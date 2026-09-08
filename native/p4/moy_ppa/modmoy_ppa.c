@@ -6,10 +6,12 @@
 // the desktop frame (game->window scale blit, wallpaper cover-crop, fills) and
 // that the CPU moy_gfx kernel pays PSRAM-bandwidth-bound against the continuous
 // DSI scan-out. This module is the thin MicroPython surface over the ESP-IDF
-// esp_driver_ppa; the driver owns all cache management (it writes back the
-// input window and invalidates the output window itself), so the caller only
-// has to hand it a cache-aligned OUTPUT buffer -- which the DSI framebuffer
-// from esp_lcd_dpi_panel_get_frame_buffer already is.
+// esp_driver_ppa; the driver writes back the input window and INVALIDATES the
+// output window (both row-scoped: pic_w x block_h from block_offset_y), so the
+// caller has to hand it a cache-aligned OUTPUT buffer -- which the DSI
+// framebuffer from esp_lcd_dpi_panel_get_frame_buffer already is -- and to
+// write back its own dirty CPU lines in that window first, since the
+// invalidate discards them.
 //
 // SRM = Scale-Rotate-Mirror. blit_scale() is the integer-upscale composite that
 // mirrors moy_gfx.blit565_scale so run_ppa_smoke can A/B them on glass.
@@ -169,6 +171,33 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
         scale = 1;
     }
 
+    // The out picture is the ROWS the scaled block lands on, not the whole
+    // framebuffer -- the same scoping rotate()/rotate_scale() do. The driver's
+    // own invalidate is ALREADY row-scoped (ppa_srm.c syncs an "out_buffer
+    // extended window" of pic_w * block_h from block_offset_y, not the buffer),
+    // so the only whole-picture cache walk left per submit was the writeback
+    // below: the entire framebuffer, per game composite and per drag stamp, for
+    // a block that is a fraction of it. Rows OUTSIDE the block keep their dirty
+    // CPU lines -- nothing invalidates them -- and moy_dsi.show() msyncs the
+    // whole framebuffer before the scan-out switch, so they still reach memory.
+    // The driver rejects an out buffer whose ADDRESS or SIZE is not cache-line
+    // aligned; a row span inherits that only from a row stride that is a whole
+    // number of lines (an RGB565 width that is a multiple of 32px), so a
+    // picture that does not qualify keeps the whole buffer.
+    mp_int_t ow = sw * scale, oh = sh * scale;
+    uint8_t *out = (uint8_t *)dst.buf;
+    size_t out_len = dst.len;
+    mp_int_t out_h = dh, out_y = dy;
+    if (dw > 0 && dh > 0 && dx >= 0 && dy >= 0
+            && dx + ow <= dw && dy + oh <= dh
+            && (mp_int_t)dst.len >= dw * dh * 2
+            && ((uintptr_t)dst.buf & 63u) == 0 && (((size_t)dw * 2u) & 63u) == 0) {
+        out = (uint8_t *)dst.buf + (size_t)dy * (size_t)dw * 2u;
+        out_len = (size_t)oh * (size_t)dw * 2u;
+        out_h = oh;
+        out_y = 0;
+    }
+
     ppa_srm_oper_config_t op = {
         .in = {
             .buffer = src.buf,
@@ -181,12 +210,12 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
             .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
         },
         .out = {
-            .buffer = dst.buf,
-            .buffer_size = (uint32_t)dst.len,
+            .buffer = out,
+            .buffer_size = (uint32_t)out_len,
             .pic_w = (uint32_t)dw,
-            .pic_h = (uint32_t)dh,
+            .pic_h = (uint32_t)out_h,
             .block_offset_x = (uint32_t)dx,
-            .block_offset_y = (uint32_t)dy,
+            .block_offset_y = (uint32_t)out_y,
             .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
         },
         .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
@@ -202,14 +231,15 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
         .mode = mode,
     };
     // WRITE BACK the destination's dirty CPU cache lines BEFORE submitting: the
-    // IDF driver INVALIDATES the whole out-picture buffer at submit, which
-    // otherwise DISCARDS every not-yet-flushed CPU write of the current frame
+    // IDF driver INVALIDATES the out window at submit, which otherwise DISCARDS
+    // every not-yet-flushed CPU write of the current frame that falls in it
     // (glass-confirmed 2026-07-10: drag frames draw strips/chrome/bar/cursor by
     // CPU and then kick the deferred window stamp -- those writes vanished and
     // the pixels reverted two frames, leaving speed-scaled desktop trails). The
     // quiet-game composite never hit this because nothing else CPU-draws on
-    // those frames. C2M writeback of a 1.2MB range costs well under a ms.
-    esp_cache_msync(dst.buf, dst.len,
+    // those frames. Scoped to the block's rows, which is exactly what the
+    // driver invalidates (see the out picture above).
+    esp_cache_msync(out, out_len,
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     s_submitted++;
     esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
@@ -221,13 +251,15 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
     return mp_const_none;
 }
 
-// rotate(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle[, nb])
+// rotate(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle[, nb[, wb]])
 //   Copy the w x h block at (sx, sy) of the sw x sh RGB565 source into dst
 //   (dw x dh) at (dx, dy), ROTATED by `angle` degrees counter-clockwise (0,
 //   90, 180, 270 -- the PPA's own convention) at 1:1 scale. The output block
 //   is h x w for 90/270 and (dx, dy) is its top-left. Blocking unless `nb`
 //   is true, when it is queued and returns at once (the caller fences with
-//   wait()/sync() before touching either buffer). The landscape
+//   wait()/sync() before touching either buffer). `wb` (default true) writes
+//   the destination rows' CPU cache back before the submit; see the msync
+//   below for when a caller may drop it. The landscape
 //   console on a portrait DSI panel (the Guition P4, device/dsi_panel.py's
 //   RotatedCompositor) is the consumer: the whole paint buffer per full
 //   frame, one game rect per quiet frame, and angle 0 to bring a ping-pong
@@ -251,6 +283,7 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
     mp_int_t h = mp_obj_get_int(args[11]);
     mp_int_t angle = mp_obj_get_int(args[12]);
     bool nb = n_args > 13 && mp_obj_is_true(args[13]);
+    bool wb = n_args <= 14 || mp_obj_is_true(args[14]);
     ppa_srm_rotation_angle_t rot;
     switch (angle) {
         case 0: rot = PPA_SRM_ROTATION_ANGLE_0; break;
@@ -306,10 +339,24 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
         .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
         .mode = nb ? PPA_TRANS_MODE_NON_BLOCKING : PPA_TRANS_MODE_BLOCKING,
     };
-    // The same dst writeback srm_blit does (the driver invalidates the whole
-    // out picture at submit); the driver writes back the in block itself.
-    esp_cache_msync(rows, rows_len,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    // The same dst writeback srm_blit does (the driver invalidates the out
+    // rows at submit, which DISCARDS a dirty CPU line there); the driver
+    // writes back the in block itself.
+    //
+    // `wb` false skips it, and a caller may say so ONLY for a destination the
+    // CPU never writes -- the rotated compositor's scan buffers (CPU-filled
+    // once at init, and moy_dsi.show() msyncs the whole buffer at every
+    // present) and its game-copy scratch (written by this engine alone). The
+    // invalidate is what makes that safe rather than merely likely: it also
+    // drops any dirty line a previous owner of the memory left behind, so
+    // nothing can evict over the DMA's pixels afterwards. It must NOT be
+    // skipped for a CPU-painted destination -- the paint buffer the drag
+    // stamp lands in -- or that frame's chrome is discarded (the 2026-07-10
+    // desktop trails this msync was added for).
+    if (wb) {
+        esp_cache_msync(rows, rows_len,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    }
     s_submitted++;
     esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
     if (err != ESP_OK) {
@@ -319,9 +366,9 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_obj, 13, 14, moy_ppa_rotate);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_obj, 13, 15, moy_ppa_rotate);
 
-// rotate_scale(dst, dw, dh, dx, dy, src, sw, sh, scale, angle[, nb])
+// rotate_scale(dst, dw, dh, dx, dy, src, sw, sh, scale, angle[, nb[, wb]])
 //   The whole sw x sh RGB565 source, integer-upscaled by `scale` AND rotated
 //   by `angle` degrees counter-clockwise, into dst (dw x dh) at (dx, dy) --
 //   the quiet game frame of a landscape console on portrait glass in ONE
@@ -345,6 +392,7 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
     mp_int_t scale = mp_obj_get_int(args[8]);
     mp_int_t angle = mp_obj_get_int(args[9]);
     bool nb = n_args > 10 && mp_obj_is_true(args[10]);
+    bool wb = n_args <= 11 || mp_obj_is_true(args[11]);
     if (scale < 1) {
         scale = 1;
     }
@@ -395,8 +443,10 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
         .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
         .mode = nb ? PPA_TRANS_MODE_NON_BLOCKING : PPA_TRANS_MODE_BLOCKING,
     };
-    esp_cache_msync(rows, rows_len,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    if (wb) {                                     // see rotate()
+        esp_cache_msync(rows, rows_len,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    }
     s_submitted++;
     esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
     if (err != ESP_OK) {
@@ -406,7 +456,7 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_scale_obj, 10, 11,
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_scale_obj, 10, 12,
                                            moy_ppa_rotate_scale);
 
 // wait(keep) -> bool: block until at most `keep` queued transactions remain

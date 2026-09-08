@@ -590,33 +590,54 @@ class RotatedCompositor:
             return None
         return (0, 0, self._w, min(h, self._h))
 
-    def _rot(self, nb, *args):
-        """moy_ppa.rotate, queued when `nb`. A full submit queue is a refused
-        submit (the driver does not wait): fence everything and resubmit
-        blocking, and count it -- a drag that overruns the queue is slower
-        for a frame, never wrong."""
+    # WHO WRITES THE DESTINATION decides `wb`, the op's cache writeback.
+    #
+    # moy_ppa writes the destination rows' CPU cache back before every submit,
+    # because the driver invalidates exactly those rows and an invalidate
+    # DISCARDS a dirty line. That walk is the op's fixed cost, and it buys
+    # nothing for a destination the CPU never writes -- which is every
+    # destination on this path but one:
+    #
+    #   scan buffers  the CPU fills them ONCE at init, and moy_dsi.show()
+    #                 msyncs the whole buffer at every present (including the
+    #                 init one), so no dirty line survives to a rotate.
+    #                 Afterwards only the PPA writes them.
+    #   scratch       the game canvas's copy, written by the PPA alone. The
+    #                 rotate covers the whole buffer, and the driver's
+    #                 invalidate drops whatever a previous owner of that
+    #                 memory left dirty, so nothing can evict over the pixels.
+    #   paint buffer  CPU-PAINTED -- the drag stamp lands beside this frame's
+    #                 chrome. It keeps the writeback, or the chrome is
+    #                 discarded (the 2026-07-10 desktop trails).
+    def _rot(self, nb, wb, *args):
+        """moy_ppa.rotate, queued when `nb`, writing the destination rows back
+        when `wb` (see above). A full submit queue is a refused submit (the
+        driver does not wait): fence everything and resubmit blocking, and
+        count it -- a drag that overruns the queue is slower for a frame,
+        never wrong."""
         try:
-            self._ppa.rotate(*(args + (nb,)))
+            self._ppa.rotate(*(args + (nb, wb)))
         except OSError:
             if not nb:
                 raise
             self._ppa.sync()
             self._refused += 1
-            self._ppa.rotate(*(args + (False,)))
+            self._ppa.rotate(*(args + (False, wb)))
 
-    def _rot_scale(self, nb, *args):
+    def _rot_scale(self, nb, wb, *args):
         try:
-            self._ppa.rotate_scale(*(args + (nb,)))
+            self._ppa.rotate_scale(*(args + (nb, wb)))
         except OSError:
             if not nb:
                 raise
             self._ppa.sync()
             self._refused += 1
-            self._ppa.rotate_scale(*(args + (False,)))
+            self._ppa.rotate_scale(*(args + (False, wb)))
 
     def _rotate(self, fb, paint, x, y, w, h, nb=False):
+        # Destination is always a scan buffer -> no writeback.
         px, py, pw, ph = rotate_rect(x, y, w, h, self.angle, self._w, self._h)
-        self._rot(nb, fb, self._pw, self._ph, px, py,
+        self._rot(nb, False, fb, self._pw, self._ph, px, py,
                   paint, self._w, self._h, x, y, w, h, self.angle)
         return (px, py, pw, ph)
 
@@ -663,10 +684,12 @@ class RotatedCompositor:
         if stamp is not None:
             # The moving window's content, into THIS paint buffer, ahead of
             # every rotate that reads it. The rows' CPU chrome is written
-            # back at submit (rotate's msync); nothing CPU-writes them again
-            # before the present fence.
+            # back at submit (rotate's msync -- the one destination on this
+            # path that needs it); nothing CPU-writes them again before the
+            # present fence.
             dst, dw, dh, sx, sy, sbuf, sw, sh = stamp
-            self._rot(nb, dst, dw, dh, sx, sy, sbuf, sw, sh, 0, 0, sw, sh, 0)
+            self._rot(nb, True, dst, dw, dh, sx, sy, sbuf, sw, sh,
+                      0, 0, sw, sh, 0)
             ops += 1
             self._stamp_n += 1
         # Two separate questions. What did THIS FRAME change (relative to the
@@ -746,7 +769,7 @@ class RotatedCompositor:
                         self.angle, self._w, self._h)
                     self._grown += 1
                     continue
-                self._rot(nb, fb, self._pw, self._ph, r[0], r[1],
+                self._rot(nb, False, fb, self._pw, self._ph, r[0], r[1],
                           front, self._pw, self._ph, r[0], r[1], r[2], r[3], 0)
                 ops += 1
                 self._copies += 1
@@ -760,14 +783,14 @@ class RotatedCompositor:
                 if nb:
                     n = sw * sh * 2
                     scr = self._scratch_for(n)
-                    self._rot(True, scr, sw, sh, 0, 0, src, sw, sh,
+                    self._rot(True, False, scr, sw, sh, 0, 0, src, sw, sh,
                               0, 0, sw, sh, 0)
-                    self._rot_scale(True, fb, self._pw, self._ph, px, py,
-                                    scr, sw, sh, scale, self.angle)
+                    self._rot_scale(True, False, fb, self._pw, self._ph,
+                                    px, py, scr, sw, sh, scale, self.angle)
                     ops += 2
                 else:
-                    self._rot_scale(False, fb, self._pw, self._ph, px, py,
-                                    src, sw, sh, scale, self.angle)
+                    self._rot_scale(False, False, fb, self._pw, self._ph,
+                                    px, py, src, sw, sh, scale, self.angle)
             else:
                 if game is not None and not painted:
                     paint()                   # crisp quiet: composite, then rotate

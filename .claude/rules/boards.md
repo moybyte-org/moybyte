@@ -135,9 +135,14 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
     frame composites via `moy_ppa.blit_async` and DEFERS the scan-out switch to the
     next loop's `present_pending()`, so the DMA overlaps the loop tail and the
     input poll. Full paints stay blocking so chrome never races the DMA. **An async
-    PPA op must be the frame's LAST write**, and `moy_ppa` must C2M-writeback dst
-    before submit, because the IDF PPA driver invalidates the whole out buffer at
-    submit and would discard unflushed CPU writes.
+    PPA op must be the frame's LAST write**, and `moy_ppa` must C2M-writeback a
+    CPU-PAINTED dst before submit, because the IDF driver invalidates the out
+    window at submit and an invalidate discards unflushed CPU writes. Both are
+    ROW-SCOPED — the driver's window is `pic_w * block_h` from `block_offset_y`,
+    and so is every `esp_cache_msync` in `moy_ppa` — so an op costs a walk of
+    the rows it lands on, not of the buffer. A destination the CPU never writes
+    (the rotated compositor's scan buffers and its game-copy scratch) skips the
+    writeback entirely: `rotate`/`rotate_scale` take a `wb` flag for it.
   - **The PPA only helps UPSCALE composites.** A full-screen 1:1 copy (the backdrop
     restore) is ~identical CPU vs PPA, PSRAM-bandwidth-bound against the scan-out;
     and **sprite BATCHING is a dead end** (~10× worse than `spr_batch` — per-op

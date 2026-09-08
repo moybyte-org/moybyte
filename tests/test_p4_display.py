@@ -550,20 +550,23 @@ class RotatingPpa(FakePpa):
         self.rotates = []          # (dst, dx, dy, src, sx, sy, w, h, angle)
         self.direct = []           # (dst, dx, dy, src, sw, sh, scale, angle)
         self.nbs = []              # the nb flag of every rotate/rotate_scale
+        self.wbs = []              # (dst, wb) of every rotate/rotate_scale
         self.waits = []            # every wait(keep)
 
     def init(self):
         return True
 
     def rotate(self, dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle,
-               nb=False):
+               nb=False, wb=True):
         self.rotates.append((dst, dx, dy, src, sx, sy, w, h, angle))
         self.nbs.append(nb)
+        self.wbs.append((dst, wb))
 
     def rotate_scale(self, dst, dw, dh, dx, dy, src, sw, sh, scale, angle,
-                     nb=False):
+                     nb=False, wb=True):
         self.direct.append((dst, dx, dy, src, sw, sh, scale, angle))
         self.nbs.append(nb)
+        self.wbs.append((dst, wb))
 
     def wait(self, keep):
         self.waits.append(keep)
@@ -1149,6 +1152,40 @@ def test_the_canvas_hands_the_rotated_compositor_its_stamp():
     assert verb(cv3, Layer(), 900, 200) is False, "a stamp off the edge stays on the CPU"
 
 
+def test_only_the_cpu_painted_destination_gets_the_cache_writeback():
+    """`wb` is the op's destination cache writeback, and it costs a walk of
+    the rows per submit. Only the PAINT buffer is CPU-painted (the drag stamp
+    lands beside this frame's chrome); the scan buffers and the game-copy
+    scratch are written by the PPA alone, so they skip it."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        paints = {id(comp.framebuffer()), id(comp._paints[1])}
+        scan = {id(dsi.fb(0)), id(dsi.fb(1))}
+        step(comp)                                  # full rotate -> scan buffer
+        assert ppa.wbs and all(wb is False for (_d, wb) in ppa.wbs)
+
+        # A quiet game frame: scratch copy + scale-rotate, and a stale copy
+        # between the scan buffers. None of them is CPU-painted.
+        game(comp)
+        comp.note_damage(10, 10, 40, 40)
+        step(comp)
+        game(comp)
+        step(comp)
+        for (dst, wb) in ppa.wbs:
+            assert id(dst) not in paints
+            assert wb is False, "no CPU writes these -- do not walk their cache"
+        assert any(id(d) in scan for (d, _wb) in ppa.wbs)
+
+        # The deferred window stamp, into the paint buffer beside the chrome.
+        n = len(ppa.wbs)
+        comp._stamp_pending = (comp.framebuffer(), comp._w, comp._h,
+                               20, 30, bytearray(4), 8, 8)
+        step(comp)
+        stamped = ppa.wbs[n]
+        assert id(stamped[0]) in paints and stamped[1] is True
+        assert all(wb is False for (d, wb) in ppa.wbs[n + 1:]
+                   if id(d) not in paints)
+
+
 def test_a_refused_queued_submit_fences_and_retries_blocking():
     """The driver fails a submit outright on a full queue; the compositor
     fences and resubmits blocking, and counts it."""
@@ -1160,8 +1197,9 @@ def test_a_refused_queued_submit_fences_and_retries_blocking():
         calls = []
 
         def refusing(*a):
-            calls.append(a[-1])
-            if a[-1] is True and len(calls) == 1:
+            nb = a[-2]                      # ... rotate(..., angle, nb, wb)
+            calls.append(nb)
+            if nb is True and len(calls) == 1:
                 raise OSError("ppa rotate failed: 1")
             return real(*a)
 
