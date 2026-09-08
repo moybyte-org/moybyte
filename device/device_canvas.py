@@ -489,6 +489,12 @@ class DeviceCanvas:
         # fences it before the cart's next write.
         self._snap_scratch = None
         self._snap_live = False
+        # blit_game's two method probes, cached (#66 lever 1): a getattr that
+        # finds a method allocates a bound method, and this is every play frame.
+        self._bg_gc = None            # the game canvas / its flush_batch
+        self._bg_fb = None
+        self._snap_fn = None          # the comp's snap_scale_fold, probed once
+        self._snap_probed = False
         # DMA double-buffer (#40, DEFAULT ON -- moy_compositor.DOUBLE_BUFFER, device-
         # confirmed stable): the compositor's BACK buffer ping-pongs between two
         # physical buffers each flush, so this canvas must re-point its draw target
@@ -1377,7 +1383,10 @@ class DeviceCanvas:
         letterbox_inplace lesson: paint into the buffer being drawn into).
         `defer` is accepted for signature parity with the P4; there is no async
         engine here, so it is ignored."""
-        fb = getattr(gc, "flush_batch", None)
+        if gc is not self._bg_gc:
+            self._bg_gc = gc
+            self._bg_fb = getattr(gc, "flush_batch", None)
+        fb = self._bg_fb
         if fb is not None:
             fb()
         if self._batch_arr[0] > 4:
@@ -1386,7 +1395,14 @@ class DeviceCanvas:
         if g is None:
             return                     # no-gfx build: the factory refused earlier
         gw, gh = gc.w, gc.h
-        sx, sy, vw, vh = src if src is not None else (0, 0, gw, gh)
+        # No tuple for the whole-canvas source: a 4-tuple is a two-block
+        # allocation, which on the S3 rescans the heap's table (see wm.py).
+        if src is not None:
+            sx, sy, vw, vh = src
+        else:
+            sx = sy = 0
+            vw = gw
+            vh = gh
         ox = int(ox)
         oy = int(oy)
         scale = int(scale)
@@ -1410,12 +1426,15 @@ class DeviceCanvas:
         # the synthesis cannot express, in which case the composite below
         # runs from the live canvas exactly as it did before the fold.
         comp = self._comp
-        snap = getattr(comp, "snap_scale_fold", None)
+        if not self._snap_probed:
+            self._snap_probed = True
+            self._snap_fn = getattr(comp, "snap_scale_fold", None)
+        snap = self._snap_fn
         src_buf = gc._buf
         if snap is not None:
             comp.fold_fence()
             scr = self._snap_scratch
-            if scr is None or scr.size() != (gw, vh):
+            if scr is None or scr._w != gw or scr._h != vh:
                 scr = self._snap_scratch = _LayerComp(gw, vh, g)
             try:
                 if snap(src_buf, sy * gw * 2, scr.framebuffer(), vw, vh, sx, gw,
@@ -1426,7 +1445,7 @@ class DeviceCanvas:
                 pass
         if sx or sy or vw != gw or vh != gh:
             scr = self._view_scratch
-            if scr is None or scr.size() != (vw, vh):
+            if scr is None or scr._w != vw or scr._h != vh:
                 scr = self._view_scratch = _LayerComp(vw, vh, g)
             g.blit565(scr.framebuffer(), vw, vh, -sx, -sy,
                       src_buf, gw, gh, -1)

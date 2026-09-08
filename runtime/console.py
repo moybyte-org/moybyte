@@ -1085,6 +1085,25 @@ class Workstation:
         self._ptr_last_x = -1     # handle_pointer's idle fast-path: last routed
         self._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
         self._ptr_was_down = False  # ...and whether it was held (release edge)
+        self._gp_idle = None      # the idle game_pointer we last published, and
+        self._gp_key = [None] * 7  # the geometry it was mapped through: the
+                                   # declared view, both canvases, their dims
+        # Per-frame method probes, cached by the object they were taken on
+        # (#66 lever 1): getattr on a method allocates a bound method each call.
+        self._rs_cv = None        # _reset_canvas_state's canvas / reset_state
+        self._rs_fn = None
+        self._fb_cv = None        # _flush_batches' game canvas / flush_batch
+        self._fb_cv_fn = None
+        self._fb_sc = None        # ...and the system canvas's
+        self._fb_sc_fn = None
+        self._lb_wm = None        # frame()'s WM / letterbox_inplace
+        self._lb_fn = None
+        self._probe_sc = None     # frame()'s system-canvas probes (begin_surface
+        self._probe_surf = None   # / skip_surface / view) and the game canvas's
+        self._probe_sksurf = None # `buf`, re-taken only when the object changes
+        self._probe_view = None
+        self._probe_gc = None
+        self._probe_buf = None
         # #184 deferred transitions: [armed, fn] entries queued by defer().
         # A tap handler schedules its heavy transition here instead of running
         # it inside the pointer walk; frame() paints the acknowledgment first
@@ -3701,14 +3720,61 @@ class Workstation:
             _pf[5] = 0
         self._tick_pointer_dt(p)
         px, py, click = p.x, p.y, p.click
-        gx, gy = self._game_xy(px, py)
         # Windowed WM (#73): while a window OTHER than the playtest holds input
         # focus, the game-space pointer publishes with click/down stripped, so a
         # background running cart never eats the taps meant for the editor beside
         # it. The fullscreen-stack WM has no hook -> unchanged.
         _pp = getattr(self.wm, "player_has_pointer", None)
+        # The idle publish is REUSED, not rebuilt (#66 lever 1, 2026-09-08).
+        # While a healthy GAME owns the glass and the pointer did nothing this
+        # frame -- no click, no held finger, not moved -- the game pointer this
+        # frame would publish equals the one standing there, PROVIDED that one
+        # is our own idle publish (anything else that wrote it -- an overlay
+        # stripping a tap, a wallpaper -- replaced the object) and the geometry
+        # it was mapped through has not moved. Rebuilding it anyway cost the
+        # mapping's tuples every loop iteration of every play frame (~0.4 ms
+        # a loop on the S3, see wm.py). The fullscreen tiers only: the
+        # windowed WM's focus can strip a tap without the pointer moving, so
+        # it keeps the unconditional publish.
+        if (_pp is None and not click and not p.down and not self._ptr_was_down
+                and px == self._ptr_last_x and py == self._ptr_last_y
+                and self.cart_error is None and self.wm.top_is_player()
+                and self.input.game_pointer is self._gp_idle):
+            # Same geometry? These seven reads are exactly what the fullscreen
+            # WM's game_xy consumes; its memo checks the same key, but through
+            # two calls and a property (~0.2 ms a loop on the S3).
+            k = self._gp_key
+            gc = self.canvas
+            sc = self._sys_canvas
+            if sc is None:
+                sc = gc
+            if (gc is k[1] and sc is k[2]
+                    and getattr(self.input, "game_view", None) is k[0]
+                    and gc.w == k[3] and gc.h == k[4]
+                    and sc.w == k[5] and sc.h == k[6]):
+                if _perf:
+                    self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)
+                return
+        gx, gy = self._game_xy(px, py)
         _live = _pp() if _pp is not None else True
-        self.input.game_pointer = (gx, gy, click and _live, p.down and _live)
+        gp = (gx, gy, click and _live, p.down and _live)
+        self.input.game_pointer = gp
+        if click or p.down:
+            self._gp_idle = None              # a tap/hold: next frame republishes
+        else:
+            self._gp_idle = gp
+            k = self._gp_key
+            gc = self.canvas
+            sc = self._sys_canvas
+            if sc is None:
+                sc = gc
+            k[0] = getattr(self.input, "game_view", None)
+            k[1] = gc
+            k[2] = sc
+            k[3] = gc.w
+            k[4] = gc.h
+            k[5] = sc.w
+            k[6] = sc.h
         if _perf:
             self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)   # pre-walk share
         # Idle fast-path (2026-08-03): while a healthy GAME owns the glass and
@@ -3855,7 +3921,13 @@ class Workstation:
         # backend supports it. Guarded so a backend without draw state (a test stub,
         # or a recording canvas) is a no-op. reset_state() also flushes any pending
         # auto-batch (#63), so cart sprites land before the console overlays draw.
-        rs = getattr(self.canvas, "reset_state", None)
+        # The probe is cached by canvas identity: a `getattr` that finds a
+        # method allocates a bound method, and this runs every cart frame.
+        cv = self.canvas
+        if cv is not self._rs_cv:
+            self._rs_cv = cv
+            self._rs_fn = getattr(cv, "reset_state", None)
+        rs = self._rs_fn
         if rs is not None:
             rs()
 
@@ -3883,13 +3955,21 @@ class Workstation:
         # spr() in a cart's _draw() (or the chrome) is left unpainted. Guarded + covers
         # both the game and system canvas -- one probe when they are the same object
         # (the 320x240 device case; #75: no per-frame tuple, no duplicate probe).
+        # Both probes cached by canvas identity (a found method is a bound-method
+        # allocation per probe, and this runs every painted frame).
         cv = self.canvas
-        fb = getattr(cv, "flush_batch", None)
+        if cv is not self._fb_cv:
+            self._fb_cv = cv
+            self._fb_cv_fn = getattr(cv, "flush_batch", None)
+        fb = self._fb_cv_fn
         if fb is not None:
             fb()
         sc = self.sys_canvas
         if sc is not cv:
-            fb = getattr(sc, "flush_batch", None)
+            if sc is not self._fb_sc:
+                self._fb_sc = sc
+                self._fb_sc_fn = getattr(sc, "flush_batch", None)
+            fb = self._fb_sc_fn
             if fb is not None:
                 fb()
 
@@ -4068,8 +4148,9 @@ class Workstation:
         # error panel is static). Stage 5 retired the pause frame, so there is no
         # paused-but-idle state to exclude here anymore.
         if kind == "desktop" and self.cart_error is None and (
-                self._update is not None or self._draw is not None):
-            return True
+                self.player._update is not None or self.player._draw is not None):
+            return True             # (the Player's own fields: ws._update/_draw
+                                    # are property forwards to exactly these)
         # Windowed WM (#73): a running cart's WINDOW keeps animating even when
         # another window sits above it on the stack (Settings over a game, the
         # editor beside a playtest). No hook on the fullscreen-stack WM.
@@ -4125,9 +4206,22 @@ class Workstation:
             return True
         if self._animating(dt):
             return True
-        if self._ptr_state() != self._last_ptr:
+        if self._ptr_changed():
             return True
         return False
+
+    def _ptr_changed(self):
+        """`_ptr_state() != _last_ptr`, field by field -- the same answer with
+        no tuple built, because this and the tail's snapshot run every frame."""
+        p = self.pointer
+        last = self._last_ptr
+        if p is None:
+            return last is not None
+        if last is None:
+            return True
+        return (last[0] != p.x or last[1] != p.y
+                or last[2] != bool(p.visible) or last[3] != bool(p.down)
+                or last[4] != bool(p.click))
 
     # -- content-layer draw bodies (routed from the frame() stack loop) -------
     #
@@ -4308,7 +4402,17 @@ class Workstation:
         # the browser then composites them (a second WM backend). `begin_surface` exists only on
         # the recording canvas, so on the RAW canvas (the default) `_surf` is None: no call, no
         # allocation, byte-identical pixels -- the golden set can't move. Probed ONCE per frame.
-        _surf = getattr(self.sys_canvas, "begin_surface", None)
+        # The four canvas probes below are re-taken only when a canvas object
+        # changes (#66 lever 1): a probe answers for the object, so keying on
+        # identity is the same answer at a compare's cost instead of a getattr
+        # with a default (~30us each on the S3, four of them every play frame).
+        _sc = self.sys_canvas
+        if _sc is not self._probe_sc:
+            self._probe_sc = _sc
+            self._probe_surf = getattr(_sc, "begin_surface", None)
+            self._probe_sksurf = getattr(_sc, "skip_surface", None)
+            self._probe_view = getattr(_sc, "view", None)
+        _surf = self._probe_surf
         # Surface model §4 skip-draw (docs/surface_model_v1.md): a WM that
         # tracks surface gens may decline a gen-clean layer's draw entirely --
         # the recorder keeps its z-slot as a zero-width skip mark and the wire
@@ -4317,7 +4421,7 @@ class Workstation:
         # per-layer cost, byte-identical (the L6 no-op pattern).
         _lskip = getattr(self.wm, "surface_skip", None) if _surf is not None \
             else None
-        _sksurf = getattr(self.sys_canvas, "skip_surface", None)
+        _sksurf = self._probe_sksurf
         # FULLSCREEN GAME-DOMAIN PLACEMENT on a COMMAND-ONLY game canvas (#175).
         # There the cart's frame has no pixels for _composite_game to scale up,
         # so its draw span must be BRACKETED instead -- otherwise every
@@ -4328,9 +4432,13 @@ class Workstation:
         # applied. Two getattr probes on a raw canvas -> None (the S3/device path
         # is byte-identical, and a raster game canvas keeps the composite).
         _view = None
-        if (self._sys_canvas is not None
-                and getattr(self.canvas, "buf", None) is None):
-            _view = getattr(self.sys_canvas, "view", None)
+        if self._sys_canvas is not None:
+            _gc = self.canvas
+            if _gc is not self._probe_gc:
+                self._probe_gc = _gc
+                self._probe_buf = getattr(_gc, "buf", None)
+            if self._probe_buf is None:
+                _view = self._probe_view
         # ...and only where the WM presents the game FULLSCREEN. In the windowed
         # desk world the player WINDOW brackets its own content, so letterboxing
         # here would black out the desktop -- and it would fire on the FPS
@@ -4347,7 +4455,13 @@ class Workstation:
         # view leaves stale pixels that FLASH on a double-buffered root (#58).
         # Same fix, same place in the order -- before the cart draws. The WM
         # decides whether it applies; a no-view cart pays one getattr.
-        _lb = getattr(self.wm, "letterbox_inplace", None) if _vp is None else None
+        _lb = None
+        if _vp is None:
+            _wm = self.wm
+            if _wm is not self._lb_wm:        # cached by WM identity: the probe
+                self._lb_wm = _wm             # allocates a bound method a frame
+                self._lb_fn = getattr(_wm, "letterbox_inplace", None)
+            _lb = self._lb_fn
         _lb_done = False
         # #190: while a flush-bounce scale fold is armed (the device composite
         # SKIPPED writing the root fb -- the flush will synthesize it), any
@@ -4364,7 +4478,7 @@ class Workstation:
         # while the fullscreen chrome rules apply, None in the windowed desk
         # world, where the WM's title strip carries the close instead. See
         # `_app_bar_route` for the input half and the scope note there.
-        _appbar = self._apps_by_id if not self.windowed_chrome else None
+        _appbar = self._apps_by_id if not self.wm.desk_open() else None
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
             if _prev_domain == "game" and layer.domain == "system":
                 if _game_open:                      # close the placement span
@@ -4473,7 +4587,8 @@ class Workstation:
             # #113) -- same pattern as the covers re-arm above.
             self._frame_requested = False
             self._dirty = True
-        self._last_ptr = self._ptr_state()
+        if self._ptr_changed():          # rebuilt only when it moved: no tuple
+            self._last_ptr = self._ptr_state()   # on a static-pointer frame
         self._frames_drawn += 1
         if _deep:
             # The tail after the flush: dirty clear, the covers/fling re-arms,
