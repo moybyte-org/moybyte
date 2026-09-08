@@ -143,7 +143,8 @@ def test_state_reports_every_frame_stage_with_its_budget_and_misses():
     st = _remote_state(ws)
     assert list(st["stages"]) == list(device_boot.STAGE_ORDER)
     for row in st["stages"].values():
-        assert sorted(row) == ["budget_us", "last_us", "max_us", "misses", "n"]
+        assert sorted(row) == ["avg_us", "budget_us", "last_us", "max_us",
+                               "misses", "n"]
     frame = st["stages"]["frame"]
     assert frame["n"] == 1 and frame["budget_us"] == 16 * 780
     # A stage no hook filled, and one with no deadline to miss: None either

@@ -980,8 +980,8 @@ def test_a_stage_over_budget_counts_a_miss_and_lifts_the_max(monkeypatch):
     m.mark(i)
     assert m.misses[i] == 1 and m.max[i] == budget + 1 and m.last[i] == 1
     rep = m.report()["inputs"]
-    assert rep == {"budget_us": budget, "last_us": 1, "max_us": budget + 1,
-                   "misses": 1, "n": 3}
+    assert rep == {"budget_us": budget, "avg_us": (budget + budget + 1 + 1) // 3,
+                   "last_us": 1, "max_us": budget + 1, "misses": 1, "n": 3}
 
 
 def test_a_stage_with_no_declared_budget_reports_None_and_never_zero(monkeypatch):
@@ -1080,8 +1080,53 @@ def test_reset_drops_every_sample_but_keeps_the_declarations(monkeypatch):
     assert m.report()["inputs"]["misses"] == 3
     m.reset()
     rep = m.report()["inputs"]
-    assert rep == {"budget_us": m.budget[i], "last_us": None, "max_us": None,
-                   "misses": None, "n": 0}
+    assert rep == {"budget_us": m.budget[i], "avg_us": None, "last_us": None,
+                   "max_us": None, "misses": None, "n": 0}
+
+
+def test_stage_meters_report_a_rolling_mean_of_each_stage(monkeypatch):
+    """#210's attribution field. `last_us` is one arbitrary frame and `max_us`
+    the run's worst GC; the mean is the only one of the three that says where
+    the frame GOES."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    for us in (100, 200, 300, 400):
+        m.start(m.slot_ms)
+        clock[0] += us
+        m.mark(device_boot._S_INPUTS)
+    r = m.report()
+    assert r["inputs"]["avg_us"] == 250 and r["inputs"]["last_us"] == 400
+    # A stage nothing sampled is None, never the 0 a broken meter also reads.
+    assert r["pace"]["avg_us"] is None
+    m.reset()
+    assert m.report()["inputs"]["avg_us"] is None
+
+
+def test_the_rolling_sum_halves_instead_of_growing_a_bignum(monkeypatch):
+    """The accumulator must stay a 30-bit small int forever: one that walks
+    past it allocates a bignum on every frame, which is a meter paying for
+    itself in exactly the pathology it exists to find. Halving the count with
+    it keeps the mean across the fold."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    i = device_boot._S_INPUTS
+    step = 20000                       # a fat frame stage, in us
+    m.total[i] = device_boot._MEAN_CAP - step // 2
+    m.seen[i] = m.total[i] // step
+    m.start(m.slot_ms)
+    clock[0] += step
+    m.mark(i)
+    assert m.total[i] <= device_boot._MEAN_CAP
+    assert m.total[i] < (1 << 30)      # still a small int under REPR_C
+    assert abs(m.report()["inputs"]["avg_us"] - step) <= step // 100
+    # ...and the lifetime count the miss ratio is read against is NOT halved.
+    assert m.n[i] == 1
 
 
 def test_a_cart_start_and_a_cart_exit_each_reset_the_meters(tmp_path):

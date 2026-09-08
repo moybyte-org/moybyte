@@ -166,7 +166,21 @@ class GSL3680:
         masks only x, and the chip sets bit 14 of y on some packets (a flag,
         not a coordinate): unmasked, those read y = 16000+ and clamped the
         pointer to the bottom edge on the Guition P4 -- three of five
-        calibration taps on 2026-09-06."""
+        calibration taps on 2026-09-06.
+
+        TWO-STAGE, and only the FIRST stage runs on a frame nobody is touching
+        (#220). The finger count is byte 0 of this register, so one byte
+        answers "is anyone on the glass" -- and that is the answer on every
+        frame of a game. Measured on the Guition P4's 400kHz bus: 205us for the
+        one byte against 375us for the eight, and the loop pays the difference
+        60 times a second forever. NOT a poll-rate change and NOT an interrupt
+        gate: the chip is still asked, at the same cadence, on every frame, so
+        no tap can fall between two samples that today's read would have seen.
+        The point comes from the SECOND transaction's own count, never the
+        first's, so a finger that lands between the two reads is reported with
+        the coordinates that arrived beside it rather than with a stale pair."""
+        if not self._r(REG_TOUCH, 1)[0]:
+            return 0, 0, 0
         d = self._r(REG_TOUCH, 8)
         n = d[0]
         x = ((d[7] & 0x0F) << 8) | d[6]

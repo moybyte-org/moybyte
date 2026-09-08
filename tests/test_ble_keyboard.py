@@ -116,6 +116,72 @@ def test_report_level_state_gives_real_hold_edges_and_text_mode_suppression():
     assert inp.held("left")
 
 
+def test_an_idle_keyboard_stops_re_applying_an_empty_level_state_every_frame():
+    """#220. With no keyboard in the room the level-state pass is a no-op that
+    still cost two sets, a sorted() list and a release_all on every frame of
+    every game. The first poll runs it (the source must be cleared once); the
+    ones after take the early-out."""
+    inp = InputState()
+    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
+    src = keyboard.src
+    calls = []
+    src.release_all = lambda: calls.append(1)          # noqa: E731 -- a witness
+
+    keyboard.poll()
+    assert calls == [1]                                # cleared once...
+    keyboard.poll()
+    keyboard.poll()
+    assert calls == [1]                                # ...and not again
+
+
+def test_a_report_after_an_idle_stretch_still_reaches_the_input():
+    """The early-out must not be a latch: a key arriving after any number of
+    skipped frames is applied on the next poll, and its release still lands."""
+    inp = InputState()
+    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
+    for _ in range(5):
+        keyboard.poll()
+        inp.begin_frame()
+    assert not inp.held("up")
+
+    keyboard._reports[7] = (0, (0x1A,))
+    keyboard.poll()
+    inp.begin_frame()
+    assert inp.held("up") and inp.pressed("up")
+
+    # Held across frames: a held report is never skipped.
+    keyboard.poll()
+    inp.begin_frame()
+    assert inp.held("up")
+
+    # ...and the release still runs the full pass, because the frame that
+    # clears the state is the frame BEFORE the guard is armed.
+    keyboard._reports.clear()
+    keyboard.poll()
+    inp.begin_frame()
+    assert not inp.held("up") and inp.released("up")
+    assert inp.last_key == 0
+
+
+def test_a_pending_edge_from_the_irq_defeats_the_idle_early_out():
+    """A make+break that lands entirely between two polls leaves nothing in
+    `_reports` -- only the pending sets carry it. The early-out reads those
+    too, or a fast tap would be swallowed by the optimisation."""
+    inp = InputState()
+    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
+    keyboard.poll()                                    # arm the guard
+    inp.begin_frame()
+    keyboard._conn = 1
+    keyboard._input_handles = {7}
+    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
+                  (1, 7, b"\x00\x00\x1a\x00\x00\x00\x00\x00"))
+    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
+                  (1, 7, b"\x00\x00\x00\x00\x00\x00\x00\x00"))
+    keyboard.poll()
+    inp.begin_frame()
+    assert inp.held("up") and inp.pressed("up")
+
+
 def test_make_and_break_between_frames_preserves_one_press_then_release():
     inp = InputState()
     keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)

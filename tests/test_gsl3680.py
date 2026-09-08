@@ -15,6 +15,7 @@ class FakeI2C:
 
     def __init__(self, regs=None):
         self.writes = []
+        self.reads = []                 # (reg, n) -- the two-stage poll's witness
         self.regs = dict(regs or {})
 
     def writeto_mem(self, addr, reg, data):
@@ -23,6 +24,7 @@ class FakeI2C:
 
     def readfrom_mem(self, addr, reg, n):
         assert addr == ADDR
+        self.reads.append((reg, n))
         v = self.regs.get(reg)
         if v is None:
             raise OSError("no such register")
@@ -104,6 +106,53 @@ def test_the_packet_decodes_like_linux_both_axes_twelve_bit():
     assert chip.read() == (1, 1623, 20)
     i2c.regs[0x80] = RELEASED
     assert chip.read()[0] == 0
+
+
+def test_an_untouched_frame_reads_one_byte_and_a_touched_one_reads_eight():
+    """#220. The finger count is byte 0 of the point register, so the frame
+    nobody is touching -- every frame of a game -- needs one byte, not eight
+    (measured on the Guition P4's 400kHz bus: 205us against 375us). The CADENCE
+    is untouched: the chip is still asked on every frame, so this cannot drop a
+    tap the way a poll-rate change or an interrupt gate could."""
+    i2c = FakeI2C({0x80: RELEASED})
+    chip = GSL3680(i2c, FakePin(), b"")
+    assert chip.read() == (0, 0, 0)
+    assert i2c.reads == [(0x80, 1)]              # the eight-byte read never ran
+
+    i2c.reads = []
+    i2c.regs[0x80] = BOTTOM_RIGHT
+    assert chip.read() == (1, 1642, 874)
+    assert i2c.reads == [(0x80, 1), (0x80, 8)]
+
+
+def test_the_point_comes_from_the_second_transaction_never_the_first():
+    """A finger that lands between the two reads is reported with the
+    coordinates that arrived BESIDE its count, not with a stale pair: the
+    returned count is the eight-byte read's own byte 0."""
+    seen = []
+
+    def answer():
+        # first call (the 1-byte probe) says "a finger"; the 8-byte read that
+        # follows carries the real packet -- and its own count is what wins.
+        seen.append(1)
+        return RELEASED if len(seen) > 1 else BOTTOM_RIGHT
+
+    i2c = FakeI2C({0x80: answer})
+    chip = GSL3680(i2c, FakePin(), b"")
+    assert chip.read()[0] == 0                   # the SECOND read's count
+    assert i2c.reads == [(0x80, 1), (0x80, 8)]
+
+
+def test_an_untouched_poll_is_a_release_through_the_short_read():
+    """The one-byte path still speaks the pointer contract: 0 fingers is a
+    RELEASE (news), not the no-news a failed read produces."""
+    i2c = FakeI2C({0x80: BOTTOM_RIGHT})
+    t = _touch(i2c, raw_w=1640, raw_h=865, raw_x0=10, raw_y0=21)
+    assert t.poll() is not None
+    i2c.regs[0x80] = RELEASED
+    assert t.poll() is None
+    assert t.fresh is True
+    assert i2c.reads[-1] == (0x80, 1)
 
 
 def _touch(i2c, **knobs):

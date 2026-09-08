@@ -784,6 +784,11 @@ STAGE_BUDGETS = (
 
 STAGE_ORDER = tuple(name for name, _share in STAGE_BUDGETS)
 
+# Where StageMeters halves a rolling sum and its count (see the class). Under
+# the boards' REPR_C build a small int is 30 bits, so this sits two bits below
+# the boundary a per-frame accumulator must never cross.
+_MEAN_CAP = 1 << 28
+
 # Index constants for the mark sites in step(), derived from the table so a
 # stage cannot be added without one. tests/test_device_boot.py pins that the
 # loop marks them in exactly STAGE_ORDER.
@@ -810,8 +815,18 @@ class StageMeters:
     `misses` however many frames it saw. A frozen 0 is also what a broken meter
     looks like, and that ambiguity is what hid `fold=0` for weeks.
 
-    COST. Five preallocated integer lists, indexed; `mark` is a ticks_us pair,
-    three list stores and two compares, and allocates nothing on any frame. The
+    `avg_us` is what ATTRIBUTION reads, and the meter shipped without it: last
+    is one arbitrary frame and max is the worst GC of the run, so neither
+    answers "where does the frame GO". A rolling sum and its count do, for one
+    add and one compare more per mark. The sum HALVES itself with its count at
+    `_MEAN_CAP` rather than growing forever -- an accumulator that walks past
+    the 30-bit small int allocates a bignum on every frame, which is a meter
+    that pays for itself in exactly the pathology it exists to find. The
+    halving also makes the mean a WINDOW, the more useful reading on a console
+    whose cadence changes with the cart.
+
+    COST. Seven preallocated integer lists, indexed; `mark` is a ticks_us pair,
+    five list stores and three compares, and allocates nothing on any frame. The
     loop only calls it under `perf_capture`, so kid mode pays one attribute read
     and eleven `is not None` tests a frame and never reads the clock.
     """
@@ -824,6 +839,11 @@ class StageMeters:
         self.max = [0] * n
         self.misses = [0] * n
         self.n = [0] * n
+        # The rolling mean's pair. `n` stays the LIFETIME count `misses` is
+        # only readable against, so these are separate lists rather than a
+        # reuse: halving the miss denominator would misreport the misses.
+        self.total = [0] * n
+        self.seen = [0] * n
         self.slot_ms = 0
         self._t = 0
         self.rebudget(frame_slot_ms(ws, floor_ms))
@@ -849,6 +869,8 @@ class StageMeters:
             self.max[i] = 0
             self.misses[i] = 0
             self.n[i] = 0
+            self.total[i] = 0
+            self.seen[i] = 0
             i += 1
 
     def start(self, slot_ms):
@@ -867,22 +889,33 @@ class StageMeters:
         if us > self.max[i]:
             self.max[i] = us
         self.n[i] += 1
+        t = self.total[i] + us
+        k = self.seen[i] + 1
+        if t > _MEAN_CAP:
+            t >>= 1
+            k >>= 1
+        self.total[i] = t
+        self.seen[i] = k
         b = self.budget[i]
         if b is not None and us > b:
             self.misses[i] += 1
 
     def report(self):
-        """`{stage: {budget_us, last_us, max_us, misses, n}}` for the `state`
-        blob. Built on demand, never on a frame. `n` is the denominator the
-        miss count is only readable against: three misses in thirty frames and
-        three in thirty thousand are opposite findings."""
+        """`{stage: {budget_us, avg_us, last_us, max_us, misses, n}}` for the
+        `state` blob. Built on demand, never on a frame. `n` is the denominator
+        the miss count is only readable against: three misses in thirty frames
+        and three in thirty thousand are opposite findings. `avg_us` is the
+        rolling mean -- the field that ATTRIBUTES a frame, because `last_us` is
+        one arbitrary frame and `max_us` is the run's worst GC."""
         out = {}
         i = 0
         for name, _share in STAGE_BUDGETS:
             b = self.budget[i]
             seen = self.n[i]
+            k = self.seen[i]
             out[name] = {
                 "budget_us": b,
+                "avg_us": self.total[i] // k if k else None,
                 "last_us": self.last[i] if seen else None,
                 "max_us": self.max[i] if seen else None,
                 "misses": self.misses[i] if (seen and b is not None) else None,
