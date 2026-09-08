@@ -51,7 +51,10 @@ def test_the_system_canvas_is_landscape_on_portrait_glass(board):
     assert line == "PY (1280, 800, 320, 240)", line
     line = board.cmd("py (comp.rotated, comp.angle, comp._pw, comp._ph, ws.sys_canvas.RETAINED_FRAMES)",
                      wait_for="PY ")
-    assert line == "PY (True, 270, 800, 1280, 1)", line     # 270 is up (owner-verified)
+    # 270 is up (owner-verified); RETAINED_FRAMES is 2 since the paint buffer
+    # ping-pongs (2026-09-08, the desk's async composite) -- the horizon the WM
+    # already floored to.
+    assert line == "PY (True, 270, 800, 1280, 2)", line
 
 
 def test_the_pointer_is_the_gsl3680(board):
@@ -60,11 +63,18 @@ def test_the_pointer_is_the_gsl3680(board):
     glass, at this glass's size, with the calibrated mapping (three corner
     holds, 2026-09-06)."""
     line = board.cmd("py (touch.available, touch.fingers, touch.w, touch.h, "
-                     "touch.swap_xy, touch.flip_x, touch.flip_y, touch.raw_w, touch.raw_h)",
+                     "touch.swap_xy, touch.flip_x, touch.flip_y)",
                      wait_for="PY ")
-    # The 2026-09-06 calibration: landscape as mounted, no swap, no flips,
-    # the firmware's 1664x896 scaled onto the glass.
-    assert line == "PY (True, 0, 1280, 800, False, False, False, 1664, 896)", line
+    # The 2026-09-06 calibration: landscape as mounted, no swap, no flips.
+    assert line == "PY (True, 0, 1280, 800, False, False, False)", line
+    # The mapping is the board's FITTED knobs (guition_p4_input.RAW_*: the
+    # five-target fit, not the firmware's nominal 1664x896), and the shared
+    # driver must carry exactly them -- a re-fit changes the module, not this.
+    line = board.cmd("py (touch.raw_x0, touch.raw_y0, touch.raw_w, touch.raw_h) == "
+                     "tuple(getattr(__import__('guition_p4_input'), k) "
+                     "for k in ('RAW_X0', 'RAW_Y0', 'RAW_W', 'RAW_H'))",
+                     wait_for="PY ")
+    assert line == "PY True", line
 
 
 def test_the_ppa_composite_is_live(board):
