@@ -182,29 +182,36 @@ _CLEARS = True
 WINDOWED_INSTALLERS = {
     "runtime/host_app.py": _CLEARS,
     "firmware/web_runner/web_boot.py": _CLEARS,
-    # The two P4 rows are ONE body -- device/p4_desktop.py, the shared desktop
-    # spine (2026-09-09) -- staged into each board's modules/ by its build, and
-    # this walk sees the staged copies. The reason is therefore the same twice.
-    "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_desktop.py":
+    # ONE row for both P4 boards: they take one desktop body (2026-09-09), and
+    # the walk reads the canonical file, never the copies their builds stage.
+    "device/p4_desktop.py":
         "P4SystemCanvas overrides blit_game outright (its composite is the "
         "hardware PPA) and paints no bands at all, so the shared flag never "
         "reaches a fill on either P4 board -- and they only ever run this WM",
-    "firmware/guition_jc8012p4a1c/modules/p4_desktop.py":
-        "the same shared spine staged onto the second P4 board -- same "
-        "P4SystemCanvas, same PPA composite, same absence of bands, same one WM",
 }
 
 
 def _windowed_install_sites():
-    """Every module that CONSTRUCTS a WindowedWM, found rather than listed."""
+    """Every module that CONSTRUCTS a WindowedWM, found rather than listed.
+
+    `device/` is walked because a shared body lives there (`p4_desktop.py`
+    installs the WM for both P4 boards since 2026-09-09), and a board's
+    `modules/` copy of ANY shared module is skipped: that copy is build output
+    -- gitignored, present only on a tree that has built that board -- so
+    counting it would make this ratchet's answer depend on whether someone had
+    run a firmware build, which is how a guard starts failing for a reason that
+    has nothing to do with what it guards.
+    """
     import ast
     import warnings
+    shared = {p.name for base in ("runtime", "device")
+              for p in (ROOT / base).glob("*.py")}
     found = {}
     # Parsing a whole tree re-raises every SyntaxWarning in it (stale regex
     # escapes in vendored/staged sources); this walk is a search, not a lint.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        for base in ("runtime", "firmware"):
+        for base in ("runtime", "device", "firmware"):
             for dirpath, dirnames, filenames in os.walk(ROOT / base):
                 dirnames[:] = [d for d in dirnames
                                if d not in (".build", "__pycache__", "dist")]
@@ -212,6 +219,8 @@ def _windowed_install_sites():
                     if not name.endswith(".py"):
                         continue
                     path = Path(dirpath) / name
+                    if path.parent.name == "modules" and name in shared:
+                        continue          # a staged copy; the canonical one is walked
                     try:
                         tree = ast.parse(path.read_text(encoding="utf-8",
                                                         errors="replace"))
