@@ -70,13 +70,28 @@ def _fb_text(s):
 # #186 moy_buf: an image whose .pix already lives OFF the gc heap (a cover --
 # memoryview pix) gets its RGB565 bakes off-heap too, so the whole cover stops
 # taxing the GC mark phase. The owner (CoverCache._free_img) frees pix and
-# bakes together at eviction. Everything else (sheet tiles, paint images,
-# wallpaper blits) keeps gc bytearrays -- their owners drop them implicitly
-# (sheet gen bumps, cart ns teardown) and an explicit free there would leak.
+# bakes together at eviction. Everything else (sheet tiles, wallpaper blits)
+# keeps gc bytearrays -- their owners drop them implicitly (sheet gen bumps,
+# cart ns teardown) and an explicit free there would leak. A cart's PAINT
+# image is the exception this rule cost us; see _paint_bake_buf.
 try:
     import moybuf as _moybuf
 except ImportError:
     _moybuf = None
+
+# A bake at or above this many bytes is a full-surface buffer and never comes
+# off the gc heap while an allocator will serve it (_paint_bake_buf). The bar
+# is the measured one: the largest contiguous gc RUN on both S3 boards in
+# ordinary use is 64-147KB, so a request this size is a coin flip on a console
+# that has been up for a while, however much heap is free in total.
+_OFFHEAP_BAKE_BYTES = 64 * 1024
+
+# Off-heap paint bakes on loan to a running program (#186), owner -> [(img,
+# buf)]. Module-level for the reason _LAYER_POOL is: the canvas that BAKES an
+# image is often a layer's throwaway canvas, while the reclaim call arrives on
+# the root -- a per-canvas register would have leaked exactly the buffers a
+# scroll cart makes. Drained by reclaim_layers(owner).
+_LENT_BAKES = {}
 
 
 def _bake_buf(img, nbytes):
@@ -84,6 +99,62 @@ def _bake_buf(img, nbytes):
     if _moybuf is not None and isinstance(img.pix, memoryview):
         return _moybuf.alloc(nbytes)
     return bytearray(nbytes)
+
+
+def _paint_bake_buf(img, nbytes):
+    """The buffer for a paint image's one RGB565 bake (_bake_indices).
+
+    This is the single biggest allocation the console makes: 153,600 bytes for
+    a 320x240 backdrop. It used to be a plain gc-heap bytearray, and that is
+    what made a cart with a painted backdrop refuse to start once a console had
+    been up for a while -- on BOTH tiers, since Python and Lua reach this
+    through the same image() verb. MicroPython's collector does not move
+    objects, so what a 150KB request needs is not free BYTES but a free RUN,
+    and a session's ordinary churn leaves the biggest run far short of that
+    while megabytes stay free. Measured on a Guition S3 idle at the launcher,
+    2026-09-09: 3092KB free after two full collects, largest run 143KB,
+    bytearray(153600) refused -- and moy_alloc.alloc(153600) granted at that
+    same instant. So a collect cannot buy this buffer; only leaving the gc heap
+    can.
+
+    Off-heap memory has no collector, so it is taken only for an image that
+    names an OWNER (`_owner`, stamped by cart_api's image() with the run that
+    asked for it): _LENT_BAKES holds the loan until reclaim_layers(owner)
+    frees it -- the same seam, and the same two call sites, that already pool a
+    dead run's layer buffers. An UNOWNED paint image (the WM's window rasters,
+    a wallpaper thumbnail, the Paint app's own canvas) keeps its gc bytearray,
+    because nothing would ever free it.
+
+    A re-bake reuses the loan rather than taking a second one, so an image
+    whose _rgb_i is invalidated repeatedly cannot grow the register.
+    """
+    owner = getattr(img, "_owner", None)
+    if _moybuf is None or owner is None or nbytes < _OFFHEAP_BAKE_BYTES:
+        return _bake_buf(img, nbytes)
+    lent = _LENT_BAKES.setdefault(owner, [])
+    for i in range(len(lent)):
+        if lent[i][0] is img:
+            buf = lent[i][1]
+            if len(buf) == nbytes:
+                return buf
+            _moybuf.free(buf)
+            lent.pop(i)
+            break
+    buf = _moybuf.alloc(nbytes)
+    if isinstance(buf, memoryview):     # a bytearray back means PSRAM said no
+        lent.append((img, buf))
+    return buf
+
+
+def _release_bakes(owner):
+    """Free a dead program's off-heap paint bakes (see _paint_bake_buf)."""
+    lent = _LENT_BAKES.pop(owner, None)
+    if not lent or _moybuf is None:
+        return
+    for img, buf in lent:
+        if getattr(img, "_rgb_i", None) is buf:
+            img._rgb_i = None     # a stale draw raises, never reads freed RAM
+        _moybuf.free(buf)
 
 # MOY64 palette as RGB565 (generated from runtime/palette.py; no colorsys here).
 PAL565 = (
@@ -2083,7 +2154,9 @@ class DeviceCanvas:
         # The "images are data, not draw calls" bake (#63 Fold 3), off the hot path.
         w = img.w
         h = img.h
-        buf = _bake_buf(img, w * h * 2)   # #186: off-heap for off-heap images
+        # #186: a full-surface bake is off-heap for an OWNED image, because the
+        # gc heap cannot promise a 150KB contiguous run. See _paint_bake_buf.
+        buf = _paint_bake_buf(img, w * h * 2)
         self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, self._wire)
         img._rgb_i = buf
 
@@ -2649,6 +2722,11 @@ class DeviceCanvas:
             self._drain_lcopy()
         self._lcopy_pred = None
         self._mapcache = None
+        # #186: and the run's off-heap paint bakes, which are loans of the same
+        # kind. BEFORE the _lent_layers guard below -- a cart that painted a
+        # backdrop without ever calling make_layer has bakes to give back and
+        # no layers, and returning early there leaked every one of them.
+        _release_bakes(owner)
         lent = self._lent_layers
         if not lent:
             return

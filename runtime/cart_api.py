@@ -139,8 +139,11 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     cart gets no network access at all (the base key-set is identical either
     way). `net` is the same gate for "multiplayer" (#65). `gpio` is the third
     such gate (#9): physical pins, which only exist where a host with pins is
-    on the other end of the page -- so far the Zero. `owner` tags layer
-    loans for the device's #63 leak-fix reclaim; a gc-heap canvas ignores it.
+    on the other end of the page -- so far the Zero. `owner` names the RUN that
+    borrows off-heap memory, so the device can hand it back when the run dies:
+    layer loans (the #63 leak fix) and, since 2026-09-09, a paint image's
+    full-screen RGB565 bake (#186 -- see device_canvas._paint_bake_buf, and the
+    cart that would not start that it fixes). A gc-heap canvas ignores it.
     """
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
                            # repeated image(name) returns the SAME Image (#63) and its
@@ -467,6 +470,12 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                 im = Image(w, h, idx, -1)      # opaque (no transparent index)
                 im._paint = True               # marks the paint-image bake/ship fast paths
                 im._name = a                   # spr() can ship ["imgref", x, y, name]
+                # #186/#67: this run owns the image, so the device canvas may take
+                # its full-screen RGB565 bake OFF the gc heap -- which is the
+                # only way that 150KB allocation is reliable -- and hand it back
+                # through the reclaim_layers(owner) the layer loans use. A
+                # gc-heap canvas ignores the tag.
+                im._owner = owner
                 _img_cache[a] = im
             return im
         return Image.from_ascii(a, mapping, transparent)

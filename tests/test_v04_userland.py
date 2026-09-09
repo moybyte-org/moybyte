@@ -505,6 +505,12 @@ def test_moyimg_asset_roundtrip_and_image_accessor(tmp_path):
     im = api["image"]("pic")
     assert im is not None and im.w == w and im.h == h
     assert bytes(im.pix) == raw and getattr(im, "_paint", False) is True
+    # #186: and tagged with the RUN that owns it, which is what lets the device
+    # canvas take its full-screen RGB565 bake off the gc heap (where a 150KB
+    # contiguous run is not there to be had) and give it back at reclaim.
+    assert im._owner == "cart"
+    assert host_app.make_api(cv, _Input(), {}, images=reloaded["images"],
+                             owner="wallpaper")["image"]("pic")._owner == "wallpaper"
     assert api["image"]("pic") is im                    # memoised: same object
     assert api["image"]("missing") is None              # unknown asset -> None
     # The ASCII-art form of image() still works (dispatch on str vs rows list).

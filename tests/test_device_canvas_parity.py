@@ -999,6 +999,106 @@ def test_spr_paint_image_matches_host():
             assert getattr(di, "_rgb_i", None) is not None, "no blit_indices bake cache"
 
 
+class _BakeTracker:
+    """moybuf with the C registry's single-owner rule enforced (see
+    tests/test_moybuf.py): alloc hands out REAL memoryviews so the canvas's
+    isinstance ownership checks fire, and free refuses a foreign or
+    already-freed buffer."""
+
+    def __init__(self):
+        self.live = {}
+        self.freed = 0
+
+    def alloc(self, n):
+        v = memoryview(bytearray(n))
+        self.live[id(v)] = v
+        return v
+
+    def free(self, buf):
+        if not isinstance(buf, memoryview):
+            return
+        if id(buf) not in self.live:
+            raise AssertionError("freed a foreign or already-freed buffer")
+        del self.live[id(buf)]
+        self.freed += 1
+
+
+def _owned_paint_image(m, iw, ih, owner="cart"):
+    im = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
+    im._owner = owner
+    return im
+
+
+def test_a_full_screen_paint_bake_never_comes_off_the_gc_heap():
+    """#186/#67: the 320x240 RGB565 bake is 153,600 bytes -- the biggest single
+    allocation the console makes, and bigger than the largest contiguous RUN
+    the MicroPython gc heap can promise on either S3 board once a session has
+    churned (measured 64-147KB while ~3MB stayed free). It is the allocation a
+    cart with a painted backdrop died on, so it must leave the gc heap whenever
+    the image names an owner and an allocator exists."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    img = _owned_paint_image(m, 320, 240)
+    dev.spr(img, 0, 0)
+    assert isinstance(img._rgb_i, memoryview), "the full-screen bake stayed on the gc heap"
+    assert len(img._rgb_i) == 320 * 240 * 2 == 153600
+    assert len(tr.live) == 1
+
+    # A RE-bake reuses the loan instead of taking a second one -- an image whose
+    # _rgb_i is invalidated repeatedly (the Paint idiom) must not grow the register.
+    borrowed = img._rgb_i
+    img._rgb_i = None
+    dev.spr(img, 0, 0)
+    assert img._rgb_i is borrowed
+    assert len(tr.live) == 1
+
+    # The run dies: reclaim_layers gives the bake back through the SAME seam
+    # that pools its layers -- and this cart never made a layer, which is the
+    # case an early return out of reclaim_layers used to leak.
+    dev.reclaim_layers("cart")
+    assert tr.freed == 1 and not tr.live
+    assert img._rgb_i is None, "a freed bake must be unreachable, not a stale view"
+
+
+def test_only_an_owned_full_surface_bake_leaves_the_gc_heap():
+    """Off-heap memory has no collector, so the canvas takes it only where
+    something will hand it back. An UNOWNED paint image (the WM's window
+    rasters, a wallpaper thumbnail, the Paint app's own canvas) and a small
+    owned one both keep their gc bytearray."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+
+    unowned = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), 320, 240)
+    dev.spr(unowned, 0, 0)
+    assert isinstance(unowned._rgb_i, bytearray)
+
+    small = _owned_paint_image(m, 40, 30)          # 2,400 bytes: no heap risk
+    dev.spr(small, 0, 0)
+    assert isinstance(small._rgb_i, bytearray)
+
+    assert not tr.live and tr.freed == 0
+    dev.reclaim_layers("cart")                      # nothing lent, nothing freed
+    assert tr.freed == 0
+
+
+def test_an_off_heap_paint_bake_draws_the_same_pixels():
+    """Residency is an allocation decision, never a pixel one."""
+    m, _host, dev = _both(True)
+    plain = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), 320, 240)
+    dev.cls(3)
+    dev.spr(plain, 2, 1)
+    on_heap = _dev_rgb565(dev)
+
+    m._moybuf = _BakeTracker()
+    owned = _owned_paint_image(m, 320, 240)
+    dev.cls(3)
+    dev.spr(owned, 2, 1)
+    assert isinstance(owned._rgb_i, memoryview)
+    assert _dev_rgb565(dev) == on_heap
+
+
 def test_spr_paint_image_into_layer_matches_host():
     # The clean full-screen-background path: spr(bg, 0, 0) into a make_layer once, then
     # draw_layer per frame -- the device bakes the paint image into the layer buffer via
