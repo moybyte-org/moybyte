@@ -253,8 +253,10 @@ above got their verdicts in **#77**. What this section keeps is what was
 DECIDED:
 
 - **The S3 pays for calls and allocations, not raster.** A C verb call floors
-  at ~1.65 µs, a malloc through the IDF heap at ~9 µs (its TLSF metadata sits
-  in PSRAM). So the levers that landed are the ones that delete calls and
+  at ~1.0 µs (re-measured 2026-09-09 with the per-verb profiler on the real
+  carts, against ~1.65 from the original micro-bench: `flr` reads 1.03 µs over
+  680 calls a frame and `palt` 1.16 over 1204), a malloc through the IDF heap
+  at ~9 µs (its TLSF metadata sits in PSRAM). So the levers that landed are the ones that delete calls and
   mallocs: every p8 draw verb one call into the machine, the hot shim paths in
   C, one call per native bit operator, a small-object pool under `l_alloc`
   with its free lists in internal SRAM and chunks that go back.
