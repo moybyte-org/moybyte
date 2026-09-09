@@ -36,9 +36,15 @@ class Bitmap:
             self._owner = owner
 
 
-def cover_indices(src, sw, sh, dw, dh):
+def cover_indices(src, sw, sh, dw, dh, out=None):
     """Nearest-neighbor cover crop: source cropped centered to the target
-    aspect, then sampled to exactly dw x dh (the ArtworkService formula)."""
+    aspect, then sampled to exactly dw x dh (the ArtworkService formula).
+
+    `out` is a caller-supplied dw*dh buffer. The desktop backdrop resamples to
+    the whole SCREEN (#186), and a screenful of indices is 153,600 bytes on the
+    Guition -- past the largest contiguous run that board has at the launcher --
+    so that caller hands one down from moybuf instead. None keeps the plain
+    bytearray every other caller wants."""
     if sw * dh > sh * dw:
         crop_h = sh
         crop_w = max(1, sh * dw // dh)
@@ -47,7 +53,8 @@ def cover_indices(src, sw, sh, dw, dh):
         crop_w = sw
         crop_h = max(1, sw * dh // dw)
         sx0, sy0 = 0, (sh - crop_h) // 2
-    out = bytearray(dw * dh)
+    if out is None:
+        out = bytearray(dw * dh)
     for y in range(dh):
         sy = sy0 + y * crop_h // dh
         so = sy * sw

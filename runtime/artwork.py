@@ -32,6 +32,19 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_context import NO_STORE
 
+# #186: the desktop backdrop's resampled indices. Off-heap for the same reason
+# its RGB565 bake is (device_canvas._paint_bake_buf) -- a screenful of indices
+# is 153,600 bytes on the Guition's 480x320 desk, and that board's largest
+# contiguous gc run at the launcher is 107,584. alloc() degrades to a plain
+# bytearray on the host and wherever PSRAM is out, so this stays one code path.
+try:
+    import moybuf as _moybuf
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    try:
+        from runtime import moybuf as _moybuf
+    except ImportError:
+        _moybuf = None
+
 
 def _invalidate_bitmap(img):
     if img is None:
@@ -987,6 +1000,13 @@ class ArtworkService:
     WALL_TITLE = "My Art"
     PAINT_TITLE = "Paint"
     NEEDS = ("files", "carts", "wallpaper", "prefs", "notify", "nav")
+    # The off-heap loan key for the DESKTOP BACKDROP (#186). Its own key, not
+    # PaintDocument's "artwork" and not the wallpaper cart's "wallpaper":
+    # release_bakes(owner) frees everything an owner holds, so a shared key
+    # would mean Paint's leaving hook drops the desktop's backdrop, and
+    # wallpaper.clear() drops a compiled cart's images. One key, one buffer,
+    # one thing to reason about.
+    WALL_OWNER = "wallpaper_bg"
 
     def __init__(self, ctx):
         self.ctx = ctx
@@ -1001,6 +1021,8 @@ class ArtworkService:
         self._wall_decoded = None      # the wallpaper COPY's decoded tuple
         self._wall_bitmap = None
         self._wall_key = None
+        self._wall_pix = None          # the backdrop's off-heap indices (#186)
+        self._wall_canvas = None       # ...and the canvas its bake is lent by
         self._thumb_bitmap = None
         self._thumb_key = None
         self._read_only = False        # the open picture is show-only
@@ -1262,8 +1284,10 @@ class ArtworkService:
                 self.last_error = str(err)
                 return False
         self._wall_decoded = None
-        self._wall_bitmap = None
-        self._wall_key = None
+        self._drop_wall_bitmap()       # #186: the outgoing backdrop's loans --
+                                       # here and not only via select_wallpaper,
+                                       # because this can still answer False
+                                       # below without ever reaching it
         self._thumb_bitmap = None
         self._thumb_key = None
         wp_id = self._wallpaper_id()
@@ -1297,29 +1321,71 @@ class ArtworkService:
         self._wall_decoded = data if data is not None else False
         return data
 
+    def _drop_wall_bitmap(self):
+        """Drop the cached backdrop and give back BOTH of its off-heap loans.
+
+        Called where the cached bitmap is genuinely being discarded -- a new
+        wallpaper published, or a source/canvas size the cache does not match.
+        The canvas nulls the bake as it frees, so a draw that raced this would
+        re-bake rather than read returned RAM (moybuf's rule: never free what
+        something still reads)."""
+        self.release_wall_bake()
+        if self._wall_pix is not None and _moybuf is not None:
+            _moybuf.free(self._wall_pix)
+        self._wall_pix = None
+        self._wall_bitmap = None
+        self._wall_key = None
+
+    def release_wall_bake(self):
+        """Give back the backdrop's RGB565 bake, keeping the resampled indices.
+
+        The backdrop is neither a cart RUN nor a document, so it has neither of
+        the deaths the other two loans hang off. What it has is a SELECTION:
+        the bake is only ever read while My Art is the chosen wallpaper, so the
+        wallpaper component's `clear()` -- the one seam every wallpaper change
+        funnels through -- is where it goes back. Coming back to My Art costs one
+        native re-bake (~8ms) and no resample, which is why this returns the
+        bake and NOT the indices: the resample is a Python loop over a whole
+        screen, and paying it per selection would be a visible hitch."""
+        cv = self._wall_canvas
+        rel = getattr(cv, "release_bakes", None) if cv is not None else None
+        if rel is not None:
+            rel(self.WALL_OWNER)
+
     def draw_wallpaper(self, canvas):
-        """Draw My Art directly in the SYSTEM domain (512x300 -> P4 exact 2x)."""
+        """Draw My Art directly in the SYSTEM domain (512x300 -> P4 exact 2x).
+
+        ONE screen-sized bitmap drawn 1:1, whatever the source size (#186).
+        The old integer-cover branch handed the canvas a source-sized bitmap
+        and a scale, and `spr` bakes a PRE-SCALED RGB565 copy for any scale but
+        1 -- so a 320x240 drawing on the Guition's 480x320 desk asked the gc
+        heap for 640*480*2 = 614,400 contiguous bytes, four times the screen it
+        was about to fill, and got `MemoryError` at an untouched launcher.
+        Resampling to the canvas instead bakes exactly one screen (307,200
+        there), and 1:1 is the only placement that reaches the owner-lent
+        `_bake_indices` path at all. Pixels are unchanged wherever the cover is
+        an exact integer multiple -- the P4's 512x300 -> 1024x600 included --
+        because cover_indices reduces to nearest-neighbour replication there."""
         data = self._wall_data()
         if data is None:
             return False
         sw, sh, src = data
         cw, ch = canvas.w, canvas.h
-        if sw > cw or sh > ch:
-            key = (id(src), cw, ch)
-            if self._wall_key != key:
-                fitted = cover_indices(src, sw, sh, cw, ch)
-                self._wall_bitmap = Bitmap(cw, ch, fitted)
-                self._wall_key = key
-            canvas.spr(self._wall_bitmap, 0, 0)
-            return True
-        # Integer cover is exact for the desktop preset: 512x300 * 2 = 1024x600.
-        scale = max(1, (cw + sw - 1) // sw, (ch + sh - 1) // sh)
-        key = (id(src), sw, sh)
+        key = (id(src), cw, ch)
         if self._wall_key != key:
-            self._wall_bitmap = Bitmap(sw, sh, src)
+            self._drop_wall_bitmap()
+            if sw == cw and sh == ch:
+                pix = src              # already the screen: no resample, no loan
+            else:
+                if _moybuf is not None:
+                    self._wall_pix = pix = _moybuf.alloc(cw * ch)
+                else:                  # pragma: no cover - every tier has moybuf
+                    pix = bytearray(cw * ch)
+                cover_indices(src, sw, sh, cw, ch, pix)
+            self._wall_bitmap = Bitmap(cw, ch, pix, self.WALL_OWNER)
             self._wall_key = key
-        canvas.spr(self._wall_bitmap, (cw - sw * scale) // 2,
-                   (ch - sh * scale) // 2, scale)
+        self._wall_canvas = canvas
+        canvas.spr(self._wall_bitmap, 0, 0)
         return True
 
     def wall_size(self):

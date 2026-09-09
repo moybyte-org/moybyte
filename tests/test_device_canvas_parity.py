@@ -2165,3 +2165,51 @@ def test_blit_game_composites_itself_when_the_geometry_is_refused():
     assert bytes(sc._buf) != bytes(320 * 240 * 2)
     assert sc._snap_live is False
     assert comp.calls == [("fold_fence",)]
+
+
+def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
+    """#186: the two off-heap lanes must never both hold one buffer.
+
+    `_bake_buf`'s lane rides the IMAGE's residency -- an off-heap `pix` (a
+    cover) gets off-heap bakes, freed by whoever owns the pixels and by
+    `_cache_rgb`'s variant eviction. `_paint_bake_buf`'s lane is the loan
+    register, freed by `release_bakes(owner)`. A buffer in both is freed twice,
+    which the C registry turns into a ValueError -- or into a live buffer handed
+    out again, if an id were reused.
+
+    Nothing had both until the desktop backdrop, which needs off-heap PIXELS
+    (a screenful of indices is 153,600 bytes on the Guition, past that board's
+    largest run at an untouched launcher) AND an owner for its bake. So an
+    owner now settles it: the register is the only lender for an image that
+    names one."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    m._LENT_BAKES = {}
+
+    img = _owned_paint_image(m, 320, 240, owner="wallpaper_bg")
+    img.pix = memoryview(bytearray(img.pix))     # off-heap pixels, as the backdrop has
+    dev.spr(img, 0, 0)
+    assert isinstance(img._rgb_i, memoryview), "the full-screen bake stayed on the heap"
+    assert len(tr.live) == 1, "the bake was lent twice, or not at all"
+    assert [b for _i, b in m._LENT_BAKES["wallpaper_bg"]] == [img._rgb_i]
+
+    # The scaled lane bakes a pre-scaled copy the register does not track, so
+    # for an OWNED image it takes the gc heap rather than an untracked loan.
+    dev.spr(img, 0, 0, 2)
+    assert isinstance(img._rgb, bytearray), "an untracked off-heap variant"
+    assert len(tr.live) == 1
+
+    # And the one release frees the one buffer -- _BakeTracker raises on a
+    # double free, so a second lender would surface right here.
+    dev.release_bakes("wallpaper_bg")
+    assert tr.live == {} and tr.freed == 1
+    assert img._rgb_i is None, "a stale draw must re-bake, never read freed RAM"
+
+    # An UNOWNED off-heap image keeps the residency lane it always had (a
+    # cover: CoverCache frees pix and bakes together).
+    cover = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), 320, 240)
+    cover.pix = memoryview(bytearray(cover.pix))
+    dev.spr(cover, 0, 0)
+    assert isinstance(cover._rgb_i, memoryview)
+    assert m._LENT_BAKES == {}, "an unowned image must never enter the register"

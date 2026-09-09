@@ -107,8 +107,17 @@ _MAX_LENT_BAKES = 4
 
 
 def _bake_buf(img, nbytes):
-    """A bake buffer riding its image's residency: off-heap iff img.pix is."""
-    if _moybuf is not None and isinstance(img.pix, memoryview):
+    """A bake buffer riding its image's residency: off-heap iff img.pix is.
+
+    Not for an image that names an OWNER, whose bakes are the loan register's
+    business alone. This path's buffers are freed by whoever owns the pixels
+    (CoverCache for a cover) and by _cache_rgb's variant eviction, and a buffer
+    the register also held would be freed twice -- which the C registry turns
+    into a ValueError, or worse if the id were reused. The desktop backdrop is
+    the first image to have both an owner and off-heap pixels (#186), so this
+    was reachable rather than hypothetical."""
+    if (_moybuf is not None and isinstance(img.pix, memoryview)
+            and getattr(img, "_owner", None) is None):
         return _moybuf.alloc(nbytes)
     return bytearray(nbytes)
 
