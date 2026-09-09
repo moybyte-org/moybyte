@@ -183,6 +183,112 @@ def verbs_line(hz, frames, rows, top=14):
     return " | ".join(out)
 
 
+# The two marker comments tools/p8_lua_port.py emits around its shim. They are
+# how a cart says where the generated 1,348 lines end and its own code starts,
+# and they are the only thing that CAN say it: the data tables emitted above
+# the shim vary in length per cart (26 lines for moss moss, 163 for one that
+# needs the raw sheet), so the block sits at a different offset in every port.
+P8_SHIM_OPEN = b"PICO-8 compatibility shim (generated"
+P8_SHIM_CLOSE = b"end shim ==="
+
+
+def shim_line_range(path, block=512):
+    """The emitted p8 shim's (first, last) lines in a cart's main.lua, or None.
+
+    Read in BLOCKS and never held. main.lua is ~100KB on a ported cart and the
+    board being asked has that same cart resident -- moss moss holds a
+    megabyte of Lua heap and barely loads at all -- so a reader that pulled the
+    file in to splitlines() would OOM the very cart it was about to measure.
+    This counts newlines through a small window with a carry, which is O(1) in
+    the file's size and costs one pass.
+    """
+    keep = max(len(P8_SHIM_OPEN), len(P8_SHIM_CLOSE)) - 1
+    lo = hi = None
+    carry = b""
+    carry_line = 1                    # the line number carry[0] sits on
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return None
+    try:
+        while True:
+            buf = f.read(block)
+            if not buf:
+                break
+            hay = carry + buf
+            if lo is None:
+                i = hay.find(P8_SHIM_OPEN)
+                if i >= 0:
+                    # The banner line above the marker opens the emitted block.
+                    lo = carry_line + hay.count(b"\n", 0, i) - 1
+            if lo is not None and hi is None:
+                i = hay.find(P8_SHIM_CLOSE)
+                if i >= 0:
+                    hi = carry_line + hay.count(b"\n", 0, i)
+                    break
+            cut = len(hay) - keep
+            if cut < 0:
+                cut = 0
+            carry_line += hay.count(b"\n", 0, cut)
+            carry = hay[cut:]
+    finally:
+        f.close()
+    if lo is None or hi is None or hi < lo:
+        return None
+    return (lo, hi)
+
+
+def luaprof_line(st, rng, top=10):
+    """The `LUAPROF` line: how a Lua/p8 frame's INTERPRETER time divides.
+
+    The verb profiler answers what a frame spends in C. This answers the other
+    half, and the half that had never been separated: a ported cart is two
+    bodies of Lua, its own and the 1,348 lines of PICO-8 standard library the
+    importer emits into every cart it makes, and `shim=` is the share of
+    sampled interpreter time spent in the emitted half.
+
+    READ THE FIRST SHARE, NOT THE SECOND. Samples are taken every `iv` VM
+    instructions, so what they weigh is instructions executed -- and the count
+    hook's tax is the same for every Lua function, which is why that share
+    survives it even though the frame rate does not. The second share, and the
+    per-row `t`, are WALL CLOCK between samples: they carry the C verbs and,
+    crucially, the COLLECTOR, which runs inside the allocator and executes no
+    counted instructions at all. A row whose `t` share far exceeds its sample
+    share is allocating, not computing, and on a cart holding a megabyte of
+    Lua heap the difference between the two IS the collector.
+
+    Rows are `s`/`c` for shim or cart, then the function's `linedefined` --
+    which is what identifies it, since most of these functions are anonymous
+    or local and a name would be a guess.
+    """
+    hz, frames, iv, tot, rows, srcs = st
+    smp, us, calls, ccalls, ssmp, sus, scalls, drop, used, pinned = tot
+    if not frames or not smp:
+        return "LUAPROF frames=%d smp=0" % (frames or 0)
+    lo, hi = rng if rng else (0, 0)
+    share = "%d%%/%d%%" % (100 * ssmp // smp, 100 * sus // us) if us else "-"
+    # n is Lua calls a frame and sn how many of them entered the shim; c is C
+    # calls, which is the same population the VERBS line breaks down by name.
+    out = ["LUAPROF frames=%d iv=%d smp=%d shim=%s n=%.0f sn=%.0f c=%.0f "
+           "used=%d drop=%d"
+           % (frames, iv, smp, share if pinned else "n/a",
+              calls / float(frames), scalls / float(frames),
+              ccalls / float(frames), used, drop)]
+    if not pinned:
+        out[0] += " (unpinned: lines %d-%d are not this cart's shim)" % (lo, hi)
+    scale = 1.0 / (1000.0 * frames)             # microseconds -> ms a frame
+    cart_src = 0
+    for i, s in enumerate(srcs):
+        if s == "cart":
+            cart_src = i
+    for r in rows[:top]:
+        src, line, n, s, rus = r
+        tag = "s" if (pinned and src == cart_src and lo <= line <= hi) else "c"
+        out.append("%s%d %.1f%% n=%.1f t=%.2f"
+                   % (tag, line, 100.0 * s / smp, n / float(frames), rus * scale))
+    return " | ".join(out)
+
+
 def _remote_state(ws):
     """One-line JSON snapshot for the `state` command -- the assertion source an
     on-glass harness reads instead of pixels. Every field best-effort: a broken
@@ -622,6 +728,95 @@ class DevChannel:
             return
         print(verbs_line(st[0], st[1], st[2]))
 
+    def _luaprof(self, ws, parts):
+        """`luaprof on|off|reset [interval]` and a bare `luaprof` -- the Lua
+        tier's per-FUNCTION sampling profiler (moycore.lua_profile).
+
+        Its own switch, like `verbs` and for the same reason: a count hook
+        makes EVERY VM instruction detour through luaG_traceexec, which is a
+        tax an ordinary diag session must not pay to answer a question a
+        measurement session asks on purpose.
+
+        `on` resolves the running cart's shim line range from its own main.lua
+        before arming, so the split is measured against the file that is
+        actually loaded rather than a constant baked in here -- the emitted
+        block is a fixed 1,348 lines but it starts wherever that cart's data
+        tables ended.
+        """
+        try:
+            import moycore
+        except ImportError:
+            print("REMOTE luaprof: no moycore on this board")
+            return
+        arg = parts[1] if len(parts) > 1 else ""
+        if arg in ("0", "off"):
+            moycore.lua_profile(0)
+            self._shim_rng = None
+            print("REMOTE luaprof off")
+            return
+        if arg in ("1", "on"):
+            try:
+                iv = int(parts[2]) if len(parts) > 2 else 1024
+            except ValueError:
+                iv = 1024
+            cart = getattr(ws, "cart", None) or {}
+            rng = None
+            if cart.get("path"):
+                rng = shim_line_range(cart["path"] + "/main.lua")
+            self._shim_rng = rng
+            lo, hi = rng if rng else (0, 0)
+            n = moycore.lua_profile(1, iv, lo, hi)
+            moycore.lua_reset()
+            if n is None:
+                print("REMOTE luaprof armed iv=%d shim=%d-%d" % (iv, lo, hi))
+            else:
+                print("REMOTE luaprof on iv=%d shim=%d-%d" % (iv, lo, hi))
+            return
+        if arg == "reset":
+            moycore.lua_reset()
+            print("REMOTE luaprof reset")
+            return
+        st = moycore.lua_stats(10)
+        if st is None:
+            print("REMOTE luaprof: not armed (`luaprof on`)")
+            return
+        print(luaprof_line(st, getattr(self, "_shim_rng", None)))
+
+    def _luagc(self, parts):
+        """`luagc [stop|run|inc [pause step size]|gen [minor major]]` -- the
+        cart VM's collector, read and set.
+
+        It is a knob here and not upstream because moycore OPENS the VM: the
+        engine and the shim are both vendored, but the collector's schedule is
+        this file's. And it is the one cost `luaprof` cannot see -- collection
+        runs inside the allocator rather than as counted VM instructions -- so
+        the two are read together or not at all.
+        """
+        try:
+            import moycore
+        except ImportError:
+            print("REMOTE luagc: no moycore on this board")
+            return
+        arg = parts[1] if len(parts) > 1 else ""
+        nums = []
+        for p in parts[2:]:
+            try:
+                nums.append(int(p))
+            except ValueError:
+                pass
+        while len(nums) < 3:
+            nums.append(-1)
+        mode = {"stop": 0, "run": 1, "inc": 2, "gen": 3}.get(arg, -1)
+        st = moycore.lua_gc_mode(mode, nums[0], nums[1], nums[2])
+        if st is None:
+            # ARMED, not ignored: the mode is applied at the next load(), which
+            # is what makes an A/B possible at all -- every tool here changes
+            # one thing by relaunching the cart.
+            print("REMOTE luagc armed mode=%s (no cart running)" % (arg or "-"))
+            return
+        print("REMOTE luagc heap=%dKB running=%d gen=%d"
+              % (st[0], 1 if st[1] else 0, 1 if st[2] else 0))
+
     def report(self, diag):
         """One SERIAL line per diag tick, and it is the channel's self-diagnosis:
         `rx` climbing while `lines` stays 0 means something is injecting bytes
@@ -857,6 +1052,12 @@ class DevChannel:
             return
         if cmd == "verbs":
             self._verbs(parts)
+            return
+        if cmd == "luaprof":
+            self._luaprof(ws, parts)
+            return
+        if cmd == "luagc":
+            self._luagc(parts)
             return
         tog = _toggle_cmd(cmd)
         if tog is not None:

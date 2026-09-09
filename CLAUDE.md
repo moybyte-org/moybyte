@@ -214,6 +214,16 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
     `diag`'s: it gates at INSTALL so an unarmed frame carries no wrapper at all)
     then a bare `verbs` prints per-frame calls and ms per verb.
     `native/moycore/README.md` is the authority.
+  - **`LUAPROF` splits the other half — the interpreter — by FUNCTION**, which
+    is what says whether a slow port is its own code or the 1,348 lines of
+    PICO-8 stdlib `p8_lua_port.py` emits into every cart it converts. `luaprof
+    on` (its own switch again), then a bare `luaprof`. It SAMPLES on a VM
+    instruction count rather than hooking calls, because a call hook inflates
+    small frequently-called functions — the shim exactly — and would answer the
+    question in its own favour. It perturbs the frame and cannot see the
+    COLLECTOR (which runs in the allocator, not as counted instructions), so
+    read its sample share and reach for `luagc` for the other. Both are
+    documented in `native/moycore/README.md`.
   - Open defects: #74 touch stalls, the launcher live-wallpaper cost, and #69's
     keyboard+touch I2C stalls (sized via I2CSTAT).
 - **Branches and releases: `dev` is where work lands; `master` is what users get.**

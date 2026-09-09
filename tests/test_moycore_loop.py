@@ -144,6 +144,79 @@ print("PROFOFF", moycore.profile(0), moycore.verb_stats())
 print("PROFALIVE", moycore.tick(0.03125))
 moycore.close()
 
+# The per-FUNCTION Lua profiler, checked against a cart whose split is KNOWN.
+# A profiler cannot be verified by its own answer, so the fixture is built to a
+# designed ratio: two IDENTICAL hot loops, one defined inside a fake shim line
+# range and one outside it, spun 3:1. An instrument that weighs instructions
+# has to come back near 75%. One that weighed CALLS would come back at 50% --
+# both are called once a frame -- and that is precisely the bias a sampler is
+# chosen to avoid, so this fixture fails a call-hook profiler on purpose.
+LP_END = 40                                  # the fake shim's last line
+_pad = "\n".join("-- shim filler %d" % i for i in range(8, LP_END))
+LPSRC = ("-- 1 shim banner\n"                                    # 1
+         "-- 2\n"                                                # 2
+         "function shim_hot(n)\n"                                # 3
+         "  local s = 0\n"
+         "  for i = 1, n do s = s + i end\n"
+         "  return s\n"
+         "end\n"                                                 # 7
+         + _pad + "\n"                                           # 8 .. END-1
+         "function _draw() cls(0) shim_hot(3000) cart_hot(1000) end\n"  # END
+         "function cart_hot(n)\n"                                # END+1
+         "  local s = 0\n"
+         "  for i = 1, n do s = s + i end\n"
+         "  return s\n"
+         "end\n"
+         "function _update(dt) end\n")
+
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
+# Armed BEFORE the load, which is the path a measurement session takes. The
+# first install cannot pin (`_draw` does not exist yet); load() re-installs
+# after the chunk, and that one can.
+print("LPARM", moycore.lua_profile(1, 32, 1, LP_END))
+print("LPLOAD", moycore.load(LPSRC, "@cart"))
+moycore.lua_reset()
+for f in range(12):
+    moycore.tick(0.03125)
+_hz, _fr, _iv, _tot, _rows, _srcs = moycore.lua_stats(8)
+_smp, _cyc, _calls, _ccalls, _ssmp, _scyc, _scalls, _drop, _used, _pin = _tot
+print("LPPIN", _pin, _iv, _fr, _drop, 1 if _smp > 200 else 0)
+print("LPSHARE", int(100 * _ssmp / _smp) if _smp else -1)
+_by = {}
+for _r in _rows:
+    _by[_r[1]] = _r                          # keyed by linedefined
+# 3 is shim_hot, END+1 is cart_hot: the ratio of their SAMPLES is the claim.
+print("LPHOT", 1 if _by[3][3] > 2 * _by[LP_END + 1][3] else 0,
+      1 if _by[3][3] < 5 * _by[LP_END + 1][3] else 0)
+# Calls are exact where samples are statistical -- one of each per frame.
+print("LPCALLS", _by[3][2], _by[LP_END + 1][2], _fr)
+print("LPSRC", len(_srcs), _srcs[0], 1 if _ccalls > 0 else 0)
+
+# A range that does NOT contain the shim's own _draw is a range for another
+# cart, and the pin is refused rather than believed: nothing is charged shim.
+print("LPBAD", moycore.lua_profile(1, 32, 900, 999))
+moycore.lua_reset()
+for f in range(4):
+    moycore.tick(0.03125)
+_t = moycore.lua_stats(2)
+print("LPUNPINNED", _t[3][9], _t[3][4], 1 if _t[3][0] > 0 else 0)
+
+# Off is off: no hook, no table, and "not measuring" rather than "measured
+# nothing" -- and the cart keeps running.
+print("LPOFF", moycore.lua_profile(0), moycore.lua_stats())
+print("LPALIVE", moycore.tick(0.03125))
+
+# The collector knob. Stop/restart has to move ISRUNNING, and generational has
+# to be reachable and reversible -- it is the lever the profiler above cannot
+# see, since collection is not counted VM instructions.
+_g0 = moycore.lua_gc_mode(-1)
+_g1 = moycore.lua_gc_mode(0)
+_g2 = moycore.lua_gc_mode(3, 20, 100)
+_g3 = moycore.lua_gc_mode(2, 200, 100, 13)
+print("LPGC", 1 if _g0[0] > 0 else 0, _g1[1], _g2[1], _g2[2], _g3[1], _g3[2])
+moycore.close()
+print("LPCLOSED", moycore.lua_stats(), moycore.lua_gc_mode(-1))
+
 # view and background are CORE upstream now, so libmoy answers them and the
 # host READS the result instead of being called -- zero crossings for view.
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
@@ -507,6 +580,51 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["PROFOFF"][1:] == ["0", "None"], out
     assert by["PROFALIVE"][1] == "None", \
         "the cart did not survive being un-wrapped: %s" % out
+
+    # -- the per-FUNCTION Lua profiler ---------------------------------------
+    #
+    # The fixture is two identical loops spun 3:1 across a fake shim boundary,
+    # so the instrument's answer is checkable against a number chosen in
+    # advance. That is the whole point of it: the shim-vs-cart split this was
+    # built to measure has no ground truth on a real cart, so the ground truth
+    # has to be manufactured here.
+    assert by["LPARM"][1] == "256", "lua_profile(1) installed no table: %s" % out
+    assert by["LPLOAD"][1] == "None", "the profiled cart failed to load: %s" % out
+    assert by["LPPIN"][1] == "True", \
+        "the shim pin was refused on a cart whose _draw is inside the range: %s" % out
+    assert by["LPPIN"][2:] == ["32", "12", "0", "1"], \
+        "interval/frames/dropped/sample-count: %s" % out
+    share = int(by["LPSHARE"][1])
+    assert 68 <= share <= 84, \
+        ("a 3:1 instruction split has to read near 75%%, not %d%% -- a call-"
+         "weighted profiler would say 50 here: %s" % (share, out))
+    assert by["LPHOT"][1:] == ["1", "1"], \
+        "the two hot loops are not in the designed ratio: %s" % out
+    # Exact, where the samples are statistical: one call each per frame.
+    assert by["LPCALLS"][1:] == ["12", "12", "12"], \
+        "the call counts are not exact: %s" % out
+    # One chunk, named (Lua drops the @), and the cls() the fixture draws
+    # counted as a C call rather than given a row of its own -- every C
+    # function reports source "=[C]" and would collide into one.
+    assert by["LPSRC"][1:] == ["1", "cart", "1"], \
+        "the chunk registry or the C-call count is wrong: %s" % out
+
+    # A range belonging to another cart is REFUSED, not believed.
+    assert by["LPUNPINNED"][1:] == ["False", "0", "1"], \
+        ("a range that misses the shim's own _draw still produced a split: %s"
+         % out)
+
+    # Off: the hook and the table are gone and the meter says so.
+    assert by["LPOFF"][1:] == ["0", "None"], out
+    assert by["LPALIVE"][1] == "None", \
+        "the cart did not survive the profiler being turned off: %s" % out
+
+    # The collector knob -- heap readable, stop/restart real, generational
+    # reachable and reversible.
+    assert by["LPGC"][1:] == ["1", "False", "True", "True", "True", "False"], \
+        "lua_gc_mode did not move the collector: %s" % out
+    assert by["LPCLOSED"][1:] == ["None", "None"], \
+        "the profiler answered after close(): %s" % out
 
     # view/background reached the cart with no trampoline registered for them.
     assert by["VIEW0"][1] == "None", out

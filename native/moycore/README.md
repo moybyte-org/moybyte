@@ -169,6 +169,89 @@ captures its globals as it loads — the p8 shim RESOLVES its verbs there
 registered. Arming and then launching is the reading that misses nothing;
 arming into a running cart still catches every verb it calls by global name.
 
+## The per-FUNCTION Lua profiler (`lua_profile` / `lua_stats` / `lua_reset`)
+
+The per-verb profiler above closes half the box: it says how much of a p8
+frame is C. The rest is "the interpreter", and on a ported cart that is not one
+body of Lua but **two** — the cart's own code, and the 1,348 lines defining 128
+functions that `tools/p8_lua_port.py` emits into every cart it converts. Which
+half the time is in decides whether there is anything to fix: the shim is
+GENERATED, so a fix there lands on every ported cart at once.
+
+`lua_profile(on, interval, shim_lo, shim_hi)` sets a Lua count+call hook;
+`lua_stats(top)` returns `(hz, frames, interval, totals, rows, srcs)` and
+`lua_reset()` zeroes it. The serial face is `luaprof on|off|reset [interval]`
+and a bare `luaprof`, which prints one `LUAPROF` line
+(`runtime/dev_channel.luaprof_line`).
+
+Five things about it are load-bearing:
+
+- **It SAMPLES, and that is the whole design.** A call/return profiler pays its
+  overhead per CALL, so it inflates exactly the functions that are small and
+  called often — which is what the shim is made of, and what the question is
+  about. It would find the shim expensive whether or not it is. A count hook
+  fires every N VM instructions whoever is running, so what it weighs is
+  instructions executed. `tests/test_moycore_loop.py` pins this with a fixture
+  built to a KNOWN 3:1 split across a fake shim boundary, where a
+  call-weighted profiler would answer 50%.
+- **It perturbs, and the honest claim is narrower than "it doesn't".** Lua 5.4
+  gates hooks per CallInfo through `trap`, so an unarmed VM pays nothing — but
+  with `LUA_MASKCOUNT` set, EVERY instruction detours through `luaG_traceexec`.
+  That tax is per-instruction and does not fall as the interval rises; only the
+  per-sample work does, which is why the frame rate is the same at interval 256
+  and 4096. What can be claimed is that the tax is the same for every Lua
+  function and therefore CANCELS OUT OF A SHARE — and that is testable, not
+  asserted: run one cart at two rates and the shares agree if it holds. Read
+  the sample share, not the wall-clock one.
+- **It cannot see the COLLECTOR**, and that is the one gap worth knowing.
+  Collection runs inside the allocator at a `checkGC` point, not as counted VM
+  instructions, so it generates no samples however long it takes. It lands in
+  the wall-clock column, charged to whoever tripped it. A row whose `t` share
+  badly exceeds its sample share is ALLOCATING, not computing. `lua_gc_mode`
+  below is the lever for that, and the two shipped together.
+- **The shim's line range is read from the cart that is loaded**, never baked
+  in. The emitted block is a fixed 1,348 lines but it starts wherever that
+  cart's data tables ended — line 26 in one port, line 163 in one that needs
+  the raw sheet. `dev_channel.shim_line_range` finds the generator's two marker
+  comments by streaming `main.lua` in blocks with a carry, because the board
+  being asked has that same ~100 KB cart resident and a reader that pulled it
+  into `splitlines()` would OOM the cart it was about to measure.
+- **The range is CHECKED against the cart, not believed.** The shim owns
+  `_draw` (the porter renames a p8 cart's own to `p8_draw`), so its
+  `linedefined` must land inside the range the host passed. If it does not, the
+  two are looking at different files and the pin is REFUSED: nothing is charged
+  as shim and `lua_stats` says `pinned` is false, rather than reporting a
+  confident split of the wrong cart. Pinning also keeps the prelude chunk
+  (`moycore.exec`, whose lines also start at 1) out of the shim's bucket.
+
+Disarmed there is no hook, no table and no allocation. Rows are identified by
+`source` + `linedefined` rather than by name, because most of these functions
+are local or anonymous and a name would be a guess; C functions are counted in
+`c_calls` but given no row, since every one of them reports `"=[C]"` and would
+collide into a single meaningless line.
+
+## The cart VM's collector (`lua_gc_mode`)
+
+`lua_gc_mode(mode, a, b, c)` reads and sets the Lua heap's collector — stop,
+restart, incremental with its pause/stepmul/stepsize, or **generational** — and
+returns `(heap_kb, running, generational)`. Serial: `luagc [stop|run|inc [pause
+step size]|gen [minor major]]`.
+
+It is a knob here rather than upstream because moycore OPENS the VM: libmoy and
+the p8 shim are both vendored, but the collector's schedule is this file's. It
+ARMS as well as sets, so it survives the relaunch every A/B tool performs, and
+an armed mode is applied AFTER `load()`'s settling collect so a `stop` never
+applies to the parse burst — the run's high-water mark, and the one thing that
+must still be collected.
+
+**Stopping it is the direct measurement of what it costs**, which is why the
+verb exists at all: the difference between a window with the collector running
+and one with it stopped is collection, on the live cart with nothing else
+changed. That measurement is worth taking before tuning, because a big heap is
+not the same thing as a busy collector — an incremental collector's cost tracks
+the ALLOCATION RATE, and a cart can hold a megabyte of long-lived data and give
+its collector almost nothing to do.
+
 Two verbs serve the pool and nothing else:
 
 - **`gc()`** → the VM's heap in KB after a full, stop-the-world collect. A
