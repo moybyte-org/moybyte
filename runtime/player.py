@@ -624,6 +624,12 @@ class Player:
         # surfaces underneath get the default table back.
         self._restore_palette()
         ns = self.ns
+        # Was there a world to drop? The collect below and the exit diags are
+        # for the heap a RUN leaves behind; go_home reaches here from the desk
+        # and the Editor too, where nothing ran and a collect is pure pause --
+        # 440ms of the PLAY tap on a Guition P4 (2026-09-09).
+        had_world = bool(ns) or self._update is not None \
+            or self._draw is not None or getattr(self, "_lua", None) is not None
         if ns:
             try:
                 ns.clear()
@@ -688,13 +694,14 @@ class Player:
                 rl("cart")
             except Exception:  # noqa: BLE001
                 pass
-        try:
-            import gc
-            gc.collect()           # off the play path: the run just ended
-        except Exception:  # noqa: BLE001
-            pass
-        self._diag_frag()          # #66: the heap the NEXT cart inherits
-        self._diag_sram()          # #211: the internal SRAM the run just had
+        if had_world:
+            try:
+                import gc
+                gc.collect()       # off the play path: the run just ended
+            except Exception:  # noqa: BLE001
+                pass
+            self._diag_frag()      # #66: the heap the NEXT cart inherits
+            self._diag_sram()      # #211: the internal SRAM the run just had
         self._reset_stage_meters()  # #210: the shell does not inherit the run's
         self._disarm_pacing()
 
@@ -752,27 +759,33 @@ class Player:
         the compact-as-it-gets state, and carries `exit=` (the run counter) so
         the series over repeated opens IS the degradation curve.
 
-        The block is BINARY-SEARCHED, which #66 line 1125 prescribes for a
-        reason: `mem_free()` reads high on these ports (it folds in a potential
-        PSRAM split), so only a probe that actually allocates is honest. Each
-        trial drops at once and a failing one auto-collects before it raises, so
-        the search perturbs nothing -- and it runs between carts with nothing
-        else live. Off unless measurement mode is on, like every line here."""
+        The block is PROBED, which #66 line 1125 prescribes for a reason:
+        `mem_free()` reads high on these ports (it folds in a potential PSRAM
+        split), so only a probe that actually allocates is honest. Probed by
+        DOUBLING from 16KB up to the 8MB cap, stopping at the first refusal:
+        the answer is a x2 bucket, which is what the line is read for (does
+        the p8 machine's 64KB still fit, does a layer) -- and at most ONE
+        probe fails. That matters because a failing probe IS a collect (the
+        allocator collects and retries before it raises): the binary search
+        this replaced failed about twelve times per exit, 5.1 seconds of MEMX
+        on a Guition P4 whose collect costs 430ms (2026-09-09). Runs after
+        release_world's own collect, so it takes none of its own. Off unless
+        measurement mode is on, like every line here."""
         if not self._diag_enabled():
             return
         try:
             import gc
-            gc.collect()
             free = gc.mem_free()
-            lo, hi = 0, min(free if free > 0 else (1 << 20), 8 << 20)
-            while hi - lo > 1024:
-                mid = (lo + hi) // 2
+            cap = min(free if free > 0 else (1 << 20), 8 << 20)
+            big = 0
+            n = 16 * 1024
+            while n <= cap:
                 try:
-                    bytearray(mid)          # unnamed: collectable at once
-                    lo = mid
+                    bytearray(n)            # unnamed: collectable at once
                 except MemoryError:
-                    hi = mid
-            big = lo
+                    break
+                big = n
+                n *= 2
             # The internal-SRAM pool the p8 machine, the flush bounce and the
             # framebuffers compete in -- regions under 1MB. Device only; -1 off it.
             int_free = int_big = -1

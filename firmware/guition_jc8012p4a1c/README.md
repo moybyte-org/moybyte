@@ -48,6 +48,13 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
     describe (a window opening, a theme change, a toast in the stack, a
     visible cursor) notes nothing and pays the full rotate; a description
     dearer than 60% of the frame is declined for one.
+  A frame's quietness is the canvas's word (`P4SystemCanvas._gates_unchanged`):
+  the two native gate counters plus the surface's own CLEAR count, because a
+  `cls` is the one whole-surface write the gates cannot see (moy_ppa.fill on
+  the PPA, a direct moy_gfx.fill on the CPU) and the PLAY world's letterbox
+  is one — invisible, the bezel frame read as quiet, only the game rect
+  reached the scan buffers, and the two of them kept different Library
+  pixels behind a fullscreen game (owner, 2026-09-09).
   Ping-pong scan buffers make rect frames dangerous — the buffer a rect lands
   in was last shown two frames ago — so each buffer keeps a STALE list of the
   portrait rects it has missed and is brought current before a rect frame is
@@ -209,6 +216,17 @@ for the C6/audio pins, which agree with the BSP.
   moved every one of them, and the current figures live in **#220** — the
   compositor's `damage_stats()` / `async_stats()` over the dev channel are
   how they are read.
+- **Layer memory is owned, not collected.** A root-canvas layer (a window's
+  content buffer, the drag backdrop, a bar strip) lives in heap_caps PSRAM
+  outside the gc heap, and the WM / bar release it (`DeviceCanvas.release`)
+  when the window dies, a resize rebuilds it, or a strip is evicted. Until
+  2026-09-09 nothing did: every Library → CHANGE → home round leaked ~3.6MB
+  (15.9MB of PSRAM free at boot, 0.8MB after four rounds), after which every
+  later layer fell back onto the gc heap, where its pixels were scanned by
+  every collect — a collect had grown from ~80ms fresh to 430-620ms, and the
+  exit diag's largest-block probe (about twelve of those) made the PLAY tap
+  five seconds. `esp32.idf_heap_info` over the dev channel is how the PSRAM
+  free is read; it must not drift across rounds.
 - The console: 36 carts seeded on first boot, PPA registered, Lua runtime on,
   the desktop under `WindowedWM` at 1280×800 landscape; the first frame lands ~300ms
   after the desktop is built, and the desktop is built ~27s after reset on a

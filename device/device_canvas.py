@@ -2596,26 +2596,8 @@ class DeviceCanvas:
         # (see _LayerComp) so gc.collect() never marks it -- the GC-wall fix (#63): a layer
         # cart's live set stays small, keeping collect cheap and the heap unfragmented.
         #
-        # COMPACT FIRST (#54/#41): a scroll cart re-execs fresh on every entry (lay=None),
-        # so it re-allocates its ~384KB world each time. The previous run's layer is already
-        # unpinned (you exit through the launcher: its ns is dropped + the recorder's atlas/
-        # layer registry was reset) but not yet collected; under the web view's per-frame
-        # JSON/command churn the PSRAM gc heap fragments and a fresh contiguous 384KB
-        # eventually fails (MemoryError). Collecting right before the alloc reclaims the dead
-        # layer + transient strings so the region is contiguous again.
-        #
-        # BIG layers only. "Cart-start only, so the ~10ms collect is invisible" was
-        # wrong on two counts: the bar's strip cache also builds layers (1024x18) and
-        # rebuilds them on a canvas switch, i.e. twice per gesture, and on the P4 the
-        # collect is ~55ms, not 10 -- 72ms of an 86ms Settings frame at the press and
-        # release edges (measured 2026-07-26). Defragmenting PSRAM only earns its
-        # keep ahead of a cart-world-sized contiguous request, so small layers skip it.
-        if int(w) * int(h) >= _COMPACT_MIN_PX:
-            try:
-                import gc
-                gc.collect()
-            except Exception:  # noqa: BLE001 -- gc is always present; never block a layer alloc
-                pass
+        # The compact-first collect a big GC-heap layer needs lives in _LayerComp,
+        # on the one path that allocates from the gc heap.
         lay = self._make_layer(_LayerComp(int(w), int(h), self._gfx))
         lay._nocache = True            # #63: a layer's own map() rasters directly (no nesting)
         lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class
@@ -2646,6 +2628,16 @@ class DeviceCanvas:
                 lent = self._lent_layers = {}
             lent.setdefault(owner, []).append((comp._buf, comp._nbytes))
         return lay
+
+    def release(self):
+        """Free this LAYER's pixel buffer now (see _LayerComp.release): the
+        windowed WM's verb for a window that died or is being rebuilt, and for
+        the drag backdrop it re-mints. Never for a cart's layers -- those are
+        lent and go back to the pool through reclaim_layers. A root canvas
+        (no releasable compositor) ignores it."""
+        rel = getattr(self._comp, "release", None)
+        if rel is not None:
+            rel()
 
     def reclaim_layers(self, owner):
         """Return a dead program's pooled layer buffers to _LAYER_POOL for reuse
@@ -3027,6 +3019,9 @@ class SystemCanvas(DeviceCanvas):
         return
 
 
+_ORIGIN_HEAP, _ORIGIN_POOL, _ORIGIN_ALLOC, _ORIGIN_DMA = 0, 1, 2, 3
+
+
 class _LayerComp:
     """Minimal compositor stand-in so DeviceCanvas can back a scroll layer (#54): a
     fresh RGB565 buffer of the requested size sharing the parent's moy_gfx kernel. No
@@ -3057,10 +3052,16 @@ class _LayerComp:
         nbytes = w * h * 2
         buf = None
         pooled = False
+        # Where the buffer came from decides what release() does with it:
+        # a pool buffer goes back to the pool, an alloc() buffer is freed
+        # (the registry-backed allocator, #186), a malloc_dma one (older
+        # firmware: no free) and a gc-heap bytearray are simply dropped.
+        origin = _ORIGIN_HEAP
         free = _LAYER_POOL.get(nbytes)
         if free:
             buf = free.pop()          # a dead cart's buffer of the same dims -> reuse
             pooled = True
+            origin = _ORIGIN_POOL
         else:
             try:
                 import moy_alloc
@@ -3068,16 +3069,68 @@ class _LayerComp:
                     import lcd_bus as _mem      # lvgl build (T-Deck): caps live here
                 except ImportError:             # mainline build (P4 #58): moy_alloc
                     _mem = moy_alloc            # exports the same MEMORY_* constants
-                buf = moy_alloc.malloc_dma(nbytes, _mem.MEMORY_SPIRAM | _mem.MEMORY_DMA)
-                pooled = buf is not None    # heap_caps memory: pool it on reclaim (no free())
+                caps = _mem.MEMORY_SPIRAM | _mem.MEMORY_DMA
+                alloc = getattr(moy_alloc, "alloc", None)
+                if alloc is not None:
+                    buf = alloc(nbytes, caps)
+                    origin = _ORIGIN_ALLOC
+                else:
+                    buf = moy_alloc.malloc_dma(nbytes, caps)
+                    origin = _ORIGIN_DMA
+                pooled = buf is not None    # heap_caps memory: pool it on reclaim
             except Exception:  # noqa: BLE001 -- host / no DMA allocator -> gc-heap bytearray
                 buf = None
+                origin = _ORIGIN_HEAP
         if buf is None:
+            # COMPACT FIRST (#54/#41), for the gc-heap fallback ONLY: a scroll
+            # cart re-execs fresh on every entry and re-allocates its ~384KB
+            # world each time; the previous run's layer is unpinned but not yet
+            # collected, and under the web view's per-frame churn the gc heap
+            # fragments until a fresh contiguous 384KB fails. Collecting right
+            # before the alloc makes the region contiguous again. BIG layers
+            # only -- the bar's strip cache builds layers twice per gesture.
+            # A pooled / heap_caps buffer (every board) lives OUTSIDE the gc
+            # heap, so a collect buys it nothing: the collect used to run
+            # ahead of every big layer regardless and cost the Guition P4 a
+            # 430ms pause per window buffer, backdrop and retained frame
+            # (three of them on one CHANGE tap, 2026-09-09).
+            if w * h >= _COMPACT_MIN_PX:
+                try:
+                    import gc
+                    gc.collect()
+                except Exception:  # noqa: BLE001 -- never block a layer alloc
+                    pass
             buf = bytearray(nbytes)
         self._buf = buf
         self._nbytes = nbytes
         self.pooled = pooled
+        self._origin = origin
         self._gfx = gfx
+
+    def release(self):
+        """Give the buffer back NOW -- the windowed WM's word that the window
+        (or the drag backdrop) it backed is gone. Off-heap layer memory has
+        no collector: before this, every window open leaked its buffer from
+        heap_caps -- ~3.6MB per Library -> CHANGE -> home round on the
+        Guition P4, measured 2026-09-09, until the pool ran dry and every
+        later layer fell back onto the gc heap, where its pixels were scanned
+        by every collect (430ms a collect after an hour). A pool buffer goes
+        back to the pool; an alloc() one is freed and its view neutered (a
+        stale draw raises, never writes freed RAM); the rest is dropped.
+        Idempotent."""
+        buf = self._buf
+        if buf is None:
+            return
+        self._buf = None
+        origin = self._origin
+        if origin == _ORIGIN_POOL:
+            _LAYER_POOL.setdefault(self._nbytes, []).append(buf)
+        elif origin == _ORIGIN_ALLOC:
+            try:
+                import moy_alloc
+                moy_alloc.free(buf)
+            except Exception:  # noqa: BLE001 -- a refused free is a leak, not a crash
+                pass
 
     def size(self):
         return (self._w, self._h)

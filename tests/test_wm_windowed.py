@@ -1918,3 +1918,42 @@ def test_moving_cursor_leaves_no_trail_on_the_desk(tmp_path):
             if abs(bx - x) >= 50:                  # away from the live cursor
                 stale += sum(1 for a, c in zip(b, snap(bx)) if a != c)
     assert stale == 0, "stale cursor pixels remained on skipped desk frames"
+
+
+def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_world_flip(tmp_path):
+    """Window buffers are off-heap layers on a board and nothing collects
+    them: the WM releases one when its window dies, when a resize rebuilds
+    it, and when a relayout drops every window. The drag backdrop is kept
+    across a world flip (same root size) instead of being re-minted at 2MB
+    a round. Measured leak this closes: ~3.6MB of PSRAM per Library ->
+    CHANGE -> home round on the Guition P4 (2026-09-09)."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    comp = win.buf._comp
+    assert comp._buf is not None
+    # A resize rebuilds the buffer: the old one is released first.
+    ws.wm._resize_window(win, win.w - 40, win.h - 40)
+    assert comp._buf is None, "the pre-resize buffer was released"
+    comp2 = win.buf._comp
+    assert comp2 is not comp and comp2._buf is not None
+    # Closing the window releases the buffer.
+    ws.exit()
+    drv.frame(1 / 30)
+    assert ws.wm._wins == {}
+    assert comp2._buf is None
+    # The drag backdrop: minted once, invalidated (not dropped) by a world flip.
+    ws.open_settings()
+    drv.frame(1 / 30)
+    cache = ws.wm._ensure_backdrop()
+    assert ws.wm._backdrop is cache
+    comp3 = ws.wm._wins["settings"].buf._comp
+    ws._relayout()                                  # the world-flip hook
+    assert ws.wm._wins == {} and comp3._buf is None
+    assert ws.wm._backdrop is cache and not ws.wm._backdrop_valid
+    assert cache._comp._buf is not None
+    # A root that changed size re-mints it and releases the old one.
+    ws.wm._root_canvas.w -= 0                       # unchanged: the same layer
+    assert ws.wm._ensure_backdrop() is cache

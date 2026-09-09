@@ -28,10 +28,12 @@ The two-domain seam (#39) as it runs on both P4 boards:
 """
 
 try:
-    from device_canvas import DeviceCanvas, SystemCanvas, _LayerComp
+    from device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp,
+                               _ST_N_FILL, _ST_N_TEXT)
     from device_util import _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host package lane
-    from device.device_canvas import DeviceCanvas, SystemCanvas, _LayerComp
+    from device.device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp,
+                                      _ST_N_FILL, _ST_N_TEXT)
     from device.device_util import _ticks_ms, _ticks_diff
 
 
@@ -89,6 +91,25 @@ class P4SystemCanvas(SystemCanvas):
         nd = getattr(comp, "note_damage", None)
         if nd is not None:
             self.note_damage = nd
+        # The quiet-frame snapshot (sync_back / _gates_unchanged): the two
+        # native gate counters and this surface's clears, as three ints so a
+        # play frame builds no tuple. -1 = no frame yet, never "unchanged".
+        self._clears = 0
+        self._q_fill = -1
+        self._q_text = -1
+        self._q_clears = -1
+
+    def cls(self, c=0):
+        # Counted, because a clear is the one whole-surface write the native
+        # gates cannot see: on the PPA it is moy_ppa.fill, on the CPU a direct
+        # moy_gfx.fill -- neither is a gated verb. The PLAY world's letterbox
+        # is a cls (composite_game, twice per game open), and with it
+        # invisible the frame read as quiet, so only the game rect reached the
+        # scan buffers and the two of them kept different Library pixels in
+        # the bezel: the flicker behind a fullscreen game (owner, Guition P4,
+        # 2026-09-09).
+        self._clears += 1
+        SystemCanvas.cls(self, c)
 
     def set_crisp_scale(self, on):
         """Settings -> CRISP PIXELS (probed by the console's crisp-pixels setter): route
@@ -214,12 +235,19 @@ class P4SystemCanvas(SystemCanvas):
         # game and the (ungated) bar strip leaves them untouched -- measured
         # on the Guition P4, 34 frames, not one count moved.
         if getattr(self._comp, "rotated", False):
-            self._q_gate = self.gate_counts()[:2]
+            st = self._gate_state
+            if st is not None:
+                self._q_fill = st[_ST_N_FILL]
+                self._q_text = st[_ST_N_TEXT]
+            self._q_clears = self._clears
 
     def _gates_unchanged(self):
-        if self._gate_state is None:
+        st = self._gate_state
+        if st is None:
             return False              # no gates installed: never claim quiet
-        return self.gate_counts()[:2] == getattr(self, "_q_gate", None)
+        return (st[_ST_N_FILL] == self._q_fill
+                and st[_ST_N_TEXT] == self._q_text
+                and self._clears == self._q_clears)
 
     def _composite_paint(self, gc, ox, oy, scale, defer=False):
         """The composite into THIS canvas's buffer: PPA (crisp or bilinear)

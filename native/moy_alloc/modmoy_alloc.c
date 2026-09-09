@@ -85,6 +85,8 @@ static size_t moy_buf_bytes = 0;
 #endif
 
 // alloc(size, caps=SPIRAM) -> zeroed writable memoryview outside the gc heap.
+// Cache-line (64B) aligned like malloc_dma above, so a layer buffer from here
+// is a legal GDMA / PPA source or destination as well as a byte cache.
 static mp_obj_t moy_alloc_alloc(size_t n_args, const mp_obj_t *args) {
     mp_int_t size = mp_obj_get_int(args[0]);
     if (size <= 0) {
@@ -94,7 +96,7 @@ static mp_obj_t moy_alloc_alloc(size_t n_args, const mp_obj_t *args) {
     uint32_t caps = (n_args > 1)
         ? (uint32_t)mp_obj_get_int(args[1])
         : MALLOC_CAP_SPIRAM;
-    void *buf = heap_caps_calloc(1, (size_t)size, caps);
+    void *buf = heap_caps_aligned_calloc(64, 1, (size_t)size, caps);
     if (buf == NULL) {
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_alloc: out of memory"));
     }

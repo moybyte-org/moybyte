@@ -1926,7 +1926,12 @@ def test_scroll_layer_buffer_is_off_gc_heap():
     # #54 Stage-2 GDMA async window-copy (free on S3 -- all PSRAM is DMA-reachable).
     # The caps constants come from lcd_bus on the lvgl build and from moy_alloc's own
     # exports on the mainline P4 build (#58, no lcd_bus) -- the _mem alias covers both.
-    assert "moy_alloc.malloc_dma(nbytes, _mem.MEMORY_SPIRAM | _mem.MEMORY_DMA)" in layercomp
+    # The registry-backed alloc() (#186) where the firmware has it -- that is
+    # what lets the windowed WM free a dead window's buffer -- and malloc_dma
+    # on an older build; the same caps either way.
+    assert "caps = _mem.MEMORY_SPIRAM | _mem.MEMORY_DMA" in layercomp
+    assert "buf = alloc(nbytes, caps)" in layercomp
+    assert "buf = moy_alloc.malloc_dma(nbytes, caps)" in layercomp
     assert "import lcd_bus as _mem" in layercomp
     assert "_mem = moy_alloc" in layercomp
     assert "buf = bytearray(nbytes)" in layercomp   # host / no-allocator fallback

@@ -42,6 +42,16 @@ _BAR_Y = 1                 # icons sit 1px down in the 18px bar (1px top/bottom 
 # bytes (~36KB at 1024 wide), so this is a small, bounded PSRAM trade for not
 # rebuilding the strip on every switch.
 _BAR_STRIP_SLOTS = 2
+
+
+def _release_layer(lay):
+    """A strip is a root-canvas layer, off the gc heap on a board (nothing
+    collects it): an evicted or outgrown strip is given back here, or every
+    window the desk opens leaks its bar strip (~80KB a round on the Guition
+    P4, 2026-09-09). Probed: a recording tier's layer has no release."""
+    rel = getattr(lay, "release", None)
+    if rel is not None:
+        rel()
 _SYSMENU_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)                 # ≡ dropdown toggle (slot 0)
 _HOME_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)      # back to launcher
 _MENU_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # Make-it-mine / code
@@ -296,9 +306,10 @@ class BarLayer:
         if slot is None:
             if len(slots) >= _BAR_STRIP_SLOTS:
                 slot = slots.pop()                 # evict the least-recently-used
-                slot[0] = None                     # ...its layer belongs to a
-                slot[1] = None                     # canvas we are no longer drawing
-                slot[2] = None                     # into, so it is rebuilt below
+                _release_layer(slot[0])            # ...its layer belongs to a
+                slot[0] = None                     # canvas we are no longer drawing
+                slot[1] = None                     # into, so it is rebuilt below
+                slot[2] = None
             else:
                 slot = [None, None, None]          # [strip, key, canvas]
             slots.insert(0, slot)
@@ -329,8 +340,8 @@ class BarLayer:
             # to drawing straight onto cv. Reuse the buffer across re-renders when the size
             # is unchanged; allocate a fresh layer on first build / a resize / a canvas swap.
             if size_changed or canvas_changed:
-                # The expensive one: new_layer pre-collects on the device.
                 self.ws.note_cost("bar.strip.alloc")
+                _release_layer(strip)              # the old size's / canvas's
                 strip = cv.new_layer(cv.w, bar_h)
                 slot[0] = strip
                 slot[2] = cv

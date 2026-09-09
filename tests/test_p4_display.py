@@ -1212,3 +1212,126 @@ def test_a_refused_queued_submit_fences_and_retries_blocking():
         assert calls[:2] == [True, False], "queued, refused, then blocking"
         assert ppa.syncs == 1
         assert comp.async_stats()[5] == 1
+
+
+def test_a_clear_is_never_a_quiet_frame():
+    """The quiet-frame snapshot (sync_back -> _gates_unchanged) must see a
+    cls: it is the one whole-surface write the native gates cannot count --
+    moy_ppa.fill on the PPA, a direct moy_gfx.fill on the CPU -- and the
+    PLAY world's letterbox is one. Invisible, the bezel frame read as quiet,
+    only the game rect reached the scan buffers, and the two of them kept
+    different Library pixels in the bezel: the flicker behind a fullscreen
+    game (owner, Guition P4, 2026-09-09)."""
+    import importlib.util as ilu
+    from array import array
+    from runtime import host_canvas
+    from device.device_canvas import _ST_LEN, _ST_N_FILL, _ST_N_TEXT
+    host_canvas.install()
+    spec = ilu.spec_from_file_location("p4_canvas_under_test", DEVICE / "p4_canvas.py")
+    mod = ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    comp = host_canvas.HostCompositor(320, 200)
+    comp.rotated = True
+    cv = mod.P4SystemCanvas(comp, font_scale=1)
+    assert cv._ppa is None, "the host has no PPA: cls takes the CPU fill"
+    # The host kernel installs no gates; stand the state array in so the
+    # snapshot has counters to compare (the device's gates write these).
+    cv._gate_state = array("i", bytearray(4 * _ST_LEN))
+    assert not cv._gates_unchanged(), "no frame yet: never quiet"
+    cv.sync_back()
+    assert cv._gates_unchanged()
+    cv.cls(0)
+    assert not cv._gates_unchanged(), "a clear is a paint-buffer write"
+    cv.sync_back()
+    assert cv._gates_unchanged()
+    cv._gate_state[_ST_N_FILL] += 1                  # a gated rect
+    assert not cv._gates_unchanged()
+    cv.sync_back()
+    cv._gate_state[_ST_N_TEXT] += 1                  # a gated print
+    assert not cv._gates_unchanged()
+    cv.sync_back()
+    lay = cv.new_layer(64, 32)
+    lay.cls(3)                                       # a LAYER's clear is its own
+    assert cv._gates_unchanged()
+
+
+def test_a_layer_gives_its_off_heap_buffer_back_on_release():
+    """A layer's pixel buffer lives outside the gc heap on a board, so nothing
+    collects it: release() is the owner's word. Where the buffer came from
+    decides what that means -- an alloc() buffer is freed through the
+    registry (and the view neutered), a pool buffer goes back to the pool, a
+    gc-heap bytearray is simply dropped. Before this the windowed WM leaked
+    ~3.6MB of PSRAM per Library -> CHANGE -> home round on the Guition P4."""
+    import sys
+    import types
+    from device import device_canvas as dc
+
+    class FakeAlloc:
+        MEMORY_SPIRAM = 1
+        MEMORY_DMA = 2
+
+        def __init__(self):
+            self.allocs = []
+            self.frees = []
+
+        def alloc(self, n, caps=1):
+            buf = memoryview(bytearray(n))
+            self.allocs.append((n, caps))
+            return buf
+
+        def free(self, view):
+            self.frees.append(view)
+
+        def malloc_dma(self, n, caps=1):
+            raise AssertionError("alloc() is preferred when the firmware has it")
+
+    fake = FakeAlloc()
+    saved = sys.modules.get("moy_alloc")
+    saved_bus = sys.modules.get("lcd_bus")
+    sys.modules["moy_alloc"] = fake
+    sys.modules["lcd_bus"] = None                 # -> ImportError: caps from moy_alloc
+    pool = dc._LAYER_POOL
+    n = 64 * 32 * 2
+    pool.pop(n, None)
+    try:
+        comp = dc._LayerComp(64, 32, None)
+        assert fake.allocs == [(n, 3)], "SPIRAM|DMA, through the registry alloc"
+        assert comp.pooled and comp._origin == dc._ORIGIN_ALLOC
+        buf = comp._buf
+        comp.release()
+        assert fake.frees == [buf] and comp._buf is None
+        comp.release()                            # idempotent
+        assert len(fake.frees) == 1
+        # A pool buffer is returned to the pool, never freed.
+        pooled = memoryview(bytearray(n))
+        pool[n] = [pooled]
+        comp2 = dc._LayerComp(64, 32, None)
+        assert comp2._buf is pooled and comp2._origin == dc._ORIGIN_POOL
+        assert pool[n] == []
+        comp2.release()
+        assert pool[n] == [pooled] and len(fake.frees) == 1
+        pool.pop(n, None)
+        # The canvas-level verb reaches the comp; a root (host compositor) ignores it.
+        from runtime import host_canvas
+        host_canvas.install()
+        root = host_canvas.make_canvas(64, 32)
+        root.release()                            # no release on HostCompositor
+        lay = root.new_layer(64, 32)
+        assert lay._comp._origin == dc._ORIGIN_ALLOC
+        lay.release()
+        assert lay._comp._buf is None and len(fake.frees) == 2
+    finally:
+        pool.pop(n, None)
+        if saved is None:
+            sys.modules.pop("moy_alloc", None)
+        else:
+            sys.modules["moy_alloc"] = saved
+        if saved_bus is None:
+            sys.modules.pop("lcd_bus", None)
+        else:
+            sys.modules["lcd_bus"] = saved_bus
+    # No allocator at all (the host): a gc-heap bytearray, dropped on release.
+    comp3 = dc._LayerComp(64, 32, None)
+    assert comp3._origin == dc._ORIGIN_HEAP and not comp3.pooled
+    comp3.release()
+    assert comp3._buf is None

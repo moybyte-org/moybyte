@@ -647,11 +647,13 @@ class WindowedWM(FullscreenStackWM):
             ws._relayout()
             self._ctx_switching = False
         self._root_ctx = _LayoutCtx.capture(ws)
-        self._wins.clear()
+        self._drop_wins()
         self._order = []
         self._focus = None
         self.content_gen += 1
-        self._backdrop = None             # size may have changed: drop the drag cache
+        # The drag cache stays minted (a world flip does not change the root's
+        # size; _ensure_backdrop re-makes it if one ever does) -- re-minting
+        # it here cost a 2MB layer per PLAY/CHANGE round. Its pixels are stale.
         self._backdrop_valid = False
 
     def on_app_registered(self, app):
@@ -736,7 +738,7 @@ class WindowedWM(FullscreenStackWM):
             alive = set(keys)
             for g in list(self._wins):
                 if g not in alive:
-                    del self._wins[g]
+                    self._drop_win(self._wins.pop(g))
             for depth, (g, k) in enumerate(slots):
                 if g not in self._wins:
                     self._wins[g] = self._make_window(g, k, depth)
@@ -851,6 +853,7 @@ class WindowedWM(FullscreenStackWM):
         full = self._root_canvas
         cw = max(64, win.w - 2)
         ch = max(40, win.h - 2 - win.title_h)
+        self._drop_win(win)             # a resize's old buffer, freed first
         win.buf = full.new_layer(cw, ch)
         win.ctx = self._make_ctx(win.buf)
         win._buf_stale = True         # blank until a live render/_prewarm fills it
@@ -973,7 +976,7 @@ class WindowedWM(FullscreenStackWM):
             # fullscreen tier, for the whole stack (Library, fullscreen games,
             # play-world Settings/tools) -- not just the launcher root.
             if self._wins:
-                self._wins.clear()
+                self._drop_wins()
                 self._order = []
             FullscreenStackWM._rebuild(self, content, sig)
             return
@@ -1056,12 +1059,50 @@ class WindowedWM(FullscreenStackWM):
 
     # -- the drag backdrop cache (#58 drag perf) -------------------------------
 
+    # -- window buffer lifetime ------------------------------------------------
+    #
+    # A window's content buffer is a root-canvas layer, and on a board a layer
+    # lives OUTSIDE the gc heap (heap_caps PSRAM, device_canvas._LayerComp),
+    # where nothing collects it: the WM has to say when it is done. It did not,
+    # and every window open leaked its buffer -- ~3.6MB per Library -> CHANGE
+    # -> home round on the Guition P4 (window + re-minted backdrop + the
+    # strip cache's canvases), measured 2026-09-09: 15.9MB of PSRAM free at
+    # boot, 0.8MB after four rounds, after which every layer fell back onto
+    # the gc heap and a collect cost 430ms. `release` is probed, so a
+    # recording tier's layer (no release) and the host's are unaffected.
+
+    @staticmethod
+    def _release_layer(lay):
+        rel = getattr(lay, "release", None)
+        if rel is not None:
+            rel()
+
+    def _drop_win(self, win):
+        buf = win.buf
+        if buf is None:
+            return
+        win.buf = None
+        win.ctx = None
+        self._release_layer(buf)
+
+    def _drop_wins(self):
+        for win in self._wins.values():
+            self._drop_win(win)
+        self._wins.clear()
+
+    def _drop_backdrop(self):
+        cache = self._backdrop
+        self._backdrop = None
+        if cache is not None:
+            self._release_layer(cache)
+
     def _ensure_backdrop(self):
         """The full-screen off-screen cache buffer (lazily allocated, re-made if
         the root canvas size changed under it)."""
         sc = self._root_canvas
         cache = self._backdrop
         if cache is None or cache.w != sc.w or cache.h != sc.h:
+            self._drop_backdrop()
             cache = self._backdrop = sc.new_layer(sc.w, sc.h)
             self._backdrop_valid = False
         return cache
@@ -1092,7 +1133,7 @@ class WindowedWM(FullscreenStackWM):
             self._backdrop_valid = True
         except Exception:  # noqa: BLE001 -- a failed capture (OOM, or a
             self._backdrop_valid = False   # recording root with no pixels to
-            self._backdrop = None          # snapshot) forfeits the cache; the
+            self._drop_backdrop()          # snapshot) forfeits the cache; the
             # drag re-renders live. Mark the mechanism unsupported so the next
             # frames don't retry (#113: each retry allocated a fresh layer --
             # on the web root that leaked one RecordingLayer per drag frame).
