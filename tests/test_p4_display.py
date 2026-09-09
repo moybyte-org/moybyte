@@ -572,6 +572,18 @@ class RotatingPpa(FakePpa):
         self.waits.append(keep)
         return True
 
+    # The SRAM-bounce rotate: `bands` transactions per block (1 keeps every
+    # older count honest; a test sets more to check the op accounting), 0 for
+    # a full queue this once, -1 to say the pipeline is not to be had.
+    bands = 1
+
+    def rotate_bounce(self, dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h,
+                      angle, nb=False):
+        self.rotates.append((dst, dx, dy, src, sx, sy, w, h, angle))
+        self.nbs.append(nb)
+        self.wbs.append((dst, False))
+        return self.bands
+
 
 @contextlib.contextmanager
 def rotated(angle=90):
@@ -717,6 +729,7 @@ def test_a_frame_that_drew_anything_else_paints_and_rotates_whole():
 
 def test_crisp_mode_composites_into_the_paint_buffer_then_rotates_the_rect():
     with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
         step(comp)
         game(comp, direct=False)
         step(comp)
@@ -726,7 +739,7 @@ def test_crisp_mode_composites_into_the_paint_buffer_then_rotates_the_rect():
         assert painted == [1]
         assert ppa.direct == []
         assert ppa.rotates[-1][3] is src
-        assert ppa.rotates[-1][4:] == (100, 50, 640, 480, 90)
+        assert ppa.rotates[-1][4:] == (0, 50, 1280, 480, 90), "bounced: full rows"
         assert comp.overlap_stats()[0] == 1
 
 
@@ -818,6 +831,7 @@ def test_a_described_frame_rotates_its_rects_not_the_whole_buffer():
     """A drag frame: the WM notes the gesture union; the compositor rotates
     that rect (and the bar strip) from the paint buffer instead of 4MB."""
     with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
         comp.strip_h = 18
         step(comp)                                     # full -> fb1
         comp.note_damage(200, 100, 700, 500)
@@ -827,8 +841,9 @@ def test_a_described_frame_rotates_its_rects_not_the_whole_buffer():
         comp.flush()                                   # fb1: rect frame
         assert comp._pending == 1 and comp._keep == 2, "two ops may fly: the rect and the strip"
         rot = [r for r in ppa.rotates if r[0] is dsi.fb(1) and r[8] == 90]
-        # the sibling owed the first union: the rect GREW 10px to cover it
-        assert [r[4:8] for r in rot[-2:]] == [(200, 100, 710, 500), (0, 0, 1280, 18)]
+        # the sibling owed the first union: the rect GREW 10px to cover it.
+        # The strip (a plain rotate) goes first, the bounced block last.
+        assert [r[4:8] for r in rot[-2:]] == [(0, 0, 1280, 18), (0, 100, 1280, 500)]
         assert ppa.direct == []
         assert comp.damage_stats() == (2, 2, 0, 1)
         assert comp.overlap_stats()[0] == 1 and comp.overlap_stats()[2] == 2
@@ -838,6 +853,7 @@ def test_a_described_frame_with_a_game_paints_the_game_and_rotates_its_rect_too(
     """A drag beside a running game window: the game's composite reaches the
     paint buffer (never direct), and its rect is one of the frame's rects."""
     with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
         step(comp)
         game(comp)
         step(comp)
@@ -850,7 +866,9 @@ def test_a_described_frame_with_a_game_paints_the_game_and_rotates_its_rect_too(
         assert painted == [1], "noted damage means the game is not the only write"
         assert len(ppa.direct) == 1
         rects = [r[4:8] for r in ppa.rotates if r[0] is dsi.fb(0) and r[8] == 90]
-        assert rects[-2:] == [(100, 50, 640, 480), (900, 300, 300, 200)]
+        # the small damage rect is a plain rotate and goes first; the game
+        # rect (307K px) is bounced and goes last
+        assert rects[-2:] == [(900, 300, 300, 200), (0, 50, 1280, 480)]
 
 
 def test_damage_is_clipped_and_an_empty_rect_is_nothing():
@@ -878,7 +896,7 @@ def test_too_many_rects_take_their_bounding_box_and_a_covered_one_is_dropped():
         comp.note_damage(800, 100, 50, 50)             # a fourth distinct: bbox
         comp.flush()
         rects = [r[4:8] for r in ppa.rotates if r[8] == 90 and r[7] != 800]
-        assert rects == [(0, 0, 850, 650)]
+        assert rects == [(0, 0, 1280, 650)]      # bounced: full rows
         assert comp.damage_stats()[:3] == (2, 2, 0)
 
 
@@ -1021,6 +1039,7 @@ def test_a_drag_grows_the_union_over_the_stale_one_instead_of_copying_it():
     it almost entirely, so growing N+1's rect by a few px to cover N's beats
     a copy the size of the whole window."""
     with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
         step(comp)
         comp.note_damage(200, 100, 700, 500)
         step(comp)                                     # fb0: full
@@ -1032,8 +1051,9 @@ def test_a_drag_grows_the_union_over_the_stale_one_instead_of_copying_it():
         assert comp.damage_stats()[3] == 5
         # the last rotate is the grown rect: the union plus ONE frame's 6px
         # trail -- the growth never compounds, the sibling owes only real damage
+        # (the engine gets the grown rect's ROWS, full width -- the bounce)
         last = [r for r in ppa.rotates if r[8] == 90 and r[7] != 800][-1]
-        assert last[4:8] == (200 + 6 * 4, 100, 706, 500)
+        assert last[4:8] == (0, 100, 1280, 500)
         assert all(st is None or all(r[2:4] == (500, 700) for r in st) for st in comp._stale)
         assert comp.overlap_stats()[1] == 0
 
@@ -1080,6 +1100,7 @@ def test_a_frame_is_painted_into_the_other_buffer_while_the_last_one_flies():
 
 def test_the_deferred_window_stamp_is_the_frames_first_op_into_the_paint_buffer():
     with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
         comp.strip_h = 18
         step(comp)
         comp.note_damage(0, 0, 1, 1)
@@ -1093,7 +1114,8 @@ def test_the_deferred_window_stamp_is_the_frames_first_op_into_the_paint_buffer(
         assert ops[0][:3] == (paint, 300, 200) and ops[0][3] is WIN
         assert ops[0][4:] == (0, 0, 512, 480, 0), "a 1:1 copy, queued"
         assert ppa.nbs[n] is True
-        assert [o[4:8] for o in ops[1:]] == [(298, 198, 519, 487), (0, 0, 1280, 18)]
+        # the strip first (plain), the window rect last (bounced)
+        assert [o[4:8] for o in ops[1:]] == [(0, 0, 1280, 18), (0, 198, 1280, 487)]
         assert all(o[3] is paint for o in ops[1:]), "the rotates read the stamped buffer"
         assert comp._keep == 3 and comp._stamp_pending is None
         assert comp.async_stats()[4] == 1
@@ -1335,3 +1357,43 @@ def test_a_layer_gives_its_off_heap_buffer_back_on_release():
     assert comp3._origin == dc._ORIGIN_HEAP and not comp3.pooled
     comp3.release()
     assert comp3._buf is None
+
+
+def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
+    """A paint-buffer block of BOUNCE_MIN_PX or more goes through
+    moy_ppa.rotate_bounce, whose transaction count is what the present must
+    fence by; the bar strip stays a plain rotate. A bounce that has no bands
+    (0) is never asked again."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
+        comp.strip_h = 18
+        ppa.bands = 5
+        step(comp)                                  # full rotate: 5 bands
+        assert comp._keep == 5 and comp._bounced == 5
+        comp.note_damage(0, 0, 1, 1)
+        step(comp)                                  # the sibling's full
+        assert comp._bounced == 10
+        n = len(ppa.rotates)
+        comp.note_damage(10, 20, 400, 300)          # 120K px: bounced
+        step(comp)                                  # a damage frame
+        new = ppa.rotates[n:]
+        big = [r for r in new if r[6] * r[7] >= comp.BOUNCE_MIN_PX]
+        assert big, "the damage rect went through the bounce"
+        strip = [r for r in new if r[7] == comp.strip_h and r[6] == comp._w]
+        assert strip, "the strip is a plain rotate"
+        assert comp.async_stats()[6] == 15
+        # five bands plus the strip: the 1px stale rect was grown over, not copied
+        assert comp._keep == 5 + 1
+        ppa.bands = 0                                # the queue is full this once
+        n = len(ppa.rotates)
+        comp.note_damage(10, 20, 400, 300)
+        step(comp)
+        assert comp._bounce is not None and comp.async_stats()[5] == 1
+        assert len(ppa.rotates) > n, "rotated the plain way this frame"
+        ppa.bands = -1                               # never for this picture
+        comp.note_damage(10, 20, 400, 300)
+        step(comp)
+        assert comp._bounce is None
+        comp.note_damage(10, 20, 400, 300)
+        step(comp)
+        assert comp.async_stats()[6] == 15, "no bounce after a refusal"

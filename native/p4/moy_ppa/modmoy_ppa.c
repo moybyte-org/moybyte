@@ -16,6 +16,7 @@
 // SRM = Scale-Rotate-Mirror. blit_scale() is the integer-upscale composite that
 // mirrors moy_gfx.blit565_scale so run_ppa_smoke can A/B them on glass.
 
+#include <string.h>
 #include "py/obj.h"
 #include "py/runtime.h"
 
@@ -23,6 +24,12 @@
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_async_memcpy.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "freertos/idf_additions.h"
 
 // The ONE nearest-neighbour expand kernel (blit_crisp below). Staged sibling:
 // build.sh places the shared moy_gfx at ../.staged/moy_gfx, and this module's
@@ -45,10 +52,43 @@ static volatile uint32_t s_timeouts = 0;
 // A real op is microseconds; this is a bug fence, not a knob.
 #define PPA_FENCE_TIMEOUT_US 500000
 
+static SemaphoreHandle_t s_rb_ppa_sem = NULL;   // the bounce worker's wake-up
+// Every engine submit from this module takes this. The IDF driver guards its
+// queues with spinlocks but the submit -> engine-start handoff is not one
+// critical section; with the bounce worker and the console submitting to the
+// same client from two cores, transactions were lost -- never completed,
+// never recycled -- until the client's 24-element pool was empty and every
+// later submit was refused for the session (Guition P4, 2026-09-09).
+static SemaphoreHandle_t s_submit_lock = NULL;
+
+static esp_err_t ppa_submit_srm(ppa_srm_oper_config_t *op) {
+    if (s_submit_lock != NULL) {
+        xSemaphoreTake(s_submit_lock, portMAX_DELAY);
+    }
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, op);
+    if (s_submit_lock != NULL) {
+        xSemaphoreGive(s_submit_lock);
+    }
+    return err;
+}
+static volatile uint32_t s_rb_cb_flagged;
+
 static bool ppa_trans_done_cb(ppa_client_handle_t client,
                               ppa_event_data_t *edata, void *user_data) {
-    s_done++;
-    return false;   // no higher-priority task to wake
+    // Atomic: the bounce worker also retires a transaction it could not
+    // submit (see rb_worker), so this counter has two writers now.
+    __atomic_fetch_add(&s_done, 1, __ATOMIC_RELAXED);
+    BaseType_t hp = pdFALSE;
+    if (user_data != NULL) {
+        // A bounce band: the SRAM band it read is free again, and the worker
+        // may be blocked on exactly that.
+        *(volatile bool *)user_data = false;
+        s_rb_cb_flagged++;
+        if (s_rb_ppa_sem != NULL) {
+            xSemaphoreGiveFromISR(s_rb_ppa_sem, &hp);
+        }
+    }
+    return hp == pdTRUE;
 }
 
 // In-flight transactions. SIGNED difference on purpose: a completion landing
@@ -107,6 +147,9 @@ static mp_obj_t moy_ppa_init(void) {
         s_srm = NULL;
         return mp_const_false;
     }
+    if (s_submit_lock == NULL) {
+        s_submit_lock = xSemaphoreCreateMutex();
+    }
     ppa_event_callbacks_t cbs = { .on_trans_done = ppa_trans_done_cb };
     ppa_client_register_event_callbacks(s_srm, &cbs);
     // A separate FILL client (#155). Why a DMA fill is worth having when a DMA
@@ -130,9 +173,11 @@ static mp_obj_t moy_ppa_init(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_init_obj, moy_ppa_init);
 
 static void crisp_free_bands(void);
+static void rb_free_bands(void);
 
 static mp_obj_t moy_ppa_deinit(void) {
     crisp_free_bands();
+    rb_free_bands();
     if (s_srm != NULL) {
         ppa_unregister_client(s_srm);
         s_srm = NULL;
@@ -242,7 +287,7 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
     esp_cache_msync(out, out_len,
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     s_submitted++;
-    esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
+    esp_err_t err = ppa_submit_srm(&op);
     if (err != ESP_OK) {
         s_submitted--;   // no transaction queued -> no done callback will fire
         mp_raise_msg_varg(&mp_type_OSError,
@@ -358,7 +403,7 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
                         ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     }
     s_submitted++;
-    esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
+    esp_err_t err = ppa_submit_srm(&op);
     if (err != ESP_OK) {
         s_submitted--;
         mp_raise_msg_varg(&mp_type_OSError,
@@ -367,6 +412,465 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_obj, 13, 15, moy_ppa_rotate);
+
+// rotate_bounce(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle[, nb])
+//   rotate() with the SOURCE bounced through internal SRAM, off the CPU: a
+//   worker task on the other core has the AXI GDMA copy the block's rows a
+//   band at a time into one of two SRAM bands while the engine rotates the
+//   previous band from the other. Returns the number of engine transactions
+//   the job will submit (the caller's op count for its fences -- they are
+//   counted as submitted HERE, so wait()/done()/sync() see the job's work
+//   before the worker has started it), 0 when the queue is full this once,
+//   or -1 when the pipeline is not to be had (the caller uses rotate()).
+//
+//   Why: the SRM engine reads PSRAM at ~40MB/s and internal SRAM at ~4x
+//   that, while it writes PSRAM at ~140MB/s and the AXI GDMA reads PSRAM
+//   into SRAM at ~130MB/s -- measured on the Guition P4 (2026-09-09): a
+//   1092x559 block rotated from the paint buffer took 29ms of engine time,
+//   and the rotated compositor's damage frames (a drag, a scroll, a
+//   keystroke) were bound by it. The first cut copied the bands with the
+//   CPU inside the call and made the frame SLOWER (a scroll 18 -> 29ms): the
+//   engine's time used to overlap the next frame's draw, and a synchronous
+//   copy took that overlap away. So the copy is DMA and the driver is a
+//   task; the calling frame pays one cache writeback of the block's rows
+//   and an enqueue.
+//
+//   The copy takes FULL ROWS of the source (the engine then reads its block
+//   at an x offset inside the band): a per-row DMA transfer costs ~80us of
+//   setup against ~15us of transfer, so rows are moved as one contiguous
+//   span. A job is fenced behind every transaction submitted before it
+//   (the drag stamp writes the very rows it reads), the source is written
+//   back from the CPU cache at enqueue, and `dst` is a PPA-owned buffer
+//   (the scan buffers): no destination writeback, exactly rotate()'s
+//   wb=False. Two bands of RB_BAND_BYTES of internal SRAM, allocated on
+//   first use and released with the crisp bands; a refusal latches.
+#define RB_BAND_BYTES (40 * 1024)
+#define RB_QUEUE_LEN 8
+#define RB_TASK_PRIO 10
+#define RB_TASK_CORE 1
+
+typedef struct {
+    uint8_t *dst;
+    int32_t dw, dh, dx, dy;
+    const uint8_t *src;
+    int32_t sw, sx, sy, w, h;
+    int32_t angle;
+    int32_t band_rows;
+    int32_t nbands;
+    uint32_t fence;      // s_submitted before this job: what must land first
+} rb_job_t;
+
+static uint8_t *s_rb[2] = { NULL, NULL };
+static volatile bool s_rb_busy[2] = { false, false };   // a band still feeding a rotate
+static bool s_rb_failed = false;
+static QueueHandle_t s_rb_q = NULL;
+static SemaphoreHandle_t s_rb_dma_sem = NULL;
+static TaskHandle_t s_rb_task = NULL;
+static volatile uint32_t s_rb_pending = 0;               // jobs queued or running
+static volatile uint32_t s_rb_fallbacks = 0;             // bands the CPU copied
+// The pipeline's own meters: where a wait gave up, and how many completions
+// carried a band flag. A pipeline that KEEPS stalling disables itself
+// (rotate_bounce answers -1 while s_rb_stalls exceeds RB_MAX_STALLS) rather
+// than turning the desk into a slideshow of fence timeouts; a job that runs
+// clean pays a stall back, so the handful a first boot's flash writes cost
+// (a non-IRAM completion ISR waits out a flash op) does not retire it for
+// the session -- measured 5 at boot on the Guition P4, 2026-09-09, and none
+// after.
+static volatile uint32_t s_rb_t_fence = 0, s_rb_t_flag = 0, s_rb_t_dma = 0, s_rb_t_submit = 0;
+static volatile uint32_t s_rb_stalls = 0;
+#define RB_MAX_STALLS 4
+static async_memcpy_handle_t s_mcp = NULL;
+static bool s_mcp_dead = false;
+
+static bool rb_dma_done_cb(async_memcpy_handle_t h, async_memcpy_event_t *e, void *arg) {
+    (void)h; (void)e; (void)arg;
+    BaseType_t hp = pdFALSE;
+    xSemaphoreGiveFromISR(s_rb_dma_sem, &hp);
+    return hp == pdTRUE;
+}
+
+static bool rb_dma_install(void) {
+    if (s_mcp != NULL) {
+        return true;
+    }
+    if (s_mcp_dead) {
+        return false;
+    }
+    // The AXI engine: the AHB one the generic installer picks cannot reach
+    // PSRAM on this chip.
+    async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
+    cfg.backlog = 4;
+    cfg.dma_burst_size = 64;
+    if (esp_async_memcpy_install_gdma_axi(&cfg, &s_mcp) != ESP_OK) {
+        s_mcp = NULL;
+        s_mcp_dead = true;
+        return false;
+    }
+    return true;
+}
+
+static void rb_free_bands(void) {
+    // A queued job would read a freed band: drain the worker first.
+    int64_t deadline = esp_timer_get_time() + PPA_FENCE_TIMEOUT_US;
+    while (s_rb_pending > 0 && esp_timer_get_time() < deadline) {
+        vTaskDelay(1);
+    }
+    ppa_wait(0);
+    for (int i = 0; i < 2; i++) {
+        if (s_rb[i] != NULL) {
+            heap_caps_free(s_rb[i]);
+            s_rb[i] = NULL;
+        }
+        s_rb_busy[i] = false;
+    }
+    s_rb_failed = false;
+}
+
+static void rb_worker(void *arg);
+
+static bool rb_setup(void) {
+    if (s_rb_failed) {
+        return false;
+    }
+    for (int i = 0; i < 2; i++) {
+        if (s_rb[i] == NULL) {
+            s_rb[i] = heap_caps_aligned_alloc(
+                64, RB_BAND_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+            if (s_rb[i] == NULL) {
+                rb_free_bands();
+                s_rb_failed = true;                   // latch: never re-probe per frame
+                return false;
+            }
+        }
+    }
+    if (s_rb_q == NULL) {
+        s_rb_q = xQueueCreate(RB_QUEUE_LEN, sizeof(rb_job_t));
+        s_rb_dma_sem = xSemaphoreCreateBinary();
+        // BINARY, not counting: a completion the worker was not waiting for
+        // must not bank a wake-up, or a backlog of them makes every later
+        // wait return at once -- the first cut counted tries, saw twenty
+        // instant returns as a timeout, ran ahead until the engine queue was
+        // full and then slept a 10ms tick per refused submit (2026-09-09).
+        s_rb_ppa_sem = xSemaphoreCreateBinary();
+        if (s_rb_q == NULL || s_rb_dma_sem == NULL || s_rb_ppa_sem == NULL) {
+            s_rb_failed = true;
+            return false;
+        }
+    }
+    if (s_rb_task == NULL) {
+        if (xTaskCreatePinnedToCore(rb_worker, "moy_rb", 4096, NULL, RB_TASK_PRIO,
+                                    &s_rb_task, RB_TASK_CORE) != pdPASS) {
+            s_rb_task = NULL;
+            s_rb_failed = true;
+            return false;
+        }
+    }
+    rb_dma_install();                                 // absent -> CPU copies, still off the frame
+    return true;
+}
+
+// Wait for the ISR-cleared flag / the fence count, waking on completions,
+// by DEADLINE: a wake-up that arrives for another band just re-checks.
+#define RB_WAIT_US 500000
+
+static bool rb_wait_flag(volatile bool *flag) {
+    int64_t deadline = esp_timer_get_time() + RB_WAIT_US;
+    while (*flag) {
+        if (esp_timer_get_time() > deadline) {
+            return false;                             // a completion that never came
+        }
+        xSemaphoreTake(s_rb_ppa_sem, pdMS_TO_TICKS(5));
+    }
+    return true;
+}
+
+static bool rb_wait_fence(uint32_t fence) {
+    int64_t deadline = esp_timer_get_time() + RB_WAIT_US;
+    while ((int32_t)(s_done - fence) < 0) {
+        if (esp_timer_get_time() > deadline) {
+            return false;
+        }
+        xSemaphoreTake(s_rb_ppa_sem, pdMS_TO_TICKS(5));
+    }
+    return true;
+}
+
+static void rb_worker(void *arg) {
+    (void)arg;
+    rb_job_t job;
+    for (;;) {
+        if (xQueueReceive(s_rb_q, &job, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        uint32_t stalls_before = s_rb_stalls;
+        // Everything submitted before this job lands first: the drag stamp
+        // writes the paint-buffer rows this job is about to read.
+        if (!rb_wait_fence(job.fence)) {
+            s_timeouts++;
+            s_rb_t_fence++;
+            s_rb_stalls++;
+        }
+        size_t sstride = (size_t)job.sw * 2u;
+        ppa_srm_rotation_angle_t rot =
+            job.angle == 90 ? PPA_SRM_ROTATION_ANGLE_90
+            : job.angle == 180 ? PPA_SRM_ROTATION_ANGLE_180
+            : job.angle == 270 ? PPA_SRM_ROTATION_ANGLE_270 : PPA_SRM_ROTATION_ANGLE_0;
+        for (int32_t i = 0, y0 = 0; y0 < job.h; i++, y0 += job.band_rows) {
+            int32_t bh = job.h - y0 < job.band_rows ? job.h - y0 : job.band_rows;
+            if (bh < job.band_rows && job.h >= job.band_rows) {
+                // NEVER A SLIVER: the last band overlaps the previous one so
+                // it is a whole band too (the same rows rotated twice are
+                // the same pixels). A 7-row tail -- a 7px-wide rotated
+                // output block -- never completed in the engine: the 487-row
+                // Settings window wedged every transaction behind it, the
+                // same (1 fence, 23 flag, 9 submit) timeouts on every build,
+                // while 800-, 559- and 201-row blocks ran clean (2026-09-09).
+                y0 = job.h - job.band_rows;
+                bh = job.band_rows;
+            }
+            int k = i & 1;
+            uint8_t *band = s_rb[k];
+            // The rotate that last read this band must be done with it.
+            if (!rb_wait_flag(&s_rb_busy[k])) {
+                s_rb_busy[k] = false;
+                s_timeouts++;
+                s_rb_t_flag++;
+                s_rb_stalls++;
+            }
+            const uint8_t *from = job.src + (size_t)(job.sy + y0) * sstride;
+            size_t n = (size_t)bh * sstride;
+            bool copied = false;
+            if (s_mcp != NULL
+                    && esp_async_memcpy(s_mcp, band, (void *)from, n,
+                                        rb_dma_done_cb, NULL) == ESP_OK) {
+                copied = xSemaphoreTake(s_rb_dma_sem, pdMS_TO_TICKS(100)) == pdTRUE;
+                if (!copied) {
+                    s_timeouts++;
+                    s_rb_t_dma++;
+                    s_rb_stalls++;
+                }
+            }
+            if (!copied) {
+                // This core's cache may hold the rows from an earlier job.
+                esp_cache_msync((void *)from, n,
+                                ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+                memcpy(band, from, n);
+                s_rb_fallbacks++;
+            }
+            // Where this band's rotated image lands inside the rotated block:
+            // the engine turns counter-clockwise, so for 90 the block's top
+            // row becomes its LEFT column (source rows walk right), for 270
+            // its RIGHT column (rows walk left), for 180 the rows reverse.
+            int32_t bx, by, bhh;
+            switch (job.angle) {
+                case 90:  bx = job.dx + y0;                    by = job.dy;                        bhh = job.w; break;
+                case 270: bx = job.dx + (job.h - y0 - bh);     by = job.dy;                        bhh = job.w; break;
+                case 180: bx = job.dx;                         by = job.dy + (job.h - y0 - bh);    bhh = bh;    break;
+                default:  bx = job.dx;                         by = job.dy + y0;                   bhh = bh;    break;
+            }
+            uint8_t *rows = job.dst + (size_t)by * (size_t)job.dw * 2u;
+            size_t rows_len = (size_t)bhh * (size_t)job.dw * 2u;
+            s_rb_busy[k] = true;
+            ppa_srm_oper_config_t op = {
+                .in = {
+                    .buffer = band,
+                    .pic_w = (uint32_t)job.sw,
+                    .pic_h = (uint32_t)bh,
+                    .block_w = (uint32_t)job.w,
+                    .block_h = (uint32_t)bh,
+                    .block_offset_x = (uint32_t)job.sx,
+                    .block_offset_y = 0,
+                    .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+                },
+                .out = {
+                    .buffer = rows,
+                    .buffer_size = (uint32_t)rows_len,
+                    .pic_w = (uint32_t)job.dw,
+                    .pic_h = (uint32_t)bhh,
+                    .block_offset_x = (uint32_t)bx,
+                    .block_offset_y = 0,
+                    .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+                },
+                .rotation_angle = rot,
+                .scale_x = 1.0f,
+                .scale_y = 1.0f,
+                .mirror_x = false,
+                .mirror_y = false,
+                .rgb_swap = false,
+                .byte_swap = false,
+                .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
+                .mode = PPA_TRANS_MODE_NON_BLOCKING,
+                .user_data = (void *)&s_rb_busy[k],
+            };
+            esp_err_t err = ppa_submit_srm(&op);
+            if (err != ESP_OK) {
+                // A full engine queue drains at completion rate: wait for one.
+                int64_t deadline = esp_timer_get_time() + RB_WAIT_US;
+                while (err != ESP_OK && esp_timer_get_time() < deadline) {
+                    xSemaphoreTake(s_rb_ppa_sem, pdMS_TO_TICKS(5));
+                    err = ppa_submit_srm(&op);
+                }
+            }
+            if (err != ESP_OK) {
+                // Counted as submitted at enqueue: retire it so no fence
+                // waits on a transaction that never existed.
+                s_rb_busy[k] = false;
+                __atomic_fetch_add(&s_done, 1, __ATOMIC_RELAXED);
+                s_timeouts++;
+                s_rb_t_submit++;
+            }
+        }
+        if (s_rb_stalls > 0 && s_rb_stalls == stalls_before) {
+            s_rb_stalls--;                            // a clean job pays one back
+        }
+        __atomic_fetch_sub(&s_rb_pending, 1, __ATOMIC_RELAXED);
+    }
+}
+
+static mp_obj_t moy_ppa_rotate_bounce(size_t n_args, const mp_obj_t *args) {
+    if (s_srm == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
+    }
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_int_t dw = mp_obj_get_int(args[1]);
+    mp_int_t dh = mp_obj_get_int(args[2]);
+    mp_int_t dx = mp_obj_get_int(args[3]);
+    mp_int_t dy = mp_obj_get_int(args[4]);
+    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
+    mp_int_t sw = mp_obj_get_int(args[6]);
+    mp_int_t sh = mp_obj_get_int(args[7]);
+    mp_int_t sx = mp_obj_get_int(args[8]);
+    mp_int_t sy = mp_obj_get_int(args[9]);
+    mp_int_t w = mp_obj_get_int(args[10]);
+    mp_int_t h = mp_obj_get_int(args[11]);
+    mp_int_t angle = mp_obj_get_int(args[12]);
+    bool nb = n_args > 13 && mp_obj_is_true(args[13]);
+    if (angle != 0 && angle != 90 && angle != 180 && angle != 270) {
+        mp_raise_ValueError(MP_ERROR_TEXT("angle 0/90/180/270"));
+    }
+    if (w <= 0 || h <= 0 || sx < 0 || sy < 0 || sx + w > sw || sy + h > sh
+            || dx < 0 || dy < 0 || (mp_int_t)src.len < sw * sh * 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rotate block"));
+    }
+    bool turned = (angle == 90 || angle == 270);
+    mp_int_t ow = turned ? h : w;
+    mp_int_t oh = turned ? w : h;
+    if (dx + ow > dw || dy + oh > dh || (mp_int_t)dst.len < dw * dh * 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rotate dst block"));
+    }
+    // A band is whole source rows, DMA-aligned: the row must fit a band and
+    // start on a cache line.
+    // -1: this picture never bounces (the caller stops asking); 0: not this
+    // time (the queue is full), rotate() it and ask again next frame.
+    mp_int_t band_rows = (mp_int_t)RB_BAND_BYTES / (sw * 2);
+    if (band_rows < 1 || ((uintptr_t)src.buf & 63u) != 0 || ((sw * 2) & 63) != 0
+            || !rb_setup()) {
+        return MP_OBJ_NEW_SMALL_INT(-1);
+    }
+    if (h < band_rows) {
+        return MP_OBJ_NEW_SMALL_INT(0);               // a sliver: rotate() it
+    }
+    if (s_rb_stalls > RB_MAX_STALLS) {
+        return MP_OBJ_NEW_SMALL_INT(-1);              // a stalled pipeline retires itself
+    }
+    if (s_rb_pending >= RB_QUEUE_LEN) {
+        return MP_OBJ_NEW_SMALL_INT(0);
+    }
+    mp_int_t nbands = (h + band_rows - 1) / band_rows;
+    // The CPU's paints of these rows reach memory before the DMA reads them.
+    esp_cache_msync((uint8_t *)src.buf + (size_t)sy * (size_t)sw * 2u,
+                    (size_t)h * (size_t)sw * 2u,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    rb_job_t job = {
+        .dst = (uint8_t *)dst.buf, .dw = (int32_t)dw, .dh = (int32_t)dh,
+        .dx = (int32_t)dx, .dy = (int32_t)dy,
+        .src = (const uint8_t *)src.buf, .sw = (int32_t)sw,
+        .sx = (int32_t)sx, .sy = (int32_t)sy, .w = (int32_t)w, .h = (int32_t)h,
+        .angle = (int32_t)angle, .band_rows = (int32_t)band_rows,
+        .nbands = (int32_t)nbands,
+        .fence = s_submitted,
+    };
+    __atomic_fetch_add(&s_rb_pending, 1, __ATOMIC_RELAXED);
+    s_submitted += (uint32_t)nbands;                  // planned: the fences see them now
+    if (xQueueSend(s_rb_q, &job, 0) != pdTRUE) {
+        s_submitted -= (uint32_t)nbands;
+        __atomic_fetch_sub(&s_rb_pending, 1, __ATOMIC_RELAXED);
+        return MP_OBJ_NEW_SMALL_INT(0);
+    }
+    if (!nb) {
+        ppa_wait(0);
+    }
+    return MP_OBJ_NEW_SMALL_INT(nbands);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_bounce_obj, 13, 14,
+                                           moy_ppa_rotate_bounce);
+
+// bounce_stats() -> (pending jobs, CPU-copied bands, fence timeouts, band-flag
+//   timeouts, DMA timeouts, submit failures, flagged completions, busy0, busy1):
+//   the pipeline's meters.
+static mp_obj_t moy_ppa_bounce_stats(void) {
+    mp_obj_t t[9] = {
+        mp_obj_new_int_from_uint(s_rb_pending),
+        mp_obj_new_int_from_uint(s_rb_fallbacks),
+        mp_obj_new_int_from_uint(s_rb_t_fence),
+        mp_obj_new_int_from_uint(s_rb_t_flag),
+        mp_obj_new_int_from_uint(s_rb_t_dma),
+        mp_obj_new_int_from_uint(s_rb_t_submit),
+        mp_obj_new_int_from_uint(s_rb_cb_flagged),
+        mp_obj_new_bool(s_rb_busy[0]),
+        mp_obj_new_bool(s_rb_busy[1]),
+    };
+    return mp_obj_new_tuple(9, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_bounce_stats_obj, moy_ppa_bounce_stats);
+
+static volatile uint32_t s_mcp_done = 0;
+
+static bool rb_dma_diag_cb(async_memcpy_handle_t h, async_memcpy_event_t *e, void *arg) {
+    (void)h; (void)e; (void)arg;
+    s_mcp_done++;
+    return false;
+}
+
+// dma_copy(dst, dst_off, src, src_off, nbytes) -> microseconds the copy took
+//   (blocking), -1 when the engine is unavailable, -2 when it refused the
+//   buffers (alignment: PSRAM ends want cache-line aligned address and size).
+//   A measurement verb for the bounce pipeline's copy engine.
+static mp_obj_t moy_ppa_dma_copy(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_int_t doff = mp_obj_get_int(args[1]);
+    mp_get_buffer_raise(args[2], &src, MP_BUFFER_READ);
+    mp_int_t soff = mp_obj_get_int(args[3]);
+    mp_int_t n = mp_obj_get_int(args[4]);
+    if (n <= 0 || doff < 0 || soff < 0 || doff + n > (mp_int_t)dst.len
+            || soff + n > (mp_int_t)src.len) {
+        mp_raise_ValueError(MP_ERROR_TEXT("dma_copy span"));
+    }
+    if (!rb_dma_install()) {
+        return MP_OBJ_NEW_SMALL_INT(-1);
+    }
+    uint8_t *d = (uint8_t *)dst.buf + doff;
+    uint8_t *sp = (uint8_t *)src.buf + soff;
+    esp_cache_msync(sp, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    uint32_t want = s_mcp_done + 1;
+    int64_t t0 = esp_timer_get_time();
+    esp_err_t err = esp_async_memcpy(s_mcp, d, sp, (size_t)n, rb_dma_diag_cb, NULL);
+    if (err != ESP_OK) {
+        return MP_OBJ_NEW_SMALL_INT(-2);
+    }
+    int64_t deadline = t0 + PPA_FENCE_TIMEOUT_US;
+    while ((int32_t)(s_mcp_done - want) < 0 && esp_timer_get_time() < deadline) {
+    }
+    int64_t t1 = esp_timer_get_time();
+    if ((int32_t)(s_mcp_done - want) < 0) {
+        return MP_OBJ_NEW_SMALL_INT(-3);
+    }
+    return mp_obj_new_int((mp_int_t)(t1 - t0));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_dma_copy_obj, 5, 5, moy_ppa_dma_copy);
 
 // rotate_scale(dst, dw, dh, dx, dy, src, sw, sh, scale, angle[, nb[, wb]])
 //   The whole sw x sh RGB565 source, integer-upscaled by `scale` AND rotated
@@ -448,7 +952,7 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
                         ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     }
     s_submitted++;
-    esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
+    esp_err_t err = ppa_submit_srm(&op);
     if (err != ESP_OK) {
         s_submitted--;
         mp_raise_msg_varg(&mp_type_OSError,
@@ -671,7 +1175,7 @@ static mp_obj_t moy_ppa_blit_crisp(size_t n_args, const mp_obj_t *args) {
                         ESP_CACHE_MSYNC_FLAG_DIR_C2M
                         | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
         s_submitted++;
-        if (ppa_do_scale_rotate_mirror(s_srm, &op) != ESP_OK) {
+        if (ppa_submit_srm(&op) != ESP_OK) {
             s_submitted--;
             ppa_wait(0);                        // fence what already flew
             return mp_const_false;              // caller repaints via the CPU
@@ -767,6 +1271,9 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_blit_crisp), MP_ROM_PTR(&moy_ppa_blit_crisp_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate), MP_ROM_PTR(&moy_ppa_rotate_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate_scale), MP_ROM_PTR(&moy_ppa_rotate_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rotate_bounce), MP_ROM_PTR(&moy_ppa_rotate_bounce_obj) },
+    { MP_ROM_QSTR(MP_QSTR_dma_copy), MP_ROM_PTR(&moy_ppa_dma_copy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bounce_stats), MP_ROM_PTR(&moy_ppa_bounce_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_crisp_release), MP_ROM_PTR(&moy_ppa_crisp_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&moy_ppa_wait_obj) },

@@ -473,6 +473,9 @@ class RotatedCompositor:
         # The async quiet frame: a moy_ppa that can fence a queue tail
         # (`wait`) runs it; an older one keeps every rotate blocking.
         self._async = hasattr(moy_ppa, "wait")
+        # The SRAM-bounce rotate (see _rotate); None once the bands failed.
+        self._bounce = getattr(moy_ppa, "rotate_bounce", None)
+        self._bounced = 0             # bounce transactions submitted
         self._scratch = None          # the game canvas's copy the rotate reads
         self._scratch_n = 0
         self._pending = None          # the scan buffer whose show is deferred
@@ -634,12 +637,51 @@ class RotatedCompositor:
             self._refused += 1
             self._ppa.rotate_scale(*(args + (False, wb)))
 
+    # A paint-buffer block of at least this many pixels is rotated through the
+    # SRAM bounce (moy_ppa.rotate_bounce -- the AXI GDMA copies its rows into
+    # SRAM bands off the CPU and the engine rotates from there): the engine
+    # reads PSRAM at ~40MB/s and internal SRAM at ~4x that. The threshold is
+    # where a plain rotate stops hiding behind the next frame's draw: below
+    # it the engine's read finishes inside the ~18ms the desk spends drawing
+    # anyway, and the bounce -- full rows, a cache writeback of them, the
+    # bands -- only adds. Measured on the Guition P4 (2026-09-09): a 512x480
+    # Settings window scroll 18ms a frame plain, 25 bounced; the 1120x720
+    # picker 44ms plain, 21 bounced; the full frame 47 -> 25.
+    BOUNCE_MIN_PX = 384 * 1024
+
     def _rotate(self, fb, paint, x, y, w, h, nb=False):
+        """Rotate the paint buffer's landscape block onto scan buffer `fb`.
+        Returns the number of engine transactions it submitted (the frame's
+        op count is what the present fences by)."""
         # Destination is always a scan buffer -> no writeback.
         px, py, pw, ph = rotate_rect(x, y, w, h, self.angle, self._w, self._h)
+        rb = self._bounce
+        if rb is not None and w * h >= self.BOUNCE_MIN_PX:
+            # FULL ROWS, whatever the block's width: the engine loses
+            # transactions on a bounced block narrower than its band (the
+            # desk scroll wedged the driver within ten frames, while full
+            # frames ran clean for thousands of bands, 2026-09-09), and the
+            # rows OUTSIDE the block are current too -- the WM repaints every
+            # change into both paint buffers before partial frames resume,
+            # which is what lets a full rotate read this buffer at all. The
+            # sibling's debt stays the described rect (`changed`); the extra
+            # columns it already holds.
+            fx, fy, fw, fh = rotate_rect(0, y, self._w, h, self.angle,
+                                         self._w, self._h)
+            # n bands submitted; 0 = the queue is full this once (rotate it
+            # plainly, ask again next frame); -1 = never for this picture.
+            n = rb(fb, self._pw, self._ph, fx, fy, paint, self._w, self._h,
+                   0, y, self._w, h, self.angle, nb)
+            if n > 0:
+                self._bounced += n
+                return n
+            if n < 0:
+                self._bounce = None
+            else:
+                self._refused += 1
         self._rot(nb, False, fb, self._pw, self._ph, px, py,
                   paint, self._w, self._h, x, y, w, h, self.angle)
-        return (px, py, pw, ph)
+        return 1
 
     def _scratch_for(self, n):
         if self._scratch is None or self._scratch_n < n:
@@ -733,8 +775,7 @@ class RotatedCompositor:
         if changed is None or stale is None or len(stale) > self.STALE_LIMIT:
             if game is not None and not painted:
                 paint()                       # a full rotate reads the paint buffer
-            self._rotate(fb, paint_buf, 0, 0, self._w, self._h, nb)
-            ops += 1
+            ops += self._rotate(fb, paint_buf, 0, 0, self._w, self._h, nb)
             self._full_n += 1
             self._full_us += _ticks_diff(_ticks_us(), t0)
             # `changed` stays what the FRAME changed: a full rotate made THIS
@@ -777,8 +818,7 @@ class RotatedCompositor:
                 # The strip and the copies go FIRST: wait(keep=1) at the
                 # present then covers everything but the scale+rotate.
                 for (x, y, w, h) in rects[1:]:
-                    self._rotate(fb, paint_buf, x, y, w, h, nb)
-                    ops += 1
+                    ops += self._rotate(fb, paint_buf, x, y, w, h, nb)
                 px, py, _pw, _ph = changed[0]
                 if nb:
                     n = sw * sh * 2
@@ -794,9 +834,24 @@ class RotatedCompositor:
             else:
                 if game is not None and not painted:
                     paint()                   # crisp quiet: composite, then rotate
+                # The plain rotates (the strip, small rects) go FIRST and the
+                # bounced blocks LAST: the bounce is a worker on the other
+                # core submitting bands as it copies them, and the engine
+                # loses transactions when the console submits alongside it
+                # (the desk scroll wedged the driver within ten frames,
+                # 2026-09-09). After this loop the console submits nothing
+                # until the next flush, which fences everything first.
+                big = None
                 for (x, y, w, h) in rects:
-                    self._rotate(fb, paint_buf, x, y, w, h, nb)
-                    ops += 1
+                    if self._bounce is not None and w * h >= self.BOUNCE_MIN_PX:
+                        if big is None:
+                            big = []
+                        big.append((x, y, w, h))
+                        continue
+                    ops += self._rotate(fb, paint_buf, x, y, w, h, nb)
+                if big is not None:
+                    for (x, y, w, h) in big:
+                        ops += self._rotate(fb, paint_buf, x, y, w, h, nb)
             self._rect_n += 1
             self._rect_us += _ticks_diff(_ticks_us(), t0)
         self._stale[back] = []
@@ -843,9 +898,10 @@ class RotatedCompositor:
 
     def async_stats(self):
         """(deferred frames, shown at a present, shown by the next flush,
-        present fence us, drag stamps the PPA performed)."""
+        present fence us, drag stamps the PPA performed, refused submits,
+        bounce transactions)."""
         return (self._def_n, self._pres_n, self._late_n, self._wait_us,
-                self._stamp_n, self._refused)
+                self._stamp_n, self._refused, self._bounced)
 
     def overlap_stats(self):
         """The PERF line's ppa= slots, re-purposed for this path:

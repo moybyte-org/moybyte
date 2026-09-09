@@ -48,6 +48,33 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
     describe (a window opening, a theme change, a toast in the stack, a
     visible cursor) notes nothing and pays the full rotate; a description
     dearer than 60% of the frame is declined for one.
+  **A big paint-buffer block rotates through internal SRAM, off the CPU**
+  (2026-09-09, `moy_ppa.rotate_bounce`): the SRM engine reads PSRAM at
+  ~40MB/s and internal SRAM at about four times that, while it writes PSRAM
+  at ~140MB/s, so a damage frame's window rect was engine-bound — the desk
+  waited on the rotate, not on its own draw. A worker task on the second
+  core has the AXI GDMA copy the block's rows, full width, into one of two
+  40KB SRAM bands while the engine rotates the previous band from the other;
+  the calling frame pays one cache writeback of the rows and an enqueue, and
+  the job's transactions are counted as submitted at enqueue so the
+  compositor's fences see them. Three things this had to learn on glass: a
+  copy done by the CPU inside the call made the frame SLOWER (the engine's
+  time used to overlap the next frame's draw); the worker's wake-up is a
+  binary semaphore, because a counting one banked completions and every
+  wait returned at once; and the last band is never a sliver — a 7-row tail
+  (a 7px-wide rotated block) never completed in the engine and wedged every
+  transaction behind it, so the last band overlaps the previous one instead.
+  Full rows because the engine loses transactions on a block narrower than
+  its band, and the rows outside the block are current too (the WM repaints
+  every change into both paint buffers before partial frames resume).
+  `RotatedCompositor.BOUNCE_MIN_PX` is where a plain rotate stops hiding
+  behind the next frame's draw: a 512×480 window scroll stays plain (18ms a
+  frame; bounced it was 25), the 1120×720 picker bounces (44 → 21ms), a
+  full frame 47 → 25. The game rect is the scale+rotate from its own canvas
+  and is not bounced. A pipeline that keeps stalling retires itself for the
+  session (`moy_ppa.bounce_stats()` over the dev channel carries its meters:
+  pending jobs, CPU-copied bands, the four wait timeouts, flagged
+  completions, the two band flags).
   A frame's quietness is the canvas's word (`P4SystemCanvas._gates_unchanged`):
   the two native gate counters plus the surface's own CLEAR count, because a
   `cls` is the one whole-surface write the gates cannot see (moy_ppa.fill on
