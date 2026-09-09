@@ -5,6 +5,8 @@ divisor remembers. `runtime/tick_model.py` is pure arithmetic on an injected
 dt, so the first half walks exact trajectories; the second half drives the
 real Player through `ws.frame`."""
 
+import time
+
 import pytest
 
 from runtime import tick_model
@@ -819,3 +821,80 @@ def test_a_free_seed_game_runs_with_the_loop(tmp_path):
     assert calls["upd"] == 20 and calls["draw"] == 20
     assert ws._frames_drawn - drawn0 == 20
     assert set(calls["dts"]) == {1 / 45}
+
+
+# -- what the PLAYER feeds the scheduler ---------------------------------------
+#
+# The arithmetic above is only as good as its input, and one input was wrong on
+# every board for a year of Lua carts. These drive the real `Player._run_ticks`.
+
+class _FusedLua:
+    """A runtime whose update() runs the WHOLE cart frame (moycore does: it
+    calls _update and _draw back to back in C), and which can still say where
+    its own time went."""
+
+    draw_next = True
+
+    def __init__(self, upd_ms, draw_ms):
+        self._split = (upd_ms, draw_ms)
+
+    def frame_split(self):
+        return self._split
+
+
+def _player_with(lua, fused_cost):
+    """A Player stub whose _update burns `fused_cost` seconds on the host clock
+    -- the loop's own measurement of a fused frame."""
+    from runtime.player import Player
+    p = Player.__new__(Player)
+    p._lua = lua
+    p._tick_edges = None
+    p._keyp_latch = 0
+    p.sched = TickScheduler()
+    p.sched.start(60, True)
+    p.ws = type("W", (), {"input": type("I", (), {"cart_keyp": 0, "cart_key": 0})()})()
+
+    def _update(dt):
+        if fused_cost:
+            t0 = time.time()
+            while time.time() - t0 < fused_cost:
+                pass
+
+    p._update = _update
+    return p
+
+
+def test_a_fused_runtime_reports_its_LOGIC_half_to_the_scheduler():
+    """The bug this pins, measured on a T-Deck 2026-09-10. moycore runs
+    _update and _draw inside one call, so the loop's clock reads logic PLUS
+    draw -- and the scheduler reads `tick_cost` as the logic alone, in both of
+    its rules. `dank tomb` at 60Hz fused to 25.7ms against a 16.7ms period, so
+    the pin that says "no divisor helps a tick already costing a period" fired
+    and held N at 1 while the scheduler's own fits(3) was True. The cart ran
+    its logic at 27Hz -- half its declared speed, the exact slowdown this model
+    exists to refuse."""
+    lua = _FusedLua(upd_ms=4.0, draw_ms=21.7)
+    p = _player_with(lua, fused_cost=0.0257)
+    p._run_ticks(1, 1 / 60.0, True)
+    # 4ms, not the 25.7ms the loop clock saw.
+    assert abs(p.sched.tick_cost - 0.004) < 0.001, p.sched.tick_cost
+    # ...and that is what keeps the divisor available: the pin reads tick_cost.
+    assert p.sched.tick_cost < p.sched.period
+
+
+def test_a_runtime_with_no_split_keeps_the_loop_s_own_timing():
+    """A Python cart's _update IS the logic, and a moycore build older than
+    tick_split reports None. Both keep the measured frame."""
+    p = _player_with(None, fused_cost=0.01)
+    p._run_ticks(1, 1 / 60.0, True)
+    assert p.sched.tick_cost >= 0.009, p.sched.tick_cost
+
+    class _Old:
+        draw_next = True
+
+        def frame_split(self):
+            return None
+
+    p2 = _player_with(_Old(), fused_cost=0.01)
+    p2._run_ticks(1, 1 / 60.0, True)
+    assert p2.sched.tick_cost >= 0.009, p2.sched.tick_cost

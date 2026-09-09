@@ -1404,7 +1404,26 @@ class Player:
             if upd is not None:
                 t0 = _ticks_us()
                 upd(dt)
-                sched.note_tick(_ticks_diff(_ticks_us(), t0) / 1000000.0)
+                cost = _ticks_diff(_ticks_us(), t0) / 1000000.0
+                # THE LOGIC HALF, not the frame. A runtime that runs the whole
+                # cart frame inside update() (moycore: _update and _draw back
+                # to back in C) makes this clock read logic PLUS draw, and the
+                # scheduler reads `tick_cost` as the logic alone in both of its
+                # rules: the catch-up test for a CHEAP tick, and the pin that
+                # says no divisor can help a tick already costing a period.
+                # Measured on a T-Deck 2026-09-10, `dank tomb` at 60Hz: the
+                # fused frame is 25.7ms against a 16.7ms period, so the pin
+                # fired and held the divisor at 1 -- while the scheduler's own
+                # fits(3) was True -- and the cart ran its logic at 27Hz, half
+                # its declared speed, which is the exact slowdown the tick
+                # model exists to refuse. The DRAWBRK split already asks this
+                # runtime the same question for the same reason.
+                _fs = getattr(lua, "frame_split", None) if lua is not None else None
+                if _fs is not None:
+                    _sp = _fs()
+                    if _sp is not None:
+                        cost = _sp[0] / 1000.0        # ms -> s, the update half
+                sched.note_tick(cost)
 
     def _start_lua(self, runtime, ns, src, t0, h0, t_pre):
         """Start a "runtime": "lua" cart (#67 Phase 2) through the injected
