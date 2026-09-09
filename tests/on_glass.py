@@ -151,17 +151,100 @@ def home_shelf_fling(board, x0, x1, y):
     board.drain(0.8)                       # let the fling settle
 
 
-def cart_runs_and_exits(board, spec, title=None):
+def draw_gates_are_installed(board, windowed=False):
+    """(#155) rect/rectb/print/pix must be the NATIVE moy_gfx callables on the
+    root system canvas -- and, on the windowed tier, on every window content
+    buffer too. Measured on P4 glass 2026-07-26: the Python wrapper cost
+    50.2us against 5.2us for the fill_rect kernel it ends in, so an un-gated
+    canvas silently pays ~10x per chrome call.
+
+    Every board installs the gates through the ONE `DeviceCanvas` body, which
+    is exactly why every board asks: the failure they catch is a staged
+    constant or a kernel signature drifting under a board nobody re-measured.
+    """
+    assert board.pyval("str(type(ws.sys_canvas.rect))") == "<class 'draw_gate'>"
+    assert board.pyval("ws.sys_canvas._gate_ctx is not None") is True
+    if windowed:
+        ungated = board.pyval(
+            "[k for k, w in ws.wm._wins.items() if w.buf._gate_ctx is None]")
+        assert ungated == [], ungated
+
+
+def draw_gates_take_the_traffic(board):
+    """The gates must actually be drawing -- a fallback that quietly swallowed
+    every call would look installed and measure fast."""
+    board.pyexec("ws.sys_canvas.gate_counts_reset()\nws.mark_dirty()")
+    board.drain(1.5)
+    fills, texts, _fu, _tu = board.pyval("ws.sys_canvas.gate_counts()")
+    assert fills > 0 and texts > 0, (fills, texts)
+
+
+def display_underruns_are_zero(board):
+    """The scan-out kept up for the whole tour. A DSI/DPI panel streams its
+    framebuffer out of PSRAM continuously, so an underrun is the one failure
+    that says the memory system lost a race with the glass -- and the compositor
+    counts them for free. `None` means the backend cannot report, which is data,
+    not a pass."""
+    n = board.pyval("comp.underruns()", strict=True)
+    assert n == 0, n
+
+
+def web_console_is_baked_into_the_image(board):
+    """The wasm console this board hands a browser lives in its OWN image, and
+    reads back correctly from flash -- the one part no host test can reach,
+    because it is the linker's answer, not the build script's.
+
+    EVERY board asks, because the failure is silent on every board: a build
+    made without `firmware/web_runner/dist` produces an image that compiles,
+    boots and runs, and is about 700KB short -- two of them shipped on
+    2026-09-08 before anyone noticed. Self-consistent on purpose (the board's
+    own `moy_webhost.ASSETS`, not this checkout's `dist/`): a board may
+    legitimately run an older build, and the question is whether ITS console
+    is whole.
+    """
+    stamp = board.pyval("__import__('moy_web').stamp()")
+    assert stamp and stamp != "0 0 none", (
+        "this image has NO baked web console (stamp %r) -- it was built with "
+        "no firmware/web_runner/dist" % (stamp,))
+    count, total = int(stamp.split()[0]), int(stamp.split()[1])
+    declared = board.pyval("sorted(__import__('moy_webhost').ASSETS)")
+    assert count == len(declared), (stamp, declared)
+    assert total > 400000, "a bundle this small is not the wasm console"
+    names = board.pyval("__import__('moy_web').assets()")
+    assert set(names) == {n + ".gz" for n in declared}, (names, declared)
+    got = board.pyval(
+        "[(n, len(__import__('moy_web').asset(n)), "
+        "bytes(__import__('moy_web').asset(n)[:3])) "
+        "for n in __import__('moy_web').assets()]")
+    assert sum(g[1] for g in got) == total, got
+    for name, size, magic in got:
+        assert magic == b"\x1f\x8b\x08", (name, magic)
+        assert size > 0, name
+
+
+def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     """THE test the 2026-08-17 _GATE_SEQ regression bought: a staged-constant
     deletion broke make_spr_gate -- and therefore EVERY cart start -- while
     both boards' suites stayed green, because nothing on glass ever RAN a
-    cart. The host pyflakes net caught it one staged build later; this makes
-    the glass able to catch its own. Launch through the real launcher path,
-    assert the cart is ticking, exit through the cart-quit flag the Player
-    honors (the same flag the cart-API quit() verb sets)."""
+    cart. Launch through the real launcher path, assert the cart is ticking,
+    then leave by this tier's door.
+
+    `door` is a real difference between the tiers, not a preference. "quit"
+    is the kid-facing `cart_quit` flag the Player honors (the same flag the
+    cart API's quit() verb sets), and on a fullscreen tier it pops all the way
+    to the launcher, which is what those boards pin. "shell" is `ws.exit()`,
+    the desk's own close: on the windowed tier a run started from a
+    picker/Settings arrangement does not pop through the flag, so those boards
+    pin the launch and the close instead. `clear` ws.exit()s that many times
+    first, to shut whatever windows the tour above left open -- a `run` from a
+    picker arrangement opens the cart under it.
+    """
+    for _ in range(clear):
+        board.cmd("py ws.exit()", wait_for="PY")
+        board.drain(0.5)
     line = board.cmd("run %s" % spec, wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
-    board.drain(2.0)
+    board.drain(2.5 if clear else 2.0)
     st = board.state()
     assert st.get("cart"), "the cart never started: %r" % st
     if title is not None:
@@ -170,11 +253,15 @@ def cart_runs_and_exits(board, spec, title=None):
     f0 = st["frames"]
     board.drain(1.0)
     assert board.state()["frames"] > f0, "the cart is not ticking"
-    board.cmd("py ws.input.cart_quit = True", wait_for="PY")
+    if door == "quit":
+        board.cmd("py ws.input.cart_quit = True", wait_for="PY")
+    else:
+        board.cmd("py ws.exit()", wait_for="PY")
     board.drain(1.5)
     st = board.state()
-    assert not st.get("cart"), "quit did not pop to the caller: %r" % st
-    assert st["stack"][-1] == "launcher"
+    assert not st.get("cart"), "%s did not end the run: %r" % (door, st)
+    if door == "quit":
+        assert st["stack"][-1] == "launcher", st["stack"]
 
 
 def idle_blank_and_wake(board):

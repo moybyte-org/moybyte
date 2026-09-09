@@ -55,6 +55,20 @@ paths:
   `tests/test_guition_p4_on_glass.py` (`MOYBYTE_GUITION_P4_PORT`, attach-only
   like the S3 boards — its USB serial is the SoC's), over
   `tools/p4_autotest.py`'s `P4Board` and the shared `tests/on_glass.py` fixture.
+  - **A check every board can make belongs in `on_glass.py`, and then EVERY
+    board makes it.** The suites keep their own `def test_*` so a failure names
+    its board, but the body is shared, and which boards call it is not a taste
+    question — it is coverage. Audited 2026-09-09: the draw gates, the baked
+    web console, the Lua-tier cart run, the `py` probe, the diag toggle, the
+    heap report and the display underruns were each pinned on ONE board and
+    silently unpinned on the others, and the shared bodies had drifted into
+    per-board copies (the desk boards each carried their own cart-run body).
+    A tier difference is expressed as an ARGUMENT to the shared body, never as
+    a second copy: `cart_runs_and_exits(door=…)` names the door a tier leaves
+    by (the fullscreen boards pin the kid-facing `cart_quit` flag; the desk
+    boards pin `ws.exit()`, because a run started from a picker arrangement
+    does not pop through the flag), and `draw_gates_are_installed(windowed=…)`
+    adds the window-buffer half only where windows exist.
   - **The line state at open is per-board and OPPOSITE, and it is DATA.**
     `P4Board(board_dir=…)` reads `dtr`/`rts`/`attach_only`/`chunk` from that
     board's `[serial]` block. The P4's CH343 opens with both LOW; the two S3

@@ -147,40 +147,15 @@ def test_perf_line_is_the_one_format(board):
     on_glass.perf_line_is_the_one_format(board)
 
 
-def _cart_runs_and_exits(board, spec, title=None):
-    """The Waveshare suite's windowed-tier idiom, not the shared fullscreen
-    body: ws.exit() first to clear whatever the tour left open (Settings + the
-    picker -- a `run` from that state opens the cart under the picker's
-    project arrangement, where the cart-quit flag does not pop), then run,
-    then ws.exit() out."""
-    for _ in range(3):
-        board.cmd("py ws.exit()", wait_for="PY")
-        board.drain(0.5)
-    line = board.cmd("run %s" % spec, wait_for="REMOTE run")
-    assert line is not None and "no cart match" not in line, line
-    board.drain(2.5)
-    st = board.state()
-    assert st.get("cart"), "the cart never started: %r" % st
-    if title is not None:
-        assert st["cart"] == title, st["cart"]
-    assert not st.get("cart_error"), st["cart_error"]
-    f0 = st["frames"]
-    board.drain(1.0)
-    assert board.state()["frames"] > f0, "the cart is not ticking"
-    board.cmd("py ws.exit()", wait_for="PY")
-    board.drain(1.5)
-    st = board.state()
-    assert not st.get("cart"), "exit did not end the run: %r" % st
-
-
 def test_a_cart_runs_and_exits(board):
-    _cart_runs_and_exits(board, "star")
+    on_glass.cart_runs_and_exits(board, "star", door="shell", clear=3)
 
 
 def test_a_lua_cart_runs_and_exits(board):
     """moycore on the second P4: the Lua tier reaches every board by default
     (the shared native staging), so pin it with a real run."""
-    _cart_runs_and_exits(board, "sakura lua", title="Sakura Lua")
+    on_glass.cart_runs_and_exits(board, "sakura lua", title="Sakura Lua",
+                                 door="shell", clear=3)
 
 
 def test_a_quiet_game_frame_rotates_one_rect(board):
@@ -221,9 +196,20 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
-def test_no_dsi_underruns(board):
+def test_no_display_underruns(board):
     """The scan-out kept up for the whole tour: the 800x1280@60Hz DPI stream
     is ~123MB/s of PSRAM reads, more than the Waveshare's, and PSRAM at 200MHz
     is what makes it hold (sdkconfig.board)."""
-    line = board.cmd("py comp.underruns()", wait_for="PY ")
-    assert line == "PY 0", line
+    on_glass.display_underruns_are_zero(board)
+
+
+def test_draw_gates_are_installed(board):
+    on_glass.draw_gates_are_installed(board, windowed=True)
+
+
+def test_draw_gates_take_the_traffic(board):
+    on_glass.draw_gates_take_the_traffic(board)
+
+
+def test_the_web_console_is_baked_into_this_image(board):
+    on_glass.web_console_is_baked_into_the_image(board)

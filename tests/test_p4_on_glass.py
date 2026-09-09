@@ -120,25 +120,27 @@ def test_window_buffers_are_single_retained_surfaces(board):
 
 
 def test_draw_gates_are_installed(board):
-    """(#155) rect/rectb/print/pix must be the NATIVE moy_gfx callables on the
-    root system canvas AND on every window content buffer. Measured on glass
-    2026-07-26: the Python wrapper cost 50.2us against 5.2us for the fill_rect
-    kernel it ends in, so an un-gated canvas silently pays ~10x per chrome
-    call."""
-    assert board.pyval("str(type(ws.sys_canvas.rect))") == "<class 'draw_gate'>"
-    assert board.pyval("ws.sys_canvas._gate_ctx is not None") is True
-    ungated = board.pyval(
-        "[k for k, w in ws.wm._wins.items() if w.buf._gate_ctx is None]")
-    assert ungated == [], ungated
+    on_glass.draw_gates_are_installed(board, windowed=True)
 
 
 def test_draw_gates_take_the_traffic(board):
-    """The gates must actually be drawing -- a fallback that quietly swallowed
-    every call would look installed and measure fast."""
-    board.pyexec("ws.sys_canvas.gate_counts_reset()\nws.mark_dirty()")
-    board.drain(1.5)
-    fills, texts, _fu, _tu = board.pyval("ws.sys_canvas.gate_counts()")
-    assert fills > 0 and texts > 0, (fills, texts)
+    on_glass.draw_gates_take_the_traffic(board)
+
+
+def test_py_probe_reaches_the_live_console(board):
+    on_glass.py_probe_reaches_the_console(board)
+
+
+def test_diag_toggle_roundtrips(board):
+    on_glass.diag_toggle_roundtrips(board)
+
+
+def test_mem_reports_the_heap(board):
+    on_glass.mem_reports_the_heap(board)
+
+
+def test_no_display_underruns(board):
+    on_glass.display_underruns_are_zero(board)
 
 
 def test_window_chrome_freezes_during_a_content_scroll(board):
@@ -541,39 +543,7 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
 
 
 def test_the_web_console_is_baked_into_this_image(board):
-    """The bundle is `.incbin`'d into flash rodata and handed out as a
-    memoryview at it, which is the one part of this that no host test can
-    reach: whether the linker put the blob where the table says it is.
-
-    Deliberately SELF-CONSISTENT rather than compared against this checkout's
-    `dist/` -- the board may legitimately be running an older build, and the
-    question here is "does the image's own console read back correctly", not
-    "is it today's". The stamp is what answers the second question, by eye.
-    """
-    stamp = board.pyval("__import__('moy_web').stamp()")
-    assert stamp and stamp != "0 0 none", (
-        "this image has NO baked web console (stamp %r) -- it was built with "
-        "no firmware/web_runner/dist" % (stamp,))
-    count, total = int(stamp.split()[0]), int(stamp.split()[1])
-    # Self-consistent like the rest of this test: the baked set must be the
-    # image's OWN serve allowlist (moy_webhost.ASSETS), not a count restated
-    # here -- a hand-pinned 4 went stale the day moy_store.mjs joined the set.
-    declared = board.pyval("sorted(__import__('moy_webhost').ASSETS)")
-    assert count == len(declared), (stamp, declared)
-    assert total > 400000, "a bundle this small is not the wasm console"
-    names = board.pyval("__import__('moy_web').assets()")
-    assert set(names) == {n + ".gz" for n in declared}, (names, declared)
-    # Each blob read back at its recorded length, starting with the gzip magic.
-    # A misplaced symbol still gives plausible lengths -- it is the first bytes
-    # that say the pointer landed on the right thing.
-    got = board.pyval(
-        "[(n, len(__import__('moy_web').asset(n)), "
-        "bytes(__import__('moy_web').asset(n)[:3])) "
-        "for n in __import__('moy_web').assets()]")
-    assert sum(g[1] for g in got) == total, got
-    for name, size, magic in got:
-        assert magic == b"\x1f\x8b\x08", (name, magic)
-        assert size > 0, name
+    on_glass.web_console_is_baked_into_the_image(board)
 
 
 def test_the_console_is_served_out_of_the_firmware_image(board):
@@ -592,31 +562,16 @@ def test_the_console_is_served_out_of_the_firmware_image(board):
     assert "baked into this firmware" in note, note
 
 
-def test_a_cart_runs_and_exits(board):
-    """The 2026-08-17 blind-spot closer, same as on_glass.cart_runs_and_exits:
-    a staged regression once broke every cart start while this suite stayed
-    green, because nothing here ran one. Launch, assert it started clean, exit.
+def test_a_lua_cart_runs_and_exits(board):
+    """The Lua tier reaches every board by default; pin it with a real run."""
+    on_glass.cart_runs_and_exits(board, "sakura lua", title="Sakura Lua",
+                                 door="shell", clear=3)
 
-    NOT the shared body, deliberately. tools/p4_perf.py's idiom, exactly:
-    ws.exit() first to clear whatever the tour above left open (Settings + the
-    picker windows -- a `run` from that state opens the cart under the picker's
-    project arrangement, where the first draft's cart-quit exit did not pop),
-    then run, then ws.exit() out. The shared body keeps the cart-quit path, so
-    the kid-facing quit() flag stays pinned on the two boards that reach the
-    launcher from a bare stack while this one pins the launch itself."""
-    for _ in range(3):                       # close settings/picker leftovers
-        board.cmd("py ws.exit()", wait_for="PY")
-        board.drain(0.5)
-    line = board.cmd("run star", wait_for="REMOTE run")
-    assert line is not None and "no cart match" not in line, line
-    board.drain(2.5)
-    st = board.state()
-    assert st.get("cart"), "the cart never started: %r" % st
-    assert not st.get("cart_error"), st["cart_error"]
-    f0 = st["frames"]
-    board.drain(1.0)
-    assert board.state()["frames"] > f0, "the cart is not ticking"
-    board.cmd("py ws.exit()", wait_for="PY")
-    board.drain(1.5)
-    st = board.state()
-    assert not st.get("cart"), "exit did not end the run: %r" % st
+
+def test_a_cart_runs_and_exits(board):
+    """The desk tier's door: ws.exit() out, not the cart-quit flag. A `run`
+    from the tour's picker arrangement opens the cart under it, where the
+    first draft's cart-quit exit did not pop -- so this board pins the launch
+    and the shell's own close, while the fullscreen tiers pin the kid-facing
+    flag."""
+    on_glass.cart_runs_and_exits(board, "star", door="shell", clear=3)
