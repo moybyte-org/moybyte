@@ -334,7 +334,16 @@ class ChunkedResponse:
 # 41.3s at 23.7KB/s with 1KB chunks -- ~960 chunks, and each was THREE sendall
 # calls (size line, body, CRLF). The OTA path moves 137KB/s on the same radio,
 # so the wire was never the limit; the syscalls were.
+#
+# It is also a CEILING now and not only a floor: a chunk is assembled in one
+# reusable buffer this size (see _send_chunked), so an oversized generated
+# piece is split across fills instead of framed whole.
 CHUNK_MIN = 8192
+
+# Bytes reserved in front of that buffer for the chunk's own size line, which
+# is written backwards into it so the frame goes out as ONE send with nothing
+# concatenated. "%x\r\n" of any CHUNK_MIN under 0x1000000 fits in 8.
+CHUNK_HEAD = 8
 
 # WebSocket opcodes we care about.
 WS_OP_TEXT = 0x1
@@ -664,33 +673,64 @@ class WebServer:
             pass
 
     def _send_chunked(self, conn, resp):
-        """Head, then each generated piece as one HTTP chunk, then the
-        terminator. Pieces are COALESCED to at least CHUNK_MIN bytes: the
-        packer yields a few bytes at a time (a key, a value) and one TCP send
-        per token would spend the whole transfer in syscall overhead."""
+        """Head, then the generated body reframed into HTTP chunks through ONE
+        reusable buffer, then the terminator.
+
+        Pieces are COALESCED to CHUNK_MIN bytes because the packer yields a few
+        bytes at a time (a key, a piece of a value) and one TCP send per token
+        would spend the whole transfer in syscall overhead. The BUFFER is why
+        that coalescing now costs nothing: it used to be `b"".join(pieces)` and
+        then `size + data + CRLF`, so every chunk minted two or three copies of
+        itself, and the copies were as big as whatever the packer handed over.
+
+        Affordable at 8KB, fatal at 150KB -- which is what one 142KB PICO-8 cart
+        used to arrive as before the packer started yielding in pieces. MEASURED
+        ON GUITION GLASS 2026-09-09: `MemoryError: memory allocation failed,
+        allocating 150641 bytes` on a heap reporting 3.4MB free, because the
+        largest free RUN on a 4MB MicroPython heap was smaller than the copies
+        in flight. The response died mid-body and the browser read an
+        IncompleteRead.
+
+        So the payload is copied ONCE, into a bytearray that outlives every
+        chunk, and a piece bigger than the buffer is split across fills rather
+        than framed whole -- this holds nothing, whatever a generator yields.
+        """
         conn.sendall(resp.head())
-        buf = []
+        buf = bytearray(CHUNK_HEAD + CHUNK_MIN + 2)
+        mv = memoryview(buf)
         n = 0
         for piece in resp.body_iter:
             if isinstance(piece, str):
                 piece = piece.encode("utf-8")
-            buf.append(piece)
-            n += len(piece)
-            if n >= CHUNK_MIN:
-                self._send_chunk(conn, b"".join(buf))
-                buf = []
-                n = 0
+            src = memoryview(piece)
+            while len(src):
+                take = CHUNK_MIN - n
+                if take > len(src):
+                    take = len(src)
+                mv[CHUNK_HEAD + n:CHUNK_HEAD + n + take] = src[:take]
+                n += take
+                src = src[take:]
+                if n == CHUNK_MIN:
+                    self._send_chunk(conn, buf, mv, n)
+                    n = 0
         if n:
-            self._send_chunk(conn, b"".join(buf))
+            self._send_chunk(conn, buf, mv, n)
         conn.sendall(b"0\r\n\r\n")
 
     @staticmethod
-    def _send_chunk(conn, data):
+    def _send_chunk(conn, buf, mv, n):
         # ONE sendall, not three. The size line and the trailing CRLF are tiny,
         # and a separate send for each is a separate trip through the stack --
         # on a board that is measurable, and it also invites Nagle to sit on the
-        # small ones waiting for an ACK.
-        conn.sendall(b"%x\r\n" % len(data) + data + b"\r\n")
+        # small ones waiting for an ACK. They are written INTO the payload
+        # buffer, right in front of and right behind the bytes, so that one send
+        # still allocates nothing.
+        head = b"%x\r\n" % n
+        i = CHUNK_HEAD - len(head)
+        buf[i:CHUNK_HEAD] = head
+        buf[CHUNK_HEAD + n] = 0x0D
+        buf[CHUNK_HEAD + n + 1] = 0x0A
+        conn.sendall(mv[i:CHUNK_HEAD + n + 2])
 
     def _send_blob(self, conn, resp):
         """Head, then the baked bundle, sliced out of flash.

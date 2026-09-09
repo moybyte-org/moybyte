@@ -130,6 +130,48 @@ def test_an_unreadable_file_is_skipped_not_fatal(tmp_path):
     b = wh.pack_store(str(root))
     assert "hop.moy/blob.bin" not in b
     assert "hop.moy/main.py" in b, "one bad file killed the rest"
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    assert "hop.moy/blob.bin" not in streamed, \
+        "a skipped file must be ABSENT, not present and empty"
+
+
+def test_a_big_file_is_streamed_in_pieces_and_never_held(tmp_path):
+    """The 2026-09-09 Guition fix, at this layer: no piece this walker yields
+    is as big as the file it came from.
+
+    A store with 142KB PICO-8 carts on it used to die every pull -- the value
+    was one `_jstr(text)` of the whole file, which the transport then encoded,
+    joined and concatenated into five more copies of the same size. Pin the
+    BOUND: a packer that goes back to whole values still round-trips every
+    content test above and brings the MemoryError straight back.
+    """
+    from runtime import moy_sync
+
+    root = _store(tmp_path)
+    text = "-- a line of a cart\n" * 9000                        # 180KB
+    (root / "hop.moy" / "big.lua").write_text(text)
+    big = max(len(p) for p in wh.stream_store_json(str(root)))
+    # One read chunk, at the escape's worst case (every character a \u00XX).
+    assert big <= 6 * moy_sync.STORE_READ_CHUNK, big
+    assert big < len(text) // 4, (big, len(text))
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    assert streamed == wh.pack_store(str(root))
+
+
+def test_a_value_split_across_pieces_is_still_the_file(tmp_path):
+    """Escaping is per character and stateless, which is the only reason a
+    value may be emitted in pieces at all. Quotes, backslashes, control
+    characters and non-ASCII across a piece boundary are where that claim gets
+    tested, so put them there deliberately."""
+    from runtime import moy_sync
+
+    step = moy_sync.STORE_READ_CHUNK
+    nasty = ('a"b\\c\td\n\x01e' * 200 + "héllo 中文 \U0001f600")
+    text = ("." * (step - 3)) + nasty * 6
+    root = _store(tmp_path)
+    (root / "hop.moy" / "nasty.txt").write_text(text)
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    assert streamed["hop.moy/nasty.txt"] == text
 
 
 # -- the handler -------------------------------------------------------------

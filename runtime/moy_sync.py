@@ -461,6 +461,96 @@ def _read_text(path):
     return _retry_io(_open, None)
 
 
+# How much of a file one store-pull piece carries, and with it the whole
+# memory cost of a pull: nothing between the card and the socket is ever
+# bigger than this. 4KB rather than 512B because a piece is also one `f.read`,
+# and FatFS reads a multi-sector request straight into the destination while a
+# sub-sector one goes through its own window buffer a sector at a time.
+STORE_READ_CHUNK = 4096
+
+
+def read_text_chunks(path, chunk=STORE_READ_CHUNK):
+    """A file's text in bounded pieces, or None -- `_read_text` for a PULL.
+
+    A whole-file `read()` is the thing a pull cannot afford, and the store this
+    was written for is why. MEASURED ON GUITION GLASS 2026-09-09: 48 carts, 272
+    files, 3.5MB, of which 22 files are over 30KB and the biggest is a 142,740-
+    byte `main.lua` from a PICO-8 port. One of those used to cross the wire as
+    six 150KB-class copies -- the read, its JSON escape, the transport's
+    `encode`, its coalescing join and two chunk-frame concatenations -- and the
+    MicroPython heap is 4MB with a largest free RUN of 449KB, so the copies in
+    flight fragmented it below the next one. Every pull died with `MemoryError:
+    memory allocation failed, allocating 150641 bytes` at whichever big cart it
+    reached first, after 0.24-3.1MB and 11-41s. Reading in pieces is what makes
+    the cost of a pull independent of the biggest file in the store.
+
+    None means SKIP, exactly as `_read_text`'s None does, and it is decided on
+    the FIRST piece -- so a file that cannot be read as text is ABSENT from the
+    bundle, never present and empty. Past that first piece a card that fails
+    every retry ENDS the value instead: the response stays valid JSON holding a
+    short file, where propagating would truncate the whole pull, which this
+    module's `_retry_io` already calls the strictly worse answer.
+    """
+    opened = _retry_io(lambda: _open_text_at(path, 0, chunk), None)
+    if opened is None:
+        return None                          # the card gave up: skip, as _read_text
+    if opened[1] is None:
+        _close_quietly(opened[0])
+        return None                          # binary/unreadable: skip, permanent
+    return _text_pieces(path, opened[0], opened[1], chunk)
+
+
+def _open_text_at(path, pos, chunk):
+    """(handle, first piece read from `pos`), or (handle, None) for a file that
+    does not read as text.
+
+    `pos` is what makes the retry work past the first piece: a FatFS handle
+    LATCHES its disk error (`FR_INVALID_OBJECT` on every later call), so a card
+    that EIO'd mid-file cannot be re-read through the handle that saw it -- the
+    retry has to re-open and seek back to where the last good piece ended.
+    """
+    f = open(path, "r")
+    try:
+        if pos:
+            f.seek(pos)
+        try:
+            return f, f.read(chunk)
+        except (UnicodeError, ValueError):
+            return f, None                   # binary/unreadable: skip, permanent
+    except Exception:                        # noqa: BLE001 -- never leak a handle
+        _close_quietly(f)
+        raise
+
+
+def _close_quietly(f):
+    try:
+        f.close()
+    except OSError:
+        pass
+
+
+def _text_pieces(path, f, piece, chunk):
+    pos = 0
+    try:
+        while piece:
+            pos = f.tell()                   # where a retry re-opens: past `piece`
+            yield piece
+            try:
+                piece = f.read(chunk)
+            except (UnicodeError, ValueError):
+                return                       # not text past here: end the value
+            except OSError:
+                _close_quietly(f)
+                nxt = _retry_io(lambda: _open_text_at(path, pos, chunk), None)
+                if nxt is None:
+                    return                   # the card gave up: end the value
+                f, piece = nxt
+                if piece is None:
+                    return
+    finally:
+        _close_quietly(f)
+
+
 def _stat_file(path):
     """(size, mtime) or None. mtime is whatever the VFS reports -- the sweep
     only ever compares a file's mtime against its own previous value and

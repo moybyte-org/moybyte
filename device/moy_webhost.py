@@ -203,6 +203,7 @@ _skip = moy_sync._skip
 _entries = moy_sync._entries
 _is_dir = moy_sync._is_dir
 _read_text = moy_sync._read_text
+_read_chunks = moy_sync.read_text_chunks
 
 
 def pack_store(carts_root, listdir=None, read=None, isdir=None, tops=None):
@@ -263,13 +264,19 @@ def stream_store_json(carts_root, listdir=None, read=None, isdir=None,
 
     A generator and not a dict-then-dumps because on real hardware the dict IS
     the problem: the P4's store is 982KB of JSON, which took 61s to build and
-    would not fit on the S3 at all. One file's text is the largest thing
-    resident here.
+    would not fit on the S3 at all.
 
-    Escaping goes through `_jstr` -- see the measured note there for why that is
-    json.dumps and not the hand-rolled walk it started as.
+    NOTHING here is as large as a FILE either, since 2026-09-09: a value is
+    read, escaped and framed one `moy_sync.STORE_READ_CHUNK` at a time, so the
+    cost of a pull no longer scales with the biggest cart in the store. It did
+    until a Guition's card grew 142KB PICO-8 ports and every pull died
+    mid-response with a MemoryError on a heap reporting 3.4MB free --
+    `moy_sync.read_text_chunks` carries that measurement.
+
+    Escaping goes through `_jesc`/`_jstr` -- see the measured note there for why
+    that is json.dumps and not the hand-rolled walk it started as.
     """
-    _read = read or _read_text
+    _read = read
     yield "{"
     first = [True]
     for top in _root_dirs(carts_root, listdir, isdir, tops):
@@ -292,15 +299,34 @@ def _stream_dir(path, prefix, _listdir, _isdir, _read, first):
             for piece in _stream_dir(full, rel, _listdir, _isdir, _read, first):
                 yield piece
             continue
-        text = _read(full)
-        if text is None:                 # binary/unreadable: skip, never crash
+        pieces = _value_pieces(full, _read)
+        if pieces is None:               # binary/unreadable: skip, never crash
             continue
         if not first[0]:
             yield ","
         first[0] = False
         yield _jstr(rel)
-        yield ":"
-        yield _jstr(text)
+        yield ':"'
+        for piece in pieces:
+            yield _jesc(piece)
+        yield '"'
+
+
+def _value_pieces(path, _read):
+    """One file's text as bounded pieces, or None (skip it).
+
+    The default reader is `moy_sync.read_text_chunks`, which never holds more
+    than a piece. An INJECTED reader is a host test with no filesystem behind
+    it: it hands over a whole string, which is then sliced rather than re-read,
+    so the two readers cannot disagree about what a file holds.
+    """
+    if _read is None:
+        return _read_chunks(path)
+    text = _read(path)
+    if text is None:
+        return None
+    step = moy_sync.STORE_READ_CHUNK
+    return (text[i:i + step] for i in range(0, len(text), step))
 
 
 def _jstr(s):
@@ -317,9 +343,29 @@ def _jstr(s):
     per-character Python loop is never the optimisation. Handing a whole string
     to a C builtin allocates, and allocating is what this file otherwise works
     hard to avoid -- but ONE file's copy is bounded and transient, where the
-    dict-of-everything this replaced was not.
+    dict-of-everything this replaced was not. A file's own text is not even
+    that any more; see `_jesc`.
     """
     return _json.dumps(s)
+
+
+def _jesc(s):
+    """One PIECE of a JSON string literal -- `_jstr` without its quotes.
+
+    JSON escaping is per character and carries no state across characters, so
+    the pieces of a value concatenate into exactly the literal `_jstr` would
+    have built for the whole file. That is the whole reason a value can be
+    emitted without the file ever being resident, and it holds on both tiers
+    even though they escape differently (CPython writes non-ASCII as \\uXXXX,
+    MicroPython passes the UTF-8 through): each side is self-consistent, and
+    each side's pieces join back into that side's own literal.
+
+    The split point is safe for the same reason. CPython reads text by
+    CHARACTER, so a piece boundary never lands inside one; MicroPython reads
+    bytes and does not decode at all, so a boundary inside a UTF-8 sequence
+    still concatenates back byte for byte.
+    """
+    return _json.dumps(s)[1:-1]
 
 
 def _file_size(path):

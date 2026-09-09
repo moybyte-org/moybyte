@@ -102,6 +102,90 @@ def test_http_response_well_formed():
 
 
 # ---------------------------------------------------------------------------
+# ChunkedResponse framing -- the generated-body path /carts.json rides.
+# ---------------------------------------------------------------------------
+
+
+class _Wire:
+    """A conn that only records. `sendall` is handed a memoryview over a buffer
+    the sender REUSES, so copy at the seam or the recording reads as the last
+    chunk repeated."""
+
+    def __init__(self):
+        self.out = bytearray()
+        self.sends = 0
+
+    def sendall(self, data):
+        self.out += bytes(data)
+        self.sends += 1
+
+
+def _dechunk(raw):
+    """(head, body, chunk sizes) for a chunked response, framing checked."""
+    head, _, rest = raw.partition(b"\r\n\r\n")
+    body = bytearray()
+    sizes = []
+    while True:
+        line, _, rest = rest.partition(b"\r\n")
+        n = int(line, 16)
+        if n == 0:
+            break
+        body += rest[:n]
+        assert rest[n:n + 2] == b"\r\n", "chunk %d had no trailer" % len(sizes)
+        sizes.append(n)
+        rest = rest[n + 2:]
+    return head, bytes(body), sizes
+
+
+def test_chunked_coalesces_small_pieces_and_splits_big_ones():
+    """The packer yields a few bytes at a time and one TCP send per token would
+    spend the transfer in syscall overhead -- so pieces COALESCE to CHUNK_MIN.
+    A piece bigger than that is SPLIT across fills rather than framed whole,
+    which is the half that matters: the buffer is what makes this path hold
+    nothing, and framing a piece whole would defeat it.
+    """
+    srv = web.WebServer()
+    small = _Wire()
+    srv._send_chunked(small, web.ChunkedResponse(iter(["a", "b", "c"])))
+    head, body, sizes = _dechunk(bytes(small.out))
+    assert b"Transfer-Encoding: chunked" in head
+    assert body == b"abc" and sizes == [3], (body, sizes)
+
+    big = _Wire()
+    srv._send_chunked(big, web.ChunkedResponse(
+        iter(["z" * (web.CHUNK_MIN * 3 + 17)])))
+    _, body, sizes = _dechunk(bytes(big.out))
+    assert sizes == [web.CHUNK_MIN] * 3 + [17], sizes
+    assert body == b"z" * (web.CHUNK_MIN * 3 + 17)
+
+
+def test_chunked_sends_never_grow_with_the_piece():
+    """The 2026-09-09 Guition defect, pinned at the transport: this used to
+    `b"".join(pieces)` and then `size + data + CRLF`, so every chunk minted two
+    or three copies of ITSELF -- fine at 8KB, a MemoryError at the 150KB one
+    PICO-8 cart arrived as. Nothing here may allocate per chunk, so one send
+    can never carry more than the one reusable buffer holds.
+    """
+    srv = web.WebServer()
+    w = _Wire()
+    srv._send_chunked(w, web.ChunkedResponse(
+        iter(["q" * 40000, "r" * 3, "s" * 40000])))
+    _, body, sizes = _dechunk(bytes(w.out))
+    assert body == b"q" * 40000 + b"r" * 3 + b"s" * 40000
+    assert max(sizes) <= web.CHUNK_MIN, sizes
+    # ...and the size line + CRLF ride INSIDE that buffer: one send per chunk.
+    assert w.sends == len(sizes) + 2, (w.sends, len(sizes))   # + head + terminator
+
+
+def test_chunked_survives_a_body_that_yields_bytes_and_str():
+    srv = web.WebServer()
+    w = _Wire()
+    srv._send_chunked(w, web.ChunkedResponse(iter([b"\x01\x02", "ok", b""])))
+    _, body, _ = _dechunk(bytes(w.out))
+    assert body == b"\x01\x02ok"
+
+
+# ---------------------------------------------------------------------------
 # WebSocket handshake + framing (RFC 6455) -- the shared web_view_ws primitives
 # the transport re-exports.
 # ---------------------------------------------------------------------------
