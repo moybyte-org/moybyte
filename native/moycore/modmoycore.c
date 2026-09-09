@@ -1477,9 +1477,21 @@ static void lprof_note_src(const char *src, const char *short_src)
         if (g_lp_src[i] == src) return;
     if (g_lp_nsrc >= LPROF_SRCS) return;
     g_lp_src[g_lp_nsrc] = src;
-    strncpy(g_lp_srcname[g_lp_nsrc], short_src ? short_src : "?",
-            sizeof(g_lp_srcname[0]) - 1);
-    g_lp_srcname[g_lp_nsrc][sizeof(g_lp_srcname[0]) - 1] = '\0';
+    // Copied by hand rather than with strncpy: a chunk name is routinely
+    // longer than this buffer (Lua's short_src is 60 bytes, the buffer is
+    // 40), and gcc's -Wstringop-truncation is an ERROR on the P4's RISC-V
+    // toolchain -- truncating here is deliberate, so say so in code the
+    // compiler cannot mistake for an accident. Always NUL-terminated.
+    {
+        const char *from = short_src ? short_src : "?";
+        char *to = g_lp_srcname[g_lp_nsrc];
+        size_t cap = sizeof(g_lp_srcname[0]) - 1, n = 0;
+        while (n < cap && from[n] != '\0') {
+            to[n] = from[n];
+            n++;
+        }
+        to[n] = '\0';
+    }
     g_lp_nsrc++;
 }
 
