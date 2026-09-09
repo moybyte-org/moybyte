@@ -172,10 +172,23 @@ def draw_gates_are_installed(board, windowed=False):
 
 def draw_gates_take_the_traffic(board):
     """The gates must actually be drawing -- a fallback that quietly swallowed
-    every call would look installed and measure fast."""
+    every call would look installed and measure fast.
+
+    Asked on SETTINGS, not on the home screen, and that is a tier difference
+    worth naming: a fullscreen board at rest re-presents its captured launcher
+    frame as ONE blit (launcher_layer's retained stamp, #66), so a home repaint
+    there legitimately moves no gated verb at all. The first draft asked on the
+    home screen, which is a desk board's shape, and read (0, 0) on the Guition
+    S3 -- a green light on the P4s for a check that could not fail on the S3s.
+    Settings draws real chrome on every tier. Restored before the assert, so a
+    failure does not leave the next test on the wrong screen."""
+    board.open("settings")
+    board.drain(1.0)
     board.pyexec("ws.sys_canvas.gate_counts_reset()\nws.mark_dirty()")
     board.drain(1.5)
     fills, texts, _fu, _tu = board.pyval("ws.sys_canvas.gate_counts()")
+    board.cmd("py ws.exit()", wait_for="PY")
+    board.drain(0.5)
     assert fills > 0 and texts > 0, (fills, texts)
 
 

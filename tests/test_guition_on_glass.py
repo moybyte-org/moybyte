@@ -117,6 +117,22 @@ def test_wifi_is_off_at_rest(board):
     on_glass.wifi_is_off_at_rest(board)
 
 
+def test_wifi_status_is_readable(board):
+    on_glass.wifi_status_is_readable(board)
+
+
+def test_draw_gates_are_installed(board):
+    on_glass.draw_gates_are_installed(board)
+
+
+def test_draw_gates_take_the_traffic(board):
+    on_glass.draw_gates_take_the_traffic(board)
+
+
+def test_the_web_console_is_baked_into_this_image(board):
+    on_glass.web_console_is_baked_into_the_image(board)
+
+
 def _skip_unparked(board, why):
     """Skip this test -- but not with the glass left PARKED.
 
