@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from board_source import runtime_text, wiring_source
+
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
@@ -616,6 +618,9 @@ def test_the_tail_is_harmless_on_a_build_with_no_ota():
 
 
 def _run_desktop(path):
+    # A board that delegates its boot body to a shared spine is asked about
+    # THE SPINE: its own run_desktop is the arguments, not the boot.
+    path = wiring_source(path)
     src = path.read_text(encoding="utf-8")
     for node in ast.walk(ast.parse(src, filename=str(path))):
         if isinstance(node, ast.FunctionDef) and node.name == "run_desktop":
@@ -648,7 +653,7 @@ BOARDS = {"tdeck": TDECK / "moy_runtime.py", "p4": P4 / "moy_runtime.py",
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_each_board_imports_the_shared_spine(board):
-    src = BOARDS[board].read_text(encoding="utf-8")
+    src = runtime_text(BOARDS[board])
     line = [l for l in src.splitlines()
             if l.startswith("from device_boot import")]
     assert line, "%s does not import the shared spine" % board
@@ -689,7 +694,7 @@ def test_both_boards_pump_the_frame_the_same_way():
         assert calls == [], (
             "%s: run_desktop drives the pump beside the shared loop -- %s"
             % (name, calls))
-        src_txt = BOARDS[name].read_text(encoding="utf-8")
+        src_txt = runtime_text(BOARDS[name])
         assert "loop = FrameLoop(" in src_txt, (
             "%s never constructs the shared frame loop" % name)
         assert "loop.run()" in src_txt
@@ -1673,7 +1678,7 @@ def _perf_call(board):
     """The board's `PerfSampler(...)` construction, as AST. Static because these
     modules import `machine`; the emitter they hand it to is executed above."""
     path = PERF_BOARDS[board][0] / "moy_runtime.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = ast.parse(runtime_text(path))
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == "PerfSampler"):
@@ -1687,7 +1692,7 @@ def test_every_board_emits_through_the_one_sampler(board):
     shapes; a fourth board would have copied one of them. `FrameLoop.account` is
     the home -- it runs after pace, which is where frame accounting belongs."""
     path = PERF_BOARDS[board][0] / "moy_runtime.py"
-    src = path.read_text(encoding="utf-8")
+    src = runtime_text(path)
     # A FORMAT is a string literal starting "PERF " -- AST, so the prose about
     # why this rule exists does not satisfy the rule. `diag.ring("PERF", ...)`
     # passes the ring's TAG, which has no trailing space and is not a format.

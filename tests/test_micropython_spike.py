@@ -3,6 +3,8 @@ import re
 import sys
 from pathlib import Path
 
+from board_source import runtime_text
+
 from tools import board_config
 
 
@@ -3103,7 +3105,7 @@ def test_one_lua_runtime_wired():
     for src_path in ((ROOT / "modules" / "moy_runtime.py"),
                      (Path("firmware/esp32_p4_wifi6_touch_lcd_7b") / "modules"
                       / "moy_runtime.py")):
-        src = src_path.read_text(encoding="utf-8")
+        src = runtime_text(src_path)
         assert "boot.lua_runtime(ws" in src, src_path
         assert "make_lua_runtime" not in src, "%s still builds the old runtime" % src_path
     assert not (ROOT / "modules" / "moy_lua_glue.py").exists()
@@ -3228,7 +3230,7 @@ def test_both_boards_service_the_web_console_every_frame():
     # dies, is executed in test_device_boot.py (#208 rank 5).
     for rel in ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
                 "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"):
-        src = (_REPO / rel).read_text(encoding="utf-8")
+        src = runtime_text(_REPO / rel)
         assert "poll_webhost(ws)" in src, (
             "%s never polls ws.webhost -- a bound listener with no accept() "
             "times out instead of refusing, which reads as a dead server" % rel)

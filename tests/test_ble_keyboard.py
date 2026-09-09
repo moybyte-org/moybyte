@@ -7,6 +7,8 @@ machine with a fake BLE object, and verify the exact shared InputState contract.
 
 import importlib.util
 import json
+
+from board_source import runtime_text
 import sys
 import types
 from pathlib import Path
@@ -502,8 +504,8 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
     underrun_patch = (ROOT / "patches"
                       / "p4_esp_lcd_dsi_underrun_hook.patch").read_text()
     build_lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text()
-    runtime = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
-               / "moy_runtime.py").read_text()
+    runtime = runtime_text(ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
+                           / "modules" / "moy_runtime.py")
     sdkconfig = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / ".build"
                  / "micropython" / "ports" / "esp32" / "boards"
                  / "sdkconfig.p4_wifi_common")

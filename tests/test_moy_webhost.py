@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from board_source import runtime_text
+
 ROOT = Path(__file__).resolve().parent.parent
 MODULES = ROOT / "device"
 sys.path.insert(0, str(MODULES))
@@ -1208,7 +1210,7 @@ def test_every_board_injects_the_web_console(board):
     stages every shared module and forgets this line fails here instead of
     shipping a console that silently cannot be reached.
     """
-    src = (ROOT / "firmware" / board / "modules" / "moy_runtime.py").read_text()
+    src = runtime_text(ROOT / "firmware" / board / "modules" / "moy_runtime.py")
     assert "make_webhost(" in src, "%s never builds a WebHost" % board
     assert "ws.webhost" in src, "%s never attaches one to the console" % board
 
@@ -1236,7 +1238,7 @@ def test_the_link_wait_is_shared_and_not_recopied_per_board():
     precisely how the T-Deck went without the feature, so the helper is shared
     and the boards must not grow private copies of it again."""
     for board in BOARDS:
-        src = (ROOT / "firmware" / board / "modules" / "moy_runtime.py").read_text()
+        src = runtime_text(ROOT / "firmware" / board / "modules" / "moy_runtime.py")
         assert "ONLINE_WAIT_MS" not in src.replace("moy_ota's ONLINE_WAIT_MS", "")
         assert "def _web_online" not in src, "%s re-grew a private link wait" % board
 

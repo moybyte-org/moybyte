@@ -162,8 +162,11 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
     parameterized by the board's `MOY_DSI_PANEL_*` define, `moy_ppa`, `moy_ble_hid`,
     `moy_c6`), declared by a P4 board as a SECOND `[native.p4]` source in board.toml
     — never seen by the S3 scan, never denied by an S3 board — plus
-    `device/dsi_panel.py` (the compositor; the board injects its backlight) and
-    `device/p4_canvas.py` (the PPA system canvas). The two P4 patches are
+    `device/dsi_panel.py` (the compositor; the board injects its backlight),
+    `device/p4_canvas.py` (the PPA system canvas) and `device/p4_desktop.py`
+    (the desktop body itself -- one `run_desktop` for both boards since
+    2026-09-09; a board supplies its name, compositor, touch and constants).
+    The two P4 patches are
     `patches/p4_*.patch` behind `moybyte_patch_p4_ble_hid_fastpath` /
     `moybyte_patch_p4_dsi_underrun` in the shared build lib.
 

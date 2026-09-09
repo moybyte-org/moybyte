@@ -58,6 +58,8 @@ from pathlib import Path
 
 import pytest
 
+from board_source import wiring_source
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # (wiring source, the function that wires it). Each target boots the SAME shared
@@ -481,7 +483,7 @@ def _wire_supplied(fn, param_map):
 def injections(target):
     """{service: lineno} -- everything `target` attaches to the Workstation."""
     rel, fname = TARGETS[target]
-    fn = _func(ROOT / rel, fname)
+    fn = _func(wiring_source(rel), fname)
     got = _boot_assignments(fn)
     got.update(_wire_supplied(fn, _wire_param_map()))
     for name in NOT_A_SERVICE:
@@ -823,7 +825,9 @@ def _wire_seed(fn, param_map):
 @functools.lru_cache(maxsize=None)
 def _target_handles(target):
     rel, fname = TARGETS[target]
-    path = ROOT / rel
+    # A board that delegates its boot body to a shared spine is asked about
+    # THE SPINE -- its own run_desktop is the arguments, not the wiring.
+    path = wiring_source(rel)
     return _Handles(path, _wire_seed(_func(path, fname), _wire_param_map()))
 
 

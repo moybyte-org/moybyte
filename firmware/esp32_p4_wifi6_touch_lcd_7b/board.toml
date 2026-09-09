@@ -373,7 +373,7 @@ queue out, pmem at the #66 boundaries), and the leaf ticks helpers
 device_canvas imports."""
 
 [[modules.device.group]]
-files = ["dsi_panel.py", "p4_canvas.py"]
+files = ["dsi_panel.py", "p4_canvas.py", "p4_desktop.py"]
 why = """
 The P4 silicon tier's Python half (2026-09-06, promoted out of THIS board's
 p4_display.py / moy_runtime.py the day the Guition P4 became their second

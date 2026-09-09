@@ -7,7 +7,7 @@ for the rules. Reading it top to bottom is the slow path.
 |---|---|---|
 | change a draw verb / the raster | `docs/surface_model_v1.md` §4, then `device/device_canvas.py` | ONE canvas class runs on every tier. `tools/p4_conformance.py` is the only check that reaches the real C on real glass. |
 | add or port a board | `docs/board_ports_2026-08.md` — its stage-6 "TAKE THESE" list | four shared bodies are taken, not copied; a lever a board lacks is expressed by ABSENCE, never by 0; `git add` the board's modules BEFORE its first build or the stager prunes them |
-| touch an ESP32-P4 board | that board's README, then `native/p4/` (the silicon tier both P4 boards take) | the panel is a board DEFINE (`MOY_DSI_PANEL_*`), the compositor is `device/dsi_panel.py`, the PPA canvas `device/p4_canvas.py` — a fix lands once |
+| touch an ESP32-P4 board | that board's README, then `native/p4/` (the silicon tier both P4 boards take) | the panel is a board DEFINE (`MOY_DSI_PANEL_*`), the compositor is `device/dsi_panel.py`, the PPA canvas `device/p4_canvas.py`, the desktop body `device/p4_desktop.py` — a fix lands once |
 | touch a panel flush | `native/moy_flush/moy_flush.c`'s header | "every clause was a race once". `tests/moy_flush_harness/` compiles it with no board attached |
 | touch SD or the panel bus | that board dir's README | the two drivers share one SPI host; a per-op teardown hangs the board with no panic |
 | change the shell / a WM / an app | `runtime/README.md` (per-file map), `docs/app_api_v1.md` | pixel goldens are the net, and the 320×240/1× row does NOT exercise the toolkit |

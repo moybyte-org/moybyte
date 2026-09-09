@@ -182,13 +182,16 @@ _CLEARS = True
 WINDOWED_INSTALLERS = {
     "runtime/host_app.py": _CLEARS,
     "firmware/web_runner/web_boot.py": _CLEARS,
-    "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py":
+    # The two P4 rows are ONE body -- device/p4_desktop.py, the shared desktop
+    # spine (2026-09-09) -- staged into each board's modules/ by its build, and
+    # this walk sees the staged copies. The reason is therefore the same twice.
+    "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_desktop.py":
         "P4SystemCanvas overrides blit_game outright (its composite is the "
         "hardware PPA) and paints no bands at all, so the shared flag never "
-        "reaches a fill on that board -- and it only ever runs this WM",
-    "firmware/guition_jc8012p4a1c/modules/moy_runtime.py":
-        "the same P4SystemCanvas (device/p4_canvas.py) on the second P4 board "
-        "-- same PPA composite, same absence of bands, same one WM",
+        "reaches a fill on either P4 board -- and they only ever run this WM",
+    "firmware/guition_jc8012p4a1c/modules/p4_desktop.py":
+        "the same shared spine staged onto the second P4 board -- same "
+        "P4SystemCanvas, same PPA composite, same absence of bands, same one WM",
 }
 
 

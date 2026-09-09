@@ -23,6 +23,8 @@ into the boot after the rollback, so that second failure gets reported too.
 import json
 from pathlib import Path
 
+from board_source import runtime_text
+
 ROOT = Path(__file__).resolve().parent.parent
 
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
@@ -703,7 +705,7 @@ def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
     import ast
 
     for mod_path in (TDECK / "moy_runtime.py", P4 / "moy_runtime.py"):
-        src = mod_path.read_text(encoding="utf-8")
+        src = runtime_text(mod_path)
         fn = None
         for node in ast.walk(ast.parse(src, filename=str(mod_path))):
             if isinstance(node, ast.FunctionDef) and node.name == "run_desktop":

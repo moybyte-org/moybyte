@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from board_source import runtime_text
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -300,7 +302,7 @@ def test_every_board_writes_every_source_before_begin_frame(board):
     """The consumer half of the contract: with the union derived once per
     frame, a source written AFTER the merge is read one frame late -- silently,
     and only on that board."""
-    src = (ROOT / BOARD_RUNTIMES[board]).read_text()
+    src = runtime_text(BOARD_RUNTIMES[board])
     lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
     merge = _line_of(lines, "inp.begin_frame()", board)
     seen = 0
@@ -320,7 +322,7 @@ ACTIVE_READ = "bool(inp._held)"
 
 @pytest.mark.parametrize("board", sorted(BOARD_RUNTIMES))
 def test_a_board_that_reads_the_union_for_its_idle_check_reads_it_after_the_merge(board):
-    src = (ROOT / BOARD_RUNTIMES[board]).read_text()
+    src = runtime_text(BOARD_RUNTIMES[board])
     lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
     if not any(ACTIVE_READ in ln for ln in lines):
         # The T-Deck spells its `active` differently (trackball counts + the
