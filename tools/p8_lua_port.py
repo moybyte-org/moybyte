@@ -2566,7 +2566,13 @@ do
       out[#out + 1] = num and (tonumber(part) or part) or part
     end
     if type(sep) == "number" then
-      local step = sep < 1 and 1 or sep
+      -- FLOORED, and bounded by the subject: a fractional or infinite width
+      -- used to reach string.sub as a float and error on the first chunk,
+      -- which is neither PICO-8's answer nor an answer at all. NaN is no
+      -- chunks -- what the `for` already does for all but a 1-char subject.
+      local step = sep < 1 and 1 or mfloor(sep)
+      if step ~= step then return out end
+      if #s > 0 and step > #s then step = #s end
       for i = 1, #s, step do keep(string.sub(s, i, i + step - 1)) end
       return out
     end
@@ -2580,6 +2586,10 @@ do
     end
     return out
   end
+  -- A cart's data tables are written in split(), and the carts that rebuild
+  -- one inside the frame spend real time here: on the interpreter-bound
+  -- boards the C verb is worth 15% of `moss moss`'s frame (#66, #67).
+  if __moy_split ~= nil then split = __moy_split end
 
   -- OVAL / OVALFILL. PICO-8 draws an ellipse in a BOUNDING BOX (x0,y0 to
   -- x1,y1); the console has circles and no ellipse. Midpoint ellipse, four-way
@@ -3187,6 +3197,15 @@ do
   pal, palt, fillp = p8c("pal") or pal, p8c("palt") or palt, p8c("fillp") or fillp
   color, cursor = p8c("color") or color, p8c("cursor") or cursor
   sget, sset = p8c("sget") or sget, p8c("sset") or sset
+  -- rnd and srand move TOGETHER or not at all: they are ONE generator, and a
+  -- C rnd drawing from the machine's state while srand reseeded lmathlib's
+  -- would leave a cart seeding something nothing reads -- the same level
+  -- laid out differently every run, with nothing to point at. A cart that
+  -- rebuilds its world from a seed each frame spends real time here: ~600
+  -- calls a frame on low mem sky, 13% of its Lua (#66, #67).
+  if p8c("rnd") ~= nil and p8c("srand") ~= nil then
+    rnd, srand = p8c("rnd"), p8c("srand")
+  end
   -- btn/btnp and the two latch hooks are one thing: the hold counters and the
   -- pending edges live in the machine or in the tables above, never half in
   -- each. The pacing rule is unchanged -- an edge latched once a console
@@ -3509,9 +3528,37 @@ def _hex_addr_calls(code, verb):
     return out
 
 
+def _count_of_16(expr):
+    """Whether a shift COUNT is sixteen, give or take: `16`, `16-cache_bits`,
+    `bits+16`. A TERM of the sum, which is what makes it a shift by sixteen --
+    dank tomb's `shl(1, lw(0x70,x,y)/16)` has a sixteen in its count and shifts
+    by a sixteenth of a word, which is not this class at all."""
+    depth = 0
+    term = []
+    for ch in expr:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if depth == 0 and ch in "+-":
+            if "".join(term).strip() == "16":
+                return True
+            term = []
+        else:
+            term.append(ch)
+    return "".join(term).strip() == "16"
+
+
 def _shifts_by_16(code):
-    """A `>> 16`, `<< 16`, `shr(x, 16)`, `shl(x, 16)` or `lshr(x, 16)` -- and
-    the porter's own spelling of the operator, `__p8_shr(x, 16)`."""
+    """A shift whose COUNT is 16 -- `>> 16`, `shr(x, 16)`, and the counts a
+    decoder writes for real, `>>> 16-cache_bits`, `__p8_lshr(v, 16 - n)`.
+
+    The count is an EXPRESSION, and reading it as the literal `16` is how this
+    stopped firing on the cart the rule was written for. celeste 2's px9 writes
+    `%src >>> 16-cache_bits`; once the native bit-operator rewrite turned every
+    operator into a call, there was no `>>` left to find and no argument equal
+    to "16", so the cart classified as "runs" and shipped -- every level
+    decompressing to zeros, drawing an empty room with its clouds in it."""
     for op in (">>", "<<"):
         i = 0
         while True:
@@ -3529,7 +3576,7 @@ def _shifts_by_16(code):
                _BIT_VERB[">>"], _BIT_VERB["<<"], _BIT_VERB[">>>"]):
         for at in _call_sites(code, fn):
             args = _call_args(code, at)
-            if len(args) >= 2 and args[1] == "16":
+            if len(args) >= 2 and _count_of_16(args[1]):
                 return True
     return False
 

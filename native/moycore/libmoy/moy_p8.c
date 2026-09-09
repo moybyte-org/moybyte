@@ -50,6 +50,7 @@
  * for the sparse table the shim keeps for hosts without this.
  */
 
+#include <float.h>
 #include <math.h>
 #include <string.h>
 
@@ -1766,6 +1767,295 @@ static int l_tonum(lua_State *L)
     return 1;
 }
 
+/* -- split ----------------------------------------------------------------
+ *
+ * split(s, [sep], [convert]) is PICO-8's own -- Lua's string library has no
+ * twin for it -- and a ported cart's data is written in it: one
+ * `split"1,2,3,..."` per row, hundreds of them, and the carts that rebuild a
+ * level or a sprite out of them do it inside the frame rather than once.
+ * The shim's Lua (p8_lua_port.py) is the reference, transcribed into
+ * test/p8lib.moy beside this so the two lanes are held to one answer.
+ *
+ * Which mode runs is the TYPE of sep, never its value: a number cuts
+ * fixed-width chunks, anything else is a PLAIN (non-pattern) separator
+ * defaulting to a comma. Every part then goes through tonumber unless the
+ * third argument is false, so "1" comes back as the integer 1 and "1a" comes
+ * back as itself.
+ */
+
+/* One part, kept as the shim's `keep` keeps it. The conversion is tonumber's
+ * exactly -- lua_stringtonumber over the whole part, integer subtype and all
+ * -- because `split("1,2")[1]` is an INTEGER in the Lua lane, and a float
+ * here would print differently and floor-divide differently. */
+static void split_keep(lua_State *L, const char *p, size_t len, int as_num,
+                       lua_Integer n)
+{
+    lua_pushlstring(L, p, len);
+    if (as_num) {
+        /* lua_stringtonumber PUSHES whatever it managed to read and reports
+         * how far it got, so a part that only STARTS with a number leaves one
+         * on the stack -- "23\0xx" reads as 23 and stops at the NUL. tonumber
+         * calls that a failure, and so must this, but the value it pushed has
+         * to come back off or the table below is no longer at index -2 and
+         * rawseti writes into a string. The fuzzer found it; nothing else
+         * would have, since no cart's data row carries a NUL. */
+        const char *part = lua_tostring(L, -1);  /* Lua strings are NUL-terminated */
+        size_t used = lua_stringtonumber(L, part);
+        if (used == len + 1) lua_replace(L, -2);   /* the number is the part */
+        else if (used != 0) lua_pop(L, 1);         /* a prefix only: keep text */
+    }
+    lua_rawseti(L, -2, n);
+}
+
+static int l_split(lua_State *L)
+{
+    /* THE ARITY, PINNED, before a single push. `split"1,2"` passes one
+     * argument, and a stringified copy of it pushed onto the stack lands at
+     * index 2 -- where a later lua_isnoneornil(L, 2) reads it as the
+     * separator and the string cuts itself apart on its own text. settop is
+     * the whole defence: after it, indices 2 and 3 are the caller's or nil. */
+    lua_settop(L, 3);
+
+    if (lua_isnil(L, 1)) {           /* split(nil) is an empty table, and the
+                                        separator is never even looked at */
+        lua_createtable(L, 0, 0);
+        return 1;
+    }
+    {
+        /* `if num == nil then num = true end`: only an explicit false turns
+         * conversion off, false and nil being Lua's only falsy values. */
+        const int as_num = lua_isnoneornil(L, 3) ? 1 : lua_toboolean(L, 3);
+        const int by_width = (lua_type(L, 2) == LUA_TNUMBER);
+        const char *sep = ",";
+        size_t seplen = 1;
+        const char *s;
+        size_t slen;
+        lua_Integer n = 0;
+
+        /* A numeric STRING is a separator, not a width: the shim asks
+         * type(sep) == "number", so "2" cuts on the digit two. lua_type, not
+         * lua_isnumber -- that one answers yes to both. */
+        if (!by_width && lua_toboolean(L, 2)) {
+            /* `sep or ","` makes nil and false a comma; a table or true
+             * reaches string.find in the Lua lane and errors there, as the
+             * argument check errors here. */
+            sep = luaL_checklstring(L, 2, &seplen);
+            if (seplen == 0) { sep = ","; seplen = 1; }  /* the shim's own "" test */
+        }
+        s = luaL_tolstring(L, 1, &slen);  /* tostring(s): __tostring honoured */
+        lua_createtable(L, 0, 0);
+
+        if (by_width) {
+            lua_Number w = lua_tonumber(L, 2);
+            lua_Integer step, i;
+            /* `step = sep < 1 and 1 or sep`, then the shim's `for` over it.
+             * A NaN width compares false both ways and the loop never runs.
+             * A fractional one is FLOORED, here and in the shim: the raw
+             * float used to reach string.sub and error on the first chunk,
+             * which is neither PICO-8's answer nor an answer at all. */
+            if (w != w) { lua_remove(L, -2); return 1; }
+            if (!(w >= 1)) w = 1;
+            step = (w >= (lua_Number)slen) ? (lua_Integer)slen : (lua_Integer)w;
+            if (step < 1) step = 1;
+            for (i = 1; i <= (lua_Integer)slen; i += step) {
+                size_t at = (size_t)i - 1, take = (size_t)step;
+                if (at + take > slen) take = slen - at;
+                split_keep(L, s + at, take, as_num, ++n);
+            }
+        } else {
+            size_t i = 0;
+            for (;;) {
+                const char *hit = NULL, *p = s + i;
+                size_t room = slen - i;
+                while (room >= seplen) {          /* string.find(..., plain) */
+                    const char *q = (const char *)memchr(p, sep[0],
+                                                         room - seplen + 1);
+                    if (q == NULL) break;
+                    if (memcmp(q, sep, seplen) == 0) { hit = q; break; }
+                    room -= (size_t)(q - p) + 1;
+                    p = q + 1;
+                }
+                if (hit == NULL) {                /* the tail, empty or not */
+                    split_keep(L, s + i, slen - i, as_num, ++n);
+                    break;
+                }
+                split_keep(L, s + i, (size_t)(hit - s) - i, as_num, ++n);
+                i = (size_t)(hit - s) + seplen;
+            }
+        }
+        lua_remove(L, -2);           /* drop the stringified subject */
+        return 1;
+    }
+}
+
+/* -- rnd / srand ----------------------------------------------------------
+ *
+ * The generator is GAMEPLAY, not a detail: a cart that seeds the same way
+ * must lay out the same level, and low mem sky rebuilds its whole sky from a
+ * seed every frame -- ~600 calls a frame across the two verbs, which is what
+ * makes them worth a crossing at all (#66, #67).
+ *
+ * So the sequence here is Lua's own xoshiro256** from lmathlib.c,
+ * TRANSCRIBED, not approximated: test/p8lib.moy seeds both lanes alike and
+ * compares 20,000 draws from each of eight seeds. Transcribed rather than
+ * called because there is no C API onto lmathlib's state -- and the shim uses
+ * math.random nowhere but these two verbs, so promoting the pair leaves
+ * exactly one generator behind a cart's randomness, as before.
+ *
+ * FIGS is the float mantissa, read the way lmathlib reads it, because the
+ * float-to-[0,1) step throws away 64 - FIGS bits and a build with a wider
+ * lua_Number must throw away fewer.
+ */
+#define P8_FIGS_RAW l_floatatt(MANT_DIG)
+#if P8_FIGS_RAW > 64
+#define P8_FIGS 64
+#else
+#define P8_FIGS P8_FIGS_RAW
+#endif
+#define P8_SCALE_FIG ((lua_Number)0.5 / (lua_Number)((uint64_t)1 << (P8_FIGS - 1)))
+
+static uint64_t rand_rotl(uint64_t x, int n)
+{
+    return (uint64_t)((x << n) | (x >> (64 - n)));
+}
+
+static uint64_t nextrand(uint64_t *s)
+{
+    uint64_t s0 = s[0], s1 = s[1], s2 = s[2] ^ s0, s3 = s[3] ^ s1;
+    uint64_t res = (uint64_t)(rand_rotl((uint64_t)(s1 * 5), 7) * 9);
+    s[0] = s0 ^ s3;
+    s[1] = s1 ^ s2;
+    s[2] = s2 ^ (uint64_t)(s1 << 17);
+    s[3] = rand_rotl(s3, 45);
+    return res;
+}
+
+/* lmathlib's I2d: the top FIGS bits, as a float in [0,1). */
+static lua_Number rand_i2d(uint64_t x)
+{
+    int64_t sx = (int64_t)(x >> (64 - P8_FIGS));
+    lua_Number res = (lua_Number)((lua_Number)sx * P8_SCALE_FIG);
+    if (sx < 0) res = (lua_Number)(res + (lua_Number)1);   /* only at FIGS 64 */
+    return res;
+}
+
+/* lmathlib's project: a uniform draw into [0, n], retried through the
+ * generator rather than folded, which is why it needs the state. */
+static lua_Unsigned rand_project(lua_Unsigned ran, lua_Unsigned n, uint64_t *s)
+{
+    if ((n & (n + 1)) == 0) return ran & n;      /* n + 1 a power of two */
+    else {
+        lua_Unsigned lim = n;
+        lim |= (lim >> 1);
+        lim |= (lim >> 2);
+        lim |= (lim >> 4);
+        lim |= (lim >> 8);
+        lim |= (lim >> 16);
+#if (LUA_MAXUNSIGNED >> 31) >= 3
+        lim |= (lim >> 32);
+#endif
+        while ((ran &= lim) > n) ran = (lua_Unsigned)nextrand(s);
+        return ran;
+    }
+}
+
+static void rand_setseed(uint64_t *s, lua_Unsigned n1, lua_Unsigned n2)
+{
+    int i;
+    s[0] = (uint64_t)n1;
+    s[1] = (uint64_t)0xff;                       /* never a zero state */
+    s[2] = (uint64_t)n2;
+    s[3] = 0;
+    for (i = 0; i < 16; i++) nextrand(s);        /* spread the seed */
+}
+
+/* srand(x) is mrandomseed(flr(x or 0)), and it answers what randomseed
+ * answers -- the two seed words -- because `return mrandomseed(...)` hands
+ * them straight back and a cart may keep them. */
+static int l_p8_srand(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    lua_Integer n1;
+    lua_settop(L, 1);
+    if (lua_isinteger(L, 1)) {
+        n1 = lua_tointeger(L, 1);
+    } else if (!lua_toboolean(L, 1)) {
+        n1 = 0;                                  /* `x or 0` */
+    } else {
+        lua_Number f = (lua_Number)l_mathop(floor)(luaL_checknumber(L, 1));
+        if (!lua_numbertointeger(f, &n1))        /* randomseed's own check */
+            return luaL_error(L, "number has no integer representation");
+    }
+    rand_setseed(p->rng, (lua_Unsigned)n1, 0);
+    lua_pushinteger(L, n1);
+    lua_pushinteger(L, 0);
+    return 2;
+}
+
+/* rnd(n): a TABLE picks one of its elements, anything else scales a float in
+ * [0,1). Both draw exactly one value from the generator before anything can
+ * go wrong, which is what keeps the sequence in step with the shim's. */
+static int l_p8_rnd(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    lua_settop(L, 1);
+    if (lua_type(L, 1) == LUA_TTABLE) {
+        lua_Integer c;
+        int isnum;
+        lua_Unsigned r;
+        lua_len(L, 1);                           /* `#n`, __len honoured */
+        lua_pushinteger(L, 0);
+        if (lua_compare(L, -2, -1, LUA_OPEQ)) {  /* `if c == 0 then nil` */
+            lua_pushnil(L);
+            return 1;
+        }
+        lua_pop(L, 1);
+        c = lua_tointegerx(L, -1, &isnum);
+        if (!isnum) return luaL_error(L, "number has no integer representation");
+        lua_pop(L, 1);
+        /* math.random(c): low is 1, so an empty interval is c < 1 */
+        r = (lua_Unsigned)nextrand(p->rng);
+        if (c < 1) return luaL_error(L, "bad argument #1 to 'random' "
+                                        "(interval is empty)");
+        r = rand_project(r, (lua_Unsigned)c - (lua_Unsigned)1, p->rng);
+        lua_geti(L, 1, (lua_Integer)(r + 1));    /* `n[...]`, __index honoured */
+        return 1;
+    }
+    /* `mrandom() * (n or 1)`, and the multiplication is LUA'S -- a numeric
+     * string coerces, a __mul answers, a boolean raises -- so lua_arith does
+     * it rather than a second transcription of the coercion rules. */
+    lua_pushnumber(L, rand_i2d(nextrand(p->rng)));
+    if (lua_toboolean(L, 1)) lua_pushvalue(L, 1);
+    else lua_pushinteger(L, 1);
+    lua_arith(L, LUA_OPMUL);
+    return 1;
+}
+
+/* The generator's starting point. lmathlib seeds its own from the clock and
+ * the address of L and offers no way to read that, so the machine borrows the
+ * SAME entropy by drawing two words from it, once, at open -- a cart that
+ * never calls srand still differs run to run, as it did before. */
+static void rand_open(lua_State *L, moy_p8 *p)
+{
+    lua_Unsigned n[2];
+    int i, top = lua_gettop(L);
+    n[0] = (lua_Unsigned)(size_t)L;
+    n[1] = (lua_Unsigned)(size_t)p;
+    lua_getglobal(L, "math");
+    if (lua_type(L, -1) == LUA_TTABLE) {
+        lua_getfield(L, -1, "random");
+        for (i = 0; i < 2 && lua_isfunction(L, -1); i++) {
+            lua_pushvalue(L, -1);
+            lua_pushinteger(L, 0);               /* math.random(0): all bits */
+            if (lua_pcall(L, 1, 1, 0) != LUA_OK) break;
+            n[i] ^= (lua_Unsigned)lua_tointeger(L, -1);
+            lua_pop(L, 1);
+        }
+    }
+    lua_settop(L, top);
+    rand_setseed(p->rng, n[0], n[1]);
+}
+
 /* -- the p8 bit verbs -----------------------------------------------------
  *
  * PICO-8's numbers are 16.16 fixed point and its bit verbs work on all 32
@@ -2325,6 +2615,7 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
         {"__moy_p8_btn", l_p8_btn}, {"__moy_p8_btnp", l_p8_btnp},
         {"__moy_p8_input_frame", l_p8_input_frame},
         {"__moy_p8_input_tick", l_p8_input_tick},
+        {"__moy_p8_rnd", l_p8_rnd}, {"__moy_p8_srand", l_p8_srand},
     };
     /* The stdlib half: no machine behind it, so no upvalue to carry. */
     static const struct { const char *name; lua_CFunction fn; } S[] = {
@@ -2335,6 +2626,7 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
         {"__moy_min", l_min}, {"__moy_max", l_max}, {"__moy_mid", l_mid},
         {"__moy_sgn", l_sgn}, {"__moy_sin", l_sin}, {"__moy_cos", l_cos},
         {"__moy_atan2", l_atan2}, {"__moy_tonum", l_tonum},
+        {"__moy_split", l_split},
         {"__moy_band", l_band}, {"__moy_bor", l_bor}, {"__moy_bxor", l_bxor},
         {"__moy_bnot", l_bnot}, {"__moy_shl", l_shl}, {"__moy_shr", l_shr},
         {"__moy_lshr", l_lshr}, {"__moy_rotl", l_rotl}, {"__moy_rotr", l_rotr},
@@ -2352,6 +2644,7 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
     p->mem = mem;
     p->rom = rom;
     seed(p);
+    rand_open(L, p);
     if (rom) memcpy(rom, mem, MOY_P8_ROM);
     for (i = 0; i < sizeof T / sizeof T[0]; i++) {
         lua_pushlightuserdata(L, p);

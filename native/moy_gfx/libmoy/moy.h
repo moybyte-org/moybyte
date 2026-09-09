@@ -433,6 +433,11 @@ typedef struct {
     uint16_t hold[6];
     uint8_t pending[6];
     uint8_t consumed;
+    /* rnd/srand's generator: Lua's own xoshiro256**, transcribed in
+     * src/moy_p8.c so a seeded cart lays out the same level it laid out
+     * through the shim's math.random. Seeded from lmathlib's state at open,
+     * so a cart that never calls srand still differs run to run. */
+    uint64_t rng[4];
 } moy_p8;
 int moy_p8_open(struct lua_State *L, moy_console *con, moy_p8 *p8,
                 uint8_t *mem, uint8_t *rom);
