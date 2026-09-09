@@ -1023,6 +1023,16 @@ class _BakeTracker:
         self.freed += 1
 
 
+class _CartInput:
+    """The two methods make_api binds off an InputState."""
+
+    def held(self, name):
+        return False
+
+    def pressed(self, name):
+        return False
+
+
 def _owned_paint_image(m, iw, ih, owner="cart"):
     im = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
     im._owner = owner
@@ -1097,6 +1107,91 @@ def test_an_off_heap_paint_bake_draws_the_same_pixels():
     dev.spr(owned, 2, 1)
     assert isinstance(owned._rgb_i, memoryview)
     assert _dev_rgb565(dev) == on_heap
+
+
+def test_one_owner_may_hold_only_so_many_full_surface_loans():
+    """#186: off-heap bytes have no collector, so the loan register is held
+    until its owner is reclaimed -- and a cart can MINT images (`Image(320, 240,
+    pix, -1)` inside _draw is legal kid code). Uncapped that is a fresh 150KB
+    loan every frame until PSRAM is gone, which would turn a wasteful cart into
+    a dead one. Past the cap a bake takes the gc bytearray it took before this
+    mechanism existed: the register stops growing and the cart is no worse off
+    than it was."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    imgs = [_owned_paint_image(m, 320, 240) for _ in range(m._MAX_LENT_BAKES + 3)]
+    for img in imgs:
+        dev.spr(img, 0, 0)
+    lent = [i for i in imgs if isinstance(i._rgb_i, memoryview)]
+    assert len(lent) == m._MAX_LENT_BAKES == len(tr.live)
+    assert lent == imgs[:m._MAX_LENT_BAKES], "the loans in hand are the first asked for"
+    for img in imgs[m._MAX_LENT_BAKES:]:
+        assert isinstance(img._rgb_i, bytearray), "past the cap: the old gc path"
+
+    # ...and the cap costs nothing at reclaim: every loan taken is given back,
+    # and no gc-heap bake is mistaken for one.
+    dev.reclaim_layers("cart")
+    assert tr.freed == m._MAX_LENT_BAKES and not tr.live
+
+
+def test_release_bakes_returns_the_loan_and_leaves_the_layers_alone():
+    """The verb for an owner that is not a cart RUN (the Paint app, which lives
+    as long as the console and so never dies for reclaim_layers to notice). It
+    returns the bakes and NOTHING else -- a leaving app must not drop the map
+    cache or pool the layers of whatever it is leaving to."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    img = _owned_paint_image(m, 320, 240, owner="artwork")
+    dev.spr(img, 0, 0)
+    dev._mapcache = object()
+    dev._lent_layers = {"cart": [(bytearray(8), 8)]}
+
+    dev.release_bakes("artwork")
+    assert tr.freed == 1 and not tr.live
+    assert img._rgb_i is None
+    assert dev._mapcache is not None, "release_bakes is not reclaim_layers"
+    assert dev._lent_layers.get("cart"), "nor does it pool a cart's layers"
+
+    dev.release_bakes("artwork")        # idempotent: nothing lent, nothing freed
+    assert tr.freed == 1
+
+
+def test_a_cart_that_builds_its_own_image_gets_the_same_loan():
+    """The hole the loaded-image fix left open (#186): the cart API hands out
+    the `Image` CLASS as well as image(), and a 320x240 picture a cart
+    constructs bakes exactly the same 153,600 bytes as one the engine decoded.
+    Only the constructor differed, so only the constructor had to change."""
+    from runtime import cart_api
+    from runtime.moy_image import Image as PlainImage
+
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    ns = cart_api.make_api(dev, _CartInput(), {})
+    cart_image = ns["Image"]
+    assert issubclass(cart_image, PlainImage)
+    assert cart_image is cart_api.make_api(dev, _CartInput(), {})["Image"], \
+        "one class per owner, not one per run: make_layer nests make_api"
+    assert cart_api.make_api(dev, _CartInput(), {}, owner="wallpaper")["Image"] \
+        is not cart_image
+
+    img = _paint_image(lambda w, h, p, t: cart_image(w, h, p, t), 320, 240)
+    assert isinstance(img, PlainImage), "spr() and background() dispatch on this"
+    assert img._owner == "cart"
+    dev.spr(img, 0, 0)
+    assert isinstance(img._rgb_i, memoryview) and len(tr.live) == 1
+
+    # The ASCII-art constructor still reaches through the subclass, and stays on
+    # the gc heap -- a kid's 8x8 sprite is nowhere near the full-surface bar.
+    tiny = cart_image.from_ascii(["..##..", ".####."], {"#": 8})
+    assert isinstance(tiny, PlainImage) and tiny._owner == "cart"
+    dev.spr(tiny, 0, 0)
+    assert len(tr.live) == 1
+
+    dev.reclaim_layers("cart")          # the run dies: the built image's loan too
+    assert tr.freed == 1 and not tr.live and img._rgb_i is None
 
 
 def test_spr_paint_image_into_layer_matches_host():

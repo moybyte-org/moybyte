@@ -40,6 +40,37 @@ except ImportError:
     from runtime.ticks import _ticks_ms, _ticks_diff
 
 
+# owner -> the Image subclass a cart of that owner constructs (below).
+_OWNED_IMAGE = {}
+
+
+def _owned_image_cls(owner):
+    """The `Image` a CART builds for itself, tagged with the run that owns it.
+
+    image() stamps `_owner` on what the ENGINE loads, and that is only half the
+    verb table: `Image` is exposed too, and a cart that constructs its own
+    320x240 picture -- `system_carts/paint.moy`'s body is the one in the tree --
+    got an untagged one, so its 153,600-byte RGB565 bake stayed on the gc heap,
+    which is the heap that has no run that size once a console has been up a
+    while (#186, device_canvas._paint_bake_buf). Same verb table, same size,
+    same failure; only the constructor differed.
+
+    A SUBCLASS rather than a factory function, because `Image` is a name a cart
+    reaches through: `Image.from_ascii(...)` is documented and `isinstance(x,
+    Image)` is how spr() and background() dispatch, and both keep working
+    through a subclass. Cached per owner -- there are three in the tree
+    ("cart", "wallpaper", "wallpaper_pv") -- so make_layer's nested make_api
+    does not mint a class per layer.
+    """
+    cls = _OWNED_IMAGE.get(owner)
+    if cls is None:
+        class _OwnedImage(Image):
+            pass
+        _OwnedImage._owner = owner          # a CLASS attribute: no per-image cost
+        _OWNED_IMAGE[owner] = cls = _OwnedImage
+    return cls
+
+
 def _rotate_indices(*args):
     """widgets.rotate_indices (#85/#93 all-around sprite rotation), bound
     lazily for the same leaf-module reason as color() above -- only the scene
@@ -143,7 +174,10 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     borrows off-heap memory, so the device can hand it back when the run dies:
     layer loans (the #63 leak fix) and, since 2026-09-09, a paint image's
     full-screen RGB565 bake (#186 -- see device_canvas._paint_bake_buf, and the
-    cart that would not start that it fixes). A gc-heap canvas ignores it.
+    cart that would not start that it fixes). It rides on BOTH ways a cart gets
+    a paint image, the loaded one (image()) and the built one (`Image`), because
+    the bake that fails does not care which constructor made the picture. A
+    gc-heap canvas ignores it.
     """
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
                            # repeated image(name) returns the SAME Image (#63) and its
@@ -584,7 +618,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
         "rnd": lambda n=1.0: random.random() * n,
         "flr": lambda x: int(x // 1),
-        "Image": Image,
+        "Image": _owned_image_cls(owner),
         "image": image,
     }
     # Capability-gated network API (#38): the shared Workstation passes a non-None

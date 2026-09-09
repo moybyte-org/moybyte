@@ -220,3 +220,55 @@ def test_the_seed_background_opens_in_paint_and_is_editable(tmp_path):
     app.open()
     assert (app.doc.W, app.doc.H) == (320, 240)
     assert bytes(app.doc.pix) == got[2]
+
+
+def _bake_bytes(img):
+    return img.w * img.h * 2
+
+
+def test_paints_full_screen_bake_is_borrowed_and_given_back(tmp_path):
+    """#186: Paint is the one app that rebuilds a WHOLE screen of RGB565 over
+    and over -- every stroke invalidates the bake and the next frame rebuilds
+    all 153,600 bytes of it -- and that is the allocation a fragmented gc heap
+    refuses first (measured on both S3 boards: megabytes free, no run past
+    ~147KB). So the document's bitmap names an owner and the device canvas
+    lends it off-heap memory instead.
+
+    Off-heap memory has no collector, so the loan needs a seam to come back at,
+    and an app has no death to hang one off -- `_init_apps` builds every app
+    once and they live as long as the console. The document's own seams are the
+    answer: it is LEFT (close) or REPLACED (a new drawing)."""
+    from device import device_canvas
+    from runtime.artwork import PaintDocument
+
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_paint(ws)
+
+    doc = app.doc
+    assert doc.image._owner == PaintDocument.OWNER == "artwork"
+    assert doc.thumb_image._owner == PaintDocument.OWNER
+    # The picture is over the full-surface bar and the half-scale thumb is
+    # under it, so a stroke in FIT view -- the default -- costs no loan at all.
+    assert _bake_bytes(doc.image) >= device_canvas._OFFHEAP_BAKE_BYTES
+    assert _bake_bytes(doc.thumb_image) < device_canvas._OFFHEAP_BAKE_BYTES
+    # A whole document plus its thumb is two loans at the desktop size, which is
+    # why the per-owner cap is not one.
+    big = PaintDocument(512, 300)
+    assert _bake_bytes(big.thumb_image) >= device_canvas._OFFHEAP_BAKE_BYTES
+    assert 2 <= device_canvas._MAX_LENT_BAKES
+
+    # The seams. A gc-heap canvas has no release_bakes at all (the host's), so
+    # the probe is a getattr -- record what a device canvas would be told.
+    cv = app._surf.canvas()
+    assert app._surf.canvas() is cv, "the app draws on one canvas"
+    given_back = []
+    cv.release_bakes = given_back.append
+
+    app.close()                       # leaving, by any route (go_home sweeps it)
+    assert given_back == ["artwork"]
+    app.open()                        # ...and a re-open, whose load() may re-mint
+    assert given_back == ["artwork"] * 2
+    app._fresh_doc(app.doc.W, app.doc.H)          # NEW: this document is gone
+    assert given_back == ["artwork"] * 3
+    assert app.doc is not doc

@@ -90,8 +90,20 @@ _OFFHEAP_BAKE_BYTES = 64 * 1024
 # buf)]. Module-level for the reason _LAYER_POOL is: the canvas that BAKES an
 # image is often a layer's throwaway canvas, while the reclaim call arrives on
 # the root -- a per-canvas register would have leaked exactly the buffers a
-# scroll cart makes. Drained by reclaim_layers(owner).
+# scroll cart makes. Drained by release_bakes(owner) / reclaim_layers(owner).
 _LENT_BAKES = {}
+
+# ...and the most one owner may hold at once. The cap is not tidiness, it is
+# the price of lending to memory a CART can mint: off-heap bytes have no
+# collector, so every entry here is held until its owner is reclaimed, and the
+# register pins the Image too. `Image(320, 240, pix, -1)` inside _draw is legal
+# kid code, and uncapped it would take a fresh 153,600-byte loan every frame
+# until PSRAM was gone -- turning a merely wasteful cart into a dead one.
+# Past the cap a bake takes the gc bytearray it took before this mechanism
+# existed, so the pathological cart degrades to the OLD behaviour instead.
+# Four covers every shipped case with room: a cart's backdrop is one, the Paint
+# app's document plus its half-scale thumb is two.
+_MAX_LENT_BAKES = 4
 
 
 def _bake_buf(img, nbytes):
@@ -118,15 +130,20 @@ def _paint_bake_buf(img, nbytes):
     can.
 
     Off-heap memory has no collector, so it is taken only for an image that
-    names an OWNER (`_owner`, stamped by cart_api's image() with the run that
-    asked for it): _LENT_BAKES holds the loan until reclaim_layers(owner)
-    frees it -- the same seam, and the same two call sites, that already pool a
-    dead run's layer buffers. An UNOWNED paint image (the WM's window rasters,
-    a wallpaper thumbnail, the Paint app's own canvas) keeps its gc bytearray,
-    because nothing would ever free it.
+    names an OWNER (`_owner`) and so has something that will hand the buffer
+    back: a CART's images, whether the engine loaded them (cart_api's image())
+    or the cart built them itself (its `Image`), reclaimed with the run; and
+    the Paint app's document, reclaimed when the app is left. _LENT_BAKES holds
+    the loan until release_bakes(owner) -- which reclaim_layers(owner) calls,
+    so a dead run's bakes go back through the same seam, and the same two call
+    sites, that already pool its layer buffers. An UNOWNED paint image (the
+    WM's window rasters, a wallpaper blit) keeps its gc bytearray, because
+    nothing would ever free it.
 
     A re-bake reuses the loan rather than taking a second one, so an image
-    whose _rgb_i is invalidated repeatedly cannot grow the register.
+    whose _rgb_i is invalidated repeatedly -- which is every stroke a kid paints
+    -- cannot grow the register. What CAN grow it is a new image each time, so
+    an owner is capped at _MAX_LENT_BAKES and falls back to the gc heap past it.
     """
     owner = getattr(img, "_owner", None)
     if _moybuf is None or owner is None or nbytes < _OFFHEAP_BAKE_BYTES:
@@ -140,6 +157,12 @@ def _paint_bake_buf(img, nbytes):
             _moybuf.free(buf)
             lent.pop(i)
             break
+    if len(lent) >= _MAX_LENT_BAKES:
+        return bytearray(nbytes)       # the gc heap, flatly: _bake_buf's own
+                                       # off-heap lane is tracked by a COVER's
+                                       # owner, and past the cap this image has
+                                       # none -- an untracked loan is the one
+                                       # outcome worse than a refused bake
     buf = _moybuf.alloc(nbytes)
     if isinstance(buf, memoryview):     # a bytearray back means PSRAM said no
         lent.append((img, buf))
@@ -147,7 +170,7 @@ def _paint_bake_buf(img, nbytes):
 
 
 def _release_bakes(owner):
-    """Free a dead program's off-heap paint bakes (see _paint_bake_buf)."""
+    """Free `owner`'s off-heap paint bakes (see _paint_bake_buf)."""
     lent = _LENT_BAKES.pop(owner, None)
     if not lent or _moybuf is None:
         return
@@ -2711,6 +2734,17 @@ class DeviceCanvas:
         rel = getattr(self._comp, "release", None)
         if rel is not None:
             rel()
+
+    def release_bakes(self, owner):
+        """Return `owner`'s off-heap full-surface paint bakes (#186) and NOTHING
+        else -- no layer pooling, no map cache dropped.
+
+        The verb for an owner that is not a cart RUN: the Paint app is a
+        console-lifetime process, so it has no death for reclaim_layers to hang
+        off, and its leaving hook must not drop a map cache or drain a layer
+        copy that belongs to whatever it is leaving to. Probed by getattr like
+        its sibling -- the host Canvas has neither."""
+        _release_bakes(owner)
 
     def reclaim_layers(self, owner):
         """Return a dead program's pooled layer buffers to _LAYER_POOL for reuse

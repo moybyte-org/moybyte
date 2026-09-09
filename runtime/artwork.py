@@ -52,6 +52,13 @@ class PaintDocument:
     """An indexed document; UI/window size never changes its chosen pixel size."""
 
     PAPER = 7
+    # The off-heap loan key for this document's bakes (#186). The app id, so a
+    # reader of moy_alloc's ledger can name what is holding the memory. Paint is
+    # the one app that repaints a WHOLE screen of indices over and over -- every
+    # stroke invalidates the bake and the next frame rebuilds all 153,600 bytes
+    # of it -- so it is the one app whose bake buffer must not be asked of a
+    # fragmented gc heap. Released by PaintAppLayer._return_bakes.
+    OWNER = "artwork"
 
     def __init__(self, width=320, height=240, seed=False):
         self.W = int(width)
@@ -61,8 +68,9 @@ class PaintDocument:
         self.pix = bytearray(self.W * self.H)
         self.pix[:] = bytes((self.PAPER,)) * len(self.pix)
         self.thumb = bytearray(self.thumb_w * self.thumb_h)
-        self.image = Bitmap(self.W, self.H, self.pix)
-        self.thumb_image = Bitmap(self.thumb_w, self.thumb_h, self.thumb)
+        self.image = Bitmap(self.W, self.H, self.pix, self.OWNER)
+        self.thumb_image = Bitmap(self.thumb_w, self.thumb_h, self.thumb,
+                                  self.OWNER)
         self.history = []
         self.future = []
         self.action_live = False
@@ -432,6 +440,7 @@ class PaintAppLayer:
 
     def open(self):
         art = self._art
+        self._return_bakes()           # #186: load() may re-mint the document
         loaded = art.load()
         if self.doc.load(loaded):
             self.status = (art.why_read_only()
@@ -520,11 +529,27 @@ class PaintAppLayer:
         self._idle = self.AUTOSAVE_S - self.RETRY_S
         return False
 
+    def _return_bakes(self):
+        """Hand this document's off-heap RGB565 bakes back (#186).
+
+        Paint borrows the one buffer the gc heap cannot promise -- a whole
+        screen of RGB565, 153,600 bytes at 320x240 and 307,200 on a desktop --
+        and off-heap memory has no collector, so the loan needs a death to be
+        returned at. An app has none: `_init_apps` builds every app once and
+        they live as long as the console. So the seams are the document's
+        instead -- it is LEFT (close) or REPLACED (a new drawing) -- and both
+        are points where nothing is mid-draw. The canvas nulls the bake as it
+        frees, so the next frame rebuilds rather than reading returned RAM."""
+        rel = getattr(self._surf.canvas(), "release_bakes", None)
+        if rel is not None:
+            rel(PaintDocument.OWNER)
+
     def close(self):
         """The app-API LEAVING hook (docs/app_api_v1.md): the host calls it when
         this app comes off the screen by ANY route. `_save` is change-gated, so
         an untouched drawing costs no write."""
         self._save()
+        self._return_bakes()
 
     # The bar's hard-commit hook is the SAME write. The context-X is an exit
     # path that does not always end in go_home's close sweep -- a cart image
@@ -541,6 +566,7 @@ class PaintAppLayer:
         file), point the service at a fresh name, and blank the canvas
         (`seed` passes through to PaintDocument's starter art)."""
         self._save()
+        self._return_bakes()           # #186: the outgoing document's loan
         self._art.new_doc(w, h)
         self.doc = PaintDocument(w, h, seed=seed)
         self._unsaved = False
