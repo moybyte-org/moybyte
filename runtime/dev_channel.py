@@ -139,6 +139,50 @@ def _toggle_cmd(cmd):
     return None
 
 
+def verbs_line(hz, frames, rows, top=14):
+    """The `VERBS` line: where a Lua/p8 cart's frame actually goes, PER FRAME.
+
+    Per frame and not per window, because the question this answers is always
+    "what is in a frame" -- and because the two shapes it distinguishes are only
+    legible that way. `spr n=180 t=14.20` is a dispatch problem (a hundred and
+    eighty crossings), `map n=1.0 t=14.20` is one kernel doing too much work,
+    and the fix for one is not the fix for the other. Sorted by time, because
+    the top row is nearly always the whole answer.
+
+    `t` is SELF time -- the verb's own, with every wrapped verb called under it
+    subtracted. `in` is its INCLUSIVE time and appears only where the two
+    differ, which is exactly the verbs that run Lua: foreach and all. Without
+    the split, foreach reads as the most expensive thing in the cart while
+    costing nothing itself, and points a fix at the wrong file.
+
+    Read `t` as C cost for a LEAF verb, which is nearly all of them. On a verb
+    carrying an `in`, `t` is its C cost PLUS whatever Lua ran under it that was
+    not itself a verb -- because non-verb Lua has no row of its own and can only
+    be charged to the nearest verb enclosing it.
+
+    `tot` sums SELF, so it is the frame's time in C. The difference between it
+    and PERF's logic+render is the cart's own Lua -- the residual that decides
+    whether a cart is short of 30 fps because of the engine or because of what
+    it asks for, and the number no other instrument here reports.
+    """
+    if not frames or not hz:
+        return "VERBS frames=0"
+    scale = 1000.0 / (float(hz) * frames)          # ticks -> ms per frame
+    rows = sorted(rows, key=lambda r: -r[2])
+    tot = 0.0
+    for row in rows:
+        tot += row[2] * scale
+    out = ["VERBS frames=%d tot=%.2f" % (frames, tot)]
+    for row in rows[:top]:
+        name, calls, self_t = row[0], row[1], row[2]
+        incl = row[3] if len(row) > 3 else self_t
+        cell = "%s n=%.1f t=%.2f" % (name, calls / float(frames), self_t * scale)
+        if incl > self_t * 1.05:
+            cell += " in=%.2f" % (incl * scale)
+        out.append(cell)
+    return " | ".join(out)
+
+
 def _remote_state(ws):
     """One-line JSON snapshot for the `state` command -- the assertion source an
     on-glass harness reads instead of pixels. Every field best-effort: a broken
@@ -535,6 +579,49 @@ class DevChannel:
             ran = True
         return ran
 
+    def _verbs(self, parts):
+        """`verbs on|off|reset` and bare `verbs` -- the Lua/p8 tier's per-verb
+        profiler (moycore.profile / verb_stats).
+
+        It is its OWN switch rather than a rider on `diag`, and deliberately:
+        every diag session would otherwise pay a profiler's per-call tax to
+        answer a question a measurement session asks on purpose. Off is the
+        default and off means the cart's globals are libmoy's C functions with
+        nothing wrapped around them.
+        """
+        try:
+            import moycore
+        except ImportError:
+            print("REMOTE verbs: no moycore on this board")
+            return
+        arg = parts[1] if len(parts) > 1 else ""
+        if arg in ("0", "off"):
+            moycore.profile(0)
+            print("REMOTE verbs off")
+            return
+        if arg in ("1", "on"):
+            n = moycore.profile(1)
+            moycore.verb_reset()
+            # None means armed but not installed -- no VM to install into yet.
+            # A cart CAPTURES its globals as it loads, so arming and then
+            # launching is the reading that misses nothing; installing into a
+            # running cart still catches every verb it calls by global name,
+            # which is nearly all of them.
+            if n is None:
+                print("REMOTE verbs armed (takes effect at the next launch)")
+            else:
+                print("REMOTE verbs on wrapped=%d" % n)
+            return
+        if arg == "reset":
+            moycore.verb_reset()
+            print("REMOTE verbs reset")
+            return
+        st = moycore.verb_stats()
+        if st is None:
+            print("REMOTE verbs: not armed (`verbs on`, then relaunch the cart)")
+            return
+        print(verbs_line(st[0], st[1], st[2]))
+
     def report(self, diag):
         """One SERIAL line per diag tick, and it is the channel's self-diagnosis:
         `rx` climbing while `lines` stays 0 means something is injecting bytes
@@ -767,6 +854,9 @@ class DevChannel:
             ws.show_fps = on
             ws._dirty = True
             print("REMOTE diag %s" % ("on" if on else "off"))
+            return
+        if cmd == "verbs":
+            self._verbs(parts)
             return
         tog = _toggle_cmd(cmd)
         if tog is not None:

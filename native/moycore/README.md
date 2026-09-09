@@ -117,6 +117,58 @@ sampled at the VM's large allocations, which is where the floor decision is
 actually made, and not between them. `sram_free_min` is `None` until a run
 reaches that test at all.
 
+## The per-verb profiler (`profile` / `verb_stats` / `verb_reset`)
+
+A Lua/p8 cart draws through libmoy's C verbs straight into the framebuffer — for
+a p8 cart literally so, since `moy_p8.c` makes the canvas the screen region — so
+**every meter `DeviceCanvas` owns reads zero on this tier**. `DRAW2` says
+`layer=0 batch=0 map=0 text=0 fill=0` and `BATCH` says 0 sprites while the frame
+spends 40 ms somewhere. That is why every pass that asked where a slow port's
+render went ended at "the cart's own code": there was no instrument that could
+say otherwise.
+
+These three open it. `profile(1)` replaces every C-function global with a
+closure that times the original; `verb_stats()` returns `(hz, frames, ((name,
+calls, self, inclusive), ...))` and `verb_reset()` zeroes it. The serial face is
+`verbs on|off|reset` and a bare `verbs`, which prints one `VERBS` line of
+**per-frame** calls and milliseconds (`runtime/dev_channel.verbs_line`).
+
+Four things about it are load-bearing:
+
+- **It gates at INSTALL, not per call.** Disarmed, a cart's globals ARE the
+  vendored C functions — there is no wrapper in the hot path, so there is no
+  gate to test in it and nothing to measure. An `if (prof)` inside a verb
+  reached three thousand times a frame is a tax the shipping frame would pay
+  forever to answer a question asked twice a year. It is also its own switch
+  rather than a rider on `diag`, for the same reason: a measurement session
+  arms it, an ordinary diag session does not.
+- **The clock is the CPU cycle counter** (`esp_cpu_get_cycle_count`, one
+  instruction), not `mp_hal_ticks_us`. That clock is `esp_timer_get_time` on
+  both S3 boards and costs about what the verbs being measured cost — at three
+  thousand calls a frame it would not perturb the measurement so much as become
+  it. The rate is MEASURED at install against the millisecond clock and handed
+  back as `hz`, because the boards do not share one frequency and the host has
+  no cycle counter at all.
+- **Self and inclusive are both kept.** `foreach` is why: five calls a frame and
+  ten milliseconds on moss moss, every bit of it the Lua function foreach was
+  handed. Charged inclusively it reads as the slowest thing in the cart and
+  aims a fix at the wrong file. A verb is charged what it spent minus what its
+  callees spent, and non-verb Lua lands on the nearest verb enclosing it — so
+  `t` is C cost for a leaf verb, and for one carrying an `in` it is C cost plus
+  the Lua underneath.
+- **The wrapper carries the original's upvalue and calls it DIRECTLY.** libmoy's
+  p8 verbs keep the machine pointer in upvalue 1 and `register()`'s trampolines
+  keep their index there, so the wrapper's upvalue 1 is the original's and
+  `fn(L)` — never `lua_call` — leaves `lua_upvalueindex(1)` resolving correctly
+  with no extra Lua frame. A closure with two upvalues would be mis-wrapped, so
+  one is skipped rather than guessed at.
+
+Install happens at `load()` when armed, before the chunk runs, because a cart
+captures its globals as it loads — the p8 shim RESOLVES its verbs there
+(`spr = __moy_p8_spr or spr`), so the name a cart calls is not the name libmoy
+registered. Arming and then launching is the reading that misses nothing;
+arming into a running cart still catches every verb it calls by global name.
+
 Two verbs serve the pool and nothing else:
 
 - **`gc()`** → the VM's heap in KB after a full, stop-the-world collect. A

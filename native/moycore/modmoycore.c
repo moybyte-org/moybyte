@@ -1102,6 +1102,271 @@ static mp_obj_t mod_register(mp_obj_t name_obj, mp_obj_t fn)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_register_obj, mod_register);
 
+// -- the per-verb profiler ---------------------------------------------------
+//
+// WHY IT EXISTS. A Lua/p8 cart draws through libmoy's own C verbs straight into
+// the framebuffer -- moy_p8.c's header puts it plainly, "the canvas IS the
+// screen region" -- so DeviceCanvas' meters read all-zero on one. DRAW2 says
+// layer=0 batch=0 map=0 text=0 fill=0 and BATCH says 0 sprites while the frame
+// spends 50ms somewhere. Every pass that asked where that went therefore hit an
+// unopenable box and concluded "the cart's own code", which is a guess. This
+// opens it: calls and time PER VERB, so a frame made of 3000 calls at 17us is
+// distinguishable from one made of 40 at 1.2ms. Those are different problems
+// with different fixes, and the ledger (#66, #67) has been unable to tell them
+// apart on this tier since the tier existed.
+//
+// WHAT IT COSTS WITH IT OFF: nothing, and not "nearly nothing". Disarmed, the
+// cart's globals ARE the vendored C functions, exactly as moy_lua_open and
+// moy_p8_open left them -- there is no wrapper in the hot path and so no gate
+// to test in it. That is the whole reason this gates at INSTALL rather than per
+// call: an `if (prof)` inside a verb reached three thousand times a frame is a
+// tax the shipping frame pays forever to answer a question asked twice a year.
+//
+// HOW IT WRAPS. Each C-function global is replaced by a closure over three
+// upvalues: [1] the original's own upvalue (libmoy's p8 verbs carry the machine
+// pointer there, register()'s trampolines their index), [2] the original
+// function as a value, [3] the slot. The wrapper calls the original DIRECTLY --
+// fn(L), never through lua_call -- so no Lua call frame is added and the
+// original's lua_upvalueindex(1) still resolves, because the closure executing
+// is ours and its upvalue 1 is where the original's was. Cost per call: two
+// clock reads and two adds.
+#define PROF_MAX 192
+#define PROF_NAMES "moy.prof.names"   // registry: slot+1 -> the global's name
+#define PROF_ORIG  "moy.prof.orig"    // registry: slot+1 -> the original value
+
+// The clock is the CPU cycle counter where there is one. mp_hal_ticks_us() is
+// esp_timer_get_time() on both S3 boards, and a systimer read costs about what
+// the verbs being measured cost -- at three thousand calls a frame it would not
+// perturb the measurement so much as become it. CCOUNT is one instruction.
+#if defined(__has_include)
+#  if __has_include(<esp_cpu.h>)
+#    include <esp_cpu.h>
+#    define PROF_CYCLES 1
+#  endif
+#endif
+#ifdef PROF_CYCLES
+#  define PROF_NOW() ((uint32_t)esp_cpu_get_cycle_count())
+#else
+#  define PROF_NOW() ((uint32_t)mp_hal_ticks_us())
+#endif
+
+static struct { uint32_t calls; uint32_t ticks; uint32_t self; } g_prof[PROF_MAX];
+static uint32_t g_prof_child;     // ticks charged to callees of the running verb
+static uint32_t g_prof_frames;    // ticks since the reset, for per-frame means
+static uint32_t g_prof_hz;        // profiler ticks per second, measured
+static int      g_prof_n;         // slots in use
+static uint8_t  g_prof_arm;       // install on the next load()
+static uint8_t  g_prof_on;        // wrappers are on the live VM
+
+// Lua's base library, minus print -- which the p8 shim replaces with a verb we
+// very much want to measure. Skipped rather than wrapped: pcall and error
+// unwind straight through a wrapper, next is what a for loop calls directly
+// rather than through the global, and none of them is a draw verb.
+static const char *const PROF_SKIP[] = {
+    "pcall", "xpcall", "error", "assert", "select", "next", "pairs", "ipairs",
+    "setmetatable", "getmetatable", "rawget", "rawset", "rawequal", "rawlen",
+    "type", "tostring", "tonumber", "unpack", NULL
+};
+
+// INCLUSIVE and SELF, because a verb that calls back into Lua would otherwise
+// be read as the slowest thing in the cart. foreach() is the case that forced
+// this: five calls a frame and ten milliseconds inclusive on moss moss -- all
+// of it the Lua function foreach was handed, none of it foreach. Reported as
+// verb cost that says "optimise foreach in C", which is precisely the wrong
+// conclusion and precisely the kind this whole instrument exists to prevent.
+// So a verb is charged what it spent MINUS what its callees spent, and the
+// inclusive figure is kept alongside rather than thrown away: `t` says what C
+// cost, `in` says how much of the frame ran underneath it.
+static int prof_call(lua_State *L)
+{
+    lua_CFunction fn = lua_tocfunction(L, lua_upvalueindex(2));
+    int slot = (int)lua_tointeger(L, lua_upvalueindex(3));
+    uint32_t saved = g_prof_child;
+    uint32_t t0, dt;
+    int n;
+    g_prof_child = 0;
+    t0 = PROF_NOW();
+    n = fn(L);
+    dt = PROF_NOW() - t0;
+    g_prof[slot].ticks += dt;
+    g_prof[slot].self += (g_prof_child < dt) ? dt - g_prof_child : 0;
+    g_prof[slot].calls++;
+    g_prof_child = saved + dt;
+    return n;
+}
+
+// Ticks per second, MEASURED against the millisecond clock rather than taken
+// from a Kconfig: the two S3 boards and the two P4s do not run at one
+// frequency, and a wrong constant here is a wrong answer everywhere downstream.
+static uint32_t prof_calibrate(void)
+{
+#ifdef PROF_CYCLES
+    uint32_t u0 = (uint32_t)mp_hal_ticks_us(), c0 = PROF_NOW(), u1, c1;
+    do { u1 = (uint32_t)mp_hal_ticks_us(); } while (u1 - u0 < 2000u);
+    c1 = PROF_NOW();
+    return (uint32_t)(((uint64_t)(c1 - c0) * 1000000u) / (uint64_t)(u1 - u0));
+#else
+    return 1000000u;
+#endif
+}
+
+static int prof_skipped(const char *name)
+{
+    int i;
+    for (i = 0; PROF_SKIP[i]; i++)
+        if (strcmp(name, PROF_SKIP[i]) == 0) return 1;
+    return 0;
+}
+
+static void prof_uninstall(lua_State *L)
+{
+    int i, top;
+    if (!g_prof_on) return;
+    top = lua_gettop(L);
+    lua_getfield(L, LUA_REGISTRYINDEX, PROF_NAMES);
+    lua_getfield(L, LUA_REGISTRYINDEX, PROF_ORIG);
+    for (i = 0; i < g_prof_n; i++) {
+        lua_rawgeti(L, top + 1, i + 1);           // the name
+        lua_rawgeti(L, top + 2, i + 1);           // the original
+        lua_setglobal(L, lua_tostring(L, top + 3));
+        lua_settop(L, top + 2);
+    }
+    lua_settop(L, top);
+    lua_pushnil(L); lua_setfield(L, LUA_REGISTRYINDEX, PROF_NAMES);
+    lua_pushnil(L); lua_setfield(L, LUA_REGISTRYINDEX, PROF_ORIG);
+    g_prof_on = 0;
+    g_prof_n = 0;
+}
+
+// Walk _G, collect every wrappable C-function global, then wrap them. TWO
+// passes because Lua forbids adding a key to a table under traversal, and a
+// name-by-name walk of a fixed list would miss exactly what matters: the p8
+// shim RESOLVES its verbs at load (`spr = __moy_p8_spr or spr`) and assigns
+// them to globals, so the name a cart calls is not the name libmoy registered.
+static void prof_install(lua_State *L)
+{
+    int n = 0, i, top;
+    if (g_prof_on) return;
+    top = lua_gettop(L);
+    lua_newtable(L);                              // top+1: names
+    lua_newtable(L);                              // top+2: originals
+    lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);   // top+3
+    lua_pushnil(L);
+    while (lua_next(L, top + 3) != 0) {
+        // key at top+4, value at top+5. The type test comes FIRST: lua_tostring
+        // on a number key would convert it in place and derail lua_next.
+        if (n < PROF_MAX && lua_type(L, top + 4) == LUA_TSTRING
+                && lua_iscfunction(L, top + 5)
+                && lua_tocfunction(L, top + 5) != prof_call
+                && !prof_skipped(lua_tostring(L, top + 4))) {
+            // Only ONE upvalue can be carried across (see the header). Nothing
+            // in libmoy or this module registers a C closure with two, but a
+            // future one must not be silently mis-wrapped into a verb reading
+            // somebody else's upvalue -- so it is skipped, not guessed at.
+            int nup = 0;
+            while (nup < 2 && lua_getupvalue(L, top + 5, nup + 1) != NULL) nup++;
+            lua_pop(L, nup);
+            if (nup <= 1) {
+                lua_pushvalue(L, top + 4);
+                lua_rawseti(L, top + 1, n + 1);
+                lua_pushvalue(L, top + 5);
+                lua_rawseti(L, top + 2, n + 1);
+                n++;
+            }
+        }
+        lua_settop(L, top + 4);                   // drop the value, keep the key
+    }
+    lua_settop(L, top + 2);                       // drop _G
+
+    for (i = 0; i < n; i++) {
+        lua_rawgeti(L, top + 2, i + 1);           // top+3: the original
+        if (lua_getupvalue(L, top + 3, 1) == NULL) lua_pushnil(L);  // top+4: uv1
+        lua_pushvalue(L, top + 3);                // top+5: uv2, the original
+        lua_pushinteger(L, i);                    // top+6: uv3, the slot
+        lua_pushcclosure(L, prof_call, 3);        // top+4: the wrapper
+        lua_rawgeti(L, top + 1, i + 1);           // top+5: the name
+        lua_pushvalue(L, top + 4);
+        lua_setglobal(L, lua_tostring(L, top + 5));
+        lua_settop(L, top + 2);
+    }
+    lua_setfield(L, LUA_REGISTRYINDEX, PROF_ORIG);
+    lua_setfield(L, LUA_REGISTRYINDEX, PROF_NAMES);
+    lua_settop(L, top);
+
+    memset(g_prof, 0, sizeof g_prof);
+    g_prof_child = 0;
+    g_prof_frames = 0;
+    g_prof_n = n;
+    if (!g_prof_hz) g_prof_hz = prof_calibrate();
+    g_prof_on = 1;
+}
+
+// profile(on) -> the number of verbs wrapped, or None with no run.
+//
+// ARMS as well as installs. A cart captures its globals as it loads, so
+// profiling a p8 port properly means the wrappers are in place BEFORE load()
+// runs the shim -- arming makes that automatic for the next launch. Installing
+// NOW is what lets a board already sitting in a level answer without being
+// restarted, at the cost of missing whatever the shim already captured.
+static mp_obj_t mod_profile(mp_obj_t on_obj)
+{
+    int on = mp_obj_is_true(on_obj);
+    g_prof_arm = (uint8_t)on;
+    if (!RUN.open) return mp_const_none;
+    if (on) prof_install(RUN.L);
+    else prof_uninstall(RUN.L);
+    return mp_obj_new_int(g_prof_n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_profile_obj, mod_profile);
+
+// verb_stats() -> (hz, frames, ((name, calls, self, inclusive), ...)), or None
+// when the profiler is not installed -- None rather than an empty tuple,
+// because "not measuring" and "measured nothing" are different answers.
+//
+// TICKS, not microseconds: the clock is the CPU cycle counter on a board, and
+// handing the host `hz` keeps the division off the device and the units honest
+// on a tier that has no cycle counter at all. Only verbs actually CALLED are
+// reported; a hundred zero rows is not a measurement and would not fit a line.
+static mp_obj_t mod_verb_stats(void)
+{
+    int i, n = 0;
+    mp_obj_t rows[PROF_MAX];
+    mp_obj_t out[3];
+    if (!RUN.open || !g_prof_on) return mp_const_none;
+    lua_getfield(RUN.L, LUA_REGISTRYINDEX, PROF_NAMES);
+    for (i = 0; i < g_prof_n; i++) {
+        mp_obj_t t[4];
+        const char *nm;
+        if (!g_prof[i].calls) continue;
+        lua_rawgeti(RUN.L, -1, i + 1);
+        nm = lua_tostring(RUN.L, -1);
+        t[0] = mp_obj_new_str(nm ? nm : "?", nm ? strlen(nm) : 1);
+        lua_pop(RUN.L, 1);
+        t[1] = mp_obj_new_int((mp_int_t)g_prof[i].calls);
+        t[2] = mp_obj_new_int((mp_int_t)g_prof[i].self);
+        t[3] = mp_obj_new_int((mp_int_t)g_prof[i].ticks);
+        rows[n++] = mp_obj_new_tuple(4, t);
+    }
+    lua_pop(RUN.L, 1);
+    out[0] = mp_obj_new_int((mp_int_t)g_prof_hz);
+    out[1] = mp_obj_new_int((mp_int_t)g_prof_frames);
+    out[2] = mp_obj_new_tuple(n, rows);
+    return mp_obj_new_tuple(3, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_verb_stats_obj, mod_verb_stats);
+
+// verb_reset() -- zero the counters and the frame count. The host samples by
+// resetting, waiting and reading, so the WINDOW is the host's to choose rather
+// than a cadence baked in here.
+static mp_obj_t mod_verb_reset(void)
+{
+    memset(g_prof, 0, sizeof g_prof);
+    g_prof_child = 0;
+    g_prof_frames = 0;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_verb_reset_obj, mod_verb_reset);
+
 // -- the module surface ------------------------------------------------------
 
 // run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h,
@@ -1248,6 +1513,8 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     // table -- never a failed run.
     if (g_p8mem) moy_p8_open(RUN.L, &RUN.con, &g_p8, g_p8mem, g_p8rom);
 
+    g_prof_on = 0;               // a new VM: the old wrappers went with the old one
+    g_prof_n = 0;
     RUN.open = 1;
     return mp_const_none;
 }
@@ -1298,6 +1565,10 @@ static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
 {
     if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
+    // Before the chunk, because the chunk is where the p8 shim resolves its
+    // verbs and captures them: wrapping after it would leave every draw call
+    // the cart makes going to the unwrapped original.
+    if (g_prof_arm) prof_install(RUN.L);
     mp_obj_t err_obj = run_chunk(src_obj, name_obj);
     if (err_obj != mp_const_none) return err_obj;
     char err[192];
@@ -1371,6 +1642,7 @@ static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
     t1 = (uint32_t)mp_hal_ticks_us();
     if (draw && moy_lua_draw(RUN.L, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
+    g_prof_frames++;
     g_upd_us = t1 - t0;
     g_draw_us = draw ? (uint32_t)mp_hal_ticks_us() - t1 : 0;
     return mp_const_none;
@@ -1429,6 +1701,8 @@ static mp_obj_t mod_close(void)
     pool_release();
 #endif
     RUN.open = 0;
+    g_prof_on = 0;               // the wrappers died with the VM
+    g_prof_n = 0;
     RUN.snap = NULL;
     RUN.aq = NULL;
     RUN.cfg = MP_OBJ_NULL;
@@ -1613,6 +1887,9 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_TICK_DRAW),   MP_ROM_INT(1) },
     { MP_ROM_QSTR(MP_QSTR_tick_split),  MP_ROM_PTR(&mod_tick_split_obj) },
+    { MP_ROM_QSTR(MP_QSTR_profile),     MP_ROM_PTR(&mod_profile_obj) },
+    { MP_ROM_QSTR(MP_QSTR_verb_stats),  MP_ROM_PTR(&mod_verb_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_verb_reset),  MP_ROM_PTR(&mod_verb_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },

@@ -103,6 +103,47 @@ print("FLOOR", moycore.set_sram_floor(24), moycore.set_sram_floor(1),
 print("CENSUS", len(moycore.alloc_stats()), moycore.alloc_stats()[0],
       moycore.alloc_stats()[1], moycore.alloc_stats()[6])
 
+# The per-verb profiler. It is the ONLY instrument that sees inside a Lua/p8
+# frame -- DeviceCanvas' meters read zero on this tier -- so what is checked
+# here is that it counts the right calls, that a verb which runs Lua is not
+# charged for it, and that arming it OFF really does put the vendored C
+# functions back as the cart's globals (the claim that it costs a shipping
+# frame nothing rests entirely on that).
+PROF = """
+function _update(dt) end
+function _draw()
+    cls(0)
+    for i = 1, 7 do rect(i, 0, 2, 2, 8) end
+    __moy_foreach({1, 2, 3}, function(v)
+        for j = 1, 10 do rect(j, 4, 1, 1, v) end
+    end)
+end
+"""
+moycore.p8_memory(bytearray(65536), bytearray(65536))
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
+print("PROFARM", moycore.profile(1) > 0)
+print("PROFLOAD", moycore.load(PROF, "@cart"))
+moycore.verb_reset()
+for f in range(5):
+    moycore.tick(0.03125)
+_hz, _frames, _rows = moycore.verb_stats()
+_by = {}
+for _r in _rows:
+    _by[_r[0]] = _r
+# 5 frames: cls once each, rect 7 + 3*10 each, foreach 3 (one per element? no:
+# ONE call taking the table) -- the counts are the point, they say the wrapper
+# sits on the verb the cart actually reaches.
+print("PROFN", _frames, _by["cls"][1], _by["rect"][1], _by["__moy_foreach"][1])
+# foreach's INCLUSIVE time covers the rects its callback drew; its SELF must
+# not. Strictly less, and by more than the noise of a single tick.
+print("PROFSELF", 1 if _by["__moy_foreach"][2] < _by["__moy_foreach"][3] else 0,
+      1 if _by["cls"][2] == _by["cls"][3] else 0)
+# Off: the globals are the originals again and the meter says "not measuring"
+# rather than "measured nothing".
+print("PROFOFF", moycore.profile(0), moycore.verb_stats())
+print("PROFALIVE", moycore.tick(0.03125))
+moycore.close()
+
 # view and background are CORE upstream now, so libmoy answers them and the
 # host READS the result instead of being called -- zero crossings for view.
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
@@ -446,6 +487,26 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     # chunk list must both be back to nothing.
     assert by["CENSUS"][1:] == ["7", "0", "0", "0"], \
         "the allocator census did not balance across a closed run: %s" % out
+
+    # The per-verb profiler, the only instrument that sees inside a Lua/p8
+    # frame. The counts say the wrapper sits on the verb the CART reaches, not
+    # on some alias of it -- the failure mode that matters, because the p8 shim
+    # resolves its verbs at load and a wrapper installed after that would
+    # silently measure nothing while reporting rows.
+    assert by["PROFARM"][1] == "True", "profile(1) wrapped nothing: %s" % out
+    assert by["PROFLOAD"][1] == "None", out
+    assert by["PROFN"][1:] == ["5", "5", "185", "5"], \
+        "wrong call counts: 5 frames of cls once, 7+30 rect, one foreach: %s" % out
+    # foreach hands Lua a function; charged inclusively it reads as the most
+    # expensive verb in the cart while costing nothing itself, which is a fix
+    # aimed at the wrong file. Self < inclusive for it, equal for a leaf.
+    assert by["PROFSELF"][1:] == ["1", "1"], \
+        "self/inclusive split did not hold: %s" % out
+    # OFF must restore the ORIGINALS, not leave a disarmed wrapper in place:
+    # "costs the shipping frame nothing" is only true if nothing is left.
+    assert by["PROFOFF"][1:] == ["0", "None"], out
+    assert by["PROFALIVE"][1] == "None", \
+        "the cart did not survive being un-wrapped: %s" % out
 
     # view/background reached the cart with no trampoline registered for them.
     assert by["VIEW0"][1] == "None", out

@@ -206,6 +206,14 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
     flush: panel DMA reads only internal SRAM).
   - Diagnostics, all gated behind `perf_capture`: `PERF`/`DRAWBRK`/`DRAW2`/
     `BATCH`/`FLUSHBRK`/`CHROMEBRK`/`PUMP`/`I2CSTAT`/`CALIB`/`HITCH`.
+  - **`VERBS` is the exception and the only meter that sees the Lua/p8 tier.**
+    Those canvas meters read all-zero on a Lua cart — it draws through libmoy's
+    C verbs into the framebuffer, never through the instrumented `DeviceCanvas`
+    ops — so "render = 40ms" was an unopenable box and every pass that asked
+    concluded "the cart's own code". `verbs on` (serial, its OWN switch, not
+    `diag`'s: it gates at INSTALL so an unarmed frame carries no wrapper at all)
+    then a bare `verbs` prints per-frame calls and ms per verb.
+    `native/moycore/README.md` is the authority.
   - Open defects: #74 touch stalls, the launcher live-wallpaper cost, and #69's
     keyboard+touch I2C stalls (sized via I2CSTAT).
 - **Branches and releases: `dev` is where work lands; `master` is what users get.**

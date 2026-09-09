@@ -15,7 +15,7 @@ falls back to a self-contained shim), which is what makes this testable at all.
 import hashlib
 import json
 
-from runtime.dev_channel import DevChannel, _remote_state
+from runtime.dev_channel import DevChannel, _remote_state, verbs_line
 
 
 class FakePointer:
@@ -546,3 +546,69 @@ def test_a_channel_with_no_8_bit_stdin_declines_the_probe_too(capsys):
     ch._rawin = None
     ch.run(ws, "recv")
     assert "RECV ERR no 8-bit route" in _said(capsys)[0]
+
+
+# -- the VERBS line (the Lua/p8 per-verb profiler's report) -------------------
+
+
+def test_the_verbs_line_reports_per_frame_not_per_window():
+    """The shape the line has to make legible: 180 cheap calls and one
+    expensive one are different problems, and per-window totals hide which is
+    which behind whatever sample length the host happened to choose."""
+    line = verbs_line(1000000, 100, [
+        ("spr", 18000, 1400000),        # 180/frame, 14ms/frame
+        ("map", 100, 1400000),          #   1/frame, 14ms/frame
+    ])
+    assert "frames=100" in line
+    assert "spr n=180.0 t=14.00" in line
+    assert "map n=1.0 t=14.00" in line
+    assert "tot=28.00" in line
+
+
+def test_the_verbs_line_sorts_by_time_and_keeps_the_top():
+    """The first row is nearly always the whole answer, and a serial line has
+    to end somewhere -- so the cut is by cost, never by name or arrival."""
+    rows = [("v%d" % i, 10, i * 1000) for i in range(20)]
+    line = verbs_line(1000000, 10, rows, top=3)
+    names = [p.split()[0] for p in line.split(" | ")[1:]]
+    assert names == ["v19", "v18", "v17"]
+
+
+def test_a_window_with_no_frames_says_so_instead_of_dividing_by_it():
+    """`verbs` read before a cart has ticked is the ordinary operator mistake;
+    it must answer, not raise inside the frame loop."""
+    assert verbs_line(1000000, 0, [("spr", 5, 5)]) == "VERBS frames=0"
+    assert verbs_line(0, 10, [("spr", 5, 5)]) == "VERBS frames=0"
+
+
+def test_verbs_declines_on_a_board_with_no_moycore(capsys):
+    """Every board freezes this channel; only the ones with the Lua tier can
+    answer. The decline is a line, not an ImportError into the loop."""
+    ws, ch = make()
+    ch.run(ws, "verbs")
+    assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
+
+
+def test_a_verb_that_runs_lua_under_it_is_not_charged_for_it():
+    """moss moss' foreach: five calls a frame, ten milliseconds INCLUSIVE, and
+    none of it foreach's own. Charged inclusively it reads as the slowest thing
+    in the cart and points a fix at the wrong file, so `t` is self and `in`
+    carries the frame that ran underneath."""
+    line = verbs_line(1000000, 100, [
+        ("__moy_foreach", 500, 12000, 1016000),
+        ("cls", 100, 44000, 44000),
+    ])
+    assert "__moy_foreach n=5.0 t=0.12 in=10.16" in line
+    assert "cls n=1.0 t=0.44" in line
+    cls_cell = [c for c in line.split(" | ") if c.startswith("cls")][0]
+    assert "in=" not in cls_cell                 # no callees, no second number
+    assert "tot=0.56" in line                    # SELF, so foreach's Lua is out
+    # and the sort is by SELF, so the cheap-but-inclusive verb drops below
+    assert line.index("cls") < line.index("__moy_foreach")
+
+
+def test_the_verbs_line_still_reads_a_three_field_row():
+    """The formatter predates the self/inclusive split and the on-glass tools
+    parse its output; a row with no inclusive column means "no callees", not a
+    crash."""
+    assert "spr n=1.0 t=1.00" in verbs_line(1000000, 10, [("spr", 10, 10000)])
