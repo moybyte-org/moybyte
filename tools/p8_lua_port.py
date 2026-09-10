@@ -895,18 +895,17 @@ def _expand_sigils_once(toks):
     return out
 
 
-# The bitwise operators. p8 spells NINE of them; Lua 5.4 has six, refuses
-# every one on a non-integral number, and has no rotate at all, so each operand
-# must be floored. ONE call per operator does it: `__p8_bor(a, b)`, whose shim
-# body IS `flr(a) | flr(b)`, so a host with nothing behind the name runs plain
-# Lua and one with moy_p8.c's twin does the floor and the operator in a single
-# crossing.
+# The bitwise operators. p8 spells NINE of them; Lua 5.4 has six, refuses every
+# one on a non-integral number, and has no rotate at all. ONE call per operator
+# carries them -- `__p8_bor(a, b)` and the rest -- and the shim binds those
+# names to the nine VERBS, which work on p8's whole 16.16 image. One lane: a
+# cart may write `x >> 1` or `shr(x, 1)` and they cannot answer differently.
 #
 # The price is that a CALL has to know precedence, where a wrapper around each
 # operand does not: `a & b * 2` is `a & (b*2)`, and `__p8_band(a, b) * 2` is a
 # different expression. _PREC is that knowledge, and it is also what keeps
-# `a + 1 & b` flooring both sides of the `+` and `#t & 3` from becoming
-# `#flr(t) & 3`.
+# `a + 1 & b` taking both sides of the `+` and `#t & 3` from becoming
+# `__p8_band(#flr(t), 3)`.
 _BITOPS = ("<<", ">>", ">>>", "<<>", ">><", "&", "~", "|")
 # The operators whose answer for two INTEGERS is Lua's own, so a provably
 # integral pair keeps the bare VM instruction. It is a short list because p8's

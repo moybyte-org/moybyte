@@ -41,6 +41,21 @@ because they pay none of the taxes we do:
    heap-boxed ints/floats, per-bytecode dispatch. An emulator's "interpretation"
    (of 6502 code) is native-C-tight (~10× cheaper per op), and its game logic is
    compiled machine code. **This is our single biggest tax.**
+   - **A PICO-8 emulator on our class of hardware does not pay one piece of it,
+     and the piece is ours by choice (2026-09-10).** FAKE-08 runs on
+     [z8lua](https://github.com/samhocevar/z8lua), whose `luaconf.h` says
+     `#define LUA_NUMBER z8::fix32` — PICO-8's 16.16 fixed-point number IS the
+     VM's number type, so a cart's `x & y` is an inlined `int32` AND inside the
+     arithmetic opcode. Ours is a Lua→C crossing, measured on the T-Deck at
+     **1,534 ns of floor** plus 0.5–1.7 µs of body; dank tomb makes ~1,100 of
+     them a frame, ≈2.5–3 ms of its 24.9 ms draw. It also makes PICO-8's
+     semantics free rather than emulated (the whole of the 2026-09-10 bit-lane
+     work). The calibration that matters: FAKE-08 benchmarks against an old
+     3DS at **268 MHz ARM11** against our 240 MHz LX7, and plays many carts —
+     so the gap here is not silicon. **Not a port**: z8lua is Lua 5.2 and C++
+     where moycore is 5.4 as C with `LUA_32BITS`, and the idea costs a 64-bit
+     intermediate for multiply/divide plus collapsing 5.4's integer/float
+     duality. Its `pico8` feature branch is the clean version to read.
 2. **The upscale composite (P4).** We render at a fixed 320×240 (so the same cart
    runs on the T-Deck) then scale it into a desktop window. Emulators render at
    their target resolution *directly into the scan-out buffer* — no composite.
@@ -253,9 +268,15 @@ above got their verdicts in **#77**. What this section keeps is what was
 DECIDED:
 
 - **The S3 pays for calls and allocations, not raster.** A C verb call floors
-  at ~1.0 µs (re-measured 2026-09-09 with the per-verb profiler on the real
-  carts, against ~1.65 from the original micro-bench: `flr` reads 1.03 µs over
-  680 calls a frame and `palt` 1.16 over 1204), a malloc through the IDF heap
+  at ~1.0 µs of C-side time (re-measured 2026-09-09 with the per-verb profiler
+  on the real carts, against ~1.65 from the original micro-bench: `flr` reads
+  1.03 µs over 680 calls a frame and `palt` 1.16 over 1204). What it costs the
+  CART is more, because the profiler times the wrapper and not the crossing
+  that reaches it: a dedicated bench (one cart per operation, 2,000 calls a
+  tick, quoted net of an empty loop) reads **1,534 ns for `flr(1.5)`** on the
+  T-Deck, 2,047 for `band` on two integers and 3,279 with a fraction in it.
+  Use 1.0 µs to reason about a verb's body and 1.5 µs to reason about deleting
+  a call. A malloc through the IDF heap
   at ~9 µs (its TLSF metadata sits in PSRAM). So the levers that landed are the ones that delete calls and
   mallocs: every p8 draw verb one call into the machine, the hot shim paths in
   C, one call per native bit operator, a small-object pool under `l_alloc`
@@ -275,11 +296,23 @@ DECIDED:
   reproduces such cadences.
 - **What is left for a 30 fps moss moss on the S3**, in order: the console's
   ~10 ms around the tick (fold snapshot, router, input poll: 3–5 ms), then the
-  structural one — running the cart tick on core 0 overlapped with the
-  console's frame (frame ≈ max, not sum; A/B against the shared PSRAM bus
-  before keeping). A Xtensa JIT is gated on the perf counters: a template JIT
-  only pays if retired instructions dominate a tick, and the evidence says
-  memory does.
+  interpreter itself (§3.1). A Xtensa JIT is gated on the perf counters: a
+  template JIT only pays if retired instructions dominate a tick, and the
+  evidence says memory does.
+- **Overlapping the cart TICK with the draw on the other core is DECLINED
+  (2026-09-10), and it is an arithmetic decline, not an engineering one.**
+  Parallelising two things caps the win at the smaller of them, and on the
+  T-Deck dank tomb's are logic **2.5 ms** against draw **25** in a 42 ms loop:
+  perfect, free, race-free overlap saves ~6 %. It is also not free — `_update`
+  and `_draw` are one cart's code in one VM over shared mutable globals, with
+  no snapshot between them. The safe form of core parallelism is INSIDE a C
+  verb, where the VM is blocked and there is nothing to race; that has nothing
+  to bite on either, because the C verbs together are ~5 ms of that 25 ms draw
+  and the largest single one is 0.32 ms. What is parallel already and worth
+  keeping: the panel flush feeder and its done-ISR on core 0, the audio I2S
+  feeder, the P4's PPA bounce worker. **Revisit only for a RASTER-bound cart**
+  — full-screen effects, a big `map()`, software 3D — where one verb owns
+  milliseconds.
 
 ## References
 

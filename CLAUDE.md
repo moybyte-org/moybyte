@@ -178,12 +178,17 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
   - **Do NOT scatter numbers into this file.** One snapshot here quoted a cart's
     fps long after the board had passed it, inside the sentence forbidding
     scattered numbers.
-  - **The engine-side lever chain is EXHAUSTED.** Every feed/dispatch/GC-cost
-    lever was tried and either shipped (auto-native carts #67, live-set diet,
-    pal-state variant cache #72, layer pool, `background()`) or reverted with a
-    recorded verdict (Fold-2 auto map cache; the third bounce slot, which also
-    retired the core-1 feeder unbuilt). What is left: per-cart render diets, the
-    #67 Lua tier, and the P4 (#58).
+  - **The FEED/DISPATCH/GC lever chain is exhausted** -- every one was tried and
+    either shipped (auto-native carts #67, live-set diet, pal-state variant
+    cache #72, layer pool, `background()`) or reverted with a recorded verdict
+    (Fold-2 auto map cache; the third bounce slot, which also retired the
+    core-1 feeder unbuilt). **That is a statement about where people LOOKED, not
+    about the system**, and it read "the engine-side lever chain is EXHAUSTED"
+    until 2026-09-10, when a free one turned up in the tick model itself: its
+    pin asked whether a tick-only frame beat the PERIOD when the question is
+    whether it beats a DRAWING frame, and dank tomb ran its logic at 23Hz of a
+    declared 60 for want of it (#217). Where to look next is #66's ledger and
+    `docs/perf_native_gap_v1.md`, not this line.
   - **Per-board verdicts do NOT transfer.** The `-O3` `moy_gfx` pragma is
     A/B-confirmed on the S3 (compute-bound there) and measured NULL on the
     dispatch-bound P4 — one pragma line, opposite answers.
