@@ -272,11 +272,28 @@ DECIDED:
   on the real carts, against ~1.65 from the original micro-bench: `flr` reads
   1.03 µs over 680 calls a frame and `palt` 1.16 over 1204). What it costs the
   CART is more, because the profiler times the wrapper and not the crossing
-  that reaches it: a dedicated bench (one cart per operation, 2,000 calls a
-  tick, quoted net of an empty loop) reads **1,534 ns for `flr(1.5)`** on the
-  T-Deck, 2,047 for `band` on two integers and 3,279 with a fraction in it.
-  Use 1.0 µs to reason about a verb's body and 1.5 µs to reason about deleting
-  a call. A malloc through the IDF heap
+  that reaches it. `tools/p8_verb_bench.py` prices that (one cart per
+  operation, 2,000 calls a tick, net of an empty-loop control) — T-Deck,
+  2026-09-10, ns per call:
+
+  | | ns | | ns |
+  |---|---:|---|---:|
+  | `i+1` (no call at all) | **30** | `shr(3,1)` | 2,274 |
+  | `flr(1.5)` — the call floor | **1,536** | `shl(1,4)` | 2,244 |
+  | `peek(0x4300)` | 1,586 | `3>>1` (operator) | 2,562 |
+  | `band(3,5)` two ints | 2,046 | `1.5&-1` (operator) | 3,511 |
+  | `band(1.5,-1)` a fraction | 3,284 | `mget(1,1)` | 3,994 |
+  | `rnd(8)` | 2,196 | | |
+
+  **A C call is ~50× a VM instruction here**, and that ratio — not any verb's
+  body — is what decides whether moving a shim line into C pays. Use 1.0 µs to
+  reason about a verb's insides and 1.5 µs about deleting a call.
+  **An OPERATOR costs ~250 ns more than the verb of the same C body**
+  (`3>>1` 2,562 against `shr(3,1)` 2,274; `1.5&-1` 3,511 against 3,284): the
+  porter localises the verb names as upvalues and leaves the nine `__p8_*` as
+  plain globals. Adding them to the localisation block is ~0.3 ms a frame on
+  dank tomb — measured but NOT taken (2026-09-10), because it is a vendored
+  porter change for 0.7% of a frame. A malloc through the IDF heap
   at ~9 µs (its TLSF metadata sits in PSRAM). So the levers that landed are the ones that delete calls and
   mallocs: every p8 draw verb one call into the machine, the hot shim paths in
   C, one call per native bit operator, a small-object pool under `l_alloc`
