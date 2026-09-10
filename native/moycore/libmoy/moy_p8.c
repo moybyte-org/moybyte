@@ -193,11 +193,24 @@ static inline void sheet_write(moy_p8 *p, uint32_t a, uint8_t v)
     }
 }
 
+/* TILE 0 IS EMPTY, and this line is where the write path learns what the seed
+ * path already knew. A console cell holds tile+1 with 0 for empty, and the
+ * importer maps p8's convention onto it exactly -- "sprite 0, empty by
+ * convention" -> cell 0 (p8_lua_port, map.moymap). Storing a runtime 0 as
+ * cell 1 instead made the two disagree the moment a cart CLEARED a cell,
+ * which `mset(x, y, 0)` is p8's only way to do: the seeded cell drew nothing
+ * and the cleared one drew sprite 0. Nothing caught it because the one host
+ * that walks this map in C had its own tile-0 skip; binding the verb below on
+ * a host that does not is what made the disagreement reachable.
+ *
+ * mget and peek are unaffected -- both read p->mem, where the byte is still
+ * the 0 the cart wrote. */
 static inline void map_write(moy_p8 *p, int row, int col, uint8_t v)
 {
     moy_map *m = p->con->map;
     if (m && m->w == 128 && row < m->h)
-        m->cells[(size_t)row * 128 + (size_t)col] = (uint8_t)(v == 255 ? 255 : v + 1);
+        m->cells[(size_t)row * 128 + (size_t)col] =
+            (uint8_t)(v == 255 ? 255 : v ? v + 1 : 0);
 }
 
 /* A PICO-8 colour byte -> a console index. The SCREEN palette (0x5f10) may
@@ -423,11 +436,13 @@ static int l_memset(lua_State *L)
     return 0;
 }
 
-/* __moy_lut_span(from, to, lut): the span a ported cart lights its screen
- * with -- `for a = from, to do poke(a, peek(lut | peek(a))) end`, a run of
- * memory pushed through a lookup table. The porter folds that statement into
- * one call (p8_lua_port.fold_lut_span) because a PICO-8 screen is 8,192 bytes
- * and the loop spends three to five binding calls on each of them.
+/* THE SPAN, and the three functions below are one subject: the run a ported
+ * cart lights its screen with -- `for a = from, to do poke(a, peek(lut |
+ * peek(a))) end`, a run of memory pushed through a lookup table. The porter
+ * folds that statement into one call (p8_lua_port.fold_lut_span) because a
+ * PICO-8 screen is 8,192 bytes and the loop spends three to five binding
+ * calls on each of them. run_span is the kernel; __moy_lut_span offers it as
+ * a boolean the shim may decline into; __moy_p8_lut_span takes the whole verb.
  *
  * THREE PLAIN INTEGERS OR NOTHING. Lua's numeric `for` coerces its bounds and
  * `|` refuses a non-integral float, and transcribing either of those here
@@ -440,21 +455,11 @@ static int l_memset(lua_State *L)
  * `lut | v` is an ORDINARY integer OR, no 16.16 conversion: the shim's `|` is
  * the VM's, both operands are already integers by the time it runs, and an
  * address it lands outside 0x0000-0xffff wraps exactly as peek's would. */
-static int l_lut_span(lua_State *L)
+static void run_span(moy_p8 *p, lua_Integer from, lua_Integer to, lua_Integer lut)
 {
-    moy_p8 *p = p8_of(L);
-    lua_Integer from, to, lut;
     lua_Unsigned i, n;
     uint32_t a;
-    if (!lua_isinteger(L, 1) || !lua_isinteger(L, 2) || !lua_isinteger(L, 3)) {
-        lua_pushboolean(L, 0);
-        return 1;
-    }
-    from = lua_tointeger(L, 1);
-    to = lua_tointeger(L, 2);
-    lut = lua_tointeger(L, 3);
-    lua_pushboolean(L, 1);
-    if (to < from) return 1;                          /* p8's empty range */
+    if (to < from) return;                            /* p8's empty range */
     n = (lua_Unsigned)to - (lua_Unsigned)from;
     /* The address is carried already truncated, and stepping the truncated
      * one is what the loop does: peek narrows to int32 every iteration, and
@@ -465,6 +470,61 @@ static int l_lut_span(lua_State *L)
         poke_byte(p, a, peek_byte(p, (uint32_t)(int32_t)(lut | (lua_Integer)v)));
         if (i == n) break;
     }
+}
+
+static int l_lut_span(lua_State *L)
+{
+    if (!lua_isinteger(L, 1) || !lua_isinteger(L, 2) || !lua_isinteger(L, 3)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    run_span(p8_of(L), lua_tointeger(L, 1), lua_tointeger(L, 2),
+             lua_tointeger(L, 3));
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+/* __moy_p8_lut_span(fallback) -> `__p8_lut_span` itself, with the shim's own
+ * loop kept as upvalue 2.
+ *
+ * THE DECLINE IS WHY THIS IS A FACTORY. The verb above answers a boolean and
+ * the shim runs its loop when the answer is false, so every call pays a Lua
+ * frame for a verb a lighting cart makes three hundred of a frame -- 300
+ * calls and 6% of the interpreter on `dank tomb` (#66, #67). Taking the WHOLE
+ * verb means the declined case has to be reachable from here, and there are
+ * only two ways: transcribe p8's coercions into C, which is the second copy
+ * this file refuses on the very next line, or CALL the definition that
+ * already exists. So the loop arrives as an argument and stays as an upvalue.
+ * One definition of the rules, in Lua, and the C hands back everything it
+ * does not recognise -- which keeps the loop THE REFERENCE rather than
+ * demoting it to a fallback nothing checks.
+ *
+ * The machine rides upvalue 1 exactly as it does for every other verb here,
+ * so p8_of() is unchanged. */
+static int l_p8_lut_span(lua_State *L)
+{
+    /* THE ARITY IS PART OF THE INPUT (l_split's paragraph, learned the hard
+     * way): the fallback takes the three the shim's loop reads, so the stack
+     * is squared off before anything is pushed onto it. */
+    lua_settop(L, 3);
+    if (!lua_isinteger(L, 1) || !lua_isinteger(L, 2) || !lua_isinteger(L, 3)) {
+        lua_pushvalue(L, lua_upvalueindex(2));
+        lua_insert(L, 1);
+        lua_call(L, 3, 0);
+        return 0;
+    }
+    run_span(p8_of(L), lua_tointeger(L, 1), lua_tointeger(L, 2),
+             lua_tointeger(L, 3));
+    return 0;
+}
+
+static int l_p8_lut_span_bind(lua_State *L)
+{
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    lua_settop(L, 1);
+    lua_pushvalue(L, lua_upvalueindex(1));      /* the machine, as upvalue 1 */
+    lua_insert(L, 1);
+    lua_pushcclosure(L, l_p8_lut_span, 2);
     return 1;
 }
 
@@ -1412,7 +1472,17 @@ static int l_p8_sset(lua_State *L)
  * pixels the camera shows first, and the default costs the cells on screen
  * rather than 8,192 a frame. The camera read is the CONSOLE's, which is the
  * machine's truth: a cart that pokes 0x5f28 moves this too, where the shim's
- * Lua copy would have gone stale. */
+ * Lua copy would have gone stale.
+ *
+ * THAT READ IS ALSO WHY THE CAMERA DOES NOT HAVE TO MOVE WITH THIS VERB. The
+ * coupling between the two is one-directional: a C camera() with the shim's
+ * Lua map() in play leaves that loop clipping against a copy nothing updates,
+ * but this verb with the shim's Lua camera() needs nothing from the shim at
+ * all -- camera() writes the console's camera, and the console's camera is
+ * what these four lines read. So the shim binds this one alone, on every host
+ * including one carrying its own native masked walk: both walks are moy_spr
+ * per cell and cost the same, and what the C actually removes is the wrapper
+ * around them (#66, #67). */
 static int l_p8_map(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
@@ -2595,6 +2665,7 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
         {"__moy_reload", l_reload}, {"__moy_cstore", l_cstore},
         {"__moy_p8print", l_p8print},
         {"__moy_lut_span", l_lut_span},
+        {"__moy_p8_lut_span", l_p8_lut_span_bind},
         {"__moy_mget", l_mget}, {"__moy_mset", l_mset},
         {"__moy_fget", l_p8fget}, {"__moy_fset", l_p8fset},
         /* The DRAW verbs: p8's semantics resolved in C from the machine's own

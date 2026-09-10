@@ -2920,11 +2920,24 @@ do
   -- anything but three plain integers -- a float bound, a nil, a string -- so
   -- p8's own coercions are never transcribed twice, and every case the C
   -- declines runs the Lua the cart was written as.
+  local function lut_span_lua(from, to, lut)
+    for a = from, to do poke(a, peek(flr(lut) | flr(peek(a)))) end
+  end
   local lut_span = rawget(_G, "__moy_lut_span")
   function __p8_lut_span(from, to, lut)
     if lut_span ~= nil and lut_span(from, to, lut) then return end
-    for a = from, to do poke(a, peek(flr(lut) | flr(peek(a)))) end
+    return lut_span_lua(from, to, lut)
   end
+  -- ...and where the machine can carry the DECLINE as well as the span, it
+  -- takes the whole verb and this frame goes away. A cart that lights its
+  -- screen this way calls it three hundred times a frame (`dank tomb`), so
+  -- the Lua frame around a C call is itself the cost: __moy_p8_lut_span is a
+  -- FACTORY, handed the loop above and returning a C closure that keeps it
+  -- and calls it for everything it declines. The reference does not move --
+  -- it is the same function either way, still the only place p8's coercions
+  -- are written down (#66, #67).
+  local lut_span_c = rawget(_G, "__moy_p8_lut_span")
+  if lut_span_c ~= nil then __p8_lut_span = lut_span_c(lut_span_lua) end
 
   -- SAVE DATA is the one that can be honest all the way down: p8's 64 cartdata
   -- slots and the console's pmem are the same shape, so a cart's progress
@@ -3220,13 +3233,22 @@ do
   -- which the machine keeps at 0x5f10 rather than in the table above. Tied to
   -- pal(), because that is what decides which of the two holds the fade.
   local p8_frame = (pal == p8c("pal")) and p8c("frame") or nil
-  -- camera and map move TOGETHER, and only where the Lua map() is the one in
-  -- play: that loop clips against the shim's own copy of the camera, which a
-  -- C camera() would stop updating. A host with its own native masked map
-  -- (__moy_map_masked) keeps both, and camera() stays the shim's.
-  if native_map == nil and p8c("map") ~= nil and p8c("camera") ~= nil then
-    camera, map = p8c("camera"), p8c("map")
-  end
+  -- THE MAP TAKES THE WHOLE VERB, on every host that has it -- including one
+  -- carrying its own native masked walk. Both walks are moy_spr per cell and
+  -- cost the same, so what the C removes is not the walk but the WRAPPER
+  -- above it: seven floors and the camera clip, 22 calls a frame on `dank
+  -- tomb` (#66, #67).
+  --
+  -- The camera stays the shim's, and the coupling that used to move the two
+  -- together is ONE-DIRECTIONAL. A C camera() with the Lua map() in play
+  -- leaves that loop clipping against p8_cam_x/p8_cam_y, a copy nothing would
+  -- update any more -- that is the pairing worth refusing. The other way
+  -- round needs nothing: the C map clips against the CONSOLE's camera, which
+  -- is exactly what camera() writes through m_camera, and is the more current
+  -- of the two (a cart that pokes 0x5f28 moves it; the Lua copy it would
+  -- not). Keeping camera() here also keeps the Lua map() above HONEST rather
+  -- than quietly stale, which is what makes it a fallback worth having.
+  if p8c("map") ~= nil then map = p8c("map") end
 
   -- moybyte lifecycle -> the p8 one. The HOST paces the cart (SPEC.md 5):
   -- one `_update` call is one PICO-8 tick, at the rate the manifest declares
