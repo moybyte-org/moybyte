@@ -27,9 +27,9 @@ def test_the_control_is_first_and_every_row_is_distinct():
     """Every op is quoted NET of the control, so the control must be the row
     the runner meets first, and no slug may repeat (they become cart titles)."""
     assert B.OPS[0][0] == B.CONTROL
-    slugs = [s for s, _e, _w in B.OPS]
+    slugs = [s for s, _e, _w, _p in B.OPS]
     assert len(slugs) == len(set(slugs))
-    assert all(w for _s, _e, w in B.OPS), "a row says what it prices"
+    assert all(w for _s, _e, w, _p in B.OPS), "a row says what it prices"
 
 
 def test_every_row_ports_and_runs_on_the_real_player(tmp_path):
@@ -46,22 +46,23 @@ def test_every_row_ports_and_runs_on_the_real_player(tmp_path):
     _need_lua()
     # Each row in its own function, so a Lua error names the row rather than a
     # line number in a generated file.
-    body = "".join("function op_%s() local a=0 for i=1,2 do %s end end\n"
-                   % (slug, expr) for slug, expr, _why in B.OPS)
+    body = "".join(p for _s, _e, _w, p in B.OPS)
+    body += "".join("function op_%s() local a=0 for i=1,2 do %s end end\n"
+                    % (slug, expr) for slug, expr, _why, _p in B.OPS)
     body += ("function _update()\n"
-             + "".join(" op_%s()\n" % slug for slug, _e, _w in B.OPS)
+             + "".join(" op_%s()\n" % slug for slug, _e, _w, _p in B.OPS)
              + "end\nfunction _draw() cls(0) end\n")
     ws = _run_p8(tmp_path, body, frames=2, dt=1.0 / 30)
     assert ws.player.cart_error is None, (
         "a row of OPS does not run: %s\n  rows: %s"
-        % (ws.player.cart_error, ", ".join(s for s, _e, _w in B.OPS)))
+        % (ws.player.cart_error, ", ".join(s for s, _e, _w, _p in B.OPS)))
 
 
 def test_a_row_that_does_no_work_would_be_caught():
     """The control is the only row allowed to be free. Every other expression
     has to reach a verb or an operator -- an expression Lua folds at compile
     time would read as a verb that costs nothing at all."""
-    for slug, expr, _why in B.OPS[1:]:
+    for slug, expr, _why, _p in B.OPS[1:]:
         rhs = expr.split("=", 1)[1]
         assert ("(" in rhs or any(op in rhs for op in ("&", ">>", "<<", "+", "|", "~"))), \
             "%s: %r has nothing to price" % (slug, rhs)

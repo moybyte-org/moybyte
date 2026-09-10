@@ -276,18 +276,29 @@ DECIDED:
   operation, 2,000 calls a tick, net of an empty-loop control) — T-Deck,
   2026-09-10, ns per call:
 
-  | | ns | | ns |
-  |---|---:|---|---:|
-  | `i+1` (no call at all) | **30** | `shr(3,1)` | 2,274 |
-  | `flr(1.5)` — the call floor | **1,536** | `shl(1,4)` | 2,244 |
-  | `peek(0x4300)` | 1,586 | `3>>1` (operator) | 2,562 |
-  | `band(3,5)` two ints | 2,046 | `1.5&-1` (operator) | 3,511 |
-  | `band(1.5,-1)` a fraction | 3,284 | `mget(1,1)` | 3,994 |
-  | `rnd(8)` | 2,196 | | |
+  | the Lua being replaced | ns | | the C replacing it | ns |
+  |---|---:|---|---|---:|
+  | `i+1` — one VM instruction, no call | **29** | | `flr(1.5)` — the call floor | **1,533** |
+  | `nop()` — a Lua→Lua call, empty | **1,125** | | `peek(0x4300)` | 1,584 |
+  | a small Lua function body | 2,634 | | `band(3,5)` two ints | 2,046 |
+  | | | | `rnd(8)` | 2,196 |
+  | | | | `shl(1,4)` / `shr(3,1)` | 2,247 / 2,276 |
+  | | | | `3>>1` / `1.5&-1` (operators) | 2,565 / 3,510 |
+  | | | | `band(1.5,-1)` a fraction | 3,280 |
+  | | | | `mget(1,1)` | 3,996 |
 
-  **A C call is ~50× a VM instruction here**, and that ratio — not any verb's
-  body — is what decides whether moving a shim line into C pays. Use 1.0 µs to
-  reason about a verb's insides and 1.5 µs about deleting a call.
+  **The number that decides a verb is 1,125 against 1,533**: a Lua→Lua call
+  and a Lua→C one. Crossing into C costs only ~400 ns MORE than the call a
+  shim function was already paying, so a C verb pays whenever it replaces a
+  Lua FUNCTION whose body is worth more than ~400 ns — a dozen VM instructions,
+  which every real shim body clears. That is why `split`, `rnd`, `srand`,
+  `lut_span` and `map` all won their A/Bs.
+
+  **And it is why the bare-operator rule earns its complexity.** Replacing
+  INLINE Lua with a verb is the opposite trade: `i+1` is 29 ns against 2,046
+  for a `band` call, a 70× loss. `&`, `|` and `^^` on provably-integer
+  operands must stay bare VM instructions (§the porter's `_BARE_OPS`), and a
+  fold that turns one into a call is a regression however tidy it looks.
   **An OPERATOR costs ~250 ns more than the verb of the same C body**
   (`3>>1` 2,562 against `shr(3,1)` 2,274; `1.5&-1` 3,511 against 3,284): the
   porter localises the verb names as upvalues and leaves the nine `__p8_*` as

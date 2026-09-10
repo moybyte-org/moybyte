@@ -57,30 +57,48 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CALLS = 2000          # calls per tick: ~6ms at 3us, well inside a 30fps period
 CONTROL = "control"
 
-# (slug, expression, what it prices). The control MUST come first: every other
-# row is quoted net of it. An expression may not be constant-folded by Lua --
-# a call never is, and a bare `i` keeps the loop honest.
+# (slug, expression, what it prices, prelude). The control MUST come first:
+# every other row is quoted net of it. An expression may not be constant-folded
+# by Lua -- a call never is, and a bare `i` keeps the loop honest. The prelude
+# is cart Lua the row needs, and it must contain NO bit operator: the porter
+# would rewrite one into a verb call and the row would measure the thing it is
+# supposed to be the alternative to.
+#
+# THE THREE SCALE ROWS -- `add`, `luacall`, `luabody` -- are what make the rest
+# mean anything. A C verb is only worth existing if it deletes more Lua than
+# the crossing costs, and those three price the Lua.
 OPS = (
-    (CONTROL,  "a=1.5",                "the empty loop, subtracted from all"),
-    ("flr",    "a=flr(1.5)",           "the call floor: a C verb that does nothing"),
-    ("bandi",  "a=band(3,5)",          "band, two integers (the fast lane)"),
-    ("bandf",  "a=band(1.5,-1)",       "band, a fraction (the 16.16 lane)"),
-    ("shr",    "a=shr(3,1)",           "shr, the verb"),
-    ("shl",    "a=shl(1,4)",           "shl, the verb"),
-    ("opshr",  "a=3>>1",               "`>>`, the operator (same C body)"),
-    ("opband", "a=1.5&-1",             "`&`, the operator, a fraction"),
-    ("rnd",    "a=rnd(8)",             "rnd (C verb since moy-spec 5633c6d)"),
-    ("mget",   "a=mget(1,1)",          "mget: an int verb, for reference"),
-    ("peek",   "a=peek(0x4300)",       "peek: the cheapest memory verb"),
-    ("add",    "a=i+1",                "no call at all: one VM instruction"),
+    (CONTROL,  "a=1.5",                "the empty loop, subtracted from all", ""),
+    ("add",    "a=i+1",                "no call at all: one VM instruction", ""),
+    ("luacall","a=nop()",              "a LUA->LUA call, doing nothing",
+     "function nop() return 1.5 end\n"),
+    ("luabody","a=lbody(1.5,-1)",      "a LUA function with a small body, as a "
+                                       "shim's own would be",
+     "function lbody(p,q)\n"
+     " local x=p*65536\n"
+     " local y=q*65536\n"
+     " local z=x+y\n"
+     " if z>0 then z=z-x end\n"
+     " return z/65536\n"
+     "end\n"),
+    ("flr",    "a=flr(1.5)",           "the call floor: a C verb that does nothing", ""),
+    ("peek",   "a=peek(0x4300)",       "peek: the cheapest memory verb", ""),
+    ("bandi",  "a=band(3,5)",          "band, two integers (the fast lane)", ""),
+    ("bandf",  "a=band(1.5,-1)",       "band, a fraction (the 16.16 lane)", ""),
+    ("shr",    "a=shr(3,1)",           "shr, the verb", ""),
+    ("shl",    "a=shl(1,4)",           "shl, the verb", ""),
+    ("opshr",  "a=3>>1",               "`>>`, the operator (same C body)", ""),
+    ("opband", "a=1.5&-1",             "`&`, the operator, a fraction", ""),
+    ("rnd",    "a=rnd(8)",             "rnd (C verb since moy-spec 5633c6d)", ""),
+    ("mget",   "a=mget(1,1)",          "mget: an int verb, for reference", ""),
 )
 
 P8_HEAD = ("pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n")
 
 
-def p8_source(expr, calls=CALLS):
+def p8_source(expr, calls=CALLS, prelude=""):
     """The cart for one operation. Pure text, so a test can port and run it."""
-    return (P8_HEAD +
+    return (P8_HEAD + prelude +
             "-- tools/p8_verb_bench.py: one operation, %d times a tick. the\n"
             "-- host reads the update half off the board's tick_split and\n"
             "-- subtracts the control cart, which runs the empty loop.\n"
@@ -105,10 +123,10 @@ def build_carts(out_dir, ops=OPS, calls=CALLS, spec=None):
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
     import p8_lua_port                                          # noqa: E402
     out = []
-    for slug, expr, _why in ops:
+    for slug, expr, _why, prelude in ops:
         src = os.path.join(out_dir, "%s.p8" % slug)
         with open(src, "w", encoding="utf-8") as f:
-            f.write(p8_source(expr, calls))
+            f.write(p8_source(expr, calls, prelude))
         cart = os.path.join(out_dir, "%s.moy" % slug)
         p8_lua_port.port(src, cart, title=title_for(slug), force=True)
         out.append((slug, title_for(slug), cart))
@@ -121,7 +139,7 @@ def per_call_ns(samples, control_ms, calls=CALLS):
 
 
 def report(rows, ops=OPS):
-    why = {s: w for s, _e, w in ops}
+    why = {s: w for s, _e, w, _p in ops}
     print("%-9s %10s %10s  %s" % ("op", "update ms", "ns/call", "what it prices"))
     for slug, ms, ns in rows:
         print("%-9s %10.3f %10s  %s"
