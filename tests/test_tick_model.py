@@ -898,3 +898,37 @@ def test_a_runtime_with_no_split_keeps_the_loop_s_own_timing():
     p2 = _player_with(_Old(), fused_cost=0.01)
     p2._run_ticks(1, 1 / 60.0, True)
     assert p2.sched.tick_cost >= 0.009, p2.sched.tick_cost
+
+
+def test_a_cart_no_divisor_fits_still_takes_the_one_that_ticks_fastest():
+    """dank tomb on the T-Deck (2026-09-10), and the reason the pin's question
+    changed from `T >= P` to `T >= D`.
+
+    Measured on glass: a drawing frame 42ms, a tick-only one 17.9ms, the logic
+    tick 2.5, against a 16.7ms period. NO divisor fits -- and that is not the
+    question. What N buys is fewer DRAWING frames, so it keeps paying while a
+    tick-only frame is cheaper than a drawing one:
+
+        N=1  42.0ms a cycle  42.0 ms/tick  23.8 ticks/s
+        N=3  77.8ms a cycle  25.9 ms/tick  38.6 ticks/s
+
+    `T >= P` read 17.9 >= 16.7 and pinned N at 1 -- the worst of the four --
+    and then froze, because at N=1 every frame draws, nothing re-prices T, and
+    the cart ran its logic at 23Hz for the rest of the session on one sample
+    it could never revisit. Two runs of the same cart on the same board landed
+    on different divisors depending on what T happened to hold when the first
+    window closed."""
+    s = _sched(60)
+    trace = _loop(s, 30.0, D=0.042, T=0.0179, tick_cost=0.0025)
+    assert s.div > 1, "a divisor that ticks faster is worth taking"
+    assert all(d > 1 for t, d in trace if t > 6 * W), "and worth keeping"
+
+
+def test_the_pin_still_holds_a_cart_whose_tick_only_frame_is_the_expensive_one():
+    """The other side of `T >= D`, and the cart the pin was written for: moss
+    moss's tick-only frame (49ms) costs MORE than its drawing frame (37ms), so
+    drawing less often makes it slower, not faster -- 27.0 ticks a second at
+    N=1 against 23.3 at N=2. It pins, as it always did."""
+    s = _sched(30)
+    _loop(s, 20.0, D=0.037, T=0.049, tick_cost=0.0278)
+    assert s.div == 1 and s.misses > 0

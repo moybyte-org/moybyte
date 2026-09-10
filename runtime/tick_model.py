@@ -285,12 +285,26 @@ class TickScheduler:
         # single 700ms hitch is a whole late cycle of a quarter-second window.
         very = cyc > 0 and (n_late - self._win_stalls) >= cyc * VERY_LATE
         per = self.period
-        if late and ((self._t_known and self.tick_frame >= per)
+        if late and ((self._t_known and self._d_known
+                      and self.tick_frame >= self.draw_frame)
                      or self.tick_cost >= per):
-            # No divisor helps a loop whose non-drawing frame already costs a
-            # period, or a logic tick that does: the misses report it. Only
-            # when the window WAS late -- an N that held is not moved by a
-            # stall that passed through T's average.
+            # No divisor helps a loop whose TICK-ONLY frame costs at least what
+            # a drawing one does -- that is the whole trade, N swaps drawing
+            # frames for tick-only ones -- nor one whose logic tick already
+            # costs a period. Only when the window WAS late: an N that held is
+            # not moved by a stall that passed through T's average.
+            #
+            # The test was `T >= P` until 2026-09-10, and it is not the same
+            # question. A cart can have a tick-only frame over the period and
+            # STILL gain from a bigger N, because what N buys is fewer
+            # DRAWING frames: dank tomb on the T-Deck measures D=42, T=17.9
+            # against a 16.7ms period, and no N fits -- but N=1 delivers 23.8
+            # logic ticks a second where N=3 delivers 38.6, and `T >= P` drove
+            # it to the worse one and then froze there, because at N=1 nothing
+            # draws less often so nothing can ever re-price T. Moss moss is
+            # the cart the old test was written for and it still pins: its
+            # T=49 exceeds its D=37, so drawing less often really does buy it
+            # nothing (27.0 ticks a second at N=1, 23.3 at N=2).
             if self.div != 1:
                 self._set_div(1)
             self.probing = False
