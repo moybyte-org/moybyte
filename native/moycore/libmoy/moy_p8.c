@@ -2305,13 +2305,16 @@ P8_BITOP(l_band, a & b, a & b)
 P8_BITOP(l_bor,  a | b, a | b)
 P8_BITOP(l_bxor, a ^ b, a ^ b)
 
+/* No integer fast path on bnot, shl, shr or lshr, and the omission is the
+ * whole point. A complement and a right shift move bits ACROSS the point, so
+ * p8 answers a fraction where an integer operator cannot -- `~3` is
+ * -3.0000153 and `shr(3, 1)` is 1.5; a left shift runs bits off the TOP of the
+ * 32-bit image, so `shl(1, 15)` is -32768 where Lua says 32768. Only
+ * band/bor/bxor keep one: two integers meeting in those three can neither
+ * reach the fractional half nor overflow. */
 static int l_bnot(lua_State *L)
 {
     lua_settop(L, 1);
-    if (or0_isint(L, 1)) {
-        lua_pushinteger(L, u2i(~(uint32_t)(int32_t)or0_int(L, 1)));
-        return 1;
-    }
     p8_bit_arg(L, 1);
     p8_unfx(L, u2i(~(uint32_t)p8_fx(L)));
     return 1;
@@ -2322,10 +2325,6 @@ static int l_shl(lua_State *L)
     lua_Integer n;
     lua_settop(L, 2);
     n = p8_shift_count(L, 2);
-    if (or0_isint(L, 1)) {
-        lua_pushinteger(L, p8_shiftl((int32_t)or0_int(L, 1), n));
-        return 1;
-    }
     p8_bit_arg(L, 1);
     p8_unfx(L, p8_shiftl(p8_fx(L), n));
     return 1;
@@ -2339,10 +2338,6 @@ static int l_shr(lua_State *L)
     lua_settop(L, 2);
     n = p8_shift_count(L, 2);
     d = p8_shiftl(1, n);
-    if (or0_isint(L, 1)) {
-        lua_pushinteger(L, p8_idiv(L, or0_int(L, 1), d));
-        return 1;
-    }
     p8_bit_arg(L, 1);
     p8_unfx(L, (int32_t)p8_idiv(L, p8_fx(L), d));
     return 1;
@@ -2353,10 +2348,6 @@ static int l_lshr(lua_State *L)
     lua_Integer n;
     lua_settop(L, 2);
     n = p8_shift_count(L, 2);
-    if (or0_isint(L, 1)) {
-        lua_pushinteger(L, p8_shiftr((int32_t)or0_int(L, 1), n));
-        return 1;
-    }
     p8_bit_arg(L, 1);
     p8_unfx(L, p8_shiftr(p8_fx(L), n));
     return 1;
@@ -2385,105 +2376,6 @@ static int l_rotr(lua_State *L)
     p8_unfx(L, u2i((uint32_t)p8_shiftr(v, n) | (uint32_t)p8_shiftl(v, 32 - n)));
     return 1;
 }
-
-/* -- the NATIVE bit operators ---------------------------------------------
- *
- * A different thing from the nine verbs above, sharing only their spelling.
- * Those are p8's band()/shl()/rotl() FUNCTIONS, which work on all 32 bits of
- * the 16.16 image, fraction included. These are p8's `a|b`, `a<<b`, `~a` as
- * the PORTER reads them: flr() on each operand and then Lua's own integer
- * operator, which is what the emitted cart ran when it spelled the expansion
- * out for itself (`flr(a) | flr(b)`). One crossing here instead of two, and
- * dank tomb's lighting made four thousand of them a frame.
- *
- * The shim's Lua is the reference and libmoy/test/p8lib.moy holds the two
- * lanes to one answer over the operands and counts a cart reaches them with.
- */
-
-/* flr(v or 0), and then the coercion the bitwise operator applies to it, in
- * one: nil and false are 0, a numeric string converts as math.floor's
- * argument does, and a float with no integer representation -- an infinity, a
- * NaN, anything past 2^31 -- raises exactly where `flr(x) | y` raised. Never
- * undefined: math.floor hands such a float straight back and the operator
- * refuses it, which is this branch. */
-static lua_Integer p8_op_int(lua_State *L, int i)
-{
-    lua_Integer n;
-    lua_Number f;
-    if (lua_isinteger(L, i)) return lua_tointeger(L, i);
-    if (!lua_toboolean(L, i)) return 0;
-    f = (lua_Number)l_mathop(floor)(luaL_checknumber(L, i));
-    if (!lua_numbertointeger(f, &n)) {
-        luaL_error(L, "number has no integer representation");
-        return 0;
-    }
-    return n;
-}
-
-/* The integer half is 32-bit by contract (SPEC.md 4.2 pins LUA_32BITS), the
- * same contract the 16.16 verbs above are written to. */
-#define P8_NATIVE_BITOP(NAME, EXPR)                                        \
-    static int NAME(lua_State *L)                                          \
-    {                                                                      \
-        uint32_t a, b;                                                     \
-        lua_settop(L, 2);                                                  \
-        a = (uint32_t)(int32_t)p8_op_int(L, 1);                            \
-        b = (uint32_t)(int32_t)p8_op_int(L, 2);                            \
-        lua_pushinteger(L, u2i(EXPR));                                     \
-        return 1;                                                          \
-    }
-
-P8_NATIVE_BITOP(l_p8_bor,  a | b)
-P8_NATIVE_BITOP(l_p8_band, a & b)
-P8_NATIVE_BITOP(l_p8_bxor, a ^ b)
-
-static int l_p8_bnot(lua_State *L)
-{
-    lua_settop(L, 1);
-    lua_pushinteger(L, u2i(~(uint32_t)(int32_t)p8_op_int(L, 1)));
-    return 1;
-}
-
-/* Lua's own shifts, which p8_shiftl already is: a count at or past the width
- * gives 0 and a negative one goes the other way, so `flr(a) << flr(b)` is
- * defined for every count a cart can reach. */
-#define P8_NATIVE_SHIFT(NAME, SHIFT)                                       \
-    static int NAME(lua_State *L)                                          \
-    {                                                                      \
-        int32_t v;                                                         \
-        lua_Integer n;                                                     \
-        lua_settop(L, 2);                                                  \
-        v = (int32_t)p8_op_int(L, 1);                                      \
-        n = p8_op_int(L, 2);                                               \
-        lua_pushinteger(L, SHIFT(v, n));                                   \
-        return 1;                                                          \
-    }
-
-P8_NATIVE_SHIFT(l_p8_shl, p8_shiftl)
-P8_NATIVE_SHIFT(l_p8_shr, p8_shiftr)
-/* p8's `>>>`: its own name, and the same answer -- Lua's `>>` is already the
- * logical shift, which is what the porter has always emitted for it. */
-P8_NATIVE_SHIFT(l_p8_lshr, p8_shiftr)
-
-/* `<<>` and `>><`, the two p8 operators with no Lua spelling at all: a 32-bit
- * rotate of the floored value, by `flr(n) % 32` -- p8_rot_count, which is
- * that expression including what Lua's floored `%` does to a float too big
- * for an integer. */
-#define P8_NATIVE_ROT(NAME, FIRST, SECOND)                                 \
-    static int NAME(lua_State *L)                                          \
-    {                                                                      \
-        int32_t v;                                                         \
-        lua_Integer n;                                                     \
-        lua_settop(L, 2);                                                  \
-        v = (int32_t)p8_op_int(L, 1);                                      \
-        n = p8_rot_count(L, 2);                                            \
-        lua_pushinteger(L, u2i((uint32_t)FIRST(v, n)                       \
-                               | (uint32_t)SECOND(v, 32 - n)));            \
-        return 1;                                                          \
-    }
-
-P8_NATIVE_ROT(l_p8_rotl, p8_shiftl, p8_shiftr)
-P8_NATIVE_ROT(l_p8_rotr, p8_shiftr, p8_shiftl)
 
 /* -- the p8 table verbs ---------------------------------------------------
  *
@@ -2703,11 +2595,6 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
         {"__moy_lshr", l_lshr}, {"__moy_rotl", l_rotl}, {"__moy_rotr", l_rotr},
         /* The porter's NATIVE bit operators, which are not those: flr() on
          * each operand and then Lua's own integer operator, in one call. */
-        {"__moy_p8_bor", l_p8_bor}, {"__moy_p8_band", l_p8_band},
-        {"__moy_p8_bxor", l_p8_bxor}, {"__moy_p8_bnot", l_p8_bnot},
-        {"__moy_p8_shl", l_p8_shl}, {"__moy_p8_shr", l_p8_shr},
-        {"__moy_p8_lshr", l_p8_lshr},
-        {"__moy_p8_rotl", l_p8_rotl}, {"__moy_p8_rotr", l_p8_rotr},
     };
     size_t i;
     if (!con || !p || !mem) return 1;

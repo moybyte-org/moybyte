@@ -908,8 +908,15 @@ def _expand_sigils_once(toks):
 # `a + 1 & b` flooring both sides of the `+` and `#t & 3` from becoming
 # `#flr(t) & 3`.
 _BITOPS = ("<<", ">>", ">>>", "<<>", ">><", "&", "~", "|")
-# p8's rotates have no Lua operator to leave behind, so they are always a call.
-_ROTATES = ("<<>", ">><")
+# The operators whose answer for two INTEGERS is Lua's own, so a provably
+# integral pair keeps the bare VM instruction. It is a short list because p8's
+# operators run on the 16.16 IMAGE: `&`, `|` and `^^` never touch the
+# fractional half when both halves start clear, so they are exact. The other
+# five move bits across the point or off the end of the image -- `3 >> 1` is
+# 1.5, `~3` is -3.0000153, `1 << 15` is -32768 -- and Lua's integer operator
+# cannot say any of that, so they are always a call, integers or not. (The two
+# rotates were already always a call, having no Lua operator at all.)
+_BARE_OPS = ("&", "|", "~")
 _BIT_VERB = {"|": "__p8_bor", "&": "__p8_band", "~": "__p8_bxor",
              "<<": "__p8_shl", ">>": "__p8_shr", ">>>": "__p8_lshr",
              "<<>": "__p8_rotl", ">><": "__p8_rotr"}
@@ -933,13 +940,11 @@ _PREFIX_OPS = ("-", "#", "~")
 
 # Verbs whose answer is a Lua INTEGER for every argument a cart can pass, so
 # an operand that is one needs no floor at all and the bare VM instruction
-# stands. The 16.16 verbs (`band`, `shl`, ...) are deliberately NOT here:
-# their fractional lane divides the 32-bit image back, so `band(x, 0.5)` is
-# 0.5 and a bit operator on it still has to floor. `peek4` reads a 16.16 word
-# and is out for the same reason, and `fget` only counts with ONE argument --
-# with two it answers a boolean.
+# stands. NO bit verb is here, in either spelling: they all answer off the
+# 16.16 image, so `band(x, 0.5)` is 0.5 and `shr(3, 1)` is 1.5. `peek4` reads
+# a 16.16 word and is out for the same reason, and `fget` only counts with ONE
+# argument -- with two it answers a boolean.
 _INT_VERBS = ("peek", "peek2", "mget", "flr", "ceil")
-_P8_BIT_VERBS = tuple(sorted(set(_BIT_VERB.values()))) + (_BNOT_VERB,)
 # The names above are only integers while they are still the SHIM'S. A cart
 # that defines or assigns one of them shadows it, and the rule is off for that
 # name for the whole cart (_shadowed_verbs).
@@ -1113,8 +1118,15 @@ def _provably_int(toks, lo, hi, shadow):
         return False
     parts = _split_bitops(toks, lo, hi)
     if parts is not None:
-        # A bit operator's own answer is an integer, but only while it IS the
-        # bare Lua operator -- which it is only once both its operands are.
+        # A bit operator's own answer is an integer only while it IS the bare
+        # Lua operator: one of _BARE_OPS, binary, with both operands integral.
+        # A `>>` or a `<<` in the chain answers off the 16.16 image and can be
+        # a fraction, and so can a `__p8_band(x, 0.5)` -- which is why no
+        # `__p8_*` name is on the integer list either.
+        for a, b in parts[:-1]:
+            op = toks[b][1]
+            if op not in _BARE_OPS or (op == "~" and a >= b):
+                return False
         for a, b in parts:
             if a < b and not _provably_int(toks, a, b, shadow):
                 return False
@@ -1133,7 +1145,7 @@ def _provably_int(toks, lo, hi, shadow):
         return False
     if name == "fget":
         return args == 1
-    return name in _INT_VERBS or name in _P8_BIT_VERBS
+    return name in _INT_VERBS
 
 
 def _floor_operands(toks, i):
@@ -1175,7 +1187,7 @@ def _rewrite_bitop(toks, i, shadow):
     ok = _provably_int(toks, rs, hi, shadow)
     if ok and not unary:
         ok = _provably_int(toks, lo, _skip_ws_back(toks, i), shadow)
-    if ok and op not in _ROTATES:
+    if ok and not unary and op in _BARE_OPS:
         return None
     if unary:
         return (toks[:i] + [(T_NAME, _BNOT_VERB), (T_OP, "(")]
@@ -2718,25 +2730,24 @@ do
     if is_int(a) and is_int(b) then return a ~ b end
     return unfx(fx(a) ~ fx(b))
   end
+  -- No integer fast path on bnot, shl, shr or lshr, and that omission IS the
+  -- difference. A complement and a right shift move bits ACROSS the point, so
+  -- p8 answers a fraction where a plain integer operator cannot -- `~3` is
+  -- -3.0000153 and `shr(3, 1)` is 1.5; a left shift runs bits off the TOP of
+  -- the 32-bit image, so `shl(1, 15)` is -32768 where Lua says 32768. Only
+  -- band/bor/bxor keep a fast path: two integers meeting in one of those three
+  -- can neither reach the fractional half nor overflow.
   function bnot(a)
-    a = a or 0
-    if is_int(a) then return ~a end
-    return unfx(~fx(a))
+    return unfx(~fx(a or 0))
   end
   function shl(a, n)
-    a, n = a or 0, flr(n or 0)
-    if is_int(a) then return a << n end
-    return unfx(fx(a) << n)
+    return unfx(fx(a or 0) << flr(n or 0))
   end
   function shr(a, n)                          -- ARITHMETIC, as PICO-8's is
-    a, n = a or 0, flr(n or 0)
-    if is_int(a) then return a // (1 << n) end
-    return unfx(fx(a) // (1 << n))
+    return unfx(fx(a or 0) // (1 << flr(n or 0)))
   end
   function lshr(a, n)
-    a, n = a or 0, flr(n or 0)
-    if is_int(a) then return (a & 0xffffffff) >> n end
-    return unfx((fx(a) & 0xffffffff) >> n)
+    return unfx((fx(a or 0) & 0xffffffff) >> flr(n or 0))
   end
   function rotl(a, n)
     n = flr(n or 0) % 32
@@ -2756,46 +2767,22 @@ do
     rotl, rotr = __moy_rotl, __moy_rotr
   end
 
-  -- THE NATIVE BIT OPERATORS, which are a different thing from the nine verbs
-  -- above and share nothing with them but their spelling. p8 writes `a|b`,
-  -- `a<<b`, `~a`; Lua 5.4 refuses a bitwise operator on a non-integral float,
-  -- so the porter floors both operands -- in ONE call rather than a wrapper
-  -- around each, which would be two binding calls around one VM instruction.
+  -- THE NATIVE BIT OPERATORS -- p8's `a|b`, `a<<b`, `~a`, under the names the
+  -- porter emits. They ARE the nine verbs above, and that identity is the
+  -- whole point: PICO-8 spells one lane two ways (the manual's "operator
+  -- versions are also available"), so `x >> 1` and `shr(x, 1)` cannot answer
+  -- differently. They were a second implementation once -- `flr()` on each
+  -- operand and then Lua's own integer operator -- which floored away every
+  -- fraction p8 keeps, made `>>` logical where p8's is arithmetic, and left
+  -- the two lanes disagreeing about `shr(3, 1)`. See PICO8.md.
   --
-  -- Each body IS that expansion, so a host with nothing behind the name runs
-  -- plain Lua; the machine's twin below does the same floor and the same
-  -- operator in one crossing. `flr` is looked up as a global here on purpose:
-  -- it is whichever flr the shim ended up with, C or Lua.
-  --
-  -- `__p8_lshr` is p8's `>>>`, which has always been Lua's `>>` (already a
-  -- logical shift); it carries its own name so the machine can too. The two
-  -- rotates are the only ones with no Lua operator behind them at all -- p8's
-  -- `<<>` and `>><`, on the floored 32-bit value.
-  function __p8_bor(a, b) return flr(a) | flr(b) end
-  function __p8_band(a, b) return flr(a) & flr(b) end
-  function __p8_bxor(a, b) return flr(a) ~ flr(b) end
-  function __p8_bnot(a) return ~flr(a) end
-  function __p8_shl(a, b) return flr(a) << flr(b) end
-  function __p8_shr(a, b) return flr(a) >> flr(b) end
-  function __p8_lshr(a, b) return flr(a) >> flr(b) end
-  function __p8_rotl(a, b)
-    local v, n = flr(a), flr(b) % 32
-    return (v << n) | (v >> (32 - n))
-  end
-  function __p8_rotr(a, b)
-    local v, n = flr(a), flr(b) % 32
-    return (v >> n) | (v << (32 - n))
-  end
-  local function p8op(name) return rawget(_G, "__moy_p8_" .. name) end
-  __p8_bor = p8op("bor") or __p8_bor
-  __p8_band = p8op("band") or __p8_band
-  __p8_bxor = p8op("bxor") or __p8_bxor
-  __p8_bnot = p8op("bnot") or __p8_bnot
-  __p8_shl = p8op("shl") or __p8_shl
-  __p8_shr = p8op("shr") or __p8_shr
-  __p8_lshr = p8op("lshr") or __p8_lshr
-  __p8_rotl = p8op("rotl") or __p8_rotl
-  __p8_rotr = p8op("rotr") or __p8_rotr
+  -- They keep their own NAMES because a cart may take `shr` or `band` for
+  -- itself; the operator is still p8's. And because the assignment happens
+  -- after the rebinding above, a console with moy_p8.c behind the verbs gets
+  -- it behind the operators too, in one crossing.
+  __p8_bor, __p8_band, __p8_bxor, __p8_bnot = bor, band, bxor, bnot
+  __p8_shl, __p8_shr, __p8_lshr = shl, shr, lshr
+  __p8_rotl, __p8_rotr = rotl, rotr
 
   -- NO COROUTINES, and the reason is worth stating where somebody will next
   -- reach for them: this IS real Lua 5.4, but the console opens only base,

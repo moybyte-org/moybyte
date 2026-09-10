@@ -1419,3 +1419,130 @@ def test_the_decode_runs_on_the_micropython_the_browser_uses(tmp_path):
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[:500]
     assert r.stdout.split() == ["256", "0", "255"], (r.stdout, r.stderr[:300])
+
+
+# -- the bit lane (2026-09-10) ---------------------------------------------
+#
+# PICO-8 has one kind of number -- 16.16 fixed point -- and its bit operators
+# run on the whole 32-bit image, fraction included. The port had two readings
+# of that for a long time: the VERBS worked on the image, and the OPERATORS
+# floored each operand onto Lua's integer instruction. `x >> 1` and
+# `shr(x, 1)` answered differently, which is not a thing PICO-8 can do.
+#
+# These run on the real Player, so they cross the emitted shim AND moy_p8.c.
+# A pure-Python check of the porter cannot see either.
+
+def test_a_bit_operator_and_the_verb_of_its_name_are_one_lane(tmp_path):
+    """`x >> 1` is `shr(x, 1)` -- the manual's "operator versions are also
+    available", and a cart reaches whichever it feels like writing."""
+    _need_lua()
+    ws = _run_p8(tmp_path,
+                 "op_shr, vb_shr = 3>>1, shr(3,1)\n"
+                 "op_lshr, vb_lshr = 3>>>1, lshr(3,1)\n"
+                 "op_not, vb_not = ~3, bnot(3)\n"
+                 "op_shl, vb_shl = 3<<1, shl(3,1)\n"
+                 "op_and, vb_and = 12.75&0.5, band(12.75,0.5)\n"
+                 "function _draw() cls(0) end\n", frames=1)
+    g = ws.player._lua.get_global
+    for name in ("shr", "lshr", "not", "shl", "and"):
+        assert g("op_" + name) == g("vb_" + name), (
+            "the `%s` operator and its verb answer differently: %r vs %r"
+            % (name, g("op_" + name), g("vb_" + name)))
+
+
+def test_the_bit_operators_answer_on_the_16_16_image(tmp_path):
+    """The four readings that were wrong, each reachable from cart source.
+
+    A right shift and a complement move bits ACROSS the point; a left shift
+    runs them off the top of the image; and p8's `>>` is ARITHMETIC where
+    Lua's is logical, so a negative used to come back vastly positive."""
+    _need_lua()
+    ws = _run_p8(tmp_path,
+                 "half = 3>>1\n"            # not 1
+                 "comp = ~3\n"              # not -4
+                 "top = 1<<15\n"            # not 32768
+                 "arith = -2>>1\n"          # not 2147483646
+                 "logic = -2>>>1\n"
+                 "frac = 1>>1\n"
+                 "whole = 4>>1\n"
+                 "function _draw() cls(0) end\n", frames=1)
+    g = ws.player._lua.get_global
+    assert g("half") == 1.5
+    assert g("comp") == -3 - 1 / 65536
+    assert g("top") == -32768
+    assert g("arith") == -1, "p8's `>>` is arithmetic, Lua's is logical"
+    assert g("logic") == 32767, "p8's `>>>` is the logical one"
+    assert g("frac") == 0.5
+    assert g("whole") == 2, "a whole answer is still a whole number"
+
+
+def _px9_bit_reader(data, requests):
+    """px9's modern bit reader, in exact 32-bit fixed point.
+
+    zep's px9 is the only compression library the PICO-8 BBS uses. Its newer
+    generation caches EIGHT bits at a time, so the running value never spans
+    more than fifteen significant bits and float32 holds it exactly -- which
+    is why this console can run it at all, once the operators stop flooring.
+    (The 2021 generation caches sixteen, spans up to 31 bits, and cannot.)"""
+    m32 = 0xffffffff
+    cache, cache_bits, i, out = 0, 0, 0, []
+    for bits in requests:
+        if cache_bits < 8:
+            cache_bits += 8
+            cache = (cache + (((data[i] << 16) & m32) >> cache_bits)) & m32
+            i += 1
+        cache = (cache << bits) & m32
+        val = cache & 0xffff0000
+        cache ^= val
+        cache_bits -= bits
+        out.append(val >> 16)
+    return out
+
+
+def test_a_px9_bit_cache_reads_the_stream_the_compressor_wrote(tmp_path):
+    """The payoff, end to end: px9's own reader over real bytes.
+
+    Every operation here is one the floored lane got wrong -- `cache += @src >>
+    n` built a fraction that was thrown away, `cache <<= bits` shifted an
+    integer that was already empty, `cache &= 0xffff` masked the integer half
+    of a word with nothing in it. celeste 2 is the cart people know this from,
+    and it stays refused for a different reason (its older 31-bit cache), but
+    a cart carrying the current px9 decompresses correctly now."""
+    _need_lua()
+    data = bytes((i * 37 + 11) & 0xff for i in range(48))
+    requests = [1 + (i % 7) for i in range(40)]
+    want = _px9_bit_reader(data, requests)
+
+    body = (
+        "d={%s}\n" % ",".join(str(b) for b in data) +
+        "r={%s}\n" % ",".join(str(n) for n in requests) +
+        "for i=1,#d do poke(0x4300+i-1, d[i]) end\n"
+        "cache, cache_bits, src = 0, 0, 0x4300\n"
+        "function getval(bits)\n"
+        " if cache_bits<8 then\n"
+        "  cache_bits+=8\n"
+        "  cache+=@src>>cache_bits\n"
+        "  src+=1\n"
+        " end\n"
+        " cache<<=bits\n"
+        " local val=cache&0xffff\n"
+        " cache^^=val\n"
+        " cache_bits-=bits\n"
+        " return val\n"
+        "end\n"
+        "w={%s}\n" % ",".join(str(v) for v in want) +
+        "bad, first_i, first_got, first_want = 0, 0, 0, 0\n"
+        "for i=1,#r do\n"
+        " local v=getval(r[i])\n"
+        " if v~=w[i] then\n"
+        "  bad+=1\n"
+        "  if first_i==0 then first_i,first_got,first_want=i,v,w[i] end\n"
+        " end\n"
+        "end\n"
+        "function _draw() cls(0) end\n")
+    ws = _run_p8(tmp_path, body, frames=1)
+    g = ws.player._lua.get_global
+    assert g("bad") == 0, (
+        "px9's bit reader disagrees with 32-bit fixed point in %d of %d reads; "
+        "first at %d: got %r, want %r"
+        % (g("bad"), len(want), g("first_i"), g("first_got"), g("first_want")))
