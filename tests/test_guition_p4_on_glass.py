@@ -147,6 +147,14 @@ def test_perf_line_is_the_one_format(board):
     on_glass.perf_line_is_the_one_format(board)
 
 
+def test_the_wm_meters_answer_for_the_frame_they_measured(board):
+    """The second windowed board makes the same check: a tier difference is an
+    ARGUMENT to a shared body, never a reason for only one board to assert
+    (.claude/rules/testing.md). This one was pinned on the Waveshare P4 alone
+    and silently unpinned here."""
+    on_glass.wm_meters_answer_for_the_frame_they_measured(board)
+
+
 def test_a_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "star", door="shell", clear=3)
 

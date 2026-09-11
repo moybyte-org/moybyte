@@ -166,15 +166,21 @@ def test_window_chrome_freezes_during_a_content_scroll(board):
 
 
 def test_perf_lines_flow(board):
-    """One format on every board (#206 item 2), plus the columns only this one
-    can fill: the windowed WM's pass split and the async-PPA overlap counters.
-    The module fixture sends `diag 1`, so the wm columns are measured here --
-    with the meters off they read `-`, which is a different answer from 0."""
+    """One format on every board (#206 item 2), plus the column only this one
+    can fill: the async-PPA overlap counters.
+
+    The windowed WM's pass split (wmr/wmw/wms) moved to its own test below. It
+    was asserted here as "not None" against whatever line an IDLE desk happened
+    to emit, and since `c95bf89` those meters are TAKEN -- so a sample in which
+    the WM drew nothing reads `-`, which is the honest answer and was being read
+    as a regression."""
     got = on_glass.perf_line_is_the_one_format(board)
-    for name in ("wmr", "wmw", "wms"):
-        assert got[name] is not None, (name, got)
     assert isinstance(got["ppa"], tuple) and len(got["ppa"]) == 5, got
     assert got["ppa"][4] == 0, "PPA timeouts must stay 0: %r" % (got["ppa"],)
+
+
+def test_the_wm_meters_answer_for_the_frame_they_measured(board):
+    on_glass.wm_meters_answer_for_the_frame_they_measured(board)
 
 
 def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):

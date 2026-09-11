@@ -127,10 +127,23 @@ def py_probe_reaches_the_console(board):
 
 
 def diag_toggle_roundtrips(board):
+    """The toggle answers both ways -- and is left where it was found.
+
+    It used to end on `diag 0`, which DISARMS the deep meters for every test
+    after it in the tour. Two suites' fixtures send `diag 1` because they
+    "assert PERF lines flow", and those are exactly the meters gated on
+    `perf_capture`: with diag off, wmr/wmw/wms are never written at all, so a
+    later test asserting them reads absence and cannot tell "nothing ran" from
+    "nothing works". Restoring is what keeps a shared body from deciding the
+    state of the suites that call it."""
+    was = board.state()["diag"]
     board.cmd("diag 1", wait_for="REMOTE diag on")
     assert board.state()["diag"] is True
     board.cmd("diag 0", wait_for="REMOTE diag off")
     assert board.state()["diag"] is False
+    if was:
+        board.cmd("diag 1", wait_for="REMOTE diag on")
+        assert board.state()["diag"] is True
 
 
 def home_shelf_fling(board, x0, x1, y):
@@ -345,3 +358,86 @@ def perf_line_is_the_one_format(board):
     # WHICH columns are `-` is the board's own capability claim, so the suites
     # assert that themselves -- this body is shared by a board that fills them.
     return got
+
+
+# -- the windowed tier's three PERF columns ----------------------------------
+
+_WM_METERS = ("wmr", "wmw", "wms")
+
+
+def wm_meters_answer_for_the_frame_they_measured(board, win="settings"):
+    """`wmr`/`wmw`/`wms` say what THIS sample measured, and nothing when no
+    frame measured them.
+
+    They were READ rather than taken until `c95bf89`, so the layer stopped
+    writing the moment a cart opened while the attribute kept its last desktop
+    value forever: both P4s reported `wmw=46` under every cart, identical across
+    carts whose whole frames differed by 8x, and that constant was taken for a
+    fixed window-manager tax every cart paid. Absence is spelled `-` now.
+
+    BOTH HALVES, because either one alone passes for the wrong reason. At REST
+    all three must be ABSENT -- a number there is the stale constant back. Under
+    a window DRAG all three must carry one -- absence everywhere would equally
+    satisfy a column that is simply dead, which is the hole the old assertion
+    sat in: it only ever sampled an idle desk, so it could not tell "nothing ran"
+    from "nothing works", and it read the honest `-` as a regression.
+
+    A window DRAG rather than a content scroll, because the scroll takes the
+    #155 restore skip once the cache is in both ping-pong buffers and so stops
+    writing `wmr` BY DESIGN. A moving window uncovers genuinely damaged backdrop
+    every frame, which is the comment at the skip.
+
+    Leaves the window where it found it -- these suites are one ordered tour.
+    """
+    from runtime.perf_line import parse_perf
+
+    # These three are gated on `perf_capture`, so with diag off they are never
+    # written and BOTH halves below would read `-` -- the rest half passing for
+    # the wrong reason and the drag half failing for it. Armed here rather than
+    # inherited from suite order, and asserted so a board that cannot arm says
+    # so instead of quietly measuring nothing.
+    board.cmd("diag 1", wait_for="REMOTE diag on")
+    assert board.state()["diag"] is True, "the deep meters would not be written"
+
+    # `open` TOGGLES, so a window the previous test left up would be closed.
+    if not (board.state().get("order") or ()):
+        board.open(win)
+        board.drain(1.5)
+
+    n0 = len(board.lines)
+    board.drain(4.0)
+    lines = board.perf_lines(n0)
+    assert lines, "no PERF lines in 4s -- is diag on?"
+    rest = parse_perf(lines[-1])
+    for name in _WM_METERS:
+        assert rest[name] is None, (
+            "%s= carries %r on an IDLE desk, where the windowed WM drew "
+            "nothing: the meter is being read rather than taken (c95bf89)"
+            % (name, rest[name]))
+
+    # The board's OWN drag verb, which exists for exactly this: it grabs the
+    # TOP window's title strip and oscillates it "so the PERF sampler reports
+    # DRAG-time fps". Hand-aiming a swipe at a window by NAME is what a tour
+    # cannot do -- the P4 suite leaves one window up and the Guition P4 suite
+    # leaves the picker stacked over it, so the swipe landed on the picker and
+    # settings never moved. Oscillating also returns the window to where it
+    # started, so nothing has to be put back.
+    n0 = len(board.lines)
+    started = board.cmd("drag 160", wait_for="REMOTE drag ", timeout=15.0)
+    assert started and "no window open" not in started, \
+        "the drag verb declined: %r" % (started,)
+    board.drain(6.0)
+    seen = {}
+    for ln in board.perf_lines(n0):
+        got = parse_perf(ln)
+        for name in _WM_METERS:
+            if got.get(name) is not None:
+                seen.setdefault(name, got[name])
+    board.wait_line("drag done", 45)
+    board.drain(0.5)
+
+    missing = [n for n in _WM_METERS if n not in seen]
+    assert not missing, (
+        "%s never carried a number across a whole window drag (saw %r) -- "
+        "the column is dead, not merely quiet" % (missing, seen))
+    return seen
