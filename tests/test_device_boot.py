@@ -1036,6 +1036,39 @@ def test_a_stage_over_budget_counts_a_miss_and_lifts_the_max(monkeypatch):
                    "last_us": 1, "max_us": budget + 1, "misses": 1, "n": 3}
 
 
+def test_the_frame_that_launched_the_cart_is_not_a_frame_of_the_cart(
+        monkeypatch):
+    """reset() drops the samples AND the rest of its own frame. The frame that
+    calls it is the one that read the cart off the card and built its machine;
+    its remaining stages are hundreds of ms landing in a window of hundreds of
+    frames, and they land in the very field the class says to attribute with.
+    Measured 2026-09-11: `dev` read 12.9ms a loop under moss moss and 1.6ms
+    under Star Catcher -- one launch, divided by each cart's frame count, and it
+    reads as a per-frame cost that scales with the cart."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    dev = device_boot.STAGE_ORDER.index("dev")
+    inp = device_boot.STAGE_ORDER.index("inputs")
+
+    m.start(m.slot_ms)
+    clock[0] += 200
+    m.mark(inp)
+    m.reset()                               # the cart started, mid-frame
+    clock[0] += 900000                      # ... and loading it cost 0.9s
+    m.mark(dev)
+    assert m.report()["dev"]["n"] == 0, "the launch is not a sample of the run"
+
+    for _ in range(3):                      # the run's own frames, from here
+        m.start(m.slot_ms)
+        clock[0] += 300
+        m.mark(dev)
+    rep = m.report()["dev"]
+    assert (rep["n"], rep["avg_us"], rep["max_us"]) == (3, 300, 300)
+
+
 def test_a_stage_with_no_declared_budget_reports_None_and_never_zero(monkeypatch):
     """`tail` is where poll_webhost runs and a browser pulling the console
     bundle owns the frame it lands in -- there is no deadline, so there is no
@@ -1533,6 +1566,38 @@ def test_the_sampler_measures_the_P4s_captured_idle_line(monkeypatch):
     s = device_boot.PerfSampler(ws, overlap=lambda: ov[0], emit=out.append)
     _drive(monkeypatch, s, ws, 124, 2, 0)
     assert out == [PERF_CASES["p4"][1]]
+
+
+def test_a_wm_column_answers_once_and_then_says_it_measured_nothing(
+        monkeypatch):
+    """The wm columns are TAKEN, not read. `wm_windowed` stamps them from inside
+    its layers, and a fullscreen cart runs a different WM -- so a bare read
+    reprints the last desktop value under every cart forever. Both P4s reported
+    `wmw=46` for carts whose frames differed by 8x (2026-09-11) and it was taken
+    for a fixed window-manager tax. The second sample here is the one that
+    matters: nothing wrote, so nothing is claimed."""
+    _clock(monkeypatch)
+    ws = PerfWs(meters={"_draw_ms": 72.0, "_flush_ms": 0.0, "_upd_ms": 0.0,
+                        "_cart_ms": 0.0, "_chrome_ms": 72.0,
+                        "_pf_wm_restore": 28, "_pf_wm_windows": 46,
+                        "_pf_wm_stamp": 3})
+    out = []
+    s = device_boot.PerfSampler(ws, emit=out.append)
+    _drive(monkeypatch, s, ws, 122, 4, 0)
+    assert " wmr=28 wmw=46 wms=3 " in out[0]
+    # ... and the WM has not drawn since.
+    _drive(monkeypatch, s, ws, 122, 4, 0)
+    assert " wmr=- wmw=- wms=- " in out[1]
+    # A board that never had them never grows them: the absence doctrine one
+    # level up (tests/test_console_facade.py holds these names off a host
+    # console) must survive a sampler that clears.
+    bare = PerfWs(meters={"_draw_ms": 72.0, "_flush_ms": 0.0, "_upd_ms": 0.0,
+                          "_cart_ms": 0.0, "_chrome_ms": 72.0})
+    out2 = []
+    _drive(monkeypatch, device_boot.PerfSampler(bare, emit=out2.append),
+           bare, 122, 4, 0)
+    assert " wmr=- wmw=- wms=- " in out2[0]
+    assert not hasattr(bare, "_pf_wm_windows")
 
 
 def test_a_board_with_no_overlap_source_reports_the_PPA_columns_absent(

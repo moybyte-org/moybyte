@@ -689,6 +689,29 @@ class PerfSampler:
         self._sched = None    # WHOSE misses _miss is a baseline for
         self._ov = overlap() if overlap is not None else None
 
+    def _take(self, name):
+        """Read one windowed-WM meter and CLEAR it: it says what THIS sample
+        measured, and only a frame that drew that layer may answer.
+
+        `wm_windowed` stamps these from inside its layers, and a FULLSCREEN cart
+        runs a different WM entirely -- so the layer stops writing the moment a
+        cart opens while the attribute keeps its last desktop value forever. Read
+        bare, the column then prints a live-looking number for a body that has not
+        run in minutes: on 2026-09-11 both P4s reported `wmw=46` under every cart,
+        identical across carts whose whole frame differed by 8x, and it was taken
+        for a fixed window-manager tax before the layer split showed the WM was
+        not in the stack at all. Absence is the honest reading and the line can
+        already say it.
+
+        The clear is conditional so a board that never had the attribute never
+        grows one -- `tests/test_console_facade.py` holds those three names to
+        ABSENT on a host console, which is the same doctrine one level up.
+        """
+        v = getattr(self.ws, name, None)
+        if v is not None:
+            setattr(self.ws, name, None)
+        return v
+
     def account(self, now, elapsed, sleep_ms):
         """The `FrameLoop.account` hook: accumulate, and emit once a period."""
         self._n += 1
@@ -711,11 +734,13 @@ class PerfSampler:
                  "logic": getattr(ws, "_upd_ms", 0),
                  "render": getattr(ws, "_cart_ms", 0),
                  "chrome": getattr(ws, "_chrome_ms", 0),
-                 # No windowed WM on this board, or the deep meters are off:
-                 # either way nothing measured them, which is not a zero.
-                 "wmr": getattr(ws, "_pf_wm_restore", None),
-                 "wmw": getattr(ws, "_pf_wm_windows", None),
-                 "wms": getattr(ws, "_pf_wm_stamp", None),
+                 # No windowed WM on this board, or the deep meters are off,
+                 # or the WM did not run this window: either way nothing
+                 # measured them, which is not a zero. TAKEN, not read -- see
+                 # _take.
+                 "wmr": self._take("_pf_wm_restore"),
+                 "wmw": self._take("_pf_wm_windows"),
+                 "wms": self._take("_pf_wm_stamp"),
                  "home": getattr(ws, "_pf_home", None)}
             if self._overlap is not None:
                 # DELTAS over this sample (the counters are cumulative), and
@@ -859,6 +884,7 @@ class StageMeters:
         self.seen = [0] * n
         self.slot_ms = 0
         self._t = 0
+        self._skip = False    # see reset(): the frame that reset is not a sample
         self.rebudget(frame_slot_ms(ws, floor_ms))
 
     def rebudget(self, slot_ms):
@@ -871,10 +897,23 @@ class StageMeters:
             i += 1
 
     def reset(self):
-        """Drop every sample. Called at cart start AND at cart exit, so a run's
-        numbers never carry the launcher's and the launcher's never carry the
-        run's -- and the budgets re-cut themselves on the next measured frame,
-        because the pacing slot changes at exactly those two moments."""
+        """Drop every sample, AND the rest of the frame that asked for the drop.
+        Called at cart start AND at cart exit, so a run's numbers never carry the
+        launcher's and the launcher's never carry the run's -- and the budgets
+        re-cut themselves on the next measured frame, because the pacing slot
+        changes at exactly those two moments.
+
+        THE FRAME THAT RESETS IS NOT A FRAME OF THE RUN. It is the one that read
+        the cart off the card, built the machine and drew the first screen, and
+        its remaining stages land in the window this call just cleared -- one
+        sample of hundreds, and hundreds of milliseconds. It poisons exactly the
+        field the class tells you to attribute with: on 2026-09-11 the Guition
+        read `dev` at 12.9ms a loop under moss moss against 1.6ms under Star
+        Catcher, which is the same one-off launch divided by each cart's frame
+        count, and it reads as a per-frame cost that scales with the cart. What
+        said otherwise was `misses` -- 2 frames of 174 -- which is why that is
+        the field this class puts first.
+        """
         i = 0
         n = len(self.n)
         while i < n:
@@ -885,16 +924,22 @@ class StageMeters:
             self.total[i] = 0
             self.seen[i] = 0
             i += 1
+        self._skip = True
 
     def start(self, slot_ms):
         """Top of a measured frame: re-cut the budgets if the cadence moved,
-        then stamp the clock the first stage is measured from."""
+        then stamp the clock the first stage is measured from. Also ends a
+        reset's skip -- THIS frame is a frame of the new run."""
         if slot_ms != self.slot_ms:
             self.rebudget(slot_ms)
+        self._skip = False
         self._t = _ticks_us()
 
     def mark(self, i):
-        """Close stage `i` at the current clock and open the next one."""
+        """Close stage `i` at the current clock and open the next one. A no-op
+        for the remainder of a frame that called reset()."""
+        if self._skip:
+            return
         t = _ticks_us()
         us = _ticks_diff(t, self._t)
         self._t = t

@@ -133,6 +133,14 @@ GETATTR_RE = re.compile(
     r'getattr\(\s*(?:self\.ws|self\._ws|ws|workstation)\s*,\s*'
     r'"([A-Za-z_][A-Za-z0-9_]*)"')
 
+# A helper that probes BY LITERAL is still a probe. `PerfSampler._take` reads a
+# console attribute and CLEARS it (the PERF line's wm columns say what one
+# sample measured, not what the WM last cost), so the names it hands out must be
+# checked exactly like a getattr's. Without this row the scan quietly stops
+# covering those three -- an exemption nothing probes any more, which is half of
+# what test_the_absent_list_stays_absent_and_stays_used exists to catch.
+TAKE_RE = re.compile(r'self\._take\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
+
 
 def _workstation():
     tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
@@ -266,7 +274,8 @@ def _getattr_sites():
     sites = {}
     for top in ("runtime", "device", "tools"):
         for path in sorted((ROOT / top).rglob("*.py")):
-            for name in GETATTR_RE.findall(path.read_text(encoding="utf-8")):
+            src = path.read_text(encoding="utf-8")
+            for name in GETATTR_RE.findall(src) + TAKE_RE.findall(src):
                 sites.setdefault(name, set()).add(
                     str(path.relative_to(ROOT)))
     return sites

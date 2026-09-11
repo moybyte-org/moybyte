@@ -238,9 +238,16 @@ def run_desktop(fps_cap=60):
 
     try:
         from dev_channel import DevChannel
+        # `touch` in the env is the P4 desktop's arrangement, and axs_touch.py's
+        # own docstring depends on it: "Diagnose this driver through the running
+        # console's own object (dev channel `py`), never a fresh side instance
+        # or SoftI2C" -- which was not possible on this board, where the name
+        # was a closure local. It is also the only way to price the read, and
+        # that read is this board's largest shell cost per frame (2026-09-11).
         serial = DevChannel(ws, pointer, set_backlight=set_backlight, idle=idle,
                             extra={"bt": _bt_cmd},
-                            env={"comp": comp, "game": game, "boot": boot})
+                            env={"comp": comp, "game": game, "boot": boot,
+                                 "touch": touch})
     except Exception as exc:  # noqa: BLE001 -- remote input is optional sugar
         print("Moybyte Guition serial channel unavailable:", exc)
         serial = None
