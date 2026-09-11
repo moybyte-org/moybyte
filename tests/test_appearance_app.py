@@ -92,7 +92,26 @@ def test_wallpaper_and_theme_choices_apply_and_persist(tmp_path):
     assert moy_carts.load_system(carts)["theme"] == "berry"
 
 
-def test_my_art_image_thumbnail_and_live_preview_draw(tmp_path):
+def test_my_art_image_thumbnail_and_live_preview_draw(tmp_path, monkeypatch):
+    # STOP THE CLOCK FIRST. The always-on bar prints HH:MM from wall time
+    # (bar_layer._clock_text) onto sys_canvas, and it is in the bar's cache KEY
+    # -- so a MINUTE ROLLOVER between the snapshot below and the frame after it
+    # repaints the clock, and this redraw-free assertion loses a coin flip. It
+    # lost one in CI on 2026-09-11 after months of green: pixel row 3, inside
+    # the 18px bar, at the clock's x. 261 local runs did not reproduce it (the
+    # window is the millisecond between the two lines, once a minute), but
+    # forcing the roll in this exact state does, every time.
+    #
+    # The claim being made is about the PREVIEW, so freeze the clock rather than
+    # quarantine the test -- and freeze it BEFORE the workstation draws
+    # anything, or the first repaint under the frozen time IS the change. The
+    # redraw suite proper is tests/test_redraw_on_change.py, which CI runs alone
+    # for this same reason; this assertion is the one of its kind outside it
+    # that watches sys_canvas (the others watch the game canvas, which has no
+    # clock on it).
+    import runtime.bar_layer as bar_layer
+    monkeypatch.setattr(bar_layer.time, "localtime",
+                        lambda *a: (2026, 9, 11, 4, 30, 0, 0, 0, 0))
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts, sys_size=(1024, 600), font_scale=2,
                                     windowed=True)
