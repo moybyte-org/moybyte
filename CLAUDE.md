@@ -19,6 +19,7 @@ for the rules. Reading it top to bottom is the slow path.
 | chase a performance number | **#66** (per-cart fps), **#58** (P4), `docs/perf_native_gap_v1.md` (#77) | numbers live in issues, never in this file — see the rule below |
 | drive a board over serial | `tools/p4_autotest.py`, the four `tests/test_*_on_glass.py` | the boards' line-state rules are OPPOSITE; `[serial]` in board.toml is the authority |
 | edit any document | — | run `tools/check_docs.py`; it resolves every path AND pins duplication downward — but it cannot know a sentence went FALSE, and that is the one that bites (see "not confined to this file" below) |
+| push anything | `tools/preflight.sh` | **`make test` is not the CI job.** Every step it omits compares a DERIVED ARTIFACT to the sources it came from — the baked web blob, `runner/` in moy-spec, `ports/p8` — and those are exactly what a source change invalidates silently. The ORDER matters too, and the script is where it is written down. moy-spec has its own `tools/preflight.sh`, whose wasm half runs in a PINNED emscripten container because emcc is not byte-reproducible across versions |
 
 **Four rules that outrank anything below.** Host and device are ONE codebase, not
 a port — a drawing change lands in the one canvas class or the "one cart, every
@@ -138,6 +139,8 @@ public cart vocabulary for no gain.
 ```bash
 make setup          # python -m venv + pip install -e '.[dev,sim]' (hermetic: NOT --system-site-packages)
 make test           # pytest (all). The venv python is .venv/bin/python
+tools/preflight.sh  # what CI runs, in CI's order -- run this BEFORE PUSHING, not `make test`.
+tools/preflight.sh --web   # ...plus the browser suites in real Chrome
 
 # run a single test
 .venv/bin/python -m pytest tests/test_v04_userland.py -k cards
