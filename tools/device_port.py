@@ -61,8 +61,46 @@ def _serial_of(port):
     return None
 
 
-def _resolve(board_dir, ports):
-    """`find_port`, with a serial-number answer for a board that declares one."""
+# ASK EACH PORT ONCE, not once per board. `find_port` probes every candidate
+# sharing its board's usb id, and four of the five boards on this desk share
+# 303a:1001 -- so five plain lookups are up to twenty opens of four ports, and
+# they are not merely redundant. Closing an attach_only handle drops its lines,
+# which resets an S3-class board; the next lookup then meets it mid-boot, gets
+# no answer inside the 4s identity timeout, and moves on having learnt nothing
+# while resetting the next one. Run over this desk it did not finish in ten
+# minutes, where one pass over the four ports answers in about ten seconds.
+#
+# `find_port`'s `prober` hook already exists for the host tests, so the fix is
+# to hand every lookup the SAME memo rather than to change what it does.
+class _Identities:
+    """`(port, line state) -> what that port answered`, probed at most once.
+
+    The line state is in the key rather than the port alone because a probe
+    opens with the ASKING board's discipline: the four boards that collide on
+    303a:1001 all declare dtr/rts high and attach_only, so they share an
+    answer -- but a board that declared otherwise must not read one taken under
+    somebody else's open."""
+
+    def __init__(self):
+        self.seen = {}
+
+    def prober(self, board_dir, log):
+        ser = pa.declared_serial(board_dir)
+        how = (bool(ser.get("dtr")), bool(ser.get("rts")))
+
+        def ask(port):
+            key = (port, how)
+            if key not in self.seen:
+                self.seen[key] = pa._probe_identity(port, board_dir, log)
+            return self.seen[key]
+        return ask
+
+
+def _resolve(board_dir, ports, ids=None):
+    """`find_port`, with a serial-number answer for a board that declares one.
+
+    `ids` is the shared probe memo (above); without one this behaves exactly as
+    a bare `find_port`, which is what a single-board caller wants."""
     want = pa.declared_serial(board_dir).get("serial_number")
     if want:
         hits = [p for p in ports if _serial_of(p) == want]
@@ -71,7 +109,10 @@ def _resolve(board_dir, ports):
         raise RuntimeError(
             "no port has usb serial %s (this board is identified by serial "
             "number, not by asking -- it has no dev channel)" % want)
-    return pa.find_port(board_dir)
+    if ids is None:
+        return pa.find_port(board_dir)
+    return pa.find_port(board_dir, ports=ports,
+                        prober=ids.prober(board_dir, lambda s: None))
 
 
 def main(argv):
@@ -87,11 +128,12 @@ def main(argv):
     print("\nboards:")
     claimed = set()
     unresolved = []
+    ids = _Identities()
     for rel, target in BOARDS:
         board_dir = os.path.join(ROOT, rel)
         name = os.path.basename(rel)
         try:
-            port = _resolve(board_dir, ports)
+            port = _resolve(board_dir, ports, ids)
         except Exception as exc:                # noqa: BLE001 -- the reason IS the answer
             unresolved.append((name, target, str(exc).split(" (saw:")[0]))
             continue

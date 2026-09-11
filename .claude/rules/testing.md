@@ -76,9 +76,6 @@ paths:
     (`rst:0x15`) after which the device re-enumerates under the open handle and
     every read returns nothing, forever — indistinguishable from a dead board.
     `attach_only` REFUSES a reset rather than recording one.
-  - **Merely OPENING the P4's CH343 reboots it** (`rst:0x1`; the Linux CH34x
-    driver glitches the reset circuit). A bare probe right after open is
-    measuring a board mid-boot, ~17s to the desk.
   - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
     vocabulary: `state`/`tap`/`run`/`open`/`swipe`/`drag`/`diag`/`steady`/
     `mem`/`bl`/`vol`/`power`/`web`/`py`/`recv`/`quit`. A command a board cannot

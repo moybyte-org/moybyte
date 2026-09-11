@@ -279,3 +279,72 @@ def test_a_rejected_chunk_names_the_chunk():
     board, _ = _driver(["PY 1", "PY ok", "PY ERR SyntaxError: invalid syntax"])
     assert board.pyexec("a = 1\nb = a + 1\n") is False
     assert "chunk 0" in board.last_error and "SyntaxError" in board.last_error
+
+
+# -- device_port: ask each port ONCE, not once per board ---------------------
+#
+# `find_port` probes every candidate sharing its board's usb id, and four of
+# the five boards declare 303a:1001 -- so listing them with a plain lookup each
+# is up to twenty opens of four ports. They are not merely redundant: closing
+# an attach_only handle drops its lines, which resets an S3-class board, so the
+# next lookup meets it mid-boot, learns nothing inside the 4s identity timeout,
+# and resets the next one on its way past. Measured on the five-board desk it
+# had not finished in ten minutes; one pass answers in about ten seconds.
+
+def _device_port():
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import device_port
+    return device_port
+
+
+def test_listing_every_board_opens_each_port_once():
+    dp = _device_port()
+    ports = ["/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyACM4"]
+    answers = {"/dev/ttyACM1": "guition_s3", "/dev/ttyACM2": "tdeck",
+               "/dev/ttyACM4": "guition_p4"}
+    opened = []
+
+    ids = dp._Identities()
+    real = p4_autotest._probe_identity
+    p4_autotest._probe_identity = lambda port, board_dir, log: (
+        opened.append(port) or answers.get(port))
+    try:
+        got = {}
+        for rel in ("firmware/lilygo_t_deck_plus_mainline",
+                    "firmware/guition_jc3248w535",
+                    "firmware/guition_jc8012p4a1c"):
+            got[rel] = p4_autotest.find_port(
+                os.path.join(ROOT, rel), ports=ports,
+                usb_of=_usb_map({p: "303a:1001" for p in ports}),
+                prober=ids.prober(os.path.join(ROOT, rel), lambda s: None))
+    finally:
+        p4_autotest._probe_identity = real
+
+    assert got["firmware/lilygo_t_deck_plus_mainline"] == "/dev/ttyACM2"
+    assert got["firmware/guition_jc3248w535"] == "/dev/ttyACM1"
+    assert got["firmware/guition_jc8012p4a1c"] == "/dev/ttyACM4"
+    assert sorted(set(opened)) == ports, "a port went unprobed"
+    assert len(opened) == len(ports), \
+        "%d opens for %d ports -- the memo is not shared" % (len(opened),
+                                                             len(ports))
+
+
+def test_the_memo_does_not_reuse_an_answer_taken_under_another_open():
+    """A probe opens with the ASKING board's line discipline, so the memo is
+    keyed on that too -- a board declaring a different one must re-probe rather
+    than read an answer taken under somebody else's open."""
+    dp = _device_port()
+    opened = []
+    ids = dp._Identities()
+    real = p4_autotest._probe_identity
+    p4_autotest._probe_identity = lambda port, board_dir, log: (
+        opened.append((port, board_dir)) or "tdeck")
+    try:
+        # The T-Deck declares dtr/rts high; the Waveshare P4 declares both low.
+        ids.prober(TDECK, lambda s: None)("/dev/ttyACM1")
+        ids.prober(TDECK, lambda s: None)("/dev/ttyACM1")
+        ids.prober(P4, lambda s: None)("/dev/ttyACM1")
+    finally:
+        p4_autotest._probe_identity = real
+    assert len(opened) == 2, \
+        "the two disciplines must not share one answer (saw %d opens)" % len(opened)
