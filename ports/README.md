@@ -34,6 +34,32 @@ and the two drifted: by 2026-09-11 every cart in the old `ports/p8perf/` carried
 measured on a viewport eight rows taller than the one a real cart draws — and no
 two boards held the same set. A cart cannot drift from itself.
 
+**The generated half is its own file**, and that is the format now, not a local
+trick: SPEC.md §4's `sources` lists every script a cart is made of and the host
+runs them in that order, each its own chunk. The importer writes `p8.lua` (data
+tables + the PICO-8 compat shim) and `main.lua` (the cart's own code, nothing
+else), and lists both. The shim was 61% of what it used to write into main.lua
+— 60,654 bytes identical in every port, ahead of the part a person opens — so
+moss moss's main.lua went 100,400 → 37,687 bytes.
+
+Separate chunks are what makes it work: the shim publishes 96 GLOBALS and
+globals cross a chunk boundary, while its four per-cart upvalue captures stay
+beside the data tables inside p8.lua, which is why the cut is there and not
+between them. `main.lua`'s `local` aliases (`localization_lua`) travel with the
+game for the same reason, in reverse.
+
+Two things fall out. A crash in cart code reports its own line — `main.lua:19`
+where the unsplit file said a line 1,400 down the generated prefix — and the
+shim stops being 62KB of permanently-live string per cart on the launcher shelf
+(`_HEAVY_CART_KEYS`).
+
+**The perf wrapper is a third script**, `perf.lua`, listed after `main.lua`. It
+wraps what the cart defined (`p8_init`), so it cannot run before it; and it is
+ours rather than the cart's, so it has no business inside the one file a person
+opens. It reaches the cart's state through globals, which is all that crosses a
+chunk — fine here, because a PICO-8 cart's top-level names are globals by
+construction.
+
 **The toggle is `config.json`'s `perf`**, the cart API's existing "Make it mine"
 surface (`cfg(key, default)`, `docs/moy_cart_api.md`): `0` plays the cart
 normally, `1` starts it in the measured scene. A kid never sees it; a measurement

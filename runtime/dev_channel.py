@@ -208,8 +208,26 @@ P8_SHIM_OPEN = b"PICO-8 compatibility shim (generated"
 P8_SHIM_CLOSE = b"end shim ==="
 
 
+def cart_shim_range(cart_path):
+    """The shim's (first, last) lines in whichever script holds it, or None.
+
+    `p8.lua` on a cart the current importer wrote (SPEC.md 4). That is not a
+    preference -- the range is pinned against the chunk that defines `_draw`,
+    and the shim owns `_draw`, so on a split port the VM reports p8.lua's line
+    numbers. A range read off main.lua would fail the pin and charge NOTHING as
+    shim, which reads as "this cart has no generated half". A single-file port
+    still answers from main.lua.
+    """
+    return (shim_line_range(cart_path + "/p8.lua")
+            or shim_line_range(cart_path + "/main.lua"))
+
+
 def shim_line_range(path, block=512):
-    """The emitted p8 shim's (first, last) lines in a cart's main.lua, or None.
+    """The emitted p8 shim's (first, last) lines in the script holding it, or
+    None.
+
+    That script is `p8.lua` on a cart the current importer wrote (SPEC.md 4);
+    the markers are the shim's own, so this reads either shape.
 
     Read in BLOCKS and never held. main.lua is ~100KB on a ported cart and the
     board being asked has that same cart resident -- moss moss holds a
@@ -908,9 +926,7 @@ class DevChannel:
             except ValueError:
                 iv = 1024
             cart = getattr(ws, "cart", None) or {}
-            rng = None
-            if cart.get("path"):
-                rng = shim_line_range(cart["path"] + "/main.lua")
+            rng = cart_shim_range(cart["path"]) if cart.get("path") else None
             self._shim_rng = rng
             lo, hi = rng if rng else (0, 0)
             n = moycore.lua_profile(1, iv, lo, hi)

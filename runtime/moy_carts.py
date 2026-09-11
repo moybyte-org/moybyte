@@ -4,6 +4,10 @@
 #   manifest.json   title, type, runtime, main, edit-schema
 #   main.py         the cartridge source (_init/_update/_draw + kid API)
 #   config.json     user-edited values (the Make-it-mine surface)
+#   <other>.lua     further scripts, when the manifest lists them in `sources`
+#                   (SPEC.md 4): each its own chunk, run in that order. A
+#                   PICO-8 port uses it for p8.lua, its generated half (data
+#                   tables + compat shim), so main.lua is the cart's own code
 #   (sprites later)
 #
 # MicroPython-friendly by construction (no shutil; os-only). Functions take a `root` so the format/seed/scan logic is
@@ -607,6 +611,16 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
             "edit": cart.get("edit", []),
             "version": seed_ver,
         }
+        # SPEC.md 4's load order, rebuilt from the two lists: `main` sits
+        # between them and must appear, so a reader gets the same order this
+        # cart was written with. Omitted entirely for a one-script cart, which
+        # is what [main] means.
+        _pre = list(cart.get("src_before") or ())
+        _post = list(cart.get("src_after") or ())
+        if _pre or _post:
+            manifest["sources"] = ([n for n, _ in _pre]
+                                   + [manifest["main"]]
+                                   + [n for n, _ in _post])
         if cart.get("fps"):               # frame pacing (#63): "fps": 60 opt-out
             manifest["fps"] = cart["fps"]
         if cart.get("icon"):              # launcher icon tiles (SPEC.md 3.4)
@@ -629,6 +643,12 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
                                                  or sorted(scenes.keys()))}
         _write(d + "/manifest.json", json.dumps(manifest))
         _write(d + "/" + cart.get("main", "main.py"), cart["src"])
+        # The cart's other scripts beside it (SPEC.md 4), and `sources` in the
+        # manifest above naming the order -- a port's main.lua cannot run
+        # without its shim chunk, and nothing else says where that goes.
+        for name, text in list(cart.get("src_before") or ()) \
+                + list(cart.get("src_after") or ()):
+            _write(d + "/" + name, text)
         _write(d + "/config.json", json.dumps(cart["cfg"]))
         sprites = cart.get("sprites")
         if sprites:
@@ -995,6 +1015,48 @@ def load(path, src=True):
             return None
         else:
             src = None          # not read: the cart carries no "src" key
+        # THE CART'S OTHER SCRIPTS (SPEC.md 4). `sources` is the whole load
+        # order with `main` among them; absent it is [main], which is every
+        # cart that is not a PICO-8 port. Split at main because that is how the
+        # tiers use it: `src` is main's text and travels on its own (the Editor
+        # edits it, the crash panel maps its lines), so what is left is the
+        # pieces either side.
+        #
+        # A port's p8.lua is the standing case -- the generated half, data
+        # tables and compat shim, 61% of what the importer used to write into
+        # main.lua. Its own chunk works because the shim publishes 96 GLOBALS
+        # and globals cross a chunk boundary; the four per-cart upvalue
+        # captures (__p8_gff, __music_map, __p8_map_raw, __p8_sheet) sit beside
+        # the data tables IN THAT FILE, which is why the cut is there.
+        #
+        # Read on the same terms as `src` -- the #66 live-set diet drops them
+        # together on a slim scan.
+        before = []
+        after = []
+        if src is not None:
+            names = man.get("sources") or ()
+            if names and mainf not in names:
+                # SPEC.md 4 requires it. Running main last (which is where an
+                # unfound marker would put it) is worse than not opening: the
+                # cart would fail inside code the author did write.
+                print("Moybyte cart sources without main:", path)
+                return None
+            seen_main = False
+            for n in names:
+                if n == mainf:
+                    seen_main = True
+                    continue
+                try:
+                    text = _read(path + "/" + n)
+                except OSError as exc:
+                    if not broken:
+                        print("Moybyte cart source missing:", path, n, exc)
+                        return None
+                    continue        # a broken cart still opens; it cannot run
+                if seen_main:
+                    after.append((n, text))
+                else:
+                    before.append((n, text))
         cfg = dict(man.get("config", {}))
         try:
             cfg.update(json.loads(_read(path + "/config.json")))
@@ -1051,6 +1113,11 @@ def load(path, src=True):
             # not graduated). Un-set only through the undo journal (the grad rider).
             "graduated": bool(man.get("graduated", False)),
             "src": src,
+            # SPEC.md 4's other scripts, as (filename, text) in load order.
+            # Empty lists, never None, for a cart that has none -- the tiers
+            # iterate them unconditionally.
+            "src_before": before,
+            "src_after": after,
             # The cart's LOGIC rate (#217): the Player ticks a GAME at 60 only
             # when its manifest says so, else at the 30 SPEC.md 5 guarantees.
             # Spec carts default to that tick explicitly.

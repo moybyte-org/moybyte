@@ -44,7 +44,7 @@ def test_a_cart_runs_in_the_same_c_the_boards_run():
     buf = bytearray(96 * 64)
     r = lb.HostLuaRun(buf, 96, 64)
     try:
-        assert r.load(CART, "@cart") is None
+        assert r.load([(CART, "@cart")]) is None
         counts, audio = [], []
         for f in range(4):
             r.snap[lb.SNAP_BTNP] = (1 << 0) if f == 1 else 0    # left
@@ -71,7 +71,7 @@ def test_a_cart_error_is_text_with_its_line():
     Player would have to parse out of an exception."""
     r = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
     try:
-        assert r.load("function _update(dt) error('boom') end", "@cart") is None
+        assert r.load([("function _update(dt) error('boom') end", "@cart")]) is None
         err = r.tick(1 / 30.0)
         assert err and "boom" in err and "cart:1" in err, err
     finally:
@@ -86,14 +86,14 @@ def test_the_sandbox_is_the_same_ceiling_the_boards_have():
     the build, not a registration list."""
     r = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
     try:
-        r.load("function _update(dt) end", "@cart")
+        r.load([("function _update(dt) end", "@cart")])
         # coroutine is NOT on this list: SPEC.md 4.1 admits it.
         for name in ("io", "os", "debug", "package", "require",
                      "dofile", "loadstring", "collectgarbage"):
             probe = "function _update(dt) local x = %s.anything end" % name
             r2 = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
             try:
-                err = r2.load(probe, "@probe") or r2.tick(1 / 30.0)
+                err = r2.load([(probe, "@probe")]) or r2.tick(1 / 30.0)
                 assert err is not None, "%s is reachable from a cart" % name
             finally:
                 r2.close()

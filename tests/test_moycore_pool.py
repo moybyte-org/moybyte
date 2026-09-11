@@ -100,7 +100,7 @@ def begin():
 
 
 def run(tag, src, frames):
-    print(tag + "LOAD", moycore.load(src, "@" + tag))
+    print(tag + "LOAD", moycore.load([(src, "@" + tag)]))
     for _f in range(frames):
         err = moycore.tick(0.03125)
         if err is not None:
@@ -165,7 +165,7 @@ print("EDGEAFTER", moycore.alloc_stats())
 # collect has to catch it, and once inside a frame, where the chunks have to
 # go back mid-run. moss moss is this with a 130KB source behind it.
 begin()
-print("BURSTLOAD", moycore.load(r"""
+print("BURSTLOAD", moycore.load([(r"""
 local t = {}
 for i = 1, 12000 do t[i] = {x = i, y = i * 2, s = "key" .. i} end
 BUILT = #t
@@ -183,7 +183,7 @@ function _update(dt)
   end
 end
 function _draw() end
-""", "@burst"))
+""", "@burst")]))
 print("BURSTBUILT", moycore.get_global("BUILT"))
 print("BURSTIDLE", moycore.alloc_stats())
 print("BURSTIDLECHECK", moycore.pool_check())
@@ -203,14 +203,14 @@ print("BURSTCLOSED", moycore.alloc_stats())
 # every round must still pass its own invariants -- a chunk freed while one of
 # its blocks is still on a free list would show up here first.
 begin()
-print("CYCLELOAD", moycore.load(r"""
+print("CYCLELOAD", moycore.load([(r"""
 function _update(dt)
   local t = {}
   for i = 1, 4000 do t[i] = {i, i + 1, i + 2} end
   for i = 1, 4000 do t[i] = nil end
 end
 function _draw() end
-""", "@cycle"))
+""", "@cycle")]))
 _rows = []
 for _r in range(6):
     moycore.tick(0.03125)

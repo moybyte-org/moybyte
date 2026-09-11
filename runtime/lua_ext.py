@@ -21,6 +21,29 @@ and the web runner stage it by name. Pure source and closures: it imports
 nothing, so it costs a frozen module and no runtime dependency.
 """
 
+# SPEC.md 4: the cart's scripts as the (src, chunkname) pairs both Lua tiers
+# hand to `load()`, in load order. ONE definition, because the ORDER is the
+# whole of it -- a tier that ran a port's shim AFTER its game would fail inside
+# the author's own code, which is the report that sends the reader furthest
+# wrong.
+#
+# The Player puts the scripts either side of main on the namespace as
+# `_moy_pre` / `_moy_post`, each a list of (filename, text); `src` is main's
+# and travels on its own because the Editor edits it and the crash panel maps
+# its lines. Hence main's chunk name stays "@cart" -- player._lua_cart_line
+# parses exactly that to mark the bad line (#24) -- while the others are named
+# after their file, so a fault in a generated shim reads `p8.lua:412:` and
+# never lands on the kid's line.
+def cart_chunks(ns, src):
+    out = []
+    for name, text in ns.get("_moy_pre") or ():
+        out.append((text, "@" + name))
+    out.append((src, "@cart"))
+    for name, text in ns.get("_moy_post") or ():
+        out.append((text, "@" + name))
+    return out
+
+
 # libmoy's `moy_button` order (moy.h, SPEC.md 7.3). This is an ABI, not a
 # preference: the snapshot hands moycore ONE integer per player and its h_btn
 # does `(mask >> b) & 1` with `b` the enum value, so bit i means button i of

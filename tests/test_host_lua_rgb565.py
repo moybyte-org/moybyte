@@ -56,7 +56,7 @@ def _run(canvas, lua, sheet=None, tilemap=None, flags=None, globals_=()):
     r = lb.HostLuaRun(buf, canvas.w, canvas.h, sheet, tilemap,
                       wire=wire, indexed=indexed, flags=flags)
     try:
-        assert r.load("function _draw() %s end" % lua, "@cart") is None
+        assert r.load([("function _draw() %s end" % lua, "@cart")]) is None
         assert r.tick(1 / 30.0) is None
         read = {n: r.get_global(n) for n in globals_}
     finally:

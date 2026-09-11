@@ -46,10 +46,10 @@ split it justified.
 from array import array
 
 try:
-    from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS,
+    from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                          LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
 except ImportError:                      # host tests importing the device module
-    from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS,
+    from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                                  LIBMOY_VERBS, NOT_REGISTRABLE,
                                  install_handles)
 
@@ -236,9 +236,12 @@ class MoycoreRun:
         except Exception:  # noqa: BLE001 -- a bad verb must not strand the VM
             _moycore.close()
             raise
-        # "@cart" so a runtime error renders `cart:12:` -- what
-        # player._lua_cart_line parses for the crash-to-code panel (#24).
-        err = _moycore.load(src, "@cart")
+        # The cart's scripts in one call (SPEC.md 4, runtime/lua_ext.py): main
+        # keeps the "@cart" name, so a runtime error in it renders `cart:12:`
+        # -- what player._lua_cart_line parses for the crash-to-code panel
+        # (#24) -- and load() is where the verb profiler arms, ahead of the
+        # first chunk rather than after a shim that already captured its verbs.
+        err = _moycore.load(cart_chunks(ns, src))
         if err:
             try:
                 _moycore.close()

@@ -25,6 +25,13 @@ below is pre-injected as a global. (A cart can also be written in **Lua** —
 `main.lua` + `"runtime": "lua"` in the manifest, same API — see
 [Writing a cart in Lua](#writing-a-cart-in-lua-67).)
 
+A Lua cart may be **more than one script**: the manifest lists them in `"sources"`
+and the console runs them in that order, each as its own chunk — so a `local` in one
+is invisible in the next and they share through globals. There is still no importing;
+the manifest declares the list and the console loads it (SPEC.md §4). A PICO-8 port is
+the standing case, with its generated compat layer in `p8.lua` ahead of the `main.lua`
+a person opens.
+
 ```python
 # a tiny cart: move a ball with the D-pad
 x = y = 0

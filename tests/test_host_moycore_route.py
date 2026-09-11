@@ -81,12 +81,12 @@ def test_a_cart_with_no_sheet_or_map_does_not_take_the_process_down():
     buf = bytearray(64 * 64)
     run = HostLuaRun(buf, 64, 64)                    # no sheet, no map
     try:
-        assert run.load("function _update(dt) end\n"
+        assert run.load([("function _update(dt) end\n"
                         "function _draw()\n"
                         "  spr(1, 0, 0) sspr(0, 0, 8, 8, 0, 0)\n"
                         "  map(0, 0) tline(0, 0, 8, 8, 0, 0, 65536, 0)\n"
                         "  mset(1, 1, 3) X = mget(1, 1)\n"
-                        "end\n", "@c") is None
+                        "end\n", "@c")]) is None
         assert run.tick(1 / 60.0) is None
         assert run.get_global("X") == -1, "no map must read as empty, not junk"
         assert not any(buf), "an absent sheet drew something"

@@ -56,7 +56,7 @@ def run(body):
                 "function _update(dt) end\nfunction _draw() end\n"
                 "function _init()\n" + body +
                 "\n  error(table.concat(out, '|'), 0)\nend\n")
-        said = r.load(cart, "@verbs")     # load runs _init, and _init reports
+        said = r.load([(cart, "@verbs")])     # load runs _init, and _init reports
         assert said is not None, "the cart loaded without reporting"
         return said
     finally:
@@ -88,9 +88,11 @@ def test_a_ported_cart_carries_the_bindings(tmp_path):
                   "__lua__\nfunction _draw() cls(1) end\n")
     out = tmp_path / "t.moy"
     p8_lua_port.port(str(p8), str(out), title="T")
-    main = (out / "main.lua").read_text()
-    assert "split = __moy_split" in main
-    assert 'rnd, srand = p8c("rnd"), p8c("srand")' in main
+    # p8.lua, not main.lua: the shim is the GENERATED half and travels in its
+    # own script (SPEC.md 4), ahead of the cart that calls it.
+    shim = (out / "p8.lua").read_text()
+    assert "split = __moy_split" in shim
+    assert 'rnd, srand = p8c("rnd"), p8c("srand")' in shim
 
 
 # ---- the C half ---------------------------------------------------------

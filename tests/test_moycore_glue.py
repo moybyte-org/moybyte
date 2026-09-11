@@ -188,8 +188,9 @@ class FakeMoycore(types.ModuleType):
         self._log("exec", src, chunk)
         return self.exec_err
 
-    def _load(self, src, chunk):
-        self._log("load", src, chunk)
+    def _load(self, chunks):
+        # SPEC.md 4: the WHOLE cart in one call -- a list of (src, chunkname).
+        self._log("load", list(chunks))
         return self.load_err
 
     def _tick(self, dt):
@@ -903,8 +904,26 @@ def test_the_cart_chunk_is_named_for_the_crash_to_code_panel(w):
     the caret on the failing line (#24); "@" is Lua's own source-name sigil."""
     w.run()
     load = [c for c in w.core.calls if c[0] == "load"][0]
-    assert load[1] == LUA_SRC
-    assert load[2] == "@cart"
+    assert load[1] == [(LUA_SRC, "@cart")]
+
+
+def test_the_whole_sources_list_goes_to_load_in_order(w):
+    """SPEC.md 4: every script, in the manifest's order, in ONE load() call.
+
+    Not exec()s followed by load(): load is where the verb profiler arms and,
+    on the host tier, where the PICO-8 machine opens. A shim chunk run outside
+    it captures the unwrapped verbs and resolves to the slow Lua fallbacks --
+    both silent, and `verbs` is the only meter that sees this tier at all."""
+    ns = make_ns()
+    ns["_moy_pre"] = [("p8.lua", "-- shim")]
+    ns["_moy_post"] = [("perf.lua", "-- wrapper")]
+    w.run(ns=ns)
+    load = [c for c in w.core.calls if c[0] == "load"][0]
+    assert load[1] == [("-- shim", "@p8.lua"),
+                       (LUA_SRC, "@cart"),
+                       ("-- wrapper", "@perf.lua")]
+    assert "exec" not in [c[0] for c in w.core.calls
+                          if len(c) > 1 and c[1] in ("-- shim", "-- wrapper")]
 
 
 # -- the shape the Player reads ------------------------------------------------

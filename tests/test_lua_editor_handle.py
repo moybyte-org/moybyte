@@ -137,9 +137,9 @@ def run_cart(body, granted=True):
     """`load` runs the chunk AND `_init`, so the body below IS the cart."""
     r = Run(granted)
     try:
-        err = r.run.load("function _init()\n%s\nend\n"
+        err = r.run.load([("function _init()\n%s\nend\n"
                          "function _update(dt) end\nfunction _draw() end\n"
-                         % body, "@cart")
+                         % body, "@cart")])
         assert err is None, err
         yield r
     finally:

@@ -96,9 +96,9 @@ def run_cart(body, blobs=None, names=None):
                                              "odd": ODD},
             names if names is not None else ["main", "level2", "odd"])
     try:
-        err = r.run.load("function _init()\n%s\nend\n"
+        err = r.run.load([("function _init()\n%s\nend\n"
                          "function _update(dt) end\nfunction _draw() end\n"
-                         % body, "@cart")
+                         % body, "@cart")])
         assert err is None, err
         yield r
     finally:

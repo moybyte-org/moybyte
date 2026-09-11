@@ -44,7 +44,11 @@ trap to get right.
 # pays for on every collect (~0.2ms/KB on device -- most of the 93-161ms pauses).
 # slim() strips them after the icons are cached; opening a cart rehydrates
 # from the store, and switching carts re-slims the previous one.
-_HEAVY_CART_KEYS = ("src", "sprites", "sounds", "map", "images", "blocks", "scenes")
+# "src_before" is the biggest of them on a ported cart (p8.lua is 62KB where
+# src is 38KB) and the least useful resident: nobody reads a generated shim off
+# the shelf.
+_HEAVY_CART_KEYS = ("src", "src_before", "src_after", "sprites", "sounds",
+                    "map", "images", "blocks", "scenes")
 
 
 class CartManager:

@@ -1175,6 +1175,23 @@ class Player:
         # pristine bytecode compile -- the flag can never break a cart. The
         # inserted-line map keeps crash lines exact (#24) either way.
         src = project.cart["src"]
+        # The cart's OTHER SCRIPTS, either side of main (SPEC.md 4). A ported
+        # cart's generated half -- data tables + the compat shim -- lives in
+        # p8.lua and runs ahead of main.lua, so main.lua is the cart's own code
+        # and an error in the shim reads `p8.lua:N:`, never landing on the kid's
+        # line in the crash-to-code panel. Each is its own chunk, which is what
+        # lets them be separate files at all.
+        #
+        # They ride the namespace like `_moy_prelude`, the same mechanism the
+        # text console's binding uses; both lists are empty for every cart that
+        # declares no `sources`, and lua_ext.cart_chunks then builds the same
+        # one-entry list the tiers always ran.
+        pre = project.cart.get("src_before")
+        if pre:
+            ns["_moy_pre"] = pre
+        post = project.cart.get("src_after")
+        if post:
+            ns["_moy_post"] = post
         # #67 dual-runtime seam (Phase 2): a non-python cart never touches the
         # Python compile / auto-native / code-cache path below -- it starts
         # through the injected Lua runtime instead (same ns, same error panel).

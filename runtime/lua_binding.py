@@ -119,7 +119,8 @@ def _lib():
             d.hl_set_map.argtypes = [_P, _P, _I, _I, _I]
             d.hl_set_flags.argtypes = [_P, _P, _I]
             d.hl_retarget.argtypes = [_P, _P]
-            d.hl_load.argtypes = [_P, _C, _I, _C, _P, _I]
+            d.hl_load.argtypes = [_P, ctypes.POINTER(_C), ctypes.POINTER(_I),
+                                  ctypes.POINTER(_C), _I, _P, _I]
             d.hl_load.restype = _I
             d.hl_exec.argtypes = [_P, _C, _I, _C, _P, _I]
             d.hl_exec.restype = _I
@@ -318,11 +319,22 @@ class HostLuaRun:
             return err.value.decode("utf-8", "replace")
         return None
 
-    def load(self, src, name="@cart"):
-        """Run the chunk and `_init`. Returns None, or the error text."""
+    def load(self, chunks):
+        """Run the cart's chunks in order, then `_init`. None, or the error.
+
+        `chunks` is [(src, chunkname), ...] -- SPEC.md 4's `sources` as the
+        host resolved it, one entry for a one-file cart. The whole list goes
+        in one call on purpose: hl_load opens the PICO-8 machine and widens the
+        draw bridge around it, and a chunk handed in separately would land on
+        the wrong side of both."""
+        n = len(chunks)
+        bufs = [s.encode("utf-8") if isinstance(s, str) else bytes(s)
+                for s, _ in chunks]
+        srcs = (_C * n)(*bufs)
+        lens = (_I * n)(*[len(b) for b in bufs])
+        names = (_C * n)(*[nm.encode() for _, nm in chunks])
         err = ctypes.create_string_buffer(256)
-        b = src.encode("utf-8") if isinstance(src, str) else bytes(src)
-        if self._d.hl_load(self._r, b, len(b), name.encode(),
+        if self._d.hl_load(self._r, srcs, lens, names, n,
                            ctypes.cast(err, _P), 256):
             return err.value.decode("utf-8", "replace")
         return None

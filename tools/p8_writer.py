@@ -319,8 +319,10 @@ def write_cart(sections, out_dir, title):
     }
 
     summary["imported"].append(
-        "main.lua (the cart's own code, converted to Lua 5.4 under a "
-        "generated PICO-8 shim -- it RUNS)")
+        "main.lua (the cart's own code, converted to Lua 5.4 -- it RUNS)")
+    summary["imported"].append(
+        "p8.lua (the generated PICO-8 layer: data tables + the compat shim, "
+        "its own script ahead of main.lua so main.lua is the cart)")
     summary["imported"].append(
         "manifest.json (canvas %s + the view(%d, %d) zoom hint)"
         % (P8_CANVAS, P8_VIEW_W, P8_VIEW_H))

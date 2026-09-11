@@ -29,7 +29,7 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 # marshals ints and one string, so they ride int handles plus a Lua prelude),
 # the moy_button bit order, and the two deny lists that decide what gets
 # registered on top of libmoy's table.
-from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS,
+from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                              LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
 
 # ---------------------------------------------------------------------------
@@ -123,7 +123,11 @@ class MoycoreHostRun:
                 if err:
                     self._run.close()
                     raise RuntimeError(err)
-        err = self._run.load(src, "@cart")
+        # The cart's scripts in one call (SPEC.md 4, runtime/lua_ext.py): a
+        # port's generated half is its own file and must run BEFORE main.lua,
+        # and hl_load is where the PICO-8 machine opens -- a shim chunk run
+        # ahead of that resolves its verbs to the slow Lua fallbacks.
+        err = self._run.load(cart_chunks(ns, src))
         if err:
             self._run.close()
             raise RuntimeError(err)

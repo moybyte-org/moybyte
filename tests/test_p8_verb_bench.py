@@ -83,4 +83,6 @@ def test_build_carts_writes_a_playable_cart_per_row(tmp_path):
         assert main.exists(), cart
         assert (Path(cart) / "manifest.json").exists()
         assert title.startswith("P8Bench ")
-        assert "end shim =" in main.read_text(encoding="utf-8")
+        # The shim is p8.lua's now (SPEC.md 4); main.lua is the cart.
+        assert "end shim =" in (Path(cart) / "p8.lua").read_text(
+            encoding="utf-8")

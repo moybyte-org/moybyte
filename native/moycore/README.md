@@ -213,9 +213,13 @@ Five things about it are load-bearing:
   in. The emitted block is a fixed 1,348 lines but it starts wherever that
   cart's data tables ended — line 26 in one port, line 163 in one that needs
   the raw sheet. `dev_channel.shim_line_range` finds the generator's two marker
-  comments by streaming `main.lua` in blocks with a carry, because the board
-  being asked has that same ~100 KB cart resident and a reader that pulled it
-  into `splitlines()` would OOM the cart it was about to measure.
+  comments by streaming the file in blocks with a carry, because the board
+  being asked has that same cart resident and a reader that pulled it into
+  `splitlines()` would OOM the cart it was about to measure.
+  **From `p8.lua`** on a cart the current importer wrote: a port is two scripts
+  now (SPEC.md 4) and the shim is that one, so those are the line numbers the
+  VM reports. `dev_channel.cart_shim_range` picks the file; a single-file port
+  still answers from `main.lua`.
 - **The range is CHECKED against the cart, not believed.** The shim owns
   `_draw` (the porter renames a p8 cart's own to `p8_draw`), so its
   `linedefined` must land inside the range the host passed. If it does not, the

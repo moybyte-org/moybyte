@@ -74,7 +74,7 @@ end
 """
 
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, pm, {"k": "v"}, None)
-print("START", moycore.load(SRC, "@cart"))
+print("START", moycore.load(((SRC, "@cart"),)))
 for f in range(4):
     snap[moycore.SNAP_TIME_MS] = f * 32
     snap[moycore.SNAP_BTNP] = (1 << 0) if f == 1 else 0     # MOY_BTN_LEFT
@@ -122,7 +122,7 @@ end
 moycore.p8_memory(bytearray(65536), bytearray(65536))
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 print("PROFARM", moycore.profile(1) > 0)
-print("PROFLOAD", moycore.load(PROF, "@cart"))
+print("PROFLOAD", moycore.load(((PROF, "@cart"),)))
 moycore.verb_reset()
 for f in range(5):
     moycore.tick(0.03125)
@@ -174,7 +174,7 @@ moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 # first install cannot pin (`_draw` does not exist yet); load() re-installs
 # after the chunk, and that one can.
 print("LPARM", moycore.lua_profile(1, 32, 1, LP_END))
-print("LPLOAD", moycore.load(LPSRC, "@cart"))
+print("LPLOAD", moycore.load(((LPSRC, "@cart"),)))
 moycore.lua_reset()
 for f in range(12):
     moycore.tick(0.03125)
@@ -221,10 +221,10 @@ print("LPCLOSED", moycore.lua_stats(), moycore.lua_gc_mode(-1))
 # host READS the result instead of being called -- zero crossings for view.
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 print("VIEW0", moycore.view())
-print("VIEWLOAD", moycore.load(
+print("VIEWLOAD", moycore.load(((
     "function _init() view(128, 120) background(5) end\n"
     "function _update(dt) end\n"
-    "function _draw() rect(0, 0, 2, 2, 9) end\n", "@view"))
+    "function _draw() rect(0, 0, 2, 2, 9) end\n", "@view"),)))
 moycore.tick(0.03125)
 print("VIEW1", moycore.view())
 print("BG", 1 if fb[(63 * W + 95) * 2] or fb[(63 * W + 95) * 2 + 1] else 0)
@@ -236,10 +236,10 @@ moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 seen = []
 moycore.register("make_layer", lambda w, h: (seen.append((w, h)), 7)[1])
 moycore.register("draw_layer", lambda h, x, y: seen.append((h, x, y)))
-print("EXT", moycore.load(
+print("EXT", moycore.load(((
     "function _init() L = make_layer(9, 5) end\n"
     "function _update(dt) end\n"
-    "function _draw() cls(0) draw_layer(L, 1, 2) end\n", "@ext"))
+    "function _draw() cls(0) draw_layer(L, 1, 2) end\n", "@ext"),)))
 moycore.tick(0.03125)
 print("EXTCALLS", seen, moycore.get_global("L"))
 moycore.close()
@@ -267,7 +267,7 @@ NS = {"make_layer": lambda w, h: (calls.append(("new", w, h)), _Layer(w, h))[1],
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 install_handles(NS, moycore.register)
 print("PRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
-print("OBJ", moycore.load(
+print("OBJ", moycore.load(((
     "function _init()\n"
     "  L = make_layer(9, 5)\n"
     "  B = image('bg')\n"
@@ -277,7 +277,7 @@ print("OBJ", moycore.load(
     "function _update(dt) end\n"
     "function _draw()\n"
     "  L:cls(3) L:spr(B, 1, 2) L:spr(9, 1, 2, -1, 2, 1) draw_layer(L, 5, 6)\n"
-    "end\n", "@obj"))
+    "end\n", "@obj"),)))
 moycore.tick(0.03125)
 print("OBJCALLS", calls)
 print("OBJGLOBALS", moycore.get_global("N"), moycore.get_global("MISS"))
@@ -307,7 +307,7 @@ moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 moycore.register("draw_scene", PNS["draw_scene"])
 install_handles(PNS, moycore.register)
 print("PPRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
-print("PLACE", moycore.load(
+print("PLACE", moycore.load(((
     "function _init()\n"
     "  local s = scene()\n"
     "  N = #s\n"
@@ -329,7 +329,7 @@ print("PLACE", moycore.load(
     "  LEFT = #actors()\n"
     "end\n"
     "function _update(dt) draw_scene() end\n"
-    "function _draw() end\n", "@place"))
+    "function _draw() end\n", "@place"),)))
 moycore.tick(0.03125)
 print("PROWS", moycore.get_global("N"), moycore.get_global("TAG"),
       moycore.get_global("X"), moycore.get_global("Y"),
@@ -350,14 +350,14 @@ moycore.close()
 # a purple screen and "cls k=32768" climbing).
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
 snap[moycore.SNAP_TIME_MS] = 5000
-print("TLOAD", moycore.load(
+print("TLOAD", moycore.load(((
     "function _update(dt)\n"
     "  T0 = time()\n"
     "  local s = 0\n"
     "  for i = 1, 1500000 do s = s + i % 7 end\n"
     "  T1 = time()\n"
     "end\n"
-    "function _draw() end\n", "@clock"))
+    "function _draw() end\n", "@clock"),)))
 moycore.tick(0.03125)
 _t0, _t1 = moycore.get_global("T0"), moycore.get_global("T1")
 print("CLOCK", 1 if _t0 >= 5000 else 0, 1 if _t1 > _t0 else 0)
@@ -381,10 +381,10 @@ moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None
 print("MASKPRESENT", moycore.exec(
     "P = (__moy_map_masked ~= nil) and (__moy_map_flags ~= nil)", "@probe"),
     moycore.get_global("P"))
-print("MASKLOAD", moycore.load(
+print("MASKLOAD", moycore.load(((
     "function _init() __moy_map_flags('00000000000102') end\n"
     "function _update(dt) end\n"
-    "function _draw() end\n", "@mask"))
+    "function _draw() end\n", "@mask"),)))
 
 
 def _walk(mask):
@@ -425,7 +425,7 @@ for i in range(len(fb)):
 moycore.p8_memory(bytearray(65536), bytearray(0x4300))
 moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None,
                   FLAGS)
-print("FLOAD", moycore.load(
+print("FLOAD", moycore.load(((
     "function _init()\n"
     "  G0, G5, G6 = fget(0), fget(5), fget(6)\n"
     "  B = fget(6, 1)\n"
@@ -434,7 +434,7 @@ print("FLOAD", moycore.load(
     "  P5, PFF = __moy_peek(0x3005), __moy_peek(0x30ff)\n"
     "end\n"
     "function _update(dt) end\n"
-    "function _draw() end\n", "@flags"))
+    "function _draw() end\n", "@flags"),)))
 print("FGET", moycore.get_global("G0"), moycore.get_global("G5"),
       moycore.get_global("G6"), moycore.get_global("B"),
       moycore.get_global("OFF"), moycore.get_global("WIDE"))
@@ -472,13 +472,13 @@ moycore.p8_memory(None, None)
 for i in range(len(fb)):
     fb[i] = 0
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
-print("BARE", moycore.load(
+print("BARE", moycore.load(((
     "function _update(dt) end\n"
     "function _draw()\n"
     "  spr(1, 0, 0) sspr(0, 0, 8, 8, 0, 0)\n"
     "  map(0, 0) tline(0, 0, 8, 8, 0, 0, 65536, 0)\n"
     "  mset(1, 1, 3) X = mget(1, 1)\n"
-    "end\n", "@bare"))
+    "end\n", "@bare"),)))
 print("BARETICK", moycore.tick(0.03125))
 nz = 0
 for b in fb:
@@ -490,7 +490,7 @@ moycore.close()
 # A cart that raises must come back as text, with the VM still recoverable.
 BAD = "function _update(dt) error('boom') end\nfunction _draw() end\n"
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
-print("START2", moycore.load(BAD, "@bad"))
+print("START2", moycore.load(((BAD, "@bad"),)))
 print("ERR", moycore.tick(0.03125))
 moycore.close()
 
@@ -511,7 +511,7 @@ CFG = ("function _update(dt)\n"
        "function _draw() end\n")
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None,
                   {"n": 6, "f": 1.5, "s": "hello", "b": True}, None)
-print("CFGSTART", moycore.load(CFG, "@cfg"))
+print("CFGSTART", moycore.load(((CFG, "@cfg"),)))
 print("CFGTICK", moycore.tick(0.03125))
 print("CFGN", moycore.get_global("N"), moycore.get_global("T"))
 print("CFGF", moycore.get_global("F"))

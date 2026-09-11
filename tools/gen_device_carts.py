@@ -221,6 +221,30 @@ def build_carts(system_carts_dir):
             # main filename intact (defaults stay implicit to keep the blob lean).
             cart["runtime"] = man["runtime"]
             cart["main"] = man.get("main", "main.py")
+        # SPEC.md 4: a cart may be several scripts, listed in `sources` in load
+        # order with `main` among them. `src` is main's; these are the rest,
+        # split at main because that is the shape moy_carts.load hands the
+        # Player and seed_builtins writes back. No system cart uses this today
+        # -- ports/ is deliberately not seeded -- but a blob that dropped them
+        # would seed a cart missing its prologue, which fails inside the
+        # author's own code.
+        _names = man.get("sources") or ()
+        if _names:
+            _main = man.get("main", "main.py")
+            if _main not in _names:
+                raise SystemExit("%s: \"sources\" does not list main %r "
+                                 "(SPEC.md 4)" % (folder, _main))
+            _pre, _post, _seen = [], [], False
+            for _n in _names:
+                if _n == _main:
+                    _seen = True
+                    continue
+                (_post if _seen else _pre).append(
+                    (_n, _read(os.path.join(base, _n))))
+            if _pre:
+                cart["src_before"] = _pre
+            if _post:
+                cart["src_after"] = _post
         if man.get("fps"):                 # frame pacing: "fps": 60, or "free"
             fps = man["fps"]               # (a dt-scaled game that runs with
             cart["fps"] = fps if fps == "free" else int(fps)   # the loop, SPEC 5)

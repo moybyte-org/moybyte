@@ -381,14 +381,22 @@ int hl_exec(host_lua *r, const char *src, int len, const char *name,
     return 0;
 }
 
-/* Load a chunk and run _init. 0 on success; the message lands in err.
+/* Run the cart's chunks in order, then _init. 0 on success; the message lands
+ * in err.
  *
- * The split exists for the GLUE PRELUDE (runtime/lua_ext.py), which has to run
- * after hl_register and before the cart: moybyte's object-valued verbs reach
- * Lua as int-handle functions plus wrappers, because this dispatch marshals
- * ints and strings and a Layer is neither. */
-int hl_load(host_lua *r, const char *src, int len, const char *name,
-            char *err, int errlen)
+ * A LIST, because SPEC.md 4 lets a cart be several scripts and the whole list
+ * has to sit inside THIS call rather than be dribbled in through hl_exec. Two
+ * things bracket the cart and both would be on the wrong side otherwise: the
+ * p8 machine is opened below, and a shim chunk run before that resolves its
+ * verbs to the slow Lua fallbacks instead of the C ones; and hl_widen covers
+ * the chunks, which are allowed to draw.
+ *
+ * hl_exec stays for the GLUE PRELUDE (runtime/lua_ext.py), which has to run
+ * after hl_register and before any of this: moybyte's object-valued verbs
+ * reach Lua as int-handle functions plus wrappers, because this dispatch
+ * marshals ints and strings and a Layer is neither. */
+int hl_load(host_lua *r, const char **srcs, const int *lens, const char **names,
+            int n, char *err, int errlen)
 {
     /* The PICO-8 machine: opened here rather than in hl_new because it seeds
      * memory from the sheet and map, which hl_set_sheet/hl_set_map supply in
@@ -396,13 +404,16 @@ int hl_load(host_lua *r, const char *src, int len, const char *name,
     if (!r->p8mem) r->p8mem = (uint8_t *)malloc(MOY_P8_MEM);
     if (!r->p8rom) r->p8rom = (uint8_t *)malloc(MOY_P8_ROM);
     if (r->p8mem) moy_p8_open(r->L, &r->con, &r->p8, r->p8mem, r->p8rom);
-    int rc;
-    /* The chunk and _init are both allowed to draw (a title screen a cart never
+    int rc = 0, i;
+    /* The chunks and _init are all allowed to draw (a title screen a cart never
      * repaints is the standing case), so they get the same bridge a frame gets
      * -- and the same single exit, so a chunk that draws and then errors still
      * lands what it drew. */
     hl_widen(r);
-    rc = hl_exec(r, src, len, name, err, errlen);
+    for (i = 0; i < n; i++) {
+        rc = hl_exec(r, srcs[i], lens[i], names[i], err, errlen);
+        if (rc) break;
+    }
     if (rc == 0) {
         g_tick_ms = hl_now_ms();          /* _init may call time(), below */
         rc = moy_lua_init(r->L, err, (size_t)errlen);

@@ -119,9 +119,16 @@ main = f.read()
 f.close()
 out["main_len"] = len(main)
 out["main_sha"] = _sha(main)
-for probe in ("PICO-8 compatibility shim", "local P8_VH = 120",
-              "function p8_draw()", "__p8_gff", "-- Localized p8 API"):
+# SPEC.md 4: two scripts. The generated layer is p8.lua, main.lua is the cart.
+f = open("out.moy/p8.lua")
+shim = f.read()
+f.close()
+out["shim_len"] = len(shim)
+for probe in ("PICO-8 compatibility shim", "local P8_VH = 120", "__p8_gff"):
+    out["probe_" + probe.split()[-1]] = probe in shim
+for probe in ("function p8_draw()", "-- Localized p8 API"):
     out["probe_" + probe.split()[-1]] = probe in main
+out["probe_leak"] = "PICO-8 compatibility shim" in main
 # The map and the sheet are OPTIONAL outputs -- a cart with no __map__ gets no
 # map.moymap, and the anon-title fixture is exactly that cart.
 for name, key in (("sprites.moygfx", "gfx"), ("map.moymap", "map")):
@@ -171,16 +178,21 @@ def test_the_whole_import_runs_on_micropython(tmp_path, form):
     assert got["sections_problem"] is None
     assert got["title"] == "tiny dash"
     assert got["files"] == ["flags.moyflags", "main.lua", "manifest.json",
-                            "map.moymap", "sounds.json", "sprites.moygfx"]
+                            "map.moymap", "p8.lua", "sounds.json",
+                            "sprites.moygfx"]
     assert got["manifest"]["canvas"] == "128x128"
     assert got["manifest"]["main"] == "main.lua"
+    assert got["manifest"]["sources"] == ["p8.lua", "main.lua"]
     assert got["manifest"]["safe_to_share"] is False
     # The whole POINT, on the tier that nearly could not do it: the shim, the
     # zoom hint, the renamed lifecycle, the flag table and the localization
     # block -- the last of which is `localization_lua`, the function whose two
-    # regexes MicroPython refused to compile at all.
-    assert got["probe_shim"] and got["probe_120"] and got["probe_p8_draw()"]
-    assert got["probe___p8_gff"] and got["probe_API"]
+    # regexes MicroPython refused to compile at all. Now split across two files
+    # (SPEC.md 4), which this tier writes DIRECTLY -- a post-process that sliced
+    # a 100KB main.lua is the allocation this MicroPython refuses.
+    assert got["probe_shim"] and got["probe_120"] and got["probe___p8_gff"]
+    assert got["probe_p8_draw()"] and got["probe_API"]
+    assert not got["probe_leak"], "main.lua must be the cart and nothing else"
     # ...and the ART is really there, not an empty grid from a failed inflate.
     assert got["gfx0"].startswith("0123456789abcdef")
     # ...and the compatibility report names the cart and says what the code is.

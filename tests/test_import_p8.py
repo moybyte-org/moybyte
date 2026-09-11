@@ -216,26 +216,40 @@ def test_manifest_valid(tmp_path):
     assert man["title"] == "my test cart"
 
 
-def test_main_lua_carries_the_converted_cart_code(tmp_path):
-    """The inversion of the old `test_main_py_keeps_lua_as_comment_only`: the
-    cart's Lua is CODE now, mechanically converted to Lua 5.4, under a shim."""
+def test_main_lua_is_the_cart_and_p8_lua_is_the_generated_half(tmp_path):
+    """The cart's Lua is CODE, mechanically converted to Lua 5.4 -- and it is
+    ALONE in main.lua.
+
+    SPEC.md 4: the generated PICO-8 layer (data tables + the compat shim) is
+    `p8.lua`, its own chunk ahead of main.lua, with both named in the manifest's
+    `sources`. That is what makes main.lua openable: line 1 is the author's line
+    1, so a crash names a line they can find and the Editor shows a game rather
+    than 1,300 lines of stdlib to scroll past and not touch."""
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
 
     src = (out / "main.lua").read_text(encoding="utf-8")
+    shim = (out / "p8.lua").read_text(encoding="utf-8")
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     assert not (out / "main.py").exists(), "the Python stub is gone"
-    # the shim, then the cart's own body -- as code, not as a comment block
-    assert "PICO-8 compatibility shim" in src
+    assert man["sources"] == ["p8.lua", "main.lua"], \
+        "the load order is the manifest's job (SPEC.md 4)"
+    assert man["main"] == "main.lua", "`main` is the AUTHORED file, not the first"
+
+    # The generated half is in the OTHER file, all of it.
+    assert "PICO-8 compatibility shim" in shim
+    assert "PICO-8 compatibility shim" not in src
+    assert "__p8_gff" not in src, \
+        "the data tables travel with the shim -- it captures them as upvalues"
+
+    # ...and main.lua is the cart: its own body, as code, not a comment block.
     assert "function p8_draw()" in src, \
         "_draw is renamed so the shim can pace it at PICO-8's 30fps"
-    # the p8 dialect is converted, not carried through
     assert " x = x - (1)" in src, "`x -= 1` must expand to Lua 5.4"
-    assert "-=" not in src.split("end shim")[-1]
-    # every body line is live: nothing from the cart is commented out wholesale
-    body = src.split("end shim ")[-1]
-    assert "cls(0)" in body and not any(
-        ln.strip().startswith("-- cls(0)") for ln in body.split("\n"))
+    assert "-=" not in src
+    assert "cls(0)" in src and not any(
+        ln.strip().startswith("-- cls(0)") for ln in src.split("\n"))
 
 
 def test_cart_loads_via_moy_carts(tmp_path):
@@ -259,7 +273,7 @@ def test_the_map_and_the_flags_come_across_now(tmp_path):
     """`__map__` and `__gff__` used to be DEFERRED -- noted in the report and
     written nowhere, because the tilemap writer lived only in moy-spec. It is
     vendored now, so both land: the map as the console's own `map.moymap` (the
-    Map editor opens it) and the flags baked into main.lua for fget()."""
+    Map editor opens it) and the flags baked into p8.lua for fget()."""
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
@@ -267,13 +281,15 @@ def test_the_map_and_the_flags_come_across_now(tmp_path):
     names = sorted(p.name for p in out.iterdir())
     # flags.moyflags is SPEC.md 3.5's sidecar: __gff__ byte for byte.
     assert names == ["flags.moyflags", "main.lua", "manifest.json", "map.moymap",
-                     "sounds.json", "sprites.moygfx"]
+                     "p8.lua", "sounds.json", "sprites.moygfx"]
     head, first = (out / "map.moymap").read_text(
         encoding="utf-8").split("\n")[:2]
     assert head == "128 64", "all 64 rows, not just __map__'s 32"
     # p8 cell ids 01 02 03 04 store as id+1 (0 means empty in .moymap)
     assert first.startswith("0203040500")
-    assert "__p8_gff" in (out / "main.lua").read_text(encoding="utf-8")
+    # The table rides with the shim that captures it as an upvalue (SPEC.md 4:
+    # separate chunks, so it cannot sit in the other file).
+    assert "__p8_gff" in (out / "p8.lua").read_text(encoding="utf-8")
 
 
 def test_empty_sections_handled(tmp_path):
@@ -559,7 +575,8 @@ def test_every_import_declares_the_view_zoom_hint(tmp_path):
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
-    src = (out / "main.lua").read_text(encoding="utf-8")
+    # In p8.lua: the hint is the shim's, and the shim is the generated half.
+    src = (out / "p8.lua").read_text(encoding="utf-8")
     # The porter takes the crop as an ARGUMENT (`--zoom` on its own CLI); this
     # importer passes it as data, from p8_writer.P8_CROP, so there is no flag on
     # any tier and nothing to forget.

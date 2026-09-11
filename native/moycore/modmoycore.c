@@ -2028,19 +2028,35 @@ static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
 
-// load(src, chunkname) -> None, or the error text. Runs the cart chunk and its
-// _init. Call AFTER any register()s and any exec()s.
-static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
+// load(chunks) -> None, or the error text. `chunks` is a sequence of
+// (src, chunkname) pairs -- THE WHOLE CART, in the order SPEC.md 4's `sources`
+// gives. Call AFTER any register()s and any exec()s.
+//
+// A LIST rather than one chunk, and the list has to be run HERE rather than
+// through exec(), because two things bracket the cart and a caller doing it by
+// hand puts one of them on the wrong side. The verb profiler arms before the
+// FIRST chunk: a p8 shim resolves and captures its verbs as its own chunk runs
+// (`spr = __moy_p8_spr or spr`), so wrapping after it leaves every draw call
+// the cart makes going to the unwrapped original -- which is silent, and
+// `verbs` is the only meter that sees this tier at all.
+static mp_obj_t mod_load(mp_obj_t chunks_obj)
 {
     if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
-    // Before the chunk, because the chunk is where the p8 shim resolves its
-    // verbs and captures them: wrapping after it would leave every draw call
-    // the cart makes going to the unwrapped original.
+    size_t nchunks = 0;
+    mp_obj_t *chunks = NULL;
+    mp_obj_get_array(chunks_obj, &nchunks, &chunks);
     if (g_prof_arm) prof_install(RUN.L);
-    mp_obj_t err_obj = run_chunk(src_obj, name_obj);
-    if (err_obj != mp_const_none) return err_obj;
-    // AFTER the chunk, unlike the verb profiler above and for the opposite
+    for (size_t i = 0; i < nchunks; i++) {
+        size_t npair = 0;
+        mp_obj_t *pair = NULL;
+        mp_obj_get_array(chunks[i], &npair, &pair);
+        if (npair != 2)
+            mp_raise_ValueError(MP_ERROR_TEXT("moycore: load wants (src, name) pairs"));
+        mp_obj_t err_obj = run_chunk(pair[0], pair[1]);
+        if (err_obj != mp_const_none) return err_obj;
+    }
+    // AFTER the chunks, unlike the verb profiler above and for the opposite
     // reason: the Lua profiler captures nothing at load, but its shim pin
     // reads the shim's own `_draw`, which does not exist until the chunk that
     // defines it has run.
@@ -2067,7 +2083,7 @@ static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
     if (g_gc_mode >= 0) lua_gc_apply(RUN.L, g_gc_mode, g_gc_a, g_gc_b, g_gc_c);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_load_obj, mod_load);
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_load_obj, mod_load);
 
 // gc() -> the VM's heap in KB after a FULL collect, or None with no run.
 //
