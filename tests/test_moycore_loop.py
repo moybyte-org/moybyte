@@ -493,6 +493,32 @@ moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
 print("START2", moycore.load(BAD, "@bad"))
 print("ERR", moycore.tick(0.03125))
 moycore.close()
+
+# config.json REACHES THE CART, and a number arrives AS a number. The seam is
+# `const char *` -- it cannot express type -- so libmoy's `l_cfg` converts a
+# whole-string number back to a Lua number and moycore's `h_cfg` has to render
+# one for it. It did not: every non-str value returned NULL, so `cfg(k, d)` was
+# `d` for every numeric value on every board, silently, because a default IS
+# the answer and there is no error path. The shipped carts tune with numbers
+# (`{"enemies": 6, "autoplay": 0}`), so this was the whole feature.
+CFG = ("function _update(dt)\n"
+       "  N = cfg('n', 0)      T = type(N)\n"
+       "  F = cfg('f', 0)\n"
+       "  S = cfg('s', 'x')    ST = type(S)\n"
+       "  B = cfg('b', 0)\n"
+       "  M = cfg('missing', 42)\n"
+       "end\n"
+       "function _draw() end\n")
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None,
+                  {"n": 6, "f": 1.5, "s": "hello", "b": True}, None)
+print("CFGSTART", moycore.load(CFG, "@cfg"))
+print("CFGTICK", moycore.tick(0.03125))
+print("CFGN", moycore.get_global("N"), moycore.get_global("T"))
+print("CFGF", moycore.get_global("F"))
+print("CFGS", moycore.get_global("S"), moycore.get_global("ST"))
+print("CFGB", moycore.get_global("B"))
+print("CFGMISS", moycore.get_global("M"))
+moycore.close()
 '''
 
 
@@ -747,3 +773,20 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["START2"][1] == "None", out
     assert by["ERR"][1] != "None" and "boom" in out, \
         "a raising _update must return its message: %s" % out
+
+
+    # config.json reaches the cart, and a NUMBER arrives as a number.
+    assert by["CFGSTART"][1] == "None" and by["CFGTICK"][1] == "None", out
+    assert by["CFGN"][1:] == ["6", "number"], (
+        "an int in config.json must reach a Lua cart as a number -- moycore's "
+        "h_cfg returned NULL for every non-str value, so `cfg(k, d)` was `d` "
+        "for every numeric tuning the shipped carts use: %s" % out)
+    assert by["CFGF"][1].startswith("1.5"), (
+        "a float must cross too: %s" % out)
+    assert by["CFGS"][1:] == ["hello", "string"], (
+        "a genuine string must STAY a string -- l_cfg converts only when the "
+        "whole value is a number: %s" % out)
+    assert by["CFGB"][1] == "1", (
+        "JSON true is a config value, not an absence: %s" % out)
+    assert by["CFGMISS"][1] == "42", (
+        "an absent key must still be the caller's default: %s" % out)

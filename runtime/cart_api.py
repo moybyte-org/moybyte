@@ -614,6 +614,16 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
         "textmode": textmode, "quit": _quit, "view": view,
         "cfg": cfg, "col": color,
+        # The C tier needs the DICT, not this closure. moycore's `run_begin`
+        # takes the cart's config and `h_cfg` reads it for libmoy's `cfg` verb,
+        # and `device/moycore_glue.py` picks it out of the namespace by this
+        # name -- a Python closure is not callable from C, so the two cannot be
+        # the same object. Nothing PRODUCED it until 2026-09-11, so every Lua
+        # cart on a board read `cfg(k, d)` as `d`, forever and silently: the
+        # glue's own test supplied `_moy_cfg` by hand and passed while the
+        # feature was dead. Not registered as a verb -- the glue registers only
+        # callables, and a dict is not one.
+        "_moy_cfg": config,
         "sfx": _sfx, "beep": _beep, "music": _music,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
         "rnd": lambda n=1.0: random.random() * n,

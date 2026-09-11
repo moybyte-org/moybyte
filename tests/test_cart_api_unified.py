@@ -82,4 +82,49 @@ def test_the_base_namespace_keyset_is_pinned():
         "textmode", "quit", "view", "cfg", "col",
         "sfx", "beep", "music", "music_stop", "sound_stop", "volume",
         "rnd", "flr", "Image", "image",
+        "_moy_cfg",
     }
+
+
+def test_the_lua_tier_gets_the_config_DICT_beside_the_cfg_closure():
+    """`cfg` is a Python closure and C cannot call one. moycore's `run_begin`
+    takes the cart's config, `h_cfg` reads it for libmoy's `cfg` verb, and
+    `device/moycore_glue.py` picks the DICT out of the namespace by name -- so
+    the namespace has to carry both, and they have to be the same config.
+
+    NOTHING PRODUCED IT until 2026-09-11. Every Lua cart on every board read
+    `cfg(key, default)` as `default`, silently and forever, while
+    `tests/test_moycore_glue.py` passed -- because that test hands `_moy_cfg`
+    to the glue itself, so it pinned the CONSUMER over a feature with no
+    producer. This pins the producer, and the name is asserted against the
+    glue's own source so the two cannot drift apart.
+    """
+    import pathlib
+
+    class _In:
+        def held(self, name):
+            return False
+
+        def pressed(self, name):
+            return False
+
+    class _Canvas:
+        w, h = 320, 240
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    config = {"perf": 1, "speed": "fast"}
+    ns = cart_api.make_api(_Canvas(), _In(), config)
+    # The dict ITSELF: the glue hands this object to C, and an edit through the
+    # Config tab must be visible to the running cart, not to a stale copy.
+    assert ns["_moy_cfg"] is config
+    # ... and it is the same config the Python-tier closure reads.
+    assert ns["cfg"]("perf", 0) == 1
+    assert ns["cfg"]("missing", "d") == "d"
+
+    glue = (pathlib.Path(__file__).resolve().parent.parent
+            / "device" / "moycore_glue.py").read_text(encoding="utf-8")
+    assert '"_moy_cfg"' in glue, (
+        "the glue no longer reads this name -- it is the whole reason the "
+        "namespace carries a dict beside the closure")

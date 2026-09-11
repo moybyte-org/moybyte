@@ -43,6 +43,7 @@
 // deletion commit records what that cost).
 
 #include <stdint.h>
+#include <stdio.h>          // snprintf, for h_cfg's numeric config values
 #include <stdlib.h>
 #include <string.h>
 
@@ -359,9 +360,37 @@ static const char *h_cfg(void *user, const char *key)
     mp_map_elem_t *e = mp_map_lookup(mp_obj_dict_get_map(RUN.cfg), k,
                                      MP_MAP_LOOKUP);
     if (e == NULL || e->value == MP_OBJ_NULL) return NULL;
-    if (!mp_obj_is_str(e->value)) return NULL;
     // The dict owns the string; libmoy only reads it during the call.
-    return mp_obj_str_get_str(e->value);
+    if (mp_obj_is_str(e->value)) return mp_obj_str_get_str(e->value);
+    // A NUMBER has to cross too, and the seam is `const char *` -- it cannot
+    // express type. libmoy's `l_cfg` is written for exactly that: it converts a
+    // whole-string number back to a Lua number, so `cfg("n", 0)` reaches the
+    // cart AS a number and a genuine string stays a string. Refusing to render
+    // one here broke the agreement from this side: config.json is JSON and the
+    // shipped carts tune with numbers (`{"enemies": 6, "autoplay": 0}`), so
+    // every numeric value read as the caller's default on every board, silently
+    // -- there is no error path, a default IS the answer. Found 2026-09-11
+    // chasing why a `perf` toggle did nothing.
+    //
+    // Static because the return is borrowed and read before the next call; the
+    // console is single-threaded and libmoy copies what it needs immediately.
+    static char num[24];
+    if (mp_obj_is_bool(e->value)) {            // JSON true/false -> 1/0
+        num[0] = (char)(mp_obj_is_true(e->value) ? '1' : '0');
+        num[1] = '\0';
+        return num;
+    }
+    if (mp_obj_is_int(e->value)) {
+        mp_int_t v = mp_obj_get_int(e->value);
+        (void)snprintf(num, sizeof(num), "%ld", (long)v);
+        return num;
+    }
+    if (mp_obj_is_float(e->value)) {
+        (void)snprintf(num, sizeof(num), "%.7g",
+                       (double)mp_obj_get_float(e->value));
+        return num;
+    }
+    return NULL;                               // a list/dict/None is not a value
 }
 
 // -- helpers -----------------------------------------------------------------

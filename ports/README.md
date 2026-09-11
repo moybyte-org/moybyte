@@ -10,6 +10,40 @@ declaration or lives in `system_carts/` — so none of it is baked into a
 firmware image or seeded onto a device. To play one, copy the `.moy` folder into a cart store
 (the tests do exactly that into a tmp store).
 
+## p8/ — the PICO-8 conformance corpus, ONE cart each (2026-09-11)
+
+`tools/gen_p8_ports.py` builds `ports/p8/<lid>.moy` for each cart in moy-spec's
+`conformance/p8_corpus.json`. The carts are **not in this repo and must not be**
+— they are their authors' work, several under licences that forbid
+redistribution. The bytes come from that file's links, cached outside the tree by
+moy-spec's `conformance/fetch_p8_corpus.py` (`~/.cache/moy/p8`), which is what
+moy-spec CI already does. What IS committed is `ports/p8/perf/<lid>.lua`: our own
+~10 lines per cart naming the scene to measure in and why.
+
+```bash
+python3 ../moy-spec/conformance/fetch_p8_corpus.py   # once, ~570KB
+python3 tools/gen_p8_ports.py                        # -> ports/p8/*.moy
+```
+
+**ONE cart, not two.** The corpus is two things at once — the COMPATIBILITY set
+(does the importer handle this cart: does it boot, take input, draw right) and
+the PERFORMANCE set (what a frame costs with a real scene on screen). Those want
+different starts, so the boards grew a plain import AND a "… Perf" twin of each,
+and the two drifted: by 2026-09-11 every cart in the old `ports/p8perf/` carried
+`P8_VH = 128` where a fresh import carries 120, so every perf number in #66 was
+measured on a viewport eight rows taller than the one a real cart draws — and no
+two boards held the same set. A cart cannot drift from itself.
+
+**The toggle is `config.json`'s `perf`**, the cart API's existing "Make it mine"
+surface (`cfg(key, default)`, `docs/moy_cart_api.md`): `0` plays the cart
+normally, `1` starts it in the measured scene. A kid never sees it; a measurement
+session flips it in the Editor's Config tab with no re-push, and
+`host_app._SEED_PRESERVE` keeps the value across a re-seed. `0`/`1` rather than
+`true`/`false` because that is what the shipped carts already use
+(`brick_siege_lua.moy/config.json`). Measured on Guition P4 glass the day it
+landed — moss moss: `perf 0` logic 21ms / 30 fps drawn, `perf 1` logic 28ms /
+13 fps, which reproduces the retired twin cart's numbers from one cart.
+
 ## celeste.moy — Celeste Classic
 
 - **Original:** *Celeste* (PICO-8, 2016) by **Maddy Thorson & Noel Berry** —
