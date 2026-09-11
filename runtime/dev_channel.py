@@ -272,6 +272,29 @@ PERF_EVENTS = {
     "bubbles": (6, 0x01FD),   # BUBBLES_ALL -- pipeline, not memory
     "window":  (5, 0x0020),   # EXR_WINDOW -- the windowed ABI's register
                               # spills, which present AS memory traffic
+    # The sub-masks. A total tells you which bucket, and only these tell you
+    # what to DO about it: CTI is the dispatch loop's branches (fuse opcodes,
+    # or stop branching), REG_DEP is a load-use hazard (the operand layout the
+    # opcode reads), and the two want opposite work.
+    "taken":     (2, 0x0010),   # INSN_BRANCH_TAKEN -- branches RETIRED, which
+                                # turns "bubbles / a guess at the per-branch
+                                # cost" into a measured number
+    "b_cti":     (6, 0x0080),   # BUBBLES_CTI -- control transfer
+    "b_regdep":  (6, 0x0010),   # BUBBLES_R_HOLD_REG_DEP
+    "b_dcache":  (6, 0x0004),   # BUBBLES_R_HOLD_D_CACHE_MISS
+    "b_store":   (6, 0x0008),   # BUBBLES_R_HOLD_STORE_RELEASE
+    "b_wait":    (6, 0x0020),   # BUBBLES_R_HOLD_WAIT
+    "d_storebuf": (3, 0x0002),  # D_STALL_STORE_BUF_FULL
+    "d_storeconf": (3, 0x0004), # D_STALL_STORE_BUF_CONFLICT
+    "d_busy":    (3, 0x0010),   # D_STALL_BUSY
+    "d_pif":     (3, 0x0020),   # D_STALL_IN_PIF -- the bus behind the cache
+    "d_bank":    (3, 0x0100),   # D_STALL_BANK_CONFLICT
+    "i_busy":    (4, 0x0002),   # I_STALL_BUSY
+    "i_pif":     (4, 0x0004),   # I_STALL_IN_PIF
+    "i_l32r":    (4, 0x0040),   # I_STALL_FAST_L32R -- literal loads, which an
+                                # interpreter does constantly
+    "i_mul":     (4, 0x0080),   # I_STALL_ITERATIVE_MUL
+    "i_div":     (4, 0x0100),   # I_STALL_ITERATIVE_DIV
 }
 
 
