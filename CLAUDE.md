@@ -18,7 +18,7 @@ for the rules. Reading it top to bottom is the slow path.
 | touch the browser build | `firmware/web_runner/`, `docs/moycore_direction.md` | two web modes, no crossover; where a page is SERVED from decides where its carts live |
 | chase a performance number | **#66** (per-cart fps), **#58** (P4), `docs/perf_native_gap_v1.md` (#77) | numbers live in issues, never in this file — see the rule below |
 | drive a board over serial | `tools/p4_autotest.py`, the four `tests/test_*_on_glass.py` | the boards' line-state rules are OPPOSITE; `[serial]` in board.toml is the authority |
-| edit any document | — | run `tools/check_docs.py`; it resolves every path AND pins duplication downward |
+| edit any document | — | run `tools/check_docs.py`; it resolves every path AND pins duplication downward — but it cannot know a sentence went FALSE, and that is the one that bites (see "not confined to this file" below) |
 
 **Four rules that outrank anything below.** Host and device are ONE codebase, not
 a port — a drawing change lands in the one canvas class or the "one cart, every
@@ -63,6 +63,33 @@ that. State the DECISION and point at the number's home:
 The numbers that MAY stay are the ones that are configuration rather than
 status — a chunk size, a timeout, a headroom floor, a gesture's hold time —
 because those are the design, not a measurement of it.
+
+**And none of this is confined to this file.** Every doc in the tree is subject
+to it, and the path-scoped rules under `.claude/rules/` bite hardest, because
+they load exactly when somebody is about to act on them. On 2026-09-11
+`.claude/rules/testing.md` still said "Merely OPENING the P4's CH343 reboots
+it" — nine days after `1725d40` fixed that and updated both
+`.claude/rules/boards.md` and the board's own `[serial]` block. The single copy
+left saying the old thing was the one that loads when you write a test, an agent
+repeated it to the owner as current fact, and a session was planned around a
+17-second boot that no longer happens.
+
+**So a change that alters behaviour has to go FIND the claims it just
+falsified.** Nothing else will: a doc has no test, and `check_docs.py` resolves
+paths and pins duplication without ever reading for truth. Grep the vocabulary
+your change moved — the verb, the file name, the words of the rule you replaced
+— read every hit, and **correct the claim itself**. Do not append a correction
+to it: a paragraph that states the old thing and walks it back two clauses later
+is worse than a stale one, because both readings are now on the page and the
+reader picks. (Both shapes turned up in one afternoon on 2026-09-11, and one of
+them was in a cell the same commit had just edited.)
+
+**Present tense for how the system works; historical voice only for a
+decision.** The paragraph above keeps dates and hashes because a decision IS
+historical. "The Code tab is one of the cart's scripts" is not — writing it as
+"since #89 the Code tab stopped…" is changelog voice, and it rots a second time
+when the next change lands on top of it. Keep the issue number as a reference
+and drop the transition.
 
 ## What this repo is
 
