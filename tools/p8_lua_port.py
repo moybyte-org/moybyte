@@ -3,7 +3,7 @@
 
 `p8_import.py` beside this file converts the ASSETS. Because a moy cart is Lua
 (SPEC.md 4), a PICO-8 cart's own code can very nearly RUN too, so this tool
-emits a complete Lua cart in TWO SCRIPTS (SPEC.md 4's `sources`) --
+emits a complete Lua cart as a LIST of scripts (SPEC.md 4's `sources`) --
 
   p8.lua   =  [__gff__ flag table]  fget/map-layer masks (import_p8 defers gff)
             + [full 128x64 map]     __map__ rows 0-31 PLUS the rows 32-63 that
@@ -22,6 +22,12 @@ emits a complete Lua cart in TWO SCRIPTS (SPEC.md 4's `sources`) --
                                     the shim can give them PICO-8's button
                                     semantics; the host paces them, SPEC.md 5)
 
+and, when the cart has PICO-8 TABS, one more file per tab after main.lua --
+tab 0 IS main.lua, and the rest take the name the author titled them with
+(`--board` -> `board.lua`) or the number PICO-8 shows. `tab_files` below owns
+that decision, including the three shapes where the tabs have to stay in one
+file; the comment above it is the whole argument.
+
 THE SPLIT IS FOR THE PERSON WHO OPENS THE CART. main.lua is now the cart and
 nothing else: its line 1 is the author's line 1, a crash names a line they can
 find, and an editor that opens `main` shows a game rather than 1,300 lines of
@@ -29,7 +35,8 @@ generated stdlib they must scroll past and must not edit. The data tables sit
 WITH the shim because the shim captures them as upvalues when its chunk loads,
 and the localization block sits WITH the game because its `local`s must be in
 the same chunk as the code that reads them -- each file is its own chunk
-(SPEC.md 4), so nothing else would work.
+(SPEC.md 4), so nothing else would work. That same rule is why the tabs can be
+files at all, and why they sometimes cannot.
 
 plus sprites.moygfx / sounds.json via import_p8's converters and a lua-runtime
 manifest that declares `"canvas": "128x128"` (SPEC.md 1/3.1) -- the cart draws
@@ -3771,6 +3778,309 @@ def _assigns_global(body, name):
             return True
 
 
+# -- the cart's TABS, as its files --------------------------------------------
+#
+# PICO-8 keeps a cart's code in numbered TABS, separated in the file by a line
+# that is exactly `-->8`, and its editor shows them as a row of numbers. That
+# is where the author put the cart's structure -- dungeons_and_diagrams opens
+# its four at `--menu`, `--tutorial`, `--board`, `--puzzles list` -- and a port
+# that flattens them into one main.lua throws it away: five hundred lines as
+# one scroll with four stray comments in it.
+#
+# So a tab becomes a SOURCE (SPEC.md 4): one file per tab, in tab order, tab 0
+# being main.lua. It works because a PICO-8 cart's top-level names are GLOBALS
+# by construction -- p8 Lua has no module scope to hide them in, and a tab
+# writes `board = {}` -- so they cross a chunk boundary exactly as the shim's
+# ninety-six already do.
+#
+# WHERE IT WOULD NOT WORK THE TABS STAY IN ONE FILE, because PICO-8 joins its
+# tabs back into ONE chunk before it parses them, and three things that are
+# legal there do not survive being cut:
+#
+#   * a top-level `local` in one tab that a later tab reads. Separate chunks
+#     make that a nil -- silently, on the first frame that touches it, in code
+#     the author did write. This is the one that must be CAUGHT rather than
+#     reported.
+#   * a top-level `goto` and its label in different tabs (Lua refuses to
+#     compile it -- loud, but still a cart that does not open).
+#   * a long string or long comment holding a line that reads `-->8`: PICO-8
+#     splits for DISPLAY and joins to run, so the string is whole there and
+#     would be halved here.
+#
+# `tab_files` is the whole decision and it returns the reason when it declines,
+# so the import report can say which of the three it was.
+P8_TAB_MARK = "-->8"
+
+# Names a tab may not take: what the porter and the console already write into
+# a cart folder. `perf.lua` is the moybyte perf wrapper (tools/gen_p8_ports.py),
+# listed here because the collision would only show up when a corpus cart was
+# regenerated months later.
+_RESERVED_NAMES = ("main.lua", "p8.lua", "perf.lua", "manifest.json",
+                   "config.json", "sprites.moygfx", "map.moymap",
+                   "flags.moyflags", "sounds.json")
+
+
+def _long_carry(line, carry):
+    """The long-bracket closer `line` leaves us still waiting for, or None.
+
+    Only LONG brackets can carry across a line: Lua's short strings and short
+    comments end at the newline, so nothing else can put a `-->8` line inside
+    a token. `carry` is what we were already waiting for when the line began."""
+    i = 0
+    n = len(line)
+    while i < n:
+        if carry is not None:
+            j = line.find(carry, i)
+            if j < 0:
+                return carry
+            i = j + len(carry)
+            carry = None
+            continue
+        ch = line[i]
+        if ch == "-" and line.startswith("--", i):
+            lv = _long_open(line, i + 2)
+            if lv < 0:
+                return None               # a short comment: the line ends here
+            carry = "]" + "=" * lv + "]"
+            i = i + 2 + lv + 2
+            continue
+        if ch == "[":
+            lv = _long_open(line, i)
+            if lv >= 0:
+                carry = "]" + "=" * lv + "]"
+                i = i + lv + 2
+                continue
+        if ch == '"' or ch == "'":
+            q = ch
+            i += 1
+            while i < n:
+                if line[i] == "\\":
+                    i += 1
+                elif line[i] == q:
+                    break
+                i += 1
+        i += 1
+    return carry
+
+
+def _tab_cuts(lines):
+    """`(cuts, unsafe)` -- the indices of the `-->8` lines, and whether one of
+    them sat inside a long string or long comment (see P8_TAB_MARK)."""
+    cuts = []
+    unsafe = False
+    carry = None
+    for idx in range(len(lines)):
+        line = lines[idx]
+        if line.strip() == P8_TAB_MARK:
+            if carry is None:
+                cuts.append(idx)
+            else:
+                unsafe = True
+        carry = _long_carry(line, carry)
+    return cuts, unsafe
+
+
+def _words(code):
+    """`(index, word)` for every identifier and keyword in `code`.
+
+    A generator, not a list: a hundred-kilobyte cart is fifteen thousand words
+    and this file runs in the browser's MicroPython, where the module header's
+    rule about per-byte lists is about exactly this kind of convenience."""
+    i = 0
+    n = len(code)
+    while i < n:
+        ch = code[i]
+        if ch == "_" or ch.isalpha():
+            j = i
+            while j < n and _ident_char(code[j]):
+                j += 1
+            yield i, code[i:j]
+            i = j
+            continue
+        if ch.isdigit():                  # skip a number whole: `0x1f`, `1e5`
+            while i < n and (_ident_char(code[i]) or code[i] == "."):
+                i += 1
+            continue
+        i += 1
+
+
+# `elseif` carries a `then` that opens nothing, which is why it is subtracted
+# rather than ignored.
+_BLOCK_OPEN = ("function", "do", "then", "repeat")
+_BLOCK_CLOSE = ("end", "until")
+
+
+def _top_level(code):
+    """`(locals, labels, gotos)` at CHUNK level in `code` (comment- and
+    string-stripped).
+
+    Chunk level is the only depth a file boundary changes: inside a function or
+    a block, a `local` and a `goto`'s label are already whole. Depth is counted
+    over keywords, which is the reading that survives minified cart code."""
+    locals_ = []
+    labels = []
+    gotos = []
+    depth = 0
+    pend = None
+    for i, w in _words(code):
+        if pend == "goto":
+            pend = None
+            gotos.append(w)
+            continue
+        if pend == "local":
+            pend = None
+            if depth == 0:
+                if w == "function":
+                    pend = "localfunc"
+                    continue
+                locals_.extend(_name_list(code, i))
+            continue
+        if pend == "localfunc":
+            pend = None
+            if depth == 0:
+                locals_.append(w)
+            continue
+        if w in _BLOCK_OPEN:
+            depth += 1
+        elif w in _BLOCK_CLOSE:
+            depth -= 1
+            if depth < 0:
+                depth = 0                 # unbalanced source: stay at the top
+        elif w == "elseif":
+            depth -= 1
+        elif w == "local":
+            pend = "local"
+        elif w == "goto":
+            if depth == 0:
+                pend = "goto"
+        elif depth == 0 and code[i - 2:i] == "::":
+            labels.append(w)
+    return locals_, labels, gotos
+
+
+def _name_list(code, at):
+    """The names a `local` declares, reading `a, b, c` from `at` up to the `=`
+    or the end of the statement."""
+    out = []
+    i = at
+    n = len(code)
+    while i < n:
+        if code[i] == "_" or code[i].isalpha():
+            j = i
+            while j < n and _ident_char(code[j]):
+                j += 1
+            out.append(code[i:j])
+            i = j
+            continue
+        if code[i] in " \t,":
+            i += 1
+            continue
+        break                             # `=`, a newline, anything else
+    return out
+
+
+def _tab_name(text, n, taken):
+    """The file a tab becomes.
+
+    PICO-8 shows its tabs as bare numbers, but authors TITLE them in the first
+    line -- `--menu`, `--board`, `--puzzles list` -- and that is the name worth
+    putting on a file the Editor lists. A first line that is not a plain
+    comment, a title that does not slug to a clean name, or one already taken
+    falls back to the number PICO-8 itself shows."""
+    head = ""
+    for line in text.split("\n"):
+        if line.strip():
+            head = line.strip()
+            break
+    slug = ""
+    if head.startswith("--") and not head.startswith("--["):
+        last = "_"
+        for ch in head[2:].lower():
+            if ch == "_" or _isword(ch):
+                slug += ch
+            elif last != "_":
+                slug += "_"
+            last = slug[-1:] or "_"
+        slug = slug.strip("_")
+        if slug and not slug[0].isalpha():
+            slug = ""
+        if len(slug) > 24:
+            slug = ""
+    name = slug + ".lua" if slug else ""
+    if not name or name in taken or name in _RESERVED_NAMES:
+        name = "tab%d.lua" % n
+    return name
+
+
+def tab_files(body):
+    """`(files, fused)` -- `body` as one (filename, text) per PICO-8 tab.
+
+    `files[0]` is always `("main.lua", ...)`. `fused` is None when the tabs were
+    split, else the sentence saying why they were not -- which is a REPORT line
+    and not a failure: a fused cart is exactly the one file the porter wrote
+    before tabs were files at all.
+
+    The split happens AFTER `p8_lua_to_lua54`, never before it: that converter
+    reads a whole body, a long string may span a tab boundary (PICO-8 joins the
+    tabs to parse them), and a per-tab conversion would meet an unterminated
+    one. The mark survives conversion as the Lua comment it already is, so
+    cutting the converted text is exact."""
+    lines = body.split("\n")
+    cuts, unsafe = _tab_cuts(lines)
+    if not cuts:
+        return [("main.lua", body)], None
+    if unsafe:
+        return [("main.lua", body)], (
+            "a long string or comment holds a line that reads `-->8`, so the "
+            "tabs cannot be cut apart -- they stay in main.lua")
+    pieces = []
+    at = 0
+    for cut in cuts + [len(lines)]:
+        pieces.append("\n".join(lines[at:cut]))
+        at = cut + 1
+    code = [_strip_lua(p) for p in pieces]
+    tops = [_top_level(c) for c in code]
+    for i in range(len(pieces)):
+        names, labels, gotos = tops[i]
+        for name in names:
+            for j in range(i + 1, len(pieces)):
+                if _reads_name(code[j], name):
+                    return [("main.lua", body)], (
+                        "tab %d declares `local %s` and tab %d reads it; a "
+                        "chunk boundary would make that nil, so the tabs stay "
+                        "in main.lua" % (i, name, j))
+        for target in gotos:
+            if target not in labels:
+                return [("main.lua", body)], (
+                    "tab %d jumps to the label `%s` in another tab, which Lua "
+                    "cannot do across files -- the tabs stay in main.lua"
+                    % (i, target))
+    files = [("main.lua", pieces[0])]
+    taken = []
+    for i in range(1, len(pieces)):
+        name = _tab_name(pieces[i], i, taken)
+        taken.append(name)
+        files.append((name, pieces[i]))
+    return files, None
+
+
+def _reads_name(code, name):
+    """`name` used as a bare identifier in `code` (already comment- and
+    string-stripped) -- not a field, not a key, not the tail of a longer
+    word."""
+    i = 0
+    n = len(name)
+    while True:
+        j = code.find(name, i)
+        if j < 0:
+            return False
+        i = j + n
+        prev = code[j - 1] if j > 0 else " "
+        nxt = code[j + n:j + n + 1]
+        if not (_ident_char(prev) or prev in "._:") and not _ident_char(nxt):
+            return True
+
+
 def localization_lua(body):
     """`local NAME = NAME` aliases at file scope, between shim and game code.
 
@@ -3802,7 +4112,7 @@ def localization_lua(body):
     return "\n".join(lines) + "\n"
 
 
-def build_manifest(title, icon=None, fps=30):
+def build_manifest(title, icon=None, fps=30, sources=None):
     # The spec manifest (SPEC.md 3.1). `fps` is the cart's LOGIC rate, and a p8
     # cart picks it by which lifecycle it defines: _update60 means 60, _update
     # means 30. The host's scheduler calls the shim's `_update` at exactly this
@@ -3817,7 +4127,9 @@ def build_manifest(title, icon=None, fps=30):
         # SPEC.md 4: the p8 layer loads first -- the shim's globals and the
         # data tables have to exist before main.lua's localization block reads
         # them. main.lua is listed too; it is the AUTHORED file, not the first.
-        "sources": ["p8.lua", "main.lua"],
+        # A cart whose tabs became files lists them after it, in tab order
+        # (tab_files), because that is the order PICO-8 runs them in.
+        "sources": list(sources) if sources else ["p8.lua", "main.lua"],
         "fps": fps,
         # SPEC.md 1/3.1: the p8 screen IS the raster. The cart draws native
         # 128x128 pixels and the host scales/letterboxes -- a quarter of the
@@ -3939,6 +4251,11 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
               "-- This is the cart: the original's Lua, mechanically converted\n"
               "-- to Lua 5.4. The p8 API it calls is in p8.lua, which the host\n"
               "-- runs first (SPEC.md 4).\n" % title)
+    tab_header = ("-- %s -- PICO-8 tab %%d, ported by tools/p8_lua_port.py\n"
+                  "-- (#11/#67). PICO-8 keeps a cart's code in numbered tabs;\n"
+                  "-- each one is a script here (SPEC.md 4), run in tab order\n"
+                  "-- after main.lua. They share their GLOBALS, as they did.\n"
+                  % title)
     vh = 128 - int(crop[0]) - int(crop[1])
     if vh not in (120, 128):
         # The host's view crop shows the CENTERED 128x120 (SPEC.md 6) -- the
@@ -3962,8 +4279,19 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
            [p8_header, data_tables_lua(sections, want_sheet, want_map_raw), "\n",
             shim])
     written.append("p8.lua")
-    _write(out_dir, "main.lua", [header, localization_lua(body), body])
-    written.append("main.lua")
+    # THE CART'S TABS, one file each (tab_files says when they cannot be).
+    # The localization block is emitted into EVERY one of them: its `local`s
+    # reach only their own chunk, and which names it may alias is a question
+    # about the WHOLE cart (a global the cart assigns in tab 3 must not be
+    # frozen by an alias in tab 0), so it is computed once over `body`.
+    tabs, fused = tab_files(body)
+    local_block = localization_lua(body)
+    for n in range(len(tabs)):
+        name, text = tabs[n]
+        _write(out_dir, name,
+               [header if n == 0 else (tab_header % n), local_block, text])
+        written.append(name)
+    sources = ["p8.lua"] + [name for name, _ in tabs]
 
     # map.moymap -- the console's own tilemap format (cells store tile+1,
     # 0 = empty), so the map is REAL data other tools/editors/native map()
@@ -4009,10 +4337,18 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
     _write(out_dir, "manifest.json",
            manifest_text(build_manifest(
                title, icon_tile(kgfx),
-               60 if _defines_function(body, "p8_update60") else 30)))
+               60 if _defines_function(body, "p8_update60") else 30,
+               sources)))
     written.append("manifest.json")
     return {"files": sorted(written), "sfx": n_sfx, "music": n_music,
-            "verdict": classify_body(body)}
+            "verdict": classify_body(body),
+            # What the tabs became, for the import report: how many files the
+            # cart's code is in, and the sentence saying why it is one when the
+            # cart HAS tabs that could not be cut apart. `sources` is beside
+            # them in LOAD order, which `files` is not -- it is sorted, and a
+            # report that named the tabs alphabetically would contradict the
+            # sentence it is in.
+            "tabs": len(tabs), "fused": fused, "sources": sources}
 
 
 def port(p8_path, out_dir, title=None, crop=(0, 0), force=False):

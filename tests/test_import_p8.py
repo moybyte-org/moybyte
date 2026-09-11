@@ -1563,3 +1563,212 @@ def test_a_px9_bit_cache_reads_the_stream_the_compressor_wrote(tmp_path):
         "px9's bit reader disagrees with 32-bit fixed point in %d of %d reads; "
         "first at %d: got %r, want %r"
         % (g("bad"), len(want), g("first_i"), g("first_got"), g("first_want")))
+
+
+# -- the cart's TABS, as its files -------------------------------------------
+#
+# PICO-8 cuts a cart's code into numbered tabs with a line that reads `-->8`,
+# and the port used to flatten them into one main.lua where they survived as
+# four stray comments. Each tab is a source now (SPEC.md 4, upstream
+# `p8_lua_port.tab_files`) -- which is only sound because a p8 cart's top-level
+# names are GLOBALS, so the tests that matter most here are the three that
+# check the port DECLINES to split when they are not.
+
+def _tabbed_p8(tmp_path, body, name="tabbed.p8"):
+    p8 = tmp_path / name
+    p8.write_text("pico-8 cartridge // http://www.pico-8.com\nversion 42\n"
+                  "__lua__\n" + body, encoding="utf-8")
+    return p8
+
+
+TABBED = (
+    "-- tabbed cart\n"
+    "-- by tester\n"
+    "board = {}\n"
+    "function _draw() cls(0) end\n"
+    "-->8\n"
+    "--menu\n"
+    "menu = {}\n"
+    "-->8\n"
+    "function helper() return 1 end\n"
+)
+
+
+def test_a_carts_tabs_become_its_files(tmp_path):
+    """One file per tab, in tab order, tab 0 being main.lua.
+
+    The names are the authors': PICO-8 shows its tabs as bare numbers, but
+    people TITLE them in the first line (`--menu`), and that is the name worth
+    putting on a file the Editor lists. A tab with no title keeps the number
+    PICO-8 shows, which is the only other thing it could honestly be called."""
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(_tabbed_p8(tmp_path, TABBED)), str(out))
+
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua", "menu.lua", "tab2.lua"], \
+        "`sources` is the LOAD order, and PICO-8's tab order is it"
+    assert man["main"] == "main.lua", "tab 0 is the authored file"
+    assert "menu = {}" in (out / "menu.lua").read_text(encoding="utf-8")
+    assert "menu = {}" not in (out / "main.lua").read_text(encoding="utf-8"), \
+        "a tab's code moved OUT of main.lua, it was not copied"
+    assert "function helper()" in (out / "tab2.lua").read_text(encoding="utf-8")
+
+    # ...and the store reads them as the scripts either side of main.
+    cart = moy_carts.load(str(out))
+    assert [n for n, _ in cart["src_before"]] == ["p8.lua"]
+    assert [n for n, _ in cart["src_after"]] == ["menu.lua", "tab2.lua"]
+
+
+def _localized(text):
+    """The p8 API names a generated file aliases. `local a, b = a, b` is the
+    block's own shape (localization_lua packs eight to a line), and a cart's
+    own `local` never has it."""
+    out = set()
+    for line in text.split("\n"):
+        if not line.startswith("local "):
+            continue
+        lhs, eq, rhs = line[6:].partition("=")
+        if eq and lhs.strip() == rhs.strip():
+            out.update(n.strip() for n in lhs.split(","))
+    return out
+
+
+def test_every_tab_file_gets_the_localization_block(tmp_path):
+    """`local spr = spr` reaches only its own chunk, so each file needs its
+    own copy -- but WHICH names may be aliased is a question about the whole
+    cart, and is answered once over the whole body. A cart that assigns a p8
+    global in a later tab must not have it frozen by an alias in an earlier
+    one."""
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(_tabbed_p8(
+        tmp_path,
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--late\n"
+        "circ = function(x, y, r, c) end\n")), str(out))
+
+    main = _localized((out / "main.lua").read_text(encoding="utf-8"))
+    late = _localized((out / "late.lua").read_text(encoding="utf-8"))
+    assert "spr" in main and "spr" in late, \
+        "each chunk binds the API it calls as upvalues, or it pays _ENV"
+    assert "circ" not in main and "circ" not in late, \
+        "the cart reassigns circ in tab 1; an alias anywhere would freeze it"
+
+
+FUSING = {
+    "a local that crosses": (
+        "local grid = {}\n"
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--menu\n"
+        "function use() return grid end\n",
+        "local grid"),
+    "a goto across tabs": (
+        "::top::\n"
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--menu\n"
+        "goto top\n",
+        "label `top`"),
+    "a tab mark inside a long string": (
+        "s = [[\n-->8\n]]\n"
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--menu\n"
+        "menu = {}\n",
+        "long string"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(FUSING))
+def test_the_tabs_stay_in_one_file_when_cutting_them_would_break_the_cart(
+        tmp_path, case):
+    """PICO-8 joins its tabs into ONE chunk before it parses them, so three
+    things that are legal there do not survive being cut apart. Each keeps the
+    cart in one main.lua and each SAYS so, because a reader who opens main.lua
+    and finds the `-->8` comments still in it is owed the reason.
+
+    The first is the one that has to be caught rather than reported: separate
+    chunks turn a crossed `local` into a nil, on the first frame that touches
+    it, in code the author did write."""
+    body, expect = FUSING[case]
+    out = tmp_path / "out.moy"
+    summary = import_p8.import_p8(str(_tabbed_p8(tmp_path, body)), str(out))
+
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua"], \
+        "the tabs must stay in one chunk: " + case
+    assert not (out / "menu.lua").exists()
+    said = [s for s in summary["lossy"] if expect in s]
+    assert said, "the report never said why the tabs stayed fused: " + case
+    assert "main.lua" in said[0]
+
+
+def test_a_local_a_tab_reads_before_it_is_declared_does_not_fuse(tmp_path):
+    """Backwards does not count. A name read in tab 0 and `local`-declared in
+    tab 1 was nil in PICO-8 too -- Lua's scoping is forward, one chunk or
+    five -- so fusing for it would keep carts in one file for a bug the split
+    does not cause."""
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(_tabbed_p8(
+        tmp_path,
+        "function _draw() cls(0) print(late) end\n"
+        "-->8\n"
+        "--tail\n"
+        "local late = 1\n")), str(out))
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua", "tail.lua"]
+
+
+def test_a_tab_titled_after_a_file_the_cart_already_has_takes_its_number(
+        tmp_path):
+    """A slug that collides -- with another tab, or with one of the nine names
+    a cart folder already holds -- falls back to the number PICO-8 shows. The
+    reserved list carries `perf.lua`, which is a host's own wrapper
+    (tools/gen_p8_ports.py) and would have collided months later."""
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(_tabbed_p8(
+        tmp_path,
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--perf\n"
+        "a = 1\n"
+        "-->8\n"
+        "--menu\n"
+        "b = 2\n"
+        "-->8\n"
+        "--menu\n"
+        "c = 3\n")), str(out))
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua", "tab1.lua", "menu.lua",
+                              "tab3.lua"]
+
+
+def test_a_tabbed_cart_runs_with_its_globals_crossing_the_files(tmp_path):
+    """The claim the split rests on, on the real Player: a function defined in
+    tab 1 and called from tab 0 answers, because a p8 cart's top-level names
+    are globals and globals cross a chunk boundary.
+
+    Called from `_init` as well as `_update`, which is the ordering that could
+    have gone wrong and would have gone wrong silently: main.lua's chunk runs
+    BEFORE the tab that defines `bump`, and only the lifecycle hooks run after
+    every chunk has."""
+    _need_lua()
+    ws = _run_p8(tmp_path,
+                 "-- crossing cart\n"
+                 "ticks = 0\n"
+                 "seed = 0\n"
+                 "function _init() seed = bump(40) end\n"
+                 "function _update() ticks += 1 end\n"
+                 "function _draw() cls(0) end\n"
+                 "-->8\n"
+                 "--helpers\n"
+                 "function bump(v) return v + 2 end\n",
+                 frames=10, dt=1.0 / 30)
+    g = ws.player._lua.get_global
+    assert g("seed") == 42, "_init could not reach a function its own tab lacks"
+    assert g("ticks") == 10
+    man = json.loads((Path(ws.carts_root) / "probe.moy" / "manifest.json")
+                     .read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua", "helpers.lua"], \
+        "the cart really did run as several files"

@@ -323,6 +323,20 @@ def write_cart(sections, out_dir, title):
     summary["imported"].append(
         "p8.lua (the generated PICO-8 layer: data tables + the compat shim, "
         "its own script ahead of main.lua so main.lua is the cart)")
+    # The cart's PICO-8 TABS, as files (p8_lua_port.tab_files). Reported both
+    # ways round: a cart whose tabs became files says how many, and one whose
+    # tabs COULD not says why in the porter's own words -- because the reader
+    # who opens main.lua and finds four `-->8` comments in it is owed the
+    # reason, and it is never the same reason twice.
+    if wrote.get("fused"):
+        summary["lossy"].append(wrote["fused"])
+    elif wrote.get("tabs", 1) > 1:
+        summary["imported"].append(
+            "%d more scripts, one per PICO-8 tab past the first (%s) -- each "
+            "its own file in the editor, run in tab order"
+            % (wrote["tabs"] - 1,
+               ", ".join(n for n in wrote["sources"]
+                         if n not in ("p8.lua", "main.lua"))))
     summary["imported"].append(
         "manifest.json (canvas %s + the view(%d, %d) zoom hint)"
         % (P8_CANVAS, P8_VIEW_W, P8_VIEW_H))

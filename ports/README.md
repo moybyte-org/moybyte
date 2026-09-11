@@ -53,6 +53,23 @@ where the unsplit file said a line 1,400 down the generated prefix — and the
 shim stops being 62KB of permanently-live string per cart on the launcher shelf
 (`_HEAVY_CART_KEYS`).
 
+**A cart's PICO-8 TABS are files too.** PICO-8 cuts a cart's code into numbered
+tabs with a line that reads `-->8`, and the port used to flatten them into one
+`main.lua` where four stray comments were all that was left of the author's own
+structure. Each tab is a source now, in tab order, tab 0 being `main.lua`;
+a tab titled by its first comment line takes that name (`--board` →
+`board.lua`), anything else takes the number PICO-8 shows. Of the twelve corpus
+carts two have tabs — dungeons & diagrams drops from 28 KB of everything to
+5.4 KB of game plus `menu`/`tutorial`/`board`/`puzzles_list`, terra_1cart gets
+three numbered ones.
+
+Globals are again the reason it works, and their absence the reason it is not
+always done: where a top-level `local` in one tab is read by a later one, where
+a `goto` and its label are in different tabs, or where a long string holds a
+line reading `-->8`, the tabs stay in one file and the import report says which.
+PICO-8 joins its tabs into one chunk before parsing, so all three are legal
+there. See `PICO8.md` (moy-spec) for the whole argument.
+
 **The perf wrapper is a third script**, `perf.lua`, listed after `main.lua`. It
 wraps what the cart defined (`p8_init`), so it cannot run before it; and it is
 ours rather than the cart's, so it has no business inside the one file a person

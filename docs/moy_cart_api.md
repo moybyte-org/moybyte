@@ -30,7 +30,8 @@ and the console runs them in that order, each as its own chunk — so a `local` 
 is invisible in the next and they share through globals. There is still no importing;
 the manifest declares the list and the console loads it (SPEC.md §4). A PICO-8 port is
 the standing case, with its generated compat layer in `p8.lua` ahead of the `main.lua`
-a person opens.
+a person opens — and one more script per PICO-8 tab after it, because tabs are where
+that cart's author put its structure.
 
 ```python
 # a tiny cart: move a ball with the D-pad
