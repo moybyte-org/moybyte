@@ -83,7 +83,10 @@ slideshow, the web view) costs nothing.
 fails to start or raises mid-frame no longer parks on an OOPS panel waiting for
 a manual TAP-CODE: the run exits straight into the Editor's Code tab with the
 caret on the crashing line, the inline marker set, and a tap/type-dismissible
-error popup over it (`ws._crash_to_code`). The marker then RE-CHECKS on every
+error popup over it (`ws._crash_to_code`). On a cart of several scripts
+(SPEC.md 4) it opens the FILE that raised, not whichever the tab was left on --
+on a PICO-8 port that is as often the generated half as the game, and a marker
+on somebody else's line N is worse than none (#89). The marker then RE-CHECKS on every
 edit/undo — it retires only when the source actually parses again, and follows
 the live syntax error while it doesn't. The old panel survives only as the
 no-open-cart fallback. This is still the caller model: the crash path is just

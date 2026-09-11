@@ -23,13 +23,13 @@ drawings the Files app owns.
 
 | door | path | what opens |
 |---|---|---|
-| make a game | Launcher → cart → EDIT → tab ladder | the Code tab is the cart's main file: highlight by runtime, parse gate on the debounce, hard exits always write (SYNTAX badge), PLAY, crash-to-code |
+| make a game | Launcher → cart → EDIT → tab ladder | the Code tab is one of the cart's scripts — its main file unless another is picked (#89): highlight by runtime, parse gate on the debounce, hard exits always write (SYNTAX badge), PLAY, crash-to-code |
 | write | Launcher → Notes | the vault list (whole names, mode badges), NEW → a name prompt, one file open with the SELECT/COPY/CUT/PASTE/UNDO/REDO toolbar over it |
 | any file | Launcher → Files → a root | routed by what it is (below) |
 
 **The Files router**, in order: a `.moy` folder opens the project Editor, never a
-listing; any script in a cart's own load order — `main.py`/`main.lua`, and since
-#89 every other entry in its `sources` — opens the Editor's Code tab (PLAY, the
+listing; any script in a cart's own load order — `main.py`/`main.lua` and every
+other entry in its `sources` (#89) — opens the Editor's Code tab (PLAY, the
 journal and crash-to-code live there); an image opens Paint -- including a
 cart's own `images/*.moyimg`, edited in place on the project kind, and one
 Paint has no editor for opens READ-ONLY rather than being refused, because a
@@ -125,12 +125,12 @@ QWERTY is planned.
    because JSON mode writes an invalid manifest on a hard exit by design,
    `moy_carts.load` now RECOVERS such a cart instead of dropping it, so the
    project stays on the shelf carrying the reason and the row leads back to the
-   file that broke it. **A cart's own SCRIPT stopped taking that door in
-   2026-09 (#89):** the Code tab holds a *file* now (SPEC.md §4's `sources`),
-   so anything in the cart's load order routes there instead — where PLAY, the
-   journal and crash-to-code are. This row is also where the one **NEW SCRIPT**
-   verb lives, offered only on a cart whose runtime actually loads more than
-   `main`; the Code tab's file chip is a switcher and has no create.
+   file that broke it. **A cart's own SCRIPT does not take this door** (#89):
+   the Code tab holds a *file* (SPEC.md §4's `sources`), so every entry in the
+   cart's load order routes there, where PLAY, the journal and crash-to-code
+   are. This row is also where the one **NEW SCRIPT** verb lives, offered only
+   on a cart whose runtime loads more than `main`; the Code tab's file chip is
+   a switcher and has no create.
 6. The script runner with the text console surface.
 
 Related: #108 (user files), #181 (apps are carts), #112 (cart-facing undo —

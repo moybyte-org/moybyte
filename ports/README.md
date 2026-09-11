@@ -38,7 +38,7 @@ two boards held the same set. A cart cannot drift from itself.
 trick: SPEC.md §4's `sources` lists every script a cart is made of and the host
 runs them in that order, each its own chunk. The importer writes `p8.lua` (data
 tables + the PICO-8 compat shim) and `main.lua` (the cart's own code, nothing
-else), and lists both. The shim was 61% of what it used to write into main.lua
+else), and lists every script it writes. The shim was 61% of what it used to write into main.lua
 — 60,654 bytes identical in every port, ahead of the part a person opens — so
 moss moss's main.lua went 100,400 → 37,687 bytes.
 
@@ -58,10 +58,13 @@ tabs with a line that reads `-->8`, and the port used to flatten them into one
 `main.lua` where four stray comments were all that was left of the author's own
 structure. Each tab is a source now, in tab order, tab 0 being `main.lua`;
 a tab titled by its first comment line takes that name (`--board` →
-`board.lua`), anything else takes the number PICO-8 shows. Of the twelve corpus
-carts two have tabs — dungeons & diagrams drops from 28 KB of everything to
-5.4 KB of game plus `menu`/`tutorial`/`board`/`puzzles_list`, terra_1cart gets
-three numbered ones.
+`board.lua`), anything else takes the number PICO-8 shows. On the cart that
+prompted it, *dungeons & diagrams*, one 28 KB `main.lua` became 5.4 KB of game
+beside `menu`/`tutorial`/`board`/`puzzles_list`.
+
+Most BBS carts are one tab and land exactly as before — which is the honest size
+of this. Which corpus carts have tabs is a property of the corpus
+(`conformance/p8_corpus.json` in moy-spec), not a number worth keeping here.
 
 Globals are again the reason it works, and their absence the reason it is not
 always done: where a top-level `local` in one tab is read by a later one, where
