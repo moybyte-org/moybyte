@@ -33,6 +33,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import p4_autotest                                              # noqa: E402
 import push_cart                                                # noqa: E402
+from runtime.dev_channel import (RECV_DEAD_WINDOWS,              # noqa: E402
+                                 RECV_RETRIES)
 
 BOARD_DIRS = {
     "p4": os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b"),
@@ -128,6 +130,7 @@ class _FakeConsole:
         self.flip_at = flip_at          # a byte that arrived wrong: counted
         self.stall_at = stall_at        # the host stops writing here
         self.sent = []          # every complete line the tool wrote
+        self.said = []          # every line this board answered with
         self.acks = []          # the byte counts `recv` acked, in order
         self.closed = 0
         self._rx = None         # the live `recv`, when one is armed
@@ -188,10 +191,18 @@ class _FakeConsole:
             return self._say("RECV done %s 0"
                              % hashlib.sha256(b"").hexdigest()[:12])
         self._rx = {"n": total, "window": window, "tmp": tmp, "got": 0,
-                    "sent": 0, "f": f}
+                    "sent": 0, "f": f, "buf": bytearray(), "left":
+                    RECV_RETRIES, "empty": 0}
 
     def _feed(self, data):
+        """A window at a time, because that is what the board COMMITS.
+
+        The real `_recv` fills a buffer and writes it whole, which is the only
+        reason a short window can be thrown away and asked for again -- the
+        file is always on a window boundary. Writing byte-by-byte here would
+        model a board that cannot retry."""
         rx = self._rx
+        acked = False
         for byte in data:
             i = rx["sent"]
             rx["sent"] += 1
@@ -201,10 +212,17 @@ class _FakeConsole:
                 continue                    # the ring dropped it, silently
             if i == self.flip_at:
                 byte ^= 0xFF                # a framing error: count intact
-            rx["f"].write(bytes([byte]))
-            rx["got"] += 1
-            if rx["got"] % rx["window"] and rx["got"] != rx["n"]:
+            rx["buf"].append(byte)
+            want = rx["window"]
+            if rx["n"] - rx["got"] < want:
+                want = rx["n"] - rx["got"]
+            if len(rx["buf"]) < want:
                 continue
+            rx["f"].write(bytes(rx["buf"]))
+            rx["got"] += len(rx["buf"])
+            del rx["buf"][:]
+            rx["empty"] = 0
+            acked = True
             self.acks.append(rx["got"])
             self._say("RECV ack %d" % rx["got"])
             if rx["got"] == rx["n"]:
@@ -214,16 +232,23 @@ class _FakeConsole:
                     "RECV done %s %d"
                     % (hashlib.sha256(self.fs.files.get(rx["tmp"], b""))
                        .hexdigest()[:12], rx["got"]))
-        if self._rx is None or (rx["got"] % rx["window"] == 0
-                                or rx["got"] == rx["n"]):
-            return
+        if self._rx is None or (acked and not rx["buf"]):
+            return                          # on a boundary: the host's turn
         # The host has stopped writing with this window short, so the byte the
         # board is waiting on is never coming: on glass that is the idle
         # timeout, RECV_IDLE_MS later. The wait is what is compressed here.
-        self._rx = None
-        rx["f"].close()
-        self.fs.files.pop(rx["tmp"], None)
-        self._say("RECV ERR timeout after %d of %d bytes" % (rx["got"], rx["n"]))
+        # Nothing of this window reached the file, so `got` is still a boundary
+        # and the board can ask for it again rather than lose the cart.
+        rx["empty"] = rx["empty"] + 1 if not rx["buf"] else 0
+        del rx["buf"][:]
+        rx["left"] -= 1
+        if rx["left"] < 0 or rx["empty"] >= RECV_DEAD_WINDOWS:
+            self._rx = None
+            rx["f"].close()
+            self.fs.files.pop(rx["tmp"], None)
+            return self._say("RECV ERR timeout after %d of %d bytes"
+                             % (rx["got"], rx["n"]))
+        self._say("RECV retry %d" % rx["got"])
 
     def _run(self, line):
         self.sent.append(line)
@@ -248,6 +273,7 @@ class _FakeConsole:
         self._say("PY " + value)
 
     def _say(self, text):
+        self.said.append(text)
         self._out += text.encode() + b"\r\n"
 
     @property
@@ -371,20 +397,26 @@ def test_the_raw_upload_carries_every_byte_value(tmp_path):
     assert dev.fs.files["/moy/carts/demo.moy/main.lua"] == payload
 
 
-def test_a_byte_the_ring_dropped_stops_the_push_and_names_the_file(tmp_path):
+def test_a_byte_the_ring_dropped_costs_its_window_not_the_cart(tmp_path):
     """The P4's failure, exactly: a byte arrives with the 260-byte ring full
     and is gone with no error. The board is then one byte short of the window
-    for ever, its idle timeout fires, it removes the tmp and says how far it
-    got -- and the push stops there, by name, with the old cart untouched."""
+    for ever and its idle timeout fires -- but nothing of that window reached
+    the file, so it asks for the window again instead of losing the cart.
+
+    Measured on glass before this existed: a handful of bytes lost about once
+    every 300 windows, which failed a 120KB push one push in five, on the only
+    transport a cart has to that board."""
     dst = "/moy/carts/demo.moy/main.lua"
     dev = _FakeConsole(files={dst: b"the cart that still works\n"},
                        drop_at=5000)
     b, window = _raw(dev)
     src = _cart(tmp_path, {"main.lua": BIG}) + "/main.lua"
-    with pytest.raises(RuntimeError) as exc:
-        push_cart.push_file_raw(b, src, dst, window)
-    assert "main.lua" in str(exc.value) and "timeout" in str(exc.value)
-    assert dev.fs.files == {dst: b"the cart that still works\n"}
+    assert push_cart.push_file_raw(b, src, dst, window) is True
+    assert dev.fs.files[dst] == BIG                     # byte-exact, hash agreed
+    assert [l for l in dev.said if l.startswith("RECV retry")] == [
+        "RECV retry 4096"]                              # the window it was in
+    # and the re-send is the ONLY extra work: every window still acks once
+    assert dev.acks == [4096, 8192, 10000]
 
 
 def test_a_byte_that_arrived_wrong_is_caught_by_the_hash(tmp_path):
@@ -416,7 +448,13 @@ def test_a_host_that_dies_inside_a_window_leaves_the_board_and_the_cart_whole(
     with pytest.raises(RuntimeError) as exc:
         push_cart.push_file_raw(b, src, dst, window)
     assert "main.lua" in str(exc.value)
-    assert "6000 of 10000" in str(exc.value)
+    # 4096, not 6000: the 1904 bytes of the short window were thrown away and
+    # never reached the file, and naming them sends a reader looking for a
+    # cart that does not exist. The board offers the window back first, so a
+    # host that is merely quiet is not mistaken for one that dropped a byte.
+    assert "4096 of 10000" in str(exc.value)
+    assert len([l for l in dev.said if l.startswith("RECV retry")]) \
+        == RECV_DEAD_WINDOWS
     assert dev.fs.files == {dst: b"the cart that still works\n"}
 
 

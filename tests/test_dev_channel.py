@@ -404,6 +404,11 @@ def test_the_ack_comes_after_the_write_never_before(
             return getattr(self.f, name)
 
     def on_dry():
+        # The board asks again after each re-send offer, so this fires more
+        # than once now; the instant being observed is the FIRST one -- the
+        # board waiting on window two, with window one already on disk.
+        if "wrote" in seen:
+            return
         seen["wrote"] = list(wrote)
         seen["out"] = capsys.readouterr().out
 
@@ -419,15 +424,145 @@ def test_the_ack_comes_after_the_write_never_before(
 def test_a_host_that_goes_quiet_takes_the_tmp_with_it(tmp_path, capsys):
     """A dead host must not park the frame loop, and must not leave a half cart
     behind either. The wait is bounded by RECV_IDLE_MS per byte, refreshed by
-    every byte that does arrive, so a slow host is not a dead one."""
-    from runtime.dev_channel import RECV_IDLE_MS
+    every byte that does arrive, so a slow host is not a dead one.
+
+    It now OFFERS the window back first -- a short window is a dropped byte far
+    more often than a dead host -- and only gives up once RECV_DEAD_WINDOWS of
+    them arrive completely empty. The count it reports is what LANDED IN THE
+    FILE (512 here, one whole window) rather than what had been buffered when
+    the stream stopped: 188 bytes of a window that was thrown away were never
+    part of the cart, and naming them sent a reader looking for a file that
+    was 700 bytes long."""
+    from runtime.dev_channel import RECV_DEAD_WINDOWS, RECV_IDLE_MS
 
     ws, ch, _raw, poll = raw_channel(EVERY_BYTE[:700])
     dst = str(tmp_path / "main.lua")
     ch.run(ws, "recv 5000 512 %s" % dst)
-    assert _said(capsys)[-1] == "RECV ERR timeout after 700 of 5000 bytes"
+    said = _said(capsys)
+    assert said[-1] == "RECV ERR timeout after 512 of 5000 bytes"
+    assert [l for l in said if l.startswith("RECV retry")] == [
+        "RECV retry 512"] * RECV_DEAD_WINDOWS
     assert not (tmp_path / "main.lua.new").exists()
-    assert poll.waits == [RECV_IDLE_MS]
+    assert poll.waits == [RECV_IDLE_MS] * (RECV_DEAD_WINDOWS + 1)
+
+
+class FeedingPoll(FakePoll):
+    """FakePoll, but a host that WROTE during `on_dry` is answered.
+
+    The base class fires the hook and then reports not-ready regardless, which
+    is right when the hook only observes. Here the hook IS the host: it puts a
+    window on the wire, and a poll that ignored it would make every window look
+    dropped."""
+
+    def ipoll(self, timeout=-1):
+        ready = super().ipoll(timeout)
+        if not ready and self.raw.data:
+            return ((None, 1),)
+        return ready
+
+
+class ReSendingHost:
+    """The push loop in miniature, over the same FakeRawIn the board reads.
+
+    It writes one window, waits, and does what the board's last line asks:
+    `retry <n>` re-sends the window at n, `ack` moves on. `drop` names the
+    windows the WIRE eats a byte from -- which is the whole failure this
+    exists to model, because the host cannot see it happen and neither can the
+    board until the stream stops."""
+
+    def __init__(self, payload, window, drop=()):
+        self.payload, self.window = payload, window
+        self.drop = set(drop)
+        self.raw = FakeRawIn()
+        self.sent = 0
+        self.nth = 0
+        self.resends = 0
+        self.said = []
+
+    def _feed(self):
+        blk = self.payload[self.sent:self.sent + self.window]
+        # The host always believes it wrote the whole window; the ring is what
+        # loses the byte, silently, which is why `sent` advances by the FULL
+        # window even on a dropped one.
+        self.sent += len(blk)
+        if self.nth in self.drop:
+            self.drop.discard(self.nth)
+            blk = blk[:-1]
+        self.nth += 1
+        self.raw.data.extend(blk)
+
+    def on_dry(self, capsys):
+        new = [l for l in capsys.readouterr().out.splitlines()
+               if l.startswith("RECV ")]
+        self.said += new
+        if not new:
+            # The board is still waiting inside a window this host already
+            # finished writing -- which is exactly the shape of a dropped
+            # byte, and a real host would be blocked on the reply. Writing
+            # here would hand it the NEXT window as the tail of this one.
+            return
+        last = new[-1]
+        if last.startswith("RECV retry "):
+            self.sent = int(last.split()[2])
+            self.resends += 1
+        elif last.startswith("RECV ERR") or last.startswith("RECV done"):
+            return
+        if self.sent < len(self.payload):
+            self._feed()
+
+
+def test_a_dropped_byte_costs_its_window_and_not_the_cart(tmp_path, capsys):
+    """The failure this whole retry exists for, end to end.
+
+    A UART ring with no flow control drops a byte with no error when the board
+    falls behind for ~25ms. Measured on the P4: a handful of bytes lost about
+    once every 300 windows, which killed a 120KB push one time in five. The
+    file only ever advances by WHOLE windows, so the board can throw the short
+    one away and name the boundary it is still standing on -- and the cart
+    lands byte-exact, hash and all, having paid one window."""
+    payload = EVERY_BYTE                      # 1280 B = 5 windows of 256
+    host = ReSendingHost(payload, 256, drop=(1, 3))
+    ws, ch = make()
+    poll = FeedingPoll(host.raw, lambda: host.on_dry(capsys))
+    ch._rawin, ch._poll, ch._ipoll = host.raw, poll, poll.ipoll
+    dst = str(tmp_path / "main.lua")
+
+    ch.run(ws, "recv %d 256 %s" % (len(payload), dst))
+    host.said += [l for l in capsys.readouterr().out.splitlines()
+                  if l.startswith("RECV ")]
+
+    assert (tmp_path / "main.lua.new").read_bytes() == payload
+    assert host.said[-1] == "RECV done %s %d" % (
+        hashlib.sha256(payload).hexdigest()[:12], len(payload))
+    # one re-send per dropped window, each at the boundary the file was on
+    assert [l for l in host.said if l.startswith("RECV retry")] == [
+        "RECV retry 256", "RECV retry 512"]
+    assert host.resends == 2
+    assert ch.raw == len(payload)
+
+
+def test_a_wire_that_drops_every_window_gives_up_rather_than_crawling(
+        tmp_path, capsys):
+    """The budget. A cable that eats a byte from EVERY window is broken, and
+    saying so beats re-sending forever -- so the retries are counted, and the
+    count is what ends it rather than the dead-host rule (every window here
+    arrives nearly full, so none of them is empty)."""
+    from runtime.dev_channel import RECV_RETRIES
+
+    payload = EVERY_BYTE
+    host = ReSendingHost(payload, 256, drop=range(200))    # every window
+    ws, ch = make()
+    poll = FeedingPoll(host.raw, lambda: host.on_dry(capsys))
+    ch._rawin, ch._poll, ch._ipoll = host.raw, poll, poll.ipoll
+
+    ch.run(ws, "recv %d 256 %s" % (len(payload), str(tmp_path / "main.lua")))
+    host.said += [l for l in capsys.readouterr().out.splitlines()
+                  if l.startswith("RECV ")]
+
+    assert len([l for l in host.said if l.startswith("RECV retry")]) \
+        == RECV_RETRIES
+    assert host.said[-1] == "RECV ERR timeout after 0 of %d bytes" % len(payload)
+    assert not (tmp_path / "main.lua.new").exists()
 
 
 def test_the_hash_is_of_the_file_not_of_the_bytes_that_went_in(

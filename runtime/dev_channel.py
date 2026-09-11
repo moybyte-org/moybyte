@@ -105,11 +105,27 @@ SERIAL_NOISE_LIMIT = 16384
 # window, and on a UART board it is also how much the ring has to absorb if the
 # frame loop is preempted mid-window.
 RECV_MAX_WINDOW = 32768
-# No byte for this long inside a window and the transfer is abandoned: the tmp
-# file goes, an error line names how far it got, and the frame loop resumes.
-# A host that is alive but slow refreshes it with every byte, so this is a
-# DEAD-host timeout, not a rate floor -- generous on purpose.
-RECV_IDLE_MS = 5000
+# No byte for this long inside a window and the window is given up on. A host
+# that is alive but slow refreshes it with every byte -- inside a window bytes
+# arrive 87us apart at 115200 -- so a quiet stretch this long means the stream
+# STOPPED, which on a ring with no flow control means bytes were dropped.
+# It is not a rate floor, and it is no longer fatal: see RECV_RETRIES.
+RECV_IDLE_MS = 2000
+# How many windows may be re-sent before the transfer is abandoned. A UART ring
+# with no flow control drops a byte with no error when the board falls behind
+# for ~25ms, and one dropped byte used to kill the whole cart: measured on the
+# P4, a handful of bytes (2, 7, 12) lost about once every 300 windows, which is
+# a failed 120KB push one time in five. The file only ever advances by WHOLE
+# windows, so `got` is a resync point that costs nothing to keep -- the board
+# throws the short window away and asks for it again. The final sha still has
+# to agree, so a retry that resynced wrongly fails loudly rather than landing a
+# corrupt cart.
+RECV_RETRIES = 8
+# Consecutive windows that arrive EMPTY before the board stops believing there
+# is a host. A dropped byte leaves a window nearly full; nothing at all means
+# the other end is gone, and two of those end it in ~4s -- about what the one
+# fatal timeout above used to cost.
+RECV_DEAD_WINDOWS = 2
 
 
 def _kbd_intr(ch):
@@ -847,6 +863,9 @@ class DevChannel:
             RECV ready <nbytes> <window> <path>.new     armed; send window 1
             RECV ack <bytes so far>                     one per window, after
                                                         the file write
+            RECV retry <bytes so far>                   that window came up
+                                                        short; re-send FROM
+                                                        this offset
             RECV done <sha12> <nbytes>                  what landed, hashed
             RECV ERR <what>                             gave up; tmp removed
             RECV caps max=<n> idle=<ms>                 bare `recv`: the probe
@@ -907,12 +926,15 @@ class DevChannel:
         err = None
         _kbd_intr(-1)
         print("RECV ready %d %d %s" % (total, window, tmp))
+        left = RECV_RETRIES
+        empty = 0
         try:
             while got < total:
                 n = total - got
                 if n > window:
                     n = window
                 i = 0
+                held = pending
                 if pending:
                     i = len(pending)
                     if i > n:
@@ -924,13 +946,30 @@ class DevChannel:
                     for _ in ipoll(RECV_IDLE_MS):
                         ready = True
                     if not ready:
-                        err = "timeout after %d of %d bytes" % (got + i, total)
                         break
                     rd(one)
                     buf[i] = one[0]
                     i += 1
-                if err is not None:
-                    break
+                if i < n:
+                    # The stream stopped inside the window, which on a ring
+                    # with no flow control is what a DROPPED byte looks like:
+                    # the host wrote the whole window and is now waiting for an
+                    # ack it will never get. Nothing has been written to the
+                    # file, so `got` is still a window boundary -- throw the
+                    # short window away and ask for it again. The wire is quiet
+                    # by construction (that is what the timeout just proved),
+                    # so nothing is in flight to prefix the re-send.
+                    empty = empty + 1 if i == 0 else 0
+                    if left <= 0 or empty >= RECV_DEAD_WINDOWS:
+                        # `got`, not `got + i`: the i bytes of this window are
+                        # about to be thrown away, and naming them sends the
+                        # reader looking for a file that never existed.
+                        err = "timeout after %d of %d bytes" % (got, total)
+                        break
+                    left -= 1
+                    pending = held
+                    print("RECV retry %d" % got)
+                    continue
                 f.write(mv[:n])
                 got += n
                 self.raw += n

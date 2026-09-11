@@ -141,6 +141,12 @@ ws._g['_sha'] = _sha; ws._g['_mkdir'] = _mkdir
 # with no flow control. Not a guess about that board: a floor no board needs
 # less than.
 RAW_WINDOW_FALLBACK = 4096
+# How many windows a single file may have to re-send before the push gives up.
+# The board asks for one when a window arrives short -- a byte dropped by a ring
+# with no flow control, which on the P4 happens about once every 300 windows.
+# A budget rather than a free-for-all: a cable that drops a byte every window is
+# a broken cable, and should say so instead of crawling.
+RAW_MAX_RETRIES = 24
 # How long to wait for the probe's answer. Generous: it is spent ONCE per
 # session, and the console answers a command at frame cadence -- a board with a
 # cart running and the diag lines streaming is not a fast responder.
@@ -245,9 +251,11 @@ def push_file_raw(b, src, dst, window, verbose=False):
 
     The host writes one window and then WAITS for the ack, which is what keeps
     the P4's flow-control-free UART safe (its board.toml carries the why). A
-    window that comes back short never acks: the board's own idle timeout fires,
-    it removes the tmp and says how far it got, and that error is what this
-    raises -- by file name, with the board's words."""
+    window that comes back short does not end the push: the board throws it
+    away, names the boundary its file is still on, and this re-sends from
+    there -- see RECV_RETRIES in runtime/dev_channel.py for why one dropped
+    byte used to cost a whole cart. Only a board out of retries, or one that
+    has gone quiet entirely, raises -- by file name, with the board's words."""
     name = os.path.basename(src)
     raw = open(src, "rb").read()
     want = hashlib.sha256(raw).hexdigest()[:12]
@@ -267,6 +275,7 @@ def push_file_raw(b, src, dst, window, verbose=False):
                            % (name, " ".join(r or ["no reply"])))
     sent = 0
     n = (len(raw) + window - 1) // window
+    resent = 0
     while sent < len(raw):
         blk = raw[sent:sent + window]
         b.ser.write(blk)
@@ -277,6 +286,27 @@ def push_file_raw(b, src, dst, window, verbose=False):
             raise RuntimeError(
                 "%s: no ack for the window ending at %d/%d B -- the board went "
                 "quiet mid-upload" % (name, sent, len(raw)))
+        if r[0] == "retry":
+            # That window arrived short -- a byte the ring dropped. The board
+            # wrote nothing, so it names the boundary it is still standing on
+            # and this sends the window again from there. Believe the BOARD's
+            # offset rather than our own: it is the one that knows what reached
+            # the file, and a disagreement would corrupt the rest of the push.
+            try:
+                sent = int(r[1])
+            except (IndexError, ValueError):
+                raise RuntimeError("%s: the board asked for a re-send but "
+                                   "named no offset (%s)"
+                                   % (name, " ".join(r)))
+            resent += 1
+            if resent > RAW_MAX_RETRIES:
+                raise RuntimeError(
+                    "%s: %d windows re-sent and still dropping at %d/%d B -- "
+                    "that is a cable, not a hiccup"
+                    % (name, resent, sent, len(raw)))
+            if verbose:
+                print("     re-sending the window at %d" % sent)
+            continue
         if r[0] == "ERR":
             raise RuntimeError("%s: the board stopped the upload: %s"
                                % (name, " ".join(r[1:])))

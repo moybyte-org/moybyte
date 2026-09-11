@@ -250,6 +250,18 @@ chunk       = 256
 # rather than after 32, and 4KB is also the buffer the board allocates for it.
 # It is NOT a rate limit; the ack costs one round trip per window and a 124KB
 # cart is 31 of them.
+#
+# WHAT THE ACK DOES NOT DO, measured 2026-09-11: it does not stop a byte being
+# dropped INSIDE a window. Between acks the host blasts the whole window and
+# the board must keep up for all of it; when it falls behind for ~25ms the ring
+# overflows and a handful of bytes (2, 7, 12 were seen) vanish with no error.
+# On this board that happened about once every 300 windows -- one failed 120KB
+# push in five -- and shrinking the window does NOT fix it: 512 failed a 120KB
+# file where 2048 passed, in the same session. The fix is recovery, not
+# avoidance (RECV_RETRIES in runtime/dev_channel.py): a short window is thrown
+# away and asked for again, and 8 pushes of a 120KB cart then went 8/8 with 6
+# re-sends absorbed. So this number is a round-trip/latency tuning knob now,
+# not a correctness one.
 window      = 4096
 
 [monitor]
