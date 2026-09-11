@@ -15,8 +15,9 @@ falls back to a self-contained shim), which is what makes this testable at all.
 import hashlib
 import json
 
-from runtime.dev_channel import (DevChannel, _remote_state, luaprof_line,
-                                 shim_line_range, verbs_line)
+from runtime.dev_channel import (DevChannel, PERF_EVENTS, _remote_state,
+                                 luaprof_line, perfcnt_line, shim_line_range,
+                                 verbs_line)
 
 
 class FakePointer:
@@ -685,6 +686,59 @@ def test_a_channel_with_no_8_bit_stdin_declines_the_probe_too(capsys):
 
 
 # -- the VERBS line (the Lua/p8 per-verb profiler's report) -------------------
+
+
+def test_the_perfcnt_line_leads_with_the_ratio_it_exists_for():
+    """IPC is the question -- four null levers on the S3 tick were read as
+    "memory, not instructions", which is an elimination rather than a
+    measurement, and this is the number that confirms or re-opens it. It is a
+    RATIO on purpose: the four boards do not share a clock, so a count would
+    not compare and `r` does."""
+    # 100 frames; update 240k cycles and 168k instructions a frame (r=0.7),
+    # draw 120k cycles and 24k instructions (r=0.2) -- one cart, both answers
+    st = (240000000, 100, 24000000, 16800000, 12000000, 2400000,
+          2, 0xffff, True)
+    line = perfcnt_line(st, "insn")
+    assert line.startswith("PERFCNT frames=100 insn")
+    assert "upd cyc=240000 insn=168000 r=0.700" in line
+    assert "draw cyc=120000 insn=24000 r=0.200" in line
+    # and the wall-clock size of each half, so a ratio is never read without
+    # knowing whether the half is worth anything
+    assert "1.000ms" in line and "0.500ms" in line
+
+
+def test_the_perfcnt_line_keeps_the_halves_apart():
+    """moss moss is update-bound and dank tomb draw-bound. One IPC over both
+    would average the answer away, so a half with no cycles is simply absent
+    rather than folded in."""
+    st = (240000000, 10, 2400000, 1680000, 0, 0, 2, 0xffff, True)
+    line = perfcnt_line(st, "insn")
+    assert "upd " in line and "draw " not in line
+
+
+def test_the_perfcnt_line_says_when_the_silicon_only_counts_two_things():
+    """The RISC-V part has the two architectural CSRs and no selector, so a
+    reading from it must not look like a chosen event that happened to be
+    instructions."""
+    st = (400000000, 5, 1000000, 700000, 0, 0, 2, 0xffff, False)
+    assert "(riscv: retired only)" in perfcnt_line(st, "insn")
+    assert "(riscv: retired only)" not in perfcnt_line(
+        (400000000, 5, 1000000, 700000, 0, 0, 2, 0xffff, True), "insn")
+
+
+def test_a_perfcnt_reading_with_no_frames_says_so_rather_than_dividing():
+    assert perfcnt_line((240000000, 0, 0, 0, 0, 0, 2, 0xffff, True)) == \
+        "PERFCNT no frames (run a cart with `perfcnt on`)"
+
+
+def test_every_named_perf_event_is_a_selector_and_a_mask():
+    """The serial word is a word so nobody types a magic integer at a board.
+    `insn` is the default and must exist; the rest are the follow-up once IPC
+    has said which way to look."""
+    assert "insn" in PERF_EVENTS
+    for name, pair in PERF_EVENTS.items():
+        sel, mask = pair
+        assert 0 <= sel <= 0xffff and 0 <= mask <= 0xffff, name
 
 
 def test_the_verbs_line_reports_per_frame_not_per_window():

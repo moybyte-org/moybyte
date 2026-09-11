@@ -254,6 +254,60 @@ def shim_line_range(path, block=512):
     return (lo, hi)
 
 
+# The Xtensa selector numbers worth naming, so the serial word is a word and
+# not a magic integer. They are XTPERF_CNT_* from xtensa/xt_perf_consts.h; the
+# RISC-V side counts retired instructions and nothing else, and says so.
+# EVERY MASK HERE IS COPIED FROM xt_perf_consts.h, not inferred. Four of them
+# were guessed on the first pass and three were wrong -- INSN_ALL is 0x8DFF and
+# not 0xffff, D_STALL_ALL is 0x01FE, and "calls" as 0x0060 is CALL|J, which
+# counts jumps. A wrong mask does not fail; it answers confidently in the wrong
+# units, which is the one thing an instrument must never do.
+PERF_EVENTS = {
+    "insn":    (2, 0x8DFF),   # INSN_ALL -- retired instructions, the IPC half
+    "calls":   (2, 0x0042),   # INSN_CALL | INSN_CALLX -- dispatch, counted
+    "dstall":  (3, 0x01FE),   # D_STALL_ALL -- the other half, if it is data
+    "dmiss":   (3, 0x0008),   # D_STALL_CACHE_MISS -- ... and if so, PSRAM
+    "istall":  (4, 0x01FF),   # I_STALL_ALL -- or if it is instruction fetch
+    "imiss":   (4, 0x0001),   # I_STALL_CACHE_MISS
+    "bubbles": (6, 0x01FD),   # BUBBLES_ALL -- pipeline, not memory
+    "window":  (5, 0x0020),   # EXR_WINDOW -- the windowed ABI's register
+                              # spills, which present AS memory traffic
+}
+
+
+def perfcnt_line(st, name=None):
+    """The `PERFCNT` line: retired instructions per cycle, over a cart's own
+    halves, with the raw counts behind it.
+
+    IPC IS THE WHOLE POINT and it is printed first. Four levers measured null
+    on the S3 tick and the conclusion drawn was "memory, not instructions" --
+    which is an elimination, and which closes the door on every
+    code-generation idea. This is the number that either confirms it or
+    re-opens it, and it is a RATIO so it survives the boards running at
+    different clocks.
+
+    Update and draw stay apart because the corpus splits that way: moss moss
+    is update-bound and dank tomb draw-bound. One figure over both would
+    average the answer away.
+    """
+    hz, frames, uc, ue, dc, de, sel, mask, selectable = st
+    if not frames:
+        return "PERFCNT no frames (run a cart with `perfcnt on`)"
+    ev = name or ("%d/%04x" % (sel, mask))
+    out = ["PERFCNT frames=%d %s" % (frames, ev)]
+    for tag, cyc, evt in (("upd", uc, ue), ("draw", dc, de)):
+        if not cyc:
+            continue
+        # per frame, and per cycle: the first says how big the half is, the
+        # second is the ratio the question is about
+        out.append("%s cyc=%d %s=%d r=%.3f %.3fms"
+                   % (tag, cyc // frames, ev, evt // frames, evt / float(cyc),
+                      (cyc / float(hz)) * 1000.0 / frames if hz else 0.0))
+    if not selectable:
+        out.append("(riscv: retired only)")
+    return " | ".join(out)
+
+
 def luaprof_line(st, rng, top=10):
     """The `LUAPROF` line: how a Lua/p8 frame's INTERPRETER time divides.
 
@@ -744,6 +798,53 @@ class DevChannel:
             return
         print(verbs_line(st[0], st[1], st[2]))
 
+    def _perfcnt(self, parts):
+        """`perfcnt on|off|reset [event]` and a bare `perfcnt` -- the CPU's own
+        performance counters, across a cart's update and draw.
+
+        Its own switch, like `verbs` and `luaprof`: disarmed, `tick` tests one
+        byte a frame and touches no register, so an ordinary diag session pays
+        nothing for a question a measurement session asks on purpose.
+
+        `event` names what counter 1 counts (the Xtensa part has exactly two
+        and counter 0 is always cycles). Default `insn`, which is the ratio
+        the instrument exists for; `perfcnt on dstall` and the rest are the
+        follow-up when IPC says memory.
+        """
+        try:
+            import moycore
+        except ImportError:
+            print("REMOTE perfcnt: no moycore on this board")
+            return
+        arg = parts[1] if len(parts) > 1 else ""
+        if arg in ("0", "off"):
+            moycore.perf_counters(0)
+            print("REMOTE perfcnt off")
+            return
+        if arg in ("1", "on"):
+            want = parts[2] if len(parts) > 2 else "insn"
+            if want not in PERF_EVENTS:
+                print("REMOTE perfcnt: no event %r (%s)"
+                      % (want, " ".join(sorted(PERF_EVENTS))))
+                return
+            sel, mask = PERF_EVENTS[want]
+            if moycore.perf_counters(1, sel, mask) is None:
+                print("REMOTE perfcnt: this board has no counters")
+                return
+            moycore.perf_reset()
+            self._perf_ev = want
+            print("REMOTE perfcnt on %s" % want)
+            return
+        if arg == "reset":
+            moycore.perf_reset()
+            print("REMOTE perfcnt reset")
+            return
+        st = moycore.perf_stats()
+        if st is None:
+            print("REMOTE perfcnt: this board has no counters")
+            return
+        print(perfcnt_line(st, getattr(self, "_perf_ev", None)))
+
     def _luaprof(self, ws, parts):
         """`luaprof on|off|reset [interval]` and a bare `luaprof` -- the Lua
         tier's per-FUNCTION sampling profiler (moycore.lua_profile).
@@ -1094,6 +1195,9 @@ class DevChannel:
             return
         if cmd == "luaprof":
             self._luaprof(ws, parts)
+            return
+        if cmd == "perfcnt":
+            self._perfcnt(parts)
             return
         if cmd == "luagc":
             self._luagc(parts)
