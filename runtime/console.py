@@ -902,6 +902,9 @@ class Workstation:
         # "theme" -- lives on self.editor_app.tab now (Stage 3); ws.menu_view is a
         # forwarding projection of it, so every reader/writer is unchanged.)
         self.editor = None            # CodeEditor while menu_view == "code"
+        self.code_file = None         # WHICH script that editor holds (SPEC.md 4);
+                                      # None = the cart's main file, which is every
+                                      # cart that has one -- see code_sources()
         # The document the console has been asked to open, parked for the text
         # cart's namespace build (take_text_request). One slot: it is set and
         # consumed inside a single launch.
@@ -2094,6 +2097,7 @@ class Workstation:
     def crash_line(self, value):
         self.player.crash_line = value
 
+
     @property
     def ns(self):
         return self.player.ns
@@ -2344,6 +2348,14 @@ class Workstation:
             return True
         err = self.cart_error or "crashed"
         line = self.crash_line
+        # THE FILE THAT RAISED, not the file the tab was left on (SPEC.md 4,
+        # #89). On a ported cart the raise is as likely to be in p8.lua or one
+        # of the PICO-8 tabs as in main.lua, and throwing the kid at main.lua's
+        # line N is throwing them at somebody else's line N.
+        # ...read straight off the player: the legacy ws-> player forwards are a
+        # set that may only shrink (tests/test_console_facade.py), and this is a
+        # new name with two readers.
+        self.code_file = self.player.crash_file or None
         self.player.release_world()
         # Windowed desk world (#73/#105): the crashed playtest window closes
         # like a normal exit (never truncating windows stacked above it);
@@ -2352,6 +2364,7 @@ class Workstation:
         if _cp is not None and self.wm.desk_open():
             _cp()
         self.editor_app.open(self.project)
+        self.editor = None            # rebuild over the file that raised
         self.set_menu_view("code")
         if line is not None:
             # Land the caret on the line that raised (set_menu_view only marks
@@ -2501,6 +2514,8 @@ class Workstation:
         self.config = dict(self.cart["cfg"])
         self.cards_layer.reset()      # fresh card selection/scroll for the new cart
         self.editor = None
+        self.code_file = None         # a new cart opens on ITS main file, never on
+                                      # the name the last one was left showing
         self.paint = None
         self.map_ui.reset()
         self.scene_ui.reset()
@@ -3154,6 +3169,56 @@ class Workstation:
         # block/code surfaces + host_app.escape + tests dispatch to it).
         self.editor_app.leave()
 
+    # -- the Code tab's FILE (SPEC.md 4, #89) --------------------------------
+    #
+    # A hand-written cart is one script and the Code tab is that file; it always
+    # was, and nothing below changes for it. A PICO-8 port is not: it arrives as
+    # p8.lua (the generated layer), main.lua (the game) and one file per PICO-8
+    # tab, and until now the two thirds of it that are not main.lua were
+    # reachable only through the Config tab's ADVANCED row -- which opens them
+    # in the text handle, where there is no PLAY, no journal and no
+    # crash-to-code. A crash reported at `p8.lua:412:` threw the kid at a tab
+    # that could not show line 412.
+    #
+    # There is deliberately NO create verb here. The file list is a list; the
+    # one door that adds a script is the Config tab's ADVANCED row, where a
+    # project's own folder already lives (docs/text_editing_2026-09.md step 5).
+
+    def code_sources(self):
+        """The scripts the Code tab can open, in load order. One entry for a
+        one-file cart -- and at one entry the switcher draws nothing at all."""
+        if self.cart is None or self.carts_store is None:
+            return []
+        return self.carts_store.cart_sources(self.cart)
+
+    def code_file_name(self):
+        """The script the Code tab is on. Never None once a cart is open."""
+        return self.code_file or (self.cart or {}).get("main", "main.py")
+
+    def open_code_file(self, name):
+        """Show another of the cart's scripts in the Code tab.
+
+        A FILE switch is an exit path for the file being left, exactly as a TAB
+        switch is for the tab being left (#111/#154): the outgoing buffer is
+        hard-committed before the editor is rebuilt, so a half-typed line
+        survives the switch, and the in-RAM op history re-baselines at the
+        boundary rather than carrying one file's ops into another's journal
+        line. Reusing the tab-switch discipline rather than inventing a second
+        one is the whole reason this is three lines and not a subsystem."""
+        if self.cart is None or name not in self.code_sources():
+            return False
+        if name == self.code_file_name():
+            return True
+        if self.editor is not None and self.project is self.editor_app.project:
+            self.editor_app.save_current()
+        self.code_file = name
+        self.editor = None            # set_menu_view rebuilds it over the new file
+        self.code_err = None
+        self.code_err_row = None
+        self.set_menu_view("code")
+        self._dirty = True
+        return True
+
     def save_code(self, force=False):
         """Persist the edited source. Returns True iff it was written.
 
@@ -3171,6 +3236,7 @@ class Workstation:
         if not (self.editor and self.cart):
             return False
         src = self.editor.text()
+        name = self.code_file_name()
         # Always gate, even for embedded/non-SD carts, so the kid sees a syntax
         # error before run_code execs it into a hard failure. The gate is the
         # cart's RUNTIME's: a lua cart used to be handed to the PYTHON compiler
@@ -3194,7 +3260,7 @@ class Workstation:
             return True
         # The store-write half moved to Project.commit_code (Stage 1b); the compile-
         # check + code-UI half above stays here (the code surface).
-        return self.project.commit_code(src, force=force)
+        return self.project.commit_code(src, force=force, name=name)
 
     def _set_code_error(self, msg, move=True):
         """Record a syntax error so the code view can mark the offending line
@@ -3231,7 +3297,11 @@ class Workstation:
         if self.editor is not None:
             if not self.save_code():
                 return                               # syntax/save error -> stay in editor
-            self.cart["src"] = self.editor.text()   # in-RAM apply (validated above)
+            # in-RAM apply (validated above), into the slot the OPEN file came
+            # out of -- a cart with no path never reaches the store write, so
+            # this is the only thing that makes a PLAY run what was just typed.
+            self.carts_store.set_source(self.cart, self.code_file_name(),
+                                        self.editor.text())
         if self._start():
             self.ach.note("run")                # "Lift Off!": a cart was RUN (#21)
             self._set_text_mode(False)

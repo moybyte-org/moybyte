@@ -164,6 +164,10 @@ except ImportError:                     # host: the runtime package
 # here rather than reached through the shell for the same reason as the module
 # above: it is a leaf over the Files role and the cart's canvas.
 try:
+    import moy_carts as _carts
+except ImportError:  # pragma: no cover - host
+    from runtime import moy_carts as _carts
+try:
     from editor_handle import EditorHandle
 except ImportError:                     # host: the runtime package
     from runtime.editor_handle import EditorHandle
@@ -268,16 +272,16 @@ def _lua_err_text(exc):
     return t if p < 0 else t[:p]
 
 
-def _lua_cart_line(text, chunk="cart"):
-    """Best-effort: the 1-based cart line inside a Lua error text (#67 Phase 5).
-    Both backends load the cart chunk as "@cart" (lua_host loadstring /
-    device_api moy_lua.exec), so a load or raise position renders `cart:12:`;
-    a plain-named chunk renders `[string "cart"]:12:` -- both parsed. The FIRST
-    position in the text is the raise point (any traceback frames come after
-    it), the deepest-frame rule the Python parser applies. No regex: this runs
-    frozen on MicroPython like its Python twin above."""
+def _lua_cart_at(text, chunk="cart"):
+    """`(offset, line)` of the FIRST `chunk:N:` position in a Lua error text,
+    or `(None, None)`.
+
+    The OFFSET is what lets a caller holding several chunk names pick the
+    earliest rather than whichever name it happened to ask about first --
+    see `_lua_cart_where`. No regex: this runs frozen on MicroPython like its
+    Python twin above."""
     if not text:
-        return None
+        return None, None
     s = str(text)
     for pat in ('[string "%s"]:' % chunk, chunk + ":"):
         p = s.find(pat)
@@ -292,9 +296,44 @@ def _lua_cart_line(text, chunk="cart"):
                     else:
                         break
                 if num:
-                    return int(num)
+                    return p, int(num)
             p = s.find(pat, p + 1)
-    return None
+    return None, None
+
+
+def _lua_cart_line(text, chunk="cart"):
+    """Best-effort: the 1-based cart line inside a Lua error text (#67 Phase 5).
+    Both backends load the cart chunk as "@cart" (lua_host loadstring /
+    device_api moy_lua.exec), so a load or raise position renders `cart:12:`;
+    a plain-named chunk renders `[string "cart"]:12:` -- both parsed. The FIRST
+    position in the text is the raise point (any traceback frames come after
+    it), the deepest-frame rule the Python parser applies.
+
+    `_lua_cart_where` is the several-scripts form, and is what the crash paths
+    use: this one cannot say WHICH file it read."""
+    return _lua_cart_at(text, chunk)[1]
+
+
+def _lua_cart_where(text, cart):
+    """`(file, line)` -- which of the cart's scripts raised, and where in it.
+
+    `lua_ext.cart_chunks` names main's chunk "@cart" and every OTHER script
+    after its own file, so a port's error reads `p8.lua:412:` where the cart's
+    own code reads `cart:12:`. Asking only about main was right while a cart was
+    one file; on a ported cart it finds NOTHING -- no line, no marker, no
+    crash-to-code -- for the two thirds of the code that is not main.lua, which
+    is exactly where a generated shim raises.
+
+    Earliest position wins whichever file it names: that is the raise point, and
+    traceback frames come after it."""
+    mainf = (cart or {}).get("main", "main.py")
+    at = None
+    where = (None, None)
+    for name in _carts.cart_sources(cart) or (mainf,):
+        pos, line = _lua_cart_at(text, "cart" if name == mainf else name)
+        if pos is not None and (at is None or pos < at):
+            at, where = pos, (name, line)
+    return where
 
 
 def _wrap(text, cols):
@@ -369,6 +408,8 @@ class Player:
         self._draw = None
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
+        self.crash_file = None        # WHICH of the cart's scripts that line is in
+                                      # (SPEC.md 4), or None for main/no crash
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
         self._cart_palette_canvas = None  # the canvas _cart_palette came off
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
@@ -943,6 +984,7 @@ class Player:
         if missing:
             self.cart_error = "needs extension: " + ", ".join(missing)
             self.crash_line = None
+            self.crash_file = None
             return False
         # Cart canvas gate (SPEC.md 1/3.1): `canvas` is the other capability
         # field -- an out-of-set size was carried raw by the loader and is
@@ -956,11 +998,13 @@ class Player:
             # the panel wraps 8px cells -- the NAME matters, not the whole blob
             self.cart_error = 'no "%.32s" canvas (SPEC.md 3.1)' % (cv,)
             self.crash_line = None
+            self.crash_file = None
             return False
         ws.release_run_canvas()        # a straggler bind never leaks into this run
         if cv is not None and not ws.bind_run_canvas(cv[0], cv[1]):
             self.cart_error = "no %dx%d canvas on this screen yet" % (cv[0], cv[1])
             self.crash_line = None
+            self.crash_file = None
             return False
         # -- USER APPS (#181, ui_refactor_2026-08 Phases 7 + 8) ---------------
         #
@@ -978,6 +1022,7 @@ class Player:
             if _man is not None:
                 self.cart_error = _man
                 self.crash_line = None
+                self.crash_file = None
                 return False
             # CRASH ISOLATION FIRST, before a single line of the cart's code has
             # been compiled, let alone run: the mark has to survive a death the
@@ -991,6 +1036,7 @@ class Player:
                 self.cart_error = ("app turned off after %d crashes - EDIT it"
                                    % ws.app_guard.STRIKES)
                 self.crash_line = None
+                self.crash_file = None
                 self._app_id = None
                 return False
             # THE RESPONSIVE OPT-IN. Fixed is the DEFAULT and deliberately so:
@@ -1287,6 +1333,7 @@ class Player:
             # become the exact silent device hang the panel exists to prevent.
             self.cart_error = _err_text(exc)
             self.crash_line = self._map_crash_line(_exc_cart_line(exc))
+            self.crash_file = None      # the python tier runs main and nothing else
             h1 = _hs()
             self.ns = ns
             self._start_diag = (t_reclaim, t_audio, t_api,
@@ -1300,6 +1347,7 @@ class Player:
             return False
         self.cart_error = None
         self.crash_line = None
+        self.crash_file = None
         self.ns = ns
         self._update = ns.get("_update")
         self._draw = ns.get("_draw")
@@ -1485,8 +1533,10 @@ class Player:
                     pass
             self.cart_error = _lua_err_text(exc)
             # a load/syntax or _init error carries its `cart:N:` position, so
-            # EDIT drops on the line exactly like a Python SyntaxError (#24)
-            self.crash_line = _lua_cart_line(self.cart_error)
+            # EDIT drops on the line exactly like a Python SyntaxError (#24) --
+            # and on a cart of several scripts, in the FILE that raised.
+            self.crash_file, self.crash_line = _lua_cart_where(
+                self.cart_error, self.ws.cart)
             self.ns = ns
             h1 = _hs()
             self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
@@ -1498,6 +1548,7 @@ class Player:
         self._lua = lua
         self.cart_error = None
         self.crash_line = None
+        self.crash_file = None
         self.ns = ns
         self._update = lua.update
         self._draw = lua.draw
@@ -1684,10 +1735,12 @@ class Player:
                 # from the traceback, mapped back through the nativize insert.
                 if self._lua is not None:
                     self.cart_error = _lua_err_text(exc)
-                    self.crash_line = _lua_cart_line(self.cart_error)
+                    self.crash_file, self.crash_line = _lua_cart_where(
+                        self.cart_error, ws.cart)
                 else:
                     self.cart_error = _err_text(exc)
                     self.crash_line = self._map_crash_line(_exc_cart_line(exc))
+                    self.crash_file = None
                 self._update = None
                 self._draw = None
                 self._disarm_pacing()  # the crash panel is a console screen

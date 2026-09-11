@@ -281,7 +281,7 @@ class Project:
             # hasn't changed (zone_gen wouldn't otherwise bump for a plain autosave).
             ws.bar_layer.invalidate()
 
-    def _journal_code(self, src, ops=None):
+    def _journal_code(self, src, ops=None, name=None):
         """Journal a main.py code commit, DETECTING GRADUATION for a block- OR
         deck-authored cart (spec Section 8, the MakeCode model -- #78 folds
         Storybook's decks into the SAME mechanism as the block editor). Bound to
@@ -305,6 +305,14 @@ class Project:
         # The journal entry names the cart's ACTUAL main file (#67: main.lua for a
         # lua cart), so an undo restores into the file the runtime loads from.
         mainf = cart.get("main", "main.py") if cart else "main.py"
+        if name is not None and name != mainf:
+            # One of the cart's OTHER scripts (SPEC.md 4): journaled under its
+            # own name and nothing else. Graduation is a claim about the file
+            # blocks.json / deck.json GENERATE, and they generate main -- a
+            # `board.lua` that diverges from a block program it was never
+            # compiled from is not a kid outgrowing blocks.
+            self._journal(name, src, ops=ops)
+            return
         if prog is not None:
             self._journal_code_toward(
                 mainf, src, cart,
@@ -463,11 +471,19 @@ class Project:
             return False
         return True
 
-    def commit_code(self, src, quiet=False, force=False):
+    def commit_code(self, src, quiet=False, force=False, name=None):
         """Persist validated source through the store -- the store-write half of the
         old Workstation.save_code. The compile-check + code-UI half stays on the code
         surface (ws.save_code), which calls this once the source is known to parse.
         Returns True iff the write succeeded.
+
+        `name` is WHICH of the cart's scripts (SPEC.md 4) the Code tab is on --
+        None meaning main, which is every cart with one file. A non-main script
+        takes the same store write, the same op-history drain and the same
+        journal line under ITS OWN file name (the #111 cursor is a per-file map,
+        so an undo on p8.lua cannot revert the last commit to main.lua). What it
+        cannot do is GRADUATE: blocks.json and deck.json generate the main file
+        and no other, so a commit to a tab has nothing to diverge from.
 
         `quiet` is set by the Stage-7 idle-debounce autosave (ws.history.idle_tick): that
         save is INVISIBLE (spec Section 7), so it must NOT pop the "Code Wizard"
@@ -492,7 +508,7 @@ class Project:
         try:
             # moy_carts.save_code always returns a (status, message) 2-tuple.
             status, smsg = ws._with_sd(
-                lambda: ws.carts_store.save_code(self.cart, src, force))
+                lambda: ws.carts_store.save_code(self.cart, src, force, name))
             _t_write = _ticks_diff(_ticks_ms(), _t0)
             if status == ws.carts_store.SAVE_BAD_SYNTAX:
                 ws.save_status = "CAN'T SAVE " + str(smsg)
@@ -520,7 +536,7 @@ class Project:
             _t_burst = _ticks_diff(_ticks_ms(), _t0) - _t_write
             ops = hist.flush() if hist is not None else None
             _t_ops = _ticks_diff(_ticks_ms(), _t0) - _t_write - _t_burst
-            self._journal_code(src, ops=ops)  # durable undo (Stage 7) + graduation (Stage 8)
+            self._journal_code(src, ops=ops, name=name)  # durable undo (Stage 7) + graduation (Stage 8)
             if hist is not None:
                 hist.clear()                  # re-baseline (subsumes mark_keyframe)
             _total = _ticks_diff(_ticks_ms(), _t0)

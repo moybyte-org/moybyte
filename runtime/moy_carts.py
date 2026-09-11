@@ -1303,6 +1303,55 @@ def save_manifest_meta(cart_dir, title=None, author=None):
     return True
 
 
+# The one door that ADDS a script to a cart (#89). Deliberately narrow, and
+# deliberately not on the Code tab: the file switcher there is a switcher, and
+# a console for eight-year-olds does not want a New File button two taps from
+# every cart. This is reached from the Config tab's ADVANCED row, which is
+# where a project's own folder already lives (docs/text_editing_2026-09.md
+# step 5) -- and it is offered only where a second script would actually RUN.
+
+def multi_script(cart):
+    """Whether THIS cart's runtime loads more than its main file.
+
+    A Lua cart does -- SPEC.md 4, and `lua_ext.cart_chunks` builds the list --
+    while the console's Python tier runs `main` and nothing else. So a second
+    script listed on a python cart would be a file that silently never runs,
+    which is worse than not offering to make one."""
+    return (cart or {}).get("runtime", "python") != "python"
+
+
+def add_source(cart, name, text=""):
+    """Create `name` in the cart's folder and list it in `sources` after every
+    script the cart already has. Returns the name, or None when it could not.
+
+    Writing `sources` in FULL rather than appending to whatever is there: an
+    absent `sources` MEANS `[main]` (SPEC.md 4), so a cart getting its second
+    script is exactly the case where there is nothing to append to.
+
+    Refuses a name the folder already holds. Overwriting a file to "create" it
+    is how a kid loses a cart, and a cart's own asset names (manifest.json,
+    sprites.moygfx) are in that folder too."""
+    path = (cart or {}).get("path")
+    if not path or not name or "/" in name or name in cart_sources(cart):
+        return None
+    if _exists(path + "/" + name):
+        return None
+    mpath = path + "/manifest.json"
+    try:
+        man = json.loads(_read_recover(mpath))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(man, dict):
+        return None
+    _write_atomic(path + "/" + name, text)
+    man["sources"] = cart_sources(cart) + [name]
+    _write_atomic(mpath, json.dumps(man))
+    # The in-RAM cart follows, so the Editor can open the new file without a
+    # re-read -- after main, which is where the manifest just put it.
+    cart["src_after"] = list(cart.get("src_after") or ()) + [(name, text)]
+    return name
+
+
 # save_code() outcomes -- the caller (Workstation) surfaces these to the kid:
 SAVE_OK = "ok"            # source parsed and was written atomically
 SAVE_BAD_SYNTAX = "bad"   # source won't compile; the good file was left untouched
@@ -1346,12 +1395,65 @@ def runtime_compile_check(cart, src):
     return compile_check(src)
 
 
-def save_code(cart, src, force=False):
-    """Persist edited source to the cart's main file, ATOMICALLY and only if it
-    passes its runtime's gate. Returns (status, message): status is SAVE_OK on
-    success, or SAVE_BAD_SYNTAX with a message (and the previous good file is
-    left intact) when `src` won't parse, so a kid's broken edit can never
-    truncate the cart.
+# -- a cart's SCRIPTS (SPEC.md 4) -------------------------------------------
+#
+# `load` splits the manifest's `sources` at main into `src_before`/`src_after`,
+# because that is how the tiers use it -- `src` is main's text and travels on
+# its own. Everything that asks "which files is this cart's CODE in" (the
+# Editor's file switcher, the crash router, the store's own writer) needs the
+# list back in LOAD order, and three readers reassembling it from three keys is
+# three places to get the order wrong.
+
+def cart_sources(cart):
+    """A cart's scripts in load order, `main` among them. A cart that declares
+    no `sources` answers `[main]`, which is what its absence MEANS."""
+    if not cart:
+        return []
+    return ([n for n, _ in cart.get("src_before") or ()]
+            + [cart.get("main", "main.py")]
+            + [n for n, _ in cart.get("src_after") or ()])
+
+
+def source_text(cart, name=None):
+    """The in-RAM text of ONE of `cart`'s scripts, or None when it has no such
+    file. `name` None -- or main's own name -- is `src`."""
+    if not cart:
+        return None
+    if name is None or name == cart.get("main", "main.py"):
+        return cart.get("src")
+    for key in ("src_before", "src_after"):
+        for n, text in cart.get(key) or ():
+            if n == name:
+                return text
+    return None
+
+
+def set_source(cart, name, src):
+    """Write `src` into the in-RAM slot `name` came out of, so a commit leaves
+    the loaded cart agreeing with the folder without a re-read."""
+    if name == cart.get("main", "main.py"):
+        cart["src"] = src
+        return
+    for key in ("src_before", "src_after"):
+        lst = cart.get(key)
+        for i in range(len(lst or ())):
+            if lst[i][0] == name:
+                lst[i] = (name, src)
+                return
+
+
+def save_code(cart, src, force=False, name=None):
+    """Persist edited source to one of the cart's scripts, ATOMICALLY and only
+    if it passes its runtime's gate. Returns (status, message): status is
+    SAVE_OK on success, or SAVE_BAD_SYNTAX with a message (and the previous
+    good file is left intact) when `src` won't parse, so a kid's broken edit can
+    never truncate the cart.
+
+    `name` is WHICH script (SPEC.md 4), None meaning main -- which is every
+    cart with one file, and the file the Editor opens on. A ported cart's
+    PICO-8 tabs and its generated p8.lua are the other kind; they take the same
+    gate and the same atomic write, because a half-typed tab must not truncate
+    the file the cart loads from either.
 
     `force` is the HARD-EXIT half of the split gate (#154): a kid who goes home
     or powers off mid-line must not lose the line for not having finished it, so
@@ -1362,8 +1464,10 @@ def save_code(cart, src, force=False):
     ok, msg = runtime_compile_check(cart, src)
     if not ok and not force:
         return SAVE_BAD_SYNTAX, msg
-    _write_atomic(cart["path"] + "/" + cart.get("main", "main.py"), src)
-    cart["src"] = src
+    if name is None:
+        name = cart.get("main", "main.py")
+    _write_atomic(cart["path"] + "/" + name, src)
+    set_source(cart, name, src)
     return (SAVE_OK, "") if ok else (SAVE_KEPT, msg)
 
 

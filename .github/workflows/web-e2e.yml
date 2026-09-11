@@ -52,6 +52,7 @@ on:
       - "tests/web_e2e.py"
       - "tests/fixtures/**"         # the p8 cart the drop suite imports
       - "tools/p8_import.py"        # the vendored converter the wasm freezes
+      - "tools/p8_lua_port.py"      # ...the vendored PORTER, frozen beside it
       - "tools/p8_writer.py"        # ...and the .moy writer it shares with the CLI
       - ".github/workflows/web-e2e.yml"
   pull_request:
@@ -65,6 +66,7 @@ on:
       - "tests/web_e2e.py"
       - "tests/fixtures/**"
       - "tools/p8_import.py"
+      - "tools/p8_lua_port.py"
       - "tools/p8_writer.py"
       - ".github/workflows/web-e2e.yml"
   workflow_dispatch:

@@ -88,6 +88,12 @@ _ASSET_TABS = {
 }
 _ASSET_SUBDIR_TABS = {"scenes": "scene"}
 
+# The last row of that list on a cart whose runtime runs more than one script:
+# the ONE door that adds a file to a cart (#89). A sentinel rather than a real
+# name, because the list's rows come from the store and a real file could be
+# called anything -- including this.
+_NEW_ROW = "+ NEW SCRIPT"
+
 
 # The Config tab draws in its OWN palette (`_tones`), not the theme's, so the
 # toolkit cannot resolve a widget kind against it without help. Same answer as
@@ -182,6 +188,9 @@ class CardsLayer:
         # The ADVANCED row's file list: None when closed, else
         # {"rows", "sel", "top", "msg"} -- see _open_files.
         self.files = None
+        # The NEW SCRIPT name prompt over it: None when closed, else
+        # {"name", "msg", "armed"} -- see _open_newf.
+        self.newf = None
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -195,8 +204,10 @@ class CardsLayer:
         self.msel = 0
         self.mtop = 0
         self.files = None
-        if self.meta is not None:     # never leak an open modal across a cart switch
+        if self.meta is not None or self.newf is not None:
+            # never leak an open modal across a cart switch
             self.meta = None
+            self.newf = None
             self.ws._set_text_mode(False)
 
     # -- Layer facets --------------------------------------------------------
@@ -223,9 +234,13 @@ class CardsLayer:
         # as the block editor's blk_kbd prompt (chrome, then any modal on top).
         if self.meta is not None:
             self._draw_meta_modal()
+        if self.newf is not None:
+            self._draw_newf_modal()
 
     def handle_input(self, i):
         ws = self.ws
+        if self.newf is not None:
+            return self._newf_input(i)
         if self.meta is not None:
             return self._meta_input(i)
         if self.files is not None:
@@ -299,6 +314,8 @@ class CardsLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
+        if self.newf is not None:
+            return self._newf_pointer(px, py, click)
         if self.meta is not None:
             return self._meta_pointer(px, py, click)
         if self.files is not None:
@@ -900,8 +917,18 @@ class CardsLayer:
                 lambda: ws.carts_store.list_files(kind, ws.carts_root)))
         except Exception as exc:  # noqa: BLE001 -- an unreadable folder lists none
             msg = self._err_text(exc)
+        if self._can_add_source(cart):
+            rows = tuple(rows) + (_NEW_ROW,)
         self.files = {"rows": rows, "sel": 0, "top": 0, "msg": msg}
         ws._dirty = True
+
+    def _can_add_source(self, cart):
+        """Whether this folder may gain another SCRIPT: a writable cart whose
+        runtime actually loads more than main (moy_carts.multi_script). The
+        gate is the store's, not a runtime string spelled here."""
+        store = self.ws.carts_store
+        return bool(self.ws.can_manage and store is not None
+                    and store.multi_script(cart))
 
     def _close_files(self):
         self.files = None
@@ -921,9 +948,17 @@ class CardsLayer:
         cart = ws.project.cart
         if cart is None:
             return
-        if name == cart.get("main", "main.py"):
+        if name == _NEW_ROW:
+            self._open_newf()
+            return
+        # ANY of the cart's scripts, not only main (SPEC.md 4, #89): the Code
+        # tab holds a file now, and it is the tab that has PLAY, the journal and
+        # crash-to-code. A port's p8.lua used to fall past this into the text
+        # handle, where a crash at `p8.lua:412:` had nothing to land on.
+        if name in ws.carts_store.cart_sources(cart):
             self._close_files()
             ws.editor_app.set_tab("code")
+            ws.open_code_file(name)
             return
         tab = _ASSET_TABS.get(name)
         if tab is None and "/" in name:
@@ -1169,6 +1204,151 @@ class CardsLayer:
             self._close_meta()
         self.ws._dirty = True
         return True
+
+    # -- NEW SCRIPT: the one door that adds a file to a cart (#89) -----------
+    #
+    # It lives HERE, on the ADVANCED row, and nowhere else -- not on the Code
+    # tab's file chip, which is a switcher. A console for eight-year-olds does
+    # not want a New File button two taps from every cart, and a cart that is
+    # one file should stay one file unless somebody went looking.
+    #
+    # Typing follows the CART INFO modal's rule EXACTLY (see the note over
+    # _open_meta and do not re-derive it): last_key only, never i.pressed, and a
+    # one-frame `armed` guard so the tap that opened the prompt is not read as
+    # the first keystroke.
+
+    def _open_newf(self):
+        ws = self.ws
+        self.newf = {"name": "", "msg": None, "armed": False}
+        ws._set_text_mode(True)
+        ws.input.release_all()
+        try:
+            ws.input._pressed = set()
+            ws.input._released = set()
+            ws.input._last = set()
+            ws.input._prev = set()
+        except AttributeError:
+            pass
+        ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
+        if ws.pointer is not None:
+            ws.pointer.click = False
+        ws._dirty = True
+
+    def _close_newf(self):
+        self.newf = None
+        self.ws._set_text_mode(False)
+        self.ws._dirty = True
+
+    def _newf_filename(self, typed):
+        """The file a typed name lands on: slugged to letters, digits and
+        underscore, under the cart's own runtime extension. `free_file_name`'s
+        rule for a project file is "keep it verbatim" (a FORMAT chose the name),
+        which is right for manifest.json and wrong for something a person is
+        typing now, so the slug is here."""
+        cart = self.ws.project.cart or {}
+        mainf = cart.get("main", "main.py")
+        cut = mainf.rfind(".")
+        ext = mainf[cut:] if cut > 0 else ".lua"
+        stem = typed.strip()
+        if stem.lower().endswith(ext):
+            stem = stem[:-len(ext)]
+        out = ""
+        last = "_"
+        for ch in stem.lower():
+            if ch == "_" or ch.isalpha() or ch.isdigit():
+                out += ch
+            elif last != "_":
+                out += "_"
+            last = out[-1:] or "_"
+        out = out.strip("_")[:24]
+        if not out or not out[0].isalpha():
+            return None
+        return out + ext
+
+    def _commit_newf(self):
+        ws = self.ws
+        n = self.newf
+        cart = ws.project.cart
+        name = self._newf_filename(n["name"])
+        if name is None:
+            n["msg"] = "NAME IT WITH LETTERS"
+            ws._dirty = True
+            return
+        made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
+                                                             "-- " + name + "\n"))
+        if made is None:
+            n["msg"] = "THAT NAME IS TAKEN"
+            ws._dirty = True
+            return
+        self._close_newf()
+        self._close_files()
+        ws.editor_app.set_tab("code")
+        ws.open_code_file(made)
+
+    def _newf_key(self, ch):
+        n = self.newf
+        if ch in (8, 127):
+            n["name"] = n["name"][:-1]
+            n["msg"] = None
+        elif ch in (13, 10):
+            self._commit_newf()
+        elif ch == 27:
+            self._close_newf()
+        elif 32 <= ch < 127 and len(n["name"]) < 24:
+            n["name"] += chr(ch)
+            n["msg"] = None
+
+    def _newf_input(self, i):
+        ws = self.ws
+        n = self.newf
+        if not n.get("armed"):
+            n["armed"] = True
+            ws._ekey_prev = i.last_key
+            return True
+        k = i.last_key
+        if k and k != ws._ekey_prev:
+            self._newf_key(k)
+        ws._ekey_prev = k
+        return True
+
+    def _newf_rects(self):
+        """A centered one-field dialog -- _meta_rects' geometry minus a row."""
+        lay = self.layout
+        fs = lay.fs
+        w, h = 240 * fs, 80 * fs
+        x = (lay.w - w) // 2
+        y = (lay.h - h) // 2
+        return ((x, y, w, h),
+                (x + 12 * fs, y + 30 * fs, w - 24 * fs, 14 * fs),
+                (x + w - 96 * fs, y + h - 22 * fs, 40 * fs, 16 * fs),
+                (x + w - 50 * fs, y + h - 22 * fs, 40 * fs, 16 * fs))
+
+    def _newf_pointer(self, px, py, click):
+        if not click:
+            return True
+        _, _field, ok_r, cancel_r = self._newf_rects()
+        if self._in(px, py, ok_r):
+            self._commit_newf()
+        elif self._in(px, py, cancel_r):
+            self._close_newf()
+        self.ws._dirty = True
+        return True
+
+    def _draw_newf_modal(self):
+        NAMES = self._NAMES
+        cv = self.ws.sys_canvas
+        fs = self.layout.fs
+        n = self.newf
+        (x, y, w, h), field, ok_r, cancel_r = self._newf_rects()
+        _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
+        cv.print("NEW SCRIPT", x + 10 * fs, y + 8 * fs, NAMES["white"], 1)
+        cv.print("NAME", x + 12 * fs, field[1] - 9 * fs, NAMES["light_grey"], 1)
+        _ui.text_field(cv, field, n["name"], "helpers")
+        cv.rectb(field[0], field[1], field[2], field[3], NAMES["yellow"])
+        if n.get("msg"):
+            cv.print(n["msg"][:34], x + 12 * fs, y + h - 38 * fs, NAMES["red"], 1)
+        _ui.game_btn(cv, ok_r, "OK", NAMES["green"])
+        _ui.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])
 
     def _draw_meta_modal(self):
         NAMES = self._NAMES

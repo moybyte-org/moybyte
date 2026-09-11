@@ -272,12 +272,22 @@ class EditorApp:
                                      # (Stage 4, #46: the lent zone's highlight moved)
         if view == "code":
             if ws.editor is None and ws.cart is not None:
-                ws.editor = CodeEditor(ws.cart["src"],
+                # WHICH script (SPEC.md 4, #89): `ws.code_file` is the Code tab's
+                # file and defaults to main, so a one-file cart reads exactly as
+                # it always did. `source_text` is the store's own reader, because
+                # main's text travels as `src` and the others as the two lists.
+                name = ws.code_file_name()
+                ws.editor = CodeEditor(ws.carts_store.source_text(ws.cart, name) or "",
                                        cols=ws.code_layout.cols,
                                        rows=ws.code_layout.rows,
                                        clip=ws.clipboard)
                 ws.code_layer.reset()   # fresh keyboard-edge tracker for the new editor
-                if ws.crash_line is not None:
+                # A crash marker belongs to the FILE that raised. Marking line N
+                # of whichever file happens to be open would put a red line on
+                # somebody else's code -- and on a port the file that raises is
+                # very often not the one the tab opens on.
+                if ws.crash_line is not None \
+                        and (ws.player.crash_file or name) == name:
                     # Opened after a runtime crash -> land on the line that raised.
                     ws._mark_code_error(ws.crash_line - 1,
                                         (ws.cart_error or "crashed")[:32])

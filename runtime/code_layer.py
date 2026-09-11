@@ -282,6 +282,9 @@ class CodeLayer:
         self._jump_open = False       # the jump-to-symbol popup is shown
         self._jump_items = []         # (name, row) for every def/class line
         self._jump_sel = 0            # the highlighted symbol row
+        # -- #89 the cart's FILE, on a cart that has more than one ------------
+        self._files_open = False      # the file-switcher popup is shown
+        self._files_sel = 0           # the highlighted row (opens on the current file)
 
     def seed_key(self, k):
         """The byte that was live when this surface took the keyboard is NOT a
@@ -306,6 +309,7 @@ class CodeLayer:
         self._select_mode = False
         self._cmp_open = False
         self._jump_open = False
+        self._files_open = False
         if self.ws.editor is not None:
             self.ws.editor.select_sticky = False
 
@@ -405,9 +409,17 @@ class CodeLayer:
             self._tools_open = not self._tools_open
             ws.mark_dirty()
             return True
-        # An open autocomplete / jump popup is modal over the code body: a tap picks a
-        # row, a tap anywhere else dismisses it (the small-screen "escape").
-        if click and (self._cmp_open or self._jump_open) and \
+        _fb = self._file_btn(lay)
+        if click and _fb is not None and self._in(px, py, _fb):
+            if self._files_open:
+                self._files_open = False
+                ws.mark_dirty()
+            else:
+                self._open_files()
+            return True
+        # An open autocomplete / jump / file popup is modal over the code body: a tap
+        # picks a row, a tap anywhere else dismisses it (the small-screen "escape").
+        if click and (self._cmp_open or self._jump_open or self._files_open) and \
                 self._popup_tap(px, py, lay, ed):
             return True
         if click and self._find_open and self._find_tap(px, py, lay):
@@ -451,12 +463,13 @@ class CodeLayer:
             # An open popup (autocomplete / jump-to-symbol) owns the keyboard: Enter
             # accepts the highlighted row; any other key dismisses it and then edits
             # normally (the small-screen "escape" -- the T-Deck has no Esc key).
-            if self._cmp_open or self._jump_open:
+            if self._cmp_open or self._jump_open or self._files_open:
                 if k in (0x0D, 0x0A):
                     self._popup_accept()
                     return
                 self._cmp_open = False
                 self._jump_open = False
+                self._files_open = False
             # Host keyboard shortcuts (#89) layered over the touch tool palette: the
             # control bytes below are NEVER inserted as text (editor.key ignores them),
             # so they can't corrupt the buffer -- and each maps to a tool-palette button
@@ -730,6 +743,14 @@ class CodeLayer:
                 _name, row = self._jump_items[self._jump_sel]
                 ed.goto_row(row, self._leading_spaces(ed.lines[row]))
             self._jump_open = False
+        elif self._files_open:
+            # Close BEFORE the switch: open_code_file hard-commits this buffer and
+            # rebuilds the editor, and a popup left open would be drawn over a
+            # file it no longer describes.
+            self._files_open = False
+            names = self.ws.code_sources()
+            if self._files_sel < len(names):
+                self.ws.open_code_file(names[self._files_sel])
         self.ws.mark_dirty()
 
     def _leading_spaces(self, line):
@@ -757,6 +778,14 @@ class CodeLayer:
                     self._popup_accept()
                     return True
             self._jump_open = False
+        elif self._files_open:
+            _panel, rects = self._files_geom(lay)
+            for i in range(len(rects)):
+                if self._in(px, py, rects[i]):
+                    self._files_sel = i
+                    self._popup_accept()
+                    return True
+            self._files_open = False
         self.ws.mark_dirty()
         return True
 
@@ -820,6 +849,66 @@ class CodeLayer:
         # so the baseline code_area()/sym_area geometry is untouched.
         w = self._TLS_COLS * lay.cell
         return (lay.w - w, lay.y0, w, lay.lh)
+
+    # -- the cart's FILE (SPEC.md 4, #89) ------------------------------------
+    #
+    # A cart is usually ONE script and this chrome does not exist: `_file_btn`
+    # answers None at one source and every rect, tap and draw below is skipped.
+    # A PICO-8 port is the cart that has several -- p8.lua, main.lua and one
+    # file per PICO-8 tab -- and before this the only way to reach them was the
+    # Config tab's ADVANCED row, which opens a file in the text handle where
+    # there is no PLAY, no journal and no crash-to-code.
+    #
+    # The chip is a SWITCH, not a file manager: there is no new/rename/delete
+    # here, deliberately. The one door that adds a script is the ADVANCED row.
+
+    _FILE_COLS = 6                # cells wide for the file chip (TLS is 3)
+
+    def _file_btn(self, lay):
+        """The file chip's rect, LEFT of the tools toggle on the same row -- or
+        None when the cart is one file, which is when there is nothing to
+        switch between."""
+        if len(self.ws.code_sources()) < 2:
+            return None
+        w = self._FILE_COLS * lay.cell
+        return (lay.w - w - self._TLS_COLS * lay.cell, lay.y0, w, lay.lh)
+
+    def _file_label(self):
+        """The open file as the chip shows it: its bare name, upper-cased into
+        the chrome's vocabulary and clipped to the chip. `puzzles_list.lua` ->
+        PUZZLE, which is a glance, not an identity -- the popup has the names."""
+        name = self.ws.code_file_name()
+        cut = name.rfind(".")
+        return (name[:cut] if cut > 0 else name).upper()[:self._FILE_COLS]
+
+    def _files_geom(self, lay):
+        """(panel_rect, [row_rects]) for the file switcher -- `_jump_geom`'s
+        centered list with a one-row header, sized to the longest name."""
+        names = self.ws.code_sources()
+        n = min(len(names), self._POPUP_MAX)
+        lh = lay.lh
+        w = 4
+        for i in range(n):
+            if len(names[i]) > w:
+                w = len(names[i])
+        pw = (w + 1) * lay.cell
+        if pw > lay.w:
+            pw = lay.w
+        x = (lay.w - pw) // 2
+        y = lay.y0 + lh
+        return (x, y, pw, (n + 1) * lh), [(x, y + (i + 1) * lh, pw, lh)
+                                          for i in range(n)]
+
+    def _open_files(self):
+        """Open the switcher on the file the tab is already showing, so the
+        highlighted row means "here" rather than "row 0"."""
+        self._cmp_open = False
+        self._jump_open = False
+        names = self.ws.code_sources()
+        cur = self.ws.code_file_name()
+        self._files_sel = names.index(cur) if cur in names else 0
+        self._files_open = len(names) > 1
+        self.ws.mark_dirty()
 
     def _toolbar_rect(self, lay):
         # The tool palette row, just above the status band / symbol palette.
@@ -1134,6 +1223,10 @@ class CodeLayer:
         _ui.chip(cv, t, _chip_rect(self._tls_btn(lay)), "TLS",
                  on=self._tools_open, glyph=self._btn_spec("TLS", "tools"),
                  glyph_draw=self._btn_face, fs=fs)
+        fb = self._file_btn(lay)
+        if fb is not None:
+            _ui.chip(cv, t, _chip_rect(fb), self._file_label(),
+                     on=self._files_open, fs=fs)
         if self._tools_open:
             r = self._toolbar_rect(lay)
             n = len(self._TOOLS)
@@ -1154,6 +1247,8 @@ class CodeLayer:
             self._draw_completion(lay, ed, t)
         if self._jump_open:
             self._draw_jump(lay, t)
+        if self._files_open:
+            self._draw_files(lay, t)
 
     def _draw_listbox(self, cv, lay, t, panel, rects, labels, sel, title):
         """A bordered overlay list (the autocomplete + jump popups): the sym_bg/edge
@@ -1187,6 +1282,12 @@ class CodeLayer:
         labels = [self._jump_items[i][0] + " " + str(self._jump_items[i][1] + 1)
                   for i in range(len(rects))]
         self._draw_listbox(cv, lay, t, panel, rects, labels, self._jump_sel, "DEFS")
+
+    def _draw_files(self, lay, t):
+        panel, rects = self._files_geom(lay)
+        names = self.ws.code_sources()
+        self._draw_listbox(self.ws.sys_canvas, lay, t, panel, rects,
+                           names[:len(rects)], self._files_sel, "FILES")
 
     def _draw_find(self, lay, ed, t):
         """The find bar: the typed query on the left + prev/next/case/close buttons

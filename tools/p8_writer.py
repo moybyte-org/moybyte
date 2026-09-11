@@ -325,11 +325,16 @@ def write_cart(sections, out_dir, title):
         "its own script ahead of main.lua so main.lua is the cart)")
     # The cart's PICO-8 TABS, as files (p8_lua_port.tab_files). Reported both
     # ways round: a cart whose tabs became files says how many, and one whose
-    # tabs COULD not says why in the porter's own words -- because the reader
-    # who opens main.lua and finds four `-->8` comments in it is owed the
-    # reason, and it is never the same reason twice.
+    # tabs COULD not says why in the porter's own words -- because it is never
+    # the same reason twice.
+    #
+    # BOTH are "imported" lines and neither is a "lossy" one, which is the
+    # difference between the CLI's report and the browser panel's
+    # (`report_lines`): a fused cart runs EXACTLY as a split one does, so
+    # calling it approximated would claim a fidelity cost that is not there.
+    # What this is about is which files the cart arrived in.
     if wrote.get("fused"):
-        summary["lossy"].append(wrote["fused"])
+        summary["imported"].append("main.lua (one file: " + wrote["fused"] + ")")
     elif wrote.get("tabs", 1) > 1:
         summary["imported"].append(
             "%d more scripts, one per PICO-8 tab past the first (%s) -- each "

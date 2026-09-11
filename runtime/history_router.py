@@ -337,7 +337,11 @@ class HistoryRouter:
         cart = ws.cart or {}
         mainf = cart.get("main", "main.py")
         if v == "code":
-            return (mainf,)
+            # The tab's own FILE, which is main on every cart that has one
+            # (SPEC.md 4, #89). Scoping to the OPEN file is the same rule the
+            # rest of this table follows -- an undo on p8.lua must not revert
+            # the newest commit to main.lua any more than the Map tab's should.
+            return (ws.code_file_name(),)
         if v == "blocks":
             # blocks.json is not itself journaled today (block saves write it straight to
             # disk); main.py IS -- so the pair is walked together and can't desync, and a

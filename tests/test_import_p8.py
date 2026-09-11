@@ -1699,7 +1699,11 @@ def test_the_tabs_stay_in_one_file_when_cutting_them_would_break_the_cart(
     assert man["sources"] == ["p8.lua", "main.lua"], \
         "the tabs must stay in one chunk: " + case
     assert not (out / "menu.lua").exists()
-    said = [s for s in summary["lossy"] if expect in s]
+    # An "imported" line, not a "lossy" one: a fused cart runs exactly as a
+    # split one does, so the report says which FILES it arrived in and claims
+    # no fidelity cost (report_lines, which is the browser's panel, carries the
+    # lossy half only).
+    said = [s for s in summary["imported"] if expect in s]
     assert said, "the report never said why the tabs stayed fused: " + case
     assert "main.lua" in said[0]
 

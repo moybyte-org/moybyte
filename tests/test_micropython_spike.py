@@ -2058,14 +2058,19 @@ def test_code_editor_wired_into_device_shell():
     # (#39 step 2 the constructor also takes the responsive cols/rows window.) The tab
     # builder that constructs the CodeEditor moved to EditorApp.set_tab (Stage 3,
     # editor_app.py); ws.save_code (the compile-check/UI half) stays on the console.
-    assert 'ws.editor = CodeEditor(ws.cart["src"],' in editor_app
+    # The buffer is read through the STORE (#89): main's text travels as `src` and
+    # a cart's other scripts as the two lists either side of it (SPEC.md 4), so
+    # which one the tab holds is `source_text`'s question and not this line's.
+    assert "CodeEditor(ws.carts_store.source_text(ws.cart, name)" in editor_app
     # `force` is the split gate (#154): the soft paths refuse source that will not
     # parse, the hard exits keep the kid's half-typed line. It rides the whole chain.
     assert "def save_code(self, force=False):" in console
     # The store-write half moved to Project.commit_code (Stage 1b, project.py -- also
     # staged onto the device); ws.save_code keeps the compile-check/UI half + delegates.
-    assert "ws.carts_store.save_code(self.cart, src, force)" in project
-    assert "def save_code(cart, src, force=False):" in carts
+    # `name` rides beside `force` all the way down (#89): the WHICH-file half of the
+    # same chain, None meaning main on every cart that has one file.
+    assert "ws.carts_store.save_code(self.cart, src, force, name)" in project
+    assert "def save_code(cart, src, force=False, name=None):" in carts
     # run_desktop injects the device make_api + SD cart store into the shared console.
     assert "wire_workstation_core(ws, moy_carts, carts_root, make_api" in runtime
 

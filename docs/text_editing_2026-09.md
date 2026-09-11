@@ -28,7 +28,8 @@ drawings the Files app owns.
 | any file | Launcher → Files → a root | routed by what it is (below) |
 
 **The Files router**, in order: a `.moy` folder opens the project Editor, never a
-listing; a cart's own `main.py`/`main.lua` opens the Editor's Code tab (PLAY, the
+listing; any script in a cart's own load order — `main.py`/`main.lua`, and since
+#89 every other entry in its `sources` — opens the Editor's Code tab (PLAY, the
 journal and crash-to-code live there); an image opens Paint -- including a
 cart's own `images/*.moyimg`, edited in place on the project kind, and one
 Paint has no editor for opens READ-ONLY rather than being refused, because a
@@ -124,7 +125,12 @@ QWERTY is planned.
    because JSON mode writes an invalid manifest on a hard exit by design,
    `moy_carts.load` now RECOVERS such a cart instead of dropping it, so the
    project stays on the shelf carrying the reason and the row leads back to the
-   file that broke it.
+   file that broke it. **A cart's own SCRIPT stopped taking that door in
+   2026-09 (#89):** the Code tab holds a *file* now (SPEC.md §4's `sources`),
+   so anything in the cart's load order routes there instead — where PLAY, the
+   journal and crash-to-code are. This row is also where the one **NEW SCRIPT**
+   verb lives, offered only on a cart whose runtime actually loads more than
+   `main`; the Code tab's file chip is a switcher and has no create.
 6. The script runner with the text console surface.
 
 Related: #108 (user files), #181 (apps are carts), #112 (cart-facing undo —
