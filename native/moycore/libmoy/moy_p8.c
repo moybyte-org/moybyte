@@ -84,19 +84,51 @@ static inline int32_t u2i(uint32_t v)
                              : (int32_t)v;
 }
 
+/* floor() in lua_Number's own precision, which is what the rest of this file
+ * already reaches for. A float's floor is exactly representable as a float, so
+ * this equals the double form to the bit; what it sheds is a promote, a double
+ * libm call and a narrow back -- and NEITHER target board has a double FPU, so
+ * all three are libgcc calls out of flash. */
+#define p8_floor(x) ((lua_Number)l_mathop(floor)(x))
+
 /* float -> int32, wrapping instead of trapping. C leaves the cast UNDEFINED
  * out of range and a p8 cart reaches out of it routinely -- a garbage
  * address, a multiply that overflows -- so the answer is pinned here rather
- * than left to the CPU. fmod is exact, so every build agrees on it. */
+ * than left to the CPU. fmod is exact, so every build agrees on it.
+ *
+ * The IN-RANGE arm compares and converts in lua_Number: both bounds are powers
+ * of two, exact in every float format Lua offers, so it answers what the double
+ * form answered. The WRAP arm stays double, because fmod's exactness is the pin
+ * -- and it is the cold path, reached only by a cart already off the map. */
 static int32_t f2i(lua_Number f)
 {
-    double d = (double)f;
-    if (d >= -2147483648.0 && d < 2147483648.0) return (int32_t)d;
-    if (!(d == d)) return 0;                             /* NaN */
-    d = fmod(d, 4294967296.0);
+    double d;
+    if (f >= (lua_Number)-2147483648.0 && f < (lua_Number)2147483648.0)
+        return (int32_t)f;
+    if (!(f == f)) return 0;                             /* NaN */
+    d = fmod((double)f, 4294967296.0);
     if (d < 0) d += 4294967296.0;
     if (d >= 2147483648.0) d -= 4294967296.0;
     return (int32_t)d;
+}
+
+/* floor AND narrow, which is what every verb that ends in an int32 actually
+ * wants. In range it is a truncate plus a correction -- two FPU instructions
+ * and a compare, where floorf() is an out-of-line call on both toolchains
+ * (neither has the lfloor pattern that would fold the pair into the one
+ * instruction each ISA owns). Out of range every float is already integral, so
+ * the floor is the identity and f2i's wrap arm answers alone; NaN takes that
+ * arm too and comes back 0, as floorf() into f2i did. Identical to
+ * f2i(p8_floor(f)) for every bit pattern -- test/p8_float_fold.c sweeps it. */
+static int32_t p8_floor_i(lua_Number f)
+{
+    if (f >= (lua_Number)-2147483648.0 && f < (lua_Number)2147483648.0) {
+        int32_t i = (int32_t)f;          /* i == INT32_MIN only when f is -2^31
+                                            exactly, where the arm below is not
+                                            taken -- so the decrement is safe */
+        return ((lua_Number)i > f) ? i - 1 : i;
+    }
+    return f2i(f);
 }
 
 static inline int32_t iarg(lua_State *L, int i)
@@ -131,7 +163,7 @@ static int32_t p8_fl(lua_State *L, int i)
     if (lua_isinteger(L, i)) return (int32_t)lua_tointeger(L, i);
     f = lua_tonumberx(L, i, &isnum);
     if (!isnum) return 0;
-    return f2i((lua_Number)floor((double)f));
+    return p8_floor_i(f);
 }
 
 /* -- the screen: the canvas IS the screen region ------------------------- */
@@ -374,8 +406,8 @@ static int l_poke4(lua_State *L)
     } else {
         int isnum;
         lua_Number f = lua_tonumberx(L, 2, &isnum);
-        raw = isnum ? (uint32_t)f2i((lua_Number)floor(
-                          (double)(lua_Number)(f * (lua_Number)65536.0))) : 0u;
+        raw = isnum ? (uint32_t)p8_floor_i((lua_Number)(f * (lua_Number)65536.0))
+                    : 0u;
     }
     poke_byte(p, a, (uint8_t)raw);
     poke_byte(p, a + 1u, (uint8_t)(raw >> 8));
@@ -564,28 +596,43 @@ static int l_cstore(lua_State *L)
  * 0x1000, the rows the map shares with the sheet) is the cell mget reads and
  * map() draws.
  *
- * The coordinates stay DOUBLE until the bound check, because math.floor of a
- * float too big for an integer hands the float back, and such a value is out
- * of every bound here -- narrowing first would wrap it into range.
+ * The coordinates stay FLOATING-POINT until the bound check, because
+ * math.floor of a float too big for an integer hands the float back, and such
+ * a value is out of every bound here -- narrowing to an integer first would
+ * wrap it into range. lua_Number carries that property on its own: the value
+ * ARRIVED as one, so a double holds no more of it, and buys soft-float.
  */
 
 /* math.floor(v or 0), undecided between integer and float. */
-static double p8_flr_d(lua_State *L, int i)
+static lua_Number p8_flr_n(lua_State *L, int i)
 {
-    if (lua_isinteger(L, i)) return (double)lua_tointeger(L, i);
+    if (lua_isinteger(L, i)) return (lua_Number)lua_tointeger(L, i);
     if (!lua_toboolean(L, i)) return 0;
-    return floor((double)luaL_checknumber(L, i));
+    return p8_floor(luaL_checknumber(L, i));
+}
+
+/* math.floor(v or 0) for a verb that narrows RIGHT AWAY -- map(), whose clip
+ * is downstream of the cast, rather than mget()'s bound check which is the
+ * reason the two above stay wide. LUA_32BITS makes lua_Integer an int32, so
+ * the integer arm is the identity and exact where a promote through double was
+ * merely wide; the float arm goes through f2i, which pins the out-of-range
+ * answer the bare cast left to the CPU. */
+static int32_t p8_flr_i(lua_State *L, int i)
+{
+    if (lua_isinteger(L, i)) return (int32_t)lua_tointeger(L, i);
+    if (!lua_toboolean(L, i)) return 0;
+    return p8_floor_i(luaL_checknumber(L, i));
 }
 
 /* fl(v), the coercing one, same treatment. */
-static double p8_fl_d(lua_State *L, int i)
+static lua_Number p8_fl_n(lua_State *L, int i)
 {
     int isnum;
     lua_Number f;
-    if (lua_isinteger(L, i)) return (double)lua_tointeger(L, i);
+    if (lua_isinteger(L, i)) return (lua_Number)lua_tointeger(L, i);
     f = lua_tonumberx(L, i, &isnum);
     if (!isnum) return 0;
-    return floor((double)f);
+    return p8_floor(f);
 }
 
 /* Lua's `//` on integers: a FLOOR, not a truncation, which is a whole cell of
@@ -597,17 +644,24 @@ static int32_t p8_floordiv(int32_t m, int32_t n)
     return q;
 }
 
-static uint32_t p8_maddr(double x, double y)
+/* Past the bound check the cells are small non-negative integers, so every
+ * address this can build -- 0x2000 + 31*128 + 127 at the widest -- is exact in
+ * a float and the arithmetic never rounds. It stays FLOATING-POINT rather than
+ * narrowing on entry because a NaN cell passes the bound check (every compare
+ * against it is false) and has to reach f2i, which pins it to address 0; a
+ * cast on the way in would be undefined instead. test/p8lib.moy asks. */
+static uint32_t p8_maddr(lua_Number x, lua_Number y)
 {
-    double a = (y < 32) ? 0x2000 + y * 128 + x
-                        : 0x1000 + (y - 32) * 128 + x;
-    return (uint32_t)f2i((lua_Number)a) & 0xffffu;
+    lua_Number a = (y < 32) ? (lua_Number)((lua_Number)0x2000 + y * 128 + x)
+                            : (lua_Number)((lua_Number)0x1000
+                                           + (y - 32) * 128 + x);
+    return (uint32_t)f2i(a) & 0xffffu;
 }
 
 static int l_mget(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    double x = p8_flr_d(L, 1), y = p8_flr_d(L, 2);
+    lua_Number x = p8_flr_n(L, 1), y = p8_flr_n(L, 2);
     if (x < 0 || x > 127 || y < 0 || y > 63) { lua_pushinteger(L, 0); return 1; }
     lua_pushinteger(L, rd(p, p8_maddr(x, y)));
     return 1;
@@ -616,7 +670,7 @@ static int l_mget(lua_State *L)
 static int l_mset(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    double x = p8_flr_d(L, 1), y = p8_flr_d(L, 2);
+    lua_Number x = p8_flr_n(L, 1), y = p8_flr_n(L, 2);
     if (x < 0 || x > 127 || y < 0 || y > 63) return 0;
     poke_byte(p, p8_maddr(x, y), (uint8_t)iarg(L, 3));
     return 0;
@@ -627,25 +681,25 @@ static int l_mset(lua_State *L)
 static int l_p8fget(lua_State *L)
 {
     moy_console *con = p8_of(L)->con;
-    double n = p8_fl_d(L, 1);
+    lua_Number n = p8_fl_n(L, 1);
     int v = (con->flags && n >= 0 && n < MOY_FLAGS)
             ? con->flags[(int)n] : 0;
     if (lua_isnoneornil(L, 2)) lua_pushinteger(L, v);
-    else lua_pushboolean(L, (v >> (f2i((lua_Number)p8_fl_d(L, 2)) & 7)) & 1);
+    else lua_pushboolean(L, (v >> (f2i(p8_fl_n(L, 2)) & 7)) & 1);
     return 1;
 }
 
 static int l_p8fset(lua_State *L)
 {
     moy_console *con = p8_of(L)->con;
-    double n = p8_fl_d(L, 1);
+    lua_Number n = p8_fl_n(L, 1);
     int i;
     if (!con->flags || !(n >= 0 && n < MOY_FLAGS)) return 0;
     i = (int)n;
     if (lua_isnoneornil(L, 3)) {                       /* fset(n, byte) */
-        con->flags[i] = (uint8_t)(f2i((lua_Number)p8_fl_d(L, 2)) & 0xff);
+        con->flags[i] = (uint8_t)(f2i(p8_fl_n(L, 2)) & 0xff);
     } else {                                           /* fset(n, bit, on) */
-        int bit = 1 << (f2i((lua_Number)p8_fl_d(L, 2)) & 7);
+        int bit = 1 << (f2i(p8_fl_n(L, 2)) & 7);
         if (lua_toboolean(L, 3)) con->flags[i] = (uint8_t)(con->flags[i] | bit);
         else con->flags[i] = (uint8_t)(con->flags[i] & ~bit);
     }
@@ -1138,15 +1192,15 @@ static int l_p8_oval(lua_State *L)
 /* `v or 1` for spr's w/h, which the shim does NOT floor. `is_one` is Lua's
  * `w == 1`, and a numeric STRING is not equal to 1 there however it converts
  * for the arithmetic below -- so the two questions are answered separately. */
-static double p8_or1(lua_State *L, int i, int *is_one)
+static lua_Number p8_or1(lua_State *L, int i, int *is_one)
 {
     int isnum;
     lua_Number f;
-    if (!lua_toboolean(L, i)) { *is_one = 1; return 1.0; }
+    if (!lua_toboolean(L, i)) { *is_one = 1; return (lua_Number)1; }
     if (lua_type(L, i) == LUA_TNUMBER) {
         f = lua_tonumber(L, i);
         *is_one = (f == (lua_Number)1);
-        return (double)f;
+        return f;
     }
     *is_one = 0;
     f = lua_tonumberx(L, i, &isnum);
@@ -1155,17 +1209,19 @@ static double p8_or1(lua_State *L, int i, int *is_one)
                    luaL_typename(L, i));
         return 0;
     }
-    return (double)f;
+    return f;
 }
 
 /* `for k = 0, v - 1`: Lua floors a float limit onto the integer grid, and a
  * limit below zero is an empty loop. Clamped at the top because the loop that
  * would follow is not one anybody survives either way. */
-static int32_t p8_for_limit(double v)
+static int32_t p8_for_limit(lua_Number v)
 {
-    double lim = floor(v - 1.0);
+    lua_Number lim = p8_floor(v - (lua_Number)1);
     if (!(lim >= 0)) return -1;                 /* NaN takes this arm too */
-    if (lim > 2147483647.0) return 2147483647;
+    /* lim is integral, so `> 2147483647` and `>= 2^31` select the same values
+     * -- and only the second bound is exact in a float. */
+    if (!(lim < (lua_Number)2147483648.0)) return 2147483647;
     return (int32_t)lim;
 }
 
@@ -1177,7 +1233,7 @@ static int l_p8_spr(lua_State *L)
     int flip = (fx ? MOY_FLIP_X : 0) | (fy ? MOY_FLIP_Y : 0);
     int wone, hone;
     int32_t n, x, y;
-    double w, h;
+    lua_Number w, h;
     if (!con->sheet) return 0;
     n = p8_fl(L, 1); x = p8_fl(L, 2); y = p8_fl(L, 3);
     w = p8_or1(L, 4, &wone);
@@ -1193,12 +1249,15 @@ static int l_p8_spr(lua_State *L)
         int32_t tx, ty, wlim = p8_for_limit(w), hlim = p8_for_limit(h);
         for (ty = 0; ty <= hlim; ty++) {
             for (tx = 0; tx <= wlim; tx++) {
-                double cx = fx ? (w - 1.0 - (double)tx) : (double)tx;
-                double cy = fy ? (h - 1.0 - (double)ty) : (double)ty;
+                lua_Number cx = fx ? (lua_Number)(w - (lua_Number)1 - (lua_Number)tx)
+                                   : (lua_Number)tx;
+                lua_Number cy = fy ? (lua_Number)(h - (lua_Number)1 - (lua_Number)ty)
+                                   : (lua_Number)ty;
                 int32_t sx = u2i((uint32_t)x + (uint32_t)(tx * 8));
                 int32_t sy = u2i((uint32_t)y + (uint32_t)(ty * 8));
                 moy_spr(con->canvas, con->sheet,
-                        (int)f2i((lua_Number)((double)n + cx + cy * 16.0)),
+                        (int)f2i((lua_Number)((lua_Number)n + cx
+                                              + cy * (lua_Number)16)),
                         (int)sx, (int)sy, -1, 1, flip);
             }
         }
@@ -1489,13 +1548,13 @@ static int l_p8_map(lua_State *L)
     moy_console *con = p->con;
     int32_t celx, cely, sx, sy, cw, ch, mask, i0, i1, j0, j1;
     if (!con->sheet || !con->map) return 0;
-    celx = (int32_t)p8_flr_d(L, 1);
-    cely = (int32_t)p8_flr_d(L, 2);
-    sx = (int32_t)p8_flr_d(L, 3);
-    sy = (int32_t)p8_flr_d(L, 4);
-    cw = lua_isnoneornil(L, 5) ? 128 : (int32_t)p8_flr_d(L, 5);
-    ch = lua_isnoneornil(L, 6) ? 64 : (int32_t)p8_flr_d(L, 6);
-    mask = lua_toboolean(L, 7) ? (int32_t)p8_flr_d(L, 7) : 0;
+    celx = p8_flr_i(L, 1);
+    cely = p8_flr_i(L, 2);
+    sx = p8_flr_i(L, 3);
+    sy = p8_flr_i(L, 4);
+    cw = lua_isnoneornil(L, 5) ? 128 : p8_flr_i(L, 5);
+    ch = lua_isnoneornil(L, 6) ? 64 : p8_flr_i(L, 6);
+    mask = lua_toboolean(L, 7) ? p8_flr_i(L, 7) : 0;
     i0 = p8_floordiv(con->canvas->cam_x - sx, 8);
     i1 = p8_floordiv(con->canvas->cam_x + 127 - sx, 8);
     if (i0 > 0) { celx += i0; sx += i0 * 8; cw -= i0; i1 -= i0; }
