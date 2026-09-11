@@ -103,9 +103,9 @@ def _indent(body):
 # all (nimudazus, poom, terra) are deliberately absent: moy-spec's `p8-carts`
 # gate is where those are watched, not a board's shelf.
 CORPUS = (
-    "bunnysurvivor-9", "celeste_classic_2-5", "crimson_night-5", "dank_tomb-0",
-    "dungeons_and_diagrams-5", "lowmemsky-1", "mossmoss-17", "petal_quest-12",
-    "picooffroad-5",
+    "42930", "bunnysurvivor-9", "celeste_classic_2-5", "crimson_night-5",
+    "dank_tomb-0", "deepdark-1", "dungeons_and_diagrams-5", "giftguardian-5",
+    "loop-4", "lowmemsky-1", "mossmoss-17", "petal_quest-12", "picooffroad-5",
 )
 
 

@@ -205,6 +205,38 @@ def _ident(ch):
     return ch == "_" or _isword(ch)
 
 
+def _p8_ident(ch):
+    """p8's lexer reads a high byte as a LETTER, so a glyph joins a name.
+
+    That is how `loop` writes `p1<right>` and how `hwd elite dock` writes
+    `<x>_down` -- one identifier each, which a lexer that stops at 0x7f
+    splits into two and hands Lua as two names with a space between them.
+    """
+    return ch != _VARIATION and (_ident(ch) or ch > "\x7f")
+
+
+def _glyph_token(ch):
+    """A P8SCII character standing ALONE: the value it means.
+
+    Codepoint-keyed, so a `.p8.png` byte and a text `.p8`'s emoji spelling
+    land on the same generated name.
+    """
+    if ch in _GLYPH_CODE:
+        return (T_NAME, "_p8g%d" % _GLYPH_CODE[ch])
+    cp = ord(ch)
+    return (T_NAME, "_p8g%d" % cp) if cp <= 0xff else (T_NUM, str(cp))
+
+
+def _glyph_in_name(ch):
+    """The same character INSIDE an identifier -- a name, never a number.
+
+    The shim predefines `_p8gNNN` at module scope, so the spelling is shared
+    with the standalone form and a cart that uses a glyph both ways keeps one
+    name for it.
+    """
+    return "_p8g%d" % _GLYPH_CODE.get(ch, ord(ch))
+
+
 # The name the rest of this file has always used for it.
 _ident_char = _ident
 
@@ -317,7 +349,20 @@ def expand_idiv(toks):
     mossmoss keys its wall registry by `celx..":"..cely`, built once from
     integer loops and looked up from `x // 8` -- and no wall ever matched, so
     no moss ever grew. `flr` returns an integer whenever the value has one.
-    p8 has no `//` of its own, so every one here came from a `\\`."""
+    p8 has no `//` of its own, so every one here came from a `\\`.
+
+    PRECEDENCE, and it is the same argument the bit operators lost once: `\\`
+    is a MULTIPLICATIVE operator in p8, left-associative beside `*`, `/` and
+    `%` -- not something that takes the primary on either side of it. Taking
+    primaries read `a*b\\c` as `a*(b\\c)` and `v\\26^i` as `(v\\26)^i`, and
+    that second one is `crimson_night`'s base-26 unpacker, which decoded its
+    strings to something else and never said so. So the operands come off the
+    same walk the bit operators use: to the LEFT, everything of multiplicative
+    precedence or tighter (`prec - 1`, because left-associative), and to the
+    RIGHT only what binds tighter than multiplication -- a unary prefix and
+    `^`. `#snd\\4` is `(#snd)\\4` by the same walk (poom), where wrapping the
+    primary alone had left `#flr(snd/4)`: a string divided by a number.
+    """
     guard = 0
     while guard < 200:
         guard += 1
@@ -325,19 +370,10 @@ def expand_idiv(toks):
         for i in range(len(toks)):
             if toks[i][0] != T_OP or toks[i][1] != "//":
                 continue
-            lo = _primary_start(toks, i)
-            hi = _primary_end(toks, i + 1)
+            lo = _bit_operand_start(toks, i, _PREC["//"] - 1)
+            hi = _bit_operand_end(toks, i + 1, _PREC["//"])
             if lo < 0 or hi < 0:
                 continue
-            # A length operator binds tighter than `\\`: `#snd\\4` is
-            # `(#snd)\\4`, and wrapping `snd` alone left `#flr(snd/4)` --
-            # a string divided by a number (poom).
-            while True:
-                k = _skip_ws_back(toks, lo)
-                if k > 0 and toks[k - 1] == (T_OP, "#"):
-                    lo = k - 1
-                    continue
-                break
             le = _skip_ws_back(toks, i)
             rs = _skip_ws(toks, i + 1)
             toks = (toks[:lo] + [(T_NAME, "flr"), (T_OP, "(")] + toks[lo:le]
@@ -502,6 +538,16 @@ def lex_line(line, state=None):
             toks.append((T_COMMENT, line[i:]))
             return toks, None
 
+        if ch == "/" and line[i + 1:i + 2] == "/":
+            # p8 takes `//` as a line comment as well as `--`, and has no `//`
+            # OPERATOR to confuse it with -- integer divide there is `\`. Lua
+            # 5.4 has the operator and not the comment, so every one of these
+            # parsed as a division: `x=1 // trailing` came out as
+            # `x=flr(1/trailing)`, which is a cart silently computing rubbish
+            # rather than a cart that fails to load.
+            toks.append((T_COMMENT, "--" + line[i + 2:]))
+            return toks, None
+
         lv = _long_open(line, i)
         if lv >= 0:
             close = "]" + "=" * lv + "]"
@@ -534,44 +580,36 @@ def lex_line(line, state=None):
             i = j
             continue
 
-        if ch in _GLYPH_BTN:
-            # A button glyph in an expression means the button NUMBER -- but
-            # `squiddy` assigns to two of them, using single glyphs as variable
-            # names to save bytes, and `1 = 0` is not Lua. So it becomes a NAME
-            # the shim predefines to that number: `btn(<right>)` still reads 1,
-            # and a cart that would rather use the glyph as a variable can.
-            toks.append((T_NAME, "_p8g%d" % _GLYPH_CODE[ch]))
-            i += 1
-            if i < n and line[i] == _VARIATION:
-                i += 1
-            continue
-
-        if ch > "\x7f":
-            # Any OTHER P8SCII character becomes a NAME that the shim predefines
-            # to the character's own code.
-            #
-            # Emitting the number directly was the first attempt and it was
-            # half right: `fillp(#)` with a shading glyph wants the value, but
-            # carts ALSO use single glyphs as variable names to save bytes --
-            # `squiddy`, a 1k-jam cart, assigns to three of them, and `1 = 0`
-            # is not Lua. A predefined name reads correctly in BOTH positions,
-            # which is what makes it strictly better than choosing one.
-            # Only the P8SCII range gets a name -- those are the ones the
-            # shim predefines. A stray character from somewhere else keeps its
-            # code, which at least parses.
-            cp = ord(ch)
-            toks.append((T_NAME, "_p8g%d" % cp) if cp <= 0xff
-                        else (T_NUM, str(cp)))
-            i += 1
-            if i < n and line[i] == _VARIATION:
-                i += 1
-            continue
-
-        if _ident(ch) and not ch.isdigit():
-            j = i
-            while j < n and _ident(line[j]):
+        if _p8_ident(ch) and not ch.isdigit():
+            # ONE scan for names and P8SCII glyphs, because p8 does not
+            # separate them: a high byte is a letter there, so `p1<right>` is
+            # a single identifier and `<x>_down` is another.
+            j, parts, letters = i, [], 0
+            while j < n:
+                c = line[j]
+                if c == _VARIATION:          # trails a glyph; not in the name
+                    j += 1
+                    continue
+                if not _p8_ident(c):
+                    break
+                if c > "\x7f":
+                    parts.append(_glyph_in_name(c))
+                else:
+                    parts.append(c)
+                    letters += 1
                 j += 1
-            toks.append((T_NAME, line[i:j]))
+            # A glyph ALONE is not a name but a VALUE -- the character's own
+            # code, which `fillp(<shade>)` wants and `btn(<right>)` reads as a
+            # button number. Emitting the number directly was the first
+            # attempt and it was half right: carts also use single glyphs as
+            # variable names to save bytes -- `squiddy`, a 1k-jam cart,
+            # assigns to three of them, and `1 = 0` is not Lua. So a lone
+            # glyph becomes the NAME the shim predefines to that value, which
+            # reads correctly in both positions.
+            if letters == 0 and len(parts) == 1:
+                toks.append(_glyph_token(line[i]))
+            else:
+                toks.append((T_NAME, "".join(parts)))
             i = j
             continue
 
@@ -1318,56 +1356,68 @@ def _in_parameter_list(code, name):
         i = e
 
 
+def _group_start(toks, at):
+    """Index of the bracket matching the closer at `at - 1`, or -1."""
+    depth = 0
+    k = at
+    while k > 0:
+        t = toks[k - 1]
+        if t[0] == T_OP and t[1] in (")", "]"):
+            depth += 1
+        elif t[0] == T_OP and t[1] in ("(", "["):
+            depth -= 1
+            if depth == 0:
+                return k - 1
+        k -= 1
+    return -1
+
+
 def _primary_start(toks, opi):
     """Start of the PRIMARY ending just before `opi`, or -1.
 
-    The mirror of _primary_end: a `)`/`]` closes back to its opener, a name or
-    number takes its `.name` / `[...]` / `(...)` chain, and a leading unary
-    minus comes along.
+    The mirror of _primary_end. Read backwards a primary is a BASE -- a name,
+    or a parenthesised expression -- carrying any run of suffixes: `.name`,
+    `[expr]`, `(args)`. Each one is taken in turn, and taking them one at a
+    time is what brings a MIXED chain back whole. A walk that knew `a.b.c` and
+    `a[1]` but not the two together stopped at the last field of
+    `T[2].ready << 1` and let the rewrite land its call inside the expression
+    -- `T[2].__p8_shl(ready, 1)`, which parses, runs, and is not the cart's
+    code (`libryinth`).
     """
     i = _skip_ws_back(toks, opi)
     if i <= 0:
         return -1
     end = i
-    prev = toks[i - 1]
-    if prev[0] == T_OP and prev[1] in (")", "]"):
-        want = "(" if prev[1] == ")" else "["
-        depth = 0
-        k = i
-        while k > 0:
-            t = toks[k - 1]
-            if t[0] == T_OP and t[1] in (")", "]"):
-                depth += 1
-            elif t[0] == T_OP and t[1] in ("(", "["):
-                depth -= 1
-                if depth == 0:
-                    break
-            k -= 1
-        if depth != 0:
-            return -1
-        i = k - 1
-        # A call or index has a name in front of it -- but a KEYWORD is not a
-        # callee. `return (a) & 1` looks exactly like a call to something
-        # named `return`, and taking it produced `band(return (a), 1)`.
-        j = _skip_ws_back(toks, i)
-        if j > 0 and toks[j - 1][0] == T_NAME \
-                and toks[j - 1][1] not in _NOT_TERM:
-            i = j - 1
-        else:
-            return i
-    elif prev[0] in (T_NAME, T_NUM):
-        if prev[0] == T_NAME and prev[1] in _NOT_TERM:
-            return -1
-        i -= 1
-    else:
-        return -1
-    # walk back over a `.name` / `:name` chain
     while True:
         j = _skip_ws_back(toks, i)
-        if j > 1 and toks[j - 1][0] == T_OP and toks[j - 1][1] in (".", ":") \
-                and toks[j - 2][0] in (T_NAME, T_NUM):
-            i = j - 2
-            continue
+        if j <= 0:
+            break
+        kind, text = toks[j - 1]
+        if kind == T_OP and text in (")", "]"):
+            k = _group_start(toks, j)
+            if k < 0:
+                return -1
+            # A call or an index has its subject in front of it -- but a
+            # KEYWORD is not a callee. `return (a) & 1` looks exactly like a
+            # call to something named `return`, and taking it produced
+            # `band(return (a), 1)`.
+            m = _skip_ws_back(toks, k)
+            i = k
+            if m > 0 and ((toks[m - 1][0] == T_NAME
+                           and toks[m - 1][1] not in _NOT_TERM)
+                          or (toks[m - 1][0] == T_OP
+                              and toks[m - 1][1] in (")", "]"))):
+                continue                    # a subject, or `f(1)(2)`/`t[1][2]`
+            break                           # `(a + b)`: the base itself
+        if kind in (T_NAME, T_NUM):
+            if kind == T_NAME and text in _NOT_TERM:
+                break                       # a keyword ends the expression
+            i = j - 1
+            m = _skip_ws_back(toks, i)
+            if m > 1 and toks[m - 1][0] == T_OP and toks[m - 1][1] in (".", ":"):
+                i = m - 1                   # a field: its subject follows
+                continue
+            break
         break
     # a unary minus belongs to the primary
     j = _skip_ws_back(toks, i)
@@ -1383,19 +1433,22 @@ def if_do_to_then(toks):
 
     Not one cart's typo: `moss moss` writes `if cond do` twenty-two times and
     the word `then` zero times.
+
+    `_STOPS` is the whole guard and a bracket depth was never part of it. The
+    only `do` that is not an `if`'s belongs to a `for` or a `while`, and both
+    words are stops, so `pending` is already off by the time their `do`
+    arrives. Counting brackets on top of that was wrong in BOTH directions,
+    because the count starts at zero on every line: a minified cart's line
+    that opens on `end)end)` -- closing parens from the line above -- ran the
+    rest of itself at a negative depth and converted nothing (`libryinth`),
+    and a callback written on one line (`f(function() if x do y end end)`) sat
+    at depth 1 and was missed the same way.
     """
-    depth = 0
     pending = False
     out = list(toks)
     for i in range(len(out)):
         kind, text = out[i]
-        if kind == T_OP:
-            if text in "([{":
-                depth += 1
-            elif text in ")]}":
-                depth -= 1
-            continue
-        if kind != T_NAME or depth != 0:
+        if kind != T_NAME:
             continue
         if text == "if" or text == "elseif":
             pending = True
@@ -1407,7 +1460,7 @@ def if_do_to_then(toks):
     return out
 
 
-def expand_print_shorthand(toks):
+def expand_print_shorthand(toks, open_string=False):
     """p8's `?x` -> `print(x)`, wherever it appears.
 
     `?` has no other meaning in p8, so the only real question is where the
@@ -1419,39 +1472,69 @@ def expand_print_shorthand(toks):
     `else` / `elseif` / `until` and any comment. That is what lets this fire
     mid-line, which the earlier statement-start-only rule could not: `squiddy`
     minifies to `y=-y?"text",108,60` and its print was left as a bare `?`.
+
+    `open_string` says the line ENDS inside a long string, which is a line the
+    arguments outlive: `gift guardian` writes `?[[bY nERDY` and closes the
+    string with the rest of its arguments on the line below. The paren is
+    owed to `close_print_shorthand` then, because writing it here writes it
+    into the string.
     """
-    for i in range(len(toks)):
-        if toks[i][0] != T_OP or toks[i][1] != "?":
-            continue
-        rest = toks[i + 1:]
-        if not [t for t in rest if t[0] not in (T_WS, T_COMMENT)]:
-            return toks                  # a `?` with nothing after it
-        tail = []
-        while rest:
-            last = None
-            for k in range(len(rest) - 1, -1, -1):
-                if rest[k][0] not in (T_WS, T_COMMENT):
-                    last = k
-                    break
-            if last is None:
+    i = _print_shorthand_at(toks)
+    if i < 0:
+        return toks
+    rest = toks[i + 1:]
+    head = [] if (i and toks[i - 1][0] == T_WS) else [(T_WS, " ")]
+    opened = toks[:i] + head + [(T_NAME, "print"), (T_OP, "(")]
+    if open_string:
+        return opened + rest
+    rest, tail = _peel_tail(rest)
+    while rest and rest[0][0] == T_WS:
+        rest = rest[1:]
+    return opened + rest + [(T_OP, ")")] + tail
+
+
+def _print_shorthand_at(toks):
+    """Index of a `?` that has arguments after it, or -1."""
+    for i, tok in enumerate(toks):
+        if tok[0] == T_OP and tok[1] == "?":
+            if [t for t in toks[i + 1:] if t[0] not in (T_WS, T_COMMENT)]:
+                return i
+            return -1                    # a `?` with nothing after it
+    return -1
+
+
+def _peel_tail(rest):
+    """(arguments, tail) -- the block keywords and comments a call ends before.
+
+    Firing blindly turned `if a then ?x end` into `if a then print(x end)`.
+    """
+    tail = []
+    while rest:
+        last = None
+        for k in range(len(rest) - 1, -1, -1):
+            if rest[k][0] not in (T_WS, T_COMMENT):
+                last = k
                 break
-            if rest[last][0] == T_NAME and rest[last][1] in _BLOCK_ENDS:
-                tail = rest[last:] + tail
-                rest = rest[:last]
-                continue
+        if last is None:
             break
-        while rest and rest[-1][0] == T_COMMENT:
-            tail.insert(0, rest.pop())
-        while rest and rest[-1][0] == T_WS:
-            rest.pop()
-        while rest and rest[0][0] == T_WS:
-            rest = rest[1:]
-        head = [] if (i and toks[i - 1][0] == T_WS) else [(T_WS, " ")]
-        if tail and tail[0][0] != T_WS:
-            tail = [(T_WS, " ")] + tail
-        return (toks[:i] + head + [(T_NAME, "print"), (T_OP, "(")]
-                + rest + [(T_OP, ")")] + tail)
-    return toks
+        if rest[last][0] == T_NAME and rest[last][1] in _BLOCK_ENDS:
+            tail = rest[last:] + tail
+            rest = rest[:last]
+            continue
+        break
+    while rest and rest[-1][0] == T_COMMENT:
+        tail.insert(0, rest.pop())
+    while rest and rest[-1][0] == T_WS:
+        rest.pop()
+    if tail and tail[0][0] != T_WS:
+        tail = [(T_WS, " ")] + tail
+    return rest, tail
+
+
+def close_print_shorthand(toks):
+    """The paren `expand_print_shorthand` owed, on the line the string closed."""
+    rest, tail = _peel_tail(list(toks))
+    return rest + [(T_OP, ")")] + tail
 
 
 # p8's one-line block forms and the word that opens their body in Lua. `while`
@@ -1872,12 +1955,21 @@ def p8_lua_to_lua54(lines):
     out = []
     state = None
     pending = ""
+    # A `?` whose arguments ran into a long string that the line did not
+    # close: the paren it owes belongs on the line that does.
+    owed_print = False
     for line in lines:
         line = line.replace("\t", "  ").rstrip()
         if pending:
             line = pending + " " + line.lstrip()
             pending = ""
         toks, state = lex_line(line, state)
+        if owed_print:
+            if state is None:
+                toks = close_print_shorthand(toks)
+                owed_print = False
+            out.append(toks)
+            continue
         # Hold a line that ends on an `op=` and glue the next one to it. The
         # blank keeps the line COUNT, so a later error still points where the
         # cart's author would look.
@@ -1889,6 +1981,10 @@ def p8_lua_to_lua54(lines):
             out.append([(T_COMMENT,
                          "-- [port] dropped the cart's empty music() stub "
                          "(imported __music__ plays instead)")])
+            continue
+        if state is not None and _print_shorthand_at(toks) >= 0:
+            out.append(expand_print_shorthand(toks, open_string=True))
+            owed_print = True
             continue
         toks = expand_print_shorthand(toks)
         toks = expand_memory_sigils(toks)
@@ -2469,11 +2565,27 @@ do
 
   -- p8 table verbs. all() tolerates deleting the CURRENT item mid-loop
   -- (celeste's foreach(objects, ...) destroys objects while iterating).
-  function add(t, v) t[#t + 1] = v return v end
+  -- add takes an optional INDEX and del ANSWERS with what it removed, and a
+  -- nil table is a no-op rather than an error in either -- all three are p8's
+  -- and all three are load-bearing. `libryinth` calls add(et, e) before `et`
+  -- exists, then builds a hand with `add(e.books, del(E, rnd(E)))`, which
+  -- adds nil for as long as del answers nothing; `terra` inserts at
+  -- `pos or #inventory+1`.
+  function add(t, v, i)
+    if t == nil then return nil end
+    local n = #t
+    if i == nil or i > n then t[n + 1] = v return v end
+    if i < 1 then i = 1 end
+    for k = n, i, -1 do t[k + 1] = t[k] end
+    t[i] = v
+    return v
+  end
   function del(t, v)
+    if t == nil then return nil end
     for i = 1, #t do
-      if t[i] == v then tremove(t, i) return end
+      if t[i] == v then return tremove(t, i) end
     end
+    return nil
   end
   function all(t)
     -- p8's all(nil) is an empty loop, not an error. Carts lean on it for
@@ -2490,6 +2602,7 @@ do
   end
   function foreach(t, f) for v in all(t) do f(v) end end
   function count(t, v)
+    if t == nil then return 0 end
     if v == nil then return #t end
     local n = 0
     for i = 1, #t do if t[i] == v then n = n + 1 end end
@@ -3256,6 +3369,14 @@ do
   -- than quietly stale, which is what makes it a fallback worth having.
   if p8c("map") ~= nil then map = p8c("map") end
 
+  -- The DRIVER's camera, taken here instead of read off _G every frame. A
+  -- cart may hold the name itself -- `deep dark` keeps its scroll position in
+  -- `camera = {x = 0, y = 0}` -- and that is ordinary PICO-8, where the
+  -- per-frame reset belongs to the host and never goes through a Lua global.
+  -- The cart's own `camera(x, y)` calls are its business either way; this is
+  -- only the one call _draw owes the console.
+  local p8_camera = camera
+
   -- moybyte lifecycle -> the p8 one. The HOST paces the cart (SPEC.md 5):
   -- one `_update` call is one PICO-8 tick, at the rate the manifest declares
   -- (build_manifest reads it off the cart), catch-up and all, and `_draw`
@@ -3303,7 +3424,7 @@ do
       -- 0) so a cart that trusts persistent draw state gets PICO-8's. The
       -- machine does all three in one call, screen palette included -- which
       -- it keeps at 0x5f10, so a memcpy fade there survives the frame too.
-      camera()
+      p8_camera()
       if p8_frame then
         p8_frame()
       else

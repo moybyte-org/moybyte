@@ -2507,12 +2507,36 @@ static int l_foreach(lua_State *L)
     return 0;
 }
 
+/* add(t, v, [i]): p8 takes an INDEX as well, and a nil table is a no-op there
+ * rather than an error -- `libryinth` calls add(et, e) before `et` exists and
+ * `terra` inserts at `pos or #inventory+1`. The shim's Lua is the reference;
+ * test/p8lib.moy holds the two to one answer. */
 static int l_add(lua_State *L)
 {
+    lua_Integer n, k, i;
+    if (lua_isnoneornil(L, 1)) { lua_pushnil(L); return 1; }
+    n = luaL_len(L, 1);
+    if (lua_isnoneornil(L, 3)) {
+        lua_settop(L, 2);
+        lua_pushvalue(L, 2);
+        lua_seti(L, 1, n + 1);
+        return 1;                         /* p8's add returns what it added */
+    }
+    i = (lua_Integer)lua_tonumber(L, 3);
     lua_settop(L, 2);
+    if (i > n) {
+        lua_pushvalue(L, 2);
+        lua_seti(L, 1, n + 1);
+        return 1;
+    }
+    if (i < 1) i = 1;
+    for (k = n; k >= i; k--) {            /* shift up, then drop it in */
+        lua_geti(L, 1, k);
+        lua_seti(L, 1, k + 1);
+    }
     lua_pushvalue(L, 2);
-    lua_seti(L, 1, luaL_len(L, 1) + 1);
-    return 1;                             /* p8's add returns what it added */
+    lua_seti(L, 1, i);
+    return 1;
 }
 
 /* table.remove(t, pos), transcribed: the shift, then the hole. */
@@ -2530,20 +2554,24 @@ static void tbl_remove(lua_State *L, int t, lua_Integer pos)
     lua_seti(L, t, pos);
 }
 
+/* del(t, v) ANSWERS with what it removed -- `libryinth` deals a hand with
+ * `add(e.books, del(E, rnd(E)))`, which adds nil while del answers nothing. */
 static int l_del(lua_State *L)
 {
-    lua_Integer n = luaL_len(L, 1), i;
+    lua_Integer n, i;
+    if (lua_isnoneornil(L, 1)) { lua_pushnil(L); return 1; }
+    n = luaL_len(L, 1);
     lua_settop(L, 2);
     for (i = 1; i <= n; i++) {
         lua_geti(L, 1, i);
         if (lua_compare(L, -1, 2, LUA_OPEQ)) {
-            lua_pop(L, 1);
-            tbl_remove(L, 1, i);
-            return 0;
+            tbl_remove(L, 1, i);          /* the value stays on the stack */
+            return 1;
         }
         lua_pop(L, 1);
     }
-    return 0;
+    lua_pushnil(L);
+    return 1;
 }
 
 static int l_deli(lua_State *L)
@@ -2559,7 +2587,9 @@ static int l_deli(lua_State *L)
 
 static int l_count(lua_State *L)
 {
-    lua_Integer n = luaL_len(L, 1), i, c = 0;
+    lua_Integer n, i, c = 0;
+    if (lua_isnoneornil(L, 1)) { lua_pushinteger(L, 0); return 1; }
+    n = luaL_len(L, 1);
     if (lua_isnoneornil(L, 2)) { lua_pushinteger(L, n); return 1; }
     lua_settop(L, 2);
     for (i = 1; i <= n; i++) {
