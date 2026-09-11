@@ -50,9 +50,30 @@ because they pay none of the taxes we do:
      **1,534 ns of floor** plus 0.5–1.7 µs of body; dank tomb makes ~1,100 of
      them a frame, ≈2.5–3 ms of its 24.9 ms draw. It also makes PICO-8's
      semantics free rather than emulated (the whole of the 2026-09-10 bit-lane
-     work). The calibration that matters: FAKE-08 benchmarks against an old
-     3DS at **268 MHz ARM11** against our 240 MHz LX7, and plays many carts —
-     so the gap here is not silicon. **Not a port**: z8lua is Lua 5.2 and C++
+     work).
+     **The 3DS calibration this entry used to rest on is WITHDRAWN
+     (2026-09-11).** It read: "FAKE-08 benchmarks against an old 3DS at 268 MHz
+     ARM11 against our 240 MHz LX7, and plays many carts — so the gap here is
+     not silicon." No fps figure for FAKE-08 exists anywhere — not its README,
+     not its wiki, not its tracker — and its README says the opposite of what
+     was inferred: *"Performance is not great on Old 3ds systems. Some games
+     may experience slowdowns on the faster consoles as well."* The same
+     paragraph explains why: *"Pico 8 lists a raspberry pi 1 with a 700 MHz
+     ARM11 professor as minimum spec, and the old 3DS's CPU is 268 MHz ARM11"*
+     — **38% of PICO-8's own stated minimum**. "Plays many carts" traced back
+     to "Many games should be playable regardless", a hope following a
+     disclaimer; this doc turned it into a benchmark. Issue #155 has users
+     reporting carts at "less than quarter of the speed they're supposed to
+     play at" on comparable low-end ARM. What would calibrate it is running ONE
+     corpus cart on a stock FAKE-08 build and reading its rate; until someone
+     does, the comparison says nothing either way.
+     **And the conclusion it carried is contradicted by measurement**: the S3's
+     core declares `XCHAL_HAVE_PREDICTED_BRANCHES 0` and
+     `XCHAL_HAVE_SPECULATION 0`, and `perfcnt` prices that at **4.66 bubble
+     cycles per taken branch, 330k taken branches a frame, 17.6% of moss moss's
+     update** — while the 3DS's ARM1176 predicts branches. Silicon IS part of
+     the gap, and an interpreter is the worst case for the part we lack.
+     **Not a port**: z8lua is Lua 5.2 and C++
      where moycore is 5.4 as C with `LUA_32BITS`, and the idea costs a 64-bit
      intermediate for multiply/divide plus collapsing 5.4's integer/float
      duality. Its `pico8` feature branch is the clean version to read.
@@ -324,9 +345,25 @@ DECIDED:
   reproduces such cadences.
 - **What is left for a 30 fps moss moss on the S3**, in order: the console's
   ~10 ms around the tick (fold snapshot, router, input poll: 3–5 ms), then the
-  interpreter itself (§3.1). A Xtensa JIT is gated on the perf counters: a
+  interpreter itself (§3.1). A Xtensa JIT was gated on the perf counters: a
   template JIT only pays if retired instructions dominate a tick, and the
-  evidence says memory does.
+  evidence was read as memory. **THE COUNTERS HAVE NOW BEEN READ, and they say
+  otherwise (2026-09-11, `perfcnt`, #66).** moss moss `_update`, share of
+  cycles: retired instructions **51.6%**, branch bubbles **17.6%**, data
+  stalls 18.1%, instruction stalls 7.1%, register-dependency bubbles 4.6% —
+  ~99% accounted. Two controls say that profile is the VM's and not the
+  board's: the Guition S3, whose flush runs on a core-0 feeder task rather than
+  the VM's core, reads the same to three decimals; and forcing the whole Lua
+  heap out of internal SRAM (`set_sram_floor` 16 → 256) moves the frame only
+  36.6 → 37.2 ms. So the four null levers were never memory fixes that failed
+  — there was no memory problem to fix, and `-O3` could not help because the
+  cost is dispatch BRANCHES, not straight-line code. What this does NOT do is
+  make a JIT a good idea; it removes the reason it was ruled out, which is a
+  smaller claim. Every remaining lever has the same shape: **run fewer
+  opcodes** (fusion, superinstructions, the porter's `_BARE_OPS` work), or
+  take fewer branches inside the ones that run (`lvm.c` compiles to 377
+  conditional branches against 3 hardware `LOOP`s, where the raster kernels
+  get 44 loops and 85 branchless ops).
 - **Overlapping the cart TICK with the draw on the other core is DECLINED
   (2026-09-10), and it is an arithmetic decline, not an engineering one.**
   Parallelising two things caps the win at the smaller of them, and on the

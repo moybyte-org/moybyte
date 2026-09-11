@@ -266,9 +266,17 @@ PERF_EVENTS = {
     "insn":    (2, 0x8DFF),   # INSN_ALL -- retired instructions, the IPC half
     "calls":   (2, 0x0042),   # INSN_CALL | INSN_CALLX -- dispatch, counted
     "dstall":  (3, 0x01FE),   # D_STALL_ALL -- the other half, if it is data
-    "dmiss":   (3, 0x0008),   # D_STALL_CACHE_MISS -- ... and if so, PSRAM
+    # THE TWO CACHE-MISS MASKS ARE CORE-LEVEL AND NEARLY BLIND HERE. The S3's
+    # Xtensa declares XCHAL_ICACHE_SIZE 0 and XCHAL_DCACHE_SIZE 0 -- the core
+    # has no cache of its own, and the cache that matters is Espressif's,
+    # OUTSIDE the core and invisible to its performance monitor. Both read ~0
+    # on every cart measured, and that zero is probably structural rather than
+    # a finding. Do not conclude "the working set fits the cache" from it; the
+    # evidence that actually carries that conclusion is behavioural -- the
+    # SRAM-floor A/B and the cross-board control in #66.
+    "dmiss":   (3, 0x0008),   # D_STALL_CACHE_MISS -- see the note above
     "istall":  (4, 0x01FF),   # I_STALL_ALL -- or if it is instruction fetch
-    "imiss":   (4, 0x0001),   # I_STALL_CACHE_MISS
+    "imiss":   (4, 0x0001),   # I_STALL_CACHE_MISS -- same caveat
     "bubbles": (6, 0x01FD),   # BUBBLES_ALL -- pipeline, not memory
     "window":  (5, 0x0020),   # EXR_WINDOW -- the windowed ABI's register
                               # spills, which present AS memory traffic
