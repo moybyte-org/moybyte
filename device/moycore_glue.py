@@ -324,18 +324,23 @@ class MoycoreRun:
                 s[self._I_TIME] = _ticks_diff(_ticks_ms(), inp.cart_start_ms)
             except Exception:  # noqa: BLE001
                 pass
-        # The pointer, in the cart's own coordinates. touch() reads nil when
-        # down is 0, which is what "no pointer" means in SPEC.md 7.3.
+        # The pointer, in the cart's own coordinates (widgets.pointer_state).
+        # The slot carries P_LIVE/P_HELD/P_CLICK as FLAGS, not a boolean: it is
+        # the only slot h_touch has, and touch() has to answer "is there one",
+        # "is it down" and "did it go down this frame" out of it. 0 is no
+        # pointer, which is what SPEC.md 7.3 means by nil.
         t = getattr(inp, "touch_state", None)
         if t is not None:
             try:
-                x, y, down, ms = t()
+                x, y, st, ms = t()
                 s[self._I_TX] = int(x)
                 s[self._I_TY] = int(y)
-                s[self._I_TD] = 1 if down else 0
+                s[self._I_TD] = int(st)
                 s[self._I_TMS] = int(ms)
             except Exception:  # noqa: BLE001
                 s[self._I_TD] = 0
+        else:
+            s[self._I_TD] = 0
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):

@@ -323,6 +323,7 @@ class ConsoleDriver:
         07-31. Same fix, same shape, one tier late.
         """
         self.pointer.place(int(x), int(y))
+        self.pointer.hovers = True   # a mouse has a position with nothing held
 
     def touch_up(self):
         self._down = False

@@ -104,7 +104,10 @@ logic at a flat 3–4ms where the Python twin spikes to 19–24ms).
 The few Lua-specific notes:
 
 - `touch()` returns **multiple values**, not a tuple:
-  `local tx, ty, tapped, held = touch()` (all `nil` when no pointer).
+  `local tx, ty, tapped, held = touch()` (all `nil` when no pointer). Lua carts
+  had **no** pointer at all until 2026-09-12: the snapshot slot libmoy reads was
+  never written on either Lua tier, so `touch()` answered nil everywhere while
+  the Python twin of the same cart had one.
 - `print(...)` is the **draw-text verb** (as in this doc), not Lua's console print.
 - Layer methods are **colon calls**: `lay = make_layer(w, h)`, then `lay:cls(0)`,
   `lay:map(...)`, `lay:spr(...)`; stamp with `draw_layer(lay, cam_x, cam_y)`.
@@ -522,7 +525,7 @@ button at all — even Backspace, Enter and space arrive as plain characters to 
 | `players()` | how many players are connected right now (**1** = just this console). Offer a 2-player mode when it's `>= 2` |
 | `key(code=None)` | with a code (`key(ord("a"))`): is that ASCII key down this frame. No arg: the last key code (`0` if none). *One key at a time* (T-Deck reports 1 byte/frame) |
 | `keyp(code=None)` | same, but only the press edge this frame |
-| `touch()` | `(x, y, tapped, held)` in canvas space, or `None` if no pointer. `tapped` = press edge (one hit per tap); `held` = the finger/button is still down this frame, position following the drag (drawing, sliders) |
+| `touch()` | `(x, y, tapped, held)` in canvas space, or `None` if no pointer. `tapped` = press edge (one hit per tap); `held` = the finger/button is still down this frame, position following the drag (drawing, sliders). **A touch panel's pointer behaves like a mouse:** hold and drag, and on release it stays where you left it for ~1.5s before `touch()` reads `None` — a pointer that vanished on the release frame is not a mouse, and a cart's cursor or drag handle is written against one. A hovering source (desktop, browser) never expires |
 | `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware |
 | `textmode(on=True)` | opt a running cart into clean text-keyboard input (for typing a name/password) so `key()/keyp()` return typeable ASCII; `textmode(False)` restores game mode (held WASD/arrows drive `btn()`). Auto-resets to game mode on exit |
 | `view(w, h)` | declare the cart's LOGICAL viewport: the console composites the centered `w`x`h` region of the 320x240 canvas at the biggest integer scale that fits the screen (a 128x128 PICO-8 port fills the P4 glass at 4x instead of the full canvas's 2x); touch coords stay in full canvas space. `view()` restores the full canvas; auto-resets each run |

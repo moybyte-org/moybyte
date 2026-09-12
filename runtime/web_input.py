@@ -83,6 +83,7 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                 # "move": that one asserts `down`, which would fake a drag out
                 # of an idle mouse (drag-scrolling grids, moving windows).
                 pointer.place(int(ev.get("x", 0)), int(ev.get("y", 0)))
+                pointer.hovers = True   # a browser mouse has a position always
             elif t == "up":
                 pointer.down = False
             elif t == "pan":

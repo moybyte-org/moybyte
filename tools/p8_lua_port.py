@@ -2076,6 +2076,18 @@ do
   local m_sget, m_sset, m_palt = sget, sset, palt
   local m_fget, m_fset, m_map = fget, fset, map
   local m_sfx = sfx
+  local m_touch = touch
+  -- p8's MOUSE (stat 32/33/34). STICKY: PICO-8's mouse has no "absent" state
+  -- for a cart to read, so the position is the last one the console reported
+  -- and only the BUTTONS fall to 0 when the pointer goes.
+  --
+  -- 0,0 UNTIL A POINTER ACTUALLY REPORTS ONE, which is p8's own "the mouse has
+  -- not moved yet" and is not a detail. Parking it mid-screen instead reads to
+  -- a cart as a mouse hovering there forever: `dungeons & diagrams` takes
+  -- `x > 8 and y > 8` as "the cursor is over the board", so a centred phantom
+  -- turned its board on and its BUTTON path off, on a console with no pointer
+  -- at all. A cart may not have a mouse; it must not be handed a fake one.
+  local p8_mx, p8_my, p8_mb = 0, 0, 0
   local m_music, m_music_stop = music, music_stop
   -- The data tables (emitted ABOVE the shim) and the stdlib verbs, captured
   -- once as upvalues: fget hits __p8_gff on every collision probe and map()
@@ -3082,7 +3094,13 @@ do
     if n == 30 or n == 120 or n == 121 then return false end
     if n == 28 then return false end                      -- key held (b, key)
     if n >= 16 and n <= 26 then return -1 end             -- sfx/music channels
-    return 0                                              -- cpu, memory, mouse,
+    -- THE MOUSE, off the console's own pointer (touch(): the glass on a board,
+    -- a mouse on a desktop or in a browser). Latched once a tick beside the
+    -- buttons, so three stat() reads in one frame cannot disagree.
+    if n == 32 then return p8_mx end
+    if n == 33 then return p8_my end
+    if n == 34 then return p8_mb end
+    return 0                                              -- cpu, memory, wheel,
                                                           -- date parts, the rest
   end
 
@@ -3377,6 +3395,25 @@ do
   -- only the one call _draw owes the console.
   local p8_camera = camera
 
+  -- THE MOUSE LATCH, once a tick beside the buttons, so three stat() reads in
+  -- one frame cannot disagree. Gated on the cart's OWN enable bit (0x5f2d bit
+  -- 0), which is p8's rule and which keeps a cart that never asks for a
+  -- pointer to one peek a tick -- a single crossing, and the static answer the
+  -- porter could give instead is not worth a second mechanism to save it.
+  --
+  -- The console has no wheel and no second or third button (`mouse()` reports
+  -- the same), so stat(36) and bits 1-2 of stat(34) stay 0. `touch()` reads
+  -- nil once a released finger's linger runs out (widgets.POINTER_LINGER_MS),
+  -- which is the pointer going away: the buttons lift, the position stays.
+  local m_peek = peek
+  local function p8_mouse_tick()
+    if m_peek(0x5f2d) & 1 == 0 then p8_mb = 0 return end
+    local x, y, tapped, held = m_touch()
+    if x == nil then p8_mb = 0 return end
+    p8_mx, p8_my = fl(x), fl(y)
+    p8_mb = (held or tapped) and 1 or 0
+  end
+
   -- moybyte lifecycle -> the p8 one. The HOST paces the cart (SPEC.md 5):
   -- one `_update` call is one PICO-8 tick, at the rate the manifest declares
   -- (build_manifest reads it off the cart), catch-up and all, and `_draw`
@@ -3410,6 +3447,7 @@ do
         hold[i] = m_btn(BTN[i]) and (hold[i] or 0) + 1 or 0
       end
     end
+    p8_mouse_tick()
     local tick = p8_update60 or p8_update
     if tick then tick() end
     ticked = true
@@ -3798,7 +3836,8 @@ def classify_body(body):
         gaps.append("it writes sound data into sfx/music memory at runtime; the imported "
                     "sounds play instead")
     if any(a == 0x5f2d for a in regs) or any(32 <= i <= 36 for i in stat_ids):
-        gaps.append("it reads the mouse; there is no pointer in a PICO-8 port's input")
+        gaps.append("it reads the mouse: the console's pointer drives stat(32)-(34), "
+                    "but there is no wheel and no second or third button")
     if any(a in (0x5f54, 0x5f55) for a in regs):
         gaps.append("it remaps the sheet or screen (0x5f54/0x5f55); the remap is remembered, "
                     "not applied")
@@ -4233,7 +4272,20 @@ def localization_lua(body):
     return "\n".join(lines) + "\n"
 
 
-def build_manifest(title, icon=None, fps=30, sources=None):
+def _reads_mouse(code):
+    """Does this cart ask for a pointer? (0x5f2d's enable bit, or a mouse stat)
+
+    Both spellings, because a cart may enable the mouse in one tab and read it
+    in another, and either one alone is enough to want the hint in the
+    manifest. Same reading the verdict reports the mouse under.
+    """
+    if any(a == 0x5f2d for v in ("poke", "poke2", "poke4", "memcpy", "memset")
+           for a in _hex_addr_calls(code, v)):
+        return True
+    return any(32 <= i <= 36 for i in _hex_addr_calls(code, "stat"))
+
+
+def build_manifest(title, icon=None, fps=30, sources=None, mouse=False):
     # The spec manifest (SPEC.md 3.1). `fps` is the cart's LOGIC rate, and a p8
     # cart picks it by which lifecycle it defines: _update60 means 60, _update
     # means 30. The host's scheduler calls the shim's `_update` at exactly this
@@ -4256,7 +4308,11 @@ def build_manifest(title, icon=None, fps=30, sources=None):
         # 128x128 pixels and the host scales/letterboxes -- a quarter of the
         # fill the old draw-2x-yourself shim paid.
         "canvas": "128x128",
-        "input": ["buttons"],
+        # SPEC.md 7.3: a HINT, for surfaces that draw optional controls -- the
+        # browser's virtual gamepad, a soft keyboard. A p8 cart always reads
+        # buttons; one that turns p8's mouse on reads the pointer too, and
+        # saying so is what stops the web view hiding the thing it needs.
+        "input": ["buttons", "touch"] if mouse else ["buttons"],
         # A ported cart is SOMEBODY ELSE'S cart. PICO-8 BBS carts default to
         # CC BY-NC-SA 4.0 (module header), so playing and studying one is fine
         # and republishing it is not -- stated in the manifest so a host's share
@@ -4459,7 +4515,7 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
            manifest_text(build_manifest(
                title, icon_tile(kgfx),
                60 if _defines_function(body, "p8_update60") else 30,
-               sources)))
+               sources, _reads_mouse(_strip_lua(body)))))
     written.append("manifest.json")
     return {"files": sorted(written), "sfx": n_sfx, "music": n_music,
             "verdict": classify_body(body),

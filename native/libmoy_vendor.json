@@ -14,7 +14,7 @@
     "native/moycore/libmoy/moy_p8.c": "f9210bf956149453a1db48429bdd765c8e106e4971d82bf80179e41794065540"
   },
   "upstream": {
-    "commit": "9bded0b7a73b2985e7727077307b4dc71157a2eb",
+    "commit": "094b9e6e7f3e7aa434d5c9a1828bc2722b74e55e",
     "date": "2026-09-12",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"

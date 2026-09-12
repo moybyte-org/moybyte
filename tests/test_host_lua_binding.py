@@ -99,3 +99,49 @@ def test_the_sandbox_is_the_same_ceiling_the_boards_have():
                 r2.close()
     finally:
         r.close()
+
+
+TOUCH_CART = """
+px, py, pt, ph = -1, -1, -1, -1
+function _update(dt)
+  local x, y, tapped, held = touch()
+  if x == nil then px, py, pt, ph = -1, -1, -1, -1
+  else px, py, pt, ph = x, y, (tapped and 1 or 0), (held and 1 or 0) end
+end
+function _draw() end
+"""
+
+
+@pytest.mark.skipif(not lb.HostLuaRun.available(),
+                    reason="no C compiler for the host lua binding")
+def test_touch_reaches_a_lua_cart_and_decodes_its_flags():
+    """`touch()` on the Lua tier, which answered nil for every cart everywhere.
+
+    The snapshot slot was in the C ABI and libmoy read it; NOTHING ever wrote
+    it -- not this binding and not the boards' -- so a Lua cart had no pointer
+    at all while the Python twin of the same cart did. The slot is FLAGS now
+    (widgets.P_LIVE/P_HELD/P_CLICK) because h_touch has one slot and three
+    questions, and `click` is not nested inside `down`: a scripted tap raises
+    the edge with the finger already lifted, which is what the last state here
+    pins and what `letter blitz` scores with.
+    """
+    buf = bytearray(96 * 64)
+    r = lb.HostLuaRun(buf, 96, 64)
+    try:
+        assert r.load([(TOUCH_CART, "@cart")]) is None
+        want = {
+            0: (-1, -1, -1, -1),            # no pointer at all -> touch() is nil
+            1: (40, 22, 0, 0),              # live, nothing held
+            3: (40, 22, 0, 1),              # held (a drag)
+            7: (40, 22, 1, 1),              # the press edge of a hold
+            5: (40, 22, 1, 0),              # a tap whose finger already lifted
+        }
+        for state, expect in want.items():
+            r.snap[lb.SNAP_TOUCH_X] = 40
+            r.snap[lb.SNAP_TOUCH_Y] = 22
+            r.snap[lb.SNAP_TOUCH_DOWN] = state
+            assert r.tick(1 / 30.0) is None
+            got = tuple(r.get_global(n) for n in ("px", "py", "pt", "ph"))
+            assert got == expect, (state, got, expect)
+    finally:
+        r.close()

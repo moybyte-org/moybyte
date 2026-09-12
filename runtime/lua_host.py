@@ -150,6 +150,8 @@ class MoycoreHostRun:
         inp = self._ws.input
         from runtime.lua_binding import (SNAP_BTN, SNAP_BTNP, SNAP_BTN_P1,
                                          SNAP_BTNP_P1, SNAP_PLAYERS,
+                                         SNAP_TOUCH_X, SNAP_TOUCH_Y,
+                                         SNAP_TOUCH_DOWN, SNAP_TOUCH_MS,
                                          AQ_SFX, AQ_MUSIC,
                                          AQ_BEEP, AQ_MUSIC_STOP,
                                          AQ_SOUND_STOP, AQ_VOLUME)
@@ -186,6 +188,18 @@ class MoycoreHostRun:
                 s[SNAP_BTN_P1] = h1
                 s[SNAP_BTNP_P1] = p1
         s[SNAP_PLAYERS] = n
+        # THE POINTER, in the cart's own coordinates (widgets.pointer_state).
+        # Same omission as player two above and the same consequence: the slot
+        # is in the C ABI, libmoy's touch() reads it, and nothing on either
+        # Lua tier ever wrote it -- so `touch()` answered nil for every Lua
+        # cart everywhere while the Python twin of the same cart had a pointer.
+        t = getattr(inp, "touch_state", None)
+        if t is not None:
+            x, y, st, ms = t()
+            s[SNAP_TOUCH_X], s[SNAP_TOUCH_Y] = x, y
+            s[SNAP_TOUCH_DOWN], s[SNAP_TOUCH_MS] = st, ms
+        else:
+            s[SNAP_TOUCH_DOWN] = 0
         err = self._run.tick(dt, self.draw_next)
         self._sync_view()
         # Audio drains through the SAME api closures a Python cart uses, so the

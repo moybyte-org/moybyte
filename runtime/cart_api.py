@@ -38,6 +38,10 @@ try:
     from ticks import _ticks_ms, _ticks_diff
 except ImportError:
     from runtime.ticks import _ticks_ms, _ticks_diff
+try:
+    from widgets import pointer_state, P_NONE, P_HELD, P_CLICK
+except ImportError:
+    from runtime.widgets import pointer_state, P_NONE, P_HELD, P_CLICK
 
 
 # owner -> the Image subclass a cart of that owner constructs (below).
@@ -353,43 +357,37 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         bit = 1 << (int(b) & 7)
         tile_flags[n] = (tile_flags[n] | bit) if on else (tile_flags[n] & ~bit & 0xFF)
 
+    _touch_scratch = [0, 0, 0, 0]        # reused; see widgets.pointer_state
+
     def touch():
         # Pointer (touch glass on a board, mouse on the host) exposed to
-        # touch-driven carts: (x, y, tapped, held) this frame, or None when there
-        # is no pointer. `tapped` is the press edge so a cart scores at most one
-        # hit per tap; `held` stays True while the finger/button is down, so a
-        # cart can track a DRAG (drawing, sliders). Two-domain seam (#39): prefer
-        # the game-space pointer publication when the console provides one (a
-        # distinct big system canvas), so a cart reads 320x240 viewport coords.
-        # A LINKED MATCH HAS NO POINTER. Only buttons cross the radio, so a
-        # touch read here would move this screen's player and not the other
-        # one's -- a divergence the lockstep exchange cannot see and cannot
-        # heal, which is the same class of bug as drawing from the shared random
-        # stream. Reporting "no pointer" makes a touch-driven cart fall back to
-        # its button path, which is the honest answer while two consoles share
-        # one game.
-        if getattr(input, "netplay_live", False):
+        # touch-driven carts: (x, y, tapped, held) this frame, or None when
+        # there is no pointer. `tapped` is the press edge so a cart scores at
+        # most one hit per tap; `held` stays True while the finger/button is
+        # down, so a cart can track a DRAG (drawing, sliders).
+        #
+        # Where the pointer COMES from -- the netplay refusal, the two-domain
+        # seam, the linger that outlives a released finger -- is
+        # widgets.pointer_state, because the Lua tier resolves the same
+        # question through the same function. This used to be its own copy,
+        # and the Lua tier had no copy at all.
+        st = pointer_state(input, _touch_scratch)
+        if st[2] == P_NONE:
             return None
-        gp = getattr(input, "game_pointer", None)
-        if gp is not None:
-            held = bool(gp[3]) if len(gp) > 3 else False
-            return (gp[0], gp[1], bool(gp[2]), held)
-        p = getattr(input, "pointer", None)
-        if p is None:
-            return None
-        return (p.x, p.y, bool(p.click), bool(getattr(p, "down", False)))
+        return (st[0], st[1], bool(st[2] & P_CLICK), bool(st[2] & P_HELD))
 
     def mouse():
         # TIC-80-shaped 7-tuple (x, y, left, middle, right, scrollx, scrolly)
         # aliasing touch(): tap -> left button. Neither the touchscreen nor the
         # host pointer has middle/right/scroll, so those are constant 0/False.
-        gp = getattr(input, "game_pointer", None)
-        if gp is not None:
-            return (gp[0], gp[1], bool(gp[2]), False, False, 0, 0)
-        p = getattr(input, "pointer", None)
-        if p is None:
+        # Same resolver as touch() -- this was a THIRD copy of the question and
+        # had already drifted from the other two: it never saw the netplay
+        # refusal, so a linked match moved this screen's cursor. `left` stays
+        # the press EDGE it has always been here.
+        st = pointer_state(input, _touch_scratch)
+        if st[2] == P_NONE:
             return (0, 0, False, False, False, 0, 0)
-        return (p.x, p.y, bool(p.click), False, False, 0, 0)
+        return (st[0], st[1], bool(st[2] & P_CLICK), False, False, 0, 0)
 
     def time():
         # Milliseconds since the cart started (set by Workstation._start).

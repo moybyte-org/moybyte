@@ -313,14 +313,18 @@ static void h_beep(void *user, float freq_hz, float dur_s)
     aq_push(AQ_BEEP, hz, ms, 0);
 }
 
+/* The pointer slot is FLAGS, not a level: it is the only one h_touch has and
+ * touch() must answer three things out of it. Mirrors runtime/widgets.py's
+ * P_LIVE / P_HELD / P_CLICK -- 0 is "no pointer", which reads as nil. */
 static int h_touch(void *user, int out_xyth[4])
 {
+    int st;
     (void)user;
-    if (!RUN.snap || !RUN.snap[SNAP_TOUCH_DOWN]) return 0;
+    if (!RUN.snap || !(st = RUN.snap[SNAP_TOUCH_DOWN])) return 0;
     out_xyth[0] = RUN.snap[SNAP_TOUCH_X];
     out_xyth[1] = RUN.snap[SNAP_TOUCH_Y];
-    out_xyth[2] = RUN.snap[SNAP_TOUCH_DOWN];
-    out_xyth[3] = RUN.snap[SNAP_TOUCH_MS];
+    out_xyth[2] = (st & 4) != 0;                 /* tapped: the press edge */
+    out_xyth[3] = (st & 2) != 0;                 /* held */
     return 1;
 }
 
