@@ -196,6 +196,10 @@ P_CLICK = 4                    # ...and it went down THIS frame (the press edge)
 def pointer_state(inp, out):
     """Fill `out` as `[x, y, state, ms]` and return it. `state` is P_*.
 
+    `ms` is 0 and the slot is vestigial: it carried a press duration only so
+    h_touch could read `held` out of it, and `held` is a flag now. The slot
+    stays because it is in the C snapshot ABI, not because anything reads it.
+
     `out` is CALLER-OWNED and reused: this runs once per frame on the play
     path, and a fresh tuple here is an allocation the S3 charges most of a
     millisecond for when the collector comes round (#66).

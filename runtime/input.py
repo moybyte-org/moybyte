@@ -25,12 +25,6 @@ set_button there), so the model lands in both, in step.
 """
 
 
-try:                                    # staged flat (boards, web)
-    from widgets import pointer_state
-except ImportError:                     # host: the runtime package
-    from runtime.widgets import pointer_state
-
-
 class InputSource:
     """One producer's half of the input: its own held set and its own key."""
 
@@ -131,14 +125,7 @@ class InputState:
         self._kept = set()          # press edges kept for a paced cart's next tick (#217)
         self._kept_p = None
         self._taken = False         # a logic tick already took this frame's edges
-        self._touch_out = [0, 0, 0, 0]   # reused: see pointer_state()
         self._default = self.source("local")
-
-    def touch_state(self):
-        """`[x, y, state, ms]` for the Lua tier's snapshot -- the name the glues
-        look for (`getattr(inp, "touch_state", None)`). The SAME list every
-        frame; the caller unpacks it immediately."""
-        return pointer_state(self, self._touch_out)
 
     # -- sources -----------------------------------------------------------
     def source(self, name, player=0):

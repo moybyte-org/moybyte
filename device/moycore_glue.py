@@ -54,6 +54,11 @@ except ImportError:                      # host tests importing the device modul
                                  install_handles)
 
 try:
+    from widgets import pointer_state
+except ImportError:                      # host tests importing the device module
+    from runtime.widgets import pointer_state
+
+try:
     import moycore as _moycore
 except ImportError:                      # a build without the module
     _moycore = None
@@ -159,6 +164,8 @@ class MoycoreRun:
         self._I_TY = _moycore.SNAP_TOUCH_Y
         self._I_TD = _moycore.SNAP_TOUCH_DOWN
         self._I_TMS = _moycore.SNAP_TOUCH_MS
+        self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
+        self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
         self.aq = array("h", bytearray(2 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
@@ -329,17 +336,13 @@ class MoycoreRun:
         # the only slot h_touch has, and touch() has to answer "is there one",
         # "is it down" and "did it go down this frame" out of it. 0 is no
         # pointer, which is what SPEC.md 7.3 means by nil.
-        t = getattr(inp, "touch_state", None)
-        if t is not None:
-            try:
-                x, y, st, ms = t()
-                s[self._I_TX] = int(x)
-                s[self._I_TY] = int(y)
-                s[self._I_TD] = int(st)
-                s[self._I_TMS] = int(ms)
-            except Exception:  # noqa: BLE001
-                s[self._I_TD] = 0
-        else:
+        try:
+            x, y, st, ms = pointer_state(inp, self._touch_out)
+            s[self._I_TX] = int(x)
+            s[self._I_TY] = int(y)
+            s[self._I_TD] = int(st)
+            s[self._I_TMS] = int(ms)
+        except Exception:  # noqa: BLE001
             s[self._I_TD] = 0
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
@@ -434,6 +437,19 @@ class MoycoreRun:
         if td is None:
             td = MoycoreRun._tick_draw = bool(getattr(_moycore, "TICK_DRAW", 0))
         err = _moycore.tick(dt, self.draw_next) if td else _moycore.tick(dt)
+        # A LUA cart ends itself the same way a Python one does. libmoy's quit()
+        # is a host callback that sets SNAP_QUIT (h_quit), and nothing read it:
+        # the flag was written on every tier and translated on none, so `quit()`
+        # was a no-op for every Lua cart -- including the textmode(True) carts
+        # the cart API says MUST provide their own exit, because hold-BACKSPACE
+        # cannot reach one. Route it into the flag the Player already honours
+        # after _update (player.tick), and clear the slot so one quit is one
+        # exit.
+        if self.snap[self._I_QUIT]:
+            self.snap[self._I_QUIT] = 0
+            inp = getattr(self.ws, "input", None)
+            if inp is not None:
+                inp.cart_quit = True
         self._sync_view()
         self._drain_audio()
         if err:

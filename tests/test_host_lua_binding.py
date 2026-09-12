@@ -145,3 +145,33 @@ def test_touch_reaches_a_lua_cart_and_decodes_its_flags():
             assert got == expect, (state, got, expect)
     finally:
         r.close()
+
+
+QUIT_CART = """
+function _update(dt) if TIME_TO_GO then quit() end end
+function _draw() end
+"""
+
+
+@pytest.mark.skipif(not lb.HostLuaRun.available(),
+                    reason="no C compiler for the host lua binding")
+def test_a_lua_cart_can_end_itself():
+    """`quit()` from Lua reaches the flag the Player honours.
+
+    libmoy's quit() is a host callback that sets SNAP_QUIT, and NOTHING read it
+    on either tier -- so a Lua cart calling quit() ran on forever, including a
+    textmode(True) cart, which the cart API says must provide its own exit
+    because hold-BACKSPACE cannot reach one. Found on glass: a probe cart
+    called quit() 3,940 times and kept running.
+    """
+    buf = bytearray(32 * 32)
+    r = lb.HostLuaRun(buf, 32, 32)
+    try:
+        assert r.load([(QUIT_CART, "@cart")]) is None
+        assert r.tick(1 / 30.0) is None
+        assert r.snap[lb.SNAP_QUIT] == 0, "quit fired without the cart asking"
+        r.exec("TIME_TO_GO = true")
+        assert r.tick(1 / 30.0) is None
+        assert r.snap[lb.SNAP_QUIT] == 1, "quit() did not reach the snapshot"
+    finally:
+        r.close()

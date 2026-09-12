@@ -342,10 +342,37 @@ class FakeInput:
     def pressed(self, name):
         return name in self._pressed
 
-    def touch_state(self):
+    @property
+    def pointer(self):
+        """What `widgets.pointer_state` actually reads.
+
+        This fake used to expose a `touch_state()` method, which was the glue's
+        old seam -- a method on InputState. There are TWO InputStates (the
+        host's and `device/moybyte/input.py`'s) and only one of them ever grew
+        it, so the boards got no pointer while every host test passed. The glue
+        asks the resolver directly now, so the fake supplies a POINTER.
+        """
         if self.touch_error is not None:
             raise self.touch_error
-        return self.touch
+        if self.touch is None:
+            return None
+        return _FakePointer(*self.touch)
+
+
+class _FakePointer:
+    """x/y/state/ms as `pointer_state` wants to read them off a Pointer."""
+
+    def __init__(self, x, y, state, ms):
+        from runtime.widgets import P_CLICK, P_HELD, P_LIVE
+
+        self.x, self.y, self.ms = x, y, ms
+        self._state = state
+        self.down = bool(state & P_HELD)
+        self.click = bool(state & P_CLICK)
+        self._live = bool(state & P_LIVE)
+
+    def live(self):
+        return self._live
 
 
 class MinimalInput:
@@ -1106,7 +1133,9 @@ def test_the_pointer_crosses_in_the_carts_own_coordinates(w):
     assert run.snap[C_CONSTS["SNAP_TOUCH_X"]] == 11
     assert run.snap[C_CONSTS["SNAP_TOUCH_Y"]] == 22
     assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_LIVE | P_HELD | P_CLICK
-    assert run.snap[C_CONSTS["SNAP_TOUCH_MS"]] == 300
+    # The MS slot is vestigial: it existed so h_touch could read `held` out of
+    # it, and `held` is a flag now. Still in the C ABI, read by nothing.
+    assert run.snap[C_CONSTS["SNAP_TOUCH_MS"]] == 0
     # A pointer with nothing held is still a POINTER: the flags have to survive
     # apart, or a hovering mouse reads as no mouse.
     inp.touch = (11, 22, P_LIVE, 0)

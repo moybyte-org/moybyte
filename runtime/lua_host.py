@@ -29,6 +29,7 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 # marshals ints and one string, so they ride int handles plus a Lua prelude),
 # the moy_button bit order, and the two deny lists that decide what gets
 # registered on top of libmoy's table.
+from runtime.widgets import pointer_state
 from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                              LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
 
@@ -143,6 +144,7 @@ class MoycoreHostRun:
         # change the shape every other runtime presents. `draw_next` is how
         # the Player's scheduler (#217) asks for a logic-only tick.
         self.draw = self._draw_noop
+        self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
         self.draw_next = True
 
     def _update(self, dt):
@@ -152,6 +154,7 @@ class MoycoreHostRun:
                                          SNAP_BTNP_P1, SNAP_PLAYERS,
                                          SNAP_TOUCH_X, SNAP_TOUCH_Y,
                                          SNAP_TOUCH_DOWN, SNAP_TOUCH_MS,
+                                         SNAP_QUIT,
                                          AQ_SFX, AQ_MUSIC,
                                          AQ_BEEP, AQ_MUSIC_STOP,
                                          AQ_SOUND_STOP, AQ_VOLUME)
@@ -193,14 +196,21 @@ class MoycoreHostRun:
         # is in the C ABI, libmoy's touch() reads it, and nothing on either
         # Lua tier ever wrote it -- so `touch()` answered nil for every Lua
         # cart everywhere while the Python twin of the same cart had a pointer.
-        t = getattr(inp, "touch_state", None)
-        if t is not None:
-            x, y, st, ms = t()
-            s[SNAP_TOUCH_X], s[SNAP_TOUCH_Y] = x, y
-            s[SNAP_TOUCH_DOWN], s[SNAP_TOUCH_MS] = st, ms
-        else:
-            s[SNAP_TOUCH_DOWN] = 0
+        x, y, st, ms = pointer_state(inp, self._touch_out)
+        s[SNAP_TOUCH_X], s[SNAP_TOUCH_Y] = x, y
+        s[SNAP_TOUCH_DOWN], s[SNAP_TOUCH_MS] = st, ms
         err = self._run.tick(dt, self.draw_next)
+        # A LUA cart ends itself the same way a Python one does. libmoy's quit()
+        # is a host callback that sets SNAP_QUIT (h_quit), and nothing read it:
+        # the flag was written on every tier and translated on none, so `quit()`
+        # was a no-op for every Lua cart -- including the textmode(True) carts
+        # the cart API says MUST provide their own exit, because hold-BACKSPACE
+        # cannot reach one. Route it into the flag the Player already honours
+        # after _update (player.tick), and clear the slot so one quit is one
+        # exit.
+        if s[SNAP_QUIT]:
+            s[SNAP_QUIT] = 0
+            inp.cart_quit = True
         self._sync_view()
         # Audio drains through the SAME api closures a Python cart uses, so the
         # engine's behaviour lives in one place; only the per-call trip is gone.

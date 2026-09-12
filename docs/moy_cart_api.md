@@ -963,7 +963,7 @@ same here as on any other console that implements the spec.
 | call | does |
 |---|---|
 | `time()` | milliseconds since the cart started |
-| `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. **Required** for a `textmode(True)` game — the console's BACKSPACE exit can't reach text mode |
+| `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. **Required** for a `textmode(True)` game — the console's BACKSPACE exit can't reach text mode. (It was a no-op for **Lua** carts until 2026-09-12: libmoy set a snapshot flag that nothing on either tier read back) |
 | `pmem(index, value=None)` | persistent memory: `pmem(i)` reads an int, `pmem(i, v)` writes+persists (high scores, saves) |
 | `cfg(key, default=None)` | read a value from the cart's `config.json` — the **"Make it mine"** tuning a kid edits (speed, counts, colors…) |
 | `col(name_or_index)` | resolve a color **name** (0–15) or int to a `0–63` palette index |

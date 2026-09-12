@@ -47,6 +47,18 @@ paths:
     That is why the pacing tests live here (`tests/test_tick_model.py` and the
     btnp pins in `tests/test_import_p8.py`) and are worth keeping.
 
+- **An attached board is a TEST RESOURCE, not a permission gate.** `make
+  device-port` says which boards are on this machine and on which port; when one
+  is there, run its suite, build, flash, push a cart and measure without asking
+  first, and when none answers say so rather than asking whether you may. The
+  line in `tools/preflight.sh` about the suites needing "a human with them
+  plugged in" means exactly that the boards must be CONNECTED — an agent read it
+  on 2026-09-12 as "an agent may not", told the owner on-glass was out of reach,
+  and shipped an input-path change unverified while four boards sat plugged in.
+  Reach for the real driver (`P4Board(board_dir=…)`) and never raw pyserial: the
+  line state at open is per-board and opposite, and getting it wrong resets the
+  chip (below).
+
 - **On-glass testing — all four console boards have a suite** (#156). Each is
   gated on its own env var and shares one session in file order, leaving the
   board where it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
