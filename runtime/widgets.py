@@ -213,27 +213,32 @@ def pointer_state(inp, out):
     # the honest answer while two consoles share one game.
     if getattr(inp, "netplay_live", False):
         return out
+    p = getattr(inp, "pointer", None)
+    if p is None:
+        return out
+    # LIVENESS IS THE POINTER'S, always, and asking it FIRST is the whole point.
+    # A touch panel reports a position only while it is touched; the pointer
+    # outlives the finger by POINTER_LINGER_MS so a released drag does not
+    # teleport a cart's cursor into nowhere, and a hovering source never
+    # expires at all. The game-space publication below is a coordinate MAPPING
+    # of this pointer, not a second opinion about whether there is one --
+    # console.py republishes it with a position every frame whether or not the
+    # pointer is alive, so reading liveness off it left a p8 cart holding a
+    # cursor over its board forever and its d-pad stamped over every frame.
+    live = getattr(p, "live", None)
+    if live is not None and not live():
+        return out
     # Two-domain seam (#39): the game-space publication wins where the console
-    # makes one (a distinct big system canvas), so a cart reads its own
-    # viewport coordinates rather than the desktop's. It carries its OWN tap
-    # and hold flags and is rebuilt from the pointer every frame -- including
-    # the linger, which wallpaper._game_pointer applies when it publishes --
-    # so it is authoritative here rather than something to cross-check.
+    # makes one (a distinct big system canvas, or a cart with a smaller
+    # canvas), so a cart reads its own viewport coordinates rather than the
+    # desktop's -- and its own tap/hold flags, which an overlay may have
+    # stripped on the way through.
     gp = getattr(inp, "game_pointer", None)
     if gp is not None:
         out[0], out[1] = gp[0], gp[1]
         out[2] = (P_LIVE | (P_CLICK if bool(gp[2]) else 0)
                   | (P_HELD if (len(gp) > 3 and gp[3]) else 0))
         out[3] = 0
-        return out
-    p = getattr(inp, "pointer", None)
-    if p is None:
-        return out
-    # A touch panel reports a position only while it is touched; the pointer
-    # OUTLIVES the finger by POINTER_LINGER_MS so a released drag does not
-    # teleport a cart's cursor into nowhere. A hovering source never expires.
-    live = getattr(p, "live", None)
-    if live is not None and not live():
         return out
     out[0], out[1] = p.x, p.y
     out[2] = (P_LIVE | (P_HELD if getattr(p, "down", False) else 0)

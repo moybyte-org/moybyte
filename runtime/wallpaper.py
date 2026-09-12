@@ -269,11 +269,8 @@ class Wallpaper:
         gx = (int(getattr(p, "x", 0)) - ox) // scale
         gy = (int(getattr(p, "y", 0)) - oy) // scale
         # Out-of-frame reads as "no pointer" rather than a clamped edge value,
-        # so petals never stampede toward a corner the cursor is not in -- and
-        # so does a pointer whose linger has run out, which is where a touch
-        # console stops having one at all (widgets.Pointer.live).
-        live = getattr(p, "live", None)
-        if not (0 <= gx < gw and 0 <= gy < gh) or (live is not None and not live()):
+        # so petals never stampede toward a corner the cursor is not in.
+        if not (0 <= gx < gw and 0 <= gy < gh):
             ws.input.game_pointer = None
             return gp
         ws.input.game_pointer = (gx, gy, False, bool(getattr(p, "down", False)))

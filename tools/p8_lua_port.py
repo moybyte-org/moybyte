@@ -2077,17 +2077,33 @@ do
   local m_fget, m_fset, m_map = fget, fset, map
   local m_sfx = sfx
   local m_touch = touch
-  -- p8's MOUSE (stat 32/33/34). STICKY: PICO-8's mouse has no "absent" state
-  -- for a cart to read, so the position is the last one the console reported
-  -- and only the BUTTONS fall to 0 when the pointer goes.
+  -- p8's MOUSE (stat 32/33/34).
   --
-  -- 0,0 UNTIL A POINTER ACTUALLY REPORTS ONE, which is p8's own "the mouse has
-  -- not moved yet" and is not a detail. Parking it mid-screen instead reads to
-  -- a cart as a mouse hovering there forever: `dungeons & diagrams` takes
-  -- `x > 8 and y > 8` as "the cursor is over the board", so a centred phantom
-  -- turned its board on and its BUTTON path off, on a console with no pointer
-  -- at all. A cart may not have a mouse; it must not be handed a fake one.
-  local p8_mx, p8_my, p8_mb = 0, 0, 0
+  -- WHERE THE MOUSE IS WHEN THERE IS NONE. p8's stat(32)/(33) have no absent
+  -- value for a cart to read -- the machine always has a mouse somewhere -- so
+  -- "there is no pointer" has to be spelled as a POSITION, and the honest
+  -- spelling is OFF THE SCREEN. That is what PICO-8 reports when the pointer
+  -- leaves the cart's 128x128 window, and it is what a cart's own bounds guard
+  -- is already written for. A whole sprite clear of the corner, so a cart that
+  -- draws its cursor unconditionally draws it out of sight rather than clipped
+  -- into it.
+  --
+  -- Getting this wrong in the other direction is not theoretical. Parking the
+  -- mouse mid-screen reads to a cart as one hovering there forever: `dungeons
+  -- & diagrams` takes `x > 8 and y > 8` for "the cursor is over the board" and
+  -- then re-asserts the board cursor from it every frame, AFTER its own
+  -- buttons have moved it -- so a phantom at 64,64 stamped over the d-pad and
+  -- the cart stopped taking input on a console with no pointer at all.
+  --
+  -- The position holds while the console HAS a pointer and for as long as a
+  -- released finger lingers (the host's POINTER_LINGER_MS), which is what
+  -- makes a touch panel feel like a mouse: hold, drag, let go, and the cursor
+  -- is still where you left it. When the linger runs out the pointer is
+  -- genuinely gone, and the cart is told so the only way p8 can say it. A
+  -- source that HOVERS -- a desktop or browser mouse -- never expires and so
+  -- never parks.
+  local P8_MOUSE_AWAY = -8
+  local p8_mx, p8_my, p8_mb = P8_MOUSE_AWAY, P8_MOUSE_AWAY, 0
   local m_music, m_music_stop = music, music_stop
   -- The data tables (emitted ABOVE the shim) and the stdlib verbs, captured
   -- once as upvalues: fget hits __p8_gff on every collision probe and map()
@@ -3409,7 +3425,10 @@ do
   local function p8_mouse_tick()
     if m_peek(0x5f2d) & 1 == 0 then p8_mb = 0 return end
     local x, y, tapped, held = m_touch()
-    if x == nil then p8_mb = 0 return end
+    if x == nil then
+      p8_mx, p8_my, p8_mb = P8_MOUSE_AWAY, P8_MOUSE_AWAY, 0
+      return
+    end
     p8_mx, p8_my = fl(x), fl(y)
     p8_mb = (held or tapped) and 1 or 0
   end

@@ -1563,3 +1563,28 @@ def test_the_executed_body_is_the_file_the_boards_stage():
         toml = (ROOT / "firmware" / board / "board.toml").read_text(
             encoding="utf-8")
         assert "moycore_glue.py" in toml, board
+
+
+def test_a_dead_pointer_is_dead_even_when_a_game_pointer_still_stands(w):
+    """Liveness is the POINTER's, never the game-space mapping of it.
+
+    console.py republishes `input.game_pointer` with a position every frame
+    whether or not the pointer is still alive -- it gates only the tap/hold
+    flags on it. A resolver that read "there is a game_pointer" as "there is a
+    pointer" therefore never expired on a board: found on glass, where a p8
+    cart held a cursor over `dungeons & diagrams`' board forever and its d-pad
+    was stamped over every frame by the cart's own mouse handler.
+    """
+    from runtime.widgets import P_LIVE, P_NONE
+
+    inp = FakeInput(touch=(11, 22, P_LIVE, 0))
+    inp.game_pointer = (5, 6, False, False)       # a stale mapping, still there
+    run = w.run(ws=FakeWs(inp=inp))
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_TOUCH_X"]] == 5, "the mapping should win the COORDS"
+    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_LIVE
+
+    inp.touch = None                               # ...and now the pointer is gone
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_NONE, (
+        "a game_pointer outlived the pointer it maps")
