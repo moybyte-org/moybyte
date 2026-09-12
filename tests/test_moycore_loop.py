@@ -363,6 +363,34 @@ _t0, _t1 = moycore.get_global("T0"), moycore.get_global("T1")
 print("CLOCK", 1 if _t0 >= 5000 else 0, 1 if _t1 > _t0 else 0)
 moycore.close()
 
+# THE POINTER, through the BOARDS' OWN h_touch. The snapshot slot carries
+# widgets.py's P_LIVE/P_HELD/P_CLICK as flags, because h_touch has one slot and
+# touch() has three questions; 0 is "no pointer", which reads as nil. Every one
+# of these decodings was dead code until 2026-09-12 -- nothing on either Lua
+# tier ever wrote the slot, so touch() answered nil for every Lua cart
+# everywhere while the Python twin of the same cart had a pointer.
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
+print("TCHLOAD", moycore.load(((
+    "function _update(dt)\n"
+    "  local x, y, tapped, held = touch()\n"
+    "  if x == nil then TX, TY, TT, TH = -1, -1, -1, -1\n"
+    "  else TX, TY, TT, TH = x, y, (tapped and 1 or 0), (held and 1 or 0) end\n"
+    "end\n"
+    "function _draw() end\n", "@touch"),)))
+_seen = []
+for _st in (0, 1, 3, 7, 5):
+    snap[moycore.SNAP_TOUCH_X] = 77
+    snap[moycore.SNAP_TOUCH_Y] = 31
+    snap[moycore.SNAP_TOUCH_DOWN] = _st
+    moycore.tick(0.03125)
+    _seen.append("%s/%s/%s/%s" % (moycore.get_global("TX"),
+                                  moycore.get_global("TY"),
+                                  moycore.get_global("TT"),
+                                  moycore.get_global("TH")))
+print("TOUCH", " ".join(_seen))
+snap[moycore.SNAP_TOUCH_DOWN] = 0
+moycore.close()
+
 # The p8 shim's masked map walk (#66 M0). A 4x1 strip of cells with distinct
 # flag bytes, drawn under three masks; each surviving cell stamps one 8x8 tile.
 MAPW, MAPH = 4, 1
@@ -756,6 +784,15 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
         "fset must change what the NEXT map(..., layers) draws: %s" % out
     # ...and the p8 shim's __moy_map_flags still writes that same table, which
     # is what keeps a ported PICO-8 cart's baked __gff__ authoritative.
+    # touch() over the boards' own h_touch: nil with no pointer, then position
+    # with the flags decoded apart. `click` is NOT nested inside `down` -- the
+    # last state is a tap whose finger already lifted, which a ladder swallows
+    # and which `letter blitz` scores with.
+    assert by["TCHLOAD"][1] == "None", out
+    assert by["TOUCH"][1:] == ["-1/-1/-1/-1", "77/31/0/0", "77/31/0/1",
+                               "77/31/1/1", "77/31/1/0"], \
+        "the boards' touch() does not decode its pointer flags: %s" % out
+
     assert by["SHIM"][1:] == ["1", "0"], \
         "__moy_map_flags no longer owns the console's flag table: %s" % out
 

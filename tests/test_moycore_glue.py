@@ -1090,25 +1090,40 @@ def test_the_import_of_the_clock_is_hoisted_out_of_the_frame(w):
 
 
 def test_the_pointer_crosses_in_the_carts_own_coordinates(w):
-    inp = FakeInput(touch=(11, 22, True, 300))
+    """...FLAGS INTACT, which is the part a boolean fake cannot see.
+
+    The slot carries widgets.py's P_LIVE/P_HELD/P_CLICK together, because
+    h_touch has one slot and touch() has three questions to answer out of it.
+    This test used to hand the glue a BOOLEAN and assert the slot was 1 -- true
+    of `int(True)` as well, so it went on passing when the contract underneath
+    it changed and pinned nothing at all.
+    """
+    from runtime.widgets import P_LIVE, P_HELD, P_CLICK
+
+    inp = FakeInput(touch=(11, 22, P_LIVE | P_HELD | P_CLICK, 300))
     run = w.run(ws=FakeWs(inp=inp))
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TOUCH_X"]] == 11
     assert run.snap[C_CONSTS["SNAP_TOUCH_Y"]] == 22
-    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == 1
+    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_LIVE | P_HELD | P_CLICK
     assert run.snap[C_CONSTS["SNAP_TOUCH_MS"]] == 300
+    # A pointer with nothing held is still a POINTER: the flags have to survive
+    # apart, or a hovering mouse reads as no mouse.
+    inp.touch = (11, 22, P_LIVE, 0)
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_LIVE
 
 
 def test_a_lifted_pointer_reads_down_zero_which_is_touch_returning_nil(w):
     """SPEC.md 7.3: 0 means no pointer at all."""
-    inp = FakeInput(touch=(11, 22, False, 0))
+    inp = FakeInput(touch=(11, 22, 0, 0))
     run = w.run(ws=FakeWs(inp=inp))
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == 0
 
 
 def test_a_pointer_read_that_raises_reports_no_pointer_rather_than_dying(w):
-    inp = FakeInput(touch=(5, 6, True, 9))
+    inp = FakeInput(touch=(5, 6, 3, 9))
     run = w.run(ws=FakeWs(inp=inp))
     run._refresh()
     inp.touch_error = OSError("i2c")
