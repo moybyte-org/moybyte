@@ -11,11 +11,11 @@
     "native/moy_gfx/libmoy/moy_sprite.c": "5d95ef9aeb5d2322511ca58a6223b63af01a5dd0d9fdcb516022be9519c9ec57",
     "native/moycore/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moycore/libmoy/moy_lua.c": "45b30acfd8894ec9642b4bdaea1c014516165dc25beeb7f3486b7efccefd97ec",
-    "native/moycore/libmoy/moy_p8.c": "f9210bf956149453a1db48429bdd765c8e106e4971d82bf80179e41794065540"
+    "native/moycore/libmoy/moy_p8.c": "a16973ce637d068775814574117f4acda6b3f475211c23e0a693eed8b29d69c3"
   },
   "upstream": {
-    "commit": "f7471dc72df967b67b362f31b00185d7a9cf6940",
-    "date": "2026-09-12",
+    "commit": "9b391b7c4097f0363620891148d4d866202c71cc",
+    "date": "2026-09-14",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }

@@ -2304,11 +2304,40 @@ do
   end
 
   -- p8 rect/circ are OUTLINES and rectangles take the far corner
+  -- PICO-8's INVERTED fills. `poke(0x5f34, 2)` arms the mode and the COLOUR
+  -- asks for it with bits 0x1800.0000 (the manual, under CIRCFILL: "the circle
+  -- is drawn inverted"); the verb then paints the COMPLEMENT of the shape --
+  -- everything in the 128x128 screen it does NOT cover. `gift guardian` frames
+  -- its snow globes with one, so drawn the ordinary way a solid disc lands on
+  -- top of the house inside and the cart reads as missing its sprites.
+  --
+  -- The complement goes out through the same m_rect the shape would have used,
+  -- so the console's camera, clip and fill pattern apply to it identically --
+  -- which is why the spans are in SCREEN space plus the camera. libmoy's C
+  -- does the same (moy_p8.c), and p8lib.moy holds the two to one answer.
+  local function inverts(c)
+    return peek(0x5f34) & 2 ~= 0 and c ~= nil and fl(c) & 0x1800 == 0x1800
+  end
+  local function inv_span(sx0, sy0, sx1, sy1, col)
+    if sx1 < sx0 or sy1 < sy0 then return end
+    m_rect(sx0 + p8_cam_x, sy0 + p8_cam_y,
+           sx1 - sx0 + 1, sy1 - sy0 + 1, col)
+  end
   function rectfill(x0, y0, x1, y1, c)
     if fill_skip() then return end
     x0 = fl(x0) y0 = fl(y0) x1 = fl(x1) y1 = fl(y1)
     if x1 < x0 then x0, x1 = x1, x0 end
     if y1 < y0 then y0, y1 = y1, y0 end
+    if inverts(c) then
+      local col = shape_col(c)
+      local sx0, sy0 = x0 - p8_cam_x, y0 - p8_cam_y
+      local sx1, sy1 = x1 - p8_cam_x, y1 - p8_cam_y
+      inv_span(0, 0, 127, sy0 - 1, col)
+      inv_span(0, sy1 + 1, 127, 127, col)
+      inv_span(0, sy0, sx0 - 1, sy1, col)
+      inv_span(sx1 + 1, sy0, 127, sy1, col)
+      return
+    end
     m_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, shape_col(c))
   end
   function rect(x0, y0, x1, y1, c)
@@ -2320,7 +2349,25 @@ do
   end
   function circfill(x, y, r, c)
     if fill_skip() then return end
-    m_circ(fl(x), fl(y), fl(r), shape_col(c))
+    local cx, cy, r2 = fl(x), fl(y), fl(r)
+    if inverts(c) then
+      local col = shape_col(c)
+      for sy = 0, 127 do
+        local dy = sy + p8_cam_y - cy
+        if r2 < 0 or dy < -r2 or dy > r2 then
+          inv_span(0, sy, 127, sy, col)
+        else
+          -- moy_circ's own span: the largest s with s*s <= r*r - dy*dy, so
+          -- the shape and its complement meet with no seam.
+          local t, s = r2 * r2 - dy * dy, 0
+          while (s + 1) * (s + 1) <= t do s = s + 1 end
+          inv_span(0, sy, cx - s - p8_cam_x - 1, sy, col)
+          inv_span(cx + s - p8_cam_x + 1, sy, 127, sy, col)
+        end
+      end
+      return
+    end
+    m_circ(cx, cy, r2, shape_col(c))
   end
   function circ(x, y, r, c)
     if fill_skip() then return end

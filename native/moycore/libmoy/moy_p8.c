@@ -75,6 +75,7 @@ static inline moy_p8 *p8_of(lua_State *L)
 #define P8_CURY  0x5f27u
 #define P8_FILLP 0x5f31u        /* fill pattern lo, hi, then its transparency */
 #define P8_SPAL  0x5f10u        /* screen palette, kept across frames */
+#define P8_DRAWM 0x5f34u        /* draw mode: bit 1 arms the inverted fills */
 
 /* uint32 -> the int32 with the same bits, without leaning on the
  * implementation-defined narrowing conversion. */
@@ -1080,6 +1081,83 @@ static int p8_shape_col(lua_State *L, moy_p8 *p, int i)
     return (int)(v & 15);
 }
 
+/* -- PICO-8's INVERTED fills (0x5f34 bit 1) --------------------------------
+ *
+ * "When bits 0x1800.0000 are set in COL, and @0x5F34 & 2 == 2, the circle is
+ * drawn inverted" (the manual, under CIRCFILL and RRECTFILL; the fillp section
+ * lists the bit as `0x0800.0000 invert the drawing operation`). Inverted means
+ * the verb paints the COMPLEMENT: everything inside the clip that the shape
+ * does not cover.
+ *
+ * `gift guardian` draws its snow globes with it -- a filled circle of colour 6
+ * with the bits set FRAMES the globe and leaves the house inside showing
+ * through. Drawn the ordinary way it is a solid disc over the art, which is
+ * what this console did until 2026-09-14 and what made the cart look like its
+ * sprites were missing. Nothing named 0x5f34 anywhere in this repository
+ * before that, so the verdict did not report it either.
+ *
+ * Both bits are an OPT-IN: the mode byte arms it and the colour asks for it,
+ * so a cart that pokes 0x5f34 and then draws an ordinary shape is unaffected.
+ * The complement is emitted as row spans through the same moy_rect the shape
+ * would have used, so the camera, the clip and the fill pattern all apply
+ * exactly as they do to the shape -- and the circle's span rule below is
+ * moy_circ's own, which makes the two exact complements with no seam.
+ *
+ * OVALFILL is NOT here: moy_ellipse walks its spans with Bresenham, and a
+ * second copy of that walk is how the two would drift apart. PICO8.md says so.
+ */
+static int p8_col_inverts(lua_State *L, moy_p8 *p, int i)
+{
+    /* The colour's 0x1800.0000 bits are the INTEGER part's 0x1800 -- p8_fl
+     * floors, which is where they land. */
+    if (!(p->mem[P8_DRAWM] & 2) || lua_isnoneornil(L, i)) return 0;
+    return (p8_fl(L, i) & 0x1800) == 0x1800;
+}
+
+/* One screen-space rectangle, in the world coordinates moy_rect takes. It
+ * re-clips, so handing it the whole clip row is safe. */
+static void p8_fill_screen(moy_canvas *c, int sx0, int sy0, int sx1, int sy1,
+                           int col)
+{
+    if (sx1 < sx0 || sy1 < sy0) return;
+    moy_rect(c, sx0 + c->cam_x, sy0 + c->cam_y,
+             sx1 - sx0 + 1, sy1 - sy0 + 1, col);
+}
+
+static void p8_circ_inv(moy_canvas *c, int cx, int cy, int r, int col)
+{
+    int sy, cx0 = c->clip_x0, cy0 = c->clip_y0;
+    int cx1 = c->clip_x1 - 1, cy1 = c->clip_y1 - 1;
+    for (sy = cy0; sy <= cy1; sy++) {
+        int dy = sy + c->cam_y - cy, s = 0, t;
+        if (r < 0 || dy < -r || dy > r) {        /* the shape misses this row */
+            p8_fill_screen(c, cx0, sy, cx1, sy, col);
+            continue;
+        }
+        t = r * r - dy * dy;                     /* moy_circ's span, exactly */
+        while ((s + 1) * (s + 1) <= t) s++;
+        p8_fill_screen(c, cx0, sy, cx - s - c->cam_x - 1, sy, col);
+        p8_fill_screen(c, cx + s - c->cam_x + 1, sy, cx1, sy, col);
+    }
+}
+
+static void p8_rect_inv(moy_canvas *c, int x, int y, int w, int h, int col)
+{
+    int cx0 = c->clip_x0, cy0 = c->clip_y0;
+    int cx1 = c->clip_x1 - 1, cy1 = c->clip_y1 - 1;
+    int sx0 = x - c->cam_x, sy0 = y - c->cam_y, sx1, sy1;
+    if (w <= 0 || h <= 0) {                      /* covers nothing: all of it */
+        p8_fill_screen(c, cx0, cy0, cx1, cy1, col);
+        return;
+    }
+    sx1 = sx0 + w - 1;
+    sy1 = sy0 + h - 1;
+    p8_fill_screen(c, cx0, cy0, cx1, sy0 - 1, col);          /* above */
+    p8_fill_screen(c, cx0, sy1 + 1, cx1, cy1, col);          /* below */
+    p8_fill_screen(c, cx0, sy0, sx0 - 1, sy1, col);          /* left */
+    p8_fill_screen(c, sx1 + 1, sy0, cx1, sy1, col);          /* right */
+}
+
 /* p8's rectangles take the FAR CORNER; the console's take a size. */
 static void p8_corners(lua_State *L, int32_t *x, int32_t *y,
                        int32_t *w, int32_t *h)
@@ -1131,6 +1209,11 @@ static int l_p8_rectfill(lua_State *L)
     int32_t x, y, w, h;
     if (p8_fill_skip(p)) return 0;
     p8_corners(L, &x, &y, &w, &h);
+    if (p8_col_inverts(L, p, 5)) {
+        p8_rect_inv(p->con->canvas, (int)x, (int)y, (int)w, (int)h,
+                    p8_shape_col(L, p, 5));
+        return 0;
+    }
     moy_rect(p->con->canvas, (int)x, (int)y, (int)w, (int)h,
              p8_shape_col(L, p, 5));
     return 0;
@@ -1153,6 +1236,11 @@ static int l_p8_circfill(lua_State *L)
     int32_t x, y, r;
     if (p8_fill_skip(p)) return 0;
     x = p8_fl(L, 1); y = p8_fl(L, 2); r = p8_fl(L, 3);
+    if (p8_col_inverts(L, p, 4)) {
+        p8_circ_inv(p->con->canvas, (int)x, (int)y, (int)r,
+                    p8_shape_col(L, p, 4));
+        return 0;
+    }
     moy_circ(p->con->canvas, (int)x, (int)y, (int)r, p8_shape_col(L, p, 4));
     return 0;
 }
