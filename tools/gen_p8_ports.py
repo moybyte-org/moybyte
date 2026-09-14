@@ -100,29 +100,18 @@ def _indent(body):
 # A lid with a `ports/p8/perf/<lid>.lua` snippet gets the toggle; one without is
 # compatibility-only and still belongs, so long as it plays.
 #
-# A cart that does not is not a shelf item, whatever else it is useful for. Two
-# separate reasons have taken carts off this list, and neither is moy-spec's
-# corpus telling us anything -- both carts are still in it, still worth
-# importing, still exercising the bugs they were added for:
+# A cart the importer REFUSES does not: `celeste_classic_2`, `nimudazus`, `poom`
+# and `terra` are absent because a refusal is reproduced by moy-spec's
+# `p8-carts` gate on every push, and what a board's shelf would do with one
+# instead is offer a kid a cart that starts and never moves.
 #
-#   * `celeste_classic_2` is REFUSED by the importer. The list carried it so the
-#     boards could reproduce that verdict, but the verdict is reproduced by
-#     moy-spec's `p8-carts` gate on every push; what a board's shelf does with
-#     it instead is offer a kid a cart that starts, draws its clouds and never
-#     moves (owner call, 2026-09-14). Same reason nimudazus/poom/terra were
-#     never here.
-#
-#   * `deepdark` and `loop` WEDGE A BOARD. Both pass moy-spec's gate -- it
-#     asks whether the frame changed inside 45 s on a desktop, which is not the
-#     same question -- and both then hang the console hard enough that the dev
-#     channel stops answering and only an esptool reset gets it back (measured
-#     on a T-Deck, 2026-09-14). PICO8.md says this in as many words: a cart that
-#     plays on the host and fails only on a board is the frame cadence, and the
-#     gate cannot see it. So the bar for this list is a RUN ON GLASS, not a
-#     green gate.
+# GOTCHA when judging a cart from the host end: a heavy cart starves the serial
+# dev channel, which is a per-frame budgeted stage. `state` timing out means the
+# probe lost the board, not that the board hung -- the console keeps drawing and
+# the exit gesture still works.
 CORPUS = (
-    "42930", "bunnysurvivor-9", "crimson_night-5",
-    "dank_tomb-0", "dungeons_and_diagrams-5", "giftguardian-5",
+    "42930", "bunnysurvivor-9", "crimson_night-5", "dank_tomb-0", "deepdark-1",
+    "dungeons_and_diagrams-5", "giftguardian-5", "loop-4",
     "lowmemsky-1", "mossmoss-17", "petal_quest-12", "picooffroad-5",
 )
 

@@ -438,6 +438,17 @@ typedef struct {
      * through the shim's math.random. Seeded from lmathlib's state at open,
      * so a cart that never calls srand still differs run to run. */
     uint64_t rng[4];
+    /* THE DRAW PALETTE AND ITS TRANSPARENCY, kept here for the same reason the
+     * SCREEN palette is kept at 0x5f10: the console resets a canvas's draw
+     * state after every cart frame and PICO-8 keeps these ACROSS frames, so a
+     * cart sets them once in _init and draws. One byte per colour, the layout
+     * 0x5f00 reads back -- four colour bits, bit 4 transparent.
+     *
+     * `gift guardian` is the cart that needed it: `palt(14, true)` in its init
+     * marks pink as its sprite key, __moy_p8_frame put p8's DEFAULT
+     * transparency back on the next frame, and from then on every globe and
+     * gift drew its key colour as a pink block. */
+    uint8_t dpal[16];
 } moy_p8;
 int moy_p8_open(struct lua_State *L, moy_console *con, moy_p8 *p8,
                 uint8_t *mem, uint8_t *rom);

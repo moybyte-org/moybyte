@@ -4,8 +4,8 @@
     "tools/p8_lua_port.py": "fcb66a1a82c555287ec00805c2d66c7ee87289cc5f608546a24070f44b97eaf7"
   },
   "upstream": {
-    "commit": "9b391b7c4097f0363620891148d4d866202c71cc",
-    "date": "2026-09-14",
+    "commit": "81e04b7e1f8074f6d1c6bb4bb4aa7b1ce1afd04d",
+    "date": "2026-09-15",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }

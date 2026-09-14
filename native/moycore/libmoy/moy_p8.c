@@ -77,6 +77,12 @@ static inline moy_p8 *p8_of(lua_State *L)
 #define P8_SPAL  0x5f10u        /* screen palette, kept across frames */
 #define P8_DRAWM 0x5f34u        /* draw mode: bit 1 arms the inverted fills */
 
+/* Defined with the rest of the palette handling below; `wr` needs them here so
+ * a poke into 0x5f00 keeps the same persistent copy pal()/palt() do. */
+static void p8_pal_set(moy_p8 *p, int i, int col);
+static void p8_palt_set(moy_p8 *p, int i, int on);
+
+
 /* uint32 -> the int32 with the same bits, without leaning on the
  * implementation-defined narrowing conversion. */
 static inline int32_t u2i(uint32_t v)
@@ -272,8 +278,8 @@ static void apply(moy_p8 *p, uint32_t a, uint8_t v)
          * writes) OR bit 7: dank tomb marks its sprite key, colour 3, by
          * ORing 0x80 into every light-level palette it copies here, and
          * nothing else it does could make that colour transparent. */
-        moy_pal(c, (int)(a - 0x5f00), v & 15);
-        moy_palt(c, (int)(a - 0x5f00), (v & 0x90) != 0);
+        p8_pal_set(p, (int)(a - 0x5f00), v & 15);
+        p8_palt_set(p, (int)(a - 0x5f00), (v & 0x90) != 0);
     } else if (a >= 0x5f10 && a < 0x5f20) {
         moy_pal_screen(c, (int)(a - 0x5f10), col_in(v));
     } else if (a >= 0x5f20 && a < 0x5f24) {
@@ -1409,6 +1415,33 @@ static int l_p8_cursor(lua_State *L)
 }
 
 /* p8's palt default: colour 0 transparent, the rest opaque. */
+/* The draw palette and its transparency, written to the canvas AND to the copy
+ * that survives the console's per-frame reset (moy_p8.dpal; __moy_p8_frame puts
+ * it back at the top of each _draw, exactly as it already did for the screen
+ * palette at 0x5f10). PICO-8 keeps both across frames -- a cart sets them once
+ * in _init and draws -- and until 2026-09-14 this console kept neither, so
+ * `gift guardian`'s `palt(14, true)` lasted one frame and its sprite key drew
+ * as a pink block from the second one on. */
+static void p8_pal_set(moy_p8 *p, int i, int col)
+{
+    i &= 15;
+    p->dpal[i] = (uint8_t)((p->dpal[i] & 0x10) | (col & 15));
+    moy_pal(p->con->canvas, i, col & 15);
+}
+
+static void p8_palt_set(moy_p8 *p, int i, int on)
+{
+    i &= 15;
+    p->dpal[i] = (uint8_t)((p->dpal[i] & 15) | (on ? 0x10 : 0));
+    moy_palt(p->con->canvas, i, on);
+}
+
+static void p8_dpal_default(moy_p8 *p)
+{
+    int i;
+    for (i = 0; i < 16; i++) p->dpal[i] = (uint8_t)(i | (i == 0 ? 0x10 : 0));
+}
+
 static void p8_palt_default(moy_canvas *c)
 {
     moy_palt_reset(c);
@@ -1435,6 +1468,7 @@ static int l_p8_pal(lua_State *L)
         moy_pal_reset(c);
         for (i = 0; i < 16; i++) p->mem[P8_SPAL + i] = (uint8_t)i;
         p8_palt_default(c);
+        p8_dpal_default(p);
         return 0;
     }
     if (lua_type(L, 1) == LUA_TTABLE) {
@@ -1455,7 +1489,7 @@ static int l_p8_pal(lua_State *L)
             if (lua_type(L, -2) == LUA_TNUMBER && lua_type(L, -1) == LUA_TNUMBER) {
                 int32_t k = p8_fl(L, -2) & 15;
                 if (screen) p8_spal_set(p, (int)k, p8_scol(L, -1));
-                else moy_pal(c, (int)k, p8_pcol(L, p, -1));
+                else p8_pal_set(p, (int)k, p8_pcol(L, p, -1));
             }
             lua_pop(L, 1);
         }
@@ -1465,7 +1499,7 @@ static int l_p8_pal(lua_State *L)
         p8_spal_set(p, (int)(p8_fl(L, 1) & 15), p8_scol(L, 2));
         return 0;
     }
-    moy_pal(c, (int)(p8_fl(L, 1) & 15), p8_pcol(L, p, 2));
+    p8_pal_set(p, (int)(p8_fl(L, 1) & 15), p8_pcol(L, p, 2));
     return 0;
 }
 
@@ -1473,16 +1507,21 @@ static int l_p8_palt(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
     moy_canvas *c = p->con->canvas;
-    if (lua_isnoneornil(L, 1)) { p8_palt_default(c); return 0; }
-    if (lua_isnoneornil(L, 2)) {          /* palt(bits): all sixteen at once */
-        uint32_t bits = (uint32_t)p8_fl(L, 1);
-        int i;
-        moy_palt_reset(c);
-        for (i = 0; i < 16; i++)
-            moy_palt(c, i, (int)((bits >> (15 - i)) & 1u));
+    int i;
+    if (lua_isnoneornil(L, 1)) {
+        p8_palt_default(c);
+        for (i = 0; i < 16; i++) p->dpal[i] = (uint8_t)((p->dpal[i] & 15)
+                                                        | (i == 0 ? 0x10 : 0));
         return 0;
     }
-    moy_palt(c, (int)(p8_fl(L, 1) & 15), lua_toboolean(L, 2));
+    if (lua_isnoneornil(L, 2)) {          /* palt(bits): all sixteen at once */
+        uint32_t bits = (uint32_t)p8_fl(L, 1);
+        moy_palt_reset(c);
+        for (i = 0; i < 16; i++)
+            p8_palt_set(p, i, (int)((bits >> (15 - i)) & 1u));
+        return 0;
+    }
+    p8_palt_set(p, (int)(p8_fl(L, 1) & 15), lua_toboolean(L, 2));
     return 0;
 }
 
@@ -1675,7 +1714,13 @@ static int l_p8_frame(lua_State *L)
     moy_p8 *p = p8_of(L);
     moy_canvas *c = p->con->canvas;
     int i;
-    p8_palt_default(c);
+    /* The cart's OWN draw palette and transparency, not p8's default: PICO-8
+     * keeps both across frames and the console just reset them. */
+    moy_palt_reset(c);
+    for (i = 0; i < 16; i++) {
+        moy_pal(c, i, p->dpal[i] & 15);
+        moy_palt(c, i, (p->dpal[i] & 0x10) != 0);
+    }
     for (i = 0; i < 16; i++) {
         int v = col_in(p->mem[P8_SPAL + (unsigned)i]);
         if (v != i) moy_pal_screen(c, i, v);
@@ -2779,6 +2824,7 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
     p->mem = mem;
     p->rom = rom;
     seed(p);
+    p8_dpal_default(p);          /* identity, colour 0 transparent -- p8's */
     rand_open(L, p);
     if (rom) memcpy(rom, mem, MOY_P8_ROM);
     for (i = 0; i < sizeof T / sizeof T[0]; i++) {
