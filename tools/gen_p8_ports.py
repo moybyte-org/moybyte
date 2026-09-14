@@ -96,16 +96,34 @@ def _indent(body):
     return "\n".join(out).rstrip("\n") + "\n"
 
 
-# The carts the fleet carries. A lid with a `ports/p8/perf/<lid>.lua` snippet
-# gets the toggle; one without is COMPATIBILITY-ONLY and still belongs here --
-# celeste2 is the importer's own "refused" verdict, which is a thing the boards
-# must keep being able to reproduce. The three corpus lids that do not import at
-# all (nimudazus, poom, terra) are deliberately absent: moy-spec's `p8-carts`
-# gate is where those are watched, not a board's shelf.
+# The carts the fleet carries, and the bar is that the cart PLAYS ON A BOARD.
+# A lid with a `ports/p8/perf/<lid>.lua` snippet gets the toggle; one without is
+# compatibility-only and still belongs, so long as it plays.
+#
+# A cart that does not is not a shelf item, whatever else it is useful for. Two
+# separate reasons have taken carts off this list, and neither is moy-spec's
+# corpus telling us anything -- both carts are still in it, still worth
+# importing, still exercising the bugs they were added for:
+#
+#   * `celeste_classic_2` is REFUSED by the importer. The list carried it so the
+#     boards could reproduce that verdict, but the verdict is reproduced by
+#     moy-spec's `p8-carts` gate on every push; what a board's shelf does with
+#     it instead is offer a kid a cart that starts, draws its clouds and never
+#     moves (owner call, 2026-09-14). Same reason nimudazus/poom/terra were
+#     never here.
+#
+#   * `deepdark` and `loop` WEDGE A BOARD. Both pass moy-spec's gate -- it
+#     asks whether the frame changed inside 45 s on a desktop, which is not the
+#     same question -- and both then hang the console hard enough that the dev
+#     channel stops answering and only an esptool reset gets it back (measured
+#     on a T-Deck, 2026-09-14). PICO8.md says this in as many words: a cart that
+#     plays on the host and fails only on a board is the frame cadence, and the
+#     gate cannot see it. So the bar for this list is a RUN ON GLASS, not a
+#     green gate.
 CORPUS = (
-    "42930", "bunnysurvivor-9", "celeste_classic_2-5", "crimson_night-5",
-    "dank_tomb-0", "deepdark-1", "dungeons_and_diagrams-5", "giftguardian-5",
-    "loop-4", "lowmemsky-1", "mossmoss-17", "petal_quest-12", "picooffroad-5",
+    "42930", "bunnysurvivor-9", "crimson_night-5",
+    "dank_tomb-0", "dungeons_and_diagrams-5", "giftguardian-5",
+    "lowmemsky-1", "mossmoss-17", "petal_quest-12", "picooffroad-5",
 )
 
 
