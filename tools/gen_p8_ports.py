@@ -105,12 +105,17 @@ def _indent(body):
 # `p8-carts` gate on every push, and what a board's shelf would do with one
 # instead is offer a kid a cart that starts and never moves.
 #
+# Nor does a cart that is a DEMO rather than a game: `deepdark` is a room with a
+# torch in it (owner call). It stays in moy-spec's conformance corpus, which is
+# a test resource and judges a cart on what it exercises -- that one is the cart
+# that found the shim calling a global `camera()` a cart had taken for itself.
+#
 # GOTCHA when judging a cart from the host end: a heavy cart starves the serial
 # dev channel, which is a per-frame budgeted stage. `state` timing out means the
 # probe lost the board, not that the board hung -- the console keeps drawing and
 # the exit gesture still works.
 CORPUS = (
-    "42930", "bunnysurvivor-9", "crimson_night-5", "dank_tomb-0", "deepdark-1",
+    "42930", "bunnysurvivor-9", "crimson_night-5", "dank_tomb-0",
     "dungeons_and_diagrams-5", "giftguardian-5", "loop-4",
     "lowmemsky-1", "mossmoss-17", "petal_quest-12", "picooffroad-5",
 )
