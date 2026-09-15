@@ -10,11 +10,9 @@ matches a board's declared `[serial] usb` id, PROBES to tell twins apart where
 opening a port is side-effect free, and refuses to guess rather than hand back a
 plausible wrong port. This is a listing around it.
 
-THE ONE THING IT HAS TO SAY THAT find_port CANNOT. A board in the ROM loader
-does not carry its running USB id -- the Zero runs as TinyUSB CDC `303a:4001`
-and appears in the loader as `303a:1001` -- so `find_port` fails for that board
-at precisely the moment you want to flash it. An unclaimed `303a:1001` port is
-therefore reported as a likely loader, because that is the flashable state and a
+THE ONE THING IT HAS TO SAY THAT find_port CANNOT. Every S3 board runs as
+USB-Serial/JTAG and its ROM loader carries the same `303a:1001`, so a port no
+board claims is reported as a likely loader: that is the flashable state, and a
 person staring at "no serial port matches" would otherwise conclude the board
 was not plugged in.
 """

@@ -30,6 +30,8 @@ except ImportError:  # pyserial is the `device` extra -- hardware only. The
     serial = None    # data half below must still import under a host suite.
 
 BAUD = 115200
+WRITE_TIMEOUT_S = 2.0      # a write that does not drain in this long is a wedged port
+
 BOOT_BANNER = "desktop running"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -168,6 +170,9 @@ def _probe_identity(port, board_dir, log):
     try:
         b.drain(0.6)
         return b.identify(timeout=4.0)
+    except Exception as exc:  # noqa: BLE001 -- a port that will not drain
+        log("  %s: no answer (%s)" % (port, exc))
+        return None
     finally:
         b.close()
 
@@ -301,6 +306,10 @@ class P4Board:
         self.ser.port = port
         self.ser.baudrate = BAUD
         self.ser.timeout = timeout
+        # A USB-Serial/JTAG port whose board is not draining its console
+        # accepts the open and then blocks the first write forever; a bounded
+        # write turns that into an exception the caller can report.
+        self.ser.write_timeout = WRITE_TIMEOUT_S
         # The line state AT OPEN is board-specific and load-bearing:
         #   P4 (CH343, external USB-UART): dtr/rts LOW, so opening never
         #     glitches the auto-reset circuit (reset is explicit, below).
