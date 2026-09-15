@@ -1107,6 +1107,20 @@ def test_the_title_comes_from_the_header_block_not_any_comment(tmp_path):
     only_by = {"lua": ["-- by someone", "x=1"]}
     assert import_p8._title_from(only_by, "star_catcher.p8") == "star catcher"
 
+    # THREE HEADER LINES THAT ARE NOT A NAME, each off a featured cart. A tab
+    # RULE is PICO-8's own tab-title convention (`octosnatch` opens with one);
+    # a LINK wraps across lines, so the second half has no "://" to catch it
+    # (`the last drop` imported as "://github.com/yellowafterlife/"); and a
+    # section LABEL ends in a colon. All three fall through to the filename.
+    rule = {"lua": ["---- main ----", "function _init()"]}
+    assert import_p8._title_from(rule, "37908.p8.png") == "37908"
+    link = {"lua": ["-- ://github.com/someone/", "-- repo/tree/master/x",
+                    "--", "-- entity:", "function f()"]}
+    assert import_p8._title_from(link, "12242.p8.png") == "12242"
+    # ...and a real title with a slash or a colon INSIDE it still lands
+    slashy = {"lua": ["-- pico/8 demake: part two", "x=1"]}
+    assert import_p8._title_from(slashy, "c.p8") == "pico/8 demake: part two"
+
 
 def _run_p8(tmp_path, body, frames=60, dt=1.0 / 60):
     """Import a scrap of p8 source and run it on the real Player."""

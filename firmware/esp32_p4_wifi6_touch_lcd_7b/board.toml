@@ -260,9 +260,16 @@ chunk       = 256
 # file where 2048 passed, in the same session. The fix is recovery, not
 # avoidance (RECV_RETRIES in runtime/dev_channel.py): a short window is thrown
 # away and asked for again, and 8 pushes of a 120KB cart then went 8/8 with 6
-# re-sends absorbed. So this number is a round-trip/latency tuning knob now,
-# not a correctness one.
-window      = 4096
+# re-sends absorbed.
+#
+# 1024, measured 2026-09-15. Recovery absorbs a dropped byte; it cannot absorb
+# a window the board never sees at all, and that is what 2048 and 4096 do here
+# -- a 79KB file failed 3/3 at each with "timeout after 0 of 79036", the
+# board's two-empty-windows verdict, while 1024 went 3/3 clean. The ring is
+# ~256 bytes with no flow control, so the ack is the only backpressure there
+# is: the larger the window, the longer this board's frame loop has to keep up
+# unaided, and for 4KB it does not.
+window      = 1024
 
 [monitor]
 baud = 115200
