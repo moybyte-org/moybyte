@@ -10,7 +10,7 @@ assert on the console's state, not on pixels.
 
 Two entry points:
   * `P4Board` -- the reusable driver (tests/test_p4_on_glass.py builds on it).
-  * `python tools/p4_autotest.py [--port /dev/ttyACM0]` -- a standalone tour:
+  * `python tools/p4_autotest.py [--port auto]` -- a standalone tour:
     boot, open each surface, scroll Settings, report PASS/FAIL + PERF lines.
 
 The board is left rebooted onto the desk afterwards, ready for a human.
@@ -233,6 +233,35 @@ def find_port(board_dir=P4_BOARD_DIR, log=None, ports=None, usb_of=None,
     raise RuntimeError(
         "no candidate answered as %r: %s -- is that board's desktop running?"
         % (want_id, ", ".join("%s=%s" % kv for kv in seen.items())))
+
+
+def add_board_args(ap):
+    """The `--board`/`--port` pair every tool that drives a board over serial
+    takes, so that all of them take the SAME one.
+
+    --board has no default. The line state at open is per board and OPPOSITE:
+    the Waveshare P4's external CH343 opens with both lines LOW, while the
+    other four carry their USB serial ON the SoC, where that same open is a
+    CHIP RESET -- after which the device re-enumerates under the open handle
+    and every read returns nothing, forever. A default here picks one of those
+    disciplines for a board somebody did not name.
+
+    --port resolves from that board's own [serial] usb id, because those four
+    share 303a:1001 and the ttyACM numbers shuffle across replugs."""
+    ap.add_argument("--board", required=True, choices=sorted(board_dirs()),
+                    help="which board to drive (its [board] ota id) -- no "
+                         "default: a wrong guess at the line state chip-resets "
+                         "every board but the Waveshare P4")
+    ap.add_argument("--port", default="auto",
+                    help="serial port, or 'auto' (default): resolve it from "
+                         "the board's [serial] usb id -- ttyACM numbers "
+                         "shuffle across replugs")
+
+
+def board_from_args(args, **kw):
+    """A driver for the board `add_board_args` parsed, opened the way that
+    board's own [serial] block declares."""
+    return P4Board(args.port, board_dir=board_dirs()[args.board], **kw)
 
 
 class DeviceError(RuntimeError):

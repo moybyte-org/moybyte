@@ -78,7 +78,7 @@ if [ "${WEB}" = "1" ]; then
   step "browser suites in real Chrome" \
     env MOYBYTE_WEB_E2E=1 "${PY}" -m pytest -rs -q \
       tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
-      tests/test_web_p8_e2e.py
+      tests/test_web_p8_e2e.py tests/test_web_update_e2e.py
 fi
 
 if [ "${fails}" -ne 0 ]; then

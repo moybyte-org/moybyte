@@ -348,3 +348,48 @@ def test_the_memo_does_not_reuse_an_answer_taken_under_another_open():
         p4_autotest._probe_identity = real
     assert len(opened) == 2, \
         "the two disciplines must not share one answer (saw %d opens)" % len(opened)
+
+
+# -- every tool that drives a board asks WHICH board ---------------------------
+#
+# Ten of them defaulted --port to /dev/ttyACM0 and built the driver with no
+# board_dir, i.e. on the Waveshare P4's both-lines-low discipline. The other
+# four boards share usb id 303a:1001 and the ttyACM numbers shuffle across
+# replugs, so that default eventually points at one of them -- where the same
+# open is a CHIP RESET and the board then answers nothing under the handle,
+# forever. `add_board_args` /
+# `board_from_args` (tools/p4_autotest.py) are the one shape; this is the guard
+# that keeps the next tool from growing its own.
+
+def _board_driving_tools():
+    import glob
+    out = []
+    for path in sorted(glob.glob(os.path.join(ROOT, "tools", "*.py"))):
+        src = open(path, encoding="utf-8").read()
+        if "P4Board(" in src or "board_from_args(" in src:
+            out.append((os.path.basename(path), src))
+    assert len(out) >= 10, "the sweep found almost nothing -- it stopped working"
+    return out
+
+
+def test_no_tool_hardcodes_a_serial_port_default():
+    bad = [name for name, src in _board_driving_tools()
+           if 'default="/dev/ttyACM' in src or "default='/dev/ttyACM" in src]
+    assert not bad, ("these default --port to one ttyACM node: %s -- the "
+                     "numbers shuffle, and the wrong board's open resets it"
+                     % ", ".join(bad))
+
+
+def test_every_board_driving_tool_takes_a_board():
+    # p4_autotest's own standalone tour is the P4's, and board_flash names its
+    # board positionally (it takes a board DIRECTORY, not an ota id).
+    exempt = {"p4_autotest.py", "board_flash.py"}
+    bad = []
+    for name, src in _board_driving_tools():
+        if name in exempt or "argparse" not in src:
+            continue
+        if "add_board_args(" not in src and '"--board"' not in src:
+            bad.append(name)
+    assert not bad, ("these drive a board without asking which: %s -- use "
+                     "p4_autotest.add_board_args/board_from_args"
+                     % ", ".join(bad))

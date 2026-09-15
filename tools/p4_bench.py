@@ -9,7 +9,7 @@ content-draw and 181ms by real frame). So every number here is measured around
 `ws.frame()`, the whole loop iteration the glass actually shows.
 
 Usage:
-    python tools/p4_bench.py [--port /dev/ttyACM0] [--out bench.md]
+    python tools/p4_bench.py --board p4 [--out bench.md]
 
 Reports per scenario: frame count, median, p90, max (ms) plus the per-Layer
 median split, so the worst offender in a slow frame is named, not guessed.
@@ -21,7 +21,7 @@ import argparse
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from p4_autotest import P4Board            # noqa: E402
+from p4_autotest import add_board_args, board_from_args  # noqa: E402
 
 
 def pyexec(b, code, timeout=60):
@@ -246,10 +246,10 @@ def bench_all(b, out_path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    add_board_args(ap)
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
-    b = P4Board(args.port)
+    b = board_from_args(args)
     try:
         b.reset()
         bench_all(b, args.out)

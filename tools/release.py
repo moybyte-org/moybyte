@@ -15,7 +15,8 @@ last on dev.
 What it does, in order, stopping at the first thing that looks wrong:
 
     1. clean tree, and `dev` and `master` both level with origin
-    2. the host suite (`make test`) -- the gate the release is entitled to
+    2. CI's host lane (`tools/preflight.sh`) -- the gate the release is
+       entitled to, and the one that catches a stale derived artifact
     3. checkout master, `merge --no-ff dev`
     4. FIRMWARE_VERSION N -> N+1 in moy_ota.py, with NOTES as its comment,
        and FIRMWARE_NAME set to NAME when one is given
@@ -118,7 +119,7 @@ def read_name():
     return m.group(2)
 
 
-def preflight(skip_tests):
+def preconditions(skip_tests):
     if git("status", "--porcelain"):
         raise Stop("the working tree has changes -- commit or stash them first "
                    "(a release must be exactly what is on the branch)")
@@ -146,21 +147,29 @@ def preflight(skip_tests):
 
 
 def gate(skip_tests):
-    """The host suite, run on the MERGED tree -- the thing being released.
+    """CI's host lane, run on the MERGED tree -- the thing being released.
 
-    It used to run in preflight, before the merge, which tested whichever branch
-    you happened to be standing on and never the combination. That was harmless
-    while master only ever moved by being merged into; it stopped being harmless
-    the first time master carried commits of its own (a pyproject change, as it
-    happens -- exactly the kind that can only break in combination)."""
+    `tools/preflight.sh`, not `make test`. The steps preflight adds over the
+    suite are the ones that compare a DERIVED ARTIFACT against the sources it
+    was built from -- the baked web blob, the desktop MicroPython, the docs'
+    paths -- and a release is precisely the moment a stale artifact escapes
+    onto a device. Its own header carries the argument and the ORDER.
+
+    It runs on the merge because the merge is the tree being released. The
+    checks used to run in preconditions(), before it, which tested whichever
+    branch you happened to be standing on and never the combination. That was
+    harmless while master only ever moved by being merged into; it stopped
+    being harmless the first time master carried commits of its own (a
+    pyproject change, as it happens -- exactly the kind that can only break in
+    combination)."""
     if skip_tests:
-        print("SKIPPING the test suite (--no-tests)")
+        print("SKIPPING the release gate (--no-tests)")
         return
-    print("running the host suite on the merged tree ...")
-    p = subprocess.run(["make", "test"], cwd=ROOT)
+    print("running CI's host lane on the merged tree (tools/preflight.sh) ...")
+    p = subprocess.run([os.path.join(ROOT, "tools", "preflight.sh")], cwd=ROOT)
     if p.returncode != 0:
-        raise Stop("tests failed ON THE MERGE -- that is the release gate. The "
-                   "merge commit is still there so you can look at it; "
+        raise Stop("preflight failed ON THE MERGE -- that is the release gate. "
+                   "The merge commit is still there so you can look at it; "
                    "`git reset --hard origin/master` undoes it")
 
 
@@ -169,7 +178,7 @@ def cut(name, notes, push, skip_tests):
     if name is not None and not NAME_SHAPE.match(name):
         raise Stop("NAME must be MAJOR.MINOR or MAJOR.MINOR.PATCH (got %r) -- it "
                    "becomes the tag and the label a kid reads" % name)
-    preflight(skip_tests)
+    preconditions(skip_tests)
 
     # The tag is checked BEFORE touching master (a name collision should cost
     # nothing), but the version and the fallback name are read AFTER the merge --
@@ -240,7 +249,7 @@ def main(argv=None):
                     default=bool(os.environ.get("PUSH")),
                     help="push master + the tag when it all worked")
     ap.add_argument("--no-tests", action="store_true",
-                    help="skip `make test` (you have just run it)")
+                    help="skip `tools/preflight.sh` (you have just run it)")
     args = ap.parse_args(argv)
     try:
         return cut(args.name, args.notes, args.push, args.no_tests)

@@ -15,7 +15,7 @@ passes over memory -- not draw calls -- decide the frame. Flipping a canvas's
 RETAINED_FRAMES to 0 disables the blit path without touching any other code,
 which makes this a clean A/B.
 
-Usage:  python tools/p4_scroll_ab.py [--port /dev/ttyACM0]
+Usage:  python tools/p4_scroll_ab.py --board p4
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import argparse
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from p4_autotest import P4Board            # noqa: E402
+from p4_autotest import add_board_args, board_from_args  # noqa: E402
 
 
 PROBE = """
@@ -104,9 +104,9 @@ def run(b, name, setup, gesture, retained):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    add_board_args(ap)
     args = ap.parse_args()
-    b = P4Board(args.port)
+    b = board_from_args(args)
     try:
         b.reset()
         b.pyexec(PROBE)

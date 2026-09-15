@@ -293,7 +293,7 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
 # -- SPEC.md 4.1: the host sandbox is a MAXIMUM, matched to what glass can give -
 
 def test_host_lua_sandbox_matches_the_device_ceiling(tmp_path):
-    """utf8 is the one library lupa's openlibs leaks that the device build drops
+    """utf8 is the one library a full openlibs leaks that the device build drops
     from its sources outright -- a cart using it would run here and die on glass."""
     from runtime import moy_carts
     root = str(tmp_path / "carts")
@@ -308,7 +308,7 @@ def test_host_lua_sandbox_matches_the_device_ceiling(tmp_path):
     ws = host_app.build_workstation(root)
     if getattr(ws, "lua_runtime", None) is None:
         import pytest
-        pytest.skip("lupa not installed")
+        pytest.skip("no Lua runtime -- runtime/lua_binding needs a C compiler")
     _open(ws, "Sandbox")
     assert not ws.cart_error
     ws.frame(1 / 30.0)
@@ -345,7 +345,7 @@ def test_lua_runtime_still_runs(tmp_path):
     ws = host_app.build_workstation(root)
     if getattr(ws, "lua_runtime", None) is None:
         import pytest
-        pytest.skip("lupa not installed")
+        pytest.skip("no Lua runtime -- runtime/lua_binding needs a C compiler")
     _open(ws, "Luacart")
     assert not ws.cart_error
     ws.frame(1 / 30.0)

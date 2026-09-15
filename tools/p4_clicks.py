@@ -12,7 +12,7 @@ code a tap runs, minus the touch plumbing), records every painted frame with
 p4_alloc's zero-retention CADENCE hook, and reports the transition's cost as the
 frames it took and the worst one.
 
-  python tools/p4_clicks.py [--port /dev/ttyACM0] [--only tab_map,open_picker]
+  python tools/p4_clicks.py --board p4 [--only tab_map,open_picker]
 
 READ THE COLUMNS AS: `frames` is how many painted frames the transition spanned
 (the settle), `worst` the single most expensive one, `sum` the total wall the kid
@@ -95,7 +95,7 @@ import argparse
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from p4_autotest import P4Board            # noqa: E402
+from p4_autotest import add_board_args, board_from_args  # noqa: E402
 from p4_alloc import PROBE, CADENCE        # noqa: E402
 
 HELPER = """
@@ -183,11 +183,11 @@ def run(b, name, pre, click, settle=4.0):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    add_board_args(ap)
     ap.add_argument("--only", default="")
     args = ap.parse_args()
     want = [s for s in args.only.split(",") if s] or list(SCENARIOS)
-    b = P4Board(args.port)
+    b = board_from_args(args)
     try:
         for name in want:
             pre, click = SCENARIOS[name]

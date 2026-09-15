@@ -15,7 +15,10 @@ Plus a real-console smoke run (the fake API proves the LOGIC; this proves the po
 against the SHIPPED make_api -- every verb name, arity and return shape the cart
 actually calls, through runtime/lua_host.py's sandbox prelude).
 
-Skips when `lupa` (the optional #67 Phase 3 host-runner dep) isn't installed.
+The PARITY half needs `lupa`, a second Lua VM that is nobody's dependency, and
+skips without it. The real-console run below needs nothing but the venv, so the
+skip is scoped to the one test that earns it -- at module level it took the
+Player test down with it everywhere but a bench that happens to have lupa.
 """
 
 import os
@@ -23,14 +26,19 @@ import sys
 
 import pytest
 
-pytest.importorskip("lupa")
-
 ROOT = os.path.join(os.path.dirname(__file__), "..")
-sys.path.insert(0, os.path.join(ROOT, "experiments", "lua_bridge"))
-from brick_parity import run_parity  # noqa: E402
+
+LUPA = (
+    "lupa is a bench-only second Lua VM -- it left pyproject on 2026-08-14 "
+    "(the host runs the BOARDS' Lua, built on demand by runtime/lua_binding), "
+    "so this harness runs only where someone installed it by hand")
 
 
 def test_brick_siege_lua_parity():
+    pytest.importorskip("lupa", reason=LUPA)
+    sys.path.insert(0, os.path.join(ROOT, "experiments", "lua_bridge"))
+    from brick_parity import run_parity
+
     assert run_parity(frames=3000, verbose=True)
 
 

@@ -137,9 +137,11 @@ ws._g['_sha'] = _sha; ws._g['_mkdir'] = _mkdir
 
 
 # A board that advertises `recv` but declares no window in its [serial] block
-# gets the P4's -- the smallest, and the only one that is safe on a transport
-# with no flow control. Not a guess about that board: a floor no board needs
-# less than.
+# gets this one. It is nobody's declared window: the P4's is 1024 (4KB outran
+# its unflow-controlled UART ring) and the USB boards' is 16384. Every board in
+# the tree that HAS a dev channel declares one, so this is only what an
+# undeclared board would get: big enough to be worth a round trip, small enough
+# not to ask a board that has said nothing to keep up with 16KB unaided.
 RAW_WINDOW_FALLBACK = 4096
 # How many windows a single file may have to re-send before the push gives up.
 # The board asks for one when a window arrives short -- a byte dropped by a ring

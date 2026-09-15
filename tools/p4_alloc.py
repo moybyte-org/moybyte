@@ -114,7 +114,7 @@ import argparse
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from p4_autotest import P4Board            # noqa: E402
+from p4_autotest import add_board_args, board_from_args  # noqa: E402
 
 
 # -- device half ----------------------------------------------------------------
@@ -436,7 +436,7 @@ def report(b, name, natural=False):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    add_board_args(ap)
     ap.add_argument("--surface", default="both",
                     choices=("settings", "picker", "both"))
     ap.add_argument("--drill", action="store_true",
@@ -455,7 +455,7 @@ def main():
     ap.add_argument("--frames", type=int, default=3, help="gestures to record")
     args = ap.parse_args()
 
-    b = P4Board(args.port)
+    b = board_from_args(args)
     try:
         b.reset()
         b.pyexec(PROBE)

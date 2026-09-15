@@ -410,6 +410,18 @@ def native_modules(board_dir, root=ROOT):
     return sorted(out)
 
 
+def native_dest(board_dir):
+    """Where `stage_native` puts the shared native modules, relative to the
+    board dir -- board.toml `[native] dest`, or the default.
+
+    A verb rather than a constant two readers restate: `tools/esp32_build_lib.sh`
+    has to find the staged tree to generate the web blob into it, and had the
+    default spelled out on its own side, where a board moving its dest would
+    have gone unnoticed until the image shipped with no console."""
+    cfg = load(Path(board_dir).resolve())
+    return cfg.get("native", {}).get("dest", "native/.staged")
+
+
 def stage_native(board_dir, root=ROOT, quiet=False):
     """Stage the shared native modules into <board>/<native.dest> and write the
     cmake include list the board's tracked native/micropython.cmake pulls in.
@@ -420,14 +432,13 @@ def stage_native(board_dir, root=ROOT, quiet=False):
     prune -- nothing in .staged/ is ever authored).
     """
     board_dir, root = Path(board_dir).resolve(), Path(root)
-    cfg = load(board_dir)
     mods = []
     for _name, nat in native_sources(board_dir):
         mods.extend(_native_of(nat, root))
     mods.sort()
     if not mods:
         return []
-    dest = board_dir / cfg["native"].get("dest", "native/.staged")
+    dest = board_dir / native_dest(board_dir)
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
@@ -653,6 +664,9 @@ def main(argv):
     if len(argv) >= 3 and argv[1] == "stage-native":
         stage_native(argv[2])
         return 0
+    if len(argv) >= 3 and argv[1] == "native-dest":
+        print(native_dest(argv[2]))
+        return 0
     if len(argv) >= 3 and argv[1] == "list":
         for name in sorted(staged_modules(argv[2])):
             print(name)
@@ -677,17 +691,10 @@ def main(argv):
                     print(s.why)
                 return 0
         return 1
-    if len(argv) >= 3 and argv[1] == "get":
-        # `get <board_dir> a.b.c` -- one scalar, for a build script.
-        cfg = load(argv[2])
-        node = cfg
-        for part in argv[3].split("."):
-            node = node[part]
-        print(node)
-        return 0
     print(__doc__.strip().splitlines()[0], file=sys.stderr)
-    print("usage: board_config.py stage|list <board_dir>", file=sys.stderr)
-    print("       board_config.py get <board_dir> <dotted.key>", file=sys.stderr)
+    print("usage: board_config.py stage|stage-native|list|list-native "
+          "<board_dir>", file=sys.stderr)
+    print("       board_config.py native-dest <board_dir>", file=sys.stderr)
     print("       board_config.py sdkconfig-required|sdkconfig-get|"
           "sdkconfig-why <board_dir> [OPTION]", file=sys.stderr)
     return 2

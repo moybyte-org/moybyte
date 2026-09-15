@@ -192,8 +192,8 @@ VFS when not).
     answer (resolution-driven with fs floors, the 2026-07-12 owner call).
     FONT_SCALE stays 1; do not re-flip it to solve tap size.
   * **the Bench twins ran on this board for the first time** (over the dev
-    channel, feeder image; JSON via tools/p4_cart_bench.py --attach). The
-    floors MATCH THE T-DECK REFEREE: idle 62.5fps p50=16ms, silent/sound
+    channel, feeder image; JSON via tools/p4_cart_bench.py --board guition_s3).
+    The floors MATCH THE T-DECK REFEREE: idle 62.5fps p50=16ms, silent/sound
     scenes 55.5fps p50=18ms, sound ≡ silent -- despite the rotate and the
     2x-class glass, which is the fold + game window + core-0 feeder chain
     doing its job. Lua logic 2.2x Python (45.4 vs 32.2fps), draw paths equal

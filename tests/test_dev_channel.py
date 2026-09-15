@@ -294,6 +294,64 @@ def test_bl_without_backlight_declines_and_with_it_drives(capsys):
     assert idle.asleep is False and idle.woken == 1
 
 
+# -- `link`: arming the radio from outside a cart ------------------------------
+
+
+class FakeLink:
+    """`ws.link` (device/moy_espnow.py's Link) narrowed to what `link` drives."""
+
+    def __init__(self):
+        self.active = False
+        self.announced = []
+
+    def start(self):
+        self.active = True
+
+    def stop(self):
+        self.active = False
+
+    def announce(self, cart="", state=0):
+        self.announced.append((cart, state))
+
+    def stats(self):
+        return {"active": self.active, "peers": []}
+
+
+def test_link_declines_on_a_board_with_no_radio(capsys):
+    ws, ch = make()
+    ch.run(ws, "link")
+    assert "no radio on this board" in capsys.readouterr().out
+
+
+def test_link_reports_and_arms_the_radio_by_hand(capsys):
+    """The Player only arms the radio for a cart that declares the multiplayer
+    permission, so a two-board bench needs a way in from outside one."""
+    ws, ch = make()
+    ws.link = FakeLink()
+
+    def said():
+        """The one LINK line the command prints, parsed. Every branch reports,
+        including the ones that changed something."""
+        out = [ln for ln in capsys.readouterr().out.splitlines()
+               if ln.startswith("LINK ")]
+        assert len(out) == 1, out
+        return json.loads(out[0][len("LINK "):])
+
+    ch.run(ws, "link")                        # bare: reports, changes nothing
+    assert said() == {"active": False, "peers": []}
+    assert ws.link.active is False and ws.link.announced == []
+
+    ch.run(ws, "link on")
+    assert ws.link.active is True and said()["active"] is True
+
+    ch.run(ws, "link cart Brick Siege")
+    assert ws.link.announced == [("Brick Siege", 1)]
+    said()
+
+    ch.run(ws, "link off")
+    assert ws.link.active is False and said()["active"] is False
+
+
 # -- `recv`: the raw upload, off the board -------------------------------------
 #
 # The loop is driven here through the two objects it actually talks to -- the

@@ -169,19 +169,6 @@ moybyte_patch_gc_split_reserve() {
   fi
 }
 
-# PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by the
-# 120MHz octal MSPI profile, not optional beside it: IDF only starts the retune
-# for verified flash vendor IDs (0xC8/0x20) and otherwise returns
-# ESP_ERR_NOT_SUPPORTED from a SECONDARY ESP_SYSTEM_INIT_FN -- which aborts the
-# boot. The board then flashes cleanly, says NOTHING on serial and never reaches
-# the console, which reads exactly like a PSRAM timing failure and is not one
-# (measured 2026-08-16). The patch relaxes the vendor gate to warn-and-run and
-# turns the task's other brick path -- an abort() when the scanned points share
-# no temperature range -- into "stop adjusting", degrading to the un-mitigated
-# build rather than a dead one. Inert, not wrong, at 80MHz.
-#
-# ESP32-S3 only: the file it patches is the S3 port of the MSPI timing tuner.
-# Reads IDF_DIR, REPO_ROOT.
 # The two ESP32-P4 SILICON patches, one-shot marker-guarded like the rest --
 # shared by every P4 board since 2026-09-06 (they were the Waveshare's own
 # `patches/` until the Guition P4 became their second consumer):
@@ -216,6 +203,19 @@ moybyte_patch_p4_dsi_underrun() {
   fi
 }
 
+# PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by the
+# 120MHz octal MSPI profile, not optional beside it: IDF only starts the retune
+# for verified flash vendor IDs (0xC8/0x20) and otherwise returns
+# ESP_ERR_NOT_SUPPORTED from a SECONDARY ESP_SYSTEM_INIT_FN -- which aborts the
+# boot. The board then flashes cleanly, says NOTHING on serial and never reaches
+# the console, which reads exactly like a PSRAM timing failure and is not one
+# (measured 2026-08-16). The patch relaxes the vendor gate to warn-and-run and
+# turns the task's other brick path -- an abort() when the scanned points share
+# no temperature range -- into "stop adjusting", degrading to the un-mitigated
+# build rather than a dead one. Inert, not wrong, at 80MHz.
+#
+# ESP32-S3 only: the file it patches is the S3 port of the MSPI timing tuner.
+# Reads IDF_DIR, REPO_ROOT.
 moybyte_patch_psram_retune() {
   local f="${IDF_DIR}/components/esp_hw_support/mspi_timing_tuning/port/esp32s3/mspi_timing_by_mspi_delay.c"
   if [ -f "${f}" ] && ! grep -q "Moybyte #169" "${f}"; then
@@ -231,7 +231,12 @@ moybyte_patch_psram_retune() {
 # because a PUBLISHED image with no console is the whole bug the baking fixes.
 moybyte_stage_native() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage-native "${SCRIPT_DIR}"
-  local staged="${SCRIPT_DIR}/native/.staged"
+  # WHERE it staged them is the board's to say ([native] dest). Asked rather
+  # than restated: a board moving its dest would otherwise leave the blob
+  # ungenerated, and an image with no console is a silent pass.
+  local dest
+  dest="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" native-dest "${SCRIPT_DIR}")"
+  local staged="${SCRIPT_DIR}/${dest}"
   if [ -d "${staged}/moy_web" ]; then
     local args=(--out "${staged}/moy_web/moy_web_blob.gen.c")
     if [ -n "${CI:-}" ] || [ "${MOYBYTE_REQUIRE_WEB_BUNDLE:-0}" = "1" ]; then
@@ -453,4 +458,34 @@ moybyte_build_and_collect() {
   moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin"
   echo "OK -> ${DIST_DIR}/${stem}.bin (${flash_note})"
   echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
+}
+
+# ESP-Hosted 2.7.0 -> 2.12.12 (the espnow-on-p4 track,
+# docs/history/espnow_p4_2026-08.md). MicroPython pins the hosted component at
+# exactly 2.7.0; 2.12.12 carries the custom-RPC seam
+# (esp_hosted_send_custom_data / register_custom_callback) the P4's ESP-NOW shim
+# rides, plus the streamed slave-OTA API that updates the C6 over SDIO.
+# esp_wifi_remote 0.15.2 constrains only >=0.0.6, so the bump is manifest-legal.
+# PROVEN ON GLASS 2026-08-24 against the FACTORY C6 slave before any shim
+# existed: builds clean, boots clean (with the MEMPOOL_PREFER_SPIRAM fragment
+# line -- without it the 2.12 transport mempool fails its internal-SRAM
+# allocation at boot and the board crash-loops), wifi at RX parity, BLE up and
+# scanning. The stale per-target lockfile is dropped so the component manager
+# re-resolves; it pins the new tree on first build.
+#
+# ESP32-P4 only: it is the C6-over-SDIO arrangement that needs hosted at all.
+# Takes the IDF target whose lockfile to drop. Reads MPY_DIR.
+moybyte_patch_esp_hosted_bump() {
+  local target="${1:-esp32p4}"
+  local manifest="${MPY_DIR}/ports/esp32/main/idf_component.yml"
+  if grep -q 'version: "2.7.0"' "${manifest}"; then
+    echo "== bumping esp_hosted 2.7.0 -> 2.12.12 (espnow-on-p4 track)"
+    sed -i 's/^    version: "2.7.0"$/    version: "2.12.12"/' "${manifest}"
+    grep -q 'version: "2.12.12"' "${manifest}" || {
+      echo "!! esp_hosted bump did not apply -- idf_component.yml changed shape" >&2
+      exit 1
+    }
+    rm -f "${MPY_DIR}/ports/esp32/lockfiles/dependencies.lock.${target}"
+    rm -rf "${MPY_DIR}/ports/esp32/managed_components/espressif__esp_hosted"
+  fi
 }

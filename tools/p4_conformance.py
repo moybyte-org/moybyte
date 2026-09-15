@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Run a moy conformance cart on the P4 and dump the frame it actually renders.
 
-    python tools/p4_conformance.py <cart-dir> <out-file> [--port /dev/ttyACM0]
+    python tools/p4_conformance.py <cart-dir> <out-file> --board p4
 
 Speaks moy-spec's player protocol (conformance/run.py --player), so:
 
     python3 conformance/run.py --player \\
-      "python3 /path/to/moybyte/tools/p4_conformance.py {cart} {out}"
+      "python3 /path/to/moybyte/tools/p4_conformance.py --board p4 {cart} {out}"
 
 checks the BOARD against the same golden frames the WebAssembly player is
 checked against.
@@ -340,8 +340,9 @@ def run_scene(board, cart_dir, log=print, frames=1.5):
 # -- it is what lets any implementation be a shell command. So the port is held
 # by a SERVER instead, and the per-scene process becomes a thin client:
 #
-#     python3 tools/p4_conformance.py --serve &          # boots the board once
-#     python3 conformance/run.py --player "python3 .../p4_conformance.py {cart} {out}"
+#     python3 tools/p4_conformance.py --board p4 --serve &   # boots it once
+#     python3 conformance/run.py --player \
+#       "python3 .../p4_conformance.py --board p4 {cart} {out}"
 #
 # With no server running the client does the whole thing itself, exactly as
 # before, so nothing has to know about this to work -- it is only slow.
@@ -433,11 +434,13 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cart", nargs="?", help="the conformance cart folder")
     ap.add_argument("out", nargs="?", help="where to write the raw frame")
-    ap.add_argument("--port", default="/dev/ttyACM0")
-    ap.add_argument("--board", default="p4", choices=sorted(BOARDS),
+    ap.add_argument("--board", required=True, choices=sorted(BOARDS),
                     help="whose [serial] declaration to open the port with -- "
-                         "the P4's line state chip-resets an S3 (default p4, "
-                         "which is what this tool was written for)")
+                         "no default: the P4's line state chip-resets an S3")
+    ap.add_argument("--port", default="auto",
+                    help="serial port, or 'auto' (default): resolve it from "
+                         "the board's [serial] usb id -- ttyACM numbers "
+                         "shuffle across replugs")
     ap.add_argument("--reset", action="store_true",
                     help="hard-reset first (slow; only needed if the board is wedged)")
     ap.add_argument("--serve", action="store_true",

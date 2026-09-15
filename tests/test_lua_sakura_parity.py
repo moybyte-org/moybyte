@@ -6,11 +6,12 @@ shed scene both carts ship, parsed by the shared `widgets.Scenes`), comparing
 every draw call and the final petal state. Exact float equality -- both runtimes
 are IEEE doubles there, so any epsilon is a porting bug.
 
-The harness needs `lupa` (the optional #67 Phase 3 host-runner dep) and skips
-without it. What does NOT skip is the pair below it: both twins opened by the
-REAL console, which is where the shed points now come from since the pasted
-`EMIT` literal became `scenes/blossoms.moyscene` (#214). That migration is the
-whole reason the Lua half needed `scene()` to work at all.
+The harness needs `lupa`, a second Lua VM that is nobody's dependency, and
+skips without it -- scoped to that one test. What does NOT skip is the pair
+below it: both twins opened by the REAL console, which is where the shed points
+now come from since the pasted `EMIT` literal became
+`scenes/blossoms.moyscene` (#214). That migration is the whole reason the Lua
+half needed `scene()` to work at all.
 """
 
 import json
@@ -25,8 +26,14 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 CARTS = os.path.join(ROOT, "system_carts")
 
 
+LUPA = (
+    "lupa is a bench-only second Lua VM -- it left pyproject on 2026-08-14 "
+    "(the host runs the BOARDS' Lua, built on demand by runtime/lua_binding), "
+    "so this harness runs only where someone installed it by hand")
+
+
 def test_sakura_lua_parity():
-    pytest.importorskip("lupa")
+    pytest.importorskip("lupa", reason=LUPA)
     sys.path.insert(0, os.path.join(ROOT, "experiments", "lua_bridge"))
     from host_parity import run_parity
 

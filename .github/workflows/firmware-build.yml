@@ -41,9 +41,18 @@ on:
       - "device/**"           # frozen onto every board
       - "native/**"           # the C modules compiled into every image
       - "patches/**"          # applied to IDF/MicroPython at build time
-      - "tools/esp32_build_lib.sh"   # the shared half of all three build.sh
+      - "tools/esp32_build_lib.sh"   # the shared half of every board's build.sh
       - "tools/board_config.py"      # decides what each board stages
       - "tools/gen_web_blob.py"      # bakes the web console into the image
+      # system_carts/** above covers the SHELF changing; these cover the code
+      # that turns it into what an image carries. gen_device_carts bakes the
+      # roster (every board's build.sh runs it), and the three p8 files are
+      # frozen into the web blob the same build bakes -- web-e2e.yml already
+      # names them for its own reason.
+      - "tools/gen_device_carts.py"
+      - "tools/p8_import.py"
+      - "tools/p8_lua_port.py"
+      - "tools/p8_writer.py"
       - ".github/workflows/firmware-build.yml"
   workflow_dispatch:
     inputs:

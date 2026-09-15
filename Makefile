@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -71,7 +71,7 @@ setup:
 check-venv:
 	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
 
-VENV_TARGETS := test \
+VENV_TARGETS := test preflight preflight-web board-modules \
                 site-gifs site-hero sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
@@ -133,13 +133,34 @@ PYTEST_FLAGS = $(if $(filter-out 0,$(JOBS)),-p xdist -n $(JOBS),)
 # SUITES, which already know the difference -- tests/unix_mp.py warns locally
 # and FAILS under CI/MOYBYTE_REQUIRE_UNIX_MP -- and a hard failure here would
 # take the whole host suite away from a machine that only ever wanted it.
+#
+# THE REDRAW SUITE RUNS ALONE, the same split CI and tools/preflight.sh make.
+# tests/test_redraw_on_change.py asserts exact repaint counts against real
+# wall-clock deadlines and the top-bar clock legitimately repaints on a minute
+# rollover, so a long shared run that straddles :00 trips an "exactly one
+# redraw" assert. Under xdist it is worse than in CI's serial run: the file's
+# tests are scattered across workers, each of which reaches them at whatever
+# point in the wall clock its queue arrives at.
 test:
 	@$(MAKE) --no-print-directory unix-micropython || { \
 	  echo ""; \
 	  echo "  ^^ could not refresh the desktop MicroPython. Running the suite"; \
 	  echo "     anyway -- the checks that need it say so themselves."; \
 	  echo ""; }
-	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS)
+	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS) \
+	  --ignore=tests/test_redraw_on_change.py
+	$(PYTEST_ENV) $(PYTHON) -m pytest tests/test_redraw_on_change.py
+
+# What CI actually runs, in CI's order -- the gate before a push. `make test` is
+# the part of it that needs nothing but the venv; every step preflight adds
+# compares a DERIVED ARTIFACT to the sources it came from, which is exactly what
+# a source change invalidates silently. tools/preflight.sh's header is the
+# authority on the steps and on why their order is load-bearing.
+preflight:  ## run CI's host lane (the pre-push gate)
+	tools/preflight.sh
+
+preflight-web:  ## ...plus the browser suites in real Chrome
+	tools/preflight.sh --web
 
 # ---------------------------------------------------------------------------
 # The desktop MicroPython that the COMPILED-VS-COMPILED checks run against.
@@ -368,6 +389,16 @@ release:
 # which probes the two S3 twins apart rather than guessing between them.
 device-port:  ## which serial port is which board
 	@$(PYTHON) tools/device_port.py
+
+# The other "what is actually true of this board" question: which modules cross
+# into its image. board.toml decides and tools/board_config.py answers, so ask
+# it rather than reading the denials by eye.
+#   make board-modules BOARD=firmware/lilygo_t_deck_plus_mainline
+board-modules:  ## which modules a board stages (BOARD=firmware/<dir>)
+	@test -n "$(BOARD)" || { echo "BOARD is not set -- e.g. make $@ BOARD=firmware/lilygo_t_deck_plus_mainline"; exit 1; }
+	@$(PYTHON) tools/board_config.py list $(BOARD)
+	@echo "-- native --"
+	@$(PYTHON) tools/board_config.py list-native $(BOARD)
 
 firmware-flash-lilygo-micropython:
 	$(REQUIRE_PORT)

@@ -23,7 +23,7 @@ TWO RUNS, because the whole design is that two boards answer differently:
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_update_e2e.py
 
-Env-gated like the other two browser suites, and prerequisites (chrome, node, a
+Env-gated like the other browser suites, and prerequisites (chrome, node, a
 dist/ carrying the strip) SKIP with a reason on a bench and FAIL under CI --
 tests/web_e2e.py owns that decision, because a suite that asks to run and then
 skips is a green tick over nothing.

@@ -65,7 +65,7 @@ import argparse
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from p4_autotest import P4Board            # noqa: E402
+from p4_autotest import add_board_args, board_from_args  # noqa: E402
 
 # -- device half ----------------------------------------------------------------
 
@@ -369,7 +369,7 @@ def run(b, name, verb, wraps, verbs=False, reps=2, frames=30, cart=""):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    add_board_args(ap)
     ap.add_argument("--only", default="", help="comma-separated subset")
     ap.add_argument("--verbs", action="store_true",
                     help="also count Python-level verb calls (inflates wall)")
@@ -382,7 +382,7 @@ def main():
     args = ap.parse_args()
     want = [s for s in args.only.split(",") if s] or ["map", "paint", "blocks"]
     extra = [tuple(s.split("::")) for s in args.extra]
-    b = P4Board(args.port)
+    b = board_from_args(args)
     try:
         for name in want:
             verb, wraps = SURFACES[name]
