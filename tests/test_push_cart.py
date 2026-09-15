@@ -413,10 +413,14 @@ def test_a_byte_the_ring_dropped_costs_its_window_not_the_cart(tmp_path):
     src = _cart(tmp_path, {"main.lua": BIG}) + "/main.lua"
     assert push_cart.push_file_raw(b, src, dst, window) is True
     assert dev.fs.files[dst] == BIG                     # byte-exact, hash agreed
+    # The boundaries come from the board's DECLARED window, not a number typed
+    # here: that value is a tuning knob (the P4's board.toml carries three
+    # measurements of it), and a test that pins it fails on the day it moves
+    # while saying nothing about the retry this is here to check.
     assert [l for l in dev.said if l.startswith("RECV retry")] == [
-        "RECV retry 4096"]                              # the window it was in
+        "RECV retry %d" % (5000 // window * window)]     # the window it was in
     # and the re-send is the ONLY extra work: every window still acks once
-    assert dev.acks == [4096, 8192, 10000]
+    assert dev.acks == list(range(window, len(BIG), window)) + [len(BIG)]
 
 
 def test_a_byte_that_arrived_wrong_is_caught_by_the_hash(tmp_path):
@@ -448,11 +452,12 @@ def test_a_host_that_dies_inside_a_window_leaves_the_board_and_the_cart_whole(
     with pytest.raises(RuntimeError) as exc:
         push_cart.push_file_raw(b, src, dst, window)
     assert "main.lua" in str(exc.value)
-    # 4096, not 6000: the 1904 bytes of the short window were thrown away and
-    # never reached the file, and naming them sends a reader looking for a
-    # cart that does not exist. The board offers the window back first, so a
-    # host that is merely quiet is not mistaken for one that dropped a byte.
-    assert "4096 of 10000" in str(exc.value)
+    # The last WHOLE window, not 6000: the bytes of the short window were
+    # thrown away and never reached the file, and naming them sends a reader
+    # looking for a cart that does not exist. The board offers the window back
+    # first, so a host that is merely quiet is not mistaken for one that
+    # dropped a byte.
+    assert "%d of %d" % (6000 // window * window, len(BIG)) in str(exc.value)
     assert len([l for l in dev.said if l.startswith("RECV retry")]) \
         == RECV_DEAD_WINDOWS
     assert dev.fs.files == {dst: b"the cart that still works\n"}
