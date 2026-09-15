@@ -465,6 +465,12 @@ def main(argv):
                                                  (the web runner's bundle list)
     """
     argv = list(argv[1:])
+    # Before anything reads a positional: OUT is `argv[0]`, so an unhandled
+    # `--help` is an output PATH and the answer to "how do I call this" is a
+    # 681KB file named `--help` in whatever directory you asked from.
+    if "-h" in argv or "--help" in argv:
+        sys.stdout.write(main.__doc__.split("\n", 1)[1].rstrip() + "\n")
+        return 0
     src = _default_system_carts()
     packed = False
     if argv and argv[0] == "--packed":

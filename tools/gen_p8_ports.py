@@ -170,6 +170,12 @@ def build(lid, corpus=CORPUS_DIR, dest=DEST):
 
 
 def main(argv):
+    # Every `--` argument is filtered out below, `--help` included -- so
+    # without this the answer to "how do I call this" is the whole corpus
+    # rebuilt into ports/p8.
+    if "-h" in argv[1:] or "--help" in argv[1:]:
+        print(__doc__.split("\n\nWHY ONE CART")[0].rstrip())
+        return 0
     args = [a for a in argv[1:] if not a.startswith("--")]
     dest = DEST
     for i, a in enumerate(argv):

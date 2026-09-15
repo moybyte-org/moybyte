@@ -113,7 +113,20 @@ def _resolve(board_dir, ports, ids=None):
                         prober=ids.prober(board_dir, lambda s: None))
 
 
+USAGE = """usage: device_port.py
+
+Lists every serial port, which board claims it, and the make target that
+flashes that board. Takes no arguments."""
+
+
 def main(argv):
+    # Answered BEFORE any probing. Resolving a board opens ports, and closing
+    # an attach_only handle resets an S3-class board -- so asking this tool for
+    # its usage must not cost a desk full of reboots.
+    if "-h" in argv or "--help" in argv:
+        print(USAGE)
+        return 0
+
     ports = pa.serial_ports()
     if not ports:
         print("no serial ports found -- is a board plugged in?")
