@@ -8,6 +8,8 @@ out of scope here."""
 
 from pathlib import Path
 
+from ws_helpers import build_ws_with_cart
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -135,20 +137,8 @@ def test_scan_skips_corrupt_cart(tmp_path):
 
 # -- (d) a cart that raises mid-frame shows an error, no exception escapes ---
 
-def _make_ws_with_cart(tmp_path, src, title="Boom", type="app", edit=None):
-    """Build the shared console with a single hand-authored cart, like
-    test_v04_userland drives it (host_app + ConsoleDriver), and open it."""
-    from runtime import host_app
-    carts_dir = str(tmp_path / "carts")
-    host_app.moy_carts.ensure_dirs(carts_dir)
-    host_app.moy_carts.create(title, carts_dir, src=src, type=type, edit=edit or [])
-    ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
-    ws.open()
-    return ws
+def _make_ws_with_cart(tmp_path, src, title="Boom", **kw):
+    return build_ws_with_cart(tmp_path, src, title, **kw)
 
 
 def test_cart_that_raises_in_draw_shows_error_panel(tmp_path):

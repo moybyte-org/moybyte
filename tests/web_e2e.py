@@ -30,6 +30,7 @@ it as unable to would be a false red on the half that works.
 
 import os
 import shutil
+import socket
 import warnings
 from pathlib import Path
 
@@ -101,3 +102,16 @@ def require(*features):
                     "tick over an untested hosted console.")
     warnings.warn(UserWarning(text), stacklevel=2)
     pytest.skip("browser e2e prerequisites missing (see the warning above)")
+
+
+def free_port():
+    """A port nothing is listening on, for the serve.py each suite starts.
+
+    Racy by nature (the socket is closed before the server binds it), which is
+    why it asks the kernel for an ephemeral one rather than picking a constant:
+    two suites running under xdist must not collide on a fixed port."""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port

@@ -10,6 +10,7 @@ tests drive the real shared console through ConsoleDriver and prove the
 fling frames keep riding the #113 blit path with the redraw gate open."""
 
 from pathlib import Path
+from ws_helpers import build_ws_with_shelf as _ws_with_carts
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -135,21 +136,6 @@ def test_fling_trajectory_is_deterministic():
 
 
 # -- the console (shelf pilot, end to end) -----------------------------------
-
-def _ws_with_carts(tmp_path, n):
-    from runtime import host_app, moy_carts
-
-    carts_dir = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts_dir)
-    while len(ws.launcher.items) < n:
-        i = len(ws.launcher.items)
-        moy_carts.create("Extra %02d" % i, carts_dir,
-                         src="def _draw():\n    cls(1)\n", type="app")
-        ws.launcher.items = moy_carts.scan(carts_dir)
-    ws.launcher.sel = 0
-    ws.launcher.scroll = 0
-    return ws
-
 
 def _fling_setup(tmp_path):
     from runtime import host_app

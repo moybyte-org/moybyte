@@ -16,14 +16,6 @@ ROOT = Path(__file__).resolve().parent.parent
 SYSTEM_CARTS = ROOT / "system_carts"
 
 
-class _StubInput:
-    def held(self, n):
-        return False
-
-    def pressed(self, n):
-        return False
-
-
 class _Stub:
     w = 320
     h = 240
@@ -32,17 +24,17 @@ class _Stub:
         return lambda *a, **k: 0
 
 
-from ws_helpers import open_cart as _open_cart
+from ws_helpers import StubInput, open_cart as _open_cart
 
 
 # -- the base key-set is identical; `wifi` is the only conditional name --------
 
 def test_make_api_base_keyset_identical_and_wifi_is_conditional():
     from runtime import host_app
-    base = set(host_app.make_api(_Stub(), _StubInput(), {}).keys())
+    base = set(host_app.make_api(_Stub(), StubInput(), {}).keys())
     assert "wifi" not in base                       # no permission -> no wifi name
 
-    with_wifi = set(host_app.make_api(_Stub(), _StubInput(), {},
+    with_wifi = set(host_app.make_api(_Stub(), StubInput(), {},
                                       wifi=host_app.FakeWifi()).keys())
     # The ONLY difference between the two namespaces is the gated `wifi` name.
     assert with_wifi - base == {"wifi"}
@@ -69,12 +61,12 @@ def test_host_and_device_make_api_keysets_match_except_wifi():
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)
 
-    host_base = set(host_app.make_api(_Stub(), _StubInput(), {}).keys())
-    dev_base = set(dev.make_api(_Stub(), _StubInput(), {}).keys())
+    host_base = set(host_app.make_api(_Stub(), StubInput(), {}).keys())
+    dev_base = set(dev.make_api(_Stub(), StubInput(), {}).keys())
     assert host_base == dev_base
 
-    host_w = set(host_app.make_api(_Stub(), _StubInput(), {}, wifi=object()).keys())
-    dev_w = set(dev.make_api(_Stub(), _StubInput(), {}, wifi=object()).keys())
+    host_w = set(host_app.make_api(_Stub(), StubInput(), {}, wifi=object()).keys())
+    dev_w = set(dev.make_api(_Stub(), StubInput(), {}, wifi=object()).keys())
     assert host_w == dev_w
     assert host_w - host_base == {"wifi"} == dev_w - dev_base
 

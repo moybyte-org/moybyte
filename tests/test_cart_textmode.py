@@ -57,7 +57,7 @@ def _draw():
 """
 
 
-from ws_helpers import open_cart as _open_cart
+from ws_helpers import StubInput, open_cart as _open_cart
 
 
 def _make_ws_with_carts(tmp_path):
@@ -240,13 +240,6 @@ def test_textmode_in_both_make_api_namespaces():
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)
 
-    class _StubInput:
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
-
     class _Stub:
         w = 320
         h = 240
@@ -254,11 +247,11 @@ def test_textmode_in_both_make_api_namespaces():
         def __getattr__(self, name):
             return lambda *a, **k: 0
 
-    host_ns = host_app.make_api(_Stub(), _StubInput(), {})
-    dev_ns = dev.make_api(_Stub(), _StubInput(), {})
+    host_ns = host_app.make_api(_Stub(), StubInput(), {})
+    dev_ns = dev.make_api(_Stub(), StubInput(), {})
     assert "textmode" in host_ns and "textmode" in dev_ns
     # Both default to on=True and set input.text_mode.
-    inp = _StubInput()
+    inp = StubInput()
     host_app.make_api(_Stub(), inp, {})["textmode"]()
     assert inp.text_mode is True
     host_app.make_api(_Stub(), inp, {})["textmode"](False)

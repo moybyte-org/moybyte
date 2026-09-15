@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RED64 = ["FF0000"] * 64
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import StubInput, build_ws as _ws
 
 
 def _open(ws, title):
@@ -224,13 +224,6 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
     from runtime import host_app
     from runtime import widgets
 
-    class _StubInput:
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
-
     class _Stub:
         w, h = 320, 240
 
@@ -258,7 +251,7 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
         sys.path.remove(str(modules_dir))
 
     def names(mod, **kw):
-        return set(mod.make_api(_Stub(), _StubInput(), {}, **kw).keys())
+        return set(mod.make_api(_Stub(), StubInput(), {}, **kw).keys())
 
     base_h, base_d = names(host_app), names(dev)
     assert base_h == base_d

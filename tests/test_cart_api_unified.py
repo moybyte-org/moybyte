@@ -14,6 +14,8 @@ from runtime import cart_api
 from runtime import host_api
 from device import device_api
 
+from ws_helpers import StubInput
+
 
 def test_one_make_api_object():
     assert host_api.make_api is cart_api.make_api
@@ -101,13 +103,6 @@ def test_the_lua_tier_gets_the_config_DICT_beside_the_cfg_closure():
     """
     import pathlib
 
-    class _In:
-        def held(self, name):
-            return False
-
-        def pressed(self, name):
-            return False
-
     class _Canvas:
         w, h = 320, 240
 
@@ -115,7 +110,7 @@ def test_the_lua_tier_gets_the_config_DICT_beside_the_cfg_closure():
             return lambda *a, **k: None
 
     config = {"perf": 1, "speed": "fast"}
-    ns = cart_api.make_api(_Canvas(), _In(), config)
+    ns = cart_api.make_api(_Canvas(), StubInput(), config)
     # The dict ITSELF: the glue hands this object to C, and an edit through the
     # Config tab must be visible to the running cart, not to a stale copy.
     assert ns["_moy_cfg"] is config

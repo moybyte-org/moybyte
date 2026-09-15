@@ -11,6 +11,7 @@ import pytest
 
 from runtime import tick_model
 from runtime.tick_model import TickScheduler, MAX_CATCHUP, MAX_DIV
+from ws_helpers import build_ws as _ws
 
 
 # -- the scheduler, as arithmetic ---------------------------------------------
@@ -461,11 +462,6 @@ def _count(ws):
 # declared `"fps": "free"` (SPEC 5's opt-out: dt-scaled logic, unpaced) -- so
 # a seed game that still carries the guaranteed 30 stands in.
 PACED_GAME = "Coin Quest"
-
-
-def _ws(tmp_path):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"))
 
 
 def _frames(ws, n, dt):

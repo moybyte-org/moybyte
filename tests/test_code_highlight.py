@@ -10,6 +10,7 @@ from runtime.code_layer import (   # the syntax highlighter moved to the code ed
     _highlight,
     _HL_TEXT, _HL_KEYWORD, _HL_STRING, _HL_NUMBER, _HL_COMMENT, _HL_BUILTIN,
 )
+from ws_helpers import build_ws_with_cart
 
 
 # -- the tokenizer ----------------------------------------------------------
@@ -111,17 +112,7 @@ def test_lua_cart_verbs_stay_builtins():
 # -- inline syntax-error markers (driven through the console) ----------------
 
 def _make_ws_with_cart(tmp_path, src, title="E"):
-    from runtime import host_app
-    carts_dir = str(tmp_path / "carts")
-    host_app.moy_carts.ensure_dirs(carts_dir)
-    host_app.moy_carts.create(title, carts_dir, src=src, type="app", edit=[])
-    ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
-    ws.open()
-    return ws
+    return build_ws_with_cart(tmp_path, src, title)
 
 
 def test_syntax_error_marks_the_offending_line_and_jumps_caret(tmp_path):

@@ -11,11 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
-
-
-def _ws(tmp_path):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"))
+from ws_helpers import build_ws as _ws  # noqa: E402
 
 
 def _pin_clock(ws, drv):

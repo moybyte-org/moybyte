@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe                              # noqa: E402
-from ws_helpers import build_ws                           # noqa: E402
+from ws_helpers import build_ws, device_frames as _dframe  # noqa: E402
 from runtime import editor_handle, moy_carts, text_modes  # noqa: E402
 
 DT = 1.0 / 30
@@ -130,14 +130,6 @@ def _device_ws(tmp_path):
             break
     ws.open()
     return ws, inp.source("kbd")
-
-
-def _dframe(ws, n=1):
-    for _ in range(n):
-        ws.input.begin_frame()
-        ws.handle_input()
-        ws.handle_pointer()
-        ws.frame(DT)
 
 
 def test_the_t_deck_keyboard_types_into_the_focused_handle(tmp_path):

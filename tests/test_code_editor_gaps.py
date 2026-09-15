@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+from ws_helpers import device_frames as _dframe  # noqa: E402
 
 DT = 1 / 30
 
@@ -676,14 +677,6 @@ def _device_ws(tmp_path):
     ws.launcher.sel = 0
     ws.open()
     return ws, inp.source("kbd")
-
-
-def _dframe(ws, n=1):
-    for _ in range(n):
-        ws.input.begin_frame()
-        ws.handle_input()
-        ws.handle_pointer()
-        ws.frame(DT)
 
 
 def test_entering_the_code_tab_does_not_type_the_key_that_entered_it(tmp_path):

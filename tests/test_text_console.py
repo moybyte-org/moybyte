@@ -11,12 +11,9 @@ shared `CodeEditor`). The RUNNER and its `input()` round trip are
 
 from pathlib import Path
 
+from ws_helpers import build_ws as _ws
+
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def _ws(tmp_path):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"))
 
 
 # ---------------------------------------------------------------------------

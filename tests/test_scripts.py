@@ -13,6 +13,8 @@ and the prompt is fed by whichever one the tier has.
 
 from pathlib import Path
 
+from ws_helpers import build_ws as _ws
+
 ROOT = Path(__file__).resolve().parent.parent
 
 DT = 1 / 30
@@ -21,11 +23,6 @@ DT = 1 / 30
 # ---------------------------------------------------------------------------
 # harness
 # ---------------------------------------------------------------------------
-
-def _ws(tmp_path):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"))
-
 
 def _device_ws(tmp_path):
     """The console with the BOARDS' InputState under it; `(ws, keyboard)`."""

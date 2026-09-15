@@ -31,7 +31,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -46,14 +45,6 @@ from web_e2e import RUNNER, ROOT
 pytestmark = pytest.mark.skipif(
     not os.environ.get("MOYBYTE_WEB_E2E"),
     reason="MOYBYTE_WEB_E2E not set (spawns headless Chrome for ~40s)")
-
-
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
 
 
 def _seeded_store(tmp_path):
@@ -73,7 +64,7 @@ def _twin(store, pin=None):
     The health check is GET /sync and not /carts.json, because under `--pin`
     the latter is a 403 -- which is the feature, and would read here as a twin
     that never came up."""
-    port = _free_port()
+    port = web_e2e.free_port()
     argv = [sys.executable, "serve.py", str(port), "dist", "--carts", str(store)]
     if pin:
         argv += ["--pin", pin]

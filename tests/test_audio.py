@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 from runtime import audio  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+from ws_helpers import StubInput  # noqa: E402
 
 
 def _synth_available():
@@ -218,20 +219,12 @@ def test_forced_channel_retrigger_keeps_sounding():
 
 # -- host API surface (host_app.make_api + FakeAudio) ----------------------
 
-class _Input:
-    def held(self, n):
-        return False
-
-    def pressed(self, n):
-        return False
-
-
 def test_make_api_exposes_audio_and_drives_engine():
     from runtime import host_app
     from runtime.host_canvas import make_canvas as Canvas
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     fake = host_app.FakeAudio(eng)
-    api = host_app.make_api(Canvas(32, 32), _Input(), {}, None, fake)
+    api = host_app.make_api(Canvas(32, 32), StubInput(), {}, None, fake)
     for name in ("sfx", "beep", "music", "music_stop", "sound_stop", "volume"):
         assert name in api
     api["sfx"](1)

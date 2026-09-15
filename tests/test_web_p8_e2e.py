@@ -32,7 +32,6 @@ fixture that cannot be committed is a check that only runs on one laptop.
 
 import os
 import re
-import socket
 import subprocess
 import sys
 import time
@@ -49,14 +48,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
 pytestmark = pytest.mark.skipif(
     not os.environ.get("MOYBYTE_WEB_E2E"),
     reason="MOYBYTE_WEB_E2E not set (spawns headless Chrome for ~60s)")
-
-
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
 
 
 def _serve(port):
@@ -170,7 +161,7 @@ def test_a_dropped_pico8_cart_converts_runs_and_opens_in_the_editor(
     web_e2e.require("store", "p8")
     p8, png = _fixtures(tmp_path)
     drop = p8 if form == "p8" else png
-    port = _free_port()
+    port = web_e2e.free_port()
     server, base = _serve(port)
     try:
         out, js = _run(base, tmp_path / "chrome", tmp_path / "s", drop)
@@ -190,7 +181,7 @@ def test_a_file_that_is_not_a_cart_is_reported_not_crashed(tmp_path):
     web_e2e.require("store", "p8")
     junk = tmp_path / "notacart.p8"
     junk.write_text("this is a readme, not a cartridge\n", encoding="utf-8")
-    port = _free_port()
+    port = web_e2e.free_port()
     server, base = _serve(port)
     try:
         out, js = _run(base, tmp_path / "chrome", tmp_path / "s", junk)

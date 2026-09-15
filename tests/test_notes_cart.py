@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from ws_helpers import build_ws                 # noqa: E402
+from ws_helpers import build_ws, device_frames as _dframe  # noqa: E402
 from runtime import moy_carts, system_api       # noqa: E402
 
 DT = 1.0 / 30
@@ -282,14 +282,6 @@ def _device_ws(tmp_path):
     inp.pointer = ws.pointer    # what `touch()` reads (wire_workstation_core's)
     ws.input = inp              # before the cart starts: make_api binds it once
     return ws, inp.source("kbd")
-
-
-def _dframe(ws, n=1):
-    for _ in range(n):
-        ws.input.begin_frame()
-        ws.handle_input()
-        ws.handle_pointer()
-        ws.frame(DT)
 
 
 def _dtap(ws, rect):
