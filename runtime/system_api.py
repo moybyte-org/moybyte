@@ -68,7 +68,7 @@ behind it stays in the shell; `runtime/editor_handle.py` is the whole of it.
 
 Every `type: "app"` cart also gets `ui`, `theme()`, `screen()` and `bar_h()` --
 see UNGATED below. Everything else a manifest lists (`"graphics"`, `"input"`,
-`"sound"`, an app's own marker permission like `"calc"`) is not a grant here and
+`"audio"`, an app's own marker permission like `"calc"`) is not a grant here and
 is silently ignored, which is correct: the kid API is already the ungated floor.
 
 ## What is NEVER grantable, and why the list is a positive one

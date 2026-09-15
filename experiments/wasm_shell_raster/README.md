@@ -5,7 +5,7 @@ vendored libmoy, at 1024x600. The cart canvas was already moycore's; the shell
 was the unpriced half, and the stage gate said two slow options meant no
 completion path.
 
-**Verdict: moy_gfx-in-wasm.** `runtime/canvas.py` interpreted in the shipped
+**Verdict: moy_gfx-in-wasm.** the Python indexed canvas of the time, interpreted in the shipped
 wasm MicroPython priced MARGINAL (37 ms desk repaint, 49 ms editor, against
 6.5 / 8.4 ms under CPython); the libmoy kernels compiled to wasm priced TRIVIAL
 (0.04-0.1 ms per full repaint plus 0.42 ms indexed->RGBA present), some
