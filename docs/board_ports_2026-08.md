@@ -28,7 +28,7 @@ own board-dir README and in the sections below.
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
 | panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
 | input drivers | one copy each | `device/gt911.py`, `device/banded_panel.py`, `native/moy_flush` |
-| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is `device_boot.FrameLoop`, and all four console boards ride it |
+| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is `device_boot.FrameLoop`, and every console board rides it |
 | `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | rides `FrameLoop` |
 | Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
 | CI legs + cache keys | one include-row per board | derived from the board list |

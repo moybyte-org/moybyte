@@ -42,7 +42,7 @@ The shell's rendering has three separable costs:
    record-only elision. NOT by this spec.
 3. **Re-doing 1+2 when nothing relevant changed** — THIS spec.
 
-The verdict, from the evidence accumulated across four targets:
+The verdict, from the evidence accumulated across every target:
 
 | layer | model | why |
 |---|---|---|
@@ -497,9 +497,9 @@ pinning the field's absence.
   it on **2026-08-17**: the T-Deck ships mainline + `native/moy_lcd` and no
   LVGL exists anywhere in the tree. The P4 never had any, and no DSI port
   exists — so on the one board where these costs hurt, "just use the library"
-  is first a port of LVGL. It also covers one of the four targets we render
-  the same pixels on: it is C with bindings and cannot run the host sim, so
-  adopting it forks the shell into two UI implementations. What we took is the
+  is first a port of LVGL. It also reaches only the device targets of the
+  set we render the same pixels on: it is C with bindings and cannot run the
+  host sim, so adopting it forks the shell into two UI implementations. What we took is the
   ALGORITHM — an invalid-area list, a merge, a clip discipline — not the
   dependency. This flips only if the P4 becomes the only target, with no host
   simulator; full analysis in `docs/history/ui_damage_model_v1.md` §4.

@@ -95,7 +95,7 @@ and drop the transition.
 ## What this repo is
 
 Moybyte is an operating system for ESP32 boards: a console where the software is
-cartridges, running as firmware on four console boards (plus one headless companion)
+cartridges, running as firmware on the console boards below (plus one headless companion)
 alongside a host simulator and a browser build.
 Everything is ONE system: **`.moy` is the only cart format.** (A separate
 `.moyproj` SDK was deleted 2026-07-31 because nothing depended on it but its own
@@ -104,12 +104,12 @@ Git history has the rest — do not reintroduce the format.)
 
 - `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
 - `firmware/lilygo_t_deck_plus_mainline/` · `firmware/esp32_p4_wifi6_touch_lcd_7b/`
-  · `firmware/guition_jc3248w535/` · `firmware/guition_jc8012p4a1c/` — the four
+  · `firmware/guition_jc3248w535/` · `firmware/guition_jc8012p4a1c/` — the
   console board ports (MicroPython); the last is the 10.1" ESP32-P4 (2026-09-06),
   a variant of the Waveshare's over the shared `native/p4/` silicon tier, a
   landscape desk rotated onto its portrait glass by the PPA
   (`device/dsi_panel.RotatedCompositor`).
-  `firmware/seeed_xiao_esp32s3_zero/` is the fourth build target and the odd one:
+  `firmware/seeed_xiao_esp32s3_zero/` is the fifth build target and the odd one:
   HEADLESS (#41), the kid's cart store the browser console pairs with, promoted
   out of its stock-MicroPython/pushed-modules arrangement on 2026-08-29. Each
   dir's README is the authority on its hardware; `.claude/rules/boards.md` carries
@@ -239,8 +239,19 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
     heap-wrap collect was the long-standing micro-stutter; the REPR_C build patch
     (unboxed 30-bit floats) fixed it. Banding is structurally gone (the SRAM-bounce
     flush: panel DMA reads only internal SRAM).
-  - Diagnostics, all gated behind `perf_capture`: `PERF`/`DRAWBRK`/`DRAW2`/
-    `BATCH`/`FLUSHBRK`/`CHROMEBRK`/`PUMP`/`I2CSTAT`/`CALIB`/`HITCH`.
+  - Diagnostics, all gated behind `perf_capture`: `PERF` (`runtime/perf_line.py`,
+    every board) and `device_diag`'s lines: `DRAWBRK`/`DRAW2`/`BATCH`/
+    `CHROMEBRK`/`PUMP`/`I2CSTAT`/`CALIB`/`HITCH`. **`device_diag` is staged on
+    the T-Deck alone** (each board's `board.toml` declares it; the Guition S3's
+    records why it declines), so those lines reach glass on that one board;
+    everywhere else the same C meters are read over the dev channel, which is
+    what `state`'s `pump`/`fold`/`ppa`/`stages` fields are for.
+  - **`PERFCNT` is the CPU's own counters** (`runtime/dev_channel.py`): retired
+    instructions per cycle over a cart's update and draw halves, the ratio that
+    says whether a slow frame is instructions or memory;
+    `docs/perf_native_gap_v1.md` is where its readings are argued. Its own
+    switch like `verbs` and `luaprof`: `perfcnt on [event]`, then a bare
+    `perfcnt`.
   - **`VERBS` is the exception and the only meter that sees the Lua/p8 tier.**
     Those canvas meters read all-zero on a Lua cart — it draws through libmoy's
     C verbs into the framebuffer, never through the instrumented `DeviceCanvas`

@@ -195,8 +195,9 @@ manual toggle it replaced. Settings → FRAMESKIP (default OFF, persisted; P4 se
 `_update`+input+audio tick every loop frame, `_draw`+composite+flush every
 SECOND. On-glass: P4 Brick Siege logic 55→60Hz / render locked 30 / busy 17.6→9.0ms;
 Letter Blitz logic 49→60Hz. Trade: 30Hz motion + doubled logic rate ⇒ ~2×
-alloc churn ⇒ GC collects ~2× as often. Default ON/OFF is an open product
-call — on the fast S3 build most carts sit near 60 skip-OFF.
+alloc churn ⇒ GC collects ~2× as often. Its default was still an open product
+call when #217 retired the toggle — on the fast S3 build most carts sat near 60
+skip-OFF.
 
 ### Open — API-preserving (do these first)
 

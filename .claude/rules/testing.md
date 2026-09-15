@@ -59,7 +59,7 @@ paths:
   line state at open is per-board and opposite, and getting it wrong resets the
   chip (below).
 
-- **On-glass testing — all four console boards have a suite** (#156). Each is
+- **On-glass testing — every console board has a suite** (#156). Each is
   gated on its own env var and shares one session in file order, leaving the
   board where it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
   `tests/test_tdeck_on_glass.py` (`MOYBYTE_TDECK_PORT`),
@@ -89,8 +89,10 @@ paths:
     every read returns nothing, forever — indistinguishable from a dead board.
     `attach_only` REFUSES a reset rather than recording one.
   - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
-    vocabulary: `state`/`tap`/`run`/`open`/`swipe`/`drag`/`diag`/`steady`/
-    `mem`/`bl`/`vol`/`power`/`web`/`py`/`recv`/`quit`. A command a board cannot
+    vocabulary, and `DevChannel.run` is the list of record: every word the
+    boards answer to is a branch in it, from `state`/`tap`/`swipe` through the
+    measurement switches (`diag`, `verbs`, `luaprof`, `perfcnt`, `luagc`,
+    `uncap`) and the settings toggles the registry derives. A command a board cannot
     serve DECLINES, and `recv` — the only one that stops reading lines and takes
     raw bytes — is the ONLY cart-push transport, so a board whose image predates
     it is refused by `tools/push_cart.py` rather than pushed too slowly. Board

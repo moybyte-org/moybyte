@@ -82,9 +82,11 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   same UART, where the board's ack is the ONLY backpressure; 16384 on the USB boards, which
   backpressure for real). The cart payload rides `recv` ALONE — an image without the command is
   refused rather than pushed some slower way — which is what lets **ONE cart-push tool
-  serve every board**: `python tools/push_cart.py <cart.moy> --board tdeck|p4|guition_s3` (the names
-  are the board files' own `[board] ota` ids, required on purpose — a default would be a silent
-  wrong transport) copies a cart folder onto the live console's store, whose path is DISCOVERED from
+  serve every board**: `python tools/push_cart.py <cart.moy> --board <id>` (the id is that
+  board file's own `[board] ota` id, and `--board` is required on purpose — a default would be
+  a silent wrong transport; `add_board_args` in `tools/p4_autotest.py` derives the choices from
+  the tree, so a new board is drivable the day its `board.toml` lands) copies a cart folder onto
+  the live console's store, whose path is DISCOVERED from
   `ws.carts_root` rather than declared (the Guition's is a TF card when one is in the slot and the
   internal VFS when not). **The frame loop is shared
   too** (#202 Phase B, `device_boot.FrameLoop`): the invariant order — inputs → dev channel → idle
@@ -105,8 +107,10 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   panel comes up through `native/moy_lcd` + `modules/tdeck_panel.py`, and that is now the ONLY panel
   driver in the tree. `patches/` was pruned to its three consumers on 2026-08-17: five orphans were
   DELETED (git history has them) — `esp32_i2c_new_driver` (reachable only through the fork's knob,
-  the #69 decision), `esp32_repr_c_floats` + `esp32_i2c_gil_release` (both live on as build.sh's
-  guarded sed/heredoc, steps 3b/3c — the patch files were unapplied second copies),
+  the #69 decision), `esp32_repr_c_floats` + `esp32_i2c_gil_release` (both live on as
+  build.sh's guarded steps 2b (`moybyte_patch_repr_c`, the shared patcher) and 2c
+  (the in-place `machine_i2c.c` edit); the patch files were unapplied second
+  copies),
   `esp32_tdeck_early_board_init` and `spi_master_psram_tx_dma` (fork-only mechanisms; the mainline
   flush never DMAs from PSRAM).
 - The MicroPython console is the only firmware. (The older Arduino/PlatformIO serial-smoke firmware and the legacy LVGL `.moyproj` game-loop boot path were removed; git history has them.)
@@ -197,7 +201,7 @@ is the authority**; what bites:
   flashed to it.
 
 
-### Fourth build target: the Zero (Seeed XIAO ESP32-S3) — HEADLESS (#41)
+### Fifth build target: the Zero (Seeed XIAO ESP32-S3) — HEADLESS (#41)
 
 `firmware/seeed_xiao_esp32s3_zero/` became a build target on **2026-08-29**
 (owner call, reversing its own "DELIBERATELY NOT A BUILD TARGET"; its board.toml
@@ -226,10 +230,16 @@ README is the authority**; what belongs here is only what bites:
   is the mechanism `moybyte_patch_repr_c`'s header already specified). Do not
   give it the #169 retune without the 120MHz profile; the spike suite refuses
   that pairing.
-- **It keeps TinyUSB CDC** rather than the #201 promotion (which exists for a
-  board that never returns to the REPL; this one is interrupted into it on every
-  provision). So `303a:4001`, and DTR must be asserted at open. In via
-  `machine.bootloader()`, out via `--after watchdog_reset`, never `hard_reset`.
+- **It took the #201 USB-Serial/JTAG promotion** on **2026-08-30**, so it
+  enumerates `303a:1001` and opens like the console S3s: DTR/RTS HIGH, because
+  opening them LOW is a chip reset. The promotion is what bought a software path
+  into the ROM loader at all: esptool's default reset drives it in, and out
+  again via `--after watchdog_reset`, never `hard_reset` (proven on this board;
+  `machine.bootloader()` is an endless loop on this chip in upstream
+  MicroPython). Holding BOOT while plugging it in is the RECOVERY, not the
+  routine. Its `board.toml` `[serial]`/`[flash]` and `mpconfigboard.h` carry the
+  evidence, and `tools/device_port.py` tells it from the other `303a:1001`
+  boards by its USB serial number, since it has no dev channel to ask.
 - **A pushed `.py` SHADOWS the frozen one** — `/` is searched before `.frozen` —
   so its module push is opt-in and undoable, and the board announces it at boot.
 
@@ -320,8 +330,8 @@ README is the authority**; what belongs here is only what bites:
   **The fork could not be fixed this way and was never made to work.** Its `MOYBYTE_REPL=jtag` mode
   had three independent bugs (documented in the deletion commit); with all three fixed it boots and
   PRINTS but still takes no input, on an identical console config and identical linked symbols. The
-  remaining difference is the MicroPython base itself. The fork is gone, so this is history, not a
-  TODO.
+  remaining difference is the MicroPython base itself. The fork was DELETED on
+  2026-08-17, which closes the question: this is a recorded verdict, not a TODO.
 
   **Do NOT use the USB product id as the RX tell** — the old note said `303a:1001` = RX dead,
   `303a:4001` = RX works. On this port a WORKING board enumerates `1001`, because that is the
@@ -339,18 +349,18 @@ README is the authority**; what belongs here is only what bites:
   boot settles.
 
 - **Full-screen flush must be a single `tx_color`** from a PSRAM DMA buffer; multiple `tx_color` calls glitch rows at the command→data boundary.
-- **The keyboard has two modes; the console flips between them per screen.** The T-Deck keyboard is a separate ESP32-C3 (I2C 0x55; firmware in `firmware/lilygo_t_deck_plus_reference/examples/Keyboard_ESP32C3` — an UNTRACKED vendor reference tree, so a fresh checkout will not have it; THIRD_PARTY.md's scope note explains why). In its default mode it returns clean 1-byte ASCII (shift→uppercase, sym→symbols/digits, all resolved on-keyboard) but reports each key **once on the press edge with no autorepeat** — so a *held* key can't be detected, only faked for `KEY_HOLD_MS` by `TDeckKeyboard`'s latch (movement stalls while you hold). For true hold-to-move, a running cart switches the keyboard to **raw-matrix mode** (`0x03`, `LILYGO_KB_MODE_RAW_CMD`): it then streams the full key matrix each read, so a held direction keeps firing. `Workstation._set_text_mode` → `TDeckKeyboard.set_game_mode(on)` drives this: ASCII for the code editor (so typing is clean — `last_key`), raw everywhere else. The revert is `0x04` (`..._MODE_KEY_CMD`) — the step an earlier attempt missed, which is why raw mode used to garble the editor *irreversibly*. **A mode switch swallows its own byte, on both sides of the seam.** The revert happens because a TEXT surface just took the keyboard, and what the C3 has to hand over then was typed while the matrix was streaming — before that surface existed; delivered, it is a letter the kid never typed appearing in the code buffer. So `_disable_raw_mode` DRAINS the keyboard after sending `0x04`, and `Workstation._set_text_mode(True)` seeds every typed-key edge with the byte already in `last_key`. Both halves: the matrix decodes only sixteen keys, so the byte the console holds is not always the one the keyboard then delivers, and each fix covers the case the other cannot. **`__init__` boots in ASCII and never enables raw**; raw needs keyboard fw **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`), and on older fw the `0x03` is ignored — `_read_raw_buttons` detects the stray ASCII byte and sticks the session back on the 1-byte + latch path (`_raw_unsupported`; class flag `RAW_GAME_MODE` force-disables raw). The keyboard has **no `=` `[ ] { } < > %`** keys at all → the code editor shows an on-screen symbol palette for those. (`0x01 <duty>` over I2C sets the keyboard backlight.) Use `RUN_KEYBOARD_PROBE` to dump keys over serial (USB-friendly, no takeover).
+- **The keyboard has two modes; the console flips between them per screen.** The T-Deck keyboard is a separate ESP32-C3 (I2C 0x55; firmware in `firmware/lilygo_t_deck_plus_reference/examples/Keyboard_ESP32C3` — an UNTRACKED vendor reference tree, so a fresh checkout will not have it; THIRD_PARTY.md's scope note explains why). In its default mode it returns clean 1-byte ASCII (shift→uppercase, sym→symbols/digits, all resolved on-keyboard) but reports each key **once on the press edge with no autorepeat** — so a *held* key can't be detected, only faked for `KEY_HOLD_MS` by `TDeckKeyboard`'s latch (movement stalls while you hold). For true hold-to-move, a running cart switches the keyboard to **raw-matrix mode** (`0x03`, `LILYGO_KB_MODE_RAW_CMD`): it then streams the full key matrix each read, so a held direction keeps firing. `Workstation._set_text_mode` → `TDeckKeyboard.set_game_mode(on)` drives this: ASCII for the code editor (so typing is clean — `last_key`), raw everywhere else. The revert is `0x04` (`..._MODE_KEY_CMD`) — the step an earlier attempt missed, which is why raw mode used to garble the editor *irreversibly*. **A mode switch swallows its own byte, on both sides of the seam.** The revert happens because a TEXT surface just took the keyboard, and what the C3 has to hand over then was typed while the matrix was streaming — before that surface existed; delivered, it is a letter the kid never typed appearing in the code buffer. So `_disable_raw_mode` DRAINS the keyboard after sending `0x04`, and `Workstation._set_text_mode(True)` seeds every typed-key edge with the byte already in `last_key`. Both halves: the matrix decodes only sixteen keys, so the byte the console holds is not always the one the keyboard then delivers, and each fix covers the case the other cannot. **`__init__` boots in ASCII and never enables raw**; raw needs keyboard fw **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`), and on older fw the `0x03` is ignored — `_read_raw_buttons` detects the stray ASCII byte and sticks the session back on the 1-byte + latch path (`_raw_unsupported`; class flag `RAW_GAME_MODE` force-disables raw). The keyboard has **no `=` `[ ] { } < > %`** keys at all → the code editor shows an on-screen symbol palette for those. (`0x01 <duty>` over I2C sets the keyboard backlight.) Boot `MODE = "keyboard"` (`tdeck_smoke.keyboard()`) to dump keys over serial (USB-friendly, no takeover).
 
 
 ### Device module map
 
 The T-Deck's own board code is `firmware/lilygo_t_deck_plus_mainline/modules/`
 (six tracked files — the rest of that directory is STAGED at build and
-gitignored). Everything both boards share moved to the repo root when the fork
+gitignored). Everything the boards share moved to the repo root when the fork
 went: the device tier is **`device/`**, the C modules **`native/`**.
 
 - `moybyte_shell.py` — boot/`main()`; ONE `MODE` string over the shared ladder in `device/boot_shell.py` (this board declares its name, its six-stage `MODES` and `tdeck_smoke` as its smoke module, and nothing else). The STAGE3/NATIVE_CORE bring-up benches and the pre-display SD-prefetch A/B toggle were removed; the #63 `MOYBYTE_BENCH=1` build is the benchmark harness.
-- `moy_runtime.py` — the **device backend**: `DeviceCanvas` (hot ops `cls`/`rect`/`circ`/`spr` go through the native `moy_gfx` kernel — `fill`/`fill_rect`/`blit565` straight into the compositor's RGB565 buffer — with framebuf for text/lines and as the no-`moy_gfx` fallback; `spr` blits a per-sprite pre-scaled RGB565 cache, and `make_api` reuses one tile `Image` per `(id, colorkey)` so the cache survives across frames), `make_api`, embedded fallback `CARTS`, `TrackBall`, `Touch`, `run_desktop()`, `run_keyboard_probe()`. Imports the shared `console`/`editors`/`moy_carts` and injects the device `make_api` + store into `console.Workstation`. **Input runs on a poller thread (#69, `MOY_INPUT_POLLER`)**: `moybyte.input.InputPoller` owns every I2C0 transaction (kbd + GT911 + mode switches) off the frame loop, so the C3's 40-60ms clock-stretch stalls block only that thread — requires the build's `esp32_i2c_gil_release.patch` (machine.I2C frees the GIL across its blocking wait); falls back to synchronous polling if `_thread`/the thread dies.
+- `moy_runtime.py` — this board's **hardware half of `run_desktop()`**, and nothing else: the panel bring-up, the input trio, the SD/panel bus gate and the serial channel, over the shared boot spine (`device_boot.DeviceBoot`/`FrameLoop`). Everything it used to define is now one import from the shared device tier: `DeviceCanvas` from `device/device_canvas.py`, `make_api` from `device/device_api.py`, `TrackBall`/`Touch` from `device/device_input.py`, the seed roster from the generated `carts_data.py`. The console itself (`console`/`editors`/`moy_carts`) is staged from `runtime/`, with the device `make_api` + store injected into `console.Workstation`. **Input runs on a poller thread (#69, `MOY_INPUT_POLLER`)**: `moybyte.input.InputPoller` owns every I2C0 transaction (kbd + GT911 + mode switches) off the frame loop, so the C3's 40-60ms clock-stretch stalls block only that thread — requires build.sh's step 2c, which patches `machine_i2c.c` to free the GIL across its blocking wait; falls back to synchronous polling if `_thread`/the thread dies.
 - `console.py` / `project.py` / `player.py` / `editor_app.py` / `wm.py` / `editors.py` / `moy_carts.py` (+ the `*_layer.py`/`*_ui.py` surfaces and `blocks.py`) — **staged from `runtime/` at build** (see above).
 - `device/moybyte_sd.py` — the SD card on the panel's SPI host; `with_sd_live(fn)` = attach once, stay resident, never tear down.
 - `tdeck_panel.py` + `native/moy_lcd/` — the panel backend, replacing the fork's

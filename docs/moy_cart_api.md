@@ -285,7 +285,7 @@ with `pal(8, 11, 1)` draws a 2 as 11 *and* a real 8 as 11 — and it is the shap
 PICO-8 fade and secret colour already has. `pal()` with no arguments resets both.
 
 It costs nothing per pixel on any tier. The flush-time pass PICO-8 does instead was
-measured at roughly half a frame on all three boards
+measured at roughly half a frame on every board
 ([#218](https://github.com/moybyte-org/moybyte/issues/218)), which is why the spec
 composes (SPEC.md §12.1). The one thing that buys you that this cannot: a fade over a
 frame you do *not* redraw. A pixel already drawn keeps its colour, and `pix(x, y)` reads
@@ -997,8 +997,8 @@ earth tones, vivid accents, neutrals, deep shades) — pass those as integers.
 The canvas works in **palette indices** and the API is **plain functions over a
 buffer** — no dependency on `framebuf`, LVGL, or even Python in the contract. That's
 deliberate: the same surface maps onto the host window (indices → RGB888), the
-device's native `moy_compositor` RGB565 framebuffer (indices → RGB565 via the
-palette), and the Lua cart VM (#67) — the "not even Python" clause is now shipping
+device's RGB565 framebuffer (indices → RGB565 at draw time, in the one
+`DeviceCanvas` over the `moy_gfx` kernel), and the Lua cart VM (#67) — the "not even Python" clause is now shipping
 code. **A cart authored once runs on every tier** (Zero /
 Player / One). When you add a drawing
 feature, add it to the ONE canvas class (`device_canvas.DeviceCanvas`) and keep the name

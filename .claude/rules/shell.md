@@ -214,7 +214,7 @@ body and nothing executable guarded it.**
 
 Record and gates: #206, #207, #208.
 
-- **ONE `PERF` line, one producer, three boards.** `runtime/perf_line.py` holds
+- **ONE `PERF` line, one producer, every board.** `runtime/perf_line.py` holds
   the field table, the formatter AND the parser, measured by
   `device_boot.PerfSampler` on `FrameLoop.account`. **A field a board cannot
   measure prints `-`, never `0`.** Cart titles are slugged and compounds join with
@@ -227,7 +227,7 @@ Record and gates: #206, #207, #208.
   `tests/moy_flush_harness/` compiles the REAL C on a host with no board.
 - **Adding a settings toggle is one entry in `SETTINGS_TOGGLES`**, not six sites.
   The capability gates stay expressed, and the flat mirrors stay flat attributes —
-  both WMs read `ws.show_fps` on every painted game frame on all three boards.
+  both WMs read `ws.show_fps` on every painted game frame on every board.
 - **The `colors=` hatch is 14 sites and each has a written reason** (`ui.row`/
   `ui.cell` take `kind=`, like `ui.button`). `row_menu` and `row_list` are
   deliberately two skin entries: `ink_dim` and `chrome_ink_dim` resolve differently

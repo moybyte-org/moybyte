@@ -33,6 +33,7 @@ Everything under _site/ is generated. Edit this file, not the output.
 
 import argparse
 import datetime
+import glob
 import hashlib
 import json
 import os
@@ -99,10 +100,16 @@ TIERS = [
 # so an ordinary flash leaves the board's own storage alone.
 #
 # `images` is a preference list: the first name present in the board's artifact
-# folder is the one published. `reset` is how esptool-js is asked to enter the
-# ROM loader, and it is a hardware fact per board, not a preference (see the
-# T-Deck note in CLAUDE.md: its native-USB auto-reset never syncs) -- so is
-# `after`, and the two S3 boards that share a chip do NOT share either value.
+# folder is the one published.
+#
+# HOW THE BOARD IS RESET IS NOT DECLARED HERE. `reset` (into the ROM loader) and
+# `after` (out of it) are hardware facts, and the board that has them is the one
+# that writes them down: each `firmware/<board>/board.toml` `[flash]` block, the
+# same declaration the cable flash reads. They are filled in below from there,
+# because a premise re-stated in this file is one that can go stale without the
+# board noticing -- this table asserted a TinyUSB CDC id for the Zero, and drew
+# `no_reset` out of it, for a fortnight after that board moved to
+# USB-Serial/JTAG (2026-08-30).
 BOARDS = [
     {
         "id": "tdeck",
@@ -111,12 +118,11 @@ BOARDS = [
         "images": ("moybyte_tdeck.bin",),
         "offset": 0x0,
         "baud": 460800,
-        "reset": "no_reset",                # the trackball hold below did it
-        "manual": None,                     # ... so there is no reset to skip
+        "manual": None,                     # no reset to skip: see below
         "usb_otg": True,                    # native USB, for esptool-js's sake
-        # Nothing can drive this board's reset line over its own USB port --
-        # neither in nor out of the loader -- so the human does both ends.
-        "after": None,                      # ... which is why we do not try
+        # Derives to (no_reset, None): this board declares `before = usb_reset`,
+        # which esptool-js does not implement, so the page cannot drive its reset
+        # line at either end and the human does both.
         "done": "Written. Press <b>RST</b> on the board to start it.",
         "prep": "Its USB port is the ESP32-S3&rsquo;s own and auto-reset does not "
                 "sync on it, so you move the board in and out of the loader by "
@@ -138,9 +144,7 @@ BOARDS = [
         "images": ("moybyte_p4.bin",),
         "offset": 0x2000,
         "baud": 921600,
-        "reset": "default_reset",           # CH343 bridge: DTR/RTS reset works
-        "usb_otg": False,
-        "after": "hard_reset",              # ... at both ends, unlike the T-Deck
+        "usb_otg": False,                   # a CH343 bridge, not native USB
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C debug port &mdash; the CH343 "
                 "bridge resets it into the loader and back out again on its own, "
@@ -164,9 +168,7 @@ BOARDS = [
         "images": ("moybyte_guition_s3.bin",),
         "offset": 0x0,
         "baud": 460800,
-        "reset": "default_reset",           # native USB-Serial/JTAG; auto-reset
         "usb_otg": True,                    # works on this one (unlike the T-Deck)
-        "after": "hard_reset",
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C port. The S3&rsquo;s own "
                 "USB-Serial/JTAG handles the reset into the loader and back.",
@@ -179,53 +181,37 @@ BOARDS = [
         "cli": "make firmware-flash-guition-s3 PORT=/dev/ttyACM1",
     },
     {
-        # The Zero (Seeed XIAO ESP32-S3, #41): a build target since 2026-08-29
-        # and the fourth card. HEADLESS -- no screen, no carts running on it. It
-        # is the store the browser console pairs with, so whoever flashes it is
-        # holding a board there is nothing to look at afterwards.
+        # The Zero (Seeed XIAO ESP32-S3, #41): a build target since 2026-08-29.
+        # HEADLESS -- no screen, no carts running on it. It is the store the
+        # browser console pairs with, so whoever flashes it is holding a board
+        # there is nothing to look at afterwards.
         #
-        # ITS RESET FIELDS ARE NOT THE OTHER S3 BOARDS', and that is the one
-        # thing on this card that cannot be inherited by analogy. This board
-        # keeps MicroPython's TinyUSB CDC (303a:4001) instead of the console
-        # boards' USB-Serial/JTAG promotion (its mpconfigboard.h argues why),
-        # and esptool-js picks its reset sequence off the PID: the JTAG path is
-        # chosen for 0x1001, so on 0x4001 anything but `no_reset` falls through
-        # to the CLASSIC DTR/RTS dance. That dance against a RUNNING TinyUSB CDC
-        # is what has wedged this board's USB device before (#63, and the board
-        # README's hardware facts) -- unrecoverable without a replug. So the
-        # page never touches the lines and the human holds BOOT, exactly like
-        # the T-Deck, for a different hardware reason.
-        #
-        # `after` is the same story from the other end: `hard_reset` is an RTS
-        # wiggle with no reset circuit behind it here and does nothing, and what
-        # DOES get this board out of the loader -- esptool's `--after
-        # watchdog_reset` -- esptool-js does not implement. So there is no reset
-        # to ask for, and the card says to replug instead.
-        #
-        # Neither has been run from the page: the pair follows this board's own
-        # documented facts, which is the safe reading, not a browser session.
+        # Derives to (default_reset, None). It took the USB-Serial/JTAG
+        # promotion on 2026-08-30 and enumerates 303a:1001, which is the PID
+        # esptool-js picks its JTAG reset path off, so the page drives it into
+        # the loader exactly as it does the Guition. Coming back out is the half
+        # it cannot do: this board declares `after = watchdog_reset` (proven
+        # here; `hard_reset` is an RTS wiggle with no circuit behind it), and
+        # esptool-js implements no such sequence -- so the card asks for a
+        # replug.
         "id": "xiao_zero",
         "label": "Seeed XIAO ESP32-S3 (Zero)",
         "chip": "ESP32-S3",
         "images": ("moybyte_zero.bin",),
         "offset": 0x0,
         "baud": 460800,
-        "reset": "no_reset",                # the BOOT hold below did it
-        "manual": None,                     # ... so there is no reset to skip
         "usb_otg": True,                    # native USB, for esptool-js's sake
-        "after": None,                      # hard_reset is a no-op on this board
+        "manual": "Skip the reset &mdash; I have put the board in download mode "
+                  "myself (hold <b>BOOT</b> while you plug it in). Try this if "
+                  "connecting fails.",
         "done": "Written. Unplug the board and plug it back in to start it.",
         "prep": "This one has no screen &mdash; it is the cartridge store a "
                 "browser console pairs with, so there is nothing to watch it do "
-                "afterwards. Its USB port is the ESP32-S3&rsquo;s own and there "
-                "is no reset circuit on the other end of it, so you move the "
-                "board in and out of the loader by hand: <b>hold the BOOT button "
-                "while you plug it in</b>, then let go. Flash, pick its port in "
-                "the dialog, and when the write finishes <b>unplug it and plug "
-                "it back in</b> &mdash; it stays in the loader until you do. The "
-                "page deliberately leaves this board&rsquo;s reset lines alone: "
-                "wiggling them while it is running has knocked its USB out "
-                "entirely, and only a replug brings that back.",
+                "afterwards. Its USB-Serial/JTAG port resets it into the loader "
+                "on its own, so there is nothing to hold going in. What it "
+                "cannot do is come back out: when the write finishes "
+                "<b>unplug the board and plug it back in</b> &mdash; it stays "
+                "in the loader until you do.",
         "erase": "Erase the whole chip first. There is no card slot on this "
                  "board &mdash; the cartridges are on its internal flash, so "
                  "this deletes them and their saves. Coming from the old "
@@ -237,6 +223,58 @@ BOARDS = [
         "cli": "make firmware-flash-zero PORT=/dev/ttyACM0",
     },
 ]
+
+# What esptool-js can actually perform: two entry sequences and one exit. The
+# declarations it cannot serve are real and are each a board's own measured
+# fact -- the T-Deck's `before = usb_reset` (the only sequence that connects to
+# its wedged USB-Serial/JTAG node) and the Zero's `after = watchdog_reset` (the
+# only one that gets it out of the loader). Both are honoured by the cable
+# flash and neither exists in the browser.
+ESPTOOL_JS_BEFORE = ("default_reset", "no_reset")
+ESPTOOL_JS_AFTER = ("hard_reset",)
+
+
+def declared_flash():
+    """{`[board] ota` id: that board's `[flash]` block}, read from the tree.
+
+    Derived rather than listed so board N+1 is described by its own file the
+    day it lands.
+    """
+    from tools import board_config
+    out = {}
+    for path in sorted(glob.glob(os.path.join(ROOT, "firmware", "*", "board.toml"))):
+        cfg = board_config.load(os.path.dirname(path))
+        ota = (cfg.get("board") or {}).get("ota")
+        if ota and "flash" in cfg:
+            out[ota] = cfg["flash"]
+    return out
+
+
+def reset_pair(flash):
+    """(`reset`, `after`) for the page, from one board's `[flash]` block.
+
+    The defaults are esptool's own, which is what the cable flash falls back to
+    when a board declares neither. A board whose ENTRY sequence esptool-js
+    cannot perform is not asked to reset on the way out either: it is the same
+    line and the same peripheral, so a page that cannot drive it in cannot
+    drive it out, and asking would log a failure for something that was never
+    going to work.
+    """
+    if not flash:                        # no declaration to follow: touch nothing
+        return "no_reset", None
+    before = str(flash.get("before", "default_reset"))
+    after = str(flash.get("after", "hard_reset"))
+    if before not in ESPTOOL_JS_BEFORE:
+        return "no_reset", None
+    return before, (after if after in ESPTOOL_JS_AFTER else None)
+
+
+_DECLARED = declared_flash()
+for _board in BOARDS:
+    # A card for a board that declares no cable flash at all gets the reading
+    # that touches nothing -- the human does both ends -- rather than a guess.
+    _board["reset"], _board["after"] = reset_pair(_DECLARED.get(_board["id"], {}))
+del _board
 
 
 # The page's CONTENT mirrors README.md's "What's in it" -- same claims, same

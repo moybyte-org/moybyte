@@ -46,7 +46,7 @@ cannot have started to matter:
   console that cannot boot). `board.toml` is the declaration now, and
   `tests/test_staging_closure.py` derives this board's frozen set from it and
   asserts every import of every staged module resolves on this target — the same
-  net all three console boards ride.
+  net every console board rides.
 
 `provision.sh` survives and **changed jobs**: it provisions the credentials and
 the pairing pin, and keeps the module push as an opt-in dev loop. The CARTS
@@ -68,12 +68,14 @@ the slot the cable flash just wrote.
 
 **The website flashes this same image**, since 2026-08-29 — `site/build.py`'s
 `BOARDS` carries the card, and `tools/publish_firmware_release.py` reads that
-same table to publish the asset the page serves. The one field pair that is not
-the Guition's, on the same chip, is the reset: the page asks for `no_reset` and
-offers no reset afterwards, because esptool-js picks its sequence off the USB
-PID and would otherwise put the classic DTR/RTS dance on this board's running
-CDC — the wedge in the hardware facts below. So the browser's gesture is the
-BOOT button held while plugging in, and a replug afterwards.
+same table to publish the asset the page serves. Both tables read the reset
+pair off this board's `[flash]` block, so the page asks for the default reset
+(esptool-js takes its USB-Serial/JTAG path off the `303a:1001` PID and drives
+this board into the loader exactly as it does the Guition) and asks for no
+reset afterwards, because the `watchdog_reset` that gets it out is a sequence
+esptool-js does not implement. So the browser's gesture is a replug when the
+write finishes, and holding BOOT while plugging in is the escape hatch on the
+card.
 
 **The migration flash WIPES THE STORE.** The new partition table puts `vfs` at
 `0x5A0000`; the stock MicroPython table it replaces put it far lower, so the old
@@ -594,17 +596,8 @@ new image's host did not come up.
 
 ## Hardware facts (learned the painful way — respect these)
 
-- **The REPL is silent unless the host asserts DTR.** A raw pyserial client
-  must set `dtr=True`; mpremote does. Looks exactly like a dead board. This
-  survives the graduation on purpose: the image keeps MicroPython's TinyUSB CDC
-  console rather than adopting the console boards' USB-Serial/JTAG promotion,
-  because that promotion exists for a board that never returns to the REPL and
-  this one is interrupted into the REPL every time it is provisioned. The
-  reasoning is in `boards/MOYBYTE_ZERO/mpconfigboard.h`; flipping it would
-  change both the USB id and the DTR rule, and is an A/B for somebody holding
-  the board.
 - **Flashing needs no button dance any more** (2026-08-30). This board took the
-  USB-Serial/JTAG promotion the three console boards use, so
+  USB-Serial/JTAG promotion the console boards use, so
   `make firmware-flash-zero PORT=…` resets it into the loader and back out with
   nothing to hold. `make device-port` prints which port it is.
 
@@ -679,9 +672,9 @@ new image's host did not come up.
 - **Getting OUT of the ROM loader needs no replug** (2026-08-25):
   `esptool --after watchdog_reset` exits download mode cleanly on this board.
   The old note ("only a physical replug exits ROM mode") predates it — that
-  was `hard_reset`, which indeed does nothing here. Prefer
-  `machine.bootloader()` to get IN (an esptool DTR-dance against the running
-  TinyUSB CDC has wedged the USB device before). The BOOT button is the last
+  was `hard_reset`, which indeed does nothing here. Getting IN is esptool's
+  default reset, since the USB-Serial/JTAG promotion; `machine.bootloader()` is
+  an endless loop on this chip and is never the way. The BOOT button is the last
   resort: hold it while powering on.
 - **The console dual-OTA partition table does not fit this 8MB flash**, and the
   failure is silent: the bootloader REJECTS the table and the board boot loops
@@ -713,7 +706,7 @@ new image's host did not come up.
   carts root has a real journal here, the files root's `.history/` sidecars
   are a different mechanism and are neither synced nor written by the
   receiver.
-- **No on-glass suite.** The other three boards have one
+- **No on-glass suite.** Every console board has one
   (`tests/test_*_on_glass.py` over the shared dev channel); this board has no
   console, no `DevChannel` and no frames to assert about. Its equivalent is
   `GET /update` and `GET /carts.json` over the network, which is what a person

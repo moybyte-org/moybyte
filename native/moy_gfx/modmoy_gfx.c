@@ -5,9 +5,9 @@
 // so the same C is reusable from a future Lua binding. Every op is fully
 // bounds-clamped: a bad coordinate clips rather than overrunning the buffer.
 //
-// Used by modules/moy_compositor.py for fast clear/fill/blit and for packing
-// dirty-region strips into the DMA buffer before lcd_bus.tx_color. See
-// STAGE3_PLAN.md.
+// Used by device/device_canvas.py for fast clear/fill/blit and by the banded
+// compositors (device/banded_panel.py + native/moy_flush) for packing bands into
+// the DMA bounce slots. docs/surface_model_v1.md is the presentation contract.
 
 #include <string.h>
 #include <math.h>

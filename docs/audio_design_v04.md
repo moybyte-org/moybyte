@@ -1,7 +1,9 @@
 # Moybyte v0.4 Audio — design + vertical slice
 
 **Issue:** #16 (Audio: sound effects + music, plus an on-device music editor)
-**Status:** host vertical slice landed; device I2S path implemented (non-blocking feed, NEEDS ON-DEVICE VERIFICATION)
+**Status:** shipped. The host, the T-Deck and the browser build all make sound.
+The synth is vendored libmoy (#97), rendered on core 1 on the board and fed to
+I2S; `docs/moy_cart_api.md` (Audio) is the current verb table.
 
 > **#170 (2026-07-29) — the model grew to PICO-8 parity** and this doc now
 > describes only the original core: today there are **8 waveforms**, an
@@ -65,11 +67,12 @@ Design notes:
   required for v1 (see §6).
 - **`beep` is the zero-data escape hatch** — a cart with no sound bank can still
   make a tone. It is sugar for "a one-step SFX at this frequency".
-- **`volume` is the only stateful global** and is clamped. The manifest carries a
-  `"sound"` permission (matching plan §13) but the v0.4 console does **not** yet
-  enforce *any* cart permissions (graphics/input aren't gated either), so wiring
-  sound to the permission is deferred with the rest of the permission model; the
-  `_SilentAudio` no-op backend is the natural hook when it lands.
+- **`volume` is the only stateful global** and is clamped. A cart that makes
+  sound declares `"audio"` in its manifest `permissions` (not the plan's
+  `"sound"`), and nothing gates sound on it: the permissions the console
+  actually enforces are the app ones and `network`/`multiplayer`
+  (`runtime/system_api.py`). The `_SilentAudio` no-op backend is the hook if
+  audio ever joins them.
 
 ---
 
@@ -196,8 +199,8 @@ The runtime builds an `AudioEngine` from `cart["sounds"]` (or `AudioBank.default
 if absent) when a cart opens, the mirror of how `_build_sheet()` builds the
 SpriteSheet.
 
-The manifest carries a `"sound"` permission (matches §13 of the plan doc), but
-audio is not yet gated on it — see §1 (the whole permission model is future work).
+Manifests declare `"audio"` rather than the plan doc's §13 `"sound"`, and nothing
+gates audio on it (see §1).
 
 ---
 
@@ -220,7 +223,7 @@ backend the calls + the engine state are enough to assert behavior headlessly.
 
 ---
 
-## 5. Device backend (T-Deck Plus, I2S MAX98357) — STUB, NEEDS ON-DEVICE VERIFICATION
+## 5. Device backend (T-Deck Plus, I2S MAX98357)
 
 > **The pin map and the feed strategy below still hold; the rest is history
 > (#97).** `DeviceAudio` no longer renders anything: it hands the cart's
@@ -288,20 +291,12 @@ write so a write is issued only when the previous copy is done — the DMA `ibuf
 covers any skipped frame. Rate is **8 kHz** (the reference `SimpleTone` rate) to
 halve the per-frame mixer cost; `render_into` skips all work when nothing plays.
 
-**This path is written but NOT verified on hardware in this environment.** What a
-hardware spike must confirm:
-
-1. The I2S pins/format above actually drive the MAX98357 audibly (boot log prints
-   `Moybyte audio: I2S ready ...` on success, or `I2S UNAVAILABLE, silent: <exc>`
-   if the constructor raised — read it during the ~2 s boot window).
-2. The pure-Python mixer at 8 kHz fits the per-frame CPU budget at 30 FPS without
-   dropping the desktop below playable (measure). If still too slow, a native
-   `moy_audio` C mixer (like `moy_gfx`) is the escalation; the model/format/`render_into`
-   seam stay identical.
-3. Non-blocking `write()` + the `_busy` gate never stalls a frame and never crackles
-   (the ibuf should absorb jitter).
-4. Whether a uasyncio background feeder is worth it (§6) vs. the synchronous
-   per-frame non-blocking `write`.
+**The escalation this section reaches for at the end is what shipped** (#97): the
+mixer is not the pure-Python loop described above but libmoy's C engine rendering
+on core 1, and what survived is the pin map, the non-blocking `write()` + `_busy`
+gate and the `render_into` seam. The boot log is the first thing to read on a
+board: `Moybyte audio: I2S ready ...`, or `I2S UNAVAILABLE, silent: <exc>` if
+the constructor raised, during the ~2 s boot window.
 
 ---
 

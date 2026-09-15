@@ -45,11 +45,13 @@ windowed counter tracks folded flushes 1:1 minus the bezel-layers. Overlays
 disarm through the shared frame walk and pay the old cost. **The snapshot
 into that scratch is the GDMA engine's since 2026-09-08** (`moy_fold_arm_snap`,
 `moy_fold.h`): the 153,600 B PSRAM-to-PSRAM copy was 5.1 ms of every native
-play frame on this board -- the whole of CHROMEBRK's `cmp`, because here the
+play frame on this board -- the whole game-to-system composite, because here the
 game canvas is a separate raster from the glass -- and started at `blit_game`
 it lands before the cart's next tick (`sync_back` fences it; the feeder waits
-for it before its first band). `snap=` on the PUMP line climbs with `fold=`;
-the before/after is in #66. Measured ladder
+for it before its first band). This board stages no `device_diag` and so has no
+PUMP line: `comp.snap_stats()` climbs 1:1 with `fold_count`, and the dev
+channel's `state` carries both, as its `pump` and `fold` fields.
+The before/after is in #66. Measured ladder
 on this glass (Star Catcher / Sakura Lua): 80MHz bring-up 24/21 -> 120MHz
 MSPI 30/27 -> fold 35/30 -> game window 42/34 -> **core-0 feeder 53/43fps**.
 
@@ -257,9 +259,9 @@ VFS when not).
     idle 1.1ms, blocked only 1.1ms -- the kick/pump/drain overlap works,
     0 timeouts / 0 queue errors over the session).
   * stage 2 (half): the AXS15231 touch controller answers at 0x3B and
-    reports no-touch correctly. The MAPPING knobs are still the
-    ESPHome-derived guess -- run `guition_smoke.touch()` with a finger and
-    bake the winners into `device/axs_touch.py`.
+    reports no-touch correctly. The MAPPING knobs were the ESPHome-derived
+    guess that night; `guition_smoke.touch()` with a finger settled them the
+    next day and `device/axs_touch.py` carries the winners (see above).
   * stage 6: boots to the desktop (first frame 270ms after a seeded boot;
     34 carts seeded to `/moy/carts` on the first boot), OTA confirm fired
     (`marked app valid (slot ota_0)`), and
@@ -268,9 +270,7 @@ VFS when not).
     the real pointer feed, a Python cart (Star Catcher, ~28fps) and a Lua
     cart (Sakura Lua via moycore, ~24fps) both run and exit, idle blank +
     wake, mem. `MODE = "desktop"` is the shipped default.
-  * NOT yet verified (needs eyes/fingers): the pattern's orientation, colors
-    and checker squareness on the physical glass, and the touch calibration
-    pass. One anomaly on file: a single
+  * One anomaly on file: a single
     `frame error: 'NoneType' object isn't iterable` fired once, on the
     first-ever cart exit of the first seeded session, and never reproduced
     (not on later exits, not on a fresh boot); `_frame_error` now prints the

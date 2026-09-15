@@ -5,9 +5,8 @@
 **An operating system that turns an ESP32 board into a small general-purpose
 computer — one you can also write software on, on the board itself. The software
 is cartridges: games, wallpapers, tools, whatever you make. Open any of them,
-change it, run it, with no host computer in the loop. It boots on three
-off-the-shelf boards today; the same source tree is also a PC simulator and a
-browser build.**
+change it, run it, with no host computer in the loop. It boots on off-the-shelf
+boards today; the same source tree is also a PC simulator and a browser build.**
 
 Its closest relatives are TIC-80 and Picotron: a fantasy console whose editors
 are part of the machine. The difference is that here it goes all the way down to
@@ -47,7 +46,8 @@ the public spec for that cart format and its verb table.
 | **LilyGO T-Deck Plus** (ESP32-S3) | MicroPython firmware, native 320×240, keyboard + trackball + touch, carts on SD — or on internal flash when the slot is empty — and OTA updates. |
 | **Waveshare ESP32-P4 7B** | 1024×600 MIPI-DSI. Same system, second presentation tier: a windowed desktop with draggable app windows. |
 | **Guition JC3248W535** (ESP32-S3) | the ~$15 3.5″ smart display: a QSPI AXS15231B panel, touch-only, landscape 480×320, carts on the TF card when one is in the slot. |
-| **Seeed XIAO ESP32-S3** | the fourth build target and the odd one: no screen at all. It serves the WebAssembly console off its own flash and is the cartridge store behind it, so the console runs on whatever screen is nearby. Same OTA, same Settings. |
+| **Guition JC8012P4A1C** (ESP32-P4) | the 10.1″ one: the same desktop tier as the Waveshare over the shared `native/p4/` silicon, a landscape desk rotated onto portrait glass by the PPA. |
+| **Seeed XIAO ESP32-S3** | the odd one: no screen at all. It serves the WebAssembly console off its own flash and is the cartridge store behind it, so the console runs on whatever screen is nearby. Same OTA, same Settings. |
 | **Browser** | MicroPython compiled to WebAssembly (`firmware/web_runner/`) — the OS *is* the page, no server. |
 
 Host and device are **one codebase**, not a port. `runtime/` is canonical; each
@@ -126,7 +126,7 @@ firmware image, so a phone on the same network gets the full console from the
 device itself — reading that board's cartridges and writing every change back to
 it, behind the pairing pin the board puts on screen.
 
-**Five rendering backends, one contract** — host, three boards, and a browser
+**One contract, every rendering backend** — the host, each board, and a browser
 build that rasterizes in WebAssembly. That contract is written down
 ([`docs/surface_model_v1.md`](docs/surface_model_v1.md)), including its graveyard
 of approaches that were built, measured and reverted.
@@ -134,7 +134,7 @@ of approaches that were built, measured and reverted.
 **Tests** — several thousand, all headless (the CI badge above is the live
 count). Golden-frame tests pin the host renderer and a canvas-parity suite holds
 the device backend to it; the firmware tests read the frozen module tree rather
-than executing it. Each of the three boards is driven over its live serial
+than executing it. Every console board is driven over its live serial
 console by a pytest suite that taps and swipes the real UI, and the browser build
 has a screenshot harness that boots the real wasm console and decodes the same
 framebuffer the page blits.
@@ -253,6 +253,10 @@ twin of `system_carts/sakura.moy`, pinned by a test.
 - **`system_carts/*/`** — 30-odd real carts, from a 70-line tap game to Battle
   City. They are the worked examples, and they model the "draw less" idioms the
   docs teach.
+- **[`docs/blocks_tap_game.md`](docs/blocks_tap_game.md)** — the block editor
+  from the kid's side: build `system_carts/tap_game.moy` block by block.
+  [`docs/scratch_parity_v1.md`](docs/scratch_parity_v1.md) is the checklist of
+  what the block vocabulary has and still lacks against Scratch.
 
 ## The spec
 
@@ -270,11 +274,12 @@ expected to differ there.
 
 ## The hardware, honestly
 
-All four boards are real and all four boot to Moybyte — but all four are
-off-the-shelf dev boards; bespoke hardware is roadmap, not shipped. The T-Deck
-Plus is a keyboard handheld; the P4 board is a 7″ desktop; the Guition is a
-~$15 touch-only 3.5″ display; the XIAO has no display at all and lends its
-console to a browser. What's honest about the state:
+Every board here is real and boots Moybyte, and every one of them is an
+off-the-shelf dev board; bespoke hardware is roadmap, not shipped. The T-Deck
+Plus is a keyboard handheld; the Waveshare P4 is a 7″ desktop and the Guition
+JC8012P4A1C a 10.1″ one; the Guition JC3248W535 is a ~$15 touch-only 3.5″
+display; the XIAO has no display at all and lends its console to a browser.
+What's honest about the state:
 
 - **It plays.** The seed carts run at playable frame rates on the boards, with
   the whole editor suite usable on the device itself.
@@ -299,6 +304,7 @@ Build and flash:
 make firmware-build-tdeck-mainline && make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 make firmware-build-p4             && make firmware-flash-p4             PORT=/dev/ttyACM0
 make firmware-build-guition-s3     && make firmware-flash-guition-s3     PORT=/dev/ttyACM0
+make firmware-build-guition-p4     && make firmware-flash-guition-p4     PORT=/dev/ttyACM0
 make firmware-build-zero           && make firmware-flash-zero           PORT=/dev/ttyACM0
 ```
 

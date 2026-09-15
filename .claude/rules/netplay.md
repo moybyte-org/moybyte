@@ -63,8 +63,8 @@ belongs here is only what a coder must not undo:
 - **A restart must not stop the radio** (`Player.release_world` stops the link
   only when `ws.netplay` is None) -- a forming match re-runs the cart, and the
   dying run used to kill the session that caused the restart.
-- **Board scope: ALL THREE console boards since 2026-08-24** (a browser still
-  has no radio). The morning of that day settled "the P4 cannot join" (the
+- **Board scope: EVERY console board** (a browser still has no radio); the P4
+  joined on 2026-08-24. The morning of that day settled "the P4 cannot join" (the
   flag flip failed at link; ESP-Hosted's RPC carries no ESP-NOW; upstream
   esp-hosted-mcu #19 open and unshipped) -- and the rest of it un-settled the
   verdict by BUILDING the path the verdict named: hosted 2.12.12 + the moy_c6
