@@ -194,6 +194,19 @@ _KIND_NAME = {0: "ws", 1: "name", 2: "num", 3: "str", 4: "long",
               5: "comment", 6: "op"}
 
 _LUA_ESCAPES = "abfnrtvxzu\\'\"\n"
+# p8's OWN string escapes, and the P8SCII control byte each stands for
+# (Appendix A). Lua knows none of these spellings -- `"\^c1"` is an invalid
+# escape and the cart refuses to load -- and escaping the BACKSLASH instead
+# makes the cart PRINT the command rather than obey it, which is how `\^c`
+# (clear the screen) and `\#` (solid background) came out as text. The other
+# eight are Lua escapes already and carry the same byte: \a is 7, \b 8, \t 9,
+# \n 10, \v 11, \f 12, \r 13, \0 0.
+#
+# THREE DIGITS, always: Lua reads up to three after a backslash, so `"\6"`
+# followed by the character `1` is byte 61, not byte 6 then "1" -- and `\^1`
+# (skip a frame) is exactly that string.
+_P8_ESCAPES = {"*": "\\001", "#": "\\002", "-": "\\003",
+               "|": "\\004", "+": "\\005", "^": "\\006"}
 
 
 
@@ -412,7 +425,7 @@ def _long_to_quoted(text):
         if cp > 255:
             return None                  # not a P8SCII byte; do not guess
         if cp > 126 or cp < 32:
-            out.append("\\%d" % cp)
+            out.append("\\%03d" % cp)
         elif ch == '"':
             out.append('\\"')
         elif ch == "\\":
@@ -438,6 +451,10 @@ def _fix_string(text):
         ch = text[i]
         if ch == "\\" and i + 1 < n:
             nxt = text[i + 1]
+            if nxt in _P8_ESCAPES:
+                out.append(_P8_ESCAPES[nxt])
+                i += 2
+                continue
             if nxt not in _LUA_ESCAPES and not nxt.isdigit():
                 out.append("\\")
             out.append(ch)
@@ -452,7 +469,7 @@ def _fix_string(text):
             continue
         if ch > "\x7f":
             cp = ord(ch)
-            out.append("\\%d" % cp if cp < 256 else "?")
+            out.append("\\%03d" % cp if cp < 256 else "?")
             i += 1
             if i < n and text[i] == _VARIATION:
                 i += 1
@@ -744,7 +761,9 @@ def rhs_end(toks, start):
     p8 lets statements share a line with no separator, so `dx/=l dy/=l` is two
     of them. After a complete TERM an expression can only go on via an
     OPERATOR (symbolic, or and/or/not); a name, number, string or `{` there is
-    the next statement.
+    the next statement. `;` is one of those OPERATORS to the lexer and is a
+    separator here, so it stops the scan: `if (dir>0)x+=aabb.w;` otherwise
+    wraps the semicolon in the parentheses it builds (`jet pig adventure`).
     """
     depth = 0
     term = False
@@ -757,6 +776,8 @@ def rhs_end(toks, start):
             i += 1
             continue
         if kind == T_OP:
+            if text == ";" and depth == 0:
+                return i              # a statement separator ends the RHS
             if text in "([{":
                 # `f"s"` and `f{...}` are CALLS in Lua, so a literal after a
                 # callable term continues the expression. After a NUMBER it
@@ -2063,7 +2084,12 @@ SHIM = r'''-- ============================================================
 -- fills 600px), and one that presents pixel-for-pixel draws it unscaled. view
 -- is core (SPEC.md 6) and cannot mislead a cart, so no guard -- lossy only at
 -- PRESENTATION.
-local P8_VH = __P8_VH__
+-- The viewport the writer chose, and whether this cart flips: two facts about
+-- THIS cart that the shim needs and cannot read off it. They arrive as globals
+-- emitted just above this chunk rather than as text substituted into it --
+-- SHIM is ~77 KB and a replace() holds it twice, which is the allocation the
+-- browser's MicroPython refuses.
+local P8_VH = __p8_vh
 if P8_VH < 128 then view(128, P8_VH) end
 do
   local m_spr, m_btn, m_btnp = spr, btn, btnp
@@ -2418,6 +2444,7 @@ do
                      [142] = 65, [151] = 66}
   local sbyte = string.byte
   local m_p8print = __moy_p8print
+  local sfind, ssub = string.find, string.sub
   function print(s, x, y, c)
     s = p8str(s)
     -- print(s) and print(s, c) take the cursor and advance it a line, as
@@ -2440,6 +2467,50 @@ do
     -- tab, backspace, newline. Parameters are one base-36 character.
     local fg, bg, wide, tall, invert, tabw, rep = c, -1, 1, 1, false, 16, 1
     local ocol, obits, oonly, ofg = -1, 0, false, false
+    -- THE FONT CELL, and the custom font at 0x5600 (Appendix A). The
+    -- attributes reset every print, which is what makes 0x5f58..0x5f5b the
+    -- place a cart sets them: bit 0 of 0x5f58 says the rest of that byte is
+    -- meant, bit 7 turns the custom font on, and 0x5f59..0x5f5b carry the
+    -- cell a nibble at a time (zero meaning "leave it"). The system cell is
+    -- 4x6, and \014/\015 switch fonts mid-string.
+    local font, fw, fw2, fh, fox, foy = false, 4, 8, 6, 0, 0
+    local function font_cell()
+      if not font then fw, fw2, fh, fox, foy = 4, 8, 6, 0, 0 return end
+      local a0, a1, a2 = peek(0x5600), peek(0x5601), peek(0x5602)
+      if a0 ~= 0 then fw = a0 end
+      if a1 ~= 0 then fw2 = a1 end
+      if a2 ~= 0 then fh = a2 end
+      fox, foy = peek(0x5603), peek(0x5604)
+      if fox > 127 then fox = fox - 256 end
+      if foy > 127 then foy = foy - 256 end
+    end
+    -- A custom character's width adjustment, and whether it is lifted a
+    -- pixel: one NIBBLE each from 0x5608 on, low nibble first, character 16 up.
+    local FADJ = {[0] = 0, 1, 2, 3, -4, -3, -2, -1}
+    local function font_adj(b)
+      if b < 16 then return 0, 0 end
+      local nib = peek(0x5608 + ((b - 16) >> 1))
+      nib = ((b - 16) & 1 == 1) and (nib >> 4) or (nib & 15)
+      return FADJ[nib & 7], (nib & 8 ~= 0) and 1 or 0
+    end
+    do
+      local att = peek(0x5f58)
+      if att & 1 ~= 0 then
+        if att & 0x80 ~= 0 then font = true end
+        if att & 0x04 ~= 0 then wide = 2 end
+        if att & 0x08 ~= 0 then tall = 2 end
+        if att & 0x20 ~= 0 then invert = true end
+      end
+      font_cell()
+      local nib = peek(0x5f59)
+      if nib & 15 ~= 0 then fw = nib & 15 end
+      if nib >> 4 ~= 0 then fh = nib >> 4 end
+      nib = peek(0x5f5a)
+      if nib & 15 ~= 0 then fw2 = nib & 15 end
+      nib = peek(0x5f5b)
+      if nib & 15 ~= 0 then fox = nib & 15 end
+      if nib >> 4 ~= 0 then foy = nib >> 4 end
+    end
     local ODX = {-1, 0, 1, -1, 1, -1, 0, 1}
     local ODY = {-1, -1, -1, 0, 0, 1, 1, 1}
     local function digit(b)
@@ -2457,7 +2528,7 @@ do
         m_pix(cx + ox + gx * wide + xx, cy + oy + gy * tall + yy, col)
       end end
     end
-    local function walk(g, w, col, outline)
+    local function walk(b, g, w, col, outline)
       local function emit(gx, gy)
         if outline then
           for i = 1, 8 do
@@ -2466,6 +2537,21 @@ do
         else
           dot(gx, gy, col)
         end
+      end
+      if font then
+        -- 8 bytes a character from 0x5600, a row each, low bit on the left.
+        -- Characters 0..15 are never drawn: their 128 bytes are the font's
+        -- own attributes and the per-character adjustments.
+        if b >= 16 then
+          local base = 0x5600 + b * 8
+          for r = 0, 7 do
+            local v = peek(base + r)
+            for k = 0, 7 do
+              if (v >> k) & 1 == 1 then emit(k, r) end
+            end
+          end
+        end
+        return
       end
       if g and g ~= 0 then
         for p = 0, 14 do
@@ -2488,15 +2574,25 @@ do
         b = BTN_GLYPH[b] or b
         local g = P8_GLYPHS[b]
         local w = P8_WIDE[b]
-        local adv = (w and 8 or 4) * wide
+        local adv, up
+        if font then
+          local adj
+          adj, up = font_adj(b)
+          adv = ((b < 128 and fw or fw2) + adj) * wide
+          if adv < 0 then adv = 0 end
+        else
+          adv, up = (w and 2 * fw or fw) * wide, 0
+        end
+        cx, cy = cx + fox, cy + foy - up
         for _ = 1, rep do
           local col = fg
-          if invert then cell(adv, 6 * tall, fg) col = bg < 0 and 0 or bg
-          elseif bg >= 0 then cell(adv, 6 * tall, bg) end
-          if ocol >= 0 or ofg then walk(g, w, ofg and col or ocol, true) end
-          if not oonly then walk(g, w, col, false) end
+          if invert then cell(adv, fh * tall, fg) col = bg < 0 and 0 or bg
+          elseif bg >= 0 then cell(adv, fh * tall, bg) end
+          if ocol >= 0 or ofg then walk(b, g, w, ofg and col or ocol, true) end
+          if not oonly then walk(b, g, w, col, false) end
           cx = cx + adv
         end
+        cx, cy = cx - fox, cy - foy + up
         rep = 1
       elseif b == 0 then
         break
@@ -2537,16 +2633,43 @@ do
           cy = digit(sbyte(s, i + 1) or 48) * 4
           i = i + 2
         elseif cmd == 115 then tabw = digit(sbyte(s, i) or 48) i = i + 1 if tabw < 1 then tabw = 16 end
-        elseif cmd == 120 or cmd == 121 or cmd == 100 or cmd == 114 then i = i + 1
+        elseif cmd == 120 then fw = digit(sbyte(s, i) or 48) i = i + 1
+        elseif cmd == 121 then fh = digit(sbyte(s, i) or 48) i = i + 1
+        elseif cmd == 64 or cmd == 33 then
+          -- RAW MEMORY WRITES: `\^@addrnnnn` pokes the nnnn bytes that follow
+          -- to addr, `\^!addr` pokes ALL of them. A one-kilobyte cart keeps
+          -- its sprite sheet in a string and unpacks it with one print
+          -- (`loom valley`), and neither the bytes nor the command may reach
+          -- the raster. Both parameters are four hex characters.
+          local function hex4(at)
+            return (digit(sbyte(s, at) or 48) & 15) << 12
+                 | (digit(sbyte(s, at + 1) or 48) & 15) << 8
+                 | (digit(sbyte(s, at + 2) or 48) & 15) << 4
+                 | (digit(sbyte(s, at + 3) or 48) & 15)
+          end
+          local a, last = hex4(i), n
+          i = i + 4
+          if cmd == 64 then
+            local cnt = hex4(i)
+            i = i + 4
+            if cnt < n - i + 1 then last = i + cnt - 1 end
+          end
+          while i <= last do
+            poke(a, sbyte(s, i))
+            a, i = a + 1, i + 1
+          end
+        elseif cmd == 100 or cmd == 114 then i = i + 1
         end
       elseif b == 7 then
         while i <= n and sbyte(s, i) ~= 32 do i = i + 1 end
-      elseif b == 8 then cx = cx - 4 * wide
+      elseif b == 8 then cx = cx - fw * wide
       elseif b == 9 then cx = lx + ((cx - lx) // tabw + 1) * tabw
-      elseif b == 10 then cx, cy = lx, cy + 6 * tall
+      elseif b == 10 then cx, cy = lx, cy + fh * tall
       elseif b == 11 then i = i + 1
       elseif b == 12 then fg = digit(sbyte(s, i) or 48) & 15 i = i + 1
       elseif b == 13 then cx = lx
+      elseif b == 14 then font = true font_cell()
+      elseif b == 15 then font = false font_cell()
       end
     end
     return cx
@@ -2616,9 +2739,31 @@ do
   function pset(x, y, c) m_pix(fl(x), fl(y), pcol(c)) end
   function pget(x, y) return m_pix(fl(x), fl(y)) end
   local m_line = line
-  function line(x0, y0, x1, y1, c)
-    if fill_skip() then return end
-    m_line(fl(x0), fl(y0), fl(x1), fl(y1), shape_col(c))
+  -- LINE(X0, Y0, [X1, Y1, [COL]]), and PICO-8's LINE STATE with it: the end
+  -- of the last line is remembered, so LINE(X1, Y1) continues a polyline from
+  -- it and LINE() with no arguments makes the next call only MARK the end
+  -- without drawing. `loom valley` draws its whole terrain that way, and
+  -- without the state every segment ran back to (0, 0).
+  --
+  -- LINE(COL) -- one argument -- is the colour, and resets the state with it.
+  -- The manual documents 0, 2, 3, 4 and 5 arguments; this is the reading that
+  -- makes zep's own `line(1) line(-20,20) ... line(198,20)` draw the figure
+  -- his cart draws, and a lone number is a colour everywhere else here.
+  local line_x, line_y, line_set = 0, 0, false
+  function line(a, b, c1, d, e)
+    if a == nil then line_set = false return end
+    if b == nil then p8_pen = fl(a) & 0x8f line_set = false return end
+    local x0, y0, x1, y1, col, draw
+    if d == nil then                       -- LINE(X1, Y1, [COL]): continue
+      x1, y1, col = fl(a), fl(b), c1
+      x0, y0 = line_x, line_y
+      draw = line_set
+    else
+      x0, y0, x1, y1, col = fl(a), fl(b), fl(c1), fl(d), e
+      draw = true
+    end
+    line_x, line_y, line_set = x1, y1, true
+    if draw and not fill_skip() then m_line(x0, y0, x1, y1, shape_col(col)) end
   end
 
   function sfx(n) if n and n >= 0 then m_sfx(fl(n)) end end
@@ -3250,9 +3395,49 @@ do
   end
   function printh(...) end
   function extcmd(...) end
-  -- The console calls _draw() for you, so there is nothing to wait for.
-  function flip() end
+  -- PICO-8's console commands are callable from cart code, and a cart that
+  -- ships with its art already in its sprite sheet keeps the `import` that
+  -- put it there (`octosnatch` imports "art.png" from _init). There is no
+  -- editor and no host filesystem behind a cart here, so these do what the
+  -- BBS player does with them: nothing. `ls` answers with an empty listing
+  -- rather than nil, because a caller indexes what it returns.
+  function import(...) end
+  function export(...) end
+  function folder(...) end
+  function info(...) end
+  function ls(...) return {} end
+  -- FLIP, THE CART'S OWN FRAME BOUNDARY.
+  --
+  -- flip() is "show what I have drawn and give me the next frame", and a cart
+  -- reaches for it two ways. It defines no _update at all and simply loops
+  -- (`loom valley`), or it flips from inside one -- a dialogue box typing a
+  -- letter a frame, a `while not btnp(4) do flip() end` waiting for the
+  -- reader (`the last drop`). The second is not cosmetic: with flip() a no-op
+  -- that loop never ends and the cart hangs the console.
+  --
+  -- So a cart that flips runs its frame inside a COROUTINE the console
+  -- resumes once per tick, and flip() is the yield. A cart that never calls
+  -- flip never enters it -- the porter reads that off the source and the
+  -- driver below takes the plain path -- so nothing else pays for this.
+  -- Does this cart call flip() at all? The writer answers it from the source
+  -- and emits the global above this chunk's shim.
+  local p8_flips = __p8_flips
+  local p8_co
+  local m_cocreate, m_coresume, m_costatus, m_yield, m_corunning =
+        coroutine.create, coroutine.resume, coroutine.status,
+        coroutine.yield, coroutine.running
+  function flip()
+    if p8_co ~= nil and m_corunning() == p8_co then m_yield() end
+  end
+  -- holdframe() asks PICO-8 to hold the NEXT flip until the frame is up. The
+  -- console paces the cart already (SPEC.md 5), so the hold is the frame.
   function holdframe() end
+  -- The cart's top level, when the porter had to defer it: each tab hands its
+  -- own chunk over here instead of running it, and p8_body below runs them in
+  -- tab order inside the coroutine -- which is the order and the scope PICO-8
+  -- gives them, minus the hang.
+  local p8_mains = {}
+  function __p8_main(f) p8_mains[#p8_mains + 1] = f end
   -- p8's persistent draw colour, and its print cursor.
   function color(c) p8_pen = fl(c or 6) & 0x8f end
   function cursor(x, y, c) p8_cx, p8_cy = fl(x or 0), fl(y or 0)
@@ -3407,6 +3592,36 @@ do
   oval, ovalfill = p8c("oval") or oval, p8c("ovalfill") or ovalfill
   spr, sspr = p8c("spr") or spr, p8c("sspr") or sspr
   print = p8c("print") or print
+  -- `\^1`..`\^9` SKIPS 1,2,4,8..256 frames mid-string (Appendix A): flip()
+  -- spelled as text, and how `loom valley` presents a frame -- `?"\^1\^c"` is
+  -- its whole flip-and-clear, IN THAT ORDER, so a printer that drew the
+  -- string and flipped afterwards would present the cleared screen and the
+  -- cart would render nothing. No printer can take it either, in Lua or in C:
+  -- a skip is a yield. So the string is cut at each skip and handed over a
+  -- piece at a time, and only a cart that flips carries the wrapper at all.
+  if p8_flips then
+    local p8_print, c_owns = print, p8c("print") ~= nil
+    print = function(s, x, y, c)
+      s = p8str(s)
+      local at = 1
+      while sfind(s, "\006", at, true) do
+        local k = sfind(s, "\006", at, true)
+        local d = sbyte(s, k + 1)
+        if d ~= nil and d >= 49 and d <= 57 then
+          -- The cursor form puts the head on the line the cursor is ON, and
+          -- the rest carries on from where the head ended, in the pen colour
+          -- it left behind (nil colour = the pen, on both printers).
+          local py = y
+          if py == nil then py = c_owns and peek(0x5f27) or p8_cy end
+          local nx = p8_print(ssub(s, 1, k - 1), x, y, c)
+          for _ = 1, 1 << (d - 49) do flip() end
+          return print(ssub(s, k + 2), nx, py, nil)
+        end
+        at = k + 2
+      end
+      return p8_print(s, x, y, c)
+    end
+  end
   pal, palt, fillp = p8c("pal") or pal, p8c("palt") or palt, p8c("fillp") or fillp
   color, cursor = p8c("color") or color, p8c("cursor") or cursor
   sget, sset = p8c("sget") or sget, p8c("sset") or sset
@@ -3500,9 +3715,39 @@ do
   -- light in _init and positions it in the first update, so a draw with no
   -- tick behind it indexed a nil position.
   local ticked = false
-  function _init()
-    if p8_init then p8_init() end
+  -- The console resets camera/clip/pal/palt after every cart frame; re-park
+  -- the p8 camera and restore p8's default transparency (colour 0) so a cart
+  -- that trusts persistent draw state gets PICO-8's. The machine does all
+  -- three in one call, screen palette included -- which it keeps at 0x5f10,
+  -- so a memcpy fade there survives the frame too.
+  local function p8_restore()
+    p8_camera()
+    if p8_frame then
+      p8_frame()
+    else
+      p8_palt_default()
+      spal_apply()
+    end
   end
+  function _init()
+    -- A cart the porter deferred has not run its top level yet, and PICO-8
+    -- calls _init AFTER that -- so p8_body below owns the call.
+    if p8_init and p8_mains[1] == nil then p8_init() end
+  end
+  -- The flipping cart's frame, resumed once a tick. It yields `true` at the
+  -- end of a COMPLETE tick and (from flip) nothing part-way through, which is
+  -- what tells _draw whether the cart has already drawn this frame.
+  local function p8_body()
+    for i = 1, #p8_mains do p8_mains[i]() end
+    if p8_mains[1] ~= nil and p8_init then p8_init() end
+    while true do
+      local tick = p8_update60 or p8_update
+      if tick == nil then m_yield(true) end
+      if tick then tick() end
+      m_yield(true)
+    end
+  end
+  local p8_mid = false                   -- the tick stopped on a flip
   function _update(dt)
     if p8_in_frame then                          -- the latch and the holds, in C
       p8_in_frame()
@@ -3514,27 +3759,31 @@ do
       end
     end
     p8_mouse_tick()
-    local tick = p8_update60 or p8_update
-    if tick then tick() end
+    if p8_flips then
+      -- A cart that flips may draw from anywhere inside its tick, so the
+      -- per-frame restore belongs here as well as in _draw.
+      p8_restore()
+      if p8_co == nil then p8_co = m_cocreate(p8_body) end
+      if m_costatus(p8_co) ~= "dead" then
+        local ok, done = m_coresume(p8_co)
+        if not ok then error(done, 0) end
+        p8_mid = not done
+      end
+    else
+      local tick = p8_update60 or p8_update
+      if tick then tick() end
+    end
     ticked = true
   end
   -- A cart with NO update function draws every frame, as PICO-8 does: there
   -- is no tick for it to wait for. _update always runs first, so both names
   -- are resolvable by the time this reads them.
   function _draw()
+    -- A tick that stopped on a flip has ALREADY presented its frame, and
+    -- PICO-8 does not call _draw for it either.
+    if p8_mid then return end
     if p8_draw and (ticked or not (p8_update60 or p8_update)) then
-      -- the console resets camera/clip/pal/palt after every cart frame;
-      -- re-park the p8 camera and restore p8's default transparency (colour
-      -- 0) so a cart that trusts persistent draw state gets PICO-8's. The
-      -- machine does all three in one call, screen palette included -- which
-      -- it keeps at 0x5f10, so a memcpy fade there survives the frame too.
-      p8_camera()
-      if p8_frame then
-        p8_frame()
-      else
-        p8_palt_default()
-        spal_apply()
-      end
+      p8_restore()
       p8_draw()
     end
   end
@@ -3628,6 +3877,7 @@ P8_API = ("btn btnp camera sin cos flr abs min max sqrt atan2 spr rectfill "
           "peek peek2 peek4 poke poke2 poke4 memcpy memset "
           "cartdata dget dset stat fillp sget sset fset "
           "reload cstore printh extcmd flip holdframe color cursor "
+          "import export folder info ls "
           "band bor bxor bnot shl shr lshr rotl rotr").split()
 # Note tostr/print above spell integral floats the p8 way; fx() is the 16.16
 # image behind the bit verbs.
@@ -3870,14 +4120,9 @@ def classify_body(body):
     # works on the 16.16 image and the converter spells the literal's bit
     # pattern -- so they are not a gap. What stays out of reach is a full
     # 32-bit packed word: the shift-by-16 decoder above.
-    has_loop = (_defines_function(body, "p8_update") or _defines_function(body, "p8_update60")
-                or _defines_function(body, "p8_draw"))
-    if _call_sites(code, "flip") and not _defines_function(body, "flip"):
-        if not has_loop:
-            refused.append("it runs its own loop on flip() instead of _update/_draw, "
-                           "and the console owns the frame")
-        else:
-            gaps.append("flip() does nothing here; the console draws each frame itself")
+    # flip() is a REAL frame boundary here -- the shim runs a flipping cart's
+    # frame inside a coroutine and yields -- so neither a cart that loops on
+    # it nor one that flips mid-update has anything to report.
     for at in _call_sites(code, "poke"):
         args = _call_args(code, at)
         if len(args) >= 2 and _num(args[0]) == 0x5f2c:
@@ -3888,6 +4133,10 @@ def classify_body(body):
                 break
 
     # -- runs, with gaps -----------------------------------------------------
+    for verb in ("import", "export"):
+        if _call_sites(code, verb) and not _defines_function(body, verb):
+            gaps.append("%s() does nothing; the cart's art and sound are already "
+                        "in it and there is no editor behind a game here" % verb)
     if _call_sites(code, "menuitem") and not _defines_function(body, "menuitem"):
         gaps.append("its pause-menu entries (menuitem) are not shown; the console owns the menu")
     stat_sites = _call_sites(code, "stat")
@@ -3909,8 +4158,8 @@ def classify_body(body):
                     "not applied")
     if any(a in (0x5f5e, 0x5f5f) for a in regs):
         gaps.append("it uses bitplane masks (0x5f5e); the mask is remembered, not applied")
-    if any(0x5600 <= a < 0x5e00 for a in regs):
-        gaps.append("it installs a custom font (0x5600); text draws in the system font")
+    # A custom font at 0x5600 is DRAWN (Appendix A), attributes and all, so a
+    # cart that installs one has nothing to report.
     if any(len(_call_args(code, at)) >= 3 for at in _call_sites(code, "sfx")):
         gaps.append("sfx() with an offset or length plays the whole sound")
     if _call_sites(code, "cstore"):
@@ -3949,6 +4198,30 @@ def _calls_verb(body, name):
             k += 1
         if not (_ident_char(prev) or prev in "._:") and body[k:k + 1] == "(":
             return True
+
+
+def _frame_skips(body):
+    r"""`\^1`..`\^9` in a printed string: the P8SCII spelling of a flip.
+
+    The escape converter has already turned `\^` into the control byte's
+    three-digit form (Appendix A), so this reads the CONVERTED body."""
+    return re.search(r"\\006[1-9]", body) is not None
+
+
+def _own_loop(body):
+    """True when the cart drives its OWN frames rather than the console's.
+
+    PICO-8 runs a cart's top level to completion and only then starts calling
+    _update/_draw, so a cart that defines neither and flips is not waiting for
+    a frame loop -- it IS one. That code cannot run where the porter puts it:
+    main.lua's chunk would never return and the cart would hang before the
+    console saw a frame (`loom valley`). The writer hands every tab's top
+    level to __p8_main instead, and the shim runs them inside the coroutine
+    flip() yields from."""
+    if any(_defines_function(body, n)
+           for n in ("p8_update", "p8_update60", "p8_draw")):
+        return False
+    return _calls_verb(body, "flip") or _frame_skips(body)
 
 
 def _defines_function(body, name):
@@ -4505,7 +4778,8 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
         # only crop a native-res port can ask for is 8 rows or none.
         raise SystemExit("--zoom: the view crop is 8 rows (128x120) or nothing"
                          " -- T+B must be 8 or 0, got %d,%d" % tuple(crop))
-    shim = SHIM.replace("__P8_VH__", str(vh))
+    flips = _own_loop(body) or _calls_verb(body, "flip") or _frame_skips(body)
+    shim = SHIM
     want_sheet = _calls_verb(body, "sget") or _calls_verb(body, "sset")
     want_map_raw = any(_calls_verb(body, v) for v in
                        ("peek", "peek2", "peek4", "memcpy", "reload"))
@@ -4520,7 +4794,8 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
     # writer, and not by re-reading a whole file afterwards.
     _write(out_dir, "p8.lua",
            [p8_header, data_tables_lua(sections, want_sheet, want_map_raw), "\n",
-            shim])
+            "__p8_vh = %d\n__p8_flips = %s\n"
+            % (vh, "true" if flips else "false"), shim])
     written.append("p8.lua")
     # THE CART'S TABS, one file each (tab_files says when they cannot be).
     # The localization block is emitted into EVERY one of them: its `local`s
@@ -4529,10 +4804,17 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
     # frozen by an alias in tab 0), so it is computed once over `body`.
     tabs, fused = tab_files(body)
     local_block = localization_lua(body)
+    # A CART THAT IS ITS OWN FRAME LOOP has its top level handed to __p8_main
+    # rather than run where it stands -- see _own_loop. Every tab is wrapped,
+    # not just the one holding the loop: PICO-8 parses the tabs as one chunk,
+    # so their top levels are a single sequence, and the shim runs them in
+    # that order inside the coroutine.
+    wrap = _own_loop(body)
     for n in range(len(tabs)):
         name, text = tabs[n]
-        _write(out_dir, name,
-               [header if n == 0 else (tab_header % n), local_block, text])
+        head = [header if n == 0 else (tab_header % n), local_block]
+        body_pieces = ["__p8_main(function()\n", text, "\nend)\n"] if wrap else [text]
+        _write(out_dir, name, head + body_pieces)
         written.append(name)
     sources = ["p8.lua"] + [name for name, _ in tabs]
 

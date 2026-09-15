@@ -580,7 +580,11 @@ def test_every_import_declares_the_view_zoom_hint(tmp_path):
     # The porter takes the crop as an ARGUMENT (`--zoom` on its own CLI); this
     # importer passes it as data, from p8_writer.P8_CROP, so there is no flag on
     # any tier and nothing to forget.
-    assert "local P8_VH = 120" in src
+    # The value is emitted as a global just above the shim rather than
+    # substituted into it -- the shim is ~77KB and a replace() holds it twice,
+    # which is the allocation the browser's MicroPython refuses.
+    assert "__p8_vh = 120" in src
+    assert "local P8_VH = __p8_vh" in src
     assert "if P8_VH < 128 then view(128, P8_VH) end" in src
     from p8_writer import P8_CROP, P8_VIEW_H
     assert 128 - P8_CROP[0] - P8_CROP[1] == P8_VIEW_H

@@ -118,13 +118,28 @@ SHIM_GAPS = {
                       "command line here; return from _update() instead"),
     "trace": (MISSING, "trace() returns a Lua stack traceback for printh() -- "
                        "no equivalent; the cart error screen shows the line"),
-    "info": (MISSING, "info() prints cart stats to PICO-8's console -- no "
-                      "console here; print() draws on the screen instead"),
     "serial": (MISSING, "serial() streams bytes to a p8 hardware port -- "
                         "no equivalent; there is nothing on the other end"),
 }
 
 SHIM_STUBS = {
+    # PICO-8's console commands are callable from cart code, and carts keep the
+    # one that built them -- `octosnatch` still imports "art.png" from _init.
+    "import": (STUBBED, "import()/export() move a file in and out of PICO-8's "
+                        "editor -- there is no editor behind a game here, and "
+                        "the cart's art is already in it, so they do nothing"),
+    "export": (STUBBED, "import()/export() move a file in and out of PICO-8's "
+                        "editor -- there is no editor behind a game here, and "
+                        "the cart's art is already in it, so they do nothing"),
+    "folder": (STUBBED, "folder()/info()/ls() are PICO-8's command line "
+                        "talking to its own console -- there is no console "
+                        "here; print() draws on the screen instead"),
+    "info": (STUBBED, "folder()/info()/ls() are PICO-8's command line talking "
+                      "to its own console -- there is no console here; "
+                      "print() draws on the screen instead"),
+    "ls": (STUBBED, "folder()/info()/ls() are PICO-8's command line talking to "
+                    "its own console -- there is no console here; ls() answers "
+                    "with an empty listing"),
     "peek": (STUBBED, "peek()/poke() read and write 64K of SCRATCH memory -- "
                       "it is not the console's memory, so a cart keeping its "
                       "own bookkeeping there works and one poking a hardware "

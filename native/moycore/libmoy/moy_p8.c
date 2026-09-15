@@ -76,6 +76,10 @@ static inline moy_p8 *p8_of(lua_State *L)
 #define P8_FILLP 0x5f31u        /* fill pattern lo, hi, then its transparency */
 #define P8_SPAL  0x5f10u        /* screen palette, kept across frames */
 #define P8_DRAWM 0x5f34u        /* draw mode: bit 1 arms the inverted fills */
+#define P8_FONT  0x5600u        /* custom font: 8 attribute bytes, 120 of
+                                   per-character adjustment, then 8 bytes a
+                                   glyph from character 16 on (Appendix A) */
+#define P8_PATT  0x5f58u        /* print attribute defaults, 0x5f58..0x5f5b */
 
 /* Defined with the rest of the palette handling below; `wr` needs them here so
  * a poke into 0x5f00 keeps the same persistent copy pal()/palt() do. */
@@ -781,12 +785,25 @@ static int p8_digit(int ch)
     return 0;
 }
 
+/* A P8SCII 4-character hex parameter -- the address and length the raw-memory
+ * print commands take. */
+static unsigned p8_hex4(const char *s)
+{
+    return (unsigned)((p8_digit((unsigned char)s[0]) & 15) << 12)
+         | (unsigned)((p8_digit((unsigned char)s[1]) & 15) << 8)
+         | (unsigned)((p8_digit((unsigned char)s[2]) & 15) << 4)
+         | (unsigned)( p8_digit((unsigned char)s[3]) & 15);
+}
+
 typedef struct {
     moy_canvas *c;
+    moy_p8 *m;                   /* the machine: the custom font is memory */
     moy_ds ds;                   /* camera, clip and the raster, read once */
     int fg, bg, wide, tall, invert;
     int ocol, obits, oonly;      /* \^o outline: colour (-1 none), 8 neighbour bits, interior skipped */
     int ouse_fg;                 /* outline in the current colour ("$" / "!") */
+    int font;                    /* 0 the system font, 1 the block at 0x5600 */
+    int fw, fw2, fh, fox, foy;   /* cell width / width past 128 / height / draw offset */
 } p8_pen;
 
 static void p8_cell(const p8_pen *pen, int cx, int cy, int w, int h, int col)
@@ -821,7 +838,7 @@ static void p8_cell(const p8_pen *pen, int cx, int cy, int w, int h, int col)
  * cell is painted exactly when it is unlit and an active direction finds a
  * lit neighbour, and the colour is the same however many times it is written. */
 #define P8_BW 18
-#define P8_BH 14
+#define P8_BH 18                 /* a custom font is 8 rows; tall doubles it */
 #define P8_BMASK ((uint32_t)((1u << P8_BW) - 1u))
 
 static void p8_lit(const p8_pen *pen, int b, uint32_t lit[P8_BH])
@@ -832,7 +849,16 @@ static void p8_lit(const p8_pen *pen, int b, uint32_t lit[P8_BH])
 #define LIT(gx, gy) \
         for (yy = 0; yy < sy; yy++) \
             lit[1 + (gy) * sy + yy] |= col << (1 + (gx) * sx)
-    if (b >= 128 && b < 128 + 26) {
+    if (pen->font) {
+        /* 8 bytes a character from 0x5600, a row each, low bit on the left.
+           Characters 0..15 are never drawn: their 128 bytes are the font's
+           own attributes and the per-character adjustments. */
+        const uint8_t *g = pen->m->mem + P8_FONT + (unsigned)b * 8u;
+        if (b >= 16)
+            for (r = 0; r < 8; r++)
+                for (kk = 0; kk < 8; kk++)
+                    if ((g[r] >> kk) & 1) { LIT(kk, r); }
+    } else if (b >= 128 && b < 128 + 26) {
         const uint8_t *rows = P8_WIDE + (b - 128) * 5;
         for (r = 0; r < 5; r++)
             for (kk = 0; kk < 7; kk++)
@@ -843,6 +869,20 @@ static void p8_lit(const p8_pen *pen, int b, uint32_t lit[P8_BH])
             if ((g >> q) & 1u) { LIT(q % 3, q / 3); }
     }
 #undef LIT
+}
+
+/* A custom font character's width adjustment, and whether it is lifted a
+ * pixel: one NIBBLE each from 0x5608 on, low nibble first, character 16 up. */
+static int p8_font_adj(const p8_pen *pen, int b, int *up)
+{
+    static const int w[8] = { 0, 1, 2, 3, -4, -3, -2, -1 };
+    unsigned nib;
+    *up = 0;
+    if (b < 16) return 0;
+    nib = pen->m->mem[P8_FONT + 8u + (unsigned)((b - 16) >> 1)];
+    nib = ((b - 16) & 1) ? (nib >> 4) : (nib & 15);
+    *up = (nib & 8) ? 1 : 0;
+    return w[nib & 7];
 }
 
 /* One bitmap row onto the canvas at screen row y. The clip test on y is the
@@ -870,19 +910,26 @@ static int p8_glyph(const p8_pen *pen, int b, int cx, int cy)
     static const int dy[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
     int sx = 1 + pen->wide, sy = 1 + pen->tall;
     int fg = pen->fg, bg = pen->bg;
-    int adv, yy, i, hmax = 1 + 5 * sy;   /* the last row an outline can touch */
+    int adv, yy, i, up = 0, rows_h = pen->font ? 8 : 5;
+    int hmax = 1 + rows_h * sy;          /* the last row an outline can touch */
     uint32_t lit[P8_BH];
     b = btn_glyph(b);
-    if (b >= 128 && b < 128 + 26) {
-        const uint8_t *rows = P8_WIDE + (b - 128) * 5;
+    if (hmax > P8_BH - 1) hmax = P8_BH - 1;
+    if (pen->font) {
+        adv = ((b < 128 ? pen->fw : pen->fw2) + p8_font_adj(pen, b, &up)) * sx;
+    } else if (b >= 128 && b < 128 + 26) {
+        const uint8_t *rws = P8_WIDE + (b - 128) * 5;
         int r, any = 0;
-        for (r = 0; r < 5; r++) any |= rows[r];
-        adv = any ? 8 * sx : 4 * sx;
+        for (r = 0; r < 5; r++) any |= rws[r];
+        adv = (any ? 2 * pen->fw : pen->fw) * sx;
     } else {
-        adv = 4 * sx;
+        adv = pen->fw * sx;
     }
-    if (pen->invert) { p8_cell(pen, cx, cy, adv, 6 * sy, fg); fg = bg < 0 ? 0 : bg; }
-    else if (bg >= 0) p8_cell(pen, cx, cy, adv, 6 * sy, bg);
+    cx += pen->fox;
+    cy += pen->foy - up;
+    if (adv < 0) adv = 0;
+    if (pen->invert) { p8_cell(pen, cx, cy, adv, pen->fh * sy, fg); fg = bg < 0 ? 0 : bg; }
+    else if (bg >= 0) p8_cell(pen, cx, cy, adv, pen->fh * sy, bg);
     p8_lit(pen, b, lit);
     if (pen->ocol >= 0 || pen->ouse_fg) {
         moy_pixel opx = pen->c->store[(pen->ouse_fg ? fg : pen->ocol) & 63];
@@ -904,6 +951,20 @@ static int p8_glyph(const p8_pen *pen, int b, int cx, int cy)
     return adv;
 }
 
+/* The custom font's own cell, from the eight attribute bytes at 0x5600: width,
+ * width for character 128 and up, height, then the draw offset. A zero means
+ * the font never set it, so the system cell stands. */
+static void p8_font_cell(p8_pen *pen)
+{
+    const uint8_t *a = pen->m->mem + P8_FONT;
+    if (!pen->font) return;
+    if (a[0]) pen->fw  = a[0];
+    if (a[1]) pen->fw2 = a[1];
+    if (a[2]) pen->fh  = a[2];
+    pen->fox = (int)(int8_t)a[3];
+    pen->foy = (int)(int8_t)a[4];
+}
+
 /* The string, at (x, y), in colour `col` -- everything print does once its
  * arguments are resolved. Split out so the shim's `print` (which resolves the
  * pen, the cursor and p8's number formatting) is one binding call and not
@@ -914,12 +975,35 @@ static int p8_text(moy_p8 *p, const char *s, size_t len, int x, int y, int col)
     p8_pen pen;
     size_t k;
     int cx, cy, tabw = 16, repeat = 1;
+    unsigned att = p->mem[P8_PATT], nib;
     pen.c = p->con->canvas;
+    pen.m = p;
     pen.ds = moy_ds_of(pen.c);           /* cls is the only thing print calls
                                             that touches the raster, and it
                                             moves neither camera nor clip */
     pen.fg = col; pen.bg = -1; pen.wide = pen.tall = pen.invert = 0;
     pen.ocol = -1; pen.obits = 0; pen.oonly = 0; pen.ouse_fg = 0;
+    /* THE ATTRIBUTES ARE RESET EVERY PRINT (Appendix A), which is what makes
+     * 0x5f58..0x5f5b the place a cart sets them: bit 0 of 0x5f58 says the rest
+     * of that byte is meant, and 0x5f59..0x5f5b carry cell width, height, the
+     * width past character 128 and the draw offset, a nibble each, zero
+     * meaning "leave it". The system font's cell is 4x6. */
+    pen.font = 0; pen.fw = 4; pen.fw2 = 8; pen.fh = 6; pen.fox = 0; pen.foy = 0;
+    if (att & 0x01) {
+        if (att & 0x80) pen.font = 1;
+        if (att & 0x04) pen.wide = 1;
+        if (att & 0x08) pen.tall = 1;
+        if (att & 0x20) pen.invert = 1;
+    }
+    p8_font_cell(&pen);
+    nib = p->mem[P8_PATT + 1];
+    if (nib & 15) pen.fw = (int)(nib & 15);
+    if (nib >> 4)  pen.fh = (int)(nib >> 4);
+    nib = p->mem[P8_PATT + 2];
+    if (nib & 15) pen.fw2 = (int)(nib & 15);
+    nib = p->mem[P8_PATT + 3];
+    if (nib & 15) pen.fox = (int)(nib & 15);
+    if (nib >> 4)  pen.foy = (int)(nib >> 4);
     cx = x; cy = y;
     for (k = 0; k < len; k++) {
         int b = (unsigned char)s[k];
@@ -969,6 +1053,28 @@ static int p8_text(moy_p8 *p, const char *s, size_t len, int x, int y, int col)
                     k += 3;
                 }
                 break;
+            /* RAW MEMORY WRITES (Appendix A): `\^@addrnnnn` pokes the nnnn
+             * bytes that follow to addr, `\^!addr` pokes ALL of them. A
+             * one-kilobyte cart keeps its sprite sheet in a string and
+             * unpacks it with one print (`loom valley`), and neither the
+             * bytes nor the command may reach the raster. */
+            case '@':
+                if (k + 8 < len) {
+                    unsigned a = p8_hex4(s + k + 1), cnt = p8_hex4(s + k + 5);
+                    size_t at = k + 9;
+                    if (cnt > len - at) cnt = (unsigned)(len - at);
+                    for (; cnt--; at++, a++) poke_byte(p, a, (uint8_t)s[at]);
+                    k = at - 1;
+                }
+                break;
+            case '!':
+                if (k + 4 < len) {
+                    unsigned a = p8_hex4(s + k + 1);
+                    size_t at = k + 5;
+                    for (; at < len; at++, a++) poke_byte(p, a, (uint8_t)s[at]);
+                    k = len;
+                }
+                break;
             case '#': pen.bg = pen.bg < 0 ? 0 : pen.bg; break;   /* solid background on */
             case 'g': cx = x; cy = y; break;
             case 'c': if (k + 1 < len) moy_cls(pen.c, p8_digit((unsigned char)s[++k]) & 15); cx = x; cy = y; break;
@@ -976,18 +1082,23 @@ static int p8_text(moy_p8 *p, const char *s, size_t len, int x, int y, int col)
                                          cy = p8_digit((unsigned char)s[k + 2]) * 4; }
                       k += 2; break;
             case 's': if (k + 1 < len) tabw = p8_digit((unsigned char)s[++k]); if (tabw < 1) tabw = 16; break;
-            case 'x': case 'y': case 'd': case 'r': k++; break;   /* one param, ignored */
+            case 'x': if (k + 1 < len) pen.fw = p8_digit((unsigned char)s[++k]); break;
+            case 'y': if (k + 1 < len) pen.fh = p8_digit((unsigned char)s[++k]); break;
+            case 'd': case 'r': k++; break;       /* per-character delay, wrap */
             default: break;                                       /* b = p 1-9: nothing to do */
             }
             break;
         case 7:  while (k + 1 < len && s[k + 1] != ' ') k++; break;
-        case 8:  cx -= 4 * (1 + pen.wide); break;
+        case 8:  cx -= pen.fw * (1 + pen.wide); break;
         case 9:  cx = x + ((cx - x) / tabw + 1) * tabw; break;
-        case 10: cx = x; cy += 6 * (1 + pen.tall); break;
+        case 10: cx = x; cy += pen.fh * (1 + pen.tall); break;
         case 11: k++; break;
         case 12: if (k + 1 < len) pen.fg = p8_digit((unsigned char)s[++k]) & 15; break;
         case 13: cx = x; break;
-        default: break;                                           /* 14, 15: font switch */
+        case 14: pen.font = 1; p8_font_cell(&pen); break;  /* the font at 0x5600 */
+        case 15: pen.font = 0; pen.fw = 4; pen.fw2 = 8; pen.fh = 6;
+                 pen.fox = pen.foy = 0; break;             /* ...and back */
+        default: break;
         }
     }
     return cx;                           /* PICO-8 0.2: print returns the pen x */
@@ -1197,15 +1308,42 @@ static int l_p8_pget(lua_State *L)
 /* No "continue from the last endpoint" form: the shim has none either -- p8's
  * `line(x1, y1)` draws from (x1, y1) to (0, 0) here, because fl(nil) is 0.
  * That is why 0x5f3c-0x5f3f holds nothing; there is no endpoint to keep. */
+/* LINE(X0, Y0, [X1, Y1, [COL]]), and PICO-8's LINE STATE with it: the end of
+ * the last line is remembered, so LINE(X1, Y1) continues a polyline from it
+ * and LINE() with no arguments makes the next call only MARK the end without
+ * drawing. `loom valley` draws its whole terrain as one such polyline, and
+ * without the state every segment ran back to (0, 0).
+ *
+ * LINE(COL) -- one argument -- is the colour, and resets the state with it.
+ * The manual documents 0, 2, 3, 4 and 5 arguments; this is the reading that
+ * makes `line(1) line(-20,20) ... line(198,20)` draw the figure zep's own
+ * cart draws, and a lone number is a colour everywhere else in the API. */
 static int l_p8_line(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
     int32_t x0, y0, x1, y1;
-    if (p8_fill_skip(p)) return 0;
-    x0 = p8_fl(L, 1); y0 = p8_fl(L, 2);
-    x1 = p8_fl(L, 3); y1 = p8_fl(L, 4);
-    moy_line(p->con->canvas, (int)x0, (int)y0, (int)x1, (int)y1,
-             p8_shape_col(L, p, 5));
+    int col_at, draw;
+    if (lua_isnoneornil(L, 1)) { p->line_set = 0; return 0; }
+    if (lua_isnoneornil(L, 2)) {
+        p->mem[P8_PEN] = (uint8_t)(p8_fl(L, 1) & 0x8f);
+        p->line_set = 0;
+        return 0;
+    }
+    if (lua_isnoneornil(L, 4)) {          /* LINE(X1, Y1, [COL]): continue */
+        x1 = p8_fl(L, 1); y1 = p8_fl(L, 2);
+        x0 = p->line_x; y0 = p->line_y;
+        col_at = 3;
+        draw = p->line_set;
+    } else {
+        x0 = p8_fl(L, 1); y0 = p8_fl(L, 2);
+        x1 = p8_fl(L, 3); y1 = p8_fl(L, 4);
+        col_at = 5;
+        draw = 1;
+    }
+    p->line_x = x1; p->line_y = y1; p->line_set = 1;
+    if (draw && !p8_fill_skip(p))
+        moy_line(p->con->canvas, (int)x0, (int)y0, (int)x1, (int)y1,
+                 p8_shape_col(L, p, col_at));
     return 0;
 }
 

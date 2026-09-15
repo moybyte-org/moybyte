@@ -124,7 +124,7 @@ f = open("out.moy/p8.lua")
 shim = f.read()
 f.close()
 out["shim_len"] = len(shim)
-for probe in ("PICO-8 compatibility shim", "local P8_VH = 120", "__p8_gff"):
+for probe in ("PICO-8 compatibility shim", "__p8_vh = 120", "__p8_gff"):
     out["probe_" + probe.split()[-1]] = probe in shim
 for probe in ("function p8_draw()", "-- Localized p8 API"):
     out["probe_" + probe.split()[-1]] = probe in main

@@ -449,6 +449,11 @@ typedef struct {
      * transparency back on the next frame, and from then on every globe and
      * gift drew its key colour as a pink block. */
     uint8_t dpal[16];
+    int32_t line_x, line_y;      /* PICO-8's LINE STATE: the end of the last
+                                    line, so LINE(X1, Y1) continues a polyline
+                                    from it. `set` is 0 after LINE() with no
+                                    arguments, when the next one only marks. */
+    int line_set;
 } moy_p8;
 int moy_p8_open(struct lua_State *L, moy_console *con, moy_p8 *p8,
                 uint8_t *mem, uint8_t *rom);
