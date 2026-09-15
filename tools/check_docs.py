@@ -100,8 +100,8 @@ BARE_RE = re.compile(
 # is idiomatic in that file and not worth expanding a hundred times.
 ROOTS = ("", "firmware/lilygo_t_deck_plus_mainline",
          "firmware/esp32_p4_wifi6_touch_lcd_7b", "firmware/web_runner",
-         "firmware/seeed_xiao_esp32s3_zero", "firmware/guition_jc8012p4a1c",
-         "docs/history")
+         "firmware/seeed_xiao_esp32s3_zero", "firmware/guition_jc3248w535",
+         "firmware/guition_jc8012p4a1c", "docs/history")
 
 # Paths that are deliberately not in this repo. Each is a fact about the world,
 # not a reference we can resolve -- and each is documented where it appears.
