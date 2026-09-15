@@ -1,4 +1,4 @@
-# Moybyte device socket/HTTP/WebSocket TRANSPORT CORE.
+# Moybyte device socket/HTTP TRANSPORT CORE.
 #
 # This file used to be the device web view (#41/#22) -- the streaming browser
 # mirror that pushed the console's draw commands over a WebSocket. That whole
@@ -7,50 +7,33 @@
 # lane, stream mode and the Settings WEB VIEW row are deleted; the browser's
 # job moved to the wasm head (firmware/web_runner), synced per plan 3.4.
 #
-# What survives -- deliberately, per the same decision -- is the TRANSPORT:
-# a non-blocking listening socket, an HTTP request parser/response builder,
-# and a persistent single-client WebSocket connection serviced BETWEEN frames.
-# The plan's 3.4 sync RPC (commit-shaped cart sync + the controller input
-# role) is specified to ride exactly this core; it has no consumer today and
-# is deliberately not wired into run_desktop. The hardware constraints this
-# code embodies were learned on glass and should not be re-derived:
+# The WEBSOCKET HALF went with it (2026-09-15) and the reason is worth stating,
+# because it survived the sunset on a claim that was never true: the RFC 6455
+# upgrade, framing and persistent conn were kept "for the 3.4 sync RPC to ride",
+# and the RPC shipped as PLAIN HTTP (moy_webhost.handle_http, runtime/moy_sync).
+# So ~180 lines here plus the whole `web_view_ws` framing leaf were frozen into
+# five board images with no caller of any kind -- and `.claude/rules/web.md`
+# already records the opposite decision on the merits: the update routes go
+# through the HTTP host "never the idle WebSocket core", because WS_IDLE_MS
+# reaped a client through a flash write. A transport kept for a consumer that
+# chose otherwise is a transport with no consumer.
+#
+# What survives is the HTTP transport: a non-blocking listening socket, a
+# request parser/response builder, and one-shot request serving. The hardware
+# constraints this code embodies were learned on glass and should not be
+# re-derived:
 #
 #   * SINGLE-THREADED, NON-BLOCKING: run_desktop's native loop does one render
 #     frame at a time and never services anything mid-frame, so the listener is
-#     non-blocking and poll() runs once per loop iteration, between frames. A
-#     WS frame may arrive split across reads -- the conn keeps a cross-iteration
-#     read buffer and yields only COMPLETE frames; a stalled client is DROPPED,
-#     never waited on.
+#     non-blocking and poll() runs once per loop iteration, between frames.
 #   * Sends block with a short budget (a non-blocking sendall can't push a
-#     multi-KB body over the device's WiFi); reads on the persistent conn are
-#     non-blocking.
-#
-# The RFC 6455 handshake + byte framing live in the shared `web_view_ws`
-# (canonical source runtime/web_view_ws.py, frozen as a top-level module).
+#     multi-KB body over the device's WiFi); the accept path reads with a short
+#     blocking bound, because the request is already en route.
 
 try:
     import usocket as socket
 except Exception:  # noqa: BLE001 -- host / CPython
     import socket
-
-# Clock shims: ONE body, runtime/ticks.py (frozen flat as `ticks` on device --
-# this module carried its own monotonic()-flavoured variant until 2026-08-18).
-try:
-    from ticks import _ticks_ms as ticks_ms, _ticks_diff as ticks_diff
-except ImportError:  # host / CPython: the runtime package
-    from runtime.ticks import _ticks_ms as ticks_ms, _ticks_diff as ticks_diff
-
-try:
-    import web_view_ws as _ws                  # frozen top-level (device)
-except ImportError:                            # host / CPython: canonical source
-    from runtime import web_view_ws as _ws
-
-ws_handshake_response = _ws.ws_handshake_response
-ws_header_key = _ws.ws_header_key
-is_ws_upgrade = _ws.is_ws_upgrade
-ws_encode = _ws.ws_encode
-ws_decode = _ws.ws_decode
-
 
 # PORT 80, the one a browser assumes (owner decision, 2026-08-29 -- it was 8080
 # from the start, as a bare constant with no argument behind it).
@@ -73,15 +56,9 @@ ws_decode = _ws.ws_decode
 # IS 80, so `WebHost(port=8321)` still renders `:8321` and stays reachable.
 DEFAULT_PORT = 80
 
-# Consider the WebSocket client DEAD (and drop it) if we haven't seen any read
-# activity for this long. A live client answers pings / sends input; this reaps
-# a half-open conn (closed tab, dropped WiFi) that never sent a TCP close.
-WS_IDLE_MS = 4000
-
 # Per-connection socket timeouts (seconds). A freshly accepted conn is read
 # BLOCKING with a short bound (the request is already en route); sends use a
-# longer blocking budget (see the header). The persistent WS conn is then
-# non-blocking for reads but keeps the blocking send budget.
+# longer blocking budget (see the header).
 WEB_RECV_TIMEOUT = 0.4
 WEB_SEND_TIMEOUT = 2.0
 
@@ -103,10 +80,6 @@ POLL_MAX = 4
 # default (no board overrides it), and past a full accept mbox lwIP aborts the
 # new pcb with an RST -- turning a slow page into a refused one.
 LISTEN_BACKLOG = 6
-
-# Max bytes a WS conn's read buffer may grow to before giving up (a peer that
-# dribbles header bytes without ever completing a frame). Dropping is safe.
-WS_MAX_BUFFER = 16384
 
 
 # ---------------------------------------------------------------------------
@@ -345,142 +318,24 @@ CHUNK_MIN = 8192
 # concatenated. "%x\r\n" of any CHUNK_MIN under 0x1000000 fits in 8.
 CHUNK_HEAD = 8
 
-# WebSocket opcodes we care about.
-WS_OP_TEXT = 0x1
-WS_OP_CLOSE = 0x8
-WS_OP_PING = 0x9
-WS_OP_PONG = 0xA
-
-
-class _WSConn:
-    """The persistent WebSocket connection (one client at a time). Non-blocking reads with a
-    cross-iteration read buffer + a parser that yields only COMPLETE inbound frames and retains
-    the partial remainder; blocking-with-a-budget sends so a multi-KB frame can drain over slow
-    WiFi. Every op is guarded -- a closed/stalled peer sets .alive False and the server drops it
-    (the client reconnects)."""
-
-    def __init__(self, conn):
-        self._c = conn
-        self._buf = b""             # inbound bytes not yet forming a complete frame
-        self.alive = True
-        self.last_recv = ticks_ms()  # for the idle reaper (WS_IDLE_MS)
-        try:
-            conn.setblocking(False)  # reads must never block the render loop
-        except Exception:  # noqa: BLE001 -- not all ports expose setblocking
-            pass
-
-    def close(self):
-        self.alive = False
-        try:
-            self._c.close()
-        except Exception:  # noqa: BLE001
-            pass
-
-    def _read_some(self):
-        """Drain whatever bytes are pending on the non-blocking socket into the buffer. Returns
-        False (and marks dead) on a clean peer close; True otherwise. EAGAIN (no data) is the
-        normal case and just returns True with nothing appended."""
-        got_close = False
-        for _ in range(8):           # bounded: don't spin draining a fast firehose forever
-            try:
-                chunk = self._c.recv(1024)
-            except Exception:  # noqa: BLE001 -- EAGAIN / would-block: nothing more pending
-                break
-            if chunk == b"" or chunk is None:
-                got_close = True     # peer closed the TCP connection
-                break
-            self._buf += chunk
-            self.last_recv = ticks_ms()
-            if len(self._buf) > WS_MAX_BUFFER:
-                self.alive = False   # a peer dribbling bytes without completing a frame
-                return False
-            if len(chunk) < 1024:    # short read -> the socket is drained for now
-                break
-        if got_close:
-            self.alive = False
-            return False
-        return True
-
-    def drain_input(self):
-        """Read pending bytes and return a list of decoded inbound TEXT payloads (bytes).
-        Handles ping (reply pong) + close (drop) inline. Non-blocking; returns [] when no
-        complete frame is ready. The render loop calls this once per iteration."""
-        if not self.alive:
-            return []
-        if not self._read_some():
-            return []
-        texts = []
-        while self.alive:
-            opcode, payload, consumed = ws_decode(self._buf)
-            if opcode is None:
-                break                # incomplete frame: keep the buffer, try next iteration
-            if consumed <= 0:        # ws_decode protocol error (-1) -> drop the conn
-                self.alive = False
-                break
-            self._buf = self._buf[consumed:]
-            if opcode == WS_OP_TEXT:
-                texts.append(payload)
-            elif opcode == WS_OP_PING:
-                self.send(payload, opcode=WS_OP_PONG)
-            elif opcode == WS_OP_CLOSE:
-                self.alive = False
-                break
-            # WS_OP_PONG / continuation / other control frames: ignored.
-        return texts
-
-    def send(self, payload, opcode=WS_OP_TEXT):
-        """Send one UNMASKED frame, blocking with a short budget so a multi-KB frame can drain
-        over slow WiFi. A send error (a stalled/closed client) drops the conn rather than
-        waiting on it. Returns True if it went out."""
-        if not self.alive:
-            return False
-        frame = ws_encode(payload, opcode)
-        try:
-            self._c.settimeout(WEB_SEND_TIMEOUT)
-        except Exception:  # noqa: BLE001 -- not all ports expose settimeout
-            pass
-        try:
-            self._c.sendall(frame)
-            ok = True
-        except Exception:  # noqa: BLE001 -- ETIMEDOUT / broken pipe: the client stalled
-            ok = False
-            self.alive = False
-        finally:
-            try:
-                self._c.setblocking(False)   # back to non-blocking for the next read
-            except Exception:  # noqa: BLE001
-                pass
-        return ok
-
-
 class WebServer:
-    """The bare cooperative transport: a non-blocking listener, one-shot HTTP
-    requests, and ONE persistent WebSocket client. No routes and no frame push
-    -- the 3.4 sync RPC supplies both when it lands.
+    """The bare cooperative transport: a non-blocking listener and one-shot HTTP
+    requests. No routes of its own.
 
-    Seams for that consumer:
-      * `on_text(payload)`  -- constructor arg, called for each inbound WS TEXT
-                               frame (bytes). None = inbound frames are dropped.
-      * `handle_http(method, path, body)` -- override in a subclass to serve
-                               endpoints; return a complete http_response()
-                               bytes blob, or None for 404. The base serves 404
-                               for everything. `path` is the REQUEST TARGET, so
-                               it may carry a query string: split it for routing
-                               and read it with `query_param`.
-      * `send_text(payload)` -- push one WS text frame to the connected client
-                               (False when none is connected).
+    The seam a consumer implements is `handle_http(method, path, body)` --
+    override it in a subclass to serve endpoints; return a complete
+    http_response() bytes blob, or None for 404. The base serves 404 for
+    everything. `path` is the REQUEST TARGET, so it may carry a query string:
+    split it for routing and read it with `query_param`.
 
     poll() runs once per loop iteration, BETWEEN frames: accept up to POLL_MAX
-    new conns (HTTP one-shot, or a WS upgrade promoted to the persistent conn,
-    latest-wins), then drain the WS's queued input. Non-blocking throughout."""
+    pending connections and serve each one-shot. Non-blocking throughout."""
 
-    def __init__(self, port=DEFAULT_PORT, on_text=None):
+    def __init__(self, port=DEFAULT_PORT):
         self.port = port
-        self.on_text = on_text
         self.sock = None
         self.ip = None
         self.requests = 0             # served-request counter (diag)
-        self._ws = None               # the persistent client (one at a time)
 
     def start(self, ip=None):
         """Open the non-blocking listening socket. `ip` is the device's STA IP (for the printed
@@ -503,23 +358,12 @@ class WebServer:
             return False
 
     def stop(self):
-        self._drop_ws()
         if self.sock is not None:
             try:
                 self.sock.close()
             except Exception:  # noqa: BLE001
                 pass
         self.sock = None
-
-    def _drop_ws(self):
-        """Close + forget the persistent WS client (a disconnect / latest-wins replacement / a
-        stalled send)."""
-        if self._ws is not None:
-            try:
-                self._ws.close()
-            except Exception:  # noqa: BLE001
-                pass
-            self._ws = None
 
     def url(self):
         """The address to hand a human. The port is SPELLED unless it is 80.
@@ -533,39 +377,20 @@ class WebServer:
             return "http://%s/" % host
         return "http://%s:%d/" % (host, self.port)
 
-    def connected(self):
-        """True while a WebSocket client is connected and not idle-timed-out."""
-        if self.sock is None or self._ws is None or not self._ws.alive:
-            return False
-        return ticks_diff(ticks_ms(), self._ws.last_recv) < WS_IDLE_MS
-
-    def send_text(self, payload):
-        """Push one WS text frame to the connected client. False when none."""
-        ws = self._ws
-        if ws is None or not ws.alive:
-            return False
-        ok = ws.send(payload)
-        if not ws.alive:
-            self._drop_ws()
-        return ok
-
     def poll(self):
-        """Run once per loop iteration, BETWEEN frames. Accept new connections, then service
-        the persistent WS conn (drain input -> on_text; reap an idle client). Returns True if
-        anything was handled. A stalled client is dropped, never waited on."""
+        """Run once per loop iteration, BETWEEN frames. Accept and serve whatever
+        is pending. Returns True if anything was handled."""
         if self.sock is None:
             return False
-        did = self._accept_new()
-        did = self._service_ws() or did
-        return did
+        return self._accept_new()
 
     # service() is the conceptual name; poll() is the established hook name.
     service = poll
 
     def _accept_new(self):
         """Accept + dispatch up to POLL_MAX pending NEW connections (non-blocking). accept()
-        EAGAINs the instant nothing is pending. A WS upgrade is promoted to the persistent conn;
-        any other request is a one-shot HTTP serve + close."""
+        EAGAINs the instant nothing is pending. Every request is a one-shot HTTP
+        serve + close."""
         did = False
         for _ in range(POLL_MAX):
             try:
@@ -584,18 +409,8 @@ class WebServer:
         return did
 
     def _dispatch(self, conn):
-        """Read one request head off a freshly accepted conn and route it: a WS upgrade is
-        promoted to the persistent live conn (the conn STAYS OPEN); any HTTP request is served
-        and the conn closed."""
-        method, path, body, raw = self._recv_request(conn)
-        if method == "GET" and is_ws_upgrade(raw):
-            key = ws_header_key(raw)
-            if key:
-                self._upgrade_ws(conn, key)
-                return
-            self._http_send_close(conn, http_response(400, "bad upgrade",
-                                                      "text/plain; charset=utf-8"))
-            return
+        """Read one request head off a freshly accepted conn, serve it and close."""
+        method, path, body = self._recv_request(conn)
         if method is None:
             try:
                 conn.close()
@@ -603,49 +418,6 @@ class WebServer:
                 pass
             return
         self._serve_http(conn, method, path, body)
-
-    def _upgrade_ws(self, conn, key):
-        """Complete the WebSocket handshake (101) and install the conn as the persistent live
-        client, dropping any previous one (latest-wins). On a handshake send failure, close."""
-        try:
-            conn.settimeout(WEB_SEND_TIMEOUT)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            conn.sendall(ws_handshake_response(key))
-        except Exception as exc:  # noqa: BLE001 -- couldn't 101 the client: drop it
-            print("Moybyte web: ws handshake failed:", exc)
-            try:
-                conn.close()
-            except Exception:  # noqa: BLE001
-                pass
-            return
-        self._drop_ws()                            # latest-wins: one client at a time
-        self._ws = _WSConn(conn)
-        self.requests += 1
-        print("Moybyte web: ws client connected")
-
-    def _service_ws(self):
-        """Drain the persistent WS conn's queued input frames (-> on_text) and reap an idle or
-        dead client. No-op when no client is connected."""
-        ws = self._ws
-        if ws is None:
-            return False
-        if not ws.alive:
-            self._drop_ws()
-            return False
-        did = False
-        for payload in ws.drain_input():
-            did = True
-            if self.on_text is not None:
-                self.on_text(payload)
-        if not ws.alive:                           # a close/oversize frame killed it
-            self._drop_ws()
-            return did
-        # Idle reaper: a half-open conn (closed tab, dropped WiFi) that stopped sending.
-        if ticks_diff(ticks_ms(), ws.last_recv) >= WS_IDLE_MS:
-            self._drop_ws()
-        return did
 
     def _http_send_close(self, conn, data):
         """sendall `data` (with a short send budget) then close -- the one-shot HTTP path.
@@ -794,9 +566,8 @@ class WebServer:
 
     def _recv_request(self, conn):
         """Read one request head (+ body up to Content-Length) off a freshly accepted conn.
-        Blocking with a short bound (the request is already en route). Returns (method, path,
-        body, raw_head) -- raw_head lets the caller sniff a WebSocket upgrade. (None, None, b'',
-        b'') on an unparseable request."""
+        Blocking with a short bound (the request is already en route). Returns
+        (method, path, body), or (None, None, b"") on an unparseable request."""
         try:
             conn.settimeout(WEB_RECV_TIMEOUT)
         except Exception:  # noqa: BLE001 -- not all ports expose settimeout
@@ -818,9 +589,9 @@ class WebServer:
             if head_end >= 0 and len(buf) - head_end >= clen:
                 break
         if head_end < 0:
-            return (None, None, b"", buf)
+            return (None, None, b"")
         body = buf[head_end:head_end + clen] if clen else b""
-        return (method, path, body, buf[:head_end])
+        return (method, path, body)
 
     def handle_http(self, method, path, body):
         """Endpoint seam for the 3.4 sync RPC: return complete http_response()

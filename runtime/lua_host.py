@@ -31,7 +31,9 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 # registered on top of libmoy's table.
 from runtime.widgets import pointer_state
 from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                             LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
+                             LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
+                             snap_slots, audio_ops, snap_shared, sync_view,
+                             drain_audio)
 
 # ---------------------------------------------------------------------------
 # The moycore lane -- now the ONLY lane.
@@ -146,18 +148,16 @@ class MoycoreHostRun:
         self.draw = self._draw_noop
         self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
         self.draw_next = True
+        # The slots and op codes lua_ext's shared bodies take -- this tier's
+        # ABI is runtime/lua_binding's, the device's is the moycore module's.
+        from runtime import lua_binding
+        self._I_SNAP = snap_slots(lua_binding)
+        self._aq_ops = audio_ops(lua_binding)
 
     def _update(self, dt):
         s = self._run.snap
         inp = self._ws.input
-        from runtime.lua_binding import (SNAP_BTN, SNAP_BTNP, SNAP_BTN_P1,
-                                         SNAP_BTNP_P1, SNAP_PLAYERS,
-                                         SNAP_TOUCH_X, SNAP_TOUCH_Y,
-                                         SNAP_TOUCH_DOWN, SNAP_TOUCH_MS,
-                                         SNAP_QUIT,
-                                         AQ_SFX, AQ_MUSIC,
-                                         AQ_BEEP, AQ_MUSIC_STOP,
-                                         AQ_SOUND_STOP, AQ_VOLUME)
+        from runtime.lua_binding import SNAP_BTN, SNAP_BTNP, SNAP_QUIT
         # MOY_BUTTONS, not a fourth hand-written copy of the order. This loop
         # carried its own and was CORRECT, which is exactly what made the
         # boards' divergence invisible: the host played fine, so nothing here
@@ -176,29 +176,7 @@ class MoycoreHostRun:
                 except Exception:  # noqa: BLE001
                     pass
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
-        # PLAYER TWO (#65). These snapshot slots exist in the C ABI and nothing
-        # filled them, so libmoy's `players()` answered 1 forever and a Lua cart
-        # could not have a second player at all -- the Python twin of the same
-        # cart fielded two tanks and the Lua one fielded one. The count is read
-        # through the router because a transport slot (a radio peer) lives
-        # there, not on the InputState; the fast path costs one dict test.
-        n = 1
-        pr = getattr(inp, "players", None)
-        if pr is not None:
-            n = pr.count()
-            if n > 1:
-                h1, p1 = pr.button_masks(MOY_BUTTONS, 1)
-                s[SNAP_BTN_P1] = h1
-                s[SNAP_BTNP_P1] = p1
-        s[SNAP_PLAYERS] = n
-        # THE POINTER, in the cart's own coordinates (widgets.pointer_state).
-        # Same omission as player two above and the same consequence: the slot
-        # is in the C ABI, libmoy's touch() reads it, and nothing on either
-        # Lua tier ever wrote it -- so `touch()` answered nil for every Lua
-        # cart everywhere while the Python twin of the same cart had a pointer.
-        x, y, st, ms = pointer_state(inp, self._touch_out)
-        s[SNAP_TOUCH_X], s[SNAP_TOUCH_Y] = x, y
-        s[SNAP_TOUCH_DOWN], s[SNAP_TOUCH_MS] = st, ms
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out)
         err = self._run.tick(dt, self.draw_next)
         # A LUA cart ends itself the same way a Python one does. libmoy's quit()
         # is a host callback that sets SNAP_QUIT (h_quit), and nothing read it:
@@ -212,38 +190,12 @@ class MoycoreHostRun:
             s[SNAP_QUIT] = 0
             inp.cart_quit = True
         self._sync_view()
-        # Audio drains through the SAME api closures a Python cart uses, so the
-        # engine's behaviour lives in one place; only the per-call trip is gone.
-        for op, a, b, _c in self._run.audio():
-            try:
-                if op == AQ_SFX:
-                    self._ns["sfx"](a, None if b < 0 else b)
-                elif op == AQ_MUSIC:
-                    self._ns["music"](a, bool(b))
-                elif op == AQ_BEEP:
-                    self._ns["beep"](a, b / 1000.0)
-                elif op == AQ_MUSIC_STOP:
-                    self._ns["music_stop"]()
-                elif op == AQ_SOUND_STOP:
-                    self._ns["sound_stop"](None if a < 0 else a)
-                elif op == AQ_VOLUME:
-                    self._ns["volume"](a)
-            except Exception:  # noqa: BLE001 -- one bad command is not the frame
-                pass
+        drain_audio(self._ns, self._aq_ops, self._run.audio())
         if err:
             raise RuntimeError(err)
 
     def _sync_view(self):
-        """Apply the cart's view() to the console -- libmoy owns the verb and
-        records it, the console still has to composite accordingly."""
-        v = self._run.view()
-        if v == self._view:
-            return
-        self._view = v
-        try:
-            self._ws.input.game_view = v
-        except Exception:  # noqa: BLE001
-            pass
+        self._view = sync_view(self._ws, self._run.view(), self._view)
 
     def get_global(self, name):
         """A cart global as a number, or None -- what the parity suites read."""

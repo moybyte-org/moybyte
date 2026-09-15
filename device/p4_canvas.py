@@ -95,6 +95,12 @@ class P4SystemCanvas(SystemCanvas):
         # native gate counters and this surface's clears, as three ints so a
         # play frame builds no tuple. -1 = no frame yet, never "unchanged".
         self._clears = 0
+        # The cart-view crop scratch, pooled across frames. Its OWN name: the
+        # base class's `_view_scratch` on the same object is a _LayerComp
+        # (`._w`/`.framebuffer()`), this one a DeviceCanvas (`.w`/`._buf`), and
+        # one name for two shapes is a crash waiting for the day blit_game
+        # stops being fully overridden here.
+        self._view_crop = None
         self._q_fill = -1
         self._q_text = -1
         self._q_clears = -1
@@ -176,9 +182,9 @@ class P4SystemCanvas(SystemCanvas):
             if fb0 is not None:
                 fb0()
             sx, sy, vw, vh = src
-            scr = getattr(self, "_view_scratch", None)
+            scr = self._view_crop
             if scr is None or scr.w != vw or scr.h != vh:
-                scr = self._view_scratch = self.new_layer(vw, vh)
+                scr = self._view_crop = self.new_layer(vw, vh)
             self._gfx.blit565(scr._buf, vw, vh, -sx, -sy,
                               gc._buf, gc.w, gc.h, -1)
             gc = scr

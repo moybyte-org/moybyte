@@ -99,7 +99,8 @@ helpers every one of them writes through. This is the board's reason to exist
 -- `moy_webhost` is a transport in front of these two files."""
 
 [[modules.shared.group]]
-files = ["moy_carts.py", "moy_image.py"]
+files = ["moy_carts.py", "moy_store_base.py", "moy_seed.py", "moy_files.py",
+         "moy_file_ops.py", "moy_image.py"]
 why = """
 THE ZERO SUPPORTS ALL FEATURES (owner call 2026-08-25), and this pair is what
 that call bought. `moy_sync.file_kinds()` asks the store module for FILE_KINDS
@@ -112,7 +113,12 @@ without these the kid's drawings simply do not travel, silently. `moy_image` is
 inflates the PACKED roster this board's build bakes into `carts_data.py` (see
 `[modules] keep`). It is the same `seed_builtins` every console board seeds
 with, one cart at a time behind a decoder, so this board gained a first-boot
-store without gaining a second copy of the seed rules."""
+store without gaining a second copy of the seed rules.
+
+`moy_carts` is an umbrella over four modules of its own -- `moy_store_base`
+(the on-card layout), `moy_seed` (the seeders), `moy_files` (the #108 layer
+the sync serves) and `moy_file_ops` (history sidecars, trash, provenance) --
+imported and re-exported, so the umbrella cannot load without them."""
 
 [[modules.shared.group]]
 files = ["moy_journal.py"]
@@ -126,12 +132,12 @@ journal_undo/journal_redo walked the live main.py between two browser-era
 commits."""
 
 [[modules.shared.group]]
-files = ["web_view_ws.py", "ticks.py"]
+files = ["ticks.py"]
 why = """
-Leaves the transport imports by name: `moy_webserver` imports `web_view_ws`
-(the RFC 6455 upgrade + framing -- the only file of the deleted streaming
-lineage the boards still freeze) and `ticks` (the wrap-safe ms clock its
-blocking budgets and idle reaper are written against)."""
+Leaves the transport import by name: `moy_webhost` imports `ticks` (the
+wrap-safe ms clock its closing grace window is written against). `web_view_ws`
+was the other name here until 2026-09, when the WebSocket half of the transport
+went with it -- the RPC it was kept for shipped as plain HTTP."""
 
 # What is DECLARED ABSENT rather than merely unlisted -----------------------
 

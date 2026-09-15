@@ -164,9 +164,11 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   (`.claude/rules/web.md` carries the rule and what follows from it).
 - `modules/` — the P4-authored device backend (tracked) + build-staged copies
   (gitignored; see `.gitignore`'s whitelist):
-  - `moybyte_shell.py` — boot entry (`main()`); `RUN_PANEL_SMOKE` flips to the
-    DSI hardware test pattern. Ctrl-C in the desktop loop drops to the REPL
-    (no native-takeover USB starvation on this board).
+  - `moybyte_shell.py` — boot entry (`main()`): this board's name, its `MODE`
+    string and the `panel` smoke below it, over the shared ladder in
+    `device/boot_shell.py`. `s.MODE = "panel"` flips to the DSI hardware test
+    pattern. Ctrl-C in the desktop loop drops to the REPL (no native-takeover
+    USB starvation on this board).
   - `p4_display.py` — this board's backlight (GPIO32 active-low) bound to the
     shared `device/dsi_panel.py` `P4Compositor` (promoted 2026-09-06): the compositor shim over `moy_dsi`
     (size/framebuffer/back_buffer/gfx/flush/sync; single-buffered, flush =

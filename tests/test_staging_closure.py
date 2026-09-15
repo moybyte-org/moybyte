@@ -13,6 +13,8 @@ quarter:
     and the WEB CONSOLE row silently does not exist. Nobody saw it because
     `modules/` is gitignored and never cleaned, so every developer's board kept
     running a pre-sunset copy; a fresh clone would have lost the feature.
+    (`web_view_ws.py` is deleted outright now -- the RPC it was kept for speaks
+    plain HTTP -- so the incident is history and the lesson is not.)
 
   * `runtime/palette.py` imports CPython's `colorsys` at module scope. The web
     runner hit this and solved it by GENERATING a literal twin
@@ -356,9 +358,10 @@ def _swallows(handler):
         try: import moy_gfx                 # a PROBE. The board may not have
         except ImportError: moy_gfx = None  # it; the caller checks. Fine.
 
-        try: import web_view_ws             # a LADDER. Two ways to reach ONE
-        except ImportError:                 # module, and if neither works the
-            from runtime import web_view_ws # importer is simply broken.
+        try: from moy_fs import _write_atomic   # a LADDER. Two ways to reach
+        except ImportError:                     # ONE module, and if neither
+            from runtime.moy_fs import _write_atomic   # works the importer is
+                                                       # simply broken.
 
     A handler that imports is offering another route; a handler that assigns a
     fallback, passes, or returns is accepting the loss. Only the former makes
@@ -647,8 +650,10 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
     staged = set(board_config.staged_modules(ZERO, ROOT))
     for name in ("moy_sync.py", "moy_fs.py",          # the 3.4 RPC
                  "moy_carts.py", "moy_image.py",      # #108 files sync
+                 "moy_store_base.py", "moy_seed.py",  # ...and the store's own
+                 "moy_files.py", "moy_file_ops.py",   # split-off modules
                  "moy_journal.py",                    # the store of record
-                 "web_view_ws.py", "ticks.py",        # the transport's leaves
+                 "ticks.py",                          # the transport's clock leaf
                  "moy_webserver.py", "moy_webhost.py",
                  "moy_ota.py"):                       # #53, wired 2026-08-29
         assert name in staged, "the Zero no longer stages %s" % name

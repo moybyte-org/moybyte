@@ -387,11 +387,6 @@ published format, protocol or behaviour; none contains third-party code.
   (`tools/render_icons.py`) — hand-written per the PNG specification, with
   `zlib` from the standard library for DEFLATE. The Paeth predictor is the
   spec's own pseudocode.
-- **WebSocket, RFC 6455** (`runtime/web_view_ws.py`,
-  `device/moy_webserver.py`) —
-  handshake and framing written from the RFC.
-  `WS_GUID` is the RFC's magic constant. SHA-1 and Base64 come from the
-  standard library.
 - **SHA-256** (`moy_ota.py`, `tools/gen_ota_manifest.py`) — `hashlib`.
 - **No third-party JavaScript.** `firmware/web_runner/page_core.html`,
   `firmware/web_runner/page_tail.js` and `firmware/web_runner/harness.mjs`

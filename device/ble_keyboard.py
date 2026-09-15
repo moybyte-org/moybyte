@@ -37,6 +37,15 @@ except ImportError:  # CPython host tests
     def const(value):
         return value
 
+# The bond store publishes through the tree's crash-safe primitives: a stamped
+# `.bak` then the file itself, and a read that finishes an interrupted publish.
+# A remove+rename dance has a window in which the bonds are on neither path, and
+# losing them means re-pairing a keyboard by hand.
+try:
+    from moy_fs import _read_recover, _write_atomic
+except ImportError:  # CPython host tests / the runtime package lane
+    from runtime.moy_fs import _read_recover, _write_atomic
+
 
 # MicroPython bluetooth IRQ numbers.
 _IRQ_SCAN_RESULT = const(5)
@@ -1288,8 +1297,7 @@ class BleHidKeyboard:
         try:
             import binascii
             import json
-            with open(self.store_path, "r") as src:
-                data = json.load(src)
+            data = json.loads(_read_recover(self.store_path))
             # v1 stored only name + NimBLE secrets. Keep those bonds and learn
             # the preferred address on the next connection instead of forcing
             # an already-working keyboard through pairing again.
@@ -1323,7 +1331,6 @@ class BleHidKeyboard:
         try:
             import binascii
             import json
-            import os
             secrets = []
             for (sec_type, key), value in self._secrets.items():
                 secrets.append((sec_type,
@@ -1336,14 +1343,7 @@ class BleHidKeyboard:
             data = {"version": _STORE_VERSION, "enabled": self._enabled,
                     "name": self.name, "preferred": preferred,
                     "secrets": secrets}
-            tmp = self.store_path + ".tmp"
-            with open(tmp, "w") as dst:
-                json.dump(data, dst)
-            try:
-                os.remove(self.store_path)
-            except OSError:
-                pass
-            os.rename(tmp, self.store_path)
+            _write_atomic(self.store_path, json.dumps(data))
             self._store_dirty = False
         except Exception as exc:
             # Do not retry every 16ms if storage is unavailable; the live bond

@@ -75,10 +75,6 @@ DRAIN_MAX = 24         # messages per frame -- a bound, not a target
 START_TRIES = 12       # invites before the host gives up (~5s at BEACON_MS)
 
 
-def _u16(b, i):
-    return b[i] | (b[i + 1] << 8)
-
-
 class Peer:
     """Another console we can hear. `cart` is what it is sitting on, which is how
     two consoles decide they are about to play the SAME game."""

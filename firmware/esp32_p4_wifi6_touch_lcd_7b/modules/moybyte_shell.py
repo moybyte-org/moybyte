@@ -1,34 +1,34 @@
-"""Moybyte P4 boot shell (#58): mode flags + main().
+"""Moybyte P4 boot shell (#58): pick a boot mode and run it.
 
-Unlike the T-Deck there is no native-takeover USB starvation -- the CH343 UART
-REPL stays alive under the desktop loop, so Ctrl-C drops cleanly back to the
-REPL (caught below) and `mpremote` keeps working for the dev loop.
+The ladder itself is `device/boot_shell.py`, shared by every console board.
+This board's CH343 UART REPL stays alive under the desktop loop, so Ctrl-C drops
+cleanly back to the REPL (caught there) and `mpremote` keeps working for the dev
+loop:
+
+    import moybyte_shell as s; s.MODE = "panel"; s.main()
+
+Its one smoke lives in this file rather than in a `*_smoke` module of its own,
+so SMOKE names this module.
 """
 
-# Boot mode flags. Default = the shared console under the windowed WM
-# (moy_runtime.run_desktop). RUN_PANEL_SMOKE is the bring-up mode: hardware
-# color bars straight from the DSI peripheral (no framebuffer involved), for
-# separating "panel path broken" from "console broken".
-RUN_PANEL_SMOKE = False
-RUN_DESKTOP = True
+import boot_shell
+
+BOARD = "P4"
+SMOKE = "moybyte_shell"
+
+# The mode this image boots. "panel" is the bring-up mode: hardware colour bars
+# straight from the DSI peripheral (no framebuffer involved), for separating
+# "panel path broken" from "console broken".
+MODE = "desktop"
+
+MODES = ("panel", "desktop")
 
 
 def main():
-    print("Moybyte P4 shell starting")
-    if RUN_PANEL_SMOKE:
-        _panel_smoke()
-        return
-    if RUN_DESKTOP:
-        try:
-            from moy_runtime import run_desktop
-            run_desktop()
-        except KeyboardInterrupt:
-            print("Moybyte P4 desktop interrupted -> REPL")
-        return
-    print("Moybyte P4: no boot mode selected (REPL)")
+    boot_shell.main(BOARD, MODE, MODES, SMOKE)
 
 
-def _panel_smoke():
+def panel():
     import time
     import moy_dsi
     from p4_display import set_backlight

@@ -72,10 +72,53 @@ HEALTHY_PAINTS = 1
 HEALTHY_LOOPS = 120
 HEALTHY_SERVES = 300
 PENDING_NAME = "pending.json"   # written beside the image at finish(), read at boot
-# How long ensure_online() waits for the link AFTER the autoconnect attempt. See
+# How long wait_online() waits for the link AFTER the autoconnect attempt. See
 # its docstring: a saved network on the P4 came up 1.5s after connect() had
 # already given up and returned False.
 ONLINE_WAIT_MS = 12000
+ONLINE_STEP_MS = 250
+
+
+def wait_online(online, autoconnect=None, wait_ms=ONLINE_WAIT_MS,
+                step_ms=ONLINE_STEP_MS):
+    """Report the link, dialling saved credentials first and then WAITING.
+
+    The wait is the whole point, and it is measured: `connect()` returning False
+    does not mean the association failed. On the P4 (2026-08-02, saved network,
+    cold reset) connect() polled isconnected() for 4s and gave up -- and the link
+    came up 1.5s AFTER it did, because the radio is a separate C6 over SDIO and
+    cold association simply takes longer than the interactive budget. Without the
+    wait a perfectly good network reads as "wifi offline", which is what both the
+    online update and the WEB CONSOLE row did on their first try.
+
+    It belongs behind a caller that has already committed to a blocking round
+    trip behind a CHECKING screen, never inside `connect()`: a few more seconds
+    cost that caller nothing, while lengthening connect() would freeze the
+    desktop for every wrong password too.
+
+    `online()` answers "is the link up" and `autoconnect()` dials -- both
+    zero-argument, so each caller keeps its own idea of what a radio is and what
+    an exception from one means. The dial is best-effort: a radio that raises on
+    connect may still be associating, and the wait is what finds out.
+    """
+    if online():
+        return True
+    if autoconnect is not None:
+        try:
+            autoconnect()
+        except Exception:  # noqa: BLE001 -- the wait below decides
+            pass
+    import time
+    sleep_ms = getattr(time, "sleep_ms", None)
+    for _ in range(max(1, wait_ms // step_ms)):
+        if online():
+            return True
+        if sleep_ms is not None:
+            sleep_ms(step_ms)
+        else:                              # host / CPython: no sleep_ms
+            time.sleep(step_ms / 1000.0)
+    return bool(online())
+
 
 # Which board this image is for. An OTA payload is an APP PARTITION image, so it
 # is board-specific in the strongest possible way -- handing a P4 an Xtensa S3
@@ -779,39 +822,11 @@ class OtaUpdater:
             return False
 
     def ensure_online(self):
-        """Best-effort: report connected, else try a saved-credentials autoconnect.
-        Never prompts for a password -- the kid joins a network via the WiFi cart;
-        this only reuses what's already saved.
-
-        Then WAIT for the link, because `connect()` returning False does not mean
-        the association failed. Measured on the P4 (2026-08-02, saved network,
-        from a cold reset): connect() polls isconnected() for 4s and gives up --
-        and the link came up 1.5s after it did. The radio is a separate C6 over
-        SDIO here, so association from cold simply takes longer than the
-        interactive budget, and reporting "wifi offline" on a network that is
-        seconds from ready made the online update look broken.
-
-        The wait belongs HERE and not in connect(): this caller has already
-        committed to a blocking network round trip behind a CHECKING screen, so
-        a few more seconds cost nothing, while lengthening connect() would freeze
-        the desktop for every wrong password too."""
-        if self.wifi_online():
-            return True
-        if self._go_online is not None:
-            try:
-                self._go_online()
-            except Exception:
-                pass
-        import time
-
-        for _ in range(ONLINE_WAIT_MS // 250):
-            if self.wifi_online():
-                return True
-            try:
-                time.sleep_ms(250)
-            except AttributeError:
-                time.sleep(0.25)
-        return self.wifi_online()
+        """Best-effort: report connected, else dial saved credentials and wait.
+        Never prompts for a password -- the kid joins a network via the WiFi
+        cart; this only reuses what's already saved. `wait_online` above owns
+        the wait and the measurement behind it."""
+        return wait_online(self.wifi_online, self._go_online)
 
     def check_online(self, channel=None):
         """Fetch + parse the manifest for `channel` (default the running channel).

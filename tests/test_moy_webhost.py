@@ -1211,6 +1211,31 @@ def test_an_already_connected_board_neither_reconnects_nor_sleeps():
     assert not called, "a connected board was made to reconnect"
 
 
+def test_the_link_wait_is_moy_otas_one_body_with_moy_otas_bounds(monkeypatch):
+    """It was the same 25 lines twice -- here and in `moy_ota.ensure_online` --
+    with `12000` and `250` written out in both. One body now, and the bounds
+    have one home; what stays local is what each caller needs on top (a bool for
+    the updater, the STA IP for the WEB CONSOLE row)."""
+    import moy_ota
+
+    seen = {}
+
+    def _spy(online, autoconnect=None, wait_ms=None, step_ms=None):
+        seen["bounds"] = (wait_ms, step_ms)
+        if autoconnect is not None:
+            autoconnect()
+        return online()
+
+    monkeypatch.setattr(moy_ota, "wait_online", _spy)
+    w = _Wifi(up=False)
+
+    def _auto(wifi):
+        wifi.up = True
+
+    assert wh.ensure_online(w, _auto) == "192.168.1.50"
+    assert seen["bounds"] == (moy_ota.ONLINE_WAIT_MS, moy_ota.ONLINE_STEP_MS)
+
+
 def test_make_webhost_reads_the_wifi_service_lazily():
     """`ws.wifi` is attached by wire_workstation_core, which has not run when a
     board builds this -- so binding the service at construction time would

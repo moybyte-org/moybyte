@@ -179,10 +179,7 @@ Browser event batches -> InputState/Pointer. It survived the 2026-08 streaming
 sunset because the plan's §3.4 sync/controller RPC speaks the same format, but
 that RPC is not built and today's only importer is the wasm head's web_boot.py.
 This board SERVES the wasm console (moy_webhost) -- it does not decode its
-input. Flip this the day it does. (`web_view_ws.py` is the opposite case and IS
-staged: `moy_webserver.py` imports it through a two-branch ladder with no third
-branch, and dropping it once already made the WEB CONSOLE row silently not
-exist -- 06506ab, then a0a9d21 three days later.)"""
+input. Flip this the day it does."""
 
 # NOTE the two files that are NOT denied here and ARE on the T-Deck:
 # `wm_windowed.py` and its `surface.py` leaf. See [board].tier_why.
@@ -378,6 +375,15 @@ after a `[[modules.device.group]]` header belongs to that group's table, not to
 wrong and the stager reported as "no packages staged".)"""
 
 [[modules.device.group]]
+files = ["boot_shell.py"]
+why = """
+The boot shell's mode ladder, which `modules/moybyte_shell.py` on this board is
+now three declarations over: the board's name, the modes it has, and the module
+its smokes live in. It was ~20 lines written once per board and byte-identical
+after normalising those three, so the ONE-STRING rule, the self-terminating
+smokes and the keep-the-REPL guards now land once instead of four times."""
+
+[[modules.device.group]]
 files = ["device_util.py", "device_canvas.py", "device_api.py", "moycore_glue.py",
          "gt911.py"]
 why = """
@@ -446,9 +452,9 @@ every other board's rows stay frozen."""
 [[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]
 why = """
-The socket/HTTP/WebSocket transport core that survived the streaming sunset,
-plus the "serve the wasm console from this board" handler (plan §3.4's pull
-half). Board-agnostic -- the web directory and the SD gate are constructor
-arguments. `moy_webserver` imports `web_view_ws`, which the shared denylist
-above stages; that pair is the whole reason `tests/test_staging_closure.py`
-exists."""
+The socket/HTTP transport core that survived the streaming sunset, plus the
+"serve the wasm console from this board" handler (plan §3.4's pull half).
+Board-agnostic -- the web directory and the SD gate are constructor arguments.
+The WebSocket half went in 2026-09 with `web_view_ws.py`: the RPC that was
+supposed to ride it shipped as plain HTTP, so both were frozen here with no
+caller."""

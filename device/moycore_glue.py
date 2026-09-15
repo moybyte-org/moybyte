@@ -47,11 +47,14 @@ from array import array
 
 try:
     from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                         LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
+                         LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
+                         snap_slots, audio_ops, snap_shared, sync_view,
+                         drain_audio)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                                  LIBMOY_VERBS, NOT_REGISTRABLE,
-                                 install_handles)
+                                 install_handles, snap_slots, audio_ops,
+                                 snap_shared, sync_view, drain_audio)
 
 try:
     from widgets import pointer_state
@@ -156,14 +159,11 @@ class MoycoreRun:
         # lookup per frame in _refresh.
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP
-        self._I_BTN_P1 = _moycore.SNAP_BTN_P1
-        self._I_BTNP_P1 = _moycore.SNAP_BTNP_P1
-        self._I_PLAYERS = _moycore.SNAP_PLAYERS
         self._I_TIME = _moycore.SNAP_TIME_MS
-        self._I_TX = _moycore.SNAP_TOUCH_X
-        self._I_TY = _moycore.SNAP_TOUCH_Y
-        self._I_TD = _moycore.SNAP_TOUCH_DOWN
-        self._I_TMS = _moycore.SNAP_TOUCH_MS
+        # The slots and op codes lua_ext's shared bodies take, resolved once --
+        # the same reason the SNAP_* lookups above are bound at construction.
+        self._I_SNAP = snap_slots(_moycore)
+        self._aq_ops = audio_ops(_moycore)
         self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
         self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
@@ -311,87 +311,27 @@ class MoycoreRun:
             held, pressed = masks(MOY_BUTTONS)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
-        # PLAYER TWO (#65). These snapshot slots exist in the C ABI and nothing
-        # filled them, so libmoy's `players()` answered 1 forever and a Lua cart
-        # could not have a second player at all -- the Python twin of the same
-        # cart fielded two tanks and the Lua one fielded one. The count is read
-        # through the router because a transport slot (a radio peer) lives
-        # there, not on the InputState; the fast path costs one dict test.
-        n = 1
-        pr = getattr(inp, "players", None)
-        if pr is not None:
-            n = pr.count()
-            if n > 1:
-                h1, p1 = pr.button_masks(MOY_BUTTONS, 1)
-                s[self._I_BTN_P1] = h1
-                s[self._I_BTNP_P1] = p1
-        s[self._I_PLAYERS] = n
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out)
         if _ticks_ms is not None:
             try:
                 s[self._I_TIME] = _ticks_diff(_ticks_ms(), inp.cart_start_ms)
             except Exception:  # noqa: BLE001
                 pass
-        # The pointer, in the cart's own coordinates (widgets.pointer_state).
-        # The slot carries P_LIVE/P_HELD/P_CLICK as FLAGS, not a boolean: it is
-        # the only slot h_touch has, and touch() has to answer "is there one",
-        # "is it down" and "did it go down this frame" out of it. 0 is no
-        # pointer, which is what SPEC.md 7.3 means by nil.
-        try:
-            x, y, st, ms = pointer_state(inp, self._touch_out)
-            s[self._I_TX] = int(x)
-            s[self._I_TY] = int(y)
-            s[self._I_TD] = int(st)
-            s[self._I_TMS] = int(ms)
-        except Exception:  # noqa: BLE001
-            s[self._I_TD] = 0
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):
-        """Apply the cart's view() to the console.
-
-        libmoy owns the verb (SPEC.md 6 core) and records the declaration; the
-        console still has to ACT on it -- ws.input.game_view is what the WM
-        composites from. So this reads the recording instead of the cart
-        crossing into Python to set it, which is the whole point of the verb
-        moving into core. Checked per frame because the spec allows a cart to
-        change its region at runtime, and skipped when unchanged so a cart that
-        declares once pays one comparison.
-        """
-        v = _moycore.view()
-        if v == self._view:
-            return
-        self._view = v
-        try:
-            self.ws.input.game_view = v
-        except Exception:  # noqa: BLE001 -- a console without the field is fine
-            pass
+        self._view = sync_view(self.ws, _moycore.view(), self._view)
 
     def _drain_audio(self):
         n = self.aq[0]
         if n <= 0:
             return
         self.aq[0] = 0
-        ns = self.ns
+        aq = self.aq
         slots = _moycore.AQ_SLOTS
-        for i in range(n):
-            p = 1 + i * slots
-            op = self.aq[p]
-            a, b = self.aq[p + 1], self.aq[p + 2]
-            try:
-                if op == _moycore.AQ_SFX:
-                    ns["sfx"](a, None if b < 0 else b)
-                elif op == _moycore.AQ_MUSIC:
-                    ns["music"](a, bool(b))
-                elif op == _moycore.AQ_BEEP:
-                    ns["beep"](a, b / 1000.0)
-                elif op == _moycore.AQ_MUSIC_STOP:
-                    ns["music_stop"]()
-                elif op == _moycore.AQ_SOUND_STOP:
-                    ns["sound_stop"](None if a < 0 else a)
-                elif op == _moycore.AQ_VOLUME:
-                    ns["volume"](a)
-            except Exception:  # noqa: BLE001 -- one bad command is not the frame
-                pass
+        drain_audio(self.ns, self._aq_ops,
+                    ((aq[1 + i * slots], aq[2 + i * slots], aq[3 + i * slots])
+                     for i in range(n)))
 
     def _draw_noop(self):
         return None

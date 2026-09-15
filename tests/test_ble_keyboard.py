@@ -446,6 +446,67 @@ def test_saved_enabled_preferred_address_and_bond_round_trip(tmp_path):
                            "Pocket Keys", -127, True)
 
 
+def _bond_store(tmp_path, name="Pocket Keys"):
+    store = tmp_path / "ble_keyboard.json"
+    keyboard = blekbd.BleHidKeyboard(
+        InputState(), store_path=str(store), auto_start=False)
+    keyboard.name = name
+    keyboard._preferred = (1, b"\xaa\xbb\xcc\xdd\xee\xff")
+    keyboard._secrets[(2, b"peer")] = b"bond-key"
+    keyboard._store_dirty = True
+    keyboard.poll()
+    return store
+
+
+def test_a_bond_save_never_unlinks_the_live_store(tmp_path, monkeypatch):
+    """The bonds must be readable at SOME path at every instant of a save.
+
+    The old publish was tmp -> os.remove -> os.rename, and the instant between
+    the remove and the rename has them on neither path: a power cut there costs
+    the kid a re-pairing of a keyboard that was already paired. The save rides
+    moy_fs now -- a stamped `.bak`, then the file itself, overwritten in place.
+    """
+    fs = sys.modules[blekbd._write_atomic.__module__]
+
+    class _SpyOs:
+        def __init__(self, real):
+            self._real = real
+            self.calls = []
+
+        def __getattr__(self, name):
+            fn = getattr(self._real, name)
+
+            def _wrapped(*a, **kw):
+                self.calls.append((name, a))
+                return fn(*a, **kw)
+            return _wrapped
+
+    spy = _SpyOs(fs.os)
+    monkeypatch.setattr(fs, "os", spy)
+    store = _bond_store(tmp_path)
+
+    assert json.loads(store.read_text())["preferred"] == [1, "aabbccddeeff"]
+    assert not [c for c in spy.calls if c[0] == "rename"]
+    assert not [c for c in spy.calls
+                if c[0] == "remove" and c[1][:1] == (str(store),)]
+
+
+def test_a_torn_bond_publish_is_recovered_from_the_backup(tmp_path):
+    """The window moy_fs's `.bak` exists to close: FAT truncates on open and
+    then grows the file, so a power cut mid-publish leaves the store somewhere
+    between empty and whole. The next boot finishes the publish instead of
+    reading a short file as "never paired"."""
+    store = _bond_store(tmp_path)
+    whole = store.read_text()
+    store.write_text(whole[:len(whole) // 3])          # the interrupted publish
+
+    restored = blekbd.BleHidKeyboard(
+        InputState(), store_path=str(store), auto_start=False)
+    assert restored.name == "Pocket Keys"
+    assert restored._secrets[(2, b"peer")] == b"bond-key"
+    assert store.read_text() == whole, "the recovery was not republished"
+
+
 def test_version_one_bond_store_migrates_without_forgetting_keys(tmp_path):
     store = tmp_path / "ble_keyboard.json"
     store.write_text(json.dumps({

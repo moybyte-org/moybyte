@@ -120,11 +120,6 @@ commit lands in the cart's own `journal/` and the console's UNDO walks back
 through it. moy_sync's docstring carries the doctrine and the cost.
 """
 
-try:
-    import os
-except ImportError:                      # pragma: no cover
-    os = None
-
 import json as _json
 
 from moy_webserver import (WebServer, http_response, FileResponse,
@@ -366,13 +361,6 @@ def _jesc(s):
     still concatenates back byte for byte.
     """
     return _json.dumps(s)[1:-1]
-
-
-def _file_size(path):
-    try:
-        return os.stat(path)[6]
-    except OSError:
-        return None
 
 
 def _baked(name):
@@ -1149,41 +1137,30 @@ class WebHost(WebServer):
         return None if root is None else root.path(self.carts_root)
 
 
-def ensure_online(wifi, autoconnect=None, wait_ms=12000, step_ms=250):
+def ensure_online(wifi, autoconnect=None, wait_ms=None, step_ms=None):
     """Connect if needed, WAIT for the link, then report the STA IP.
 
-    The wait is not optional and the reason is recorded in moy_ota's own
-    ensure_online: `connect()` polls for 4s and gives up, and on the P4 a saved
-    network measured 1.5s SLOWER than that (its radio is a separate C6 over
-    SDIO, so cold association is slow). Without the wait a perfectly good
-    network reads as "no wifi" -- which is exactly what the WEB CONSOLE row did
-    on its first try.
+    The wait is `moy_ota.wait_online` -- ONE body, whose docstring carries the
+    measurement behind it and whose constants are the defaults here. What this
+    adds is what a web host needs on top: the STA IP the WEB CONSOLE row
+    displays, and an OSError rather than a False for a board with no radio.
 
-    This lives here, and not in either board's run_desktop, because it is the
-    same 25 lines on both. That is not a hypothetical: the web console shipped
-    on the P4 with every SHARED piece already in place -- moy_webhost itself,
-    the Settings row, the console verbs, all staged from one source -- and the
+    It lives here, and not in either board's run_desktop, because it is the
+    same call on both. That is not a hypothetical: the web console shipped on
+    the P4 with every SHARED piece already in place -- moy_webhost itself, the
+    Settings row, the console verbs, all staged from one source -- and the
     T-Deck still did not have the feature, because the one per-board injection
     was never written for it. The row is capability-gated on `ws.webhost`, so
     the whole thing failed by being invisible rather than by breaking.
     """
     if wifi is None:
         raise OSError("no wifi service")
-    if not wifi.status()[0]:
-        if autoconnect is not None:
-            try:
-                autoconnect(wifi)
-            except Exception:          # noqa: BLE001 -- the wait below decides
-                pass
-        import time
-        _sleep_ms = getattr(time, "sleep_ms", None)
-        for _ in range(max(1, wait_ms // step_ms)):
-            if wifi.status()[0]:
-                break
-            if _sleep_ms is not None:
-                _sleep_ms(step_ms)
-            else:                      # host/CPython: no sleep_ms
-                time.sleep(step_ms / 1000.0)
+    import moy_ota
+    moy_ota.wait_online(
+        lambda: wifi.status()[0],
+        None if autoconnect is None else lambda: autoconnect(wifi),
+        moy_ota.ONLINE_WAIT_MS if wait_ms is None else wait_ms,
+        moy_ota.ONLINE_STEP_MS if step_ms is None else step_ms)
     st = wifi.status()
     if not st[0]:
         raise OSError("no wifi")

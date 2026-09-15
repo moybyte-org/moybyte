@@ -232,10 +232,7 @@ The transport-neutral half of the old web view: browser event batches ->
 InputState/Pointer. It survived the 2026-08 streaming sunset because the plan's
 §3.4 sync/controller RPC speaks the same `{"events":[...]}` format -- but that
 RPC is not built, and today the only importer is the wasm head's `web_boot.py`.
-FLIP THIS the day a board grows a consumer. (`web_view_ws.py`, the RFC 6455
-framing, is the opposite case and IS staged: `moy_webserver.py` imports it
-through a two-branch ladder with no third branch, and dropping it once already
-made the WEB CONSOLE row silently not exist.)"""
+FLIP THIS the day a board grows a consumer."""
 
 # -- staged under another name -----------------------------------------------
 
@@ -361,6 +358,15 @@ after a `[[modules.device.group]]` header belongs to that group's table, not to
 `[modules.device]`.)"""
 
 [[modules.device.group]]
+files = ["boot_shell.py"]
+why = """
+The boot shell's mode ladder, which `modules/moybyte_shell.py` on this board is
+now three declarations over: the board's name, the modes it has, and the module
+its smokes live in. It was ~20 lines written once per board and byte-identical
+after normalising those three, so the ONE-STRING rule, the self-terminating
+smokes and the keep-the-REPL guards now land once instead of four times."""
+
+[[modules.device.group]]
 files = ["banded_panel.py"]
 why = """
 STAGE 1 (panel). `BandedCompositor` -- the compositor body this board's
@@ -468,11 +474,11 @@ took their last update from it install this build over plain OTA."""
 [[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]
 why = """
-STAGE 6. The socket/HTTP/WebSocket transport core that survived the streaming
-sunset, plus the "serve the wasm console from this board" handler. Board-agnostic
--- the web directory and the SD gate are constructor arguments. `moy_webserver`
-imports `web_view_ws`, which the shared denylist above stages; that pair is the
-whole reason `tests/test_staging_closure.py` exists."""
+STAGE 6. The socket/HTTP transport core that survived the streaming sunset,
+plus the "serve the wasm console from this board" handler. Board-agnostic -- the
+web directory and the SD gate are constructor arguments. The WebSocket half went
+in 2026-09 with `web_view_ws.py`: the RPC that was supposed to ride it shipped as
+plain HTTP, so both were frozen here with no caller."""
 
 [[modules.device.group]]
 files = ["ble_keyboard.py"]

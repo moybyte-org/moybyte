@@ -67,6 +67,17 @@ def _editors_src():
     return "\n".join(parts)
 
 
+def _carts_src():
+    """The store's combined source: moy_carts.py is the re-exporting umbrella
+    over moy_store_base/_seed/_files/_file_ops -- greps that pin store verbs
+    read all of them."""
+    parts = []
+    for name in ("moy_carts", "moy_store_base", "moy_seed", "moy_files",
+                 "moy_file_ops"):
+        parts.append((Path("runtime") / (name + ".py")).read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
 def test_micropython_spike_scaffold_exists():
     assert (ROOT / "README.md").exists()
     assert (ROOT / "build.sh").exists()
@@ -182,25 +193,15 @@ def test_web_stack_split_after_the_streaming_sunset():
     # The 2026-08 streaming sunset (moycore plan 3.2) and its completion at
     # stage 4: the recording stack is GONE (absence pins in
     # test_streaming_sunset.py); what survives on the device side is a bare
-    # socket/HTTP/WS transport core with no recorder coupling, which the 3.4
-    # sync RPC rides. This greps the PRESENCE side. Executable behaviour:
-    # test_moy_webserver.py.
-    wv_ws = (Path("runtime") / "web_view_ws.py").read_text(encoding="utf-8")
+    # socket/HTTP transport core with no recorder coupling, which the 3.4 sync
+    # RPC rides as plain HTTP. This greps the PRESENCE side. Executable
+    # behaviour: test_moy_webserver.py.
     web = (DEVICE / "moy_webserver.py").read_text(encoding="utf-8")
 
-    # -- the WS primitives leaf (web_view_ws): what the transport rides --
-    assert "def ws_accept_key" in wv_ws and "def ws_handshake_response" in wv_ws
-    assert "def ws_encode" in wv_ws and "def ws_decode" in wv_ws
-    assert "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" in wv_ws
-    assert "Switching Protocols" in wv_ws
-
-    # -- the DEVICE transport core (moy_webserver): sockets only, no recorder --
-    assert "import web_view_ws" in web          # framing from the leaf, not web_view
     assert "class WebServer" in web
-    assert "class _WSConn" in web
     assert "setblocking(False)" in web          # NON-blocking listening socket
+    assert "def parse_request" in web           # the request head, host-testable
     assert "def handle_http" in web             # the 3.4 sync RPC's endpoint seam
-    assert "def send_text" in web               # ...and its push verb
 
 
 def test_ota_online_download_streams_to_sd_with_checksum():
@@ -358,8 +359,9 @@ def test_micropython_touch_and_idle_cursor():
     assert "pointer.tick(now)" in boot_spine
     assert "loop = FrameLoop(" in runtime
 
-    # Touch calibration bring-up mode (serial-only, flush-once).
-    assert "RUN_TOUCH_CALIBRATE" in shell
+    # Touch calibration bring-up mode (serial-only, flush-once): a rung of the
+    # board's MODES ladder, reached as `s.MODE = "touch"; s.main()`.
+    assert '"touch"' in shell and "MODES = (" in shell
 
 
 def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
@@ -1540,7 +1542,7 @@ def test_paint_image_assets_wired_device_and_carts():
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    carts = _carts_src()
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
 
     # moy_carts loads/writes a cart's images/ subfolder of .moyimg blobs.
@@ -2087,7 +2089,7 @@ def test_code_editor_wired_into_device_shell():
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     editor_app = (Path("runtime") / "editor_app.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    carts = _carts_src()
 
     # The console + editor cores are shared with the host (imported, not redefined).
     assert "from console import Pointer, Workstation" in runtime
@@ -2136,7 +2138,7 @@ def test_unified_top_bar_wired_into_device_shell():
     chrome = (Path("runtime") / "chrome.py").read_text(encoding="utf-8")
     bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
     editors = _editors_src()
-    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    carts = _carts_src()
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
@@ -2176,7 +2178,7 @@ def test_icon_theme_editor_wired_into_device_shell():
     appearance = (Path("runtime") / "appearance.py").read_text(encoding="utf-8")
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     paint_layer = (Path("runtime") / "paint_layer.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    carts = _carts_src()
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
@@ -2425,7 +2427,7 @@ def test_device_sprite_storage_wired():
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    carts = _carts_src()
     # device cart API -- also takes the injected audio backend (#16) + tilemap
     # (#32) + persistent memory (pmem, #11).
     # make_api now also takes the capability-gated wifi backend LAST (#38).
@@ -2451,7 +2453,7 @@ def test_device_audio_wired():
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    carts = _carts_src()
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     device_audio = (DEVICE / "device_audio.py").read_text(encoding="utf-8")
 
@@ -2509,7 +2511,7 @@ def test_music_editor_wired_into_device_shell():
     chrome = (Path("runtime") / "chrome.py").read_text(encoding="utf-8")
     bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    carts = _carts_src()
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
     # The editor CORE is a single shared class (not redefined on the device),
@@ -2780,7 +2782,7 @@ def test_device_wifi_wired():
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    carts = _carts_src()
     # The DeviceWifi backend + make_wifi/autoconnect_wifi now live in device_wifi.py
     # (extracted from moy_runtime.py); run_desktop still calls them (asserts below).
     device_wifi = (DEVICE / "device_wifi.py").read_text(encoding="utf-8")

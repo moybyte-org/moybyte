@@ -183,8 +183,7 @@ kind = "no-consumer"
 why  = """
 Browser event batches -> InputState/Pointer; today's only importer is the wasm
 head's web_boot.py. This board SERVES the wasm console (moy_webhost) -- it
-does not decode its input. Flip this the day it does. (`web_view_ws.py` IS
-staged: `moy_webserver.py` imports it.)"""
+does not decode its input. Flip this the day it does."""
 
 # -- staged under another name -----------------------------------------------
 
@@ -307,6 +306,15 @@ bothers someone; it did not block the port, so per the rule it was not done
 ahead of need."""
 
 [[modules.device.group]]
+files = ["boot_shell.py"]
+why = """
+The boot shell's mode ladder, which `modules/moybyte_shell.py` on this board is
+now three declarations over: the board's name, the modes it has, and the module
+its smokes live in. It was ~20 lines written once per board and byte-identical
+after normalising those three, so the ONE-STRING rule, the self-terminating
+smokes and the keep-the-REPL guards now land once instead of four times."""
+
+[[modules.device.group]]
 files = ["banded_panel.py"]
 why = """
 STAGE 1 (panel). `BandedCompositor` -- the compositor body this board's
@@ -391,6 +399,6 @@ comes from the generated `_ota_build.py`."""
 [[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]
 why = """
-STAGE 6. The socket/HTTP/WS transport core plus the "serve the wasm console
-from this board" handler; `moy_webserver` imports `web_view_ws`, which the
-shared denylist above stages."""
+STAGE 6. The socket/HTTP transport core plus the "serve the wasm console from
+this board" handler. Its WebSocket half went in 2026-09 with `web_view_ws.py`:
+the RPC that was supposed to ride it shipped as plain HTTP."""
