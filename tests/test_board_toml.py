@@ -30,7 +30,6 @@ from tools import board_config
 
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
-TDECK_MAINLINE = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 GUITION = ROOT / "firmware" / "guition_jc3248w535"
 # The HEADLESS fourth target (#41), a build target since 2026-08-29. It is in
@@ -41,8 +40,8 @@ GUITION = ROOT / "firmware" / "guition_jc3248w535"
 # tests that do care about a console say so where they narrow.
 ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
 GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c"
-BOARDS = {"tdeck": TDECK, "tdeck-mainline": TDECK_MAINLINE, "p4": P4,
-          "guition-s3": GUITION, "zero": ZERO, "guition-p4": GUITION_P4}
+BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION, "zero": ZERO,
+          "guition-p4": GUITION_P4}
 
 try:                                    # 3.11+
     import tomllib as _real_toml
@@ -162,7 +161,7 @@ def test_stage_produces_the_declared_set_and_prunes_strays(tmp_path, board):
         # -- it has no console at all -- which its own row below pins instead.
         assert (dest / "console.py").exists() and (dest / "moy_font.py").exists()
     assert not (dest / "font.py").exists(), "font.py must stage RENAMED only"
-    if board in ("tdeck", "tdeck-mainline", "guition-s3", "zero"):
+    if board in ("tdeck", "guition-s3", "zero"):
         assert not (dest / "wm_windowed.py").exists()      # no desktop to window
     else:
         assert (dest / "wm_windowed.py").exists()          # the two P4 desks
@@ -260,10 +259,64 @@ def test_the_panel_diagonal_is_declared_once_and_reaches_the_console():
     # because at 320px wide cs 2 leaves the bar's lent zone too narrow for the
     # Editor's tab ladder. Its glass floors at 2 like everything else, so the
     # arithmetic cannot be what stops a later re-declaration -- this can.
-    assert declared["tdeck"] is None and declared["tdeck-mainline"] is None
+    assert declared["tdeck"] is None
     assert chrome_scale_floor(320, 240, 2.8) == 2
     tdeck_toml = (TDECK / "board.toml").read_text(encoding="utf-8")
     assert "NO [panel] BLOCK, AND THAT IS A DECISION" in tdeck_toml
+
+
+# -- the [board] header, and where a declared key has a reader ----------------
+#
+# Every board.toml in the tree, the web runner's included: these two are about
+# the DECLARATION itself, and the runner declares the same shapes.
+ALL_DECLS = sorted((ROOT / "firmware").glob("*/board.toml"))
+
+TIERS = ("handheld", "desktop", "headless", "browser")
+
+
+def test_every_declaration_names_its_board_and_its_tier():
+    """`[board]` is the header every other section is read under. `tier` is
+    the word the module sets are argued from -- every `wm_windowed.py` denial
+    in the tree points at `tier_why` -- so an unspelled or unexplained tier
+    leaves those denials pointing at nothing."""
+    assert len(ALL_DECLS) >= 6, "declaration discovery found %d" % len(ALL_DECLS)
+    for toml in ALL_DECLS:
+        cfg = board_config.load(toml.parent)["board"]
+        assert cfg["name"] == toml.parent.name, (
+            "%s: [board] name is the directory's, and the build prints it" % toml)
+        assert cfg["tier"] in TIERS, (
+            "%s: tier %r is not one of %s" % (toml, cfg.get("tier"), TIERS))
+        assert len(cfg.get("tier_why", "").split()) >= 10, (
+            "%s: tier_why must ARGUE the tier -- the denials cite it" % toml)
+
+
+def test_strategy_is_declared_only_where_something_reads_it():
+    """`strategy` is read in ONE place -- `board_config.shared_strategy`, over
+    `[modules.shared]`. It sat under `[native.shared]`, `[native.p4]` and
+    `[modules.device]` too, where an `allowlist` would have been obeyed by
+    nothing and the build would have compiled everything anyway: a declaration
+    that reads as a decision and is inert."""
+    for toml in ALL_DECLS:
+        cfg = board_config.load(toml.parent)
+        for sect, body in sorted(_tables(cfg)):
+            if "strategy" not in body:
+                continue
+            assert sect == "modules.shared", (
+                "%s: [%s] declares strategy = %r, which no reader consumes"
+                % (toml, sect, body["strategy"]))
+            assert body["strategy"] in ("denylist", "allowlist"), toml
+        assert (board_config.shared_strategy(toml.parent)
+                == cfg["modules"]["shared"]["strategy"])
+
+
+def _tables(cfg, prefix=""):
+    """(dotted name, table) for every table in a parsed board.toml."""
+    for key, val in cfg.items():
+        if isinstance(val, dict):
+            name = prefix + key
+            yield name, val
+            for sub in _tables(val, name + "."):
+                yield sub
 
 
 # -- the [native] declaration (#161: the C-module list is data too) -----------
@@ -606,9 +659,9 @@ def test_an_equals_n_disable_never_reaches_the_required_list():
     the literal `=n` line reports it inert forever."""
     d = _DEVICE_BOARDS["p4"]
     settings = {s.option: s for s in board_config.sdkconfig_settings(d)}
-    s = settings.get("CONFIG_BT_HCI_LOG_DEBUG_EN")
-    if s is None:
-        pytest.skip("the P4 fragment no longer carries the option")
+    # Asserted, never skipped: the option going away is the one event that
+    # would leave this pin passing while covering nothing.
+    s = settings["CONFIG_BT_HCI_LOG_DEBUG_EN"]
     assert s.disables, "=n is a disable spelling"
     assert s.assignment not in [
         q.assignment for q in board_config.sdkconfig_required(d)]

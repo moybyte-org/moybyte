@@ -240,7 +240,6 @@ dest = "native/.staged"
 
 [native.shared]
 source   = "native"
-strategy = "denylist"
 why = """
 The C-module twin of [modules.shared] (#161; see the T-Deck's board.toml for
 the mechanism). Every directory under native/ with a micropython.cmake crosses
@@ -283,7 +282,6 @@ ever needs a push path is a new decision, not a flip of this one."""
 
 [native.p4]
 source   = "native/p4"
-strategy = "denylist"
 why = """
 The ESP32-P4 SILICON tier: the C modules an ESP32-P4 board has BECAUSE it is a
 P4 -- moy_dsi (the MIPI-DSI panel; THIS board names MOY_DSI_PANEL_JD9365 in
@@ -299,7 +297,6 @@ Phase C of docs/board_ports_2026-08.md). Nothing is denied."""
 
 [modules.device]
 source   = "device"
-strategy = "allowlist"
 why = """
 The second staging source, and the one that must STAY an allowlist.
 

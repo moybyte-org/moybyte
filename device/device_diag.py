@@ -1,14 +1,21 @@
 """Serial diagnostics for the device desktop loop (extracted from moy_runtime.py).
 
-A set of pure logging functions (#43/#63/#66/#68/#69) the run_desktop loop calls
-between frames when perf capture is on: _diag_flush (ring -> SD),
-_diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 / _diag_chromebrk (the
-draw-cost splits), _diag_pump (bounce-feed pacing), _diag_i2cstat (#69 kbd/touch
-I2C latency), _diag_calib (interpreter cost model), _diag_gc (the forced-collect
-sample). Every one takes its inputs explicitly (diag / ws / comp / keyboard /
-touch) and logs via the passed `diag` handle -- no shared class state -- so they
-lift out cleanly and import only the leaf device_util tick helpers (+ local gc /
-array imports). Device-only module (modules/, auto-frozen); no moy_runtime cycle.
+A set of pure logging functions (#43/#63/#66/#68/#69). The T-Deck's run_desktop
+calls six of them between frames when perf capture is on: _diag_flush (ring ->
+SD), _diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 (the draw-cost splits),
+_diag_pump (bounce-feed pacing) and _diag_i2cstat (#69 kbd/touch I2C latency).
+It is the only board that stages this module.
+
+THREE HAVE NO CALLER on any board: _diag_chromebrk (the chrome split),
+_diag_calib (the interpreter cost model) and _diag_gc (the forced-collect
+sample). They are reachable only from tests/test_device_diag.py. Whether each
+is a lever to re-arm or dead code to delete is an open question -- what it is
+NOT is a thing the loop runs.
+
+Every one takes its inputs explicitly (diag / ws / comp / keyboard / touch) and
+logs via the passed `diag` handle -- no shared class state -- so they lift out
+cleanly and import only the leaf device_util tick helpers (+ local gc / array
+imports). Device-only module (modules/, auto-frozen); no moy_runtime cycle.
 """
 from device_util import _ticks_ms, _ticks_us, _ticks_diff
 

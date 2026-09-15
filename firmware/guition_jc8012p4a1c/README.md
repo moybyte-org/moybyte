@@ -72,9 +72,11 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   frame; bounced it was 25), the 1120×720 picker bounces (44 → 21ms), a
   full frame 47 → 25. The game rect is the scale+rotate from its own canvas
   and is not bounced. A pipeline that keeps stalling retires itself for the
-  session (`moy_ppa.bounce_stats()` over the dev channel carries its meters:
-  pending jobs, CPU-copied bands, the four wait timeouts, flagged
-  completions, the two band flags).
+  session (`moy_ppa.rotate_bounce_stats()` over the dev channel carries its
+  meters: pending jobs, CPU-copied bands, the four wait timeouts, the STALL
+  count that retires it, flagged completions, the two band flags — read the
+  stalls, because a retired pipeline and a picture that never qualified both
+  answer −1).
   A frame's quietness is the canvas's word (`P4SystemCanvas._gates_unchanged`):
   the two native gate counters plus the surface's own CLEAR count, because a
   `cls` is the one whole-surface write the gates cannot see (moy_ppa.fill on
@@ -231,7 +233,7 @@ for the C6/audio pins, which agree with the BSP.
   ~16.6ms (2MB).
 - GSL3680: firmware upload 1.34s, `0xB0 == 5A5A5A5A`, clean polling. Axes
   uncalibrated (above).
-- **The rotation, measured** (the compositor's `overlap_stats()` meters, read
+- **The rotation, measured** (the compositor's `rotate_stats()` meters, read
   over the dev channel after a tour with a running cart; 2026-09-06): a
   FULL-frame rotate is **~48ms** (4MB of PSRAM traffic against the DSI's own
   ~123MB/s read — chrome, drags and scrolls move at ~20fps); a QUIET game

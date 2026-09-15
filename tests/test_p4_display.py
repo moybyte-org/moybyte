@@ -577,12 +577,18 @@ class RotatingPpa(FakePpa):
     # a full queue this once, -1 to say the pipeline is not to be had.
     bands = 1
 
+    stalls = 0
+
     def rotate_bounce(self, dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h,
                       angle, nb=False):
         self.rotates.append((dst, dx, dy, src, sx, sy, w, h, angle))
         self.nbs.append(nb)
         self.wbs.append((dst, False))
         return self.bands
+
+    def rotate_bounce_stats(self):
+        # modmoy_ppa.c's tuple, in its order.
+        return (0, 0, 0, 0, 0, 0, self.stalls, 0, False, False)
 
 
 @contextlib.contextmanager
@@ -671,7 +677,7 @@ def test_a_full_frame_rotates_the_whole_paint_buffer_and_ping_pongs():
         assert dsi.shown == [0, 1, 0]
         assert ppa.rotates[-1][0] is dsi.fb(0) and ppa.rotates[-1][3] is p1
         assert comp.framebuffer() is p0
-        assert comp.overlap_stats()[2] == 2         # two full frames
+        assert comp.rotate_stats()[0] == 2          # two full frames
 
 
 def test_a_quiet_game_after_a_change_is_full_once_then_direct():
@@ -686,7 +692,7 @@ def test_a_quiet_game_after_a_change_is_full_once_then_direct():
         step(comp)                                     # fb0 missed a full: full again
         assert painted == [1]
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
-        assert comp.overlap_stats()[2] == 2 and comp.overlap_stats()[0] == 0
+        assert comp.rotate_stats()[0] == 2 and comp.rotate_stats()[2] == 0
         painted = game(comp)
         comp.flush()                                   # fb1: stale == the rect
         assert painted == [], "a quiet direct frame never touches the paint buffer"
@@ -699,7 +705,7 @@ def test_a_quiet_game_after_a_change_is_full_once_then_direct():
         gcopy = ppa.rotates[-1]
         assert gcopy[0] is comp._scratch and gcopy[3] is GAME and gcopy[8] == 0
         assert ppa.nbs[-2:] == [True, True]
-        assert comp.overlap_stats()[0] == 1 and comp.overlap_stats()[1] == 0
+        assert comp.rotate_stats()[2] == 1 and comp.rotate_stats()[4] == 0
         assert dsi.shown == [0, 1, 0], "the show is deferred to the present"
         comp.present_pending()
         assert ppa.waits[-1] == 1 and dsi.shown == [0, 1, 0, 1]
@@ -707,7 +713,7 @@ def test_a_quiet_game_after_a_change_is_full_once_then_direct():
         comp.flush()                                   # fb0 likewise
         comp.present_pending()
         assert painted == [] and len(ppa.direct) == 2
-        assert comp.overlap_stats()[0] == 2 and comp.overlap_stats()[1] == 0
+        assert comp.rotate_stats()[2] == 2 and comp.rotate_stats()[4] == 0
         assert dsi.shown == [0, 1, 0, 1, 0]
         assert comp.async_stats()[:3] == (4, 4, 0), "every frame defers its show now"
 
@@ -740,7 +746,7 @@ def test_crisp_mode_composites_into_the_paint_buffer_then_rotates_the_rect():
         assert ppa.direct == []
         assert ppa.rotates[-1][3] is src
         assert ppa.rotates[-1][4:] == (0, 50, 1280, 480, 90), "bounced: full rows"
-        assert comp.overlap_stats()[0] == 1
+        assert comp.rotate_stats()[2] == 1
 
 
 def test_the_chrome_strip_rides_every_quiet_frame():
@@ -774,7 +780,7 @@ def test_a_stale_rect_the_new_frame_does_not_cover_is_copied_from_the_front():
         assert dst is dsi.fb(0) and src is dsi.fb(1)
         assert (dx, dy, w, h) == (sx, sy, w, h) == (50, 1280 - 100 - 640, 480, 640)
         assert ppa.direct[-1][1:3] == (0, 1280 - 640)
-        assert comp.overlap_stats()[1] == 1
+        assert comp.rotate_stats()[4] == 1
 
 
 def test_a_trail_of_moved_rects_costs_one_copy_a_frame_never_a_full():
@@ -790,9 +796,9 @@ def test_a_trail_of_moved_rects_costs_one_copy_a_frame_never_a_full():
             game(comp, ox=i * 20)
             step(comp)
             assert all(len(st) <= 1 for st in comp._stale if st is not None)
-        assert comp.overlap_stats()[2] == 2
-        assert comp.overlap_stats()[0] == n
-        assert comp.overlap_stats()[1] == n - 1      # the first repeats its predecessor
+        assert comp.rotate_stats()[0] == 2
+        assert comp.rotate_stats()[2] == n
+        assert comp.rotate_stats()[4] == n - 1      # the first repeats its predecessor
 
 
 def test_set_angle_forces_every_buffer_current_the_other_way_up():
@@ -821,7 +827,7 @@ def test_present_and_sync_are_inert_once_a_frame_is_shown():
         comp.present_pending()
         comp.sync()
         assert ppa.syncs == 0
-        assert len(comp.overlap_stats()) == 7          # the PERF line's ppa= shape
+        assert len(comp.overlap_stats()) == len(mod.OVERLAP_FIELDS)
 
 
 # -- damage frames: the WM describes what it painted (the desktop lever) -------
@@ -846,7 +852,7 @@ def test_a_described_frame_rotates_its_rects_not_the_whole_buffer():
         assert [r[4:8] for r in rot[-2:]] == [(0, 0, 1280, 18), (0, 100, 1280, 500)]
         assert ppa.direct == []
         assert comp.damage_stats() == (2, 2, 0, 1)
-        assert comp.overlap_stats()[0] == 1 and comp.overlap_stats()[2] == 2
+        assert comp.rotate_stats()[2] == 1 and comp.rotate_stats()[0] == 2
 
 
 def test_a_described_frame_with_a_game_paints_the_game_and_rotates_its_rect_too():
@@ -923,7 +929,7 @@ def test_a_damage_frame_leaves_the_other_buffer_a_stale_rect_it_copies_next():
         copies = [r for r in ppa.rotates if r[8] == 0]
         assert len(copies) == 1 and copies[0][0] is dsi.fb(1) and copies[0][3] is dsi.fb(0)
         assert copies[0][4:8] == mod.rotate_rect(100, 100, 200, 200, 90, 1280, 800)
-        assert comp.overlap_stats()[1] == 1
+        assert comp.rotate_stats()[4] == 1
 
 
 def test_an_undescribed_frame_after_damage_frames_is_full_and_resets_the_other():
@@ -933,7 +939,7 @@ def test_an_undescribed_frame_after_damage_frames_is_full_and_resets_the_other()
         step(comp)
         comp.note_damage(100, 100, 200, 200)
         step(comp)                                     # -> fb1, a rect frame
-        assert comp.overlap_stats()[0] == 1
+        assert comp.rotate_stats()[2] == 1
         step(comp)                                     # -> fb0, nothing noted: full
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
         assert comp._stale[1] is None                  # the other missed a full
@@ -1055,7 +1061,7 @@ def test_a_drag_grows_the_union_over_the_stale_one_instead_of_copying_it():
         last = [r for r in ppa.rotates if r[8] == 90 and r[7] != 800][-1]
         assert last[4:8] == (0, 100, 1280, 500)
         assert all(st is None or all(r[2:4] == (500, 700) for r in st) for st in comp._stale)
-        assert comp.overlap_stats()[1] == 0
+        assert comp.rotate_stats()[4] == 0
 
 
 def test_a_far_stale_rect_is_still_copied_not_grown_over():
@@ -1397,3 +1403,151 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
         comp.note_damage(10, 20, 400, 300)
         step(comp)
         assert comp.async_stats()[6] == 15, "no bounce after a refusal"
+
+
+# -- one field set, two compositors --------------------------------------------
+#
+# `runtime/perf_line.py` labels the ppa= slots ONCE for every board and
+# `tools/p4_perf.py` parses every board with one table, so the two compositors
+# in `device/dsi_panel.py` must answer the same question in each slot. The
+# rotated one used to answer with its rotate meters -- rect frames under
+# `deferred`, copies under `obsolete`, full frames under `fences` -- so the
+# Guition P4 printed one counter under two labels and its rect-frame count
+# arrived at the ledger as a deferral count. These drive both bodies through
+# the same event and read the slot by NAME.
+
+
+def _slot(comp, name):
+    from device.dsi_panel import OVERLAP_FIELDS
+    return comp.overlap_stats()[OVERLAP_FIELDS.index(name)]
+
+
+def test_both_compositors_report_the_same_overlap_field_set():
+    from device.dsi_panel import OVERLAP_FIELDS
+    assert OVERLAP_FIELDS == ("deferred", "obsolete", "fences", "fence_us",
+                              "game_n", "game_us", "timeouts")
+    _dsi, _ppa, ctx = build()
+    with ctx as mod:
+        assert len(mod.P4Compositor().overlap_stats()) == len(OVERLAP_FIELDS)
+    with rotated() as (rmod, comp, _dsi2, _ppa2, _lit):
+        assert rmod.OVERLAP_FIELDS == OVERLAP_FIELDS
+        assert len(comp.overlap_stats()) == len(OVERLAP_FIELDS)
+
+
+def test_a_deferred_show_counts_under_deferred_on_both():
+    """Slot 0 on both: a frame whose scan-out switch was held a loop."""
+    _dsi, _ppa, ctx = build()
+    with ctx as mod:
+        comp = mod.P4Compositor()
+        comp._composite_pending = True
+        comp.flush()
+        assert _slot(comp, "deferred") == 1
+    with rotated() as (_rmod, rcomp, _dsi2, _ppa2, _lit):
+        rcomp.flush()
+        assert _slot(rcomp, "deferred") == 1
+
+
+def test_the_flush_fence_counts_under_fences_on_both(stepped):
+    """Slots 2/3 on both: the blocking fence in flush() that frees the buffer
+    the next frame paints, and what it cost."""
+    _dsi, ppa, ctx = build()
+    with ctx as mod:
+        stepped(mod)
+        comp = mod.P4Compositor()
+        for _ in range(3):                 # three deferrals, no present between
+            comp._composite_pending = True
+            comp.flush()
+        assert (_slot(comp, "fences"), ppa.syncs) == (1, 1)
+        assert _slot(comp, "fence_us") > 0
+    with rotated() as (rmod, rcomp, _dsi2, rppa, _lit):
+        stepped(rmod)
+        rcomp.flush()
+        rcomp.flush()                      # the first frame's ops outlived a loop
+        assert (_slot(rcomp, "fences"), rppa.syncs) == (1, 1)
+        assert _slot(rcomp, "fence_us") > 0
+
+
+def test_the_present_fence_counts_under_game_on_both(stepped):
+    """Slots 4/5 on both: the fence inside FrameLoop's UNTIMED present() hook
+    -- the one that must land before the cart's tick overwrites the source.
+    Nowhere else in the line is it visible."""
+    _dsi, _ppa, ctx = build()
+    with ctx as mod:
+        stepped(mod)
+        comp = mod.P4Compositor()
+        comp._composite_pending = True
+        comp.flush()
+        comp.present_pending()
+        assert _slot(comp, "game_n") == 1 and _slot(comp, "game_us") > 0
+    with rotated() as (rmod, rcomp, _dsi2, _ppa2, _lit):
+        stepped(rmod)
+        rcomp.flush()
+        rcomp.present_pending()
+        assert _slot(rcomp, "game_n") == 1 and _slot(rcomp, "game_us") > 0
+
+
+def test_timeouts_is_the_ppa_counter_on_both():
+    """Slot 6 on both: the only sign of a wedged fence, since a fence cannot
+    raise where it runs."""
+    _dsi, ppa, ctx = build()
+    with ctx as mod:
+        ppa.timeouts = 4
+        assert _slot(mod.P4Compositor(), "timeouts") == 4
+    with rotated() as (_rmod, rcomp, _dsi2, rppa, _lit):
+        rppa.timeouts = 4
+        assert _slot(rcomp, "timeouts") == 4
+
+
+def test_the_rotated_path_reports_obsolete_absent_never_zero():
+    """Slot 1 is the one mechanism the rotated path does not have: a deferred
+    frame there is fenced and shown LATE, never dropped. None says so; a 0
+    would read as a drop counter that is working and quiet."""
+    with rotated() as (_rmod, comp, dsi, _ppa, _lit):
+        comp.flush()
+        comp.flush()
+        assert _slot(comp, "obsolete") is None
+        assert dsi.shown == [0, 1], "the deferred frame was shown, not dropped"
+        assert comp.rotate_stats()[0] == 2, "the rotate meters have their own tuple"
+
+
+# -- the bounce pipeline's own meters ------------------------------------------
+
+
+PPA_C = ROOT / "native" / "p4" / "moy_ppa" / "modmoy_ppa.c"
+
+PPA_BOUNCE_FIELDS = ("s_rb_pending", "s_rb_fallbacks", "s_rb_t_fence",
+                     "s_rb_t_flag", "s_rb_t_dma", "s_rb_t_submit",
+                     "s_rb_stalls", "s_rb_cb_flagged",
+                     "s_rb_busy[0]", "s_rb_busy[1]")
+
+
+def _ppa_verb_body(name):
+    src = PPA_C.read_text(encoding="utf-8")
+    head = src.index("static mp_obj_t moy_ppa_%s(" % name)
+    return src[head:src.index("\n}\n", head)]
+
+
+def test_the_bounce_meters_report_the_stall_count_that_retires_them():
+    """`rotate_bounce` answers -1 for TWO different things: a picture that can
+    never bounce, and a pipeline that stalled past RB_MAX_STALLS and retired
+    itself for the session. The second is the whole lever going away, and the
+    counter that decides it has to be readable or the two are the same
+    answer."""
+    src = PPA_C.read_text(encoding="utf-8")
+    assert "s_rb_stalls > RB_MAX_STALLS" in src, (
+        "the retirement gate moved -- this pin names the variable it reads")
+    body = _ppa_verb_body("rotate_bounce_stats")
+    for field in PPA_BOUNCE_FIELDS:
+        assert field in body, "rotate_bounce_stats no longer reports %s" % field
+    assert "mp_obj_new_tuple(%d," % len(PPA_BOUNCE_FIELDS) in body
+
+
+def test_the_ppa_bounce_meters_do_not_collide_with_the_compositor_verb():
+    """`bounce_stats` is `BandedCompositor.bounce_stats()` -- the moy_flush
+    PUMP 9-tuple, which is what every Python caller and every doc in the tree
+    means by the name. A second, different 9-tuple under the same name on a
+    native module is a meter nobody can ask for by name and be sure what they
+    got."""
+    src = PPA_C.read_text(encoding="utf-8")
+    assert "MP_QSTR_rotate_bounce_stats" in src
+    assert "MP_QSTR_bounce_stats" not in src

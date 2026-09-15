@@ -748,11 +748,14 @@ class PerfSampler:
                 # FrameLoop's UNTIMED present() hook, so it lands in busy= and
                 # in no phase meter. The timeout count must stay 0.
                 cur = self._overlap()
-                d = [a - b for a, b in zip(cur, self._ov)]
+                # A slot a compositor cannot measure is None the whole way
+                # through: a 0 would read as a count this board never took.
+                d = [None if (a is None or b is None) else a - b
+                     for a, b in zip(cur, self._ov)]
                 self._ov = cur
                 v["ppa"] = (d[0], d[1], d[2], d[4], d[6])
-                v["fence_ms"] = d[3] / 1000.0
-                v["gfence_ms"] = d[5] / 1000.0
+                v["fence_ms"] = None if d[3] is None else d[3] / 1000.0
+                v["gfence_ms"] = None if d[5] is None else d[5] / 1000.0
             # LAST, and BARE where every field beside it is a getattr: perf_net
             # CONSUMES its window, and `-` is a legitimate reading here, so a
             # getattr default would let a renamed meter forge "no match"

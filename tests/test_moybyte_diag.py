@@ -1,13 +1,14 @@
 """Host-testable unit tests for the device-only moybyte_diag module's PURE logic:
-the bounded ring buffer, the line/perf formatting, and the dump markers. The SD
-persistence + boot-dump paths touch hardware (machine.SDCard / moybyte_sd) and are
-covered by the grep tests in test_micropython_spike.py instead.
+the bounded ring buffer, the line/perf formatting, the dump markers, and the
+boot dump driven against a fake `moybyte_sd`.
 
 moybyte_diag lives in the firmware modules/ tree (device-only) but its top-level
 imports are host-safe (only `time`; all hardware imports are lazy inside the SD
 helpers), so we can load + exercise the pure pieces directly here."""
 
 import importlib.util
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -191,3 +192,90 @@ def test_flush_to_sd_degrades_on_writer_error(diag):
 def test_flush_to_sd_none_wrapper_is_noop(diag):
     diag.log("a", "one")
     assert diag.flush_to_sd(None) is False
+
+
+# -- the boot dump: it has to REACH the card -----------------------------------
+
+
+def _fake_sd(mapping, wrapper="with_sd_live"):
+    """`moybyte_sd` with one session wrapper and a tiny read-only filesystem.
+
+    The wrapper's NAME is the point: the module previously read through
+    `with_sd`, a pre-display lifecycle built on `machine.SPI.Bus` that mainline
+    MicroPython does not have. Every read raised, was swallowed, and the dump
+    printed "(no previous diag log)" whatever was on the card. A fake that only
+    offers the shipped wrapper fails the same way if the reader picks another.
+    """
+    mod = types.ModuleType("moybyte_sd")
+    calls = []
+
+    def _session(fn):
+        calls.append("session")
+        return fn()
+
+    setattr(mod, wrapper, _session)
+    mod.calls = calls
+    mod.files = mapping
+    return mod
+
+
+def _with_sd(monkeypatch, diag, mod):
+    monkeypatch.setitem(sys.modules, "moybyte_sd", mod)
+
+    def _open(path, mode="r"):
+        if path not in mod.files:
+            raise OSError(2, path)
+        return _FakeFile(mod.files[path])
+    monkeypatch.setattr(diag, "open", _open, raising=False)
+
+
+class _FakeFile:
+    def __init__(self, text):
+        self._text = text
+
+    def read(self):
+        return self._text
+
+    def close(self):
+        pass
+
+
+def test_the_boot_dump_reads_the_previous_log_through_the_sd_session(monkeypatch, diag):
+    mod = _fake_sd({diag.LOG_PATH: "1 perf one\n2 perf two"})
+    _with_sd(monkeypatch, diag, mod)
+    out = []
+    monkeypatch.setattr("builtins.print", lambda *a: out.append(" ".join(map(str, a))))
+    diag.dump_previous_to_serial()
+    assert mod.calls == ["session"], "the read never opened an SD session"
+    assert out[0] == diag.DUMP_HEADER and out[-1] == diag.DUMP_FOOTER
+    assert "1 perf one" in out[1]
+
+
+def test_an_absent_log_dumps_the_empty_marker(monkeypatch, diag):
+    mod = _fake_sd({})
+    _with_sd(monkeypatch, diag, mod)
+    out = []
+    monkeypatch.setattr("builtins.print", lambda *a: out.append(" ".join(map(str, a))))
+    diag.dump_previous_to_serial()
+    assert "(no previous diag log)" in out
+
+
+def test_a_wedged_card_never_raises_into_the_caller(monkeypatch, diag):
+    mod = types.ModuleType("moybyte_sd")
+
+    def _boom(fn):
+        raise OSError(19, "no card")
+    mod.with_sd_live = _boom
+    monkeypatch.setitem(sys.modules, "moybyte_sd", mod)
+    out = []
+    monkeypatch.setattr("builtins.print", lambda *a: out.append(" ".join(map(str, a))))
+    diag.dump_previous_to_serial()
+    assert "(no previous diag log)" in out
+
+
+def test_a_board_with_no_sd_module_dumps_the_empty_marker(monkeypatch, diag):
+    monkeypatch.setitem(sys.modules, "moybyte_sd", None)   # PEP 328: raises ImportError
+    out = []
+    monkeypatch.setattr("builtins.print", lambda *a: out.append(" ".join(map(str, a))))
+    diag.dump_previous_to_serial()
+    assert "(no previous diag log)" in out

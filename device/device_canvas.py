@@ -487,14 +487,16 @@ _ST_T_FILL, _ST_T_TEXT = 12, 13
 _ST_LEN = 14
 _GATE_RECT, _GATE_RECTB, _GATE_PRINT, _GATE_PIX = 0, 1, 2, 3
 
-# Layer-buffer pool (#63 GC-wall follow-up): moy_alloc has NO free(), so a layer
-# buffer handed back by a dead cart is returned HERE (keyed by byte size) and the
-# next new_layer of the same dims reuses it -- without this, every cart re-run
-# leaked its world (~150-384KB) from the heap_caps PSRAM pool until the allocator
-# started failing (~20-30 opens) and silently degraded to gc-heap buffers (the
-# GC wall back again). Only moy_alloc-backed buffers are pooled (a gc-heap
-# fallback bytearray is the collector's job); nothing is ever dropped from the
-# pool -- the set of distinct layer sizes across carts is small and stable.
+# Layer-buffer pool (#63 GC-wall follow-up): a layer buffer handed back by a
+# dead cart is returned HERE (keyed by byte size) and the next new_layer of the
+# same dims reuses it instead of going back to the allocator. Without it every
+# cart re-run leaked its world (~150-384KB) from the heap_caps PSRAM pool until
+# the allocator started failing (~20-30 opens) and silently degraded to gc-heap
+# buffers (the GC wall back again) -- and the malloc_dma lane, which is all a
+# board without moy_alloc.alloc has, cannot free at all. Only moy_alloc-backed
+# buffers are pooled (a gc-heap fallback bytearray is the collector's job);
+# nothing is ever dropped from the pool -- the set of distinct layer sizes
+# across carts is small and stable.
 _LAYER_POOL = {}
 
 
@@ -2757,10 +2759,10 @@ class DeviceCanvas:
 
     def reclaim_layers(self, owner):
         """Return a dead program's pooled layer buffers to _LAYER_POOL for reuse
-        (#63 leak fix: moy_alloc has no free(), so without this every cart re-run
-        leaked its world from the heap_caps pool). Also drops the Fold-2 map cache
-        (its hidden layer is program content) and any in-flight async layer copy.
-        Callers probe via getattr (the host Canvas has no pool -- gc reclaims)."""
+        (#63 leak fix: without this every cart re-run leaks its world from the
+        heap_caps pool). Also drops the Fold-2 map cache (its hidden layer is
+        program content) and any in-flight async layer copy. Callers probe via
+        getattr (the host Canvas has no pool -- gc reclaims)."""
         if self._lcopy is not None:
             self._drain_lcopy()
         self._lcopy_pred = None

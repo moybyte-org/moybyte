@@ -153,7 +153,6 @@ the declaration and a comment in a shell script is not."""
 
 [modules.device]
 source   = "device"
-strategy = "allowlist"
 why = """
 The second staging source, an allowlist for the same reason it is one on every
 board -- `device/` is the boards' shared device tier and not every board drives
@@ -271,7 +270,6 @@ dest = "native/.staged"
 
 [native.shared]
 source   = "native"
-strategy = "denylist"
 why = """
 The C-module twin of the Python staging, and the one place this board keeps the
 siblings' DENYLIST shape -- because `native/` really does default to yes: a new

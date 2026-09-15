@@ -806,24 +806,36 @@ static mp_obj_t moy_ppa_rotate_bounce(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_bounce_obj, 13, 14,
                                            moy_ppa_rotate_bounce);
 
-// bounce_stats() -> (pending jobs, CPU-copied bands, fence timeouts, band-flag
-//   timeouts, DMA timeouts, submit failures, flagged completions, busy0, busy1):
-//   the pipeline's meters.
-static mp_obj_t moy_ppa_bounce_stats(void) {
-    mp_obj_t t[9] = {
+// rotate_bounce_stats() -> (pending jobs, CPU-copied bands, fence timeouts,
+//   band-flag timeouts, DMA timeouts, submit failures, STALLS, flagged
+//   completions, busy0, busy1): rotate_bounce's own meters.
+//
+//   `stalls` is the retirement gate and belongs in the tuple: rotate_bounce
+//   answers -1 once it passes RB_MAX_STALLS, and -1 is also what it answers
+//   for a picture that can never bounce. Without this counter a pipeline that
+//   RETIRED reads exactly like one that was never eligible -- the whole lever
+//   gone, and nothing on the board saying so.
+//
+//   Named for the verb it measures, and not `bounce_stats`: that name is
+//   BandedCompositor's, a different 9-tuple (the moy_flush PUMP meters), and
+//   one name over two unrelated meters is a meter nobody can ask for by name.
+static mp_obj_t moy_ppa_rotate_bounce_stats(void) {
+    mp_obj_t t[10] = {
         mp_obj_new_int_from_uint(s_rb_pending),
         mp_obj_new_int_from_uint(s_rb_fallbacks),
         mp_obj_new_int_from_uint(s_rb_t_fence),
         mp_obj_new_int_from_uint(s_rb_t_flag),
         mp_obj_new_int_from_uint(s_rb_t_dma),
         mp_obj_new_int_from_uint(s_rb_t_submit),
+        mp_obj_new_int_from_uint(s_rb_stalls),
         mp_obj_new_int_from_uint(s_rb_cb_flagged),
         mp_obj_new_bool(s_rb_busy[0]),
         mp_obj_new_bool(s_rb_busy[1]),
     };
-    return mp_obj_new_tuple(9, t);
+    return mp_obj_new_tuple(10, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_bounce_stats_obj, moy_ppa_bounce_stats);
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_rotate_bounce_stats_obj,
+                                 moy_ppa_rotate_bounce_stats);
 
 static volatile uint32_t s_mcp_done = 0;
 
@@ -1273,7 +1285,7 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rotate_scale), MP_ROM_PTR(&moy_ppa_rotate_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate_bounce), MP_ROM_PTR(&moy_ppa_rotate_bounce_obj) },
     { MP_ROM_QSTR(MP_QSTR_dma_copy), MP_ROM_PTR(&moy_ppa_dma_copy_obj) },
-    { MP_ROM_QSTR(MP_QSTR_bounce_stats), MP_ROM_PTR(&moy_ppa_bounce_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rotate_bounce_stats), MP_ROM_PTR(&moy_ppa_rotate_bounce_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_crisp_release), MP_ROM_PTR(&moy_ppa_crisp_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&moy_ppa_wait_obj) },

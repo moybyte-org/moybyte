@@ -308,7 +308,6 @@ dest = "native/.staged"
 
 [native.shared]
 source   = "native"
-strategy = "denylist"
 why = """
 The C-module twin of [modules.shared], one tier down and for the same reason
 (#161): the shared native list used to be a hand-written line in each build.sh
@@ -331,7 +330,6 @@ down."""
 
 [modules.device]
 source   = "device"
-strategy = "allowlist"
 why = """
 The second staging source, and the one that must STAY an allowlist -- the same
 call the P4's board file makes, for the same reason.

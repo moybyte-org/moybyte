@@ -89,6 +89,21 @@ moybyte_setup_idf esp32s3 \
 #    recv ring (#7). modespnow is not in this image: no netplay, no cart net.*
 #    inbox, and no second console to pair with.
 #
+# DECLINED moybyte_patch_gc_split_reserve -- caps split-heap growth so PSRAM
+#    stays available to the C side (#66). What needs that PSRAM on a console is
+#    the canvas and the layer pool; this board is headless and has neither.
+#
+# DECLINED moybyte_patch_p4_ble_hid_fastpath -- an ESP32-P4 silicon patch: it
+#    edits modbluetooth.c for native/p4/moy_ble_hid, which this ESP32-S3 image
+#    does not compile.
+#
+# DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
+#    the MIPI-DSI bridge-underrun ISR. No DSI peripheral, no panel.
+#
+# DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
+#    component is the P4's radio (a C6 slave over SDIO); this board's WiFi is
+#    on-die and its build pulls esp_hosted in nowhere.
+#
 #    Also not applied, and never were: the esp_lcd tx_color no-acquire patch
 #    (there is no panel) and the #69 I2C GIL release (no input poller, no I2C
 #    device on the bus).

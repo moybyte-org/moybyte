@@ -181,11 +181,12 @@ def test_a_quiet_game_frame_rotates_one_rect(board):
     board.drain(2.5)
     st = board.state()
     assert st.get("cart"), "the cart never started: %r" % st
-    before = board.pyval("comp.overlap_stats()", strict=True)
+    before = board.pyval("comp.rotate_stats()", strict=True)
     board.drain(2.0)
-    after = board.pyval("comp.overlap_stats()", strict=True)
-    rect = after[0] - before[0]
-    full = after[2] - before[2]
+    after = board.pyval("comp.rotate_stats()", strict=True)
+    # rotate_stats: (full frames, full_us, rect frames, rect_us, copies).
+    full = after[0] - before[0]
+    rect = after[2] - before[2]
     assert rect >= 20, (before, after)
     assert full <= 3, (before, after)
     board.cmd("py ws.exit()", wait_for="PY")

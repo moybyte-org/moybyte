@@ -128,7 +128,6 @@ boards, so browser text rasterizes from the same bytes."""
 
 [modules.device]
 source   = "device"
-strategy = "allowlist"
 why = """
 The browser stages three files from the boards' shared device tier -- the
 allowlist call is the same as the boards': `device/` defaults to "no" because

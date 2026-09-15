@@ -129,9 +129,7 @@ def run_ppa_smoke(scale=2, iters=60):
 # This is a DARK SCREEN, not a suspend, and deliberately so: the loop keeps
 # running, a cart mid-run keeps ticking, and the serial dev channel stays live,
 # because the on-glass harness (#156) has to reach a board that has been idle
-# for hours. The backlight is also the one power lever the board README calls
-# out as unmeasured -- its 2.85W draw has never been split between the SoC and
-# the panel, and "one reading with the backlight blanked settles it".
+# for hours.
 POWER_SAVE_MS = 300000          # 5 minutes
 
 

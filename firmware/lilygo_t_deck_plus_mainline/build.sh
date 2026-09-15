@@ -129,6 +129,16 @@ moybyte_patch_espnow_ring_race
 #     MSPI setting in sdkconfig.board, not optional alongside it.
 moybyte_patch_psram_retune
 
+# DECLINED moybyte_patch_p4_ble_hid_fastpath -- an ESP32-P4 silicon patch: it
+# edits modbluetooth.c for native/p4/moy_ble_hid, a module this board does not
+# compile.
+# DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
+# the MIPI-DSI bridge-underrun ISR. This board has no DSI peripheral.
+
+# DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
+# component is the P4's radio: a C6 slave over SDIO. This board's WiFi and BLE
+# are on-die, and nothing in its build pulls esp_hosted in at all.
+
 # ---------------------------------------------------------------------------
 # 3) Stage: the shared native modules (board.toml [native.shared] -- the
 #    C-module list is DATA, exactly like the Python one; there is no module

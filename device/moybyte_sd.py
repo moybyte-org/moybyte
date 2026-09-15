@@ -1,106 +1,22 @@
+"""The T-Deck's SD card, on the SPI host the panel already owns.
+
+ONE LIFECYCLE, and the hazard is why. SD and the panel share SPI host 1, so a
+`machine.SDCard` -- which re-runs `spi_bus_initialize()` on that host -- and a
+per-op teardown -- which corrupts the bus and DMA state `esp_lcd` needs -- both
+hang the board on the NEXT panel flush. No panic, no message: gray screen, dead
+USB. So the card is ATTACHED to the already-initialized host through the native
+`moy_sd` module (ESP-IDF "Sharing the SPI Bus"), mounted ONCE, and kept resident
+for the rest of the session. Only the unused LoRa radio CS is parked; the panel's
+CS and sdspi's CS are driver-owned and never touched here.
+
+The desktop loop is single-threaded, so `with_sd_live()` runs between frames and
+never overlaps a panel flush.
+"""
+
 SD_MOUNT = "/sd"
-SD_PROJECT_FILE_PATHS = (
-    "/sd/moybyte/project.py",
-    "/sd/moybyte/main.py",
-    "/sd/project.py",
-    "/sd/main.py",
-)
-SD_FREQ = 800000
 SPI_HOST = 1
-SPI_MOSI = 41
-SPI_MISO = 38
-SPI_SCK = 40
 RADIO_CS = 9
-TFT_CS = 12
 SD_CS = 39
-
-
-def mount_sd(spi_bus=None):
-    import os
-    from machine import Pin, SDCard
-
-    if _looks_mounted(os):
-        return SD_MOUNT
-
-    spi_bus = spi_bus or _display_spi_bus()
-    if spi_bus is None:
-        spi_bus = _new_spi_bus()
-
-    # Keep all shared SPI devices deselected before adding the SD card.
-    _deselect_shared_spi(Pin)
-
-    try:
-        os.mkdir(SD_MOUNT)
-    except OSError:
-        pass
-
-    sd = SDCard(spi_bus=spi_bus, cs=SD_CS, freq=SD_FREQ)
-    try:
-        _mount(sd, SD_MOUNT)
-    except OSError:
-        if _looks_mounted(os):
-            return SD_MOUNT
-        raise
-    return SD_MOUNT
-
-
-def read_first_project_source(spi_bus=None):
-    import os
-
-    sd = None
-    owned_spi = None
-    try:
-        spi_bus = spi_bus or _display_spi_bus()
-        if spi_bus is None:
-            owned_spi = _new_spi_bus()
-            spi_bus = owned_spi
-        sd = _mount_sd_device(spi_bus)
-        for path in SD_PROJECT_FILE_PATHS:
-            try:
-                with open(path, "r") as handle:
-                    return path, handle.read()
-            except OSError:
-                pass
-        return None
-    finally:
-        _unmount_if_possible(os)
-        _deinit_if_possible(sd)
-        _deinit_if_possible(owned_spi)
-        _deselect_after_sd()
-
-
-def with_sd(fn, spi_bus=None):
-    """Mount the SD card, run fn() (which may read/write under /sd), then always
-    unmount + deselect so the display can own the shared SPI bus again. This is
-    the same lifecycle as read_first_project_source: leaving an SDCard device on
-    the bus collides with esp_lcd flushes and hard-hangs the device."""
-    import os
-
-    sd = None
-    owned_spi = None
-    try:
-        spi_bus = spi_bus or _display_spi_bus()
-        if spi_bus is None:
-            owned_spi = _new_spi_bus()
-            spi_bus = owned_spi
-        sd = _mount_sd_device(spi_bus)
-        return fn()
-    finally:
-        _unmount_if_possible(os)
-        _deinit_if_possible(sd)
-        _deinit_if_possible(owned_spi)
-        _deselect_after_sd()
-
-
-# --- live SD sharing (native single-bus, while the panel is running) --------
-#
-# machine.SDCard re-runs spi_bus_initialize() on the host esp_lcd already owns,
-# which hard-hangs the board once the panel is live (see the README SD section
-# and CLAUDE.md). The moy_sd native module instead ATTACHES the card to that same,
-# already-initialized host (ESP-IDF "Sharing the SPI Bus" guide) -- no bus re-init,
-# the panel device is left intact. So reads AND writes work mid-run, as long as
-# the caller never flushes the panel during the SD session (the device desktop
-# loop is single-threaded, so with_sd_live() runs between frames).
 SD_LIVE_FREQ_KHZ = 20000
 
 
@@ -150,17 +66,10 @@ _live_mounted = False
 
 
 def with_sd_live(fn):
-    """Run fn() (cart reads/writes under /sd) with SD mounted via the native
-    single-bus path (moy_sd) while the panel is live, then return -- WITHOUT
-    tearing the card down. The SD device is mounted once and kept resident for
-    the rest of the device session.
-
-    Why persistent: tearing the sdspi device down between ops (sdspi_host_deinit)
-    corrupts the shared SPI bus + DMA state esp_lcd needs, and the next panel
-    flush hangs the board -- observed as "the write lands on SD, then resume
-    hangs." We also leave esp_lcd's TFT_CS and sdspi's SD_CS untouched (both are
-    driver-owned); only the unused LoRa radio CS is parked high. The desktop loop
-    is single-threaded, so fn() never overlaps a panel flush."""
+    """Run fn() (cart reads/writes under /sd) with SD mounted, then return --
+    WITHOUT tearing the card down. The device is mounted once and kept resident
+    for the rest of the session; see this module's header for what a teardown
+    costs."""
     global _live_mounted
     import os
 
@@ -181,98 +90,15 @@ def with_sd_live(fn):
     return fn()
 
 
-def _mount_sd_device(spi_bus):
-    import os
-    from machine import Pin, SDCard
-
-    if _looks_mounted(os):
-        return None
-
-    _deselect_shared_spi(Pin)
-    try:
-        os.mkdir(SD_MOUNT)
-    except OSError:
-        pass
-
-    sd = SDCard(spi_bus=spi_bus, cs=SD_CS, freq=SD_FREQ)
-    _mount(sd, SD_MOUNT)
-    return sd
-
-
-def _display_spi_bus():
-    try:
-        from tdeck_display import get_spi_bus
-
-        return get_spi_bus()
-    except Exception:
-        return None
-
-
-def _new_spi_bus():
-    import machine
-
-    return machine.SPI.Bus(host=SPI_HOST, mosi=SPI_MOSI, miso=SPI_MISO, sck=SPI_SCK)
-
-
-def _deselect_shared_spi(Pin):
-    Pin(RADIO_CS, Pin.OUT, value=1)
-    Pin(TFT_CS, Pin.OUT, value=1)
-    Pin(SD_CS, Pin.OUT, value=1)
-
-
-def _deselect_after_sd():
-    try:
-        from machine import Pin
-
-        _deselect_shared_spi(Pin)
-    except Exception:
-        pass
-
-
-def _unmount_if_possible(os_module):
-    try:
-        import vfs
-
-        vfs.umount(SD_MOUNT)
-        return
-    except Exception:
-        pass
-
-    try:
-        os_module.umount(SD_MOUNT)
-    except Exception:
-        pass
-
-
-def _deinit_if_possible(obj):
-    if obj is None:
-        return
-    deinit = getattr(obj, "deinit", None)
-    if deinit is None:
-        return
-    try:
-        deinit()
-    except Exception:
-        pass
-
-
 def _looks_mounted(os_module):
     try:
         return os_module.statvfs(SD_MOUNT) != os_module.statvfs("/")
     except OSError:
         return False
     except AttributeError:
-        return _has_project_file(os_module)
-
-
-def _has_project_file(os_module):
-    for path in SD_PROJECT_FILE_PATHS:
-        try:
-            with open(path, "r"):
-                return True
-        except OSError:
-            pass
-    return False
+        # A build with no os.statvfs cannot answer; the caller's own residency
+        # latch is what keeps a session to one attach either way.
+        return False
 
 
 def _mount(block_device, path):

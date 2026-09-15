@@ -1975,3 +1975,13 @@ def test_a_failing_poll_still_reports_the_time_it_burned(monkeypatch):
             raise OSError(104)
 
     assert device_boot.poll_webhost(_WSWeb(_SlowBoom())) == 12
+
+
+def test_a_compound_perf_field_renders_an_absent_component_as_a_dash():
+    # A compositor that cannot measure one slot reports None there; the line
+    # keeps its siblings' numbers and the reader gets None back, never 0.
+    from runtime.perf_line import format_perf, parse_perf
+    line = format_perf({"ppa": (1, None, 2, 3, 0), "fence_ms": None})
+    assert "ppa=1/-/2/3/0" in line and "fence_ms=-" in line
+    got = parse_perf(line)
+    assert got["ppa"] == (1.0, None, 2.0, 3.0, 0.0) and got["fence_ms"] is None

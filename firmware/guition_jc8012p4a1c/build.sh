@@ -54,20 +54,10 @@ moybyte_patch_p4_dsi_underrun
 moybyte_idf_component esp_lcd
 moybyte_idf_component esp_driver_ppa
 
-# 2c) ESP-Hosted 2.7.0 -> 2.12.12 (the espnow-on-p4 track,
-#     docs/history/espnow_p4_2026-08.md) -- the Waveshare's bump, verbatim:
-#     2.12.12 carries the custom-RPC seam the P4's ESP-NOW shim rides plus the
-#     streamed slave-OTA API. The stale per-target lockfile is dropped so the
-#     component manager re-resolves. On THIS board the C6 runs Guition's
-#     factory slave; hosted 2.12 against it is what the first boot reports
-#     (README records the verdict).
-MAIN_MANIFEST="${MPY_DIR}/ports/esp32/main/idf_component.yml"
-if grep -q 'version: "2.7.0"' "${MAIN_MANIFEST}"; then
-  echo "== bumping esp_hosted 2.7.0 -> 2.12.12 (espnow-on-p4 track)"
-  sed -i 's/^    version: "2.7.0"$/    version: "2.12.12"/' "${MAIN_MANIFEST}"
-  rm -f "${MPY_DIR}/ports/esp32/lockfiles/dependencies.lock.esp32p4"
-  rm -rf "${MPY_DIR}/ports/esp32/managed_components/espressif__esp_hosted"
-fi
+# 2c) ESP-Hosted 2.7.0 -> 2.12.12 -- the espnow-on-p4 track (shared lib). On
+#     THIS board the C6 runs Guition's factory slave; hosted 2.12 against it is
+#     what the first boot reports (README records the verdict).
+moybyte_patch_esp_hosted_bump esp32p4
 
 # 2d) Un-static esp_native_code_free_all (#66) -- shared with every board.
 moybyte_patch_native_code_free
@@ -77,7 +67,10 @@ moybyte_patch_espnow_ring_race
 #     build.sh carries the measured argument): every board that can hold a
 #     link runs REPR_C.
 moybyte_patch_repr_c
-moybyte_patch_gc_split_reserve
+
+# DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
+# MOYBYTE_GC_SPLIT_RESERVE is set by the two S3 boards' mpconfigboard.h alone,
+# so a call here reserves 0. Whether a P4 wants a reserve is unmeasured (#58).
 
 # DECLINED moybyte_patch_psram_retune -- not applicable: an ESP32-S3 MSPI
 # timing-tuner patch (#169); this is an ESP32-P4 and the file does not exist

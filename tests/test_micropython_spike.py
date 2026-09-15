@@ -263,23 +263,22 @@ def test_micropython_spike_uses_tdeck_native_panel_geometry():
 
 
 
-def test_micropython_spike_has_guarded_sd_project_loader():
+def test_the_sd_module_carries_one_lifecycle_and_no_fork_api():
+    """`moybyte_sd` used to hold a second, PRE-DISPLAY lifecycle built on
+    `machine.SDCard` + `machine.SPI.Bus` + `tdeck_display`. None of the three
+    exists on the mainline build this board ships, so it was unreachable code
+    that a substring grep kept looking alive -- and the boot diag dump read
+    through it. `tests/test_moybyte_sd.py` runs what is left."""
     display = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
     sd_loader = (DEVICE / "moybyte_sd.py").read_text(encoding="utf-8")
 
     assert "class TDeckCompositor" in display
-    assert "SD_PROJECT_FILE_PATHS" in sd_loader
-    assert '"/sd/project.py"' in sd_loader
-    assert "SD_FREQ = 800000" in sd_loader
-    assert "def read_first_project_source" in sd_loader
-    assert "SDCard(spi_bus=spi_bus, cs=SD_CS, freq=SD_FREQ)" in sd_loader
-    assert "Pin(TFT_CS, Pin.OUT, value=1)" in sd_loader
-    assert "machine.SPI.Bus(host=SPI_HOST" in sd_loader
-    assert "def _unmount_if_possible" in sd_loader
-    assert "def _deinit_if_possible" in sd_loader
+    assert "def with_sd_live(fn):" in sd_loader
     assert "def _looks_mounted(os_module):" in sd_loader
     assert 'os_module.statvfs(SD_MOUNT) != os_module.statvfs("/")' in sd_loader
     assert "vfs.mount(block_device, path)" in sd_loader
+    for dead in ("SDCard(", "SPI.Bus(", "tdeck_display"):
+        assert dead not in sd_loader
 
 
 def test_micropython_native_sd_shares_display_spi_host():
@@ -1789,12 +1788,50 @@ def _opts_in(build, fn):
     in a `# DECLINED <fn>` line whose reason follows -- board.toml's `[[deny]]
     why=` in the one file that is not board.toml. Silence is neither."""
     src = build.read_text(encoding="utf-8")
-    called = ("\n%s\n" % fn) in src
+    # A call sits at the start of a line and may carry arguments; the name
+    # inside a comment or a longer identifier is neither.
+    called = re.search(r"^%s(\s|$)" % fn, src, re.M) is not None
     declined = ("# DECLINED %s " % fn) in src
     assert called != declined, (
         "%s: %s must be either called or declined in writing, exactly one"
         % (build, fn))
     return called
+
+
+def _shared_patches():
+    """Every `moybyte_patch_*` the shared build lib defines. DISCOVERED, so a
+    new one is covered by the ladder test the day it lands."""
+    lib = Path("tools/esp32_build_lib.sh").read_text(encoding="utf-8")
+    out = re.findall(r"^(moybyte_patch_[a-z0-9_]+)\(\) \{", lib, re.M)
+    assert len(out) >= 7, "patch discovery found %d functions" % len(out)
+    return sorted(out)
+
+
+def test_every_board_answers_for_every_shared_patch():
+    """The ladder is a MATRIX, and silence is the cell that rots. Two of the
+    seven were spot-checked and the rest were not: both P4s called
+    moybyte_patch_gc_split_reserve while MOYBYTE_GC_SPLIT_RESERVE was defined
+    by the two S3 boards alone, so the patch reserved 0 on them from the day
+    of the port -- applied, verified, and capping nothing. No test could see
+    it, because a CALL was never checked against the board that has to mean
+    it."""
+    for build in _esp32_builds():
+        for fn in _shared_patches():
+            _opts_in(build, fn)
+
+
+def test_the_gc_split_reserve_call_and_the_board_define_agree():
+    """The patch's cap is MOYBYTE_GC_SPLIT_RESERVE, defaulted to 0 by the patch
+    itself. A board that calls it without defining it reserves nothing, which
+    is indistinguishable from a working reserve -- the same shape as `fold=0`.
+    So the call and the define travel together, both ways."""
+    for build in _esp32_builds():
+        called = _opts_in(build, "moybyte_patch_gc_split_reserve")
+        hdr = board_config.sdkconfig_path(build.parent).parent / "mpconfigboard.h"
+        defined = "MOYBYTE_GC_SPLIT_RESERVE" in hdr.read_text(encoding="utf-8")
+        assert called == defined, (
+            "%s: calls the split-reserve patch = %r but defines "
+            "MOYBYTE_GC_SPLIT_RESERVE = %r" % (build, called, defined))
 
 
 def test_repr_c_unboxed_floats_wired():
@@ -1902,8 +1939,8 @@ def test_exactly_one_board_owns_the_esp_idf_checkout():
 def test_gc_diag_is_low_cadence():
     # #63: the forced-collect GC sample costs ~130ms on a cart-sized live set --
     # running it every 3s was a visible periodic hitch. 1-in-10 samples only.
-    # _diag_gc + its cadence state now live in device_diag.py (extracted from
-    # moy_runtime.py); run_desktop calls _diag_gc(diag) between frames.
+    # _diag_gc and its cadence state live in device_diag.py; no board loop
+    # calls it today.
     device_diag = (DEVICE / "device_diag.py").read_text(encoding="utf-8")
     assert "_GC_TICK = [0]" in device_diag
     assert "if tick % 10 != 0:" in device_diag
@@ -2846,12 +2883,11 @@ def test_micropython_offline_diag_wiring():
 
     # The previous-session dump is a REPL affordance now: its boot hook rode the
     # #56 pre-display SD prefetch A/B path, which shipped OFF and was removed
-    # (nothing touches SD before the panel is up). The reader keeps the bus-safe
-    # pre-display machine.SDCard path (moybyte_sd.with_sd), NOT the live native
-    # path, so calling it from the REPL before the desktop starts stays safe.
+    # (nothing touches SD before the panel is up). It reads through the board's
+    # one SD session wrapper -- there is no second lifecycle to pick.
     assert "def dump_previous_to_serial(" in diag
     assert "_dump_diag" not in shell            # the boot hook is gone with the prefetch
-    assert "moybyte_sd.with_sd(" in diag
+    assert "moybyte_sd.with_sd_live(" in diag
 
     # Periodic SD flush goes through the live single-bus path (with_sd_live), runs
     # between frames, and overwrites the whole ring (one session per file).

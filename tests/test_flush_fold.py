@@ -33,6 +33,7 @@ overwrites the scratch, and a banded board WITHOUT the lever must carry no fold
 attribute at all. `tests/test_banded_panel.py` owns the compositors' behaviour.
 """
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -199,3 +200,54 @@ def test_a_banded_board_without_the_lever_carries_no_fold_attribute():
                  "disarm_scale_fold", "fold_fence"):
         assert name not in head, "%s leaked onto BandedCompositor" % name
         assert name in folding, name
+
+
+# -- the twin verbs: two panel modules, one body ------------------------------
+
+
+# Every MicroPython verb whose body is the SAME on both panel modules once the
+# module prefix is normalised. Not a wish -- measured over the shipped files,
+# and the list is a ratchet: a pair that legitimately diverges comes off it
+# with the reason, which is the review a silent edit never gets.
+TWIN_VERBS = ("arm_fold", "arm_fold_snap", "disarm_fold", "fold_fence",
+              "fold_snap_fence", "snap_stats", "fb", "fb_index", "nfbs",
+              "pending", "stats", "check", "park_pin", "backlight", "madctl")
+
+
+def _c_function(src, prefix, name):
+    """`moy_<prefix>_<name>`, from its `static` line to the closing brace in
+    column 0 -- the shape every function in both files is written in."""
+    m = re.search(r"^static [^\n]*\bmoy_%s_%s\(" % (prefix, name), src, re.M)
+    assert m, "no moy_%s_%s in the module" % (prefix, name)
+    return src[m.start():src.index("\n}\n", m.start()) + 3]
+
+
+def _normalised(src, prefix, name):
+    body = _c_function(src, prefix, name)
+    return (body.replace("moy_" + prefix, "moy_PANEL")
+                .replace("MOY_" + prefix.upper(), "MOY_PANEL"))
+
+
+@pytest.mark.parametrize("verb", TWIN_VERBS)
+def test_the_twin_panel_verbs_stay_byte_identical(verb):
+    """`moy_lcd` and `moy_axs` stand alone by decision (the transport differs:
+    one esp_lcd frame per band against one CS assertion for the whole frame,
+    docs/board_ports_2026-08.md), and most of the two files earns that. These
+    fifteen do not: they are the same body under two prefixes, and a fix to one
+    is a fix owed to the other.
+
+    The drift is not hypothetical. `set_madctl`'s drain was missing from
+    modmoy_lcd.c until 2026-08-21 while the axs twin had it from the start --
+    a command raced into a frame the feeder was still shipping, with the rule
+    written down two paragraphs above the verb that broke it. Nothing could
+    see it, because nothing compared the two.
+
+    NOT merged into a shared header: the value here is the REVIEW, and a
+    parameterised body over two transports is what the board-ports doc already
+    declined."""
+    lcd = (TDECK / "native" / "moy_lcd" / "modmoy_lcd.c").read_text(
+        encoding="utf-8")
+    axs = (GUITION / "native" / "moy_axs" / "modmoy_axs.c").read_text(
+        encoding="utf-8")
+    assert _normalised(lcd, "lcd", verb) == _normalised(axs, "axs", verb), (
+        "moy_lcd_%s and moy_axs_%s have drifted apart" % (verb, verb))

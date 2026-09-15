@@ -41,6 +41,7 @@ Mutation-checked per #208: 69 perturbations of the glue and 13 of the shared
 host execution of), 82 red, no survivors.
 """
 
+import ast
 import importlib.util
 import re
 import sys
@@ -52,20 +53,25 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 GLUE_SRC = ROOT / "device" / "moycore_glue.py"
 C_SRC = ROOT / "native" / "moycore" / "modmoycore.c"
+# The second ABI this file's parser is pointed at: the native draw gates and
+# the shape kernel, whose enums device/device_canvas.py mirrors by hand.
+GFX_SRC = ROOT / "native" / "moy_gfx" / "modmoy_gfx.c"
+GFX_KERNELS = ROOT / "native" / "moy_gfx" / "moy_gfx_kernels.h"
+CANVAS_SRC = ROOT / "device" / "device_canvas.py"
 
 
 # -- the C side, parsed --------------------------------------------------------
 
 
-def _c_text():
-    src = C_SRC.read_text(encoding="utf-8")
+def _c_text(path=None):
+    src = (path or C_SRC).read_text(encoding="utf-8")
     src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
     return re.sub(r"//[^\n]*", "", src)
 
 
-def _c_enum(first):
+def _c_enum(first, path=None):
     """The enum block that starts with `first`, as {name: value}."""
-    text = _c_text()
+    text = _c_text(path)
     for block in re.findall(r"enum\s*\{(.*?)\}\s*;", text, flags=re.S):
         if not re.search(r"\b%s\b" % first, block):
             continue
@@ -81,7 +87,7 @@ def _c_enum(first):
             out[item] = nxt
             nxt += 1
         return out
-    raise AssertionError("no enum containing %s in %s" % (first, C_SRC))
+    raise AssertionError("no enum containing %s in %s" % (first, path or C_SRC))
 
 
 def _c_define(name):
@@ -1588,3 +1594,72 @@ def test_a_dead_pointer_is_dead_even_when_a_game_pointer_still_stands(w):
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_NONE, (
         "a game_pointer outlived the pointer it maps")
+
+
+# -- the OTHER hand-mirrored ABI: moy_gfx's enums in device_canvas -------------
+#
+# Same failure shape as the moycore constants above, one module over, and
+# nothing pinned it: `device/device_canvas.py` restates moy_gfx's state-array
+# indices, its gate kinds and mg_shape's `kind` as Python literals, and the two
+# sides are ONE BINARY LAYOUT. A slot inserted in the C enum renumbers every
+# index after it, the Python keeps writing the old ones, and the gate reads
+# camera where it expects clip -- on glass, silently, in the fast lane that
+# exists to skip the Python frame. The parser above is already the instrument;
+# these tests point it at the second header.
+
+
+def _py_int_consts(path):
+    """Module-level int constants of a Python source, by name. Read as source
+    rather than imported: device_canvas pulls in the device tier's flat module
+    names, and the layout is literal assignments either way."""
+    out = {}
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        tgt, val = node.targets[0], node.value
+        pairs = (zip(tgt.elts, val.elts)
+                 if isinstance(tgt, ast.Tuple) and isinstance(val, ast.Tuple)
+                 else [(tgt, val)])
+        for t, v in pairs:
+            if (isinstance(t, ast.Name) and isinstance(v, ast.Constant)
+                    and isinstance(v.value, int) and not isinstance(v.value, bool)):
+                out[t.id] = v.value
+    return out
+
+
+def _mirror(c_enum, c_prefix, py_prefix):
+    """{python name: (c name, value)} for the members of one C enum."""
+    return {py_prefix + n[len(c_prefix):]: (n, v) for n, v in c_enum.items()}
+
+
+GFX_MIRRORS = (
+    ("ST_CAM_X", GFX_SRC, "ST_", "_ST_"),
+    ("GATE_RECT", GFX_SRC, "GATE_", "_GATE_"),
+    ("MG_SHAPE_LINE", GFX_KERNELS, "MG_SHAPE_", "_MG_"),
+)
+
+
+@pytest.mark.parametrize("first,src,c_prefix,py_prefix", GFX_MIRRORS)
+def test_device_canvas_mirrors_the_moy_gfx_enum_exactly(first, src, c_prefix,
+                                                        py_prefix):
+    py = _py_int_consts(CANVAS_SRC)
+    want = _mirror(_c_enum(first, src), c_prefix, py_prefix)
+    for name, (c_name, value) in sorted(want.items()):
+        assert name in py, (
+            "%s defines %s and device_canvas has no %s" % (src.name, c_name, name))
+        assert py[name] == value, (
+            "%s = %d in device_canvas, %s = %d in %s"
+            % (name, py[name], c_name, value, src.name))
+
+
+@pytest.mark.parametrize("first,src,c_prefix,py_prefix", GFX_MIRRORS)
+def test_device_canvas_mirrors_no_member_the_c_dropped(first, src, c_prefix,
+                                                       py_prefix):
+    """The other direction: a constant the C no longer has is a Python name
+    still being written into the shared array."""
+    want = _mirror(_c_enum(first, src), c_prefix, py_prefix)
+    stray = {n for n in _py_int_consts(CANVAS_SRC)
+             if n.startswith(py_prefix)} - set(want)
+    assert not stray, (
+        "device_canvas keeps %s, which %s's enum does not define"
+        % (sorted(stray), src.name))

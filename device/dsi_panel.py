@@ -38,6 +38,32 @@ except ImportError:  # pragma: no cover - host package lane
     from runtime.ticks import _ticks_us, _ticks_diff
 
 
+# The async-overlap meters, in order: every compositor in this module returns
+# THIS field set from `overlap_stats()`, whatever its path does internally.
+# `runtime/device_boot.PerfSampler` deltas the tuple and the PERF line prints
+# five of the slots as `ppa=` with `fence_us`/`game_us` as fence_ms/gfence_ms,
+# so a compositor that answered a slot with some other counter would print one
+# board's number under every board's label. A slot whose mechanism this path
+# does not have is None -- the absence rule, because 0 is also what a broken
+# meter reads as.
+#
+#   deferred  composites kicked async whose scan-out switch was held a loop --
+#             the denominator for the rest.
+#   obsolete  queued shows a newer full paint replaced: composited, unseen.
+#   fences    blocking fences in flush() that free the next paint target, and
+#             fence_us their cost. One per deferred frame means the extra
+#             framebuffer buys nothing.
+#   game_n    the blocking fence in present_pending() -- the one that must land
+#             before the cart's tick overwrites the composite's source -- and
+#             game_us its cost. It runs inside FrameLoop's UNTIMED present()
+#             hook, so this is the only place it is visible.
+#   timeouts  moy_ppa fences that gave up. Must stay 0, and a fence cannot
+#             RAISE (it runs where a throw would take the desktop down), so
+#             this is the only sign of a wedge.
+OVERLAP_FIELDS = ("deferred", "obsolete", "fences", "fence_us",
+                  "game_n", "game_us", "timeouts")
+
+
 class P4Compositor:
     def __init__(self, set_backlight=None):
         import moy_dsi
@@ -261,23 +287,10 @@ class P4Compositor:
             self.present_pending()
 
     def overlap_stats(self):
-        """The async-overlap meters, cumulative since boot:
-
-            (deferred, obsolete, fences, fence_us, game_n, game_us, timeouts)
-
-        deferred  composites kicked async whose scan-out switch was held one
-                  loop -- the denominator for the rest.
-        obsolete  queued shows a full opaque paint replaced: composited, unseen.
-        fences    blocking reuse fences in flush(), and fence_us their cost.
-                  One per deferred frame means the third framebuffer buys
-                  nothing.
-        game_n    the blocking "game" fence in present_pending(), and game_us
-                  its cost. It runs inside FrameLoop's UNTIMED present() hook,
-                  so this is the only place it is visible.
-        timeouts  moy_ppa fences that gave up. Must stay 0, and a fence cannot
-                  RAISE (it runs where a throw would take the desktop down), so
-                  this is the only sign of a wedge.
-        """
+        """OVERLAP_FIELDS, cumulative since boot. Every slot is measured here:
+        the deferred show, the reuse fence in flush(), the "game" fence in
+        present_pending() and the drop that obsoletes a queued show are all
+        paths this compositor has."""
         try:
             import moy_ppa
             timeouts = moy_ppa.stats()[2]
@@ -459,8 +472,8 @@ class RotatedCompositor:
         # This frame's damage, in landscape rects, as the WM described it
         # (note_damage); None = nothing described. Consumed at flush.
         self._damage = None
-        # Meters (overlap_stats keeps the PERF line's 7-slot ppa= shape; a
-        # damage frame counts as a rect frame there and separately below).
+        # The rotate meters -- rotate_stats(). A damage frame counts as a rect
+        # frame here and again in damage_stats().
         self._full_n = 0
         self._full_us = 0
         self._rect_n = 0
@@ -485,6 +498,9 @@ class RotatedCompositor:
         self._def_n = 0               # deferred frames
         self._pres_n = 0              # ...shown at a present
         self._late_n = 0              # ...shown by the following flush
+        self._fences = 0              # flush fences that freed the paint target
+        self._fence_us = 0            # ...and what they cost
+        self._wait_n = 0              # presents that fenced the queue tail
         self._wait_us = 0             # time the present spent fencing
         # The WM's deferred window stamp (P4SystemCanvas.blit_strip_async):
         # (dst, dw, dh, x, y, src, sw, sh), the frame's first queued op.
@@ -716,8 +732,11 @@ class RotatedCompositor:
         if self._pending is not None:
             # The last frame's ops outlived a whole loop: fence and show it
             # before this frame's ops go to its sibling buffer.
+            tf = _ticks_us()
             self._ppa.sync()
             self._present(True)
+            self._fences += 1
+            self._fence_us += _ticks_diff(_ticks_us(), tf)
             back = self._back
             fb = self._fbs[back]
             stale = self._stale[back]
@@ -886,6 +905,7 @@ class RotatedCompositor:
             return
         t0 = _ticks_us()
         self._ppa.wait(self._keep)
+        self._wait_n += 1
         self._wait_us += _ticks_diff(_ticks_us(), t0)
         if self._ppa.done():
             self._present(False)
@@ -903,17 +923,30 @@ class RotatedCompositor:
         return (self._def_n, self._pres_n, self._late_n, self._wait_us,
                 self._stamp_n, self._refused, self._bounced)
 
+    def rotate_stats(self):
+        """What the rotation itself cost, cumulative since boot:
+        (full frames, full_us, rect frames, rect_us, stale rects copied 1:1
+        from the buffer on glass)."""
+        return (self._full_n, self._full_us, self._rect_n, self._rect_us,
+                self._copies)
+
     def overlap_stats(self):
-        """The PERF line's ppa= slots, re-purposed for this path:
-        (rect frames, copies, full frames, full_us, rect frames, rect_us,
-        ppa timeouts) -- fence_ms is the full-rotate cost, gfence_ms the
-        rect-rotate cost."""
+        """OVERLAP_FIELDS, cumulative since boot -- the SAME meanings the
+        sibling compositor reports, because one PERF line labels both.
+
+        `obsolete` is None: this path never drops a queued show. A deferred
+        frame that outlives a loop is fenced and shown LATE by the next flush
+        (the `fences` slot), so nothing is ever composited unseen -- and a
+        frozen 0 there would read as a working drop counter.
+
+        The rotation's own costs are rotate_stats().
+        """
         try:
             timeouts = self._ppa.stats()[2]
         except Exception:  # noqa: BLE001
             timeouts = 0
-        return (self._rect_n, self._copies, self._full_n, self._full_us,
-                self._rect_n, self._rect_us, timeouts)
+        return (self._def_n, None, self._fences, self._fence_us,
+                self._wait_n, self._wait_us, timeouts)
 
     def underruns(self):
         try:
