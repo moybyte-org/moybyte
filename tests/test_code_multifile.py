@@ -371,11 +371,11 @@ def test_new_script_names_the_file_and_opens_it_in_the_code_tab(tmp_path):
     cl = ws.cards_layer
     cl._open_files()
     cl._files_open("+ NEW SCRIPT")
-    assert cl.newf is not None
-    cl.newf["name"] = "Enemy Helpers!"
-    cl._commit_newf()
+    assert cl.prompt is not None and cl.prompt.kind == "newf"
+    cl.prompt.fields[0].text = "Enemy Helpers!"
+    cl._commit_prompt()
 
-    assert cl.newf is None and cl.files is None
+    assert cl.prompt is None and cl.files is None
     assert ws.menu_view == "code"
     assert ws.code_file_name() == "enemy_helpers.lua", \
         "a typed name is slugged under the cart's own runtime extension"
@@ -390,12 +390,12 @@ def test_new_script_refuses_a_taken_name_and_an_unusable_one(tmp_path):
     cl = ws.cards_layer
     cl._open_files()
     cl._files_open("+ NEW SCRIPT")
-    cl.newf["name"] = "extra"
-    cl._commit_newf()
-    assert cl.newf is not None and cl.newf["msg"] == "THAT NAME IS TAKEN"
-    cl.newf["name"] = "!!!"
-    cl._commit_newf()
-    assert cl.newf is not None and cl.newf["msg"] == "NAME IT WITH LETTERS"
+    cl.prompt.fields[0].text = "extra"
+    cl._commit_prompt()
+    assert cl.prompt is not None and cl.prompt.msg == "THAT NAME IS TAKEN"
+    cl.prompt.fields[0].text = "!!!"
+    cl._commit_prompt()
+    assert cl.prompt is not None and cl.prompt.msg == "NAME IT WITH LETTERS"
 
 
 def test_a_projects_own_script_routes_to_the_code_tab_not_the_text_handle(
@@ -427,8 +427,8 @@ def test_a_script_added_here_actually_runs(tmp_path):
     cl = ws.cards_layer
     cl._open_files()
     cl._files_open("+ NEW SCRIPT")
-    cl.newf["name"] = "helpers"
-    cl._commit_newf()
+    cl.prompt.fields[0].text = "helpers"
+    cl._commit_prompt()
     assert ws.code_file_name() == "helpers.lua"
     ws.editor.set_text("function bump() seen = seen + 1 end\n")
     assert ws.save_code(force=True)

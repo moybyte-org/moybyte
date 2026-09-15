@@ -537,12 +537,6 @@ class BlockEditor(OpHistoryMixin):
             return []
         return self.blocks.block_slots(self.program, b)
 
-    def slot_value(self, slot_name, block=None):
-        b = block if block is not None else self.selected_block()
-        if b is None:
-            return None
-        return (b.get("p", {}) or {}).get(slot_name)
-
     def set_slot(self, slot_name, value, block=None):
         """Write a slot value on a block (defaults to the selection). The caller is
         responsible for passing a value the slot's type accepts (a number/string

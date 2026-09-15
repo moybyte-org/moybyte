@@ -230,19 +230,6 @@ class MusicTrack:
             return row if row else -1
         return int(r)
 
-    def row_dur(self, i):
-        """Row i's duration in seconds (None = hold forever).
-
-        Once a track carries row_secs at all, it governs EVERY row: libmoy holds
-        a fixed row_secs array that the parser zero-fills, and 0 means hold, so a
-        row past the end of the authored list holds rather than quietly
-        reverting to the speed clock. Matching that keeps a short-row_secs cart
-        sounding the same here and on a libmoy host."""
-        if self.row_secs:
-            v = self.row_secs[i] if 0 <= i < len(self.row_secs) else 0.0
-            return None if v <= 0 else v
-        return 1.0 / self.speed
-
     def to_dict(self):
         d = {"speed": self.speed, "loop": self.loop,
              "pattern": [list(r) if isinstance(r, list) else r

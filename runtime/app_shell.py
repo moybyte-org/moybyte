@@ -35,6 +35,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
 
+try:
+    from editors import TE_COMMIT, TE_CANCEL
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors import TE_COMMIT, TE_CANCEL
+
 
 class ListShellLayout:
     """Base for the apps' Layout classes. Subclass __init__ calls _init_frame
@@ -143,32 +148,27 @@ class ListShellApp:
     # -- typed keys ------------------------------------------------------------
 
     def _edge_key(self, inp):
-        """The typed-key edge (one key per physical press -- the code_layer
-        idiom): the keyboard reports the byte for the frame it is down then 0.
-        Returns the fresh byte or 0. Hosts keep `self._ekey_prev = 0` in
-        __init__/mode resets."""
+        """The typed-key edge (one key per physical press): the keyboard
+        reports the byte for the frame it is down, then 0. Returns the fresh
+        byte or 0. Hosts keep `self._kedge = editors.KeyEdge()` and reset it
+        on a mode change."""
         k = inp.last_key
-        fresh = k if (k and k != self._ekey_prev) else 0
-        self._ekey_prev = k
-        return fresh
+        return k if self._kedge.hit(k) else 0
 
-    # Rename entry cap -- a label, not a paragraph (Files narrows it to 20).
+    # Rename entry cap -- a label, not a paragraph.
     RENAME_MAX = 24
 
     def _typed_rename(self, inp):
-        """The rename-buffer keystroke handler the Desk-Lab apps share: Enter
-        commits, Backspace trims, printable ASCII appends up to RENAME_MAX.
-        Hosts supply `rename_text` and `_rename_commit()`."""
-        k = self._edge_key(inp)
-        if not k:
-            return
-        if k in (0x0D, 0x0A):
+        """The rename field's keystrokes: hosts keep `self.rename`, a
+        `TextEntry(RENAME_MAX)`, and supply `_rename_commit()` /
+        `_rename_cancel()` for its Enter and Esc."""
+        ev = self.rename.feed(inp)
+        if ev == TE_COMMIT:
             self._rename_commit()
-        elif k in (0x08, 0x7F):
-            self.rename_text = self.rename_text[:-1]
-        elif 0x20 <= k < 0x7F and len(self.rename_text) < self.RENAME_MAX:
-            self.rename_text += chr(k)
-        self._damage.all()
+        elif ev == TE_CANCEL:
+            self._rename_cancel()
+        if ev is not None:
+            self._damage.all()
 
     # -- the list view's scroll window + nav -------------------------------------
 

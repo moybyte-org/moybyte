@@ -56,9 +56,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import CodeEditor, KeyEdge
 
 try:
-    from code_layer import _CODE_SYMBOLS, _LUA_SYMBOLS
+    from code_layer import symbols_for, draw_symbol_keys
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import _CODE_SYMBOLS, _LUA_SYMBOLS
+    from runtime.code_layer import symbols_for, draw_symbol_keys
 
 
 # Lua has no `input` of its own and libmoy owns `print` (the DRAW verb), so a
@@ -372,7 +372,7 @@ class TextConsole:
             self._drag = None
 
     def _symbols(self):
-        return _LUA_SYMBOLS if self._lang == "lua" else _CODE_SYMBOLS
+        return symbols_for(self._lang)
 
     # -- the surface ----------------------------------------------------------
 
@@ -421,25 +421,20 @@ class TextConsole:
         show = line[-self.cols:] if len(line) > self.cols else line
         cv.print(show, pad, py, in_ink, 1)
         cv.rect(pad + len(show) * fw, py, fw, 8 * fs, accent)
-        self._draw_symbols(cv, th, cv.h - sym_h, sym_h, fs)
+        self._draw_symbols(cv, cv.h - sym_h, sym_h, fs)
 
-    def _draw_symbols(self, cv, th, y, h, fs):
+    def _draw_symbols(self, cv, y, h, fs):
         """The Code tab's tappable symbol palette, under the prompt: the same
-        characters, because it is the same keyboard that cannot type them."""
-        NAMES = self.NAMES
+        characters through the same renderer and tone map, because it is the
+        same keyboard that cannot type them. The keys share the width; the
+        symbol is re-centred in a key shorter than the Code tab's."""
         syms = self._symbols()
         cell = max(8 * fs + 2, cv.w // len(syms))
+        syms = syms[:max(1, cv.w // cell)]
         rects = []
-        for i, ch in enumerate(syms):
-            x = i * cell
-            if x + cell > cv.w:
-                break
-            r = (x, y, cell - 1, h - 1)
-            cv.rect(r[0], r[1], r[2], r[3], NAMES["dark_grey"])
-            cv.rectb(r[0], r[1], r[2], r[3], th.get("hilite", NAMES["indigo"]))
-            cv.print(ch, x + (cell - 8 * fs) // 2, y + (h - 8 * fs) // 2,
-                     NAMES["white"], 1)
-            rects.append(r)
+        draw_symbol_keys(cv, self.ws.code_layer._tones(), syms, 0, y, cell, h,
+                         fs, (cell - 1 - 8 * fs) // 2 - 8 * fs,
+                         (h - 1 - 8 * fs) // 2 - 8 * fs, rects)
         self._sym_rects = tuple(rects)
 
     def _tones(self, th):

@@ -42,7 +42,7 @@ class WebConsole:
 
     _PIN_DIGITS = 4
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         # The WEB CONSOLE connection screen (web_console_ui.py) + the flag that
         # says the glass is parked on it. `parked` is what makes wasm mode a
@@ -50,7 +50,7 @@ class WebConsole:
         # re-parks while it is set, so a cart launched from the browser comes
         # back HERE rather than dropping a kid onto a shelf the browser is
         # concurrently rewriting.
-        self.ui = WebConsoleUI(ws, names, in_rect)
+        self.ui = WebConsoleUI(ws, names)
         self.parked = False
 
     def pin(self):

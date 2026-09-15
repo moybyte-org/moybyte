@@ -31,15 +31,16 @@ taps SHOW ADDRESS has already decided not to scan.
 
 Dependency profile is UpdateUI's (the other parked fullscreen surface, and the
 model this follows): everything reaches the console through `self.ws`, and
-NAMES / in_rect are injected at construction rather than imported back from
-console.py -- `WebConsole` (web_console.py) builds the one instance a
-Workstation holds, as `ws.web.ui`.
+NAMES is injected at construction rather than imported back from console.py --
+`WebConsole` (web_console.py) builds the one instance a Workstation holds, as
+`ws.web.ui`. The rect hit-test is `ui.rect_in`, imported directly.
 """
 
 try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
     import moy_qr as _qr
@@ -58,10 +59,9 @@ except ImportError:  # host fallback when not yet aliased
 
 class WebConsoleUI:
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         # Revealed by the SHOW ADDRESS button; reset on every entry, so a kid
         # who left the pin on screen does not find it there tomorrow.
         self.show_address = False
@@ -124,10 +124,10 @@ class WebConsoleUI:
         if not click:
             return True
         _qrr, _addr, show, off = self.rects()
-        if self._in(px, py, show):
+        if _in(px, py, show):
             self.show_address = not self.show_address
             self.ws._dirty = True
-        elif self._in(px, py, off):
+        elif _in(px, py, off):
             self.ws.web.stop()
         return True
 

@@ -316,7 +316,9 @@ def test_gen_has_no_ws_mirror(tmp_path):
     launcher = (ROOT / "runtime" / "launcher_layer.py").read_text(encoding="utf-8")
     windowed = (ROOT / "runtime" / "wm_windowed.py").read_text(encoding="utf-8")
     assert "_cover_gen" not in launcher and "_cover_gen" not in windowed
-    assert launcher.count("ws.covers.gen") == 8
+    # Six reads: the shared drag-partial body (`_drag_partial`, two), the
+    # home frame (three) and the picker frame (one).
+    assert launcher.count("ws.covers.gen") == 6
 
 
 # -- the grids reach covers through injected bound methods ----------------------

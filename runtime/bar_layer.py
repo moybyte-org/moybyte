@@ -20,9 +20,9 @@ ratchet.
 
 `BarLayer` reaches everything else through its `self.ws` back-ref (the shared draw
 toolkit ws._glyph/_icon/_mini_btn stays on Workstation; the bar is a consumer). Only
-`NAMES` (palette) and `_in` (rect hit-test) are injected at construction -- the same
-circular-import dodge the other extracted UIs use, since console.py builds the one
-BarLayer instance a Workstation holds. The trivial time helpers `_ticks_ms`/
+`NAMES` (palette) is injected at construction -- the same circular-import dodge the
+other extracted UIs use, since console.py builds the one BarLayer instance a
+Workstation holds; the rect hit-test `_in` is widgets', imported directly. The trivial time helpers `_ticks_ms`/
 `_ticks_diff` are duplicated here (time-only, like achievements_ui.py) for the clock.
 """
 import time
@@ -91,6 +91,11 @@ try:                                    # device: ticks is frozen flat
 except ImportError:                     # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_diff
 
+try:
+    from widgets import _in
+except ImportError:                     # host: the runtime package
+    from runtime.widgets import _in
+
 
 class BarLayer:
     """The unified 18px top bar (#46), migrated out of Workstation as
@@ -145,13 +150,12 @@ class BarLayer:
     app's zone_tap takes the lent rect as a parameter; the game-canvas tabs
     (cards/paint/map, MUSIC next) keep the fixed _ZONE_LEFT_GAME rect.)
 
-    `NAMES` (palette) and `_in` (rect hit-test) are injected at construction (the same
-    circular-import dodge the other extracted UIs use)."""
+    `NAMES` (palette) is injected at construction (the same circular-import dodge
+    the other extracted UIs use)."""
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         # Cached top bar (#43, generalized in Stage 4 to every `where`): rendered
         # ONCE into an offscreen strip and blitted each frame (one flat copy)
         # instead of re-rendering ~9 sprites + glyph + text every frame.
@@ -384,7 +388,6 @@ class BarLayer:
         which is what makes the cached strip pixel-identical to a direct render.
         `key` carries the already-computed has_edit (index 2) so the icon choice
         can't drift from the key."""
-        NAMES = self._NAMES
         ws = self.ws
         where = key[0]
         has_edit = key[2]
@@ -471,7 +474,6 @@ class BarLayer:
         cluster (cards/paint/map, mirrors the crash bar's right cluster) or the
         responsive Layout-driven one (home/settings/code/blocks). The launcher IS the
         back-stack root, so it draws NO X (spec Section 9) -- only where != "home"."""
-        NAMES = self._NAMES
         ws = self.ws
         # The launcher root never exits -> no X; neither does the DESK (#105:
         # it is the make world's FLOOR -- the PLAY icon is the way out).
@@ -573,11 +575,11 @@ class BarLayer:
         # Clock Easter egg (#21): tapping the bar's clock _CLOCK_TAP_GOAL times
         # wakes the Time Traveler. Checked before the ≡/X/zone so a tap on the clock
         # never falls through to a button.
-        if self._in(px, py, clock_hit):
+        if _in(px, py, clock_hit):
             ws.ach_ui._tap_clock()
             return True
         ws.ach_ui._clock_taps = 0                # any other bar tap resets the run
-        if self._in(px, py, gear_hit):           # ≡ -> system menu (Settings/About/Reboot, #52)
+        if _in(px, py, gear_hit):           # ≡ -> system menu (Settings/About/Reboot, #52)
             ws.toggle_sysmenu()
             return True
         # WiFi status icon: on the WINDOWED desktop it deep-links into Settings ->
@@ -585,7 +587,7 @@ class BarLayer:
         # a system APP, so wifi setup coexists with a running cart, #38); on the
         # fullscreen tiers it launches the wifi.moy tool (Part 3, unchanged device
         # behavior). Consumes the tap either way so it never leaks to the lent zone.
-        if self._in(px, py, wifi_hit):
+        if _in(px, py, wifi_hit):
             if getattr(ws, "windowed_chrome", False):
                 ws.open_settings()
                 ws.settings_layer.open_wifi()
@@ -598,7 +600,7 @@ class BarLayer:
         # caller (spec Section 6's test-play round trip -- go_home for a launcher-launched
         # tool, but the Editor tab if a tool is ever PLAYed from the editor); every other
         # taskbar app (Editor/Settings) uses the screen-string exit.
-        if where not in ("home", "desk") and self._in(px, py, x_hit):
+        if where not in ("home", "desk") and _in(px, py, x_hit):
             if where == "tool":
                 ws._exit_to_caller()
             else:
@@ -623,19 +625,19 @@ class BarLayer:
         Returns True if a tool switch consumed the tap (so the pause QUIT/CONTINUE
         handling in the desktop pointer is skipped)."""
         ws = self.ws
-        if self._in(px, py, _SYSMENU_BTN):
+        if _in(px, py, _SYSMENU_BTN):
             ws.toggle_sysmenu()      # ≡ -> open the dropdown system menu (#52)
-        elif self._in(px, py, _HOME_BTN):
+        elif _in(px, py, _HOME_BTN):
             ws.go_home()
-        elif self._in(px, py, _MENU_BTN):
+        elif _in(px, py, _MENU_BTN):
             ws._open_menu()
-        elif self._in(px, py, _PAINT_BTN):
+        elif _in(px, py, _PAINT_BTN):
             ws._open_paint()
-        elif self._in(px, py, _MAP_BTN):
+        elif _in(px, py, _MAP_BTN):
             ws._open_map()
-        elif self._in(px, py, _BLOCKS_BTN):
+        elif _in(px, py, _BLOCKS_BTN):
             ws._open_blocks()
-        elif self._in(px, py, _MUSIC_BTN):
+        elif _in(px, py, _MUSIC_BTN):
             ws._open_music()
         else:
             return False

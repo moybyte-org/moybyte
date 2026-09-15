@@ -162,7 +162,6 @@ class SystemMenuUI:
     def _draw_about(self):
         """The ABOUT info modal (#52): a small centered panel with the console name +
         firmware version, dismissed by any tap / ESC / B. Drawn on top of everything."""
-        NAMES = self._NAMES
         cv = self.ws.sys_canvas
         lines = ("moybyte", "v0.4", "", "TAP TO CLOSE")
         ver = self._firmware_version_text()

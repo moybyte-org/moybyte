@@ -136,10 +136,9 @@ class EditorApp:
     projects `menu_view` onto it. The methods are the old `set_menu_view`/`_open_*`/
     `_leave_menu` bodies, moved verbatim with `self.` data reads left reaching `ws`."""
 
-    def __init__(self, ws, names=None, in_rect=None):
+    def __init__(self, ws, names=None):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect if in_rect is not None else _in
         self.project = None           # the open cart's workspace (set by open())
         # Stage 4 (#46 zoned bar): bumped whenever the active tab ACTUALLY changes --
         # the ONLY thing that varies in the Editor's lent left zone (which icon is
@@ -521,14 +520,14 @@ class EditorApp:
         tiers resolve against the SAME _zone_parts geometry the draw used."""
         if rect is not None and not self.ws.layout._base:
             proj, tabs_area, play_r = self._zone_parts(rect)
-            if self._in(px, py, proj):
+            if _in(px, py, proj):
                 return self._activate_zone_tab(_ZONE_PROJECTS)
-            if self._in(px, py, play_r):
+            if _in(px, py, play_r):
                 return self._activate_zone_tab(None)
             slim = [(tid, label) for tid, label, _ic in _TAB_CHIPS]
             for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim,
                                                         self._zone_scale()):
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     return self._activate_zone_tab(tid)
             return False
         x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
@@ -538,7 +537,7 @@ class EditorApp:
             x = x0 + i * stride
             if x + ic > x0 + w:
                 break
-            if self._in(px, py, (x, y0, ic, ic)):
+            if _in(px, py, (x, y0, ic, ic)):
                 return self._activate_zone_tab(tab)
         return False
 

@@ -244,7 +244,7 @@ def capture(cfg, carts_dir):
         if shot != unselected:
             out["wifi_list_%d" % sel] = shot
     sl.wifi_pick = "MoyNet-5G-Long-Name"
-    sl.wifi_pw = "hunter2hunter2"
+    sl.wifi_pw.text = "hunter2hunter2"
     out["wifi_password"] = _shot(ws, lambda: sl._draw_wifi())
     sl.wifi_pick = None
     ws.wifi = _Wifi(False)

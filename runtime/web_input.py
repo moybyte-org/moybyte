@@ -1,14 +1,11 @@
-"""Browser input decode -- the transport-neutral half of the old web_view.
+"""Browser input decode: the batch a browser event stream ships becomes
+console input.
 
-This is what SURVIVED the recording stack (moycore stage 4). Until the wasm
-head re-rastered, `web_view.py` held two unrelated things: the draw-command
-recorder + wire protocol that shipped pixels to a JS replayer, and this -- the
-decode that turns a browser event batch into console input. The first is
-deleted; the second is transport-shaped, not raster-shaped, and both the wasm
-head and the plan's 3.4 sync/controller RPC speak this same `{"events":[...]}`
-format, so it keeps its own module rather than dying with its old neighbours.
+Transport-shaped, not raster-shaped: both the wasm head and the plan's 3.4
+sync/controller RPC speak this same `{"events":[...]}` format, so the decode
+is its own module with no draw path beside it.
 
-Moved VERBATIM, hard-won edge cases and all: the hover-without-button rule, the
+The edge cases it carries: the hover-without-button rule, the
 Backspace-is-also-HOME mapping and its text-mode exemption, the held-key latch
 that stops browser autorepeat flapping key() at 60fps, and the desktop
 hold-Backspace-to-exit gesture.
@@ -71,17 +68,13 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                 pointer.place(int(ev.get("x", 0)), int(ev.get("y", 0)))
                 pointer.down = True
             elif t == "hover":
-                # POINTER POSITION WITHOUT A BUTTON (2026-07-31). The shell has
-                # real hover feedback -- the desk icon highlight (_lhover), the
-                # cards grid's msel -- and the browser only ever reported the
-                # pointer while a button was down, so on the web the whole shell
-                # looked dead under the cursor. (This note used to add "it works
-                # in the pygame sim because that loop reads the mouse every
-                # frame". It did not: that loop only placed the pointer on
-                # button-down, and got its own ConsoleDriver.hover on
-                # 2026-08-14.) Deliberately NOT
-                # "move": that one asserts `down`, which would fake a drag out
-                # of an idle mouse (drag-scrolling grids, moving windows).
+                # POINTER POSITION WITHOUT A BUTTON: the shell has real hover
+                # feedback (the desk icon highlight `_lhover`, the cards grid's
+                # msel), so a browser mouse reports its position between
+                # clicks too, as ConsoleDriver.hover does for the sim.
+                # Deliberately NOT "move": that one asserts `down`, which would
+                # fake a drag out of an idle mouse (drag-scrolling grids, moving
+                # windows).
                 pointer.place(int(ev.get("x", 0)), int(ev.get("y", 0)))
                 pointer.hovers = True   # a browser mouse has a position always
             elif t == "up":

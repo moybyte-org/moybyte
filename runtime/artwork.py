@@ -21,6 +21,7 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
     from file_widgets import FileGridView, Bitmap, cover_indices
@@ -31,6 +32,11 @@ try:
     from app_context import NO_STORE
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_context import NO_STORE
+
+try:
+    from widgets import ConfirmTap
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.widgets import ConfirmTap
 
 # #186: the desktop backdrop's resampled indices. Off-heap for the same reason
 # its RGB565 bake is (device_canvas._paint_bake_buf) -- a screenful of indices
@@ -399,7 +405,7 @@ class PaintAppLayer:
     # no storage role at all; `shell` is only the FileGridView duck-type.
     NEEDS = ("surface", "theme", "damage", "artwork", "shell")
 
-    def __init__(self, ctx, names, in_rect):
+    def __init__(self, ctx, names):
         self.ctx = ctx
         # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
         self._surf = ctx.surface
@@ -407,7 +413,6 @@ class PaintAppLayer:
         self._damage = ctx.damage
         self._art = ctx.artwork
         self.names = names
-        self._in = in_rect
         cv = ctx.surface.canvas()
         desktop = cv.w >= 640 and cv.h >= 400
         self.doc = PaintDocument(512, 300) if desktop else PaintDocument()
@@ -425,8 +430,8 @@ class PaintAppLayer:
         self.pan_y = 0
         self.status = "READY"
         self.mode = "paint"           # paint | show | projects | open
-        self.new_armed = False
-        self.size_armed = False
+        self.new_confirm = ConfirmTap()    # N: first tap arms, second confirms
+        self.size_confirm = ConfirmTap()   # the size swap, the same guard
         self.stroke_last = None
         self.shape_start = None
         self.shape_now = None
@@ -588,15 +593,13 @@ class PaintAppLayer:
 
     def _action(self, index):
         if index == 0:
-            if self.new_armed:
+            if self.new_confirm.tap():
                 self._fresh_doc(self.doc.W, self.doc.H)
-                self.new_armed = False
                 self.status = "NEW DRAWING"
             else:
-                self.new_armed = True
                 self.status = "TAP N AGAIN"
         else:
-            self.new_armed = False
+            self.new_confirm.disarm()
             if index == 1:
                 if self.doc.undo():
                     self.status = "UNDO"
@@ -658,11 +661,11 @@ class PaintAppLayer:
             return True
         if click:
             for i, r in enumerate(lay.actions):
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     self._action(i)
                     return True
             for i, r in enumerate(lay.tools):
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     self.tool = i
                     self.status = self.TOOLS[i]
                     self._damage.all()
@@ -671,26 +674,26 @@ class PaintAppLayer:
             for i in range(count):
                 x = lay.pal_x + (i % lay.pal_cols) * lay.pal_cell
                 y = lay.pal_y + (i // lay.pal_cols) * lay.pal_cell
-                if self._in(px, py, (x, y, lay.pal_cell, lay.pal_cell)):
+                if _in(px, py, (x, y, lay.pal_cell, lay.pal_cell)):
                     self.color = (self.pal_page * 16 + i) if lay.compact else i
                     self.status = "COLOR " + str(self.color)
                     self._damage.all()
                     return True
-            if lay.compact and self._in(px, py, lay.pal_page):
+            if lay.compact and _in(px, py, lay.pal_page):
                 self.pal_page = (self.pal_page + 1) & 3
                 self._damage.all()
                 return True
             for i, r in enumerate(lay.sizes):
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     self.size = (1, 2, 4)[i]
                     self._damage.all()
                     return True
-            if self._in(px, py, lay.fill):
+            if _in(px, py, lay.fill):
                 self.shape_fill = not self.shape_fill
                 self._damage.all()
                 return True
-            if self._in(px, py, lay.preset):
-                if self.size_armed:
+            if _in(px, py, lay.preset):
+                if self.size_confirm.tap():
                     # A size swap starts a NEW auto-named drawing -- the open
                     # one keeps its file (#108: nothing is ever lost).
                     if self.doc.W == 320:
@@ -700,10 +703,8 @@ class PaintAppLayer:
                     else:
                         self._fresh_doc(320, 240)
                         self.status = "GAME 320X240"
-                    self.size_armed = False
                     self.display = None
                 else:
-                    self.size_armed = True
                     self.status = "TAP SIZE AGAIN"
                 self._damage.all()
                 return True
@@ -842,7 +843,7 @@ class PaintAppLayer:
             idx = self.project_top + row
             if idx >= len(self.project_names):
                 break
-            if self._in(x, y, (10 * lay.fs, y0 + row * row_h,
+            if _in(x, y, (10 * lay.fs, y0 + row * row_h,
                                lay.w - 20 * lay.fs, row_h - 2 * lay.fs)):
                 art = self._art
                 name = art.attach(idx)
@@ -881,7 +882,7 @@ class PaintAppLayer:
         action_icons = ("plus", "undo", "redo", None, None, None, None, None)
         for i, r in enumerate(lay.actions):
             self._button(cv, action_labels[i], r,
-                         (i == 0 and self.new_armed) or (i == 7 and self.view_mode == 0),
+                         (i == 0 and self.new_confirm.armed) or (i == 7 and self.view_mode == 0),
                          glyph=action_icons[i])
         for i, r in enumerate(lay.tools):
             self._button(cv, self.GLYPHS[i], r, i == self.tool,
@@ -923,7 +924,7 @@ class PaintAppLayer:
         self._button(cv, "SOLID" if self.shape_fill else "EDGE",
                      lay.fill, self.shape_fill)
         preset = "GAME" if self.doc.W == 320 else "DESKTOP"
-        self._button(cv, preset, lay.preset, self.size_armed)
+        self._button(cv, preset, lay.preset, self.size_confirm.armed)
 
     def _draw_preview(self, cv):
         if self.shape_start is None or self.shape_now is None or self.display is None:

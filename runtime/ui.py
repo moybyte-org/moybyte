@@ -1597,6 +1597,24 @@ def fill_uncovered(cv, inner, outer, col):
 
 # --- scrolling ------------------------------------------------------------------
 
+def row_drag(anchor, py, step, top, top_max):
+    """PURE row-snapped drag scrolling, the Settings-rows contract: a held
+    vertical drag moves the window one row per `step` pixels of travel, finger
+    up scrolls the content down, and the sub-step remainder stays anchored so
+    a slow drag still crosses a row. `anchor` is the finger y the pending
+    travel is measured from, `top` the first visible row, `top_max` the
+    largest `top` the list allows. Returns (anchor, top); the caller marks
+    dirty when `top` moved."""
+    delta = anchor - py
+    while delta >= step and top < top_max:
+        top += 1
+        delta -= step
+    while delta <= -step and top > 0:
+        top -= 1
+        delta += step
+    return py + delta, top
+
+
 # The largest physical-buffer rotation any canvas has (host 1, device
 # ping-pong 2, the P4's triple framebuffer 3 -- shipped, efcf5d1). The paint ring
 # keeps this many entries so blit_shift can verify RETAINED_FRAMES consecutive

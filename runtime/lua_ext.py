@@ -1,4 +1,4 @@
-"""The Lua-side glue for moybyte's OBJECT-valued cart verbs -- one definition.
+"""What both Lua tiers share -- the object-verb glue, and the frame seam.
 
 Several families of the moybyte cart API return objects: `make_layer` (a
 Layer), `image` (a paint image), the placement verbs of #85/#109 (`scene`,
@@ -10,11 +10,14 @@ an int-handle registry on the Python side, and Lua wrappers that hide the
 handles from the cart. A verb that answers a PAIR encodes it as one string and
 splits it in Lua, for the same reason the scene rows do.
 
-This module is that solution, once. It used to live in moy_lua_glue.py, which
-made it reachable from the two DEVICE runtimes and invisible to the host's --
-and the host's consequently registered the raw closures, whose Layer return
-marshalled to nil, so a cart's `lay:spr(...)` died on "index a nil value". A
-copy would have fixed that day and drifted the next.
+This module is that solution, once, for EVERY runtime: a second copy is how a
+host runtime once registered the raw closures, whose Layer return marshalled to
+nil, so a cart's `lay:spr(...)` died on "index a nil value".
+
+The FRAME SEAM is the other half and the same argument: the snapshot slots, the
+view declaration and the audio drain are what a Lua runtime does around every
+tick, and they were written once per tier down to the guard comments. See
+`snap_shared` below.
 
 Canonical here in runtime/ like every other shared console module; the boards
 and the web runner stage it by name. Pure source and closures: it imports
@@ -63,6 +66,129 @@ def cart_chunks(ns, src):
 # and has no opinion about ordering; tests/test_moy_button_order.py parses the
 # enum out of moy.h and asserts the two still agree.
 MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
+
+
+# -- the frame seam, once for both Lua tiers ---------------------------------
+#
+# The device glue (device/moycore_glue.py) and the host runtime
+# (runtime/lua_host.py) do the same three things around every tick: fill the
+# snapshot slots libmoy reads, apply the cart's view() declaration, and drain
+# the audio queue through the api closures. They differ only in WHERE the ABI
+# constants come from -- a `moycore` C module on a board, `runtime.lua_binding`
+# on the host -- so each tier resolves its own indices once and the bodies are
+# these.
+#
+# That is the same argument MOY_BUTTONS above records, applied one level up: a
+# seam written twice diverges in the half nobody runs, and the d-pad incident
+# is what a silent divergence in this file's subject matter looks like.
+#
+# `pointer_state` is passed IN rather than imported, so this module keeps its
+# one property: it imports nothing, costs a frozen module and drags no
+# dependency onto a board or the wasm head.
+
+SNAP_SLOTS = ("SNAP_BTN_P1", "SNAP_BTNP_P1", "SNAP_PLAYERS",
+              "SNAP_TOUCH_X", "SNAP_TOUCH_Y", "SNAP_TOUCH_DOWN",
+              "SNAP_TOUCH_MS")
+
+AQ_OPS = ("AQ_SFX", "AQ_MUSIC", "AQ_BEEP", "AQ_MUSIC_STOP", "AQ_SOUND_STOP",
+          "AQ_VOLUME")
+
+
+def snap_slots(mod):
+    """The indices `snap_shared` writes, read off this tier's ABI module."""
+    return tuple(getattr(mod, name) for name in SNAP_SLOTS)
+
+
+def audio_ops(mod):
+    """The op codes `drain_audio` tests, read off this tier's ABI module."""
+    return tuple(getattr(mod, name) for name in AQ_OPS)
+
+
+def snap_shared(s, inp, idx, pointer_state, out):
+    """PLAYER TWO and THE POINTER, into the snapshot the tick will read.
+
+    PLAYER TWO (#65). These slots exist in the C ABI and nothing filled them, so
+    libmoy's `players()` answered 1 forever and a Lua cart could not have a
+    second player at all -- the Python twin of the same cart fielded two tanks
+    and the Lua one fielded one. The count is read through the router because a
+    transport slot (a radio peer) lives there, not on the InputState; the fast
+    path costs one dict test.
+
+    THE POINTER, in the cart's own coordinates (widgets.pointer_state). Same
+    omission and the same consequence: the slot is in the C ABI, libmoy's
+    touch() reads it, and nothing on either Lua tier ever wrote it -- so
+    `touch()` answered nil for every Lua cart everywhere while the Python twin
+    of the same cart had a pointer. The slot carries P_LIVE/P_HELD/P_CLICK as
+    FLAGS, not a boolean: it is the only slot h_touch has, and touch() has to
+    answer "is there one", "is it down" and "did it go down this frame" out of
+    it. 0 is no pointer, which is what SPEC.md 7.3 means by nil.
+    """
+    n = 1
+    pr = getattr(inp, "players", None)
+    if pr is not None:
+        n = pr.count()
+        if n > 1:
+            h1, p1 = pr.button_masks(MOY_BUTTONS, 1)
+            s[idx[0]] = h1
+            s[idx[1]] = p1
+    s[idx[2]] = n
+    try:
+        x, y, st, ms = pointer_state(inp, out)
+        s[idx[3]] = int(x)
+        s[idx[4]] = int(y)
+        s[idx[5]] = int(st)
+        s[idx[6]] = int(ms)
+    except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
+        s[idx[5]] = 0
+
+
+def sync_view(ws, view, last):
+    """Apply the cart's view() to the console; returns the view now in force.
+
+    libmoy owns the verb (SPEC.md 6 core) and records the declaration; the
+    console still has to ACT on it -- ws.input.game_view is what the WM
+    composites from. So this reads the recording instead of the cart crossing
+    into Python to set it, which is the whole point of the verb moving into
+    core. Checked per frame because the spec allows a cart to change its region
+    at runtime, and skipped when unchanged, so a cart that declares once pays
+    one comparison.
+    """
+    if view == last:
+        return last
+    try:
+        ws.input.game_view = view
+    except Exception:  # noqa: BLE001 -- a console without the field is fine
+        pass
+    return view
+
+
+def drain_audio(ns, ops, queue):
+    """Play the queued audio commands through the SAME make_api closures a
+    Python cart uses.
+
+    Deliberate: sfx/music semantics (bank sync, the volume model the Settings
+    surface reads, the diag triggers) stay in one place, and what the crossing
+    deletes is the per-CALL trip, not the behaviour. Order is preserved because
+    the queue is a queue. `queue` yields rows indexable as (op, a, b).
+    """
+    sfx, music, beep, music_stop, sound_stop, volume = ops
+    for row in queue:
+        op, a, b = row[0], row[1], row[2]
+        try:
+            if op == sfx:
+                ns["sfx"](a, None if b < 0 else b)
+            elif op == music:
+                ns["music"](a, bool(b))
+            elif op == beep:
+                ns["beep"](a, b / 1000.0)
+            elif op == music_stop:
+                ns["music_stop"]()
+            elif op == sound_stop:
+                ns["sound_stop"](None if a < 0 else a)
+            elif op == volume:
+                ns["volume"](a)
+        except Exception:  # noqa: BLE001 -- one bad command is not the frame
+            pass
 
 # -- what NOT to register on top of libmoy's table ---------------------------
 #

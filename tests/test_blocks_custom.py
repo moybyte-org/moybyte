@@ -486,6 +486,6 @@ def test_ui_proc_menu_adds_an_input(tmp_path):
     bui.blk_menu["sel"] = bui.blk_menu["items"].index(BUI._PROC_ADD)
     bui._blk_menu_select()
     assert bui.blk_kbd is not None and bui.blk_kbd["kind"] == "param"
-    bui.blk_kbd["text"] = "size"
+    bui.blk_kbd["entry"].text = "size"
     bui._blk_kbd_commit()
     assert blocks.proc_params(pd) == ["size"]

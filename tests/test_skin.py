@@ -796,6 +796,10 @@ _FROZEN_HATCH = {
     "music_editor_ui.py": (1,
         "the title-strip nudge ticks: a frozen blue/black/white trio with no "
         "token behind any of the three"),
+    "block_editor_ui.py": (1,
+        "the insert menu's rows over the black modal dialog: the indigo "
+        "selection fill and the white/light-grey label inks are game-canvas "
+        "literals with no token behind them on any theme"),
 }
 
 

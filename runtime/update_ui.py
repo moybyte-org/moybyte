@@ -24,8 +24,9 @@ Dependency profile (the facade lens, shell_architecture_v1.md §2) -- through it
                              genuinely privileged capability the screen needs; it
                              is injected onto Workstation by moy_runtime.run_desktop.
 
-`NAMES` / `in_rect` / `err_text` are injected at construction (same circular-import
-reason as BlockEditorUI: console.py builds the one UpdateUI a Workstation holds).
+`NAMES` / `err_text` are injected at construction (same circular-import
+reason as BlockEditorUI: console.py builds the one UpdateUI a Workstation holds);
+the rect hit-test is `ui.rect_in`, imported directly.
 `_ticks_ms` / `_ticks_diff` are duplicated here (they only wrap `time`; the same
 foundational-helper duplication BlockEditorUI's layout constants use), so the
 method bodies stay byte-for-byte identical to the pre-extraction versions.
@@ -36,6 +37,7 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_diff
@@ -44,11 +46,10 @@ except ImportError:                     # host: the runtime package
 
 
 class UpdateUI:
-    def __init__(self, ws, names, in_rect, err_text):
+    def __init__(self, ws, names, err_text):
         self.ws = ws
         # Injected instead of imported back from console.py (see module docstring).
         self._NAMES = names
-        self._in = in_rect
         self._err_text = err_text
         # Update-screen transient state (was Workstation's; _updater_ok/_online_ok
         # stay there -- they back the queries, not the screen).
@@ -225,7 +226,7 @@ class UpdateUI:
     def _update_pointer(self, px, py, click):
         if not click:
             return
-        if self._in(px, py, self.ws.layout.set_back):  # the X in the title row
+        if _in(px, py, self.ws.layout.set_back):  # the X in the title row
             if self._upd_phase != "done":
                 self._exit_update()
             return
@@ -479,7 +480,6 @@ class UpdateUI:
                           lay.tap_box(lay.set_back, 18, 14))
         u = self.ws.updater
         slot = u.slot() if u is not None else "?"
-        ver = u.version() if u is not None else 0
         vlabel = u.version_label() if u is not None else "v0"
         x = px + 12 * fs
         y = py + 28 * fs

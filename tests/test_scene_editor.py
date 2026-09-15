@@ -314,7 +314,7 @@ def test_props_row_tag_typing_and_flip(tmp_path):
     # (the wifi-password pattern), so distinct bytes need a 0 between repeats.
     _tap(ws, lay.tag_btn[0] + 2, lay.tag_btn[1] + 2)
     assert ui.tag_edit and ws.input.text_mode
-    assert ui.tag_buf == "coin"
+    assert ui.tag_buf.text == "coin"
     for k in (8, 0, 8, 0, 8, 0, 8):                   # four BACKSPACEs
         ws.input.last_key = k
         ui._scene_input()

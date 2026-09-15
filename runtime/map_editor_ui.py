@@ -11,7 +11,7 @@ renaming), via a back-reference to the owning Workstation (`self.ws`) for the
 handful of primitives it shares with the rest of the console (canvas, _btn,
 _leave_menu, sheet, tilemap, save_map -- the last two are the cart's actual
 resources, shared with the running game and the paint editor, so they stay on
-Workstation rather than becoming map-only state). `NAMES`/`_in` are injected at
+Workstation rather than becoming map-only state). `NAMES` is injected at
 construction instead of imported back from console.py, which would be a real
 circular import: console.py imports MapEditorUI to build the one instance a
 Workstation holds (same reasoning as BlockEditorUI -- see its docstring).
@@ -29,6 +29,7 @@ try:
     import ui as _ui              # frozen on device
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
     from editors import MapEditor, KeyEdge
@@ -303,11 +304,10 @@ class MapEditorUI:
     called lazily from `set_menu_view("map")` the first time a cart's map
     editor is opened, exactly like the pre-extraction code did inline."""
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         # Injected instead of imported back from console.py -- see module docstring.
         self._NAMES = names
-        self._in = in_rect
         self.mapedit = None            # MapEditor while menu_view == "map" (#32)
         self.map_erase = False         # tap-to-erase instead of stamp
         self.map_page = 0              # first tile id shown in the palette
@@ -518,7 +518,7 @@ class MapEditorUI:
         """The map cell (cx, cy) under pointer (px, py) accounting for the pan
         offset, or None when the pointer is outside the visible map view."""
         me = self.mapedit
-        if me is None or not self._in(px, py, self._mv_area()):
+        if me is None or not _in(px, py, self._mv_area()):
             return None
         x0, y0, cell, cols, rows = self._mv_metrics()
         cx = me.cam_x + (px - x0) // cell
@@ -612,15 +612,15 @@ class MapEditorUI:
         by one row/column, DONE (or a tap outside the panel) closes it. Returns True
         so the tap never falls through to the map/palette behind the panel."""
         r = self._dims_rects()
-        if self._in(px, py, r["w_dn"]):
+        if _in(px, py, r["w_dn"]):
             self._map_resize(-1, 0)
-        elif self._in(px, py, r["w_up"]):
+        elif _in(px, py, r["w_up"]):
             self._map_resize(1, 0)
-        elif self._in(px, py, r["h_dn"]):
+        elif _in(px, py, r["h_dn"]):
             self._map_resize(0, -1)
-        elif self._in(px, py, r["h_up"]):
+        elif _in(px, py, r["h_up"]):
             self._map_resize(0, 1)
-        elif self._in(px, py, r["done"]) or not self._in(px, py, r["panel"]):
+        elif _in(px, py, r["done"]) or not _in(px, py, r["panel"]):
             self.dims_open = False
         return True
 
@@ -650,18 +650,18 @@ class MapEditorUI:
         if me is None:
             return False
         r = self._sel_actions_rects()
-        if self._in(px, py, r["copy"]):
+        if _in(px, py, r["copy"]):
             me.copy_selection()
             return True
-        if self._in(px, py, r["cut"]):
+        if _in(px, py, r["cut"]):
             me.cut_selection()
             return True
-        if self._in(px, py, r["paste"]):
+        if _in(px, py, r["paste"]):
             self._sel_paste_default(me)
             return True
         # A tap anywhere else in the palette column while selecting is swallowed (the
         # strip owns the column in this mode) so it can't accidentally re-pick a brush.
-        return self._in(px, py, r["panel"])
+        return _in(px, py, r["panel"])
 
     def _sel_paste_default(self, me):
         """The PASTE button stamps the clip at the active selection's top-left (so
@@ -817,7 +817,7 @@ class MapEditorUI:
         if self.dims_open:                     # the resize panel eats every tap (#91)
             self._dims_click(px, py)
             return
-        if self._in(px, py, self._mv_area()):  # a press in the map view: start a
+        if _in(px, py, self._mv_area()):  # a press in the map view: start a
             self._map_press = (px, py)         # gesture; the tool decides what it does.
             self._map_panning = False
             self._map_drag = None
@@ -861,16 +861,16 @@ class MapEditorUI:
         # so it eats taps there before the brush-pick / palette-page logic below.
         if self.map_tool == "select" and self._sel_actions_click(px, py):
             return
-        if self._in(px, py, lay.tool_btn):     # cycle stamp/rect/flood (#91)
+        if _in(px, py, lay.tool_btn):     # cycle stamp/rect/flood (#91)
             self._map_cycle_tool()
             return
-        if self._in(px, py, lay.dim_btn):      # open the map-resize panel (#91)
+        if _in(px, py, lay.dim_btn):      # open the map-resize panel (#91)
             self.dims_open = True
             return
-        if self._in(px, py, lay.sky_btn):      # the EMPTY/"sky" swatch (#37)
+        if _in(px, py, lay.sky_btn):      # the EMPTY/"sky" swatch (#37)
             me.n = ws.project.tilemap.EMPTY if ws.project.tilemap is not None else -1
             return
-        if self._in(px, py, lay.tp_area):      # pick the brush tile from the palette
+        if _in(px, py, lay.tp_area):      # pick the brush tile from the palette
             col = (px - lay.tp_x0) // lay.tp_cell
             row = (py - lay.tp_y0) // lay.tp_cell
             if 0 <= col < lay.tp_cols and 0 <= row < lay.tp_rows:
@@ -878,26 +878,26 @@ class MapEditorUI:
                 ids = self._map_palette_ids()
                 if 0 <= k < len(ids):
                     me.n = ids[k]
-        elif self._in(px, py, lay.tp_prev):    # page the palette back/forward
+        elif _in(px, py, lay.tp_prev):    # page the palette back/forward
             self.map_page = max(0, self.map_page - lay.tp_page)
-        elif self._in(px, py, lay.tp_next):
+        elif _in(px, py, lay.tp_next):
             if ws.project.sheet is not None and self.map_page + lay.tp_page < ws.project.sheet.count:
                 self.map_page += lay.tp_page
-        elif self._in(px, py, lay.size_btn):   # cycle the SIZE brush 1/2/3 (#57)
+        elif _in(px, py, lay.size_btn):   # cycle the SIZE brush 1/2/3 (#57)
             me.cycle_size()
-        elif self._in(px, py, lay.zoom_btn):   # cycle the zoom level (#37 follow-up)
+        elif _in(px, py, lay.zoom_btn):   # cycle the zoom level (#37 follow-up)
             self._map_cycle_zoom()
-        elif self._in(px, py, lay.pan_up):
+        elif _in(px, py, lay.pan_up):
             self._map_pan(0, -1)
-        elif self._in(px, py, lay.pan_dn):
+        elif _in(px, py, lay.pan_dn):
             self._map_pan(0, 1)
-        elif self._in(px, py, lay.pan_lf):
+        elif _in(px, py, lay.pan_lf):
             self._map_pan(-1, 0)
-        elif self._in(px, py, lay.pan_rt):
+        elif _in(px, py, lay.pan_rt):
             self._map_pan(1, 0)
-        elif self._in(px, py, lay.erase_btn):  # toggle stamp <-> erase
+        elif _in(px, py, lay.erase_btn):  # toggle stamp <-> erase
             self.map_erase = not self.map_erase
-        elif self._in(px, py, lay.close_btn):
+        elif _in(px, py, lay.close_btn):
             # CLOSE runs+leaves to the cart (ws._leave_menu is EditorApp.leave --
             # PLAY, itself a hard-commit trigger now, #111: no SAVE tap exists).
             ws.defer(ws._leave_menu)   # #184: commit+run behind the next paint

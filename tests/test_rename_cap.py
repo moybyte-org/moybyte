@@ -1,5 +1,6 @@
 """The Desk-Lab rename field: `app_shell.ListShellApp` types into it up to
-RENAME_MAX, and the app SEEDS it from the current name. The two used to be
+RENAME_MAX (a `TextEntry` cut to that cap), and the app SEEDS it from the
+current name. The two used to be
 hand-synced through a per-module MAX_NAME constant, so a class that set one
 without the other seeded a name longer than typing could ever reproduce -- the
 tail could be backspaced away but never typed back."""
@@ -56,14 +57,14 @@ def test_every_rename_seed_is_typable(tmp_path):
     for name, open_app in OPENERS:
         app = open_app(tmp_path / name)
         assert app.mode == "rename", name
-        assert len(app.rename_text) == app.RENAME_MAX, name
+        assert len(app.rename.text) == app.RENAME_MAX, name
         # Full: one more key is refused. One backspace: the same key is taken.
         _type_one(app, "z")
-        assert len(app.rename_text) == app.RENAME_MAX, name
+        assert len(app.rename.text) == app.RENAME_MAX, name
         app._typed_rename(_FakeInp(0x08))
         app._typed_rename(_FakeInp(0))
         _type_one(app, "z")
-        assert app.rename_text == LONG[:app.RENAME_MAX - 1] + "z", name
+        assert app.rename.text == LONG[:app.RENAME_MAX - 1] + "z", name
 
 
 def test_rename_cap_lives_only_on_the_class(tmp_path):

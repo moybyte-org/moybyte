@@ -19,9 +19,9 @@ Boundary (single source of truth): ws.launcher (the instance) + ws.open() (open 
 selected cart -- lifecycle, pinned) + the cart store stay on Workstation. The Launcher
 CLASS needs the palette + the shared glyph blitter for its tile art -- `NAMES` and
 `_blit_glyph` are INJECTED at construction (the established pattern; `_blit_glyph` is the
-one shared toolkit fn, like bar_layer takes `_in`), and the launcher-only tile-type maps
-`_TYPE_GLYPH`/`_TYPE_COLOR` live here. `_in` is duplicated (pure/trivial). LauncherHomeLayer
-takes NAMES + `_in` injected too. No circular import: this is a leaf (the only console
+one shared toolkit fn), and the launcher-only tile-type maps `_TYPE_GLYPH`/`_TYPE_COLOR`
+live here. The rect hit-test is `ui.rect_in`. LauncherHomeLayer takes NAMES injected
+too. No circular import: this is a leaf (the only console
 touch is a lazy Layout fallback for a bare Launcher() that no caller ever constructs).
 
 Stage 4 (#46 zoned bar, docs/history/shell_ux_technical_plan_v1.md): `LauncherHomeLayer` grows
@@ -52,6 +52,11 @@ try:
     from chrome import _print_scaled, _text_w, _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import _print_scaled, _text_w, _ticks_ms, _ticks_diff
+
+try:
+    from widgets import ConfirmTap
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.widgets import ConfirmTap
 
 
 def _wrap_words(text, maxc):
@@ -782,6 +787,97 @@ def _cursor_stamp(ws):
     return (p.x, p.y, 8 * fs, 13 * fs)
 
 
+def _paint_continuity(layer, ws):
+    """Re-arm a grid layer's streak from zero when other surfaces painted
+    since its last draw: the retained ping-pong buffers hold foreign pixels
+    after a visit elsewhere, and a streak carried across it would let a
+    partial repaint over the PREVIOUS screen's chrome in the second buffer."""
+    nf = ws._frames_drawn
+    if layer._last_pf is not None and nf != layer._last_pf + 1:
+        layer._full_streak = 0
+    layer._last_pf = nf
+
+
+def _statics_base(ws, cv, grid):
+    """What BOTH grid layers' static chrome is a pure function of: the canvas,
+    the font scale, the theme (its dict identity: `theme_colors` is rebound on
+    every swap, so the new dict IS the invalidation), the grid rect (#113:
+    set_layout no longer invalidates the ring eagerly, since the windowed tier
+    re-applies layouts several times per frame, so this key is what makes a
+    paint recorded under a different layout unmatchable) and the item count.
+    The home shelf folds its own extras on top."""
+    return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
+            grid.layout.lib_grid, len(grid.items))
+
+
+def _drag_partial(layer, cv, dt, grid, kind, fill, strip, timed=False):
+    """The grid layers' drag fast path (#113, #58/#66), ONE body for the home
+    shelf and the Editor picker: while a touch drag or fling scrolls `grid`
+    and every retained framebuffer already holds this frame's static chrome
+    (two prior full paints under an unchanged statics key -- the ping-pong
+    stale-by-2 rule), repaint ONLY the shelf band and the bar strip. The
+    band is blit-SHIFTED when the ring proves the target buffer holds this
+    shelf's pixels at a known offset (same sel/statics/covers, consecutive
+    paints) and only the exposed strip + the stale cursor stamp are repainted;
+    otherwise the whole band. Everything outside the band (wallpaper, panel
+    chrome, dot grid) is byte-identical in the target buffer and left alone;
+    full paints resume on release, so any straggler is erased within a frame.
+
+    `fill(cv, rect)` paints the band backdrop the owner would paint under the
+    cards; `strip` is the bar strip's kind; `timed` records the home diag's
+    `ws._pf_home` split under perf_capture. Returns False when the frame
+    must be painted in full."""
+    ws = layer.ws
+    if not (grid.dragging or grid.flinging):
+        return False
+    if (getattr(cv, "RETAINED_FRAMES", 0) < 1
+            or layer._full_streak < _retained_n(cv)):
+        return False
+    if layer._statics != layer._statics_key(cv):
+        return False
+    # Anything animating over the surface (toast/confetti/splash/live
+    # wallpaper) moves pixels outside the band -> full frames.
+    if ws._animating(dt):
+        return False
+    top = getattr(ws.wm, "top_kind", None)
+    if top is not None and top() != kind:
+        return False
+    bx, by, bw, bh = grid.band_rect()
+    fs = ws.look.font_scale
+    p = ws.pointer
+    if p is not None and getattr(p, "visible", False):
+        # The composited cursor must land fully inside the repainted band,
+        # or its previous stamp would ghost on the untouched chrome.
+        if not (bx <= p.x and p.x + 8 * fs <= bx + bw
+                and by <= p.y and p.y + 13 * fs <= by + bh):
+            return False
+    _t0 = _ticks_ms() if timed and getattr(ws, "perf_capture", False) else None
+    region = grid._scroll_region()
+    key = (grid.sel, layer._statics, ws.covers.gen)
+    shift = region.blit_shift(cv, ws._frames_drawn, key)
+    if shift is not None:
+        delta, old_stamp = shift
+        damage = []
+        if old_stamp is not None:
+            damage.append(old_stamp)               # where the shift left it...
+            if delta:                              # ...and where it came from
+                damage.append((old_stamp[0] - delta, old_stamp[1],
+                               old_stamp[2], old_stamp[3]))
+        grid.draw_shift(cv, ws.covers.icon_sheet_for, delta, damage, fill)
+    else:
+        fill(cv, (bx, by, bw, bh))
+        grid.draw(cv, ws.covers.icon_sheet_for)
+    # Re-pin the cover gen POST-draw: a cover landing during the card draw
+    # is in these pixels, so the recorded key must carry the new gen.
+    region.note_painted(ws._frames_drawn, (grid.sel, layer._statics, ws.covers.gen),
+                        _cursor_stamp(ws))
+    _t1 = _ticks_ms() if _t0 is not None else None
+    ws.bar_layer._draw_status_strip(strip)
+    if _t0 is not None:
+        ws._pf_home = (0, _ticks_diff(_t1, _t0), _ticks_diff(_ticks_ms(), _t1))
+    return True
+
+
 class LauncherHomeLayer:
     """The "launcher" content Layer (system domain): the home desktop. draw composes
     the wallpaper backdrop -> the cart icon grid (ws.launcher) -> the top bar; input is
@@ -791,10 +887,9 @@ class LauncherHomeLayer:
     id = "launcher"
     domain = "system"
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         self._lhover = (-1, -1)       # last cursor pos used for desktop icon hover-highlight
         # Drag-scroll PARTIAL repaint bookkeeping (#58/#66: a FULL home repaint
         # measured ~100-140ms on BOTH boards' glass -- backdrop + panel + cards
@@ -830,14 +925,13 @@ class LauncherHomeLayer:
 
     def _statics_key(self, cv):
         """Everything the home frame's STATIC chrome (wallpaper backdrop +
-        Library panel fill/header/footer) is a pure function of. A key change
-        forces full paints until the streak re-arms. Carries the GRID RECT
-        (#113) for the same reason the picker's does -- see that docstring."""
+        Library panel fill/header/footer) is a pure function of: the shared
+        base plus the wallpaper and the search field. A key change forces
+        full paints until the streak re-arms."""
         ws = self.ws
-        return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
-                ws.launcher.layout.lib_grid,
-                ws.look.wallpaper_id, len(ws.launcher.items),
-                getattr(ws, "search_query", ""), getattr(ws, "search_typing", False))
+        return _statics_base(ws, cv, ws.launcher) + (
+            ws.look.wallpaper_id,
+            getattr(ws, "search_query", ""), getattr(ws, "search_typing", False))
 
     def _retained_key(self, cv):
         """Everything the WHOLE home frame's pixels are a pure function of: the
@@ -943,86 +1037,15 @@ class LauncherHomeLayer:
             self._lib_key = None       # session rather than retry every paint
             self._lib_unsupported = True
 
-    def _paint_continuity(self):
-        """Re-arm the streak from zero when other surfaces painted since our
-        last draw (see __init__'s note -- the retained ping-pong buffers hold
-        foreign pixels after a visit elsewhere)."""
-        nf = self.ws._frames_drawn
-        if self._last_pf is not None and nf != self._last_pf + 1:
-            self._full_streak = 0
-        self._last_pf = nf
+    def _surface_fill(self, cv, r):
+        """The shelf band's backdrop: the Library panel's surface fill."""
+        cv.rect(r[0], r[1], r[2], r[3], self.ws.theme_colors["surface"])
 
     def _try_drag_partial(self, cv, dt):
-        """The shelf drag fast path: while a touch drag scrolls the grid and
-        every retained framebuffer already holds this frame's static chrome
-        (two prior full paints, unchanged statics -- the ping-pong stale-by-2
-        rule), repaint ONLY what moves: the inflated grid band (fill + cards +
-        scroll UI, the exact rect the card clip uses) and the bar strip. The
-        wallpaper backdrop and panel chrome are byte-identical in the target
-        buffer and are simply left alone. Full paints resume on release, so
-        any straggler is erased within a frame."""
-        ws = self.ws
-        if not (ws.launcher.dragging or ws.launcher.flinging):
-            return False
-        if (getattr(cv, "RETAINED_FRAMES", 0) < 1
-                or self._full_streak < _retained_n(cv)):
-            return False
-        if self._statics != self._statics_key(cv):
-            return False
-        # Anything animating over the home (toast/confetti/splash/live
-        # wallpaper) moves pixels outside the band -> full frames.
-        if ws._animating(dt):
-            return False
-        top = getattr(ws.wm, "top_kind", None)
-        if top is not None and top() != "launcher":
-            return False
-        lay = ws.layout
-        gx, gy, gw, gh = lay.lib_grid
-        d = 2 * lay.fs + 2
-        p = ws.pointer
-        if p is not None and getattr(p, "visible", False):
-            # The composited cursor must land fully inside the repainted band,
-            # or its previous stamp would ghost on the untouched chrome.
-            if not (gx <= p.x and p.x + 8 <= gx + gw
-                    and gy - d <= p.y and p.y + 13 <= gy + gh + d):
-                return False
-        _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
-        # #113 scroll-as-blit: when the target framebuffer holds this shelf's
-        # pixels at a known offset (same sel/statics/covers, consecutive
-        # paints), shift them and repaint only the exposed strip + the stale
-        # cursor stamp -- a handful of draw calls instead of every visible
-        # card. Any ineligibility falls back to the full band repaint below.
-        region = ws.launcher._scroll_region()
-        key = (ws.launcher.sel, self._statics, ws.covers.gen)
-        shift = region.blit_shift(cv, ws._frames_drawn, key)
-        if shift is not None:
-            delta, old_stamp = shift
-            damage = []
-            if old_stamp is not None:
-                damage.append(old_stamp)           # where the shift left it...
-                if delta:                          # ...and where it came from
-                    damage.append((old_stamp[0] - delta, old_stamp[1],
-                                   old_stamp[2], old_stamp[3]))
-            surface = ws.theme_colors["surface"]
-
-            def _fill(c, r):
-                c.rect(r[0], r[1], r[2], r[3], surface)
-
-            ws.launcher.draw_shift(cv, ws.covers.icon_sheet_for, delta, damage, _fill)
-        else:
-            cv.rect(gx, gy - d, gw, gh + 2 * d, ws.theme_colors["surface"])
-            ws.launcher.draw(cv, ws.covers.icon_sheet_for)
-        # Re-pin the cover gen POST-draw: a cover landing during the card draw
-        # is in these pixels, so the recorded key must carry the new gen.
-        region.note_painted(ws._frames_drawn,
-                            (ws.launcher.sel, self._statics, ws.covers.gen),
-                            _cursor_stamp(ws))
-        _t1 = _ticks_ms() if _t0 is not None else None
-        ws.bar_layer._draw_status_strip("home")
-        if _t0 is not None:
-            ws._pf_home = (0, _ticks_diff(_t1, _t0),
-                           _ticks_diff(_ticks_ms(), _t1))
-        return True
+        """The shelf drag fast path (`_drag_partial`), timed for the home
+        diag's HITCH split."""
+        return _drag_partial(self, cv, dt, self.ws.launcher, "launcher",
+                             self._surface_fill, "home", timed=True)
 
     def draw(self, dt):
         """The home desktop: wallpaper backdrop -> cart icon grid -> top status
@@ -1037,7 +1060,7 @@ class LauncherHomeLayer:
         (Layout.grid_bottom)."""
         ws = self.ws
         cv = ws.sys_canvas
-        self._paint_continuity()              # foreign paints void the buffers
+        _paint_continuity(self, ws)           # foreign paints void the buffers
         # Kinetic fling (#113): advance a coasting shelf BEFORE painting, and
         # keep the redraw gate open until it rests. Fling frames ride the same
         # partial/blit path as finger drags (its gate includes flinging).
@@ -1225,15 +1248,15 @@ class LauncherHomeLayer:
             if ws.bar_layer.handle_home_tap(px, py):
                 return True
             lay = ws.layout
-            if ws.launcher.max_scroll() > 0 and self._in(px, py, lay.scroll_lt):
+            if ws.launcher.max_scroll() > 0 and _in(px, py, lay.scroll_lt):
                 ws.launcher.scroll_cols(-1); return True
-            if ws.launcher.max_scroll() > 0 and self._in(px, py, lay.scroll_rt):
+            if ws.launcher.max_scroll() > 0 and _in(px, py, lay.scroll_rt):
                 ws.launcher.scroll_cols(1); return True
             # The selected card's favorite star badge (#105) -- checked before the
             # PLAY/CHANGE row and the grid press, same reason: a button tap must
             # never fall through to the card's primary activation underneath it.
             frect = ws.launcher.favorite_rect(ws.launcher.sel)
-            if frect is not None and self._in(px, py, frect):
+            if frect is not None and _in(px, py, frect):
                 ws.carts.toggle_favorite(ws.launcher.selected())
                 return True
             # The selected card's PLAY / CHANGE buttons (wide-card tiers).
@@ -1241,10 +1264,10 @@ class LauncherHomeLayer:
             # the card's primary activation underneath it.
             ar = ws.launcher.action_rects()
             if ar is not None:
-                if self._in(px, py, ar["play"]):
+                if _in(px, py, ar["play"]):
                     ws.defer(ws.launch_selected)   # #184: start behind the paint
                     return True
-                if self._in(px, py, ar["change"]):
+                if _in(px, py, ar["change"]):
                     ws.defer(ws.change_selected)
                     return True
         # The grid's press/drag/release machine: returns an index only on a clean
@@ -1364,10 +1387,10 @@ class LauncherHomeLayer:
         chips = self._zone_action_rects(
             rect if rect is not None else ws.layout.zone_left)
         if chips is not None:
-            if self._in(px, py, chips["play"]):
+            if _in(px, py, chips["play"]):
                 ws.defer(ws.launch_selected)   # #184: start behind the paint
                 return True
-            if self._in(px, py, chips["change"]):
+            if _in(px, py, chips["change"]):
                 ws.defer(ws.change_selected)
                 return True
         return False
@@ -1391,7 +1414,7 @@ class EditorPickerLayer:
     the picker is for MANAGING projects) -- DUP/DEL act on the picker's SELECTED cart
     via the lent zone (ws.carts.dup/ws.carts.delete, which read `ws.picker`'s selection
     instead of the launcher's -- see console.py). "+ New" was already picker-only (the
-    pinned grid tile). DEL is two-tap guarded (`_del_armed`): a project sits right next
+    pinned grid tile). DEL is two-tap guarded (a `ConfirmTap`): a project sits right next
     to its icon in this grid, so a single accidental tap must not delete it -- the
     first DEL tap arms a "DELETE? TAP AGAIN" prompt (folded into `zone_gen` so the bar
     cache repaints), the second confirms. Any navigation/selection change (nav2d, a
@@ -1401,13 +1424,11 @@ class EditorPickerLayer:
     id = "picker"
     domain = "system"
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         self._phover = (-1, -1)       # trackball hover pos (like LauncherHomeLayer._lhover)
-        self._del_armed = False       # DEL confirm-guard: first tap arms, second confirms
-        self._confirm_gen = 0         # bumped on arm/disarm so zone_gen reflects it too
+        self._delete = ConfirmTap()   # DEL: first tap arms, second confirms
         # Drag-scroll partial repaint (#113): the picker grid rides the same
         # streak/statics machinery as the home shelf (LauncherHomeLayer), so a
         # drag frame can blit the band instead of repainting every card.
@@ -1421,27 +1442,12 @@ class EditorPickerLayer:
         """Clear any armed delete-confirm state -- called by ws.open_picker() so a
         stale "DELETE? TAP AGAIN" from a previous visit never carries into a fresh
         one."""
-        self._disarm_delete()
-
-    def _arm_delete(self):
-        self._del_armed = True
-        self._confirm_gen += 1
-
-    def _disarm_delete(self):
-        if self._del_armed:
-            self._del_armed = False
-            self._confirm_gen += 1
+        self._delete.disarm()
 
     def _statics_key(self, cv):
         """Everything the picker's STATIC backdrop (panel fill + dot grid) and
-        band chrome are a pure function of -- the home shelf's streak idiom.
-        Carries the GRID RECT too (#113): set_layout no longer invalidates the
-        ring eagerly (the windowed tier re-applies layouts several times per
-        frame), so this key is what makes a paint recorded under a different
-        layout unmatchable."""
-        ws = self.ws
-        return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
-                ws.picker.layout.lib_grid, len(ws.picker.items))
+        band chrome are a pure function of: exactly the shared base."""
+        return _statics_base(self.ws, cv, self.ws.picker)
 
     def _dots(self, cv, r, xoff):
         """Dot-grid pixels inside rect `r`, x-lattice shifted by `xoff`. The
@@ -1475,63 +1481,15 @@ class EditorPickerLayer:
         self._dots(cv, r, self._dot_xoff())
 
     def _try_drag_partial(self, cv, dt):
-        """The picker grid's drag fast path (#113) -- the home shelf's gates,
-        minus the wallpaper concerns (the backdrop is static): while a touch
-        drag scrolls the grid and every retained framebuffer holds the statics
-        (two prior full paints, unchanged statics), repaint only the band --
-        blit-shifted when the ring proves the target buffer's pixels, else the
-        full band repaint."""
-        ws = self.ws
-        if not (ws.picker.dragging or ws.picker.flinging):
-            return False
-        if (getattr(cv, "RETAINED_FRAMES", 0) < 1
-                or self._full_streak < _retained_n(cv)):
-            return False
-        if self._statics != self._statics_key(cv):
-            return False
-        if ws._animating(dt):
-            return False
-        top = getattr(ws.wm, "top_kind", None)
-        if top is not None and top() != "picker":
-            return False
-        bx, by, bw, bh = ws.picker.band_rect()
-        fs = ws.look.font_scale
-        p = ws.pointer
-        if p is not None and getattr(p, "visible", False):
-            if not (bx <= p.x and p.x + 8 * fs <= bx + bw
-                    and by <= p.y and p.y + 13 * fs <= by + bh):
-                return False
-        region = ws.picker._scroll_region()
-        key = (ws.picker.sel, self._statics, ws.covers.gen)
-        shift = region.blit_shift(cv, ws._frames_drawn, key)
-        if shift is not None:
-            delta, old_stamp = shift
-            damage = []
-            if old_stamp is not None:
-                damage.append(old_stamp)
-                if delta:
-                    damage.append((old_stamp[0] - delta, old_stamp[1],
-                                   old_stamp[2], old_stamp[3]))
-            ws.picker.draw_shift(cv, ws.covers.icon_sheet_for, delta, damage,
-                                 self._backdrop_fill)
-        else:
-            self._backdrop_fill(cv, (bx, by, bw, bh))
-            ws.picker.draw(cv, ws.covers.icon_sheet_for)
-        region.note_painted(ws._frames_drawn,
-                            (ws.picker.sel, self._statics, ws.covers.gen),
-                            _cursor_stamp(ws))
-        ws.bar_layer._draw_status_strip("picker")
-        return True
+        """The picker grid's drag fast path (`_drag_partial`) over its static
+        backdrop."""
+        return _drag_partial(self, cv, dt, self.ws.picker, "picker",
+                             self._backdrop_fill, "picker")
 
     def draw(self, dt):
         ws = self.ws
         cv = ws.sys_canvas
-        # Paint-continuity (see LauncherHomeLayer._paint_continuity): foreign
-        # paints since our last draw void the retained ping-pong buffers.
-        nf = ws._frames_drawn
-        if self._last_pf is not None and nf != self._last_pf + 1:
-            self._full_streak = 0
-        self._last_pf = nf
+        _paint_continuity(self, ws)           # foreign paints void the buffers
         # Kinetic fling (#113): tick before painting; keep frames coming.
         ws.picker.anim_frame(dt)
         if ws.picker.flinging:
@@ -1571,19 +1529,19 @@ class EditorPickerLayer:
     def handle_input(self, i):
         ws = self.ws
         if i.pressed("left"):
-            self._disarm_delete(); ws.picker.nav2d(-1, 0)
+            self._delete.disarm(); ws.picker.nav2d(-1, 0)
         if i.pressed("right"):
-            self._disarm_delete(); ws.picker.nav2d(1, 0)
+            self._delete.disarm(); ws.picker.nav2d(1, 0)
         if i.pressed("up"):
-            self._disarm_delete(); ws.picker.nav2d(0, -1)
+            self._delete.disarm(); ws.picker.nav2d(0, -1)
         if i.pressed("down"):
-            self._disarm_delete(); ws.picker.nav2d(0, 1)
+            self._delete.disarm(); ws.picker.nav2d(0, 1)
         if i.pressed("a") or i.pressed("run"):
-            self._disarm_delete()
+            self._delete.disarm()
             # #184: deferred -- the workspace open runs behind the next paint
             ws.defer(ws.pick_selected)       # open the picked cart in the Editor (or + New)
         if i.pressed("b") or i.pressed("home") or i.pressed("stop"):
-            self._disarm_delete()
+            self._delete.disarm()
             ws.exit()                        # back to the launcher root
         return True
 
@@ -1594,16 +1552,16 @@ class EditorPickerLayer:
             if ws.bar_layer.handle_bar_tap("picker", px, py):   # clock/≡/wifi/X + lent zone
                 return True
             lay = ws.layout
-            if ws.picker.max_scroll() > 0 and self._in(px, py, lay.scroll_lt):
-                self._disarm_delete(); ws.picker.scroll_cols(-1); return True
-            if ws.picker.max_scroll() > 0 and self._in(px, py, lay.scroll_rt):
-                self._disarm_delete(); ws.picker.scroll_cols(1); return True
+            if ws.picker.max_scroll() > 0 and _in(px, py, lay.scroll_lt):
+                self._delete.disarm(); ws.picker.scroll_cols(-1); return True
+            if ws.picker.max_scroll() > 0 and _in(px, py, lay.scroll_rt):
+                self._delete.disarm(); ws.picker.scroll_cols(1); return True
         # The grid's press/drag/release machine (mirrors LauncherHomeLayer): a
         # clean tap release picks; a drag scrolls and disarms the DEL confirm.
         i = ws.picker.pointer_frame(px, py, click, down,
                                     dt_ms=ws._pointer_dt_ms)
         if i is not None:
-            self._disarm_delete()
+            self._delete.disarm()
             ws.picker.sel = i
             # #184: the tap frame paints the moved selection + LOADING first;
             # the workspace open + Editor build runs behind it.
@@ -1611,7 +1569,7 @@ class EditorPickerLayer:
             return True
         if click or down:
             if ws.picker.dragging:
-                self._disarm_delete()
+                self._delete.disarm()
             self._phover = (px, py)   # track the finger so the release frame
             return True               # isn't read as a hover "move" below
         # Trackball hover (pointer up, no click): preview the tile the cursor moved
@@ -1623,7 +1581,7 @@ class EditorPickerLayer:
             self._phover = (px, py)
             i = ws.picker.tile_at(px, py)
             if i is not None:
-                self._disarm_delete()
+                self._delete.disarm()
                 if i != ws.picker.sel:
                     ws.picker.sel = i
                     # A real selection move must MARK DIRTY (#177): inside the
@@ -1642,7 +1600,7 @@ class EditorPickerLayer:
         arming/disarming DELETE changes the zone's pixels (the title <-> "DELETE? TAP
         AGAIN") without necessarily touching sel/items, so it needs its own counter
         folded in so BarLayer's cache repaints on that transition too."""
-        return self.ws.picker.zone_gen + self._confirm_gen
+        return self.ws.picker.zone_gen + self._delete.gen
 
     def draw_zone(self, cv, rect):
         """The picker's lent left zone: DUP/DEL icons over the picker's SELECTED cart
@@ -1657,7 +1615,7 @@ class EditorPickerLayer:
         if ws.can_manage and real is not None:
             ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv, lay.cs)
             ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv, lay.cs)
-        armed = self._del_armed and real is not None
+        armed = self._delete.armed and real is not None
         title = "DELETE? TAP AGAIN" if armed else "PICK A PROJECT"
         th = ws.theme_colors
         if ws.bar_layer.zone_band_light("picker"):
@@ -1676,15 +1634,12 @@ class EditorPickerLayer:
         ws = self.ws
         lay = ws.layout
         real = ws._real_selected(ws.picker)
-        if ws.can_manage and real is not None and self._in(px, py, lay.dup_btn):
-            self._disarm_delete()
+        if ws.can_manage and real is not None and _in(px, py, lay.dup_btn):
+            self._delete.disarm()
             ws.carts.dup()
             return True
-        if ws.can_manage and real is not None and self._in(px, py, lay.del_btn):
-            if self._del_armed:
-                self._disarm_delete()
+        if ws.can_manage and real is not None and _in(px, py, lay.del_btn):
+            if self._delete.tap():
                 ws.carts.delete()
-            else:
-                self._arm_delete()
             return True
         return False

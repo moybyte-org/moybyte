@@ -371,12 +371,6 @@ class HostLuaRun:
             return (w.value, h.value)
         return None
 
-    def heap_bytes(self, collect=True):
-        """The cart's Lua heap -- live after a collect, or as-reached."""
-        if collect:
-            return self._d.hl_heap_bytes(self._r)
-        return self._d.hl_heap_peak_bytes(self._r)
-
     def get_global(self, name):
         """A cart global as a number, or None."""
         v = ctypes.c_double(0.0)

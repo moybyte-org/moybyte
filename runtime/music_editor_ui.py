@@ -14,7 +14,7 @@ the last two stay on Workstation: `audio` is the cart's live AudioEngine
 backend, also used by the running game, and `save_sounds` uses the shared
 `self.save_status` field like save_code/save_sprites/save_map, not a
 dedicated one, so it stays alongside them as a Workstation-level "persist
-this editor's content" method). `NAMES`/`_in` are injected at construction
+this editor's content" method). `NAMES` is injected at construction
 instead of imported back from console.py, which would be a real circular
 import: console.py imports MusicEditorUI to build the one instance a
 Workstation holds (same reasoning as BlockEditorUI/MapEditorUI).
@@ -60,6 +60,7 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
@@ -223,11 +224,10 @@ class MusicEditorUI:
     is called lazily from `set_menu_view("music")` the first time a cart's
     music editor is opened, exactly like the pre-extraction code did inline."""
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         # Injected instead of imported back from console.py -- see module docstring.
         self._NAMES = names
-        self._in = in_rect
         # `musicedit` is built lazily on first open. `music_preview` tracks what
         # the live AudioEngine is previewing so the frame loop ticks the mixer
         # and shows STOP; None when nothing is playing.
@@ -356,14 +356,13 @@ class MusicEditorUI:
         right-hand edit pad bumps the value under it; the title-strip steppers pick the
         SFX/track + tempo; the bottom bar plays/saves/loops/closes. Mirrors _map_click's
         button-dispatch shape."""
-        ws = self.ws
         me = self.musicedit
         lay = self.layout
         if me is None:
             return                         # nothing to edit; exit via the bar's X
         song = me.view == MusicEditor.SONG_VIEW
         # The step/slot list: tap a row to select it.
-        if self._in(px, py, lay.list_area):
+        if _in(px, py, lay.list_area):
             total = me.slot_count() if song else me.step_count()
             cur = me.slot if song else me.step
             top = self._mu_visible_top(cur, total)
@@ -371,32 +370,32 @@ class MusicEditorUI:
             me.select_cursor(top + row)
             return
         # Title-strip controls.
-        if self._in(px, py, lay.obj_prev):
+        if _in(px, py, lay.obj_prev):
             (me.select_track if song else me.select_sfx)(-1)
             return
-        if self._in(px, py, lay.obj_next):
+        if _in(px, py, lay.obj_next):
             (me.select_track if song else me.select_sfx)(1)
             return
-        if self._in(px, py, lay.speed_dn):
+        if _in(px, py, lay.speed_dn):
             me.nudge_speed(-1); return
-        if self._in(px, py, lay.speed_up):
+        if _in(px, py, lay.speed_up):
             me.nudge_speed(1); return
-        if self._in(px, py, lay.view_btn):
+        if _in(px, py, lay.view_btn):
             me.toggle_view()
             self._stop_music_preview()         # don't carry a preview across views
             return
         # The bottom action bar.
-        if self._in(px, py, lay.play_btn):
+        if _in(px, py, lay.play_btn):
             if self.music_preview is not None:
                 self._stop_music_preview()
             else:
                 self._play_music_preview()
             return
-        if self._in(px, py, lay.loop_btn):
+        if _in(px, py, lay.loop_btn):
             me.toggle_loop(); return
-        if self._in(px, py, lay.undo_btn):
+        if _in(px, py, lay.undo_btn):
             me.undo(); return
-        if self._in(px, py, lay.redo_btn):
+        if _in(px, py, lay.redo_btn):
             me.redo(); return
         # The right-hand edit pad (per-view button grid).
         self._music_pad_click(px, py, song)
@@ -408,7 +407,7 @@ class MusicEditorUI:
         # Find which pad button was hit (col 0/1, row 0..5 -- #92 added rows 4-5).
         for row in range(_MU_PAD_ROWS):
             for col in range(2):
-                if self._in(px, py, self.layout.pad_rect(col, row)):
+                if _in(px, py, self.layout.pad_rect(col, row)):
                     self._music_pad_action(row, col, song)
                     return
 

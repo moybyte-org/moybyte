@@ -705,7 +705,7 @@ class Workstation:
         # handle_input/handle_pointer/frame's menu_view == "blocks" branches plus
         # set_menu_view/_relayout/_leave_menu/go_home/open. NAMES/_in/_err_text/
         # _clamp_scroll are injected (see that module's docstring for why).
-        self.block_ui = BlockEditorUI(self, NAMES, _in, _err_text, _clamp_scroll)
+        self.block_ui = BlockEditorUI(self, NAMES, _err_text, _clamp_scroll)
         self.block_ui.relayout(self.sys_canvas.w, self.sys_canvas.h,
                                self.look.effective_font_scale(),
                                self.look.effective_chrome_scale())
@@ -797,12 +797,12 @@ class Workstation:
         # screen == "update" branches and from _activate_settings_action. The
         # transient screen state (_upd_phase/_upd_msg/_upd_bin/...) lives on it;
         # the queries + channel config above/below stay here.
-        self.update_ui = UpdateUI(self, NAMES, _in, _err_text)
+        self.update_ui = UpdateUI(self, NAMES, _err_text)
         # WASM MODE (#197): the pin, the paired url, the connection screen and
         # the parked flag, all on one object (web_console.py). The webhost above
         # stays a flat Workstation attribute -- `poll_webhost` reads it at every
         # frame tail on all three boards -- and this reads it through `self`.
-        self.web = WebConsole(self, NAMES, _in)
+        self.web = WebConsole(self, NAMES)
         # The shelf's cover + icon pipeline (#209 landing C, cover_cache.py): the
         # bounded caches, the per-frame build budget, the idle warmers and the
         # #186 off-heap frees, all on one object. FRAME-HOT -- the grids below
@@ -891,7 +891,7 @@ class Workstation:
         # (Stage 4, docs/history/shell_ux_technical_plan_v1.md): the Editor now lends the top
         # bar's left zone (draw_zone/zone_tap, bar_layer.py) so it needs the shared
         # draw toolkit + rect hit-test, like the other zone-owning surfaces.
-        self.editor_app = EditorApp(self, NAMES, _in)
+        self.editor_app = EditorApp(self, NAMES)
         self._run_caller = None       # who to return to on EXIT (run() records it; the
                                       # launcher root OR -- Stage 3 -- the Editor. The
                                       # Stage-5 hold-BACKSPACE / context-X
@@ -937,17 +937,17 @@ class Workstation:
         # map_editor_ui.py): one instance, delegated to from handle_input/
         # handle_pointer/frame's menu_view == "map" branches plus set_menu_view/
         # _open_map/open/go_home.
-        self.map_ui = MapEditorUI(self, NAMES, _in)
+        self.map_ui = MapEditorUI(self, NAMES)
         # The scene placement editor's UI (#85 Stage 2 -- see scene_editor_ui.py):
         # one instance, delegated to from the "scene" content layer plus
         # set_menu_view/_open_scene/open/go_home, the exact map_ui lifecycle.
-        self.scene_ui = SceneEditorUI(self, NAMES, _in)
+        self.scene_ui = SceneEditorUI(self, NAMES)
         # Block editor (#29 Part 2) state now lives on self.block_ui (built above).
         # The music/sound editor's UI (#50, extracted from this class -- see
         # music_editor_ui.py): one instance, delegated to from handle_input/
         # handle_pointer/frame's menu_view == "music" branches plus set_menu_view/
         # _open_music/open (NOT go_home -- see music_editor_ui.py's docstring).
-        self.music_ui = MusicEditorUI(self, NAMES, _in)
+        self.music_ui = MusicEditorUI(self, NAMES)
         # The perf HUD's rendering (#43/#44, extracted from this class -- see
         # perf_hud.py): the FPS chip + frame-time breakdown drawn in frame() and
         # the tap target hit-tested in handle_pointer. Named perf_ui (NOT
@@ -1002,7 +1002,7 @@ class Workstation:
         # of docs/history/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
         # per-second clock cache (#66) and the bar tap slices live
         # on self.bar_layer; look.set_icon_sheet bumps its cache gen via bar_layer.invalidate().
-        self.bar_layer = BarLayer(self, NAMES, _in)
+        self.bar_layer = BarLayer(self, NAMES)
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
         # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
         # It changes where SAVE writes (system_icons.moygfx, not the cart) and where
@@ -1238,17 +1238,17 @@ class Workstation:
             self, id, domain, draw=draw, kbd=kbd, ptr=ptr)
         # The cards ("Make it mine") surface is its own Layer now (#3/#15), owning its
         # selection/scroll state (msel/mtop) + draw + taps; cart config/apply stay on ws.
-        self.cards_layer = CardsLayer(self, NAMES, _in, _err_text)
+        self.cards_layer = CardsLayer(self, NAMES, _err_text)
         # The PAINT editor surface (#4/#30): one renderer for the cart sheet ("paint")
         # and the icon sheet ("theme"), keyed on ws._editing_icons. It reads ws.paint /
         # ws.sheet + dispatches SAVE/GET/PUT/CLOSE to ws. The theme content is ThemeLayer
         # -- it owns the EDIT-ICONS lifecycle + delegates all editing to this PaintLayer.
-        self.paint_layer = PaintLayer(self, NAMES, _in)
+        self.paint_layer = PaintLayer(self, NAMES)
         self.theme_layer = ThemeLayer(self, self.paint_layer, NAMES)
         # The Settings app (#28/#39/#53): the aggregator screen. Owns the row list +
         # scroll window (set_msel/set_top) + drawing; reads ws config/system state +
         # dispatches every mutation to ws setters (it owns NO config).
-        self.settings_layer = SettingsLayer(self, NAMES, _in, _clamp_scroll)
+        self.settings_layer = SettingsLayer(self, NAMES, _clamp_scroll)
         # The system APPS are constructed AND registered below, from the
         # declarations (`_init_apps`) -- Paint's indexed document + reflowing
         # chrome, Storybook's compiling decks, Files' user-files gallery and
@@ -1257,17 +1257,19 @@ class Workstation:
         # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
         # handle + save_code/run_code + code-error state + code_layout stay on ws.
-        self.code_layer = CodeLayer(self, NAMES, _in)
+        self.code_layer = CodeLayer(self, NAMES)
         # The desktop home / launcher (#28): the home composition + grid nav. The Launcher
         # GRID instance stays ws.launcher (the single source); this Layer draws it.
-        self.launcher_layer = LauncherHomeLayer(self, NAMES, _in)
+        self.launcher_layer = LauncherHomeLayer(self, NAMES)
         # The Editor's project-picker content Layer (spec shell_ux_v1.md): reuses the
         # launcher grid look over ws.picker; the Make tile opens it, picking a cart opens
         # the Editor above it.
-        self.editor_picker = EditorPickerLayer(self, NAMES, _in)
+        self.editor_picker = EditorPickerLayer(self, NAMES)
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
-        # surface is now its own Layer/component; only the running-cart "desktop" + the
-        # theme wrapper remain thin _LegacyLayer shims over Workstation methods.
+        # surface is its own Layer/component -- the running-cart "desktop" is the
+        # _PlayerLayer adapter over ws.player, "theme" the ThemeLayer over the paint
+        # layer; the only _LegacyLayer entries are the four draw-only overlays
+        # (splash / toast / notice / cursor, built by `L` above).
         # SYSTEM APPS (docs/app_api_v1.md) are NOT listed here -- register_app below
         # adds each one's kind to this table.
         self._content_layers = {
@@ -2573,7 +2575,7 @@ class Workstation:
         for d in APPS:
             cls = _resolve_app_entry(d["entry"])
             app = cls(self.app_context(d["id"], getattr(cls, "NEEDS", ())),
-                      NAMES, _in)
+                      NAMES)
             setattr(self, str(d["id"]) + "_app", app)
             ms = d.get("min_size")
             self.register_app(app, text_mode=bool(d.get("text_mode")),
@@ -3925,11 +3927,8 @@ class Workstation:
 
         On a backend that samples every frame (the host's mouse, the scripted
         remote gestures) every frame is fresh, so this is exactly
-        `self._frame_dt_ms`. BOTH boards' GT911 drivers hold + flag: the P4's
-        p4_input.Touch does it for the same reason device_input.Touch does,
-        which it did not until 2026-08-15 -- it held the point and flagged
-        nothing, so this docstring's old claim that the P4 "samples every frame"
-        described the bug rather than the board.
+        `self._frame_dt_ms`. BOTH boards' GT911 drivers hold + flag
+        (device_input.Touch and p4_input.Touch alike).
 
         (A "third rule" -- charge stale stretches past a threshold as real dt
         so a silent still finger decays the fling -- was built here on

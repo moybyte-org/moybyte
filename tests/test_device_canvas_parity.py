@@ -2213,3 +2213,19 @@ def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
     dev.spr(cover, 0, 0)
     assert isinstance(cover._rgb_i, memoryview)
     assert m._LENT_BAKES == {}, "an unowned image must never enter the register"
+
+
+# --------------------------------------------------------------------------- #
+# Sanity: chrome.NAMES / color() equal palette's. The duplication is on        #
+# purpose (palette.py is deny-listed on the boards; chrome.py is what the     #
+# device freezes), so the two copies are pinned to each other here.           #
+# --------------------------------------------------------------------------- #
+def test_chrome_names_match_palette_names():
+    from runtime import chrome
+    assert chrome.NAMES == palette.NAMES
+    assert len(chrome.NAMES) == 16
+    for name, idx in palette.NAMES.items():
+        assert chrome.color(name) == palette.color(name) == idx
+    for idx in range(70):
+        assert chrome.color(idx) == palette.color(idx)
+    assert chrome.color("no-such-colour") == palette.color("no-such-colour") == 7

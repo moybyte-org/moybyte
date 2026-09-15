@@ -541,7 +541,7 @@ class CodeLayout(LayoutBase):
 # 1-bit, recolorable pixel bitmaps designed on a 12x12 grid at the native button
 # size (boxes are 14-16px), then centered in each button's rect and blitted in
 # the requested palette color via the indexed primitives only -- so they render
-# identically on host (runtime/canvas.py) and the frozen device console. Each
+# identically on the host canvas and the frozen device console. Each
 # glyph is a tuple of 12 ints: row r, bit (11 - col) set => pixel on. Constant
 # (no per-frame allocation; freezes into firmware at ~15*12 ints).
 #

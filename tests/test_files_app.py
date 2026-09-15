@@ -70,7 +70,7 @@ def test_gallery_lists_rename_copy_trash_restore(tmp_path):
     app.grid.select("dragon_2")
     app._act("NAME", "dragon_2")
     assert app.mode == "rename"
-    app.rename_text = ""
+    app.rename.text = ""
     for ch in "castle":
         app._typed_rename(_FakeInp(ord(ch)))
         app._typed_rename(_FakeInp(0))

@@ -76,7 +76,6 @@ sys.modules.setdefault("players", _players)   # console.py does `from players im
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
-from . import palette  # noqa: E402
 # The RASTER is the boards' (`device_canvas.DeviceCanvas`, RGB565), reached
 # through the two factories in host_canvas.py. There is no host-only canvas
 # class any more -- runtime/canvas.py, the second raster, is deleted.

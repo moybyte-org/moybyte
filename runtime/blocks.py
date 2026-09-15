@@ -1848,12 +1848,6 @@ def _is_identifier(name):
     return True
 
 
-def is_identifier(name):
-    """Public alias for the variable-name validator (the block editor's create/
-    rename flow gates names through this so a slot can never inject code)."""
-    return _is_identifier(name)
-
-
 def sanitize_var_name(raw):
     """Coerce a kid's free-typed text into a SAFE Python identifier for a variable
     name (MicroPython-safe, no regex): keep letters/digits/underscore, turn spaces

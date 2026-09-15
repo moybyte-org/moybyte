@@ -70,7 +70,7 @@ class CalcAppLayer:
              ("1", "2", "3", "-"),
              ("C", "0", "=", "+"))
 
-    def __init__(self, ctx, names, in_rect):
+    def __init__(self, ctx, names):
         self.ctx = ctx
         # Roles used on every drawn frame are bound ONCE here, not looked up
         # per draw -- the hoist mandate (ui_refactor_2026-08 Section 2.4).
@@ -78,7 +78,6 @@ class CalcAppLayer:
         self._theme = ctx.theme
         self._damage = ctx.damage
         self._NAMES = names
-        self._in = in_rect
         self.hits = _ui.Hits()
         self.entry = "0"              # the number being typed
         self.acc = None               # banked left operand

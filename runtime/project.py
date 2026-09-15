@@ -663,116 +663,88 @@ class Project:
             return getattr(me, "_hist", None)
         return None
 
+    def _commit_asset(self, what, rel, payload, save, hist, clean=None, note=None):
+        """ONE body for the asset commits (sprites / map / scene / sounds):
+        the store write under the SD wrapper, the editor marked clean, the
+        stale failure text cleared, then the durable undo line -- this
+        snapshot IS a keyframe, so the tab's in-RAM op History is drained
+        into the journal entry and re-baselined (#111): in-RAM undo covers
+        edits SINCE the last commit, the journal covers commit-to-commit, and
+        the two never double-count a stroke. flush() runs only after the store
+        write succeeded, so a failed save cannot swallow the batch. A failed
+        save must be VISIBLE on device (no serial in the run loop), hence the
+        status + cart_error, _err_text-guarded so a weird exception's __str__
+        cannot itself escape. Returns True on a persisted commit."""
+        ws = self.ws
+        try:
+            ws._with_sd(save)
+            if clean is not None:
+                clean.dirty = False
+            ws.save_status = None             # clear stale failure text (see commit_code)
+            ops = hist.flush() if hist is not None else None
+            self._journal(rel, payload, ops=ops)
+            if hist is not None:
+                hist.clear()
+            if note:
+                ws.ach.note(note)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            txt = _err_text(exc)
+            ws.save_status = "CAN'T SAVE"
+            ws.cart_error = "Could not save " + what + " -- " + txt
+            print("Moybyte save " + what + " failed:", txt)
+            return False
+
     def commit_sprites(self):
         ws = self.ws
         if not (self.sheet and self.cart and self.cart.get("path") and ws.can_manage):
             return
         hexs = self.sheet.to_hex()
-        try:
-            ws._with_sd(lambda: ws.carts_store.save_sprites(self.cart, hexs))
-            self.sheet.dirty = False
-            ws.save_status = None             # clear stale failure text (see commit_code)
-            # #111: this snapshot IS a keyframe, so drain the paint History's op batch
-            # into the journal line (fine-grained cross-boundary undo). Then re-baseline
-            # the History (clear): a commit is the CLEAN boundary -- in-RAM undo covers
-            # edits SINCE the last commit, the journal covers commit-to-commit, so the
-            # two never double-count the same stroke. flush() runs only after the store
-            # write succeeded, so a failed save doesn't silently swallow the batch.
-            # (Paint commits only on tab-leave/exit, never mid-session, so clearing
-            # here never costs a kid an in-progress stroke's undo.)
-            hist = self._paint_history()
-            ops = hist.flush() if hist is not None else None
-            self._journal("sprites.moygfx", hexs, ops=ops)   # durable undo (Stage 7/#111)
-            if hist is not None:
-                hist.clear()                  # re-baseline (subsumes mark_keyframe)
-            ws.ach.note("paint_save")         # "Little Artist": a sprite saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            # Mirror the save_code contract: a failed sprite save must be VISIBLE on
-            # device (no serial in the run loop), not silent. _err_text-guarded so a
-            # weird exception's __str__ can't itself escape this handler.
-            txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
-            ws.cart_error = "Could not save sprites -- " + txt
-            print("Moybyte save sprites failed:", txt)
+        # Paint commits only on tab-leave/exit, never mid-session, so the
+        # History re-baseline never costs a kid an in-progress stroke's undo.
+        self._commit_asset("sprites", "sprites.moygfx", hexs,
+                           lambda: ws.carts_store.save_sprites(self.cart, hexs),
+                           self._paint_history(), clean=self.sheet,
+                           note="paint_save")          # "Little Artist" (#21)
 
     def commit_map(self):
-        # Persist the cart's tilemap to map.moymap (#32) -- the exact mirror of
-        # commit_sprites (to_hex -> SD wrapper -> save_map). The running cart already
-        # holds this same TileMap, so a save only persists what it's already using.
+        """Persist the cart's tilemap to map.moymap (#32). The running cart
+        already holds this same TileMap, so a save only persists what it is
+        already using."""
         ws = self.ws
         if not (self.tilemap and self.cart and self.cart.get("path") and ws.can_manage):
             return
         hexs = self.tilemap.to_hex()
-        try:
-            ws._with_sd(lambda: ws.carts_store.save_map(self.cart, hexs))
-            self.tilemap.dirty = False
-            ws.save_status = None             # clear stale failure text (see commit_code)
-            hist = self._map_history()        # #111: drain the map op batch (see commit_sprites)
-            ops = hist.flush() if hist is not None else None
-            self._journal("map.moymap", hexs, ops=ops)   # durable undo (Stage 7/#111)
-            if hist is not None:
-                hist.clear()                  # re-baseline the clean boundary (see commit_sprites)
-            ws.ach.note("map_save")           # "Map Maker": a map saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
-            ws.cart_error = "Could not save map -- " + txt
-            print("Moybyte save map failed:", txt)
+        self._commit_asset("map", "map.moymap", hexs,
+                           lambda: ws.carts_store.save_map(self.cart, hexs),
+                           self._map_history(), clean=self.tilemap,
+                           note="map_save")            # "Map Maker" (#21)
 
     def commit_scene(self, name, text):
-        """Persist one scene to scenes/<name>.moyscene (#85) -- the mirror of commit_map
-        (save_scene -> SD wrapper -> journal). `text` is the compact .moyscene JSON blob
-        (an ordered actor list). Stage 1 has no placement editor yet; this is the
-        persistence verb the editor (Stage 2) calls, and the surface tests drive it
-        directly. The journal `file` is the real relative path (scenes/<name>.moyscene),
-        so undo restores into the file the loader reads from. Returns True on a
-        persisted commit (the caller's success signal -- this used to ride the
-        save_status "SAVED" happy path, removed with the rest of it)."""
+        """Persist one scene to scenes/<name>.moyscene (#85). `text` is the
+        compact .moyscene JSON blob (an ordered actor list); the placement
+        editor calls this and the surface tests drive it directly. The journal
+        `file` is the real relative path, so undo restores into the file the
+        loader reads from. Returns True on a persisted commit."""
         ws = self.ws
         if not (self.cart and self.cart.get("path") and ws.can_manage):
             return False
-        try:
-            ws._with_sd(lambda: ws.carts_store.save_scene(self.cart, name, text))
-            ws.save_status = None             # clear stale failure text (see commit_code)
-            rel = ws.carts_store.SCENES_DIR + "/" + name + ws.carts_store.SCENE_EXT
-            # #111 phase 4: drain the SceneEditor's op batch into the journal line
-            # (see commit_sprites for the clean-boundary contract).
-            hist = self._scene_history()
-            ops = hist.flush() if hist is not None else None
-            self._journal(rel, text, ops=ops)     # durable undo (Stage 7/#111)
-            if hist is not None:
-                hist.clear()                      # re-baseline
-            return True
-        except Exception as exc:  # noqa: BLE001
-            txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
-            ws.cart_error = "Could not save scene -- " + txt
-            print("Moybyte save scene failed:", txt)
-            return False
+        rel = ws.carts_store.SCENES_DIR + "/" + name + ws.carts_store.SCENE_EXT
+        return self._commit_asset(
+            "scene", rel, text,
+            lambda: ws.carts_store.save_scene(self.cart, name, text),
+            self._scene_history())
 
     def commit_sounds(self):
-        """Persist the cart's AudioBank to sounds.json (#50) -- the mirror of
-        commit_map. The MusicEditor edits the LIVE bank (ws.audio.engine.bank), so a
-        save just serializes what the cart already plays through."""
+        """Persist the cart's AudioBank to sounds.json (#50). The MusicEditor
+        edits the LIVE bank (ws.audio.engine.bank), so a save just serializes
+        what the cart already plays through."""
         ws = self.ws
         me = ws.music_ui.musicedit
         if not (me and self.cart and self.cart.get("path") and ws.can_manage):
             return
         bank_dict = me.bank.to_dict()
-        try:
-            ws._with_sd(lambda: ws.carts_store.save_sounds(self.cart, bank_dict))
-            me.dirty = False
-            ws.save_status = None             # clear stale failure text (see commit_code)
-            # #111 phase 4: drain the MusicEditor's op batch into the journal line
-            # (see commit_sprites for the clean-boundary contract).
-            hist = self._music_history()
-            ops = hist.flush() if hist is not None else None
-            self._journal("sounds.json", json.dumps(bank_dict), ops=ops)  # (Stage 7/#111)
-            if hist is not None:
-                hist.clear()                      # re-baseline
-            ws.ach.note("sound_save")          # "Sound Designer": a bank saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
-            ws.cart_error = "Could not save sounds -- " + txt
-            print("Moybyte save sounds failed:", txt)
+        self._commit_asset("sounds", "sounds.json", json.dumps(bank_dict),
+                           lambda: ws.carts_store.save_sounds(self.cart, bank_dict),
+                           self._music_history(), clean=me,
+                           note="sound_save")          # "Sound Designer" (#21)

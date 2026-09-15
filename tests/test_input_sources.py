@@ -209,9 +209,9 @@ def test_a_source_write_does_not_move_the_union_until_begin_frame(tier):
 def test_the_shared_release_all_stays_immediate_and_stays_consistent(tier):
     """The one write to the union outside the merge, and not a second author of
     it: it empties every SOURCE first, so what it leaves behind is exactly what
-    the next merge would build. Its callers (cards_layer._open_meta,
-    block_editor_ui._blk_arm_prompt) blank the edge sets in the same breath and
-    need it to have taken effect."""
+    the next merge would build. Its caller (widgets.arm_prompt, the one
+    body every modal prompt opens through) blanks the edge sets in the same
+    breath and needs it to have taken effect."""
     inp = _state(tier)
     a = inp.source("a")
     _set(a, "up")

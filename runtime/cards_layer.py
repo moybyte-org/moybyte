@@ -19,9 +19,9 @@ config; it mutates ws.project.config in
 place and dispatches the stepping through `ws.adjust(...)` (which reads this layer's
 `msel` to know which card is selected) and re-runs via `ws.apply()`. The card-only
 constants live here (single source; console.py imports them back so tests + a couple
-of console call sites resolve `console._CARD_H` / `_RUN_BTN` / ...). `NAMES` (palette),
-`_in` (rect hit-test) and `_err_text` are injected at construction (the same circular-
-import dodge the other extracted UIs use). Shared draw toolkit (ws._glyph/_icon_btn)
+of console call sites resolve `console._CARD_H` / `_RUN_BTN` / ...). `NAMES` (palette)
+and `_err_text` are injected at construction (the same circular-import dodge the
+other extracted UIs use); the rect hit-test is `ui.rect_in`, imported directly. Shared draw toolkit (ws._glyph/_icon_btn)
 stays on Workstation; the bar draws through it via self.ws.
 
 Stage 4 (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip("menu") LAST
@@ -45,6 +45,59 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
+
+try:
+    from editors import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
+
+try:
+    from widgets import arm_prompt as _arm_prompt
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.widgets import arm_prompt as _arm_prompt
+
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
+
+
+class _Prompt:
+    """One open dialog: `kind` names what OK does, `fields` are its TextEntry
+    buffers over ONE shared key edge (so Tab does not re-fire the byte that
+    switched fields), `field` the focused one, `msg` the inline status line.
+    `fields` is built from (label, placeholder, cap) triples."""
+
+    def __init__(self, kind, title, fields):
+        self.kind = kind
+        self.title = title
+        self.labels = tuple(f[0] for f in fields)
+        self.hints = tuple(f[1] for f in fields)
+        self.edge = KeyEdge()
+        self.fields = tuple(TextEntry(f[2], edge=self.edge) for f in fields)
+        self.field = 0
+        self.msg = None
+
+    def open(self, texts, seed):
+        for i, entry in enumerate(self.fields):
+            entry.open(texts[i], seed)
+        self.edge.seed(seed, guard=True)
+
+    def key(self, ch):
+        """One typed byte: Tab moves the focus, anything else goes to the
+        focused field; returns the field's event (editors_base.text_key)."""
+        if ch == 9:
+            self.field = (self.field + 1) % len(self.fields)
+            return None
+        ev = self.fields[self.field].key(ch)
+        if ev is not None:
+            self.msg = None
+        return ev
+
+    def feed(self, inp):
+        """One input frame: the event of a fresh byte, else None (the guarded
+        opening pass included)."""
+        k = inp.last_key
+        if self.edge.arming(k) or not self.edge.hit(k):
+            return None
+        return self.key(k)
 
 
 
@@ -172,25 +225,19 @@ class CardsLayer:
     _DISPLAYS = ("gauge", "count", "choice-icons", "sprite-tiles", "bg-thumbs")
     _CELL_DISPLAYS = ("choice-icons", "sprite-tiles", "bg-thumbs")
 
-    def __init__(self, ws, names, in_rect, err_text):
+    def __init__(self, ws, names, err_text):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         self._err_text = err_text
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
         self._t = None                # per-draw tone map (set by _draw_cards)
         self._dragv = None            # drag-to-scroll anchor (held vertical drag)
-        # The CART INFO modal (#94): None when closed, else {"title", "author",
-        # "field" (0=title/1=author), "msg", "armed"} -- the title/author edit
-        # buffer + which field has focus + an inline status line. See _open_meta.
-        self.meta = None
+        # The open dialog (CART INFO or NEW SCRIPT), a `_Prompt`, or None.
+        self.prompt = None
         # The ADVANCED row's file list: None when closed, else
         # {"rows", "sel", "top", "msg"} -- see _open_files.
         self.files = None
-        # The NEW SCRIPT name prompt over it: None when closed, else
-        # {"name", "msg", "armed"} -- see _open_newf.
-        self.newf = None
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -204,10 +251,9 @@ class CardsLayer:
         self.msel = 0
         self.mtop = 0
         self.files = None
-        if self.meta is not None or self.newf is not None:
-            # never leak an open modal across a cart switch
-            self.meta = None
-            self.newf = None
+        if self.prompt is not None:
+            # never leak an open dialog across a cart switch
+            self.prompt = None
             self.ws._set_text_mode(False)
 
     # -- Layer facets --------------------------------------------------------
@@ -230,19 +276,15 @@ class CardsLayer:
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
         ws.bar_layer._draw_status_strip("menu")
-        # The CART INFO modal (#94), if open, draws OVER the bar too -- same order
-        # as the block editor's blk_kbd prompt (chrome, then any modal on top).
-        if self.meta is not None:
-            self._draw_meta_modal()
-        if self.newf is not None:
-            self._draw_newf_modal()
+        # An open dialog draws OVER the bar too -- same order as the block
+        # editor's blk_kbd prompt (chrome, then any modal on top).
+        if self.prompt is not None:
+            self._draw_prompt()
 
     def handle_input(self, i):
         ws = self.ws
-        if self.newf is not None:
-            return self._newf_input(i)
-        if self.meta is not None:
-            return self._meta_input(i)
+        if self.prompt is not None:
+            return self._prompt_input(i)
         if self.files is not None:
             return self._files_input(i)
         n = self._card_count()
@@ -293,31 +335,21 @@ class CardsLayer:
         if self._dragv is None:
             area = (lay.card_x, self._cards_top(), lay.card_w,
                     lay.view_bottom - self._cards_top())
-            if not self._cards_scrollable() or not self._in(px, py, area):
+            if not self._cards_scrollable() or not _in(px, py, area):
                 return
             self._dragv = py
             return
-        step = max(1, lay.card_h + lay.gap)
-        delta = self._dragv - py           # finger up -> content down
-        moved = False
-        while delta >= step and self.mtop < self._max_mtop():
-            self.mtop += 1
-            delta -= step
-            moved = True
-        while delta <= -step and self.mtop > 0:
-            self.mtop -= 1
-            delta += step
-            moved = True
-        self._dragv = py + delta           # keep the sub-step remainder
-        if moved:
+        was = self.mtop
+        self._dragv, self.mtop = _ui.row_drag(self._dragv, py,
+                                              max(1, lay.card_h + lay.gap),
+                                              self.mtop, self._max_mtop())
+        if self.mtop != was:
             ws._dirty = True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        if self.newf is not None:
-            return self._newf_pointer(px, py, click)
-        if self.meta is not None:
-            return self._meta_pointer(px, py, click)
+        if self.prompt is not None:
+            return self._prompt_pointer(px, py, click)
         if self.files is not None:
             if click and ws.bar_layer.handle_bar_tap("menu", px, py):
                 return True
@@ -326,7 +358,7 @@ class CardsLayer:
         self._cards_drag(px, py)           # held drag scrolls the card column
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
-        if click and self._in(px, py, self.layout.info_btn):
+        if click and _in(px, py, self.layout.info_btn):
             self._open_meta()
             return True
         ci = self._card_at(px, py)
@@ -341,9 +373,9 @@ class CardsLayer:
         if click:
             # GO/CODE/CLOSE dissolved into the unified bar (fix B): PLAY runs+persists,
             # the Code tab is in the ladder, the context X exits.
-            if self._cards_scrollable() and self._in(px, py, self.layout.scroll_up):
+            if self._cards_scrollable() and _in(px, py, self.layout.scroll_up):
                 self.scroll_cards(-1)
-            elif self._cards_scrollable() and self._in(px, py, self.layout.scroll_dn):
+            elif self._cards_scrollable() and _in(px, py, self.layout.scroll_dn):
                 self.scroll_cards(1)
             elif ci is not None:
                 self._card_tap(px, py, ci)
@@ -474,7 +506,6 @@ class CardsLayer:
         error} -- `error` (#94) is None for a well-formed field, else the short
         reason _validate_field gave; `display` is forced None on an errored row
         (_draw_card/_card_tap branch off `error` before ever reading `display`)."""
-        ws = self.ws
         lay = self.layout
         rows = []
         y = self._cards_top()
@@ -593,7 +624,7 @@ class CardsLayer:
 
     def _card_at(self, px, py):
         for row in self._card_layout():
-            if self._in(px, py, (row["x"], row["y"], row["w"], row["h"])):
+            if _in(px, py, (row["x"], row["y"], row["w"], row["h"])):
                 return row["i"]
         return None
 
@@ -613,7 +644,7 @@ class CardsLayer:
                 return                 # a malformed card def can't be stepped (#94)
             if row["display"] in self._CELL_DISPLAYS:
                 for k, cell in self._choice_cells(row):
-                    if self._in(px, py, cell):
+                    if _in(px, py, cell):
                         f = row["f"]
                         old = ws.project.config.get(f["key"], f.get("default"))
                         new = f["choices"][k]
@@ -1037,11 +1068,11 @@ class CardsLayer:
     def _files_pointer(self, px, py, click):
         if not click:
             return True
-        if self._in(px, py, self.layout.info_btn):
+        if _in(px, py, self.layout.info_btn):
             self._close_files()
             return True
         for rect, name, k in self._files_rects():
-            if self._in(px, py, rect):
+            if _in(px, py, rect):
                 self.files["sel"] = k
                 self._files_open(name)
                 return True
@@ -1070,174 +1101,73 @@ class CardsLayer:
             cv.print(f["msg"][:34], lay.card_x, lay.view_bottom - 8 * lay.fs,
                      self._NAMES["red"], lay.fs)
 
-    # -- CART INFO: manifest title/author editing (#94) ----------------------
+    # -- the two dialogs: CART INFO (#94) and NEW SCRIPT (#89) ---------------
     #
-    # The tracker's gap 1 ("Cart manifest / metadata editing -- title, author,
-    # permissions not editable here"): a small modal opened from the header INFO
-    # button, editing title/author through Project.commit_manifest (which writes
-    # manifest.json via moy_carts.save_manifest_meta). `permissions` stays
-    # read-only by design -- see the comment over save_manifest_meta.
+    # One prompt state machine (`_Prompt`), parameterised by its fields and by
+    # what OK means. CART INFO edits the manifest's title/author through
+    # Project.commit_manifest (`permissions` stays read-only: see the comment
+    # over moy_carts.save_manifest_meta). NEW SCRIPT is the ONE door that adds
+    # a file to a cart, on the ADVANCED row and nowhere else, because a console
+    # for eight-year-olds does not want a New File button two taps from every
+    # cart, and a cart that is one file should stay one file unless somebody
+    # went looking.
     #
-    # Typing idiom: exactly the wifi-password field's shape (settings_layer.py
-    # _wifi_input) -- while self.meta is open, input is driven PURELY off
-    # `i.last_key` (never i.pressed("a")/("b")/nav), because _set_text_mode(True)
-    # does not stop the T-Deck's ASCII-mode keyboard from ALSO firing a typed
-    # key's game-button alias (w/a/s/d/z/x -> up/left/down/right/a/b) -- typing a
-    # letter that collided with a checked button would spuriously fire it. Field
-    # switch is Tab (ASCII 9) or a tap, never up/down, for the same reason. The
-    # one-frame "armed" guard mirrors block_editor_ui._blk_arm_prompt: the tap/
-    # key that OPENED the modal can still be latched on its first input pass, so
-    # that pass only arms it -- never types/commits/cancels.
+    # Typing is driven PURELY off `i.last_key` (never i.pressed("a")/("b")/
+    # nav): _set_text_mode(True) does not stop the T-Deck's ASCII-mode keyboard
+    # from ALSO firing a typed key's game-button alias (w/a/s/d/z/x), so a typed
+    # letter that collided with a checked button would fire it. Field switch is
+    # Tab (ASCII 9) or a tap, never up/down, for the same reason. The prompt
+    # opens through widgets.arm_prompt and its key edge opens GUARDED
+    # (editors_base.KeyEdge.seed): the tap/key that opened it can still be
+    # latched on its first input pass, and that pass only arms it.
+
+    def _open_prompt(self, kind, title, fields, texts):
+        ws = self.ws
+        _arm_prompt(ws)
+        self.prompt = _Prompt(kind, title, fields)
+        self.prompt.open(texts, getattr(ws.input, "last_key", 0) or 0)
+        ws._dirty = True
 
     def _open_meta(self):
-        ws = self.ws
-        cart = ws.project.cart
+        cart = self.ws.project.cart
         if not cart:
             return
-        self.meta = {"title": str(cart.get("title") or "")[:24],
-                     "author": str(cart.get("author") or "")[:24],
-                     "field": 0, "msg": None, "armed": False}
-        ws._set_text_mode(True)             # clean ASCII typing (device keyboard)
-        ws.input.release_all()               # EVERYBODY let go -- the shared
-                                             # meaning, not a source's "I hold
-                                             # nothing" (runtime/input.py)
-        try:
-            ws.input._pressed = set()
-            ws.input._released = set()
-            ws.input._last = set()          # device InputState edge snapshot
-            ws.input._prev = set()          # host InputState edge snapshot
-        except AttributeError:
-            pass
-        ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
-        if ws.pointer is not None:
-            ws.pointer.click = False        # the tap that opened this != a field tap
-        ws._dirty = True
-
-    def _close_meta(self):
-        self.meta = None
-        self.ws._set_text_mode(False)
-
-    def _commit_meta(self):
-        ws = self.ws
-        m = self.meta
-        if m is None:
-            return
-        title = m["title"].strip()
-        author = m["author"].strip()
-        if not title:
-            m["msg"] = "TITLE CAN'T BE BLANK"
-            ws._dirty = True
-            return                          # stay open -- never persist a blank title
-        if not ws.project.commit_manifest(title=title, author=author):
-            m["msg"] = "COULD NOT SAVE"
-            ws._dirty = True
-            return
-        self._close_meta()
-        ws._dirty = True
-
-    def _meta_key(self, ch):
-        m = self.meta
-        if m is None:
-            return
-        field = "title" if m["field"] == 0 else "author"
-        if ch in (8, 127):                  # backspace / delete
-            m[field] = m[field][:-1]
-            m["msg"] = None
-            return
-        if ch in (13, 10):                  # Enter -> confirm
-            self._commit_meta()
-            return
-        if ch == 27:                        # Esc -> cancel
-            self._close_meta()
-            return
-        if ch == 9:                         # Tab -> switch field
-            m["field"] = 1 - m["field"]
-            return
-        if not (32 <= ch < 127):
-            return
-        if len(m[field]) >= 24:             # matches the launcher/toast title cap
-            return
-        m[field] += chr(ch)
-        m["msg"] = None
-
-    def _meta_input(self, i):
-        """Input while the CART INFO modal is open: last_key ONLY (see the note
-        above the section) -- no i.pressed(...) branch, ever."""
-        ws = self.ws
-        m = self.meta
-        if not m.get("armed"):
-            m["armed"] = True
-            ws._ekey_prev = i.last_key      # don't read the trigger byte as a keystroke
-            return True
-        k = i.last_key
-        if k and k != ws._ekey_prev:
-            self._meta_key(k)
-        ws._ekey_prev = k
-        return True
-
-    def _meta_rects(self):
-        """Modal geometry: a centered dialog with a TITLE field, an AUTHOR
-        field, a status line and OK/CANCEL, scaled by the system font like
-        every other responsive Cards element."""
-        lay = self.layout
-        fs = lay.fs
-        w, h = 240 * fs, 108 * fs
-        x = (lay.w - w) // 2
-        y = (lay.h - h) // 2
-        title_r = (x + 12 * fs, y + 26 * fs, w - 24 * fs, 14 * fs)
-        author_r = (x + 12 * fs, y + 54 * fs, w - 24 * fs, 14 * fs)
-        ok_r = (x + w - 96 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
-        cancel_r = (x + w - 50 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
-        return (x, y, w, h), title_r, author_r, ok_r, cancel_r
-
-    def _meta_pointer(self, px, py, click):
-        if not click:
-            return True
-        _, title_r, author_r, ok_r, cancel_r = self._meta_rects()
-        if self._in(px, py, title_r):
-            self.meta["field"] = 0
-        elif self._in(px, py, author_r):
-            self.meta["field"] = 1
-        elif self._in(px, py, ok_r):
-            self._commit_meta()
-        elif self._in(px, py, cancel_r):
-            self._close_meta()
-        self.ws._dirty = True
-        return True
-
-    # -- NEW SCRIPT: the one door that adds a file to a cart (#89) -----------
-    #
-    # It lives HERE, on the ADVANCED row, and nowhere else -- not on the Code
-    # tab's file chip, which is a switcher. A console for eight-year-olds does
-    # not want a New File button two taps from every cart, and a cart that is
-    # one file should stay one file unless somebody went looking.
-    #
-    # Typing follows the CART INFO modal's rule EXACTLY (see the note over
-    # _open_meta and do not re-derive it): last_key only, never i.pressed, and a
-    # one-frame `armed` guard so the tap that opened the prompt is not read as
-    # the first keystroke.
+        self._open_prompt("meta", "CART INFO",
+                          (("TITLE", "", 24), ("AUTHOR", "(optional)", 24)),
+                          (str(cart.get("title") or ""),
+                           str(cart.get("author") or "")))
 
     def _open_newf(self):
-        ws = self.ws
-        self.newf = {"name": "", "msg": None, "armed": False}
-        ws._set_text_mode(True)
-        ws.input.release_all()
-        try:
-            ws.input._pressed = set()
-            ws.input._released = set()
-            ws.input._last = set()
-            ws.input._prev = set()
-        except AttributeError:
-            pass
-        ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
-        if ws.pointer is not None:
-            ws.pointer.click = False
-        ws._dirty = True
+        self._open_prompt("newf", "NEW SCRIPT", (("NAME", "helpers", 24),),
+                          ("",))
 
-    def _close_newf(self):
-        self.newf = None
+    def _close_prompt(self):
+        self.prompt = None
         self.ws._set_text_mode(False)
         self.ws._dirty = True
+
+    def _commit_prompt(self):
+        p = self.prompt
+        if p is None:
+            return
+        if p.kind == "meta":
+            self._commit_meta(p)
+        else:
+            self._commit_newf(p)
+
+    def _commit_meta(self, p):
+        ws = self.ws
+        title = p.fields[0].text.strip()
+        author = p.fields[1].text.strip()
+        if not title:
+            p.msg = "TITLE CAN'T BE BLANK"
+            ws._dirty = True
+            return                          # stay open: never persist a blank title
+        if not ws.project.commit_manifest(title=title, author=author):
+            p.msg = "COULD NOT SAVE"
+            ws._dirty = True
+            return
+        self._close_prompt()
 
     def _newf_filename(self, typed):
         """The file a typed name lands on: slugged to letters, digits and
@@ -1265,112 +1195,83 @@ class CardsLayer:
             return None
         return out + ext
 
-    def _commit_newf(self):
+    def _commit_newf(self, p):
         ws = self.ws
-        n = self.newf
         cart = ws.project.cart
-        name = self._newf_filename(n["name"])
+        name = self._newf_filename(p.fields[0].text)
         if name is None:
-            n["msg"] = "NAME IT WITH LETTERS"
+            p.msg = "NAME IT WITH LETTERS"
             ws._dirty = True
             return
         made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
                                                              "-- " + name + "\n"))
         if made is None:
-            n["msg"] = "THAT NAME IS TAKEN"
+            p.msg = "THAT NAME IS TAKEN"
             ws._dirty = True
             return
-        self._close_newf()
+        self._close_prompt()
         self._close_files()
         ws.editor_app.set_tab("code")
         ws.open_code_file(made)
 
-    def _newf_key(self, ch):
-        n = self.newf
-        if ch in (8, 127):
-            n["name"] = n["name"][:-1]
-            n["msg"] = None
-        elif ch in (13, 10):
-            self._commit_newf()
-        elif ch == 27:
-            self._close_newf()
-        elif 32 <= ch < 127 and len(n["name"]) < 24:
-            n["name"] += chr(ch)
-            n["msg"] = None
+    def _prompt_event(self, ev):
+        if ev == TE_COMMIT:
+            self._commit_prompt()
+        elif ev == TE_CANCEL:
+            self._close_prompt()
 
-    def _newf_input(self, i):
-        ws = self.ws
-        n = self.newf
-        if not n.get("armed"):
-            n["armed"] = True
-            ws._ekey_prev = i.last_key
-            return True
-        k = i.last_key
-        if k and k != ws._ekey_prev:
-            self._newf_key(k)
-        ws._ekey_prev = k
+    def _prompt_key(self, ch):
+        """One typed byte into the open prompt (the tests' door)."""
+        self._prompt_event(self.prompt.key(ch))
+
+    def _prompt_input(self, i):
+        self._prompt_event(self.prompt.feed(i))
         return True
 
-    def _newf_rects(self):
-        """A centered one-field dialog -- _meta_rects' geometry minus a row."""
+    def _prompt_rects(self):
+        """Dialog geometry: a centered panel, one 14px field per entry under
+        its label, a status line and OK/X, scaled by the system font like
+        every other responsive Cards element."""
         lay = self.layout
         fs = lay.fs
-        w, h = 240 * fs, 80 * fs
+        n = len(self.prompt.fields)
+        w, h = 240 * fs, (52 + 28 * n) * fs
         x = (lay.w - w) // 2
         y = (lay.h - h) // 2
-        return ((x, y, w, h),
-                (x + 12 * fs, y + 30 * fs, w - 24 * fs, 14 * fs),
-                (x + w - 96 * fs, y + h - 22 * fs, 40 * fs, 16 * fs),
-                (x + w - 50 * fs, y + h - 22 * fs, 40 * fs, 16 * fs))
+        fields = tuple((x + 12 * fs, y + (26 + 28 * i) * fs, w - 24 * fs, 14 * fs)
+                       for i in range(n))
+        ok_r = (x + w - 96 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
+        cancel_r = (x + w - 50 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
+        return (x, y, w, h), fields, ok_r, cancel_r
 
-    def _newf_pointer(self, px, py, click):
+    def _prompt_pointer(self, px, py, click):
         if not click:
             return True
-        _, _field, ok_r, cancel_r = self._newf_rects()
-        if self._in(px, py, ok_r):
-            self._commit_newf()
-        elif self._in(px, py, cancel_r):
-            self._close_newf()
+        _, fields, ok_r, cancel_r = self._prompt_rects()
+        for i, r in enumerate(fields):
+            if _in(px, py, r):
+                self.prompt.field = i
+        if _in(px, py, ok_r):
+            self._commit_prompt()
+        elif _in(px, py, cancel_r):
+            self._close_prompt()
         self.ws._dirty = True
         return True
 
-    def _draw_newf_modal(self):
+    def _draw_prompt(self):
         NAMES = self._NAMES
         cv = self.ws.sys_canvas
         fs = self.layout.fs
-        n = self.newf
-        (x, y, w, h), field, ok_r, cancel_r = self._newf_rects()
+        p = self.prompt
+        (x, y, w, h), fields, ok_r, cancel_r = self._prompt_rects()
         _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
-        cv.print("NEW SCRIPT", x + 10 * fs, y + 8 * fs, NAMES["white"], 1)
-        cv.print("NAME", x + 12 * fs, field[1] - 9 * fs, NAMES["light_grey"], 1)
-        _ui.text_field(cv, field, n["name"], "helpers")
-        cv.rectb(field[0], field[1], field[2], field[3], NAMES["yellow"])
-        if n.get("msg"):
-            cv.print(n["msg"][:34], x + 12 * fs, y + h - 38 * fs, NAMES["red"], 1)
-        _ui.game_btn(cv, ok_r, "OK", NAMES["green"])
-        _ui.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])
-
-    def _draw_meta_modal(self):
-        NAMES = self._NAMES
-        ws = self.ws
-        cv = ws.sys_canvas
-        fs = self.layout.fs
-        m = self.meta
-        (x, y, w, h), title_r, author_r, ok_r, cancel_r = self._meta_rects()
-        _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
-        cv.print("CART INFO", x + 10 * fs, y + 8 * fs, NAMES["white"], 1)
-        foc_title = m["field"] == 0
-        cv.print("TITLE", x + 12 * fs, title_r[1] - 9 * fs, NAMES["light_grey"], 1)
-        _ui.text_field(cv, title_r, m["title"], "")
-        if foc_title:
-            cv.rectb(title_r[0], title_r[1], title_r[2], title_r[3], NAMES["yellow"])
-        cv.print("AUTHOR", x + 12 * fs, author_r[1] - 9 * fs, NAMES["light_grey"], 1)
-        _ui.text_field(cv, author_r, m["author"], "(optional)")
-        if not foc_title:
-            cv.rectb(author_r[0], author_r[1], author_r[2], author_r[3], NAMES["yellow"])
-        if m.get("msg"):
-            bad = ("BLANK" in m["msg"] or "FAILED" in m["msg"] or "SAVE" in m["msg"])
-            cv.print(m["msg"][:34], x + 12 * fs, y + h - 38 * fs,
-                     NAMES["red"] if bad else NAMES["green"], 1)
+        cv.print(p.title, x + 10 * fs, y + 8 * fs, NAMES["white"], 1)
+        for i, r in enumerate(fields):
+            cv.print(p.labels[i], x + 12 * fs, r[1] - 9 * fs, NAMES["light_grey"], 1)
+            _ui.text_field(cv, r, p.fields[i].text, p.hints[i])
+            if i == p.field:
+                cv.rectb(r[0], r[1], r[2], r[3], NAMES["yellow"])
+        if p.msg:
+            cv.print(p.msg[:34], x + 12 * fs, y + h - 38 * fs, NAMES["red"], 1)
         _ui.game_btn(cv, ok_r, "OK", NAMES["green"])
         _ui.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])

@@ -36,6 +36,7 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 # The cart API's names, once (see runtime/cart_verbs.py) -- the syntax
 # highlighter's builtin class is derived from them below.
@@ -118,6 +119,28 @@ _SYM_Y = 220
 _SYM_H = 20
 _SYM_CELL = 20
 _SYM_AREA = (0, _SYM_Y, _SYM_CELL * len(_CODE_SYMBOLS), _SYM_H)
+
+
+def symbols_for(lang):
+    """The tappable symbol palette for a source language: the keys the
+    keyboard lacks, in the order they are laid out."""
+    return _LUA_SYMBOLS if lang == "lua" else _CODE_SYMBOLS
+
+
+def draw_symbol_keys(cv, t, syms, x0, y, cell, h, fs, dx=0, dy=0, rects=None):
+    """The symbol palette renderer, ONE body for the Code tab and the script
+    console: each key is a grid CELL whose picture is the symbol itself, laid
+    out `cell` apart from `x0`. `cell` draws the frame and hands back where
+    the picture goes; the symbol sits at the frozen +6px inside it, nudged by
+    `dx`/`dy` (the Code tab re-centres it in a key the chrome scale grew,
+    #203). Appends each key's rect to `rects` when a list is given."""
+    for i in range(len(syms)):
+        r = (x0 + i * cell, y, cell - 1, h - 1)
+        art = _ui.cell(cv, t, r, pad=0, caption_h=0, fs=fs)
+        cv.print(syms[i], art[0] + 6 * fs + dx, art[1] + 6 * fs + dy,
+                 t["sym_ink"], 1)
+        if rects is not None:
+            rects.append(r)
 
 
 # --- code-editor syntax highlighting (#24) ---------------------------------
@@ -257,10 +280,9 @@ class CodeLayer:
     _TLS_COLS = 3                 # cells wide for the always-visible tools toggle
     _POPUP_MAX = 8               # visible rows in the autocomplete / jump popups
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         self._ekey = KeyEdge()        # keyboard edge tracker (editor edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self._hl_cache = {}           # per-line syntax-highlight memo (#24)
@@ -322,7 +344,7 @@ class CodeLayer:
         return cart is not None and _modes.cart_lang(cart) == "lua"
 
     def _symbols(self):
-        return _LUA_SYMBOLS if self._is_lua() else _CODE_SYMBOLS
+        return symbols_for("lua" if self._is_lua() else "python")
 
     # -- Layer facets --------------------------------------------------------
 
@@ -405,12 +427,12 @@ class CodeLayer:
             return True
         # #89 chrome, in overlay order: the always-visible tools toggle, then (when
         # open) the find bar + the tool palette row, all before the code body.
-        if click and self._in(px, py, self._tls_btn(lay)):
+        if click and _in(px, py, self._tls_btn(lay)):
             self._tools_open = not self._tools_open
             ws.mark_dirty()
             return True
         _fb = self._file_btn(lay)
-        if click and _fb is not None and self._in(px, py, _fb):
+        if click and _fb is not None and _in(px, py, _fb):
             if self._files_open:
                 self._files_open = False
                 ws.mark_dirty()
@@ -424,16 +446,16 @@ class CodeLayer:
             return True
         if click and self._find_open and self._find_tap(px, py, lay):
             return True
-        if click and self._tools_open and self._in(px, py, self._toolbar_rect(lay)):
+        if click and self._tools_open and _in(px, py, self._toolbar_rect(lay)):
             self._tool_tap(px, py, lay, ed)
             return True
-        if click and self._in(px, py, lay.sym_area) and ed is not None:
+        if click and _in(px, py, lay.sym_area) and ed is not None:
             syms = self._symbols()
             i = (px - lay.sym_area[0]) // lay.sym_cell   # tap a coding symbol
             if 0 <= i < len(syms):
                 self._feed_char(ord(syms[i]))            # routes to find field or editor
             return True
-        if ed is not None and self._in(px, py, lay.code_area()):
+        if ed is not None and _in(px, py, lay.code_area()):
             if self._select_mode:
                 self._select_pointer(px, py, click, lay, ed)   # drag = extend selection
             else:
@@ -683,17 +705,17 @@ class CodeLayer:
 
     def _find_tap(self, px, py, lay):
         btns = self._find_btns(lay)
-        if self._in(px, py, btns["prev"]):
+        if _in(px, py, btns["prev"]):
             self._find_run(False)
-        elif self._in(px, py, btns["next"]):
+        elif _in(px, py, btns["next"]):
             self._find_run(True)
-        elif self._in(px, py, btns["case"]):
+        elif _in(px, py, btns["case"]):
             self._find_ci = not self._find_ci
             self._find_run(True, reset=True)
-        elif self._in(px, py, btns["close"]):
+        elif _in(px, py, btns["close"]):
             self._find_open = False
             self.ws.mark_dirty()
-        elif not self._in(px, py, self._find_rect(lay)):
+        elif not _in(px, py, self._find_rect(lay)):
             return False
         return True                            # a tap anywhere on the bar is consumed
 
@@ -765,7 +787,7 @@ class CodeLayer:
         if self._cmp_open:
             _panel, rects = self._cmp_geom(lay, ed)
             for i in range(len(rects)):
-                if self._in(px, py, rects[i]):
+                if _in(px, py, rects[i]):
                     self._cmp_sel = i
                     self._popup_accept()
                     return True
@@ -773,7 +795,7 @@ class CodeLayer:
         elif self._jump_open:
             _panel, rects = self._jump_geom(lay)
             for i in range(len(rects)):
-                if self._in(px, py, rects[i]):
+                if _in(px, py, rects[i]):
                     self._jump_sel = i
                     self._popup_accept()
                     return True
@@ -781,7 +803,7 @@ class CodeLayer:
         elif self._files_open:
             _panel, rects = self._files_geom(lay)
             for i in range(len(rects)):
-                if self._in(px, py, rects[i]):
+                if _in(px, py, rects[i]):
                     self._files_sel = i
                     self._popup_accept()
                     return True
@@ -959,7 +981,7 @@ class CodeLayer:
         ws = self.ws
         ed = ws.editor
         lay = ws.code_layout
-        if ed is None or not ws.pointer.down or not self._in(px, py, lay.code_area()):
+        if ed is None or not ws.pointer.down or not _in(px, py, lay.code_area()):
             self._drag = None
             return
         if self._drag is None:
@@ -1326,14 +1348,5 @@ class CodeLayer:
         sy = lay.sym_y
         sh = lay.sym_h
         t = self._t if self._t is not None else self._tones()
-        syms = self._symbols()
-        for i in range(len(syms)):
-            x = lay.sym_area[0] + i * sc
-            # A key is a grid CELL whose picture is the symbol itself: `cell`
-            # draws the frame and hands back where the picture goes (the frozen
-            # +6px offset is measured from that rect, not from the cell).
-            art = _ui.cell(cv, t, (x, sy, sc - 1, sh - 1),
-                           pad=0, caption_h=0, fs=fs)
-            # re-centre the fs-sized symbol in a key the chrome scale grew (#203)
-            cv.print(syms[i], art[0] + 6 * fs + lay.sym_text_dx,
-                     art[1] + 6 * fs + lay.sym_text_dy, t["sym_ink"], 1)
+        draw_symbol_keys(cv, t, self._symbols(), lay.sym_area[0], sy, sc, sh,
+                         fs, lay.sym_text_dx, lay.sym_text_dy)

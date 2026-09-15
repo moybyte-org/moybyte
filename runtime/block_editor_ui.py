@@ -17,9 +17,10 @@ holds a back-reference to the owning Workstation (`self.ws`) for the handful
 of primitives it shares with the rest of the console (canvas, input, cart,
 carts_store, _with_sd, ach, set_menu_view, _set_text_mode, _leave_menu,
 _leave_or_home, _btn/_icon_btn, editor, cart_error, can_manage, pointer,
-sys_canvas). `NAMES` / `_in` / `_err_text` are injected at construction
-instead of imported back from console.py, which would be a genuine circular
-import: console.py imports BlockEditorUI to build the one instance it holds.
+sys_canvas). `NAMES` / `_err_text` are injected at construction instead of
+imported back from console.py, which would be a genuine circular import:
+console.py imports BlockEditorUI to build the one instance it holds. The rect
+hit-test is `ui.rect_in`, imported directly.
 
 Kept name-for-name with the pre-extraction Workstation methods/fields (no
 renaming): Workstation.set_menu_view/_relayout/_leave_menu/go_home/open all
@@ -32,9 +33,10 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
-from editors import BlockEditor, KeyEdge, _clone_tree
+from editors import BlockEditor, KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL, _clone_tree
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
 # host_app has aliased it on the host, or `runtime.blocks` when a test loads
@@ -47,6 +49,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The shared pre-literate glyph vocabulary (#93 icon pass): the action bar's UNDO/REDO
 # draw glyph-only ("..." IS its own icon and stays text). Imported for the membership
 # check that keeps the word label as a fallback (chrome._gbtn owns it now).
+try:
+    from widgets import arm_prompt as _arm_prompt
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.widgets import arm_prompt as _arm_prompt
+
 try:
     from chrome import _gbtn as _chrome_gbtn
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -231,6 +238,21 @@ _BLK_HINTS = {
 }
 
 
+
+def _blk_num_allow(c, text):
+    """A number literal: digits, one leading '-' and at most one '.'
+    (parse_number_literal tolerates more; the filter keeps the buffer honest)."""
+    return c.isdigit() or (c == "-" and not text) or (c == "." and "." not in text)
+
+
+def _blk_name_allow(c, text):
+    """A variable / list / block / input name: name-legal characters only."""
+    return c.isalpha() or c.isdigit() or c in ("_", " ", "-")
+
+
+# Which characters each prompt kind types; a kind not listed is a NAME.
+_BLK_KBD_ALLOW = {"num": _blk_num_allow, "text": None}
+
 class BlockLayout(LayoutBase):
     """Responsive block-editor geometry (#39 step 2): the scrolling outline (X0/W/
     Y0, row height + indent, visible ROWS), the bottom action bar, and the modal
@@ -353,7 +375,7 @@ class BlockEditorUI:
     called lazily from `set_menu_view("blocks")` the first time a cart's block
     editor is opened, exactly like the pre-extraction code did inline."""
 
-    def __init__(self, ws, names, in_rect, err_text, clamp_scroll):
+    def __init__(self, ws, names, err_text, clamp_scroll):
         self.ws = ws
         # Injected instead of imported back from console.py (see module docstring):
         # console.py builds this instance, so `import console` here would be a real
@@ -362,7 +384,6 @@ class BlockEditorUI:
         # Workstation._settings_scroll -- injecting it here (instead of duplicating
         # it) keeps that dedup meaningful.
         self._NAMES = names
-        self._in = in_rect
         self._err_text = err_text
         self._clamp_scroll = clamp_scroll
         # Block editor (#29 Part 2): a BlockEditor over the cart's block program +
@@ -909,12 +930,9 @@ class BlockEditorUI:
         m = self.blk_menu
         if not m or not m["items"]:
             return
-        mrows = self.block_layout.menu_rows
         m["sel"] = max(0, min(len(m["items"]) - 1, m["sel"] + d))
-        if m["sel"] < m["top"]:
-            m["top"] = m["sel"]
-        elif m["sel"] > m["top"] + mrows - 1:
-            m["top"] = m["sel"] - mrows + 1
+        m["top"] = self._clamp_scroll(m["top"], m["sel"],
+                                      self.block_layout.menu_rows, len(m["items"]))
 
     def _blk_menu_select(self):
         """Activate the highlighted menu item (drill in or commit)."""
@@ -1000,9 +1018,8 @@ class BlockEditorUI:
         pd = be.new_proc("block")
         self.blk_menu = None
         self._blk_reveal()
-        self.blk_kbd = {"kind": "proc", "text": "", "var": _blocks_mod.proc_name(pd),
-                        "proc": pd, "slot_target": None, "armed": False}
-        self._blk_arm_prompt()
+        self._blk_open_kbd("proc", var=_blocks_mod.proc_name(pd), proc=pd,
+                           slot_target=None)
 
     def _blk_open_proc_menu(self, pd):
         """Open the PROC ACTIONS menu on a define-hat: add/remove an input, rename or
@@ -1025,14 +1042,10 @@ class BlockEditorUI:
             return
         if item == _PROC_ADD:
             # name the new input, then add_param on confirm.
-            self.blk_kbd = {"kind": "param", "text": "", "var": "", "proc": pd,
-                            "slot_target": None, "armed": False}
-            self._blk_arm_prompt()
+            self._blk_open_kbd("param", var="", proc=pd, slot_target=None)
         elif item == _PROC_RENAME:
-            self.blk_kbd = {"kind": "proc", "text": "",
-                            "var": _blocks_mod.proc_name(pd), "proc": pd,
-                            "slot_target": None, "armed": False}
-            self._blk_arm_prompt()
+            self._blk_open_kbd("proc", var=_blocks_mod.proc_name(pd), proc=pd,
+                               slot_target=None)
         elif item == _PROC_DELP:
             self.blk_status = "INPUT REMOVED" if be.remove_last_param(pd) \
                 else "NO INPUTS"
@@ -1048,7 +1061,6 @@ class BlockEditorUI:
         holding a literal) opens the on-screen number pad so the kid TYPES the value;
         an expr slot is the Scratch white oval -- type a number OR drop in a reporter
         block; variable + dropdown open a picker; text opens the keyboard."""
-        be = self.blocks_ed
         t = slot["type"]
         name = slot["name"]
         if t == _blocks_mod.SLOT_DROPDOWN:
@@ -1090,27 +1102,19 @@ class BlockEditorUI:
                 val = d
         be.set_slot(name, val, block)
 
-    # -- typed literal prompts (number / text), shared on-screen keypad -------
-    def _blk_arm_prompt(self):
-        """Neutralise the input edge that OPENED a prompt so its first frame can't
-        carry the still-latched A/Enter/tap straight into commit/cancel (#29). Shared
-        by every blk_kbd prompt (variable name, number, text)."""
-        self.ws._set_text_mode(True)            # ASCII keyboard for typing
-        # EVERYBODY let go: the shared object's meaning (every source), not a
-        # driver's per-source "I hold nothing" -- see runtime/input.py.
-        self.ws.input.release_all()             # drop held buttons (host + device)
-        try:
-            self.ws.input._pressed = set()
-            self.ws.input._released = set()
-            self.ws.input._last = set()         # device InputState edge snapshot
-            self.ws.input._prev = set()         # host InputState edge snapshot
-        except AttributeError:
-            pass
-        # Seed the typed-key edge with the byte held RIGHT NOW so a held A/Enter byte
-        # (last_key) isn't re-read as a fresh keystroke on the prompt's first frame.
-        self.ws._ekey_prev = getattr(self.ws.input, "last_key", 0) or 0
-        if self.ws.pointer is not None:
-            self.ws.pointer.click = False       # a tap that opened the prompt != OK
+    # -- the entry prompts (name / number / text), one on-screen keypad -------
+    def _blk_open_kbd(self, kind, text="", **fields):
+        """Open an entry prompt as `self.blk_kbd`: `kind` routes the keypad
+        (num / text / var / list / proc / param) and picks which characters
+        its TextEntry accepts; `fields` are the prompt's own facts (the slot or
+        variable it edits). Opened through widgets.arm_prompt with a GUARDED
+        edge (#29): the tap/key that opened it is never its first keystroke."""
+        entry = TextEntry(16, _BLK_KBD_ALLOW.get(kind, _blk_name_allow))
+        _arm_prompt(self.ws)
+        entry.open(text, getattr(self.ws.input, "last_key", 0) or 0, guard=True)
+        fields["kind"] = kind
+        fields["entry"] = entry
+        self.blk_kbd = fields
 
     def _blk_open_number_prompt(self, block, name, slot):
         """Open the on-screen number pad to TYPE a literal into a number / expr slot
@@ -1122,10 +1126,8 @@ class BlockEditorUI:
         cur = (block.get("p", {}) or {}).get(name)
         allow_block = self._blk_slot_is_expr(block, name, slot)
         self.blk_menu = None
-        self.blk_kbd = {"kind": "num", "text": "", "cur": cur,
-                        "block": block, "slot": name, "allow_block": allow_block,
-                        "armed": False}
-        self._blk_arm_prompt()
+        self._blk_open_kbd("num", cur=cur, block=block, slot=name,
+                           allow_block=allow_block)
 
     def _blk_slot_is_expr(self, block, name, slot):
         """True if the named slot on `block` is an expr slot (so the number pad can
@@ -1144,9 +1146,7 @@ class BlockEditorUI:
     def _blk_open_text_prompt(self, block, name, cur):
         """Open the on-screen keyboard to TYPE a text literal into a text slot."""
         self.blk_menu = None
-        self.blk_kbd = {"kind": "text", "text": str(cur or ""),
-                        "block": block, "slot": name, "armed": False}
-        self._blk_arm_prompt()
+        self._blk_open_kbd("text", str(cur or ""), block=block, slot=name)
 
     def _blk_open_variable_picker(self, block, name):
         # The variable-slot picker: "+ new variable" first (so a kid can create +
@@ -1182,22 +1182,12 @@ class BlockEditorUI:
             slot_target = (m.get("block"), m.get("slot"))
         name = be.new_var("var")
         self.blk_menu = None
-        # An inline prompt: `text` is the live edit buffer (starts EMPTY so the kid
-        # types a fresh name instead of appending to the default), `var` is the
-        # just-created variable's CURRENT name -- confirm renames it old->typed, and a
-        # blank/invalid entry keeps this default. `slot_target`, if set, is the
-        # (block, slot) to fill with the final name. `kind` routes the shared keypad
-        # (var / num / text); `armed` is the one-frame guard (#29): the prompt ignores
-        # commit/cancel until its first input pass arms it, so the very input that
-        # *selected* "+ new variable" (a held A / Enter, or the tap) can't carry into
-        # the fresh prompt and instantly close it.
-        self.blk_kbd = {"kind": "var", "text": "", "var": name,
-                        "slot_target": slot_target, "armed": False}
-        # Neutralise the triggering input so the prompt's first frame can't consume it
-        # (#29): drop held buttons, wipe this frame's edges, and seed the typed-key
-        # snapshot -- otherwise the still-latched A/Enter edge (or the held Enter byte
-        # on the device) lands on the prompt as commit and it flashes shut.
-        self._blk_arm_prompt()
+        # The entry starts EMPTY so the kid types a fresh name instead of
+        # appending to the default; `var` is the just-created variable's CURRENT
+        # name: confirm renames it old->typed, and a blank/invalid entry keeps
+        # the default. `slot_target`, if set, is the (block, slot) to fill with
+        # the final name.
+        self._blk_open_kbd("var", var=name, slot_target=slot_target)
 
     def _blk_new_list(self):
         """Create a fresh list (default name) and open the name-entry prompt (#48).
@@ -1212,9 +1202,7 @@ class BlockEditorUI:
             slot_target = (m.get("block"), m.get("slot"))
         name = be.new_list("list")
         self.blk_menu = None
-        self.blk_kbd = {"kind": "list", "text": "", "var": name,
-                        "slot_target": slot_target, "armed": False}
-        self._blk_arm_prompt()
+        self._blk_open_kbd("list", var=name, slot_target=slot_target)
 
     def _blk_kbd_commit(self):
         """Confirm a prompt: a name prompt renames the var; a number prompt parses the
@@ -1230,15 +1218,15 @@ class BlockEditorUI:
         if kind == "num":
             cur = k.get("cur")
             default = cur if _blocks_mod.is_literal_value(cur) and cur is not None else 0
-            val = _blocks_mod.parse_number_literal(k["text"], default)
+            val = _blocks_mod.parse_number_literal(k["entry"].text, default)
             be.set_slot(k["slot"], val, k["block"])
             self.blk_status = "= " + str(val)
         elif kind == "text":
-            be.set_slot(k["slot"], k["text"], k["block"])
+            be.set_slot(k["slot"], k["entry"].text, k["block"])
             self.blk_status = "TEXT SET"
         elif kind == "list":                   # "list": rename the freshly-created list
             old = k["var"]
-            applied = be.rename_list(old, k["text"])
+            applied = be.rename_list(old, k["entry"].text)
             final = applied if applied else old
             bt = k.get("slot_target")
             if bt is not None and bt[0] is not None:
@@ -1246,15 +1234,15 @@ class BlockEditorUI:
             self.blk_status = "LIST: " + final[:12]
         elif kind == "proc":                   # "proc": rename the custom block (#48)
             old = k["var"]
-            applied = be.rename_proc(old, k["text"])
+            applied = be.rename_proc(old, k["entry"].text)
             self.blk_status = "BLOCK: " + (applied if applied else old)[:12]
         elif kind == "param":                  # "param": add an input to the block (#48)
-            applied = be.add_param(k.get("proc"), k["text"])
+            applied = be.add_param(k.get("proc"), k["entry"].text)
             self.blk_status = ("input: " + applied[:12]) if applied \
                 else "bad input name"
         else:                                  # "var": rename the freshly-created var
             old = k["var"]
-            applied = be.rename_var(old, k["text"])
+            applied = be.rename_var(old, k["entry"].text)
             final = applied if applied else old   # blank/dup/invalid keeps the default
             bt = k.get("slot_target")
             if bt is not None and bt[0] is not None:
@@ -1277,42 +1265,16 @@ class BlockEditorUI:
         self.ws._set_text_mode(False)
 
     def _blk_kbd_key(self, ch):
-        """Apply one typed character to the prompt buffer: backspace deletes, Enter
-        confirms, Esc cancels, and an allowed char appends. The allowed set depends on
-        the prompt kind -- digits/'-'/'.' for a number, name-legal chars for a var,
-        any printable for free text."""
+        """One typed byte into the open prompt (editors_base.text_key: trim,
+        commit, cancel, or append what the kind allows)."""
         k = self.blk_kbd
         if k is None:
             return
-        if ch in (8, 127):                    # backspace / delete
-            k["text"] = k["text"][:-1]
-            return
-        if ch in (13, 10):                    # Enter -> confirm
+        ev = k["entry"].key(ch)
+        if ev == TE_COMMIT:
             self._blk_kbd_commit()
-            return
-        if ch == 27:                          # Esc -> cancel
+        elif ev == TE_CANCEL:
             self._blk_kbd_cancel()
-            return
-        if not (32 <= ch < 127):
-            return
-        c = chr(ch)
-        if len(k["text"]) >= 16:              # cap so it always fits a row
-            return
-        kind = k.get("kind", "var")
-        if kind == "num":
-            # digits, a single leading '-', and at most one '.' (parse_number_literal
-            # tolerates more, but filtering here keeps the on-screen buffer honest).
-            if c.isdigit():
-                k["text"] += c
-            elif c == "-" and not k["text"]:
-                k["text"] += c
-            elif c == "." and "." not in k["text"]:
-                k["text"] += c
-        elif kind == "text":
-            k["text"] += c                    # any printable char for a text literal
-        else:                                  # "var": name-legal chars only
-            if c.isalpha() or c.isdigit() or c in ("_", " ", "-"):
-                k["text"] += c
 
     def _blk_open_dropdown_picker(self, block, slot):
         opts = _blocks_mod.slot_options(slot)
@@ -1447,21 +1409,18 @@ class BlockEditorUI:
             ws.scene_ui._scene_input()
             return
         if self.blk_kbd is not None:
-            # The variable name-entry prompt owns input: type the name (one insert per
-            # physical press, edge-detected like the code editor), Enter/A confirm, B
-            # cancels. last_key carries the resolved ASCII byte (text mode is on).
-            # One-frame guard (#29): the FIRST input pass after the prompt opens only
-            # arms it -- never commits/cancels -- so the A/Enter/tap that *selected*
-            # "+ new variable" (which can still be latched/held this frame) can't carry
-            # in and instantly close the prompt before the kid types a name.
-            if not self.blk_kbd.get("armed"):
-                self.blk_kbd["armed"] = True
-                ws._ekey_prev = i.last_key   # don't read the trigger byte as a key
+            # The entry prompt owns input: typed bytes go through its TextEntry
+            # (one insert per physical press), Enter/A confirm, B cancels. The
+            # FIRST input pass after it opens only arms the guarded edge (#29),
+            # so the A/Enter/tap that opened it cannot carry in and close it.
+            entry = self.blk_kbd["entry"]
+            if entry.edge.arming(i.last_key):
                 return
-            k = i.last_key
-            if k and k != ws._ekey_prev:
-                self._blk_kbd_key(k)
-            ws._ekey_prev = k
+            ev = entry.feed(i)
+            if ev == TE_COMMIT:
+                self._blk_kbd_commit()
+            elif ev == TE_CANCEL:
+                self._blk_kbd_cancel()
             if i.pressed("a") or i.pressed("run"):
                 self._blk_kbd_commit()
             elif i.pressed("b"):
@@ -1548,24 +1507,15 @@ class BlockEditorUI:
             return
         if self._dragv is None:
             area = (lay.x0, lay.y0, lay.outline_w, lay.rows * lay.row_h)
-            if len(be.rows) <= lay.rows or not self._in(px, py, area):
+            if len(be.rows) <= lay.rows or not _in(px, py, area):
                 return
             self._dragv = py
             return
-        step = max(1, lay.row_h)
-        delta = self._dragv - py
-        top_max = max(0, len(be.rows) - lay.rows)
-        moved = False
-        while delta >= step and self.blk_top < top_max:
-            self.blk_top += 1
-            delta -= step
-            moved = True
-        while delta <= -step and self.blk_top > 0:
-            self.blk_top -= 1
-            delta += step
-            moved = True
-        self._dragv = py + delta
-        if moved:
+        was = self.blk_top
+        self._dragv, self.blk_top = _ui.row_drag(
+            self._dragv, py, max(1, lay.row_h), self.blk_top,
+            max(0, len(be.rows) - lay.rows))
+        if self.blk_top != was:
             ws._dirty = True
 
     def _blocks_pointer(self, px, py, click):
@@ -1584,7 +1534,7 @@ class BlockEditorUI:
         # outline scroll. Suppressed while a block modal is open.
         if panes is not None and self.blk_kbd is None and self.blk_menu is None:
             if click:
-                self._ws_scene_drag = self._in(px, py, panes[1])
+                self._ws_scene_drag = _in(px, py, panes[1])
             if self._ws_scene_drag:
                 self._scene_pane_pointer(px, py, click)
                 if not click and not self.ws.pointer.down:
@@ -1604,7 +1554,7 @@ class BlockEditorUI:
             # Sprite list (#85/#93): tapping a chip edits that sprite's scripts (STAGE =
             # the global program); the "+" chip adds a new sprite. Scratch's sprite pane.
             for rect, tag in self._blk_roster_btns:
-                if self._in(px, py, rect):
+                if _in(px, py, rect):
                     if tag == _ADD_SPRITE:
                         self._add_sprite()
                     else:
@@ -1615,26 +1565,26 @@ class BlockEditorUI:
             return
         lay = self.block_layout
         # Action bar: editing controls + CODE (graduate) only (SAVE/CLOSE in the bar).
-        if self._in(px, py, lay.add_btn):
+        if _in(px, py, lay.add_btn):
             self._blk_open_categories(); return
-        if self._in(px, py, lay.del_btn):
+        if _in(px, py, lay.del_btn):
             be.delete(); self.blk_slot = 0; self._blk_reveal(); return
-        if self._in(px, py, lay.up_btn):
+        if _in(px, py, lay.up_btn):
             be.move_block(-1); self._blk_reveal(); return
-        if self._in(px, py, lay.dn_btn):
+        if _in(px, py, lay.dn_btn):
             be.move_block(1); self._blk_reveal(); return
-        if self._in(px, py, lay.code_btn):
+        if _in(px, py, lay.code_btn):
             self.graduate_to_code(); return
         # #93 edit cluster: "..." opens the block-actions menu, UNDO/REDO walk history.
-        if self._in(px, py, lay.act_btn):
+        if _in(px, py, lay.act_btn):
             self._blk_open_actions(); return
-        if self._in(px, py, lay.undo_btn):
+        if _in(px, py, lay.undo_btn):
             self._blk_undo(); return
-        if self._in(px, py, lay.redo_btn):
+        if _in(px, py, lay.redo_btn):
             self._blk_redo(); return
         # Tap a row in the outline: select it (and on a block, advance the slot
         # highlight / open the insert menu on a `+` row -- a tap == the A action).
-        if self._in(px, py, lay.area()):
+        if _in(px, py, lay.area()):
             ridx = self.blk_top + (py - lay.y0) // lay.row_h
             if 0 <= ridx < len(be.rows):
                 if be.moving():
@@ -1675,7 +1625,7 @@ class BlockEditorUI:
             return
         lay = self.block_layout
         mx, my, mw, mh = lay.menu
-        if not self._in(px, py, lay.menu):
+        if not _in(px, py, lay.menu):
             self.blk_menu = None                 # tap outside dismisses
             return
         ridx = m["top"] + (py - (my + 16 * lay.fs)) // lay.menu_row_h
@@ -1686,19 +1636,19 @@ class BlockEditorUI:
     def _blk_kbd_click(self, px, py):
         """Touch handling for the entry prompts. One-frame guard (#29): the tap that
         OPENED the prompt must not carry into this first pass and immediately commit."""
-        if self.blk_kbd is not None and not self.blk_kbd.get("armed"):
-            self.blk_kbd["armed"] = True
+        if self.blk_kbd is not None and \
+                self.blk_kbd["entry"].edge.arming(self.ws.input.last_key):
             return
         if self.blk_kbd is not None and self.blk_kbd.get("kind") == "num":
             self._blk_num_click(px, py)
             return
         # var / text prompt: DEL backspaces, OK confirms, X cancels (typing is the
         # on-screen / T-Deck keyboard).
-        if self._in(px, py, _BLK_KBD_DEL):
+        if _in(px, py, _BLK_KBD_DEL):
             self._blk_kbd_key(8); return
-        if self._in(px, py, _BLK_KBD_OK):
+        if _in(px, py, _BLK_KBD_OK):
             self._blk_kbd_commit(); return
-        if self._in(px, py, _BLK_KBD_X):
+        if _in(px, py, _BLK_KBD_X):
             self._blk_kbd_cancel(); return
         # taps inside the panel are ignored (no dismiss-on-tap-outside: a stray tap
         # shouldn't discard a half-typed name).
@@ -1714,16 +1664,16 @@ class BlockEditorUI:
             c = idx % _BLK_NUM_BPR
             rx = _BLK_NUM_GX + c * _BLK_NUM_BW
             ry = _BLK_NUM_GY + r * _BLK_NUM_BH
-            if self._in(px, py, (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3)):
+            if _in(px, py, (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3)):
                 self._blk_kbd_key(ord(_BLK_NUM_KEYS[idx]))
                 return
-        if self._in(px, py, _BLK_NUM_DEL):
+        if _in(px, py, _BLK_NUM_DEL):
             self._blk_kbd_key(8); return
-        if k is not None and k.get("allow_block") and self._in(px, py, _BLK_NUM_BLOCK):
+        if k is not None and k.get("allow_block") and _in(px, py, _BLK_NUM_BLOCK):
             self._blk_num_to_block(); return
-        if self._in(px, py, _BLK_NUM_OK):
+        if _in(px, py, _BLK_NUM_OK):
             self._blk_kbd_commit(); return
-        if self._in(px, py, _BLK_NUM_X):
+        if _in(px, py, _BLK_NUM_X):
             self._blk_kbd_cancel(); return
 
     def _blk_num_to_block(self):
@@ -1885,7 +1835,7 @@ class BlockEditorUI:
         cv.print("type, then OK", x + 10, y + 18, NAMES["light_grey"], 1)
         # the live edit buffer in a field with a blinking-ish caret bar
         fx, fy, fw = x + 10, y + 30, w - 20
-        txt = (self.blk_kbd.get("text") or "")[:24]
+        txt = self.blk_kbd["entry"].text[:24]
         # empty buffer: the default name shows as a dim placeholder (OK keeps it)
         ph = "" if is_text else str(self.blk_kbd.get("var", ""))[:24]
         _ui.text_field(cv, (fx, fy, fw, 14), txt, ph)
@@ -1905,7 +1855,7 @@ class BlockEditorUI:
         cv.print("TYPE A NUMBER", x + 10, y + 6, NAMES["white"], 1)
         # live value field; an empty buffer shows the slot's current value, dim (OK keeps it)
         fx, fy, fw = x + 10, y + 18, w - 20
-        txt = (k.get("text") or "")[:30]
+        txt = k["entry"].text[:30]
         cur = k.get("cur")
         ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
         _ui.text_field(cv, (fx, fy, fw, 14), txt, ph[:30])
@@ -1964,7 +1914,6 @@ class BlockEditorUI:
         fs = lay.fs
         cell = lay.cell
         rh = lay.row_h
-        be = self.blocks_ed
         th = self.ws.theme_colors
         light = (not lay._base) or self.ws.look.light_chrome()
         bg = th["surface"] if light else NAMES["dark_blue"]
@@ -2171,12 +2120,10 @@ class BlockEditorUI:
         cv = self.ws.sys_canvas
         lay = self.block_layout
         fs = lay.fs
-        cell = lay.cell
         mrh = lay.menu_row_h
         m = self.blk_menu
         mx, my, mw, mh = lay.menu
-        cv.rect(mx, my, mw, mh, NAMES["black"])
-        cv.rectb(mx, my, mw, mh, NAMES["yellow"])
+        _ui.dialog(cv, (mx, my, mw, mh), ring=NAMES["yellow"], fill=NAMES["black"])
         titles = {"cat": "PICK A KIND", "blk": "PICK A BLOCK",
                   "dropdown": "PICK ONE", "variable": "PICK A VARIABLE",
                   "expr": "PICK A VALUE", "actions": "BLOCK ACTIONS",
@@ -2193,15 +2140,19 @@ class BlockEditorUI:
                 break
             y = my + 16 * fs + vi * mrh
             sel = ridx == m["sel"]
-            if sel:
-                cv.rect(mx + 3 * fs, y, mw - 6 * fs, mrh - fs, NAMES["indigo"])
+            # A row over the black dialog: the selection fill, the label ink
+            # and the chip gutter are the frozen indigo/white/grey trio, so
+            # the row takes them as `colors=` (test_skin pins the site).
+            _ui.row(cv, None, (mx + 3 * fs, y, mw - 6 * fs, mrh - fs),
+                    self._blk_menu_label(ridx),
+                    colors=(NAMES["indigo"] if sel else None,
+                            NAMES["white"] if sel else NAMES["light_grey"], None),
+                    edge=False, pad=13 * fs, pad_right=5 * fs, text_dy=3 * fs,
+                    fs=fs)
             # color the category/block swatch chips so the look matches the outline
             chip = self._blk_menu_chip(ridx)
             if chip is not None:
                 cv.rect(mx + 5 * fs, y + 2 * fs, 8 * fs, mrh - 5 * fs, chip)
-            label = self._blk_menu_label(ridx)
-            cv.print(label[:(mw - 24 * fs) // cell], mx + 16 * fs, y + 3 * fs,
-                     NAMES["white"] if sel else NAMES["light_grey"], 1)
         cv.print("B = BACK", mx + 6 * fs, my + mh - 12 * fs, NAMES["light_grey"], 1)
 
     def _blk_menu_chip(self, ridx):

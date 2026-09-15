@@ -13,6 +13,8 @@ that don't belong to any one surface Layer or the router:
   * `_SilentAudio` -- the no-op audio backend (#16) when none was injected.
   * `Popup`        -- the reusable dropdown overlay primitive (#52) the ≡ menu is
                       built on.
+  * `ConfirmTap`   -- the two-tap guard every destructive button shares.
+  * `arm_prompt`   -- the input-edge neutraliser a modal prompt opens with.
 
 All are backend-agnostic + MicroPython-safe: they take NO NAMES/canvas (they don't
 draw chrome -- Popup/Launcher DRAWING lives on their owners), so this file is a
@@ -56,6 +58,59 @@ def _err_text(exc):
 def _in(px, py, rect):
     x, y, w, h = rect
     return x <= px < x + w and y <= py < y + h
+
+
+def arm_prompt(ws):
+    """Take the keyboard for a modal prompt and neutralise the input edge that
+    opened it, so the prompt's first frame cannot carry the still-latched
+    A/Enter/tap straight into commit or cancel (#29). ONE body for every
+    prompt that opens on a key or a tap (the block keypads, the Config tab's
+    CART INFO and NEW SCRIPT dialogs); the prompt's own TextEntry then opens
+    guarded (editors_base.TextEntry.open)."""
+    ws._set_text_mode(True)
+    # EVERYBODY let go: the shared object's meaning (every source), not a
+    # driver's per-source "I hold nothing" (runtime/input.py).
+    ws.input.release_all()
+    try:
+        ws.input._pressed = set()
+        ws.input._released = set()
+        ws.input._last = set()          # device InputState edge snapshot
+        ws.input._prev = set()          # host InputState edge snapshot
+    except AttributeError:
+        pass
+    ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
+    if ws.pointer is not None:
+        ws.pointer.click = False        # the tap that opened the prompt is not OK
+
+
+class ConfirmTap:
+    """A two-tap guard on a destructive button: the first tap ARMS, the
+    second (while still armed) confirms, and any other gesture disarms.
+    `gen` counts every arm/disarm so a surface whose chrome is cached by a
+    generation key (the picker's bar zone) repaints the armed prompt."""
+
+    def __init__(self):
+        self.armed = False
+        self.gen = 0
+
+    def arm(self):
+        if not self.armed:
+            self.armed = True
+            self.gen += 1
+
+    def disarm(self):
+        if self.armed:
+            self.armed = False
+            self.gen += 1
+
+    def tap(self):
+        """One tap on the guarded button: True when it confirms (and disarms),
+        False when it only armed."""
+        if self.armed:
+            self.disarm()
+            return True
+        self.arm()
+        return False
 
 
 class _Blit:

@@ -20,6 +20,12 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
+
+try:
+    from editors import TextEntry
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors import TextEntry
 
 try:
     from file_widgets import FileGridView
@@ -131,7 +137,7 @@ class FilesAppLayer(ListShellApp):
     SCRIPT_ACTIONS = ("RUN", "OPEN", "NAME", "COPY", "DEL")
     PLAIN_ACTIONS = ("NAME", "COPY", "DEL")     # kinds with no opener/reuse yet
 
-    def __init__(self, ctx, names, in_rect):
+    def __init__(self, ctx, names):
         self.ctx = ctx
         # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
         self._surf = ctx.surface
@@ -142,7 +148,6 @@ class FilesAppLayer(ListShellApp):
         self._art = ctx.artwork
         self._shell = ctx.shell       # FileGridView's duck-type only
         self.names = names
-        self._in = in_rect
         cv = ctx.surface.canvas()
         self.layout = FilesLayout(cv.w, cv.h, self._surf.font_scale(),
                                   self._surf.windowed(),
@@ -157,8 +162,7 @@ class FilesAppLayer(ListShellApp):
         self._rows = ()               # the active row-list mode's labels
         self._rows_empty = ""
         self._save_failed = False
-        self.rename_text = ""
-        self._ekey_prev = 0
+        self.rename = TextEntry(self.RENAME_MAX)
         self.project_names = ()
         self.project_carts = ()       # the PROJECTS root's .moy folders
         self._rows_scroll = None      # the row list's touch model (ListShellApp)
@@ -351,8 +355,7 @@ class FilesAppLayer(ListShellApp):
             self._pick(name)
             return
         if verb == "NAME":
-            self.rename_text = name[:self.RENAME_MAX]
-            self._ekey_prev = 0
+            self.rename.open(name)
             self.mode = "rename"
             self.status = "TYPE A NAME"
             return
@@ -388,7 +391,7 @@ class FilesAppLayer(ListShellApp):
     def _rename_commit(self):
         name = self.grid.sel_name()
         if name:
-            res = self._store.rename(self.grid.kind, name, self.rename_text)
+            res = self._store.rename(self.grid.kind, name, self.rename.text)
             if self._persist(res):
                 new = res[0] or name
                 art = self._art
@@ -399,6 +402,9 @@ class FilesAppLayer(ListShellApp):
                 self.grid.refresh()
                 self.grid.select(new)
                 self.status = new.upper()
+        self.mode = "grid"
+
+    def _rename_cancel(self):
         self.mode = "grid"
         self._damage.all()
 
@@ -499,7 +505,7 @@ class FilesAppLayer(ListShellApp):
         # ...and so does the row list's drag: a scroll is made of samples that
         # are not clicks, and the tap it may end in fires on the RELEASE.
         if self.mode in ("trash", "game", "used", PROJECTS) \
-                and not self._in(px, py, lay.head) and not self._in(px, py, lay.head2):
+                and not _in(px, py, lay.head) and not _in(px, py, lay.head2):
             row = self._rows_pointer(px, py, click, len(self._rows))
             if row is not None:
                 self._tap_row(row)
@@ -507,7 +513,7 @@ class FilesAppLayer(ListShellApp):
             return True
         if not click:
             return True
-        if self._in(px, py, lay.head):
+        if _in(px, py, lay.head):
             self._back()
             return True
         if self.mode == "kinds":
@@ -515,13 +521,13 @@ class FilesAppLayer(ListShellApp):
         elif self.mode == "grid":
             self._grid_tap(px, py)
         elif self.mode == "trash":
-            if self._in(px, py, lay.head2) \
+            if _in(px, py, lay.head2) \
                     and self._persist(self._store.empty_trash()):
                 self.status = "TRASH EMPTY"
                 self._refresh_counts()
                 self._enter_rows("trash")
         elif self.mode == "rename":
-            if self._in(px, py, lay.head2):
+            if _in(px, py, lay.head2):
                 self._rename_commit()
         self._damage.all()
         return True
@@ -529,14 +535,14 @@ class FilesAppLayer(ListShellApp):
     def _kinds_tap(self, px, py):
         shown = self._shown_kinds()
         for i, (kind, _label) in enumerate(shown):
-            if self._in(px, py, self.layout.tiles[i]):
+            if _in(px, py, self.layout.tiles[i]):
                 if kind == PROJECTS:
                     self._enter_rows(PROJECTS)
                     self.status = "PROJECTS"
                 else:
                     self._enter_kind(kind)
                 return
-        if self._in(px, py, self.layout.tiles[len(shown)]):
+        if _in(px, py, self.layout.tiles[len(shown)]):
             self._enter_rows("trash")
             self.status = "TRASH"
 
@@ -544,7 +550,7 @@ class FilesAppLayer(ListShellApp):
         if self.grid.sel_name():
             labels = self._action_labels()
             for i, r in enumerate(self.layout.action_rects(labels)):
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     self._act(labels[i], self.grid.sel_name())
                     return
         hit = self.grid.tap(px, py)
@@ -631,7 +637,7 @@ class FilesAppLayer(ListShellApp):
         r = (lay.body[0], lay.action_y, lay.body[2], lay.action_h)
         cv.rect(r[0], r[1], r[2], r[3], self.names["white"])
         cv.rectb(r[0], r[1], r[2], r[3], th.get("accent", 10))
-        cv.print(self.rename_text + "_", r[0] + 4 * fs, r[1] + 6 * fs,
+        cv.print(self.rename.text + "_", r[0] + 4 * fs, r[1] + 6 * fs,
                  self.names["black"], 1)
 
     def _draw_rows(self, cv):

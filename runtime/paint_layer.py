@@ -22,7 +22,8 @@ system state the device + tests pin). PaintLayer READS those and DISPATCHES to t
 owns only the paint-UI: the DRAW, the grid/palette/button hit-testing, and the drag-
 stroke continuity state (_paint_drag). The paint-only constants live here (single source;
 console.py imports them back so tests + tools resolve console._PG_X0 / _PAINT_CLOSE / ...).
-`NAMES` (palette) and `_in` (rect hit-test) are injected (the circular-import dodge);
+`NAMES` (palette) is injected (the circular-import dodge); the rect hit-test is
+`ui.rect_in`, imported directly;
 the shared draw toolkit (ws._btn/_icon_btn) stays on Workstation.
 
 The icon-theme editor (EDIT ICONS) is the same paint flow over the system icon sheet,
@@ -48,6 +49,7 @@ try:
     import ui as _ui              # frozen on device
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 from editors import PaintEditor, KeyEdge, _pe_line
 
 # The shared pre-literate glyph vocabulary (#89-#93 icon pass): the tool row draws a
@@ -265,10 +267,9 @@ class PaintLayer:
     id = "paint"
     domain = "system"
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         self._paint_drag = None       # last painted grid cell during a drag (#30)
         self._fill_fired = False      # FILL already fired this press (#90; see _paint_stroke)
         self._shape_start = None      # RECT/LINE/OVAL/SELECT drag origin cell (#90)
@@ -357,7 +358,7 @@ class PaintLayer:
         the layout's grid footprint (#30; responsive span #39)."""
         pe = self.ws.paint
         lay = self.layout
-        if pe is None or not self._in(px, py, lay.pg_area):
+        if pe is None or not _in(px, py, lay.pg_area):
             return None
         cell = lay.pg_span // pe.dim
         if cell < 1:
@@ -491,24 +492,24 @@ class PaintLayer:
         if tid is not None:
             self._do_tool(tid)
             return
-        if self._in(px, py, lay.sw_area):           # pick a palette color
+        if _in(px, py, lay.sw_area):           # pick a palette color
             idx = ((py - lay.sw_y0) // lay.sw) * lay.sw_cols + ((px - lay.sw_x0) // lay.sw)
             if 0 <= idx < 16:
                 pe.color = idx
-        elif self._in(px, py, lay.spr_prev):
+        elif _in(px, py, lay.spr_prev):
             pe.select(-1)
-        elif self._in(px, py, lay.spr_next):
+        elif _in(px, py, lay.spr_next):
             pe.select(1)
-        elif self._in(px, py, lay.size_btn):        # cycle 1x1 / 2x2 / 3x3 (#30)
+        elif _in(px, py, lay.size_btn):        # cycle 1x1 / 2x2 / 3x3 (#30)
             pe.cycle_size()
-        elif self._in(px, py, lay.get_btn) and not ws._editing_icons:
+        elif _in(px, py, lay.get_btn) and not ws._editing_icons:
             ws.share_tile_get()              # import the tile from the shared sheet
-        elif self._in(px, py, lay.put_btn) and not ws._editing_icons:
+        elif _in(px, py, lay.put_btn) and not ws._editing_icons:
             ws.share_tile_put()              # save the tile to the shared sheet
         elif (getattr(lay, "files_btn", None) is not None
-              and self._in(px, py, lay.files_btn) and not ws._editing_icons):
+              and _in(px, py, lay.files_btn) and not ws._editing_icons):
             ws.send_sprites_to_files()       # export the sheet to files/sprites/ (#108)
-        elif self._in(px, py, lay.close_btn):
+        elif _in(px, py, lay.close_btn):
             # CLOSE returns to Settings (theme editor, hard-committing on the way --
             # ThemeLayer.leave -- since it has no PLAY of its own) or runs+leaves to
             # the cart (PAINT: ws._leave_menu is EditorApp.leave, PLAY, itself now a
@@ -524,7 +525,7 @@ class PaintLayer:
         if btns is None:
             return None
         for i in range(len(btns)):
-            if self._in(px, py, btns[i]):
+            if _in(px, py, btns[i]):
                 return _TOOLS[i]
         return None
 

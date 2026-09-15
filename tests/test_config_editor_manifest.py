@@ -2,7 +2,8 @@
 
   1. a cart manifest/metadata editing surface -- title + author, through
      moy_carts.save_manifest_meta / Project.commit_manifest / the CardsLayer
-     "CART INFO" modal (cards_layer.py's _open_meta/_meta_key/_commit_meta).
+     "CART INFO" dialog (cards_layer.py's _open_meta over the shared `_Prompt`
+     state machine, which NEW SCRIPT (#89) opens too -- covered at the end).
   2. validation feedback for a bad/out-of-range `edit` field definition --
      covered in test_preliterate_ux.py alongside the existing malformed-card
      tests, not here.
@@ -161,18 +162,18 @@ def test_info_button_tap_opens_the_modal(tmp_path):
     _open_cards_for(ws, "Tune Me")
     ws.input.begin_frame()
     ws.frame(1 / 30)                                    # draw once (lays out layout)
-    assert ws.cards_layer.meta is None
+    assert ws.cards_layer.prompt is None
 
     rect = ws.cards_layer.layout.info_btn
     cx, cy = rect[0] + rect[2] // 2, rect[1] + rect[3] // 2
     assert ws.cards_layer.handle_pointer(cx, cy, True) is True
-    assert ws.cards_layer.meta is not None
+    assert ws.cards_layer.prompt is not None
     assert ws.input.text_mode is True                   # typing mode armed
 
 
 def _type(cards, text):
     for ch in text:
-        cards._meta_key(ord(ch))
+        cards._prompt_key(ord(ch))
 
 
 def test_meta_modal_edits_title_and_author_and_commits(tmp_path):
@@ -185,18 +186,18 @@ def test_meta_modal_edits_title_and_author_and_commits(tmp_path):
 
     cl = ws.cards_layer
     cl._open_meta()
-    assert cl.meta["field"] == 0                         # starts on TITLE
-    assert cl.meta["title"] == "Tune Me"                  # pre-filled from the cart
+    assert cl.prompt.field == 0                          # starts on TITLE
+    assert cl.prompt.fields[0].text == "Tune Me"           # pre-filled from the cart
     # clear the pre-filled title, type a new one
     for _ in range(len("Tune Me")):
-        cl._meta_key(8)
+        cl._prompt_key(8)
     _type(cl, "Star Racer")
-    cl._meta_key(9)                                       # Tab -> AUTHOR
-    assert cl.meta["field"] == 1
+    cl._prompt_key(9)                                     # Tab -> AUTHOR
+    assert cl.prompt.field == 1
     _type(cl, "Ada")
-    cl._meta_key(13)                                       # Enter -> commit
+    cl._prompt_key(13)                                     # Enter -> commit
 
-    assert cl.meta is None                                 # modal closed
+    assert cl.prompt is None                               # dialog closed
     assert ws.input.text_mode is False                     # keyboard restored
     assert ws.project.cart["title"] == "Star Racer"
     assert ws.project.cart["author"] == "Ada"
@@ -215,13 +216,13 @@ def test_meta_modal_blank_title_stays_open_with_message(tmp_path):
 
     cl = ws.cards_layer
     cl._open_meta()
-    for _ in range(len(cl.meta["title"])):
-        cl._meta_key(8)                                     # backspace to empty
-    assert cl.meta["title"] == ""
-    cl._meta_key(13)                                        # Enter -> try to commit
+    for _ in range(len(cl.prompt.fields[0].text)):
+        cl._prompt_key(8)                                   # backspace to empty
+    assert cl.prompt.fields[0].text == ""
+    cl._prompt_key(13)                                      # Enter -> try to commit
 
-    assert cl.meta is not None                              # stayed open
-    assert cl.meta["msg"] == "TITLE CAN'T BE BLANK"
+    assert cl.prompt is not None                            # stayed open
+    assert cl.prompt.msg == "TITLE CAN'T BE BLANK"
     assert ws.project.cart["title"] == "Tune Me"             # unchanged
 
 
@@ -236,9 +237,9 @@ def test_meta_modal_cancel_discards_edits(tmp_path):
     cl = ws.cards_layer
     cl._open_meta()
     _type(cl, "XXXXX")
-    cl._meta_key(27)                                        # Esc -> cancel
+    cl._prompt_key(27)                                      # Esc -> cancel
 
-    assert cl.meta is None
+    assert cl.prompt is None
     assert ws.input.text_mode is False
     assert ws.project.cart["title"] == "Tune Me"             # discarded
     reloaded = moy_carts.load(cart["path"])
@@ -260,5 +261,5 @@ def test_meta_modal_draws_without_crashing_and_reset_closes_it(tmp_path):
     assert probe.drew_something(ws.canvas)
 
     ws.cards_layer.reset()                                  # switching cart must not leak it
-    assert ws.cards_layer.meta is None
+    assert ws.cards_layer.prompt is None
     assert ws.input.text_mode is False
