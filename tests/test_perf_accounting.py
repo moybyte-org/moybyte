@@ -106,9 +106,9 @@ def test_the_cart_phase_brackets_use_the_microsecond_clock():
 def test_the_frame_and_flush_brackets_use_the_microsecond_clock():
     """_frame_perf_end's own two spans -- the whole frame and the panel flush --
     are the minuend of every subtraction above them."""
-    src = _src("runtime/console.py")
+    src = _src("runtime/console_perf.py")
     body = src[src.index("def _frame_perf_end"):
-               src.index("def arm_splash")]
+               src.index("def perf_sample")]
     assert "_ticks_ms()" not in body, \
         "a millisecond bracket is back in the frame perf tail"
     assert "_flush_t0 = _ticks_us()" in body

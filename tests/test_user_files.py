@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from runtime import moy_carts  # noqa: E402
+from runtime import moy_file_ops
 
 import pytest  # noqa: E402
 
@@ -395,7 +396,7 @@ def test_a_failed_prune_does_not_fail_the_commit(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise OSError(28, "no space")
 
-    monkeypatch.setattr(moy_carts, "prune_history", boom)
+    monkeypatch.setattr(moy_file_ops, "prune_history", boom)   # history_commit's own module
     err = moy_carts.history_commit("docs", "story", [["ins", 0, "hi"]],
                                    keyframe={"body": ""}, root=root)
 

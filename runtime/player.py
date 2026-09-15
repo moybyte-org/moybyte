@@ -36,9 +36,9 @@ forwarding properties, so every surface file + test is unchanged.
 
 Canonical home is runtime/; build.sh stages a copy into the firmware modules/ tree
 so the device freezes it (same pattern as console.py/project.py). It stays a leaf --
-the tiny `_ticks_*`/`_err_text`/`_wrap` helpers are defined here (as widgets.py and
-the other leaf surfaces define their own copies) and NAMES/_in are injected -- so it
-imports nothing back into console (no circular import). The one cross-module value it needs
+the tiny `_ticks_*`/`_wrap` helpers are defined here, `_err_text`/`_in` come from the
+widgets leaf and NAMES is injected -- so it imports nothing back into console (no
+circular import). The one cross-module value it needs
 is the code line-height for the crash panel, imported from the code editor leaf
 (bare name on the device / once host_app has aliased it, `runtime.X` for a direct
 test load).
@@ -146,10 +146,10 @@ SUPPORTED_EXTENSIONS = (
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_us, _ticks_diff
-    from widgets import _err_text
+    from widgets import _err_text, _in
 except ImportError:                     # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
-    from runtime.widgets import _err_text
+    from runtime.widgets import _err_text, _in
 
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter over
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
@@ -394,15 +394,14 @@ FREE_DT_MAX = 0.1
 class Player:
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
     `ws` back-ref (the shared draw toolkit + services seam every surface uses) and is
-    injected NAMES + `_in` like the other surfaces. The cart-run fields it owns
+    injected NAMES like the other surfaces. The cart-run fields it owns
     (ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev) are exposed
     back on Workstation as forwarding properties, so every reader of ws.cart_error/
     ws._update/... is byte-for-byte unchanged; they are reset per run in start()."""
 
-    def __init__(self, ws, NAMES, _in):
+    def __init__(self, ws, NAMES):
         self.ws = ws
         self.NAMES = NAMES
-        self._in = _in
         self.ns = None
         self._update = None
         self._draw = None
@@ -941,192 +940,12 @@ class Player:
         # sentinel, so the RUNSTART/RUNERR phases(...) format never changes.
         _hs = _heap_stats if self._diag_enabled() else (lambda: (-1, -1))
         h0 = _hs()
-        ws._dirty = True               # a (re)started cart paints its first frame (#44)
-        self._reset_exit_state()       # a fresh run drops any half-done exit gesture
-        self._reset_stage_meters()     # #210: this run's misses are its own
-        self._disarm_pacing()          # re-armed below, once the cart is running
-        # USER APP per-run state (#181): cleared here rather than at the bind
-        # site below, so the early SPEC refusals (extensions / canvas) cannot
-        # leave a previous app's `_layout` armed against this cart.
-        self._app_layout = None
-        self._app_wh = None
-        self._app_id = None
-        self._release_editors()        # a RE-RUN is an exit too: flush, then drop
-        ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
-                                       # pattern): a cart re-declares it each start
-        # #85: a fresh run resets the active scene to the default, so a load_scene()
-        # switch never leaks across a re-run (the "resets on next _init" semantics).
-        _sc = getattr(project, "scenes", None)
-        if _sc is not None:
-            try:
-                _sc.reset()
-            except Exception:  # noqa: BLE001 -- scene reset must never block a run
-                pass
-        self._close_lua()              # a re-run replaces the previous run's Lua state
-        self._sram_run = None          # #211: whatever it reported was the LAST
-                                       # run's; a Python cart must not inherit it
-        self._pmem_last = t0           # periodic pmem flush counts from this run's start
-        self._slow_logic_next = 0
-        # #75: cache the bar-visibility-by-type rule for this run (see __init__).
-        cart = project.cart
-        self._is_tool = cart is not None and cart.get("type") in BAR_TYPES
-        # A SCRIPT (docs/text_editing_2026-09.md): a cart with no folder whose
-        # screen is the shell's text console. Tool-shaped -- one unpaced tick
-        # per loop frame, the minimal bar's X to leave. Its responsive bind is
-        # below, WITH the app one: `release_run_canvas` sits between here and
-        # there and would drop it.
-        self._script = cart is not None and cart.get("type") == SCRIPT_TYPE
-        # Required-extension gate (moy SPEC.md 10): a cart listing an extension
-        # this build doesn't implement is refused cleanly -- the normal error
-        # panel -- instead of crashing partway into a frame on a missing verb.
-        missing = [e for e in ((cart.get("extensions") or ()) if cart else ())
-                   if e not in SUPPORTED_EXTENSIONS]
-        if missing:
-            self.cart_error = "needs extension: " + ", ".join(missing)
-            self.crash_line = None
-            self.crash_file = None
-            return False
-        # Cart canvas gate (SPEC.md 1/3.1): `canvas` is the other capability
-        # field -- an out-of-set size was carried raw by the loader and is
-        # refused here BY NAME, like an unknown runtime; an in-set size binds a
-        # real small canvas for the run (released in release_world). A tier
-        # with no factory refuses too: running a 128x128 cart on a 320x240
-        # canvas would letterbox it into a corner and lie about W/H.
-        cv = cart.get("canvas") if cart else None
-        if cv is not None and (not isinstance(cv, (tuple, list)) or len(cv) != 2):
-            # clip the repr: a malformed value can be an arbitrary object and
-            # the panel wraps 8px cells -- the NAME matters, not the whole blob
-            self.cart_error = 'no "%.32s" canvas (SPEC.md 3.1)' % (cv,)
-            self.crash_line = None
-            self.crash_file = None
-            return False
-        ws.release_run_canvas()        # a straggler bind never leaks into this run
-        if cv is not None and not ws.bind_run_canvas(cv[0], cv[1]):
-            self.cart_error = "no %dx%d canvas on this screen yet" % (cv[0], cv[1])
-            self.crash_line = None
-            self.crash_file = None
-            return False
-        # -- USER APPS (#181, ui_refactor_2026-08 Phases 7 + 8) ---------------
-        #
-        # A `type: "app"` cart no shell app claims is a USER APP: written by
-        # whoever owns the console, editable in the picker, and handed shell
-        # capabilities by MANIFEST PERMISSION (make_system_api, below).
-        if ws.is_user_app(cart):
-            # A manifest this build cannot honour AS WRITTEN is refused by
-            # name, like an unknown runtime or an out-of-set canvas -- and
-            # BEFORE the crash guard arms, because a mis-declared permission is
-            # not a crash and must not spend a strike. Today the only such rule
-            # is "at most one file kind"; the alternative was the silent
-            # last-one-wins grant this replaced.
-            _man = manifest_error(cart)
-            if _man is not None:
-                self.cart_error = _man
-                self.crash_line = None
-                self.crash_file = None
-                return False
-            # CRASH ISOLATION FIRST, before a single line of the cart's code has
-            # been compiled, let alone run: the mark has to survive a death the
-            # interpreter never observes (a hang, an OOM, a native fault). See
-            # runtime/crash_guard.py. A cart that has used up its strikes is
-            # refused into the ORDINARY error panel, whose top bar carries
-            # EDIT/CODE -- so "this app is broken" and "here is how you fix it"
-            # are the same screen.
-            self._app_id = ws.app_cart_id(cart)
-            if not ws.app_guard.arm(self._app_id):
-                self.cart_error = ("app turned off after %d crashes - EDIT it"
-                                   % ws.app_guard.STRIKES)
-                self.crash_line = None
-                self.crash_file = None
-                self._app_id = None
-                return False
-            # THE RESPONSIVE OPT-IN. Fixed is the DEFAULT and deliberately so:
-            # a kid cart hardcodes coordinates, and the manifest `canvas` (320x240
-            # unless it says otherwise) is what the WM centres and integer-scales.
-            # A cart that defines a top-level `_layout(w, h, fs)` is saying it can
-            # reflow, and gets the whole system surface instead. Probed from the
-            # SOURCE because the canvas has to be chosen before make_api closes
-            # over it -- see system_api.wants_layout.
-            if wants_layout(cart.get("src")):
-                ws.bind_app_canvas()
-        # A SCRIPT is responsive by construction -- the SHELL draws it, and text
-        # is the one thing an integer upscale of the 320x240 raster serves worst
-        # -- so it takes the same whole-surface bind an app opts into, with no
-        # opt-in to make. (Refused in the windowed desk world for the reason the
-        # bind's own docstring gives, where it stays the fixed raster in a
-        # window like any cart.)
-        elif self._script:
-            ws.bind_app_canvas()
-        # #63 leak fix: the PREVIOUS cart is dead -- return its pooled layer buffers
-        # (make_layer worlds, the Fold-2 map cache) for reuse before the new run
-        # allocates. Probe: the host Canvas has no pool (gc reclaims its layers).
-        rl = getattr(ws.canvas, "reclaim_layers", None)
-        if rl is not None:
-            rl("cart")
-        t_reclaim = _ticks_diff(_ticks_ms(), t0)
-        t1 = _ticks_ms()
-        project._build_audio()
-        t_audio = _ticks_diff(_ticks_ms(), t1)
-        # Reset the canvas draw state (camera/clip/pal/palt, #11) so a fresh cart run
-        # never inherits a previous cart's clip rect or palette swap.
-        rs = getattr(ws.canvas, "reset_state", None)
-        if rs is not None:
-            rs()
-        # Cart-supplied palette (moy SPEC.md 2.2): 64 "RRGGBB" strings in the
-        # manifest replace the default table for this run; layers made during
-        # the run inherit it (make_layer shares canvas.palette), and every exit
-        # path restores it (release_world). Indexed backends without a live
-        # .palette (the device compositor's baked RGB565 LUT) skip it -- a
-        # recorded conformance gap there, never a crash.
-        self._restore_palette()        # a re-run must never stack two swaps
-        pal = cart.get("palette") if cart else None
-        if pal and len(pal) == 64 and getattr(ws.canvas, "palette", None):
-            try:
-                table = []
-                for s in pal:
-                    v = int(s.lstrip("#"), 16)
-                    table.append(((v >> 16) & 255, (v >> 8) & 255, v & 255))
-            except (ValueError, AttributeError, TypeError):
-                table = None               # malformed -> keep the default table
-            if table is not None:
-                self._cart_palette = ws.canvas.palette
-                self._cart_palette_canvas = ws.canvas
-                ws.canvas.palette = table
-        # Stamp the cart-start clock so the cart's time() reads ms since this run
-        # began (re-run on apply/run_code/edit-close resets it, like TIC-80).
-        self._cart_start_ms = _ticks_ms()
-        ws.input.cart_start_ms = self._cart_start_ms
-        # Capability-permission gate (#38): hand make_api the wifi backend ONLY
-        # when this cart declares the "network" permission, so a normal kid cart
-        # gets NO `wifi` name (sandbox preserved). make_api injects `wifi` into the
-        # cart namespace iff the backend it receives is non-None.
-        wifi = ws.wifi if ws._cart_has_perm("network") else None
-        if wifi is not None:
-            ws.wifi_hold("cart")       # the radio lease for this run; release_world lets go
-        # Multiplayer message service (#65): gate net.* by the "multiplayer"
-        # manifest permission exactly like wifi's "network" gate. reset() drops any
-        # handler/inbox from a previous run so a fresh run starts clean; make_api
-        # injects `net`/`on_net` into the namespace iff the backend is non-None.
-        net = ws.net if ws._cart_has_perm("multiplayer") else None
-        # Physical pins (#9), gated HERE with its two siblings rather than in the
-        # tier that happens to supply it. It used to be injected by the browser
-        # tier's own make_api wrapper the moment the serving host answered the pin
-        # probe -- which gave it the CAPABILITY half of the gate (does this
-        # console have pins) and none of the CONSENT half (did this cart ask),
-        # while cart_api's comment claimed it was gated "the same way as wifi and
-        # net". It was not, and the difference stopped being theoretical once a
-        # dropped .p8 could land in a board's own store: a cart nobody wrote
-        # could move a pin nobody declared. The pin ALLOWLIST bounds which pins,
-        # never which carts.
-        gpio = ws.gpio if ws._cart_has_perm("pins") else None
-        # The TEXT CONSOLE, gated on the "console" permission exactly as wifi is
-        # on "network": a cart that never declares it keeps `print` as the DRAW
-        # verb, and a script -- whose synthesized manifest DOES declare it --
-        # gets the scrollback instead. The terminal (#115) declares it too.
-        console = (getattr(ws, "script_console", None)
-                   if ws._cart_has_perm("console") else None)
-        if net is not None:
-            net.reset()
-        self._net = net
+        cart = self._begin_run(ws, project, t0)
+        err = self._gate_spec(ws, cart)
+        if err is not None:
+            return self._refuse(err)
+        t_reclaim, t_audio = self._prepare_world(ws, project, cart, t0)
+        wifi, net, gpio, console = self._grant_services(ws, project, cart)
         # #65 Phase 2: a linked two-console match. THIS is the moment a solo run
         # becomes one -- before the seed is drawn and before _init runs, so both
         # consoles' rnd() start from the same place. The guest side has already
@@ -1182,65 +1001,9 @@ class Player:
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte link config failed:", exc)
         t2 = _ticks_ms()
-        ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
-                         ws.audio, project.tilemap, project.pmem, wifi, project.images,
-                         project.scenes,    # #85: scene()/load_scene() over the cart's scenes
-                         net=net,           # #65: capability-gated net.* backend
-                         gpio=gpio,         # #9: capability-gated physical pins
-                         flags=project.flags)   # SPEC.md 3.5 tile flags (fget/fset)
-        # Paint is a regular cartridge with one narrow shell capability. Keep it out
-        # of the kid API and inject it only into the shipped app identity that asks
-        # for the artwork permission; copied/renamed carts do not inherit it.
-        if (getattr(ws, "artwork", None) is not None
-                and ws.artwork.is_paint_app(cart)):
-            ns["artwork"] = ws.artwork
-        # USER APP capability injection (#181): the cart's manifest permissions,
-        # intersected with `system_api`'s allowlist, become names in its
-        # namespace -- and a capability it did not declare has NO NAME AT ALL,
-        # exactly like `wifi` above. Same AppContext the shipped apps get,
-        # through the same `ws.app_context` factory; only the source of the
-        # `needs` tuple differs (a manifest here, a class constant there). The
-        # ungated riders (`ui`, `theme()`, `screen()`, `bar_h()`) are how an app
-        # draws, not what it may reach -- see runtime/system_api.py.
-        # A SCRIPT is handed the same filter by the same call: its permissions
-        # come from the manifest `run_script` synthesized, so the refusing is
-        # the machinery that already refuses, and `carts` is not grantable to
-        # anything (system_api.NEVER_GRANTED).
-        if self._app_id is not None or self._script:
-            ns.update(make_system_api(ws.app_context, cart, ws.canvas,
-                                      ws.app_bar_h,
-                                      editor=self._open_cart_editor,
-                                      request=ws.take_text_request()))
-        if console is not None:
-            ns.update(console.api())
+        ns = self._build_namespace(ws, project, cart, wifi, net, gpio, console)
         t_api = _ticks_diff(_ticks_ms(), t2)
-        # Compile with the "<cart>" filename so a runtime traceback carries cart
-        # line numbers (_exc_cart_line reads them to mark the bad line). #67 spike:
-        # prefer the AUTO-NATIVE rewrite (machine code per top-level def) when the
-        # emitter exists; if it refuses the cart at compile time, fall back to the
-        # pristine bytecode compile -- the flag can never break a cart. The
-        # inserted-line map keeps crash lines exact (#24) either way.
         src = project.cart["src"]
-        # The cart's OTHER SCRIPTS, either side of main (SPEC.md 4). A ported
-        # cart's generated half -- data tables + the compat shim -- lives in
-        # p8.lua and runs ahead of main.lua, so main.lua is the cart's own code
-        # and an error in the shim reads `p8.lua:N:`, never landing on the kid's
-        # line in the crash-to-code panel. Each is its own chunk, which is what
-        # lets them be separate files at all.
-        #
-        # They ride the namespace like `_moy_prelude`, the same mechanism the
-        # text console's binding uses; both lists are empty for every cart that
-        # declares no `sources`, and lua_ext.cart_chunks then builds the same
-        # one-entry list the tiers always ran.
-        pre = project.cart.get("src_before")
-        if pre:
-            ns["_moy_pre"] = pre
-        post = project.cart.get("src_after")
-        if post:
-            ns["_moy_post"] = post
-        # #67 dual-runtime seam (Phase 2): a non-python cart never touches the
-        # Python compile / auto-native / code-cache path below -- it starts
-        # through the injected Lua runtime instead (same ns, same error panel).
         _rt = project.cart.get("runtime", "python")
         if _rt != "python":
             ok = self._start_lua(_rt, ns, src, t0, h0,
@@ -1248,59 +1011,7 @@ class Player:
             if ok:
                 self._arm_pacing(cart)
             return ok
-        self._native_ins = None
-        self._native_fail = None
-        code = None
-        t3 = _ticks_ms()
-        # #66 THE repeat-run cliff fix (glass-fingerprinted 2026-07-11): the esp32
-        # port's exec arena (esp_native_code_commit, MALLOC_CAP_EXEC internal
-        # IRAM) is a GROW-ONLY list -- every @micropython.native compile leaks its
-        # machine-code blobs until soft reset. Recompiling the SAME source on
-        # every PLAY (the kid's edit->PLAY->edit loop!) exhausted it in ~5 runs of
-        # a heavy cart; the emitter then died on a ~300-byte MemoryError and the
-        # silent bytecode fallback HALVED the cart's logic speed ("the floor",
-        # logic 6.5 -> 13-17ms; nfail= in RUNSTART names it). So compile ONCE per
-        # (cart, source version): the cache key is the source's (len, hash) and
-        # re-PLAYs of unchanged source re-exec the SAME code object -- its blobs
-        # are immortal in the arena anyway, so reuse costs nothing and saves the
-        # ~110-210ms recompile per PLAY too. An EDIT legitimately recompiles (new
-        # hash -> one new blob-set; the old one still leaks -- the arena has no
-        # free -- so a marathon edit session can still exhaust it, but at the
-        # per-edit rate instead of the per-PLAY rate; the fallback stays graceful).
-        _ckey = project.cart.get("path") or id(project.cart)
-        _csig = (len(src), hash(src))
-        _hit = _CODE_CACHE.get(_ckey)
-        if _hit is not None and _hit[0] == _csig:
-            code = _hit[1]
-            self._native_ins = _hit[2]
-            self._native_fail = _hit[3]
-            if NATIVE_CARTS and self._native_ins is not None:
-                ns["micropython"] = _micropython
-        elif NATIVE_CARTS:
-            # Compile MISS (new cart or edited source): reclaim the exec arena
-            # FIRST (#66 -- it is grow-only otherwise; the port patch exposes
-            # the free through moy_gfx). Safe here: the cache is being purged
-            # (its code objects' native blobs die with the arena) and no cart
-            # world is live (the previous run's release_world dropped it; the
-            # wallpaper compiles plain, never native). The arena then holds
-            # exactly ONE cart's current-version blobs at any time -- unlimited
-            # edit->PLAY cycles. On builds without the patch the call reports
-            # False and behavior is the pre-patch cache-only mitigation.
-            _CODE_CACHE.clear()
-            try:
-                import moy_gfx
-                moy_gfx.native_code_free_all()
-            except Exception:  # noqa: BLE001 -- host / bench builds: no reclaim
-                pass
-            nsrc, ins = _nativize(src)
-            ns["micropython"] = _micropython   # the decorator's global, no import line
-            try:
-                code = compile(nsrc, "<cart>", "exec")
-                self._native_ins = ins
-            except Exception as exc:  # noqa: BLE001 -- emitter limitation -> bytecode path
-                self._native_fail = _err_text(exc)
-                code = None
-        t_compile_native = _ticks_diff(_ticks_ms(), t3)
+        code, t_compile_native, _ckey, _csig = self._compile_python(project, src, ns)
         try:
             t4 = _ticks_ms()
             if code is None:
@@ -1361,6 +1072,334 @@ class Player:
         self._arm_pacing(cart)
         self._print_run_diag("RUNSTART")
         return True
+
+
+    def _refuse(self, msg):
+        """Refuse a run before any of the cart's code has run: the ordinary
+        error panel, with no line to mark."""
+        self.cart_error = msg
+        self.crash_line = None
+        self.crash_file = None
+        return False
+
+    def _begin_run(self, ws, project, t0):
+        """Reset the previous run's world and stamp this run's per-run flags.
+        Returns the cart."""
+        ws._dirty = True               # a (re)started cart paints its first frame (#44)
+        self._reset_exit_state()       # a fresh run drops any half-done exit gesture
+        self._reset_stage_meters()     # #210: this run's misses are its own
+        self._disarm_pacing()          # re-armed below, once the cart is running
+        # USER APP per-run state (#181): cleared here rather than at the bind
+        # site below, so the early SPEC refusals (extensions / canvas) cannot
+        # leave a previous app's `_layout` armed against this cart.
+        self._app_layout = None
+        self._app_wh = None
+        self._app_id = None
+        self._release_editors()        # a RE-RUN is an exit too: flush, then drop
+        ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
+                                       # pattern): a cart re-declares it each start
+        # #85: a fresh run resets the active scene to the default, so a load_scene()
+        # switch never leaks across a re-run (the "resets on next _init" semantics).
+        _sc = getattr(project, "scenes", None)
+        if _sc is not None:
+            try:
+                _sc.reset()
+            except Exception:  # noqa: BLE001 -- scene reset must never block a run
+                pass
+        self._close_lua()              # a re-run replaces the previous run's Lua state
+        self._sram_run = None          # #211: whatever it reported was the LAST
+                                       # run's; a Python cart must not inherit it
+        self._pmem_last = t0           # periodic pmem flush counts from this run's start
+        self._slow_logic_next = 0
+        # #75: cache the bar-visibility-by-type rule for this run (see __init__).
+        cart = project.cart
+        self._is_tool = cart is not None and cart.get("type") in BAR_TYPES
+        # A SCRIPT (docs/text_editing_2026-09.md): a cart with no folder whose
+        # screen is the shell's text console. Tool-shaped -- one unpaced tick
+        # per loop frame, the minimal bar's X to leave. Its responsive bind is
+        # below, WITH the app one: `release_run_canvas` sits between here and
+        # there and would drop it.
+        self._script = cart is not None and cart.get("type") == SCRIPT_TYPE
+        return cart
+
+    def _gate_spec(self, ws, cart):
+        """The SPEC gates a cart must pass before its code runs -- required
+        extensions, the canvas size, a user app's manifest and crash guard --
+        binding the run's canvas on the way. Returns the refusal text, or None
+        when the cart may start."""
+        # Required-extension gate (moy SPEC.md 10): a cart listing an extension
+        # this build doesn't implement is refused cleanly -- the normal error
+        # panel -- instead of crashing partway into a frame on a missing verb.
+        missing = [e for e in ((cart.get("extensions") or ()) if cart else ())
+                   if e not in SUPPORTED_EXTENSIONS]
+        if missing:
+            return "needs extension: " + ", ".join(missing)
+        # Cart canvas gate (SPEC.md 1/3.1): `canvas` is the other capability
+        # field -- an out-of-set size was carried raw by the loader and is
+        # refused here BY NAME, like an unknown runtime; an in-set size binds a
+        # real small canvas for the run (released in release_world). A tier
+        # with no factory refuses too: running a 128x128 cart on a 320x240
+        # canvas would letterbox it into a corner and lie about W/H.
+        cv = cart.get("canvas") if cart else None
+        if cv is not None and (not isinstance(cv, (tuple, list)) or len(cv) != 2):
+            # clip the repr: a malformed value can be an arbitrary object and
+            # the panel wraps 8px cells -- the NAME matters, not the whole blob
+            return 'no "%.32s" canvas (SPEC.md 3.1)' % (cv,)
+        ws.release_run_canvas()        # a straggler bind never leaks into this run
+        if cv is not None and not ws.bind_run_canvas(cv[0], cv[1]):
+            return "no %dx%d canvas on this screen yet" % (cv[0], cv[1])
+        # -- USER APPS (#181, ui_refactor_2026-08 Phases 7 + 8) ---------------
+        #
+        # A `type: "app"` cart no shell app claims is a USER APP: written by
+        # whoever owns the console, editable in the picker, and handed shell
+        # capabilities by MANIFEST PERMISSION (make_system_api, below).
+        if ws.is_user_app(cart):
+            # A manifest this build cannot honour AS WRITTEN is refused by
+            # name, like an unknown runtime or an out-of-set canvas -- and
+            # BEFORE the crash guard arms, because a mis-declared permission is
+            # not a crash and must not spend a strike. Today the only such rule
+            # is "at most one file kind"; the alternative was the silent
+            # last-one-wins grant this replaced.
+            _man = manifest_error(cart)
+            if _man is not None:
+                return _man
+            # CRASH ISOLATION FIRST, before a single line of the cart's code has
+            # been compiled, let alone run: the mark has to survive a death the
+            # interpreter never observes (a hang, an OOM, a native fault). See
+            # runtime/crash_guard.py. A cart that has used up its strikes is
+            # refused into the ORDINARY error panel, whose top bar carries
+            # EDIT/CODE -- so "this app is broken" and "here is how you fix it"
+            # are the same screen.
+            self._app_id = ws.app_cart_id(cart)
+            if not ws.app_guard.arm(self._app_id):
+                self._app_id = None
+                return ("app turned off after %d crashes - EDIT it"
+                                   % ws.app_guard.STRIKES)
+            # THE RESPONSIVE OPT-IN. Fixed is the DEFAULT and deliberately so:
+            # a kid cart hardcodes coordinates, and the manifest `canvas` (320x240
+            # unless it says otherwise) is what the WM centres and integer-scales.
+            # A cart that defines a top-level `_layout(w, h, fs)` is saying it can
+            # reflow, and gets the whole system surface instead. Probed from the
+            # SOURCE because the canvas has to be chosen before make_api closes
+            # over it -- see system_api.wants_layout.
+            if wants_layout(cart.get("src")):
+                ws.bind_app_canvas()
+        # A SCRIPT is responsive by construction -- the SHELL draws it, and text
+        # is the one thing an integer upscale of the 320x240 raster serves worst
+        # -- so it takes the same whole-surface bind an app opts into, with no
+        # opt-in to make. (Refused in the windowed desk world for the reason the
+        # bind's own docstring gives, where it stays the fixed raster in a
+        # window like any cart.)
+        elif self._script:
+            ws.bind_app_canvas()
+        return None
+
+    def _prepare_world(self, ws, project, cart, t0):
+        """Reclaim the previous cart's buffers, build the audio, reset the
+        canvas state, install a declared palette and stamp the cart clock.
+        Returns the (reclaim, audio) ms for the RUNSTART diag."""
+        # #63 leak fix: the PREVIOUS cart is dead -- return its pooled layer buffers
+        # (make_layer worlds, the Fold-2 map cache) for reuse before the new run
+        # allocates. Probe: the host Canvas has no pool (gc reclaims its layers).
+        rl = getattr(ws.canvas, "reclaim_layers", None)
+        if rl is not None:
+            rl("cart")
+        t_reclaim = _ticks_diff(_ticks_ms(), t0)
+        t1 = _ticks_ms()
+        project._build_audio()
+        t_audio = _ticks_diff(_ticks_ms(), t1)
+        # Reset the canvas draw state (camera/clip/pal/palt, #11) so a fresh cart run
+        # never inherits a previous cart's clip rect or palette swap.
+        rs = getattr(ws.canvas, "reset_state", None)
+        if rs is not None:
+            rs()
+        # Cart-supplied palette (moy SPEC.md 2.2): 64 "RRGGBB" strings in the
+        # manifest replace the default table for this run; layers made during
+        # the run inherit it (make_layer shares canvas.palette), and every exit
+        # path restores it (release_world). Indexed backends without a live
+        # .palette (the device compositor's baked RGB565 LUT) skip it -- a
+        # recorded conformance gap there, never a crash.
+        self._restore_palette()        # a re-run must never stack two swaps
+        pal = cart.get("palette") if cart else None
+        if pal and len(pal) == 64 and getattr(ws.canvas, "palette", None):
+            try:
+                table = []
+                for s in pal:
+                    v = int(s.lstrip("#"), 16)
+                    table.append(((v >> 16) & 255, (v >> 8) & 255, v & 255))
+            except (ValueError, AttributeError, TypeError):
+                table = None               # malformed -> keep the default table
+            if table is not None:
+                self._cart_palette = ws.canvas.palette
+                self._cart_palette_canvas = ws.canvas
+                ws.canvas.palette = table
+        # Stamp the cart-start clock so the cart's time() reads ms since this run
+        # began (re-run on apply/run_code/edit-close resets it, like TIC-80).
+        self._cart_start_ms = _ticks_ms()
+        ws.input.cart_start_ms = self._cart_start_ms
+        return t_reclaim, t_audio
+
+    def _grant_services(self, ws, project, cart):
+        """The capability services this cart's manifest permissions grant --
+        (wifi, net, gpio, console) -- each None when not declared."""
+        # Capability-permission gate (#38): hand make_api the wifi backend ONLY
+        # when this cart declares the "network" permission, so a normal kid cart
+        # gets NO `wifi` name (sandbox preserved). make_api injects `wifi` into the
+        # cart namespace iff the backend it receives is non-None.
+        wifi = ws.wifi if ws._cart_has_perm("network") else None
+        if wifi is not None:
+            ws.wifi_hold("cart")       # the radio lease for this run; release_world lets go
+        # Multiplayer message service (#65): gate net.* by the "multiplayer"
+        # manifest permission exactly like wifi's "network" gate. reset() drops any
+        # handler/inbox from a previous run so a fresh run starts clean; make_api
+        # injects `net`/`on_net` into the namespace iff the backend is non-None.
+        net = ws.net if ws._cart_has_perm("multiplayer") else None
+        # Physical pins (#9), gated HERE with its two siblings rather than in the
+        # tier that happens to supply it. It used to be injected by the browser
+        # tier's own make_api wrapper the moment the serving host answered the pin
+        # probe -- which gave it the CAPABILITY half of the gate (does this
+        # console have pins) and none of the CONSENT half (did this cart ask),
+        # while cart_api's comment claimed it was gated "the same way as wifi and
+        # net". It was not, and the difference stopped being theoretical once a
+        # dropped .p8 could land in a board's own store: a cart nobody wrote
+        # could move a pin nobody declared. The pin ALLOWLIST bounds which pins,
+        # never which carts.
+        gpio = ws.gpio if ws._cart_has_perm("pins") else None
+        # The TEXT CONSOLE, gated on the "console" permission exactly as wifi is
+        # on "network": a cart that never declares it keeps `print` as the DRAW
+        # verb, and a script -- whose synthesized manifest DOES declare it --
+        # gets the scrollback instead. The terminal (#115) declares it too.
+        console = (getattr(ws, "script_console", None)
+                   if ws._cart_has_perm("console") else None)
+        if net is not None:
+            net.reset()
+        self._net = net
+        return wifi, net, gpio, console
+
+    def _build_namespace(self, ws, project, cart, wifi, net, gpio, console):
+        """The cart's namespace: make_api over the project, the artwork and
+        system-api capabilities a shipped app / user app / script is granted,
+        the text console's verbs, and the other scripts either side of main."""
+        ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
+                         ws.audio, project.tilemap, project.pmem, wifi, project.images,
+                         project.scenes,    # #85: scene()/load_scene() over the cart's scenes
+                         net=net,           # #65: capability-gated net.* backend
+                         gpio=gpio,         # #9: capability-gated physical pins
+                         flags=project.flags)   # SPEC.md 3.5 tile flags (fget/fset)
+        # Paint is a regular cartridge with one narrow shell capability. Keep it out
+        # of the kid API and inject it only into the shipped app identity that asks
+        # for the artwork permission; copied/renamed carts do not inherit it.
+        if (getattr(ws, "artwork", None) is not None
+                and ws.artwork.is_paint_app(cart)):
+            ns["artwork"] = ws.artwork
+        # USER APP capability injection (#181): the cart's manifest permissions,
+        # intersected with `system_api`'s allowlist, become names in its
+        # namespace -- and a capability it did not declare has NO NAME AT ALL,
+        # exactly like `wifi` above. Same AppContext the shipped apps get,
+        # through the same `ws.app_context` factory; only the source of the
+        # `needs` tuple differs (a manifest here, a class constant there). The
+        # ungated riders (`ui`, `theme()`, `screen()`, `bar_h()`) are how an app
+        # draws, not what it may reach -- see runtime/system_api.py.
+        # A SCRIPT is handed the same filter by the same call: its permissions
+        # come from the manifest `run_script` synthesized, so the refusing is
+        # the machinery that already refuses, and `carts` is not grantable to
+        # anything (system_api.NEVER_GRANTED).
+        if self._app_id is not None or self._script:
+            ns.update(make_system_api(ws.app_context, cart, ws.canvas,
+                                      ws.app_bar_h,
+                                      editor=self._open_cart_editor,
+                                      request=ws.take_text_request()))
+        if console is not None:
+            ns.update(console.api())
+        # The cart's OTHER SCRIPTS, either side of main (SPEC.md 4). A ported
+        # cart's generated half -- data tables + the compat shim -- lives in
+        # p8.lua and runs ahead of main.lua, so main.lua is the cart's own code
+        # and an error in the shim reads `p8.lua:N:`, never landing on the kid's
+        # line in the crash-to-code panel. Each is its own chunk, which is what
+        # lets them be separate files at all.
+        #
+        # They ride the namespace like `_moy_prelude`, the same mechanism the
+        # text console's binding uses; both lists are empty for every cart that
+        # declares no `sources`, and lua_ext.cart_chunks then builds the same
+        # one-entry list the tiers always ran.
+        pre = project.cart.get("src_before")
+        if pre:
+            ns["_moy_pre"] = pre
+        post = project.cart.get("src_after")
+        if post:
+            ns["_moy_post"] = post
+        # #67 dual-runtime seam (Phase 2): a non-python cart never touches the
+        # Python compile / auto-native / code-cache path below -- it starts
+        # through the injected Lua runtime instead (same ns, same error panel).
+        return ns
+
+    def _compile_python(self, project, src, ns):
+        """Compile a Python cart, preferring the auto-native rewrite through
+        the per-source code cache. Returns (code, native_compile_ms, cache key,
+        source signature); code is None when the emitter refused and the
+        pristine compile must run -- the caller stores that outcome under the
+        key."""
+        # Compile with the "<cart>" filename so a runtime traceback carries cart
+        # line numbers (_exc_cart_line reads them to mark the bad line). #67 spike:
+        # prefer the AUTO-NATIVE rewrite (machine code per top-level def) when the
+        # emitter exists; if it refuses the cart at compile time, fall back to the
+        # pristine bytecode compile -- the flag can never break a cart. The
+        # inserted-line map keeps crash lines exact (#24) either way.
+        self._native_ins = None
+        self._native_fail = None
+        code = None
+        t3 = _ticks_ms()
+        # #66 THE repeat-run cliff fix (glass-fingerprinted 2026-07-11): the esp32
+        # port's exec arena (esp_native_code_commit, MALLOC_CAP_EXEC internal
+        # IRAM) is a GROW-ONLY list -- every @micropython.native compile leaks its
+        # machine-code blobs until soft reset. Recompiling the SAME source on
+        # every PLAY (the kid's edit->PLAY->edit loop!) exhausted it in ~5 runs of
+        # a heavy cart; the emitter then died on a ~300-byte MemoryError and the
+        # silent bytecode fallback HALVED the cart's logic speed ("the floor",
+        # logic 6.5 -> 13-17ms; nfail= in RUNSTART names it). So compile ONCE per
+        # (cart, source version): the cache key is the source's (len, hash) and
+        # re-PLAYs of unchanged source re-exec the SAME code object -- its blobs
+        # are immortal in the arena anyway, so reuse costs nothing and saves the
+        # ~110-210ms recompile per PLAY too. An EDIT legitimately recompiles (new
+        # hash -> one new blob-set; the old one still leaks -- the arena has no
+        # free -- so a marathon edit session can still exhaust it, but at the
+        # per-edit rate instead of the per-PLAY rate; the fallback stays graceful).
+        _ckey = project.cart.get("path") or id(project.cart)
+        _csig = (len(src), hash(src))
+        _hit = _CODE_CACHE.get(_ckey)
+        if _hit is not None and _hit[0] == _csig:
+            code = _hit[1]
+            self._native_ins = _hit[2]
+            self._native_fail = _hit[3]
+            if NATIVE_CARTS and self._native_ins is not None:
+                ns["micropython"] = _micropython
+        elif NATIVE_CARTS:
+            # Compile MISS (new cart or edited source): reclaim the exec arena
+            # FIRST (#66 -- it is grow-only otherwise; the port patch exposes
+            # the free through moy_gfx). Safe here: the cache is being purged
+            # (its code objects' native blobs die with the arena) and no cart
+            # world is live (the previous run's release_world dropped it; the
+            # wallpaper compiles plain, never native). The arena then holds
+            # exactly ONE cart's current-version blobs at any time -- unlimited
+            # edit->PLAY cycles. On builds without the patch the call reports
+            # False and behavior is the pre-patch cache-only mitigation.
+            _CODE_CACHE.clear()
+            try:
+                import moy_gfx
+                moy_gfx.native_code_free_all()
+            except Exception:  # noqa: BLE001 -- host / bench builds: no reclaim
+                pass
+            nsrc, ins = _nativize(src)
+            ns["micropython"] = _micropython   # the decorator's global, no import line
+            try:
+                code = compile(nsrc, "<cart>", "exec")
+                self._native_ins = ins
+            except Exception as exc:  # noqa: BLE001 -- emitter limitation -> bytecode path
+                self._native_fail = _err_text(exc)
+                code = None
+        t_compile_native = _ticks_diff(_ticks_ms(), t3)
+        return code, t_compile_native, _ckey, _csig
+
 
     def _arm_pacing(self, cart):
         """A GAME runs on the tick model (#217): logic at its manifest rate --
@@ -1574,26 +1613,7 @@ class Player:
         ws = self.ws
         _perf = ws.perf_hud or ws.perf_capture
         if self.cart_error is None:
-            # The keyboard edge for the cart's key()/keyp(): last_key is the
-            # byte held this loop frame (0 when nothing is down); keyp fires on
-            # the 0->key transition, and the edge LATCHES until a logic tick
-            # takes it (#217). Done here (not in InputState) so it is
-            # independent of whether the backend sets last_key before or after
-            # begin_frame().
-            k = ws.input.last_key
-            fed = self._focus_editor
-            if fed is None:
-                ws.input.cart_key = k
-                if k and k != self._cart_key_prev:
-                    self._keyp_latch = k
-            else:
-                # A FOCUSED editor handle owns the keyboard: the byte goes to
-                # it and the cart's own key()/keyp() read nothing, so a skin
-                # never has to filter the text its editor is eating.
-                ws.input.cart_key = 0
-                if k and k != self._cart_key_prev:
-                    fed.key(k)
-            self._cart_key_prev = k
+            self._tick_keys(ws)
             try:
                 # A RESPONSIVE app cart follows its surface (#181): a window
                 # resize, a font-scale change or a world flip re-runs `_layout`
@@ -1626,49 +1646,7 @@ class Player:
                 # not. No-op when the cart has no net permission.
                 if self._net is not None:
                     self._net.pump()
-                # LOCKSTEP (#65 Phase 2): the session owns the clock. `dt` becomes
-                # the fixed tick -- a variable dt diverges the two sims on frame
-                # one -- and a frame whose peer input has not arrived does NOT
-                # simulate. It still DRAWS: the screen holds the last agreed
-                # frame instead of freezing, which is what "waiting for player"
-                # looks like on hardware that cannot extrapolate safely.
-                stalled = False
-                np = self._netplay
-                if np is not None:
-                    # Drain the radio BEFORE deciding whether this tick can
-                    # advance: the boards drain in the frame TAIL, so without
-                    # this the peer's input is up to a whole loop frame stale
-                    # by the time advance() looks for it. Measured on glass
-                    # (P4<->T-Deck, 2026-08-24): 8.0% -> 6.4% stalled ticks at
-                    # DELAY=2 from this call alone. Input-priority and
-                    # mid-frame-safe by contract -- see EspNowLink.drain_input.
-                    _di = self._drain_input
-                    if _di is not None:
-                        try:
-                            _di()
-                        except Exception:  # noqa: BLE001 -- radio must not kill a frame
-                            pass
-                    dt = np.dt
-                    # The session owns the CLOCK as well as the order: it ticks
-                    # at its fixed rate, not at whatever the board's frame loop
-                    # manages, or a fixed dt would silently run the game fast.
-                    _nowp = _ticks_ms()
-                    if np.due(_nowp) or np.waiting:
-                        # A STALLED tick retries every loop frame instead of
-                        # waiting out a whole tick: the missing input usually
-                        # lands a few ms after it was first needed, and the
-                        # wait-for-the-next-due schedule made a 5ms miss cost
-                        # 34ms (wait_med, on glass 2026-08-24). due() still
-                        # owns the cadence of healthy ticks.
-                        stalled = not np.advance(
-                            _netplay_mask(ws.input, _NET_BUTTONS), _nowp)
-                    else:
-                        # Between ticks: do not simulate, but KEEP SENDING. The
-                        # frame loop is faster than the lockstep clock, so these
-                        # frames are free redundancy against a radio whose ack
-                        # lies -- and they serve a stalled peer sooner.
-                        stalled = True
-                        np.resend()
+                dt, stalled, np = self._lockstep_step(ws, dt)
                 # MICROSECONDS, not ms (2026-08-14). These three brackets and the
                 # backdrop one above feed DRAWBRK's split, and CHROMEBRK's `other`
                 # is what is left after subtracting them from the frame -- so on a
@@ -1726,44 +1704,128 @@ class Player:
                 if render and self._app_id is not None:
                     ws.app_guard.frame()
             except Exception as exc:  # noqa: BLE001
-                # A cart that raises mid-frame must NOT escape the loop (the
-                # device would hang silently). Capture it, stop running the
-                # broken cart, and fall through to paint the error panel; the
-                # desktop buttons stay so the kid can EDIT/CODE the fix.
-                # mark the line on EDIT (#24): a Lua cart's line comes from the
-                # error text's `cart:N:` position (#67 Phase 5); a Python cart's
-                # from the traceback, mapped back through the nativize insert.
-                if self._lua is not None:
-                    self.cart_error = _lua_err_text(exc)
-                    self.crash_file, self.crash_line = _lua_cart_where(
-                        self.cart_error, ws.cart)
-                else:
-                    self.cart_error = _err_text(exc)
-                    self.crash_line = self._map_crash_line(_exc_cart_line(exc))
-                    self.crash_file = None
-                self._update = None
-                self._draw = None
-                self._disarm_pacing()  # the crash panel is a console screen
-                # Print the _err_text-guarded string, never the raw `exc`: a
-                # cart exception whose __str__ itself raises would otherwise
-                # escape here -> the silent device hang the panel exists to prevent.
-                print("Moybyte frame error:", self.cart_error)
-                # Deferred pmem (#66): the crash must not eat saved progress --
-                # the cart stops ticking now, so this is its last chance to
-                # persist. Guarded: the panel must paint even if SD is gone.
-                pm = getattr(ws, "pmem", None)
-                if pm is not None:
-                    try:
-                        pm.flush()
-                    except Exception:  # noqa: BLE001
-                        pass
-                # Owner ask 2026-07-23: no parked OOPS screen -- throw the kid
-                # straight into the code editor on the crashing line (popup +
-                # inline marker). The panel below survives only as the
-                # fallback when there is nothing to edit.
-                ws._reset_canvas_state()
-                if ws._crash_to_code():
+                if self._capture_frame_error(ws, exc):
                     return
+        self._tick_tail(ws, render)
+
+    def _tick_keys(self, ws):
+        """The keyboard edge for the cart's key()/keyp(), or for the focused
+        editor handle that owns the keyboard instead."""
+        # The keyboard edge for the cart's key()/keyp(): last_key is the
+        # byte held this loop frame (0 when nothing is down); keyp fires on
+        # the 0->key transition, and the edge LATCHES until a logic tick
+        # takes it (#217). Done here (not in InputState) so it is
+        # independent of whether the backend sets last_key before or after
+        # begin_frame().
+        k = ws.input.last_key
+        fed = self._focus_editor
+        if fed is None:
+            ws.input.cart_key = k
+            if k and k != self._cart_key_prev:
+                self._keyp_latch = k
+        else:
+            # A FOCUSED editor handle owns the keyboard: the byte goes to
+            # it and the cart's own key()/keyp() read nothing, so a skin
+            # never has to filter the text its editor is eating.
+            ws.input.cart_key = 0
+            if k and k != self._cart_key_prev:
+                fed.key(k)
+        self._cart_key_prev = k
+
+    def _lockstep_step(self, ws, dt):
+        """The #65 lockstep gate for this frame: (dt, stalled, session). With
+        no session dt is the loop's own, nothing stalls and session is None."""
+        # LOCKSTEP (#65 Phase 2): the session owns the clock. `dt` becomes
+        # the fixed tick -- a variable dt diverges the two sims on frame
+        # one -- and a frame whose peer input has not arrived does NOT
+        # simulate. It still DRAWS: the screen holds the last agreed
+        # frame instead of freezing, which is what "waiting for player"
+        # looks like on hardware that cannot extrapolate safely.
+        stalled = False
+        np = self._netplay
+        if np is not None:
+            # Drain the radio BEFORE deciding whether this tick can
+            # advance: the boards drain in the frame TAIL, so without
+            # this the peer's input is up to a whole loop frame stale
+            # by the time advance() looks for it. Measured on glass
+            # (P4<->T-Deck, 2026-08-24): 8.0% -> 6.4% stalled ticks at
+            # DELAY=2 from this call alone. Input-priority and
+            # mid-frame-safe by contract -- see EspNowLink.drain_input.
+            _di = self._drain_input
+            if _di is not None:
+                try:
+                    _di()
+                except Exception:  # noqa: BLE001 -- radio must not kill a frame
+                    pass
+            dt = np.dt
+            # The session owns the CLOCK as well as the order: it ticks
+            # at its fixed rate, not at whatever the board's frame loop
+            # manages, or a fixed dt would silently run the game fast.
+            _nowp = _ticks_ms()
+            if np.due(_nowp) or np.waiting:
+                # A STALLED tick retries every loop frame instead of
+                # waiting out a whole tick: the missing input usually
+                # lands a few ms after it was first needed, and the
+                # wait-for-the-next-due schedule made a 5ms miss cost
+                # 34ms (wait_med, on glass 2026-08-24). due() still
+                # owns the cadence of healthy ticks.
+                stalled = not np.advance(
+                    _netplay_mask(ws.input, _NET_BUTTONS), _nowp)
+            else:
+                # Between ticks: do not simulate, but KEEP SENDING. The
+                # frame loop is faster than the lockstep clock, so these
+                # frames are free redundancy against a radio whose ack
+                # lies -- and they serve a stalled peer sooner.
+                stalled = True
+                np.resend()
+        return dt, stalled, np
+
+    def _capture_frame_error(self, ws, exc):
+        """A cart that raised mid-frame: capture it, stop the cart, persist
+        pmem, and throw the kid into the code editor when there is one.
+        Returns True when the crash-to-code throw took the screen."""
+        # A cart that raises mid-frame must NOT escape the loop (the
+        # device would hang silently). Capture it, stop running the
+        # broken cart, and fall through to paint the error panel; the
+        # desktop buttons stay so the kid can EDIT/CODE the fix.
+        # mark the line on EDIT (#24): a Lua cart's line comes from the
+        # error text's `cart:N:` position (#67 Phase 5); a Python cart's
+        # from the traceback, mapped back through the nativize insert.
+        if self._lua is not None:
+            self.cart_error = _lua_err_text(exc)
+            self.crash_file, self.crash_line = _lua_cart_where(
+                self.cart_error, ws.cart)
+        else:
+            self.cart_error = _err_text(exc)
+            self.crash_line = self._map_crash_line(_exc_cart_line(exc))
+            self.crash_file = None
+        self._update = None
+        self._draw = None
+        self._disarm_pacing()  # the crash panel is a console screen
+        # Print the _err_text-guarded string, never the raw `exc`: a
+        # cart exception whose __str__ itself raises would otherwise
+        # escape here -> the silent device hang the panel exists to prevent.
+        print("Moybyte frame error:", self.cart_error)
+        # Deferred pmem (#66): the crash must not eat saved progress --
+        # the cart stops ticking now, so this is its last chance to
+        # persist. Guarded: the panel must paint even if SD is gone.
+        pm = getattr(ws, "pmem", None)
+        if pm is not None:
+            try:
+                pm.flush()
+            except Exception:  # noqa: BLE001
+                pass
+        # Owner ask 2026-07-23: no parked OOPS screen -- throw the kid
+        # straight into the code editor on the crashing line (popup +
+        # inline marker). The panel below survives only as the
+        # fallback when there is nothing to edit.
+        ws._reset_canvas_state()
+        return ws._crash_to_code()
+
+    def _tick_tail(self, ws, render):
+        """After the cart's frame: the periodic pmem flush, a quit() exit,
+        the text-mode sync, the canvas-state reset and the chrome a drawn
+        frame paints over the cart."""
         # Deferred pmem periodic flush (#66, the Letter Blitz attribution): a
         # dirty pmem persists at most once per PMEM_FLUSH_MS while the cart
         # plays -- the guaranteed saves are exit (release_world) and the crash
@@ -1888,7 +1950,7 @@ class Player:
                 ws.input.game_pointer = (gp[0], gp[1], False, False)
             # else the tap falls through to the tool (game pointer already published)
         elif click:
-            if ws.show_fps and self._in(px, py, ws.perf_ui._fps_tap_rect()):
+            if ws.show_fps and _in(px, py, ws.perf_ui._fps_tap_rect()):
                 # Tapping the FPS readout toggles the frame-time breakdown HUD
                 # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
                 # input -- the touch lands on a small bottom-right corner box.

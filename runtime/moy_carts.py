@@ -13,6 +13,19 @@
 # MicroPython-friendly by construction (no shutil; os-only). Functions take a `root` so the format/seed/scan logic is
 # host-testable against a temp dir. SD shares the SPI bus with the display, so
 # the caller mounts SD (moybyte_sd) with the LoRa/TFT CS deselected first.
+#
+# This file is the store CORE: load/scan/save_*, manifests, sources, the
+# sibling stores (wifi/system/achievements/icons/shared sheet), pmem and
+# create/duplicate/delete. Its leaves and the modules split off it are
+# imported back and re-exported under their old names, so `moy_carts.X` is
+# one namespace for every caller:
+#   moy_store_base   the on-card layout, slug, ensure_dirs, the dir primitives
+#   moy_fs           crash-safe file primitives
+#   moy_image        the moyimg codec
+#   moy_journal      the per-project undo journal
+#   moy_seed         seeding, the packed roster, the retired-seed sweep
+#   moy_files        the #108 user-files layer
+#   moy_file_ops     per-file history sidecars, the trash, provenance
 
 import gc
 import json
@@ -27,8 +40,20 @@ try:
 except ImportError:  # pragma: no cover
     _time = None
 
-CARTS_DIR = "/sd/moybyte/carts"
-CART_FORMAT = "moybyte-cart-v1"
+try:
+    from moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES, IMAGES_DIR,
+                                IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
+                                SCENE_EXT, _normalize_canvas, _canvas_str,
+                                _sibling_path, slug, ensure_dirs, _is_dir,
+                                _rmtree)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
+                                        IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
+                                        TILE_FLAGS, SCENES_DIR, SCENE_EXT,
+                                        _normalize_canvas, _canvas_str,
+                                        _sibling_path, slug, ensure_dirs,
+                                        _is_dir, _rmtree)
+
 
 # Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
 # input groups it actually reads -- "buttons" (btn/btnp), "touch" (touch()), "keyboard"
@@ -88,57 +113,6 @@ def _normalize_input_kinds(value):
     return kinds or None
 
 
-# The closed set of cart canvas sizes (SPEC.md 1/3.1). Closed so a host still
-# provisions for a fixed-size machine and can pick its scaler per size ahead of
-# time; 128x128 exists to inherit the PICO-8 back catalogue at native res.
-CANVAS_SIZES = {"320x240": (320, 240), "160x120": (160, 120),
-                "128x128": (128, 128)}
-
-
-def _normalize_canvas(value):
-    """A manifest "canvas" (SPEC.md 1/3.1) -> (w, h) from the closed set, None
-    when absent, or the raw declared value when OUT OF SET. Unlike an icon this
-    is a CAPABILITY field: a bad value is not dropped here, because the loader
-    has no way to refuse -- the evidence is carried so Player.start can refuse
-    the cart by name (like an unknown `runtime`) instead of running it at
-    dimensions it did not ask for, which would break every coordinate in it.
-
-    The dict form ({"width": W, "height": H, ...}) is the LEGACY moybyte shape
-    -- carts already seeded on boards carry it (a stale celeste on the P4
-    refused the day this normalizer shipped without it), so it normalizes like
-    the string when its size is in the set."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        wh = CANVAS_SIZES.get(value)
-        if wh is not None:
-            return wh
-    elif isinstance(value, dict):
-        try:
-            wh = (int(value.get("width")), int(value.get("height")))
-        except (TypeError, ValueError):
-            return value
-        if wh in CANVAS_SIZES.values():
-            return wh
-    return value
-
-
-def _canvas_str(value):
-    """The manifest wire form of a canvas value: a loaded (w, h) tuple goes back
-    to its "WxH" string; anything else (including an out-of-set original) is
-    written back verbatim, so a copy stays lossless."""
-    if isinstance(value, (list, tuple)) and len(value) == 2:
-        return "%dx%d" % (value[0], value[1])
-    return value
-
-
-# Paint-image assets (#63 Fold 3) live in a per-cart images/ subfolder as
-# <name>.moyimg files -- the THIRD asset type (a 64-colour MOY64 index bitmap from
-# the paint app), alongside sprites.moygfx and map.moymap. A .moyimg is a small JSON
-# header {format,w,h,data} over deflated indices, one byte per pixel -- ONE format,
-# whoever wrote it (runtime/moy_image.py holds the codec and the argument).
-IMAGES_DIR = "images"
-IMAGE_EXT = ".moyimg"
 ARTWORK_NAME = "artwork.moyimg"
 # Cartridge COVER ART (visual identity v1 Section 11.4): a cart folder may carry
 # images/cover.moyimg -- static authored cover art the Library shelf draws
@@ -146,21 +120,12 @@ ARTWORK_NAME = "artwork.moyimg"
 # sprite tile 0 / type glyph (the pre-cover look). tools/gen_covers.py captures a
 # gameplay frame for the seed games; Paint art or any moyimg works the same.
 COVER_IMAGE = "cover"
-NOTES_NAME = "notes.json"
 DECK_NAME = "deck.json"
 
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
 # it sits beside every <name>.moy folder). Tiles painted here are reusable
 # across carts; the import-tile primitive copies tiles between any two sheets.
 SHARED_SHEET_NAME = "shared.moygfx"
-
-# Tile flags (SPEC.md 3.5): the FIFTH asset, one byte per tile for all 512 tiles
-# of the SPEC.md 3.2 sheet, as hex pairs in tile order. The tile-tagging idiom --
-# solid, spike, coin, layer 2 -- read by fget, written by fset and consulted by
-# map(..., layers). A sidecar rather than a manifest field because it is data
-# with the sheet's shape. PICO-8's __gff__ is its first 256 tiles byte for byte.
-FLAGS_NAME = "flags.moyflags"
-TILE_FLAGS = 512
 
 
 def parse_flags(text):
@@ -194,16 +159,14 @@ def flags_to_hex(flags):
 # under their pre-extraction names so every caller, test and `store.X` lookup is
 # unchanged. Same bare-or-package fallback as every shared module.
 try:
-    from moy_image import (THUMBS_DIR, _b64_encode, _b64_decode, _deflate,
-                           encode_moyimg, moyimg_runs, decode_moyimg,
-                           cover_sig, _thumb_file)
+    from moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg, moyimg_runs,
+                           decode_moyimg, cover_sig)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                         _write_atomic, _read_recover, _read_bak, _forget_bak,
                         set_publish_root)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_image import (THUMBS_DIR, _b64_encode, _b64_decode,
-                                   _deflate, encode_moyimg, moyimg_runs,
-                                   decode_moyimg, cover_sig, _thumb_file)
+    from runtime.moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg,
+                                   moyimg_runs, decode_moyimg, cover_sig)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover, _read_bak,
                                 _forget_bak, set_publish_root)
@@ -262,8 +225,6 @@ def save_image(cart, name, text):
 # active scene, the one bare scene() iterates); the folder scan is the safety net. The
 # cart consumes them once in _init via scene()/load_scene() (data-only, #85 Variant A)
 # -- Project builds a widgets.Scenes from the raw blobs. json+os only, like the rest.
-SCENES_DIR = "scenes"
-SCENE_EXT = ".moyscene"
 
 
 def load_scene(path, name):
@@ -375,10 +336,6 @@ def save_scene(cart, name, text):
 # the per-store `X_path`/`load_X`/`save_X` wrappers keep their public names (and
 # any store-specific parse/sanitize logic).
 
-def _sibling_path(root, name):
-    parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + name) if parent else name
-
 
 def _read_sibling(root, name):
     """The store's raw text, or None if it has never been saved."""
@@ -432,11 +389,6 @@ def _write_sibling(root, name, text):
     _write_atomic(_sibling_path(root, name), text)
 
 
-def artwork_path(root=CARTS_DIR):
-    """The shared Paint document, beside the carts directory."""
-    return _sibling_path(root, ARTWORK_NAME)
-
-
 def load_artwork(root=CARTS_DIR):
     return _read_sibling(root, ARTWORK_NAME)
 
@@ -456,20 +408,6 @@ def load_deck(cart):
 
 def save_deck(cart, text):
     _write_atomic(cart["path"] + "/" + DECK_NAME, text)
-
-
-def notes_path(root=CARTS_DIR):
-    """The Writer app's notebook (a `moynotes-v1` JSON blob), beside the carts
-    directory like Paint's shared artwork.moyimg."""
-    return _sibling_path(root, NOTES_NAME)
-
-
-def load_notes(root=CARTS_DIR):
-    return _read_sibling(root, NOTES_NAME)
-
-
-def save_notes(text, root=CARTS_DIR):
-    _write_sibling(root, NOTES_NAME, text)
 
 
 # --- the document codec ---
@@ -496,423 +434,6 @@ def decode_text(blob):
     if not isinstance(blob, str):
         return []
     return blob.split("\n") if blob else []
-
-
-def slug(title):
-    out = ""
-    for ch in str(title).lower():
-        if ch.isalpha() or ch.isdigit():
-            out += ch
-        elif ch in " -_":
-            out += "_"
-    return out or "cart"
-
-
-def ensure_dirs(root=CARTS_DIR):
-    parent = root.rsplit("/", 1)[0]
-    if parent:
-        _mkdir(parent)
-    _mkdir(root)
-    # The publish marker (#154) goes at the PARENT, because that is what covers
-    # the whole store in one file: the cart folders and their journals under
-    # `root`, the #108 files layer and the sibling stores (system.json,
-    # wifi.json, shared.moygfx) beside it. One marker, one read per boot.
-    set_publish_root(parent or root)
-
-
-def _cart_version(path):
-    """The integer "version" of an on-SD cart's manifest, or 0 when it has none
-    (or is unreadable). A pre-versioning cart therefore counts as the oldest, so
-    a versioned built-in always supersedes it on the next boot."""
-    try:
-        man = json.loads(_read_recover(path + "/manifest.json"))
-        if isinstance(man, dict):
-            return int(man.get("version", 0))
-    except Exception:  # noqa: BLE001 -- a bad manifest just reads as version 0
-        pass
-    return 0
-
-
-# The per-kid files kept across a destructive re-seed: pmem.json is the cart's
-# save state / high scores (TIC-80 pmem), config.json is the kid's "Make it mine"
-# tuning. A version bump replaces CODE + ART but restores these over the fresh
-# copy, so updating a cart never wipes a kid's progress or settings.
-_RESEED_PRESERVE = ("pmem.json", "config.json")
-
-
-def _preserve_moy_data(path):
-    """Snapshot an on-SD cart's per-kid files (saves + config) before a re-seed
-    wipes the folder. Returns {name: text} for those present (crash-safe read)."""
-    kept = {}
-    for name in _RESEED_PRESERVE:
-        try:
-            kept[name] = _read_recover(path + "/" + name)
-        except OSError:
-            pass                  # not written yet (no saves / default config) -> skip
-    return kept
-
-
-def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
-    """Write missing/outdated built-in carts to SD as editable .moy folders.
-
-    A seed dict that carries a non-empty "sprites" hex blob also gets a
-    sprites.moygfx written, so the device's paint editor (and the cart's spr()
-    tile draws) have the real art -- without this the device seeds blank sheets
-    and the games fall back to nothing. The manifest is COMPLETE (canvas +
-    permissions + full edit schema + version) so the visual "Make it mine" cards
-    render on device exactly as on host.
-
-    Versioning (the re-seed): a cart already on SD is left untouched UNLESS the
-    built-in's "version" is newer than the on-SD one -- then its CODE + ART are
-    REPLACED wholesale (the old folder is removed first), but the kid's data
-    (pmem.json saves + config.json tuning, see _RESEED_PRESERVE) is preserved
-    over the fresh copy. So a content update keeps high scores and settings;
-    on-device edits to a built-in's *code/sprites* are discarded. Pre-versioning
-    carts read as version 0, so bumping a built-in to >=1 refreshes stale copies
-    automatically -- no more "clear /sd/moybyte/carts by hand". Bump a built-in's
-    manifest "version" whenever you change its content.
-
-    (Migration note: a preserved config.json keeps the kid's old values, so a
-    NEW default for an EXISTING config key won't apply to an already-seeded cart;
-    a brand-new key just falls back to its code default via cfg(key, default).)"""
-    # `progress(done, total, title)` is called once per seed considered, so a
-    # boot screen can show a bar. Measured on a full-erase P4 boot: seeding all
-    # 32 built-ins takes 17.5 of the 25 seconds before the desktop composes, and
-    # it is the only stage of that boot with a countable unit of work. Optional
-    # and best-effort -- a progress callback must never be able to fail a seed.
-    _total = len(seed_list)
-    for _seeded, cart in enumerate(seed_list):
-        if progress is not None:
-            try:
-                progress(_seeded, _total, cart.get("title", ""))
-            except Exception:                 # noqa: BLE001
-                progress = None               # broken hook: drop it, keep seeding
-        d = root + "/" + slug(cart["title"]) + ".moy"
-        seed_ver = int(cart.get("version", 0))
-        preserved = None
-        if _exists(d):
-            if seed_ver <= _cart_version(d):
-                continue
-            preserved = _preserve_moy_data(d)   # keep saves + tuning across the wipe
-            _rmtree(d)            # newer built-in: replace code+art wholesale
-        _mkdir(d)
-        manifest = {
-            # This manifest is REGENERATED, not copied, so every field a built-in
-            # declares has to be passed through explicitly or the seeded copy
-            # loses it. `format` especially: the device seeds from the baked blob
-            # while the host copies the source folder, so hardcoding CART_FORMAT
-            # here restamped a "moy-1" built-in on device and nowhere else.
-            "format": cart.get("format", CART_FORMAT),
-            "title": cart["title"], "type": cart["type"],
-            # #67 dual-runtime passthrough: a baked "lua" built-in seeds with its
-            # runtime + main.lua intact.
-            "runtime": cart.get("runtime", "python"),
-            "main": cart.get("main", "main.py"),
-            "edit": cart.get("edit", []),
-            "version": seed_ver,
-        }
-        # SPEC.md 4's load order, rebuilt from the two lists: `main` sits
-        # between them and must appear, so a reader gets the same order this
-        # cart was written with. Omitted entirely for a one-script cart, which
-        # is what [main] means.
-        _pre = list(cart.get("src_before") or ())
-        _post = list(cart.get("src_after") or ())
-        if _pre or _post:
-            manifest["sources"] = ([n for n, _ in _pre]
-                                   + [manifest["main"]]
-                                   + [n for n, _ in _post])
-        if cart.get("fps"):               # frame pacing (#63): "fps": 60 opt-out
-            manifest["fps"] = cart["fps"]
-        if cart.get("icon"):              # launcher icon tiles (SPEC.md 3.4)
-            manifest["icon"] = list(cart["icon"])
-        if cart.get("canvas") is not None:
-            # A baked seed carries the manifest string; a load()ed cart carries
-            # the normalized (w, h) -- both serialize back to the "WxH" form.
-            manifest["canvas"] = _canvas_str(cart["canvas"])
-        if cart.get("permissions") is not None:
-            manifest["permissions"] = cart["permissions"]
-        if cart.get("input") is not None:               # #42 Thread 3 input-kind hint
-            manifest["input"] = list(cart["input"])
-        scenes = cart.get("scenes")               # {name: .moyscene blob}, optional (#85)
-        if scenes:
-            # Register the ordered set in manifest.assets.scenes (element 0 = default
-            # active) BEFORE the manifest is written, so load() finds them. A seed may
-            # pin the order via "scene_order"; else sorted names (bump the built-in's
-            # version, #47, whenever a seed's scenes change -- like any other content).
-            manifest["assets"] = {"scenes": list(cart.get("scene_order")
-                                                 or sorted(scenes.keys()))}
-        _write(d + "/manifest.json", json.dumps(manifest))
-        _write(d + "/" + cart.get("main", "main.py"), cart["src"])
-        # The cart's other scripts beside it (SPEC.md 4), and `sources` in the
-        # manifest above naming the order -- a port's main.lua cannot run
-        # without its shim chunk, and nothing else says where that goes.
-        for name, text in list(cart.get("src_before") or ()) \
-                + list(cart.get("src_after") or ()):
-            _write(d + "/" + name, text)
-        _write(d + "/config.json", json.dumps(cart["cfg"]))
-        sprites = cart.get("sprites")
-        if sprites:
-            _write(d + "/sprites.moygfx", sprites)
-        sounds = cart.get("sounds")               # AudioBank dict, optional (#16)
-        if sounds:
-            _write(d + "/sounds.json", json.dumps(sounds))
-        tilemap = cart.get("map")                 # TileMap.to_hex() blob, optional (#32)
-        if tilemap:
-            _write(d + "/map.moymap", tilemap)
-        flags = cart.get("flags")                 # tile flags (SPEC.md 3.5), optional
-        if flags:
-            _write(d + "/" + FLAGS_NAME, flags)
-        images = cart.get("images")               # {name: .moyimg blob}, optional (#63)
-        if images:
-            _mkdir(d + "/" + IMAGES_DIR)
-            for iname, iblob in images.items():
-                _write(d + "/" + IMAGES_DIR + "/" + iname + IMAGE_EXT, iblob)
-        blocks = cart.get("blocks")               # block program tree, optional (#29)
-        if blocks:
-            # a block-authored seed (tap_game) ships its blocks.json so it opens in
-            # the on-device block editor as blocks, not just compiled code.
-            _write(d + "/blocks.json", json.dumps(blocks))
-        if scenes:                                # scene assets (#85), written last
-            _mkdir(d + "/" + SCENES_DIR)
-            for sname, sblob in scenes.items():
-                _write(d + "/" + SCENES_DIR + "/" + sname + SCENE_EXT, sblob)
-        if preserved:
-            # restore the kid's saves + tuning AFTER the seed write, so config.json
-            # holds their values (not the freshly-seeded defaults) and pmem survives.
-            for name, data in preserved.items():
-                _write(d + "/" + name, data)
-
-
-# -- the PACKED seed roster (2026-08-30) -------------------------------------
-#
-# `seed_builtins` above takes cart DICTS, and on the console boards those come
-# straight out of a frozen `carts_data.CARTS` -- 732 KB of literal source whose
-# strings live in ROM and cost no heap. That representation is free on a board
-# with the flash for it, and the Zero is the board without. Both forms were
-# BUILT: the plain roster makes a 2,830,672 B image of a 2,883,584 B OTA slot,
-# 51 KB left -- it fits, by less than 2%, under the #168 warning floor and one
-# cart from a build failure, in a slot the board pays for TWICE.
-#
-# So the Zero froze `carts_data.CARTS_Z` instead: the SAME carts, one raw
-# deflate stream each (tools/gen_device_carts.py --packed), which builds to
-# 2,399,232 B and leaves 473 KB. The unit of work is ONE CART -- inflate it,
-# hand it to `seed_builtins`, drop it -- because the roster inflates to 732 KB
-# and no board should ever hold that at once.
-#
-# EVERY BOARD FREEZES THE PACKED ROSTER since 2026-08-30, and the argument on
-# the three that fit is not the fit, it is the MARGIN: the roster only grows and
-# a slot does not, so the board with the least room decides the form for all of
-# them, and a lever that lives on one target is the lever the next port forgets.
-# `seed_any` below is the one door a boot calls, so nothing else had to change.
-#
-# Nothing about the seed CONTRACT changes: the #47 version rules, the manifest
-# regeneration, the preserved pmem/config all stay in `seed_builtins`, which is
-# the one body that writes a cart to a store. This is a decoder in front of it.
-
-# The deflate window the roster was compressed with. `tools/gen_device_carts.py`
-# holds the writer's copy (SEED_WBITS) and tests/test_seed_pack.py pins the two
-# equal -- a mismatch is not a crash, it is a wrong-looking inflate.
-_SEED_WBITS = 15
-
-
-def _packed_stream(blob):
-    """A readable stream over one cart's raw-deflate blob.
-
-    `deflate` is MicroPython's built-in inflater and the reason there is no
-    `zlib` on a board at all (it replaced it in v1.21). CPython has no
-    `deflate`, so the host reaches the same bytes through zlib's raw mode --
-    which is what lets every host suite exercise THIS body rather than a twin.
-    """
-    import io as _io
-
-    try:
-        import deflate
-    except ImportError:                  # CPython (host suites, the simulator)
-        import zlib
-        return _io.BytesIO(zlib.decompress(blob, -_SEED_WBITS))
-    return deflate.DeflateIO(_io.BytesIO(blob), deflate.RAW, _SEED_WBITS)
-
-
-def unpack_seed(blob):
-    """One packed blob -> the cart dict `seed_builtins` takes.
-
-    `json.load` over the inflating stream, NOT `json.loads(stream.read())`:
-    read() materializes the whole inflated document beside the objects parsed
-    out of it, and the parse allocates those anyway. MEASURED under the desktop
-    MicroPython, as the smallest heap the whole roster seeds in -- 680 KB
-    streaming against 896 KB for the read-all version, which is also ~40%
-    slower. tests/test_seed_pack.py asserts at 768 KB, between the two.
-    """
-    return json.load(_packed_stream(blob))
-
-
-def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False):
-    """`seed_builtins` over a PACKED roster, one cart inflated at a time.
-
-    `packed` is `[(title, version, blob)]`. The title and the version ride
-    outside the blob so the #47 already-there check can be answered WITHOUT
-    inflating: a board that is already seeded walks the whole roster doing 35
-    directory stats and no decompression at all, which is what keeps this off
-    the warm-boot path rather than merely cheap on it.
-
-    `only_new` changes the skip rule from "already CURRENT" to "already THERE",
-    and it is the Zero's (2026-08-30). On a console board the store is a CACHE
-    of the image's built-ins, so #47 replaces a cart whose baked version is
-    newer and accepts that on-device edits to a built-in's code are lost. On the
-    Zero the store is the RECORD -- the only copy of a cart made in a browser,
-    with a `moy_journal` history behind it -- and `seed_builtins` names a folder
-    by the TITLE slug, so a version bump is exactly what would overwrite a kid's
-    edited "Hop Quest". A cart that is not there yet has nothing to overwrite,
-    which is the whole difference: this seeds what is MISSING and never rewrites
-    what is present.
-
-    Returns the number of carts actually written.
-    """
-    total = len(packed)
-    written = 0
-    for index, entry in enumerate(packed):
-        title, version, blob = entry
-        if progress is not None:
-            try:
-                progress(index, total, title)
-            except Exception:             # noqa: BLE001 -- as in seed_builtins
-                progress = None
-        d = root + "/" + slug(title) + ".moy"
-        if _exists(d) and (only_new or int(version) <= _cart_version(d)):
-            continue
-        # One cart in flight. seed_builtins gets a ONE-element list so every
-        # rule it owns still applies -- and no progress hook, because the
-        # counting is this loop's (it would report 1-of-1, 35 times).
-        #
-        # NO `gc.collect()` here, and that is MEASURED rather than assumed. The
-        # obvious version collects after each cart to "make peak heap be one
-        # cart"; under the desktop MicroPython the smallest heap the whole
-        # roster seeds in is 680 KB either way, and the collecting version is
-        # ~10% slower for it. The allocator already collects at the moment
-        # peak matters -- when an allocation cannot be served -- and on a board
-        # whose heap is megabytes of PSRAM a full scan per cart is a real cost
-        # paid 35 times for a bound it does not move.
-        seed_builtins([unpack_seed(blob)], root)
-        written += 1
-    return written
-
-
-# -- which roster is this? ----------------------------------------------------
-#
-# Since every console board freezes the PACKED roster (2026-08-30), the two
-# seeders both exist on every board and something has to choose. That choice
-# lives HERE, in the module that owns both bodies, and not in the boot spine:
-# it is a property of the DATA -- what `carts_data` was generated as -- and a
-# board passing the wrong flag beside the right roster is a failure mode worth
-# not having. A packed entry is a `(title, version, blob)` tuple; a plain one is
-# a cart dict. Nothing else has ever been in a roster.
-
-
-def is_packed(seed):
-    """True if `seed` is a packed roster (`carts_data.CARTS_Z`)."""
-    return bool(seed) and not isinstance(seed[0], dict)
-
-
-# -- seeds that no longer ship (2026-09-06) ----------------------------------
-#
-# A seed is written to the store once and then LIVES there: nothing in the #47
-# version rules can express "this cart is gone", so a retired built-in stayed
-# on every flashed board's shelf forever and only a hand-deleted folder took it
-# off. RETIRED is that expression -- the titles a roster used to carry -- and
-# `prune_retired` removes their folders once per store.
-#
-# ONCE is the whole design. The generation counter is written into the store
-# after a sweep, so the pass runs when a store is behind and never again: a kid
-# who later makes their own cart under a retired title keeps it. Bump
-# RETIRED_GEN in the same commit that adds titles, or the new ones never sweep.
-#
-# The Zero is deliberately NOT a caller (it seeds `seed_packed(only_new=True)`
-# directly): its store is the RECORD -- the only copy of a cart made in a
-# browser -- where a console board's store is a CACHE of the image's built-ins.
-#
-# The list is the 2026-09-06 bench fold (three benches became phases of Bench
-# and Bench Lua) plus the 2026-07-29 RENAME's leftovers: b4cc0d8 renamed the
-# folders as well as the titles, so every board seeded before it has carried a
-# second, stale copy of Brick Siege and Harpoon Pop ever since. Sheets and
-# Beeper are the 2026-09-07 deletions: the spreadsheet app, and the audio demo
-# whose verbs the cart API now shows off instead. Writer is the same day's: the
-# notebook app is gone and Notes -- a CART over the shell's editor handle --
-# is the one text app (docs/text_editing_2026-09.md).
-RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
-           "Sheets", "Beeper", "Writer")
-RETIRED_GEN = 4
-RETIRED_VER_NAME = "retired.ver"
-
-
-def retired_version_path(root=CARTS_DIR):
-    """Sidecar (a sibling of the carts dir, like system_icons.ver) holding the
-    RETIRED generation this store has already been swept for."""
-    return _sibling_path(root, RETIRED_VER_NAME)
-
-
-def load_retired_version(root=CARTS_DIR):
-    """The generation the store was swept at -- 0 when absent/unreadable, so a
-    store that predates this sweeps once."""
-    try:
-        return int(_read(retired_version_path(root)).strip())
-    except (OSError, ValueError, AttributeError):
-        return 0
-
-
-def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN):
-    """Remove the folders of seeds that no longer ship, once per store.
-
-    Returns the number of folders removed (0 when the store is already at this
-    generation, which is the warm-boot path and costs one small file read)."""
-    if load_retired_version(root) >= generation:
-        return 0
-    gone = 0
-    for title in titles:
-        d = root + "/" + slug(title) + ".moy"
-        if _exists(d):
-            _rmtree(d)
-            gone += 1
-    try:
-        _write(retired_version_path(root), str(int(generation)))
-    except OSError:
-        return gone          # a read-only store: sweep again next boot, harmless
-    return gone
-
-
-def sweep_store(root=CARTS_DIR):
-    """The one-shot pass a store OPENING runs, behind one door. Returns the
-    number of retired folders removed.
-
-    The door is kept for the next sweep that earns it, and the bar it has to
-    clear is `prune_retired`'s: gated on a generation sidecar, so the warm path
-    is one small read and the cold one is bounded. A FORMAT change does not
-    clear it and does not belong here -- readers are strict and a bumped seed
-    version re-seeds the content (CLAUDE.md, 2026-09-07)."""
-    return prune_retired(root)
-
-
-def seed_any(seed, root=CARTS_DIR, progress=None):
-    """Seed a roster of either form. The one call a board's boot makes."""
-    sweep_store(root)
-    if is_packed(seed):
-        return seed_packed(seed, root, progress=progress)
-    return seed_builtins(seed, root, progress=progress)
-
-
-def embedded_floor(seed):
-    """The read-only carts a board falls back to when it has NO writable store.
-
-    Nearly unreachable since 2026-08-30: every board now retries on internal
-    flash before it gets here (device_boot.load_carts `fallback_root`), so
-    reaching this means the internal VFS itself is gone -- a board that cannot
-    save anything at all. That is the only reason inflating the WHOLE roster is
-    acceptable here: ~732 KB held at once, which every console board has in
-    PSRAM and none should ever spend on a warm path. The Zero, whose store is
-    the only thing it has, has no floor to fall to and does not call this.
-    """
-    if is_packed(seed):
-        return [unpack_seed(blob) for _title, _version, blob in seed]
-    return [dict(c) for c in seed]
 
 
 def _read_main(path, name):
@@ -1501,22 +1022,17 @@ def save_map(cart, hex_text):
 # unchanged; the design doc lives at the top of moy_journal.py.
 try:
     from moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
-                             JOURNAL_SNAP_DIR, JOURNAL_MAX_ENTRIES,
-                             JOURNAL_MAX_BYTES, journal_append, journal_undo,
+                             JOURNAL_SNAP_DIR, journal_append, journal_undo,
                              journal_redo, journal_can_undo, journal_can_redo,
-                             journal_compact, journal_entry_ops,
                              _journal_paths, _journal_load_entries,
-                             _journal_cursor, _journal_current_snap,
-                             _journal_total_bytes)
+                             _journal_current_snap, _journal_total_bytes)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
-                                     JOURNAL_SNAP_DIR, JOURNAL_MAX_ENTRIES,
-                                     JOURNAL_MAX_BYTES, journal_append,
+                                     JOURNAL_SNAP_DIR, journal_append,
                                      journal_undo, journal_redo,
                                      journal_can_undo, journal_can_redo,
-                                     journal_compact, journal_entry_ops,
                                      _journal_paths, _journal_load_entries,
-                                     _journal_cursor, _journal_current_snap,
+                                     _journal_current_snap,
                                      _journal_total_bytes)
 
 
@@ -1892,13 +1408,6 @@ NEW_TEMPLATE = {
 }
 
 
-def _is_dir(path):
-    try:
-        return (os.stat(path)[0] & 0x4000) != 0
-    except OSError:
-        return False
-
-
 def _unique_dir(root, base):
     d = root + "/" + base + ".moy"
     if not _exists(d):
@@ -2036,834 +1545,61 @@ def delete(cart):
     _rmtree(cart["path"])
 
 
-def _rmtree(path):
-    try:
-        names = os.listdir(path)
-    except OSError:
-        return
-    for n in names:
-        p = path + "/" + n
-        if _is_dir(p):
-            _rmtree(p)
-        else:
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-    try:
-        os.rmdir(path)
-    except OSError:
-        pass
-
-
-# --- user files (#108): the kid's creations as real files -------------------
+# --- the modules split off this file, re-exported under their old names -------
 #
-# Creations that outlive any one app or cart (a Paint drawing, a note, a
-# recorded voice set) live under ONE visible root BESIDE the carts dir --
-# files/<kind>/<name><ext> -- real folders with real names on the card, so the
-# same stuff a File Manager shows is what a PC sees on the mounted SD. Kinds
-# are flat (no nesting in v1) and kind-homed like every desktop OS's known
-# folders. Carts never reference these: reuse is copy-on-use through the
-# existing attach verbs (the one exception, recordings, is used-by-name and
-# never copied INTO a cart -- #70's privacy rule). Delete moves to
-# files/trash/<kind>/ (restorable; pruned by count), never destroys directly.
-
-FILES_DIR = "files"
-TRASH_DIR = "trash"
-TRASH_KEEP = 50          # prune the trash's oldest entries beyond this many
-
-# Documents are PLAIN MARKDOWN (2026-09-07): `files/docs/<name>.md`, UTF-8, LF,
-# no envelope and no header -- the file's body IS the document and its stem is
-# the note's name. The point is that a card in a PC's reader opens the same
-# folder in Obsidian with nothing to convert. The reader is STRICT: a `.md` is
-# the only thing the docs kind lists, so the `.moytext` wrapper this replaced is
-# not a document any more, it is a file the vault does not know.
-DOC_EXT = ".md"
-
-# SCRIPTS live in the vault beside the notes (docs/text_editing_2026-09.md): a
-# bare `.py` or `.lua` file is a cart with no folder, and RUN wraps it on the
-# fly. They are the ONE kind of vault item listed under its WHOLE name --
-# `hello.py`, not `hello` -- because the extension is what says which runtime
-# runs it, and because a note called `hello` and a script called `hello.py` are
-# two different things that must not shadow each other.
-SCRIPT_EXTS = (".py", ".lua")
-
-# The vault holds more than notes. A `.txt`, a `.json` and a script are all
-# things a person makes ON the console (the NEW prompt in Notes takes a name
-# and honours the extension it carries), and every one of them is listed and
-# addressed under its WHOLE name -- `todo.txt`, never `todo` -- because the
-# extension is what picks the editing MODE, and because two files that differ
-# only by it must not shadow each other.
-#
-# `.md` is the ONE extension a vault name may leave off: it is what a bare
-# name MEANS. So a note stays `story`, and the list shows what each item is
-# through its badge (text_modes.badge) rather than by spelling `.md` on every
-# row.
-VAULT_EXTS = SCRIPT_EXTS + (".txt", ".json")
-
-
-def script_ext(name):
-    """The script extension `name` carries, or "" -- the one place that says a
-    vault item is a PROGRAM and not prose."""
-    return _ext_from(name, SCRIPT_EXTS)
-
-
-def vault_ext(name):
-    """The extension `name` keeps in the VAULT, or "" -- what says the name is
-    already whole and nothing is appended to it on disk."""
-    return _ext_from(name, VAULT_EXTS)
-
-
-def _ext_from(name, exts):
-    name = str(name)
-    for ext in exts:
-        if name.endswith(ext) and len(name) > len(ext):
-            return ext
-    return ""
-
-
-def _item_ext(kind, name):
-    """The on-disk extension for one item of `kind`. The kind's own, except for
-    a whole-named vault item, which already carries its extension."""
-    if kind == "docs" and vault_ext(name):
-        return ""
-    return _kind_spec(kind)[0]
-
-
-def _whole_exts(kind):
-    """Extensions `kind` lists under their whole name -- the vault's."""
-    return VAULT_EXTS if kind == "docs" else ()
-
-
-def _split_item(kind, name):
-    """`(stem, ext)` for a whole-named vault item, `(name, "")` otherwise --
-    where a uniquifying counter goes, so a collision yields `todo_2.txt` and
-    not `todo.txt_2` (which would be stored as `todo.txt_2.md`)."""
-    ext = vault_ext(name) if kind == "docs" else ""
-    return (str(name)[:-len(ext)], ext) if ext else (str(name), "")
-
-
-def _slug_item(kind, name):
-    """`slug` for a file item, keeping a whole-named vault item's extension
-    (slug drops the dot, so slugging the whole name would turn `hello.py` into
-    `hellopy` and lose the runtime with it)."""
-    stem, ext = _split_item(kind, name)
-    return (slug(stem) + ext) if ext else slug(name)
-
-# kind -> (extension, folder_valued, auto-name base). A folder-valued kind
-# (#70 recordings) holds one DIRECTORY per item (the macOS-bundle model); file
-# kinds hold one flat file per item. Every store verb below validates against
-# this registry, so an unknown kind is a loud ValueError, not a stray dir.
-FILE_KINDS = {
-    "drawings":   (IMAGE_EXT, False, "drawing"),
-    "docs":       (DOC_EXT, False, "doc"),
-    "sprites":    (".moygfx", False, "sheet"),
-    "music":      (".moysong", False, "song"),
-    "recordings": ("", True, "recording"),
-}
-
-
-def _kind_spec(kind):
-    try:
-        return FILE_KINDS[kind]
-    except KeyError:
-        raise ValueError("unknown file kind: " + str(kind))
-
-
-# -- a PROJECT's own files, as a files-role KIND ------------------------------
-#
-# The Config tab's ADVANCED row (step 5 of docs/text_editing_2026-09.md) edits a
-# cart's own manifest.json / config.json / main file in the shell's editor
-# handle, and the handle is identified by `(kind, name)` through the Files role.
-# So a project becomes a kind: `project:<folder>.moy`, whose store is that
-# folder under the carts root rather than a `files/<kind>/` directory.
-#
-# It is a KIND and not a path because the handle, the parked text request and
-# the cart-facing `open_editor` all speak `(kind, name)` and none of them may
-# learn about directories. The folder rather than the full path so the token is
-# root-relative: the same request means the same file on the host and on a board
-# whose carts live somewhere else.
-#
-# The two things this kind deliberately does NOT get:
-#   * a `files/.history/` sidecar -- a project file's durable undo is the
-#     project's own JOURNAL (#111), which `save_project_file` appends to. Two
-#     parallel histories over one file would double-count every edit, and
-#     `project:foo.moy` is not a legal FAT directory name anyway.
-#   * the trash / rename / duplicate / auto-name verbs. A cart's own files are
-#     named by the FORMAT, not by a person, so there is nothing to name and
-#     nothing that may go missing.
-PROJECT_KIND = "project:"
-
-# The order the ADVANCED row lists a project in: the two documents a person
-# edits, the program, then its assets. Anything else on disk follows, sorted.
-PROJECT_ORDER = ("manifest.json", "config.json", "main.py", "main.lua",
-                 "sprites.moygfx", "map.moymap", FLAGS_NAME, "sounds.json",
-                 "blocks.json")
-
-# Subfolders whose items the row lists as `<dir>/<name><ext>`.
-PROJECT_SUBDIRS = ((SCENES_DIR, SCENE_EXT), (IMAGES_DIR, IMAGE_EXT))
-
-# The atomic-write machinery's orphans, and the two DIRECTORIES a listing must
-# never wander into (the journal's snapshots are history, not files to edit).
-_PROJECT_SKIP_EXT = (".bak", ".tmp")
-
-
-def project_kind(path_or_folder):
-    """The files-role kind naming the project at `path_or_folder` -- a cart
-    dict's `path` or a bare `.moy` folder name."""
-    name = str(path_or_folder)
-    cut = max(name.rfind("/"), name.rfind("\\"))
-    return PROJECT_KIND + (name[cut + 1:] if cut >= 0 else name)
-
-
-def project_folder(kind):
-    """The `.moy` folder `kind` names, or "" when `kind` is a user-files kind.
-    The ONE predicate that says "this kind is a project", so every store verb
-    branches on the same answer."""
-    k = str(kind)
-    return k[len(PROJECT_KIND):] if k.startswith(PROJECT_KIND) else ""
-
-
-def project_dir(kind, root=CARTS_DIR):
-    folder = project_folder(kind)
-    if not folder:
-        raise ValueError("not a project kind: " + str(kind))
-    return root + "/" + folder
-
-
-def project_file_path(kind, name, root=CARTS_DIR):
-    """The on-disk path of one project file. `name` may carry ONE subfolder
-    (`scenes/opening.moyscene`) and nothing else: a name that climbs, or that
-    is absolute, is refused rather than resolved, because this kind is the one
-    place a NAME chosen elsewhere becomes a path."""
-    parts = str(name).replace("\\", "/").split("/")
-    if len(parts) > 2 or not parts[-1] or parts[0] in ("", ".", ".."):
-        raise ValueError("bad project file name: " + str(name))
-    if len(parts) == 2 and parts[1] in ("", ".", ".."):
-        raise ValueError("bad project file name: " + str(name))
-    return project_dir(kind, root) + "/" + "/".join(parts)
-
-
-def list_project_files(kind, root=CARTS_DIR):
-    """One project's own files, PROJECT_ORDER first and the rest sorted after.
-
-    Lists what is actually on disk rather than what a cart could hold, so a
-    main file the manifest renamed still appears and an absent asset is not a
-    dead row."""
-    d = project_dir(kind, root)
-    try:
-        names = sorted(os.listdir(d))
-    except OSError:
-        return []
-    flat = []
-    for n in names:
-        if _ends_any(n, _PROJECT_SKIP_EXT) or _is_dir(d + "/" + n):
-            continue
-        flat.append(n)
-    out = [n for n in PROJECT_ORDER if n in flat]
-    out.extend(n for n in flat if n not in PROJECT_ORDER)
-    for sub, ext in PROJECT_SUBDIRS:
-        try:
-            kids = sorted(os.listdir(d + "/" + sub))
-        except OSError:
-            continue
-        out.extend(sub + "/" + n for n in kids if n.endswith(ext))
-    return out
-
-
-def load_project_file(kind, name, root=CARTS_DIR):
-    """One project file's text, or None -- through `_read_recover`, so a crash
-    mid-save reads the `.bak` exactly as `load()` does for the manifest."""
-    try:
-        return _read_recover(project_file_path(kind, name, root))
-    except OSError:
-        return None
-
-
-def save_project_file(kind, name, text, root=CARTS_DIR):
-    """Write one project file atomically and record it in the project's undo
-    journal (#111), which is the shape `Project.commit_config` already has for
-    config.json. A journal failure never fails the write -- the edit is on
-    disk, the kid just loses one undo step."""
-    path = project_file_path(kind, name, root)
-    _write_atomic(path, text)
-    try:
-        journal_append(project_dir(kind, root), str(name), text)
-    except Exception as exc:  # noqa: BLE001 -- journaling can't fail a save
-        print("Moybyte project journal failed:", exc)
-    return str(name)
-
-
-def files_root(root=CARTS_DIR):
-    """The user-files root, beside the carts directory (like shared.moygfx)."""
-    return _sibling_path(root, FILES_DIR)
-
-
-def file_kind_dir(kind, root=CARTS_DIR):
-    _kind_spec(kind)
-    return files_root(root) + "/" + kind
-
-
-def file_path(kind, name, root=CARTS_DIR):
-    return file_kind_dir(kind, root) + "/" + name + _item_ext(kind, name)
-
-
-def _ensure_kind_dir(kind, root):
-    ensure_dirs(root)
-    _mkdir(files_root(root))
-    d = file_kind_dir(kind, root)
-    _mkdir(d)
-    return d
-
-
-def _mtime(path):
-    try:
-        return os.stat(path)[8]
-    except OSError:
-        return 0
-
-
-def _kind_entries(d, ext, folder_valued, whole=()):
-    """[(name, mtime)] of the kind's items in `d`, newest first (mtime is
-    best-effort -- 0 on filesystems without one, leaving alphabetical order).
-    Skips the atomic-write machinery's .tmp/.bak orphans by construction: a
-    file item must end with the kind's extension exactly.
-
-    `whole` names extra extensions the kind holds whose items keep their WHOLE
-    name -- the vault's scripts, and nothing else so far."""
-    try:
-        names = os.listdir(d)
-    except OSError:
-        return []
-    out = []
-    for n in names:
-        p = d + "/" + n
-        if folder_valued:
-            if _is_dir(p):
-                out.append((n, _mtime(p)))
-        elif _ends_any(n, whole) and not _is_dir(p):
-            out.append((n, _mtime(p)))
-        elif n.endswith(ext) and len(n) > len(ext) and not _is_dir(p):
-            out.append((n[:-len(ext)] if ext else n, _mtime(p)))
-    out.sort(key=lambda e: (-e[1], e[0]))
-    return out
-
-
-def _ends_any(name, exts):
-    for ext in exts:
-        if name.endswith(ext) and len(name) > len(ext):
-            return True
-    return False
-
-
-def list_files(kind, root=CARTS_DIR):
-    """The kind's item names, newest first."""
-    if project_folder(kind):
-        return list_project_files(kind, root)
-    ext, folder_valued, _base = _kind_spec(kind)
-    d = file_kind_dir(kind, root)
-    entries = _kind_entries(d, ext, folder_valued, _whole_exts(kind))
-    return [n for n, _m in entries]
-
-
-def count_files(kind, root=CARTS_DIR):
-    """How many items the kind holds -- a bare listdir filter, so the Files
-    kinds screen never pays list_files' per-item stat+sort just for a badge."""
-    if project_folder(kind):
-        return len(list_project_files(kind, root))
-    ext, folder_valued, _base = _kind_spec(kind)
-    d = file_kind_dir(kind, root)
-    try:
-        names = os.listdir(d)
-    except OSError:
-        return 0
-    if folder_valued:
-        return sum(1 for n in names if _is_dir(d + "/" + n))
-    whole = _whole_exts(kind)
-    return sum(1 for n in names
-               if _ends_any(n, whole)
-               or (n.endswith(ext) and len(n) > len(ext)))
-
-
-def load_file(kind, name, root=CARTS_DIR):
-    """A file item's text, or None if missing/unreadable (degrade-don't-throw,
-    like every asset loader). Folder-valued kinds have no single blob."""
-    if project_folder(kind):
-        return load_project_file(kind, name, root)
-    if _kind_spec(kind)[1]:
-        return None
-    try:
-        return _read(file_path(kind, name, root))
-    except OSError:
-        return None
-
-
-def _unique_name(kind, name, root, path=None):
-    """`name` if free under `path` (default: the kind's live dir), else name_2,
-    name_3, ... -- the ONE collision probe every rename/duplicate/trash move
-    rides on (`path` swaps in _trash_path for the trash side)."""
-    path = path or file_path
-    if not _exists(path(kind, name, root)):
-        return name
-    stem, ext = _split_item(kind, name)
-    i = 2
-    while _exists(path(kind, stem + "_" + str(i) + ext, root)):
-        i += 1
-    return stem + "_" + str(i) + ext
-
-
-def new_file_name(kind, root=CARTS_DIR, base=None):
-    """The next free auto-name for the kind (drawing_1, drawing_2, ...) --
-    creations are auto-named so naming is never a gate; rename is optional."""
-    _ext, _fv, kind_base = _kind_spec(kind)
-    base = slug(base) if base else kind_base
-    i = 1
-    while _exists(file_path(kind, base + "_" + str(i), root)):
-        i += 1
-    return base + "_" + str(i)
-
-
-def free_file_name(kind, title, root=CARTS_DIR):
-    """The name a TYPED title lands on: slugged the kind's way (a vault
-    extension survives), then unique-ified -- so NEW never silently overwrites
-    a file that is already there, and a name a person can no longer read is
-    auto-named instead."""
-    for ch in str(title):
-        if ch.isalpha() or ch.isdigit():
-            break
-    else:
-        return new_file_name(kind, root)
-    return _unique_name(kind, _slug_item(kind, title), root)
-
-
-def save_file(kind, name, text, root=CARTS_DIR):
-    """Persist one file item atomically (folder-valued kinds are written by
-    their own tools, never through this). Returns the (slugged) stored name."""
-    if project_folder(kind):
-        # A project file keeps its name verbatim -- the FORMAT chose it, so
-        # slugging it would write `manifestjson` and take the cart down.
-        return save_project_file(kind, name, text, root)
-    if _kind_spec(kind)[1]:
-        raise ValueError(kind + " items are folders; write them in place")
-    name = _slug_item(kind, name)
-    _ensure_kind_dir(kind, root)
-    _write_atomic(file_path(kind, name, root), text)
-    return name
-
-
-# --- op-history sidecars (#111): keyframe + op segments per user file --------
-#
-# The #111 keyframe+ops undo model for the document surfaces (Paint, the
-# editor handle). A
-# per-file history lives in a HIDDEN sibling of the kind dirs --
-# files/.history/<kind>/<name>.jsonl -- one append-only JSONL of records:
-#
-#   {"t":"kf","doc": <snapshot blob>}   a full keyframe (the replay base). Comes
-#                                       from an op_history.History.keyframe().
-#   {"t":"seg","ops": [ ... ]}          a batch of fine-grained ops (History.flush())
-#                                       that transforms the previous keyframe forward.
-#
-# CADENCE mirrors the journal (#7): a raw open(path,"a") per record -- O(1), never
-# _write_atomic -- flushed on the SAME #108 autosave debounce as the file itself,
-# so nothing writes per-stroke (the pmem SD lesson, #66). A torn last line fails
-# json.loads and is dropped at load, exactly like journal.jsonl. Pruned to the
-# newest keyframe + the last HISTORY_KEEP segments (History forces a fresh keyframe
-# every <=256 ops, so segments never grow unbounded). The .history dir is a SIBLING
-# of the kind dirs, NOT a kind -- list_files/trash_list/FileGridView are all
-# registry-driven (they scan files/<kind>, never files/), so it is invisible by
-# construction, and _kind_spec(".history") is a loud ValueError.
-
-HISTORY_DIR = ".history"
-HISTORY_EXT = ".jsonl"
-HISTORY_KEEP = 32          # keep the newest keyframe + this many trailing op-segments
-
-
-def _history_dir(kind, root):
-    _kind_spec(kind)                          # validate -- ".history" is never a kind
-    return files_root(root) + "/" + HISTORY_DIR + "/" + kind
-
-
-def _history_path(kind, name, root):
-    return _history_dir(kind, root) + "/" + name + HISTORY_EXT
-
-
-def _history_trash_dir(kind, root):
-    _kind_spec(kind)
-    return files_root(root) + "/" + TRASH_DIR + "/" + HISTORY_DIR + "/" + kind
-
-
-def _history_trash_path(kind, name, root):
-    return _history_trash_dir(kind, root) + "/" + name + HISTORY_EXT
-
-
-def _ensure_history_dir(kind, root):
-    ensure_dirs(root)
-    _mkdir(files_root(root))
-    _mkdir(files_root(root) + "/" + HISTORY_DIR)
-    d = _history_dir(kind, root)
-    _mkdir(d)
-    return d
-
-
-def _ensure_history_trash_dir(kind, root):
-    _mkdir(files_root(root))
-    _mkdir(files_root(root) + "/" + TRASH_DIR)
-    _mkdir(files_root(root) + "/" + TRASH_DIR + "/" + HISTORY_DIR)
-    d = _history_trash_dir(kind, root)
-    _mkdir(d)
-    return d
-
-
-def _sidecar_move(src, dst):
-    """Move a history sidecar to follow its file (rename/trash/restore). A
-    best-effort no-op when the file was never edited under op-history (no
-    sidecar). The dst's dir must already exist (callers ensure it)."""
-    if not _exists(src):
-        return
-    try:
-        os.rename(src, dst)
-    except OSError:
-        _copy(src, dst)
-        _remove(src)
-
-
-def _sidecar_copy(src, dst):
-    """Copy a history sidecar alongside a duplicated file (best-effort)."""
-    if not _exists(src):
-        return
-    _copy(src, dst)
-
-
-def history_path(kind, name, root=CARTS_DIR):
-    """The op-history sidecar path for a user file (phase 2/3 read this)."""
-    return _history_path(kind, name, root)
-
-
-def load_history(kind, name, root=CARTS_DIR):
-    """Parse a file's history sidecar into a list of records (keyframes +
-    segments) in file order. A torn/corrupt line is DROPPED (append-only's only
-    failure mode), every good record before it survives; a missing sidecar -> [].
-
-    A PROJECT kind has no sidecar by design (see PROJECT_KIND): its durable undo
-    is the cart's own journal, so the handle opens with an empty seed and
-    records live ops from there."""
-    if project_folder(kind):
-        return []
-    _kind_spec(kind)
-    out = []
-    try:
-        raw = _read(_history_path(kind, name, root))
-    except OSError:
-        return out
-    for line in raw.split("\n"):
-        if not line.strip():
-            continue
-        try:
-            rec = json.loads(line)
-        except ValueError:
-            continue                          # torn / corrupt line -> drop, keep the rest
-        if isinstance(rec, dict) and rec.get("t") in ("kf", "seg"):
-            out.append(rec)
-    return out
-
-
-def _last_keyframe(recs):
-    """Index of the newest "kf" record in `recs`, or -1 when there is none."""
-    last = -1
-    for i in range(len(recs)):
-        if recs[i].get("t") == "kf":
-            last = i
-    return last
-
-
-def ops_since_keyframe(recs):
-    """Every op recorded AFTER the last keyframe in `recs` (a load_history()
-    list), flattened oldest..newest -- the window prune_history keeps on disk,
-    and the seed for an op_history.History undo stack. A keyframe supersedes
-    the records before it, so a reader that skips this scan seeds ops the
-    keyframe already accounts for and over-counts History's keyframe cadence."""
-    recs = recs or []
-    ops = []
-    for rec in recs[_last_keyframe(recs) + 1:]:
-        if rec.get("t") == "seg":
-            ops.extend(rec.get("ops") or [])
-    return ops
-
-
-def history_write_keyframe(kind, name, doc_blob, root=CARTS_DIR):
-    """Append a full keyframe record (the replay base) and prune. `doc_blob` is
-    a JSON-able snapshot (an op_history.History.keyframe())."""
-    _ensure_history_dir(kind, root)
-    with open(_history_path(kind, name, root), "a") as f:   # RAW append -- O(1)
-        f.write(json.dumps({"t": "kf", "doc": doc_blob}) + "\n")
-    prune_history(kind, name, root)
-
-
-def history_append_segment(kind, name, ops, root=CARTS_DIR):
-    """Append one op-segment record (a History.flush() batch) and prune. An empty
-    batch writes nothing (a debounce that fires with no ops must not touch SD)."""
-    if not ops:
-        return
-    _ensure_history_dir(kind, root)
-    with open(_history_path(kind, name, root), "a") as f:   # RAW append -- O(1)
-        f.write(json.dumps({"t": "seg", "ops": list(ops)}) + "\n")
-    prune_history(kind, name, root)
-
-
-_PRUNE_FAILS = 0
-
-
-def history_prune_fails():
-    """Sidecar prunes that failed since boot. Must stay 0. history_commit
-    swallows the failure to keep the commit honest, so this is the only place
-    a store that has stopped pruning is visible."""
-    return _PRUNE_FAILS
-
-
-def history_commit(kind, name, ops, keyframe=None, root=CARTS_DIR):
-    """The one-call adapter for op_history: at the #108 autosave debounce a Desk
-    Lab app passes History.flush() as `ops` and, when History.needs_keyframe(),
-    History.keyframe() as `keyframe`. Writes the keyframe first (so it precedes
-    the segment it bases), then the segment, then prunes once. A pure no-op
-    (no keyframe, empty ops) never touches SD.
-
-    The APPEND is the commit; the prune is housekeeping. A failed prune is
-    returned, never raised: raising made the caller skip mark_keyframe() for a
-    keyframe that was already on disk, so every later flush wrote another one.
-    Leaving records unpruned is safe because ops_since_keyframe reads only the
-    window after the last keyframe."""
-    if project_folder(kind):
-        return None            # journaled by save_project_file -- see PROJECT_KIND
-    if keyframe is None and not ops:
-        return None
-    _ensure_history_dir(kind, root)
-    path = _history_path(kind, name, root)
-    with open(path, "a") as f:
-        if keyframe is not None:
-            f.write(json.dumps({"t": "kf", "doc": keyframe}) + "\n")
-        if ops:
-            f.write(json.dumps({"t": "seg", "ops": list(ops)}) + "\n")
-    try:
-        prune_history(kind, name, root)
-    except (OSError, ValueError) as exc:
-        global _PRUNE_FAILS
-        _PRUNE_FAILS += 1
-        return str(exc)
-    return None
-
-
-def prune_history(kind, name, root=CARTS_DIR, keep=HISTORY_KEEP):
-    """Keep the newest keyframe and the last `keep` op-segments after it; drop
-    everything older (the keyframe supersedes the records before it). A full
-    rewrite, so it rides _write_atomic -- but it is O(records) and rare (only
-    when a sidecar exceeds keep+1), NOT on the per-record append path (like
-    journal_compact). No-op when nothing needs dropping."""
-    recs = load_history(kind, name, root)
-    if not recs:
-        return 0
-    last_kf = _last_keyframe(recs)
-    if last_kf >= 0:
-        head = [recs[last_kf]]
-        segs = [r for r in recs[last_kf + 1:] if r.get("t") == "seg"]
-    else:
-        head = []                             # no keyframe yet -> just cap the segments
-        segs = [r for r in recs if r.get("t") == "seg"]
-    kept = head + (segs[-keep:] if keep and len(segs) > keep else segs)
-    if len(kept) == len(recs):
-        return 0                              # nothing to drop
-    _write_atomic(_history_path(kind, name, root),
-                  "".join(json.dumps(r) + "\n" for r in kept))
-    return len(recs) - len(kept)
-
-
-def clear_history(kind, name, root=CARTS_DIR):
-    """Drop a file's history sidecar entirely (a hard reset / the file is gone
-    forever). Best-effort; a missing sidecar is a no-op."""
-    _kind_spec(kind)
-    _remove(_history_path(kind, name, root))
-
-
-def rename_file(kind, name, new_title, root=CARTS_DIR):
-    """Rename an item to (the slug of) `new_title`, unique-ified against the
-    kind's dir. Returns the final name (a contentless or unchanged title is a
-    no-op -- slug()'s "cart" fallback must never fire from a rename). The op-
-    history sidecar (#111) moves with the file."""
-    for ch in str(new_title):
-        if ch.isalpha() or ch.isdigit():
-            break
-    else:
-        return name
-    new = _slug_item(kind, new_title)
-    if new == name:
-        return name
-    new = _unique_name(kind, new, root)
-    os.rename(file_path(kind, name, root), file_path(kind, new, root))
-    _forget_bak(file_path(kind, name, root))   # the old name's crash backup, #154
-    _ensure_history_dir(kind, root)
-    _sidecar_move(_history_path(kind, name, root), _history_path(kind, new, root))
-    return new
-
-
-def _copytree(src, dst):
-    _mkdir(dst)
-    for n in os.listdir(src):
-        s = src + "/" + n
-        d = dst + "/" + n
-        if _is_dir(s):
-            _copytree(s, d)
-        else:
-            _copy(s, d)
-
-
-def duplicate_file(kind, name, root=CARTS_DIR):
-    """Copy an item to the next free name_2/name_3 slot; returns the new name.
-    The op-history sidecar (#111) is copied alongside it, so a duplicate opens
-    with its source's undo history intact."""
-    folder_valued = _kind_spec(kind)[1]
-    new = _unique_name(kind, name, root)   # the source exists, so this yields name_2, name_3, ...
-    src = file_path(kind, name, root)
-    if folder_valued:
-        _copytree(src, file_path(kind, new, root))
-    else:
-        _write_atomic(file_path(kind, new, root), _read(src))
-    _ensure_history_dir(kind, root)
-    _sidecar_copy(_history_path(kind, name, root), _history_path(kind, new, root))
-    return new
-
-
-def _trash_dir(kind, root):
-    return files_root(root) + "/" + TRASH_DIR + "/" + kind
-
-
-def _trash_path(kind, name, root):
-    return _trash_dir(kind, root) + "/" + name + _item_ext(kind, name)
-
-
-def delete_file(kind, name, root=CARTS_DIR):
-    """Move an item to files/trash/<kind>/ (never destroy -- trash trains
-    recovery, confirms train click-through), then prune the trash's oldest
-    entries beyond TRASH_KEEP. Returns the name it holds in the trash."""
-    _kind_spec(kind)
-    _mkdir(files_root(root))
-    _mkdir(files_root(root) + "/" + TRASH_DIR)
-    _mkdir(_trash_dir(kind, root))
-    new = _unique_name(kind, name, root, _trash_path)
-    os.rename(file_path(kind, name, root), _trash_path(kind, new, root))
-    _forget_bak(file_path(kind, name, root))   # the backup does not follow it, #154
-    # The op-history sidecar (#111) follows the file into the trash under the
-    # SAME trashed name, so a restore brings the undo history back with it.
-    _ensure_history_trash_dir(kind, root)
-    _sidecar_move(_history_path(kind, name, root), _history_trash_path(kind, new, root))
-    prune_trash(root)
-    return new
-
-
-def trash_list(root=CARTS_DIR):
-    """Every trashed item as (kind, name), newest first across kinds."""
-    out = []
-    for kind in FILE_KINDS:
-        ext, folder_valued, _base = FILE_KINDS[kind]
-        # `_whole_exts` here too, or a trashed `todo.txt` (or a script) is
-        # invisible in the trash and can never be restored: the listing is what
-        # `restore_file` is offered from.
-        for n, m in _kind_entries(_trash_dir(kind, root), ext, folder_valued,
-                                  _whole_exts(kind)):
-            out.append((kind, n, m))
-    out.sort(key=lambda e: (-e[2], e[0], e[1]))
-    return [(k, n) for k, n, _m in out]
-
-
-def restore_file(kind, name, root=CARTS_DIR):
-    """Move a trashed item back into its kind dir (unique-ified against what
-    was made since). Returns the restored name."""
-    _ensure_kind_dir(kind, root)
-    new = _unique_name(kind, name, root)
-    os.rename(_trash_path(kind, name, root), file_path(kind, new, root))
-    _forget_bak(_trash_path(kind, name, root))
-    # Bring the op-history sidecar (#111) back out of the trash with the file.
-    _ensure_history_dir(kind, root)
-    _sidecar_move(_history_trash_path(kind, name, root), _history_path(kind, new, root))
-    return new
-
-
-def _remove_trash_entry(kind, name, root):
-    p = _trash_path(kind, name, root)
-    if _is_dir(p):
-        _rmtree(p)
-    else:
-        _remove(p)
-    _forget_bak(p)
-    _remove(_history_trash_path(kind, name, root))   # drop the sidecar too (#111)
-
-
-def prune_trash(root=CARTS_DIR, keep=TRASH_KEEP):
-    """Drop the trash's oldest entries beyond `keep` (mtime best-effort -- the
-    quota-pressure half of the trash story; there is no wall-clock retention
-    because the device RTC may never be set). A cheap listdir count gates the
-    stat+sort pass, so the every-delete call usually costs six listdirs."""
-    total = 0
-    for kind in FILE_KINDS:
-        try:
-            total += len(os.listdir(_trash_dir(kind, root)))
-        except OSError:
-            pass
-    if total <= keep:
-        return
-    for kind, name in trash_list(root)[keep:]:
-        _remove_trash_entry(kind, name, root)
-
-
-def empty_trash(root=CARTS_DIR):
-    prune_trash(root, keep=0)
-
-
-# --- provenance stamps (#108 phase 2): a copy remembers its source ----------
-#
-# When a user file is COPIED into a consuming cart (a drawing -> a project's
-# images/bg, or the wallpaper copy), the copied JSON blob gains two optional
-# keys: `src` ("<kind>/<name>", the origin file) and `sig` (a content signature
-# of the source blob at copy time -- the cover_sig stamp pattern from #86).
-# PURE METADATA: never resolved at runtime, ignored by every decoder (they read
-# only format/w/h/data/cells/body). It powers two PULL-BASED affordances --
-# "your drawing changed -> UPDATE" (re-read the source; a differing sig offers a
-# one-tap re-copy; a missing/renamed source simply never matches, so the
-# affordance vanishes) and the File Manager's "used in:" list (scan the
-# consumers for a matching src). No reverse index is kept, so a stale/deleted
-# source can never break anything.
-
-def content_sig(text):
-    """A cheap content stamp for a user-file blob (reuses the #86 cover_sig)."""
-    return cover_sig(text) if text else 0
-
-
-def stamp_provenance(blob, kind, name, sig):
-    """Return `blob` (a JSON object string) with src/sig provenance keys added.
-    A non-object / unparseable blob passes through unchanged (never a crash)."""
-    try:
-        data = json.loads(blob)
-    except (ValueError, TypeError):
-        return blob
-    if not isinstance(data, dict):
-        return blob
-    data["src"] = str(kind) + "/" + str(name)
-    data["sig"] = int(sig) & 0xFFFFFFFF
-    return json.dumps(data)
-
-
-def read_provenance(blob):
-    """(src, sig) from a stamped blob -- ("<kind>/<name>", int) -- or
-    (None, None) when there is no stamp / the blob is unreadable."""
-    try:
-        data = json.loads(blob)
-    except (ValueError, TypeError):
-        return (None, None)
-    if not isinstance(data, dict):
-        return (None, None)
-    src = data.get("src")
-    if not isinstance(src, str) or "/" not in src:
-        return (None, None)
-    try:
-        sig = int(data.get("sig", 0))
-    except (TypeError, ValueError):
-        sig = 0
-    return (src, sig)
+# Nothing in the core above reads any of these; every caller reaches them as
+# `moy_carts.X`, so the umbrella is the import site and the leaves stay leaves.
+try:
+    from moy_seed import (
+        _cart_version, _RESEED_PRESERVE, _preserve_moy_data, seed_builtins,
+        _SEED_WBITS, _packed_stream, unpack_seed, seed_packed, is_packed,
+        RETIRED, RETIRED_GEN, RETIRED_VER_NAME, retired_version_path,
+        load_retired_version, prune_retired, sweep_store, seed_any,
+        embedded_floor)
+    from moy_files import (
+        FILES_DIR, TRASH_DIR, TRASH_KEEP, DOC_EXT, SCRIPT_EXTS, VAULT_EXTS,
+        script_ext, vault_ext, _ext_from, _item_ext, _whole_exts, _split_item,
+        _slug_item, FILE_KINDS, _kind_spec, PROJECT_KIND, PROJECT_ORDER,
+        PROJECT_SUBDIRS, _PROJECT_SKIP_EXT, project_kind, project_folder,
+        project_dir, project_file_path, list_project_files, load_project_file,
+        save_project_file, files_root, file_kind_dir, file_path,
+        _ensure_kind_dir, _mtime, _kind_entries, _ends_any, list_files,
+        count_files, load_file, _unique_name, new_file_name, free_file_name,
+        save_file)
+    from moy_file_ops import (
+        HISTORY_DIR, HISTORY_EXT, HISTORY_KEEP, _history_dir, _history_path,
+        _history_trash_dir, _history_trash_path, _ensure_history_dir,
+        _ensure_history_trash_dir, _sidecar_move, _sidecar_copy, history_path,
+        load_history, _last_keyframe, ops_since_keyframe,
+        history_write_keyframe, history_append_segment, history_prune_fails,
+        history_commit, prune_history, clear_history, rename_file, _copytree,
+        duplicate_file, _trash_dir, _trash_path, delete_file, trash_list,
+        restore_file, _remove_trash_entry, prune_trash, empty_trash,
+        content_sig, stamp_provenance, read_provenance)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_seed import (
+        _cart_version, _RESEED_PRESERVE, _preserve_moy_data, seed_builtins,
+        _SEED_WBITS, _packed_stream, unpack_seed, seed_packed, is_packed,
+        RETIRED, RETIRED_GEN, RETIRED_VER_NAME, retired_version_path,
+        load_retired_version, prune_retired, sweep_store, seed_any,
+        embedded_floor)
+    from runtime.moy_files import (
+        FILES_DIR, TRASH_DIR, TRASH_KEEP, DOC_EXT, SCRIPT_EXTS, VAULT_EXTS,
+        script_ext, vault_ext, _ext_from, _item_ext, _whole_exts, _split_item,
+        _slug_item, FILE_KINDS, _kind_spec, PROJECT_KIND, PROJECT_ORDER,
+        PROJECT_SUBDIRS, _PROJECT_SKIP_EXT, project_kind, project_folder,
+        project_dir, project_file_path, list_project_files, load_project_file,
+        save_project_file, files_root, file_kind_dir, file_path,
+        _ensure_kind_dir, _mtime, _kind_entries, _ends_any, list_files,
+        count_files, load_file, _unique_name, new_file_name, free_file_name,
+        save_file)
+    from runtime.moy_file_ops import (
+        HISTORY_DIR, HISTORY_EXT, HISTORY_KEEP, _history_dir, _history_path,
+        _history_trash_dir, _history_trash_path, _ensure_history_dir,
+        _ensure_history_trash_dir, _sidecar_move, _sidecar_copy, history_path,
+        load_history, _last_keyframe, ops_since_keyframe,
+        history_write_keyframe, history_append_segment, history_prune_fails,
+        history_commit, prune_history, clear_history, rename_file, _copytree,
+        duplicate_file, _trash_dir, _trash_path, delete_file, trash_list,
+        restore_file, _remove_trash_entry, prune_trash, empty_trash,
+        content_sig, stamp_provenance, read_provenance)

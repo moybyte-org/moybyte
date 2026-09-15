@@ -81,8 +81,8 @@ This board is not a console. It has no glass, runs no carts and constructs no
 Workstation; the default answer for a new `runtime/*.py` here is NO, and a
 denylist would express that as forty denials that all say "there is no
 console", plus a silent bug every time a new shared module appears and nobody
-adds the forty-first. The allowlist below is thirteen names long and each group
-says what the board does with it.
+adds the forty-first. The allowlist below is short and each group says what
+the board does with it.
 
 The cost is stated plainly: a new shared module the SYNC STACK starts importing
 does not reach this board by default. `tests/test_staging_closure.py` is what

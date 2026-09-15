@@ -400,7 +400,7 @@ def test_the_frame_loop_touches_covers_exactly_twice(tmp_path):
     per-frame reach into covers would show up here."""
     text = (ROOT / "runtime" / "console.py").read_text(encoding="utf-8")
     body = text[text.index("\n    def frame(self, dt):"):]
-    body = body[:body.index("\n    def _frame_perf_end(")]
+    body = body[:body.index("\n    def arm_splash(")]
     assert body.count("covers = self.covers") == 1
     assert body.count("covers.begin_frame()") == 1
     assert body.count("covers.take_deferred()") == 1

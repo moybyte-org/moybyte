@@ -175,6 +175,22 @@ Surface model v1's retained-surface object -- a LEAF whose only importers are
 `wm_windowed.py` and the web serve glue. With wm_windowed denied above,
 staging this would freeze bytes nothing imports."""
 
+[[modules.shared.deny]]
+file = "wm_desk.py"
+kind = "tier"
+why  = """
+The windowed WM's two halves that live in their own files: the desk root
+layer and the `WindowChrome` mixin. Only `wm_windowed.py` imports either, so
+with it denied above they would freeze bytes nothing imports -- the same
+reasoning as `surface.py`."""
+
+[[modules.shared.deny]]
+file = "wm_chrome.py"
+kind = "tier"
+why  = """
+See `wm_desk.py` above: the other half of the windowed WM, imported only by
+`wm_windowed.py`."""
+
 # -- no consumer here yet ----------------------------------------------------
 
 [[modules.shared.deny]]

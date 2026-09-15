@@ -46,7 +46,10 @@ SETTERS = [t[3] for t in SETTINGS_TOGGLES]
 # wiring, which is the failure `test_skin` was written after finding.
 OWNERS = {
     "settings_layer.py": "declares it, and draws the rows from it",
-    "console.py": "the flat defaults, the boot apply, the persistence tail",
+    "console.py": "the boot apply (load_system)",
+    "console_perf.py": "the flat defaults (_init_perf, the PerfMeters mixin)",
+    "console_settings.py": "the setters over the one _set_toggle tail (the "
+                           "SettingsToggles mixin) -- the persistence tail",
     "dev_channel.py": "the serial words",
 }
 
@@ -62,12 +65,32 @@ def _ws(tmp_path, **kw):
     return host_app.build_workstation(str(tmp_path / "carts"), **kw)
 
 
-def _workstation_ast():
-    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
+def _class(path, name):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "Workstation":
-            return node
-    raise AssertionError("Workstation is not a class in runtime/console.py")
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return node, tree
+    raise AssertionError("%s is not a class in %s" % (name, path))
+
+
+def _workstation_ast():
+    """Workstation's methods -- its own AND its mixins' (the bases console.py
+    names, each parsed from the runtime module console.py imports it from) --
+    as one ClassDef, so a setter moved onto a mixin is still seen here."""
+    ws, tree = _class(CONSOLE, "Workstation")
+    bases = {b.id for b in ws.bases if isinstance(b, ast.Name)}
+    modules = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if alias.name in bases:
+                    modules.setdefault(alias.name, node.module.split(".")[-1])
+    assert set(modules) == bases, "a Workstation base is not imported by name"
+    body = list(ws.body)
+    for name in sorted(bases):
+        body.extend(_class(ROOT / "runtime" / (modules[name] + ".py"), name)[0].body)
+    return ast.ClassDef(name="Workstation", bases=[], keywords=[], body=body,
+                        decorator_list=[])
 
 
 def _method(name):

@@ -6,7 +6,9 @@ things have to be pinned, and neither is visible to the goldens:
 
   1. WHAT IS STILL FORWARDED. A forward is migration debt with a name on it --
      the set may shrink, and a new one must be a deliberate edit here rather
-     than something a landing adds without noticing. This also pins the two
+     than something a landing adds without noticing. The walk covers `class
+     Workstation` in console.py AND the mixins it lists as bases (each in its
+     own runtime module), so moving a method onto a mixin hides nothing. This also pins the two
      banned shapes: a `*a, **kw` shim (which allocates a tuple per call -- the
      churn class #63/#66 were about) and a `property` forward (measured at
      +5.1us against a plain hop's +0.5us, banned repo-wide).
@@ -150,6 +152,54 @@ def _workstation():
     raise AssertionError("Workstation is not a class in runtime/console.py")
 
 
+def _mixin_modules(tree, bases):
+    """base class name -> the runtime module console.py imports it from."""
+    out = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if alias.name in bases and (alias.asname or alias.name) in bases:
+                    out.setdefault(alias.name, node.module.split(".")[-1])
+    return out
+
+
+def _workstation_classes():
+    """The Workstation ClassDef plus every mixin it lists as a base, each
+    parsed from its own module. The ratchets walk ALL of them: a method moved
+    onto a mixin is still a Workstation method, and a forward or a property
+    that hid there would otherwise vanish from every check below."""
+    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
+    ws = _workstation()
+    bases = {b.id for b in ws.bases if isinstance(b, ast.Name)}
+    found = _mixin_modules(tree, bases)
+    assert set(found) == bases, "a Workstation base is not imported by name"
+    out = [ws]
+    for name in sorted(bases):
+        path = ROOT / "runtime" / (found[name] + ".py")
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            if isinstance(node, ast.ClassDef) and node.name == name:
+                out.append(node)
+                break
+        else:
+            raise AssertionError("%s is not a class in %s" % (name, path))
+    return out
+
+
+def _methods():
+    """Every function defined on Workstation or one of its mixins."""
+    for cls in _workstation_classes():
+        for fn in cls.body:
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                yield fn
+
+
+def test_the_ratchet_sees_every_mixin():
+    """The walk covers the four mixins console.py names as bases; a fifth
+    that was not imported by name would be silently skipped."""
+    names = [c.name for c in _workstation_classes()]
+    assert names[0] == "Workstation" and len(names) >= 5, names
+
+
 def _statements(fn):
     """The function's body with a leading docstring dropped."""
     body = fn.body
@@ -177,9 +227,7 @@ def _collaborator_call(node):
 def _forwards():
     """Every Workstation method whose whole body is one collaborator call."""
     found = {}
-    for fn in _workstation().body:
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for fn in _methods():
         body = _statements(fn)
         if len(body) != 1:
             continue
@@ -212,9 +260,7 @@ def test_no_forward_is_a_star_args_shim():
 def test_no_property_forwards_to_a_collaborator():
     """Measured on this codebase: a plain hop is +0.5us, a property forward
     +5.1us. Live state is read through a method, everywhere."""
-    for fn in _workstation().body:
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for fn in _methods():
         decorated = any(
             (isinstance(d, ast.Name) and d.id == "property")
             or (isinstance(d, ast.Attribute) and d.attr in ("setter", "getter"))
@@ -252,9 +298,7 @@ def test_the_legacy_property_forwards_are_exactly_the_pinned_set():
     retired one is a deliberate edit down. Without this the rule above reads as
     "banned repo-wide" while seventeen of them stand."""
     found = {owner: set() for owner in LEGACY_PROPERTY_FORWARDS}
-    for fn in _workstation().body:
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for fn in _methods():
         if not any((isinstance(d, ast.Name) and d.id == "property")
                    or (isinstance(d, ast.Attribute)
                        and d.attr in ("setter", "getter"))

@@ -67,6 +67,17 @@ def _editors_src():
     return "\n".join(parts)
 
 
+def _console_src():
+    """The Workstation's combined source: console.py is the kernel and the
+    class's four mixins live in console_perf/_settings/_saves/_notices --
+    greps that pin a Workstation method read all of them."""
+    parts = []
+    for name in ("console", "console_perf", "console_settings", "console_saves",
+                 "console_notices"):
+        parts.append((Path("runtime") / (name + ".py")).read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
 def _carts_src():
     """The store's combined source: moy_carts.py is the re-exporting umbrella
     over moy_store_base/_seed/_files/_file_ops -- greps that pin store verbs
@@ -165,7 +176,7 @@ def test_console_settings_has_firmware_update_screen():
     # The shared console owns all OTA pixels (host == device): a Settings UPDATE FW row
     # (shown only when an updater is injected and OTA-capable) drives a confirm/progress
     # screen. The host injects no updater, so the row never appears there.
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     # The update SCREEN itself now lives in update_ui.py (UpdateUI, extracted from
     # console.py); the queries/config + dispatch stay in console.py.
@@ -237,7 +248,7 @@ def test_ota_online_wired_and_console_has_online_flow():
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     # The online update SCREEN (checking/download/install phases) lives in
     # update_ui.py (UpdateUI); the _online_update_available query + row label
@@ -348,7 +359,7 @@ def test_micropython_touch_and_idle_cursor():
     assert "apply_touch(touch, pointer)" in runtime
 
     # Cursor auto-hide + the Pointer are a shared support widget now (widgets.py).
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     widgets = (Path("runtime") / "widgets.py").read_text(encoding="utf-8")
     assert "class Pointer:" in widgets
     assert "def tick(self, now):" in widgets
@@ -372,7 +383,7 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     kb = (DEVICE / "moybyte" / "input.py").read_text(encoding="utf-8")
 
@@ -419,7 +430,7 @@ def test_micropython_cart_quit_verb_pops_to_the_caller():
     host = ((Path("runtime") / "host_api.py").read_text(encoding="utf-8")
             + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
 
     # Both backends expose the SAME verb, setting the SAME input flag (host parity).
     for src in (runtime, host):
@@ -678,7 +689,7 @@ def test_kid_mode_gates_diag_frame_eaters():
     # #68 kid mode: Settings -> PERF DIAG (default OFF, persisted) gates the two
     # felt diag costs -- the forced GC sample and the periodic diag->SD write --
     # and hushes the live echo; the ring still flushes on cart exit + crash.
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     # The row + its default + its verb are ONE declaration since #209 section 7
     # (SETTINGS_TOGGLES); the boot apply loops over it, so what used to be a
@@ -1543,7 +1554,7 @@ def test_paint_image_assets_wired_device_and_carts():
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     carts = _carts_src()
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
 
     # moy_carts loads/writes a cart's images/ subfolder of .moyimg blobs.
     assert "def load_images(path):" in carts
@@ -1762,7 +1773,7 @@ def test_hitch_logger_wired():
     assert '_diag_hitch(diag, ws, comp, elapsed, _t["kbd"], _t["inp"], _t["sb"],' in runtime
     assert "pump=%.1f lw=%d raw(logic=%.1f" in device_diag
     assert "self._lcopy_trips += 1" in device_canvas
-    console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console_src = _console_src()
     assert "def perf_breakdown_raw(self):" in console_src
     gfx_c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
     assert "spins < 250000u" in gfx_c
@@ -2086,7 +2097,7 @@ def test_code_editor_wired_into_device_shell():
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     editor_app = (Path("runtime") / "editor_app.py").read_text(encoding="utf-8")
     carts = _carts_src()
@@ -2134,7 +2145,7 @@ def test_unified_top_bar_wired_into_device_shell():
     sprites on BOTH screens. The device freezes the SAME runtime/console.py +
     editors.py + moy_carts.py, so grep the canonical sources (staged into modules/ at
     build) for the new wiring."""
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     chrome = (Path("runtime") / "chrome.py").read_text(encoding="utf-8")
     bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
     editors = _editors_src()
@@ -2165,7 +2176,7 @@ def test_unified_top_bar_wired_into_device_shell():
     # The device run loop builds + injects the IconSheet the same way as the host
     # (the boot loads run inside the shared console.wire_workstation_core).
     assert "wire_workstation_core(ws, moy_carts, carts_root, make_api" in runtime
-    console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console_src = _console_src()
     assert "ws.look.load_icon_sheet()" in console_src
 
 
@@ -2174,7 +2185,7 @@ def test_icon_theme_editor_wired_into_device_shell():
     PAINT editor (Settings -> EDIT ICONS) and it persists. The device freezes the same
     runtime/console.py + moy_carts.py, so grep the canonical sources for the wiring
     that MUST match the working cart-sprite save path (or the device SD bus hangs)."""
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     appearance = (Path("runtime") / "appearance.py").read_text(encoding="utf-8")
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     paint_layer = (Path("runtime") / "paint_layer.py").read_text(encoding="utf-8")
@@ -2425,7 +2436,7 @@ def test_device_sprite_storage_wired():
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = _carts_src()
     # device cart API -- also takes the injected audio backend (#16) + tilemap
@@ -2450,7 +2461,7 @@ def test_device_audio_wired():
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = _carts_src()
@@ -2504,7 +2515,7 @@ def test_music_editor_wired_into_device_shell():
     # the SAME shared files build.sh freezes onto the device, so source-level
     # greps prove it's on both ends (host == device).
     editors = _editors_src()
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     editor_app = (Path("runtime") / "editor_app.py").read_text(encoding="utf-8")
     layers = (Path("runtime") / "layers.py").read_text(encoding="utf-8")
     music_ui = (Path("runtime") / "music_editor_ui.py").read_text(encoding="utf-8")
@@ -2780,7 +2791,7 @@ def test_device_wifi_wired():
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     carts = _carts_src()
     # The DeviceWifi backend + make_wifi/autoconnect_wifi now live in device_wifi.py
@@ -2859,7 +2870,7 @@ def test_micropython_offline_diag_wiring():
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    console = _console_src()
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     # The _diag_* logging functions moved to device_diag.py (extracted from
     # moy_runtime.py); run_desktop still CALLS them (the _diag_X(...) asserts
@@ -3035,7 +3046,7 @@ def test_ota_two_channel_wired():
     assert "def manifest_url(self, channel=None):" in kc
     assert "def check_online(self, channel=None):" in kc
     # The shared console (staged to the device) drives the channel toggle + flow.
-    console = Path("runtime/console.py").read_text(encoding="utf-8")
+    console = _console_src()
     settings_layer = Path("runtime/settings_layer.py").read_text(encoding="utf-8")
     assert '("ota_channel", "CHANNEL", "channel")' in settings_layer
     assert "def _cycle_channel(self, d):" in console
@@ -3072,7 +3083,9 @@ def test_no_undefined_names_in_extracted_modules():
     targets = sorted((ROOT / "modules").glob("device_*.py"))
     targets.append(ROOT / "modules" / "moy_runtime.py")
     targets += [Path("runtime") / n for n in (
-        "console.py", "project.py", "player.py", "editor_app.py", "wm.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
+        "console.py", "console_perf.py", "console_settings.py", "console_saves.py",
+        "console_notices.py", "wm_desk.py", "wm_chrome.py",
+        "project.py", "player.py", "editor_app.py", "wm.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
         "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py", "widgets.py", "wallpaper.py", "launcher_layer.py",
         "block_editor_ui.py", "map_editor_ui.py", "music_editor_ui.py")]
 

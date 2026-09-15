@@ -29,7 +29,7 @@ A system APP is two artifacts:
        TITLE = "MY APP"      # windowed WM title strip (falls back to id.upper())
        NEEDS = ("surface", "theme", "damage")   # the shell roles you use
 
-       def __init__(self, ctx, names, in_rect): ...   # ctx = your AppContext
+       def __init__(self, ctx, names): ...   # ctx = your AppContext
 
        def is_app(self, cart): ...   # claim the identity cart (title + marker
                                      # permission + slug -- never a renamed copy)
