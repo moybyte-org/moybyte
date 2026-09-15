@@ -118,7 +118,7 @@ persistence layer, which is NOT part of `make_system_api`):
 | OTA update | `update_ui.py` (stage 6) | **`ota`** — the updater handle (check/download/install/reset) |
 | System menu | `system_menu_ui.py` (stage 7) | **`reboot`**, **`del_cart`**, **`restart_cart`**, **`open_settings`**, open-about |
 | Achievements/eggs | `achievements_ui.py` (stage 8) | **none** — shared `ws.ach` + persistence via the shared `_with_sd` |
-| Settings | *(still in Workstation)* | **`web_view.toggle`**, **`set_diag_live`**, **`set_font_scale`**, **`persist_system`** + delegates into ota/theme/achievements (**the aggregator — its API is the union of the others**) |
+| Settings | *(still in Workstation)* | **`toggle_webhost`**, **`set_diag_live`**, **`set_font_scale`**, **`persist_system`** + delegates into ota/theme/achievements (**the aggregator — its API is the union of the others**) |
 | Theme | *(still in Workstation)* | **`wallpaper.select`/`cycle`**, **`icons.edit`/`save`** (repaints system chrome) |
 | Launcher | *(still in Workstation)* | store-read + **`open(cart)`**, **`new_cart`**, **`dup_cart`** |
 | Top bar | *(still in Workstation)* | mostly reads state; dispatches taps to the verbs above |
@@ -129,7 +129,7 @@ persistence layer, which is NOT part of `make_system_api`):
 - **Cart store:** `new_cart()`, `dup_cart()`, `del_cart()`, `restart_cart()`/`apply()`
 - **System:** `reboot()`, `ota` (the OTA updater handle), `set_diag_live()`, `set_font_scale()`, `persist_system()`
 - **Theme:** `wallpaper.select()`/`cycle()`, `icons.edit()`/`save()`
-- **Web view:** `web_view.toggle()`
+- **Web view:** `toggle_webhost()`
 - **Read-only but system-only:** `perf_snapshot()`, wifi status / credential read
 
 **Findings that fall out of the evidence** (each one shapes §2.3–§2.4):
