@@ -79,11 +79,14 @@ def test_the_roster_carries_free_through_to_the_boards():
     assert by_title["Sky Run"]["fps"] == 60
 
 
-# The seed games that declared free, each audited 2026-09-06: every per-frame
-# motion in its _update is `* dt`, and its bare `+= 1`s are event counters
-# (lives, level, misses, a spawn queue). Adding a cart here is that audit.
-FREE_SEEDS = {"Star Catcher", "Brick Siege", "Tiny Runner", "Letter Blitz",
-              "Harpoon Pop", "Tap Only Red", "Pixel Pet"}
+# The seed games that declare free, each audited: every per-frame motion in its
+# _update is `* dt`, and its bare `+= 1`s are event counters (lives, level,
+# misses, a graze, a spawn queue). Adding a cart here is that audit. The two Lua
+# carts are audited the same way: the pace comes from the manifest, not from
+# the runtime, so a Lua game that counted frames would be just as wrong.
+FREE_SEEDS = {"Star Catcher", "Brick Siege", "Brick Siege Lua", "Tiny Runner",
+              "Letter Blitz", "Harpoon Pop", "Tap Only Red", "Pixel Pet",
+              "Bullet Storm"}
 
 
 def test_only_audited_seed_games_declare_free():

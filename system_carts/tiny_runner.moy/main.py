@@ -134,15 +134,16 @@ def _update(dt):
     if spawn_x <= W:
         _spawn()
     # dust particles
-    keep = []
+    n = 0
     for p in dust:
         p[4] -= dt
         if p[4] > 0.0:
             p[0] += p[2] * dt
             p[1] += p[3] * dt
             p[3] += 200.0 * dt
-            keep.append(p)
-    dust[:] = keep
+            dust[n] = p
+            n += 1
+    del dust[n:]
     # collision -> reset
     gy = _ground_y()
     hx0 = HERO_X

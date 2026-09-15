@@ -42,6 +42,22 @@ def test_paint_and_my_art_are_well_formed_system_carts():
     assert json.loads((wall / "manifest.json").read_text())["type"] == "wallpaper"
 
 
+def test_the_paint_cart_body_is_only_the_fallback_card():
+    """Paint the APP is `runtime/artwork.py`; `paint.moy/main.py` is the card an
+    older shell shows instead, and nothing else.
+
+    A registered app CLAIMS its cart (`console.open()` routes a claimed cart to
+    `open_app`, and `_init_apps` is unconditional), so a cart body here is
+    unreachable on every build that has the app -- which is every build. It
+    carried a second 705-line drawing studio until 2026-09-15. The other four
+    app-claimed carts ship the same 12-15 line card; this pins Paint to it.
+    """
+    src = (ROOT / "system_carts" / "paint.moy" / "main.py").read_text(encoding="utf-8")
+    assert "UPDATE MOYBYTE TO OPEN" in src
+    assert "def _update" not in src and "def _init" not in src
+    assert len(src.splitlines()) < 40, "the fallback card grew a second app"
+
+
 def test_moyimg_roundtrip_handles_long_runs_and_all_palette_indices():
     raw = bytearray()
     raw.extend(bytes((7,)) * 700)

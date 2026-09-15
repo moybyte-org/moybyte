@@ -174,12 +174,6 @@ def _verbs():
     def v_spr(i):
         spr(i & 7, (i * 37) % 310, (i * 53) % 230)
 
-    # There was a "sprb" scene here (one spr_batch of 64 prebuilt tiles) until
-    # 2026-08-14. The verb is gone (plan 6.10) and so is the asymmetry it created:
-    # the Lua twin never had this scene, because a trampoline cannot marshal a
-    # list, so the two Bench carts disagreed by one row and every table taken from
-    # them had a hole in it. The "spr" scene above measures the same lane.
-
     def v_map(i):
         map(0, 0, 15, 8, (i * 7) % 40, (i * 11) % 40)
 

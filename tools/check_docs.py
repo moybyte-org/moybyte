@@ -237,8 +237,6 @@ DUP_BUDGET = {
     # they share the vendoring rules deliberately.
     ("native/moy_audio/libmoy/UPSTREAM.md",
      "native/moy_gfx/libmoy/UPSTREAM.md"): 21,
-    ("experiments/lua_bridge/components/lua/MODIFICATIONS.md",
-     "native/moy_lua/lua/MODIFICATIONS.md"): 8,
 }
 DUP_FLOOR = 4
 DUP_EXEMPT_DIRS = ("LICENSES/",)

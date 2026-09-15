@@ -93,24 +93,26 @@ def _update(dt):
     for b in bubbles:
         b[1] -= rise * dt
     # off the top: red escaped = a miss (and breaks the combo); lures just vanish
-    keep = []
+    n = 0
     for b in bubbles:
         if b[1] + b[2] < 0:
             if b[4]:
                 misses += 1
                 combo = 0
         else:
-            keep.append(b)
-    bubbles[:] = keep
+            bubbles[n] = b
+            n += 1
+    del bubbles[n:]
     # pop particles
-    pk = []
+    n = 0
     for p in pops:
         p[4] -= dt
         if p[4] > 0.0:
             p[0] += p[2] * dt
             p[1] += p[3] * dt
-            pk.append(p)
-    pops[:] = pk
+            pops[n] = p
+            n += 1
+    del pops[n:]
     spawn_t += dt
     if spawn_t > 0.6 and len(bubbles) < int(cfg("max_bubbles", 8)):
         spawn_t = 0.0

@@ -47,10 +47,7 @@
 --     `auto ~= 0` (the autoplay flag), `ddx ~= 0 or ddy ~= 0` (was `if ddx or ddy`),
 --     and `bm[4] ~= 0` (the explosion's big flag, stored 1/0 like the Python cart).
 --   * Python's `continue` is `goto continue` + a trailing `::continue::` label.
---   * the per-sprite spr() loop is now what BOTH carts write. It used to be a Lua
---     workaround (a trampoline cannot marshal an items list) against a Python twin
---     that called spr_batch; that verb was deleted 2026-08-14 (plan 6.10) and the
---     Python cart took this shape. It always cost the same: a contiguous run of
+--   * the per-sprite spr() loop is what BOTH carts write: a contiguous run of
 --     1x1 spr()s leaves as ONE native blit_batch through the auto-batch gate.
 --
 -- TWO PLAYERS (#65). The hook this cart was built with is WIRED now: when players()

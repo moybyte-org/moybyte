@@ -26,7 +26,6 @@ separate question from what is committed.
 | Component | Where it lives here | Upstream | Licence | Modified? |
 |---|---|---|---|---|
 | Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
-| Lua 5.4.7 (measurement spike) | `experiments/lua_bridge/components/lua/` | [lua.org](https://www.lua.org/) | MIT | No |
 | `esp_lcd_ek79007` panel driver | `native/p4/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
 | `esp_lcd_jd9365` panel driver, Guition's build | `native/p4/moy_dsi/vendor_jd9365/` | Espressif's component as shipped in [Guition's JC8012P4A1C demo](https://github.com/DevinWatson/10.1-inch-ESP32P4-Xiaozhi-ESP32-C6-JC8012P4A1C_I_W_Y) | Apache-2.0 | No |
 | GSL3680 touch firmware (JC8012P4A1C glass) | `firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py` | Silead, via the same Guition demo (`esp_lcd_gsl3680.h`) | vendor firmware, redistributed as shipped | Transcribed (`tools/gen_gsl_fw.py`) |
@@ -70,20 +69,6 @@ targets.
   simply not vendored.
 - `modmoy_lua.c` and `micropython.cmake` in the parent directory are Moybyte's
   own bridge code, not Lua's, and are under this repository's licence.
-
-### 2.2 Lua 5.4 — the measurement spike
-
-`experiments/lua_bridge/components/lua/`
-
-The `#6`/`#67` benchmark that decided whether a Lua tier was worth building. It
-is deliberately kept on **stock** Lua so it measures a stock VM.
-
-- **Upstream / licence:** identical to §2.1.
-  Full text: [`.../components/lua/COPYRIGHT`](experiments/lua_bridge/components/lua/COPYRIGHT).
-- **Modified: no.** Every `.c`/`.h` file is byte-for-byte upstream. The only
-  Moybyte file in that directory is the added `CMakeLists.txt` ESP-IDF
-  component wrapper. See
-  [`.../components/lua/MODIFICATIONS.md`](experiments/lua_bridge/components/lua/MODIFICATIONS.md).
 
 ### 2.3 Espressif `esp_lcd_ek79007` — the P4 panel driver
 
