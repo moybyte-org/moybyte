@@ -328,10 +328,10 @@ FEATURES = [
      "PPA with the DMA overlapping the next frame&rsquo;s input poll; scrolling "
      "shifts retained pixels instead of repainting them."),
     ("Sound",
-     "A C mixer on the boards and in the browser, and full-fidelity PICO-8 imports.",
-     "A C mixer on the boards and in the browser. PICO-8 imports are "
-     "full-fidelity &mdash; eight waveforms, the effect column, four-channel "
-     "patterns, SFX loop ranges."),
+     "A C mixer on the boards and in the browser, and PICO-8 sound imports.",
+     "A C mixer on the boards and in the browser. A PICO-8 import carries "
+     "eight waveforms, the effect column, four-channel patterns and SFX loop "
+     "ranges."),
     ("Cartridges are folders",
      "A manifest, a script, a sheet, a tilemap, a sound bank. No build step.",
      "A manifest, a script, an indexed sheet, a tilemap, a sound bank. No build "
@@ -345,10 +345,9 @@ FEATURES = [
      "WiFi setup while a game runs, and firmware updates over the air with rollback.",
      "WiFi setup lives in Settings, so it works while a game runs. Firmware "
      "updates over the air on two channels into an inactive OTA slot, with "
-     "bootloader rollback if the new image does not come up. This is not a "
-     "demo: it is how the T-Deck and the P4 actually get their updates &mdash; "
-     "download, install, and rolling a bad image back have all run on the real "
-     "hardware. The screenless board takes the same updates through the same "
+     "bootloader rollback if the new image does not come up. It is how the "
+     "T-Deck and the P4 get their updates: download, install and rolling a bad "
+     "image back have each run on the hardware. The screenless board takes the same updates through the same "
      "Settings screen, shown in a browser instead of on glass. The Guition's "
      "updater is wired and awaits its first release."),
     ("The console in a browser",
@@ -356,8 +355,8 @@ FEATURES = [
      "The same system also compiles to WebAssembly &mdash; it is what runs on "
      "this page &mdash; and every board carries that build inside its firmware. "
      "Switch it on and the board hands the console to any phone or laptop on "
-     "the same WiFi: it opens in a tab and runs there at full speed, drawing "
-     "every pixel itself rather than mirroring the board&rsquo;s screen. Where "
+     "the same WiFi: it opens in a tab and draws every pixel itself rather "
+     "than mirroring the board&rsquo;s screen. Where "
      "the page came from decides where its cartridges live. Opened from a "
      "board, it edits that board&rsquo;s cartridges and writes every change "
      "back to it, behind the pairing pin the device puts on screen. Opened "
@@ -403,15 +402,14 @@ FEATURES = [
 SHOWCASE = [
     ("blocks.gif", "blocks &rarr; python", "Blocks that graduate",
      "A block is snapped into the program, and the CODE tab is opened on the "
-     "same edit &mdash; compiled to the Python the code tab edits. Nothing is "
-     "sped up and nothing is staged: the recording is the shell being driven.",
+     "same edit &mdash; compiled to the Python the code tab edits.",
      "The BLOCKS tab of the Editor: a block is dragged into the program, then "
      "the CODE tab shows the same program as Python"),
     ("paint.gif", "draw it, play it", "Editors on the device itself",
      "It opens on the cards a ten-year-old starts from, goes to the sprite "
      "tab, paints a smile onto the pet&rsquo;s tile, and presses PLAY &mdash; "
-     "and the pet is wearing it in the running game. No save button, no export "
-     "step, no host computer in the loop.",
+     "and the pet is wearing it in the running game. No save button and no "
+     "export step.",
      "The Editor on Pixel Pet: the config cards, then the SPRITES tab where a "
      "smile is painted onto the pet's tile, then the game running with the "
      "edited sprite"),
@@ -439,9 +437,8 @@ TARGETS = [
      "and updates itself over the air like the others."),
     ("This browser tab", "WebAssembly",
      "The system compiled to wasm &mdash; MicroPython plus the same C drawing "
-     "kernels the boards run. The page draws every pixel itself, a locked "
-     "60&nbsp;fps in headless-Chrome runs, and nothing is streamed from "
-     "anywhere."),
+     "kernels the boards run. The page draws every pixel itself, and nothing "
+     "is streamed from anywhere."),
     ("PC simulator", "pure Python",
      "The host reference and the fast dev loop. A pixel that moves here moves on "
      "glass: the firmware freezes copies of the same modules."),
@@ -454,8 +451,8 @@ ROUGH = [
     "Per-cart frame rates, the frame-budget model and every lever &mdash; including "
     "the ones built, measured and reverted &mdash; are tracked in public issues, "
     "not claimed here.",
-    "Open holes are filed rather than hidden: the system apps are not editable "
-    "yet, and USB-HID keyboard and audio on the P4 are unbuilt.",
+    "The system apps are not editable yet, and USB-HID keyboard and audio on "
+    "the P4 are unbuilt. Both are filed.",
 ]
 
 
@@ -1143,8 +1140,9 @@ footer a{margin-right:4px}
       on. The software is cartridges &mdash; games, wallpapers, tools, whatever you
       make &mdash; and you open, change and run any of them on the board itself,
       with no host computer in the loop.</p>
-    <p class="sub rise">It boots on three off-the-shelf boards today, and the same source
-      tree is a PC simulator and the browser build below.</p>
+    <p class="sub rise">It boots on four off-the-shelf boards today &mdash; three
+      with screens, one without &mdash; and the same source tree is a PC simulator
+      and the browser build below.</p>
     <div class="btns rise">
       <a class="btn pri" href="#try">Try it in the browser &#9656;</a>
       <a class="btn" href="https://github.com/moybyte-org/moybyte">Source</a>
@@ -1170,8 +1168,8 @@ footer a{margin-right:4px}
 <section class="rise" id="try"><div class="wrap">
   <p class="kick">run it</p>
   <h2>Try it, right here</h2>
-  <p class="slead">The real system compiled to WebAssembly &mdash; the same code the
-    firmware freezes. Not a mock-up, not a video.</p>
+  <p class="slead">The same code the firmware freezes, compiled to
+    WebAssembly.</p>
   <div class="tabs" id="tabs">
 %(tabs)s
     <button class="tab exp" id="expand" type="button"><b>Expand &#8663;</b><span>fill the screen</span></button>
@@ -1203,10 +1201,9 @@ footer a{margin-right:4px}
 <section class="rise" id="in"><div class="wrap">
   <p class="kick">the system</p>
   <h2>What's in it</h2>
-  <p class="slead">Approachable enough for a ten-year-old &mdash; that is what the
-    block editor is for &mdash; without being only that: underneath is a MicroPython
-    firmware with native C kernels, a Lua VM, OTA updates and a windowing shell.
-    Everything here runs today, and where something is rough it says so.</p>
+  <p class="slead">The block editor is there for a ten-year-old. Underneath it is a
+    MicroPython firmware with native C kernels, a Lua VM, OTA updates and a
+    windowing shell. Where something is rough, it says so.</p>
   <ul class="cards">
 %(features)s
   </ul>
@@ -1255,8 +1252,8 @@ firmware/web_runner/build.sh &amp;&amp; make site</pre>
     <br><br>
     Source-available (FSL-1.1-MIT): free to run, modify, teach with, and to author
     and sell carts; selling hardware built on Moybyte needs a commercial licence
-    until each release turns MIT two years after publication. The player bundle on
-    this page is MIT. The kid- and parent-facing site is
+    until each release turns MIT two years after publication &mdash; the player on
+    this page included. The kid- and parent-facing site is
     <a href="https://moybyte.com">moybyte.com</a>.
   </footer>
 </div></section>
