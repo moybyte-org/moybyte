@@ -1,7 +1,7 @@
 # Third-party components
 
 Moybyte is licensed as described in [LICENSE.md](LICENSE.md) — FSL-1.1-MIT for
-the console and firmware, MIT for the spec player's compiled artifacts. Some files in this
+the console and firmware. Some files in this
 repository did **not** originate here, and some of what the build produces
 bundles code from elsewhere. Everything in that category is listed below, with
 its upstream, its licence, and whether we changed it.

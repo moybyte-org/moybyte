@@ -2,144 +2,86 @@
 
 [![CI](https://github.com/moybyte-org/moybyte/actions/workflows/ci.yml/badge.svg)](https://github.com/moybyte-org/moybyte/actions/workflows/ci.yml)
 
-**An operating system that turns an ESP32 board into a small general-purpose
-computer — one you can also write software on, on the board itself. The software
-is cartridges: games, wallpapers, tools, whatever you make. Open any of them,
-change it, run it, with no host computer in the loop. It boots on off-the-shelf
-boards today; the same source tree is also a PC simulator and a browser build.**
+**An operating system for ESP32 boards. Its software is cartridges — games,
+wallpapers and tools — and you can open, change and run any of them on the board
+itself, with no computer attached.** The same source tree also runs as a PC
+simulator and in a browser.
 
-Its closest relatives are TIC-80 and Picotron: a fantasy console whose editors
-are part of the machine. The difference is that here it goes all the way down to
-an operating system — the launcher, the editor (config / blocks / code / sprites
-/ tilemap / scene / music) and your running cart are all processes on one window
-manager, not a separate mode you leave the machine to enter. A cart
-is a folder: a manifest, a Python or Lua script, an indexed sprite sheet, a
-tilemap, a sound bank. No build step, no per-device binary, no host toolchain.
+It is in the family of TIC-80 and Picotron, a fantasy console with its editors
+built in, except that the launcher, the editor and the running cart are all
+ordinary processes under one window manager. A cart is a folder: a manifest, a
+Python or Lua script, a sprite sheet, a tilemap and a sound bank. There is no
+build step.
 
-It is approachable enough for a ten-year-old (that is what the block editor and
-the seed carts are for) without being *only* that: underneath is a MicroPython
-firmware with native C kernels, a Lua VM, OTA updates and a windowing shell, and
-you are meant to be able to read and change all of it.
+The block editor and the built-in carts are aimed at kids. Underneath is a
+MicroPython firmware with C drawing and audio kernels, a Lua VM, over-the-air
+updates and a windowing shell, and all of it is open to read and change.
 
-Carts draw in 64 indexed colours on a 320×240 surface, the same on every target.
-The shell around them is not fixed — it reflows from that handheld screen to a 7″
-1024×600 desktop, all from one implementation.
+Carts draw in 64 indexed colours on a 320×240 screen on every target. The shell
+around them adapts to the screen, from a 320×240 handheld to a 10″ desktop.
 
-This repo is the **reference implementation of [moy core 0.3](https://github.com/moybyte-org/moy-spec)**,
-the public spec for that cart format and its verb table.
+This repo is the reference implementation of
+[moy core 0.3](https://github.com/moybyte-org/moy-spec), the public spec for the
+cart format and its verbs.
 
 <p align="center">
   <img src="docs/media/desktop/paint.gif"
-       alt="On the windowed desktop: drawing a smile on the pet sprite in the editor, and the running game window beside it wearing the change">
-  <br><em>Paint a smile on the sprite — the game window beside it is already wearing it.</em>
+       alt="On the windowed desktop: drawing a smile on the pet sprite in the editor, and the running game window beside it showing the change">
+  <br><em>Paint on the sprite, and the game running beside the editor picks it up.</em>
 </p>
 
 | ![The code editor as a window on the desktop](docs/media/desktop/code.gif) | ![Building a block program next to the scene it drives](docs/media/desktop/blocks.gif) |
 |:--:|:--:|
-| The code editor is a tab in the same system | Blocks compile to the same Python, and *graduate* to it |
+| The code editor | Blocks compile to the same Python |
 
 ## What it runs on
 
-| target | what it is |
+| target | |
 |---|---|
-| **PC simulator** | `tools/simulate_desktop.py` over the same `runtime/` the boards run. The host reference and the fast dev loop. Needs a C compiler — the raster is compiled libmoy, the same one the boards use. |
-| **LilyGO T-Deck Plus** (ESP32-S3) | MicroPython firmware, native 320×240, keyboard + trackball + touch, carts on SD — or on internal flash when the slot is empty — and OTA updates. |
-| **Waveshare ESP32-P4 7B** | 1024×600 MIPI-DSI. Same system, second presentation tier: a windowed desktop with draggable app windows. |
-| **Guition JC3248W535** (ESP32-S3) | the ~$15 3.5″ smart display: a QSPI AXS15231B panel, touch-only, landscape 480×320, carts on the TF card when one is in the slot. |
-| **Guition JC8012P4A1C** (ESP32-P4) | the 10.1″ one: the same desktop tier as the Waveshare over the shared `native/p4/` silicon, a landscape desk rotated onto portrait glass by the PPA. |
-| **Seeed XIAO ESP32-S3** | the odd one: no screen at all. It serves the WebAssembly console off its own flash and is the cartridge store behind it, so the console runs on whatever screen is nearby. Same OTA, same Settings. |
-| **Browser** | MicroPython compiled to WebAssembly (`firmware/web_runner/`) — the OS *is* the page, no server. |
+| **LilyGO T-Deck Plus** (ESP32-S3) | 320×240 handheld with keyboard, trackball and touch |
+| **Waveshare ESP32-P4 7B** | 7″ 1024×600 touch screen, windowed desktop |
+| **Guition JC8012P4A1C** (ESP32-P4) | 10.1″ 1280×800 touch screen, the same desktop as the Waveshare |
+| **Guition JC3248W535** (ESP32-S3) | 3.5″ 480×320 touch screen |
+| **Seeed XIAO ESP32-S3** | no screen: it stores carts and serves the browser console over WiFi |
+| **PC simulator** | `tools/simulate_desktop.py`, running the same `runtime/` modules as the boards |
+| **Browser** | MicroPython compiled to WebAssembly (`firmware/web_runner/`) |
 
-Host and device are **one codebase**, not a port. `runtime/` is canonical; each
-firmware build stages copies of those modules and freezes them, so the simulator
-is not a second implementation that can drift from the firmware.
-
-The GIFs above are the desktop tier at 1024×600. Below is the same system, from
-the same modules, on the handheld tier at its native 320×240 — the layout
-reflows to the smaller screen:
+Host and device are one codebase. Each firmware build freezes copies of the
+`runtime/` modules, so the simulator runs the same code as the boards.
 
 | ![The paint editor at native 320x240](docs/media/paint.gif) | ![The code editor at native 320x240](docs/media/code.gif) |
 |:--:|:--:|
-| The same paint session, fullscreen at 320×240 | …and the same code editor |
+| Paint on the 320×240 handheld | The code editor on the 320×240 handheld |
 
 ## What's in it
 
-Everything below exists and runs today. Where something is unverified or rough,
-it says so.
+- **Shell** — a launcher, a Player and an Editor, all processes over a window
+  manager. Apps are fullscreen on small screens; on the ESP32-P4 boards they
+  are resizable windows, so a game can keep running next to its editor.
+- **Editors on the device** — seven tabs per project: Config, Blocks, Code,
+  Sprites, Map, Scene, Music. Autosave with undo and redo; a crash opens the code
+  at the failing line. Block programs compile to Python, and once you edit that
+  Python by hand the blocks become read-only.
+- **Apps** — Paint, Files, Notes, Storybook, Calc, Appearance, Settings. Drawings
+  and documents go into a shared file store that carts can read. Your own apps
+  can be carts ([`docs/app_api_v1.md`](docs/app_api_v1.md)).
+- **Python and Lua** — one verb table, the same in both languages
+  ([`docs/moy_cart_api.md`](docs/moy_cart_api.md)). On the boards, Lua carts run
+  on Lua 5.4 with a heap separate from MicroPython's.
+- **Graphics and sound** — drawing and the audio mixer are C (libmoy) on every
+  target, the simulator included.
+- **Storage** — carts are plain folders, on an SD card where the board uses one
+  and on internal flash otherwise. Every firmware image carries the built-in
+  carts and writes them out on first boot.
+- **Updates** — signed over-the-air updates on a stable and a beta channel, with
+  rollback if a new image doesn't boot.
+- **Browser** — the whole console runs in a browser tab. Served from a normal web
+  host, it keeps your carts in that browser. Served by a board over WiFi, it
+  edits that board's carts, behind a pairing PIN shown on the board. Dropping a
+  PICO-8 cart (`.p8` or `.p8.png`) on the page converts it to a Lua cart you can
+  open in the editors.
 
-**The shell** — a launcher, a Player (`run(cart)` plays until exit and returns to
-whoever called it), and an Editor: all ordinary processes over a window manager.
-Two presentation tiers from one implementation — a fullscreen back-stack on the
-handheld, and a windowed desktop on the 7″ board with draggable, resizable
-windows and a taskbar, where a playtest keeps running beside the editor you are
-typing in. Panel themes in dark and light, live or static wallpapers, and a
-per-window responsive layout: every surface reflows from a phone panel to a 7″
-desk, and only a *running cart* is fixed at 320×240.
-
-**The editors, on the device itself** — seven tabs over one project: Config,
-Blocks, Code, Sprites, Map, Scene, Music. Blocks compile to the same Python and
-*graduate* to it when you edit the code directly. There is no save button and no
-dirty star: commits ride a typing-idle autosave and every exit path, backed by a
-per-project journal, so undo/redo walks fine-grained edits and then whole
-commits, scoped to the tab you are in. A crash drops you into the code on the
-offending line.
-
-**Apps** — Paint, Files, Storybook, Calc, Settings, Appearance,
-WiFi setup. Drawings and documents live in a shared file layer that carts
-can read back. They sit on the launcher as carts and behave like the rest of the
-system. An app can now BE a cartridge — declared by manifest permissions, with
-no shell module, no registration and no reflash
-([`docs/app_api_v1.md`](docs/app_api_v1.md); `system_carts/notes.moy` is one in
-200 lines). These particular apps still live in the shell, deliberately: they
-are big, and the capability is there for what *you* write.
-
-**Two cart languages** — Python and Lua, one verb table, valid verbatim in both.
-On device, Lua carts run on a vendored Lua 5.4 VM whose heap lives *outside*
-MicroPython's GC and is freed wholesale at exit. Drawing, input, sprites,
-tilemaps, layers, audio, scenes and documents, persistent memory —
-[the full table](docs/moy_cart_api.md) is about 60 verbs and no imports.
-
-**Graphics** — an indexed 64-colour palette end to end, every draw verb landing
-in a native C kernel on device (`moy_gfx`). The 7″ board composites the game
-through the SoC's hardware PPA, with the DMA overlapping the next frame's input
-poll; scrolling shifts retained pixels instead of repainting them; sprite
-batching collapses N calls into one. A cart's logic runs at its declared rate
-and its draw on an integer divisor the console picks from load, so motion stays
-even when a frame is heavy.
-
-**Sound** — a C mixer (`moy_audio`) on the boards and in the browser, fed by a
-tracker-style sound bank. PICO-8 imports carry eight waveforms, the effect
-column, four-channel patterns and SFX loop ranges.
-
-**Cartridges are folders** — a manifest, a script, an indexed sheet, a tilemap, a
-sound bank. No build step and no per-device binary: copy a folder onto the SD
-card and it is on the launcher. Built-in carts re-seed by version and keep the
-your saves and tuning across an update.
-
-**Wireless** — WiFi setup lives in Settings, so it works while a game runs.
-Firmware updates go over the air on two signed channels, stable and beta, into
-an inactive OTA slot with bootloader rollback — the whole chain (real WiFi,
-signature check on device, streamed install, boot the new slot, rollback
-self-heal) has run on the glass of the T-Deck and the P4. Each board also serves
-the browser console below over its own WiFi: the wasm bundle is baked into the
-firmware image, so a phone on the same network gets the full console from the
-device itself — reading that board's cartridges and writing every change back to
-it, behind the pairing pin the board puts on screen.
-
-**One contract, every rendering backend** — the host, each board, and a browser
-build that rasterizes in WebAssembly. That contract is written down
-([`docs/surface_model_v1.md`](docs/surface_model_v1.md)), including its graveyard
-of approaches that were built, measured and reverted.
-
-**Tests** — several thousand, all headless (the CI badge above is the live
-count). Golden-frame tests pin the host renderer and a canvas-parity suite holds
-the device backend to it; the firmware tests read the frozen module tree rather
-than executing it. Every console board is driven over its live serial
-console by a pytest suite that taps and swipes the real UI, and the browser build
-has a screenshot harness that boots the real wasm console and decodes the same
-framebuffer the page blits.
-
-## Try it in 60 seconds
+## Try it
 
 ```bash
 make setup                                       # venv + editable install (dev, sim)
@@ -147,80 +89,46 @@ make test                                        # pytest
 .venv/bin/python tools/simulate_desktop.py       # boots the launcher
 ```
 
-Arrows move, `Enter` runs, `M` menu, `H` home, `Esc` quits; the mouse is the
-touchscreen. Tap **Make ✏️** to open the editor on any cart, including the ones
-you just played.
+You need Python 3.10+ and a C compiler (`cc` or `gcc` on PATH, or `$CC`): the
+simulator draws, plays audio and runs Lua through the same C library as the
+boards. Debian/Ubuntu `sudo apt install build-essential`, Fedora
+`sudo dnf install gcc`, macOS `xcode-select --install`.
 
-**On Windows**, the Makefile doesn't apply (it is POSIX), so `make setup` is
-spelled out — same three steps, same extras:
+Arrows or WASD move, Z or Space is A, X is B, Enter runs, hold H or Backspace to
+go home, Esc quits. The mouse is the touchscreen. Pick **Make** on the launcher
+to open the editor on any cart.
+
+```bash
+# the 1024x600 desktop
+.venv/bin/python tools/simulate_desktop.py --size 1024x600 --windowed
+
+# run one cart
+.venv/bin/python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
+
+# a headless tour, recorded to a GIF (how the GIFs above are made)
+.venv/bin/python tools/simulate_desktop.py --demo --gif demo.gif
+
+# the browser build (downloads emsdk on its first run)
+cd firmware/web_runner && ./build.sh && python serve.py
+```
+
+`--cart` copies a cart from outside the cart store (`~/.moybyte/projects/`) the
+first time and runs that copy afterwards, so later edits to the original don't
+show up. Keep a cart you are working on inside the store.
+
+**On Windows** the Makefile doesn't work, so set up by hand and use
+`.venv\Scripts\python` wherever this README says `.venv/bin/python`:
 
 ```bat
 py -3 -m venv .venv
 .venv\Scripts\python -m pip install --upgrade pip setuptools
 .venv\Scripts\python -m pip install -e ".[dev,sim]"
-
-.venv\Scripts\python tools\simulate_desktop.py
 ```
-
-Every command below works as written with `.venv\Scripts\python` in place of
-`.venv/bin/python`. Python 3.10+, **and a C compiler — it is a requirement, not
-an extra.** The host draws through the boards' own vendored libmoy, compiled on
-demand and cached; there has been no Python fallback raster since 2026-08-15, so
-without a compiler the simulator dies at its first draw and `make test` cannot
-render. (You get a sentence saying so, not a ctypes error.) The same applies to
-audio, which is silence without one, and to Lua carts, which open the "needs the
-Lua runtime" panel: `cc` or `gcc` on PATH, or `$CC`. Debian/Ubuntu
-`sudo apt install build-essential`, Fedora `sudo dnf install gcc`, macOS
-`xcode-select --install`.
-
-```bash
-# the P4's windowed desktop tier, on your PC
-.venv/bin/python tools/simulate_desktop.py --size 1024x600 --windowed
-
-# skip the launcher, run one cart
-.venv/bin/python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
-
-# ...and run YOUR cart in place, editing it between runs (see below)
-.venv/bin/python tools/simulate_desktop.py --cart ~/.moybyte/projects/mine.moy
-
-# the whole console in a browser: the wasm build (firmware/web_runner)
-cd firmware/web_runner && ./build.sh && python serve.py
-
-# headless tour -> animated GIF (this is how the GIFs above are made)
-.venv/bin/python tools/simulate_desktop.py --demo --gif demo.gif
-```
-
-No display? Every test runs headless, and `--gif`/`--script` drive the real
-system without one.
-
-**`--cart` copies before it runs.** A cart from outside the cart store is copied
-into it (`--save-dir`, default `~/.moybyte/projects/`) the first time it is seen,
-and every later run opens *that* copy — so edits to the folder you pointed at
-stop showing up. Fine for trying a cart, wrong while writing one. Keep the cart
-you are working on **inside the store** and it runs in place, edits and all.
-(`--save-dir` moves the store, but the system carts seed into wherever it
-points, so it is a second store rather than a way to run one loose folder.)
-
-**In the browser, for real.** `firmware/web_runner/build.sh` compiles the same
-system to WebAssembly (it fetches emsdk itself; first build is slow) and emits a
-static `dist/` — serve it with `firmware/web_runner/serve.py` and the whole
-system, cart roster included, runs in a tab with no server behind it. Carts and
-drawings made there are kept in that browser and are still on the shelf after a
-reload; a `.moy` file carries one in or out. Drop a **PICO-8** cart on it
-(`.p8` or a `.p8.png` off the BBS) and it converts and runs — the assets and the
-cart's own code, ported to Lua under a generated p8 shim, so it opens in the
-editors like anything else. A page served by a *board* instead edits that
-board's store, over the wire — where the page came from decides which, once, and
-the two never mix — and from there Settings can update the board's firmware,
-which is how the headless Zero is updated at all. That build is also what the spec repo vendors as its
-player, so **you can try a cart without cloning anything**: `moy run` over there
-is one command and no dependencies.
 
 ## Write a cart
 
 A cart is a folder (`manifest.json` + `main.py` + `config.json`, plus optional
-sprites / tilemap / sounds). Three optional lifecycle hooks, and **no imports** —
-the verbs are pre-injected globals:
+sprites, tilemap and sounds). There are no imports; the verbs are globals:
 
 ```python
 # a tiny cart: move a ball with the D-pad
@@ -242,65 +150,35 @@ def _draw():
     print("MOVE ME", 8, 8, col("white"))
 ```
 
-The same cart in **Lua** is one manifest line away (`"runtime": "lua"` +
-`main.lua`) — every verb in the API is valid verbatim in both languages, and on
-device Lua carts run on a vendored Lua 5.4 VM with the cart heap outside
-MicroPython's GC. `system_carts/sakura_lua.moy` is a line-by-line, pixel-identical
-twin of `system_carts/sakura.moy`, pinned by a test.
+For Lua, set `"runtime": "lua"` in the manifest and write `main.lua`.
+`system_carts/sakura_lua.moy` is a Lua copy of `system_carts/sakura.moy`, and a
+test checks that they draw the same pixels.
 
-- **[`docs/moy_cart_api.md`](docs/moy_cart_api.md)** — the full verb table:
-  drawing, input, sprites, tilemaps, layers, audio, scenes, persistent memory.
-- **`system_carts/*/`** — 30-odd real carts, from a 70-line tap game to Battle
-  City. They are the worked examples, and they model the "draw less" idioms the
-  docs teach.
-- **[`docs/blocks_tap_game.md`](docs/blocks_tap_game.md)** — the block editor
-  from the kid's side: build `system_carts/tap_game.moy` block by block.
-  [`docs/scratch_parity_v1.md`](docs/scratch_parity_v1.md) is the checklist of
-  what the block vocabulary has and still lacks against Scratch.
+- [`docs/moy_cart_api.md`](docs/moy_cart_api.md) — the verb table.
+- `system_carts/` — the 30 built-in carts, from a 70-line tap game to Brick Siege.
+- [`docs/blocks_tap_game.md`](docs/blocks_tap_game.md) — building
+  `system_carts/tap_game.moy` in the block editor, step by step.
 
 ## The spec
 
-The cart format and verb table are a **public spec** so carts aren't hostage to
-this one implementation: [**moybyte-org/moy-spec**](https://github.com/moybyte-org/moy-spec)
-(MIT). It ships `SPEC.md`, a browser player built from this repo's web runner,
-a `moy` CLI (`new` / `run` / `export` / `port`), and a PICO-8 converter — a p8
-cart converts art, map, sound and code under a compat shim.
+The cart format and verbs are a public spec,
+[moybyte-org/moy-spec](https://github.com/moybyte-org/moy-spec) (MIT), so carts
+don't depend on this implementation. It has `SPEC.md`, its own browser player, a
+`moy` command-line tool (`new`, `run`, `export`, `port`, …) and a PICO-8
+converter. The spec covers what a game uses; the shell, editors, window manager
+and app API in this repo are outside it.
 
-The spec is deliberately narrow: it describes what a *game* touches. That layer
-is where the word *console* belongs — moy core specifies a virtual console, and
-Moybyte is a system that contains one. Everything else in this repo — the shell,
-the editors, the window manager, the app API — is above core, and consoles are
-expected to differ there.
+## Flash a board
 
-## The hardware, honestly
+Without a toolchain, the [project site](https://moybyte-org.github.io/moybyte/)
+flashes a board from Chrome or Edge over Web Serial, using the images from the
+[`firmware-latest`](https://github.com/moybyte-org/moybyte/releases/tag/firmware-latest)
+release.
 
-Every board here is real and boots Moybyte, and every one of them is an
-off-the-shelf dev board; bespoke hardware is roadmap, not shipped. The T-Deck
-Plus is a keyboard handheld; the Waveshare P4 is a 7″ desktop and the Guition
-JC8012P4A1C a 10.1″ one; the Guition JC3248W535 is a ~$15 touch-only 3.5″
-display; the XIAO has no display at all and lends its console to a browser.
-What's honest about the state:
-
-- **It plays.** The seed carts run at playable frame rates on the boards, with
-  the whole editor suite usable on the device itself.
-- **A flashed board is not an empty board.** Every image carries the whole
-  cartridge roster compressed inside it and writes it out on first boot, so
-  there is no cable step between flashing a board and playing on it — and no
-  SD card needed either, on any of them.
-- **Performance is tracked in the open, not claimed.** Per-cart fps, the frame
-  budget model, and every lever *including the ones that were built, measured
-  and reverted* live in [issue #66](https://github.com/moybyte-org/moybyte/issues/66)
-  (T-Deck) and [#58](https://github.com/moybyte-org/moybyte/issues/58) (P4);
-  [`docs/perf_native_gap_v1.md`](docs/perf_native_gap_v1.md) is the strategic
-  analysis of why we trail native emulators and what's left.
-- **Open holes are filed, not hidden** — USB-HID keyboard and audio on the P4,
-  the touch-controller stalls, the editor-tab draw cost. See the issue tracker.
-
-Build and flash:
+From source, each board's `build.sh` downloads the MicroPython and ESP-IDF it
+needs into `.build/`, so the first build is slow:
 
 ```bash
-# each build.sh clones the MicroPython and ESP-IDF it needs into .build/ --
-# you do not install a toolchain, but the first build of a board is slow.
 make firmware-build-tdeck-mainline && make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 make firmware-build-p4             && make firmware-flash-p4             PORT=/dev/ttyACM0
 make firmware-build-guition-s3     && make firmware-flash-guition-s3     PORT=/dev/ttyACM0
@@ -308,74 +186,47 @@ make firmware-build-guition-p4     && make firmware-flash-guition-p4     PORT=/d
 make firmware-build-zero           && make firmware-flash-zero           PORT=/dev/ttyACM0
 ```
 
-Without the toolchain: every build off `master` publishes to the rolling
-[`firmware-latest`](https://github.com/moybyte-org/moybyte/releases/tag/firmware-latest)
-release, and the project site flashes any of the boards straight from the browser
-over Web Serial (Chrome or Edge) — the same image at the same offset as the
-commands above. The site serves its own copy of each image because that is the
-only origin a browser may fetch firmware from; `tools/fetch_ci_firmware.py` is
-how they get there.
-
-`master` is the tested branch — it is what the site flashes and what a board
-offers itself over the air. Work happens on `dev`, whose builds publish
-separately to
+`master` is the tested branch: its builds go to `firmware-latest` and the stable
+update channel. Work happens on `dev`, whose builds go to
 [`firmware-beta`](https://github.com/moybyte-org/moybyte/releases/tag/firmware-beta)
-for the device's opt-in BETA channel (Settings → CHANNEL). Beta images are
-untested by definition; the bootloader keeps the previous one and rolls back if
-a new image doesn't come up.
+and to boards that pick the beta channel in Settings → CHANNEL.
 
-Each firmware directory has its own README recording the hardware-learned
-constraints (shared SPI bus rules, DSI/PSRAM timing, the keyboard's two modes) —
-**read them before touching that board.** They exist because each line in them
-cost a debugging session.
+Each `firmware/<board>/` directory has a README with that board's hardware
+constraints. Read it before changing the board.
 
 ## Where things live
 
 | path | |
 |---|---|
-| `runtime/` | the system: kernel, WMs, player, editor app, every surface. **[Its README](runtime/README.md) is a per-file map.** |
-| `system_carts/` | the seed cartridges — games, wallpapers, and the system apps (Paint, Files, Storybook, Calc) |
-| `firmware/lilygo_t_deck_plus_mainline/` | the ESP32-S3 (T-Deck) port; the shared native C modules live in repo-root `native/` |
-| `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the Waveshare 7″ ESP32-P4 port (mainline MicroPython; the P4-silicon C modules live in repo-root `native/p4/`) |
-| `firmware/guition_jc3248w535/` | the Guition 3.5″ S3 port (its own QSPI panel driver, `native/moy_axs`) |
-| `firmware/guition_jc8012p4a1c/` | the Guition 10.1″ ESP32-P4 port (a variant of the Waveshare's over the shared `native/p4/` silicon tier; portrait glass) |
-| `firmware/seeed_xiao_esp32s3_zero/` | the Zero: a headless companion, not a console — it stores and serves a kid's carts to the browser build |
-| `firmware/web_runner/` | the MicroPython-WASM build; `build.sh` fetches emsdk itself |
-| `tools/` | simulator, GIF recorder, p8 importers, on-glass test drivers |
-| `docs/` | cart API, shell UX, visual identity, architecture and design docs |
-| **`CLAUDE.md`** | **the best single map of this repo.** Written for AI tools, but it is the orientation doc humans should read first. |
-
-Design doc: [`moybyte_console_plan_2026-07.md`](moybyte_console_plan_2026-07.md).
-Shell reference: [`docs/shell_ux_v1.md`](docs/shell_ux_v1.md).
+| `runtime/` | the system: kernel, window managers, Player, Editor. [Its README](runtime/README.md) maps every file. |
+| `system_carts/` | the built-in carts |
+| `firmware/<board>/` | one directory per board, plus `firmware/web_runner/` for the browser build |
+| `native/` | the C modules the boards build in; `native/p4/` is shared by both ESP32-P4 boards |
+| `tools/` | simulator, GIF recorder, PICO-8 import, on-device test drivers |
+| `docs/` | cart API, shell UX, architecture and design docs |
+| `CLAUDE.md` | the most complete map of the repo. It is written for AI tools, but it is a good first read for people too. |
 
 ## Contributing
 
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md) — features want an issue first, and
-every commit needs a DCO sign-off (`git commit -s`). Then read `CLAUDE.md`.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md): open an issue before starting a
+feature, and sign off every commit (`git commit -s`).
 
-The one rule that trips people up: **host == device.** A change to the drawing
-API lands in the ONE canvas class every tier runs (`device_canvas.DeviceCanvas`,
-built for the host by `runtime/host_canvas.py`) with
-an identical API, or the "one cart, every tier" contract breaks.
+The rule that catches people: host and device share one canvas class,
+`device_canvas.DeviceCanvas`, which the host runs through
+`runtime/host_canvas.py`. A drawing change goes there, or carts stop behaving
+the same on every target.
 
 ## License
 
-Everything you'd do as a person is free: run the simulator, flash the firmware on
-your own board, modify it, teach with it, make and sell your own carts. Selling
-hardware (or a commercial product) built on Moybyte requires a commercial
-license, and that restriction expires per release two years after publication.
-
-Details and the exact split: [`LICENSE.md`](LICENSE.md) — the system and
-firmware are
-[FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available, becomes MIT after two
-years). The `.moy` cart format and API are an open specification, and carts you
-author are yours. What each licence lets you do, in a table:
-[`docs/licensing_v1.md`](docs/licensing_v1.md).
+You can run it, flash your own boards, modify it, teach with it, and make and
+sell your own carts. Selling hardware or a commercial product built on Moybyte
+needs a commercial license, and each release becomes MIT two years after it is
+published. The system is [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md); the cart format
+and API are an open spec, and carts you make are yours. Details in
+[`LICENSE.md`](LICENSE.md) and [`docs/licensing_v1.md`](docs/licensing_v1.md).
 
 ---
 
-*The kid- and parent-facing side of this project lives at
-[moybyte.com](https://moybyte.com). This README is for people reading the source.*
-
-*Most of the code here was written with Claude Code, directed and tested on
-hardware by a human.*
+*The page for kids and parents is [moybyte.com](https://moybyte.com). Most of
+the code here was written with Claude Code, directed and tested on hardware by a
+human.*

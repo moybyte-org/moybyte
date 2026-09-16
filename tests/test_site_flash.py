@@ -175,7 +175,7 @@ def test_a_board_with_no_ci_build_is_not_an_error(tmp_path):
     assert [b["id"] for b in manifest["boards"]] == ["p4"]
     assert "no published build" in html
     # ... and offers the way to make one, rather than a dead card.
-    assert "make firmware-flash-lilygo-micropython-full" in html
+    assert "make firmware-flash-tdeck-mainline" in html
     assert not os.path.isdir(os.path.join(out, "firmware", "tdeck"))
 
 

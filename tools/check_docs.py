@@ -230,8 +230,6 @@ DUP_BUDGET = {
     (".claude/rules/carts.md",
      "native/moy_audio/libmoy/UPSTREAM.md"): 16,
     ("docs/moy_cart_api.md", "runtime/README.md"): 14,
-    ("CONTRIBUTING.md", "README.md"): 12,
-    ("LICENSE.md", "README.md"): 7,
     ("docs/backend_contract_v1.md", "docs/surface_model_v1.md"): 8,
     # Each vendored directory's UPSTREAM.md must stand alone beside its code, so
     # they share the vendoring rules deliberately.
