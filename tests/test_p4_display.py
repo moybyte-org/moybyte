@@ -1498,6 +1498,71 @@ def test_timeouts_is_the_ppa_counter_on_both():
         assert _slot(rcomp, "timeouts") == 4
 
 
+class RefreshingDsi(PortraitDsi):
+    """A portrait panel whose refresh count the test advances by hand: a show
+    takes effect only at the next refresh, which is the fact the third scan
+    buffer exists for."""
+
+    def __init__(self, n=3):
+        PortraitDsi.__init__(self, n)
+        self.refresh = 0
+
+    def refreshes(self):
+        return self.refresh
+
+
+@contextlib.contextmanager
+def refreshing_rotated(angle=90):
+    dsi, ppa = RefreshingDsi(3), RotatingPpa()
+    keys = ("dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
+    saved = {k: sys.modules.get(k) for k in keys}
+    sys.modules["moy_dsi"] = dsi
+    sys.modules["moy_ppa"] = ppa
+    sys.modules["moy_gfx"] = FakeGfx()
+    sys.modules.pop("moy_alloc", None)
+    spec = importlib.util.spec_from_file_location("dsi_panel", DEVICE / "dsi_panel.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["dsi_panel"] = mod
+    try:
+        spec.loader.exec_module(mod)
+        comp = mod.RotatedCompositor(lambda on: None, angle=angle)
+        comp.strip_h = 0
+        yield mod, comp, dsi, ppa
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
+def test_a_buffer_still_on_glass_is_never_the_rotate_target():
+    """The DPI driver moves the scan-out at the refresh AFTER a show. Until
+    that refresh the buffer the show left is still being read by the panel,
+    and the ping-pong used to rotate the next frame straight into it -- the
+    frame landed on glass mid-scan. With the panel's refresh count the
+    compositor knows which buffer is free: the partner once a refresh has
+    passed, the third buffer while the partner is still on glass."""
+    with refreshing_rotated() as (mod, comp, dsi, ppa):
+        dsi.refresh = 1                       # the init show(0) has taken effect
+        step(comp)                            # frame A: into the partner
+        assert ppa.rotates[-1][0] is dsi.fb(1) and dsi.shown == [0, 1]
+        # No refresh since show(1): fb0 is what the panel scans, fb1 is the
+        # show waiting for the next refresh -- neither may be written.
+        step(comp)                            # frame B
+        assert ppa.rotates[-1][0] is dsi.fb(2), "the third buffer, not the one on glass"
+        assert dsi.shown == [0, 1, 2] and comp._vsync_waits == 0
+        # A refresh passed: show(2) took effect (it superseded show(1), which
+        # never reached glass), so fb1 is free again and the ping-pong resumes.
+        dsi.refresh = 2
+        step(comp)                            # frame C
+        assert ppa.rotates[-1][0] is dsi.fb(1) and dsi.shown == [0, 1, 2, 1]
+        assert comp._on_glass() == 2
+        # Every frame here was a full rotate, and a full frame is a debt the
+        # other TWO buffers owe (None: current again only by a full rotate).
+        assert comp._stale[0] is None and comp._stale[2] is None
+
+
 def test_the_rotated_path_reports_obsolete_absent_never_zero():
     """Slot 1 is the one mechanism the rotated path does not have: a deferred
     frame there is fenced and shown LATE, never dropped. None says so; a 0

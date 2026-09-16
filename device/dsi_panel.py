@@ -346,9 +346,14 @@ class P4Compositor:
 # frame, already covered, and costs nothing. A buffer whose stale list has
 # grown past a handful, or that missed a full frame, is brought current by a
 # full rotate instead: correctness by construction, and the bound on the
-# bookkeeping. Two scan buffers, not three: the third bought the Waveshare an
-# async-overlap lever this path does not use (every rotate is blocking), and a
-# third buffer to keep current would be a third full rotate after every change.
+# bookkeeping. All three scan buffers, because a show takes effect at the
+# panel's NEXT refresh, not when show() returns: the buffer a show left is
+# still being scanned until then, and with two buffers it is the only other
+# one, so every frame presented late was rotated into the buffer on glass and
+# landed mid-scan. The panel's refresh count (moy_dsi.refreshes) says when a
+# show has taken effect; the partner is the target whenever it has, the third
+# buffer only while the partner is still on glass, so the third's stale debt
+# is paid rarely rather than every frame.
 #
 # EVERY FRAME IS ASYNC (2026-09-08), and the paint buffer PING-PONGS to make
 # it so. A rotate is PPA time the CPU used to spend waiting -- ~11ms for a
@@ -442,8 +447,13 @@ class RotatedCompositor:
         if not moy_ppa.init():
             raise OSError("moy_ppa init failed: a portrait panel needs the rotate")
         self._ppa = moy_ppa
-        # Two scan buffers of the panel's (the third exists; unused here).
-        self._fbs = [moy_dsi.fb(0), moy_dsi.fb(1)]
+        # All three scan buffers of the panel's. A show(n) takes effect at the
+        # panel's next refresh, not when show() returns: until then the buffer
+        # it left is still being scanned, and a frame rotated into it lands on
+        # glass mid-scan. Two buffers cannot avoid that (the one just left is
+        # the only other one); three can, and the panel's refresh count says
+        # exactly which buffer is free -- see _pick_back.
+        self._fbs = [moy_dsi.fb(0), moy_dsi.fb(1), moy_dsi.fb(2)]
         # Two paint buffers, ping-ponged at flush: the PPA reads one while
         # the console paints the other (see the block comment).
         self._paints = [self._alloc(self._w * self._h * 2),
@@ -454,11 +464,20 @@ class RotatedCompositor:
                 self._gfx.fill(f, self._pw * self._ph, 0)
             for f in self._paints:
                 self._gfx.fill(f, self._w * self._h, 0)
+        # The refresh count is the panel's word on when a show took effect;
+        # a moy_dsi without it (older firmware, the host fakes) reads as
+        # "every show has taken effect", which the three-way rotation still
+        # keeps one frame safer than the ping-pong was.
+        self._refreshes = getattr(moy_dsi, "refreshes", None)
+        self._seq = [0, -1, -1]       # show order per buffer (-1: never shown)
+        self._rseq = [0, -1, -1]      # the refresh count at each buffer's show
+        self._shows = 0
         moy_dsi.show(0)
-        self._front = 0
-        self._back = 1
+        self._front = 0               # the last buffer shown
+        self._back = 1                # the next paint target (see _pick_back)
+        self._vsync_waits = 0         # picks that found no free buffer (never, with three)
         # None = "missed a full frame": the next frame into it is a full rotate.
-        self._stale = [[], None]
+        self._stale = [[], None, None]
         # This frame's game composite, registered by the canvas (mark_game),
         # or None: decided at flush -- a quiet frame goes straight to the scan
         # buffer as one scale+rotate, anything else composites into the paint
@@ -538,7 +557,7 @@ class RotatedCompositor:
         rotate into every buffer."""
         rotate_rect(0, 0, 1, 1, angle, self._w, self._h)   # validates
         self.angle = angle
-        self._stale = [None, None]
+        self._stale = [None, None, None]
 
     def mark_game(self, src, sw, sh, ox, oy, scale, paint, quiet, direct):
         """The canvas's word about THIS frame's game composite (one per frame):
@@ -705,20 +724,64 @@ class RotatedCompositor:
             self._scratch_n = n
         return self._scratch
 
+    def _show(self, n):
+        """show(n), remembering its order and the refresh it was asked in."""
+        self._dsi.show(n)
+        self._shows += 1
+        self._seq[n] = self._shows
+        r = self._refreshes
+        self._rseq[n] = r() if r is not None else self._shows
+        self._front = n
+
+    def _on_glass(self):
+        """The buffer the panel is scanning NOW: the latest show that a
+        refresh has followed (the DPI driver switches at the refresh after a
+        show; a show superseded before one never reaches glass)."""
+        r = self._refreshes
+        now = r() if r is not None else self._shows + 1
+        best = -1
+        seq = -1
+        for i in range(3):
+            if self._rseq[i] < now and self._seq[i] > seq:
+                seq = self._seq[i]
+                best = i
+        return best
+
+    def _pick_back(self):
+        """The scan buffer the next frame may be rotated into: neither the
+        one on glass nor the one whose show is waiting for the refresh that
+        makes it so. Of the free ones, the most recently shown -- the
+        ping-pong partner whenever the refresh has passed, so the third
+        buffer (and the stale debt it accrues) is touched only when the
+        partner is still being scanned."""
+        busy_a = self._on_glass()
+        busy_b = self._front
+        best = -1
+        seq = None
+        for i in range(3):
+            if i == busy_a or i == busy_b:
+                continue
+            if seq is None or self._seq[i] > seq:
+                seq = self._seq[i]
+                best = i
+        if best < 0:
+            self._vsync_waits += 1
+            best = 3 - busy_a - busy_b if busy_a != busy_b else (busy_a + 1) % 3
+        self._back = best
+        return best
+
     def _present(self, late):
-        """Show the deferred buffer (every op landed) and swap."""
+        """Show the deferred buffer (every op landed)."""
         back = self._pending
         self._pending = None
-        self._dsi.show(back)
-        self._front = back
-        self._back = 1 - back
+        self._show(back)
         if late:
             self._late_n += 1
         else:
             self._pres_n += 1
 
     def flush(self):
-        back = self._back
+        back = self._pick_back()
         fb = self._fbs[back]
         stale = self._stale[back]
         game = self._game
@@ -737,7 +800,7 @@ class RotatedCompositor:
             self._present(True)
             self._fences += 1
             self._fence_us += _ticks_diff(_ticks_us(), tf)
-            back = self._back
+            back = self._pick_back()
             fb = self._fbs[back]
             stale = self._stale[back]
         t0 = _ticks_us()
@@ -874,14 +937,16 @@ class RotatedCompositor:
             self._rect_n += 1
             self._rect_us += _ticks_diff(_ticks_us(), t0)
         self._stale[back] = []
-        other = self._front
-        if changed is None:
-            self._stale[other] = None
-        elif self._stale[other] is not None:
-            lst = self._stale[other]
-            for r in changed:
-                if r not in lst:
-                    lst.append(r)
+        for other in range(3):
+            if other == back:
+                continue
+            if changed is None:
+                self._stale[other] = None
+            elif self._stale[other] is not None:
+                lst = self._stale[other]
+                for r in changed:
+                    if r not in lst:
+                        lst.append(r)
         # The next frame paints the other buffer while this one's ops fly.
         self._pi = 1 - self._pi
         if nb:
@@ -892,9 +957,7 @@ class RotatedCompositor:
             self._pending = back
             self._def_n += 1
             return                            # shown at the next present
-        self._dsi.show(back)
-        self._front = back
-        self._back = 1 - back
+        self._show(back)
 
     def present_pending(self):
         """The loop's pre-frame hook, BEFORE the canvas re-points at the

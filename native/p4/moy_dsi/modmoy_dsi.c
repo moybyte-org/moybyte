@@ -85,6 +85,19 @@ static int s_nfbs;          // the next paint; show(n) switches scan-out zero-co
                             // redraw never races the scan (the "everything visibly
                             // refreshes" tearing).
 static volatile uint32_t s_underruns;
+// Panel refreshes: the DPI driver's "refresh done" event, raised from the
+// DW-GDMA transfer-done ISR that also restarts the frame -- so a count that
+// moved is the proof a scan-out switch (show) has TAKEN EFFECT, and the buffer
+// it left is off glass. The rotated compositor picks its paint target by it.
+static volatile uint32_t s_refreshes;
+
+IRAM_ATTR static bool moy_dsi_on_refresh_done(esp_lcd_panel_handle_t panel,
+                                              esp_lcd_dpi_panel_event_data_t *edata,
+                                              void *user_ctx) {
+    (void)panel; (void)edata; (void)user_ctx;
+    s_refreshes++;
+    return false;
+}
 
 // Strong implementation of ESP-IDF's P4-build weak diagnostic hook
 // (patches/p4_esp_lcd_dsi_underrun_hook.patch). ISR-safe: one internal-RAM
@@ -105,6 +118,7 @@ static mp_obj_t moy_dsi_init(void) {
     }
 
     s_underruns = 0;
+    s_refreshes = 0;
 
     esp_ldo_channel_config_t ldo_cfg = {
         .chan_id = MOY_DSI_PHY_LDO_CHAN,
@@ -141,6 +155,11 @@ static mp_obj_t moy_dsi_init(void) {
     moy_dsi_check(moy_dsi_new_panel(s_io, &panel_cfg, &s_panel), "panel new");
     moy_dsi_check(esp_lcd_panel_reset(s_panel), "panel reset");
     moy_dsi_check(esp_lcd_panel_init(s_panel), "panel init");
+    esp_lcd_dpi_panel_event_callbacks_t cbs = {
+        .on_refresh_done = moy_dsi_on_refresh_done,
+    };
+    moy_dsi_check(esp_lcd_dpi_panel_register_event_callbacks(s_panel, &cbs, NULL),
+                  "refresh callback");
 #if MOY_DSI_MIRROR_XY
     moy_dsi_check(esp_lcd_panel_mirror(s_panel, true, true), "panel mirror");
 #endif
@@ -199,6 +218,14 @@ static mp_obj_t moy_dsi_underruns(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_underruns_obj, moy_dsi_underruns);
 
+// refreshes() -> panel frames scanned out since init. A show(n) takes effect at
+// the first refresh after it; until the count moves, the buffer show() left is
+// still on glass and must not be written.
+static mp_obj_t moy_dsi_refreshes(void) {
+    return mp_obj_new_int_from_uint(s_refreshes);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_refreshes_obj, moy_dsi_refreshes);
+
 // show(n): make framebuffer n the scan-out source -- msync its CPU-cached writes,
 // then a zero-copy draw_bitmap (the DPI driver recognizes its own fb pointer and
 // just switches buffers at the next VSYNC; no pixel copy).
@@ -251,6 +278,7 @@ static const mp_rom_map_elem_t moy_dsi_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fb), MP_ROM_PTR(&moy_dsi_fb_obj) },
     { MP_ROM_QSTR(MP_QSTR_nfbs), MP_ROM_PTR(&moy_dsi_nfbs_obj) },
     { MP_ROM_QSTR(MP_QSTR_underruns), MP_ROM_PTR(&moy_dsi_underruns_obj) },
+    { MP_ROM_QSTR(MP_QSTR_refreshes), MP_ROM_PTR(&moy_dsi_refreshes_obj) },
     { MP_ROM_QSTR(MP_QSTR_show), MP_ROM_PTR(&moy_dsi_show_obj) },
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&moy_dsi_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_pattern), MP_ROM_PTR(&moy_dsi_set_pattern_obj) },
