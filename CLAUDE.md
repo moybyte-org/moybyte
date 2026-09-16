@@ -144,7 +144,7 @@ tools/preflight.sh --web   # ...plus the browser suites in real Chrome
 
 # run a single test
 .venv/bin/python -m pytest tests/test_v04_userland.py -k cards
-.venv/bin/python -m pytest tests/test_micropython_spike.py::test_name
+.venv/bin/python -m pytest tests/test_board_routing.py::test_name
 ```
 
 `.moy` console (host):
