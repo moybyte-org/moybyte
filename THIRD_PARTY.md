@@ -514,7 +514,7 @@ Installed from PyPI; never vendored, never redistributed by this repository.
 | Package | Used for | Licence |
 |---|---|---|
 | pytest | test suite (`dev`) | MIT |
-| pillow | GIF export in `tools/make_site_gifs.py` (`dev`) | MIT-CMU / HPND |
+| pillow | GIF export in `tools/make_site_gifs.py` and `tools/make_feature_tiles.py` (`dev`) | MIT-CMU / HPND |
 | pygame | the simulator window (`sim`), imported lazily | **LGPL-2.1** |
 | esptool | flashing a board (`device`); `tools/esptool_no_modem.py` monkeypatches its reset strategy at runtime | **GPL-2.0-or-later** |
 | pyserial | serial I/O (`device`) | BSD-3-Clause |

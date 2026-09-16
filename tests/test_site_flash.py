@@ -312,16 +312,7 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
     # flash, which is a missing feature. This set is the second kind, and it is
     # compared EXACTLY -- so an entry has to be deleted the day its card lands
     # (this test says so), and a board that silently loses its card is caught.
-    #
-    # Was EMPTY from 2026-08-29 (the Zero's card landed the day of its
-    # promotion) until 2026-09-06, when board N+1 arrived exactly as
-    # predicted: the Guition P4 builds in CI and has no site card yet. Its
-    # entry goes the day the card lands.
-    no_site_card = {
-        "guition_p4": "ported 2026-09-06, hands-off; the site card waits on "
-                      "the owner's orientation + touch-calibration verdicts "
-                      "(firmware/guition_jc8012p4a1c/README.md, open items)",
-    }
+    no_site_card = {}
     assert set(fetch.BOARDS) - set(rows) == set(), (
         "the site offers a board CI does not build: %s"
         % sorted(set(fetch.BOARDS) - set(rows)))
@@ -329,3 +320,27 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
         "matrix rows with no site card must be named above, with why -- "
         "unexplained: %s"
         % sorted((set(rows) - set(fetch.BOARDS)) - set(no_site_card)))
+
+
+def test_a_beta_board_says_so_and_why(site):
+    """A board that is not ready yet carries a `beta` reason: the card shows a
+    badge and the reason with its issue linked, and the dropdown marks it. A
+    ready board carries no key at all, and shows neither."""
+    _, html = site
+    betas = [b for b in build.BOARDS if "beta" in b]
+    assert betas, "no board is beta any more -- this check has stopped biting"
+    for board in build.BOARDS:
+        card = re.search(r'<li class="board" data-board="%s">(.*?)</li>' % board["id"],
+                         html, re.S).group(1)
+        option = re.search(r'<option value="%s">(.*?)</option>' % board["id"],
+                           html).group(1)
+        if "beta" in board:
+            assert board["beta"].strip()
+            assert '<span class="beta">beta</span>' in card
+            assert 'class="betanote"' in card
+            for issue in re.findall(r"#(\d+)", board["beta"]):
+                assert "/issues/%s" % issue in card
+            assert option.endswith("(beta)")
+        else:
+            assert 'class="beta"' not in card and "betanote" not in card
+            assert "(beta)" not in option

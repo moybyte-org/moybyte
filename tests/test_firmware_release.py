@@ -393,3 +393,17 @@ def test_board_names_reach_the_notes_as_markdown_not_html():
     # least one label must actually contain an entity, or this proves nothing.
     assert any("&" in b["label"] for b in build.BOARDS), (
         "no label carries an entity any more -- this check has stopped biting")
+
+
+def test_a_beta_board_is_named_beta_in_the_notes(tmp_path, monkeypatch):
+    """The release notes carry the same `beta` reason the flasher card shows."""
+    monkeypatch.setattr(publish, "existing_source", lambda *a: None)
+    boards = publish.boards_table()
+    body = publish.notes("firmware-beta", "unstable", boards, str(tmp_path),
+                         "https://example/")
+    for board in boards:
+        if "beta" in board:
+            assert "%s (beta)" % publish.label(board) in body
+            assert board["beta"] in body
+        else:
+            assert "%s (beta)" % publish.label(board) not in body

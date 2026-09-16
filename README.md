@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/moybyte-org/moybyte/actions/workflows/ci.yml/badge.svg)](https://github.com/moybyte-org/moybyte/actions/workflows/ci.yml)
 
-**An operating system for ESP32 boards. Its software is cartridges — games,
+**A small operating system for ESP32 boards. Its software is cartridges — games,
 wallpapers and tools — and you can open, change and run any of them on the board
 itself, with no computer attached.** The same source tree also runs as a PC
 simulator and in a browser.
@@ -55,31 +55,25 @@ Host and device are one codebase. Each firmware build freezes copies of the
 
 ## What's in it
 
-- **Shell** — a launcher, a Player and an Editor, all processes over a window
-  manager. Apps are fullscreen on small screens; on the ESP32-P4 boards they
-  are resizable windows, so a game can keep running next to its editor.
-- **Editors on the device** — seven tabs per project: Config, Blocks, Code,
-  Sprites, Map, Scene, Music. Autosave with undo and redo; a crash opens the code
-  at the failing line. Block programs compile to Python, and once you edit that
-  Python by hand the blocks become read-only.
-- **Apps** — Paint, Files, Notes, Storybook, Calc, Appearance, Settings. Drawings
-  and documents go into a shared file store that carts can read. Your own apps
-  can be carts ([`docs/app_api_v1.md`](docs/app_api_v1.md)).
-- **Python and Lua** — one verb table, the same in both languages
-  ([`docs/moy_cart_api.md`](docs/moy_cart_api.md)). On the boards, Lua carts run
-  on Lua 5.4 with a heap separate from MicroPython's.
-- **Graphics and sound** — drawing and the audio mixer are C (libmoy) on every
-  target, the simulator included.
-- **Storage** — carts are plain folders, on an SD card where the board uses one
-  and on internal flash otherwise. Every firmware image carries the built-in
-  carts and writes them out on first boot.
-- **Updates** — signed over-the-air updates on a stable and a beta channel, with
-  rollback if a new image doesn't boot.
-- **Browser** — the whole console runs in a browser tab. Served from a normal web
-  host, it keeps your carts in that browser. Served by a board over WiFi, it
-  edits that board's carts, behind a pairing PIN shown on the board. Dropping a
-  PICO-8 cart (`.p8` or `.p8.png`) on the page converts it to a Lua cart you can
-  open in the editors.
+Tap a tile to read about it.
+
+<table>
+<tr>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/windows.gif" width="192" height="144" alt="Three windows taking turns in front"><br><b>Windows and processes</b></summary>The launcher, the editor and your game are all processes under one window manager: fullscreen on a handheld, overlapping windows on a desktop board.</details></td>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/editors.gif" width="192" height="144" alt="An editor switching from code to a sprite to music"><br><b>Editors on the device</b></summary>Code, blocks, sprites, maps, scenes and music, on the board itself. Autosave with undo, and a crash opens the code at the failing line.</details></td>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/apps.gif" width="192" height="144" alt="A page turning into a calculator, then a canvas"><br><b>Apps</b></summary>Paint, Files, Notes, Storybook, Calc and Settings. Drawings and documents go into a shared store that carts can read. Your own apps can be carts too (<a href="docs/app_api_v1.md">app API</a>).</details></td>
+</tr>
+<tr>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/languages.gif" width="192" height="144" alt="A snake and a moon meeting to make a star"><br><b>Python and Lua</b></summary>Write carts in either language. The verbs are the same in both, so a cart ports line by line. See <a href="docs/moy_cart_api.md">the verb table</a>.</details></td>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/multiplayer.gif" width="192" height="144" alt="A ball crossing between two handheld consoles"><br><b>Local multiplayer</b></summary>Two consoles in the same room find each other over ESP-NOW and play one game on two screens. No router, no cables.</details></td>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/pico8.gif" width="192" height="144" alt="A PICO-8 cart coming apart into its pieces and becoming a folder"><br><b>PICO-8 import</b></summary>Drop a <code>.p8</code> or <code>.p8.png</code> cart on the browser console and it becomes a Lua cart — art, map, sound and code — that opens in the editors.</details></td>
+</tr>
+<tr>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/folders.gif" width="192" height="144" alt="A folder dropping into a slot and a new cart appearing on the shelf"><br><b>Carts are folders</b></summary>A manifest, a script, sprites, a map and sounds. There is no build step: a folder in the cart store is a cart on the launcher.</details></td>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/updates.gif" width="192" height="144" alt="A chip taking an update, glitching, and rewinding"><br><b>Updates</b></summary>Signed over-the-air updates on a stable and a beta channel. If a new image doesn’t boot, the board goes back to the one before.</details></td>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/browser.gif" width="192" height="144" alt="A console's screen lifting off into a browser window"><br><b>In the browser</b></summary>The same console runs in a tab and keeps your carts there. A board can also serve it over WiFi, so a phone or laptop edits that board’s carts.</details></td>
+</tr>
+</table>
 
 ## Try it
 

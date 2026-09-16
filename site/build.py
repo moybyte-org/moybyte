@@ -21,7 +21,7 @@ The page also FLASHES a board over USB (site/flash.js, esptool-js over Web
 Serial). The images it writes are CI builds pulled down beforehand:
 
     python3 tools/fetch_ci_firmware.py --release firmware-latest \
-        --out dist/ci-firmware/stable      # -> stable/{tdeck,p4,guition_s3}/
+        --out dist/ci-firmware/stable      # -> stable/<board>/
     python3 tools/fetch_ci_firmware.py --release firmware-beta \
         --out dist/ci-firmware/beta        # the picker's other option
 
@@ -37,6 +37,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -90,10 +91,11 @@ TIERS = [
 #
 #   tdeck    esptool --chip esp32s3 write_flash 0x0 <full-dio image>
 #   p4       esptool --chip esp32p4 write_flash 0x2000 moybyte_p4.bin
+#   guition_p4  esptool --chip esp32p4 write_flash 0x2000 moybyte_guition_p4.bin
 #   guition  esptool --chip esp32s3 write_flash 0x0 moybyte_guition_s3.bin
 #   zero     esptool --chip esp32s3 write_flash 0x0 moybyte_zero.bin
 #
-# All four write a MERGED image (bootloader + partition table + app) whose header
+# Every one writes a MERGED image (bootloader + partition table + app) whose header
 # already carries the flash mode/size/frequency the build baked in, which is why
 # the flasher passes "keep" for all of them rather than re-deriving them here. The
 # partition tail (the VFS, and on the T-Deck otadata) is not part of the image,
@@ -101,6 +103,10 @@ TIERS = [
 #
 # `images` is a preference list: the first name present in the board's artifact
 # folder is the one published.
+#
+# `beta`, on a board that has it, is why that board is not ready yet: plain text
+# (the release notes reuse it as Markdown), with `#N` linked to the issue on the
+# page. A ready board has no `beta` key.
 #
 # HOW THE BOARD IS RESET IS NOT DECLARED HERE. `reset` (into the ROM loader) and
 # `after` (out of it) are hardware facts, and the board that has them is the one
@@ -151,6 +157,28 @@ BOARDS = [
                   "myself (hold <b>BOOT</b>, tap <b>RESET</b>, release BOOT). Try "
                   "this if connecting fails.",
         "cli": "make firmware-flash-p4 PORT=/dev/ttyACM0",
+    },
+    {
+        # The Guition JC8012P4A1C: the Waveshare's silicon over the P4's own
+        # USB-Serial/JTAG, which esptool's default reset drives in and out.
+        "id": "guition_p4",
+        "label": "Guition JC8012P4A1C 10.1&Prime;",
+        "chip": "ESP32-P4",
+        "images": ("moybyte_guition_p4.bin",),
+        "offset": 0x2000,
+        "baud": 921600,
+        "usb_otg": True,                    # native USB, like the Guition S3
+        "done": "Done &mdash; the board is rebooting into this build.",
+        "prep": "Plug into the board&rsquo;s USB-C port. It resets into the "
+                "loader and back on its own.",
+        "erase": "Erase the whole chip first. This board keeps its carts on "
+                 "internal flash, so this deletes them and their saves.",
+        "manual": "Skip the reset &mdash; I have put the board in download mode "
+                  "myself (hold <b>BOOT</b>, tap <b>RST</b>, release BOOT). Try "
+                  "this if connecting fails.",
+        "cli": "make firmware-flash-guition-p4 PORT=/dev/ttyACM0",
+        "beta": "Fast games make the whole panel blink for a frame (#220), and "
+                "WiFi doesn't work on this board yet.",
     },
     {
         # The Guition JC3248W535 (#202, ported 2026-08-18): the third board,
@@ -261,39 +289,50 @@ for _board in BOARDS:
 del _board
 
 
-# The page's CONTENT mirrors README.md's "What's in it" -- same claims, same
-# order. Keep them in step: a feature that only exists in one of them is a bug.
+# The page's CONTENT mirrors README.md's "What's in it" -- same tiles, same
+# claims, same order. Keep them in step: a feature that only exists in one of
+# them is a bug. Each id names a tile tools/make_feature_tiles.py draws.
 FEATURES = [
-    ("Shell",
-     "A launcher, a Player and an Editor, all processes over a window manager. "
-     "Apps are fullscreen on small screens; on the ESP32-P4 boards they are "
-     "resizable windows, so a game can keep running next to its editor."),
-    ("Editors on the device",
-     "Seven tabs per project: config, blocks, code, sprites, map, scene, music. "
-     "Autosave with undo and redo. Block programs compile to Python, and once "
-     "you edit that Python by hand the blocks become read-only."),
-    ("Apps",
-     "Paint, Files, Notes, Storybook, Calc, Appearance, Settings. Drawings and "
-     "documents go into a shared file store that carts can read."),
-    ("Python and Lua",
-     "One verb table, the same in both languages. On the boards, Lua carts run "
-     "on Lua 5.4 with a heap separate from MicroPython&rsquo;s."),
-    ("Graphics and sound",
-     "64 indexed colours on a 320&times;240 cart screen everywhere. Drawing and "
-     "the audio mixer are C on every target."),
-    ("Storage",
-     "Carts are plain folders, on an SD card where the board uses one and on "
-     "internal flash otherwise. Every firmware image carries the built-in carts "
-     "and writes them out on first boot."),
-    ("Updates",
-     "Signed over-the-air updates on a stable and a beta channel, with rollback "
-     "if a new image doesn&rsquo;t boot."),
-    ("In the browser",
-     "The console on this page keeps your carts in this browser. Served by a "
-     "board over WiFi, it edits that board&rsquo;s carts instead, behind a "
-     "pairing PIN. Drop a <b>PICO-8</b> cart on it and it converts to a Lua "
-     "cart you can open in the editors."),
+    ("windows", "Windows and processes",
+     "The launcher, the editor and your game are all processes under one window "
+     "manager: fullscreen on a handheld, overlapping windows on a desktop board."),
+    ("editors", "Editors on the device",
+     "Code, blocks, sprites, maps, scenes and music, on the board itself. "
+     "Autosave with undo, and a crash opens the code at the failing line."),
+    ("apps", "Apps",
+     "Paint, Files, Notes, Storybook, Calc and Settings. Drawings and documents "
+     "go into a shared store that carts can read."),
+    ("languages", "Python and Lua",
+     "Write carts in either language. The verbs are the same in both, so a cart "
+     "ports line by line."),
+    ("multiplayer", "Local multiplayer",
+     "Two consoles in the same room find each other over ESP-NOW and play one "
+     "game on two screens. No router, no cables."),
+    ("pico8", "PICO-8 import",
+     "Drop a <code>.p8</code> or <code>.p8.png</code> cart on the browser "
+     "console and it becomes a Lua cart &mdash; art, map, sound and code "
+     "&mdash; that opens in the editors."),
+    ("folders", "Carts are folders",
+     "A manifest, a script, sprites, a map and sounds. There is no build step: "
+     "a folder in the cart store is a cart on the launcher."),
+    ("updates", "Updates",
+     "Signed over-the-air updates on a stable and a beta channel. If a new image "
+     "doesn&rsquo;t boot, the board goes back to the one before."),
+    ("browser", "In the browser",
+     "The same console runs in a tab and keeps your carts there. A board can also "
+     "serve it over WiFi, so a phone or laptop edits that board&rsquo;s carts."),
 ]
+FEATURE_SRC = os.path.join(ROOT, "docs", "media", "features")
+TILE_W = 256
+
+
+def tile_frames(name):
+    """Frames in a tile's mask sheet, read from the PNG header's width."""
+    import struct
+    with open(os.path.join(FEATURE_SRC, name + ".png"), "rb") as f:
+        head = f.read(24)
+    return struct.unpack(">I", head[16:20])[0] // TILE_W
+
 
 TARGETS = [
     ("LilyGO T-Deck Plus", "ESP32-S3",
@@ -492,8 +531,14 @@ def flash_cards(cards):
     out = []
     for c in cards:
         fw = c["fw"]
-        li = ['<li class="board" data-board="%s"><h3>%s</h3><p class="chip">%s</p>'
-              % (c["id"], c["label"], c["chip"])]
+        li = ['<li class="board" data-board="%s"><h3>%s%s</h3><p class="chip">%s</p>'
+              % (c["id"], c["label"],
+                 ' <span class="beta">beta</span>' if c.get("beta") else "",
+                 c["chip"])]
+        if c.get("beta"):
+            li.append('<p class="betanote"><b>Beta:</b> %s</p>'
+                      % re.sub(r"#(\d+)", r'<a href="%s/issues/\1">#\1</a>' % REPO,
+                               c["beta"]))
         if not fw:
             li.append('<p class="fwmeta">no published build</p>'
                       '<p>CI has not left a live image for this board &mdash; the '
@@ -571,11 +616,18 @@ def page(pal, has_player, cards):
         '      <li><i class="%s"></i><b>%s</b> %s</li>' % (k, name, note)
         for k, name, note in STATUS)
     features = "\n".join(
-        "      <li><h3>%s</h3><p>%s</p></li>" % (t, b) for t, b in FEATURES)
+        '      <li><details name="feat"><summary>'
+        '<span class="art" aria-hidden="true" '
+        'style="--n:%d;--src:url(media/features/%s.png)"></span>'
+        '<h3>%s <i aria-hidden="true">+</i></h3></summary><p><span>%s</span></p></details></li>'
+        % (tile_frames(tid), tid, title, desc) for tid, title, desc in FEATURES)
     targets = "\n".join(
         '      <li><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>' % (t, chip, b)
         for t, chip, b in TARGETS)
     boards = flash_cards(cards)
+    device_options = "\n".join(
+        '      <option value="%s">%s%s</option>'
+        % (c["id"], c["label"], " (beta)" if c.get("beta") else "") for c in cards)
     # One manifest entry per BOARD, carrying every build the picker offers.
     # The default build's fields stay at the top level so a reader that
     # predates the picker still finds what it expects.
@@ -599,8 +651,8 @@ def page(pal, has_player, cards):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAhUlEQVR42mNgGAW4wX8y8dB3ANig5rI5ZGFqOGTAHIBi8aHDx1HwyHPAgEfBcHAAydl0cDrg/8cXKJiQOCVRNLgdgC6PS3z4OYDaeOg5gJDDaB4FA+4AQgUM3dLAgDtg5OaCEeUAFIfUqQZTFZPSUBncDsCVHalh8aBxAKGuGbXUDw4HAAAJtsp8ecvLrQAAAABJRU5ErkJggg==">
-<title>moybyte &mdash; an operating system for ESP32 boards</title>
-<meta name="description" content="An operating system for ESP32 boards. Its software is cartridges you can open, change and run on the board itself. Try it in the browser.">
+<title>moybyte &mdash; a small operating system for ESP32 boards</title>
+<meta name="description" content="A small operating system for ESP32 boards. Its software is cartridges you can open, change and run on the board itself. Try it in the browser.">
 <style>
 /* Every colour below is MOY64, generated from runtime/palette.py -- the site
    cannot drift from the system's own palette. Roles are named so the light
@@ -622,6 +674,7 @@ def page(pal, has_player, cards):
 }
 %(font)s
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 html{-webkit-text-size-adjust:100%%;scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--body);font:16px/1.62 var(--sans)}
 .wrap{width:100%%;max-width:var(--w);margin:0 auto;padding:0 24px}
@@ -732,16 +785,56 @@ body.noscroll{overflow:hidden}
 .cards li{background:var(--surface);border:1px solid var(--line);padding:16px 18px}
 .cards h3{margin:0 0 7px;font-size:15px;color:var(--accent)}
 .cards p{margin:0;font-size:14px;color:var(--body)}
+/* --- feature tiles: one-colour mask sheets, stepped through by CSS ---------- */
+/* Each sheet is drawn at its display size, so nothing is resampled, and its
+   colour is the accent, so it follows the theme. A tapped tile shows its text
+   over the art; the text lets taps through, so tapping again closes it. */
+.feats{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));
+  margin:24px 0 0;padding:0;list-style:none}
+.feats li{background:var(--surface);border:1px solid var(--line)}
+.feats details{position:relative;height:100%%}
+.feats summary{list-style:none;cursor:pointer;display:block;padding:16px 16px 12px}
+.feats summary::-webkit-details-marker{display:none}
+.feats summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.feats .art{display:block;width:256px;height:192px;margin:0 auto;
+  background:var(--accent);transition:opacity .15s;
+  -webkit-mask-image:var(--src);mask-image:var(--src);
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;
+  -webkit-mask-size:calc(256px * var(--n)) 192px;mask-size:calc(256px * var(--n)) 192px;
+  -webkit-mask-position:0 0;mask-position:0 0;
+  animation:tile calc(var(--n) * 100ms) steps(var(--n)) infinite}
+@keyframes tile{to{-webkit-mask-position:calc(-256px * var(--n)) 0;
+  mask-position:calc(-256px * var(--n)) 0}}
+@media (prefers-reduced-motion:reduce){.feats .art{animation:none}}
+.feats h3{margin:12px 0 0;font-size:15px;display:flex;justify-content:space-between;
+  align-items:center}
+.feats h3 i{font:600 16px/1 var(--mono);font-style:normal;color:var(--muted);
+  transition:transform .15s}
+.feats details[open] h3 i{transform:rotate(45deg)}
+.feats details > p{position:absolute;left:20px;right:20px;top:16px;height:192px;margin:0;
+  display:flex;align-items:center;font-size:15px;color:var(--ink);pointer-events:none}
+.feats details[open] .art{opacity:.05}
 .cards .chip{display:inline-block;margin:0 0 7px;padding:2px 8px;font:11px/1.5 var(--mono);
   letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
   background:var(--bg);border:1px solid var(--line)}
 /* --- the flasher ----------------------------------------------------------- */
 /* One card per board: what CI built, how to get the board into the loader, and
    the button that writes it. Everything below the button is progress reporting,
-   hidden until a flash starts. */
+   hidden until a flash starts. The device dropdown shows one card at a time;
+   without script every card shows. */
+.devpick{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:22px 0 0;
+  font-size:14px;color:var(--muted)}
+.devpick select{font:15px var(--sans);color:var(--ink);background:var(--surface);
+  border:1px solid var(--line);padding:8px 10px;min-width:min(20rem,100%%)}
+.cards.boards{grid-template-columns:minmax(0,40rem)}
 .boards li{display:flex;flex-direction:column}
 /* The column stretches its children, and a full-width chip reads as a field. */
 .boards .chip{align-self:flex-start}
+.boards h3 .beta{margin-left:6px;padding:1px 6px;vertical-align:2px;
+  font:600 11px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--wip);border:1px solid var(--wip)}
+.betanote{margin:0 0 10px;font-size:13px;color:var(--wip)}
+.betanote a{color:inherit}
 .boards pre{margin:12px 0 0;font-size:12px}
 .fwmeta{margin:0 0 9px;font:11px/1.7 var(--mono);color:var(--muted)}
 .fwmeta a{color:var(--muted)}
@@ -796,7 +889,7 @@ footer a{margin-right:4px}
   <div class="hero">
     <div>
       <p class="eyebrow">Source-available firmware &middot; FSL-1.1-MIT</p>
-      <h1 class="px">An <em>operating system</em> for ESP32 boards.</h1>
+      <h1 class="px">A small <em>operating system</em> for ESP32 boards.</h1>
       <p class="lead">Its software is cartridges &mdash; games, wallpapers and
         tools &mdash; and you can open, change and run any of them on the board
         itself, with no computer attached.</p>
@@ -843,12 +936,17 @@ footer a{margin-right:4px}
 
 <section id="flash"><div class="wrap">
   <h2>Put it on a board</h2>
-  <p class="slead">Plug a board in over USB and flash the latest release from this
-    page. Needs Chrome, Edge or Opera on a desktop; Firefox and Safari have no
-    Web Serial.</p>
+  <p class="slead">Pick your device, plug it in over USB, and flash the latest
+    release from this page. Needs Chrome, Edge or Opera on a desktop; Firefox and
+    Safari have no Web Serial.</p>
   <p class="warnbox" id="fw-nowebserial" hidden>This browser has no Web Serial, so
     the flash buttons are off. Download the image instead and write it with
     <code>esptool</code>, at the offset on its card.</p>
+  <label class="devpick"><span>Your device</span>
+    <select id="device">
+      <option value="">Pick one&hellip;</option>
+%(device_options)s
+    </select></label>
   <ul class="cards boards">
 %(boards)s
   </ul>
@@ -856,7 +954,8 @@ footer a{margin-right:4px}
 
 <section id="in"><div class="wrap">
   <h2>What's in it</h2>
-  <ul class="cards">
+  <p class="slead">Tap a tile to read about it.</p>
+  <ul class="feats">
 %(features)s
   </ul>
 </div></section>
@@ -953,6 +1052,18 @@ document.addEventListener("keydown", function (e) {
   if (e.key === "Escape" && stage.classList.contains("big")) collapse();
 });
 show(tabs[0]);
+
+// The flash section's device dropdown: one board card at a time. The browser
+// keeps the choice across a reload, so apply whatever it restored.
+var device = document.getElementById("device");
+var boardCards = [].slice.call(document.querySelectorAll(".boards .board"));
+var flashHint = document.querySelector("#flash .hint");
+function pickDevice() {
+  boardCards.forEach(function (c) { c.hidden = c.dataset.board !== device.value; });
+  if (flashHint) flashHint.hidden = !device.value;
+}
+device.addEventListener("change", pickDevice);
+pickDevice();
 </script>
 %(flash_js)s
 </body>
@@ -960,7 +1071,7 @@ show(tabs[0]);
 """ % {
         "tokens": tokens, "font": font_face(), "tabs": tabs, "missing": missing,
         "status": status, "features": features, "mark": moy_mark(pal),
-        "targets": targets, "boards": boards, "flash_js": flash_js,
+        "targets": targets, "boards": boards, "device_options": device_options, "flash_js": flash_js,
         "flash_hint": flash_hint,
     }
 
@@ -1016,6 +1127,9 @@ def main():
     else:
         print("!! no firmware images under %s -- the page will say so "
               "(build them with tools/fetch_ci_firmware.py)" % args.firmware)
+
+    shutil.copytree(FEATURE_SRC, os.path.join(out, "media", "features"),
+                    ignore=shutil.ignore_patterns("*.gif"))
 
     gif = os.path.join(HERE, "hero.gif")
     if not os.path.exists(gif):
