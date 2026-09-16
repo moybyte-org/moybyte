@@ -4,9 +4,16 @@
 Mirrors the moy-spec site generator's rule: the CANONICAL things live where they
 live, and this only assembles. The playable player is the real web runner build
 (firmware/web_runner/dist), copied in under player/ -- so what a visitor plays is
-the same bundle the repo ships, at the commit they are reading. The page's colours
-come from runtime/palette.py's MOY64, so the site cannot drift from the system's
-own palette.
+the same bundle the repo ships, at the commit they are reading. The page's ACCENTS
+come from runtime/palette.py's MOY64, so the colour the site spends cannot drift
+from the system's own palette.
+
+Since 2026-09 the page is the PAPER scheme: a light document set in Host Grotesk
+and JetBrains Mono (site/fonts/, OFL -- THIRD_PARTY.md), with the console's own
+8x8 pixel face kept for the wordmark and nothing else. It replaced a dark,
+MOY64-yellow, pixel-headline page that read as a game rather than as an operating
+system. The <style> block's header records why each part of that is the way it
+is; the short version is that the PIXELS ARE THE ARTEFACT, not the frame.
 
     python3 site/build.py                  # -> _site/
     python3 site/build.py --out /tmp/x     # somewhere else
@@ -541,17 +548,43 @@ def size_mb(n):
     return "%.1f MB" % (n / 1048576.0)
 
 
+# The page's two text faces, served from site/fonts/ (SIL OFL 1.1, and
+# THIRD_PARTY.md records both). They are the 2026-09 paper scheme's actual
+# content: a grotesk for everything that is a sentence, a monospace for
+# everything that is a label. Latin subsets of the variable builds, ~52 KB the
+# pair -- small enough to ship, too big to inline into every page load, so
+# unlike Petme128 they are files.
+#
+# Petme128 stays INLINED, because it is one word (the wordmark) and a separate
+# request for a wordmark that paints in the first frame is the wrong trade.
+WEBFONTS = (
+    # file, family, weight range
+    ("host-grotesk-latin-var.woff2", "Host Grotesk", "300 800"),
+    ("jetbrains-mono-latin-var.woff2", "JetBrains Mono", "400 700"),
+)
+
+
 def font_face():
-    """The system's own font as the display face. site/petme128.woff2 is the
-    petme128 8x8 glyph set (MicroPython, MIT -- THIRD_PARTY.md) rendered as a
-    webfont; inlined so the page stays one self-contained file."""
+    """The @font-face block: Petme128 inlined, the two text faces by URL.
+
+    site/petme128.woff2 is the petme128 8x8 glyph set (MicroPython, MIT --
+    THIRD_PARTY.md) rendered as a webfont. It sets the wordmark and nothing
+    else since the paper scheme landed.
+    """
     import base64
+    out = []
+    for name, family, wght in WEBFONTS:
+        if os.path.exists(os.path.join(HERE, "fonts", name)):
+            out.append("@font-face{font-family:'%s';font-style:normal;"
+                       "font-weight:%s;font-display:swap;"
+                       "src:url(fonts/%s) format('woff2')}"
+                       % (family, wght, name))
     blob = os.path.join(HERE, "petme128.woff2")
-    if not os.path.exists(blob):
-        return ""
-    b64 = base64.b64encode(open(blob, "rb").read()).decode("ascii")
-    return ("@font-face{font-family:'Petme128';font-display:swap;"
-            "src:url(data:font/woff2;base64,%s) format('woff2')}" % b64)
+    if os.path.exists(blob):
+        b64 = base64.b64encode(open(blob, "rb").read()).decode("ascii")
+        out.append("@font-face{font-family:'Petme128';font-display:swap;"
+                   "src:url(data:font/woff2;base64,%s) format('woff2')}" % b64)
+    return "".join(out)
 
 
 # The at-a-glance status list: the honest state of the machine, as data. Dots are
@@ -693,104 +726,155 @@ def page(pal, has_player, cards):
 <title>moybyte &mdash; an operating system for ESP32 boards</title>
 <meta name="description" content="An operating system that turns an ESP32 board into a small general-purpose computer. The software is cartridges -- open any of them, change it, run it, on the board itself. Try it here, no install.">
 <style>
-/* Every colour below is MOY64, generated from runtime/palette.py -- the site
-   cannot drift from the system's own palette. Roles are named so the light
-   scheme differs only in the block that follows. */
+/* ---------------------------------------------------------------------------
+   THE PAPER SCHEME (2026-09).
+
+   The page used to be the console: navy ground, MOY64 yellow, the 8x8 pixel
+   face carrying the headlines. It read as a game, and the thing being sold is
+   an operating system -- so the chrome is now a technical document and the
+   PIXELS ARE THE ARTEFACT, not the frame. Paper ground, one grotesk, a
+   monospace for anything that is a label rather than a sentence, hairline
+   rules instead of filled boxes, and colour spent on roughly three words a
+   screen. The pixel face survives in exactly one place: the wordmark.
+
+   Light is now the DEFAULT and dark is the variant, which is the other half of
+   the same decision -- a dark page with saturated accents is the gaming cue,
+   whatever the accents are.
+
+   The accents are still MOY64 (--p2 wine, --p14 pink, generated from
+   runtime/palette.py), so the page cannot drift from the system's palette. The
+   neutrals are not: paper, ink and rule are a document's greys and there is no
+   64-colour game palette entry for "hairline". */
 :root{%(tokens)s
-  --bg:#05070d; --surface:#090d19; --raised:#0d1325; --line:#141e3a;
-  --ink:var(--p7); --body:var(--p6); --muted:#828899; --link:var(--p12);
-  --accent:var(--p10); --ok:var(--p11); --wip:var(--p9); --warn:var(--p8);
-  --pri-ink:var(--p1);
-  --w:70rem;
-  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --paper:#fdfcfb; --sunk:#f5f3f0; --raised:#ffffff;
+  --ink:#1b1b1d; --body:#4a4b52; --muted:#84858d;
+  --line:#e4e1dc; --hair:#d6d2cc;
+  --accent:var(--p2); --link:var(--p2);
+  --ok:#0f7a52; --wip:#9a6a00; --warn:#b4143c;
+  --pri-ink:var(--paper);
+  --w:68rem;
+  --sans:'Host Grotesk',ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,
+         "Helvetica Neue",Arial,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,
+         "Liberation Mono",monospace;
 }
-@media (prefers-color-scheme: light){
-  :root{--bg:#fff9f5; --surface:#fff4ec; --raised:#fffcfa; --line:#b3a9a1;
-        --ink:var(--p1); --body:#2f323a; --muted:#4d525e; --link:#175f8c;
-        --accent:#74224c; --ok:#007446; --wip:#a86c00; --warn:#c2003b;
-        --pri-ink:#fff9f5;}
+@media (prefers-color-scheme: dark){
+  :root{--paper:#121214; --sunk:#181819; --raised:#1b1b1e;
+        --ink:#f3f1ee; --body:#b6b4b0; --muted:#83817e;
+        --line:#2a2a2d; --hair:#333336;
+        --accent:var(--p14); --link:var(--p14);
+        --ok:#3fbe86; --wip:#d99a1f; --warn:#f0577f;
+        --pri-ink:#121214;}
 }
 %(font)s
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 html{-webkit-text-size-adjust:100%%;scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--body);font:16px/1.62 var(--sans)}
-.wrap{width:100%%;max-width:var(--w);margin:0 auto;padding:0 24px}
-a{color:var(--link);text-decoration-thickness:1px;text-underline-offset:2px}
-h1,h2,h3{color:var(--ink);line-height:1.25}
-/* --- pixel-native display type: the system's own font ---------------------- */
+body{margin:0;background:var(--paper);color:var(--body);
+  font:17px/1.62 var(--sans);font-weight:380;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.wrap{width:100%%;max-width:var(--w);margin:0 auto;padding:0 28px}
+a{color:var(--link);text-decoration-thickness:1px;text-underline-offset:3px;
+  text-decoration-color:color-mix(in srgb,currentColor 35%%,transparent)}
+a:hover{text-decoration-color:currentColor}
+h1,h2,h3{color:var(--ink);font-weight:500;letter-spacing:-.02em;line-height:1.1;
+  text-wrap:balance}
+/* --- the one place the pixel face is still allowed --------------------------
+   It is the mark, not the voice. Everything it used to set is grotesk now. */
 .px{font-family:'Petme128',var(--mono);letter-spacing:.02em}
+/* --- mono micro-labels ------------------------------------------------------
+   Every label on the page is one of these: an eyebrow, a section kicker, a
+   chip, a field name. Uppercase and tracked-out so a label is never mistaken
+   for a sentence. */
+.eyebrow,.k,.kick,.chip,.fwmeta,.tab span{font-family:var(--mono)}
+.eyebrow,.k{font-size:11px;line-height:1;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--muted);margin:0 0 18px;font-weight:500}
 /* --- top bar --------------------------------------------------------------- */
-nav{position:sticky;top:0;z-index:9;background:var(--bg);border-bottom:1px solid var(--line)}
-nav .wrap{display:flex;align-items:center;gap:18px;height:52px}
-nav .brand{font-size:19px;color:var(--ink);text-decoration:none}
+nav{position:sticky;top:0;z-index:9;background:color-mix(in srgb,var(--paper) 88%%,transparent);
+  backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:22px;height:60px}
+nav .brand{font-size:18px;color:var(--ink);text-decoration:none;display:flex;
+  align-items:center}
 nav .brand em{font-style:normal;color:var(--accent)}
 nav .sp{flex:1}
-nav a.l{color:var(--body);text-decoration:none;font-size:14px}
-nav a.l:hover{color:var(--accent)}
-/* Narrow: the section anchors are one scroll away anyway, and keeping them
-   pushed the GitHub link off the edge. */
-@media (max-width:640px){nav a.l:not(:last-of-type){display:none}}
-/* --- hero ------------------------------------------------------------------ */
-.hero{display:grid;grid-template-columns:1.3fr .7fr;gap:44px;
-  align-items:start;padding:52px 0 8px}
-@media (max-width:900px){.hero{grid-template-columns:1fr;gap:28px;padding-top:34px}}
-.eyebrow{font:12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
-  color:var(--muted);margin:0 0 14px}
-h1{margin:0;font-size:clamp(24px,3.2vw,36px);line-height:1.35}
+nav a.l{color:var(--muted);text-decoration:none;font:11px/1 var(--mono);
+  font-weight:500;letter-spacing:.09em;text-transform:uppercase;
+  transition:color .15s}
+nav a.l:hover{color:var(--ink)}
+@media (max-width:760px){nav a.l:not(:last-of-type){display:none}}
+/* --- hero ------------------------------------------------------------------
+   One column at desk width, because the status rail beside a 60px headline
+   fought it for the eye. The rail now sits UNDER the buttons as a ruled strip,
+   which is also where a reader looks for "state of the thing". */
+.hero{padding:104px 0 0}
+h1{margin:0;font-size:clamp(40px,5.6vw,72px);line-height:1.02;
+  letter-spacing:-.035em;max-width:16ch}
 h1 em{font-style:normal;color:var(--accent)}
-.lead{font-size:19px;color:var(--ink);margin:18px 0 0;max-width:36em}
-.sub{margin:14px 0 0;max-width:38em}
-.btns{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 0}
-.btn{display:inline-block;padding:9px 16px;border:1px solid var(--line);
-  background:var(--surface);color:var(--ink);text-decoration:none;font-size:15px}
-.btn:hover{border-color:var(--accent);color:var(--accent)}
-.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--pri-ink);font-weight:600}
-.btn.pri:hover{filter:brightness(1.08);color:var(--pri-ink)}
-/* --- the machine, shown rather than tabulated ------------------------------ */
-/* The recording is 1024 wide and it is PIXEL ART: shrink it and the 8px glyphs
-   turn to mush, so the shot gets its own full-width band and is capped at
-   exactly its native size (1024 + the bezel's 2x10 padding + borders). Below
-   that width it has to scale, and a non-integer downscale looks better smoothed
-   than snapped -- hence the image-rendering flip. */
-.shot{margin:40px auto 0}
-.screen{margin:0 auto;max-width:1046px}
-.bezel{background:var(--surface);border:1px solid var(--line);padding:10px 10px 26px;
-  position:relative}
-.bezel:after{content:"";position:absolute;left:50%%;bottom:9px;transform:translateX(-50%%);
-  width:34px;height:4px;background:var(--line)}
-.bezel img{display:block;width:100%%;image-rendering:pixelated;border:1px solid var(--line)}
-@media (max-width:1100px){.bezel img{image-rendering:auto}}
-.screen figcaption{margin:11px 2px 0;color:var(--muted);font-size:13px;max-width:74ch}
-/* --- the mascot ------------------------------------------------------------ */
-.moy{image-rendering:pixelated;vertical-align:-4px}
-nav .moy{width:22px;height:22px;margin-right:9px}
-/* --- status: a column beside the hero copy --------------------------------- */
-.k{font:12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
-  color:var(--muted);margin:0 0 12px}
-.status{display:flex;flex-direction:column;gap:8px;list-style:none;padding:0;margin:0}
-@media (max-width:900px){.status{flex-direction:row;flex-wrap:wrap}}
-.status li{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);
-  background:var(--surface);border:1px solid var(--line);padding:6px 11px}
-.status b{color:var(--ink);font-weight:600}
-.status i{flex:0 0 7px;width:7px;height:7px;display:inline-block}
+.lead{font-size:21px;line-height:1.5;color:var(--ink);margin:30px 0 0;text-wrap:pretty;
+  max-width:44ch;font-weight:380;letter-spacing:-.011em}
+.sub{margin:20px 0 0;max-width:62ch;color:var(--body);font-size:16px}
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin:36px 0 0}
+.btn{display:inline-block;padding:11px 19px;border:1px solid var(--hair);
+  background:transparent;color:var(--ink);text-decoration:none;
+  font:14px/1.3 var(--sans);font-weight:500;letter-spacing:-.005em;
+  transition:border-color .15s,color .15s,background .15s}
+.btn:hover{border-color:var(--ink)}
+.btn.pri{background:var(--ink);border-color:var(--ink);color:var(--pri-ink)}
+.btn.pri:hover{background:var(--accent);border-color:var(--accent);
+  color:var(--paper)}
+/* --- status: a ruled strip, one cell per claim ------------------------------ */
+.rail{margin:56px 0 0;border-top:1px solid var(--ink)}
+.rail .k{margin:14px 0 16px}
+.status{display:grid;gap:0 40px;list-style:none;padding:0;margin:0;
+  grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+.status li{display:flex;align-items:baseline;gap:9px;font-size:14px;
+  color:var(--muted);padding:11px 0;border-top:1px solid var(--line)}
+.status b{color:var(--ink);font-weight:500;white-space:nowrap}
+.status i{flex:0 0 6px;width:6px;height:6px;display:inline-block;
+  border-radius:50%%;transform:translateY(-1px)}
 .status .ok{background:var(--ok)} .status .wip{background:var(--wip)}
 .status .warn{background:var(--warn)}
-/* --- sections -------------------------------------------------------------- */
-section{padding:52px 0 0}
-section > .wrap > h2{margin:0;font-size:clamp(22px,3vw,30px)}
-.slead{margin:10px 0 0;max-width:60ch;color:var(--muted)}
+/* --- the shot -------------------------------------------------------------- */
+/* The recording is 1024 wide and it is PIXEL ART: shrink it and the 8px glyphs
+   turn to mush, so the shot gets its own band and is capped at its native size.
+   Below that width a non-integer downscale looks better smoothed than snapped
+   -- hence the image-rendering flip. The bezel is now a hairline frame on the
+   sunk ground; the moulded chin it used to draw was the handheld-console cue. */
+.shot{margin:64px auto 0}
+.screen{margin:0 auto;max-width:1046px}
+.bezel{background:var(--sunk);border:1px solid var(--line);padding:10px}
+.bezel img{display:block;width:100%%;image-rendering:pixelated}
+@media (max-width:1100px){.bezel img{image-rendering:auto}}
+.screen figcaption{margin:14px 2px 0;color:var(--muted);font-size:14px;
+  max-width:72ch}
+/* --- the mascot ------------------------------------------------------------ */
+.moy{image-rendering:pixelated;vertical-align:-4px}
+nav .moy{width:20px;height:20px;margin-right:10px}
+/* --- sections ---------------------------------------------------------------
+   Each opens on a rule and a lowercase mono kicker, so the page reads as a
+   document with numbered parts rather than a stack of panels. */
+section{padding:104px 0 0;scroll-margin-top:60px}
+section > .wrap > h2{margin:0;font-size:clamp(30px,3.9vw,46px);
+  letter-spacing:-.03em;max-width:18ch}
+.kick{margin:0 0 20px;padding:18px 0 0;border-top:1px solid var(--ink);
+  font-size:11px;line-height:1;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--accent);font-weight:500}
+.slead{margin:20px 0 0;max-width:64ch;color:var(--body)}
 /* --- the player ------------------------------------------------------------ */
-.tabs{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 0}
-.tab{appearance:none;cursor:pointer;text-align:left;font:inherit;padding:9px 15px;
-  background:var(--surface);color:var(--muted);border:1px solid var(--line)}
-.tab b{display:block;font-size:14px;color:var(--ink)}
-.tab span{display:block;font:12px/1.5 var(--mono);color:var(--muted)}
-.tab:hover{border-color:var(--link)}
-.tab.on{border-color:var(--accent)}
-.tab.on b{color:var(--accent)}
-.stage{margin:12px 0 0;background:#000;border:1px solid var(--line);overflow:hidden;
-  position:relative}
+.tabs{display:flex;gap:0;flex-wrap:wrap;margin:34px 0 0;
+  border-bottom:1px solid var(--line)}
+.tab{appearance:none;cursor:pointer;text-align:left;font:inherit;
+  padding:12px 20px 13px;background:transparent;color:var(--muted);
+  border:0;border-bottom:2px solid transparent;margin-bottom:-1px;
+  transition:color .15s,border-color .15s}
+.tab b{display:block;font-size:14px;font-weight:500;color:var(--muted)}
+.tab span{display:block;font-size:11px;line-height:1.7;letter-spacing:.02em;
+  color:var(--muted)}
+.tab:hover b{color:var(--ink)}
+.tab.on{border-bottom-color:var(--ink)}
+.tab.on b{color:var(--ink)}
+.stage{margin:20px 0 0;background:#000;border:1px solid var(--line);
+  overflow:hidden;position:relative}
 .stage iframe{display:block;width:100%%;height:100%%;border:0}
 /* --- expand: the console filling the screen -------------------------------- */
 /* Two mechanisms on purpose. The Fullscreen API is the good one, but Safari on
@@ -799,14 +883,14 @@ section > .wrap > h2{margin:0;font-size:clamp(22px,3vw,30px)}
    the real sizing (a fixed overlay works everywhere), and fullscreen is asked
    for on top of it where it exists, which additionally hides the browser
    chrome. Either can end first, so the JS syncs both ways. */
-.exp{margin-left:auto;align-self:center}
+.exp{margin-left:auto;align-self:center;border-bottom-color:transparent !important}
 .stage.big{position:fixed;inset:0;z-index:60;margin:0;border:0;
   aspect-ratio:auto !important;background:#000}
 body.noscroll{overflow:hidden}
-.shrink{position:absolute;top:8px;right:8px;z-index:2;appearance:none;cursor:pointer;
-  font:13px/1 var(--sans);padding:8px 11px;color:var(--ink);
-  background:rgba(5,7,13,.72);border:1px solid var(--line)}
-.shrink:hover{border-color:var(--accent);color:var(--accent)}
+.shrink{position:absolute;top:8px;right:8px;z-index:2;appearance:none;
+  cursor:pointer;font:13px/1 var(--sans);padding:8px 12px;color:#f3f1ee;
+  background:rgba(12,12,14,.74);border:1px solid rgba(243,241,238,.28)}
+.shrink:hover{border-color:#f3f1ee}
 .stage:not(.big) .shrink{display:none}
 /* Landscape phone: the OS bar sits at the very top of the console, so a button
    in the corner would cover its clock. Nudge it clear of the safe area. */
@@ -814,63 +898,82 @@ body.noscroll{overflow:hidden}
   .stage.big .shrink{top:calc(8px + env(safe-area-inset-top));
                      right:calc(8px + env(safe-area-inset-right))}
 }
-.hint{display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between;
-  color:var(--muted);font-size:13px;margin:10px 0 0}
-.warnbox{color:var(--warn);border:1px solid var(--warn);padding:10px 14px;margin:12px 0 0}
-/* --- card grids ------------------------------------------------------------ */
-.cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
-  margin:24px 0 0;padding:0;list-style:none}
-.cards li{background:var(--surface);border:1px solid var(--line);padding:16px 18px}
-.cards h3{margin:0 0 7px;font-size:15px;color:var(--accent)}
-.cards p{margin:0;font-size:14px;color:var(--body)}
-.cards .chip{display:inline-block;margin:0 0 7px;padding:2px 8px;font:11px/1.5 var(--mono);
-  letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
-  background:var(--bg);border:1px solid var(--line)}
-.rough{margin:20px 0 0;padding-left:20px;color:var(--body);font-size:15px}
-.rough li{margin:0 0 9px}
+.hint{display:flex;gap:28px;flex-wrap:wrap;justify-content:space-between;
+  color:var(--muted);font-size:13px;margin:16px 0 0}
+.hint b{color:var(--body);font-weight:500}
+.warnbox{color:var(--warn);border-left:2px solid var(--warn);padding:2px 0 2px 14px;
+  margin:20px 0 0;font-size:14px}
+/* --- card grids -------------------------------------------------------------
+   No fill and no box: a hairline over each entry and air around it. Twelve
+   bordered panels in a row was the other half of what read as an arcade. */
+.cards{display:grid;gap:0 40px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  margin:40px 0 0;padding:0;list-style:none}
+.cards li{background:transparent;border:0;border-top:1px solid var(--line);
+  padding:20px 0 26px}
+.cards h3{margin:0 0 9px;font-size:16px;font-weight:500;color:var(--ink);
+  letter-spacing:-.015em}
+.cards p{margin:0;font-size:14.5px;line-height:1.6;color:var(--body)}
+.cards .chip{display:inline-block;margin:0 0 10px;padding:0;
+  font:11px/1.5 var(--mono);font-weight:500;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--muted);background:transparent;border:0}
+.rough{margin:36px 0 0;padding:0;list-style:none;color:var(--body);font-size:16px;
+  max-width:70ch}
+.rough li{margin:0;padding:18px 0;border-top:1px solid var(--line)}
 /* --- the flasher ----------------------------------------------------------- */
 /* One card per board: what CI built, how to get the board into the loader, and
    the button that writes it. Everything below the button is progress reporting,
    hidden until a flash starts. */
 .boards li{display:flex;flex-direction:column}
-/* The column stretches its children, and a full-width chip reads as a field. */
 .boards .chip{align-self:flex-start}
-.boards pre{margin:12px 0 0;font-size:12px}
-.fwmeta{margin:0 0 9px;font:11px/1.7 var(--mono);color:var(--muted)}
-.fwmeta a{color:var(--muted)}
+.boards pre{margin:16px 0 0;font-size:12px;padding:12px 14px}
+.cards .fwmeta{margin:0 0 10px;font-size:11px;line-height:1.8;color:var(--muted)}
+.cards .fwmeta a{color:var(--muted)}
 /* The build picker: stable vs dev, when the site was built with both. */
-.pick{display:flex;gap:8px;align-items:center;margin:0 0 9px;
+.pick{display:flex;gap:10px;align-items:center;margin:0 0 10px;
   font-size:12px;color:var(--muted)}
-.pick select{font:12px var(--mono);color:var(--ink);background:var(--bg);
-  border:1px solid var(--line);padding:3px 6px;flex:1 1 auto}
+.pick select{font:12px var(--mono);color:var(--ink);background:var(--paper);
+  border:1px solid var(--hair);padding:4px 7px;flex:1 1 auto;border-radius:0}
 /* Flashing a version the site does not carry -- folded away, because it is the
    uncommon path and it asks the visitor to go and fetch a file first. */
-.older{margin:12px 0 0;font-size:12px;color:var(--muted)}
+.older{margin:16px 0 0;font-size:12px;color:var(--muted)}
 .older summary{cursor:pointer}
 .older p{margin:8px 0 0}
 .older input{margin:8px 0 0;font-size:11px;color:var(--muted);max-width:100%%}
-.act{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0}
-.act .btn{font-size:14px;padding:7px 13px}
-button.btn{appearance:none;cursor:pointer;font-family:inherit}
-button.btn:disabled{opacity:.45;cursor:default;filter:none}
-.erase{display:flex;gap:8px;align-items:flex-start;margin:12px 0 0;
+.act{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}
+.act .btn{font-size:13px;padding:8px 15px}
+button.btn{appearance:none;cursor:pointer;font-family:var(--sans)}
+button.btn:disabled{opacity:.4;cursor:default}
+.erase{display:flex;gap:9px;align-items:flex-start;margin:14px 0 0;
   font-size:12px;color:var(--muted);cursor:pointer}
 .erase input{margin:3px 0 0;flex:0 0 auto}
-.state{margin:11px 0 0;font-size:13px;color:var(--ink);min-height:1.3em}
+.state{margin:13px 0 0;font-size:13px;color:var(--ink);min-height:1.3em}
 .state.ok{color:var(--ok)} .state.warn{color:var(--warn)} .state.wip{color:var(--wip)}
-.prog{height:6px;margin:9px 0 0;background:var(--bg);border:1px solid var(--line)}
-.prog i{display:block;height:100%%;width:0;background:var(--accent);
+.prog{height:3px;margin:11px 0 0;background:var(--line)}
+.prog i{display:block;height:100%%;width:0;background:var(--ink);
   transition:width .12s linear}
-.log{max-height:9.5em;overflow:auto;margin:9px 0 0;padding:8px 10px;
-  white-space:pre-wrap;font:11px/1.55 var(--mono);color:var(--muted);
-  background:var(--bg);border:1px solid var(--line)}
-pre{background:var(--surface);border:1px solid var(--line);padding:16px 18px;
-  overflow-x:auto;font:13px/1.7 var(--mono);color:var(--ink);margin:20px 0 0}
+.log{max-height:9.5em;overflow:auto;margin:11px 0 0;padding:10px 12px;
+  white-space:pre-wrap;font:11px/1.6 var(--mono);color:var(--muted);
+  background:var(--sunk);border:1px solid var(--line)}
+pre{background:var(--sunk);border:1px solid var(--line);padding:20px 22px;
+  overflow-x:auto;font:13px/1.85 var(--mono);color:var(--ink);margin:36px 0 0}
 pre .c{color:var(--muted)}
-code{font:.92em var(--mono);background:var(--surface);border:1px solid var(--line);padding:1px 5px}
-footer{margin:64px 0 0;border-top:1px solid var(--line);padding:24px 0 44px;
-  color:var(--muted);font-size:13px}
+code{font:.9em var(--mono);background:var(--sunk);border:1px solid var(--line);
+  padding:1px 5px;color:var(--ink)}
+footer{margin:104px 0 0;border-top:1px solid var(--ink);padding:24px 0 72px;
+  color:var(--muted);font-size:13px;max-width:78ch}
 footer a{margin-right:4px}
+/* --- narrow -----------------------------------------------------------------
+   The paper scheme's air is sized for a desk. On a phone the same gaps read as
+   the page having failed to load, so every 104px band comes down to 64. */
+@media (max-width:760px){
+  .hero{padding:64px 0 0}
+  section{padding:64px 0 0}
+  footer{margin:64px 0 0}
+  h1{font-size:clamp(34px,10vw,44px);max-width:none}
+  .lead{font-size:19px;margin:24px 0 0}
+  .shot{margin:40px auto 0}
+  .rail{margin:40px 0 0}
+}
 </style>
 </head>
 <body>
@@ -887,30 +990,28 @@ footer a{margin-right:4px}
 
 <div class="wrap" id="top">
   <div class="hero">
-    <div>
-      <p class="eyebrow">Source-available firmware &middot; FSL-1.1-MIT</p>
-      <h1 class="px">An <em>operating system</em> for ESP32 boards.</h1>
-      <p class="lead">It turns the board into a small computer you can write software
-        on. The software is cartridges &mdash; games, wallpapers, tools, whatever you
-        make &mdash; and you open, change and run any of them on the board itself,
-        with no host computer in the loop.</p>
-      <p class="sub">It boots on three off-the-shelf boards today, and the same source
-        tree is a PC simulator and the browser build below. Approachable enough for a
-        ten-year-old (that is what the block editor is for) without being only that:
-        underneath is a MicroPython firmware with native C kernels, a Lua VM, OTA
-        updates and a windowing shell.</p>
-      <div class="btns">
-        <a class="btn pri" href="#try">Try it in the browser &#9656;</a>
-        <a class="btn" href="https://github.com/moybyte-org/moybyte">Source</a>
-        <a class="btn" href="https://github.com/moybyte-org/moy-spec">The cart spec</a>
-      </div>
+    <p class="eyebrow">Source-available firmware &middot; FSL-1.1-MIT</p>
+    <h1>An <em>operating system</em> for ESP32 boards.</h1>
+    <p class="lead">It turns the board into a small computer you can write software
+      on. The software is cartridges &mdash; games, wallpapers, tools, whatever you
+      make &mdash; and you open, change and run any of them on the board itself,
+      with no host computer in the loop.</p>
+    <p class="sub">It boots on three off-the-shelf boards today, and the same source
+      tree is a PC simulator and the browser build below. Approachable enough for a
+      ten-year-old (that is what the block editor is for) without being only that:
+      underneath is a MicroPython firmware with native C kernels, a Lua VM, OTA
+      updates and a windowing shell.</p>
+    <div class="btns">
+      <a class="btn pri" href="#try">Try it in the browser &#9656;</a>
+      <a class="btn" href="https://github.com/moybyte-org/moybyte">Source</a>
+      <a class="btn" href="https://github.com/moybyte-org/moy-spec">The cart spec</a>
     </div>
-    <aside>
+    <div class="rail">
       <p class="k">Where it stands</p>
       <ul class="status">
 %(status)s
       </ul>
-    </aside>
+    </div>
   </div>
 
   <figure class="screen shot">
@@ -922,6 +1023,7 @@ footer a{margin-right:4px}
 </div>
 
 <section id="try"><div class="wrap">
+  <p class="kick">run it</p>
   <h2>Try it, right here</h2>
   <p class="slead">The real system compiled to WebAssembly &mdash; the same code the
     firmware freezes, served from this page and nowhere else. Not a mock-up, not a
@@ -941,6 +1043,7 @@ footer a{margin-right:4px}
 %(missing)s</div></section>
 
 <section id="flash"><div class="wrap">
+  <p class="kick">on hardware</p>
   <h2>Put it on a board</h2>
   <p class="slead">Plug a board in and write the current firmware to it from this
     page &mdash; no toolchain, no checkout. Each image below is the one GitHub
@@ -956,6 +1059,7 @@ footer a{margin-right:4px}
 %(flash_hint)s</div></section>
 
 <section id="in"><div class="wrap">
+  <p class="kick">the system</p>
   <h2>What's in it</h2>
   <p class="slead">Everything here exists and runs today. Where something is
     unverified or rough, it says so.</p>
@@ -965,6 +1069,7 @@ footer a{margin-right:4px}
 </div></section>
 
 <section id="runs"><div class="wrap">
+  <p class="kick">targets</p>
   <h2>What it runs on</h2>
   <p class="slead">Host and device are one codebase, not a port: each firmware build
     stages copies of the same modules and freezes them.</p>
@@ -974,6 +1079,7 @@ footer a{margin-right:4px}
 </div></section>
 
 <section id="rough"><div class="wrap">
+  <p class="kick">honestly</p>
   <h2>Where it's rough</h2>
   <ul class="rough">
 %(rough)s
@@ -981,6 +1087,7 @@ footer a{margin-right:4px}
 </div></section>
 
 <section id="build"><div class="wrap">
+  <p class="kick">from source</p>
   <h2>Build it</h2>
   <pre><span class="c"># the system on your PC</span>
 make setup &amp;&amp; make test
@@ -1127,6 +1234,11 @@ def main():
     else:
         print("!! no firmware images under %s -- the page will say so "
               "(build them with tools/fetch_ci_firmware.py)" % args.firmware)
+
+    # The text faces. Petme128 rides inside the CSS; these two do not.
+    fonts = os.path.join(HERE, "fonts")
+    if os.path.isdir(fonts):
+        shutil.copytree(fonts, os.path.join(out, "fonts"))
 
     gif = os.path.join(HERE, "hero.gif")
     if not os.path.exists(gif):

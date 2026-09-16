@@ -33,6 +33,8 @@ separate question from what is committed.
 | AXS15231B init register values (Guition panel) | `firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c` | [esphome/esphome](https://github.com/esphome/esphome) | MIT (their Python half) | **Yes** — transcribed to C |
 | esptool-js 0.6.0 (the site's board flasher) | `site/vendor/esptool-js/` | [espressif/esptool-js](https://github.com/espressif/esptool-js) | Apache-2.0 | No |
 | `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont `site/petme128.woff2` | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
+| Host Grotesk (the site's text face) | `site/fonts/host-grotesk-latin-var.woff2` | [Element-Type/HostGrotesk](https://github.com/Element-Type/HostGrotesk) | OFL-1.1 | No (latin subset) |
+| JetBrains Mono (the site's label face) | `site/fonts/jetbrains-mono-latin-var.woff2` | [JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) | OFL-1.1 | No (latin subset) |
 | PICO-8 base palette + colour names | `runtime/palette.py` (`_BASE16`, `NAMES`) | [PICO-8 / Lexaloffle](https://www.lexaloffle.com/pico-8.php) | CC-0 | No |
 | Pixelarticons icon shapes | `runtime/chrome.py` (`_GLYPHS` and siblings) | [halfmage/pixelarticons](https://github.com/halfmage/pixelarticons) | MIT | **Yes** — retraced |
 | T-Deck pin assignments | `docs/boards/lilygo_t_deck_plus.md` | [Xinyuan-LilyGO/T-Deck](https://github.com/Xinyuan-LilyGO/T-Deck) | facts; source cited | Transcribed |
@@ -245,9 +247,9 @@ inlined by the marketing site, which now lives in its own repository.
 - **Modified: no.** The bytes are identical to upstream; only the container
   changed (a C array became a Python `bytes` literal). The generated webfont is
   a *derivative*: same glyph shapes, with proportional advances and a redrawn
-  `'`/`"`. `site/petme128.woff2` is that webfont, inlined into the project site
-  so the page's display type is the console's own font; the MIT notice above
-  covers it.
+  `'`/`"`. `site/petme128.woff2` is that webfont, inlined into the project site.
+  Since the site's paper scheme (2026-09) it sets the wordmark only, not the
+  headlines; the MIT notice above covers it either way.
 
 The MIT permission notice, reproduced in full so it travels with the data:
 
@@ -273,7 +275,31 @@ The MIT permission notice, reproduced in full so it travels with the data:
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
 
-### 3.2 The MOY64 palette — indices 0–15
+### 3.2 The site's text faces — Host Grotesk and JetBrains Mono
+
+`site/fonts/`
+
+The marketing site's paper scheme (2026-09) is set in two OFL faces, served as
+files from `site/fonts/` rather than inlined: **Host Grotesk** for anything that
+is a sentence, **JetBrains Mono** for anything that is a label. Both are the
+latin subsets of Google Fonts' variable builds, pulled once and committed — the
+site build is stdlib-only and must work with no network, and a page that fetches
+its own typography from a third party is a request we do not want to make on a
+visitor's behalf.
+
+- **Upstream:** Host Grotesk —
+  <https://github.com/Element-Type/HostGrotesk>; JetBrains Mono —
+  <https://github.com/JetBrains/JetBrainsMono>. Both subset by Google Fonts.
+- **Licence: SIL OFL 1.1** for both, reproduced next to the fonts as
+  `site/fonts/host-grotesk-OFL.txt` and `site/fonts/jetbrains-mono-OFL.txt`,
+  and at [LICENSES/OFL-1.1.md](LICENSES/OFL-1.1.md).
+  **Copyright 2023 The Host Grotesk Project Authors**;
+  **Copyright 2020 The JetBrains Mono Project Authors.**
+- **Modified: no.** The binaries are Google Fonts' latin-subset woff2 files
+  byte-for-byte. Neither font is renamed, so the OFL's Reserved Font Name
+  clause is not engaged.
+
+### 3.3 The MOY64 palette — indices 0–15
 
 `runtime/palette.py` (`_BASE16`, and the `NAMES` map)
 
@@ -305,7 +331,7 @@ PICO-8's *name and logo* are **not** covered by that grant and are not used as
 Moybyte branding. References to PICO-8 in this repository are descriptive.
 Moybyte is not affiliated with or endorsed by Lexaloffle Games.
 
-### 3.3 Pixelarticons — the button icon vocabulary
+### 3.4 Pixelarticons — the button icon vocabulary
 
 `runtime/chrome.py` — the `_GLYPHS` table (12×12 1-bit bitmaps) and the two
 sibling glyph blocks below it.
@@ -327,7 +353,7 @@ legibility at button size.
 The separate 16×16 top-bar icon art (`_ICON_ART` in the same file, persisted as
 `system_icons.moygfx`) is hand-authored Moybyte work.
 
-### 3.4 Board pin assignments — LilyGO T-Deck
+### 3.5 Board pin assignments — LilyGO T-Deck
 
 `docs/boards/lilygo_t_deck_plus.md` and the constants derived from it in
 `firmware/lilygo_t_deck_plus_mainline/modules/tdeck_panel.py` /
@@ -344,7 +370,7 @@ These are hardware facts about a physical product, not expressive work, and no
 upstream code was copied — but the source is named here because the repository
 names it, and a reader deserves to know where the numbers came from.
 
-### 3.5 Board pin assignments — Guition JC3248W535
+### 3.6 Board pin assignments — Guition JC3248W535
 
 `firmware/guition_jc3248w535/board.toml` and the constants derived from it in
 `firmware/guition_jc3248w535/native/moy_axs/` and `device/axs_touch.py`.
@@ -357,7 +383,7 @@ battery-ADC GPIOs. That file is the owner's own configuration, not upstream
 work; ESPHome's contribution to it is the component vocabulary, covered by
 §2.6.
 
-Same reasoning as §3.4: GPIO numbers and an I²C address are hardware facts
+Same reasoning as §3.5: GPIO numbers and an I²C address are hardware facts
 about a physical product, and none of the *tuning* beside them in that YAML
 was copied — that is deliberately re-derived on this glass, because per-board
 verdicts do not transfer (`sdkconfig.board` carries the argument).
