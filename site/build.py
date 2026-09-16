@@ -374,6 +374,49 @@ FEATURES = [
      "would mind losing."),
 ]
 
+# The SET-PIECES: a claim, and the footage that proves it, side by side. This is
+# where the page gets to be alive -- the reference site's own life comes from
+# five <video loop muted playsinline> beside its claims, not from scripted
+# motion, and the equivalent we have is better than an illustration: these are
+# recordings of the real console doing the real thing, produced by
+# `make site-gifs` (tools/make_site_gifs.py drives the actual shell with real
+# taps), so they track the system instead of ageing away from it.
+#
+# GIF ON PURPOSE, and it is not the lazy choice here. The console is an indexed
+# 64-colour machine, so a GIF is EXACT -- same palette, lossless, every 8px
+# glyph intact. An mp4 of this would chroma-subsample the text into mush, which
+# is why the reference can use video for photography and we cannot.
+#
+# The handheld recordings (640x480) are deliberate: the hero already shows the
+# windowed desktop, so these are the OTHER tier.
+#
+# TWO, and the third was CUT for a reason worth keeping: tap.gif opens on the
+# identical "MAKE IT MINE" screen paint.gif opens on, and ends on the same pet
+# running. Side by side they read as one recording shown twice. A loop has no
+# poster frame to choose -- frame 0 is simply what a visitor sees first, and two
+# set-pieces that start on the same pixels are worse than one. paint.gif keeps
+# the claim because its arc (edit -> PLAY -> the edit is in the game) contains
+# tap.gif's.
+#
+# The body copy describes the WHOLE ARC for the same reason: it is a loop, not a
+# still, so a caption true only of the middle of it is false half the time.
+SHOWCASE = [
+    ("blocks.gif", "blocks &rarr; python", "Blocks that graduate",
+     "A block is snapped into the program, and the CODE tab is opened on the "
+     "same edit &mdash; compiled to the Python the code tab edits. Nothing is "
+     "sped up and nothing is staged: the recording is the shell being driven.",
+     "The BLOCKS tab of the Editor: a block is dragged into the program, then "
+     "the CODE tab shows the same program as Python"),
+    ("paint.gif", "draw it, play it", "Editors on the device itself",
+     "It opens on the cards a ten-year-old starts from, goes to the sprite "
+     "tab, paints a smile onto the pet&rsquo;s tile, and presses PLAY &mdash; "
+     "and the pet is wearing it in the running game. No save button, no export "
+     "step, no host computer in the loop.",
+     "The Editor on Pixel Pet: the config cards, then the SPRITES tab where a "
+     "smile is painted onto the pet's tile, then the game running with the "
+     "edited sprite"),
+]
+
 TARGETS = [
     ("LilyGO T-Deck Plus", "ESP32-S3",
      "MicroPython firmware with native C modules for graphics, audio, SD and the "
@@ -730,6 +773,13 @@ def page(pal, has_player, cards):
         '      <li class="rise"><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>'
         % (t, chip, b)
         for t, chip, b in TARGETS)
+    shows = "\n".join(
+        '  <section class="show rise">\n'
+        '    <figure><img src="media/%s" alt="%s" loading="lazy" decoding="async">'
+        '</figure>\n'
+        '    <div><p class="kick nb">%s</p><h3>%s</h3><p>%s</p></div>\n'
+        '  </section>' % (gif, alt, kick, title, body)
+        for gif, kick, title, body, alt in SHOWCASE)
     rough = "\n".join('      <li class="rise">%s</li>' % r for r in ROUGH)
     boards = flash_cards(cards)
     # One manifest entry per BOARD, carrying every build the picker offers.
@@ -1008,6 +1058,27 @@ details summary::-webkit-details-marker{display:none}
 details summary:hover{color:var(--ink);border-bottom-color:var(--ink)}
 details[open] summary{color:var(--ink);border-bottom-color:transparent}
 details p{margin:12px 0 0}
+/* --- the set-pieces ---------------------------------------------------------
+   A claim and the footage that proves it, side by side, alternating sides down
+   the page. The footage is the wide half because it is the evidence; the words
+   beside it are a caption for it, not a section of their own -- which is why
+   the kicker here does not draw the section rule the others do. */
+.shows{margin:104px auto 0}
+.show{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center;
+  padding:0;margin:0 0 72px}
+.show:last-child{margin-bottom:0}
+.show:nth-child(even) figure{order:2}
+.show figure{margin:0;min-width:0}
+.show img{display:block;width:100%%;border:1px solid var(--line);
+  background:var(--sunk);image-rendering:pixelated}
+.show h3{margin:0;font-size:clamp(23px,2.6vw,32px);letter-spacing:-.025em}
+.show p:last-child{margin:14px 0 0;color:var(--body);max-width:44ch}
+.kick.nb{border-top:0;padding:0;margin:0 0 14px}
+@media (max-width:820px){
+  .shows{margin:64px auto 0}
+  .show{grid-template-columns:1fr;gap:20px;margin:0 0 56px}
+  .show:nth-child(even) figure{order:0}
+}
 /* --- the ticker -------------------------------------------------------------
    A quiet strip of the machine's own numbers between the shot and the player.
    Every item is a fact the page asserts further down; it is ornament, so it is
@@ -1140,6 +1211,10 @@ footer a{margin-right:4px}
 %(features)s
   </ul>
 </div></section>
+
+<div class="wrap shows">
+%(shows)s
+</div>
 
 <section class="rise" id="runs"><div class="wrap">
   <p class="kick">targets</p>
@@ -1306,7 +1381,7 @@ show(tabs[0]);
 """ % {
         "tokens": tokens, "font": font_face(), "tabs": tabs, "missing": missing,
         "status": status, "features": features, "mark": moy_mark(pal),
-        "ticker": ticker(),
+        "ticker": ticker(), "shows": shows,
         "targets": targets, "rough": rough, "boards": boards, "flash_js": flash_js,
         "flash_hint": flash_hint,
     }
@@ -1368,6 +1443,17 @@ def main():
     fonts = os.path.join(HERE, "fonts")
     if os.path.isdir(fonts):
         shutil.copytree(fonts, os.path.join(out, "fonts"))
+
+    # The set-pieces. Committed recordings of the real shell, regenerated by
+    # `make site-gifs` -- copied rather than referenced so _site/ stands alone.
+    media = os.path.join(out, "media")
+    for entry in SHOWCASE:
+        src = os.path.join(ROOT, "docs", "media", entry[0])
+        if os.path.exists(src):
+            os.makedirs(media, exist_ok=True)
+            shutil.copyfile(src, os.path.join(media, entry[0]))
+        else:
+            print("!! no footage at %s -- that set-piece will show a gap" % src)
 
     gif = os.path.join(HERE, "hero.gif")
     if not os.path.exists(gif):
