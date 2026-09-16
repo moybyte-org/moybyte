@@ -24,9 +24,9 @@ the real native modules -- nothing is faked but the board:
                    device_api.make_api closures and a second real DeviceCanvas
 
 so when a stage-1 crossing swaps side A's lane from trampoline to C, this
-trace is what proves the C implementation semantics-identical. (The HOST
-tier's lua lane -- lupa -- is pinned separately by the sakura/brick-siege
-golden parity tests; this file owns the device seam.)
+trace is what proves the C implementation semantics-identical. (The Lua
+PORTS themselves are pinned separately by the sakura/brick-siege parity
+tests, on the same host binding; this file owns the device seam.)
 
 Traced float literals are deliberately binary-exact (0.25, 0.5): the boards
 build LUA_32BITS, so a literal like 0.1 crosses as float32 and differs from

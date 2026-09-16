@@ -10,6 +10,8 @@ lives in runtime.editors, shared with the frozen device modules.
 
 from pathlib import Path
 
+from ws_helpers import StubInput
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -120,15 +122,6 @@ def test_spr_with_wh_span_blits_a_16x16_image():
 
         def __getattr__(self, name):
             return lambda *a, **k: 0
-
-    class StubInput:
-        pointer = None
-
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
 
     sheet = SpriteSheet()
     api = host_app.make_api(StubCanvas(), StubInput(), {}, sheet)

@@ -2,7 +2,7 @@
 
 A module whose only executable coverage was `_diag_pump` (through
 `tests/test_banded_panel.py`); everything else was pinned as SOURCE STRINGS in
-`tests/test_micropython_spike.py`. A substring cannot tell `us / 1000.0` from
+the T-Deck spike suite. A substring cannot tell `us / 1000.0` from
 `us / 100.0`, cannot notice a bucket wired to the wrong tuple index, cannot see
 a cart gate that stopped gating, and cannot see a guard that stopped guarding --
 which is exactly the shape that let `fold=0` print for weeks under a comment

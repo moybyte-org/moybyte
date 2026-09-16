@@ -12,15 +12,16 @@
 -- beat). AUTOPLAY (in "Make it mine") is OFF by default; flip it ON for attract mode.
 --
 -- The port is line-faithful by design: same globals, same helper split, same
--- arithmetic in the same order, so the two runtimes produce bit-identical game state
--- and draw streams (verified per frame by experiments/lua_bridge/brick_parity.py).
+-- arithmetic in the same order, so the two runtimes produce the same draw stream and
+-- the same game state to within float32 rounding (verified per frame by
+-- experiments/lua_bridge/brick_parity.py, which runs this file on the shipped VM).
 -- Kept in lockstep with brick_siege.moy/main.py: edit BOTH or the parity test fails.
 --
 -- THIS CART IS moy core 0.1 ONLY -- no extensions, no vendor verbs. It is the
 -- showcase cart for the public spec (moy-spec), so a conformant third-party
 -- console must be able to run it as-is. That means it deliberately does NOT use
 -- three things the Python twin does, and each substitution is draw-stream
--- IDENTICAL (which is why parity still holds byte-for-byte):
+-- IDENTICAL (which is why the two streams still compare call for call):
 --   * col("name") -> the literal palette index. col() is a VENDOR verb, absent
 --     from every SPEC.md verb table and not even declarable as an extension.
 --     Indices used: 0 black, 1 dark_blue, 6 light_grey, 7 white, 10 yellow,

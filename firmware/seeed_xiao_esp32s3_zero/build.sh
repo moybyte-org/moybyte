@@ -55,7 +55,7 @@ moybyte_setup_idf esp32s3 \
 #    Every shared patch is per-board and OPT-IN, and a board that does not call
 #    one declines it HERE IN WRITING (`# DECLINED <fn> <reason>` -- board.toml's
 #    `[[deny]] why=` in the one file that is not board.toml). Silence is neither,
-#    and `tests/test_micropython_spike.py` fails a build.sh that is silent.
+#    and `tests/test_board_routing.py` fails a build.sh that is silent.
 #
 # DECLINED moybyte_patch_repr_c -- unboxed 30-bit floats (#66). The lever is a
 #    CART INTERPRETER tax: REPR_A boxes every float RESULT in 16 bytes of heap,

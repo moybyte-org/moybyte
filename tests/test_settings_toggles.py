@@ -32,6 +32,7 @@ import inspect
 from pathlib import Path
 
 from runtime.settings_layer import SETTINGS_TOGGLES
+from ws_helpers import build_ws
 
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "runtime" / "console.py"
@@ -58,11 +59,6 @@ OWNERS = {
 # perf_capture and the FPS chip along with the gate -- so its entry declares no
 # serial word and the command stays written out.
 DEV_SETTER_EXEMPT = {"set_diag_live"}
-
-
-def _ws(tmp_path, **kw):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
 
 
 def _class(path, name):
@@ -134,7 +130,7 @@ def test_every_entry_resolves_on_a_real_console(tmp_path):
     """key IS the flat attribute IS the system.json key, and setter IS a verb.
     All three were the same string six times over before the registry; this is
     what turns that coincidence into a contract."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
         assert hasattr(ws, key), key
         assert isinstance(getattr(ws, key), bool), key
@@ -246,7 +242,7 @@ def test_a_board_that_cannot_serve_a_toggle_shows_no_row(tmp_path):
     """The host console has neither the crisp canvas hook nor a second
     keyboard, so neither row exists -- which is what keeps the other tiers'
     frozen Settings pixels."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     keys = [r[0] for r in ws.settings_layer._settings_rows()]
     for key, _l, _d, _s, gate, _dev in SETTINGS_TOGGLES:
         if gate is None:
@@ -260,7 +256,7 @@ def test_a_granted_gate_adds_its_row_in_registry_order(tmp_path):
     """Grant both capabilities and the block is the registry, in order,
     directly after EDIT ICONS. This is the order the Settings goldens rest on:
     2 PLAYERS above STEADY, CRISP PIXELS below it."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     ws.sys_canvas.set_crisp_scale = lambda on: None
     ws.ble_keyboard = _FakeSecondKeyboard()
     rows = ws.settings_layer._settings_rows()
@@ -275,7 +271,7 @@ def test_the_row_block_follows_the_gate_without_a_manual_bust(tmp_path):
     """The memo re-asks the gates every call, so a capability that appears mid
     session appears on the next frame. A memo keyed on a stale flag would show
     the OLD rows until something else invalidated the cache."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     before = ws.settings_layer._settings_rows()
     assert "two_player" not in [r[0] for r in before]
     ws.ble_keyboard = _FakeSecondKeyboard()
@@ -292,7 +288,7 @@ def test_a_gated_toggle_declines_its_serial_word(tmp_path, capsys):
     doctrine the channel's docstring states."""
     from runtime.dev_channel import DevChannel
     from tests.test_dev_channel import FakePointer
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     ch = DevChannel(ws, FakePointer())
     capsys.readouterr()                 # the channel's own no-fileno notice
     ch.run(ws, "crisp 1")
@@ -314,7 +310,7 @@ def test_the_serial_word_reports_what_the_console_reached(tmp_path, capsys):
     cannot leave a kid's system.json off-default."""
     from runtime.dev_channel import DevChannel
     from tests.test_dev_channel import FakePointer
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     ws.system.pop("steady", None)
     ch = DevChannel(ws, FakePointer())
     capsys.readouterr()                 # the channel's own no-fileno notice
@@ -331,7 +327,7 @@ def test_a_setter_that_cannot_work_still_reports_honestly(tmp_path):
     whatever it is told when there is no second keyboard. The gate hides the
     row; the SETTER is what keeps a stale system.json key from claiming two
     players nothing can drive."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     assert ws.second_keyboard() is None
     ws.set_two_player(True, persist=False)
     assert ws.two_player is False
@@ -340,7 +336,7 @@ def test_a_setter_that_cannot_work_still_reports_honestly(tmp_path):
 # -- persistence and the boot round trip --------------------------------------
 
 def test_a_fresh_console_boots_at_the_declared_defaults(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for key, _l, default, _s, gate, _dev in SETTINGS_TOGGLES:
         if gate is None:
             assert getattr(ws, key) is default, key
@@ -367,7 +363,7 @@ def test_every_toggle_persists_under_its_own_key_and_comes_back(tmp_path):
 def test_the_boot_apply_writes_nothing_back(tmp_path):
     """`persist=False` on every entry: loading a store must never re-write what
     it just read (and must not mint keys the kid never chose)."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for key in KEYS:
         ws.system.pop(key, None)
     ws.load_system()
@@ -382,7 +378,7 @@ def test_no_toggle_is_a_property(tmp_path):
     instance dict (a plain attribute, which is what makes the read a slot
     lookup)."""
     from runtime.console import Workstation
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for key in KEYS:
         assert not isinstance(getattr(Workstation, key, None), property), key
         assert key in ws.__dict__, key

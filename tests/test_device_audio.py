@@ -1,7 +1,7 @@
 """`device/device_audio.py`, EXECUTED (#208, the single-consumer list).
 
 515 lines, one importer (`moy_runtime`), and until this file nothing off-glass
-ever ran a statement of it. The net over it was `tests/test_micropython_spike.py`
+ever ran a statement of it. The net over it was the T-Deck spike suite
 grepping the frozen source, which is the shape #208 exists to stop: a substring
 cannot tell `sfx()` that syncs the bank BEFORE the trigger from one that syncs
 after, cannot see the bank crossing once per FRAME instead of once per cart, and

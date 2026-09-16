@@ -2,7 +2,7 @@
 
 `BandedCompositor` is the one body both S3 boards' frame machine runs -- the
 drain/swap/kick overlap, the ping-pong, the async gate and the flush meters. The
-other net over it is the source-text greps in `tests/test_micropython_spike.py`,
+other net over it is the source-text greps in `tests/test_board_routing.py`,
 which pin that a mechanism is still NAMED where a reader expects it; a substring
 cannot tell drain-then-kick from kick-then-drain, cannot notice a ping-pong that
 stopped advancing, and cannot see a meter wired to a name nothing defines. So
@@ -762,7 +762,7 @@ def test_state_is_harmless_on_a_board_with_no_compositor_meters():
 
 
 def test_the_shared_body_is_what_both_boards_subclass():
-    """`tests/test_micropython_spike.py` greps `device/banded_panel.py` for the
+    """`tests/test_board_routing.py` greps `device/banded_panel.py` for the
     mechanism; this file runs it. Both are pointing at the same file only for
     as long as the boards subclass it, so pin that too."""
     tdeck = (TDECK_MODULES / "tdeck_panel.py").read_text(encoding="utf-8")
@@ -773,3 +773,16 @@ def test_the_shared_body_is_what_both_boards_subclass():
         assert "from banded_panel import FoldingCompositor" in src
         assert "FoldingCompositor.__init__(self," in src
     assert banded_panel.__file__.endswith("device/banded_panel.py")
+
+
+def test_micropython_spike_uses_tdeck_native_panel_geometry():
+    """The T-Deck declares no `[panel]` block: its geometry is the panel
+    module's own constants, and the compositor it builds takes its size from
+    the native module it is built over (here the fake's), never from a second
+    declaration."""
+    lcd = FakeLcd()
+    with board_panel("tdeck_panel", "moy_lcd", TDECK_MODULES, lcd) as tp:
+        assert (tp.WIDTH, tp.HEIGHT) == (320, 240)
+        comp = tp.TDeckCompositor()
+        lcd.comp = comp
+        assert comp.size() == (lcd.WIDTH, lcd.HEIGHT)

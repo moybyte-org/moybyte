@@ -2228,3 +2228,47 @@ def test_chrome_names_match_palette_names():
     for idx in range(70):
         assert chrome.color(idx) == palette.color(idx)
     assert chrome.color("no-such-colour") == palette.color("no-such-colour") == 7
+
+
+def test_scroll_layer_buffer_is_off_gc_heap():
+    """A scroll/paint layer's RGB565 buffer is the biggest object a cart keeps
+    live, and collect cost scales with the live set -- so `_LayerComp` takes it
+    from moy_alloc (PSRAM, DMA-eligible for the GDMA window copy) where the
+    firmware has it: the registry-backed `alloc()` first, `malloc_dma` on an
+    older build, and a gc-heap bytearray only where there is no allocator at
+    all. Driven with a fake `moy_alloc` in sys.modules; the sizes are odd so
+    the layer pool never answers first."""
+    m = _load_device_canvas()
+    dev = m.DeviceCanvas(_FakeComp(W, H))
+    calls = []
+
+    def _alloc_mod(**verbs):
+        mod = types.SimpleNamespace(MEMORY_SPIRAM=0x400, MEMORY_DMA=0x8)
+        for k, v in verbs.items():
+            setattr(mod, k, v)
+        return mod
+
+    saved = sys.modules.get("moy_alloc")
+    try:
+        got = bytearray(13 * 7 * 2)
+        sys.modules["moy_alloc"] = _alloc_mod(
+            alloc=lambda n, caps: calls.append(("alloc", n, caps)) or got)
+        lay = dev.new_layer(13, 7)
+        assert calls == [("alloc", 13 * 7 * 2, 0x400 | 0x8)]
+        assert lay._buf is got
+
+        got2 = bytearray(13 * 9 * 2)
+        sys.modules["moy_alloc"] = _alloc_mod(
+            malloc_dma=lambda n, caps: calls.append(("dma", n, caps)) or got2)
+        lay2 = dev.new_layer(13, 9)
+        assert calls[-1] == ("dma", 13 * 9 * 2, 0x400 | 0x8)
+        assert lay2._buf is got2
+
+        sys.modules.pop("moy_alloc", None)
+        lay3 = dev.new_layer(13, 11)
+        assert isinstance(lay3._buf, bytearray) and len(lay3._buf) == 13 * 11 * 2
+    finally:
+        if saved is None:
+            sys.modules.pop("moy_alloc", None)
+        else:
+            sys.modules["moy_alloc"] = saved

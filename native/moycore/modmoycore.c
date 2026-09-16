@@ -997,7 +997,7 @@ static int l_tramp(lua_State *L)
 // owns the Fold-2 cache). These are shim machinery with p8 semantics -- tile 0
 // never draws, colorkey 0, scale 1, no flip -- and the __gff__ flag byte gates
 // each cell against the mask. The shim nil-guards both and keeps its Lua loop,
-// which is what a host without them (lupa) still takes.
+// which is what a build without them still takes.
 
 // MOY_FLAGS wide: libmoy's own fget/fset/map(..., layers) read the console's
 // flag table (SPEC.md 3.5), and this is that table here.

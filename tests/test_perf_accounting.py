@@ -13,7 +13,6 @@ project has hit. So: source pins that the brackets are on the microsecond
 clock.
 """
 
-import re
 from pathlib import Path
 
 
@@ -54,9 +53,3 @@ def test_the_frame_and_flush_brackets_use_the_microsecond_clock():
     assert "self._flush_ms = _ema(self._flush_ms, _flush / 1000.0)" in body
     assert "self._draw_ms = _ema(self._draw_ms, _draw / 1000.0)" in body
 
-
-def test_the_bar_bracket_uses_the_microsecond_clock():
-    src = _src("runtime/console.py")
-    hits = re.findall(r"self\._pf_bar = _ticks_diff\((_ticks_\w+)\(\)", src)
-    assert hits, "the bar's bracket vanished"
-    assert set(hits) == {"_ticks_us"}, hits

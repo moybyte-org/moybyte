@@ -7,7 +7,7 @@ reported the module "was never imported". The one lane that ran it,
 subprocess, so it needs `make unix-micropython`, it SKIPS without one, and
 nothing it proves is visible to a host coverage sweep. That is the #208 shape:
 a body promoted so four consumers can share it, guarded by greps
-(`test_micropython_spike`, `test_moy_button_order`, `test_streaming_sunset`)
+(`test_board_routing`, `test_moy_button_order`, `test_streaming_sunset`)
 that read source text.
 
 Nothing here is transcribed. The real file is loaded and executed against a
@@ -30,7 +30,7 @@ NOT reachable from a host, and named rather than faked into looking covered:
   owns those under the real VM; what is testable here is that the glue calls
   `run_begin` with the shape the C demands, and that is what is pinned.
 * the SRAM-floor knob, which is `run_desktop`'s (`moycore.set_sram_floor`), not
-  this file's -- pinned by `test_micropython_spike`'s boot-path check.
+  this file's -- pinned by `test_board_routing`'s boot-path check.
 * the frame COST the docstrings quote (~1ms of per-frame `_refresh` on the S3).
   Timing is glass work; the structure that bought it -- one `button_masks`
   call instead of sixteen, slot numbers bound once, no per-frame import -- is
@@ -1555,7 +1555,7 @@ def test_every_name_the_glue_reads_is_exported_by_the_c_module():
 
 
 def test_the_executed_body_is_the_file_the_boards_stage():
-    """`test_micropython_spike` keeps the ROUTING greps (a board still calls
+    """`test_board_routing` keeps the ROUTING greps (a board still calls
     `make_moycore_runtime`); the body assertions are executed above, and both
     are only looking at the same file for as long as this holds."""
     world = World()

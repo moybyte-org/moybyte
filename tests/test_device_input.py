@@ -2,7 +2,7 @@
 
 The T-Deck's trackball and GT911 touch driver: 350 lines behind one importer
 (`moy_runtime.run_desktop`), whose only nets were source-text greps in
-`tests/test_micropython_spike.py` and two checks there that build a `Touch`
+the T-Deck spike suite and two checks there that build a `Touch`
 with `__new__` and hand-fill its fields -- so `__init__` (the address probe, the
 INT-pin claim and every degrade-instead-of-die arm inside it) had never run at
 all, and the hand-filled shape had already drifted off the real one (`_down` is

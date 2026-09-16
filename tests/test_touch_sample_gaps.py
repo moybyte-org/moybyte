@@ -18,6 +18,8 @@ All dt is injected, so every trajectory here is exact (the wall-clock rule)."""
 
 from pathlib import Path
 
+from ws_helpers import build_ws, build_ws_with_shelf
+
 ROOT = Path(__file__).resolve().parent.parent
 
 DT = 16.0        # injected ms per loop frame
@@ -107,14 +109,8 @@ def test_a_finger_that_really_stops_still_reads_as_a_stop():
 
 # -- the console's dt bookkeeping --------------------------------------------
 
-def _ws(tmp_path):
-    from runtime import host_app
-
-    return host_app.build_workstation(str(tmp_path / "carts"))
-
-
 def test_stale_frames_bank_their_time_for_the_next_real_sample(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     ws._frame_dt_ms = DT
     p = ws.pointer
 
@@ -136,7 +132,7 @@ def test_stale_frames_bank_their_time_for_the_next_real_sample(tmp_path):
 
 
 def test_banked_time_is_clamped_like_the_frame_tick(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     ws._frame_dt_ms = DT
     ws.pointer.fresh = False
     for _ in range(50):                    # a long stall (the board slept, a GC hit)
@@ -148,28 +144,13 @@ def test_banked_time_is_clamped_like_the_frame_tick(tmp_path):
 
 # -- end to end: the shelf under a device-shaped sample stream ----------------
 
-def _ws_with_carts(tmp_path, n=14):
-    from runtime import host_app, moy_carts
-
-    carts_dir = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts_dir)
-    while len(ws.launcher.items) < n:
-        i = len(ws.launcher.items)
-        moy_carts.create("Extra %02d" % i, carts_dir,
-                         src="def _draw():\n    cls(1)\n", type="app")
-        ws.launcher.items = moy_carts.scan(carts_dir)
-    ws.launcher.sel = 0
-    ws.launcher.scroll = 0
-    return ws
-
-
 def _shelf_drag_with_gaps(tmp_path, frames=12, step=6):
     """Drag the shelf the way the T-Deck feeds it: the finger moves every frame,
     the hardware reports every GAP-th one, and the backend repeats its last
     point (marked stale) in between."""
     from runtime import host_app
 
-    ws = _ws_with_carts(tmp_path)
+    ws = build_ws_with_shelf(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
     for _ in range(80):
         drv.frame(1 / 60)

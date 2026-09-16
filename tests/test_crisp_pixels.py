@@ -9,13 +9,10 @@ composites nearest already and keeps its frozen Settings pixels.
 
 from pathlib import Path
 
+from ws_helpers import build_ws
+
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def _ws(tmp_path, **kwargs):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"), **kwargs)
 
 
 def _grant_hook(ws):
@@ -25,7 +22,7 @@ def _grant_hook(ws):
 
 
 def test_row_is_capability_gated(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     keys = [row[0] for row in ws.settings_layer._settings_rows()]
     assert "crisp_pixels" not in keys      # host canvas: already nearest
 
@@ -40,7 +37,7 @@ def test_row_is_capability_gated(tmp_path):
 
 
 def test_toggle_flips_persists_and_drives_the_canvas_hook(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     calls = _grant_hook(ws)
     assert ws.crisp_pixels is False        # default OFF = the shipped smooth
 
@@ -56,7 +53,7 @@ def test_toggle_flips_persists_and_drives_the_canvas_hook(tmp_path):
 
 
 def test_boot_apply_does_not_persist_but_reaches_the_canvas(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     calls = _grant_hook(ws)
     ws.system.pop("crisp_pixels", None)
     ws.set_crisp_pixels(True, persist=False)

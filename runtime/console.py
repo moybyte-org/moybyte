@@ -24,7 +24,7 @@ from editors import CodeEditor, _SheetSprite
 # Workstation holds). Same bare-or-package fallback as the _blocks_mod import
 # just below (host tests that load console.py directly without the
 # runtime/host_app.py aliasing, or one that hand-registers editors/audio/blocks/
-# console like tests/test_micropython_spike.py's _load_moy_runtime).
+# console like tests/test_device_make_api.py's _load_moy_runtime).
 try:
     from block_editor_ui import (BlockEditorUI, BlockLayout, _BLK_W, _BLK_ROWS,
                                  _BLK_AREA, _BLK_ADD, _BLK_CODE, _BLK_MENU,
@@ -688,8 +688,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         self.carts_store = None     # injected: cart store module (moy_carts API)
         # #67 dual-runtime seam: factory(ns, src) -> a running Lua cart handle
         # (.init/.update/.draw callables + .close()). build_workstation injects
-        # the lupa-backed runtime/lua_host.py; the device injects moy_lua once
-        # Phase 1 lands. None = "runtime": "lua" carts open the error panel.
+        # runtime/lua_host.MoycoreHostRun; the device injects moycore_glue's.
+        # None = "runtime": "lua" carts open the error panel.
         self.lua_runtime = None
         # OTA firmware updater (#53): injected by the device (moy_ota.OtaUpdater); None
         # on the host. When present AND the build is OTA-capable, Settings grows an
@@ -953,110 +953,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # default is a host passthrough.
         self._with_sd = lambda fn: fn()
 
-    def _init_perf(self):
-        """The perf/diag measurement fields (#43/#44/#66/#68)."""
-        # The persisted ON/OFF settings, at the registry's declared defaults
-        # (#209 section 7 -- SETTINGS_TOGGLES in settings_layer.py carries each
-        # one's prose). FLAT ATTRIBUTES on purpose and forever: both WMs read
-        # show_fps per painted game frame, and the Player reads `steady` at
-        # every run start. load_system replaces these with the store's values
-        # at boot.
-        for _key, _label, _default, _setter, _gate, _dev in SETTINGS_TOGGLES:
-            setattr(self, _key, _default)
-        self._fps = 0.0               # smoothed frames/sec DRAWN (EMA, #217)
-        self._since_draw = 0.0        # seconds since the last drawn frame
-        # Frame-time breakdown HUD (#43/#44 perf): off by default; tap the FPS
-        # readout (bottom-right, while a cart runs) to toggle it. When on, frame()
-        # records the per-frame split in ms -- _flush_ms is the compositor's panel
-        # DMA flush (comp.flush(); ~0 on the host's _NullComp), _draw_ms is the
-        # rest (cart _update/_draw + the console's own draw = total minus flush).
-        # All EMA-smoothed like _fps so the numbers read steady, not single-frame
-        # jitter. This tells us whether the wall is the SPI flush or the per-frame
-        # MicroPython draw cost on device. Measurement only -- no render-path change.
-        self.perf_hud = False         # frame-time breakdown HUD shown? (tap FPS to toggle)
-        self._uncap = False           # the serial `uncap` diag (tick_model): a cart
-                                      # started while it is on draws every loop frame
-        # perf_capture decouples the per-frame timing MEASUREMENT from drawing the
-        # HUD: when either perf_hud OR perf_capture is set, frame() records the
-        # flush/draw split (the two cheap ticks calls below). The device backend
-        # (moy_runtime.run_desktop) sets perf_capture=True so it can SAMPLE these
-        # numbers into the offline diag log without painting the HUD on screen.
-        # Default False -> host behaviour is byte-identical (no extra ticks calls).
-        self.perf_capture = False     # measure flush/draw without drawing the HUD
-        # The frame loop's per-stage deadline meters (#210,
-        # device_boot.StageMeters): stamped here by FrameLoop on the boards, and
-        # None on every tier that runs its own loop (the host simulator, the
-        # wasm head), which is why the `state` blob reads it through a probe.
-        # Reset per run by the Player, dumped by the dev channel's `state`.
-        self.stage_meters = None
-        self._flush_ms = 0.0          # smoothed comp.flush() ms (panel DMA)
-        self._draw_ms = 0.0           # smoothed draw ms (total frame - flush)
-        # DRAWBRK phase split of _draw_ms (#43 follow-up): where the per-frame draw
-        # cost actually goes -- cart _update, cart _draw, and the console chrome
-        # (bar + cursor + overlays, the remainder). Surfaced via perf_breakdown().
-        self._upd_ms = 0.0            # smoothed cart _update(dt) ms (game LOGIC)
-        self._cart_ms = 0.0           # smoothed cart _draw() ms (RENDERING)
-        self._audio_ms = 0.0          # smoothed audio.tick(dt) ms (mixer feed)
-        self._chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart - audio)
-        # LAYERBRK (#172) / the hitch logger's hp() detail (#184): the two stack
-        # walks, split per layer. _pf_layers is {layer.id: us} for the last
-        # PAINTED frame (rebuilt each paint under _perf); _pf_ptr is a fixed
-        # 6-slot scratch overwritten in place by handle_pointer --
-        # [total_us, pre_us, worst_us, worst_id, claim_id, n_visited].
-        self._pf_layers = None
-        self._pf_ptr = [0, 0, 0, None, None, 0]
-        self._ptr_last_x = -1     # handle_pointer's idle fast-path: last routed
-        self._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
-        self._ptr_was_down = False  # ...and whether it was held (release edge)
-        self._gp_idle = None      # the idle game_pointer we last published, and
-        self._gp_key = [None] * 7  # the geometry it was mapped through: the
-                                   # declared view, both canvases, their dims
-        # Per-frame method probes, cached by the object they were taken on
-        # (#66 lever 1): getattr on a method allocates a bound method each call.
-        self._rs_cv = None        # _reset_canvas_state's canvas / reset_state
-        self._rs_fn = None
-        self._fb_cv = None        # _flush_batches' game canvas / flush_batch
-        self._fb_cv_fn = None
-        self._fb_sc = None        # ...and the system canvas's
-        self._fb_sc_fn = None
-        self._lb_wm = None        # frame()'s WM / letterbox_inplace
-        self._lb_fn = None
-        self._probe_sc = None     # frame()'s system-canvas probes (begin_surface
-        self._probe_surf = None   # / skip_surface / view) and the game canvas's
-        self._probe_sksurf = None # `buf`, re-taken only when the object changes
-        self._probe_view = None
-        self._probe_gc = None
-        self._probe_buf = None
-        # #184 deferred transitions: [armed, fn] entries queued by defer().
-        # A tap handler schedules its heavy transition here instead of running
-        # it inside the pointer walk; frame() paints the acknowledgment first
-        # (arming the entry after the flush), then runs it at the next frame's
-        # top -- so the pressed state is ON GLASS during the load stall.
-        self._deferred = []
-        # RAW (un-smoothed) copy of THIS frame's phase split (#66 HITCH v3): the
-        # EMAs above hide which phase a single 150ms hitch frame spent its time
-        # in (a one-frame spike moves an alpha=0.15 EMA by only 15% of itself).
-        # The hitch logger prints these instead.
-        self._raw_upd = 0.0
-        self._raw_cart = 0.0
-        self._raw_audio = 0.0
-        self._raw_chrome = 0.0
-        self._raw_flush = 0.0
-        self._raw_draw = 0.0
-        # CHROMEBRK sub-split of _chrome_ms (#66 lever 5, instrument-before-cutting):
-        # what the ~4-6ms of cart-path chrome actually buys -- the top status bar
-        # (_draw_status_strip), the game->system viewport composite (a no-op when the
-        # canvases are one object, i.e. today's 320x240 device), the cursor, the rest
-        # of the WM stack walk (_stk_ms, 2026-08-14), and the router remainder.
-        # Only measured on the running-cart path with perf capture on; surfaced via
-        # perf_chrome() -> the device CHROMEBRK diag line.
-        self._bar_ms = 0.0
-        self._cmp_ms = 0.0
-        self._cur_ms = 0.0
-        self._stk_ms = 0.0  # the WM stack walk's CHROME share (2026-08-14)
-        self._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
-        # (The clock-text cache moved to self.bar_layer with the rest of the bar #66.)
-
     def _init_overlays(self):
         """Achievements/eggs (#21), the system menu (#52), device hooks, and the
         #44 redraw gate."""
@@ -1128,23 +1024,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
                                       # a coasting fling re-arms the gate the
                                       # covers.take_deferred way -- set DURING a draw,
                                       # consumed after the gate cleared _dirty)
-        # Per-frame perf scratch (#43/#66): the running-cart content Layer fills these
-        # during its draw so the router's frame-end DRAWBRK/CHROMEBRK accounting can read
-        # the split without threading it back through the loop. Zeroed each frame().
-        # MICROSECONDS since 2026-08-14 -- ms truncation was piling into CHROMEBRK's
-        # `other`, which is a residual and so inherited every term's rounding.
-        self._pf_upd = 0
-        self._pf_cart = 0
-        self._pf_audio = 0
-        self._pf_bar = 0
-        self._pf_bg = 0     # #172: the declared-backdrop share of _pf_cart
-        self._pf_stack = 0  # total us of the last painted frame's layer walk
-        # #172: the frame's unmeasured EDGES, us -- pre = entry..draw span open
-        # (journal tick, splash, tick-model gate, redraw gate), post = the tail
-        # after the flush (dirty clear, covers/fling re-arm, pointer snapshot).
-        self._pf_pre = 0
-        self._pf_post = 0
-
 
     # -- the layer stack (compositor / router) -------------------------------
 
@@ -2088,16 +1967,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
             self._go_home_or_back()
 
     def _draw_cart_bar(self):
-        """Draw the unified top bar over the CRASH frame (the only cart-path chrome left
-        after Stage 5 retired the pause frame). The bar is the shell's, not the Player's,
-        so its draw + the _pf_bar (CHROMEBRK) accounting stay here; the Player asks for it
-        via this thin helper so player.py never reaches the bar surface directly (the
-        Stage-2 isolation guarantee)."""
-        _perf = self.perf_hud or self.perf_capture
-        _tb = _ticks_us() if _perf else 0
+        """Draw the unified top bar over the CRASH frame (the only cart-path chrome
+        a game gets). The bar is the shell's, not the Player's; the Player asks
+        for it via this thin helper so player.py never reaches the bar surface
+        directly."""
         self.bar_layer._draw_status_strip("desktop")   # unified top bar (tool switcher)
-        if _perf:
-            self._pf_bar = _ticks_diff(_ticks_us(), _tb)   # CHROMEBRK: the bar's share (us)
 
     def _cart_bar_tap(self, px, py):
         """Route a CRASH-frame tap to the top-bar tool switcher (bar-owned), returning
@@ -2125,14 +1999,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
                 and self.cart.get("type") in BAR_TYPES)
 
     def _draw_tool_bar(self):
-        """Draw the minimal TOOL bar over a running tool/app (Part 4). Same shell-owned
-        draw + _pf_bar accounting as _draw_cart_bar; the Player asks for it via this thin
-        helper so player.py never reaches the bar surface directly (Stage-2 isolation)."""
-        _perf = self.perf_hud or self.perf_capture
-        _tb = _ticks_us() if _perf else 0
+        """Draw the minimal TOOL bar over a running tool/app (Part 4). Shell-owned
+        like _draw_cart_bar; the Player asks for it via this thin helper so
+        player.py never reaches the bar surface directly."""
         self.bar_layer._draw_status_strip("tool")   # minimal bar: title + status + X
-        if _perf:
-            self._pf_bar = _ticks_diff(_ticks_us(), _tb)   # CHROMEBRK: the bar's share (us)
 
     def _tool_bar_tap(self, px, py):
         """Route a running-TOOL tap (px, py in GAME coords) to the minimal bar: the
@@ -3751,11 +3621,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
 
     # -- content-layer draw bodies (routed from the frame() stack loop) -------
     #
-    # (The running-cart content body -- the cart tick + pause/crash chrome -- moved to
-    # Player.tick (Stage 2, player.py). It still fills the DRAWBRK perf split ws._pf_*
-    # exactly as before, and asks the shell for the top bar via _draw_cart_bar (which
-    # keeps the _pf_bar CHROMEBRK accounting here). The "desktop" content layer routes
-    # to it via _PlayerLayer.)
+    # (The running-cart content body -- the cart tick + crash chrome -- is
+    # Player.tick (player.py). It fills the DRAWBRK perf split ws._pf_* and asks
+    # the shell for the top bar via _draw_cart_bar. The "desktop" content layer
+    # routes to it via _PlayerLayer.)
 
     # (_draw_menu_backdrop -- the frozen-cart backdrop under the cards/paint/map
     # panels -- was removed by the #39 step-3 conversions: every Editor tab is
@@ -3763,22 +3632,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
     # just reset the game canvas's draw state and paint their own opaque body.)
 
     def frame(self, dt):
-        # #172: bracket the frame's UNMEASURED edges. `draw` starts at _frame_t0,
-        # which is after the journal idle tick, the splash check, the tick-model
-        # gate and the redraw gate -- so all of that, plus the dirty/pointer
-        # bookkeeping in the tail, sits inside the loop's `frm` but outside
-        # DRAWBRK+flush. Comparing those two (an EMA against a windowed mean)
-        # put the gap somewhere between -4 and +15ms, which is not a measurement.
-        # Bracketing it is.
-        # DEEP meters (frame edges, per-layer walk timing, per-op canvas timers,
-        # the DRAWBRK/CHROMEBRK EMA tail) run ONLY under perf_capture -- the
-        # measurement-session mode. perf_hud alone keeps the LIGHT set (frame
-        # total, flush, fps): watching the fps chip must not cost milliseconds.
-        # 2026-08-03: the deep set is post-ledger instrumentation, and with
-        # run_desktop arming capture unconditionally it was ~1-1.5ms of every
-        # frame on the S3 -- a real slice of the fps regression it existed to
-        # find. Capture now follows Settings -> PERF DIAG on device.
-        _fe0 = _ticks_us() if self.perf_capture else 0
+        # DEEP meters (the per-op canvas timers, the batch counters, the DRAWBRK
+        # EMA tail) run ONLY under perf_capture -- the measurement-session mode,
+        # which follows Settings -> PERF DIAG on device. perf_hud alone keeps
+        # the LIGHT set (frame total, flush, fps): watching the fps chip must
+        # not cost milliseconds.
         if dt > 0:
             self._since_draw += dt
             # The loop tick in ms for the input phase (which runs BEFORE frame()
@@ -3868,36 +3726,25 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # fires when perf_capture is set (device diag sampling) -- not just the HUD.
         _perf = self.perf_hud or self.perf_capture
         _deep = self.perf_capture
-        # MICROSECONDS (2026-08-14). Everything in the DRAWBRK/CHROMEBRK family
-        # runs on this clock now; see _frame_perf_end for why the ms one was
-        # manufacturing the remainder it was being read to explain.
+        # MICROSECONDS: every DRAWBRK bracket is on this clock, converted to ms
+        # once at the EMA (_frame_perf_end).
         _frame_t0 = _ticks_us() if _perf else 0
-        if _deep:
-            # Everything from frame() entry to here: journal idle tick, splash
-            # expiry, the tick-model gate, and the redraw gate itself.
-            self._pf_pre = _ticks_diff(_ticks_us(), _fe0)
-        _cmp = 0            # CHROMEBRK: _composite_game us
-        _cur = 0            # CHROMEBRK: _draw_cursor us
         if _deep:
             _bc = getattr(self.canvas, "batch_reset", None)
             if _bc is not None:
                 _bc()                  # #63: zero this frame's auto-batch profiling counters
-            # Per-frame perf scratch (the running-cart content Layer fills self._pf_*).
-            # #75: zeroed ONLY under _perf -- the writers (Player.tick / the bar draws)
-            # only fill them under _perf too, and the reads below are _perf-gated, so a
-            # kid-mode play frame skips the five attribute stores entirely.
-            #
-            # These stores MUST live in the _perf branch, not the elif below: a
-            # 2026-07-26 edit nested them under "_prof just went off", so under
-            # steady capture a frame whose writer didn't fire REPORTED THE
-            # PREVIOUS WRITER'S VALUE -- launcher frames carried the last cart
-            # frame's logic/render in every HITCH line, and DRAWBRK/CHROMEBRK
-            # attribution after that date is suspect (found auditing #172).
-            self._pf_upd = 0    # cart _update(dt) ms (game LOGIC); 0 off the cart path
-            self._pf_cart = 0   # cart _draw() ms (RENDERING)
-            self._pf_audio = 0  # audio.tick(dt) ms (mixer feed) -- split out from render
-            self._pf_bar = 0    # CHROMEBRK: _draw_status_strip ms (cart path only)
-            self._pf_bg = 0     # #172: backdrop restore (cart path only)
+            # The DRAWBRK scratch (Player.tick fills it on the cart path, in
+            # us). Zeroed ONLY under capture -- the writer fills it under
+            # capture too and the reads are capture-gated, so a kid-mode play
+            # frame skips the four stores. Zeroed HERE, on every captured
+            # frame, never under "capture just went off": a frame whose writer
+            # did not fire would otherwise report the previous writer's value
+            # (launcher frames once carried the last cart frame's logic/render
+            # in every HITCH line).
+            self._pf_upd = 0    # cart _update(dt) (game LOGIC); 0 off the cart path
+            self._pf_cart = 0   # cart _draw() (RENDERING)
+            self._pf_audio = 0  # audio.tick(dt) (mixer feed)
+            self._pf_bg = 0     # the backdrop restore's share of _pf_cart
         elif getattr(self.canvas, "_prof", False):
             # Perf capture just went off: clear the device canvas's DRAW2 timing
             # gate so its hot verbs stop paying the per-op ticks_us pair (~6us a
@@ -3914,14 +3761,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # cursor is always the top system layer, so a game-domain content is always
         # composited before it -- reproducing the pre-refactor single composite step.
         _prev_domain = None
-        # #172: per-layer draw cost (us) keyed by layer.id. CHROMEBRK's `other`
-        # IS this walk -- on the 2026-07-29 T-Deck regression it was 6.7ms of a
-        # Brick Siege frame with bar/cmp/cur all reading ~0.00, i.e. every named
-        # bucket said "not me". Timing the walk names the layer directly instead
-        # of narrowing again; a cost spread evenly across it says the stack
-        # machinery, not one layer. Built only under _perf, so the kid-mode path
-        # never allocates the dict.
-        _lay = {} if _deep else None
         # WM-surface mark (Stage 9, docs/history/shell_ux_technical_plan_v1.md): when a RECORDING system
         # canvas is installed (the opt-in web view), tag each WM-stack surface so the recorder
         # slices the frame into ONE stream per surface (bar / app-content / player-viewport) --
@@ -4010,11 +3849,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
                 if _game_open:                      # close the placement span
                     _view()
                     _game_open = False
-                _tc = _ticks_us() if _deep else 0
                 self._composite_game()
                 _fold_live = True
-                if _deep:
-                    _cmp = _ticks_diff(_ticks_us(), _tc)   # CHROMEBRK: viewport composite
             if _fold_live and (layer is not self._cursor_layer
                                or (self.pointer is not None
                                    and self.pointer.visible)):
@@ -4043,34 +3879,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
             if _lb is not None and layer.domain == "game" and not _lb_done:
                 _lb()
                 _lb_done = True
-            if _lay is not None:
-                _tk = _ticks_us()
-                layer.draw(dt)
-                if _appbar is not None and layer.id in _appbar:
-                    self.bar_layer._draw_status_strip("tool")   # host guarantee
-                _lus = _ticks_diff(_ticks_us(), _tk)
-                # SUMMED, not assigned: the windowed WM draws several windows
-                # that share one layer id, and each would otherwise clobber the
-                # last -- exactly the case where the number has to be a total.
-                _lay[layer.id] = _lay.get(layer.id, 0) + _lus
-                if layer.id == "cursor":
-                    _cur = _lus                     # CHROMEBRK: cursor (us)
-            else:
-                layer.draw(dt)
-                if _appbar is not None and layer.id in _appbar:
-                    self.bar_layer._draw_status_strip("tool")   # host guarantee
+            layer.draw(dt)
+            if _appbar is not None and layer.id in _appbar:
+                self.bar_layer._draw_status_strip("tool")   # host guarantee
             _prev_domain = layer.domain
-        if _deep:
-            # Last PAINTED frame's split (the skip/quiet gates return above), so
-            # it keeps the same "sample whenever you like" contract as DRAW2.
-            self._pf_layers = _lay
-            # ...and its TOTAL, which is what turns CHROMEBRK's `other` from a
-            # residual into a partition: the walk is one measured bucket, and
-            # what remains after it is the router machinery alone.
-            _st = 0
-            for _v in _lay.values():
-                _st += _v
-            self._pf_stack = _st
         if _game_open:                              # game was the TOP layer
             _view()
         if self._deferred:
@@ -4097,7 +3909,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # calls gated on perf_hud OR perf_capture (device diag sampling), so the
         # render path itself is unchanged.
         if _perf:
-            self._frame_perf_end(_frame_t0, _cmp, _cur)
+            self._frame_perf_end(_frame_t0)
         else:
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
@@ -4116,12 +3928,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         if self._ptr_changed():          # rebuilt only when it moved: no tuple
             self._last_ptr = self._ptr_state()   # on a static-pointer frame
         self._frames_drawn += 1
-        if _deep:
-            # The tail after the flush: dirty clear, the covers/fling re-arms,
-            # and the pointer snapshot. Small by inspection -- measured so that
-            # `pre` can be read as the whole of the unnamed edge, not a guess.
-            self._pf_post = _ticks_diff(_ticks_us(), _fe0) - self._pf_pre \
-                - int(self._raw_draw * 1000) - int(self._raw_flush * 1000)
         if self._deferred:
             # #184: the flush above PRESENTED this frame's LOADING
             # acknowledgment -- now run the queued transition(s) behind it.

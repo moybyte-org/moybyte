@@ -177,7 +177,7 @@ class BarLayer:
         # before, which is a perf floor, not a correctness problem.
         self._bar_strips = {}
         self._bar_cache_gen = 0
-        # Clock-text cache (#66 CHROMEBRK): (second, string) -- see _clock_text.
+        # Clock-text cache (#66): (second, string) -- see _clock_text.
         self._clock_at = -1
         self._clock_cache = ""
 
@@ -531,7 +531,7 @@ class BarLayer:
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
         uptime so the strip always shows a live clock (host == device). Cached
-        per second (#66 CHROMEBRK): the cart bar's cache KEY calls this every
+        per second (#66): the cart bar's cache KEY calls this every
         frame, and re-running localtime + %-format 30x/s was a measurable slice
         of the ~2.3ms bar cost -- the string can only change once a second."""
         now_s = _ticks_ms() // 1000

@@ -11,7 +11,9 @@ paths:
   suites once asserted device bodies as source STRINGS, which is how a meter
   printed a constant for weeks behind a green test. What legitimately stays a grep
   is ROUTING — that a board still calls a shared helper — and
-  `tests/test_micropython_spike.py` keeps only those.
+  `tests/test_board_routing.py` keeps only those; the T-Deck's own drivers are
+  executed in `tests/test_tdeck_input.py`, the device make_api in
+  `tests/test_device_make_api.py`.
 
 - **The hosted console has a CI net, and its skips have TEETH.**
   `tests/test_web_sync_e2e.py` and `tests/test_web_persist_e2e.py` are the only

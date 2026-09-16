@@ -11,13 +11,13 @@
 -- (#214) -- so after a repaint the points are draggable in the Scene tab.
 --
 -- The port is line-faithful by design: same globals, same helper split, same
--- arithmetic in the same order, so the two runtimes produce bit-identical petal
--- state and draw streams (verified per frame by
--- experiments/lua_bridge/host_parity.py).
+-- arithmetic in the same order, so the two runtimes produce the same draw stream
+-- and the same petal state to within float32 drift (verified per frame by
+-- experiments/lua_bridge/host_parity.py, which runs this file on the shipped VM).
 -- Kept in lockstep with sakura.moy/main.py: edit BOTH or the parity test fails.
 -- Launches through the manifest "runtime": "lua" seam: host and device run the
 -- SAME vendored Lua -- runtime/lua_host.py over the ctypes binding here,
--- moycore there. (lupa, the host's second embedding, was deleted 2026-08-14.)
+-- moycore there.
 --
 -- Port conventions (the canonical .lua cart shapes, to be written up in the
 -- #67 Phase 5 docs pass):

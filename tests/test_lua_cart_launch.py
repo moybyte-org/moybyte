@@ -37,7 +37,7 @@ def _open(ws, title):
     raise AssertionError("no seed cart titled " + title)
 
 
-# -- store passthrough (no lupa needed) -----------------------------------------
+# -- store passthrough (no binding needed) -------------------------------------
 
 def test_load_carries_runtime_and_main(tmp_path):
     from runtime import moy_carts
@@ -77,7 +77,7 @@ def test_save_code_writes_the_manifest_main(tmp_path):
     assert (Path(cart["path"]) / "main.lua").read_text().endswith("-- edited\n")
 
 
-# -- the launch seam (needs lupa) ------------------------------------------------
+# -- the launch seam (needs the host binding) ------------------------------------
 
 def test_lua_cart_runs_under_the_player(tmp_path):
     _need_lua()
@@ -90,9 +90,8 @@ def test_lua_cart_runs_under_the_player(tmp_path):
         ws.frame(1 / 30)
     assert ws.player.cart_error is None
     # the cart world lives in the LUA state: 120 petals falling
-    # Read through the run's own accessor, not lupa's internals: the host runs
-    # the boards' Lua now, and a test that reaches into one embedding's guts
-    # only ever tested that embedding.
+    # Read through the run's own accessor, never an embedding's internals: a
+    # test that reaches into one VM's guts only ever tested that VM.
     assert ws.player._lua.get_global_len("petals") == 120
 
 
@@ -122,7 +121,7 @@ def test_lua_error_routes_to_the_cart_panel(tmp_path):
     assert ws.player.cart_error is not None
     assert "boom" in ws.player.cart_error
     # #67 Phase 5: the error position maps to the cart line (error() on line 2)
-    # and lupa's traceback block is trimmed to the device-parity one-liner.
+    # and any traceback block is trimmed to the device-parity one-liner.
     assert ws.player.crash_line == 2
     assert "stack traceback" not in ws.player.cart_error
 
@@ -166,7 +165,7 @@ def test_lua_load_error_drops_on_the_line(tmp_path):
 
 
 def test_lua_cart_line_parser_shapes():
-    # The text parser both backends' error texts route through (no lupa needed).
+    # The text parser both backends' error texts route through (no binding needed).
     from runtime.player import _lua_cart_line
     assert _lua_cart_line("cart:12: attempt to add a nil value") == 12
     assert _lua_cart_line("LuaError: cart:3: boom") == 3
@@ -180,10 +179,10 @@ def test_lua_cart_line_parser_shapes():
 
 # test_bullet_storm_seed_cart_runs lived here until 2026-08-14. It forced a
 # DEATH by writing the cart's globals (park the ship on the enemy, zero the
-# i-frames) and asserting the game-over state came out clean -- and it could
-# only do that through lupa, which hands Lua real Python objects. The moycore
-# boundary marshals ints and one string, exposes globals READ-ONLY by design,
-# and lupa is gone, so the poke is not expressible any more.
+# i-frames) and asserting the game-over state came out clean -- which needed
+# an embedding that hands Lua real Python objects. The moycore boundary
+# marshals ints and one string and exposes globals READ-ONLY by design, so the
+# poke is not expressible any more.
 #
 # What is lost, stated rather than quietly dropped: nothing else drives this
 # cart to its game-over branch. test_bullet_storm_runs_on_moycore below keeps
@@ -195,11 +194,11 @@ def test_lua_cart_line_parser_shapes():
 def test_bullet_storm_runs_on_moycore(tmp_path):
     """The same cart on the boards' own Lua, observed from outside.
 
-    This is the half the lupa test cannot cover and the half that regressed:
-    bullet_storm's `_init` calls make_layer, which is object-valued, so before
-    the shared handle glue reached this runtime the cart's layer came back nil
-    -- and because _init raised, the run failed to LOAD and quietly fell back
-    to lupa, which is why every lua test still passed while moycore ran none of
+    This is the half that regressed: bullet_storm's `_init` calls make_layer,
+    which is object-valued, so before the shared handle glue reached this
+    runtime the cart's layer came back nil -- and because _init raised, the
+    run failed to LOAD and quietly fell back to the second embedding of the
+    day, which is why every lua test still passed while moycore ran none of
     these carts. So the assertion that matters is the negative one: the run is
     a MoycoreHostRun, not a fallback.
     """
@@ -210,7 +209,7 @@ def test_bullet_storm_runs_on_moycore(tmp_path):
     _open(ws, "Bullet Storm")
     assert ws.player.cart_error is None
     assert type(ws.player._lua).__name__ == "MoycoreHostRun", \
-        "the cart fell back to lupa -- the handle glue did not take"
+        "the cart is not on MoycoreHostRun -- the handle glue did not take"
     for _ in range(300):
         ws.frame(1 / 60)
         assert ws.player.cart_error is None

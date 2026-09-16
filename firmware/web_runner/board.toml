@@ -64,8 +64,8 @@ The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
 file = "lua_host.py"
 kind = "host-only"
 why  = """
-The host's Lua cart runner (lupa, a CPython extension). The browser runs
-moycore, compiled in as a usermod since 2026-08-13."""
+The host's Lua cart runner over runtime/lua_binding, a ctypes build of the
+boards' Lua. The browser runs moycore, compiled in as a usermod."""
 
 [[modules.shared.deny]]
 file = "gfx_binding.py"

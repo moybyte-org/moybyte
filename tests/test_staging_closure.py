@@ -511,7 +511,7 @@ def test_modules_that_cannot_load_on_a_board_are_not_frozen_onto_one(target):
 @pytest.mark.parametrize("target", TARGETS)
 def test_no_host_only_module_is_frozen_onto_a_target(target):
     """The mirror-image bug: a module that imports cleanly and then cannot
-    work, because it needs a compiler, ctypes, lupa, or a subprocess."""
+    work, because it needs a compiler, ctypes, or a subprocess."""
     leaked = sorted(set(frozen_set(target)) & HOST_ONLY[target])
     assert not leaked, "%s freezes host-only modules: %s" % (target, leaked)
 

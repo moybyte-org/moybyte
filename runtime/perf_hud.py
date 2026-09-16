@@ -2,12 +2,12 @@
 Workstation (runtime/console.py).
 
 Two layers, the same split as the console's other sub-UIs:
-  * The perf *query* API -- Workstation.perf_sample / perf_breakdown /
-    perf_breakdown_raw / perf_chrome / perf_batch -- STAYS on Workstation.
-    Those are the device backend's measurement contract (moy_runtime.run_desktop
-    calls `ws.perf_sample()` / `ws.perf_breakdown()` every few seconds for its
-    PERF/DRAWBRK diag lines, and tests pin `def perf_sample(self):` to the
-    console module). They read the frame-timing fields the frame loop writes.
+  * The perf *query* API -- perf_sample / perf_breakdown / perf_breakdown_raw /
+    perf_backdrop / perf_pointer / perf_batch -- is the PerfMeters mixin's
+    (runtime/console_perf.py). Those are the device backend's measurement
+    contract (device_diag calls `ws.perf_sample()` / `ws.perf_breakdown()`
+    every few seconds for its PERF/DRAWBRK diag lines). They read the
+    frame-timing fields the frame loop writes.
   * PerfHud (here) -- the tiny bottom-right FPS chip + optional frame-time
     breakdown drawn over it, plus the tap target that toggles the HUD. Pure
     read-only consumer of the owning Workstation's timing fields; it draws, it

@@ -18,7 +18,7 @@ dev = [
   "pytest",
   "pytest-xdist", # `make test` runs the ~2000 host tests across cores (3m25s -> ~40s)
   "pillow",       # GIF export: tools/make_site_gifs.py + simulate_desktop.py --gif
-  "pyflakes",     # the undefined-name gate (tests/test_micropython_spike.py):
+  "pyflakes",     # the undefined-name gate (tests/test_undefined_names.py):
                   # a moved body naming a symbol its new namespace never
                   # imported NameErrors only when the line runs, on glass
 ]

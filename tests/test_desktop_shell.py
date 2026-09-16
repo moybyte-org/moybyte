@@ -1169,3 +1169,22 @@ def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path)
     # is a BOOL: an inner session's exit would clear the bracket while the
     # outer one is still on the bus.
     assert depth[0] == 0
+
+
+def test_the_cursor_hides_after_the_idle_window_and_a_move_wakes_it():
+    """The trackball cursor auto-hides after `idle_ms` without movement; a
+    move wakes it, and a touch placement keeps it hidden (the finger already
+    shows where you are). All on an injected clock."""
+    from runtime.widgets import Pointer
+
+    p = Pointer(320, 240, idle_ms=100)
+    p.move(1, 0)
+    assert p.visible
+    p.tick(p._last_move + 99)
+    assert p.visible
+    p.tick(p._last_move + 100)
+    assert not p.visible
+    p.move(1, 0)
+    assert p.visible
+    p.place(5, 5)
+    assert not p.visible and (p.x, p.y) == (5, 5)

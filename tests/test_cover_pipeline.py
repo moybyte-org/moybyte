@@ -150,7 +150,7 @@ def test_native_and_python_crops_are_byte_identical(tmp_path):
 
     (On the host there is no moy_gfx, so the fast path is absent and this
     pins the REFERENCE the device kernel was written against; the device half
-    is grepped by tests/test_micropython_spike.py.)"""
+    is executed by tests/test_device_canvas_parity.py.)"""
     from runtime import cover_cache
     from runtime.console import _ticks_ms
 

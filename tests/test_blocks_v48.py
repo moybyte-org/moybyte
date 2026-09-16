@@ -37,7 +37,7 @@ def _program(vars_=None, lists_=None, scripts=None):
     return p
 
 
-from blocks_helpers import run_cart as _run_cart  # noqa: E402
+from blocks_helpers import run_cart as _run_cart, go_to_insert  # noqa: E402
 
 
 # The portable subset / MicroPython-safe gate (same spirit as moybyte_cli/portable.py
@@ -355,12 +355,6 @@ def _be():
     return BlockEditor(blocks)
 
 
-def _go_to_insert(be, depth, which=-1):
-    found = [i for i, r in enumerate(be.rows) if r.kind == "insert" and r.depth == depth]
-    assert found, "no insert row at depth %d" % depth
-    be.cur = found[which]
-
-
 def test_editor_new_list_creates_unique_names_across_vars_and_lists():
     be = _be()
     a = be.new_list("list")
@@ -377,7 +371,7 @@ def test_editor_new_list_creates_unique_names_across_vars_and_lists():
 def test_editor_rename_list_rewrites_references():
     be = _be()
     name = be.new_list("list")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("list_add", {"item": 1, "list": name})
     applied = be.rename_list(name, "enemies!!")
     assert applied == "enemies"                  # sanitized
@@ -393,12 +387,12 @@ def test_editor_inserts_list_blocks_then_compiles_and_runs():
     be = _be()
     be.add_var("it")
     name = be.new_list("nums")
-    _go_to_insert(be, 1)                          # on_start trailing insert
+    go_to_insert(be, 1)                          # on_start trailing insert
     be.insert_block("list_add", {"item": 42, "list": name})
     # a for_each in on_draw
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     fe = be.insert_block("for_each", {"var": "it", "list": name})
-    _go_to_insert(be, 2)                          # inside the for_each body
+    go_to_insert(be, 2)                          # inside the for_each body
     be.insert_block("spr", {"id": 0, "x": mk("var", {"var": "it"}), "y": 0})
     src = blocks.compile_blocks(be.program)
     assert "nums.append(42)" in src and "for it in nums:" in src

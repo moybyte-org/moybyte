@@ -107,9 +107,7 @@ class MoycoreHostRun:
             # The object-valued verbs, through the shared int-handle glue --
             # the same module and the same prelude the boards run. Without it
             # `make_layer` returns a Layer, the dispatch cannot marshal it, and
-            # the cart gets nil back: sakura_lua died on `lay:spr(...)` rather
-            # than falling back to lupa, which is a worse failure than the one
-            # the fallback exists for.
+            # the cart gets nil back: sakura_lua died on `lay:spr(...)`.
             self._layers, self._images = install_handles(ns, reg)
             err = self._run.exec(PRELUDE_HANDLES, "prelude")
             if err:
@@ -201,6 +199,11 @@ class MoycoreHostRun:
         """A cart global as a number, or None -- what the parity suites read."""
         return self._run.get_global(name)
 
+    def exec(self, src, name="probe"):
+        """Run a chunk in the cart's state; None, or the error text. The parity
+        harnesses' probe: a state dump or a crafted call, never cart code."""
+        return self._run.exec(src, name)
+
     def get_global_len(self, name):
         """The length of a table global (Lua's #t), or None."""
         return self._run.get_global_len(name)
@@ -209,8 +212,8 @@ class MoycoreHostRun:
         return None
 
     def close(self):
-        # Tear the hooks down with the state, as lupa's run does: the Player
-        # and its tests read `update is None` as "this run is over".
+        # Tear the hooks down with the state: the Player and its tests read
+        # `update is None` as "this run is over".
         self.update = None
         self.draw = None
         self._run.close()

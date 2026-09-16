@@ -22,8 +22,8 @@ Two deliberate choices, recorded:
 
 * **No compiler means SILENCE, not a fallback synth** (owner decision,
   2026-08-11 -- KISS). ``get()`` returns None and AudioEngine degrades to
-  zero-filled PCM, the same graceful-absence pattern lupa uses for the Lua
-  host runner. The old degradation lane WAS the Python twin, and the twin's
+  zero-filled PCM, the same absence the Lua host runner presents without a
+  compiler. The old degradation lane WAS the Python twin, and the twin's
   drift class is what stage 0 exists to delete.
 
 MicroPython never imports this file (the boards bind libmoy natively via

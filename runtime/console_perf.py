@@ -74,6 +74,13 @@ class PerfMeters:
         # handle_pointer -- [total_us, pre_us, worst_us, worst_id, claim_id,
         # n_visited].
         self._pf_ptr = [0, 0, 0, None, None, 0]
+        # The DRAWBRK split's per-frame scratch, MICROSECONDS: Player.tick
+        # writes it on the cart path under capture, frame() zeroes it on every
+        # captured frame, _frame_perf_end converts once at the EMA.
+        self._pf_upd = 0      # cart _update(dt) (game LOGIC)
+        self._pf_cart = 0     # cart _draw() + the backdrop restore (RENDERING)
+        self._pf_audio = 0    # audio.tick(dt) (mixer feed)
+        self._pf_bg = 0       # the backdrop restore's share of _pf_cart
         self._ptr_last_x = -1     # handle_pointer's idle fast-path: last routed
         self._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
         self._ptr_was_down = False  # ...and whether it was held (release edge)
@@ -142,16 +149,13 @@ class PerfMeters:
         d = self.costs
         d[what] = d.get(what, 0) + 1
 
-    def _frame_perf_end(self, frame_t0, cmp_us, cur_us):
-        """The #43/#44 perf-capture frame tail (extracted from frame() so the hot
-        router stays readable): time the panel DMA flush in isolation, back out
-        the draw span, and EMA the DRAWBRK split. Only called when
+    def _frame_perf_end(self, frame_t0):
+        """The perf-capture frame tail: time the panel DMA flush in isolation,
+        back out the draw span, and EMA the DRAWBRK split. Only called when
         perf_hud/perf_capture is on -- the kid-mode path flushes directly, so the
         render path itself is unchanged. The timing fields stay on the
         Workstation (the device diag contract -- perf_sample/perf_breakdown
-        read them). `cmp_us`/`cur_us` are the router's composite and cursor
-        brackets; nothing reads them since the chrome sub-split's only consumer
-        went, and they stay in the signature for the caller's sake.
+        read them).
 
         EVERY BRACKET IN HERE IS MICROSECONDS (2026-08-14), converted to ms once,
         at the EMA. It used to be ticks_ms, and that quietly broke the one number
@@ -254,9 +258,9 @@ class PerfMeters:
 
         A SUB-slice of perf_breakdown()'s render, not a fourth bucket: it is the
         cart's own drawing, standing in for the cls() it would otherwise make
-        first thing. It used to fall outside every measured span and surface as
-        CHROME, which on the T-Deck read as ~4.7ms of shell cost that no
-        CHROMEBRK bucket could name. Feeds DRAWBRK's `bg=`."""
+        first thing. Measured on its own so that it cannot surface as CHROME
+        (on the T-Deck it read as ~4.7ms of shell cost while it did). Feeds
+        DRAWBRK's `bg=`."""
         return self._bg_ms
 
     def perf_pointer(self):

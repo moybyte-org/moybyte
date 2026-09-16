@@ -15,8 +15,7 @@ What the Player owns (moved verbatim from Workstation):
   * `tick(dt)` -- the per-frame game loop: key-edge derivation (cart_key/cart_keyp),
     `_update(dt)`/`_draw()`/`audio.tick`, the crash capture, then the crash chrome +
     the TRANSIENT hold-to-exit toast. It fills the DRAWBRK perf split
-    (ws._pf_upd/_pf_cart/_pf_audio) exactly as the old content-layer body did -- that
-    contract stays on `ws`.
+    (ws._pf_upd/_pf_cart/_pf_audio/_pf_bg) -- that contract stays on `ws`.
   * `handle_input`/`handle_pointer` -- input + the Stage-5 EXIT model: for a GAME a
     sustained hold-BACKSPACE (~700ms) pops to the run caller (`ws._exit_to_caller`);
     the #71 pause machinery it replaced is gone. (Tool/app carts run WITH a minimal
@@ -263,10 +262,9 @@ def _exc_cart_line(exc, fname="<cart>"):
 
 
 def _lua_err_text(exc):
-    """_err_text minus lupa's appended "stack traceback:" block (#67 Phase 5).
-    The device moy_lua text never has one (lua_pcall runs without a message
-    handler), so trimming keeps the panel the same kid-short one-liner on both
-    backends; the raise position (`cart:N:`) lives in the message head."""
+    """_err_text minus any appended "stack traceback:" block (#67 Phase 5): the
+    panel is the same kid-short one-liner on every backend, and the raise
+    position (`cart:N:`) lives in the message head."""
     t = _err_text(exc)
     p = t.find("\nstack traceback:")
     return t if p < 0 else t[:p]
@@ -1531,8 +1529,8 @@ class Player:
 
     def _start_lua(self, runtime, ns, src, t0, h0, t_pre):
         """Start a "runtime": "lua" cart (#67 Phase 2) through the injected
-        `ws.lua_runtime` factory -- runtime/lua_host.py (lupa) on the host, the
-        moy_lua native module on the device once Phase 1 lands. The cart gets
+        `ws.lua_runtime` factory -- runtime/lua_host.MoycoreHostRun on the
+        host, moycore_glue's runtime on the device. The cart gets
         the SAME make_api namespace a Python cart got (the factory registers
         those callables as the cart's Lua globals), so permission gating, pmem,
         audio and quit() semantics are identical by construction. No
@@ -1603,7 +1601,7 @@ class Player:
         """The running-cart content (game domain): the logic ticks frame_plan
         scheduled for this loop frame, the cart's _draw when `render`, the mixer
         feed, then the crash chrome + the transient hold-to-exit toast. Fills the
-        per-frame perf split (ws._pf_*) the router's DRAWBRK/CHROMEBRK accounting
+        per-frame perf split (ws._pf_*) the router's DRAWBRK accounting
         reads. Drawn on the fixed 320x240 GAME canvas, composited by the router.
 
         render=False is a logic-only frame (#217): the cart's ticks, audio and
@@ -1647,15 +1645,12 @@ class Player:
                 if self._net is not None:
                     self._net.pump()
                 dt, stalled, np = self._lockstep_step(ws, dt)
-                # MICROSECONDS, not ms (2026-08-14). These three brackets and the
-                # backdrop one above feed DRAWBRK's split, and CHROMEBRK's `other`
-                # is what is left after subtracting them from the frame -- so on a
-                # ms clock every one of them truncated toward zero and the
-                # remainder collected the whole error. Six quantized terms, each
-                # losing up to 1ms, is up to 6ms of PURE ARTEFACT in a bucket that
-                # read ~7.6ms and was being treated as a real cost to hunt.
-                # ws._pf_* are microsecond ints now; _frame_perf_end divides once,
-                # at the EMA, so every public number stays in ms.
+                # MICROSECONDS, not ms. These three brackets and the backdrop one
+                # above feed DRAWBRK's split, and `chrome` is what is left after
+                # subtracting them from the frame -- on a ms clock every one of
+                # them truncated toward zero and the residual collected the whole
+                # error. ws._pf_* are microsecond ints; _frame_perf_end divides
+                # once, at the EMA, so every public number stays in ms.
                 _ts = _ticks_us() if _perf else 0
                 if np is not None:
                     self._run_ticks(0 if stalled else 1, dt, render)
@@ -1867,8 +1862,8 @@ class Player:
         # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full
         # 320x240 with NO chrome (the #71 pause frame is gone). The ONLY chrome left
         # is the CRASH panel + its top bar, so EDIT/CODE stay reachable to fix the cart.
-        # The top bar is the shell's (not the Player's), so its draw + _pf_bar
-        # (CHROMEBRK) accounting stay on ws; the Player just asks for it here.
+        # The top bar is the shell's (not the Player's); the Player just asks
+        # for it here.
         if self.cart_error is not None:
             self._draw_error_panel()
             ws._draw_cart_bar()                 # unified top bar (crash tool switcher)

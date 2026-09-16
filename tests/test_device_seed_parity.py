@@ -47,7 +47,7 @@ TITLE_TO_FOLDER = _gdc.title_to_folder(str(SYSTEM_CARTS))
 
 
 def _load_moy_runtime():
-    # Mirror tests/test_micropython_spike.py::_load_moy_runtime: the device does
+    # Mirror tests/test_device_make_api.py::_load_moy_runtime: the device does
     # `from editors import ...` / `from audio import ...` / `from console import ...`,
     # frozen from runtime/ (editors + audio first -- console imports both).
     for name in ("editors", "audio", "console"):

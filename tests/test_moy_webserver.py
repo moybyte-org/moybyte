@@ -262,3 +262,13 @@ def test_an_upgrade_request_is_served_and_closed_like_any_other_get():
         c.close()
     finally:
         srv.stop()
+
+
+def test_the_listener_is_non_blocking():
+    """The frame loop polls the listener between frames; a blocking accept()
+    would stall the console until a client happened to connect."""
+    srv = _start_server()
+    try:
+        assert srv.sock.getblocking() is False
+    finally:
+        srv.stop()

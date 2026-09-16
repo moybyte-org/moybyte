@@ -1838,7 +1838,7 @@ def test_the_T_Deck_still_rings_its_samples_for_the_offline_log():
 # -- the two shared frame-loop verbs, EXECUTED (#208 rank 5) --------------------
 #
 # `apply_touch` and `poll_webhost` are shared by all three boards and were
-# asserted only as source STRINGS in test_micropython_spike.py -- the shape #208
+# asserted only as source STRINGS in the T-Deck spike suite -- the shape #208
 # exists to stop. The routing greps there stay (a board must still CALL them);
 # what runs here is the body.
 

@@ -1,10 +1,9 @@
-"""The host runs the boards' Lua, not lupa's (moycore plan rung 4).
+"""The host runs the boards' Lua (moycore plan rung 4).
 
-The host sim embeds Lua through **lupa**, which is a different program from the
-one the boards run: 64-bit doubles where both boards build `LUA_32BITS`,
-because their FPUs are single-precision and doubles would be soft-float. The
-plan records the consequence -- golden-frame parity for float-heavy carts is
-host-only, and device integers wrap at 2^31 where lupa's do not.
+A second embedding would be a different program from the one the boards run:
+64-bit doubles where both boards build `LUA_32BITS` (their FPUs are
+single-precision, so doubles would be soft-float), integers that do not wrap at
+2^31 -- and golden-frame parity for float-heavy carts would be host-only.
 
 `runtime/lua_binding.py` closes that by giving CPython libmoy's own binding
 over the same vendored Lua 5.4, compiled the same way. This pins that it works

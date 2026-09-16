@@ -11,7 +11,7 @@ The shape: on MicroPython `time.ticks_*` exists and wins; on CPython the
 AttributeError branch synthesizes the same units. `_ticks_diff` works on
 either clock's values (MicroPython's wraps, the host's doesn't need to).
 `_ticks_us`'s host branch is `perf_counter` -- monotonic and sub-microsecond,
-which is what the DRAWBRK/CHROMEBRK phase brackets want; a wall clock only
+which is what the DRAWBRK phase brackets want; a wall clock only
 ever agreed with it by luck.
 
 (`device/moybyte_diag.py` keeps its own hardened `_ticks_ms` on purpose: that

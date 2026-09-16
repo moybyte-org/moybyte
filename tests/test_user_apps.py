@@ -29,8 +29,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import app_context as _ac        # noqa: E402
 from runtime import bar_layer as _bar         # noqa: E402
-from runtime import crash_guard, host_app, moy_carts, system_api  # noqa: E402
+from runtime import crash_guard, moy_carts, system_api  # noqa: E402
 from runtime.crash_guard import CrashGuard    # noqa: E402
+from ws_helpers import build_ws                # noqa: E402
 
 DT = 1.0 / 30
 
@@ -52,10 +53,6 @@ def _write_cart(carts_dir, name, src, perms=(), type="app", canvas="320x240"):
     (d / "main.py").write_text(src)
     (d / "config.json").write_text("{}")
     return d
-
-
-def _ws(tmp_path, **kw):
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
 
 
 def _open(ws, title):
@@ -180,7 +177,7 @@ def test_a_two_kind_manifest_is_refused_before_the_cart_runs(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Greedy", "raise SystemExit\n",
                 perms=["files:docs", "files:music"])
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Greedy")
     assert ws.player.cart_error is not None
     assert "file kinds" in ws.player.cart_error, ws.player.cart_error
@@ -210,7 +207,7 @@ def test_wants_layout_only_fires_on_a_top_level_def():
 # ---------------------------------------------------------------------------
 
 def test_the_demo_app_opens_and_gets_exactly_what_it_declared(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Notes")
     _frames(ws)
     assert ws.player.cart_error is None, ws.player.cart_error
@@ -233,7 +230,7 @@ def test_the_demo_app_opens_and_gets_exactly_what_it_declared(tmp_path):
 def test_the_demo_app_saves_a_document_the_rest_of_the_console_can_read(tmp_path):
     """Notes types through the EDITOR HANDLE and its note lands as a plain
     `.md` the rest of the console reads -- the cart holds no text of its own."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Notes")
     _frames(ws)
     ns = ws.player.ns
@@ -262,7 +259,7 @@ def test_the_demo_app_saves_a_document_the_rest_of_the_console_can_read(tmp_path
 
 
 def test_the_demo_apps_prefs_cannot_see_the_shells_own_settings(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Notes")
     _frames(ws)
     prefs = ws.player.ns["prefs"]
@@ -277,7 +274,7 @@ def test_a_user_app_is_always_exitable_through_the_hosts_bar(tmp_path):
     """The bar contract reaches carts too: the shell draws the strip over a
     running app cart and routes its context-X, so a user app cannot trap a kid
     even if its own input handling is broken."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Notes")
     _frames(ws)
     assert ws.wm.top_is_player()
@@ -300,7 +297,7 @@ def test_without_the_permission_the_files_name_is_ABSENT(tmp_path):
     `test_the_scope_is_a_speed_bump_not_a_sandbox` and system_api's docstring)."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Sneaky", NOTES_SRC, perms=["graphics", "input", "prefs"])
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     cart = next(c for c in ws.carts.all if c["title"] == "Sneaky")
     ws._open_workspace(cart)
     # Player.start directly, because the launcher path throws a failed start
@@ -319,7 +316,7 @@ def test_without_the_permission_the_files_name_is_ABSENT(tmp_path):
 def test_the_grant_is_the_only_difference_between_the_two_namespaces(tmp_path):
     """The same source and the same factory, one manifest line apart: the key
     sets differ by exactly `files` and by nothing else."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     with_perm = system_api.make_system_api(
         ws.app_context, {"title": "N", "permissions": ["files:docs", "prefs"]})
     without = system_api.make_system_api(
@@ -333,7 +330,7 @@ def test_with_the_permission_the_same_source_runs(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Sneaky", NOTES_SRC,
                 perms=["graphics", "input", "files:docs", "prefs"])
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Sneaky")
     _frames(ws)
     assert ws.player.cart_error is None, ws.player.cart_error
@@ -344,7 +341,7 @@ def test_a_scoped_grant_cannot_reach_another_kind(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Tabby", "def _update(dt):\n    pass\n\n\ndef _draw():\n"
                                 "    cls(0)\n", perms=["files:music"])
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Tabby")
     f = ws.player.ns["files"]
     assert f.kind == "music"
@@ -370,7 +367,7 @@ def test_the_scope_is_a_speed_bump_not_a_sandbox(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Tabby", "def _update(dt):\n    pass\n\n\ndef _draw():\n"
                                 "    cls(0)\n", perms=["files:music", "prefs"])
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Tabby")
     f = ws.player.ns["files"]
     for casual in ("_files", "files", "ws", "_ws"):
@@ -390,7 +387,7 @@ def test_a_game_gets_no_app_api_at_all(tmp_path):
     _write_cart(carts, "Gamey", "def _update(dt):\n    pass\n\n\ndef _draw():\n"
                                 "    cls(0)\n",
                 perms=["files:docs", "prefs", "appearance"], type="game")
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Gamey")
     _frames(ws)
     ns = ws.player.ns
@@ -404,7 +401,7 @@ def test_an_identity_cart_of_a_shipped_app_is_not_a_user_app(tmp_path):
     shell's CalcAppLayer -- its `main.py` is only the older-shell fallback. It
     must not be handed the user-app surface, and it must not take crash
     strikes for a body nobody runs."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     calc = next(c for c in ws.carts.all if c["title"] == "Calc")
     assert ws.is_user_app(calc) is False
     assert ws.cart_broken(calc) is False
@@ -443,7 +440,7 @@ def _draw():
 def test_a_fixed_app_cart_draws_on_the_game_canvas(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Fixy", FIXED_SRC)
-    ws = _ws(tmp_path, sys_size=(800, 480), font_scale=2)
+    ws = build_ws(tmp_path, sys_size=(800, 480), font_scale=2)
     _open(ws, "Fixy")
     _frames(ws)
     assert ws.player.cart_error is None, ws.player.cart_error
@@ -456,7 +453,7 @@ def test_a_fixed_app_cart_draws_on_the_game_canvas(tmp_path):
 def test_a_responsive_app_cart_draws_on_the_system_canvas(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
-    ws = _ws(tmp_path, sys_size=(800, 480), font_scale=2)
+    ws = build_ws(tmp_path, sys_size=(800, 480), font_scale=2)
     _open(ws, "Flexy")
     _frames(ws)
     assert ws.player.cart_error is None, ws.player.cart_error
@@ -473,7 +470,7 @@ def test_a_responsive_app_cart_draws_on_the_system_canvas(tmp_path):
 def test_a_responsive_app_cart_is_told_when_the_surface_changes(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
-    ws = _ws(tmp_path, sys_size=(800, 480), font_scale=2)
+    ws = build_ws(tmp_path, sys_size=(800, 480), font_scale=2)
     _open(ws, "Flexy")
     _frames(ws)
     seen = ws.player.ns["seen"]
@@ -491,7 +488,7 @@ def test_a_responsive_run_gives_the_bar_back_the_responsive_geometry(tmp_path):
     context-X stranded mid-screen."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
-    ws = _ws(tmp_path, sys_size=(800, 480), font_scale=2)
+    ws = build_ws(tmp_path, sys_size=(800, 480), font_scale=2)
     _open(ws, "Flexy")
     _frames(ws)
     assert ws.bar_layer._zone_is_game("tool") is False
@@ -506,7 +503,7 @@ def test_a_responsive_run_gives_the_bar_back_the_responsive_geometry(tmp_path):
 def test_the_run_canvas_is_given_back_on_exit(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
-    ws = _ws(tmp_path, sys_size=(800, 480), font_scale=2)
+    ws = build_ws(tmp_path, sys_size=(800, 480), font_scale=2)
     stock = ws.canvas
     _open(ws, "Flexy")
     _frames(ws)
@@ -527,7 +524,7 @@ def test_the_desk_world_keeps_a_responsive_cart_on_the_fixed_raster(tmp_path):
     world keeps the fixed raster and the cart is TOLD (320, 240)."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
+    ws = build_ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
     ws.open_desk()
     assert ws.windowed_chrome is True
     cart = next(c for c in ws.carts.all if c["title"] == "Flexy")
@@ -546,7 +543,7 @@ def test_the_play_world_gives_a_responsive_cart_the_whole_surface(tmp_path):
     so the same cart gets the desktop-sized surface it asked for."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
+    ws = build_ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
     ws.go_home()                          # the play world's Library
     assert ws.windowed_chrome is False
     _open(ws, "Flexy")
@@ -562,7 +559,7 @@ def test_a_declared_small_canvas_wins_over_the_responsive_probe(tmp_path):
     is still told the truth about what it got."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Both", RESPONSIVE_SRC, canvas="128x128")
-    ws = _ws(tmp_path, sys_size=(800, 480), font_scale=2)
+    ws = build_ws(tmp_path, sys_size=(800, 480), font_scale=2)
     _open(ws, "Both")
     _frames(ws)
     assert ws.player.cart_error is None, ws.player.cart_error
@@ -627,7 +624,7 @@ def test_a_corrupt_guard_slot_cannot_disable_everything():
 
 
 def test_a_healthy_app_leaves_no_strike_behind(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Notes")
     _frames(ws, CrashGuard.HEAL_FRAMES + 1)
     assert ws.player.cart_error is None, ws.player.cart_error
@@ -640,7 +637,7 @@ def test_a_game_is_not_guarded(tmp_path):
     """Two writes per open is not free, and a game that always crashes shows
     the panel and is not a brick. The guard is for content the shell runs on
     the kid's behalf."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     _open(ws, "Star Catcher")
     _frames(ws)
     assert ws.app_guard.last_open() is None
@@ -668,7 +665,7 @@ def test_a_cart_that_raises_on_every_open_is_disabled_after_three(tmp_path):
     The cart's own code is never reached on that fourth open."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Boomy", BOOM_SRC)
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for i in range(3):
         ws.go_home()
         _open(ws, "Boomy")
@@ -690,10 +687,10 @@ def test_the_strikes_survive_a_reboot(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Boomy", BOOM_SRC)
     for _ in range(3):
-        ws = _ws(tmp_path)                 # a fresh boot each time
+        ws = build_ws(tmp_path)                 # a fresh boot each time
         _open(ws, "Boomy")
         assert ws.player.cart_error is not None
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     assert ws.app_guard.strikes("boomy") == 3
     boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
     assert ws.cart_broken(boomy) is True
@@ -704,7 +701,7 @@ def test_a_broken_app_stays_editable_in_the_picker(tmp_path):
     which also means the temporary #181 app-cart hide must not catch it."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Boomy", BOOM_SRC)
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for _ in range(3):
         ws.go_home()
         _open(ws, "Boomy")
@@ -735,7 +732,7 @@ def test_editing_the_code_forgives_a_struck_out_app(tmp_path):
     the cart hangs, faults or eats the heap."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Boomy", BOOM_SRC)
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for _ in range(3):
         ws.go_home()
         _open(ws, "Boomy")

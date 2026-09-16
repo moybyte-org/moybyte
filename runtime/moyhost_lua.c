@@ -461,12 +461,19 @@ void hl_pmem_load(host_lua *r, const int32_t *in, int n)
 
 /* Read a cart global as a double; returns 0 when absent or not a number, 1
  * otherwise. Numbers only: the parity suites compare counters and positions,
- * and a richer marshalling here would be a second contract to keep. */
+ * and a richer marshalling here would be a second contract to keep. An
+ * INTEGER goes through lua_tointeger: under LUA_32BITS lua_Number is a float,
+ * so lua_tonumber on an integer above 2^24 would round it, and a double holds
+ * every int32 exactly. */
 int hl_get_global_num(host_lua *r, const char *name, double *out)
 {
     lua_getglobal(r->L, name);
     int ok = 0;
-    if (lua_type(r->L, -1) == LUA_TNUMBER) { *out = (double)lua_tonumber(r->L, -1); ok = 1; }
+    if (lua_type(r->L, -1) == LUA_TNUMBER) {
+        if (lua_isinteger(r->L, -1)) *out = (double)lua_tointeger(r->L, -1);
+        else *out = (double)lua_tonumber(r->L, -1);
+        ok = 1;
+    }
     lua_pop(r->L, 1);
     return ok;
 }

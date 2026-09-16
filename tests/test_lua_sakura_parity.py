@@ -1,15 +1,18 @@
-"""Golden parity: the sakura Lua port must match main.py bit-for-bit (#67).
+"""Parity: the sakura Lua port against main.py, on the shipped VM (#67).
 
 Runs experiments/lua_bridge/host_parity.py's harness: the real main.py and
 main.lua under one deterministic fake API (shared PRNG, scripted touch, and the
-shed scene both carts ship, parsed by the shared `widgets.Scenes`), comparing
-every draw call and the final petal state. Exact float equality -- both runtimes
-are IEEE doubles there, so any epsilon is a porting bug.
+shed scene both carts ship, parsed by the shared `widgets.Scenes`), the Lua
+side under runtime/lua_host's MoycoreHostRun -- the boards' Lua, LUA_32BITS
+and all -- comparing every draw call and the final petal state. The contract
+is the harness's docstring: the same calls in the same order, every sprite
+within a pixel, the PRNG consumed in lockstep, the petal floats within the
+drift 600 frames of float32 arithmetic accumulate.
 
-The harness needs `lupa`, a second Lua VM that is nobody's dependency, and
-skips without it -- scoped to that one test. What does NOT skip is the pair
-below it: both twins opened by the REAL console, which is where the shed points
-now come from since the pasted `EMIT` literal became
+The harness needs the host Lua binding (a C compiler, not a package) and skips
+without it, as does the last test here; the pair in between always runs: both
+twins' scenes and the Python twin opened by the REAL console, which is where
+the shed points come from since the pasted `EMIT` literal became
 `scenes/blossoms.moyscene` (#214). That migration is the whole reason the Lua
 half needed `scene()` to work at all.
 """
@@ -26,14 +29,14 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 CARTS = os.path.join(ROOT, "system_carts")
 
 
-LUPA = (
-    "lupa is a bench-only second Lua VM -- it left pyproject on 2026-08-14 "
-    "(the host runs the BOARDS' Lua, built on demand by runtime/lua_binding), "
-    "so this harness runs only where someone installed it by hand")
+def _need_lua():
+    from runtime import lua_host
+    if lua_host.moycore_supports("") is not True:
+        pytest.skip("host lua binding not built (needs a C compiler)")
 
 
 def test_sakura_lua_parity():
-    pytest.importorskip("lupa", reason=LUPA)
+    _need_lua()
     sys.path.insert(0, os.path.join(ROOT, "experiments", "lua_bridge"))
     from host_parity import run_parity
 
