@@ -39,8 +39,12 @@ def _count_grid(ws):
 
 
 def _settle_home(tmp_path):
-    """Boot to the home shelf, one settled paint captured."""
+    """Boot to the home shelf, one settled paint captured. The bar prints a
+    live HH:MM, so the clock is bound to a constant: the stamped frame and the
+    live render it is compared with would otherwise differ across a minute
+    rollover (it did, once, on a CI runner)."""
     ws = _ws(tmp_path)
+    ws.bar_layer._clock_text = lambda: "00:00"
     drv = _drv(ws)
     drv.frame(0.0)
     _quiesce(ws)
