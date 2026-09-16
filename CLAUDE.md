@@ -7,7 +7,7 @@ for the rules. Reading it top to bottom is the slow path.
 |---|---|---|
 | change a draw verb / the raster | `docs/surface_model_v1.md` §4, then `device/device_canvas.py` | ONE canvas class runs on every tier. `tools/p4_conformance.py` is the only check that reaches the real C on real glass. |
 | add or port a board | `docs/board_ports_2026-08.md` — its stage-6 "TAKE THESE" list | four shared bodies are taken, not copied; a lever a board lacks is expressed by ABSENCE, never by 0; `git add` the board's modules BEFORE its first build or the stager prunes them |
-| touch an ESP32-P4 board | that board's README, then `native/p4/` (the silicon tier both P4 boards take) | the panel is a board DEFINE (`MOY_DSI_PANEL_*`), the compositor is `device/dsi_panel.py`, the PPA canvas `device/p4_canvas.py`, the desktop body `device/p4_desktop.py` — a fix lands once |
+| touch an ESP32-P4 board | that board's README, then `native/p4/` (the silicon tier both P4 boards take) | the panel is a board DEFINE (`MOY_DSI_PANEL_*`), the compositor is `device/dsi_panel.py`, the PPA canvas `device/p4_canvas.py`, the P4 tier `device/p4_desktop.py` over the boot spine every console board takes, `device/desktop_spine.py` — a fix lands once |
 | touch a panel flush | `native/moy_flush/moy_flush.c`'s header | "every clause was a race once". `tests/moy_flush_harness/` compiles it with no board attached |
 | touch SD or the panel bus | that board dir's README | the two drivers share one SPI host; a per-op teardown hangs the board with no panic |
 | change the shell / a WM / an app | `runtime/README.md` (per-file map), `docs/app_api_v1.md` | pixel goldens are the net, and the 320×240/1× row does NOT exercise the toolkit |
@@ -240,8 +240,8 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
     (unboxed 30-bit floats) fixed it. Banding is structurally gone (the SRAM-bounce
     flush: panel DMA reads only internal SRAM).
   - Diagnostics, all gated behind `perf_capture`: `PERF` (`runtime/perf_line.py`,
-    every board) and `device_diag`'s lines: `DRAWBRK`/`DRAW2`/`BATCH`/
-    `CHROMEBRK`/`PUMP`/`I2CSTAT`/`CALIB`/`HITCH`. **`device_diag` is staged on
+    every board) and `device_diag`'s lines: `DRAWBRK`/`BATCH`/`DRAW2`/
+    `LOOP`/`PUMP`/`I2CSTAT`/`WEBHOST`/`HITCH`. **`device_diag` is staged on
     the T-Deck alone** (each board's `board.toml` declares it; the Guition S3's
     records why it declines), so those lines reach glass on that one board;
     everywhere else the same C meters are read over the dev channel, which is

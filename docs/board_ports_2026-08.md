@@ -81,10 +81,12 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     so the shared scan never sees it. Two Python halves followed:
     `device/dsi_panel.py` (the compositor, backlight injected),
     `device/p4_canvas.py` (the PPA system canvas + the PPA smoke) and
-    `device/p4_desktop.py` (the whole desktop body, 2026-09-09: the two boards'
-    `run_desktop`s had drifted into fifty differing lines of which all but five
-    were the board's own name in a print string, so a board now passes its
-    name, its compositor, its touch and its constants and takes the rest).
+    `device/p4_desktop.py` (the P4 tier over the shared boot spine
+    `device/desktop_spine.py`, which all four console boards take since
+    2026-09-16 -- the boot order, the service set and the frame loop; a board
+    passes its name, compositor, inputs, store and constants and takes the
+    rest. The 2026-09-09 P4 promotion found the two boards' `run_desktop`s
+    differing in fifty lines of which all but five were a print string).
     The two P4
     patches became `patches/p4_*.patch` behind two shared build-lib
     functions. What stayed per board: the backlight (GPIO + polarity), the

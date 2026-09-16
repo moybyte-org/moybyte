@@ -168,8 +168,10 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
     — never seen by the S3 scan, never denied by an S3 board — plus
     `device/dsi_panel.py` (the compositor; the board injects its backlight),
     `device/p4_canvas.py` (the PPA system canvas) and `device/p4_desktop.py`
-    (the desktop body itself -- one `run_desktop` for both boards since
-    2026-09-09; a board supplies its name, compositor, touch and constants).
+    (the P4 tier: PPA canvas, windowed WM, C6 updater, the P4 dev-channel
+    extras) over `device/desktop_spine.py`, the boot order, service set and
+    frame loop every console board takes; a board supplies its name,
+    compositor, touch and constants.
     The two P4 patches are
     `patches/p4_*.patch` behind `moybyte_patch_p4_ble_hid_fastpath` /
     `moybyte_patch_p4_dsi_underrun` in the shared build lib.
