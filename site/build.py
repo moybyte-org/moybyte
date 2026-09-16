@@ -287,39 +287,53 @@ del _board
 # The page's CONTENT mirrors README.md's "What's in it" -- same claims, same
 # order, same honesty. Keep them in step: the README is the model, this is the
 # shop window, and a feature that only exists in one of them is a bug.
+#
+# (title, LEAD, detail). The lead is the one line on the page; the detail is the
+# paragraph this list has always carried, folded behind a disclosure. The split
+# exists because ten dense paragraphs in a grid is what made the page feel like
+# a manual -- but a claim that is only in the README is still a bug, so the
+# detail is FOLDED, never cut.
 FEATURES = [
     ("The shell",
+     "A launcher, a Player and an Editor, as ordinary processes over a window manager.",
      "A launcher, a Player and an Editor, all ordinary processes over a window "
      "manager. Two presentation tiers from one implementation: a fullscreen "
      "back-stack on the handheld, a windowed desktop on the 7&Prime; board where a "
      "playtest keeps running beside the editor you are typing in."),
     ("Editors on the device itself",
+     "Seven tabs over one project. No save button and no dirty star.",
      "Seven tabs over one project &mdash; config, blocks, code, sprites, tilemap, "
      "scene, music. No save button and no dirty star: autosave on a typing pause "
      "and on every exit, with undo that walks edits and then whole commits."),
     ("Blocks that graduate",
+     "Block programs compile to the same Python the code tab edits.",
      "Block programs compile to the same Python the code tab edits. Edit the code "
      "directly and the project graduates &mdash; the blocks go read-only rather "
      "than silently disagreeing with the source."),
     ("Apps",
+     "Paint, Files, Storybook, Calc, Settings, Appearance, WiFi.",
      "Paint, Files, Storybook, Calc, Settings, Appearance, WiFi. "
      "Drawings, documents and tables land in a shared file layer that carts can "
      "read back. They sit on the launcher as carts; their code still lives in the "
      "shell rather than in an editable cart, which is the next piece of work."),
     ("Python and Lua",
+     "One verb table, valid verbatim in both languages.",
      "One verb table, valid verbatim in both languages. On device, Lua carts run "
      "on a vendored Lua 5.4 VM whose heap lives outside MicroPython&rsquo;s GC and is "
      "freed wholesale at exit."),
     ("Graphics",
+     "An indexed 64-colour palette end to end, every draw verb landing in a C kernel.",
      "An indexed 64-colour palette end to end, every draw verb landing in a C "
      "kernel on device. The 7&Prime; board composites through the SoC&rsquo;s hardware "
      "PPA with the DMA overlapping the next frame&rsquo;s input poll; scrolling "
      "shifts retained pixels instead of repainting them."),
     ("Sound",
+     "A C mixer on the boards and in the browser, and full-fidelity PICO-8 imports.",
      "A C mixer on the boards and in the browser. PICO-8 imports are "
      "full-fidelity &mdash; eight waveforms, the effect column, four-channel "
      "patterns, SFX loop ranges."),
     ("Cartridges are folders",
+     "A manifest, a script, a sheet, a tilemap, a sound bank. No build step.",
      "A manifest, a script, an indexed sheet, a tilemap, a sound bank. No build "
      "step, no per-device binary: copy a folder onto the card and it is on the "
      "launcher. Every board carries the whole set inside its firmware and writes "
@@ -328,6 +342,7 @@ FEATURES = [
      "with an empty slot keeps its cartridges in its own flash and stays just as "
      "editable. Built-in carts re-seed by version and keep your saves and tuning."),
     ("Wireless",
+     "WiFi setup while a game runs, and firmware updates over the air with rollback.",
      "WiFi setup lives in Settings, so it works while a game runs. Firmware "
      "updates over the air on two channels into an inactive OTA slot, with "
      "bootloader rollback if the new image does not come up. This is not a "
@@ -337,6 +352,7 @@ FEATURES = [
      "Settings screen, shown in a browser instead of on glass. The Guition's "
      "updater is wired and awaits its first release."),
     ("The console in a browser",
+     "The same system compiles to WebAssembly &mdash; it is what runs on this page.",
      "The same system also compiles to WebAssembly &mdash; it is what runs on "
      "this page &mdash; and every board carries that build inside its firmware. "
      "Switch it on and the board hands the console to any phone or laptop on "
@@ -603,6 +619,25 @@ STATUS = [
 
 REPO = "https://github.com/moybyte-org/moybyte"
 
+# The ticker strip between the shot and the player. Every item is a fact the
+# page states again in full further down -- a strip that scrolls past is not
+# where a claim gets to live on its own.
+TICKER = ("ESP32-S3", "320 &times; 240", "ESP32-P4", "1024 &times; 600",
+          "ESP32-S3", "480 &times; 320", "WebAssembly", "64 colours",
+          "MicroPython", "Lua 5.4", "C draw kernels", "OTA + rollback",
+          ".moy carts", "PICO-8 import")
+
+
+def ticker():
+    """The strip's markup: the items TWICE, because the keyframe travels -50%.
+
+    Ornament, so the whole thing is aria-hidden -- a screen reader has no use
+    for a list of numbers it will meet again as prose two screens down.
+    """
+    items = "".join("<li>%s</li>" % t for t in TICKER)
+    return ('<div class="ticker" aria-hidden="true"><ul>%s%s</ul></div>'
+            % (items, items))
+
 
 def flash_cards(cards):
     """The board cards for the flash section -- one per BOARDS entry."""
@@ -685,14 +720,17 @@ def page(pal, has_player, cards):
         '    <p class="warnbox">The player bundle is not built yet &mdash; run '
         '<code>firmware/web_runner/build.sh</code>, then <code>make site</code>.</p>\n')
     status = "\n".join(
-        '      <li><i class="%s"></i><b>%s</b> %s</li>' % (k, name, note)
+        '      <li class="rise"><i class="%s"></i><b>%s</b> %s</li>' % (k, name, note)
         for k, name, note in STATUS)
     features = "\n".join(
-        "      <li><h3>%s</h3><p>%s</p></li>" % (t, b) for t, b in FEATURES)
+        '      <li class="rise"><h3>%s</h3><p>%s</p>'
+        '<details><summary>More</summary><p>%s</p></details></li>' % (t, lead, body)
+        for t, lead, body in FEATURES)
     targets = "\n".join(
-        '      <li><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>' % (t, chip, b)
+        '      <li class="rise"><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>'
+        % (t, chip, b)
         for t, chip, b in TARGETS)
-    rough = "\n".join("      <li>%s</li>" % r for r in ROUGH)
+    rough = "\n".join('      <li class="rise">%s</li>' % r for r in ROUGH)
     boards = flash_cards(cards)
     # One manifest entry per BOARD, carrying every build the picker offers.
     # The default build's fields stay at the top level so a reader that
@@ -959,6 +997,43 @@ pre{background:var(--sunk);border:1px solid var(--line);padding:20px 22px;
 pre .c{color:var(--muted)}
 code{font:.9em var(--mono);background:var(--sunk);border:1px solid var(--line);
   padding:1px 5px;color:var(--ink)}
+/* --- the folded half of a card ----------------------------------------------
+   The lead is the page; the paragraph behind this is the claim. See FEATURES. */
+details{margin:12px 0 0}
+details summary{cursor:pointer;list-style:none;display:inline-block;
+  font:11px/1 var(--mono);font-weight:500;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--muted);padding:2px 0;
+  border-bottom:1px solid var(--line);transition:color .15s,border-color .15s}
+details summary::-webkit-details-marker{display:none}
+details summary:hover{color:var(--ink);border-bottom-color:var(--ink)}
+details[open] summary{color:var(--ink);border-bottom-color:transparent}
+details p{margin:12px 0 0}
+/* --- the ticker -------------------------------------------------------------
+   A quiet strip of the machine's own numbers between the shot and the player.
+   Every item is a fact the page asserts further down; it is ornament, so it is
+   aria-hidden and it stops dead under reduced-motion. */
+.ticker{overflow:hidden;margin:72px 0 0;padding:15px 0;
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.ticker ul{display:flex;list-style:none;margin:0;padding:0;width:max-content;
+  animation:tick 46s linear infinite}
+.ticker li{padding:0 28px;white-space:nowrap;font:11px/1 var(--mono);
+  font-weight:500;letter-spacing:.19em;text-transform:uppercase;color:var(--muted)}
+@keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%%)}}
+/* --- motion -----------------------------------------------------------------
+   One gesture, used everywhere: a short rise out of nothing, staggered down a
+   group. It is OPT-IN -- the rules live inside no-preference, so a reader who
+   asked for less motion gets a page that was never transformed in the first
+   place, not one that animates and then snaps. Elements are visible by default
+   and only hidden once the observer is known to be running (the .anim class the
+   script sets), so no-JS never leaves the page blank. */
+@media (prefers-reduced-motion: no-preference){
+  .anim .rise{opacity:0;transform:translateY(16px)}
+  .anim .rise{transition:opacity .66s cubic-bezier(.22,.61,.36,1),
+                         transform .66s cubic-bezier(.22,.61,.36,1);
+              transition-delay:var(--d,0ms)}
+  .anim .rise.in{opacity:1;transform:none}
+}
+@media (prefers-reduced-motion: reduce){.ticker ul{animation:none}}
 footer{margin:104px 0 0;border-top:1px solid var(--ink);padding:24px 0 72px;
   color:var(--muted);font-size:13px;max-width:78ch}
 footer a{margin-right:4px}
@@ -973,6 +1048,7 @@ footer a{margin-right:4px}
   .lead{font-size:19px;margin:24px 0 0}
   .shot{margin:40px auto 0}
   .rail{margin:40px 0 0}
+  .ticker{margin:44px 0 0}
 }
 </style>
 </head>
@@ -990,23 +1066,20 @@ footer a{margin-right:4px}
 
 <div class="wrap" id="top">
   <div class="hero">
-    <p class="eyebrow">Source-available firmware &middot; FSL-1.1-MIT</p>
-    <h1>An <em>operating system</em> for ESP32 boards.</h1>
-    <p class="lead">It turns the board into a small computer you can write software
+    <p class="eyebrow rise">Source-available firmware &middot; FSL-1.1-MIT</p>
+    <h1 class="rise">An <em>operating system</em> for ESP32 boards.</h1>
+    <p class="lead rise">It turns the board into a small computer you can write software
       on. The software is cartridges &mdash; games, wallpapers, tools, whatever you
       make &mdash; and you open, change and run any of them on the board itself,
       with no host computer in the loop.</p>
-    <p class="sub">It boots on three off-the-shelf boards today, and the same source
-      tree is a PC simulator and the browser build below. Approachable enough for a
-      ten-year-old (that is what the block editor is for) without being only that:
-      underneath is a MicroPython firmware with native C kernels, a Lua VM, OTA
-      updates and a windowing shell.</p>
-    <div class="btns">
+    <p class="sub rise">It boots on three off-the-shelf boards today, and the same source
+      tree is a PC simulator and the browser build below.</p>
+    <div class="btns rise">
       <a class="btn pri" href="#try">Try it in the browser &#9656;</a>
       <a class="btn" href="https://github.com/moybyte-org/moybyte">Source</a>
       <a class="btn" href="https://github.com/moybyte-org/moy-spec">The cart spec</a>
     </div>
-    <div class="rail">
+    <div class="rail rise">
       <p class="k">Where it stands</p>
       <ul class="status">
 %(status)s
@@ -1014,20 +1087,20 @@ footer a{margin-right:4px}
     </div>
   </div>
 
-  <figure class="screen shot">
+  <figure class="screen shot rise">
     <div class="bezel"><img src="media/desktop.gif" alt="The windowed desktop at night: the code editor open on Star Catcher, the same cart running in a window beside it, and the sprite scale being changed from 4 to 8 in the source" loading="lazy"></div>
     <figcaption>The desktop tier, unedited: change <code>SPR_SCALE</code> in the
       code tab and the cart running in the window next to it comes back twice the
       size. The wallpaper is a cartridge too &mdash; that is Moy, asleep.</figcaption>
   </figure>
 </div>
+%(ticker)s
 
-<section id="try"><div class="wrap">
+<section class="rise" id="try"><div class="wrap">
   <p class="kick">run it</p>
   <h2>Try it, right here</h2>
   <p class="slead">The real system compiled to WebAssembly &mdash; the same code the
-    firmware freezes, served from this page and nowhere else. Not a mock-up, not a
-    video.</p>
+    firmware freezes. Not a mock-up, not a video.</p>
   <div class="tabs" id="tabs">
 %(tabs)s
     <button class="tab exp" id="expand" type="button"><b>Expand &#8663;</b><span>fill the screen</span></button>
@@ -1042,14 +1115,12 @@ footer a{margin-right:4px}
   </div>
 %(missing)s</div></section>
 
-<section id="flash"><div class="wrap">
+<section class="rise" id="flash"><div class="wrap">
   <p class="kick">on hardware</p>
   <h2>Put it on a board</h2>
   <p class="slead">Plug a board in and write the current firmware to it from this
-    page &mdash; no toolchain, no checkout. Each image below is the one GitHub
-    Actions built, served from this site, and the browser writes it over USB
-    itself. Chrome, Edge or Opera on a desktop: Firefox and Safari do not
-    implement Web Serial.</p>
+    page &mdash; no toolchain, no checkout. Each image is the one CI built, and the
+    browser writes it over USB itself. Chrome, Edge or Opera on a desktop.</p>
   <p class="warnbox" id="fw-nowebserial" hidden>This browser has no Web Serial, so
     the flash buttons are off. Download the image instead and write it with
     <code>esptool</code>, at the offset on its card.</p>
@@ -1058,17 +1129,19 @@ footer a{margin-right:4px}
   </ul>
 %(flash_hint)s</div></section>
 
-<section id="in"><div class="wrap">
+<section class="rise" id="in"><div class="wrap">
   <p class="kick">the system</p>
   <h2>What's in it</h2>
-  <p class="slead">Everything here exists and runs today. Where something is
-    unverified or rough, it says so.</p>
+  <p class="slead">Approachable enough for a ten-year-old &mdash; that is what the
+    block editor is for &mdash; without being only that: underneath is a MicroPython
+    firmware with native C kernels, a Lua VM, OTA updates and a windowing shell.
+    Everything here runs today, and where something is rough it says so.</p>
   <ul class="cards">
 %(features)s
   </ul>
 </div></section>
 
-<section id="runs"><div class="wrap">
+<section class="rise" id="runs"><div class="wrap">
   <p class="kick">targets</p>
   <h2>What it runs on</h2>
   <p class="slead">Host and device are one codebase, not a port: each firmware build
@@ -1078,7 +1151,7 @@ footer a{margin-right:4px}
   </ul>
 </div></section>
 
-<section id="rough"><div class="wrap">
+<section class="rise" id="rough"><div class="wrap">
   <p class="kick">honestly</p>
   <h2>Where it's rough</h2>
   <ul class="rough">
@@ -1086,7 +1159,7 @@ footer a{margin-right:4px}
   </ul>
 </div></section>
 
-<section id="build"><div class="wrap">
+<section class="rise" id="build"><div class="wrap">
   <p class="kick">from source</p>
   <h2>Build it</h2>
   <pre><span class="c"># the system on your PC</span>
@@ -1113,6 +1186,61 @@ firmware/web_runner/build.sh &amp;&amp; make site</pre>
   </footer>
 </div></section>
 <script>
+// MOTION. One gesture -- a short rise out of nothing -- staggered down whatever
+// group the element belongs to. Three things make it safe to ship on a page
+// whose job is to be read:
+//
+//   * It is OPT-IN twice over. The CSS lives inside `prefers-reduced-motion:
+//     no-preference`, and it only bites once this script has set `.anim` on
+//     <html>. With JS off, or before this runs, every .rise element is an
+//     ordinary visible element -- the page can never be left blank by a
+//     transition that did not arrive.
+//   * The observer UNOBSERVES on first reveal. A hundred elements watched for
+//     the life of the page is a scroll cost for an effect that happens once.
+//   * The stagger is per GROUP, not per page, so a ten-card grid ripples in
+//     over 200ms instead of the last card waiting on the first nine sections.
+(function () {
+  var q = function (s) { return [].slice.call(document.querySelectorAll(s)); };
+  var rise = q(".rise");
+  if (!rise.length || !window.IntersectionObserver ||
+      !window.matchMedia || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  document.documentElement.classList.add("anim");
+
+  // Position within the element's own group decides its delay. A section is its
+  // own group; the cells of a grid share the parent that lays them out.
+  rise.forEach(function (el) {
+    var sibs = el.parentNode ? [].filter.call(el.parentNode.children, function (c) {
+      return c.classList && c.classList.contains("rise");
+    }) : [el];
+    var i = sibs.indexOf(el);
+    el.style.setProperty("--d", (i < 0 ? 0 : Math.min(i, 7) * 55) + "ms");
+  });
+
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      e.target.classList.add("in");
+      io.unobserve(e.target);           // it only ever happens once
+    });
+  }, { rootMargin: "0px 0px -12%% 0px", threshold: 0.01 });
+
+  // The hero is already on screen at first paint, so waiting for an
+  // intersection callback would show it blank for a frame. Reveal it directly
+  // instead, and observe everything else.
+  var hero = q(".hero .rise");
+  rise.forEach(function (el) { if (hero.indexOf(el) < 0) io.observe(el); });
+  // The reflow is LOAD-BEARING, not a superstition. Adding `.anim` and `.in`
+  // inside one turn coalesces into a single style recalc: the hidden state is
+  // never a computed value, so there are no two values to interpolate between
+  // and the hero snaps in at full opacity. Reading a layout property forces the
+  // hidden state to resolve first, which is what gives the transition a start.
+  // Measured: without it the hero's opacity is 1 for every frame of the page.
+  void document.documentElement.offsetHeight;
+  requestAnimationFrame(function () {
+    hero.forEach(function (el) { el.classList.add("in"); });
+  });
+})();
+
 // Tabs own ONE iframe and swap its src, so only one wasm VM is ever live (two
 // would mean two heaps and two frame loops competing for the main thread). The
 // first tab loads immediately; switching reboots the system for that tier.
@@ -1178,6 +1306,7 @@ show(tabs[0]);
 """ % {
         "tokens": tokens, "font": font_face(), "tabs": tabs, "missing": missing,
         "status": status, "features": features, "mark": moy_mark(pal),
+        "ticker": ticker(),
         "targets": targets, "rough": rough, "boards": boards, "flash_js": flash_js,
         "flash_hint": flash_hint,
     }
