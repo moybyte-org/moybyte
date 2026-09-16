@@ -61,12 +61,15 @@ def test_host_and_device_make_api_keysets_match_except_wifi():
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)
 
+    # THE make_api the device runs is device_api's, reached by the spine the
+    # board module above imports; the board module itself names no verb.
+    import device_api
     host_base = set(host_app.make_api(_Stub(), StubInput(), {}).keys())
-    dev_base = set(dev.make_api(_Stub(), StubInput(), {}).keys())
+    dev_base = set(device_api.make_api(_Stub(), StubInput(), {}).keys())
     assert host_base == dev_base
 
     host_w = set(host_app.make_api(_Stub(), StubInput(), {}, wifi=object()).keys())
-    dev_w = set(dev.make_api(_Stub(), StubInput(), {}, wifi=object()).keys())
+    dev_w = set(device_api.make_api(_Stub(), StubInput(), {}, wifi=object()).keys())
     assert host_w == dev_w
     assert host_w - host_base == {"wifi"} == dev_w - dev_base
 

@@ -72,7 +72,9 @@ class TrackBall:
 # This T-Deck's GT911 already reports landscape coords matching the 320x240 canvas
 # (x ~0..320, y ~0..240), so no axis swap is needed -- only the Y axis is inverted
 # (raw top=240, bottom=0). read_raw() handles the byte order (y in bytes 0-1, x in
-# bytes 2-3); these just scale + flip into canvas space.
+# bytes 2-3); the shared gt911.map_point scales + flips into canvas space (the
+# raw span IS the canvas here, so the flip lands on the same pixel either side
+# of the scale).
 TOUCH_SWAP = False      # raw axes already match the landscape canvas
 TOUCH_FLIP_X = False
 TOUCH_FLIP_Y = True     # GT911 Y runs opposite the screen
@@ -320,15 +322,9 @@ class Touch:
         return (status, data)
 
     def _map(self, rx, ry):
-        if TOUCH_SWAP:
-            rx, ry = ry, rx
-        if TOUCH_FLIP_X:
-            rx = TOUCH_RAW_W - 1 - rx
-        if TOUCH_FLIP_Y:
-            ry = TOUCH_RAW_H - 1 - ry
-        x = rx * self.w // TOUCH_RAW_W
-        y = ry * self.h // TOUCH_RAW_H
-        return max(0, min(self.w - 1, x)), max(0, min(self.h - 1, y))
+        return gt911.map_point(rx, ry, self.w, self.h, TOUCH_SWAP,
+                               TOUCH_FLIP_X, TOUCH_FLIP_Y,
+                               TOUCH_RAW_W, TOUCH_RAW_H)
 
     def poll(self):
         # #69: threaded mode consumes the poller's staged raw sample (no I2C on

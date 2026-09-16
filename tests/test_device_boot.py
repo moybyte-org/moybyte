@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from board_source import runtime_text, wiring_source
+from board_source import runtime_text, wiring_chain
 
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
@@ -617,15 +617,20 @@ def test_the_tail_is_harmless_on_a_build_with_no_ota():
 # -- both boards drive the same spine ----------------------------------------
 
 
-def _run_desktop(path):
-    # A board that delegates its boot body to a shared spine is asked about
-    # THE SPINE: its own run_desktop is the arguments, not the boot.
-    path = wiring_source(path)
+def _fn(path, name):
     src = path.read_text(encoding="utf-8")
     for node in ast.walk(ast.parse(src, filename=str(path))):
-        if isinstance(node, ast.FunctionDef) and node.name == "run_desktop":
+        if isinstance(node, ast.FunctionDef) and node.name == name:
             return node
-    raise AssertionError("%s has no run_desktop()" % path)
+    raise AssertionError("%s has no %s()" % (path, name))
+
+
+def _boot_body(path):
+    """The function that runs a board's boot: the LAST link of its delegation
+    chain (the shared spine's `build_desktop`), since the board's own
+    run_desktop is the arguments, not the boot."""
+    spine, name = wiring_chain(path)[-1]
+    return _fn(spine, name)
 
 
 def _calls_on(fn, receiver):
@@ -646,58 +651,76 @@ def _calls_on(fn, receiver):
     return out
 
 
+GUITION = ROOT / "firmware" / "guition_jc3248w535" / "modules"
 GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c" / "modules"
 BOARDS = {"tdeck": TDECK / "moy_runtime.py", "p4": P4 / "moy_runtime.py",
+          "guition": GUITION / "moy_runtime.py",
           "guition_p4": GUITION_P4 / "moy_runtime.py"}
+SPINE = ROOT / "device" / "desktop_spine.py"
 
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_each_board_imports_the_shared_spine(board):
     src = runtime_text(BOARDS[board])
-    line = [l for l in src.splitlines()
-            if l.startswith("from device_boot import")]
-    assert line, "%s does not import the shared spine" % board
-    for name in ("DeviceBoot", "FramePump", "FrameLoop"):
-        assert name in line[0], "%s does not import %s" % (board, name)
+    lines = [l for l in src.splitlines()
+             if l.startswith("from device_boot import")]
+    assert lines, "%s does not import the shared spine" % board
+    # One import line somewhere down the chain carries all three (a board's
+    # own module may import a single verb from the spine beside it).
+    assert any(all(name in l for name in ("DeviceBoot", "FramePump",
+                                          "FrameLoop")) for l in lines), (
+        "%s does not import DeviceBoot/FramePump/FrameLoop: %s" % (board, lines))
     # The staged name is flat (`device_boot`), never the host package path --
     # there is no `runtime` package on a board.
     assert "from runtime.device_boot" not in src
 
 
-def test_both_boards_run_the_boot_steps_in_ONE_order():
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_board_takes_the_one_boot_body(board):
     """The invariant Phase 4 buys, stated as a test.
 
-    Two boards, one console: the difference between their boots should be
-    HARDWARE (an esp_lcd strip flush vs a DPI scan-out, a trackball vs BLE HID),
-    never the order in which the shared steps happen or whether one of them
-    happens at all. When this fails, read the diff before changing the test --
-    either a board grew a real reason to reorder, or a step went missing from
-    one of them, which is the failure this whole phase exists to make loud.
+    Four boards, one console: the difference between their boots should be
+    HARDWARE (an esp_lcd strip flush vs a DPI scan-out, a trackball vs BLE
+    HID), never the order in which the shared steps happen or whether one of
+    them happens at all. So the boot body is ONE function, every board's
+    chain ends in it, and a board's own run_desktop makes no boot step of its
+    own beside it.
     """
-    seqs = {name: [m for m, _ in _calls_on(_run_desktop(path), "boot")]
-            for name, path in BOARDS.items()}
-    assert seqs["tdeck"] == seqs["p4"], seqs
-    assert seqs["p4"] == seqs["guition_p4"], seqs
-    assert seqs["tdeck"] == ["note", "note", "load_carts", "note",
-                             "lua_runtime", "start_frames"], seqs["tdeck"]
+    chain = wiring_chain(BOARDS[board])
+    assert chain[-1] == (SPINE, "build_desktop"), (board, chain)
+    own = _fn(BOARDS[board], "run_desktop")
+    assert _calls_on(own, "boot") == [], (
+        "%s: run_desktop drives boot steps beside the shared spine" % board)
+
+
+def test_the_boot_steps_run_in_ONE_order():
+    """...and the order itself, pinned where it lives. When this fails, read
+    the diff before changing the test -- either a board grew a real reason to
+    reorder, or a step went missing, which is the failure this whole phase
+    exists to make loud."""
+    seq = [m for m, _ in _calls_on(_fn(SPINE, "build_desktop"), "boot")]
+    assert seq == ["note", "note", "load_carts", "note",
+                   "lua_runtime", "start_frames"], seq
 
 
 def test_both_boards_pump_the_frame_the_same_way():
     """Since #202 Phase B the pump is driven by the SHARED FrameLoop
     (device_boot), whose begin -> tail -> pace order the FrameLoop tests below
     pin directly -- so the per-board claim inverts: a board's run_desktop must
-    CONSTRUCT the loop and must not drive the pump itself (a board that calls
-    pump.begin beside the loop is running two cadences)."""
+    not drive the pump itself (a board that calls pump.begin beside the loop
+    is running two cadences), and the loop is constructed ONCE, in the spine."""
     for name, path in BOARDS.items():
-        rd = _run_desktop(path)
-        calls = _calls_on(rd, "pump")
-        assert calls == [], (
-            "%s: run_desktop drives the pump beside the shared loop -- %s"
-            % (name, calls))
-        src_txt = runtime_text(BOARDS[name])
+        for spine, fname in wiring_chain(path):
+            calls = _calls_on(_fn(spine, fname), "pump")
+            assert calls == [], (
+                "%s: %s drives the pump beside the shared loop -- %s"
+                % (name, spine.name, calls))
+        src_txt = runtime_text(path)
         assert "loop = FrameLoop(" in src_txt, (
             "%s never constructs the shared frame loop" % name)
         assert "loop.run()" in src_txt
+    spine_src = SPINE.read_text(encoding="utf-8")
+    assert spine_src.count("FrameLoop(") == 1
 
 
 def test_the_spine_imports_no_board_module():
@@ -1740,8 +1763,9 @@ def test_the_meters_follow_PERF_DIAG_live(monkeypatch):
 
 
 def _perf_call(board):
-    """The board's `PerfSampler(...)` construction, as AST. Static because these
-    modules import `machine`; the emitter they hand it to is executed above."""
+    """The `PerfSampler(...)` construction a board's boot reaches, as AST.
+    Static because these modules import `machine`; the emitter they hand it
+    to is executed above."""
     path = PERF_BOARDS[board][0] / "moy_runtime.py"
     tree = ast.parse(runtime_text(path))
     for node in ast.walk(tree):
@@ -1749,6 +1773,21 @@ def _perf_call(board):
                 and node.func.id == "PerfSampler"):
             return node
     raise AssertionError("%s constructs no PerfSampler" % path)
+
+
+def _supplied_down_the_chain(board, keyword):
+    """Does any link of the board's delegation chain hand `keyword=` to the
+    next link? The spine constructs the one sampler; what a board passes it
+    is read off the calls between the links."""
+    chain = wiring_chain(PERF_BOARDS[board][0] / "moy_runtime.py")
+    for (path, fname), (_nxt, nname) in zip(chain, chain[1:]):
+        src = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(src)):
+            if (isinstance(node, ast.Call)
+                    and getattr(node.func, "id", None) == nname
+                    and any(k.arg == keyword for k in node.keywords)):
+                return True
+    return False
 
 
 @pytest.mark.parametrize("board", sorted(PERF_BOARDS))
@@ -1764,7 +1803,7 @@ def test_every_board_emits_through_the_one_sampler(board):
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             assert not node.value.startswith("PERF "), (board, node.value)
-    assert "PerfSampler(" in src and "_perf.account" in src, board
+    assert "PerfSampler(" in src and "perf.account" in src, board
 
 
 @pytest.mark.parametrize("board", sorted(PERF_BOARDS))
@@ -1774,8 +1813,8 @@ def test_only_the_board_with_a_PPA_declares_an_overlap_source(board):
     The windowed-WM columns need no argument -- wm_windowed stamps them on the
     Workstation and a board that does not stage it never has them, so the
     getattr IS the capability probe."""
+    assert _supplied_down_the_chain(board, "overlap") is PERF_BOARDS[board][1], board
     kw = {k.arg for k in _perf_call(board).keywords}
-    assert ("overlap" in kw) is PERF_BOARDS[board][1], (board, sorted(kw))
     assert not (kw - {"overlap", "emit"}), \
         "%s declares per-board FIELDS again: %s" % (board, sorted(kw))
 

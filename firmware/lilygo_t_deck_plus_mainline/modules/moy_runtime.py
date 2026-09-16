@@ -1,10 +1,10 @@
 """Moybyte T-Deck device backend -- the shared console on the S3.
 
 The `run_desktop` that had the least to invent: the shared boot spine
-(`runtime/device_boot.py`) already owns the splash, the cart seed/scan, the Lua
-probe, the OTA verdict and the frame cadence, and the shared
-`console.Workstation` owns every pixel. What is left here is the part that is
-genuinely this board's hardware.
+(`device/desktop_spine.py` over `runtime/device_boot.py`) owns the splash,
+the cart seed/scan, the Lua probe, the service wiring, the OTA verdict and
+the frame loop, and the shared `console.Workstation` owns every pixel. What is
+left here is the part that is genuinely this board's hardware.
 
 This port replaced the lvgl_micropython fork build of the same glass (deleted
 2026-08-17). What structurally changed with it: the panel machine is
@@ -22,14 +22,9 @@ audio backend, WiFi service, OTA updater -- is staged from the shared
 underneath.
 """
 
-from console import Pointer, Workstation, wire_workstation_core, _cursor_delta
-# The boot spine + frame pump, shared with the P4 (#161
-# Phase 4/5, canonical: runtime/device_boot.py). The steps that used to be
-# written per board -- boot splash, cart seed+scan, the Lua runtime probe, the
-# OTA verdict + rollback confirm, the frame cadence and its pacing debt -- live
-# there. Everything below that is not one of those is hardware.
-from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
-                         OtaHealth, PerfSampler, apply_touch, poll_webhost)
+from console import _cursor_delta
+from desktop_spine import build_desktop
+from device_boot import apply_touch
 # The seed roster, generated from system_carts/ at build time and PACKED
 # (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
 # `moy_carts.seed_any`, which reads the roster's form rather than being told.
@@ -37,11 +32,9 @@ from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
 # compression is a storage detail of this one import.
 from carts_data import CARTS_Z as CARTS
 from device_util import _ticks_ms, _ticks_diff, _diag_note, _diag_log
-from device_wifi import make_wifi, autoconnect_wifi
 from device_input import TrackBall, Touch
 from device_audio import make_audio
-from device_canvas import DeviceCanvas, _LayerComp
-from device_api import make_api
+from device_canvas import DeviceCanvas
 from device_diag import (_diag_flush, _diag_hitch,
                          _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat, _diag_webhost,
                          _diag_pump, HITCH_MS)
@@ -100,19 +93,89 @@ FLASH_CARTS_ROOT = "/moy/carts"
 FLASH_UPDATE_DIR = "/moy/update"
 
 
+class _Storage:
+    """This boot's store -- the TF card when it takes the store, internal
+    flash when it does not -- and the SESSION every store write goes through.
+
+    Every SD session on this board is drained first and the panel SERIALIZED
+    for the session's whole span (comp.sd_bracket -> moy_lcd's sd_guard). The
+    bracket exists because the seed/scan PAINTS a progress frame per cart
+    INSIDE the session, and since the core-0 feeder (2026-08-21) an
+    unbracketed paint queues panel bands from core 0 while the VM sits inside
+    an sdspi transaction on the same SPI host -- measured as a Cache/MMU panic
+    at "loading cartridges 1/35". `comp.sync()` is load-bearing now that the
+    flush overlaps: a frame's bands can still be in flight, and an SD op that
+    overlaps a panel DMA on the shared host is the documented way to hang
+    this board.
+
+    The TRACE is the diagnostic (#183). An editor commit can wedge this board
+    with nothing on serial, so each phase says its name and whichever line is
+    LAST before the silence identifies the op:
+      "SD > sync" -- the pre-op drain
+      "SD > op"   -- the SD write itself
+      "SD < op"   -- the NEXT PANEL FLUSH, i.e. the shared-bus corruption;
+                     "SD = panel ok" (the frame tail) is what says it did not
+                     happen.
+    Costs nothing when quiet: SD sessions happen on commits, not per frame.
+    """
+
+    def __init__(self, comp):
+        self._comp = comp
+        self.on_sd = False      # did the card take the store this boot
+        self.traced = False     # a traced session awaits its "panel ok"
+
+    def _bracketed(self, fn, trace=False):
+        if trace:
+            print("SD > sync")
+        t = _ticks_ms()
+        self._comp.sync()
+        if trace:
+            print("SD > op (sync %dms)" % _ticks_diff(_ticks_ms(), t))
+            t = _ticks_ms()
+        bracket = getattr(self._comp, "sd_bracket", None)
+        if bracket is not None:
+            bracket(True)
+        try:
+            import moybyte_sd
+            return moybyte_sd.with_sd_live(fn)
+        finally:
+            if bracket is not None:
+                bracket(False)
+            if trace:
+                print("SD < op %dms" % _ticks_diff(_ticks_ms(), t))
+                self.traced = True
+
+    def load(self, boot, store):
+        """The cart store: seed + scan on the card, bracketed (`with_sd_live`
+        attaches once and keeps the card resident); internal flash when there
+        is no card. The OTA image stages wherever the store went -- an updater
+        aimed at /sd/update on a card-less board would stage onto a card that
+        is not there."""
+        carts, root = boot.load_carts(store, CARTS, session=self._bracketed,
+                                      media="SD",
+                                      fallback_root=FLASH_CARTS_ROOT)
+        self.on_sd = root is not None and root.startswith("/sd")
+        return carts, root, (None if self.on_sd else FLASH_UPDATE_DIR)
+
+    def session(self, fn):
+        """Every store op: the bracket while the card is the store; a plain
+        call while internal flash is -- it shares no bus with the panel, and
+        routing it through the bracket would fail every write."""
+        if not self.on_sd:
+            return fn()
+        return self._bracketed(fn, SD_TRACE)
+
+
 def run_desktop(fps_cap=60):
     """Boot the shared console: launcher + carts + keyboard + touch, carts on SD.
 
-    The order below is the shared one (`wire_workstation_core` is the canonical
-    service wiring for the host and both boards); what is board-specific is the
-    panel bring-up at the top, the input trio, the SD/panel bus gate, and the
-    serial channel.
+    The boot order and the service set are the shared spine's; what is here is
+    the panel bring-up, the input trio and its poller thread, the SD/panel bus
+    gate, and the diag ticks this board's offline ring records.
     """
     import tdeck_panel
     from tdeck_panel import TDeckCompositor, set_backlight
     from moybyte.input import InputState, TDeckKeyboard, InputPoller
-    import moybyte_sd
-    import moy_carts
 
     # #54 St.2: arm the async layer copy BEFORE the first canvas exists.
     # `DeviceCanvas` latches `_async_ok` in __init__, so this has to precede the
@@ -128,174 +191,43 @@ def run_desktop(fps_cap=60):
 
     comp = TDeckCompositor(nfbs=2)
     canvas = DeviceCanvas(comp)
-
-    # -- the shared boot spine (#45/#161) ----------------------------------
-    # DeviceBoot owns the boot splash + its progress bar, the cart seed/scan,
-    # the Lua runtime probe and the "first frame in Nms" report. The two things
-    # that differ here are its arguments: the serial prefix and the panel light.
-    #
-    # The panel is dark until the first frame ships, which keeps the ST7789's
-    # power-on GRAM noise off the glass -- at the cost of making a slow boot
-    # look like a dead board, and a FIRST boot is slow because every built-in
-    # cartridge is written to SD before anything composes. The splash is how
-    # that wait becomes legible, on the glass and on the wire.
-    boot = DeviceBoot(canvas, comp, set_backlight, "Moybyte")
-    # Shared with the P4 (#58) -- see IdleBlank for the three behaviours a
-    # per-board copy got wrong. `power <secs>` retunes it; 0 disables.
-    idle = IdleBlank(set_backlight, POWER_SAVE_MS)
-    boot.note("starting")
+    try:
+        import moybyte_diag as diag
+    except Exception:  # noqa: BLE001
+        diag = None
 
     inp = InputState()
     keyboard = TDeckKeyboard(inp)
     ball = TrackBall()
-    # Share the keyboard's I2C object: one bus, one driver instance, so the
-    # poller below owns every transaction on it.
-    touch = Touch(canvas.w, canvas.h, i2c=getattr(keyboard, "_i2c", None))
-    pointer = Pointer(canvas.w, canvas.h)
-    inp.pointer = pointer          # touch-driven carts read it via the api touch()
-
+    touch = None
     poller = None
-    if MOY_INPUT_POLLER:
-        try:
-            _p = InputPoller(keyboard, touch)
-            if _p.start():
-                poller = _p
-                keyboard._poller_owned = True
-                touch._source = poller.consume_touch
-                _diag_note("input", "poller thread running (#69, %dms cadence)"
-                           % poller.period)
-        except Exception as exc:  # noqa: BLE001 -- input must never fail closed
-            _diag_note("input", "poller setup failed: %s" % (exc,))
-            poller = None
 
-    boot.note("loading cartridges")
-
-    def _sd_session(fn):
-        """Every SD session on this board: drained first, and the panel
-        SERIALIZED for the session's whole span (comp.sd_bracket -> moy_lcd's
-        sd_guard). The bracket exists because the seed/scan below PAINTS a
-        progress frame per cart INSIDE the session, and since the core-0
-        feeder (2026-08-21) an unbracketed paint queues panel bands from core
-        0 while the VM sits inside an sdspi transaction on the same SPI host
-        -- measured as a Cache/MMU panic at "loading cartridges 1/35"."""
-        comp.sync()
-        _b = getattr(comp, "sd_bracket", None)
-        if _b is not None:
-            _b(True)
-        try:
-            return moybyte_sd.with_sd_live(fn)
-        finally:
-            if _b is not None:
-                _b(False)
-
-    # SD shares the panel's SPI host, so the mount must bracket the whole
-    # seed+scan; `with_sd_live` attaches once and keeps the card resident.
-    carts, carts_root = boot.load_carts(moy_carts, CARTS,
-                                        session=_sd_session,
-                                        media="SD",
-                                        fallback_root=FLASH_CARTS_ROOT)
-    # Did the card actually take the store? Everything below that exists ONLY
-    # because SD shares the panel's SPI host -- the session bracket and the OTA
-    # staging dir -- has to follow the store, or a card-less board brackets the
-    # panel for a bus it is not using and stages its update onto a card that is
-    # not there.
-    on_sd = carts_root is not None and carts_root.startswith("/sd")
-    boot.note("building the desktop")
-    ws = Workstation(comp, canvas, inp, carts)
-
-    # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
-    # raster plays on its own off-screen canvas and `wm.composite_game` upscales
-    # it through `DeviceCanvas.blit_game`. No native kernel -> None, so the
-    # Player refuses the cart cleanly instead of crawling per-pixel.
-    def _mk_game_canvas(w, h):
-        if getattr(canvas, "_gfx", None) is None:
-            return None
-        return DeviceCanvas(_LayerComp(int(w), int(h), canvas._gfx))
-
-    ws.make_game_canvas = _mk_game_canvas
-    lua_runtime = boot.lua_runtime(ws, log=lambda m: _diag_note("carts", m))
-
-    _sd_traced = [False]
-
-    def _with_sd_synced(fn):
-        """Every SD session on this board, with the panel drained first.
-
-        `comp.sync()` is load-bearing now that the flush overlaps: a frame's
-        bands can still be in flight when this is called, and an SD op that
-        overlaps a panel DMA on the shared host is the documented way to hang
-        this board. It drains; it is not a formality.
-
-        The BRACKET is the diagnostic (#183). An editor commit can wedge this
-        board with nothing on serial, so each phase says its name and whichever
-        line is LAST before the silence identifies the op:
-          "> sync" -- the pre-op drain
-          "> op"   -- the SD write itself
-          "< op"   -- the NEXT PANEL FLUSH, i.e. the shared-bus corruption;
-                      "= panel ok" below is what says it did not happen.
-        Costs nothing when quiet: SD sessions happen on commits, not per frame.
-        """
-        if not SD_TRACE:
-            return _sd_session(fn)
-        print("SD > sync")
-        _t = _ticks_ms()
-        print("SD > op (sync %dms)" % _ticks_diff(_ticks_ms(), _t))
-        _t = _ticks_ms()
-        try:
-            return _sd_session(fn)
-        finally:
-            print("SD < op %dms" % _ticks_diff(_ticks_ms(), _t))
-            _sd_traced[0] = True
-
-    def _direct(fn):
-        """The no-card store lifecycle: just call it. Internal flash shares no
-        bus with the panel, so there is nothing to drain and nothing to mount --
-        and routing it through the SD bracket would fail every write."""
-        return fn()
-
-    _store_session = _with_sd_synced if on_sd else _direct
-
-    def _before_slim(_ws):
-        # Set BEFORE slim_carts so the store can reload what the diet drops.
-        _ws._with_sd = _store_session
-        try:
-            import moy_ota
-            _ws.updater = moy_ota.OtaUpdater(
-                _store_session,
-                update_dir=None if on_sd else FLASH_UPDATE_DIR)
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte: OTA updater unavailable:", exc)
-
-    # The shared service wiring: api/audio/lua + store/root/can_manage + WiFi +
-    # the #66 slim_carts diet + pointer/keyboard + the boot loads. One canonical
-    # order for the host and every board.
-    wire_workstation_core(ws, moy_carts, carts_root, make_api,
-                          make_wifi(moy_carts, carts_root),
-                          make_audio=make_audio,
-                          lua_runtime=lua_runtime, before_slim=_before_slim,
-                          pointer=pointer, inp=inp, keyboard=keyboard)
-
-    # THE RADIO LINK (#7/#65 Phase 2): the console's one ESP-NOW owner. Built
-    # here, INERT until a cart with the "multiplayer" permission runs -- the
-    # radio is only started by ws.link_arm(), because pm=PM_NONE costs battery
-    # and a console sitting on its shelf has nobody to talk to. Two kids each
-    # open the same game and the consoles find each other; there is no pairing
-    # screen and no code to type, because being in the same room IS the
-    # agreement (the doctrine the OTA design already set for the SD card).
-    try:
-        from moy_espnow import make_link
-        ws.link = make_link(board="tdeck", name=ws.system.get("name", "tdeck"))
-        ws.net = ws.link.net
-    except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
-        print("Moybyte T-Deck link unavailable:", exc)
-        ws.link = None
+    def _inputs():
+        """The GT911 and the #69 poller thread, behind the splash. The touch
+        shares the keyboard's I2C object: one bus, one driver instance, so the
+        poller owns every transaction on it."""
+        nonlocal touch, poller
+        touch = Touch(canvas.w, canvas.h, i2c=getattr(keyboard, "_i2c", None))
+        if MOY_INPUT_POLLER:
+            try:
+                _p = InputPoller(keyboard, touch)
+                if _p.start():
+                    poller = _p
+                    keyboard._poller_owned = True
+                    touch._source = poller.consume_touch
+                    _diag_note("input", "poller thread running (#69, %dms cadence)"
+                               % poller.period)
+            except Exception as exc:  # noqa: BLE001 -- input must never fail closed
+                _diag_note("input", "poller setup failed: %s" % (exc,))
+                poller = None
+        return touch
 
     # BLE HID keyboard (#26): a SECOND, optional input source on this board.
-    # On the P4 and the Guition a paired BLE keyboard is the only keyboard and
+    # On the touch-only boards a paired BLE keyboard is the only keyboard and
     # becomes ws.keyboard outright; here the physical C3 keyboard keeps that
     # slot and the BLE driver hangs off ws.ble_keyboard. Both write into the
-    # SAME InputState above, so nothing in the shared console needs to know
-    # which one a keypress came from -- and Settings finds it because
-    # settings_layer._bt_service() checks ws.ble_keyboard before ws.keyboard.
+    # SAME InputState, so nothing in the shared console needs to know which
+    # one a keypress came from.
     #
     # auto_start=False deliberately: scanning is what makes BLE expensive, and
     # a board whose keyboard already works should not pay for a radio nobody
@@ -306,110 +238,38 @@ def run_desktop(fps_cap=60):
     # to go through the with_sd_live gate, and a pairing that fails because a
     # card is missing would be a bad first experience for a feature whose whole
     # point is "my keyboard works now".
+    _ble = None
     try:
         from ble_keyboard import BleHidKeyboard
-        ws.ble_keyboard = BleHidKeyboard(inp, store_path="/ble_keyboard.json",
-                                         auto_start=False)
+        _ble = BleHidKeyboard(inp, store_path="/ble_keyboard.json",
+                              auto_start=False)
     except Exception as exc:  # noqa: BLE001 -- a build without the module, or no radio
         print("Moybyte: BLE keyboard unavailable:", exc)
-    if getattr(ws, "updater", None) is not None:
-        try:
-            ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte: OTA wifi wiring failed:", exc)
-    try:
-        import machine
-        ws.reboot_hook = machine.reset
-    except Exception as exc:  # noqa: BLE001
-        print("Moybyte: reboot hook unavailable:", exc)
-    # WEB CONSOLE: the wasm console, BAKED into this image (native/moy_web) and
-    # served from the board. Constructed, not started -- injecting it only makes
-    # the Settings row appear, and the row is what brings the radio up.
-    #
-    # The risk that is this board's alone: the WLAN stack reserves internal RAM
-    # the LCD DMA flush needs, which is why boot does NOT autoconnect. Turning
-    # the row on takes that risk knowingly, exactly as UPDATE ONLINE does.
-    try:
-        from moy_webhost import make_webhost
-        # carts_root follows the store, and the SD gate is only a gate when SD
-        # is the bus. The web bundle does not follow anything -- it rides the
-        # firmware image.
-        ws.webhost = make_webhost(ws, carts_root,
-                                  autoconnect=autoconnect_wifi,
-                                  with_sd=_store_session)
-    except Exception as exc:  # noqa: BLE001
-        print("Moybyte: web console unavailable:", exc)
 
-    try:
-        import moybyte_diag as diag
-    except Exception:  # noqa: BLE001
-        diag = None
-    if diag is not None:
-        try:
-            ws.perf_capture = bool(getattr(ws, "diag_live", False))
-        except Exception:  # noqa: BLE001
-            pass
-    _diag_log("boot", "desktop running kb=%d ball=%d touch=%d poller=%d"
-              % (1 if keyboard.available else 0, 1 if ball.available else 0,
-                 1 if touch.available else 0, 1 if poller is not None else 0),
-              diag)
+    store = _Storage(comp)
 
-    # #66/#67 SRAM diet: everything needing boot-time internal RAM has taken it
-    # by here, so the Lua allocator's headroom floor drops 48->24KB. BOTH
-    # runtimes -- moycore has its own allocator with its own floor, and a cart
-    # left on the 48KB floor sits at ~97% PSRAM, the measured-2x-slower regime,
-    # with nothing saying so.
-    for _mod in ("moy_lua", "moycore"):
-        try:
-            _m = __import__(_mod)
-            _fl = getattr(_m, "set_sram_floor", None)
-            if _fl is not None:
-                _diag_log("boot", "%s sram floor=%dKB" % (_mod, _fl(24)), diag)
-        except Exception:  # noqa: BLE001
-            pass
+    def _before_slim(_ws):
+        # Set BEFORE slim_carts so the store can reload what the diet drops.
+        _ws._with_sd = store.session
 
-    # Say what became of the last update before anything overwrites the evidence
-    # (#53). The rollback CONFIRM is NOT made here: reaching this line proves the
-    # desktop was CONSTRUCTED, not that a pixel reached the glass, and an image
-    # that never paints has shipped here before (#56). FramePump.tail fires it
-    # from the loop, once frames are really going out.
-    _ota = OtaHealth(ws, log=lambda m: _diag_log("ota", m, diag))
-    _ota.boot_check()
-
-    import gc
-    gc.collect()        # defrag after the heavy boot so the flush bounce has SRAM
-
-    # `state`'s psave field reports the LIVE timeout; the dev channel's `power`
-    # retune keeps it current from here on.
-    ws._psave_ms = POWER_SAVE_MS
-
-    serial = None
-    if SERIAL_CMDS:
-        from dev_channel import DevChannel
-        # env: the loop objects `py` probes reach beyond ws/wm/pointer -- the
-        # same names the P4 exposes, minus its game canvas.
-        serial = DevChannel(ws, pointer, set_backlight=set_backlight, idle=idle,
-                            env={"comp": comp, "boot": boot})
-        _diag_log("boot", "serial dev channel %s"
-                  % ("armed" if serial.armed else "unavailable"), diag)
-
-    pump = FramePump(boot, _ota, fps_cap)
-    if serial is not None:
-        serial.env["pump"] = pump   # created just above; same py-scope as the P4
-    # Per-frame phase costs the diag lines read. Mutable containers because the
-    # hooks below are CLOSURES over this scope (the FrameLoop owns the order,
-    # this board owns the hardware inside each hook -- #202 Phase B).
-    _diag_at = [_ticks_ms() + 3000]
-    _flush_at = [_ticks_ms() + 5000]
-    _prev_cart_err = [None]
-    _cart_prev = [False]
-    # [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep, hi, hp] ms per frame,
-    # averaged and zeroed every diag tick. HITCH only fires on SPIKES, so a
-    # steady per-frame cost that never crosses HITCH_MS is invisible without it.
-    _acc = [0] * 12
-    _t = {"kbd": 0, "inp": 0, "sb": 0, "diag": 0, "sd": 0, "web": 0}
-    _ble = getattr(ws, "ble_keyboard", None)   # optional second keyboard (#26)
-    boot.start_frames(ws)
+    def _after_services(ws):
+        _diag_log("boot", "desktop running kb=%d ball=%d touch=%d poller=%d"
+                  % (1 if keyboard.available else 0, 1 if ball.available else 0,
+                     1 if touch.available else 0, 1 if poller is not None else 0),
+                  diag)
+        # #66/#67 SRAM diet: everything needing boot-time internal RAM has taken
+        # it by here, so the Lua allocator's headroom floor drops 48->24KB. BOTH
+        # runtimes -- moycore has its own allocator with its own floor, and a
+        # cart left on the 48KB floor sits at ~97% PSRAM, the measured-2x-slower
+        # regime, with nothing saying so.
+        for _mod in ("moy_lua", "moycore"):
+            try:
+                _m = __import__(_mod)
+                _fl = getattr(_m, "set_sram_floor", None)
+                if _fl is not None:
+                    _diag_log("boot", "%s sram floor=%dKB" % (_mod, _fl(24)), diag)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _perf_emit(line):
         """TWO SINKS, ONE LINE (#206 item 2).
@@ -431,9 +291,32 @@ def run_desktop(fps_cap=60):
             except Exception:  # noqa: BLE001 -- a diag never breaks a frame
                 pass
 
-    # No overlap counters and no windowed WM on this board, so those columns
-    # print `-`: absence, never a zero that a broken lever would also print.
-    _perf = PerfSampler(ws, emit=_perf_emit)
+    d = build_desktop("Moybyte", "tdeck", comp, canvas, set_backlight, inp,
+                      inputs=_inputs, keyboard=keyboard, seed_carts=CARTS,
+                      power_save_ms=POWER_SAVE_MS,
+                      load_carts=store.load, with_sd=store.session,
+                      before_slim=_before_slim, after_services=_after_services,
+                      make_audio=make_audio, ble_keyboard=_ble,
+                      serial=SERIAL_CMDS, perf_emit=_perf_emit,
+                      log=lambda tag, msg: _diag_log(tag, msg, diag),
+                      fps_cap=fps_cap)
+    ws = d.ws
+    pointer = d.pointer
+    serial = d.serial
+    perf_account = d.perf.account
+
+    # Per-frame phase costs the diag lines read. Mutable containers because the
+    # hooks below are CLOSURES over this scope (the FrameLoop owns the order,
+    # this board owns the hardware inside each hook -- #202 Phase B).
+    _diag_at = [_ticks_ms() + 3000]
+    _flush_at = [_ticks_ms() + 5000]
+    _prev_cart_err = [None]
+    _cart_prev = [False]
+    # [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep, hi, hp] ms per frame,
+    # averaged and zeroed every diag tick. HITCH only fires on SPIKES, so a
+    # steady per-frame cost that never crosses HITCH_MS is invisible without it.
+    _acc = [0] * 12
+    _t = {"kbd": 0, "inp": 0, "sb": 0, "diag": 0, "sd": 0, "web": 0}
 
     def _poll_inputs(now):
         """Every input source on this board: the #69 poller (with its death
@@ -460,14 +343,9 @@ def run_desktop(fps_cap=60):
                 keyboard.poll()
         except Exception:  # noqa: BLE001
             pass
-        # The BLE keyboard is this board's SECOND input source (#26). Its
-        # reports arrive on a radio IRQ; poll() is what turns them into held
-        # buttons + a key, and it also advances scan/reconnect and flushes a
-        # new bond outside the IRQ -- exactly the P4/Guition arrangement, where
-        # it IS the only keyboard. It was never called here, so even before the
-        # multi-source merge the driver could not have worked on this board:
-        # the physical keyboard's poll asserted full authority over the shared
-        # InputState, and nothing was writing the other half anyway.
+        # The BLE keyboard's reports arrive on a radio IRQ; poll() is what
+        # turns them into held buttons + a key, and it also advances
+        # scan/reconnect and flushes a new bond outside the IRQ.
         if _ble is not None:
             try:
                 _ble.poll()
@@ -504,13 +382,15 @@ def run_desktop(fps_cap=60):
         _diag_log("frame error", exc, diag)
         print("Moybyte frame error:", exc)
         _diag_flush(diag, ws)
+        import gc
         gc.collect()
 
     def _tail(now):
+        loop = d.loop
         # #183: close the SD bracket. A DRAWN frame here means the first panel
         # flush after the SD session completed, so the bus survived it.
-        if _sd_traced[0] and loop.drew:
-            _sd_traced[0] = False
+        if store.traced and loop.drew:
+            store.traced = False
             print("SD = panel ok")
 
         # THE IDLE-BAND DRAIN (#40/#66). The overlapped flush RETURNS with bands
@@ -549,9 +429,8 @@ def run_desktop(fps_cap=60):
                 diag.ECHO_LIVE = _live
             except Exception:  # noqa: BLE001
                 pass
-            # The PERF sample is NOT here any more (#206 item 2): it rides the
-            # shared FrameLoop.account hook with the other two boards, on the
-            # 2s cadence they use, so all three emit one format from one body.
+            # The PERF sample rides the shared FrameLoop.account hook with the
+            # other boards (#206 item 2), on their 2s cadence.
             _diag_drawbrk(diag, ws)
             # DRAWBRK says how much of the frame is `render`; this says WHICH
             # native op render is: `layer=` is the draw_layer window copy (what
@@ -588,23 +467,13 @@ def run_desktop(fps_cap=60):
             _flush_at[0] = _tnow + (20000 if ws.cart is not None else 5000)
             _t["sd"] = _diag_flush(diag, ws)
 
-        # Serve the web console -- created at boot, DRIVEN here (a bound socket
-        # nobody accepts on is indistinguishable from a network fault). Timed,
-        # so `web=` in LOOP/HITCH answers "is the transfer what stalled this
-        # frame".
-        _t["web"] = poll_webhost(ws)
-
-        # The radio, once per frame. At 30Hz an input frame carries ~2 messages
-        # and the ring holds hundreds, so a per-frame slice is comfortable --
-        # and draining on the frame loop is what keeps ESP-NOW off a thread
-        # fighting the panel flush for the VM core. No-op while the link is
-        # inert, which is every frame nobody is playing together.
-        _lk = ws.link
-        if _lk is not None and _lk.active:
-            _lk.poll(ws)
+        # The shared tail: the web console (timed, so `web=` in LOOP/HITCH
+        # answers "is the transfer what stalled this frame") then the radio.
+        _t["web"] = d.tail(now)
 
     def _account(now, elapsed, sleep_ms):
-        _perf.account(now, elapsed, sleep_ms)
+        loop = d.loop
+        perf_account(now, elapsed, sleep_ms)
         if diag is not None and elapsed >= HITCH_MS:
             _diag_hitch(diag, ws, comp, elapsed, _t["kbd"], _t["inp"], _t["sb"],
                         loop.t_ws, _t["diag"], _t["sd"], _t["web"],
@@ -624,11 +493,5 @@ def run_desktop(fps_cap=60):
         _acc[10] += loop.t_hi
         _acc[11] += loop.t_hp
 
-    # The shared frame loop (#202 Phase B): the invariant order lives ONCE, in
-    # device_boot.FrameLoop; every hook above is this board's hardware.
-    loop = FrameLoop(ws, pump, pointer, _poll_inputs, idle=idle, serial=serial,
-                     present=_present, tail=_tail, account=_account,
-                     frame_error=_frame_error,
-                     set_backlight=set_backlight, lit=boot.lit)
-    if loop.run() == "quit":
-        print("Moybyte desktop: serial quit -> REPL")
+    return d.run(_poll_inputs, present=_present, tail=_tail,
+                 account=_account, frame_error=_frame_error)

@@ -276,7 +276,13 @@ SOURCE_WRITERS = ("poller.consume()", "keyboard.poll()", "_ble.poll()")
 def _code_lines(src, start_at, stop_at):
     """The CODE of one block: docstrings and comments stripped, because the
     thing being measured is what runs, and both boards' `_poll_inputs`
-    docstrings say the words `inp.begin_frame()` before the call does."""
+    docstrings say the words `inp.begin_frame()` before the call does.
+
+    A board with its own input hardware writes `_poll_inputs` in its module;
+    the touch-only tier's body is the spine's `poll_inputs` method, and a
+    board that has no closure of its own is read there."""
+    if start_at == "def _poll_inputs(" and start_at not in src:
+        start_at = "def poll_inputs("
     body = src[src.index(start_at):]
     body = body[:body.index(stop_at, len(start_at))]
     out = []

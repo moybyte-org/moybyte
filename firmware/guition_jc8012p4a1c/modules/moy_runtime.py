@@ -25,13 +25,9 @@ Carts live on the INTERNAL flash VFS (~7.9MB of the 16MB chip); the TF slot is
 wired like the Waveshare's (SDMMC slot 0 on LDO4) and equally unused.
 """
 
-import time
-
 # The seed roster, generated from system_carts/ at build time and PACKED: one
 # raw-deflate blob per cart, inflated ONE AT A TIME by `moy_carts.seed_any`.
 from carts_data import CARTS_Z as CARTS
-from device_util import _ticks_ms, _ticks_diff
-from p4_canvas import P4SystemCanvas
 
 GAME_W, GAME_H = 320, 240
 FONT_SCALE = 1                     # 1x, the Waveshare's call carried over: this
@@ -65,47 +61,16 @@ def run_touch_calibrate():
     Tap each numbered box; read which box the MAPPED coords land in. The knobs
     are guition_p4_input's module globals, read when Touch() is constructed --
     Ctrl-C, `import guition_p4_input as k; k.FLIP_X = True` (etc.), re-run, and
-    once mapped == tapped everywhere, bake the winners into that file."""
+    once mapped == tapped everywhere, bake the winners into that file. The
+    body is `device/p4_desktop.run_touch_calibrate`, shared with the
+    Waveshare."""
     from guition_p4_display import P4Compositor, set_backlight
     from guition_p4_input import Touch
+    from p4_desktop import run_touch_calibrate as _calibrate
 
-    comp = P4Compositor()
-    canvas = P4SystemCanvas(comp, font_scale=2)
-    touch = Touch(canvas.w, canvas.h)
-    w, h = canvas.w, canvas.h
-    targets = ((60, 60, "1 TOP-LEFT"), (w - 61, 60, "2 TOP-RIGHT"),
-               (60, h - 61, "3 BOT-LEFT"), (w - 61, h - 61, "4 BOT-RIGHT"),
-               (w // 2, h // 2, "5 CENTER"))
-    knobs = "swap=%s flip_x=%s flip_y=%s" % (touch.swap_xy, touch.flip_x, touch.flip_y)
-
-    def _draw(msg, mx=-1, my=-1):
-        canvas.cls(0)
-        for (cx, cy, label) in targets:
-            canvas.rectb(cx - 20, cy - 20, 40, 40, 10)          # yellow box
-            canvas.print(label, max(4, min(w - 180, cx - 40)), cy + 26, 7)
-        canvas.print("TOUCH CALIBRATE - tap the boxes, watch serial", 20, h // 2 - 60, 7)
-        canvas.print(msg, 20, h // 2 + 40, 6)
-        if mx >= 0:
-            canvas.rect(mx - 4, my - 4, 9, 9, 8)                # red: mapped landing
-        comp.flush()
-
-    _draw(knobs)
-    set_backlight(True)
-    print("Moybyte Guition P4 touch calibrate: available=%s %s (Ctrl-C to exit)"
-          % (touch.available, knobs))
-    last_print = 0
-    while True:
-        tp = touch.poll()
-        now = _ticks_ms()
-        if tp is not None and (tp[2] or _ticks_diff(now, last_print) > 250):
-            last_print = now
-            raw = touch.raw or (-1, -1)
-            print("TAP%s mapped=(%d,%d) raw=(%d,%d) %s"
-                  % ("*" if tp[2] else " ", tp[0], tp[1], raw[0], raw[1], knobs))
-            if tp[2]:
-                _draw("last mapped=(%d,%d) raw=(%d,%d)"
-                      % (tp[0], tp[1], raw[0], raw[1]), tp[0], tp[1])
-        time.sleep_ms(20)
+    _calibrate("Moybyte Guition P4", P4Compositor, set_backlight, Touch,
+               lambda touch: "swap=%s flip_x=%s flip_y=%s"
+               % (touch.swap_xy, touch.flip_x, touch.flip_y))
 
 
 def run_ppa_smoke(scale=2, iters=60):

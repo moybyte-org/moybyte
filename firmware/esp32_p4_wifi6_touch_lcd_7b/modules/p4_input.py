@@ -20,7 +20,7 @@ read which corner the mapped coords land in, set the knobs so mapped == target,
 then bake the winning values in here.
 """
 
-from gt911 import HeldPoint, REG_STATUS as _REG_STATUS, \
+from gt911 import HeldPoint, map_point, REG_STATUS as _REG_STATUS, \
     REG_POINT0 as _REG_POINT1        # x lo/hi, y lo/hi on THIS board's part
 
 GT911_ADDR = 0x5D
@@ -85,16 +85,7 @@ class Touch:
             x = d[0] | (d[1] << 8)
             y = d[2] | (d[3] << 8)
             self.raw = (x, y)
-            if SWAP_XY:
-                x, y = y, x
-            if FLIP_X:
-                x = self.w - 1 - x
-            if FLIP_Y:
-                y = self.h - 1 - y
-            if x >= self.w:
-                x = self.w - 1
-            if y >= self.h:
-                y = self.h - 1
+            x, y = map_point(x, y, self.w, self.h, SWAP_XY, FLIP_X, FLIP_Y)
             return self._hp.sample(x, y)
         except Exception:  # noqa: BLE001 -- a flaky read = one missed frame, not a crash
             # ...and "one missed frame" must mean NO NEWS, not a finger-up: this

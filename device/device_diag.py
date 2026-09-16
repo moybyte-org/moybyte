@@ -1,23 +1,18 @@
-"""Serial diagnostics for the device desktop loop (extracted from moy_runtime.py).
+"""Serial diagnostics for the device desktop loop.
 
-A set of pure logging functions (#43/#63/#66/#68/#69). The T-Deck's run_desktop
-calls six of them between frames when perf capture is on: _diag_flush (ring ->
-SD), _diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 (the draw-cost splits),
-_diag_pump (bounce-feed pacing) and _diag_i2cstat (#69 kbd/touch I2C latency).
-It is the only board that stages this module.
-
-THREE HAVE NO CALLER on any board: _diag_chromebrk (the chrome split),
-_diag_calib (the interpreter cost model) and _diag_gc (the forced-collect
-sample). They are reachable only from tests/test_device_diag.py. Whether each
-is a lever to re-arm or dead code to delete is an open question -- what it is
-NOT is a thing the loop runs.
+Pure logging functions (#43/#63/#66/#68/#69), every one of them called by the
+T-Deck's run_desktop between frames when perf capture is on: _diag_flush (ring
+-> SD), _diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 (the draw-cost
+splits), _diag_loop (the average frame by stage), _diag_pump (bounce-feed
+pacing), _diag_i2cstat (#69 kbd/touch I2C latency) and _diag_webhost (the web
+console's socket). The T-Deck is the only board that stages this module.
 
 Every one takes its inputs explicitly (diag / ws / comp / keyboard / touch) and
-logs via the passed `diag` handle -- no shared class state -- so they lift out
-cleanly and import only the leaf device_util tick helpers (+ local gc / array
-imports). Device-only module (modules/, auto-frozen); no moy_runtime cycle.
+logs via the passed `diag` handle -- no shared class state -- so they import
+only the leaf device_util tick helpers. Device-only module (modules/,
+auto-frozen); no moy_runtime cycle.
 """
-from device_util import _ticks_ms, _ticks_us, _ticks_diff
+from device_util import _ticks_ms, _ticks_diff
 
 
 def _diag_flush(diag, ws):
@@ -70,8 +65,8 @@ def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
         trips = getattr(getattr(ws, "canvas", None), "_lcopy_trips", -1)
         # Launcher-frame section split (#66 instrument-before-cutting): the
         # home layer stashes (wallpaper, shelf grid, bar) ms under perf_capture
-        # -- DRAWBRK/CHROMEBRK are cart-gated, so this is the one split a
-        # launcher hitch gets.
+        # -- DRAWBRK is cart-gated, so this is the one split a launcher hitch
+        # gets.
         home = getattr(ws, "_pf_home", None)
         home_s = (" home(wp=%d grid=%d bar=%d)" % home) if home else ""
         # ws= lumps handle_input + handle_pointer + ws.frame, which is one lump too
@@ -182,213 +177,6 @@ def _diag_draw2(diag, ws):
                     (getattr(cv, "_t_text_us", 0) + gt) / 1000.0,
                     (getattr(cv, "_t_fill_us", 0) + gf) / 1000.0,
                     nf, nt))
-    except Exception:
-        pass
-
-
-def _diag_draw3(diag, ws):
-    """Log a DRAW3 line: the REST of the render ms, and what's left after it.
-
-    DRAW2's five buckets never covered the whole render slice -- its own comment
-    called the leftover "Python dispatch + circ/line/pix", which is a guess, and
-    on the 2026-07-29 fps regression hunt that guess was 3.6ms of a 9.2ms Sky Run
-    render. So: spr = the per-sprite blit565 path (every spr that did NOT coalesce
-    into blit_batch -- DRAW2 batch=0.00 with sprites on screen means ALL of them),
-    shape = circ/line, img = paint-image blits, n= their call counts. resid is
-    render minus every named bucket: what's genuinely interpreter dispatch.
-
-    Read it as: a big `spr` says the pixel work moved, a big `resid` with flat
-    counts says dispatch got dearer, and a jump in `n` says something started
-    calling more often. Guarded; only meaningful while a cart runs."""
-    if diag is None:
-        return
-    try:
-        cv = getattr(ws, "canvas", None)
-        if cv is None or ws.perf_sample() is None:
-            return
-        named = (getattr(cv, "_t_layer_us", 0) + getattr(cv, "_t_batch_us", 0)
-                 + getattr(cv, "_t_map_us", 0) + getattr(cv, "_t_text_us", 0)
-                 + getattr(cv, "_t_fill_us", 0) + getattr(cv, "_t_spr_us", 0)
-                 + getattr(cv, "_t_shape_us", 0) + getattr(cv, "_t_img_us", 0))
-        # render is the DRAWBRK EMA and the buckets are last-frame, so resid is
-        # approximate frame to frame -- it's the TREND that answers the question.
-        render_ms = ws.perf_breakdown()[1]
-        diag.log("DRAW3",
-                 "spr=%.2fms shape=%.2fms img=%.2fms nspr=%d nshape=%d "
-                 "named=%.2fms resid=%.2fms"
-                 % (getattr(cv, "_t_spr_us", 0) / 1000.0,
-                    getattr(cv, "_t_shape_us", 0) / 1000.0,
-                    getattr(cv, "_t_img_us", 0) / 1000.0,
-                    getattr(cv, "_n_spr", 0), getattr(cv, "_n_shape", 0),
-                    named / 1000.0, render_ms - named / 1000.0))
-    except Exception:
-        pass
-
-
-def _diag_luamem(diag, ws):
-    """Log a LUAMEM line (#67, 2026-08-10): where the running Lua cart's heap
-    LIVES -- live bytes internal SRAM vs PSRAM, the floor-denied demand, and
-    the live size-class split per region (<=64/<=256/<=2048/>2048 -- small
-    classes are the VM's hot objects: stack segments, table nodes). This is
-    the pricing input for any structural SRAM proposal (#66: an indexed SRAM
-    canvas would take ~77KB from the same pool the allocator feeds on).
-
-    moycore's line carries the small-object pool too (`pool=live/capKB ch=n`).
-    The gap between those two is the pool's slack -- free lists and un-carved
-    chunk tails -- and it is PSRAM the VM holds that `psram` alone does not
-    show, so a pool that is mostly slack is visible here and nowhere else.
-    Guarded; prints only while a lua cart's VM is alive (live bytes > 0)."""
-    if diag is None:
-        return
-    try:
-        if ws.perf_sample() is None:
-            return
-        # Whichever runtime is holding the cart. moycore reports the same four
-        # leading fields plus its pool's three and stops there -- the
-        # size-class buckets existed to CHOOSE the SRAM-first policy, and the
-        # policy is chosen; what is left to watch is whether it took. A short
-        # tuple prints a short line rather than nothing, which is what the old
-        # unconditional st[15] would have done here.
-        st = None
-        try:
-            import moycore
-            if moycore.active():
-                st = moycore.alloc_stats()
-        except ImportError:
-            pass
-        if st is None:
-            import moy_lua
-            st = moy_lua.alloc_stats()
-        if not st or (st[0] + st[1]) == 0:
-            return
-        # In-play internal-SRAM headroom rides along (#66 census): free +
-        # largest block, internal regions only (>=1MB regions are PSRAM).
-        int_free = int_big = 0
-        try:
-            import esp32
-            for reg in esp32.idf_heap_info(esp32.HEAP_DATA):
-                if reg[0] < 1024 * 1024:
-                    int_free += reg[1]
-                    if reg[2] > int_big:
-                        int_big = reg[2]
-        except Exception:
-            pass
-        k = 1024.0
-        if len(st) < 16:                    # moycore's seven
-            diag.log("LUAMEM",
-                     "sram=%.1fKB psram=%.1fKB peak=%.1fKB denied=%d "
-                     "pool=%.1f/%.1fKB ch=%d int=%d/%dk core=1"
-                     % (st[0] / k, st[1] / k, st[2] / k, st[3],
-                        st[4] / k, st[5] / k, st[6],
-                        int_free // 1024, int_big // 1024))
-            return
-        diag.log("LUAMEM",
-                 "sram=%.1fKB psram=%.1fKB peak=%.1fKB denied=%.0fKB "
-                 "sc=%.1f/%.1f/%.1f/%.1f pc=%.1f/%.1f/%.1f/%.1f n=%d/%d "
-                 "int=%d/%dk"
-                 % (st[0] / k, st[1] / k, st[2] / k, st[7] / k,
-                    st[8] / k, st[9] / k, st[10] / k, st[11] / k,
-                    st[12] / k, st[13] / k, st[14] / k, st[15] / k,
-                    st[3], st[4], int_free // 1024, int_big // 1024))
-    except Exception:
-        pass
-
-
-def _diag_chromebrk(diag, ws):
-    """Log a CHROMEBRK line (#66 lever 5, instrument-before-cutting): the sub-split
-    of DRAWBRK's chrome remainder -- bar (_draw_status_strip), cmp (the game->system
-    viewport composite; ~0 on the 320x240 device where the canvases are one object),
-    cur (the cursor layer), stk (every other layer's draw in the WM stack walk),
-    other (the router: the walk itself, the surface/fold probes, _flush_batches).
-
-    Read `other` as a real quantity now. Until 2026-08-14 it was a residual of a
-    residual over six millisecond-quantized brackets, so it absorbed every term's
-    rounding on top of whatever was genuinely unnamed -- on the S3 it read ~7.6ms
-    with bar/cmp/cur all ~0.00, which is an instrument saying "somewhere else" as
-    loudly as it can. The brackets are microseconds now and the stack walk is
-    measured, so a large `other` means the ROUTER, and a large `stk` means a
-    layer -- which LAYERBRK will then name.
-
-    Says which chrome cost a trim should target. Guarded; cart-running only."""
-    if diag is None:
-        return
-    try:
-        if ws.perf_sample() is None:
-            return
-        pc = getattr(ws, "perf_chrome", None)
-        if pc is None:
-            return
-        c = pc()
-        if len(c) < 5:                      # a console older than the stk bucket
-            diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"
-                     % (c[0], c[1], c[2], c[3]))
-            return
-        diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f stk=%.2f other=%.2f"
-                 % (c[0], c[1], c[2], c[3], c[4]))
-    except Exception:
-        pass
-
-
-def _diag_layerbrk(diag, ws):
-    """Log a LAYERBRK line (#172): the last PAINTED frame's WM stack walk, split
-    per layer and printed dearest first.
-
-    CHROMEBRK's `other` IS this walk. On the 2026-07-29 T-Deck regression that
-    remainder was 6.7ms of a Brick Siege frame while bar/cmp/cur all read ~0.00
-    -- every named bucket saying "not me", which is as far as narrowing could
-    go. This names the layer instead. Read it as: one big row = that layer's
-    draw got dearer; cost spread evenly across `n` rows = the stack machinery
-    itself (the draw_stack walk, the surface probes, the batch guard), not any
-    one layer.
-
-    Deliberately NOT cart-gated, unlike DRAWBRK/CHROMEBRK: the launcher and
-    editor walks have no other instrument at all, and `sum` vs the frame's draw
-    ms is the check on whether the walk is even where the time goes."""
-    if diag is None:
-        return
-    try:
-        pl = getattr(ws, "perf_layers", None)
-        if pl is None:
-            return
-        rows = pl()
-        if not rows:
-            return
-        total = 0.0
-        for _, ms in rows:
-            total += ms
-        # Six is the whole stack on the fullscreen tiers and the dear end of a
-        # windowed one; a truncated tail is named so the sum is never read as
-        # covering fewer layers than it does.
-        head = rows[:6]
-        parts = " ".join("%s=%.2f" % (lid, ms) for lid, ms in head)
-        more = "" if len(rows) == len(head) else " +%d more" % (len(rows) - len(head))
-        # pre/post are the frame's unmeasured EDGES (#172) -- printed here
-        # because this line is the frame's anatomy and is not cart-gated:
-        # pre + sum + flush + post should account for the loop's whole `frm`.
-        pe = getattr(ws, "perf_frame_edges", None)
-        edge = ""
-        if pe is not None:
-            p0, p1 = pe()
-            edge = "pre=%.2f post=%.2f " % (p0, p1)
-        diag.log("LAYERBRK", "%sn=%d sum=%.2f %s%s"
-                 % (edge, len(rows), total, parts, more))
-    except Exception:
-        pass
-
-
-def _diag_homebrk(diag, ws):
-    """Log a HOMEBRK line: the LAUNCHER frame's section split (wallpaper /
-    shelf grid / bar ms, stashed by launcher_layer under perf_capture). The
-    steady scroll-drag frames sit UNDER the HITCH threshold, so this periodic
-    line is how the launcher's repaint cost gets named on-glass (DRAWBRK /
-    CHROMEBRK are cart-gated). Prints only when the LAST frame actually drew
-    the home screen -- silent while idle or inside a cart/app."""
-    if diag is None:
-        return
-    try:
-        home = getattr(ws, "_pf_home", None)
-        if home:
-            diag.log("HOMEBRK", "wp=%d grid=%d bar=%d" % home)
     except Exception:
         pass
 
@@ -589,115 +377,5 @@ def _diag_i2cstat(diag, keyboard, touch):
                     getattr(touch, "stat_int_edges", 0),
                     getattr(touch, "stat_skipped", 0),
                     first))
-    except Exception:
-        pass
-
-
-_CALIB_DONE = [False]
-
-
-def _diag_calib(diag):
-    """One-shot CALIB line (#63): the interpreter cost model measured on THIS device
-    in THIS heap state -- the numbers that explain where a kid cart's frame goes.
-      call4 = 4-arg Python call, small frame (stays on the C stack)
-      spill = 8-arg Python call with a real body -- frame > ~11 words HEAP-ALLOCATES
-              on every call; on a warm fragmented heap this is the ~1.5ms/call
-              pathology that made 120-sprite kid loops collapse (the spr_gate fix)
-      tup   = small tuple alloc+append (pool-sized: cheap even warm)
-      arr   = 4x array('h') stores (the gate's append shape)
-      flt   = float multiply-add (REPR_C: no boxing on this port)
-    us per 100 ops. Run once, ~3s into the first cart, so it reflects the REAL
-    runtime heap, not a fresh boot."""
-    if diag is None or _CALIB_DONE[0]:
-        return
-    _CALIB_DONE[0] = True
-    try:
-        from array import array as _arr_t
-        r = range(100)
-
-        def f4(a, b, c, d):
-            pass
-
-        def f8(a, b, c, d=-1, e=1, f=0, g=1, h=1):
-            q = a + b
-            s = c + d
-            u = e + f
-            v = g + h
-            return q + s + u + v
-
-        t0 = _ticks_us()
-        for i in r:
-            pass
-        base = _ticks_diff(_ticks_us(), t0)
-        t0 = _ticks_us()
-        for i in r:
-            f4(1, 2, 3, 0)
-        call4 = _ticks_diff(_ticks_us(), t0) - base
-        t0 = _ticks_us()
-        for i in r:
-            f8(1, 2, 3, 0)
-        spill = _ticks_diff(_ticks_us(), t0) - base
-        li = []
-        ap = li.append
-        t0 = _ticks_us()
-        for i in r:
-            ap((3, 100, 60, 0))
-        tup = _ticks_diff(_ticks_us(), t0) - base
-        qa = _arr_t("h", bytearray(2 * 512))
-        t0 = _ticks_us()
-        k = 4
-        for i in r:
-            qa[k] = 3
-            qa[k + 1] = 100
-            qa[k + 2] = 60
-            qa[k + 3] = 0
-        arr = _ticks_diff(_ticks_us(), t0) - base
-        x = 1.5
-        y = 0.25
-        z = 0.0
-        t0 = _ticks_us()
-        for i in r:
-            z = x * y + 0.3
-        flt = _ticks_diff(_ticks_us(), t0) - base
-        diag.log("CALIB", "call4=%d spill=%d tup=%d arr=%d flt=%d us/100"
-                 % (call4, spill, tup, arr, flt))
-    except Exception:
-        pass
-
-
-_GC_BASE = [0]      # #63: last-sample gc.mem_alloc() live-set baseline, for the churn delta.
-_GC_TICK = [0]      # #63: sample counter -- the forced collect runs 1-in-10, not every 3s.
-
-
-def _diag_gc(diag):
-    """Log a GC line (#63, the sakura ~14fps profiling): the forced-collect PAUSE (what an
-    auto-GC costs when it fires mid-frame -> the render-time variance), free heap, the live
-    set, and the CHURN (bytes allocated since the last sample -> the pressure that sets how
-    OFTEN auto-GC fires). A high churn + a non-trivial collect = GC-bound, and the stutter is
-    that collect landing at random frames.
-
-    CADENCE: the forced collect costs ~130ms on a cart-sized live set, and gc.mem_alloc()/
-    mem_free() WALK the heap (tens of ms) -- running that every 3s sample was itself a
-    visible periodic hitch (the perf capture is on by default at boot). So the full
-    collect+report now runs on the FIRST sample of a cart run and then 1-in-10 (~30s);
-    other samples skip entirely. Never per frame."""
-    if diag is None:
-        return
-    tick = _GC_TICK[0]
-    _GC_TICK[0] = tick + 1
-    if tick % 10 != 0:
-        return
-    try:
-        import gc
-        pre = gc.mem_alloc()                 # live set + garbage accumulated since last GC
-        t = _ticks_ms()
-        gc.collect()
-        collect_ms = _ticks_diff(_ticks_ms(), t)
-        free = gc.mem_free()
-        live = gc.mem_alloc()                # post-collect: the retained (live) set
-        churn = pre - _GC_BASE[0]            # allocated since the last sample (mod auto-GC)
-        _GC_BASE[0] = live
-        diag.log("GC", "collect=%dms free=%dk live=%dk churn=%dk"
-                 % (collect_ms, free >> 10, live >> 10, churn >> 10))
     except Exception:
         pass

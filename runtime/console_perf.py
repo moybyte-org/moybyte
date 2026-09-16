@@ -1,8 +1,9 @@
 """The Workstation's perf METERS: the per-frame timing fields and the query
-API the device diag reads (`perf_sample`/`perf_breakdown`/`perf_chrome`/...),
-the perf-capture frame tail that fills them, and the expensive-event counter
-`note_cost`. A mixin of `Workstation`; every field it writes is a flat
-attribute the frame loop and both WMs read directly.
+API the device diag reads (`perf_sample`/`perf_breakdown`/`perf_backdrop`/
+`perf_pointer`/`perf_batch`/...), the perf-capture frame tail that fills
+them, and the expensive-event counter `note_cost`. A mixin of `Workstation`;
+every field it writes is a flat attribute the frame loop and both WMs read
+directly.
 """
 
 try:
@@ -68,12 +69,10 @@ class PerfMeters:
         self._cart_ms = 0.0           # smoothed cart _draw() ms (RENDERING)
         self._audio_ms = 0.0          # smoothed audio.tick(dt) ms (mixer feed)
         self._chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart - audio)
-        # LAYERBRK (#172) / the hitch logger's hp() detail (#184): the two stack
-        # walks, split per layer. _pf_layers is {layer.id: us} for the last
-        # PAINTED frame (rebuilt each paint under _perf); _pf_ptr is a fixed
-        # 6-slot scratch overwritten in place by handle_pointer --
-        # [total_us, pre_us, worst_us, worst_id, claim_id, n_visited].
-        self._pf_layers = None
+        # The hitch logger's hp() detail (#184): the pointer walk, split.
+        # _pf_ptr is a fixed 6-slot scratch overwritten in place by
+        # handle_pointer -- [total_us, pre_us, worst_us, worst_id, claim_id,
+        # n_visited].
         self._pf_ptr = [0, 0, 0, None, None, 0]
         self._ptr_last_x = -1     # handle_pointer's idle fast-path: last routed
         self._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
@@ -113,17 +112,6 @@ class PerfMeters:
         self._raw_chrome = 0.0
         self._raw_flush = 0.0
         self._raw_draw = 0.0
-        # CHROMEBRK sub-split of _chrome_ms (#66 lever 5, instrument-before-cutting):
-        # what the ~4-6ms of cart-path chrome actually buys -- the top status bar
-        # (_draw_status_strip), the game->system viewport composite (a no-op when the
-        # canvases are one object, i.e. today's 320x240 device), the cursor, the rest
-        # of the WM stack walk (_stk_ms, 2026-08-14), and the router remainder.
-        # Only measured on the running-cart path with perf capture on; surfaced via
-        # perf_chrome() -> the device CHROMEBRK diag line.
-        self._bar_ms = 0.0
-        self._cmp_ms = 0.0
-        self._cur_ms = 0.0
-        self._stk_ms = 0.0  # the WM stack walk's CHROME share (2026-08-14)
         self._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
         # (The clock-text cache moved to self.bar_layer with the rest of the bar #66.)
 
@@ -157,31 +145,22 @@ class PerfMeters:
     def _frame_perf_end(self, frame_t0, cmp_us, cur_us):
         """The #43/#44 perf-capture frame tail (extracted from frame() so the hot
         router stays readable): time the panel DMA flush in isolation, back out
-        the draw span, and EMA the DRAWBRK/CHROMEBRK splits. Only called when
+        the draw span, and EMA the DRAWBRK split. Only called when
         perf_hud/perf_capture is on -- the kid-mode path flushes directly, so the
         render path itself is unchanged. The timing fields stay on the
-        Workstation (the device diag contract -- perf_sample/perf_breakdown/
-        perf_chrome read them).
+        Workstation (the device diag contract -- perf_sample/perf_breakdown
+        read them). `cmp_us`/`cur_us` are the router's composite and cursor
+        brackets; nothing reads them since the chrome sub-split's only consumer
+        went, and they stay in the signature for the caller's sake.
 
         EVERY BRACKET IN HERE IS MICROSECONDS (2026-08-14), converted to ms once,
         at the EMA. It used to be ticks_ms, and that quietly broke the one number
-        the shell's frame budget was being argued from. `chrome` is a residual
-        (draw - upd - cart - audio) and `other` was a residual OF a residual
-        (chrome - bar - cmp - cur): six integer-ms differences, each truncating
-        toward zero, all of their loss landing in the last term. That is up to
-        ~6ms of manufactured cost in a bucket that read ~7.6ms on the S3 and was
-        the largest unexplained item in an 18ms frame -- i.e. the instrument was
-        a plausible whole explanation for what it was being used to investigate.
-
-        `other` is also no longer the last term. The stack walk is measured
-        (self._pf_stack, us) and subtracted as `stk`, so what remains is the
-        ROUTER itself -- the draw_stack walk, the surface/fold probes,
-        _flush_batches, and this function's own bookkeeping -- and it is a
-        partition, not a leftover."""
+        the shell's frame budget was being argued from: `chrome` is a residual
+        (draw - upd - cart - audio), and integer-ms differences truncate toward
+        zero with every term's loss landing in the last one."""
         _upd = self._pf_upd                     # us
         _cart = self._pf_cart                   # us
         _audio = self._pf_audio                 # us
-        _bar = self._pf_bar                     # us
         _flush_t0 = _ticks_us()
         self.comp.flush()
         _flush = _ticks_diff(_ticks_us(), _flush_t0)
@@ -191,10 +170,10 @@ class PerfMeters:
             _draw = 0
         self._flush_ms = _ema(self._flush_ms, _flush / 1000.0)
         self._draw_ms = _ema(self._draw_ms, _draw / 1000.0)
-        # Everything below is the DEEP tail (DRAWBRK/CHROMEBRK splits + the
-        # HITCH logger's raw copies): diag-session data, and 6 boxed floats +
-        # ~12 EMA calls of churn per frame -- perf_hud alone stops here (the
-        # chip shows fps/draw/flush, all set above).
+        # Everything below is the DEEP tail (the DRAWBRK split + the HITCH
+        # logger's raw copies): diag-session data, and 6 boxed floats + ~8 EMA
+        # calls of churn per frame -- perf_hud alone stops here (the chip shows
+        # fps/draw/flush, all set above).
         if not self.perf_capture:
             return
         # DRAWBRK split: cart _update (logic) / cart _draw (render) / audio.tick /
@@ -213,24 +192,6 @@ class PerfMeters:
         self._cart_ms = _ema(self._cart_ms, self._raw_cart)
         self._audio_ms = _ema(self._audio_ms, self._raw_audio)
         self._chrome_ms = _ema(self._chrome_ms, self._raw_chrome)
-        # CHROMEBRK sub-split (#66 lever 5): bar / composite / cursor / stack-walk
-        # EMAs, so a chrome trim targets the real cost instead of guessing.
-        #
-        # `stk` is the layer walk MINUS the pieces already named: upd/cart/audio
-        # and the bar all run inside layer.draw() (the cart's content layer, then
-        # the shell bar the Player asks for), and the cursor is its own row. What
-        # is left is every OTHER layer's draw plus the content layer's non-cart
-        # tail. Double-counting here would push `other` negative and clamp it to
-        # zero, which reads as "all accounted for" -- the failure mode this whole
-        # change exists to remove -- so the subtraction is deliberate and the
-        # clamp below is a floor, not a fit.
-        _stk = self._pf_stack - _upd - _cart - _audio - _bar - cur_us
-        if _stk < 0:
-            _stk = 0
-        self._bar_ms = _ema(self._bar_ms, _bar / 1000.0)
-        self._cmp_ms = _ema(self._cmp_ms, cmp_us / 1000.0)
-        self._cur_ms = _ema(self._cur_ms, cur_us / 1000.0)
-        self._stk_ms = _ema(self._stk_ms, _stk / 1000.0)
         # #172: the declared-backdrop restore. NOT a fourth peer of the split --
         # it is already inside _cart_ms (Player.tick charges it to render, where
         # the cart's own cls would have landed). Tracked separately only so
@@ -287,34 +248,6 @@ class PerfMeters:
         return (self._raw_upd, self._raw_cart, self._raw_audio,
                 self._raw_chrome, self._raw_flush, self._raw_draw)
 
-    def perf_chrome(self):
-        """(bar_ms, composite_ms, cursor_ms, stack_ms, other_ms): the EMA sub-split
-        of the DRAWBRK chrome remainder (#66 lever 5).
-
-        bar   the top status bar (_draw_status_strip)
-        cmp   the game->system viewport composite (~0 when the canvases are one
-              object, i.e. the 320x240 device)
-        cur   the cursor layer
-        stk   every OTHER layer's draw in the WM stack walk, plus the content
-              layer's non-cart tail (2026-08-14)
-        other what is left: the router itself -- the draw_stack walk, the
-              surface/scale-fold probes, _flush_batches, the perf bookkeeping
-
-        `stk` was added because `other` had become the answer to every question:
-        it was a residual of a residual computed from six millisecond-quantized
-        terms, so it collected both the real unnamed cost AND up to ~6ms of
-        rounding, and on the S3 it read ~7.6ms with every named bucket at ~0.00.
-        Both halves of that are fixed -- the brackets are microseconds now, and
-        the biggest unnamed component is measured rather than inferred.
-
-        Only meaningful while a cart runs with perf_capture/perf_hud on; feeds
-        the device CHROMEBRK diag line so a chrome trim cuts the real cost."""
-        other = (self._chrome_ms - self._bar_ms - self._cmp_ms - self._cur_ms
-                 - self._stk_ms)
-        if other < 0:
-            other = 0.0
-        return (self._bar_ms, self._cmp_ms, self._cur_ms, self._stk_ms, other)
-
     def perf_backdrop(self):
         """The EMA ms of the declared-backdrop restore (#172) -- `background()`'s
         per-frame repaint, run by Player.tick before the cart's _draw.
@@ -325,33 +258,6 @@ class PerfMeters:
         CHROME, which on the T-Deck read as ~4.7ms of shell cost that no
         CHROMEBRK bucket could name. Feeds DRAWBRK's `bg=`."""
         return self._bg_ms
-
-    def perf_frame_edges(self):
-        """(pre_ms, post_ms): the parts of frame() OUTSIDE the measured draw span
-        (#172).
-
-        `draw` is timed from _frame_t0, which sits after the journal idle tick,
-        the splash expiry, the tick-model gate and the redraw gate; the tail
-        after the flush is outside it too. Both land inside the device loop's
-        `frm` stage, so DRAWBRK + flush has never summed to a whole frame and the
-        difference was being inferred by subtracting an EMA from a windowed mean
-        -- which spread the answer across -4..+15ms. Feeds LAYERBRK."""
-        return (self._pf_pre / 1000.0, self._pf_post / 1000.0)
-
-    def perf_layers(self):
-        """((layer_id, ms), ...) for the last PAINTED frame, dearest first (#172).
-
-        The per-layer split of the WM stack walk -- which is precisely what
-        CHROMEBRK reports as its unnamed `other` remainder. Not cart-gated (the
-        launcher and editor walks are the ones with no other instrument at all).
-        Empty tuple when perf capture has never painted a frame. Only meaningful
-        with perf_capture/perf_hud on; feeds the device LAYERBRK diag line."""
-        lay = self._pf_layers
-        if not lay:
-            return ()
-        rows = [(lid, us / 1000.0) for lid, us in lay.items()]
-        rows.sort(key=lambda r: -r[1])
-        return tuple(rows)
 
     def perf_pointer(self):
         """(total_ms, pre_ms, worst_ms, worst_id, claim_id, n) for the last

@@ -171,7 +171,7 @@ copy is in the demo repo below) — restore with `write_flash 0 <file>`.
 ```python
 import moybyte_shell as s; s.MODE = "panel"; s.main()   # DSI bars, quadrants, fill timing
 import guition_p4_smoke as g; g.touch()                # fw upload + 15s of samples
-import moy_runtime; moy_runtime.run_touch_calibrate()  # corner targets, live knobs
+import moy_runtime; moy_runtime.run_touch_calibrate()  # corner targets, live knobs (body: device/p4_desktop.py)
 import moy_runtime; moy_runtime.run_ppa_smoke()        # PPA vs CPU composite A/B
 ```
 
@@ -196,8 +196,9 @@ plus the P4 extras `bt`/`union`/`cache`.
   S3's MODE-string shell), `guition_p4_display.py` (backlight + the shared
   compositor), `guition_p4_input.py` (pins, knobs, the shared GSL3680 driver),
   `gsl_fw_jc8012.py` (the touch firmware — generated, but checked in: it is a
-  panel fact), `guition_p4_smoke.py`, `moy_runtime.py` (`run_desktop` — the
-  Waveshare's, with this board's parts). Everything else in `modules/` is
+  panel fact), `guition_p4_smoke.py`, `moy_runtime.py` (`run_desktop` — this
+  glass's arguments to `device/p4_desktop.py`, the P4 tier's body over the
+  shared boot spine `device/desktop_spine.py`). Everything else in `modules/` is
   staged at build and gitignored.
 - `native/micropython.cmake` — includes only the generated `.staged/` list;
   this board authors no C.

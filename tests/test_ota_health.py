@@ -703,16 +703,23 @@ def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
     frozen-module suite.
     """
     import ast
+    from board_source import wiring_chain
 
     for mod_path in (TDECK / "moy_runtime.py", P4 / "moy_runtime.py"):
         src = runtime_text(mod_path)
-        fn = None
-        for node in ast.walk(ast.parse(src, filename=str(mod_path))):
-            if isinstance(node, ast.FunctionDef) and node.name == "run_desktop":
-                fn = node
-        assert fn is not None, mod_path
+        # A board's boot is its delegation chain: its own run_desktop, then
+        # every spine's wiring function, plus the spine's `Desktop.run`, which
+        # is where the loop is built. Walked together, so the placement claim
+        # is made about what the board actually runs.
+        fns = []
+        for path, fname in wiring_chain(mod_path):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            fns += [n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef) and n.name in (fname, "run")]
+        assert fns, mod_path
 
         seen = {}
+        pump_verbs = set()
 
         def walk(node, in_loop):
             for child in ast.iter_child_nodes(node):
@@ -723,24 +730,29 @@ def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
                             else getattr(child.func, "id", None))
                     if name:
                         seen.setdefault(name, set()).add(loop)
+                    if (isinstance(child.func, ast.Attribute)
+                            and isinstance(child.func.value, ast.Name)
+                            and child.func.value.id == "pump"):
+                        pump_verbs.add(child.func.attr)
                 walk(child, loop)
 
-        walk(fn, False)
+        for fn in fns:
+            walk(fn, False)
         assert seen.get("OtaHealth") == {False}, (
             "%s: the OTA health reporter must be built on the boot path" % mod_path)
         assert seen.get("boot_check") == {False}, (
             "%s: the boot verdict is read once, before the loop" % mod_path)
         # #202 Phase B: the frame loop itself is SHARED (device_boot.FrameLoop
         # calls pump.tail every frame -- asserted against the spine below), so
-        # the per-board placement claim becomes: run_desktop hands the pump to
-        # a FrameLoop and runs it, and does NOT drive pump.tail beside it.
+        # the per-board placement claim becomes: the boot hands the pump to a
+        # FrameLoop and runs it, and nothing drives pump.tail beside it.
         assert "FrameLoop" in seen, (
-            "%s: run_desktop no longer constructs the shared frame loop"
+            "%s: the boot no longer constructs the shared frame loop"
             % mod_path)
         assert seen.get("run") is not None, mod_path
-        assert seen.get("tail") is None, (
-            "%s: pump.tail driven beside the shared loop -- two cadences"
-            % mod_path)
+        assert not pump_verbs, (
+            "%s: the pump is driven beside the shared loop (%s) -- two cadences"
+            % (mod_path, sorted(pump_verbs)))
         # The old unconditional confirm at desktop-construction time is gone.
         assert "ws.updater.mark_valid()" not in src, mod_path
 

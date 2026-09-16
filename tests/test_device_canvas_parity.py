@@ -1916,18 +1916,17 @@ def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
     # #63 leak fix: moy_alloc has no free(), so a dead cart's layer buffers must
     # return to the pool and the next same-dims new_layer must REUSE them (without
     # this, every cart re-run leaked its world from the heap_caps pool). Stub
-    # moy_alloc/lcd_bus so the CPython-run device module takes the pooled path.
+    # moy_alloc (caps constants + the older malloc_dma) so the CPython-run
+    # device module takes the pooled path.
     import sys
     import types
     m, _, _ = _both(True)
     _map_cache_on(m, monkeypatch)
     fake_alloc = types.ModuleType("moy_alloc")
     fake_alloc.malloc_dma = lambda n, caps=0: bytearray(n)
-    fake_bus = types.ModuleType("lcd_bus")
-    fake_bus.MEMORY_SPIRAM = 1
-    fake_bus.MEMORY_DMA = 2
+    fake_alloc.MEMORY_SPIRAM = 1
+    fake_alloc.MEMORY_DMA = 2
     monkeypatch.setitem(sys.modules, "moy_alloc", fake_alloc)
-    monkeypatch.setitem(sys.modules, "lcd_bus", fake_bus)
     g = m.DeviceCanvas.__init__.__globals__       # the device module's namespace
     monkeypatch.setitem(g, "_LAYER_POOL", {})
     cv = m.DeviceCanvas(_FakeComp(W, H))

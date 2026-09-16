@@ -247,8 +247,9 @@ def test_textmode_in_both_make_api_namespaces():
         def __getattr__(self, name):
             return lambda *a, **k: 0
 
+    import device_api      # the device's make_api home, reached by the spine dev imports
     host_ns = host_app.make_api(_Stub(), StubInput(), {})
-    dev_ns = dev.make_api(_Stub(), StubInput(), {})
+    dev_ns = device_api.make_api(_Stub(), StubInput(), {})
     assert "textmode" in host_ns and "textmode" in dev_ns
     # Both default to on=True and set input.text_mode.
     inp = StubInput()

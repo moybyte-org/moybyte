@@ -626,6 +626,19 @@ def poll_webhost(ws):
     return _ticks_diff(_ticks_ms(), t0)
 
 
+def poll_link(ws):
+    """One radio slice per frame, at the frame TAIL beside the webhost poll.
+
+    At 30Hz an input frame carries ~2 messages and the ring holds hundreds, so
+    a per-frame slice is comfortable -- and draining on the frame loop is what
+    keeps ESP-NOW off a thread fighting the panel flush for the VM core. A
+    no-op while the link is inert, which is every frame nobody is playing
+    together, and on a board that built no link at all."""
+    lk = getattr(ws, "link", None)
+    if lk is not None and lk.active:
+        lk.poll(ws)
+
+
 class PerfSampler:
     """The serial PERF line, ONE body, every board (#206 item 2).
 

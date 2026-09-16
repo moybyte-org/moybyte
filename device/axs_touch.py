@@ -56,9 +56,9 @@ like the disproven "wedge".
 """
 
 try:                                    # device: staged flat namespace
-    from gt911 import HeldPoint
+    from gt911 import HeldPoint, map_point
 except ImportError:                     # host tests
-    from device.gt911 import HeldPoint
+    from device.gt911 import HeldPoint, map_point
 
 # The read-touchpad command, verbatim from ESPHome (11 bytes; the trailing
 # zeros are part of the command).
@@ -166,23 +166,5 @@ class Touch:
         x = ((d[2] & 0x0F) << 8) | d[3]
         y = ((d[4] & 0x0F) << 8) | d[5]
         self.raw = (x, y)
-        if SWAP_XY:
-            x, y = y, x
-        if FLIP_X:
-            x = self.w - 1 - x
-        if FLIP_Y:
-            y = self.h - 1 - y
-        # BOTH bounds, not just the upper one. The controller reports a raw
-        # 12-bit coordinate and a touch past the panel edge reads BIGGER than
-        # the axis it is mapped onto -- which a flip then turns NEGATIVE, so
-        # clamping only the top let an off-glass press arrive as a point off
-        # the other side of the screen.
-        if x < 0:
-            x = 0
-        elif x >= self.w:
-            x = self.w - 1
-        if y < 0:
-            y = 0
-        elif y >= self.h:
-            y = self.h - 1
+        x, y = map_point(x, y, self.w, self.h, SWAP_XY, FLIP_X, FLIP_Y)
         return self._hp.sample(x, y)

@@ -31,9 +31,9 @@ not be the glass's; `Touch` scales.
 """
 
 try:                                    # device: staged flat namespace
-    from gt911 import HeldPoint
+    from gt911 import HeldPoint, map_point
 except ImportError:                     # host tests
-    from device.gt911 import HeldPoint
+    from device.gt911 import HeldPoint, map_point
 
 ADDR = 0x40
 REG_TOUCH = 0x80          # finger count + points
@@ -248,22 +248,7 @@ class Touch:
         if n < 1:
             return self._hp.release()
         self.raw = (x, y)
-        if self.swap_xy:
-            x, y = y, x
-        if self.raw_w:
-            x = (x - self.raw_x0) * self.w // self.raw_w
-        if self.raw_h:
-            y = (y - self.raw_y0) * self.h // self.raw_h
-        if self.flip_x:
-            x = self.w - 1 - x
-        if self.flip_y:
-            y = self.h - 1 - y
-        if x >= self.w:
-            x = self.w - 1
-        if y >= self.h:
-            y = self.h - 1
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
+        x, y = map_point(x, y, self.w, self.h, self.swap_xy, self.flip_x,
+                         self.flip_y, self.raw_w, self.raw_h,
+                         self.raw_x0, self.raw_y0)
         return self._hp.sample(x, y)

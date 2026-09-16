@@ -26,16 +26,12 @@ Carts live on the INTERNAL flash VFS (31.5MB -- SD is optional on this board;
 the SDIO slot + LDO4 power fix are a follow-up for removable-cart workflows).
 """
 
-import time
-
 # The seed roster, generated from system_carts/ at build time and PACKED
 # (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
 # `moy_carts.seed_any`, which reads the roster's form rather than being told.
 # Named CARTS because that is what it is to everything downstream -- the
 # compression is a storage detail of this one import.
 from carts_data import CARTS_Z as CARTS
-from device_util import _ticks_ms, _ticks_diff
-from p4_canvas import P4SystemCanvas
 
 GAME_W, GAME_H = 320, 240
 FONT_SCALE = 1                     # 1x everywhere (owner call, 2026-07-12): the 7"
@@ -60,8 +56,8 @@ CARTS_ROOT = "/moy/carts"
 OTA_UPDATE_DIR = "/moy/update"
 
 
-# Loading the carts is DeviceBoot.load_carts now (#161 Phase 4): the seed +
-# scan + built-in fallback is the same on both boards, and what differs here is
+# Loading the carts is DeviceBoot.load_carts (#161 Phase 4): the seed + scan +
+# built-in fallback is the same on every board, and what differs here is
 # arguments -- the internal-flash root above, no storage SESSION at all (this
 # console has no SD card and the store races nobody), and the word "flash" in
 # the serial lines. On a full-erase boot that call is 17.5 of the 25 seconds
@@ -80,48 +76,16 @@ def run_touch_calibrate():
     Tap each numbered box; read which box the MAPPED coords land in. The knobs
     are live module globals -- Ctrl-C, `import p4_input; p4_input.FLIP_X = True`
     (etc.), re-run, and once mapped == tapped everywhere, bake the winners into
-    p4_input.py. Ctrl-C exits (the REPL stays alive on this board)."""
+    p4_input.py. The body is `device/p4_desktop.run_touch_calibrate`, shared
+    with the Guition P4."""
     from p4_display import P4Compositor, set_backlight
     from p4_input import Touch
+    from p4_desktop import run_touch_calibrate as _calibrate
     import p4_input
 
-    comp = P4Compositor()
-    canvas = P4SystemCanvas(comp, font_scale=2)
-    touch = Touch(canvas.w, canvas.h)
-    w, h = canvas.w, canvas.h
-    targets = ((60, 60, "1 TOP-LEFT"), (w - 61, 60, "2 TOP-RIGHT"),
-               (60, h - 61, "3 BOT-LEFT"), (w - 61, h - 61, "4 BOT-RIGHT"),
-               (w // 2, h // 2, "5 CENTER"))
-
-    def _draw(msg, mx=-1, my=-1):
-        canvas.cls(0)
-        for (cx, cy, label) in targets:
-            canvas.rectb(cx - 20, cy - 20, 40, 40, 10)          # yellow box
-            canvas.print(label, max(4, min(w - 180, cx - 40)), cy + 26, 7)
-        canvas.print("TOUCH CALIBRATE - tap the boxes, watch serial", w // 2 - 340, h // 2 - 60, 7)
-        canvas.print(msg, w // 2 - 340, h // 2 + 40, 6)
-        if mx >= 0:
-            canvas.rect(mx - 4, my - 4, 9, 9, 8)                # red: mapped landing
-        comp.flush()
-
-    _draw("swap=%s flip_x=%s flip_y=%s" % (p4_input.SWAP_XY, p4_input.FLIP_X, p4_input.FLIP_Y))
-    set_backlight(True)
-    print("Moybyte P4 touch calibrate: swap=%s flip_x=%s flip_y=%s (Ctrl-C to exit)"
-          % (p4_input.SWAP_XY, p4_input.FLIP_X, p4_input.FLIP_Y))
-    last_print = 0
-    while True:
-        tp = touch.poll()
-        now = _ticks_ms()
-        if tp is not None and (tp[2] or _ticks_diff(now, last_print) > 250):
-            last_print = now
-            raw = touch.raw or (-1, -1)
-            print("TAP%s mapped=(%d,%d) raw=(%d,%d) swap=%s flip_x=%s flip_y=%s"
-                  % ("*" if tp[2] else " ", tp[0], tp[1], raw[0], raw[1],
-                     p4_input.SWAP_XY, p4_input.FLIP_X, p4_input.FLIP_Y))
-            if tp[2]:
-                _draw("last mapped=(%d,%d) raw=(%d,%d)"
-                      % (tp[0], tp[1], raw[0], raw[1]), tp[0], tp[1])
-        time.sleep_ms(20)
+    _calibrate("Moybyte P4", P4Compositor, set_backlight, Touch,
+               lambda touch: "swap=%s flip_x=%s flip_y=%s"
+               % (p4_input.SWAP_XY, p4_input.FLIP_X, p4_input.FLIP_Y))
 
 
 def run_ppa_smoke(scale=2, iters=60):

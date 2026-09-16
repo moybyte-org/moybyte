@@ -109,7 +109,9 @@ the ONLY cart-push transport, so an image without the command answers
 `REMOTE ? recv` and the tool stops with one line saying to flash the board.
 
 `moy_runtime.run_touch_calibrate()` (REPL-invokable) draws corner targets and
-dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs.
+dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs; the
+body is `device/p4_desktop.run_touch_calibrate`, shared with the Guition P4,
+and this board hands it the knobs' home (the `p4_input` module globals).
 
 ## Build / flash
 
@@ -189,10 +191,12 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     the DSI framebuffer + the system-surface contract: `font_scale` text via
     the native text kernel, font-scale window layers, and the `blit_game` /
     `blit_cover` native composite hooks `wm_windowed`/`wallpaper` probe for)
-    and `run_desktop()` — constructs the shared `Workstation` with a distinct
-    1024×600 system canvas + the fixed 320×240 off-screen game canvas and
-    installs **`WindowedWM`** (#73's tier, on its intended hardware). Carts
-    live on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
+    and `run_desktop()` — this glass's arguments (name, compositor, touch,
+    constants) to `device/p4_desktop.py`, the P4 tier's body shared with the
+    Guition P4, which constructs the 1024×600 system canvas + the fixed
+    320×240 off-screen game canvas and hands **`WindowedWM`** (#73's tier, on
+    its intended hardware) to the shared boot spine `device/desktop_spine.py`.
+    Carts live on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
     `/moybyte/...`, which shadows the frozen `moybyte.input` module and killed a
     boot; see the constraint below. SD is optional here.
   - Staged at build (canonical sources elsewhere), and **declared in

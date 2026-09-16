@@ -182,8 +182,9 @@ _CLEARS = True
 WINDOWED_INSTALLERS = {
     "runtime/host_app.py": _CLEARS,
     "firmware/web_runner/web_boot.py": _CLEARS,
-    # ONE row for both P4 boards: they take one desktop body (2026-09-09), and
-    # the walk reads the canonical file, never the copies their builds stage.
+    # ONE row for both P4 boards: they take one P4 tier body, which hands the
+    # WM to the shared spine; the walk reads the canonical file, never the
+    # copies their builds stage.
     "device/p4_desktop.py":
         "P4SystemCanvas overrides blit_game outright (its composite is the "
         "hardware PPA) and paints no bands at all, so the shared flag never "
@@ -227,9 +228,13 @@ def _windowed_install_sites():
                     except SyntaxError:
                         continue
                     for node in ast.walk(tree):
-                        if (isinstance(node, ast.Call)
-                                and isinstance(node.func, ast.Name)
-                                and node.func.id == "WindowedWM"):
+                        # Constructed here, or NAMED as the tier a shared
+                        # spine installs (`wm=WindowedWM`): either way this
+                        # is the module that decided the board runs windowed.
+                        if isinstance(node, ast.Call) and any(
+                                isinstance(f, ast.Name) and f.id == "WindowedWM"
+                                for f in [node.func]
+                                + [k.value for k in node.keywords]):
                             found[path.relative_to(ROOT).as_posix()] = (path,
                                                                         tree)
     return found

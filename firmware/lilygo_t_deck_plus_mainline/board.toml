@@ -384,6 +384,17 @@ after normalising those three, so the ONE-STRING rule, the self-terminating
 smokes and the keep-the-REPL guards now land once instead of four times."""
 
 [[modules.device.group]]
+files = ["desktop_spine.py"]
+why = """
+The console desktop's boot spine: ONE `build_desktop` (the boot order and the
+service set every console board wires) and ONE frame loop over it, with the
+touch-only tier's frame hooks as defaults. The four boards' `run_desktop`s
+carried the same imports, the same IdleBlank/FramePump/FrameLoop construction,
+the same `ws.*` service assignments and the same hook names in fifty-four
+byte-identical lines each; a board now passes its hardware -- compositor,
+canvas, inputs, keyboard, store, constants -- and takes the rest."""
+
+[[modules.device.group]]
 files = ["banded_panel.py"]
 why = """
 STAGE 1 (panel). `BandedCompositor` -- the compositor body this board's

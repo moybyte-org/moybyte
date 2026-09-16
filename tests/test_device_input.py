@@ -833,9 +833,13 @@ def test_the_y_axis_is_flipped_and_x_is_not(board):
 
 
 def test_the_raw_extent_is_scaled_into_canvas_space(board):
+    """The shared mapping scales the raw extent onto the canvas and then
+    flips (gt911.map_point's one order, the GSL3680's); at this board's
+    shipped 1:1 extent the flip lands on the same pixel either side of the
+    scale, which tests/test_touch_mapping.py pins."""
     t = board.touch(w=640, h=480)
-    assert t._map(160, 120) == (320, 238)
-    assert t._map(0, 0) == (0, 478)
+    assert t._map(160, 120) == (320, 239)
+    assert t._map(0, 0) == (0, 479)
 
 
 def test_TOUCH_SWAP_exchanges_the_axes(board):

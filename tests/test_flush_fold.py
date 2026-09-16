@@ -178,10 +178,16 @@ def test_blit_game_fences_before_it_overwrites_the_scratch():
     sync = dc[dc.index("def sync_back"):dc.index("def _drain_lcopy")]
     assert sync.index("_snap_live") < sync.index("snap_fence()") \
         < sync.index("back_buffer()")
+    from board_source import runtime_text
     for path in (GUITION / "modules" / "moy_runtime.py",
                  TDECK / "modules" / "moy_runtime.py"):
-        src = path.read_text(encoding="utf-8")
-        present = src[src.index("def _present"):]
+        # The board's own present hook where it has one (the T-Deck times
+        # its sync_back); the spine's `present` method where it does not.
+        src = runtime_text(path)
+        at = src.find("def _present(")
+        if at < 0:
+            at = src.index("def present(")
+        present = src[at:]
         present = present[:present.index("\n\n")]
         assert "sync_back()" in present, path
 

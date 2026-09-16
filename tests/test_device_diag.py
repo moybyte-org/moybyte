@@ -1,6 +1,6 @@
 """`device/device_diag.py`, EXECUTED (#208, the single-consumer list).
 
-678 lines whose only executable coverage was `_diag_pump` (through
+A module whose only executable coverage was `_diag_pump` (through
 `tests/test_banded_panel.py`); everything else was pinned as SOURCE STRINGS in
 `tests/test_micropython_spike.py`. A substring cannot tell `us / 1000.0` from
 `us / 100.0`, cannot notice a bucket wired to the wrong tuple index, cannot see
@@ -20,14 +20,9 @@ perf_line.py` owns the PERF contract and none of these -- so the reader is
 modelled here.
 
 WHAT THIS SUITE CANNOT REACH ON A HOST, stated rather than left as silence:
-  * the VALUES behind `esp32.idf_heap_info`, MicroPython's `gc.mem_alloc` /
-    `mem_free`, `moycore.alloc_stats` and `diag.flush_to_sd`'s actual SD write
-    are hardware. They arrive here as doubles installed at the IMPORT boundary,
-    so the real body runs and only the numbers are ours.
-  * `_diag_calib`'s numbers are a device's interpreter cost model and mean
-    nothing on a desktop CPython. Its clock is scripted instead, which pins the
-    ORDER of the five benchmarks and the `- base` subtraction -- the parts that
-    are code -- and pins nothing about the magnitudes, which are not.
+  * the VALUES behind `esp32.idf_heap_info` and `diag.flush_to_sd`'s actual SD
+    write are hardware. They arrive here as doubles installed at the IMPORT
+    boundary, so the real body runs and only the numbers are ours.
   * `_diag_pump` is deliberately absent: `tests/test_banded_panel.py` already
     drives it against a real `BandedCompositor`.
 """
@@ -506,297 +501,6 @@ def test_a_canvas_with_no_gates_still_prints_the_whole_line(dd):
     assert diag.one("DRAW2")["gated"] == {"_bare": [], "fill": "0", "text": "0"}
 
 
-# == _diag_draw3 ===============================================================
-
-
-def test_draw3_names_the_rest_of_render_and_the_residual_after_it(dd):
-    """`named` is the sum of all EIGHT us buckets (DRAW2's five plus spr/shape/
-    img); `resid` is the DRAWBRK render EMA minus that -- what is genuinely
-    interpreter dispatch."""
-    cv = canvas(_t_spr_us=6000, _t_shape_us=7000, _t_img_us=8000,
-                _n_spr=42, _n_shape=9)
-    diag = FakeDiag()
-    dd._diag_draw3(diag, Obj(canvas=cv, perf_sample=lambda: ("c",),
-                             perf_breakdown=lambda: (0.0, 40.0, 0.0, 0.0)))
-    f = diag.one("DRAW3")
-    assert (f["spr"], f["shape"], f["img"]) == ("6.00ms", "7.00ms", "8.00ms")
-    assert (f["nspr"], f["nshape"]) == ("42", "9")
-    assert f["named"] == "36.00ms"                 # 1+2+3+4+5+6+7+8 ms
-    assert f["resid"] == "4.00ms"                  # render 40 - named 36
-
-
-def test_a_residual_can_go_NEGATIVE_and_must_print_that_honestly(dd):
-    """render is an EMA and the buckets are last-frame, so the two disagree
-    frame to frame. A clamp at zero would hide the disagreement it exists to
-    show -- it is the TREND that answers the question."""
-    cv = canvas(_t_spr_us=0, _t_shape_us=0, _t_img_us=0)
-    diag = FakeDiag()
-    dd._diag_draw3(diag, Obj(canvas=cv, perf_sample=lambda: ("c",),
-                             perf_breakdown=lambda: (0.0, 5.0, 0.0, 0.0)))
-    assert diag.one("DRAW3")["resid"] == "-10.00ms"
-
-
-def test_draw3_is_cart_gated_and_needs_a_canvas(dd):
-    diag = FakeDiag()
-    dd._diag_draw3(diag, Obj(canvas=None, perf_sample=lambda: ("c",)))
-    dd._diag_draw3(diag, Obj(canvas=canvas(), perf_sample=lambda: None))
-    dd._diag_draw3(None, Obj(canvas=canvas(), perf_sample=lambda: ("c",)))
-    assert diag.lines == []
-
-
-# == _diag_luamem ==============================================================
-
-
-class FakeMoycore:
-    def __init__(self, active, stats):
-        self._active = active
-        self._stats = stats
-
-    def active(self):
-        return self._active
-
-    def alloc_stats(self):
-        return self._stats
-
-
-def esp32_with(*regions):
-    """`idf_heap_info(HEAP_DATA)` -> ((total, free, largest, ...), ...)."""
-    return Obj(HEAP_DATA=4, idf_heap_info=lambda _cap: regions)
-
-
-def test_luamem_prints_moycores_seven_fields_and_says_which_core_it_is(dd):
-    """moycore's alloc_stats stops at seven; a short tuple must print a short
-    line rather than index off the end of it. The last three are the
-    small-object pool -- live/capacity and the chunk count -- and the gap
-    between them is PSRAM the VM holds that `psram` alone does not show."""
-    core = FakeMoycore(True, (2048, 4096, 8192, 5, 10240, 32768, 3))
-    diag = FakeDiag()
-    with modules(moycore=core):
-        dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
-    f = diag.one("LUAMEM")
-    assert (f["sram"], f["psram"], f["peak"]) == ("2.0KB", "4.0KB", "8.0KB")
-    assert f["denied"] == "5"
-    assert f["pool"] == "10.0/32.0KB"
-    assert f["ch"] == "3"
-    assert f["core"] == "1"
-
-
-def test_luamem_falls_through_to_the_old_runtime_when_moycore_is_idle(dd):
-    """A 16-field tuple takes the long line: `denied` becomes KILOBYTES (st[7]),
-    the size classes come from st[8..15] and the call counts from st[3]/st[4] --
-    a completely different index map from the short line's."""
-    st = (1024, 2048, 3072, 11, 22, 0, 0, 4096,
-          5120, 6144, 7168, 8192, 9216, 10240, 11264, 12288)
-    diag = FakeDiag()
-    with modules(moycore=FakeMoycore(False, None),
-                 moy_lua=Obj(alloc_stats=lambda: st)):
-        dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
-    f = diag.one("LUAMEM")
-    assert f["denied"] == "4KB"                    # st[7]/1024, not st[3]
-    assert f["sc"] == "5.0/6.0/7.0/8.0"
-    assert f["pc"] == "9.0/10.0/11.0/12.0"
-    assert f["n"] == "11/22"
-    assert "core" not in f
-
-
-def test_luamem_is_silent_when_no_lua_vm_is_holding_anything(dd):
-    """`live == 0` means no cart VM. The guard is st[0] + st[1], so a VM living
-    entirely in PSRAM still reports."""
-    diag = FakeDiag()
-    with modules(moycore=FakeMoycore(True, (0, 0, 8192, 0, 0, 0, 0))):
-        dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
-    assert diag.lines == []
-
-    with modules(moycore=FakeMoycore(True, (0, 4096, 8192, 0, 0, 32768, 1))):
-        dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
-    assert diag.line("LUAMEM") is not None
-
-
-def test_luamem_counts_only_the_INTERNAL_heap_regions(dd):
-    """>=1MB regions are PSRAM (device_util.sram_census uses the same rule).
-    `int` is free/largest in KB, and the largest is a MAX across regions, not
-    the last one seen."""
-    diag = FakeDiag()
-    with modules(moycore=FakeMoycore(True, (2048, 4096, 8192, 0, 1024, 32768, 1)),
-                 # the biggest block is NOT the last region seen, or a lost
-                 # max() reads as agreement
-                 esp32=esp32_with((65536, 51200, 61440),
-                                  (32768, 20480, 40960),
-                                  (8 * 1024 * 1024, 7 * 1024 * 1024, 999999))):
-        dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
-    assert diag.one("LUAMEM")["int"] == "70/60k"   # 71680//1024, 61440//1024
-
-
-def test_luamem_still_prints_where_the_heap_probe_is_unavailable(dd):
-    """A board with no `esp32` module is not a reason to lose the Lua numbers;
-    the census rides along, guarded separately."""
-    diag = FakeDiag()
-    with modules(moycore=FakeMoycore(True, (2048, 4096, 8192, 0, 1024, 32768, 1)),
-                 esp32=None):
-        dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
-    assert diag.one("LUAMEM")["int"] == "0/0k"
-
-
-def test_luamem_is_cart_gated_and_survives_a_runtime_with_no_stats(dd):
-    diag = FakeDiag()
-    with modules(moycore=FakeMoycore(True, (2048, 4096, 8192, 0, 1024, 32768, 1))):
-        dd._diag_luamem(diag, Obj(perf_sample=lambda: None))
-    dd._diag_luamem(None, Obj(perf_sample=lambda: ("c",)))
-    assert diag.lines == []
-    # moycore idle and no moy_lua at all -- the shipped shape since the old Lua
-    # runtime was deleted. The ImportError must reach the outer guard.
-    with modules(moycore=FakeMoycore(False, None), moy_lua=None):
-        dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
-    assert diag.lines == []
-
-
-def test_a_build_with_no_moycore_at_all_still_asks_the_other_runtime(dd):
-    """The `except ImportError` around the moycore probe is what makes the
-    fallback reachable on a board that ships one runtime and not the other."""
-    diag = FakeDiag()
-    # Seven fields, i.e. the short form: what is under test is that the
-    # ImportError reaches the fallback at all, and the only Lua runtime left in
-    # the tree is moycore's, so its tuple is the one shape to fall back with.
-    with modules(moycore=None,
-                 moy_lua=Obj(alloc_stats=lambda: (1024, 0, 0, 0, 0, 0, 0)),
-                 esp32=None):
-        dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
-    assert diag.one("LUAMEM")["sram"] == "1.0KB"
-
-
-# == _diag_chromebrk ===========================================================
-
-
-def test_chromebrk_splits_the_chrome_remainder_five_ways(dd):
-    diag = FakeDiag()
-    dd._diag_chromebrk(diag, Obj(perf_sample=lambda: ("c",),
-                                 perf_chrome=lambda: (1.0, 2.0, 3.0, 4.0, 5.0)))
-    assert diag.one("CHROMEBRK") == {"_bare": [], "bar": "1.00", "cmp": "2.00",
-                                     "cur": "3.00", "stk": "4.00",
-                                     "other": "5.00"}
-
-
-def test_a_console_older_than_the_stack_bucket_prints_the_four_field_line(dd):
-    """`other` used to be a residual of a residual; the short line is what a
-    pre-2026-08-14 console still emits, and index 3 is `other` there."""
-    diag = FakeDiag()
-    dd._diag_chromebrk(diag, Obj(perf_sample=lambda: ("c",),
-                                 perf_chrome=lambda: (1.0, 2.0, 3.0, 9.0)))
-    f = diag.one("CHROMEBRK")
-    assert "stk" not in f
-    assert f["other"] == "9.00"
-
-
-def test_chromebrk_needs_a_running_cart_and_a_chrome_probe(dd):
-    diag = FakeDiag()
-    dd._diag_chromebrk(diag, Obj(perf_sample=lambda: None,
-                                 perf_chrome=lambda: (1.0,) * 5))
-    dd._diag_chromebrk(diag, Obj(perf_sample=lambda: ("c",)))
-    dd._diag_chromebrk(None, Obj(perf_sample=lambda: ("c",)))
-    assert diag.lines == []
-
-
-def test_a_throwing_chrome_probe_never_breaks_the_diag_tick(dd):
-    def boom():
-        raise ValueError("no")
-
-    diag = FakeDiag()
-    dd._diag_chromebrk(diag, Obj(perf_sample=lambda: ("c",), perf_chrome=boom))
-    assert diag.lines == []
-
-
-# == _diag_layerbrk ============================================================
-
-
-def test_layerbrk_names_the_stack_walk_per_layer_in_the_order_given(dd):
-    """`perf_layers` sorts dearest first; this line must not re-order it."""
-    rows = (("wall", 3.0), ("shelf", 2.0), ("bar", 1.0))
-    diag = FakeDiag()
-    dd._diag_layerbrk(diag, Obj(perf_layers=lambda: rows))
-    msg = diag.line("LAYERBRK")
-    f = fields(msg)
-    assert f["n"] == "3"
-    assert f["sum"] == "6.00"
-    assert msg.index("wall=") < msg.index("shelf=") < msg.index("bar=")
-    assert (f["wall"], f["shelf"], f["bar"]) == ("3.00", "2.00", "1.00")
-
-
-def test_the_sum_covers_every_layer_even_where_the_tail_is_truncated(dd):
-    """Six rows are printed and the rest are counted; a `sum` over the printed
-    head only would be read as covering fewer layers than it does -- which is
-    why the truncation is NAMED."""
-    rows = tuple(("l%d" % i, float(i)) for i in range(8))    # 0..7, sum 28
-    diag = FakeDiag()
-    dd._diag_layerbrk(diag, Obj(perf_layers=lambda: rows))
-    msg = diag.line("LAYERBRK")
-    assert fields(msg)["sum"] == "28.00"
-    assert msg.endswith(" +2 more")
-    assert "l6=" not in msg and "l7=" not in msg
-    assert "l5=5.00" in msg
-
-
-def test_exactly_six_layers_are_printed_whole_with_no_more_suffix(dd):
-    rows = tuple(("l%d" % i, 1.0) for i in range(6))
-    diag = FakeDiag()
-    dd._diag_layerbrk(diag, Obj(perf_layers=lambda: rows))
-    assert "more" not in diag.line("LAYERBRK")
-
-
-def test_the_frame_edges_lead_the_layer_line_when_the_console_measures_them(dd):
-    """pre + sum + flush + post should account for the loop's whole `frm`, so
-    the edges belong at the FRONT of the anatomy, before n=."""
-    diag = FakeDiag()
-    dd._diag_layerbrk(diag, Obj(perf_layers=lambda: (("a", 1.0),),
-                                perf_frame_edges=lambda: (0.5, 0.25)))
-    msg = diag.line("LAYERBRK")
-    assert msg.startswith("pre=0.50 post=0.25 n=1 ")
-
-    diag = FakeDiag()
-    dd._diag_layerbrk(diag, Obj(perf_layers=lambda: (("a", 1.0),)))
-    assert diag.line("LAYERBRK").startswith("n=1 ")
-
-
-def test_layerbrk_is_NOT_cart_gated_but_is_silent_with_nothing_to_report(dd):
-    """Deliberately unlike DRAWBRK/CHROMEBRK: the launcher and editor walks
-    have no other instrument at all, so this ws double has no perf_sample."""
-    diag = FakeDiag()
-    dd._diag_layerbrk(diag, Obj(perf_layers=lambda: (("a", 1.0),)))
-    assert diag.line("LAYERBRK") is not None
-
-    diag = FakeDiag()
-    dd._diag_layerbrk(diag, Obj(perf_layers=lambda: ()))
-    dd._diag_layerbrk(diag, Obj())
-    dd._diag_layerbrk(None, Obj(perf_layers=lambda: (("a", 1.0),)))
-    assert diag.lines == []
-
-
-# == _diag_homebrk =============================================================
-
-
-def test_homebrk_prints_the_launcher_frames_three_sections(dd):
-    diag = FakeDiag()
-    dd._diag_homebrk(diag, Obj(_pf_home=(7, 8, 9)))
-    assert diag.one("HOMEBRK") == {"_bare": [], "wp": "7", "grid": "8",
-                                   "bar": "9"}
-
-
-def test_homebrk_is_silent_unless_the_LAST_frame_drew_the_home_screen(dd):
-    """`_pf_home` is None while idle or inside a cart/app; a stale line would
-    read as the launcher having repainted when it did not.
-
-    An EQUIVALENT MUTANT lives here: weakening `if home:` to something always
-    true is unobservable, because `"wp=%d..." % None` then raises into the
-    body's own blanket except and the line is dropped anyway. The guard is what
-    makes the silence deliberate rather than incidental, and no test can tell
-    those apart from the outside -- do not "simplify" it away expecting one to.
-    """
-    diag = FakeDiag()
-    dd._diag_homebrk(diag, Obj(_pf_home=None))
-    dd._diag_homebrk(diag, Obj())
-    dd._diag_homebrk(None, Obj(_pf_home=(1, 2, 3)))
-    assert diag.lines == []
-
-
 # == _diag_loop ================================================================
 #
 # acc is [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep, hi, hp] in ms
@@ -881,6 +585,11 @@ def test_an_empty_window_prints_nothing_rather_than_dividing_by_zero(dd):
     dd._diag_loop(diag, Obj(), [])
     dd._diag_loop(None, Obj(), acc_of())
     assert diag.lines == []
+
+
+def esp32_with(*regions):
+    """`idf_heap_info(HEAP_DATA)` -> ((total, free, largest, ...), ...)."""
+    return Obj(HEAP_DATA=4, idf_heap_info=lambda _cap: regions)
 
 
 # == _diag_webhost =============================================================
@@ -1030,158 +739,6 @@ def test_a_board_polling_neither_peripheral_reports_zeroes_not_a_crash(dd):
     assert len(diag.lines) == 1
 
 
-# == _diag_calib ===============================================================
-#
-# The MAGNITUDES here are a device's interpreter cost model and are meaningless
-# on a desktop CPython, so the clock is scripted: what is pinned is the ORDER of
-# the five benchmarks and the `- base` subtraction, which are code.
-
-CALIB_CLOCK = (0, 100,      # base: the empty loop
-               0, 500,      # call4
-               0, 900,      # spill
-               0, 300,      # tup
-               0, 700,      # arr
-               0, 1100)     # flt
-
-
-def test_the_calib_benchmarks_all_subtract_the_empty_loop_baseline(dd):
-    """Without `- base` every number carries the interpreter's loop overhead,
-    which is the thing the model is trying to price the OTHER ops against."""
-    clock_us(dd, *CALIB_CLOCK)
-    diag = FakeDiag()
-    dd._diag_calib(diag)
-    assert diag.one("CALIB") == {"_bare": ["us/100"], "call4": "400",
-                                 "spill": "800", "tup": "200", "arr": "600",
-                                 "flt": "1000"}
-
-
-def test_calib_runs_ONCE_per_boot_and_never_again(dd):
-    """It is timed ~3s into the first cart so it reflects the real runtime
-    heap; a second run would price a different heap under the same name."""
-    clock_us(dd, *CALIB_CLOCK)
-    diag = FakeDiag()
-    dd._diag_calib(diag)
-    dd._diag_calib(diag)
-    dd._diag_calib(diag)
-    assert diag.tags() == ["CALIB"]
-    assert dd._CALIB_DONE == [True]
-
-
-def test_a_calib_that_throws_does_not_retry_on_every_later_sample(dd):
-    """The latch is set BEFORE the try on purpose: a benchmark that cannot run
-    on this board must cost one attempt, not one per diag tick forever."""
-    dd._ticks_us = None                            # TypeError inside the body
-    diag = FakeDiag()
-    dd._diag_calib(diag)
-    assert diag.lines == []
-    clock_us(dd, *CALIB_CLOCK)
-    dd._diag_calib(diag)
-    assert diag.lines == []
-
-    dd._diag_calib(None)                           # and it declines a None ring
-
-
-# == _diag_gc ==================================================================
-
-
-class FakeGC:
-    """MicroPython's `gc`: `mem_alloc`/`mem_free` walk the heap and do not
-    exist on CPython. Everything else delegates to the real module, because
-    this sits in `sys.modules` for the duration of the call."""
-
-    def __init__(self, allocs, free):
-        import gc as _real
-        self._real = _real
-        self._allocs = list(allocs)
-        self._free = free
-        self.calls = []
-
-    def __getattr__(self, name):
-        return getattr(self._real, name)
-
-    def mem_alloc(self):
-        self.calls.append("mem_alloc")
-        return self._allocs.pop(0)
-
-    def mem_free(self):
-        self.calls.append("mem_free")
-        return self._free
-
-    def collect(self):
-        self.calls.append("collect")
-
-
-def test_the_gc_sample_measures_the_collect_it_forced(dd):
-    """The pause an auto-GC costs when it lands mid-frame -- the render-time
-    variance. It is timed around `collect()`, so the collect has to be between
-    the two reads."""
-    fake = FakeGC([300000, 200000], 1500000)
-    clock_ms(dd, 5000, 5130)
-    diag = FakeDiag()
-    with modules(gc=fake):
-        dd._diag_gc(diag)
-    assert fake.calls == ["mem_alloc", "collect", "mem_free", "mem_alloc"]
-    f = diag.one("GC")
-    assert f["collect"] == "130ms"
-    assert f["free"] == "1464k"                    # 1500000 >> 10
-    assert f["live"] == "195k"                     # the POST-collect read
-
-
-def test_churn_is_measured_from_the_last_samples_LIVE_set(dd):
-    """Bytes allocated since the last sample -- the pressure that sets how
-    often auto-GC fires. The baseline is the post-collect live set, not the
-    pre-collect read, or every sample would report ~0 churn."""
-    fake = FakeGC([300000, 200000], 1500000)
-    clock_ms(dd, 0, 0)
-    diag = FakeDiag()
-    with modules(gc=fake):
-        dd._diag_gc(diag)
-        assert diag.one("GC")["churn"] == "292k"   # 300000 - 0
-        assert dd._GC_BASE == [200000]
-
-        for _ in range(9):                         # the skipped samples
-            dd._diag_gc(diag)
-        assert len(diag.lines) == 1
-
-        fake._allocs = [250000, 210000]
-        clock_ms(dd, 0, 0)
-        dd._diag_gc(diag)
-    assert len(diag.lines) == 2
-    assert fields(diag.lines[1][1])["churn"] == "48k"   # 250000 - 200000
-
-
-def test_the_forced_collect_runs_one_sample_in_ten_and_never_per_frame(dd):
-    """It costs ~130ms on a cart-sized live set and mem_alloc/mem_free walk the
-    heap on top -- running it every 3s sample was itself a visible hitch. The
-    FIRST sample of a run must still take it."""
-    fake = FakeGC(list(range(200)), 0)
-    clock_ms(dd, *([0] * 200))
-    diag = FakeDiag()
-    with modules(gc=fake):
-        for _ in range(31):
-            dd._diag_gc(diag)
-    assert len(diag.lines) == 4                    # ticks 0, 10, 20, 30
-    assert dd._GC_TICK == [31]
-
-
-def test_the_gc_tick_advances_even_where_there_is_no_ring_to_log_to(dd):
-    """`diag is None` returns before the counter, so the cadence is not a
-    function of whether anyone was listening -- pinned so it stays deliberate."""
-    dd._diag_gc(None)
-    assert dd._GC_TICK == [0]
-
-
-def test_a_port_without_the_heap_verbs_stays_silent_instead_of_raising(dd):
-    """CPython's `gc` has no mem_alloc; so does a MicroPython build without
-    MICROPY_PY_GC. The AttributeError must not reach the frame loop."""
-    diag = FakeDiag()
-    dd._diag_gc(diag)                              # the REAL gc module
-    assert diag.lines == []
-
-
-# == the never-break-the-frame guard, on every line ============================
-
-
 class Exploding:
     """A source that has gone away mid-session -- a peripheral off the bus, a
     probe on a half-torn-down console. `getattr(x, n, default)` swallows only
@@ -1208,18 +765,11 @@ def test_no_diag_line_can_break_the_frame_it_is_measuring(dd):
             diag, Obj(perf_breakdown=raises, **running))),
         ("DRAW2", lambda: dd._diag_draw2(
             diag, Obj(canvas=Obj(gate_counts=raises), **running))),
-        ("DRAW3", lambda: dd._diag_draw3(
-            diag, Obj(canvas=canvas(), perf_breakdown=raises, **running))),
-        ("LUAMEM", lambda: dd._diag_luamem(diag, Exploding())),
-        ("CHROMEBRK", lambda: dd._diag_chromebrk(diag, Exploding())),
-        ("LAYERBRK", lambda: dd._diag_layerbrk(diag, Exploding())),
-        # a two-element split against a three-field format
-        ("HOMEBRK", lambda: dd._diag_homebrk(diag, Obj(_pf_home=(1, 2)))),
         ("LOOP", lambda: dd._diag_loop(diag, Obj(), [1, 2])),
         ("WEBHOST", lambda: dd._diag_webhost(diag, Obj(webhost=Exploding()))),
         ("I2CSTAT", lambda: dd._diag_i2cstat(diag, Exploding(), Exploding())),
     )
     for _name, call in calls:
         call()                                     # must not raise
-    assert len(calls) == 11
+    assert len(calls) == 6
     assert diag.lines == []
