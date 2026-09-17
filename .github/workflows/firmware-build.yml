@@ -53,6 +53,11 @@ on:
       - "tools/p8_import.py"
       - "tools/p8_lua_port.py"
       - "tools/p8_writer.py"
+      # What gets RELEASED, not what gets built: the publisher stages each
+      # board's flashable image off site/build.py's BOARDS, so a board added
+      # there publishes nothing until a build runs after it.
+      - "site/build.py"
+      - "tools/publish_firmware_release.py"
       - ".github/workflows/firmware-build.yml"
   workflow_dispatch:
     inputs:
