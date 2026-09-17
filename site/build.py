@@ -100,6 +100,18 @@ TIERS = [
 #   guition  esptool --chip esp32s3 write_flash 0x0 moybyte_guition_s3.bin
 #   zero     esptool --chip esp32s3 write_flash 0x0 moybyte_zero.bin
 #
+# THE 10.1" P4 (guition_p4) IS DELIBERATELY NOT HERE, though CI builds it and
+# `declared_flash()` already reads its [flash] block. tests/test_site_flash.py's
+# `test_a_reset_that_will_not_take_has_a_way_out` requires every board that
+# ATTEMPTS an auto-reset to offer a BOOT-button way to skip it, because that
+# reset is the part most likely to fail on someone else's machine -- and that
+# board's README records it has no BOOT button. There is no honest `manual`
+# string to write for it, so it cannot join the page's flasher until somebody
+# with the hardware decides what its escape hatch is (a power-cycle, most
+# likely, which is a different affordance and a change to that invariant).
+# tools/fetch_ci_firmware.py does not carry it either, so there would be no
+# image to serve regardless.
+#
 # All four write a MERGED image (bootloader + partition table + app) whose header
 # already carries the flash mode/size/frequency the build baked in, which is why
 # the flasher passes "keep" for all of them rather than re-deriving them here. The
@@ -428,6 +440,11 @@ TARGETS = [
      "The ~$15 3.5&Prime; smart display, and the third board: a QSPI panel of "
      "its own, touch only, landscape 480&times;320, and cartridges on the TF "
      "card when there is one in the slot."),
+    ("Guition JC8012P4A1C", "ESP32-P4",
+     "The 10.1&Prime; one, and the second P4: 800&times;1280 portrait glass "
+     "run as a landscape desk, rotated by the same hardware PPA that "
+     "composites the game. Its port is the Waveshare&rsquo;s, over a shared "
+     "silicon tier rather than a copy."),
     ("Seeed XIAO ESP32-S3", "ESP32-S3",
      "The odd one, and the smallest: no screen at all. A browser is its "
      "console &mdash; it serves that same WebAssembly build off its own flash "
@@ -447,7 +464,7 @@ TARGETS = [
 # Being straight about the state is the point of this section. Update it when
 # one of these lands -- a stale honesty list is worse than none.
 ROUGH = [
-    "All four boards are off-the-shelf dev boards. Bespoke hardware is roadmap, not shipped.",
+    "All five boards are off-the-shelf dev boards. Bespoke hardware is roadmap, not shipped.",
     "Per-cart frame rates, the frame-budget model and every lever &mdash; including "
     "the ones built, measured and reverted &mdash; are tracked in public issues, "
     "not claimed here.",
@@ -646,7 +663,7 @@ def font_face():
 # The at-a-glance status list: the honest state of the machine, as data. Dots are
 # role colours (ok / wip / warn), so "what works" is readable before any prose.
 STATUS = [
-    ("ok", "The system", "boots on four ESP32 boards"),
+    ("ok", "The system", "boots on five ESP32 boards"),
     ("ok", "Editors", "on the device itself"),
     ("ok", "OTA updates", "hardware-confirmed"),
     ("wip", "System apps", "not editable yet"),
@@ -1140,7 +1157,7 @@ footer a{margin-right:4px}
       on. The software is cartridges &mdash; games, wallpapers, tools, whatever you
       make &mdash; and you open, change and run any of them on the board itself,
       with no host computer in the loop.</p>
-    <p class="sub rise">It boots on four off-the-shelf boards today &mdash; three
+    <p class="sub rise">It boots on five off-the-shelf boards today &mdash; four
       with screens, one without &mdash; and the same source tree is a PC simulator
       and the browser build below.</p>
     <div class="btns rise">
