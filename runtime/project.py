@@ -78,7 +78,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 class _ConfigOps(OpCodec):
     """OpCodec for the CONFIG tab (#111 phase 4): an op is `{"k":key,"o":old,
-    "n":new}` -- one field's old/new value, the exact Sheets cell-codec shape
+    "n":new}` -- one field's old/new value, a single-cell codec shape
     (invert is O(1): write `o`/`n` straight back). The doc is the Project
     itself (config lives directly in `doc.config`, a plain dict -- there is no
     separate ConfigEditor instance the way paint/map/scene/music each have
@@ -90,6 +90,15 @@ class _ConfigOps(OpCodec):
 
     def invert(self, doc, op):
         doc.config[op["k"]] = op["o"]
+
+
+# How slow a code commit has to be before the perf_capture COMMIT line prints.
+# It is a NOISE FLOOR, not a measurement: a normal commit stays silent so the
+# diag stream is readable. Settable over the dev channel (`py "import project;
+# project.COMMIT_LOG_MS = 0"`) so a measurement session can see every commit
+# without a reflash -- which is the only way to read one that now lands under
+# the floor.
+COMMIT_LOG_MS = 500
 
 
 class Project:
@@ -106,8 +115,6 @@ class Project:
         self.flags = None             # 512 tile flag bytes (SPEC.md 3.5, built on open)
         self.images = None            # {name: .moyimg text} for the open cart (#63);
                                       # make_api decodes each lazily via image(name)
-        self.tables = None            # {name: rows} Sheets docs, read via table() (#78)
-        self.texts = None             # {name: lines} Writer docs, read via text() (#78)
         self.pmem = None              # Pmem (persistent cart store) for the open cart
         self.scenes = None            # Scenes (#85): the open cart's placed-actor
                                       # scenes; make_api binds scene()/load_scene()
@@ -274,7 +281,7 @@ class Project:
             # hasn't changed (zone_gen wouldn't otherwise bump for a plain autosave).
             ws.bar_layer.invalidate()
 
-    def _journal_code(self, src, ops=None):
+    def _journal_code(self, src, ops=None, name=None):
         """Journal a main.py code commit, DETECTING GRADUATION for a block- OR
         deck-authored cart (spec Section 8, the MakeCode model -- #78 folds
         Storybook's decks into the SAME mechanism as the block editor). Bound to
@@ -298,6 +305,14 @@ class Project:
         # The journal entry names the cart's ACTUAL main file (#67: main.lua for a
         # lua cart), so an undo restores into the file the runtime loads from.
         mainf = cart.get("main", "main.py") if cart else "main.py"
+        if name is not None and name != mainf:
+            # One of the cart's OTHER scripts (SPEC.md 4): journaled under its
+            # own name and nothing else. Graduation is a claim about the file
+            # blocks.json / deck.json GENERATE, and they generate main -- a
+            # `board.lua` that diverges from a block program it was never
+            # compiled from is not a kid outgrowing blocks.
+            self._journal(name, src, ops=ops)
+            return
         if prog is not None:
             self._journal_code_toward(
                 mainf, src, cart,
@@ -393,7 +408,7 @@ class Project:
         """Record one field's old/new value (#111): called by every config
         mutation point (Workstation.adjust's left/right stepper, the CardsLayer
         choice-cell tap) AFTER the field is already written, mirroring the
-        paint/map/scene/sheets record() contract. A same-value set records
+        paint/map/scene record() contract. A same-value set records
         nothing."""
         if old != new:
             self.config_hist.record({"k": key, "o": old, "n": new})
@@ -456,16 +471,31 @@ class Project:
             return False
         return True
 
-    def commit_code(self, src, quiet=False):
+    def commit_code(self, src, quiet=False, force=False, name=None):
         """Persist validated source through the store -- the store-write half of the
         old Workstation.save_code. The compile-check + code-UI half stays on the code
         surface (ws.save_code), which calls this once the source is known to parse.
         Returns True iff the write succeeded.
 
+        `name` is WHICH of the cart's scripts (SPEC.md 4) the Code tab is on --
+        None meaning main, which is every cart with one file. A non-main script
+        takes the same store write, the same op-history drain and the same
+        journal line under ITS OWN file name (the #111 cursor is a per-file map,
+        so an undo on p8.lua cannot revert the last commit to main.lua). What it
+        cannot do is GRADUATE: blocks.json and deck.json generate the main file
+        and no other, so a commit to a tab has nothing to diverge from.
+
         `quiet` is set by the Stage-7 idle-debounce autosave (ws.history.idle_tick): that
         save is INVISIBLE (spec Section 7), so it must NOT pop the "Code Wizard"
         achievement toast -- a visible side effect on a nominally-invisible save. The
-        badge stays earnable via the explicit SAVE / PLAY paths (quiet defaults False)."""
+        badge stays earnable via the explicit SAVE / PLAY paths (quiet defaults False).
+
+        `force` is the hard-exit paths' (#154): write source that does not parse
+        rather than lose the kid's half-typed line. The write then comes back
+        SAVE_KEPT -- persisted, still broken -- so the two things a GOOD commit
+        also does are skipped: the stale crash text stands (nothing was fixed) and
+        the crash guard is NOT forgiven, which would otherwise re-arm a `type:
+        "app"` cart that still cannot compile."""
         ws = self.ws
         # #183 stage split. On glass a single commit frame took 37.3 SECONDS with the
         # store write measured at 355ms and the whole in-frame draw breakdown summing
@@ -477,18 +507,23 @@ class Project:
         _t_write = _t_burst = _t_ops = 0
         try:
             # moy_carts.save_code always returns a (status, message) 2-tuple.
-            status, smsg = ws._with_sd(lambda: ws.carts_store.save_code(self.cart, src))
+            status, smsg = ws._with_sd(
+                lambda: ws.carts_store.save_code(self.cart, src, force, name))
             _t_write = _ticks_diff(_ticks_ms(), _t0)
-            if status != ws.carts_store.SAVE_OK:
+            if status == ws.carts_store.SAVE_BAD_SYNTAX:
                 ws.save_status = "CAN'T SAVE " + str(smsg)
                 ws.cart_error = "Could not save -- " + str(smsg)
                 return False
+            parsed = status == ws.carts_store.SAVE_OK
             ws.editor.dirty = False
             # Save is invisible (spec Section 7 / #111): no "SAVED" happy path --
             # save_status carries FAILURES only, so a successful commit just
             # CLEARS any stale failure text (the old "SAVED" write also did the
-            # clearing, by overwrite; same across every commit_* verb).
-            ws.save_status = None
+            # clearing, by overwrite; same across every commit_* verb). A KEPT
+            # write leaves the syntax badge the code surface just wrote standing:
+            # the line is safe on disk AND it still does not parse.
+            if parsed:
+                ws.save_status = None
             # #111 phase 4: close any live typing burst, drain the code History's op
             # batch into this commit's journal line (mirrors commit_sprites/map), then
             # re-baseline (clear) -- the CLEAN boundary: in-RAM undo covers edits SINCE
@@ -501,11 +536,11 @@ class Project:
             _t_burst = _ticks_diff(_ticks_ms(), _t0) - _t_write
             ops = hist.flush() if hist is not None else None
             _t_ops = _ticks_diff(_ticks_ms(), _t0) - _t_write - _t_burst
-            self._journal_code(src, ops=ops)  # durable undo (Stage 7) + graduation (Stage 8)
+            self._journal_code(src, ops=ops, name=name)  # durable undo (Stage 7) + graduation (Stage 8)
             if hist is not None:
                 hist.clear()                  # re-baseline (subsumes mark_keyframe)
             _total = _ticks_diff(_ticks_ms(), _t0)
-            if ws.perf_capture and _total > 500:
+            if ws.perf_capture and _total > COMMIT_LOG_MS:
                 # journal = the remainder: _journal_code's graduation decision + the
                 # journal_append SD session (which the device SD_TRACE brackets too,
                 # so a big journal= with a small SD bracket is the compare/snapshot).
@@ -518,12 +553,16 @@ class Project:
             # any stale crash text so returning to the desktop re-runs the fixed
             # cart instead of re-painting the old "crashed" panel. (run_code/the
             # _leave_menu re-_start() then actually re-exec it.)
-            ws.cart_error = None
             # ...and the same for a `type: "app"` cart the crash guard struck
             # out (#160). The refusal panel says "EDIT it"; this is the line
             # that makes that true. Code is the ONLY edit that clears strikes
             # -- see Workstation.forgive_app for why not every commit_* verb.
-            ws.forgive_app(self.cart)
+            # Neither is true of a KEPT write: the code is on disk and still
+            # broken, so a stale crash panel is not stale and re-arming the guard
+            # would just let the same cart strike out again.
+            if parsed:
+                ws.cart_error = None
+                ws.forgive_app(self.cart)
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
@@ -624,116 +663,88 @@ class Project:
             return getattr(me, "_hist", None)
         return None
 
+    def _commit_asset(self, what, rel, payload, save, hist, clean=None, note=None):
+        """ONE body for the asset commits (sprites / map / scene / sounds):
+        the store write under the SD wrapper, the editor marked clean, the
+        stale failure text cleared, then the durable undo line -- this
+        snapshot IS a keyframe, so the tab's in-RAM op History is drained
+        into the journal entry and re-baselined (#111): in-RAM undo covers
+        edits SINCE the last commit, the journal covers commit-to-commit, and
+        the two never double-count a stroke. flush() runs only after the store
+        write succeeded, so a failed save cannot swallow the batch. A failed
+        save must be VISIBLE on device (no serial in the run loop), hence the
+        status + cart_error, _err_text-guarded so a weird exception's __str__
+        cannot itself escape. Returns True on a persisted commit."""
+        ws = self.ws
+        try:
+            ws._with_sd(save)
+            if clean is not None:
+                clean.dirty = False
+            ws.save_status = None             # clear stale failure text (see commit_code)
+            ops = hist.flush() if hist is not None else None
+            self._journal(rel, payload, ops=ops)
+            if hist is not None:
+                hist.clear()
+            if note:
+                ws.ach.note(note)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            txt = _err_text(exc)
+            ws.save_status = "CAN'T SAVE"
+            ws.cart_error = "Could not save " + what + " -- " + txt
+            print("Moybyte save " + what + " failed:", txt)
+            return False
+
     def commit_sprites(self):
         ws = self.ws
         if not (self.sheet and self.cart and self.cart.get("path") and ws.can_manage):
             return
         hexs = self.sheet.to_hex()
-        try:
-            ws._with_sd(lambda: ws.carts_store.save_sprites(self.cart, hexs))
-            self.sheet.dirty = False
-            ws.save_status = None             # clear stale failure text (see commit_code)
-            # #111: this snapshot IS a keyframe, so drain the paint History's op batch
-            # into the journal line (fine-grained cross-boundary undo). Then re-baseline
-            # the History (clear): a commit is the CLEAN boundary -- in-RAM undo covers
-            # edits SINCE the last commit, the journal covers commit-to-commit, so the
-            # two never double-count the same stroke. flush() runs only after the store
-            # write succeeded, so a failed save doesn't silently swallow the batch.
-            # (Paint commits only on tab-leave/exit, never mid-session, so clearing
-            # here never costs a kid an in-progress stroke's undo.)
-            hist = self._paint_history()
-            ops = hist.flush() if hist is not None else None
-            self._journal("sprites.moygfx", hexs, ops=ops)   # durable undo (Stage 7/#111)
-            if hist is not None:
-                hist.clear()                  # re-baseline (subsumes mark_keyframe)
-            ws.ach.note("paint_save")         # "Little Artist": a sprite saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            # Mirror the save_code contract: a failed sprite save must be VISIBLE on
-            # device (no serial in the run loop), not silent. _err_text-guarded so a
-            # weird exception's __str__ can't itself escape this handler.
-            txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
-            ws.cart_error = "Could not save sprites -- " + txt
-            print("Moybyte save sprites failed:", txt)
+        # Paint commits only on tab-leave/exit, never mid-session, so the
+        # History re-baseline never costs a kid an in-progress stroke's undo.
+        self._commit_asset("sprites", "sprites.moygfx", hexs,
+                           lambda: ws.carts_store.save_sprites(self.cart, hexs),
+                           self._paint_history(), clean=self.sheet,
+                           note="paint_save")          # "Little Artist" (#21)
 
     def commit_map(self):
-        # Persist the cart's tilemap to map.moymap (#32) -- the exact mirror of
-        # commit_sprites (to_hex -> SD wrapper -> save_map). The running cart already
-        # holds this same TileMap, so a save only persists what it's already using.
+        """Persist the cart's tilemap to map.moymap (#32). The running cart
+        already holds this same TileMap, so a save only persists what it is
+        already using."""
         ws = self.ws
         if not (self.tilemap and self.cart and self.cart.get("path") and ws.can_manage):
             return
         hexs = self.tilemap.to_hex()
-        try:
-            ws._with_sd(lambda: ws.carts_store.save_map(self.cart, hexs))
-            self.tilemap.dirty = False
-            ws.save_status = None             # clear stale failure text (see commit_code)
-            hist = self._map_history()        # #111: drain the map op batch (see commit_sprites)
-            ops = hist.flush() if hist is not None else None
-            self._journal("map.moymap", hexs, ops=ops)   # durable undo (Stage 7/#111)
-            if hist is not None:
-                hist.clear()                  # re-baseline the clean boundary (see commit_sprites)
-            ws.ach.note("map_save")           # "Map Maker": a map saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
-            ws.cart_error = "Could not save map -- " + txt
-            print("Moybyte save map failed:", txt)
+        self._commit_asset("map", "map.moymap", hexs,
+                           lambda: ws.carts_store.save_map(self.cart, hexs),
+                           self._map_history(), clean=self.tilemap,
+                           note="map_save")            # "Map Maker" (#21)
 
     def commit_scene(self, name, text):
-        """Persist one scene to scenes/<name>.moyscene (#85) -- the mirror of commit_map
-        (save_scene -> SD wrapper -> journal). `text` is the compact .moyscene JSON blob
-        (an ordered actor list). Stage 1 has no placement editor yet; this is the
-        persistence verb the editor (Stage 2) calls, and the surface tests drive it
-        directly. The journal `file` is the real relative path (scenes/<name>.moyscene),
-        so undo restores into the file the loader reads from. Returns True on a
-        persisted commit (the caller's success signal -- this used to ride the
-        save_status "SAVED" happy path, removed with the rest of it)."""
+        """Persist one scene to scenes/<name>.moyscene (#85). `text` is the
+        compact .moyscene JSON blob (an ordered actor list); the placement
+        editor calls this and the surface tests drive it directly. The journal
+        `file` is the real relative path, so undo restores into the file the
+        loader reads from. Returns True on a persisted commit."""
         ws = self.ws
         if not (self.cart and self.cart.get("path") and ws.can_manage):
             return False
-        try:
-            ws._with_sd(lambda: ws.carts_store.save_scene(self.cart, name, text))
-            ws.save_status = None             # clear stale failure text (see commit_code)
-            rel = ws.carts_store.SCENES_DIR + "/" + name + ws.carts_store.SCENE_EXT
-            # #111 phase 4: drain the SceneEditor's op batch into the journal line
-            # (see commit_sprites for the clean-boundary contract).
-            hist = self._scene_history()
-            ops = hist.flush() if hist is not None else None
-            self._journal(rel, text, ops=ops)     # durable undo (Stage 7/#111)
-            if hist is not None:
-                hist.clear()                      # re-baseline
-            return True
-        except Exception as exc:  # noqa: BLE001
-            txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
-            ws.cart_error = "Could not save scene -- " + txt
-            print("Moybyte save scene failed:", txt)
-            return False
+        rel = ws.carts_store.SCENES_DIR + "/" + name + ws.carts_store.SCENE_EXT
+        return self._commit_asset(
+            "scene", rel, text,
+            lambda: ws.carts_store.save_scene(self.cart, name, text),
+            self._scene_history())
 
     def commit_sounds(self):
-        """Persist the cart's AudioBank to sounds.json (#50) -- the mirror of
-        commit_map. The MusicEditor edits the LIVE bank (ws.audio.engine.bank), so a
-        save just serializes what the cart already plays through."""
+        """Persist the cart's AudioBank to sounds.json (#50). The MusicEditor
+        edits the LIVE bank (ws.audio.engine.bank), so a save just serializes
+        what the cart already plays through."""
         ws = self.ws
         me = ws.music_ui.musicedit
         if not (me and self.cart and self.cart.get("path") and ws.can_manage):
             return
         bank_dict = me.bank.to_dict()
-        try:
-            ws._with_sd(lambda: ws.carts_store.save_sounds(self.cart, bank_dict))
-            me.dirty = False
-            ws.save_status = None             # clear stale failure text (see commit_code)
-            # #111 phase 4: drain the MusicEditor's op batch into the journal line
-            # (see commit_sprites for the clean-boundary contract).
-            hist = self._music_history()
-            ops = hist.flush() if hist is not None else None
-            self._journal("sounds.json", json.dumps(bank_dict), ops=ops)  # (Stage 7/#111)
-            if hist is not None:
-                hist.clear()                      # re-baseline
-            ws.ach.note("sound_save")          # "Sound Designer": a bank saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
-            ws.cart_error = "Could not save sounds -- " + txt
-            print("Moybyte save sounds failed:", txt)
+        self._commit_asset("sounds", "sounds.json", json.dumps(bank_dict),
+                           lambda: ws.carts_store.save_sounds(self.cart, bank_dict),
+                           self._music_history(), clean=me,
+                           note="sound_save")          # "Sound Designer" (#21)

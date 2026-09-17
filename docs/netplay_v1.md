@@ -101,8 +101,8 @@ the protocol's host pin.
 **The PERF line names a match eating frames** (`13c3d9e`, 2026-08-27):
 `net=<ticks/s>` on both emitters, right after `fps=`, because for a linked game
 the drawn rate IS the tick rate — the world moves only on the shared tick and
-`console.frame` gates every frame that tick is not due for (a genuine rate lock,
-unlike frameskip's phase toggle; the two do not stack). **A console with no
+`Player.frame_plan` gates every frame that tick is not due for (a genuine rate
+lock; the tick model's draw divisor stays 1 under a session, #217). **A console with no
 session prints `-`, never 0**: 0 is a real reading, matched but not advancing,
 and a frozen 0 is what a broken meter looks like — the lesson `fold=` taught by
 lying for a month.

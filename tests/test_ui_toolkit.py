@@ -115,6 +115,25 @@ def test_chip_clips_an_overlong_label_inside_its_rect():
                for x in range(r[0], r[0] + r[2]))
 
 
+def test_chip_clip_follows_the_system_font_scale():
+    """The clip is a CHARACTER count at 8*fs px, so the scaled chrome (the P4
+    ships font_scale 2 and Settings offers 3) clips fewer characters rather
+    than the same ones at four times the width."""
+    for fs in (1, 2, 3):
+        cv = _cv(320, 120, fs)
+        cv.rect(0, 0, 320, 120, 7)
+        r = (10, 10, 40 * fs, 20 * fs)
+        ui.chip(cv, TH, r, "STORYBOOK")
+        for y in range(120):
+            for x in range(320):
+                if r[0] <= x < r[0] + r[2] and r[1] <= y < r[1] + r[3]:
+                    continue
+                assert cv.pix(x, y) == 7, (fs, x, y)
+        assert any(cv.pix(x, y) == TH["title_ink"]
+                   for y in range(r[1], r[1] + r[3])
+                   for x in range(r[0], r[0] + r[2]))
+
+
 def test_apps_button_delegates_to_chip(tmp_path):
     """The Appearance app's toolbar button (one of the four migrated copies)
     still paints its exact legacy pixels through the delegate."""
@@ -492,8 +511,8 @@ def test_cell_edge_last_paints_the_frame_over_the_content():
 
 
 def test_chip_colors_bypasses_the_skin_like_row_and_cell():
-    """Parity: absorbing a private button (writer's history pair, sheets' icon
-    button) must be able to keep that site's exact palette."""
+    """Parity: absorbing a private button (the notebook app's history pair)
+    must be able to keep that site's exact palette."""
     cv = SystemCanvas(80, 40)
     ui.chip(cv, TH, (0, 0, 60, 20), "X", colors=(19, 0, 22))
     assert cv.pix(1, 1) == 19

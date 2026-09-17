@@ -41,6 +41,42 @@ because they pay none of the taxes we do:
    heap-boxed ints/floats, per-bytecode dispatch. An emulator's "interpretation"
    (of 6502 code) is native-C-tight (~10× cheaper per op), and its game logic is
    compiled machine code. **This is our single biggest tax.**
+   - **A PICO-8 emulator on our class of hardware does not pay one piece of it,
+     and the piece is ours by choice (2026-09-10).** FAKE-08 runs on
+     [z8lua](https://github.com/samhocevar/z8lua), whose `luaconf.h` says
+     `#define LUA_NUMBER z8::fix32` — PICO-8's 16.16 fixed-point number IS the
+     VM's number type, so a cart's `x & y` is an inlined `int32` AND inside the
+     arithmetic opcode. Ours is a Lua→C crossing, measured on the T-Deck at
+     **1,534 ns of floor** plus 0.5–1.7 µs of body; dank tomb makes ~1,100 of
+     them a frame, ≈2.5–3 ms of its 24.9 ms draw. It also makes PICO-8's
+     semantics free rather than emulated (the whole of the 2026-09-10 bit-lane
+     work).
+     **The 3DS calibration this entry used to rest on is WITHDRAWN
+     (2026-09-11).** It read: "FAKE-08 benchmarks against an old 3DS at 268 MHz
+     ARM11 against our 240 MHz LX7, and plays many carts — so the gap here is
+     not silicon." No fps figure for FAKE-08 exists anywhere — not its README,
+     not its wiki, not its tracker — and its README says the opposite of what
+     was inferred: *"Performance is not great on Old 3ds systems. Some games
+     may experience slowdowns on the faster consoles as well."* The same
+     paragraph explains why: *"Pico 8 lists a raspberry pi 1 with a 700 MHz
+     ARM11 professor as minimum spec, and the old 3DS's CPU is 268 MHz ARM11"*
+     — **38% of PICO-8's own stated minimum**. "Plays many carts" traced back
+     to "Many games should be playable regardless", a hope following a
+     disclaimer; this doc turned it into a benchmark. Issue #155 has users
+     reporting carts at "less than quarter of the speed they're supposed to
+     play at" on comparable low-end ARM. What would calibrate it is running ONE
+     corpus cart on a stock FAKE-08 build and reading its rate; until someone
+     does, the comparison says nothing either way.
+     **And the conclusion it carried is contradicted by measurement**: the S3's
+     core declares `XCHAL_HAVE_PREDICTED_BRANCHES 0` and
+     `XCHAL_HAVE_SPECULATION 0`, and `perfcnt` prices that at **4.66 bubble
+     cycles per taken branch, 330k taken branches a frame, 17.6% of moss moss's
+     update** — while the 3DS's ARM1176 predicts branches. Silicon IS part of
+     the gap, and an interpreter is the worst case for the part we lack.
+     **Not a port**: z8lua is Lua 5.2 and C++
+     where moycore is 5.4 as C with `LUA_32BITS`, and the idea costs a 64-bit
+     intermediate for multiply/divide plus collapsing 5.4's integer/float
+     duality. Its `pico8` feature branch is the clean version to read.
 2. **The upscale composite (P4).** We render at a fixed 320×240 (so the same cart
    runs on the T-Deck) then scale it into a desktop window. Emulators render at
    their target resolution *directly into the scan-out buffer* — no composite.
@@ -125,9 +161,10 @@ on the P4 with hardware levers. Consequences:
 - **`moy_gfx` in IRAM is predicted null on the P4** (it accelerates the same C
   that just measured as a minor fraction of the slice) — deprioritized, not worth
   a build unless the T-Deck (SPI flush profile, different cache) wants it.
-- Levers that reduce **how often dispatch runs** get promoted: frameskip halves
-  the number of dispatched `_draw` calls per second, and the Lua/native tier
-  (#67) cheapens each one. Everything else render-side is noise.
+- Levers that reduce **how often dispatch runs** get promoted: the tick model's
+  draw divisor (#217) halves or thirds the number of dispatched `_draw` calls
+  per second, and the Lua/native tier (#67) cheapens each one. Everything else
+  render-side is noise.
 - Two build-cycle gotchas recorded: cmake `set_source_files_properties` does
   NOT reach `moy_gfx` (directory-scoped; the linked object compiles in the
   `micropython.elf` target's dir — verified via build.ninja; use an in-source
@@ -150,14 +187,17 @@ each.** The **fb-in-internal-SRAM** lever measured
 **cannot engage** on the T-Deck: `fb=psram free-int=164KB need=420KB` (both
 ping-pong buffers + WiFi reserve); the guard + boot line stay self-documenting.
 
-### Shipped 2026-07-10 — frameskip (#77, both boards)
+### Shipped 2026-07-10 — frameskip (#77, both boards); RETIRED by #217
 
-Settings → FRAMESKIP (default OFF, persisted; P4 serial `skip 0|1`): a GAME's
+Superseded by the tick model (#217): logic at the cart's declared rate, draw on
+an adaptive integer divisor, one STEADY knob. What follows is the record of the
+manual toggle it replaced. Settings → FRAMESKIP (default OFF, persisted; P4 serial `skip 0|1`): a GAME's
 `_update`+input+audio tick every loop frame, `_draw`+composite+flush every
 SECOND. On-glass: P4 Brick Siege logic 55→60Hz / render locked 30 / busy 17.6→9.0ms;
 Letter Blitz logic 49→60Hz. Trade: 30Hz motion + doubled logic rate ⇒ ~2×
-alloc churn ⇒ GC collects ~2× as often. Default ON/OFF is an open product
-call — on the fast S3 build most carts sit near 60 skip-OFF.
+alloc churn ⇒ GC collects ~2× as often. Its default was still an open product
+call when #217 retired the toggle — on the fast S3 build most carts sat near 60
+skip-OFF.
 
 ### Open — API-preserving (do these first)
 
@@ -195,8 +235,8 @@ Kids write ordinary code and shouldn't have to know the expert idioms. The path
 there is NOT hardware acceleration (the PPA dead-ended for everything but the
 composite), NOT "faster sprites" (already fast), and — as of the 2026-07-09 A/B —
 NOT compiler flags or SRAM placement either (both measured null; the render
-slice is dispatch). What's left is: **run the dispatch less often** (frameskip,
-the composite overlaps) and **make each dispatch cheaper** (Lua/native tier,
+slice is dispatch). What's left is: **run the dispatch less often** (the draw
+divisor, the composite overlaps) and **make each dispatch cheaper** (Lua/native tier,
 #67). The plain-ESP32 NES emulator is the proof the hardware has the grunt — the
 ceiling is the layers we put on top of it.
 
@@ -250,8 +290,44 @@ above got their verdicts in **#77**. What this section keeps is what was
 DECIDED:
 
 - **The S3 pays for calls and allocations, not raster.** A C verb call floors
-  at ~1.65 µs, a malloc through the IDF heap at ~9 µs (its TLSF metadata sits
-  in PSRAM). So the levers that landed are the ones that delete calls and
+  at ~1.0 µs of C-side time (re-measured 2026-09-09 with the per-verb profiler
+  on the real carts, against ~1.65 from the original micro-bench: `flr` reads
+  1.03 µs over 680 calls a frame and `palt` 1.16 over 1204). What it costs the
+  CART is more, because the profiler times the wrapper and not the crossing
+  that reaches it. `tools/p8_verb_bench.py` prices that (one cart per
+  operation, 2,000 calls a tick, net of an empty-loop control) — T-Deck,
+  2026-09-10, ns per call:
+
+  | the Lua being replaced | ns | | the C replacing it | ns |
+  |---|---:|---|---|---:|
+  | `i+1` — one VM instruction, no call | **29** | | `flr(1.5)` — the call floor | **1,533** |
+  | `nop()` — a Lua→Lua call, empty | **1,125** | | `peek(0x4300)` | 1,584 |
+  | a small Lua function body | 2,634 | | `band(3,5)` two ints | 2,046 |
+  | | | | `rnd(8)` | 2,196 |
+  | | | | `shl(1,4)` / `shr(3,1)` | 2,247 / 2,276 |
+  | | | | `3>>1` / `1.5&-1` (operators) | 2,565 / 3,510 |
+  | | | | `band(1.5,-1)` a fraction | 3,280 |
+  | | | | `mget(1,1)` | 3,996 |
+
+  **The number that decides a verb is 1,125 against 1,533**: a Lua→Lua call
+  and a Lua→C one. Crossing into C costs only ~400 ns MORE than the call a
+  shim function was already paying, so a C verb pays whenever it replaces a
+  Lua FUNCTION whose body is worth more than ~400 ns — a dozen VM instructions,
+  which every real shim body clears. That is why `split`, `rnd`, `srand`,
+  `lut_span` and `map` all won their A/Bs.
+
+  **And it is why the bare-operator rule earns its complexity.** Replacing
+  INLINE Lua with a verb is the opposite trade: `i+1` is 29 ns against 2,046
+  for a `band` call, a 70× loss. `&`, `|` and `^^` on provably-integer
+  operands must stay bare VM instructions (§the porter's `_BARE_OPS`), and a
+  fold that turns one into a call is a regression however tidy it looks.
+  **An OPERATOR costs ~250 ns more than the verb of the same C body**
+  (`3>>1` 2,562 against `shr(3,1)` 2,274; `1.5&-1` 3,511 against 3,284): the
+  porter localises the verb names as upvalues and leaves the nine `__p8_*` as
+  plain globals. Adding them to the localisation block is ~0.3 ms a frame on
+  dank tomb — measured but NOT taken (2026-09-10), because it is a vendored
+  porter change for 0.7% of a frame. A malloc through the IDF heap
+  at ~9 µs (its TLSF metadata sits in PSRAM). So the levers that landed are the ones that delete calls and
   mallocs: every p8 draw verb one call into the machine, the hot shim paths in
   C, one call per native bit operator, a small-object pool under `l_alloc`
   with its free lists in internal SRAM and chunks that go back.
@@ -270,11 +346,39 @@ DECIDED:
   reproduces such cadences.
 - **What is left for a 30 fps moss moss on the S3**, in order: the console's
   ~10 ms around the tick (fold snapshot, router, input poll: 3–5 ms), then the
-  structural one — running the cart tick on core 0 overlapped with the
-  console's frame (frame ≈ max, not sum; A/B against the shared PSRAM bus
-  before keeping). A Xtensa JIT is gated on the perf counters: a template JIT
-  only pays if retired instructions dominate a tick, and the evidence says
-  memory does.
+  interpreter itself (§3.1). A Xtensa JIT was gated on the perf counters: a
+  template JIT only pays if retired instructions dominate a tick, and the
+  evidence was read as memory. **THE COUNTERS HAVE NOW BEEN READ, and they say
+  otherwise (2026-09-11, `perfcnt`, #66).** moss moss `_update`, share of
+  cycles: retired instructions **51.6%**, branch bubbles **17.6%**, data
+  stalls 18.1%, instruction stalls 7.1%, register-dependency bubbles 4.6% —
+  ~99% accounted. Two controls say that profile is the VM's and not the
+  board's: the Guition S3, whose flush runs on a core-0 feeder task rather than
+  the VM's core, reads the same to three decimals; and forcing the whole Lua
+  heap out of internal SRAM (`set_sram_floor` 16 → 256) moves the frame only
+  36.6 → 37.2 ms. So the four null levers were never memory fixes that failed
+  — there was no memory problem to fix, and `-O3` could not help because the
+  cost is dispatch BRANCHES, not straight-line code. What this does NOT do is
+  make a JIT a good idea; it removes the reason it was ruled out, which is a
+  smaller claim. Every remaining lever has the same shape: **run fewer
+  opcodes** (fusion, superinstructions, the porter's `_BARE_OPS` work), or
+  take fewer branches inside the ones that run (`lvm.c` compiles to 377
+  conditional branches against 3 hardware `LOOP`s, where the raster kernels
+  get 44 loops and 85 branchless ops).
+- **Overlapping the cart TICK with the draw on the other core is DECLINED
+  (2026-09-10), and it is an arithmetic decline, not an engineering one.**
+  Parallelising two things caps the win at the smaller of them, and on the
+  T-Deck dank tomb's are logic **2.5 ms** against draw **25** in a 42 ms loop:
+  perfect, free, race-free overlap saves ~6 %. It is also not free — `_update`
+  and `_draw` are one cart's code in one VM over shared mutable globals, with
+  no snapshot between them. The safe form of core parallelism is INSIDE a C
+  verb, where the VM is blocked and there is nothing to race; that has nothing
+  to bite on either, because the C verbs together are ~5 ms of that 25 ms draw
+  and the largest single one is 0.32 ms. What is parallel already and worth
+  keeping: the panel flush feeder and its done-ISR on core 0, the audio I2S
+  feeder, the P4's PPA bounce worker. **Revisit only for a RASTER-bound cart**
+  — full-screen effects, a big `map()`, software 3D — where one verb owns
+  milliseconds.
 
 ## References
 

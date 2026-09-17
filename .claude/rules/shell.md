@@ -54,7 +54,11 @@ to whoever called it.
   (wallpaper + panel theme — the ONE appearance surface; Settings' APPEARANCE
   action row deep-links to it, the old WALLPAPER/THEME stepper rows are gone),
   still editable via the picker.
-- **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned 18px bar. RIGHT
+- **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned bar, 18px ×
+  the CHROME scale — `chrome.Layout`'s `cs` (#203), which equals the font scale
+  unless a board declared a panel diagonal small enough that a 16px icon falls
+  under `chrome.MIN_TAP_MM` (which boards do is pinned in
+  `tests/test_board_toml.py`). RIGHT
   zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;
   the launcher root draws no X). LEFT zone = LENT to the active app (`draw_zone`):
   the launcher shows the selected cart's name, the Editor its PROJECTS/tab-ladder/
@@ -104,9 +108,10 @@ to whoever called it.
   - **What moycore registers on top of libmoy is a DENY list, not an allow list**
     (`runtime/lua_ext.py`, ONE definition every runtime imports). An allow list
     silently drops any moybyte verb nobody remembered to add — and it did.
-    Object-valued verbs (`make_layer`/`draw_layer`/`image`) can never be registry
-    entries: a trampoline marshals scalars and a Layer comes back nil, so they ride
-    int handles plus a Lua prelude. **If you add a runtime, import that module; if
+    Object-valued verbs (`make_layer`/`draw_layer`/`image`, and the #85/#109
+    placement family since #214) can never be registry entries: a trampoline
+    marshals scalars and a Layer comes back nil, so they ride int handles plus a
+    Lua prelude. **If you add a runtime, import that module; if
     you add an object-valued verb, it goes there, not in a verb list.** It was two
     copies once, which is why layer carts crashed on the host and merely fell back
     on device.
@@ -209,7 +214,7 @@ body and nothing executable guarded it.**
 
 Record and gates: #206, #207, #208.
 
-- **ONE `PERF` line, one producer, three boards.** `runtime/perf_line.py` holds
+- **ONE `PERF` line, one producer, every board.** `runtime/perf_line.py` holds
   the field table, the formatter AND the parser, measured by
   `device_boot.PerfSampler` on `FrameLoop.account`. **A field a board cannot
   measure prints `-`, never `0`.** Cart titles are slugged and compounds join with
@@ -222,7 +227,7 @@ Record and gates: #206, #207, #208.
   `tests/moy_flush_harness/` compiles the REAL C on a host with no board.
 - **Adding a settings toggle is one entry in `SETTINGS_TOGGLES`**, not six sites.
   The capability gates stay expressed, and the flat mirrors stay flat attributes —
-  `frame_cap_fps` reads `ws.frameskip` every loop iteration on all three boards.
+  both WMs read `ws.show_fps` on every painted game frame on every board.
 - **The `colors=` hatch is 14 sites and each has a written reason** (`ui.row`/
   `ui.cell` take `kind=`, like `ui.button`). `row_menu` and `row_list` are
   deliberately two skin entries: `ink_dim` and `chrome_ink_dim` resolve differently

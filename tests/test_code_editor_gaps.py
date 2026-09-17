@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+from ws_helpers import device_frames as _dframe  # noqa: E402
 
 DT = 1 / 30
 
@@ -651,3 +652,85 @@ def test_completion_popup_renders_without_error(tmp_path):
     drv.frame(DT)
     buf = ws.sys_canvas.to_rgb888()
     assert probe.distinct_pixels_in(buf, 3) > 4
+
+
+# ---------------------------------------------------------------------------
+# Entering the Code tab must not type the key that entered it
+# ---------------------------------------------------------------------------
+
+def _device_ws(tmp_path):
+    """The console with the BOARDS' InputState under it.
+
+    There are two InputState classes and the boards use `device/moybyte/input.py`
+    (the two are pinned separate on purpose -- see .claude/rules/shell.md). The
+    key feed under test is that one's: a keyboard SOURCE writes `last_key`, and
+    the merge is what the console reads."""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from runtime import host_app
+    from device.moybyte.input import InputState as DeviceInputState
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    inp = DeviceInputState()
+    inp.cart_start_ms = 0
+    ws.input = inp
+    ws.launcher.sel = 0
+    ws.open()
+    return ws, inp.source("kbd")
+
+
+def test_entering_the_code_tab_does_not_type_the_key_that_entered_it(tmp_path):
+    """The owner on the T-Deck: "a bug in the code tab, it would seem to add a
+    random letter when entering it."
+
+    Taking the keyboard for a text surface is a screen change, and the key that
+    made it happen is still in `last_key` when that surface's first frame runs.
+    The code editor's edge tracker was RESET to 0 on entry -- so the byte
+    already there read as a fresh keystroke and went into the buffer at the
+    caret, whichever key it was. Every tab the kid can arrive from, and the
+    re-entry that is already on the tab.
+    """
+    for entry, key in (("cards", ord("m")), ("paint", ord("l")),
+                       ("map", ord(" ")), ("code", 0x0D)):
+        ws, src = _device_ws(tmp_path)
+        ws.screen = "menu"
+        ws.set_menu_view(entry)
+        _dframe(ws)
+        ws.set_menu_view("code")            # build the editor before measuring
+        _dframe(ws)
+        ws.set_menu_view(entry)
+        _dframe(ws)
+        before = ws.editor.text()
+
+        src.last_key = key                  # the key that enters the tab
+        ws.set_menu_view("code")
+        _dframe(ws, 2)
+        src.last_key = 0
+        _dframe(ws)
+        assert ws.editor.text() == before, \
+            "entering code from %r with %r down typed it" % (entry, key)
+
+
+def test_the_swallowed_key_still_types_when_it_is_pressed_again(tmp_path):
+    """The seed must be a seed, not a mute: an already-down byte looks like the
+    PREVIOUS one, so releasing and pressing it again still types -- and so does
+    any other key. Without this the fix would be a code editor that ignores its
+    first keystroke."""
+    ws, src = _device_ws(tmp_path)
+    ws.screen = "menu"
+    before = ws.editor.text() if ws.editor is not None else None
+    src.last_key = ord("m")
+    ws.set_menu_view("code")
+    _dframe(ws)
+    before = ws.editor.text()
+    src.last_key = 0
+    _dframe(ws)
+    src.last_key = ord("m")                 # the SAME key, pressed again
+    _dframe(ws)
+    src.last_key = 0
+    _dframe(ws)
+    src.last_key = ord("z")                 # and a different one
+    _dframe(ws)
+    src.last_key = 0
+    _dframe(ws)
+    assert ws.editor.text() == "mz" + before

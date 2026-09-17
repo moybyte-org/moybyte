@@ -15,7 +15,7 @@ app; there is no per-app line anywhere in the shell.
 
   id         the process kind (router / back-stack / window key)
   entry      "module:Class" -- a runtime/ module staged to every target
-  text_mode  True = a TYPING app (clean ASCII keyboard, Writer precedent)
+  text_mode  True = a TYPING app (the clean ASCII keyboard)
   order      registration precedence (NOT the cart's shelf order)
   folder     the identity cart it rides on, in system_carts/
   title      that cart's title (what the device names its seeded folder from)
@@ -26,9 +26,7 @@ app; there is no per-app line anywhere in the shell.
 APPS = [
     {'id': 'artwork', 'entry': 'artwork:PaintAppLayer', 'text_mode': False, 'order': 10, 'folder': 'paint', 'title': 'Paint'},
     {'id': 'appearance', 'entry': 'appearance_app:AppearanceAppLayer', 'text_mode': False, 'order': 20, 'folder': 'theme_picker', 'title': 'Appearance'},
-    {'id': 'writer', 'entry': 'writer_app:WriterAppLayer', 'text_mode': True, 'order': 30, 'folder': 'writer', 'title': 'Writer'},
     {'id': 'storybook', 'entry': 'storybook_app:StorybookAppLayer', 'text_mode': False, 'order': 40, 'folder': 'storybook', 'title': 'Storybook'},
-    {'id': 'sheets', 'entry': 'sheets_app:SheetsAppLayer', 'text_mode': True, 'order': 50, 'folder': 'sheets', 'title': 'Sheets'},
     {'id': 'files', 'entry': 'files_app:FilesAppLayer', 'text_mode': True, 'order': 60, 'folder': 'files', 'title': 'Files'},
     {'id': 'calc', 'entry': 'calc_app:CalcAppLayer', 'text_mode': False, 'order': 70, 'folder': 'calc', 'title': 'Calc'},
 ]

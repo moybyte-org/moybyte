@@ -29,6 +29,25 @@ time. `wm_windowed.py` is still the wrong tier here; see its denial below."""
 
 # ---------------------------------------------------------------------------
 
+[panel]
+# The GLASS, in inches. Declaring it is how a board opts in to the chrome
+# tap-target floor (#203): `chrome.chrome_scale_floor` turns it into the
+# smallest scale that keeps a 16px bar icon at `chrome.MIN_TAP_MM`, and the
+# shell lays out interactive geometry -- the bar, the ≡ menu's rows, the
+# Settings rows, the code editor's symbol keys -- at that scale while every
+# glyph stays on the font scale.
+#
+# This board is why the floor exists. 480x320 on 3.5" is ~165 PPI, so a 16px
+# icon is 2.5mm -- physically SMALLER than the T-Deck's, on a board that is
+# touch-ONLY. The other lever was tried first and rejected: FONT_SCALE 2 was
+# built, shipped and reverted the same day (#202, 2026-08-19) because 1x text
+# reads fine on this panel and 2x "looks bad" -- the problem was never
+# legibility. `modules/moy_runtime.py`'s PANEL_DIAGONAL_IN carries this number
+# to the console; tests/test_board_toml.py pins the two together.
+diagonal_in = 3.5
+
+# ---------------------------------------------------------------------------
+
 [modules]
 dest = "modules"
 
@@ -156,6 +175,22 @@ Surface model v1's retained-surface object -- a LEAF whose only importers are
 `wm_windowed.py` and the web serve glue. With wm_windowed denied above,
 staging this would freeze bytes nothing imports."""
 
+[[modules.shared.deny]]
+file = "wm_desk.py"
+kind = "tier"
+why  = """
+The windowed WM's two halves that live in their own files: the desk root
+layer and the `WindowChrome` mixin. Only `wm_windowed.py` imports either, so
+with it denied above they would freeze bytes nothing imports -- the same
+reasoning as `surface.py`."""
+
+[[modules.shared.deny]]
+file = "wm_chrome.py"
+kind = "tier"
+why  = """
+See `wm_desk.py` above: the other half of the windowed WM, imported only by
+`wm_windowed.py`."""
+
 # -- no consumer here yet ----------------------------------------------------
 
 [[modules.shared.deny]]
@@ -164,8 +199,7 @@ kind = "no-consumer"
 why  = """
 Browser event batches -> InputState/Pointer; today's only importer is the wasm
 head's web_boot.py. This board SERVES the wasm console (moy_webhost) -- it
-does not decode its input. Flip this the day it does. (`web_view_ws.py` IS
-staged: `moy_webserver.py` imports it.)"""
+does not decode its input. Flip this the day it does."""
 
 # -- staged under another name -----------------------------------------------
 
@@ -232,7 +266,6 @@ dest = "native/.staged"
 
 [native.shared]
 source   = "native"
-strategy = "denylist"
 why = """
 The C-module twin of [modules.shared] (#161; the T-Deck's board.toml carries
 the mechanism). Every directory under native/ with a micropython.cmake crosses
@@ -265,7 +298,6 @@ from this board's device allowlist. Flip both together at stage 5."""
 
 [modules.device]
 source   = "device"
-strategy = "allowlist"
 why = """
 The second staging source, and the one that must STAY an allowlist -- same
 call as both siblings, same reason: `device/` is the boards' shared device
@@ -288,6 +320,26 @@ arrangement too and costs flash, not RAM. The doc's input-contract split
 ("separable InputState core") stays on the table for the day the rider weight
 bothers someone; it did not block the port, so per the rule it was not done
 ahead of need."""
+
+[[modules.device.group]]
+files = ["boot_shell.py"]
+why = """
+The boot shell's mode ladder, which `modules/moybyte_shell.py` on this board is
+now three declarations over: the board's name, the modes it has, and the module
+its smokes live in. It was ~20 lines written once per board and byte-identical
+after normalising those three, so the ONE-STRING rule, the self-terminating
+smokes and the keep-the-REPL guards now land once instead of four times."""
+
+[[modules.device.group]]
+files = ["desktop_spine.py"]
+why = """
+The console desktop's boot spine: ONE `build_desktop` (the boot order and the
+service set every console board wires) and ONE frame loop over it, with the
+touch-only tier's frame hooks as defaults. The four boards' `run_desktop`s
+carried the same imports, the same IdleBlank/FramePump/FrameLoop construction,
+the same `ws.*` service assignments and the same hook names in fifty-four
+byte-identical lines each; a board now passes its hardware -- compositor,
+canvas, inputs, keyboard, store, constants -- and takes the rest."""
 
 [[modules.device.group]]
 files = ["banded_panel.py"]
@@ -374,6 +426,6 @@ comes from the generated `_ota_build.py`."""
 [[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]
 why = """
-STAGE 6. The socket/HTTP/WS transport core plus the "serve the wasm console
-from this board" handler; `moy_webserver` imports `web_view_ws`, which the
-shared denylist above stages."""
+STAGE 6. The socket/HTTP transport core plus the "serve the wasm console from
+this board" handler. Its WebSocket half went in 2026-09 with `web_view_ws.py`:
+the RPC that was supposed to ride it shipped as plain HTTP."""

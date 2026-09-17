@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 6,
   "title": "Bullet Storm",
   "type": "game",
   "runtime": "lua",
@@ -8,7 +8,7 @@
   "system": true,
   "order": 170,
   "targets": ["host", "device", "web"],
-  "fps": 60,
+  "fps": "free",
   "canvas": "320x240",
   "permissions": [
     "graphics",

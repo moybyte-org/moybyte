@@ -13,7 +13,7 @@ hand-written mappings with nothing checking that they AGREED. They had drifted:
 `hjkl` was a full vim d-pad on the raw path and only partly present on the
 other, and an audit of the pair misread it an hour before this was written.
 
-(test_micropython_spike has covered a few individual raw keys since #71 -- the
+(test_tdeck_input has covered a few individual raw keys since #71 -- the
 backspace/q/e trio -- so the map was not untested; what was missing is a check
 that the two decoders say the same thing, which is the failure that actually
 happened.)

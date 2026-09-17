@@ -16,14 +16,6 @@ ROOT = Path(__file__).resolve().parent.parent
 SYSTEM_CARTS = ROOT / "system_carts"
 
 
-class _StubInput:
-    def held(self, n):
-        return False
-
-    def pressed(self, n):
-        return False
-
-
 class _Stub:
     w = 320
     h = 240
@@ -32,17 +24,17 @@ class _Stub:
         return lambda *a, **k: 0
 
 
-from ws_helpers import open_cart as _open_cart
+from ws_helpers import StubInput, open_cart as _open_cart
 
 
 # -- the base key-set is identical; `wifi` is the only conditional name --------
 
 def test_make_api_base_keyset_identical_and_wifi_is_conditional():
     from runtime import host_app
-    base = set(host_app.make_api(_Stub(), _StubInput(), {}).keys())
+    base = set(host_app.make_api(_Stub(), StubInput(), {}).keys())
     assert "wifi" not in base                       # no permission -> no wifi name
 
-    with_wifi = set(host_app.make_api(_Stub(), _StubInput(), {},
+    with_wifi = set(host_app.make_api(_Stub(), StubInput(), {},
                                       wifi=host_app.FakeWifi()).keys())
     # The ONLY difference between the two namespaces is the gated `wifi` name.
     assert with_wifi - base == {"wifi"}
@@ -69,12 +61,15 @@ def test_host_and_device_make_api_keysets_match_except_wifi():
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)
 
-    host_base = set(host_app.make_api(_Stub(), _StubInput(), {}).keys())
-    dev_base = set(dev.make_api(_Stub(), _StubInput(), {}).keys())
+    # THE make_api the device runs is device_api's, reached by the spine the
+    # board module above imports; the board module itself names no verb.
+    import device_api
+    host_base = set(host_app.make_api(_Stub(), StubInput(), {}).keys())
+    dev_base = set(device_api.make_api(_Stub(), StubInput(), {}).keys())
     assert host_base == dev_base
 
-    host_w = set(host_app.make_api(_Stub(), _StubInput(), {}, wifi=object()).keys())
-    dev_w = set(dev.make_api(_Stub(), _StubInput(), {}, wifi=object()).keys())
+    host_w = set(host_app.make_api(_Stub(), StubInput(), {}, wifi=object()).keys())
+    dev_w = set(device_api.make_api(_Stub(), StubInput(), {}, wifi=object()).keys())
     assert host_w == dev_w
     assert host_w - host_base == {"wifi"} == dev_w - dev_base
 
@@ -407,18 +402,18 @@ def test_a_store_lost_in_the_write_window_is_recovered_not_reported_empty(tmp_pa
 
 
 def test_a_truncated_store_falls_back_to_the_backup(tmp_path):
-    """The rename-unsupported _copy fallback publishes by truncating `path` and
-    writing into it, so a crash there leaves a HALF file rather than none. Garbage
-    must read as "use the backup", never as "no saved networks"."""
+    """The publish overwrites `path` in place, so a crash there leaves a HALF file
+    rather than none. Garbage must read as "use the backup", never as "no saved
+    networks" -- and the backup is the REDO log (#154), carrying the same save's
+    bytes, so what comes back is the newest store rather than the one before it."""
     from runtime import moy_carts
 
     carts = _two_saved(tmp_path)
     with open(moy_carts.wifi_store_path(carts), "w") as f:
         f.write('{"networks": [{"ssi')     # torn mid-write
 
-    # .bak is the copy from before the second save, so Home is what survives.
-    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
-    assert moy_carts.load_wifi(carts)[0]["password"] == "secretpw"
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Work", "Home"]
+    assert moy_carts.load_wifi(carts)[1]["password"] == "secretpw"
 
 
 def test_a_wrong_shaped_store_falls_back_to_the_backup(tmp_path):
@@ -429,7 +424,7 @@ def test_a_wrong_shaped_store_falls_back_to_the_backup(tmp_path):
     with open(moy_carts.wifi_store_path(carts), "w") as f:
         f.write('{"networks": "oops"}')
 
-    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Work", "Home"]
 
 
 def test_a_deliberately_emptied_store_is_not_resurrected(tmp_path):
@@ -460,9 +455,9 @@ def test_a_save_after_a_corrupt_read_does_not_eat_the_other_networks(tmp_path):
 
 def _arm_write_probe(carts):
     """Delete the store's .bak and hand back a "did anything republish the store?"
-    check. _write_atomic ALWAYS rotates an existing store to .bak before
-    publishing, so a reappeared .bak is proof of a rewrite -- an exact signal,
-    where an mtime comparison depends on the filesystem's timestamp granularity."""
+    check. _write_atomic ALWAYS writes the .bak beside the store it publishes, so
+    a reappeared .bak is proof of a rewrite -- an exact signal, where an mtime
+    comparison depends on the filesystem's timestamp granularity."""
     import os
     from runtime import moy_carts
     bak = moy_carts.wifi_store_path(carts) + ".bak"
@@ -566,7 +561,8 @@ def test_an_unreadable_store_does_not_blank_the_saved_password(tmp_path):
 
 def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
     """system.json and achievements.json are the same read-modify-write over the
-    same _write_atomic. One loader, one rule."""
+    same _write_atomic. One loader, one rule -- and the backup carries the LAST
+    save, so a publish lost to a crash costs nothing (#154)."""
     import os
     from runtime import moy_carts
 
@@ -581,5 +577,212 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
                  moy_carts.achievements_store_path(carts)):
         os.remove(path)                  # the crash window, again
 
-    assert moy_carts.load_system(carts) == {"wallpaper": "moy_night"}
-    assert moy_carts.load_achievements(carts) == ["first_cart"]
+    assert moy_carts.load_system(carts) == {"wallpaper": "moy_night",
+                                            "theme": "outline"}
+    assert moy_carts.load_achievements(carts) == ["first_cart", "first_edit"]
+
+
+# -- the radio is a LEASE (2026-09-07) ----------------------------------------
+#
+# Off unless something holds it. `ws.wifi_hold(tag)` powers the radio up and
+# the last `ws.wifi_release(tag)` powers it down, so a console on a shelf spends
+# nothing on WiFi; what persists is the credential, never the link. The five
+# holders each have a test in the suite that owns them (the web console in
+# test_moy_webhost, the update screen in test_web_update, the link in
+# test_espnow_link); the mechanism, the network-permission run and the Settings
+# panel are pinned here, on the host FakeWifi -- the device half, below, is
+# DeviceWifi over a fake `network` module.
+
+
+def test_the_radio_is_off_unless_something_holds_it(tmp_path):
+    from ws_helpers import build_ws
+
+    ws = build_ws(tmp_path)
+    w = ws.wifi
+    assert w.radio is False, "a fresh console has its radio off"
+
+    # A hold powers it up at once, and a second holder shares it.
+    assert ws.wifi_hold("a") is True
+    assert w.radio is True
+    ws.wifi_hold("b")
+    ws.wifi_hold("b")                       # idempotent per tag
+    ws.wifi_release("a")
+    assert w.radio is True, "one holder left: the radio stays"
+    w.connect("Home WiFi", "hunter2")
+    assert w.status()[0] is True
+
+    # The last one out powers it down, link and all.
+    ws.wifi_release("b")
+    assert w.radio is False
+    assert w.status() == (False, None, None)
+    assert ws._wifi_holders == set()
+
+    # Releasing what was never held is fine -- every exit path releases
+    # without asking -- and it still powers down whatever came up outside a
+    # lease: "off in general" is the rule.
+    w.scan()
+    assert w.radio is True
+    ws.wifi_release("nobody")
+    assert w.radio is False
+
+
+def test_a_console_with_no_wifi_service_takes_no_lease(tmp_path):
+    from ws_helpers import build_ws
+
+    ws = build_ws(tmp_path)
+    ws.wifi = None
+    assert ws.wifi_hold("web") is False
+    ws.wifi_release("web")                  # and never raises
+
+
+def test_a_network_cart_holds_the_radio_for_its_run_and_no_longer(tmp_path):
+    """The WiFi tool is the one cart with the "network" permission: its scan
+    needs the radio, and leaving it is the moment the console goes back to
+    radio-off. The credential it saved is what the next holder replays."""
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "WiFi")
+    assert ws.cart_error is None
+    assert "cart" in ws._wifi_holders
+    assert ws.wifi.radio is True
+
+    ws.go_home()
+    assert ws._wifi_holders == set()
+    assert ws.wifi.radio is False
+    assert ws.wifi.status() == (False, None, None)
+
+
+def test_a_plain_cart_never_touches_the_radio(tmp_path):
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Star Catcher")
+    assert ws.cart_error is None
+    assert ws._wifi_holders == set()
+    assert ws.wifi.radio is False
+    ws.go_home()
+    assert ws.wifi.radio is False
+
+
+def test_the_settings_wifi_panel_holds_the_radio_while_it_is_open(tmp_path):
+    from ws_helpers import build_ws
+
+    ws = build_ws(tmp_path)
+    ws.open_settings()
+    sl = ws.settings_layer
+    sl.open_wifi()
+    assert sl.wifi_view and "settings" in ws._wifi_holders
+    assert ws.wifi.radio is True
+    sl.close_wifi()
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+    # Leaving Settings with the panel still open -- the HOME key, or the X --
+    # ends the lease too: the panel is closed on the way out, not on the next
+    # visit, or the radio would stay on until somebody opened Settings again.
+    sl.open_wifi()
+    assert ws.wifi.radio is True
+    ws.go_home()
+    assert not sl.wifi_view
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+    ws.open_settings()
+    sl.open_wifi()
+    ws._exit_settings()
+    assert not sl.wifi_view
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
+class _FakeNetwork:
+    """A `network` module: one STA singleton that logs what is done to it and
+    COUNTS constructions, because constructing network.WLAN is what initialises
+    the ESP-IDF driver -- the internal-RAM reservation the S3's panel DMA
+    fights -- so radio_off must never be the thing that builds one."""
+
+    STA_IF = 0
+
+    def __init__(self):
+        self.built = 0
+        self.log = []
+        self._sta = None
+
+    def WLAN(self, _iface):
+        self.built += 1
+        if self._sta is None:
+            self._sta = _FakeSta(self.log)
+        return self._sta
+
+
+class _FakeSta:
+    def __init__(self, log):
+        self.log = log
+        self.on = False
+
+    def active(self, v=None):
+        if v is not None:
+            self.on = bool(v)
+            self.log.append(("active", self.on))
+        return self.on
+
+    def disconnect(self):
+        self.log.append(("disconnect",))
+
+    def isconnected(self):
+        return False
+
+
+def _device_wifi_over(fake_net, tmp_path):
+    from runtime import moy_carts
+
+    carts = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts)
+    cls = _device_wifi_class()
+    dev = cls(moy_carts, carts)
+    sys.modules["network"] = fake_net
+    return dev
+
+
+def test_the_device_radio_powers_down_with_the_last_holder(tmp_path):
+    net = _FakeNetwork()
+    dev = _device_wifi_over(net, tmp_path)
+    try:
+        # Never up: radio_off constructs nothing and touches nothing.
+        dev.radio_off()
+        assert net.built == 0 and net.log == []
+
+        # The lease's power-up half brings the STA up at once...
+        assert dev.radio_on() is True
+        assert net.built == 1 and net.log == [("active", True)]
+        assert dev.wlan is not None
+        # ...idempotently.
+        assert dev.radio_on() is True
+        assert net.built == 1
+
+        # ...and the power-down half disconnects, stops the driver and drops
+        # the handle, so the next holder starts from a clean bring-up.
+        net.log[:] = []
+        dev.radio_off()
+        assert net.log == [("disconnect",), ("active", False)]
+        assert dev.wlan is None and dev.status() == (False, None, None)
+
+        # Up again for the next holder: the singleton, re-activated.
+        dev.radio_on()
+        assert net.built == 2 and net.log[-1] == ("active", True)
+    finally:
+        sys.modules.pop("network", None)
+
+
+def test_a_device_radio_that_will_not_stop_is_a_diag_line_not_a_crash(tmp_path):
+    net = _FakeNetwork()
+    dev = _device_wifi_over(net, tmp_path)
+    try:
+        dev.radio_on()
+
+        def _boom(v=None):
+            raise OSError("wifi busy")
+
+        dev.wlan.active = _boom
+        dev.radio_off()                     # must not raise
+        assert dev.wlan is None
+    finally:
+        sys.modules.pop("network", None)

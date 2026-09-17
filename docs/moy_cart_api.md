@@ -25,6 +25,14 @@ below is pre-injected as a global. (A cart can also be written in **Lua** —
 `main.lua` + `"runtime": "lua"` in the manifest, same API — see
 [Writing a cart in Lua](#writing-a-cart-in-lua-67).)
 
+A Lua cart may be **more than one script**: the manifest lists them in `"sources"`
+and the console runs them in that order, each as its own chunk — so a `local` in one
+is invisible in the next and they share through globals. There is still no importing;
+the manifest declares the list and the console loads it (SPEC.md §4). A PICO-8 port is
+the standing case, with its generated compat layer in `p8.lua` ahead of the `main.lua`
+a person opens — and one more script per PICO-8 tab after it, because tabs are where
+that cart's author put its structure.
+
 ```python
 # a tiny cart: move a ball with the D-pad
 x = y = 0
@@ -96,7 +104,10 @@ logic at a flat 3–4ms where the Python twin spikes to 19–24ms).
 The few Lua-specific notes:
 
 - `touch()` returns **multiple values**, not a tuple:
-  `local tx, ty, tapped, held = touch()` (all `nil` when no pointer).
+  `local tx, ty, tapped, held = touch()` (all `nil` when no pointer). Lua carts
+  had **no** pointer at all until 2026-09-12: the snapshot slot libmoy reads was
+  never written on either Lua tier, so `touch()` answered nil everywhere while
+  the Python twin of the same cart had one.
 - `print(...)` is the **draw-text verb** (as in this doc), not Lua's console print.
 - Layer methods are **colon calls**: `lay = make_layer(w, h)`, then `lay:cls(0)`,
   `lay:map(...)`, `lay:spr(...)`; stamp with `draw_layer(lay, cam_x, cam_y)`.
@@ -104,6 +115,12 @@ The few Lua-specific notes:
   path). Paint images (`image("name")`) are placed via a layer —
   `lay:spr(image("bg"), x, y)` — not passed to `spr()` directly; multi-tile
   sprites (`w,h` spans) are drawn as their individual tiles.
+- Anything the document calls a **list** is a 1-based Lua **sequence**: walk it
+  with `for _, a in ipairs(scene()) do … end` and size it with `#`. Anything it
+  calls a **row** (a scene actor) is a Lua **table** with the same field names —
+  `a.tag`, `a.tile`, `a.x`, `a.y`, `a.flip`, `a.flags` — and anything it calls a
+  **dict** (`a.flags`) is a table too, read as `a.flags.size` or
+  `a.flags["size"]`.
 - No imports, same as Python. The **safe Lua stdlib** is available: `math.*`,
   `string.*`, `table.*` (no `io`/`os`/`load`/`require`).
 - A crash opens the same error panel, and EDIT drops on the offending
@@ -126,15 +143,26 @@ Without one, a Lua cart opens the "needs the Lua runtime" panel.)*
 
 ## Frame pacing
 
-The console has a frame governor: a **game** cart locks to a steady **30fps** —
-a steady 30 feels smoother than a jittery 40, and the headroom absorbs hiccups.
-If your cart genuinely holds 60 (measure it!), declare `"fps": 60` in
-`manifest.json` (Hop Quest and Sky Run do). Tools/apps and all console screens
-run at 60. *(The governor currently ships **disabled** — `console.FPS_GOVERNOR
-= False`, an owner measurement mode so every cart shows its real uncapped fps;
-the manifest field and the policy are live the moment the flag flips back.)*
-Your `_update(dt)` gets the real `dt` either way — movement written as
-`speed * dt` is framerate-independent.
+A **game** cart's `_update` runs at its declared rate: **30 ticks a second**, or
+60 when `manifest.json` says `"fps": 60` (Hop Quest and Sky Run do — declare it
+only if your cart genuinely holds 60, and measure). The console never lowers
+that rate: a cart that counts frames (`x += 1`) plays at the same speed on every
+board. When a board cannot also draw that often it draws every second (or
+third) tick instead, so motion coarsens evenly rather than the game slowing;
+Settings → STEADY decides how long it remembers before changing its mind.
+Tools/apps and all console screens tick with the loop. `_update(dt)` gets the
+tick period as `dt`, so movement written as `speed * dt` is right at either
+rate.
+
+A game whose logic is ALL `speed * dt` can say so — `"fps": "free"` in its
+manifest — and then it is not paced at all: it ticks and draws with the loop,
+`dt` is the real time since the last frame (clamped to 0.1s, so a stall slows
+the game rather than teleporting it), and it draws as often as the board can
+(a P4 desk ~60, the 10.1" one ~45, a browser whatever its display does).
+Declare it only if nothing in the cart counts frames: a `x += 1` runs at a
+different speed on every board the moment it is free. Most seed games
+declare it; the two that hold a real 60 (Hop Quest, Sky Run) stay at 60, and
+an imported PICO-8 cart always carries its own 30 or 60.
 
 ## The canvas
 
@@ -257,7 +285,7 @@ with `pal(8, 11, 1)` draws a 2 as 11 *and* a real 8 as 11 — and it is the shap
 PICO-8 fade and secret colour already has. `pal()` with no arguments resets both.
 
 It costs nothing per pixel on any tier. The flush-time pass PICO-8 does instead was
-measured at roughly half a frame on all three boards
+measured at roughly half a frame on every board
 ([#218](https://github.com/moybyte-org/moybyte/issues/218)), which is why the spec
 composes (SPEC.md §12.1). The one thing that buys you that this cannot: a fade over a
 frame you do *not* redraw. A pixel already drawn keeps its colour, and `pix(x, y)` reads
@@ -311,7 +339,7 @@ drag to move, and set its tag in the props row — PLAY spawns what you placed.
 
 | call | does |
 |---|---|
-| `scene()` | the ACTIVE scene's actors — a list of read-only rows with `.tag` (the kind your code branches on), `.tile` (sheet index), `.x`/`.y` (world-space), `.flip`, `.flags` (a dict of extras). Missing/empty scene → `[]` |
+| `scene()` | the ACTIVE scene's actors — a list of read-only rows with `.tag` (the kind your code branches on), `.tile` (sheet index), `.x`/`.y` (world-space), `.flip`, `.flags` (a dict of extras). Missing/empty scene → `[]` (Lua: an empty table) |
 | `scene(name)` | a named scene's actors, WITHOUT switching the active one |
 | `load_scene(name)` | switch the active scene (e.g. `level2`) and return its actors. Resets to the default on the next run. Unknown name → `[]`, active unchanged |
 
@@ -324,6 +352,19 @@ def _init():
             coins.append([a.x, a.y])
         elif a.tag == "player":
             px, py = a.x, a.y
+```
+
+```lua
+function _init()
+  coins = {}
+  for _, a in ipairs(scene()) do      -- spawn whatever was placed
+    if a.tag == "coin" then
+      coins[#coins + 1] = { a.x, a.y }
+    elseif a.tag == "player" then
+      px, py = a.x, a.y
+    end
+  end
+end
 ```
 
 Treat the rows as read-only — a game's *changing* state belongs in your own
@@ -371,43 +412,38 @@ def _draw():
     print("SCORE " + str(score), 4, 4, col("white"))
 ```
 
+…and the same cart in Lua, call for call:
+
+```lua
+score = 0
+
+function _update(dt)
+  for _, player in ipairs(actors("player")) do
+    if btn("left")  then move_actor(player, -2, 0) end
+    if btn("right") then move_actor(player, 2, 0) end
+    if btn("up")    then move_actor(player, 0, -2) end
+    if btn("down")  then move_actor(player, 0, 2) end
+  end
+  for _, coin in ipairs(actors("coin")) do
+    if touching(coin, "player") then
+      remove_actor(coin)
+      score = score + 1
+    end
+  end
+end
+
+function _draw()
+  cls(col("dark_blue"))
+  draw_scene()
+  print("SCORE " .. score, 4, 4, col("white"))
+end
+```
+
 The **Actors** block category gives you the no-loop version of the same thing:
 *for each `player` actor → move actor with the buttons*, *for each `coin` actor → if
 actor touching `player`? → remove actor, change score by 1*, then *clear*, *draw
 scene*, *write score*. Inside a *for each … actor* block, "actor" always means the
 one it's currently looping over. (`system_carts/coin_quest.moy` is the built-in demo.)
-
-## Reading documents (`table` / `text`, `#78`)
-
-A game can read a **Sheets** sheet or a **Writer** doc that lives in its own cart
-folder — the document IS the game data. Make the document in the Sheets/Writer app,
-attach it to your cart (`tables/<name>.moysheet`, `docs/<name>.moytext`), then read
-it back. Both are tiny kid-greppable JSON; a missing name reads as an empty list, so
-these never crash your cart.
-
-| call | does |
-|---|---|
-| `table(name)` | read the sheet `tables/<name>.moysheet` as **rows** — a list of lists of the sheet's computed values (numbers stay numbers, text stays strings, a blank cell is `""`). Missing name → `[]` |
-| `text(name)` | read the Writer doc `docs/<name>.moytext` as **lines** — a list of strings, one per line. Missing name → `[]` |
-
-```python
-# A wave table authored in Sheets drives how many enemies each level spawns:
-WAVES = table("waves")        # e.g. [[3], [5], [8], [12]]
-
-def spawn(level):
-    count = WAVES[level][0] if level < len(WAVES) else 20
-    ...
-
-# Dialog written in Writer, shown a line at a time:
-LINES = text("intro")         # ["You wake in a cave.", "A torch flickers.", ...]
-
-def _draw():
-    cls(col("black"))
-    for i, ln in enumerate(LINES):
-        print(ln, 8, 8 + i * 10, col("white"))
-```
-
----
 
 ## Make it fast (five habits)
 
@@ -489,7 +525,7 @@ button at all — even Backspace, Enter and space arrive as plain characters to 
 | `players()` | how many players are connected right now (**1** = just this console). Offer a 2-player mode when it's `>= 2` |
 | `key(code=None)` | with a code (`key(ord("a"))`): is that ASCII key down this frame. No arg: the last key code (`0` if none). *One key at a time* (T-Deck reports 1 byte/frame) |
 | `keyp(code=None)` | same, but only the press edge this frame |
-| `touch()` | `(x, y, tapped, held)` in canvas space, or `None` if no pointer. `tapped` = press edge (one hit per tap); `held` = the finger/button is still down this frame, position following the drag (drawing, sliders) |
+| `touch()` | `(x, y, tapped, held)` in canvas space, or `None` if no pointer. `tapped` = press edge (one hit per tap); `held` = the finger/button is still down this frame, position following the drag (drawing, sliders). **A touch panel's pointer behaves like a mouse:** hold and drag, and on release it stays where you left it for ~1.5s before `touch()` reads `None` — a pointer that vanished on the release frame is not a mouse, and a cart's cursor or drag handle is written against one. A hovering source (desktop, browser) never expires |
 | `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware |
 | `textmode(on=True)` | opt a running cart into clean text-keyboard input (for typing a name/password) so `key()/keyp()` return typeable ASCII; `textmode(False)` restores game mode (held WASD/arrows drive `btn()`). Auto-resets to game mode on exit |
 | `view(w, h)` | declare the cart's LOGICAL viewport: the console composites the centered `w`x`h` region of the 320x240 canvas at the biggest integer scale that fits the screen (a 128x128 PICO-8 port fills the P4 glass at 4x instead of the full canvas's 2x); touch coords stay in full canvas space. `view()` restores the full canvas; auto-resets each run |
@@ -671,10 +707,12 @@ you, and it can ask for a few of the console's own powers by naming them in
 
 | permission | what the cart gets |
 |---|---|
-| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` — one kind only (`docs` = your documents, the ones Writer and Files show) |
+| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` / `badge` — one kind only (`docs` = your documents, the ones Files shows) — **and `open_editor`, below** |
+| `clipboard` | nothing by name: it lets an editor handle's `cut`/`copy`/`paste` reach the console's own clipboard, so text travels between your app and the Code tab |
 | `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
 | `appearance` | `set_theme(name)` / `themes()` |
 | `launch` | `open_app(id)` |
+| `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/notes.moy` is that cart |
 
 Every app cart also gets four names with no permission needed, because they are
 how an app draws rather than what it may touch: **`screen()`** (the canvas),
@@ -686,10 +724,162 @@ and never crashes, so there is no `try` to write.
 Anything you did not ask for **is not there** — no `carts`, no shell. Writing
 that name is an ordinary "name is not defined" error, like a typo.
 
-`system_carts/notes.moy` is a small worked example: it types, saves, and lists
-what it saved. The full rules (what is never grantable, and how to make an app
-reflow to a big screen with `_layout(w, h, fs)` instead of drawing at a fixed
-320×240) are in `docs/app_api_v1.md`.
+`system_carts/notes.moy` is the worked example: it lists your notes, opens one
+through the editor handle below, and holds no text of its own. The full rules
+(what is never grantable, and how to make an app reflow to a big screen with
+`_layout(w, h, fs)` instead of drawing at a fixed 320×240) are in
+`docs/app_api_v1.md`.
+
+### The editor handle (`#112`)
+
+`open_editor` hands your cart the console's **own** text editor over one
+document. You draw it into a rect and forward taps; it does the text, the
+caret, the selection, wrap, undo, the clipboard, the Markdown rendering and
+the saving. There is no SAVE button to build: it writes on an idle pause and
+again when the cart exits, so a note is never lost by tapping X.
+
+| call | does |
+|---|---|
+| `open_editor(name)` | an editor over the document `name` in the kind your `files` permission granted. Never a path and never another kind — you cannot name one |
+| `open_editor()` | the document the console was already ASKED to open (someone tapped a file in Files, or a project's own file on the Editor's Config tab), or `None` when there is none. Call it once in `_init` |
+
+The kind that arrives with `open_editor()` may be one you were never granted —
+a person chose that file, not your cart. One of them is a whole PROJECT:
+`project:<folder>.moy` is a `.moy` folder's own files (`manifest.json`,
+`config.json`, the main program), reached only through the Config tab's
+ADVANCED row so the cart loader re-reads the folder afterwards. You still just
+draw it; nothing about the handle changes.
+
+Everything else is on the handle you get back:
+
+| call | does |
+|---|---|
+| `ed.draw(x, y, w, h)` | render the document into that rect of your canvas, this frame. Add a `scale` for a big screen |
+| `ed.tap(x, y, click)` | forward a pointer PRESS. Answers what the tap MEANT: `("link", name)` a tapped `[[note]]` — open it — `("check", row)` a checkbox it just ticked, `("caret", None)` a plain place, `None` outside |
+| `ed.drag(x, y, down)` | forward what follows the press. It PANS — down the page, and sideways too in a mode that does not wrap — or, in SELECT mode, grows the selection to the finger |
+| `ed.nav(dx, dy)` | move the caret by cells. The console already feeds this from the T-Deck trackball and the host arrow keys while your handle has focus; call it yourself for an on-screen d-pad |
+| `ed.focus(on)` / `ed.focused()` | take or release the keyboard. While a handle has it, the console types into it and your own `key()`/`keyp()` read nothing |
+| `ed.key(code)` | feed one byte yourself (an on-screen key), focused or not |
+| `ed.undo()` / `ed.redo()` | one step. `ed.can_undo()` / `ed.can_redo()` for dimming a button |
+| `ed.select_all()` / `ed.copy()` / `ed.cut()` / `ed.paste()` | the clipboard. It is the CONSOLE's clipboard when your manifest asks for `clipboard`, and the document's own otherwise |
+| `ed.select_mode(on)` / `ed.selecting()` | turn SELECT mode on or off (no argument toggles). While it is on, a drag and the trackball EXTEND the selection instead of moving the caret — the only way to mark a range on a keyboard with no shift-arrow and no Ctrl |
+| `ed.has_selection()` / `ed.can_paste()` | is there anything to copy or cut, is there anything to paste — for dimming those buttons |
+| `ed.wraps()` | does this mode soft-wrap (`md`, `text`) or pan sideways (`code`, `json`) |
+| `ed.save()` | write it now. `ed.save(soft=True)` is the gentle one: it refuses a document its mode cannot parse and badges it instead |
+| `ed.badge()` | why the last save was refused, `""` when the document is fine. Print it |
+| `ed.dirty()` | are there edits no save has taken yet |
+| `ed.text()` / `ed.set_text(s)` | the whole document as one string |
+| `ed.caret()` | `(row, col)` — for a "Ln 3, Col 12" strip |
+| `ed.scroll(rows, cols)` | pan the view without moving the caret |
+| `ed.name()` / `ed.mode()` | the document's name, and how it is being edited: `"md"` / `"code"` / `"json"` / `"text"` |
+| `ed.close()` | save and let it go (going back to a list) |
+
+**Markdown** is what a note is, and the handle renders it: `#` headings, `- [ ]`
+checkboxes you tick by tapping, `[[another note]]` links, and `![[a drawing]]`
+which puts one of Paint's pictures inline — by NAME, so your cart never handles
+the picture. PROSE wraps — a note and a `.txt` both — while code and JSON pan
+sideways instead, because breaking one of their lines would lie about the file.
+A JSON document arrives INDENTED however it was written, and saves the way the
+person sees it.
+
+```python
+def _init():
+    global ed
+    ed = open_editor() or open_editor("my notes")
+
+def _draw():
+    cls(0)
+    ed.draw(4, bar_h() + 4, W - 8, H - bar_h() - 8)
+
+def _update(dt):
+    t = touch()
+    if t:
+        hit = ed.tap(t[0], t[1], t[2])
+        if hit and hit[0] == "link":
+            open_note(hit[1])                 # your skin decides what that means
+```
+
+```lua
+function _init()
+  ed = open_editor() or open_editor("my notes")
+end
+
+function _draw()
+  cls(0)
+  ed:draw(4, bar_h() + 4, W - 8, H - bar_h() - 8)
+end
+
+function _update(dt)
+  local x, y, click = touch()
+  if x ~= nil then
+    local verb, arg = ed:tap(x, y, click)
+    if verb == "link" then open_note(arg) end
+  end
+end
+```
+
+In Lua the handle is a table with the same verbs as methods (`ed:draw(...)`,
+`ed:tap(...)`), `nil` where Python returns `None`, and `ed:tap` answering two
+values rather than a pair — the same shape `make_layer` takes, for the same
+reason: only numbers and strings cross the Lua boundary.
+
+## Scripts — a cart with no folder
+
+A **script** is a bare `.py` or `.lua` file in your NOTES (the vault the Files
+app and Notes both show). It has no folder, no manifest and no sprites: Files
+shows a **RUN** button beside it, and the console wraps it in a manifest on the
+spot and runs it like any other cart.
+
+Its screen is the **text console**: a scrollback, a prompt line and the same
+symbol palette the Code tab has, with the top bar's X to leave.
+
+```python
+# hello.py, in NOTES
+print("what is 6 x 7?")
+
+def _update(dt):
+    answer = input("> ")
+    if answer is not None:
+        print("you said " + answer)
+        quit()
+```
+
+Three things are different from a game, and nothing else is:
+
+* **`print(...)` writes a LINE to the console.** In a script it is the ordinary
+  Python/Lua `print`, not the drawing verb of the same name — a script has no
+  raster to draw on, it has words.
+* **`input(prompt)` never waits.** The console cannot stop the frame loop, so
+  `input` shows the prompt and answers **`None`** on every tick until a whole
+  line has been typed and entered — then it answers that line, once. So a
+  script that reads writes an `_update(dt)` and checks for `None`, exactly as
+  above. A script that only prints needs no `_update` at all: its body runs
+  once when it starts, like any cart's.
+* **`_update` may be a generator**, which is the linear way to write the same
+  thing — `yield` means "wait a frame", and the script ends when it does:
+
+  ```python
+  def _update(dt):
+      name = None
+      while name is None:
+          name = input("your name? ")
+          yield
+      print("hello " + name)
+  ```
+
+A script may use `files` and `prefs` (the same two an app cart asks for, above)
+and nothing else — no `carts`, no network. Those names are simply not there,
+and the console says so in plain words if a script asks. If it stops with an
+error, the error is printed into its own console: there is no folder to open in
+the Editor, so the traceback goes where you can read it.
+
+Lua scripts work the same way, with the same two verbs:
+
+```lua
+-- countdown.lua
+for i = 3, 1, -1 do print(i) end
+print("go!")
+```
 
 ## Audio
 
@@ -704,6 +894,26 @@ reflow to a big screen with `_layout(w, h, fs)` instead of drawing at a fixed
 
 `beep()` plays at the exact frequency you ask for, on the engine's own
 oscillator — it never takes a channel away from music or an effect.
+
+Four tappable pads: three play a sound from the cart's own bank, the fourth is
+the no-data escape hatch. A cart's `config.json` decides whether the background
+track runs, so the kid can turn it off without touching code.
+
+```python
+PADS = ["COIN", "JUMP", "THUD", "BEEP"]   # ids 0/1/2 in sounds.json, then a tone
+
+def _init():
+    if cfg("music_on", 1):
+        music(0)              # start the looping background track
+    else:
+        music_stop()
+
+def _hit(i):
+    if i < 3:
+        sfx(i)                # play SFX i from this cart's bank
+    else:
+        beep(660, 0.12)       # a raw tone -- no bank entry needed
+```
 
 The sound bank lives in the cart's `sounds.json` (authored in the Music tab).
 Since #170 the model is PICO-8-parity:
@@ -753,7 +963,7 @@ same here as on any other console that implements the spec.
 | call | does |
 |---|---|
 | `time()` | milliseconds since the cart started |
-| `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. **Required** for a `textmode(True)` game — the console's BACKSPACE exit can't reach text mode |
+| `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. **Required** for a `textmode(True)` game — the console's BACKSPACE exit can't reach text mode. (It was a no-op for **Lua** carts until 2026-09-12: libmoy set a snapshot flag that nothing on either tier read back) |
 | `pmem(index, value=None)` | persistent memory: `pmem(i)` reads an int, `pmem(i, v)` writes+persists (high scores, saves) |
 | `cfg(key, default=None)` | read a value from the cart's `config.json` — the **"Make it mine"** tuning a kid edits (speed, counts, colors…) |
 | `col(name_or_index)` | resolve a color **name** (0–15) or int to a `0–63` palette index |
@@ -787,8 +997,8 @@ earth tones, vivid accents, neutrals, deep shades) — pass those as integers.
 The canvas works in **palette indices** and the API is **plain functions over a
 buffer** — no dependency on `framebuf`, LVGL, or even Python in the contract. That's
 deliberate: the same surface maps onto the host window (indices → RGB888), the
-device's native `moy_compositor` RGB565 framebuffer (indices → RGB565 via the
-palette), and the Lua cart VM (#67) — the "not even Python" clause is now shipping
+device's RGB565 framebuffer (indices → RGB565 at draw time, in the one
+`DeviceCanvas` over the `moy_gfx` kernel), and the Lua cart VM (#67) — the "not even Python" clause is now shipping
 code. **A cart authored once runs on every tier** (Zero /
 Player / One). When you add a drawing
 feature, add it to the ONE canvas class (`device_canvas.DeviceCanvas`) and keep the name

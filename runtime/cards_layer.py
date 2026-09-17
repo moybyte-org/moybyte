@@ -19,9 +19,9 @@ config; it mutates ws.project.config in
 place and dispatches the stepping through `ws.adjust(...)` (which reads this layer's
 `msel` to know which card is selected) and re-runs via `ws.apply()`. The card-only
 constants live here (single source; console.py imports them back so tests + a couple
-of console call sites resolve `console._CARD_H` / `_RUN_BTN` / ...). `NAMES` (palette),
-`_in` (rect hit-test) and `_err_text` are injected at construction (the same circular-
-import dodge the other extracted UIs use). Shared draw toolkit (ws._glyph/_icon_btn)
+of console call sites resolve `console._CARD_H` / `_RUN_BTN` / ...). `NAMES` (palette)
+and `_err_text` are injected at construction (the same circular-import dodge the
+other extracted UIs use); the rect hit-test is `ui.rect_in`, imported directly. Shared draw toolkit (ws._glyph/_icon_btn)
 stays on Workstation; the bar draws through it via self.ws.
 
 Stage 4 (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip("menu") LAST
@@ -36,10 +36,68 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
 
 try:
+    import text_modes as _modes
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import text_modes as _modes
+
+try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
+
+try:
+    from editors import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
+
+try:
+    from widgets import arm_prompt as _arm_prompt
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.widgets import arm_prompt as _arm_prompt
+
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
+
+
+class _Prompt:
+    """One open dialog: `kind` names what OK does, `fields` are its TextEntry
+    buffers over ONE shared key edge (so Tab does not re-fire the byte that
+    switched fields), `field` the focused one, `msg` the inline status line.
+    `fields` is built from (label, placeholder, cap) triples."""
+
+    def __init__(self, kind, title, fields):
+        self.kind = kind
+        self.title = title
+        self.labels = tuple(f[0] for f in fields)
+        self.hints = tuple(f[1] for f in fields)
+        self.edge = KeyEdge()
+        self.fields = tuple(TextEntry(f[2], edge=self.edge) for f in fields)
+        self.field = 0
+        self.msg = None
+
+    def open(self, texts, seed):
+        for i, entry in enumerate(self.fields):
+            entry.open(texts[i], seed)
+        self.edge.seed(seed, guard=True)
+
+    def key(self, ch):
+        """One typed byte: Tab moves the focus, anything else goes to the
+        focused field; returns the field's event (editors_base.text_key)."""
+        if ch == 9:
+            self.field = (self.field + 1) % len(self.fields)
+            return None
+        ev = self.fields[self.field].key(ch)
+        if ev is not None:
+            self.msg = None
+        return ev
+
+    def feed(self, inp):
+        """One input frame: the event of a fresh byte, else None (the guarded
+        opening pass included)."""
+        k = inp.last_key
+        if self.edge.arming(k) or not self.edge.hit(k):
+            return None
+        return self.key(k)
 
 
 
@@ -62,6 +120,32 @@ _CARD_SCROLL_DN = (300, 214, 16, 14)    # tap to scroll cards down
 # editing -- the tracker's gap 2). Sits in the header row (y=21..35), clear of both
 # the "MAKE IT MINE" label (ends ~x234 at scale 2) and the scroll chevrons (y>=44).
 _CARD_INFO_BTN = (278, 21, 36, 14)
+
+
+# The ADVANCED row (step 5 of docs/text_editing_2026-09.md): the last row of the
+# card column, and the ONE door to a project's own files AS FILES. It is here
+# rather than in the Files app because the loader has to stay in the loop -- what
+# it opens is reached through the Editor, which re-reads the folder on the way
+# back (Workstation.open_project_file).
+_ADVANCED_ROW = "ADVANCED: FILES IN THIS PROJECT"
+
+# A project file that is an ASSET is opened by the TAB that owns it, never as
+# text -- the row is a router, not a viewer. `images/` is deliberately absent: a
+# cart's image assets are copies the WALL/GAME flow made from a drawing and no
+# tab edits one in place, so the row says so instead of opening the wrong editor.
+_ASSET_TABS = {
+    "sprites.moygfx": "paint",
+    "map.moymap": "map",
+    "sounds.json": "music",
+    "blocks.json": "blocks",
+}
+_ASSET_SUBDIR_TABS = {"scenes": "scene"}
+
+# The last row of that list on a cart whose runtime runs more than one script:
+# the ONE door that adds a file to a cart (#89). A sentinel rather than a real
+# name, because the list's rows come from the store and a real file could be
+# called anything -- including this.
+_NEW_ROW = "+ NEW SCRIPT"
 
 
 # The Config tab draws in its OWN palette (`_tones`), not the theme's, so the
@@ -89,8 +173,9 @@ class CardsLayout(LayoutBase):
     on a larger canvas / bigger font. A bigger panel shows MORE cards at once (the
     view band grows) and the cards span its full width."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        LayoutBase.__init__(self, w, h, font_scale)
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
+                 chrome_scale=None):
+        LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         if self._base:
             self.body = (0, 18, _BASE_W, _BASE_H - 18)
@@ -104,7 +189,7 @@ class CardsLayout(LayoutBase):
             self.gap = 2
             self.h_cells, self.h_icons, self.h_meter = 44, 36, 32
             return
-        bar_h = 18 * fs
+        bar_h = 18 * self.cs          # the OS bar's own height (#203)
         self.body = (0, bar_h, self.w, self.h - bar_h)
         self.head_glyph = (8 * fs, bar_h + 4 * fs, 14 * fs, 14 * fs)
         self.head_xy = (26 * fs, bar_h + 4 * fs)
@@ -140,33 +225,35 @@ class CardsLayer:
     _DISPLAYS = ("gauge", "count", "choice-icons", "sprite-tiles", "bg-thumbs")
     _CELL_DISPLAYS = ("choice-icons", "sprite-tiles", "bg-thumbs")
 
-    def __init__(self, ws, names, in_rect, err_text):
+    def __init__(self, ws, names, err_text):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         self._err_text = err_text
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
         self._t = None                # per-draw tone map (set by _draw_cards)
         self._dragv = None            # drag-to-scroll anchor (held vertical drag)
-        # The CART INFO modal (#94): None when closed, else {"title", "author",
-        # "field" (0=title/1=author), "msg", "armed"} -- the title/author edit
-        # buffer + which field has focus + an inline status line. See _open_meta.
-        self.meta = None
+        # The open dialog (CART INFO or NEW SCRIPT), a `_Prompt`, or None.
+        self.prompt = None
+        # The ADVANCED row's file list: None when closed, else
+        # {"rows", "sel", "top", "msg"} -- see _open_files.
+        self.files = None
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
-    def relayout(self, w, h, fs):
+    def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
         a font-scale change."""
-        self.layout = CardsLayout(w, h, fs)
+        self.layout = CardsLayout(w, h, fs, chrome_scale=cs)
 
     def reset(self):
         """Reset the scroll/selection state (called by ws.open on a fresh cart)."""
         self.msel = 0
         self.mtop = 0
-        if self.meta is not None:     # never leak an open modal across a cart switch
-            self.meta = None
+        self.files = None
+        if self.prompt is not None:
+            # never leak an open dialog across a cart switch
+            self.prompt = None
             self.ws._set_text_mode(False)
 
     # -- Layer facets --------------------------------------------------------
@@ -189,28 +276,38 @@ class CardsLayer:
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
         ws.bar_layer._draw_status_strip("menu")
-        # The CART INFO modal (#94), if open, draws OVER the bar too -- same order
-        # as the block editor's blk_kbd prompt (chrome, then any modal on top).
-        if self.meta is not None:
-            self._draw_meta_modal()
+        # An open dialog draws OVER the bar too -- same order as the block
+        # editor's blk_kbd prompt (chrome, then any modal on top).
+        if self.prompt is not None:
+            self._draw_prompt()
 
     def handle_input(self, i):
         ws = self.ws
-        if self.meta is not None:
-            return self._meta_input(i)
-        ed = ws.project.cart.get("edit")
-        if not ed:
+        if self.prompt is not None:
+            return self._prompt_input(i)
+        if self.files is not None:
+            return self._files_input(i)
+        n = self._card_count()
+        if not n:
             return True
         if i.pressed("up"):
-            self.msel = (self.msel - 1) % len(ed)
+            self.msel = (self.msel - 1) % n
             self._reveal_card(self.msel)
         if i.pressed("down"):
-            self.msel = (self.msel + 1) % len(ed)
+            self.msel = (self.msel + 1) % n
             self._reveal_card(self.msel)
         if i.pressed("left"):
             ws.adjust(-1)
         if i.pressed("right"):
             ws.adjust(1)
+        if self._is_advanced(self.msel):
+            # The last row is a DOOR, not a stepper: A opens it rather than
+            # playing, the way A opens a row in every other list on the console.
+            if i.pressed("a") or i.pressed("run"):
+                self._open_files()
+            else:
+                ws._leave_or_home(ws._leave_menu)
+            return True
         # Enter / RUN in Config = PLAY the cart (the bar's PLAY path). The device keyboard
         # maps Enter (0x0D) to the "a" button and the host maps it to "run", so BOTH must
         # play here: _leave_menu() -> EditorApp.leave()'s cards branch re-runs the cart with
@@ -236,36 +333,32 @@ class CardsLayer:
             self._dragv = None
             return
         if self._dragv is None:
-            area = (lay.card_x, lay.card_y0, lay.card_w,
-                    lay.view_bottom - lay.card_y0)
-            if not self._cards_scrollable() or not self._in(px, py, area):
+            area = (lay.card_x, self._cards_top(), lay.card_w,
+                    lay.view_bottom - self._cards_top())
+            if not self._cards_scrollable() or not _in(px, py, area):
                 return
             self._dragv = py
             return
-        step = max(1, lay.card_h + lay.gap)
-        delta = self._dragv - py           # finger up -> content down
-        moved = False
-        while delta >= step and self.mtop < self._max_mtop():
-            self.mtop += 1
-            delta -= step
-            moved = True
-        while delta <= -step and self.mtop > 0:
-            self.mtop -= 1
-            delta += step
-            moved = True
-        self._dragv = py + delta           # keep the sub-step remainder
-        if moved:
+        was = self.mtop
+        self._dragv, self.mtop = _ui.row_drag(self._dragv, py,
+                                              max(1, lay.card_h + lay.gap),
+                                              self.mtop, self._max_mtop())
+        if self.mtop != was:
             ws._dirty = True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        if self.meta is not None:
-            return self._meta_pointer(px, py, click)
+        if self.prompt is not None:
+            return self._prompt_pointer(px, py, click)
+        if self.files is not None:
+            if click and ws.bar_layer.handle_bar_tap("menu", px, py):
+                return True
+            return self._files_pointer(px, py, click)
         # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
         self._cards_drag(px, py)           # held drag scrolls the card column
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
-        if click and self._in(px, py, self.layout.info_btn):
+        if click and _in(px, py, self.layout.info_btn):
             self._open_meta()
             return True
         ci = self._card_at(px, py)
@@ -280,9 +373,9 @@ class CardsLayer:
         if click:
             # GO/CODE/CLOSE dissolved into the unified bar (fix B): PLAY runs+persists,
             # the Code tab is in the ladder, the context X exits.
-            if self._cards_scrollable() and self._in(px, py, self.layout.scroll_up):
+            if self._cards_scrollable() and _in(px, py, self.layout.scroll_up):
                 self.scroll_cards(-1)
-            elif self._cards_scrollable() and self._in(px, py, self.layout.scroll_dn):
+            elif self._cards_scrollable() and _in(px, py, self.layout.scroll_dn):
                 self.scroll_cards(1)
             elif ci is not None:
                 self._card_tap(px, py, ci)
@@ -292,7 +385,9 @@ class CardsLayer:
 
     def card_text(self, i):
         ws = self.ws
-        f = ws.project.cart["edit"][i]
+        if self._is_advanced(i):
+            return _ADVANCED_ROW
+        f = self._fields()[i]
         v = ws.project.config.get(f["key"], f.get("default"))
         if f["type"] == "choice":
             v = self._choice_label(f, v)
@@ -393,6 +488,16 @@ class CardsLayer:
             return lay.h_meter
         return lay.card_h
 
+    def _fields(self):
+        """The open cart's `edit` schema, or () -- the ADVANCED row means the
+        card column outlives an empty (or unreadable) one."""
+        cart = self.ws.project.cart
+        return (cart.get("edit") or ()) if cart else ()
+
+    def _is_advanced(self, i):
+        """True when card index `i` is the ADVANCED row -- always the last."""
+        return bool(self.ws.project.cart) and i == len(self._fields())
+
     def _card_layout(self):
         """Pure (no-draw) per-card geometry for the VISIBLE cards so draw and
         hit-test agree (#3). Cards lay out top-down from layout.card_y0 starting at
@@ -401,41 +506,59 @@ class CardsLayer:
         error} -- `error` (#94) is None for a well-formed field, else the short
         reason _validate_field gave; `display` is forced None on an errored row
         (_draw_card/_card_tap branch off `error` before ever reading `display`)."""
-        ws = self.ws
         lay = self.layout
         rows = []
-        y = lay.card_y0
+        y = self._cards_top()
         top = self._clamp_mtop()
-        for i in range(top, len(ws.project.cart["edit"])):
-            f = ws.project.cart["edit"][i]
-            err = self._validate_field(f)
-            h = self._card_height(f)
+        fields = self._fields()
+        for i in range(top, self._card_count()):
+            adv = i >= len(fields)
+            f = None if adv else fields[i]
+            err = None if adv else self._validate_field(f)
+            h = self._row_height(i)
             if i > top and y + h > lay.view_bottom:
                 break                       # next row would spill past the buttons
             rows.append({"i": i, "f": f,
-                         "display": None if err else self._card_display(f),
+                         "display": None if (adv or err) else self._card_display(f),
                          "x": lay.card_x, "y": y, "w": lay.card_w, "h": h,
-                         "error": err})
+                         "error": err, "advanced": adv})
             y += h + lay.gap
         return rows
 
     def _card_count(self):
-        ws = self.ws
-        return len(ws.project.cart["edit"]) if ws.project.cart and ws.project.cart.get("edit") else 0
+        """Rows in the card column: the cart's `edit` fields plus the ADVANCED
+        row. Zero only when there is no open cart at all."""
+        return (len(self._fields()) + 1) if self.ws.project.cart else 0
+
+    def _row_height(self, i):
+        return (self.layout.card_h if self._is_advanced(i)
+                else self._card_height(self._fields()[i]))
+
+    def _cards_top(self):
+        """Where the card column starts. A BROKEN cart spends one row of it on
+        the reason (see _draw_cards), so every reader of the column -- draw,
+        hit-test and the scroll clamp -- asks here rather than reading card_y0."""
+        lay = self.layout
+        return lay.card_y0 + (10 * lay.fs if self._broken() else 0)
+
+    def _broken(self):
+        """The reason this cart's manifest would not parse, or "" -- what
+        moy_carts.load left behind instead of dropping the project."""
+        cart = self.ws.project.cart
+        return (cart.get("broken") or "") if cart else ""
 
     def _max_mtop(self):
         """Topmost card index that still leaves the view full from the bottom up:
         walk heights backwards, summing until the next card would no longer fit."""
-        ws = self.ws
         lay = self.layout
         n = self._card_count()
         if n == 0:
             return 0
-        avail = lay.view_bottom - lay.card_y0
+        avail = lay.view_bottom - self._cards_top()
         used = 0
         top = n
         for i in range(n - 1, -1, -1):
-            h = self._card_height(ws.project.cart["edit"][i])
+            h = self._row_height(i)
             step = h if top == n else h + lay.gap
             if used + step > avail:
                 break
@@ -501,7 +624,7 @@ class CardsLayer:
 
     def _card_at(self, px, py):
         for row in self._card_layout():
-            if self._in(px, py, (row["x"], row["y"], row["w"], row["h"])):
+            if _in(px, py, (row["x"], row["y"], row["w"], row["h"])):
                 return row["i"]
         return None
 
@@ -514,11 +637,14 @@ class CardsLayer:
         for row in self._card_layout():
             if row["i"] != ci:
                 continue
+            if row.get("advanced"):
+                self._open_files()
+                return
             if row.get("error"):
                 return                 # a malformed card def can't be stepped (#94)
             if row["display"] in self._CELL_DISPLAYS:
                 for k, cell in self._choice_cells(row):
-                    if self._in(px, py, cell):
+                    if _in(px, py, cell):
                         f = row["f"]
                         old = ws.project.config.get(f["key"], f.get("default"))
                         new = f["choices"][k]
@@ -560,13 +686,25 @@ class CardsLayer:
         cv = ws.sys_canvas
         lay = self.layout
         t = self._t = self._tones()
+        if self.files is not None:
+            self._draw_files()          # the ADVANCED row's list, same panel
+            return
         # Fullscreen "Make it mine" panel below the unified bar (fix B/C): edge to
         # edge, no centered mini-card. GO/CODE/CLOSE are gone -- PLAY/Code-tab/X are all
         # in the bar (drawn after this by the layer).
         cv.rect(*(lay.body + (t["body"],)))
         cv.rectb(*(lay.body + (t["edge"],)))
         ws._glyph("edit", lay.head_glyph, t["accent"], cv)  # pencil = "make it yours"
-        cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
+        broken = self._broken()
+        if broken:
+            # The cart is on the shelf only because load() refused to drop it.
+            # Say why, and leave the ADVANCED row below as the way to the file.
+            cv.print("MANIFEST BROKEN", lay.head_xy[0], lay.head_xy[1],
+                     self._NAMES["red"], 2)
+            cv.print(broken[:(lay.card_w // (8 * lay.fs))],
+                     lay.card_x, lay.card_y0, t["text"], 1)
+        else:
+            cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
         _ui.mini_btn(cv, lay.info_btn, "INFO", t["accent"])   # #94: CART INFO modal
         for row in self._card_layout():
             self._draw_card(row)
@@ -577,6 +715,9 @@ class CardsLayer:
                 self.mtop > 0, self.mtop < self._max_mtop(), t["accent"], 2)
 
     def _draw_card(self, row):
+        if row.get("advanced"):
+            self._draw_advanced(row)
+            return
         if row.get("error"):
             self._draw_bad_card(row)
             return
@@ -608,6 +749,18 @@ class CardsLayer:
             self._draw_bg_thumbs(row)
         elif disp in ("choice-icons", "sprite-tiles"):
             self._draw_choice_icons(row)
+
+    def _draw_advanced(self, row):
+        """The ADVANCED row: an ordinary list row with a chevron, so it reads as
+        somewhere to GO and not as another value to step."""
+        cv = self.ws.sys_canvas
+        fs = self.layout.fs
+        t = self._t
+        x, y, w, h = row["x"], row["y"], row["w"], row["h"]
+        _ui.row(cv, t, (x, y - 1 * fs, w, h), _ADVANCED_ROW,
+                kind="row_chrome", on=(row["i"] == self.msel), edge=False,
+                pad=6 * fs, text_dy=1 * fs, fs=fs)
+        cv.print(">", x + w - 10 * fs, y + 1 * fs, t["accent"], fs)
 
     def _draw_bad_card(self, row):
         """A card whose `edit` field definition failed _validate_field (#94):
@@ -773,162 +926,352 @@ class CardsLayer:
                      colors=(None, t["cell_edge"],
                              NAMES["yellow"] if k == sel_k else t["cell_edge"]))
 
-    # -- CART INFO: manifest title/author editing (#94) ----------------------
+    # -- ADVANCED: the project's own files (step 5) --------------------------
     #
-    # The tracker's gap 1 ("Cart manifest / metadata editing -- title, author,
-    # permissions not editable here"): a small modal opened from the header INFO
-    # button, editing title/author through Project.commit_manifest (which writes
-    # manifest.json via moy_carts.save_manifest_meta). `permissions` stays
-    # read-only by design -- see the comment over save_manifest_meta.
-    #
-    # Typing idiom: exactly the wifi-password field's shape (settings_layer.py
-    # _wifi_input) -- while self.meta is open, input is driven PURELY off
-    # `i.last_key` (never i.pressed("a")/("b")/nav), because _set_text_mode(True)
-    # does not stop the T-Deck's ASCII-mode keyboard from ALSO firing a typed
-    # key's game-button alias (w/a/s/d/z/x -> up/left/down/right/a/b) -- typing a
-    # letter that collided with a checked button would spuriously fire it. Field
-    # switch is Tab (ASCII 9) or a tap, never up/down, for the same reason. The
-    # one-frame "armed" guard mirrors block_editor_ui._blk_arm_prompt: the tap/
-    # key that OPENED the modal can still be latched on its first input pass, so
-    # that pass only arms it -- never types/commits/cancels.
+    # A ROUTER over one project folder, not a viewer: a text-shaped file (by
+    # `text_modes`) opens in the shell's editor handle through the SAME request
+    # door Notes uses, the cart's main file opens the Code tab, and an asset
+    # opens the tab that owns it. Everything it lists comes from the store's
+    # `list_files` on the project KIND (moy_carts.PROJECT_KIND), so the panel
+    # never spells a cart's layout itself.
 
-    def _open_meta(self):
+    def _open_files(self):
         ws = self.ws
         cart = ws.project.cart
-        if not cart:
+        path = (cart or {}).get("path")
+        if not path:
             return
-        self.meta = {"title": str(cart.get("title") or "")[:24],
-                     "author": str(cart.get("author") or "")[:24],
-                     "field": 0, "msg": None, "armed": False}
-        ws._set_text_mode(True)             # clean ASCII typing (device keyboard)
-        ws.input.release_all()               # EVERYBODY let go -- the shared
-                                             # meaning, not a source's "I hold
-                                             # nothing" (runtime/input.py)
+        rows, msg = (), None
         try:
-            ws.input._pressed = set()
-            ws.input._released = set()
-            ws.input._last = set()          # device InputState edge snapshot
-            ws.input._prev = set()          # host InputState edge snapshot
-        except AttributeError:
-            pass
-        ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
-        if ws.pointer is not None:
-            ws.pointer.click = False        # the tap that opened this != a field tap
+            kind = ws.carts_store.project_kind(path)
+            rows = tuple(ws._with_sd(
+                lambda: ws.carts_store.list_files(kind, ws.carts_root)))
+        except Exception as exc:  # noqa: BLE001 -- an unreadable folder lists none
+            msg = self._err_text(exc)
+        if self._can_add_source(cart):
+            rows = tuple(rows) + (_NEW_ROW,)
+        self.files = {"rows": rows, "sel": 0, "top": 0, "msg": msg}
         ws._dirty = True
 
-    def _close_meta(self):
-        self.meta = None
-        self.ws._set_text_mode(False)
+    def _can_add_source(self, cart):
+        """Whether this folder may gain another SCRIPT: a writable cart whose
+        runtime actually loads more than main (moy_carts.multi_script). The
+        gate is the store's, not a runtime string spelled here."""
+        store = self.ws.carts_store
+        return bool(self.ws.can_manage and store is not None
+                    and store.multi_script(cart))
 
-    def _commit_meta(self):
+    def _close_files(self):
+        self.files = None
+        self.ws._dirty = True
+
+    def _files_visible(self):
+        """How many rows the list band fits."""
+        lay = self.layout
+        return max(1, (lay.view_bottom - lay.card_y0)
+                   // (lay.card_h + lay.gap))
+
+    def _files_open(self, name):
+        """Route one project file. The main file is the Code tab (that is where
+        PLAY, the journal and crash-to-code live); an asset is its own tab; a
+        text file goes through the request door and comes BACK here."""
         ws = self.ws
-        m = self.meta
-        if m is None:
+        cart = ws.project.cart
+        if cart is None:
             return
-        title = m["title"].strip()
-        author = m["author"].strip()
-        if not title:
-            m["msg"] = "TITLE CAN'T BE BLANK"
+        if name == _NEW_ROW:
+            self._open_newf()
+            return
+        # ANY of the cart's scripts, not only main (SPEC.md 4, #89): the Code
+        # tab holds a file now, and it is the tab that has PLAY, the journal and
+        # crash-to-code. A port's p8.lua used to fall past this into the text
+        # handle, where a crash at `p8.lua:412:` had nothing to land on.
+        if name in ws.carts_store.cart_sources(cart):
+            self._close_files()
+            ws.editor_app.set_tab("code")
+            ws.open_code_file(name)
+            return
+        tab = _ASSET_TABS.get(name)
+        if tab is None and "/" in name:
+            tab = _ASSET_SUBDIR_TABS.get(name.split("/")[0])
+        if tab is not None:
+            self._close_files()
+            ws.editor_app.set_tab(tab)
+            return
+        if _modes.is_image(name):
+            # A cart's OWN image (`images/cover.moyimg`) is a picture, so it
+            # takes the picture door -- the same `ws.open_image` the Files
+            # router takes, opening it in Paint on this project's kind and
+            # writing it back in place. A picture is never refused for its
+            # shape: one Paint cannot edit opens read-only.
+            self._close_files()
+            if not ws.open_image(name, cart=cart):
+                self.files = {"rows": (), "sel": 0, "top": 0,
+                              "msg": "NO PAINT APP"}
+            return
+        if "/" in name:
+            # Anything else in a subfolder no tab claims. Saying so beats
+            # opening a blob as text.
+            self.files["msg"] = "NO EDITOR FOR THIS"
             ws._dirty = True
-            return                          # stay open -- never persist a blank title
-        if not ws.project.commit_manifest(title=title, author=author):
-            m["msg"] = "COULD NOT SAVE"
-            ws._dirty = True
             return
-        self._close_meta()
-        ws._dirty = True
+        mode = _modes.mode_for(name)
+        self._close_files()
+        if not ws.open_project_file(cart, name, mode):
+            self.files = {"rows": (), "sel": 0, "top": 0, "msg": "CAN'T OPEN"}
 
-    def _meta_key(self, ch):
-        m = self.meta
-        if m is None:
-            return
-        field = "title" if m["field"] == 0 else "author"
-        if ch in (8, 127):                  # backspace / delete
-            m[field] = m[field][:-1]
-            m["msg"] = None
-            return
-        if ch in (13, 10):                  # Enter -> confirm
-            self._commit_meta()
-            return
-        if ch == 27:                        # Esc -> cancel
-            self._close_meta()
-            return
-        if ch == 9:                         # Tab -> switch field
-            m["field"] = 1 - m["field"]
-            return
-        if not (32 <= ch < 127):
-            return
-        if len(m[field]) >= 24:             # matches the launcher/toast title cap
-            return
-        m[field] += chr(ch)
-        m["msg"] = None
+    def _files_rects(self):
+        """(row rect, name) for each VISIBLE list row, plus the BACK button --
+        the draw pass and the hit-test read the same geometry."""
+        lay = self.layout
+        f = self.files
+        step = lay.card_h + lay.gap
+        out = []
+        y = lay.card_y0
+        for k in range(f["top"], min(len(f["rows"]),
+                                     f["top"] + self._files_visible())):
+            out.append(((lay.card_x, y, lay.card_w, lay.card_h), f["rows"][k], k))
+            y += step
+        return out
 
-    def _meta_input(self, i):
-        """Input while the CART INFO modal is open: last_key ONLY (see the note
-        above the section) -- no i.pressed(...) branch, ever."""
+    def _files_reveal(self):
+        f = self.files
+        vis = self._files_visible()
+        if f["sel"] < f["top"]:
+            f["top"] = f["sel"]
+        elif f["sel"] >= f["top"] + vis:
+            f["top"] = f["sel"] - vis + 1
+
+    def _files_input(self, i):
         ws = self.ws
-        m = self.meta
-        if not m.get("armed"):
-            m["armed"] = True
-            ws._ekey_prev = i.last_key      # don't read the trigger byte as a keystroke
+        f = self.files
+        n = len(f["rows"])
+        if i.pressed("b") or i.pressed("home"):
+            self._close_files()
+            if i.pressed("home"):
+                ws.go_home()
             return True
-        k = i.last_key
-        if k and k != ws._ekey_prev:
-            self._meta_key(k)
-        ws._ekey_prev = k
+        if not n:
+            return True
+        if i.pressed("up"):
+            f["sel"] = (f["sel"] - 1) % n
+            self._files_reveal()
+            ws._dirty = True
+        if i.pressed("down"):
+            f["sel"] = (f["sel"] + 1) % n
+            self._files_reveal()
+            ws._dirty = True
+        if i.pressed("a") or i.pressed("run"):
+            self._files_open(f["rows"][f["sel"]])
         return True
 
-    def _meta_rects(self):
-        """Modal geometry: a centered dialog with a TITLE field, an AUTHOR
-        field, a status line and OK/CANCEL, scaled by the system font like
+    def _files_pointer(self, px, py, click):
+        if not click:
+            return True
+        if _in(px, py, self.layout.info_btn):
+            self._close_files()
+            return True
+        for rect, name, k in self._files_rects():
+            if _in(px, py, rect):
+                self.files["sel"] = k
+                self._files_open(name)
+                return True
+        return True
+
+    def _draw_files(self):
+        ws = self.ws
+        cv = ws.sys_canvas
+        lay = self.layout
+        t = self._t
+        f = self.files
+        cv.rect(*(lay.body + (t["body"],)))
+        cv.rectb(*(lay.body + (t["edge"],)))
+        ws._glyph("code", lay.head_glyph, t["accent"], cv)
+        cv.print("PROJECT FILES", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
+        _ui.mini_btn(cv, lay.info_btn, "BACK", t["accent"])
+        rows = self._files_rects()
+        if not rows:
+            cv.print(f["msg"] or "NO FILES", lay.card_x, lay.card_y0,
+                     t["text"], lay.fs)
+            return
+        for rect, name, k in rows:
+            _ui.row(cv, t, rect, name, kind="row_chrome", on=(k == f["sel"]),
+                    edge=False, pad=6 * lay.fs, text_dy=1 * lay.fs, fs=lay.fs)
+        if f["msg"]:
+            cv.print(f["msg"][:34], lay.card_x, lay.view_bottom - 8 * lay.fs,
+                     self._NAMES["red"], lay.fs)
+
+    # -- the two dialogs: CART INFO (#94) and NEW SCRIPT (#89) ---------------
+    #
+    # One prompt state machine (`_Prompt`), parameterised by its fields and by
+    # what OK means. CART INFO edits the manifest's title/author through
+    # Project.commit_manifest (`permissions` stays read-only: see the comment
+    # over moy_carts.save_manifest_meta). NEW SCRIPT is the ONE door that adds
+    # a file to a cart, on the ADVANCED row and nowhere else, because a console
+    # for eight-year-olds does not want a New File button two taps from every
+    # cart, and a cart that is one file should stay one file unless somebody
+    # went looking.
+    #
+    # Typing is driven PURELY off `i.last_key` (never i.pressed("a")/("b")/
+    # nav): _set_text_mode(True) does not stop the T-Deck's ASCII-mode keyboard
+    # from ALSO firing a typed key's game-button alias (w/a/s/d/z/x), so a typed
+    # letter that collided with a checked button would fire it. Field switch is
+    # Tab (ASCII 9) or a tap, never up/down, for the same reason. The prompt
+    # opens through widgets.arm_prompt and its key edge opens GUARDED
+    # (editors_base.KeyEdge.seed): the tap/key that opened it can still be
+    # latched on its first input pass, and that pass only arms it.
+
+    def _open_prompt(self, kind, title, fields, texts):
+        ws = self.ws
+        _arm_prompt(ws)
+        self.prompt = _Prompt(kind, title, fields)
+        self.prompt.open(texts, getattr(ws.input, "last_key", 0) or 0)
+        ws._dirty = True
+
+    def _open_meta(self):
+        cart = self.ws.project.cart
+        if not cart:
+            return
+        self._open_prompt("meta", "CART INFO",
+                          (("TITLE", "", 24), ("AUTHOR", "(optional)", 24)),
+                          (str(cart.get("title") or ""),
+                           str(cart.get("author") or "")))
+
+    def _open_newf(self):
+        self._open_prompt("newf", "NEW SCRIPT", (("NAME", "helpers", 24),),
+                          ("",))
+
+    def _close_prompt(self):
+        self.prompt = None
+        self.ws._set_text_mode(False)
+        self.ws._dirty = True
+
+    def _commit_prompt(self):
+        p = self.prompt
+        if p is None:
+            return
+        if p.kind == "meta":
+            self._commit_meta(p)
+        else:
+            self._commit_newf(p)
+
+    def _commit_meta(self, p):
+        ws = self.ws
+        title = p.fields[0].text.strip()
+        author = p.fields[1].text.strip()
+        if not title:
+            p.msg = "TITLE CAN'T BE BLANK"
+            ws._dirty = True
+            return                          # stay open: never persist a blank title
+        if not ws.project.commit_manifest(title=title, author=author):
+            p.msg = "COULD NOT SAVE"
+            ws._dirty = True
+            return
+        self._close_prompt()
+
+    def _newf_filename(self, typed):
+        """The file a typed name lands on: slugged to letters, digits and
+        underscore, under the cart's own runtime extension. `free_file_name`'s
+        rule for a project file is "keep it verbatim" (a FORMAT chose the name),
+        which is right for manifest.json and wrong for something a person is
+        typing now, so the slug is here."""
+        cart = self.ws.project.cart or {}
+        mainf = cart.get("main", "main.py")
+        cut = mainf.rfind(".")
+        ext = mainf[cut:] if cut > 0 else ".lua"
+        stem = typed.strip()
+        if stem.lower().endswith(ext):
+            stem = stem[:-len(ext)]
+        out = ""
+        last = "_"
+        for ch in stem.lower():
+            if ch == "_" or ch.isalpha() or ch.isdigit():
+                out += ch
+            elif last != "_":
+                out += "_"
+            last = out[-1:] or "_"
+        out = out.strip("_")[:24]
+        if not out or not out[0].isalpha():
+            return None
+        return out + ext
+
+    def _commit_newf(self, p):
+        ws = self.ws
+        cart = ws.project.cart
+        name = self._newf_filename(p.fields[0].text)
+        if name is None:
+            p.msg = "NAME IT WITH LETTERS"
+            ws._dirty = True
+            return
+        made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
+                                                             "-- " + name + "\n"))
+        if made is None:
+            p.msg = "THAT NAME IS TAKEN"
+            ws._dirty = True
+            return
+        self._close_prompt()
+        self._close_files()
+        ws.editor_app.set_tab("code")
+        ws.open_code_file(made)
+
+    def _prompt_event(self, ev):
+        if ev == TE_COMMIT:
+            self._commit_prompt()
+        elif ev == TE_CANCEL:
+            self._close_prompt()
+
+    def _prompt_key(self, ch):
+        """One typed byte into the open prompt (the tests' door)."""
+        self._prompt_event(self.prompt.key(ch))
+
+    def _prompt_input(self, i):
+        self._prompt_event(self.prompt.feed(i))
+        return True
+
+    def _prompt_rects(self):
+        """Dialog geometry: a centered panel, one 14px field per entry under
+        its label, a status line and OK/X, scaled by the system font like
         every other responsive Cards element."""
         lay = self.layout
         fs = lay.fs
-        w, h = 240 * fs, 108 * fs
+        n = len(self.prompt.fields)
+        w, h = 240 * fs, (52 + 28 * n) * fs
         x = (lay.w - w) // 2
         y = (lay.h - h) // 2
-        title_r = (x + 12 * fs, y + 26 * fs, w - 24 * fs, 14 * fs)
-        author_r = (x + 12 * fs, y + 54 * fs, w - 24 * fs, 14 * fs)
+        fields = tuple((x + 12 * fs, y + (26 + 28 * i) * fs, w - 24 * fs, 14 * fs)
+                       for i in range(n))
         ok_r = (x + w - 96 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
         cancel_r = (x + w - 50 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
-        return (x, y, w, h), title_r, author_r, ok_r, cancel_r
+        return (x, y, w, h), fields, ok_r, cancel_r
 
-    def _meta_pointer(self, px, py, click):
+    def _prompt_pointer(self, px, py, click):
         if not click:
             return True
-        _, title_r, author_r, ok_r, cancel_r = self._meta_rects()
-        if self._in(px, py, title_r):
-            self.meta["field"] = 0
-        elif self._in(px, py, author_r):
-            self.meta["field"] = 1
-        elif self._in(px, py, ok_r):
-            self._commit_meta()
-        elif self._in(px, py, cancel_r):
-            self._close_meta()
+        _, fields, ok_r, cancel_r = self._prompt_rects()
+        for i, r in enumerate(fields):
+            if _in(px, py, r):
+                self.prompt.field = i
+        if _in(px, py, ok_r):
+            self._commit_prompt()
+        elif _in(px, py, cancel_r):
+            self._close_prompt()
         self.ws._dirty = True
         return True
 
-    def _draw_meta_modal(self):
+    def _draw_prompt(self):
         NAMES = self._NAMES
-        ws = self.ws
-        cv = ws.sys_canvas
+        cv = self.ws.sys_canvas
         fs = self.layout.fs
-        m = self.meta
-        (x, y, w, h), title_r, author_r, ok_r, cancel_r = self._meta_rects()
+        p = self.prompt
+        (x, y, w, h), fields, ok_r, cancel_r = self._prompt_rects()
         _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
-        cv.print("CART INFO", x + 10 * fs, y + 8 * fs, NAMES["white"], 1)
-        foc_title = m["field"] == 0
-        cv.print("TITLE", x + 12 * fs, title_r[1] - 9 * fs, NAMES["light_grey"], 1)
-        _ui.text_field(cv, title_r, m["title"], "")
-        if foc_title:
-            cv.rectb(title_r[0], title_r[1], title_r[2], title_r[3], NAMES["yellow"])
-        cv.print("AUTHOR", x + 12 * fs, author_r[1] - 9 * fs, NAMES["light_grey"], 1)
-        _ui.text_field(cv, author_r, m["author"], "(optional)")
-        if not foc_title:
-            cv.rectb(author_r[0], author_r[1], author_r[2], author_r[3], NAMES["yellow"])
-        if m.get("msg"):
-            bad = ("BLANK" in m["msg"] or "FAILED" in m["msg"] or "SAVE" in m["msg"])
-            cv.print(m["msg"][:34], x + 12 * fs, y + h - 38 * fs,
-                     NAMES["red"] if bad else NAMES["green"], 1)
+        cv.print(p.title, x + 10 * fs, y + 8 * fs, NAMES["white"], 1)
+        for i, r in enumerate(fields):
+            cv.print(p.labels[i], x + 12 * fs, r[1] - 9 * fs, NAMES["light_grey"], 1)
+            _ui.text_field(cv, r, p.fields[i].text, p.hints[i])
+            if i == p.field:
+                cv.rectb(r[0], r[1], r[2], r[3], NAMES["yellow"])
+        if p.msg:
+            cv.print(p.msg[:34], x + 12 * fs, y + h - 38 * fs, NAMES["red"], 1)
         _ui.game_btn(cv, ok_r, "OK", NAMES["green"])
         _ui.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])

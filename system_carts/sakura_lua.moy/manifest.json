@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 8,
+  "version": 11,
   "title": "Sakura Lua",
   "type": "game",
   "runtime": "lua",
@@ -67,6 +67,12 @@
     }
   ],
   "extensions": [
-    "moybyte.images"
-  ]
+    "moybyte.images",
+    "moybyte.scenes"
+  ],
+  "assets": {
+    "scenes": [
+      "blossoms"
+    ]
+  }
 }

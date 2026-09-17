@@ -276,14 +276,12 @@ def _do_flush(body):
 
 # --- boot dump (device-only; runs while serial is alive) --------------------
 
-def _read_prev_log_pre_display():
-    """Read the previous session's diag.log using the PRE-DISPLAY SD path
-    (machine.SDCard via moybyte_sd.with_sd). This is the SAFE read path when
-    called BEFORE init_display(): the panel isn't up yet, so machine.SDCard
-    mounting + re-running spi_bus_initialize() is fine here -- exactly the same
-    pre-display window the boot cart prefetch uses. (Calling machine.SDCard AFTER
-    the panel is live would hard-hang the shared bus; that's why this runs in
-    main() before _init_display.)
+def _read_prev_log():
+    """Read the previous session's diag.log through the board's ONE SD session
+    wrapper (moybyte_sd.with_sd_live: attach to the host the panel owns, mount
+    once, stay resident). There is no second, pre-display lifecycle to choose
+    between -- `machine.SDCard` re-initialises the shared bus and hangs the
+    board, which is the whole reason moy_sd exists.
 
     We do NOT rotate or truncate the file -- the new session's first flush (~5s
     into the loop) simply overwrites it with the new ring, so the file always
@@ -305,7 +303,7 @@ def _read_prev_log_pre_display():
             return None   # no previous log -> nothing to dump
 
     try:
-        return moybyte_sd.with_sd(_read)
+        return moybyte_sd.with_sd_live(_read)
     except Exception:
         return None
 
@@ -319,16 +317,15 @@ def dump_previous_to_serial():
     No rotation: the new session's periodic flushes overwrite the same file, so it
     always contains exactly one (the most recent) session.
 
-    NOT called automatically anymore: the boot hook rode the #56 pre-display SD
-    prefetch path, which shipped OFF (a pre-display machine.SDCard mount can
-    break display init on a populated card) and has been removed. Call it from
-    the REPL before the desktop starts -- that's the bus-safe window for the
-    machine.SDCard read path (see _read_prev_log_pre_display). Fully guarded:
-    never crashes the caller."""
+    NOT called automatically: the boot hook rode the #56 pre-display SD prefetch
+    path, which shipped OFF and has been removed. Call it from the REPL -- the
+    card attaches to the host the panel already owns, so the panel being up is
+    what makes the read safe, not a window before it. Fully guarded: never
+    crashes the caller."""
     if not ENABLED:
         return
     try:
-        body = _read_prev_log_pre_display()
+        body = _read_prev_log()
     except Exception:
         body = None
     try:

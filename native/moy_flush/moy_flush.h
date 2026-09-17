@@ -93,12 +93,14 @@
 // timed-out-flush recovery: esp_lcd's tx_param recycles ALL in-flight color
 // transactions before its command, so by the time the arm returns every stale
 // band's completion ISR has run and the counters restart clean. On the
-// Guition a timed-out band's ISR never fires at all (raw spi_master, see its
-// queue-slot-leak note), so the placement is merely harmless there -- and it
-// is strictly BETTER than the reset-at-kick that file shipped with, because
-// it shrinks the window in which a stale completion can credit the new
-// frame's pacing. One placement serves both, and it is the one that can never
-// double-count.
+// Guition the same holds by its own route: frame_end waits the bands it
+// queued out (bounded) before the bus is released, and raw spi_master's
+// polling arm in frame_begin cannot start while a queued band is still on
+// the wire -- so a late band's ISR has likewise run by the time the arm
+// returns. Either way the placement is strictly BETTER than the reset-at-kick
+// the Guition file shipped with, because it shrinks the window in which a
+// stale completion can credit the new frame's pacing. One placement serves
+// both, and it is the one that can never double-count.
 //
 // The ISR half is moy_flush_band_done_from_isr() below: STATIC INLINE so each
 // board's completion callback keeps its own placement (moy_axs's post_cb is
@@ -175,8 +177,8 @@ typedef struct {
 // The engine's state, exported as ONE struct rather than a wall of accessors:
 // this is shared code between two in-tree consumers, not an ABI (the repo
 // declines those -- docs/board_ports_2026-08.md), and the boards' own verbs
-// read a handful of fields directly (pending() reads frame_busy, moy_axs's
-// fold_fence reads bnc_next/bnc_total and its retrieve loop reads done).
+// read a handful of fields directly (pending() reads frame_busy, moy_fold's
+// fence reads bnc_next/bnc_total, moy_axs's frame_end waits on done/target).
 // Volatile exactly where the feeder and the VM core both look: these live in
 // internal SRAM, which the S3 does not cache, so plain in-order stores are
 // visible cross-core -- volatile (plus the handoff barrier) only stops GCC

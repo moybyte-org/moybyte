@@ -39,12 +39,14 @@ class CalcLayout:
     MIN_W = 170          # ui.py min-size convention (fs-scaled; WM clamps resizes)
     MIN_H = 190
 
-    def __init__(self, w, h, fs=1, windowed=False):
+    def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(fs))
         fs = self.fs
-        self.bar_h = 0 if windowed else 18 * fs
+        # The chrome scale (#203) sizes only the OS bar band above this app.
+        self.cs = max(fs, int(cs)) if cs else fs
+        self.bar_h = 0 if windowed else 18 * self.cs
         body = _ui.inset((0, self.bar_h, self.w, self.h - self.bar_h), 6 * fs)
         self.display, grid = _ui.cut_top(body, 26 * fs)
         _pad, grid = _ui.cut_top(grid, 4 * fs)
@@ -68,7 +70,7 @@ class CalcAppLayer:
              ("1", "2", "3", "-"),
              ("C", "0", "=", "+"))
 
-    def __init__(self, ctx, names, in_rect):
+    def __init__(self, ctx, names):
         self.ctx = ctx
         # Roles used on every drawn frame are bound ONCE here, not looked up
         # per draw -- the hoist mandate (ui_refactor_2026-08 Section 2.4).
@@ -76,19 +78,19 @@ class CalcAppLayer:
         self._theme = ctx.theme
         self._damage = ctx.damage
         self._NAMES = names
-        self._in = in_rect
         self.hits = _ui.Hits()
         self.entry = "0"              # the number being typed
         self.acc = None               # banked left operand
         self.op = None                # pending operator
         sc = self._surf.canvas()
-        self.layout = CalcLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
+        self.layout = CalcLayout(sc.w, sc.h, getattr(sc, "font_scale", 1),
+                                 cs=self._surf.chrome_scale())
 
     # -- the app protocol (docs/app_api_v1.md) --------------------------------
 
     @staticmethod
     def is_app(cart):
-        """True only for the shipped Calc identity cart (the Writer pattern:
+        """True only for the shipped Calc identity cart (the shipped-identity pattern:
         title + a marker permission + the slug, never a renamed copy)."""
         if (not cart or cart.get("title") != "Calc"
                 or "calc" not in (cart.get("permissions") or ())):
@@ -104,8 +106,8 @@ class CalcAppLayer:
         self.op = None
         self._damage.all()
 
-    def relayout(self, w, h, fs):
-        self.layout = CalcLayout(w, h, fs, self._surf.windowed())
+    def relayout(self, w, h, fs, cs=None):
+        self.layout = CalcLayout(w, h, fs, self._surf.windowed(), cs)
 
     # -- draw (the draw pass IS the hit map: ui.Hits) --------------------------
 

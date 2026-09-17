@@ -23,7 +23,7 @@ TWO RUNS, because the whole design is that two boards answer differently:
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_update_e2e.py
 
-Env-gated like the other two browser suites, and prerequisites (chrome, node, a
+Env-gated like the other browser suites, and prerequisites (chrome, node, a
 dist/ carrying the strip) SKIP with a reason on a bench and FAIL under CI --
 tests/web_e2e.py owns that decision, because a suite that asks to run and then
 skips is a green tick over nothing.
@@ -34,7 +34,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import threading
@@ -51,14 +50,6 @@ pytestmark = pytest.mark.skipif(
     reason="MOYBYTE_WEB_E2E not set (spawns headless Chrome)")
 
 
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
 @contextlib.contextmanager
 def _twin(tmp_path, mode, close_after=None, pin=None):
     """serve.py's board twin with a faked /update of the given shape.
@@ -73,7 +64,7 @@ def _twin(tmp_path, mode, close_after=None, pin=None):
     # the page), and there would then be no page chrome to drive.
     for cart in ("star_catcher.moy", "sakura.moy"):
         shutil.copytree(ROOT / "system_carts" / cart, store / cart)
-    port = _free_port()
+    port = web_e2e.free_port()
     argv = [sys.executable, "serve.py", str(port), "dist",
             "--carts", str(store), "--update", mode]
     if close_after is not None:

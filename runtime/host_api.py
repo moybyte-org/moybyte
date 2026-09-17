@@ -128,10 +128,15 @@ class FakeWifi:
         self._root = root
         self._connected = False
         self._ssid = None
+        # The radio's power state, the DeviceWifi `wlan is not None` twin: up
+        # on first use or on a lease, down when the last holder lets go.
+        self.radio = False
+        self.radio_offs = 0
 
     # -- the injected `wifi` API surface (host == device) ----------------
     def scan(self):
         """List nearby networks as (ssid, signal, locked) tuples."""
+        self.radio = True
         return [tuple(ap) for ap in self.FAKE_APS]
 
     def _stored_password(self, ssid):
@@ -153,8 +158,9 @@ class FakeWifi:
 
     def connect(self, ssid, password=""):
         """'Associate' with `ssid` (fake: always succeeds), remember the creds, and
-        report connected. Returns True. The connection persists across carts (it's
-        system state) and the creds persist to disk for autoconnect. An EMPTY
+        report connected. Returns True. The link lasts as long as the radio's
+        lease does (Workstation.wifi_hold / wifi_release, host == device); the
+        creds persist to disk for autoconnect. An EMPTY
         password resolves to the stored one first (the DeviceWifi contract): the
         panel's known-network reconnect passes "", and remembering that "" used
         to overwrite the saved password in wifi.json.
@@ -164,6 +170,7 @@ class FakeWifi:
         reading, not two -- the fake radio always associates, so it never bites
         here."""
         ok = True                       # the fake radio always associates
+        self.radio = True
         self._ssid = str(ssid)
         stored = self._stored_password(self._ssid)
         if not password and stored:
@@ -180,6 +187,15 @@ class FakeWifi:
     def disconnect(self):
         self._connected = False
         self._ssid = None
+
+    def radio_on(self):
+        self.radio = True
+        return True
+
+    def radio_off(self):
+        self.disconnect()
+        self.radio = False
+        self.radio_offs += 1
 
     def status(self):
         """(connected, ssid, ip): the live link state other features read."""
@@ -307,6 +323,7 @@ class ConsoleDriver:
         07-31. Same fix, same shape, one tier late.
         """
         self.pointer.place(int(x), int(y))
+        self.pointer.hovers = True   # a mouse has a position with nothing held
 
     def touch_up(self):
         self._down = False
@@ -326,6 +343,13 @@ class ConsoleDriver:
 
     def in_code_editor(self):
         return self.ws.screen == "menu" and self.ws.menu_view == "code"
+
+    def in_caret_surface(self):
+        """A surface where a DIRECTION means the caret, not the cursor: the
+        Editor's Code tab, and a cart's focused editor handle (#181). The one
+        gate, so the host arrows and the T-Deck trackball answer alike."""
+        return (self.in_code_editor()
+                or self.ws.focused_cart_editor() is not None)
 
     def in_text_mode(self):
         # A RUNNING cart that opted into text input via textmode(True) (#38/#42).
@@ -351,7 +375,7 @@ class ConsoleDriver:
         # step here, and swallow them so the shell does not ALSO act on them.
         # (`_pan` stays wired for real trackball backends; the T-Deck's own
         # driver is untouched by this file.)
-        if not (dx or dy) and self._held_ext and self.in_code_editor():
+        if not (dx or dy) and self._held_ext and self.in_caret_surface():
             ndx = (1 if "right" in self._held_ext else 0) \
                 - (1 if "left" in self._held_ext else 0)
             ndy = (1 if "down" in self._held_ext else 0) \
@@ -362,7 +386,7 @@ class ConsoleDriver:
                     self._held_ext.discard(_n)
                     self.input.set_held(_n, False)
         if dx or dy:
-            if self.in_code_editor():
+            if self.in_caret_surface():
                 self.ws.nav(dx, dy)          # arrows move the caret in the editor
             else:
                 self.pointer.move(dx * PAN_SPEED, dy * PAN_SPEED)   # trackball nudge

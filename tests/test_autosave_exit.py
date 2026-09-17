@@ -109,7 +109,7 @@ def test_code_edit_survives_a_workspace_swap_via_projects(tmp_path):
 
 def test_windowed_make_window_close_commits_code_edit(tmp_path):
     """#111 regression: the Make window's title-strip X used to route through
-    wm_windowed.close_window_kind, which only flushed writer/storybook -- an
+    wm_windowed.close_window_kind, which only flushed the Desk Lab apps -- an
     Editor mid-idle-debounce closed by dragging the window shut (rather than
     using PROJECTS/PLAY) would silently lose the edit. close_window_kind must
     now hard-commit the Editor too."""
@@ -126,19 +126,6 @@ def test_windowed_make_window_close_commits_code_edit(tmp_path):
     reloaded = moy_carts.load(path)
     assert "cls(6)" in reloaded["src"], \
         "closing the Make window must hard-commit the Editor's active tab (#111)"
-
-
-def test_windowed_sheets_window_close_commits_the_open_sheet(tmp_path):
-    """Same #111 gap, the Sheets app: closing its window via the strip X must
-    flush the open sheet (sheets_app.flush), matching writer/storybook."""
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
-    ws.open_app(ws.sheets_app)
-    app = ws.sheets_app
-    app._new_sheet()
-    app.sheet.set_cell(0, 0, "42")
-    app._unsaved = True
-    ws.wm.close_window_kind("sheets")
-    assert app._unsaved is False, "closing the Sheets window must flush the open sheet"
 
 
 def test_windowed_artwork_window_close_commits_the_drawing(tmp_path):
@@ -191,9 +178,10 @@ def _writes_during(ws, fn):
 def test_untouched_tab_switch_writes_nothing(tmp_path):
     """Walking the tab ladder without editing must not touch the store."""
     ws = _ws(tmp_path)
-    _open_in_editor_by_title(ws, ws.launcher.items[1]["title"]
-                             if ws.launcher.items[1].get("path")
-                             else ws.launcher.items[2]["title"])
+    # A cart with real assets on every tab, named rather than indexed off the
+    # shelf -- and NOT one whose `_init` authors its own map (Bench msets
+    # there, so its map is legitimately dirty before the walk starts).
+    _open_in_editor_by_title(ws, "Hop Quest")
     ws.editor_app.set_tab("code")
     hits = _writes_during(ws, lambda: [ws.editor_app.set_tab(t)
                                        for t in ("paint", "map", "scene",
@@ -254,3 +242,89 @@ def test_code_undo_is_not_mistaken_for_clean(tmp_path):
         "content differs from the persisted source -- must NOT read as clean"
     hits = _writes_during(ws, lambda: ws.editor_app.set_tab("cards"))
     assert "save_code" in hits, hits
+
+
+# -- a HALF-TYPED line survives a fast quit (#154, owner 2026-09-06) ---------
+#
+# "save isn't persisted if I quit too fast". The compile gate refused the hard
+# commit too, so quitting mid-line -- go home, the context X, a tab switch, the
+# power button -- dropped whatever did not parse yet. The gate is SPLIT now: the
+# soft paths still refuse, the hard paths write and keep the badge.
+
+_HALF = "def _draw():\n    cls(3)\n    x = (\n"      # a line the kid is still typing
+
+
+def _open_code(ws):
+    title = next(c["title"] for c in ws.launcher.items if c.get("path"))
+    path = _cart_path_by_title(ws, title)
+    _open_in_editor_by_title(ws, title)
+    ws.set_menu_view("code")
+    return path
+
+
+def test_a_half_typed_line_survives_going_home(tmp_path):
+    """The kid's text is theirs even when Python cannot parse it yet. Broken code
+    is caught at the next RUN (crash-to-code), never by silently dropping it."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    path = _open_code(ws)
+    ws.editor.set_text(_HALF)
+
+    ws.exit()                       # context-X -> go_home, no wait, no save call
+
+    assert ws.screen == "launcher"
+    assert "x = (" in moy_carts.load(path)["src"], \
+        "a hard exit must persist the code tab even when it does not compile"
+
+
+def test_a_half_typed_line_survives_a_tab_switch_and_keeps_its_badge(tmp_path):
+    """...and the syntax status survives with it: the line is safe on disk AND
+    still broken, so the badge must say so. The caret stays where the kid left
+    it -- leaving a tab is not a request to be taken to the error."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    path = _open_code(ws)
+    ed = ws.editor
+    ed.set_text(_HALF)
+    ed.row, ed.col = 1, 4
+    where = (ed.row, ed.col)
+
+    ws.set_menu_view("paint")
+
+    assert "x = (" in moy_carts.load(path)["src"]
+    assert (ws.save_status or "").startswith("SYNTAX"), ws.save_status
+    assert ws.code_err_row == 2                  # the inline marker still points at it
+    assert (ed.row, ed.col) == where, "the hard commit must not yank the caret"
+    assert ws.cart_error is None, "nothing crashed -- the text was saved"
+
+
+def test_a_forced_commit_does_not_forgive_a_struck_out_app(tmp_path):
+    """commit_code clears the #160 strikes because a code fix is what makes the
+    panel's "EDIT it" true. A KEPT write fixed nothing, so re-arming the guard
+    would only let the same cart strike out again."""
+    ws = _ws(tmp_path)
+    _open_code(ws)
+    forgiven = []
+    ws.forgive_app = lambda cart: forgiven.append(cart)
+
+    ws.editor.set_text(_HALF)
+    ws.editor_app.save_current()                 # the hard path: writes anyway
+    assert forgiven == []
+
+    ws.editor.set_text("def _draw():\n    cls(3)\n")
+    ws.editor_app.save_current()                 # ...and a real fix does forgive
+    assert len(forgiven) == 1
+
+
+def test_play_still_refuses_to_run_source_that_will_not_parse(tmp_path):
+    """The other half of the split: the RUN gate is unchanged. PLAY keeps the kid
+    in the editor with the error shown and the caret ON the bad line."""
+    ws = _ws(tmp_path)
+    _open_code(ws)
+    ws.editor.set_text(_HALF)
+
+    ws.run_code()
+
+    assert ws.screen == "menu", "a cart that cannot compile must not be run"
+    assert (ws.cart_error or "").startswith("Syntax error")
+    assert ws.editor.row == 2, "the run gate DOES take the kid to the error"

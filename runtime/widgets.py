@@ -13,6 +13,8 @@ that don't belong to any one surface Layer or the router:
   * `_SilentAudio` -- the no-op audio backend (#16) when none was injected.
   * `Popup`        -- the reusable dropdown overlay primitive (#52) the ≡ menu is
                       built on.
+  * `ConfirmTap`   -- the two-tap guard every destructive button shares.
+  * `arm_prompt`   -- the input-edge neutraliser a modal prompt opens with.
 
 All are backend-agnostic + MicroPython-safe: they take NO NAMES/canvas (they don't
 draw chrome -- Popup/Launcher DRAWING lives on their owners), so this file is a
@@ -58,6 +60,59 @@ def _in(px, py, rect):
     return x <= px < x + w and y <= py < y + h
 
 
+def arm_prompt(ws):
+    """Take the keyboard for a modal prompt and neutralise the input edge that
+    opened it, so the prompt's first frame cannot carry the still-latched
+    A/Enter/tap straight into commit or cancel (#29). ONE body for every
+    prompt that opens on a key or a tap (the block keypads, the Config tab's
+    CART INFO and NEW SCRIPT dialogs); the prompt's own TextEntry then opens
+    guarded (editors_base.TextEntry.open)."""
+    ws._set_text_mode(True)
+    # EVERYBODY let go: the shared object's meaning (every source), not a
+    # driver's per-source "I hold nothing" (runtime/input.py).
+    ws.input.release_all()
+    try:
+        ws.input._pressed = set()
+        ws.input._released = set()
+        ws.input._last = set()          # device InputState edge snapshot
+        ws.input._prev = set()          # host InputState edge snapshot
+    except AttributeError:
+        pass
+    ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
+    if ws.pointer is not None:
+        ws.pointer.click = False        # the tap that opened the prompt is not OK
+
+
+class ConfirmTap:
+    """A two-tap guard on a destructive button: the first tap ARMS, the
+    second (while still armed) confirms, and any other gesture disarms.
+    `gen` counts every arm/disarm so a surface whose chrome is cached by a
+    generation key (the picker's bar zone) repaints the armed prompt."""
+
+    def __init__(self):
+        self.armed = False
+        self.gen = 0
+
+    def arm(self):
+        if not self.armed:
+            self.armed = True
+            self.gen += 1
+
+    def disarm(self):
+        if self.armed:
+            self.armed = False
+            self.gen += 1
+
+    def tap(self):
+        """One tap on the guarded button: True when it confirms (and disarms),
+        False when it only armed."""
+        if self.armed:
+            self.disarm()
+            return True
+        self.arm()
+        return False
+
+
 class _Blit:
     """Minimal blittable for the cursor sprite (canvas.spr reads only these)."""
     def __init__(self, w, h, pix, transparent=-1):
@@ -99,6 +154,13 @@ def rotate_indices(pix, w, h, deg, transparent):
 
 
 CURSOR_IDLE_MS = 2000  # hide the trackball cursor after this long with no movement
+# How long a touchscreen pointer OUTLIVES the finger that made it. A touch
+# panel reports a position only while it is being touched, and a cart wants a
+# MOUSE: hold and drag, then let go and the pointer is still where you left it
+# for a moment before it is gone. Without the linger a released finger reads as
+# "no pointer" on the very next frame, which is not a mouse and is not what a
+# cart's cursor, drag handle or hover highlight is written against.
+POINTER_LINGER_MS = 1500
 
 
 class Pointer:
@@ -113,6 +175,14 @@ class Pointer:
         self.y = h // 2
         self.click = False
         self.down = False         # touch/button currently held (for drag gestures)
+        # Does this pointer's SOURCE report a position with no button down? A
+        # mouse does (host, browser) and a touch panel does not, and that is
+        # the whole of the difference: a hovering pointer never expires, a
+        # touched one lingers (POINTER_LINGER_MS) and then reads as absent.
+        # Set by whoever feeds a hover, so a console inherits its own answer
+        # rather than being told which kind of machine it is.
+        self.hovers = False
+        self._sampled = _ticks_ms()
         # Did THIS frame's sample come from the input hardware, or is it a repeat
         # of the last one? A mouse always reports a level, so the host never sets
         # this False; the T-Deck's GT911 hands over ~20-30 samples/s while a
@@ -131,7 +201,7 @@ class Pointer:
         self.x = max(0, min(self.w - 1, self.x + dx))
         self.y = max(0, min(self.h - 1, self.y + dy))
         self.visible = True
-        self._last_move = _ticks_ms()
+        self._last_move = self._sampled = _ticks_ms()
 
     def place(self, x, y):
         # Absolute position from touch: hit-test there, but keep the cursor
@@ -139,11 +209,97 @@ class Pointer:
         self.x = max(0, min(self.w - 1, x))
         self.y = max(0, min(self.h - 1, y))
         self.visible = False
+        self._sampled = _ticks_ms()
+
+    def live(self):
+        """Is there a pointer for a CART to read right now?
+
+        Held is live, hovered is live, and a just-released touch stays live for
+        POINTER_LINGER_MS so a drag that ends does not teleport the cart's
+        cursor into nowhere on the next frame. Past that a touch console
+        honestly has no pointer, which is what `touch()` answers None/nil for.
+        """
+        return (self.down or self.hovers
+                or _ticks_diff(_ticks_ms(), self._sampled) < POINTER_LINGER_MS)
 
     def tick(self, now):
         # Auto-hide once the trackball has been idle long enough.
         if self.visible and _ticks_diff(now, self._last_move) >= self.idle_ms:
             self.visible = False
+
+
+# The pointer a CART sees, resolved once for every tier.
+#
+# Python carts reach it through cart_api's `touch()`; Lua carts reach it through
+# the snapshot the glues fill (device/moycore_glue.py, runtime/lua_host.py) and
+# libmoy's `touch()` reads. Those are two code paths and they must not be two
+# ANSWERS -- "one cart, every tier" is the whole contract, and a pointer that
+# expires on one tier and not the other breaks it silently, in a cart that draws
+# a cursor.
+#
+# ONE INTEGER, because the Lua snapshot has one slot to say all three things in
+# (see moycore_glue / moyhost_lua's h_touch). FLAGS and not a ladder: `click`
+# and `down` are independent, not nested -- a scripted tap (host_api.click, the
+# suites) raises the edge with the finger already lifted, and a ladder that
+# assumed down >= click swallowed it, which `letter blitz` scores with.
+P_NONE = 0
+P_LIVE = 1                     # there is a pointer at all
+P_HELD = 2                     # the finger/button is down this frame
+P_CLICK = 4                    # ...and it went down THIS frame (the press edge)
+
+
+def pointer_state(inp, out):
+    """Fill `out` as `[x, y, state, ms]` and return it. `state` is P_*.
+
+    `ms` is 0 and the slot is vestigial: it carried a press duration only so
+    h_touch could read `held` out of it, and `held` is a flag now. The slot
+    stays because it is in the C snapshot ABI, not because anything reads it.
+
+    `out` is CALLER-OWNED and reused: this runs once per frame on the play
+    path, and a fresh tuple here is an allocation the S3 charges most of a
+    millisecond for when the collector comes round (#66).
+    """
+    out[2] = P_NONE
+    # A LINKED MATCH HAS NO POINTER. Only buttons cross the radio, so a touch
+    # read here would move this screen's player and not the other one's -- a
+    # divergence the lockstep exchange cannot see and cannot heal, the same
+    # class of bug as drawing from the shared random stream. Reporting "no
+    # pointer" makes a touch-driven cart fall back to its button path, which is
+    # the honest answer while two consoles share one game.
+    if getattr(inp, "netplay_live", False):
+        return out
+    p = getattr(inp, "pointer", None)
+    if p is None:
+        return out
+    # LIVENESS IS THE POINTER'S, always, and asking it FIRST is the whole point.
+    # A touch panel reports a position only while it is touched; the pointer
+    # outlives the finger by POINTER_LINGER_MS so a released drag does not
+    # teleport a cart's cursor into nowhere, and a hovering source never
+    # expires at all. The game-space publication below is a coordinate MAPPING
+    # of this pointer, not a second opinion about whether there is one --
+    # console.py republishes it with a position every frame whether or not the
+    # pointer is alive, so reading liveness off it left a p8 cart holding a
+    # cursor over its board forever and its d-pad stamped over every frame.
+    live = getattr(p, "live", None)
+    if live is not None and not live():
+        return out
+    # Two-domain seam (#39): the game-space publication wins where the console
+    # makes one (a distinct big system canvas, or a cart with a smaller
+    # canvas), so a cart reads its own viewport coordinates rather than the
+    # desktop's -- and its own tap/hold flags, which an overlay may have
+    # stripped on the way through.
+    gp = getattr(inp, "game_pointer", None)
+    if gp is not None:
+        out[0], out[1] = gp[0], gp[1]
+        out[2] = (P_LIVE | (P_CLICK if bool(gp[2]) else 0)
+                  | (P_HELD if (len(gp) > 3 and gp[3]) else 0))
+        out[3] = 0
+        return out
+    out[0], out[1] = p.x, p.y
+    out[2] = (P_LIVE | (P_HELD if getattr(p, "down", False) else 0)
+              | (P_CLICK if getattr(p, "click", False) else 0))
+    out[3] = 0
+    return out
 
 
 # --- achievements + Easter eggs (#21) ---------------------------------------
@@ -671,6 +827,11 @@ class Popup:
         # from _effective_font_scale(); 1 keeps every product byte-identical (the
         # T-Deck / 320x240 baseline).
         self.fs = 1
+        # The menu's ROWS are tap targets, so their height follows the chrome
+        # scale (#203) while the labels stay on `fs`. Equal by default, which is
+        # what keeps every tier byte-identical; the panel WIDTH stays on `fs`
+        # because it is sized to hold text, not to be hit.
+        self.cs = 1
 
     # -- open/close ----------------------------------------------------------
     def show(self, items):
@@ -735,13 +896,13 @@ class Popup:
     def panel_rect(self):
         """(x, y, w, h) of the whole panel -- height grows with the row count. The
         left edge is `anchor_x` (set under the ≡ button by toggle_sysmenu, Stage 4);
-        defaults to _POPUP_X (flush left). All geometry scales by `fs` (1 = the
-        byte-identical baseline)."""
-        fs = self.fs
+        defaults to _POPUP_X (flush left). Rows and the drop under the bar scale by
+        `cs`, the text-sized width by `fs`; equal is the byte-identical baseline."""
+        fs, cs = self.fs, self.cs
         h = 0
         for it in self.items:
-            h += _POPUP_SEP_H * fs if it[0] == "sep" else _POPUP_ROW_H * fs
-        return (self.anchor_x, _POPUP_Y * fs, _POPUP_W * fs, h)
+            h += _POPUP_SEP_H * cs if it[0] == "sep" else _POPUP_ROW_H * cs
+        return (self.anchor_x, _POPUP_Y * cs, _POPUP_W * fs, h)
 
     def row_at(self, px, py):
         """Index of the row under (px, py), or None when outside the panel."""
@@ -750,10 +911,10 @@ class Popup:
         x, y, w, h = self.panel_rect()
         if not _in(px, py, (x, y, w, h)):
             return None
-        fs = self.fs
-        cy = _POPUP_Y * fs
+        cs = self.cs
+        cy = _POPUP_Y * cs
         for i in range(len(self.items)):
-            rh = _POPUP_SEP_H * fs if self.items[i][0] == "sep" else _POPUP_ROW_H * fs
+            rh = _POPUP_SEP_H * cs if self.items[i][0] == "sep" else _POPUP_ROW_H * cs
             if cy <= py < cy + rh:
                 return i
             cy += rh

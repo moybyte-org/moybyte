@@ -131,12 +131,17 @@ static void h_vol(void *u, int l) { (void)u; aq_push(AQ_VOLUME, l, 0, 0); }
 static void h_beep(void *u, float hz, float s)
 { (void)u; aq_push(AQ_BEEP, (int)hz, (int)(s * 1000.0f), 0); }
 
+/* The pointer slot is FLAGS, not a level: it is the only one h_touch has and
+ * touch() must answer three things out of it. Mirrors runtime/widgets.py's
+ * P_LIVE / P_HELD / P_CLICK -- 0 is "no pointer", which reads as nil. */
 static int h_touch(void *u, int out[4])
 {
     (void)u;
-    if (!CUR || !CUR->snap || !CUR->snap[SNAP_TOUCH_DOWN]) return 0;
+    int st;
+    if (!CUR || !CUR->snap || !(st = CUR->snap[SNAP_TOUCH_DOWN])) return 0;
     out[0] = CUR->snap[SNAP_TOUCH_X]; out[1] = CUR->snap[SNAP_TOUCH_Y];
-    out[2] = CUR->snap[SNAP_TOUCH_DOWN]; out[3] = CUR->snap[SNAP_TOUCH_MS];
+    out[2] = (st & 4) != 0;                      /* tapped: the press edge */
+    out[3] = (st & 2) != 0;                      /* held */
     return 1;
 }
 static int h_key(void *u, int code)
@@ -159,11 +164,19 @@ static const char *h_cfg(void *u, const char *k) { (void)u; (void)k; return NULL
  * -- a cart needing a Python-backed verb needs one engine that can hold one,
  * not a second engine.
  *
- * The contract is deliberately narrow, because it is exactly what those verbs
- * take and return: up to four integer arguments plus at most one string
- * (image("bg") is the only string-taking verb), and an integer result or
- * nothing. Objects have never crossed this boundary -- layers and images
- * travel as int handles, which is what the prelude's wrappers speak. */
+ * The contract is what moycore's l_tramp already had, because a host and a
+ * device that disagree about what an argument IS is the same disease as one
+ * that disagree about what a verb does: up to eight arguments, each an
+ * integer, a string, a boolean or nil, each WHERE THE CART PUT IT, and an
+ * integer, a string, a boolean or nothing back. Objects still never cross --
+ * layers, images and actors travel as int handles, which is what the prelude's
+ * wrappers speak, and a whole scene crosses as one encoded string.
+ *
+ * It used to be an int vector plus "the first string", with a boolean landing
+ * as 0 and every later string dropped: __actor_flag(id, "hidden", true) would
+ * have arrived as ("hidden", id, 0). Nothing mixed the kinds until the
+ * placement verbs did, which is why that survived this long; every existing
+ * verb (all ints, or the lone string of image("bg")) sees what it always saw. */
 /* Eight, not four: the widest wrapper is the prelude's
  * __layer_spr(lid, tile, x, y, ck, scale, flip) at seven. Four silently
  * TRUNCATED it -- the extra arguments never reached Python, the closure raised
@@ -171,8 +184,17 @@ static const char *h_cfg(void *u, const char *k) { (void)u; (void)k; return NULL
  * sprite would simply not draw, with nothing printed anywhere. */
 #define HL_MAX_IARGS 8
 
-typedef int (*hl_dispatch_fn)(int idx, int argc, const int *iargs,
-                              const char *sarg, int *out);
+/* Argument i: HL_NUM takes iargs[i], HL_STR sargs[i], HL_BOOL iargs[i] != 0,
+ * HL_NIL nothing. Result: 0 nothing, 1 the integer in *out, 2 the *out bytes
+ * at *sout, 3 the boolean *out != 0. */
+#define HL_NUM  0
+#define HL_STR  1
+#define HL_BOOL 2
+#define HL_NIL  3
+
+typedef int (*hl_dispatch_fn)(int idx, int argc, const int *kinds,
+                              const int *iargs, const char **sargs,
+                              int *out, const char **sout);
 
 static hl_dispatch_fn CUR_DISPATCH;
 
@@ -180,20 +202,38 @@ static int hl_tramp(lua_State *L)
 {
     int idx = (int)lua_tointeger(L, lua_upvalueindex(1));
     int n = lua_gettop(L);
+    int kinds[HL_MAX_IARGS];
     int iargs[HL_MAX_IARGS];
-    const char *sarg = NULL;
+    const char *sargs[HL_MAX_IARGS];
     int ic = 0;
-    for (int i = 1; i <= n; i++) {
-        if (lua_type(L, i) == LUA_TSTRING) {
-            if (sarg == NULL) sarg = lua_tostring(L, i);
-        } else if (ic < HL_MAX_IARGS) {
-            iargs[ic++] = (int)lua_tointeger(L, i);
+    for (int i = 1; i <= n && ic < HL_MAX_IARGS; i++) {
+        int t = lua_type(L, i);
+        sargs[ic] = NULL;
+        iargs[ic] = 0;
+        if (t == LUA_TSTRING) {
+            kinds[ic] = HL_STR;
+            sargs[ic] = lua_tostring(L, i);
+        } else if (t == LUA_TBOOLEAN) {
+            kinds[ic] = HL_BOOL;
+            iargs[ic] = lua_toboolean(L, i);
+        } else if (t == LUA_TNIL || t == LUA_TNONE) {
+            kinds[ic] = HL_NIL;
+        } else {
+            kinds[ic] = HL_NUM;
+            iargs[ic] = (int)lua_tointeger(L, i);
         }
+        ic++;
     }
     if (CUR_DISPATCH == NULL) return 0;
     int out = 0;
-    int has = CUR_DISPATCH(idx, ic, iargs, sarg, &out);
-    if (has) { lua_pushinteger(L, out); return 1; }
+    const char *sout = NULL;
+    int has = CUR_DISPATCH(idx, ic, kinds, iargs, sargs, &out, &sout);
+    if (has == 1) { lua_pushinteger(L, out); return 1; }
+    if (has == 2 && sout != NULL) {
+        lua_pushlstring(L, sout, (size_t)out);
+        return 1;
+    }
+    if (has == 3) { lua_pushboolean(L, out); return 1; }
     return 0;
 }
 
@@ -346,14 +386,22 @@ int hl_exec(host_lua *r, const char *src, int len, const char *name,
     return 0;
 }
 
-/* Load a chunk and run _init. 0 on success; the message lands in err.
+/* Run the cart's chunks in order, then _init. 0 on success; the message lands
+ * in err.
  *
- * The split exists for the GLUE PRELUDE (runtime/lua_ext.py), which has to run
- * after hl_register and before the cart: moybyte's object-valued verbs reach
- * Lua as int-handle functions plus wrappers, because this dispatch marshals
- * ints and one string and a Layer is neither. */
-int hl_load(host_lua *r, const char *src, int len, const char *name,
-            char *err, int errlen)
+ * A LIST, because SPEC.md 4 lets a cart be several scripts and the whole list
+ * has to sit inside THIS call rather than be dribbled in through hl_exec. Two
+ * things bracket the cart and both would be on the wrong side otherwise: the
+ * p8 machine is opened below, and a shim chunk run before that resolves its
+ * verbs to the slow Lua fallbacks instead of the C ones; and hl_widen covers
+ * the chunks, which are allowed to draw.
+ *
+ * hl_exec stays for the GLUE PRELUDE (runtime/lua_ext.py), which has to run
+ * after hl_register and before any of this: moybyte's object-valued verbs
+ * reach Lua as int-handle functions plus wrappers, because this dispatch
+ * marshals ints and strings and a Layer is neither. */
+int hl_load(host_lua *r, const char **srcs, const int *lens, const char **names,
+            int n, char *err, int errlen)
 {
     /* The PICO-8 machine: opened here rather than in hl_new because it seeds
      * memory from the sheet and map, which hl_set_sheet/hl_set_map supply in
@@ -361,13 +409,16 @@ int hl_load(host_lua *r, const char *src, int len, const char *name,
     if (!r->p8mem) r->p8mem = (uint8_t *)malloc(MOY_P8_MEM);
     if (!r->p8rom) r->p8rom = (uint8_t *)malloc(MOY_P8_ROM);
     if (r->p8mem) moy_p8_open(r->L, &r->con, &r->p8, r->p8mem, r->p8rom);
-    int rc;
-    /* The chunk and _init are both allowed to draw (a title screen a cart never
+    int rc = 0, i;
+    /* The chunks and _init are all allowed to draw (a title screen a cart never
      * repaints is the standing case), so they get the same bridge a frame gets
      * -- and the same single exit, so a chunk that draws and then errors still
      * lands what it drew. */
     hl_widen(r);
-    rc = hl_exec(r, src, len, name, err, errlen);
+    for (i = 0; i < n; i++) {
+        rc = hl_exec(r, srcs[i], lens[i], names[i], err, errlen);
+        if (rc) break;
+    }
     if (rc == 0) {
         g_tick_ms = hl_now_ms();          /* _init may call time(), below */
         rc = moy_lua_init(r->L, err, (size_t)errlen);
@@ -376,7 +427,9 @@ int hl_load(host_lua *r, const char *src, int len, const char *name,
     return rc;
 }
 
-int hl_tick(host_lua *r, float dt, char *err, int errlen)
+/* `draw` 0 is a logic-only tick: the Player's scheduler (#217) skips _draw on
+ * the ticks its divisor does not draw, which SPEC.md 5 sanctions. */
+int hl_tick(host_lua *r, float dt, int draw, char *err, int errlen)
 {
     int rc;
     CUR = r;
@@ -386,7 +439,7 @@ int hl_tick(host_lua *r, float dt, char *err, int errlen)
     /* ONE exit, so a cart that draws and THEN errors still lands its pixels --
      * the crash-to-code panel is drawn over the frame the cart died on. */
     rc = moy_lua_update(r->L, dt, err, (size_t)errlen);
-    if (rc == 0) rc = moy_lua_draw(r->L, err, (size_t)errlen);
+    if (rc == 0 && draw) rc = moy_lua_draw(r->L, err, (size_t)errlen);
     hl_narrow(r);
     return rc;
 }
@@ -408,12 +461,19 @@ void hl_pmem_load(host_lua *r, const int32_t *in, int n)
 
 /* Read a cart global as a double; returns 0 when absent or not a number, 1
  * otherwise. Numbers only: the parity suites compare counters and positions,
- * and a richer marshalling here would be a second contract to keep. */
+ * and a richer marshalling here would be a second contract to keep. An
+ * INTEGER goes through lua_tointeger: under LUA_32BITS lua_Number is a float,
+ * so lua_tonumber on an integer above 2^24 would round it, and a double holds
+ * every int32 exactly. */
 int hl_get_global_num(host_lua *r, const char *name, double *out)
 {
     lua_getglobal(r->L, name);
     int ok = 0;
-    if (lua_type(r->L, -1) == LUA_TNUMBER) { *out = (double)lua_tonumber(r->L, -1); ok = 1; }
+    if (lua_type(r->L, -1) == LUA_TNUMBER) {
+        if (lua_isinteger(r->L, -1)) *out = (double)lua_tointeger(r->L, -1);
+        else *out = (double)lua_tonumber(r->L, -1);
+        ok = 1;
+    }
     lua_pop(r->L, 1);
     return ok;
 }

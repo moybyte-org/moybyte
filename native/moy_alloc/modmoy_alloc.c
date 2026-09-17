@@ -1,11 +1,13 @@
-// Moybyte moy_alloc: DMA-capable memory allocator for the native canvas blitter.
+// Moybyte moy_alloc: memory OUTSIDE the MicroPython gc heap, in two shapes.
 //
-// lcd_bus.allocate_framebuffer is capped at 2 slots (both are consumed by the
-// LVGL ST7789 driver's draw buffers), and ESP-IDF SPI esp_lcd_panel_io_tx_color
-// requires a DMA-capable buffer (no bounce buffer is configured on this bus).
-// This module exposes malloc_dma(size) -> writable memoryview backed by
-// MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL, so moy_canvas can DMA the canvas
-// framebuffer straight to the panel, bypassing LVGL's software-rotated flush.
+// malloc_dma(size, caps) -> a writable memoryview of cache-line-aligned
+// heap_caps memory that is never freed: the panel and the PPA DMA out of these
+// buffers, and a device-lifetime allocation is what a scan buffer, a paint
+// buffer and a layer are (device/dsi_panel.py, device/device_canvas.py).
+//
+// alloc/free (#186) is the registry-backed pair beside it, for payloads that
+// must not be walked by every gc mark phase; runtime/moybuf.py is the Python
+// discipline over it. See the moy_buf block below for what the registry buys.
 
 #include "py/obj.h"
 #include "py/runtime.h"
@@ -29,9 +31,9 @@
 #endif
 
 // malloc_dma(size, caps=DMA|INTERNAL) -> writable memoryview of `size` bytes.
-// The memoryview is marked writable (typecode |= 0x80) the same way lcd_bus
-// marks its framebuffers (lcd_types.c). moy_canvas never frees it (one-shot,
-// device-lifetime allocation).
+// The memoryview is marked writable (typecode |= 0x80). There is no free for
+// it: a caller that needs one allocates through alloc() instead, and the layer
+// pool in device/device_canvas.py is what recycles these.
 static mp_obj_t moy_alloc_malloc_dma(size_t n_args, const mp_obj_t *args) {
     mp_int_t size = mp_obj_get_int(args[0]);
     if (size <= 0) {
@@ -85,6 +87,8 @@ static size_t moy_buf_bytes = 0;
 #endif
 
 // alloc(size, caps=SPIRAM) -> zeroed writable memoryview outside the gc heap.
+// Cache-line (64B) aligned like malloc_dma above, so a layer buffer from here
+// is a legal GDMA / PPA source or destination as well as a byte cache.
 static mp_obj_t moy_alloc_alloc(size_t n_args, const mp_obj_t *args) {
     mp_int_t size = mp_obj_get_int(args[0]);
     if (size <= 0) {
@@ -94,7 +98,7 @@ static mp_obj_t moy_alloc_alloc(size_t n_args, const mp_obj_t *args) {
     uint32_t caps = (n_args > 1)
         ? (uint32_t)mp_obj_get_int(args[1])
         : MALLOC_CAP_SPIRAM;
-    void *buf = heap_caps_calloc(1, (size_t)size, caps);
+    void *buf = heap_caps_aligned_calloc(64, 1, (size_t)size, caps);
     if (buf == NULL) {
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_alloc: out of memory"));
     }

@@ -52,6 +52,7 @@ on:
       - "tests/web_e2e.py"
       - "tests/fixtures/**"         # the p8 cart the drop suite imports
       - "tools/p8_import.py"        # the vendored converter the wasm freezes
+      - "tools/p8_lua_port.py"      # ...the vendored PORTER, frozen beside it
       - "tools/p8_writer.py"        # ...and the .moy writer it shares with the CLI
       - ".github/workflows/web-e2e.yml"
   pull_request:
@@ -65,6 +66,7 @@ on:
       - "tests/web_e2e.py"
       - "tests/fixtures/**"
       - "tools/p8_import.py"
+      - "tools/p8_lua_port.py"
       - "tools/p8_writer.py"
       - ".github/workflows/web-e2e.yml"
   workflow_dispatch:
@@ -154,7 +156,7 @@ jobs:
         run: |
           .venv/bin/python -m pytest -rs --junitxml=web-e2e.xml \
             tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
-            tests/test_web_p8_e2e.py
+            tests/test_web_p8_e2e.py tests/test_web_update_e2e.py
 
       # pytest was green -- but was it green over anything? The prerequisite
       # skips fail hard above, so this catches the other way of proving nothing:

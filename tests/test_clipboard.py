@@ -1,6 +1,6 @@
 """The system clipboard (#132): one typed holder (widgets.Clipboard) every
 editor writes THROUGH while keeping its local behavior -- copy in the code tab
-pastes in Writer, a Writer line lands in a Sheets cell, and an editor with no
+pastes into a note, and an editor with no
 workstation attached behaves exactly as before (the local-only contract)."""
 
 from pathlib import Path
@@ -27,7 +27,7 @@ def test_clipboard_holder_typed_and_versioned():
     assert c.text() == ""
 
 
-# -- the CodeEditor lane (code tab + Writer + Storybook share this core) ------
+# -- the CodeEditor lane (code tab + editor handle + Storybook share it) -----
 
 def test_copy_travels_between_editors_through_the_system_lane():
     clip = Clipboard()
@@ -83,88 +83,31 @@ def test_code_tab_editor_rides_the_workstation_clipboard(tmp_path):
     assert ws.editor.clip is ws.clipboard
 
 
-# -- Writer (Ctrl+A / C / X / V through the shared core) ----------------------
+# -- the editor handle (Ctrl+A / C / X / V through the shared core) -----------
 
-def _open_writer(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Writer":
-            ws.launcher.sel = i
-            break
-    ws.open()
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    return ws.writer_app
+def _handle(ws, name):
+    """A cart's editor handle, built the way `open_editor` builds one. This is
+    the SECOND surface on the lane -- the code tab is the first, and the point
+    of the lane is that text crosses between them."""
+    ctx = ws.app_context("probe", ("files", "clipboard"))
+    return ws.player._open_cart_editor(ctx.files, "docs", name, None,
+                                       ws.canvas, ctx.clipboard)
 
 
-def _press(app, inp, key):
-    inp.last_key = key
-    app._typed_keys(inp)
-    inp.last_key = 0
-    app._typed_keys(inp)
-
-
-def test_writer_pastes_what_the_code_editor_copied(tmp_path):
+def test_a_note_pastes_what_the_code_editor_copied(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.clipboard.put_text("def bounce():")     # what a code-tab copy left behind
-    app = _open_writer(ws)
-    app._new_doc()
-    assert app.editor is not None and app.editor.clip is ws.clipboard
-    _press(app, ws.input, 0x16)                # Ctrl+V
-    assert app.editor.text() == "def bounce():"
-    assert app._unsaved
-    # Ctrl+A then Ctrl+C round-trips the doc back out to the system lane.
-    _press(app, ws.input, 0x01)
-    _press(app, ws.input, 0x03)
+    ed = _handle(ws, "note")
+    assert ed.ed.clip is ws.clipboard
+    assert ed.key(0x16)                        # Ctrl+V
+    assert ed.text() == "def bounce():"
+    assert ed.dirty()
+    # Ctrl+A then Ctrl+C round-trips the note back out to the system lane.
+    ed.key(0x01)
+    ed.key(0x03)
     assert ws.clipboard.text() == "def bounce():"
-    # Ctrl+X empties the doc and keeps the text on the clipboard.
-    _press(app, ws.input, 0x01)
-    _press(app, ws.input, 0x18)
-    assert app.editor.text() == ""
+    # Ctrl+X empties the note and keeps the text on the clipboard.
+    ed.key(0x01)
+    ed.key(0x18)
+    assert ed.text() == ""
     assert ws.clipboard.text() == "def bounce():"
-
-
-# -- Sheets (cell lane, naive one-cell v1) ------------------------------------
-
-def _open_sheets(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Sheets":
-            ws.launcher.sel = i
-            break
-    ws.open()
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    return ws.sheets_app
-
-
-def _type(app, inp, text):
-    for ch in text:
-        inp.last_key = 10 if ch == "\n" else ord(ch)
-        app._typed_keys(inp)
-        inp.last_key = 0
-        app._typed_keys(inp)
-
-
-def test_sheets_cell_copy_paste_and_undo(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_sheets(ws)
-    app._new_sheet()
-    _type(app, ws.input, "42\n")               # A1 = 42, cursor now on A2
-    assert app.sheet.raw_at(0, 0) == "42"
-    app.cur_col, app.cur_row = 0, 0
-    _press(app, ws.input, 0x03)                # Ctrl+C: A1 -> clipboard
-    assert ws.clipboard.text() == "42"
-    app.cur_col, app.cur_row = 1, 1
-    _press(app, ws.input, 0x16)                # Ctrl+V into B2
-    assert app.sheet.raw_at(1, 1) == "42"
-    app._undo()                                # the paste is one undoable cell op
-    assert app.sheet.raw_at(1, 1) == ""
-    # Multi-line text (a Writer copy) lands as its FIRST line (naive v1).
-    ws.clipboard.put_text("first\nsecond")
-    app.cur_col, app.cur_row = 2, 0
-    _press(app, ws.input, 0x16)
-    assert app.sheet.raw_at(2, 0) == "first"
-    # Ctrl+X copies then clears.
-    app.cur_col, app.cur_row = 0, 0
-    _press(app, ws.input, 0x18)
-    assert ws.clipboard.text() == "42"
-    assert app.sheet.raw_at(0, 0) == ""

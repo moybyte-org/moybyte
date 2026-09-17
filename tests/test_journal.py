@@ -382,34 +382,21 @@ def test_per_file_truncation_preserves_the_other_files_redo_tail(tmp_path):
     assert _live(path, "map.moymap") == "M2\n"
 
 
-def test_old_single_seq_cursor_migrates_per_file(tmp_path):
-    # TOLERANT MIGRATION: a pre-#111 cursor.json ({"seq": N}) loads as "each file's
-    # cursor = its newest entry seq <= N". Interleaved commits main(1),map(2),main(3),
-    # map(4) with an old seq=2 -> main's cursor = 1 (seq3 is redo tail), map's = 2 (seq4
-    # is redo tail): each file rewound to its own newest-applied-<=-2.
+def test_a_cursor_without_a_map_loads_as_everything_applied(tmp_path):
+    # No older cursor shape is read: a cursor.json carrying only a scalar `seq`
+    # (the pre-#111 form) is the same as a missing one -- every file sits at its
+    # newest entry, the safe 'everything applied' state.
     mc, path = _cart(tmp_path)
     mc.journal_append(path, "main.py", "A\n")            # seq 1
     mc.journal_append(path, "map.moymap", "M1\n")        # seq 2
     mc.journal_append(path, "main.py", "B\n")            # seq 3
-    mc.journal_append(path, "map.moymap", "M2\n")        # seq 4
     _jdir, _log, cur, _snap = mc._journal_paths(path)
-    Path(cur).write_text(json.dumps({"seq": 2, "bytes": 999}))   # legacy single-seq shape
+    Path(cur).write_text(json.dumps({"seq": 2, "bytes": 999}))
 
     mj = _journal_mod()
     entries = mj._journal_load_entries(_log)
-    cursors = mj._journal_cursors(cur, entries)
-    assert cursors == {"main.py": 1, "map.moymap": 2}    # each file's newest seq <= 2
-
-    # And the walk honors it: both files have a commit AHEAD of their migrated cursor.
-    assert mc.journal_can_redo(path, ("main.py",)) is True       # seq3 (B) ahead
-    assert mc.journal_can_redo(path, ("map.moymap",)) is True    # seq4 (M2) ahead
-    assert mc.journal_can_undo(path, ("main.py",)) is False      # main is at its floor (seq1)
-    assert mc.journal_redo(path, ("main.py",)) == "main.py"      # steps main 1 -> 3
-
-    # A migrating write persists the NEW cursor-map format (no more bare `seq` walk).
-    saved = json.loads(Path(cur).read_text())
-    assert "cursors" in saved and saved["cursors"]["main.py"] == 3
-
+    assert mj._journal_cursors(cur, entries) == {"main.py": 3, "map.moymap": 2}
+    assert mc.journal_can_redo(path, ("main.py",)) is False
 
 def test_missing_and_torn_cursor_default_to_newest(tmp_path):
     # A missing/torn cursor.json defaults every file to its newest entry (the safe
@@ -423,3 +410,25 @@ def test_missing_and_torn_cursor_default_to_newest(tmp_path):
     assert mj._journal_cursors(cur, entries) == {"main.py": 2, "map.moymap": 4}
     assert mc.journal_can_redo(path, ("main.py",)) is False   # already at the top
     assert mc.journal_can_undo(path, ("main.py",)) is True
+
+
+def test_the_journal_dirs_are_made_once_not_on_every_commit(tmp_path, monkeypatch):
+    """Two directory ops per save, on every board, to re-make a folder that has
+    existed since the project's first commit (#154). The dirs are created by
+    FAILING to write into them instead, so only the first commit pays."""
+    from runtime import moy_journal
+    store, path = _cart(tmp_path)
+
+    made = []
+    real = moy_journal._mkdir
+    monkeypatch.setattr(moy_journal, "_mkdir",
+                        lambda p: (made.append(p), real(p))[1])
+
+    store.journal_append(path, "main.py", "v1\n")
+    assert len(made) == 2                     # the first commit builds journal/ + s/
+    made.clear()
+
+    store.journal_append(path, "main.py", "v2\n")
+    store.journal_append(path, "main.py", "v3\n")
+    assert made == []
+    assert store.journal_undo(path) == "main.py"      # ...and the journal still walks

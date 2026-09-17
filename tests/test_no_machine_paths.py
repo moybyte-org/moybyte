@@ -40,12 +40,12 @@ CODE = ("*.py", "*.mjs", "*.js", "*.sh", "*.yml", "*.yaml")
 # excludes < and >, so a written-out /home/<placeholder>/ never trips it.
 HOME_PATH = re.compile(r"(?:/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/)")
 
-# Provisioning scripts create service accounts, so a home path is the subject
-# matter rather than an accident. Listed one by one, never a glob: the point of
-# this test is that adding an exemption should be a visible decision.
-ALLOWED = {
-    "deploy/proxmox-setup.sh",      # creates and populates the `moybyte` user
-}
+# Empty, and that is the point. An exemption is listed one by one, never a
+# glob, so that adding one is a visible decision -- and so that a file leaving
+# the tree takes its exemption with it. (The last entry outlived its script by
+# months: a provisioning script that created the `moybyte` service account, so
+# a home path there was the subject matter.)
+ALLOWED = set()
 
 
 def _code_files():

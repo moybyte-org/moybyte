@@ -37,6 +37,15 @@ except ImportError:  # CPython host tests
     def const(value):
         return value
 
+# The bond store publishes through the tree's crash-safe primitives: a stamped
+# `.bak` then the file itself, and a read that finishes an interrupted publish.
+# A remove+rename dance has a window in which the bonds are on neither path, and
+# losing them means re-pairing a keyboard by hand.
+try:
+    from moy_fs import _read_recover, _write_atomic
+except ImportError:  # CPython host tests / the runtime package lane
+    from runtime.moy_fs import _read_recover, _write_atomic
+
 
 # MicroPython bluetooth IRQ numbers.
 _IRQ_SCAN_RESULT = const(5)
@@ -302,6 +311,9 @@ class BleHidKeyboard:
         # tap completely.
         self._pending_usages = set()
         self._pending_modifiers = 0
+        # False until a poll has applied an EMPTY level state, so the very
+        # first poll always runs the pass in full (see poll's early-out).
+        self._level_idle = False
         self._notify_count = 0
         self._trace_on = False
         self._trace_events = []
@@ -598,13 +610,14 @@ class BleHidKeyboard:
     def poll(self):
         """Apply latest report level-state before InputState.begin_frame()."""
         self._sync_player()
-        logs = self._log_queue
-        self._log_queue = []
-        for parts in logs:
-            try:
-                print(*parts)
-            except Exception:
-                pass
+        if self._log_queue:
+            logs = self._log_queue
+            self._log_queue = []
+            for parts in logs:
+                try:
+                    print(*parts)
+                except Exception:
+                    pass
 
         if self._store_dirty:
             self._save_store()
@@ -624,6 +637,22 @@ class BleHidKeyboard:
             self._disconnect("discovery timeout")
 
         self._drain_fastpath()
+
+        # NOTHING HELD, NOTHING ARRIVED, NOTHING TO CLEAR: the level-state pass
+        # below is a no-op that still costs three heap allocations (two sets
+        # and sorted()'s list) plus a release_all on every frame of every game
+        # -- with no keyboard in the room at all (#220; measured on the Guition
+        # P4). The scan/reconnect state machine and the fastpath drain above
+        # have already run, so the radio still makes progress.
+        #
+        # The GUARD is `_level_idle`, set at the tail of the pass below, and it
+        # is what keeps the RELEASE correct: the frame on which the last report
+        # goes away still runs the whole pass (the flag is still False from the
+        # frame that set the key), clears the source, and only THEN arms this.
+        # A skip is therefore never the frame a key is let go on.
+        if (self._level_idle and not self._reports and not self._pending_usages
+                and not self._pending_modifiers):
+            return
 
         modifiers = 0
         usages = set()
@@ -667,6 +696,10 @@ class BleHidKeyboard:
             if key_out:
                 break
         src.last_key = key_out
+        # This frame's level state, applied. Empty means the next frame may
+        # take the early-out above -- the source is already clear, so there is
+        # nothing left for the pass to release.
+        self._level_idle = not usages and not modifiers
 
         if self._trace_on:
             try:
@@ -1264,8 +1297,7 @@ class BleHidKeyboard:
         try:
             import binascii
             import json
-            with open(self.store_path, "r") as src:
-                data = json.load(src)
+            data = json.loads(_read_recover(self.store_path))
             # v1 stored only name + NimBLE secrets. Keep those bonds and learn
             # the preferred address on the next connection instead of forcing
             # an already-working keyboard through pairing again.
@@ -1299,7 +1331,6 @@ class BleHidKeyboard:
         try:
             import binascii
             import json
-            import os
             secrets = []
             for (sec_type, key), value in self._secrets.items():
                 secrets.append((sec_type,
@@ -1312,14 +1343,7 @@ class BleHidKeyboard:
             data = {"version": _STORE_VERSION, "enabled": self._enabled,
                     "name": self.name, "preferred": preferred,
                     "secrets": secrets}
-            tmp = self.store_path + ".tmp"
-            with open(tmp, "w") as dst:
-                json.dump(data, dst)
-            try:
-                os.remove(self.store_path)
-            except OSError:
-                pass
-            os.rename(tmp, self.store_path)
+            _write_atomic(self.store_path, json.dumps(data))
             self._store_dirty = False
         except Exception as exc:
             # Do not retry every 16ms if storage is unavailable; the live bond

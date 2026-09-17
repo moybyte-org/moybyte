@@ -29,7 +29,8 @@ THE GAME FOLD IS HERE, and no moy_gfx kernel or Python-visible bounce slot is
   built straight from the game snapshot, black outside the viewport, the game
   rows at integer scale inside. `fold_supported` is True here,
   `DeviceCanvas.blit_game` arms instead of compositing, and the PUMP line's
-  `fold=` climbs on every quiet play frame.
+  `fold=` climbs on every quiet play frame. The snapshot the arm reads is the
+  GDMA engine's (`snap_scale_fold`, 2026-09-08) and `snap=` climbs with it.
 
   What is the Guition's alone is THE GAME WINDOW: shipping the game rect alone
   needs a panel whose GRAM keeps the bezels and a per-frame window arm, and this
@@ -83,7 +84,7 @@ ASYNC_FLUSH = True
 # WHAT IT CANNOT DO, so a flat reading is not a mystery. `_arm_layer_pred` only
 # arms the prediction when the copy is ONE contiguous memcpy: `cam_x == 0` and
 # the layer EXACTLY screen-wide. So the scroll carts, whose layers are wider
-# than the screen (Sky Run at 800 px, layer_test at 512), keep the synchronous
+# than the screen (Sky Run at 800 px, the Bench carts' scroll phase at 512), keep the synchronous
 # `blit_window` and are untouched by this flag; and Brick Siege has no layer at
 # all -- its `background(col("dark_blue"))` is a `cls()`, a PSRAM fill -- so it
 # cannot move by a microsecond. On the shipped roster the carts that CAN move

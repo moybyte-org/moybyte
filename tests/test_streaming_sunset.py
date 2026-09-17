@@ -11,10 +11,20 @@ runtime/web_view.py and runtime/web_view_page.py themselves.
 
 The plan's lane ledger pins each deletion with a grep-test so a revert or
 cargo-cult reintroduction fails loudly instead of resurrecting a seam the
-architecture buried. What SURVIVES by decision: moy_webserver's transport core
-and the web_view_ws framing leaf (the 3.4 sync RPC rides both), and
-runtime/web_input.py -- the browser event decode, which is transport-shaped
-rather than raster-shaped and which that same RPC speaks.
+architecture buried. What SURVIVES by decision: moy_webserver's HTTP transport
+core, and runtime/web_input.py -- the browser event decode, which is
+transport-shaped rather than raster-shaped.
+
+THE WEBSOCKET HALF WENT IN 2026-09, and it is pinned here as an absence for the
+same reason everything else on this page is. It survived the sunset itself on
+one claim -- "the 3.4 sync RPC rides both" -- and the RPC then shipped as plain
+HTTP (`moy_webhost.handle_http`, `runtime/moy_sync`). So the RFC 6455 upgrade,
+the framing leaf `runtime/web_view_ws.py`, the persistent `_WSConn` and the
+`on_text`/`send_text` seams were ~350 lines frozen into five board images with
+no caller of any kind, and `.claude/rules/web.md` had already recorded the
+opposite decision on the merits: the update routes go through the HTTP host
+"never the idle WebSocket core", because `WS_IDLE_MS` reaped a client through a
+flash write.
 """
 
 import os
@@ -106,9 +116,33 @@ def test_device_webserver_is_transport_core_only():
                  "def recording_wanted", "def stream_mode", "def begin_frame",
                  "PAGE_HTML,", "self.recorder", "self.provider"):
         assert dead not in src, dead
-    for alive in ("def parse_request", "def http_response", "class _WSConn",
-                  "class WebServer", "def handle_http", "def send_text"):
+    for alive in ("def parse_request", "def http_response", "class WebServer",
+                  "def handle_http"):
         assert alive in src, alive
+
+
+def test_the_websocket_half_is_gone_with_its_framing_leaf():
+    """The 2026-09 deletion (see this module's docstring): the RPC it was kept
+    for speaks plain HTTP, so nothing in the tree ever opened it."""
+    assert not os.path.exists(os.path.join(ROOT, "runtime", "web_view_ws.py"))
+    # Load-bearing patterns, not prose: the module header narrates this
+    # deletion too, so a bare "web_view_ws" would fail on the sentence that
+    # records it.
+    src = _read("device", "moy_webserver.py")
+    for dead in ("class _WSConn", "def _upgrade_ws", "def _service_ws",
+                 "def send_text", "def connected", "on_text=", "self.on_text",
+                 "import web_view_ws", "WS_OP_TEXT =", "WS_IDLE_MS ="):
+        assert dead not in src, dead
+
+
+def test_no_board_freezes_the_websocket_framing_any_more():
+    from tools.board_config import staged_modules
+
+    root = Path(__file__).resolve().parent.parent
+    for board in sorted(p.name for p in (root / "firmware").iterdir()
+                        if (p / "board.toml").exists()):
+        staged = staged_modules(root / "firmware" / board, root)
+        assert "web_view_ws.py" not in staged, board
 
 
 def test_console_has_no_web_hook_surface():
@@ -150,18 +184,16 @@ def test_boards_no_longer_freeze_the_recording_stack():
     # question this test always meant -- "is the recorder frozen onto a board?"
     # -- is answered by asking what a fresh build stages.
     #
-    # web_view_ws.py is the carve-out: the RFC 6455 framing leaf moy_webserver's
-    # transport core imports, kept by decision (see this module's docstring).
-    # Banning the bare substring "web_view" once banned its dependency too --
-    # which is how the P4 lost it in 06506ab and shipped a web console that
-    # could not import for two days. So the ban is on the DELETED modules by
-    # name, and the survivor is asserted present.
+    # The ban is on the DELETED modules BY NAME, never on the bare substring
+    # "web_view": banning that once banned the framing leaf the transport then
+    # imported, which is how the P4 lost it in 06506ab and shipped a web console
+    # that could not import for two days. The leaf is gone on its own terms now
+    # (the test above), and the lesson about how to write the ban is not.
     from tools.board_config import staged_modules
 
     root = Path(__file__).resolve().parent.parent
     for board in ("lilygo_t_deck_plus_mainline",
                   "esp32_p4_wifi6_touch_lcd_7b"):
         staged = staged_modules(root / "firmware" / board, root)
-        assert "web_view_ws.py" in staged, board          # framing survives
         assert "web_view.py" not in staged, board
         assert "web_view_page.py" not in staged, board

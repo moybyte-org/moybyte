@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: check-venv device-port firmware-build-guition-s3 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-hero site-tiles sync-issues test vendor-libmoy vendor-p8-import
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -71,11 +71,12 @@ setup:
 check-venv:
 	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
 
-VENV_TARGETS := test \
-                site-gifs site-hero sync-issues release ota-keygen \
+VENV_TARGETS := test preflight preflight-web board-modules \
+                site-gifs site-hero site-tiles sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3 \
+                firmware-flash-guition-p4 firmware-monitor-guition-p4 \
                 firmware-flash-zero firmware-monitor-zero
 $(VENV_TARGETS): check-venv
 
@@ -132,13 +133,34 @@ PYTEST_FLAGS = $(if $(filter-out 0,$(JOBS)),-p xdist -n $(JOBS),)
 # SUITES, which already know the difference -- tests/unix_mp.py warns locally
 # and FAILS under CI/MOYBYTE_REQUIRE_UNIX_MP -- and a hard failure here would
 # take the whole host suite away from a machine that only ever wanted it.
+#
+# THE REDRAW SUITE RUNS ALONE, the same split CI and tools/preflight.sh make.
+# tests/test_redraw_on_change.py asserts exact repaint counts against real
+# wall-clock deadlines and the top-bar clock legitimately repaints on a minute
+# rollover, so a long shared run that straddles :00 trips an "exactly one
+# redraw" assert. Under xdist it is worse than in CI's serial run: the file's
+# tests are scattered across workers, each of which reaches them at whatever
+# point in the wall clock its queue arrives at.
 test:
 	@$(MAKE) --no-print-directory unix-micropython || { \
 	  echo ""; \
 	  echo "  ^^ could not refresh the desktop MicroPython. Running the suite"; \
 	  echo "     anyway -- the checks that need it say so themselves."; \
 	  echo ""; }
-	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS)
+	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS) \
+	  --ignore=tests/test_redraw_on_change.py
+	$(PYTEST_ENV) $(PYTHON) -m pytest tests/test_redraw_on_change.py
+
+# What CI actually runs, in CI's order -- the gate before a push. `make test` is
+# the part of it that needs nothing but the venv; every step preflight adds
+# compares a DERIVED ARTIFACT to the sources it came from, which is exactly what
+# a source change invalidates silently. tools/preflight.sh's header is the
+# authority on the steps and on why their order is load-bearing.
+preflight:  ## run CI's host lane (the pre-push gate)
+	tools/preflight.sh
+
+preflight-web:  ## ...plus the browser suites in real Chrome
+	tools/preflight.sh --web
 
 # ---------------------------------------------------------------------------
 # The desktop MicroPython that the COMPILED-VS-COMPILED checks run against.
@@ -169,6 +191,14 @@ test:
 # back into a build that does not happen. MICROPY_PY_SSL=0 drops the only
 # submodule it would otherwise want (mbedtls); MICROPY_PY_FFI=0 drops libffi.
 # Nothing on either side of a raster/VM parity check speaks TLS or ctypes.
+#
+# The one ADDITION is the deflate compressor, and it is here to MIRROR the
+# boards: unix `standard` and the esp32 port are both EXTRA_FEATURES, where
+# upstream builds `deflate` read-only, and every board's mpconfigboard.h turns
+# the writer on because Paint saves a compressed `.moyimg`. A binary without it
+# would answer "MicroPython cannot write this format" -- about itself, not about
+# the boards -- which is the sort of false negative this whole target exists to
+# stop.
 UNIX_MP_TAG ?= v1.28.0
 UNIX_MP_DIR ?= .build/unix_micropython
 UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
@@ -219,6 +249,7 @@ unix-micropython:
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
+	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1 \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 
@@ -246,6 +277,11 @@ site-hero:
 	$(PYTHON) tools/make_site_gifs.py --windowed --scene code \
 		--wallpaper moy_night --out $(CURDIR)/site
 	mv $(CURDIR)/site/code.gif $(CURDIR)/site/hero.gif
+
+# Redraw the "What's in it" tiles (docs/media/features, committed for the same
+# reason as the hero).
+site-tiles:
+	$(PYTHON) tools/make_feature_tiles.py
 
 # Mirror GitHub issues into docs/issues/ (open/ + closed/ + INDEX.md) so issue
 # numbers referenced in commits/docs/chat resolve locally. Needs the `gh` CLI, authed.
@@ -359,6 +395,16 @@ release:
 device-port:  ## which serial port is which board
 	@$(PYTHON) tools/device_port.py
 
+# The other "what is actually true of this board" question: which modules cross
+# into its image. board.toml decides and tools/board_config.py answers, so ask
+# it rather than reading the denials by eye.
+#   make board-modules BOARD=firmware/lilygo_t_deck_plus_mainline
+board-modules:  ## which modules a board stages (BOARD=firmware/<dir>)
+	@test -n "$(BOARD)" || { echo "BOARD is not set -- e.g. make $@ BOARD=firmware/lilygo_t_deck_plus_mainline"; exit 1; }
+	@$(PYTHON) tools/board_config.py list $(BOARD)
+	@echo "-- native --"
+	@$(PYTHON) tools/board_config.py list-native $(BOARD)
+
 firmware-flash-lilygo-micropython:
 	$(REQUIRE_PORT)
 	$(REQUIRE_IDF)
@@ -447,6 +493,24 @@ firmware-monitor-guition-s3:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) tools/board_flash.py monitor firmware/guition_jc3248w535 --port $(PORT)
+
+# Guition JC8012P4A1C (the 10.1" ESP32-P4 + C6): the fifth board, a VARIANT of
+# the Waveshare P4's port -- build via the board dir's build.sh ->
+# dist/guition_p4/, flashed at 0x2000 over the P4's own USB-Serial/JTAG; the
+# flash/monitor facts live in its board.toml [flash]/[monitor].
+
+firmware-build-guition-p4:
+	firmware/guition_jc8012p4a1c/build.sh
+
+firmware-flash-guition-p4:
+	$(REQUIRE_PORT)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/guition_jc8012p4a1c --port $(PORT)
+
+firmware-monitor-guition-p4:
+	$(REQUIRE_PORT)
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/guition_jc8012p4a1c --port $(PORT)
 
 # Zero -- Seeed XIAO ESP32-S3 (#41), a build target since 2026-08-29. Headless,
 # so there is nothing to look at after a flash: `make firmware-monitor-zero` is

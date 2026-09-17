@@ -75,8 +75,8 @@ def _frame(ws):
 # --------------------------------------------------------------- the code tab
 
 def test_the_private_panel_button_copy_is_gone(tmp_path):
-    """`_panel_btn` was one of the three private button copies Phase 3a set out
-    to absorb (`writer_app._hist_btn`, `sheets_app._icon_btn`, this one). It is
+    """`_panel_btn` was one of the private button copies Phase 3a set out
+    to absorb (the notebook app's history pair, this one). It is
     not a method any more, and its body is not hiding under another name: the
     module draws no filled+bordered button of its own."""
     from runtime.code_layer import CodeLayer
@@ -173,8 +173,8 @@ def test_config_cards_are_toolkit_rows_and_cells(tmp_path, monkeypatch):
     counter = _Counter(monkeypatch)
     _frame(ws)
     rows = cl._card_layout()
-    assert len(rows) == 3                       # all three fit at this size
-    assert counter.n["row"] == 3
+    assert len(rows) == 4                       # three cards + the ADVANCED row
+    assert counter.n["row"] == 4
     assert counter.n["cell"] == 3 + 2           # bg thumbs + choice icons
 
 
@@ -196,7 +196,9 @@ def test_config_grids_register_no_per_cell_hit_rects(tmp_path, monkeypatch):
     # an empty `added` is ALSO what a draw that returned early reports, so the
     # widgets the draw actually made are what make the zero mean something.
     # (This assertion used to be `real_add is not None`, which cannot fail.)
-    assert counter.n["row"] == 3, counter.n
+    # Three cards plus the ADVANCED row, which is a toolkit row like the rest
+    # (step 5 of docs/text_editing_2026-09.md).
+    assert counter.n["row"] == 4, counter.n
     assert counter.n["cell"] == 5, counter.n
     assert added == []
 

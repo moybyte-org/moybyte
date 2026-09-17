@@ -9,7 +9,7 @@ surface inherits another's warm caches -- opens it through the console's own
 verbs, drags it three times through the middle of its window, and reports the
 painted-frame distribution from tools/p4_alloc.py's zero-retention CADENCE hook.
 
-  python tools/p4_surface_sweep.py [--port /dev/ttyACM0] [--only code,map]
+  python tools/p4_surface_sweep.py --board p4 [--only code,map]
 
 READ IT AS "cost of a drag frame", not "scroll". On the Sprites and Map tabs a
 vertical drag PAINTS rather than scrolls, so those rows measure the drawing
@@ -27,7 +27,6 @@ memos (c422a12). Painted-frame distribution over three drag gestures:
   | editor:paint  | 19 chrome glyphs      |   52   |  56 |  116  |  0 |
   | writer        | 200-line doc          |   52   |  52 |  128  |  0 |
   | editor:code   | 302-line cart         |   52   |  60 |  130  |  2 |
-  | sheets        | 360-cell table        |   48   |  52 |   99  |  1 |
   | picker        | 29 carts, covers warm |   48   |  60 |   89  |  0 |
   | settings      | full row set          |   24   |  28 |   42  |  0 |
 
@@ -35,9 +34,9 @@ The first version of this table measured EMPTY surfaces and drew a conclusion th
 had to be withdrawn. The deltas are why seeding is not optional:
 
   * writer   20ms (empty file GRID) -> 40 (empty text area) -> 52 (200 lines)
-  * sheets   16ms (empty file GRID) -> 48 (360 cells)
+    (the notebook app this measured is gone; the shape of its lesson is not)
 
-With no file open, Writer and Sheets show a file grid rather than a text surface,
+With no file open, that app showed a file grid rather than a text surface,
 so an unseeded measurement is not a slow version of the real thing -- it is a
 different screen.
 
@@ -66,14 +65,8 @@ What the seeding then established, and it is the useful part:
 SEEDING RECIPE (the formats are not guessable -- three wrong guesses cost a run
 each):
 
-  * doc:   save_file('docs', name, json.dumps({"format": "moytext-v1",
-           "body": "<text>"})) -- writer's _open_doc runs the blob through
-           _body_of, which reads ONLY the "body" key.
-  * table: build a real formula.Sheet (set_cell(col, row, raw), keys are "A1"
-           refs via make_ref) and save json.dumps(sheet.to_dict()). A hand-rolled
-           {"rows","cols","cells"} dict leaves sheets_app.sheet None.
-  * ORDER MATTERS for Sheets: open_named(name) only sets _pending_open, which is
-           consumed by the app's open(). Call it BEFORE open_app(), not after.
+  * doc:   save_file('docs', name, "<text>") -- a document is plain Markdown
+           (files/docs/<name>.md), so the file's text IS the page's text.
   * cart:  carts_store.create(title, root, src=...) then
            ws.carts.apply(store.scan(root)).
   * There is no load_code(path); reading a cart's source goes through load(path).
@@ -90,7 +83,7 @@ import argparse
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from p4_autotest import P4Board            # noqa: E402
+from p4_autotest import add_board_args, board_from_args  # noqa: E402
 from p4_alloc import PROBE, CADENCE        # noqa: E402
 
 OPEN = {
@@ -100,8 +93,6 @@ OPEN = {
     "blocks":    "ws._g['_edit']('blocks')",
     "sprites":   "ws._g['_edit']('paint')",
     "map":       "ws._g['_edit']('map')",
-    "writer":    "ws.open_app(ws.writer_app)",
-    "sheets":    "ws.open_app(ws.sheets_app)",
     "files":     "ws.open_app(ws.files_app)",
     "storybook": "ws.open_app(ws.storybook_app)",
 }
@@ -120,7 +111,8 @@ ws._g['_edit'] = _edit
 """
 rows = []
 
-def run(name, verb):
+
+def run(b, name, verb):
     b.reset()
     b.pyexec(PROBE); b.pyexec(CADENCE); b.pyexec(HELPER)
     b.pyval("bool(%s) or True" % verb, 60)   # open_app returns False if
@@ -163,24 +155,32 @@ def run(name, verb):
           % (name, top, where, nf, pct(.5) if nf else "-", pct(.9) if nf else "-",
              worst if nf else "-", nc))
 
-ap = argparse.ArgumentParser()
-ap.add_argument("--port", default="/dev/ttyACM0")
-ap.add_argument("--only", default="", help="comma-separated subset of the surfaces")
-args = ap.parse_args()
-b = P4Board(args.port)
-want = [s_ for s_ in args.only.split(",") if s_] or list(OPEN)
 
-try:
-    for name in want:
-        verb = OPEN[name]
-        try:
-            run(name, verb)
-        except Exception as exc:  # noqa: BLE001 -- one bad surface must not end the sweep
-            print("  %-10s FAILED: %s" % (name, exc))
-    print("\n| surface | top | median | p90 | worst | frames | gc |")
-    print("|---|---|---|---|---|---|---|")
-    for r in sorted(rows, key=lambda r: -(r[4] or 0)):
-        print("| %s | %s | %s | %s | %s | %d | %d |"
-              % (r[0], r[1], r[4], r[5], r[6], r[3], r[7]))
-finally:
-    b.close()
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    add_board_args(ap)
+    ap.add_argument("--only", default="",
+                    help="comma-separated subset of the surfaces")
+    args = ap.parse_args(argv)
+    want = [s_ for s_ in args.only.split(",") if s_] or list(OPEN)
+
+    b = board_from_args(args)
+    try:
+        for name in want:
+            verb = OPEN[name]
+            try:
+                run(b, name, verb)
+            except Exception as exc:  # noqa: BLE001 -- one bad surface must not end the sweep
+                print("  %-10s FAILED: %s" % (name, exc))
+        print("\n| surface | top | median | p90 | worst | frames | gc |")
+        print("|---|---|---|---|---|---|---|")
+        for r in sorted(rows, key=lambda r: -(r[4] or 0)):
+            print("| %s | %s | %s | %s | %s | %d | %d |"
+                  % (r[0], r[1], r[4], r[5], r[6], r[3], r[7]))
+    finally:
+        b.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

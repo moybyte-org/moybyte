@@ -395,7 +395,7 @@ _CHIP_STATES = {
     ON:       (_ACCENT, _BLACK, _EDGE),
     HOT:      (_DANGER, _WHITE, _DIM),
     PRESSED:  (_PRESS, _PRESS_INK, _EDGE),
-    # What `writer_app._hist_btn` and `sheets_app._icon_btn` hand-roll: the
+    # What the apps' private icon buttons hand-roll: the
     # quiet chip shell with the ink (and the edge) carrying the affordance,
     # because there is no dimmed sprite -- only a dimmed colour.
     DISABLED: (_PANEL, _DIS_INK, _DIS_EDGE),
@@ -930,7 +930,7 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
          glyph=None, glyph_draw=None, disabled=False, state=None,
          colors=None):
     """The app-toolbar CHIP -- the one implementation of the `_button` the
-    Appearance/Writer/Storybook/Artwork apps each used to carry a local copy
+    Appearance/Storybook/Artwork apps each used to carry a local copy
     of (pixel-identical to those). A quiet field on the panel color with the
     theme's title ink; `on` swaps to the accent toggle look (edge border);
     `hot` to danger red with light ink (an armed destructive action).
@@ -945,9 +945,8 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
     vocabulary (dark-edged verb chips -- PLAY/CHANGE/SAVE).
 
     `disabled` + `state` are the six-state model (see `widget_state`), and both
-    default to the exact pixels the goldens pin. `disabled` is what the three
-    live private copies -- `writer_app._hist_btn`, `sheets_app._icon_btn`,
-    `code_layer._panel_btn` -- each dim by hand today.
+    default to the exact pixels the goldens pin. `disabled` is what the one
+    live private copy -- `code_layer._panel_btn` -- dims by hand today.
 
     `colors` is the same escape hatch `row` and `cell` carry: an explicit
     (field, ink, edge) triple bypassing the skin, for a site whose pixels are
@@ -1124,7 +1123,7 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
         if label:
             cv.print(label, tx, ty, ink, scale)
     # A DISABLED row registers nothing: "dim ink, non-registering" is the whole
-    # point of the state -- the three sites that hand-roll disabled ink today
+    # point of the state -- the sites that hand-roll disabled ink today
     # all still accept taps, which is the bug the state absorbs.
     if hits is not None and verb is not None and st != DISABLED:
         hits.add(rect, verb, arg)
@@ -1434,18 +1433,24 @@ def game_icon_btn(cv, rect, kind, label, fill, glyph_draw=None):
                  m[GI_INK], 1)
 
 
-def mini_btn(cv, rect, label, fill):
+def mini_btn(cv, rect, label, fill, label_rect=None):
     """A tiny labeled chip (no ring) -- the Settings steppers' vocabulary. Its
     pads are UNSCALED (NON_DATA_QUIRKS): the vocabulary predates font scaling
-    and its frozen pixels never grew with it."""
+    and its frozen pixels never grew with it.
+
+    `label_rect` is where those pads are measured from when the CHIP is bigger
+    than the label's own box -- a chrome-scaled tap target (#203), whose fill
+    still paints the whole finger-sized `rect`. Defaults to `rect`, which is the
+    identity everywhere the two are the same size."""
     x, y, w, h = rect
     m = _METRICS["mini_btn"]
     cv.rect(x, y, w, h, fill)
-    cv.print(label, x + m[MB_PADX], y + m[MB_PADY], m[MB_INK], 1)
+    lx, ly = (rect if label_rect is None else label_rect)[:2]
+    cv.print(label, lx + m[MB_PADX], ly + m[MB_PADY], m[MB_INK], 1)
 
 
 def toolbar(cv, th, rect):
-    """The app toolbar band (Writer/Storybook): the theme's title surface --
+    """The app toolbar band (Storybook): the theme's title surface --
     chips and status text draw over it in title_ink."""
     x, y, w, h = rect
     field, _ink, _edge = state_colors(th, "toolbar", REST)
@@ -1591,6 +1596,24 @@ def fill_uncovered(cv, inner, outer, col):
 
 
 # --- scrolling ------------------------------------------------------------------
+
+def row_drag(anchor, py, step, top, top_max):
+    """PURE row-snapped drag scrolling, the Settings-rows contract: a held
+    vertical drag moves the window one row per `step` pixels of travel, finger
+    up scrolls the content down, and the sub-step remainder stays anchored so
+    a slow drag still crosses a row. `anchor` is the finger y the pending
+    travel is measured from, `top` the first visible row, `top_max` the
+    largest `top` the list allows. Returns (anchor, top); the caller marks
+    dirty when `top` moved."""
+    delta = anchor - py
+    while delta >= step and top < top_max:
+        top += 1
+        delta -= step
+    while delta <= -step and top > 0:
+        top -= 1
+        delta += step
+    return py + delta, top
+
 
 # The largest physical-buffer rotation any canvas has (host 1, device
 # ping-pong 2, the P4's triple framebuffer 3 -- shipped, efcf5d1). The paint ring

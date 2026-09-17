@@ -119,9 +119,16 @@ main = f.read()
 f.close()
 out["main_len"] = len(main)
 out["main_sha"] = _sha(main)
-for probe in ("PICO-8 compatibility shim", "local P8_VH = 120",
-              "function p8_draw()", "__p8_gff", "-- Localized p8 API"):
+# SPEC.md 4: two scripts. The generated layer is p8.lua, main.lua is the cart.
+f = open("out.moy/p8.lua")
+shim = f.read()
+f.close()
+out["shim_len"] = len(shim)
+for probe in ("PICO-8 compatibility shim", "__p8_vh = 120", "__p8_gff"):
+    out["probe_" + probe.split()[-1]] = probe in shim
+for probe in ("function p8_draw()", "-- Localized p8 API"):
     out["probe_" + probe.split()[-1]] = probe in main
+out["probe_leak"] = "PICO-8 compatibility shim" in main
 # The map and the sheet are OPTIONAL outputs -- a cart with no __map__ gets no
 # map.moymap, and the anon-title fixture is exactly that cart.
 for name, key in (("sprites.moygfx", "gfx"), ("map.moymap", "map")):
@@ -171,16 +178,21 @@ def test_the_whole_import_runs_on_micropython(tmp_path, form):
     assert got["sections_problem"] is None
     assert got["title"] == "tiny dash"
     assert got["files"] == ["flags.moyflags", "main.lua", "manifest.json",
-                            "map.moymap", "sounds.json", "sprites.moygfx"]
+                            "map.moymap", "p8.lua", "sounds.json",
+                            "sprites.moygfx"]
     assert got["manifest"]["canvas"] == "128x128"
     assert got["manifest"]["main"] == "main.lua"
+    assert got["manifest"]["sources"] == ["p8.lua", "main.lua"]
     assert got["manifest"]["safe_to_share"] is False
     # The whole POINT, on the tier that nearly could not do it: the shim, the
     # zoom hint, the renamed lifecycle, the flag table and the localization
     # block -- the last of which is `localization_lua`, the function whose two
-    # regexes MicroPython refused to compile at all.
-    assert got["probe_shim"] and got["probe_120"] and got["probe_p8_draw()"]
-    assert got["probe___p8_gff"] and got["probe_API"]
+    # regexes MicroPython refused to compile at all. Now split across two files
+    # (SPEC.md 4), which this tier writes DIRECTLY -- a post-process that sliced
+    # a 100KB main.lua is the allocation this MicroPython refuses.
+    assert got["probe_shim"] and got["probe_120"] and got["probe___p8_gff"]
+    assert got["probe_p8_draw()"] and got["probe_API"]
+    assert not got["probe_leak"], "main.lua must be the cart and nothing else"
     # ...and the ART is really there, not an empty grid from a failed inflate.
     assert got["gfx0"].startswith("0123456789abcdef")
     # ...and the compatibility report names the cart and says what the code is.
@@ -306,3 +318,65 @@ def test_the_zlib_shim_inflates_what_cpython_deflated(tmp_path):
     assert r.returncode == 0, r.stderr[-2000:]
     assert "LEN %d" % len(payload) in r.stdout, r.stdout + r.stderr
     assert "pico-8 cartridge" in r.stdout
+
+
+# The TAB split (`p8_lua_port.tab_files`) on the tier that decides whether a
+# dropped cart converts in a browser at all. Nothing else here drives it: the
+# main fixture is one tab, so every other check in this file leaves `tab_files`
+# unrun -- and it is new vendored code using exactly the constructs this suite
+# exists to catch. A generator, a `str.strip(chars)` with an argument,
+# `isalpha`/`isdigit` per character, a slug built by concatenation: all fine on
+# CPython, and this file's header is a list of four things that were fine on
+# CPython and were not here.
+#
+# TWO TESTS rather than two drives in one, because `_drive` writes every import
+# into the same `out.moy` and reads `files` back with listdir -- a second drive
+# in one tmp_path reports the UNION of both carts.
+
+_TABBED = ("pico-8 cartridge\nversion 42\n__lua__\n"
+           "-- tabbed cart\n"
+           "board = {}\n"
+           "function _draw() cls(0) end\n"
+           "-->8\n"
+           "--menu\n"
+           "menu = {}\n"
+           "-->8\n"
+           "function helper() return 1 end\n"
+           "__gfx__\n" + "1" * 128 + "\n")
+
+# The same cart with one word changed: a top-level `local` in tab 0 that tab 1
+# reads. Separate chunks would make it nil at the first frame, in code the
+# author did write, so the tabs have to stay in one file.
+_FUSED = ("pico-8 cartridge\nversion 42\n__lua__\n"
+          "-- fused cart\n"
+          "local grid = {}\n"
+          "function _draw() cls(0) end\n"
+          "-->8\n"
+          "--menu\n"
+          "function use() return grid end\n"
+          "__gfx__\n" + "1" * 128 + "\n")
+
+
+def _drive_source(tmp_path, text, stem):
+    _stage(tmp_path)
+    path = os.path.join(str(tmp_path), stem + ".p8")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return _drive(tmp_path, path, name=stem + ".py")
+
+
+def test_a_tabbed_cart_splits_on_micropython(tmp_path):
+    """Three scripts, the middle one named from its own `--menu` comment."""
+    got = _drive_source(tmp_path, _TABBED, "tabbed")
+    assert got["manifest"]["sources"] == ["p8.lua", "main.lua", "menu.lua",
+                                          "tab2.lua"], got["manifest"]["sources"]
+    assert "menu.lua" in got["files"] and "tab2.lua" in got["files"], got["files"]
+
+
+def test_a_crossed_local_fuses_the_tabs_on_micropython(tmp_path):
+    """...and the decline, which is the half that must not silently ship a cart
+    that reads nil on its first frame."""
+    got = _drive_source(tmp_path, _FUSED, "fused")
+    assert got["manifest"]["sources"] == ["p8.lua", "main.lua"], \
+        "a crossed top-level `local` must keep the tabs in one file"
+    assert "menu.lua" not in got["files"], got["files"]

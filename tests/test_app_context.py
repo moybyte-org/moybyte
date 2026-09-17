@@ -195,8 +195,8 @@ _HOT = {
     # caps are the MEASURED counts (2026-08-19) with no slack above the highest
     # observed value, so a canvas() call added inside a per-widget helper fails
     # here instead of costing a hop per widget on glass.
-    "calc": 1, "artwork": 1, "appearance": 1, "writer": 1,
-    "storybook": 1, "sheets": 1, "files": 1,
+    "calc": 1, "artwork": 1, "appearance": 1,
+    "storybook": 1, "files": 1,
 }
 
 
@@ -271,8 +271,8 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
     ws = _ws(tmp_path)
     ws.carts_store = None
     _v, err = ws.app_context("demo", ("files",)).files.load("docs", "x")
-    assert ws.sheets_app._persist((None, err)) is False
-    assert ws.sheets_app.status == "CAN'T SAVE HERE"
+    assert ws.files_app._persist((None, err)) is False
+    assert ws.files_app.status == "CAN'T SAVE HERE"
 
 
 # -- PERF: the roles are built at BOOT, never per frame ------------------------
@@ -319,7 +319,7 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
                                                           sorted(set(built)))
 
 
-@pytest.mark.parametrize("kind", ("calc", "files", "sheets", "writer"))
+@pytest.mark.parametrize("kind", ("calc", "files", "storybook"))
 def test_an_open_app_still_paints_only_on_damage(tmp_path, kind):
     """The redraw gate, per app. `ctx.damage.all()` replaced ~90 `ws._dirty =
     True` assignments, and a role verb called where a bare assignment was not
@@ -402,7 +402,7 @@ def test_the_persist_status_contract_still_distinguishes_the_two(tmp_path):
     CAN'T SAVE <why>. Those strings are DRAWN, so this pins the seam that used
     to be three hand-rolled try/excepts."""
     ws = _ws(tmp_path)
-    app = ws.sheets_app
+    app = ws.files_app
     ws.carts_store = None
     assert app._persist((None, _ac.NO_STORE)) is False
     assert app.status == "CAN'T SAVE HERE"
@@ -523,7 +523,8 @@ def test_files_count_is_the_kinds_item_count_not_its_listing(tmp_path):
     assert err is None
     assert n == 3
     assert n == len(files.list("docs")[0])
-    assert n == len(os.listdir(_store.file_kind_dir("docs", ws.carts_root)))
+    assert n == len([f for f in os.listdir(_store.file_kind_dir("docs", ws.carts_root))
+                     if not f.endswith(".bak")])   # moy_fs's crash backups, #154
     assert files.delete("docs", "two")[1] is None
     assert files.count("docs") == (2, None)
     assert files.count("drawings") == (0, None)     # a kind nobody has written
@@ -537,14 +538,14 @@ def test_empty_trash_destroys_every_trashed_item_on_disk(tmp_path):
     absent from a listing the same module builds."""
     ws, files = _files(tmp_path)
     assert files.save("docs", "note", _store.encode_text("hi"))[1] is None
-    assert files.save("tables", "grid", "{}")[1] is None
+    assert files.save("music", "tune", "{}")[1] is None
     assert files.delete("docs", "note")[1] is None
-    assert files.delete("tables", "grid")[1] is None
+    assert files.delete("music", "tune")[1] is None
     listed, err = files.trash_list()
-    assert err is None and sorted(listed) == [("docs", "note"), ("tables", "grid")]
-    dirs = [_trash_dir(ws, k) for k in ("docs", "tables")]
+    assert err is None and sorted(listed) == [("docs", "note"), ("music", "tune")]
+    dirs = [_trash_dir(ws, k) for k in ("docs", "music")]
     assert [os.listdir(d) for d in dirs] == [["note" + _kind_ext("docs")],
-                                             ["grid" + _kind_ext("tables")]]
+                                             ["tune" + _kind_ext("music")]]
     assert files.empty_trash() == (None, None)
     assert files.trash_list() == ([], None)
     for d in dirs:
@@ -607,18 +608,20 @@ def test_the_raw_view_runs_the_same_verbs_inside_one_session(tmp_path):
     assert value is None and "nope" in str(err) and err is not _ac.NO_STORE
 
 
-def test_decode_text_reads_a_stored_document_and_never_a_bare_string(tmp_path):
-    """A `.moytext` holds a `moytext-v1` blob, not a string. The codec is on the
-    role so a USER APP writes what Writer and Files can read back -- a bare
-    string decodes to nothing, silently, and looks exactly like a save that did
-    not happen."""
+def test_decode_text_reads_a_stored_document_and_a_bare_string_is_one(tmp_path):
+    """A document is plain Markdown, so the bare string IS the document. The
+    codec stays on the role because that is where a USER APP reaches it, and it
+    is a SPLIT and nothing else -- a note that happens to be JSON is that text,
+    not a wrapper to unpack."""
     ws, files = _files(tmp_path)
     blob = files.encode_text("HELLO\nWORLD")
     assert files.save("docs", "greeting", blob)[1] is None
     stored, err = files.load("docs", "greeting")
-    assert err is None and stored == blob
+    assert err is None and stored == "HELLO\nWORLD"
     assert files.decode_text(stored) == ["HELLO", "WORLD"]
-    assert files.decode_text("HELLO\nWORLD") == []       # the bare-string trap
+    assert files.decode_text("HELLO\nWORLD") == ["HELLO", "WORLD"]
+    wrapped = '{"format": "moytext-v1", "body": "hi"}'
+    assert files.decode_text(wrapped) == [wrapped]
     assert files.decode_text(files.encode_text("")) == []
     assert files.decode_text("") == [] and files.decode_text(None) == []
     ws.carts_store = None
@@ -687,7 +690,8 @@ def test_carts_images_reads_the_assets_by_name_from_a_cart_or_a_path(tmp_path):
     assert err is None
     assert sorted(by_cart) == ["moon", "star"] and by_cart["star"] == blob
     assert carts.images(cart["path"]) == (by_cart, None)
-    assert sorted(os.listdir(cart["path"] + "/" + _store.IMAGES_DIR)) == \
+    assert sorted(f for f in os.listdir(cart["path"] + "/" + _store.IMAGES_DIR)
+                  if not f.endswith(".bak")) == \
         ["moon" + _store.IMAGE_EXT, "star" + _store.IMAGE_EXT]
 
 
@@ -775,9 +779,10 @@ def test_the_scoped_handle_acts_on_its_granted_kind_only(tmp_path):
     assert scoped.delete("copy") == ("copy", None)
     assert sorted(scoped.list()[0]) == ["note", "plain"]
     ext = _kind_ext("docs")
-    assert sorted(os.listdir(_store.file_kind_dir("docs", ws.carts_root))) == \
+    assert sorted(f for f in os.listdir(_store.file_kind_dir("docs", ws.carts_root))
+                  if not f.endswith(".bak")) == \
         ["note" + ext, "plain" + ext]
-    for kind in ("drawings", "tables", "sprites", "music"):
+    for kind in ("drawings", "sprites", "music"):
         assert files.count(kind) == (0, None), kind
 
 
@@ -919,7 +924,7 @@ def test_the_host_calls_close_on_every_registered_app(tmp_path):
     assert Demo.closed == 1, "the host did not call close() on the way home"
 
 
-@pytest.mark.parametrize("kind", ("writer", "sheets", "storybook", "artwork"))
+@pytest.mark.parametrize("kind", ("storybook", "artwork"))
 def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
     ws = _ws(tmp_path)
     app = ws._apps_by_id[kind]
@@ -933,8 +938,8 @@ def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
 # `runtime/*_app.py runtime/artwork.py`, whose glob also catches editor_app.py
 # and host_app.py -- neither is a system app and neither is in Phase 6's scope,
 # so that condition is unsatisfiable as written.
-MIGRATED = ("calc_app", "appearance_app", "writer_app", "storybook_app",
-            "sheets_app", "files_app", "artwork", "app_shell")
+MIGRATED = ("calc_app", "appearance_app", "storybook_app",
+            "files_app", "artwork", "app_shell")
 
 
 @pytest.mark.parametrize("mod", MIGRATED)
@@ -957,8 +962,7 @@ def test_no_migrated_module_reaches_the_workstation(mod):
 # shared FileGridView widget still duck-types on ws.carts_store / ws.carts_root /
 # ws._with_sd. This set may only SHRINK -- giving that widget the files role is
 # what deletes the escape hatch, and Phase 7 must never grant it to a cart.
-SHELL_CONSUMERS = {"PaintAppLayer", "WriterAppLayer", "SheetsAppLayer",
-                   "FilesAppLayer"}
+SHELL_CONSUMERS = {"PaintAppLayer", "FilesAppLayer"}
 
 
 def test_the_shell_escape_hatch_has_a_pinned_consumer_list():

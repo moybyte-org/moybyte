@@ -1,8 +1,8 @@
 """The Desk-Lab list shell's scroll window + nav, EXECUTED (`runtime/app_shell.py`).
 
 `ListShellApp._scroll_list` / `_list_nav` are the row-list nav extracted FROM
-three hand-copies (Files' trash/game/used lists, Sheets' attach picker,
-Storybook's shelf and page rows). Until this file nothing executed either one:
+hand-copies (Files' trash/game/used lists, Storybook's shelf and page
+rows). Until this file nothing executed either one:
 a `sys.settrace` sweep of the whole suite saw only their `def` lines. The
 arithmetic is small and entirely off-by-one shaped -- which edge scrolls, by how
 much, and whether an end wraps or stops -- so it is pinned against the real

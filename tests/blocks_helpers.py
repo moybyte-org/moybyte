@@ -55,3 +55,10 @@ def run_cart(src, frames=1, fake=None):
         if fake.get("_draw"):
             fake["_draw"]()
     return fake
+
+
+def go_to_insert(be, depth=1, which=-1):
+    """Park the cursor on an insert row at `depth` (the last one by default)."""
+    found = [i for i, r in enumerate(be.rows) if r.kind == "insert" and r.depth == depth]
+    assert found, "no insert row at depth %d" % depth
+    be.cur = found[which]

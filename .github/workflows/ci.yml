@@ -81,8 +81,12 @@ jobs:
       # Isolating it removes the shared-run timing risk instead of chasing a
       # rerun-on-failure workaround. See the repo's redraw-test-wallclock-flake
       # note for the observed history.
+      # --durations names the slowest tests in the log. The suite's runtime is
+      # the thing nobody measures until it is already the reason to skip it.
       - name: Run test suite (excluding the wall-clock-flaky redraw tests)
-        run: .venv/bin/python -m pytest --ignore=tests/test_redraw_on_change.py
+        run: |
+          .venv/bin/python -m pytest --durations=25 \
+            --ignore=tests/test_redraw_on_change.py
 
       - name: Run redraw-on-change tests in isolation
         run: .venv/bin/python -m pytest tests/test_redraw_on_change.py
@@ -150,14 +154,15 @@ jobs:
               echo
               echo "This change touches \`firmware/\` or \`native/\`. Per #34's"
               echo "software-vs-hardware heuristic, host CI (this workflow) can't"
-              echo "prove it: the T-Deck/P4 can't be exercised on a GitHub-hosted"
-              echo "runner (native-takeover loop starves USB, SD/display share"
-              echo "one SPI bus). Build the image and test on real hardware:"
+              echo "prove it: no board can be exercised on a GitHub-hosted"
+              echo "runner. Build the image and test on real hardware (this"
+              echo "is the T-Deck; the other boards' targets follow the same"
+              echo "firmware-{build,flash,monitor}-<board> shape):"
               echo
               echo '```'
-              echo "make firmware-build-lilygo-micropython"
-              echo "make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0"
-              echo "make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0"
+              echo "make firmware-build-tdeck-mainline"
+              echo "make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0"
+              echo "make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0"
               echo '```'
               echo
               echo "(or run the \"Firmware build\" workflow from the Actions tab for a downloadable \`.bin\` without a local ESP-IDF toolchain.)"
@@ -184,12 +189,12 @@ jobs:
               marker,
               "**Hardware path -- needs on-device verification** (#34)",
               "",
-              "This PR touches `firmware/` or `native/`. Host CI can't exercise the T-Deck/P4, so this needs a build + a flash/test pass on real hardware before merge:",
+              "This PR touches `firmware/` or `native/`. Host CI can't exercise a board, so this needs a build + a flash/test pass on real hardware before merge (the T-Deck below; every board has the same `firmware-{build,flash,monitor}-<board>` targets):",
               "",
               "```",
-              "make firmware-build-lilygo-micropython",
-              "make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0",
-              "make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0",
+              "make firmware-build-tdeck-mainline",
+              "make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0",
+              "make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0",
               "```",
               "",
               '(or run the "Firmware build" workflow from the Actions tab for a downloadable `.bin` without a local ESP-IDF toolchain.)',

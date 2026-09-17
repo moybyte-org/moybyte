@@ -49,10 +49,15 @@ def test_achievements_store_dedupes_and_ignores_garbage(tmp_path):
     carts = str(tmp_path / "carts")
     moy_carts.save_achievements(["a", "a", "b"], carts)
     assert moy_carts.load_achievements(carts) == ["a", "b"]
-    # A corrupt store must never crash -> empty list.
+    # A corrupt store recovers from its crash backup (#154), and when BOTH copies
+    # are garbage it must still never crash -> empty list.
     path = moy_carts.achievements_store_path(carts)
     with open(path, "w") as f:
         f.write("{not json")
+    assert moy_carts.load_achievements(carts) == ["a", "b"]
+    for p in (path + ".bak", path):        # ...and when BOTH copies are garbage
+        with open(p, "w") as f:
+            f.write("{not json either")
     assert moy_carts.load_achievements(carts) == []
 
 

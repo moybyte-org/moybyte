@@ -569,6 +569,53 @@ def test_a_restart_for_a_forming_match_does_not_stop_the_radio():
     assert stops == [1], "an ordinary exit stops the radio"
 
 
+def test_the_link_rides_the_radio_lease(tmp_path):
+    """The radio is a LEASE (2026-09-07): the console's WiFi is off unless
+    something holds it, and a match is one of the holders. The hold is taken
+    BEFORE link.start(), so the STA the link activates is one the wifi service
+    owns and can power down; a restart a forming match asked for keeps it, an
+    ordinary exit lets it go."""
+    from ws_helpers import build_ws, open_cart
+
+    class _Link:
+        net = None
+
+        def __init__(self):
+            self.calls = []
+
+        def start(self):
+            self.calls.append("start")
+            return True
+
+        def announce(self, cart="", state=0):
+            pass
+
+        def offer(self, ws, cart, router=None, seed=None):
+            return False
+
+        def end_match(self, ws=None):
+            pass
+
+        def stop(self):
+            self.calls.append("stop")
+
+    ws = build_ws(tmp_path)
+    ws.link = _Link()
+    assert ws.wifi.radio is False
+    open_cart(ws, "Brick Siege")           # a "multiplayer" cart: the link runs
+    assert ws.link.calls == ["start"]
+    assert "link" in ws._wifi_holders and ws.wifi.radio is True
+
+    ws.netplay = object()                  # a session arranged for the next run
+    ws.player.release_world()
+    assert "link" in ws._wifi_holders and ws.wifi.radio is True
+
+    ws.netplay = None
+    ws.player.release_world()
+    assert ws.link.calls[-1] == "stop"
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
 def _lose_invites(air, n):
     """Swallow the next n INVITES -- acked and never delivered, which is the
     measured behaviour of this radio rather than a hypothetical. Dropping by

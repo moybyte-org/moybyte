@@ -221,8 +221,33 @@ def build_carts(system_carts_dir):
             # main filename intact (defaults stay implicit to keep the blob lean).
             cart["runtime"] = man["runtime"]
             cart["main"] = man.get("main", "main.py")
-        if man.get("fps"):                 # frame pacing (#63): "fps": 60 opt-out
-            cart["fps"] = int(man["fps"])
+        # SPEC.md 4: a cart may be several scripts, listed in `sources` in load
+        # order with `main` among them. `src` is main's; these are the rest,
+        # split at main because that is the shape moy_carts.load hands the
+        # Player and seed_builtins writes back. No system cart uses this today
+        # -- ports/ is deliberately not seeded -- but a blob that dropped them
+        # would seed a cart missing its prologue, which fails inside the
+        # author's own code.
+        _names = man.get("sources") or ()
+        if _names:
+            _main = man.get("main", "main.py")
+            if _main not in _names:
+                raise SystemExit("%s: \"sources\" does not list main %r "
+                                 "(SPEC.md 4)" % (folder, _main))
+            _pre, _post, _seen = [], [], False
+            for _n in _names:
+                if _n == _main:
+                    _seen = True
+                    continue
+                (_post if _seen else _pre).append(
+                    (_n, _read(os.path.join(base, _n))))
+            if _pre:
+                cart["src_before"] = _pre
+            if _post:
+                cart["src_after"] = _post
+        if man.get("fps"):                 # frame pacing: "fps": 60, or "free"
+            fps = man["fps"]               # (a dt-scaled game that runs with
+            cart["fps"] = fps if fps == "free" else int(fps)   # the loop, SPEC 5)
         if man.get("icon"):                # launcher icon tiles (SPEC.md 3.4)
             cart["icon"] = man["icon"]
         sheet = os.path.join(base, "sprites.moygfx")
@@ -379,7 +404,7 @@ APP_DECLS_HEADER = (
     "\n"
     "  id         the process kind (router / back-stack / window key)\n"
     "  entry      \"module:Class\" -- a runtime/ module staged to every target\n"
-    "  text_mode  True = a TYPING app (clean ASCII keyboard, Writer precedent)\n"
+    "  text_mode  True = a TYPING app (the clean ASCII keyboard)\n"
     "  order      registration precedence (NOT the cart's shelf order)\n"
     "  folder     the identity cart it rides on, in system_carts/\n"
     "  title      that cart's title (what the device names its seeded folder from)\n"
@@ -440,6 +465,12 @@ def main(argv):
                                                  (the web runner's bundle list)
     """
     argv = list(argv[1:])
+    # Before anything reads a positional: OUT is `argv[0]`, so an unhandled
+    # `--help` is an output PATH and the answer to "how do I call this" is a
+    # 681KB file named `--help` in whatever directory you asked from.
+    if "-h" in argv or "--help" in argv:
+        sys.stdout.write(main.__doc__.split("\n", 1)[1].rstrip() + "\n")
+        return 0
     src = _default_system_carts()
     packed = False
     if argv and argv[0] == "--packed":

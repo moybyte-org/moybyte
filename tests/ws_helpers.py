@@ -56,3 +56,69 @@ def quiesce(ws):
     deadline is up."""
     ws.pointer.visible = False
     ws._toast_until = 0
+
+
+def build_ws_with_cart(tmp_path, src, title="Cart", type="app", edit=None,
+                       editor=False):
+    """A workstation over a store holding ONE hand-authored cart, opened.
+
+    `editor=True` lands in the Editor (`open_in_editor`) instead of RUNNING the
+    cart. A title the launcher does not carry is an AssertionError, like
+    `open_cart`: a select loop that falls through in silence opens whatever the
+    launcher had selected, which reads as a passing test against a seed cart."""
+    from runtime import host_app
+    carts_dir = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts_dir)
+    host_app.moy_carts.create(title, carts_dir, src=src, type=type,
+                              edit=edit or [])
+    ws = host_app.build_workstation(carts_dir)
+    sel = next((i for i, c in enumerate(ws.launcher.items)
+                if c["title"] == title), None)
+    assert sel is not None, "created cart not on the launcher: " + title
+    ws.launcher.sel = sel
+    if editor:
+        ws.open_in_editor()
+    else:
+        ws.open()
+    return ws
+
+
+def build_ws_with_shelf(tmp_path, n):
+    """A workstation whose launcher holds at least `n` carts -- more than one
+    viewport, which is the precondition every shelf-scrolling suite needs --
+    topped up through the real store, parked at the head."""
+    from runtime import host_app, moy_carts
+
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)        # seeds the system carts
+    while len(ws.launcher.items) < n:                 # top up with extra carts
+        i = len(ws.launcher.items)
+        moy_carts.create("Extra %02d" % i, carts_dir,
+                         src="def _draw():\n    cls(1)\n", type="app")
+        ws.launcher.items = moy_carts.scan(carts_dir)
+    ws.launcher.sel = 0
+    ws.launcher.scroll = 0
+    return ws
+
+
+def device_frames(ws, n=1, dt=1 / 30):
+    """`n` whole frames in the DEVICE lane: the boards' InputState needs
+    `handle_input`/`handle_pointer` driven by hand, where the host driver does
+    it for you (`game_pointer`, the tuple a cart's `touch()` reads, is only
+    refreshed by `handle_pointer`)."""
+    for _ in range(n):
+        ws.input.begin_frame()
+        ws.handle_input()
+        ws.handle_pointer()
+        ws.frame(dt)
+
+
+class StubInput:
+    """The cart-facing input with nothing held and nothing pressed -- what
+    `make_api` wants from a test with no opinion about buttons."""
+
+    def held(self, n):
+        return False
+
+    def pressed(self, n):
+        return False

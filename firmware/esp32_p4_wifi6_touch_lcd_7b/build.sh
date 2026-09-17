@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Moybyte P4 port (#58): build mainline MicroPython (ESP32_GENERIC_P4, C6_WIFI
-# variant) + the moy_dsi native module (EK79007 MIPI-DSI panel) for the
-# Waveshare ESP32-P4-WIFI6-Touch-LCD-7B.
+# variant) + the P4 silicon tier (native/p4: moy_dsi over the EK79007 MIPI-DSI
+# panel, moy_ppa, moy_ble_hid, moy_c6) for the Waveshare
+# ESP32-P4-WIFI6-Touch-LCD-7B.
 #
 # A plain mainline build with USER_C_MODULES -- the strategy both boards use
 # now (this board went mainline first, because the deleted lvgl_micropython
@@ -19,7 +20,6 @@ MPY_DIR="${BUILD_DIR}/micropython"
 MPY_TAG="${MPY_TAG:-v1.28.0}"
 BOARD="MOYBYTE_P4"
 BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
-PATCH_DIR="${SCRIPT_DIR}/patches"
 DIST_DIR="${REPO_ROOT}/dist/p4"
 MODULES_DIR="${SCRIPT_DIR}/modules"
 MANIFEST="${BUILD_DIR}/moybyte_p4_manifest.py"
@@ -54,54 +54,23 @@ moybyte_setup_idf esp32p4
 #    because both the .build tree and a reused IDF checkout persist.
 # ---------------------------------------------------------------------------
 
-# 2a) Steady-state BLE keyboard notifications must not wait behind MicroPython's
-#     synchronous NimBLE IRQ/GIL path. The P4-only native queue consumes
-#     registered HID handles before Python dispatch; pairing/bonding/discovery
-#     remain on the supported synchronous path.
-MODBLUETOOTH_C="${MPY_DIR}/extmod/modbluetooth.c"
-if [ -f "${MODBLUETOOTH_C}" ] && \
-   ! grep -q "moy_ble_hid_queue_on_notify" "${MODBLUETOOTH_C}"; then
-  echo "== applying P4 BLE-HID native notification fast-path patch"
-  patch -d "${MPY_DIR}" -p1 < "${PATCH_DIR}/modbluetooth_ble_hid_fastpath.patch"
-fi
-
-# 2b) #106: backport current ESP-IDF's dedicated DSI bridge-underrun ISR and
-#     keep the frame-restart DW-GDMA interrupt above ESP-Hosted's SDIO
-#     interrupt. IDF v5.5 checks the bridge only from the DMA callback; if SDIO
-#     delays that callback, the display has already gone blue and the status
-#     can be cleared unseen.
-DSI_DPI_C="${IDF_DIR}/components/esp_lcd/dsi/esp_lcd_panel_dpi.c"
-if [ -f "${DSI_DPI_C}" ] && \
-   ! grep -q "Moybyte P4: dedicated DSI bridge underrun IRQ" "${DSI_DPI_C}"; then
-  echo "== applying P4 DSI bridge IRQ/priority fix (#106)"
-  patch -d "${IDF_DIR}" -p1 < "${PATCH_DIR}/esp_lcd_dsi_underrun_hook.patch"
-fi
+# 2a) The P4 SILICON patches (shared lib, both P4 boards): the BLE-HID
+#     notification fast path into MicroPython's modbluetooth.c, and the #106
+#     DSI bridge-underrun ISR backport into the (shared) ESP-IDF checkout.
+#     Both were this directory's patches/ until 2026-09-06; they live in
+#     patches/p4_*.patch now.
+moybyte_patch_p4_ble_hid_fastpath
+moybyte_patch_p4_dsi_underrun
 
 # 2c) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel
 #     accelerator) in the main component's REQUIRES.
 moybyte_idf_component esp_lcd
 moybyte_idf_component esp_driver_ppa
 
-# 2c') ESP-Hosted 2.7.0 -> 2.12.12 (the espnow-on-p4 track,
-#      docs/history/espnow_p4_2026-08.md). MicroPython pins the hosted
-#      component at exactly 2.7.0; 2.12.12 carries the custom-RPC seam
-#      (esp_hosted_send_custom_data / register_custom_callback) the P4's
-#      ESP-NOW shim rides, plus the streamed slave-OTA API that updates the C6
-#      from this board over SDIO. esp_wifi_remote 0.15.2 constrains only
-#      >=0.0.6, so the bump is manifest-legal. PROVEN ON GLASS 2026-08-24
-#      against the FACTORY C6 slave before any shim existed: builds clean,
-#      boots clean (with the MEMPOOL_PREFER_SPIRAM fragment line -- without it
-#      the 2.12 transport mempool fails its internal-SRAM allocation at boot
-#      and the board crash-loops), wifi at RX parity (2.9-3.0 MB/s vs 2.7.0's
-#      3.2), BLE up and scanning. The stale per-target lockfile is dropped so
-#      the component manager re-resolves; it pins the new tree on first build.
-MAIN_MANIFEST="${MPY_DIR}/ports/esp32/main/idf_component.yml"
-if grep -q 'version: "2.7.0"' "${MAIN_MANIFEST}"; then
-  echo "== bumping esp_hosted 2.7.0 -> 2.12.12 (espnow-on-p4 track)"
-  sed -i 's/^    version: "2.7.0"$/    version: "2.12.12"/' "${MAIN_MANIFEST}"
-  rm -f "${MPY_DIR}/ports/esp32/lockfiles/dependencies.lock.esp32p4"
-  rm -rf "${MPY_DIR}/ports/esp32/managed_components/espressif__esp_hosted"
-fi
+# 2c') ESP-Hosted 2.7.0 -> 2.12.12 -- the espnow-on-p4 track. The shared lib
+#      carries the argument and the glass verdict; wifi measured at RX parity
+#      here (2.9-3.0 MB/s against 2.7.0's 3.2).
+moybyte_patch_esp_hosted_bump esp32p4
 
 # 2d) Un-static esp_native_code_free_all (#66) -- shared with the T-Deck.
 #     Mainline's ports/esp32/main.c has the identical grow-only
@@ -128,7 +97,13 @@ moybyte_patch_espnow_ring_race
 #     Sky Run 58.0 -> 56.5, Sakura 51.0 -> 51.5 -- ~1.5fps on one cart,
 #     noise on the other. It would not have gotten a vote anyway.
 moybyte_patch_repr_c
-moybyte_patch_gc_split_reserve
+
+# DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
+# The patch reserves MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM outside the Python
+# heap, and that define is set by the two S3 boards' mpconfigboard.h alone, so a
+# call here reserves 0 -- the patch applies and the cap computes to nothing.
+# Whether a P4 with 32MB of PSRAM wants a reserve at all is unmeasured (#58);
+# the day it is, the board sets the define and takes the call back.
 
 # DECLINED moybyte_patch_psram_retune -- not applicable. That patch relaxes the
 # ESP32-S3 MSPI timing tuner's flash-vendor gate (#169); this is an ESP32-P4 and
@@ -136,10 +111,11 @@ moybyte_patch_gc_split_reserve
 # entirely (200MHz or the DSI scan-out underruns -- see this dir's README).
 
 # ---------------------------------------------------------------------------
-# 3) Stage: the shared native modules (board.toml [native.shared] -- the two
-#    denials, moy_sd and moy_audio, live there WITH their reasons; all plain C,
-#    the S3-specific pieces are include-guarded, so they compile unchanged on
-#    RISC-V) with the browser console blob generated into the staged copy
+# 3) Stage: the shared native modules (board.toml [native.shared] -- the
+#    denials, moy_sd/moy_audio/moy_flush, live there WITH their reasons; all
+#    plain C, the S3-specific pieces are include-guarded, so they compile
+#    unchanged on RISC-V) plus the P4 silicon tier ([native.p4] over
+#    native/p4/), with the browser console blob generated into the staged copy
 #    (never into the shared native/ tree two builds read -- this used to
 #    generate there and race a concurrent T-Deck build); then the shared
 #    PYTHON modules (#58 console staging, #161 Phase 3 -- board.toml holds the

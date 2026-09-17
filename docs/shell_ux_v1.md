@@ -83,7 +83,10 @@ slideshow, the web view) costs nothing.
 fails to start or raises mid-frame no longer parks on an OOPS panel waiting for
 a manual TAP-CODE: the run exits straight into the Editor's Code tab with the
 caret on the crashing line, the inline marker set, and a tap/type-dismissible
-error popup over it (`ws._crash_to_code`). The marker then RE-CHECKS on every
+error popup over it (`ws._crash_to_code`). On a cart of several scripts
+(SPEC.md 4) it opens the FILE that raised, not whichever the tab was left on --
+on a PICO-8 port that is as often the generated half as the game, and a marker
+on somebody else's line N is worse than none (#89). The marker then RE-CHECKS on every
 edit/undo — it retires only when the source actually parses again, and follows
 the live syntax error while it doesn't. The old panel survives only as the
 no-open-cart fallback. This is still the caller model: the crash path is just
@@ -261,8 +264,11 @@ gentlest:
 - **Sprites / Map / Scene / Music** — the asset editors, each with an icon-buttoned
   tool row (#90/#91/#92): the sprite painter has stroke-level undo/redo, a bucket
   fill, and whole-sprite transforms (flip/rotate/shift/clear); the map editor has
-  per-gesture undo/redo, rectangle + flood fills, and map resize; the scene
-  placement editor (#85 Stage 2) places tagged actors WYSIWYG on the world (tap =
+  per-gesture undo/redo, rectangle + flood fills, map resize, and a zoom ladder
+  whose last rung is an OVERVIEW -- each cell a solid block of its tile's dominant
+  colour, because no tile can be drawn below 8px, at 4-7px per cell: the whole map
+  where it fits, panning where it does not (#215);
+  the scene placement editor (#85 Stage 2) places tagged actors WYSIWYG on the world (tap =
   place/select, drag = move or pan, snap toggle, tag/flip props, front/back
   z-order, per-gesture undo/redo — every committed gesture live-syncs so PLAY
   runs the freshest placement); the music editor has copy/paste/duplicate,
@@ -282,7 +288,9 @@ There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
 stood for. Every tab-leaving event (switching tabs, PLAY, PROJECTS, a window/context-X
 close, a workspace swap, going home) hard-commits whichever tab was showing, on top of
-the idle-typing debounce -- exactly what SAVE used to do, just automatic.
+the idle debounce -- exactly what SAVE used to do, just automatic. The debounce runs
+on EVERY tab (#154), so by the time one of those events fires it usually finds nothing
+left to write.
 
 The ladder is the icons → blocks → code progression (#29) made spatial: growth is
 "one tab to the right," and every rung is visible from every other rung.
@@ -295,8 +303,10 @@ Two guarantees, stated as UX law:
 
 - **Save is never required — there is no SAVE.** No "unsaved changes" state, no save
   prompt on exit, no SAVE button anywhere (#111): edits persist continuously — a
-  typing-idle autosave debounce plus hard commits on every tab-leaving event (a tab
-  switch, PLAY, PROJECTS, a window/context-X close, a workspace swap, going home). A
+  an idle autosave debounce on every tab -- armed by typing on the code tab and by
+  touch on the drawn ones -- plus hard commits on every tab-leaving event (a tab
+  switch, PLAY, PROJECTS, a window/context-X close, a workspace swap, going home,
+  and the reboot into a new firmware image). A
   kid can pull the battery mid-edit and lose (at most) the last idle-debounce window.
   (`commit` in the §10 contract is the app telling the OS "persist this" — the exit
   paths above are simply every place that telling now happens automatically.)

@@ -1,0 +1,3 @@
+# emcc build products, not sources
+*.js
+*.wasm

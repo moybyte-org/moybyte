@@ -38,6 +38,17 @@ WHAT COUNTS AS AN INJECTION. Two sites, because the wiring lives in two:
     parameter that assigns to `ws` is picked up without editing this file --
     and then fails, correctly, as an undeclared service.
 
+A BOARD IS ITS DELEGATION CHAIN. A board's own `run_desktop` is the
+arguments; the boot body is the shared spine's `build_desktop`
+(`device/desktop_spine.py`), which the two P4 boards reach through the P4
+tier body (`device/p4_desktop.py`) first. Every link is read, and a link's
+assignment onto `ws` or argument to `wire_workstation_core` counts for THIS
+target only if the parameters it is built from were supplied down the chain:
+`ws.wm = wm(ws)` is the P4's, because only the P4 tier hands the spine a `wm`;
+`ws.ble_keyboard = ble_keyboard` is the T-Deck's. A parameter left at its
+default, or supplied as a literal None, is the tree's way of saying a tier
+lacks the lever, and it is read that way here.
+
 WHAT IT CANNOT SEE, said out loud: this is static analysis, so it asserts the
 LINE EXISTS, not that the object it builds is non-None at runtime. Every
 device injection here is inside a guarded `try`, and a build without the native
@@ -58,6 +69,8 @@ from pathlib import Path
 
 import pytest
 
+from board_source import wiring_chain
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # (wiring source, the function that wires it). Each target boots the SAME shared
@@ -69,6 +82,8 @@ TARGETS = {
            "run_desktop"),
     "guition": ("firmware/guition_jc3248w535/modules/moy_runtime.py",
                 "run_desktop"),
+    "guition_p4": ("firmware/guition_jc8012p4a1c/modules/moy_runtime.py",
+                   "run_desktop"),
     "host": ("runtime/host_app.py", "build_workstation"),
     # The wasm head is the third tier and wires the same console (moycore stage
     # 4), so it belongs in the table: it is the target most likely to be handed
@@ -147,6 +162,40 @@ WIRING = {
         "perf_capture": INJECTED,
     },
     "p4": {
+        "make_api": INJECTED,
+        "make_audio": "no ES8311 bring-up on this board yet (#82). The codec is "
+                      "on the hardware and unwired; until it is, injecting a "
+                      "backend would give the console an audio path that plays "
+                      "into nothing",
+        "lua_runtime": INJECTED,
+        "make_game_canvas": INJECTED,
+        "carts_store": INJECTED,
+        "carts_root": INJECTED,
+        "can_manage": "derived, not passed -- the store is on internal flash and "
+                      "is always writable, so the carts_root default is already "
+                      "the right answer",
+        "wifi": INJECTED,
+        "pointer": INJECTED,
+        "keyboard": INJECTED,
+        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
+        "_with_sd": "no SD card on this console -- the store is internal flash "
+                    "and races nothing, so the Workstation's own call-through "
+                    "default IS the correct gate. A wrapper here would be "
+                    "ceremony around `fn()`",
+        "updater": INJECTED,
+        "c6_updater": INJECTED,
+        "webhost": INJECTED,
+        "reboot_hook": INJECTED,
+        "net": INJECTED,
+        "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
+                "the C6, and a cart runs locally. Nothing to expose.",
+        "link": INJECTED,
+        "wm": INJECTED,
+        "perf_capture": INJECTED,
+    },
+    # The Guition P4 is the Waveshare's row: same silicon, same services,
+    # the same three absences for the same reasons.
+    "guition_p4": {
         "make_api": INJECTED,
         "make_audio": "no ES8311 bring-up on this board yet (#82). The codec is "
                       "on the hardware and unwired; until it is, injecting a "
@@ -370,6 +419,28 @@ def _func(path, name):
     return fn
 
 
+def _called(node):
+    f = node.func
+    return f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+
+
+def _params(fn):
+    return [a.arg for a in fn.args.args]
+
+
+def _call_args(call, params):
+    """{callee parameter: value node} for one call, positional arguments
+    mapped by the callee's own order."""
+    out = {}
+    for i, a in enumerate(call.args):
+        if i < len(params):
+            out[params[i]] = a
+    for k in call.keywords:
+        if k.arg:
+            out[k.arg] = k.value
+    return out
+
+
 # The workstation reaches a closure under whatever name that closure's
 # parameter has. The T-Deck's `_before_slim` calls it `_ws`, so matching only
 # "ws" read its `_with_sd`/`updater` injections as MISSING -- a service the
@@ -383,7 +454,69 @@ def _is_ws_attr(node):
             and node.value.id in _WS_NAMES)
 
 
-def _boot_assignments(fn):
+def _links(target):
+    """[(path, function)] -- the target's own wiring function and every spine
+    it delegates to, in delegation order."""
+    rel, fname = TARGETS[target]
+    if target in ("host", "web"):
+        return [(ROOT / rel, fname)]
+    chain = wiring_chain(rel)
+    assert chain[0][1] == fname, chain
+    return chain
+
+
+def _real(node, dead):
+    """A SUPPLIED value: not a literal None, and not a Name for a parameter
+    the supplying link itself never received. A target that hands a link an
+    explicit `None` is DECLARING the absence -- the tree's own way of saying a
+    tier lacks a lever ("a board that lacks a lever reports None, never 0") --
+    and reading that as a wired service is how the web console's row went on
+    claiming a WiFi backend after the fake behind it was removed."""
+    if isinstance(node, ast.Constant) and node.value is None:
+        return False
+    return not (isinstance(node, ast.Name) and node.id in dead)
+
+
+@functools.lru_cache(maxsize=None)
+def _resolved(target):
+    """[(path, FunctionDef, dead)] per link of the target's chain, where
+    `dead` is the set of that link's own parameters this target left
+    unsupplied (or supplied as None), carried down from the link before."""
+    out = []
+    dead = frozenset()
+    links = _links(target)
+    for i, (path, fname) in enumerate(links):
+        fn = _func(path, fname)
+        out.append((path, fn, dead))
+        if i + 1 == len(links):
+            break
+        nfn = _func(*links[i + 1])
+        params = _params(nfn)
+        given = set()
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Call) and _called(n) == nfn.name:
+                for prm, val in _call_args(n, params).items():
+                    if _real(val, dead):
+                        given.add(prm)
+        dead = frozenset(set(params) - given)
+    return out
+
+
+def _from_dead(value, dead):
+    """Is this value BUILT FROM a parameter the target never supplied -- the
+    parameter itself (`ws.ble_keyboard = ble_keyboard`) or a call on it
+    (`ws.wm = wm(ws)`)? An unsupplied parameter passed as one optional
+    argument among others (`make_webhost(..., with_sd=with_sd)`) is a lever
+    the service lacks, not a service the target lacks."""
+    if isinstance(value, ast.Name):
+        return value.id in dead
+    if isinstance(value, ast.Call):
+        f = value.func
+        return isinstance(f, ast.Name) and f.id in dead
+    return False
+
+
+def _boot_assignments(fn, dead=frozenset()):
     """{attr: lineno} for `ws.<attr> = ...` reachable on the boot path.
 
     Loop bodies are skipped. On the P4 the entire frame loop lives inside
@@ -395,6 +528,10 @@ def _boot_assignments(fn):
     `_before_slim`, a closure handed to wire_workstation_core precisely because
     it must run between the store hookup and the cart diet. That is boot wiring in
     every sense that matters.
+
+    An assignment built from a parameter this target left unsupplied
+    (`ws.wm = wm(ws)` on a board that handed the spine no `wm`) is not this
+    target's -- see _from_dead for exactly what "built from" means.
     """
     out = {}
 
@@ -402,7 +539,8 @@ def _boot_assignments(fn):
         for child in ast.iter_child_nodes(node):
             loop = in_loop or isinstance(node, (ast.While, ast.For,
                                                 ast.AsyncFor))
-            if isinstance(child, ast.Assign) and not loop:
+            if (isinstance(child, ast.Assign) and not loop
+                    and not _from_dead(child.value, dead)):
                 for t in child.targets:
                     if _is_ws_attr(t):
                         out.setdefault(t.attr, child.lineno)
@@ -412,30 +550,17 @@ def _boot_assignments(fn):
     return out
 
 
-def _wire_supplied(fn, param_map):
-    """{attr: lineno} for services this target hands to wire_workstation_core."""
+def _wire_supplied(fn, param_map, dead=frozenset()):
+    """{attr: lineno} for services this link hands to wire_workstation_core.
+    SUPPLIED IS NOT INJECTED: only a value `_real` counts."""
     fname = "wire_workstation_core"
-    order = [a.arg for a in _func(ROOT / "runtime" / "console.py", fname).args.args]
+    order = _params(_func(ROOT / "runtime" / "console.py", fname))
     out = {}
     for n in ast.walk(fn):
-        if not isinstance(n, ast.Call):
+        if not isinstance(n, ast.Call) or _called(n) != fname:
             continue
-        called = (n.func.attr if isinstance(n.func, ast.Attribute)
-                  else getattr(n.func, "id", None))
-        if called != fname:
-            continue
-        # SUPPLIED IS NOT INJECTED. A target that hands this an explicit `None`
-        # is DECLARING the absence -- the tree's own way of saying a tier lacks
-        # a lever ("a board that lacks a lever reports None, never 0") -- and
-        # reading that as a wired service is how the web console's row went on
-        # claiming a WiFi backend after the fake behind it was removed. Only a
-        # value that is not a literal None counts.
-        def _real(node):
-            return not (isinstance(node, ast.Constant) and node.value is None)
-
-        supplied = {order[i] for i in range(len(n.args))
-                    if i < len(order) and _real(n.args[i])}
-        supplied |= {k.arg for k in n.keywords if k.arg and _real(k.value)}
+        supplied = {prm for prm, val in _call_args(n, order).items()
+                    if _real(val, dead)}
         for attr, param in param_map.items():
             if param in supplied:
                 out.setdefault(attr, n.lineno)
@@ -443,11 +568,15 @@ def _wire_supplied(fn, param_map):
 
 
 def injections(target):
-    """{service: lineno} -- everything `target` attaches to the Workstation."""
-    rel, fname = TARGETS[target]
-    fn = _func(ROOT / rel, fname)
-    got = _boot_assignments(fn)
-    got.update(_wire_supplied(fn, _wire_param_map()))
+    """{service: lineno} -- everything `target` attaches to the Workstation,
+    across its whole delegation chain."""
+    got = {}
+    pmap = _wire_param_map()
+    for _path, fn, dead in _resolved(target):
+        for k, v in _boot_assignments(fn, dead).items():
+            got.setdefault(k, v)
+        for k, v in _wire_supplied(fn, pmap, dead).items():
+            got.setdefault(k, v)
     for name in NOT_A_SERVICE:
         got.pop(name, None)
     return got
@@ -550,6 +679,26 @@ def test_every_service_says_what_it_is():
         assert isinstance(what, str) and what.strip(), service
 
 
+def test_the_four_boards_wire_one_service_set():
+    """Since the spine, the service set is written ONCE: a board lacks a
+    service only by handing the spine nothing for it, and the table's reason
+    on that board names the lever it lacks. So the four boards' injected sets
+    agree on everything the spine wires unconditionally, and disagree only
+    where a row above says why."""
+    boards = ("tdeck", "p4", "guition", "guition_p4")
+    sets = {b: set(injections(b)) for b in boards}
+    common = set.intersection(*sets.values())
+    for svc in sorted(set.union(*sets.values()) - common):
+        for b in boards:
+            if svc not in sets[b]:
+                assert WIRING[b][svc] is not INJECTED, (
+                    "%s lacks %s and its row does not say why" % (b, svc))
+    assert {"make_api", "lua_runtime", "make_game_canvas", "carts_store",
+            "carts_root", "wifi", "pointer", "keyboard", "updater",
+            "webhost", "reboot_hook", "net", "link", "perf_capture"} <= common, (
+        sorted(common))
+
+
 def test_the_webhost_row_is_the_one_this_file_was_written_for():
     """The concrete regression, kept as its own assertion so a refactor of the
     machinery above cannot lose it: BOTH boards serve the web console (6084b2d),
@@ -608,9 +757,10 @@ Lazy = collections.namedtuple("Lazy", "path func why")
 
 LIFECYCLE = {
     "tdeck": {
-        ("keyboard", "start"): "TDeckKeyboard has no start(): the C3 is on I2C0 "
-                               "and answers from __init__, so poll() is the "
-                               "whole lifecycle",
+        # The spine's guarded start() -- TDeckKeyboard has none (the C3 is on
+        # I2C0 and answers from __init__), so on this board the call is the
+        # getattr saying no.
+        ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
         ("ble_keyboard", "start"): Lazy(
             "runtime/settings_layer.py", "open_bluetooth",
@@ -622,21 +772,28 @@ LIFECYCLE = {
         ("ble_keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): HERE,
+        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
     },
     "p4": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): HERE,
+        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
     },
     "guition": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): HERE,
+        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
+    },
+    "guition_p4": {
+        ("keyboard", "start"): HERE,
+        ("keyboard", "poll"): HERE,
+        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
     },
 }
 
@@ -711,7 +868,24 @@ class _Handles:
             return set(self.rets.get(_called(node), ()))
         return set()
 
-    def verbs(self, funcname):
+    def _roots(self, funcname, whole_module):
+        """(node, per_frame) to walk: the wiring function, per_frame=False;
+        for a SPINE, every other function and method in the module too, all
+        per_frame -- the boot function runs once and everything else in a
+        spine is a hook the loop calls."""
+        root = _find(self.tree, funcname)
+        assert root is not None, "no %s() to read" % funcname
+        out = [(root, False)]
+        if whole_module:
+            for node in self.tree.body:
+                if isinstance(node, ast.ClassDef):
+                    out += [(m, True) for m in node.body
+                            if isinstance(m, ast.FunctionDef)]
+                elif isinstance(node, ast.FunctionDef) and node is not root:
+                    out.append((node, True))
+        return out
+
+    def verbs(self, funcname, whole_module=False):
         """{(service, verb): per_frame} for `<handle>.<verb>()` under funcname.
 
         per_frame is True when the call sits in a loop or inside a nested def
@@ -720,11 +894,9 @@ class _Handles:
         board's boot path runs once and reads, in every static sense, exactly
         like one that runs every frame.
         """
-        root = _find(self.tree, funcname)
-        assert root is not None, "no %s() to read" % funcname
         out = {}
 
-        def walk(node, per_frame):
+        def walk(node, per_frame, root):
             sub = per_frame or isinstance(node, (ast.While, ast.For,
                                                  ast.AsyncFor)) or (
                 node is not root and isinstance(node, (ast.FunctionDef,
@@ -736,52 +908,72 @@ class _Handles:
                     for svc in self.of(c.func.value):
                         key = (svc, c.func.attr)
                         out[key] = out.get(key, False) or sub
-                walk(c, sub)
+                walk(c, sub, root)
 
-        walk(root, False)
+        for root, per_frame in self._roots(funcname, whole_module):
+            walk(root, per_frame, root)
         return out
 
-    def calls(self, funcname):
-        """Every function name called anywhere under funcname."""
-        root = _find(self.tree, funcname)
-        assert root is not None, "no %s() to read" % funcname
-        return {_called(n) for n in ast.walk(root) if isinstance(n, ast.Call)}
+    def calls(self, funcname, whole_module=False):
+        """Every function name called under funcname (and, for a spine, under
+        its hooks)."""
+        return {_called(n) for root, _pf in self._roots(funcname, whole_module)
+                for n in ast.walk(root) if isinstance(n, ast.Call)}
 
 
-def _called(node):
-    f = node.func
-    return f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+def _chain_maps(links):
+    """Per link: ({parameter: service}, {local name: {service}}).
 
-
-def _wire_seed(fn, param_map):
-    """{local name: {service}} for the handles a target hands to
-    wire_workstation_core.
-
-    `keyboard=keyboard` is the only thing that says the P4's BleHidKeyboard
-    local IS ws.keyboard, and without it every lifecycle call on those boards
-    reads as a call on an unrelated object."""
+    The first says which of a link's OWN parameters land on the Workstation as
+    a service -- directly (`ws.svc = <param>`) or by being handed on, to the
+    next link or to wire_workstation_core, under a parameter that does. The
+    second seeds that link's handles: `keyboard=keyboard` into the spine is
+    the only thing that says a board's BleHidKeyboard local IS ws.keyboard,
+    and without it every lifecycle call on that object reads as a call on an
+    unrelated one. Resolved from the LAST link backwards.
+    """
     inv = {}
-    for attr, param in param_map.items():
+    for attr, param in _wire_param_map().items():
         inv.setdefault(param, attr)
-    order = [a.arg for a in _func(ROOT / "runtime" / "console.py",
-                                  "wire_workstation_core").args.args]
-    seed = {}
-    for n in ast.walk(fn):
-        if not isinstance(n, ast.Call) or _called(n) != "wire_workstation_core":
-            continue
-        pairs = [(order[i], a) for i, a in enumerate(n.args) if i < len(order)]
-        pairs += [(k.arg, k.value) for k in n.keywords if k.arg]
-        for param, val in pairs:
-            if isinstance(val, ast.Name) and param in inv:
-                seed.setdefault(val.id, set()).add(inv[param])
-    return seed
+    wire = _func(ROOT / "runtime" / "console.py", "wire_workstation_core")
+    maps = [None] * len(links)
+    seeds = [None] * len(links)
+    for i in range(len(links) - 1, -1, -1):
+        fn = _func(*links[i])
+        params = set(_params(fn))
+        m, seed = {}, {}
+        for n in ast.walk(fn):
+            if (isinstance(n, ast.Assign) and isinstance(n.value, ast.Name)
+                    and n.value.id in params):
+                for t in n.targets:
+                    if _is_ws_attr(t) and t.attr in SERVICES:
+                        m[n.value.id] = t.attr
+        callees = [(wire.name, _params(wire), inv)]
+        if i + 1 < len(links):
+            nfn = _func(*links[i + 1])
+            callees.append((nfn.name, _params(nfn), maps[i + 1]))
+        for n in ast.walk(fn):
+            if not isinstance(n, ast.Call):
+                continue
+            for cname, order, cmap in callees:
+                if _called(n) != cname:
+                    continue
+                for prm, val in _call_args(n, order).items():
+                    if isinstance(val, ast.Name) and prm in cmap:
+                        seed.setdefault(val.id, set()).add(cmap[prm])
+                        if val.id in params:
+                            m[val.id] = cmap[prm]
+        maps[i], seeds[i] = m, seed
+    return maps, seeds
 
 
 @functools.lru_cache(maxsize=None)
 def _target_handles(target):
-    rel, fname = TARGETS[target]
-    path = ROOT / rel
-    return _Handles(path, _wire_seed(_func(path, fname), _wire_param_map()))
+    """[(handles, wiring function, is-a-spine)] per link of the chain."""
+    links = _links(target)
+    _maps, seeds = _chain_maps(links)
+    return [(_Handles(path, seeds[i]), fname, i > 0)
+            for i, (path, fname) in enumerate(links)]
 
 
 @functools.lru_cache(maxsize=None)
@@ -797,9 +989,21 @@ def _required_cells(target):
 
 
 def _driven_here(target, service, verb):
-    """(found, per_frame) for the target's own wiring function."""
-    got = _target_handles(target).verbs(TARGETS[target][1])
-    return ((service, verb) in got, got.get((service, verb), False))
+    """(found, per_frame) across the target's own wiring and its spines."""
+    found = per_frame = False
+    for handles, fname, spine in _target_handles(target):
+        got = handles.verbs(fname, whole_module=spine)
+        if (service, verb) in got:
+            found = True
+            per_frame = per_frame or got[(service, verb)]
+    return found, per_frame
+
+
+def _target_calls(target):
+    out = set()
+    for handles, fname, spine in _target_handles(target):
+        out |= handles.calls(fname, whole_module=spine)
+    return out
 
 
 # -- the tests ----------------------------------------------------------------
@@ -853,8 +1057,7 @@ def test_the_target_drives_exactly_what_the_lifecycle_says(target):
                 "make the call" % (target, service, verb, value.path,
                                    value.func))
         if isinstance(value, Via):
-            assert value.func in _target_handles(target).calls(
-                TARGETS[target][1]), (
+            assert value.func in _target_calls(target), (
                 "%s delegates %s.%s() to %s and never calls it"
                 % (target, service, verb, value.func))
 

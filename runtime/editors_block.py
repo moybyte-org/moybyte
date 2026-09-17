@@ -108,7 +108,8 @@ class BlockEditor(OpHistoryMixin):
         # A mutating edit snapshots the program PRE-state here (at _record, before
         # it changes anything); the matching POST-state is captured lazily when the
         # NEXT edit opens or an undo/redo/flush seals it -- a "burst" close exactly
-        # like Writer's typing burst and Map's open batch. So an edit is one op.
+        # like the editor handle's typing burst and Map's open batch. So an
+        # edit is one op.
         self._pending_pre = None
         self.reflow()
 
@@ -272,7 +273,8 @@ class BlockEditor(OpHistoryMixin):
         program pair. A no-op when nothing is pending, or when the edit ended up
         not changing the program. Also the seam the undo/redo verbs (and the bar's
         ws.history._seal_active_local) call FIRST, so a just-made, not-yet-sealed
-        edit is undo's first target -- mirrors Writer's burst close + Map's
+        edit is undo's first target -- mirrors the editor handle's burst close
+        + Map's
         end_edit."""
         before = self._pending_pre
         self._pending_pre = None
@@ -534,12 +536,6 @@ class BlockEditor(OpHistoryMixin):
         if b is None:
             return []
         return self.blocks.block_slots(self.program, b)
-
-    def slot_value(self, slot_name, block=None):
-        b = block if block is not None else self.selected_block()
-        if b is None:
-            return None
-        return (b.get("p", {}) or {}).get(slot_name)
 
     def set_slot(self, slot_name, value, block=None):
         """Write a slot value on a block (defaults to the selection). The caller is

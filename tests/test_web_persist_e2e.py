@@ -23,7 +23,6 @@ under CI, where a suite that asks to run and then skips proves nothing.
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -37,14 +36,6 @@ from web_e2e import RUNNER, ROOT
 pytestmark = pytest.mark.skipif(
     not os.environ.get("MOYBYTE_WEB_E2E"),
     reason="MOYBYTE_WEB_E2E not set (spawns headless Chrome for ~90s)")
-
-
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
 
 
 def _serve(port, extra=()):
@@ -81,7 +72,7 @@ def test_a_cart_made_in_the_browser_survives_a_reload(tmp_path):
     """#193's done-when, in one run: make a cart on a STATIC host, close the
     page, open it again in the same browser, and it is still on the shelf."""
     web_e2e.require("store")
-    port = _free_port()                    # fixed: OPFS is scoped to the ORIGIN
+    port = web_e2e.free_port()             # fixed: OPFS is scoped to the ORIGIN
     profile = tmp_path / "chrome"          # fixed: OPFS lives in the profile
     server, base = _serve(port)
     try:
@@ -114,7 +105,7 @@ def test_a_cart_exports_and_imports_as_a_zip(tmp_path):
     """The no-account escape hatch: zip a cart out of the live VFS, feed the
     same bytes back, and it lands under the store's own duplicate name."""
     web_e2e.require("store")
-    port = _free_port()
+    port = web_e2e.free_port()
     profile = tmp_path / "chrome"
     server, base = _serve(port)
     try:
@@ -154,7 +145,7 @@ def test_a_board_served_page_keeps_nothing_locally(tmp_path):
     store.mkdir()
     for cart in ("star_catcher.moy", "sakura.moy"):
         shutil.copytree(ROOT / "system_carts" / cart, store / cart)
-    port = _free_port()
+    port = web_e2e.free_port()
     server, base = _serve(port, ("--carts", str(store)))
     try:
         out, js = _run("persist_board_mode", base, tmp_path / "chrome", tmp_path / "s1")

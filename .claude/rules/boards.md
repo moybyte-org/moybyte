@@ -82,9 +82,11 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   same UART, where the board's ack is the ONLY backpressure; 16384 on the USB boards, which
   backpressure for real). The cart payload rides `recv` ALONE — an image without the command is
   refused rather than pushed some slower way — which is what lets **ONE cart-push tool
-  serve every board**: `python tools/push_cart.py <cart.moy> --board tdeck|p4|guition_s3` (the names
-  are the board files' own `[board] ota` ids, required on purpose — a default would be a silent
-  wrong transport) copies a cart folder onto the live console's store, whose path is DISCOVERED from
+  serve every board**: `python tools/push_cart.py <cart.moy> --board <id>` (the id is that
+  board file's own `[board] ota` id, and `--board` is required on purpose — a default would be
+  a silent wrong transport; `add_board_args` in `tools/p4_autotest.py` derives the choices from
+  the tree, so a new board is drivable the day its `board.toml` lands) copies a cart folder onto
+  the live console's store, whose path is DISCOVERED from
   `ws.carts_root` rather than declared (the Guition's is a TF card when one is in the slot and the
   internal VFS when not). **The frame loop is shared
   too** (#202 Phase B, `device_boot.FrameLoop`): the invariant order — inputs → dev channel → idle
@@ -105,8 +107,10 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   panel comes up through `native/moy_lcd` + `modules/tdeck_panel.py`, and that is now the ONLY panel
   driver in the tree. `patches/` was pruned to its three consumers on 2026-08-17: five orphans were
   DELETED (git history has them) — `esp32_i2c_new_driver` (reachable only through the fork's knob,
-  the #69 decision), `esp32_repr_c_floats` + `esp32_i2c_gil_release` (both live on as build.sh's
-  guarded sed/heredoc, steps 3b/3c — the patch files were unapplied second copies),
+  the #69 decision), `esp32_repr_c_floats` + `esp32_i2c_gil_release` (both live on as
+  build.sh's guarded steps 2b (`moybyte_patch_repr_c`, the shared patcher) and 2c
+  (the in-place `machine_i2c.c` edit); the patch files were unapplied second
+  copies),
   `esp32_tdeck_early_board_init` and `spi_master_psram_tx_dma` (fork-only mechanisms; the mainline
   flush never DMAs from PSRAM).
 - The MicroPython console is the only firmware. (The older Arduino/PlatformIO serial-smoke firmware and the legacy LVGL `.moyproj` game-loop boot path were removed; git history has them.)
@@ -135,9 +139,14 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
     frame composites via `moy_ppa.blit_async` and DEFERS the scan-out switch to the
     next loop's `present_pending()`, so the DMA overlaps the loop tail and the
     input poll. Full paints stay blocking so chrome never races the DMA. **An async
-    PPA op must be the frame's LAST write**, and `moy_ppa` must C2M-writeback dst
-    before submit, because the IDF PPA driver invalidates the whole out buffer at
-    submit and would discard unflushed CPU writes.
+    PPA op must be the frame's LAST write**, and `moy_ppa` must C2M-writeback a
+    CPU-PAINTED dst before submit, because the IDF driver invalidates the out
+    window at submit and an invalidate discards unflushed CPU writes. Both are
+    ROW-SCOPED — the driver's window is `pic_w * block_h` from `block_offset_y`,
+    and so is every `esp_cache_msync` in `moy_ppa` — so an op costs a walk of
+    the rows it lands on, not of the buffer. A destination the CPU never writes
+    (the rotated compositor's scan buffers and its game-copy scratch) skips the
+    writeback entirely: `rotate`/`rotate_scale` take a `wb` flag for it.
   - **The PPA only helps UPSCALE composites.** A full-screen 1:1 copy (the backdrop
     restore) is ~identical CPU vs PPA, PSRAM-bandwidth-bound against the scan-out;
     and **sprite BATCHING is a dead end** (~10× worse than `spr_batch` — per-op
@@ -153,9 +162,48 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
     saved), and #159's L2 cache 128→256KB closed the game chapter (512KB does not
     boot — internal/DMA pool 0x101).
   - Status and numbers: **#58**. Open: USB-HID keyboard, audio (ES8311).
+  - **The P4 SILICON is a shared tier since 2026-09-06**: `native/p4/` (`moy_dsi`
+    parameterized by the board's `MOY_DSI_PANEL_*` define, `moy_ppa`, `moy_ble_hid`,
+    `moy_c6`), declared by a P4 board as a SECOND `[native.p4]` source in board.toml
+    — never seen by the S3 scan, never denied by an S3 board — plus
+    `device/dsi_panel.py` (the compositor; the board injects its backlight),
+    `device/p4_canvas.py` (the PPA system canvas) and `device/p4_desktop.py`
+    (the P4 tier: PPA canvas, windowed WM, C6 updater, the P4 dev-channel
+    extras) over `device/desktop_spine.py`, the boot order, service set and
+    frame loop every console board takes; a board supplies its name,
+    compositor, touch and constants.
+    The two P4 patches are
+    `patches/p4_*.patch` behind `moybyte_patch_p4_ble_hid_fastpath` /
+    `moybyte_patch_p4_dsi_underrun` in the shared build lib.
 
 
-### Fourth build target: the Zero (Seeed XIAO ESP32-S3) — HEADLESS (#41)
+### Fifth build target: the Guition JC8012P4A1C — the second ESP32-P4 (2026-09-06)
+
+`firmware/guition_jc8012p4a1c/` — 10.1″ 800×1280 JD9365 MIPI-DSI, GSL3680 touch,
+the same P4 + C6-over-SDIO as the Waveshare on the same pins. **That dir's README
+is the authority**; what bites:
+
+- **The desk is LANDSCAPE (1280×800) on glass that scans PORTRAIT (800×1280).**
+  `device/dsi_panel.RotatedCompositor`: the console paints one persistent
+  landscape buffer, the PPA rotates it onto the panel — whole-frame for any
+  chrome paint, one rect for a quiet game frame, with per-buffer stale-rect
+  bookkeeping so a ping-pong buffer is never shown behind (owner call
+  2026-09-06; `tests/test_p4_display.py` pins it). Which way is up is
+  `guition_p4_display.ROTATION` (90/270), live as `py comp.set_angle(270)`.
+- **The GSL3680 is RAM-loaded**: `device/gsl3680.py` uploads the panel's firmware
+  (`modules/gsl_fw_jc8012.py`, 1.3 s) after every reset. Its axes are
+  UNCALIBRATED — bring-up was hands-off; `run_touch_calibrate()` is the first
+  thing to do with a finger.
+- **Serial is the P4's own USB-Serial/JTAG** (`303a:1001`, attach-only, DTR/RTS
+  asserted — the S3 rules, not the Waveshare's CH343 rules). esptool needs no
+  BOOT button. **Backlight GPIO23 is active-HIGH** (the Waveshare's is
+  active-low).
+- **The C6 runs Guition's factory slave**: BLE works, ESP-NOW has no shim to talk
+  to (the link fails inert, by design) until the Waveshare's `c6_slave/` image is
+  flashed to it.
+
+
+### Fifth build target: the Zero (Seeed XIAO ESP32-S3) — HEADLESS (#41)
 
 `firmware/seeed_xiao_esp32s3_zero/` became a build target on **2026-08-29**
 (owner call, reversing its own "DELIBERATELY NOT A BUILD TARGET"; its board.toml
@@ -184,10 +232,16 @@ README is the authority**; what belongs here is only what bites:
   is the mechanism `moybyte_patch_repr_c`'s header already specified). Do not
   give it the #169 retune without the 120MHz profile; the spike suite refuses
   that pairing.
-- **It keeps TinyUSB CDC** rather than the #201 promotion (which exists for a
-  board that never returns to the REPL; this one is interrupted into it on every
-  provision). So `303a:4001`, and DTR must be asserted at open. In via
-  `machine.bootloader()`, out via `--after watchdog_reset`, never `hard_reset`.
+- **It took the #201 USB-Serial/JTAG promotion** on **2026-08-30**, so it
+  enumerates `303a:1001` and opens like the console S3s: DTR/RTS HIGH, because
+  opening them LOW is a chip reset. The promotion is what bought a software path
+  into the ROM loader at all: esptool's default reset drives it in, and out
+  again via `--after watchdog_reset`, never `hard_reset` (proven on this board;
+  `machine.bootloader()` is an endless loop on this chip in upstream
+  MicroPython). Holding BOOT while plugging it in is the RECOVERY, not the
+  routine. Its `board.toml` `[serial]`/`[flash]` and `mpconfigboard.h` carry the
+  evidence, and `tools/device_port.py` tells it from the other `303a:1001`
+  boards by its USB serial number, since it has no dev channel to ask.
 - **A pushed `.py` SHADOWS the frozen one** — `/` is searched before `.frozen` —
   so its module push is opt-in and undoable, and the board announces it at boot.
 
@@ -209,6 +263,23 @@ README is the authority**; what belongs here is only what bites:
   instruction placement (`MOY_HOT`), and its allocator is a small-object pool
   (`native/moycore/README.md`).
 
+- **The WiFi radio is a LEASE: off unless something holds it (2026-09-07).**
+  `Workstation.wifi_hold(tag)` powers the STA up at once and the last
+  `wifi_release(tag)` powers it down (`DeviceWifi.radio_off`, which is
+  `esp_wifi_stop`), so a console on a shelf spends nothing on WiFi and the S3's
+  WLAN-vs-LCD-DMA internal-RAM fight is only ever live while someone needs the
+  network. Five holders: `web` (released when the webhost's SOCKET closes —
+  after the goodbye window — through `make_webhost`'s `on_stop`), `update` (the
+  online update screen, taken BEFORE the hand-off releases `web`), `settings`
+  (the WIFI panel, closed on every way out of Settings), `cart` (a run with the
+  "network" permission) and `link` (a match; the hold precedes `link.start()`
+  so the interface ESP-NOW activates is one the service owns). **A new consumer
+  of the network takes a tag and releases it on its way out, or the radio never
+  goes off again** — `tests/test_wifi.py`'s lease section is the guard, and
+  `state`'s `wifi_held` is how a board says who holds it. Constructing
+  `network.WLAN` is what initialises the driver, so `radio_off` never
+  constructs one. The Zero is outside this: WiFi is its only I/O.
+
 - **SD shares the SPI host with the display, and getting it wrong HANGS the
   board** — gray screen, dead USB, no panic. Three rules, each learned on
   hardware:
@@ -217,7 +288,10 @@ README is the authority**; what belongs here is only what bites:
     leaving the shared host claimed, so the next `init_display()` intermittently
     failed — the "no-SD boots, SD-with-files doesn't" bug.
     `PREFETCH_SD_BEFORE_DISPLAY=False`; carts load after init and degrade to the
-    built-ins on any SD failure.
+    built-ins on any SD failure. So `moybyte_sd` carries ONE lifecycle and only
+    one: a pre-display `machine.SDCard` path needs `machine.SPI.Bus` and
+    `tdeck_display`, and the mainline build has neither, so such a path cannot
+    run at all — it can only raise into whatever swallows the exception.
   - **After the panel is live, never `machine.SDCard`** — `esp_lcd` and that
     driver fight over one host and a CS-deselect is not enough. Live reads and
     writes go through the native `moy_sd` ATTACH (`sdspi_host_init_device`, no bus
@@ -258,8 +332,8 @@ README is the authority**; what belongs here is only what bites:
   **The fork could not be fixed this way and was never made to work.** Its `MOYBYTE_REPL=jtag` mode
   had three independent bugs (documented in the deletion commit); with all three fixed it boots and
   PRINTS but still takes no input, on an identical console config and identical linked symbols. The
-  remaining difference is the MicroPython base itself. The fork is gone, so this is history, not a
-  TODO.
+  remaining difference is the MicroPython base itself. The fork was DELETED on
+  2026-08-17, which closes the question: this is a recorded verdict, not a TODO.
 
   **Do NOT use the USB product id as the RX tell** — the old note said `303a:1001` = RX dead,
   `303a:4001` = RX works. On this port a WORKING board enumerates `1001`, because that is the
@@ -277,20 +351,20 @@ README is the authority**; what belongs here is only what bites:
   boot settles.
 
 - **Full-screen flush must be a single `tx_color`** from a PSRAM DMA buffer; multiple `tx_color` calls glitch rows at the command→data boundary.
-- **The keyboard has two modes; the console flips between them per screen.** The T-Deck keyboard is a separate ESP32-C3 (I2C 0x55; firmware in `firmware/lilygo_t_deck_plus_reference/examples/Keyboard_ESP32C3` — an UNTRACKED vendor reference tree, so a fresh checkout will not have it; THIRD_PARTY.md's scope note explains why). In its default mode it returns clean 1-byte ASCII (shift→uppercase, sym→symbols/digits, all resolved on-keyboard) but reports each key **once on the press edge with no autorepeat** — so a *held* key can't be detected, only faked for `KEY_HOLD_MS` by `TDeckKeyboard`'s latch (movement stalls while you hold). For true hold-to-move, a running cart switches the keyboard to **raw-matrix mode** (`0x03`, `LILYGO_KB_MODE_RAW_CMD`): it then streams the full key matrix each read, so a held direction keeps firing. `Workstation._set_text_mode` → `TDeckKeyboard.set_game_mode(on)` drives this: ASCII for the code editor (so typing is clean — `last_key`), raw everywhere else. The revert is `0x04` (`..._MODE_KEY_CMD`) — the step an earlier attempt missed, which is why raw mode used to garble the editor *irreversibly*. **`__init__` boots in ASCII and never enables raw**; raw needs keyboard fw **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`), and on older fw the `0x03` is ignored — `_read_raw_buttons` detects the stray ASCII byte and sticks the session back on the 1-byte + latch path (`_raw_unsupported`; class flag `RAW_GAME_MODE` force-disables raw). The keyboard has **no `=` `[ ] { } < > %`** keys at all → the code editor shows an on-screen symbol palette for those. (`0x01 <duty>` over I2C sets the keyboard backlight.) Use `RUN_KEYBOARD_PROBE` to dump keys over serial (USB-friendly, no takeover).
+- **The keyboard has two modes; the console flips between them per screen.** The T-Deck keyboard is a separate ESP32-C3 (I2C 0x55; firmware in `firmware/lilygo_t_deck_plus_reference/examples/Keyboard_ESP32C3` — an UNTRACKED vendor reference tree, so a fresh checkout will not have it; THIRD_PARTY.md's scope note explains why). In its default mode it returns clean 1-byte ASCII (shift→uppercase, sym→symbols/digits, all resolved on-keyboard) but reports each key **once on the press edge with no autorepeat** — so a *held* key can't be detected, only faked for `KEY_HOLD_MS` by `TDeckKeyboard`'s latch (movement stalls while you hold). For true hold-to-move, a running cart switches the keyboard to **raw-matrix mode** (`0x03`, `LILYGO_KB_MODE_RAW_CMD`): it then streams the full key matrix each read, so a held direction keeps firing. `Workstation._set_text_mode` → `TDeckKeyboard.set_game_mode(on)` drives this: ASCII for the code editor (so typing is clean — `last_key`), raw everywhere else. The revert is `0x04` (`..._MODE_KEY_CMD`) — the step an earlier attempt missed, which is why raw mode used to garble the editor *irreversibly*. **A mode switch swallows its own byte, on both sides of the seam.** The revert happens because a TEXT surface just took the keyboard, and what the C3 has to hand over then was typed while the matrix was streaming — before that surface existed; delivered, it is a letter the kid never typed appearing in the code buffer. So `_disable_raw_mode` DRAINS the keyboard after sending `0x04`, and `Workstation._set_text_mode(True)` seeds every typed-key edge with the byte already in `last_key`. Both halves: the matrix decodes only sixteen keys, so the byte the console holds is not always the one the keyboard then delivers, and each fix covers the case the other cannot. **`__init__` boots in ASCII and never enables raw**; raw needs keyboard fw **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`), and on older fw the `0x03` is ignored — `_read_raw_buttons` detects the stray ASCII byte and sticks the session back on the 1-byte + latch path (`_raw_unsupported`; class flag `RAW_GAME_MODE` force-disables raw). The keyboard has **no `=` `[ ] { } < > %`** keys at all → the code editor shows an on-screen symbol palette for those. (`0x01 <duty>` over I2C sets the keyboard backlight.) Boot `MODE = "keyboard"` (`tdeck_smoke.keyboard()`) to dump keys over serial (USB-friendly, no takeover).
 
 
 ### Device module map
 
 The T-Deck's own board code is `firmware/lilygo_t_deck_plus_mainline/modules/`
 (six tracked files — the rest of that directory is STAGED at build and
-gitignored). Everything both boards share moved to the repo root when the fork
+gitignored). Everything the boards share moved to the repo root when the fork
 went: the device tier is **`device/`**, the C modules **`native/`**.
 
-- `moybyte_shell.py` — boot/`main()`; mode flags `RUN_DESKTOP` / `RUN_TOUCH_CALIBRATE` / `RUN_KEYBOARD_PROBE` (the STAGE3/NATIVE_CORE bring-up benches and the pre-display SD-prefetch A/B toggle were removed; the #63 `MOYBYTE_BENCH=1` build is the benchmark harness).
-- `moy_runtime.py` — the **device backend**: `DeviceCanvas` (hot ops `cls`/`rect`/`circ`/`spr` go through the native `moy_gfx` kernel — `fill`/`fill_rect`/`blit565` straight into the compositor's RGB565 buffer — with framebuf for text/lines and as the no-`moy_gfx` fallback; `spr` blits a per-sprite pre-scaled RGB565 cache, and `make_api` reuses one tile `Image` per `(id, colorkey)` so the cache survives across frames), `make_api`, embedded fallback `CARTS`, `TrackBall`, `Touch`, `run_desktop()`, `run_keyboard_probe()`. Imports the shared `console`/`editors`/`moy_carts` and injects the device `make_api` + store into `console.Workstation`. **Input runs on a poller thread (#69, `MOY_INPUT_POLLER`)**: `moybyte.input.InputPoller` owns every I2C0 transaction (kbd + GT911 + mode switches) off the frame loop, so the C3's 40-60ms clock-stretch stalls block only that thread — requires the build's `esp32_i2c_gil_release.patch` (machine.I2C frees the GIL across its blocking wait); falls back to synchronous polling if `_thread`/the thread dies.
+- `moybyte_shell.py` — boot/`main()`; ONE `MODE` string over the shared ladder in `device/boot_shell.py` (this board declares its name, its six-stage `MODES` and `tdeck_smoke` as its smoke module, and nothing else). The STAGE3/NATIVE_CORE bring-up benches and the pre-display SD-prefetch A/B toggle were removed; the #63 `MOYBYTE_BENCH=1` build is the benchmark harness.
+- `moy_runtime.py` — this board's **hardware half of `run_desktop()`**, and nothing else: the panel bring-up, the input trio, the SD/panel bus gate and the serial channel, over the shared boot spine (`device_boot.DeviceBoot`/`FrameLoop`). Everything it used to define is now one import from the shared device tier: `DeviceCanvas` from `device/device_canvas.py`, `make_api` from `device/device_api.py`, `TrackBall`/`Touch` from `device/device_input.py`, the seed roster from the generated `carts_data.py`. The console itself (`console`/`editors`/`moy_carts`) is staged from `runtime/`, with the device `make_api` + store injected into `console.Workstation`. **Input runs on a poller thread (#69, `MOY_INPUT_POLLER`)**: `moybyte.input.InputPoller` owns every I2C0 transaction (kbd + GT911 + mode switches) off the frame loop, so the C3's 40-60ms clock-stretch stalls block only that thread — requires build.sh's step 2c, which patches `machine_i2c.c` to free the GIL across its blocking wait; falls back to synchronous polling if `_thread`/the thread dies.
 - `console.py` / `project.py` / `player.py` / `editor_app.py` / `wm.py` / `editors.py` / `moy_carts.py` (+ the `*_layer.py`/`*_ui.py` surfaces and `blocks.py`) — **staged from `runtime/` at build** (see above).
-- `device/moybyte_sd.py` — SD mount on the shared SPI bus; `with_sd(fn)` = mount → run → unmount + deselect.
+- `device/moybyte_sd.py` — the SD card on the panel's SPI host; `with_sd_live(fn)` = attach once, stay resident, never tear down.
 - `tdeck_panel.py` + `native/moy_lcd/` — the panel backend, replacing the fork's
   `tdeck_display.py` (LVGL bootstrap) and `moy_compositor.py` (Python banding).
   `TDeckCompositor` is the ping-pong + `ASYNC_FLUSH`/`LAYER_COPY_ASYNC` levers and
@@ -306,5 +380,5 @@ went: the device tier is **`device/`**, the C modules **`native/`**.
   stays the Guition's: shipping the game rect alone needs a panel whose GRAM
   keeps the bezels. See `tdeck_panel.py`'s header and `moy_fold.h`.
 - `device/moy_ota.py` — OTA firmware updater (#53): `OtaUpdater` flashes a new app image from `/sd/update/*.bin` into the **inactive** OTA slot via `esp32.Partition` (block-erase `writeblocks`), then `set_boot` + `machine.reset`. Phase 3 adds WiFi download — `check_online`/`begin_download`/`download_step` stream a manifest-described `.bin` over a raw socket straight to SD (sha256-verified, never buffering the whole 3MB), reusing the injected `wifi` service. Device-only; `run_desktop` injects it into the shared `Workstation` (which owns all the update-screen pixels), wires the wifi service, and calls `mark_valid()` at a healthy boot to cancel rollback.
-- `device/moy_webserver.py` — the device **socket/HTTP/WebSocket transport core**. Until 2026-08-12 this was the device WEB VIEW (#41/#22, owner-verified once on-glass 2026-08-01, #182) — the streaming browser mirror. **The whole streaming stack was DELETED in the 2026-08 sunset** (`docs/history/moycore_plan_2026-08.md` §3.2, owner decision; `tests/test_streaming_sunset.py` pins the absences): the frame push, `device_webview.py`, the recording `TeeCanvas`, stream mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py` + its VM deploy recipe, and the decline-the-Tee guards in `moy_lua_glue`. The browser's job belongs to the **wasm head** (`firmware/web_runner`), to be synced per §3.4; mirror-of-glass is an accepted loss (a screenshot verb on the sync RPC was the recorded successor and was DROPPED, owner 2026-08-25 — the browser IS the console, so show-and-tell happens there). What survives here — deliberately, for the §3.4 sync RPC to ride — is the bare transport: non-blocking listener, `parse_request`/`http_response`, the RFC 6455 upgrade + framing (shared `web_view_ws`, the only file of that lineage the boards still freeze), one persistent non-blocking `_WSConn` (cross-iteration read buffer, blocking-budget sends, idle reaper), and a `WebServer` with `handle_http`/`on_text`/`send_text` seams, no consumer wired. **The recording stack is GONE as of stage 4** (2026-08-12): the wasm head rasterizes, so `runtime/web_view.py` and `runtime/web_view_page.py` were deleted outright with the recorder, CommandCanvas, RecordingLayer, ServedState, SurfaceDelta, WsClientState, the wire protocol and the page's JS replayer. Two pieces of that module were never about rasterizing and survive on their own: `runtime/web_input.py` (browser events → InputState/Pointer, which the §3.4 RPC also speaks) and `web_view_ws.py`. `runtime/surface.py` and `wm_windowed`'s `if not self._recording` guards deliberately STAY, unreachable — `docs/surface_model_v1.md` §13 records why, and is the place to argue with it. The XIAO Zero port stood entirely on the deleted stream; the owner re-based it the next day (plan §3.2): the browser runs the wasm head, and the Zero becomes the pocketable cart-store + GPIO peripheral it pairs with (#41 direction, #9 pins) — its rebuild rides the §3.4 track.
+- `device/moy_webserver.py` — the device **socket/HTTP/WebSocket transport core**. Until 2026-08-12 this was the device WEB VIEW (#41/#22, owner-verified once on-glass 2026-08-01, #182) — the streaming browser mirror. **The whole streaming stack was DELETED in the 2026-08 sunset** (`docs/history/moycore_plan_2026-08.md` §3.2, owner decision; `tests/test_streaming_sunset.py` pins the absences): the frame push, `device_webview.py`, the recording `TeeCanvas`, stream mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py` + its VM deploy recipe, and the decline-the-Tee guards in `moy_lua_glue`. The browser's job belongs to the **wasm head** (`firmware/web_runner`), to be synced per §3.4; mirror-of-glass is an accepted loss (a screenshot verb on the sync RPC was the recorded successor and was DROPPED, owner 2026-08-25 — the browser IS the console, so show-and-tell happens there). What survives here is the bare HTTP transport: non-blocking listener, `parse_request`/`http_response`, one-shot request serving, and a `WebServer` whose one seam is `handle_http` — which is what `moy_webhost` overrides. **The WEBSOCKET half went in 2026-09**, and it had only ever been kept "for the §3.4 sync RPC to ride": that RPC shipped as PLAIN HTTP (`moy_webhost.handle_http`, `runtime/moy_sync.py`), so the RFC 6455 upgrade, the `_WSConn`, the `on_text`/`send_text` seams and the shared framing leaf `web_view_ws.py` were ~350 lines frozen into five images with no caller and are all DELETED — while `.claude/rules/web.md` already recorded the opposite decision on the merits (the update routes go through the HTTP host, *never the idle WebSocket core*, because `WS_IDLE_MS` reaped a client through a flash write). **The recording stack is GONE as of stage 4** (2026-08-12): the wasm head rasterizes, so `runtime/web_view.py` and `runtime/web_view_page.py` were deleted outright with the recorder, CommandCanvas, RecordingLayer, ServedState, SurfaceDelta, WsClientState, the wire protocol and the page's JS replayer. One piece of that module was never about rasterizing and survives on its own: `runtime/web_input.py` (browser events → InputState/Pointer, which the §3.4 RPC also speaks). `runtime/surface.py` and `wm_windowed`'s `if not self._recording` guards deliberately STAY, unreachable — `docs/surface_model_v1.md` §13 records why, and is the place to argue with it. The XIAO Zero port stood entirely on the deleted stream; the owner re-based it the next day (plan §3.2): the browser runs the wasm head, and the Zero becomes the pocketable cart-store + GPIO peripheral it pairs with (#41 direction, #9 pins) — its rebuild rides the §3.4 track.
 

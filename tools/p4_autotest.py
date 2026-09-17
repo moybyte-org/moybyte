@@ -10,7 +10,7 @@ assert on the console's state, not on pixels.
 
 Two entry points:
   * `P4Board` -- the reusable driver (tests/test_p4_on_glass.py builds on it).
-  * `python tools/p4_autotest.py [--port /dev/ttyACM0]` -- a standalone tour:
+  * `python tools/p4_autotest.py [--port auto]` -- a standalone tour:
     boot, open each surface, scroll Settings, report PASS/FAIL + PERF lines.
 
 The board is left rebooted onto the desk afterwards, ready for a human.
@@ -30,6 +30,8 @@ except ImportError:  # pyserial is the `device` extra -- hardware only. The
     serial = None    # data half below must still import under a host suite.
 
 BAUD = 115200
+WRITE_TIMEOUT_S = 2.0      # a write that does not drain in this long is a wedged port
+
 BOOT_BANNER = "desktop running"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -168,6 +170,9 @@ def _probe_identity(port, board_dir, log):
     try:
         b.drain(0.6)
         return b.identify(timeout=4.0)
+    except Exception as exc:  # noqa: BLE001 -- a port that will not drain
+        log("  %s: no answer (%s)" % (port, exc))
+        return None
     finally:
         b.close()
 
@@ -235,6 +240,35 @@ def find_port(board_dir=P4_BOARD_DIR, log=None, ports=None, usb_of=None,
         % (want_id, ", ".join("%s=%s" % kv for kv in seen.items())))
 
 
+def add_board_args(ap):
+    """The `--board`/`--port` pair every tool that drives a board over serial
+    takes, so that all of them take the SAME one.
+
+    --board has no default. The line state at open is per board and OPPOSITE:
+    the Waveshare P4's external CH343 opens with both lines LOW, while the
+    other four carry their USB serial ON the SoC, where that same open is a
+    CHIP RESET -- after which the device re-enumerates under the open handle
+    and every read returns nothing, forever. A default here picks one of those
+    disciplines for a board somebody did not name.
+
+    --port resolves from that board's own [serial] usb id, because those four
+    share 303a:1001 and the ttyACM numbers shuffle across replugs."""
+    ap.add_argument("--board", required=True, choices=sorted(board_dirs()),
+                    help="which board to drive (its [board] ota id) -- no "
+                         "default: a wrong guess at the line state chip-resets "
+                         "every board but the Waveshare P4")
+    ap.add_argument("--port", default="auto",
+                    help="serial port, or 'auto' (default): resolve it from "
+                         "the board's [serial] usb id -- ttyACM numbers "
+                         "shuffle across replugs")
+
+
+def board_from_args(args, **kw):
+    """A driver for the board `add_board_args` parsed, opened the way that
+    board's own [serial] block declares."""
+    return P4Board(args.port, board_dir=board_dirs()[args.board], **kw)
+
+
 class DeviceError(RuntimeError):
     """The board answered a `py` command with an exception (or with nothing).
 
@@ -272,6 +306,10 @@ class P4Board:
         self.ser.port = port
         self.ser.baudrate = BAUD
         self.ser.timeout = timeout
+        # A USB-Serial/JTAG port whose board is not draining its console
+        # accepts the open and then blocks the first write forever; a bounded
+        # write turns that into an exception the caller can report.
+        self.ser.write_timeout = WRITE_TIMEOUT_S
         # The line state AT OPEN is board-specific and load-bearing:
         #   P4 (CH343, external USB-UART): dtr/rts LOW, so opening never
         #     glitches the auto-reset circuit (reset is explicit, below).
@@ -407,13 +445,35 @@ class P4Board:
 
     # -- lifecycle --------------------------------------------------------
 
-    def reset(self, boot_timeout=40.0, settle=3.0):
+    # 60, not 40: a 75-cart store boots to the desk in 36.2s freshly flashed and
+    # 39.2s once anything has been written to it (measured 2026-09-05, dev
+    # 5b244b6), so a 40s budget left under a second of margin on a real store.
+    #
+    # AND THAT NUMBER IS A CONTRACT ON WHAT A BOOT MAY DO, not a dial to turn
+    # when a boot gets slower. A picture-format migration was added to the store
+    # door on 2026-09-07 and a Guition reproducing its first boot after the flash
+    # spent 196 SECONDS in it before the "loading cartridges" lines even began --
+    # about 15s per 320x240 cover on the S3's compressor. The fix was to delete
+    # the pass, not to widen this: a boot that outgrows a minute has stopped
+    # being a boot, and a budget wide enough to hide it is also wide enough to
+    # make a dead board take two minutes to say so.
+    def reset(self, boot_timeout=60.0, settle=3.0):
         """Hard-reset via the CH343 RTS pulse and wait for the desktop.
 
         CH343-ONLY. On a board whose USB-Serial/JTAG is on the SoC the pulse
         re-enumerates the USB device under this open handle and every read
         afterwards returns nothing, forever -- indistinguishable from a dead
-        board. Those boards declare attach_only in their [serial] block."""
+        board. Those boards declare attach_only in their [serial] block.
+
+        WHEN THERE IS NO RESET TO GIVE. An attach-only board that has gone
+        silent is normally revived with a Ctrl-D soft reset, but ONLY once
+        `>>>` has appeared -- sent into a desktop that has not reached the
+        prompt yet (straight after `quit`) it is swallowed, and the board then
+        answers nothing, Ctrl-C included. That wedge is not a serial state this
+        driver can talk its way out of: close the port and run
+        `esptool --port <port> --after hard_reset read_mac`, which drives the
+        SoC's USB-JTAG rather than the running app -- the port node survives,
+        the open handle does not, so re-attach afterwards."""
         if self.attach_only:
             raise RuntimeError(
                 "this board declares attach_only: it is attached to, never "
@@ -638,6 +698,17 @@ class P4Board:
             return oy + lay[1] + i * lay[3] + lay[3] // 2
 
         return cx, row_y, lay[3]
+
+    def swipe_settings(self, st=None, rows=2.5, frames=25):
+        """Drag the Settings list up by `rows` rows, starting from the last
+        row INSIDE the view. The row height follows the chrome scale (52px on
+        a board that declares its glass, 26 without), so a fixed start row can
+        sit below the view and move nothing."""
+        st = st or self.state()
+        cx, row_y, row_h = self.settings_geometry(st)
+        start = max(1, st["settings"]["view"][3] // row_h - 1)
+        y0 = row_y(start)
+        self.swipe(cx, y0, cx, y0 - int(rows * row_h), frames=frames)
 
 
 # ---------------------------------------------------------------------------

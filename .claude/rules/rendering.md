@@ -16,7 +16,7 @@ paths:
 
 ### The indexed-canvas portability contract (why the canvas is "indexed")
 
-The `.moy` canvas works in **palette indices** (the `MOY64` palette) with a plain-function drawing API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`) — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` runs on the host, on all three boards and in the browser. **There is now ONE canvas class on every tier** — `device_canvas.DeviceCanvas`, RGB565 with the palette resolved at draw time; the host builds it on CPython through `runtime/host_canvas.py` (the host's own indexed raster, runtime/canvas.py, was deleted 2026-08-15 — git history has it). So a drawing feature is added ONCE, in that class + the `moy_gfx`/libmoy kernel under it. The SYSTEM-surface contract (#39: font_scale text, font-scale layers, `blit_cover`) is one body too since 2026-08-18 — `device_canvas.SystemCanvas`, which the host/web/P4 classes subclass for only their per-tier pieces; two of the three hand-copies it replaced had silently drifted (the P4's print stride, its lost cart-palette layer rider).
+The `.moy` canvas works in **palette indices** (the `MOY64` palette) with a plain-function drawing API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`) — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` runs on the host, on every board and in the browser. **There is now ONE canvas class on every tier** — `device_canvas.DeviceCanvas`, RGB565 with the palette resolved at draw time; the host builds it on CPython through `runtime/host_canvas.py` (the host's own indexed raster, runtime/canvas.py, was deleted 2026-08-15 — git history has it). So a drawing feature is added ONCE, in that class + the `moy_gfx`/libmoy kernel under it. The SYSTEM-surface contract (#39: font_scale text, font-scale layers, `blit_cover`) is one body too since 2026-08-18 — `device_canvas.SystemCanvas`, which the host/web/P4 classes subclass for only their per-tier pieces; two of the three hand-copies it replaced had silently drifted (the P4's print stride, its lost cart-palette layer rider).
 
 
 ### Graphics is conformance-checked, and the indexed canvas was MEASURED AND DECLINED
@@ -58,7 +58,7 @@ Lua twin reports over serial too: both carts write a fixed PMEM layout the tool
 reads live via `moycore.pmem_image`, so `--json`/`--diff` speak one format for
 both twins; `tests/test_bench_pmem_report.py` locks the three layout copies
 together), `tools/p4_bench.py` (the console's own UI-panel bench),
-`tools/p4_conformance.py --serve` (holds the board — opening the port
+`tools/p4_conformance.py --board p4 --serve` (holds the board — opening the port
 REBOOTS it, which cost a full boot per scene; the suite went 12min → 4m45).
 
 **`tests/test_spec_conformance.py` is that gate** (suite vendored under
@@ -133,7 +133,7 @@ left:
 - **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
   roles as an ALLOWLIST; never grantable: `shell`, `carts`, `wallpaper`, `artwork`,
   `damage`, `surface`, `clipboard`, `notify`. **An ungranted verb is ABSENT, not
-  stubbed** (`system_carts/notes.moy` is the proof). Storybook/Sheets/Files/Paint
+  stubbed** (`system_carts/notes.moy` is the proof). Storybook/Files/Paint
   STAY shell code; Calc is portable today.
 - **The windowed DESK world must NOT bind the system canvas** — a cart there lives
   in a window whose blit source IS `ws.canvas`, so binding makes the desktop blit

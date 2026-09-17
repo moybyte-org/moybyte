@@ -21,21 +21,27 @@ existed) -- opportunistically detects + GRADUATES it into the real mechanism
 right here on open (`_graduate_hand_edit`), so "leveled up to code" is never a
 transient, un-persisted, un-undoable guess again.
 
-Same app pattern as Paint/Appearance/Writer: a `.moy` cartridge identity
+Same app pattern as Paint/Appearance: a `.moy` cartridge identity
 (`storybook.moy`) backed by this responsive system process."""
 
 try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 import json
 
 try:
-    from editors import CodeEditor
+    from editors import CodeEditor, KeyEdge
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.editors import CodeEditor
+    from runtime.editors import CodeEditor, KeyEdge
+
+try:
+    from widgets import ConfirmTap
+except ImportError:  # pragma: no cover - direct host import
+    from runtime.widgets import ConfirmTap
 
 try:
     from app_shell import ListShellLayout, ListShellApp
@@ -117,8 +123,8 @@ def _fit_art(w, h, idx, max_w=320, max_h=240):
 
 
 class StorybookLayout(ListShellLayout):
-    def __init__(self, w, h, fs=1, windowed=False):
-        self._init_frame(w, h, fs, windowed)
+    def __init__(self, w, h, fs=1, windowed=False, cs=None):
+        self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
         self.band_h = 24 * fs
         x = 6 * fs
@@ -130,7 +136,7 @@ class StorybookLayout(ListShellLayout):
         self.btn3 = (x + 118 * fs, y, 72 * fs, bh)           # MY ART
         self.btn4 = (x + 194 * fs, y, 66 * fs, bh)           # NO ART / TEAR OUT
         self.status_x = x
-        # Row lists (shelf + pages), Writer-style (geometry: ListShellLayout).
+        # Row lists (shelf + pages); geometry: ListShellLayout.
         self._init_list(self.bar_h + self.band_h)
         # Page view: the text box (the kid types the page's words here) above a
         # live-ish preview strip.
@@ -165,7 +171,7 @@ class StorybookAppLayer(ListShellApp):
     NEEDS = ("surface", "theme", "damage", "carts", "nav", "artwork",
              "clipboard")
 
-    def __init__(self, ctx, names, in_rect):
+    def __init__(self, ctx, names):
         self.ctx = ctx
         # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
         self._surf = ctx.surface
@@ -176,10 +182,10 @@ class StorybookAppLayer(ListShellApp):
         self._art = ctx.artwork
         self._clip = ctx.clipboard
         self.names = names
-        self._in = in_rect
         cv = ctx.surface.canvas()
         self.layout = StorybookLayout(cv.w, cv.h, self._surf.font_scale(),
-                                      self._surf.windowed())
+                                      self._surf.windowed(),
+                                      self._surf.chrome_scale())
         self.mode = "shelf"           # shelf | pages | page
         self.cart = None              # the open story cart dict
         self.deck = None              # its parsed deck.json
@@ -189,8 +195,8 @@ class StorybookAppLayer(ListShellApp):
         self.editor = None            # CodeEditor over the page's text lines
         self.status = "MY STORIES"
         self.read_only = False        # the kid graduated this story to code
-        self.del_armed = False
-        self._ekey_prev = 0
+        self.tear = ConfirmTap()      # TEAR OUT: first tap arms, second confirms
+        self._kedge = KeyEdge()       # the page words' typed-key edge
         self._deck_dirty = False      # unsaved deck edits (commit no-ops when clean)
 
     # -- store -----------------------------------------------------------------
@@ -254,8 +260,8 @@ class StorybookAppLayer(ListShellApp):
 
     # -- lifecycle ---------------------------------------------------------------
 
-    def relayout(self, w, h, fs):
-        self.layout = StorybookLayout(w, h, fs, self._surf.windowed())
+    def relayout(self, w, h, fs, cs=None):
+        self.layout = StorybookLayout(w, h, fs, self._surf.windowed(), cs)
         if self.editor is not None:
             self.editor.set_view_size(self.layout.cols, self.layout.rows)
 
@@ -267,9 +273,9 @@ class StorybookAppLayer(ListShellApp):
         self.page_i = -1
         self.sel = 0
         self.top = 0
-        self.del_armed = False
+        self.tear.disarm()
         self.read_only = False
-        self._ekey_prev = 0
+        self._kedge.reset()
         self._deck_dirty = False
         self.status = "MY STORIES"
         self._damage.all()
@@ -335,7 +341,7 @@ class StorybookAppLayer(ListShellApp):
         self.mode = "pages"
         self.sel = 0
         self.top = 0
-        self.del_armed = False
+        self.tear.disarm()
         self._deck_dirty = False
         self.status = ("LEVELED UP TO CODE - EDIT IN MAKE" if self.read_only
                        else (cart.get("title") or "STORY"))
@@ -410,8 +416,8 @@ class StorybookAppLayer(ListShellApp):
         self.editor.col = len(self.editor.lines[self.editor.row])
         self.editor._scroll()
         self.mode = "page"
-        self.del_armed = False
-        self._ekey_prev = 0
+        self.tear.disarm()
+        self._kedge.reset()
         self.status = "PAGE " + str(i + 1)
         self._nav.text_mode(True)       # the page's words are typed
         self._damage.all()
@@ -423,7 +429,7 @@ class StorybookAppLayer(ListShellApp):
         self.sel = self.page_i + 1 if self.page_i >= 0 else 0
         self.page_i = -1
         self.mode = "pages"
-        self.del_armed = False
+        self.tear.disarm()
         self.status = (self.cart.get("title") or "STORY") if self.cart else "STORY"
         self._nav.text_mode(False)
         self._damage.all()
@@ -469,13 +475,6 @@ class StorybookAppLayer(ListShellApp):
         self.status = "PAINTING ON PAGE " + str(self.page_i + 1)
         self._damage.all()
 
-    def _clear_art(self):
-        if self.read_only or not (0 <= self.page_i < len(self._pages())):
-            return
-        self._pages()[self.page_i]["art"] = None
-        self._deck_dirty = True
-        self._damage.all()
-
     def _delete_page(self):
         pages = self._pages()
         if self.read_only or not (0 <= self.page_i < len(pages)):
@@ -485,7 +484,7 @@ class StorybookAppLayer(ListShellApp):
         self.page_i = -1
         self.mode = "pages"
         self.sel = 0
-        self.del_armed = False
+        self.tear.disarm()
         self.status = "PAGE TORN OUT"
         self._deck_dirty = True
         self._commit_deck()
@@ -526,46 +525,45 @@ class StorybookAppLayer(ListShellApp):
         if self.mode == "shelf":
             for i in range(self.top, min(self.top + lay.list_rows,
                                          len(self._stories()) + 1)):
-                if self._in(px, py, lay.row_rect(i - self.top)):
+                if _in(px, py, lay.row_rect(i - self.top)):
                     self.sel = i
                     self._tap_row(i)
                     return True
             return True
         if self.mode == "pages":
-            if self._in(px, py, lay.btn1):
+            if _in(px, py, lay.btn1):
                 self._back_to_shelf()
                 return True
-            if self._in(px, py, lay.btn2):
+            if _in(px, py, lay.btn2):
                 self._play_story()
                 return True
             for i in range(self.top, min(self.top + lay.list_rows,
                                          len(self._pages()) + 1)):
-                if self._in(px, py, lay.row_rect(i - self.top)):
+                if _in(px, py, lay.row_rect(i - self.top)):
                     self.sel = i
                     self._tap_row(i)
                     return True
             return True
         # -- page view -------------------------------------------------------------
-        if self._in(px, py, lay.btn1):
+        if _in(px, py, lay.btn1):
             self._back_to_pages()
             return True
-        if self._in(px, py, lay.btn2):
+        if _in(px, py, lay.btn2):
             self._cycle_bg()
             return True
-        if self._in(px, py, lay.btn3):
+        if _in(px, py, lay.btn3):
             self._attach_art()
             return True
-        if self._in(px, py, lay.btn4):
-            if self.del_armed:
+        if _in(px, py, lay.btn4):
+            if self.tear.tap():
                 self._delete_page()
             else:
-                self.del_armed = True
                 self.status = "TAP AGAIN TO TEAR OUT"
                 self._damage.all()
             return True
-        self.del_armed = False
+        self.tear.disarm()
         if (self.editor is not None and not self.read_only
-                and self._in(px, py, lay.text_area)):
+                and _in(px, py, lay.text_area)):
             self.editor.place((px - lay.tx) // lay.cell, (py - lay.ty) // lay.lh)
             self._damage.all()
         return True
@@ -613,7 +611,7 @@ class StorybookAppLayer(ListShellApp):
             self._button(cv, "PAGES", lay.btn1)
             self._button(cv, "BG", lay.btn2)
             self._button(cv, "MY ART", lay.btn3)
-            self._button(cv, "TEAR OUT", lay.btn4, hot=self.del_armed)
+            self._button(cv, "TEAR OUT", lay.btn4, hot=self.tear.armed)
             self._draw_page(cv)
 
     def _page_label(self, p):

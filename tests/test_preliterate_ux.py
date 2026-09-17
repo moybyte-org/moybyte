@@ -88,7 +88,11 @@ def test_all_display_types_render_without_error():
     # tall visual cards on one screen now -- the extra vertical room the removed buttons
     # freed. All four display types are laid out + the sprite-tiles row is the tallest.
     rows = ws.cards_layer._card_layout()
-    assert [r["display"] for r in rows] == ["count", "gauge", "choice-icons", "sprite-tiles"]
+    # ... plus the ADVANCED row the Config tab always ends on (step 5 of
+    # docs/text_editing_2026-09.md), which is a door and carries no display.
+    assert [r["display"] for r in rows] == ["count", "gauge", "choice-icons",
+                                            "sprite-tiles", None]
+    assert rows[-1]["advanced"] and rows[-1]["f"] is None
     assert not ws.cards_layer._cards_scrollable()        # all four fit -> no scroll needed
     spr = [r for r in rows if r["display"] == "sprite-tiles"][0]
     assert spr["h"] > console._CARD_H       # sprite-tiles row is tallest
@@ -204,7 +208,7 @@ def test_showcase_star_catcher_opens_and_runs_headless(tmp_path):
     # its CATCHER card is a sprite-tile picker.
     ws._open_menu()
     rows = ws.cards_layer._card_layout()
-    basket = [r for r in rows if r["f"]["key"] == "basket"][0]
+    basket = [r for r in rows if r["f"] and r["f"]["key"] == "basket"][0]
     assert basket["display"] == "sprite-tiles"
     _tap_cell(ws, basket, 1)                            # pick the robot tile
     assert ws.config["basket"] == 1
@@ -246,7 +250,8 @@ def test_space_desktop_bg_picker_applies_a_preset(tmp_path):
     # longer fit at once -- scroll the BG card into view the way a kid would.
     bg_i = [i for i, f in enumerate(ws.cart["edit"]) if f["key"] == "bg"][0]
     ws.cards_layer._reveal_card(bg_i)
-    bg = [r for r in ws.cards_layer._card_layout() if r["f"]["key"] == "bg"][0]
+    bg = [r for r in ws.cards_layer._card_layout()
+          if r["f"] and r["f"]["key"] == "bg"][0]
     assert bg["display"] == "bg-thumbs"
     _tap_cell(ws, bg, 2)                         # "stripes"
     assert ws.config["bg"] == "stripes"
@@ -322,7 +327,7 @@ def test_bad_edit_field_renders_inline_error_others_still_work():
     _draw_once(ws)                                    # must not raise / no error panel
     assert ws.cart_error is None
     rows = ws.cards_layer._card_layout()
-    assert [r["error"] for r in rows] == [None, "min > max"]
+    assert [r["error"] for r in rows] == [None, "min > max", None]  # + ADVANCED
     assert rows[1]["display"] is None                  # never reaches the real renderer
     assert probe.drew_something(ws.canvas)              # something drew (the good card + "!")
 
@@ -392,7 +397,8 @@ def test_cards_menu_scroll_clamps_and_keeps_rows_on_panel():
     assert ws.cards_layer.mtop == ws.cards_layer._max_mtop()
     bottoms = [r["y"] + r["h"] for r in ws.cards_layer._card_layout()]
     assert max(bottoms) <= console._CARD_VIEW_BOTTOM # nothing runs over the buttons
-    assert ws.cards_layer._card_layout()[-1]["i"] == len(edit) - 1   # the last card IS reachable
+    # the last ROW is reachable -- the ADVANCED door, one past the last card
+    assert ws.cards_layer._card_layout()[-1]["i"] == len(edit)
 
     ws.cards_layer.scroll_cards(-99)                             # clamp the other way
     assert ws.cards_layer.mtop == 0

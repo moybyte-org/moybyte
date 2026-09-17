@@ -117,7 +117,7 @@ class SystemStore:
         """Write the dict to `system.json` when a writable store is wired.
 
         The ONE funnel behind every persisting Settings toggle (theme, skin,
-        font scale, wallpaper, diagnostics, frameskip, 2P, crisp pixels, the FPS
+        font scale, wallpaper, diagnostics, steady, 2P, crisp pixels, the FPS
         chip, the OTA channel), favorites/recents, the crash guard's strikes and
         the pairing pin. A failed write just isn't remembered."""
         if not self.store.writable():

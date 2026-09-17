@@ -15,8 +15,8 @@ each resolved here on its merits:
   * the host's `_Layer` verb list carried `tline`; the device's did NOT -- so
     `layer.tline(...)` worked on the host and raised AttributeError on a
     board. The superset is now everyone's.
-  * make_layer: the device passed `owner=` (the #63 layer-loan leak fix) and
-    tables/texts through to the layer's namespace; the host passed neither.
+  * make_layer: the device passed `owner=` (the #63 layer-loan leak fix)
+    through to the layer's namespace; the host passed neither.
     Both now do both.
   * time() reached the tick helpers through three different lanes; it rides
     `runtime/ticks.py` now, like everything else.
@@ -28,7 +28,6 @@ frozen name is unchanged. tests/test_cart_api_unified.py pins the identity:
 one function OBJECT, not three agreeing copies.
 """
 
-import json
 import random
 
 try:                                    # staged/frozen flat namespace (boards, web)
@@ -39,6 +38,41 @@ try:
     from ticks import _ticks_ms, _ticks_diff
 except ImportError:
     from runtime.ticks import _ticks_ms, _ticks_diff
+try:
+    from widgets import pointer_state, P_NONE, P_HELD, P_CLICK
+except ImportError:
+    from runtime.widgets import pointer_state, P_NONE, P_HELD, P_CLICK
+
+
+# owner -> the Image subclass a cart of that owner constructs (below).
+_OWNED_IMAGE = {}
+
+
+def _owned_image_cls(owner):
+    """The `Image` a CART builds for itself, tagged with the run that owns it.
+
+    image() stamps `_owner` on what the ENGINE loads, and that is only half the
+    verb table: `Image` is exposed too, and a cart that constructs its own
+    320x240 picture -- `system_carts/paint.moy`'s body is the one in the tree --
+    got an untagged one, so its 153,600-byte RGB565 bake stayed on the gc heap,
+    which is the heap that has no run that size once a console has been up a
+    while (#186, device_canvas._paint_bake_buf). Same verb table, same size,
+    same failure; only the constructor differed.
+
+    A SUBCLASS rather than a factory function, because `Image` is a name a cart
+    reaches through: `Image.from_ascii(...)` is documented and `isinstance(x,
+    Image)` is how spr() and background() dispatch, and both keep working
+    through a subclass. Cached per owner -- there are three in the tree
+    ("cart", "wallpaper", "wallpaper_pv") -- so make_layer's nested make_api
+    does not mint a class per layer.
+    """
+    cls = _OWNED_IMAGE.get(owner)
+    if cls is None:
+        class _OwnedImage(Image):
+            pass
+        _OwnedImage._owner = owner          # a CLASS attribute: no per-image cost
+        _OWNED_IMAGE[owner] = cls = _OwnedImage
+    return cls
 
 
 def _rotate_indices(*args):
@@ -84,35 +118,18 @@ def color(name_or_index):
 
 def _decode_moyimg(text):
     """Decode a .moyimg paint-image asset (#63 Fold 3) into (w, h, index_bytes),
-    or None on any error (a bad image just doesn't draw). The blob is a JSON
-    header {w, h, data} where `data` is base64 of the zlib-compressed MOY64
-    index bitmap (1 byte/pixel). The shared moy_carts.decode_moyimg handles the
-    current codec on every target; the legacy envelope inflates through zlib
-    where CPython provides it and MicroPython's `deflate` where it doesn't."""
+    or None on any error (a bad image just doesn't draw).
+
+    A forward, not a decoder. There was a second body here -- the drawing tiers
+    inflated the compressed envelope themselves while the store read Paint's RLE
+    one -- and a picture whose format the caller had not thought of came back as
+    a silently blank image on whichever tier held the other half."""
     try:
         try:
-            import moy_carts
+            import moy_image
         except ImportError:
-            from runtime import moy_carts
-        shared = moy_carts.decode_moyimg(text)
-        if shared is not None:
-            return shared
-        import binascii
-        meta = json.loads(text)
-        w = int(meta["w"])
-        h = int(meta["h"])
-        raw = binascii.a2b_base64(meta["data"])
-        try:
-            import zlib
-            idx = zlib.decompress(raw)
-        except ImportError:
-            # MicroPython target: `deflate` is its zlib. Without this the
-            # legacy zlib envelope (sakura's bg) silently decoded to None,
-            # so the Lua/paint background never drew in the browser.
-            import deflate
-            import io
-            idx = deflate.DeflateIO(io.BytesIO(raw), deflate.ZLIB).read()
-        return (w, h, idx)
+            from runtime import moy_image
+        return moy_image.decode_moyimg(text)
     except Exception:  # noqa: BLE001 -- bad/absent image -> caller gets None
         return None
 
@@ -141,8 +158,8 @@ class _Layer:
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None, scenes=None, tables=None,
-             texts=None, net=None, gpio=None, flags=None, owner="cart"):
+             pmem=None, wifi=None, images=None, scenes=None,
+             net=None, gpio=None, flags=None, owner="cart"):
     """The cartridge global namespace: the frozen TIC-80-style kid API
     (cls/pix/rect/circ/spr/map/print/btn/touch/... -- docs/moy_cart_api.md)
     bound to a canvas + InputState + the injected audio/wifi backends.
@@ -157,8 +174,14 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     cart gets no network access at all (the base key-set is identical either
     way). `net` is the same gate for "multiplayer" (#65). `gpio` is the third
     such gate (#9): physical pins, which only exist where a host with pins is
-    on the other end of the page -- so far the Zero. `owner` tags layer
-    loans for the device's #63 leak-fix reclaim; a gc-heap canvas ignores it.
+    on the other end of the page -- so far the Zero. `owner` names the RUN that
+    borrows off-heap memory, so the device can hand it back when the run dies:
+    layer loans (the #63 leak fix) and, since 2026-09-09, a paint image's
+    full-screen RGB565 bake (#186 -- see device_canvas._paint_bake_buf, and the
+    cart that would not start that it fixes). It rides on BOTH ways a cart gets
+    a paint image, the loaded one (image()) and the built one (`Image`), because
+    the bake that fails does not care which constructor made the picture. A
+    gc-heap canvas ignores it.
     """
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
                            # repeated image(name) returns the SAME Image (#63) and its
@@ -334,43 +357,37 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         bit = 1 << (int(b) & 7)
         tile_flags[n] = (tile_flags[n] | bit) if on else (tile_flags[n] & ~bit & 0xFF)
 
+    _touch_scratch = [0, 0, 0, 0]        # reused; see widgets.pointer_state
+
     def touch():
         # Pointer (touch glass on a board, mouse on the host) exposed to
-        # touch-driven carts: (x, y, tapped, held) this frame, or None when there
-        # is no pointer. `tapped` is the press edge so a cart scores at most one
-        # hit per tap; `held` stays True while the finger/button is down, so a
-        # cart can track a DRAG (drawing, sliders). Two-domain seam (#39): prefer
-        # the game-space pointer publication when the console provides one (a
-        # distinct big system canvas), so a cart reads 320x240 viewport coords.
-        # A LINKED MATCH HAS NO POINTER. Only buttons cross the radio, so a
-        # touch read here would move this screen's player and not the other
-        # one's -- a divergence the lockstep exchange cannot see and cannot
-        # heal, which is the same class of bug as drawing from the shared random
-        # stream. Reporting "no pointer" makes a touch-driven cart fall back to
-        # its button path, which is the honest answer while two consoles share
-        # one game.
-        if getattr(input, "netplay_live", False):
+        # touch-driven carts: (x, y, tapped, held) this frame, or None when
+        # there is no pointer. `tapped` is the press edge so a cart scores at
+        # most one hit per tap; `held` stays True while the finger/button is
+        # down, so a cart can track a DRAG (drawing, sliders).
+        #
+        # Where the pointer COMES from -- the netplay refusal, the two-domain
+        # seam, the linger that outlives a released finger -- is
+        # widgets.pointer_state, because the Lua tier resolves the same
+        # question through the same function. This used to be its own copy,
+        # and the Lua tier had no copy at all.
+        st = pointer_state(input, _touch_scratch)
+        if st[2] == P_NONE:
             return None
-        gp = getattr(input, "game_pointer", None)
-        if gp is not None:
-            held = bool(gp[3]) if len(gp) > 3 else False
-            return (gp[0], gp[1], bool(gp[2]), held)
-        p = getattr(input, "pointer", None)
-        if p is None:
-            return None
-        return (p.x, p.y, bool(p.click), bool(getattr(p, "down", False)))
+        return (st[0], st[1], bool(st[2] & P_CLICK), bool(st[2] & P_HELD))
 
     def mouse():
         # TIC-80-shaped 7-tuple (x, y, left, middle, right, scrollx, scrolly)
         # aliasing touch(): tap -> left button. Neither the touchscreen nor the
         # host pointer has middle/right/scroll, so those are constant 0/False.
-        gp = getattr(input, "game_pointer", None)
-        if gp is not None:
-            return (gp[0], gp[1], bool(gp[2]), False, False, 0, 0)
-        p = getattr(input, "pointer", None)
-        if p is None:
+        # Same resolver as touch() -- this was a THIRD copy of the question and
+        # had already drifted from the other two: it never saw the netplay
+        # refusal, so a linked match moved this screen's cursor. `left` stays
+        # the press EDGE it has always been here.
+        st = pointer_state(input, _touch_scratch)
+        if st[2] == P_NONE:
             return (0, 0, False, False, False, 0, 0)
-        return (p.x, p.y, bool(p.click), False, False, 0, 0)
+        return (st[0], st[1], bool(st[2] & P_CLICK), False, False, 0, 0)
 
     def time():
         # Milliseconds since the cart started (set by Workstation._start).
@@ -441,7 +458,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
         lc = canvas.new_layer(w, h, owner=owner)   # #63: lent to this program (leak fix)
         lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images,
-                       tables=tables, texts=texts, flags=tile_flags, owner=owner)
+                       flags=tile_flags, owner=owner)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):
@@ -485,23 +502,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                 im = Image(w, h, idx, -1)      # opaque (no transparent index)
                 im._paint = True               # marks the paint-image bake/ship fast paths
                 im._name = a                   # spr() can ship ["imgref", x, y, name]
+                # #186/#67: this run owns the image, so the device canvas may take
+                # its full-screen RGB565 bake OFF the gc heap -- which is the
+                # only way that 150KB allocation is reliable -- and hand it back
+                # through the reclaim_layers(owner) the layer loans use. A
+                # gc-heap canvas ignores the tag.
+                im._owner = owner
                 _img_cache[a] = im
             return im
         return Image.from_ascii(a, mapping, transparent)
-
-    def table(name):
-        # Desk Lab interop (#78): a Sheets sheet placed in the cart's folder
-        # (tables/<name>.moysheet) read as ROWS -- a list of lists of computed
-        # values. Missing name -> [] (image()'s degrade-don't-throw contract).
-        # The rows were decoded once at cart-load (moy_carts.decode_table).
-        rows = tables.get(name) if tables else None
-        return rows if rows is not None else []
-
-    def text(name):
-        # Desk Lab interop (#78): a Writer doc in the cart's folder
-        # (docs/<name>.moytext) read as LINES. Missing name -> [].
-        lines = texts.get(name) if texts else None
-        return lines if lines is not None else []
 
     # #63: hand the kid the NATIVE spr fast path when the canvas has one. The C
     # gate parses (n, x, y[, colorkey[, scale[, flip]]]) and appends to the
@@ -603,13 +612,22 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
         "textmode": textmode, "quit": _quit, "view": view,
         "cfg": cfg, "col": color,
+        # The C tier needs the DICT, not this closure. moycore's `run_begin`
+        # takes the cart's config and `h_cfg` reads it for libmoy's `cfg` verb,
+        # and `device/moycore_glue.py` picks it out of the namespace by this
+        # name -- a Python closure is not callable from C, so the two cannot be
+        # the same object. Nothing PRODUCED it until 2026-09-11, so every Lua
+        # cart on a board read `cfg(k, d)` as `d`, forever and silently: the
+        # glue's own test supplied `_moy_cfg` by hand and passed while the
+        # feature was dead. Not registered as a verb -- the glue registers only
+        # callables, and a dict is not one.
+        "_moy_cfg": config,
         "sfx": _sfx, "beep": _beep, "music": _music,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
         "rnd": lambda n=1.0: random.random() * n,
         "flr": lambda x: int(x // 1),
-        "Image": Image,
+        "Image": _owned_image_cls(owner),
         "image": image,
-        "table": table, "text": text,
     }
     # Capability-gated network API (#38): the shared Workstation passes a non-None
     # wifi backend ONLY for a cart with the "network" permission, so a normal kid

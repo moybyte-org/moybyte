@@ -313,3 +313,27 @@ def test_coin_quest_cart_loads_with_scene_and_runs():
     # player moved right; draw_scene drew the remaining actors
     assert api.world.actors("player")[0].x > [r for r in rows if r["tag"] == "player"][0]["x"]
     assert len(api.spr_calls) >= 1
+
+
+def test_coin_quest_pickup_asks_for_a_sound_that_exists(tmp_path):
+    """`sfx(0)` on every pickup, and the cart ships no `sounds.json`.
+
+    That is not a hole: a cart with no bank is handed `AudioBank.default()` by
+    `Project._build_audio`, and its slot 0 IS the rising coin blip. So the
+    pickup is audible on every tier -- but only while both halves hold, and
+    each can break alone: the block could emit a slot the bank has not got, or
+    the cart could grow an EMPTY `sounds.json` and take the default away.
+    """
+    from ws_helpers import build_ws, open_cart
+
+    rows = [{"tag": "player", "tile": 1, "x": 40, "y": 40, "flip": 0},
+            {"tag": "coin", "tile": 2, "x": 44, "y": 44, "flip": 0}]
+    with open(_coin_quest_dir() + "/main.py") as f:
+        api = _run(f.read(), _ActorAPI(rows), frames=1)
+    assert api._sfx == [0], "the pickup no longer plays slot 0"
+
+    ws = build_ws(tmp_path)
+    open_cart(ws, "Coin Quest")
+    assert ws.cart_error is None
+    sfx0 = ws.audio.engine.bank.get_sfx(0)
+    assert sfx0 is not None and sfx0.steps, "Coin Quest picks up in silence"

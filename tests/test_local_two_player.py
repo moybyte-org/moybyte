@@ -210,5 +210,5 @@ def test_the_settings_row_appears_only_where_the_option_works(tmp_path):
     rows = ws.settings_layer._settings_rows()
     keys = [r[0] for r in rows]
     assert "two_player" in keys
-    # It sits with FRAMESKIP -- both are play-time trades.
-    assert keys.index("two_player") == keys.index("frameskip") - 1
+    # It sits with STEADY -- both are play-time trades.
+    assert keys.index("two_player") == keys.index("steady") - 1

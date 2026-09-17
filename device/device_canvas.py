@@ -12,12 +12,12 @@ palette LUTs (PAL565 / PAL565_SW / PAL565_WIRE / _PAL565_WIRE_BUF), and the nati
 (_USE_GFX / LAYER_COPY_ASYNC / _RGB_KEY / _FONT8).
 
 Imports: `array` + the leaf device_util tick helpers; the native modules
-(moy_gfx/moy_alloc/lcd_bus/framebuf) are imported lazily inside methods, and the
+(moy_gfx/moy_alloc/framebuf) are imported lazily inside methods, and the
 staged `moy_font` + `moy_compositor.SRAM_BOUNCE_FLUSH` at module load (guarded).
 No moy_runtime cycle. Device-only module (modules/, auto-frozen).
 
 EVERY pixel the device draws flows through here, and the native moy_gfx/
-moy_alloc/lcd_bus paths cannot be exercised by the host test shim -- host tests
+moy_alloc paths cannot be exercised by the host test shim -- host tests
 prove the import DAG + structure; only a board confirms the panel draws, so run
 an on-glass suite after touching the hot paths. The module-load reads (_PAL565_WIRE_BUF buffer, _SRAM_BOUNCE_FLUSH->
 LAYER_COPY_ASYNC) must stay intact -- they travelled with the block verbatim.
@@ -70,20 +70,123 @@ def _fb_text(s):
 # #186 moy_buf: an image whose .pix already lives OFF the gc heap (a cover --
 # memoryview pix) gets its RGB565 bakes off-heap too, so the whole cover stops
 # taxing the GC mark phase. The owner (CoverCache._free_img) frees pix and
-# bakes together at eviction. Everything else (sheet tiles, paint images,
-# wallpaper blits) keeps gc bytearrays -- their owners drop them implicitly
-# (sheet gen bumps, cart ns teardown) and an explicit free there would leak.
+# bakes together at eviction. Everything else (sheet tiles, wallpaper blits)
+# keeps gc bytearrays -- their owners drop them implicitly (sheet gen bumps,
+# cart ns teardown) and an explicit free there would leak. A cart's PAINT
+# image is the exception this rule cost us; see _paint_bake_buf.
 try:
     import moybuf as _moybuf
 except ImportError:
     _moybuf = None
 
+# A bake at or above this many bytes is a full-surface buffer and never comes
+# off the gc heap while an allocator will serve it (_paint_bake_buf). The bar
+# is the measured one: the largest contiguous gc RUN on both S3 boards in
+# ordinary use is 64-147KB, so a request this size is a coin flip on a console
+# that has been up for a while, however much heap is free in total.
+_OFFHEAP_BAKE_BYTES = 64 * 1024
+
+# Off-heap paint bakes on loan to a running program (#186), owner -> [(img,
+# buf)]. Module-level for the reason _LAYER_POOL is: the canvas that BAKES an
+# image is often a layer's throwaway canvas, while the reclaim call arrives on
+# the root -- a per-canvas register would have leaked exactly the buffers a
+# scroll cart makes. Drained by release_bakes(owner) / reclaim_layers(owner).
+_LENT_BAKES = {}
+
+# ...and the most one owner may hold at once. The cap is not tidiness, it is
+# the price of lending to memory a CART can mint: off-heap bytes have no
+# collector, so every entry here is held until its owner is reclaimed, and the
+# register pins the Image too. `Image(320, 240, pix, -1)` inside _draw is legal
+# kid code, and uncapped it would take a fresh 153,600-byte loan every frame
+# until PSRAM was gone -- turning a merely wasteful cart into a dead one.
+# Past the cap a bake takes the gc bytearray it took before this mechanism
+# existed, so the pathological cart degrades to the OLD behaviour instead.
+# Four covers every shipped case with room: a cart's backdrop is one, the Paint
+# app's document plus its half-scale thumb is two.
+_MAX_LENT_BAKES = 4
+
 
 def _bake_buf(img, nbytes):
-    """A bake buffer riding its image's residency: off-heap iff img.pix is."""
-    if _moybuf is not None and isinstance(img.pix, memoryview):
+    """A bake buffer riding its image's residency: off-heap iff img.pix is.
+
+    Not for an image that names an OWNER, whose bakes are the loan register's
+    business alone. This path's buffers are freed by whoever owns the pixels
+    (CoverCache for a cover) and by _cache_rgb's variant eviction, and a buffer
+    the register also held would be freed twice -- which the C registry turns
+    into a ValueError, or worse if the id were reused. The desktop backdrop is
+    the first image to have both an owner and off-heap pixels (#186), so this
+    was reachable rather than hypothetical."""
+    if (_moybuf is not None and isinstance(img.pix, memoryview)
+            and getattr(img, "_owner", None) is None):
         return _moybuf.alloc(nbytes)
     return bytearray(nbytes)
+
+
+def _paint_bake_buf(img, nbytes):
+    """The buffer for a paint image's one RGB565 bake (_bake_indices).
+
+    This is the single biggest allocation the console makes: 153,600 bytes for
+    a 320x240 backdrop. It used to be a plain gc-heap bytearray, and that is
+    what made a cart with a painted backdrop refuse to start once a console had
+    been up for a while -- on BOTH tiers, since Python and Lua reach this
+    through the same image() verb. MicroPython's collector does not move
+    objects, so what a 150KB request needs is not free BYTES but a free RUN,
+    and a session's ordinary churn leaves the biggest run far short of that
+    while megabytes stay free. Measured on a Guition S3 idle at the launcher,
+    2026-09-09: 3092KB free after two full collects, largest run 143KB,
+    bytearray(153600) refused -- and moy_alloc.alloc(153600) granted at that
+    same instant. So a collect cannot buy this buffer; only leaving the gc heap
+    can.
+
+    Off-heap memory has no collector, so it is taken only for an image that
+    names an OWNER (`_owner`) and so has something that will hand the buffer
+    back: a CART's images, whether the engine loaded them (cart_api's image())
+    or the cart built them itself (its `Image`), reclaimed with the run; and
+    the Paint app's document, reclaimed when the app is left. _LENT_BAKES holds
+    the loan until release_bakes(owner) -- which reclaim_layers(owner) calls,
+    so a dead run's bakes go back through the same seam, and the same two call
+    sites, that already pool its layer buffers. An UNOWNED paint image (the
+    WM's window rasters, a wallpaper blit) keeps its gc bytearray, because
+    nothing would ever free it.
+
+    A re-bake reuses the loan rather than taking a second one, so an image
+    whose _rgb_i is invalidated repeatedly -- which is every stroke a kid paints
+    -- cannot grow the register. What CAN grow it is a new image each time, so
+    an owner is capped at _MAX_LENT_BAKES and falls back to the gc heap past it.
+    """
+    owner = getattr(img, "_owner", None)
+    if _moybuf is None or owner is None or nbytes < _OFFHEAP_BAKE_BYTES:
+        return _bake_buf(img, nbytes)
+    lent = _LENT_BAKES.setdefault(owner, [])
+    for i in range(len(lent)):
+        if lent[i][0] is img:
+            buf = lent[i][1]
+            if len(buf) == nbytes:
+                return buf
+            _moybuf.free(buf)
+            lent.pop(i)
+            break
+    if len(lent) >= _MAX_LENT_BAKES:
+        return bytearray(nbytes)       # the gc heap, flatly: _bake_buf's own
+                                       # off-heap lane is tracked by a COVER's
+                                       # owner, and past the cap this image has
+                                       # none -- an untracked loan is the one
+                                       # outcome worse than a refused bake
+    buf = _moybuf.alloc(nbytes)
+    if isinstance(buf, memoryview):     # a bytearray back means PSRAM said no
+        lent.append((img, buf))
+    return buf
+
+
+def _release_bakes(owner):
+    """Free `owner`'s off-heap paint bakes (see _paint_bake_buf)."""
+    lent = _LENT_BAKES.pop(owner, None)
+    if not lent or _moybuf is None:
+        return
+    for img, buf in lent:
+        if getattr(img, "_rgb_i", None) is buf:
+            img._rgb_i = None     # a stale draw raises, never reads freed RAM
+        _moybuf.free(buf)
 
 # MOY64 palette as RGB565 (generated from runtime/palette.py; no colorsys here).
 PAL565 = (
@@ -99,9 +202,10 @@ PAL565 = (
 
 # Same palette, byte-swapped to the T-Deck PANEL's wire order (#43). PAL565 above is
 # the canonical little-endian RGB565 (the host parity test asserts it == rgb565(MOY64));
-# PAL565_SW is what the T-Deck WRITEs into the device framebuffer so the per-flush
-# CPU byte-swap in lcd_bus.tx_color can be turned OFF (tdeck_display rgb565_byte_swap
-# =False). That swap was ~17 ms/frame over PSRAM -- the synchronous wall left once the
+# PAL565_SW is what a banded board WRITEs into the device framebuffer so the panel
+# module needs no per-flush CPU byte-swap (native/moy_lcd stores RGB565 high byte
+# first for the ST7789's wire order, `moy_lcd.BYTE_SWAP`). That swap was ~17 ms/frame
+# over PSRAM -- the synchronous wall left once the
 # DMA-overlap flush (#43) hid the SPI transfer. Folding it into this LUT makes it free
 # (the index->colour lookup happens anyway), so the kick drops from ~17 ms to ~2 ms and
 # the SPI finally overlaps render. PAL565 stays the canonical reference.
@@ -384,14 +488,16 @@ _ST_T_FILL, _ST_T_TEXT = 12, 13
 _ST_LEN = 14
 _GATE_RECT, _GATE_RECTB, _GATE_PRINT, _GATE_PIX = 0, 1, 2, 3
 
-# Layer-buffer pool (#63 GC-wall follow-up): moy_alloc has NO free(), so a layer
-# buffer handed back by a dead cart is returned HERE (keyed by byte size) and the
-# next new_layer of the same dims reuses it -- without this, every cart re-run
-# leaked its world (~150-384KB) from the heap_caps PSRAM pool until the allocator
-# started failing (~20-30 opens) and silently degraded to gc-heap buffers (the
-# GC wall back again). Only moy_alloc-backed buffers are pooled (a gc-heap
-# fallback bytearray is the collector's job); nothing is ever dropped from the
-# pool -- the set of distinct layer sizes across carts is small and stable.
+# Layer-buffer pool (#63 GC-wall follow-up): a layer buffer handed back by a
+# dead cart is returned HERE (keyed by byte size) and the next new_layer of the
+# same dims reuses it instead of going back to the allocator. Without it every
+# cart re-run leaked its world (~150-384KB) from the heap_caps PSRAM pool until
+# the allocator started failing (~20-30 opens) and silently degraded to gc-heap
+# buffers (the GC wall back again) -- and the malloc_dma lane, which is all a
+# board without moy_alloc.alloc has, cannot free at all. Only moy_alloc-backed
+# buffers are pooled (a gc-heap fallback bytearray is the collector's job);
+# nothing is ever dropped from the pool -- the set of distinct layer sizes
+# across carts is small and stable.
 _LAYER_POOL = {}
 
 
@@ -483,6 +589,18 @@ class DeviceCanvas:
         # made layers/view/background core; see blit_game): one pooled
         # _LayerComp reused across frames, allocated on first cropped composite.
         self._view_scratch = None
+        # The fold's snapshot scratch (moy_fold.h): the game canvas's row range
+        # at the canvas stride, so ONE shape serves a native frame and a view
+        # crop. `_snap_live` is a DMA still reading the game canvas; sync_back
+        # fences it before the cart's next write.
+        self._snap_scratch = None
+        self._snap_live = False
+        # blit_game's two method probes, cached (#66 lever 1): a getattr that
+        # finds a method allocates a bound method, and this is every play frame.
+        self._bg_gc = None            # the game canvas / its flush_batch
+        self._bg_fb = None
+        self._snap_fn = None          # the comp's snap_scale_fold, probed once
+        self._snap_probed = False
         # DMA double-buffer (#40, DEFAULT ON -- moy_compositor.DOUBLE_BUFFER, device-
         # confirmed stable): the compositor's BACK buffer ping-pongs between two
         # physical buffers each flush, so this canvas must re-point its draw target
@@ -594,20 +712,6 @@ class DeviceCanvas:
         self._t_map_us = 0
         self._t_text_us = 0
         self._t_fill_us = 0
-        # DRAW3 (2026-07-29 regression hunt): DRAW2's five buckets left
-        # (DRAWBRK render - them) as "Python dispatch + circ/line/pix" -- a
-        # guess, and on Sky Run a 3.6ms one. These time the rest, so the
-        # leftover is a MEASURED dispatch number: spr = the per-sprite blit565
-        # path (the spr calls that did NOT coalesce into blit_batch -- DRAW2
-        # batch=0.00 means every sprite went this way), shape = circ/line,
-        # img = the paint-image blit_indices. Counts ride along because a
-        # bucket grows either by cost-per-call or by call COUNT, and only the
-        # count distinguishes "the op got slower" from "something calls it more".
-        self._t_spr_us = 0
-        self._t_shape_us = 0
-        self._t_img_us = 0
-        self._n_spr = 0
-        self._n_shape = 0
         # DRAW2 timing gate. The per-op ticks_us pair costs ~6us -- meaningless
         # against a cart's big native verbs (which is why it shipped ungated), but
         # ~6% of a CHROME fill, of which a single picker draw issues ~155. The
@@ -684,7 +788,18 @@ class DeviceCanvas:
         cart's _update, so a predicted draw_layer background restore started here
         runs on the GDMA engine WHILE the kid's Python logic executes -- by the
         time _draw calls draw_layer, the ~7ms copy is already done (copy_wait
-        returns immediately). Prediction armed by blit_window_from (below)."""
+        returns immediately). Prediction armed by blit_window_from (below).
+
+        ALSO THE SNAPSHOT FENCE (moy_fold.h): a folded frame's copy of the game
+        canvas rides the GDMA engine, and this canvas -- the one whose
+        blit_game armed it -- is re-pointed here before every Player tick on
+        both banded boards (their present() hooks), so this is where the
+        cart's next write of the LIVE canvas is fenced. One attribute test on
+        every other frame; the C is one compare once the copy has landed,
+        which it has by the end of the loop head."""
+        if self._snap_live:
+            self._snap_live = False
+            self._comp.snap_fence()
         buf = self._comp.back_buffer()
         if buf is not self._buf:
             self._buf = buf
@@ -1267,19 +1382,10 @@ class DeviceCanvas:
         x0 = int(x1); y0 = int(y1); xe = int(x2); ye = int(y2)
         col = self._col(c)
         if self._gfx is not None:
-            if self._prof:
-                _t0 = _ticks_us()      # DRAW3: shape bucket (line)
-                self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye,
-                               col, self._cam_x, self._cam_y,
-                               self._clip_x0, self._clip_y0,
-                               self._clip_x1, self._clip_y1)
-                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
-                self._n_shape += 1
-            else:
-                self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye,
-                               col, self._cam_x, self._cam_y,
-                               self._clip_x0, self._clip_y0,
-                               self._clip_x1, self._clip_y1)
+            self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye,
+                           col, self._cam_x, self._cam_y,
+                           self._clip_x0, self._clip_y0,
+                           self._clip_x1, self._clip_y1)
             return
         dx = abs(xe - x0); dy = -abs(ye - y0)
         sx = 1 if x0 < xe else -1
@@ -1360,7 +1466,10 @@ class DeviceCanvas:
         letterbox_inplace lesson: paint into the buffer being drawn into).
         `defer` is accepted for signature parity with the P4; there is no async
         engine here, so it is ignored."""
-        fb = getattr(gc, "flush_batch", None)
+        if gc is not self._bg_gc:
+            self._bg_gc = gc
+            self._bg_fb = getattr(gc, "flush_batch", None)
+        fb = self._bg_fb
         if fb is not None:
             fb()
         if self._batch_arr[0] > 4:
@@ -1369,36 +1478,61 @@ class DeviceCanvas:
         if g is None:
             return                     # no-gfx build: the factory refused earlier
         gw, gh = gc.w, gc.h
-        sx, sy, vw, vh = src if src is not None else (0, 0, gw, gh)
+        # No tuple for the whole-canvas source: a 4-tuple is a two-block
+        # allocation, which on the S3 rescans the heap's table (see wm.py).
+        if src is not None:
+            sx, sy, vw, vh = src
+        else:
+            sx = sy = 0
+            vw = gw
+            vh = gh
         ox = int(ox)
         oy = int(oy)
         scale = int(scale)
         rw = vw * scale
         rh = vh * scale
         # #190 flush-bounce scale fold: on the SRAM-bounce tier, skip this
-        # whole root-fb composite -- snapshot the (cropped) game frame into the
-        # flush-private scratch and let the bounce pump synthesize each band
-        # from it (black + one dest-clipped blit565_scale). Anything that draws
-        # on the root AFTER us (toast/notice/cursor) disarms, and the comp then
+        # whole root-fb composite -- snapshot the game frame's row range into
+        # the flush-private scratch and let the bounce pump synthesize each
+        # band from it (black + the rect at scale). Anything that draws on the
+        # root AFTER us (toast/notice/cursor) disarms, and the comp then
         # performs this composite itself -- so the fold is presentation-
         # invisible, purely a data-path change. The fence blocks (normally a
         # no-op) until the PREVIOUS flush has read the scratch we're about to
         # overwrite -- its bands feed early in the frame we just spent.
+        #
+        # THE SNAPSHOT IS THE DMA ENGINE'S (moy_fold.h, 2026-09-08): the copy
+        # was the whole of `cmp` -- 5.1 ms a frame for a native 320x240 cart
+        # on the Guition, 1.1 ms for a p8 canvas on either S3 -- and started
+        # here it lands before the cart's next tick; `sync_back` takes the
+        # fence. The C memcpys when the engine declines, and REFUSES geometry
+        # the synthesis cannot express, in which case the composite below
+        # runs from the live canvas exactly as it did before the fold.
         comp = self._comp
-        fold = getattr(comp, "fold_supported", False)
+        if not self._snap_probed:
+            self._snap_probed = True
+            self._snap_fn = getattr(comp, "snap_scale_fold", None)
+        snap = self._snap_fn
         src_buf = gc._buf
-        if fold:
+        if snap is not None:
             comp.fold_fence()
-        if fold or sx or sy or vw != gw or vh != gh:
+            scr = self._snap_scratch
+            if scr is None or scr._w != gw or scr._h != vh:
+                scr = self._snap_scratch = _LayerComp(gw, vh, g)
+            try:
+                if snap(src_buf, sy * gw * 2, scr.framebuffer(), vw, vh, sx, gw,
+                        ox, oy, scale):
+                    self._snap_live = True
+                return
+            except ValueError:
+                pass
+        if sx or sy or vw != gw or vh != gh:
             scr = self._view_scratch
-            if scr is None or scr.size() != (vw, vh):
+            if scr is None or scr._w != vw or scr._h != vh:
                 scr = self._view_scratch = _LayerComp(vw, vh, g)
             g.blit565(scr.framebuffer(), vw, vh, -sx, -sy,
                       src_buf, gw, gh, -1)
             src_buf = scr.framebuffer()
-        if fold:
-            comp.arm_scale_fold(src_buf, vw, vh, ox, oy, scale)
-            return
         # Bezel: only the four strips outside the viewport (raw 565 black).
         # Skipped on a WINDOWED tier -- see letterbox_composite above; the
         # composite below writes exactly the game rect either way, so this is
@@ -1476,19 +1610,10 @@ class DeviceCanvas:
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         if self._gfx is not None:
-            if self._prof:
-                _t0 = _ticks_us()      # DRAW3: shape bucket (circ)
-                self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
-                               self._cam_x, self._cam_y,
-                               self._clip_x0, self._clip_y0,
-                               self._clip_x1, self._clip_y1)
-                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
-                self._n_shape += 1
-            else:
-                self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
-                               self._cam_x, self._cam_y,
-                               self._clip_x0, self._clip_y0,
-                               self._clip_x1, self._clip_y1)
+            self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
+                           self._cam_x, self._cam_y,
+                           self._clip_x0, self._clip_y0,
+                           self._clip_x1, self._clip_y1)
             return
         # The no-moy_gfx fallback, walking span the way the kernel does (#97).
         span = 0
@@ -1538,19 +1663,10 @@ class DeviceCanvas:
         tk = None if gfx is None else getattr(gfx, "tri", None)
         if tk is not None:
             col = self._col(c)
-            if self._prof:
-                _t0 = _ticks_us()      # DRAW3: shape bucket (tri)
-                tk(self._buf, self._stride, self._bh,
-                   int(x1), int(y1), int(x2), int(y2), int(x3), int(y3), col,
-                   self._cam_x, self._cam_y,
-                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
-                self._n_shape += 1
-            else:
-                tk(self._buf, self._stride, self._bh,
-                   int(x1), int(y1), int(x2), int(y2), int(x3), int(y3), col,
-                   self._cam_x, self._cam_y,
-                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            tk(self._buf, self._stride, self._bh,
+               int(x1), int(y1), int(x2), int(y2), int(x3), int(y3), col,
+               self._cam_x, self._cam_y,
+               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
             return
         spans = tri_spans(x1, y1, x2, y2, x3, y3)
         if spans:
@@ -1748,23 +1864,12 @@ class DeviceCanvas:
         gfx = self._gfx
         sk = None if gfx is None else getattr(gfx, "sspr", None)
         if sk is not None:
-            if self._prof:
-                _t0 = _ticks_us()      # DRAW3: shape bucket (sspr)
-                sk(self._buf, self._stride, self._bh,
-                   sheet.pix, sheet.w, sheet.h, sx, sy, sw, sh,
-                   dx, dy, dw, dh, int(colorkey), int(flip),
-                   self._wire_pal(), self._palt,
-                   self._cam_x, self._cam_y,
-                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
-                self._n_shape += 1
-            else:
-                sk(self._buf, self._stride, self._bh,
-                   sheet.pix, sheet.w, sheet.h, sx, sy, sw, sh,
-                   dx, dy, dw, dh, int(colorkey), int(flip),
-                   self._wire_pal(), self._palt,
-                   self._cam_x, self._cam_y,
-                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            sk(self._buf, self._stride, self._bh,
+               sheet.pix, sheet.w, sheet.h, sx, sy, sw, sh,
+               dx, dy, dw, dh, int(colorkey), int(flip),
+               self._wire_pal(), self._palt,
+               self._cam_x, self._cam_y,
+               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
             return
         flip = int(flip)
         fx = flip & 1
@@ -1812,25 +1917,13 @@ class DeviceCanvas:
         gfx = self._gfx
         tk = None if gfx is None else getattr(gfx, "tline", None)
         if tk is not None:
-            if self._prof:
-                _t0 = _ticks_us()      # DRAW3: shape bucket (tline)
-                tk(self._buf, self._stride, self._bh,
-                   tilemap.cells, tilemap.w, tilemap.h,
-                   sheet.pix, sheet.w, sheet.h,
-                   x0, y0, x1, y1, u, v, du, dv, ck,
-                   self._wire_pal(), self._palt,
-                   self._cam_x, self._cam_y,
-                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
-                self._n_shape += 1
-            else:
-                tk(self._buf, self._stride, self._bh,
-                   tilemap.cells, tilemap.w, tilemap.h,
-                   sheet.pix, sheet.w, sheet.h,
-                   x0, y0, x1, y1, u, v, du, dv, ck,
-                   self._wire_pal(), self._palt,
-                   self._cam_x, self._cam_y,
-                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            tk(self._buf, self._stride, self._bh,
+               tilemap.cells, tilemap.w, tilemap.h,
+               sheet.pix, sheet.w, sheet.h,
+               x0, y0, x1, y1, u, v, du, dv, ck,
+               self._wire_pal(), self._palt,
+               self._cam_x, self._cam_y,
+               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
             return
         # Python fallback -- the correctness lane, same arithmetic.
         tu = tw << 16
@@ -1909,19 +2002,10 @@ class DeviceCanvas:
                 and self._palgen == 0):
             if getattr(img, "_rgb_i", None) is None:
                 self._bake_indices(img)
-            if self._prof:
-                _t0 = _ticks_us()      # DRAW3: spr bucket (paint-image fast path)
-                self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
-                                  img._rgb_i, img.w, img.h, -1,
-                                  self._clip_x0, self._clip_y0,
-                                  self._clip_x1, self._clip_y1)
-                self._t_spr_us += _ticks_diff(_ticks_us(), _t0)
-                self._n_spr += 1
-            else:
-                self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
-                                  img._rgb_i, img.w, img.h, -1,
-                                  self._clip_x0, self._clip_y0,
-                                  self._clip_x1, self._clip_y1)
+            self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
+                              img._rgb_i, img.w, img.h, -1,
+                              self._clip_x0, self._clip_y0,
+                              self._clip_x1, self._clip_y1)
             return
         # Blit a cached, pre-scaled+flipped+pal-applied RGB565 copy in one C call. The
         # cache lives on the Image (sheet tiles are reused across frames via the
@@ -1937,19 +2021,10 @@ class DeviceCanvas:
                 or getattr(img, "_rgb_palgen", -1) != self._palgen):
             if not self._rgb_variant(img, scale, flip):
                 self._cache_rgb(img, scale, flip)
-        if self._prof:
-            _t0 = _ticks_us()          # DRAW3: spr bucket (cached-bake blit)
-            self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
-                              img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
-                              self._clip_x0, self._clip_y0,
-                              self._clip_x1, self._clip_y1)
-            self._t_spr_us += _ticks_diff(_ticks_us(), _t0)
-            self._n_spr += 1
-        else:
-            self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
-                              img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
-                              self._clip_x0, self._clip_y0,
-                              self._clip_x1, self._clip_y1)
+        self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
+                          img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
+                          self._clip_x0, self._clip_y0,
+                          self._clip_x1, self._clip_y1)
 
     def _rgb_variant(self, img, scale, flip):
         # Promote a previously-baked (scale, flip, pal-state) variant into the hot
@@ -2032,7 +2107,9 @@ class DeviceCanvas:
         # The "images are data, not draw calls" bake (#63 Fold 3), off the hot path.
         w = img.w
         h = img.h
-        buf = _bake_buf(img, w * h * 2)   # #186: off-heap for off-heap images
+        # #186: a full-surface bake is off-heap for an OWNED image, because the
+        # gc heap cannot promise a 150KB contiguous run. See _paint_bake_buf.
+        buf = _paint_bake_buf(img, w * h * 2)
         self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, self._wire)
         img._rgb_i = buf
 
@@ -2399,11 +2476,6 @@ class DeviceCanvas:
         self._t_map_us = 0          # #66: the render-bound carts' remaining verbs
         self._t_text_us = 0
         self._t_fill_us = 0
-        self._t_spr_us = 0          # DRAW3: the rest of the render ms (see __init__)
-        self._t_shape_us = 0
-        self._t_img_us = 0
-        self._n_spr = 0
-        self._n_shape = 0
         self.gate_counts_reset()    # the #155 gates keep their own fill/text us
                                     # (a gated rect never reaches _t_fill_us);
                                     # they are per-FRAME numbers like the rest,
@@ -2490,16 +2562,8 @@ class DeviceCanvas:
         if iw <= 0 or ih <= 0:
             return
         if self._gfx is not None:
-            if self._prof:
-                _t0 = _ticks_us()      # DRAW3: img bucket. Documented as a LOAD-time
-                                       # op -- if this is nonzero during play, some
-                                       # cart is blitting a paint image every frame.
-                self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
-                                       indices, iw, ih, self._wire)
-                self._t_img_us += _ticks_diff(_ticks_us(), _t0)
-            else:
-                self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
-                                       indices, iw, ih, self._wire)
+            self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
+                                   indices, iw, ih, self._wire)
             return
         d = memoryview(self._buf).cast("H")
         w = self.w
@@ -2545,26 +2609,8 @@ class DeviceCanvas:
         # (see _LayerComp) so gc.collect() never marks it -- the GC-wall fix (#63): a layer
         # cart's live set stays small, keeping collect cheap and the heap unfragmented.
         #
-        # COMPACT FIRST (#54/#41): a scroll cart re-execs fresh on every entry (lay=None),
-        # so it re-allocates its ~384KB world each time. The previous run's layer is already
-        # unpinned (you exit through the launcher: its ns is dropped + the recorder's atlas/
-        # layer registry was reset) but not yet collected; under the web view's per-frame
-        # JSON/command churn the PSRAM gc heap fragments and a fresh contiguous 384KB
-        # eventually fails (MemoryError). Collecting right before the alloc reclaims the dead
-        # layer + transient strings so the region is contiguous again.
-        #
-        # BIG layers only. "Cart-start only, so the ~10ms collect is invisible" was
-        # wrong on two counts: the bar's strip cache also builds layers (1024x18) and
-        # rebuilds them on a canvas switch, i.e. twice per gesture, and on the P4 the
-        # collect is ~55ms, not 10 -- 72ms of an 86ms Settings frame at the press and
-        # release edges (measured 2026-07-26). Defragmenting PSRAM only earns its
-        # keep ahead of a cart-world-sized contiguous request, so small layers skip it.
-        if int(w) * int(h) >= _COMPACT_MIN_PX:
-            try:
-                import gc
-                gc.collect()
-            except Exception:  # noqa: BLE001 -- gc is always present; never block a layer alloc
-                pass
+        # The compact-first collect a big GC-heap layer needs lives in _LayerComp,
+        # on the one path that allocates from the gc heap.
         lay = self._make_layer(_LayerComp(int(w), int(h), self._gfx))
         lay._nocache = True            # #63: a layer's own map() rasters directly (no nesting)
         lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class
@@ -2596,16 +2642,42 @@ class DeviceCanvas:
             lent.setdefault(owner, []).append((comp._buf, comp._nbytes))
         return lay
 
+    def release(self):
+        """Free this LAYER's pixel buffer now (see _LayerComp.release): the
+        windowed WM's verb for a window that died or is being rebuilt, and for
+        the drag backdrop it re-mints. Never for a cart's layers -- those are
+        lent and go back to the pool through reclaim_layers. A root canvas
+        (no releasable compositor) ignores it."""
+        rel = getattr(self._comp, "release", None)
+        if rel is not None:
+            rel()
+
+    def release_bakes(self, owner):
+        """Return `owner`'s off-heap full-surface paint bakes (#186) and NOTHING
+        else -- no layer pooling, no map cache dropped.
+
+        The verb for an owner that is not a cart RUN: the Paint app is a
+        console-lifetime process, so it has no death for reclaim_layers to hang
+        off, and its leaving hook must not drop a map cache or drain a layer
+        copy that belongs to whatever it is leaving to. Probed by getattr like
+        its sibling -- the host Canvas has neither."""
+        _release_bakes(owner)
+
     def reclaim_layers(self, owner):
         """Return a dead program's pooled layer buffers to _LAYER_POOL for reuse
-        (#63 leak fix: moy_alloc has no free(), so without this every cart re-run
-        leaked its world from the heap_caps pool). Also drops the Fold-2 map cache
-        (its hidden layer is program content) and any in-flight async layer copy.
-        Callers probe via getattr (the host Canvas has no pool -- gc reclaims)."""
+        (#63 leak fix: without this every cart re-run leaks its world from the
+        heap_caps pool). Also drops the Fold-2 map cache (its hidden layer is
+        program content) and any in-flight async layer copy. Callers probe via
+        getattr (the host Canvas has no pool -- gc reclaims)."""
         if self._lcopy is not None:
             self._drain_lcopy()
         self._lcopy_pred = None
         self._mapcache = None
+        # #186: and the run's off-heap paint bakes, which are loans of the same
+        # kind. BEFORE the _lent_layers guard below -- a cart that painted a
+        # backdrop without ever calling make_layer has bakes to give back and
+        # no layers, and returning early there leaked every one of them.
+        _release_bakes(owner)
         lent = self._lent_layers
         if not lent:
             return
@@ -2976,6 +3048,9 @@ class SystemCanvas(DeviceCanvas):
         return
 
 
+_ORIGIN_HEAP, _ORIGIN_POOL, _ORIGIN_ALLOC, _ORIGIN_DMA = 0, 1, 2, 3
+
+
 class _LayerComp:
     """Minimal compositor stand-in so DeviceCanvas can back a scroll layer (#54): a
     fresh RGB565 buffer of the requested size sharing the parent's moy_gfx kernel. No
@@ -3006,27 +3081,81 @@ class _LayerComp:
         nbytes = w * h * 2
         buf = None
         pooled = False
+        # Where the buffer came from decides what release() does with it:
+        # a pool buffer goes back to the pool, an alloc() buffer is freed
+        # (the registry-backed allocator, #186), a malloc_dma one (older
+        # firmware: no free) and a gc-heap bytearray are simply dropped.
+        origin = _ORIGIN_HEAP
         free = _LAYER_POOL.get(nbytes)
         if free:
             buf = free.pop()          # a dead cart's buffer of the same dims -> reuse
             pooled = True
+            origin = _ORIGIN_POOL
         else:
             try:
                 import moy_alloc
-                try:
-                    import lcd_bus as _mem      # lvgl build (T-Deck): caps live here
-                except ImportError:             # mainline build (P4 #58): moy_alloc
-                    _mem = moy_alloc            # exports the same MEMORY_* constants
-                buf = moy_alloc.malloc_dma(nbytes, _mem.MEMORY_SPIRAM | _mem.MEMORY_DMA)
-                pooled = buf is not None    # heap_caps memory: pool it on reclaim (no free())
+                caps = moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA
+                alloc = getattr(moy_alloc, "alloc", None)
+                if alloc is not None:
+                    buf = alloc(nbytes, caps)
+                    origin = _ORIGIN_ALLOC
+                else:
+                    buf = moy_alloc.malloc_dma(nbytes, caps)
+                    origin = _ORIGIN_DMA
+                pooled = buf is not None    # heap_caps memory: pool it on reclaim
             except Exception:  # noqa: BLE001 -- host / no DMA allocator -> gc-heap bytearray
                 buf = None
+                origin = _ORIGIN_HEAP
         if buf is None:
+            # COMPACT FIRST (#54/#41), for the gc-heap fallback ONLY: a scroll
+            # cart re-execs fresh on every entry and re-allocates its ~384KB
+            # world each time; the previous run's layer is unpinned but not yet
+            # collected, and under the web view's per-frame churn the gc heap
+            # fragments until a fresh contiguous 384KB fails. Collecting right
+            # before the alloc makes the region contiguous again. BIG layers
+            # only -- the bar's strip cache builds layers twice per gesture.
+            # A pooled / heap_caps buffer (every board) lives OUTSIDE the gc
+            # heap, so a collect buys it nothing: the collect used to run
+            # ahead of every big layer regardless and cost the Guition P4 a
+            # 430ms pause per window buffer, backdrop and retained frame
+            # (three of them on one CHANGE tap, 2026-09-09).
+            if w * h >= _COMPACT_MIN_PX:
+                try:
+                    import gc
+                    gc.collect()
+                except Exception:  # noqa: BLE001 -- never block a layer alloc
+                    pass
             buf = bytearray(nbytes)
         self._buf = buf
         self._nbytes = nbytes
         self.pooled = pooled
+        self._origin = origin
         self._gfx = gfx
+
+    def release(self):
+        """Give the buffer back NOW -- the windowed WM's word that the window
+        (or the drag backdrop) it backed is gone. Off-heap layer memory has
+        no collector: before this, every window open leaked its buffer from
+        heap_caps -- ~3.6MB per Library -> CHANGE -> home round on the
+        Guition P4, measured 2026-09-09, until the pool ran dry and every
+        later layer fell back onto the gc heap, where its pixels were scanned
+        by every collect (430ms a collect after an hour). A pool buffer goes
+        back to the pool; an alloc() one is freed and its view neutered (a
+        stale draw raises, never writes freed RAM); the rest is dropped.
+        Idempotent."""
+        buf = self._buf
+        if buf is None:
+            return
+        self._buf = None
+        origin = self._origin
+        if origin == _ORIGIN_POOL:
+            _LAYER_POOL.setdefault(self._nbytes, []).append(buf)
+        elif origin == _ORIGIN_ALLOC:
+            try:
+                import moy_alloc
+                moy_alloc.free(buf)
+            except Exception:  # noqa: BLE001 -- a refused free is a leak, not a crash
+                pass
 
     def size(self):
         return (self._w, self._h)

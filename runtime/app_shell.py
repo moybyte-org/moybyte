@@ -1,5 +1,5 @@
-# The Desk Lab apps' shared "list shell" (#78 family: Sheets / Writer /
-# Storybook -- written in sequence, so each had hand-copied the same
+# The Desk Lab apps' shared "list shell" (#78 family: Files / Storybook --
+# written in sequence, so each had hand-copied the same
 # scaffolding). Two small bases, extracted MECHANICALLY so every derived
 # number and drawn pixel stays byte-identical (#39):
 #
@@ -35,17 +35,25 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
 
+try:
+    from editors import TE_COMMIT, TE_CANCEL
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors import TE_COMMIT, TE_CANCEL
+
 
 class ListShellLayout:
     """Base for the apps' Layout classes. Subclass __init__ calls _init_frame
     first, lays out its own bands/views, then _init_list(top) for the list
     geometry. Nothing here reads a subclass field except what it set."""
 
-    def _init_frame(self, w, h, fs, windowed):
+    def _init_frame(self, w, h, fs, windowed, cs=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(fs))
-        self.bar_h = 0 if windowed else 18 * self.fs
+        # The chrome scale (#203) sizes only the OS bar band this app sits under;
+        # everything the app itself draws stays on `fs`.
+        self.cs = max(self.fs, int(cs)) if cs else self.fs
+        self.bar_h = 0 if windowed else 18 * self.cs
 
     def _init_list(self, top):
         """The notebook-list rows below `top` (the title/toolbar band's bottom)."""
@@ -58,17 +66,23 @@ class ListShellLayout:
         return (4 * self.fs, self.list_y + i * self.row_h,
                 self.w - 8 * self.fs, self.row_h - 2 * self.fs)
 
+    def rows_view(self):
+        """The list's VIEWPORT -- the band row_rect fills, as one rect. The
+        scroll model needs the whole band where the draw needs a slot, and both
+        must come off the same numbers."""
+        return (4 * self.fs, self.list_y, self.w - 8 * self.fs,
+                self.list_rows * self.row_h)
+
 
 class ListShellApp:
     """Mixin for the app layers. Expects the host class to provide `_store`
     (its AppContext storage role), `_damage`, layout, sel, top, status
     (+ _save_failed where _persist is used) and a _tap_row verb for the A
-    button. `_button` and `_list_pointer` additionally want `_theme`,
-    `_surf` and (for the pointer) `_in` + a `grid`."""
+    button. `_button` additionally wants `_theme` and `_surf`."""
 
-    APP_TITLE = None            # the shipped cart's title ("Writer", ...)
-    APP_PERM = None             # its identity permission ("notebook", ...)
-    APP_FOLDER = None           # its store folder ("writer.moy", ...)
+    APP_TITLE = None            # the shipped cart's title ("Files", ...)
+    APP_PERM = None             # its identity permission ("browse", ...)
+    APP_FOLDER = None           # its store folder ("files.moy", ...)
 
     @classmethod
     def is_app(cls, cart):
@@ -122,77 +136,39 @@ class ListShellApp:
         dimmed sprite -- only a dimmed colour).
 
         Three private copies of this collapsed into one over two passes.
-        Phase 3a absorbed `writer._hist_btn` and `sheets._icon_btn` into
-        `ui.chip` itself (whose `disabled` state ended the divergence where
-        Sheets ringed an enabled icon in `accent` and Writer's identical pair
+        Phase 3a absorbed the apps' private icon buttons into `ui.chip`
+        itself (whose `disabled` state ended the divergence where one app
+        ringed an enabled icon in `accent` and another's identical pair
         in `dim`), which left three byte-identical two-line DELEGATES -- and
         Storybook's, which was the same call with the two arguments it never
         passes left off. They are this one method now."""
         _ui.chip(cv, self._theme.colors(), r, label, hot=hot, fs=self.layout.fs,
                  glyph=glyph, glyph_draw=self._surf.glyph, disabled=not enabled)
 
-    # -- the list/rename pointer head ---------------------------------------------
-
-    def _list_pointer(self, px, py, click, on_new, on_open):
-        """The LIST and RENAME modes' pointer handling, shared by the two apps
-        whose list view is a `FileGridView` (Writer, Sheets). True when it
-        handled the event; False when the host is in one of its OWN modes and
-        should carry on.
-
-        `on_new` / `on_open` are the host's verbs (`_new_doc`/`_open_doc` vs
-        `_new_sheet`/`_open_file`) -- passed rather than renamed, because a
-        thumbnail grid of documents is generic and "make a new sheet" is not.
-        Bound methods are built on a pointer EVENT, never per frame."""
-        lay = self.layout
-        if self.mode == "list":
-            # The grid's hover/pressed pump runs on every sample, not just the
-            # click frame -- a press cue nobody sees is not a cue.
-            if self.grid.pointer_frame(px, py, self._surf.pointer()):
-                self._damage.all()
-            if not click:
-                return True
-            if self._in(px, py, lay.new_btn):
-                on_new()
-                return True
-            hit = self.grid.tap(px, py)
-            if hit and hit[0] in ("pick", "sel"):
-                on_open(hit[1])              # the picker opens on ONE tap
-            return True
-        if self.mode == "rename":
-            if click and self._in(px, py, lay.del_btn):
-                self._rename_commit()
-            return True
-        return False
-
     # -- typed keys ------------------------------------------------------------
 
     def _edge_key(self, inp):
-        """The typed-key edge (one key per physical press -- the code_layer
-        idiom): the keyboard reports the byte for the frame it is down then 0.
-        Returns the fresh byte or 0. Hosts keep `self._ekey_prev = 0` in
-        __init__/mode resets."""
+        """The typed-key edge (one key per physical press): the keyboard
+        reports the byte for the frame it is down, then 0. Returns the fresh
+        byte or 0. Hosts keep `self._kedge = editors.KeyEdge()` and reset it
+        on a mode change."""
         k = inp.last_key
-        fresh = k if (k and k != self._ekey_prev) else 0
-        self._ekey_prev = k
-        return fresh
+        return k if self._kedge.hit(k) else 0
 
-    # Rename entry cap -- a label, not a paragraph (Files narrows it to 20).
+    # Rename entry cap -- a label, not a paragraph.
     RENAME_MAX = 24
 
     def _typed_rename(self, inp):
-        """The rename-buffer keystroke handler the Desk-Lab apps share: Enter
-        commits, Backspace trims, printable ASCII appends up to RENAME_MAX.
-        Hosts supply `rename_text` and `_rename_commit()`."""
-        k = self._edge_key(inp)
-        if not k:
-            return
-        if k in (0x0D, 0x0A):
+        """The rename field's keystrokes: hosts keep `self.rename`, a
+        `TextEntry(RENAME_MAX)`, and supply `_rename_commit()` /
+        `_rename_cancel()` for its Enter and Esc."""
+        ev = self.rename.feed(inp)
+        if ev == TE_COMMIT:
             self._rename_commit()
-        elif k in (0x08, 0x7F):
-            self.rename_text = self.rename_text[:-1]
-        elif 0x20 <= k < 0x7F and len(self.rename_text) < self.RENAME_MAX:
-            self.rename_text += chr(k)
-        self._damage.all()
+        elif ev == TE_CANCEL:
+            self._rename_cancel()
+        if ev is not None:
+            self._damage.all()
 
     # -- the list view's scroll window + nav -------------------------------------
 
@@ -202,6 +178,13 @@ class ListShellApp:
             self.top = self.sel
         elif self.sel >= self.top + rows:
             self.top = self.sel - rows + 1
+
+    def _clamp_list(self, count):
+        """Keep the scroll window inside a list that changed under it (a
+        refresh, a delete, a font-scale relayout). Range only -- it must never
+        nudge the selection, which is the drag's to move."""
+        self.top = max(0, min(self.top,
+                              max(0, count - self.layout.list_rows)))
 
     def _list_nav(self, inp, count):
         """The list mode's trackball verbs: up/down wrap the selection (keeping
@@ -214,4 +197,64 @@ class ListShellApp:
             self._scroll_list()
         elif inp.pressed("a"):
             self._tap_row(self.sel)
+        self._clamp_list(count)
         return True
+
+    # -- the list view's TOUCH model (#113) --------------------------------------
+    #
+    # `top` stays the row-slot state of record -- draw and hit-test both read
+    # it -- and the shared `ui.ScrollRegion` is the interaction model over it:
+    # the drag, the clamp and the slim scrollbar. Row-SNAPPED like the Settings
+    # rows (a fling is stopped on release), so the two row lists a kid meets
+    # behave identically; #113 Phase 5 converts both to pixel-smooth at once.
+
+    def _rows_region(self, count):
+        """The row list's ScrollRegion + its tap/drag machine, built lazily and
+        re-synced to the live layout each sample. The sub-row remainder is kept
+        while a drag is live: re-snapping from `top` every sample would discard
+        normal 3-5px finger travel, so a gradual drag could never cross a row."""
+        if self._rows_scroll is None:
+            self._rows_scroll = _ui.ScrollRegion()
+            self._rows_taps = _ui.DragTap(self._rows_scroll)
+        lay = self.layout
+        self._rows_scroll.set(lay.rows_view(), count * lay.row_h)
+        if not self._rows_scroll.drag_active:
+            self._rows_scroll.offset = self.top * lay.row_h
+        return self._rows_scroll
+
+    def _rows_pointer(self, px, py, click, count):
+        """One pointer sample over the row list. A held drag SCROLLS (`top`
+        snapped from the region's offset, the selection dragged along so the
+        next key press does not yank the view back to it); a row activates only
+        on a clean tap RELEASE, so letting go of a scroll can never open
+        whatever the finger stopped on. Returns the tapped row index, else
+        None."""
+        lay = self.layout
+        sr = self._rows_region(count)
+        press = self._rows_taps.frame(px, py, click, self._surf.pointer().down,
+                                      slop=4 * lay.fs + 2)
+        if self._rows_taps.dragging:
+            vis = lay.list_rows
+            self.top = max(0, min(max(0, count - vis), sr.offset // lay.row_h))
+            if self.sel < self.top:
+                self.sel = self.top
+            elif self.sel >= self.top + vis:
+                self.sel = self.top + vis - 1
+            self._damage.all()
+        else:
+            sr.stop()      # row-snapped: a released flick must not coast, and
+                           # a live fling would swallow the NEXT tap as a catch
+        if press is None:
+            return None
+        for row in range(lay.list_rows):
+            i = self.top + row
+            if i >= count:
+                break
+            if _ui.rect_in(press[0], press[1], lay.row_rect(row)):
+                return i
+        return None
+
+    def _rows_bar(self, cv, th, count):
+        """The list's scrollbar, drawn from the same region the drag moves."""
+        if count > self.layout.list_rows:
+            self._rows_region(count).draw_bar(cv, th)

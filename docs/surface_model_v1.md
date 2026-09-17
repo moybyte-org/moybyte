@@ -42,7 +42,7 @@ The shell's rendering has three separable costs:
    record-only elision. NOT by this spec.
 3. **Re-doing 1+2 when nothing relevant changed** — THIS spec.
 
-The verdict, from the evidence accumulated across four targets:
+The verdict, from the evidence accumulated across every target:
 
 | layer | model | why |
 |---|---|---|
@@ -151,9 +151,9 @@ payload-shape tests are re-baselined knowingly (§9).
     hash assertion cannot catch either.
 - **L9 — cart output is opaque.** A game surface's content is free-form; the
   shell never parses or diffs it. A running cart's surface is content-dirty
-  **on frames it renders** — under frameskip (#77) logic ticks at full rate
-  while render runs at half, and the gen moves only with renders, or web
-  clients would re-ship at 60 while glass draws 30.
+  **on frames it renders** — under the tick model (#217) logic ticks at the
+  cart's rate while render runs on a divisor of it, and the gen moves only
+  with renders, or web clients would re-ship at 60 while glass draws 30.
 - **L10 — new backends implement §4; they do not add invalidation
   mechanisms.** This is the "we don't redesign this again" law.
 
@@ -295,6 +295,21 @@ never evict-and-reallocate. Phase C claims **no perf change** — the gate is
 window's drag explicitly** (the last silent-disable bug lived exactly there).
 Games: fullscreen in the play world; windowed via the PPA upscale composite
 (PPA is upscale-only — §8).
+
+**The rotated P4 (Guition 10.1″, 2026-09-08) adds nothing to the contract
+and one verb to the backend.** Its paint target is ONE persistent landscape
+buffer, presented by rotating it onto portrait scan buffers, so the
+placement-changed cell above is *the same* backdrop restore followed by a
+rect rotate instead of a full one — provided the compositor knows the rect.
+`WindowedWM._hand_damage` hands it the gesture union and the extents of the
+windows it rendered live (`note_damage` on the root canvas, absent on every
+other backend), the same set the union restore already trusts; a frame it
+cannot describe is a full rotate. This is not a second invalidation
+mechanism: no new dirty state, no new producer class — the backdrop layer
+and the window loop say what they painted, once, on the frame they painted
+it. `end_frame()`'s ordering rule holds there too: the quiet game frame's
+rotate is queued at flush and fenced at the next present, before the cart's
+tick can write the canvas it was copied from.
 
 ### 5.3 Host sim — reference implementation
 
@@ -482,9 +497,9 @@ pinning the field's absence.
   it on **2026-08-17**: the T-Deck ships mainline + `native/moy_lcd` and no
   LVGL exists anywhere in the tree. The P4 never had any, and no DSI port
   exists — so on the one board where these costs hurt, "just use the library"
-  is first a port of LVGL. It also covers one of the four targets we render
-  the same pixels on: it is C with bindings and cannot run the host sim, so
-  adopting it forks the shell into two UI implementations. What we took is the
+  is first a port of LVGL. It also reaches only the device targets of the
+  set we render the same pixels on: it is C with bindings and cannot run the
+  host sim, so adopting it forks the shell into two UI implementations. What we took is the
   ALGORITHM — an invalid-area list, a merge, a clip discipline — not the
   dependency. This flips only if the P4 becomes the only target, with no host
   simulator; full analysis in `docs/history/ui_damage_model_v1.md` §4.
@@ -687,9 +702,10 @@ check plus a case per leg of the gate.
 **The caret invariant this gate is designed around.** The one way a
 surface-granularity freeze breaks is a surface that animates without
 signalling: it silently stops moving. The 2026-07-27 audit found the feared
-case does not exist here — **both carets, the code editor's and Writer's, are
-deliberately SOLID** (Writer's own comment says so). A blinking caret added
-later without a Class B declaration is exactly how this freeze breaks.
+case does not exist here — **both carets, the code editor's and the editor
+handle's, are deliberately SOLID** (`runtime/editor_handle.py` paints its caret
+unconditionally). A blinking caret added later without a Class B declaration is
+exactly how this freeze breaks.
 
 **MEASURED on P4 glass, 2026-07-27** (before the #159 L2-cache flag, which
 moved every surface median; #58 carries the post-flag sweep):

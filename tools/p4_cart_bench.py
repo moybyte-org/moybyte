@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Run the Bench CART on the P4 and collect its per-verb numbers.
+"""Run the Bench CART on a board and collect its per-verb numbers.
 
-    python3 tools/p4_cart_bench.py                     # Bench (python)
-    python3 tools/p4_cart_bench.py --cart "Bench Lua"  # the Lua twin
-    python3 tools/p4_cart_bench.py --json after.json
+    python3 tools/p4_cart_bench.py --board p4
+    python3 tools/p4_cart_bench.py --board tdeck --cart "Bench Lua"
+    python3 tools/p4_cart_bench.py --board p4 --json after.json
     python3 tools/p4_cart_bench.py --diff before.json after.json
 
 Not to be confused with `p4_bench.py`, which benches the console's own UI
 panels end-to-end. This one drives `system_carts/bench.moy`: a MICRO phase
 timing one draw VERB per frame in adaptively-sized batches (best-of-8, so a GC
-landing is excluded rather than averaged in), then a busy scene. It prints
+landing is excluded rather than averaged in), then a scene per thing worth
+timing -- the busy game frame, and since 2026-09-06 the software 3D frame
+(`ray`/`tetra`) and the scroll A/B (`scroll`/`layer`) that used to be three
+separate carts. It prints
 `BENCHCART` lines to serial, which is what this reads. Use it to A/B a change to
 the raster kernel -- same workload every run, no play skill, no feel.
 
@@ -43,7 +46,8 @@ PMEM_MAGIC = 45948
 VERB_NAMES = ("cls", "rect", "circ", "line", "pix", "print", "rectb",
               "circb", "tri", "spr", "map", "sspr", "tline", "trib",
               "oval", "ovalb", "oval_p")
-PHASE_NAMES = ("idle", "logic", "draw", "silent", "sound")
+PHASE_NAMES = ("idle", "logic", "draw", "silent", "sound",
+               "ray", "tetra", "scroll", "layer", "float", "table")
 
 
 def pmem_lines(cells):
@@ -52,7 +56,8 @@ def pmem_lines(cells):
     the Python cart's serial lines do. Rows are id-checked because only the
     done FLAG is zeroed at cart start -- a stale row from an older layout
     must read as absent, not as a number."""
-    if len(cells) < 128 or cells[0] != PMEM_MAGIC or cells[1] != 1:
+    if (len(cells) < 64 + len(PHASE_NAMES) * 8
+            or cells[0] != PMEM_MAGIC or cells[1] != 1):
         return []
     out = []
     for i in range(min(cells[2], len(VERB_NAMES))):
@@ -91,7 +96,9 @@ def run_bench(board, title, secs, log):
     cells = None
     while time.time() < end:
         board.drain(1.0)
-        if any(l.startswith("BENCHCART phase=game_snd") for l in board.lines[n0:]):
+        # the LAST phase's serial line -- the Python twin's "run is over" mark
+        last = "BENCHCART phase=%s" % PHASE_NAMES[-1]
+        if any(l.startswith(last) for l in board.lines[n0:]):
             board.drain(1.0)
             break
         if board.pyval(poll, timeout=8.0) == 1:
@@ -182,14 +189,13 @@ def diff(a, b):
 
 
 def main(argv=None):
+    from p4_autotest import add_board_args, board_from_args
+
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cart", default="Bench")
-    ap.add_argument("--port", default="/dev/ttyACM0")
-    ap.add_argument("--secs", type=float, default=180.0)
-    ap.add_argument("--attach", action="store_true",
-                    help="open with DTR/RTS HIGH and never pulse reset -- the"
-                         " T-Deck arrangement (USB-Serial/JTAG: an open with"
-                         " both lines low is a chip reset)")
+    add_board_args(ap)
+    ap.add_argument("--secs", type=float, default=300.0)   # the ray phase is
+                    # tens of ms a frame on an S3, and it is one of nine now
     ap.add_argument("--json", help="write the parsed result here")
     ap.add_argument("--frame", help="also dump the final frame (raw indices)")
     ap.add_argument("--diff", nargs=2, metavar=("BEFORE", "AFTER"))
@@ -204,17 +210,17 @@ def main(argv=None):
         diff(before, after)
         return 0
 
-    from p4_autotest import P4Board
     import p4_conformance as PC
 
     log = print if a.verbose else (lambda *x: None)
-    board = P4Board(a.port, log=(lambda s: log("  | " + s[:120])),
-                    dtr=a.attach, rts=a.attach)
+    board = board_from_args(a, log=(lambda s: log("  | " + s[:120])))
     try:
         board.drain(0.5)
         if board.pyval("1", timeout=8.0) != 1:
-            if a.attach:
-                raise RuntimeError("board not answering (attach mode never resets)")
+            if board.attach_only:
+                raise RuntimeError(
+                    "board not answering, and it declares attach_only -- there "
+                    "is no reset to give it (see P4Board.reset)")
             board.reset()
         res = parse(run_bench(board, a.cart, a.secs, log))
         show(res)

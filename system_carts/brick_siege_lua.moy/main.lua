@@ -12,15 +12,16 @@
 -- beat). AUTOPLAY (in "Make it mine") is OFF by default; flip it ON for attract mode.
 --
 -- The port is line-faithful by design: same globals, same helper split, same
--- arithmetic in the same order, so the two runtimes produce bit-identical game state
--- and draw streams (verified per frame by experiments/lua_bridge/brick_parity.py).
+-- arithmetic in the same order, so the two runtimes produce the same draw stream and
+-- the same game state to within float32 rounding (verified per frame by
+-- experiments/lua_bridge/brick_parity.py, which runs this file on the shipped VM).
 -- Kept in lockstep with brick_siege.moy/main.py: edit BOTH or the parity test fails.
 --
 -- THIS CART IS moy core 0.1 ONLY -- no extensions, no vendor verbs. It is the
 -- showcase cart for the public spec (moy-spec), so a conformant third-party
 -- console must be able to run it as-is. That means it deliberately does NOT use
 -- three things the Python twin does, and each substitution is draw-stream
--- IDENTICAL (which is why parity still holds byte-for-byte):
+-- IDENTICAL (which is why the two streams still compare call for call):
 --   * col("name") -> the literal palette index. col() is a VENDOR verb, absent
 --     from every SPEC.md verb table and not even declarable as an extension.
 --     Indices used: 0 black, 1 dark_blue, 6 light_grey, 7 white, 10 yellow,
@@ -47,10 +48,7 @@
 --     `auto ~= 0` (the autoplay flag), `ddx ~= 0 or ddy ~= 0` (was `if ddx or ddy`),
 --     and `bm[4] ~= 0` (the explosion's big flag, stored 1/0 like the Python cart).
 --   * Python's `continue` is `goto continue` + a trailing `::continue::` label.
---   * the per-sprite spr() loop is now what BOTH carts write. It used to be a Lua
---     workaround (a trampoline cannot marshal an items list) against a Python twin
---     that called spr_batch; that verb was deleted 2026-08-14 (plan 6.10) and the
---     Python cart took this shape. It always cost the same: a contiguous run of
+--   * the per-sprite spr() loop is what BOTH carts write: a contiguous run of
 --     1x1 spr()s leaves as ONE native blit_batch through the auto-batch gate.
 --
 -- TWO PLAYERS (#65). The hook this cart was built with is WIRED now: when players()

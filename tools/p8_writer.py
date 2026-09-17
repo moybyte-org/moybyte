@@ -118,13 +118,28 @@ SHIM_GAPS = {
                       "command line here; return from _update() instead"),
     "trace": (MISSING, "trace() returns a Lua stack traceback for printh() -- "
                        "no equivalent; the cart error screen shows the line"),
-    "info": (MISSING, "info() prints cart stats to PICO-8's console -- no "
-                      "console here; print() draws on the screen instead"),
     "serial": (MISSING, "serial() streams bytes to a p8 hardware port -- "
                         "no equivalent; there is nothing on the other end"),
 }
 
 SHIM_STUBS = {
+    # PICO-8's console commands are callable from cart code, and carts keep the
+    # one that built them -- `octosnatch` still imports "art.png" from _init.
+    "import": (STUBBED, "import()/export() move a file in and out of PICO-8's "
+                        "editor -- there is no editor behind a game here, and "
+                        "the cart's art is already in it, so they do nothing"),
+    "export": (STUBBED, "import()/export() move a file in and out of PICO-8's "
+                        "editor -- there is no editor behind a game here, and "
+                        "the cart's art is already in it, so they do nothing"),
+    "folder": (STUBBED, "folder()/info()/ls() are PICO-8's command line "
+                        "talking to its own console -- there is no console "
+                        "here; print() draws on the screen instead"),
+    "info": (STUBBED, "folder()/info()/ls() are PICO-8's command line talking "
+                      "to its own console -- there is no console here; "
+                      "print() draws on the screen instead"),
+    "ls": (STUBBED, "folder()/info()/ls() are PICO-8's command line talking to "
+                    "its own console -- there is no console here; ls() answers "
+                    "with an empty listing"),
     "peek": (STUBBED, "peek()/poke() read and write 64K of SCRATCH memory -- "
                       "it is not the console's memory, so a cart keeping its "
                       "own bookkeeping there works and one poking a hardware "
@@ -319,8 +334,29 @@ def write_cart(sections, out_dir, title):
     }
 
     summary["imported"].append(
-        "main.lua (the cart's own code, converted to Lua 5.4 under a "
-        "generated PICO-8 shim -- it RUNS)")
+        "main.lua (the cart's own code, converted to Lua 5.4 -- it RUNS)")
+    summary["imported"].append(
+        "p8.lua (the generated PICO-8 layer: data tables + the compat shim, "
+        "its own script ahead of main.lua so main.lua is the cart)")
+    # The cart's PICO-8 TABS, as files (p8_lua_port.tab_files). Reported both
+    # ways round: a cart whose tabs became files says how many, and one whose
+    # tabs COULD not says why in the porter's own words -- because it is never
+    # the same reason twice.
+    #
+    # BOTH are "imported" lines and neither is a "lossy" one, which is the
+    # difference between the CLI's report and the browser panel's
+    # (`report_lines`): a fused cart runs EXACTLY as a split one does, so
+    # calling it approximated would claim a fidelity cost that is not there.
+    # What this is about is which files the cart arrived in.
+    if wrote.get("fused"):
+        summary["imported"].append("main.lua (one file: " + wrote["fused"] + ")")
+    elif wrote.get("tabs", 1) > 1:
+        summary["imported"].append(
+            "%d more scripts, one per PICO-8 tab past the first (%s) -- each "
+            "its own file in the editor, run in tab order"
+            % (wrote["tabs"] - 1,
+               ", ".join(n for n in wrote["sources"]
+                         if n not in ("p8.lua", "main.lua"))))
     summary["imported"].append(
         "manifest.json (canvas %s + the view(%d, %d) zoom hint)"
         % (P8_CANVAS, P8_VIEW_W, P8_VIEW_H))

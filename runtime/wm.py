@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 
 _VIEWPORT_BEZEL = 0         # black -- the letterbox fill around a scaled game viewport
+_VIEWPORT_IDENTITY = (0, 0, 1)   # the degradation viewport: one canvas IS the glass
 
 
 class FullscreenStackWM:
@@ -73,6 +74,30 @@ class FullscreenStackWM:
         # (the canvas only changes on a web-view Tee swap, never mid-play).
         self._fb_for = None
         self._fb_fn = None
+        self._bg_for = None           # ...and its blit_game probe, the same way
+        self._bg_fn = None
+        # The view/viewport GEOMETRY is memoized (#66 lever 1, 2026-09-08). A play
+        # frame asked for it five times -- letterbox, composite, blit source, and
+        # twice for the tap mapping -- and every answer was a fresh tuple. That
+        # is the expensive shape on the S3: a 3-tuple is a two-block allocation,
+        # and MicroPython's allocator only advances its free index on a
+        # single-block hit, so every multi-block request rescans the table from
+        # the live set's front -- measured in situ at 0.3-0.55 ms per tuple
+        # against 10 us for `A + B`. The key is what the answer depends on: the
+        # cart's declared view (by identity -- `view()` writes a new tuple),
+        # both canvases (by identity -- a run binds a small one) and their dims
+        # (a DeviceCanvas can be re-windowed in place), compared field by field
+        # so the check itself allocates nothing.
+        self._vs_key = None
+        self._vs_gc = None
+        self._vs_sc = None
+        self._vs_dims = [0, 0, 0, 0]
+        self._vs_val = None
+        self._vp_view = None
+        self._vp_gc = None
+        self._vp_sc = None
+        self._vp_dims = [0, 0, 0, 0]
+        self._vp_val = None
 
     # -- the process back-stack (Stage 6b) -----------------------------------
 
@@ -298,15 +323,28 @@ class FullscreenStackWM:
         gc = self.ws.canvas
         sc = self.ws.sys_canvas
         if sc is gc:
-            return (0, 0, 1)
-        view = self._view_src()
+            return _VIEWPORT_IDENTITY
+        view = self._view_src_for(gc, sc)
+        d = self._vp_dims
+        if (view is self._vp_view and gc is self._vp_gc and sc is self._vp_sc
+                and d[0] == gc.w and d[1] == gc.h
+                and d[2] == sc.w and d[3] == sc.h):
+            return self._vp_val
         gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
         scale = min(sc.w // gw, sc.h // gh)
         if scale < 1:
             scale = 1
         ox = (sc.w - gw * scale) // 2
         oy = (sc.h - gh * scale) // 2
-        return (ox, oy, scale)
+        self._vp_view = view
+        self._vp_gc = gc
+        self._vp_sc = sc
+        d[0] = gc.w
+        d[1] = gc.h
+        d[2] = sc.w
+        d[3] = sc.h
+        self._vp_val = (ox, oy, scale)
+        return self._vp_val
 
     def game_xy(self, px, py):
         """Map a SYSTEM-canvas point (where the pointer lives) into GAME-canvas
@@ -314,9 +352,18 @@ class FullscreenStackWM:
         test correctly. Identity in the degradation case. A cart-declared VIEW
         (`view(w, h)`) shifts the mapping by its source origin, so touch coords
         stay in full game-canvas space -- the cart's own frame of reference."""
-        ox, oy, scale = self.viewport()
-        view = self._view_src()
-        sx, sy = (view[0], view[1]) if view else (0, 0)
+        vp = self.viewport()
+        ox, oy, scale = vp
+        # When the answer is this class's own memo, the view it was validated
+        # against this instant IS _view_src()'s answer. Otherwise -- the
+        # one-canvas identity, or a subclass's viewport (the windowed tier's
+        # is the player window's) -- ask.
+        view = self._vp_view if vp is self._vp_val else self._view_src()
+        if view:
+            sx = view[0]
+            sy = view[1]
+        else:
+            sx = sy = 0
         return (sx + (px - ox) // scale, sy + (py - oy) // scale)
 
     def _view_src(self):
@@ -331,12 +378,39 @@ class FullscreenStackWM:
         screen that would otherwise sit at 1x, and is honored only there. On
         a 480x320 screen the full 128x128 already fits at 2x; on the P4 it
         fits at 4x, where the 5x a trim buys costs a fifth of the frame (the
-        crisp composite scales with output pixels) and eight rows of picture. Three quarters of the canvas is the line."""
+        crisp composite scales with output pixels) and eight rows of picture. Three quarters of the canvas is the line.
+
+        Memoized on the declared view's identity + both canvases + their dims
+        (see __init__): the SAME tuple comes back until one of those moves."""
+        ws = self.ws
+        return self._view_src_for(ws.canvas, ws.sys_canvas)
+
+    def _view_src_for(self, gc, sc):
+        """_view_src for canvases the caller already holds (one attribute walk
+        per frame instead of one per asker)."""
+        gv = getattr(self.ws.input, "game_view", None)
+        if not gv:
+            return None                 # no declared view: nothing to crop, ever
+        d = self._vs_dims
+        if (gv is self._vs_key and gc is self._vs_gc and sc is self._vs_sc
+                and d[0] == gc.w and d[1] == gc.h
+                and d[2] == sc.w and d[3] == sc.h):
+            return self._vs_val
+        self._vs_key = gv
+        self._vs_gc = gc
+        self._vs_sc = sc
+        d[0] = gc.w
+        d[1] = gc.h
+        d[2] = sc.w
+        d[3] = sc.h
+        self._vs_val = self._view_src_compute(gc, sc)
+        return self._vs_val
+
+    def _view_src_compute(self, gc, sc):
+        """The rule itself (see _view_src's docstring); runs once per key."""
         view = getattr(self.ws, "game_view", None)
         if view is None:
             return None
-        gc = self.ws.canvas
-        sc = self.ws.sys_canvas
         if sc is gc or not view[2] or not view[3]:
             return view
         if view[2] * view[3] * 4 < gc.w * gc.h * 3:
@@ -379,12 +453,14 @@ class FullscreenStackWM:
         on the tier with the least fill rate to spare, and for a 256x240 view
         that is 15,360 px instead of 76,800. Camera and clip are identity here --
         the Player resets both after every cart frame."""
-        view = self._view_src()
+        ws = self.ws
+        sc = ws.sys_canvas
+        gc = ws.canvas
+        if sc is not gc:
+            return                      # the composite will fill it, as it always has
+        view = self._view_src_for(gc, sc)
         if view is None:
             return                      # cart owns the whole canvas: nothing outside
-        sc = self.ws.sys_canvas
-        if sc is not self.ws.canvas:
-            return                      # the composite will fill it, as it always has
         sx, sy, vw, vh = view
         if sy > 0:
             sc.rect(0, 0, sc.w, sy, _VIEWPORT_BEZEL)
@@ -416,15 +492,21 @@ class FullscreenStackWM:
             self._fb_fn()
         if sc is gc:
             return
-        ox, oy, scale = self.viewport()
+        vp = self.viewport()
+        ox, oy, scale = vp
         # Native composite probe (the wm_windowed._blit_game convention): a
         # system canvas with a blit_game verb scales + letterboxes in C -- the
         # T-Deck path for a cart-declared small canvas (SPEC.md 1/3.1), where
         # the boot DeviceCanvas was promoted to system canvas and neither side
-        # has an index `buf` for the Python loops below.
-        bg = getattr(sc, "blit_game", None)
+        # has an index `buf` for the Python loops below. The source rect is
+        # the view viewport() validated this instant (see game_xy).
+        if sc is not self._bg_for:
+            self._bg_for = sc
+            self._bg_fn = getattr(sc, "blit_game", None)
+        bg = self._bg_fn
         if bg is not None:
-            bg(gc, ox, oy, scale, src=self._view_src())
+            bg(gc, ox, oy, scale,
+               src=self._vp_view if vp is self._vp_val else self._view_src())
             return
         sc.cls(_VIEWPORT_BEZEL)                     # letterbox fill
         gbuf = getattr(gc, "buf", None)

@@ -36,6 +36,7 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 # The cart API's names, once (see runtime/cart_verbs.py) -- the syntax
 # highlighter's builtin class is derived from them below.
@@ -43,6 +44,14 @@ try:
     from cart_verbs import CART_VERBS as _CART_VERBS
 except ImportError:  # pragma: no cover - host fallback
     from runtime.cart_verbs import CART_VERBS as _CART_VERBS
+
+# The console-wide editor MODE table (docs/text_editing_2026-09.md): this tab
+# edits a cart's MAIN file, so its language and its parse gate are the `code`
+# mode's, asked here rather than re-derived.
+try:
+    import text_modes as _modes
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import text_modes as _modes
 
 # The shared pre-literate glyph vocabulary (#89 icon pass): the TLS toggle + the tool
 # palette row draw a 12x12 chrome glyph per button instead of the terse 2-3 char
@@ -112,6 +121,28 @@ _SYM_CELL = 20
 _SYM_AREA = (0, _SYM_Y, _SYM_CELL * len(_CODE_SYMBOLS), _SYM_H)
 
 
+def symbols_for(lang):
+    """The tappable symbol palette for a source language: the keys the
+    keyboard lacks, in the order they are laid out."""
+    return _LUA_SYMBOLS if lang == "lua" else _CODE_SYMBOLS
+
+
+def draw_symbol_keys(cv, t, syms, x0, y, cell, h, fs, dx=0, dy=0, rects=None):
+    """The symbol palette renderer, ONE body for the Code tab and the script
+    console: each key is a grid CELL whose picture is the symbol itself, laid
+    out `cell` apart from `x0`. `cell` draws the frame and hands back where
+    the picture goes; the symbol sits at the frozen +6px inside it, nudged by
+    `dx`/`dy` (the Code tab re-centres it in a key the chrome scale grew,
+    #203). Appends each key's rect to `rects` when a list is given."""
+    for i in range(len(syms)):
+        r = (x0 + i * cell, y, cell - 1, h - 1)
+        art = _ui.cell(cv, t, r, pad=0, caption_h=0, fs=fs)
+        cv.print(syms[i], art[0] + 6 * fs + dx, art[1] + 6 * fs + dy,
+                 t["sym_ink"], 1)
+        if rects is not None:
+            rects.append(r)
+
+
 # --- code-editor syntax highlighting (#24) ---------------------------------
 # A tiny, MicroPython-safe tokenizer: scans one source line char-by-char and returns a
 # per-character list of MOY64 palette indices, so the code view draws colored runs
@@ -123,6 +154,11 @@ _HL_STRING = 11     # green
 _HL_NUMBER = 9      # orange
 _HL_COMMENT = 5     # dark_grey
 _HL_BUILTIN = 14    # pink -- the cart drawing verbs stand out
+
+# Lines held per generation of the `_hl` memo. TWO generations live at a time,
+# so this is half the single bound it replaces and the memory ceiling is the
+# same; see _hl for why one generation was the wrong shape.
+_HL_MEMO = 200
 
 _HL_KEYWORDS = (
     "False", "None", "True", "and", "as", "assert", "break", "class",
@@ -244,13 +280,13 @@ class CodeLayer:
     _TLS_COLS = 3                 # cells wide for the always-visible tools toggle
     _POPUP_MAX = 8               # visible rows in the autocomplete / jump popups
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         self._ekey = KeyEdge()        # keyboard edge tracker (editor edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self._hl_cache = {}           # per-line syntax-highlight memo (#24)
+        self._hl_old = {}             # ...and the generation it retires (see _hl)
         self._t = None                # per-draw tone map (set by _draw_code)
         # -- #89 additions: selection / tools / find / gutter -----------------
         self._tools_open = False      # the tool palette row is shown
@@ -268,29 +304,47 @@ class CodeLayer:
         self._jump_open = False       # the jump-to-symbol popup is shown
         self._jump_items = []         # (name, row) for every def/class line
         self._jump_sel = 0            # the highlighted symbol row
+        # -- #89 the cart's FILE, on a cart that has more than one ------------
+        self._files_open = False      # the file-switcher popup is shown
+        self._files_sel = 0           # the highlighted row (opens on the current file)
+
+    def seed_key(self, k):
+        """The byte that was live when this surface took the keyboard is NOT a
+        keystroke of its own. Called by ws._set_text_mode on the switch into
+        text mode -- the key that entered the Code tab is still in last_key when
+        the editor's first frame reads it, and a zeroed edge tracker types it.
+        Seeding, not resetting: an already-down byte has to look like the
+        PREVIOUS one, so releasing and pressing it again still types."""
+        self._ekey.prev = k
 
     def reset(self):
         """Reset the keyboard edge tracker (called by ws.set_menu_view when the editor
         is (re)built) so the first key press after opening registers. Also drops the
-        transient #89 modes so a freshly-opened editor is in a clean state."""
+        transient #89 modes so a freshly-opened editor is in a clean state.
+
+        set_tab runs this BEFORE ws._set_text_mode, whose seed_key then supplies
+        the live byte -- so a fresh editor still starts clean and still does not
+        type the key that opened it."""
         self._ekey.reset()
         self._sel_drag = False
         self._find_open = False
         self._select_mode = False
         self._cmp_open = False
         self._jump_open = False
+        self._files_open = False
         if self.ws.editor is not None:
             self.ws.editor.select_sticky = False
 
     def _is_lua(self):
         """The open project's cart language (#67 Phase 5): drives the symbol
-        palette + the highlighter's comment/keyword rules."""
+        palette + the highlighter's comment/keyword rules. Asked of the mode
+        table, which is where the shell's other text surfaces ask too."""
         proj = self.ws.project
         cart = proj.cart if proj is not None else None
-        return cart is not None and cart.get("runtime") == "lua"
+        return cart is not None and _modes.cart_lang(cart) == "lua"
 
     def _symbols(self):
-        return _LUA_SYMBOLS if self._is_lua() else _CODE_SYMBOLS
+        return symbols_for("lua" if self._is_lua() else "python")
 
     # -- Layer facets --------------------------------------------------------
 
@@ -373,27 +427,35 @@ class CodeLayer:
             return True
         # #89 chrome, in overlay order: the always-visible tools toggle, then (when
         # open) the find bar + the tool palette row, all before the code body.
-        if click and self._in(px, py, self._tls_btn(lay)):
+        if click and _in(px, py, self._tls_btn(lay)):
             self._tools_open = not self._tools_open
             ws.mark_dirty()
             return True
-        # An open autocomplete / jump popup is modal over the code body: a tap picks a
-        # row, a tap anywhere else dismisses it (the small-screen "escape").
-        if click and (self._cmp_open or self._jump_open) and \
+        _fb = self._file_btn(lay)
+        if click and _fb is not None and _in(px, py, _fb):
+            if self._files_open:
+                self._files_open = False
+                ws.mark_dirty()
+            else:
+                self._open_files()
+            return True
+        # An open autocomplete / jump / file popup is modal over the code body: a tap
+        # picks a row, a tap anywhere else dismisses it (the small-screen "escape").
+        if click and (self._cmp_open or self._jump_open or self._files_open) and \
                 self._popup_tap(px, py, lay, ed):
             return True
         if click and self._find_open and self._find_tap(px, py, lay):
             return True
-        if click and self._tools_open and self._in(px, py, self._toolbar_rect(lay)):
+        if click and self._tools_open and _in(px, py, self._toolbar_rect(lay)):
             self._tool_tap(px, py, lay, ed)
             return True
-        if click and self._in(px, py, lay.sym_area) and ed is not None:
+        if click and _in(px, py, lay.sym_area) and ed is not None:
             syms = self._symbols()
             i = (px - lay.sym_area[0]) // lay.sym_cell   # tap a coding symbol
             if 0 <= i < len(syms):
                 self._feed_char(ord(syms[i]))            # routes to find field or editor
             return True
-        if ed is not None and self._in(px, py, lay.code_area()):
+        if ed is not None and _in(px, py, lay.code_area()):
             if self._select_mode:
                 self._select_pointer(px, py, click, lay, ed)   # drag = extend selection
             else:
@@ -423,12 +485,13 @@ class CodeLayer:
             # An open popup (autocomplete / jump-to-symbol) owns the keyboard: Enter
             # accepts the highlighted row; any other key dismisses it and then edits
             # normally (the small-screen "escape" -- the T-Deck has no Esc key).
-            if self._cmp_open or self._jump_open:
+            if self._cmp_open or self._jump_open or self._files_open:
                 if k in (0x0D, 0x0A):
                     self._popup_accept()
                     return
                 self._cmp_open = False
                 self._jump_open = False
+                self._files_open = False
             # Host keyboard shortcuts (#89) layered over the touch tool palette: the
             # control bytes below are NEVER inserted as text (editor.key ignores them),
             # so they can't corrupt the buffer -- and each maps to a tool-palette button
@@ -492,20 +555,23 @@ class CodeLayer:
         FOLLOWS the live syntax error (without moving the caret). A runtime
         crash marker can't be re-proven without a run, so a parsing source
         retires it too -- the closest static answer. The crash popup is
-        transient either way: the first edit/undo dismisses it. Lua carts have
-        no host-side parser -> the old clear-on-edit rule. No marker up ->
-        free (typing never pays a compile)."""
+        transient either way: the first edit/undo dismisses it. No marker up ->
+        free (typing never pays a compile).
+
+        The gate is the cart's runtime's, asked through the same store verb the
+        commit paths ask: a lua cart has no parse gate on either tier, answers
+        ok, and so keeps the clear-on-edit rule it always had."""
         ws = self.ws
         ws.crash_popup = None          # typing starts the fix -- the popup is done
         if ws.code_err is None and ws.code_err_row is None:
             return
         ed = ws.editor
-        check = getattr(ws.carts_store, "compile_check", None) \
+        check = getattr(ws.carts_store, "runtime_compile_check", None) \
             if ws.carts_store is not None else None
-        if ed is None or check is None or self._is_lua():
+        if ed is None or check is None:
             self._clear_err()
             return
-        ok, msg = check(ed.text())
+        ok, msg = check(ws.cart, ed.text())
         if ok:
             self._clear_err()
         else:
@@ -639,17 +705,17 @@ class CodeLayer:
 
     def _find_tap(self, px, py, lay):
         btns = self._find_btns(lay)
-        if self._in(px, py, btns["prev"]):
+        if _in(px, py, btns["prev"]):
             self._find_run(False)
-        elif self._in(px, py, btns["next"]):
+        elif _in(px, py, btns["next"]):
             self._find_run(True)
-        elif self._in(px, py, btns["case"]):
+        elif _in(px, py, btns["case"]):
             self._find_ci = not self._find_ci
             self._find_run(True, reset=True)
-        elif self._in(px, py, btns["close"]):
+        elif _in(px, py, btns["close"]):
             self._find_open = False
             self.ws.mark_dirty()
-        elif not self._in(px, py, self._find_rect(lay)):
+        elif not _in(px, py, self._find_rect(lay)):
             return False
         return True                            # a tap anywhere on the bar is consumed
 
@@ -699,6 +765,14 @@ class CodeLayer:
                 _name, row = self._jump_items[self._jump_sel]
                 ed.goto_row(row, self._leading_spaces(ed.lines[row]))
             self._jump_open = False
+        elif self._files_open:
+            # Close BEFORE the switch: open_code_file hard-commits this buffer and
+            # rebuilds the editor, and a popup left open would be drawn over a
+            # file it no longer describes.
+            self._files_open = False
+            names = self.ws.code_sources()
+            if self._files_sel < len(names):
+                self.ws.open_code_file(names[self._files_sel])
         self.ws.mark_dirty()
 
     def _leading_spaces(self, line):
@@ -713,7 +787,7 @@ class CodeLayer:
         if self._cmp_open:
             _panel, rects = self._cmp_geom(lay, ed)
             for i in range(len(rects)):
-                if self._in(px, py, rects[i]):
+                if _in(px, py, rects[i]):
                     self._cmp_sel = i
                     self._popup_accept()
                     return True
@@ -721,11 +795,19 @@ class CodeLayer:
         elif self._jump_open:
             _panel, rects = self._jump_geom(lay)
             for i in range(len(rects)):
-                if self._in(px, py, rects[i]):
+                if _in(px, py, rects[i]):
                     self._jump_sel = i
                     self._popup_accept()
                     return True
             self._jump_open = False
+        elif self._files_open:
+            _panel, rects = self._files_geom(lay)
+            for i in range(len(rects)):
+                if _in(px, py, rects[i]):
+                    self._files_sel = i
+                    self._popup_accept()
+                    return True
+            self._files_open = False
         self.ws.mark_dirty()
         return True
 
@@ -790,6 +872,66 @@ class CodeLayer:
         w = self._TLS_COLS * lay.cell
         return (lay.w - w, lay.y0, w, lay.lh)
 
+    # -- the cart's FILE (SPEC.md 4, #89) ------------------------------------
+    #
+    # A cart is usually ONE script and this chrome does not exist: `_file_btn`
+    # answers None at one source and every rect, tap and draw below is skipped.
+    # A PICO-8 port is the cart that has several -- p8.lua, main.lua and one
+    # file per PICO-8 tab -- and before this the only way to reach them was the
+    # Config tab's ADVANCED row, which opens a file in the text handle where
+    # there is no PLAY, no journal and no crash-to-code.
+    #
+    # The chip is a SWITCH, not a file manager: there is no new/rename/delete
+    # here, deliberately. The one door that adds a script is the ADVANCED row.
+
+    _FILE_COLS = 6                # cells wide for the file chip (TLS is 3)
+
+    def _file_btn(self, lay):
+        """The file chip's rect, LEFT of the tools toggle on the same row -- or
+        None when the cart is one file, which is when there is nothing to
+        switch between."""
+        if len(self.ws.code_sources()) < 2:
+            return None
+        w = self._FILE_COLS * lay.cell
+        return (lay.w - w - self._TLS_COLS * lay.cell, lay.y0, w, lay.lh)
+
+    def _file_label(self):
+        """The open file as the chip shows it: its bare name, upper-cased into
+        the chrome's vocabulary and clipped to the chip. `puzzles_list.lua` ->
+        PUZZLE, which is a glance, not an identity -- the popup has the names."""
+        name = self.ws.code_file_name()
+        cut = name.rfind(".")
+        return (name[:cut] if cut > 0 else name).upper()[:self._FILE_COLS]
+
+    def _files_geom(self, lay):
+        """(panel_rect, [row_rects]) for the file switcher -- `_jump_geom`'s
+        centered list with a one-row header, sized to the longest name."""
+        names = self.ws.code_sources()
+        n = min(len(names), self._POPUP_MAX)
+        lh = lay.lh
+        w = 4
+        for i in range(n):
+            if len(names[i]) > w:
+                w = len(names[i])
+        pw = (w + 1) * lay.cell
+        if pw > lay.w:
+            pw = lay.w
+        x = (lay.w - pw) // 2
+        y = lay.y0 + lh
+        return (x, y, pw, (n + 1) * lh), [(x, y + (i + 1) * lh, pw, lh)
+                                          for i in range(n)]
+
+    def _open_files(self):
+        """Open the switcher on the file the tab is already showing, so the
+        highlighted row means "here" rather than "row 0"."""
+        self._cmp_open = False
+        self._jump_open = False
+        names = self.ws.code_sources()
+        cur = self.ws.code_file_name()
+        self._files_sel = names.index(cur) if cur in names else 0
+        self._files_open = len(names) > 1
+        self.ws.mark_dirty()
+
     def _toolbar_rect(self, lay):
         # The tool palette row, just above the status band / symbol palette.
         h = lay.lh
@@ -839,7 +981,7 @@ class CodeLayer:
         ws = self.ws
         ed = ws.editor
         lay = ws.code_layout
-        if ed is None or not ws.pointer.down or not self._in(px, py, lay.code_area()):
+        if ed is None or not ws.pointer.down or not _in(px, py, lay.code_area()):
             self._drag = None
             return
         if self._drag is None:
@@ -966,15 +1108,24 @@ class CodeLayer:
     def _hl(self, line):
         """Memoized per-line syntax highlight (#24). Lines recur every frame, so
         cache by text (keyed with the language, so switching a python project for
-        a lua one never replays stale colors); bound the cache so a long edit
-        session can't grow it."""
+        a lua one never replays stale colors).
+
+        The bound is TWO generations, not a clear. Dragging through a long file
+        walks past the bound, and emptying the memo there re-highlights the whole
+        visible window inside ONE frame -- a felt hitch, mid-drag, on exactly the
+        gesture the memo exists to make cheap. Retiring the older generation
+        leaves the lines still on screen one lookup away and caps the memory at
+        what the single larger bound it replaces held."""
         lua = self._is_lua()
         key = (lua, line)
         cols = self._hl_cache.get(key)
         if cols is None:
-            if len(self._hl_cache) > 400:
-                self._hl_cache.clear()
-            cols = _highlight(line, lua)
+            cols = self._hl_old.get(key)
+            if cols is None:
+                cols = _highlight(line, lua)
+            if len(self._hl_cache) >= _HL_MEMO:
+                self._hl_old = self._hl_cache
+                self._hl_cache = {}
             self._hl_cache[key] = cols
         return cols
 
@@ -1094,6 +1245,10 @@ class CodeLayer:
         _ui.chip(cv, t, _chip_rect(self._tls_btn(lay)), "TLS",
                  on=self._tools_open, glyph=self._btn_spec("TLS", "tools"),
                  glyph_draw=self._btn_face, fs=fs)
+        fb = self._file_btn(lay)
+        if fb is not None:
+            _ui.chip(cv, t, _chip_rect(fb), self._file_label(),
+                     on=self._files_open, fs=fs)
         if self._tools_open:
             r = self._toolbar_rect(lay)
             n = len(self._TOOLS)
@@ -1114,6 +1269,8 @@ class CodeLayer:
             self._draw_completion(lay, ed, t)
         if self._jump_open:
             self._draw_jump(lay, t)
+        if self._files_open:
+            self._draw_files(lay, t)
 
     def _draw_listbox(self, cv, lay, t, panel, rects, labels, sel, title):
         """A bordered overlay list (the autocomplete + jump popups): the sym_bg/edge
@@ -1147,6 +1304,12 @@ class CodeLayer:
         labels = [self._jump_items[i][0] + " " + str(self._jump_items[i][1] + 1)
                   for i in range(len(rects))]
         self._draw_listbox(cv, lay, t, panel, rects, labels, self._jump_sel, "DEFS")
+
+    def _draw_files(self, lay, t):
+        panel, rects = self._files_geom(lay)
+        names = self.ws.code_sources()
+        self._draw_listbox(self.ws.sys_canvas, lay, t, panel, rects,
+                           names[:len(rects)], self._files_sel, "FILES")
 
     def _draw_find(self, lay, ed, t):
         """The find bar: the typed query on the left + prev/next/case/close buttons
@@ -1185,12 +1348,5 @@ class CodeLayer:
         sy = lay.sym_y
         sh = lay.sym_h
         t = self._t if self._t is not None else self._tones()
-        syms = self._symbols()
-        for i in range(len(syms)):
-            x = lay.sym_area[0] + i * sc
-            # A key is a grid CELL whose picture is the symbol itself: `cell`
-            # draws the frame and hands back where the picture goes (the frozen
-            # +6px offset is measured from that rect, not from the cell).
-            art = _ui.cell(cv, t, (x, sy, sc - 1, sh - 1),
-                           pad=0, caption_h=0, fs=fs)
-            cv.print(syms[i], art[0] + 6 * fs, art[1] + 6 * fs, t["sym_ink"], 1)
+        draw_symbol_keys(cv, t, self._symbols(), lay.sym_area[0], sy, sc, sh,
+                         fs, lay.sym_text_dx, lay.sym_text_dy)

@@ -271,11 +271,6 @@ class PaintEditor(OpHistoryMixin):
 
     # -- tool selection (#90) ------------------------------------------------
 
-    def toggle_fill(self):
-        """Flip between the PEN brush and the FILL bucket (legacy one-button toggle;
-        the tool row now selects modes directly via set_tool -- kept for API stability)."""
-        self.tool = self.PEN if self.tool == self.FILL else self.FILL
-
     def set_tool(self, tool):
         """Select the active drawing tool (PEN / FILL / RECT / LINE / OVAL / SELECT).
         Direct mode buttons on the tool row call this -- touch-first, no chords (#90)."""

@@ -8,7 +8,7 @@ Four claims, in the order they matter:
    hashes did not move, which `test_shell_goldens.py` and `test_ui_states.py`
    assert on every run. What is added HERE is the round trip: installing the
    catalog's `"default"` entry renders byte-identically to installing no skin
-   at all, on every one of the five golden configurations.
+   at all, on every one of the six golden configurations.
 
 2. **A second skin is pure data.** `skin.use("outline")` restyles the entire
    shell -- every surface, every app, every Editor tab -- and this file is the
@@ -112,7 +112,7 @@ def test_the_whole_shell_round_trips_the_default_skin_and_restyles_under_a_secon
 
     ROUND TRIP: `ui.set_skin(None)` and `skin.use("default")` are independent
     expressions of the same look -- the built-in table, and the catalog entry
-    that points at it -- and 87 hashes across five configurations say they
+    that points at it -- and 116 hashes across six configurations say they
     agree, surface for surface.
 
     RESTYLE: `skin.use("outline")` then repaints essentially every one of those
@@ -715,7 +715,7 @@ def _center(rect):
 
 
 def test_the_skin_chips_fit_every_tier(tmp_path):
-    """Geometry, on the golden matrix's five configurations: the chips sit
+    """Geometry, on the golden matrix's six configurations: the chips sit
     inside the preview field, never overlap the DARK/LIGHT band above them,
     and are wide enough for the catalog's longest name at font scale 1-2.
 
@@ -793,11 +793,13 @@ _FROZEN_HATCH = {
     "storybook_app.py": (1,
         "a deck row is cream paper with black ink -- frozen off-token, the "
         "case the hatch is documented for"),
-    "sheets_app.py": (1,
-        "the attach list's rows, same cream paper; only the edge is themed"),
     "music_editor_ui.py": (1,
         "the title-strip nudge ticks: a frozen blue/black/white trio with no "
         "token behind any of the three"),
+    "block_editor_ui.py": (1,
+        "the insert menu's rows over the black modal dialog: the indigo "
+        "selection fill and the white/light-grey label inks are game-canvas "
+        "literals with no token behind them on any theme"),
 }
 
 
@@ -914,12 +916,12 @@ def test_the_hatch_that_moved_now_names_a_kind_instead():
             named[path.name] = len(k)
     assert named == {
         "achievements_ui.py": 1,        # the achievements list
-        "cards_layer.py": 1,            # the Config tab's cards
+        "cards_layer.py": 3,            # the cards, the ADVANCED row, its file list
         "settings_layer.py": 6,         # the rows, the wifi list, the notes
         "storybook_app.py": 1,          # the + NEW row
         "system_menu_ui.py": 1,         # the popup's rows
     }, named
-    assert sum(named.values()) == 10
+    assert sum(named.values()) == 12
 
 
 def test_every_kind_a_surface_asks_the_catalog_for_exists():

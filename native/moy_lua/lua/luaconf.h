@@ -123,8 +123,8 @@
 @@ LUA_32BITS enables Lua with 32-bit integers and 32-bit floats.
 ** moybyte: set to 1 (#67) — both boards' FPUs are single-precision, so
 ** doubles are soft-float; 32-bit floats use the HW FPU and halve TValue.
-** The host runner (lupa) stays on 64-bit doubles: golden-frame parity is
-** host-only for float-heavy carts, and device integers wrap at 2^31.
+** The host builds this same file (runtime/lua_binding), so float semantics
+** and the 2^31 integer wrap are identical on every tier.
 */
 #define LUA_32BITS	1
 

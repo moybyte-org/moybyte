@@ -64,10 +64,12 @@ nor those docs will warn you about:
   the update screen — two taps, then a polled progress read, because the board
   installs in its own loop. With glass: ONE tap hands the glass back and the
   board's own update screen takes over, so the page installs nothing anywhere.
-  Both go through `GET`/`POST /update` on the shared webhost, never the idle
-  WebSocket core: the megabytes never cross this link (the board downloads its
-  own firmware), and `WS_IDLE_MS` would reap a client through a flash write —
-  which is exactly what the old streaming port hit. **ONE disconnect surface,
+  Both go through `GET`/`POST /update` on the shared webhost, which is plain
+  HTTP: the megabytes never cross this link (the board downloads its own
+  firmware), and a persistent socket's idle reaper would have dropped a client
+  through a flash write — which is exactly what the old streaming port hit.
+  That verdict is why the transport's WebSocket half had no consumer left and
+  was deleted in 2026-09 (`.claude/rules/boards.md` on `device/moy_webserver.py`). **ONE disconnect surface,
   and the REASON is its point**: an update or a hand-back is "expected" and
   nothing is at risk; a board that vanished is "lost", and only that one carries
   the unsynced-work warning, because board mode keeps no local store. First

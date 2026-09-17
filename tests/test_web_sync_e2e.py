@@ -31,7 +31,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -46,14 +45,6 @@ from web_e2e import RUNNER, ROOT
 pytestmark = pytest.mark.skipif(
     not os.environ.get("MOYBYTE_WEB_E2E"),
     reason="MOYBYTE_WEB_E2E not set (spawns headless Chrome for ~40s)")
-
-
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
 
 
 def _seeded_store(tmp_path):
@@ -73,7 +64,7 @@ def _twin(store, pin=None):
     The health check is GET /sync and not /carts.json, because under `--pin`
     the latter is a 403 -- which is the feature, and would read here as a twin
     that never came up."""
-    port = _free_port()
+    port = web_e2e.free_port()
     argv = [sys.executable, "serve.py", str(port), "dist", "--carts", str(store)]
     if pin:
         argv += ["--pin", pin]
@@ -122,11 +113,23 @@ def test_a_cart_made_in_chrome_lands_on_disk(tmp_path):
         assert {"config.json", "main.py", "manifest.json"} <= set(got), got
         man = json.loads((new / "manifest.json").read_text())
         assert man.get("title"), man
-        # ...and nothing that must stay home CROSSED. Scoped to the cart's own
-        # files: `journal/cursor.json.bak` is moy_fs's atomic-rename rotation,
-        # written HERE by the receiver's own journal, and counting it as a
-        # wire leak would be counting this side's crash safety against it.
-        assert not any(p.suffix in (".bak", ".tmp") for p in new.iterdir())
+        # ...and nothing that must stay home CROSSED. The test is what came
+        # over the WIRE, not what is on the disk afterwards, and those stopped
+        # being the same thing: `moy_fs._publish` leaves a `<name>.bak` redo
+        # log beside EVERY file it writes, so the receiver's own crash safety
+        # now puts `main.py.bak` next to `main.py` exactly as it has always put
+        # `journal/cursor.json.bak` next to the cursor. Counting either against
+        # the wire counts this side's durability as a leak.
+        #
+        # A backup whose PRINCIPAL did not cross is still a leak, and that is
+        # what this asks: every `.bak`/`.tmp` here must belong to a file that
+        # is itself here. An orphan means something arrived that should not
+        # have -- which is the failure the line was written to catch.
+        here = {p.name for p in new.iterdir()}
+        orphans = sorted(n for n in here
+                         if n.endswith((".bak", ".tmp"))
+                         and n.rsplit(".", 1)[0] not in here)
+        assert not orphans, "a backup with no file to back: %s" % orphans
 
         # THE JOURNAL IS THE RECEIVER'S OWN (2026-08-25). This used to assert
         # `journal/` did not exist, which was the right test of the wire and

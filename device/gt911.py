@@ -7,7 +7,10 @@ while maintaining it twice. That block had already drifted once: the P4 copy
 held the point without the staleness flag or the release bound that make
 holding safe.
 
-What is SHARED here: the register map and the no-news contract (`HeldPoint`).
+What is SHARED here: the register map, the no-news contract (`HeldPoint`)
+and the raw-to-glass mapping (`map_point`), which every touch driver on every
+board takes -- swap, scale, flip, clamp, in that order, with the knobs each
+board keeps wherever it keeps them.
 What deliberately is NOT: everything each board learned on its own glass --
 the T-Deck's #74 INT-pin gate, per-phase I2C latency stats and poller-thread
 hook (bus-contention medicine for a GT911 sharing I2C0 with the keyboard C3),
@@ -42,6 +45,37 @@ REG_POINT0 = 0x8150       # first touch point (byte order is BOARD-specific:
                           # Waveshare P4's x(lo,hi) y(lo,hi) -- read the byte
                           # dump on new glass, never assume)
 ADDRS = (0x5D, 0x14)      # default / alternate I2C addresses (INT strap)
+
+
+def map_point(x, y, w, h, swap, flip_x, flip_y, raw_w=None, raw_h=None,
+              raw_x0=0, raw_y0=0):
+    """A controller's raw point onto the glass, the same four steps for every
+    touch driver: swap the axes, scale the controller's own space -- an origin
+    and a span, where it is not the glass's -- onto the panel's, flip, clamp.
+
+    BOTH ends of the clamp, not just the upper one. A touch past the panel
+    edge reads BIGGER than the axis it is mapped onto, which a flip then turns
+    NEGATIVE, so clamping only the top let an off-glass press arrive as a
+    point off the other side of the screen."""
+    if swap:
+        x, y = y, x
+    if raw_w:
+        x = (x - raw_x0) * w // raw_w
+    if raw_h:
+        y = (y - raw_y0) * h // raw_h
+    if flip_x:
+        x = w - 1 - x
+    if flip_y:
+        y = h - 1 - y
+    if x < 0:
+        x = 0
+    elif x >= w:
+        x = w - 1
+    if y < 0:
+        y = 0
+    elif y >= h:
+        y = h - 1
+    return x, y
 
 
 class HeldPoint:

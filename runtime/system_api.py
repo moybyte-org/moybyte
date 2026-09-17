@@ -3,7 +3,7 @@ permissions its manifest declares (#181, ui_refactor_2026-08 Phase 7).
 
 ## What this is, and what it deliberately is NOT
 
-A SHIPPED system app (Calc, Files, Writer ...) is shell code: a Layer class in
+A SHIPPED system app (Calc, Files, Paint ...) is shell code: a Layer class in
 `runtime/` that declares a `NEEDS` tuple and is handed an `AppContext`
 (`runtime/app_context.py`) carrying exactly those roles. A USER APP is a
 `.moy` CART -- editable in the project picker like any other cart, written by
@@ -53,15 +53,22 @@ here changes that, and no amount of wrapper would.
 
     permission        cart globals                    AppContext role
     ---------------   -----------------------------   ---------------
-    "files"           files.*  (kind "docs")          ctx.files
-    "files:<kind>"    files.*  (that kind only)       ctx.files
+    "files"           files.*  + open_editor()        ctx.files
+    "files:<kind>"    the same, that kind only        ctx.files
+    "clipboard"       (the editor handle's cut/copy)  ctx.clipboard
     "prefs"           prefs.get / prefs.set           ctx.prefs (namespaced)
     "appearance"      set_theme() / themes()          ctx.theme
     "launch"          open_app(id)                    ctx.nav
 
+`open_editor` rides the `files` grant because a text editor IS a document
+handle: it opens `(kind, name)` through the same role `files.*` narrows, and
+the cart can never NAME a kind -- it gets the one it was granted, or the one
+the console was already asked to open (the Files router's door). The engine
+behind it stays in the shell; `runtime/editor_handle.py` is the whole of it.
+
 Every `type: "app"` cart also gets `ui`, `theme()`, `screen()` and `bar_h()` --
 see UNGATED below. Everything else a manifest lists (`"graphics"`, `"input"`,
-`"sound"`, an app's own marker permission like `"calc"`) is not a grant here and
+`"audio"`, an app's own marker permission like `"calc"`) is not a grant here and
 is silently ignored, which is correct: the kid API is already the ungated floor.
 
 ## What is NEVER grantable, and why the list is a positive one
@@ -89,8 +96,11 @@ lost feature rather than a granted capability.)
   * `damage` / `surface` -- the shell's invalidation epoch and its live canvas
     plumbing. A cart repaints because the Player ticked it; a cart that could
     dirty the shell every frame would defeat the redraw gate on every tier.
-  * `clipboard` / `notify` -- not refused on principle, just not mapped yet. A
-    grant with no consumer is a capability granted for nothing.
+  * `notify` -- not refused on principle, just not mapped yet. A grant with no
+    consumer is a capability granted for nothing. `clipboard` sat here for the
+    same reason until the editor handle became its consumer; it is mapped now,
+    and a cart still never touches the buffer -- the handle's `cut`/`copy`/
+    `paste` are the only things that read it.
   * Firmware update and reboot are not roles at all -- they live on
     `ws.updater` / `machine`, reachable only through `shell`.
 
@@ -143,23 +153,37 @@ _ROLE_FOR = {
     "prefs": "prefs",
     "appearance": "theme",
     "launch": "nav",
+    "clipboard": "clipboard",
 }
+
+
+# The marker permission the console's TEXT APP claims its cart with -- the
+# `.md`/`.json`/`.txt` door the Files router opens (docs/text_editing_2026-09).
+# NOT in `_ROLE_FOR`, so it grants nothing; it only says which cart this is,
+# the way a shipped app claims its cart by title + `APP_PERM`.
+TEXT_APP_PERM = "editor"
+
+
+def is_text_app(cart):
+    """True when `cart` is the console's text app."""
+    perms = (cart.get("permissions") or ()) if cart else ()
+    return TEXT_APP_PERM in perms
 
 
 # Roles a cart is never handed, whatever its manifest says. Enforced by
 # `_ROLE_FOR` being an allowlist; named here so the refusal is READABLE and so
 # `tests/test_user_apps.py` can pin it against `app_context.ROLES`.
 NEVER_GRANTED = ("shell", "carts", "wallpaper", "artwork",
-                 "damage", "surface", "clipboard", "notify")
+                 "damage", "surface", "notify")
 
 
 # The user-files kinds a `"files:<kind>"` permission may name. A closed set, and
 # `recordings` is deliberately outside it: it is the one FOLDER-valued kind
 # (moy_carts.FILE_KINDS), so `save(name, blob)` does not mean anything there.
-FILE_KINDS = ("docs", "tables", "drawings", "sprites", "music")
+FILE_KINDS = ("docs", "drawings", "sprites", "music")
 
 # `"files"` with no kind means the kid's DOCUMENTS -- the same `docs` kind
-# Writer authors and Files browses, so an app's notes show up where a kid would
+# Notes authors and Files browses, so an app's notes show up where a kid would
 # look for them.
 DEFAULT_FILE_KIND = "docs"
 
@@ -227,9 +251,9 @@ def manifest_error(cart):
     ONE rule today: **a cart gets at most one user-files kind.** `files` is
     published as a single kind-bound handle (`ScopedFiles`, whose verbs take a
     name and never a kind), so there is nowhere for a second kind to go. Until
-    this check existed, `["files:docs", "files:tables"]` silently kept the LAST
+    this check existed, `["files:docs", "files:drawings"]` silently kept the LAST
     one -- an order-dependent grant, with the cart's docs quietly landing in
-    tables and no diagnostic anywhere. Refusing beats guessing: a manifest that
+    drawings and no diagnostic anywhere. Refusing beats guessing: a manifest that
     asks for two kinds is asking for something this build does not have, and
     the author is the only one who can say which kind they meant.
 
@@ -319,25 +343,46 @@ class ScopedFiles:
     def duplicate(self, name):
         return self.__files.duplicate(self.kind, name)
 
-    def new_name(self):
-        return self.__files.new_name(self.kind)
+    def new_name(self, title=None):
+        """A free name for a NEW item. With no `title` the kind auto-names, so
+        making a thing is never gated on naming it; with one it is that title,
+        slugged and unique-ified by the STORE -- which is also what keeps an
+        extension a person typed (`todo.txt`, `hi.py`) and so picks the mode
+        the editor opens it in."""
+        return self.__files.new_name(self.kind, title)
+
+    def badge(self, name):
+        """The short label a LISTING puts beside `name` -- MD / TXT / JSON /
+        PY / LUA. The console-wide mode table's answer (`text_modes`), not a
+        second reading of the extension: the vault holds notes, plain text,
+        data and scripts side by side, and the skin that lists them may not
+        have its own opinion about which is which.
+
+        Imported at the CALL, like `_themes` below and for the same reason:
+        this module is a leaf on the Player's start path for every cart, and
+        the mode table reaches the store behind it."""
+        try:
+            import text_modes
+        except ImportError:  # pragma: no cover - host fallback
+            from runtime import text_modes
+        return text_modes.badge_for_kind(self.kind, name)
 
     # -- text documents ------------------------------------------------------
     #
-    # A `.moytext` on disk is a `moytext-v1` JSON blob, not a bare string, and a
-    # cart that writes the string instead produces a file Writer and Files
-    # decode to NOTHING -- silently, looking exactly like a save that did not
-    # happen. So the codec lives on this side of the boundary and a cart deals
-    # in text. `save`/`load` above stay raw for the kinds that are not text.
+    # A document on disk is plain Markdown (`files/docs/<name>.md`), so these
+    # two are thin -- but they stay the verbs a cart calls, because they are
+    # what says a document is TEXT and not a blob. `save`/`load` above stay raw
+    # for the kinds that are not text.
 
     def save_text(self, name, text):
-        """Write `text` as a document. `(name, err)` -- the name it was saved
-        under, so a caller that passed a fresh `new_name()` can remember it."""
+        """Write `text` as a document. `(name, err)` -- the name it was
+        actually saved under, which is the STORE's answer and not the one that
+        was passed: a title is slugged on the way in, so a caller that typed
+        one has to be told what it became."""
         blob = self.__files.encode_text(text)
         if blob is None:
             return (None, NO_STORE)
-        value, err = self.__files.save(self.kind, name, blob)
-        return (name if err is None else value, err)
+        return self.__files.save(self.kind, name, blob)
 
     def load_text(self, name):
         """Read a document back as ONE string (lines joined by newlines).
@@ -350,7 +395,8 @@ class ScopedFiles:
 
 # -- the factory -------------------------------------------------------------
 
-def make_system_api(ctx_factory, cart, canvas=None, bar_h=None):
+def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
+                    editor=None, request=None):
     """The extra globals `cart` (a `type: "app"` cart) gets, or `{}`.
 
     `ctx_factory(app_id, needs, prefs_ns)` is `Workstation.app_context` -- the
@@ -364,7 +410,12 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None):
     passed rather than read off `ctx.surface`, because `ctx.surface.canvas()` is
     always the SYSTEM canvas and a fixed app draws on the game one. `bar_h` is a
     zero-argument callable for the host strip's height, for the same reason: it
-    is chrome geometry, not a shell role."""
+    is chrome geometry, not a shell role.
+
+    `editor` is the shell's editor-handle factory (`Player._open_cart_editor`)
+    and `request` is the `(kind, name, mode)` the console was asked to open --
+    both passed the same way and for the same reason: they are the running
+    shell, not a role. Without them `open_editor` simply has no name."""
     roles, kind = granted_roles(cart)
     # `theme` is always needed: `theme()` is ungated. Requesting it twice is
     # harmless (AppContext just attaches the role), but keep the tuple clean so
@@ -401,6 +452,26 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None):
     # -- GATED ----------------------------------------------------------------
     if "files" in roles:
         ns["files"] = ScopedFiles(ctx.files, kind)
+        if editor is not None:
+            # The editor handle (docs/text_editing_2026-09.md step 3). The cart
+            # passes a NAME and never a kind: with one it edits an item of the
+            # kind it was granted; with none it picks up whatever document the
+            # console was already asked to open, which may be another kind
+            # because a PERSON chose that file in Files.
+            files = ctx.files
+            clip = getattr(ctx, "clipboard", None)
+
+            def _open_editor(name=None, mode=None):
+                """An editor over one document, or None when there is none."""
+                if name is None:
+                    if not request:
+                        return None
+                    r_kind, r_name, r_mode = request
+                    return editor(files, r_kind, r_name, mode or r_mode,
+                                  canvas, clip)
+                return editor(files, kind, str(name), mode, canvas, clip)
+
+            ns["open_editor"] = _open_editor
     if "prefs" in roles:
         ns["prefs"] = ctx.prefs
     if "theme" in roles:

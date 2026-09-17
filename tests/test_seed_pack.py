@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.join(ROOT, "runtime"))
 
 import gen_device_carts as gen              # noqa: E402
 import moy_carts                            # noqa: E402
+import moy_seed                             # noqa: E402
 
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 ZERO = os.path.join(ROOT, "firmware", "seeed_xiao_esp32s3_zero")
@@ -135,7 +136,7 @@ def test_reseeding_a_current_store_inflates_nothing(tmp_path, monkeypatch):
     def boom(_blob):
         raise AssertionError("seed_packed inflated a cart that was already there")
 
-    monkeypatch.setattr(moy_carts, "unpack_seed", boom)
+    monkeypatch.setattr(moy_seed, "unpack_seed", boom)   # seed_packed's own module
     assert moy_carts.seed_packed(packed, root) == 0
 
 
@@ -285,6 +286,7 @@ _BOARDS = {
     "lilygo_t_deck_plus_mainline": "moy_runtime.py",
     "esp32_p4_wifi6_touch_lcd_7b": "moy_runtime.py",
     "guition_jc3248w535": "moy_runtime.py",
+    "guition_jc8012p4a1c": "moy_runtime.py",
 }
 
 
@@ -389,8 +391,9 @@ def _stage_for_micropython(tmp_path):
     the set itself is `board.toml`'s -- `tests/test_staging_closure.py` is what
     fails if these names stop being the ones the board freezes.
     """
-    for name in ("moy_carts.py", "moy_image.py", "moy_fs.py", "moy_journal.py",
-                 "ticks.py"):
+    for name in ("moy_carts.py", "moy_store_base.py", "moy_seed.py",
+                 "moy_files.py", "moy_file_ops.py", "moy_image.py", "moy_fs.py",
+                 "moy_journal.py", "ticks.py"):
         with open(os.path.join(ROOT, "runtime", name), encoding="utf-8") as f:
             body = f.read()
         with open(os.path.join(str(tmp_path), name), "w", encoding="utf-8") as f:

@@ -7,17 +7,16 @@ frames punctuated by hitches is exactly what reads as "smoother but not smooth".
 Averages hide that, so this records EVERY painted frame with a per-phase
 breakdown and reports the slowest ones with what dominated them.
 
-Usage:  python tools/p4_hitch.py [--port /dev/ttyACM0] [--surface settings|picker]
+Usage:  python tools/p4_hitch.py --board p4 [--surface settings|picker]
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-import time
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from p4_autotest import P4Board            # noqa: E402
+from p4_autotest import add_board_args, board_from_args  # noqa: E402
 
 
 # Per frame: total ms plus the ms attributed to each wrapped phase THIS frame, so
@@ -117,9 +116,9 @@ def report(b, name, top=6):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    add_board_args(ap)
     args = ap.parse_args()
-    b = P4Board(args.port)
+    b = board_from_args(args)
     try:
         def fresh():
             """Boot into the DESK world with the probe loaded.

@@ -6,9 +6,9 @@ module holds the shell-side building blocks that are NOT the router itself:
 
   * `Layer`      -- the uniform surface interface (id / domain / draw / handle_input
                     / handle_pointer / lifecycle).
-  * `_LegacyLayer` -- the Phase-0 shim: a Layer whose facets just call injected
-                    callables (the still-smeared surfaces + splash/toast/cursor use
-                    it until they're promoted to their own Layer file).
+  * `_LegacyLayer` -- a Layer whose facets call injected callables: the permanent
+                    home of the four draw-only overlays (splash / toast / notice /
+                    cursor), which have no state worth a class of their own.
   * The Phase-1 adapters -- `_BlocksLayer` / `_UpdateLayer` / `_MapLayer` /
                     `_MusicLayer` / `_PerfLayer` / `_AchOverlayLayer` / `_SysMenuLayer`
                     / `_AboutLayer` -- real Layer types for the surfaces that were
@@ -64,11 +64,11 @@ class Layer:
 
 
 class _LegacyLayer(Layer):
-    """Phase-0 shim (docs/history/shell_layers_refactor_v1.md §5): a Layer whose draw / input /
-    pointer just call the EXISTING Workstation `_draw_*` / input methods, so the router
-    can drive the whole shell as a z-ordered stack while every surface's pixels + taps
-    stay byte-identical. Each smeared surface is later promoted to a real Layer
-    (Phase 1/2), replacing its shim in place.
+    """A Layer whose draw / input / pointer facets call injected Workstation
+    methods. It is the permanent home of the four draw-only overlays -- splash,
+    toast, notice and the cursor -- each a `_draw_*` method with no state that
+    would earn a class of its own (docs/history/shell_layers_refactor_v1.md §5
+    is where the shape came from).
 
     `draw` is a callable(dt); `kbd` is a callable(i) -> handled bool; `ptr` is a
     callable(px, py, click) -> handled bool. Any may be None (that facet no-ops)."""

@@ -1,8 +1,9 @@
 {
   "format": "moy-1",
-  "version": 5,
+  "version": 8,
   "title": "Brick Siege Lua",
   "type": "game",
+  "fps": "free",
   "runtime": "lua",
   "main": "main.lua",
   "system": true,

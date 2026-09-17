@@ -29,15 +29,18 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 # marshals ints and one string, so they ride int handles plus a Lua prelude),
 # the moy_button bit order, and the two deny lists that decide what gets
 # registered on top of libmoy's table.
-from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
-                             LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
+from runtime.widgets import pointer_state
+from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
+                             LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
+                             snap_slots, audio_ops, snap_shared, sync_view,
+                             drain_audio)
 
 # ---------------------------------------------------------------------------
 # The moycore lane -- now the ONLY lane.
 #
 # `runtime/lua_binding.py` is the same C the boards run. This used to route only
 # the carts libmoy's SPEC table could serve and hand the rest to lupa; the
-# superset (layers/images, scenes, tables, texts, view) reaches moycore through
+# superset (layers/images, scenes, view) reaches moycore through
 # lua_ext's handles now, so every cart qualifies and the source gate that used
 # to decide is gone. What `moycore_supports` still answers is whether the module
 # BUILT -- see below.
@@ -101,21 +104,31 @@ class MoycoreHostRun:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
                         and callable(ns[name])):
                     reg(name, ns[name])
-            tv = ns.get("table")
-            if callable(tv):
-                reg("moy_table_verb", tv)
             # The object-valued verbs, through the shared int-handle glue --
             # the same module and the same prelude the boards run. Without it
             # `make_layer` returns a Layer, the dispatch cannot marshal it, and
-            # the cart gets nil back: sakura_lua died on `lay:spr(...)` rather
-            # than falling back to lupa, which is a worse failure than the one
-            # the fallback exists for.
+            # the cart gets nil back: sakura_lua died on `lay:spr(...)`.
             self._layers, self._images = install_handles(ns, reg)
-            err = self._run.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude")
+            err = self._run.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 self._run.close()
                 raise RuntimeError(err)
-        err = self._run.load(src, "@cart")
+            # A namespace may carry ONE more prelude of its own -- today the
+            # text console's, which binds `print`/`input` over the registered
+            # `__moy_say`/`__moy_ask` because libmoy owns the NAME `print` (it
+            # is the draw verb) and lua_ext denies registering over it. A plain
+            # string in the namespace, so the registration loop above skips it.
+            extra = ns.get("_moy_prelude")
+            if extra:
+                err = self._run.exec(extra, "prelude")
+                if err:
+                    self._run.close()
+                    raise RuntimeError(err)
+        # The cart's scripts in one call (SPEC.md 4, runtime/lua_ext.py): a
+        # port's generated half is its own file and must run BEFORE main.lua,
+        # and hl_load is where the PICO-8 machine opens -- a shim chunk run
+        # ahead of that resolves its verbs to the slow Lua fallbacks.
+        err = self._run.load(cart_chunks(ns, src))
         if err:
             self._run.close()
             raise RuntimeError(err)
@@ -128,17 +141,21 @@ class MoycoreHostRun:
         # The C loop runs _update and _draw back to back inside the tick, so
         # there is nothing left to do here -- but the hook must EXIST. The
         # Player calls update() then draw(), and a None draw would silently
-        # change the shape every other runtime presents.
+        # change the shape every other runtime presents. `draw_next` is how
+        # the Player's scheduler (#217) asks for a logic-only tick.
         self.draw = self._draw_noop
+        self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
+        self.draw_next = True
+        # The slots and op codes lua_ext's shared bodies take -- this tier's
+        # ABI is runtime/lua_binding's, the device's is the moycore module's.
+        from runtime import lua_binding
+        self._I_SNAP = snap_slots(lua_binding)
+        self._aq_ops = audio_ops(lua_binding)
 
     def _update(self, dt):
         s = self._run.snap
         inp = self._ws.input
-        from runtime.lua_binding import (SNAP_BTN, SNAP_BTNP, SNAP_BTN_P1,
-                                         SNAP_BTNP_P1, SNAP_PLAYERS,
-                                         AQ_SFX, AQ_MUSIC,
-                                         AQ_BEEP, AQ_MUSIC_STOP,
-                                         AQ_SOUND_STOP, AQ_VOLUME)
+        from runtime.lua_binding import SNAP_BTN, SNAP_BTNP, SNAP_QUIT
         # MOY_BUTTONS, not a fourth hand-written copy of the order. This loop
         # carried its own and was CORRECT, which is exactly what made the
         # boards' divergence invisible: the host played fine, so nothing here
@@ -157,59 +174,35 @@ class MoycoreHostRun:
                 except Exception:  # noqa: BLE001
                     pass
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
-        # PLAYER TWO (#65). These snapshot slots exist in the C ABI and nothing
-        # filled them, so libmoy's `players()` answered 1 forever and a Lua cart
-        # could not have a second player at all -- the Python twin of the same
-        # cart fielded two tanks and the Lua one fielded one. The count is read
-        # through the router because a transport slot (a radio peer) lives
-        # there, not on the InputState; the fast path costs one dict test.
-        n = 1
-        pr = getattr(inp, "players", None)
-        if pr is not None:
-            n = pr.count()
-            if n > 1:
-                h1, p1 = pr.button_masks(MOY_BUTTONS, 1)
-                s[SNAP_BTN_P1] = h1
-                s[SNAP_BTNP_P1] = p1
-        s[SNAP_PLAYERS] = n
-        err = self._run.tick(dt)
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out)
+        err = self._run.tick(dt, self.draw_next)
+        # A LUA cart ends itself the same way a Python one does. libmoy's quit()
+        # is a host callback that sets SNAP_QUIT (h_quit), and nothing read it:
+        # the flag was written on every tier and translated on none, so `quit()`
+        # was a no-op for every Lua cart -- including the textmode(True) carts
+        # the cart API says MUST provide their own exit, because hold-BACKSPACE
+        # cannot reach one. Route it into the flag the Player already honours
+        # after _update (player.tick), and clear the slot so one quit is one
+        # exit.
+        if s[SNAP_QUIT]:
+            s[SNAP_QUIT] = 0
+            inp.cart_quit = True
         self._sync_view()
-        # Audio drains through the SAME api closures a Python cart uses, so the
-        # engine's behaviour lives in one place; only the per-call trip is gone.
-        for op, a, b, _c in self._run.audio():
-            try:
-                if op == AQ_SFX:
-                    self._ns["sfx"](a, None if b < 0 else b)
-                elif op == AQ_MUSIC:
-                    self._ns["music"](a, bool(b))
-                elif op == AQ_BEEP:
-                    self._ns["beep"](a, b / 1000.0)
-                elif op == AQ_MUSIC_STOP:
-                    self._ns["music_stop"]()
-                elif op == AQ_SOUND_STOP:
-                    self._ns["sound_stop"](None if a < 0 else a)
-                elif op == AQ_VOLUME:
-                    self._ns["volume"](a)
-            except Exception:  # noqa: BLE001 -- one bad command is not the frame
-                pass
+        drain_audio(self._ns, self._aq_ops, self._run.audio())
         if err:
             raise RuntimeError(err)
 
     def _sync_view(self):
-        """Apply the cart's view() to the console -- libmoy owns the verb and
-        records it, the console still has to composite accordingly."""
-        v = self._run.view()
-        if v == self._view:
-            return
-        self._view = v
-        try:
-            self._ws.input.game_view = v
-        except Exception:  # noqa: BLE001
-            pass
+        self._view = sync_view(self._ws, self._run.view(), self._view)
 
     def get_global(self, name):
         """A cart global as a number, or None -- what the parity suites read."""
         return self._run.get_global(name)
+
+    def exec(self, src, name="probe"):
+        """Run a chunk in the cart's state; None, or the error text. The parity
+        harnesses' probe: a state dump or a crafted call, never cart code."""
+        return self._run.exec(src, name)
 
     def get_global_len(self, name):
         """The length of a table global (Lua's #t), or None."""
@@ -219,8 +212,8 @@ class MoycoreHostRun:
         return None
 
     def close(self):
-        # Tear the hooks down with the state, as lupa's run does: the Player
-        # and its tests read `update is None` as "this run is over".
+        # Tear the hooks down with the state: the Player and its tests read
+        # `update is None` as "this run is over".
         self.update = None
         self.draw = None
         self._run.close()

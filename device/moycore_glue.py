@@ -21,7 +21,7 @@ this class does the three things that cannot live in C --
 Everything else the shell needs from a run -- `init`/`update`/`draw`/`close` --
 has the same shape `LuaCartRun` exposes, so `Player` needs no branch.
 
-EVERY Lua cart runs here. moybyte's superset verbs (scenes, tables, texts,
+EVERY Lua cart runs here. moybyte's superset verbs (scenes,
 flags, the batch forms) are not in libmoy's table, so they are REGISTERED on
 top of it as trampolines back to the same `make_api` closures they always had
 -- `moycore.register()` between `run_begin` and `load`, which is the window a
@@ -46,12 +46,20 @@ split it justified.
 from array import array
 
 try:
-    from lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
-                         LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
+    from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
+                         LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
+                         snap_slots, audio_ops, snap_shared, sync_view,
+                         drain_audio)
 except ImportError:                      # host tests importing the device module
-    from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
+    from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                                  LIBMOY_VERBS, NOT_REGISTRABLE,
-                                 install_handles)
+                                 install_handles, snap_slots, audio_ops,
+                                 snap_shared, sync_view, drain_audio)
+
+try:
+    from widgets import pointer_state
+except ImportError:                      # host tests importing the device module
+    from runtime.widgets import pointer_state
 
 try:
     import moycore as _moycore
@@ -151,14 +159,13 @@ class MoycoreRun:
         # lookup per frame in _refresh.
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP
-        self._I_BTN_P1 = _moycore.SNAP_BTN_P1
-        self._I_BTNP_P1 = _moycore.SNAP_BTNP_P1
-        self._I_PLAYERS = _moycore.SNAP_PLAYERS
         self._I_TIME = _moycore.SNAP_TIME_MS
-        self._I_TX = _moycore.SNAP_TOUCH_X
-        self._I_TY = _moycore.SNAP_TOUCH_Y
-        self._I_TD = _moycore.SNAP_TOUCH_DOWN
-        self._I_TMS = _moycore.SNAP_TOUCH_MS
+        # The slots and op codes lua_ext's shared bodies take, resolved once --
+        # the same reason the SNAP_* lookups above are bound at construction.
+        self._I_SNAP = snap_slots(_moycore)
+        self._aq_ops = audio_ops(_moycore)
+        self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
+        self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
         self.aq = array("h", bytearray(2 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
@@ -216,24 +223,32 @@ class MoycoreRun:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
                         and callable(ns[name])):
                     _moycore.register(name, ns[name])
-            tv = ns.get("table") if hasattr(ns, "get") else None
-            if callable(tv):
-                _moycore.register("moy_table_verb", tv)
             # The object-valued verbs and their Lua wrappers -- the same two
             # halves moy_lua uses, from the same source. Without this a cart
             # calling make_layer() gets "unsupported value" back from the
             # trampoline and the whole run falls to the old runtime, which is
             # what sakura_lua/brick_siege/ray did before this landed.
             self._layers, self._images = install_handles(ns, _moycore.register)
-            err = _moycore.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude")
+            err = _moycore.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 raise RuntimeError(err)
+            # The namespace's OWN prelude, if it brought one (the text console's
+            # `print`/`input` binding -- see runtime/lua_host.py's twin of this).
+            # A string, so the registration loop above skipped it.
+            extra = ns.get("_moy_prelude")
+            if extra:
+                err = _moycore.exec(extra, "prelude")
+                if err:
+                    raise RuntimeError(err)
         except Exception:  # noqa: BLE001 -- a bad verb must not strand the VM
             _moycore.close()
             raise
-        # "@cart" so a runtime error renders `cart:12:` -- what
-        # player._lua_cart_line parses for the crash-to-code panel (#24).
-        err = _moycore.load(src, "@cart")
+        # The cart's scripts in one call (SPEC.md 4, runtime/lua_ext.py): main
+        # keeps the "@cart" name, so a runtime error in it renders `cart:12:`
+        # -- what player._lua_cart_line parses for the crash-to-code panel
+        # (#24) -- and load() is where the verb profiler arms, ahead of the
+        # first chunk rather than after a shim that already captured its verbs.
+        err = _moycore.load(cart_chunks(ns, src))
         if err:
             try:
                 _moycore.close()
@@ -296,86 +311,27 @@ class MoycoreRun:
             held, pressed = masks(MOY_BUTTONS)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
-        # PLAYER TWO (#65). These snapshot slots exist in the C ABI and nothing
-        # filled them, so libmoy's `players()` answered 1 forever and a Lua cart
-        # could not have a second player at all -- the Python twin of the same
-        # cart fielded two tanks and the Lua one fielded one. The count is read
-        # through the router because a transport slot (a radio peer) lives
-        # there, not on the InputState; the fast path costs one dict test.
-        n = 1
-        pr = getattr(inp, "players", None)
-        if pr is not None:
-            n = pr.count()
-            if n > 1:
-                h1, p1 = pr.button_masks(MOY_BUTTONS, 1)
-                s[self._I_BTN_P1] = h1
-                s[self._I_BTNP_P1] = p1
-        s[self._I_PLAYERS] = n
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out)
         if _ticks_ms is not None:
             try:
                 s[self._I_TIME] = _ticks_diff(_ticks_ms(), inp.cart_start_ms)
             except Exception:  # noqa: BLE001
                 pass
-        # The pointer, in the cart's own coordinates. touch() reads nil when
-        # down is 0, which is what "no pointer" means in SPEC.md 7.3.
-        t = getattr(inp, "touch_state", None)
-        if t is not None:
-            try:
-                x, y, down, ms = t()
-                s[self._I_TX] = int(x)
-                s[self._I_TY] = int(y)
-                s[self._I_TD] = 1 if down else 0
-                s[self._I_TMS] = int(ms)
-            except Exception:  # noqa: BLE001
-                s[self._I_TD] = 0
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):
-        """Apply the cart's view() to the console.
-
-        libmoy owns the verb (SPEC.md 6 core) and records the declaration; the
-        console still has to ACT on it -- ws.input.game_view is what the WM
-        composites from. So this reads the recording instead of the cart
-        crossing into Python to set it, which is the whole point of the verb
-        moving into core. Checked per frame because the spec allows a cart to
-        change its region at runtime, and skipped when unchanged so a cart that
-        declares once pays one comparison.
-        """
-        v = _moycore.view()
-        if v == self._view:
-            return
-        self._view = v
-        try:
-            self.ws.input.game_view = v
-        except Exception:  # noqa: BLE001 -- a console without the field is fine
-            pass
+        self._view = sync_view(self.ws, _moycore.view(), self._view)
 
     def _drain_audio(self):
         n = self.aq[0]
         if n <= 0:
             return
         self.aq[0] = 0
-        ns = self.ns
+        aq = self.aq
         slots = _moycore.AQ_SLOTS
-        for i in range(n):
-            p = 1 + i * slots
-            op = self.aq[p]
-            a, b = self.aq[p + 1], self.aq[p + 2]
-            try:
-                if op == _moycore.AQ_SFX:
-                    ns["sfx"](a, None if b < 0 else b)
-                elif op == _moycore.AQ_MUSIC:
-                    ns["music"](a, bool(b))
-                elif op == _moycore.AQ_BEEP:
-                    ns["beep"](a, b / 1000.0)
-                elif op == _moycore.AQ_MUSIC_STOP:
-                    ns["music_stop"]()
-                elif op == _moycore.AQ_SOUND_STOP:
-                    ns["sound_stop"](None if a < 0 else a)
-                elif op == _moycore.AQ_VOLUME:
-                    ns["volume"](a)
-            except Exception:  # noqa: BLE001 -- one bad command is not the frame
-                pass
+        drain_audio(self.ns, self._aq_ops,
+                    ((aq[1 + i * slots], aq[2 + i * slots], aq[3 + i * slots])
+                     for i in range(n)))
 
     def _draw_noop(self):
         return None
@@ -399,6 +355,13 @@ class MoycoreRun:
         upd, drw = f()
         return (upd / 1000.0, drw / 1000.0)
 
+    # The Player's scheduler (#217) clears this for a logic-only tick. A module
+    # built before `tick` took the flag draws every tick, which is the fused
+    # frame it always ran -- the divisor then saves the composite and flush
+    # on those frames, and not the cart's own drawing.
+    draw_next = True
+    _tick_draw = None
+
     def _update(self, dt):
         """The whole cart frame. `draw` is None because this already drew: the
         C loop runs _update and _draw back to back, which is the point."""
@@ -410,7 +373,23 @@ class MoycoreRun:
         if buf is not self._last_buf():
             _moycore.retarget(buf)
             self._buf = buf
-        err = _moycore.tick(dt)
+        td = self._tick_draw
+        if td is None:
+            td = MoycoreRun._tick_draw = bool(getattr(_moycore, "TICK_DRAW", 0))
+        err = _moycore.tick(dt, self.draw_next) if td else _moycore.tick(dt)
+        # A LUA cart ends itself the same way a Python one does. libmoy's quit()
+        # is a host callback that sets SNAP_QUIT (h_quit), and nothing read it:
+        # the flag was written on every tier and translated on none, so `quit()`
+        # was a no-op for every Lua cart -- including the textmode(True) carts
+        # the cart API says MUST provide their own exit, because hold-BACKSPACE
+        # cannot reach one. Route it into the flag the Player already honours
+        # after _update (player.tick), and clear the slot so one quit is one
+        # exit.
+        if self.snap[self._I_QUIT]:
+            self.snap[self._I_QUIT] = 0
+            inp = getattr(self.ws, "input", None)
+            if inp is not None:
+                inp.cart_quit = True
         self._sync_view()
         self._drain_audio()
         if err:

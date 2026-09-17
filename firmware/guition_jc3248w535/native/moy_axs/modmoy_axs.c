@@ -55,14 +55,41 @@
 //   the live dev channel fixed it with no other change. Every proven driver
 //   (ESPHome, esp_lcd's AXS component) arms the window before every write;
 //   kick() arms it before every frame now. Arm-every-frame is the DESIGN, and
-//   deliberately not a recovery mechanism -- because on this path there is no
-//   recovery to hang off it. moy_lcd can lean on esp_lcd recycling its own
-//   in-flight transactions after a bad flush; here the retrieve loop only
-//   reclaims results the done-ISR has COUNTED, so a band that was queued and
-//   never completed (the timed-out flush) is never retrieved and its
-//   spi_master queue slot is gone until reboot. Tracked in the moy_axs
-//   hardening issue; a next kick that finds the queue full latches ESP_ERR
-//   and reports it, which is a symptom, not a cure.
+//   it is also half of how a frame that FAILED is recovered from: the window
+//   the next frame arms is a full command sequence, which the panel only
+//   parses with CS high. THE FAILURE PATHS below are the other half.
+//
+// THE FAILURE PATHS (#205, proven on glass 2026-09-05). Three things can go
+//   wrong on the feeder -- a deadline passes (a band the peripheral never
+//   completed, or a feed starved past it), the transport refuses a band,
+//   frame_begin fails after the pixel header -- and each leaves a frame
+//   half-shipped under one CS assertion. The next frame needs two guarantees:
+//   * NO QUEUE SLOT OUTLIVES ITS BAND. The device runs
+//     SPI_DEVICE_NO_RETURN_RESULT: spi_master frees a transaction's slot as
+//     its ISR starts it and files no result, so there is nothing to retrieve
+//     and nothing a count could disagree with. (Before this the driver filed
+//     every result and frame_end reclaimed exactly the number the done-ISR
+//     had counted; a band that completed after its frame gave up stayed
+//     filed for the rest of the boot, the driver's result queue filled to
+//     its depth and then dropped completions, and spi_bus_remove_device
+//     refuses a device with results on file. Teardown/re-add was DECLINED
+//     for the same reason: the driver will not remove a device with an
+//     unfinished transaction, so it cannot drop an orphan, only be blocked
+//     by one. Numbers: #205.)
+//   * CS ENDS HIGH. A frame whose LAST band did not go out still holds CS
+//     low, and the next frame's CASET/RASET/header would be swallowed as
+//     pixel data -- one more garbage frame before the picture came back.
+//     frame_end waits the bands it did queue out (bounded) and, if the chain
+//     is still open, sends one 1-line DCS NOP header with no KEEP_ACTIVE: the
+//     bridge reads its four bytes as the tail of whatever it was receiving
+//     and CS rises. The same close runs when a command's parameters fail
+//     after their header went out with CS held.
+//   `fault(kind)` arms ONE of these failures for the next flush so the glass
+//   proves the recovery instead of assuming it (tests/test_guition_on_glass
+//   .py). The one case this cannot clear is a peripheral that never completes
+//   a transaction at all: spi_master's polling path waits for it unbounded,
+//   so the drain reports the feeder busy and every VM-side verb raises rather
+//   than kicking, or sending a command, over a frame the feeder still holds.
 //
 // LANDSCAPE, ROTATED IN THE BAND COPY (owner call, 2026-08-18/19). The
 //   console runs 480x320 landscape; the glass is portrait-native and the
@@ -213,11 +240,24 @@ static bool s_bus_held;                // spi_device_acquire_bus is ours right n
 // long native call (a moycore tick pumps nothing), which held the measured
 // flush wall at ~12.4ms against a ~7.7ms game-window transfer.
 
-// One transaction struct per band, stable for the whole frame (queued
-// transactions must outlive their retrieval), plus the retrieval counter --
-// spi_master's queue slots free only at spi_device_get_trans_result.
+// One transaction struct per band, stable for the whole frame: a queued
+// descriptor must outlive its completion, and with NO_RETURN_RESULT the ISR is
+// its last reader.
 static spi_transaction_t s_band_trans[MOY_AXS_BANDS];
-static int s_retrieved;                // results collected so far this frame
+// The pixel-write CS chain is asserted: set when the header ships, cleared
+// when the LAST band is queued (its completion raises CS) or by the close in
+// frame_end. Feeder-owned.
+static bool s_cs_open;
+// THE FAILURE PATHS' proof hook: one fault, consumed by the next flush.
+static volatile int s_fault;
+#define MOY_AXS_FAULT_DROP  1   // band 1 is counted but never queued: a band that never completes
+#define MOY_AXS_FAULT_QERR  2   // band 1 is refused by the transport
+#define MOY_AXS_FAULT_HDR   3   // frame_begin fails after the pixel header, CS held
+#define MOY_AXS_FAULT_LATE  4   // the last band is fed after the deadline and completes late
+// How long frame_end waits for the bands it queued to complete before it
+// releases the bus: a band is ~1ms of wire, so this only runs its course on a
+// peripheral that has stopped completing.
+#define MOY_AXS_QUIET_TICKS 10
 // The pixel-write header, DMA-visible (polling tx still wants a real buffer).
 static DMA_ATTR uint8_t s_pix_hdr[4] = { AXS_OP_PIX4, 0x00, CMD_RAMWR, 0x00 };
 
@@ -298,7 +338,9 @@ static void moy_axs_fold_band(uint8_t *slot, int k, int rows) {
 // (= a LOGICAL ROW of the source), inner over the band's physical rows
 // (= consecutive lx, sequential PSRAM reads -- every 32B cache line fully
 // used, same total read traffic as a straight memcpy); the writes scatter
-// with a 640B stride, into internal SRAM, where a scatter is free.
+// with a 640B stride, into internal SRAM, where a scatter is free. `-O3` on
+// this loop and on moy_fold_band_rot was A/B'd on glass (2026-09-05, #205)
+// and made both SLOWER -- the moy_gfx pragma's verdict does not transfer.
 static void moy_axs_rotate_band(uint8_t *slot, const uint8_t *fb, int k,
                                 int rows) {
     const uint16_t *src = (const uint16_t *)fb;
@@ -342,6 +384,16 @@ static void moy_axs_require(void) {
     }
 }
 
+// After a drain. Its false has two meanings -- the frame finished unclean, or
+// the feeder never handed it back -- and only the first may be followed by a
+// kick, a command on the bus or a write to the fold/bezel state, because the
+// feeder reads all three from inside a frame it still holds.
+static void moy_axs_require_idle(void) {
+    if (moy_flush.frame_busy) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_axs: feeder busy"));
+    }
+}
+
 // SPI post-transfer callback, ISR context: count BAND completions only. The
 // command/param/header polling transmits also come through here, so bands mark
 // themselves via trans->user.
@@ -370,10 +422,27 @@ static void moy_axs_free_all(void) {
         if (s_fbs[i]) { heap_caps_free(s_fbs[i]); s_fbs[i] = NULL; }
     }
     s_nfbs = 0;
-    s_retrieved = 0;
+    s_cs_open = false;
+    s_fault = 0;
     moy_flush_reset();
     moy_fold_reset();          // the fold's src was one of the buffers just freed
     moy_flush.frame_clean = true;
+}
+
+// End whatever write CS is holding open (THE FAILURE PATHS): one 1-line DCS
+// NOP header with no KEEP_ACTIVE. Mid-write the bridge takes the four bytes as
+// the tail of what it was receiving -- a few garbage pixels in a frame that
+// already failed, overwritten by the next -- and with CS already high it is a
+// NOP command. The polling path first waits out every band this device still
+// has on the wire, which is what makes it safe to send after queued bands.
+// Bus acquired.
+static esp_err_t moy_axs_cs_close_acquired(void) {
+    uint8_t nop[4] = { AXS_OP_CMD1, 0x00, 0x00, 0x00 };
+    spi_transaction_t t = { 0 };
+    t.length = 32;
+    t.tx_buffer = nop;
+    s_cs_open = false;
+    return spi_device_polling_transmit(s_dev, &t);
 }
 
 // One panel command over the 1-line opcode path, bus ALREADY ACQUIRED by the
@@ -401,6 +470,9 @@ static esp_err_t moy_axs_cmd_acquired(uint8_t cmd, const uint8_t *data, size_t l
         d.length = len * 8;
         d.tx_buffer = pbuf;
         err = spi_device_polling_transmit(s_dev, &d);
+        if (err != ESP_OK) {
+            moy_axs_cs_close_acquired();    // the header left CS held for these
+        }
     }
     return err;
 }
@@ -499,13 +571,15 @@ static mp_obj_t moy_axs_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         // lesson: a leftover bnc_total makes the next drain feed a dead
         // frame) and let a stuck bus hold go.
         moy_flush_drain();          // wait any in-flight FEEDER frame out
+        moy_axs_require_idle();     // ...and never reset under one still held
         if (s_bus_held) {
             spi_device_release_bus(s_dev);
             s_bus_held = false;
         }
         moy_flush_reset();
         moy_fold_reset();
-        s_retrieved = 0;
+        s_cs_open = false;
+        s_fault = 0;
         s_bezels_valid = false;
         moy_axs_set_full_window();
         return mp_const_none;
@@ -563,10 +637,14 @@ static mp_obj_t moy_axs_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         .clock_speed_hz = args[1].u_int,
         .mode = 0,
         .spics_io_num = MOY_AXS_PIN_CS,
-        // Bands per frame + margin: queue slots free only at result retrieval,
-        // and drain retrieves once at the end of the frame.
-        .queue_size = MOY_AXS_BANDS + 2,
-        .flags = SPI_DEVICE_HALFDUPLEX,
+        // Bands the ISR has not STARTED yet: with NO_RETURN_RESULT a slot
+        // frees the moment the ISR picks the band up, and the engine never
+        // hands over more than its bounce slots' worth -- so a full queue can
+        // only mean the ISR has stopped, which the deadline then names.
+        .queue_size = MOY_AXS_BOUNCE_SLOTS + 2,
+        // NO_RETURN_RESULT: THE FAILURE PATHS above. The driver requires a
+        // post_cb in its place, which this module always had.
+        .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_RETURN_RESULT,
         .post_cb = moy_axs_post_cb,
     };
     err = spi_bus_add_device(MOY_AXS_SPI_HOST, &dev_cfg, &s_dev);
@@ -634,28 +712,19 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_nfbs_obj, moy_axs_nfbs);
 // show() to report. This is the QSPI TRANSPORT -- the one part Phase C said
 // the two S3 panels can never share.
 
-// Retrieve every completed queued result so the queue slots free. Non-blocking
-// for results the ISR has already counted; anything not yet done is left.
-static void moy_axs_retrieve(void) {
-    spi_transaction_t *rt;
-    while (s_retrieved < (int)moy_flush.done) {
-        if (spi_device_get_trans_result(s_dev, &rt, 0) != ESP_OK) {
-            break;
-        }
-        s_retrieved++;
+static inline bool moy_axs_fault_take(int kind) {
+    if (s_fault != kind) {
+        return false;
     }
+    s_fault = 0;
+    return true;
 }
 
 // frame_begin: acquire the bus (CS_KEEP_ACTIVE demands the holder), arm the
 // window EVERY frame (the discard rule -- THE WINDOW MUST BE ARMED above),
 // then ship the 1-line pixel-write header with CS held for the bands that
-// follow.
-//
-// The window rect is whatever the MP-side decision left in s_win_* (THE GAME
-// WINDOW). The retrieval counter restarts here, in lockstep with the band
-// counters the engine restarts the instant this returns OK -- on an ERROR
-// path it is deliberately left alone, because nothing new was queued and the
-// previous frame's frame_end already reconciled it.
+// follow. The window rect is whatever the MP-side decision left in s_win_*
+// (THE GAME WINDOW).
 static esp_err_t moy_axs_frame_begin(void) {
     esp_err_t err = spi_device_acquire_bus(s_dev, portMAX_DELAY);
     if (err != ESP_OK) {
@@ -670,13 +739,17 @@ static esp_err_t moy_axs_frame_begin(void) {
         hdr.flags = SPI_TRANS_CS_KEEP_ACTIVE;
         err = spi_device_polling_transmit(s_dev, &hdr);
     }
+    if (err == ESP_OK) {
+        s_cs_open = true;
+        if (moy_axs_fault_take(MOY_AXS_FAULT_HDR)) {
+            err = ESP_FAIL;
+        }
+    }
     if (err != ESP_OK) {
         // Whatever is on the glass is no longer a picture this fold laid.
         s_bezels_valid = false;
-        return err;
     }
-    s_retrieved = 0;
-    return ESP_OK;
+    return err;
 }
 
 // queue_band: synthesize physical band k into the slot the engine has already
@@ -685,15 +758,26 @@ static esp_err_t moy_axs_frame_begin(void) {
 // until the LAST band ends the write.
 //
 // Cheap and non-blocking: we hold the bus for the whole frame, so there is no
-// acquire wait anywhere in here.
+// acquire wait anywhere in here. A queue-full return can only mean the ISR
+// stopped taking bands (queue_size in init); the engine latches and counts it.
 static esp_err_t moy_axs_queue_band(uint8_t *slot, const uint8_t *src, int k,
                                     int y, int rows, bool last) {
     (void)y;
-    moy_axs_retrieve();
+    if (last && moy_axs_fault_take(MOY_AXS_FAULT_LATE)) {
+        vTaskDelay(pdMS_TO_TICKS(MOY_FLUSH_TIMEOUT_US / 1000 + 20));
+    }
     if (moy_fold.inflight) {
         moy_axs_fold_band(slot, k, rows);
     } else {
         moy_axs_rotate_band(slot, src, k, rows);
+    }
+    if (k == 1) {
+        if (moy_axs_fault_take(MOY_AXS_FAULT_QERR)) {
+            return ESP_FAIL;
+        }
+        if (moy_axs_fault_take(MOY_AXS_FAULT_DROP)) {
+            return ESP_OK;
+        }
     }
     spi_transaction_t *t = &s_band_trans[k];
     memset(t, 0, sizeof(*t));
@@ -704,22 +788,28 @@ static esp_err_t moy_axs_queue_band(uint8_t *slot, const uint8_t *src, int k,
     if (!last) {
         t->flags |= SPI_TRANS_CS_KEEP_ACTIVE;
     }
-    // A queue-full here is either a bookkeeping bug (queue_size covers a whole
-    // frame) or the LEAK from an earlier timed-out flush: bands that never
-    // completed are never retrieved, so their queue slots stay taken for the
-    // rest of the boot (see the header note; the moy_axs hardening issue
-    // tracks it). Either way, all the engine can do is latch, count, and let
-    // kick report it.
-    return spi_device_queue_trans(s_dev, t, 0);
+    esp_err_t err = spi_device_queue_trans(s_dev, t, 0);
+    if (err == ESP_OK && last) {
+        s_cs_open = false;          // its completion is what raises CS
+    }
+    return err;
 }
 
-// frame_end: collect every queued result (which frees the queue slots) -- even
-// after an error or a timeout, whatever completed must be retrieved or the
-// queue jams for good -- and hand the bus back.
+// frame_end: wait out every band the transport was handed (each still reads a
+// bounce slot and holds CS until it completes -- bounded, because a band the
+// peripheral never completes is the one fault this path cannot clear), close
+// the CS chain if this frame's last band never did, and hand the bus back.
+// Runs on every handoff, including a failed frame_begin.
 static void moy_axs_frame_end(bool ok) {
     (void)ok;
     if (s_bus_held) {
-        moy_axs_retrieve();
+        for (int i = 0; i < MOY_AXS_QUIET_TICKS
+                        && moy_flush.done < moy_flush.target; i++) {
+            ulTaskNotifyTake(pdTRUE, 1);
+        }
+        if (s_cs_open) {
+            moy_axs_cs_close_acquired();
+        }
         spi_device_release_bus(s_dev);
         s_bus_held = false;
     }
@@ -772,6 +862,7 @@ static mp_obj_t moy_axs_kick(size_t n_args, const mp_obj_t *a) {
     moy_axs_require();
     int n = moy_axs_fb_index(n_args, a);
     moy_flush_drain();
+    moy_axs_require_idle();
     // The FEEDER runs the SPI, so an error surfaces one frame late: raise the
     // finished frame's before handing this one over.
     moy_axs_check(moy_flush_take_err(), "flush");
@@ -814,6 +905,7 @@ static mp_obj_t moy_axs_show(size_t n_args, const mp_obj_t *a) {
     moy_axs_require();
     int n = moy_axs_fb_index(n_args, a);
     moy_flush_drain();
+    moy_axs_require_idle();
     (void)moy_flush_take_err();     // show reports its OWN frame's errors
     moy_axs_decide_window();
     moy_flush_kick(s_fbs[n], s_win_h);
@@ -840,6 +932,7 @@ static mp_obj_t moy_axs_set_madctl(mp_obj_t v_in) {
     moy_axs_require();
     uint8_t v = (uint8_t)mp_obj_get_int(v_in);
     moy_flush_drain();         // never race a command into a live write
+    moy_axs_require_idle();
     moy_axs_cmd(CMD_MADCTL, &v, 1);
     s_madctl = v;
     return mp_const_none;
@@ -879,6 +972,64 @@ static mp_obj_t moy_axs_fold_fence(void) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_fold_fence_obj, moy_axs_fold_fence);
+
+// arm_fold_snap(live, live_off, scratch, vw, vh, sx, sstride, ox, oy, scale)
+// -> True when the snapshot is a DMA in flight (fence with fold_snap_fence()
+// before `live` is written again -- DeviceCanvas.sync_back does), False when
+// it landed here as a memcpy. The rectangle is vw x vh at column sx of the
+// rows starting live_off bytes into `live`, sstride pixels wide; the copy is
+// that whole row range into `scratch`, which becomes the fold's source.
+// Geometry the synthesis cannot express is REFUSED (ValueError) with nothing
+// copied or latched, and blit_game composites itself. moy_fold.h has the why.
+static mp_obj_t moy_axs_arm_fold_snap(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_axs_require();
+    mp_buffer_info_t live, scratch;
+    mp_get_buffer_raise(a[0], &live, MP_BUFFER_READ);
+    mp_int_t live_off = mp_obj_get_int(a[1]);
+    mp_get_buffer_raise(a[2], &scratch, MP_BUFFER_WRITE);
+    bool async_copy = false;
+    if (live_off < 0
+            || !moy_fold_arm_snap((const uint8_t *)live.buf, live.len,
+                                  (size_t)live_off, (uint8_t *)scratch.buf,
+                                  scratch.len,
+                                  mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                                  mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                                  mp_obj_get_int(a[7]), mp_obj_get_int(a[8]),
+                                  mp_obj_get_int(a[9]), MOY_AXS_W, MOY_AXS_H,
+                                  &async_copy)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fold geometry"));
+    }
+    return async_copy ? mp_const_true : mp_const_false;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_arm_fold_snap_obj, 10, 10,
+                                           moy_axs_arm_fold_snap);
+
+// fold_snap_fence() -- block until the snapshot in flight has finished reading
+// the live canvas: the fence the sys canvas takes before the cart's next
+// write. One compare when nothing is in flight, which is every frame once the
+// copy has landed -- and it lands before the loop head is over.
+static mp_obj_t moy_axs_fold_snap_fence(void) {
+    moy_fold_snap_fence();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_fold_snap_fence_obj, moy_axs_fold_snap_fence);
+
+// snap_stats() -> (snaps, snaps_sync, timeouts, wait_us): DMA snapshots,
+// memcpy snapshots (the engine declined: alignment, size, a refusal), copies
+// that never landed (the engine is then retired for the session), and what
+// the last VM-side snap fence waited. The PUMP line prints them as
+// snap=a/b snapto= snapwait=; `snaps` climbing 1:1 with fold= is the proof.
+static mp_obj_t moy_axs_snap_stats(void) {
+    mp_obj_t t[4] = {
+        mp_obj_new_int_from_uint(moy_fold.snaps),
+        mp_obj_new_int_from_uint(moy_fold.snaps_sync),
+        mp_obj_new_int_from_uint(moy_fold.snap_timeouts),
+        mp_obj_new_int_from_uint(moy_fold.snap_wait_us),
+    };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_snap_stats_obj, moy_axs_snap_stats);
 
 // disarm_fold(back_fb) -- an overlay is about to paint the root: perform the
 // SKIPPED composite (black bezels + the game rect at scale) into framebuffer
@@ -928,6 +1079,7 @@ static mp_obj_t moy_axs_fold_test(mp_obj_t back_in) {
         mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
     }
     moy_flush_drain();         // the bounce slots are our scratch here
+    moy_axs_require_idle();
     const uint8_t *keep_src = moy_flush.bnc_src;
     moy_flush.bnc_src = s_fbs[n];
     uint32_t bad = 0;
@@ -969,6 +1121,7 @@ static mp_obj_t moy_axs_set_rot(mp_obj_t v_in) {
         mp_raise_ValueError(MP_ERROR_TEXT("rot 0|1"));
     }
     moy_flush_drain();         // never flip mid-frame
+    moy_axs_require_idle();
     s_rot = (int)v;
     s_bezels_valid = false;
     return mp_const_none;
@@ -985,6 +1138,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_rot_obj, moy_axs_rot);
 static mp_obj_t moy_axs_cmd_py(size_t n_args, const mp_obj_t *a) {
     moy_axs_require();
     moy_flush_drain();
+    moy_axs_require_idle();
     uint8_t c = (uint8_t)mp_obj_get_int(a[0]);
     mp_buffer_info_t buf = { 0 };
     if (n_args > 1) {
@@ -1046,6 +1200,19 @@ static mp_obj_t moy_axs_pump_stats(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_pump_stats_obj, moy_axs_pump_stats);
 
+// fault(kind) -- arm ONE of THE FAILURE PATHS for the next flush (the FAULT_*
+// constants; 0 disarms). What lets the on-glass suite prove a failed frame is
+// recovered from, on a path no natural run has ever taken.
+static mp_obj_t moy_axs_fault(mp_obj_t kind_in) {
+    mp_int_t kind = mp_obj_get_int(kind_in);
+    if (kind < 0 || kind > MOY_AXS_FAULT_LATE) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fault kind"));
+    }
+    s_fault = (int)kind;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_axs_fault_obj, moy_axs_fault);
+
 static const mp_rom_map_elem_t moy_axs_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),   MP_ROM_QSTR(MP_QSTR_moy_axs) },
     { MP_ROM_QSTR(MP_QSTR_init),       MP_ROM_PTR(&moy_axs_init_obj) },
@@ -1067,10 +1234,18 @@ static const mp_rom_map_elem_t moy_axs_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_disarm_fold), MP_ROM_PTR(&moy_axs_disarm_fold_obj) },
     { MP_ROM_QSTR(MP_QSTR_fold_stats), MP_ROM_PTR(&moy_axs_fold_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_fold_test),  MP_ROM_PTR(&moy_axs_fold_test_obj) },
+    { MP_ROM_QSTR(MP_QSTR_arm_fold_snap), MP_ROM_PTR(&moy_axs_arm_fold_snap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fold_snap_fence), MP_ROM_PTR(&moy_axs_fold_snap_fence_obj) },
+    { MP_ROM_QSTR(MP_QSTR_snap_stats), MP_ROM_PTR(&moy_axs_snap_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_cmd),        MP_ROM_PTR(&moy_axs_cmd_obj) },
     { MP_ROM_QSTR(MP_QSTR_bars),       MP_ROM_PTR(&moy_axs_bars_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats),      MP_ROM_PTR(&moy_axs_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_pump_stats), MP_ROM_PTR(&moy_axs_pump_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fault),      MP_ROM_PTR(&moy_axs_fault_obj) },
+    { MP_ROM_QSTR(MP_QSTR_FAULT_DROP), MP_ROM_INT(MOY_AXS_FAULT_DROP) },
+    { MP_ROM_QSTR(MP_QSTR_FAULT_QERR), MP_ROM_INT(MOY_AXS_FAULT_QERR) },
+    { MP_ROM_QSTR(MP_QSTR_FAULT_HDR),  MP_ROM_INT(MOY_AXS_FAULT_HDR) },
+    { MP_ROM_QSTR(MP_QSTR_FAULT_LATE), MP_ROM_INT(MOY_AXS_FAULT_LATE) },
     { MP_ROM_QSTR(MP_QSTR_WIDTH),      MP_ROM_INT(MOY_AXS_W) },
     { MP_ROM_QSTR(MP_QSTR_HEIGHT),     MP_ROM_INT(MOY_AXS_H) },
     { MP_ROM_QSTR(MP_QSTR_BAND_ROWS),  MP_ROM_INT(MOY_AXS_BAND_ROWS) },

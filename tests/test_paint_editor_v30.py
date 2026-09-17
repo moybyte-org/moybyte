@@ -10,6 +10,8 @@ lives in runtime.editors, shared with the frozen device modules.
 
 from pathlib import Path
 
+from ws_helpers import StubInput
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -120,15 +122,6 @@ def test_spr_with_wh_span_blits_a_16x16_image():
 
         def __getattr__(self, name):
             return lambda *a, **k: 0
-
-    class StubInput:
-        pointer = None
-
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
 
     sheet = SpriteSheet()
     api = host_app.make_api(StubCanvas(), StubInput(), {}, sheet)
@@ -278,6 +271,25 @@ def test_save_persists_a_2x2_sprite(tmp_path):
 
 # -- Part A applied to the map editor (tap = paint) --------------------------
 
+# The map tests need a cart with a REAL shipped map, and one whose `_init` does
+# not author its own tiles: opening a project runs `_init`, so a cart that
+# `mset`s there (Bench does) arrives in the editor already dirty and no
+# assertion about "a pan wrote nothing" can mean anything. Named, not indexed --
+# the shelf order is content and moves whenever a seed does.
+_MAP_CART = "Hop Quest"
+
+
+def _open_map_cart(ws):
+    for i, c in enumerate(ws.launcher.items):
+        if c.get("title") == _MAP_CART:
+            ws.launcher.sel = i
+            break
+    else:
+        raise AssertionError("no seed cart titled " + _MAP_CART)
+    ws.open_in_editor()
+    ws._open_map()
+
+
 def _map_cell_center(ws, cx, cy):
     # Pixel center of visible map cell (cx, cy) at the workstation's LIVE zoom (#37
     # follow-up): the map-view metrics are dynamic now, so compute from _mv_metrics().
@@ -293,9 +305,7 @@ def test_map_tap_paints_one_cell(tmp_path):
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.launcher.sel = 0
-    ws.open()
-    ws._open_map()
+    _open_map_cart(ws)
     assert ws.menu_view == "map"
     drv = host_app.ConsoleDriver(ws)
     me = ws.map_ui.mapedit
@@ -327,9 +337,7 @@ def test_map_drag_pans_view_while_tap_still_paints(tmp_path):
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.launcher.sel = 0
-    ws.open()
-    ws._open_map()
+    _open_map_cart(ws)
     assert ws.menu_view == "map"
     drv = host_app.ConsoleDriver(ws)
     me = ws.map_ui.mapedit
@@ -378,9 +386,7 @@ def test_map_drag_with_size_brush_reverts_the_whole_block(tmp_path):
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.launcher.sel = 0
-    ws.open()
-    ws._open_map()
+    _open_map_cart(ws)
     drv = host_app.ConsoleDriver(ws)
     me = ws.map_ui.mapedit
     me.n = 4
@@ -413,9 +419,7 @@ def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.launcher.sel = 0
-    ws.open()
-    ws._open_map()
+    _open_map_cart(ws)
     drv = host_app.ConsoleDriver(ws)
 
     # First fill a cell with a real tile.
@@ -454,9 +458,7 @@ def _btn_center(rect):
 def _open_map(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.launcher.sel = 0
-    ws.open()
-    ws._open_map()
+    _open_map_cart(ws)
     return ws, host_app.ConsoleDriver(ws)
 
 

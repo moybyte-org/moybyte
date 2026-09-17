@@ -31,8 +31,8 @@
 //   * pmem lives in a C array with a dirty flag, which is the shape the device
 //     already deferred it to (#66): RAM during play, persisted at boundaries.
 //
-// Verbs moybyte adds ON TOP of the spec -- layers/images, scenes, tables,
-// texts, view() -- are not IMPLEMENTED here, and they do not need to be: they
+// Verbs moybyte adds ON TOP of the spec -- layers/images, scenes,
+// view() -- are not IMPLEMENTED here, and they do not need to be: they
 // are REGISTERED here, as Lua globals backed by the same Python closures they
 // always had (register() below).
 //
@@ -42,6 +42,8 @@
 // hold one, never a second runtime (the first cut shipped two and the
 // deletion commit records what that cost).
 
+#include <stdint.h>
+#include <stdio.h>          // snprintf, for h_cfg's numeric config values
 #include <stdlib.h>
 #include <string.h>
 
@@ -91,9 +93,7 @@
 #ifndef MOYCORE_SRAM_FLOOR
 #define MOYCORE_SRAM_FLOOR (48 * 1024)
 #endif
-#ifdef MOYCORE_PSRAM
 static size_t g_sram_floor = MOYCORE_SRAM_FLOOR;
-#endif
 
 // The census the floor is set from: live bytes per region, the peak, and how
 // often the floor sent an allocation to PSRAM. Deliberately four numbers where
@@ -108,6 +108,28 @@ static size_t g_sram_floor = MOYCORE_SRAM_FLOOR;
 // only tier that runs it is not a guard.
 static size_t g_live_r[2], g_live_total, g_peak;
 static uint32_t g_sram_denied;
+
+// What the RUN had (#211): the low-water mark of free internal SRAM while it
+// ran, and whether the floor ever pushed it into the ~2x-slower PSRAM regime.
+// Both are read where big_realloc already knows the free figure, so the
+// accounting is one compare and NO extra syscall -- a per-frame sample would
+// have cost a heap_caps_get_free_size the allocator does not otherwise need.
+// The consequence is worth stating: the mark is sampled at the VM's big
+// allocations, which is the moment the floor decision is actually made, and
+// not between them.
+//
+// SIZE_MAX means "never sampled", which reports as None -- a run whose Lua
+// never allocated big is not a run with zero headroom.
+static size_t g_sram_free_min = SIZE_MAX;
+static uint8_t g_psram_fallback;
+#ifndef MOYCORE_PSRAM
+// Off-board there is ONE region, so the split above cannot happen and the
+// report is None. `sram_sim(bytes)` supplies the free figure the boards read
+// from the heap, which is what makes the floor arithmetic and the fallback
+// flag testable on the tier the tests run on (tests/test_moycore_pool.py).
+// A TEST verb, like pool_check: it cannot exist in a firmware build.
+static size_t g_sram_sim;
+#endif
 
 static inline int mc_region(const void *p)
 {
@@ -291,14 +313,18 @@ static void h_beep(void *user, float freq_hz, float dur_s)
     aq_push(AQ_BEEP, hz, ms, 0);
 }
 
+/* The pointer slot is FLAGS, not a level: it is the only one h_touch has and
+ * touch() must answer three things out of it. Mirrors runtime/widgets.py's
+ * P_LIVE / P_HELD / P_CLICK -- 0 is "no pointer", which reads as nil. */
 static int h_touch(void *user, int out_xyth[4])
 {
+    int st;
     (void)user;
-    if (!RUN.snap || !RUN.snap[SNAP_TOUCH_DOWN]) return 0;
+    if (!RUN.snap || !(st = RUN.snap[SNAP_TOUCH_DOWN])) return 0;
     out_xyth[0] = RUN.snap[SNAP_TOUCH_X];
     out_xyth[1] = RUN.snap[SNAP_TOUCH_Y];
-    out_xyth[2] = RUN.snap[SNAP_TOUCH_DOWN];
-    out_xyth[3] = RUN.snap[SNAP_TOUCH_MS];
+    out_xyth[2] = (st & 4) != 0;                 /* tapped: the press edge */
+    out_xyth[3] = (st & 2) != 0;                 /* held */
     return 1;
 }
 
@@ -338,9 +364,37 @@ static const char *h_cfg(void *user, const char *key)
     mp_map_elem_t *e = mp_map_lookup(mp_obj_dict_get_map(RUN.cfg), k,
                                      MP_MAP_LOOKUP);
     if (e == NULL || e->value == MP_OBJ_NULL) return NULL;
-    if (!mp_obj_is_str(e->value)) return NULL;
     // The dict owns the string; libmoy only reads it during the call.
-    return mp_obj_str_get_str(e->value);
+    if (mp_obj_is_str(e->value)) return mp_obj_str_get_str(e->value);
+    // A NUMBER has to cross too, and the seam is `const char *` -- it cannot
+    // express type. libmoy's `l_cfg` is written for exactly that: it converts a
+    // whole-string number back to a Lua number, so `cfg("n", 0)` reaches the
+    // cart AS a number and a genuine string stays a string. Refusing to render
+    // one here broke the agreement from this side: config.json is JSON and the
+    // shipped carts tune with numbers (`{"enemies": 6, "autoplay": 0}`), so
+    // every numeric value read as the caller's default on every board, silently
+    // -- there is no error path, a default IS the answer. Found 2026-09-11
+    // chasing why a `perf` toggle did nothing.
+    //
+    // Static because the return is borrowed and read before the next call; the
+    // console is single-threaded and libmoy copies what it needs immediately.
+    static char num[24];
+    if (mp_obj_is_bool(e->value)) {            // JSON true/false -> 1/0
+        num[0] = (char)(mp_obj_is_true(e->value) ? '1' : '0');
+        num[1] = '\0';
+        return num;
+    }
+    if (mp_obj_is_int(e->value)) {
+        mp_int_t v = mp_obj_get_int(e->value);
+        (void)snprintf(num, sizeof(num), "%ld", (long)v);
+        return num;
+    }
+    if (mp_obj_is_float(e->value)) {
+        (void)snprintf(num, sizeof(num), "%.7g",
+                       (double)mp_obj_get_float(e->value));
+        return num;
+    }
+    return NULL;                               // a list/dict/None is not a value
 }
 
 // -- helpers -----------------------------------------------------------------
@@ -390,8 +444,9 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 #ifdef MOYCORE_PSRAM
     int tried_sram = 0;
     np = NULL;
-    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
-            >= nsize + g_sram_floor) {
+    size_t sram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (sram_free < g_sram_free_min) g_sram_free_min = sram_free;
+    if (sram_free >= nsize + g_sram_floor) {
         tried_sram = 1;
         np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
@@ -399,8 +454,16 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
         if (!tried_sram) g_sram_denied++;   // the FLOOR turned it away, not a
         np = heap_caps_realloc(ptr, nsize,  // failed internal allocation
                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (np != NULL) g_psram_fallback = 1;
     }
 #else
+    if (g_sram_sim) {                       // the host's simulated split
+        if (g_sram_sim < g_sram_free_min) g_sram_free_min = g_sram_sim;
+        if (g_sram_sim < nsize + g_sram_floor) {
+            g_sram_denied++;
+            g_psram_fallback = 1;
+        }
+    }
     np = realloc(ptr, nsize);
 #endif
     if (np != NULL) {
@@ -934,7 +997,7 @@ static int l_tramp(lua_State *L)
 // owns the Fold-2 cache). These are shim machinery with p8 semantics -- tile 0
 // never draws, colorkey 0, scale 1, no flip -- and the __gff__ flag byte gates
 // each cell against the mask. The shim nil-guards both and keeps its Lua loop,
-// which is what a host without them (lupa) still takes.
+// which is what a build without them still takes.
 
 // MOY_FLAGS wide: libmoy's own fget/fset/map(..., layers) read the console's
 // flag table (SPEC.md 3.5), and this is that table here.
@@ -1072,6 +1135,709 @@ static mp_obj_t mod_register(mp_obj_t name_obj, mp_obj_t fn)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_register_obj, mod_register);
 
+// -- the per-verb profiler ---------------------------------------------------
+//
+// WHY IT EXISTS. A Lua/p8 cart draws through libmoy's own C verbs straight into
+// the framebuffer -- moy_p8.c's header puts it plainly, "the canvas IS the
+// screen region" -- so DeviceCanvas' meters read all-zero on one. DRAW2 says
+// layer=0 batch=0 map=0 text=0 fill=0 and BATCH says 0 sprites while the frame
+// spends 50ms somewhere. Every pass that asked where that went therefore hit an
+// unopenable box and concluded "the cart's own code", which is a guess. This
+// opens it: calls and time PER VERB, so a frame made of 3000 calls at 17us is
+// distinguishable from one made of 40 at 1.2ms. Those are different problems
+// with different fixes, and the ledger (#66, #67) has been unable to tell them
+// apart on this tier since the tier existed.
+//
+// WHAT IT COSTS WITH IT OFF: nothing, and not "nearly nothing". Disarmed, the
+// cart's globals ARE the vendored C functions, exactly as moy_lua_open and
+// moy_p8_open left them -- there is no wrapper in the hot path and so no gate
+// to test in it. That is the whole reason this gates at INSTALL rather than per
+// call: an `if (prof)` inside a verb reached three thousand times a frame is a
+// tax the shipping frame pays forever to answer a question asked twice a year.
+//
+// HOW IT WRAPS. Each C-function global is replaced by a closure over three
+// upvalues: [1] the original's own upvalue (libmoy's p8 verbs carry the machine
+// pointer there, register()'s trampolines their index), [2] the original
+// function as a value, [3] the slot. The wrapper calls the original DIRECTLY --
+// fn(L), never through lua_call -- so no Lua call frame is added and the
+// original's lua_upvalueindex(1) still resolves, because the closure executing
+// is ours and its upvalue 1 is where the original's was. Cost per call: two
+// clock reads and two adds.
+#define PROF_MAX 192
+#define PROF_NAMES "moy.prof.names"   // registry: slot+1 -> the global's name
+#define PROF_ORIG  "moy.prof.orig"    // registry: slot+1 -> the original value
+
+// The clock is the CPU cycle counter where there is one. mp_hal_ticks_us() is
+// esp_timer_get_time() on both S3 boards, and a systimer read costs about what
+// the verbs being measured cost -- at three thousand calls a frame it would not
+// perturb the measurement so much as become it. CCOUNT is one instruction.
+#if defined(__has_include)
+#  if __has_include(<esp_cpu.h>)
+#    include <esp_cpu.h>
+#    define PROF_CYCLES 1
+#  endif
+#endif
+#ifdef PROF_CYCLES
+#  define PROF_NOW() ((uint32_t)esp_cpu_get_cycle_count())
+#else
+#  define PROF_NOW() ((uint32_t)mp_hal_ticks_us())
+#endif
+
+static struct { uint32_t calls; uint32_t ticks; uint32_t self; } g_prof[PROF_MAX];
+static uint32_t g_prof_child;     // ticks charged to callees of the running verb
+static uint32_t g_prof_frames;    // ticks since the reset, for per-frame means
+static uint32_t g_prof_hz;        // profiler ticks per second, measured
+static int      g_prof_n;         // slots in use
+static uint8_t  g_prof_arm;       // install on the next load()
+static uint8_t  g_prof_on;        // wrappers are on the live VM
+
+// Lua's base library, minus print -- which the p8 shim replaces with a verb we
+// very much want to measure. Skipped rather than wrapped: pcall and error
+// unwind straight through a wrapper, next is what a for loop calls directly
+// rather than through the global, and none of them is a draw verb.
+static const char *const PROF_SKIP[] = {
+    "pcall", "xpcall", "error", "assert", "select", "next", "pairs", "ipairs",
+    "setmetatable", "getmetatable", "rawget", "rawset", "rawequal", "rawlen",
+    "type", "tostring", "tonumber", "unpack", NULL
+};
+
+// INCLUSIVE and SELF, because a verb that calls back into Lua would otherwise
+// be read as the slowest thing in the cart. foreach() is the case that forced
+// this: five calls a frame and ten milliseconds inclusive on moss moss -- all
+// of it the Lua function foreach was handed, none of it foreach. Reported as
+// verb cost that says "optimise foreach in C", which is precisely the wrong
+// conclusion and precisely the kind this whole instrument exists to prevent.
+// So a verb is charged what it spent MINUS what its callees spent, and the
+// inclusive figure is kept alongside rather than thrown away: `t` says what C
+// cost, `in` says how much of the frame ran underneath it.
+static int prof_call(lua_State *L)
+{
+    lua_CFunction fn = lua_tocfunction(L, lua_upvalueindex(2));
+    int slot = (int)lua_tointeger(L, lua_upvalueindex(3));
+    uint32_t saved = g_prof_child;
+    uint32_t t0, dt;
+    int n;
+    g_prof_child = 0;
+    t0 = PROF_NOW();
+    n = fn(L);
+    dt = PROF_NOW() - t0;
+    g_prof[slot].ticks += dt;
+    g_prof[slot].self += (g_prof_child < dt) ? dt - g_prof_child : 0;
+    g_prof[slot].calls++;
+    g_prof_child = saved + dt;
+    return n;
+}
+
+// Ticks per second, MEASURED against the millisecond clock rather than taken
+// from a Kconfig: the two S3 boards and the two P4s do not run at one
+// frequency, and a wrong constant here is a wrong answer everywhere downstream.
+static uint32_t prof_calibrate(void)
+{
+#ifdef PROF_CYCLES
+    uint32_t u0 = (uint32_t)mp_hal_ticks_us(), c0 = PROF_NOW(), u1, c1;
+    do { u1 = (uint32_t)mp_hal_ticks_us(); } while (u1 - u0 < 2000u);
+    c1 = PROF_NOW();
+    return (uint32_t)(((uint64_t)(c1 - c0) * 1000000u) / (uint64_t)(u1 - u0));
+#else
+    return 1000000u;
+#endif
+}
+
+static int prof_skipped(const char *name)
+{
+    int i;
+    for (i = 0; PROF_SKIP[i]; i++)
+        if (strcmp(name, PROF_SKIP[i]) == 0) return 1;
+    return 0;
+}
+
+static void prof_uninstall(lua_State *L)
+{
+    int i, top;
+    if (!g_prof_on) return;
+    top = lua_gettop(L);
+    lua_getfield(L, LUA_REGISTRYINDEX, PROF_NAMES);
+    lua_getfield(L, LUA_REGISTRYINDEX, PROF_ORIG);
+    for (i = 0; i < g_prof_n; i++) {
+        lua_rawgeti(L, top + 1, i + 1);           // the name
+        lua_rawgeti(L, top + 2, i + 1);           // the original
+        lua_setglobal(L, lua_tostring(L, top + 3));
+        lua_settop(L, top + 2);
+    }
+    lua_settop(L, top);
+    lua_pushnil(L); lua_setfield(L, LUA_REGISTRYINDEX, PROF_NAMES);
+    lua_pushnil(L); lua_setfield(L, LUA_REGISTRYINDEX, PROF_ORIG);
+    g_prof_on = 0;
+    g_prof_n = 0;
+}
+
+// Walk _G, collect every wrappable C-function global, then wrap them. TWO
+// passes because Lua forbids adding a key to a table under traversal, and a
+// name-by-name walk of a fixed list would miss exactly what matters: the p8
+// shim RESOLVES its verbs at load (`spr = __moy_p8_spr or spr`) and assigns
+// them to globals, so the name a cart calls is not the name libmoy registered.
+static void prof_install(lua_State *L)
+{
+    int n = 0, i, top;
+    if (g_prof_on) return;
+    top = lua_gettop(L);
+    lua_newtable(L);                              // top+1: names
+    lua_newtable(L);                              // top+2: originals
+    lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);   // top+3
+    lua_pushnil(L);
+    while (lua_next(L, top + 3) != 0) {
+        // key at top+4, value at top+5. The type test comes FIRST: lua_tostring
+        // on a number key would convert it in place and derail lua_next.
+        if (n < PROF_MAX && lua_type(L, top + 4) == LUA_TSTRING
+                && lua_iscfunction(L, top + 5)
+                && lua_tocfunction(L, top + 5) != prof_call
+                && !prof_skipped(lua_tostring(L, top + 4))) {
+            // Only ONE upvalue can be carried across (see the header). Nothing
+            // in libmoy or this module registers a C closure with two, but a
+            // future one must not be silently mis-wrapped into a verb reading
+            // somebody else's upvalue -- so it is skipped, not guessed at.
+            int nup = 0;
+            while (nup < 2 && lua_getupvalue(L, top + 5, nup + 1) != NULL) nup++;
+            lua_pop(L, nup);
+            if (nup <= 1) {
+                lua_pushvalue(L, top + 4);
+                lua_rawseti(L, top + 1, n + 1);
+                lua_pushvalue(L, top + 5);
+                lua_rawseti(L, top + 2, n + 1);
+                n++;
+            }
+        }
+        lua_settop(L, top + 4);                   // drop the value, keep the key
+    }
+    lua_settop(L, top + 2);                       // drop _G
+
+    for (i = 0; i < n; i++) {
+        lua_rawgeti(L, top + 2, i + 1);           // top+3: the original
+        if (lua_getupvalue(L, top + 3, 1) == NULL) lua_pushnil(L);  // top+4: uv1
+        lua_pushvalue(L, top + 3);                // top+5: uv2, the original
+        lua_pushinteger(L, i);                    // top+6: uv3, the slot
+        lua_pushcclosure(L, prof_call, 3);        // top+4: the wrapper
+        lua_rawgeti(L, top + 1, i + 1);           // top+5: the name
+        lua_pushvalue(L, top + 4);
+        lua_setglobal(L, lua_tostring(L, top + 5));
+        lua_settop(L, top + 2);
+    }
+    lua_setfield(L, LUA_REGISTRYINDEX, PROF_ORIG);
+    lua_setfield(L, LUA_REGISTRYINDEX, PROF_NAMES);
+    lua_settop(L, top);
+
+    memset(g_prof, 0, sizeof g_prof);
+    g_prof_child = 0;
+    g_prof_frames = 0;
+    g_prof_n = n;
+    if (!g_prof_hz) g_prof_hz = prof_calibrate();
+    g_prof_on = 1;
+}
+
+// profile(on) -> the number of verbs wrapped, or None with no run.
+//
+// ARMS as well as installs. A cart captures its globals as it loads, so
+// profiling a p8 port properly means the wrappers are in place BEFORE load()
+// runs the shim -- arming makes that automatic for the next launch. Installing
+// NOW is what lets a board already sitting in a level answer without being
+// restarted, at the cost of missing whatever the shim already captured.
+static mp_obj_t mod_profile(mp_obj_t on_obj)
+{
+    int on = mp_obj_is_true(on_obj);
+    g_prof_arm = (uint8_t)on;
+    if (!RUN.open) return mp_const_none;
+    if (on) prof_install(RUN.L);
+    else prof_uninstall(RUN.L);
+    return mp_obj_new_int(g_prof_n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_profile_obj, mod_profile);
+
+// verb_stats() -> (hz, frames, ((name, calls, self, inclusive), ...)), or None
+// when the profiler is not installed -- None rather than an empty tuple,
+// because "not measuring" and "measured nothing" are different answers.
+//
+// TICKS, not microseconds: the clock is the CPU cycle counter on a board, and
+// handing the host `hz` keeps the division off the device and the units honest
+// on a tier that has no cycle counter at all. Only verbs actually CALLED are
+// reported; a hundred zero rows is not a measurement and would not fit a line.
+static mp_obj_t mod_verb_stats(void)
+{
+    int i, n = 0;
+    mp_obj_t rows[PROF_MAX];
+    mp_obj_t out[3];
+    if (!RUN.open || !g_prof_on) return mp_const_none;
+    lua_getfield(RUN.L, LUA_REGISTRYINDEX, PROF_NAMES);
+    for (i = 0; i < g_prof_n; i++) {
+        mp_obj_t t[4];
+        const char *nm;
+        if (!g_prof[i].calls) continue;
+        lua_rawgeti(RUN.L, -1, i + 1);
+        nm = lua_tostring(RUN.L, -1);
+        t[0] = mp_obj_new_str(nm ? nm : "?", nm ? strlen(nm) : 1);
+        lua_pop(RUN.L, 1);
+        t[1] = mp_obj_new_int((mp_int_t)g_prof[i].calls);
+        t[2] = mp_obj_new_int((mp_int_t)g_prof[i].self);
+        t[3] = mp_obj_new_int((mp_int_t)g_prof[i].ticks);
+        rows[n++] = mp_obj_new_tuple(4, t);
+    }
+    lua_pop(RUN.L, 1);
+    out[0] = mp_obj_new_int((mp_int_t)g_prof_hz);
+    out[1] = mp_obj_new_int((mp_int_t)g_prof_frames);
+    out[2] = mp_obj_new_tuple(n, rows);
+    return mp_obj_new_tuple(3, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_verb_stats_obj, mod_verb_stats);
+
+// verb_reset() -- zero the counters and the frame count. The host samples by
+// resetting, waiting and reading, so the WINDOW is the host's to choose rather
+// than a cadence baked in here.
+static mp_obj_t mod_verb_reset(void)
+{
+    memset(g_prof, 0, sizeof g_prof);
+    g_prof_child = 0;
+    g_prof_frames = 0;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_verb_reset_obj, mod_verb_reset);
+
+// -- the per-FUNCTION Lua profiler -------------------------------------------
+//
+// WHY A SECOND ONE. The verb profiler above closes half the box: on moss moss
+// it says 6.5ms of a 44ms frame is C, which leaves ~37ms "in the interpreter"
+// with no way to ask where. That residual is not one body of Lua but two.
+// tools/p8_lua_port.py emits 1,348 lines defining 128 functions -- the whole
+// PICO-8 standard library -- into every cart it converts, and moss moss's own
+// code is 167 lines. Every call the cart makes runs cart Lua -> shim Lua -> C
+// verb: `rectfill` does a skip test, four flr() calls, two swaps and a colour
+// resolve before its one crossing, and pico off road makes 641 of those a
+// frame. Whether that 37ms is the cart's logic or the shared shim decides
+// whether an optimisation exists at all -- the shim is GENERATED, so a fix
+// there lands on every ported cart at once, and cart code is the cart's.
+//
+// SAMPLING, and not a call/return hook, because of the population. A call-hook
+// profiler pays its overhead per CALL, so it inflates exactly the functions
+// that are small and called often -- which is what the shim is made of, and
+// what the hypothesis is about. It would find the shim expensive whether or
+// not it is. A count hook fires every N VM instructions whoever is running, so
+// what it weighs is instructions executed, and the shim's share of those does
+// not depend on how often it is entered.
+//
+// WHAT IT COSTS, stated narrowly. Lua 5.4 gates hooks per CallInfo through
+// `trap`, so with no hook set the VM pays nothing at all -- but with
+// LUA_MASKCOUNT set EVERY instruction detours through luaG_traceexec, and that
+// tax is per-instruction and does NOT fall as the interval rises; only the
+// per-sample work does. So a profiled cart runs slower than the real one and
+// the honest claim is not "it does not perturb". It is that the tax is the
+// same for every Lua function and therefore cancels out of a SHARE -- which is
+// a testable claim rather than an assertion: run one cart at two sampling
+// rates and the shares agree if it holds. That is why the SAMPLE share and not
+// the wall-clock one is the number to read, and why lua_stats reports the
+// interval it was taken at.
+//
+// WHAT IT CANNOT SEE, and this one is load-bearing: the COLLECTOR. Lua runs
+// it inside the allocator at a checkGC point, not as counted VM instructions,
+// so a collection generates no samples however long it takes. It shows up in
+// the wall-clock figure -- time between samples, charged to whoever tripped it
+// -- and never in the sample count. So a function whose wall-clock share badly
+// exceeds its sample share is ALLOCATING rather than computing, and on a cart
+// holding a megabyte of Lua heap that gap is the collector. Read the samples
+// alone there and the answer comes back "the cart's own code" when the cost is
+// collection the cart triggered.
+// lua_gc_mode below is the lever for it, and the two shipped together.
+//
+// Disarmed there is no hook, no table and no allocation. The cart runs the
+// vendored VM exactly as it shipped.
+#define LPROF_SLOTS 256           // a power of two: the probe masks with it
+#define LPROF_SRCS  4             // @cart, prelude, and room to be surprised
+
+typedef struct {
+    const char *src;              // the Proto's source text: stable per chunk
+    int32_t line;                 // linedefined -- with src, this IS the Proto
+    uint32_t calls;
+    uint32_t samples;
+    uint64_t cycles;              // 32 bits is 17.9s of a 240MHz counter, and
+} lprof_slot_t;                   // a measurement window is longer than that
+
+static lprof_slot_t *g_lp;                    // NULL unless installed
+static const char *g_lp_src[LPROF_SRCS];      // the chunks seen, by identity
+static char     g_lp_srcname[LPROF_SRCS][40];
+static int      g_lp_nsrc;
+static const char *g_lp_cart;                 // the cart chunk, once PINNED
+static int32_t  g_lp_lo, g_lp_hi;             // the shim's lines within it
+static uint32_t g_lp_samples, g_lp_calls, g_lp_ccalls;
+static uint64_t g_lp_cycles, g_lp_shim_cy;
+static uint32_t g_lp_shim_s, g_lp_shim_n;
+static uint32_t g_lp_dropped;                 // samples past the last slot
+static uint32_t g_lp_t0;                      // the previous sample's clock
+static uint32_t g_lp_frames;
+static int      g_lp_interval;
+static int      g_lp_used;
+static uint8_t  g_lp_on;
+static uint8_t  g_lp_arm;                     // install at the next load()
+static int      g_lp_arm_iv;
+static int32_t  g_lp_arm_lo, g_lp_arm_hi;
+
+// A Proto's slot, claimed on first sight. Open addressing over a power-of-two
+// table, because the alternative inside a hook is an allocation inside a hook.
+// A full table counts into g_lp_dropped rather than folding two functions into
+// one row: a wrong attribution is worse than a missing one, and the totals --
+// which are what the split is computed from -- stay whole either way.
+static int lprof_slot(const char *src, int32_t line)
+{
+    uint32_t h = (uint32_t)(uintptr_t)src * 2654435761u;
+    int i, probes;
+    h ^= (uint32_t)line * 40503u;
+    i = (int)((h >> 5) & (LPROF_SLOTS - 1));
+    for (probes = 0; probes < LPROF_SLOTS; probes++) {
+        if (g_lp[i].src == NULL) {
+            g_lp[i].src = src;
+            g_lp[i].line = line;
+            g_lp_used++;
+            return i;
+        }
+        if (g_lp[i].src == src && g_lp[i].line == line) return i;
+        i = (i + 1) & (LPROF_SLOTS - 1);
+    }
+    return -1;
+}
+
+// The chunk names, kept once each rather than per row: every row shares one of
+// two of them, and lua_stats hands the host an index into this.
+static void lprof_note_src(const char *src, const char *short_src)
+{
+    int i;
+    for (i = 0; i < g_lp_nsrc; i++)
+        if (g_lp_src[i] == src) return;
+    if (g_lp_nsrc >= LPROF_SRCS) return;
+    g_lp_src[g_lp_nsrc] = src;
+    // Copied by hand rather than with strncpy: a chunk name is routinely
+    // longer than this buffer (Lua's short_src is 60 bytes, the buffer is
+    // 40), and gcc's -Wstringop-truncation is an ERROR on the P4's RISC-V
+    // toolchain -- truncating here is deliberate, so say so in code the
+    // compiler cannot mistake for an accident. Always NUL-terminated.
+    {
+        const char *from = short_src ? short_src : "?";
+        char *to = g_lp_srcname[g_lp_nsrc];
+        size_t cap = sizeof(g_lp_srcname[0]) - 1, n = 0;
+        while (n < cap && from[n] != '\0') {
+            to[n] = from[n];
+            n++;
+        }
+        to[n] = '\0';
+    }
+    g_lp_nsrc++;
+}
+
+// The hook. Two events answering different questions: COUNT is the sample --
+// where the interpreter IS -- and CALL is an exact count, which sampling
+// cannot give and the report needs beside it. C functions are counted but
+// never given a slot: every one reports source "=[C]" and linedefined -1, so
+// they would collide into a single meaningless row, and the verb profiler
+// above already breaks that same total down by name.
+static void lprof_hook(lua_State *L, lua_Debug *ar)
+{
+    uint32_t now = PROF_NOW();
+    int slot, shim;
+    if (!g_lp) return;
+    if (!lua_getinfo(L, "S", ar)) return;
+    if (ar->linedefined < 0) {                  // a C function
+        if (ar->event != LUA_HOOKCOUNT) g_lp_ccalls++;
+        return;
+    }
+    shim = (g_lp_cart && ar->source == g_lp_cart
+            && ar->linedefined >= g_lp_lo && ar->linedefined <= g_lp_hi);
+    slot = lprof_slot(ar->source, (int32_t)ar->linedefined);
+    if (slot >= 0 && g_lp[slot].calls == 0 && g_lp[slot].samples == 0)
+        lprof_note_src(ar->source, ar->short_src);
+    if (ar->event == LUA_HOOKCOUNT) {
+        // The interval since the last sample, charged to the function at
+        // the END of it -- the ordinary reading of "the VM is here now". It
+        // therefore carries any C verb called in between, which is why the two
+        // columns part company on the draw functions and agree nearly
+        // everywhere else. tick() re-bases the clock every frame so the host's
+        // own frame never lands on a cart function.
+        uint32_t dt = now - g_lp_t0;
+        g_lp_t0 = now;
+        g_lp_samples++;
+        g_lp_cycles += dt;
+        if (shim) { g_lp_shim_s++; g_lp_shim_cy += dt; }
+        if (slot < 0) { g_lp_dropped++; return; }
+        g_lp[slot].samples++;
+        g_lp[slot].cycles += dt;
+    } else {
+        g_lp_calls++;
+        if (shim) g_lp_shim_n++;
+        if (slot >= 0) g_lp[slot].calls++;
+    }
+}
+
+// PIN the cart chunk, so the shim's line range is read against the right one.
+// The prelude (moycore.exec, "prelude") is a second chunk whose lines also
+// start at 1, and a range applied to both would file its functions as shim.
+//
+// `_draw` is the anchor because the SHIM owns it -- the porter renames a p8
+// cart's own `_draw` to `p8_draw` and the shim's `_draw` calls that -- so its
+// linedefined lands inside the emitted block on every ported cart. Which makes
+// it a check as well as an anchor: if the line the VM reports is outside the
+// range the host passed, the two disagree about this cart, and the pin is
+// REFUSED. Nothing is charged as shim then, and lua_stats says so, rather than
+// reporting a confident split of the wrong file.
+static void lprof_pin(lua_State *L, int32_t lo, int32_t hi)
+{
+    lua_Debug ar;
+    g_lp_cart = NULL;
+    g_lp_lo = lo;
+    g_lp_hi = hi;
+    if (lo <= 0 || hi < lo) return;
+    lua_getglobal(L, "_draw");
+    if (lua_type(L, -1) == LUA_TFUNCTION && !lua_iscfunction(L, -1)) {
+        if (lua_getinfo(L, ">S", &ar)          // pops the function
+                && ar.linedefined >= lo && ar.linedefined <= hi)
+            g_lp_cart = ar.source;
+    } else {
+        lua_pop(L, 1);
+    }
+}
+
+static void lprof_zero(void)
+{
+    if (g_lp) memset(g_lp, 0, LPROF_SLOTS * sizeof(lprof_slot_t));
+    g_lp_nsrc = 0;
+    g_lp_used = 0;
+    g_lp_samples = g_lp_calls = g_lp_ccalls = 0;
+    g_lp_cycles = g_lp_shim_cy = 0;
+    g_lp_shim_s = g_lp_shim_n = 0;
+    g_lp_dropped = 0;
+    g_lp_frames = 0;
+    g_lp_t0 = PROF_NOW();
+}
+
+// Drop the table and the flags WITHOUT touching the VM -- close() has already
+// destroyed it by the time this runs, and a sethook on a freed lua_State is
+// the kind of crash that reads as "the profiler broke the console".
+static void lprof_forget(void)
+{
+    if (g_lp) { free(g_lp); g_lp = NULL; }
+    g_lp_on = 0;
+    g_lp_cart = NULL;
+}
+
+static void lprof_uninstall(lua_State *L)
+{
+    if (L && g_lp_on) lua_sethook(L, NULL, 0, 0);
+    lprof_forget();
+}
+
+static int lprof_install(lua_State *L, int interval, int32_t lo, int32_t hi)
+{
+    int mask;
+    if (g_lp_on) lprof_uninstall(L);
+    g_lp = (lprof_slot_t *)malloc(LPROF_SLOTS * sizeof(lprof_slot_t));
+    if (!g_lp) return 0;
+    lprof_zero();
+    lprof_pin(L, lo, hi);
+    g_lp_interval = interval;
+    // interval <= 0 arms the CALL hook ALONE. That is the isolation knob: the
+    // per-instruction trap tax and the per-sample work are two different costs
+    // and the header's claim about them was sized this way rather than guessed
+    // at. Coroutines created after this inherit the hook (lua_newthread copies
+    // hook/hookmask/basehookcount); ones already alive do not.
+    mask = LUA_MASKCALL;
+    if (interval > 0) mask |= LUA_MASKCOUNT;
+    if (!g_prof_hz) g_prof_hz = prof_calibrate();
+    lua_sethook(L, lprof_hook, mask, interval > 0 ? interval : 0);
+    g_lp_on = 1;
+    return LPROF_SLOTS;
+}
+
+// lua_profile(on [, interval [, shim_lo [, shim_hi]]]) -> slots, or None with
+// no run. ARMS as well as installs, so a relaunch keeps measuring. Unlike the
+// verb profiler nothing here is captured at load time, so installing into a
+// cart already sitting in a level is a complete reading and not a partial one.
+static mp_obj_t mod_lua_profile(size_t n_args, const mp_obj_t *args)
+{
+    int on = mp_obj_is_true(args[0]);
+    int interval = n_args > 1 ? mp_obj_get_int(args[1]) : 1024;
+    int32_t lo = n_args > 2 ? (int32_t)mp_obj_get_int(args[2]) : 0;
+    int32_t hi = n_args > 3 ? (int32_t)mp_obj_get_int(args[3]) : 0;
+    g_lp_arm = (uint8_t)on;
+    g_lp_arm_iv = interval;
+    g_lp_arm_lo = lo;
+    g_lp_arm_hi = hi;
+    if (!RUN.open) return mp_const_none;
+    if (!on) { lprof_uninstall(RUN.L); return MP_OBJ_NEW_SMALL_INT(0); }
+    return mp_obj_new_int(lprof_install(RUN.L, interval, lo, hi));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lua_profile_obj, 1, 4,
+                                           mod_lua_profile);
+
+// lua_stats([top]) -> (hz, frames, interval, totals, rows, srcs), or None when
+// it is not installed -- None rather than empty, because "not measuring" and
+// "measured nothing" are different answers.
+//
+//   totals = (samples, us, calls, c_calls, shim_samples, shim_us,
+//             shim_calls, dropped, slots_used, pinned)
+//   rows   = ((srcidx, linedefined, calls, samples, us), ...), by samples
+//
+// MICROSECONDS on the wire and not ticks, unlike verb_stats above: these sums
+// run for the whole window rather than one verb's turn in it, and a 32-bit
+// cycle counter at 240MHz is 17.9 seconds. The first on-glass run of this
+// reported `shim=-34%`, which is what that overflow looks like from the other
+// end. `hz` is still reported, for the record and for the interval.
+//
+// The SPLIT is summed in C rather than derived from the rows, so it stays
+// exact however few rows are asked for -- and `pinned` says whether it means
+// anything at all.
+// Ticks -> microseconds against the rate measured at install. Done HERE and
+// not on the host so nothing that can wrap ever reaches the wire.
+static uint32_t lprof_us(uint64_t ticks)
+{
+    if (!g_prof_hz) return 0;
+    return (uint32_t)((ticks * 1000000u) / (uint64_t)g_prof_hz);
+}
+
+static mp_obj_t mod_lua_stats(size_t n_args, const mp_obj_t *args)
+{
+    int top = n_args > 0 ? mp_obj_get_int(args[0]) : 16;
+    uint8_t taken[LPROF_SLOTS / 8];
+    mp_obj_t rows[64], srcs[LPROF_SRCS], tot[10], out[6];
+    int i, n = 0;
+    if (!RUN.open || !g_lp_on || !g_lp) return mp_const_none;
+    if (top > 64) top = 64;
+    if (top < 0) top = 0;
+    memset(taken, 0, sizeof taken);
+    // A selection rather than a sort: the table is 256 slots and `top` is
+    // small, so this is cheaper than ordering rows nobody asked for -- and it
+    // bounds the allocation the host pays for, which matters on a board whose
+    // cart barely fits its heap in the first place.
+    while (n < top) {
+        int best = -1;
+        mp_obj_t t[5];
+        int s;
+        for (i = 0; i < LPROF_SLOTS; i++) {
+            if (!g_lp[i].src) continue;
+            if (taken[i >> 3] & (1u << (i & 7))) continue;
+            if (g_lp[i].samples == 0 && g_lp[i].calls == 0) continue;
+            if (best < 0 || g_lp[i].samples > g_lp[best].samples
+                    || (g_lp[i].samples == g_lp[best].samples
+                        && g_lp[i].calls > g_lp[best].calls))
+                best = i;
+        }
+        if (best < 0) break;
+        taken[best >> 3] |= (uint8_t)(1u << (best & 7));
+        for (s = 0; s < g_lp_nsrc; s++)
+            if (g_lp_src[s] == g_lp[best].src) break;
+        t[0] = MP_OBJ_NEW_SMALL_INT(s < g_lp_nsrc ? s : -1);
+        t[1] = mp_obj_new_int((mp_int_t)g_lp[best].line);
+        t[2] = mp_obj_new_int_from_uint(g_lp[best].calls);
+        t[3] = mp_obj_new_int_from_uint(g_lp[best].samples);
+        t[4] = mp_obj_new_int_from_uint(lprof_us(g_lp[best].cycles));
+        rows[n++] = mp_obj_new_tuple(5, t);
+    }
+    for (i = 0; i < g_lp_nsrc; i++)
+        srcs[i] = mp_obj_new_str(g_lp_srcname[i], strlen(g_lp_srcname[i]));
+    tot[0] = mp_obj_new_int_from_uint(g_lp_samples);
+    tot[1] = mp_obj_new_int_from_uint(lprof_us(g_lp_cycles));
+    tot[2] = mp_obj_new_int_from_uint(g_lp_calls);
+    tot[3] = mp_obj_new_int_from_uint(g_lp_ccalls);
+    tot[4] = mp_obj_new_int_from_uint(g_lp_shim_s);
+    tot[5] = mp_obj_new_int_from_uint(lprof_us(g_lp_shim_cy));
+    tot[6] = mp_obj_new_int_from_uint(g_lp_shim_n);
+    tot[7] = mp_obj_new_int_from_uint(g_lp_dropped);
+    tot[8] = mp_obj_new_int_from_uint((uint32_t)g_lp_used);
+    tot[9] = mp_obj_new_bool(g_lp_cart != NULL);
+    out[0] = mp_obj_new_int((mp_int_t)g_prof_hz);
+    out[1] = mp_obj_new_int((mp_int_t)g_lp_frames);
+    out[2] = mp_obj_new_int((mp_int_t)g_lp_interval);
+    out[3] = mp_obj_new_tuple(10, tot);
+    out[4] = mp_obj_new_tuple(n, rows);
+    out[5] = mp_obj_new_tuple(g_lp_nsrc, srcs);
+    return mp_obj_new_tuple(6, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lua_stats_obj, 0, 1,
+                                           mod_lua_stats);
+
+// lua_reset() -- zero the counters and the frame count, keeping the hook and
+// the pin. The host samples by resetting, waiting and reading, so the WINDOW
+// is the host's to choose.
+static mp_obj_t mod_lua_reset(void)
+{
+    lprof_zero();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_lua_reset_obj, mod_lua_reset);
+
+// lua_gc_mode(mode [, a [, b [, c]]]) -> (heap_kb, running, generational), or
+// None with no run. ARMS: the mode is re-applied at the next load(), because
+// every A/B tool here relaunches the cart to change one thing.
+//
+// WHY THIS IS A KNOB AT ALL. moss moss holds a ONE MEGABYTE Lua heap --
+// moycore.gc() right after the cart starts, against 151KB for dungeons &
+// diagrams through the same importer and 75KB for a hand-written Lua cart --
+// so the emitted shim is ~60-75KB of it and the rest is the cart's own data,
+// out of 141 lines of PICO-8 source. A collector walking a megabyte every few
+// frames is frame time, and unlike the shim and unlike libmoy it is NOT
+// vendored: the VM is opened in this file, so its collector is ours to tune.
+//
+// It is also the one cost the sampling profiler above can UNDER-report, which
+// is why they shipped together. Collection runs inside the allocator at a
+// checkGC point rather than as counted VM instructions, so it generates no
+// samples of its own: it lands in `cyc` -- the wall clock between samples,
+// charged to whichever function tripped it -- and never in `smp`. A function
+// whose cyc share far exceeds its smp share is ALLOCATING, not computing, and
+// that gap is the collector. Reading smp alone would call it the cart's code.
+//
+//   mode -1  read only          0  stop             1  restart
+//        2   incremental(pause, stepmul, stepsize)
+//        3   generational(minormul, majormul)
+//
+// A parameter of -1 leaves that one alone (Lua spells that 0; -1 is used here
+// so a caller can pass 0 for "the engine default" without meaning "keep").
+static int g_gc_mode = -1;                 // armed request, -1 = leave alone
+static int g_gc_a = -1, g_gc_b = -1, g_gc_c = -1;
+static uint8_t g_gc_gen;                   // the live mode, tracked: asking
+                                           // Lua costs a mode change
+
+static void lua_gc_apply(lua_State *L, int mode, int a, int b, int c)
+{
+    switch (mode) {
+    case 0: lua_gc(L, LUA_GCSTOP); break;
+    case 1: lua_gc(L, LUA_GCRESTART); break;
+    case 2:
+        lua_gc(L, LUA_GCINC, a < 0 ? 0 : a, b < 0 ? 0 : b, c < 0 ? 0 : c);
+        lua_gc(L, LUA_GCRESTART);
+        g_gc_gen = 0;
+        break;
+    case 3:
+        lua_gc(L, LUA_GCGEN, a < 0 ? 0 : a, b < 0 ? 0 : b);
+        lua_gc(L, LUA_GCRESTART);
+        g_gc_gen = 1;
+        break;
+    default: break;
+    }
+}
+
+static mp_obj_t mod_lua_gc_mode(size_t n_args, const mp_obj_t *args)
+{
+    int mode = n_args > 0 ? mp_obj_get_int(args[0]) : -1;
+    int a = n_args > 1 ? mp_obj_get_int(args[1]) : -1;
+    int b = n_args > 2 ? mp_obj_get_int(args[2]) : -1;
+    int c = n_args > 3 ? mp_obj_get_int(args[3]) : -1;
+    mp_obj_t out[3];
+    g_gc_mode = mode;
+    g_gc_a = a; g_gc_b = b; g_gc_c = c;
+    if (!RUN.open) return mp_const_none;
+    lua_gc_apply(RUN.L, mode, a, b, c);
+    // GCCOUNT, never GCCOLLECT: this is read DURING a measurement window and a
+    // full collect here would be the thing that made the next frame cheap.
+    out[0] = mp_obj_new_int(lua_gc(RUN.L, LUA_GCCOUNT));
+    out[1] = mp_obj_new_bool(lua_gc(RUN.L, LUA_GCISRUNNING));
+    out[2] = mp_obj_new_bool(g_gc_gen);
+    return mp_obj_new_tuple(3, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lua_gc_mode_obj, 0, 4,
+                                           mod_lua_gc_mode);
+
 // -- the module surface ------------------------------------------------------
 
 // run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h,
@@ -1093,6 +1859,10 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     if (RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                MP_ERROR_TEXT("moycore: a run is already open"));
     memset(&RUN, 0, sizeof(RUN));
+    // #211's two meters belong to the RUN, so they start here and survive
+    // close() -- the report is read at the exit boundary, after the VM is gone.
+    g_sram_free_min = SIZE_MAX;
+    g_psram_fallback = 0;
 
     size_t fblen = 0;
     moy_pixel *fb = (moy_pixel *)buf_w(a[0], &fblen);
@@ -1214,6 +1984,10 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     // table -- never a failed run.
     if (g_p8mem) moy_p8_open(RUN.L, &RUN.con, &g_p8, g_p8mem, g_p8rom);
 
+    g_prof_on = 0;               // a new VM: the old wrappers went with the old one
+    g_prof_n = 0;
+    lprof_forget();              // ...and the old one's hook died with it
+    g_gc_gen = 0;                // a fresh lua_State is incremental
     RUN.open = 1;
     return mp_const_none;
 }
@@ -1245,9 +2019,11 @@ static mp_obj_t run_chunk(mp_obj_t src_obj, mp_obj_t name_obj)
 // "unsupported value" and the whole cart falls back to the trampoline runtime.
 // moy_lua has always solved this the same way (int-handle registries plus Lua
 // wrappers that hide them), so moycore runs the SAME prelude rather than
-// growing an object marshaller. Hence a chunk verb: the prelude has to execute
-// after register() and before the cart, which is exactly the window load()
-// closes.
+// growing an object marshaller. The placement verbs of #85/#109 took that
+// route too (#214) and needed nothing here: a scene crosses as one STRING,
+// which push_mp_to_lua already carried. Hence a chunk verb: the prelude has to
+// execute after register() and before the cart, which is exactly the window
+// load() closes.
 static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
 {
     if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
@@ -1256,14 +2032,39 @@ static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
 
-// load(src, chunkname) -> None, or the error text. Runs the cart chunk and its
-// _init. Call AFTER any register()s and any exec()s.
-static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
+// load(chunks) -> None, or the error text. `chunks` is a sequence of
+// (src, chunkname) pairs -- THE WHOLE CART, in the order SPEC.md 4's `sources`
+// gives. Call AFTER any register()s and any exec()s.
+//
+// A LIST rather than one chunk, and the list has to be run HERE rather than
+// through exec(), because two things bracket the cart and a caller doing it by
+// hand puts one of them on the wrong side. The verb profiler arms before the
+// FIRST chunk: a p8 shim resolves and captures its verbs as its own chunk runs
+// (`spr = __moy_p8_spr or spr`), so wrapping after it leaves every draw call
+// the cart makes going to the unwrapped original -- which is silent, and
+// `verbs` is the only meter that sees this tier at all.
+static mp_obj_t mod_load(mp_obj_t chunks_obj)
 {
     if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
-    mp_obj_t err_obj = run_chunk(src_obj, name_obj);
-    if (err_obj != mp_const_none) return err_obj;
+    size_t nchunks = 0;
+    mp_obj_t *chunks = NULL;
+    mp_obj_get_array(chunks_obj, &nchunks, &chunks);
+    if (g_prof_arm) prof_install(RUN.L);
+    for (size_t i = 0; i < nchunks; i++) {
+        size_t npair = 0;
+        mp_obj_t *pair = NULL;
+        mp_obj_get_array(chunks[i], &npair, &pair);
+        if (npair != 2)
+            mp_raise_ValueError(MP_ERROR_TEXT("moycore: load wants (src, name) pairs"));
+        mp_obj_t err_obj = run_chunk(pair[0], pair[1]);
+        if (err_obj != mp_const_none) return err_obj;
+    }
+    // AFTER the chunks, unlike the verb profiler above and for the opposite
+    // reason: the Lua profiler captures nothing at load, but its shim pin
+    // reads the shim's own `_draw`, which does not exist until the chunk that
+    // defines it has run.
+    if (g_lp_arm) lprof_install(RUN.L, g_lp_arm_iv, g_lp_arm_lo, g_lp_arm_hi);
     char err[192];
     // _init runs here, before any tick has stamped the frame base, and it may
     // call time(). Stamp it now so the elapsed term starts from zero instead
@@ -1280,9 +2081,13 @@ static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
     // before the first frame; on moss moss it is the difference between the
     // cart loading and `not enough memory`.
     lua_gc(RUN.L, LUA_GCCOLLECT);
+    // AFTER that collect, never before: an armed `stop` has to not apply to
+    // the load burst, which is the run's high-water mark and the one thing
+    // that must still be collected.
+    if (g_gc_mode >= 0) lua_gc_apply(RUN.L, g_gc_mode, g_gc_a, g_gc_b, g_gc_c);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_load_obj, mod_load);
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_load_obj, mod_load);
 
 // gc() -> the VM's heap in KB after a FULL collect, or None with no run.
 //
@@ -1300,12 +2105,15 @@ static mp_obj_t mod_gc(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_gc_obj, mod_gc);
 
-// tick(dt) -> None on a clean frame, else the error text.
+// tick(dt[, draw]) -> None on a clean frame, else the error text.
 //
 // The whole frame: reset the per-frame draw state (SPEC.md's rule that draw
 // state must not leak between frames or from host UI into a cart), then
-// _update and _draw. The host refreshed the snapshot before calling and drains
-// the audio queue after.
+// _update and -- unless `draw` is false -- _draw. A logic-only tick is the
+// Player's scheduler (#217) skipping _draw on a tick its divisor does not
+// draw, which SPEC.md 5 sanctions; TICK_DRAW in the module table is how the
+// glue knows this build takes the flag. The host refreshed the snapshot before
+// calling and drains the audio queue after.
 // The last tick's two halves, in microseconds. The loop's own clock cannot see
 // them any more: it times `update()` and `draw()`, and moycore runs BOTH inside
 // update(), so the diag's logic/render split read `logic = the whole frame,
@@ -1316,26 +2124,187 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_gc_obj, mod_gc);
 // to attribute.
 static uint32_t g_upd_us, g_draw_us;
 
-static mp_obj_t mod_tick(mp_obj_t dt_obj)
+// -- the hardware performance counters (perf_counters / perf_stats / perf_reset)
+//
+// WHAT THIS IS FOR, and it is one question. Four levers have been tried on the
+// S3 tick and all four measured NULL -- -O3 on the raster kernels, -O3 on the
+// VM core, the whole VM core in IRAM, and the Lua heap's SRAM floor swept to
+// both ends (#66, #77). The conclusion drawn from them is that the tick is
+// bound by MEMORY rather than by the instructions it retires, and that
+// conclusion is what closes the door on a JIT, on opcode fusion and on every
+// other code-generation idea. But four nulls are an ELIMINATION, not a
+// measurement: they are equally consistent with "the thing you changed was not
+// the bottleneck". The ledger even holds both readings at once -- 2026-08-10
+// says celeste's residue "is instruction-count -- interpreter dispatch at
+// 240MHz", 2026-09-08 says the tick is bound by "the cart's DATA in PSRAM".
+//
+// IPC settles it, and nothing else does. Retired instructions over cycles,
+// across a cart's own update and draw:
+//
+//   IPC high  -- the core is retiring most cycles: fewer or cheaper
+//                instructions win, and the code-generation chapter re-opens.
+//   IPC low   -- the core is STALLED most cycles: no code generator helps, and
+//                the levers are allocation rate, data layout and cache
+//                residency. That closes the chapter with a number.
+//
+// Counter 0 is always CYCLES, because every reading here is a ratio against
+// it; counter 1 is whatever is being asked about, and the default is retired
+// instructions. The Xtensa part has exactly two (XCHAL_NUM_PERF_COUNTERS), so
+// a wider question is a sweep of paired runs rather than one capture -- which
+// is also why the selector is an argument and not a constant.
+//
+// It is its OWN switch, like `verbs` and `luaprof` and for the same reason: an
+// ordinary diag session must not arm it. Disarmed, `tick` tests one byte per
+// frame and touches no register.
+#if defined(__XTENSA__) && defined(__has_include)
+#  if __has_include("eri.h") && __has_include("xtensa-debug-module.h")
+#    include "eri.h"
+#    include "xtensa-debug-module.h"
+#    define MOY_PMU 1          // ERI: two counters, both selectable
+#  endif
+#elif defined(__riscv)
+#  define MOY_PMU 2            // the standard CSRs, cycles and retired only
+#endif
+#ifndef MOY_PMU
+#  define MOY_PMU 0            // the host, and the wasm head: no counters
+#endif
+
+#if MOY_PMU == 2
+static inline uint32_t pm_csr_cycle(void)
+{
+    uint32_t v; __asm__ volatile ("csrr %0, mcycle" : "=r"(v)); return v;
+}
+static inline uint32_t pm_csr_instret(void)
+{
+    uint32_t v; __asm__ volatile ("csrr %0, minstret" : "=r"(v)); return v;
+}
+#endif
+
+#define PM_UPD  0
+#define PM_DRAW 1
+
+static uint8_t  g_pm_on;              // counting, and `tick` is bracketing
+static uint16_t g_pm_sel = 2;         // XTPERF_CNT_INSN
+static uint16_t g_pm_mask = 0xffff;   // every subset of it
+static uint32_t g_pm_frames;
+static uint64_t g_pm_cyc[2];          // [PM_UPD], [PM_DRAW]
+static uint64_t g_pm_evt[2];
+
+// Both counters, as close together as the ISA allows. 32 bits and they wrap --
+// at 240MHz the cycle count turns over every ~17.9s -- but every use below is
+// an unsigned DIFFERENCE inside one frame, which wrapping leaves correct.
+static inline void pm_read(uint32_t *cyc, uint32_t *evt)
+{
+#if MOY_PMU == 1
+    *cyc = eri_read(ERI_PERFMON_PM0);
+    *evt = eri_read(ERI_PERFMON_PM0 + (int)sizeof(int32_t));
+#elif MOY_PMU == 2
+    *cyc = pm_csr_cycle();
+    *evt = pm_csr_instret();
+#else
+    *cyc = 0; *evt = 0;
+#endif
+}
+
+#if MOY_PMU == 1
+// tracelevel < 0 and kernelcnt 0 is the IDF's own "count everything" pair
+// (xtensa_perfmon_apis.c): counting is gated on CINTLEVEL <= tracelevel, so
+// the widest value counts interrupt context too -- which belongs in the
+// measurement, because it is time the cart's frame actually spends.
+static void pm_program(int id, uint16_t sel, uint16_t mask)
+{
+    uint32_t pmc = ((uint32_t)(0xf & PMCTRL_TRACELEVEL_MASK)
+                        << PMCTRL_TRACELEVEL_SHIFT)
+                 | ((uint32_t)(sel & PMCTRL_SELECT_MASK) << PMCTRL_SELECT_SHIFT)
+                 | ((uint32_t)(mask & PMCTRL_MASK_MASK) << PMCTRL_MASK_SHIFT);
+    eri_write(ERI_PERFMON_PM0 + id * (int)sizeof(int32_t), 0);
+    eri_write(ERI_PERFMON_PMCTRL0 + id * (int)sizeof(int32_t), pmc);
+}
+#endif
+
+// Does this silicon actually count? The counters are architecturally optional
+// and a core that does not implement them reads a frozen zero rather than
+// faulting, so the answer is taken by LOOKING: read, spend a little time, read
+// again. A frozen counter reports as absent, which is the project's rule for a
+// lever a board does not have -- None, never 0.
+//
+// IT HAS TO START THEM TO ASK. A stopped counter and an absent one read
+// identically, so the probe arms cycles, samples, and puts PGM back exactly as
+// it found it -- otherwise the first `perf_counters(1)` answers "no counters"
+// about hardware that has two, which is what it did.
+static int8_t g_pm_have = -1;          // -1 not yet asked, 0 no, 1 yes
+
+static int pm_alive(void)
+{
+    if (g_pm_have >= 0) return g_pm_have;
+#if MOY_PMU == 0
+    g_pm_have = 0;
+#else
+    {
+        uint32_t c0, e0, c1, e1, spin = 0;
+#if MOY_PMU == 1
+        uint32_t pgm = eri_read(ERI_PERFMON_PGM);
+        pm_program(0, 0, 0xffff);                  /* XTPERF_CNT_CYCLES */
+        eri_write(ERI_PERFMON_PGM, PGM_PMEN);
+#endif
+        pm_read(&c0, &e0);
+        while (spin < 2000u) spin++;
+        pm_read(&c1, &e1);
+#if MOY_PMU == 1
+        eri_write(ERI_PERFMON_PGM, pgm);           /* as we found it */
+#endif
+        (void)e0; (void)e1;
+        g_pm_have = (int8_t)((c1 - c0) != 0u);
+    }
+#endif
+    return g_pm_have;
+}
+
+static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
 {
     if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
     char err[192];
     uint32_t t0, t1;
+    int draw = n_args < 2 || mp_obj_is_true(args[1]);
     moy_reset_state(&RUN.canvas);
-    float dt = (float)mp_obj_get_float(dt_obj);
+    float dt = (float)mp_obj_get_float(args[0]);
     g_tick_ms = (uint32_t)mp_hal_ticks_ms();   // h_time_ms counts from here
+    // The sample clock re-bases per FRAME. Without this the gap from the last
+    // sample of one frame to the first of the next -- the whole of the host's
+    // Python frame, flush included -- is charged to whichever cart function
+    // happened to be running when the tick ended.
+    if (g_lp_on) g_lp_t0 = PROF_NOW();
+    // The counters bracket the cart's OWN halves and nothing else: not the
+    // reset above, not the error paths, not the host's frame around this call.
+    // A frame that errors out is not counted at all -- half a tick would move
+    // the ratio without being a tick.
+    uint32_t pc0 = 0, pe0 = 0, pc1 = 0, pe1 = 0, pc2 = 0, pe2 = 0;
+    if (g_pm_on) pm_read(&pc0, &pe0);
     t0 = (uint32_t)mp_hal_ticks_us();
     if (moy_lua_update(RUN.L, dt, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
     t1 = (uint32_t)mp_hal_ticks_us();
-    if (moy_lua_draw(RUN.L, err, sizeof(err)) != 0)
+    if (g_pm_on) pm_read(&pc1, &pe1);
+    if (draw && moy_lua_draw(RUN.L, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
+    if (g_pm_on) {
+        pm_read(&pc2, &pe2);
+        g_pm_cyc[PM_UPD]  += (uint64_t)(uint32_t)(pc1 - pc0);
+        g_pm_evt[PM_UPD]  += (uint64_t)(uint32_t)(pe1 - pe0);
+        if (draw) {
+            g_pm_cyc[PM_DRAW] += (uint64_t)(uint32_t)(pc2 - pc1);
+            g_pm_evt[PM_DRAW] += (uint64_t)(uint32_t)(pe2 - pe1);
+        }
+        g_pm_frames++;
+    }
+    g_prof_frames++;
+    g_lp_frames++;
     g_upd_us = t1 - t0;
-    g_draw_us = (uint32_t)mp_hal_ticks_us() - t1;
+    g_draw_us = draw ? (uint32_t)mp_hal_ticks_us() - t1 : 0;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_tick_obj, mod_tick);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_tick_obj, 1, 2, mod_tick);
 
 // tick_split() -> (update_us, draw_us) for the last tick. Microseconds, not the
 // loop's milliseconds: a cart frame this project cares about is single-digit ms
@@ -1389,6 +2358,9 @@ static mp_obj_t mod_close(void)
     pool_release();
 #endif
     RUN.open = 0;
+    g_prof_on = 0;               // the wrappers died with the VM
+    g_prof_n = 0;
+    lprof_forget();              // the hook went with it; the table is ours
     RUN.snap = NULL;
     RUN.aq = NULL;
     RUN.cfg = MP_OBJ_NULL;
@@ -1509,6 +2481,46 @@ static mp_obj_t mod_alloc_stats(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_alloc_stats_obj, mod_alloc_stats);
 
+// sram_report() -> (sram_free_min, psram_fallback, floor), or None on a tier
+// whose allocator has one region to choose from (#211).
+//
+// What the RUN just had, not what the session accumulated: run_begin resets
+// both meters, close() does not, so the exit boundary reads the run that ended.
+// `psram_fallback` is the field that matters -- a BOOLEAN about a regime
+// change, because a cart that outgrows the floor does not fail, it silently
+// starts allocating from PSRAM and gets about twice as slow (#67).
+//
+// None, never a zeroed tuple, where the concept does not apply: a Python cart
+// has no Lua allocator and the host has no second region, and both must stay
+// distinguishable from a run that fitted with nothing to spare.
+static mp_obj_t mod_sram_report(void)
+{
+#ifndef MOYCORE_PSRAM
+    if (!g_sram_sim) return mp_const_none;
+#endif
+    mp_obj_t t[3];
+    t[0] = (g_sram_free_min == SIZE_MAX) ? mp_const_none
+                                         : mp_obj_new_int((mp_int_t)g_sram_free_min);
+    t[1] = mp_obj_new_bool(g_psram_fallback);
+    t[2] = mp_obj_new_int((mp_int_t)g_sram_floor);
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_sram_report_obj, mod_sram_report);
+
+#ifndef MOYCORE_PSRAM
+// sram_sim(bytes) -- arm the host's simulated internal-SRAM region, 0 to
+// disarm; returns what is armed. The board reads that figure from the heap and
+// this file is the only place the floor arithmetic lives, so this is how the
+// fallback flag and the low-water mark are driven where tests run. Absent from
+// every firmware build.
+static mp_obj_t mod_sram_sim(mp_obj_t bytes_obj)
+{
+    g_sram_sim = (size_t)mp_obj_get_int(bytes_obj);
+    return mp_obj_new_int((mp_int_t)g_sram_sim);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_sram_sim_obj, mod_sram_sim);
+#endif
+
 // pool_check() -> 0 when the pool's own invariants hold, else a negative code
 // (README.md lists them). A TEST verb: the invariant that a block masks back
 // to the chunk it came from cannot be seen from Python and does not fault when
@@ -1523,6 +2535,62 @@ static mp_obj_t mod_pool_check(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 
+// perf_counters(on[, sel[, mask]]) -> the state it is in now, or None where
+// there is no counter to arm. `sel`/`mask` choose counter 1 and are the Xtensa
+// XTPERF_CNT_*/XTPERF_MASK_* numbers; the RISC-V side has only the two fixed
+// CSRs and ignores them, which `perf_stats` reports rather than hides.
+static mp_obj_t mod_perf_counters(size_t n_args, const mp_obj_t *args)
+{
+    int on = mp_obj_is_true(args[0]);
+    if (!pm_alive()) return mp_const_none;
+    if (n_args > 1) g_pm_sel = (uint16_t)mp_obj_get_int(args[1]);
+    if (n_args > 2) g_pm_mask = (uint16_t)mp_obj_get_int(args[2]);
+#if MOY_PMU == 1
+    if (on) {
+        eri_write(ERI_PERFMON_PGM, 0);
+        pm_program(0, 0, 0xffff);              // XTPERF_CNT_CYCLES
+        pm_program(1, g_pm_sel, g_pm_mask);
+        eri_write(ERI_PERFMON_PGM, PGM_PMEN);
+    } else {
+        eri_write(ERI_PERFMON_PGM, 0);
+    }
+#endif
+    g_pm_on = (uint8_t)(on ? 1 : 0);
+    if (!g_prof_hz) g_prof_hz = prof_calibrate();
+    return mp_obj_new_bool(on);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_perf_counters_obj, 1, 3,
+                                           mod_perf_counters);
+
+// perf_stats() -> (hz, frames, upd_cyc, upd_evt, draw_cyc, draw_evt, sel,
+// mask, selectable), or None where there is no counter. The two halves are
+// kept apart because the corpus splits that way: moss moss is update-bound and
+// dank tomb draw-bound, and one IPC over both would average the answer away.
+static mp_obj_t mod_perf_stats(void)
+{
+    mp_obj_t t[9];
+    if (!pm_alive()) return mp_const_none;
+    t[0] = mp_obj_new_int((mp_int_t)(g_prof_hz ? g_prof_hz : prof_calibrate()));
+    t[1] = mp_obj_new_int((mp_int_t)g_pm_frames);
+    t[2] = mp_obj_new_int_from_ull(g_pm_cyc[PM_UPD]);
+    t[3] = mp_obj_new_int_from_ull(g_pm_evt[PM_UPD]);
+    t[4] = mp_obj_new_int_from_ull(g_pm_cyc[PM_DRAW]);
+    t[5] = mp_obj_new_int_from_ull(g_pm_evt[PM_DRAW]);
+    t[6] = mp_obj_new_int((mp_int_t)g_pm_sel);
+    t[7] = mp_obj_new_int((mp_int_t)g_pm_mask);
+    t[8] = mp_obj_new_bool(MOY_PMU == 1);
+    return mp_obj_new_tuple(9, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_perf_stats_obj, mod_perf_stats);
+
+static mp_obj_t mod_perf_reset(void)
+{
+    g_pm_frames = 0;
+    g_pm_cyc[0] = g_pm_cyc[1] = g_pm_evt[0] = g_pm_evt[1] = 0;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_perf_reset_obj, mod_perf_reset);
+
 static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),    MP_OBJ_NEW_QSTR(MP_QSTR_moycore) },
     { MP_ROM_QSTR(MP_QSTR_run_begin),   MP_ROM_PTR(&mod_run_begin_obj) },
@@ -1531,7 +2599,18 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_exec),        MP_ROM_PTR(&mod_exec_obj) },
     { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_TICK_DRAW),   MP_ROM_INT(1) },
     { MP_ROM_QSTR(MP_QSTR_tick_split),  MP_ROM_PTR(&mod_tick_split_obj) },
+    { MP_ROM_QSTR(MP_QSTR_profile),     MP_ROM_PTR(&mod_profile_obj) },
+    { MP_ROM_QSTR(MP_QSTR_verb_stats),  MP_ROM_PTR(&mod_verb_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_verb_reset),  MP_ROM_PTR(&mod_verb_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_lua_profile), MP_ROM_PTR(&mod_lua_profile_obj) },
+    { MP_ROM_QSTR(MP_QSTR_lua_stats),   MP_ROM_PTR(&mod_lua_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_lua_reset),   MP_ROM_PTR(&mod_lua_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_lua_gc_mode), MP_ROM_PTR(&mod_lua_gc_mode_obj) },
+    { MP_ROM_QSTR(MP_QSTR_perf_counters), MP_ROM_PTR(&mod_perf_counters_obj) },
+    { MP_ROM_QSTR(MP_QSTR_perf_stats),  MP_ROM_PTR(&mod_perf_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_perf_reset),  MP_ROM_PTR(&mod_perf_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
@@ -1539,6 +2618,10 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_active),      MP_ROM_PTR(&mod_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&mod_set_sram_floor_obj) },
     { MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&mod_alloc_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sram_report), MP_ROM_PTR(&mod_sram_report_obj) },
+#ifndef MOYCORE_PSRAM
+    { MP_ROM_QSTR(MP_QSTR_sram_sim),    MP_ROM_PTR(&mod_sram_sim_obj) },
+#endif
     { MP_ROM_QSTR(MP_QSTR_pool_check), MP_ROM_PTR(&mod_pool_check_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_global),  MP_ROM_PTR(&mod_get_global_obj) },
     { MP_ROM_QSTR(MP_QSTR_view),        MP_ROM_PTR(&mod_view_obj) },

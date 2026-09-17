@@ -23,7 +23,7 @@ import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" prob
 SYSTEM_CARTS = ROOT / "system_carts"
 
 
-from ws_helpers import open_cart as _open_cart
+from ws_helpers import StubInput, open_cart as _open_cart
 
 
 # -- palette ---------------------------------------------------------------
@@ -161,14 +161,7 @@ def test_map_mget_mset_via_make_api():
     sheet.tset(3, 0, 0, 11)
     tm = TileMap(3, 3)
 
-    class _Input:
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
-
-    api = host_app.make_api(cv, _Input(), {}, sheet, None, tm)
+    api = host_app.make_api(cv, StubInput(), {}, sheet, None, tm)
     api["mset"](1, 1, 3)                     # cart-facing mset writes the shared map
     assert api["mget"](1, 1) == 3 and tm.mget(1, 1) == 3
     api["map"](0, 0, 3, 3, 0, 0, -1, 1)      # cart-facing map() draws it (scale 1)
@@ -188,14 +181,7 @@ def _flag_api(cv, flags):
     tm.mset(1, 0, 2)
     tm.mset(2, 0, 3)
 
-    class _Input:
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
-
-    return host_app.make_api(cv, _Input(), {}, sheet, None, tm, flags=flags)
+    return host_app.make_api(cv, StubInput(), {}, sheet, None, tm, flags=flags)
 
 
 def test_fget_and_fset_are_the_projects_own_flag_table():
@@ -305,15 +291,8 @@ def test_make_layer_and_draw_layer_via_make_api():
     # window-copies its visible region into the screen canvas at a CLAMPED camera.
     from runtime import host_app
 
-    class _Input:
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
-
     cv = Canvas(20, 16)
-    api = host_app.make_api(cv, _Input(), {})
+    api = host_app.make_api(cv, StubInput(), {})
     bg = api["make_layer"](40, 16)           # a 2x-wide world
     assert (bg.W, bg.H) == (40, 16)
     bg.rect(0, 0, 20, 16, 8)                  # left half = 8
@@ -379,14 +358,7 @@ def test_the_batch_verbs_are_gone_from_the_cart_namespace():
     from runtime import host_app
     cv = Canvas(20, 20)
 
-    class _Input:
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
-
-    api = host_app.make_api(cv, _Input(), {}, sheet=None)
+    api = host_app.make_api(cv, StubInput(), {}, sheet=None)
     for gone in ("spr_batch", "rect_batch", "spans"):
         assert gone not in api, gone
     assert "spr" in api and "rect" in api      # the survivors, so this can't pass empty
@@ -431,14 +403,7 @@ def test_spr_indexed_and_image_via_make_api():
     sheet = SpriteSheet()
     sheet.tset(0, 0, 0, 8)                  # sprite 0, top-left pixel -> red
 
-    class _Input:
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
-
-    api = host_app.make_api(cv, _Input(), {}, sheet)
+    api = host_app.make_api(cv, StubInput(), {}, sheet)
     api["spr"](0, 50, 60)                   # TIC-80 indexed spr from the sheet
     assert cv.pix(50, 60) == 8
     api["spr"](Image.from_ascii(["#"], {"#": 11}), 10, 10)  # Image still blits
@@ -493,18 +458,17 @@ def test_moyimg_asset_roundtrip_and_image_accessor(tmp_path):
 
     # image("pic") returns the SAME Image across calls (memoised, so its bake cache is
     # stable), tagged _paint, with the decoded index pixels; image(name) misses -> None.
-    class _Input:
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
-
     cv = Canvas(8, 8)
-    api = host_app.make_api(cv, _Input(), {}, images=reloaded["images"])
+    api = host_app.make_api(cv, StubInput(), {}, images=reloaded["images"])
     im = api["image"]("pic")
     assert im is not None and im.w == w and im.h == h
     assert bytes(im.pix) == raw and getattr(im, "_paint", False) is True
+    # #186: and tagged with the RUN that owns it, which is what lets the device
+    # canvas take its full-screen RGB565 bake off the gc heap (where a 150KB
+    # contiguous run is not there to be had) and give it back at reclaim.
+    assert im._owner == "cart"
+    assert host_app.make_api(cv, StubInput(), {}, images=reloaded["images"],
+                             owner="wallpaper")["image"]("pic")._owner == "wallpaper"
     assert api["image"]("pic") is im                    # memoised: same object
     assert api["image"]("missing") is None              # unknown asset -> None
     # The ASCII-art form of image() still works (dispatch on str vs rows list).
@@ -871,14 +835,6 @@ class _Stub:
         return lambda *a, **k: 0
 
 
-class _StubInput:
-    def held(self, n):
-        return False
-
-    def pressed(self, n):
-        return False
-
-
 class _Pointer:
     def __init__(self, x=0, y=0, click=False, down=False):
         self.x = x
@@ -889,7 +845,7 @@ class _Pointer:
 
 def test_mouse_aliases_touch_as_tic80_tuple():
     from runtime import host_app
-    inp = _StubInput()
+    inp = StubInput()
     api = host_app.make_api(_Stub(), inp, {})
     # No pointer -> all-zero 7-tuple (never None, unlike touch()).
     assert api["mouse"]() == (0, 0, False, False, False, 0, 0)
@@ -907,7 +863,7 @@ def test_mouse_aliases_touch_as_tic80_tuple():
 def test_time_advances_with_cart_clock():
     from runtime import host_app
     from runtime import console as C
-    inp = _StubInput()
+    inp = StubInput()
     inp.cart_start_ms = C._ticks_ms()
     api = host_app.make_api(_Stub(), inp, {})
     t0 = api["time"]()
@@ -919,7 +875,7 @@ def test_time_advances_with_cart_clock():
 
 def test_key_and_keyp_reflect_current_frame_key():
     from runtime import host_app
-    inp = _StubInput()
+    inp = StubInput()
     api = host_app.make_api(_Stub(), inp, {})
     a, b = ord("a"), ord("b")
     # No key held this frame.
@@ -1493,12 +1449,13 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     #
     # Expectations are DERIVED rather than listed per cart, because the listed form is
     # what went stale: it named platformer as the widest shipped map long after
-    # layer_test had shipped at 64x30.
+    # a 64x30 one had shipped (layer_test's, which is the bench's since the
+    # scroll A/B folded into it).
     from runtime import console as C
     from runtime.map_editor_ui import _MV_ZOOMS
 
     fitted = 0
-    for name in ("brick_siege", "ray_test", "letter_blitz", "platformer", "scroll_demo"):
+    for name in ("brick_siege", "bench", "letter_blitz", "platformer", "scroll_demo"):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
         w, h = ws.tilemap.w, ws.tilemap.h
         assert ws.map_ui.map_zoom == 0                          # opens at the fit default
@@ -1520,23 +1477,36 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     assert fitted >= 2, "no shipped map exercised the fit guarantee"
 
 
-def test_map_cycle_zoom_increases_cell_and_shrinks_view(tmp_path):
-    # Cycling the zoom steps IN: the cell size strictly grows and the visible cell
-    # count strictly shrinks, level by level, until it wraps back to the default.
+def test_map_cycle_zoom_increases_cell_then_lands_on_overview(tmp_path):
+    # Cycling the zoom steps IN through the detail rungs -- the cell size strictly
+    # grows and the visible cell count strictly shrinks -- then lands on OVERVIEW,
+    # which is BELOW every detail rung, and wraps back to the 8px field size.
     from runtime import console as C
+    from runtime import map_editor_ui as M
     _C, ws, drv = _open_cart_map(tmp_path, "brick_siege")
+    rungs = ws.map_ui.layout.zooms
+    assert rungs[-1] == M._MV_OVERVIEW                   # the sentinel is last (#215)
     seen = []
-    for _ in range(len(C._MV_ZOOMS)):
+    for _ in range(len(rungs)):
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
-        seen.append((ws.map_ui.map_zoom, cell, cols * rows))
-        drv.click(C._MAP_ZOOM[0] + 2, C._MAP_ZOOM[1] + 2)   # tap ZOOM -> next level
+        seen.append((ws.map_ui.map_zoom, cell, cols * rows,
+                     ws.map_ui._mv_overview()))
+        drv.click(C._MAP_ZOOM[0] + 2, C._MAP_ZOOM[1] + 2)   # tap ZOOM -> next rung
         drv.frame(1 / 30)
     # Back to the default after a full cycle.
     assert ws.map_ui.map_zoom == 0
-    # Ascending cell size, descending visible-cell count across the levels.
-    for k in range(1, len(seen)):
-        assert seen[k][1] > seen[k - 1][1]               # bigger cells
-        assert seen[k][2] < seen[k - 1][2]               # fewer visible cells
+    detail = [s for s in seen if not s[3]]
+    assert len(detail) == len(rungs) - 1
+    # Ascending cell size, descending visible-cell count across the detail rungs.
+    for k in range(1, len(detail)):
+        assert detail[k][1] > detail[k - 1][1]           # bigger cells
+        assert detail[k][2] < detail[k - 1][2]           # fewer visible cells
+    # The OVERVIEW rung is the only one visited that is below one tile, and it shows
+    # strictly more cells than any detail rung.
+    ov = [s for s in seen if s[3]]
+    assert len(ov) == 1
+    assert ov[0][1] < detail[0][1] and ov[0][1] < 8
+    assert ov[0][2] > detail[0][2]
 
 
 def test_map_tap_and_sky_hit_right_cell_after_zoom(tmp_path):
@@ -1697,7 +1667,7 @@ def test_make_api_exposes_cluster2_verbs_with_identical_keyset():
     # The cart namespace gains clip/camera/pal/palt; spr takes a flip arg. The host
     # and device make_api key-sets stay identical (the device spike test pins it too).
     from runtime import host_app
-    api = host_app.make_api(Canvas(32, 24), _StubInput(), {})
+    api = host_app.make_api(Canvas(32, 24), StubInput(), {})
     for name in ("clip", "camera", "pal", "palt"):
         assert name in api and callable(api[name])
 
@@ -1737,7 +1707,7 @@ def test_background_declares_color_and_image_backdrops():
     # so a naive cart never writes a per-frame cls/backdrop blit.
     from runtime import host_app, palette
     cv = Canvas(64, 48)
-    api = host_app.make_api(cv, _StubInput(), {})
+    api = host_app.make_api(cv, StubInput(), {})
     red = palette.color("red")
     white = palette.color("white")
     api["background"](red)

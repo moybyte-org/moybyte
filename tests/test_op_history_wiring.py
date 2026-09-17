@@ -10,21 +10,14 @@ commit re-baselines the History, so the two never double-count a stroke)."""
 
 from pathlib import Path
 
+from blocks_helpers import go_to_insert
+from ws_helpers import build_ws_with_cart
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def _make_ws_with_cart(tmp_path, src="def _draw():\n    cls(1)\n", title="Ops"):
-    from runtime import host_app
-    carts_dir = str(tmp_path / "carts")
-    host_app.moy_carts.ensure_dirs(carts_dir)
-    host_app.moy_carts.create(title, carts_dir, src=src, type="app")
-    ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
-    ws.open_in_editor()
-    return ws
+    return build_ws_with_cart(tmp_path, src, title, editor=True)
 
 
 def _entries(cart_path, file=None):
@@ -315,12 +308,6 @@ def _open_blocks(ws):
     return ws.block_ui.blocks_ed
 
 
-def _go_to_insert(be, depth=1, which=-1):
-    found = [i for i, r in enumerate(be.rows) if r.kind == "insert" and r.depth == depth]
-    assert found, "no insert row at depth %d" % depth
-    be.cur = found[which]
-
-
 def _select_type(be, tid):
     for i, r in enumerate(be.rows):
         if (r.block or {}).get("t") == tid:
@@ -336,7 +323,7 @@ def test_blocks_add_delete_param_bar_undo(tmp_path):
 
     # ADD a block -> bar UNDO removes it.
     s0 = blocks_snapshot(be)
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})
     assert be.program != s0
     assert ws.history.undo() is True and be.program == s0
@@ -361,7 +348,7 @@ def test_blocks_dimmed_state_is_truthful(tmp_path):
     be = _open_blocks(ws)
     assert ws.history.can_undo() is False and ws.history.can_redo() is False
 
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})   # an un-sealed edit still dims-in undo
 # -- scene: a placement is one undo step; undo re-syncs ws.scenes (#111 phase 4) --
 
@@ -461,7 +448,7 @@ def test_music_dimmed_state_is_truthful(tmp_path):
 def test_graduated_blocks_tab_has_no_history(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
     be = _open_blocks(ws)
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})   # an edit that WOULD be undoable
 
     # Graduated: the Blocks tab is a frozen read-only render, so its History is

@@ -25,8 +25,10 @@ from tools import board_config, board_flash                     # noqa: E402
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 GUITION = ROOT / "firmware" / "guition_jc3248w535"
+GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c"
 WEB_RUNNER = ROOT / "firmware" / "web_runner"
-BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION}
+BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION,
+          "guition-p4": GUITION_P4}
 
 SUBCOMMANDS = ("erase_region", "write_flash")
 
@@ -265,3 +267,67 @@ def test_main_routes_the_verbs_and_honours_no_verify(monkeypatch, tmp_path):
     assert board_flash.main(["board_flash.py", "monitor", str(TDECK),
                              "--port", "/dev/fake"]) == 0
     assert "miniterm" in fake.calls[-1][2]
+
+
+def test_the_no_modem_wrapper_keeps_flow_control_off_and_splits_dtr_rts():
+    """`tools/esptool_no_modem.py`: some S3 native USB serial nodes accept reads
+    but reject the combined modem-control ioctls, so the wrapper opens every
+    port with flow control off, makes pyserial's DTR/RTS state updates no-ops,
+    and replaces esptool's combined RTS/DTR update with two separate calls.
+    Imported against stubbed `serial`/`esptool` modules."""
+    import importlib.util
+    import types
+
+    opened = []
+    serial = types.ModuleType("serial")
+    serialposix = types.ModuleType("serial.serialposix")
+
+    class _Serial:
+        pass
+
+    serialposix.Serial = _Serial
+    serial.serialposix = serialposix
+    serial.serial_for_url = lambda *a, **kw: opened.append((a, kw)) or "port"
+    esptool = types.ModuleType("esptool")
+    reset = types.ModuleType("esptool.reset")
+
+    class _Strategy:
+        pass
+
+    reset.ResetStrategy = _Strategy
+    esptool.reset = reset
+    esptool._main = lambda: 0
+    stubs = {"serial": serial, "serial.serialposix": serialposix,
+             "esptool": esptool, "esptool.reset": reset}
+    saved = {k: sys.modules.get(k) for k in stubs}
+    sys.modules.update(stubs)
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "esptool_no_modem", ROOT / "tools" / "esptool_no_modem.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert serial.serial_for_url("/dev/x", 115200, rtscts=True) == "port"
+        assert opened == [(("/dev/x", 115200), {"rtscts": False, "dsrdtr": False})]
+        assert _Serial._update_dtr_state(None) is None
+        assert _Serial._update_rts_state(None) is None
+
+        class _Port:
+            def __init__(self):
+                self.seq = []
+
+            def setDTR(self, v):
+                self.seq.append(("dtr", v))
+
+            def setRTS(self, v):
+                self.seq.append(("rts", v))
+
+        strat = _Strategy()
+        strat.port = _Port()
+        _Strategy._setDTRandRTS(strat, dtr=True, rts=False)
+        assert strat.port.seq == [("dtr", True), ("rts", False)]
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v

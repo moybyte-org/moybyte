@@ -52,7 +52,7 @@ def _call(name, args=None):
     return mk("call", {"name": name, "args": list(args or [])})
 
 
-from blocks_helpers import run_cart as _run_cart  # noqa: E402
+from blocks_helpers import run_cart as _run_cart, go_to_insert  # noqa: E402
 
 
 _FORBIDDEN = {"eval", "exec", "getattr", "setattr", "compile", "open",
@@ -283,12 +283,6 @@ def _be():
     return BlockEditor(blocks)
 
 
-def _go_to_insert(be, depth, which=-1):
-    found = [i for i, r in enumerate(be.rows) if r.kind == "insert" and r.depth == depth]
-    assert found, "no insert row at depth %d" % depth
-    be.cur = found[which]
-
-
 def test_editor_new_proc_unique_across_vars_lists_procs():
     be = _be()
     a = blocks.proc_name(be.new_proc("block"))
@@ -319,7 +313,7 @@ def test_editor_add_and_remove_param():
 def test_editor_rename_proc_rewrites_calls():
     be = _be()
     pd = be.new_proc("go")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     call = be.insert_call("go")
     assert blocks.proc_name(call) == "go"
     applied = be.rename_proc("go", "run!!")
@@ -336,7 +330,7 @@ def test_editor_insert_call_prefills_args_by_param_count():
     pd = be.new_proc("f")
     be.add_param(pd, "a")
     be.add_param(pd, "b")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     call = be.insert_call("f")
     assert blocks.call_args(call) == [0, 0]          # one default per param
     assert [s["name"] for s in be.slots(call)] == ["arg0", "arg1"]
@@ -348,7 +342,7 @@ def test_editor_insert_call_prefills_args_by_param_count():
 def test_editor_delete_proc_leaves_stray_calls_as_pass():
     be = _be()
     pd = be.new_proc("f")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_call("f")
     assert be.delete_proc(pd) is True
     assert be.proc_names() == []
@@ -454,7 +448,7 @@ def test_ui_my_blocks_palette_creates_proc_and_places_call(tmp_path):
     assert call_items == [BUI._CALL_PREFIX + name]
 
     # park on an insert point in a script body and place the call
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     bui.blk_menu["sel"] = bui.blk_menu["items"].index(BUI._CALL_PREFIX + name)
     bui._blk_menu_select()
     assert bui.blk_menu is None
@@ -486,6 +480,6 @@ def test_ui_proc_menu_adds_an_input(tmp_path):
     bui.blk_menu["sel"] = bui.blk_menu["items"].index(BUI._PROC_ADD)
     bui._blk_menu_select()
     assert bui.blk_kbd is not None and bui.blk_kbd["kind"] == "param"
-    bui.blk_kbd["text"] = "size"
+    bui.blk_kbd["entry"].text = "size"
     bui._blk_kbd_commit()
     assert blocks.proc_params(pd) == ["size"]

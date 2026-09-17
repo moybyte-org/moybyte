@@ -105,11 +105,27 @@ SERIAL_NOISE_LIMIT = 16384
 # window, and on a UART board it is also how much the ring has to absorb if the
 # frame loop is preempted mid-window.
 RECV_MAX_WINDOW = 32768
-# No byte for this long inside a window and the transfer is abandoned: the tmp
-# file goes, an error line names how far it got, and the frame loop resumes.
-# A host that is alive but slow refreshes it with every byte, so this is a
-# DEAD-host timeout, not a rate floor -- generous on purpose.
-RECV_IDLE_MS = 5000
+# No byte for this long inside a window and the window is given up on. A host
+# that is alive but slow refreshes it with every byte -- inside a window bytes
+# arrive 87us apart at 115200 -- so a quiet stretch this long means the stream
+# STOPPED, which on a ring with no flow control means bytes were dropped.
+# It is not a rate floor, and it is no longer fatal: see RECV_RETRIES.
+RECV_IDLE_MS = 2000
+# How many windows may be re-sent before the transfer is abandoned. A UART ring
+# with no flow control drops a byte with no error when the board falls behind
+# for ~25ms, and one dropped byte used to kill the whole cart: measured on the
+# P4, a handful of bytes (2, 7, 12) lost about once every 300 windows, which is
+# a failed 120KB push one time in five. The file only ever advances by WHOLE
+# windows, so `got` is a resync point that costs nothing to keep -- the board
+# throws the short window away and asks for it again. The final sha still has
+# to agree, so a retry that resynced wrongly fails loudly rather than landing a
+# corrupt cart.
+RECV_RETRIES = 8
+# Consecutive windows that arrive EMPTY before the board stops believing there
+# is a host. A dropped byte leaves a window nearly full; nothing at all means
+# the other end is gone, and two of those end it in ~4s -- about what the one
+# fatal timeout above used to cost.
+RECV_DEAD_WINDOWS = 2
 
 
 def _kbd_intr(ch):
@@ -137,6 +153,259 @@ def _toggle_cmd(cmd):
         if t[5] == cmd:
             return t
     return None
+
+
+def verbs_line(hz, frames, rows, top=14):
+    """The `VERBS` line: where a Lua/p8 cart's frame actually goes, PER FRAME.
+
+    Per frame and not per window, because the question this answers is always
+    "what is in a frame" -- and because the two shapes it distinguishes are only
+    legible that way. `spr n=180 t=14.20` is a dispatch problem (a hundred and
+    eighty crossings), `map n=1.0 t=14.20` is one kernel doing too much work,
+    and the fix for one is not the fix for the other. Sorted by time, because
+    the top row is nearly always the whole answer.
+
+    `t` is SELF time -- the verb's own, with every wrapped verb called under it
+    subtracted. `in` is its INCLUSIVE time and appears only where the two
+    differ, which is exactly the verbs that run Lua: foreach and all. Without
+    the split, foreach reads as the most expensive thing in the cart while
+    costing nothing itself, and points a fix at the wrong file.
+
+    Read `t` as C cost for a LEAF verb, which is nearly all of them. On a verb
+    carrying an `in`, `t` is its C cost PLUS whatever Lua ran under it that was
+    not itself a verb -- because non-verb Lua has no row of its own and can only
+    be charged to the nearest verb enclosing it.
+
+    `tot` sums SELF, so it is the frame's time in C. The difference between it
+    and PERF's logic+render is the cart's own Lua -- the residual that decides
+    whether a cart is short of 30 fps because of the engine or because of what
+    it asks for, and the number no other instrument here reports.
+    """
+    if not frames or not hz:
+        return "VERBS frames=0"
+    scale = 1000.0 / (float(hz) * frames)          # ticks -> ms per frame
+    rows = sorted(rows, key=lambda r: -r[2])
+    tot = 0.0
+    for row in rows:
+        tot += row[2] * scale
+    out = ["VERBS frames=%d tot=%.2f" % (frames, tot)]
+    for row in rows[:top]:
+        name, calls, self_t = row[0], row[1], row[2]
+        incl = row[3] if len(row) > 3 else self_t
+        cell = "%s n=%.1f t=%.2f" % (name, calls / float(frames), self_t * scale)
+        if incl > self_t * 1.05:
+            cell += " in=%.2f" % (incl * scale)
+        out.append(cell)
+    return " | ".join(out)
+
+
+# The two marker comments tools/p8_lua_port.py emits around its shim. They are
+# how a cart says where the generated 1,348 lines end and its own code starts,
+# and they are the only thing that CAN say it: the data tables emitted above
+# the shim vary in length per cart (26 lines for moss moss, 163 for one that
+# needs the raw sheet), so the block sits at a different offset in every port.
+P8_SHIM_OPEN = b"PICO-8 compatibility shim (generated"
+P8_SHIM_CLOSE = b"end shim ==="
+
+
+def cart_shim_range(cart_path):
+    """The shim's (first, last) lines in whichever script holds it, or None.
+
+    `p8.lua` on a cart the current importer wrote (SPEC.md 4). That is not a
+    preference -- the range is pinned against the chunk that defines `_draw`,
+    and the shim owns `_draw`, so on a split port the VM reports p8.lua's line
+    numbers. A range read off main.lua would fail the pin and charge NOTHING as
+    shim, which reads as "this cart has no generated half". A single-file port
+    still answers from main.lua.
+    """
+    return (shim_line_range(cart_path + "/p8.lua")
+            or shim_line_range(cart_path + "/main.lua"))
+
+
+def shim_line_range(path, block=512):
+    """The emitted p8 shim's (first, last) lines in the script holding it, or
+    None.
+
+    That script is `p8.lua` on a cart the current importer wrote (SPEC.md 4);
+    the markers are the shim's own, so this reads either shape.
+
+    Read in BLOCKS and never held. main.lua is ~100KB on a ported cart and the
+    board being asked has that same cart resident -- moss moss holds a
+    megabyte of Lua heap and barely loads at all -- so a reader that pulled the
+    file in to splitlines() would OOM the very cart it was about to measure.
+    This counts newlines through a small window with a carry, which is O(1) in
+    the file's size and costs one pass.
+    """
+    keep = max(len(P8_SHIM_OPEN), len(P8_SHIM_CLOSE)) - 1
+    lo = hi = None
+    carry = b""
+    carry_line = 1                    # the line number carry[0] sits on
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return None
+    try:
+        while True:
+            buf = f.read(block)
+            if not buf:
+                break
+            hay = carry + buf
+            if lo is None:
+                i = hay.find(P8_SHIM_OPEN)
+                if i >= 0:
+                    # The banner line above the marker opens the emitted block.
+                    lo = carry_line + hay.count(b"\n", 0, i) - 1
+            if lo is not None and hi is None:
+                i = hay.find(P8_SHIM_CLOSE)
+                if i >= 0:
+                    hi = carry_line + hay.count(b"\n", 0, i)
+                    break
+            cut = len(hay) - keep
+            if cut < 0:
+                cut = 0
+            carry_line += hay.count(b"\n", 0, cut)
+            carry = hay[cut:]
+    finally:
+        f.close()
+    if lo is None or hi is None or hi < lo:
+        return None
+    return (lo, hi)
+
+
+# The Xtensa selector numbers worth naming, so the serial word is a word and
+# not a magic integer. They are XTPERF_CNT_* from xtensa/xt_perf_consts.h; the
+# RISC-V side counts retired instructions and nothing else, and says so.
+# EVERY MASK HERE IS COPIED FROM xt_perf_consts.h, not inferred. Four of them
+# were guessed on the first pass and three were wrong -- INSN_ALL is 0x8DFF and
+# not 0xffff, D_STALL_ALL is 0x01FE, and "calls" as 0x0060 is CALL|J, which
+# counts jumps. A wrong mask does not fail; it answers confidently in the wrong
+# units, which is the one thing an instrument must never do.
+PERF_EVENTS = {
+    "insn":    (2, 0x8DFF),   # INSN_ALL -- retired instructions, the IPC half
+    "calls":   (2, 0x0042),   # INSN_CALL | INSN_CALLX -- dispatch, counted
+    "dstall":  (3, 0x01FE),   # D_STALL_ALL -- the other half, if it is data
+    # THE TWO CACHE-MISS MASKS ARE CORE-LEVEL AND NEARLY BLIND HERE. The S3's
+    # Xtensa declares XCHAL_ICACHE_SIZE 0 and XCHAL_DCACHE_SIZE 0 -- the core
+    # has no cache of its own, and the cache that matters is Espressif's,
+    # OUTSIDE the core and invisible to its performance monitor. Both read ~0
+    # on every cart measured, and that zero is probably structural rather than
+    # a finding. Do not conclude "the working set fits the cache" from it; the
+    # evidence that actually carries that conclusion is behavioural -- the
+    # SRAM-floor A/B and the cross-board control in #66.
+    "dmiss":   (3, 0x0008),   # D_STALL_CACHE_MISS -- see the note above
+    "istall":  (4, 0x01FF),   # I_STALL_ALL -- or if it is instruction fetch
+    "imiss":   (4, 0x0001),   # I_STALL_CACHE_MISS -- same caveat
+    "bubbles": (6, 0x01FD),   # BUBBLES_ALL -- pipeline, not memory
+    "window":  (5, 0x0020),   # EXR_WINDOW -- the windowed ABI's register
+                              # spills, which present AS memory traffic
+    # The sub-masks. A total tells you which bucket, and only these tell you
+    # what to DO about it: CTI is the dispatch loop's branches (fuse opcodes,
+    # or stop branching), REG_DEP is a load-use hazard (the operand layout the
+    # opcode reads), and the two want opposite work.
+    "taken":     (2, 0x0010),   # INSN_BRANCH_TAKEN -- branches RETIRED, which
+                                # turns "bubbles / a guess at the per-branch
+                                # cost" into a measured number
+    "b_cti":     (6, 0x0080),   # BUBBLES_CTI -- control transfer
+    "b_regdep":  (6, 0x0010),   # BUBBLES_R_HOLD_REG_DEP
+    "b_dcache":  (6, 0x0004),   # BUBBLES_R_HOLD_D_CACHE_MISS
+    "b_store":   (6, 0x0008),   # BUBBLES_R_HOLD_STORE_RELEASE
+    "b_wait":    (6, 0x0020),   # BUBBLES_R_HOLD_WAIT
+    "d_storebuf": (3, 0x0002),  # D_STALL_STORE_BUF_FULL
+    "d_storeconf": (3, 0x0004), # D_STALL_STORE_BUF_CONFLICT
+    "d_busy":    (3, 0x0010),   # D_STALL_BUSY
+    "d_pif":     (3, 0x0020),   # D_STALL_IN_PIF -- the bus behind the cache
+    "d_bank":    (3, 0x0100),   # D_STALL_BANK_CONFLICT
+    "i_busy":    (4, 0x0002),   # I_STALL_BUSY
+    "i_pif":     (4, 0x0004),   # I_STALL_IN_PIF
+    "i_l32r":    (4, 0x0040),   # I_STALL_FAST_L32R -- literal loads, which an
+                                # interpreter does constantly
+    "i_mul":     (4, 0x0080),   # I_STALL_ITERATIVE_MUL
+    "i_div":     (4, 0x0100),   # I_STALL_ITERATIVE_DIV
+}
+
+
+def perfcnt_line(st, name=None):
+    """The `PERFCNT` line: retired instructions per cycle, over a cart's own
+    halves, with the raw counts behind it.
+
+    IPC IS THE WHOLE POINT and it is printed first. Four levers measured null
+    on the S3 tick and the conclusion drawn was "memory, not instructions" --
+    which is an elimination, and which closes the door on every
+    code-generation idea. This is the number that either confirms it or
+    re-opens it, and it is a RATIO so it survives the boards running at
+    different clocks.
+
+    Update and draw stay apart because the corpus splits that way: moss moss
+    is update-bound and dank tomb draw-bound. One figure over both would
+    average the answer away.
+    """
+    hz, frames, uc, ue, dc, de, sel, mask, selectable = st
+    if not frames:
+        return "PERFCNT no frames (run a cart with `perfcnt on`)"
+    ev = name or ("%d/%04x" % (sel, mask))
+    out = ["PERFCNT frames=%d %s" % (frames, ev)]
+    for tag, cyc, evt in (("upd", uc, ue), ("draw", dc, de)):
+        if not cyc:
+            continue
+        # per frame, and per cycle: the first says how big the half is, the
+        # second is the ratio the question is about
+        out.append("%s cyc=%d %s=%d r=%.3f %.3fms"
+                   % (tag, cyc // frames, ev, evt // frames, evt / float(cyc),
+                      (cyc / float(hz)) * 1000.0 / frames if hz else 0.0))
+    if not selectable:
+        out.append("(riscv: retired only)")
+    return " | ".join(out)
+
+
+def luaprof_line(st, rng, top=10):
+    """The `LUAPROF` line: how a Lua/p8 frame's INTERPRETER time divides.
+
+    The verb profiler answers what a frame spends in C. This answers the other
+    half, and the half that had never been separated: a ported cart is two
+    bodies of Lua, its own and the 1,348 lines of PICO-8 standard library the
+    importer emits into every cart it makes, and `shim=` is the share of
+    sampled interpreter time spent in the emitted half.
+
+    READ THE FIRST SHARE, NOT THE SECOND. Samples are taken every `iv` VM
+    instructions, so what they weigh is instructions executed -- and the count
+    hook's tax is the same for every Lua function, which is why that share
+    survives it even though the frame rate does not. The second share, and the
+    per-row `t`, are WALL CLOCK between samples: they carry the C verbs and,
+    crucially, the COLLECTOR, which runs inside the allocator and executes no
+    counted instructions at all. A row whose `t` share far exceeds its sample
+    share is allocating, not computing, and on a cart holding a megabyte of
+    Lua heap the difference between the two IS the collector.
+
+    Rows are `s`/`c` for shim or cart, then the function's `linedefined` --
+    which is what identifies it, since most of these functions are anonymous
+    or local and a name would be a guess.
+    """
+    hz, frames, iv, tot, rows, srcs = st
+    smp, us, calls, ccalls, ssmp, sus, scalls, drop, used, pinned = tot
+    if not frames or not smp:
+        return "LUAPROF frames=%d smp=0" % (frames or 0)
+    lo, hi = rng if rng else (0, 0)
+    share = "%d%%/%d%%" % (100 * ssmp // smp, 100 * sus // us) if us else "-"
+    # n is Lua calls a frame and sn how many of them entered the shim; c is C
+    # calls, which is the same population the VERBS line breaks down by name.
+    out = ["LUAPROF frames=%d iv=%d smp=%d shim=%s n=%.0f sn=%.0f c=%.0f "
+           "used=%d drop=%d"
+           % (frames, iv, smp, share if pinned else "n/a",
+              calls / float(frames), scalls / float(frames),
+              ccalls / float(frames), used, drop)]
+    if not pinned:
+        out[0] += " (unpinned: lines %d-%d are not this cart's shim)" % (lo, hi)
+    scale = 1.0 / (1000.0 * frames)             # microseconds -> ms a frame
+    cart_src = 0
+    for i, s in enumerate(srcs):
+        if s == "cart":
+            cart_src = i
+    for r in rows[:top]:
+        src, line, n, s, rus = r
+        tag = "s" if (pinned and src == cart_src and lo <= line <= hi) else "c"
+        out.append("%s%d %.1f%% n=%.1f t=%.2f"
+                   % (tag, line, 100.0 * s / smp, n / float(frames), rus * scale))
+    return " | ".join(out)
 
 
 def _remote_state(ws):
@@ -218,6 +487,7 @@ def _remote_state(ws):
         st["settings_err"] = str(exc)
     try:
         st["wifi"] = list(ws.wifi.status()) if ws.wifi is not None else None
+        st["wifi_held"] = sorted(ws._wifi_holders)     # the radio lease's holders
     except Exception as exc:  # noqa: BLE001
         st["wifi_err"] = str(exc)
     try:
@@ -260,6 +530,21 @@ def _remote_state(ws):
     except Exception as exc:  # noqa: BLE001
         st["pump_err"] = str(exc)
     try:
+        # #210's per-stage deadline meters: {stage: {budget_us, last_us, max_us,
+        # misses, n}} in the loop's invariant order. `state` is the route
+        # because it is the one every board serves -- the Guition stages no
+        # device_diag and so has no PUMP line to hang this off.
+        #
+        # The measurement is perf_capture-gated like every other frame-eater
+        # here, so a kid's console reports every stage unsampled (n=0, the rest
+        # None) and `diag 1` is what arms it. None is also the answer for a
+        # stage this board has no hook for and for a whole tier with no shared
+        # frame loop -- never 0, which is what a broken meter reads as.
+        sm = getattr(ws, "stage_meters", None)
+        st["stages"] = sm.report() if sm is not None else None
+    except Exception as exc:  # noqa: BLE001
+        st["stages_err"] = str(exc)
+    try:
         # Look system-app carts up by TITLE, never folder name: the device seeds
         # from the title slug and the host store copies the source folder, and
         # assuming either name is what broke `is_app` on the P4's glass.
@@ -284,6 +569,26 @@ def _remote_state(ws):
         st["app_claims"] = claims
     except Exception as exc:  # noqa: BLE001
         st["app_err"] = str(exc)
+    try:
+        # The tick model (#217): [rate, divisor, misses, steady] while a game
+        # is paced, else None -- the on-glass suites read "did the cart hold
+        # its tick" from here rather than from pixels.
+        pl = ws.player
+        st["tick"] = ([pl.sched.rate, pl.sched.div, pl.sched.misses,
+                       bool(pl.sched.steady)] if pl.tick_ms else None)
+        st["uncap"] = bool(pl.sched.uncapped) if pl.tick_ms else None
+    except Exception as exc:  # noqa: BLE001
+        st["tick_err"] = str(exc)
+    try:
+        # #211: the internal-SRAM headroom the cart run actually had --
+        # {sram_free_min, psram_fallback, floor} -- live while a Lua cart is
+        # open, the ended run's at the launcher. None (never zeros) for a Python
+        # cart and for a tier whose allocator has one region: the moment a cart
+        # tips into the ~2x-slower PSRAM regime has to be distinguishable from
+        # the board that cannot tip at all.
+        st["sram"] = ws.player.sram_report()
+    except Exception as exc:  # noqa: BLE001
+        st["sram_err"] = str(exc)
     return st
 
 
@@ -312,13 +617,17 @@ class DevChannel:
       drag [frames] [step]         grab the TOP window's title strip and
                       oscillate it (windowed tier; declines with no window)
       diag 0|1        the diagnostic frame-eaters (perf_capture + the FPS chip)
-      skip 0|1        the #77 frameskip gate
+      steady 0|1      the tick model's STEADY / FREE knob (#217)
       crisp 0|1       the #204 nearest-neighbour game composite -- these two
                       are SETTINGS_TOGGLES entries that declared a serial word,
                       not branches written here; a board whose capability gate
                       says no declines the word. Neither persists, so a
                       measurement session cannot leave the board off-default.
-      gov 0|1         the #63 frame governor
+      uncap 0|1       DIAG: every loop frame draws while logic keeps its rate
+                      -- the draw+present path flat out, the game at its own
+                      speed. Never persists; `fps=` is the answer
+      skip, gov       retired with FRAMESKIP and the governor (#217); both
+                      decline and name `steady`
       mem             a forced collect + the live/free split
       bl 0|1          panel backlight. The board keeps RENDERING either way, so
                       a dark screen is a fine way to bench unattended.
@@ -495,6 +804,183 @@ class DevChannel:
             ran = True
         return ran
 
+    def _verbs(self, parts):
+        """`verbs on|off|reset` and bare `verbs` -- the Lua/p8 tier's per-verb
+        profiler (moycore.profile / verb_stats).
+
+        It is its OWN switch rather than a rider on `diag`, and deliberately:
+        every diag session would otherwise pay a profiler's per-call tax to
+        answer a question a measurement session asks on purpose. Off is the
+        default and off means the cart's globals are libmoy's C functions with
+        nothing wrapped around them.
+        """
+        try:
+            import moycore
+        except ImportError:
+            print("REMOTE verbs: no moycore on this board")
+            return
+        arg = parts[1] if len(parts) > 1 else ""
+        if arg in ("0", "off"):
+            moycore.profile(0)
+            print("REMOTE verbs off")
+            return
+        if arg in ("1", "on"):
+            n = moycore.profile(1)
+            moycore.verb_reset()
+            # None means armed but not installed -- no VM to install into yet.
+            # A cart CAPTURES its globals as it loads, so arming and then
+            # launching is the reading that misses nothing; installing into a
+            # running cart still catches every verb it calls by global name,
+            # which is nearly all of them.
+            if n is None:
+                print("REMOTE verbs armed (takes effect at the next launch)")
+            else:
+                print("REMOTE verbs on wrapped=%d" % n)
+            return
+        if arg == "reset":
+            moycore.verb_reset()
+            print("REMOTE verbs reset")
+            return
+        st = moycore.verb_stats()
+        if st is None:
+            print("REMOTE verbs: not armed (`verbs on`, then relaunch the cart)")
+            return
+        print(verbs_line(st[0], st[1], st[2]))
+
+    def _perfcnt(self, parts):
+        """`perfcnt on|off|reset [event]` and a bare `perfcnt` -- the CPU's own
+        performance counters, across a cart's update and draw.
+
+        Its own switch, like `verbs` and `luaprof`: disarmed, `tick` tests one
+        byte a frame and touches no register, so an ordinary diag session pays
+        nothing for a question a measurement session asks on purpose.
+
+        `event` names what counter 1 counts (the Xtensa part has exactly two
+        and counter 0 is always cycles). Default `insn`, which is the ratio
+        the instrument exists for; `perfcnt on dstall` and the rest are the
+        follow-up when IPC says memory.
+        """
+        try:
+            import moycore
+        except ImportError:
+            print("REMOTE perfcnt: no moycore on this board")
+            return
+        arg = parts[1] if len(parts) > 1 else ""
+        if arg in ("0", "off"):
+            moycore.perf_counters(0)
+            print("REMOTE perfcnt off")
+            return
+        if arg in ("1", "on"):
+            want = parts[2] if len(parts) > 2 else "insn"
+            if want not in PERF_EVENTS:
+                print("REMOTE perfcnt: no event %r (%s)"
+                      % (want, " ".join(sorted(PERF_EVENTS))))
+                return
+            sel, mask = PERF_EVENTS[want]
+            if moycore.perf_counters(1, sel, mask) is None:
+                print("REMOTE perfcnt: this board has no counters")
+                return
+            moycore.perf_reset()
+            self._perf_ev = want
+            print("REMOTE perfcnt on %s" % want)
+            return
+        if arg == "reset":
+            moycore.perf_reset()
+            print("REMOTE perfcnt reset")
+            return
+        st = moycore.perf_stats()
+        if st is None:
+            print("REMOTE perfcnt: this board has no counters")
+            return
+        print(perfcnt_line(st, getattr(self, "_perf_ev", None)))
+
+    def _luaprof(self, ws, parts):
+        """`luaprof on|off|reset [interval]` and a bare `luaprof` -- the Lua
+        tier's per-FUNCTION sampling profiler (moycore.lua_profile).
+
+        Its own switch, like `verbs` and for the same reason: a count hook
+        makes EVERY VM instruction detour through luaG_traceexec, which is a
+        tax an ordinary diag session must not pay to answer a question a
+        measurement session asks on purpose.
+
+        `on` resolves the running cart's shim line range from its own main.lua
+        before arming, so the split is measured against the file that is
+        actually loaded rather than a constant baked in here -- the emitted
+        block is a fixed 1,348 lines but it starts wherever that cart's data
+        tables ended.
+        """
+        try:
+            import moycore
+        except ImportError:
+            print("REMOTE luaprof: no moycore on this board")
+            return
+        arg = parts[1] if len(parts) > 1 else ""
+        if arg in ("0", "off"):
+            moycore.lua_profile(0)
+            self._shim_rng = None
+            print("REMOTE luaprof off")
+            return
+        if arg in ("1", "on"):
+            try:
+                iv = int(parts[2]) if len(parts) > 2 else 1024
+            except ValueError:
+                iv = 1024
+            cart = getattr(ws, "cart", None) or {}
+            rng = cart_shim_range(cart["path"]) if cart.get("path") else None
+            self._shim_rng = rng
+            lo, hi = rng if rng else (0, 0)
+            n = moycore.lua_profile(1, iv, lo, hi)
+            moycore.lua_reset()
+            if n is None:
+                print("REMOTE luaprof armed iv=%d shim=%d-%d" % (iv, lo, hi))
+            else:
+                print("REMOTE luaprof on iv=%d shim=%d-%d" % (iv, lo, hi))
+            return
+        if arg == "reset":
+            moycore.lua_reset()
+            print("REMOTE luaprof reset")
+            return
+        st = moycore.lua_stats(10)
+        if st is None:
+            print("REMOTE luaprof: not armed (`luaprof on`)")
+            return
+        print(luaprof_line(st, getattr(self, "_shim_rng", None)))
+
+    def _luagc(self, parts):
+        """`luagc [stop|run|inc [pause step size]|gen [minor major]]` -- the
+        cart VM's collector, read and set.
+
+        It is a knob here and not upstream because moycore OPENS the VM: the
+        engine and the shim are both vendored, but the collector's schedule is
+        this file's. And it is the one cost `luaprof` cannot see -- collection
+        runs inside the allocator rather than as counted VM instructions -- so
+        the two are read together or not at all.
+        """
+        try:
+            import moycore
+        except ImportError:
+            print("REMOTE luagc: no moycore on this board")
+            return
+        arg = parts[1] if len(parts) > 1 else ""
+        nums = []
+        for p in parts[2:]:
+            try:
+                nums.append(int(p))
+            except ValueError:
+                pass
+        while len(nums) < 3:
+            nums.append(-1)
+        mode = {"stop": 0, "run": 1, "inc": 2, "gen": 3}.get(arg, -1)
+        st = moycore.lua_gc_mode(mode, nums[0], nums[1], nums[2])
+        if st is None:
+            # ARMED, not ignored: the mode is applied at the next load(), which
+            # is what makes an A/B possible at all -- every tool here changes
+            # one thing by relaunching the cart.
+            print("REMOTE luagc armed mode=%s (no cart running)" % (arg or "-"))
+            return
+        print("REMOTE luagc heap=%dKB running=%d gen=%d"
+              % (st[0], 1 if st[1] else 0, 1 if st[2] else 0))
+
     def report(self, diag):
         """One SERIAL line per diag tick, and it is the channel's self-diagnosis:
         `rx` climbing while `lines` stays 0 means something is injecting bytes
@@ -525,6 +1011,9 @@ class DevChannel:
             RECV ready <nbytes> <window> <path>.new     armed; send window 1
             RECV ack <bytes so far>                     one per window, after
                                                         the file write
+            RECV retry <bytes so far>                   that window came up
+                                                        short; re-send FROM
+                                                        this offset
             RECV done <sha12> <nbytes>                  what landed, hashed
             RECV ERR <what>                             gave up; tmp removed
             RECV caps max=<n> idle=<ms>                 bare `recv`: the probe
@@ -585,12 +1074,15 @@ class DevChannel:
         err = None
         _kbd_intr(-1)
         print("RECV ready %d %d %s" % (total, window, tmp))
+        left = RECV_RETRIES
+        empty = 0
         try:
             while got < total:
                 n = total - got
                 if n > window:
                     n = window
                 i = 0
+                held = pending
                 if pending:
                     i = len(pending)
                     if i > n:
@@ -602,13 +1094,30 @@ class DevChannel:
                     for _ in ipoll(RECV_IDLE_MS):
                         ready = True
                     if not ready:
-                        err = "timeout after %d of %d bytes" % (got + i, total)
                         break
                     rd(one)
                     buf[i] = one[0]
                     i += 1
-                if err is not None:
-                    break
+                if i < n:
+                    # The stream stopped inside the window, which on a ring
+                    # with no flow control is what a DROPPED byte looks like:
+                    # the host wrote the whole window and is now waiting for an
+                    # ack it will never get. Nothing has been written to the
+                    # file, so `got` is still a window boundary -- throw the
+                    # short window away and ask for it again. The wire is quiet
+                    # by construction (that is what the timeout just proved),
+                    # so nothing is in flight to prefix the re-send.
+                    empty = empty + 1 if i == 0 else 0
+                    if left <= 0 or empty >= RECV_DEAD_WINDOWS:
+                        # `got`, not `got + i`: the i bytes of this window are
+                        # about to be thrown away, and naming them sends the
+                        # reader looking for a file that never existed.
+                        err = "timeout after %d of %d bytes" % (got, total)
+                        break
+                    left -= 1
+                    pending = held
+                    print("RECV retry %d" % got)
+                    continue
                 f.write(mv[:n])
                 got += n
                 self.raw += n
@@ -728,6 +1237,18 @@ class DevChannel:
             ws._dirty = True
             print("REMOTE diag %s" % ("on" if on else "off"))
             return
+        if cmd == "verbs":
+            self._verbs(parts)
+            return
+        if cmd == "luaprof":
+            self._luaprof(ws, parts)
+            return
+        if cmd == "perfcnt":
+            self._perfcnt(parts)
+            return
+        if cmd == "luagc":
+            self._luagc(parts)
+            return
         tog = _toggle_cmd(cmd)
         if tog is not None:
             # A settings toggle by its registry word (`skip`, `crisp`). The
@@ -745,11 +1266,17 @@ class DevChannel:
             print("REMOTE %s %s"
                   % (cmd, "on" if getattr(ws, key, on) else "off"))
             return
-        if cmd == "gov":
+        if cmd == "uncap":
             on = not (len(parts) == 2 and parts[1] == "0")
-            import console as _console_mod
-            _console_mod.FPS_GOVERNOR = on
-            print("REMOTE gov %s" % ("on" if on else "off"))
+            ws._uncap = on                    # the next run starts uncapped
+            pl = getattr(ws, "player", None)
+            if pl is not None and getattr(pl, "tick_ms", 0):
+                pl.uncap_mode(on)             # ...and the running one flips now
+            print("REMOTE uncap %s" % ("on" if on else "off"))
+            return
+        if cmd in ("skip", "gov"):
+            print("REMOTE %s: retired by the tick model (#217) -- the Player "
+                  "schedules logic and draw; `steady 0|1` is the knob" % cmd)
             return
         if cmd == "mem":
             import gc

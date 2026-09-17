@@ -1,0 +1,296 @@
+// moy_dsi: the ESP32-P4 MIPI-DSI panel module -- the P4 silicon tier
+// (native/p4), parameterized by the PANEL the board's mpconfigboard.cmake
+// names. Born as the Waveshare 7B's EK79007 backend (#58); the Guition
+// JC8012P4A1C's JD9365 became its second panel on 2026-09-06, which is when
+// the panel facts moved behind the #if ladder below and the module moved out
+// of the Waveshare's tree.
+//
+// DPI mode on either panel: the DSI peripheral continuously scans out a PSRAM
+// framebuffer -- there is no per-frame flush transfer (the T-Deck's ~28ms
+// tx_color ceiling does not exist here). Python draws into the framebuffer
+// returned by fb() and calls flush()/show() so the DPI DMA sees the CPU's
+// cached writes.
+
+#include "py/runtime.h"
+#include "py/objarray.h"
+
+#include "esp_ldo_regulator.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_mipi_dsi.h"
+#include "esp_cache.h"
+#include "esp_attr.h"
+
+// ---------------------------------------------------------------------------
+// The panel: everything a board's glass decides, and nothing else. A board
+// names ONE of these in mpconfigboard.cmake (list(APPEND MICROPY_DEF_BOARD
+// MOY_DSI_PANEL_xxx=1)); the rest of this file is the silicon's.
+// ---------------------------------------------------------------------------
+#if defined(MOY_DSI_PANEL_EK79007)
+// Waveshare ESP32-P4-WIFI6-Touch-LCD-7B: EK79007, 7" 1024x600 landscape,
+// 2-lane DSI @ 900Mbps (the vendored component's own bus config), LCD reset
+// GPIO33, DSI PHY on LDO channel 3 @ 2.5V. Panel mounted 180 degrees --
+// handled on the TOUCH side (p4_input.FLIP_X/Y), never here.
+#include "esp_lcd_ek79007.h"
+#define MOY_DSI_H_RES        1024
+#define MOY_DSI_V_RES        600
+#define MOY_DSI_LCD_RST_GPIO 33
+#define MOY_DSI_MIRROR_XY    0
+#define MOY_DSI_PANEL_QSTR   MP_QSTR_ek79007
+typedef ek79007_vendor_config_t moy_dsi_vendor_config_t;
+#define MOY_DSI_BUS_CONFIG()      EK79007_PANEL_BUS_DSI_2CH_CONFIG()
+#define MOY_DSI_DBI_CONFIG()      EK79007_PANEL_IO_DBI_CONFIG()
+#define MOY_DSI_DPI_CONFIG(fmt)   EK79007_1024_600_PANEL_60HZ_CONFIG(fmt)
+#define moy_dsi_new_panel         esp_lcd_new_panel_ek79007
+#elif defined(MOY_DSI_PANEL_JD9365)
+// Guition JC8012P4A1C: JD9365, 10.1" 800x1280 PORTRAIT-native glass, 2-lane
+// DSI @ 1500Mbps + DPI 60MHz (the factory demo's numbers, verbatim), LCD
+// reset GPIO27, DSI PHY on LDO channel 3 @ 2.5V. The factory demo mirrors
+// both axes after init (MADCTL GS|SS) -- a 180-degree image, which is the
+// orientation its LVGL demo ran in and what MOY_DSI_MIRROR_XY reproduces.
+// Board README carries the portrait-vs-landscape decision; this file only
+// knows the glass is 800 wide.
+#include "esp_lcd_jd9365.h"
+#define MOY_DSI_H_RES        800
+#define MOY_DSI_V_RES        1280
+#define MOY_DSI_LCD_RST_GPIO 27
+#ifndef MOY_DSI_MIRROR_XY
+#define MOY_DSI_MIRROR_XY    1
+#endif
+#define MOY_DSI_PANEL_QSTR   MP_QSTR_jd9365
+typedef jd9365_vendor_config_t moy_dsi_vendor_config_t;
+#define MOY_DSI_BUS_CONFIG()      JD9365_PANEL_BUS_DSI_2CH_CONFIG()
+#define MOY_DSI_DBI_CONFIG()      JD9365_PANEL_IO_DBI_CONFIG()
+#define MOY_DSI_DPI_CONFIG(fmt)   JD9365_800_1280_PANEL_60HZ_DPI_CONFIG(fmt)
+#define moy_dsi_new_panel         esp_lcd_new_panel_jd9365
+#else
+#error "moy_dsi: the board must name its panel in mpconfigboard.cmake (MICROPY_DEF_BOARD MOY_DSI_PANEL_EK79007=1 or MOY_DSI_PANEL_JD9365=1)"
+#endif
+
+#define MOY_DSI_FB_BYTES     (MOY_DSI_H_RES * MOY_DSI_V_RES * 2) // RGB565
+#define MOY_DSI_PHY_LDO_CHAN 3    // MIPI DSI PHY power rail (both boards)
+#define MOY_DSI_PHY_LDO_MV   2500
+#define MOY_DSI_NUM_FBS      3    // TRIPLE-BUFFER (#58 render overlap), see below
+
+static esp_ldo_channel_handle_t s_phy_ldo;
+static esp_lcd_dsi_bus_handle_t s_bus;
+static esp_lcd_panel_io_handle_t s_io;
+static esp_lcd_panel_handle_t s_panel;
+static void *s_fb;          // fb 0 (kept for the single-buffer flush() compat path)
+static void *s_fbs[MOY_DSI_NUM_FBS]; // TRIPLE-BUFFER (#58 render overlap): the DPI
+                            // panel owns 3 framebuffers -- scan / DMA-pending /
+                            // paint -- so a deferred async composite never blocks
+static int s_nfbs;          // the next paint; show(n) switches scan-out zero-copy
+                            // (draw_bitmap with an internal fb pointer), so a full
+                            // redraw never races the scan (the "everything visibly
+                            // refreshes" tearing).
+static volatile uint32_t s_underruns;
+// Panel refreshes: the DPI driver's "refresh done" event, raised from the
+// DW-GDMA transfer-done ISR that also restarts the frame -- so a count that
+// moved is the proof a scan-out switch (show) has TAKEN EFFECT, and the buffer
+// it left is off glass. The rotated compositor picks its paint target by it.
+static volatile uint32_t s_refreshes;
+
+IRAM_ATTR static bool moy_dsi_on_refresh_done(esp_lcd_panel_handle_t panel,
+                                              esp_lcd_dpi_panel_event_data_t *edata,
+                                              void *user_ctx) {
+    (void)panel; (void)edata; (void)user_ctx;
+    s_refreshes++;
+    return false;
+}
+
+// Strong implementation of ESP-IDF's P4-build weak diagnostic hook
+// (patches/p4_esp_lcd_dsi_underrun_hook.patch). ISR-safe: one internal-RAM
+// counter increment, with all Python/serial work deferred.
+IRAM_ATTR void moy_dsi_note_underrun(void) {
+    s_underruns++;
+}
+
+static void moy_dsi_check(esp_err_t err, const char *what) {
+    if (err != ESP_OK) {
+        mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("moy_dsi %s: err 0x%x"), what, (unsigned)err);
+    }
+}
+
+static mp_obj_t moy_dsi_init(void) {
+    if (s_panel != NULL) {
+        return mp_const_none;
+    }
+
+    s_underruns = 0;
+    s_refreshes = 0;
+
+    esp_ldo_channel_config_t ldo_cfg = {
+        .chan_id = MOY_DSI_PHY_LDO_CHAN,
+        .voltage_mv = MOY_DSI_PHY_LDO_MV,
+    };
+    moy_dsi_check(esp_ldo_acquire_channel(&ldo_cfg, &s_phy_ldo), "phy ldo");
+
+    esp_lcd_dsi_bus_config_t bus_cfg = MOY_DSI_BUS_CONFIG();
+    moy_dsi_check(esp_lcd_new_dsi_bus(&bus_cfg, &s_bus), "dsi bus");
+
+    esp_lcd_dbi_io_config_t dbi_cfg = MOY_DSI_DBI_CONFIG();
+    moy_dsi_check(esp_lcd_new_panel_io_dbi(s_bus, &dbi_cfg, &s_io), "dbi io");
+
+    esp_lcd_dpi_panel_config_t dpi_cfg = MOY_DSI_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+    dpi_cfg.num_fbs = 3;    // triple-buffer: 3x the frame in PSRAM (both boards
+                            // have 32MB) -- scan + DMA-pending + paint (#58)
+    // Nothing here ever draw_bitmaps a FOREIGN buffer -- show() hands the DPI
+    // driver one of its own framebuffers, which it switches zero-copy -- so the
+    // JD9365 vendor config's DMA2D copy engine has no work and stays off.
+    dpi_cfg.flags.use_dma2d = false;
+    moy_dsi_vendor_config_t vendor_cfg = {
+        .mipi_config = {
+            .dsi_bus = s_bus,
+            .dpi_config = &dpi_cfg,
+            .lane_num = 2,
+        },
+    };
+    esp_lcd_panel_dev_config_t panel_cfg = {
+        .reset_gpio_num = MOY_DSI_LCD_RST_GPIO,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = 16,
+        .vendor_config = &vendor_cfg,
+    };
+    moy_dsi_check(moy_dsi_new_panel(s_io, &panel_cfg, &s_panel), "panel new");
+    moy_dsi_check(esp_lcd_panel_reset(s_panel), "panel reset");
+    moy_dsi_check(esp_lcd_panel_init(s_panel), "panel init");
+    esp_lcd_dpi_panel_event_callbacks_t cbs = {
+        .on_refresh_done = moy_dsi_on_refresh_done,
+    };
+    moy_dsi_check(esp_lcd_dpi_panel_register_event_callbacks(s_panel, &cbs, NULL),
+                  "refresh callback");
+#if MOY_DSI_MIRROR_XY
+    moy_dsi_check(esp_lcd_panel_mirror(s_panel, true, true), "panel mirror");
+#endif
+    moy_dsi_check(esp_lcd_dpi_panel_get_frame_buffer(s_panel, MOY_DSI_NUM_FBS,
+                                                     &s_fbs[0], &s_fbs[1], &s_fbs[2]), "get fbs");
+    s_nfbs = MOY_DSI_NUM_FBS;
+    s_fb = s_fbs[0];
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_init_obj, moy_dsi_init);
+
+static mp_obj_t moy_dsi_deinit(void) {
+    if (s_panel) {
+        esp_lcd_panel_del(s_panel);
+        s_panel = NULL;
+        s_fb = NULL;
+        s_fbs[0] = s_fbs[1] = s_fbs[2] = NULL;
+        s_nfbs = 0;
+    }
+    if (s_io) {
+        esp_lcd_panel_io_del(s_io);
+        s_io = NULL;
+    }
+    if (s_bus) {
+        esp_lcd_del_dsi_bus(s_bus);
+        s_bus = NULL;
+    }
+    if (s_phy_ldo) {
+        esp_ldo_release_channel(s_phy_ldo);
+        s_phy_ldo = NULL;
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_deinit_obj, moy_dsi_deinit);
+
+// fb([n]) -> writable memoryview over framebuffer n (default 0).
+static mp_obj_t moy_dsi_fb(size_t n_args, const mp_obj_t *a) {
+    if (s_nfbs == 0) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_dsi not initialized"));
+    }
+    mp_int_t n = (n_args > 0) ? mp_obj_get_int(a[0]) : 0;
+    if (n < 0 || n >= s_nfbs) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
+    }
+    return mp_obj_new_memoryview('B' | MP_OBJ_ARRAY_TYPECODE_FLAG_RW, MOY_DSI_FB_BYTES, s_fbs[n]);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_dsi_fb_obj, 0, 1, moy_dsi_fb);
+
+static mp_obj_t moy_dsi_nfbs(void) {
+    return MP_OBJ_NEW_SMALL_INT(s_nfbs);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_nfbs_obj, moy_dsi_nfbs);
+
+static mp_obj_t moy_dsi_underruns(void) {
+    return mp_obj_new_int_from_uint(s_underruns);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_underruns_obj, moy_dsi_underruns);
+
+// refreshes() -> panel frames scanned out since init. A show(n) takes effect at
+// the first refresh after it; until the count moves, the buffer show() left is
+// still on glass and must not be written.
+static mp_obj_t moy_dsi_refreshes(void) {
+    return mp_obj_new_int_from_uint(s_refreshes);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_refreshes_obj, moy_dsi_refreshes);
+
+// show(n): make framebuffer n the scan-out source -- msync its CPU-cached writes,
+// then a zero-copy draw_bitmap (the DPI driver recognizes its own fb pointer and
+// just switches buffers at the next VSYNC; no pixel copy).
+static mp_obj_t moy_dsi_show(mp_obj_t n_in) {
+    if (s_panel == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_dsi not initialized"));
+    }
+    mp_int_t n = mp_obj_get_int(n_in);
+    if (n < 0 || n >= s_nfbs) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
+    }
+    moy_dsi_check(esp_cache_msync(s_fbs[n], MOY_DSI_FB_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M), "msync");
+    moy_dsi_check(esp_lcd_panel_draw_bitmap(s_panel, 0, 0, MOY_DSI_H_RES, MOY_DSI_V_RES, s_fbs[n]),
+                  "show");
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_dsi_show_obj, moy_dsi_show);
+
+// Push CPU cache to memory so the DPI scan-out DMA sees the writes.
+static mp_obj_t moy_dsi_flush(void) {
+    if (s_fb == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_dsi not initialized"));
+    }
+    moy_dsi_check(esp_cache_msync(s_fb, MOY_DSI_FB_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M), "msync");
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_flush_obj, moy_dsi_flush);
+
+// Hardware test pattern: 0 = none, 1 = vertical bars, 2 = horizontal bars.
+static mp_obj_t moy_dsi_set_pattern(mp_obj_t pat_in) {
+    if (s_panel == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_dsi not initialized"));
+    }
+    mp_int_t pat = mp_obj_get_int(pat_in);
+    mipi_dsi_pattern_type_t types[] = {
+        MIPI_DSI_PATTERN_NONE, MIPI_DSI_PATTERN_BAR_VERTICAL, MIPI_DSI_PATTERN_BAR_HORIZONTAL,
+    };
+    if (pat < 0 || pat > 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("pattern 0..2"));
+    }
+    moy_dsi_check(esp_lcd_dpi_panel_set_pattern(s_panel, types[pat]), "pattern");
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_dsi_set_pattern_obj, moy_dsi_set_pattern);
+
+static const mp_rom_map_elem_t moy_dsi_module_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_dsi) },
+    { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&moy_dsi_init_obj) },
+    { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&moy_dsi_deinit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fb), MP_ROM_PTR(&moy_dsi_fb_obj) },
+    { MP_ROM_QSTR(MP_QSTR_nfbs), MP_ROM_PTR(&moy_dsi_nfbs_obj) },
+    { MP_ROM_QSTR(MP_QSTR_underruns), MP_ROM_PTR(&moy_dsi_underruns_obj) },
+    { MP_ROM_QSTR(MP_QSTR_refreshes), MP_ROM_PTR(&moy_dsi_refreshes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_show), MP_ROM_PTR(&moy_dsi_show_obj) },
+    { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&moy_dsi_flush_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_pattern), MP_ROM_PTR(&moy_dsi_set_pattern_obj) },
+    { MP_ROM_QSTR(MP_QSTR_WIDTH), MP_ROM_INT(MOY_DSI_H_RES) },
+    { MP_ROM_QSTR(MP_QSTR_HEIGHT), MP_ROM_INT(MOY_DSI_V_RES) },
+    { MP_ROM_QSTR(MP_QSTR_PANEL), MP_ROM_QSTR(MOY_DSI_PANEL_QSTR) },
+};
+static MP_DEFINE_CONST_DICT(moy_dsi_module_globals, moy_dsi_module_globals_table);
+
+const mp_obj_module_t moy_dsi_module = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&moy_dsi_module_globals,
+};
+
+MP_REGISTER_MODULE(MP_QSTR_moy_dsi, moy_dsi_module);

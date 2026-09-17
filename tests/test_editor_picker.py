@@ -234,11 +234,11 @@ def test_picker_delete_is_two_tap_guarded(tmp_path):
     x, y, w, h = ws.layout.del_btn
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
-    assert ws.editor_picker._del_armed is True
+    assert ws.editor_picker._delete.armed is True
     assert len(ws.picker.items) == n0                  # armed, NOT deleted yet
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
-    assert ws.editor_picker._del_armed is False
+    assert ws.editor_picker._delete.armed is False
     assert len(ws.picker.items) == n0 - 1              # second tap confirmed it
 
 
@@ -251,9 +251,9 @@ def test_picker_delete_confirm_disarms_on_navigation(tmp_path):
     ws.picker.sel = _first_real(ws.picker)
     x, y, w, h = ws.layout.del_btn
     ws.editor_picker.zone_tap(x + w // 2, y + h // 2)
-    assert ws.editor_picker._del_armed is True
+    assert ws.editor_picker._delete.armed is True
     ws.editor_picker.handle_input(_FakeInput({"right"}))
-    assert ws.editor_picker._del_armed is False
+    assert ws.editor_picker._delete.armed is False
 
 
 def test_picker_delete_confirm_resets_on_reopen(tmp_path):
@@ -264,10 +264,10 @@ def test_picker_delete_confirm_resets_on_reopen(tmp_path):
     ws.picker.sel = _first_real(ws.picker)
     x, y, w, h = ws.layout.del_btn
     ws.editor_picker.zone_tap(x + w // 2, y + h // 2)
-    assert ws.editor_picker._del_armed is True
+    assert ws.editor_picker._delete.armed is True
     ws.exit()                          # back to the launcher, confirm never fired
     ws.open_picker()                   # a fresh visit
-    assert ws.editor_picker._del_armed is False
+    assert ws.editor_picker._delete.armed is False
 
 
 class _FakeInput:

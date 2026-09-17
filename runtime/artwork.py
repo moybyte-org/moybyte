@@ -21,6 +21,7 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
     from file_widgets import FileGridView, Bitmap, cover_indices
@@ -31,6 +32,24 @@ try:
     from app_context import NO_STORE
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_context import NO_STORE
+
+try:
+    from widgets import ConfirmTap
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.widgets import ConfirmTap
+
+# #186: the desktop backdrop's resampled indices. Off-heap for the same reason
+# its RGB565 bake is (device_canvas._paint_bake_buf) -- a screenful of indices
+# is 153,600 bytes on the Guition's 480x320 desk, and that board's largest
+# contiguous gc run at the launcher is 107,584. alloc() degrades to a plain
+# bytearray on the host and wherever PSRAM is out, so this stays one code path.
+try:
+    import moybuf as _moybuf
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    try:
+        from runtime import moybuf as _moybuf
+    except ImportError:
+        _moybuf = None
 
 
 def _invalidate_bitmap(img):
@@ -52,6 +71,13 @@ class PaintDocument:
     """An indexed document; UI/window size never changes its chosen pixel size."""
 
     PAPER = 7
+    # The off-heap loan key for this document's bakes (#186). The app id, so a
+    # reader of moy_alloc's ledger can name what is holding the memory. Paint is
+    # the one app that repaints a WHOLE screen of indices over and over -- every
+    # stroke invalidates the bake and the next frame rebuilds all 153,600 bytes
+    # of it -- so it is the one app whose bake buffer must not be asked of a
+    # fragmented gc heap. Released by PaintAppLayer._return_bakes.
+    OWNER = "artwork"
 
     def __init__(self, width=320, height=240, seed=False):
         self.W = int(width)
@@ -61,8 +87,9 @@ class PaintDocument:
         self.pix = bytearray(self.W * self.H)
         self.pix[:] = bytes((self.PAPER,)) * len(self.pix)
         self.thumb = bytearray(self.thumb_w * self.thumb_h)
-        self.image = Bitmap(self.W, self.H, self.pix)
-        self.thumb_image = Bitmap(self.thumb_w, self.thumb_h, self.thumb)
+        self.image = Bitmap(self.W, self.H, self.pix, self.OWNER)
+        self.thumb_image = Bitmap(self.thumb_w, self.thumb_h, self.thumb,
+                                  self.OWNER)
         self.history = []
         self.future = []
         self.action_live = False
@@ -295,7 +322,7 @@ class PaintAppLayout:
     MIN_W = 310
     MIN_H = 230
 
-    def __init__(self, w, h, fs=1, windowed=False):
+    def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(fs))
@@ -303,7 +330,9 @@ class PaintAppLayout:
         # Physical surface threshold: a 894x502 P4 window at font-scale 2 still has
         # room for the full 512x300 document plus desktop rails, so it is WIDE.
         self.compact = self.w < 700 or self.h < 420
-        self.bar_h = 0 if windowed else 18 * fs
+        # The chrome scale (#203) sizes only the OS bar band above this app.
+        self.cs = max(fs, int(cs)) if cs else fs
+        self.bar_h = 0 if windowed else 18 * self.cs
         self.top_h = 28 * fs
         self.status_h = 18 * fs
         self.left_w = (36 if self.compact else 52) * fs
@@ -376,7 +405,7 @@ class PaintAppLayer:
     # no storage role at all; `shell` is only the FileGridView duck-type.
     NEEDS = ("surface", "theme", "damage", "artwork", "shell")
 
-    def __init__(self, ctx, names, in_rect):
+    def __init__(self, ctx, names):
         self.ctx = ctx
         # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
         self._surf = ctx.surface
@@ -384,13 +413,13 @@ class PaintAppLayer:
         self._damage = ctx.damage
         self._art = ctx.artwork
         self.names = names
-        self._in = in_rect
         cv = ctx.surface.canvas()
         desktop = cv.w >= 640 and cv.h >= 400
         self.doc = PaintDocument(512, 300) if desktop else PaintDocument()
         self._starter_pending = desktop
         self.layout = PaintAppLayout(cv.w, cv.h, self._surf.font_scale(),
-                                     self._surf.windowed())
+                                     self._surf.windowed(),
+                                     self._surf.chrome_scale())
         self.tool = 0
         self.color = names["blue"]
         self.pal_page = 0
@@ -401,8 +430,8 @@ class PaintAppLayer:
         self.pan_y = 0
         self.status = "READY"
         self.mode = "paint"           # paint | show | projects | open
-        self.new_armed = False
-        self.size_armed = False
+        self.new_confirm = ConfirmTap()    # N: first tap arms, second confirms
+        self.size_confirm = ConfirmTap()   # the size swap, the same guard
         self.stroke_last = None
         self.shape_start = None
         self.shape_now = None
@@ -417,8 +446,8 @@ class PaintAppLayer:
         self._unsaved = False
         self._idle = 0.0
 
-    def relayout(self, w, h, fs):
-        self.layout = PaintAppLayout(w, h, fs, self._surf.windowed())
+    def relayout(self, w, h, fs, cs=None):
+        self.layout = PaintAppLayout(w, h, fs, self._surf.windowed(), cs)
         self.display = None
 
     def is_app(self, cart):
@@ -429,10 +458,15 @@ class PaintAppLayer:
 
     def open(self):
         art = self._art
+        self._return_bakes()           # #186: load() may re-mint the document
         loaded = art.load()
         if self.doc.load(loaded):
-            self.status = (art.doc_name() or "DRAWING").upper()
-        elif self._starter_pending:
+            self.status = (art.why_read_only()
+                           or (art.doc_name() or "DRAWING").upper())
+        elif not art.editable():
+            # A picture that would not decode. It still opens HERE, saying so:
+            # the blank canvas is not a new drawing and is never written back.
+            self.status = art.why_read_only()
             # Build the editable demo lazily on the first Paint launch, not at OS boot.
             self.doc.seed_desktop()
             self.doc.invalidate()
@@ -500,6 +534,8 @@ class PaintAppLayer:
 
     def _save(self):
         art = self._art
+        if not art.editable():
+            return True                # show-only: there is nothing to write back
         if not self._unsaved and art.doc_name() is not None:
             return True                # unchanged since the last flush: no re-encode
         if art.save(self.doc.pix, self.doc.W, self.doc.H):
@@ -511,11 +547,33 @@ class PaintAppLayer:
         self._idle = self.AUTOSAVE_S - self.RETRY_S
         return False
 
+    def _return_bakes(self):
+        """Hand this document's off-heap RGB565 bakes back (#186).
+
+        Paint borrows the one buffer the gc heap cannot promise -- a whole
+        screen of RGB565, 153,600 bytes at 320x240 and 307,200 on a desktop --
+        and off-heap memory has no collector, so the loan needs a death to be
+        returned at. An app has none: `_init_apps` builds every app once and
+        they live as long as the console. So the seams are the document's
+        instead -- it is LEFT (close) or REPLACED (a new drawing) -- and both
+        are points where nothing is mid-draw. The canvas nulls the bake as it
+        frees, so the next frame rebuilds rather than reading returned RAM."""
+        rel = getattr(self._surf.canvas(), "release_bakes", None)
+        if rel is not None:
+            rel(PaintDocument.OWNER)
+
     def close(self):
         """The app-API LEAVING hook (docs/app_api_v1.md): the host calls it when
         this app comes off the screen by ANY route. `_save` is change-gated, so
         an untouched drawing costs no write."""
         self._save()
+        self._return_bakes()
+
+    # The bar's hard-commit hook is the SAME write. The context-X is an exit
+    # path that does not always end in go_home's close sweep -- a cart image
+    # returns into its project's Editor instead -- so the pop must not be the
+    # only thing that saves.
+    commit = close
 
     def _mark_changed(self):
         self._unsaved = True
@@ -526,6 +584,7 @@ class PaintAppLayer:
         file), point the service at a fresh name, and blank the canvas
         (`seed` passes through to PaintDocument's starter art)."""
         self._save()
+        self._return_bakes()           # #186: the outgoing document's loan
         self._art.new_doc(w, h)
         self.doc = PaintDocument(w, h, seed=seed)
         self._unsaved = False
@@ -534,15 +593,13 @@ class PaintAppLayer:
 
     def _action(self, index):
         if index == 0:
-            if self.new_armed:
+            if self.new_confirm.tap():
                 self._fresh_doc(self.doc.W, self.doc.H)
-                self.new_armed = False
                 self.status = "NEW DRAWING"
             else:
-                self.new_armed = True
                 self.status = "TAP N AGAIN"
         else:
-            self.new_armed = False
+            self.new_confirm.disarm()
             if index == 1:
                 if self.doc.undo():
                     self.status = "UNDO"
@@ -604,11 +661,11 @@ class PaintAppLayer:
             return True
         if click:
             for i, r in enumerate(lay.actions):
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     self._action(i)
                     return True
             for i, r in enumerate(lay.tools):
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     self.tool = i
                     self.status = self.TOOLS[i]
                     self._damage.all()
@@ -617,26 +674,26 @@ class PaintAppLayer:
             for i in range(count):
                 x = lay.pal_x + (i % lay.pal_cols) * lay.pal_cell
                 y = lay.pal_y + (i // lay.pal_cols) * lay.pal_cell
-                if self._in(px, py, (x, y, lay.pal_cell, lay.pal_cell)):
+                if _in(px, py, (x, y, lay.pal_cell, lay.pal_cell)):
                     self.color = (self.pal_page * 16 + i) if lay.compact else i
                     self.status = "COLOR " + str(self.color)
                     self._damage.all()
                     return True
-            if lay.compact and self._in(px, py, lay.pal_page):
+            if lay.compact and _in(px, py, lay.pal_page):
                 self.pal_page = (self.pal_page + 1) & 3
                 self._damage.all()
                 return True
             for i, r in enumerate(lay.sizes):
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     self.size = (1, 2, 4)[i]
                     self._damage.all()
                     return True
-            if self._in(px, py, lay.fill):
+            if _in(px, py, lay.fill):
                 self.shape_fill = not self.shape_fill
                 self._damage.all()
                 return True
-            if self._in(px, py, lay.preset):
-                if self.size_armed:
+            if _in(px, py, lay.preset):
+                if self.size_confirm.tap():
                     # A size swap starts a NEW auto-named drawing -- the open
                     # one keeps its file (#108: nothing is ever lost).
                     if self.doc.W == 320:
@@ -646,10 +703,8 @@ class PaintAppLayer:
                     else:
                         self._fresh_doc(320, 240)
                         self.status = "GAME 320X240"
-                    self.size_armed = False
                     self.display = None
                 else:
-                    self.size_armed = True
                     self.status = "TAP SIZE AGAIN"
                 self._damage.all()
                 return True
@@ -657,6 +712,13 @@ class PaintAppLayer:
         return True
 
     def _paint_pointer(self, x, y, tapped, held):
+        if not self._art.editable() and self.tool != 9:
+            # A show-only picture (#108): panning still works, so it can be
+            # looked at; every mark is refused with the reason on the status.
+            if tapped:
+                self.status = self._art.why_read_only() or "READ ONLY"
+                self._damage.all()
+            return
         p = self._screen_to_art(x, y)
         if self.tool == 9:
             if tapped:
@@ -758,9 +820,9 @@ class PaintAppLayer:
             art = self._art
             art.open_named(hit[1])
             if self.doc.load(art.load()):
-                self.status = hit[1].upper()
+                self.status = art.why_read_only() or hit[1].upper()
             else:
-                self.status = "CAN'T OPEN"
+                self.status = art.why_read_only() or "CAN'T OPEN"
             self._unsaved = False
             self._idle = 0.0
             self.view_mode = 0
@@ -781,7 +843,7 @@ class PaintAppLayer:
             idx = self.project_top + row
             if idx >= len(self.project_names):
                 break
-            if self._in(x, y, (10 * lay.fs, y0 + row * row_h,
+            if _in(x, y, (10 * lay.fs, y0 + row * row_h,
                                lay.w - 20 * lay.fs, row_h - 2 * lay.fs)):
                 art = self._art
                 name = art.attach(idx)
@@ -820,7 +882,7 @@ class PaintAppLayer:
         action_icons = ("plus", "undo", "redo", None, None, None, None, None)
         for i, r in enumerate(lay.actions):
             self._button(cv, action_labels[i], r,
-                         (i == 0 and self.new_armed) or (i == 7 and self.view_mode == 0),
+                         (i == 0 and self.new_confirm.armed) or (i == 7 and self.view_mode == 0),
                          glyph=action_icons[i])
         for i, r in enumerate(lay.tools):
             self._button(cv, self.GLYPHS[i], r, i == self.tool,
@@ -862,7 +924,7 @@ class PaintAppLayer:
         self._button(cv, "SOLID" if self.shape_fill else "EDGE",
                      lay.fill, self.shape_fill)
         preset = "GAME" if self.doc.W == 320 else "DESKTOP"
-        self._button(cv, preset, lay.preset, self.size_armed)
+        self._button(cv, preset, lay.preset, self.size_confirm.armed)
 
     def _draw_preview(self, cv):
         if self.shape_start is None or self.shape_now is None or self.display is None:
@@ -927,11 +989,25 @@ class ArtworkService:
     (runtime/app_context.py). Its prefs namespace is "paint" and not its id:
     `paint_doc` has been the key in real cards' system.json since #108."""
 
+    # The largest document Paint holds -- and it is Paint's OWN largest, the
+    # 512x300 desktop wallpaper it seeds and edits, not a number picked for the
+    # gate below. Smaller pictures are editable at every size, because
+    # PaintDocument.load re-sizes to what it is given and the view zooms out to
+    # the half-scale thumb when the panel is narrower than the picture. So
+    # "TOO BIG TO EDIT" is about a picture bigger than anything this system
+    # makes; a 320x240 seed background is ordinary work.
     MAX_W = 512
     MAX_H = 300
     WALL_TITLE = "My Art"
     PAINT_TITLE = "Paint"
     NEEDS = ("files", "carts", "wallpaper", "prefs", "notify", "nav")
+    # The off-heap loan key for the DESKTOP BACKDROP (#186). Its own key, not
+    # PaintDocument's "artwork" and not the wallpaper cart's "wallpaper":
+    # release_bakes(owner) frees everything an owner holds, so a shared key
+    # would mean Paint's leaving hook drops the desktop's backdrop, and
+    # wallpaper.clear() drops a compiled cart's images. One key, one buffer,
+    # one thing to reason about.
+    WALL_OWNER = "wallpaper_bg"
 
     def __init__(self, ctx):
         self.ctx = ctx
@@ -946,8 +1022,12 @@ class ArtworkService:
         self._wall_decoded = None      # the wallpaper COPY's decoded tuple
         self._wall_bitmap = None
         self._wall_key = None
+        self._wall_pix = None          # the backdrop's off-heap indices (#186)
+        self._wall_canvas = None       # ...and the canvas its bake is lent by
         self._thumb_bitmap = None
         self._thumb_key = None
+        self._read_only = False        # the open picture is show-only
+        self._why = ""
 
     def _ready(self):
         return self._files.ready()
@@ -973,14 +1053,49 @@ class ArtworkService:
     def available(self):
         return self._ready()
 
-    # -- the open document (a named files/drawings item) ----------------------
+    # -- the open document (a named files item) -------------------------------
+    #
+    # The doc pointer is a `(kind, name)` PAIR, because a picture is not only a
+    # drawing: a cart's own `images/cover.moyimg` opens here too (#108), on the
+    # project kind (`moy_carts.PROJECT_KIND`), and is written back to the cart's
+    # folder rather than into the gallery. `drawings` is the default and the
+    # only kind the auto-naming, trash and copy-on-use verbs know -- a project
+    # image was NAMED by the format, so there is nothing to auto-name.
+
+    DRAWINGS = "drawings"
 
     def doc_name(self):
-        """The open drawing's file name, or None before the first save."""
+        """The open picture's file name, or None before the first save."""
         return self._prefs.get("doc")
 
-    def _set_doc_name(self, name):
+    def doc_kind(self):
+        """The files kind the open picture lives in ("drawings" by default; a
+        `project:<folder>` kind for a cart's own image)."""
+        return self._prefs.get("doc_kind") or self.DRAWINGS
+
+    def editable(self):
+        """False while the open picture is one Paint can SHOW but not change --
+        a shape it has no editor for. Never a refusal to open: a picture always
+        opens somewhere a kid can look at it."""
+        return not self._read_only
+
+    def why_read_only(self):
+        return self._why
+
+    def _open_drawing(self):
+        """The open picture's name IF it is a gallery drawing, else None. The
+        copy-on-use verbs (WALL / GAME) are about the gallery: a cart's own
+        image was never copied FROM anywhere, so it is not a source."""
+        return self.doc_name() if self.doc_kind() == self.DRAWINGS else None
+
+    def _set_doc_name(self, name, kind=None):
         prefs = self._prefs
+        kind = kind or self.DRAWINGS
+        if prefs.get("doc_kind") != (None if kind == self.DRAWINGS else kind):
+            if kind == self.DRAWINGS:
+                prefs.clear("doc_kind")
+            else:
+                prefs.set("doc_kind", kind)
         if prefs.get("doc") == name:
             return
         if name is None:
@@ -988,27 +1103,38 @@ class ArtworkService:
         else:
             prefs.set("doc", name)
 
-    def open_named(self, name):
-        """Point Paint at another drawing file (the Files app's OPEN verb, and
-        Paint's own picker). The next load() reads it."""
-        self._set_doc_name(name)
+    def open_named(self, name, kind=None):
+        """Point Paint at another picture (the Files app's OPEN verb, Paint's
+        own picker, and the cart-image door). The next load() reads it."""
+        self._set_doc_name(name, kind)
         self._cached = None
+        self._read_only = False
+        self._why = ""
 
     def load(self):
-        """Return ``(w, h, index_bytes)`` for the open drawing, or ``None``.
+        """Return ``(w, h, index_bytes)`` for the open picture, or ``None``.
         Resolves the doc pointer (running the one-shot #108 migration first):
         no pointer -> the newest drawing; an empty kind -> fresh canvas; a
-        pointer at a since-deleted file -> a fresh canvas under that name."""
+        pointer at a since-deleted file -> a fresh canvas under that name.
+
+        A picture Paint cannot EDIT still loads -- it comes back read-only with
+        a reason, and only a blob that will not decode at all comes back None.
+        A cart's own image is asked for by name and never falls back to the
+        gallery: there is exactly one file behind that door."""
         files = self._files
+        kind = self.doc_kind()
+        self._read_only = False
+        self._why = ""
 
         def _load(f):
-            f.migrate()
             name = self.doc_name()
+            if kind != self.DRAWINGS:
+                return name, f.load(kind, name)
             if name:
-                return name, f.load("drawings", name)
-            names = f.list("drawings")
+                return name, f.load(kind, name)
+            names = f.list(kind)
             if names:
-                return names[0], f.load("drawings", names[0])
+                return names[0], f.load(kind, names[0])
             return None, None
 
         got, err = files.batch(_load)
@@ -1018,11 +1144,18 @@ class ArtworkService:
             return None
         name, blob = got
         if name is not None:
-            self._set_doc_name(name)
+            self._set_doc_name(name, kind)
         self._cached = files.decode_image(blob)
-        if (self._cached is not None and (self._cached[0] > self.MAX_W
-                                          or self._cached[1] > self.MAX_H)):
-            self._cached = None
+        if self._cached is None:
+            if blob:
+                self._read_only = True
+                self._why = "CAN'T READ THIS PICTURE"
+        elif self._cached[0] > self.MAX_W or self._cached[1] > self.MAX_H:
+            # Bigger than Paint's largest document. It still OPENS -- refusing a
+            # picture outright is what "no editor for this" was, and a kid with a
+            # picture they cannot look at learns nothing.
+            self._read_only = True
+            self._why = "TOO BIG TO EDIT"
         return self._cached
 
     def save(self, indices, width=320, height=240):
@@ -1032,25 +1165,31 @@ class ArtworkService:
         if not self._ready():
             self.last_error = "STORAGE OFF"
             return False
+        if self._read_only:
+            self.last_error = self._why or "READ ONLY"
+            return False
         w = int(width)
         h = int(height)
         if w <= 0 or h <= 0 or w > self.MAX_W or h > self.MAX_H:
             self.last_error = "BAD SIZE"
             return False
         files = self._files
+        kind = self.doc_kind()
         blob = files.encode_image(w, h, indices)
         name = self.doc_name()
 
         def _write(f):
-            n = name or f.new_name("drawings")
-            f.save("drawings", n, blob)
+            # A cart's own image keeps its name: the FORMAT chose it, and an
+            # auto-name would write a file the cart does not look for.
+            n = name or f.new_name(kind)
+            f.save(kind, n, blob)
             return n
 
         got, err = files.batch(_write)
         if err is not None:      # surface failure in the app
             self.last_error = str(err)
             return False
-        self._set_doc_name(got)
+        self._set_doc_name(got, kind)
         self._cached = (w, h, bytes(indices))
         self.last_error = ""
         self._notify.achieve("paint_save")
@@ -1063,11 +1202,15 @@ class ArtworkService:
         if not self._ready():
             self._set_doc_name(None)
             return None
-        name, err = self._files.new_name("drawings")
+        name, err = self._files.new_name(self.DRAWINGS)
         if err is not None:
             self.last_error = str(err)
             return None
-        self._set_doc_name(name)
+        # NEW always lands in the gallery, so it also LEAVES a cart's image --
+        # a fresh canvas is not a new cover.
+        self._set_doc_name(name, self.DRAWINGS)
+        self._read_only = False
+        self._why = ""
         self._cached = None
         return name
 
@@ -1123,8 +1266,8 @@ class ArtworkService:
         # construction: `_with_sd` is a call-through on the host and on the P4,
         # and on the T-Deck `with_sd_live` mounts once and keeps the card
         # resident for the session -- so a second call is a readiness check.
-        n = name or self.doc_name()
-        blob = files.load("drawings", n)[0] if n else None
+        n = name or self._open_drawing()
+        blob = files.load(self.DRAWINGS, n)[0] if n else None
         if not blob:
             self.last_error = "SAVE FIRST"
             return False
@@ -1142,8 +1285,10 @@ class ArtworkService:
                 self.last_error = str(err)
                 return False
         self._wall_decoded = None
-        self._wall_bitmap = None
-        self._wall_key = None
+        self._drop_wall_bitmap()       # #186: the outgoing backdrop's loans --
+                                       # here and not only via select_wallpaper,
+                                       # because this can still answer False
+                                       # below without ever reaching it
         self._thumb_bitmap = None
         self._thumb_key = None
         wp_id = self._wallpaper_id()
@@ -1177,29 +1322,71 @@ class ArtworkService:
         self._wall_decoded = data if data is not None else False
         return data
 
+    def _drop_wall_bitmap(self):
+        """Drop the cached backdrop and give back BOTH of its off-heap loans.
+
+        Called where the cached bitmap is genuinely being discarded -- a new
+        wallpaper published, or a source/canvas size the cache does not match.
+        The canvas nulls the bake as it frees, so a draw that raced this would
+        re-bake rather than read returned RAM (moybuf's rule: never free what
+        something still reads)."""
+        self.release_wall_bake()
+        if self._wall_pix is not None and _moybuf is not None:
+            _moybuf.free(self._wall_pix)
+        self._wall_pix = None
+        self._wall_bitmap = None
+        self._wall_key = None
+
+    def release_wall_bake(self):
+        """Give back the backdrop's RGB565 bake, keeping the resampled indices.
+
+        The backdrop is neither a cart RUN nor a document, so it has neither of
+        the deaths the other two loans hang off. What it has is a SELECTION:
+        the bake is only ever read while My Art is the chosen wallpaper, so the
+        wallpaper component's `clear()` -- the one seam every wallpaper change
+        funnels through -- is where it goes back. Coming back to My Art costs one
+        native re-bake (~8ms) and no resample, which is why this returns the
+        bake and NOT the indices: the resample is a Python loop over a whole
+        screen, and paying it per selection would be a visible hitch."""
+        cv = self._wall_canvas
+        rel = getattr(cv, "release_bakes", None) if cv is not None else None
+        if rel is not None:
+            rel(self.WALL_OWNER)
+
     def draw_wallpaper(self, canvas):
-        """Draw My Art directly in the SYSTEM domain (512x300 -> P4 exact 2x)."""
+        """Draw My Art directly in the SYSTEM domain (512x300 -> P4 exact 2x).
+
+        ONE screen-sized bitmap drawn 1:1, whatever the source size (#186).
+        The old integer-cover branch handed the canvas a source-sized bitmap
+        and a scale, and `spr` bakes a PRE-SCALED RGB565 copy for any scale but
+        1 -- so a 320x240 drawing on the Guition's 480x320 desk asked the gc
+        heap for 640*480*2 = 614,400 contiguous bytes, four times the screen it
+        was about to fill, and got `MemoryError` at an untouched launcher.
+        Resampling to the canvas instead bakes exactly one screen (307,200
+        there), and 1:1 is the only placement that reaches the owner-lent
+        `_bake_indices` path at all. Pixels are unchanged wherever the cover is
+        an exact integer multiple -- the P4's 512x300 -> 1024x600 included --
+        because cover_indices reduces to nearest-neighbour replication there."""
         data = self._wall_data()
         if data is None:
             return False
         sw, sh, src = data
         cw, ch = canvas.w, canvas.h
-        if sw > cw or sh > ch:
-            key = (id(src), cw, ch)
-            if self._wall_key != key:
-                fitted = cover_indices(src, sw, sh, cw, ch)
-                self._wall_bitmap = Bitmap(cw, ch, fitted)
-                self._wall_key = key
-            canvas.spr(self._wall_bitmap, 0, 0)
-            return True
-        # Integer cover is exact for the desktop preset: 512x300 * 2 = 1024x600.
-        scale = max(1, (cw + sw - 1) // sw, (ch + sh - 1) // sh)
-        key = (id(src), sw, sh)
+        key = (id(src), cw, ch)
         if self._wall_key != key:
-            self._wall_bitmap = Bitmap(sw, sh, src)
+            self._drop_wall_bitmap()
+            if sw == cw and sh == ch:
+                pix = src              # already the screen: no resample, no loan
+            else:
+                if _moybuf is not None:
+                    self._wall_pix = pix = _moybuf.alloc(cw * ch)
+                else:                  # pragma: no cover - every tier has moybuf
+                    pix = bytearray(cw * ch)
+                cover_indices(src, sw, sh, cw, ch, pix)
+            self._wall_bitmap = Bitmap(cw, ch, pix, self.WALL_OWNER)
             self._wall_key = key
-        canvas.spr(self._wall_bitmap, (cw - sw * scale) // 2,
-                   (ch - sh * scale) // 2, scale)
+        self._wall_canvas = canvas
+        canvas.spr(self._wall_bitmap, 0, 0)
         return True
 
     def wall_size(self):
@@ -1247,8 +1434,8 @@ class ArtworkService:
             self.last_error = "NO PROJECT"
             return None
         files = self._files
-        n = name or self.doc_name()
-        blob = files.load("drawings", n)[0] if n else None
+        n = name or self._open_drawing()
+        blob = files.load(self.DRAWINGS, n)[0] if n else None
         data = files.decode_image(blob)
         if not blob or data is None:
             self.last_error = "SAVE FIRST"

@@ -15,7 +15,10 @@ falls back to a self-contained shim), which is what makes this testable at all.
 import hashlib
 import json
 
-from runtime.dev_channel import DevChannel, _remote_state
+from runtime.dev_channel import (DevChannel, PERF_EVENTS, _remote_state,
+                                 luaprof_line, perfcnt_line, shim_line_range,
+                                 cart_shim_range,
+                                 verbs_line)
 
 
 class FakePointer:
@@ -121,6 +124,59 @@ def test_state_is_one_line_json(capsys):
     line = [l for l in out.splitlines() if l.startswith("STATE ")][0]
     st = json.loads(line.split("STATE ", 1)[1])
     assert st["screen"] == "home"
+
+
+def test_state_reports_every_frame_stage_with_its_budget_and_misses():
+    """#210's route. `state` is the one every board serves -- the Guition
+    stages no device_diag and has no PUMP line -- so the per-stage deadline
+    meters ride it, in the loop's invariant order and with its field shape."""
+    from runtime import device_boot
+
+    class CapWS(FakeWS):
+        def __init__(self):
+            FakeWS.__init__(self)
+            self.perf_capture = True
+            self.stage_meters = device_boot.StageMeters(self)
+
+    ws = CapWS()
+    m = ws.stage_meters
+    m.start(m.slot_ms)
+    m.mark(device_boot._S_FRAME)
+
+    st = _remote_state(ws)
+    assert list(st["stages"]) == list(device_boot.STAGE_ORDER)
+    for row in st["stages"].values():
+        assert sorted(row) == ["avg_us", "budget_us", "last_us", "max_us",
+                               "misses", "n"]
+    frame = st["stages"]["frame"]
+    assert frame["n"] == 1 and frame["budget_us"] == 16 * 780
+    # A stage no hook filled, and one with no deadline to miss: None either
+    # way, never the 0 that reads identically to a broken meter.
+    assert st["stages"]["inputs"]["last_us"] is None
+    assert st["stages"]["tail"]["budget_us"] is None
+
+
+def test_state_reports_no_stages_at_all_where_no_shared_loop_runs():
+    """The host simulator and the wasm head run their own loops, so there are
+    no stage meters to dump -- and that is None, not eleven zeroed rows."""
+    assert _remote_state(FakeWS())["stages"] is None
+
+
+def test_state_reports_the_sram_headroom_the_run_had_or_none():
+    """#211's route, and it is `state` for the same reason #210's is: every
+    board serves it. A run that tipped into PSRAM reports the regime change as
+    a boolean beside the low-water mark it tipped at; a Python cart and a tier
+    whose allocator has one region report None -- never zeros, which is also
+    what a meter that stopped working looks like."""
+
+    class PlayerWS(FakeWS):
+        def __init__(self, report):
+            FakeWS.__init__(self)
+            self.player = type("P", (), {"sram_report": lambda _s: report})()
+
+    tipped = {"sram_free_min": 21504, "psram_fallback": True, "floor": 24576}
+    assert _remote_state(PlayerWS(tipped))["sram"] == tipped
+    assert _remote_state(PlayerWS(None))["sram"] is None
 
 
 # -- gesture scripts -----------------------------------------------------------
@@ -238,6 +294,64 @@ def test_bl_without_backlight_declines_and_with_it_drives(capsys):
     assert idle.asleep is False and idle.woken == 1
 
 
+# -- `link`: arming the radio from outside a cart ------------------------------
+
+
+class FakeLink:
+    """`ws.link` (device/moy_espnow.py's Link) narrowed to what `link` drives."""
+
+    def __init__(self):
+        self.active = False
+        self.announced = []
+
+    def start(self):
+        self.active = True
+
+    def stop(self):
+        self.active = False
+
+    def announce(self, cart="", state=0):
+        self.announced.append((cart, state))
+
+    def stats(self):
+        return {"active": self.active, "peers": []}
+
+
+def test_link_declines_on_a_board_with_no_radio(capsys):
+    ws, ch = make()
+    ch.run(ws, "link")
+    assert "no radio on this board" in capsys.readouterr().out
+
+
+def test_link_reports_and_arms_the_radio_by_hand(capsys):
+    """The Player only arms the radio for a cart that declares the multiplayer
+    permission, so a two-board bench needs a way in from outside one."""
+    ws, ch = make()
+    ws.link = FakeLink()
+
+    def said():
+        """The one LINK line the command prints, parsed. Every branch reports,
+        including the ones that changed something."""
+        out = [ln for ln in capsys.readouterr().out.splitlines()
+               if ln.startswith("LINK ")]
+        assert len(out) == 1, out
+        return json.loads(out[0][len("LINK "):])
+
+    ch.run(ws, "link")                        # bare: reports, changes nothing
+    assert said() == {"active": False, "peers": []}
+    assert ws.link.active is False and ws.link.announced == []
+
+    ch.run(ws, "link on")
+    assert ws.link.active is True and said()["active"] is True
+
+    ch.run(ws, "link cart Brick Siege")
+    assert ws.link.announced == [("Brick Siege", 1)]
+    said()
+
+    ch.run(ws, "link off")
+    assert ws.link.active is False and said()["active"] is False
+
+
 # -- `recv`: the raw upload, off the board -------------------------------------
 #
 # The loop is driven here through the two objects it actually talks to -- the
@@ -350,6 +464,11 @@ def test_the_ack_comes_after_the_write_never_before(
             return getattr(self.f, name)
 
     def on_dry():
+        # The board asks again after each re-send offer, so this fires more
+        # than once now; the instant being observed is the FIRST one -- the
+        # board waiting on window two, with window one already on disk.
+        if "wrote" in seen:
+            return
         seen["wrote"] = list(wrote)
         seen["out"] = capsys.readouterr().out
 
@@ -365,15 +484,145 @@ def test_the_ack_comes_after_the_write_never_before(
 def test_a_host_that_goes_quiet_takes_the_tmp_with_it(tmp_path, capsys):
     """A dead host must not park the frame loop, and must not leave a half cart
     behind either. The wait is bounded by RECV_IDLE_MS per byte, refreshed by
-    every byte that does arrive, so a slow host is not a dead one."""
-    from runtime.dev_channel import RECV_IDLE_MS
+    every byte that does arrive, so a slow host is not a dead one.
+
+    It now OFFERS the window back first -- a short window is a dropped byte far
+    more often than a dead host -- and only gives up once RECV_DEAD_WINDOWS of
+    them arrive completely empty. The count it reports is what LANDED IN THE
+    FILE (512 here, one whole window) rather than what had been buffered when
+    the stream stopped: 188 bytes of a window that was thrown away were never
+    part of the cart, and naming them sent a reader looking for a file that
+    was 700 bytes long."""
+    from runtime.dev_channel import RECV_DEAD_WINDOWS, RECV_IDLE_MS
 
     ws, ch, _raw, poll = raw_channel(EVERY_BYTE[:700])
     dst = str(tmp_path / "main.lua")
     ch.run(ws, "recv 5000 512 %s" % dst)
-    assert _said(capsys)[-1] == "RECV ERR timeout after 700 of 5000 bytes"
+    said = _said(capsys)
+    assert said[-1] == "RECV ERR timeout after 512 of 5000 bytes"
+    assert [l for l in said if l.startswith("RECV retry")] == [
+        "RECV retry 512"] * RECV_DEAD_WINDOWS
     assert not (tmp_path / "main.lua.new").exists()
-    assert poll.waits == [RECV_IDLE_MS]
+    assert poll.waits == [RECV_IDLE_MS] * (RECV_DEAD_WINDOWS + 1)
+
+
+class FeedingPoll(FakePoll):
+    """FakePoll, but a host that WROTE during `on_dry` is answered.
+
+    The base class fires the hook and then reports not-ready regardless, which
+    is right when the hook only observes. Here the hook IS the host: it puts a
+    window on the wire, and a poll that ignored it would make every window look
+    dropped."""
+
+    def ipoll(self, timeout=-1):
+        ready = super().ipoll(timeout)
+        if not ready and self.raw.data:
+            return ((None, 1),)
+        return ready
+
+
+class ReSendingHost:
+    """The push loop in miniature, over the same FakeRawIn the board reads.
+
+    It writes one window, waits, and does what the board's last line asks:
+    `retry <n>` re-sends the window at n, `ack` moves on. `drop` names the
+    windows the WIRE eats a byte from -- which is the whole failure this
+    exists to model, because the host cannot see it happen and neither can the
+    board until the stream stops."""
+
+    def __init__(self, payload, window, drop=()):
+        self.payload, self.window = payload, window
+        self.drop = set(drop)
+        self.raw = FakeRawIn()
+        self.sent = 0
+        self.nth = 0
+        self.resends = 0
+        self.said = []
+
+    def _feed(self):
+        blk = self.payload[self.sent:self.sent + self.window]
+        # The host always believes it wrote the whole window; the ring is what
+        # loses the byte, silently, which is why `sent` advances by the FULL
+        # window even on a dropped one.
+        self.sent += len(blk)
+        if self.nth in self.drop:
+            self.drop.discard(self.nth)
+            blk = blk[:-1]
+        self.nth += 1
+        self.raw.data.extend(blk)
+
+    def on_dry(self, capsys):
+        new = [l for l in capsys.readouterr().out.splitlines()
+               if l.startswith("RECV ")]
+        self.said += new
+        if not new:
+            # The board is still waiting inside a window this host already
+            # finished writing -- which is exactly the shape of a dropped
+            # byte, and a real host would be blocked on the reply. Writing
+            # here would hand it the NEXT window as the tail of this one.
+            return
+        last = new[-1]
+        if last.startswith("RECV retry "):
+            self.sent = int(last.split()[2])
+            self.resends += 1
+        elif last.startswith("RECV ERR") or last.startswith("RECV done"):
+            return
+        if self.sent < len(self.payload):
+            self._feed()
+
+
+def test_a_dropped_byte_costs_its_window_and_not_the_cart(tmp_path, capsys):
+    """The failure this whole retry exists for, end to end.
+
+    A UART ring with no flow control drops a byte with no error when the board
+    falls behind for ~25ms. Measured on the P4: a handful of bytes lost about
+    once every 300 windows, which killed a 120KB push one time in five. The
+    file only ever advances by WHOLE windows, so the board can throw the short
+    one away and name the boundary it is still standing on -- and the cart
+    lands byte-exact, hash and all, having paid one window."""
+    payload = EVERY_BYTE                      # 1280 B = 5 windows of 256
+    host = ReSendingHost(payload, 256, drop=(1, 3))
+    ws, ch = make()
+    poll = FeedingPoll(host.raw, lambda: host.on_dry(capsys))
+    ch._rawin, ch._poll, ch._ipoll = host.raw, poll, poll.ipoll
+    dst = str(tmp_path / "main.lua")
+
+    ch.run(ws, "recv %d 256 %s" % (len(payload), dst))
+    host.said += [l for l in capsys.readouterr().out.splitlines()
+                  if l.startswith("RECV ")]
+
+    assert (tmp_path / "main.lua.new").read_bytes() == payload
+    assert host.said[-1] == "RECV done %s %d" % (
+        hashlib.sha256(payload).hexdigest()[:12], len(payload))
+    # one re-send per dropped window, each at the boundary the file was on
+    assert [l for l in host.said if l.startswith("RECV retry")] == [
+        "RECV retry 256", "RECV retry 512"]
+    assert host.resends == 2
+    assert ch.raw == len(payload)
+
+
+def test_a_wire_that_drops_every_window_gives_up_rather_than_crawling(
+        tmp_path, capsys):
+    """The budget. A cable that eats a byte from EVERY window is broken, and
+    saying so beats re-sending forever -- so the retries are counted, and the
+    count is what ends it rather than the dead-host rule (every window here
+    arrives nearly full, so none of them is empty)."""
+    from runtime.dev_channel import RECV_RETRIES
+
+    payload = EVERY_BYTE
+    host = ReSendingHost(payload, 256, drop=range(200))    # every window
+    ws, ch = make()
+    poll = FeedingPoll(host.raw, lambda: host.on_dry(capsys))
+    ch._rawin, ch._poll, ch._ipoll = host.raw, poll, poll.ipoll
+
+    ch.run(ws, "recv %d 256 %s" % (len(payload), str(tmp_path / "main.lua")))
+    host.said += [l for l in capsys.readouterr().out.splitlines()
+                  if l.startswith("RECV ")]
+
+    assert len([l for l in host.said if l.startswith("RECV retry")]) \
+        == RECV_RETRIES
+    assert host.said[-1] == "RECV ERR timeout after 0 of %d bytes" % len(payload)
+    assert not (tmp_path / "main.lua.new").exists()
 
 
 def test_the_hash_is_of_the_file_not_of_the_bytes_that_went_in(
@@ -493,3 +742,251 @@ def test_a_channel_with_no_8_bit_stdin_declines_the_probe_too(capsys):
     ch._rawin = None
     ch.run(ws, "recv")
     assert "RECV ERR no 8-bit route" in _said(capsys)[0]
+
+
+# -- the VERBS line (the Lua/p8 per-verb profiler's report) -------------------
+
+
+def test_the_perfcnt_line_leads_with_the_ratio_it_exists_for():
+    """IPC is the question -- four null levers on the S3 tick were read as
+    "memory, not instructions", which is an elimination rather than a
+    measurement, and this is the number that confirms or re-opens it. It is a
+    RATIO on purpose: the four boards do not share a clock, so a count would
+    not compare and `r` does."""
+    # 100 frames; update 240k cycles and 168k instructions a frame (r=0.7),
+    # draw 120k cycles and 24k instructions (r=0.2) -- one cart, both answers
+    st = (240000000, 100, 24000000, 16800000, 12000000, 2400000,
+          2, 0xffff, True)
+    line = perfcnt_line(st, "insn")
+    assert line.startswith("PERFCNT frames=100 insn")
+    assert "upd cyc=240000 insn=168000 r=0.700" in line
+    assert "draw cyc=120000 insn=24000 r=0.200" in line
+    # and the wall-clock size of each half, so a ratio is never read without
+    # knowing whether the half is worth anything
+    assert "1.000ms" in line and "0.500ms" in line
+
+
+def test_the_perfcnt_line_keeps_the_halves_apart():
+    """moss moss is update-bound and dank tomb draw-bound. One IPC over both
+    would average the answer away, so a half with no cycles is simply absent
+    rather than folded in."""
+    st = (240000000, 10, 2400000, 1680000, 0, 0, 2, 0xffff, True)
+    line = perfcnt_line(st, "insn")
+    assert "upd " in line and "draw " not in line
+
+
+def test_the_perfcnt_line_says_when_the_silicon_only_counts_two_things():
+    """The RISC-V part has the two architectural CSRs and no selector, so a
+    reading from it must not look like a chosen event that happened to be
+    instructions."""
+    st = (400000000, 5, 1000000, 700000, 0, 0, 2, 0xffff, False)
+    assert "(riscv: retired only)" in perfcnt_line(st, "insn")
+    assert "(riscv: retired only)" not in perfcnt_line(
+        (400000000, 5, 1000000, 700000, 0, 0, 2, 0xffff, True), "insn")
+
+
+def test_a_perfcnt_reading_with_no_frames_says_so_rather_than_dividing():
+    assert perfcnt_line((240000000, 0, 0, 0, 0, 0, 2, 0xffff, True)) == \
+        "PERFCNT no frames (run a cart with `perfcnt on`)"
+
+
+def test_every_named_perf_event_is_a_selector_and_a_mask():
+    """The serial word is a word so nobody types a magic integer at a board.
+    `insn` is the default and must exist; the rest are the follow-up once IPC
+    has said which way to look."""
+    assert "insn" in PERF_EVENTS
+    for name, pair in PERF_EVENTS.items():
+        sel, mask = pair
+        assert 0 <= sel <= 0xffff and 0 <= mask <= 0xffff, name
+
+
+def test_the_verbs_line_reports_per_frame_not_per_window():
+    """The shape the line has to make legible: 180 cheap calls and one
+    expensive one are different problems, and per-window totals hide which is
+    which behind whatever sample length the host happened to choose."""
+    line = verbs_line(1000000, 100, [
+        ("spr", 18000, 1400000),        # 180/frame, 14ms/frame
+        ("map", 100, 1400000),          #   1/frame, 14ms/frame
+    ])
+    assert "frames=100" in line
+    assert "spr n=180.0 t=14.00" in line
+    assert "map n=1.0 t=14.00" in line
+    assert "tot=28.00" in line
+
+
+def test_the_verbs_line_sorts_by_time_and_keeps_the_top():
+    """The first row is nearly always the whole answer, and a serial line has
+    to end somewhere -- so the cut is by cost, never by name or arrival."""
+    rows = [("v%d" % i, 10, i * 1000) for i in range(20)]
+    line = verbs_line(1000000, 10, rows, top=3)
+    names = [p.split()[0] for p in line.split(" | ")[1:]]
+    assert names == ["v19", "v18", "v17"]
+
+
+def test_a_window_with_no_frames_says_so_instead_of_dividing_by_it():
+    """`verbs` read before a cart has ticked is the ordinary operator mistake;
+    it must answer, not raise inside the frame loop."""
+    assert verbs_line(1000000, 0, [("spr", 5, 5)]) == "VERBS frames=0"
+    assert verbs_line(0, 10, [("spr", 5, 5)]) == "VERBS frames=0"
+
+
+def test_verbs_declines_on_a_board_with_no_moycore(capsys):
+    """Every board freezes this channel; only the ones with the Lua tier can
+    answer. The decline is a line, not an ImportError into the loop."""
+    ws, ch = make()
+    ch.run(ws, "verbs")
+    assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
+
+
+def test_a_verb_that_runs_lua_under_it_is_not_charged_for_it():
+    """moss moss' foreach: five calls a frame, ten milliseconds INCLUSIVE, and
+    none of it foreach's own. Charged inclusively it reads as the slowest thing
+    in the cart and points a fix at the wrong file, so `t` is self and `in`
+    carries the frame that ran underneath."""
+    line = verbs_line(1000000, 100, [
+        ("__moy_foreach", 500, 12000, 1016000),
+        ("cls", 100, 44000, 44000),
+    ])
+    assert "__moy_foreach n=5.0 t=0.12 in=10.16" in line
+    assert "cls n=1.0 t=0.44" in line
+    cls_cell = [c for c in line.split(" | ") if c.startswith("cls")][0]
+    assert "in=" not in cls_cell                 # no callees, no second number
+    assert "tot=0.56" in line                    # SELF, so foreach's Lua is out
+    # and the sort is by SELF, so the cheap-but-inclusive verb drops below
+    assert line.index("cls") < line.index("__moy_foreach")
+
+
+def test_the_verbs_line_still_reads_a_three_field_row():
+    """The formatter predates the self/inclusive split and the on-glass tools
+    parse its output; a row with no inclusive column means "no callees", not a
+    crash."""
+    assert "spr n=1.0 t=1.00" in verbs_line(1000000, 10, [("spr", 10, 10000)])
+
+
+# -- the Lua-tier sampling profiler ------------------------------------------
+
+def _shim_cart(tmp_path, before=25, body=("function p8_go() end",)):
+    """A ported cart's main.lua in miniature: `before` lines of data tables,
+    then the generator's two shim markers, then the cart's own code. The line
+    OFFSET is the point -- the data tables above the shim vary per cart, which
+    is why the range is read from the file instead of being a constant."""
+    d = tmp_path / "port.moy"
+    d.mkdir(parents=True)
+    lines = ["-- data %d" % i for i in range(1, before)]
+    lines.append("-- =========================")            # the banner
+    lines.append("-- PICO-8 compatibility shim (generated by tools/p8_lua_port.py)")
+    lines += ["  function shim_fn_%d() end" % i for i in range(40)]
+    lines.append("-- ============== end shim =============")
+    lines += list(body)
+    (d / "main.lua").write_text("\n".join(lines) + "\n")
+    return str(d / "main.lua")
+
+
+def test_the_shim_range_is_read_from_the_cart_that_is_loaded(tmp_path):
+    """The emitted block is a fixed 1,348 lines but it starts wherever that
+    cart's data tables ended -- 26 lines into moss moss, 163 into a cart that
+    needs the raw sheet. A constant here would file 137 lines of one cart's
+    generated code as its own."""
+    a = shim_line_range(_shim_cart(tmp_path / "a", before=25))
+    b = shim_line_range(_shim_cart(tmp_path / "b", before=140))
+    assert a == (25, 67), a
+    assert b == (140, 182), b
+    assert b[1] - b[0] == a[1] - a[0]           # same shim, different offset
+
+
+def test_the_shim_range_reader_never_holds_the_file(tmp_path):
+    """It is read in blocks with a carry because the board being asked has that
+    same ~100KB cart resident and barely fitting. The carry is where such a
+    reader goes wrong, so the markers are found identically at a block size
+    smaller than either marker."""
+    p = _shim_cart(tmp_path, before=30)
+    assert shim_line_range(p, block=3) == shim_line_range(p, block=1 << 20)
+
+
+def test_the_range_comes_from_the_script_that_holds_the_shim(tmp_path):
+    """SPEC.md 4: a port is two scripts, and the shim is p8.lua's.
+
+    The range is pinned against the chunk that defines `_draw`, and the shim
+    owns `_draw` -- so on a split port the VM reports p8.lua's line numbers. A
+    range read off main.lua would fail the pin and charge nothing as shim,
+    which reads as "this cart has no generated half" and is exactly wrong for
+    the carts the profiler exists to measure."""
+    d = tmp_path / "port.moy"
+    d.mkdir()
+    (d / "main.lua").write_text(
+        "-- Localized p8 API (generated)\nfunction p8_draw() end\n")
+    lines = ["-- data %d" % i for i in range(1, 12)]
+    lines.append("-- =========================")
+    lines.append("-- PICO-8 compatibility shim (generated by tools/p8_lua_port.py)")
+    lines += ["  function shim_fn_%d() end" % i for i in range(9)]
+    lines.append("-- ============== end shim =============")
+    (d / "p8.lua").write_text("\n".join(lines) + "\n")
+
+    assert cart_shim_range(str(d)) == (12, 23)
+    assert shim_line_range(str(d / "main.lua")) is None, \
+        "main.lua is the cart -- no marker in it to find"
+
+    # A single-file port predates the split and still answers.
+    one = tmp_path / "one"
+    _shim_cart(one, before=25)
+    assert cart_shim_range(str(one / "port.moy")) == (25, 67)
+
+
+def test_a_cart_with_no_shim_reports_no_range(tmp_path):
+    """A hand-written Lua cart is not a port and has no generated half. That is
+    "no split to make", which the profiler must say rather than guess at."""
+    d = tmp_path / "plain.moy"
+    d.mkdir()
+    (d / "main.lua").write_text("function _draw() cls(0) end\n")
+    assert shim_line_range(str(d / "main.lua")) is None
+    assert shim_line_range(str(tmp_path / "gone.moy" / "main.lua")) is None
+    assert cart_shim_range(str(d)) is None
+
+
+def _stats(rows, smp=1000, shim_smp=600, cyc=2000, shim_cyc=900, pinned=True,
+           srcs=("cart",)):
+    tot = (smp, cyc, 4000, 3000, shim_smp, shim_cyc, 2400, 0, 31, pinned)
+    return (1000000, 100, 1024, tot, rows, srcs)
+
+
+def test_the_luaprof_line_splits_the_emitted_shim_from_the_cart():
+    """The question the whole instrument exists for: of the interpreter time a
+    ported cart spends, how much is the 1,348 lines the importer emitted into
+    it. `shim=` is that share of SAMPLES, with the wall-clock share beside it
+    -- the two differ exactly where the collector and the C verbs are."""
+    line = luaprof_line(_stats([(0, 1200, 6410, 300, 900000),
+                                (0, 1600, 120, 100, 300000)]), (26, 1373))
+    assert "shim=60%/45%" in line
+    # 4000 Lua calls a frame-window over 100 frames, 2400 of them into the shim.
+    assert "n=40 sn=24 c=30" in line
+    # s/c is the row's own side, from its linedefined -- 1200 is inside the
+    # shim's lines, 1600 is the cart's own code below them.
+    assert "s1200 30.0% n=64.1 t=9.00" in line
+    assert "c1600 10.0% n=1.2 t=3.00" in line
+
+
+def test_a_refused_pin_reports_no_split_rather_than_a_wrong_one():
+    """The range is checked against the shim's own `_draw` on the device. When
+    they disagree the two are looking at different files, and a confident 60%
+    would be a number about the wrong cart."""
+    line = luaprof_line(_stats([(0, 1200, 10, 100, 1000)], pinned=False),
+                        (26, 1373))
+    assert "shim=n/a" in line
+    assert "unpinned" in line
+    assert "c1200" in line                      # nothing is claimed as shim
+
+
+def test_the_luaprof_line_survives_a_window_with_no_frames():
+    """Read before the cart has ticked -- "measured nothing", which is a real
+    answer and not a division by zero in the loop's own print path."""
+    assert "smp=0" in luaprof_line((1000000, 0, 1024, (0,) * 10, (), ()), None)
+
+
+def test_luaprof_declines_on_a_board_without_the_lua_tier(capsys):
+    """Same shape as `verbs`: a decline is a line, not an ImportError thrown
+    into the frame loop."""
+    ws, ch = make()
+    ch.run(ws, "luaprof")
+    assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
+    ch.run(ws, "luagc")
+    assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]

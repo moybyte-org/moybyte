@@ -7,6 +7,8 @@ machine with a fake BLE object, and verify the exact shared InputState contract.
 
 import importlib.util
 import json
+
+from board_source import runtime_text
 import sys
 import types
 from pathlib import Path
@@ -114,6 +116,72 @@ def test_report_level_state_gives_real_hold_edges_and_text_mode_suppression():
     inp.begin_frame()
     assert inp.last_key == 0
     assert inp.held("left")
+
+
+def test_an_idle_keyboard_stops_re_applying_an_empty_level_state_every_frame():
+    """#220. With no keyboard in the room the level-state pass is a no-op that
+    still cost two sets, a sorted() list and a release_all on every frame of
+    every game. The first poll runs it (the source must be cleared once); the
+    ones after take the early-out."""
+    inp = InputState()
+    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
+    src = keyboard.src
+    calls = []
+    src.release_all = lambda: calls.append(1)          # noqa: E731 -- a witness
+
+    keyboard.poll()
+    assert calls == [1]                                # cleared once...
+    keyboard.poll()
+    keyboard.poll()
+    assert calls == [1]                                # ...and not again
+
+
+def test_a_report_after_an_idle_stretch_still_reaches_the_input():
+    """The early-out must not be a latch: a key arriving after any number of
+    skipped frames is applied on the next poll, and its release still lands."""
+    inp = InputState()
+    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
+    for _ in range(5):
+        keyboard.poll()
+        inp.begin_frame()
+    assert not inp.held("up")
+
+    keyboard._reports[7] = (0, (0x1A,))
+    keyboard.poll()
+    inp.begin_frame()
+    assert inp.held("up") and inp.pressed("up")
+
+    # Held across frames: a held report is never skipped.
+    keyboard.poll()
+    inp.begin_frame()
+    assert inp.held("up")
+
+    # ...and the release still runs the full pass, because the frame that
+    # clears the state is the frame BEFORE the guard is armed.
+    keyboard._reports.clear()
+    keyboard.poll()
+    inp.begin_frame()
+    assert not inp.held("up") and inp.released("up")
+    assert inp.last_key == 0
+
+
+def test_a_pending_edge_from_the_irq_defeats_the_idle_early_out():
+    """A make+break that lands entirely between two polls leaves nothing in
+    `_reports` -- only the pending sets carry it. The early-out reads those
+    too, or a fast tap would be swallowed by the optimisation."""
+    inp = InputState()
+    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
+    keyboard.poll()                                    # arm the guard
+    inp.begin_frame()
+    keyboard._conn = 1
+    keyboard._input_handles = {7}
+    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
+                  (1, 7, b"\x00\x00\x1a\x00\x00\x00\x00\x00"))
+    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
+                  (1, 7, b"\x00\x00\x00\x00\x00\x00\x00\x00"))
+    keyboard.poll()
+    inp.begin_frame()
+    assert inp.held("up") and inp.pressed("up")
 
 
 def test_make_and_break_between_frames_preserves_one_press_then_release():
@@ -378,6 +446,67 @@ def test_saved_enabled_preferred_address_and_bond_round_trip(tmp_path):
                            "Pocket Keys", -127, True)
 
 
+def _bond_store(tmp_path, name="Pocket Keys"):
+    store = tmp_path / "ble_keyboard.json"
+    keyboard = blekbd.BleHidKeyboard(
+        InputState(), store_path=str(store), auto_start=False)
+    keyboard.name = name
+    keyboard._preferred = (1, b"\xaa\xbb\xcc\xdd\xee\xff")
+    keyboard._secrets[(2, b"peer")] = b"bond-key"
+    keyboard._store_dirty = True
+    keyboard.poll()
+    return store
+
+
+def test_a_bond_save_never_unlinks_the_live_store(tmp_path, monkeypatch):
+    """The bonds must be readable at SOME path at every instant of a save.
+
+    The old publish was tmp -> os.remove -> os.rename, and the instant between
+    the remove and the rename has them on neither path: a power cut there costs
+    the kid a re-pairing of a keyboard that was already paired. The save rides
+    moy_fs now -- a stamped `.bak`, then the file itself, overwritten in place.
+    """
+    fs = sys.modules[blekbd._write_atomic.__module__]
+
+    class _SpyOs:
+        def __init__(self, real):
+            self._real = real
+            self.calls = []
+
+        def __getattr__(self, name):
+            fn = getattr(self._real, name)
+
+            def _wrapped(*a, **kw):
+                self.calls.append((name, a))
+                return fn(*a, **kw)
+            return _wrapped
+
+    spy = _SpyOs(fs.os)
+    monkeypatch.setattr(fs, "os", spy)
+    store = _bond_store(tmp_path)
+
+    assert json.loads(store.read_text())["preferred"] == [1, "aabbccddeeff"]
+    assert not [c for c in spy.calls if c[0] == "rename"]
+    assert not [c for c in spy.calls
+                if c[0] == "remove" and c[1][:1] == (str(store),)]
+
+
+def test_a_torn_bond_publish_is_recovered_from_the_backup(tmp_path):
+    """The window moy_fs's `.bak` exists to close: FAT truncates on open and
+    then grows the file, so a power cut mid-publish leaves the store somewhere
+    between empty and whole. The next boot finishes the publish instead of
+    reading a short file as "never paired"."""
+    store = _bond_store(tmp_path)
+    whole = store.read_text()
+    store.write_text(whole[:len(whole) // 3])          # the interrupted publish
+
+    restored = blekbd.BleHidKeyboard(
+        InputState(), store_path=str(store), auto_start=False)
+    assert restored.name == "Pocket Keys"
+    assert restored._secrets[(2, b"peer")] == b"bond-key"
+    assert store.read_text() == whole, "the recovery was not republished"
+
+
 def test_version_one_bond_store_migrates_without_forgetting_keys(tmp_path):
     store = tmp_path / "ble_keyboard.json"
     store.write_text(json.dumps({
@@ -421,18 +550,23 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
                        / "MOYBYTE_P4" / "sdkconfig.board").read_text()
     build_script = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
                     / "build.sh").read_text()
-    native_cmake = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "native"
-                    / "micropython.cmake").read_text()
-    dsi_native = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "native"
-                  / "moy_dsi" / "modmoy_dsi.c").read_text()
-    native_queue = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "native"
-                    / "moy_ble_hid" / "modmoy_ble_hid.c").read_text()
-    bt_patch = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "patches"
-                / "modbluetooth_ble_hid_fastpath.patch").read_text()
-    underrun_patch = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "patches"
-                      / "esp_lcd_dsi_underrun_hook.patch").read_text()
-    runtime = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
-               / "moy_runtime.py").read_text()
+    # The P4 silicon tier (2026-09-06): the modules and patches both P4 boards
+    # take live at the repo root, and a board names them through board.toml
+    # ([native.p4]) and the shared build lib, never by path.
+    native_cmake = "\n".join(
+        "%s/micropython.cmake" % m for m in
+        board_config.native_modules(
+            ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"))
+    dsi_native = (ROOT / "native" / "p4" / "moy_dsi" / "modmoy_dsi.c").read_text()
+    native_queue = (ROOT / "native" / "p4" / "moy_ble_hid"
+                    / "modmoy_ble_hid.c").read_text()
+    bt_patch = (ROOT / "patches"
+                / "p4_modbluetooth_ble_hid_fastpath.patch").read_text()
+    underrun_patch = (ROOT / "patches"
+                      / "p4_esp_lcd_dsi_underrun_hook.patch").read_text()
+    build_lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text()
+    runtime = runtime_text(ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
+                           / "modules" / "moy_runtime.py")
     sdkconfig = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / ".build"
                  / "micropython" / "ports" / "esp32" / "boards"
                  / "sdkconfig.p4_wifi_common")
@@ -452,10 +586,12 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
     assert "moy_ble_hid/micropython.cmake" in native_cmake
     assert "moy_ble_hid_queue_on_notify" in native_queue
     assert "moy_ble_hid_queue_on_notify" in bt_patch
-    assert "modbluetooth_ble_hid_fastpath.patch" in build_script
+    assert "moybyte_patch_p4_ble_hid_fastpath" in build_script
+    assert "p4_modbluetooth_ble_hid_fastpath.patch" in build_lib
     assert "moy_dsi_note_underrun" in dsi_native
     assert "moy_dsi_note_underrun" in underrun_patch
-    assert "esp_lcd_dsi_underrun_hook.patch" in build_script
+    assert "moybyte_patch_p4_dsi_underrun" in build_script
+    assert "p4_esp_lcd_dsi_underrun_hook.patch" in build_lib
     assert ".intr_priority = 3" in underrun_patch
     assert "ETS_DSI_BRIDGE_INTR_SOURCE" in underrun_patch
     assert "CONFIG_LCD_DSI_ISR_IRAM_SAFE=y" in board_sdkconfig

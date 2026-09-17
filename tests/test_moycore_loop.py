@@ -74,7 +74,7 @@ end
 """
 
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, pm, {"k": "v"}, None)
-print("START", moycore.load(SRC, "@cart"))
+print("START", moycore.load(((SRC, "@cart"),)))
 for f in range(4):
     snap[moycore.SNAP_TIME_MS] = f * 32
     snap[moycore.SNAP_BTNP] = (1 << 0) if f == 1 else 0     # MOY_BTN_LEFT
@@ -103,14 +103,128 @@ print("FLOOR", moycore.set_sram_floor(24), moycore.set_sram_floor(1),
 print("CENSUS", len(moycore.alloc_stats()), moycore.alloc_stats()[0],
       moycore.alloc_stats()[1], moycore.alloc_stats()[6])
 
+# The per-verb profiler. It is the ONLY instrument that sees inside a Lua/p8
+# frame -- DeviceCanvas' meters read zero on this tier -- so what is checked
+# here is that it counts the right calls, that a verb which runs Lua is not
+# charged for it, and that arming it OFF really does put the vendored C
+# functions back as the cart's globals (the claim that it costs a shipping
+# frame nothing rests entirely on that).
+PROF = """
+function _update(dt) end
+function _draw()
+    cls(0)
+    for i = 1, 7 do rect(i, 0, 2, 2, 8) end
+    __moy_foreach({1, 2, 3}, function(v)
+        for j = 1, 10 do rect(j, 4, 1, 1, v) end
+    end)
+end
+"""
+moycore.p8_memory(bytearray(65536), bytearray(65536))
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
+print("PROFARM", moycore.profile(1) > 0)
+print("PROFLOAD", moycore.load(((PROF, "@cart"),)))
+moycore.verb_reset()
+for f in range(5):
+    moycore.tick(0.03125)
+_hz, _frames, _rows = moycore.verb_stats()
+_by = {}
+for _r in _rows:
+    _by[_r[0]] = _r
+# 5 frames: cls once each, rect 7 + 3*10 each, foreach 3 (one per element? no:
+# ONE call taking the table) -- the counts are the point, they say the wrapper
+# sits on the verb the cart actually reaches.
+print("PROFN", _frames, _by["cls"][1], _by["rect"][1], _by["__moy_foreach"][1])
+# foreach's INCLUSIVE time covers the rects its callback drew; its SELF must
+# not. Strictly less, and by more than the noise of a single tick.
+print("PROFSELF", 1 if _by["__moy_foreach"][2] < _by["__moy_foreach"][3] else 0,
+      1 if _by["cls"][2] == _by["cls"][3] else 0)
+# Off: the globals are the originals again and the meter says "not measuring"
+# rather than "measured nothing".
+print("PROFOFF", moycore.profile(0), moycore.verb_stats())
+print("PROFALIVE", moycore.tick(0.03125))
+moycore.close()
+
+# The per-FUNCTION Lua profiler, checked against a cart whose split is KNOWN.
+# A profiler cannot be verified by its own answer, so the fixture is built to a
+# designed ratio: two IDENTICAL hot loops, one defined inside a fake shim line
+# range and one outside it, spun 3:1. An instrument that weighs instructions
+# has to come back near 75%. One that weighed CALLS would come back at 50% --
+# both are called once a frame -- and that is precisely the bias a sampler is
+# chosen to avoid, so this fixture fails a call-hook profiler on purpose.
+LP_END = 40                                  # the fake shim's last line
+_pad = "\n".join("-- shim filler %d" % i for i in range(8, LP_END))
+LPSRC = ("-- 1 shim banner\n"                                    # 1
+         "-- 2\n"                                                # 2
+         "function shim_hot(n)\n"                                # 3
+         "  local s = 0\n"
+         "  for i = 1, n do s = s + i end\n"
+         "  return s\n"
+         "end\n"                                                 # 7
+         + _pad + "\n"                                           # 8 .. END-1
+         "function _draw() cls(0) shim_hot(3000) cart_hot(1000) end\n"  # END
+         "function cart_hot(n)\n"                                # END+1
+         "  local s = 0\n"
+         "  for i = 1, n do s = s + i end\n"
+         "  return s\n"
+         "end\n"
+         "function _update(dt) end\n")
+
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
+# Armed BEFORE the load, which is the path a measurement session takes. The
+# first install cannot pin (`_draw` does not exist yet); load() re-installs
+# after the chunk, and that one can.
+print("LPARM", moycore.lua_profile(1, 32, 1, LP_END))
+print("LPLOAD", moycore.load(((LPSRC, "@cart"),)))
+moycore.lua_reset()
+for f in range(12):
+    moycore.tick(0.03125)
+_hz, _fr, _iv, _tot, _rows, _srcs = moycore.lua_stats(8)
+_smp, _cyc, _calls, _ccalls, _ssmp, _scyc, _scalls, _drop, _used, _pin = _tot
+print("LPPIN", _pin, _iv, _fr, _drop, 1 if _smp > 200 else 0)
+print("LPSHARE", int(100 * _ssmp / _smp) if _smp else -1)
+_by = {}
+for _r in _rows:
+    _by[_r[1]] = _r                          # keyed by linedefined
+# 3 is shim_hot, END+1 is cart_hot: the ratio of their SAMPLES is the claim.
+print("LPHOT", 1 if _by[3][3] > 2 * _by[LP_END + 1][3] else 0,
+      1 if _by[3][3] < 5 * _by[LP_END + 1][3] else 0)
+# Calls are exact where samples are statistical -- one of each per frame.
+print("LPCALLS", _by[3][2], _by[LP_END + 1][2], _fr)
+print("LPSRC", len(_srcs), _srcs[0], 1 if _ccalls > 0 else 0)
+
+# A range that does NOT contain the shim's own _draw is a range for another
+# cart, and the pin is refused rather than believed: nothing is charged shim.
+print("LPBAD", moycore.lua_profile(1, 32, 900, 999))
+moycore.lua_reset()
+for f in range(4):
+    moycore.tick(0.03125)
+_t = moycore.lua_stats(2)
+print("LPUNPINNED", _t[3][9], _t[3][4], 1 if _t[3][0] > 0 else 0)
+
+# Off is off: no hook, no table, and "not measuring" rather than "measured
+# nothing" -- and the cart keeps running.
+print("LPOFF", moycore.lua_profile(0), moycore.lua_stats())
+print("LPALIVE", moycore.tick(0.03125))
+
+# The collector knob. Stop/restart has to move ISRUNNING, and generational has
+# to be reachable and reversible -- it is the lever the profiler above cannot
+# see, since collection is not counted VM instructions.
+_g0 = moycore.lua_gc_mode(-1)
+_g1 = moycore.lua_gc_mode(0)
+_g2 = moycore.lua_gc_mode(3, 20, 100)
+_g3 = moycore.lua_gc_mode(2, 200, 100, 13)
+print("LPGC", 1 if _g0[0] > 0 else 0, _g1[1], _g2[1], _g2[2], _g3[1], _g3[2])
+moycore.close()
+print("LPCLOSED", moycore.lua_stats(), moycore.lua_gc_mode(-1))
+
 # view and background are CORE upstream now, so libmoy answers them and the
 # host READS the result instead of being called -- zero crossings for view.
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 print("VIEW0", moycore.view())
-print("VIEWLOAD", moycore.load(
+print("VIEWLOAD", moycore.load(((
     "function _init() view(128, 120) background(5) end\n"
     "function _update(dt) end\n"
-    "function _draw() rect(0, 0, 2, 2, 9) end\n", "@view"))
+    "function _draw() rect(0, 0, 2, 2, 9) end\n", "@view"),)))
 moycore.tick(0.03125)
 print("VIEW1", moycore.view())
 print("BG", 1 if fb[(63 * W + 95) * 2] or fb[(63 * W + 95) * 2 + 1] else 0)
@@ -122,17 +236,17 @@ moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 seen = []
 moycore.register("make_layer", lambda w, h: (seen.append((w, h)), 7)[1])
 moycore.register("draw_layer", lambda h, x, y: seen.append((h, x, y)))
-print("EXT", moycore.load(
+print("EXT", moycore.load(((
     "function _init() L = make_layer(9, 5) end\n"
     "function _update(dt) end\n"
-    "function _draw() cls(0) draw_layer(L, 1, 2) end\n", "@ext"))
+    "function _draw() cls(0) draw_layer(L, 1, 2) end\n", "@ext"),)))
 moycore.tick(0.03125)
 print("EXTCALLS", seen, moycore.get_global("L"))
 moycore.close()
 
 # OBJECT-valued verbs ride the shared prelude, not the trampoline. This is the
 # real runtime/lua_ext.py, imported and executed -- not a transcription of it.
-from lua_ext import PRELUDE_TABLE, PRELUDE_HANDLES, install_handles
+from lua_ext import PRELUDE_HANDLES, install_handles
 
 class _Layer:
     def __init__(self, w, h):
@@ -149,28 +263,84 @@ calls = []
 _img = _Img()
 NS = {"make_layer": lambda w, h: (calls.append(("new", w, h)), _Layer(w, h))[1],
       "draw_layer": lambda l, x, y: calls.append(("draw", l.wh, x, y)),
-      "image": lambda n: _img if n == "bg" else None,
-      "table": lambda n: 77}
+      "image": lambda n: _img if n == "bg" else None}
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
-moycore.register("moy_table_verb", NS["table"])
 install_handles(NS, moycore.register)
-print("PRE", moycore.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude"))
-print("OBJ", moycore.load(
+print("PRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
+print("OBJ", moycore.load(((
     "function _init()\n"
     "  L = make_layer(9, 5)\n"
     "  B = image('bg')\n"
     "  MISS = image('nope')\n"
-    "  T = table('scores')\n"
-    "  N = #({1,2,3})\n"          # the table LIBRARY must survive the graft
+    "  N = #({1,2,3})\n"          # the table LIBRARY is untouched
     "end\n"
     "function _update(dt) end\n"
     "function _draw()\n"
     "  L:cls(3) L:spr(B, 1, 2) L:spr(9, 1, 2, -1, 2, 1) draw_layer(L, 5, 6)\n"
-    "end\n", "@obj"))
+    "end\n", "@obj"),)))
 moycore.tick(0.03125)
 print("OBJCALLS", calls)
-print("OBJGLOBALS", moycore.get_global("T"), moycore.get_global("N"),
-      moycore.get_global("MISS"))
+print("OBJGLOBALS", moycore.get_global("N"), moycore.get_global("MISS"))
+moycore.close()
+
+# The placement API (#85/#109) over the SAME shared Scenes the Python tier
+# binds -- widgets.py imports here unchanged, so this is the real world object
+# and the real prelude, not a transcription of either (#214).
+from widgets import Scenes
+
+SCN = ('[{"tag": "player", "tile": 1, "x": 100, "y": 100, "flip": 0},'
+       ' {"tag": "coin", "tile": 2, "x": 104, "y": 100, "flip": 1,'
+       '  "flags": {"size": 200, "say": "hi, there", "hidden": false}},'
+       ' {"tag": "coin", "tile": 2, "x": 200, "y": 8, "flip": 0}]')
+_scenes = Scenes({"main": SCN, "two": '[{"tag": "boss", "tile": 9}]'},
+                 ["main", "two"])
+_world = _scenes.world()
+_drawn = []
+PNS = {"scene": _scenes.scene, "load_scene": _scenes.load_scene,
+       "actors": _world.actors, "touching": _world.touching,
+       "move_actor": _world.move, "move_actor_to": _world.move_to,
+       "remove_actor": _world.remove,
+       "draw_scene": lambda: _drawn.append(
+           [(a.tag, a.tile, a.x, a.y, a.flip, a.flags)
+            for a in _world.actors()])}
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
+moycore.register("draw_scene", PNS["draw_scene"])
+install_handles(PNS, moycore.register)
+print("PPRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
+print("PLACE", moycore.load(((
+    "function _init()\n"
+    "  local s = scene()\n"
+    "  N = #s\n"
+    "  TAG = (s[1].tag == 'player') and 1 or 0\n"
+    "  X, Y, TILE, FLIP = s[2].x, s[2].y, s[2].tile, s[2].flip\n"
+    "  SAY = (s[2].flags.say == 'hi, there') and 1 or 0\n"     # escaped comma
+    "  SIZE = s[2].flags.size\n"
+    "  HID = (s[2].flags.hidden == false) and 1 or 0\n"
+    "  TWO = #scene('two')\n"
+    "  MISS = #scene('nope')\n"
+    "  A, C = #actors(), #actors('coin')\n"
+    "  local p = actors('player')[1]\n"
+    "  T0 = touching(p, 'coin') and 1 or 0\n"
+    "  move_actor(p, -3.5, 4)\n"
+    "  PX, PY = p.x, p.y\n"
+    "  p.flags.hidden = true\n"
+    "  p.tag = 'hero'\n"
+    "  for _, c in ipairs(actors('coin')) do remove_actor(c) end\n"
+    "  LEFT = #actors()\n"
+    "end\n"
+    "function _update(dt) draw_scene() end\n"
+    "function _draw() end\n", "@place"),)))
+moycore.tick(0.03125)
+print("PROWS", moycore.get_global("N"), moycore.get_global("TAG"),
+      moycore.get_global("X"), moycore.get_global("Y"),
+      moycore.get_global("TILE"), moycore.get_global("FLIP"))
+print("PFLAGS", moycore.get_global("SAY"), moycore.get_global("SIZE"),
+      moycore.get_global("HID"))
+print("PNAMED", moycore.get_global("TWO"), moycore.get_global("MISS"))
+print("PWORLD", moycore.get_global("A"), moycore.get_global("C"),
+      moycore.get_global("T0"), moycore.get_global("PX"),
+      moycore.get_global("PY"), moycore.get_global("LEFT"))
+print("PDRAWN", _drawn)
 moycore.close()
 
 # time() must ADVANCE INSIDE a tick. Input is frozen for the frame on purpose;
@@ -180,17 +350,45 @@ moycore.close()
 # a purple screen and "cls k=32768" climbing).
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
 snap[moycore.SNAP_TIME_MS] = 5000
-print("TLOAD", moycore.load(
+print("TLOAD", moycore.load(((
     "function _update(dt)\n"
     "  T0 = time()\n"
     "  local s = 0\n"
     "  for i = 1, 1500000 do s = s + i % 7 end\n"
     "  T1 = time()\n"
     "end\n"
-    "function _draw() end\n", "@clock"))
+    "function _draw() end\n", "@clock"),)))
 moycore.tick(0.03125)
 _t0, _t1 = moycore.get_global("T0"), moycore.get_global("T1")
 print("CLOCK", 1 if _t0 >= 5000 else 0, 1 if _t1 > _t0 else 0)
+moycore.close()
+
+# THE POINTER, through the BOARDS' OWN h_touch. The snapshot slot carries
+# widgets.py's P_LIVE/P_HELD/P_CLICK as flags, because h_touch has one slot and
+# touch() has three questions; 0 is "no pointer", which reads as nil. Every one
+# of these decodings was dead code until 2026-09-12 -- nothing on either Lua
+# tier ever wrote the slot, so touch() answered nil for every Lua cart
+# everywhere while the Python twin of the same cart had a pointer.
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
+print("TCHLOAD", moycore.load(((
+    "function _update(dt)\n"
+    "  local x, y, tapped, held = touch()\n"
+    "  if x == nil then TX, TY, TT, TH = -1, -1, -1, -1\n"
+    "  else TX, TY, TT, TH = x, y, (tapped and 1 or 0), (held and 1 or 0) end\n"
+    "end\n"
+    "function _draw() end\n", "@touch"),)))
+_seen = []
+for _st in (0, 1, 3, 7, 5):
+    snap[moycore.SNAP_TOUCH_X] = 77
+    snap[moycore.SNAP_TOUCH_Y] = 31
+    snap[moycore.SNAP_TOUCH_DOWN] = _st
+    moycore.tick(0.03125)
+    _seen.append("%s/%s/%s/%s" % (moycore.get_global("TX"),
+                                  moycore.get_global("TY"),
+                                  moycore.get_global("TT"),
+                                  moycore.get_global("TH")))
+print("TOUCH", " ".join(_seen))
+snap[moycore.SNAP_TOUCH_DOWN] = 0
 moycore.close()
 
 # The p8 shim's masked map walk (#66 M0). A 4x1 strip of cells with distinct
@@ -211,10 +409,10 @@ moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None
 print("MASKPRESENT", moycore.exec(
     "P = (__moy_map_masked ~= nil) and (__moy_map_flags ~= nil)", "@probe"),
     moycore.get_global("P"))
-print("MASKLOAD", moycore.load(
+print("MASKLOAD", moycore.load(((
     "function _init() __moy_map_flags('00000000000102') end\n"
     "function _update(dt) end\n"
-    "function _draw() end\n", "@mask"))
+    "function _draw() end\n", "@mask"),)))
 
 
 def _walk(mask):
@@ -255,7 +453,7 @@ for i in range(len(fb)):
 moycore.p8_memory(bytearray(65536), bytearray(0x4300))
 moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None,
                   FLAGS)
-print("FLOAD", moycore.load(
+print("FLOAD", moycore.load(((
     "function _init()\n"
     "  G0, G5, G6 = fget(0), fget(5), fget(6)\n"
     "  B = fget(6, 1)\n"
@@ -264,7 +462,7 @@ print("FLOAD", moycore.load(
     "  P5, PFF = __moy_peek(0x3005), __moy_peek(0x30ff)\n"
     "end\n"
     "function _update(dt) end\n"
-    "function _draw() end\n", "@flags"))
+    "function _draw() end\n", "@flags"),)))
 print("FGET", moycore.get_global("G0"), moycore.get_global("G5"),
       moycore.get_global("G6"), moycore.get_global("B"),
       moycore.get_global("OFF"), moycore.get_global("WIDE"))
@@ -302,13 +500,13 @@ moycore.p8_memory(None, None)
 for i in range(len(fb)):
     fb[i] = 0
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
-print("BARE", moycore.load(
+print("BARE", moycore.load(((
     "function _update(dt) end\n"
     "function _draw()\n"
     "  spr(1, 0, 0) sspr(0, 0, 8, 8, 0, 0)\n"
     "  map(0, 0) tline(0, 0, 8, 8, 0, 0, 65536, 0)\n"
     "  mset(1, 1, 3) X = mget(1, 1)\n"
-    "end\n", "@bare"))
+    "end\n", "@bare"),)))
 print("BARETICK", moycore.tick(0.03125))
 nz = 0
 for b in fb:
@@ -320,8 +518,34 @@ moycore.close()
 # A cart that raises must come back as text, with the VM still recoverable.
 BAD = "function _update(dt) error('boom') end\nfunction _draw() end\n"
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
-print("START2", moycore.load(BAD, "@bad"))
+print("START2", moycore.load(((BAD, "@bad"),)))
 print("ERR", moycore.tick(0.03125))
+moycore.close()
+
+# config.json REACHES THE CART, and a number arrives AS a number. The seam is
+# `const char *` -- it cannot express type -- so libmoy's `l_cfg` converts a
+# whole-string number back to a Lua number and moycore's `h_cfg` has to render
+# one for it. It did not: every non-str value returned NULL, so `cfg(k, d)` was
+# `d` for every numeric value on every board, silently, because a default IS
+# the answer and there is no error path. The shipped carts tune with numbers
+# (`{"enemies": 6, "autoplay": 0}`), so this was the whole feature.
+CFG = ("function _update(dt)\n"
+       "  N = cfg('n', 0)      T = type(N)\n"
+       "  F = cfg('f', 0)\n"
+       "  S = cfg('s', 'x')    ST = type(S)\n"
+       "  B = cfg('b', 0)\n"
+       "  M = cfg('missing', 42)\n"
+       "end\n"
+       "function _draw() end\n")
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None,
+                  {"n": 6, "f": 1.5, "s": "hello", "b": True}, None)
+print("CFGSTART", moycore.load(((CFG, "@cfg"),)))
+print("CFGTICK", moycore.tick(0.03125))
+print("CFGN", moycore.get_global("N"), moycore.get_global("T"))
+print("CFGF", moycore.get_global("F"))
+print("CFGS", moycore.get_global("S"), moycore.get_global("ST"))
+print("CFGB", moycore.get_global("B"))
+print("CFGMISS", moycore.get_global("M"))
 moycore.close()
 '''
 
@@ -391,6 +615,71 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["CENSUS"][1:] == ["7", "0", "0", "0"], \
         "the allocator census did not balance across a closed run: %s" % out
 
+    # The per-verb profiler, the only instrument that sees inside a Lua/p8
+    # frame. The counts say the wrapper sits on the verb the CART reaches, not
+    # on some alias of it -- the failure mode that matters, because the p8 shim
+    # resolves its verbs at load and a wrapper installed after that would
+    # silently measure nothing while reporting rows.
+    assert by["PROFARM"][1] == "True", "profile(1) wrapped nothing: %s" % out
+    assert by["PROFLOAD"][1] == "None", out
+    assert by["PROFN"][1:] == ["5", "5", "185", "5"], \
+        "wrong call counts: 5 frames of cls once, 7+30 rect, one foreach: %s" % out
+    # foreach hands Lua a function; charged inclusively it reads as the most
+    # expensive verb in the cart while costing nothing itself, which is a fix
+    # aimed at the wrong file. Self < inclusive for it, equal for a leaf.
+    assert by["PROFSELF"][1:] == ["1", "1"], \
+        "self/inclusive split did not hold: %s" % out
+    # OFF must restore the ORIGINALS, not leave a disarmed wrapper in place:
+    # "costs the shipping frame nothing" is only true if nothing is left.
+    assert by["PROFOFF"][1:] == ["0", "None"], out
+    assert by["PROFALIVE"][1] == "None", \
+        "the cart did not survive being un-wrapped: %s" % out
+
+    # -- the per-FUNCTION Lua profiler ---------------------------------------
+    #
+    # The fixture is two identical loops spun 3:1 across a fake shim boundary,
+    # so the instrument's answer is checkable against a number chosen in
+    # advance. That is the whole point of it: the shim-vs-cart split this was
+    # built to measure has no ground truth on a real cart, so the ground truth
+    # has to be manufactured here.
+    assert by["LPARM"][1] == "256", "lua_profile(1) installed no table: %s" % out
+    assert by["LPLOAD"][1] == "None", "the profiled cart failed to load: %s" % out
+    assert by["LPPIN"][1] == "True", \
+        "the shim pin was refused on a cart whose _draw is inside the range: %s" % out
+    assert by["LPPIN"][2:] == ["32", "12", "0", "1"], \
+        "interval/frames/dropped/sample-count: %s" % out
+    share = int(by["LPSHARE"][1])
+    assert 68 <= share <= 84, \
+        ("a 3:1 instruction split has to read near 75%%, not %d%% -- a call-"
+         "weighted profiler would say 50 here: %s" % (share, out))
+    assert by["LPHOT"][1:] == ["1", "1"], \
+        "the two hot loops are not in the designed ratio: %s" % out
+    # Exact, where the samples are statistical: one call each per frame.
+    assert by["LPCALLS"][1:] == ["12", "12", "12"], \
+        "the call counts are not exact: %s" % out
+    # One chunk, named (Lua drops the @), and the cls() the fixture draws
+    # counted as a C call rather than given a row of its own -- every C
+    # function reports source "=[C]" and would collide into one.
+    assert by["LPSRC"][1:] == ["1", "cart", "1"], \
+        "the chunk registry or the C-call count is wrong: %s" % out
+
+    # A range belonging to another cart is REFUSED, not believed.
+    assert by["LPUNPINNED"][1:] == ["False", "0", "1"], \
+        ("a range that misses the shim's own _draw still produced a split: %s"
+         % out)
+
+    # Off: the hook and the table are gone and the meter says so.
+    assert by["LPOFF"][1:] == ["0", "None"], out
+    assert by["LPALIVE"][1] == "None", \
+        "the cart did not survive the profiler being turned off: %s" % out
+
+    # The collector knob -- heap readable, stop/restart real, generational
+    # reachable and reversible.
+    assert by["LPGC"][1:] == ["1", "False", "True", "True", "True", "False"], \
+        "lua_gc_mode did not move the collector: %s" % out
+    assert by["LPCLOSED"][1:] == ["None", "None"], \
+        "the profiler answered after close(): %s" % out
+
     # view/background reached the cart with no trampoline registered for them.
     assert by["VIEW0"][1] == "None", out
     assert by["VIEWLOAD"][1] == "None", out
@@ -418,9 +707,28 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
                 out[out.index("<_Img"):out.index(">", out.index("<_Img")) + 1],
                 "<_Img object>")), \
         "layer/image handles did not reach the Python objects: %s" % out
-    # table() rides Lua's table LIBRARY as __call (#164), so both work.
-    assert by["OBJGLOBALS"][1:] == ["77", "3", "None"], \
-        "the table graft or the missing-image nil regressed: %s" % out
+    assert by["OBJGLOBALS"][1:] == ["3", "None"], \
+        "the table library or the missing-image nil regressed: %s" % out
+
+    # The placement API (#214). scene() reached Lua as NIL until the rows got a
+    # route across the boundary, so `ipairs(scene())` was "value expected" on
+    # every board -- and the Blocks ladder compiles to these exact calls.
+    assert by["PPRE"][1] == "None", out
+    assert by["PLACE"][1] == "None", \
+        "the prelude did not define the placement verbs for the cart: %s" % out
+    assert by["PROWS"][1:] == ["3", "1", "104", "100", "2", "1"], \
+        "a scene row lost a field crossing into Lua: %s" % out
+    # A tag or a say holding the blob's separator must survive it, and a false
+    # flag must arrive false rather than vanish.
+    assert by["PFLAGS"][1:] == ["1", "200", "1"], \
+        "a scene flag did not survive the crossing: %s" % out
+    assert by["PNAMED"][1:] == ["1", "0"], \
+        "scene(name) or the missing-scene empty list regressed: %s" % out
+    # move_actor truncates toward zero exactly as Python's int() does, and the
+    # coins removed in Lua are gone from the Python world.
+    assert by["PWORLD"][1:] == ["3", "2", "1", "96", "104", "1"], out
+    assert ("PDRAWN [[('hero', 1, 96, 104, 0, {'hidden': True})]]" in out), \
+        "the mutations did not reach the Python actor draw_scene draws: %s" % out
 
     # time() reads the host's frame base AND advances within the tick. The
     # snapshot freezes INPUT for a frame deliberately; freezing the clock with
@@ -476,6 +784,15 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
         "fset must change what the NEXT map(..., layers) draws: %s" % out
     # ...and the p8 shim's __moy_map_flags still writes that same table, which
     # is what keeps a ported PICO-8 cart's baked __gff__ authoritative.
+    # touch() over the boards' own h_touch: nil with no pointer, then position
+    # with the flags decoded apart. `click` is NOT nested inside `down` -- the
+    # last state is a tap whose finger already lifted, which a ladder swallows
+    # and which `letter blitz` scores with.
+    assert by["TCHLOAD"][1] == "None", out
+    assert by["TOUCH"][1:] == ["-1/-1/-1/-1", "77/31/0/0", "77/31/0/1",
+                               "77/31/1/1", "77/31/1/0"], \
+        "the boards' touch() does not decode its pointer flags: %s" % out
+
     assert by["SHIM"][1:] == ["1", "0"], \
         "__moy_map_flags no longer owns the console's flag table: %s" % out
 
@@ -493,3 +810,20 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["START2"][1] == "None", out
     assert by["ERR"][1] != "None" and "boom" in out, \
         "a raising _update must return its message: %s" % out
+
+
+    # config.json reaches the cart, and a NUMBER arrives as a number.
+    assert by["CFGSTART"][1] == "None" and by["CFGTICK"][1] == "None", out
+    assert by["CFGN"][1:] == ["6", "number"], (
+        "an int in config.json must reach a Lua cart as a number -- moycore's "
+        "h_cfg returned NULL for every non-str value, so `cfg(k, d)` was `d` "
+        "for every numeric tuning the shipped carts use: %s" % out)
+    assert by["CFGF"][1].startswith("1.5"), (
+        "a float must cross too: %s" % out)
+    assert by["CFGS"][1:] == ["hello", "string"], (
+        "a genuine string must STAY a string -- l_cfg converts only when the "
+        "whole value is a number: %s" % out)
+    assert by["CFGB"][1] == "1", (
+        "JSON true is a config value, not an absence: %s" % out)
+    assert by["CFGMISS"][1] == "42", (
+        "an absent key must still be the caller's default: %s" % out)

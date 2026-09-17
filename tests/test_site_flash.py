@@ -9,8 +9,11 @@ against the wrong chip, or silently stale. Three things are pinned here:
   * the gap: no CI image is an ORDINARY state (the firmware workflow is manual
     and artifacts expire), so the page must still build and say so;
   * the parity: site/build.py's BOARDS table is the browser's copy of the
-    Makefile's `write_flash` arguments, and the two drifting apart is exactly
-    the bug that ends with a board that will not boot.
+    cable flash's `write_flash` arguments, and the two drifting apart is exactly
+    the bug that ends with a board that will not boot. The reset pair is the
+    half that cannot be seen by looking at a board afterwards, so it is DERIVED
+    from each board.toml here and cross-checked below against a translation
+    written out a second time.
 """
 
 import hashlib
@@ -103,8 +106,10 @@ def test_manifest_carries_what_the_flasher_needs(site):
 
 
 def test_a_board_that_cannot_be_reset_says_so_rather_than_trying():
-    """The T-Deck's reset line is unreachable over its own USB at BOTH ends, so
-    the page must not claim the board is running when the write finishes."""
+    """The T-Deck's reset line is unreachable over its own USB at BOTH ends --
+    it declares `before = usb_reset`, the one sequence that connects to its node
+    and the one esptool-js has not got -- so the page must not claim the board
+    is running when the write finishes."""
     tdeck = {b["id"]: b for b in build.BOARDS}["tdeck"]
     assert tdeck["reset"] == "no_reset"      # in: the human holds the trackball
     assert tdeck["after"] is None            # out: the human presses RST
@@ -170,7 +175,7 @@ def test_a_board_with_no_ci_build_is_not_an_error(tmp_path):
     assert [b["id"] for b in manifest["boards"]] == ["p4"]
     assert "no published build" in html
     # ... and offers the way to make one, rather than a dead card.
-    assert "make firmware-flash-lilygo-micropython-full" in html
+    assert "make firmware-flash-tdeck-mainline" in html
     assert not os.path.isdir(os.path.join(out, "firmware", "tdeck"))
 
 
@@ -232,29 +237,49 @@ def test_the_page_writes_what_the_cable_flash_writes():
         assert str(fl["image"]).split("/")[-1] == board["images"][0], bid
 
 
-def test_a_tinyusb_cdc_board_is_never_reset_by_the_page():
-    """The Zero (#41) shares the Guition's chip and NOT its reset fields, which
-    is the one thing on that card that cannot be inherited by analogy.
+def test_the_reset_pair_is_the_boards_own_declaration():
+    """`reset` and `after` are not written in the site table: they are read from
+    each board's `[flash]` block, the same one the cable flash obeys.
 
-    It keeps MicroPython's TinyUSB CDC (303a:4001) rather than the console
-    boards' USB-Serial/JTAG promotion, and esptool-js chooses its reset sequence
-    off the PID: the JTAG path is taken for 0x1001, so on 0x4001 anything but
-    `no_reset` falls through to the classic DTR/RTS dance -- which against this
-    board's RUNNING CDC has wedged the USB device, unrecoverable without a
-    replug. Coming back out is the mirror image: `hard_reset` is an RTS wiggle
-    with no circuit behind it, and the `watchdog_reset` that does work here is
-    not implemented by esptool-js at all."""
+    The translation is the only thing this file is allowed to know -- what a
+    browser can perform -- and it is written out a second time here so the table
+    and the check are two statements rather than one. The failure this closes is
+    a premise copied into the page and left behind by the board: the Zero's card
+    asserted a TinyUSB CDC id, and drew `no_reset` from it, for a fortnight
+    after that board moved to USB-Serial/JTAG."""
+    declared = _declared_flash()
+    for board in build.BOARDS:
+        _, fl = declared[board["id"]]
+        before = str(fl.get("before", "default_reset"))   # esptool's own defaults
+        after = str(fl.get("after", "hard_reset"))
+        # esptool-js implements two entry sequences and one exit; a board whose
+        # entry it cannot perform is not asked to reset on the way out either.
+        reachable = before in ("default_reset", "no_reset")
+        assert board["reset"] == (before if reachable else "no_reset"), board["id"]
+        assert board["after"] == (after if reachable and after == "hard_reset"
+                                  else None), board["id"]
+
+
+def test_the_zero_is_reset_into_the_loader_but_not_out_of_it():
+    """The Zero (#41) shares the Guition's chip and, since 2026-08-30, its USB
+    peripheral: USB-Serial/JTAG at 303a:1001, which is the PID esptool-js takes
+    its JTAG reset path off -- so the page drives this board into the loader the
+    same way. Coming back out is the half it cannot do: the board declares
+    `after = watchdog_reset` (proven here; `hard_reset` is an RTS wiggle with no
+    circuit behind it), and esptool-js implements no such sequence, so the card
+    asks for a replug instead."""
     zero = {b["id"]: b for b in build.BOARDS}["xiao_zero"]
     assert zero["chip"] == "ESP32-S3"
-    assert zero["reset"] == "no_reset"        # in: the human holds BOOT
+    assert zero["reset"] == "default_reset"   # in: the peripheral does it
     assert zero["after"] is None              # out: the human replugs
-    assert "BOOT" in zero["prep"] and "plug" in zero["done"]
+    assert "plug" in zero["done"]
+    assert zero["manual"] and "BOOT" in zero["manual"]
     # The board's own file is the authority for both halves; if it stops saying
     # so, the values above are the ones to revisit.
     toml = open(os.path.join(ROOT, "firmware", "seeed_xiao_esp32s3_zero",
                              "board.toml"), encoding="utf-8").read()
-    assert '303a:4001' in toml
-    assert "watchdog_reset" in toml and "hard_reset" in toml
+    assert '303a:1001' in toml
+    assert "watchdog_reset" in toml
     # It IS the cart store -- no card slot -- so its erase warning cannot borrow
     # the Guition's "with a TF card in the slot the cartridges survive it". Both
     # halves matter to whoever ticks that box: where the carts are, and that
@@ -287,11 +312,6 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
     # flash, which is a missing feature. This set is the second kind, and it is
     # compared EXACTLY -- so an entry has to be deleted the day its card lands
     # (this test says so), and a board that silently loses its card is caught.
-    #
-    # EMPTY since 2026-08-29, when the Zero got its card: every board CI builds
-    # can be flashed from the page. Its entry sat here from the board's
-    # promotion that morning until the card landed the same day -- which is what
-    # this mechanism is for, and the shape to reuse for board N+1.
     no_site_card = {}
     assert set(fetch.BOARDS) - set(rows) == set(), (
         "the site offers a board CI does not build: %s"
@@ -300,3 +320,27 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
         "matrix rows with no site card must be named above, with why -- "
         "unexplained: %s"
         % sorted((set(rows) - set(fetch.BOARDS)) - set(no_site_card)))
+
+
+def test_a_beta_board_says_so_and_why(site):
+    """A board that is not ready yet carries a `beta` reason: the card shows a
+    badge and the reason with its issue linked, and the dropdown marks it. A
+    ready board carries no key at all, and shows neither."""
+    _, html = site
+    betas = [b for b in build.BOARDS if "beta" in b]
+    assert betas, "no board is beta any more -- this check has stopped biting"
+    for board in build.BOARDS:
+        card = re.search(r'<li class="board" data-board="%s">(.*?)</li>' % board["id"],
+                         html, re.S).group(1)
+        option = re.search(r'<option value="%s">(.*?)</option>' % board["id"],
+                           html).group(1)
+        if "beta" in board:
+            assert board["beta"].strip()
+            assert '<span class="beta">beta</span>' in card
+            assert 'class="betanote"' in card
+            for issue in re.findall(r"#(\d+)", board["beta"]):
+                assert "/issues/%s" % issue in card
+            assert option.endswith("(beta)")
+        else:
+            assert 'class="beta"' not in card and "betanote" not in card
+            assert "(beta)" not in option

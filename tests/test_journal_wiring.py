@@ -7,21 +7,13 @@ whose snapshot is byte-identical to what landed on disk.
 import json
 from pathlib import Path
 
+from ws_helpers import build_ws_with_cart
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _make_ws_with_cart(tmp_path, src, title="Journaled", type="app", edit=None):
-    from runtime import host_app
-    carts_dir = str(tmp_path / "carts")
-    host_app.moy_carts.ensure_dirs(carts_dir)
-    host_app.moy_carts.create(title, carts_dir, src=src, type=type, edit=edit or [])
-    ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
-    ws.open()
-    return ws
+def _make_ws_with_cart(tmp_path, src, title="Journaled", **kw):
+    return build_ws_with_cart(tmp_path, src, title, **kw)
 
 
 def _entries(cart_path):

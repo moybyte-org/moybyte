@@ -41,6 +41,13 @@ keeps the matrix a clean product instead of a pile of special cases.
                            coverage before this file; asserted only in
                            `tests/test_guition_on_glass.py`, which skips
                            without the board.
+  guition_tapfloor_dark    the SAME Guition tier with its panel DIAGONAL
+                           declared (3.5"), which is how a board opts in to
+                           the #203 tap-target floor. One axis from the row
+                           above: chrome_scale 2 against font_scale 1, so
+                           these two rows together are the proof the mechanism
+                           was built for -- the bar, the ≡ menu and the
+                           Settings rows grew, and not one glyph did.
   big_800x480_fs3_dark     font_scale 3. fs=2 renders elsewhere but is never a
                            pinned reference and fs=3 never drew a shell frame
                            at all (`ui_widgets_2026-08.md` A-m6). 800x480 is
@@ -48,8 +55,18 @@ keeps the matrix a clean product instead of a pile of special cases.
   p4_1024x600_fs2_windowed the desktop tier: WindowedWM, font_scale 2 (so the
                            fs=2 rung is pinned here rather than in a config of
                            its own), plus the desk and a desk-with-one-window.
+                           It declares the P4's 7.0" glass (2026-09-06), whose
+                           floor is 2 -- the scale this row already ran -- so
+                           its hashes did not move by a byte when the diagonal
+                           landed. That is the PIXEL statement of "declaring
+                           the scale you already run changes nothing", the
+                           arithmetic half of which is
+                           tests/test_chrome_tap_floor.py. (The board ships
+                           FONT_SCALE 1, so what it actually draws is cs 2 over
+                           fs 1; no config models that tier, which was already
+                           true before the diagonal was declared.)
 
-That is 5 configurations x 19 surfaces (+2 windowed-only) = 97 goldens in
+That is 6 configurations x 19 surfaces (+2 windowed-only) = 116 goldens in
 about 1 second. The combination NOT covered is light-on-windowed; it is the
 one intersection, not an axis, and adding it would start the product
 explosion this phase was told to avoid.
@@ -118,6 +135,8 @@ from pathlib import Path
 
 import pytest
 
+from ws_helpers import open_cart
+
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_DIR = Path(__file__).resolve().parent / "shell_goldens"
 GOLDEN_FILE = GOLDEN_DIR / "hashes.json"
@@ -140,8 +159,8 @@ _EDITOR_CART = "Star Catcher"
 #
 # The launcher shelf, the picker grid and the desk icon column render REAL
 # seeded content (see "What moves these goldens" above), so without this list
-# these 87 goldens are a function of `system_carts/` and merely ADDING a cart
-# turns five configurations red for a reason that is not a pixel. That is the
+# these 116 goldens are a function of `system_carts/` and merely ADDING a cart
+# turns six configurations red for a reason that is not a pixel. That is the
 # worst kind of red: it trains the reader to re-baseline, which is precisely the
 # laundering this file exists to prevent.
 #
@@ -151,19 +170,30 @@ _EDITOR_CART = "Star Catcher"
 # measures: no golden here renders a cart's own pixels (a running cart is the
 # game domain, pinned by tests/test_spec_conformance.py), only the tile the
 # shelf draws for it, and 34 tiles already exercise every shelf branch there is.
-GOLDEN_EXCLUDE = {
-    "Notes": "the #181 user-app demo cart, added after the Phase 0 baseline. "
-             "It is content; the shell paths it exercises (the app bar over a "
-             "cart, the permission-gated namespace) are pinned by "
-             "tests/test_user_apps.py.",
-}
+# Empty today, and deliberately kept: the mechanism is what makes the choice
+# above a decision rather than a shrug. Notes lived here as "the #181 demo
+# cart" until step 3 of docs/text_editing_2026-09.md made it the console's ONE
+# text app -- a shipped surface with a golden of its own (`app_notes`), which
+# is exactly the case an exclusion must not cover.
+GOLDEN_EXCLUDE = {}
 
 # The Editor tab ladder and the system-app roster. Both are pinned against the
 # live registries below (test_tab_ladder_is_fully_covered /
 # test_every_registered_app_is_covered), so adding a tab or an app without
 # adding its golden is a red test rather than a silent coverage hole.
 TABS = ("cards", "blocks", "code", "paint", "map", "scene", "music")
-APPS = ("artwork", "appearance", "writer", "storybook", "sheets", "files", "calc")
+APPS = ("artwork", "appearance", "storybook", "files", "calc")
+
+# Apps that are CARTS, not registered layers (#181): rendered by RUNNING them,
+# so what these hash is the app bar over a cart's own 320x240 raster, composited
+# and scaled by the tier. `APPS` above is pinned against `ws._apps_by_id`; these
+# deliberately are not in it, and are pinned against the STORE instead
+# (test_every_app_cart_is_covered), which is where a cart's identity lives.
+#
+# The "a running cart is not covered here" note above still holds for GAMES: a
+# game is the spec's domain and free to use rnd(). An app cart draws a settled
+# surface out of stored content, which is what every other row here does.
+APP_CARTS = (("notes", "Notes"),)
 
 # The WEB CONSOLE connection screen (#197) is rendered LAST, and with a fake
 # service, for two reasons that are both about not moving the other 87 hashes:
@@ -175,6 +205,21 @@ APPS = ("artwork", "appearance", "writer", "storybook", "sheets", "files", "calc
 # every run, which is the one way this surface could be non-deterministic.
 GOLDEN_PIN = "4821"
 GOLDEN_URL = "http://192.168.1.151/"
+
+# The TEXT CONSOLE (docs/text_editing_2026-09.md step 6), rendered as a real
+# SCRIPT RUN. It is the one running cart in this matrix, and the exception is
+# principled: a script has no `_draw`, so every pixel on it is the SHELL's --
+# the scrollback, the prompt and the symbol palette -- and none of it reads a
+# clock or `rnd()`. The script prints two fixed lines and then waits on
+# `input()`, which is the state the surface is interesting in.
+GOLDEN_SCRIPT_NAME = "say_hello.py"
+GOLDEN_SCRIPT = (
+    "print('a script is a cart with no folder')\n"
+    "print('RUN wraps it on the fly')\n"
+    "def _update(dt):\n"
+    "    name = input('your name? ')\n"
+    "    if name is not None:\n"
+    "        print('hello ' + name)\n")
 
 
 class _GoldenWebHost:
@@ -197,26 +242,42 @@ class _GoldenWebHost:
         return GOLDEN_URL + "?pin=" + GOLDEN_PIN
 
 
+# `diagonal_in` is the board fact behind the #203 tap-target floor; None is
+# every tier that does not declare one, i.e. chrome on the font scale.
 CONFIGS = {
     "tdeck_320x240_fs1_dark": dict(
-        sys_size=None, font_scale=1, windowed=False, variant="dark"),
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None),
     "tdeck_320x240_fs1_light": dict(
-        sys_size=None, font_scale=1, windowed=False, variant="light"),
+        sys_size=None, font_scale=1, windowed=False, variant="light",
+        diagonal_in=None),
     "guition_480x320_fs1_dark": dict(
-        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark"),
+        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None),
+    "guition_tapfloor_dark": dict(
+        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
+        diagonal_in=3.5),
     "big_800x480_fs3_dark": dict(
-        sys_size=(800, 480), font_scale=3, windowed=False, variant="dark"),
+        sys_size=(800, 480), font_scale=3, windowed=False, variant="dark",
+        diagonal_in=None),
     "p4_1024x600_fs2_windowed": dict(
-        sys_size=(1024, 600), font_scale=2, windowed=True, variant="dark"),
+        sys_size=(1024, 600), font_scale=2, windowed=True, variant="dark",
+        diagonal_in=7.0),
 }
+
+# The config test_editor_tabs_render_independently sweeps. The largest one: every
+# cross-tab bounding an editor layout can suffer is a big-screen feature, and #216
+# showed only here.
+_INDEPENDENCE_CONFIG = "big_800x480_fs3_dark"
 
 
 def _axes(cfg):
     """The one-line axis description quoted in a failure message."""
     w, h = cfg["sys_size"] or (320, 240)
-    return "size=%dx%d font_scale=%d variant=%s tier=%s" % (
+    return "size=%dx%d font_scale=%d variant=%s tier=%s diagonal=%s" % (
         w, h, cfg["font_scale"], cfg["variant"],
-        "windowed" if cfg["windowed"] else "fullscreen")
+        "windowed" if cfg["windowed"] else "fullscreen",
+        cfg["diagonal_in"] or "-")
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +326,14 @@ def _render(ws, surface, config_name):
         "naming what and why." % (surface, config_name, _MAX_FRAMES))
 
 
+def _editor_tab_hash(ws, tab):
+    """Open the Editor on the pinned cart at `tab` and hash the settled frame --
+    the same two calls `_surface_plan`'s per-tab `enter` makes."""
+    ws.open_in_editor(_cart_by_title(ws, _EDITOR_CART))
+    ws.set_menu_view(tab)
+    return _render(ws, "editor_" + tab, _INDEPENDENCE_CONFIG)
+
+
 def _cart_by_title(ws, title):
     for cart in ws.carts.all:
         if cart.get("title") == title:
@@ -276,7 +345,8 @@ def _build(cfg, carts_dir):
     from runtime import host_app
     ws = host_app.build_workstation(
         str(carts_dir), sys_size=cfg["sys_size"],
-        font_scale=cfg["font_scale"], windowed=cfg["windowed"])
+        font_scale=cfg["font_scale"], windowed=cfg["windowed"],
+        panel_diagonal_in=cfg["diagonal_in"])
     # persist=False: the two tdeck rows must differ by the token set ALONE, so
     # neither may leave a theme_variant behind in its store.
     ws.look.set_theme_variant(cfg["variant"], persist=False)
@@ -304,12 +374,18 @@ def _surface_plan(ws, cfg):
     cart = _cart_by_title(ws, _EDITOR_CART)
     for tab in TABS:
         def enter(tab=tab):
-            ws.open_in_editor(cart)      # re-open per tab: no cross-tab state
+            # Re-open per tab. That alone does NOT buy independence -- the layouts
+            # are ws singletons another tab can bind (#216); what pins it is
+            # test_editor_tabs_render_independently.
+            ws.open_in_editor(cart)
             ws.set_menu_view(tab)
         plan.append(("editor_" + tab, enter))
     for app in APPS:
         plan.append(("app_" + app,
                      lambda app=app: ws.open_app(ws._apps_by_id[app])))
+    for surface, title in APP_CARTS:
+        plan.append(("app_" + surface,
+                     lambda title=title: open_cart(ws, title)))
 
     def park():
         ws.system["web_pin"] = GOLDEN_PIN
@@ -323,6 +399,19 @@ def _surface_plan(ws, cfg):
         park()
         ws.web.ui.show_address = True
 
+    def run_script():
+        # From HOME, so the windowed tier runs it in the play world (where a
+        # script takes the whole responsive surface) rather than cascaded under
+        # the six app windows every surface before this one left open.
+        ws.go_home()
+        # Written through the store the workstation was built on: the script
+        # lives in the vault like any note, and RUN synthesizes its manifest.
+        ws.carts_store.save_file("docs", GOLDEN_SCRIPT_NAME, GOLDEN_SCRIPT,
+                                 ws.carts_root)
+        ok, why = ws.run_script("docs", GOLDEN_SCRIPT_NAME)
+        assert ok, "the golden script did not run: " + why
+
+    plan.append(("script_console", run_script))
     plan.append(("web_console", park))
     plan.append(("web_console_address", park_revealed))
     return plan
@@ -337,6 +426,8 @@ def surface_names(config_name):
     names += ["launcher", "picker", "settings"]
     names += ["editor_" + t for t in TABS]
     names += ["app_" + a for a in APPS]
+    names += ["script_console"]
+    names += ["app_" + a for a, _title in APP_CARTS]
     names += ["web_console", "web_console_address"]
     return names
 
@@ -491,6 +582,37 @@ def test_every_axis_is_actually_exercised():
     assert {c["font_scale"] for c in CONFIGS.values()} >= {1, 2, 3}
     assert {c["variant"] for c in CONFIGS.values()} == {"dark", "light"}
     assert {c["windowed"] for c in CONFIGS.values()} == {True, False}
+    assert {bool(c["diagonal_in"]) for c in CONFIGS.values()} == {True, False}
+
+
+# A running APP CART is drawn on the fixed 320x240 GAME raster, and so is the
+# minimal bar over it -- `bar_layer._bar_canvas("tool")` IS `ws.canvas` and its
+# height is the flat `_STATUS_H`, deliberately, because the tier then scales
+# that whole raster and the scale is what carries a 16px icon past the
+# millimetre floor. So these two hash the same on both sides of the declared
+# diagonal, and that is #203 working rather than missing. Asserted BOTH ways
+# below, so an exemption that stops being true goes red instead of widening.
+TAP_FLOOR_EXEMPT = frozenset("app_" + s for s, _title in APP_CARTS)
+
+
+def test_the_tap_floor_moves_chrome_and_leaves_text_alone(request):
+    """#203's whole claim, as pixels. Two configs differ ONLY by the declared
+    panel diagonal, so every surface that draws OS chrome must differ -- and the
+    surfaces that draw none must not."""
+    if _updating(request):
+        pytest.skip("re-baselining: the file is rewritten at module teardown")
+    stored = _load_goldens()
+    plain = stored["guition_480x320_fs1_dark"]
+    floored = stored["guition_tapfloor_dark"]
+    same = [s for s in plain
+            if s not in TAP_FLOOR_EXEMPT and plain[s] == floored.get(s)]
+    assert not same, (
+        "these surfaces hash IDENTICALLY with and without the tap-target "
+        "floor, i.e. the declared diagonal reached nothing: %s" % sorted(same))
+    moved = [s for s in TAP_FLOOR_EXEMPT if plain[s] != floored.get(s)]
+    assert not moved, (
+        "these surfaces are exempt because they draw on the scaled GAME "
+        "raster, and they moved with the diagonal: %s" % sorted(moved))
 
 
 def test_the_light_variant_really_draws_different_pixels(request):
@@ -507,6 +629,42 @@ def test_the_light_variant_really_draws_different_pixels(request):
     assert not same, (
         "these surfaces hash IDENTICALLY in dark and light, i.e. they ignore "
         "the theme variant: %s" % sorted(same))
+
+
+def test_editor_tabs_render_independently(tmp_path):
+    """An Editor tab renders the same pixels whatever tab was rendered before it.
+
+    `_surface_plan` re-opens the Editor per tab and its comment claims that buys
+    independence. It did not (#216): the Blocks+Scene workspace binds
+    `ws.scene_ui.layout` to its right pane and nothing unbound it, so the Scene tab
+    entered afterwards drew into that pane -- at this config a rect of NEGATIVE
+    width, off the right edge, leaving the blocks pixels standing underneath. One
+    golden was therefore a function of the surface before it, and an unrelated
+    map-editor change moved `editor_scene` with a re-baseline reason that looked
+    wrong.
+
+    Every ORDERED PAIR, at the config where it showed. font_scale 3 is what
+    collapses the workspace panes; the 320x240 rows take the frozen `_base`
+    branches, where no editor is ever bounded. The pairs share one workstation, so
+    the state also ACCUMULATES across them -- a stronger claim than pairwise, for
+    the price of one build."""
+    cfg = CONFIGS[_INDEPENDENCE_CONFIG]
+    alone = {tab: _editor_tab_hash(_build(cfg, tmp_path / ("alone_" + tab)), tab)
+             for tab in TABS}
+    ws = _build(cfg, tmp_path / "pairs")
+    leaked = []
+    for before in TABS:
+        for tab in TABS:
+            if tab == before:
+                continue
+            _editor_tab_hash(ws, before)
+            if _editor_tab_hash(ws, tab) != alone[tab]:
+                leaked.append("%s after %s" % (tab, before))
+    assert not leaked, (
+        "these Editor tabs render DIFFERENT pixels depending on which tab was "
+        "rendered before them (config %r, cart %r): %s. A tab must re-derive its "
+        "own state on entry -- see EditorApp._relayout_tab."
+        % (_INDEPENDENCE_CONFIG, _EDITOR_CART, leaked))
 
 
 def test_tab_ladder_is_fully_covered():
@@ -527,3 +685,13 @@ def test_every_registered_app_is_covered(tmp_path):
     assert sorted(ws._apps_by_id) == sorted(APPS), (
         "the system-app registry changed (%s) -- add the new app here and "
         "re-baseline:\n    %s" % (sorted(ws._apps_by_id), REBASELINE_CMD))
+
+
+def test_every_app_cart_is_covered(tmp_path):
+    """The other half: an app that is a CART is claimed by no registry, so its
+    coverage is pinned against the seeded store."""
+    ws = _build(CONFIGS["tdeck_320x240_fs1_dark"], tmp_path / "carts")
+    carts = {c.get("title") for c in ws.carts.all if ws.is_user_app(c)}
+    assert carts == {title for _s, title in APP_CARTS}, (
+        "the app-cart roster changed (%s) -- add it to APP_CARTS and "
+        "re-baseline:\n    %s" % (sorted(carts), REBASELINE_CMD))

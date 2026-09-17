@@ -54,22 +54,21 @@ import argparse
 import os
 import statistics
 import sys
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from p4_autotest import P4Board, board_dirs   # noqa: E402
+from p4_autotest import add_board_args, board_from_args   # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from runtime.perf_line import parse_perf     # noqa: E402
 
 # The carts worth watching: the historically slowest (Brick Siege), the two Lua
-# twins against their Python originals (the #67 comparison), the 3D-verb carts
-# that this raster work actually touches, and a couple of cheap ones as a
-# control -- if a control moves, the change was not in the verbs.
+# twins against their Python originals (the #67 comparison), and a couple of
+# cheap ones as a control -- if a control moves, the change was not in the
+# verbs. The 3D-verb row used to be Ray Lua's; those scenes are phases of the
+# two Bench carts now, and `p4_cart_bench.py` is what reads them.
 DEFAULT_ROSTER = [
     "Brick Siege", "Brick Siege Lua",
     "Sakura", "Sakura Lua",
-    "Ray Lua",
     "Hop Quest", "Sky Run", "Letter Blitz", "Star Catcher",
 ]
 
@@ -116,12 +115,7 @@ def measure(board, title, secs, log):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("carts", nargs="*", help="cart titles (default: the roster)")
-    ap.add_argument("--board", required=True, choices=sorted(board_dirs()),
-                    help="which board to drive (its [board] ota id) -- no "
-                         "default: a wrong guess at the line state chip-resets "
-                         "the two S3 parts")
-    ap.add_argument("--port", default=None,
-                    help="override the port resolved from the board's usb id")
+    add_board_args(ap)
     ap.add_argument("--secs", type=float, default=8.0, help="sample window per cart")
     ap.add_argument("--diag", action="store_true",
                     help="leave perf_capture + the FPS chip ON (per-phase ms, "
@@ -131,8 +125,7 @@ def main(argv=None):
 
     log = print if a.verbose else (lambda *x: None)
     roster = a.carts or DEFAULT_ROSTER
-    board = P4Board(a.port or "auto", board_dir=board_dirs()[a.board],
-                    log=(lambda s: log("  | " + s[:120])))
+    board = board_from_args(a, log=(lambda s: log("  | " + s[:120])))
     try:
         board.drain(0.5)
         # A board that declares attach_only is ATTACHED to, never reset: the

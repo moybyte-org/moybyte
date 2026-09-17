@@ -29,17 +29,18 @@ if getattr(gc, "buf", None) is None:      # "must be command-only"
 
 The first review's blocking finding, and it is right: capability is a property
 of the **(game canvas, system canvas, world)** triple that an entry point
-actually constructs — not of a target board. Seven pairs ship from five
+actually constructs — not of a target board. Eight entry points ship from five
 "backends" (**table refreshed 2026-08-28**: the 2026-08 streaming sunset deleted
 `TeeCanvas`/`CommandCanvas`/`ViewCanvas` and the host's pure-Python `Canvas` went
-on 2026-08-15, so the rows below are today's; the finding got STRONGER, since two
-of the three boards now disagree with each other):
+on 2026-08-15, so the rows below are today's; the finding got STRONGER, since the
+console boards ship three different shapes between them):
 
 | entry point | game canvas | system canvas |
 |---|---|---|
-| P4 `run_desktop` | `DeviceCanvas` | `P4SystemCanvas` — **distinct objects** |
+| Waveshare P4 `run_desktop` | `DeviceCanvas` | `P4SystemCanvas` — **distinct objects** |
+| Guition P4 `run_desktop` | `DeviceCanvas` | `P4SystemCanvas` — **distinct**, over a `RotatedCompositor` |
 | T-Deck `run_desktop` | `DeviceCanvas` | *the same object* |
-| Guition `run_desktop` | `DeviceCanvas` 320×240 | `SystemCanvas` 480×320 — **distinct** |
+| Guition S3 `run_desktop` | `DeviceCanvas` 320×240 | `SystemCanvas` 480×320 — **distinct** |
 | host sim 320×240 | `DeviceCanvas` (via `host_canvas`) | *the same object* |
 | host sim windowed | `DeviceCanvas` | `HostSystemCanvas` |
 | wasm handheld tier | `WebSystemCanvas` | *the same object* |
@@ -111,11 +112,11 @@ are the two **device** pairs.)
 
 ## 2. What is already right — do not churn it
 
-- Both boards already share **one** `device_canvas.py` (T-Deck tracked, P4
-  staged, byte-identical).
+- The boards already share **one** `device_canvas.py` (canonical in `device/`,
+  staged per board from `board.toml`).
 - Host and P4 already use inheritance: `Canvas → SystemCanvas`,
   `DeviceCanvas → P4SystemCanvas`.
-- The four backends already have correct implementations of "composite the
+- Every backend already has a correct implementation of "composite the
   game"; they are selected by `getattr` instead of by polymorphism.
 - `tests/test_device_canvas_parity.py` already runs the **real** `DeviceCanvas`
   under CPython behind `framebuf` + `moy_gfx` stubs — a device adapter is a
@@ -242,7 +243,7 @@ them keeps Phase 3's allowlist from becoming a permanent exemption list.
   — and this must land **before** `surface_model_v1` Phase B, which versions the
   protocol and re-baselines those payloads knowingly.
 - **Phase 2 — devices.** Device presenter; P4 native overrides. Gates:
-  **#156 on-glass green**; a **governor-ON** (`console.FPS_GOVERNOR`) timed span
+  **#156 on-glass green**; a paced-game timed span (the tick model, #217)
   over N fixed frames via `P4Board.pyval`, plus `ws.note_cost` counters
   asserting each converted site executes the **same number of times** before and
   after (`test_a_drag_touches_no_storage_and_rebuilds_no_cache` is the working
@@ -386,7 +387,7 @@ objects — listed so they are decisions rather than omissions): `ws.wifi`,
 | M7/F5 | merge premature; `end_frame`/`defer` insufficient and out of contract | Q2 resolved "beside"; both removed from §4 |
 | M8 | Phase 0's gate already green at HEAD | restated as coverage matrix; dispatch-only caveat |
 | F7 | risk mis-sized vs #43/#63 | §6 re-derived (~0.18ms/frame) |
-| F8 | "unchanged fps" cannot gate | Phase 2 → governor-ON span + `note_cost` counters |
+| F8 | "unchanged fps" cannot gate | Phase 2 → paced-game span + `note_cost` counters |
 | F9/N4 | Phase 1 ↔ surface_model Phase B payload collision; coverage overclaim | sequenced in Phase 1; §1.4 corrected |
 | N1 | `view` collides with the cart verb | renamed `place_span`, real signature |
 | N2 | two latent sites unmentioned | §1.3 + Phase 1 disposition |

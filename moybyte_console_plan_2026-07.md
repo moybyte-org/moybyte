@@ -43,7 +43,7 @@ Picotron and TIC-80 remain the north-star references for *grammar* (everything-i
 | **Lua-first** runtime; MicroPython as "Advanced/Lab" | **MicroPython/Python-first**; Lua/TIC-80 kept as a *future second cart type* behind the manifest `runtime` seam | Decided 2026-06-26. The T-Deck spike proved MicroPython boots/draws/runs carts on hardware and **exonerated it on performance** (the frame wall was native LVGL rotation, not Python). The only technical argument for Lua-first evaporated. #11 |
 | Canvas target **480×270**, 64-color | **Two rendering domains:** the *game* is a fixed **320×240** indexed viewport (the console spec); the *system UI* renders at the panel's **native** resolution and reflows | #39 (owner-decided, in progress) |
 | One "fantasy workstation" device | A **three-tier hardware family — Zero / Player / One** — over one shared console; tiers differ only in backend | §3 |
-| Native core + **Lua-VM-per-cart + KidKernel services + LVGL shell** | Shipped simpler: a **host==device MicroPython shared console** + native C kernels (`moy_gfx`, `moy_compositor`) for the hot paths + a swappable per-tier backend | as-built (see CLAUDE.md) |
+| Native core + **Lua-VM-per-cart + KidKernel services + LVGL shell** | Shipped simpler: a **host==device MicroPython shared console** + native C kernels (`moy_gfx` and the per-board panel drivers) for the hot paths + a swappable per-tier backend | as-built (see CLAUDE.md) |
 | First MVP = **Living Desktop** | Shipped first as a **TIC-80-style cart console**: on-device code/sprite/map editors, SD cartridges, an editable launcher, scroll engine, OTA, web view. "Living Desktop" survives as *a cart type*, not the MVP | tic80-goal; #54, #53, #41 |
 | KidCode / Spryte naming | **Moybyte** (brand), `moybyte` / `moy_` (code/paths). Rename merged (PR #60) | — |
 
@@ -178,7 +178,7 @@ The XIAO ESP32-S3 is the *same chip* as the Player, so the firmware core runs un
 
 ### 4.2 Why the game canvas is indexed (the portability contract)
 
-The game canvas works in **palette indices** (the **MOY64** palette) with a plain-function drawing API — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` runs on the host, on every device tier (indices → RGB565 via `moy_compositor`), and eventually a Lua VM. **This is the contract to protect. Hold the line at 320×240 for carts.**
+The game canvas works in **palette indices** (the **MOY64** palette) over a plain-function drawing API, so one cart draws identically on the host, on every board and on a Lua VM; the contract itself, and the one class that implements it, are in `.claude/rules/rendering.md`. **This is the contract to protect. Hold the line at 320×240 for carts.**
 
 > **DECIDED: the game canvas stays 320×240 indexed, forever, across all tiers.** Low-res is the *aesthetic*, not a limitation (TIC-80 240×136, PICO-8 128×128 prove it). Giving the One a native hi-res *game* canvas would fork the contract and dissolve the tier family's coherence — so we don't. The One's big screen is spent on *system UI* and a crisp ×N game viewport, not on breaking the spec.
 
@@ -193,7 +193,7 @@ Hardware  (per tier: ESP32-S3 / ESP32-P4; display, input, SD/flash, wireless)
    ↓
 Native C kernels
    - moy_gfx        indexed blitter (fill / fill_rect / blit565 / spr_batch / blit_window)
-   - moy_compositor RGB565 framebuffer + DMA flush
+   - moy_lcd/moy_axs/moy_ppa  the per-board panel: RGB565 framebuffer + DMA flush
    - moy_sd         SD attach on the shared host (native, no bus re-init)
    ↓
 MicroPython runtime  (device backend: DeviceCanvas + make_api + TrackBall/Touch/Keyboard)
@@ -443,9 +443,9 @@ The "hardware learning" pillar: gated `module.*` / `led.set` / `servo.set` APIs,
 
 Dual-OTA partitioning: the device flashes a new `.bin` into the **inactive** slot and ping-pongs, with rollback on (a bad image self-heals; `run_desktop` calls `mark_valid()` at a healthy boot). **Two channels — STABLE and UNSTABLE/BETA** — toggled in Settings; the build stamps its channel/version into a gitignored `_ota_build.py`. Phase-3 WiFi download streams a manifest-described `.bin` to SD (sha256-verified). **Bump `moy_ota.FIRMWARE_VERSION` on every release.** Download ~72KB/s ≈ the MicroPython TCP ceiling (don't chase it).
 
-### 12.2 Web view (#41/#22, host-tested; hardware-UNVERIFIED)
+### 12.2 The browser console (#41/#151)
 
-Serves the **running console** to a browser on the same WiFi via the **same draw-command protocol** (`defspr`/`spr`-by-index/`map`/primitives) — the page renders device frames, never the raw framebuffer (WiFi ~72KB/s, 153KB/frame is unplayable). Live channel is a persistent **WebSocket** (frames push down, input pushes up — no per-frame handshake). Off by default (zero per-draw cost); Settings → WEB VIEW swaps in a `TeeCanvas`. This is the Zero's entire rendering path and the universal authoring/remote surface (§8.4). **WiFi↔LCD-DMA coexistence + the socket layer are unverified on hardware.**
+Every board serves the **wasm console baked into its own firmware image** (`native/moy_web` + `moy_webhost`), so a phone on the same WiFi gets the whole console from the board itself, behind the pairing pin the board shows on screen. The page RASTERIZES: it is this console compiled to WebAssembly, not a stream of the board's frames, and it reads and writes that board's cartridges over the §3.4 sync RPC (`moy_sync`, plain HTTP). The draw-command protocol and its WebSocket live channel that this section used to describe went with the 2026-08 streaming sunset. **Where a page is SERVED from decides where its carts live**, and the two modes have no crossover: `docs/moycore_direction.md` and `.claude/rules/web.md` are the authorities. This is the Zero's entire reason to exist (§8.4).
 
 ### 12.3 Storage
 
@@ -482,19 +482,17 @@ AI understands *cartridges and customization*, not only game code. Allowed: expl
 
 ### 14.1 Built (shipping on host and/or device)
 
-Shared host==device console · `.moy` cart format + store + versioning (#47) · on-device code (#3) / sprite (#4) editors · unified themeable top bar + IconSheet (#46) · native `moy_gfx` + `moy_compositor` pipeline · `spr_batch` (#43) · scroll engine window-copy + a hardware-confirmed ~45fps demo cart (#54) · two-channel OTA, hardware-confirmed (#53) · web view / WebSocket, host-tested (#41/#22) · block language + single-object game (#29) · SD live read/write (#56 fix).
+Shared host==device console · `.moy` cart format + store + versioning (#47) · on-device code (#3) / sprite (#4) / music (#50) editors · unified themeable top bar + IconSheet (#46) · native `moy_gfx` raster + the per-board panel drivers · the auto-batched sprite path (#43) · scroll engine window-copy + a hardware-confirmed demo cart (#54) · two-channel OTA, hardware-confirmed (#53) · the browser console served off each board's own image, with the sync RPC behind it (#41/#151) · ESP-NOW local multiplayer on every console board (#7) · the P4 desktop tier (#58) · block language + single-object game (#29) · SD live read/write (#56 fix).
 
 ### 14.2 Next (dependency-ordered)
 
-1. **The One / P4 port (#58)** — the primary backend; de-risk toolchain → native DSI driver → wire the shared console.
-2. **Responsive native-res system UI + resizable font (#39)** — unlocks spacious authoring now, hardware-ready later.
-3. **Input across form factors (#42)** — virtual gamepad + web keyboard; prerequisite for phone/web play (Zero/Player-on-phone).
-4. **ESP-NOW local multiplayer & sharing (#7)** — party games; cart transfer.
-5. **Blocks depth (#48)** — lists first; the path to real games in blocks.
-6. **Quests & badges (#20)** — the "learn to make" onboarding engine.
-7. **Music editor (#50)**, **map big-sprite brush (#57)**, **top-bar dropdown (#52)**.
-8. **Voxel: bake-to-sprite (#44)** — portable, authorable 3D-look.
-9. **TIC-80 second cart type (#11)** — gated on a real source-compat goal.
+1. **Responsive native-res system UI + resizable font (#39)** — unlocks spacious authoring now, hardware-ready later.
+2. **Input across form factors (#42)** — virtual gamepad + web keyboard; prerequisite for phone/web play (Zero/Player-on-phone).
+3. **Blocks depth (#48)** — lists first; the path to real games in blocks.
+4. **Quests & badges (#20)** — the "learn to make" onboarding engine.
+5. **Map big-sprite brush (#57)**, **top-bar dropdown (#52)**.
+6. **Voxel: bake-to-sprite (#44)** — portable, authorable 3D-look.
+7. **TIC-80 second cart type (#11)** — gated on a real source-compat goal.
 
 ### 14.3 Milestones
 

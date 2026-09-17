@@ -46,6 +46,10 @@ def test_wifi_status_is_readable(board):
     on_glass.wifi_status_is_readable(board)
 
 
+def test_wifi_is_off_at_rest(board):
+    on_glass.wifi_is_off_at_rest(board)
+
+
 def test_every_system_app_claims_exactly_one_cart(board):
     on_glass.every_app_claims_one_cart(board)
 
@@ -64,6 +68,24 @@ def test_swipe_rides_the_real_pointer_feed(board):
 
 def test_a_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "star")
+
+
+def test_a_lua_cart_runs_and_exits(board):
+    """The Lua tier is supposed to reach EVERY board by default (the point of
+    the shared native staging), so pin it with a real run, not an import."""
+    on_glass.cart_runs_and_exits(board, "sakura lua", title="Sakura Lua")
+
+
+def test_draw_gates_are_installed(board):
+    on_glass.draw_gates_are_installed(board)
+
+
+def test_draw_gates_take_the_traffic(board):
+    on_glass.draw_gates_take_the_traffic(board)
+
+
+def test_the_web_console_is_baked_into_this_image(board):
+    on_glass.web_console_is_baked_into_the_image(board)
 
 
 def test_idle_screen_blank_and_wake(board):

@@ -209,8 +209,8 @@ class NetService:
     The cart-facing surface is send() + on_message() (bound as `on_net`) + the
     pump() the Player drains each frame; a real transport subclasses and overrides
     send() (frame a ~250-byte ESP-NOW packet) and calls deliver() on each inbound
-    frame. Mirrors the old radio contract (moybyte/radio.py: send/on_message/
-    receive) so a cart written against radio ports cleanly."""
+    frame. The verbs are send / on_message / receive, the shape a cart written
+    against a radio API expects, so such a cart ports cleanly."""
 
     def __init__(self):
         self._inbox = []

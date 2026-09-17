@@ -107,6 +107,11 @@ def _ascii_dump(sheet):
 
 
 def main():
+    # The one positional is the OUTPUT PATH, so an unhandled `--help` renders
+    # the sheet into a file called `--help`.
+    if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
+        print(__doc__.split("Usage:", 1)[1].strip())
+        return
     out = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUT
     sheet = _chrome._default_icon_sheet()
     kinds = list(C._ICON.items())

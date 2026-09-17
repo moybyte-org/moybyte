@@ -7,7 +7,7 @@ reported the module "was never imported". The one lane that ran it,
 subprocess, so it needs `make unix-micropython`, it SKIPS without one, and
 nothing it proves is visible to a host coverage sweep. That is the #208 shape:
 a body promoted so four consumers can share it, guarded by greps
-(`test_micropython_spike`, `test_moy_button_order`, `test_streaming_sunset`)
+(`test_board_routing`, `test_moy_button_order`, `test_streaming_sunset`)
 that read source text.
 
 Nothing here is transcribed. The real file is loaded and executed against a
@@ -30,7 +30,7 @@ NOT reachable from a host, and named rather than faked into looking covered:
   owns those under the real VM; what is testable here is that the glue calls
   `run_begin` with the shape the C demands, and that is what is pinned.
 * the SRAM-floor knob, which is `run_desktop`'s (`moycore.set_sram_floor`), not
-  this file's -- pinned by `test_micropython_spike`'s boot-path check.
+  this file's -- pinned by `test_board_routing`'s boot-path check.
 * the frame COST the docstrings quote (~1ms of per-frame `_refresh` on the S3).
   Timing is glass work; the structure that bought it -- one `button_masks`
   call instead of sixteen, slot numbers bound once, no per-frame import -- is
@@ -41,6 +41,7 @@ Mutation-checked per #208: 69 perturbations of the glue and 13 of the shared
 host execution of), 82 red, no survivors.
 """
 
+import ast
 import importlib.util
 import re
 import sys
@@ -52,20 +53,25 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 GLUE_SRC = ROOT / "device" / "moycore_glue.py"
 C_SRC = ROOT / "native" / "moycore" / "modmoycore.c"
+# The second ABI this file's parser is pointed at: the native draw gates and
+# the shape kernel, whose enums device/device_canvas.py mirrors by hand.
+GFX_SRC = ROOT / "native" / "moy_gfx" / "modmoy_gfx.c"
+GFX_KERNELS = ROOT / "native" / "moy_gfx" / "moy_gfx_kernels.h"
+CANVAS_SRC = ROOT / "device" / "device_canvas.py"
 
 
 # -- the C side, parsed --------------------------------------------------------
 
 
-def _c_text():
-    src = C_SRC.read_text(encoding="utf-8")
+def _c_text(path=None):
+    src = (path or C_SRC).read_text(encoding="utf-8")
     src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
     return re.sub(r"//[^\n]*", "", src)
 
 
-def _c_enum(first):
+def _c_enum(first, path=None):
     """The enum block that starts with `first`, as {name: value}."""
-    text = _c_text()
+    text = _c_text(path)
     for block in re.findall(r"enum\s*\{(.*?)\}\s*;", text, flags=re.S):
         if not re.search(r"\b%s\b" % first, block):
             continue
@@ -81,7 +87,7 @@ def _c_enum(first):
             out[item] = nxt
             nxt += 1
         return out
-    raise AssertionError("no enum containing %s in %s" % (first, C_SRC))
+    raise AssertionError("no enum containing %s in %s" % (first, path or C_SRC))
 
 
 def _c_define(name):
@@ -188,8 +194,9 @@ class FakeMoycore(types.ModuleType):
         self._log("exec", src, chunk)
         return self.exec_err
 
-    def _load(self, src, chunk):
-        self._log("load", src, chunk)
+    def _load(self, chunks):
+        # SPEC.md 4: the WHOLE cart in one call -- a list of (src, chunkname).
+        self._log("load", list(chunks))
         return self.load_err
 
     def _tick(self, dt):
@@ -341,10 +348,37 @@ class FakeInput:
     def pressed(self, name):
         return name in self._pressed
 
-    def touch_state(self):
+    @property
+    def pointer(self):
+        """What `widgets.pointer_state` actually reads.
+
+        This fake used to expose a `touch_state()` method, which was the glue's
+        old seam -- a method on InputState. There are TWO InputStates (the
+        host's and `device/moybyte/input.py`'s) and only one of them ever grew
+        it, so the boards got no pointer while every host test passed. The glue
+        asks the resolver directly now, so the fake supplies a POINTER.
+        """
         if self.touch_error is not None:
             raise self.touch_error
-        return self.touch
+        if self.touch is None:
+            return None
+        return _FakePointer(*self.touch)
+
+
+class _FakePointer:
+    """x/y/state/ms as `pointer_state` wants to read them off a Pointer."""
+
+    def __init__(self, x, y, state, ms):
+        from runtime.widgets import P_CLICK, P_HELD, P_LIVE
+
+        self.x, self.y, self.ms = x, y, ms
+        self._state = state
+        self.down = bool(state & P_HELD)
+        self.click = bool(state & P_CLICK)
+        self._live = bool(state & P_LIVE)
+
+    def live(self):
+        return self._live
 
 
 class MinimalInput:
@@ -405,12 +439,12 @@ def make_ns(**extra):
         "cls": lambda *a: None,
         "rnd": lambda *a: None,
         "scene": lambda *a: log.append(("scene",) + a),
+        "draw_scene": lambda *a: log.append(("draw_scene",) + a),
         "text": lambda *a: log.append(("text",) + a),
         "make_layer": lambda w, h: FakeLayer(w, h, log),
         "draw_layer": lambda lay, cx, cy: log.append(("draw_layer", lay, cx, cy)),
         "image": lambda name: ("img", name) if name != "missing" else None,
         "Image": FakeLayer,
-        "table": lambda name: log.append(("table", name)),
         "_moy_cfg": {"speed": 3},
     }
     ns.update(extra)
@@ -716,8 +750,11 @@ def test_a_moybyte_verb_nobody_remembered_is_registered_anyway(w):
     w.run(ns=ns)
     assert "brand_new_verb_2026" in w.core.registered
     assert w.core.registered["brand_new_verb_2026"] is ns["brand_new_verb_2026"]
-    for shared in ("scene", "text"):
+    for shared in ("draw_scene", "text"):
         assert shared in w.core.registered
+    # ...and scene() is not one of them: it answers with a LIST of rows, so it
+    # rides the handle glue instead (#214).
+    assert "scene" not in w.core.registered
 
 
 def test_libmoys_own_verbs_are_never_shadowed_by_a_trampoline(w):
@@ -737,22 +774,6 @@ def test_the_object_valued_verbs_are_never_registry_entries(w):
 
     w.run()
     assert not (set(w.core.registered) & NOT_REGISTRABLE)
-
-
-def test_the_table_verb_goes_in_under_its_own_name(w):
-    """#164: registering the bare name sets the GLOBAL `table` and clobbers
-    Lua's library, which a ported cart's p8 shim needs for table.remove."""
-    ns = make_ns()
-    w.run(ns=ns)
-    assert "table" not in w.core.registered
-    assert w.core.registered["moy_table_verb"] is ns["table"]
-
-
-def test_a_namespace_without_a_table_verb_registers_no_alias(w):
-    ns = make_ns()
-    del ns["table"]
-    w.run(ns=ns)
-    assert "moy_table_verb" not in w.core.registered
 
 
 def test_non_callable_namespace_entries_are_skipped(w):
@@ -801,7 +822,7 @@ def test_the_prelude_runs_before_the_cart_and_after_the_registrations(w):
     assert verbs[-1] == "load"
     assert verbs.count("exec") == 1
     # EVERY registration, not merely the first: the prelude copies
-    # `__layer_new` and its five siblings into locals and then nils the
+    # `__layer_new` and its siblings into locals and then nils the
     # globals, so a handle registered after the exec is captured as nil and
     # `make_layer` dies on "attempt to call a nil value".
     last_register = max(i for i, v in enumerate(verbs) if v == "register")
@@ -812,24 +833,40 @@ def test_the_prelude_is_the_shared_source_and_omits_the_fastmath_half(w):
     """`PRELUDE_FASTMATH` is moy_lua's alone: shadowing libmoy's C `rnd` with
     a Lua one is a pessimisation AND a semantic change -- libmoy's draws from
     the console rng the C seeds, which is the sequence SPEC.md 9 pins."""
-    from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES,
-                                 PRELUDE_FASTMATH)
+    from runtime.lua_ext import PRELUDE_HANDLES, PRELUDE_FASTMATH
 
     w.run()
     src = [c[1] for c in w.core.calls if c[0] == "exec"][0]
-    assert src == PRELUDE_TABLE + PRELUDE_HANDLES
+    assert src == PRELUDE_HANDLES
     assert PRELUDE_FASTMATH not in src
     assert "function rnd(" not in src
 
 
 def test_every_handle_the_prelude_consumes_is_registered(w):
     """The two halves are one source (`lua_ext`) precisely because a rename on
-    one side is a layer cart dying on "index a nil value"."""
+    one side is a layer cart dying on "index a nil value".
+
+    The editor family (#112) is the one GATED set: `open_editor` rides the
+    `files` permission, so its trampolines exist only for a cart that earned
+    it and the prelude guards its whole block on their presence. Asserted in
+    both states below rather than exempted, because "registered when granted"
+    is the actual invariant and a rename would still break it."""
     from runtime.lua_ext import PRELUDE_HANDLES
 
     w.run()
     wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - {"__id", "__img"}
-    assert wanted == {n for n in w.core.registered if n.startswith("__")}
+    gated = {n for n in wanted if n.startswith("__ed_")}
+    assert gated, "the editor handles vanished from the prelude"
+    got = {n for n in w.core.registered if n.startswith("__")}
+    assert wanted - gated == got, "an UNGATED handle is missing"
+
+
+def test_the_editor_handles_are_registered_for_a_cart_that_earned_them(w):
+    from runtime.lua_ext import PRELUDE_HANDLES
+
+    w.run(ns=make_ns(open_editor=lambda name=None, mode=None: None))
+    wanted = set(re.findall(r"__ed_\w+", PRELUDE_HANDLES))
+    assert wanted <= {n for n in w.core.registered if n.startswith("__")}
 
 
 def test_a_layer_made_through_a_handle_is_pinned_by_the_run(w):
@@ -873,7 +910,7 @@ def test_a_missing_image_answers_a_negative_handle_and_pins_nothing(w):
 
 
 def test_a_register_that_raises_closes_the_vm_and_reraises(w):
-    w.core.register_error = ("scene", ValueError("bad verb"))
+    w.core.register_error = ("text", ValueError("bad verb"))
     with pytest.raises(ValueError):
         w.run()
     assert w.core.closes == 1
@@ -900,8 +937,26 @@ def test_the_cart_chunk_is_named_for_the_crash_to_code_panel(w):
     the caret on the failing line (#24); "@" is Lua's own source-name sigil."""
     w.run()
     load = [c for c in w.core.calls if c[0] == "load"][0]
-    assert load[1] == LUA_SRC
-    assert load[2] == "@cart"
+    assert load[1] == [(LUA_SRC, "@cart")]
+
+
+def test_the_whole_sources_list_goes_to_load_in_order(w):
+    """SPEC.md 4: every script, in the manifest's order, in ONE load() call.
+
+    Not exec()s followed by load(): load is where the verb profiler arms and,
+    on the host tier, where the PICO-8 machine opens. A shim chunk run outside
+    it captures the unwrapped verbs and resolves to the slow Lua fallbacks --
+    both silent, and `verbs` is the only meter that sees this tier at all."""
+    ns = make_ns()
+    ns["_moy_pre"] = [("p8.lua", "-- shim")]
+    ns["_moy_post"] = [("perf.lua", "-- wrapper")]
+    w.run(ns=ns)
+    load = [c for c in w.core.calls if c[0] == "load"][0]
+    assert load[1] == [("-- shim", "@p8.lua"),
+                       (LUA_SRC, "@cart"),
+                       ("-- wrapper", "@perf.lua")]
+    assert "exec" not in [c[0] for c in w.core.calls
+                          if len(c) > 1 and c[1] in ("-- shim", "-- wrapper")]
 
 
 # -- the shape the Player reads ------------------------------------------------
@@ -1068,25 +1123,42 @@ def test_the_import_of_the_clock_is_hoisted_out_of_the_frame(w):
 
 
 def test_the_pointer_crosses_in_the_carts_own_coordinates(w):
-    inp = FakeInput(touch=(11, 22, True, 300))
+    """...FLAGS INTACT, which is the part a boolean fake cannot see.
+
+    The slot carries widgets.py's P_LIVE/P_HELD/P_CLICK together, because
+    h_touch has one slot and touch() has three questions to answer out of it.
+    This test used to hand the glue a BOOLEAN and assert the slot was 1 -- true
+    of `int(True)` as well, so it went on passing when the contract underneath
+    it changed and pinned nothing at all.
+    """
+    from runtime.widgets import P_LIVE, P_HELD, P_CLICK
+
+    inp = FakeInput(touch=(11, 22, P_LIVE | P_HELD | P_CLICK, 300))
     run = w.run(ws=FakeWs(inp=inp))
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TOUCH_X"]] == 11
     assert run.snap[C_CONSTS["SNAP_TOUCH_Y"]] == 22
-    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == 1
-    assert run.snap[C_CONSTS["SNAP_TOUCH_MS"]] == 300
+    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_LIVE | P_HELD | P_CLICK
+    # The MS slot is vestigial: it existed so h_touch could read `held` out of
+    # it, and `held` is a flag now. Still in the C ABI, read by nothing.
+    assert run.snap[C_CONSTS["SNAP_TOUCH_MS"]] == 0
+    # A pointer with nothing held is still a POINTER: the flags have to survive
+    # apart, or a hovering mouse reads as no mouse.
+    inp.touch = (11, 22, P_LIVE, 0)
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_LIVE
 
 
 def test_a_lifted_pointer_reads_down_zero_which_is_touch_returning_nil(w):
     """SPEC.md 7.3: 0 means no pointer at all."""
-    inp = FakeInput(touch=(11, 22, False, 0))
+    inp = FakeInput(touch=(11, 22, 0, 0))
     run = w.run(ws=FakeWs(inp=inp))
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == 0
 
 
 def test_a_pointer_read_that_raises_reports_no_pointer_rather_than_dying(w):
-    inp = FakeInput(touch=(5, 6, True, 9))
+    inp = FakeInput(touch=(5, 6, 3, 9))
     run = w.run(ws=FakeWs(inp=inp))
     run._refresh()
     inp.touch_error = OSError("i2c")
@@ -1483,7 +1555,7 @@ def test_every_name_the_glue_reads_is_exported_by_the_c_module():
 
 
 def test_the_executed_body_is_the_file_the_boards_stage():
-    """`test_micropython_spike` keeps the ROUTING greps (a board still calls
+    """`test_board_routing` keeps the ROUTING greps (a board still calls
     `make_moycore_runtime`); the body assertions are executed above, and both
     are only looking at the same file for as long as this holds."""
     world = World()
@@ -1492,7 +1564,102 @@ def test_the_executed_body_is_the_file_the_boards_stage():
     finally:
         world.close()
     for board in ("lilygo_t_deck_plus_mainline", "guition_jc3248w535",
-                  "esp32_p4_wifi6_touch_lcd_7b", "web_runner"):
+                  "esp32_p4_wifi6_touch_lcd_7b", "guition_jc8012p4a1c",
+                  "web_runner"):
         toml = (ROOT / "firmware" / board / "board.toml").read_text(
             encoding="utf-8")
         assert "moycore_glue.py" in toml, board
+
+
+def test_a_dead_pointer_is_dead_even_when_a_game_pointer_still_stands(w):
+    """Liveness is the POINTER's, never the game-space mapping of it.
+
+    console.py republishes `input.game_pointer` with a position every frame
+    whether or not the pointer is still alive -- it gates only the tap/hold
+    flags on it. A resolver that read "there is a game_pointer" as "there is a
+    pointer" therefore never expired on a board: found on glass, where a p8
+    cart held a cursor over `dungeons & diagrams`' board forever and its d-pad
+    was stamped over every frame by the cart's own mouse handler.
+    """
+    from runtime.widgets import P_LIVE, P_NONE
+
+    inp = FakeInput(touch=(11, 22, P_LIVE, 0))
+    inp.game_pointer = (5, 6, False, False)       # a stale mapping, still there
+    run = w.run(ws=FakeWs(inp=inp))
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_TOUCH_X"]] == 5, "the mapping should win the COORDS"
+    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_LIVE
+
+    inp.touch = None                               # ...and now the pointer is gone
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_TOUCH_DOWN"]] == P_NONE, (
+        "a game_pointer outlived the pointer it maps")
+
+
+# -- the OTHER hand-mirrored ABI: moy_gfx's enums in device_canvas -------------
+#
+# Same failure shape as the moycore constants above, one module over, and
+# nothing pinned it: `device/device_canvas.py` restates moy_gfx's state-array
+# indices, its gate kinds and mg_shape's `kind` as Python literals, and the two
+# sides are ONE BINARY LAYOUT. A slot inserted in the C enum renumbers every
+# index after it, the Python keeps writing the old ones, and the gate reads
+# camera where it expects clip -- on glass, silently, in the fast lane that
+# exists to skip the Python frame. The parser above is already the instrument;
+# these tests point it at the second header.
+
+
+def _py_int_consts(path):
+    """Module-level int constants of a Python source, by name. Read as source
+    rather than imported: device_canvas pulls in the device tier's flat module
+    names, and the layout is literal assignments either way."""
+    out = {}
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        tgt, val = node.targets[0], node.value
+        pairs = (zip(tgt.elts, val.elts)
+                 if isinstance(tgt, ast.Tuple) and isinstance(val, ast.Tuple)
+                 else [(tgt, val)])
+        for t, v in pairs:
+            if (isinstance(t, ast.Name) and isinstance(v, ast.Constant)
+                    and isinstance(v.value, int) and not isinstance(v.value, bool)):
+                out[t.id] = v.value
+    return out
+
+
+def _mirror(c_enum, c_prefix, py_prefix):
+    """{python name: (c name, value)} for the members of one C enum."""
+    return {py_prefix + n[len(c_prefix):]: (n, v) for n, v in c_enum.items()}
+
+
+GFX_MIRRORS = (
+    ("ST_CAM_X", GFX_SRC, "ST_", "_ST_"),
+    ("GATE_RECT", GFX_SRC, "GATE_", "_GATE_"),
+    ("MG_SHAPE_LINE", GFX_KERNELS, "MG_SHAPE_", "_MG_"),
+)
+
+
+@pytest.mark.parametrize("first,src,c_prefix,py_prefix", GFX_MIRRORS)
+def test_device_canvas_mirrors_the_moy_gfx_enum_exactly(first, src, c_prefix,
+                                                        py_prefix):
+    py = _py_int_consts(CANVAS_SRC)
+    want = _mirror(_c_enum(first, src), c_prefix, py_prefix)
+    for name, (c_name, value) in sorted(want.items()):
+        assert name in py, (
+            "%s defines %s and device_canvas has no %s" % (src.name, c_name, name))
+        assert py[name] == value, (
+            "%s = %d in device_canvas, %s = %d in %s"
+            % (name, py[name], c_name, value, src.name))
+
+
+@pytest.mark.parametrize("first,src,c_prefix,py_prefix", GFX_MIRRORS)
+def test_device_canvas_mirrors_no_member_the_c_dropped(first, src, c_prefix,
+                                                       py_prefix):
+    """The other direction: a constant the C no longer has is a Python name
+    still being written into the shared array."""
+    want = _mirror(_c_enum(first, src), c_prefix, py_prefix)
+    stray = {n for n in _py_int_consts(CANVAS_SRC)
+             if n.startswith(py_prefix)} - set(want)
+    assert not stray, (
+        "device_canvas keeps %s, which %s's enum does not define"
+        % (sorted(stray), src.name))

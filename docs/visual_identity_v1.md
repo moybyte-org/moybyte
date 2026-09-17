@@ -598,7 +598,7 @@ This is the acceptance journey. It must work before broader surface restyling.
 
 ### Phase 5 — system apps and website
 
-1. Move Settings, Appearance, Writer, Storybook, and other system tools onto the same
+1. Move Settings, Appearance, Storybook, and other system tools onto the same
    semantic surface contract.
 2. Capture real runtime screenshots.
 3. Update the website from those real screens rather than AI approximations.

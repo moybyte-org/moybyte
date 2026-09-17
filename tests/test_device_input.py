@@ -2,7 +2,7 @@
 
 The T-Deck's trackball and GT911 touch driver: 350 lines behind one importer
 (`moy_runtime.run_desktop`), whose only nets were source-text greps in
-`tests/test_micropython_spike.py` and two checks there that build a `Touch`
+the T-Deck spike suite and two checks there that build a `Touch`
 with `__new__` and hand-fill its fields -- so `__init__` (the address probe, the
 INT-pin claim and every degrade-instead-of-die arm inside it) had never run at
 all, and the hand-filled shape had already drifted off the real one (`_down` is
@@ -833,9 +833,13 @@ def test_the_y_axis_is_flipped_and_x_is_not(board):
 
 
 def test_the_raw_extent_is_scaled_into_canvas_space(board):
+    """The shared mapping scales the raw extent onto the canvas and then
+    flips (gt911.map_point's one order, the GSL3680's); at this board's
+    shipped 1:1 extent the flip lands on the same pixel either side of the
+    scale, which tests/test_touch_mapping.py pins."""
     t = board.touch(w=640, h=480)
-    assert t._map(160, 120) == (320, 238)
-    assert t._map(0, 0) == (0, 478)
+    assert t._map(160, 120) == (320, 239)
+    assert t._map(0, 0) == (0, 479)
 
 
 def test_TOUCH_SWAP_exchanges_the_axes(board):

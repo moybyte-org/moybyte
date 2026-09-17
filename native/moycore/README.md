@@ -103,6 +103,159 @@ holds is `(psram_live - pool_live) + pool_cap`. **`pool_cap` falls when chunks
 go back**, and that is the number to watch — `tests/test_moycore_pool.py`'s
 burst scenario is where that fall is asserted.
 
+`sram_report()` → `(sram_free_min, psram_fallback, floor)`, or **`None`** on a
+tier whose allocator has one region to choose from (the host, the wasm head).
+This is the SAME switch above, reported per RUN rather than per session:
+`run_begin` resets both meters and `close()` does not, so the console reads them
+at the exit boundary, after the VM is gone (`Player.release_world`, #211).
+`psram_fallback` is the field that matters — a **boolean about a regime
+change**, because a cart that outgrows the floor does not fail and does not
+warn, it starts allocating from PSRAM and runs about twice as slow. Both are
+read where the large path already knows the free figure, so the accounting adds
+one compare and no syscall; the consequence is that the low-water mark is
+sampled at the VM's large allocations, which is where the floor decision is
+actually made, and not between them. `sram_free_min` is `None` until a run
+reaches that test at all.
+
+## The per-verb profiler (`profile` / `verb_stats` / `verb_reset`)
+
+A Lua/p8 cart draws through libmoy's C verbs straight into the framebuffer — for
+a p8 cart literally so, since `moy_p8.c` makes the canvas the screen region — so
+**every meter `DeviceCanvas` owns reads zero on this tier**. `DRAW2` says
+`layer=0 batch=0 map=0 text=0 fill=0` and `BATCH` says 0 sprites while the frame
+spends 40 ms somewhere. That is why every pass that asked where a slow port's
+render went ended at "the cart's own code": there was no instrument that could
+say otherwise.
+
+These three open it. `profile(1)` replaces every C-function global with a
+closure that times the original; `verb_stats()` returns `(hz, frames, ((name,
+calls, self, inclusive), ...))` and `verb_reset()` zeroes it. The serial face is
+`verbs on|off|reset` and a bare `verbs`, which prints one `VERBS` line of
+**per-frame** calls and milliseconds (`runtime/dev_channel.verbs_line`).
+
+Four things about it are load-bearing:
+
+- **It gates at INSTALL, not per call.** Disarmed, a cart's globals ARE the
+  vendored C functions — there is no wrapper in the hot path, so there is no
+  gate to test in it and nothing to measure. An `if (prof)` inside a verb
+  reached three thousand times a frame is a tax the shipping frame would pay
+  forever to answer a question asked twice a year. It is also its own switch
+  rather than a rider on `diag`, for the same reason: a measurement session
+  arms it, an ordinary diag session does not.
+- **The clock is the CPU cycle counter** (`esp_cpu_get_cycle_count`, one
+  instruction), not `mp_hal_ticks_us`. That clock is `esp_timer_get_time` on
+  both S3 boards and costs about what the verbs being measured cost — at three
+  thousand calls a frame it would not perturb the measurement so much as become
+  it. The rate is MEASURED at install against the millisecond clock and handed
+  back as `hz`, because the boards do not share one frequency and the host has
+  no cycle counter at all.
+- **Self and inclusive are both kept.** `foreach` is why: five calls a frame and
+  ten milliseconds on moss moss, every bit of it the Lua function foreach was
+  handed. Charged inclusively it reads as the slowest thing in the cart and
+  aims a fix at the wrong file. A verb is charged what it spent minus what its
+  callees spent, and non-verb Lua lands on the nearest verb enclosing it — so
+  `t` is C cost for a leaf verb, and for one carrying an `in` it is C cost plus
+  the Lua underneath.
+- **The wrapper carries the original's upvalue and calls it DIRECTLY.** libmoy's
+  p8 verbs keep the machine pointer in upvalue 1 and `register()`'s trampolines
+  keep their index there, so the wrapper's upvalue 1 is the original's and
+  `fn(L)` — never `lua_call` — leaves `lua_upvalueindex(1)` resolving correctly
+  with no extra Lua frame. A closure with two upvalues would be mis-wrapped, so
+  one is skipped rather than guessed at.
+
+Install happens at `load()` when armed, before the chunk runs, because a cart
+captures its globals as it loads — the p8 shim RESOLVES its verbs there
+(`spr = __moy_p8_spr or spr`), so the name a cart calls is not the name libmoy
+registered. Arming and then launching is the reading that misses nothing;
+arming into a running cart still catches every verb it calls by global name.
+
+## The per-FUNCTION Lua profiler (`lua_profile` / `lua_stats` / `lua_reset`)
+
+The per-verb profiler above closes half the box: it says how much of a p8
+frame is C. The rest is "the interpreter", and on a ported cart that is not one
+body of Lua but **two** — the cart's own code, and the 1,348 lines defining 128
+functions that `tools/p8_lua_port.py` emits into every cart it converts. Which
+half the time is in decides whether there is anything to fix: the shim is
+GENERATED, so a fix there lands on every ported cart at once.
+
+`lua_profile(on, interval, shim_lo, shim_hi)` sets a Lua count+call hook;
+`lua_stats(top)` returns `(hz, frames, interval, totals, rows, srcs)` and
+`lua_reset()` zeroes it. The serial face is `luaprof on|off|reset [interval]`
+and a bare `luaprof`, which prints one `LUAPROF` line
+(`runtime/dev_channel.luaprof_line`).
+
+Five things about it are load-bearing:
+
+- **It SAMPLES, and that is the whole design.** A call/return profiler pays its
+  overhead per CALL, so it inflates exactly the functions that are small and
+  called often — which is what the shim is made of, and what the question is
+  about. It would find the shim expensive whether or not it is. A count hook
+  fires every N VM instructions whoever is running, so what it weighs is
+  instructions executed. `tests/test_moycore_loop.py` pins this with a fixture
+  built to a KNOWN 3:1 split across a fake shim boundary, where a
+  call-weighted profiler would answer 50%.
+- **It perturbs, and the honest claim is narrower than "it doesn't".** Lua 5.4
+  gates hooks per CallInfo through `trap`, so an unarmed VM pays nothing — but
+  with `LUA_MASKCOUNT` set, EVERY instruction detours through `luaG_traceexec`.
+  That tax is per-instruction and does not fall as the interval rises; only the
+  per-sample work does, which is why the frame rate is the same at interval 256
+  and 4096. What can be claimed is that the tax is the same for every Lua
+  function and therefore CANCELS OUT OF A SHARE — and that is testable, not
+  asserted: run one cart at two rates and the shares agree if it holds. Read
+  the sample share, not the wall-clock one.
+- **It cannot see the COLLECTOR**, and that is the one gap worth knowing.
+  Collection runs inside the allocator at a `checkGC` point, not as counted VM
+  instructions, so it generates no samples however long it takes. It lands in
+  the wall-clock column, charged to whoever tripped it. A row whose `t` share
+  badly exceeds its sample share is ALLOCATING, not computing. `lua_gc_mode`
+  below is the lever for that, and the two shipped together.
+- **The shim's line range is read from the cart that is loaded**, never baked
+  in. The emitted block is a fixed 1,348 lines but it starts wherever that
+  cart's data tables ended — line 26 in one port, line 163 in one that needs
+  the raw sheet. `dev_channel.shim_line_range` finds the generator's two marker
+  comments by streaming the file in blocks with a carry, because the board
+  being asked has that same cart resident and a reader that pulled it into
+  `splitlines()` would OOM the cart it was about to measure.
+  **From `p8.lua`** on a cart the current importer wrote: a port is two scripts
+  now (SPEC.md 4) and the shim is that one, so those are the line numbers the
+  VM reports. `dev_channel.cart_shim_range` picks the file; a single-file port
+  still answers from `main.lua`.
+- **The range is CHECKED against the cart, not believed.** The shim owns
+  `_draw` (the porter renames a p8 cart's own to `p8_draw`), so its
+  `linedefined` must land inside the range the host passed. If it does not, the
+  two are looking at different files and the pin is REFUSED: nothing is charged
+  as shim and `lua_stats` says `pinned` is false, rather than reporting a
+  confident split of the wrong cart. Pinning also keeps the prelude chunk
+  (`moycore.exec`, whose lines also start at 1) out of the shim's bucket.
+
+Disarmed there is no hook, no table and no allocation. Rows are identified by
+`source` + `linedefined` rather than by name, because most of these functions
+are local or anonymous and a name would be a guess; C functions are counted in
+`c_calls` but given no row, since every one of them reports `"=[C]"` and would
+collide into a single meaningless line.
+
+## The cart VM's collector (`lua_gc_mode`)
+
+`lua_gc_mode(mode, a, b, c)` reads and sets the Lua heap's collector — stop,
+restart, incremental with its pause/stepmul/stepsize, or **generational** — and
+returns `(heap_kb, running, generational)`. Serial: `luagc [stop|run|inc [pause
+step size]|gen [minor major]]`.
+
+It is a knob here rather than upstream because moycore OPENS the VM: libmoy and
+the p8 shim are both vendored, but the collector's schedule is this file's. It
+ARMS as well as sets, so it survives the relaunch every A/B tool performs, and
+an armed mode is applied AFTER `load()`'s settling collect so a `stop` never
+applies to the parse burst — the run's high-water mark, and the one thing that
+must still be collected.
+
+**Stopping it is the direct measurement of what it costs**, which is why the
+verb exists at all: the difference between a window with the collector running
+and one with it stopped is collection, on the live cart with nothing else
+changed. That measurement is worth taking before tuning, because a big heap is
+not the same thing as a busy collector — an incremental collector's cost tracks
+the ALLOCATION RATE, and a cart can hold a megabyte of long-lived data and give
+its collector almost nothing to do.
+
 Two verbs serve the pool and nothing else:
 
 - **`gc()`** → the VM's heap in KB after a full, stop-the-world collect. A
@@ -131,7 +284,7 @@ transfer.
 
 ## Superset verbs are not bound here
 
-`make_layer`/`draw_layer`/`image`, scenes, tables, texts and `view()` are
+`make_layer`/`draw_layer`/`image`, scenes and `view()` are
 moybyte's, not the spec's. The cart census that decided to leave them
 Python-side is in the plan: one Lua cart in the tree uses layers, at one blit
 per frame rather than one per sprite, so a second console in C would trade the
@@ -161,3 +314,9 @@ everywhere else. Tests that need the binary say so loudly when it is absent
 rather than vanishing from the run.
 
 `MOYBYTE_MICROPYTHON=/path/to/micropython` points them at a different build.
+
+One verb exists only there: **`sram_sim(bytes)`** arms a simulated internal-SRAM
+region on a build with no `esp_heap_caps.h`, supplying the free figure a board
+reads from its heap. It is how the floor arithmetic and `sram_report`'s fallback
+flag are driven where the tests run, and it is compiled out of every firmware
+build — like `pool_check`, a test verb rather than a knob.

@@ -70,7 +70,7 @@ def test_gallery_lists_rename_copy_trash_restore(tmp_path):
     app.grid.select("dragon_2")
     app._act("NAME", "dragon_2")
     assert app.mode == "rename"
-    app.rename_text = ""
+    app.rename.text = ""
     for ch in "castle":
         app._typed_rename(_FakeInp(ord(ch)))
         app._typed_rename(_FakeInp(0))
@@ -143,18 +143,6 @@ def test_delete_of_the_open_drawing_cannot_break_paint(tmp_path):
     _open_app(ws, "Paint")
     assert ws.cart_error is None
     assert ws.wm.top_kind() == "artwork"
-
-
-def test_migration_surfaces_legacy_artwork_in_the_gallery(tmp_path):
-    carts = str(tmp_path / "carts")
-    ws = _ws(tmp_path)
-    blob = moy_carts.encode_moyimg(320, 240, bytes((9,)) * (320 * 240))
-    moy_carts.ensure_dirs(carts)
-    moy_carts.save_artwork(blob, carts)
-    app = ws.files_app
-    _open_app(ws, "Files")
-    app._enter_kind("drawings")
-    assert "my_art" in app.grid.names
 
 
 def test_paint_open_picker_switches_documents(tmp_path):
@@ -276,11 +264,9 @@ def test_files_app_use_action_lists_and_resends(tmp_path):
 
 
 def test_docs_and_tables_kinds_get_the_open_action(tmp_path):
-    import json
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
-    moy_carts.save_file("docs", "note",
-                        json.dumps({"format": "moytext-v1", "body": "hi"}), carts)
+    moy_carts.save_file("docs", "note", "hi", carts)
     app = ws.files_app
     _open_app(ws, "Files")
     app._enter_kind("docs")

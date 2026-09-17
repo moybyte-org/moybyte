@@ -120,6 +120,6 @@ point-towards, graphic effects, and trig operators**.
 ## Where the code lives
 - Vocabulary + compiler: `runtime/blocks.py` (catalog, helpers, `compile_blocks`).
 - Runtime actor verbs + `draw_scene` (looks/rotation): `runtime/host_app.py` +
-  `firmware/.../device_api.py`; the actor world is `runtime/widgets.py` (`SceneWorld`).
+  `device/device_api.py`; the actor world is `runtime/widgets.py` (`SceneWorld`).
 - Editor surfaces: `runtime/block_editor_ui.py` (+ `editors_block.py`),
   `runtime/scene_editor_ui.py` (the side-by-side workspace).

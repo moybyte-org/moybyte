@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 12,
+  "version": 15,
   "title": "Bench",
   "type": "game",
   "runtime": "python",
@@ -16,7 +16,7 @@
   "permissions": [
     "graphics",
     "input",
-    "sound"
+    "audio"
   ],
   "safe_to_share": true,
   "config": {

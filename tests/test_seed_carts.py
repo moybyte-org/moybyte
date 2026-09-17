@@ -146,7 +146,7 @@ def test_platformer_falling_off_respawns(tmp_path):
     ts = ws.ns["TS"]
     ws.ns["py"] = float(ws.ns["MH"] * ts + 200)           # well below the level
     ws.input.begin_frame()
-    ws.frame(1 / 30)
+    ws.frame(1 / 60)                     # ONE tick of this 60fps cart (#217)
     assert ws.ns["py"] == float(spawn[1] * ts)            # back at the spawn tile
 
 
@@ -248,8 +248,10 @@ CONVERTED_SHEETS = {
     "scroll_demo": (0, 3, 6, 32, 34, 38),  # both heroes, coin, tree, cloud, flag
     "harpoon_pop": (0, 2, 5, 8, 12, 64),   # both hunters, then one tile per bubble size
     "letter_blitz": (1, 2, 3, 16, 18),     # brick, turret, star, the two tank spans
-    "ray_test": (1, 2, 3, 4),    # one wall texture per map digit; +16 is its dim face
-    "ray_lua": (1, 2, 3, 4),
+    # The bench twins' folded ray scene: one wall texture per maze tile id, and
+    # +16 is that wall's dim side-on face (they were ray_test/ray_lua's tiles).
+    "bench": (64, 65, 66, 67, 80, 81, 82, 83),
+    "bench_lua": (64, 65, 66, 67, 80, 81, 82, 83),
 }
 # Letter Blitz is the partial case worth stating: its PROPS are sheet tiles above,
 # but its 26 letters deliberately stay GLYPH_ROWS in main.py -- the trace bonus
@@ -305,8 +307,8 @@ def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
     title_for = {"pet": "Pixel Pet", "tiny_runner": "Tiny Runner",
                  "platformer": "Hop Quest", "star_catcher": "Star Catcher",
                  "scroll_demo": "Sky Run", "harpoon_pop": "Harpoon Pop",
-                 "letter_blitz": "Letter Blitz", "ray_test": "Ray Test",
-                 "ray_lua": "Ray Lua"}
+                 "letter_blitz": "Letter Blitz", "bench": "Bench",
+                 "bench_lua": "Bench Lua"}
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for folder, tiles in CONVERTED_SHEETS.items():
         _open_cart(ws, title_for[folder])
@@ -329,7 +331,7 @@ def test_pet_picker_selects_a_sprite_tile(tmp_path):
     _open_cart(ws, "Pixel Pet")
     ws._open_menu()
     rows = ws.cards_layer._card_layout()
-    pet = [r for r in rows if r["f"]["key"] == "pet"][0]
+    pet = [r for r in rows if r["f"] and r["f"]["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
     cells = ws.cards_layer._choice_cells(pet)
     assert len(cells) == 3                               # frog / cat / robot
@@ -406,7 +408,7 @@ def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
     _open_cart(ws, "Space Desktop")
     ws._open_menu()
     rows = ws.cards_layer._card_layout()
-    pet = [r for r in rows if r["f"]["key"] == "pet"][0]
+    pet = [r for r in rows if r["f"] and r["f"]["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
     cells = ws.cards_layer._choice_cells(pet)
     assert len(cells) == 2                               # frog / robot

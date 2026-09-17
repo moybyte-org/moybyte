@@ -137,10 +137,18 @@ ws._g['_sha'] = _sha; ws._g['_mkdir'] = _mkdir
 
 
 # A board that advertises `recv` but declares no window in its [serial] block
-# gets the P4's -- the smallest, and the only one that is safe on a transport
-# with no flow control. Not a guess about that board: a floor no board needs
-# less than.
+# gets this one. It is nobody's declared window: the P4's is 1024 (4KB outran
+# its unflow-controlled UART ring) and the USB boards' is 16384. Every board in
+# the tree that HAS a dev channel declares one, so this is only what an
+# undeclared board would get: big enough to be worth a round trip, small enough
+# not to ask a board that has said nothing to keep up with 16KB unaided.
 RAW_WINDOW_FALLBACK = 4096
+# How many windows a single file may have to re-send before the push gives up.
+# The board asks for one when a window arrives short -- a byte dropped by a ring
+# with no flow control, which on the P4 happens about once every 300 windows.
+# A budget rather than a free-for-all: a cable that drops a byte every window is
+# a broken cable, and should say so instead of crawling.
+RAW_MAX_RETRIES = 24
 # How long to wait for the probe's answer. Generous: it is spent ONCE per
 # session, and the console answers a command at frame cadence -- a board with a
 # cart running and the diag lines streaming is not a fast responder.
@@ -245,9 +253,11 @@ def push_file_raw(b, src, dst, window, verbose=False):
 
     The host writes one window and then WAITS for the ack, which is what keeps
     the P4's flow-control-free UART safe (its board.toml carries the why). A
-    window that comes back short never acks: the board's own idle timeout fires,
-    it removes the tmp and says how far it got, and that error is what this
-    raises -- by file name, with the board's words."""
+    window that comes back short does not end the push: the board throws it
+    away, names the boundary its file is still on, and this re-sends from
+    there -- see RECV_RETRIES in runtime/dev_channel.py for why one dropped
+    byte used to cost a whole cart. Only a board out of retries, or one that
+    has gone quiet entirely, raises -- by file name, with the board's words."""
     name = os.path.basename(src)
     raw = open(src, "rb").read()
     want = hashlib.sha256(raw).hexdigest()[:12]
@@ -267,6 +277,7 @@ def push_file_raw(b, src, dst, window, verbose=False):
                            % (name, " ".join(r or ["no reply"])))
     sent = 0
     n = (len(raw) + window - 1) // window
+    resent = 0
     while sent < len(raw):
         blk = raw[sent:sent + window]
         b.ser.write(blk)
@@ -277,6 +288,27 @@ def push_file_raw(b, src, dst, window, verbose=False):
             raise RuntimeError(
                 "%s: no ack for the window ending at %d/%d B -- the board went "
                 "quiet mid-upload" % (name, sent, len(raw)))
+        if r[0] == "retry":
+            # That window arrived short -- a byte the ring dropped. The board
+            # wrote nothing, so it names the boundary it is still standing on
+            # and this sends the window again from there. Believe the BOARD's
+            # offset rather than our own: it is the one that knows what reached
+            # the file, and a disagreement would corrupt the rest of the push.
+            try:
+                sent = int(r[1])
+            except (IndexError, ValueError):
+                raise RuntimeError("%s: the board asked for a re-send but "
+                                   "named no offset (%s)"
+                                   % (name, " ".join(r)))
+            resent += 1
+            if resent > RAW_MAX_RETRIES:
+                raise RuntimeError(
+                    "%s: %d windows re-sent and still dropping at %d/%d B -- "
+                    "that is a cable, not a hiccup"
+                    % (name, resent, sent, len(raw)))
+            if verbose:
+                print("     re-sending the window at %d" % sent)
+            continue
         if r[0] == "ERR":
             raise RuntimeError("%s: the board stopped the upload: %s"
                                % (name, " ".join(r[1:])))
@@ -298,9 +330,45 @@ def push_file_raw(b, src, dst, window, verbose=False):
                            % (name, got, want))
     b.pyval("__import__('os').remove(%r) or 1" % dst)     # no-op if absent
     b.pyval("__import__('os').rename(%r, %r) or 1" % (tmp, dst))
+    # moy_fs's invariant (#154): a file the store published carries a stamped
+    # `.bak` describing it, and a writer that puts different bytes at the path
+    # has to drop that stamp -- or the board's next read "recovers" the kid's own
+    # last save over what was just pushed.
+    b.pyval("__import__('os').remove(%r) or 1" % (dst + ".bak"))   # no-op if absent
     print("  > %-16s %d B in %.0fs  sha %s"
           % (name, len(raw), time.time() - t0, want))
     return True
+
+
+def cart_files(cart):
+    """Every file in the cart folder, RELATIVE to it, forward-slashed.
+
+    A cart is a TREE, not a flat list: `scenes/`, `images/` and `tables/` are
+    as much the cart as main.py is, and a listdir walk left every one of them
+    on the host -- the cart arrived on the board without the assets it needs,
+    and `--only scenes/x.moyscene` could not name one. Forward slashes because
+    these become device paths, sorted so the transcript is stable."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(cart):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        rel = os.path.relpath(dirpath, cart)
+        for f in filenames:
+            if f.startswith("."):
+                continue
+            out.append(f if rel == "." else
+                       rel.replace(os.sep, "/") + "/" + f)
+    return sorted(out)
+
+
+def sub_dirs(names):
+    """The folders those paths need, SHALLOWEST FIRST -- `_mkdir` is one
+    os.mkdir and does not make parents."""
+    out = set()
+    for n in names:
+        parts = n.split("/")[:-1]
+        for i in range(len(parts)):
+            out.add("/".join(parts[:i + 1]))
+    return sorted(out, key=lambda p: (p.count("/"), p))
 
 
 def main(argv=None):
@@ -316,7 +384,8 @@ def main(argv=None):
     ap.add_argument("--dest",
                     help="target path (default <ws.carts_root>/<foldername>)")
     ap.add_argument("--only", action="append",
-                    help="push just this file (repeatable)")
+                    help="push just this file, as its path inside the cart "
+                         "(scenes/x.moyscene); repeatable")
     ap.add_argument("--force", action="store_true",
                     help="push even when the hash already matches")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -325,9 +394,7 @@ def main(argv=None):
     cart = a.cart.rstrip("/")
     if not os.path.isdir(cart):
         sys.exit("not a cart folder: " + cart)
-    names = sorted(f for f in os.listdir(cart)
-                   if os.path.isfile(os.path.join(cart, f))
-                   and not f.startswith("."))
+    names = cart_files(cart)
     if a.only:
         missing = [f for f in a.only if f not in names]
         if missing:
@@ -386,6 +453,8 @@ def main(argv=None):
         if not b.pyexec(HELPERS):
             sys.exit("could not install the upload helpers")
         b.pyval("ws._g['_mkdir'](%r)" % dest)
+        for sub in sub_dirs(names):
+            b.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
         wrote = 0
         for f in names:
             if a.force:

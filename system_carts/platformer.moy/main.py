@@ -151,15 +151,16 @@ def _update(dt):
     if flash > 0.0:
         flash = max(0.0, flash - dt)
     # particles always tick (so the win burst animates during the banner)
-    keep = []
+    n = 0
     for p in sparks:
         p[4] -= dt
         if p[4] > 0.0:
             p[0] += p[2] * dt
             p[1] += p[3] * dt
             p[3] += 220.0 * dt
-            keep.append(p)
-    sparks[:] = keep
+            sparks[n] = p
+            n += 1
+    del sparks[n:]
     if won > 0.0:
         won -= dt
         if won <= 0.0:

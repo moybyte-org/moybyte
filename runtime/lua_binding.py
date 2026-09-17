@@ -119,11 +119,12 @@ def _lib():
             d.hl_set_map.argtypes = [_P, _P, _I, _I, _I]
             d.hl_set_flags.argtypes = [_P, _P, _I]
             d.hl_retarget.argtypes = [_P, _P]
-            d.hl_load.argtypes = [_P, _C, _I, _C, _P, _I]
+            d.hl_load.argtypes = [_P, ctypes.POINTER(_C), ctypes.POINTER(_I),
+                                  ctypes.POINTER(_C), _I, _P, _I]
             d.hl_load.restype = _I
             d.hl_exec.argtypes = [_P, _C, _I, _C, _P, _I]
             d.hl_exec.restype = _I
-            d.hl_tick.argtypes = [_P, _F, _P, _I]
+            d.hl_tick.argtypes = [_P, _F, _I, _P, _I]
             d.hl_tick.restype = _I
             d.hl_pmem_image.argtypes = [_P, _P, _I]
             d.hl_pmem_image.restype = _I
@@ -254,8 +255,12 @@ class HostLuaRun:
 
     # The dispatch callback's C signature; kept alive on the instance because
     # ctypes will collect a CFUNCTYPE object the C side is still holding.
-    _DISPATCH = ctypes.CFUNCTYPE(_I, _I, _I, ctypes.POINTER(_I), _C,
-                                 ctypes.POINTER(_I))
+    # (idx, argc, kinds, iargs, sargs, out, sout) -- moyhost_lua.c's hl_tramp
+    # holds the kind table; this side only has to agree with it.
+    _DISPATCH = ctypes.CFUNCTYPE(_I, _I, _I, ctypes.POINTER(_I),
+                                 ctypes.POINTER(_I), ctypes.POINTER(_C),
+                                 ctypes.POINTER(_I), ctypes.POINTER(_C))
+    KIND_NUM, KIND_STR, KIND_BOOL, KIND_NIL = 0, 1, 2, 3
 
     def register(self, name, fn):
         """Add a verb libmoy does not bind. After __init__, before load()."""
@@ -267,19 +272,37 @@ class HostLuaRun:
         self._ext.append(fn)
         self._d.hl_register(self._r, name.encode(), idx)
 
-    def _dispatch(self, idx, argc, iargs, sarg, out):
-        """C -> Python. Returns 1 when it produced a value, 0 for nil."""
+    def _dispatch(self, idx, argc, kinds, iargs, sargs, out, sout):
+        """C -> Python. 0 nil, 1 the int in out, 2 the string, 3 the boolean."""
         try:
             fn = self._ext[idx]
             args = []
-            if sarg:
-                args.append(sarg.decode("utf-8", "replace"))
-            args.extend(int(iargs[i]) for i in range(argc))
+            for i in range(argc):
+                k = kinds[i]
+                if k == self.KIND_STR:
+                    args.append(sargs[i].decode("utf-8", "replace"))
+                elif k == self.KIND_BOOL:
+                    args.append(bool(iargs[i]))
+                elif k == self.KIND_NIL:
+                    args.append(None)
+                else:
+                    args.append(int(iargs[i]))
             r = fn(*args)
         except Exception:  # noqa: BLE001 -- a raising verb reads as nil, and
             return 0       # the console's own error path reports it
-        if r is None or r is False:
+        if r is None:
             return 0
+        if r is True or r is False:
+            out[0] = 1 if r else 0
+            return 3
+        if isinstance(r, str):
+            # PINNED on the instance: sout[0] holds a pointer into this bytes
+            # object, and hl_tramp copies it with lua_pushlstring during this
+            # same call -- but a temporary would already be collectable here.
+            self._sret = r.encode("utf-8")
+            sout[0] = self._sret
+            out[0] = len(self._sret)
+            return 2
         try:
             out[0] = int(r)
         except (TypeError, ValueError):
@@ -296,19 +319,31 @@ class HostLuaRun:
             return err.value.decode("utf-8", "replace")
         return None
 
-    def load(self, src, name="@cart"):
-        """Run the chunk and `_init`. Returns None, or the error text."""
+    def load(self, chunks):
+        """Run the cart's chunks in order, then `_init`. None, or the error.
+
+        `chunks` is [(src, chunkname), ...] -- SPEC.md 4's `sources` as the
+        host resolved it, one entry for a one-file cart. The whole list goes
+        in one call on purpose: hl_load opens the PICO-8 machine and widens the
+        draw bridge around it, and a chunk handed in separately would land on
+        the wrong side of both."""
+        n = len(chunks)
+        bufs = [s.encode("utf-8") if isinstance(s, str) else bytes(s)
+                for s, _ in chunks]
+        srcs = (_C * n)(*bufs)
+        lens = (_I * n)(*[len(b) for b in bufs])
+        names = (_C * n)(*[nm.encode() for _, nm in chunks])
         err = ctypes.create_string_buffer(256)
-        b = src.encode("utf-8") if isinstance(src, str) else bytes(src)
-        if self._d.hl_load(self._r, b, len(b), name.encode(),
+        if self._d.hl_load(self._r, srcs, lens, names, n,
                            ctypes.cast(err, _P), 256):
             return err.value.decode("utf-8", "replace")
         return None
 
-    def tick(self, dt):
-        """One whole cart frame. None, or the error text."""
+    def tick(self, dt, draw=True):
+        """One cart tick: _update, then _draw unless `draw` is False (a
+        logic-only tick, #217). None, or the error text."""
         err = ctypes.create_string_buffer(256)
-        if self._d.hl_tick(self._r, ctypes.c_float(dt),
+        if self._d.hl_tick(self._r, ctypes.c_float(dt), 1 if draw else 0,
                            ctypes.cast(err, _P), 256):
             return err.value.decode("utf-8", "replace")
         return None
@@ -335,12 +370,6 @@ class HostLuaRun:
         if self._d.hl_get_view(self._r, ctypes.byref(w), ctypes.byref(h)):
             return (w.value, h.value)
         return None
-
-    def heap_bytes(self, collect=True):
-        """The cart's Lua heap -- live after a collect, or as-reached."""
-        if collect:
-            return self._d.hl_heap_bytes(self._r)
-        return self._d.hl_heap_peak_bytes(self._r)
 
     def get_global(self, name):
         """A cart global as a number, or None."""

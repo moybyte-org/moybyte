@@ -17,7 +17,7 @@ it refuses beyond that:
    hides the row and declines the serial word; it never silently keeps a flag
    nothing reads. `set_two_player` is the honest end of the same rule and
    reports OFF whatever it is told when no second keyboard exists.
-2. **The flat mirrors stay FLAT.** `frame`'s pace check reads `self.frameskip`
+2. **The flat mirrors stay FLAT.** Both WMs read `ws.show_fps`
    every loop iteration on all three boards, and both WMs read `ws.show_fps`
    per painted game frame. The registry owns declaration, persistence and the
    row -- never a read path.
@@ -32,6 +32,7 @@ import inspect
 from pathlib import Path
 
 from runtime.settings_layer import SETTINGS_TOGGLES
+from ws_helpers import build_ws
 
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "runtime" / "console.py"
@@ -46,7 +47,10 @@ SETTERS = [t[3] for t in SETTINGS_TOGGLES]
 # wiring, which is the failure `test_skin` was written after finding.
 OWNERS = {
     "settings_layer.py": "declares it, and draws the rows from it",
-    "console.py": "the flat defaults, the boot apply, the persistence tail",
+    "console.py": "the boot apply (load_system)",
+    "console_perf.py": "the flat defaults (_init_perf, the PerfMeters mixin)",
+    "console_settings.py": "the setters over the one _set_toggle tail (the "
+                           "SettingsToggles mixin) -- the persistence tail",
     "dev_channel.py": "the serial words",
 }
 
@@ -57,17 +61,32 @@ OWNERS = {
 DEV_SETTER_EXEMPT = {"set_diag_live"}
 
 
-def _ws(tmp_path, **kw):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
+def _class(path, name):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return node, tree
+    raise AssertionError("%s is not a class in %s" % (name, path))
 
 
 def _workstation_ast():
-    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "Workstation":
-            return node
-    raise AssertionError("Workstation is not a class in runtime/console.py")
+    """Workstation's methods -- its own AND its mixins' (the bases console.py
+    names, each parsed from the runtime module console.py imports it from) --
+    as one ClassDef, so a setter moved onto a mixin is still seen here."""
+    ws, tree = _class(CONSOLE, "Workstation")
+    bases = {b.id for b in ws.bases if isinstance(b, ast.Name)}
+    modules = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if alias.name in bases:
+                    modules.setdefault(alias.name, node.module.split(".")[-1])
+    assert set(modules) == bases, "a Workstation base is not imported by name"
+    body = list(ws.body)
+    for name in sorted(bases):
+        body.extend(_class(ROOT / "runtime" / (modules[name] + ".py"), name)[0].body)
+    return ast.ClassDef(name="Workstation", bases=[], keywords=[], body=body,
+                        decorator_list=[])
 
 
 def _method(name):
@@ -111,7 +130,7 @@ def test_every_entry_resolves_on_a_real_console(tmp_path):
     """key IS the flat attribute IS the system.json key, and setter IS a verb.
     All three were the same string six times over before the registry; this is
     what turns that coincidence into a contract."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
         assert hasattr(ws, key), key
         assert isinstance(getattr(ws, key), bool), key
@@ -223,7 +242,7 @@ def test_a_board_that_cannot_serve_a_toggle_shows_no_row(tmp_path):
     """The host console has neither the crisp canvas hook nor a second
     keyboard, so neither row exists -- which is what keeps the other tiers'
     frozen Settings pixels."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     keys = [r[0] for r in ws.settings_layer._settings_rows()]
     for key, _l, _d, _s, gate, _dev in SETTINGS_TOGGLES:
         if gate is None:
@@ -236,8 +255,8 @@ def test_a_board_that_cannot_serve_a_toggle_shows_no_row(tmp_path):
 def test_a_granted_gate_adds_its_row_in_registry_order(tmp_path):
     """Grant both capabilities and the block is the registry, in order,
     directly after EDIT ICONS. This is the order the Settings goldens rest on:
-    2 PLAYERS above FRAMESKIP, CRISP PIXELS below it."""
-    ws = _ws(tmp_path)
+    2 PLAYERS above STEADY, CRISP PIXELS below it."""
+    ws = build_ws(tmp_path)
     ws.sys_canvas.set_crisp_scale = lambda on: None
     ws.ble_keyboard = _FakeSecondKeyboard()
     rows = ws.settings_layer._settings_rows()
@@ -252,7 +271,7 @@ def test_the_row_block_follows_the_gate_without_a_manual_bust(tmp_path):
     """The memo re-asks the gates every call, so a capability that appears mid
     session appears on the next frame. A memo keyed on a stale flag would show
     the OLD rows until something else invalidated the cache."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     before = ws.settings_layer._settings_rows()
     assert "two_player" not in [r[0] for r in before]
     ws.ble_keyboard = _FakeSecondKeyboard()
@@ -269,7 +288,7 @@ def test_a_gated_toggle_declines_its_serial_word(tmp_path, capsys):
     doctrine the channel's docstring states."""
     from runtime.dev_channel import DevChannel
     from tests.test_dev_channel import FakePointer
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     ch = DevChannel(ws, FakePointer())
     capsys.readouterr()                 # the channel's own no-fileno notice
     ch.run(ws, "crisp 1")
@@ -286,21 +305,21 @@ def test_a_gated_toggle_declines_its_serial_word(tmp_path, capsys):
 
 
 def test_the_serial_word_reports_what_the_console_reached(tmp_path, capsys):
-    """`skip` keeps its wire behaviour verbatim -- the on-glass suites and the
+    """`steady` keeps the wire shape `skip` had -- the on-glass suites and the
     bench tools speak it -- and it does not persist, so a measurement session
     cannot leave a kid's system.json off-default."""
     from runtime.dev_channel import DevChannel
     from tests.test_dev_channel import FakePointer
-    ws = _ws(tmp_path)
-    ws.system.pop("frameskip", None)
+    ws = build_ws(tmp_path)
+    ws.system.pop("steady", None)
     ch = DevChannel(ws, FakePointer())
     capsys.readouterr()                 # the channel's own no-fileno notice
-    ch.run(ws, "skip 1")
-    assert capsys.readouterr().out.strip() == "REMOTE skip on"
-    assert ws.frameskip is True and "frameskip" not in ws.system
-    ch.run(ws, "skip 0")
-    assert capsys.readouterr().out.strip() == "REMOTE skip off"
-    assert ws.frameskip is False
+    ch.run(ws, "steady 0")
+    assert capsys.readouterr().out.strip() == "REMOTE steady off"
+    assert ws.steady is False and "steady" not in ws.system
+    ch.run(ws, "steady 1")
+    assert capsys.readouterr().out.strip() == "REMOTE steady on"
+    assert ws.steady is True
 
 
 def test_a_setter_that_cannot_work_still_reports_honestly(tmp_path):
@@ -308,7 +327,7 @@ def test_a_setter_that_cannot_work_still_reports_honestly(tmp_path):
     whatever it is told when there is no second keyboard. The gate hides the
     row; the SETTER is what keeps a stale system.json key from claiming two
     players nothing can drive."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     assert ws.second_keyboard() is None
     ws.set_two_player(True, persist=False)
     assert ws.two_player is False
@@ -317,7 +336,7 @@ def test_a_setter_that_cannot_work_still_reports_honestly(tmp_path):
 # -- persistence and the boot round trip --------------------------------------
 
 def test_a_fresh_console_boots_at_the_declared_defaults(tmp_path):
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for key, _l, default, _s, gate, _dev in SETTINGS_TOGGLES:
         if gate is None:
             assert getattr(ws, key) is default, key
@@ -344,7 +363,7 @@ def test_every_toggle_persists_under_its_own_key_and_comes_back(tmp_path):
 def test_the_boot_apply_writes_nothing_back(tmp_path):
     """`persist=False` on every entry: loading a store must never re-write what
     it just read (and must not mint keys the kid never chose)."""
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for key in KEYS:
         ws.system.pop(key, None)
     ws.load_system()
@@ -359,20 +378,17 @@ def test_no_toggle_is_a_property(tmp_path):
     instance dict (a plain attribute, which is what makes the read a slot
     lookup)."""
     from runtime.console import Workstation
-    ws = _ws(tmp_path)
+    ws = build_ws(tmp_path)
     for key in KEYS:
         assert not isinstance(getattr(Workstation, key, None), property), key
         assert key in ws.__dict__, key
 
 
 def test_the_hot_readers_still_read_the_flat_attribute():
-    """The named per-frame sites, by source. `frame`'s frameskip gate and its
-    pace check run every loop iteration on all three boards; both WMs read
-    show_fps per painted game frame. None of them may go through the registry
-    or the system dict."""
+    """The named per-frame sites, by source: both WMs read show_fps per
+    painted game frame on all three boards. Neither may go through the
+    registry or the system dict."""
     console_src = CONSOLE.read_text(encoding="utf-8")
-    assert "self.frameskip and self.wm.top_is_player()" in console_src
-    assert "FPS_GOVERNOR or self.frameskip" in console_src
     assert 'ws.show_fps and self._stack[-1] == "desktop"' in (
         ROOT / "runtime" / "wm.py").read_text(encoding="utf-8")
     assert "self.ws.show_fps and bool(self._stack)" in (

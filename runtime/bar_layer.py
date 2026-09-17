@@ -20,9 +20,9 @@ ratchet.
 
 `BarLayer` reaches everything else through its `self.ws` back-ref (the shared draw
 toolkit ws._glyph/_icon/_mini_btn stays on Workstation; the bar is a consumer). Only
-`NAMES` (palette) and `_in` (rect hit-test) are injected at construction -- the same
-circular-import dodge the other extracted UIs use, since console.py builds the one
-BarLayer instance a Workstation holds. The trivial time helpers `_ticks_ms`/
+`NAMES` (palette) is injected at construction -- the same circular-import dodge the
+other extracted UIs use, since console.py builds the one BarLayer instance a
+Workstation holds; the rect hit-test `_in` is widgets', imported directly. The trivial time helpers `_ticks_ms`/
 `_ticks_diff` are duplicated here (time-only, like achievements_ui.py) for the clock.
 """
 import time
@@ -42,6 +42,16 @@ _BAR_Y = 1                 # icons sit 1px down in the 18px bar (1px top/bottom 
 # bytes (~36KB at 1024 wide), so this is a small, bounded PSRAM trade for not
 # rebuilding the strip on every switch.
 _BAR_STRIP_SLOTS = 2
+
+
+def _release_layer(lay):
+    """A strip is a root-canvas layer, off the gc heap on a board (nothing
+    collects it): an evicted or outgrown strip is given back here, or every
+    window the desk opens leaks its bar strip (~80KB a round on the Guition
+    P4, 2026-09-09). Probed: a recording tier's layer has no release."""
+    rel = getattr(lay, "release", None)
+    if rel is not None:
+        rel()
 _SYSMENU_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)                 # ≡ dropdown toggle (slot 0)
 _HOME_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)      # back to launcher
 _MENU_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # Make-it-mine / code
@@ -80,6 +90,11 @@ try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_diff
 except ImportError:                     # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_diff
+
+try:
+    from widgets import _in
+except ImportError:                     # host: the runtime package
+    from runtime.widgets import _in
 
 
 class BarLayer:
@@ -135,13 +150,12 @@ class BarLayer:
     app's zone_tap takes the lent rect as a parameter; the game-canvas tabs
     (cards/paint/map, MUSIC next) keep the fixed _ZONE_LEFT_GAME rect.)
 
-    `NAMES` (palette) and `_in` (rect hit-test) are injected at construction (the same
-    circular-import dodge the other extracted UIs use)."""
+    `NAMES` (palette) is injected at construction (the same circular-import dodge
+    the other extracted UIs use)."""
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         # Cached top bar (#43, generalized in Stage 4 to every `where`): rendered
         # ONCE into an offscreen strip and blitted each frame (one flat copy)
         # instead of re-rendering ~9 sprites + glyph + text every frame.
@@ -163,7 +177,7 @@ class BarLayer:
         # before, which is a perf floor, not a correctness problem.
         self._bar_strips = {}
         self._bar_cache_gen = 0
-        # Clock-text cache (#66 CHROMEBRK): (second, string) -- see _clock_text.
+        # Clock-text cache (#66): (second, string) -- see _clock_text.
         self._clock_at = -1
         self._clock_cache = ""
 
@@ -296,9 +310,10 @@ class BarLayer:
         if slot is None:
             if len(slots) >= _BAR_STRIP_SLOTS:
                 slot = slots.pop()                 # evict the least-recently-used
-                slot[0] = None                     # ...its layer belongs to a
-                slot[1] = None                     # canvas we are no longer drawing
-                slot[2] = None                     # into, so it is rebuilt below
+                _release_layer(slot[0])            # ...its layer belongs to a
+                slot[0] = None                     # canvas we are no longer drawing
+                slot[1] = None                     # into, so it is rebuilt below
+                slot[2] = None
             else:
                 slot = [None, None, None]          # [strip, key, canvas]
             slots.insert(0, slot)
@@ -329,8 +344,8 @@ class BarLayer:
             # to drawing straight onto cv. Reuse the buffer across re-renders when the size
             # is unchanged; allocate a fresh layer on first build / a resize / a canvas swap.
             if size_changed or canvas_changed:
-                # The expensive one: new_layer pre-collects on the device.
                 self.ws.note_cost("bar.strip.alloc")
+                _release_layer(strip)              # the old size's / canvas's
                 strip = cv.new_layer(cv.w, bar_h)
                 slot[0] = strip
                 slot[2] = cv
@@ -373,7 +388,6 @@ class BarLayer:
         which is what makes the cached strip pixel-identical to a direct render.
         `key` carries the already-computed has_edit (index 2) so the icon choice
         can't drift from the key."""
-        NAMES = self._NAMES
         ws = self.ws
         where = key[0]
         has_edit = key[2]
@@ -423,7 +437,10 @@ class BarLayer:
             title = (ws.cart.get("title") if ws.cart else "") or ""
             maxc = zone[2] // 8                                      # 8px cells in the lent rect
             if maxc > 0:
-                cv.print(title[:maxc], zone[0], 3, th["chrome_ink_dim"], 1)
+                # 0 on the fixed cluster, whose bar is _STATUS_H whatever the
+                # layout says; the responsive-app-cart case (#181) re-centres.
+                dy = 0 if self._zone_is_game(where) else ws.layout.bar_text_dy
+                cv.print(title[:maxc], zone[0], 3 + dy, th["chrome_ink_dim"], 1)
             return
         # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
         # line below), the OS-owned RIGHT zone, then the active app's LENT left zone.
@@ -457,7 +474,6 @@ class BarLayer:
         cluster (cards/paint/map, mirrors the crash bar's right cluster) or the
         responsive Layout-driven one (home/settings/code/blocks). The launcher IS the
         back-stack root, so it draws NO X (spec Section 9) -- only where != "home"."""
-        NAMES = self._NAMES
         ws = self.ws
         # The launcher root never exits -> no X; neither does the DESK (#105:
         # it is the make world's FLOOR -- the PLAY icon is the way out).
@@ -471,13 +487,18 @@ class BarLayer:
             if show_x:                    # context X (Stage 5): tap to exit the app
                 ws._icon("close", _ZONE_CONTEXT_X[0], _ZONE_CONTEXT_X[1], cv)
         else:
+            # The responsive arm is the ONLY one that follows the chrome scale
+            # (#203): the branch above draws the fixed 320x240 game-canvas cluster,
+            # whose rects are frozen module constants.
             lay = ws.layout
-            cv.print(self._clock_text(), lay.clock_x, 3, th["chrome_ink_dim"], 1)
-            ws._icon(ws._wifi_icon_kind(), lay.wifi_btn[0], lay.wifi_btn[1], cv)
-            ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
-            ws._glyph("menu", lay.sysmenu_btn, th["chrome_ink"], cv)
+            cs = lay.cs
+            cv.print(self._clock_text(), lay.clock_x, 3 + lay.bar_text_dy,
+                     th["chrome_ink_dim"], 1)
+            ws._icon(ws._wifi_icon_kind(), lay.wifi_btn[0], lay.wifi_btn[1], cv, cs)
+            ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv, cs)
+            ws._glyph("menu", lay.sysmenu_btn, th["chrome_ink"], cv, cs)
             if show_x:                    # context X (Stage 5): tap to exit the app
-                ws._icon("close", lay.context_x_btn[0], lay.context_x_btn[1], cv)
+                ws._icon("close", lay.context_x_btn[0], lay.context_x_btn[1], cv, cs)
 
     def redraw_clock(self, where):
         """Repaint JUST the clock cell of an already-drawn bar (#155).
@@ -487,7 +508,7 @@ class BarLayer:
         clock is the only part of it that changes while nothing else does -- so
         without this, ticking the minute invalidated the whole cached desk once a
         second. The clock cell is right of the taskbar chips (they stop at
-        lay.clock_x - 4*cs), so repainting it cannot erase them."""
+        lay.clock_x - 4*fs), so repainting it cannot erase them."""
         ws = self.ws
         cv = self._bar_canvas(where)
         if cv is None:
@@ -504,12 +525,13 @@ class BarLayer:
             bg = th["bar"]
         bar_h = self._bar_h(where)
         cv.rect(x, y, w, min(h, max(0, bar_h - 1)), bg)
-        cv.print(self._clock_text(), lay.clock_x, 3, th["chrome_ink_dim"], 1)
+        cv.print(self._clock_text(), lay.clock_x, 3 + lay.bar_text_dy,
+                 th["chrome_ink_dim"], 1)
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
         uptime so the strip always shows a live clock (host == device). Cached
-        per second (#66 CHROMEBRK): the cart bar's cache KEY calls this every
+        per second (#66): the cart bar's cache KEY calls this every
         frame, and re-running localtime + %-format 30x/s was a measurable slice
         of the ~2.3ms bar cost -- the string can only change once a second."""
         now_s = _ticks_ms() // 1000
@@ -553,11 +575,11 @@ class BarLayer:
         # Clock Easter egg (#21): tapping the bar's clock _CLOCK_TAP_GOAL times
         # wakes the Time Traveler. Checked before the ≡/X/zone so a tap on the clock
         # never falls through to a button.
-        if self._in(px, py, clock_hit):
+        if _in(px, py, clock_hit):
             ws.ach_ui._tap_clock()
             return True
         ws.ach_ui._clock_taps = 0                # any other bar tap resets the run
-        if self._in(px, py, gear_hit):           # ≡ -> system menu (Settings/About/Reboot, #52)
+        if _in(px, py, gear_hit):           # ≡ -> system menu (Settings/About/Reboot, #52)
             ws.toggle_sysmenu()
             return True
         # WiFi status icon: on the WINDOWED desktop it deep-links into Settings ->
@@ -565,7 +587,7 @@ class BarLayer:
         # a system APP, so wifi setup coexists with a running cart, #38); on the
         # fullscreen tiers it launches the wifi.moy tool (Part 3, unchanged device
         # behavior). Consumes the tap either way so it never leaks to the lent zone.
-        if self._in(px, py, wifi_hit):
+        if _in(px, py, wifi_hit):
             if getattr(ws, "windowed_chrome", False):
                 ws.open_settings()
                 ws.settings_layer.open_wifi()
@@ -578,7 +600,7 @@ class BarLayer:
         # caller (spec Section 6's test-play round trip -- go_home for a launcher-launched
         # tool, but the Editor tab if a tool is ever PLAYed from the editor); every other
         # taskbar app (Editor/Settings) uses the screen-string exit.
-        if where not in ("home", "desk") and self._in(px, py, x_hit):
+        if where not in ("home", "desk") and _in(px, py, x_hit):
             if where == "tool":
                 ws._exit_to_caller()
             else:
@@ -603,19 +625,19 @@ class BarLayer:
         Returns True if a tool switch consumed the tap (so the pause QUIT/CONTINUE
         handling in the desktop pointer is skipped)."""
         ws = self.ws
-        if self._in(px, py, _SYSMENU_BTN):
+        if _in(px, py, _SYSMENU_BTN):
             ws.toggle_sysmenu()      # ≡ -> open the dropdown system menu (#52)
-        elif self._in(px, py, _HOME_BTN):
+        elif _in(px, py, _HOME_BTN):
             ws.go_home()
-        elif self._in(px, py, _MENU_BTN):
+        elif _in(px, py, _MENU_BTN):
             ws._open_menu()
-        elif self._in(px, py, _PAINT_BTN):
+        elif _in(px, py, _PAINT_BTN):
             ws._open_paint()
-        elif self._in(px, py, _MAP_BTN):
+        elif _in(px, py, _MAP_BTN):
             ws._open_map()
-        elif self._in(px, py, _BLOCKS_BTN):
+        elif _in(px, py, _BLOCKS_BTN):
             ws._open_blocks()
-        elif self._in(px, py, _MUSIC_BTN):
+        elif _in(px, py, _MUSIC_BTN):
             ws._open_music()
         else:
             return False

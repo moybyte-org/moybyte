@@ -1,7 +1,7 @@
 # The console APP API v1 — cartridge identity, system process
 
-**Status:** SHIPPED (2026-07-12). This formalizes the pattern Paint, Appearance,
-Writer and Storybook grew organically ("a cartridge identity backed by a
+**Status:** SHIPPED (2026-07-12). This formalizes the pattern Paint, Appearance
+and Storybook grew organically ("a cartridge identity backed by a
 responsive system process") into one public seam, aligned with
 `docs/shell_architecture_v1.md`'s privileged-system-carts direction. **Calc**
 (`runtime/calc_app.py` + `system_carts/calc.moy`) is the reference app — small
@@ -29,7 +29,7 @@ A system APP is two artifacts:
        TITLE = "MY APP"      # windowed WM title strip (falls back to id.upper())
        NEEDS = ("surface", "theme", "damage")   # the shell roles you use
 
-       def __init__(self, ctx, names, in_rect): ...   # ctx = your AppContext
+       def __init__(self, ctx, names): ...   # ctx = your AppContext
 
        def is_app(self, cart): ...   # claim the identity cart (title + marker
                                      # permission + slug -- never a renamed copy)
@@ -48,7 +48,7 @@ A system APP is two artifacts:
    ```python
    ws.register_app(MyAppLayer(ws.app_context("myapp", MyAppLayer.NEEDS),
                               NAMES, _in),
-                   text_mode=False,        # True = typing app (Writer precedent)
+                   text_mode=False,        # True = typing app (Files precedent)
                    min_size=(310, 230))    # windowed resize floor, fs-scaled
    ```
 
@@ -86,9 +86,9 @@ roles it declared:
 | `ctx.damage` | `all()` -- repaint the whole system surface next frame |
 | `ctx.surface` | `canvas()`, `size()`, `font_scale()`, `windowed()`, `pointer()`, `glyph()` |
 | `ctx.theme` | `colors()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()` |
-| `ctx.files` | the USER-FILES store (#108): named documents, the trash, history sidecars, the image codec |
+| `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image codec |
 | `ctx.carts` | the CART store: projects, decks, cart images, `create`/`scan`/`hydrate` |
-| `ctx.nav` | `app()`, `open_app()`, `play()`, `open_workspace()`, `text_mode()`, `is_system_app()` |
+| `ctx.nav` | `app()`, `open_app()`, `play()`, `open_workspace()`, `text_mode()`, `is_system_app()`, `projects()`, `edit()`, `edit_file()`, `open_text()`, `open_image()`, `run_script()` |
 | `ctx.prefs` | `get`/`set`/`clear` on `system.json`, namespaced per app |
 | `ctx.notify` | `achieve()`, `notice()` |
 | `ctx.wallpaper` | the desktop-backdrop capability (this app and Paint only) |
@@ -178,8 +178,8 @@ Two things follow for an app author:
   band height instead.
 - **Optional `commit(self)`** — the host calls it just before routing a bar
   tap, because the X there is an exit path. An app that persists on an idle
-  debounce (#111) implements it (`writer_app`, `sheets_app`, `storybook_app`
-  do); forgetting it costs an autosave, never the exit.
+  debounce (#111) implements it (`storybook_app` does); forgetting it costs an
+  autosave, never the exit.
 
 ## Checklist for a new shipped app (2026-08-19: it is two files)
 
@@ -236,7 +236,7 @@ proves it with one cart source opened twice, one manifest line apart.
 
 | permission | cart globals |
 |---|---|
-| `files` / `files:<kind>` | `files.list/load/save/load_text/save_text/rename/delete/duplicate/new_name`, scoped to ONE user-files kind (`docs` by default) |
+| `files` / `files:<kind>` | `files.list/load/save/load_text/save_text/rename/delete/duplicate/new_name/badge`, scoped to ONE user-files kind (`docs` by default). `new_name(title)` takes a name a person typed and answers what it may be stored as; `badge(name)` is the mode table's short label for a row (`MD`/`TXT`/`JSON`/`PY`/`LUA`) |
 | `prefs` | `prefs.get` / `prefs.set`, namespaced under the app's own title slug |
 | `appearance` | `set_theme(name)` / `themes()` |
 | `launch` | `open_app(id)` |
@@ -283,7 +283,7 @@ calculator or a notepad, fixed is the right answer.
 ### What a user app costs to write
 
 `system_carts/notes.moy` is the worked example: a notepad that types, saves into
-the kid's documents (the same `docs` kind Writer and Files browse -- open one
+the kid's documents (the same `docs` kind Files browses -- open one
 there and it is really the same file), lists what it saved and remembers which
 note was open. **200 lines of cart, no shell code, no registration, no
 `runtime/` module** -- and no C, no build, no reflash: it is a cart, so it edits
@@ -318,9 +318,21 @@ free, and a game that always crashes shows the panel and is not a brick.
 - Multiple instances of one app.
 
 **App-to-app is no longer a non-goal (2026-08-19).** It was one, and it shipped
-anyway: `files_app` reached `ws.writer_app.open_named(...)` across five sites,
-because "open this table in Sheets" is a real product need and there was no seam
-for it. `ctx.nav.app(id)` / `ctx.nav.open_app(id)` is the seam -- resolution is
-by REGISTERED ID, so no app holds a reference to another app's class and a build
-without the target degrades to a status line. IPC beyond "open that, pointed
-here" is still out.
+anyway: `files_app` reached straight into the notebook app's layer across five
+sites, because "open this doc in the text app" is a real product need and there
+was no seam for it. `ctx.nav.app(id)` / `ctx.nav.open_app(id)` is the seam --
+resolution is by REGISTERED ID, so no app holds a reference to another app's
+class and a build without the target degrades to a status line. IPC beyond
+"open that, pointed here" is still out.
+
+The Files ROUTER (docs/text_editing_2026-09.md) is the seam's second customer,
+and it added verbs that are all "open that, pointed here":
+`nav.projects()` lists the editable carts, `nav.edit(cart, tab)` opens one in
+the project Editor, `nav.open_text(name, kind, mode)` opens a document on
+the shell's text page in a `text_modes` mode, and `nav.open_image(name, kind,
+cart)` opens a picture in Paint -- a gallery drawing, or a cart's OWN image
+edited in place on that project's kind, which is the SAME console verb the
+Editor's ADVANCED files row takes, so there is one image route and not two. `projects()` is on `nav` and not
+on `ctx.carts` deliberately: a list of places to GO is navigation, and an app
+that browses projects has not thereby earned the right to author executable
+content.

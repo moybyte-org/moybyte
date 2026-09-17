@@ -50,6 +50,7 @@
  * for the sparse table the shim keeps for hosts without this.
  */
 
+#include <float.h>
 #include <math.h>
 #include <string.h>
 
@@ -74,6 +75,17 @@ static inline moy_p8 *p8_of(lua_State *L)
 #define P8_CURY  0x5f27u
 #define P8_FILLP 0x5f31u        /* fill pattern lo, hi, then its transparency */
 #define P8_SPAL  0x5f10u        /* screen palette, kept across frames */
+#define P8_DRAWM 0x5f34u        /* draw mode: bit 1 arms the inverted fills */
+#define P8_FONT  0x5600u        /* custom font: 8 attribute bytes, 120 of
+                                   per-character adjustment, then 8 bytes a
+                                   glyph from character 16 on (Appendix A) */
+#define P8_PATT  0x5f58u        /* print attribute defaults, 0x5f58..0x5f5b */
+
+/* Defined with the rest of the palette handling below; `wr` needs them here so
+ * a poke into 0x5f00 keeps the same persistent copy pal()/palt() do. */
+static void p8_pal_set(moy_p8 *p, int i, int col);
+static void p8_palt_set(moy_p8 *p, int i, int on);
+
 
 /* uint32 -> the int32 with the same bits, without leaning on the
  * implementation-defined narrowing conversion. */
@@ -83,19 +95,51 @@ static inline int32_t u2i(uint32_t v)
                              : (int32_t)v;
 }
 
+/* floor() in lua_Number's own precision, which is what the rest of this file
+ * already reaches for. A float's floor is exactly representable as a float, so
+ * this equals the double form to the bit; what it sheds is a promote, a double
+ * libm call and a narrow back -- and NEITHER target board has a double FPU, so
+ * all three are libgcc calls out of flash. */
+#define p8_floor(x) ((lua_Number)l_mathop(floor)(x))
+
 /* float -> int32, wrapping instead of trapping. C leaves the cast UNDEFINED
  * out of range and a p8 cart reaches out of it routinely -- a garbage
  * address, a multiply that overflows -- so the answer is pinned here rather
- * than left to the CPU. fmod is exact, so every build agrees on it. */
+ * than left to the CPU. fmod is exact, so every build agrees on it.
+ *
+ * The IN-RANGE arm compares and converts in lua_Number: both bounds are powers
+ * of two, exact in every float format Lua offers, so it answers what the double
+ * form answered. The WRAP arm stays double, because fmod's exactness is the pin
+ * -- and it is the cold path, reached only by a cart already off the map. */
 static int32_t f2i(lua_Number f)
 {
-    double d = (double)f;
-    if (d >= -2147483648.0 && d < 2147483648.0) return (int32_t)d;
-    if (!(d == d)) return 0;                             /* NaN */
-    d = fmod(d, 4294967296.0);
+    double d;
+    if (f >= (lua_Number)-2147483648.0 && f < (lua_Number)2147483648.0)
+        return (int32_t)f;
+    if (!(f == f)) return 0;                             /* NaN */
+    d = fmod((double)f, 4294967296.0);
     if (d < 0) d += 4294967296.0;
     if (d >= 2147483648.0) d -= 4294967296.0;
     return (int32_t)d;
+}
+
+/* floor AND narrow, which is what every verb that ends in an int32 actually
+ * wants. In range it is a truncate plus a correction -- two FPU instructions
+ * and a compare, where floorf() is an out-of-line call on both toolchains
+ * (neither has the lfloor pattern that would fold the pair into the one
+ * instruction each ISA owns). Out of range every float is already integral, so
+ * the floor is the identity and f2i's wrap arm answers alone; NaN takes that
+ * arm too and comes back 0, as floorf() into f2i did. Identical to
+ * f2i(p8_floor(f)) for every bit pattern -- test/p8_float_fold.c sweeps it. */
+static int32_t p8_floor_i(lua_Number f)
+{
+    if (f >= (lua_Number)-2147483648.0 && f < (lua_Number)2147483648.0) {
+        int32_t i = (int32_t)f;          /* i == INT32_MIN only when f is -2^31
+                                            exactly, where the arm below is not
+                                            taken -- so the decrement is safe */
+        return ((lua_Number)i > f) ? i - 1 : i;
+    }
+    return f2i(f);
 }
 
 static inline int32_t iarg(lua_State *L, int i)
@@ -130,7 +174,7 @@ static int32_t p8_fl(lua_State *L, int i)
     if (lua_isinteger(L, i)) return (int32_t)lua_tointeger(L, i);
     f = lua_tonumberx(L, i, &isnum);
     if (!isnum) return 0;
-    return f2i((lua_Number)floor((double)f));
+    return p8_floor_i(f);
 }
 
 /* -- the screen: the canvas IS the screen region ------------------------- */
@@ -192,11 +236,24 @@ static inline void sheet_write(moy_p8 *p, uint32_t a, uint8_t v)
     }
 }
 
+/* TILE 0 IS EMPTY, and this line is where the write path learns what the seed
+ * path already knew. A console cell holds tile+1 with 0 for empty, and the
+ * importer maps p8's convention onto it exactly -- "sprite 0, empty by
+ * convention" -> cell 0 (p8_lua_port, map.moymap). Storing a runtime 0 as
+ * cell 1 instead made the two disagree the moment a cart CLEARED a cell,
+ * which `mset(x, y, 0)` is p8's only way to do: the seeded cell drew nothing
+ * and the cleared one drew sprite 0. Nothing caught it because the one host
+ * that walks this map in C had its own tile-0 skip; binding the verb below on
+ * a host that does not is what made the disagreement reachable.
+ *
+ * mget and peek are unaffected -- both read p->mem, where the byte is still
+ * the 0 the cart wrote. */
 static inline void map_write(moy_p8 *p, int row, int col, uint8_t v)
 {
     moy_map *m = p->con->map;
     if (m && m->w == 128 && row < m->h)
-        m->cells[(size_t)row * 128 + (size_t)col] = (uint8_t)(v == 255 ? 255 : v + 1);
+        m->cells[(size_t)row * 128 + (size_t)col] =
+            (uint8_t)(v == 255 ? 255 : v ? v + 1 : 0);
 }
 
 /* A PICO-8 colour byte -> a console index. The SCREEN palette (0x5f10) may
@@ -225,8 +282,8 @@ static void apply(moy_p8 *p, uint32_t a, uint8_t v)
          * writes) OR bit 7: dank tomb marks its sprite key, colour 3, by
          * ORing 0x80 into every light-level palette it copies here, and
          * nothing else it does could make that colour transparent. */
-        moy_pal(c, (int)(a - 0x5f00), v & 15);
-        moy_palt(c, (int)(a - 0x5f00), (v & 0x90) != 0);
+        p8_pal_set(p, (int)(a - 0x5f00), v & 15);
+        p8_palt_set(p, (int)(a - 0x5f00), (v & 0x90) != 0);
     } else if (a >= 0x5f10 && a < 0x5f20) {
         moy_pal_screen(c, (int)(a - 0x5f10), col_in(v));
     } else if (a >= 0x5f20 && a < 0x5f24) {
@@ -360,8 +417,8 @@ static int l_poke4(lua_State *L)
     } else {
         int isnum;
         lua_Number f = lua_tonumberx(L, 2, &isnum);
-        raw = isnum ? (uint32_t)f2i((lua_Number)floor(
-                          (double)(lua_Number)(f * (lua_Number)65536.0))) : 0u;
+        raw = isnum ? (uint32_t)p8_floor_i((lua_Number)(f * (lua_Number)65536.0))
+                    : 0u;
     }
     poke_byte(p, a, (uint8_t)raw);
     poke_byte(p, a + 1u, (uint8_t)(raw >> 8));
@@ -422,11 +479,13 @@ static int l_memset(lua_State *L)
     return 0;
 }
 
-/* __moy_lut_span(from, to, lut): the span a ported cart lights its screen
- * with -- `for a = from, to do poke(a, peek(lut | peek(a))) end`, a run of
- * memory pushed through a lookup table. The porter folds that statement into
- * one call (p8_lua_port.fold_lut_span) because a PICO-8 screen is 8,192 bytes
- * and the loop spends three to five binding calls on each of them.
+/* THE SPAN, and the three functions below are one subject: the run a ported
+ * cart lights its screen with -- `for a = from, to do poke(a, peek(lut |
+ * peek(a))) end`, a run of memory pushed through a lookup table. The porter
+ * folds that statement into one call (p8_lua_port.fold_lut_span) because a
+ * PICO-8 screen is 8,192 bytes and the loop spends three to five binding
+ * calls on each of them. run_span is the kernel; __moy_lut_span offers it as
+ * a boolean the shim may decline into; __moy_p8_lut_span takes the whole verb.
  *
  * THREE PLAIN INTEGERS OR NOTHING. Lua's numeric `for` coerces its bounds and
  * `|` refuses a non-integral float, and transcribing either of those here
@@ -439,21 +498,11 @@ static int l_memset(lua_State *L)
  * `lut | v` is an ORDINARY integer OR, no 16.16 conversion: the shim's `|` is
  * the VM's, both operands are already integers by the time it runs, and an
  * address it lands outside 0x0000-0xffff wraps exactly as peek's would. */
-static int l_lut_span(lua_State *L)
+static void run_span(moy_p8 *p, lua_Integer from, lua_Integer to, lua_Integer lut)
 {
-    moy_p8 *p = p8_of(L);
-    lua_Integer from, to, lut;
     lua_Unsigned i, n;
     uint32_t a;
-    if (!lua_isinteger(L, 1) || !lua_isinteger(L, 2) || !lua_isinteger(L, 3)) {
-        lua_pushboolean(L, 0);
-        return 1;
-    }
-    from = lua_tointeger(L, 1);
-    to = lua_tointeger(L, 2);
-    lut = lua_tointeger(L, 3);
-    lua_pushboolean(L, 1);
-    if (to < from) return 1;                          /* p8's empty range */
+    if (to < from) return;                            /* p8's empty range */
     n = (lua_Unsigned)to - (lua_Unsigned)from;
     /* The address is carried already truncated, and stepping the truncated
      * one is what the loop does: peek narrows to int32 every iteration, and
@@ -464,6 +513,61 @@ static int l_lut_span(lua_State *L)
         poke_byte(p, a, peek_byte(p, (uint32_t)(int32_t)(lut | (lua_Integer)v)));
         if (i == n) break;
     }
+}
+
+static int l_lut_span(lua_State *L)
+{
+    if (!lua_isinteger(L, 1) || !lua_isinteger(L, 2) || !lua_isinteger(L, 3)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    run_span(p8_of(L), lua_tointeger(L, 1), lua_tointeger(L, 2),
+             lua_tointeger(L, 3));
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+/* __moy_p8_lut_span(fallback) -> `__p8_lut_span` itself, with the shim's own
+ * loop kept as upvalue 2.
+ *
+ * THE DECLINE IS WHY THIS IS A FACTORY. The verb above answers a boolean and
+ * the shim runs its loop when the answer is false, so every call pays a Lua
+ * frame for a verb a lighting cart makes three hundred of a frame -- 300
+ * calls and 6% of the interpreter on `dank tomb` (#66, #67). Taking the WHOLE
+ * verb means the declined case has to be reachable from here, and there are
+ * only two ways: transcribe p8's coercions into C, which is the second copy
+ * this file refuses on the very next line, or CALL the definition that
+ * already exists. So the loop arrives as an argument and stays as an upvalue.
+ * One definition of the rules, in Lua, and the C hands back everything it
+ * does not recognise -- which keeps the loop THE REFERENCE rather than
+ * demoting it to a fallback nothing checks.
+ *
+ * The machine rides upvalue 1 exactly as it does for every other verb here,
+ * so p8_of() is unchanged. */
+static int l_p8_lut_span(lua_State *L)
+{
+    /* THE ARITY IS PART OF THE INPUT (l_split's paragraph, learned the hard
+     * way): the fallback takes the three the shim's loop reads, so the stack
+     * is squared off before anything is pushed onto it. */
+    lua_settop(L, 3);
+    if (!lua_isinteger(L, 1) || !lua_isinteger(L, 2) || !lua_isinteger(L, 3)) {
+        lua_pushvalue(L, lua_upvalueindex(2));
+        lua_insert(L, 1);
+        lua_call(L, 3, 0);
+        return 0;
+    }
+    run_span(p8_of(L), lua_tointeger(L, 1), lua_tointeger(L, 2),
+             lua_tointeger(L, 3));
+    return 0;
+}
+
+static int l_p8_lut_span_bind(lua_State *L)
+{
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    lua_settop(L, 1);
+    lua_pushvalue(L, lua_upvalueindex(1));      /* the machine, as upvalue 1 */
+    lua_insert(L, 1);
+    lua_pushcclosure(L, l_p8_lut_span, 2);
     return 1;
 }
 
@@ -503,28 +607,43 @@ static int l_cstore(lua_State *L)
  * 0x1000, the rows the map shares with the sheet) is the cell mget reads and
  * map() draws.
  *
- * The coordinates stay DOUBLE until the bound check, because math.floor of a
- * float too big for an integer hands the float back, and such a value is out
- * of every bound here -- narrowing first would wrap it into range.
+ * The coordinates stay FLOATING-POINT until the bound check, because
+ * math.floor of a float too big for an integer hands the float back, and such
+ * a value is out of every bound here -- narrowing to an integer first would
+ * wrap it into range. lua_Number carries that property on its own: the value
+ * ARRIVED as one, so a double holds no more of it, and buys soft-float.
  */
 
 /* math.floor(v or 0), undecided between integer and float. */
-static double p8_flr_d(lua_State *L, int i)
+static lua_Number p8_flr_n(lua_State *L, int i)
 {
-    if (lua_isinteger(L, i)) return (double)lua_tointeger(L, i);
+    if (lua_isinteger(L, i)) return (lua_Number)lua_tointeger(L, i);
     if (!lua_toboolean(L, i)) return 0;
-    return floor((double)luaL_checknumber(L, i));
+    return p8_floor(luaL_checknumber(L, i));
+}
+
+/* math.floor(v or 0) for a verb that narrows RIGHT AWAY -- map(), whose clip
+ * is downstream of the cast, rather than mget()'s bound check which is the
+ * reason the two above stay wide. LUA_32BITS makes lua_Integer an int32, so
+ * the integer arm is the identity and exact where a promote through double was
+ * merely wide; the float arm goes through f2i, which pins the out-of-range
+ * answer the bare cast left to the CPU. */
+static int32_t p8_flr_i(lua_State *L, int i)
+{
+    if (lua_isinteger(L, i)) return (int32_t)lua_tointeger(L, i);
+    if (!lua_toboolean(L, i)) return 0;
+    return p8_floor_i(luaL_checknumber(L, i));
 }
 
 /* fl(v), the coercing one, same treatment. */
-static double p8_fl_d(lua_State *L, int i)
+static lua_Number p8_fl_n(lua_State *L, int i)
 {
     int isnum;
     lua_Number f;
-    if (lua_isinteger(L, i)) return (double)lua_tointeger(L, i);
+    if (lua_isinteger(L, i)) return (lua_Number)lua_tointeger(L, i);
     f = lua_tonumberx(L, i, &isnum);
     if (!isnum) return 0;
-    return floor((double)f);
+    return p8_floor(f);
 }
 
 /* Lua's `//` on integers: a FLOOR, not a truncation, which is a whole cell of
@@ -536,17 +655,24 @@ static int32_t p8_floordiv(int32_t m, int32_t n)
     return q;
 }
 
-static uint32_t p8_maddr(double x, double y)
+/* Past the bound check the cells are small non-negative integers, so every
+ * address this can build -- 0x2000 + 31*128 + 127 at the widest -- is exact in
+ * a float and the arithmetic never rounds. It stays FLOATING-POINT rather than
+ * narrowing on entry because a NaN cell passes the bound check (every compare
+ * against it is false) and has to reach f2i, which pins it to address 0; a
+ * cast on the way in would be undefined instead. test/p8lib.moy asks. */
+static uint32_t p8_maddr(lua_Number x, lua_Number y)
 {
-    double a = (y < 32) ? 0x2000 + y * 128 + x
-                        : 0x1000 + (y - 32) * 128 + x;
-    return (uint32_t)f2i((lua_Number)a) & 0xffffu;
+    lua_Number a = (y < 32) ? (lua_Number)((lua_Number)0x2000 + y * 128 + x)
+                            : (lua_Number)((lua_Number)0x1000
+                                           + (y - 32) * 128 + x);
+    return (uint32_t)f2i(a) & 0xffffu;
 }
 
 static int l_mget(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    double x = p8_flr_d(L, 1), y = p8_flr_d(L, 2);
+    lua_Number x = p8_flr_n(L, 1), y = p8_flr_n(L, 2);
     if (x < 0 || x > 127 || y < 0 || y > 63) { lua_pushinteger(L, 0); return 1; }
     lua_pushinteger(L, rd(p, p8_maddr(x, y)));
     return 1;
@@ -555,7 +681,7 @@ static int l_mget(lua_State *L)
 static int l_mset(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    double x = p8_flr_d(L, 1), y = p8_flr_d(L, 2);
+    lua_Number x = p8_flr_n(L, 1), y = p8_flr_n(L, 2);
     if (x < 0 || x > 127 || y < 0 || y > 63) return 0;
     poke_byte(p, p8_maddr(x, y), (uint8_t)iarg(L, 3));
     return 0;
@@ -566,25 +692,25 @@ static int l_mset(lua_State *L)
 static int l_p8fget(lua_State *L)
 {
     moy_console *con = p8_of(L)->con;
-    double n = p8_fl_d(L, 1);
+    lua_Number n = p8_fl_n(L, 1);
     int v = (con->flags && n >= 0 && n < MOY_FLAGS)
             ? con->flags[(int)n] : 0;
     if (lua_isnoneornil(L, 2)) lua_pushinteger(L, v);
-    else lua_pushboolean(L, (v >> (f2i((lua_Number)p8_fl_d(L, 2)) & 7)) & 1);
+    else lua_pushboolean(L, (v >> (f2i(p8_fl_n(L, 2)) & 7)) & 1);
     return 1;
 }
 
 static int l_p8fset(lua_State *L)
 {
     moy_console *con = p8_of(L)->con;
-    double n = p8_fl_d(L, 1);
+    lua_Number n = p8_fl_n(L, 1);
     int i;
     if (!con->flags || !(n >= 0 && n < MOY_FLAGS)) return 0;
     i = (int)n;
     if (lua_isnoneornil(L, 3)) {                       /* fset(n, byte) */
-        con->flags[i] = (uint8_t)(f2i((lua_Number)p8_fl_d(L, 2)) & 0xff);
+        con->flags[i] = (uint8_t)(f2i(p8_fl_n(L, 2)) & 0xff);
     } else {                                           /* fset(n, bit, on) */
-        int bit = 1 << (f2i((lua_Number)p8_fl_d(L, 2)) & 7);
+        int bit = 1 << (f2i(p8_fl_n(L, 2)) & 7);
         if (lua_toboolean(L, 3)) con->flags[i] = (uint8_t)(con->flags[i] | bit);
         else con->flags[i] = (uint8_t)(con->flags[i] & ~bit);
     }
@@ -659,12 +785,25 @@ static int p8_digit(int ch)
     return 0;
 }
 
+/* A P8SCII 4-character hex parameter -- the address and length the raw-memory
+ * print commands take. */
+static unsigned p8_hex4(const char *s)
+{
+    return (unsigned)((p8_digit((unsigned char)s[0]) & 15) << 12)
+         | (unsigned)((p8_digit((unsigned char)s[1]) & 15) << 8)
+         | (unsigned)((p8_digit((unsigned char)s[2]) & 15) << 4)
+         | (unsigned)( p8_digit((unsigned char)s[3]) & 15);
+}
+
 typedef struct {
     moy_canvas *c;
+    moy_p8 *m;                   /* the machine: the custom font is memory */
     moy_ds ds;                   /* camera, clip and the raster, read once */
     int fg, bg, wide, tall, invert;
     int ocol, obits, oonly;      /* \^o outline: colour (-1 none), 8 neighbour bits, interior skipped */
     int ouse_fg;                 /* outline in the current colour ("$" / "!") */
+    int font;                    /* 0 the system font, 1 the block at 0x5600 */
+    int fw, fw2, fh, fox, foy;   /* cell width / width past 128 / height / draw offset */
 } p8_pen;
 
 static void p8_cell(const p8_pen *pen, int cx, int cy, int w, int h, int col)
@@ -699,7 +838,7 @@ static void p8_cell(const p8_pen *pen, int cx, int cy, int w, int h, int col)
  * cell is painted exactly when it is unlit and an active direction finds a
  * lit neighbour, and the colour is the same however many times it is written. */
 #define P8_BW 18
-#define P8_BH 14
+#define P8_BH 18                 /* a custom font is 8 rows; tall doubles it */
 #define P8_BMASK ((uint32_t)((1u << P8_BW) - 1u))
 
 static void p8_lit(const p8_pen *pen, int b, uint32_t lit[P8_BH])
@@ -710,7 +849,16 @@ static void p8_lit(const p8_pen *pen, int b, uint32_t lit[P8_BH])
 #define LIT(gx, gy) \
         for (yy = 0; yy < sy; yy++) \
             lit[1 + (gy) * sy + yy] |= col << (1 + (gx) * sx)
-    if (b >= 128 && b < 128 + 26) {
+    if (pen->font) {
+        /* 8 bytes a character from 0x5600, a row each, low bit on the left.
+           Characters 0..15 are never drawn: their 128 bytes are the font's
+           own attributes and the per-character adjustments. */
+        const uint8_t *g = pen->m->mem + P8_FONT + (unsigned)b * 8u;
+        if (b >= 16)
+            for (r = 0; r < 8; r++)
+                for (kk = 0; kk < 8; kk++)
+                    if ((g[r] >> kk) & 1) { LIT(kk, r); }
+    } else if (b >= 128 && b < 128 + 26) {
         const uint8_t *rows = P8_WIDE + (b - 128) * 5;
         for (r = 0; r < 5; r++)
             for (kk = 0; kk < 7; kk++)
@@ -721,6 +869,20 @@ static void p8_lit(const p8_pen *pen, int b, uint32_t lit[P8_BH])
             if ((g >> q) & 1u) { LIT(q % 3, q / 3); }
     }
 #undef LIT
+}
+
+/* A custom font character's width adjustment, and whether it is lifted a
+ * pixel: one NIBBLE each from 0x5608 on, low nibble first, character 16 up. */
+static int p8_font_adj(const p8_pen *pen, int b, int *up)
+{
+    static const int w[8] = { 0, 1, 2, 3, -4, -3, -2, -1 };
+    unsigned nib;
+    *up = 0;
+    if (b < 16) return 0;
+    nib = pen->m->mem[P8_FONT + 8u + (unsigned)((b - 16) >> 1)];
+    nib = ((b - 16) & 1) ? (nib >> 4) : (nib & 15);
+    *up = (nib & 8) ? 1 : 0;
+    return w[nib & 7];
 }
 
 /* One bitmap row onto the canvas at screen row y. The clip test on y is the
@@ -748,19 +910,26 @@ static int p8_glyph(const p8_pen *pen, int b, int cx, int cy)
     static const int dy[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
     int sx = 1 + pen->wide, sy = 1 + pen->tall;
     int fg = pen->fg, bg = pen->bg;
-    int adv, yy, i, hmax = 1 + 5 * sy;   /* the last row an outline can touch */
+    int adv, yy, i, up = 0, rows_h = pen->font ? 8 : 5;
+    int hmax = 1 + rows_h * sy;          /* the last row an outline can touch */
     uint32_t lit[P8_BH];
     b = btn_glyph(b);
-    if (b >= 128 && b < 128 + 26) {
-        const uint8_t *rows = P8_WIDE + (b - 128) * 5;
+    if (hmax > P8_BH - 1) hmax = P8_BH - 1;
+    if (pen->font) {
+        adv = ((b < 128 ? pen->fw : pen->fw2) + p8_font_adj(pen, b, &up)) * sx;
+    } else if (b >= 128 && b < 128 + 26) {
+        const uint8_t *rws = P8_WIDE + (b - 128) * 5;
         int r, any = 0;
-        for (r = 0; r < 5; r++) any |= rows[r];
-        adv = any ? 8 * sx : 4 * sx;
+        for (r = 0; r < 5; r++) any |= rws[r];
+        adv = (any ? 2 * pen->fw : pen->fw) * sx;
     } else {
-        adv = 4 * sx;
+        adv = pen->fw * sx;
     }
-    if (pen->invert) { p8_cell(pen, cx, cy, adv, 6 * sy, fg); fg = bg < 0 ? 0 : bg; }
-    else if (bg >= 0) p8_cell(pen, cx, cy, adv, 6 * sy, bg);
+    cx += pen->fox;
+    cy += pen->foy - up;
+    if (adv < 0) adv = 0;
+    if (pen->invert) { p8_cell(pen, cx, cy, adv, pen->fh * sy, fg); fg = bg < 0 ? 0 : bg; }
+    else if (bg >= 0) p8_cell(pen, cx, cy, adv, pen->fh * sy, bg);
     p8_lit(pen, b, lit);
     if (pen->ocol >= 0 || pen->ouse_fg) {
         moy_pixel opx = pen->c->store[(pen->ouse_fg ? fg : pen->ocol) & 63];
@@ -782,6 +951,20 @@ static int p8_glyph(const p8_pen *pen, int b, int cx, int cy)
     return adv;
 }
 
+/* The custom font's own cell, from the eight attribute bytes at 0x5600: width,
+ * width for character 128 and up, height, then the draw offset. A zero means
+ * the font never set it, so the system cell stands. */
+static void p8_font_cell(p8_pen *pen)
+{
+    const uint8_t *a = pen->m->mem + P8_FONT;
+    if (!pen->font) return;
+    if (a[0]) pen->fw  = a[0];
+    if (a[1]) pen->fw2 = a[1];
+    if (a[2]) pen->fh  = a[2];
+    pen->fox = (int)(int8_t)a[3];
+    pen->foy = (int)(int8_t)a[4];
+}
+
 /* The string, at (x, y), in colour `col` -- everything print does once its
  * arguments are resolved. Split out so the shim's `print` (which resolves the
  * pen, the cursor and p8's number formatting) is one binding call and not
@@ -792,12 +975,35 @@ static int p8_text(moy_p8 *p, const char *s, size_t len, int x, int y, int col)
     p8_pen pen;
     size_t k;
     int cx, cy, tabw = 16, repeat = 1;
+    unsigned att = p->mem[P8_PATT], nib;
     pen.c = p->con->canvas;
+    pen.m = p;
     pen.ds = moy_ds_of(pen.c);           /* cls is the only thing print calls
                                             that touches the raster, and it
                                             moves neither camera nor clip */
     pen.fg = col; pen.bg = -1; pen.wide = pen.tall = pen.invert = 0;
     pen.ocol = -1; pen.obits = 0; pen.oonly = 0; pen.ouse_fg = 0;
+    /* THE ATTRIBUTES ARE RESET EVERY PRINT (Appendix A), which is what makes
+     * 0x5f58..0x5f5b the place a cart sets them: bit 0 of 0x5f58 says the rest
+     * of that byte is meant, and 0x5f59..0x5f5b carry cell width, height, the
+     * width past character 128 and the draw offset, a nibble each, zero
+     * meaning "leave it". The system font's cell is 4x6. */
+    pen.font = 0; pen.fw = 4; pen.fw2 = 8; pen.fh = 6; pen.fox = 0; pen.foy = 0;
+    if (att & 0x01) {
+        if (att & 0x80) pen.font = 1;
+        if (att & 0x04) pen.wide = 1;
+        if (att & 0x08) pen.tall = 1;
+        if (att & 0x20) pen.invert = 1;
+    }
+    p8_font_cell(&pen);
+    nib = p->mem[P8_PATT + 1];
+    if (nib & 15) pen.fw = (int)(nib & 15);
+    if (nib >> 4)  pen.fh = (int)(nib >> 4);
+    nib = p->mem[P8_PATT + 2];
+    if (nib & 15) pen.fw2 = (int)(nib & 15);
+    nib = p->mem[P8_PATT + 3];
+    if (nib & 15) pen.fox = (int)(nib & 15);
+    if (nib >> 4)  pen.foy = (int)(nib >> 4);
     cx = x; cy = y;
     for (k = 0; k < len; k++) {
         int b = (unsigned char)s[k];
@@ -847,6 +1053,28 @@ static int p8_text(moy_p8 *p, const char *s, size_t len, int x, int y, int col)
                     k += 3;
                 }
                 break;
+            /* RAW MEMORY WRITES (Appendix A): `\^@addrnnnn` pokes the nnnn
+             * bytes that follow to addr, `\^!addr` pokes ALL of them. A
+             * one-kilobyte cart keeps its sprite sheet in a string and
+             * unpacks it with one print (`loom valley`), and neither the
+             * bytes nor the command may reach the raster. */
+            case '@':
+                if (k + 8 < len) {
+                    unsigned a = p8_hex4(s + k + 1), cnt = p8_hex4(s + k + 5);
+                    size_t at = k + 9;
+                    if (cnt > len - at) cnt = (unsigned)(len - at);
+                    for (; cnt--; at++, a++) poke_byte(p, a, (uint8_t)s[at]);
+                    k = at - 1;
+                }
+                break;
+            case '!':
+                if (k + 4 < len) {
+                    unsigned a = p8_hex4(s + k + 1);
+                    size_t at = k + 5;
+                    for (; at < len; at++, a++) poke_byte(p, a, (uint8_t)s[at]);
+                    k = len;
+                }
+                break;
             case '#': pen.bg = pen.bg < 0 ? 0 : pen.bg; break;   /* solid background on */
             case 'g': cx = x; cy = y; break;
             case 'c': if (k + 1 < len) moy_cls(pen.c, p8_digit((unsigned char)s[++k]) & 15); cx = x; cy = y; break;
@@ -854,18 +1082,23 @@ static int p8_text(moy_p8 *p, const char *s, size_t len, int x, int y, int col)
                                          cy = p8_digit((unsigned char)s[k + 2]) * 4; }
                       k += 2; break;
             case 's': if (k + 1 < len) tabw = p8_digit((unsigned char)s[++k]); if (tabw < 1) tabw = 16; break;
-            case 'x': case 'y': case 'd': case 'r': k++; break;   /* one param, ignored */
+            case 'x': if (k + 1 < len) pen.fw = p8_digit((unsigned char)s[++k]); break;
+            case 'y': if (k + 1 < len) pen.fh = p8_digit((unsigned char)s[++k]); break;
+            case 'd': case 'r': k++; break;       /* per-character delay, wrap */
             default: break;                                       /* b = p 1-9: nothing to do */
             }
             break;
         case 7:  while (k + 1 < len && s[k + 1] != ' ') k++; break;
-        case 8:  cx -= 4 * (1 + pen.wide); break;
+        case 8:  cx -= pen.fw * (1 + pen.wide); break;
         case 9:  cx = x + ((cx - x) / tabw + 1) * tabw; break;
-        case 10: cx = x; cy += 6 * (1 + pen.tall); break;
+        case 10: cx = x; cy += pen.fh * (1 + pen.tall); break;
         case 11: k++; break;
         case 12: if (k + 1 < len) pen.fg = p8_digit((unsigned char)s[++k]) & 15; break;
         case 13: cx = x; break;
-        default: break;                                           /* 14, 15: font switch */
+        case 14: pen.font = 1; p8_font_cell(&pen); break;  /* the font at 0x5600 */
+        case 15: pen.font = 0; pen.fw = 4; pen.fw2 = 8; pen.fh = 6;
+                 pen.fox = pen.foy = 0; break;             /* ...and back */
+        default: break;
         }
     }
     return cx;                           /* PICO-8 0.2: print returns the pen x */
@@ -965,6 +1198,83 @@ static int p8_shape_col(lua_State *L, moy_p8 *p, int i)
     return (int)(v & 15);
 }
 
+/* -- PICO-8's INVERTED fills (0x5f34 bit 1) --------------------------------
+ *
+ * "When bits 0x1800.0000 are set in COL, and @0x5F34 & 2 == 2, the circle is
+ * drawn inverted" (the manual, under CIRCFILL and RRECTFILL; the fillp section
+ * lists the bit as `0x0800.0000 invert the drawing operation`). Inverted means
+ * the verb paints the COMPLEMENT: everything inside the clip that the shape
+ * does not cover.
+ *
+ * `gift guardian` draws its snow globes with it -- a filled circle of colour 6
+ * with the bits set FRAMES the globe and leaves the house inside showing
+ * through. Drawn the ordinary way it is a solid disc over the art, which is
+ * what this console did until 2026-09-14 and what made the cart look like its
+ * sprites were missing. Nothing named 0x5f34 anywhere in this repository
+ * before that, so the verdict did not report it either.
+ *
+ * Both bits are an OPT-IN: the mode byte arms it and the colour asks for it,
+ * so a cart that pokes 0x5f34 and then draws an ordinary shape is unaffected.
+ * The complement is emitted as row spans through the same moy_rect the shape
+ * would have used, so the camera, the clip and the fill pattern all apply
+ * exactly as they do to the shape -- and the circle's span rule below is
+ * moy_circ's own, which makes the two exact complements with no seam.
+ *
+ * OVALFILL is NOT here: moy_ellipse walks its spans with Bresenham, and a
+ * second copy of that walk is how the two would drift apart. PICO8.md says so.
+ */
+static int p8_col_inverts(lua_State *L, moy_p8 *p, int i)
+{
+    /* The colour's 0x1800.0000 bits are the INTEGER part's 0x1800 -- p8_fl
+     * floors, which is where they land. */
+    if (!(p->mem[P8_DRAWM] & 2) || lua_isnoneornil(L, i)) return 0;
+    return (p8_fl(L, i) & 0x1800) == 0x1800;
+}
+
+/* One screen-space rectangle, in the world coordinates moy_rect takes. It
+ * re-clips, so handing it the whole clip row is safe. */
+static void p8_fill_screen(moy_canvas *c, int sx0, int sy0, int sx1, int sy1,
+                           int col)
+{
+    if (sx1 < sx0 || sy1 < sy0) return;
+    moy_rect(c, sx0 + c->cam_x, sy0 + c->cam_y,
+             sx1 - sx0 + 1, sy1 - sy0 + 1, col);
+}
+
+static void p8_circ_inv(moy_canvas *c, int cx, int cy, int r, int col)
+{
+    int sy, cx0 = c->clip_x0, cy0 = c->clip_y0;
+    int cx1 = c->clip_x1 - 1, cy1 = c->clip_y1 - 1;
+    for (sy = cy0; sy <= cy1; sy++) {
+        int dy = sy + c->cam_y - cy, s = 0, t;
+        if (r < 0 || dy < -r || dy > r) {        /* the shape misses this row */
+            p8_fill_screen(c, cx0, sy, cx1, sy, col);
+            continue;
+        }
+        t = r * r - dy * dy;                     /* moy_circ's span, exactly */
+        while ((s + 1) * (s + 1) <= t) s++;
+        p8_fill_screen(c, cx0, sy, cx - s - c->cam_x - 1, sy, col);
+        p8_fill_screen(c, cx + s - c->cam_x + 1, sy, cx1, sy, col);
+    }
+}
+
+static void p8_rect_inv(moy_canvas *c, int x, int y, int w, int h, int col)
+{
+    int cx0 = c->clip_x0, cy0 = c->clip_y0;
+    int cx1 = c->clip_x1 - 1, cy1 = c->clip_y1 - 1;
+    int sx0 = x - c->cam_x, sy0 = y - c->cam_y, sx1, sy1;
+    if (w <= 0 || h <= 0) {                      /* covers nothing: all of it */
+        p8_fill_screen(c, cx0, cy0, cx1, cy1, col);
+        return;
+    }
+    sx1 = sx0 + w - 1;
+    sy1 = sy0 + h - 1;
+    p8_fill_screen(c, cx0, cy0, cx1, sy0 - 1, col);          /* above */
+    p8_fill_screen(c, cx0, sy1 + 1, cx1, cy1, col);          /* below */
+    p8_fill_screen(c, cx0, sy0, sx0 - 1, sy1, col);          /* left */
+    p8_fill_screen(c, sx1 + 1, sy0, cx1, sy1, col);          /* right */
+}
+
 /* p8's rectangles take the FAR CORNER; the console's take a size. */
 static void p8_corners(lua_State *L, int32_t *x, int32_t *y,
                        int32_t *w, int32_t *h)
@@ -998,15 +1308,42 @@ static int l_p8_pget(lua_State *L)
 /* No "continue from the last endpoint" form: the shim has none either -- p8's
  * `line(x1, y1)` draws from (x1, y1) to (0, 0) here, because fl(nil) is 0.
  * That is why 0x5f3c-0x5f3f holds nothing; there is no endpoint to keep. */
+/* LINE(X0, Y0, [X1, Y1, [COL]]), and PICO-8's LINE STATE with it: the end of
+ * the last line is remembered, so LINE(X1, Y1) continues a polyline from it
+ * and LINE() with no arguments makes the next call only MARK the end without
+ * drawing. `loom valley` draws its whole terrain as one such polyline, and
+ * without the state every segment ran back to (0, 0).
+ *
+ * LINE(COL) -- one argument -- is the colour, and resets the state with it.
+ * The manual documents 0, 2, 3, 4 and 5 arguments; this is the reading that
+ * makes `line(1) line(-20,20) ... line(198,20)` draw the figure zep's own
+ * cart draws, and a lone number is a colour everywhere else in the API. */
 static int l_p8_line(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
     int32_t x0, y0, x1, y1;
-    if (p8_fill_skip(p)) return 0;
-    x0 = p8_fl(L, 1); y0 = p8_fl(L, 2);
-    x1 = p8_fl(L, 3); y1 = p8_fl(L, 4);
-    moy_line(p->con->canvas, (int)x0, (int)y0, (int)x1, (int)y1,
-             p8_shape_col(L, p, 5));
+    int col_at, draw;
+    if (lua_isnoneornil(L, 1)) { p->line_set = 0; return 0; }
+    if (lua_isnoneornil(L, 2)) {
+        p->mem[P8_PEN] = (uint8_t)(p8_fl(L, 1) & 0x8f);
+        p->line_set = 0;
+        return 0;
+    }
+    if (lua_isnoneornil(L, 4)) {          /* LINE(X1, Y1, [COL]): continue */
+        x1 = p8_fl(L, 1); y1 = p8_fl(L, 2);
+        x0 = p->line_x; y0 = p->line_y;
+        col_at = 3;
+        draw = p->line_set;
+    } else {
+        x0 = p8_fl(L, 1); y0 = p8_fl(L, 2);
+        x1 = p8_fl(L, 3); y1 = p8_fl(L, 4);
+        col_at = 5;
+        draw = 1;
+    }
+    p->line_x = x1; p->line_y = y1; p->line_set = 1;
+    if (draw && !p8_fill_skip(p))
+        moy_line(p->con->canvas, (int)x0, (int)y0, (int)x1, (int)y1,
+                 p8_shape_col(L, p, col_at));
     return 0;
 }
 
@@ -1016,6 +1353,11 @@ static int l_p8_rectfill(lua_State *L)
     int32_t x, y, w, h;
     if (p8_fill_skip(p)) return 0;
     p8_corners(L, &x, &y, &w, &h);
+    if (p8_col_inverts(L, p, 5)) {
+        p8_rect_inv(p->con->canvas, (int)x, (int)y, (int)w, (int)h,
+                    p8_shape_col(L, p, 5));
+        return 0;
+    }
     moy_rect(p->con->canvas, (int)x, (int)y, (int)w, (int)h,
              p8_shape_col(L, p, 5));
     return 0;
@@ -1038,6 +1380,11 @@ static int l_p8_circfill(lua_State *L)
     int32_t x, y, r;
     if (p8_fill_skip(p)) return 0;
     x = p8_fl(L, 1); y = p8_fl(L, 2); r = p8_fl(L, 3);
+    if (p8_col_inverts(L, p, 4)) {
+        p8_circ_inv(p->con->canvas, (int)x, (int)y, (int)r,
+                    p8_shape_col(L, p, 4));
+        return 0;
+    }
     moy_circ(p->con->canvas, (int)x, (int)y, (int)r, p8_shape_col(L, p, 4));
     return 0;
 }
@@ -1077,15 +1424,15 @@ static int l_p8_oval(lua_State *L)
 /* `v or 1` for spr's w/h, which the shim does NOT floor. `is_one` is Lua's
  * `w == 1`, and a numeric STRING is not equal to 1 there however it converts
  * for the arithmetic below -- so the two questions are answered separately. */
-static double p8_or1(lua_State *L, int i, int *is_one)
+static lua_Number p8_or1(lua_State *L, int i, int *is_one)
 {
     int isnum;
     lua_Number f;
-    if (!lua_toboolean(L, i)) { *is_one = 1; return 1.0; }
+    if (!lua_toboolean(L, i)) { *is_one = 1; return (lua_Number)1; }
     if (lua_type(L, i) == LUA_TNUMBER) {
         f = lua_tonumber(L, i);
         *is_one = (f == (lua_Number)1);
-        return (double)f;
+        return f;
     }
     *is_one = 0;
     f = lua_tonumberx(L, i, &isnum);
@@ -1094,17 +1441,19 @@ static double p8_or1(lua_State *L, int i, int *is_one)
                    luaL_typename(L, i));
         return 0;
     }
-    return (double)f;
+    return f;
 }
 
 /* `for k = 0, v - 1`: Lua floors a float limit onto the integer grid, and a
  * limit below zero is an empty loop. Clamped at the top because the loop that
  * would follow is not one anybody survives either way. */
-static int32_t p8_for_limit(double v)
+static int32_t p8_for_limit(lua_Number v)
 {
-    double lim = floor(v - 1.0);
+    lua_Number lim = p8_floor(v - (lua_Number)1);
     if (!(lim >= 0)) return -1;                 /* NaN takes this arm too */
-    if (lim > 2147483647.0) return 2147483647;
+    /* lim is integral, so `> 2147483647` and `>= 2^31` select the same values
+     * -- and only the second bound is exact in a float. */
+    if (!(lim < (lua_Number)2147483648.0)) return 2147483647;
     return (int32_t)lim;
 }
 
@@ -1116,7 +1465,7 @@ static int l_p8_spr(lua_State *L)
     int flip = (fx ? MOY_FLIP_X : 0) | (fy ? MOY_FLIP_Y : 0);
     int wone, hone;
     int32_t n, x, y;
-    double w, h;
+    lua_Number w, h;
     if (!con->sheet) return 0;
     n = p8_fl(L, 1); x = p8_fl(L, 2); y = p8_fl(L, 3);
     w = p8_or1(L, 4, &wone);
@@ -1132,12 +1481,15 @@ static int l_p8_spr(lua_State *L)
         int32_t tx, ty, wlim = p8_for_limit(w), hlim = p8_for_limit(h);
         for (ty = 0; ty <= hlim; ty++) {
             for (tx = 0; tx <= wlim; tx++) {
-                double cx = fx ? (w - 1.0 - (double)tx) : (double)tx;
-                double cy = fy ? (h - 1.0 - (double)ty) : (double)ty;
+                lua_Number cx = fx ? (lua_Number)(w - (lua_Number)1 - (lua_Number)tx)
+                                   : (lua_Number)tx;
+                lua_Number cy = fy ? (lua_Number)(h - (lua_Number)1 - (lua_Number)ty)
+                                   : (lua_Number)ty;
                 int32_t sx = u2i((uint32_t)x + (uint32_t)(tx * 8));
                 int32_t sy = u2i((uint32_t)y + (uint32_t)(ty * 8));
                 moy_spr(con->canvas, con->sheet,
-                        (int)f2i((lua_Number)((double)n + cx + cy * 16.0)),
+                        (int)f2i((lua_Number)((lua_Number)n + cx
+                                              + cy * (lua_Number)16)),
                         (int)sx, (int)sy, -1, 1, flip);
             }
         }
@@ -1201,6 +1553,33 @@ static int l_p8_cursor(lua_State *L)
 }
 
 /* p8's palt default: colour 0 transparent, the rest opaque. */
+/* The draw palette and its transparency, written to the canvas AND to the copy
+ * that survives the console's per-frame reset (moy_p8.dpal; __moy_p8_frame puts
+ * it back at the top of each _draw, exactly as it already did for the screen
+ * palette at 0x5f10). PICO-8 keeps both across frames -- a cart sets them once
+ * in _init and draws -- and until 2026-09-14 this console kept neither, so
+ * `gift guardian`'s `palt(14, true)` lasted one frame and its sprite key drew
+ * as a pink block from the second one on. */
+static void p8_pal_set(moy_p8 *p, int i, int col)
+{
+    i &= 15;
+    p->dpal[i] = (uint8_t)((p->dpal[i] & 0x10) | (col & 15));
+    moy_pal(p->con->canvas, i, col & 15);
+}
+
+static void p8_palt_set(moy_p8 *p, int i, int on)
+{
+    i &= 15;
+    p->dpal[i] = (uint8_t)((p->dpal[i] & 15) | (on ? 0x10 : 0));
+    moy_palt(p->con->canvas, i, on);
+}
+
+static void p8_dpal_default(moy_p8 *p)
+{
+    int i;
+    for (i = 0; i < 16; i++) p->dpal[i] = (uint8_t)(i | (i == 0 ? 0x10 : 0));
+}
+
 static void p8_palt_default(moy_canvas *c)
 {
     moy_palt_reset(c);
@@ -1227,6 +1606,7 @@ static int l_p8_pal(lua_State *L)
         moy_pal_reset(c);
         for (i = 0; i < 16; i++) p->mem[P8_SPAL + i] = (uint8_t)i;
         p8_palt_default(c);
+        p8_dpal_default(p);
         return 0;
     }
     if (lua_type(L, 1) == LUA_TTABLE) {
@@ -1247,7 +1627,7 @@ static int l_p8_pal(lua_State *L)
             if (lua_type(L, -2) == LUA_TNUMBER && lua_type(L, -1) == LUA_TNUMBER) {
                 int32_t k = p8_fl(L, -2) & 15;
                 if (screen) p8_spal_set(p, (int)k, p8_scol(L, -1));
-                else moy_pal(c, (int)k, p8_pcol(L, p, -1));
+                else p8_pal_set(p, (int)k, p8_pcol(L, p, -1));
             }
             lua_pop(L, 1);
         }
@@ -1257,7 +1637,7 @@ static int l_p8_pal(lua_State *L)
         p8_spal_set(p, (int)(p8_fl(L, 1) & 15), p8_scol(L, 2));
         return 0;
     }
-    moy_pal(c, (int)(p8_fl(L, 1) & 15), p8_pcol(L, p, 2));
+    p8_pal_set(p, (int)(p8_fl(L, 1) & 15), p8_pcol(L, p, 2));
     return 0;
 }
 
@@ -1265,16 +1645,21 @@ static int l_p8_palt(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
     moy_canvas *c = p->con->canvas;
-    if (lua_isnoneornil(L, 1)) { p8_palt_default(c); return 0; }
-    if (lua_isnoneornil(L, 2)) {          /* palt(bits): all sixteen at once */
-        uint32_t bits = (uint32_t)p8_fl(L, 1);
-        int i;
-        moy_palt_reset(c);
-        for (i = 0; i < 16; i++)
-            moy_palt(c, i, (int)((bits >> (15 - i)) & 1u));
+    int i;
+    if (lua_isnoneornil(L, 1)) {
+        p8_palt_default(c);
+        for (i = 0; i < 16; i++) p->dpal[i] = (uint8_t)((p->dpal[i] & 15)
+                                                        | (i == 0 ? 0x10 : 0));
         return 0;
     }
-    moy_palt(c, (int)(p8_fl(L, 1) & 15), lua_toboolean(L, 2));
+    if (lua_isnoneornil(L, 2)) {          /* palt(bits): all sixteen at once */
+        uint32_t bits = (uint32_t)p8_fl(L, 1);
+        moy_palt_reset(c);
+        for (i = 0; i < 16; i++)
+            p8_palt_set(p, i, (int)((bits >> (15 - i)) & 1u));
+        return 0;
+    }
+    p8_palt_set(p, (int)(p8_fl(L, 1) & 15), lua_toboolean(L, 2));
     return 0;
 }
 
@@ -1411,20 +1796,30 @@ static int l_p8_sset(lua_State *L)
  * pixels the camera shows first, and the default costs the cells on screen
  * rather than 8,192 a frame. The camera read is the CONSOLE's, which is the
  * machine's truth: a cart that pokes 0x5f28 moves this too, where the shim's
- * Lua copy would have gone stale. */
+ * Lua copy would have gone stale.
+ *
+ * THAT READ IS ALSO WHY THE CAMERA DOES NOT HAVE TO MOVE WITH THIS VERB. The
+ * coupling between the two is one-directional: a C camera() with the shim's
+ * Lua map() in play leaves that loop clipping against a copy nothing updates,
+ * but this verb with the shim's Lua camera() needs nothing from the shim at
+ * all -- camera() writes the console's camera, and the console's camera is
+ * what these four lines read. So the shim binds this one alone, on every host
+ * including one carrying its own native masked walk: both walks are moy_spr
+ * per cell and cost the same, and what the C actually removes is the wrapper
+ * around them (#66, #67). */
 static int l_p8_map(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
     moy_console *con = p->con;
     int32_t celx, cely, sx, sy, cw, ch, mask, i0, i1, j0, j1;
     if (!con->sheet || !con->map) return 0;
-    celx = (int32_t)p8_flr_d(L, 1);
-    cely = (int32_t)p8_flr_d(L, 2);
-    sx = (int32_t)p8_flr_d(L, 3);
-    sy = (int32_t)p8_flr_d(L, 4);
-    cw = lua_isnoneornil(L, 5) ? 128 : (int32_t)p8_flr_d(L, 5);
-    ch = lua_isnoneornil(L, 6) ? 64 : (int32_t)p8_flr_d(L, 6);
-    mask = lua_toboolean(L, 7) ? (int32_t)p8_flr_d(L, 7) : 0;
+    celx = p8_flr_i(L, 1);
+    cely = p8_flr_i(L, 2);
+    sx = p8_flr_i(L, 3);
+    sy = p8_flr_i(L, 4);
+    cw = lua_isnoneornil(L, 5) ? 128 : p8_flr_i(L, 5);
+    ch = lua_isnoneornil(L, 6) ? 64 : p8_flr_i(L, 6);
+    mask = lua_toboolean(L, 7) ? p8_flr_i(L, 7) : 0;
     i0 = p8_floordiv(con->canvas->cam_x - sx, 8);
     i1 = p8_floordiv(con->canvas->cam_x + 127 - sx, 8);
     if (i0 > 0) { celx += i0; sx += i0 * 8; cw -= i0; i1 -= i0; }
@@ -1457,7 +1852,13 @@ static int l_p8_frame(lua_State *L)
     moy_p8 *p = p8_of(L);
     moy_canvas *c = p->con->canvas;
     int i;
-    p8_palt_default(c);
+    /* The cart's OWN draw palette and transparency, not p8's default: PICO-8
+     * keeps both across frames and the console just reset them. */
+    moy_palt_reset(c);
+    for (i = 0; i < 16; i++) {
+        moy_pal(c, i, p->dpal[i] & 15);
+        moy_palt(c, i, (p->dpal[i] & 0x10) != 0);
+    }
     for (i = 0; i < 16; i++) {
         int v = col_in(p->mem[P8_SPAL + (unsigned)i]);
         if (v != i) moy_pal_screen(c, i, v);
@@ -1766,6 +2167,295 @@ static int l_tonum(lua_State *L)
     return 1;
 }
 
+/* -- split ----------------------------------------------------------------
+ *
+ * split(s, [sep], [convert]) is PICO-8's own -- Lua's string library has no
+ * twin for it -- and a ported cart's data is written in it: one
+ * `split"1,2,3,..."` per row, hundreds of them, and the carts that rebuild a
+ * level or a sprite out of them do it inside the frame rather than once.
+ * The shim's Lua (p8_lua_port.py) is the reference, transcribed into
+ * test/p8lib.moy beside this so the two lanes are held to one answer.
+ *
+ * Which mode runs is the TYPE of sep, never its value: a number cuts
+ * fixed-width chunks, anything else is a PLAIN (non-pattern) separator
+ * defaulting to a comma. Every part then goes through tonumber unless the
+ * third argument is false, so "1" comes back as the integer 1 and "1a" comes
+ * back as itself.
+ */
+
+/* One part, kept as the shim's `keep` keeps it. The conversion is tonumber's
+ * exactly -- lua_stringtonumber over the whole part, integer subtype and all
+ * -- because `split("1,2")[1]` is an INTEGER in the Lua lane, and a float
+ * here would print differently and floor-divide differently. */
+static void split_keep(lua_State *L, const char *p, size_t len, int as_num,
+                       lua_Integer n)
+{
+    lua_pushlstring(L, p, len);
+    if (as_num) {
+        /* lua_stringtonumber PUSHES whatever it managed to read and reports
+         * how far it got, so a part that only STARTS with a number leaves one
+         * on the stack -- "23\0xx" reads as 23 and stops at the NUL. tonumber
+         * calls that a failure, and so must this, but the value it pushed has
+         * to come back off or the table below is no longer at index -2 and
+         * rawseti writes into a string. The fuzzer found it; nothing else
+         * would have, since no cart's data row carries a NUL. */
+        const char *part = lua_tostring(L, -1);  /* Lua strings are NUL-terminated */
+        size_t used = lua_stringtonumber(L, part);
+        if (used == len + 1) lua_replace(L, -2);   /* the number is the part */
+        else if (used != 0) lua_pop(L, 1);         /* a prefix only: keep text */
+    }
+    lua_rawseti(L, -2, n);
+}
+
+static int l_split(lua_State *L)
+{
+    /* THE ARITY, PINNED, before a single push. `split"1,2"` passes one
+     * argument, and a stringified copy of it pushed onto the stack lands at
+     * index 2 -- where a later lua_isnoneornil(L, 2) reads it as the
+     * separator and the string cuts itself apart on its own text. settop is
+     * the whole defence: after it, indices 2 and 3 are the caller's or nil. */
+    lua_settop(L, 3);
+
+    if (lua_isnil(L, 1)) {           /* split(nil) is an empty table, and the
+                                        separator is never even looked at */
+        lua_createtable(L, 0, 0);
+        return 1;
+    }
+    {
+        /* `if num == nil then num = true end`: only an explicit false turns
+         * conversion off, false and nil being Lua's only falsy values. */
+        const int as_num = lua_isnoneornil(L, 3) ? 1 : lua_toboolean(L, 3);
+        const int by_width = (lua_type(L, 2) == LUA_TNUMBER);
+        const char *sep = ",";
+        size_t seplen = 1;
+        const char *s;
+        size_t slen;
+        lua_Integer n = 0;
+
+        /* A numeric STRING is a separator, not a width: the shim asks
+         * type(sep) == "number", so "2" cuts on the digit two. lua_type, not
+         * lua_isnumber -- that one answers yes to both. */
+        if (!by_width && lua_toboolean(L, 2)) {
+            /* `sep or ","` makes nil and false a comma; a table or true
+             * reaches string.find in the Lua lane and errors there, as the
+             * argument check errors here. */
+            sep = luaL_checklstring(L, 2, &seplen);
+            if (seplen == 0) { sep = ","; seplen = 1; }  /* the shim's own "" test */
+        }
+        s = luaL_tolstring(L, 1, &slen);  /* tostring(s): __tostring honoured */
+        lua_createtable(L, 0, 0);
+
+        if (by_width) {
+            lua_Number w = lua_tonumber(L, 2);
+            lua_Integer step, i;
+            /* `step = sep < 1 and 1 or sep`, then the shim's `for` over it.
+             * A NaN width compares false both ways and the loop never runs.
+             * A fractional one is FLOORED, here and in the shim: the raw
+             * float used to reach string.sub and error on the first chunk,
+             * which is neither PICO-8's answer nor an answer at all. */
+            if (w != w) { lua_remove(L, -2); return 1; }
+            if (!(w >= 1)) w = 1;
+            step = (w >= (lua_Number)slen) ? (lua_Integer)slen : (lua_Integer)w;
+            if (step < 1) step = 1;
+            for (i = 1; i <= (lua_Integer)slen; i += step) {
+                size_t at = (size_t)i - 1, take = (size_t)step;
+                if (at + take > slen) take = slen - at;
+                split_keep(L, s + at, take, as_num, ++n);
+            }
+        } else {
+            size_t i = 0;
+            for (;;) {
+                const char *hit = NULL, *p = s + i;
+                size_t room = slen - i;
+                while (room >= seplen) {          /* string.find(..., plain) */
+                    const char *q = (const char *)memchr(p, sep[0],
+                                                         room - seplen + 1);
+                    if (q == NULL) break;
+                    if (memcmp(q, sep, seplen) == 0) { hit = q; break; }
+                    room -= (size_t)(q - p) + 1;
+                    p = q + 1;
+                }
+                if (hit == NULL) {                /* the tail, empty or not */
+                    split_keep(L, s + i, slen - i, as_num, ++n);
+                    break;
+                }
+                split_keep(L, s + i, (size_t)(hit - s) - i, as_num, ++n);
+                i = (size_t)(hit - s) + seplen;
+            }
+        }
+        lua_remove(L, -2);           /* drop the stringified subject */
+        return 1;
+    }
+}
+
+/* -- rnd / srand ----------------------------------------------------------
+ *
+ * The generator is GAMEPLAY, not a detail: a cart that seeds the same way
+ * must lay out the same level, and low mem sky rebuilds its whole sky from a
+ * seed every frame -- ~600 calls a frame across the two verbs, which is what
+ * makes them worth a crossing at all (#66, #67).
+ *
+ * So the sequence here is Lua's own xoshiro256** from lmathlib.c,
+ * TRANSCRIBED, not approximated: test/p8lib.moy seeds both lanes alike and
+ * compares 20,000 draws from each of eight seeds. Transcribed rather than
+ * called because there is no C API onto lmathlib's state -- and the shim uses
+ * math.random nowhere but these two verbs, so promoting the pair leaves
+ * exactly one generator behind a cart's randomness, as before.
+ *
+ * FIGS is the float mantissa, read the way lmathlib reads it, because the
+ * float-to-[0,1) step throws away 64 - FIGS bits and a build with a wider
+ * lua_Number must throw away fewer.
+ */
+#define P8_FIGS_RAW l_floatatt(MANT_DIG)
+#if P8_FIGS_RAW > 64
+#define P8_FIGS 64
+#else
+#define P8_FIGS P8_FIGS_RAW
+#endif
+#define P8_SCALE_FIG ((lua_Number)0.5 / (lua_Number)((uint64_t)1 << (P8_FIGS - 1)))
+
+static uint64_t rand_rotl(uint64_t x, int n)
+{
+    return (uint64_t)((x << n) | (x >> (64 - n)));
+}
+
+static uint64_t nextrand(uint64_t *s)
+{
+    uint64_t s0 = s[0], s1 = s[1], s2 = s[2] ^ s0, s3 = s[3] ^ s1;
+    uint64_t res = (uint64_t)(rand_rotl((uint64_t)(s1 * 5), 7) * 9);
+    s[0] = s0 ^ s3;
+    s[1] = s1 ^ s2;
+    s[2] = s2 ^ (uint64_t)(s1 << 17);
+    s[3] = rand_rotl(s3, 45);
+    return res;
+}
+
+/* lmathlib's I2d: the top FIGS bits, as a float in [0,1). */
+static lua_Number rand_i2d(uint64_t x)
+{
+    int64_t sx = (int64_t)(x >> (64 - P8_FIGS));
+    lua_Number res = (lua_Number)((lua_Number)sx * P8_SCALE_FIG);
+    if (sx < 0) res = (lua_Number)(res + (lua_Number)1);   /* only at FIGS 64 */
+    return res;
+}
+
+/* lmathlib's project: a uniform draw into [0, n], retried through the
+ * generator rather than folded, which is why it needs the state. */
+static lua_Unsigned rand_project(lua_Unsigned ran, lua_Unsigned n, uint64_t *s)
+{
+    if ((n & (n + 1)) == 0) return ran & n;      /* n + 1 a power of two */
+    else {
+        lua_Unsigned lim = n;
+        lim |= (lim >> 1);
+        lim |= (lim >> 2);
+        lim |= (lim >> 4);
+        lim |= (lim >> 8);
+        lim |= (lim >> 16);
+#if (LUA_MAXUNSIGNED >> 31) >= 3
+        lim |= (lim >> 32);
+#endif
+        while ((ran &= lim) > n) ran = (lua_Unsigned)nextrand(s);
+        return ran;
+    }
+}
+
+static void rand_setseed(uint64_t *s, lua_Unsigned n1, lua_Unsigned n2)
+{
+    int i;
+    s[0] = (uint64_t)n1;
+    s[1] = (uint64_t)0xff;                       /* never a zero state */
+    s[2] = (uint64_t)n2;
+    s[3] = 0;
+    for (i = 0; i < 16; i++) nextrand(s);        /* spread the seed */
+}
+
+/* srand(x) is mrandomseed(flr(x or 0)), and it answers what randomseed
+ * answers -- the two seed words -- because `return mrandomseed(...)` hands
+ * them straight back and a cart may keep them. */
+static int l_p8_srand(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    lua_Integer n1;
+    lua_settop(L, 1);
+    if (lua_isinteger(L, 1)) {
+        n1 = lua_tointeger(L, 1);
+    } else if (!lua_toboolean(L, 1)) {
+        n1 = 0;                                  /* `x or 0` */
+    } else {
+        lua_Number f = (lua_Number)l_mathop(floor)(luaL_checknumber(L, 1));
+        if (!lua_numbertointeger(f, &n1))        /* randomseed's own check */
+            return luaL_error(L, "number has no integer representation");
+    }
+    rand_setseed(p->rng, (lua_Unsigned)n1, 0);
+    lua_pushinteger(L, n1);
+    lua_pushinteger(L, 0);
+    return 2;
+}
+
+/* rnd(n): a TABLE picks one of its elements, anything else scales a float in
+ * [0,1). Both draw exactly one value from the generator before anything can
+ * go wrong, which is what keeps the sequence in step with the shim's. */
+static int l_p8_rnd(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    lua_settop(L, 1);
+    if (lua_type(L, 1) == LUA_TTABLE) {
+        lua_Integer c;
+        int isnum;
+        lua_Unsigned r;
+        lua_len(L, 1);                           /* `#n`, __len honoured */
+        lua_pushinteger(L, 0);
+        if (lua_compare(L, -2, -1, LUA_OPEQ)) {  /* `if c == 0 then nil` */
+            lua_pushnil(L);
+            return 1;
+        }
+        lua_pop(L, 1);
+        c = lua_tointegerx(L, -1, &isnum);
+        if (!isnum) return luaL_error(L, "number has no integer representation");
+        lua_pop(L, 1);
+        /* math.random(c): low is 1, so an empty interval is c < 1 */
+        r = (lua_Unsigned)nextrand(p->rng);
+        if (c < 1) return luaL_error(L, "bad argument #1 to 'random' "
+                                        "(interval is empty)");
+        r = rand_project(r, (lua_Unsigned)c - (lua_Unsigned)1, p->rng);
+        lua_geti(L, 1, (lua_Integer)(r + 1));    /* `n[...]`, __index honoured */
+        return 1;
+    }
+    /* `mrandom() * (n or 1)`, and the multiplication is LUA'S -- a numeric
+     * string coerces, a __mul answers, a boolean raises -- so lua_arith does
+     * it rather than a second transcription of the coercion rules. */
+    lua_pushnumber(L, rand_i2d(nextrand(p->rng)));
+    if (lua_toboolean(L, 1)) lua_pushvalue(L, 1);
+    else lua_pushinteger(L, 1);
+    lua_arith(L, LUA_OPMUL);
+    return 1;
+}
+
+/* The generator's starting point. lmathlib seeds its own from the clock and
+ * the address of L and offers no way to read that, so the machine borrows the
+ * SAME entropy by drawing two words from it, once, at open -- a cart that
+ * never calls srand still differs run to run, as it did before. */
+static void rand_open(lua_State *L, moy_p8 *p)
+{
+    lua_Unsigned n[2];
+    int i, top = lua_gettop(L);
+    n[0] = (lua_Unsigned)(size_t)L;
+    n[1] = (lua_Unsigned)(size_t)p;
+    lua_getglobal(L, "math");
+    if (lua_type(L, -1) == LUA_TTABLE) {
+        lua_getfield(L, -1, "random");
+        for (i = 0; i < 2 && lua_isfunction(L, -1); i++) {
+            lua_pushvalue(L, -1);
+            lua_pushinteger(L, 0);               /* math.random(0): all bits */
+            if (lua_pcall(L, 1, 1, 0) != LUA_OK) break;
+            n[i] ^= (lua_Unsigned)lua_tointeger(L, -1);
+            lua_pop(L, 1);
+        }
+    }
+    lua_settop(L, top);
+    rand_setseed(p->rng, n[0], n[1]);
+}
+
 /* -- the p8 bit verbs -----------------------------------------------------
  *
  * PICO-8's numbers are 16.16 fixed point and its bit verbs work on all 32
@@ -1945,13 +2635,16 @@ P8_BITOP(l_band, a & b, a & b)
 P8_BITOP(l_bor,  a | b, a | b)
 P8_BITOP(l_bxor, a ^ b, a ^ b)
 
+/* No integer fast path on bnot, shl, shr or lshr, and the omission is the
+ * whole point. A complement and a right shift move bits ACROSS the point, so
+ * p8 answers a fraction where an integer operator cannot -- `~3` is
+ * -3.0000153 and `shr(3, 1)` is 1.5; a left shift runs bits off the TOP of the
+ * 32-bit image, so `shl(1, 15)` is -32768 where Lua says 32768. Only
+ * band/bor/bxor keep one: two integers meeting in those three can neither
+ * reach the fractional half nor overflow. */
 static int l_bnot(lua_State *L)
 {
     lua_settop(L, 1);
-    if (or0_isint(L, 1)) {
-        lua_pushinteger(L, u2i(~(uint32_t)(int32_t)or0_int(L, 1)));
-        return 1;
-    }
     p8_bit_arg(L, 1);
     p8_unfx(L, u2i(~(uint32_t)p8_fx(L)));
     return 1;
@@ -1962,10 +2655,6 @@ static int l_shl(lua_State *L)
     lua_Integer n;
     lua_settop(L, 2);
     n = p8_shift_count(L, 2);
-    if (or0_isint(L, 1)) {
-        lua_pushinteger(L, p8_shiftl((int32_t)or0_int(L, 1), n));
-        return 1;
-    }
     p8_bit_arg(L, 1);
     p8_unfx(L, p8_shiftl(p8_fx(L), n));
     return 1;
@@ -1979,10 +2668,6 @@ static int l_shr(lua_State *L)
     lua_settop(L, 2);
     n = p8_shift_count(L, 2);
     d = p8_shiftl(1, n);
-    if (or0_isint(L, 1)) {
-        lua_pushinteger(L, p8_idiv(L, or0_int(L, 1), d));
-        return 1;
-    }
     p8_bit_arg(L, 1);
     p8_unfx(L, (int32_t)p8_idiv(L, p8_fx(L), d));
     return 1;
@@ -1993,10 +2678,6 @@ static int l_lshr(lua_State *L)
     lua_Integer n;
     lua_settop(L, 2);
     n = p8_shift_count(L, 2);
-    if (or0_isint(L, 1)) {
-        lua_pushinteger(L, p8_shiftr((int32_t)or0_int(L, 1), n));
-        return 1;
-    }
     p8_bit_arg(L, 1);
     p8_unfx(L, p8_shiftr(p8_fx(L), n));
     return 1;
@@ -2025,105 +2706,6 @@ static int l_rotr(lua_State *L)
     p8_unfx(L, u2i((uint32_t)p8_shiftr(v, n) | (uint32_t)p8_shiftl(v, 32 - n)));
     return 1;
 }
-
-/* -- the NATIVE bit operators ---------------------------------------------
- *
- * A different thing from the nine verbs above, sharing only their spelling.
- * Those are p8's band()/shl()/rotl() FUNCTIONS, which work on all 32 bits of
- * the 16.16 image, fraction included. These are p8's `a|b`, `a<<b`, `~a` as
- * the PORTER reads them: flr() on each operand and then Lua's own integer
- * operator, which is what the emitted cart ran when it spelled the expansion
- * out for itself (`flr(a) | flr(b)`). One crossing here instead of two, and
- * dank tomb's lighting made four thousand of them a frame.
- *
- * The shim's Lua is the reference and libmoy/test/p8lib.moy holds the two
- * lanes to one answer over the operands and counts a cart reaches them with.
- */
-
-/* flr(v or 0), and then the coercion the bitwise operator applies to it, in
- * one: nil and false are 0, a numeric string converts as math.floor's
- * argument does, and a float with no integer representation -- an infinity, a
- * NaN, anything past 2^31 -- raises exactly where `flr(x) | y` raised. Never
- * undefined: math.floor hands such a float straight back and the operator
- * refuses it, which is this branch. */
-static lua_Integer p8_op_int(lua_State *L, int i)
-{
-    lua_Integer n;
-    lua_Number f;
-    if (lua_isinteger(L, i)) return lua_tointeger(L, i);
-    if (!lua_toboolean(L, i)) return 0;
-    f = (lua_Number)l_mathop(floor)(luaL_checknumber(L, i));
-    if (!lua_numbertointeger(f, &n)) {
-        luaL_error(L, "number has no integer representation");
-        return 0;
-    }
-    return n;
-}
-
-/* The integer half is 32-bit by contract (SPEC.md 4.2 pins LUA_32BITS), the
- * same contract the 16.16 verbs above are written to. */
-#define P8_NATIVE_BITOP(NAME, EXPR)                                        \
-    static int NAME(lua_State *L)                                          \
-    {                                                                      \
-        uint32_t a, b;                                                     \
-        lua_settop(L, 2);                                                  \
-        a = (uint32_t)(int32_t)p8_op_int(L, 1);                            \
-        b = (uint32_t)(int32_t)p8_op_int(L, 2);                            \
-        lua_pushinteger(L, u2i(EXPR));                                     \
-        return 1;                                                          \
-    }
-
-P8_NATIVE_BITOP(l_p8_bor,  a | b)
-P8_NATIVE_BITOP(l_p8_band, a & b)
-P8_NATIVE_BITOP(l_p8_bxor, a ^ b)
-
-static int l_p8_bnot(lua_State *L)
-{
-    lua_settop(L, 1);
-    lua_pushinteger(L, u2i(~(uint32_t)(int32_t)p8_op_int(L, 1)));
-    return 1;
-}
-
-/* Lua's own shifts, which p8_shiftl already is: a count at or past the width
- * gives 0 and a negative one goes the other way, so `flr(a) << flr(b)` is
- * defined for every count a cart can reach. */
-#define P8_NATIVE_SHIFT(NAME, SHIFT)                                       \
-    static int NAME(lua_State *L)                                          \
-    {                                                                      \
-        int32_t v;                                                         \
-        lua_Integer n;                                                     \
-        lua_settop(L, 2);                                                  \
-        v = (int32_t)p8_op_int(L, 1);                                      \
-        n = p8_op_int(L, 2);                                               \
-        lua_pushinteger(L, SHIFT(v, n));                                   \
-        return 1;                                                          \
-    }
-
-P8_NATIVE_SHIFT(l_p8_shl, p8_shiftl)
-P8_NATIVE_SHIFT(l_p8_shr, p8_shiftr)
-/* p8's `>>>`: its own name, and the same answer -- Lua's `>>` is already the
- * logical shift, which is what the porter has always emitted for it. */
-P8_NATIVE_SHIFT(l_p8_lshr, p8_shiftr)
-
-/* `<<>` and `>><`, the two p8 operators with no Lua spelling at all: a 32-bit
- * rotate of the floored value, by `flr(n) % 32` -- p8_rot_count, which is
- * that expression including what Lua's floored `%` does to a float too big
- * for an integer. */
-#define P8_NATIVE_ROT(NAME, FIRST, SECOND)                                 \
-    static int NAME(lua_State *L)                                          \
-    {                                                                      \
-        int32_t v;                                                         \
-        lua_Integer n;                                                     \
-        lua_settop(L, 2);                                                  \
-        v = (int32_t)p8_op_int(L, 1);                                      \
-        n = p8_rot_count(L, 2);                                            \
-        lua_pushinteger(L, u2i((uint32_t)FIRST(v, n)                       \
-                               | (uint32_t)SECOND(v, 32 - n)));            \
-        return 1;                                                          \
-    }
-
-P8_NATIVE_ROT(l_p8_rotl, p8_shiftl, p8_shiftr)
-P8_NATIVE_ROT(l_p8_rotr, p8_shiftr, p8_shiftl)
 
 /* -- the p8 table verbs ---------------------------------------------------
  *
@@ -2196,12 +2778,36 @@ static int l_foreach(lua_State *L)
     return 0;
 }
 
+/* add(t, v, [i]): p8 takes an INDEX as well, and a nil table is a no-op there
+ * rather than an error -- `libryinth` calls add(et, e) before `et` exists and
+ * `terra` inserts at `pos or #inventory+1`. The shim's Lua is the reference;
+ * test/p8lib.moy holds the two to one answer. */
 static int l_add(lua_State *L)
 {
+    lua_Integer n, k, i;
+    if (lua_isnoneornil(L, 1)) { lua_pushnil(L); return 1; }
+    n = luaL_len(L, 1);
+    if (lua_isnoneornil(L, 3)) {
+        lua_settop(L, 2);
+        lua_pushvalue(L, 2);
+        lua_seti(L, 1, n + 1);
+        return 1;                         /* p8's add returns what it added */
+    }
+    i = (lua_Integer)lua_tonumber(L, 3);
     lua_settop(L, 2);
+    if (i > n) {
+        lua_pushvalue(L, 2);
+        lua_seti(L, 1, n + 1);
+        return 1;
+    }
+    if (i < 1) i = 1;
+    for (k = n; k >= i; k--) {            /* shift up, then drop it in */
+        lua_geti(L, 1, k);
+        lua_seti(L, 1, k + 1);
+    }
     lua_pushvalue(L, 2);
-    lua_seti(L, 1, luaL_len(L, 1) + 1);
-    return 1;                             /* p8's add returns what it added */
+    lua_seti(L, 1, i);
+    return 1;
 }
 
 /* table.remove(t, pos), transcribed: the shift, then the hole. */
@@ -2219,20 +2825,24 @@ static void tbl_remove(lua_State *L, int t, lua_Integer pos)
     lua_seti(L, t, pos);
 }
 
+/* del(t, v) ANSWERS with what it removed -- `libryinth` deals a hand with
+ * `add(e.books, del(E, rnd(E)))`, which adds nil while del answers nothing. */
 static int l_del(lua_State *L)
 {
-    lua_Integer n = luaL_len(L, 1), i;
+    lua_Integer n, i;
+    if (lua_isnoneornil(L, 1)) { lua_pushnil(L); return 1; }
+    n = luaL_len(L, 1);
     lua_settop(L, 2);
     for (i = 1; i <= n; i++) {
         lua_geti(L, 1, i);
         if (lua_compare(L, -1, 2, LUA_OPEQ)) {
-            lua_pop(L, 1);
-            tbl_remove(L, 1, i);
-            return 0;
+            tbl_remove(L, 1, i);          /* the value stays on the stack */
+            return 1;
         }
         lua_pop(L, 1);
     }
-    return 0;
+    lua_pushnil(L);
+    return 1;
 }
 
 static int l_deli(lua_State *L)
@@ -2248,7 +2858,9 @@ static int l_deli(lua_State *L)
 
 static int l_count(lua_State *L)
 {
-    lua_Integer n = luaL_len(L, 1), i, c = 0;
+    lua_Integer n, i, c = 0;
+    if (lua_isnoneornil(L, 1)) { lua_pushinteger(L, 0); return 1; }
+    n = luaL_len(L, 1);
     if (lua_isnoneornil(L, 2)) { lua_pushinteger(L, n); return 1; }
     lua_settop(L, 2);
     for (i = 1; i <= n; i++) {
@@ -2305,6 +2917,7 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
         {"__moy_reload", l_reload}, {"__moy_cstore", l_cstore},
         {"__moy_p8print", l_p8print},
         {"__moy_lut_span", l_lut_span},
+        {"__moy_p8_lut_span", l_p8_lut_span_bind},
         {"__moy_mget", l_mget}, {"__moy_mset", l_mset},
         {"__moy_fget", l_p8fget}, {"__moy_fset", l_p8fset},
         /* The DRAW verbs: p8's semantics resolved in C from the machine's own
@@ -2325,6 +2938,7 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
         {"__moy_p8_btn", l_p8_btn}, {"__moy_p8_btnp", l_p8_btnp},
         {"__moy_p8_input_frame", l_p8_input_frame},
         {"__moy_p8_input_tick", l_p8_input_tick},
+        {"__moy_p8_rnd", l_p8_rnd}, {"__moy_p8_srand", l_p8_srand},
     };
     /* The stdlib half: no machine behind it, so no upvalue to carry. */
     static const struct { const char *name; lua_CFunction fn; } S[] = {
@@ -2335,16 +2949,12 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
         {"__moy_min", l_min}, {"__moy_max", l_max}, {"__moy_mid", l_mid},
         {"__moy_sgn", l_sgn}, {"__moy_sin", l_sin}, {"__moy_cos", l_cos},
         {"__moy_atan2", l_atan2}, {"__moy_tonum", l_tonum},
+        {"__moy_split", l_split},
         {"__moy_band", l_band}, {"__moy_bor", l_bor}, {"__moy_bxor", l_bxor},
         {"__moy_bnot", l_bnot}, {"__moy_shl", l_shl}, {"__moy_shr", l_shr},
         {"__moy_lshr", l_lshr}, {"__moy_rotl", l_rotl}, {"__moy_rotr", l_rotr},
         /* The porter's NATIVE bit operators, which are not those: flr() on
          * each operand and then Lua's own integer operator, in one call. */
-        {"__moy_p8_bor", l_p8_bor}, {"__moy_p8_band", l_p8_band},
-        {"__moy_p8_bxor", l_p8_bxor}, {"__moy_p8_bnot", l_p8_bnot},
-        {"__moy_p8_shl", l_p8_shl}, {"__moy_p8_shr", l_p8_shr},
-        {"__moy_p8_lshr", l_p8_lshr},
-        {"__moy_p8_rotl", l_p8_rotl}, {"__moy_p8_rotr", l_p8_rotr},
     };
     size_t i;
     if (!con || !p || !mem) return 1;
@@ -2352,6 +2962,8 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
     p->mem = mem;
     p->rom = rom;
     seed(p);
+    p8_dpal_default(p);          /* identity, colour 0 transparent -- p8's */
+    rand_open(L, p);
     if (rom) memcpy(rom, mem, MOY_P8_ROM);
     for (i = 0; i < sizeof T / sizeof T[0]; i++) {
         lua_pushlightuserdata(L, p);

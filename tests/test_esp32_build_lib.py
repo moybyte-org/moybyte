@@ -627,7 +627,43 @@ def test_every_board_build_sources_this_library(board):
     does; the tests above run it. Both are aimed at the same file only for as
     long as every board still sources it."""
     for sub in ("lilygo_t_deck_plus_mainline", "esp32_p4_wifi6_touch_lcd_7b",
-                "guition_jc3248w535"):
+                "guition_jc3248w535", "guition_jc8012p4a1c"):
         src = (ROOT / "firmware" / sub / "build.sh").read_text(encoding="utf-8")
         assert "tools/esp32_build_lib.sh" in src
         assert "moybyte_sdkconfig_guard" in src
+
+
+# -- the staged native tree: one owner of where it is ---------------------------
+
+
+def test_the_lib_asks_where_the_native_tree_was_staged(tmp_path):
+    """`moybyte_stage_native` generates the web blob INTO the staged tree, so it
+    has to find it -- and it had `native/.staged` typed on its own side while
+    board.toml's `[native] dest` decides. A board moving its dest would have
+    left the blob ungenerated: no error, an image with no console."""
+    lib = LIB.read_text(encoding="utf-8")
+    body = lib.split("moybyte_stage_native() {", 1)[1].split("\n}", 1)[0]
+    assert "native/.staged" not in body, \
+        "the lib restates the staging dest instead of asking board_config"
+    assert "native-dest" in body
+
+    sys.path.insert(0, str(ROOT / "tools"))
+    import board_config
+    board = tmp_path / "board"
+    (board / "boards" / "X").mkdir(parents=True)
+    (board / "board.toml").write_text('[native]\ndest = "native/elsewhere"\n',
+                                      encoding="utf-8")
+    assert board_config.native_dest(board) == "native/elsewhere"
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "board_config.py"),
+                        "native-dest", str(board)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.strip() == "native/elsewhere", r.stderr
+
+
+def test_a_board_that_says_nothing_gets_the_default_dest(tmp_path):
+    sys.path.insert(0, str(ROOT / "tools"))
+    import board_config
+    board = tmp_path / "board"
+    board.mkdir()
+    (board / "board.toml").write_text("[board]\nota = \"x\"\n", encoding="utf-8")
+    assert board_config.native_dest(board) == "native/.staged"

@@ -4,7 +4,7 @@
 READ THIS FIRST: this script is not the source of
 `system_carts/sakura*.moy/images/bg.moyimg`. It generated a *candidate*
 backdrop, which the project owner then replaced with a supplied image; the
-shipped bitmap and the carts' `EMIT` tables now come from
+shipped bitmap and the carts' shed-point scene now come from
 `tools/import_sakura_bg.py`. Running this script OVERWRITES both carts' bg with
 this scene instead, so don't run it unless that is what you want. It is kept in
 the tree because a fixed-seed generator is a useful fallback and a working
@@ -20,14 +20,14 @@ a fixed seed, so the result is reproducible.
 Run from the repo root:
 
     .venv/bin/python tools/make_sakura_bg.py --dry-run --png /tmp/sakura.png
-    .venv/bin/python tools/make_sakura_bg.py --emit     # print the EMIT tables
+    .venv/bin/python tools/make_sakura_bg.py --emit     # + the shed scene
     .venv/bin/python tools/make_sakura_bg.py            # OVERWRITE both carts' bg
 
-The canopy DEFINES the `EMIT` table that would go with this scene -- the
-petal-shedding points must sit on real blossom clusters -- so `--emit` prints
-the Python and Lua literals for main.py / main.lua (they must stay identical:
+The canopy DEFINES the shed points that would go with this scene -- they must
+sit on real blossom clusters -- so `--emit` writes both carts'
+`scenes/blossoms.moyscene` (they must stay identical:
 tests/test_lua_sakura_parity.py compares the two runtimes bit-for-bit). Adopting
-this scene means taking its art AND its table together.
+this scene means taking its art AND its scene together.
 
 If you do adopt it, bump `"version"` in BOTH carts' manifest.json (#47) or an
 already-seeded device keeps the old art, and refresh sakura_lua's cover with
@@ -43,11 +43,11 @@ import math
 import os
 import random
 import sys
-import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from runtime import moy_image  # noqa: E402
 from runtime.palette import MOY64  # noqa: E402  (preview colours only)
 from tools import pngwrite  # noqa: E402
 
@@ -506,21 +506,10 @@ def _emit_points(clumps, rng):
     return pts
 
 
-def _wrap(text, width=86, indent=""):
-    out, line = [], indent
-    for word in text.split(" "):
-        if line != indent and len(line) + len(word) + 1 > width:
-            out.append(line)
-            line = indent
-        line += ("" if line == indent else " ") + word
-    out.append(line)
-    return "\n".join(out)
-
-
-def emit_tables(pts):
-    py = "EMIT = [" + ", ".join("(%d, %d)" % p for p in pts) + "]"
-    lua = ("EMIT = { " + ", ".join("{%d, %d}" % p for p in pts) + " }")
-    return py, _wrap(lua)
+def emit_scene(pts):
+    """The shed points as a .moyscene, in the row shape SceneEditor writes."""
+    return json.dumps([{"tag": "blossom", "tile": 0, "x": int(x), "y": int(y)}
+                       for x, y in pts])
 
 
 def write_png(path, buf):
@@ -534,14 +523,13 @@ def write_png(path, buf):
 
 
 def encode_bg(buf):
-    """The legacy zlib .moyimg envelope -- what both carts' bg has always used
-    (a dense 320x240 scene compresses far better than the RLE codec, and every
-    decoder dispatches on the absent `codec` field)."""
-    import base64
-    return json.dumps({
-        "format": "moyimg-v1", "w": W, "h": H,
-        "data": base64.b64encode(zlib.compress(bytes(buf), 9)).decode("ascii"),
-    })
+    """The `.moyimg` envelope, through the codec every writer shares.
+
+    Not a local `zlib.compress`: the window is PINNED (moy_image.MOYIMG_WBITS)
+    so a picture written here and one written by Paint on a board are the same
+    stream, and a tool with its own copy of that number is how they stop being.
+    """
+    return moy_image.encode_moyimg(W, H, bytes(buf))
 
 
 def render():
@@ -561,7 +549,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--png", help="also write a preview PNG here")
     ap.add_argument("--emit", action="store_true",
-                    help="print the EMIT literals for main.py / main.lua")
+                    help="also write both carts' scenes/blossoms.moyscene")
     ap.add_argument("--dry-run", action="store_true",
                     help="render (and preview) but do not touch the carts")
     args = ap.parse_args(argv)
@@ -579,9 +567,17 @@ def main(argv=None):
                 f.write(blob)
             print("wrote", os.path.join(d, "bg.moyimg"), len(blob), "bytes")
     if args.emit:
-        py, lua = emit_tables(_emit_points(clumps, random.Random(SEED + 1)))
-        print("\n--- main.py ---\n" + py)
-        print("\n--- main.lua ---\n" + lua)
+        scene = emit_scene(_emit_points(clumps, random.Random(SEED + 1)))
+        for slug in ("sakura", "sakura_lua"):
+            d = os.path.join(ROOT, "system_carts", slug + ".moy", "scenes")
+            os.makedirs(d, exist_ok=True)
+            path = os.path.join(d, "blossoms.moyscene")
+            if args.dry_run:
+                print("would write", path, len(scene), "bytes")
+                continue
+            with open(path, "w") as f:
+                f.write(scene)
+            print("wrote", path, len(scene), "bytes")
     return 0
 
 

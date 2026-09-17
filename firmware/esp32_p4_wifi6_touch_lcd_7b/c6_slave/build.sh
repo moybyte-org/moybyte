@@ -6,7 +6,7 @@
 # P4 host image builds against (make firmware-build-p4 must have run), so host
 # and slave are the same hosted version BY CONSTRUCTION -- the property the
 # hosted docs say to keep by discipline. The shim is this directory's
-# slave_espnow_shim.c + the ONE-BODY protocol header from native/moy_c6; both
+# slave_espnow_shim.c + the ONE-BODY protocol header from native/p4/moy_c6; both
 # are COPIED into the staged project, and the two stock files it touches
 # (main/CMakeLists.txt, main/esp_hosted_coprocessor.c) are edited
 # marker-guarded, same style as every build.sh patch in this repo.
@@ -40,7 +40,7 @@ rsync -a --delete "${HOSTED}/common/" "${STAGE}/common/"
 
 # The shim: one .c staged in, one protocol header copied from its ONE body.
 cp "${HERE}/slave_espnow_shim.c" "${STAGE}/project/main/"
-cp "${BOARD_DIR}/native/moy_c6/espnow_shim_proto.h" "${STAGE}/project/main/"
+cp "${REPO_ROOT}/native/p4/moy_c6/espnow_shim_proto.h" "${STAGE}/project/main/"
 
 # Marker-guarded: compile the shim...
 CMAKE="${STAGE}/project/main/CMakeLists.txt"
@@ -88,7 +88,7 @@ cp build/flasher_args.json "${DIST}/c6_flasher_args.json"
 # READ FROM THE PROTO HEADER (the one body the slave compiled), so the number
 # a device is offered is the number the image answers over MOYC6_V_VERSION.
 SHIM_VER=$(grep -oP '#define MOYC6_SHIM_VERSION\s+\K[0-9]+' \
-  "${BOARD_DIR}/native/moy_c6/espnow_shim_proto.h")
+  "${REPO_ROOT}/native/p4/moy_c6/espnow_shim_proto.h")
 [ -n "${SHIM_VER}" ] || { echo "!! no MOYC6_SHIM_VERSION in the proto header" >&2; exit 1; }
 printf '{"version": %s, "hosted": "%s"}\n' "${SHIM_VER}" "${HOSTED_VER}" \
   > "${DIST}/c6_build.json"

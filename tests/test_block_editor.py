@@ -27,18 +27,11 @@ mk = blocks.make_block
 # Helpers
 # ----------------------------------------------------------------------------
 
-from blocks_helpers import run_cart as _run  # noqa: E402
+from blocks_helpers import run_cart as _run, go_to_insert  # noqa: E402
 
 
 def _be():
     return BlockEditor(blocks)
-
-
-def _go_to_insert(be, depth, which=-1):
-    """Park the cursor on an insert row at `depth` (the last one by default)."""
-    found = [i for i, r in enumerate(be.rows) if r.kind == "insert" and r.depth == depth]
-    assert found, "no insert row at depth %d" % depth
-    be.cur = found[which]
 
 
 def _select_type(be, tid):
@@ -77,13 +70,13 @@ def test_cursor_moves_and_clamps():
 
 def test_insert_blocks_then_compile_and_run():
     be = _be()
-    _go_to_insert(be, 1)                    # the on_start trailing insert
+    go_to_insert(be, 1)                    # the on_start trailing insert
     be.insert_block("set_var", {"var": "x", "value": 0})
     be.add_var("x")
     # insert a draw cls + spr under on_draw
-    _go_to_insert(be, 1)                    # now the last depth-1 insert (under on_draw)
+    go_to_insert(be, 1)                    # now the last depth-1 insert (under on_draw)
     be.insert_block("cls", {"color": "black"})
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("spr", {"id": 1, "x": mk("var", {"var": "x"}), "y": 100})
     src = blocks.compile_blocks(be.program)
     assert "cls(col(" in src and "spr(1," in src
@@ -92,10 +85,10 @@ def test_insert_blocks_then_compile_and_run():
 
 def test_nested_insert_inside_a_cblock():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("if", {"cond": mk("btn", {"dir": "left"})})
     # the new if is selected; its body opened a depth-2 insert point
-    _go_to_insert(be, 2)
+    go_to_insert(be, 2)
     be.insert_block("pix", {"x": 1, "y": 1, "color": "white"})
     src = blocks.compile_blocks(be.program)
     assert 'if btn("left"):' in src
@@ -105,7 +98,7 @@ def test_nested_insert_inside_a_cblock():
 
 def test_delete_removes_subtree_but_refuses_hats():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})
     assert _select_type(be, "cls")
     assert be.delete() is True
@@ -117,9 +110,9 @@ def test_delete_removes_subtree_but_refuses_hats():
 
 def test_move_block_reorders_siblings():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("circ", {"x": 1, "y": 2, "r": 3, "color": "red"})
     # both live in the same body; move the circ up above the cls
     assert _select_type(be, "circ")
@@ -132,7 +125,7 @@ def test_move_block_reorders_siblings():
 
 def test_if_else_divider_and_branches():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("if_else", {"cond": mk("btnp", {"dir": "a"})})
     assert be.insert_else() is True
     assert be.insert_else() is False             # only one else
@@ -159,7 +152,7 @@ def test_if_else_divider_and_branches():
 
 def test_editing_a_slot_changes_generated_code():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
     assert _select_type(be, "cls")
     before = blocks.compile_blocks(be.program)
@@ -173,7 +166,7 @@ def test_editing_a_slot_changes_generated_code():
 
 def test_set_expr_slot_nests_an_expression():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("spr", {"id": 0, "x": 0, "y": 0})
     assert _select_type(be, "spr")
     be.set_slot("x", mk("op_add", {"a": 5, "b": 3}))
@@ -236,7 +229,7 @@ def test_insert_flow_through_the_menu_then_runs(tmp_path):
     be = ws.block_ui.blocks_ed
     # park on the trailing insert under on_draw and press A. An idle frame between
     # presses mirrors a real release (the input edge needs the key to lift first).
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     drv.press("a")
     drv.frame(1 / 30)
     drv.frame(1 / 30)                                  # release
@@ -267,7 +260,7 @@ def test_save_persists_blocks_and_main_and_reloads(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     be.add_var("score")
-    _go_to_insert(be, 1)                                # under on_start
+    go_to_insert(be, 1)                                # under on_start
     be.insert_block("set_var", {"var": "score", "value": 0})
     assert ws.block_ui.save_blocks() is True and ws.block_ui.blk_status is None
     # both files landed; reload restores the program AND a runnable main.py
@@ -284,7 +277,7 @@ def test_dropdown_slot_picker_sets_the_value(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
     assert _select_type(be, "cls")
     ws.block_ui.blk_slot = 0
@@ -306,7 +299,7 @@ def test_variable_slot_picker_leads_with_new_variable(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("set_var")                      # no vars declared yet
     assert _select_type(be, "set_var")
     ws.block_ui.blk_slot = 0                                 # the {var} slot
@@ -329,7 +322,7 @@ def test_graduate_to_code_opens_code_editor_on_generated_source(tmp_path):
     ws, cart, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "indigo"})
     ws.block_ui.graduate_to_code()
     assert ws.menu_view == "code" and ws.editor is not None
@@ -345,7 +338,7 @@ def test_block_authored_cart_runs_normally(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     be.add_var("x")
-    _go_to_insert(be, 1)                                # on_start: set x = 100
+    go_to_insert(be, 1)                                # on_start: set x = 100
     be.insert_block("set_var", {"var": "x", "value": 100})
     ws.block_ui.save_blocks()
     # reopen the cart fresh from disk and run it
@@ -390,11 +383,11 @@ def test_forever_and_wait_have_kidfacing_hints(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("forever")
     assert _select_type(be, "forever")
     assert "every frame" in ws.block_ui._blk_hint()             # forever is bounded
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("wait", {"secs": 1})
     assert _select_type(be, "wait")
     assert "pause" in ws.block_ui._blk_hint()
@@ -478,7 +471,7 @@ def test_block_authored_cart_is_not_protected(tmp_path):
     be = ws.block_ui.blocks_ed
     assert ws.block_ui.blk_protect is False                       # new-template cart: editable
     be.add_var("score")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("set_var", {"var": "score", "value": 7})
     assert ws.block_ui.save_blocks() is True
     # reopen fresh from disk: it loads its blocks.json, so it's NOT protected and
@@ -507,7 +500,7 @@ def test_new_variable_entry_creates_names_and_is_usable(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     # open the insert menu -> Variables category
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     ws.block_ui._blk_open_categories()
     ws.block_ui.blk_menu["sel"] = ws.block_ui.blk_menu["items"].index(blocks.CAT_VARIABLES)
     ws.block_ui._blk_menu_select()
@@ -527,7 +520,7 @@ def test_new_variable_entry_creates_names_and_is_usable(tmp_path):
     assert ws.block_ui.blk_kbd is None
     assert "lives" in be.variables()
     # now USE it: insert a set_var and point its {var} slot at "lives"
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("set_var", {"var": "lives", "value": 3})
     src = blocks.compile_blocks(be.program)
     assert "lives = 0" in src                            # declared at module level
@@ -542,7 +535,7 @@ def test_new_variable_name_is_sanitized_and_renames_references(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     name = be.new_var("var")                             # default-named variable
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("set_var", {"var": name, "value": 1})
     # rename it via free text with spaces/punctuation -> a safe identifier
     applied = be.rename_var(name, "my score!!")
@@ -634,7 +627,7 @@ def test_new_variable_prompt_survives_the_opening_keypress(tmp_path):
     assert "lives" in be.variables()
     assert "var" not in be.variables()                 # NOT the default name
     # and it compiles into the generated Python under the typed name
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("set_var", {"var": "lives", "value": 3})
     src = blocks.compile_blocks(be.program)
     assert "lives = 0" in src and "lives = 3" in src
@@ -680,7 +673,7 @@ def test_expr_slot_defaults_to_a_typeable_literal(tmp_path):
     be = ws.block_ui.blocks_ed
     # a fresh set_var: its {value} expr slot defaults to the literal 0
     be.new_var("score")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("set_var", {"var": "score", "value": 0})
     # edit the value (expr) slot -> the NUMBER PAD opens (a literal), not the block menu
     slot = [s for s in be.slots(blk) if s["name"] == "value"][0]
@@ -697,7 +690,7 @@ def test_type_a_literal_into_an_expr_slot_compiles_to_bare_value(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     be.new_var("score")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("set_var", {"var": "score", "value": 0})
     slot = [s for s in be.slots(blk) if s["name"] == "value"][0]
     ws.block_ui._blk_edit_slot(blk, slot)
@@ -719,9 +712,9 @@ def test_set_var_to_zero_and_three_roundtrip_and_execute(tmp_path):
     be = ws.block_ui.blocks_ed
     be.new_var("score")
     be.new_var("lives")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     b0 = be.insert_block("set_var", {"var": "score", "value": 0})
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     b3 = be.insert_block("set_var", {"var": "lives", "value": 0})
     # type 0 into score's value, 3 into lives' value, both via the number pad
     s0 = [s for s in be.slots(b0) if s["name"] == "value"][0]
@@ -745,7 +738,7 @@ def test_negative_and_decimal_literals_type_correctly(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     be.new_var("v")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("change_var", {"var": "v", "value": 0})
     slot = [s for s in be.slots(blk) if s["name"] == "value"][0]
     ws.block_ui._blk_edit_slot(blk, slot)
@@ -766,7 +759,7 @@ def test_number_slot_is_typeable(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("beep", {"freq": 440})
     slot = [s for s in be.slots(blk) if s["name"] == "freq"][0]
     ws.block_ui._blk_edit_slot(blk, slot)
@@ -786,7 +779,7 @@ def test_expr_menu_leads_with_type_a_number_and_keeps_reporters(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("spr", {"id": 0, "x": 0, "y": 0})
     ws.block_ui._blk_open_expr_menu(blk, "x")
     items = ws.block_ui.blk_menu["items"]
@@ -809,7 +802,7 @@ def test_expr_slot_can_still_hold_a_reporter_block(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     be.new_var("px")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("spr", {"id": 0, "x": 0, "y": 0})
     ws.block_ui._blk_open_expr_menu(blk, "x")
     ws.block_ui.blk_menu["sel"] = ws.block_ui.blk_menu["items"].index("var")
@@ -832,7 +825,7 @@ def test_number_prompt_typing_through_the_driver(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     drv = _driver(ws)
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("beep", {"freq": 0})
     slot = [s for s in be.slots(blk) if s["name"] == "freq"][0]
     ws.block_ui._blk_edit_slot(blk, slot)                  # opens the number pad (armed next frame)
@@ -856,7 +849,7 @@ def test_number_prompt_survives_the_opening_keypress(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     drv = _driver(ws)
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("beep", {"freq": 7})
     # select the freq slot and press A to open the pad, A still held the next frame
     ws.block_ui.blk_slot = 0
@@ -879,7 +872,7 @@ def test_left_nudges_an_expr_literal_slot(tmp_path):
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     be.new_var("x")
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("set_var", {"var": "x", "value": 5})  # value is an expr-literal
     # cursor on the block, slot index pointing at "value"
     assert _select_type(be, "set_var")
@@ -901,7 +894,7 @@ def test_lists_category_block_list_leads_with_new_list(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     ws.block_ui._blk_open_categories()
     ws.block_ui.blk_menu["sel"] = ws.block_ui.blk_menu["items"].index(blocks.CAT_LISTS)
     ws.block_ui._blk_menu_select()
@@ -918,7 +911,7 @@ def test_list_slot_picker_leads_with_new_list_and_fills_the_slot(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     blk = be.insert_block("list_add")               # no lists declared yet
     assert _select_type(be, "list_add")
     # step the slot highlight to the {list} slot, then A opens the list picker
@@ -945,11 +938,11 @@ def test_for_each_block_inserts_and_saves(tmp_path):
     be = ws.block_ui.blocks_ed
     be.add_var("it")
     be.new_list("nums")
-    _go_to_insert(be, 1)                            # on_start
+    go_to_insert(be, 1)                            # on_start
     be.insert_block("list_add", {"item": 1, "list": "nums"})
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("for_each", {"var": "it", "list": "nums"})
-    _go_to_insert(be, 2)
+    go_to_insert(be, 2)
     be.insert_block("spr", {"id": 0, "x": mk("var", {"var": "it"}), "y": 0})
     assert ws.block_ui.save_blocks() is True
     reloaded = moy_carts.load(cart["path"])
@@ -977,7 +970,7 @@ def test_copy_paste_subtree_keeps_structure_and_deep_copies():
     a paste is an independent deep copy -- mutating one pasted block never touches
     the clipboard or another paste."""
     be = _be()
-    _go_to_insert(be, 1)                                  # under on_draw
+    go_to_insert(be, 1)                                  # under on_draw
     be.insert_block("if_else", {"cond": mk("btnp", {"dir": "a"})})
     assert be.insert_else() is True
     ins2 = _inserts_at(be, 2)
@@ -1016,7 +1009,7 @@ def test_copy_and_duplicate_refuse_hats_and_else_divider():
     assert be.duplicate() is None
     assert be.clipboard is None
     # the else divider is protected too
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("if_else", {"cond": mk("btnp", {"dir": "a"})})
     be.insert_else()
     else_row = [i for i, r in enumerate(be.rows) if r.is_else][0]
@@ -1027,7 +1020,7 @@ def test_copy_and_duplicate_refuse_hats_and_else_divider():
 
 def test_duplicate_in_place_inserts_a_sibling_copy():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("spr", {"id": 3, "x": 1, "y": 2})
     assert _select_type(be, "spr")
     dup = be.duplicate()
@@ -1045,7 +1038,7 @@ def test_duplicate_in_place_inserts_a_sibling_copy():
 def test_paste_only_at_insert_point_and_needs_clipboard():
     be = _be()
     # nothing copied yet -> paste is a no-op even at an insert point
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     assert be.paste() is None
     # copy a block, then try to paste while the cursor is ON A BLOCK (not an insert)
     be.insert_block("cls", {"color": "black"})
@@ -1060,7 +1053,7 @@ def test_paste_only_at_insert_point_and_needs_clipboard():
 def test_compile_after_paste_is_correct():
     be = _be()
     be.add_var("x")
-    _go_to_insert(be, 1)                                  # under on_draw
+    go_to_insert(be, 1)                                  # under on_draw
     be.insert_block("if", {"cond": mk("op_gt", {"a": mk("var", {"var": "x"}), "b": 5})})
     be.cur = _inserts_at(be, 2)[0]
     be.insert_block("spr", {"id": 0, "x": 1, "y": 2})
@@ -1080,7 +1073,7 @@ def test_compile_after_paste_is_correct():
 
 def test_move_across_the_if_else_divider():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("if_else", {"cond": mk("btnp", {"dir": "a"})})
     be.insert_else()
     be.cur = _inserts_at(be, 2)[0]                        # if-body
@@ -1098,7 +1091,7 @@ def test_move_across_the_if_else_divider():
 
 def test_move_to_a_different_parent():
     be = _be()
-    _go_to_insert(be, 1)                                  # under on_draw (last depth-1)
+    go_to_insert(be, 1)                                  # under on_draw (last depth-1)
     be.insert_block("cls", {"color": "black"})
     assert _select_type(be, "cls")
     assert be.start_move() is True
@@ -1111,7 +1104,7 @@ def test_move_to_a_different_parent():
 
 def test_move_rejects_dropping_a_block_inside_itself():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("if", {"cond": mk("btn", {"dir": "left"})})
     assert _select_type(be, "if")
     assert be.start_move() is True
@@ -1129,7 +1122,7 @@ def test_move_rejects_dropping_a_block_inside_itself():
 def test_undo_redo_over_insert():
     be = _be()
     s0 = _snap(be)
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})
     assert be.program != s0
     assert be.undo() is True and be.program == s0
@@ -1138,7 +1131,7 @@ def test_undo_redo_over_insert():
 
 def test_undo_redo_over_delete():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})
     s1 = _snap(be)
     assert _select_type(be, "cls")
@@ -1149,9 +1142,9 @@ def test_undo_redo_over_delete():
 
 def test_undo_redo_over_reorder():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("circ", {"x": 1, "y": 2, "r": 3, "color": "red"})
     s = _snap(be)
     assert _select_type(be, "circ")
@@ -1161,7 +1154,7 @@ def test_undo_redo_over_reorder():
 
 def test_undo_redo_over_slot_edit():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
     assert _select_type(be, "cls")
     s = _snap(be)
@@ -1176,7 +1169,7 @@ def test_undo_redo_over_slot_edit():
 
 def test_undo_redo_over_paste():
     be = _be()
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
     assert _select_type(be, "cls")
     be.copy_block()
@@ -1193,7 +1186,7 @@ def test_undo_stack_is_bounded():
     be = _be()
     be.add_var("x")
     for _ in range(_BLK_UNDO_MAX + 20):
-        _go_to_insert(be, 1)
+        go_to_insert(be, 1)
         be.insert_block("change_var", {"var": "x", "value": 1})
     assert len(be._undo) <= _BLK_UNDO_MAX
 
@@ -1208,7 +1201,7 @@ def test_actions_menu_copy_then_paste_ui(tmp_path):
     ws._open_blocks()
     bu = ws.block_ui
     be = bu.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "green"})
     assert _select_type(be, "cls")
     bu._blk_open_actions()
@@ -1234,7 +1227,7 @@ def test_move_flow_via_ui_taps_a_destination(tmp_path):
     ws._open_blocks()
     bu = ws.block_ui
     be = bu.blocks_ed
-    _go_to_insert(be, 1)                                  # under on_draw
+    go_to_insert(be, 1)                                  # under on_draw
     be.insert_block("cls", {"color": "black"})
     assert _select_type(be, "cls")
     bu._blk_open_actions()
@@ -1254,7 +1247,7 @@ def test_undo_redo_buttons_ui(tmp_path):
     ws._open_blocks()
     bu = ws.block_ui
     be = bu.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})
     assert _select_type(be, "cls")
     bu._blk_undo()
@@ -1272,7 +1265,7 @@ def test_ctrl_z_keyboard_shortcut_undoes(tmp_path):
     ws._open_blocks()
     drv = _driver(ws)
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})
     assert _select_type(be, "cls")
     drv.type_char(0x1A)                                   # Ctrl+Z
@@ -1300,12 +1293,12 @@ def test_undo_after_save_does_not_leak_into_cart_blocks(tmp_path):
     ws, cart, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
     assert ws.block_ui.save_blocks() is True
     saved = _snap_of(ws.project.cart["blocks"])
     # a post-save in-place edit must NOT reach through into the cart's snapshot...
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("spr", {"id": 0, "x": 1, "y": 2})
     assert ws.project.cart["blocks"] == saved
     assert "spr" not in _body_types(ws.project.cart["blocks"])
@@ -1322,12 +1315,12 @@ def test_in_ram_save_and_build_fallback_do_not_alias_cart_blocks(tmp_path):
     ws, cart, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
     ws.project.cart["path"] = None                       # force the in-RAM save path
     assert ws.block_ui.save_blocks() is True
     saved = _snap_of(ws.project.cart["blocks"])
-    _go_to_insert(be, 1)
+    go_to_insert(be, 1)
     be.insert_block("spr", {"id": 1, "x": 3, "y": 4})
     assert ws.project.cart["blocks"] == saved            # no reach-through
     assert be.undo() is True
@@ -1338,7 +1331,7 @@ def test_in_ram_save_and_build_fallback_do_not_alias_cart_blocks(tmp_path):
     ws.block_ui.build()
     be2 = ws.block_ui.blocks_ed
     assert be2 is not None and be2.program == saved
-    _go_to_insert(be2, 1)
+    go_to_insert(be2, 1)
     be2.insert_block("beep", {"freq": 220})
     assert ws.project.cart["blocks"] == saved
     assert "beep" not in _body_types(ws.project.cart["blocks"])

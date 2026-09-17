@@ -11,25 +11,9 @@ it through ConsoleDriver -- mouse == touch, arrows == trackball -- exactly like
 tests/test_v04_userland.py."""
 
 from pathlib import Path
+from ws_helpers import build_ws_with_shelf as _ws_with_carts
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def _ws_with_carts(tmp_path, n):
-    """A workstation whose launcher holds n carts (> one viewport), via the real
-    store."""
-    from runtime import host_app, moy_carts
-
-    carts_dir = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts_dir)        # seeds the system carts
-    while len(ws.launcher.items) < n:                 # top up with extra carts
-        i = len(ws.launcher.items)
-        moy_carts.create("Extra %02d" % i, carts_dir,
-                         src="def _draw():\n    cls(1)\n", type="app")
-        ws.launcher.items = moy_carts.scan(carts_dir)
-    ws.launcher.sel = 0
-    ws.launcher.scroll = 0
-    return ws
 
 
 def test_more_carts_than_one_viewport_seeded(tmp_path):

@@ -1,15 +1,14 @@
 """The #108 user-files layer: files/<kind>/ beside the carts dir -- the kind
 registry, list/load/save/rename/duplicate verbs, the restorable trash, and the
-one-shot artwork.moyimg migration. Same shared runtime/moy_carts.py the device
+one-shot artwork.moyimg move. Same shared runtime/moy_carts.py the device
 freezes."""
 
 import json
 import os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-
 from runtime import moy_carts  # noqa: E402
+from runtime import moy_file_ops
 
 import pytest  # noqa: E402
 
@@ -162,27 +161,6 @@ def test_folder_valued_recordings_ride_the_same_verbs(tmp_path):
     assert moy_carts.trash_list(root) == []
 
 
-def test_artwork_migration_is_one_shot(tmp_path):
-    root = _root(tmp_path)
-    moy_carts.ensure_dirs(root)
-    moy_carts.save_artwork("LEGACY-DRAWING", root)
-    assert moy_carts.migrate_user_files(root) == "my_art"
-    assert moy_carts.load_file("drawings", "my_art", root) == "LEGACY-DRAWING"
-    # The legacy file stays (older builds keep booting against it) ...
-    assert moy_carts.load_artwork(root) == "LEGACY-DRAWING"
-    # ... and the migration never re-runs, even after the kind is emptied.
-    moy_carts.delete_file("drawings", "my_art", root)
-    moy_carts.empty_trash(root)
-    assert moy_carts.migrate_user_files(root) is None
-    assert moy_carts.list_files("drawings", root) == []
-
-
-def test_migration_without_legacy_artwork_is_a_noop(tmp_path):
-    root = _root(tmp_path)
-    assert moy_carts.migrate_user_files(root) is None
-    assert moy_carts.list_files("drawings", root) == []
-
-
 # -- provenance stamps (#108 phase 2) --------------------------------------------
 
 def test_provenance_stamp_roundtrips_and_is_ignored_by_decoders():
@@ -210,22 +188,66 @@ def test_content_sig_changes_when_the_blob_changes():
     assert moy_carts.content_sig("") == 0
 
 
-# -- migrate docs / tables -------------------------------------------------------
+# -- documents are plain Markdown (2026-09-07) -------------------------------
 
-def test_migrate_docs_and_tables_are_one_shot(tmp_path):
-    import json
+WRAPPED = '{"format": "moytext-v1", "body": "line one\\nline two"}'
+
+
+def _docs_dir(root):
+    return Path(moy_carts.file_kind_dir("docs", root))
+
+
+def _wrapper(root, stem, body="line one\nline two"):
+    """Write a legacy `.moytext` the way the old store did."""
+    d = _docs_dir(root)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (stem + ".moytext")).write_text(
+        json.dumps({"format": "moytext-v1", "body": body}))
+    return d / (stem + ".moytext")
+
+
+def test_a_document_is_the_file_and_nothing_wraps_it(tmp_path):
+    root = _root(tmp_path)
+    name = moy_carts.save_file("docs", "story", "# Title\n\nA line.", root)
+    p = _docs_dir(root) / (name + ".md")
+    assert p.read_text() == "# Title\n\nA line."
+    assert moy_carts.load_file("docs", name, root) == "# Title\n\nA line."
+    assert moy_carts.list_files("docs", root) == [name]
+
+
+def test_a_moytext_wrapper_is_not_a_document(tmp_path):
+    """The reader is STRICT: `.moytext` was the JSON wrapper a document used to
+    come in, and nothing reads one now. A card carrying one shows it as ABSENT
+    -- not listed, not loadable -- which is the whole of the no-migration policy
+    (CLAUDE.md, 2026-09-07): the file is left alone for a person to remove."""
+    root = _root(tmp_path)
+    _wrapper(root, "from_a_card")
+    assert moy_carts.list_files("docs", root) == []
+    assert moy_carts.load_file("docs", "from_a_card", root) is None
+    assert (_docs_dir(root) / "from_a_card.moytext").exists()
+
+
+def test_decode_text_is_a_split_and_not_an_unwrapper(tmp_path):
+    """A document IS its body, so the codec never looks inside it -- a note that
+    happens to start with a brace is that text, not a header to unpack."""
+    assert moy_carts.decode_text(WRAPPED) == [WRAPPED]
+    assert moy_carts.decode_text("one\ntwo") == ["one", "two"]
+    assert moy_carts.decode_text("") == [] and moy_carts.decode_text(None) == []
+
+
+def test_sweep_store_prunes_retired_seeds_and_nothing_else(tmp_path):
+    """The store-opening door, and what is behind it: ONE pass. A format change
+    is not a sweep -- readers are strict and a seed version bump re-seeds the
+    content -- so this door stays sized for `prune_retired`'s shape: gated on a
+    generation sidecar, one small read on the warm path."""
     root = _root(tmp_path)
     moy_carts.ensure_dirs(root)
-    moy_carts.save_notes(json.dumps({"notes": [{"body": "hello"}]}), root)
-    moy_carts.save_sheets(json.dumps(
-        {"sheets": [{"format": "moysheet-v1", "name": "S", "cells": {}}]}), root)
-    assert moy_carts.migrate_docs(root)
-    assert moy_carts.migrate_tables(root)
-    assert len(moy_carts.list_files("docs", root)) == 1
-    assert len(moy_carts.list_files("tables", root)) == 1
-    # Both are gated on their kind dir existing -> never re-run.
-    assert moy_carts.migrate_docs(root) is None
-    assert moy_carts.migrate_tables(root) is None
+    gone = _root(tmp_path) + "/" + moy_carts.slug(moy_carts.RETIRED[0]) + ".moy"
+    os.makedirs(gone)
+    assert moy_carts.sweep_store(root) == 1
+    assert not os.path.exists(gone)
+    assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
+    assert moy_carts.sweep_store(root) == 0
 
 
 def test_sprite_export_lands_in_files_sprites(tmp_path):
@@ -285,8 +307,9 @@ def test_history_prune_keeps_last_keyframe_plus_n_segments(tmp_path):
 
 
 def test_ops_since_keyframe_is_the_one_sidecar_window():
-    """The ONE reader every undo-seeding app goes through (Writer, Sheets, the
-    Files role's history_ops): everything after the LAST keyframe, in order."""
+    """The ONE reader every undo-seeding surface goes through (the editor
+    handle, the Files role's history_ops): everything after the LAST keyframe,
+    in order."""
     kf = {"t": "kf", "doc": "X"}
     seg = lambda *ops: {"t": "seg", "ops": list(ops)}
     assert moy_carts.ops_since_keyframe([]) == []
@@ -373,7 +396,7 @@ def test_a_failed_prune_does_not_fail_the_commit(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise OSError(28, "no space")
 
-    monkeypatch.setattr(moy_carts, "prune_history", boom)
+    monkeypatch.setattr(moy_file_ops, "prune_history", boom)   # history_commit's own module
     err = moy_carts.history_commit("docs", "story", [["ins", 0, "hi"]],
                                    keyframe={"body": ""}, root=root)
 
@@ -401,3 +424,73 @@ def test_an_unpruned_sidecar_still_reads_the_right_window(tmp_path):
     assert moy_carts.ops_since_keyframe(recs) == [["new", 2]]
     on_disk = moy_carts.load_history("docs", "story", root)
     assert moy_carts.ops_since_keyframe(on_disk) == [["new", 2]]
+
+
+# ---------------------------------------------------------------------------
+# the VAULT holds more than notes (docs/text_editing_2026-09.md)
+# ---------------------------------------------------------------------------
+
+def test_the_vault_lists_every_file_it_holds_under_its_whole_name(tmp_path):
+    """`.md` is the one extension a vault name may leave off -- it is what a
+    bare name MEANS. Everything else keeps it, because the extension is what
+    picks the editing mode and what stops two files shadowing each other."""
+    root = _root(tmp_path)
+    for name in ("story", "todo.txt", "data.json", "hi.py", "hi.lua"):
+        moy_carts.save_file("docs", name, "x", root)
+    assert set(moy_carts.list_files("docs", root)) == {
+        "story", "todo.txt", "data.json", "hi.py", "hi.lua"}
+    assert moy_carts.count_files("docs", root) == 5
+    # ...and each is on the card under exactly that name.
+    assert moy_carts.file_path("docs", "story", root).endswith("story.md")
+    for name in ("todo.txt", "data.json", "hi.py"):
+        assert moy_carts.file_path("docs", name, root).endswith("/" + name)
+
+
+def test_a_typed_title_keeps_its_extension_through_the_slug(tmp_path):
+    root = _root(tmp_path)
+    assert moy_carts.save_file("docs", "My Notes!.txt", "x", root) == \
+        "my_notes.txt"
+    assert moy_carts.load_file("docs", "my_notes.txt", root) == "x"
+
+
+def test_a_free_name_is_the_title_when_it_is_free_and_numbered_when_not(tmp_path):
+    root = _root(tmp_path)
+    assert moy_carts.free_file_name("docs", "todo.txt", root) == "todo.txt"
+    moy_carts.save_file("docs", "todo.txt", "x", root)
+    # The counter goes BEFORE the extension: `todo.txt_2` would be stored as
+    # `todo.txt_2.md` and stop being a text file at all.
+    assert moy_carts.free_file_name("docs", "todo.txt", root) == "todo_2.txt"
+    assert moy_carts.free_file_name("docs", "story", root) == "story"
+    # A title with nothing readable in it auto-names rather than becoming
+    # `slug`'s "cart" fallback.
+    assert moy_carts.free_file_name("docs", "  ", root) == "doc_1"
+
+
+def test_rename_and_duplicate_keep_a_vault_extension(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("docs", "todo.txt", "x", root)
+    assert moy_carts.rename_file("docs", "todo.txt", "shopping.txt", root) == \
+        "shopping.txt"
+    assert moy_carts.load_file("docs", "shopping.txt", root) == "x"
+    assert moy_carts.duplicate_file("docs", "shopping.txt", root) == \
+        "shopping_2.txt"
+
+
+def test_a_note_and_a_file_named_after_it_do_not_shadow_each_other(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("docs", "todo", "the note", root)
+    moy_carts.save_file("docs", "todo.txt", "the text file", root)
+    assert moy_carts.load_file("docs", "todo", root) == "the note"
+    assert moy_carts.load_file("docs", "todo.txt", root) == "the text file"
+    assert set(moy_carts.list_files("docs", root)) == {"todo", "todo.txt"}
+
+
+def test_a_vault_file_goes_to_the_trash_and_comes_back_whole(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("docs", "data.json", "{}", root)
+    assert moy_carts.delete_file("docs", "data.json", root) == "data.json"
+    assert moy_carts.list_files("docs", root) == []
+    assert ("docs", "data.json") in [
+        (k, n) for k, n, *_ in moy_carts.trash_list(root)]
+    moy_carts.restore_file("docs", "data.json", root)
+    assert moy_carts.load_file("docs", "data.json", root) == "{}"

@@ -405,12 +405,13 @@ def _update(dt):
     if shake > 0.0:
         shake = max(0.0, shake - dt * 14.0)
     # explosions always tick (so the boom animates through a banner)
-    keep = []
+    n = 0
     for bm in booms:
         bm[2] -= dt
         if bm[2] > 0.0:
-            keep.append(bm)
-    booms[:] = keep
+            booms[n] = bm
+            n += 1
+    del booms[n:]
 
     if state != 0:
         state_t -= dt
@@ -485,7 +486,7 @@ def _update(dt):
             spawn_t = 1.4
 
     # bullets
-    bk = []
+    n = 0
     for b in bullets:
         dx, dy = DV[b[2]]
         b[0] += dx * BSPEED * dt
@@ -514,8 +515,9 @@ def _update(dt):
         # tank on the other side?
         if _hit_tank(bx, by, b[3]):
             continue
-        bk.append(b)
-    bullets[:] = bk
+        bullets[n] = b
+        n += 1
+    del bullets[n:]
 
     # win? all queued spawned AND none left alive
     if spawn_q == 0 and _alive_enemies() == 0:
@@ -556,14 +558,10 @@ def _draw():
     map(0, 0, MW, MH, sx, sy, 0, 2)
 
     # Every moving sprite (eagle + enemies + tanks + bullets + explosions) is one
-    # spr() at colorkey 0, scale 2. This CONTIGUOUS run still leaves as ONE native
-    # blit_batch: the canvas's auto-batch gate (#63) coalesces a run of plain spr()
-    # calls and flushes on any state break, so the loop costs what the hand-packed
-    # spr_batch list used to -- minus the list, which was a per-frame allocation of
-    # ~40 tuples and is now gone. (spr_batch itself was deleted on 2026-08-14, plan
-    # 6.10: Lua could never call it, and this is what the Lua twin always did.)
-    # Draw order = call order, so keep the sequence: eagle, enemies, tanks,
-    # bullets, booms.
+    # spr() at colorkey 0, scale 2. The contiguous run leaves as ONE native
+    # blit_batch: the canvas's auto-batch gate (#63) coalesces a run of plain
+    # spr() calls and flushes on any state break. Draw order = call order, so
+    # keep the sequence: eagle, enemies, tanks, bullets, booms.
     # the eagle base (or its rubble) at the fortress center
     bx = BASE_CX * TS + sx
     by = BASE_CY * TS + sy

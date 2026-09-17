@@ -4,19 +4,20 @@
 -- The backdrop (images/bg.moyimg, byte-identical to sakura.moy's) is an image
 -- supplied by the project owner (AI-generated; the project's own, no outside
 -- rights holder), converted to the 320x240 MOY64 bitmap
--- by tools/import_sakura_bg.py. That same script generates the EMIT table
--- below, whose shedding points have to sit on THIS image's canopy; re-importing
--- regenerates both carts' tables together, and they must stay identical or the
--- parity test fails.
+-- by tools/import_sakura_bg.py. That same script writes scenes/blossoms.moyscene,
+-- whose shedding points have to sit on THIS image's canopy; re-importing writes
+-- both carts' copies together, and they must stay identical or the parity test
+-- fails. The scene is read with scene() -- the same call the Python twin makes
+-- (#214) -- so after a repaint the points are draggable in the Scene tab.
 --
 -- The port is line-faithful by design: same globals, same helper split, same
--- arithmetic in the same order, so the two runtimes produce bit-identical petal
--- state and draw streams (verified per frame by
--- experiments/lua_bridge/host_parity.py).
+-- arithmetic in the same order, so the two runtimes produce the same draw stream
+-- and the same petal state to within float32 drift (verified per frame by
+-- experiments/lua_bridge/host_parity.py, which runs this file on the shipped VM).
 -- Kept in lockstep with sakura.moy/main.py: edit BOTH or the parity test fails.
--- Launches through the manifest "runtime": "lua" seam (Phase 2): the host runs
--- it via runtime/lua_host.py (lupa); the device shows the runtime-missing panel
--- until the moy_lua native module (Phase 1) lands.
+-- Launches through the manifest "runtime": "lua" seam: host and device run the
+-- SAME vendored Lua -- runtime/lua_host.py over the ctypes binding here,
+-- moycore there.
 --
 -- Port conventions (the canonical .lua cart shapes, to be written up in the
 -- #67 Phase 5 docs pass):
@@ -27,24 +28,7 @@
 --   * Python's int() is truncation toward zero: use trunc() below, NOT
 --     math.floor (they differ on the negative x a wrapped petal can have)
 
-EMIT = { {2, 143}, {6, 113}, {16, 102}, {24, 97}, {25, 80}, {26, 73}, {26, 106}, {40,
-80}, {42, 107}, {44, 100}, {49, 54}, {49, 64}, {53, 98}, {57, 53}, {57, 110}, {59,
-74}, {62, 44}, {66, 80}, {74, 40}, {75, 72}, {75, 105}, {79, 45}, {79, 77}, {80, 103},
-{84, 27}, {86, 101}, {87, 29}, {96, 70}, {99, 40}, {99, 52}, {99, 84}, {99, 110},
-{104, 71}, {105, 111}, {107, 57}, {113, 86}, {116, 93}, {117, 28}, {118, 40}, {119,
-28}, {121, 59}, {121, 76}, {122, 33}, {122, 90}, {126, 71}, {128, 105}, {138, 69},
-{139, 49}, {139, 102}, {145, 29}, {149, 77}, {152, 42}, {157, 13}, {158, 40}, {159,
-68}, {164, 22}, {164, 59}, {167, 121}, {168, 77}, {169, 94}, {169, 105}, {171, 23},
-{171, 122}, {174, 14}, {174, 68}, {174, 90}, {176, 109}, {177, 36}, {177, 86}, {182,
-59}, {188, 19}, {189, 13}, {189, 57}, {192, 90}, {197, 67}, {198, 81}, {199, 106},
-{201, 134}, {202, 38}, {202, 138}, {204, 110}, {207, 25}, {207, 41}, {207, 134}, {215,
-55}, {217, 100}, {218, 60}, {218, 89}, {220, 140}, {222, 119}, {224, 126}, {228, 42},
-{229, 65}, {231, 96}, {231, 150}, {234, 85}, {236, 55}, {236, 144}, {240, 46}, {240,
-114}, {241, 131}, {245, 91}, {248, 39}, {248, 72}, {249, 151}, {250, 147}, {253, 80},
-{259, 85}, {259, 153}, {260, 104}, {262, 48}, {262, 126}, {262, 139}, {264, 74}, {265,
-113}, {274, 118}, {279, 83}, {281, 71}, {282, 136}, {285, 90}, {285, 123}, {290, 118},
-{290, 128}, {292, 96}, {296, 88}, {306, 92} }
-
+EMIT = {}           -- canopy shed points (scenes/blossoms.moyscene), read at _init
 SIN = {}            -- sine LUT (built once); the hot loop indexes it, never calls math.sin
 lay = nil           -- the static scene, inflated + painted once, copied per frame (#54)
 petals = {}         -- each: {x, y, fall_speed, sway_phase, sway_amp, shade(0 near..2 far)}
@@ -95,9 +79,9 @@ function _shed(p, fresh)
     local n = #EMIT
     local ex, ey
     if n > 0 then
-        local e = EMIT[(trunc(rnd(n)) % n) + 1]
-        ex = e[1]
-        ey = e[2]
+        local a = EMIT[(trunc(rnd(n)) % n) + 1]
+        ex = a.x
+        ey = a.y
     else
         ex = rnd(W)
         ey = 0.0
@@ -112,6 +96,7 @@ function _shed(p, fresh)
 end
 
 function _init()
+    EMIT = scene()                         -- the canopy, as placed in the Scene tab
     _build_sin()
     if lay == nil then                     -- allocate the scene buffer only once
         lay = make_layer(W, H)

@@ -125,6 +125,7 @@ class _FakeGfx:
     circb = staticmethod(gfx_binding.circb)
     line = staticmethod(gfx_binding.line)
     shape = staticmethod(gfx_binding.shape)
+    blit565_scale = staticmethod(gfx_binding.blit565_scale)
 
     @staticmethod
     def fill(buf, npix, color):
@@ -998,6 +999,201 @@ def test_spr_paint_image_matches_host():
             assert getattr(di, "_rgb_i", None) is not None, "no blit_indices bake cache"
 
 
+class _BakeTracker:
+    """moybuf with the C registry's single-owner rule enforced (see
+    tests/test_moybuf.py): alloc hands out REAL memoryviews so the canvas's
+    isinstance ownership checks fire, and free refuses a foreign or
+    already-freed buffer."""
+
+    def __init__(self):
+        self.live = {}
+        self.freed = 0
+
+    def alloc(self, n):
+        v = memoryview(bytearray(n))
+        self.live[id(v)] = v
+        return v
+
+    def free(self, buf):
+        if not isinstance(buf, memoryview):
+            return
+        if id(buf) not in self.live:
+            raise AssertionError("freed a foreign or already-freed buffer")
+        del self.live[id(buf)]
+        self.freed += 1
+
+
+class _CartInput:
+    """The two methods make_api binds off an InputState."""
+
+    def held(self, name):
+        return False
+
+    def pressed(self, name):
+        return False
+
+
+def _owned_paint_image(m, iw, ih, owner="cart"):
+    im = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
+    im._owner = owner
+    return im
+
+
+def test_a_full_screen_paint_bake_never_comes_off_the_gc_heap():
+    """#186/#67: the 320x240 RGB565 bake is 153,600 bytes -- the biggest single
+    allocation the console makes, and bigger than the largest contiguous RUN
+    the MicroPython gc heap can promise on either S3 board once a session has
+    churned (measured 64-147KB while ~3MB stayed free). It is the allocation a
+    cart with a painted backdrop died on, so it must leave the gc heap whenever
+    the image names an owner and an allocator exists."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    img = _owned_paint_image(m, 320, 240)
+    dev.spr(img, 0, 0)
+    assert isinstance(img._rgb_i, memoryview), "the full-screen bake stayed on the gc heap"
+    assert len(img._rgb_i) == 320 * 240 * 2 == 153600
+    assert len(tr.live) == 1
+
+    # A RE-bake reuses the loan instead of taking a second one -- an image whose
+    # _rgb_i is invalidated repeatedly (the Paint idiom) must not grow the register.
+    borrowed = img._rgb_i
+    img._rgb_i = None
+    dev.spr(img, 0, 0)
+    assert img._rgb_i is borrowed
+    assert len(tr.live) == 1
+
+    # The run dies: reclaim_layers gives the bake back through the SAME seam
+    # that pools its layers -- and this cart never made a layer, which is the
+    # case an early return out of reclaim_layers used to leak.
+    dev.reclaim_layers("cart")
+    assert tr.freed == 1 and not tr.live
+    assert img._rgb_i is None, "a freed bake must be unreachable, not a stale view"
+
+
+def test_only_an_owned_full_surface_bake_leaves_the_gc_heap():
+    """Off-heap memory has no collector, so the canvas takes it only where
+    something will hand it back. An UNOWNED paint image (the WM's window
+    rasters, a wallpaper thumbnail, the Paint app's own canvas) and a small
+    owned one both keep their gc bytearray."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+
+    unowned = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), 320, 240)
+    dev.spr(unowned, 0, 0)
+    assert isinstance(unowned._rgb_i, bytearray)
+
+    small = _owned_paint_image(m, 40, 30)          # 2,400 bytes: no heap risk
+    dev.spr(small, 0, 0)
+    assert isinstance(small._rgb_i, bytearray)
+
+    assert not tr.live and tr.freed == 0
+    dev.reclaim_layers("cart")                      # nothing lent, nothing freed
+    assert tr.freed == 0
+
+
+def test_an_off_heap_paint_bake_draws_the_same_pixels():
+    """Residency is an allocation decision, never a pixel one."""
+    m, _host, dev = _both(True)
+    plain = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), 320, 240)
+    dev.cls(3)
+    dev.spr(plain, 2, 1)
+    on_heap = _dev_rgb565(dev)
+
+    m._moybuf = _BakeTracker()
+    owned = _owned_paint_image(m, 320, 240)
+    dev.cls(3)
+    dev.spr(owned, 2, 1)
+    assert isinstance(owned._rgb_i, memoryview)
+    assert _dev_rgb565(dev) == on_heap
+
+
+def test_one_owner_may_hold_only_so_many_full_surface_loans():
+    """#186: off-heap bytes have no collector, so the loan register is held
+    until its owner is reclaimed -- and a cart can MINT images (`Image(320, 240,
+    pix, -1)` inside _draw is legal kid code). Uncapped that is a fresh 150KB
+    loan every frame until PSRAM is gone, which would turn a wasteful cart into
+    a dead one. Past the cap a bake takes the gc bytearray it took before this
+    mechanism existed: the register stops growing and the cart is no worse off
+    than it was."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    imgs = [_owned_paint_image(m, 320, 240) for _ in range(m._MAX_LENT_BAKES + 3)]
+    for img in imgs:
+        dev.spr(img, 0, 0)
+    lent = [i for i in imgs if isinstance(i._rgb_i, memoryview)]
+    assert len(lent) == m._MAX_LENT_BAKES == len(tr.live)
+    assert lent == imgs[:m._MAX_LENT_BAKES], "the loans in hand are the first asked for"
+    for img in imgs[m._MAX_LENT_BAKES:]:
+        assert isinstance(img._rgb_i, bytearray), "past the cap: the old gc path"
+
+    # ...and the cap costs nothing at reclaim: every loan taken is given back,
+    # and no gc-heap bake is mistaken for one.
+    dev.reclaim_layers("cart")
+    assert tr.freed == m._MAX_LENT_BAKES and not tr.live
+
+
+def test_release_bakes_returns_the_loan_and_leaves_the_layers_alone():
+    """The verb for an owner that is not a cart RUN (the Paint app, which lives
+    as long as the console and so never dies for reclaim_layers to notice). It
+    returns the bakes and NOTHING else -- a leaving app must not drop the map
+    cache or pool the layers of whatever it is leaving to."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    img = _owned_paint_image(m, 320, 240, owner="artwork")
+    dev.spr(img, 0, 0)
+    dev._mapcache = object()
+    dev._lent_layers = {"cart": [(bytearray(8), 8)]}
+
+    dev.release_bakes("artwork")
+    assert tr.freed == 1 and not tr.live
+    assert img._rgb_i is None
+    assert dev._mapcache is not None, "release_bakes is not reclaim_layers"
+    assert dev._lent_layers.get("cart"), "nor does it pool a cart's layers"
+
+    dev.release_bakes("artwork")        # idempotent: nothing lent, nothing freed
+    assert tr.freed == 1
+
+
+def test_a_cart_that_builds_its_own_image_gets_the_same_loan():
+    """The hole the loaded-image fix left open (#186): the cart API hands out
+    the `Image` CLASS as well as image(), and a 320x240 picture a cart
+    constructs bakes exactly the same 153,600 bytes as one the engine decoded.
+    Only the constructor differed, so only the constructor had to change."""
+    from runtime import cart_api
+    from runtime.moy_image import Image as PlainImage
+
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    ns = cart_api.make_api(dev, _CartInput(), {})
+    cart_image = ns["Image"]
+    assert issubclass(cart_image, PlainImage)
+    assert cart_image is cart_api.make_api(dev, _CartInput(), {})["Image"], \
+        "one class per owner, not one per run: make_layer nests make_api"
+    assert cart_api.make_api(dev, _CartInput(), {}, owner="wallpaper")["Image"] \
+        is not cart_image
+
+    img = _paint_image(lambda w, h, p, t: cart_image(w, h, p, t), 320, 240)
+    assert isinstance(img, PlainImage), "spr() and background() dispatch on this"
+    assert img._owner == "cart"
+    dev.spr(img, 0, 0)
+    assert isinstance(img._rgb_i, memoryview) and len(tr.live) == 1
+
+    # The ASCII-art constructor still reaches through the subclass, and stays on
+    # the gc heap -- a kid's 8x8 sprite is nowhere near the full-surface bar.
+    tiny = cart_image.from_ascii(["..##..", ".####."], {"#": 8})
+    assert isinstance(tiny, PlainImage) and tiny._owner == "cart"
+    dev.spr(tiny, 0, 0)
+    assert len(tr.live) == 1
+
+    dev.reclaim_layers("cart")          # the run dies: the built image's loan too
+    assert tr.freed == 1 and not tr.live and img._rgb_i is None
+
+
 def test_spr_paint_image_into_layer_matches_host():
     # The clean full-screen-background path: spr(bg, 0, 0) into a make_layer once, then
     # draw_layer per frame -- the device bakes the paint image into the layer buffer via
@@ -1720,18 +1916,17 @@ def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
     # #63 leak fix: moy_alloc has no free(), so a dead cart's layer buffers must
     # return to the pool and the next same-dims new_layer must REUSE them (without
     # this, every cart re-run leaked its world from the heap_caps pool). Stub
-    # moy_alloc/lcd_bus so the CPython-run device module takes the pooled path.
+    # moy_alloc (caps constants + the older malloc_dma) so the CPython-run
+    # device module takes the pooled path.
     import sys
     import types
     m, _, _ = _both(True)
     _map_cache_on(m, monkeypatch)
     fake_alloc = types.ModuleType("moy_alloc")
     fake_alloc.malloc_dma = lambda n, caps=0: bytearray(n)
-    fake_bus = types.ModuleType("lcd_bus")
-    fake_bus.MEMORY_SPIRAM = 1
-    fake_bus.MEMORY_DMA = 2
+    fake_alloc.MEMORY_SPIRAM = 1
+    fake_alloc.MEMORY_DMA = 2
     monkeypatch.setitem(sys.modules, "moy_alloc", fake_alloc)
-    monkeypatch.setitem(sys.modules, "lcd_bus", fake_bus)
     g = m.DeviceCanvas.__init__.__globals__       # the device module's namespace
     monkeypatch.setitem(g, "_LAYER_POOL", {})
     cv = m.DeviceCanvas(_FakeComp(W, H))
@@ -1870,3 +2065,210 @@ def test_tline_parity():
             c.clip()
             c.tline(tm, sh, 33, 33, 33, 33, 0, 0, F, F)  # single pixel
         _assert_same(host, dev, "tline gfx=%s" % gfx)
+
+
+# -- the game fold's snapshot (native/moy_flush/moy_fold.h) --------------------
+
+
+class _FoldingFakeComp(_FakeComp):
+    """`_FakeComp` plus the fold verbs `FoldingCompositor` exports, logging
+    exactly what `blit_game` hands the C -- the row-range arithmetic is the
+    part of the snapshot that lives in Python, so it is the part pinned here."""
+
+    def __init__(self, w, h):
+        _FakeComp.__init__(self, w, h)
+        self.calls = []
+        self.snap_async = True
+        self.refuse = False
+
+    def back_buffer(self):
+        return self._buf
+
+    def fold_fence(self):
+        self.calls.append(("fold_fence",))
+
+    def snap_scale_fold(self, live, live_off, scratch, vw, vh, sx, sstride,
+                        ox, oy, scale):
+        if self.refuse:
+            raise ValueError("fold geometry")
+        self.calls.append(("snap", live_off, len(scratch), vw, vh, sx, sstride,
+                           ox, oy, scale))
+        return self.snap_async
+
+
+    def snap_fence(self):
+        self.calls.append(("snap_fence",))
+
+
+def test_blit_game_snapshots_the_row_range_and_sync_back_fences_it():
+    """The snapshot is the game canvas's ROW RANGE at the canvas stride (one
+    contiguous run, the only shape a DMA takes), with the rectangle's column
+    and stride passed so the C reads a view out of it; the scratch is shaped
+    to that range. A DMA in flight is fenced by the NEXT sync_back, once; a
+    synchronous snapshot leaves nothing to fence."""
+    m = _load_device_canvas()
+    comp = _FoldingFakeComp(480, 320)
+    sc = m.DeviceCanvas(comp)
+    gc = m.DeviceCanvas(_FakeComp(320, 240))
+    sc.blit_game(gc, 80, 40, 1)
+    assert comp.calls == [("fold_fence",),
+                          ("snap", 0, 320 * 240 * 2, 320, 240, 0, 320,
+                           80, 40, 1)]
+    assert sc._snap_live is True
+    sc.sync_back()
+    assert comp.calls[-1] == ("snap_fence",)
+    assert sc._snap_live is False
+    sc.sync_back()
+    assert comp.calls.count(("snap_fence",)) == 1
+    # A view crop: the rows from sy at the CANVAS stride, the rect at sx
+    # inside them -- celeste's 128x120 of a 128x128, then a narrow one.
+    gc2 = m.DeviceCanvas(_FakeComp(128, 128))
+    comp.calls.clear()
+    sc.blit_game(gc2, 112, 40, 2, src=(0, 4, 128, 120))
+    assert comp.calls == [("fold_fence",),
+                          ("snap", 4 * 128 * 2, 128 * 120 * 2, 128, 120, 0, 128,
+                           112, 40, 2)]
+    comp.calls.clear()
+    sc.blit_game(gc2, 64, 20, 2, src=(16, 14, 96, 100))
+    assert comp.calls[1] == ("snap", 14 * 128 * 2, 128 * 100 * 2, 96, 100,
+                             16, 128, 64, 20, 2)
+    # A synchronous snapshot (the engine declined; the C memcpy'd) has
+    # nothing in flight to fence. (The DMA arm above is still owed its fence
+    # until the next sync_back -- the flag is not per call, it is a debt.)
+    assert sc._snap_live is True
+    sc.sync_back()
+    comp.snap_async = False
+    comp.calls.clear()
+    sc.blit_game(gc, 80, 40, 1)
+    assert sc._snap_live is False
+    sc.sync_back()
+    assert ("snap_fence",) not in comp.calls
+
+
+def test_blit_game_composites_itself_when_the_geometry_is_refused():
+    """A refusal must be invisible one level up: the pixels are those of a
+    system canvas whose compositor has no lever at all, composited from the
+    LIVE canvas through the view crop, bezels included."""
+    m = _load_device_canvas()
+    gc = m.DeviceCanvas(_FakeComp(128, 128))
+    gc.cls(3)
+    gc.rect(10, 10, 40, 30, 8)
+    gc.rect(60, 70, 50, 50, 12)
+    plain = m.DeviceCanvas(_FakeComp(320, 240))
+    plain.blit_game(gc, 32, 0, 2, src=(0, 4, 128, 120))
+    comp = _FoldingFakeComp(320, 240)
+    comp.refuse = True
+    sc = m.DeviceCanvas(comp)
+    sc.blit_game(gc, 32, 0, 2, src=(0, 4, 128, 120))
+    assert bytes(sc._buf) == bytes(plain._buf)
+    assert bytes(sc._buf) != bytes(320 * 240 * 2)
+    assert sc._snap_live is False
+    assert comp.calls == [("fold_fence",)]
+
+
+def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
+    """#186: the two off-heap lanes must never both hold one buffer.
+
+    `_bake_buf`'s lane rides the IMAGE's residency -- an off-heap `pix` (a
+    cover) gets off-heap bakes, freed by whoever owns the pixels and by
+    `_cache_rgb`'s variant eviction. `_paint_bake_buf`'s lane is the loan
+    register, freed by `release_bakes(owner)`. A buffer in both is freed twice,
+    which the C registry turns into a ValueError -- or into a live buffer handed
+    out again, if an id were reused.
+
+    Nothing had both until the desktop backdrop, which needs off-heap PIXELS
+    (a screenful of indices is 153,600 bytes on the Guition, past that board's
+    largest run at an untouched launcher) AND an owner for its bake. So an
+    owner now settles it: the register is the only lender for an image that
+    names one."""
+    m, _host, dev = _both(True)
+    tr = _BakeTracker()
+    m._moybuf = tr
+    m._LENT_BAKES = {}
+
+    img = _owned_paint_image(m, 320, 240, owner="wallpaper_bg")
+    img.pix = memoryview(bytearray(img.pix))     # off-heap pixels, as the backdrop has
+    dev.spr(img, 0, 0)
+    assert isinstance(img._rgb_i, memoryview), "the full-screen bake stayed on the heap"
+    assert len(tr.live) == 1, "the bake was lent twice, or not at all"
+    assert [b for _i, b in m._LENT_BAKES["wallpaper_bg"]] == [img._rgb_i]
+
+    # The scaled lane bakes a pre-scaled copy the register does not track, so
+    # for an OWNED image it takes the gc heap rather than an untracked loan.
+    dev.spr(img, 0, 0, 2)
+    assert isinstance(img._rgb, bytearray), "an untracked off-heap variant"
+    assert len(tr.live) == 1
+
+    # And the one release frees the one buffer -- _BakeTracker raises on a
+    # double free, so a second lender would surface right here.
+    dev.release_bakes("wallpaper_bg")
+    assert tr.live == {} and tr.freed == 1
+    assert img._rgb_i is None, "a stale draw must re-bake, never read freed RAM"
+
+    # An UNOWNED off-heap image keeps the residency lane it always had (a
+    # cover: CoverCache frees pix and bakes together).
+    cover = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), 320, 240)
+    cover.pix = memoryview(bytearray(cover.pix))
+    dev.spr(cover, 0, 0)
+    assert isinstance(cover._rgb_i, memoryview)
+    assert m._LENT_BAKES == {}, "an unowned image must never enter the register"
+
+
+# --------------------------------------------------------------------------- #
+# Sanity: chrome.NAMES / color() equal palette's. The duplication is on        #
+# purpose (palette.py is deny-listed on the boards; chrome.py is what the     #
+# device freezes), so the two copies are pinned to each other here.           #
+# --------------------------------------------------------------------------- #
+def test_chrome_names_match_palette_names():
+    from runtime import chrome
+    assert chrome.NAMES == palette.NAMES
+    assert len(chrome.NAMES) == 16
+    for name, idx in palette.NAMES.items():
+        assert chrome.color(name) == palette.color(name) == idx
+    for idx in range(70):
+        assert chrome.color(idx) == palette.color(idx)
+    assert chrome.color("no-such-colour") == palette.color("no-such-colour") == 7
+
+
+def test_scroll_layer_buffer_is_off_gc_heap():
+    """A scroll/paint layer's RGB565 buffer is the biggest object a cart keeps
+    live, and collect cost scales with the live set -- so `_LayerComp` takes it
+    from moy_alloc (PSRAM, DMA-eligible for the GDMA window copy) where the
+    firmware has it: the registry-backed `alloc()` first, `malloc_dma` on an
+    older build, and a gc-heap bytearray only where there is no allocator at
+    all. Driven with a fake `moy_alloc` in sys.modules; the sizes are odd so
+    the layer pool never answers first."""
+    m = _load_device_canvas()
+    dev = m.DeviceCanvas(_FakeComp(W, H))
+    calls = []
+
+    def _alloc_mod(**verbs):
+        mod = types.SimpleNamespace(MEMORY_SPIRAM=0x400, MEMORY_DMA=0x8)
+        for k, v in verbs.items():
+            setattr(mod, k, v)
+        return mod
+
+    saved = sys.modules.get("moy_alloc")
+    try:
+        got = bytearray(13 * 7 * 2)
+        sys.modules["moy_alloc"] = _alloc_mod(
+            alloc=lambda n, caps: calls.append(("alloc", n, caps)) or got)
+        lay = dev.new_layer(13, 7)
+        assert calls == [("alloc", 13 * 7 * 2, 0x400 | 0x8)]
+        assert lay._buf is got
+
+        got2 = bytearray(13 * 9 * 2)
+        sys.modules["moy_alloc"] = _alloc_mod(
+            malloc_dma=lambda n, caps: calls.append(("dma", n, caps)) or got2)
+        lay2 = dev.new_layer(13, 9)
+        assert calls[-1] == ("dma", 13 * 9 * 2, 0x400 | 0x8)
+        assert lay2._buf is got2
+
+        sys.modules.pop("moy_alloc", None)
+        lay3 = dev.new_layer(13, 11)
+        assert isinstance(lay3._buf, bytearray) and len(lay3._buf) == 13 * 11 * 2
+    finally:
+        if saved is None:
+            sys.modules.pop("moy_alloc", None)
+        else:
+            sys.modules["moy_alloc"] = saved

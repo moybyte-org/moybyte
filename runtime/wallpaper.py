@@ -76,6 +76,14 @@ class Wallpaper:
         rl = getattr(self.ws.canvas, "reclaim_layers", None)
         if rl is not None:
             rl("wallpaper")
+        # #186: and My Art's backdrop bake, which is a loan of the same kind on
+        # the same event -- the desktop is about to stop drawing it. Its owner
+        # is the artwork service's, not "wallpaper": the compiled cart's images
+        # and the backdrop must not free each other. The resampled indices stay
+        # cached, so coming back to My Art is a re-bake, not a re-resample.
+        art = getattr(self.ws, "artwork", None)
+        if art is not None:
+            art.release_wall_bake()
 
     def _stock_bracket(self):
         """The backdrop never follows a cart's private raster: while a per-run
@@ -114,6 +122,9 @@ class Wallpaper:
             ns = ws.make_api(ws.canvas, ws.input, dict(cart.get("cfg", {})),
                              sheet, _SilentAudio(AudioEngine(AudioBank.default())),
                              tilemap, Pmem(), None, cart.get("images") or {},
+                             # A wallpaper is a cart, so it gets the fourth asset
+                             # type too: sakura sheds its petals from a scene.
+                             ws._build_scenes(cart),
                              flags=ws._build_flags(cart),   # SPEC.md 3.5 tile flags
                              owner="wallpaper")   # #63: layer loans reclaimed on clear()
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
@@ -412,6 +423,7 @@ class Wallpaper:
                 ns = ws.make_api(pv, ws.input, dict(cart.get("cfg", {})),
                                  sheet, _SilentAudio(AudioEngine(AudioBank.default())),
                                  tilemap, Pmem(), None, cart.get("images") or {},
+                                 ws._build_scenes(cart),
                                  flags=ws._build_flags(cart),
                                  owner="wallpaper_pv")
                 exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)

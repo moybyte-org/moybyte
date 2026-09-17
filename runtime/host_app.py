@@ -44,7 +44,7 @@ from . import ui as _ui
 sys.modules.setdefault("ui", _ui)   # the shared widget toolkit: editor_app + the
                                     # apps do `import ui` (their frozen device name)
 from . import calc_app as _calc_app
-sys.modules.setdefault("calc_app", _calc_app)   # console does `from calc_app import ...`
+sys.modules.setdefault("calc_app", _calc_app)   # app_decls names it bare; console resolves it by data
 from . import bar_layer as _bar_layer
 from . import cards_layer as _cards_layer
 from . import paint_layer as _paint_layer
@@ -76,7 +76,6 @@ sys.modules.setdefault("players", _players)   # console.py does `from players im
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
-from . import palette  # noqa: E402
 # The RASTER is the boards' (`device_canvas.DeviceCanvas`, RGB565), reached
 # through the two factories in host_canvas.py. There is no host-only canvas
 # class any more -- runtime/canvas.py, the second raster, is deleted.
@@ -213,11 +212,11 @@ def _seed_system_carts(carts_dir):
     matching the device's seed_builtins, so a bumped cart actually propagates on the host
     (it used to seed once and ignore version bumps)."""
     os.makedirs(carts_dir, exist_ok=True)
+    moy_carts.sweep_store(carts_dir)     # a retired seed leaves the store, once
     if not os.path.isdir(SYSTEM_CARTS):
         return
-    for name in sorted(os.listdir(SYSTEM_CARTS)):
-        if not name.endswith(".moy"):
-            continue
+    names = [n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
+    for name in names:
         src = os.path.join(SYSTEM_CARTS, name)
         dst = os.path.join(carts_dir, name)
         if not os.path.exists(dst):
@@ -236,7 +235,8 @@ def _seed_system_carts(carts_dir):
                     fh.write(data)
 
 
-def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=False):
+def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
+                      windowed=False, panel_diagonal_in=None):
     """Build the shared console.Workstation wired to host backends.
 
     The two-domain seam (#39): `sys_size` is the SYSTEM canvas size (w, h) -- the
@@ -249,7 +249,12 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     `windowed=True` installs the Picotron-style windowed WM (wm_windowed.py --
     the big-screen / P4 presentation, #73/#58): the launcher is the desktop and
     every pushed app is a floating window. Needs a distinct big `sys_size`;
-    silently ignored on the shared-canvas 320x240 build."""
+    silently ignored on the shared-canvas 320x240 build.
+
+    `panel_diagonal_in` is the board fact a BOARD declares in its board.toml
+    (#203): the glass's diagonal in inches, from which the chrome tap-target
+    floor is derived. None -- every simulated tier by default -- keeps chrome on
+    the font scale."""
     carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
     carts = moy_carts.scan(carts_dir)
@@ -274,7 +279,8 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
         sys_canvas = host_canvas.make_system_canvas(sw, sh, font_scale=font_scale)
     inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
-                             sys_canvas=sys_canvas, font_scale=font_scale)
+                             sys_canvas=sys_canvas, font_scale=font_scale,
+                             panel_diagonal_in=panel_diagonal_in)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
     ws.make_game_canvas = lambda w, h: host_canvas.make_canvas(w, h)

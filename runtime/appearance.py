@@ -330,6 +330,22 @@ class Appearance:
         always matches the 8px text actually drawn -- no mis-laid-out desktop."""
         return self.font_scale if self.ws._sys_canvas is not None else 1
 
+    def effective_chrome_scale(self):
+        """The scale INTERACTIVE CHROME geometry is laid out at (#203) -- the bar
+        and its buttons, the ≡ menu's rows, the Settings rows, the code editor's
+        symbol keys. Never below the font scale (text must still fit) and never
+        below the board's tap-target floor.
+
+        It sits beside `effective_font_scale` because every caller needs both and
+        `_relayout` is the one cascade that applies them -- but it is NOT a look
+        SETTING: nothing here writes it, no Settings row cycles it, and its floor
+        comes from `ws.chrome_floor`, resolved once from the board's declared
+        glass. That is deliberate. `font_scale` is persisted, so a device whose
+        store already says 1 would ignore a changed default, and the whole point
+        of #203 is a size a kid's finger can rely on rather than one a setting
+        can lose."""
+        return max(self.effective_font_scale(), self.ws.chrome_floor)
+
     def set_font_scale(self, scale, persist=True):
         """Set the system-UI font scale (clamped to FONT_SCALES), relay the effective
         scale into the system canvas + relayout the desktop, and (by default) persist

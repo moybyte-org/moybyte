@@ -13,7 +13,7 @@ require (a) every snapshot of a given buffer to match its previous one and
 and repeat -- that exercises the streak-restart path, which is where a
 half-refreshed buffer would show up.
 
-Usage:  python tools/p4_chrome_freeze.py [--port /dev/ttyACM0]
+Usage:  python tools/p4_chrome_freeze.py --board p4
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import sys
 import time
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from p4_autotest import P4Board            # noqa: E402
+from p4_autotest import add_board_args, board_from_args  # noqa: E402
 
 
 PROBE = """
@@ -83,9 +83,9 @@ def sample(b, key, n=8, gap=0.12):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    add_board_args(ap)
     args = ap.parse_args()
-    b = P4Board(args.port)
+    b = board_from_args(args)
     rc = 0
     try:
         b.reset()

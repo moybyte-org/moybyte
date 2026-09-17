@@ -35,11 +35,13 @@ try:
     import ui as _ui              # frozen on device
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
-    from editors import SceneEditor, KeyEdge
+    from editors import SceneEditor, KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import SceneEditor, KeyEdge
+    from runtime.editors import (SceneEditor, KeyEdge, TextEntry, TE_COMMIT,
+                                 TE_CANCEL)
 
 try:
     from chrome import _gbtn as _chrome_gbtn
@@ -105,13 +107,15 @@ class SceneLayout(LayoutBase):
     star of the reflow -- a big panel shows the whole 320x240 viewport (and
     beyond) with no panning."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None):
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None,
+                 chrome_scale=None):
         # `bounds` (bx, by, bw, bh) confines the whole editor to a SUB-RECT of the
         # system canvas -- the right pane of the combined Blocks+Scene workspace
         # (blocks-left / objects-right, Scratch-style). A bounded layout never takes
         # the frozen 320x240 branch (it's a big-screen feature), so `_base` excludes
         # it and the T-Deck's scene tab is byte-identical.
-        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None)
+        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None,
+                            chrome_scale=chrome_scale)
         fs = self.fs
         self.zooms = _SV_ZOOMS
         if self._base:
@@ -136,7 +140,7 @@ class SceneLayout(LayoutBase):
             return
         # -- responsive: the MapLayout formulas (right column anchored to the
         # panel's right edge, button row to its bottom, view fills the rest) ----
-        bar_h = 18 * fs
+        bar_h = 18 * self.cs          # the OS bar's own height (#203)
         if bounds is not None:
             # Confined to the workspace's right pane: the panel fills the pane
             # (minus a hair of inset), and every rect below derives from px/py/
@@ -201,18 +205,16 @@ class SceneEditorUI:
     set_menu_view("scene") the first time a cart's scene tab is opened --
     exactly the MapEditorUI lifecycle."""
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         self.sceneedit = None          # SceneEditor while menu_view == "scene"
         self.scene_name = None         # the DEFAULT scene this editor manages
         self.scene_page = 0            # first tile id shown in the palette
         self.scene_zoom = 0            # index into layout.zooms (0 = 1x)
         self.tag_edit = False          # the TAG field is capturing keystrokes
-        self.tag_buf = ""              # the tag being typed (commits on ENTER)
+        self.tag_buf = TextEntry(SceneEditor.TAG_MAX)   # the tag being typed
         self._skey = KeyEdge()         # Ctrl+Z/Y edge tracker
-        self._tag_kprev = 0            # tag-typing edge detect (wifi-field pattern)
         self._press = None             # gesture origin (px, py); None outside one
         self._mode = None              # open gesture: "move" (an actor) or "pan"
         self._panning = False          # the pan gesture crossed the tap threshold
@@ -224,9 +226,9 @@ class SceneEditorUI:
         sc = ws.sys_canvas
         self.layout = SceneLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
-    def relayout(self, w, h, fs):
+    def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39) -- ws._relayout fan-out."""
-        self.layout = SceneLayout(w, h, fs)
+        self.layout = SceneLayout(w, h, fs, chrome_scale=cs)
         if self.scene_zoom >= len(self.layout.zooms):
             self.scene_zoom = 0
         self._clamp_cam()
@@ -261,7 +263,7 @@ class SceneEditorUI:
         self.sceneedit = None
         self.scene_name = None
         self.tag_edit = False
-        self.tag_buf = ""
+        self.tag_buf.open("")
 
     def on_open(self):
         """Reset gesture/zoom/props state -- called from EditorApp.open_scene
@@ -269,13 +271,12 @@ class SceneEditorUI:
         self.scene_zoom = 0
         self.scene_page = 0
         self.tag_edit = False
-        self.tag_buf = ""
+        self.tag_buf.open("")
         self._press = None
         self._mode = None
         self._panning = False
         self._drag = None
         self._skey.reset()
-        self._tag_kprev = 0
 
     # -- live sync + persistence ---------------------------------------------
 
@@ -325,7 +326,7 @@ class SceneEditorUI:
     def _world_at(self, px, py):
         """World coords under pointer (px, py), or None outside the view."""
         se = self.sceneedit
-        if se is None or not self._in(px, py, self._sv_area()):
+        if se is None or not _in(px, py, self._sv_area()):
             return None
         x0, y0, scale, vw, vh = self._sv_metrics()
         return (se.cam_x + (px - x0) // scale, se.cam_y + (py - y0) // scale)
@@ -373,18 +374,13 @@ class SceneEditorUI:
         i = ws.input
         se = self.sceneedit
         if se is not None and self.tag_edit:
-            k = i.last_key
-            if k and k != self._tag_kprev:
-                if k in (10, 13):                    # ENTER -> commit the tag
-                    self._tag_commit()
-                elif k == 27:                        # ESC -> cancel
-                    self._tag_cancel()
-                elif k == 8:                         # BACKSPACE -> delete
-                    self.tag_buf = self.tag_buf[:-1]
-                elif 32 <= k <= 126 and len(self.tag_buf) < SceneEditor.TAG_MAX:
-                    self.tag_buf += chr(k)
+            ev = self.tag_buf.feed(i)
+            if ev == TE_COMMIT:                      # ENTER -> commit the tag
+                self._tag_commit()
+            elif ev == TE_CANCEL:                    # ESC -> cancel
+                self._tag_cancel()
+            if ev is not None:
                 ws._dirty = True
-            self._tag_kprev = k
             return                                   # the field owns every key
         if se is not None:
             g = 8
@@ -440,15 +436,15 @@ class SceneEditorUI:
         if r is None:
             return
         self.tag_edit = True
-        self.tag_buf = r.get("tag", "")
-        self._tag_kprev = 0
+        self.tag_buf.open(r.get("tag", ""),
+                          getattr(self.ws.input, "last_key", 0) or 0)
         self.ws._set_text_mode(True)
 
     def _tag_commit(self):
         se = self.sceneedit
         self.tag_edit = False
         self.ws._set_text_mode(False)
-        if se is not None and se.set_tag(self.tag_buf):
+        if se is not None and se.set_tag(self.tag_buf.text):
             self._sync_live()
 
     def _tag_cancel(self):
@@ -467,9 +463,9 @@ class SceneEditorUI:
         if se is None:
             return
         lay = self.layout
-        if self.tag_edit and not self._in(px, py, lay.tag_btn):
+        if self.tag_edit and not _in(px, py, lay.tag_btn):
             self._tag_commit()                   # tap-away commits the typed tag
-        if self._in(px, py, self._sv_area()):
+        if _in(px, py, self._sv_area()):
             self._press = (px, py)
             self._panning = False
             self._drag = None
@@ -486,35 +482,35 @@ class SceneEditorUI:
                 self._mode = "pan"
             ws._dirty = True
             return
-        if self._in(px, py, lay.undo_btn):
+        if _in(px, py, lay.undo_btn):
             self._undo()
             return
-        if self._in(px, py, lay.redo_btn):
+        if _in(px, py, lay.redo_btn):
             self._redo()
             return
-        if self._in(px, py, lay.front_btn):
+        if _in(px, py, lay.front_btn):
             if se.front_sel():
                 self._sync_live()
             return
-        if self._in(px, py, lay.back_btn):
+        if _in(px, py, lay.back_btn):
             if se.back_sel():
                 self._sync_live()
             return
-        if self._in(px, py, lay.tag_btn):
+        if _in(px, py, lay.tag_btn):
             self._tag_start()
             return
-        if self._in(px, py, lay.del_btn):
+        if _in(px, py, lay.del_btn):
             if se.delete_sel():
                 self._sync_live()
             return
-        if self._in(px, py, lay.snap_btn):
+        if _in(px, py, lay.snap_btn):
             se.snap = not se.snap
             return
-        if self._in(px, py, lay.flip_btn):
+        if _in(px, py, lay.flip_btn):
             if se.toggle_flip():
                 self._sync_live()
             return
-        if self._in(px, py, lay.tp_area):
+        if _in(px, py, lay.tp_area):
             col = (px - lay.tp_x0) // lay.tp_cell
             row = (py - lay.tp_y0) // lay.tp_cell
             if 0 <= col < lay.tp_cols and 0 <= row < lay.tp_rows:
@@ -522,21 +518,21 @@ class SceneEditorUI:
                 ids = self._palette_ids()
                 if 0 <= k < len(ids):
                     se.set_brush(ids[k])     # pick sprite + adopt its object type (#85/#93)
-        elif self._in(px, py, lay.tp_prev):
+        elif _in(px, py, lay.tp_prev):
             self.scene_page = max(0, self.scene_page - lay.tp_page)
-        elif self._in(px, py, lay.tp_next):
+        elif _in(px, py, lay.tp_next):
             sheet = ws.project.sheet
             if sheet is not None and self.scene_page + lay.tp_page < sheet.count:
                 self.scene_page += lay.tp_page
-        elif self._in(px, py, lay.zoom_btn):
+        elif _in(px, py, lay.zoom_btn):
             self._cycle_zoom()
-        elif self._in(px, py, lay.pan_up):
+        elif _in(px, py, lay.pan_up):
             self._pan(0, -8)
-        elif self._in(px, py, lay.pan_dn):
+        elif _in(px, py, lay.pan_dn):
             self._pan(0, 8)
-        elif self._in(px, py, lay.pan_lf):
+        elif _in(px, py, lay.pan_lf):
             self._pan(-8, 0)
-        elif self._in(px, py, lay.pan_rt):
+        elif _in(px, py, lay.pan_rt):
             self._pan(8, 0)
 
     def _scene_drag(self, px, py):
@@ -736,7 +732,7 @@ class SceneEditorUI:
         fs = lay.fs
         cv.rect(tx, ty, tw2, th2, NAMES["dark_blue"])
         if self.tag_edit:
-            tag_text = "TAG " + self.tag_buf + "_"
+            tag_text = "TAG " + self.tag_buf.text + "_"
         elif sel is not None:
             tag_text = "TAG " + (sel.get("tag") or "-")
         else:

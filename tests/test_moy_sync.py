@@ -145,6 +145,82 @@ def test_a_transient_card_read_is_retried_not_dropped(tmp_path):
         builtins.open = orig
 
 
+def test_a_pull_reads_a_file_in_bounded_pieces(tmp_path):
+    """The PULL never holds a file, whatever size it is.
+
+    This is the whole of the 2026-09-09 Guition fix: a 142KB PICO-8 `main.lua`
+    used to cross as six 150KB-class copies and every pull died with a
+    MemoryError on a heap reporting megabytes free, because none of its free
+    RUNS was that long. Assert the bound, not the symptom -- a reader that goes
+    back to `read()` passes every content test and brings the defect back.
+    """
+    p = tmp_path / "big.lua"
+    p.write_text("-- a line of a cart\n" * 9000)                # ~180KB
+    pieces = list(moy_sync.read_text_chunks(str(p)))
+    assert "".join(pieces) == p.read_text()
+    assert len(pieces) > 1, "the whole file arrived as one piece"
+    assert max(len(x) for x in pieces) <= moy_sync.STORE_READ_CHUNK
+
+
+def test_a_pull_reads_the_edge_shapes_the_way_read_text_does(tmp_path):
+    """Empty is a VALUE and binary is an ABSENCE, exactly as `_read_text`'s
+    "" and None are -- a binary file must not arrive as an empty string, which
+    is what deciding it after the first piece would produce."""
+    empty = tmp_path / "empty.txt"
+    empty.write_text("")
+    assert list(moy_sync.read_text_chunks(str(empty))) == []
+    assert moy_sync._read_text(str(empty)) == ""
+
+    blob = tmp_path / "blob.bin"
+    blob.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\xff\xfe\x00\x01" * 4000)
+    assert moy_sync.read_text_chunks(str(blob)) is None
+    assert moy_sync._read_text(str(blob)) is None
+
+
+def test_a_card_that_eios_mid_file_is_re_opened_where_it_left_off(tmp_path):
+    """The retry has to RE-OPEN, not re-read: a FatFS handle latches its disk
+    error, so the handle that saw the EIO answers FR_INVALID_OBJECT forever
+    after. Losing this would turn the Guition's documented transient-card EIO
+    from a hiccup into a silently short file."""
+    import builtins
+
+    p = tmp_path / "flaky.lua"
+    p.write_text("".join("line %04d\n" % i for i in range(2000)))   # ~20KB
+    state = {"reads": 0, "opens": 0}
+    orig = builtins.open
+
+    class _Latching:
+        def __init__(self, f):
+            self._f = f
+            self._dead = False
+
+        def read(self, n=-1):
+            if self._dead:
+                raise OSError(5, "EIO")      # the latch: this handle is done
+            state["reads"] += 1
+            if state["reads"] == 2:
+                self._dead = True
+                raise OSError(5, "EIO")
+            return self._f.read(n)
+
+        def __getattr__(self, name):
+            return getattr(self._f, name)
+
+    def flaky(path, *a, **k):
+        if str(path).endswith("flaky.lua"):
+            state["opens"] += 1
+            return _Latching(orig(path, *a, **k))
+        return orig(path, *a, **k)
+
+    builtins.open = flaky
+    try:
+        got = "".join(moy_sync.read_text_chunks(str(p), chunk=4096))
+    finally:
+        builtins.open = orig
+    assert got == p.read_text(), "the retry lost or duplicated a piece"
+    assert state["opens"] > 1, "the retry re-read the handle that had failed"
+
+
 # ---------------------------------------------------------------------------
 # safe_segments -- the path trust boundary.
 # ---------------------------------------------------------------------------
@@ -619,7 +695,7 @@ def test_a_files_batch_never_dirties_the_shelf(tmp_path):
     root = _files_store(tmp_path)
     for ops in ([{"p": "drawings/new.moyimg", "t": "0,"}],
                 [{"p": "drawings/sunset.moyimg", "d": 1}],
-                [{"p": "docs/story.moytext", "t": "hi"}]):
+                [{"p": "docs/story.md", "t": "hi"}]):
         _, errors, shelf = apply_ops(str(root), ops, FILES_ROOT_ID)
         assert not errors and not shelf
 
@@ -663,6 +739,27 @@ def test_the_files_watcher_stamps_the_rooted_protocol(tmp_path):
     ops, pin, root_id = parse_batch(json.dumps(doc))
     assert (pin, root_id) == ("1234", FILES_ROOT_ID)
     assert ops == [{"p": "drawings/sunset.moyimg", "t": "2,"}]
+
+
+def test_a_markdown_document_crosses_the_wire_both_ways(tmp_path):
+    """Documents are plain `.md` (2026-09-07). The wire has no extension table
+    -- `_skip` refuses `.bak`/`.tmp` and the kind allowlist does the rest -- so
+    the file the board holds is the file the browser gets, byte for byte."""
+    root = _files_store(tmp_path)
+    applied, errors, shelf = apply_ops(
+        str(root), [{"p": "docs/story.md", "t": "# Chapter one\n\nIt began."}],
+        FILES_ROOT_ID)
+    assert (applied, errors, shelf) == (1, [], False)
+    p = root / "docs" / "story.md"
+    assert p.read_text() == "# Chapter one\n\nIt began."
+    w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
+    w.sweep()                                  # the first sweep is the baseline
+    p.write_text("# Chapter two")
+    _bump_mtime(p)
+    assert w.sweep()
+    ops, _pin, root_id = parse_batch(w.take_json("1234"))
+    assert root_id == FILES_ROOT_ID
+    assert ops == [{"p": "docs/story.md", "t": "# Chapter two"}]
 
 
 def test_a_missing_files_root_is_an_empty_watcher_not_a_crash(tmp_path):

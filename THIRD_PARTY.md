@@ -1,7 +1,7 @@
 # Third-party components
 
 Moybyte is licensed as described in [LICENSE.md](LICENSE.md) — FSL-1.1-MIT for
-the console and firmware, MIT for the spec player's compiled artifacts. Some files in this
+the console and firmware. Some files in this
 repository did **not** originate here, and some of what the build produces
 bundles code from elsewhere. Everything in that category is listed below, with
 its upstream, its licence, and whether we changed it.
@@ -26,8 +26,9 @@ separate question from what is committed.
 | Component | Where it lives here | Upstream | Licence | Modified? |
 |---|---|---|---|---|
 | Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
-| Lua 5.4.7 (measurement spike) | `experiments/lua_bridge/components/lua/` | [lua.org](https://www.lua.org/) | MIT | No |
-| `esp_lcd_ek79007` panel driver | `firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
+| `esp_lcd_ek79007` panel driver | `native/p4/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
+| `esp_lcd_jd9365` panel driver, Guition's build | `native/p4/moy_dsi/vendor_jd9365/` | Espressif's component as shipped in [Guition's JC8012P4A1C demo](https://github.com/DevinWatson/10.1-inch-ESP32P4-Xiaozhi-ESP32-C6-JC8012P4A1C_I_W_Y) | Apache-2.0 | No |
+| GSL3680 touch firmware (JC8012P4A1C glass) | `firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py` | Silead, via the same Guition demo (`esp_lcd_gsl3680.h`) | vendor firmware, redistributed as shipped | Transcribed (`tools/gen_gsl_fw.py`) |
 | ST7789 init register values (T-Deck panel) | `firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c` | [lvgl-micropython/lvgl_micropython](https://github.com/lvgl-micropython/lvgl_micropython) | MIT | **Yes** — transcribed to C |
 | AXS15231B init register values (Guition panel) | `firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c` | [esphome/esphome](https://github.com/esphome/esphome) | MIT (their Python half) | **Yes** — transcribed to C |
 | esptool-js 0.6.0 (the site's board flasher) | `site/vendor/esptool-js/` | [espressif/esptool-js](https://github.com/espressif/esptool-js) | Apache-2.0 | No |
@@ -36,6 +37,7 @@ separate question from what is committed.
 | Pixelarticons icon shapes | `runtime/chrome.py` (`_GLYPHS` and siblings) | [halfmage/pixelarticons](https://github.com/halfmage/pixelarticons) | MIT | **Yes** — retraced |
 | T-Deck pin assignments | `docs/boards/lilygo_t_deck_plus.md` | [Xinyuan-LilyGO/T-Deck](https://github.com/Xinyuan-LilyGO/T-Deck) | facts; source cited | Transcribed |
 | Guition JC3248W535 pin assignments | `firmware/guition_jc3248w535/board.toml` | the owner's own ESPHome definition for the board | facts; source cited | Transcribed |
+| Guition JC8012P4A1C pin assignments + DSI timing | `native/p4/moy_dsi/modmoy_dsi.c`, `firmware/guition_jc8012p4a1c/` | Guition's demo `pins_config.h` / BSP + the ESPHome community's board profile | facts; source cited | Transcribed |
 
 Build-time upstreams that end up inside shipped binaries are in §5.
 Development and optional dependencies that are *not* redistributed are in §6.
@@ -68,23 +70,10 @@ targets.
 - `modmoy_lua.c` and `micropython.cmake` in the parent directory are Moybyte's
   own bridge code, not Lua's, and are under this repository's licence.
 
-### 2.2 Lua 5.4 — the measurement spike
-
-`experiments/lua_bridge/components/lua/`
-
-The `#6`/`#67` benchmark that decided whether a Lua tier was worth building. It
-is deliberately kept on **stock** Lua so it measures a stock VM.
-
-- **Upstream / licence:** identical to §2.1.
-  Full text: [`.../components/lua/COPYRIGHT`](experiments/lua_bridge/components/lua/COPYRIGHT).
-- **Modified: no.** Every `.c`/`.h` file is byte-for-byte upstream. The only
-  Moybyte file in that directory is the added `CMakeLists.txt` ESP-IDF
-  component wrapper. See
-  [`.../components/lua/MODIFICATIONS.md`](experiments/lua_bridge/components/lua/MODIFICATIONS.md).
-
 ### 2.3 Espressif `esp_lcd_ek79007` — the P4 panel driver
 
-`firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/`
+`native/p4/moy_dsi/vendor/` (moved from the Waveshare's board tree on
+2026-09-06, when `moy_dsi` became the two P4 boards' shared panel module)
 
 The EK79007 MIPI-DSI controller driver for the Waveshare 7″ board (issue #58).
 
@@ -96,16 +85,51 @@ The EK79007 MIPI-DSI controller driver for the Waveshare 7″ board (issue #58).
   `idf_component.yml`).
 - **Licence:** Apache-2.0, © 2023–2025 Espressif Systems (Shanghai) CO LTD.
   Full text is retained at
-  [`.../vendor/license.txt`](firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/license.txt);
+  [`.../vendor/license.txt`](native/p4/moy_dsi/vendor/license.txt);
   the per-file `SPDX-FileCopyrightText` / `SPDX-License-Identifier` headers are
   intact. Upstream ships no `NOTICE` file, so Apache-2.0 §4(d) attaches nothing
   further.
 - **Modified: no.** Every file is byte-for-byte upstream, so Apache-2.0 §4(b)'s
   changed-files notice is not triggered. That determination — and how to
   re-verify it in one command — is recorded in
-  [`.../vendor/MODIFICATIONS.md`](firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/MODIFICATIONS.md).
+  [`.../vendor/MODIFICATIONS.md`](native/p4/moy_dsi/vendor/MODIFICATIONS.md).
 - The board bring-up that *uses* the driver (`modmoy_dsi.c`,
   `micropython.cmake`, one level up) is Moybyte's own work.
+
+### 2.3a Espressif `esp_lcd_jd9365`, Guition's build — the Guition P4 panel driver
+
+`native/p4/moy_dsi/vendor_jd9365/`
+
+The JD9365 MIPI-DSI controller driver for the Guition JC8012P4A1C's 10.1″
+800×1280 glass, taken from the factory demo Guition publishes for that exact
+board (`1-Demo/arduino-examples/esp32p4_lvgl_v8/src/lcd/` in the vendor's zip,
+mirrored at
+<https://github.com/DevinWatson/10.1-inch-ESP32P4-Xiaozhi-ESP32-C6-JC8012P4A1C_I_W_Y>).
+
+- **Upstream:** Espressif's `esp_lcd_jd9365` component (esp-iot-solution,
+  `components/display/lcd/esp_lcd_jd9365`) with Guition's own edits — the
+  panel's initialization table, a 1500 Mbps 2-lane bus config and the
+  800×1280 60 Hz DPI timing macro. Guition publishes no change statement;
+  `vendor_jd9365/MODIFICATIONS.md` is Moybyte's record of provenance.
+- **Licence:** Apache-2.0 — both files carry Espressif's SPDX header intact
+  (© 2024 Espressif Systems (Shanghai) CO LTD). The full licence text is the
+  one retained beside the EK79007 driver (`vendor/license.txt`).
+- **Modified: no.** Byte-for-byte as published; `modmoy_dsi.c` overrides
+  `num_fbs` and `use_dma2d` at runtime rather than editing the macros.
+
+### 2.3b Silead GSL3680 touch firmware — the Guition P4 glass
+
+`firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py`
+
+The GSL3680 is a RAM-loaded touch controller: the host uploads its firmware
+over I²C after every reset. Silead publishes it only through panel vendors,
+and this table came from the same Guition demo above (`GSLX680_FW[]` in
+`src/touch/esp_lcd_gsl3680.h`), transcribed to a `bytes` literal by
+`tools/gen_gsl_fw.py` (offset + 32-bit value per record, nothing else
+changed). Every project driving this glass redistributes the same table
+(ESPHome's `gsl3680` component included); Silead ships no licence with it.
+Moybyte's driver (`device/gsl3680.py`) is its own work and does NOT carry
+Silead's GPL `gsl_point_id.c` finger-tracking algorithm.
 
 ### 2.4 ST7789 init register values — the T-Deck panel on mainline
 
@@ -363,11 +387,6 @@ published format, protocol or behaviour; none contains third-party code.
   (`tools/render_icons.py`) — hand-written per the PNG specification, with
   `zlib` from the standard library for DEFLATE. The Paeth predictor is the
   spec's own pseudocode.
-- **WebSocket, RFC 6455** (`runtime/web_view_ws.py`,
-  `device/moy_webserver.py`) —
-  handshake and framing written from the RFC.
-  `WS_GUID` is the RFC's magic constant. SHA-1 and Base64 come from the
-  standard library.
 - **SHA-256** (`moy_ota.py`, `tools/gen_ota_manifest.py`) — `hashlib`.
 - **No third-party JavaScript.** `firmware/web_runner/page_core.html`,
   `firmware/web_runner/page_tail.js` and `firmware/web_runner/harness.mjs`
@@ -457,6 +476,14 @@ console.
 The AXS15231B register values this build sends are carried in-tree and are
 covered by §2.6, not by this table.
 
+### 5.6 Guition JC8012P4A1C, ESP32-P4 (`firmware/guition_jc8012p4a1c/build.sh`)
+
+The Waveshare P4's build (§5.2) on the second ESP32-P4 board: the same
+mainline MicroPython v1.28.0, ESP-IDF v5.5.1, ESP-Hosted 2.12.12 and
+managed components, the same patch ladder, the shared `native/p4/` modules
+(§2.3, §2.3a) and this board's GSL3680 firmware (§2.3b) frozen into the
+image. Nothing else is pulled in.
+
 ### 6.4 `experiments/wasm_aot/build.sh` (experiment only, nothing shipped)
 
 | Project | Upstream | Licence |
@@ -468,9 +495,9 @@ hand-written 8-opcode benchmark cores, not derived from any emulator.
 
 ### 6.5 Patches we apply to upstream sources
 
-`patches/*.patch` and
-`firmware/esp32_p4_wifi6_touch_lcd_7b/patches/*.patch` are Moybyte-authored
-diffs against MicroPython and ESP-IDF (I²C GIL release, `MICROPY_OBJ_REPR_C`
+`patches/*.patch` (the two `p4_*` ones were the Waveshare's own
+`patches/` until 2026-09-06, when both ESP32-P4 boards started applying them)
+are Moybyte-authored diffs against MicroPython and ESP-IDF (I²C GIL release, `MICROPY_OBJ_REPR_C`
 floats, native-code arena reclaim, T-Deck early board init, SPI PSRAM TX DMA,
 `esp_lcd` no-acquire `tx_color`, PSRAM temperature retune, DSI underrun hook,
 BLE-HID notification fast path). Being diffs, each carries a few lines of
@@ -487,7 +514,7 @@ Installed from PyPI; never vendored, never redistributed by this repository.
 | Package | Used for | Licence |
 |---|---|---|
 | pytest | test suite (`dev`) | MIT |
-| pillow | GIF export in `tools/make_site_gifs.py` (`dev`) | MIT-CMU / HPND |
+| pillow | GIF export in `tools/make_site_gifs.py` and `tools/make_feature_tiles.py` (`dev`) | MIT-CMU / HPND |
 | pygame | the simulator window (`sim`), imported lazily | **LGPL-2.1** |
 | esptool | flashing a board (`device`); `tools/esptool_no_modem.py` monkeypatches its reset strategy at runtime | **GPL-2.0-or-later** |
 | pyserial | serial I/O (`device`) | BSD-3-Clause |

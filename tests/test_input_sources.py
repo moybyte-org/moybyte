@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from board_source import runtime_text
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -207,9 +209,9 @@ def test_a_source_write_does_not_move_the_union_until_begin_frame(tier):
 def test_the_shared_release_all_stays_immediate_and_stays_consistent(tier):
     """The one write to the union outside the merge, and not a second author of
     it: it empties every SOURCE first, so what it leaves behind is exactly what
-    the next merge would build. Its callers (cards_layer._open_meta,
-    block_editor_ui._blk_arm_prompt) blank the edge sets in the same breath and
-    need it to have taken effect."""
+    the next merge would build. Its caller (widgets.arm_prompt, the one
+    body every modal prompt opens through) blanks the edge sets in the same
+    breath and needs it to have taken effect."""
     inp = _state(tier)
     a = inp.source("a")
     _set(a, "up")
@@ -262,6 +264,7 @@ BOARD_RUNTIMES = {
     "guition": "firmware/guition_jc3248w535/modules/moy_runtime.py",
     "p4": "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py",
     "tdeck": "firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
+    "guition_p4": "firmware/guition_jc8012p4a1c/modules/moy_runtime.py",
 }
 
 # Everything that WRITES an InputSource inside a board's _poll_inputs. The
@@ -273,7 +276,13 @@ SOURCE_WRITERS = ("poller.consume()", "keyboard.poll()", "_ble.poll()")
 def _code_lines(src, start_at, stop_at):
     """The CODE of one block: docstrings and comments stripped, because the
     thing being measured is what runs, and both boards' `_poll_inputs`
-    docstrings say the words `inp.begin_frame()` before the call does."""
+    docstrings say the words `inp.begin_frame()` before the call does.
+
+    A board with its own input hardware writes `_poll_inputs` in its module;
+    the touch-only tier's body is the spine's `poll_inputs` method, and a
+    board that has no closure of its own is read there."""
+    if start_at == "def _poll_inputs(" and start_at not in src:
+        start_at = "def poll_inputs("
     body = src[src.index(start_at):]
     body = body[:body.index(stop_at, len(start_at))]
     out = []
@@ -299,7 +308,7 @@ def test_every_board_writes_every_source_before_begin_frame(board):
     """The consumer half of the contract: with the union derived once per
     frame, a source written AFTER the merge is read one frame late -- silently,
     and only on that board."""
-    src = (ROOT / BOARD_RUNTIMES[board]).read_text()
+    src = runtime_text(BOARD_RUNTIMES[board])
     lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
     merge = _line_of(lines, "inp.begin_frame()", board)
     seen = 0
@@ -319,7 +328,7 @@ ACTIVE_READ = "bool(inp._held)"
 
 @pytest.mark.parametrize("board", sorted(BOARD_RUNTIMES))
 def test_a_board_that_reads_the_union_for_its_idle_check_reads_it_after_the_merge(board):
-    src = (ROOT / BOARD_RUNTIMES[board]).read_text()
+    src = runtime_text(BOARD_RUNTIMES[board])
     lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
     if not any(ACTIVE_READ in ln for ln in lines):
         # The T-Deck spells its `active` differently (trackball counts + the

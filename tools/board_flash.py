@@ -23,11 +23,11 @@ leaves the ROM loader is a hardware fact and not a preference. The T-Deck
 declares `before = usb_reset` (measured: default_reset write-times-out against
 a wedged USB-Serial/JTAG node, usb_reset connects); the P4's CH343 is happy
 with the esptool default. `after` defaults to hard_reset, which is what the
-three console boards want -- and the Zero declares `watchdog_reset`, because
-hard_reset does NOTHING on its TinyUSB CDC and a board left sitting in the
-loader after a flash reads exactly like a board that did not take the image.
-That fact was written in that board's own toml while this file hardcoded the
-opposite.
+console boards want -- and the Zero declares `watchdog_reset`, the verb that
+is PROVEN on it: hard_reset left it sitting in the loader when it ran as CDC,
+which reads exactly like an image that did not take, and the verb stayed when
+the board moved to USB-Serial/JTAG rather than changing two things at once.
+That fact lives in the board's own toml, which this file reads.
 
 esptool runs from THIS interpreter (`sys.executable -m esptool`) -- the venv's,
 via the Makefile. The fork-era esptool_no_modem wrapper is not needed on either

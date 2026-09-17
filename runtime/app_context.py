@@ -26,7 +26,7 @@ cart's manifest permissions rather than on a class constant.
     ctx.damage      the whole-system-surface invalidation flag
     ctx.surface     the system canvas, its font scale, chrome mode, pointer
     ctx.theme       the live token set + the theme/variant verbs
-    ctx.files       the USER-FILES store (#108: drawings/docs/tables/...)
+    ctx.files       the USER-FILES store (#108: drawings/docs/...)
     ctx.carts       the CART store (a cart is a project, not a document)
     ctx.nav         open another app, run a cart, keyboard text mode
     ctx.prefs       persisted per-app settings (system.json, namespaced)
@@ -45,8 +45,9 @@ it hides which apps can write executable content.
 and zero consumers" and deferred it. That reading came from grepping for
 `ws` followed by a dot,
 which cannot see `getattr(self.ws, "clipboard", None)` -- and that is how all
-FIVE of its live consumers are written (Sheets' Ctrl+C/Ctrl+V cell verbs, plus
-the `clip=` argument Writer, Sheets and Storybook hand their CodeEditor). The
+its live consumers are written (the `clip=` argument the editor handle and
+Storybook hand
+their CodeEditor). The
 same blind spot hid Storybook's `getattr(self.ws, "artwork", None)`. When a
 count says zero and the feature ships, suspect the grep.
 
@@ -142,6 +143,13 @@ class Surface:
         """The EFFECTIVE system font scale (1 on a shared 320x240 canvas whose
         framebuf text cannot scale, regardless of the setting)."""
         return self.__ws.look.effective_font_scale()
+
+    def chrome_scale(self):
+        """The scale the OS chrome around this app is laid out at (#203) -- the
+        font scale, or the board's tap-target floor when that is larger. An app
+        needs it to know how tall the bar band above it is; its own text stays on
+        `font_scale`."""
+        return self.__ws.look.effective_chrome_scale()
 
     def windowed(self):
         """True while the app is a WINDOW on the desk (#105): the WM's title
@@ -339,8 +347,11 @@ class _RawFiles:
         return self.__ws.carts_store.rename_file(kind, name, new,
                                                 self.__ws.carts_root)
 
-    def new_name(self, kind):
-        return self.__ws.carts_store.new_file_name(kind, self.__ws.carts_root)
+    def new_name(self, kind, title=None):
+        store = self.__ws.carts_store
+        if title:
+            return store.free_file_name(kind, title, self.__ws.carts_root)
+        return store.new_file_name(kind, self.__ws.carts_root)
 
     # -- the restorable trash ------------------------------------------------
 
@@ -352,18 +363,6 @@ class _RawFiles:
 
     def empty_trash(self):
         return self.__ws.carts_store.empty_trash(self.__ws.carts_root)
-
-    # -- one-shot layout migrations (#108) -----------------------------------
-
-    def migrate(self, kind=None):
-        """The `files/` migrations. `None` = the whole user-files layer;
-        `"docs"`/`"tables"` = that kind's own one-shot move."""
-        store = self.__ws.carts_store
-        if kind == "docs":
-            return store.migrate_docs(self.__ws.carts_root)
-        if kind == "tables":
-            return store.migrate_tables(self.__ws.carts_root)
-        return store.migrate_user_files(self.__ws.carts_root)
 
     # -- the #111 op-history sidecars ---------------------------------------
 
@@ -416,8 +415,11 @@ class Files(_StoreRole):
     def rename(self, kind, name, new):
         return self._write(self.raw.rename, kind, name, new)
 
-    def new_name(self, kind):
-        return self._read(self.raw.new_name, kind)
+    def new_name(self, kind, title=None):
+        """A free name for a NEW item. With a `title` it is that title, slugged
+        the kind's way and unique-ified (so a typed `todo.txt` stays
+        `todo.txt`); without one it is the kind's auto-name."""
+        return self._read(self.raw.new_name, kind, title)
 
     # -- the restorable trash ------------------------------------------------
 
@@ -429,9 +431,6 @@ class Files(_StoreRole):
 
     def empty_trash(self):
         return self._write(self.raw.empty_trash)
-
-    def migrate(self, kind=None):
-        return self._write(self.raw.migrate, kind)
 
     # -- the #111 op-history sidecars ---------------------------------------
 
@@ -482,12 +481,12 @@ class Files(_StoreRole):
             return blob
         return store.stamp_provenance(blob, kind, name, sig)
 
-    # -- the moytext codec (#181) --------------------------------------------
+    # -- the document codec (#181) -------------------------------------------
     #
-    # Pure functions on the store, same shape as the image codec above. Here
-    # because a USER APP cart saving a note must write the blob Writer and Files
-    # can READ -- a plain string in a `.moytext` decodes to nothing, silently,
-    # and looks exactly like a save that did not happen.
+    # Pure functions on the store, same shape as the image codec above. A
+    # document is plain Markdown, so these are `str` and `splitlines` -- they
+    # stay a named seam so a USER APP cart writing a note goes through the one
+    # place that says what a `.md` holds.
 
     def encode_text(self, body):
         store = self._store()
@@ -539,9 +538,6 @@ class _RawCarts:
     def save_image(self, cart, name, blob):
         return self.__ws.carts_store.save_image(cart, name, blob)
 
-    def save_table(self, cart, name, blob):
-        return self.__ws.carts_store.save_table(cart, name, blob)
-
     def journal_append(self, path, main, src, grad=0):
         return self.__ws.carts_store.journal_append(path, main, src, grad=grad)
 
@@ -552,7 +548,7 @@ class Carts(_StoreRole):
     Deliberately a SEPARATE role from `ctx.files`: a cart is executable
     content, and an app that can author one is doing something categorically
     different from an app that saves a drawing. Storybook is the only shipped
-    consumer of the authoring half; Sheets and Paint use only the
+    consumer of the authoring half; Paint uses only the
     copy-into-a-project verbs. Same `(value, err)` contract as `Files`, off the
     same `_StoreRole` machinery."""
 
@@ -597,9 +593,6 @@ class Carts(_StoreRole):
     def save_image(self, cart, name, blob):
         return self._write(self.raw.save_image, cart, name, blob)
 
-    def save_table(self, cart, name, blob):
-        return self._write(self.raw.save_table, cart, name, blob)
-
     # The .moyimg ENCODER, mirrored from `Files`. Deliberately on both roles: a
     # `.moyimg` blob is the same bytes whether it lands in `files/drawings/` or
     # in a cart's `images/`, and Storybook (which needs it to put a painting on a
@@ -619,8 +612,8 @@ class Nav:
 
     `app()`/`open_app()` are the APP-TO-APP seam. `docs/app_api_v1.md` listed
     app-to-app as an explicit v1 NON-GOAL and it shipped anyway -- `files_app`
-    reaches `ws.writer_app.open_named(...)` across five sites, because "open
-    this table in Sheets" is a real product need and there was no seam for it.
+    reached the notebook app's `open_named(...)` across five sites, because
+    "open this doc" is a real product need and there was no seam for it.
     This is the seam. It resolves by registered ID, so an app never holds a
     hard reference to another app's class."""
 
@@ -646,12 +639,88 @@ class Nav:
         app carts out of project lists."""
         return self.__ws.is_system_app(cart)
 
+    def projects(self):
+        """The editable PROJECTS -- every scanned cart a system app does not
+        claim as its identity, which is exactly the roster the Editor's
+        project-picker shows without its "+ New" tile.
+
+        Here and not on `ctx.carts` on purpose: a list of places to GO is
+        navigation, and an app that browses projects is not thereby allowed to
+        author executable content."""
+        ws = self.__ws
+        return [c for c in ws.carts.all if not ws.is_system_app(c)]
+
+    def edit(self, cart, tab=None):
+        """Open `cart` in the project EDITOR, optionally landing on one tab.
+
+        The Files router's door for a `.moy` folder (which opens the project,
+        never a listing) and for a cart's own main file (`tab="code"`). False
+        when there is nothing to edit -- `open_in_editor` lands a source-less
+        cart on the error panel, and the caller shows its own status instead.
+
+        Leaving the Editor comes back HERE, to the app that opened it, on the
+        row it was showing (`Workstation._go_home_or_back`)."""
+        if cart is None:
+            return False
+        ws = self.__ws
+        ws._note_app_caller()
+        ws.open_in_editor(cart)
+        if ws.project is None or ws.project.cart is not cart:
+            return False
+        if tab:
+            ws.set_menu_view(tab)
+        return True
+
+    def open_image(self, name, kind=None, cart=None):
+        """Open a PICTURE in Paint -- the Files router's image door, for a
+        gallery drawing and for a cart's OWN image (`cart` given) alike. The
+        Editor's ADVANCED files row takes the same console verb, so there is
+        one image route and not two. False when the build carries no Paint."""
+        return self.__ws.open_image(name, kind, cart)
+
+    def open_text(self, name, kind=None, mode=None):
+        """Open a user-files TEXT document in the console's text app, in `mode`.
+
+        The Files router's door for anything that is not a project, a project's
+        main file or a drawing. The text app is a CART now (step 3 of
+        docs/text_editing_2026-09.md) -- Notes, over the editor handle -- and
+        this signature did not move: an app asks to open a document and does
+        not learn what draws it. False when the build carries no text app."""
+        return self.__ws.open_text_cart(name, kind, mode)
+
+    def edit_file(self, cart, name, mode=None):
+        """Open one of `cart`'s OWN files (`manifest.json`, `config.json`, a
+        script beside the main) in the editor, through that project's Editor.
+
+        The Files router's door for a project file, and deliberately not
+        `open_text`: a project file is reached with the loader in the loop
+        (docs/text_editing_2026-09.md), which is what going through the Editor
+        buys -- the return re-reads the folder. Leaving THAT Editor then comes
+        back to this app, the same way `edit` does."""
+        if cart is None:
+            return False
+        ws = self.__ws
+        ws._note_app_caller()
+        return bool(ws.open_project_file(cart, name, mode))
+
     def play(self, cart, caller):
         """Open `cart` as a workspace and RUN it, returning to `caller` on
         exit -- the Storybook PLAY verb."""
         ws = self.__ws
         ws._open_workspace(cart)
         ws.run(ws.project, caller)
+
+    def run_script(self, kind, name):
+        """RUN a vault SCRIPT -- a bare `.py`/`.lua` file, which is a cart with
+        no folder (step 6 of docs/text_editing_2026-09.md). The Files router's
+        RUN door.
+
+        `(ok, why)`: the shell synthesizes the manifest, starts it on the text
+        console and returns True, or answers a kid-facing line the caller shows
+        on its status. Navigation and not `carts`, for the same reason
+        `projects()` is: RUNNING something is going somewhere, and it is
+        emphatically not permission to AUTHOR a cart."""
+        return self.__ws.run_script(kind, name)
 
     def text_mode(self, on):
         """Flip the keyboard between typing (clean ASCII) and game (raw

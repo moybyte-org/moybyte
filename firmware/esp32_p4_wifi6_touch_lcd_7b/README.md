@@ -87,7 +87,7 @@ UI while watching the glass:
 - `drag [frames] [step]` — grab the top window's title strip and oscillate it (step = px/frame amplitude scale, default 6; 30 ≈ a violent finger drag)
 - `cache 0|1` — A/B the drag backdrop cache
 - `union 0|1` — A/B the dirty-union gesture restore (window-sized backdrop re-stamp vs full-screen)
-- `skip 0|1` — A/B the #77 frameskip (logic full-rate, render halved; non-persisting)
+- `steady 0|1` — A/B the tick model's STEADY / FREE knob (#217; non-persisting)
 - `bt status|scan|forget` — inspect/restart BLE-keyboard discovery or clear its local bond keys (`fast=(rx, drops, queued, peak, enabled)`)
 - `bt trace 0|1` — print raw HID notification bytes, native queue age, and decoded held input state
 - `recv <n> <window> <path>` — take `n` RAW bytes off stdin into `<path>.new` (see below)
@@ -109,7 +109,9 @@ the ONLY cart-push transport, so an image without the command answers
 `REMOTE ? recv` and the tool stops with one line saying to flash the board.
 
 `moy_runtime.run_touch_calibrate()` (REPL-invokable) draws corner targets and
-dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs.
+dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs; the
+body is `device/p4_desktop.run_touch_calibrate`, shared with the Guition P4,
+and this board hands it the knobs' home (the `p4_input` module globals).
 
 ## Build / flash
 
@@ -138,7 +140,10 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   slots — the default 4MiBplus table's ~1.94MB app can't hold the frozen
   console — with the ~24MB tail left unlisted so mainline auto-builds the vfs
   over it).
-- `native/moy_dsi/` — the panel module: vendored `esp_lcd_ek79007` v2.0.2
+- `native/p4/moy_dsi/` (repo root — the P4 SILICON tier since 2026-09-06, shared
+  with the Guition JC8012P4A1C and staged here by `board.toml` `[native.p4]`;
+  this board names `MOY_DSI_PANEL_EK79007` in its `mpconfigboard.cmake`) — the
+  panel module: vendored `esp_lcd_ek79007` v2.0.2
   (Apache-2.0, ESP component registry) + `modmoy_dsi.c` exposing
   `init() / fb() / flush() / set_pattern() / deinit()` and `WIDTH/HEIGHT`.
   DPI mode: the DSI peripheral **continuously scans a PSRAM framebuffer** —
@@ -161,10 +166,13 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   (`.claude/rules/web.md` carries the rule and what follows from it).
 - `modules/` — the P4-authored device backend (tracked) + build-staged copies
   (gitignored; see `.gitignore`'s whitelist):
-  - `moybyte_shell.py` — boot entry (`main()`); `RUN_PANEL_SMOKE` flips to the
-    DSI hardware test pattern. Ctrl-C in the desktop loop drops to the REPL
-    (no native-takeover USB starvation on this board).
-  - `p4_display.py` — `P4Compositor`: the compositor shim over `moy_dsi`
+  - `moybyte_shell.py` — boot entry (`main()`): this board's name, its `MODE`
+    string and the `panel` smoke below it, over the shared ladder in
+    `device/boot_shell.py`. `s.MODE = "panel"` flips to the DSI hardware test
+    pattern. Ctrl-C in the desktop loop drops to the REPL (no native-takeover
+    USB starvation on this board).
+  - `p4_display.py` — this board's backlight (GPIO32 active-low) bound to the
+    shared `device/dsi_panel.py` `P4Compositor` (promoted 2026-09-06): the compositor shim over `moy_dsi`
     (size/framebuffer/back_buffer/gfx/flush/sync; single-buffered, flush =
     cache msync) + the active-low GPIO32 backlight (held dark until the first
     composed frame).
@@ -178,14 +186,17 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     `InputState`/`last_key` mapping. Settings can enable/disable, scan/pick and
     forget; the preferred address + gate + bond keys persist in
     `/moy/ble_keyboard.json`. Radio or protocol failures degrade to touch-only.
-  - `moy_runtime.py` — the P4 backend: `P4SystemCanvas` (a `DeviceCanvas` over
+  - `moy_runtime.py` — the P4 backend: `P4SystemCanvas` (`device/p4_canvas.py`
+    since 2026-09-06, shared with the Guition P4; a `DeviceCanvas` over
     the DSI framebuffer + the system-surface contract: `font_scale` text via
     the native text kernel, font-scale window layers, and the `blit_game` /
     `blit_cover` native composite hooks `wm_windowed`/`wallpaper` probe for)
-    and `run_desktop()` — constructs the shared `Workstation` with a distinct
-    1024×600 system canvas + the fixed 320×240 off-screen game canvas and
-    installs **`WindowedWM`** (#73's tier, on its intended hardware). Carts
-    live on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
+    and `run_desktop()` — this glass's arguments (name, compositor, touch,
+    constants) to `device/p4_desktop.py`, the P4 tier's body shared with the
+    Guition P4, which constructs the 1024×600 system canvas + the fixed
+    320×240 off-screen game canvas and hands **`WindowedWM`** (#73's tier, on
+    its intended hardware) to the shared boot spine `device/desktop_spine.py`.
+    Carts live on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
     `/moybyte/...`, which shadows the frozen `moybyte.input` module and killed a
     boot; see the constraint below. SD is optional here.
   - Staged at build (canonical sources elsewhere), and **declared in

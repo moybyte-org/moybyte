@@ -1,8 +1,9 @@
 {
   "format": "moy-1",
-  "version": 15,
+  "version": 17,
   "title": "Letter Blitz",
   "type": "game",
+  "fps": "free",
   "runtime": "python",
   "main": "main.py",
   "system": true,

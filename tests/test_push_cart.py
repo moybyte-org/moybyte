@@ -33,11 +33,14 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import p4_autotest                                              # noqa: E402
 import push_cart                                                # noqa: E402
+from runtime.dev_channel import (RECV_DEAD_WINDOWS,              # noqa: E402
+                                 RECV_RETRIES)
 
 BOARD_DIRS = {
     "p4": os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b"),
     "tdeck": os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_mainline"),
     "guition_s3": os.path.join(ROOT, "firmware", "guition_jc3248w535"),
+    "guition_p4": os.path.join(ROOT, "firmware", "guition_jc8012p4a1c"),
 }
 
 
@@ -127,6 +130,7 @@ class _FakeConsole:
         self.flip_at = flip_at          # a byte that arrived wrong: counted
         self.stall_at = stall_at        # the host stops writing here
         self.sent = []          # every complete line the tool wrote
+        self.said = []          # every line this board answered with
         self.acks = []          # the byte counts `recv` acked, in order
         self.closed = 0
         self._rx = None         # the live `recv`, when one is armed
@@ -187,10 +191,18 @@ class _FakeConsole:
             return self._say("RECV done %s 0"
                              % hashlib.sha256(b"").hexdigest()[:12])
         self._rx = {"n": total, "window": window, "tmp": tmp, "got": 0,
-                    "sent": 0, "f": f}
+                    "sent": 0, "f": f, "buf": bytearray(), "left":
+                    RECV_RETRIES, "empty": 0}
 
     def _feed(self, data):
+        """A window at a time, because that is what the board COMMITS.
+
+        The real `_recv` fills a buffer and writes it whole, which is the only
+        reason a short window can be thrown away and asked for again -- the
+        file is always on a window boundary. Writing byte-by-byte here would
+        model a board that cannot retry."""
         rx = self._rx
+        acked = False
         for byte in data:
             i = rx["sent"]
             rx["sent"] += 1
@@ -200,10 +212,17 @@ class _FakeConsole:
                 continue                    # the ring dropped it, silently
             if i == self.flip_at:
                 byte ^= 0xFF                # a framing error: count intact
-            rx["f"].write(bytes([byte]))
-            rx["got"] += 1
-            if rx["got"] % rx["window"] and rx["got"] != rx["n"]:
+            rx["buf"].append(byte)
+            want = rx["window"]
+            if rx["n"] - rx["got"] < want:
+                want = rx["n"] - rx["got"]
+            if len(rx["buf"]) < want:
                 continue
+            rx["f"].write(bytes(rx["buf"]))
+            rx["got"] += len(rx["buf"])
+            del rx["buf"][:]
+            rx["empty"] = 0
+            acked = True
             self.acks.append(rx["got"])
             self._say("RECV ack %d" % rx["got"])
             if rx["got"] == rx["n"]:
@@ -213,16 +232,23 @@ class _FakeConsole:
                     "RECV done %s %d"
                     % (hashlib.sha256(self.fs.files.get(rx["tmp"], b""))
                        .hexdigest()[:12], rx["got"]))
-        if self._rx is None or (rx["got"] % rx["window"] == 0
-                                or rx["got"] == rx["n"]):
-            return
+        if self._rx is None or (acked and not rx["buf"]):
+            return                          # on a boundary: the host's turn
         # The host has stopped writing with this window short, so the byte the
         # board is waiting on is never coming: on glass that is the idle
         # timeout, RECV_IDLE_MS later. The wait is what is compressed here.
-        self._rx = None
-        rx["f"].close()
-        self.fs.files.pop(rx["tmp"], None)
-        self._say("RECV ERR timeout after %d of %d bytes" % (rx["got"], rx["n"]))
+        # Nothing of this window reached the file, so `got` is still a boundary
+        # and the board can ask for it again rather than lose the cart.
+        rx["empty"] = rx["empty"] + 1 if not rx["buf"] else 0
+        del rx["buf"][:]
+        rx["left"] -= 1
+        if rx["left"] < 0 or rx["empty"] >= RECV_DEAD_WINDOWS:
+            self._rx = None
+            rx["f"].close()
+            self.fs.files.pop(rx["tmp"], None)
+            return self._say("RECV ERR timeout after %d of %d bytes"
+                             % (rx["got"], rx["n"]))
+        self._say("RECV retry %d" % rx["got"])
 
     def _run(self, line):
         self.sent.append(line)
@@ -247,6 +273,7 @@ class _FakeConsole:
         self._say("PY " + value)
 
     def _say(self, text):
+        self.said.append(text)
         self._out += text.encode() + b"\r\n"
 
     @property
@@ -370,20 +397,30 @@ def test_the_raw_upload_carries_every_byte_value(tmp_path):
     assert dev.fs.files["/moy/carts/demo.moy/main.lua"] == payload
 
 
-def test_a_byte_the_ring_dropped_stops_the_push_and_names_the_file(tmp_path):
+def test_a_byte_the_ring_dropped_costs_its_window_not_the_cart(tmp_path):
     """The P4's failure, exactly: a byte arrives with the 260-byte ring full
     and is gone with no error. The board is then one byte short of the window
-    for ever, its idle timeout fires, it removes the tmp and says how far it
-    got -- and the push stops there, by name, with the old cart untouched."""
+    for ever and its idle timeout fires -- but nothing of that window reached
+    the file, so it asks for the window again instead of losing the cart.
+
+    Measured on glass before this existed: a handful of bytes lost about once
+    every 300 windows, which failed a 120KB push one push in five, on the only
+    transport a cart has to that board."""
     dst = "/moy/carts/demo.moy/main.lua"
     dev = _FakeConsole(files={dst: b"the cart that still works\n"},
                        drop_at=5000)
     b, window = _raw(dev)
     src = _cart(tmp_path, {"main.lua": BIG}) + "/main.lua"
-    with pytest.raises(RuntimeError) as exc:
-        push_cart.push_file_raw(b, src, dst, window)
-    assert "main.lua" in str(exc.value) and "timeout" in str(exc.value)
-    assert dev.fs.files == {dst: b"the cart that still works\n"}
+    assert push_cart.push_file_raw(b, src, dst, window) is True
+    assert dev.fs.files[dst] == BIG                     # byte-exact, hash agreed
+    # The boundaries come from the board's DECLARED window, not a number typed
+    # here: that value is a tuning knob (the P4's board.toml carries three
+    # measurements of it), and a test that pins it fails on the day it moves
+    # while saying nothing about the retry this is here to check.
+    assert [l for l in dev.said if l.startswith("RECV retry")] == [
+        "RECV retry %d" % (5000 // window * window)]     # the window it was in
+    # and the re-send is the ONLY extra work: every window still acks once
+    assert dev.acks == list(range(window, len(BIG), window)) + [len(BIG)]
 
 
 def test_a_byte_that_arrived_wrong_is_caught_by_the_hash(tmp_path):
@@ -415,7 +452,14 @@ def test_a_host_that_dies_inside_a_window_leaves_the_board_and_the_cart_whole(
     with pytest.raises(RuntimeError) as exc:
         push_cart.push_file_raw(b, src, dst, window)
     assert "main.lua" in str(exc.value)
-    assert "6000 of 10000" in str(exc.value)
+    # The last WHOLE window, not 6000: the bytes of the short window were
+    # thrown away and never reached the file, and naming them sends a reader
+    # looking for a cart that does not exist. The board offers the window back
+    # first, so a host that is merely quiet is not mistaken for one that
+    # dropped a byte.
+    assert "%d of %d" % (6000 // window * window, len(BIG)) in str(exc.value)
+    assert len([l for l in dev.said if l.startswith("RECV retry")]) \
+        == RECV_DEAD_WINDOWS
     assert dev.fs.files == {dst: b"the cart that still works\n"}
 
 
@@ -428,6 +472,26 @@ def test_the_pushed_bytes_arrive_intact(tmp_path):
     dst = "/moy/carts/demo.moy/main.lua"
     assert push_cart.push_file_raw(b, src, dst, window) is True
     assert dev.fs.files == {dst: SOURCE}
+
+
+def test_a_push_retires_the_stamped_backup_the_board_kept(tmp_path):
+    """moy_fs's invariant (#154): the store leaves a stamped `<file>.bak` beside
+    everything it publishes, and it describes the file it published. A push puts
+    different bytes there, so leaving that stamp behind would have the board's
+    next read "recover" the kid's own last save over what was just pushed."""
+    from runtime import moy_fs
+    dev = _FakeConsole()
+    b, window = _raw(dev)
+    src = _cart(tmp_path, {"main.lua": SOURCE}) + "/main.lua"
+    dst = "/moy/carts/demo.moy/main.lua"
+    kid = "-- the kid's own save, made on the board\n"
+    dev.fs.files[dst] = kid
+    dev.fs.files[dst + ".bak"] = moy_fs._stamp_line(kid) + kid
+
+    assert push_cart.push_file_raw(b, src, dst, window) is True
+
+    assert dev.fs.files == {dst: SOURCE}
+    assert any("remove(%r)" % (dst + ".bak") in line for line in dev.sent)
 
 
 def test_a_first_push_survives_the_remove_of_a_file_that_is_not_there(tmp_path):
@@ -646,3 +710,48 @@ def test_only_pushes_the_named_file_and_refuses_one_the_cart_lacks(
     with pytest.raises(SystemExit) as exc:
         push_cart.main([cart, "--board", "tdeck", "--only", "sprites.json"])
     assert "sprites.json" in str(exc.value)
+
+
+def _sub(cart, rel, data):
+    path = os.path.join(cart, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(data)
+
+
+def test_a_carts_subfolders_travel_with_it(monkeypatch, tmp_path):
+    """A cart is a TREE. `scenes/`, `images/` and `tables/` are as much the
+    cart as main.py is, and a listdir walk left every one of them on the host:
+    the cart landed on the board without the assets it needs, and the folders
+    were never made there either."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": SOURCE,
+                            "manifest.json": b'{"title": "Demo"}\n'})
+    scene = b'{"actors": [], "w": 40}\n'
+    _sub(cart, "scenes/x.moyscene", scene)
+    _sub(cart, "images/tiles/a.moyimg", b"IMG\n")
+
+    assert push_cart.main([cart, "--board", "tdeck"]) == 0
+
+    assert dev.fs.files["/sd/carts/demo.moy/scenes/x.moyscene"] == scene
+    assert dev.fs.files["/sd/carts/demo.moy/images/tiles/a.moyimg"] == b"IMG\n"
+    # ... and the folders were created, parents first -- `_mkdir` is one
+    # os.mkdir on the board and does not make them.
+    assert "/sd/carts/demo.moy/scenes" in dev.fs.dirs
+    assert "/sd/carts/demo.moy/images/tiles" in dev.fs.dirs
+    mk = [line for line in dev.sent if "_mkdir" in line]
+    assert mk.index("py ws._g['_mkdir']('/sd/carts/demo.moy/images')") < \
+        mk.index("py ws._g['_mkdir']('/sd/carts/demo.moy/images/tiles')")
+
+
+def test_only_reaches_a_file_inside_a_subfolder(monkeypatch, tmp_path):
+    """`--only` names a path inside the cart, so the assets it exists to
+    re-push one of are reachable by it."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": SOURCE})
+    _sub(cart, "scenes/x.moyscene", b"{}\n")
+    assert push_cart.main([cart, "--board", "tdeck",
+                           "--only", "scenes/x.moyscene"]) == 0
+    assert list(dev.fs.files) == ["/sd/carts/demo.moy/scenes/x.moyscene"]

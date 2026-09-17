@@ -21,8 +21,8 @@ Wallpaper + panel-theme picking is NOT here: the Appearance app is the ONE
 appearance surface, and Settings just deep-links to it (the APPEARANCE action row).
 The actions Settings hosts delegate OUT to other layers (ws.open_theme / ws.update_ui.
 open_update / ws.show_achievements). ws.open_settings / _exit_settings (the lifecycle,
-tested) stay on ws. `NAMES` / `_in` / `_clamp_scroll` are injected to keep the
-surface independent of console.py. Shared draw toolkit (ws._glyph/_mini_btn) +
+tested) stay on ws. `NAMES` / `_clamp_scroll` are injected to keep the surface
+independent of console.py; the rect hit-test is `ui.rect_in`, imported directly. Shared draw toolkit (ws._glyph/_mini_btn) +
 the bar (ws.bar_layer) stay put.
 """
 
@@ -30,6 +30,12 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+
+try:
+    from editors import TextEntry, TE_COMMIT, TE_CANCEL
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors import TextEntry, TE_COMMIT, TE_CANCEL
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 
@@ -84,10 +90,9 @@ _SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #
 #
 # Every entry renders as the "diag" row kind: a generic ON/OFF that reads the
 # flat mirror by name. Which is the other half of the contract -- the mirrors
-# stay FLAT ATTRIBUTES and this table never becomes a read path. `frame` reads
-# `self.frameskip` on the pace check every loop iteration on all three boards,
-# and a dict lookup there would buy a boot-time convenience at a per-frame
-# price.
+# stay FLAT ATTRIBUTES and this table never becomes a read path. Both WMs read
+# `show_fps` on every painted game frame on all three boards, and a dict lookup
+# there would buy a boot-time convenience at a per-frame price.
 
 
 def _gate_second_keyboard(ws):
@@ -112,17 +117,15 @@ SETTINGS_TOGGLES = (
     # alone with a Bluetooth keyboard wants to be player one, not player two.
     ("two_player", "2 PLAYERS", False, "set_two_player",
      _gate_second_keyboard, None),
-    # FRAMESKIP (#77): while a GAME plays, tick its logic + input at the full
-    # loop rate but render every SECOND frame -- halves the whole render-side
-    # cost (per-draw-call dispatch, the measured tax). It is a PHASE TOGGLE, so
-    # what it gives you is half of whatever the loop is doing, NOT a 30Hz lock
-    # (measured 2026-08-22: ~40fps on the Guition, ~55 on the T-Deck, so
-    # frameskip means ~20 and ~27 there). Default OFF -- the on-glass feel pass
-    # kept it opt-in (2026-07-10, both boards). _fs_phase is the alternation
-    # bit the setter resets, so the first frame after a flip always renders.
-    ("frameskip", "FRAMESKIP", False, "set_frameskip", None, "skip"),
+    # STEADY (#217): the tick model's one knob. A GAME's logic always runs at
+    # its declared rate; its draw runs on an integer divisor the Player picks
+    # from what draw frames cost. ON, the divisor is re-decided once every
+    # couple of seconds with hysteresis, so a cadence holds through a hitch
+    # and a heavy menu does not condemn the game; OFF (FREE) it follows load
+    # on every draw frame and judders at transitions. Default ON.
+    ("steady", "STEADY", True, "set_steady", None, "steady"),
     # CRISP PIXELS (#204): nearest-neighbour game composite instead of the
-    # PPA's fixed-bilinear scaler. Sits by FRAMESKIP -- both are play-time
+    # PPA's fixed-bilinear scaler. Sits by STEADY -- both are play-time
     # quality/perf trades. Default OFF: smooth is the shipped behaviour, and
     # the trade is sharp pixel art against a real per-frame CPU cost the async
     # PPA path does not pay.
@@ -184,17 +187,16 @@ class SettingsLayer:
         # deferred to #52, so it lives in Settings for now. "action" rows aren't
         # +/- steppers: any tap / left / right activates them (open_theme).
         ("icons", "EDIT ICONS", "action"),
-        # The ON/OFF gate rows (FRAMESKIP, SHOW FPS, PERF DIAG, DIAG SD LOG and
+        # The ON/OFF gate rows (STEADY, SHOW FPS, PERF DIAG, DIAG SD LOG and
         # the two capability-gated ones) are NOT here: they are declared once in
         # SETTINGS_TOGGLES above and spliced in by _toggle_rows below, in
         # registry order, directly after this row.
     )
     _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
-    def __init__(self, ws, names, in_rect, clamp_scroll):
+    def __init__(self, ws, names, clamp_scroll):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect
         self._clamp_scroll = clamp_scroll
         self.set_msel = 0             # selected row in the Settings screen
         self.set_top = 0              # first visible Settings row (scroll offset, #53)
@@ -206,10 +208,9 @@ class SettingsLayer:
         self.wifi_nets = []           # [(ssid, signal, locked), ...] last scan
         self.wifi_sel = 0
         self.wifi_pick = None         # ssid being typed for (password mode)
-        self.wifi_pw = ""
+        self.wifi_pw = TextEntry(32)  # the password being typed
         self.wifi_msg = ""
         self.wifi_known = []
-        self._wifi_kprev = 0          # keyboard edge detect (password typing)
         # Bluetooth keyboard panel, capability-gated through _bt_service() --
         # so a board with no BLE service keeps the exact Settings rows/pixels
         # it has today. Was P4-only; the Guition joined it (#202) and the
@@ -416,8 +417,8 @@ class SettingsLayer:
         ws = self.ws
         self.wifi_view = True
         self.wifi_pick = None
-        self.wifi_pw = ""
-        self._wifi_kprev = 0
+        self.wifi_pw.open("")
+        ws.wifi_hold("settings")      # the radio lease: close_wifi lets go
         self._wifi_rescan()
         ws._dirty = True
 
@@ -427,6 +428,7 @@ class SettingsLayer:
         self.wifi_view = False
         self.wifi_pick = None
         ws._set_text_mode(False)
+        ws.wifi_release("settings")
         ws._dirty = True
 
     def _wifi_rescan(self):
@@ -455,8 +457,7 @@ class SettingsLayer:
         ssid, _sig, locked = self.wifi_nets[self.wifi_sel % len(self.wifi_nets)]
         if locked and ssid not in self.wifi_known:
             self.wifi_pick = ssid
-            self.wifi_pw = ""
-            self._wifi_kprev = 0
+            self.wifi_pw.open("", getattr(ws.input, "last_key", 0) or 0)
             self.wifi_msg = "TYPE THE PASSWORD"
             ws._set_text_mode(True)      # clean ASCII typing (device keyboard)
         else:
@@ -469,8 +470,7 @@ class SettingsLayer:
             ok = self._wifi_connect(ssid, "")
             if not ok and locked:
                 self.wifi_pick = ssid
-                self.wifi_pw = ""
-                self._wifi_kprev = 0
+                self.wifi_pw.open("", getattr(ws.input, "last_key", 0) or 0)
                 self.wifi_msg = "TYPE THE PASSWORD"
                 ws._set_text_mode(True)
         ws._dirty = True
@@ -518,19 +518,14 @@ class SettingsLayer:
         d-pad moves, A connects, B backs out to the Settings rows."""
         ws = self.ws
         if self.wifi_pick is not None:
-            k = ws.input.last_key
-            if k and k != self._wifi_kprev:
-                if k in (10, 13):                       # ENTER -> connect
-                    self._wifi_connect(self.wifi_pick, self.wifi_pw)
-                elif k == 8:                            # BACKSPACE -> delete
-                    self.wifi_pw = self.wifi_pw[:-1]
-                elif k == 27:                           # ESC -> cancel the prompt
-                    self.wifi_pick = None
-                    ws._set_text_mode(False)
-                elif 32 <= k <= 126 and len(self.wifi_pw) < 32:
-                    self.wifi_pw += chr(k)
+            ev = self.wifi_pw.feed(ws.input)
+            if ev == TE_COMMIT:                          # ENTER -> connect
+                self._wifi_connect(self.wifi_pick, self.wifi_pw.text)
+            elif ev == TE_CANCEL:                        # ESC -> cancel the prompt
+                self.wifi_pick = None
+                ws._set_text_mode(False)
+            if ev is not None:
                 ws._dirty = True
-            self._wifi_kprev = k
             return True
         if i.pressed("up") and self.wifi_nets:
             self.wifi_sel = (self.wifi_sel - 1) % len(self.wifi_nets)
@@ -568,7 +563,7 @@ class SettingsLayer:
         if not click:
             return True
         for name, rect in self._wifi_btns():
-            if self._in(px, py, rect):
+            if _in(px, py, rect):
                 if name == "connect":
                     if self.wifi_pick is not None:
                         self._wifi_connect(self.wifi_pick, self.wifi_pw)
@@ -589,7 +584,7 @@ class SettingsLayer:
                 return True
         if self.wifi_pick is None:
             for k in range(len(self.wifi_nets)):
-                if self._in(px, py, self._wifi_row_rect(k)):
+                if _in(px, py, self._wifi_row_rect(k)):
                     if self.wifi_sel == k:
                         self._wifi_activate()       # second tap = connect
                     else:
@@ -608,6 +603,9 @@ class SettingsLayer:
         lay = ws.layout
         fs = lay.fs
         fw = lay.font_w
+        # Every offset below is inside the row's fs-tall band (#203): 0 unless
+        # the tap-target floor made the rows taller than the font asked for.
+        dy = lay.row_text_dy
         px, py, pw, ph = lay.settings_panel
         # Status line (slot 0).
         x, y, w, h = lay.settings_row_rect(0)
@@ -621,18 +619,19 @@ class SettingsLayer:
         # The status ICON is an IconSheet sprite the caller owns (ui.py must not
         # learn about the sheet), so it draws first and the label row takes the
         # rest of the slot; the IP keeps its own fixed column.
-        ws._icon("wifi" if connected else "wifi_off", x, y, cv)
+        ws._icon("wifi" if connected else "wifi_off", x, y + dy, cv)
         if connected:
             # The ONE ink here that is not a widget state: `play` says CONNECTED,
             # which is a status the theme owns and no skin should overrule.
             _ui.row(cv, th, (x, y, w, h), ("ON  " + str(ssid))[:22],
                     colors=(None, th["play"], None), edge=False,
-                    pad=20 * fs, text_dy=5, fs=fs)
+                    pad=20 * fs, text_dy=5 + dy, fs=fs)
             if ip:
-                cv.print(str(ip)[:15], x + w - 15 * fw, y + 5, NAMES["blue"], 1)
+                cv.print(str(ip)[:15], x + w - 15 * fw, y + 5 + dy,
+                         NAMES["blue"], 1)
         else:
             _ui.row(cv, th, (x, y, w, h), "NOT CONNECTED", kind="row_list",
-                    edge=False, pad=20 * fs, text_dy=5, fs=fs)
+                    edge=False, pad=20 * fs, text_dy=5 + dy, fs=fs)
         if self.wifi_pick is not None:
             # Password prompt: the picked ssid + the typed password + a caret.
             x, y, w, h = self._wifi_row_rect(0)
@@ -641,16 +640,17 @@ class SettingsLayer:
             _ui.row(cv, th, (x, y, w, h),
                     ("PASSWORD FOR " + str(self.wifi_pick))[:30],
                     colors=(None, th["ink"], None), edge=False, pad=4,
-                    text_dy=5, fs=fs)
+                    text_dy=5 + dy, fs=fs)
             bx, by, bw2, bh2 = self._wifi_row_rect(1)
             cv.rect(bx, by, bw2, bh2 - 2, NAMES["black"])
             cv.rectb(bx, by, bw2, bh2 - 2, ws.theme_colors["edge"])
-            shown = self.wifi_pw[-max(4, bw2 // fw - 3):]
-            cv.print(shown, bx + 4, by + 5, NAMES["yellow"], 1)
-            cv.rect(bx + 4 + len(shown) * fw, by + 3, fs, bh2 - 8, NAMES["yellow"])
+            shown = self.wifi_pw.text[-max(4, bw2 // fw - 3):]
+            cv.print(shown, bx + 4, by + 5 + dy, NAMES["yellow"], 1)
+            cv.rect(bx + 4 + len(shown) * fw, by + 3 + dy, fs,
+                    bh2 - 8 - 2 * dy, NAMES["yellow"])
             x, y, w, h = self._wifi_row_rect(2)
             _ui.row(cv, th, (x, y, w, h), "ENTER = CONNECT   ESC = BACK",
-                    kind="row_list", edge=False, pad=4, text_dy=5, fs=fs)
+                    kind="row_list", edge=False, pad=4, text_dy=5 + dy, fs=fs)
         else:
             # The network list.
             for k in range(len(self.wifi_nets)):
@@ -664,17 +664,21 @@ class SettingsLayer:
                 # this list's own per-row content at their fixed columns.
                 _ui.row(cv, th, (x, y, w, h), str(ssid_k)[:16],
                         kind="row_list", on=sel,
-                        edge=False, pad=4, text_dy=5, fs=fs)
+                        edge=False, pad=4, text_dy=5 + dy, fs=fs)
+                _bx, band_y, _bw, band_h = lay.row_band((x, y, w, h))
                 bars = max(0, min(4, int(sig) // 25 + 1))
                 for s in range(4):
                     c = th["play"] if s < bars else th["ink_dim"]
-                    cv.rect(x + w - 46 * fs + s * 8 * fs, y + h - 6 * fs - 2 * fs * s,
+                    cv.rect(x + w - 46 * fs + s * 8 * fs,
+                            band_y + band_h - 6 * fs - 2 * fs * s,
                             5 * fs, (2 + 2 * s) * fs, c)
                 if locked:
-                    ws._glyph("lock", (x + w - 62 * fs, y + 2, 12 * fs, 12 * fs),
+                    ws._glyph("lock",
+                              (x + w - 62 * fs, y + 2 + dy, 12 * fs, 12 * fs),
                               NAMES["orange"], cv)
                 if str(ssid_k) in self.wifi_known:
-                    cv.print("SAVED", x + w - 110 * fs, y + 5, NAMES["blue"], 1)
+                    cv.print("SAVED", x + w - 110 * fs, y + 5 + dy,
+                             NAMES["blue"], 1)
         if self.wifi_msg:
             mx, my = px + 10 * fs, py + ph - 30 * fs - 10 * fs
             cv.print(self.wifi_msg[:36], mx, my, th["accent"], 1)
@@ -925,7 +929,7 @@ class SettingsLayer:
         if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
             self._activate_settings_action(key)
             return
-        if kind == "diag":                      # the ON/OFF gates (#68 diag, #77 frameskip)
+        if kind == "diag":                      # the ON/OFF gates (#68 diag, #217 steady)
             self._toggle_diag_row(key)
             return
         if kind == "webhost":                   # WEB CONSOLE: serve / stop serving
@@ -1087,19 +1091,19 @@ class SettingsLayer:
         if self.bt_view:
             return self._bt_pointer(px, py, click)
         lay = ws.layout
-        if self._in(px, py, lay.set_ach):      # trophy: open the achievements view (#21)
+        if _in(px, py, lay.set_ach):      # trophy: open the achievements view (#21)
             ws.show_achievements = True
             ws.ach_ui._secret_taps = 0
             return True
         # The panel's own X + title only exist outside a WM window (the strip owns
         # both there -- see _draw_settings), so their taps are gated the same way.
         if not getattr(ws, "windowed_chrome", False):
-            if self._in(px, py, lay.set_back):
+            if _in(px, py, lay.set_back):
                 ws._exit_settings()
                 return True
             # Secret-door Easter egg (#21): tapping the SETTINGS title (not a button)
             # _SECRET_TAP_GOAL times knocks the hidden door open. Reset on any other tap.
-            if self._in(px, py, lay.set_title_hit):
+            if _in(px, py, lay.set_title_hit):
                 ws.ach_ui._tap_secret_door()
                 return True
         ws.ach_ui._secret_taps = 0
@@ -1119,7 +1123,7 @@ class SettingsLayer:
             if not self._settings_row_visible(i):
                 continue                       # off-screen (scrolled) rows aren't tappable
             x, y, w, h = self._settings_row_rect(i)
-            if self._in(px, py, (x, y, w, h)):
+            if _in(px, py, (x, y, w, h)):
                 self.set_msel = i
                 if rows[i][2] == "wifi-net":       # WIFI: any tap opens the panel (#38)
                     self.open_wifi()
@@ -1151,7 +1155,6 @@ class SettingsLayer:
         FUNCTIONAL, persist) plus the mocked rows, over the live wallpaper so the
         backdrop preview is honest. On the SYSTEM canvas; panel + title-row controls
         reflow with the layout/font scale (#39)."""
-        NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
         lay = ws.layout
@@ -1181,10 +1184,15 @@ class SettingsLayer:
         # the closing X, so the panel's own header + X are suppressed (no doubled
         # chrome); the trophy (the achievements door, #21) stays either way.
         p_ink = th["ink"] if th.get("bar_light", False) else th["chrome_ink"]
+        hd = lay.set_head_dy      # the title band's own re-centring (#203)
         if not getattr(ws, "windowed_chrome", False):
-            ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), th["accent"], cv)
-            cv.print("SETTINGS", px + 24, py + 4, p_ink, 2)
-            ws._mini_btn("X", lay.set_back, th["danger"], cv)
+            ws._glyph("gear", (px + 6, py + 2 + hd, 14 * fs, 14 * fs),
+                      th["accent"], cv)
+            cv.print("SETTINGS", px + 24, py + 4 + hd, p_ink, 2)
+            # The X's chip is the TAP TARGET and paints all of it; its 8px letter
+            # sits in the fs-sized box at the middle of it (#203), not the corner.
+            ws._mini_btn("X", lay.set_back, th["danger"], cv,
+                         lay.tap_box(lay.set_back, 18, 14))
         if self.wifi_view:
             # The WIFI panel (#38) replaces the row list (its BACK returns here).
             self._draw_wifi()
@@ -1197,9 +1205,12 @@ class SettingsLayer:
         # Achievements view button (#21): a trophy badge with the unlocked count.
         sa = lay.set_ach
         cv.rect(sa[0], sa[1], sa[2], sa[3], th["hilite"])
-        ws._glyph("trophy", (sa[0] - 2, sa[1], 14 * fs, 14 * fs), th["accent"], cv)
-        cv.print(str(ws.ach.count()), sa[0] + 13 * fs, sa[1] + 4,
-                 th["selection_ink"], 1)
+        # Trophy + count are an fs-sized pair inside a cs-sized badge (#203): the
+        # fill is the tap target, the pair is centred in it. Identity at cs == fs.
+        bx, by, _bw, bh = lay.tap_box(sa, 22, 14)
+        ws._glyph("trophy", (bx - 2, by, bh, bh), th["accent"], cv, fs)
+        cv.print(str(ws.ach.count()), bx + 13 * fs,
+                 by + 4 + (bh - 14 * fs) // 2, th["selection_ink"], 1)
         rows = self._settings_rows()
         for i in range(len(rows)):
             if self._settings_row_visible(i):
@@ -1210,7 +1221,6 @@ class SettingsLayer:
     def _draw_settings_more(self, rows):
         """Up/down chevrons at the panel's right edge when the Settings list scrolls
         past the visible window (the #53 OTA rows can push it over one screen)."""
-        NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
         lay = ws.layout
@@ -1247,7 +1257,12 @@ class SettingsLayer:
         # panel-CHROME coloured, which the row kind cannot express, so it is its
         # own catalog entry rather than a hand-built triple no skin could reach.
         _ui.row(cv, th, (x, y, w, h), label, kind="row_menu", on=sel,
-                edge=False, pad=4, text_dy=5, fs=lay.fs)
+                edge=False, pad=4, text_dy=5 + lay.row_text_dy, fs=lay.fs)
+        # Below here the rect is the row's own CONTENT band -- the fs-tall strip
+        # the chrome scale re-centred inside the tap target (#203). The identity
+        # at cs == fs; `row` above kept the FULL rect, because the selection fill
+        # is the tap target and has to paint all of it.
+        x, y, w, h = lay.row_band((x, y, w, h))
         if kind == "wifi-net":
             # WIFI (#38): the connected SSID (or OFF) + the status icon as the OPEN
             # affordance -- a tap / A opens the wifi panel, no stepper.

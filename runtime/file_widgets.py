@@ -1,6 +1,6 @@
 # The user-files (#108) shared visual vocabulary: the thumbnail-grid picker
 # every file surface reuses -- the Files app's gallery, Paint's OPEN mode, and
-# any later save/open flow (Writer/Sheets/#70/#110). One widget so "browse your
+# any later save/open flow (#70/#110). One widget so "browse your
 # stuff" is a single learned gesture; it is, quietly, an Open dialog in icon
 # view. Kid rules baked in: thumbnails first, names ALWAYS visible under them
 # (names are identity -- the desktop concept we refuse to hide), newest first,
@@ -17,19 +17,34 @@ _in = _ui.rect_in
 
 
 class Bitmap:
-    """Duck-typed indexed image accepted by host and device system canvases."""
+    """Duck-typed indexed image accepted by host and device system canvases.
 
-    def __init__(self, w, h, pix):
+    `owner` names whoever will hand back the off-heap buffer the device canvas
+    may take for a FULL-SURFACE RGB565 bake of this bitmap (#186,
+    device_canvas._paint_bake_buf) -- the one allocation a 320x240 picture makes
+    that the gc heap cannot promise. Left None (every small bitmap, and every
+    console-lifetime one) the bake stays a gc bytearray, which is right: an
+    off-heap buffer nobody returns is a leak."""
+
+    def __init__(self, w, h, pix, owner=None):
         self.w = int(w)
         self.h = int(h)
         self.pix = pix
         self.transparent = -1
         self._paint = True
+        if owner is not None:
+            self._owner = owner
 
 
-def cover_indices(src, sw, sh, dw, dh):
+def cover_indices(src, sw, sh, dw, dh, out=None):
     """Nearest-neighbor cover crop: source cropped centered to the target
-    aspect, then sampled to exactly dw x dh (the ArtworkService formula)."""
+    aspect, then sampled to exactly dw x dh (the ArtworkService formula).
+
+    `out` is a caller-supplied dw*dh buffer. The desktop backdrop resamples to
+    the whole SCREEN (#186), and a screenful of indices is 153,600 bytes on the
+    Guition -- past the largest contiguous run that board has at the launcher --
+    so that caller hands one down from moybuf instead. None keeps the plain
+    bytearray every other caller wants."""
     if sw * dh > sh * dw:
         crop_h = sh
         crop_w = max(1, sh * dw // dh)
@@ -38,7 +53,8 @@ def cover_indices(src, sw, sh, dw, dh):
         crop_w = sw
         crop_h = max(1, sw * dh // dw)
         sx0, sy0 = 0, (sh - crop_h) // 2
-    out = bytearray(dw * dh)
+    if out is None:
+        out = bytearray(dw * dh)
     for y in range(dh):
         sy = sy0 + y * crop_h // dh
         so = sy * sw

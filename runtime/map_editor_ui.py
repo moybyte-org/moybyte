@@ -11,7 +11,7 @@ renaming), via a back-reference to the owning Workstation (`self.ws`) for the
 handful of primitives it shares with the rest of the console (canvas, _btn,
 _leave_menu, sheet, tilemap, save_map -- the last two are the cart's actual
 resources, shared with the running game and the paint editor, so they stay on
-Workstation rather than becoming map-only state). `NAMES`/`_in` are injected at
+Workstation rather than becoming map-only state). `NAMES` is injected at
 construction instead of imported back from console.py, which would be a real
 circular import: console.py imports MapEditorUI to build the one instance a
 Workstation holds (same reasoning as BlockEditorUI -- see its docstring).
@@ -29,6 +29,7 @@ try:
     import ui as _ui              # frozen on device
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
     from editors import MapEditor, KeyEdge
@@ -65,11 +66,11 @@ _MV_Y0 = 32
 # live cell size; there is no fixed _MV_CELL/_MV_COLS/_MV_ROWS/_MV_AREA any more.
 _MV_AVAIL_W = 192      # usable map-view width  (14 .. 206)
 _MV_AVAIL_H = 164      # usable map-view height (32 .. 196)
-# TIC-80-style zoom: a small ascending list of CELL SIZES in px. Every rung is a
-# multiple of the 8px tile, so a tile UPSCALES to fill its cell exactly (scale =
-# cell // 8) -- crisp pixel art, never a floating 8px tile in a bigger box, and
-# never a downscale (`scale = max(1, cell // TILE)` cannot shrink one; issue #215
-# covers the sub-8px overview rung that would lift that).
+# TIC-80-style zoom: a small ascending list of DETAIL CELL SIZES in px. Every rung
+# is a multiple of the 8px tile, so a tile UPSCALES to fill its cell exactly (scale
+# = cell // 8) -- crisp pixel art, never a floating 8px tile in a bigger box. 8px is
+# the floor of this list because `spr` cannot downscale: below it a tile spills over
+# its neighbours.
 #
 # The cell size is the MAP FIELD SIZE and zoom is what changes it. It deliberately
 # does NOT adapt to the map or to the screen: a wider view then shows MORE OF THE
@@ -80,6 +81,34 @@ _MV_AVAIL_H = 164      # usable map-view height (32 .. 196)
 # rows than the 320x240 T-Deck on eight times the pixels, because the extra space went
 # into bigger cells rather than more map.
 _MV_ZOOMS = [8, 16, 24, 32]
+# The OVERVIEW rung (#215), appended to `layout.zooms` AFTER the detail sizes: the
+# sentinel is not a cell size but "compute the largest cell that shows the most map",
+# resolved by _mv_fit_cell against the live map + view. It is the only rung that draws
+# a cell as a solid block of its tile's dominant colour instead of the tile -- a
+# minimap. The detail rungs are untouched, and the rung the editor OPENS on is still
+# zooms[0], the 8px field size: overview is where you find yourself in a level, not
+# where you paint it, and a tap on a 2px cell is not an edit gesture. Cycling reaches
+# it in one wrap.
+#
+# The cell lives BETWEEN the two constants. _MV_FIT_MAX is one below the tile, so the
+# rung is ALWAYS sub-8 and always draws blocks -- a map small enough to fit at 12px
+# still gets the block view rather than a fifth, near-identical tile rung. _MV_FIT_MIN
+# is the READABILITY floor (owner call on T-Deck glass, 2026-09-06): Sky Run's 100
+# columns fit the 192px view only at 1px per cell, and a 1px minimap is not a picture
+# of a level. Below the floor the rung stops shrinking and PANS like every other rung
+# -- same camera, same clamp, and the cursor/tap/trackball paths already work at
+# sub-8px cells. Seeing most of a level at 4px beats seeing all of it at 1px.
+#
+# This is a FIT TARGET, not a survey of shipped maps. The constants it replaced
+# (_MV_FIT_COLS = 20 "widest shipped map") were read as a survey and went stale the
+# day a wider map shipped; nothing here needs updating when one does, because the
+# target is the whole map, whatever its size.
+_MV_OVERVIEW = 0
+_MV_FIT_MAX = 7
+_MV_FIT_MIN = 4
+# The rung's badge, in the title ("zOV") and on the ZOOM button. Two chars, because
+# the 24px button prints at 8px per glyph and "Z" + a three-char label overflows it.
+_MV_OV_LABEL = "OV"
 # ZOOM control: a small button in the map editor that cycles the zoom level. Sits
 # in the empty CENTER of the pan d-pad (between UP/DOWN/LEFT/RIGHT) -- a natural,
 # TIC-80-ish spot that overlaps nothing (palette PREV/NEXT end at y 140; the d-pad
@@ -154,6 +183,22 @@ _MAP_MIN_DIM = 1
 _MAP_PAN_THRESH = 6
 
 
+def _mv_fit_cell(avail_w, avail_h, mw, mh):
+    """The largest whole-pixel cell at which an mw x mh map fits an avail_w x
+    avail_h view, capped at _MV_FIT_MAX and floored at _MV_FIT_MIN (#215). A map
+    that needs a smaller cell than the floor does not fit whole: it draws at the
+    floor and PANS, exactly as the detail rungs do."""
+    if mw < 1 or mh < 1:
+        return _MV_FIT_MAX
+    cell = avail_w // mw
+    ch = avail_h // mh
+    if ch < cell:
+        cell = ch
+    if cell > _MV_FIT_MAX:
+        return _MV_FIT_MAX
+    return cell if cell > _MV_FIT_MIN else _MV_FIT_MIN
+
+
 class MapLayout(LayoutBase):
     """Responsive map-editor geometry (#39 step 3): the panel, the panned map view,
     the paged tile palette + pan d-pad + zoom column, and the ERASE/CLOSE/SKY
@@ -165,13 +210,14 @@ class MapLayout(LayoutBase):
     run on a larger canvas / bigger font.
 
     The map VIEW is the star of the reflow: its available rectangle grows to fill
-    the panel (so a big screen shows far more of the map at once), the zoom list's
-    fit-both default is recomputed for the bigger view, and larger zoom-in cell
-    sizes (48/64) join the cycle once the view can afford them. The palette gains
-    rows to fill its column."""
+    the panel (so a big screen shows far more of the map at once), and larger
+    zoom-in cell sizes (48/64) join the cycle once the view can afford them. The
+    OVERVIEW sentinel stays LAST on every tier, so the rung a reader is on is a
+    name, not an index. The palette gains rows to fill its column."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        LayoutBase.__init__(self, w, h, font_scale)
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
+                 chrome_scale=None):
+        LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         if self._base:
             self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
@@ -179,7 +225,7 @@ class MapLayout(LayoutBase):
             self.title_xy = (14, 18)
             self.mv_x0, self.mv_y0 = _MV_X0, _MV_Y0
             self.mv_avail_w, self.mv_avail_h = _MV_AVAIL_W, _MV_AVAIL_H
-            self.zooms = tuple(_MV_ZOOMS)
+            self.zooms = tuple(_MV_ZOOMS) + (_MV_OVERVIEW,)
             self.tp_x0, self.tp_y0 = _TP_X0, _TP_Y0
             self.tp_cell, self.tp_cols, self.tp_rows = _TP_CELL, _TP_COLS, _TP_ROWS
             self.tp_page = _TP_PAGE
@@ -199,7 +245,7 @@ class MapLayout(LayoutBase):
             return
         # -- responsive: anchor the palette/d-pad column to the panel's right edge,
         # the button row to its bottom, and grow the map view to fill the rest ----
-        bar_h = 18 * fs
+        bar_h = 18 * self.cs          # the OS bar's own height (#203)
         px, py = 8 * fs, bar_h - 2 * fs
         pw, ph = self.w - 16 * fs, self.h - (bar_h - 2 * fs) - 20 * fs
         self.body_fill = (0, bar_h, self.w, self.h - bar_h)
@@ -213,7 +259,7 @@ class MapLayout(LayoutBase):
         self.mv_y0 = py + 16 * fs
         self.mv_avail_w = rc_x - self.mv_x0
         self.mv_avail_h = row_y - self.mv_y0 - 2 * fs
-        self.zooms = tuple(_MV_ZOOMS) + (48, 64)
+        self.zooms = tuple(_MV_ZOOMS) + (48, 64, _MV_OVERVIEW)
         # Pan d-pad cluster, bottom-anchored just above the button row.
         pan_dn_y = row_y - 16 * fs
         pan_mid_y = row_y - 34 * fs
@@ -258,11 +304,10 @@ class MapEditorUI:
     called lazily from `set_menu_view("map")` the first time a cart's map
     editor is opened, exactly like the pre-extraction code did inline."""
 
-    def __init__(self, ws, names, in_rect):
+    def __init__(self, ws, names):
         self.ws = ws
         # Injected instead of imported back from console.py -- see module docstring.
         self._NAMES = names
-        self._in = in_rect
         self.mapedit = None            # MapEditor while menu_view == "map" (#32)
         self.map_erase = False         # tap-to-erase instead of stamp
         self.map_page = 0              # first tile id shown in the palette
@@ -279,15 +324,24 @@ class MapEditorUI:
                                        # block painted on press (#57: the SIZE brush
                                        # stamps s x s cells); reverted if the gesture
                                        # turns out to be a pan
+        self._ov_buf = None            # the OVERVIEW rung's reused quad buffer (#215)
         sc = ws.sys_canvas
         self.layout = MapLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
-    def relayout(self, w, h, fs):
+    def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
-        a font-scale change. Re-clamps the zoom index + camera, since the reflowed
-        view may have a different zoom list / visible span."""
-        self.layout = MapLayout(w, h, fs)
-        if self.map_zoom >= len(self.layout.zooms):
+        a font-scale change AND by EditorApp.set_tab on every entry into the tab
+        (#216). Re-clamps the zoom index + camera, since the reflowed view may have
+        a different zoom list / visible span; the OVERVIEW rung is carried by NAME
+        rather than by index, because it is last in a list whose length differs per
+        tier and a plain clamp would silently drop the reader back to 8px."""
+        old = self.layout.zooms
+        overview = (0 <= self.map_zoom < len(old)
+                    and old[self.map_zoom] == _MV_OVERVIEW)
+        self.layout = MapLayout(w, h, fs, chrome_scale=cs)
+        if overview:
+            self.map_zoom = len(self.layout.zooms) - 1
+        elif self.map_zoom >= len(self.layout.zooms):
             self.map_zoom = 0
         self._map_clamp_cam()
 
@@ -310,7 +364,7 @@ class MapEditorUI:
         """Reset gesture/zoom state (#37) -- called from Workstation._open_map,
         before set_menu_view("map") (re)builds the editor."""
         self.map_erase = False
-        self.map_zoom = 0              # reset to the fit-both default zoom (#37 follow-up)
+        self.map_zoom = 0              # the 8px field-size rung (#37 follow-up)
         self._map_press = None         # fresh gesture state on open (#37)
         self._map_panning = False
         self._map_drag = None
@@ -388,7 +442,10 @@ class MapEditorUI:
         (x0, y0, cell, cols, rows). `cell` is the px per cell at the current zoom;
         `cols`/`rows` are how many whole cells fit the available rectangle. All map
         hit-testing, panning and drawing route through this so they share one cell
-        size; the rectangle + zoom list come from the responsive MapLayout (#39)."""
+        size; the rectangle + zoom list come from the responsive MapLayout (#39).
+
+        The OVERVIEW rung's entry is a sentinel, not a size: its cell is fitted to
+        the live map here (#215), so a resize re-fits it with no state to keep."""
         lay = self.layout
         idx = self.map_zoom
         if idx < 0:
@@ -396,9 +453,31 @@ class MapEditorUI:
         elif idx >= len(lay.zooms):
             idx = len(lay.zooms) - 1
         cell = lay.zooms[idx]
+        if cell == _MV_OVERVIEW:
+            cell = self._mv_overview_cell()
         cols = lay.mv_avail_w // cell
         rows = lay.mv_avail_h // cell
         return (lay.mv_x0, lay.mv_y0, cell, cols, rows)
+
+    def _mv_overview_cell(self):
+        """The OVERVIEW rung's cell size for the map that is open."""
+        lay = self.layout
+        tm = self.ws.project.tilemap
+        if tm is None:
+            return _MV_FIT_MAX
+        return _mv_fit_cell(lay.mv_avail_w, lay.mv_avail_h, tm.w, tm.h)
+
+    def _mv_overview(self):
+        """True while the view is on the OVERVIEW rung -- the cell is below one
+        tile, so cells draw as dominant-colour blocks instead of sprites."""
+        lay = self.layout
+        idx = self.map_zoom
+        return 0 <= idx < len(lay.zooms) and lay.zooms[idx] == _MV_OVERVIEW
+
+    def _mv_zoom_label(self):
+        """The rung's badge: its ordinal for a detail size, _MV_OV_LABEL for the
+        OVERVIEW rung, which has no fixed cell size to number."""
+        return _MV_OV_LABEL if self._mv_overview() else str(self.map_zoom + 1)
 
     def _mv_area(self):
         """The current map-view rectangle (x, y, w, h) for _in() hit-tests."""
@@ -418,8 +497,9 @@ class MapEditorUI:
         me.cam_y = max(0, min(max(0, tm.h - rows), me.cam_y))
 
     def _map_cycle_zoom(self):
-        """Cycle to the next zoom level (wrapping back to the fit-both default),
-        then re-clamp the camera so a zoom-out can't leave it scrolled off-map."""
+        """Cycle to the next zoom rung -- the detail sizes in order, then OVERVIEW,
+        then back to the 8px field size -- and re-clamp the camera so a zoom-out
+        can't leave it scrolled off-map."""
         self.map_zoom = (self.map_zoom + 1) % len(self.layout.zooms)
         self._map_clamp_cam()
 
@@ -438,7 +518,7 @@ class MapEditorUI:
         """The map cell (cx, cy) under pointer (px, py) accounting for the pan
         offset, or None when the pointer is outside the visible map view."""
         me = self.mapedit
-        if me is None or not self._in(px, py, self._mv_area()):
+        if me is None or not _in(px, py, self._mv_area()):
             return None
         x0, y0, cell, cols, rows = self._mv_metrics()
         cx = me.cam_x + (px - x0) // cell
@@ -532,15 +612,15 @@ class MapEditorUI:
         by one row/column, DONE (or a tap outside the panel) closes it. Returns True
         so the tap never falls through to the map/palette behind the panel."""
         r = self._dims_rects()
-        if self._in(px, py, r["w_dn"]):
+        if _in(px, py, r["w_dn"]):
             self._map_resize(-1, 0)
-        elif self._in(px, py, r["w_up"]):
+        elif _in(px, py, r["w_up"]):
             self._map_resize(1, 0)
-        elif self._in(px, py, r["h_dn"]):
+        elif _in(px, py, r["h_dn"]):
             self._map_resize(0, -1)
-        elif self._in(px, py, r["h_up"]):
+        elif _in(px, py, r["h_up"]):
             self._map_resize(0, 1)
-        elif self._in(px, py, r["done"]) or not self._in(px, py, r["panel"]):
+        elif _in(px, py, r["done"]) or not _in(px, py, r["panel"]):
             self.dims_open = False
         return True
 
@@ -570,18 +650,18 @@ class MapEditorUI:
         if me is None:
             return False
         r = self._sel_actions_rects()
-        if self._in(px, py, r["copy"]):
+        if _in(px, py, r["copy"]):
             me.copy_selection()
             return True
-        if self._in(px, py, r["cut"]):
+        if _in(px, py, r["cut"]):
             me.cut_selection()
             return True
-        if self._in(px, py, r["paste"]):
+        if _in(px, py, r["paste"]):
             self._sel_paste_default(me)
             return True
         # A tap anywhere else in the palette column while selecting is swallowed (the
         # strip owns the column in this mode) so it can't accidentally re-pick a brush.
-        return self._in(px, py, r["panel"])
+        return _in(px, py, r["panel"])
 
     def _sel_paste_default(self, me):
         """The PASTE button stamps the clip at the active selection's top-left (so
@@ -737,7 +817,7 @@ class MapEditorUI:
         if self.dims_open:                     # the resize panel eats every tap (#91)
             self._dims_click(px, py)
             return
-        if self._in(px, py, self._mv_area()):  # a press in the map view: start a
+        if _in(px, py, self._mv_area()):  # a press in the map view: start a
             self._map_press = (px, py)         # gesture; the tool decides what it does.
             self._map_panning = False
             self._map_drag = None
@@ -781,16 +861,16 @@ class MapEditorUI:
         # so it eats taps there before the brush-pick / palette-page logic below.
         if self.map_tool == "select" and self._sel_actions_click(px, py):
             return
-        if self._in(px, py, lay.tool_btn):     # cycle stamp/rect/flood (#91)
+        if _in(px, py, lay.tool_btn):     # cycle stamp/rect/flood (#91)
             self._map_cycle_tool()
             return
-        if self._in(px, py, lay.dim_btn):      # open the map-resize panel (#91)
+        if _in(px, py, lay.dim_btn):      # open the map-resize panel (#91)
             self.dims_open = True
             return
-        if self._in(px, py, lay.sky_btn):      # the EMPTY/"sky" swatch (#37)
+        if _in(px, py, lay.sky_btn):      # the EMPTY/"sky" swatch (#37)
             me.n = ws.project.tilemap.EMPTY if ws.project.tilemap is not None else -1
             return
-        if self._in(px, py, lay.tp_area):      # pick the brush tile from the palette
+        if _in(px, py, lay.tp_area):      # pick the brush tile from the palette
             col = (px - lay.tp_x0) // lay.tp_cell
             row = (py - lay.tp_y0) // lay.tp_cell
             if 0 <= col < lay.tp_cols and 0 <= row < lay.tp_rows:
@@ -798,26 +878,26 @@ class MapEditorUI:
                 ids = self._map_palette_ids()
                 if 0 <= k < len(ids):
                     me.n = ids[k]
-        elif self._in(px, py, lay.tp_prev):    # page the palette back/forward
+        elif _in(px, py, lay.tp_prev):    # page the palette back/forward
             self.map_page = max(0, self.map_page - lay.tp_page)
-        elif self._in(px, py, lay.tp_next):
+        elif _in(px, py, lay.tp_next):
             if ws.project.sheet is not None and self.map_page + lay.tp_page < ws.project.sheet.count:
                 self.map_page += lay.tp_page
-        elif self._in(px, py, lay.size_btn):   # cycle the SIZE brush 1/2/3 (#57)
+        elif _in(px, py, lay.size_btn):   # cycle the SIZE brush 1/2/3 (#57)
             me.cycle_size()
-        elif self._in(px, py, lay.zoom_btn):   # cycle the zoom level (#37 follow-up)
+        elif _in(px, py, lay.zoom_btn):   # cycle the zoom level (#37 follow-up)
             self._map_cycle_zoom()
-        elif self._in(px, py, lay.pan_up):
+        elif _in(px, py, lay.pan_up):
             self._map_pan(0, -1)
-        elif self._in(px, py, lay.pan_dn):
+        elif _in(px, py, lay.pan_dn):
             self._map_pan(0, 1)
-        elif self._in(px, py, lay.pan_lf):
+        elif _in(px, py, lay.pan_lf):
             self._map_pan(-1, 0)
-        elif self._in(px, py, lay.pan_rt):
+        elif _in(px, py, lay.pan_rt):
             self._map_pan(1, 0)
-        elif self._in(px, py, lay.erase_btn):  # toggle stamp <-> erase
+        elif _in(px, py, lay.erase_btn):  # toggle stamp <-> erase
             self.map_erase = not self.map_erase
-        elif self._in(px, py, lay.close_btn):
+        elif _in(px, py, lay.close_btn):
             # CLOSE runs+leaves to the cart (ws._leave_menu is EditorApp.leave --
             # PLAY, itself a hard-commit trigger now, #111: no SAVE tap exists).
             ws.defer(ws._leave_menu)   # #184: commit+run behind the next paint
@@ -864,7 +944,7 @@ class MapEditorUI:
             title = "MAP  SKY"
         else:
             title = "MAP  TILE " + str(me.n if me else 0)
-        title = title + "  z" + str(self.map_zoom + 1)
+        title = title + "  z" + self._mv_zoom_label()
         cv.print(title, lay.title_xy[0], lay.title_xy[1],
                  th["ink"] if light else NAMES["green"], 1)
         if me is None or sheet is None or ws.project.tilemap is None:
@@ -874,15 +954,18 @@ class MapEditorUI:
         # fill the cell (scale = cell // TILE, crisp pixel-art) and centered, with grid
         # lines so empty cells read as empty. Tile images are cached by id within the
         # draw so a repeated tile builds once.
-        cache = {}
-        scale = max(1, cell // sheet.TILE)
-        off = (cell - sheet.TILE * scale) // 2
+        #
+        # On the OVERVIEW rung (#215) the cell is below one tile, so a cell is a solid
+        # block of its tile's dominant colour instead, and the lattice is SKIPPED: at
+        # 2-4px a 1px grid line on every side is most of the cell, and at 1px it is the
+        # whole of it -- the minimap would be a field of grey.
+        overview = self._mv_overview()
         # #163 span-batch: the per-cell rect+rectb pair (2 gated calls x every
         # visible cell, the tab's dominant dispatch cost) becomes THREE merged
         # quad groups in two fill_rects calls, pixel-identical by construction:
         #   1. backgrounds -- cells are disjoint, so the in-bounds block is ONE
         #      dark_blue quad and the out-of-bounds remainder two black strips;
-        #   2. (sprites, unchanged -- they ride the existing spr batch);
+        #   2. (the tiles between them are ONE map() -- see below);
         #   3. the grid lattice -- each cell's rectb edges merged into full-length
         #      1px lines (interior edges stay DOUBLED at k*cell and k*cell-1,
         #      exactly the pixels the per-cell outlines painted; overlaps at
@@ -918,30 +1001,30 @@ class MapEditorUI:
                 bg += [x0, y0 + ny * cell,
                        nx * cell, (rows - ny) * cell, black]
             lat = []
-            gw = cols * cell
-            for k in range(rows):
-                yb = y0 + k * cell
-                lat += [x0, yb, gw, 1, grey]
-                lat += [x0, yb + cell - 1, gw, 1, grey]
-                for j in range(cols):
-                    lat += [x0 + j * cell, yb, 1, cell, grey]
-                    lat += [x0 + (j + 1) * cell - 1, yb, 1, cell, grey]
+            if not overview:
+                gw = cols * cell
+                for k in range(rows):
+                    yb = y0 + k * cell
+                    lat += [x0, yb, gw, 1, grey]
+                    lat += [x0, yb + cell - 1, gw, 1, grey]
+                    for j in range(cols):
+                        lat += [x0 + j * cell, yb, 1, cell, grey]
+                        lat += [x0 + (j + 1) * cell - 1, yb, 1, cell, grey]
             memo = (key, array("h", bg), array("h", lat))
             self._grid_memo = memo
         cv.fill_rects(memo[1])
-        for ry in range(ny):
-            cy = me.cam_y + ry
-            y = y0 + ry * cell
-            for rx in range(nx):
-                tid = tm.mget(me.cam_x + rx, cy)
-                if tid >= 0:
-                    img = cache.get(tid)
-                    if img is None:
-                        img = sheet.tile_image(tid, -1)
-                        cache[tid] = img if img is not None else False
-                    if img:
-                        cv.spr(img, x0 + rx * cell + off, y + off, scale)
-        cv.fill_rects(memo[2])
+        if overview:
+            self._draw_map_blocks(cv, tm, sheet, me, x0, y0, cell, nx, ny)
+        else:
+            # The visible window IS a map() region -- every detail rung's cell is a
+            # whole multiple of the tile (tests/test_map_tile_blit.py pins the
+            # ladder), so the cells sit on exactly the lattice blit_map walks. One
+            # native call for the window replaces an Image blit per cell, and it is
+            # the SAME kernel the cart's own map() runs, so a tile in the editor is
+            # the tile the cart draws.
+            cv.map(tm, sheet, me.cam_x, me.cam_y, nx, ny, x0, y0, -1,
+                   cell // sheet.TILE)
+            cv.fill_rects(memo[2])
         # RECT preview (#91): while a box is being dragged, outline the covered cells
         # (clamped to the visible window) so the fill region is visible before release.
         if self.map_tool == "rect" and self._map_rect is not None \
@@ -1013,9 +1096,11 @@ class MapEditorUI:
         # SIZE brush (#57): cycles the stamp size (top-left d-pad corner slot);
         # labeled like the zoom button ("S2" ~ "Z2").
         ws._btn("S" + str(me.size), lay.size_btn, NAMES["dark_purple"], cv)
-        # ZOOM control (#37 follow-up): cycles the zoom level (in the d-pad center);
-        # the title's "z<level>" badge shows which level is active.
-        ws._btn("Z" + str(self.map_zoom + 1), lay.zoom_btn, NAMES["dark_purple"], cv)
+        # ZOOM control (#37 follow-up): cycles the zoom rung (in the d-pad center);
+        # the title's "z<rung>" badge shows which one is active.
+        zlab = self._mv_zoom_label()
+        ws._btn(zlab if zlab == _MV_OV_LABEL else "Z" + zlab,
+                lay.zoom_btn, NAMES["dark_purple"], cv)
         # Pan d-pad under the map view.
         ws._btn("^", lay.pan_up, NAMES["indigo"], cv)
         ws._btn("v", lay.pan_dn, NAMES["indigo"], cv)
@@ -1046,6 +1131,65 @@ class MapEditorUI:
         # Map-resize overlay (#91): drawn LAST so it sits over the whole editor.
         if self.dims_open:
             self._draw_dims(cv, NAMES)
+
+    def _draw_map_blocks(self, cv, tm, sheet, me, x0, y0, cell, nx, ny):
+        """The OVERVIEW rung's minimap (#215): every placed cell as a solid block of
+        its tile's dominant colour, equal-colour neighbours merged into one quad per
+        RUN along a row, one fill_rects batch per row. An empty cell emits nothing, so
+        the map field's own blue reads as sky exactly like it does at 8px.
+
+        The quad buffer is sized to the VISIBLE COLUMNS and reused across rows and
+        frames. A whole-map array would be up to 9216 quads on a 96x96 map (the resize
+        ceiling) -- ~90KB on a board, to draw a picture 96px wide."""
+        if nx < 1 or ny < 1:
+            return
+        need = nx * 5
+        buf = self._ov_buf
+        if buf is None or len(buf) < need:
+            buf = array("h", (0,) * need)
+            self._ov_buf = buf
+        cells = tm.cells
+        w = tm.w
+        tile_color = sheet.tile_color
+        tint = {}
+        for ry in range(ny):
+            base = (me.cam_y + ry) * w + me.cam_x
+            y = y0 + ry * cell
+            n = 0
+            run_c = -1
+            run_x = 0
+            run_n = 0
+            for rx in range(nx):
+                v = cells[base + rx]
+                if v:
+                    c = tint.get(v, -2)
+                    if c == -2:
+                        c = tile_color(v - 1)
+                        tint[v] = c
+                else:
+                    c = -1
+                if c == run_c:
+                    run_n += 1
+                    continue
+                if run_c >= 0:
+                    buf[n] = x0 + run_x * cell
+                    buf[n + 1] = y
+                    buf[n + 2] = run_n * cell
+                    buf[n + 3] = cell
+                    buf[n + 4] = run_c
+                    n += 5
+                run_c = c
+                run_x = rx
+                run_n = 1
+            if run_c >= 0:
+                buf[n] = x0 + run_x * cell
+                buf[n + 1] = y
+                buf[n + 2] = run_n * cell
+                buf[n + 3] = cell
+                buf[n + 4] = run_c
+                n += 5
+            if n:
+                cv.fill_rects(buf, n // 5)
 
     def _draw_map_box(self, cv, x0, y0, cell, cols, rows, cam_x, cam_y,
                       bx0, by0, bx1, by1, color, double):

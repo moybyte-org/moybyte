@@ -172,4 +172,16 @@ def test_the_gate_runs_on_the_merge_not_on_a_branch():
     assert merge < gated, "the gate runs before the merge -- wrong tree"
     # And the version comes off the merged tree, not off master as it stood.
     assert body.index("read_version()") > merge
-    assert "def preflight" in src and "make" not in src.split("def preflight")[1].split("def ")[0]
+    pre = src.split("def preconditions")[1].split("\ndef ")[0]
+    assert "preflight" not in pre, "the gate moved back before the merge"
+
+
+def test_the_gate_is_cis_host_lane_not_make_test():
+    """`make test` is the part of CI that needs only the venv. Every step
+    preflight adds compares a DERIVED ARTIFACT to its sources, which is exactly
+    what a release must not ship stale."""
+    src = open(release.__file__, encoding="utf-8").read()
+    body = src.split("def gate(")[1].split("\ndef ")[0]
+    assert "tools" in body and "preflight.sh" in body
+    assert '"make", "test"' not in body
+    assert (ROOT / "tools" / "preflight.sh").exists()

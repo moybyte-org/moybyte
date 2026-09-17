@@ -42,7 +42,16 @@ T-Deck's exact payload at a quarter of this bus's full-frame time. Proven
 byte-identical to the composite path on the device itself
 (`moy_axs.fold_test`, both passes, 0 mismatched bytes); `fold_stats`'
 windowed counter tracks folded flushes 1:1 minus the bezel-layers. Overlays
-disarm through the shared frame walk and pay the old cost. Measured ladder
+disarm through the shared frame walk and pay the old cost. **The snapshot
+into that scratch is the GDMA engine's since 2026-09-08** (`moy_fold_arm_snap`,
+`moy_fold.h`): the 153,600 B PSRAM-to-PSRAM copy was 5.1 ms of every native
+play frame on this board -- the whole game-to-system composite, because here the
+game canvas is a separate raster from the glass -- and started at `blit_game`
+it lands before the cart's next tick (`sync_back` fences it; the feeder waits
+for it before its first band). This board stages no `device_diag` and so has no
+PUMP line: `comp.snap_stats()` climbs 1:1 with `fold_count`, and the dev
+channel's `state` carries both, as its `pump` and `fold` fields.
+The before/after is in #66. Measured ladder
 on this glass (Star Catcher / Sakura Lua): 80MHz bring-up 24/21 -> 120MHz
 MSPI 30/27 -> fold 35/30 -> game window 42/34 -> **core-0 feeder 53/43fps**.
 
@@ -81,10 +90,14 @@ about the feeder or the handoff is restated here. What moy_axs supplies is
 three hooks: `frame_begin` (acquire the bus, arm the window, ship the pixel
 header), `queue_band` (the ROTATE-gather or the fold synthesis into the slot
 the engine hands it, queued with `SPI_TRANS_CS_KEEP_ACTIVE` on all but the
-last) and `frame_end` (retrieve the results, release the bus). Bands are 32
-physical rows; completion is counted by this module's `post_cb` ISR, whose
-body is the engine's `moy_flush_band_done_from_isr` -- static inline, so the
-callback keeps its IRAM placement. `modules/guition_panel.py` is the
+last) and `frame_end` (wait the queued bands out, close CS if the frame's
+last band never went, release the bus -- THE FAILURE PATHS in the C, #205).
+Bands are 32 physical rows; completion is counted by this module's `post_cb`
+ISR, whose body is the engine's `moy_flush_band_done_from_isr` -- static
+inline, so the callback keeps its IRAM placement. The device runs
+`SPI_DEVICE_NO_RETURN_RESULT`: a band's queue slot frees as the ISR starts
+it and no result is ever filed, so a band that completes late cannot leave
+anything behind. `modules/guition_panel.py` is the
 compositor over it -- since 2026-08-21 a thin SUBCLASS of the shared
 `device/banded_panel.py` (`FoldingCompositor` over `BandedCompositor`, #206
 item 1), the Python twin of the `moy_flush` split above. What is left in this
@@ -123,6 +136,28 @@ VFS when not).
 
 ## Bring-up log
 
+* 2026-09-05 -- **the flush's failure paths are proven, not assumed** (#205;
+  numbers in the issue). Three decisions, each verified on this glass with
+  `moy_axs.fault(kind)` arming one failure for the next flush:
+  * a band's `spi_master` queue slot frees when the ISR starts it
+    (`SPI_DEVICE_NO_RETURN_RESULT`) -- the old count-based retrieve left every
+    late-completing band's result filed in the driver for the rest of the
+    boot (measured before the change: the driver's result queue filled to its
+    depth over a run of injected late frames, and `spi_bus_remove_device`
+    refuses a device in that state). Teardown/re-add DECLINED: the driver
+    cannot remove a device with an unfinished transaction, so it cannot drop
+    an orphan, only be blocked by one.
+  * every error exit that left CS asserted now closes it (one DCS NOP header
+    with no `KEEP_ACTIVE`, after the queued bands are waited out), so the
+    frame after a failed one arms its window with CS high and is clean.
+  * a drain that gives up is no longer followed by a kick, a bus command or
+    a fold/bezel write: `moy_axs: feeder busy` is raised instead.
+  * the two A/Bs the issue named were RUN and both DECLINED on data (numbers
+    in #205): `-O3` on the rotate/fold gathers made the feeder's per-frame CPU
+    WORSE on every cart, with the transport never starved either way; and
+    `vTaskDelay(1)` in place of the fold fence's 20us spin -- the fence never
+    spins on the shipped cadence, and a 10ms tick (FREERTOS_HZ 100) is the
+    wrong unit for a sub-millisecond wait when it does.
 * 2026-08-20 -- **stage 4 lands: the TF card is the cart store** (owner call
   "already has an SD inside, so you can do that now"; the exit-gesture DECLINE
   and the #202 close are the same session -- see the hardware table's SD row
@@ -159,8 +194,8 @@ VFS when not).
     answer (resolution-driven with fs floors, the 2026-07-12 owner call).
     FONT_SCALE stays 1; do not re-flip it to solve tap size.
   * **the Bench twins ran on this board for the first time** (over the dev
-    channel, feeder image; JSON via tools/p4_cart_bench.py --attach). The
-    floors MATCH THE T-DECK REFEREE: idle 62.5fps p50=16ms, silent/sound
+    channel, feeder image; JSON via tools/p4_cart_bench.py --board guition_s3).
+    The floors MATCH THE T-DECK REFEREE: idle 62.5fps p50=16ms, silent/sound
     scenes 55.5fps p50=18ms, sound ≡ silent -- despite the rotate and the
     2x-class glass, which is the fold + game window + core-0 feeder chain
     doing its job. Lua logic 2.2x Python (45.4 vs 32.2fps), draw paths equal
@@ -224,9 +259,9 @@ VFS when not).
     idle 1.1ms, blocked only 1.1ms -- the kick/pump/drain overlap works,
     0 timeouts / 0 queue errors over the session).
   * stage 2 (half): the AXS15231 touch controller answers at 0x3B and
-    reports no-touch correctly. The MAPPING knobs are still the
-    ESPHome-derived guess -- run `guition_smoke.touch()` with a finger and
-    bake the winners into `device/axs_touch.py`.
+    reports no-touch correctly. The MAPPING knobs were the ESPHome-derived
+    guess that night; `guition_smoke.touch()` with a finger settled them the
+    next day and `device/axs_touch.py` carries the winners (see above).
   * stage 6: boots to the desktop (first frame 270ms after a seeded boot;
     34 carts seeded to `/moy/carts` on the first boot), OTA confirm fired
     (`marked app valid (slot ota_0)`), and
@@ -235,9 +270,7 @@ VFS when not).
     the real pointer feed, a Python cart (Star Catcher, ~28fps) and a Lua
     cart (Sakura Lua via moycore, ~24fps) both run and exit, idle blank +
     wake, mem. `MODE = "desktop"` is the shipped default.
-  * NOT yet verified (needs eyes/fingers): the pattern's orientation, colors
-    and checker squareness on the physical glass, and the touch calibration
-    pass. One anomaly on file: a single
+  * One anomaly on file: a single
     `frame error: 'NoneType' object isn't iterable` fired once, on the
     first-ever cart exit of the first seeded session, and never reproduced
     (not on later exits, not on a fresh boot); `_frame_error` now prints the

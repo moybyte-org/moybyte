@@ -998,41 +998,6 @@ def test_moy_mascot_baked_into_default_icon_sheet():
     assert any(p > 0 for p in img.pix)              # mascot has painted pixels
 
 
-def test_frame_cap_locks_games_to_a_steady_30(tmp_path, monkeypatch):
-    # Frame pacing (#63): with the governor ON, a running GAME locks to 30fps (the
-    # SNES consistency rule) unless its manifest declares "fps": 60; tools/apps and
-    # every console screen keep 60. The knob currently SHIPS OFF (uncapped -- the
-    # owner wants real per-cart numbers while the engine work settles), so the test
-    # pins BOTH: the default-off behaviour and the ON policy.
-    from runtime import host_app, console as console_mod
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    # "a plain game" = anything that doesn't declare the 60 opt-in. Since the
-    # carts became "moy-1" this is fps 30 (SPEC.md 5's default) rather than the
-    # old unset 0, and frame_cap_fps treats the two the same.
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("path") and it.get("type") == "game"
-                           and it.get("fps") != 60)
-    ws.open()
-    assert ws.screen == "desktop" and ws.cart_error is None
-    assert console_mod.FPS_GOVERNOR is False
-    assert ws.frame_cap_fps() == 60                 # knob OFF: uncapped everywhere
-    monkeypatch.setattr(console_mod, "FPS_GOVERNOR", True)
-    assert ws.frame_cap_fps() == 30                 # a plain game: locked 30
-    ws.cart["fps"] = 60
-    assert ws.frame_cap_fps() == 60                 # manifest fps: 60 (Hop Quest/Sky Run)
-    ws.cart["fps"] = "junk"
-    assert ws.frame_cap_fps() == 30                 # malformed -> the safe default
-    ws.cart["fps"] = 0
-    ws.cart["type"] = "tool"
-    assert ws.frame_cap_fps() == 60                 # tools keep the responsive cap
-    ws.cart["type"] = "game"
-    ws.player.cart_error = "boom"
-    assert ws.frame_cap_fps() == 60                 # the crash panel is a console screen
-    ws.player.cart_error = None
-    ws.go_home()
-    assert ws.frame_cap_fps() == 60
-
-
 def test_nativize_maps_crash_lines_back_to_kid_source():
     # #67 spike: the auto-native rewrite inserts one decorator line above every
     # top-level def; a crash line reported against the REWRITTEN source must map
@@ -1204,3 +1169,22 @@ def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path)
     # is a BOOL: an inner session's exit would clear the bracket while the
     # outer one is still on the bus.
     assert depth[0] == 0
+
+
+def test_the_cursor_hides_after_the_idle_window_and_a_move_wakes_it():
+    """The trackball cursor auto-hides after `idle_ms` without movement; a
+    move wakes it, and a touch placement keeps it hidden (the finger already
+    shows where you are). All on an injected clock."""
+    from runtime.widgets import Pointer
+
+    p = Pointer(320, 240, idle_ms=100)
+    p.move(1, 0)
+    assert p.visible
+    p.tick(p._last_move + 99)
+    assert p.visible
+    p.tick(p._last_move + 100)
+    assert not p.visible
+    p.move(1, 0)
+    assert p.visible
+    p.place(5, 5)
+    assert not p.visible and (p.x, p.y) == (5, 5)

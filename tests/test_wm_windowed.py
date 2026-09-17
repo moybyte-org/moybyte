@@ -182,23 +182,37 @@ _CLEARS = True
 WINDOWED_INSTALLERS = {
     "runtime/host_app.py": _CLEARS,
     "firmware/web_runner/web_boot.py": _CLEARS,
-    "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py":
+    # ONE row for both P4 boards: they take one P4 tier body, which hands the
+    # WM to the shared spine; the walk reads the canonical file, never the
+    # copies their builds stage.
+    "device/p4_desktop.py":
         "P4SystemCanvas overrides blit_game outright (its composite is the "
         "hardware PPA) and paints no bands at all, so the shared flag never "
-        "reaches a fill on that board -- and it only ever runs this WM",
+        "reaches a fill on either P4 board -- and they only ever run this WM",
 }
 
 
 def _windowed_install_sites():
-    """Every module that CONSTRUCTS a WindowedWM, found rather than listed."""
+    """Every module that CONSTRUCTS a WindowedWM, found rather than listed.
+
+    `device/` is walked because a shared body lives there (`p4_desktop.py`
+    installs the WM for both P4 boards since 2026-09-09), and a board's
+    `modules/` copy of ANY shared module is skipped: that copy is build output
+    -- gitignored, present only on a tree that has built that board -- so
+    counting it would make this ratchet's answer depend on whether someone had
+    run a firmware build, which is how a guard starts failing for a reason that
+    has nothing to do with what it guards.
+    """
     import ast
     import warnings
+    shared = {p.name for base in ("runtime", "device")
+              for p in (ROOT / base).glob("*.py")}
     found = {}
     # Parsing a whole tree re-raises every SyntaxWarning in it (stale regex
     # escapes in vendored/staged sources); this walk is a search, not a lint.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        for base in ("runtime", "firmware"):
+        for base in ("runtime", "device", "firmware"):
             for dirpath, dirnames, filenames in os.walk(ROOT / base):
                 dirnames[:] = [d for d in dirnames
                                if d not in (".build", "__pycache__", "dist")]
@@ -206,15 +220,21 @@ def _windowed_install_sites():
                     if not name.endswith(".py"):
                         continue
                     path = Path(dirpath) / name
+                    if path.parent.name == "modules" and name in shared:
+                        continue          # a staged copy; the canonical one is walked
                     try:
                         tree = ast.parse(path.read_text(encoding="utf-8",
                                                         errors="replace"))
                     except SyntaxError:
                         continue
                     for node in ast.walk(tree):
-                        if (isinstance(node, ast.Call)
-                                and isinstance(node.func, ast.Name)
-                                and node.func.id == "WindowedWM"):
+                        # Constructed here, or NAMED as the tier a shared
+                        # spine installs (`wm=WindowedWM`): either way this
+                        # is the module that decided the board runs windowed.
+                        if isinstance(node, ast.Call) and any(
+                                isinstance(f, ast.Name) and f.id == "WindowedWM"
+                                for f in [node.func]
+                                + [k.value for k in node.keywords]):
                             found[path.relative_to(ROOT).as_posix()] = (path,
                                                                         tree)
     return found
@@ -1915,3 +1935,42 @@ def test_moving_cursor_leaves_no_trail_on_the_desk(tmp_path):
             if abs(bx - x) >= 50:                  # away from the live cursor
                 stale += sum(1 for a, c in zip(b, snap(bx)) if a != c)
     assert stale == 0, "stale cursor pixels remained on skipped desk frames"
+
+
+def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_world_flip(tmp_path):
+    """Window buffers are off-heap layers on a board and nothing collects
+    them: the WM releases one when its window dies, when a resize rebuilds
+    it, and when a relayout drops every window. The drag backdrop is kept
+    across a world flip (same root size) instead of being re-minted at 2MB
+    a round. Measured leak this closes: ~3.6MB of PSRAM per Library ->
+    CHANGE -> home round on the Guition P4 (2026-09-09)."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    comp = win.buf._comp
+    assert comp._buf is not None
+    # A resize rebuilds the buffer: the old one is released first.
+    ws.wm._resize_window(win, win.w - 40, win.h - 40)
+    assert comp._buf is None, "the pre-resize buffer was released"
+    comp2 = win.buf._comp
+    assert comp2 is not comp and comp2._buf is not None
+    # Closing the window releases the buffer.
+    ws.exit()
+    drv.frame(1 / 30)
+    assert ws.wm._wins == {}
+    assert comp2._buf is None
+    # The drag backdrop: minted once, invalidated (not dropped) by a world flip.
+    ws.open_settings()
+    drv.frame(1 / 30)
+    cache = ws.wm._ensure_backdrop()
+    assert ws.wm._backdrop is cache
+    comp3 = ws.wm._wins["settings"].buf._comp
+    ws._relayout()                                  # the world-flip hook
+    assert ws.wm._wins == {} and comp3._buf is None
+    assert ws.wm._backdrop is cache and not ws.wm._backdrop_valid
+    assert cache._comp._buf is not None
+    # A root that changed size re-mints it and releases the old one.
+    ws.wm._root_canvas.w -= 0                       # unchanged: the same layer
+    assert ws.wm._ensure_backdrop() is cache

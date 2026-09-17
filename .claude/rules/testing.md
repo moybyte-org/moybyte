@@ -11,7 +11,9 @@ paths:
   suites once asserted device bodies as source STRINGS, which is how a meter
   printed a constant for weeks behind a green test. What legitimately stays a grep
   is ROUTING — that a board still calls a shared helper — and
-  `tests/test_micropython_spike.py` keeps only those.
+  `tests/test_board_routing.py` keeps only those; the T-Deck's own drivers are
+  executed in `tests/test_tdeck_input.py`, the device make_api in
+  `tests/test_device_make_api.py`.
 
 - **The hosted console has a CI net, and its skips have TEETH.**
   `tests/test_web_sync_e2e.py` and `tests/test_web_persist_e2e.py` are the only
@@ -41,17 +43,46 @@ paths:
     few lines of p8 source and runs them on the real Player. The corpus found
     them; the inline tests hold them.
   - **What the Player still adds over `run_cart` is TIME**: run_cart calls
-    update once per frame at a fixed 1/30, while the Player runs a cart's own
-    rate against the host's, with catch-up and a btnp latch spanning console
-    frames. That is why the pacing tests live here and are worth keeping. See
-    #217, which folds all of it into one scheduler.
+    update once per frame at a fixed 1/30, while the Player's scheduler
+    (`runtime/tick_model.py`, #217) places a cart's declared rate on the host's
+    clock, with catch-up, a draw divisor and a press-edge latch per logic tick.
+    That is why the pacing tests live here (`tests/test_tick_model.py` and the
+    btnp pins in `tests/test_import_p8.py`) and are worth keeping.
 
-- **On-glass testing — all three boards have a suite** (#156). Each is gated on
-  its own env var and shares one session in file order, leaving the board where
-  it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
+- **An attached board is a TEST RESOURCE, not a permission gate.** `make
+  device-port` says which boards are on this machine and on which port; when one
+  is there, run its suite, build, flash, push a cart and measure without asking
+  first, and when none answers say so rather than asking whether you may. The
+  line in `tools/preflight.sh` about the suites needing "a human with them
+  plugged in" means exactly that the boards must be CONNECTED — an agent read it
+  on 2026-09-12 as "an agent may not", told the owner on-glass was out of reach,
+  and shipped an input-path change unverified while four boards sat plugged in.
+  Reach for the real driver (`P4Board(board_dir=…)`) and never raw pyserial: the
+  line state at open is per-board and opposite, and getting it wrong resets the
+  chip (below).
+
+- **On-glass testing — every console board has a suite** (#156). Each is
+  gated on its own env var and shares one session in file order, leaving the
+  board where it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
   `tests/test_tdeck_on_glass.py` (`MOYBYTE_TDECK_PORT`),
-  `tests/test_guition_on_glass.py` (`MOYBYTE_GUITION_PORT`), over
+  `tests/test_guition_on_glass.py` (`MOYBYTE_GUITION_PORT`),
+  `tests/test_guition_p4_on_glass.py` (`MOYBYTE_GUITION_P4_PORT`, attach-only
+  like the S3 boards — its USB serial is the SoC's), over
   `tools/p4_autotest.py`'s `P4Board` and the shared `tests/on_glass.py` fixture.
+  - **A check every board can make belongs in `on_glass.py`, and then EVERY
+    board makes it.** The suites keep their own `def test_*` so a failure names
+    its board, but the body is shared, and which boards call it is not a taste
+    question — it is coverage. Audited 2026-09-09: the draw gates, the baked
+    web console, the Lua-tier cart run, the `py` probe, the diag toggle, the
+    heap report and the display underruns were each pinned on ONE board and
+    silently unpinned on the others, and the shared bodies had drifted into
+    per-board copies (the desk boards each carried their own cart-run body).
+    A tier difference is expressed as an ARGUMENT to the shared body, never as
+    a second copy: `cart_runs_and_exits(door=…)` names the door a tier leaves
+    by (the fullscreen boards pin the kid-facing `cart_quit` flag; the desk
+    boards pin `ws.exit()`, because a run started from a picker arrangement
+    does not pop through the flag), and `draw_gates_are_installed(windowed=…)`
+    adds the window-buffer half only where windows exist.
   - **The line state at open is per-board and OPPOSITE, and it is DATA.**
     `P4Board(board_dir=…)` reads `dtr`/`rts`/`attach_only`/`chunk` from that
     board's `[serial]` block. The P4's CH343 opens with both LOW; the two S3
@@ -59,12 +90,11 @@ paths:
     (`rst:0x15`) after which the device re-enumerates under the open handle and
     every read returns nothing, forever — indistinguishable from a dead board.
     `attach_only` REFUSES a reset rather than recording one.
-  - **Merely OPENING the P4's CH343 reboots it** (`rst:0x1`; the Linux CH34x
-    driver glitches the reset circuit). A bare probe right after open is
-    measuring a board mid-boot, ~17s to the desk.
   - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
-    vocabulary: `state`/`tap`/`run`/`open`/`swipe`/`drag`/`diag`/`skip`/`gov`/
-    `mem`/`bl`/`vol`/`power`/`web`/`py`/`recv`/`quit`. A command a board cannot
+    vocabulary, and `DevChannel.run` is the list of record: every word the
+    boards answer to is a branch in it, from `state`/`tap`/`swipe` through the
+    measurement switches (`diag`, `verbs`, `luaprof`, `perfcnt`, `luagc`,
+    `uncap`) and the settings toggles the registry derives. A command a board cannot
     serve DECLINES, and `recv` — the only one that stops reading lines and takes
     raw bytes — is the ONLY cart-push transport, so a board whose image predates
     it is refused by `tools/push_cart.py` rather than pushed too slowly. Board
@@ -75,8 +105,16 @@ paths:
   - **`quit` exits the DESKTOP to the REPL, not the running cart**
     (`REMOTE quit -> REPL`). Using it to end a cart leaves the board at `>>>`,
     after which every suite errors with "did not answer `state`" and reads like a
-    dead board. Recover with a **Ctrl-D soft reset** — it re-runs `main.py` and
-    does NOT re-enumerate USB, which is what makes it safe on an attach-only board.
+    dead board. Recover with a **Ctrl-D soft reset** — it re-runs `main.py`
+    without re-enumerating USB, which is what makes it safe on an attach-only
+    board — but only once `>>>` has actually appeared, which is why the driver
+    sends `\r\x03` and waits before it sends `\x04`. Sent into a desktop that has
+    not reached the prompt yet (straight after `quit`), the Ctrl-D is SWALLOWED:
+    no banner, no prompt, no answer to Ctrl-C, indistinguishable from the dead
+    board it was meant to revive. That wedge clears with `esptool --port
+    /dev/ttyACMn --after hard_reset read_mac`, which drives the SoC's USB-JTAG
+    instead of the app — the port node survives, the open handle does not, so
+    reopen it afterwards.
   - **Never put a call that blocks on FLASH inside a `pyexec` snippet.** `pyexec`
     uploads in chunks while `cmd` sends one line, so a real file write stalls the
     loop long enough for a streaming PERF line to interleave into the exchange;

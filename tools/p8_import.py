@@ -86,7 +86,19 @@ which is a debug line it disabled on line 67. Reading past real code to find
             continue
         if not s.startswith("--"):
             break                       # code: the header block is over
-        cand = s[2:].strip()
+        body = s[2:]
+        cand = body.strip()
+        # Two header lines that are not the cart's name. A tab RULE
+        # (`---- main ----`, PICO-8's own tab-title convention) has a dash run
+        # either side of a word, and a cart whose header is a LINK carries the
+        # URL split across lines -- `the last drop` imported as
+        # "://github.com/yellowafterlife/".
+        if body.startswith("-") and body.rstrip().endswith("-"):
+            continue
+        if "://" in cand or ("/" in cand and not cand.split()[1:]):
+            continue                    # a link, or the rest of one wrapped
+        if cand.endswith(":"):
+            continue                    # `-- entity:`, a section label
         if cand and not cand.lower().startswith(("by ", "by:")):
             return cand[:40]
     stem = os.path.basename(p8_path)

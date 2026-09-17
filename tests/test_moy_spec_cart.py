@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RED64 = ["FF0000"] * 64
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import StubInput, build_ws as _ws
 
 
 def _open(ws, title):
@@ -224,13 +224,6 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
     from runtime import host_app
     from runtime import widgets
 
-    class _StubInput:
-        def held(self, n):
-            return False
-
-        def pressed(self, n):
-            return False
-
     class _Stub:
         w, h = 320, 240
 
@@ -258,15 +251,15 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
         sys.path.remove(str(modules_dir))
 
     def names(mod, **kw):
-        return set(mod.make_api(_Stub(), _StubInput(), {}, **kw).keys())
+        return set(mod.make_api(_Stub(), StubInput(), {}, **kw).keys())
 
     base_h, base_d = names(host_app), names(dev)
     assert base_h == base_d
 
     # Every gate the Player can open, together -- so a name that only appears
     # under a combination is compared too.
-    gates = dict(scenes=widgets.Scenes({}, []), images={}, tables={},
-                 texts={}, wifi=object(), gpio=_GpioGate())
+    gates = dict(scenes=widgets.Scenes({}, []), images={},
+                 wifi=object(), gpio=_GpioGate())
     full_h, full_d = names(host_app, **gates), names(dev, **gates)
     assert full_h == full_d, (
         "host-only: %s / device-only: %s"
@@ -293,7 +286,7 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
 # -- SPEC.md 4.1: the host sandbox is a MAXIMUM, matched to what glass can give -
 
 def test_host_lua_sandbox_matches_the_device_ceiling(tmp_path):
-    """utf8 is the one library lupa's openlibs leaks that the device build drops
+    """utf8 is the one library a full openlibs leaks that the device build drops
     from its sources outright -- a cart using it would run here and die on glass."""
     from runtime import moy_carts
     root = str(tmp_path / "carts")
@@ -308,7 +301,7 @@ def test_host_lua_sandbox_matches_the_device_ceiling(tmp_path):
     ws = host_app.build_workstation(root)
     if getattr(ws, "lua_runtime", None) is None:
         import pytest
-        pytest.skip("lupa not installed")
+        pytest.skip("no Lua runtime -- runtime/lua_binding needs a C compiler")
     _open(ws, "Sandbox")
     assert not ws.cart_error
     ws.frame(1 / 30.0)
@@ -345,7 +338,7 @@ def test_lua_runtime_still_runs(tmp_path):
     ws = host_app.build_workstation(root)
     if getattr(ws, "lua_runtime", None) is None:
         import pytest
-        pytest.skip("lupa not installed")
+        pytest.skip("no Lua runtime -- runtime/lua_binding needs a C compiler")
     _open(ws, "Luacart")
     assert not ws.cart_error
     ws.frame(1 / 30.0)
@@ -372,11 +365,7 @@ def test_duplicate_carries_every_asset(tmp_path):
     for sub, fn, blob in (
             ("images", "cover.moyimg",
              json.dumps({"format": "moyimg-v1", "w": 1, "h": 1,
-                         "codec": "rle", "data": "AA"})),
-            ("tables", "scores.moysheet",
-             json.dumps({"format": "moysheet-v1", "cells": {}})),
-            ("docs", "notes.moytext",
-             json.dumps({"format": "moytext-v1", "body": "hi"}))):
+                         "codec": "rle", "data": "AA"})),):
         (p / sub).mkdir()
         (p / sub / fn).write_text(blob)
 
@@ -388,8 +377,6 @@ def test_duplicate_carries_every_asset(tmp_path):
     assert dup["sounds"] == src["sounds"]
     assert dup["blocks"] == src["blocks"]
     assert set(dup["images"]) == {"cover"}
-    assert set(dup["tables"]) == {"scores"}
-    assert set(dup["texts"]) == {"notes"}
 
 
 # -- tile flags (SPEC.md 3.5) --------------------------------------------------

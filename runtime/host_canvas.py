@@ -245,9 +245,6 @@ def _system_canvas_class():
         checkout needs (`moy_font` is a gitignored build artefact, so the
         kernel text op can be absent), and -- host only, because only the host
         has a screen to hand to pygame or a GIF -- an RGB888 readout.
-
-        Its purpose was to make `runtime/canvas.py` deletable -- which it now
-        is, and is.
         """
 
         # NOT the class default 2. That describes the P4's DPI buffer rotation;

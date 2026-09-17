@@ -100,6 +100,9 @@ OTA_IMAGES = {
     # The Zero (#41), OTA-wired 2026-08-29 and given its flasher card the same
     # day, so it publishes both halves like every other board.
     "xiao_zero": "moybyte_zero_app.bin",
+    # The Guition P4 (2026-09-06): OTA-shaped from its first flash like the
+    # Waveshare.
+    "guition_p4": "moybyte_guition_p4_app.bin",
 }
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
 
@@ -142,6 +145,10 @@ def label(board):
     notes are rendered as Markdown, where an entity is just the literal text.
     Every release before 2026-08-30 named the Guition `3.5&Prime;`."""
     return html.unescape(board["label"])
+
+
+def row_name(board):
+    return label(board) + (" (beta)" if board.get("beta") else "")
 
 
 def cable_block(boards):
@@ -381,16 +388,18 @@ def notes(tag, channel, boards, workdir, site, manifests=None):
     for board in boards:
         src = existing_source(tag, board["id"], workdir)
         if not src:
-            rows.append("| %s | — | — | not published yet | — |" % label(board))
+            rows.append("| %s | — | — | not published yet | — |" % row_name(board))
             continue
         commit = src.get("commit", "")
         rows.append("| %s | `%s-%s` | `0x%x` | %s | %s |"
-                    % (label(board), board["id"], src.get("image", "?"),
+                    % (row_name(board), board["id"], src.get("image", "?"),
                        board["offset"], src.get("built", "?")[:10],
                        ("`%s`" % commit[:7]) if commit else "—"))
     head = NOTES_HEAD.format(channel="beta" if channel == "unstable" else channel,
                              branch=spec["branch"], blurb=spec["blurb"], site=site)
-    body = (head + "\n".join(rows) + "\n"
+    betas = "".join("\n**%s is beta:** %s\n" % (label(b), b["beta"])
+                    for b in boards if b.get("beta"))
+    body = (head + "\n".join(rows) + "\n" + betas
             + NOTES_TAIL.format(cable=cable_block(boards)))
     if manifests:
         body += NOTES_OTA
@@ -432,7 +441,7 @@ def main():
             # A board can have an OTA manifest and NO cable-flash image on the
             # release: `stage()` walks site/build.py's BOARDS (the website's
             # flasher cards) and `stage_ota_all` walks OTA_IMAGES, which are two
-            # lists and not one. They happen to name the same four boards today
+            # lists and not one. They happen to name the same boards today
             # -- they did NOT for the few hours between the Zero becoming a
             # build target and its card landing, which is when this branch was
             # written. Bailing on an empty `staged` would throw away a perfectly

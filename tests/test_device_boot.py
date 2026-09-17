@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from board_source import runtime_text, wiring_chain
+
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
@@ -70,10 +72,18 @@ class FakeComp:
         self.flushes += 1
 
 
+class FakePlayer:
+    """The one thing the loop asks the Player: the cart's tick period, 0 when
+    no game is paced (#217)."""
+
+    def __init__(self, tick_ms=0):
+        self.tick_ms = tick_ms
+
+
 class FakeWs:
-    def __init__(self, frames=0, cap=60):
+    def __init__(self, frames=0, tick_ms=0):
         self._frames_drawn = frames
-        self._cap = cap
+        self.player = FakePlayer(tick_ms)
         self.armed = 0
         self.announced = 0
 
@@ -82,9 +92,6 @@ class FakeWs:
 
     def announce_update(self):
         self.announced += 1
-
-    def frame_cap_fps(self):
-        return self._cap
 
 
 class FakeStore:
@@ -116,8 +123,8 @@ class FakeStore:
     def embedded_floor(self, seed):
         return [dict(c) for c in seed]
 
-    def scan(self, root):
-        self.calls.append(("scan", root))
+    def scan(self, root, src=True):
+        self.calls.append(("scan", root, src))
         return list(self.carts)
 
 
@@ -378,6 +385,49 @@ def test_the_lua_status_can_be_routed_to_a_boards_own_log():
     assert lines == ["lua runtime ABSENT"]
 
 
+# -- the internal-SRAM census -------------------------------------------------
+
+
+def test_the_sram_census_names_its_four_stages_in_boot_order(monkeypatch):
+    """One census, every board (#66/#67, 2026-09-08).
+
+    It was four hand-placed calls in the T-Deck's `run_desktop` and nowhere
+    else, so the one question a Lua cart's PSRAM fallback raises -- who took
+    the internal SRAM, and at which stage -- could be asked only on the board
+    that happened to have the calls. The deltas between the lines are the
+    whole point: any single line is a number without an owner.
+    """
+    seen = []
+    monkeypatch.setattr(device_boot, "sram_census", seen.append)
+    boot, _, _ = _boot()
+
+    boot.load_carts(FakeStore(), [{"title": "s"}])
+    boot.lua_runtime(FakeWs())
+    boot.start_frames(FakeWs())
+
+    assert seen == ["rd-entry", "carts", "console", "desktop-up"]
+
+
+def test_a_store_that_fails_still_weighs_the_heap_the_scan_fragmented(monkeypatch):
+    """`carts` is the reading the scan is measured BY, so it has to survive the
+    scan failing -- a board that fell back to its embedded carts is exactly the
+    one whose heap someone is about to ask about."""
+    seen = []
+    monkeypatch.setattr(device_boot, "sram_census", seen.append)
+    boot, _, _ = _boot()
+
+    boot.load_carts(FakeStore(raise_on="ensure_dirs"), [{"title": "b"}])
+
+    assert seen == ["rd-entry", "carts"]
+
+
+def test_the_census_is_a_no_op_off_board():
+    """The host has one region and no `device_util` staged, so the fallback has
+    to be callable and silent -- every board method above calls it
+    unconditionally."""
+    assert device_boot.sram_census("anything") is None
+
+
 # -- the OTA verdict + confirm ------------------------------------------------
 
 
@@ -490,54 +540,44 @@ def test_dt_is_seconds_and_clamped_so_a_hitch_cannot_teleport_a_cart():
 
 def test_a_frame_inside_its_budget_sleeps_the_remainder():
     pump = _pump()
-    assert pump.pace(FakeWs(cap=60), 5) == 11      # 16ms slot
+    assert pump.pace(FakeWs(), 5) == 11            # 16ms slot
     assert pump.debt == 0
 
 
-def test_a_running_game_paces_to_its_own_cadence_never_faster_than_the_cap():
+def test_a_paced_game_never_sleeps_and_still_publishes_its_tick_as_the_slot():
+    """#217: the Player's scheduler places ticks on the cart's own clock, so
+    the loop must not quantize them onto a sleep grid -- and the slot the
+    budgets are cut from is the cart's tick, not the loop cap."""
     pump = _pump(cap=60)
-    # #63: a GAME locks to 30 (the SNES rule -- a locked 30 beats a 38-55 swing)
-    assert pump.pace(FakeWs(cap=30), 10) == 23
-    # ...and a cart that asks for MORE than the loop cap still gets the cap.
-    assert pump.pace(FakeWs(cap=120), 2) == 14
+    assert pump.pace(FakeWs(tick_ms=33), 10) == 0
+    assert pump.slot == 33
+    assert pump.pace(FakeWs(tick_ms=33), 50) == 0     # an overrun accrues no debt
+    assert pump.debt == 0
+    # ...and a 60Hz cart's tick is never a slot FASTER than the loop cap.
+    assert pump.pace(FakeWs(tick_ms=16), 2) == 0
+    assert pump.slot == 16
+    # Back on a console screen the cap paces again, with no debt carried over.
+    assert pump.pace(FakeWs(), 4) == 12
 
 
 def test_pacing_never_kills_the_loop_when_the_console_throws():
-    class Broken(FakeWs):
-        def frame_cap_fps(self):
-            raise ValueError("no wm")
+    class Broken:
+        @property
+        def player(self):
+            raise ValueError("no player")
 
     assert _pump(cap=60).pace(Broken(), 4) == 12    # falls back to the loop cap
 
 
-def test_the_frameskip_pair_lands_on_cadence_instead_of_overshooting():
-    """#77's celeste measurement, as arithmetic.
-
-    A per-frame clamp can only slow FAST frames. With frameskip on and a full
-    frame at 50ms against a 33ms budget, the padded skip frame made the PAIR
-    83ms -- the game 20% slow at 12fps, worse on both axes than no skip at all.
-    The debt makes the pair 50 + 16 = 66ms, i.e. two 30fps slots: true 30Hz
-    logic, an even 15fps of render.
-    """
-    pump = _pump(cap=60)
-    ws = FakeWs(cap=30)                    # frameskip implies the 30 cap
-
-    assert pump.pace(ws, 50) == 0          # the full frame overruns
-    assert pump.debt == 50 - 33
-    assert pump.pace(ws, 16) == 0          # the skip frame pays the debt down
-    assert pump.debt == 0
-    # 50 + 16 = 66ms for the pair == two 33ms slots, which is the whole claim.
-
-
 def test_the_debt_is_capped_at_one_pair_so_a_real_hitch_is_not_repaid_forever():
     pump = _pump(cap=60)
-    ws = FakeWs(cap=30)
+    ws = FakeWs()
     pump.pace(ws, 300)                     # a 200ms+ GC collect
-    assert pump.debt == 2 * 33, "unpayable: just run flat out"
+    assert pump.debt == 2 * 16, "unpayable: just run flat out"
     # Repaid within a couple of frames rather than eating a second of sleeps.
     assert pump.pace(ws, 0) == 0
     assert pump.pace(ws, 0) == 0
-    assert pump.pace(ws, 0) == 33 - 0
+    assert pump.pace(ws, 0) == 16 - 0
 
 
 def test_the_debt_is_inert_while_frames_fit_their_budget():
@@ -548,7 +588,7 @@ def test_the_debt_is_inert_while_frames_fit_their_budget():
     identical to the plain clamp it replaced.
     """
     pump = _pump(cap=60)
-    ws = FakeWs(cap=60)
+    ws = FakeWs()
     for elapsed in (0, 3, 8, 15, 16):
         expect = 16 - elapsed if elapsed < 16 else 0
         assert pump.pace(ws, elapsed) == expect
@@ -577,12 +617,20 @@ def test_the_tail_is_harmless_on_a_build_with_no_ota():
 # -- both boards drive the same spine ----------------------------------------
 
 
-def _run_desktop(path):
+def _fn(path, name):
     src = path.read_text(encoding="utf-8")
     for node in ast.walk(ast.parse(src, filename=str(path))):
-        if isinstance(node, ast.FunctionDef) and node.name == "run_desktop":
+        if isinstance(node, ast.FunctionDef) and node.name == name:
             return node
-    raise AssertionError("%s has no run_desktop()" % path)
+    raise AssertionError("%s has no %s()" % (path, name))
+
+
+def _boot_body(path):
+    """The function that runs a board's boot: the LAST link of its delegation
+    chain (the shared spine's `build_desktop`), since the board's own
+    run_desktop is the arguments, not the boot."""
+    spine, name = wiring_chain(path)[-1]
+    return _fn(spine, name)
 
 
 def _calls_on(fn, receiver):
@@ -603,55 +651,76 @@ def _calls_on(fn, receiver):
     return out
 
 
-BOARDS = {"tdeck": TDECK / "moy_runtime.py", "p4": P4 / "moy_runtime.py"}
+GUITION = ROOT / "firmware" / "guition_jc3248w535" / "modules"
+GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c" / "modules"
+BOARDS = {"tdeck": TDECK / "moy_runtime.py", "p4": P4 / "moy_runtime.py",
+          "guition": GUITION / "moy_runtime.py",
+          "guition_p4": GUITION_P4 / "moy_runtime.py"}
+SPINE = ROOT / "device" / "desktop_spine.py"
 
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_each_board_imports_the_shared_spine(board):
-    src = BOARDS[board].read_text(encoding="utf-8")
-    line = [l for l in src.splitlines()
-            if l.startswith("from device_boot import")]
-    assert line, "%s does not import the shared spine" % board
-    for name in ("DeviceBoot", "FramePump", "FrameLoop"):
-        assert name in line[0], "%s does not import %s" % (board, name)
+    src = runtime_text(BOARDS[board])
+    lines = [l for l in src.splitlines()
+             if l.startswith("from device_boot import")]
+    assert lines, "%s does not import the shared spine" % board
+    # One import line somewhere down the chain carries all three (a board's
+    # own module may import a single verb from the spine beside it).
+    assert any(all(name in l for name in ("DeviceBoot", "FramePump",
+                                          "FrameLoop")) for l in lines), (
+        "%s does not import DeviceBoot/FramePump/FrameLoop: %s" % (board, lines))
     # The staged name is flat (`device_boot`), never the host package path --
     # there is no `runtime` package on a board.
     assert "from runtime.device_boot" not in src
 
 
-def test_both_boards_run_the_boot_steps_in_ONE_order():
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_board_takes_the_one_boot_body(board):
     """The invariant Phase 4 buys, stated as a test.
 
-    Two boards, one console: the difference between their boots should be
-    HARDWARE (an esp_lcd strip flush vs a DPI scan-out, a trackball vs BLE HID),
-    never the order in which the shared steps happen or whether one of them
-    happens at all. When this fails, read the diff before changing the test --
-    either a board grew a real reason to reorder, or a step went missing from
-    one of them, which is the failure this whole phase exists to make loud.
+    Four boards, one console: the difference between their boots should be
+    HARDWARE (an esp_lcd strip flush vs a DPI scan-out, a trackball vs BLE
+    HID), never the order in which the shared steps happen or whether one of
+    them happens at all. So the boot body is ONE function, every board's
+    chain ends in it, and a board's own run_desktop makes no boot step of its
+    own beside it.
     """
-    seqs = {name: [m for m, _ in _calls_on(_run_desktop(path), "boot")]
-            for name, path in BOARDS.items()}
-    assert seqs["tdeck"] == seqs["p4"], seqs
-    assert seqs["tdeck"] == ["note", "note", "load_carts", "note",
-                             "lua_runtime", "start_frames"], seqs["tdeck"]
+    chain = wiring_chain(BOARDS[board])
+    assert chain[-1] == (SPINE, "build_desktop"), (board, chain)
+    own = _fn(BOARDS[board], "run_desktop")
+    assert _calls_on(own, "boot") == [], (
+        "%s: run_desktop drives boot steps beside the shared spine" % board)
+
+
+def test_the_boot_steps_run_in_ONE_order():
+    """...and the order itself, pinned where it lives. When this fails, read
+    the diff before changing the test -- either a board grew a real reason to
+    reorder, or a step went missing, which is the failure this whole phase
+    exists to make loud."""
+    seq = [m for m, _ in _calls_on(_fn(SPINE, "build_desktop"), "boot")]
+    assert seq == ["note", "note", "load_carts", "note",
+                   "lua_runtime", "start_frames"], seq
 
 
 def test_both_boards_pump_the_frame_the_same_way():
     """Since #202 Phase B the pump is driven by the SHARED FrameLoop
     (device_boot), whose begin -> tail -> pace order the FrameLoop tests below
     pin directly -- so the per-board claim inverts: a board's run_desktop must
-    CONSTRUCT the loop and must not drive the pump itself (a board that calls
-    pump.begin beside the loop is running two cadences)."""
+    not drive the pump itself (a board that calls pump.begin beside the loop
+    is running two cadences), and the loop is constructed ONCE, in the spine."""
     for name, path in BOARDS.items():
-        rd = _run_desktop(path)
-        calls = _calls_on(rd, "pump")
-        assert calls == [], (
-            "%s: run_desktop drives the pump beside the shared loop -- %s"
-            % (name, calls))
-        src_txt = BOARDS[name].read_text(encoding="utf-8")
+        for spine, fname in wiring_chain(path):
+            calls = _calls_on(_fn(spine, fname), "pump")
+            assert calls == [], (
+                "%s: %s drives the pump beside the shared loop -- %s"
+                % (name, spine.name, calls))
+        src_txt = runtime_text(path)
         assert "loop = FrameLoop(" in src_txt, (
             "%s never constructs the shared frame loop" % name)
         assert "loop.run()" in src_txt
+    spine_src = SPINE.read_text(encoding="utf-8")
+    assert spine_src.count("FrameLoop(") == 1
 
 
 def test_the_spine_imports_no_board_module():
@@ -664,8 +733,12 @@ def test_the_spine_imports_no_board_module():
     """
     src = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
+    # `moycore_glue` and `device_util` are device-tier LEAVES, not board
+    # modules: both are staged to every board, neither knows a panel or a pin,
+    # and both are imported behind an ImportError guard with a working
+    # off-board answer. A firmware/ module never belongs here.
     allowed = {"console", "runtime", "chrome", "ticks", "moycore_glue",
-               "perf_line", "time", "gc"}
+               "device_util", "perf_line", "time", "gc"}
     seen = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -882,6 +955,306 @@ def test_frameloop_gate_respects_a_deliberate_blank():
     assert lit == [], "a blanked panel must not be re-lit by the boot gate"
 
 
+# -- the per-stage deadline meters (#210) -------------------------------------
+
+
+class _CapWS:
+    """The two things StageMeters asks a console: the cadence, and the flag."""
+
+    def __init__(self, tick_ms=0, capture=True):
+        self.player = FakePlayer(tick_ms)
+        self.perf_capture = capture
+
+
+def _meters(tick_ms=0, floor_ms=1000 // 60):
+    from runtime import device_boot
+    return device_boot.StageMeters(_CapWS(tick_ms), floor_ms)
+
+
+def test_the_budget_table_is_one_place_and_spends_one_whole_slot():
+    """Budgets are CONFIGURATION and live in exactly one tuple. The shares sum
+    to the slot on purpose: the frame's own 780 against 220 of overhead is the
+    statement that four fifths of every slot is meant to reach the glass."""
+    from runtime import device_boot
+
+    declared = [sh for _n, sh in device_boot.STAGE_BUDGETS if sh is not None]
+    assert sum(declared) == 1000
+    assert device_boot.STAGE_ORDER == tuple(
+        n for n, _sh in device_boot.STAGE_BUDGETS)
+    # The index constants the loop marks with are the table's own positions --
+    # a stage cannot be added without one, and none can silently swap.
+    assert (device_boot._S_INPUTS, device_boot._S_FRAME,
+            device_boot._S_ACCOUNT) == (0, 5, 10)
+    assert len(device_boot.STAGE_ORDER) == 11
+
+
+def test_every_stage_in_the_pinned_order_is_metered_in_that_order():
+    """The companion the order test asked for: the marks are not a second list
+    that can drift from the loop's shape. A measured frame with every hook
+    present closes each stage exactly once, in STAGE_ORDER."""
+    from runtime import device_boot
+
+    class Serial:
+        click = False
+        quit = False
+
+        def poll(self, ws):
+            return False
+
+    class Idle:
+        asleep = False
+
+        def tick(self, now, active, ws, pointer, click):
+            return click
+
+    class Rec(device_boot.StageMeters):
+        def __init__(self, *a, **kw):
+            self.marks = []
+            device_boot.StageMeters.__init__(self, *a, **kw)
+
+        def mark(self, i):
+            self.marks.append(device_boot.STAGE_ORDER[i])
+            device_boot.StageMeters.mark(self, i)
+
+    r = _Rec(serial=Serial(), idle=Idle())
+    r.ws.perf_capture = True
+    lp = r.loop()
+    lp.meters = Rec(r.ws)
+    lp.step()
+    assert tuple(lp.meters.marks) == device_boot.STAGE_ORDER
+
+
+def test_the_loop_stamps_the_meters_on_the_console_for_state_to_find():
+    r = _Rec()
+    lp = r.loop()
+    assert r.ws.stage_meters is lp.meters
+
+
+def test_a_stage_over_budget_counts_a_miss_and_lifts_the_max(monkeypatch):
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    i = device_boot.STAGE_ORDER.index("inputs")
+    budget = m.budget[i]
+    assert budget == 16 * 1000 * 60 // 1000
+
+    m.start(m.slot_ms)
+    clock[0] += budget                      # exactly ON budget is not a miss
+    m.mark(i)
+    assert (m.misses[i], m.max[i], m.last[i]) == (0, budget, budget)
+
+    m.start(m.slot_ms)
+    clock[0] += budget + 1
+    m.mark(i)
+    assert m.misses[i] == 1 and m.max[i] == budget + 1
+
+    m.start(m.slot_ms)
+    clock[0] += 1                           # a fast frame keeps the high water
+    m.mark(i)
+    assert m.misses[i] == 1 and m.max[i] == budget + 1 and m.last[i] == 1
+    rep = m.report()["inputs"]
+    assert rep == {"budget_us": budget, "avg_us": (budget + budget + 1 + 1) // 3,
+                   "last_us": 1, "max_us": budget + 1, "misses": 1, "n": 3}
+
+
+def test_the_frame_that_launched_the_cart_is_not_a_frame_of_the_cart(
+        monkeypatch):
+    """reset() drops the samples AND the rest of its own frame. The frame that
+    calls it is the one that read the cart off the card and built its machine;
+    its remaining stages are hundreds of ms landing in a window of hundreds of
+    frames, and they land in the very field the class says to attribute with.
+    Measured 2026-09-11: `dev` read 12.9ms a loop under moss moss and 1.6ms
+    under Star Catcher -- one launch, divided by each cart's frame count, and it
+    reads as a per-frame cost that scales with the cart."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    dev = device_boot.STAGE_ORDER.index("dev")
+    inp = device_boot.STAGE_ORDER.index("inputs")
+
+    m.start(m.slot_ms)
+    clock[0] += 200
+    m.mark(inp)
+    m.reset()                               # the cart started, mid-frame
+    clock[0] += 900000                      # ... and loading it cost 0.9s
+    m.mark(dev)
+    assert m.report()["dev"]["n"] == 0, "the launch is not a sample of the run"
+
+    for _ in range(3):                      # the run's own frames, from here
+        m.start(m.slot_ms)
+        clock[0] += 300
+        m.mark(dev)
+    rep = m.report()["dev"]
+    assert (rep["n"], rep["avg_us"], rep["max_us"]) == (3, 300, 300)
+
+
+def test_a_stage_with_no_declared_budget_reports_None_and_never_zero(monkeypatch):
+    """`tail` is where poll_webhost runs and a browser pulling the console
+    bundle owns the frame it lands in -- there is no deadline, so there is no
+    miss count. 0 would read as a stage that always makes its deadline."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    i = device_boot.STAGE_ORDER.index("tail")
+    assert m.budget[i] is None
+    m.start(m.slot_ms)
+    clock[0] += 900000                      # 0.9s: a whole asset transfer
+    m.mark(i)
+    rep = m.report()["tail"]
+    assert rep["budget_us"] is None and rep["misses"] is None
+    assert rep["last_us"] == 900000 and rep["n"] == 1
+
+
+def test_a_stage_this_board_has_no_hook_for_is_never_sampled():
+    """The absence rule, at the stage level: a board with no dev channel and no
+    idle blank has no such stage, and every measured field reads None rather
+    than a 0 that would say the stage ran and cost nothing."""
+    r = _Rec()                               # no serial, no idle
+    r.ws.perf_capture = True
+    lp = r.loop()
+    lp.step()
+    rep = lp.meters.report()
+    for absent in ("dev", "idle"):
+        assert rep[absent]["n"] == 0
+        assert rep[absent]["last_us"] is None
+        assert rep[absent]["max_us"] is None
+        assert rep[absent]["misses"] is None
+        assert rep[absent]["budget_us"] is not None   # declared, just unfilled
+    assert rep["frame"]["n"] == 1 and rep["frame"]["last_us"] is not None
+
+
+def test_the_meters_stay_asleep_until_perf_capture_arms_them():
+    """Gated like every other frame-eater (#68 keeps them off for a kid). Off,
+    the loop never reads the microsecond clock at all."""
+    r = _Rec()
+    lp = r.loop()
+    lp.step()
+    assert all(v["n"] == 0 for v in lp.meters.report().values())
+    r.ws.perf_capture = True
+    lp.step()
+    assert lp.meters.report()["frame"]["n"] == 1
+
+
+def test_the_budgets_are_cut_from_the_pacing_slot_and_follow_it():
+    """A paced 30Hz game halves the cadence, so every stage's allowance doubles.
+    Cutting budgets from a constant would make one of the two cadences a
+    permanent miss, which is a broken meter with extra steps."""
+    from runtime import device_boot
+
+    fast = _meters()
+    assert fast.slot_ms == 16
+    assert fast.budget[device_boot._S_FRAME] == 16 * 1000 * 780 // 1000
+
+    fast.start(33)                           # what pace() slotted this frame
+    assert fast.slot_ms == 33
+    assert fast.budget[device_boot._S_FRAME] == 33 * 1000 * 780 // 1000
+    assert fast.budget[device_boot._S_TAIL] is None
+
+
+def test_the_pump_publishes_the_slot_the_budgets_are_cut_from(monkeypatch):
+    """One author for the cadence: pace() derives the slot and the budgets read
+    what it derived, so a cart that changes the cadence cannot be judged
+    against the one it replaced."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    assert pump.slot == 16
+    pump.pace(_CapWS(33), 5)
+    assert pump.slot == 33
+    pump.pace(_CapWS(8), 5)                  # never a slot FASTER than the cap
+    assert pump.slot == 16
+
+
+def test_reset_drops_every_sample_but_keeps_the_declarations(monkeypatch):
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    i = device_boot._S_INPUTS
+    for _ in range(3):
+        m.start(m.slot_ms)
+        clock[0] += m.budget[i] + 5
+        m.mark(i)
+    assert m.report()["inputs"]["misses"] == 3
+    m.reset()
+    rep = m.report()["inputs"]
+    assert rep == {"budget_us": m.budget[i], "avg_us": None, "last_us": None,
+                   "max_us": None, "misses": None, "n": 0}
+
+
+def test_stage_meters_report_a_rolling_mean_of_each_stage(monkeypatch):
+    """#210's attribution field. `last_us` is one arbitrary frame and `max_us`
+    the run's worst GC; the mean is the only one of the three that says where
+    the frame GOES."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    for us in (100, 200, 300, 400):
+        m.start(m.slot_ms)
+        clock[0] += us
+        m.mark(device_boot._S_INPUTS)
+    r = m.report()
+    assert r["inputs"]["avg_us"] == 250 and r["inputs"]["last_us"] == 400
+    # A stage nothing sampled is None, never the 0 a broken meter also reads.
+    assert r["pace"]["avg_us"] is None
+    m.reset()
+    assert m.report()["inputs"]["avg_us"] is None
+
+
+def test_the_rolling_sum_halves_instead_of_growing_a_bignum(monkeypatch):
+    """The accumulator must stay a 30-bit small int forever: one that walks
+    past it allocates a bignum on every frame, which is a meter paying for
+    itself in exactly the pathology it exists to find. Halving the count with
+    it keeps the mean across the fold."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    i = device_boot._S_INPUTS
+    step = 20000                       # a fat frame stage, in us
+    m.total[i] = device_boot._MEAN_CAP - step // 2
+    m.seen[i] = m.total[i] // step
+    m.start(m.slot_ms)
+    clock[0] += step
+    m.mark(i)
+    assert m.total[i] <= device_boot._MEAN_CAP
+    assert m.total[i] < (1 << 30)      # still a small int under REPR_C
+    assert abs(m.report()["inputs"]["avg_us"] - step) <= step // 100
+    # ...and the lifetime count the miss ratio is read against is NOT halved.
+    assert m.n[i] == 1
+
+
+def test_a_cart_start_and_a_cart_exit_each_reset_the_meters(tmp_path):
+    """#210's pollution rule, on the real Player: a run's misses are its own
+    and the desk does not inherit them."""
+    from ws_helpers import build_ws
+    from runtime import device_boot
+
+    ws = build_ws(tmp_path)
+    ws.stage_meters = device_boot.StageMeters(ws)
+    m = ws.stage_meters
+    m.n[device_boot._S_FRAME] = 7
+    m.misses[device_boot._S_FRAME] = 3
+    ws.player._reset_stage_meters()
+    assert m.n[device_boot._S_FRAME] == 0 and m.misses[device_boot._S_FRAME] == 0
+    # ...and both call sites are wired, not just the helper.
+    src = (ROOT / "runtime" / "player.py").read_text(encoding="utf-8")
+    assert src.count("self._reset_stage_meters()") == 2
+
+
 # -- FramePump slack: sleep-overshoot feedback (#202, 2026-08-17) -------------
 
 
@@ -899,8 +1272,7 @@ def test_pump_slack_converges_on_a_constant_sleep_overshoot(monkeypatch):
     monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
-        def frame_cap_fps(self):
-            return 60
+        pass
 
     pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
@@ -931,8 +1303,7 @@ def test_pump_slack_stays_zero_on_exact_sleeps(monkeypatch):
     monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
-        def frame_cap_fps(self):
-            return 60
+        pass
 
     pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
@@ -957,8 +1328,7 @@ def test_pump_slack_never_charges_a_hitch(monkeypatch):
     monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
-        def frame_cap_fps(self):
-            return 60
+        pass
 
     pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
@@ -983,8 +1353,7 @@ def test_pump_slack_recovers_after_swallowing_the_whole_sleep(monkeypatch):
     monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
-        def frame_cap_fps(self):
-            return 60
+        pass
 
     pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
@@ -1026,6 +1395,7 @@ PERF_BOARDS = {
     "tdeck": (TDECK, False),
     "p4": (P4, True),
     "guition": (ROOT / "firmware" / "guition_jc3248w535" / "modules", False),
+    "guition_p4": (GUITION_P4, True),
 }
 
 # The console meters + loop accumulators one sample was taken from, per board,
@@ -1051,30 +1421,31 @@ PERF_CASES = {
          "chrome": 33.0, "wmr": 28, "wmw": 1, "wms": 0,
          "ppa": (0, 0, 0, 0, 0), "fence_ms": 0.0, "gfence_ms": 0.0,
          "home": None},
-        "PERF cart=- fps=0/62 net=- busy=2ms draw=33 flush=1 logic=0 render=0 "
-        "chrome=33 wmr=28 wmw=1 wms=0 ppa=0/0/0/0/0 fence_ms=0.0 "
-        "gfence_ms=0.0 home=-"),
+        "PERF cart=- fps=0/62 net=- tick=- miss=- busy=2ms draw=33 flush=1 "
+        "logic=0 render=0 chrome=33 wmr=28 wmw=1 wms=0 ppa=0/0/0/0/0 "
+        "fence_ms=0.0 gfence_ms=0.0 home=-"),
     "guition": (
         {"cart": None, "fps": (0, 61), "net": None, "busy": 4,
          "draw": 72.0, "flush": 0.0, "logic": 0.0, "render": 0.0,
          "chrome": 72.0, "home": None},
-        "PERF cart=- fps=0/61 net=- busy=4ms draw=72 flush=0 logic=0 render=0 "
-        "chrome=72 wmr=- wmw=- wms=- ppa=- fence_ms=- gfence_ms=- home=-"),
+        "PERF cart=- fps=0/61 net=- tick=- miss=- busy=4ms draw=72 flush=0 "
+        "logic=0 render=0 chrome=72 wmr=- wmw=- wms=- ppa=- fence_ms=- "
+        "gfence_ms=- home=-"),
     "tdeck": (
         {"cart": "Sakura Lua", "fps": (53, 55), "net": None, "busy": 18,
          "draw": 14.0, "flush": 0.0, "logic": 3.0, "render": 9.0,
          "chrome": 2.0, "home": None},
-        "PERF cart=Sakura_Lua fps=53/55 net=- busy=18ms draw=14 flush=0 "
-        "logic=3 render=9 chrome=2 wmr=- wmw=- wms=- ppa=- fence_ms=- "
+        "PERF cart=Sakura_Lua fps=53/55 net=- tick=- miss=- busy=18ms draw=14 "
+        "flush=0 logic=3 render=9 chrome=2 wmr=- wmw=- wms=- ppa=- fence_ms=- "
         "gfence_ms=- home=-"),
     "p4_dark": (
         {"cart": None, "fps": (0, 62), "net": None, "busy": 2,
          "draw": 33.0, "flush": 1.0, "logic": 0.0, "render": 0.0,
          "chrome": 33.0, "ppa": (0, 0, 0, 0, 0), "fence_ms": 0.0,
          "gfence_ms": 0.0, "home": None},
-        "PERF cart=- fps=0/62 net=- busy=2ms draw=33 flush=1 logic=0 render=0 "
-        "chrome=33 wmr=- wmw=- wms=- ppa=0/0/0/0/0 fence_ms=0.0 "
-        "gfence_ms=0.0 home=-"),
+        "PERF cart=- fps=0/62 net=- tick=- miss=- busy=2ms draw=33 flush=1 "
+        "logic=0 render=0 chrome=33 wmr=- wmw=- wms=- ppa=0/0/0/0/0 "
+        "fence_ms=0.0 gfence_ms=0.0 home=-"),
 }
 
 # Every column populated and every value DISTINCT: the captures above are idle
@@ -1082,13 +1453,14 @@ PERF_CASES = {
 # one, nor `%.0f` from `%d`. Each rounding here is one a plain int cast gets
 # wrong, and the cart title carries a space the tokeniser must not see.
 PERF_LOUD = (
-    {"cart": "Brick Siege", "fps": (20, 31), "net": 30, "busy": 8,
+    {"cart": "Brick Siege", "fps": (20, 31), "net": 30, "tick": (60, 2),
+     "miss": 3, "busy": 8,
      "draw": 3.6, "flush": 1.4, "logic": 5.4, "render": 12.7, "chrome": 2.2,
      "wmr": 7, "wmw": 8, "wms": 9, "ppa": (1, 2, 3, 4, 0),
      "fence_ms": 2.5, "gfence_ms": 0.7, "home": (3, 4, 1)},
-    "PERF cart=Brick_Siege fps=20/31 net=30 busy=8ms draw=4 flush=1 logic=5 "
-    "render=13 chrome=2 wmr=7 wmw=8 wms=9 ppa=1/2/3/4/0 fence_ms=2.5 "
-    "gfence_ms=0.7 home=3/4/1")
+    "PERF cart=Brick_Siege fps=20/31 net=30 tick=60/2 miss=3 busy=8ms draw=4 "
+    "flush=1 logic=5 render=13 chrome=2 wmr=7 wmw=8 wms=9 ppa=1/2/3/4/0 "
+    "fence_ms=2.5 gfence_ms=0.7 home=3/4/1")
 
 
 @pytest.mark.parametrize("case", sorted(PERF_CASES))
@@ -1219,6 +1591,38 @@ def test_the_sampler_measures_the_P4s_captured_idle_line(monkeypatch):
     assert out == [PERF_CASES["p4"][1]]
 
 
+def test_a_wm_column_answers_once_and_then_says_it_measured_nothing(
+        monkeypatch):
+    """The wm columns are TAKEN, not read. `wm_windowed` stamps them from inside
+    its layers, and a fullscreen cart runs a different WM -- so a bare read
+    reprints the last desktop value under every cart forever. Both P4s reported
+    `wmw=46` for carts whose frames differed by 8x (2026-09-11) and it was taken
+    for a fixed window-manager tax. The second sample here is the one that
+    matters: nothing wrote, so nothing is claimed."""
+    _clock(monkeypatch)
+    ws = PerfWs(meters={"_draw_ms": 72.0, "_flush_ms": 0.0, "_upd_ms": 0.0,
+                        "_cart_ms": 0.0, "_chrome_ms": 72.0,
+                        "_pf_wm_restore": 28, "_pf_wm_windows": 46,
+                        "_pf_wm_stamp": 3})
+    out = []
+    s = device_boot.PerfSampler(ws, emit=out.append)
+    _drive(monkeypatch, s, ws, 122, 4, 0)
+    assert " wmr=28 wmw=46 wms=3 " in out[0]
+    # ... and the WM has not drawn since.
+    _drive(monkeypatch, s, ws, 122, 4, 0)
+    assert " wmr=- wmw=- wms=- " in out[1]
+    # A board that never had them never grows them: the absence doctrine one
+    # level up (tests/test_console_facade.py holds these names off a host
+    # console) must survive a sampler that clears.
+    bare = PerfWs(meters={"_draw_ms": 72.0, "_flush_ms": 0.0, "_upd_ms": 0.0,
+                          "_cart_ms": 0.0, "_chrome_ms": 72.0})
+    out2 = []
+    _drive(monkeypatch, device_boot.PerfSampler(bare, emit=out2.append),
+           bare, 122, 4, 0)
+    assert " wmr=- wmw=- wms=- " in out2[0]
+    assert not hasattr(bare, "_pf_wm_windows")
+
+
 def test_a_board_with_no_overlap_source_reports_the_PPA_columns_absent(
         monkeypatch):
     """The S3 boards pass no `overlap`, and that is the whole of their
@@ -1307,6 +1711,40 @@ def test_the_sampler_emits_once_per_period_and_never_once_per_frame(frames,
         assert len(out) == period + 1, out
 
 
+class _FakeSched:
+    """The Player's scheduler, as the sampler reads it (#217)."""
+
+    def __init__(self, rate=30, div=1, misses=0):
+        self.rate, self.div, self.misses = rate, div, misses
+
+
+class _FakePlayer:
+    def __init__(self, sched, tick_ms=33):
+        self.sched, self.tick_ms = sched, tick_ms
+
+
+def test_a_new_carts_misses_count_from_its_own_scheduler(monkeypatch):
+    """`miss=` is a DELTA over one sample, and every cart start builds a NEW
+    scheduler counting from zero -- so a baseline taken from the previous
+    cart's total reported a NEGATIVE miss in the first sample of each run.
+    Measured on the Guition (`tick=60/1 miss=-424`, 2026-09-05), which is what
+    a `run` straight after an `exit` does: no sample lands at the launcher in
+    between, so the else-branch never clears the baseline."""
+    _clock(monkeypatch)
+    out = []
+    ws = PerfWs()
+    ws.player = _FakePlayer(_FakeSched(rate=60, div=1, misses=424))
+    s = device_boot.PerfSampler(ws, emit=out.append)
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    assert parse_perf(out[-1])["miss"] == 424.0
+
+    ws.player.sched = _FakeSched(rate=30, div=1, misses=2)     # the next cart
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    got = parse_perf(out[-1])
+    assert got["tick"] == (30.0, 1.0)
+    assert got["miss"] == 2.0
+
+
 def test_the_meters_follow_PERF_DIAG_live(monkeypatch):
     """Settings -> PERF DIAG (#68) arms the deep meters, and flipping it must
     need no reboot. The BOOT arm stays in each run_desktop (a service
@@ -1325,15 +1763,31 @@ def test_the_meters_follow_PERF_DIAG_live(monkeypatch):
 
 
 def _perf_call(board):
-    """The board's `PerfSampler(...)` construction, as AST. Static because these
-    modules import `machine`; the emitter they hand it to is executed above."""
+    """The `PerfSampler(...)` construction a board's boot reaches, as AST.
+    Static because these modules import `machine`; the emitter they hand it
+    to is executed above."""
     path = PERF_BOARDS[board][0] / "moy_runtime.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = ast.parse(runtime_text(path))
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == "PerfSampler"):
             return node
     raise AssertionError("%s constructs no PerfSampler" % path)
+
+
+def _supplied_down_the_chain(board, keyword):
+    """Does any link of the board's delegation chain hand `keyword=` to the
+    next link? The spine constructs the one sampler; what a board passes it
+    is read off the calls between the links."""
+    chain = wiring_chain(PERF_BOARDS[board][0] / "moy_runtime.py")
+    for (path, fname), (_nxt, nname) in zip(chain, chain[1:]):
+        src = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(src)):
+            if (isinstance(node, ast.Call)
+                    and getattr(node.func, "id", None) == nname
+                    and any(k.arg == keyword for k in node.keywords)):
+                return True
+    return False
 
 
 @pytest.mark.parametrize("board", sorted(PERF_BOARDS))
@@ -1342,14 +1796,14 @@ def test_every_board_emits_through_the_one_sampler(board):
     shapes; a fourth board would have copied one of them. `FrameLoop.account` is
     the home -- it runs after pace, which is where frame accounting belongs."""
     path = PERF_BOARDS[board][0] / "moy_runtime.py"
-    src = path.read_text(encoding="utf-8")
+    src = runtime_text(path)
     # A FORMAT is a string literal starting "PERF " -- AST, so the prose about
     # why this rule exists does not satisfy the rule. `diag.ring("PERF", ...)`
     # passes the ring's TAG, which has no trailing space and is not a format.
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             assert not node.value.startswith("PERF "), (board, node.value)
-    assert "PerfSampler(" in src and "_perf.account" in src, board
+    assert "PerfSampler(" in src and "perf.account" in src, board
 
 
 @pytest.mark.parametrize("board", sorted(PERF_BOARDS))
@@ -1359,8 +1813,8 @@ def test_only_the_board_with_a_PPA_declares_an_overlap_source(board):
     The windowed-WM columns need no argument -- wm_windowed stamps them on the
     Workstation and a board that does not stage it never has them, so the
     getattr IS the capability probe."""
+    assert _supplied_down_the_chain(board, "overlap") is PERF_BOARDS[board][1], board
     kw = {k.arg for k in _perf_call(board).keywords}
-    assert ("overlap" in kw) is PERF_BOARDS[board][1], (board, sorted(kw))
     assert not (kw - {"overlap", "emit"}), \
         "%s declares per-board FIELDS again: %s" % (board, sorted(kw))
 
@@ -1384,7 +1838,7 @@ def test_the_T_Deck_still_rings_its_samples_for_the_offline_log():
 # -- the two shared frame-loop verbs, EXECUTED (#208 rank 5) --------------------
 #
 # `apply_touch` and `poll_webhost` are shared by all three boards and were
-# asserted only as source STRINGS in test_micropython_spike.py -- the shape #208
+# asserted only as source STRINGS in the T-Deck spike suite -- the shape #208
 # exists to stop. The routing greps there stay (a board must still CALL them);
 # what runs here is the body.
 
@@ -1560,3 +2014,13 @@ def test_a_failing_poll_still_reports_the_time_it_burned(monkeypatch):
             raise OSError(104)
 
     assert device_boot.poll_webhost(_WSWeb(_SlowBoom())) == 12
+
+
+def test_a_compound_perf_field_renders_an_absent_component_as_a_dash():
+    # A compositor that cannot measure one slot reports None there; the line
+    # keeps its siblings' numbers and the reader gets None back, never 0.
+    from runtime.perf_line import format_perf, parse_perf
+    line = format_perf({"ppa": (1, None, 2, 3, 0), "fence_ms": None})
+    assert "ppa=1/-/2/3/0" in line and "fence_ms=-" in line
+    got = parse_perf(line)
+    assert got["ppa"] == (1.0, None, 2.0, 3.0, 0.0) and got["fence_ms"] is None

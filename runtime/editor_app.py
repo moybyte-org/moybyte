@@ -87,6 +87,13 @@ _ZONE_TABS = (
 )
 _ZONE_STRIDE = _BAR_ICON        # 0-gap ladder (#88) -- see the block comment above
 
+# The tabs save_current() can route a commit to, derived from the ladder rather
+# than listed a second time. The sentinels (PROJECTS/UNDO/REDO) and PLAY (None)
+# are actions; "theme" is the EDIT-ICONS reuse of the paint renderer and commits
+# through its own leave, so it is not a tab here either.
+COMMIT_TABS = tuple(t for t, _g in _ZONE_TABS
+                    if isinstance(t, str) and not t.startswith("\x00"))
+
 # The SHELF-density zone (visual identity v1 Phase 3, the Studio mockup): the six
 # tabs as LABELED chips (icon + name) via ui.tab_row, PROJECTS as an icon chip on
 # the left, PLAY a labeled button on the right (SAVE dropped, #111). The 320x240
@@ -100,6 +107,20 @@ _TAB_CHIPS = (
     ("scene", "SCENE", "scene"),
     ("music", "MUSIC", "music"),
 )
+
+# The `ws` attribute holding each tab's layout owner -- the object whose
+# `relayout(w, h, fs, cs)` rebuilds that tab's geometry from the live canvas
+# (EditorApp._relayout_tab). The Code tab is absent because ws itself owns the
+# CodeLayout handle (see code_layer.py's boundary note); "cards" is here because
+# the Config tab has a layout like any other.
+_TAB_LAYOUT_UI = {
+    "cards": "cards_layer",
+    "blocks": "block_ui",
+    "paint": "paint_layer",
+    "map": "map_ui",
+    "scene": "scene_ui",
+    "music": "music_ui",
+}
 
 try:
     import ui as _ui
@@ -115,10 +136,9 @@ class EditorApp:
     projects `menu_view` onto it. The methods are the old `set_menu_view`/`_open_*`/
     `_leave_menu` bodies, moved verbatim with `self.` data reads left reaching `ws`."""
 
-    def __init__(self, ws, names=None, in_rect=None):
+    def __init__(self, ws, names=None):
         self.ws = ws
         self._NAMES = names
-        self._in = in_rect if in_rect is not None else _in
         self.project = None           # the open cart's workspace (set by open())
         # Stage 4 (#46 zoned bar): bumped whenever the active tab ACTUALLY changes --
         # the ONLY thing that varies in the Editor's lent left zone (which icon is
@@ -163,11 +183,14 @@ class EditorApp:
     def open(self, project):
         """Open the Editor on `project`, landing on the Config tab (spec Section 6):
         the "Make it mine" cards when the cart exposes an edit schema, else the code
-        editor (there are no cards to show). The old Workstation._open_menu."""
+        editor (there are no cards to show). A cart whose MANIFEST is broken lands
+        on Config whatever its (unreadable) schema says: that tab is where the
+        break is reported and where the file that caused it is offered."""
         self.project = project
         ws = self.ws
         ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
-        ws.set_menu_view("cards" if ws.cart.get("edit") else "code")
+        ws.set_menu_view("cards" if (ws.cart.get("edit")
+                                     or ws.cart.get("broken")) else "code")
 
     def open_paint(self):
         ws = self.ws
@@ -248,12 +271,22 @@ class EditorApp:
                                      # (Stage 4, #46: the lent zone's highlight moved)
         if view == "code":
             if ws.editor is None and ws.cart is not None:
-                ws.editor = CodeEditor(ws.cart["src"],
+                # WHICH script (SPEC.md 4, #89): `ws.code_file` is the Code tab's
+                # file and defaults to main, so a one-file cart reads exactly as
+                # it always did. `source_text` is the store's own reader, because
+                # main's text travels as `src` and the others as the two lists.
+                name = ws.code_file_name()
+                ws.editor = CodeEditor(ws.carts_store.source_text(ws.cart, name) or "",
                                        cols=ws.code_layout.cols,
                                        rows=ws.code_layout.rows,
                                        clip=ws.clipboard)
                 ws.code_layer.reset()   # fresh keyboard-edge tracker for the new editor
-                if ws.crash_line is not None:
+                # A crash marker belongs to the FILE that raised. Marking line N
+                # of whichever file happens to be open would put a red line on
+                # somebody else's code -- and on a port the file that raises is
+                # very often not the one the tab opens on.
+                if ws.crash_line is not None \
+                        and (ws.player.crash_file or name) == name:
                     # Opened after a runtime crash -> land on the line that raised.
                     ws._mark_code_error(ws.crash_line - 1,
                                         (ws.cart_error or "crashed")[:32])
@@ -284,10 +317,37 @@ class EditorApp:
             # by the preview AND by the cart on resume. Edits go straight into that
             # bank; a tab-leave/PLAY hard-commit persists it to sounds.json (#111).
             ws.music_ui.build()
+        self._relayout_tab(view)
         ws._set_text_mode(view == "code")
         # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
         # Master". "cards" isn't an editor, so it's ignored by note().
         ws.ach.note("editor", view)
+
+    def _relayout_tab(self, view):
+        """Re-derive the entered tab's geometry from the live canvas.
+
+        Every tab layout is a pure function of (canvas size, effective font scale),
+        but the objects are shared singletons on `ws`, so ANOTHER tab can overwrite
+        one and leave it there. The Blocks+Scene workspace binds `ws.scene_ui.layout`
+        to its right pane (block_editor_ui._layout_workspace) and nothing unbound it,
+        so the Scene tab opened afterwards drew into that pane -- at 800x480/3x a rect
+        of NEGATIVE width, off the right edge (#216). Rebuilding the ENTERED tab's own
+        layout is what makes that whole class impossible instead of fixing one pair:
+        whatever a tab inherits, it re-derives before it draws. It runs after the tab's
+        editor is built, so the clamps inside each `relayout` see the live editor."""
+        ws = self.ws
+        if view == "code":
+            ws._relayout_code()              # ws owns the CodeLayout handle
+            return
+        name = _TAB_LAYOUT_UI.get(view)
+        owner = getattr(ws, name, None) if name else None
+        if owner is not None:
+            # BOTH scales (#203): a tab that re-derived on the font scale alone
+            # would inset for an 18*fs bar and draw under the taller one an
+            # opted-in board actually has.
+            owner.relayout(ws.sys_canvas.w, ws.sys_canvas.h,
+                           ws.look.effective_font_scale(),
+                           ws.look.effective_chrome_scale())
 
     # -- PLAY: commit the tab, then run the cart (spec Section 2/Section 6) ---------
 
@@ -422,12 +482,27 @@ class EditorApp:
                       th["chrome_ink_dim"] if th.get("bar_light")
                       else self._NAMES["dark_blue"], cv)
 
+    def _zone_scale(self):
+        """The scale the shelf zone is laid out on: the FONT scale, which is also
+        what `ui.tab_row`/`ui.button` read off the canvas when they draw into it.
+
+        It used to be derived from the lent rect's height (`rect[3] // 16`), the
+        same number until #203 gave chrome its own scale -- after which the Guition
+        laid the ladder out at cs 2 and DREW it at fs 1, so a tap on the CODE chip
+        opened Blocks. The width stays on the font scale rather than the tap-target
+        one because the zone the bar can lend holds two of the seven chips at cs 2,
+        and the ladder is the only way to reach a tab on a board with no keyboard:
+        a chip that is off the bar cannot be tapped at all. What the chrome scale
+        does give every chip is the band's full HEIGHT, which is the axis a finger
+        aiming at a row of them misses in."""
+        return max(1, self.ws.layout.fs)
+
     def _zone_parts(self, rect):
         """PURE shelf-zone geometry (shared by draw_zone and zone_tap so a strip-
         cached draw and a later tap can't desync): PROJECTS chip | labeled tab row
-        | PLAY, the button right-aligned (SAVE dropped, #111). Scales off the
-        lent rect's height (16*fs, like the frozen ladder)."""
-        fs = max(1, rect[3] // 16)
+        | PLAY, the button right-aligned (SAVE dropped, #111). Widths scale with
+        the font (`_zone_scale`); every part is as tall as the lent band."""
+        fs = self._zone_scale()
         gap = 4 * fs
         proj, rest = _ui.cut_left(rect, 22 * fs)
         play_r, rest = _ui.cut_right(rest, 54 * fs)
@@ -445,14 +520,14 @@ class EditorApp:
         tiers resolve against the SAME _zone_parts geometry the draw used."""
         if rect is not None and not self.ws.layout._base:
             proj, tabs_area, play_r = self._zone_parts(rect)
-            if self._in(px, py, proj):
+            if _in(px, py, proj):
                 return self._activate_zone_tab(_ZONE_PROJECTS)
-            if self._in(px, py, play_r):
+            if _in(px, py, play_r):
                 return self._activate_zone_tab(None)
-            fs = max(1, rect[3] // 16)
             slim = [(tid, label) for tid, label, _ic in _TAB_CHIPS]
-            for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim, fs):
-                if self._in(px, py, r):
+            for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim,
+                                                        self._zone_scale()):
+                if _in(px, py, r):
                     return self._activate_zone_tab(tid)
             return False
         x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
@@ -462,7 +537,7 @@ class EditorApp:
             x = x0 + i * stride
             if x + ic > x0 + w:
                 break
-            if self._in(px, py, (x, y0, ic, ic)):
+            if _in(px, py, (x, y0, ic, ic)):
                 return self._activate_zone_tab(tab)
         return False
 
@@ -575,7 +650,9 @@ class EditorApp:
         _open_workspace, reached from PROJECTS -> pick a project) and going home
         (console.py's go_home), and a window/context-X close (wm_windowed.py's
         close_window_kind)). Each tab keeps its own persist verb; this just routes
-        to whichever tab is up. Config persists via commit_config (no re-run -- PLAY
+        to whichever tab is up. Because it is the hard path, the code tab's save is
+        FORCED here: half-typed Python is written rather than lost (#154). Config
+        persists via commit_config (no re-run -- PLAY
         runs, handled separately in leave() so a crash can't overwrite good config).
         The theme (EDIT ICONS) tab has no bar zone, so it's never routed here -- its
         own CLOSE/leave hard-commits via ws.look.save_icons()
@@ -585,7 +662,10 @@ class EditorApp:
         if self._tab_is_clean(tab):
             return                   # nothing changed -> nothing to persist
         if tab == "code":
-            ws.save_code()
+            # force: this verb IS the hard-exit path (#154). A kid who goes home or
+            # switches tab mid-line keeps the line even though it does not parse
+            # yet -- the debounce is where the compile gate still refuses.
+            ws.save_code(force=True)
         elif tab == "paint":
             ws.save_sprites()
         elif tab == "map":

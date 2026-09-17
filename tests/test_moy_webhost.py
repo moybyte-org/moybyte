@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from board_source import runtime_text
+
 ROOT = Path(__file__).resolve().parent.parent
 MODULES = ROOT / "device"
 sys.path.insert(0, str(MODULES))
@@ -128,6 +130,48 @@ def test_an_unreadable_file_is_skipped_not_fatal(tmp_path):
     b = wh.pack_store(str(root))
     assert "hop.moy/blob.bin" not in b
     assert "hop.moy/main.py" in b, "one bad file killed the rest"
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    assert "hop.moy/blob.bin" not in streamed, \
+        "a skipped file must be ABSENT, not present and empty"
+
+
+def test_a_big_file_is_streamed_in_pieces_and_never_held(tmp_path):
+    """The 2026-09-09 Guition fix, at this layer: no piece this walker yields
+    is as big as the file it came from.
+
+    A store with 142KB PICO-8 carts on it used to die every pull -- the value
+    was one `_jstr(text)` of the whole file, which the transport then encoded,
+    joined and concatenated into five more copies of the same size. Pin the
+    BOUND: a packer that goes back to whole values still round-trips every
+    content test above and brings the MemoryError straight back.
+    """
+    from runtime import moy_sync
+
+    root = _store(tmp_path)
+    text = "-- a line of a cart\n" * 9000                        # 180KB
+    (root / "hop.moy" / "big.lua").write_text(text)
+    big = max(len(p) for p in wh.stream_store_json(str(root)))
+    # One read chunk, at the escape's worst case (every character a \u00XX).
+    assert big <= 6 * moy_sync.STORE_READ_CHUNK, big
+    assert big < len(text) // 4, (big, len(text))
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    assert streamed == wh.pack_store(str(root))
+
+
+def test_a_value_split_across_pieces_is_still_the_file(tmp_path):
+    """Escaping is per character and stateless, which is the only reason a
+    value may be emitted in pieces at all. Quotes, backslashes, control
+    characters and non-ASCII across a piece boundary are where that claim gets
+    tested, so put them there deliberately."""
+    from runtime import moy_sync
+
+    step = moy_sync.STORE_READ_CHUNK
+    nasty = ('a"b\\c\td\n\x01e' * 200 + "héllo 中文 \U0001f600")
+    text = ("." * (step - 3)) + nasty * 6
+    root = _store(tmp_path)
+    (root / "hop.moy" / "nasty.txt").write_text(text)
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    assert streamed["hop.moy/nasty.txt"] == text
 
 
 # -- the handler -------------------------------------------------------------
@@ -1167,6 +1211,31 @@ def test_an_already_connected_board_neither_reconnects_nor_sleeps():
     assert not called, "a connected board was made to reconnect"
 
 
+def test_the_link_wait_is_moy_otas_one_body_with_moy_otas_bounds(monkeypatch):
+    """It was the same 25 lines twice -- here and in `moy_ota.ensure_online` --
+    with `12000` and `250` written out in both. One body now, and the bounds
+    have one home; what stays local is what each caller needs on top (a bool for
+    the updater, the STA IP for the WEB CONSOLE row)."""
+    import moy_ota
+
+    seen = {}
+
+    def _spy(online, autoconnect=None, wait_ms=None, step_ms=None):
+        seen["bounds"] = (wait_ms, step_ms)
+        if autoconnect is not None:
+            autoconnect()
+        return online()
+
+    monkeypatch.setattr(moy_ota, "wait_online", _spy)
+    w = _Wifi(up=False)
+
+    def _auto(wifi):
+        wifi.up = True
+
+    assert wh.ensure_online(w, _auto) == "192.168.1.50"
+    assert seen["bounds"] == (moy_ota.ONLINE_WAIT_MS, moy_ota.ONLINE_STEP_MS)
+
+
 def test_make_webhost_reads_the_wifi_service_lazily():
     """`ws.wifi` is attached by wire_workstation_core, which has not run when a
     board builds this -- so binding the service at construction time would
@@ -1188,6 +1257,7 @@ BOARDS = (
     "lilygo_t_deck_plus_mainline",
     "esp32_p4_wifi6_touch_lcd_7b",
     "guition_jc3248w535",
+    "guition_jc8012p4a1c",
 )
 
 
@@ -1207,7 +1277,7 @@ def test_every_board_injects_the_web_console(board):
     stages every shared module and forgets this line fails here instead of
     shipping a console that silently cannot be reached.
     """
-    src = (ROOT / "firmware" / board / "modules" / "moy_runtime.py").read_text()
+    src = runtime_text(ROOT / "firmware" / board / "modules" / "moy_runtime.py")
     assert "make_webhost(" in src, "%s never builds a WebHost" % board
     assert "ws.webhost" in src, "%s never attaches one to the console" % board
 
@@ -1235,7 +1305,7 @@ def test_the_link_wait_is_shared_and_not_recopied_per_board():
     precisely how the T-Deck went without the feature, so the helper is shared
     and the boards must not grow private copies of it again."""
     for board in BOARDS:
-        src = (ROOT / "firmware" / board / "modules" / "moy_runtime.py").read_text()
+        src = runtime_text(ROOT / "firmware" / board / "modules" / "moy_runtime.py")
         assert "ONLINE_WAIT_MS" not in src.replace("moy_ota's ONLINE_WAIT_MS", "")
         assert "def _web_online" not in src, "%s re-grew a private link wait" % board
 
@@ -1419,6 +1489,84 @@ def test_a_failed_start_does_not_park(tmp_path):
     ws.toggle_webhost()
     assert ws.wm.top_kind() == "settings" and ws.web.parked is False
     assert "no wifi" in ws.webhost_label()
+
+
+def test_wasm_mode_holds_the_radio_and_lets_it_go_with_the_socket(tmp_path):
+    """The radio is a LEASE (2026-09-07): off unless something holds it, and
+    the web console is the holder this whole feature exists for. The row ON
+    takes it before the host binds; the row OFF lets it go -- at once for a
+    host that stops at once (this fake, a bare stop), and only when the SOCKET
+    closes for one saying goodbye (the test after this one)."""
+    ws = _mode_ws(tmp_path)
+    assert ws.wifi.radio is False
+    ws.toggle_webhost()
+    assert ws.webhost_serving() and "web" in ws._wifi_holders
+    assert ws.wifi.radio is True
+    ws.toggle_webhost()
+    assert not ws.webhost_serving()
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
+def test_a_failed_start_holds_no_radio(tmp_path):
+    """A start that could not bring WiFi up leaves the kid in Settings reading
+    why -- with the radio OFF, because a lease nobody is using is the bug the
+    lease exists to prevent."""
+    ws = _ws(tmp_path)
+    ws.webhost = _ModeHost(fail="no wifi")
+    ws.open_settings()
+    ws.toggle_webhost()
+    assert "no wifi" in ws.webhost_label()
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
+def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(
+        tmp_path, monkeypatch):
+    """The page's last round trip rides the link. `serving` drops at once when
+    the row is switched off, but the socket lingers for the closing window --
+    and so must the radio, or the goodbye is said into a dead radio and the
+    page gets the vanished-board panel this window was written to prevent.
+    `make_webhost` wires the release to the host's own `on_stop`."""
+    ws = _ws(tmp_path)
+    h = wh.WebHost(str(_store(tmp_path)), pin="4321",
+                   on_stop=lambda: ws.wifi_release("web"))
+    h.sock = None
+    h._ws = None
+    h.update = None
+    ws.webhost = h
+    ws.wifi_hold("web")
+    h.serving = True
+    ws.web.park()
+
+    ws.stop_web_console()                   # the connection screen's TURN OFF
+    assert h.serving is False and h.closing == "off"
+    assert not ws.web.parked
+    assert "web" in ws._wifi_holders, "let go before the goodbye was said"
+    assert ws.wifi.radio is True
+
+    clock = [0]
+    monkeypatch.setattr(wh, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(wh, "_ticks_diff", lambda a, b: a - b)
+    h.closing_at = 0
+    clock[0] = h.CLOSING_MS - 1
+    h.poll()
+    assert "web" in ws._wifi_holders
+    clock[0] = h.CLOSING_MS
+    h.poll()
+    assert h.closing is None
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
+def test_every_board_wires_the_release_to_the_socket(tmp_path):
+    """make_webhost is the ONE injection every board takes, so the lease's
+    release lives there and not in four board files."""
+    ws = _ws(tmp_path)
+    h = wh.make_webhost(ws, str(_store(tmp_path)))
+    ws.wifi_hold("web")
+    h.serving = True
+    h.sock = None
+    h._ws = None
+    h.stop()                                # a bare stop: the socket is gone
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
 
 
 def test_park_sets_the_flag_before_it_hands_the_glass_over(tmp_path):

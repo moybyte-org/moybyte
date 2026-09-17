@@ -10,6 +10,7 @@ from runtime.code_layer import (   # the syntax highlighter moved to the code ed
     _highlight,
     _HL_TEXT, _HL_KEYWORD, _HL_STRING, _HL_NUMBER, _HL_COMMENT, _HL_BUILTIN,
 )
+from ws_helpers import build_ws_with_cart
 
 
 # -- the tokenizer ----------------------------------------------------------
@@ -111,17 +112,7 @@ def test_lua_cart_verbs_stay_builtins():
 # -- inline syntax-error markers (driven through the console) ----------------
 
 def _make_ws_with_cart(tmp_path, src, title="E"):
-    from runtime import host_app
-    carts_dir = str(tmp_path / "carts")
-    host_app.moy_carts.ensure_dirs(carts_dir)
-    host_app.moy_carts.create(title, carts_dir, src=src, type="app", edit=[])
-    ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
-    ws.open()
-    return ws
+    return build_ws_with_cart(tmp_path, src, title)
 
 
 def test_syntax_error_marks_the_offending_line_and_jumps_caret(tmp_path):
@@ -188,6 +179,33 @@ def test_highlight_cache_reuses_result(tmp_path):
     a = ws.code_layer._hl("cls(7)")
     b = ws.code_layer._hl("cls(7)")
     assert a is b                          # same line -> cached object
+
+
+def test_crossing_the_memo_bound_keeps_the_lines_still_on_screen(tmp_path):
+    """Dragging through a long file walks past the bound. Emptying the memo
+    there re-highlights the visible window inside one frame -- a hitch on the
+    very gesture the memo is for -- so the older generation is retired instead
+    and the lines just scrolled past are still one lookup away."""
+    from runtime.code_layer import _HL_MEMO
+    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
+    onscreen = ["cls(%d)" % i for i in range(20)]
+    kept = [cl._hl(ln) for ln in onscreen]
+    for i in range(_HL_MEMO * 2):          # scroll far enough to rotate twice
+        cl._hl("x%d = %d" % (i, i))
+    assert len(cl._hl_cache) <= _HL_MEMO
+    assert len(cl._hl_old) <= _HL_MEMO
+    # The window is re-highlighted, not returned stale, once BOTH generations
+    # have rolled past it -- correctness never depends on the memo.
+    assert [cl._hl(ln) for ln in onscreen] == kept
+
+
+def test_a_rotation_does_not_lose_the_line_it_just_cached(tmp_path):
+    from runtime.code_layer import _HL_MEMO
+    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
+    for i in range(_HL_MEMO - 1):
+        cl._hl("a%d = 1" % i)
+    first = cl._hl("cls(1)")               # the entry that trips the rotation
+    assert cl._hl("cls(1)") is first
 
 
 def test_lua_project_switches_palette_and_highlighting(tmp_path):

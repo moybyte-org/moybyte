@@ -721,9 +721,9 @@ def test_the_console_asks_the_live_session_for_the_rate(tmp_path):
 
 def test_perf_sample_does_not_spend_the_meters_window(tmp_path):
     """perf_sample is also the `is a cart running?` probe that _diag_drawbrk,
-    _diag_draw2, _diag_chromebrk, _diag_i2cstat and _diag_gc all call. If the
-    rate rode along in that tuple, five probes would eat the PERF line's window
-    and it would report a fifth of the truth."""
+    _diag_draw2 and _diag_i2cstat call. If the rate rode along in that tuple,
+    the probes would eat the PERF line's window and it would report a fraction
+    of the truth."""
     ws = build_ws(tmp_path)
     ws.netplay = _FakeSession()
     ws.wm.top_is_player = lambda: True

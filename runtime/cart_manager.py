@@ -44,7 +44,11 @@ trap to get right.
 # pays for on every collect (~0.2ms/KB on device -- most of the 93-161ms pauses).
 # slim() strips them after the icons are cached; opening a cart rehydrates
 # from the store, and switching carts re-slims the previous one.
-_HEAVY_CART_KEYS = ("src", "sprites", "sounds", "map", "images", "blocks", "scenes")
+# "src_before" is the biggest of them on a ported cart (p8.lua is 62KB where
+# src is 38KB) and the least useful resident: nobody reads a generated shim off
+# the shelf.
+_HEAVY_CART_KEYS = ("src", "src_before", "src_after", "sprites", "sounds",
+                    "map", "images", "blocks", "scenes")
 
 
 class CartManager:
@@ -112,9 +116,12 @@ class CartManager:
         if not self.store.ready():
             return
         ws = self.ws
+        # src=False on every scan here: the shelf is slimmed straight after, the
+        # source comes back at open, and reading it mid-session is the one
+        # allocation a fragmented heap refuses (see moy_carts.load).
         try:
             self.apply(self.store.call(
-                lambda: ws.carts_store.scan(ws.carts_root)))
+                lambda: ws.carts_store.scan(ws.carts_root, src=False)))
         except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
             print("Moybyte rescan failed:", exc)
         ws._dirty = True
@@ -151,8 +158,8 @@ class CartManager:
     def rehydrate(self, cart):
         """Load a slimmed cart's full payloads back from the store IN PLACE (the
         launcher/picker hold the same dict, so every reference fattens at once).
-        No-op for fat/embedded carts; a failed load leaves the cart slim and the
-        caller's error handling surfaces it (missing src -> the crash panel)."""
+        No-op for fat/embedded carts; a failed load leaves the cart slim, which
+        `_open_workspace` reads as NOT OPENABLE and refuses on the spot."""
         ws = self.ws
         if not cart.get("lazy") or ws.carts_store is None or not cart.get("path"):
             return cart
@@ -161,6 +168,29 @@ class CartManager:
         except Exception:  # noqa: BLE001 -- SD hiccup: stay slim, surface downstream
             full = None
         if full:
+            cart.update(full)
+            cart["lazy"] = False
+        return cart
+
+    def reload(self, cart):
+        """Re-read ONE cart from the store in place, fat or not -- what puts the
+        loader back in the loop after something edited a project's own files
+        (`Workstation._return_to_project`, step 5 of
+        docs/text_editing_2026-09.md). `rehydrate` cannot serve: it is a no-op on
+        the fat cart the Editor is holding, which is exactly the case here.
+
+        `broken` is popped first because it is the one key `load()` omits when
+        it has nothing to say, so a repaired manifest must not leave the old
+        note behind. A failed read keeps the cart as it stands."""
+        ws = self.ws
+        if cart is None or not cart.get("path") or ws.carts_store is None:
+            return cart
+        try:
+            full = self.store.call(lambda: ws.carts_store.load(cart["path"]))
+        except Exception:  # noqa: BLE001 -- SD hiccup: keep what we have
+            full = None
+        if full:
+            cart.pop("broken", None)
             cart.update(full)
             cart["lazy"] = False
         return cart
@@ -196,7 +226,7 @@ class CartManager:
         try:
             new, items = self.store.call(lambda: (
                 ws.carts_store.new_from_template(ws.carts_root),
-                ws.carts_store.scan(ws.carts_root)))
+                ws.carts_store.scan(ws.carts_root, src=False)))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte new cart failed:", exc)
             return None
@@ -215,7 +245,7 @@ class CartManager:
         try:
             self.apply(self.store.call(lambda: (
                 ws.carts_store.duplicate(sel, ws.carts_root),
-                ws.carts_store.scan(ws.carts_root))[1]))
+                ws.carts_store.scan(ws.carts_root, src=False))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte duplicate failed:", exc)
 
@@ -233,7 +263,7 @@ class CartManager:
         try:
             self.apply(self.store.call(lambda: (
                 ws.carts_store.delete(target),
-                ws.carts_store.scan(ws.carts_root))[1]))
+                ws.carts_store.scan(ws.carts_root, src=False))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
 

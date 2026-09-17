@@ -19,14 +19,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+from ws_helpers import build_ws as _ws          # noqa: E402
 from ws_helpers import open_cart as _open_cart  # noqa: E402
 
 TWO_PLAYER_CARTS = ("Brick Siege", "Harpoon Pop")
-
-
-def _ws(tmp_path):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"))
 
 
 def _run(ws, frames, dt=1 / 30):

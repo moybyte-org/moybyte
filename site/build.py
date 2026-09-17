@@ -21,7 +21,7 @@ The page also FLASHES a board over USB (site/flash.js, esptool-js over Web
 Serial). The images it writes are CI builds pulled down beforehand:
 
     python3 tools/fetch_ci_firmware.py --release firmware-latest \
-        --out dist/ci-firmware/stable      # -> stable/{tdeck,p4,guition_s3}/
+        --out dist/ci-firmware/stable      # -> stable/<board>/
     python3 tools/fetch_ci_firmware.py --release firmware-beta \
         --out dist/ci-firmware/beta        # the picker's other option
 
@@ -33,9 +33,11 @@ Everything under _site/ is generated. Edit this file, not the output.
 
 import argparse
 import datetime
+import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -89,20 +91,31 @@ TIERS = [
 #
 #   tdeck    esptool --chip esp32s3 write_flash 0x0 <full-dio image>
 #   p4       esptool --chip esp32p4 write_flash 0x2000 moybyte_p4.bin
+#   guition_p4  esptool --chip esp32p4 write_flash 0x2000 moybyte_guition_p4.bin
 #   guition  esptool --chip esp32s3 write_flash 0x0 moybyte_guition_s3.bin
 #   zero     esptool --chip esp32s3 write_flash 0x0 moybyte_zero.bin
 #
-# All four write a MERGED image (bootloader + partition table + app) whose header
+# Every one writes a MERGED image (bootloader + partition table + app) whose header
 # already carries the flash mode/size/frequency the build baked in, which is why
 # the flasher passes "keep" for all of them rather than re-deriving them here. The
 # partition tail (the VFS, and on the T-Deck otadata) is not part of the image,
 # so an ordinary flash leaves the board's own storage alone.
 #
 # `images` is a preference list: the first name present in the board's artifact
-# folder is the one published. `reset` is how esptool-js is asked to enter the
-# ROM loader, and it is a hardware fact per board, not a preference (see the
-# T-Deck note in CLAUDE.md: its native-USB auto-reset never syncs) -- so is
-# `after`, and the two S3 boards that share a chip do NOT share either value.
+# folder is the one published.
+#
+# `beta`, on a board that has it, is why that board is not ready yet: plain text
+# (the release notes reuse it as Markdown), with `#N` linked to the issue on the
+# page. A ready board has no `beta` key.
+#
+# HOW THE BOARD IS RESET IS NOT DECLARED HERE. `reset` (into the ROM loader) and
+# `after` (out of it) are hardware facts, and the board that has them is the one
+# that writes them down: each `firmware/<board>/board.toml` `[flash]` block, the
+# same declaration the cable flash reads. They are filled in below from there,
+# because a premise re-stated in this file is one that can go stale without the
+# board noticing -- this table asserted a TinyUSB CDC id for the Zero, and drew
+# `no_reset` out of it, for a fortnight after that board moved to
+# USB-Serial/JTAG (2026-08-30).
 BOARDS = [
     {
         "id": "tdeck",
@@ -111,25 +124,19 @@ BOARDS = [
         "images": ("moybyte_tdeck.bin",),
         "offset": 0x0,
         "baud": 460800,
-        "reset": "no_reset",                # the trackball hold below did it
-        "manual": None,                     # ... so there is no reset to skip
+        "manual": None,                     # no reset to skip: see below
         "usb_otg": True,                    # native USB, for esptool-js's sake
-        # Nothing can drive this board's reset line over its own USB port --
-        # neither in nor out of the loader -- so the human does both ends.
-        "after": None,                      # ... which is why we do not try
+        # Derives to (no_reset, None): this board declares `before = usb_reset`,
+        # which esptool-js does not implement, so the page cannot drive its reset
+        # line at either end and the human does both.
         "done": "Written. Press <b>RST</b> on the board to start it.",
-        "prep": "Its USB port is the ESP32-S3&rsquo;s own and auto-reset does not "
-                "sync on it, so you move the board in and out of the loader by "
-                "hand. There is no BOOT button &mdash; <b>the trackball click is "
-                "GPIO0</b>: hold the trackball in while you power the board on, "
-                "then let go, and it comes up in the ROM loader instead of the "
-                "console. Flash, pick its port in the dialog, and when the write "
-                "finishes <b>press RST</b> &mdash; it stays in the loader until "
-                "you do.",
-        "erase": "Erase the whole chip first. Only needed once, when moving a "
-                 "board onto the OTA layout &mdash; carts live on the SD card, so "
-                 "they survive either way.",
-        "cli": "make firmware-flash-lilygo-micropython-full PORT=/dev/ttyACM0",
+        "prep": "This board has to be put into the loader by hand. <b>Hold the "
+                "trackball in</b> while you power it on, then let go. Flash, pick "
+                "its port, and when the write finishes <b>press RST</b>.",
+        "erase": "Erase the whole chip first. Carts on an SD card survive it; "
+                 "with no card they are on internal flash, and this deletes them "
+                 "and their saves.",
+        "cli": "make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0",
     },
     {
         "id": "p4",
@@ -138,21 +145,40 @@ BOARDS = [
         "images": ("moybyte_p4.bin",),
         "offset": 0x2000,
         "baud": 921600,
-        "reset": "default_reset",           # CH343 bridge: DTR/RTS reset works
-        "usb_otg": False,
-        "after": "hard_reset",              # ... at both ends, unlike the T-Deck
+        "usb_otg": False,                   # a CH343 bridge, not native USB
         "done": "Done &mdash; the board is rebooting into this build.",
-        "prep": "Plug into the board&rsquo;s USB-C debug port &mdash; the CH343 "
-                "bridge resets it into the loader and back out again on its own, "
-                "so there is nothing to hold or press.",
-        "erase": "Erase the whole chip first. This board keeps its cartridges on "
-                 "internal flash, so that deletes them along with their saves.",
+        "prep": "Plug into the board&rsquo;s USB-C debug port. It resets into "
+                "the loader and back on its own.",
+        "erase": "Erase the whole chip first. This board keeps its carts on "
+                 "internal flash, so this deletes them and their saves.",
         # The escape hatch for a reset that will not take: hold BOOT (GPIO35 on
         # this board), tap RESET, and the browser skips its own reset entirely.
         "manual": "Skip the reset &mdash; I have put the board in download mode "
                   "myself (hold <b>BOOT</b>, tap <b>RESET</b>, release BOOT). Try "
                   "this if connecting fails.",
         "cli": "make firmware-flash-p4 PORT=/dev/ttyACM0",
+    },
+    {
+        # The Guition JC8012P4A1C: the Waveshare's silicon over the P4's own
+        # USB-Serial/JTAG, which esptool's default reset drives in and out.
+        "id": "guition_p4",
+        "label": "Guition JC8012P4A1C 10.1&Prime;",
+        "chip": "ESP32-P4",
+        "images": ("moybyte_guition_p4.bin",),
+        "offset": 0x2000,
+        "baud": 921600,
+        "usb_otg": True,                    # native USB, like the Guition S3
+        "done": "Done &mdash; the board is rebooting into this build.",
+        "prep": "Plug into the board&rsquo;s USB-C port. It resets into the "
+                "loader and back on its own.",
+        "erase": "Erase the whole chip first. This board keeps its carts on "
+                 "internal flash, so this deletes them and their saves.",
+        "manual": "Skip the reset &mdash; I have put the board in download mode "
+                  "myself (hold <b>BOOT</b>, tap <b>RST</b>, release BOOT). Try "
+                  "this if connecting fails.",
+        "cli": "make firmware-flash-guition-p4 PORT=/dev/ttyACM0",
+        "beta": "Fast games make the whole panel blink for a frame (#220), and "
+                "WiFi doesn't work on this board yet.",
     },
     {
         # The Guition JC3248W535 (#202, ported 2026-08-18): the third board,
@@ -164,194 +190,167 @@ BOARDS = [
         "images": ("moybyte_guition_s3.bin",),
         "offset": 0x0,
         "baud": 460800,
-        "reset": "default_reset",           # native USB-Serial/JTAG; auto-reset
         "usb_otg": True,                    # works on this one (unlike the T-Deck)
-        "after": "hard_reset",
         "done": "Done &mdash; the board is rebooting into this build.",
-        "prep": "Plug into the board&rsquo;s USB-C port. The S3&rsquo;s own "
-                "USB-Serial/JTAG handles the reset into the loader and back.",
-        "erase": "Erase the whole chip first. With a TF card in the slot the "
-                 "cartridges live on the card and survive it; with no card they "
-                 "are on internal flash, and this deletes them and their saves.",
+        "prep": "Plug into the board&rsquo;s USB-C port. It resets into the "
+                "loader and back on its own.",
+        "erase": "Erase the whole chip first. Carts on a TF card survive it; "
+                 "with no card they are on internal flash, and this deletes them "
+                 "and their saves.",
         "manual": "Skip the reset &mdash; I have put the board in download "
                   "mode myself (hold <b>BOOT</b>, tap <b>RST</b>, release "
                   "BOOT). Try this if connecting fails.",
         "cli": "make firmware-flash-guition-s3 PORT=/dev/ttyACM1",
     },
     {
-        # The Zero (Seeed XIAO ESP32-S3, #41): a build target since 2026-08-29
-        # and the fourth card. HEADLESS -- no screen, no carts running on it. It
-        # is the store the browser console pairs with, so whoever flashes it is
-        # holding a board there is nothing to look at afterwards.
+        # The Zero (Seeed XIAO ESP32-S3, #41): a build target since 2026-08-29.
+        # HEADLESS -- no screen, no carts running on it. It is the store the
+        # browser console pairs with, so whoever flashes it is holding a board
+        # there is nothing to look at afterwards.
         #
-        # ITS RESET FIELDS ARE NOT THE OTHER S3 BOARDS', and that is the one
-        # thing on this card that cannot be inherited by analogy. This board
-        # keeps MicroPython's TinyUSB CDC (303a:4001) instead of the console
-        # boards' USB-Serial/JTAG promotion (its mpconfigboard.h argues why),
-        # and esptool-js picks its reset sequence off the PID: the JTAG path is
-        # chosen for 0x1001, so on 0x4001 anything but `no_reset` falls through
-        # to the CLASSIC DTR/RTS dance. That dance against a RUNNING TinyUSB CDC
-        # is what has wedged this board's USB device before (#63, and the board
-        # README's hardware facts) -- unrecoverable without a replug. So the
-        # page never touches the lines and the human holds BOOT, exactly like
-        # the T-Deck, for a different hardware reason.
-        #
-        # `after` is the same story from the other end: `hard_reset` is an RTS
-        # wiggle with no reset circuit behind it here and does nothing, and what
-        # DOES get this board out of the loader -- esptool's `--after
-        # watchdog_reset` -- esptool-js does not implement. So there is no reset
-        # to ask for, and the card says to replug instead.
-        #
-        # Neither has been run from the page: the pair follows this board's own
-        # documented facts, which is the safe reading, not a browser session.
+        # Derives to (default_reset, None). It took the USB-Serial/JTAG
+        # promotion on 2026-08-30 and enumerates 303a:1001, which is the PID
+        # esptool-js picks its JTAG reset path off, so the page drives it into
+        # the loader exactly as it does the Guition. Coming back out is the half
+        # it cannot do: this board declares `after = watchdog_reset` (proven
+        # here; `hard_reset` is an RTS wiggle with no circuit behind it), and
+        # esptool-js implements no such sequence -- so the card asks for a
+        # replug.
         "id": "xiao_zero",
         "label": "Seeed XIAO ESP32-S3 (Zero)",
         "chip": "ESP32-S3",
         "images": ("moybyte_zero.bin",),
         "offset": 0x0,
         "baud": 460800,
-        "reset": "no_reset",                # the BOOT hold below did it
-        "manual": None,                     # ... so there is no reset to skip
         "usb_otg": True,                    # native USB, for esptool-js's sake
-        "after": None,                      # hard_reset is a no-op on this board
+        "manual": "Skip the reset &mdash; I have put the board in download mode "
+                  "myself (hold <b>BOOT</b> while you plug it in). Try this if "
+                  "connecting fails.",
         "done": "Written. Unplug the board and plug it back in to start it.",
-        "prep": "This one has no screen &mdash; it is the cartridge store a "
-                "browser console pairs with, so there is nothing to watch it do "
-                "afterwards. Its USB port is the ESP32-S3&rsquo;s own and there "
-                "is no reset circuit on the other end of it, so you move the "
-                "board in and out of the loader by hand: <b>hold the BOOT button "
-                "while you plug it in</b>, then let go. Flash, pick its port in "
-                "the dialog, and when the write finishes <b>unplug it and plug "
-                "it back in</b> &mdash; it stays in the loader until you do. The "
-                "page deliberately leaves this board&rsquo;s reset lines alone: "
-                "wiggling them while it is running has knocked its USB out "
-                "entirely, and only a replug brings that back.",
-        "erase": "Erase the whole chip first. There is no card slot on this "
-                 "board &mdash; the cartridges are on its internal flash, so "
-                 "this deletes them and their saves. Coming from the old "
-                 "MicroPython layout they go either way: this firmware keeps "
-                 "the filing system somewhere else, so the board comes up with "
-                 "an empty store and wants setting up again. Anything made in "
-                 "the browser is still in the browser and syncs back on the "
-                 "next visit.",
+        "prep": "This board has no screen. It resets into the loader on its "
+                "own, but when the write finishes <b>unplug it and plug it back "
+                "in</b> to start it.",
+        "erase": "Erase the whole chip first. This board keeps its carts on "
+                 "internal flash, so this deletes them and their saves.",
         "cli": "make firmware-flash-zero PORT=/dev/ttyACM0",
     },
 ]
 
+# What esptool-js can actually perform: two entry sequences and one exit. The
+# declarations it cannot serve are real and are each a board's own measured
+# fact -- the T-Deck's `before = usb_reset` (the only sequence that connects to
+# its wedged USB-Serial/JTAG node) and the Zero's `after = watchdog_reset` (the
+# only one that gets it out of the loader). Both are honoured by the cable
+# flash and neither exists in the browser.
+ESPTOOL_JS_BEFORE = ("default_reset", "no_reset")
+ESPTOOL_JS_AFTER = ("hard_reset",)
 
-# The page's CONTENT mirrors README.md's "What's in it" -- same claims, same
-# order, same honesty. Keep them in step: the README is the model, this is the
-# shop window, and a feature that only exists in one of them is a bug.
+
+def declared_flash():
+    """{`[board] ota` id: that board's `[flash]` block}, read from the tree.
+
+    Derived rather than listed so board N+1 is described by its own file the
+    day it lands.
+    """
+    from tools import board_config
+    out = {}
+    for path in sorted(glob.glob(os.path.join(ROOT, "firmware", "*", "board.toml"))):
+        cfg = board_config.load(os.path.dirname(path))
+        ota = (cfg.get("board") or {}).get("ota")
+        if ota and "flash" in cfg:
+            out[ota] = cfg["flash"]
+    return out
+
+
+def reset_pair(flash):
+    """(`reset`, `after`) for the page, from one board's `[flash]` block.
+
+    The defaults are esptool's own, which is what the cable flash falls back to
+    when a board declares neither. A board whose ENTRY sequence esptool-js
+    cannot perform is not asked to reset on the way out either: it is the same
+    line and the same peripheral, so a page that cannot drive it in cannot
+    drive it out, and asking would log a failure for something that was never
+    going to work.
+    """
+    if not flash:                        # no declaration to follow: touch nothing
+        return "no_reset", None
+    before = str(flash.get("before", "default_reset"))
+    after = str(flash.get("after", "hard_reset"))
+    if before not in ESPTOOL_JS_BEFORE:
+        return "no_reset", None
+    return before, (after if after in ESPTOOL_JS_AFTER else None)
+
+
+_DECLARED = declared_flash()
+for _board in BOARDS:
+    # A card for a board that declares no cable flash at all gets the reading
+    # that touches nothing -- the human does both ends -- rather than a guess.
+    _board["reset"], _board["after"] = reset_pair(_DECLARED.get(_board["id"], {}))
+del _board
+
+
+# The page's CONTENT mirrors README.md's "What's in it" -- same tiles, same
+# claims, same order. Keep them in step: a feature that only exists in one of
+# them is a bug. Each id names a tile tools/make_feature_tiles.py draws.
 FEATURES = [
-    ("The shell",
-     "A launcher, a Player and an Editor, all ordinary processes over a window "
-     "manager. Two presentation tiers from one implementation: a fullscreen "
-     "back-stack on the handheld, a windowed desktop on the 7&Prime; board where a "
-     "playtest keeps running beside the editor you are typing in."),
-    ("Editors on the device itself",
-     "Seven tabs over one project &mdash; config, blocks, code, sprites, tilemap, "
-     "scene, music. No save button and no dirty star: autosave on a typing pause "
-     "and on every exit, with undo that walks edits and then whole commits."),
-    ("Blocks that graduate",
-     "Block programs compile to the same Python the code tab edits. Edit the code "
-     "directly and the project graduates &mdash; the blocks go read-only rather "
-     "than silently disagreeing with the source."),
-    ("Apps",
-     "Paint, Files, Writer, Sheets, Storybook, Calc, Settings, Appearance, WiFi. "
-     "Drawings, documents and tables land in a shared file layer that carts can "
-     "read back. They sit on the launcher as carts; their code still lives in the "
-     "shell rather than in an editable cart, which is the next piece of work."),
-    ("Python and Lua",
-     "One verb table, valid verbatim in both languages. On device, Lua carts run "
-     "on a vendored Lua 5.4 VM whose heap lives outside MicroPython&rsquo;s GC and is "
-     "freed wholesale at exit."),
-    ("Graphics",
-     "An indexed 64-colour palette end to end, every draw verb landing in a C "
-     "kernel on device. The 7&Prime; board composites through the SoC&rsquo;s hardware "
-     "PPA with the DMA overlapping the next frame&rsquo;s input poll; scrolling "
-     "shifts retained pixels instead of repainting them."),
-    ("Sound",
-     "A C mixer on the boards and in the browser. PICO-8 imports are "
-     "full-fidelity &mdash; eight waveforms, the effect column, four-channel "
-     "patterns, SFX loop ranges."),
-    ("Cartridges are folders",
-     "A manifest, a script, an indexed sheet, a tilemap, a sound bank. No build "
-     "step, no per-device binary: copy a folder onto the card and it is on the "
-     "launcher. Every board carries the whole set inside its firmware and writes "
-     "them out on first boot, so a freshly flashed board is already full of "
-     "things to play &mdash; with or without a card in the slot, since a board "
-     "with an empty slot keeps its cartridges in its own flash and stays just as "
-     "editable. Built-in carts re-seed by version and keep your saves and tuning."),
-    ("Wireless",
-     "WiFi setup lives in Settings, so it works while a game runs. Firmware "
-     "updates over the air on two channels into an inactive OTA slot, with "
-     "bootloader rollback if the new image does not come up. This is not a "
-     "demo: it is how the T-Deck and the P4 actually get their updates &mdash; "
-     "download, install, and rolling a bad image back have all run on the real "
-     "hardware. The screenless board takes the same updates through the same "
-     "Settings screen, shown in a browser instead of on glass. The Guition's "
-     "updater is wired and awaits its first release."),
-    ("The console in a browser",
-     "The same system also compiles to WebAssembly &mdash; it is what runs on "
-     "this page &mdash; and every board carries that build inside its firmware. "
-     "Switch it on and the board hands the console to any phone or laptop on "
-     "the same WiFi: it opens in a tab and runs there at full speed, drawing "
-     "every pixel itself rather than mirroring the board&rsquo;s screen. Where "
-     "the page came from decides where its cartridges live. Opened from a "
-     "board, it edits that board&rsquo;s cartridges and writes every change "
-     "back to it, behind the pairing pin the device puts on screen. Opened "
-     "from an ordinary web host &mdash; this page &mdash; the cartridges and "
-     "drawings are kept in your browser and are still there on your next "
-     "visit. A <code>.moy</code> file carries a cartridge in or out either "
-     "way, and dropping a <b>PICO-8</b> cartridge on the page converts it and "
-     "plays it &mdash; art, sound, map and the game&rsquo;s own code, which "
-     "you can then open and read, because this console speaks that language "
-     "too. When a board served the page, its Settings can update the board "
-     "itself. There is "
-     "nothing to sign into and nothing leaves the machine it was made on; the "
-     "trade is that a browser is not a filing cabinet, so export the ones you "
-     "would mind losing."),
+    ("windows", "Windows and processes",
+     "The launcher, the editor and your game are all processes under one window "
+     "manager: fullscreen on a handheld, overlapping windows on a desktop board."),
+    ("editors", "Editors on the device",
+     "Code, blocks, sprites, maps, scenes and music, on the board itself. "
+     "Autosave with undo, and a crash opens the code at the failing line."),
+    ("apps", "Apps",
+     "Paint, Files, Notes, Storybook, Calc and Settings. Drawings and documents "
+     "go into a shared store that carts can read."),
+    ("languages", "Python and Lua",
+     "Write carts in either language. The verbs are the same in both, so a cart "
+     "ports line by line."),
+    ("multiplayer", "Local multiplayer",
+     "Two consoles in the same room find each other over ESP-NOW and play one "
+     "game on two screens. No router, no cables."),
+    ("pico8", "PICO-8 import",
+     "Drop a <code>.p8</code> or <code>.p8.png</code> cart on the browser "
+     "console and it becomes a Lua cart &mdash; art, map, sound and code "
+     "&mdash; that opens in the editors."),
+    ("folders", "Carts are folders",
+     "A manifest, a script, sprites, a map and sounds. There is no build step: "
+     "a folder in the cart store is a cart on the launcher."),
+    ("updates", "Updates",
+     "Signed over-the-air updates on a stable and a beta channel. If a new image "
+     "doesn&rsquo;t boot, the board goes back to the one before."),
+    ("browser", "In the browser",
+     "The same console runs in a tab and keeps your carts there. A board can also "
+     "serve it over WiFi, so a phone or laptop edits that board&rsquo;s carts."),
 ]
+FEATURE_SRC = os.path.join(ROOT, "docs", "media", "features")
+TILE_W = 256
+
+
+def tile_frames(name):
+    """Frames in a tile's mask sheet, read from the PNG header's width."""
+    import struct
+    with open(os.path.join(FEATURE_SRC, name + ".png"), "rb") as f:
+        head = f.read(24)
+    return struct.unpack(">I", head[16:20])[0] // TILE_W
+
 
 TARGETS = [
     ("LilyGO T-Deck Plus", "ESP32-S3",
-     "MicroPython firmware with native C modules for graphics, audio, SD and the "
-     "Lua VM. Native 320&times;240, keyboard and trackball, cartridges on SD, "
-     "over-the-air updates."),
+     "320&times;240 handheld with keyboard, trackball and touch."),
     ("Waveshare ESP32-P4 7B", "ESP32-P4",
-     "1024&times;600 over MIPI-DSI, mainline MicroPython with a vendored panel "
-     "driver. The same system as a windowed desktop, with the game composite on "
-     "the hardware PPA."),
+     "7&Prime; 1024&times;600 touch screen, windowed desktop."),
+    ("Guition JC8012P4A1C", "ESP32-P4",
+     "10.1&Prime; 1280&times;800 touch screen, the same desktop as the "
+     "Waveshare."),
     ("Guition JC3248W535", "ESP32-S3",
-     "The ~$15 3.5&Prime; smart display, and the third board: a QSPI panel of "
-     "its own, touch only, landscape 480&times;320, and cartridges on the TF "
-     "card when there is one in the slot."),
+     "3.5&Prime; 480&times;320 touch screen."),
     ("Seeed XIAO ESP32-S3", "ESP32-S3",
-     "The odd one, and the smallest: no screen at all. A browser is its "
-     "console &mdash; it serves that same WebAssembly build off its own flash "
-     "&mdash; and the board is the cartridge store behind it, on whatever "
-     "screen happens to be nearby. It arrives with the cartridges already on "
-     "it, joins your WiFi from a form its own setup network hands your phone, "
-     "and updates itself over the air like the others."),
-    ("This browser tab", "WebAssembly",
-     "The system compiled to wasm &mdash; MicroPython plus the same C drawing "
-     "kernels the boards run. The page draws every pixel itself, a locked "
-     "60&nbsp;fps in headless-Chrome runs, and nothing is streamed from "
-     "anywhere."),
-    ("PC simulator", "pure Python",
-     "The host reference and the fast dev loop. A pixel that moves here moves on "
-     "glass: the firmware freezes copies of the same modules."),
-]
-
-# Being straight about the state is the point of this section. Update it when
-# one of these lands -- a stale honesty list is worse than none.
-ROUGH = [
-    "All four boards are off-the-shelf dev boards. Bespoke hardware is roadmap, not shipped.",
-    "Per-cart frame rates, the frame-budget model and every lever &mdash; including "
-    "the ones built, measured and reverted &mdash; are tracked in public issues, "
-    "not claimed here.",
-    "Open holes are filed rather than hidden: the system apps are not editable "
-    "yet, and USB-HID keyboard and audio on the P4 are unbuilt.",
+     "No screen: it stores carts and serves the browser console over WiFi."),
+    ("Browser", "WebAssembly",
+     "MicroPython and the same C drawing code, compiled to wasm. It is what "
+     "runs on this page."),
+    ("PC simulator", "Python + C",
+     "The same modules the firmware freezes, running on your computer."),
 ]
 
 
@@ -516,18 +515,12 @@ def font_face():
             "src:url(data:font/woff2;base64,%s) format('woff2')}" % b64)
 
 
-# The at-a-glance status list: the honest state of the machine, as data. Dots are
-# role colours (ok / wip / warn), so "what works" is readable before any prose.
+# The at-a-glance list beside the hero. Dots are role colours (ok / wip / warn).
 STATUS = [
-    ("ok", "The system", "boots on four ESP32 boards"),
+    ("ok", "Five boards", "ESP32-S3 and ESP32-P4"),
     ("ok", "Editors", "on the device itself"),
-    ("ok", "OTA updates", "hardware-confirmed"),
-    ("wip", "System apps", "not editable yet"),
-    # NOT "streams". The page runs the console itself -- the feature text below
-    # is explicit that nothing is mirrored from the board's screen, and a
-    # one-word summary contradicting it is the kind of small lie a shop window
-    # gets believed on.
-    ("ok", "Runs in a browser", "off the board's own flash"),
+    ("ok", "OTA updates", "stable and beta"),
+    ("ok", "In the browser", "nothing to install"),
 ]
 
 REPO = "https://github.com/moybyte-org/moybyte"
@@ -538,8 +531,14 @@ def flash_cards(cards):
     out = []
     for c in cards:
         fw = c["fw"]
-        li = ['<li class="board" data-board="%s"><h3>%s</h3><p class="chip">%s</p>'
-              % (c["id"], c["label"], c["chip"])]
+        li = ['<li class="board" data-board="%s"><h3>%s%s</h3><p class="chip">%s</p>'
+              % (c["id"], c["label"],
+                 ' <span class="beta">beta</span>' if c.get("beta") else "",
+                 c["chip"])]
+        if c.get("beta"):
+            li.append('<p class="betanote"><b>Beta:</b> %s</p>'
+                      % re.sub(r"#(\d+)", r'<a href="%s/issues/\1">#\1</a>' % REPO,
+                               c["beta"]))
         if not fw:
             li.append('<p class="fwmeta">no published build</p>'
                       '<p>CI has not left a live image for this board &mdash; the '
@@ -617,28 +616,28 @@ def page(pal, has_player, cards):
         '      <li><i class="%s"></i><b>%s</b> %s</li>' % (k, name, note)
         for k, name, note in STATUS)
     features = "\n".join(
-        "      <li><h3>%s</h3><p>%s</p></li>" % (t, b) for t, b in FEATURES)
+        '      <li><details name="feat"><summary>'
+        '<span class="art" aria-hidden="true" '
+        'style="--n:%d;--src:url(media/features/%s.png)"></span>'
+        '<h3>%s <i aria-hidden="true">+</i></h3></summary><p><span>%s</span></p></details></li>'
+        % (tile_frames(tid), tid, title, desc) for tid, title, desc in FEATURES)
     targets = "\n".join(
         '      <li><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>' % (t, chip, b)
         for t, chip, b in TARGETS)
-    rough = "\n".join("      <li>%s</li>" % r for r in ROUGH)
     boards = flash_cards(cards)
+    device_options = "\n".join(
+        '      <option value="%s">%s%s</option>'
+        % (c["id"], c["label"], " (beta)" if c.get("beta") else "") for c in cards)
     # One manifest entry per BOARD, carrying every build the picker offers.
     # The default build's fields stay at the top level so a reader that
     # predates the picker still finds what it expects.
     published = [dict(c["fw"], builds=c["builds"]) for c in cards if c["fw"]]
-    # The flasher's 218 KB of vendored esptool-js is only worth loading when
-    # there is something to write.
-    # Only worth saying when there is a button to press. The "not proven on
-    # glass yet" caveat that used to sit here was retired once a P4 was flashed
-    # from this page end to end -- an honesty note that has stopped being true
-    # is just a lie with good intentions.
+    # The hint and the vendored esptool-js only ship when there is something
+    # to write.
     flash_hint = "" if not published else (
         '  <div class="hint">\n'
-        '    <span>The same image at the same offset the cable flash uses. Your\n'
-        '      cartridges and saves are left alone unless you tick the erase box.</span>\n'
-        '    <span><b>After an erase</b> the board re-seeds its cartridges before the\n'
-        '      screen comes up &mdash; give it half a minute.</span>\n'
+        '    <span>Your carts and saves are left alone unless you tick the erase box.</span>\n'
+        '    <span><b>After an erase</b> the first boot takes about half a minute.</span>\n'
         '  </div>\n')
     flash_js = ""
     if published:
@@ -652,8 +651,8 @@ def page(pal, has_player, cards):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAhUlEQVR42mNgGAW4wX8y8dB3ANig5rI5ZGFqOGTAHIBi8aHDx1HwyHPAgEfBcHAAydl0cDrg/8cXKJiQOCVRNLgdgC6PS3z4OYDaeOg5gJDDaB4FA+4AQgUM3dLAgDtg5OaCEeUAFIfUqQZTFZPSUBncDsCVHalh8aBxAKGuGbXUDw4HAAAJtsp8ecvLrQAAAABJRU5ErkJggg==">
-<title>moybyte &mdash; an operating system for ESP32 boards</title>
-<meta name="description" content="An operating system that turns an ESP32 board into a small general-purpose computer. The software is cartridges -- open any of them, change it, run it, on the board itself. Try it here, no install.">
+<title>moybyte &mdash; a small operating system for ESP32 boards</title>
+<meta name="description" content="A small operating system for ESP32 boards. Its software is cartridges you can open, change and run on the board itself. Try it in the browser.">
 <style>
 /* Every colour below is MOY64, generated from runtime/palette.py -- the site
    cannot drift from the system's own palette. Roles are named so the light
@@ -675,6 +674,7 @@ def page(pal, has_player, cards):
 }
 %(font)s
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 html{-webkit-text-size-adjust:100%%;scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--body);font:16px/1.62 var(--sans)}
 .wrap{width:100%%;max-width:var(--w);margin:0 auto;padding:0 24px}
@@ -785,18 +785,56 @@ body.noscroll{overflow:hidden}
 .cards li{background:var(--surface);border:1px solid var(--line);padding:16px 18px}
 .cards h3{margin:0 0 7px;font-size:15px;color:var(--accent)}
 .cards p{margin:0;font-size:14px;color:var(--body)}
+/* --- feature tiles: one-colour mask sheets, stepped through by CSS ---------- */
+/* Each sheet is drawn at its display size, so nothing is resampled, and its
+   colour is the accent, so it follows the theme. A tapped tile shows its text
+   over the art; the text lets taps through, so tapping again closes it. */
+.feats{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));
+  margin:24px 0 0;padding:0;list-style:none}
+.feats li{background:var(--surface);border:1px solid var(--line)}
+.feats details{position:relative;height:100%%}
+.feats summary{list-style:none;cursor:pointer;display:block;padding:16px 16px 12px}
+.feats summary::-webkit-details-marker{display:none}
+.feats summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.feats .art{display:block;width:256px;height:192px;margin:0 auto;
+  background:var(--accent);transition:opacity .15s;
+  -webkit-mask-image:var(--src);mask-image:var(--src);
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;
+  -webkit-mask-size:calc(256px * var(--n)) 192px;mask-size:calc(256px * var(--n)) 192px;
+  -webkit-mask-position:0 0;mask-position:0 0;
+  animation:tile calc(var(--n) * 100ms) steps(var(--n)) infinite}
+@keyframes tile{to{-webkit-mask-position:calc(-256px * var(--n)) 0;
+  mask-position:calc(-256px * var(--n)) 0}}
+@media (prefers-reduced-motion:reduce){.feats .art{animation:none}}
+.feats h3{margin:12px 0 0;font-size:15px;display:flex;justify-content:space-between;
+  align-items:center}
+.feats h3 i{font:600 16px/1 var(--mono);font-style:normal;color:var(--muted);
+  transition:transform .15s}
+.feats details[open] h3 i{transform:rotate(45deg)}
+.feats details > p{position:absolute;left:20px;right:20px;top:16px;height:192px;margin:0;
+  display:flex;align-items:center;font-size:15px;color:var(--ink);pointer-events:none}
+.feats details[open] .art{opacity:.05}
 .cards .chip{display:inline-block;margin:0 0 7px;padding:2px 8px;font:11px/1.5 var(--mono);
   letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
   background:var(--bg);border:1px solid var(--line)}
-.rough{margin:20px 0 0;padding-left:20px;color:var(--body);font-size:15px}
-.rough li{margin:0 0 9px}
 /* --- the flasher ----------------------------------------------------------- */
 /* One card per board: what CI built, how to get the board into the loader, and
    the button that writes it. Everything below the button is progress reporting,
-   hidden until a flash starts. */
+   hidden until a flash starts. The device dropdown shows one card at a time;
+   without script every card shows. */
+.devpick{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:22px 0 0;
+  font-size:14px;color:var(--muted)}
+.devpick select{font:15px var(--sans);color:var(--ink);background:var(--surface);
+  border:1px solid var(--line);padding:8px 10px;min-width:min(20rem,100%%)}
+.cards.boards{grid-template-columns:minmax(0,40rem)}
 .boards li{display:flex;flex-direction:column}
 /* The column stretches its children, and a full-width chip reads as a field. */
 .boards .chip{align-self:flex-start}
+.boards h3 .beta{margin-left:6px;padding:1px 6px;vertical-align:2px;
+  font:600 11px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--wip);border:1px solid var(--wip)}
+.betanote{margin:0 0 10px;font-size:13px;color:var(--wip)}
+.betanote a{color:inherit}
 .boards pre{margin:12px 0 0;font-size:12px}
 .fwmeta{margin:0 0 9px;font:11px/1.7 var(--mono);color:var(--muted)}
 .fwmeta a{color:var(--muted)}
@@ -851,16 +889,12 @@ footer a{margin-right:4px}
   <div class="hero">
     <div>
       <p class="eyebrow">Source-available firmware &middot; FSL-1.1-MIT</p>
-      <h1 class="px">An <em>operating system</em> for ESP32 boards.</h1>
-      <p class="lead">It turns the board into a small computer you can write software
-        on. The software is cartridges &mdash; games, wallpapers, tools, whatever you
-        make &mdash; and you open, change and run any of them on the board itself,
-        with no host computer in the loop.</p>
-      <p class="sub">It boots on three off-the-shelf boards today, and the same source
-        tree is a PC simulator and the browser build below. Approachable enough for a
-        ten-year-old (that is what the block editor is for) without being only that:
-        underneath is a MicroPython firmware with native C kernels, a Lua VM, OTA
-        updates and a windowing shell.</p>
+      <h1 class="px">A small <em>operating system</em> for ESP32 boards.</h1>
+      <p class="lead">Its software is cartridges &mdash; games, wallpapers and
+        tools &mdash; and you can open, change and run any of them on the board
+        itself, with no computer attached.</p>
+      <p class="sub">It runs on five off-the-shelf ESP32 boards, on a PC, and in
+        the browser below.</p>
       <div class="btns">
         <a class="btn pri" href="#try">Try it in the browser &#9656;</a>
         <a class="btn" href="https://github.com/moybyte-org/moybyte">Source</a>
@@ -877,17 +911,15 @@ footer a{margin-right:4px}
 
   <figure class="screen shot">
     <div class="bezel"><img src="media/desktop.gif" alt="The windowed desktop at night: the code editor open on Star Catcher, the same cart running in a window beside it, and the sprite scale being changed from 4 to 8 in the source" loading="lazy"></div>
-    <figcaption>The desktop tier, unedited: change <code>SPR_SCALE</code> in the
-      code tab and the cart running in the window next to it comes back twice the
-      size. The wallpaper is a cartridge too &mdash; that is Moy, asleep.</figcaption>
+    <figcaption>Change <code>SPR_SCALE</code> in the code editor, press play, and
+      the game in the next window comes back bigger. The wallpaper is a cart
+      too.</figcaption>
   </figure>
 </div>
 
 <section id="try"><div class="wrap">
-  <h2>Try it, right here</h2>
-  <p class="slead">The real system compiled to WebAssembly &mdash; the same code the
-    firmware freezes, served from this page and nowhere else. Not a mock-up, not a
-    video.</p>
+  <h2>Try it</h2>
+  <p class="slead">The same system the boards run, compiled to WebAssembly.</p>
   <div class="tabs" id="tabs">
 %(tabs)s
     <button class="tab exp" id="expand" type="button"><b>Expand &#8663;</b><span>fill the screen</span></button>
@@ -896,22 +928,25 @@ footer a{margin-right:4px}
     <button class="shrink" id="shrink" type="button">Close &#10005;</button>
   </div>
   <div class="hint">
-    <span>Click the screen, then arrow keys and Z / X. Pick <b>Make</b> for the editors.
-      <b>Expand</b> fills the screen &mdash; the console resizes to fit it.</span>
-    <span><b>Nothing is saved.</b> Reloading resets the machine.</span>
+    <span>Click the screen, then use the arrow keys, Z and X. Pick <b>Make</b> for
+      the editors.</span>
+    <span>Carts you make are kept in this browser.</span>
   </div>
 %(missing)s</div></section>
 
 <section id="flash"><div class="wrap">
   <h2>Put it on a board</h2>
-  <p class="slead">Plug a board in and write the current firmware to it from this
-    page &mdash; no toolchain, no checkout. Each image below is the one GitHub
-    Actions built, served from this site, and the browser writes it over USB
-    itself. Chrome, Edge or Opera on a desktop: Firefox and Safari do not
-    implement Web Serial.</p>
+  <p class="slead">Pick your device, plug it in over USB, and flash the latest
+    release from this page. Needs Chrome, Edge or Opera on a desktop; Firefox and
+    Safari have no Web Serial.</p>
   <p class="warnbox" id="fw-nowebserial" hidden>This browser has no Web Serial, so
     the flash buttons are off. Download the image instead and write it with
     <code>esptool</code>, at the offset on its card.</p>
+  <label class="devpick"><span>Your device</span>
+    <select id="device">
+      <option value="">Pick one&hellip;</option>
+%(device_options)s
+    </select></label>
   <ul class="cards boards">
 %(boards)s
   </ul>
@@ -919,26 +954,18 @@ footer a{margin-right:4px}
 
 <section id="in"><div class="wrap">
   <h2>What's in it</h2>
-  <p class="slead">Everything here exists and runs today. Where something is
-    unverified or rough, it says so.</p>
-  <ul class="cards">
+  <p class="slead">Tap a tile to read about it.</p>
+  <ul class="feats">
 %(features)s
   </ul>
 </div></section>
 
 <section id="runs"><div class="wrap">
   <h2>What it runs on</h2>
-  <p class="slead">Host and device are one codebase, not a port: each firmware build
-    stages copies of the same modules and freezes them.</p>
+  <p class="slead">One codebase: each firmware build freezes the same modules the
+    simulator and the browser run.</p>
   <ul class="cards">
 %(targets)s
-  </ul>
-</div></section>
-
-<section id="rough"><div class="wrap">
-  <h2>Where it's rough</h2>
-  <ul class="rough">
-%(rough)s
   </ul>
 </div></section>
 
@@ -948,9 +975,9 @@ footer a{margin-right:4px}
 make setup &amp;&amp; make test
 .venv/bin/python tools/simulate_desktop.py
 
-<span class="c"># firmware (needs the ESP-IDF toolchain)</span>
-make firmware-build-lilygo-micropython
-make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
+<span class="c"># firmware (downloads MicroPython and ESP-IDF on the first build)</span>
+make firmware-build-tdeck-mainline
+make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 
 <span class="c"># this page's player, from source</span>
 firmware/web_runner/build.sh &amp;&amp; make site</pre>
@@ -960,11 +987,10 @@ firmware/web_runner/build.sh &amp;&amp; make site</pre>
     <a href="https://github.com/moybyte-org/moybyte/blob/master/docs/moy_cart_api.md">Cart API</a> &middot;
     <a href="https://github.com/moybyte-org/moybyte/issues">Issues</a>
     <br><br>
-    Source-available (FSL-1.1-MIT): free to run, modify, teach with, and to author
-    and sell carts; selling hardware built on Moybyte needs a commercial licence
-    until each release turns MIT two years after publication. The player bundle on
-    this page is MIT. The kid- and parent-facing site is
-    <a href="https://moybyte.com">moybyte.com</a>.
+    Source-available (FSL-1.1-MIT): free to run, modify, teach with, and to make
+    and sell carts. Selling hardware built on Moybyte needs a commercial licence;
+    each release becomes MIT two years after it is published. The page for kids
+    and parents is <a href="https://moybyte.com">moybyte.com</a>.
   </footer>
 </div></section>
 <script>
@@ -1026,6 +1052,18 @@ document.addEventListener("keydown", function (e) {
   if (e.key === "Escape" && stage.classList.contains("big")) collapse();
 });
 show(tabs[0]);
+
+// The flash section's device dropdown: one board card at a time. The browser
+// keeps the choice across a reload, so apply whatever it restored.
+var device = document.getElementById("device");
+var boardCards = [].slice.call(document.querySelectorAll(".boards .board"));
+var flashHint = document.querySelector("#flash .hint");
+function pickDevice() {
+  boardCards.forEach(function (c) { c.hidden = c.dataset.board !== device.value; });
+  if (flashHint) flashHint.hidden = !device.value;
+}
+device.addEventListener("change", pickDevice);
+pickDevice();
 </script>
 %(flash_js)s
 </body>
@@ -1033,7 +1071,7 @@ show(tabs[0]);
 """ % {
         "tokens": tokens, "font": font_face(), "tabs": tabs, "missing": missing,
         "status": status, "features": features, "mark": moy_mark(pal),
-        "targets": targets, "rough": rough, "boards": boards, "flash_js": flash_js,
+        "targets": targets, "boards": boards, "device_options": device_options, "flash_js": flash_js,
         "flash_hint": flash_hint,
     }
 
@@ -1089,6 +1127,9 @@ def main():
     else:
         print("!! no firmware images under %s -- the page will say so "
               "(build them with tools/fetch_ci_firmware.py)" % args.firmware)
+
+    shutil.copytree(FEATURE_SRC, os.path.join(out, "media", "features"),
+                    ignore=shutil.ignore_patterns("*.gif"))
 
     gif = os.path.join(HERE, "hero.gif")
     if not os.path.exists(gif):

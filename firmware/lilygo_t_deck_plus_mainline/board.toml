@@ -30,6 +30,28 @@ them as the same object). That is what makes `wm.FullscreenStackWM` the right
 window manager here and the windowed desktop tier wrong -- see the
 `wm_windowed.py` denial below."""
 
+# NO [panel] BLOCK, AND THAT IS A DECISION (2026-09-06). Declaring this glass
+# would opt the board in to the #203 chrome tap-target floor; the owner asked
+# for it, it was built, RENDERED and declined on the pictures.
+#   * 320x240 on 2.8" is ~143 PPI -> a 16px icon is 2.8mm -> chrome scale 2:
+#     a 36px bar and 52px Settings rows on a 240px-tall screen.
+#   * What that costs is WIDTH, not height. cs 2 spends 188 of the 320 px on
+#     the bar's right cluster alone, so the lent left zone falls from ~202px to
+#     124: the Editor's tab ladder goes from eleven icons to ONE chip (Code,
+#     Sprites, Map, Scene, Music unreachable from the bar), the launcher's
+#     PLAY/CHANGE chips stop fitting entirely, Settings shows two rows instead
+#     of six, and the map editor's bottom button row clips past the panel.
+#     Declaring also moves 320x240 OFF chrome.Layout's frozen `_base` branch
+#     (its predicate ANDs `cs == fs`), so the reference geometry every other
+#     tier degrades to would stop being what this board runs.
+#   * What would have to land FIRST for this to be worth re-proposing: either
+#     the bar's right cluster shrinking under cs (four 32px icons + a clock is
+#     the whole cost) or the tab ladder taking a SECOND row when the lent zone
+#     cannot hold it. Until one of those exists the floor buys a bigger target
+#     for controls that are no longer on the screen.
+# The 7" P4 was declared the same day; its board.toml has the opposite
+# arithmetic, and chrome.chrome_scale_floor's docstring carries both.
+
 # ---------------------------------------------------------------------------
 
 [modules]
@@ -200,6 +222,23 @@ a LEAF whose only importers are `wm_windowed.py` and the web serve glue -- never
 `wm.py` or `console.py`, which this board freezes verbatim. With wm_windowed
 denied above, staging this would freeze bytes nothing imports."""
 
+[[modules.shared.deny]]
+file = "wm_desk.py"
+kind = "tier"
+why  = """
+The windowed WM's two halves that live in their own files: the desk root
+layer (wallpaper + bar + icon column and its retained-backdrop cache) and the
+`WindowChrome` mixin (title strips, grip, taskbar chips). Only `wm_windowed.py`
+imports either, so with it denied above they would freeze bytes nothing
+imports -- the same reasoning as `surface.py`."""
+
+[[modules.shared.deny]]
+file = "wm_chrome.py"
+kind = "tier"
+why  = """
+See `wm_desk.py` above: the other half of the windowed WM, imported only by
+`wm_windowed.py`."""
+
 # -- no consumer here yet ----------------------------------------------------
 
 [[modules.shared.deny]]
@@ -210,10 +249,7 @@ The transport-neutral half of the old web view: browser event batches ->
 InputState/Pointer. It survived the 2026-08 streaming sunset because the plan's
 §3.4 sync/controller RPC speaks the same `{"events":[...]}` format -- but that
 RPC is not built, and today the only importer is the wasm head's `web_boot.py`.
-FLIP THIS the day a board grows a consumer. (`web_view_ws.py`, the RFC 6455
-framing, is the opposite case and IS staged: `moy_webserver.py` imports it
-through a two-branch ladder with no third branch, and dropping it once already
-made the WEB CONSOLE row silently not exist.)"""
+FLIP THIS the day a board grows a consumer."""
 
 # -- staged under another name -----------------------------------------------
 
@@ -286,7 +322,6 @@ dest = "native/.staged"
 
 [native.shared]
 source   = "native"
-strategy = "denylist"
 why = """
 The C-module twin of [modules.shared], one tier down and for the same reason
 (#161): the shared native list used to be a hand-written line in each build.sh
@@ -309,7 +344,6 @@ down."""
 
 [modules.device]
 source   = "device"
-strategy = "allowlist"
 why = """
 The second staging source, and the one that must STAY an allowlist -- the same
 call the P4's board file makes, for the same reason.
@@ -339,6 +373,26 @@ file, so a new member of the package cannot go missing here.
 (Declared HERE, above the groups, and not at the end of the section: a bare key
 after a `[[modules.device.group]]` header belongs to that group's table, not to
 `[modules.device]`.)"""
+
+[[modules.device.group]]
+files = ["boot_shell.py"]
+why = """
+The boot shell's mode ladder, which `modules/moybyte_shell.py` on this board is
+now three declarations over: the board's name, the modes it has, and the module
+its smokes live in. It was ~20 lines written once per board and byte-identical
+after normalising those three, so the ONE-STRING rule, the self-terminating
+smokes and the keep-the-REPL guards now land once instead of four times."""
+
+[[modules.device.group]]
+files = ["desktop_spine.py"]
+why = """
+The console desktop's boot spine: ONE `build_desktop` (the boot order and the
+service set every console board wires) and ONE frame loop over it, with the
+touch-only tier's frame hooks as defaults. The four boards' `run_desktop`s
+carried the same imports, the same IdleBlank/FramePump/FrameLoop construction,
+the same `ws.*` service assignments and the same hook names in fifty-four
+byte-identical lines each; a board now passes its hardware -- compositor,
+canvas, inputs, keyboard, store, constants -- and takes the rest."""
 
 [[modules.device.group]]
 files = ["banded_panel.py"]
@@ -448,11 +502,11 @@ took their last update from it install this build over plain OTA."""
 [[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]
 why = """
-STAGE 6. The socket/HTTP/WebSocket transport core that survived the streaming
-sunset, plus the "serve the wasm console from this board" handler. Board-agnostic
--- the web directory and the SD gate are constructor arguments. `moy_webserver`
-imports `web_view_ws`, which the shared denylist above stages; that pair is the
-whole reason `tests/test_staging_closure.py` exists."""
+STAGE 6. The socket/HTTP transport core that survived the streaming sunset,
+plus the "serve the wasm console from this board" handler. Board-agnostic -- the
+web directory and the SD gate are constructor arguments. The WebSocket half went
+in 2026-09 with `web_view_ws.py`: the RPC that was supposed to ride it shipped as
+plain HTTP, so both were frozen here with no caller."""
 
 [[modules.device.group]]
 files = ["ble_keyboard.py"]

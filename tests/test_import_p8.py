@@ -216,26 +216,40 @@ def test_manifest_valid(tmp_path):
     assert man["title"] == "my test cart"
 
 
-def test_main_lua_carries_the_converted_cart_code(tmp_path):
-    """The inversion of the old `test_main_py_keeps_lua_as_comment_only`: the
-    cart's Lua is CODE now, mechanically converted to Lua 5.4, under a shim."""
+def test_main_lua_is_the_cart_and_p8_lua_is_the_generated_half(tmp_path):
+    """The cart's Lua is CODE, mechanically converted to Lua 5.4 -- and it is
+    ALONE in main.lua.
+
+    SPEC.md 4: the generated PICO-8 layer (data tables + the compat shim) is
+    `p8.lua`, its own chunk ahead of main.lua, with both named in the manifest's
+    `sources`. That is what makes main.lua openable: line 1 is the author's line
+    1, so a crash names a line they can find and the Editor shows a game rather
+    than 1,300 lines of stdlib to scroll past and not touch."""
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
 
     src = (out / "main.lua").read_text(encoding="utf-8")
+    shim = (out / "p8.lua").read_text(encoding="utf-8")
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     assert not (out / "main.py").exists(), "the Python stub is gone"
-    # the shim, then the cart's own body -- as code, not as a comment block
-    assert "PICO-8 compatibility shim" in src
+    assert man["sources"] == ["p8.lua", "main.lua"], \
+        "the load order is the manifest's job (SPEC.md 4)"
+    assert man["main"] == "main.lua", "`main` is the AUTHORED file, not the first"
+
+    # The generated half is in the OTHER file, all of it.
+    assert "PICO-8 compatibility shim" in shim
+    assert "PICO-8 compatibility shim" not in src
+    assert "__p8_gff" not in src, \
+        "the data tables travel with the shim -- it captures them as upvalues"
+
+    # ...and main.lua is the cart: its own body, as code, not a comment block.
     assert "function p8_draw()" in src, \
         "_draw is renamed so the shim can pace it at PICO-8's 30fps"
-    # the p8 dialect is converted, not carried through
     assert " x = x - (1)" in src, "`x -= 1` must expand to Lua 5.4"
-    assert "-=" not in src.split("end shim")[-1]
-    # every body line is live: nothing from the cart is commented out wholesale
-    body = src.split("end shim ")[-1]
-    assert "cls(0)" in body and not any(
-        ln.strip().startswith("-- cls(0)") for ln in body.split("\n"))
+    assert "-=" not in src
+    assert "cls(0)" in src and not any(
+        ln.strip().startswith("-- cls(0)") for ln in src.split("\n"))
 
 
 def test_cart_loads_via_moy_carts(tmp_path):
@@ -259,7 +273,7 @@ def test_the_map_and_the_flags_come_across_now(tmp_path):
     """`__map__` and `__gff__` used to be DEFERRED -- noted in the report and
     written nowhere, because the tilemap writer lived only in moy-spec. It is
     vendored now, so both land: the map as the console's own `map.moymap` (the
-    Map editor opens it) and the flags baked into main.lua for fget()."""
+    Map editor opens it) and the flags baked into p8.lua for fget()."""
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
@@ -267,13 +281,15 @@ def test_the_map_and_the_flags_come_across_now(tmp_path):
     names = sorted(p.name for p in out.iterdir())
     # flags.moyflags is SPEC.md 3.5's sidecar: __gff__ byte for byte.
     assert names == ["flags.moyflags", "main.lua", "manifest.json", "map.moymap",
-                     "sounds.json", "sprites.moygfx"]
+                     "p8.lua", "sounds.json", "sprites.moygfx"]
     head, first = (out / "map.moymap").read_text(
         encoding="utf-8").split("\n")[:2]
     assert head == "128 64", "all 64 rows, not just __map__'s 32"
     # p8 cell ids 01 02 03 04 store as id+1 (0 means empty in .moymap)
     assert first.startswith("0203040500")
-    assert "__p8_gff" in (out / "main.lua").read_text(encoding="utf-8")
+    # The table rides with the shim that captures it as an upvalue (SPEC.md 4:
+    # separate chunks, so it cannot sit in the other file).
+    assert "__p8_gff" in (out / "p8.lua").read_text(encoding="utf-8")
 
 
 def test_empty_sections_handled(tmp_path):
@@ -559,11 +575,16 @@ def test_every_import_declares_the_view_zoom_hint(tmp_path):
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
-    src = (out / "main.lua").read_text(encoding="utf-8")
+    # In p8.lua: the hint is the shim's, and the shim is the generated half.
+    src = (out / "p8.lua").read_text(encoding="utf-8")
     # The porter takes the crop as an ARGUMENT (`--zoom` on its own CLI); this
     # importer passes it as data, from p8_writer.P8_CROP, so there is no flag on
     # any tier and nothing to forget.
-    assert "local P8_VH = 120" in src
+    # The value is emitted as a global just above the shim rather than
+    # substituted into it -- the shim is ~77KB and a replace() holds it twice,
+    # which is the allocation the browser's MicroPython refuses.
+    assert "__p8_vh = 120" in src
+    assert "local P8_VH = __p8_vh" in src
     assert "if P8_VH < 128 then view(128, P8_VH) end" in src
     from p8_writer import P8_CROP, P8_VIEW_H
     assert 128 - P8_CROP[0] - P8_CROP[1] == P8_VIEW_H
@@ -1086,6 +1107,20 @@ def test_the_title_comes_from_the_header_block_not_any_comment(tmp_path):
     only_by = {"lua": ["-- by someone", "x=1"]}
     assert import_p8._title_from(only_by, "star_catcher.p8") == "star catcher"
 
+    # THREE HEADER LINES THAT ARE NOT A NAME, each off a featured cart. A tab
+    # RULE is PICO-8's own tab-title convention (`octosnatch` opens with one);
+    # a LINK wraps across lines, so the second half has no "://" to catch it
+    # (`the last drop` imported as "://github.com/yellowafterlife/"); and a
+    # section LABEL ends in a colon. All three fall through to the filename.
+    rule = {"lua": ["---- main ----", "function _init()"]}
+    assert import_p8._title_from(rule, "37908.p8.png") == "37908"
+    link = {"lua": ["-- ://github.com/someone/", "-- repo/tree/master/x",
+                    "--", "-- entity:", "function f()"]}
+    assert import_p8._title_from(link, "12242.p8.png") == "12242"
+    # ...and a real title with a slash or a colon INSIDE it still lands
+    slashy = {"lua": ["-- pico/8 demake: part two", "x=1"]}
+    assert import_p8._title_from(slashy, "c.p8") == "pico/8 demake: part two"
+
 
 def _run_p8(tmp_path, body, frames=60, dt=1.0 / 60):
     """Import a scrap of p8 source and run it on the real Player."""
@@ -1419,3 +1454,343 @@ def test_the_decode_runs_on_the_micropython_the_browser_uses(tmp_path):
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[:500]
     assert r.stdout.split() == ["256", "0", "255"], (r.stdout, r.stderr[:300])
+
+
+# -- the bit lane (2026-09-10) ---------------------------------------------
+#
+# PICO-8 has one kind of number -- 16.16 fixed point -- and its bit operators
+# run on the whole 32-bit image, fraction included. The port had two readings
+# of that for a long time: the VERBS worked on the image, and the OPERATORS
+# floored each operand onto Lua's integer instruction. `x >> 1` and
+# `shr(x, 1)` answered differently, which is not a thing PICO-8 can do.
+#
+# These run on the real Player, so they cross the emitted shim AND moy_p8.c.
+# A pure-Python check of the porter cannot see either.
+
+def test_a_bit_operator_and_the_verb_of_its_name_are_one_lane(tmp_path):
+    """`x >> 1` is `shr(x, 1)` -- the manual's "operator versions are also
+    available", and a cart reaches whichever it feels like writing."""
+    _need_lua()
+    ws = _run_p8(tmp_path,
+                 "op_shr, vb_shr = 3>>1, shr(3,1)\n"
+                 "op_lshr, vb_lshr = 3>>>1, lshr(3,1)\n"
+                 "op_not, vb_not = ~3, bnot(3)\n"
+                 "op_shl, vb_shl = 3<<1, shl(3,1)\n"
+                 "op_and, vb_and = 12.75&0.5, band(12.75,0.5)\n"
+                 "function _draw() cls(0) end\n", frames=1)
+    g = ws.player._lua.get_global
+    for name in ("shr", "lshr", "not", "shl", "and"):
+        assert g("op_" + name) == g("vb_" + name), (
+            "the `%s` operator and its verb answer differently: %r vs %r"
+            % (name, g("op_" + name), g("vb_" + name)))
+
+
+def test_the_bit_operators_answer_on_the_16_16_image(tmp_path):
+    """The four readings that were wrong, each reachable from cart source.
+
+    A right shift and a complement move bits ACROSS the point; a left shift
+    runs them off the top of the image; and p8's `>>` is ARITHMETIC where
+    Lua's is logical, so a negative used to come back vastly positive."""
+    _need_lua()
+    ws = _run_p8(tmp_path,
+                 "half = 3>>1\n"            # not 1
+                 "comp = ~3\n"              # not -4
+                 "top = 1<<15\n"            # not 32768
+                 "arith = -2>>1\n"          # not 2147483646
+                 "logic = -2>>>1\n"
+                 "frac = 1>>1\n"
+                 "whole = 4>>1\n"
+                 "function _draw() cls(0) end\n", frames=1)
+    g = ws.player._lua.get_global
+    assert g("half") == 1.5
+    assert g("comp") == -3 - 1 / 65536
+    assert g("top") == -32768
+    assert g("arith") == -1, "p8's `>>` is arithmetic, Lua's is logical"
+    assert g("logic") == 32767, "p8's `>>>` is the logical one"
+    assert g("frac") == 0.5
+    assert g("whole") == 2, "a whole answer is still a whole number"
+
+
+def _px9_bit_reader(data, requests):
+    """px9's modern bit reader, in exact 32-bit fixed point.
+
+    zep's px9 is the only compression library the PICO-8 BBS uses. Its newer
+    generation caches EIGHT bits at a time, so the running value never spans
+    more than fifteen significant bits and float32 holds it exactly -- which
+    is why this console can run it at all, once the operators stop flooring.
+    (The 2021 generation caches sixteen, spans up to 31 bits, and cannot.)"""
+    m32 = 0xffffffff
+    cache, cache_bits, i, out = 0, 0, 0, []
+    for bits in requests:
+        if cache_bits < 8:
+            cache_bits += 8
+            cache = (cache + (((data[i] << 16) & m32) >> cache_bits)) & m32
+            i += 1
+        cache = (cache << bits) & m32
+        val = cache & 0xffff0000
+        cache ^= val
+        cache_bits -= bits
+        out.append(val >> 16)
+    return out
+
+
+def test_a_px9_bit_cache_reads_the_stream_the_compressor_wrote(tmp_path):
+    """The payoff, end to end: px9's own reader over real bytes.
+
+    Every operation here is one the floored lane got wrong -- `cache += @src >>
+    n` built a fraction that was thrown away, `cache <<= bits` shifted an
+    integer that was already empty, `cache &= 0xffff` masked the integer half
+    of a word with nothing in it. celeste 2 is the cart people know this from,
+    and it stays refused for a different reason (its older 31-bit cache), but
+    a cart carrying the current px9 decompresses correctly now."""
+    _need_lua()
+    data = bytes((i * 37 + 11) & 0xff for i in range(48))
+    requests = [1 + (i % 7) for i in range(40)]
+    want = _px9_bit_reader(data, requests)
+
+    body = (
+        "d={%s}\n" % ",".join(str(b) for b in data) +
+        "r={%s}\n" % ",".join(str(n) for n in requests) +
+        "for i=1,#d do poke(0x4300+i-1, d[i]) end\n"
+        "cache, cache_bits, src = 0, 0, 0x4300\n"
+        "function getval(bits)\n"
+        " if cache_bits<8 then\n"
+        "  cache_bits+=8\n"
+        "  cache+=@src>>cache_bits\n"
+        "  src+=1\n"
+        " end\n"
+        " cache<<=bits\n"
+        " local val=cache&0xffff\n"
+        " cache^^=val\n"
+        " cache_bits-=bits\n"
+        " return val\n"
+        "end\n"
+        "w={%s}\n" % ",".join(str(v) for v in want) +
+        "bad, first_i, first_got, first_want = 0, 0, 0, 0\n"
+        "for i=1,#r do\n"
+        " local v=getval(r[i])\n"
+        " if v~=w[i] then\n"
+        "  bad+=1\n"
+        "  if first_i==0 then first_i,first_got,first_want=i,v,w[i] end\n"
+        " end\n"
+        "end\n"
+        "function _draw() cls(0) end\n")
+    ws = _run_p8(tmp_path, body, frames=1)
+    g = ws.player._lua.get_global
+    assert g("bad") == 0, (
+        "px9's bit reader disagrees with 32-bit fixed point in %d of %d reads; "
+        "first at %d: got %r, want %r"
+        % (g("bad"), len(want), g("first_i"), g("first_got"), g("first_want")))
+
+
+# -- the cart's TABS, as its files -------------------------------------------
+#
+# PICO-8 cuts a cart's code into numbered tabs with a line that reads `-->8`,
+# and the port used to flatten them into one main.lua where they survived as
+# four stray comments. Each tab is a source now (SPEC.md 4, upstream
+# `p8_lua_port.tab_files`) -- which is only sound because a p8 cart's top-level
+# names are GLOBALS, so the tests that matter most here are the three that
+# check the port DECLINES to split when they are not.
+
+def _tabbed_p8(tmp_path, body, name="tabbed.p8"):
+    p8 = tmp_path / name
+    p8.write_text("pico-8 cartridge // http://www.pico-8.com\nversion 42\n"
+                  "__lua__\n" + body, encoding="utf-8")
+    return p8
+
+
+TABBED = (
+    "-- tabbed cart\n"
+    "-- by tester\n"
+    "board = {}\n"
+    "function _draw() cls(0) end\n"
+    "-->8\n"
+    "--menu\n"
+    "menu = {}\n"
+    "-->8\n"
+    "function helper() return 1 end\n"
+)
+
+
+def test_a_carts_tabs_become_its_files(tmp_path):
+    """One file per tab, in tab order, tab 0 being main.lua.
+
+    The names are the authors': PICO-8 shows its tabs as bare numbers, but
+    people TITLE them in the first line (`--menu`), and that is the name worth
+    putting on a file the Editor lists. A tab with no title keeps the number
+    PICO-8 shows, which is the only other thing it could honestly be called."""
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(_tabbed_p8(tmp_path, TABBED)), str(out))
+
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua", "menu.lua", "tab2.lua"], \
+        "`sources` is the LOAD order, and PICO-8's tab order is it"
+    assert man["main"] == "main.lua", "tab 0 is the authored file"
+    assert "menu = {}" in (out / "menu.lua").read_text(encoding="utf-8")
+    assert "menu = {}" not in (out / "main.lua").read_text(encoding="utf-8"), \
+        "a tab's code moved OUT of main.lua, it was not copied"
+    assert "function helper()" in (out / "tab2.lua").read_text(encoding="utf-8")
+
+    # ...and the store reads them as the scripts either side of main.
+    cart = moy_carts.load(str(out))
+    assert [n for n, _ in cart["src_before"]] == ["p8.lua"]
+    assert [n for n, _ in cart["src_after"]] == ["menu.lua", "tab2.lua"]
+
+
+def _localized(text):
+    """The p8 API names a generated file aliases. `local a, b = a, b` is the
+    block's own shape (localization_lua packs eight to a line), and a cart's
+    own `local` never has it."""
+    out = set()
+    for line in text.split("\n"):
+        if not line.startswith("local "):
+            continue
+        lhs, eq, rhs = line[6:].partition("=")
+        if eq and lhs.strip() == rhs.strip():
+            out.update(n.strip() for n in lhs.split(","))
+    return out
+
+
+def test_every_tab_file_gets_the_localization_block(tmp_path):
+    """`local spr = spr` reaches only its own chunk, so each file needs its
+    own copy -- but WHICH names may be aliased is a question about the whole
+    cart, and is answered once over the whole body. A cart that assigns a p8
+    global in a later tab must not have it frozen by an alias in an earlier
+    one."""
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(_tabbed_p8(
+        tmp_path,
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--late\n"
+        "circ = function(x, y, r, c) end\n")), str(out))
+
+    main = _localized((out / "main.lua").read_text(encoding="utf-8"))
+    late = _localized((out / "late.lua").read_text(encoding="utf-8"))
+    assert "spr" in main and "spr" in late, \
+        "each chunk binds the API it calls as upvalues, or it pays _ENV"
+    assert "circ" not in main and "circ" not in late, \
+        "the cart reassigns circ in tab 1; an alias anywhere would freeze it"
+
+
+FUSING = {
+    "a local that crosses": (
+        "local grid = {}\n"
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--menu\n"
+        "function use() return grid end\n",
+        "local grid"),
+    "a goto across tabs": (
+        "::top::\n"
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--menu\n"
+        "goto top\n",
+        "label `top`"),
+    "a tab mark inside a long string": (
+        "s = [[\n-->8\n]]\n"
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--menu\n"
+        "menu = {}\n",
+        "long string"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(FUSING))
+def test_the_tabs_stay_in_one_file_when_cutting_them_would_break_the_cart(
+        tmp_path, case):
+    """PICO-8 joins its tabs into ONE chunk before it parses them, so three
+    things that are legal there do not survive being cut apart. Each keeps the
+    cart in one main.lua and each SAYS so, because a reader who opens main.lua
+    and finds the `-->8` comments still in it is owed the reason.
+
+    The first is the one that has to be caught rather than reported: separate
+    chunks turn a crossed `local` into a nil, on the first frame that touches
+    it, in code the author did write."""
+    body, expect = FUSING[case]
+    out = tmp_path / "out.moy"
+    summary = import_p8.import_p8(str(_tabbed_p8(tmp_path, body)), str(out))
+
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua"], \
+        "the tabs must stay in one chunk: " + case
+    assert not (out / "menu.lua").exists()
+    # An "imported" line, not a "lossy" one: a fused cart runs exactly as a
+    # split one does, so the report says which FILES it arrived in and claims
+    # no fidelity cost (report_lines, which is the browser's panel, carries the
+    # lossy half only).
+    said = [s for s in summary["imported"] if expect in s]
+    assert said, "the report never said why the tabs stayed fused: " + case
+    assert "main.lua" in said[0]
+
+
+def test_a_local_a_tab_reads_before_it_is_declared_does_not_fuse(tmp_path):
+    """Backwards does not count. A name read in tab 0 and `local`-declared in
+    tab 1 was nil in PICO-8 too -- Lua's scoping is forward, one chunk or
+    five -- so fusing for it would keep carts in one file for a bug the split
+    does not cause."""
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(_tabbed_p8(
+        tmp_path,
+        "function _draw() cls(0) print(late) end\n"
+        "-->8\n"
+        "--tail\n"
+        "local late = 1\n")), str(out))
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua", "tail.lua"]
+
+
+def test_a_tab_titled_after_a_file_the_cart_already_has_takes_its_number(
+        tmp_path):
+    """A slug that collides -- with another tab, or with one of the nine names
+    a cart folder already holds -- falls back to the number PICO-8 shows. The
+    reserved list carries `perf.lua`, which is a host's own wrapper
+    (tools/gen_p8_ports.py) and would have collided months later."""
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(_tabbed_p8(
+        tmp_path,
+        "function _draw() cls(0) end\n"
+        "-->8\n"
+        "--perf\n"
+        "a = 1\n"
+        "-->8\n"
+        "--menu\n"
+        "b = 2\n"
+        "-->8\n"
+        "--menu\n"
+        "c = 3\n")), str(out))
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua", "tab1.lua", "menu.lua",
+                              "tab3.lua"]
+
+
+def test_a_tabbed_cart_runs_with_its_globals_crossing_the_files(tmp_path):
+    """The claim the split rests on, on the real Player: a function defined in
+    tab 1 and called from tab 0 answers, because a p8 cart's top-level names
+    are globals and globals cross a chunk boundary.
+
+    Called from `_init` as well as `_update`, which is the ordering that could
+    have gone wrong and would have gone wrong silently: main.lua's chunk runs
+    BEFORE the tab that defines `bump`, and only the lifecycle hooks run after
+    every chunk has."""
+    _need_lua()
+    ws = _run_p8(tmp_path,
+                 "-- crossing cart\n"
+                 "ticks = 0\n"
+                 "seed = 0\n"
+                 "function _init() seed = bump(40) end\n"
+                 "function _update() ticks += 1 end\n"
+                 "function _draw() cls(0) end\n"
+                 "-->8\n"
+                 "--helpers\n"
+                 "function bump(v) return v + 2 end\n",
+                 frames=10, dt=1.0 / 30)
+    g = ws.player._lua.get_global
+    assert g("seed") == 42, "_init could not reach a function its own tab lacks"
+    assert g("ticks") == 10
+    man = json.loads((Path(ws.carts_root) / "probe.moy" / "manifest.json")
+                     .read_text(encoding="utf-8"))
+    assert man["sources"] == ["p8.lua", "main.lua", "helpers.lua"], \
+        "the cart really did run as several files"

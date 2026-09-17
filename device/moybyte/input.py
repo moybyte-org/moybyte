@@ -275,6 +275,9 @@ class InputState:
         self._p_held = None         # per-player views, built only when _multi
         self._p_pressed = None
         self._p_last = None
+        self._kept = set()          # press edges kept for a paced cart's next tick (#217)
+        self._kept_p = None
+        self._taken = False         # a logic tick already took this frame's edges
         self._default = self.source("local")
 
     # -- sources -----------------------------------------------------------
@@ -337,8 +340,56 @@ class InputState:
         self._pressed = held - self._last
         self._released = self._last - held
         self._last = set(held)
+        self._taken = False
         if self._multi:
             self._player_edges()
+
+    # A paced cart's press edges (#217). begin_frame stays the shell's
+    # per-frame edge set; the Player KEEPS a frame's edges when no logic tick
+    # ran in it (a 30Hz cart on a 60Hz loop must not lose the press that
+    # landed between its ticks), and the first tick of a frame takes what was
+    # kept while a second tick in the same frame sees no edge at all. Nothing
+    # here runs while the shell owns the input, so a menu over a parked game
+    # reads fresh edges every frame.
+    def keep_edges(self):
+        if self._pressed:
+            self._kept |= self._pressed
+        pp = self._p_pressed
+        if pp:
+            kp = self._kept_p
+            if kp is None:
+                kp = self._kept_p = {}
+            for p, b in pp.items():
+                if b:
+                    k = kp.get(p)
+                    if k is None:
+                        kp[p] = set(b)
+                    else:
+                        k |= b
+
+    def tick_edges(self):
+        if self._taken:
+            self._pressed.clear()
+            if self._p_pressed:
+                for b in self._p_pressed.values():
+                    b.clear()
+            return
+        self._taken = True
+        if self._kept:
+            self._pressed |= self._kept
+            self._kept.clear()
+        kp = self._kept_p
+        if kp:
+            pp = self._p_pressed
+            for p, k in kp.items():
+                if pp is not None and p in pp:
+                    pp[p] |= k
+            kp.clear()
+
+    def drop_edges(self):
+        self._kept.clear()
+        if self._kept_p:
+            self._kept_p.clear()
 
     # SPLIT OUT OF begin_frame ON PURPOSE, and measured: MicroPython sizes a
     # call frame from the whole function, and one that needs enough locals
@@ -656,6 +707,11 @@ class TDeckKeyboard:
         else:
             self._disable_raw_mode()     # sends 0x04; back to 1-byte ASCII
 
+    # How many 1-byte reads the raw->ASCII revert drains before giving up. Two
+    # or three is what a real switch produces; the cap is only so a keyboard
+    # that answers with a byte forever cannot hold the bus.
+    DRAIN_READS = 4
+
     def _disable_raw_mode(self):
         try:
             self._i2c.writeto(self.KEYBOARD_ADDR, self.KEY_MODE_CMD)
@@ -663,6 +719,20 @@ class TDeckKeyboard:
             print("Moybyte keyboard mode revert failed:", exc)
         self.raw_mode = False
         self._held_buttons = ()
+        # THE SWITCH DRAINS ITS OWN BYTE. This revert happens because a TEXT
+        # surface just took the keyboard (the Code tab, a password field), and
+        # what the C3 has to hand over at that moment was typed while the matrix
+        # was streaming -- before the surface existed. Delivered, it is a letter
+        # the kid did not type appearing in the buffer. The matrix decodes only
+        # sixteen keys, so the byte the console already holds is not always the
+        # one that arrives here, which is why the seed on the console side
+        # (Workstation._set_text_mode) does not cover this and neither covers
+        # the other. Kbd-INTERNAL, like every other _read_stage-side write: it
+        # touches the bus this thread owns and never InputState.
+        for _ in range(self.DRAIN_READS):
+            if self._read_key() == 0:
+                break
+        self._held_until_ms = 0
 
     def _timed_read(self, nbytes):
         """The one place a keyboard I2C transaction happens: readfrom + #69 latency

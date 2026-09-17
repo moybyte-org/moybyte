@@ -100,7 +100,8 @@ BARE_RE = re.compile(
 # is idiomatic in that file and not worth expanding a hundred times.
 ROOTS = ("", "firmware/lilygo_t_deck_plus_mainline",
          "firmware/esp32_p4_wifi6_touch_lcd_7b", "firmware/web_runner",
-         "firmware/seeed_xiao_esp32s3_zero", "docs/history")
+         "firmware/seeed_xiao_esp32s3_zero", "firmware/guition_jc3248w535",
+         "firmware/guition_jc8012p4a1c", "docs/history")
 
 # Paths that are deliberately not in this repo. Each is a fact about the world,
 # not a reference we can resolve -- and each is documented where it appears.
@@ -229,15 +230,11 @@ DUP_BUDGET = {
     (".claude/rules/carts.md",
      "native/moy_audio/libmoy/UPSTREAM.md"): 16,
     ("docs/moy_cart_api.md", "runtime/README.md"): 14,
-    ("CONTRIBUTING.md", "README.md"): 12,
-    ("LICENSE.md", "README.md"): 7,
     ("docs/backend_contract_v1.md", "docs/surface_model_v1.md"): 8,
     # Each vendored directory's UPSTREAM.md must stand alone beside its code, so
     # they share the vendoring rules deliberately.
     ("native/moy_audio/libmoy/UPSTREAM.md",
      "native/moy_gfx/libmoy/UPSTREAM.md"): 21,
-    ("experiments/lua_bridge/components/lua/MODIFICATIONS.md",
-     "native/moy_lua/lua/MODIFICATIONS.md"): 8,
 }
 DUP_FLOOR = 4
 DUP_EXEMPT_DIRS = ("LICENSES/",)

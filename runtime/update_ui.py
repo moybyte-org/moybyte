@@ -24,8 +24,9 @@ Dependency profile (the facade lens, shell_architecture_v1.md §2) -- through it
                              genuinely privileged capability the screen needs; it
                              is injected onto Workstation by moy_runtime.run_desktop.
 
-`NAMES` / `in_rect` / `err_text` are injected at construction (same circular-import
-reason as BlockEditorUI: console.py builds the one UpdateUI a Workstation holds).
+`NAMES` / `err_text` are injected at construction (same circular-import
+reason as BlockEditorUI: console.py builds the one UpdateUI a Workstation holds);
+the rect hit-test is `ui.rect_in`, imported directly.
 `_ticks_ms` / `_ticks_diff` are duplicated here (they only wrap `time`; the same
 foundational-helper duplication BlockEditorUI's layout constants use), so the
 method bodies stay byte-for-byte identical to the pre-extraction versions.
@@ -36,6 +37,7 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_diff
@@ -44,11 +46,10 @@ except ImportError:                     # host: the runtime package
 
 
 class UpdateUI:
-    def __init__(self, ws, names, in_rect, err_text):
+    def __init__(self, ws, names, err_text):
         self.ws = ws
         # Injected instead of imported back from console.py (see module docstring).
         self._NAMES = names
-        self._in = in_rect
         self._err_text = err_text
         # Update-screen transient state (was Workstation's; _updater_ok/_online_ok
         # stay there -- they back the queries, not the screen).
@@ -100,6 +101,7 @@ class UpdateUI:
             return
         if self._boot_verdict_phase():
             return
+        self.ws.wifi_hold("update")            # the radio lease: _exit_update lets go
         self._check_armed = False              # gate: draw CHECKING... before the blocking fetch
         self._upd_phase = "checking"
 
@@ -118,6 +120,7 @@ class UpdateUI:
             self._upd_phase = "error"
             self._upd_msg = "no c6 updater"
             return
+        self.ws.wifi_hold("update")            # the same lease: the manifest rides the link
         self._check_armed = False              # CHECKING... paints first
         self._upd_phase = "c6_checking"
 
@@ -171,6 +174,7 @@ class UpdateUI:
                 cu.cancel()
             except Exception:
                 pass
+        self.ws.wifi_release("update")        # the screen was the radio's reason
         self.ws.wm.goto("settings")   # Stage 6e: pop the update screen, back to Settings
         self.ws._dirty = True
 
@@ -222,7 +226,7 @@ class UpdateUI:
     def _update_pointer(self, px, py, click):
         if not click:
             return
-        if self._in(px, py, self.ws.layout.set_back):  # the X in the title row
+        if _in(px, py, self.ws.layout.set_back):  # the X in the title row
             if self._upd_phase != "done":
                 self._exit_update()
             return
@@ -410,11 +414,27 @@ class UpdateUI:
         elif ph == "done":
             # Brief pause so the kid sees "UPDATED!", then reboot into the new image.
             if _ticks_diff(_ticks_ms(), self._upd_at) >= 1200:
+                self._commit_open_editor()
                 try:
                     u.reset()
                 except Exception:
                     self._upd_phase = "error"
                     self._upd_msg = "reset failed"
+
+    def _commit_open_editor(self):
+        """A reboot is an exit path too (#154). On the windowed tier an Editor
+        window can still be open beside this screen holding an edit inside its
+        idle-debounce window, and nothing else on the way to reset() would persist
+        it -- so hard-commit it the way go_home does. Guarded: a store hiccup must
+        not strand a board whose bootloader already points at the new slot."""
+        ws = self.ws
+        app = getattr(ws, "editor_app", None)
+        if app is None or app.project is not ws.project:
+            return
+        try:
+            app.save_current()
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte pre-reboot commit failed:", exc)
 
     def _line(self, x, y, text, col):
         """One status line on the update screen, through the toolkit's `row`.
@@ -450,12 +470,16 @@ class UpdateUI:
         cv.rect(0, 0, lay.w, lay.h, th["bar"])
         px, py, pw, ph = lay.settings_panel
         _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["surface"])
-        self.ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), th["accent"], cv)
-        cv.print("UPDATE", px + 24, py + 4, th["ink"], 2)
-        self.ws._mini_btn("X", lay.set_back, th["danger"], cv)
+        # The same title band Settings draws, so it takes the same #203 re-centring:
+        # the gear + word ride set_head_dy, the X's letter the middle of its chip.
+        hd = lay.set_head_dy
+        self.ws._glyph("gear", (px + 6, py + 2 + hd, 14 * fs, 14 * fs),
+                       th["accent"], cv)
+        cv.print("UPDATE", px + 24, py + 4 + hd, th["ink"], 2)
+        self.ws._mini_btn("X", lay.set_back, th["danger"], cv,
+                          lay.tap_box(lay.set_back, 18, 14))
         u = self.ws.updater
         slot = u.slot() if u is not None else "?"
-        ver = u.version() if u is not None else 0
         vlabel = u.version_label() if u is not None else "v0"
         x = px + 12 * fs
         y = py + 28 * fs

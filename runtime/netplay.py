@@ -81,8 +81,8 @@ T_BYE = 6        # leaving
 
 # The lockstep clock. 30Hz because the p99 input round trip (14ms) fits a 33ms
 # tick 2.4x over, where a 60Hz tick (16.7ms) leaves nothing for the console's own
-# frame. It also lands on the frameskip model the console already ships (#77:
-# logic at the full rate, motion at 30Hz).
+# frame. It is also the tick model's default rate (#217: logic at 30, draw on
+# a divisor of it).
 TICK_HZ = 30
 # Input delay STARTS at one frame (33ms) and RAISES ITSELF to two under stall
 # pressure -- see LockstepSession.advance. DELAY=1 was measured and rejected in

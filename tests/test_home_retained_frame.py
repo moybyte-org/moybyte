@@ -38,11 +38,39 @@ def _count_grid(ws):
     return calls
 
 
+def _settle_covers(ws, drv, limit=400):
+    """Run frames until the cover pipeline has nothing left to land: no build
+    in flight and the cover generation unchanged for several frames. Builds
+    and the idle prefetch are sliced by the WALL CLOCK, so how many covers a
+    frame lands depends on how fast the machine is, and a cover landing between
+    two renders makes them differ for a reason that has nothing to do with the
+    stamp (a slow CI runner did exactly that at x=213 of the shelf)."""
+    covers = ws.covers
+    last = covers.gen
+    still = 0
+    for _ in range(limit):
+        _quiesce(ws)
+        drv.frame(0.0)
+        if covers._jobs or covers.gen != last:
+            last = covers.gen
+            still = 0
+            continue
+        still += 1
+        if still >= 5:
+            return
+    raise AssertionError("the cover pipeline never settled in %d frames" % limit)
+
+
 def _settle_home(tmp_path):
-    """Boot to the home shelf, one settled paint captured."""
+    """Boot to the home shelf with every cover landed, one settled paint
+    captured. The bar's live HH:MM is bound to a constant for the same reason
+    the covers are drained: two renders a moment apart must not differ by
+    anything but the path under test."""
     ws = _ws(tmp_path)
+    ws.bar_layer._clock_text = lambda: "00:00"
     drv = _drv(ws)
     drv.frame(0.0)
+    _settle_covers(ws, drv)
     _quiesce(ws)
     ws._dirty = True
     drv.frame(0.0)
@@ -70,10 +98,12 @@ def test_stamped_frame_matches_live_render(tmp_path):
     _quiesce(ws)
     drv.frame(0.0)                                   # the stamped re-entry
     stamped = bytes(ws.sys_canvas._buf)
+    gen = ws.covers.gen
     ws.launcher_layer._lib_key = None                # force the live path
     ws._dirty = True
     drv.frame(0.0)
     live = bytes(ws.sys_canvas._buf)
+    assert ws.covers.gen == gen, "a cover landed between the two renders"
     assert stamped == live
 
 

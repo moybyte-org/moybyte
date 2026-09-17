@@ -27,6 +27,23 @@ module lists differ by exactly those two files, and by nothing else."""
 
 # ---------------------------------------------------------------------------
 
+[panel]
+# The GLASS, in inches -- the opt-in to the chrome tap-target floor (#203).
+# 1024x600 on 7.0" is ~170 PPI, so a 16px bar icon is 2.4mm and the floor
+# (`chrome.MIN_TAP_MM`, 4.5) answers chrome scale 2.
+#
+# The #203 note said declaring here was "only free while that board runs at
+# font scale 2", and this board runs at 1 (`FONT_SCALE`, owner call 2026-07-12:
+# the 7" panel fits CONTENT, not magnification) -- so it is NOT free, and the
+# owner made the call on 2026-09-06 anyway. It costs nothing but pixels here:
+# 1024px of width absorbs a 36px bar without dropping a single tab chip or a
+# Settings row, and the code editor's symbol keys -- this board's on-screen
+# keyboard until a BLE one is paired -- double. The T-Deck was declined on the
+# same day for the opposite arithmetic; its board.toml records why.
+diagonal_in = 7.0
+
+# ---------------------------------------------------------------------------
+
 [modules]
 dest = "modules"
 
@@ -162,10 +179,7 @@ Browser event batches -> InputState/Pointer. It survived the 2026-08 streaming
 sunset because the plan's §3.4 sync/controller RPC speaks the same format, but
 that RPC is not built and today's only importer is the wasm head's web_boot.py.
 This board SERVES the wasm console (moy_webhost) -- it does not decode its
-input. Flip this the day it does. (`web_view_ws.py` is the opposite case and IS
-staged: `moy_webserver.py` imports it through a two-branch ladder with no third
-branch, and dropping it once already made the WEB CONSOLE row silently not
-exist -- 06506ab, then a0a9d21 three days later.)"""
+input. Flip this the day it does."""
 
 # NOTE the two files that are NOT denied here and ARE on the T-Deck:
 # `wm_windowed.py` and its `surface.py` leaf. See [board].tier_why.
@@ -233,7 +247,26 @@ chunk       = 256
 # rather than after 32, and 4KB is also the buffer the board allocates for it.
 # It is NOT a rate limit; the ack costs one round trip per window and a 124KB
 # cart is 31 of them.
-window      = 4096
+#
+# WHAT THE ACK DOES NOT DO, measured 2026-09-11: it does not stop a byte being
+# dropped INSIDE a window. Between acks the host blasts the whole window and
+# the board must keep up for all of it; when it falls behind for ~25ms the ring
+# overflows and a handful of bytes (2, 7, 12 were seen) vanish with no error.
+# On this board that happened about once every 300 windows -- one failed 120KB
+# push in five -- and shrinking the window does NOT fix it: 512 failed a 120KB
+# file where 2048 passed, in the same session. The fix is recovery, not
+# avoidance (RECV_RETRIES in runtime/dev_channel.py): a short window is thrown
+# away and asked for again, and 8 pushes of a 120KB cart then went 8/8 with 6
+# re-sends absorbed.
+#
+# 1024, measured 2026-09-15. Recovery absorbs a dropped byte; it cannot absorb
+# a window the board never sees at all, and that is what 2048 and 4096 do here
+# -- a 79KB file failed 3/3 at each with "timeout after 0 of 79036", the
+# board's two-empty-windows verdict, while 1024 went 3/3 clean. The ring is
+# ~256 bytes with no flow control, so the ack is the only backpressure there
+# is: the larger the window, the longer this board's frame loop has to keep up
+# unaided, and for 4KB it does not.
+window      = 1024
 
 [monitor]
 baud = 115200
@@ -245,14 +278,13 @@ dest = "native/.staged"
 
 [native.shared]
 source   = "native"
-strategy = "denylist"
 why = """
 The C-module twin of [modules.shared] (#161; see the T-Deck's board.toml for
 the mechanism). Every directory under native/ with a micropython.cmake crosses
-unless denied here -- this board's own moy_dsi/moy_ppa/moy_ble_hid live in its
-board tree and are not staged. The two denials below are what the old
-hand-written cp list in build.sh silently encoded; now they are decisions with
-reasons someone can check."""
+unless denied here. The three denials below are what the old hand-written cp
+list in build.sh silently encoded; now they are decisions with reasons someone
+can check. (native/p4/ has no micropython.cmake of its own, so this scan never
+sees it -- that tier is the second source, [native.p4] below.)"""
 
 [[native.shared.deny]]
 module = "moy_sd"
@@ -286,11 +318,28 @@ bounce and no completion ISR. Staging it would compile a FreeRTOS task and a
 DMA-SRAM allocation into the image for code nothing calls. A DSI board that
 ever needs a push path is a new decision, not a flip of this one."""
 
+[native.p4]
+source   = "native/p4"
+why = """
+The ESP32-P4 SILICON tier: the C modules an ESP32-P4 board has BECAUSE it is a
+P4 and no S3 board could compile -- moy_dsi (the MIPI-DSI panel, parameterized
+by the board's panel define in mpconfigboard.cmake), moy_ppa (the pixel
+accelerator behind the game composite), moy_ble_hid (the NimBLE-host report
+queue over the C6's hosted radio) and moy_c6 (the ESP-NOW shim + C6 plumbing
+over ESP-Hosted). All four lived in THIS board's tree until 2026-09-06, when
+the Guition JC8012P4A1C became their second consumer -- Phase C's rule
+(docs/board_ports_2026-08.md): a driver moves to a shared tree the day a
+second board carries the hardware, parameterized by board data, not before.
+Declared as a second SOURCE rather than as four denials on every S3 board:
+a board that names this tier has the silicon; one that does not has nothing
+to explain. Nothing is denied here -- every module in the tier is the
+silicon's, not a panel's, except moy_dsi, which each P4 board parameterizes
+(MOY_DSI_PANEL_*) rather than denies."""
+
 # ---------------------------------------------------------------------------
 
 [modules.device]
 source   = "device"
-strategy = "allowlist"
 why = """
 The second staging source, and the one that must STAY an allowlist.
 
@@ -326,6 +375,26 @@ after a `[[modules.device.group]]` header belongs to that group's table, not to
 wrong and the stager reported as "no packages staged".)"""
 
 [[modules.device.group]]
+files = ["boot_shell.py"]
+why = """
+The boot shell's mode ladder, which `modules/moybyte_shell.py` on this board is
+now three declarations over: the board's name, the modes it has, and the module
+its smokes live in. It was ~20 lines written once per board and byte-identical
+after normalising those three, so the ONE-STRING rule, the self-terminating
+smokes and the keep-the-REPL guards now land once instead of four times."""
+
+[[modules.device.group]]
+files = ["desktop_spine.py"]
+why = """
+The console desktop's boot spine: ONE `build_desktop` (the boot order and the
+service set every console board wires) and ONE frame loop over it, with the
+touch-only tier's frame hooks as defaults. The four boards' `run_desktop`s
+carried the same imports, the same IdleBlank/FramePump/FrameLoop construction,
+the same `ws.*` service assignments and the same hook names in fifty-four
+byte-identical lines each; a board now passes its hardware -- compositor,
+canvas, inputs, keyboard, store, constants -- and takes the rest."""
+
+[[modules.device.group]]
 files = ["device_util.py", "device_canvas.py", "device_api.py", "moycore_glue.py",
          "gt911.py"]
 why = """
@@ -335,6 +404,17 @@ device home of THE make_api -- one body in the shared cart_api.py since
 2026-08-17, re-exported here), moycore's host half (input snapshot in, audio
 queue out, pmem at the #66 boundaries), and the leaf ticks helpers
 device_canvas imports."""
+
+[[modules.device.group]]
+files = ["dsi_panel.py", "p4_canvas.py", "p4_desktop.py"]
+why = """
+The P4 silicon tier's Python half (2026-09-06, promoted out of THIS board's
+p4_display.py / moy_runtime.py the day the Guition P4 became their second
+consumer): the DSI compositor over native/p4/moy_dsi (triple-buffer rotation,
+deferred present, fences -- tests/test_p4_display.py executes it) and the
+SYSTEM canvas with the PPA composite hooks the windowed WM probes for. This
+board's p4_display.py adds only its backlight; its moy_runtime.py constructs
+the canvas at this glass's size."""
 
 [[modules.device.group]]
 files = ["ble_keyboard.py"]
@@ -383,9 +463,9 @@ every other board's rows stay frozen."""
 [[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]
 why = """
-The socket/HTTP/WebSocket transport core that survived the streaming sunset,
-plus the "serve the wasm console from this board" handler (plan §3.4's pull
-half). Board-agnostic -- the web directory and the SD gate are constructor
-arguments. `moy_webserver` imports `web_view_ws`, which the shared denylist
-above stages; that pair is the whole reason `tests/test_staging_closure.py`
-exists."""
+The socket/HTTP transport core that survived the streaming sunset, plus the
+"serve the wasm console from this board" handler (plan §3.4's pull half).
+Board-agnostic -- the web directory and the SD gate are constructor arguments.
+The WebSocket half went in 2026-09 with `web_view_ws.py`: the RPC that was
+supposed to ride it shipped as plain HTTP, so both were frozen here with no
+caller."""

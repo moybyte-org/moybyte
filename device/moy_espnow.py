@@ -75,10 +75,6 @@ DRAIN_MAX = 24         # messages per frame -- a bound, not a target
 START_TRIES = 12       # invites before the host gives up (~5s at BEACON_MS)
 
 
-def _u16(b, i):
-    return b[i] | (b[i + 1] << 8)
-
-
 class Peer:
     """Another console we can hear. `cart` is what it is sitting on, which is how
     two consoles decide they are about to play the SAME game."""
@@ -178,7 +174,10 @@ class EspNowLink:
             if self.wlan is None:
                 import network
                 self.wlan = network.WLAN(network.STA_IF)
-                self.wlan.active(True)
+            # Every start, not only the first: the console's radio lease
+            # (Workstation.wifi_release) stops the interface between matches,
+            # and ESP-NOW on a stopped WiFi raises. Idempotent when it is up.
+            self.wlan.active(True)
             self.mac = self.wlan.config("mac")
             # Power save off for the session only -- it halves the latency tail
             # and it costs battery, so stop() puts it back.

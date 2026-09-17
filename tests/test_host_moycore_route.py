@@ -1,14 +1,15 @@
-"""The host routes a spec-only Lua cart to the boards' Lua (rung 4 swap).
+"""The host routes every Lua cart to the boards' Lua (rung 4 swap).
 
-`build_workstation` now prefers `runtime/lua_binding` -- libmoy's binding over
-the same vendored 5.4 the boards build, LUA_32BITS and all -- and keeps lupa
-for carts that use moybyte's superset, which libmoy does not bind.
+`build_workstation` runs Lua carts through `runtime/lua_binding` -- libmoy's
+binding over the same vendored 5.4 the boards build, LUA_32BITS and all --
+and there is no second runtime for carts that use moybyte's superset: those
+verbs ride the shared handle glue (runtime/lua_ext.py).
 
-The gate is the part worth testing, because its first version was a silent
-no-op: a plain substring scan for the superset names disqualified EVERY cart in
-the tree (`table.insert`, a variable named `col`, the letters "net" inside an
-identifier), so the new path existed and was never taken. It matches calls now,
-and these assertions are what would have caught that.
+The route used to have a source gate, and that gate's first version was a
+silent no-op: a substring scan for the superset names disqualified EVERY cart
+in the tree (`table.insert`, a variable named `col`, the letters "net" inside
+an identifier), so the new path existed and was never taken. These assertions
+pin that the route is taken, by asking the carts rather than the gate.
 """
 
 import pytest
@@ -21,8 +22,8 @@ import canvas_probe as probe  # pixel-width-agnostic "it drew" probes
 def test_a_superset_cart_is_not_routed_away_any_more():
     """The correction: ONE runtime.
 
-    A cart calling make_layer used to be sent to lupa, which meant two Lua
-    engines coexisted, both implementing the spec verbs. The superset rides
+    A cart calling make_layer used to be sent to a second Lua engine, so two
+    coexisted, both implementing the spec verbs. The superset rides
     moycore now as registered trampolines, so every cart qualifies and the
     old source gate is gone."""
     for src in ("function _draw() cls(1) spr(2, 8, 8) end",
@@ -40,7 +41,7 @@ def test_every_lua_seed_cart_really_runs_on_moycore(tmp_path):
     for a while it was not even close. Every Lua seed calls make_layer or
     image() somewhere in `_init`; those are object-valued, the trampoline
     cannot marshal a Layer, so the load raised and `_make_lua` handed the cart
-    to lupa. The route test passed the whole time -- it asks the gate, and the
+    to the fallback. The route test passed the whole time -- it asks the gate, and the
     gate was right. This asks the carts.
 
     Deliberately checks the run's TYPE rather than that it merely started: a
@@ -81,12 +82,12 @@ def test_a_cart_with_no_sheet_or_map_does_not_take_the_process_down():
     buf = bytearray(64 * 64)
     run = HostLuaRun(buf, 64, 64)                    # no sheet, no map
     try:
-        assert run.load("function _update(dt) end\n"
+        assert run.load([("function _update(dt) end\n"
                         "function _draw()\n"
                         "  spr(1, 0, 0) sspr(0, 0, 8, 8, 0, 0)\n"
                         "  map(0, 0) tline(0, 0, 8, 8, 0, 0, 65536, 0)\n"
                         "  mset(1, 1, 3) X = mget(1, 1)\n"
-                        "end\n", "@c") is None
+                        "end\n", "@c")]) is None
         assert run.tick(1 / 60.0) is None
         assert run.get_global("X") == -1, "no map must read as empty, not junk"
         assert not any(buf), "an absent sheet drew something"

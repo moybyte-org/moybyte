@@ -120,11 +120,6 @@ commit lands in the cart's own `journal/` and the console's UNDO walks back
 through it. moy_sync's docstring carries the doctrine and the cost.
 """
 
-try:
-    import os
-except ImportError:                      # pragma: no cover
-    os = None
-
 import json as _json
 
 from moy_webserver import (WebServer, http_response, FileResponse,
@@ -203,6 +198,7 @@ _skip = moy_sync._skip
 _entries = moy_sync._entries
 _is_dir = moy_sync._is_dir
 _read_text = moy_sync._read_text
+_read_chunks = moy_sync.read_text_chunks
 
 
 def pack_store(carts_root, listdir=None, read=None, isdir=None, tops=None):
@@ -263,13 +259,19 @@ def stream_store_json(carts_root, listdir=None, read=None, isdir=None,
 
     A generator and not a dict-then-dumps because on real hardware the dict IS
     the problem: the P4's store is 982KB of JSON, which took 61s to build and
-    would not fit on the S3 at all. One file's text is the largest thing
-    resident here.
+    would not fit on the S3 at all.
 
-    Escaping goes through `_jstr` -- see the measured note there for why that is
-    json.dumps and not the hand-rolled walk it started as.
+    NOTHING here is as large as a FILE either, since 2026-09-09: a value is
+    read, escaped and framed one `moy_sync.STORE_READ_CHUNK` at a time, so the
+    cost of a pull no longer scales with the biggest cart in the store. It did
+    until a Guition's card grew 142KB PICO-8 ports and every pull died
+    mid-response with a MemoryError on a heap reporting 3.4MB free --
+    `moy_sync.read_text_chunks` carries that measurement.
+
+    Escaping goes through `_jesc`/`_jstr` -- see the measured note there for why
+    that is json.dumps and not the hand-rolled walk it started as.
     """
-    _read = read or _read_text
+    _read = read
     yield "{"
     first = [True]
     for top in _root_dirs(carts_root, listdir, isdir, tops):
@@ -292,15 +294,34 @@ def _stream_dir(path, prefix, _listdir, _isdir, _read, first):
             for piece in _stream_dir(full, rel, _listdir, _isdir, _read, first):
                 yield piece
             continue
-        text = _read(full)
-        if text is None:                 # binary/unreadable: skip, never crash
+        pieces = _value_pieces(full, _read)
+        if pieces is None:               # binary/unreadable: skip, never crash
             continue
         if not first[0]:
             yield ","
         first[0] = False
         yield _jstr(rel)
-        yield ":"
-        yield _jstr(text)
+        yield ':"'
+        for piece in pieces:
+            yield _jesc(piece)
+        yield '"'
+
+
+def _value_pieces(path, _read):
+    """One file's text as bounded pieces, or None (skip it).
+
+    The default reader is `moy_sync.read_text_chunks`, which never holds more
+    than a piece. An INJECTED reader is a host test with no filesystem behind
+    it: it hands over a whole string, which is then sliced rather than re-read,
+    so the two readers cannot disagree about what a file holds.
+    """
+    if _read is None:
+        return _read_chunks(path)
+    text = _read(path)
+    if text is None:
+        return None
+    step = moy_sync.STORE_READ_CHUNK
+    return (text[i:i + step] for i in range(0, len(text), step))
 
 
 def _jstr(s):
@@ -317,16 +338,29 @@ def _jstr(s):
     per-character Python loop is never the optimisation. Handing a whole string
     to a C builtin allocates, and allocating is what this file otherwise works
     hard to avoid -- but ONE file's copy is bounded and transient, where the
-    dict-of-everything this replaced was not.
+    dict-of-everything this replaced was not. A file's own text is not even
+    that any more; see `_jesc`.
     """
     return _json.dumps(s)
 
 
-def _file_size(path):
-    try:
-        return os.stat(path)[6]
-    except OSError:
-        return None
+def _jesc(s):
+    """One PIECE of a JSON string literal -- `_jstr` without its quotes.
+
+    JSON escaping is per character and carries no state across characters, so
+    the pieces of a value concatenate into exactly the literal `_jstr` would
+    have built for the whole file. That is the whole reason a value can be
+    emitted without the file ever being resident, and it holds on both tiers
+    even though they escape differently (CPython writes non-ASCII as \\uXXXX,
+    MicroPython passes the UTF-8 through): each side is self-consistent, and
+    each side's pieces join back into that side's own literal.
+
+    The split point is safe for the same reason. CPython reads text by
+    CHARACTER, so a piece boundary never lands inside one; MicroPython reads
+    bytes and does not decode at all, so a boundary inside a UTF-8 sequence
+    still concatenates back byte for byte.
+    """
+    return _json.dumps(s)[1:-1]
 
 
 def _baked(name):
@@ -515,6 +549,11 @@ class ConsoleUpdate:
         self._want = False
         ws = self.ws
         try:
+            # The update screen's radio lease is taken BEFORE the host's is
+            # let go: the stop below releases "web", and with nothing else
+            # holding it the radio would power down and the screen would pay
+            # a cold association to bring it back for the same network.
+            ws.wifi_hold("update")
             web = getattr(ws, "web", None)
             if web is not None:
                 # THE ONE FUNNEL (web_console.WebConsole.stop): it stops the
@@ -544,6 +583,10 @@ class ConsoleUpdate:
             self.state = "error"
             self.error = "%s" % exc
             print("UPDATE hand-off failed:", exc)
+            try:
+                ws.wifi_release("update")    # no screen opened: nothing holds it
+            except Exception:                # noqa: BLE001
+                pass
         return True
 
     # -- what the page reads -------------------------------------------------
@@ -584,7 +627,7 @@ class WebHost(WebServer):
 
     def __init__(self, carts_root, port=None, with_sd=None,
                  ensure_online=None, pin=None, on_sync=None, pin_source=None,
-                 on_run=None, update=None):
+                 on_run=None, update=None, on_stop=None):
         if port is None:
             WebServer.__init__(self)
         else:
@@ -623,6 +666,10 @@ class WebHost(WebServer):
         # Brought up by start(), because a Settings toggle cannot be asked to
         # connect the WiFi first: the row is the whole UI this feature has.
         self._ensure_online = ensure_online
+        # Fires when the SOCKET closes -- after the goodbye window, not when
+        # `serving` drops -- because that is when the link stops being needed:
+        # the console's radio lease (Workstation.wifi_release) hangs off it.
+        self.on_stop = on_stop
         # The T-Deck's store lives on a shared-SPI SD card that must be touched
         # through moybyte_sd.with_sd_live, never directly (see that module and
         # the hard-constraints section of CLAUDE.md). The P4 has no SD and
@@ -767,6 +814,12 @@ class WebHost(WebServer):
         if why is None:
             WebServer.stop(self)
             self.closing = None
+            hook = getattr(self, "on_stop", None)   # a bare-built test host has none
+            if hook is not None:
+                try:
+                    hook()
+                except Exception as exc:  # noqa: BLE001 -- a hook is never fatal
+                    print("WEBHOST on_stop:", exc)
             return
         self.closing = why
         self.closing_at = _ticks_ms()
@@ -1084,41 +1137,30 @@ class WebHost(WebServer):
         return None if root is None else root.path(self.carts_root)
 
 
-def ensure_online(wifi, autoconnect=None, wait_ms=12000, step_ms=250):
+def ensure_online(wifi, autoconnect=None, wait_ms=None, step_ms=None):
     """Connect if needed, WAIT for the link, then report the STA IP.
 
-    The wait is not optional and the reason is recorded in moy_ota's own
-    ensure_online: `connect()` polls for 4s and gives up, and on the P4 a saved
-    network measured 1.5s SLOWER than that (its radio is a separate C6 over
-    SDIO, so cold association is slow). Without the wait a perfectly good
-    network reads as "no wifi" -- which is exactly what the WEB CONSOLE row did
-    on its first try.
+    The wait is `moy_ota.wait_online` -- ONE body, whose docstring carries the
+    measurement behind it and whose constants are the defaults here. What this
+    adds is what a web host needs on top: the STA IP the WEB CONSOLE row
+    displays, and an OSError rather than a False for a board with no radio.
 
-    This lives here, and not in either board's run_desktop, because it is the
-    same 25 lines on both. That is not a hypothetical: the web console shipped
-    on the P4 with every SHARED piece already in place -- moy_webhost itself,
-    the Settings row, the console verbs, all staged from one source -- and the
+    It lives here, and not in either board's run_desktop, because it is the
+    same call on both. That is not a hypothetical: the web console shipped on
+    the P4 with every SHARED piece already in place -- moy_webhost itself, the
+    Settings row, the console verbs, all staged from one source -- and the
     T-Deck still did not have the feature, because the one per-board injection
     was never written for it. The row is capability-gated on `ws.webhost`, so
     the whole thing failed by being invisible rather than by breaking.
     """
     if wifi is None:
         raise OSError("no wifi service")
-    if not wifi.status()[0]:
-        if autoconnect is not None:
-            try:
-                autoconnect(wifi)
-            except Exception:          # noqa: BLE001 -- the wait below decides
-                pass
-        import time
-        _sleep_ms = getattr(time, "sleep_ms", None)
-        for _ in range(max(1, wait_ms // step_ms)):
-            if wifi.status()[0]:
-                break
-            if _sleep_ms is not None:
-                _sleep_ms(step_ms)
-            else:                      # host/CPython: no sleep_ms
-                time.sleep(step_ms / 1000.0)
+    import moy_ota
+    moy_ota.wait_online(
+        lambda: wifi.status()[0],
+        None if autoconnect is None else lambda: autoconnect(wifi),
+        moy_ota.ONLINE_WAIT_MS if wait_ms is None else wait_ms,
+        moy_ota.ONLINE_STEP_MS if step_ms is None else step_ms)
     st = wifi.status()
     if not st[0]:
         raise OSError("no wifi")
@@ -1162,4 +1204,5 @@ def make_webhost(ws, carts_root, autoconnect=None, with_sd=None,
                    pin_source=None if pin else lambda: ws.web_pin(),
                    on_sync=lambda: ws.rescan_carts(),
                    on_run=lambda name: ws.launch_named(name),
+                   on_stop=lambda: ws.wifi_release("web"),
                    update=ConsoleUpdate(ws))

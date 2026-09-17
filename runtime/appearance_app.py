@@ -19,6 +19,7 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 # The widget-SKIN catalog (runtime/skin.py). Imported for its NAME LIST only,
 # exactly as `chrome.THEMES` is imported above and for the same reason
@@ -38,12 +39,14 @@ class AppearanceLayout:
     MIN_W = 310
     MIN_H = 230
 
-    def __init__(self, w, h, fs=1, windowed=False):
+    def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(fs))
         fs = self.fs
-        self.bar_h = 0 if windowed else 18 * fs
+        # The chrome scale (#203) sizes only the OS bar band above this app.
+        self.cs = max(fs, int(cs)) if cs else fs
+        self.bar_h = 0 if windowed else 18 * self.cs
         self.tabs_h = 30 * fs
         # Side-by-side: the catalog COLUMN on the left, the preview pane on the
         # right. `wide` only picks the chunkier paddings/bezels of big surfaces.
@@ -54,7 +57,6 @@ class AppearanceLayout:
         self.catalog = (0, band_y, self.catalog_w, band_h)
         self.preview = (self.catalog_w, band_y,
                         max(1, self.w - self.catalog_w), band_h)
-        labels = ("IMAGES", "CARTS", "THEMES")
         widths = (70, 62, 70)
         self.tabs = []
         x = 6 * fs
@@ -146,7 +148,7 @@ class AppearanceAppLayer:
     # and nothing else should reach the desktop backdrop.
     NEEDS = ("surface", "theme", "damage", "wallpaper", "artwork")
 
-    def __init__(self, ctx, names, in_rect):
+    def __init__(self, ctx, names):
         self.ctx = ctx
         # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
         self._surf = ctx.surface
@@ -155,10 +157,10 @@ class AppearanceAppLayer:
         self._wall = ctx.wallpaper
         self._art = ctx.artwork
         self.names = names
-        self._in = in_rect
         cv = ctx.surface.canvas()
         self.layout = AppearanceLayout(cv.w, cv.h, self._surf.font_scale(),
-                                       self._surf.windowed())
+                                       self._surf.windowed(),
+                                       self._surf.chrome_scale())
         self.mode = "images"
         self.sel = 0
         self.status = "IMAGE WALLPAPERS"
@@ -180,8 +182,8 @@ class AppearanceAppLayer:
         base = str(path).replace("\\", "/").rsplit("/", 1)[-1]
         return base in ("theme_picker.moy", "appearance.moy")
 
-    def relayout(self, w, h, fs):
-        self.layout = AppearanceLayout(w, h, fs, self._surf.windowed())
+    def relayout(self, w, h, fs, cs=None):
+        self.layout = AppearanceLayout(w, h, fs, self._surf.windowed(), cs)
 
     def open(self):
         # Land on the current wallpaper's source category. Solid fills live on
@@ -319,20 +321,20 @@ class AppearanceAppLayer:
         if not click:
             return True
         for i, r in enumerate(lay.tabs):
-            if self._in(px, py, r):
+            if _in(px, py, r):
                 self._set_mode(self.MODES[i])
                 return True
         if self.mode == "themes":
             for v, r in self._variant_chip_rects():
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     self._set_variant(v)
                     return True
             for s, r in self._skin_chip_rects():
-                if self._in(px, py, r):
+                if _in(px, py, r):
                     self._set_skin(s)
                     return True
         for i, r in enumerate(lay.cards(len(self._items()))):
-            if self._in(px, py, r):
+            if _in(px, py, r):
                 self._apply(i)
                 return True
         return True

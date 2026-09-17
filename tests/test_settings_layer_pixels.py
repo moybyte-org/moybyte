@@ -172,7 +172,7 @@ def _build(cfg, carts_dir):
     from runtime import host_app
     ws = host_app.build_workstation(
         str(carts_dir), sys_size=cfg["sys_size"], font_scale=cfg["font_scale"],
-        windowed=cfg["windowed"])
+        windowed=cfg["windowed"], panel_diagonal_in=cfg["diagonal_in"])
     ws.look.set_theme_variant(cfg["variant"], persist=False)
     ws.wifi = _Wifi(True)
     ws.updater = _Updater()
@@ -244,7 +244,7 @@ def capture(cfg, carts_dir):
         if shot != unselected:
             out["wifi_list_%d" % sel] = shot
     sl.wifi_pick = "MoyNet-5G-Long-Name"
-    sl.wifi_pw = "hunter2hunter2"
+    sl.wifi_pw.text = "hunter2hunter2"
     out["wifi_password"] = _shot(ws, lambda: sl._draw_wifi())
     sl.wifi_pick = None
     ws.wifi = _Wifi(False)

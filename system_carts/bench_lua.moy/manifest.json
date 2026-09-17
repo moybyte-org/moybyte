@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 7,
+  "version": 10,
   "title": "Bench Lua",
   "type": "game",
   "runtime": "lua",
@@ -16,7 +16,7 @@
   "permissions": [
     "graphics",
     "input",
-    "sound"
+    "audio"
   ],
   "safe_to_share": true,
   "config": {

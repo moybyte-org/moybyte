@@ -135,15 +135,16 @@ def _update(dt):
         elif s[1] > H:
             _drop(s)
     # particles
-    keep = []
+    n = 0
     for p in sparks:
         p[4] -= dt
         if p[4] > 0.0:
             p[0] += p[2] * dt
             p[1] += p[3] * dt
             p[3] += 240.0 * dt
-            keep.append(p)
-    sparks[:] = keep
+            sparks[n] = p
+            n += 1
+    del sparks[n:]
     if flash > 0.0:
         flash = max(0.0, flash - dt)
     if shake > 0.0:

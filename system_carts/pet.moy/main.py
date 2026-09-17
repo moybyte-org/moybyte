@@ -88,13 +88,14 @@ def _update(dt):
             else:
                 _play()
     # floating hearts rise + fade
-    keep = []
+    n = 0
     for h in hearts:
         h[2] -= dt
         if h[2] > 0.0:
             h[1] -= 26.0 * dt
-            keep.append(h)
-    hearts[:] = keep
+            hearts[n] = h
+            n += 1
+    del hearts[n:]
     # a happier pet bounces faster
     mood = min(food, joy)
     rate = 3 if mood > 40 else 2

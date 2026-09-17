@@ -79,3 +79,12 @@
 // No SD slot on this board at all: the cart store is the internal VFS
 // (/moy/carts), which is also where OTA payloads are staged.
 #define MICROPY_HW_ENABLE_SDCARD            (0)
+
+// Paint SAVES pictures, and since 2026-09-07 a `.moyimg` is a deflate stream --
+// ONE format, the compressed one (runtime/moy_image.py). The esp32 port sits at
+// MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES, which builds `deflate` READ-ONLY:
+// upstream gates the compressor at FULL_FEATURES, so without this line a board
+// can open every picture on the card and cannot write one.
+// tests/test_moy_image.py pins all five boards, because a board that is missed
+// fails at the moment a kid presses save and nowhere earlier.
+#define MICROPY_PY_DEFLATE_COMPRESS         (1)

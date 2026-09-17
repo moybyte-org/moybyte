@@ -11,70 +11,45 @@ free apart from the shared editor cores below.
 
 import time
 
-from editors import CodeEditor, SpriteSheet, _SheetSprite
+from editors import CodeEditor, _SheetSprite
 # (the #111 op-history core is history_router.py's import now, not this file's --
 # #209 landing E took the code tab's History and its typing-burst codec with it)
-# The block editor's UI layer (issue #29 Part 2, extracted from this file): the
-# structured-outline screen + BlockLayout (its responsive geometry, #39 step 2) +
-# the module constants/sentinels its rows/menu render. Re-exported under their
-# pre-extraction names (BlockLayout, _BLK_*, _NEW_VAR_*, _NEW_LIST_*,
-# _NUM_LITERAL_*) so anything doing `console.X` / `C.X` for one of them -- tests
-# included -- still resolves. See block_editor_ui.py's module docstring for why
-# it takes NAMES/_in/_err_text/_clamp_scroll as constructor args instead of
-# importing them back from here (a real circular import: this module builds the
-# one BlockEditorUI instance a Workstation holds). Same bare-or-package fallback
-# as the _blocks_mod import just below (host tests that load console.py directly
-# without the runtime/host_app.py aliasing, or one that hand-registers editors/
-# audio/blocks/console like tests/test_micropython_spike.py's _load_moy_runtime).
+# The block editor's UI layer (issue #29 Part 2): the structured-outline screen
+# + BlockLayout (its responsive geometry, #39 step 2). The geometry constants
+# and menu sentinels that tests still reach as `console.X` ride along and are
+# re-exported; the rest of that module's constants are its own. See
+# block_editor_ui.py's module docstring for why it takes NAMES/_err_text/
+# _clamp_scroll as constructor args instead of importing them back from here (a
+# real circular import: this module builds the one BlockEditorUI instance a
+# Workstation holds). Same bare-or-package fallback as the _blocks_mod import
+# just below (host tests that load console.py directly without the
+# runtime/host_app.py aliasing, or one that hand-registers editors/audio/blocks/
+# console like tests/test_device_make_api.py's _load_moy_runtime).
 try:
-    from block_editor_ui import (
-        BlockEditorUI, BlockLayout,
-        _BLK_HINT_Y, _BLK_X0, _BLK_W, _BLK_Y0, _BLK_ROW_H, _BLK_INDENT, _BLK_ROWS,
-        _BLK_AREA, _BLK_ADD, _BLK_DEL, _BLK_UP, _BLK_DN, _BLK_CODE,
-        _BLK_MENU, _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _BLK_KBD,
-        _BLK_KBD_DEL, _BLK_KBD_OK, _BLK_KBD_X, _BLK_NUM, _BLK_NUM_GX, _BLK_NUM_GY,
-        _BLK_NUM_BW, _BLK_NUM_BH, _BLK_NUM_BPR, _BLK_NUM_KEYS, _BLK_NUM_DEL,
-        _BLK_NUM_BLOCK, _BLK_NUM_OK, _BLK_NUM_X, _CAT_LABEL, _NEW_VAR_ITEM,
-        _NEW_VAR_LABEL, _NEW_LIST_ITEM, _NEW_LIST_LABEL, _NUM_LITERAL_ITEM,
-        _NUM_LITERAL_LABEL, _blk_plain_label, _BLK_HINTS,
-    )
+    from block_editor_ui import (BlockEditorUI, BlockLayout, _BLK_W, _BLK_ROWS,
+                                 _BLK_AREA, _BLK_ADD, _BLK_CODE, _BLK_MENU,
+                                 _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _NEW_VAR_ITEM,
+                                 _NEW_VAR_LABEL, _NEW_LIST_ITEM, _NEW_LIST_LABEL,
+                                 _NUM_LITERAL_ITEM, _NUM_LITERAL_LABEL)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.block_editor_ui import (
-        BlockEditorUI, BlockLayout,
-        _BLK_HINT_Y, _BLK_X0, _BLK_W, _BLK_Y0, _BLK_ROW_H, _BLK_INDENT, _BLK_ROWS,
-        _BLK_AREA, _BLK_ADD, _BLK_DEL, _BLK_UP, _BLK_DN, _BLK_CODE,
-        _BLK_MENU, _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _BLK_KBD,
-        _BLK_KBD_DEL, _BLK_KBD_OK, _BLK_KBD_X, _BLK_NUM, _BLK_NUM_GX, _BLK_NUM_GY,
-        _BLK_NUM_BW, _BLK_NUM_BH, _BLK_NUM_BPR, _BLK_NUM_KEYS, _BLK_NUM_DEL,
-        _BLK_NUM_BLOCK, _BLK_NUM_OK, _BLK_NUM_X, _CAT_LABEL, _NEW_VAR_ITEM,
-        _NEW_VAR_LABEL, _NEW_LIST_ITEM, _NEW_LIST_LABEL, _NUM_LITERAL_ITEM,
-        _NUM_LITERAL_LABEL, _blk_plain_label, _BLK_HINTS,
-    )
+    from runtime.block_editor_ui import (BlockEditorUI, BlockLayout, _BLK_W, _BLK_ROWS,
+                                         _BLK_AREA, _BLK_ADD, _BLK_CODE, _BLK_MENU,
+                                         _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _NEW_VAR_ITEM,
+                                         _NEW_VAR_LABEL, _NEW_LIST_ITEM,
+                                         _NEW_LIST_LABEL, _NUM_LITERAL_ITEM,
+                                         _NUM_LITERAL_LABEL)
 
-# The map (tilemap) editor's UI layer (issue #32, extracted from this file): the
-# panned view + tile palette + pan/zoom + gesture handling. Re-exported under
-# their pre-extraction names (_MV_*, _TP_*, _MAP_ZOOM/_MAP_ERASE/
-# _MAP_CLOSE/_MAP_PAN_THRESH, _PAN_*) for the same `console.X`/`C.X` reasons as
-# the block editor above, with the same bare-or-package fallback. (_MAP_SAVE was
-# removed with the SAVE button, #111.)
+# The map (tilemap) editor's UI layer (issue #32): the panned view + tile
+# palette + pan/zoom + gesture handling, plus the geometry constants tests reach
+# as `console.X`, with the same bare-or-package fallback as the block editor.
 try:
-    from map_editor_ui import (
-        MapEditorUI,
-        _MV_X0, _MV_Y0, _MV_AVAIL_W, _MV_AVAIL_H,
-        _MV_ZOOMS, _MAP_ZOOM, _MAP_SIZE, _TP_X0, _TP_Y0,
-        _TP_CELL, _TP_COLS, _TP_ROWS, _TP_PAGE, _TP_AREA, _TP_PREV, _TP_NEXT,
-        _TP_SKY, _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE,
-        _MAP_CLOSE, _MAP_PAN_THRESH,
-    )
+    from map_editor_ui import (MapEditorUI, _MV_X0, _MV_Y0, _MV_ZOOMS, _MAP_ZOOM,
+                               _MAP_SIZE, _TP_X0, _TP_Y0, _TP_CELL, _TP_SKY, _PAN_RT,
+                               _PAN_DN, _MAP_ERASE)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.map_editor_ui import (
-        MapEditorUI,
-        _MV_X0, _MV_Y0, _MV_AVAIL_W, _MV_AVAIL_H,
-        _MV_ZOOMS, _MAP_ZOOM, _MAP_SIZE, _TP_X0, _TP_Y0,
-        _TP_CELL, _TP_COLS, _TP_ROWS, _TP_PAGE, _TP_AREA, _TP_PREV, _TP_NEXT,
-        _TP_SKY, _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE,
-        _MAP_CLOSE, _MAP_PAN_THRESH,
-    )
+    from runtime.map_editor_ui import (MapEditorUI, _MV_X0, _MV_Y0, _MV_ZOOMS,
+                                       _MAP_ZOOM, _MAP_SIZE, _TP_X0, _TP_Y0, _TP_CELL,
+                                       _TP_SKY, _PAN_RT, _PAN_DN, _MAP_ERASE)
 
 # The scene placement editor's UI layer (#85 Stage 2, its own module from birth
 # -- the map editor's extraction shape): the WYSIWYG placed-actor editor.
@@ -83,44 +58,28 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.scene_editor_ui import SceneEditorUI
 
-# The music/sound editor's UI layer (issue #50, extracted from this file): the
-# tracker-style step editor + preview. Re-exported under its pre-extraction names
-# (_MU_*, _mu_note_name, _mu_pad_rect) for the same `console.X`/`C.X` reasons as
-# the block/map editors above, with the same bare-or-package fallback.
+# The music/sound editor's UI layer (issue #50): the tracker-style step editor
+# + preview, plus the two geometry names tests reach as `console.X`.
 try:
-    from music_editor_ui import (
-        MusicEditorUI,
-        _MU_TITLE_Y, _MU_VIEW, _MU_LIST_X, _MU_LIST_Y0, _MU_ROW_H, _MU_ROWS,
-        _MU_LIST_W, _MU_LIST_AREA, _MU_OBJ_PREV, _MU_OBJ_NEXT, _MU_PAD_X,
-        _MU_PAD_Y, _MU_PAD_W, _MU_PAD_H, _MU_PAD_GAP, _MU_SPEED_DN, _MU_SPEED_UP,
-        _MU_PLAY, _MU_LOOP, _MU_NOTE_NAMES, _MU_WAVE_LABELS,
-        _mu_note_name, _mu_pad_rect,
-    )
+    from music_editor_ui import (MusicEditorUI, _MU_VIEW, _MU_PLAY, _mu_pad_rect)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.music_editor_ui import (
-        MusicEditorUI,
-        _MU_TITLE_Y, _MU_VIEW, _MU_LIST_X, _MU_LIST_Y0, _MU_ROW_H, _MU_ROWS,
-        _MU_LIST_W, _MU_LIST_AREA, _MU_OBJ_PREV, _MU_OBJ_NEXT, _MU_PAD_X,
-        _MU_PAD_Y, _MU_PAD_W, _MU_PAD_H, _MU_PAD_GAP, _MU_SPEED_DN, _MU_SPEED_UP,
-        _MU_PLAY, _MU_LOOP, _MU_NOTE_NAMES, _MU_WAVE_LABELS,
-        _mu_note_name, _mu_pad_rect,
-    )
+    from runtime.music_editor_ui import (MusicEditorUI, _MU_VIEW, _MU_PLAY,
+                                         _mu_pad_rect)
 
-# The perf HUD's rendering layer (#43/#44, extracted from this file): the
-# bottom-right FPS chip + optional frame-time breakdown + its tap target. The
-# perf *query* API (perf_sample/perf_breakdown/...) stays on Workstation (the
-# device diag's measurement contract); only the drawing moves here. Same
-# bare-or-package fallback as the editors above.
+# The perf HUD's rendering layer (#43/#44): the bottom-right FPS chip + optional
+# frame-time breakdown + its tap target. The perf *query* API
+# (perf_sample/perf_breakdown/...) is the Workstation's, in console_perf.py (the
+# device diag's measurement contract). Same bare-or-package fallback as above.
 try:
     from perf_hud import PerfHud
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.perf_hud import PerfHud
 
-# The firmware-update (OTA) SCREEN's UI layer (#53, extracted from this file): the
+# The firmware-update (OTA) SCREEN's UI layer (#53): the
 # confirm/download/install/done lifecycle + its pump + drawing. The update
-# *queries* + channel config (_update_available/_online_update_available/
-# _ota_channel/_cycle_channel) stay on Workstation (Settings + draw paths + tests
-# reference them). Same bare-or-package fallback as the editors above.
+# *queries* (_update_available/_online_update_available) stay below, and the
+# channel choice (_ota_channel/_cycle_channel) is the SettingsToggles mixin's
+# (console_settings.py). Same bare-or-package fallback as the editors above.
 try:
     from update_ui import UpdateUI
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -156,9 +115,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # store/root/can_manage/_with_sd guard through `ws` per call. What APPLIES the
 # settings (load_system's cascade) stays kernel policy, below.
 try:
-    from system_store import StoreHandle, SystemStore
+    from system_store import (StoreHandle, SystemStore)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.system_store import StoreHandle, SystemStore
+    from runtime.system_store import (StoreHandle, SystemStore)
 
 # The #111 undo ROUTER (#209 landing E, history_router.py): the bar UNDO/REDO
 # pair, the code tab's typing burst, the tab-scoped journal walk they fall
@@ -178,12 +137,12 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.system_menu_ui import SystemMenuUI
 
-# The Easter-egg subsystem + achievement/egg drawing (#21, extracted from this
-# file): the 3 hidden eggs + their state + _draw_egg/_draw_confetti/
-# _draw_achievements. The achievement CORE (ach, show_achievements,
-# load_achievements/_achievement_unlocked) stays on Workstation (tested ws.ach.*
-# + device ws.load_achievements()), and so do the three overlay DEADLINES those
-# objects push into at event time (#209 landing B). Same bare-or-package fallback.
+# The Easter-egg subsystem + achievement/egg drawing (#21): the 3 hidden eggs +
+# their state + _draw_egg/_draw_confetti/_draw_achievements. The achievement
+# CORE (ach, show_achievements, load_achievements/_achievement_unlocked) is the
+# Workstation's, on the Notices mixin (console_notices.py), and the three
+# overlay DEADLINES those objects push into at event time are created in
+# _init_overlays below (#209 landing B). Same bare-or-package fallback.
 try:
     from achievements_ui import AchievementsUI
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -194,115 +153,98 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # dependency-free leaf (every class references only its self.ws back-ref), so there
 # is no circular import back into console. Same bare-or-package fallback as above.
 try:
-    from layers import (
-        _LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
-        _SceneLayer, _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer,
-        _WebConsoleLayer)
+    from layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
+                        _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
+                        _AchOverlayLayer, _SysMenuLayer, _AboutLayer, _WebConsoleLayer)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layers import (
-        _LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
-        _SceneLayer, _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer,
-        _WebConsoleLayer)
+    from runtime.layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
+                                _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
+                                _AchOverlayLayer, _SysMenuLayer, _AboutLayer,
+                                _WebConsoleLayer)
 
-# The unified top bar surface (#46, extracted from this file -- see
-# bar_layer.py). bar_layer.py is the SINGLE SOURCE of the bar geometry constants
-# (_STATUS_H / _BAR_* / the tool-switcher button rects); they're imported
-# back here (re-exported under the same names) because console.py's own Layout + a few
-# derived constants + the golden harness/tests reference them as console._X -- rather
-# than duplicate them (drift), the same way block_editor_ui.py owns its _BLK_*. NAMES
-# and _in are injected into the one BarLayer a Workstation builds (circular-import dodge).
+# The unified top bar surface (#46 -- see bar_layer.py). bar_layer.py is the
+# SINGLE SOURCE of the bar geometry constants (_STATUS_H / the tool-switcher
+# button rects); the ones tests reference as console._X are imported back here
+# rather than duplicated. NAMES is injected into the one BarLayer a Workstation
+# builds (circular-import dodge).
 try:
-    from bar_layer import (
-        BarLayer, _BAR_ICON, _BAR_GAP, _BAR_STRIDE, _BAR_Y, _SYSMENU_BTN, _HOME_BTN,
-        _MENU_BTN, _PAINT_BTN, _MAP_BTN, _BLOCKS_BTN, _MUSIC_BTN, _BAR_BATT, _BAR_WIFI,
-        _BAR_CLOCK, _STATUS_H)
+    from bar_layer import (BarLayer, _BAR_ICON, _BAR_STRIDE, _SYSMENU_BTN, _HOME_BTN,
+                           _MENU_BTN, _PAINT_BTN, _MAP_BTN, _BLOCKS_BTN, _BAR_CLOCK,
+                           _STATUS_H)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import (
-        BarLayer, _BAR_ICON, _BAR_GAP, _BAR_STRIDE, _BAR_Y, _SYSMENU_BTN, _HOME_BTN,
-        _MENU_BTN, _PAINT_BTN, _MAP_BTN, _BLOCKS_BTN, _MUSIC_BTN, _BAR_BATT, _BAR_WIFI,
-        _BAR_CLOCK, _STATUS_H)
+    from runtime.bar_layer import (BarLayer, _BAR_ICON, _BAR_STRIDE, _SYSMENU_BTN,
+                                   _HOME_BTN, _MENU_BTN, _PAINT_BTN, _MAP_BTN,
+                                   _BLOCKS_BTN, _BAR_CLOCK, _STATUS_H)
 
-# The "Make it mine" config-card editor surface (#3/#15, extracted -- see
-# cards_layer.py). cards_layer.py is the single source of the card geometry constants
-# (_CARD_*); imported back here so tests + a couple of console call sites resolve
-# console._X. Its own GO/CODE/CLOSE buttons were dissolved into the unified bar
-# (fix B); CART STATE stays on Workstation: ws.config / ws.apply / ws.adjust; CardsLayer
-# mutates ws.config in place + dispatches through them.
+# The "Make it mine" config-card editor surface (#3/#15 -- see cards_layer.py).
+# cards_layer.py is the single source of the card geometry constants (_CARD_*);
+# the ones tests resolve as console._X are imported back here. CART STATE stays
+# on Workstation: ws.config / ws.apply / ws.adjust; CardsLayer mutates ws.config
+# in place + dispatches through them.
 try:
-    from cards_layer import (
-        CardsLayer, _CARD_X, _CARD_W, _CARD_Y0,
-        _CARD_H, _CARD_VIEW_BOTTOM, _CARD_SCROLL_UP, _CARD_SCROLL_DN)
+    from cards_layer import (CardsLayer, _CARD_Y0, _CARD_H, _CARD_VIEW_BOTTOM)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cards_layer import (
-        CardsLayer, _CARD_X, _CARD_W, _CARD_Y0,
-        _CARD_H, _CARD_VIEW_BOTTOM, _CARD_SCROLL_UP, _CARD_SCROLL_DN)
+    from runtime.cards_layer import (CardsLayer, _CARD_Y0, _CARD_H, _CARD_VIEW_BOTTOM)
 
-# The sprite/icon PAINT editor surface (#4/#30, extracted -- see paint_layer.py). ONE
-# renderer serves both the cart sprite sheet (menu_view=="paint") and the system icon
-# sheet (menu_view=="theme", EDIT ICONS), keyed on ws._editing_icons. paint_layer.py is
-# the single source of the paint geometry constants (_PG_*/_SW*/_SPR_*/_PAINT_*),
-# imported back here for tests + tools. The SHEETS + ws.paint handle + save persistence
-# stay on Workstation; PaintLayer reads them + dispatches GET/PUT/CLOSE to ws (SAVE
-# removed with the button, #111 -- CLOSE + every other exit path hard-commit instead).
+# The sprite/icon PAINT editor surface (#4/#30 -- see paint_layer.py). ONE
+# renderer serves both the cart sprite sheet (menu_view=="paint") and the system
+# icon sheet (menu_view=="theme", EDIT ICONS), keyed on ws._editing_icons.
+# paint_layer.py is the single source of the paint geometry constants; the ones
+# tests reach as console._X are imported back here. The SHEETS + ws.paint handle
+# + save persistence stay on Workstation; PaintLayer reads them + dispatches
+# GET/PUT/CLOSE to ws (SAVE removed with the button, #111 -- CLOSE + every other
+# exit path hard-commit instead).
 try:
-    from paint_layer import (
-        PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_CELL, _PG_SPAN, _PG_AREA, _SW_X0,
-        _SW_Y0, _SW, _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE,
-        _PAINT_CLOSE, _PAINT_GET, _PAINT_PUT)
+    from paint_layer import (PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_SPAN, _SW_X0,
+                             _SW_Y0, _SW, _SW_COLS, _PAINT_SIZE, _PAINT_CLOSE,
+                             _PAINT_GET, _PAINT_PUT)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.paint_layer import (
-        PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_CELL, _PG_SPAN, _PG_AREA, _SW_X0,
-        _SW_Y0, _SW, _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE,
-        _PAINT_CLOSE, _PAINT_GET, _PAINT_PUT)
+    from runtime.paint_layer import (PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_SPAN,
+                                     _SW_X0, _SW_Y0, _SW, _SW_COLS, _PAINT_SIZE,
+                                     _PAINT_CLOSE, _PAINT_GET, _PAINT_PUT)
 
-# The Settings app surface (#28/#39/#53, extracted -- see settings_layer.py). The
-# aggregator: rows + scroll + drawing move to SettingsLayer, which owns NO config -- it
-# reads ws state (system/ws.look/diag_live) and dispatches every mutation to the ws
-# setters; the wallpaper cluster is single-sourced on ws.look (the launcher shares
-# that backdrop). settings_layer.py is the single source of the _SET_* geometry
-# constants (also used by console's Layout), imported back here for Layout + tests.
-# SETTINGS_TOGGLES rides the same import: it is the ONE declaration of the
-# persisted ON/OFF settings (#209 section 7), and this file is what reads it for
-# the flat defaults, the boot apply and the shared persistence tail.
+# The Settings app surface (#28/#39/#53 -- see settings_layer.py). The
+# aggregator: rows + scroll + drawing, owning NO config -- it reads ws state
+# (system/ws.look/diag_live) and dispatches every mutation to the ws setters
+# (the SettingsToggles mixin); the wallpaper cluster is single-sourced on
+# ws.look (the launcher shares that backdrop). settings_layer.py is the single
+# source of the _SET_* geometry constants; the two tests reach as console._X are
+# imported back here. SETTINGS_TOGGLES rides the same import: it is the ONE
+# declaration of the persisted ON/OFF settings (#209 section 7), read here for
+# the boot apply and by console_perf.py for the flat defaults.
 try:
-    from settings_layer import (
-        SettingsLayer, SETTINGS_TOGGLES, _SET_X, _SET_W, _SET_ROW_Y0, _SET_ROW_H,
-        _SET_BACK, _SET_ACH, _SET_TITLE_HIT)
+    from settings_layer import (SettingsLayer, SETTINGS_TOGGLES, _SET_BACK, _SET_ACH)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.settings_layer import (
-        SettingsLayer, SETTINGS_TOGGLES, _SET_X, _SET_W, _SET_ROW_Y0, _SET_ROW_H,
-        _SET_BACK, _SET_ACH, _SET_TITLE_HIT)
+    from runtime.settings_layer import (SettingsLayer, SETTINGS_TOGGLES, _SET_BACK,
+                                        _SET_ACH)
 
-# The Python code editor surface (#24/#39, extracted -- see code_layer.py). CodeLayer
-# owns the full-screen text view + drawing + code-UI state; the shared ws.editor handle
-# (like ws.paint) + save_code/run_code + the code-error state + code_layout stay on ws.
-# code_layer.py is the single source of the code geometry constants (_CODE_*/_ED_*/
-# _SYM_*/_CODE_SYMBOLS) + the MicroPython-safe syntax highlighter, imported back here for
-# console's CodeLayout + the crash panel (_CODE_LH) + tests.
+# The Python code editor surface (#24/#39 -- see code_layer.py). CodeLayer owns
+# the full-screen text view + drawing + code-UI state; the shared ws.editor
+# handle (like ws.paint) + save_code/run_code + the code-error state +
+# code_layout stay on ws. code_layer.py is the single source of the code
+# geometry constants + the MicroPython-safe syntax highlighter; the constants
+# tests reach as console._X are imported back here.
 try:
-    from code_layer import (
-        CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA,
-        _CODE_SYMBOLS, _SYM_Y, _SYM_H, _SYM_CELL, _SYM_AREA)
+    from code_layer import (CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA,
+                            _CODE_SYMBOLS, _SYM_Y, _SYM_CELL, _SYM_AREA)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (
-        CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA,
-        _CODE_SYMBOLS, _SYM_Y, _SYM_H, _SYM_CELL, _SYM_AREA)
+    from runtime.code_layer import (CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA,
+                                    _CODE_SYMBOLS, _SYM_Y, _SYM_CELL, _SYM_AREA)
 
-# Self-contained support widgets (extracted -- see widgets.py): the cursor blittable
-# _Blit, the Pointer cursor, the Achievements milestone tracker (+ its ACHIEVEMENTS
-# catalog), Pmem (cart persistent RAM), the _SilentAudio no-op backend, and the reusable
-# Popup dropdown. A dependency-free leaf; imported back here so console.Pointer /
-# console.Popup / console.ACHIEVEMENTS / ... resolve for Workstation + host_app + tests.
+# Self-contained support widgets (see widgets.py): the Pointer cursor, the
+# Achievements milestone tracker (+ its ACHIEVEMENTS catalog), Pmem (cart
+# persistent RAM), the _SilentAudio no-op backend, and the reusable Popup
+# dropdown. A dependency-free leaf; imported back here so console.Pointer /
+# console.Popup / console.ACHIEVEMENTS / ... resolve for Workstation + host_app
+# + tests.
 try:
-    from widgets import (
-        _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
-        TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X,
-        _POPUP_SEP_H)
+    from widgets import (Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup,
+                         ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y,
+                         _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (
-        _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
-        TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X,
-        _POPUP_SEP_H)
+    from runtime.widgets import (Pointer, Achievements, Pmem, Clipboard, _SilentAudio,
+                                 Popup, ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X,
+                                 _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
 # SHARED backdrop the launcher home + Settings both draw (ws.wallpaper.draw). It owns
@@ -314,24 +256,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wallpaper import Wallpaper
 
 try:
-    from artwork import ArtworkService, PaintAppLayer
+    from artwork import ArtworkService
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.artwork import ArtworkService, PaintAppLayer
+    from runtime.artwork import ArtworkService
 
-try:
-    from appearance_app import AppearanceAppLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.appearance_app import AppearanceAppLayer
-
-try:
-    from writer_app import WriterAppLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.writer_app import WriterAppLayer
-
-try:
-    from calc_app import CalcAppLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.calc_app import CalcAppLayer
 
 try:
     from app_decls import APPS
@@ -379,8 +307,8 @@ def _resolve_app_entry(entry):
     """Resolve an app declaration's "module:Class" to the class itself.
 
     Two namespaces, as everywhere in this tree: the boards and the wasm head
-    freeze `runtime/` FLAT (`import writer_app`), the host imports the package
-    (`runtime.writer_app`). Same ladder every module header here writes by
+    freeze `runtime/` FLAT (`import files_app`), the host imports the package
+    (`runtime.files_app`). Same ladder every module header here writes by
     hand -- resolved from data instead of once per app.
     """
     mod_name, _, cls_name = entry.partition(":")
@@ -390,27 +318,6 @@ def _resolve_app_entry(entry):
         mod = __import__("runtime." + mod_name, None, None, (cls_name,))
     return getattr(mod, cls_name)
 
-try:
-    from artwork import PaintAppLayout
-    from appearance_app import AppearanceLayout
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.artwork import PaintAppLayout
-    from runtime.appearance_app import AppearanceLayout
-
-try:
-    from storybook_app import StorybookAppLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.storybook_app import StorybookAppLayer
-
-try:
-    from sheets_app import SheetsAppLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.sheets_app import SheetsAppLayer
-
-try:
-    from files_app import FilesAppLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.files_app import FilesAppLayer
 
 # The desktop home / launcher surface (#28, extracted -- see launcher_layer.py): the
 # Launcher grid CLASS (its instance stays ws.launcher, the single source everything
@@ -444,17 +351,32 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # reason. Exit is hold-BACKSPACE (games) / the bar X (tools) -- the #71 pause
 # machinery is retired, do not reintroduce it.
 try:
-    from player import Player
+    from player import (Player, BAR_TYPES, SCRIPT_TYPE)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.player import Player
+    from runtime.player import (Player, BAR_TYPES, SCRIPT_TYPE)
+
+# The TEXT CONSOLE (text_console.py): the surface a `type: "script"` cart runs
+# on -- scrollback + prompt, drawn by the shell as the run's `_draw` so a
+# script cannot paint over the line it is reading from.
+try:
+    from text_console import TextConsole
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.text_console import TextConsole
+
+# The editor MODE table (text_modes.py): here for `script_runtime`, which is
+# what says a vault file is a program and which tier runs it.
+try:
+    import text_modes as _modes
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import text_modes as _modes
 
 # EditorApp (editor_app.py): the tab ladder + PLAY. ws.menu_view is a
 # forwarding projection of EditorApp.tab; ws.set_menu_view/_open_*/_leave_menu
 # stay one-line forwards (tested surface).
 try:
-    from editor_app import EditorApp
+    from editor_app import (EditorApp, COMMIT_TABS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editor_app import EditorApp
+    from runtime.editor_app import (EditorApp, COMMIT_TABS)
 
 # FullscreenStackWM (wm.py): viewport composite (#39), the back-stack `screen`
 # projects onto, and the MEMOIZED visible/draw stack (rebuilt only on push/pop
@@ -486,35 +408,44 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import blocks as _blocks_mod
 
 
-# The console's stateless base layer -- the MOY64 palette (NAMES/color), the responsive
-# Layout/CodeLayout geometry (#39), the icon-glyph vocabulary (_GLYPHS/_blit_glyph), the
-# themeable top-bar IconSheet slot map + art (_ICON/_ICON_ART),
-# the cursor sprite (CURSOR), and the small pure helpers (_in/_clamp_scroll/_cursor_delta/
-# _ticks_*/_err_text/_from_ascii) -- now live in chrome.py (extracted so the Workstation
-# kernel is alone in this file). Imported back + re-exported under the pre-extraction names
-# so every `console.X` and bare reference below -- tests included -- still resolves. chrome.py
-# is a leaf (it imports only editors/widgets + surface geometry constants, none of which
-# import back), so there is no cycle. Same bare-or-package fallback as the surfaces above.
+# The console's stateless base layer -- the MOY64 palette (NAMES), the
+# responsive Layout/CodeLayout geometry (#39), the icon-glyph blitter
+# (_blit_glyph), the themeable top-bar IconSheet slot map + art
+# (_ICON/_ICON_ART), the cursor sprite (CURSOR), and the small pure helpers
+# (_clamp_scroll/_cursor_delta/_ticks_*/_err_text) -- lives in chrome.py.
+# Imported back so every bare reference below and every `console.X` a test
+# still makes resolves (`_in` is one of those: nothing here calls it). chrome.py is a leaf (it imports only editors/widgets +
+# surface geometry constants, none of which import back), so there is no cycle.
+# Same bare-or-package fallback as the surfaces above.
 try:
-    from chrome import (
-        _ticks_ms, _ticks_us, _ticks_diff, _err_text, _from_ascii, CURSOR, NAMES, color,
-        _ICON_COLS, _ICON_ROWS, _ICON_W, _ICON_H, _ICON_GAP_X,
-        _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
-        _CURSOR_BASE, _CURSOR_ACCEL,
-        _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _nibble,
-        _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
-    )
+    from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR, NAMES,
+                        _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout, _blit_glyph,
+                        _ICON, _ICON_ART, _nibble, chrome_scale_floor, _cursor_delta,
+                        _clamp_scroll, _in, _SPLASH_MS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import (
-        _ticks_ms, _ticks_us, _ticks_diff, _err_text, _from_ascii, CURSOR, NAMES, color,
-        _ICON_COLS, _ICON_ROWS, _ICON_W, _ICON_H, _ICON_GAP_X,
-        _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
-        _CURSOR_BASE, _CURSOR_ACCEL,
-        _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _nibble,
-        _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
-    )
+    from runtime.chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
+                                NAMES, _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
+                                _blit_glyph, _ICON, _ICON_ART, _nibble,
+                                chrome_scale_floor, _cursor_delta, _clamp_scroll,
+                                _in, _SPLASH_MS)
+
+
+# The Workstation's four mixins -- what a kernel does not need to be in the
+# same file with: the perf meters + query API (console_perf), the Settings
+# toggles + OTA channel (console_settings), the Editor's save/PLAY verbs
+# (console_saves) and the notices, toast and achievements wiring
+# (console_notices). Each is a bag of methods over `self`; the class below is
+# where the state they touch is created.
+try:
+    from console_perf import PerfMeters, _ema
+    from console_settings import SettingsToggles
+    from console_saves import SaveVerbs
+    from console_notices import Notices
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.console_perf import PerfMeters, _ema
+    from runtime.console_settings import SettingsToggles
+    from runtime.console_saves import SaveVerbs
+    from runtime.console_notices import Notices
 
 
 _SPLASH_IMG = None
@@ -594,33 +525,15 @@ def draw_splash(cv, frac=None, status=None):
                  NAMES["light_grey"], 1)
 
 
-def _ema(cur, sample):
-    """One-pole EMA (alpha 0.15) with a <=0 "unseeded" bootstrap -- the perf
-    readouts' smoothing, written once (frame() applies it to ~10 fields)."""
-    return float(sample) if cur <= 0 else cur + (sample - cur) * 0.15
-
-# Frame pacing knob (#63): True locks GAME carts to a steady cadence (30 default,
-# manifest "fps": 60 opt-out); False runs everything uncapped at the loop's own
-# fps cap -- the measurement mode (owner call 2026-07-08: we want the REAL
-# per-cart numbers on the glass, and #66 is fed from them).
-#
-# RE-AFFIRMED ON PRODUCT GROUNDS 2026-08-19 (owner): uncapped-by-default is
-# not just the measurement mode, it is the intended shipping behavior --
-# "if no fps set, it should be 60; 30 is available via FRAMESKIP always."
-# The 30-lock is the governor/frameskip's business, chosen per device in
-# Settings, never the silent default. (This footnote exists because the
-# docstring below once read as "games default to 30" and a same-day A/B
-# verdict was misworded off the back of it.)
-FPS_GOVERNOR = False
-
-class Workstation:
+class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
-                 font_scale=1):
+                 font_scale=1, panel_diagonal_in=None):
         # Built in five ordered stages (each a method so the constructor reads
         # as a table of contents). The ORDER is load-bearing: the WM must exist
         # before anything reads/writes `screen`, Project/Player/EditorApp before
         # anything sets their forwarded fields, and the layer stack last.
-        self._init_canvases(comp, canvas, sys_canvas, font_scale)
+        self._init_canvases(comp, canvas, sys_canvas, font_scale,
+                            panel_diagonal_in)
         self._init_components(input, carts)
         self._init_state()
         self._init_perf()
@@ -629,9 +542,20 @@ class Workstation:
         # once here; _visible_stack()/_draw_stack() z-order + gate them per frame.
         self._build_layers()
 
-    def _init_canvases(self, comp, canvas, sys_canvas, font_scale):
+    def _init_canvases(self, comp, canvas, sys_canvas, font_scale,
+                       panel_diagonal_in=None):
         """The two-domain canvas seam (#39), the WM, the theme and the responsive layouts."""
         self.comp = comp
+        # The board's glass, in inches, or None when it did not say (#203). The
+        # ONE fact behind the tap-target floor, and the reason the floor is an
+        # opt-in: millimetres are the only unit that can answer "is this icon big
+        # enough to hit", and only a board knows its own. Resolved to an integer
+        # here, from the PANEL's size -- never from a window's, which is what
+        # `chrome_floor` being a constructor-time field buys on the windowed tier.
+        self.panel_diagonal_in = panel_diagonal_in
+        _panel = sys_canvas if sys_canvas is not None else canvas
+        self.chrome_floor = chrome_scale_floor(_panel.w, _panel.h,
+                                               panel_diagonal_in)
         # Two rendering domains (#39). The GAME canvas is the fixed 320x240 indexed
         # surface the cart + cart API draw on -- carts are UNCHANGED. The SYSTEM
         # canvas is the panel/window surface the desktop/launcher/settings + status
@@ -685,7 +609,8 @@ class Workstation:
         # True only while the windowed WM's DESK (the make world) is open --
         # see the property below the screen projection.
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
-                             self.look.effective_font_scale())
+                             self.look.effective_font_scale(),
+                             self.look.effective_chrome_scale())
         # Responsive editor geometry (#39 step 2): the code + block editors now draw
         # on the SYSTEM canvas at native size, so their layout (visible cols/rows,
         # button rects, palette/menu) derives from (w, h, font_scale) -- exactly the
@@ -693,15 +618,17 @@ class Workstation:
         # a size/font change. (Sprite/paint + map editors stay a 320x240 viewport --
         # step 3.)
         self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
-                                      self.look.effective_font_scale())
+                                      self.look.effective_font_scale(),
+                                      self.look.effective_chrome_scale())
         # The block editor's UI (issue #29 Part 2, extracted from this class -- see
         # block_editor_ui.py): one instance, built once here and delegated to from
         # handle_input/handle_pointer/frame's menu_view == "blocks" branches plus
-        # set_menu_view/_relayout/_leave_menu/go_home/open. NAMES/_in/_err_text/
+        # set_menu_view/_relayout/_leave_menu/go_home/open. NAMES/_err_text/
         # _clamp_scroll are injected (see that module's docstring for why).
-        self.block_ui = BlockEditorUI(self, NAMES, _in, _err_text, _clamp_scroll)
+        self.block_ui = BlockEditorUI(self, NAMES, _err_text, _clamp_scroll)
         self.block_ui.relayout(self.sys_canvas.w, self.sys_canvas.h,
-                               self.look.effective_font_scale())
+                               self.look.effective_font_scale(),
+                               self.look.effective_chrome_scale())
 
     def _init_components(self, input, carts):
         """Injected-service attach points + the shell processes (Project/Player/
@@ -723,11 +650,14 @@ class Workstation:
             self.app_context("paint", ArtworkService.NEEDS, prefs_ns="paint"))
         self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
         self.audio = None           # the per-cart audio backend (built on open, #16)
-        # WiFi (#38): a SYSTEM service shared across carts (the connection persists
-        # when a cart exits), not per-cart. run_desktop/build_workstation injects
-        # the backend here; it's exposed to a cart's namespace ONLY when the cart's
-        # manifest permissions include "network" (capability-gated -- see _start).
+        # WiFi (#38): a SYSTEM service shared across carts, not per-cart.
+        # run_desktop/build_workstation injects the backend here; it's exposed
+        # to a cart's namespace ONLY when the cart's manifest permissions
+        # include "network" (capability-gated -- see _start). THE RADIO IS A
+        # LEASE (wifi_hold/wifi_release below): the tags holding it, and the
+        # last one out powers it down.
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
+        self._wifi_holders = set()
         # Multiplayer message service (#65): the transport-neutral net.* seam (a
         # players.LoopbackNet in the host sim, None on the device until the ESP-NOW
         # radio lands). A SYSTEM service like wifi -- exposed to a cart's namespace
@@ -758,8 +688,8 @@ class Workstation:
         self.carts_store = None     # injected: cart store module (moy_carts API)
         # #67 dual-runtime seam: factory(ns, src) -> a running Lua cart handle
         # (.init/.update/.draw callables + .close()). build_workstation injects
-        # the lupa-backed runtime/lua_host.py; the device injects moy_lua once
-        # Phase 1 lands. None = "runtime": "lua" carts open the error panel.
+        # runtime/lua_host.MoycoreHostRun; the device injects moycore_glue's.
+        # None = "runtime": "lua" carts open the error panel.
         self.lua_runtime = None
         # OTA firmware updater (#53): injected by the device (moy_ota.OtaUpdater); None
         # on the host. When present AND the build is OTA-capable, Settings grows an
@@ -787,12 +717,12 @@ class Workstation:
         # screen == "update" branches and from _activate_settings_action. The
         # transient screen state (_upd_phase/_upd_msg/_upd_bin/...) lives on it;
         # the queries + channel config above/below stay here.
-        self.update_ui = UpdateUI(self, NAMES, _in, _err_text)
+        self.update_ui = UpdateUI(self, NAMES, _err_text)
         # WASM MODE (#197): the pin, the paired url, the connection screen and
         # the parked flag, all on one object (web_console.py). The webhost above
         # stays a flat Workstation attribute -- `poll_webhost` reads it at every
         # frame tail on all three boards -- and this reads it through `self`.
-        self.web = WebConsole(self, NAMES, _in)
+        self.web = WebConsole(self, NAMES)
         # The shelf's cover + icon pipeline (#209 landing C, cover_cache.py): the
         # bounded caches, the per-frame build budget, the idle warmers and the
         # #186 off-heap frees, all on one object. FRAME-HOT -- the grids below
@@ -867,16 +797,21 @@ class Workstation:
         # state -- live on it now and the cart-run ones are exposed back as forwarding
         # properties (below), so every surface file + test reading ws.cart_error/
         # ws._update/... is unchanged. (Stage 5 retired the #71 cart_paused/_bks_prev.)
-        self.player = Player(self, NAMES, _in)
+        self.player = Player(self, NAMES)
+        # The TEXT CONSOLE (text_console.py): a script's screen, and #115's
+        # terminal scrollback after it. One instance for the console's life
+        # (its ring is preallocated, so a run costs no allocation); `run_script`
+        # below is what starts a script on it.
+        self.script_console = TextConsole(self, NAMES)
         # The EDITOR app (Stage 3, editor_app.py): owns the tab ladder + the active-tab
         # state (EditorApp.tab). Built idle here (BEFORE anything can set menu_view,
         # which is now a forwarding projection of editor_app.tab -- see below). The tab
         # machine (set_menu_view/_open_*/_leave_menu) moved onto it; ws keeps one-line
-        # forwards so every surface file + test is unchanged. NAMES/_in are injected
-        # (Stage 4, docs/history/shell_ux_technical_plan_v1.md): the Editor now lends the top
+        # forwards so every surface file + test is unchanged. NAMES is injected
+        # (Stage 4, docs/history/shell_ux_technical_plan_v1.md): the Editor lends the top
         # bar's left zone (draw_zone/zone_tap, bar_layer.py) so it needs the shared
-        # draw toolkit + rect hit-test, like the other zone-owning surfaces.
-        self.editor_app = EditorApp(self, NAMES, _in)
+        # draw toolkit, like the other zone-owning surfaces.
+        self.editor_app = EditorApp(self, NAMES)
         self._run_caller = None       # who to return to on EXIT (run() records it; the
                                       # launcher root OR -- Stage 3 -- the Editor. The
                                       # Stage-5 hold-BACKSPACE / context-X
@@ -887,6 +822,22 @@ class Workstation:
         # "theme" -- lives on self.editor_app.tab now (Stage 3); ws.menu_view is a
         # forwarding projection of it, so every reader/writer is unchanged.)
         self.editor = None            # CodeEditor while menu_view == "code"
+        self.code_file = None         # WHICH script that editor holds (SPEC.md 4);
+                                      # None = the cart's main file, which is every
+                                      # cart that has one -- see code_sources()
+        # The document the console has been asked to open, parked for the text
+        # cart's namespace build (take_text_request). One slot: it is set and
+        # consumed inside a single launch.
+        self._text_request = None
+        # The project a text run must return INTO (open_project_file): set with
+        # the request, popped by _exit_to_caller, which re-reads the folder on
+        # the way back so the loader sees what was written.
+        self._project_return = None
+        # The registered APP an app-to-app jump must return INTO (Files opening
+        # a drawing in Paint / a project in the Editor): set by _note_app_caller
+        # with the jump, popped by _go_home_or_back. See its docstring for why
+        # this is a third slot beside _run_caller and _project_return.
+        self._app_return = None
         # The #111 UNDO ROUTER (#209 landing E, history_router.py): the bar
         # UNDO/REDO pair over both undo mechanisms (each Editor tab's in-RAM op
         # stack, then the tab-scoped durable journal walk), the code tab's typing
@@ -906,24 +857,24 @@ class Workstation:
         # map_editor_ui.py): one instance, delegated to from handle_input/
         # handle_pointer/frame's menu_view == "map" branches plus set_menu_view/
         # _open_map/open/go_home.
-        self.map_ui = MapEditorUI(self, NAMES, _in)
+        self.map_ui = MapEditorUI(self, NAMES)
         # The scene placement editor's UI (#85 Stage 2 -- see scene_editor_ui.py):
         # one instance, delegated to from the "scene" content layer plus
         # set_menu_view/_open_scene/open/go_home, the exact map_ui lifecycle.
-        self.scene_ui = SceneEditorUI(self, NAMES, _in)
+        self.scene_ui = SceneEditorUI(self, NAMES)
         # Block editor (#29 Part 2) state now lives on self.block_ui (built above).
         # The music/sound editor's UI (#50, extracted from this class -- see
         # music_editor_ui.py): one instance, delegated to from handle_input/
         # handle_pointer/frame's menu_view == "music" branches plus set_menu_view/
         # _open_music/open (NOT go_home -- see music_editor_ui.py's docstring).
-        self.music_ui = MusicEditorUI(self, NAMES, _in)
+        self.music_ui = MusicEditorUI(self, NAMES)
         # The perf HUD's rendering (#43/#44, extracted from this class -- see
         # perf_hud.py): the FPS chip + frame-time breakdown drawn in frame() and
         # the tap target hit-tested in handle_pointer. Named perf_ui (NOT
-        # perf_hud -- that stays the tested boolean flag below for "breakdown
-        # shown?"). The perf query API (perf_sample/perf_breakdown/...) stays on
-        # this class (device diag contract). Pure read-only consumer of the
-        # timing fields.
+        # perf_hud -- that stays the tested boolean flag for "breakdown shown?",
+        # set in _init_perf). The perf query API (perf_sample/perf_breakdown/...)
+        # is the PerfMeters mixin's (console_perf.py, the device diag contract).
+        # Pure read-only consumer of the timing fields.
         self.perf_ui = PerfHud(self, NAMES)
 
     def _init_state(self):
@@ -935,9 +886,10 @@ class Workstation:
         # (The launcher's trackball-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
         # The system clipboard (#132): the one typed holder every editor writes
-        # through (code tab / Writer / Sheets v1), so copy in one app pastes in
-        # another. Console-side end-to-end -- works identically over the web
-        # transport, never touches a host OS clipboard (parity trap).
+        # through (the code tab, a cart's editor handle), so copy in one
+        # app pastes in another. Console-side end-to-end -- works identically
+        # over the web transport, never touches a host OS clipboard (parity
+        # trap).
         self.clipboard = Clipboard()
         # system.json (#209 landing B): the store owns the dict and every
         # persist funnel; `self.system` is a plain ALIAS of it and neither name
@@ -958,6 +910,7 @@ class Workstation:
         # Expensive-event counters (2026-07-26). See note_cost.
         self.costs = {}
         self._quiet_frames = 0        # consecutive frames the redraw gate skipped
+        self._idle_warned = False     # the idle branch's backstop has spoken once
         # Unified top bar (Stage 1): _bar_img_cache memoises tile_image(slot) per
         # kind so the SAME _SheetSprite is reused every frame -- on the device that
         # keeps its per-Image RGB565 blit cache alive (one cached blit per icon),
@@ -969,7 +922,7 @@ class Workstation:
         # of docs/history/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
         # per-second clock cache (#66) and the bar tap slices live
         # on self.bar_layer; look.set_icon_sheet bumps its cache gen via bar_layer.invalidate().
-        self.bar_layer = BarLayer(self, NAMES, _in)
+        self.bar_layer = BarLayer(self, NAMES)
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
         # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
         # It changes where SAVE writes (system_icons.moygfx, not the cart) and where
@@ -999,83 +952,6 @@ class Workstation:
         # run_desktop swaps in moybyte_sd.with_sd_live (native moy_sd attach). The
         # default is a host passthrough.
         self._with_sd = lambda fn: fn()
-
-    def _init_perf(self):
-        """The perf/diag/frameskip measurement fields (#43/#44/#66/#68/#77)."""
-        # The persisted ON/OFF settings, at the registry's declared defaults
-        # (#209 section 7 -- SETTINGS_TOGGLES in settings_layer.py carries each
-        # one's prose). FLAT ATTRIBUTES on purpose and forever: `frame_cap_fps`
-        # reads self.frameskip and device_boot's `pace` calls it every loop
-        # iteration on all three boards; both WMs read show_fps per painted game
-        # frame. load_system replaces these with the store's values at boot.
-        for _key, _label, _default, _setter, _gate, _dev in SETTINGS_TOGGLES:
-            setattr(self, _key, _default)
-        self._fps = 0.0               # smoothed frames/sec (EMA of 1/dt)
-        # Frame-time breakdown HUD (#43/#44 perf): off by default; tap the FPS
-        # readout (bottom-right, while a cart runs) to toggle it. When on, frame()
-        # records the per-frame split in ms -- _flush_ms is the compositor's panel
-        # DMA flush (comp.flush(); ~0 on the host's _NullComp), _draw_ms is the
-        # rest (cart _update/_draw + the console's own draw = total minus flush).
-        # All EMA-smoothed like _fps so the numbers read steady, not single-frame
-        # jitter. This tells us whether the wall is the SPI flush or the per-frame
-        # MicroPython draw cost on device. Measurement only -- no render-path change.
-        self.perf_hud = False         # frame-time breakdown HUD shown? (tap FPS to toggle)
-        # perf_capture decouples the per-frame timing MEASUREMENT from drawing the
-        # HUD: when either perf_hud OR perf_capture is set, frame() records the
-        # flush/draw split (the two cheap ticks calls below). The device backend
-        # (moy_runtime.run_desktop) sets perf_capture=True so it can SAMPLE these
-        # numbers into the offline diag log without painting the HUD on screen.
-        # Default False -> host behaviour is byte-identical (no extra ticks calls).
-        self.perf_capture = False     # measure flush/draw without drawing the HUD
-        self._flush_ms = 0.0          # smoothed comp.flush() ms (panel DMA)
-        self._draw_ms = 0.0           # smoothed draw ms (total frame - flush)
-        # DRAWBRK phase split of _draw_ms (#43 follow-up): where the per-frame draw
-        # cost actually goes -- cart _update, cart _draw, and the console chrome
-        # (bar + cursor + overlays, the remainder). Surfaced via perf_breakdown().
-        self._upd_ms = 0.0            # smoothed cart _update(dt) ms (game LOGIC)
-        self._cart_ms = 0.0           # smoothed cart _draw() ms (RENDERING)
-        self._audio_ms = 0.0          # smoothed audio.tick(dt) ms (mixer feed)
-        self._chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart - audio)
-        # LAYERBRK (#172) / the hitch logger's hp() detail (#184): the two stack
-        # walks, split per layer. _pf_layers is {layer.id: us} for the last
-        # PAINTED frame (rebuilt each paint under _perf); _pf_ptr is a fixed
-        # 6-slot scratch overwritten in place by handle_pointer --
-        # [total_us, pre_us, worst_us, worst_id, claim_id, n_visited].
-        self._pf_layers = None
-        self._pf_ptr = [0, 0, 0, None, None, 0]
-        self._ptr_last_x = -1     # handle_pointer's idle fast-path: last routed
-        self._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
-        self._ptr_was_down = False  # ...and whether it was held (release edge)
-        # #184 deferred transitions: [armed, fn] entries queued by defer().
-        # A tap handler schedules its heavy transition here instead of running
-        # it inside the pointer walk; frame() paints the acknowledgment first
-        # (arming the entry after the flush), then runs it at the next frame's
-        # top -- so the pressed state is ON GLASS during the load stall.
-        self._deferred = []
-        # RAW (un-smoothed) copy of THIS frame's phase split (#66 HITCH v3): the
-        # EMAs above hide which phase a single 150ms hitch frame spent its time
-        # in (a one-frame spike moves an alpha=0.15 EMA by only 15% of itself).
-        # The hitch logger prints these instead.
-        self._raw_upd = 0.0
-        self._raw_cart = 0.0
-        self._raw_audio = 0.0
-        self._raw_chrome = 0.0
-        self._raw_flush = 0.0
-        self._raw_draw = 0.0
-        # CHROMEBRK sub-split of _chrome_ms (#66 lever 5, instrument-before-cutting):
-        # what the ~4-6ms of cart-path chrome actually buys -- the top status bar
-        # (_draw_status_strip), the game->system viewport composite (a no-op when the
-        # canvases are one object, i.e. today's 320x240 device), the cursor, the rest
-        # of the WM stack walk (_stk_ms, 2026-08-14), and the router remainder.
-        # Only measured on the running-cart path with perf capture on; surfaced via
-        # perf_chrome() -> the device CHROMEBRK diag line.
-        self._bar_ms = 0.0
-        self._cmp_ms = 0.0
-        self._cur_ms = 0.0
-        self._stk_ms = 0.0  # the WM stack walk's CHROME share (2026-08-14)
-        self._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
-        # (The clock-text cache moved to self.bar_layer with the rest of the bar #66.)
-        self._fs_phase = False        # frameskip's alternation bit (#77)
 
     def _init_overlays(self):
         """Achievements/eggs (#21), the system menu (#52), device hooks, and the
@@ -1148,23 +1024,6 @@ class Workstation:
                                       # a coasting fling re-arms the gate the
                                       # covers.take_deferred way -- set DURING a draw,
                                       # consumed after the gate cleared _dirty)
-        # Per-frame perf scratch (#43/#66): the running-cart content Layer fills these
-        # during its draw so the router's frame-end DRAWBRK/CHROMEBRK accounting can read
-        # the split without threading it back through the loop. Zeroed each frame().
-        # MICROSECONDS since 2026-08-14 -- ms truncation was piling into CHROMEBRK's
-        # `other`, which is a residual and so inherited every term's rounding.
-        self._pf_upd = 0
-        self._pf_cart = 0
-        self._pf_audio = 0
-        self._pf_bar = 0
-        self._pf_bg = 0     # #172: the declared-backdrop share of _pf_cart
-        self._pf_stack = 0  # total us of the last painted frame's layer walk
-        # #172: the frame's unmeasured EDGES, us -- pre = entry..draw span open
-        # (journal tick, splash, frameskip branch, redraw gate), post = the tail
-        # after the flush (dirty clear, covers/fling re-arm, pointer snapshot).
-        self._pf_pre = 0
-        self._pf_post = 0
-
 
     # -- the layer stack (compositor / router) -------------------------------
 
@@ -1178,36 +1037,38 @@ class Workstation:
             self, id, domain, draw=draw, kbd=kbd, ptr=ptr)
         # The cards ("Make it mine") surface is its own Layer now (#3/#15), owning its
         # selection/scroll state (msel/mtop) + draw + taps; cart config/apply stay on ws.
-        self.cards_layer = CardsLayer(self, NAMES, _in, _err_text)
+        self.cards_layer = CardsLayer(self, NAMES, _err_text)
         # The PAINT editor surface (#4/#30): one renderer for the cart sheet ("paint")
         # and the icon sheet ("theme"), keyed on ws._editing_icons. It reads ws.paint /
         # ws.sheet + dispatches SAVE/GET/PUT/CLOSE to ws. The theme content is ThemeLayer
         # -- it owns the EDIT-ICONS lifecycle + delegates all editing to this PaintLayer.
-        self.paint_layer = PaintLayer(self, NAMES, _in)
+        self.paint_layer = PaintLayer(self, NAMES)
         self.theme_layer = ThemeLayer(self, self.paint_layer, NAMES)
         # The Settings app (#28/#39/#53): the aggregator screen. Owns the row list +
         # scroll window (set_msel/set_top) + drawing; reads ws config/system state +
         # dispatches every mutation to ws setters (it owns NO config).
-        self.settings_layer = SettingsLayer(self, NAMES, _in, _clamp_scroll)
+        self.settings_layer = SettingsLayer(self, NAMES, _clamp_scroll)
         # The system APPS are constructed AND registered below, from the
         # declarations (`_init_apps`) -- Paint's indexed document + reflowing
-        # chrome, Writer's notebook, Storybook's compiling decks, Sheets'
-        # formula grids, Files' user-files gallery and Calc. Each is a
-        # `system_carts/<folder>/manifest.json` "app" block, not a line here.
+        # chrome, Storybook's compiling decks, Files' user-files gallery and
+        # Calc. Each is a `system_carts/<folder>/manifest.json` "app" block,
+        # not a line here.
         # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
         # handle + save_code/run_code + code-error state + code_layout stay on ws.
-        self.code_layer = CodeLayer(self, NAMES, _in)
+        self.code_layer = CodeLayer(self, NAMES)
         # The desktop home / launcher (#28): the home composition + grid nav. The Launcher
         # GRID instance stays ws.launcher (the single source); this Layer draws it.
-        self.launcher_layer = LauncherHomeLayer(self, NAMES, _in)
+        self.launcher_layer = LauncherHomeLayer(self, NAMES)
         # The Editor's project-picker content Layer (spec shell_ux_v1.md): reuses the
         # launcher grid look over ws.picker; the Make tile opens it, picking a cart opens
         # the Editor above it.
-        self.editor_picker = EditorPickerLayer(self, NAMES, _in)
+        self.editor_picker = EditorPickerLayer(self, NAMES)
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
-        # surface is now its own Layer/component; only the running-cart "desktop" + the
-        # theme wrapper remain thin _LegacyLayer shims over Workstation methods.
+        # surface is its own Layer/component -- the running-cart "desktop" is the
+        # _PlayerLayer adapter over ws.player, "theme" the ThemeLayer over the paint
+        # layer; the only _LegacyLayer entries are the four draw-only overlays
+        # (splash / toast / notice / cursor, built by `L` above).
         # SYSTEM APPS (docs/app_api_v1.md) are NOT listed here -- register_app below
         # adds each one's kind to this table.
         self._content_layers = {
@@ -1265,11 +1126,6 @@ class Workstation:
         if kind == "menu":
             return self._content_layers.get(self.menu_view) or self._content_layers["cards"]
         return self._content_layers.get(kind) or self._content_layers["launcher"]
-
-    @property
-    def _active_content(self):
-        """The active content Layer (spec alias for _content_layer())."""
-        return self._content_layer()
 
     @property
     def windowed_chrome(self):
@@ -1331,6 +1187,93 @@ class Workstation:
         return (cart is not None and cart.get("type") == "app"
                 and not self.is_system_app(cart))
 
+    def cart_editor_focus(self, handle):
+        """A cart's editor handle takes (`handle`) or releases (None) the
+        keyboard -- `editor_handle.EditorHandle.focus`.
+
+        The flip is the shell's and not the cart's because `_set_text_mode`
+        does two things no cart can: it puts the T-Deck keyboard into clean
+        ASCII, and it seeds the typed-key edge with the byte already down, so
+        the key that opened the note is not typed into it (`b2ff7de`)."""
+        self.player.set_editor_focus(handle)
+        self._set_text_mode(handle is not None)
+
+    def take_text_request(self):
+        """POP the `(kind, name, mode)` document the console was asked to open,
+        or None. Read once, by the namespace build of the run that answers it,
+        so a re-run never re-opens what the person has since navigated away
+        from."""
+        req = self._text_request
+        self._text_request = None
+        return req
+
+    def open_text_cart(self, name, kind=None, mode=None):
+        """RUN the text app on one document -- the Files router's door for
+        anything textual (docs/text_editing_2026-09.md).
+
+        The text app is a CART, claimed by the `editor` marker permission
+        (`system_api.is_text_app`), so this is an ordinary launch with the
+        request parked for its namespace. False when this build carries no
+        such cart, which the router reports on its status line."""
+        cart = None
+        for c in self.carts.all:
+            if system_api.is_text_app(c):
+                cart = c
+                break
+        if cart is None:
+            return False
+        self._text_request = (kind or system_api.DEFAULT_FILE_KIND,
+                              str(name), mode)
+        # Back to whoever asked, not home: Files opened this, so its X returns
+        # to the shelf the person was standing on, and the Editor's Config tab
+        # (step 5's ADVANCED row) gets back the tab it left.
+        caller = (self.editor_app if self.wm.top_is("menu")
+                  else self._apps_by_id.get(self.wm.top_kind()))
+        if not self._open_workspace(cart):
+            self._text_request = None
+            return False
+        self.run(self.project, caller or self.launcher_layer)
+        return True
+
+    def open_project_file(self, cart, name, mode=None):
+        """Open one of a PROJECT's own files in the text app -- the Config tab's
+        ADVANCED row, and the Files router's door for a project file reached
+        from the PROJECTS root (step 5 of docs/text_editing_2026-09.md).
+
+        It goes through the EDITOR, not straight into the handle, and that is
+        the whole point of the door: the project is opened first and returned to
+        on exit, so leaving re-READS the folder. That is what keeps the loader in
+        the loop over a file JSON mode is allowed to write invalid -- a manifest
+        the kid just broke comes back with its banner on the Config tab instead
+        of quietly leaving the shelf."""
+        path = (cart or {}).get("path")
+        if not path:
+            return False
+        if self.project is None or self.project.cart is not cart:
+            self.open_in_editor(cart)
+            if self.project is None or self.project.cart is not cart:
+                return False
+        self.editor_app.set_tab("cards")     # the tab the return lands back on
+        if not self.open_text_cart(name, self.carts_store.project_kind(path),
+                                   mode):
+            return False
+        self._project_return = cart
+        return True
+
+    def _return_to_project(self, cart):
+        """Come back from a project-file edit to that project's Editor, THROUGH
+        THE LOADER (`open_project_file`'s contract). Both WM tiers land here:
+        the windowed one closes the playtest window first, exactly as the
+        ordinary exit below does."""
+        _cp = getattr(self.wm, "close_player", None)
+        if _cp is not None and self.wm.desk_open():
+            _cp()
+        self.carts.reload(cart)
+        self.open_in_editor(cart)
+        if self.project is not None and self.project.cart is cart:
+            self.editor_app.set_tab("cards")
+        self._dirty = True
+
     def app_bar_h(self):
         """Rows the exitable "tool" strip owns on top of a running app cart's
         surface -- what `bar_h()` reports to a USER APP so it can draw below the
@@ -1374,7 +1317,6 @@ class Workstation:
             return False
         return self.app_guard.forgive(system_api.app_id_for(cart))
 
-
     def load_system(self):
         """Read the system settings (`self.prefs`) and APPLY them -- the saved
         wallpaper, font scale, theme, skin and every persisted toggle (#39).
@@ -1411,38 +1353,61 @@ class Workstation:
         # used to sit here, and a seventh toggle is now none.
         for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
             getattr(self, setter)(self.system.get(key, default), persist=False)
-
-
-
+        # A key a retired setting left behind (#217 took FRAMESKIP) would ride
+        # every persist forever; drop it once.
+        if self.system.pop("frameskip", None) is not None:
+            self.prefs.persist()
 
     def _relayout(self):
         """Rebuild the responsive layout from the live system-canvas size + the
         EFFECTIVE font scale and re-push it into the launcher (so its grid reflows).
         Called on a font-scale change (and could be called on a resize)."""
         w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self.look.effective_font_scale()
-        self.layout = Layout(w, h, fs)
+        cs = self.look.effective_chrome_scale()
+        self.layout = Layout(w, h, fs, cs)
         self.launcher.set_layout(self.layout)
-        # Editor layouts reflow too (#39 step 2); an open code editor adopts the new
-        # visible window live so a font/size change reflows it without losing the buffer.
-        self.code_layout = CodeLayout(w, h, fs)
-        self.block_ui.relayout(w, h, fs)
-        if self.editor is not None:
-            self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
+        self._relayout_code()             # editor layouts reflow too (#39 step 2)
+        self.block_ui.relayout(w, h, fs, cs)
         # The step-3 responsive editors (#39): each converted layer owns its layout;
         # guarded, since _relayout is first called before _build_layers registers them.
         for _lyr in ("paint_layer", "map_ui", "scene_ui", "music_ui", "cards_layer"):
             _obj = getattr(self, _lyr, None)
             if _obj is not None:
-                _obj.relayout(w, h, fs)
+                _obj.relayout(w, h, fs, cs)
         for _app, _t in getattr(self, "_apps", ()):   # registered system apps
             _relay = getattr(_app, "relayout", None)
             if _relay is not None:
-                _relay(w, h, fs)
+                _relay(w, h, fs, cs)
         # The windowed WM (wm_windowed.py, big-screen tier) re-anchors its layout
         # contexts after any relayout; a no-op hook on the fullscreen-stack WM.
         _hook = getattr(self.wm, "on_relayout", None) if hasattr(self, "wm") else None
         if _hook is not None:
             _hook()
+
+    def _relayout_code(self):
+        """Rebuild the Code tab's geometry and let an open editor adopt it live (so a
+        font/size change reflows without losing the buffer). The ONE author of
+        `code_layout` after __init__ -- _relayout above and EditorApp._relayout_tab
+        (entering the tab, #216) both come through here.
+
+        Adopting is gated on the LAYOUT's window actually changing, because
+        `set_view_size` re-runs the caret-follow scroll and this now runs on EVERY
+        entry into the tab. A kid who scrolled away from the caret and came back
+        through the tab ladder -- or re-tapped CODE while already on it -- had the
+        view snapped back to the caret. Re-deriving geometry must not move what the
+        kid is looking at; only a real reflow may. The gate compares LAYOUTS, not
+        the editor's live window, because the line-number gutter narrows that
+        window itself (code_layer._apply_gutter) and re-widening it here would
+        yank the view on every entry with the gutter on."""
+        prev = getattr(self, "code_layout", None)
+        lay = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
+                         self.look.effective_font_scale(),
+                         self.look.effective_chrome_scale())
+        self.code_layout = lay
+        ed = self.editor
+        if ed is not None and (prev is None
+                               or (prev.cols, prev.rows) != (lay.cols, lay.rows)):
+            ed.set_view_size(lay.cols, lay.rows)
 
 
     # -- WEB CONSOLE (#197): forwards to the `web` collaborator ---------------
@@ -1488,223 +1453,10 @@ class Workstation:
         depends on the shelf following a browser batch with no reboot."""
         return self.carts.rescan()
 
-    def _set_toggle(self, key, on, persist):
-        """The tail every SETTINGS_TOGGLES verb shares: the flat mirror, the
-        repaint mark, and the persisted copy under the SAME name (#209 section
-        7). What differs per toggle -- the phase reset, the canvas hook, the
-        keyboard hand-over -- stays written out in the verb that calls this.
-
-        The mirror is set with setattr, which is fine because this runs on a
-        FLIP and at boot, never per frame; the READ side stays a plain
-        attribute everywhere, and must -- `frame_cap_fps` reads self.frameskip
-        and device_boot's `pace` calls it every loop iteration on all three
-        boards."""
-        setattr(self, key, on)
-        self._dirty = True
-        if persist:
-            self.system[key] = on
-            self.prefs.persist()
-
-    def set_diag_live(self, on, persist=True):
-        """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
-        The device loop (moy_runtime.run_desktop) reads self.diag_live each cycle,
-        so the change takes effect within a frame -- no reboot."""
-        self._set_toggle("diag_live", bool(on), persist)
-
-    def set_diag_sd(self, on, persist=True):
-        """Flip the periodic diag->SD write gate (Settings -> DIAG SD LOG) and
-        persist it. Separate from PERF DIAG so a measurement session can stream
-        serial samples WITHOUT the ~115ms 20s sdflush stutter; the offline
-        play-then-read-diag.log workflow flips this ON too. Crash/cart-exit
-        flushes are unconditional either way (the safety net)."""
-        self._set_toggle("diag_sd", bool(on), persist)
-
-    def set_frameskip(self, on, persist=True):
-        """Flip the #77 frameskip gate (Settings -> FRAMESKIP) and persist it.
-        Takes effect on the next frame; the phase bit resets so the first frame
-        after a toggle always renders (no one-frame blank on enable)."""
-        self._fs_phase = False
-        self._set_toggle("frameskip", bool(on), persist)
-
-    def second_keyboard(self):
-        """The keyboard that can become player two, or None.
-
-        A board qualifies only when it has a SECOND keyboard: the T-Deck's
-        paired Bluetooth one, alongside the physical C3 keyboard it already
-        has. On the touch-only boards a BLE keyboard IS `ws.keyboard` -- the
-        only one there is -- so handing it to player two would leave player one
-        with nothing to press."""
-        ble = getattr(self, "ble_keyboard", None)
-        if ble is None or ble is self.keyboard:
-            return None
-        return ble if getattr(ble, "set_player", None) is not None else None
-
-    def set_two_player(self, on, persist=True):
-        """Flip LOCAL 2P (Settings -> 2 PLAYERS) and persist it.
-
-        Two kids, two real keyboards, one screen, and no radio between consoles.
-        The whole mechanism is that the second keyboard's input SOURCE carries a
-        player: a source with a player IS a player (#26), so `players()` reports
-        2 and every cart that offers a 2P mode finds it -- no transport, no
-        session, no netcode.
-
-        A board with no second keyboard reports OFF whatever it is told. Saying
-        otherwise would be the frozen-meter bug in another costume: the console
-        would claim two players while nothing on it could produce the second
-        one's buttons. (The keyboard slot stays honest at the other end too --
-        an UNCONNECTED Bluetooth keyboard does not hold the slot, or the cart
-        would field a character nobody could move.)"""
-        on = bool(on)
-        kb = self.second_keyboard()
-        if kb is None:
-            on = False
-        else:
-            try:
-                kb.set_player(1 if on else 0)
-            except Exception as exc:  # noqa: BLE001 -- a keyboard hiccup is not a crash
-                print("Moybyte 2 players failed:", exc)
-                on = False
-        self._set_toggle("two_player", on, persist)
-
-    def set_crisp_pixels(self, on, persist=True):
-        """Flip the CRISP PIXELS composite (Settings row, capability-gated) and
-        persist it. The mode lives on the SYSTEM canvas (set_crisp_scale --
-        the P4's P4SystemCanvas routes the game composite nearest-neighbour
-        instead of the PPA's fixed-bilinear scaler); a canvas without the hook
-        never shows the row, so this setter is then only ever the boot apply
-        of a stale system.json key."""
-        on = bool(on)
-        self._set_toggle("crisp_pixels", on, persist)
-        hook = getattr(self.sys_canvas, "set_crisp_scale", None)
-        if hook is not None:
-            hook(on)
-
-    def set_show_fps(self, on, persist=True):
-        """Flip the in-game FPS chip (Settings -> SHOW FPS) and persist it.
-        The chip is GAME-domain (it rides the cart's canvas and its composite
-        scale -- 2x-big on a 128px cart, and fold-compatible for free, #190),
-        so hiding it is purely cosmetic: the perf fields keep updating and
-        PERF DIAG is untouched. Hiding also disables the chip's tap-to-toggle
-        breakdown HUD, so clear that too rather than strand it on-screen."""
-        on = bool(on)
-        if not on:
-            self.perf_hud = False
-        self._set_toggle("show_fps", on, persist)
-
     def _persist_system(self):
         """`prefs.persist()` -- app_context's Prefs role and the dev channel's
         `vol`, which keep speaking this name."""
         return self.prefs.persist()
-
-    def _ota_channel(self):
-        """The selected OTA update channel ("stable" / "unstable" beta). Drives which
-        manifest UPDATE ONLINE checks; persisted in system.json once chosen.
-
-        The default is the channel this FIRMWARE was built on, not a constant. A
-        board that took a beta is running `unstable`, and defaulting it to
-        `stable` meant every check compared the two, found them different, and
-        offered the "update" -- a downgrade, on every check, forever, because
-        installing it is the only thing that would make the two agree. Which
-        channel you are on is a fact about the running image; the setting is a
-        deliberate departure from it, so absence of a setting should mean "the
-        one I am on"."""
-        saved = self.system.get("ota_channel")
-        if saved in ("stable", "unstable"):
-            return saved
-        u = self.updater
-        if u is not None:
-            try:
-                running = u.channel()
-                if running in ("stable", "unstable"):
-                    return running
-            except Exception:            # a backend without channel(): fall through
-                pass
-        return "stable"
-
-    def _cycle_channel(self, d):
-        """Toggle the OTA channel STABLE<->UNSTABLE and persist. Two channels, so any
-        step flips. This only changes what UPDATE ONLINE checks -- the running firmware
-        is unchanged until a manifest is actually installed (and the bootloader's
-        rollback still guards a bad beta image)."""
-        self.system["ota_channel"] = (
-            "stable" if self._ota_channel() == "unstable" else "unstable")
-        self.prefs.persist()
-
-    def load_achievements(self):
-        """Wire a fresh Achievements over the badges the store remembers (#21).
-
-        The read is `prefs`'; the WIRING is kernel -- persistence goes back to
-        the store, the unlock effects (the toast deadline + the beep) are the
-        kernel's own. Call after the store + carts_root are injected (host
-        build_workstation / device run_desktop)."""
-        self.ach = Achievements(self.prefs.load_achievements(),
-                                on_save=self.prefs.save_achievements,
-                                on_unlock=self._achievement_unlocked)
-
-    def _achievement_unlocked(self, ach_id):
-        """A fresh unlock's EFFECTS: arm the toast overlay, then celebrate with a
-        short rising beep when audio is wired (#21, rev-3 event push).
-
-        `Achievements` generates the effect and the kernel executes it. The
-        deadline is written HERE, at the unlock, rather than polled per frame off
-        the object -- `_animating` and the WM's overlay signature read the flat
-        field and never call into `ach` on the frame path. There is no toast
-        QUEUE to preserve: `award()` overwrites its payload, so a second unlock
-        inside the window replaces the banner and extends the deadline, which is
-        exactly what a later write to this field does.
-
-        The deadline is armed BEFORE the beep so a silent (or broken) backend
-        cannot cost the kid the banner; the beep itself is best-effort."""
-        self._toast_until = _ticks_ms() + TOAST_MS
-        au = self.audio
-        if au is not None:
-            try:
-                au.beep(880, 0.08)
-                au.beep(1320, 0.12)
-            except Exception:  # noqa: BLE001
-                pass
-
-    # -- hidden Easter eggs (#21) now live on self.ach_ui (achievements_ui.py,
-    # AchievementsUI): the 3 eggs + their trigger state + the popup payload +
-    # _show_egg + _draw_egg/_draw_confetti/_draw_achievements. The achievement
-    # core above (load_achievements/_achievement_unlocked + self.ach) and the
-    # overlay deadlines those objects arm (_init_overlays) stay here.
-
-
-
-    def note_cost(self, what):
-        """Count one EXPENSIVE event: a cache build, or a call into storage.
-
-        Every performance bug found in the 2026-07-26 session was a violated
-        assumption that produced NO SIGNAL -- a cache silently missing 100% of the
-        time (the bar strip keyed on canvas identity while the WM alternated
-        destinations: 72ms of an 86ms frame, twice per gesture), an accessor
-        silently rebuilding per row, storage reads silently landing on drag
-        frames. None of them broke anything; they just made two frames in
-        thirty-one five times slower, which only shows up if you happen to measure
-        the exact frame. Each took hours to find, and three wrong models died on
-        the way.
-
-        So the expensive paths say so. Deliberately counted on the BUILD side
-        only, never on the hit side: a cache hit is the hot path and stays
-        untouched, while a build already costs 15-100ms, so one dict increment
-        there is free. Hit RATE is not the interesting number anyway -- "rebuilt
-        44 times in 44 frames" is the thing that screams, and a bare build count
-        says it.
-
-        Read it two ways: the P4's `state` serial command reports it, so a glass
-        session sees a thrashing cache immediately; and tests assert BUDGETS over a
-        run of frames (tests/test_top_bar.py, tests/test_cover_pipeline.py), which
-        turns this whole bug class from a perf mystery into a test failure."""
-        d = self.costs
-        d[what] = d.get(what, 0) + 1
-
-    # -- Settings screen (#28) -----------------------------------------------
-    #
-    # Most rows are live (wallpaper/theme/font size/icons/frameskip/fps/diag --
-    # settings_layer.py is the authority); only the remaining "mock" rows step a
-    # cosmetic placeholder value. Each row is (key, label, kind).
-
 
     # `updater` is a PROPERTY so that injecting one INVALIDATES the two cached
     # availability answers below. Four places inject an updater -- three boards
@@ -1761,6 +1513,8 @@ class Workstation:
         # Windowed WM (#73): close JUST the Settings window -- whatever else is
         # open (a running game, the Make window) stays. Desk world only (#105):
         # play-world Settings is fullscreen and takes the resume-or-home rules.
+        if self.settings_layer.wifi_view:
+            self.settings_layer.close_wifi()   # its radio lease ends with the visit
         _ck = getattr(self.wm, "close_window_kind", None)
         if _ck is not None and self.wm.desk_open():
             self._dirty = True
@@ -1800,7 +1554,8 @@ class Workstation:
         # ≡ rect (the launcher/Settings/Editor bar), not the fixed crash-bar slot.
         bx, _by, bw, _bh = self.layout.sysmenu_btn
         fs = self.look.effective_font_scale()
-        self.sysmenu.fs = fs          # rows hold fs-scaled text -> fs-scaled geometry
+        self.sysmenu.fs = fs          # rows hold fs-scaled text -> fs-scaled width
+        self.sysmenu.cs = self.layout.cs      # ...and cs-scaled rows (#203)
         pw = _POPUP_W * fs
         ax = bx + bw - pw
         self.sysmenu.anchor_x = max(0, min(ax, self.sys_canvas.w - pw))
@@ -1879,22 +1634,6 @@ class Workstation:
     @images.setter
     def images(self, value):
         self.project.images = value
-
-    @property
-    def tables(self):
-        return self.project.tables
-
-    @tables.setter
-    def tables(self, value):
-        self.project.tables = value
-
-    @property
-    def texts(self):
-        return self.project.texts
-
-    @texts.setter
-    def texts(self, value):
-        self.project.texts = value
 
     @property
     def pmem(self):
@@ -2061,12 +1800,29 @@ class Workstation:
         (hold-BACKSPACE) calls this. The Editor is the second caller
         (Stage 3b): a cart run from PLAY returns to the Editor on the tab it left
         (screen -> "menu"; editor_app.tab is preserved -> the SAME tab), proving the
-        Player has zero knowledge of who launched it. Any other caller (the launcher
-        home root, or None) pops all the way home."""
+        Player has zero knowledge of who launched it. A registered APP is the
+        third (Files opening a note in the Notes cart, step 3 of
+        docs/text_editing_2026-09.md): it pops back to that app's own surface,
+        on the shelf the person was standing on. Any other caller (the launcher
+        home root, or None) pops all the way home. A PROJECT FILE edit (step 5)
+        is the Editor arm with a reload in front of it -- see
+        `_return_to_project`."""
         # Drop the dead run's world NOW (#66 repeat-run fragmentation fix): the
         # next cart must build into a compact heap, not around this one's corpse
         # (see Player.release_world's docstring for the measured mechanism).
         self.player.release_world()
+        back = self._project_return
+        self._project_return = None
+        # A run's caller is SPENT by its return. Leaving it set is what wedged
+        # Files (#108, on glass 2026-09-07): the returned-to APP's own context X
+        # routes here too, and a stale caller made it `goto` the app already on
+        # top -- a no-op, so Files could never be left again once it had opened
+        # a note.
+        caller = self._run_caller
+        if back is not None:
+            self._run_caller = None
+            self._return_to_project(back)
+            return
         # Windowed WM (#73): closing the playtest must never truncate unrelated
         # windows stacked above it (e.g. Settings) -- the WM removes ONLY the
         # player and refocuses the caller's window. Desk world only (#105): a
@@ -2075,9 +1831,11 @@ class Workstation:
         _cp = getattr(self.wm, "close_player", None)
         if _cp is not None and self.wm.desk_open():
             self._dirty = True
-            _cp()
+            _cp()                          # reads _run_caller to refocus
+            self._run_caller = None
             return
-        if self._run_caller is self.editor_app:
+        self._run_caller = None
+        if caller is self.editor_app:
             self._dirty = True             # screen change repaints (#44)
             self.wm.goto("menu")           # Stage 6e: pop the Player, back to the Editor tab
             # #80: returning DIRECTLY to the code tab is not a tab CHANGE, so
@@ -2086,8 +1844,60 @@ class Workstation:
             # map but the sym layer doesn't exist (sym+digit typed NOTHING in
             # the code editor after a PLAY). Restore the returned-to tab's mode.
             self._set_text_mode(getattr(self.editor_app, "tab", None) == "code")
-        else:
-            self.go_home()
+            return
+        caller_id = getattr(caller, "id", None)
+        if caller_id is not None and self._apps_by_id.get(caller_id) is caller \
+                and self._return_to_app(caller_id):
+            return
+        self._go_home_or_back()
+
+    def _return_to_app(self, app_id):
+        """Land back on registered app `app_id`'s own surface, on the row it was
+        showing. A back-stack RETURN and never a re-open: `open_app` would call
+        the app's `open()`, which resets it to its root -- and coming back to a
+        different screen than you left is exactly what a return must not do."""
+        app = self._apps_by_id.get(app_id)
+        if app is None:
+            return False
+        self._dirty = True
+        self.wm.goto(app_id)
+        for _app, _text in self._apps:
+            if _app is app:
+                self._set_text_mode(bool(_text))
+                break
+        return True
+
+    def _go_home_or_back(self):
+        """Leave the top surface for the launcher root -- unless an APP opened
+        it, in which case leaving lands back INSIDE that app.
+
+        `_app_return` is the app-to-app half of the launch-and-return contract
+        (#108). `_run_caller` covers a RUN (the Player pops to whoever started
+        it) and `_project_return` a project-file edit (which comes back through
+        the loader); this covers the third shape -- Files opening a drawing in
+        Paint or a project in the Editor, neither of which is a run. It survives
+        a nested run on purpose, so PLAY from a Files-opened Editor still comes
+        home to Files. Going home clears it, so a later unrelated exit can never
+        inherit it."""
+        back = self._app_return
+        self._app_return = None
+        self.go_home()                     # the leaving surface's save + teardown
+        if back is not None and self.wm.top_is("launcher"):
+            self._return_to_app(back)
+
+    def _note_app_caller(self):
+        """Record the registered APP this navigation is leaving, so whatever it
+        opens comes back to it. Called at the app-to-app jumps -- `open_app`
+        and the two `ctx.nav` editor doors.
+
+        It only ever SETS. A jump from somewhere that is not an app deepens a
+        journey rather than starting one (Files -> a project's Editor -> that
+        cart's cover in Paint is still on its way back to Files), and clearing
+        there would strand the shelf. `go_home` is the one reset, because the
+        launcher root is where every return path ends."""
+        app = self._apps_by_id.get(self.wm.top_kind())
+        if app is not None:
+            self._app_return = app.id
 
     def _crash_to_code(self):
         """A crashed cart run throws the kid STRAIGHT into the code editor on
@@ -2115,6 +1925,14 @@ class Workstation:
             return True
         err = self.cart_error or "crashed"
         line = self.crash_line
+        # THE FILE THAT RAISED, not the file the tab was left on (SPEC.md 4,
+        # #89). On a ported cart the raise is as likely to be in p8.lua or one
+        # of the PICO-8 tabs as in main.lua, and throwing the kid at main.lua's
+        # line N is throwing them at somebody else's line N.
+        # ...read straight off the player: the legacy ws-> player forwards are a
+        # set that may only shrink (tests/test_console_facade.py), and this is a
+        # new name with two readers.
+        self.code_file = self.player.crash_file or None
         self.player.release_world()
         # Windowed desk world (#73/#105): the crashed playtest window closes
         # like a normal exit (never truncating windows stacked above it);
@@ -2123,6 +1941,7 @@ class Workstation:
         if _cp is not None and self.wm.desk_open():
             _cp()
         self.editor_app.open(self.project)
+        self.editor = None            # rebuild over the file that raised
         self.set_menu_view("code")
         if line is not None:
             # Land the caret on the line that raised (set_menu_view only marks
@@ -2139,59 +1958,26 @@ class Workstation:
         here. The launcher IS the back-stack root and never exits (its bar draws no X,
         so this is never reached with screen == "launcher"). A pre-Stage-6 shim over the
         screen strings: Settings closes via its own resume-or-home rule; the Editor (and
-        any other taskbar app) goes home."""
+        any other taskbar app) goes home -- or back into the app that opened it
+        (`_go_home_or_back`: the Editor Files opened on a project returns to the
+        Files shelf, not to the launcher)."""
         if self.wm.top_is("settings"):            # Stage 6d: ask the stack top
             self._exit_settings()
         elif not self.wm.top_is("launcher"):
-            self.go_home()
+            self._go_home_or_back()
 
     def _draw_cart_bar(self):
-        """Draw the unified top bar over the CRASH frame (the only cart-path chrome left
-        after Stage 5 retired the pause frame). The bar is the shell's, not the Player's,
-        so its draw + the _pf_bar (CHROMEBRK) accounting stay here; the Player asks for it
-        via this thin helper so player.py never reaches the bar surface directly (the
-        Stage-2 isolation guarantee)."""
-        _perf = self.perf_hud or self.perf_capture
-        _tb = _ticks_us() if _perf else 0
+        """Draw the unified top bar over the CRASH frame (the only cart-path chrome
+        a game gets). The bar is the shell's, not the Player's; the Player asks
+        for it via this thin helper so player.py never reaches the bar surface
+        directly."""
         self.bar_layer._draw_status_strip("desktop")   # unified top bar (tool switcher)
-        if _perf:
-            self._pf_bar = _ticks_diff(_ticks_us(), _tb)   # CHROMEBRK: the bar's share (us)
 
     def _cart_bar_tap(self, px, py):
         """Route a CRASH-frame tap to the top-bar tool switcher (bar-owned), returning
         True iff a tool icon consumed it. Same isolation reason as _draw_cart_bar: the
         Player calls this instead of reaching the bar surface."""
         return self.bar_layer.handle_cart_tap(px, py)
-
-    def frame_cap_fps(self):
-        """The frame-loop cap for THIS moment (#63 frame pacing). DEFAULT:
-        everything runs uncapped at the loop's 60 -- FPS_GOVERNOR ships False
-        (see its block above; owner-affirmed twice). WHEN the governor or
-        FRAMESKIP is on, a running GAME locks to a steady 30 (the SNES rule: a
-        LOCKED cadence feels smoother than a swing -- most carts land in the
-        29-45 band, and holding the fast frames to the slow ones' pace turns
-        "38-55 and jittery" into "30 and rock solid") unless its manifest
-        declares `"fps": 60` (Hop Quest, Sky Run). Tools/apps and every console
-        screen keep 60 in every mode -- the pointer must stay responsive. The
-        device loop re-reads this every iteration; the host simulator paces via
-        its own --fps flag."""
-        # #77 pairing (2026-08-10, learned on zoomed celeste): FRAMESKIP implies
-        # the cap. The p8 ports pace THEMSELVES by frame-quantized dt with a
-        # never-fast rule -- against an UNCAPPED skip loop (~30ms frames) the
-        # quantizer must halve to avoid running fast, so skip made the game
-        # SLOWER (20Hz -> 16.5Hz). Capped at 30, dt=33.3ms quantizes to
-        # tick-every-frame: correct 30Hz logic, render at 15 -- the trade skip
-        # promises. dt-driven carts are indifferent to the cap either way.
-        if ((FPS_GOVERNOR or self.frameskip) and self.wm.top_is_player()
-                and self.cart_error is None):
-            cart = self.cart
-            if cart is not None and cart.get("type") == "game":
-                try:
-                    f = int(cart.get("fps") or 30)
-                except (TypeError, ValueError):
-                    f = 30
-                return 60 if f >= 60 else 30
-        return 60
 
     def _running_cart_shows_bar(self):
         """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs
@@ -2210,17 +1996,13 @@ class Workstation:
         cart's job -- see docs/moy_cart_api.md "A text-mode cart must provide its own exit"."""
         return (self.wm.top_is_player() and self.cart_error is None  # Stage 6d
                 and self.cart is not None
-                and self.cart.get("type") in ("tool", "app"))
+                and self.cart.get("type") in BAR_TYPES)
 
     def _draw_tool_bar(self):
-        """Draw the minimal TOOL bar over a running tool/app (Part 4). Same shell-owned
-        draw + _pf_bar accounting as _draw_cart_bar; the Player asks for it via this thin
-        helper so player.py never reaches the bar surface directly (Stage-2 isolation)."""
-        _perf = self.perf_hud or self.perf_capture
-        _tb = _ticks_us() if _perf else 0
+        """Draw the minimal TOOL bar over a running tool/app (Part 4). Shell-owned
+        like _draw_cart_bar; the Player asks for it via this thin helper so
+        player.py never reaches the bar surface directly."""
         self.bar_layer._draw_status_strip("tool")   # minimal bar: title + status + X
-        if _perf:
-            self._pf_bar = _ticks_diff(_ticks_us(), _tb)   # CHROMEBRK: the bar's share (us)
 
     def _tool_bar_tap(self, px, py):
         """Route a running-TOOL tap (px, py in GAME coords) to the minimal bar: the
@@ -2241,6 +2023,8 @@ class Workstation:
         # shared by open() [RUN, from a launcher tap, uses the launcher selection] and
         # open_in_editor() [EDIT, from the project-picker, which passes the PICKED cart].
         # Leaves the cart STARTED so PLAY can run it and the editors have live data.
+        # Returns True iff the workspace opened; False leaves ws.cart None with
+        # cart_error set (see the rehydrate guard below).
         # Deferred pmem (#66): persist the OUTGOING project's unsaved cells before
         # the fresh Project replaces it -- a re-open otherwise reloads pmem.json
         # over progress that only ever reached RAM.
@@ -2277,11 +2061,29 @@ class Workstation:
         if prev is not None and prev is not cart:
             self.carts.reslim(prev)            # at most ~one fat cart stays live (#66)
         self.carts.rehydrate(cart)
+        # FAIL CLOSED (#66): a cart whose SOURCE did not come back is not
+        # openable, and the refusal belongs here -- everything below assumes
+        # cart["src"], so a slim dict that got this far reached Player.start and
+        # died on a KeyError two frames later, leaving ws.cart on the half-loaded
+        # dict. rehydrate() leaves a cart slim when the store said no: a missing
+        # folder, or (the case this was written from) a heap with no block big
+        # enough for the source. The kid gets the panel a crashing cart gets --
+        # open()/play() run() straight to it -- and the launcher stays usable.
+        if cart is None or "src" not in cart:
+            self._fat_cart = None
+            self.player.release_world()    # the outgoing run's world is dead too,
+                                           # and this is the heap that had no room
+            self.cart_error = ("Couldn't open %.24s. Try again."
+                               % ((cart or {}).get("title") or "that cart"))
+            self.crash_line = None
+            return False
         self._fat_cart = cart
         self.cart = cart
         self.config = dict(self.cart["cfg"])
         self.cards_layer.reset()      # fresh card selection/scroll for the new cart
         self.editor = None
+        self.code_file = None         # a new cart opens on ITS main file, never on
+                                      # the name the last one was left showing
         self.paint = None
         self.map_ui.reset()
         self.scene_ui.reset()
@@ -2296,8 +2098,6 @@ class Workstation:
         # Player, building the cart namespace -- goes through self.project.
         self.project.flags = self._build_flags()
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
-        self.tables = self.cart.get("tables") or {}    # Sheets docs, table() (#78)
-        self.texts = self.cart.get("texts") or {}      # Writer docs, text() (#78)
         self.pmem = self._build_pmem()
         self.scenes = self._build_scenes()             # placed-actor scenes (#85)
         self._cart_key_prev = 0       # fresh cart: no stale key edge
@@ -2312,6 +2112,7 @@ class Workstation:
         # distinct carts is "Cart Explorer". Key by the cart's path/title so it's
         # the SAME identity the launcher uses (distinct carts, not repeat opens).
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
+        return True
 
     def app_context(self, app_id, needs=(), prefs_ns=None):
         """Build the narrowed shell interface for one system app
@@ -2331,8 +2132,8 @@ class Workstation:
         from the `app` blocks in `system_carts/*/manifest.json`, so adding an
         app is a manifest plus a module -- never an edit here
         (docs/app_api_v1.md). The `<id>_app` attributes are kept because the
-        shell and the apps address each other by them (`files_app` opens
-        `ws.writer_app`), and because 100+ call sites use them.
+        shell and the apps address each other by them (`settings_layer` opens
+        `ws.appearance_app`), and because 100+ call sites use them.
 
         Declaration order IS dispatch precedence, which is why `order` lives in
         the manifest rather than being implied by a dict.
@@ -2340,7 +2141,7 @@ class Workstation:
         for d in APPS:
             cls = _resolve_app_entry(d["entry"])
             app = cls(self.app_context(d["id"], getattr(cls, "NEEDS", ())),
-                      NAMES, _in)
+                      NAMES)
             setattr(self, str(d["id"]) + "_app", app)
             ms = d.get("min_size")
             self.register_app(app, text_mode=bool(d.get("text_mode")),
@@ -2355,9 +2156,9 @@ class Workstation:
           open()        -- (re)enter the app on every launch
           relayout(w, h, fs)  -- adopt a new canvas size / font scale
 
-        `text_mode=True` marks a TYPING app (clean ASCII keyboard, the Writer
-        precedent); `min_size=(w, h)` is the windowed-WM resize minimum in
-        fs-scaled units (the ui.py convention). When omitted, MIN_W/MIN_H on
+        `text_mode=True` marks a TYPING app (clean ASCII keyboard);
+        `min_size=(w, h)` is the windowed-WM resize minimum in fs-scaled
+        units (the ui.py convention). When omitted, MIN_W/MIN_H on
         the app's layout are adopted. TITLE supplies window/taskbar text. A
         launcher tap on the claimed cart opens the app instead of the Player;
         everything else (window chrome, theme tokens, toolkit) comes free."""
@@ -2455,17 +2256,94 @@ class Workstation:
             if _app.is_app(selected):
                 self.open_app(_app, selected)
                 return
+        if (selected or {}).get("broken"):
+            # A cart whose manifest will not parse cannot be RUN -- it has no
+            # main, no fps and no permissions. A tap opens it where it can be
+            # fixed instead (step 5 of docs/text_editing_2026-09.md): the
+            # Editor's Config tab, which shows the break and offers the file.
+            self.open_in_editor(selected)
+            return
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
+
+    def run_script(self, kind, name):
+        """RUN a SCRIPT: a bare `.py`/`.lua` file in the vault, which is a cart
+        with NO FOLDER (step 6 of docs/text_editing_2026-09.md).
+
+        The file is read through the store, wrapped in a manifest synthesized
+        HERE and written nowhere -- no folder is created, nothing is saved --
+        and started down the ordinary Player path. `type: "script"` is
+        tool-shaped (`player.BAR_TYPES`): one unpaced tick per loop frame, the
+        minimal bar's X to leave. Its screen is `self.script_console`, and the
+        SHELL keeps the pen: the console's draw becomes the run's `_draw` and
+        its driver wraps the script's `_update`, so a script cannot paint over
+        the prompt it is reading from, and a raise lands in the scrollback
+        (there is no folder for crash-to-code to open).
+
+        THE CAPABILITY GATE (#120) is that manifest and nothing more: `files`,
+        `prefs`, `console`. `carts` is ungrantable to any cart at all
+        (`system_api.NEVER_GRANTED`) and the network is gated on a `network`
+        permission this manifest does not carry, so a script naming either has
+        no such NAME -- and the console says which one it wanted.
+
+        `(True, "")` when the script is running; `(False, why)` -- a kid-facing
+        line -- when there was nothing to run."""
+        store = self.carts_store
+        src = None
+        if store is not None and self.store.ready():
+            try:
+                src = self.store.call(
+                    lambda: store.load_file(kind, name, self.carts_root))
+            except Exception as exc:  # noqa: BLE001 -- a bad card is not a crash
+                print("Moybyte script read failed:", exc)
+        if src is None:
+            return (False, "CAN'T READ IT")
+        runtime = _modes.script_runtime(name)
+        if not runtime:
+            return (False, "NOT A SCRIPT")
+        title = str(name)
+        cut = title.rfind(".")
+        cart = {"title": title[:cut] if cut > 0 else title,
+                # The FILE is the path: a script has no folder, and the loader
+                # never opens this -- it is the run's identity, and what keeps
+                # `_open_workspace`'s pathless-cart guard from substituting a
+                # real cart for it.
+                "path": store.file_path(kind, name, self.carts_root),
+                "type": SCRIPT_TYPE,
+                "runtime": runtime,
+                "permissions": ["files", "prefs", "console"],
+                "src": src,
+                "cfg": {},
+                "version": 0}
+        con = self.script_console
+        con.start(cart["title"], runtime)
+        caller = self._content_layer()
+        if not self._open_workspace(cart):
+            return (False, "CAN'T RUN IT")
+        player = self.player
+        if player.cart_error is not None:
+            # The body did not survive its own exec. The console IS this run's
+            # error surface, so the traceback goes there and the run continues
+            # as a readable, exitable screen instead of an error panel over a
+            # cart with nothing to edit.
+            con.crash(player.cart_error)
+            player.cart_error = None
+            player.crash_line = None
+        player._draw = con.draw
+        player._update = con.driver(player._update)
+        self._set_text_mode(True)      # a script TYPES; this is the surface taking
+        con.seed_key(getattr(self.input, "last_key", 0) or 0)
+        self.run(self.project, caller)
+        return (True, "")
 
     def open_app(self, app, cart=None):
         """Spawn a registered system app on `cart` (default: the cart its
         is_app claims) -- the ONE app-launch dispatch, used by the launcher
         tap above and by app-to-app jumps (e.g. Files' OPEN -> Paint). A
-        TYPING app (register_app text_mode=True, the Writer precedent) gets
-        the clean ASCII keyboard after it opens; the rest are set to button
-        mode BOTH ways, so a jump out of a typing app restores the raw
-        keyboard. Returns False when no cart carries the app's identity."""
+        TYPING app (register_app text_mode=True) gets the clean ASCII
+        keyboard after it opens; the rest are set to button mode BOTH ways, so
+        a jump out of a typing app restores the raw keyboard. Returns False
+        when no cart carries the app's identity."""
         if cart is None:
             for c in self.carts.all:
                 if app.is_app(c):
@@ -2478,6 +2356,7 @@ class Workstation:
             if _app is app:
                 text = _text
                 break
+        self._note_app_caller()        # a jump OUT of an app comes back to it
         self.cart = cart
         self.input.text_mode = False
         self.search_typing = False     # #105: an app jump ends any in-progress search typing
@@ -2485,6 +2364,36 @@ class Workstation:
         self.wm.goto(app.id)
         self._set_text_mode(bool(text))
         self.ach.note("open", cart.get("path") or cart.get("title"))
+        return True
+
+    def open_image(self, name, kind=None, cart=None):
+        """Open a PICTURE in Paint -- the ONE image door, taken by the Files
+        router and by the Editor's ADVANCED files row alike (#108).
+
+        `cart` names a project whose OWN image this is (`images/cover.moyimg`):
+        Paint then reads and writes it on that project's kind, in place, so an
+        edited cover is the cover. Without one it is a gallery drawing. False
+        when this build carries no Paint app, which each door reports on its
+        own status line -- but a picture is never REFUSED for its shape: one
+        Paint cannot edit opens read-only rather than not at all."""
+        app = self._apps_by_id.get("artwork")
+        if app is None:
+            return False
+        into_project = None
+        if cart is not None:
+            path = (cart or {}).get("path")
+            if not path:
+                return False
+            kind = self.carts_store.project_kind(path)
+            if self.project is not None and self.project.cart is cart:
+                into_project = cart      # opened FROM this project's Editor
+        self.artwork.open_named(name, kind)
+        if not self.open_app(app):
+            return False
+        # Leaving Paint comes back to the Config tab THROUGH the loader, the
+        # same contract a project TEXT file has: the folder is re-read, so an
+        # edited cover is the cover the shelf shows.
+        self._project_return = into_project
         return True
 
     def is_system_app(self, cart):
@@ -2502,7 +2411,11 @@ class Workstation:
         # owns the screen until PLAY runs it. Reached from the Editor's PROJECT-PICKER, which
         # passes the PICKED cart -- never a launcher tap (a launcher tap always RUNS).
         self._ensure_desk()            # make verbs live in the make world (#105)
-        self._open_workspace(cart)
+        if not self._open_workspace(cart):
+            # No source, nothing to edit: land on the same error panel a crashed
+            # cart lands on rather than opening the Editor over an empty project.
+            self.run(self.project, self.launcher_layer)
+            return
         self.editor_app.open(self.project)
 
     def launch_selected(self):
@@ -2601,7 +2514,7 @@ class Workstation:
         """The desk's PLAY icon: drop to the fullscreen Library (the play
         world). Leaving the desk closes its windows (v1 -- autosave means
         nothing is lost); go_home also runs the leave-make-world cleanup
-        (flushes Writer/Storybook, releases the world, re-slims the cart)."""
+        (flushes the open app, releases the world, re-slims the cart)."""
         self.go_home()
 
     def _ensure_desk(self):
@@ -2725,6 +2638,30 @@ class Workstation:
         # clear it on every other screen (on=False) so it can never leak past the cart
         # /editor that asked for it -- the desktop frame re-derives keyboard mode from
         # input.text_mode (#38/#42). No-op on the host (no keyboard); harmless flag set.
+        #
+        # THE SWITCH SWALLOWS THE BYTE THAT CAUSED IT. Taking the keyboard for a
+        # text surface is a screen change, and the key that made it happen is
+        # still in last_key when the surface's first frame runs -- so the code
+        # editor typed it. On glass that is a letter appearing in the buffer on
+        # entering the Code tab, at the caret, whichever key was used. Every
+        # other typed surface already seeded its edge with the live byte by hand
+        # (cards_layer's meta prompt, block_editor_ui's keypads); the code
+        # editor RESET its tracker to 0 instead, which is the same statement
+        # with the opposite meaning. Seeding here makes it the rule rather than
+        # a habit, and it is the one place every text surface passes through.
+        #
+        # EVERY on=True call, not only an off->on transition: re-entering the
+        # Code tab while already on it is the case the owner hit, and text mode
+        # is already set there. `on=True` MEANS "this surface is taking the
+        # keyboard now" -- a tab entry, a prompt opening, an app switch -- and
+        # nothing calls it per frame (a cart's own `textmode()` writes the flag
+        # directly, cart_api.py). Do not add a per-frame caller: it would seed
+        # away the keystroke it was called during.
+        if on:
+            k = getattr(self.input, "last_key", 0) or 0
+            self._ekey_prev = k
+            self.code_layer.seed_key(k)
+            self.player.seed_cart_key(k)   # a cart's editor handle, same rule
         self.input.text_mode = bool(on)
         kb = self.keyboard
         if kb is not None:
@@ -2800,233 +2737,68 @@ class Workstation:
         # block/code surfaces + host_app.escape + tests dispatch to it).
         self.editor_app.leave()
 
-    def save_code(self):
-        """Persist the edited source. Returns True iff it was written. A source
-        that won't compile is REFUSED (the good file is left intact) and the
-        syntax error is surfaced via self.save_status / cart_error rather than
-        silently writing garbage. Non-SD carts (no path) just no-op True."""
-        if not (self.editor and self.cart):
+    # -- the Code tab's FILE (SPEC.md 4, #89) --------------------------------
+    #
+    # A hand-written cart is one script and the Code tab is that file; it always
+    # was, and nothing below changes for it. A PICO-8 port is not: it arrives as
+    # p8.lua (the generated layer), main.lua (the game) and one file per PICO-8
+    # tab, and until now the two thirds of it that are not main.lua were
+    # reachable only through the Config tab's ADVANCED row -- which opens them
+    # in the text handle, where there is no PLAY, no journal and no
+    # crash-to-code. A crash reported at `p8.lua:412:` threw the kid at a tab
+    # that could not show line 412.
+    #
+    # There is deliberately NO create verb here. The file list is a list; the
+    # one door that adds a script is the Config tab's ADVANCED row, where a
+    # project's own folder already lives (docs/text_editing_2026-09.md step 5).
+
+    def code_sources(self):
+        """The scripts the Code tab can open, in load order. One entry for a
+        one-file cart -- and at one entry the switcher draws nothing at all."""
+        if self.cart is None or self.carts_store is None:
+            return []
+        return self.carts_store.cart_sources(self.cart)
+
+    def code_file_name(self):
+        """The script the Code tab is on. Never None once a cart is open."""
+        return self.code_file or (self.cart or {}).get("main", "main.py")
+
+    def open_code_file(self, name):
+        """Show another of the cart's scripts in the Code tab.
+
+        A FILE switch is an exit path for the file being left, exactly as a TAB
+        switch is for the tab being left (#111/#154): the outgoing buffer is
+        hard-committed before the editor is rebuilt, so a half-typed line
+        survives the switch, and the in-RAM op history re-baselines at the
+        boundary rather than carrying one file's ops into another's journal
+        line. Reusing the tab-switch discipline rather than inventing a second
+        one is the whole reason this is three lines and not a subsystem."""
+        if self.cart is None or name not in self.code_sources():
             return False
-        src = self.editor.text()
-        # Always compile-check, even for embedded/non-SD carts, so the kid sees a
-        # syntax error before run_code execs it into a hard failure.
-        ok, msg = self.carts_store.compile_check(src)
-        if not ok:
-            self.save_status = "SYNTAX " + msg
-            self.cart_error = "Syntax error -- " + msg
-            self._set_code_error(msg)        # mark the bad line in the editor (#24)
-            return False
-        self.code_err = None                 # parses now -> clear the inline marker
-        self.code_err_row = None
-        self.crash_line = None               # a re-run will re-detect any runtime crash
-        if not (self.cart.get("path") and self.can_manage):
-            self.save_status = None             # nothing to persist, but src is valid
-            self.ach.note("code_save")          # "Code Wizard": valid code saved (#21)
+        if name == self.code_file_name():
             return True
-        # The store-write half moved to Project.commit_code (Stage 1b); the compile-
-        # check + code-UI half above stays here (the code surface).
-        return self.project.commit_code(src)
-
-    def _set_code_error(self, msg, move=True):
-        """Record a syntax error so the code view can mark the offending line
-        inline (#24). compile_check formats messages as "line N: <reason>"; pull
-        N out for the marker, keep the short reason for the inline note, and move
-        the caret onto that line so the fix is one tap away (`move=False` for
-        the live typing re-check, which must never yank the caret)."""
-        row = None
-        short = msg
-        if msg.startswith("line "):
-            rest = msg[5:]
-            p = rest.find(":")
-            if p > 0 and rest[:p].strip().isdigit():
-                row = int(rest[:p].strip()) - 1
-                short = rest[p + 1:].strip()
-        self._mark_code_error(row, short, move=move)
-
-    def _mark_code_error(self, row, short, move=True):
-        """Record an inline error marker (#24) and, if the editor is open, move
-        the caret onto `row` (0-based) so the fix is one tap away. `move=False`
-        (the live re-check while the kid types) updates the marker WITHOUT
-        yanking the caret."""
-        self.code_err = short
-        self.code_err_row = row
-        if move and row is not None and self.editor is not None:
-            ed = self.editor
-            ed.row = max(0, min(len(ed.lines) - 1, row))
-            ed._clamp_col()
-            ed._scroll()
-
-    def run_code(self):
-        # Refuse to run un-parseable source: keep the kid in the editor with the
-        # syntax error shown rather than dropping to a blank/broken desktop.
-        if self.editor is not None:
-            if not self.save_code():
-                return                               # syntax/save error -> stay in editor
-            self.cart["src"] = self.editor.text()   # in-RAM apply (validated above)
-        if self._start():
-            self.ach.note("run")                # "Lift Off!": a cart was RUN (#21)
-            self._set_text_mode(False)
-            # PLAY from the code tab (Stage 3b): caller = the Editor, so the cart's
-            # exit returns to the code tab (not the launcher home).
-            self.run(self.project, self.editor_app)
-        else:
-            # Compiled but raised at exec/_init: show the error panel on the desktop
-            # (still reachable -> the kid can reopen the editor to fix it).
-            self.run(self.project, self.editor_app)
-
-    # (The #111 bar UNDO/REDO pair, the code typing burst, the tab-scoped
-    # journal walk and the post-walk workspace reload all live on
-    # self.history now -- history_router.py, #209 landing E.)
-
-    def save_sprites(self):
-        # Store-write moved to Project.commit_sprites (Stage 1b); this stays as the
-        # tested ws. entry point PaintLayer's SAVE dispatches to.
-        self.project.commit_sprites()
+        if self.editor is not None and self.project is self.editor_app.project:
+            self.editor_app.save_current()
+        self.code_file = name
+        self.editor = None            # set_menu_view rebuilds it over the new file
+        self.code_err = None
+        self.code_err_row = None
+        self.set_menu_view("code")
+        self._dirty = True
+        return True
 
     def _leave_theme(self):
         # CLOSE/back from the theme editor -> the lifecycle lives on self.theme_layer;
         # this stays reachable (PaintLayer's CLOSE tap dispatches ws._leave_theme()).
         self.theme_layer.leave()
 
-    def save_map(self):
-        # Store-write moved to Project.commit_map (Stage 1b); this stays as the tested
-        # ws. entry point MapEditorUI's SAVE dispatches to.
-        self.project.commit_map()
-
-    def save_scene(self):
-        # The scene tab's persist verb (#85 Stage 2): the editor serializes its
-        # rows and commits through Project.commit_scene (atomic write + manifest
-        # registration + the durable undo journal). The ws entry point the bar's
-        # SAVE (EditorApp.save_current) dispatches to.
-        self.scene_ui.save()
-
-    # -- music / sound editor (#50) ------------------------------------------
-
-    def save_sounds(self):
-        # Store-write moved to Project.commit_sounds (Stage 1b); this stays as the
-        # tested ws. entry point MusicEditorUI's SAVE dispatches to.
-        self.project.commit_sounds()
-
-    # -- cross-cart sprite reuse (#18) ---------------------------------------
-    #
-    # The shared sheet is a single .moygfx living beside the carts dir. PUT copies
-    # the tile a kid is painting INTO that shared sheet; GET copies a tile back
-    # OUT of it into whatever cart they're painting next -- so a sprite travels
-    # between carts without being repainted. Both go through SpriteSheet.copy_tile
-    # (the import primitive) and the moy_carts shared-sheet store.
-
-    def _load_shared_sheet(self):
-        """Read the shared sheet into a SpriteSheet (empty one if never saved).
-
-        Spec-shaped (16 x 32) like every cart sheet -- explicit here because it is
-        load-bearing twice over. It has to span all 512 tile ids or copy_tile()
-        refuses a PUT/GET of anything past id 255 (which is what the old 16x16
-        default did, silently, as "CAN'T PUT"); and it is a SpriteSheet like any
-        other, so a shape libmoy would refuse has no business being one. An older
-        128-line shared.moygfx parses into the top half with ids unchanged."""
-        try:
-            hexs = self._with_sd(lambda: self.carts_store.load_shared_sheet(self.carts_root))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte load shared sheet failed:", exc)
-            return None
-        if hexs:
-            try:
-                return SpriteSheet.from_hex(hexs, cols=16, rows=32)
-            except Exception:  # noqa: BLE001
-                pass
-        return SpriteSheet(16, 32)
-
-    def share_tile_get(self):
-        """Import the current tile FROM the shared sheet into this cart's sheet
-        (same tile id). The kid then SAVEs the cart sheet to keep it."""
-        if not (self.paint and self.sheet):
-            return False
-        shared = self._load_shared_sheet()
-        if shared is None:
-            self.paint_status = "NO SHARED"
-            return False
-        if shared.is_blank():
-            self.paint_status = "SHARED EMPTY"   # nothing painted there yet
-            return False
-        n = self.paint.n
-        if self.sheet.copy_tile(shared, n, dst_n=n) is None:
-            self.paint_status = "CAN'T GET"
-            return False
-        self.paint_status = "GOT SPR " + str(n)
-        return True
-
-    def share_tile_put(self):
-        """Save the current tile TO the shared sheet (persisted), so another cart
-        can GET it. Loads the shared sheet, drops this tile in at the same id, and
-        writes it back."""
-        if not (self.paint and self.sheet):
-            return False
-        if not (self.carts_root and self.can_manage):
-            self.paint_status = None             # writes deferred -- nothing to persist
-            return False
-        shared = self._load_shared_sheet()
-        if shared is None:
-            self.paint_status = "CAN'T PUT"
-            return False
-        n = self.paint.n
-        if shared.copy_tile(self.sheet, n, dst_n=n) is None:
-            self.paint_status = "CAN'T PUT"
-            return False
-        try:
-            hexs = shared.to_hex()
-            self._with_sd(lambda: self.carts_store.save_shared_sheet(hexs, self.carts_root))
-        except Exception as exc:  # noqa: BLE001
-            self.paint_status = "CAN'T PUT"
-            print("Moybyte save shared sheet failed:", exc)
-            return False
-        self.paint_status = "PUT SPR " + str(n)
-        return True
-
-    def send_sprites_to_files(self):
-        """Export the open cart's sprite sheet to files/sprites/ as a named user
-        file (#108 the "send to Files" producer for the sprites kind). The whole
-        sheet travels as one .moygfx (the same hex the cart stores), auto-named
-        (sheet_1, ...) and browsable in the Files app; from there it re-imports
-        into any project through the file picker (the #18 cross-cart reuse hub).
-        Returns the stored file name, or None. Surfaces a paint status."""
-        sheet = self.project.sheet if self.project is not None else None
-        if sheet is None or not (self.carts_root and self.can_manage):
-            self.paint_status = None       # writes deferred -- nothing to persist
-            return None
-        try:
-            hexs = sheet.to_hex()
-
-            def _write():
-                name = self.carts_store.new_file_name("sprites", self.carts_root)
-                return self.carts_store.save_file("sprites", name, hexs,
-                                                  self.carts_root)
-            name = self._with_sd(_write)
-        except Exception as exc:  # noqa: BLE001 -- surface, never crash the editor
-            self.paint_status = "CAN'T SEND"
-            print("Moybyte send sprites to files failed:", exc)
-            return None
-        self.paint_status = "SENT " + str(name).upper()[:8]
-        return name
-
-    def apply(self):
-        # GO (Config tab): re-run with the new config. Always return to the desktop:
-        # on success it runs, on failure frame() paints the error panel there (still
-        # reachable). PLAY from the Config tab (Stage 3b): caller = the Editor, so the
-        # cart's exit returns to the Config cards, not the launcher home.
-        ok = self._start()
-        self.run(self.project, self.editor_app)
-        if ok:
-            self.ach.note("run")                # "Lift Off!": GO re-ran the cart (#21)
-            self._save_config()
-
-    def _save_config(self):
-        # Moved to Project.commit_config (Stage 1b); this stays as the tested ws. name
-        # apply() dispatches to.
-        self.project.commit_config()
-
     def go_home(self):
         self._dirty = True             # screen change repaints (#44)
         self._set_text_mode(False)    # restore the game-button keyboard mode
+        # The launcher root ends every return path: an app-to-app return that
+        # outlived its journey here would drag an unrelated later exit into
+        # Files. `_go_home_or_back` pops the slot BEFORE calling this.
+        self._app_return = None
         # (#111) autosave-only: going home is an exit path for every persistent
         # system app + the Editor, so each is persisted BEFORE the state below is
         # torn down (self.editor/self.project etc.) -- a HOME-key tap reaches
@@ -3053,6 +2825,8 @@ class Workstation:
         self.editor = None
         self.paint = None
         self._editing_icons = False    # never carry the theme-editing flag home
+        if self.settings_layer.wifi_view:
+            self.settings_layer.close_wifi()   # its radio lease ends with the visit
         self.map_ui.reset()
         self.scene_ui.reset()
         self.block_ui.reset()
@@ -3177,7 +2951,7 @@ class Workstation:
         game + open it), then every editable cart (wallpapers + built-ins included).
 
         SYSTEM-APP carts are the one exclusion, and it is TEMPORARY (owner call
-        2026-07-31). Files/Paint/Writer/Sheets/Calc/Appearance are not really
+        2026-07-31). Files/Paint/Calc/Appearance are not really
         carts: the app is a shell MODULE (runtime/*_app.py, frozen on device),
         and the `.moy` only carries identity, icon art and a few-line fallback
         body for an older shell. Listing them offered a project whose "code" was
@@ -3217,7 +2991,10 @@ class Workstation:
     def adjust(self, d):
         # Config mutation stays on Workstation (ws.config is the single source of cart
         # state); the CARD selection lives on cards_layer, so read msel from there.
-        f = self.cart["edit"][self.cards_layer.msel]
+        fields = self.cart.get("edit") or []
+        if self.cards_layer.msel >= len(fields):
+            return                     # the ADVANCED row: a door, not a stepper
+        f = fields[self.cards_layer.msel]
         # #94: a malformed field definition (bad type, min>max, missing/empty
         # choices, ...) must not crash left/right stepping -- this is the ONE
         # call site draw()'s try/except doesn't cover (a d-pad press routes
@@ -3292,14 +3069,16 @@ class Workstation:
         if getattr(i, "_pressed", None) or i.last_key:
             if not self.wm.keys_to_cart():
                 self._dirty = True
-        # Undo journal (Stage 7): any activity in the code editor (re)arms the idle
+        # Undo journal (Stage 7): activity in an EDITOR TAB (re)arms the idle
         # autosave-commit debounce -- frame() fires the durable commit once the kid
-        # STOPS typing for _edit_debounce_ms, so the SD write lands in a gap. Marked
+        # stops for _edit_debounce_ms, so the store write lands in a gap. Marked
         # here (before routing) so it tracks the last keystroke regardless of who
-        # consumes it; frame() only actually commits when the editor is dirty.
-        if (self.editor is not None and self.wm.top_is("menu")
-                and self.menu_view == "code"
-                and (i.last_key or getattr(i, "_pressed", None))):
+        # consumes it; frame() only actually commits a tab that is dirty. The touch
+        # tabs re-arm from handle_pointer -- paint/map/scene/music are drawn at
+        # rather than typed at, and a debounce they could not arm would fire
+        # mid-stroke.
+        if ((i.last_key or getattr(i, "_pressed", None))
+                and self.menu_view in COMMIT_TABS and self.wm.top_is("menu")):
             self.history.edit_ms = _ticks_ms()
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
@@ -3340,14 +3119,61 @@ class Workstation:
             _pf[5] = 0
         self._tick_pointer_dt(p)
         px, py, click = p.x, p.y, p.click
-        gx, gy = self._game_xy(px, py)
         # Windowed WM (#73): while a window OTHER than the playtest holds input
         # focus, the game-space pointer publishes with click/down stripped, so a
         # background running cart never eats the taps meant for the editor beside
         # it. The fullscreen-stack WM has no hook -> unchanged.
         _pp = getattr(self.wm, "player_has_pointer", None)
+        # The idle publish is REUSED, not rebuilt (#66 lever 1, 2026-09-08).
+        # While a healthy GAME owns the glass and the pointer did nothing this
+        # frame -- no click, no held finger, not moved -- the game pointer this
+        # frame would publish equals the one standing there, PROVIDED that one
+        # is our own idle publish (anything else that wrote it -- an overlay
+        # stripping a tap, a wallpaper -- replaced the object) and the geometry
+        # it was mapped through has not moved. Rebuilding it anyway cost the
+        # mapping's tuples every loop iteration of every play frame (~0.4 ms
+        # a loop on the S3, see wm.py). The fullscreen tiers only: the
+        # windowed WM's focus can strip a tap without the pointer moving, so
+        # it keeps the unconditional publish.
+        if (_pp is None and not click and not p.down and not self._ptr_was_down
+                and px == self._ptr_last_x and py == self._ptr_last_y
+                and self.cart_error is None and self.wm.top_is_player()
+                and self.input.game_pointer is self._gp_idle):
+            # Same geometry? These seven reads are exactly what the fullscreen
+            # WM's game_xy consumes; its memo checks the same key, but through
+            # two calls and a property (~0.2 ms a loop on the S3).
+            k = self._gp_key
+            gc = self.canvas
+            sc = self._sys_canvas
+            if sc is None:
+                sc = gc
+            if (gc is k[1] and sc is k[2]
+                    and getattr(self.input, "game_view", None) is k[0]
+                    and gc.w == k[3] and gc.h == k[4]
+                    and sc.w == k[5] and sc.h == k[6]):
+                if _perf:
+                    self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)
+                return
+        gx, gy = self._game_xy(px, py)
         _live = _pp() if _pp is not None else True
-        self.input.game_pointer = (gx, gy, click and _live, p.down and _live)
+        gp = (gx, gy, click and _live, p.down and _live)
+        self.input.game_pointer = gp
+        if click or p.down:
+            self._gp_idle = None              # a tap/hold: next frame republishes
+        else:
+            self._gp_idle = gp
+            k = self._gp_key
+            gc = self.canvas
+            sc = self._sys_canvas
+            if sc is None:
+                sc = gc
+            k[0] = getattr(self.input, "game_view", None)
+            k[1] = gc
+            k[2] = sc
+            k[3] = gc.w
+            k[4] = gc.h
+            k[5] = sc.w
+            k[6] = sc.h
         if _perf:
             self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)   # pre-walk share
         # Idle fast-path (2026-08-03): while a healthy GAME owns the glass and
@@ -3366,6 +3192,14 @@ class Workstation:
         self._ptr_was_down = p.down
         self._ptr_last_x = px
         self._ptr_last_y = py
+        # ...and a touch in an editor tab re-arms that same debounce. Past the idle
+        # fast-path above, so a frame the pointer did nothing in pays nothing. The
+        # held-finger flag is stored UNCONDITIONALLY (the pointer is global, not a
+        # tab's) so it can never be left stale True by a gesture that ended
+        # somewhere else; the router refuses to commit under it.
+        self.history.pointer_down = p.down
+        if (click or p.down) and self.menu_view in COMMIT_TABS and self.wm.top_is("menu"):
+            self.history.edit_ms = _ticks_ms()
         # THE APP BAR CONTRACT, input half (docs/app_api_v1.md): a tap in a
         # REGISTERED app's bar band belongs to the bar, and the router routes it
         # BEFORE the app's own handle_pointer -- checked inside the walk (not
@@ -3420,11 +3254,8 @@ class Workstation:
 
         On a backend that samples every frame (the host's mouse, the scripted
         remote gestures) every frame is fresh, so this is exactly
-        `self._frame_dt_ms`. BOTH boards' GT911 drivers hold + flag: the P4's
-        p4_input.Touch does it for the same reason device_input.Touch does,
-        which it did not until 2026-08-15 -- it held the point and flagged
-        nothing, so this docstring's old claim that the P4 "samples every frame"
-        described the bug rather than the board.
+        `self._frame_dt_ms`. BOTH boards' GT911 drivers hold + flag
+        (device_input.Touch and p4_input.Touch alike).
 
         (A "third rule" -- charge stale stretches past a threshold as real dt
         so a silent still finger decays the fling -- was built here on
@@ -3452,13 +3283,32 @@ class Workstation:
     # draw/tap it needs stay on the shell, reached via _draw_cart_bar / _cart_bar_tap.)
 
     def nav(self, dx, dy):
-        # Directional input (host arrows / device trackball). In the code editor it
-        # moves the CARET (the view follows it); elsewhere the launcher/desktop are
-        # pointer-driven, so this is a no-op there.
+        # Directional input (host arrows / device trackball). It belongs to
+        # whichever surface holds a CARET -- the Editor's code tab, and a
+        # cart's focused editor handle (#181: Notes is a cart, and the T-Deck's
+        # ball IS its arrow keys, so a note whose caret the ball could not
+        # reach would be unwritable past the first screen). Elsewhere the
+        # launcher/desktop are pointer-driven and this is a no-op.
+        #
+        # Returns True when it was CONSUMED, which is the board loop's
+        # question: the same pulses drive the cursor when no caret wants them.
+        if not (dx or dy):
+            return False
         if (self.wm.top_is("menu") and self.menu_view == "code"    # Stage 6d
-                and self.editor is not None and (dx or dy)):
+                and self.editor is not None):
             self.editor.move(dy, dx)
             self._dirty = True             # caret moved -> redraw (#44)
+            return True
+        handle = self.focused_cart_editor()
+        if handle is not None:
+            handle.nav(dx, dy)
+            self._dirty = True
+            return True
+        return False
+
+    def focused_cart_editor(self):
+        """The cart editor handle holding the keyboard, or None."""
+        return self.player.focused_editor()
 
     # -- frame + drawing -----------------------------------------------------
 
@@ -3467,7 +3317,13 @@ class Workstation:
         # backend supports it. Guarded so a backend without draw state (a test stub,
         # or a recording canvas) is a no-op. reset_state() also flushes any pending
         # auto-batch (#63), so cart sprites land before the console overlays draw.
-        rs = getattr(self.canvas, "reset_state", None)
+        # The probe is cached by canvas identity: a `getattr` that finds a
+        # method allocates a bound method, and this runs every cart frame.
+        cv = self.canvas
+        if cv is not self._rs_cv:
+            self._rs_cv = cv
+            self._rs_fn = getattr(cv, "reset_state", None)
+        rs = self._rs_fn
         if rs is not None:
             rs()
 
@@ -3495,13 +3351,21 @@ class Workstation:
         # spr() in a cart's _draw() (or the chrome) is left unpainted. Guarded + covers
         # both the game and system canvas -- one probe when they are the same object
         # (the 320x240 device case; #75: no per-frame tuple, no duplicate probe).
+        # Both probes cached by canvas identity (a found method is a bound-method
+        # allocation per probe, and this runs every painted frame).
         cv = self.canvas
-        fb = getattr(cv, "flush_batch", None)
+        if cv is not self._fb_cv:
+            self._fb_cv = cv
+            self._fb_cv_fn = getattr(cv, "flush_batch", None)
+        fb = self._fb_cv_fn
         if fb is not None:
             fb()
         sc = self.sys_canvas
         if sc is not cv:
-            fb = getattr(sc, "flush_batch", None)
+            if sc is not self._fb_sc:
+                self._fb_sc = sc
+                self._fb_sc_fn = getattr(sc, "flush_batch", None)
+            fb = self._fb_sc_fn
             if fb is not None:
                 fb()
 
@@ -3680,8 +3544,9 @@ class Workstation:
         # error panel is static). Stage 5 retired the pause frame, so there is no
         # paused-but-idle state to exclude here anymore.
         if kind == "desktop" and self.cart_error is None and (
-                self._update is not None or self._draw is not None):
-            return True
+                self.player._update is not None or self.player._draw is not None):
+            return True             # (the Player's own fields: ws._update/_draw
+                                    # are property forwards to exactly these)
         # Windowed WM (#73): a running cart's WINDOW keeps animating even when
         # another window sits above it on the stack (Settings over a game, the
         # editor beside a playtest). No hook on the fullscreen-stack WM.
@@ -3737,17 +3602,29 @@ class Workstation:
             return True
         if self._animating(dt):
             return True
-        if self._ptr_state() != self._last_ptr:
+        if self._ptr_changed():
             return True
         return False
 
+    def _ptr_changed(self):
+        """`_ptr_state() != _last_ptr`, field by field -- the same answer with
+        no tuple built, because this and the tail's snapshot run every frame."""
+        p = self.pointer
+        last = self._last_ptr
+        if p is None:
+            return last is not None
+        if last is None:
+            return True
+        return (last[0] != p.x or last[1] != p.y
+                or last[2] != bool(p.visible) or last[3] != bool(p.down)
+                or last[4] != bool(p.click))
+
     # -- content-layer draw bodies (routed from the frame() stack loop) -------
     #
-    # (The running-cart content body -- the cart tick + pause/crash chrome -- moved to
-    # Player.tick (Stage 2, player.py). It still fills the DRAWBRK perf split ws._pf_*
-    # exactly as before, and asks the shell for the top bar via _draw_cart_bar (which
-    # keeps the _pf_bar CHROMEBRK accounting here). The "desktop" content layer routes
-    # to it via _PlayerLayer.)
+    # (The running-cart content body -- the cart tick + crash chrome -- is
+    # Player.tick (player.py). It fills the DRAWBRK perf split ws._pf_* and asks
+    # the shell for the top bar via _draw_cart_bar. The "desktop" content layer
+    # routes to it via _PlayerLayer.)
 
     # (_draw_menu_backdrop -- the frozen-cart backdrop under the cards/paint/map
     # panels -- was removed by the #39 step-3 conversions: every Editor tab is
@@ -3755,25 +3632,13 @@ class Workstation:
     # just reset the game canvas's draw state and paint their own opaque body.)
 
     def frame(self, dt):
-        # #172: bracket the frame's UNMEASURED edges. `draw` starts at _frame_t0,
-        # which is after the journal idle tick, the splash check, the frameskip
-        # branch and the redraw gate -- so all of that, plus the dirty/pointer
-        # bookkeeping in the tail, sits inside the loop's `frm` but outside
-        # DRAWBRK+flush. Comparing those two (an EMA against a windowed mean)
-        # put the gap somewhere between -4 and +15ms, which is not a measurement.
-        # Bracketing it is.
-        # DEEP meters (frame edges, per-layer walk timing, per-op canvas timers,
-        # the DRAWBRK/CHROMEBRK EMA tail) run ONLY under perf_capture -- the
-        # measurement-session mode. perf_hud alone keeps the LIGHT set (frame
-        # total, flush, fps): watching the fps chip must not cost milliseconds.
-        # 2026-08-03: the deep set is post-ledger instrumentation, and with
-        # run_desktop arming capture unconditionally it was ~1-1.5ms of every
-        # frame on the S3 -- a real slice of the fps regression it existed to
-        # find. Capture now follows Settings -> PERF DIAG on device.
-        _fe0 = _ticks_us() if self.perf_capture else 0
+        # DEEP meters (the per-op canvas timers, the batch counters, the DRAWBRK
+        # EMA tail) run ONLY under perf_capture -- the measurement-session mode,
+        # which follows Settings -> PERF DIAG on device. perf_hud alone keeps
+        # the LIGHT set (frame total, flush, fps): watching the fps chip must
+        # not cost milliseconds.
         if dt > 0:
-            # EMA so the readout reflects sustained rate, not single-frame jitter.
-            self._fps = _ema(self._fps, 1.0 / dt)
+            self._since_draw += dt
             # The loop tick in ms for the input phase (which runs BEFORE frame()
             # and has no dt of its own): feeds the kinetic scroll velocity
             # (#113). Clamped so a hitch can't spike the physics.
@@ -3799,47 +3664,20 @@ class Workstation:
         if self._splash_until is not None and _ticks_diff(self._splash_until, _ticks_ms()) <= 0:
             self._splash_until = None
             self._dirty = True
-        # Frameskip (#77): with the gate ON and a GAME playing (not crashed), every
-        # SECOND frame ticks only the cart's logic + audio (player.tick(render=False))
-        # and presents nothing -- the panel simply retains the last frame, so the
-        # whole render side (cart _draw + composite + flush -- measured to be
-        # per-draw-call dispatch, the one tax left) is halved while input/logic keep
-        # the full loop rate. Sits BEFORE the redraw gate so a skip frame never
-        # consumes dirty state (a pending repaint in a background window survives to
-        # the next rendered frame). Games only: tools/apps are event-driven (the
-        # redraw gate already keeps them ~free) and their cursor must stay 60.
-        # LOCKSTEP (#65): a linked game's world only changes on the shared 30Hz
-        # tick, so drawing it at the panel's rate (40-55fps on the two S3
-        # boards) repaints an identical frame one to two times in three. Holding
-        # the last frame instead hands that time back to the loop -- and the
-        # loop's regularity is what decides whether the input buffer can be cut,
-        # because a slow frame is what makes a tick late. The Player still runs:
-        # it re-sends the input packet on these frames.
-        _np = self.netplay
-        _linked = (_np is not None and self.wm.top_is_player()
-                   and self.cart_error is None)
-        if _linked and not _np.pending(_ticks_ms()):
-            self.player.tick(dt, render=False)
-            return
-        # ...and a linked game does NOT also take the frameskip gate. Frameskip
-        # is a phase toggle -- it renders every second LOOP frame, so it is half
-        # of whatever the loop is doing (~20fps on the Guition's 40, ~27 on the
-        # T-Deck's 55), not the 30Hz its own comment claims from back when the
-        # loop ran at 60. Stacking it under lockstep would halve a rate that is
-        # already the shared tick, for a saving that no longer exists: the whole
-        # premise of frameskip is logic at the full loop rate, and here logic IS
-        # 30Hz.
-        if (not _linked and self.frameskip and self.wm.top_is_player()
-                and self.cart_error is None
-                and self.cart is not None and self.cart.get("type") == "game"):
-            # phase True = render, False = logic-only; the setter resets it False,
-            # so the first frame after a toggle (or a fresh run) always RENDERS.
-            self._fs_phase = not self._fs_phase
-            if not self._fs_phase:
+        # The tick model (#217): while a GAME plays, the Player's scheduler
+        # decides what this loop frame is -- which logic ticks run, and whether
+        # it draws. A frame that does not draw ticks logic only and presents
+        # nothing: the panel keeps the last frame, and the loop hands the time
+        # back. Sits BEFORE the redraw gate so it never consumes dirty state. A
+        # lockstep match (#65) owns its clock in there: the world moves only on
+        # the shared tick, so a frame that tick is not due for holds the last
+        # agreed frame instead of repainting it.
+        if self.wm.top_is_player() and self.cart_error is None:
+            if not self.player.frame_plan(dt):
                 self.player.tick(dt, render=False)
                 return
-        else:
-            self._fs_phase = False
+        elif self.player.tick_ms:
+            self.player.park()
         # Redraw-on-change (#44): a static UI screen (no animation, no pointer change,
         # nothing marked dirty) is skipped entirely -- no draw, no flush. The panel /
         # host window simply retains the last frame, so an idle UI costs ~0 and the
@@ -3853,13 +3691,34 @@ class Workstation:
             # built by the draw path, the prefetch is for the ones off-screen.
             self._quiet_frames += 1
             if self._quiet_frames > 2:
-                covers.prefetch_tick()
-                # Mint the home retained-frame buffer off the paint path too
-                # (idempotent after the first call; the device new_layer
-                # pre-collects, ~150ms nobody should wait for).
-                self.launcher_layer.prealloc_retained()
+                # NOTHING HERE MAY RAISE. This branch runs on a frame with no
+                # user waiting on it, which is exactly why it is the wrong place
+                # to end a session: on 2026-09-07 both S3 boards reached the desk
+                # after a flash and dropped to the REPL within minutes, because a
+                # cover the prefetch was warming asked a fragmented heap for a
+                # 76,800-byte raster and the MemoryError walked straight out of
+                # the loop. Each warmer fences its own expected failures (a
+                # cover it cannot build is skipped for the session); this is the
+                # backstop for the unexpected one, and it says so once rather
+                # than every idle frame forever.
+                try:
+                    covers.prefetch_tick()
+                    # Mint the home retained-frame buffer off the paint path too
+                    # (idempotent after the first call; the device new_layer
+                    # pre-collects, ~150ms nobody should wait for).
+                    self.launcher_layer.prealloc_retained()
+                except Exception as exc:  # noqa: BLE001 -- an idle tick never ends a session
+                    if not self._idle_warned:
+                        self._idle_warned = True
+                        print("Moybyte idle work failed:", _err_text(exc))
             return
         self._quiet_frames = 0
+        # The fps the chip shows is the DRAWN rate (#217): an EMA over the
+        # frames that reach the glass, so a paced cart reads its draw rate and
+        # not the loop's spin between ticks.
+        if self._since_draw > 0:
+            self._fps = _ema(self._fps, 1.0 / self._since_draw)
+            self._since_draw = 0.0
         # Perf HUD (#43/#44): mark the start of this frame's draw work. Cheap (one
         # ticks call); only meaningful for a frame we actually paint, so it's after
         # the redraw gate. _flush_ms is filled around comp.flush() below; _draw_ms
@@ -3867,36 +3726,25 @@ class Workstation:
         # fires when perf_capture is set (device diag sampling) -- not just the HUD.
         _perf = self.perf_hud or self.perf_capture
         _deep = self.perf_capture
-        # MICROSECONDS (2026-08-14). Everything in the DRAWBRK/CHROMEBRK family
-        # runs on this clock now; see _frame_perf_end for why the ms one was
-        # manufacturing the remainder it was being read to explain.
+        # MICROSECONDS: every DRAWBRK bracket is on this clock, converted to ms
+        # once at the EMA (_frame_perf_end).
         _frame_t0 = _ticks_us() if _perf else 0
-        if _deep:
-            # Everything from frame() entry to here: journal idle tick, splash
-            # expiry, the frameskip branch, and the redraw gate itself.
-            self._pf_pre = _ticks_diff(_ticks_us(), _fe0)
-        _cmp = 0            # CHROMEBRK: _composite_game us
-        _cur = 0            # CHROMEBRK: _draw_cursor us
         if _deep:
             _bc = getattr(self.canvas, "batch_reset", None)
             if _bc is not None:
                 _bc()                  # #63: zero this frame's auto-batch profiling counters
-            # Per-frame perf scratch (the running-cart content Layer fills self._pf_*).
-            # #75: zeroed ONLY under _perf -- the writers (Player.tick / the bar draws)
-            # only fill them under _perf too, and the reads below are _perf-gated, so a
-            # kid-mode play frame skips the five attribute stores entirely.
-            #
-            # These stores MUST live in the _perf branch, not the elif below: a
-            # 2026-07-26 edit nested them under "_prof just went off", so under
-            # steady capture a frame whose writer didn't fire REPORTED THE
-            # PREVIOUS WRITER'S VALUE -- launcher frames carried the last cart
-            # frame's logic/render in every HITCH line, and DRAWBRK/CHROMEBRK
-            # attribution after that date is suspect (found auditing #172).
-            self._pf_upd = 0    # cart _update(dt) ms (game LOGIC); 0 off the cart path
-            self._pf_cart = 0   # cart _draw() ms (RENDERING)
-            self._pf_audio = 0  # audio.tick(dt) ms (mixer feed) -- split out from render
-            self._pf_bar = 0    # CHROMEBRK: _draw_status_strip ms (cart path only)
-            self._pf_bg = 0     # #172: backdrop restore (cart path only)
+            # The DRAWBRK scratch (Player.tick fills it on the cart path, in
+            # us). Zeroed ONLY under capture -- the writer fills it under
+            # capture too and the reads are capture-gated, so a kid-mode play
+            # frame skips the four stores. Zeroed HERE, on every captured
+            # frame, never under "capture just went off": a frame whose writer
+            # did not fire would otherwise report the previous writer's value
+            # (launcher frames once carried the last cart frame's logic/render
+            # in every HITCH line).
+            self._pf_upd = 0    # cart _update(dt) (game LOGIC); 0 off the cart path
+            self._pf_cart = 0   # cart _draw() (RENDERING)
+            self._pf_audio = 0  # audio.tick(dt) (mixer feed)
+            self._pf_bg = 0     # the backdrop restore's share of _pf_cart
         elif getattr(self.canvas, "_prof", False):
             # Perf capture just went off: clear the device canvas's DRAW2 timing
             # gate so its hot verbs stop paying the per-op ticks_us pair (~6us a
@@ -3913,21 +3761,23 @@ class Workstation:
         # cursor is always the top system layer, so a game-domain content is always
         # composited before it -- reproducing the pre-refactor single composite step.
         _prev_domain = None
-        # #172: per-layer draw cost (us) keyed by layer.id. CHROMEBRK's `other`
-        # IS this walk -- on the 2026-07-29 T-Deck regression it was 6.7ms of a
-        # Brick Siege frame with bar/cmp/cur all reading ~0.00, i.e. every named
-        # bucket said "not me". Timing the walk names the layer directly instead
-        # of narrowing again; a cost spread evenly across it says the stack
-        # machinery, not one layer. Built only under _perf, so the kid-mode path
-        # never allocates the dict.
-        _lay = {} if _deep else None
         # WM-surface mark (Stage 9, docs/history/shell_ux_technical_plan_v1.md): when a RECORDING system
         # canvas is installed (the opt-in web view), tag each WM-stack surface so the recorder
         # slices the frame into ONE stream per surface (bar / app-content / player-viewport) --
         # the browser then composites them (a second WM backend). `begin_surface` exists only on
         # the recording canvas, so on the RAW canvas (the default) `_surf` is None: no call, no
         # allocation, byte-identical pixels -- the golden set can't move. Probed ONCE per frame.
-        _surf = getattr(self.sys_canvas, "begin_surface", None)
+        # The four canvas probes below are re-taken only when a canvas object
+        # changes (#66 lever 1): a probe answers for the object, so keying on
+        # identity is the same answer at a compare's cost instead of a getattr
+        # with a default (~30us each on the S3, four of them every play frame).
+        _sc = self.sys_canvas
+        if _sc is not self._probe_sc:
+            self._probe_sc = _sc
+            self._probe_surf = getattr(_sc, "begin_surface", None)
+            self._probe_sksurf = getattr(_sc, "skip_surface", None)
+            self._probe_view = getattr(_sc, "view", None)
+        _surf = self._probe_surf
         # Surface model §4 skip-draw (docs/surface_model_v1.md): a WM that
         # tracks surface gens may decline a gen-clean layer's draw entirely --
         # the recorder keeps its z-slot as a zero-width skip mark and the wire
@@ -3936,7 +3786,7 @@ class Workstation:
         # per-layer cost, byte-identical (the L6 no-op pattern).
         _lskip = getattr(self.wm, "surface_skip", None) if _surf is not None \
             else None
-        _sksurf = getattr(self.sys_canvas, "skip_surface", None)
+        _sksurf = self._probe_sksurf
         # FULLSCREEN GAME-DOMAIN PLACEMENT on a COMMAND-ONLY game canvas (#175).
         # There the cart's frame has no pixels for _composite_game to scale up,
         # so its draw span must be BRACKETED instead -- otherwise every
@@ -3947,9 +3797,13 @@ class Workstation:
         # applied. Two getattr probes on a raw canvas -> None (the S3/device path
         # is byte-identical, and a raster game canvas keeps the composite).
         _view = None
-        if (self._sys_canvas is not None
-                and getattr(self.canvas, "buf", None) is None):
-            _view = getattr(self.sys_canvas, "view", None)
+        if self._sys_canvas is not None:
+            _gc = self.canvas
+            if _gc is not self._probe_gc:
+                self._probe_gc = _gc
+                self._probe_buf = getattr(_gc, "buf", None)
+            if self._probe_buf is None:
+                _view = self._probe_view
         # ...and only where the WM presents the game FULLSCREEN. In the windowed
         # desk world the player WINDOW brackets its own content, so letterboxing
         # here would black out the desktop -- and it would fire on the FPS
@@ -3966,7 +3820,13 @@ class Workstation:
         # view leaves stale pixels that FLASH on a double-buffered root (#58).
         # Same fix, same place in the order -- before the cart draws. The WM
         # decides whether it applies; a no-view cart pays one getattr.
-        _lb = getattr(self.wm, "letterbox_inplace", None) if _vp is None else None
+        _lb = None
+        if _vp is None:
+            _wm = self.wm
+            if _wm is not self._lb_wm:        # cached by WM identity: the probe
+                self._lb_wm = _wm             # allocates a bound method a frame
+                self._lb_fn = getattr(_wm, "letterbox_inplace", None)
+            _lb = self._lb_fn
         _lb_done = False
         # #190: while a flush-bounce scale fold is armed (the device composite
         # SKIPPED writing the root fb -- the flush will synthesize it), any
@@ -3983,17 +3843,14 @@ class Workstation:
         # while the fullscreen chrome rules apply, None in the windowed desk
         # world, where the WM's title strip carries the close instead. See
         # `_app_bar_route` for the input half and the scope note there.
-        _appbar = self._apps_by_id if not self.windowed_chrome else None
+        _appbar = self._apps_by_id if not self.wm.desk_open() else None
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
             if _prev_domain == "game" and layer.domain == "system":
                 if _game_open:                      # close the placement span
                     _view()
                     _game_open = False
-                _tc = _ticks_us() if _deep else 0
                 self._composite_game()
                 _fold_live = True
-                if _deep:
-                    _cmp = _ticks_diff(_ticks_us(), _tc)   # CHROMEBRK: viewport composite
             if _fold_live and (layer is not self._cursor_layer
                                or (self.pointer is not None
                                    and self.pointer.visible)):
@@ -4022,34 +3879,10 @@ class Workstation:
             if _lb is not None and layer.domain == "game" and not _lb_done:
                 _lb()
                 _lb_done = True
-            if _lay is not None:
-                _tk = _ticks_us()
-                layer.draw(dt)
-                if _appbar is not None and layer.id in _appbar:
-                    self.bar_layer._draw_status_strip("tool")   # host guarantee
-                _lus = _ticks_diff(_ticks_us(), _tk)
-                # SUMMED, not assigned: the windowed WM draws several windows
-                # that share one layer id, and each would otherwise clobber the
-                # last -- exactly the case where the number has to be a total.
-                _lay[layer.id] = _lay.get(layer.id, 0) + _lus
-                if layer.id == "cursor":
-                    _cur = _lus                     # CHROMEBRK: cursor (us)
-            else:
-                layer.draw(dt)
-                if _appbar is not None and layer.id in _appbar:
-                    self.bar_layer._draw_status_strip("tool")   # host guarantee
+            layer.draw(dt)
+            if _appbar is not None and layer.id in _appbar:
+                self.bar_layer._draw_status_strip("tool")   # host guarantee
             _prev_domain = layer.domain
-        if _deep:
-            # Last PAINTED frame's split (the skip/quiet gates return above), so
-            # it keeps the same "sample whenever you like" contract as DRAW2.
-            self._pf_layers = _lay
-            # ...and its TOTAL, which is what turns CHROMEBRK's `other` from a
-            # residual into a partition: the walk is one measured bucket, and
-            # what remains after it is the router machinery alone.
-            _st = 0
-            for _v in _lay.values():
-                _st += _v
-            self._pf_stack = _st
         if _game_open:                              # game was the TOP layer
             _view()
         if self._deferred:
@@ -4076,7 +3909,7 @@ class Workstation:
         # calls gated on perf_hud OR perf_capture (device diag sampling), so the
         # render path itself is unchanged.
         if _perf:
-            self._frame_perf_end(_frame_t0, _cmp, _cur)
+            self._frame_perf_end(_frame_t0)
         else:
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
@@ -4092,103 +3925,15 @@ class Workstation:
             # #113) -- same pattern as the covers re-arm above.
             self._frame_requested = False
             self._dirty = True
-        self._last_ptr = self._ptr_state()
+        if self._ptr_changed():          # rebuilt only when it moved: no tuple
+            self._last_ptr = self._ptr_state()   # on a static-pointer frame
         self._frames_drawn += 1
-        if _deep:
-            # The tail after the flush: dirty clear, the covers/fling re-arms,
-            # and the pointer snapshot. Small by inspection -- measured so that
-            # `pre` can be read as the whole of the unnamed edge, not a guess.
-            self._pf_post = _ticks_diff(_ticks_us(), _fe0) - self._pf_pre \
-                - int(self._raw_draw * 1000) - int(self._raw_flush * 1000)
         if self._deferred:
             # #184: the flush above PRESENTED this frame's LOADING
             # acknowledgment -- now run the queued transition(s) behind it.
             # Last thing in the frame so the stall sits outside every timing
             # bracket (the DEFER diag line names its cost instead).
             self._run_deferred()
-
-    def _frame_perf_end(self, frame_t0, cmp_us, cur_us):
-        """The #43/#44 perf-capture frame tail (extracted from frame() so the hot
-        router stays readable): time the panel DMA flush in isolation, back out
-        the draw span, and EMA the DRAWBRK/CHROMEBRK splits. Only called when
-        perf_hud/perf_capture is on -- the kid-mode path flushes directly, so the
-        render path itself is unchanged. The timing fields stay on the
-        Workstation (the device diag contract -- perf_sample/perf_breakdown/
-        perf_chrome read them).
-
-        EVERY BRACKET IN HERE IS MICROSECONDS (2026-08-14), converted to ms once,
-        at the EMA. It used to be ticks_ms, and that quietly broke the one number
-        the shell's frame budget was being argued from. `chrome` is a residual
-        (draw - upd - cart - audio) and `other` was a residual OF a residual
-        (chrome - bar - cmp - cur): six integer-ms differences, each truncating
-        toward zero, all of their loss landing in the last term. That is up to
-        ~6ms of manufactured cost in a bucket that read ~7.6ms on the S3 and was
-        the largest unexplained item in an 18ms frame -- i.e. the instrument was
-        a plausible whole explanation for what it was being used to investigate.
-
-        `other` is also no longer the last term. The stack walk is measured
-        (self._pf_stack, us) and subtracted as `stk`, so what remains is the
-        ROUTER itself -- the draw_stack walk, the surface/fold probes,
-        _flush_batches, and this function's own bookkeeping -- and it is a
-        partition, not a leftover."""
-        _upd = self._pf_upd                     # us
-        _cart = self._pf_cart                   # us
-        _audio = self._pf_audio                 # us
-        _bar = self._pf_bar                     # us
-        _flush_t0 = _ticks_us()
-        self.comp.flush()
-        _flush = _ticks_diff(_ticks_us(), _flush_t0)
-        _total = _ticks_diff(_ticks_us(), frame_t0)
-        _draw = _total - _flush
-        if _draw < 0:
-            _draw = 0
-        self._flush_ms = _ema(self._flush_ms, _flush / 1000.0)
-        self._draw_ms = _ema(self._draw_ms, _draw / 1000.0)
-        # Everything below is the DEEP tail (DRAWBRK/CHROMEBRK splits + the
-        # HITCH logger's raw copies): diag-session data, and 6 boxed floats +
-        # ~12 EMA calls of churn per frame -- perf_hud alone stops here (the
-        # chip shows fps/draw/flush, all set above).
-        if not self.perf_capture:
-            return
-        # DRAWBRK split: cart _update (logic) / cart _draw (render) / audio.tick /
-        # console chrome (remainder = bar + cursor + overlays).
-        _chrome = _draw - _upd - _cart - _audio
-        if _chrome < 0:
-            _chrome = 0
-        # raw per-frame copies for the hitch logger (#66 HITCH v3), in ms
-        self._raw_upd = _upd / 1000.0
-        self._raw_cart = _cart / 1000.0
-        self._raw_audio = _audio / 1000.0
-        self._raw_chrome = _chrome / 1000.0
-        self._raw_flush = _flush / 1000.0
-        self._raw_draw = _draw / 1000.0
-        self._upd_ms = _ema(self._upd_ms, self._raw_upd)
-        self._cart_ms = _ema(self._cart_ms, self._raw_cart)
-        self._audio_ms = _ema(self._audio_ms, self._raw_audio)
-        self._chrome_ms = _ema(self._chrome_ms, self._raw_chrome)
-        # CHROMEBRK sub-split (#66 lever 5): bar / composite / cursor / stack-walk
-        # EMAs, so a chrome trim targets the real cost instead of guessing.
-        #
-        # `stk` is the layer walk MINUS the pieces already named: upd/cart/audio
-        # and the bar all run inside layer.draw() (the cart's content layer, then
-        # the shell bar the Player asks for), and the cursor is its own row. What
-        # is left is every OTHER layer's draw plus the content layer's non-cart
-        # tail. Double-counting here would push `other` negative and clamp it to
-        # zero, which reads as "all accounted for" -- the failure mode this whole
-        # change exists to remove -- so the subtraction is deliberate and the
-        # clamp below is a floor, not a fit.
-        _stk = self._pf_stack - _upd - _cart - _audio - _bar - cur_us
-        if _stk < 0:
-            _stk = 0
-        self._bar_ms = _ema(self._bar_ms, _bar / 1000.0)
-        self._cmp_ms = _ema(self._cmp_ms, cmp_us / 1000.0)
-        self._cur_ms = _ema(self._cur_ms, cur_us / 1000.0)
-        self._stk_ms = _ema(self._stk_ms, _stk / 1000.0)
-        # #172: the declared-backdrop restore. NOT a fourth peer of the split --
-        # it is already inside _cart_ms (Player.tick charges it to render, where
-        # the cart's own cls would have landed). Tracked separately only so
-        # DRAWBRK can say how much of render is the backdrop.
-        self._bg_ms = _ema(self._bg_ms, self._pf_bg / 1000.0)
 
     # -- boot logo ------------------------------------------------------------
 
@@ -4200,10 +3945,6 @@ class Workstation:
         self._splash_until = _ticks_ms() + (int(ms) if ms else _SPLASH_MS)
         self._dirty = True
 
-    def _splash_image(self):
-        """The Moy mascot as a blittable (see the module-level splash_image)."""
-        return splash_image()
-
     def _draw_splash(self):
         """Paint the boot logo on the system canvas (see draw_splash)."""
         draw_splash(self.sys_canvas)
@@ -4214,242 +3955,11 @@ class Workstation:
     # Stage 5; the Player now exits on hold-BACKSPACE, with a transient
     # hold-progress toast in its place. See player.py.)
 
-    def _mini_btn(self, label, rect, fill, cv=None):
+    def _mini_btn(self, label, rect, fill, cv=None, label_rect=None):
         # Shared draw toolkit -- the implementation moved to ui.mini_btn (the
         # 2026-07 kernel-shrink direction); this stays the tested ws entry point.
-        _uimod.mini_btn(cv if cv is not None else self.canvas, rect, label, fill)
-
-    # _draw_fps / _fps_tap_rect / _draw_perf_hud (the HUD *rendering*) now live on
-    # self.perf_ui (perf_hud.py, PerfHud). The perf *query* API below stays here --
-    # it's the device diag's measurement contract (ws.perf_sample / perf_breakdown).
-
-    def perf_sample(self):
-        """Snapshot of the current per-frame perf numbers for offline sampling:
-        (cart_name, fps, flush_ms, draw_ms). Used by the device backend's diag
-        sampler (moy_runtime.run_desktop) to log a PERF line every few seconds
-        while a cart runs. flush_ms/draw_ms are only meaningful when perf_capture
-        (or perf_hud) is on -- run_desktop sets perf_capture=True at boot. Backend-
-        agnostic + host-safe: pure reads, no drawing, no hardware. Returns None
-        when no cart is actively running (nothing useful to sample)."""
-        running = (self.wm.top_is_player() and self.cart is not None  # Stage 6d
-                   and self.cart_error is None)
-        if not running:
-            return None
-        cart = self.cart
-        name = cart.get("title") or cart.get("path") or "?"
-        return (name, self._fps, self._flush_ms, self._draw_ms)
-
-    def perf_net(self):
-        """The PERF line's `net=` witness: the #65 lockstep tick rate in ticks/s,
-        or **None when no session is gating frames at all**.
-
-        None is not "zero ticks" and must never be printed as 0 -- a board with
-        no lever reports absence (the 2026-08-22 doctrine; `EspNowLink.status`
-        answers the same way for the same reason). A running match reports a
-        real rate: ~30 while it is healthy, lower under stall pressure, 0 while
-        it is matched but frozen.
-
-        This is the PERF emitters' ONE entry to the meter, because the meter
-        CONSUMES its sample window (netplay.LockstepSession.tps) -- perf_sample()
-        stays the `is a cart running?` probe half a dozen diag helpers call, and
-        must not carry a number that a second caller would spend."""
-        np = self.netplay
-        return None if np is None else np.tps(_ticks_ms())
-
-    def perf_breakdown(self):
-        """(_upd_ms, _cart_ms, _audio_ms, _chrome_ms): the EMA phase split of draw_ms --
-        cart _update (game LOGIC), cart _draw (RENDERING), audio.tick (mixer feed), and
-        console chrome (bar + cursor + overlays, the remainder). Used by the device
-        diag's DRAWBRK line to find where the per-frame draw cost actually goes (cart
-        logic vs rendering vs audio vs chrome). Only meaningful while a cart runs with
-        perf_capture/perf_hud on."""
-        return (self._upd_ms, self._cart_ms, self._audio_ms, self._chrome_ms)
-
-    def perf_breakdown_raw(self):
-        """(upd, cart, audio, chrome, flush, draw) of the LAST drawn frame,
-        un-smoothed (#66 HITCH v3). The EMA split (perf_breakdown) hides which
-        phase a single hitch frame spent its time in; the hitch logger prints
-        this instead. Only meaningful with perf_capture/perf_hud on."""
-        return (self._raw_upd, self._raw_cart, self._raw_audio,
-                self._raw_chrome, self._raw_flush, self._raw_draw)
-
-    def perf_chrome(self):
-        """(bar_ms, composite_ms, cursor_ms, stack_ms, other_ms): the EMA sub-split
-        of the DRAWBRK chrome remainder (#66 lever 5).
-
-        bar   the top status bar (_draw_status_strip)
-        cmp   the game->system viewport composite (~0 when the canvases are one
-              object, i.e. the 320x240 device)
-        cur   the cursor layer
-        stk   every OTHER layer's draw in the WM stack walk, plus the content
-              layer's non-cart tail (2026-08-14)
-        other what is left: the router itself -- the draw_stack walk, the
-              surface/scale-fold probes, _flush_batches, the perf bookkeeping
-
-        `stk` was added because `other` had become the answer to every question:
-        it was a residual of a residual computed from six millisecond-quantized
-        terms, so it collected both the real unnamed cost AND up to ~6ms of
-        rounding, and on the S3 it read ~7.6ms with every named bucket at ~0.00.
-        Both halves of that are fixed -- the brackets are microseconds now, and
-        the biggest unnamed component is measured rather than inferred.
-
-        Only meaningful while a cart runs with perf_capture/perf_hud on; feeds
-        the device CHROMEBRK diag line so a chrome trim cuts the real cost."""
-        other = (self._chrome_ms - self._bar_ms - self._cmp_ms - self._cur_ms
-                 - self._stk_ms)
-        if other < 0:
-            other = 0.0
-        return (self._bar_ms, self._cmp_ms, self._cur_ms, self._stk_ms, other)
-
-    def perf_backdrop(self):
-        """The EMA ms of the declared-backdrop restore (#172) -- `background()`'s
-        per-frame repaint, run by Player.tick before the cart's _draw.
-
-        A SUB-slice of perf_breakdown()'s render, not a fourth bucket: it is the
-        cart's own drawing, standing in for the cls() it would otherwise make
-        first thing. It used to fall outside every measured span and surface as
-        CHROME, which on the T-Deck read as ~4.7ms of shell cost that no
-        CHROMEBRK bucket could name. Feeds DRAWBRK's `bg=`."""
-        return self._bg_ms
-
-    def perf_frame_edges(self):
-        """(pre_ms, post_ms): the parts of frame() OUTSIDE the measured draw span
-        (#172).
-
-        `draw` is timed from _frame_t0, which sits after the journal idle tick,
-        the splash expiry, the frameskip branch and the redraw gate; the tail
-        after the flush is outside it too. Both land inside the device loop's
-        `frm` stage, so DRAWBRK + flush has never summed to a whole frame and the
-        difference was being inferred by subtracting an EMA from a windowed mean
-        -- which spread the answer across -4..+15ms. Feeds LAYERBRK."""
-        return (self._pf_pre / 1000.0, self._pf_post / 1000.0)
-
-    def perf_layers(self):
-        """((layer_id, ms), ...) for the last PAINTED frame, dearest first (#172).
-
-        The per-layer split of the WM stack walk -- which is precisely what
-        CHROMEBRK reports as its unnamed `other` remainder. Not cart-gated (the
-        launcher and editor walks are the ones with no other instrument at all).
-        Empty tuple when perf capture has never painted a frame. Only meaningful
-        with perf_capture/perf_hud on; feeds the device LAYERBRK diag line."""
-        lay = self._pf_layers
-        if not lay:
-            return ()
-        rows = [(lid, us / 1000.0) for lid, us in lay.items()]
-        rows.sort(key=lambda r: -r[1])
-        return tuple(rows)
-
-    def perf_pointer(self):
-        """(total_ms, pre_ms, worst_ms, worst_id, claim_id, n) for the last
-        handle_pointer call (#184), or None if it never ran under capture.
-
-        `pre` is the bookkeeping before the routing walk (_tick_pointer_dt +
-        _game_xy + the focus probe), `worst`/`worst_id` the dearest single
-        layer.handle_pointer in the walk, `claim_id` the layer that consumed the
-        tap, `n` how many layers were visited. total - pre - worst says whether
-        the cost was one layer or spread; a total far BELOW the loop's own hp=
-        says the time went somewhere outside this method entirely."""
-        pf = self._pf_ptr
-        if not pf[5]:
-            return None
-        return (pf[0] / 1000.0, pf[1] / 1000.0, pf[2] / 1000.0,
-                pf[3] or "-", pf[4] or "-", pf[5])
-
-    def perf_batch(self):
-        """(flushes, sprites, maxrun) for the auto-batch this frame (#63 profiling). N
-        sprites coalesced into ONE blit_batch read flushes=1 / maxrun=N; drawn one-by-one
-        read flushes=N / maxrun=1 -- so this PROVES the batch stayed intact at runtime,
-        which pixel-parity can't. Counters reset per frame in frame() when perf capture is
-        on; a lone item still counts as a (flushes=1, maxrun=1) direct blit."""
-        cv = self.canvas
-        return (getattr(cv, "_batch_flushes", 0),
-                getattr(cv, "_batch_sprites", 0),
-                getattr(cv, "_batch_maxrun", 0))
-
-    # -- achievements + Easter-egg drawing (#21) -----------------------------
-
-    # -- system notice banner (#53) ------------------------------------------
-
-    def notice(self, title, sub="", kind="ok", ms=6000):
-        """Say something on whatever screen is up, briefly, and then stop.
-
-        For things the MACHINE did on its own -- the achievement toast next door
-        is for things the kid did. It expires on a timer with no input, because a
-        notice that needs dismissing is a modal, and a modal in front of a kid who
-        just wanted to play is worse than the message is worth."""
-        self._notice = (str(title), str(sub), kind)
-        self._notice_until = _ticks_ms() + int(ms)
-        self._dirty = True
-
-    def notice_active(self, now=None):
-        if self._notice is None:
-            return False
-        if _ticks_diff(self._notice_until, now if now is not None else _ticks_ms()) <= 0:
-            self._notice = None
-            return False
-        return True
-
-    def announce_update(self):
-        """Put the firmware-update verdict on the desktop (#53).
-
-        An update lands during a REBOOT: the screen that asked for it is gone by
-        the time there is an answer, so unless the machine volunteers it the kid
-        learns nothing -- a successful update looks like a slow reboot, and a
-        rolled-back one looks exactly the same. Reading it here does NOT clear it;
-        Settings -> UPDATE still has it for anyone who missed the banner."""
-        u = getattr(self, "updater", None)
-        verdict = getattr(u, "boot_verdict", None)
-        if not verdict:
-            return False
-        if verdict[0] == "ok":
-            self.notice("MOYBYTE UPDATED", "now %s" % u.version_label(), "ok")
-        else:
-            self.notice("UPDATE UNDONE", "still on %s" % u.version_label(), "warn")
-        return True
-
-    def _draw_notice(self):
-        """The system banner: a wide strip under the top bar, title + one small line.
-
-        Sized off `layout` rather than the frozen 320x240 numbers the achievement
-        toast uses, because this one has to look deliberate on a 1024x600 desktop
-        too."""
-        cv = self.sys_canvas
-        lay = self.layout
-        fs = lay.fs
-        title, sub, kind = self._notice
-        th = self.theme_colors
-        accent = th["play"] if kind == "ok" else NAMES["orange"]
-        w = min(lay.w - 16 * fs, max(180 * fs, (len(title) + 2) * 8 * fs * 2))
-        h = 34 * fs
-        x = (lay.w - w) // 2
-        y = lay.status_h + 6 * fs
-        cv.rect(x, y, w, h, th["surface"])
-        cv.rectb(x, y, w, h, accent)
-        cv.rect(x, y, w, 3 * fs, accent)          # a lit edge, not a full title bar
-        self._glyph("gear", (x + 5 * fs, y + 8 * fs, 14 * fs, 14 * fs), accent, cv)
-        cv.print(title[:22], x + 22 * fs, y + 7 * fs, th["ink"], 2 * fs)
-        if sub:
-            cv.print(sub[:26], x + 22 * fs, y + 22 * fs, th["ink_dim"], 1 * fs)
-
-    def _draw_toast(self):
-        """A small celebratory banner near the top: a trophy + "ACHIEVEMENT!" + the
-        achievement name + its glyph. Drawn last each frame over whatever screen is
-        up, so it never disturbs the content beneath and expires on its own. Indexed
-        API only (host == device)."""
-        cv = self.sys_canvas
-        ach_id, title, glyph = self.ach.toast
-        x, y, w, h = 36, 26, 248, 38
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["yellow"])
-        cv.rect(x, y, w, 12, NAMES["yellow"])
-        self._glyph("trophy", (x + 2, y - 1, 12, 12), NAMES["black"], cv)
-        cv.print("ACHIEVEMENT UNLOCKED!", x + 16, y + 2, NAMES["black"], 1)
-        self._glyph(glyph, (x + 6, y + 16, 16, 16), NAMES["yellow"], cv)
-        cv.print(title[:24], x + 28, y + 20, NAMES["white"], 2)
-
-    # _draw_egg / _draw_confetti / _draw_achievements (the egg popup, Konami
-    # confetti, and achievements-list overlay) now live on self.ach_ui
-    # (achievements_ui.py, AchievementsUI). frame() calls self.ach_ui._draw_*.
+        _uimod.mini_btn(cv if cv is not None else self.canvas, rect, label, fill,
+                        label_rect)
 
     def _btn(self, label, rect, fill, cv=None):
         # Defaults to the GAME canvas (paint/map editors -- a 320x240 viewport); the
@@ -4481,13 +3991,14 @@ class Workstation:
             self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y,
                             self.look.font_scale)
 
-    def _glyph(self, kind, rect, c, cv=None):
+    def _glyph(self, kind, rect, c, cv=None, scale=None):
         # Draw a centered icon glyph in color `c`. Defaults to the GAME canvas (the
         # editors/cart-overlay callers); the desktop/system callers pass cv=
-        # self.sys_canvas so the glyph follows the system font scale (#39). The shared
-        # blit + the glyph encoding live in the module-level _blit_glyph so Launcher
-        # (canvas-only) renders the identical vocabulary.
-        _blit_glyph(cv if cv is not None else self.canvas, kind, rect, c)
+        # self.sys_canvas so the glyph follows the system font scale (#39). `scale`
+        # overrides that -- what the bar passes so its glyphs fill a chrome-scaled
+        # slot (#203). The shared blit + the glyph encoding live in the module-level
+        # _blit_glyph so Launcher (canvas-only) renders the identical vocabulary.
+        _blit_glyph(cv if cv is not None else self.canvas, kind, rect, c, scale)
 
     def _wifi_icon_kind(self):
         """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi
@@ -4505,6 +4016,44 @@ class Workstation:
             return "wifi" if w.status()[0] else "wifi_off"
         except Exception:  # noqa: BLE001 -- a status hiccup must not blank the bar
             return "wifi_off"
+
+    def wifi_hold(self, tag):
+        """Take the radio for `tag` (2026-09-07): the WiFi is OFF unless
+        something holds it, and this is the only way to turn it on. Powers the
+        interface up at once -- every holder scans or connects next, and the
+        ESP-NOW link must find the service owning the interface it activates.
+        Idempotent per tag. The holders: "web" (wasm mode, released when its
+        socket actually closes), "update" (the online update screen), "settings"
+        (the WIFI panel), "cart" (a run with the "network" permission), "link"
+        (a match). A new consumer of the network takes a tag here and releases
+        it on its way out, or the radio never goes off again."""
+        w = self.wifi
+        if w is None:
+            return False
+        self._wifi_holders.add(tag)
+        on = getattr(w, "radio_on", None)
+        if on is None:
+            return True
+        try:
+            return bool(on())
+        except Exception:  # noqa: BLE001 -- a radio that will not start is offline
+            return False
+
+    def wifi_release(self, tag):
+        """Let the radio go for `tag`; the last holder out powers it down.
+        Releasing a tag never held is fine (every exit path releases without
+        asking), and an empty set powers down even so: "off in general" is the
+        rule, and whatever a serial `py` brought up without a lease goes with
+        the next exit."""
+        self._wifi_holders.discard(tag)
+        if self._wifi_holders:
+            return
+        off = getattr(self.wifi, "radio_off", None)
+        if off is not None:
+            try:
+                off()
+            except Exception:  # noqa: BLE001 -- a radio that will not stop is a diag line
+                pass
 
     def _bar_image(self, kind):
         """The cached 16x16 _SheetSprite for top-bar icon `kind`, or None when the
@@ -4568,24 +4117,26 @@ class Workstation:
             return None
         return sheet.tile_image(slot, transparent=0)
 
-    def _icon(self, kind, x, y, cv=None):
+    def _icon(self, kind, x, y, cv=None, scale=None):
         """Blit the top-bar icon `kind` (a 16x16 IconSheet sprite) at (x, y). The
         themeable replacement for _glyph on the bar; falls back to _glyph (the 12x12
         bitmap, centered) when the icon sheet/slot is missing, so the bar never crashes
         on a half-wired theme. cv defaults to the system canvas (the bar lives there);
         the running-cart bar passes the game canvas explicitly. The icon scales with
         the canvas's system font scale (#39) so it grows on a larger panel -- the GAME
-        canvas is always scale 1, so the cart bar is byte-identical."""
+        canvas is always scale 1, so the cart bar is byte-identical. `scale` overrides
+        that with the layout's CHROME scale (#203), which is what the responsive bar
+        passes so the sprite fills the tap target the layout sized."""
         cv = cv if cv is not None else self.sys_canvas
-        fs = getattr(cv, "font_scale", 1)
+        fs = int(scale) if scale else getattr(cv, "font_scale", 1)
         if fs < 1:
             fs = 1
         img = self._bar_image(kind)
         if img is not None:
-            cv.spr(img, x, y, fs)                        # 16px art upscaled by font scale
+            cv.spr(img, x, y, fs)                        # 16px art upscaled by that scale
         else:
             self._glyph(kind, (x, y, _BAR_ICON * fs, _BAR_ICON * fs),
-                        self.theme_colors.get("chrome_ink_dim", 6), cv)
+                        self.theme_colors.get("chrome_ink_dim", 6), cv, fs)
 
 
 def wire_workstation_core(ws, store, carts_root, make_api, wifi,
