@@ -576,9 +576,8 @@ class EditorApp:
 
         Why this exists (on-glass P4, 2026-07-25): every exit path hard-commits
         the outgoing tab, and a commit is expensive -- serialize the asset
-        (`to_hex`, ~220ms), write it to flash (~800ms: _write_atomic costs five
-        littlefs metadata ops), then append a full-file snapshot to the undo
-        journal (~175ms). With no guard that ran even when the kid had merely
+        (`to_hex`), write it to flash, then append a full-file snapshot to the
+        undo journal. With no guard that ran even when the kid had merely
         LOOKED at a tab, so walking the tab ladder cost 0.5-1.4s PER SWITCH
         ("slow switching between project tabs"). Measured on glass: map 1356ms,
         paint 1145ms, music 919ms, code 579ms, cards 534ms -- against a
@@ -600,7 +599,7 @@ class EditorApp:
         buffer through it, so an undo/redo leaves a changed document flagged
         clean. Code therefore compares content against the last persisted source
         (moy_carts.save_code keeps cart["src"] in step) -- an O(n) compare of a
-        few KB, nothing next to the ~800ms flash write it guards."""
+        few KB, nothing next to the flash write it guards (#154)."""
         ws = self.ws
 
         def _quiet(hist):
