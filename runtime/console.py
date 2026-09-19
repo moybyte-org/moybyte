@@ -1746,7 +1746,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
 
     # -- run / exit (Stage 2: the run/return stack discipline) ----------------
 
-    def defer(self, fn):
+    def defer(self, fn, toast=True):
         """#184: schedule a heavy transition (cart start, editor open, PLAY)
         instead of running it inside the pointer walk. The tap frame paints its
         acknowledgment (selection highlight + the LOADING toast) and PRESENTS
@@ -1754,8 +1754,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         that same frame's tail -- so the 1-2s a cart start costs happens
         behind a frame that already shows the tap landed, not behind a frozen
         stale shelf. defer() marks dirty so the acknowledgment frame always
-        paints (the redraw gate can't skip it)."""
-        self._deferred.append(fn)
+        paints (the redraw gate can't skip it).
+
+        `toast=False` queues work the kid is NOT waiting on -- the Editor's
+        owed commit (#154), which rides the same tail because the frame has
+        already painted the destination. It gets the same drain and the same
+        DEFER line, and no pill: SAVE IS INVISIBLE (spec Section 7), and a
+        'LOADING...' over a tab that has already finished switching would
+        announce the one thing the shell promises never to show."""
+        self._deferred.append((fn, bool(toast)))
         self._dirty = True             # the acknowledgment frame must paint
 
     def _run_deferred(self):
@@ -1765,7 +1772,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         its own result must paint first."""
         q = self._deferred
         for _ in range(len(q)):
-            fn = q.pop(0)
+            fn, _toast = q.pop(0)
             _t0 = _ticks_ms() if self.perf_capture else 0
             fn()
             if self.perf_capture:
@@ -3885,11 +3892,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
             _prev_domain = layer.domain
         if _game_open:                              # game was the TOP layer
             _view()
-        if self._deferred:
+        if any(_t for _fn, _t in self._deferred):
             # #184: the acknowledgment frame -- a transition queued this
             # iteration paints its LOADING toast on top of everything; the
             # flush below presents it, and the frame TAIL then runs the
             # transition. The panel retains this frame for the whole stall.
+            # A `toast=False` entry (the Editor's owed commit, #154) takes the
+            # same tail and no pill -- the kid is not waiting on it.
             if _fold_live:                          # #190: toast paints the root
                 _dsf = getattr(self.comp, "disarm_scale_fold", None)
                 if _dsf is not None:

@@ -130,7 +130,8 @@ app will never be granted. Giving the widget the files role closes it.
 `close()` is optional and the host calls it when your app comes off the screen,
 whatever route took it there. Implement it if you persist on an idle debounce --
 it should be **change-gated and cheap**, because a pop home must not cost a
-flash write for an app nobody edited (~800ms on the P4).
+store write for an app nobody edited — a write is a floor plus the payload
+(#154), and the floor alone is more than a frame.
 
 `commit()` (see "The bar contract" below) is its forced twin for an explicit
 exit GESTURE: the bar's context-X, or the WM strip's X on the windowed tier.

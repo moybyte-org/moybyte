@@ -375,10 +375,11 @@ def test_re_entry_keeps_the_view_with_the_gutter_on(tmp_path):
 
 def test_a_pending_commit_does_not_move_the_view_either(tmp_path):
     """Moving around the ladder with an edit still inside its debounce window: the
-    tab switch commits it (it is a hard exit path) and nothing about the view jumps
-    -- neither the caret nor the scroll. The edit is HALF-TYPED, which is what a kid
-    moving around the menu actually has: it is kept (#154) and badged, and badging
-    must not walk the caret onto the error the way the run gate does."""
+    switch owes the commit and the frame behind it pays (#154), and nothing about
+    the view jumps -- neither the caret nor the scroll. The edit is HALF-TYPED,
+    which is what a kid moving around the menu actually has: it is kept and
+    badged, and badging must not walk the caret onto the error the way the run
+    gate does."""
     from runtime import moy_carts
     ws, ed = _scrolled_code_ws(tmp_path)
     path = ws.cart["path"]
@@ -389,6 +390,7 @@ def test_a_pending_commit_does_not_move_the_view_either(tmp_path):
     was = _view(ed)
 
     ws.set_menu_view("music")
+    ws.frame(1 / 30)                        # the frame that pays the owed commit
     ws.set_menu_view("code")
 
     assert _view(ed) == was

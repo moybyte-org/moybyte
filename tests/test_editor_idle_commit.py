@@ -310,7 +310,8 @@ def test_a_broken_lua_chunk_commits_and_hard_commits(tmp_path):
 
     ws.editor.set_text("function _draw( cls(4)\n")
     ws.editor.dirty = True
-    ws.set_menu_view("cards")                     # tab leave: the hard commit
+    ws.set_menu_view("cards")                     # tab leave: the commit is owed
+    ws.frame(1 / 30)                              # ...and this frame pays it
     assert "cls(4)" in moy_carts.load(path)["src"]
 
 

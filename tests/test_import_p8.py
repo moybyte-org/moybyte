@@ -148,6 +148,12 @@ def test_gfx_roundtrip_stable(tmp_path):
     only) and does not need to, because the grid it builds is already exactly
     what the editor would emit. That claim is only worth anything while
     something checks it here, where SpriteSheet actually exists.
+
+    The fixed point is in PIXELS, not characters: `to_hex` stops at the last
+    painted row (#154) and the stdlib converter emits the whole 128-row grid,
+    so the editor's blob is the importer's with its blank tail cut. Every way
+    the converter could really be wrong -- nibble order, row width, hex case,
+    a shifted row -- still shows up, in the prefix and in the pixels.
     """
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
@@ -156,7 +162,12 @@ def test_gfx_roundtrip_stable(tmp_path):
     # spec=False: p8's __gfx__ is 128x128, the top half of a SPEC.md 3.2 cart
     # sheet, and the importer emits exactly that region.
     sheet = SpriteSheet.from_hex(kgfx, cols=16, rows=16, spec=False)
-    assert sheet.to_hex() == kgfx
+    editor_blob = sheet.to_hex()
+    assert kgfx.startswith(editor_blob)
+    assert set(kgfx[len(editor_blob):]) <= set("0\n"), \
+        "the importer's extra rows must be BLANK, not content the editor dropped"
+    again = SpriteSheet.from_hex(editor_blob, cols=16, rows=16, spec=False)
+    assert again.pix == sheet.pix and again.to_hex() == editor_blob
 
 
 def test_sounds_parse_via_audiobank(tmp_path):
