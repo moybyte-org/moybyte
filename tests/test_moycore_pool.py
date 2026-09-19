@@ -16,6 +16,12 @@ So:
     already prints without a fraction -- by hand
     (`native/moy_lua/lua/lobject.c`, MODIFICATIONS.md item 3).
 
+The collector that DRIVES the pool is watched here too (#107): Lua's default
+incremental schedule paces itself against the allocation rate, which at a
+frame's scale means a whole cycle inside one tick, so `load()` puts every run
+on the generational collector and the last test in this file is what keeps it
+there.
+
 What this file watches, because neither lever fails loudly:
 
   * THE POOL GIVES EVERYTHING BACK. `alloc_stats()` reads all-zero after
@@ -202,6 +208,12 @@ print("BURSTCLOSED", moycore.alloc_stats())
 # empty, refill. The pool must reach a steady state rather than ratchet, and
 # every round must still pass its own invariants -- a chunk freed while one of
 # its blocks is still on a free list would show up here first.
+#
+# TWENTY-FOUR rounds, not six: on the generational collector a burst this size
+# is caught mid-fill every few rounds and its survivors are PROMOTED, so the
+# pool swings up to about twice its resting size and comes straight back. Six
+# rounds is a window too narrow to tell that cycle from a ratchet -- it ends on
+# whichever phase it lands in.
 begin()
 print("CYCLELOAD", moycore.load([(r"""
 function _update(dt)
@@ -212,7 +224,7 @@ end
 function _draw() end
 """, "@cycle")]))
 _rows = []
-for _r in range(6):
+for _r in range(24):
     moycore.tick(0.03125)
     _s = moycore.alloc_stats()
     _rows.append((_s[5], _s[6], moycore.pool_check()))
@@ -222,6 +234,42 @@ print("CYCLEAFTER", moycore.alloc_stats())
 print("CYCLEAFTERCHECK", moycore.pool_check())
 moycore.close()
 print("CYCLECLOSED", moycore.alloc_stats())
+
+# ----------------------------------------------- the collector's SCHEDULE
+# A big live set with a modest per-tick churn -- the shape a PICO-8 port has,
+# and the one Lua's default INCREMENTAL collector serves worst. `incstep` paces
+# itself against the ALLOCATION RATE, so a cycle that starts walks the whole
+# heap inside one frame's worth of churn and the cart pays it as ONE
+# stop-the-world pause. load() puts every run on the generational collector for
+# that reason (#107); these rows are what says it still does.
+begin()
+print("SCHEDLOAD", moycore.load([(r"""
+local live = {}
+for i = 1, 4000 do live[i] = {x = i, y = i * 2, z = i * 3} end
+local sink = 0
+function _update(dt)
+  for i = 1, 100 do
+    local t = {a = i, b = i + 1}
+    sink = sink + t.a + t.b + live[i].x
+  end
+end
+function _draw() end
+""", "@sched")]))
+print("SCHEDGEN", moycore.lua_gc_mode(-1, -1, -1, -1)[2])
+_prev = moycore.lua_gc_mode(-1, -1, -1, -1)[0]
+_peak, _drop, _busy = _prev, 0, 0
+for _r in range(600):
+    moycore.tick(0.03125)
+    _k = moycore.lua_gc_mode(-1, -1, -1, -1)[0]
+    if _k > _peak:
+        _peak = _k
+    if _prev - _k > _drop:
+        _drop = _prev - _k
+    if _prev - _k > 16:
+        _busy += 1
+    _prev = _k
+print("SCHEDROWS", (_peak, _drop, _busy))
+moycore.close()
 
 # ------------------------------------------------- the SRAM report (#211)
 # What the run HAD: the low-water mark of free internal SRAM and whether the
@@ -431,23 +479,63 @@ def test_the_churn_reaches_a_steady_state_instead_of_ratcheting():
     The pool may not grow round on round -- a chunk that goes back and one that
     comes out again must be the same arithmetic -- and every round has to pass
     pool_check(), which is where a chunk freed with one of its blocks still on
-    a free list would surface."""
+    a free list would surface.
+
+    "Steady state" is a RETURN, not a monotone: the generational collector
+    promotes the survivors of a burst it catches mid-fill, so this pool swings
+    to about twice its resting size on the odd round and drops straight back.
+    What a ratchet would look like is a resting level that CLIMBS -- so the
+    floor over the last third is what is held against the first round, and the
+    swing is bounded separately."""
     out = _run()
     assert "CYCLEERR" not in out, out
     assert "CYCLELOAD None" in out, out
     rows = _stats(out, "CYCLEROWS")
-    assert len(rows) == 6, rows
+    assert len(rows) == 24, rows
     assert all(r[2] == 0 for r in rows), \
         "pool_check() failed during the churn: %r" % (rows,)
     assert rows[0][1] > 1, "the churn never left its first chunk: %r" % (rows,)
-    assert rows[-1][0] <= rows[0][0], \
-        "the pool ratcheted: it must reuse what it already holds, not grow " \
-        "every round: %r" % (rows,)
+    caps = [r[0] for r in rows]
+    assert min(caps[16:]) <= caps[0], \
+        "the pool ratcheted: it must come back to what it already holds, not " \
+        "settle higher every round: %r" % (caps,)
+    assert max(caps) < 3 * caps[0], \
+        "the churn's swing is unbounded, not a promote-and-release cycle: " \
+        "%r" % (caps,)
 
     after = _stats(out, "CYCLEAFTER")
-    assert after[POOL_CAP] * 4 < rows[-1][0], \
+    assert after[POOL_CAP] * 4 < max(caps), \
         "the churn's chunks stayed after a full collect: %r vs %r" % (after, rows)
     assert _stats(out, "CYCLECLOSED")[POOL_CHUNKS] == 0, out
+
+
+def test_a_collection_cycle_is_spread_over_frames_and_not_spent_in_one():
+    """Lua's default collector is incremental in NAME only at a frame's scale:
+    `incstep` does work in proportion to what the cart allocates -- about a
+    hundred bytes of traversal per byte at the default stepmul -- so a cycle
+    that starts walks a heap several times over inside one frame's worth of
+    churn, and the cart pays the whole cycle as one stop-the-world pause. On
+    the P4 that was #107's residual stutter: a 42ms frame every ~49, which at
+    60Hz logic is a dropped tick. `gcstepsize` cannot divide it (it sets how
+    OFTEN a step runs, never how much of the cycle remains), so load() sets the
+    generational collector instead, where a minor collection traverses only
+    what was allocated since the last one.
+
+    Both halves are held here, because either alone would pass a lie: the mode
+    a run actually reaches, and the behaviour that is the point of it -- no
+    single tick may reclaim a third of the heap, and the work has to land in
+    many ticks rather than one."""
+    out = _run()
+    assert "SCHEDLOAD None" in out, out
+    assert _stats(out, "SCHEDGEN") is True, \
+        "a run is not generational: load() stopped setting the collector"
+    peak, drop, busy = _stats(out, "SCHEDROWS")
+    assert drop * 3 < peak, \
+        "one tick reclaimed %dKB of a %dKB heap -- a whole cycle is landing " \
+        "in a single frame again (%r)" % (drop, peak, (peak, drop, busy))
+    assert busy > 25, \
+        "only %d of 600 ticks collected anything: the work is concentrated, " \
+        "not spread (%r)" % (busy, (peak, drop, busy))
 
 
 def test_every_chunk_stays_aligned_to_its_own_size():

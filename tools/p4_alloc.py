@@ -106,6 +106,20 @@ THREE MORE (2026-07-27, the #107 celeste hunt -- each cost a probe cycle):
   * A sample window longer than ~2s must PUMP serial (drain, not sleep): the
     board's PERF prints fill the host-side buffer and the loop stalls on the
     blocking write, which reads as a fake 3fps slowdown.
+
+AND ONE MORE (2026-09-20, the #107 p8 hunt):
+
+  * A `gc.mem_free()` DELTA is not MicroPython's churn on a Lua cart. mem_free
+    is free + `max_new_split`, and `max_new_split` is whatever heap_caps has
+    left -- so every 8KB chunk moycore's Lua pool takes or hands back moves it.
+    On a p8 port that reads as ~10KB/frame of "MP churn" punctuated by a
+    half-megabyte "collect" that `gc.mem_alloc()` never sees, because there was
+    no MicroPython collect at all: it was the CART VM's collector returning
+    chunks. Read BOTH counters -- mem_alloc alone moving is MicroPython,
+    mem_free alone moving is the C side under it -- and for the cart VM ask
+    `moycore.alloc_stats()` and `moycore.lua_gc_mode()`, which answer about the
+    heap that is actually churning. The probe that reads one counter and names
+    a tier is how this issue spent a session measuring the wrong heap.
 """
 
 from __future__ import annotations

@@ -2074,16 +2074,36 @@ static mp_obj_t mod_load(mp_obj_t chunks_obj)
         return mp_obj_new_str(err, strlen(err));
     // The parse burst is over, and it is the run's high-water mark: a 130KB
     // source becomes tokens, short strings and tables that are all garbage by
-    // the time _init returns. Nothing else collects here -- Lua's collector is
-    // incremental and moy_lua_init does not ask -- so the burst would sit in
-    // the pool until the cart's own churn walked it out, one step at a time,
-    // holding chunks the frame loop is about to need. One full collect, once,
-    // before the first frame; on moss moss it is the difference between the
-    // cart loading and `not enough memory`.
+    // the time _init returns. Nothing else collects here -- a Lua collector
+    // only ever runs in steps at the allocator, and moy_lua_init does not
+    // ask -- so the burst would sit in the pool until the cart's own churn
+    // walked it out, one step at a time, holding chunks the frame loop is
+    // about to need. One full collect, once, before the first frame; on moss
+    // moss it is the difference between the cart loading and `not enough
+    // memory`.
     lua_gc(RUN.L, LUA_GCCOLLECT);
+    // ...and then GENERATIONAL, because Lua's default INCREMENTAL collector is
+    // not incremental at a frame's scale. `incstep` paces itself against the
+    // ALLOCATION RATE -- it does (stepmul/WORK2MEM) work units per byte the
+    // cart allocates, 12.5 of them at the default stepmul, i.e. about a
+    // hundred bytes of traversal per byte allocated -- so once a cycle starts
+    // it walks a heap several times over within one frame's worth of churn and
+    // the cart pays the whole cycle as ONE stop-the-world pause. `gcstepsize`
+    // does not divide it: it sets how often a step runs, never how much of the
+    // cycle is left to do, and lowering it measured NULL. A minor collection
+    // instead traverses only what was allocated since the last one, which is a
+    // frame's worth by construction.
+    //
+    // That cycle was #107's residual stutter, and on glass (P4, dank tomb,
+    // 2026-09-20) one 60s soak of it held one 42ms frame in every ~49 -- a
+    // dropped tick at the cart's 60Hz logic, and felt. The same soak
+    // generational held none above 27ms, with the VM's heap peak a third
+    // lower; #107 carries the arms.
+    lua_gc_apply(RUN.L, 3, -1, -1, -1);
     // AFTER that collect, never before: an armed `stop` has to not apply to
     // the load burst, which is the run's high-water mark and the one thing
-    // that must still be collected.
+    // that must still be collected. And after the line above, so `luagc inc`
+    // can put a run back on the default schedule for an A/B.
     if (g_gc_mode >= 0) lua_gc_apply(RUN.L, g_gc_mode, g_gc_a, g_gc_b, g_gc_c);
     return mp_const_none;
 }
@@ -2092,11 +2112,11 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_load_obj, mod_load);
 // gc() -> the VM's heap in KB after a FULL collect, or None with no run.
 //
 // A DIAGNOSTIC and a test verb, not a frame-loop one: a full collect is the
-// stop-the-world kind, and the cart's own churn is what the incremental
-// collector is tuned for. It exists because `collectgarbage` is one of the
-// names SPEC.md 4.1 takes AWAY from a cart, so nothing else can ask the VM to
-// settle -- which is exactly what tests/test_moycore_pool.py has to do to see
-// a burst's garbage die and its chunks go back.
+// stop-the-world kind, and a running cart's churn is what the generational
+// collector load() installs is there for. It exists because `collectgarbage`
+// is one of the names SPEC.md 4.1 takes AWAY from a cart, so nothing else can
+// ask the VM to settle -- which is exactly what tests/test_moycore_pool.py has
+// to do to see a burst's garbage die and its chunks go back.
 static mp_obj_t mod_gc(void)
 {
     if (!RUN.open) return mp_const_none;

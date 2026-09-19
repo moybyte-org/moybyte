@@ -248,6 +248,18 @@ an armed mode is applied AFTER `load()`'s settling collect so a `stop` never
 applies to the parse burst — the run's high-water mark, and the one thing that
 must still be collected.
 
+**A run is GENERATIONAL, and Lua's own default is not.** `load()` sets the mode
+itself, because the default INCREMENTAL collector is not incremental at a
+frame's scale: `incstep` paces itself against the ALLOCATION RATE — about a
+hundred bytes of traversal per byte the cart allocates, at the default
+`stepmul` — so once a cycle starts it walks a heap several times over inside
+one frame's worth of churn, and the cart pays the whole cycle as ONE
+stop-the-world pause. `gcstepsize` does not divide that: it says how often a
+step runs, never how much of the cycle is left to do, and lowering it measured
+NULL on glass. A minor collection traverses only what was allocated since the
+last one, which is a frame's worth by construction. #107 is where the numbers
+live, and `luagc inc` is how a run goes back on Lua's schedule for an A/B.
+
 **Stopping it is the direct measurement of what it costs**, which is why the
 verb exists at all: the difference between a window with the collector running
 and one with it stopped is collection, on the live cart with nothing else
