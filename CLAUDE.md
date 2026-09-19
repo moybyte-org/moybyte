@@ -217,8 +217,11 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
     until 2026-09-10, when a free one turned up in the tick model itself: its
     pin asked whether a tick-only frame beat the PERIOD when the question is
     whether it beats a DRAWING frame, and dank tomb ran its logic at 23Hz of a
-    declared 60 for want of it (#217). Where to look next is #66's ledger and
-    `docs/perf_native_gap_v1.md`, not this line.
+    declared 60 for want of it (#217). It broke again on 2026-09-20, in the
+    half it names outright: the CART VM's collector had never been taken off
+    Lua's default schedule, which paces itself against the allocation rate and
+    therefore spends a whole cycle inside one frame (#107). Where to look next
+    is #66's ledger and `docs/perf_native_gap_v1.md`, not this line.
   - **Per-board verdicts do NOT transfer.** The `-O3` `moy_gfx` pragma is
     A/B-confirmed on the S3 (compute-bound there) and measured NULL on the
     dispatch-bound P4 — one pragma line, opposite answers.
