@@ -86,6 +86,7 @@ if [ "${fails}" -ne 0 ]; then
   exit 1
 fi
 printf '\npreflight: green. A push should be too.\n'
-printf 'ON-GLASS IS NOT IN HERE: the four board suites need the boards, and\n'
-printf 'nothing but a human with them plugged in can run them (see\n'
-printf '.claude/rules/testing.md). `make device-port` names the ports.\n'
+printf 'ON-GLASS IS NOT IN HERE: the board suites need a board CONNECTED to\n'
+printf 'this machine, which CI has none of. Whoever is at this checkout --\n'
+printf 'person or agent -- runs them when one is plugged in, no permission\n'
+printf 'needed. `make device-port` says which board is on which port.\n'

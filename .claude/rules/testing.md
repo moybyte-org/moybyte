@@ -53,10 +53,13 @@ paths:
   device-port` says which boards are on this machine and on which port; when one
   is there, run its suite, build, flash, push a cart and measure without asking
   first, and when none answers say so rather than asking whether you may. The
-  line in `tools/preflight.sh` about the suites needing "a human with them
-  plugged in" means exactly that the boards must be CONNECTED — an agent read it
-  on 2026-09-12 as "an agent may not", told the owner on-glass was out of reach,
-  and shipped an input-path change unverified while four boards sat plugged in.
+  gate is a CABLE, never a person, and inventing the other reading has cost two
+  sessions: `tools/preflight.sh` used to close with the suites needing "a human
+  with them plugged in", which an agent read on 2026-09-12 as "an agent may
+  not" — it told the owner on-glass was out of reach and shipped an input-path
+  change unverified while four boards sat plugged in, then repeated the same
+  invented gate to a second session on 2026-09-20. That line now says what it
+  meant, so this paragraph is the rule and not a gloss on a sentence elsewhere.
   Reach for the real driver (`P4Board(board_dir=…)`) and never raw pyserial: the
   line state at open is per-board and opposite, and getting it wrong resets the
   chip (below).
