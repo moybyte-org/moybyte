@@ -243,6 +243,7 @@ class SettingsLayer:
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
         self.set_msel = 0
         self.set_top = 0
+        self._sync_scroll_from_top()
         if self.wifi_view:
             self.close_wifi()
         if self.bt_view:
@@ -964,23 +965,62 @@ class SettingsLayer:
         area = (lay.set_x, lay.set_row_y0, lay.set_w,
                 self._settings_visible() * lay.set_row_h)
         self.scroll.set(area, len(rows) * lay.set_row_h)
-        # Keep the sub-row remainder while a drag is active.  Re-snapping from
-        # set_top on every pointer sample discards normal 3-5px finger movement,
-        # so a gradual drag can never accumulate enough travel to cross a row.
-        if not self.scroll.drag_active:
-            self.scroll.offset = self.set_top * lay.set_row_h
         return self.scroll
+
+    def rows_flinging(self):
+        """True while a released kinetic fling is coasting the rows (#113).
+        The console's redraw gate reads it -- a fling is a per-frame change with
+        no input behind it, which is exactly what the gate exists to notice."""
+        return self.scroll is not None and self.scroll.animating
+
+    def rows_anim_frame(self, dt):
+        """Advance a live fling one frame (dt in SECONDS, the loop's tick),
+        called at the top of the draw so the painted offset is this frame's.
+
+        set_top follows the coasting offset the same way it follows a drag, so
+        the cues and the keyboard clamp stay consistent with the pixels. The
+        selection is NOT dragged along: a fling is a look-around, and yanking
+        the highlight through a dozen rows on the way past is not what the
+        finger asked for -- the range clamp in handle_input still guarantees it
+        cannot strand anything.
+        """
+        sr = self.scroll
+        if sr is None or not sr.animating:
+            return False
+        if not sr.tick(dt * 1000.0):
+            return False
+        rows = len(self._settings_rows())
+        vis = self._settings_visible()
+        top = int(sr.offset) // self.ws.layout.set_row_h
+        self.set_top = max(0, min(max(0, rows - vis), top))
+        return True
+
+    def _sync_scroll_from_top(self):
+        """Push set_top into the region's pixel offset -- the ONE direction the
+        row slot drives the pixels.
+
+        The region carries the offset a finger produced and set_top follows it
+        (`_rows_pointer`); this is the opposite push, for the movers that think
+        in ROWS: a d-pad step, a reset, the range clamp. Re-snapping outside
+        those used to happen on every pointer sample, which is what discarded
+        the sub-row remainder and made the list travel a row at a time.
+        """
+        if self.scroll is not None:
+            self.scroll.offset = self.set_top * self.ws.layout.set_row_h
+            self.scroll.stop()        # a row-aligned jump kills a live fling
 
     def _rows_pointer(self, px, py, click):
         """The row list's pointer machine -- the SAME shared ui.DragTap the
-        Library shelf rides: a held drag scrolls the rows (snapped to whole
-        rows; set_top stays the state of record), and a row activates only on
-        a clean tap RELEASE -- so letting go of a scroll can never 'click' the
-        row under the finger. Returns True when it consumed a tap."""
+        Library shelf rides: a held drag scrolls the rows by PIXELS (the region
+        owns the offset, set_top follows it as the row-slot state of record),
+        and a row activates only on a clean tap RELEASE -- so letting go of a
+        scroll can never 'click' the row under the finger. Returns True when it
+        consumed a tap."""
         ws = self.ws
         sr = self._scroll_region()
         press = self._taps.frame(px, py, click, ws.pointer.down,
-                                 slop=4 * ws.layout.fs + 2)
+                                 slop=4 * ws.layout.fs + 2,
+                                 dt_ms=ws._pointer_dt_ms)
         if self._taps.dragging:
             rows = len(self._settings_rows())
             vis = self._settings_visible()
@@ -1012,14 +1052,49 @@ class SettingsLayer:
         rows = len(self._settings_rows())
         vis = self._settings_visible()
         self.set_top = self._clamp_scroll(self.set_top, self.set_msel, vis, rows)
+        self._sync_scroll_from_top()   # a d-pad step lands row-aligned
+
+    def _rows_viewport(self):
+        """The band the rows occupy -- the SAME rect the ScrollRegion measures its
+        view by, so the clip and the scroll extent cannot drift apart."""
+        lay = self.ws.layout
+        return (lay.set_x, lay.set_row_y0, lay.set_w,
+                self._settings_visible() * lay.set_row_h)
+
+    def _scroll_px(self):
+        """The live offset's SUB-ROW remainder in pixels -- the whole of what
+        makes this list travel by pixels instead of snapping a row at a time.
+
+        set_top remains the row-slot state of record (the cues, the keyboard
+        clamp and the selection all think in rows); the region underneath it
+        carries what a finger actually moved. Rows draw at their slot MINUS this
+        remainder. Zero when no region exists yet, which is the old slot
+        arithmetic exactly -- a keyboard-only tier never builds one.
+        """
+        sr = self.scroll
+        if sr is None:
+            return 0
+        d = int(sr.offset) - self.set_top * self.ws.layout.set_row_h
+        # A region left stale by a shrinking row set or a font-scale change can
+        # hold an offset that no longer belongs to set_top. A remainder outside
+        # one row says the two have diverged, and the slot is the one to trust.
+        return d if 0 <= d < self.ws.layout.set_row_h else 0
 
     def _settings_row_visible(self, i):
-        return self.set_top <= i < self.set_top + self._settings_visible()
+        # A pixel offset puts a PARTIAL row at each edge, so visibility is a band
+        # intersection rather than a slot range: row i shows whenever its own band
+        # overlaps the viewport at all. The draw clips to that viewport, and the
+        # pointer loop hit-tests the real rect -- so a half-row is tappable exactly
+        # where it is drawn, and never outside the panel.
+        _vx, vy, _vw, vh = self._rows_viewport()
+        _x, y, _w, h = self._settings_row_rect(i)
+        return y < vy + vh and y + h > vy
 
     def _settings_row_rect(self, i):
-        # Scrolled position: row i sits in on-screen slot (i - set_top). Rows outside
-        # the visible window get an off-panel rect that the draw + pointer loops skip.
-        return self.ws.layout.settings_row_rect(i - self.set_top)
+        # Scrolled position: row i sits in on-screen slot (i - set_top), lifted by
+        # the sub-row remainder so the list travels by pixels.
+        x, y, w, h = self.ws.layout.settings_row_rect(i - self.set_top)
+        return (x, y - self._scroll_px(), w, h)
 
     # -- Layer facets: input + pointer ---------------------------------------
 
@@ -1045,8 +1120,15 @@ class SettingsLayer:
         # Range-only safety clamp (what the per-frame _settings_scroll used to
         # provide): a shrinking row set / a font-scale change must not strand
         # set_top past the end. No selection nudge -- that is the drag's fight.
-        self.set_top = max(0, min(self.set_top,
-                                  max(0, len(rows) - self._settings_visible())))
+        capped = max(0, min(self.set_top,
+                            max(0, len(rows) - self._settings_visible())))
+        if capped != self.set_top:
+            # Only on an ACTUAL strand. This clamp runs every frame, and pushing
+            # unconditionally would re-snap the offset each one -- which is the
+            # per-sample re-snap that used to eat the sub-row remainder, and
+            # would now also kill a fling on its first coasting frame.
+            self.set_top = capped
+            self._sync_scroll_from_top()
         if i.pressed("left"):
             self.settings_adjust(-1)
         if i.pressed("right"):
@@ -1161,6 +1243,9 @@ class SettingsLayer:
         fs = lay.fs
         px, py, pw, ph = lay.settings_panel
         th = ws.theme_colors
+        # A coasting fling advances BEFORE anything paints, so the rows below are
+        # drawn at this frame's offset rather than the previous one's.
+        self.rows_anim_frame(dt)
         # Backdrop. FULLSCREEN tiers keep the live wallpaper behind the panel (the
         # honest preview this app is partly about). Inside a WM WINDOW that is pure
         # waste: the window already sits ON the desktop wallpaper, and rendering the
@@ -1212,9 +1297,17 @@ class SettingsLayer:
         cv.print(str(ws.ach.count()), bx + 13 * fs,
                  by + 4 + (bh - 14 * fs) // 2, th["selection_ink"], 1)
         rows = self._settings_rows()
+        # A pixel offset leaves a PARTIAL row at each edge; the clip is what cuts
+        # it to the band instead of letting it bleed over the panel's frame. The
+        # chevrons + scrollbar are chrome ABOUT the band, so they stay outside it.
+        clip = getattr(cv, "clip", None)
+        if clip is not None:
+            clip(*self._rows_viewport())
         for i in range(len(rows)):
             if self._settings_row_visible(i):
                 self._draw_settings_row(i)
+        if clip is not None:
+            clip()
         self._draw_settings_more(rows)
         ws.bar_layer._draw_status_strip("settings")
 

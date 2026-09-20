@@ -3573,6 +3573,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # gate after its first frame and hide newly-found devices/status changes.
         if kind == "settings" and self.settings_layer.bluetooth_animating():
             return True
+        # A released kinetic fling coasts the Settings rows for a second or so
+        # after the finger is gone (#113 Phase 5). Without this the gate closes
+        # on the release frame and the list stops dead under the thumb.
+        if kind == "settings" and self.settings_layer.rows_flinging():
+            return True
         # (The Appearance app's monitor shows a COMPUTED still on every tier,
         # so it needs no live-wallpaper redraw exception -- the gate closes
         # like any static UI and the web view idles at ~0 KB/s there.)

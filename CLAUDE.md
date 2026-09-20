@@ -273,8 +273,10 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
     COLLECTOR (which runs in the allocator, not as counted instructions), so
     read its sample share and reach for `luagc` for the other. Both are
     documented in `native/moycore/README.md`.
-  - Open defects: #74 touch stalls, the launcher live-wallpaper cost, and #69's
-    keyboard+touch I2C stalls (sized via I2CSTAT).
+  - Open defect: the launcher's live-wallpaper cost. An animated wallpaper
+    defeats the redraw-on-change gate, so the whole tile grid re-renders at
+    wallpaper rate — #66's ledger sizes it and #73's per-surface compositing is
+    the architectural fix.
 - **Branches and releases: `dev` is where work lands; `master` is what users get.**
   Commit to `dev` by default — a change is not on master until a human has tested
   it on the boards it touches, and **never push straight to master anything a
