@@ -273,6 +273,19 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
     COLLECTOR (which runs in the allocator, not as counted instructions), so
     read its sample share and reach for `luagc` for the other. Both are
     documented in `native/moycore/README.md`.
+  - **`moy_prof` is the only meter that sees the WHOLE IMAGE**, which is what
+    every other one on this list cannot: they each attribute within one tier,
+    so a cost living BETWEEN them is unattributable. It PC-samples from a
+    GPTimer ISR and symbolizes on the host —
+    `tools/prof_sample.py --board tdeck --cart "..."`, `--frame 1` for the
+    caller instead of the callee. One capture spans libmoy's kernels, the VM's
+    internals, the Lua verbs, IDF driver code and the idle hook. Free at its
+    default 1000Hz (measured; 2000Hz costs ~2fps). How the PC is taken differs
+    per arch and the module header is the authority: `mepc` on the P4, a
+    windowed-ABI frame walk on the S3, with `moy_prof.SELF` naming the index so
+    no caller has to know which. It is what `LUAPROF` cannot be — the collector
+    runs in the allocator rather than as counted instructions, so only a PC
+    sampler sees it (#107 was found by reading code).
   - Open defect: the launcher's live-wallpaper cost. An animated wallpaper
     defeats the redraw-on-change gate, so the whole tile grid re-renders at
     wallpaper rate — #66's ledger sizes it and #73's per-surface compositing is

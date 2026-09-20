@@ -349,3 +349,15 @@ The vendored moy-spec core (the cart runtime the Lua tier and the p8 semantics
 sit on). Same argument as moy_lua and the same size class: it is the single
 largest shared C module, and this board runs no carts. Denying the pair is
 most of what makes two app slots fit in 8MB of flash."""
+
+[[native.shared.deny]]
+module = "moy_prof"
+why = """
+The whole-image PC sampler (tools/prof_sample.py is its host half). It exists
+to attribute frame time across the raster kernels, the VM and the flush path --
+and this board has no frame, no cart running and no console loop, so there is
+nothing here for a profile to be OF. Its one workload is serving a page over
+HTTP, which is bounded by the network and is measured by timing the request.
+
+The sampler is also internal SRAM while armed, on the board with the least of
+it and the 8MB flash where every module is spent twice, once per OTA slot."""
