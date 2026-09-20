@@ -22,7 +22,11 @@ def _entries(cart_path):
 
 
 def _snap(cart_path, entry):
-    return (Path(cart_path) / "journal" / entry["snap"]).read_text()
+    # Through the journal's own reader: a snapshot that CLAIMED the publish
+    # backup keeps moy_fs's stamp line, so the bytes an undo would restore are
+    # what this asserts on, not the file's layout (#154).
+    from runtime import moy_journal
+    return moy_journal._journal_read_snap(cart_path + "/journal", entry)
 
 
 def test_commit_code_journals_the_saved_source(tmp_path):

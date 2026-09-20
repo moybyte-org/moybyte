@@ -477,8 +477,9 @@ def test_a_chunked_publish_is_journaled_from_what_landed(tmp_path):
     entries = moy_journal._journal_load_entries(
         str(root / "hop.moy" / "journal" / "journal.jsonl"))
     assert len(entries) == 1 and entries[0]["file"] == "big.lua"
-    snap = root / "hop.moy" / "journal" / entries[0]["snap"]
-    assert snap.read_text() == big, "the snapshot is one chunk, not the file"
+    assert moy_journal._journal_read_snap(
+        str(root / "hop.moy" / "journal"), entries[0]) == big, \
+        "the snapshot is one chunk, not the file"
 
 
 def test_a_files_push_is_never_journaled(tmp_path):

@@ -229,7 +229,8 @@ def test_commit_scene_journals_and_undo_restores(tmp_path):
     # the subfolder path flattened into a valid flat snapshot filename (no "/" dir)
     snap = ents[-1]["snap"]
     assert "/" not in snap[len("s/"):]
-    assert (Path(path) / "journal" / snap).read_text() == LEVEL2_SCENE
+    from runtime import moy_journal
+    assert moy_journal._journal_read_snap(path + "/journal", ents[-1]) == LEVEL2_SCENE
 
     live = Path(path) / "scenes" / "main.moyscene"
     assert live.read_text() == LEVEL2_SCENE

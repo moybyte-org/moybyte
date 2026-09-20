@@ -1025,7 +1025,7 @@ try:
                              JOURNAL_SNAP_DIR, journal_append, journal_undo,
                              journal_redo, journal_can_undo, journal_can_redo,
                              _journal_paths, _journal_load_entries,
-                             _journal_current_snap, _journal_total_bytes)
+                             _journal_current_snap, _journal_total_len)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
                                      JOURNAL_SNAP_DIR, journal_append,
@@ -1033,7 +1033,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                      journal_can_undo, journal_can_redo,
                                      _journal_paths, _journal_load_entries,
                                      _journal_current_snap,
-                                     _journal_total_bytes)
+                                     _journal_total_len)
 
 
 def _import_blocks():
