@@ -148,3 +148,49 @@ CONFIG_ESP_WIFI_RX_BA_WIN=32
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
+
+# --- Power management: machinery with no user ------------------------------
+# IDF's default is n; MicroPython's sdkconfig.base turns it ON for every board.
+# Nothing in this repo touches the PM API -- no machine.freq() setter, no
+# lightsleep/deepsleep, no esp_pm_* call in device/ runtime/ native/ or the
+# board modules -- and neither PM_DFS_INIT_AUTO nor tickless idle is set, so no
+# frequency scaling ever happens. What is left is only the cost:
+# esp_pm_lock_acquire is a spinlock critical section taken per SPI transaction,
+# i.e. once per flush band on this board.
+#
+# Frame-neutral when A/B'd on the T-Deck 2026-09-20 -- this is dead weight
+# removed, not a trade. The one behaviour lost is machine.freq(x) as a SETTER,
+# which would start raising ValueError; the getter is unaffected.
+CONFIG_PM_ENABLE=
+
+# --- No PSRAM memtest at every boot ----------------------------------------
+# IDF: "Runs a rudimentary memory test on initialization. Aborts when memory
+# test fails. Disable this for slightly faster startup." 8MB of octal PSRAM
+# written and read before the console starts. Both P4 boards already run
+# without it (upstream's sdkconfig.p4 disables it), so this closes an inherited
+# asymmetry rather than taking a new risk. Cost: no automatic bad-PSRAM
+# detector at boot.
+CONFIG_SPIRAM_MEMTEST=
+
+# --- CONFIG_SPI_MASTER_ISR_IN_IRAM: MEASURED NULL HERE, do not re-propose --
+# The T-Deck takes this one (its fragment carries the A/B: Brick Siege
+# worst-frame 48 -> 51, render 10 -> 9ms). It does NOT transfer to this board,
+# which is the same SoC running the same option.
+#
+# A/B'd on this board's glass 2026-09-20, Brick Siege, 4-5 runs per side,
+# discarding the post-flash settling runs:
+#
+#     baseline   fps 47   worst 46   render 9ms   draw 14ms
+#     in IRAM    fps 47   worst 46   render 9ms   draw 14ms
+#
+# The structural reason it lands differently: this board's flush runs on a
+# CORE-0 FEEDER TASK rather than the VM's core (perf_native_gap_v1.md §9 uses
+# exactly that difference as its control when reading the perf counters). A
+# done-ISR sitting in flash therefore costs the VM's core nothing here, while
+# on the T-Deck -- where the feeder and the VM share a core -- it costs a
+# flash-miss window per band.
+#
+# And it is not free to take anyway: ~7.9KB of internal SRAM (the option also
+# selects GDMA_CTRL_FUNC_IN_IRAM) out of the 37KB this board has free with BLE
+# active. On the board whose WiFi has never fitted, that is a fifth of the
+# remaining budget for a null.

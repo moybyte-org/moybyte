@@ -131,11 +131,25 @@ generic 4MB board and every Moybyte board then inherits — a different question
 from "did we tune IDF", and one nobody had asked. Swept 2026-09-20, it was not
 empty: `CONFIG_SPI_MASTER_ISR_IN_IRAM` sat off (base turns it off under a
 comment reading "To reduce IRAM usage"), which put the panel flush's done-ISR
-in flash on both S3 boards. Enabling it on the T-Deck is worth Brick Siege
-worst-frame 48 → 51 fps and render 10 → 9ms for 7,932 bytes of internal SRAM
-(the board's fragment carries the A/B). So: the IDF-knob chapter is closed,
-the INHERITED-DEFAULT chapter was never opened, and the two are not the same
+in flash on both S3 boards. So: the IDF-knob chapter is closed, the
+INHERITED-DEFAULT chapter was never opened, and the two are not the same
 survey.
+
+**And it split the two S3 boards, which is this doc's own rule arriving
+again** — same SoC, same option, opposite answers, each board's fragment
+carrying its A/B:
+
+| board | Brick Siege | verdict |
+|---|---|---|
+| T-Deck | worst-frame 48 → 51 fps, render 10 → 9ms | **SHIPPED** for 7,932 B internal SRAM |
+| Guition S3 | fps 47 → 47, worst 46 → 46, render 9 → 9 | **NULL — declined**, 7,908 B for nothing |
+
+The mechanism is the one §9 already uses as its control: the Guition runs its
+flush on a **core-0 feeder task**, off the VM's core, so a done-ISR in flash
+costs the VM nothing there; on the T-Deck the feeder and the VM share a core
+and every band completion is a flash-miss window. The win is not "ISR in
+IRAM", it is "ISR in IRAM *when it contends with the VM*" — so the lever's
+real precondition is core topology, and any third board needs its own A/B.
 
 ## 6. The lever roadmap
 
