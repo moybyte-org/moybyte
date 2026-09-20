@@ -114,16 +114,28 @@ The generic ESP-IDF speed-guide knobs are mostly already set:
 
 | knob | T-Deck (S3) | P4 |
 |---|---|---|
-| flash mode | QIO ✅ + 120MHz ✅ | QIO ✅ |
+| flash mode | DIO (a board fact — the images we flash are dio) + 120MHz ✅ | QIO ✅ |
 | compiler | `-O2` (PERF) ✅ | `-O2` ✅ |
 | PSRAM | OCT 120MHz ✅ (the owner's bump) | HEX 200MHz ✅ |
-| caches | I 32KB + D 64KB — **max** ✅ | L2 128KB (not max) |
+| caches | I 32KB + D 64KB — **max** ✅ | L2 256KB ✅ (#159; 512KB does not boot) |
 
 This is *why* the T-Deck's PSRAM bump only "helped a bit" — it was one of the
-last generic knobs. The T-Deck is near its architectural ceiling on these, and
-the P4's two "obvious" remaining knobs (`-O3` on the kernel, game canvas in
-internal SRAM) both **measured null** on glass (next section) — the generic
-build-tuning chapter is closed on both boards.
+last generic knobs. The P4's two "obvious" remaining knobs (`-O3` on the
+kernel, game canvas in internal SRAM) both **measured null** on glass (next
+section).
+
+**But "well-tuned" was read as "closed", and it was not.** The knobs surveyed
+above are the ones the *speed guide* lists. What that framing misses is the
+options MicroPython's own `ports/esp32/boards/sdkconfig.base` sets for a
+generic 4MB board and every Moybyte board then inherits — a different question
+from "did we tune IDF", and one nobody had asked. Swept 2026-09-20, it was not
+empty: `CONFIG_SPI_MASTER_ISR_IN_IRAM` sat off (base turns it off under a
+comment reading "To reduce IRAM usage"), which put the panel flush's done-ISR
+in flash on both S3 boards. Enabling it on the T-Deck is worth Brick Siege
+worst-frame 48 → 51 fps and render 10 → 9ms for 7,932 bytes of internal SRAM
+(the board's fragment carries the A/B). So: the IDF-knob chapter is closed,
+the INHERITED-DEFAULT chapter was never opened, and the two are not the same
+survey.
 
 ## 6. The lever roadmap
 

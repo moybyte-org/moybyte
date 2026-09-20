@@ -251,3 +251,54 @@ CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
 CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=8
 CONFIG_BT_CTRL_BLE_MAX_ACT=3
 CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=50
+
+# --- The panel flush done-ISR runs from IRAM, not flash ---------------------
+# IDF's own default is y; MicroPython's boards/sdkconfig.base turns it off in a
+# block headed "To reduce IRAM usage" -- a generic-4MB-board trade inherited by
+# a console whose hot path is a DMA-paced panel flush. moy_flush.c's header is
+# explicit that the feeder returns to its wait between bands "so the done-ISR
+# paces it", and that ISR is spi_intr: unset, every band completion takes a
+# flash-cache-miss window. Enabling it moves spi_intr to 0x4038_ (IRAM);
+# `nm micropython.elf | grep spi_intr` is how to check it stayed there.
+#
+# A/B'd on this board's glass 2026-09-20, Brick Siege (the only referee with
+# headroom -- Hop Quest and Sky Run sit on the 60 cap and cannot show a win),
+# 3-4 runs per side, diag on:
+#
+#     fps median   51 -> 52        render  10ms -> 9ms
+#     WORST frame  48 -> 51        <- the real win: a shorter tail, not a
+#                                     faster average
+#
+# COST, measured rather than estimated: .iram0.text 0x1f48b -> 0x21387, i.e.
+# 7,932 bytes of internal SRAM -- roughly DOUBLE a naive read of the option,
+# because enabling it also selects GDMA_CTRL_FUNC_IN_IRAM. Checked against the
+# hazard the WiFi block below is careful about: with WLAN active the board
+# still has 79KB internal free / 38KB largest block, scan() answers, and
+# tests/test_tdeck_on_glass.py is 15/15.
+#
+# This is NOT the ~32KB WiFi IRAM block declined above -- it is a quarter of
+# that for a measured win, so that decline's reasoning does not reach it.
+CONFIG_SPI_MASTER_ISR_IN_IRAM=y
+
+# --- Power management: machinery with no user ------------------------------
+# IDF's default is n; MicroPython's sdkconfig.base turns it ON for every board.
+# Nothing in this repo touches the PM API -- no machine.freq() setter, no
+# lightsleep/deepsleep, no esp_pm_* call anywhere in device/ runtime/ native/
+# or the board modules -- and neither PM_DFS_INIT_AUTO nor tickless idle is
+# set, so no frequency scaling ever actually happens. What is left is only the
+# cost: esp_pm_lock_acquire is a spinlock critical section taken per SPI
+# transaction, i.e. once per flush band on this board.
+#
+# Small -- this is dead weight removed, not a trade. The one behaviour lost is
+# machine.freq(x) as a SETTER, which would start raising ValueError; the getter
+# is unaffected. Revisit if #130's idle light-sleep rung is ever built.
+CONFIG_PM_ENABLE=
+
+# --- No PSRAM memtest at every boot ----------------------------------------
+# IDF: "Runs a rudimentary memory test on initialization. Aborts when memory
+# test fails. Disable this for slightly faster startup." 8MB of octal PSRAM
+# written and read before the console starts. Both P4 boards already run
+# without it (upstream's sdkconfig.p4 disables it) -- so this is an inherited
+# asymmetry being closed, not a new risk appetite. The cost is losing an
+# automatic bad-PSRAM detector at boot.
+CONFIG_SPIRAM_MEMTEST=
