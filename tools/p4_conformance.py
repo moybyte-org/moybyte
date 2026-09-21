@@ -303,8 +303,7 @@ def run_scene(board, cart_dir, log=print, frames=1.5):
     title = cart_title(cart_dir)
 
     # Leave whatever is running, so a repeat call starts from the desk.
-    board.pyexec("ws.exit()")
-    board.drain(0.6)
+    board.leave_cart(settle=0.6)
     # The diag stream OFF for the session: its PERF lines share this UART
     # with the base64 push below and the capture after, and a line landing
     # mid-chunk is a decode error or a stalled read -- the same finding

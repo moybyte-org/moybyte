@@ -77,12 +77,20 @@ paths:
     written against; a leftover menu or a scrolled shelf makes a fling land on
     a tile instead, and the failure reads as `['launcher', 'menu'] != launcher`
     from whichever swipe ran first — the flush test, the pointer test, anything
-    that gestures. Check `state()["stack"]` and reboot the board before
+    that gestures. The windowed boards have a second shape: `ws.exit()` with no
+    cart up pops the DESK itself, and every test then reads `desk` False and
+    `order` empty — six failures from one leftover, on the attach-only Guition
+    P4 where nothing resets the board at open (the Waveshare's fixture does,
+    which is why the same sequence passes there). Check `state()["stack"]` and reboot the board before
     believing it: on 2026-09-21 that answer cost two investigations, once on
     each S3 board, both of which went 18/18 and 15/15 the moment the desk was
     clean. A tool that runs a cart owes the desk back when it is done
     (`tools/prof_sample.py` does it in a `finally`), and the same applies to
-    anything you drive by hand.
+    anything you drive by hand. And give the reboot its whole boot before
+    attaching: the Guition S3 takes the better part of a minute to reach the
+    desk from its card, and a suite started at thirty seconds errors every
+    test with "did not answer `state`" -- a third false dead board, not a
+    second failure.
   - **A check every board can make belongs in `on_glass.py`, and then EVERY
     board makes it.** The suites keep their own `def test_*` so a failure names
     its board, but the body is shared, and which boards call it is not a taste

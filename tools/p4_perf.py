@@ -74,8 +74,7 @@ DEFAULT_ROSTER = [
 
 
 def measure(board, title, secs, log):
-    board.pyexec("ws.exit()")
-    board.drain(0.8)
+    board.leave_cart()
     if board.cmd("run %s" % title, wait_for="REMOTE run", timeout=20.0) is None:
         raise RuntimeError("board never acknowledged `run %s`" % title)
     line = board.lines[-1]
@@ -159,7 +158,7 @@ def main(argv=None):
                      if r["linked"] is not None else ""))
             linked = linked or r["linked"] is not None
             rows.append((title, r))
-        board.pyexec("ws.exit()")
+        board.leave_cart()
         if linked:
             print("\nLINKED: the board's own PERF line reported a lockstep tick "
                   "rate (net=), so another\nconsole on this desk is in the same "

@@ -77,8 +77,7 @@ def pmem_lines(cells):
 
 
 def run_bench(board, title, secs, log):
-    board.pyexec("ws.exit()")
-    board.drain(0.8)
+    board.leave_cart()
     # Frame eaters OFF: perf_capture and the FPS chip are themselves a cost
     # (#68), and a verb timed with them on is not the shipping number.
     board.cmd("diag 0", wait_for="REMOTE diag")
@@ -232,7 +231,7 @@ def main(argv=None):
             with open(a.json, "w") as f:
                 json.dump(res, f, indent=2, sort_keys=True)
             print("  -> %s" % a.json)
-        board.pyexec("ws.exit()")
+        board.leave_cart()
     finally:
         board.close()
     return 0

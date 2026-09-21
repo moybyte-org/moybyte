@@ -170,8 +170,7 @@ def main():
 
     board = P4Board(port=a.port, board_dir=bdir, log=lambda s: None)
     if a.cart:
-        board.pyexec("ws.exit()")
-        board.drain(0.8)
+        board.leave_cart()
         if board.cmd("run %s" % a.cart, wait_for="REMOTE run", timeout=25.0) is None:
             sys.exit("board never acknowledged `run %s`" % a.cart)
         if "no cart match" in board.lines[-1]:
@@ -199,8 +198,7 @@ def main():
         # tests/test_tdeck_on_glass.py fail two tests that pass on their own.
         board.pyval("__import__('moy_prof').free()", timeout=25)
         if a.cart:
-            board.pyexec("ws.exit()")
-            board.drain(0.5)
+            board.leave_cart(settle=0.5)
     if not tally:
         sys.exit("no samples -- is moy_prof in this image?")
 

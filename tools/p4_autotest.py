@@ -530,6 +530,16 @@ class P4Board:
             raise RuntimeError("no STATE reply")
         return json.loads(line.split("STATE ", 1)[1])
 
+    def leave_cart(self, settle=0.8):
+        """End a running cart, and nothing else. `ws.exit()` pops whatever is
+        on top, and on a windowed board with no cart up that is the DESK --
+        which leaves an attach-only board (nothing resets it at open) reading
+        `desk` False for the next suite, six failures from one leftover
+        (Guition P4, 2026-09-21). So ask the board first."""
+        if self.state().get("cart"):
+            self.pyexec("ws.exit()")
+            self.drain(settle)
+
     def tap(self, x, y, settle=0.4):
         self.cmd("tap %d %d" % (x, y))
         self.drain(settle)
