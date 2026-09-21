@@ -43,3 +43,18 @@
 // tests/test_moy_image.py pins all five boards, because a board that is missed
 // fails at the moment a kid presses save and nowhere earlier.
 #define MICROPY_PY_DEFLATE_COMPRESS         (1)
+
+// The map-lookup cache, 128 -> 512 slots (384 bytes of .bss) -- the T-Deck's
+// mpconfigboard.h explains the mechanism and the REPR_C half the shared build
+// applies. A/B'd on this board's own glass, 2026-09-21, Brick Siege, diag on,
+// three runs a side:
+//
+//     stock                     fps 55.5   worst 54-56   mp_map_lookup 10-13%
+//     re-aimed index, 128       fps 55     worst 49-55                 12.8%
+//     re-aimed index, 512       fps 56.5   worst 55-56                 11.7%
+//
+// The median's step is inside this board's noise: Brick Siege leaves this
+// chip 38% idle, so a cheaper lookup mostly buys more idle. What carries it
+// is that the sampled share and the on-board lookup probe move exactly as on
+// the S3 boards, for 384 bytes on a 32MB board. Tables in #77.
+#define MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE   (512)

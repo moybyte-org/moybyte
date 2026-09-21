@@ -96,7 +96,10 @@ moybyte_patch_espnow_ring_race
 #     perf A/B ran the same day, paired on the same tree and flash cycle:
 #     Sky Run 58.0 -> 56.5, Sakura 51.0 -> 51.5 -- ~1.5fps on one cart,
 #     noise on the other. It would not have gotten a vote anyway.
+#     With it, the map-lookup cache index re-aimed for REPR_C (#77), paired
+#     with mpconfigboard.h's 512-slot table.
 moybyte_patch_repr_c
+moybyte_patch_map_cache_for_repr_c
 
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # The patch reserves MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM outside the Python

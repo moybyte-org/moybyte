@@ -225,6 +225,54 @@ alloc churn ⇒ GC collects ~2× as often. Its default was still an open product
 call when #217 retired the toggle — on the fast S3 build most carts sat near 60
 skip-OFF.
 
+### Shipped 2026-09-21 — the map-lookup cache, in two halves (#77)
+
+`moy_prof` priced `mp_map_lookup` at 10–20% of PC samples on every board,
+against one shared `uint8_t[128]` hint table serving every map in the system
+— a console running a shell, a WM and a cart at once. Two things were wrong
+with it, and they had to be fixed TOGETHER:
+
+- **The index was aimed for REPR_A.** `py/map.c` picks the slot as
+  `index >> 2` ("shift down by two to remove the tag bits"), which is REPR_A's
+  qstr layout. REPR_C — every console board — tags a qstr `(q << 4) | 6`, so
+  after `>> 2` two bits are constant for every qstr key and the 128-slot cache
+  offered attribute, global and method lookups **32 slots**; a gc-pointer key
+  reached the same 32. `moybyte_patch_map_cache_for_repr_c`
+  (`tools/esp32_build_lib.sh`) shifts by the tag width REPR_C uses; each
+  console build script calls it beside REPR_C, it refuses a tree that is not
+  REPR_C, and the REPR_A Zero declines it in writing.
+- **The table is too small for this workload.** `MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE`
+  goes 128 → 512 in each console board's `mpconfigboard.h` (384 bytes of
+  `.bss`), each with its own verdict beside it.
+
+Brick Siege, diag on, three runs a side, the same session per board;
+"share" is `mp_map_lookup`'s slice of `moy_prof`'s samples:
+
+| arm | T-Deck fps / worst / share | Guition S3 | P4 | Guition P4 |
+|---|---|---|---|---|
+| stock | 51.5 / 49–52 / 20.1% | 47 / 42–47 / 13–17% | 55.5 / 54–56 / 10–13% | 56 / 48–55 / — |
+| re-aimed index, 128 | 52 / 47–52 / 20.3% | 48 / 46–48 / 17.3% | 55 / 49–55 / 12.8% | — |
+| re-aimed index, 512 | **55 / 52–54 / 17.5%** | **49 / 46–48 / 15.1%** | **56.5 / 55–56 / 11.7%** | **56.5 / 53–56 / 13.9%** |
+| re-aimed index, 1024 | 54.5 / 48–54 / 18.2% | — | — | — |
+
+**Neither half alone moves the frame, and 1024 buys nothing over 512.** The
+re-aim alone is null on all three boards it was tried on (32 → 128 reachable
+slots), and the size alone is the same 128 by arithmetic; together they are
+the T-Deck's biggest single lever since `-O3`. The step shrinks across the
+table because the lookup is a smaller share of each board's frame: the S3
+boards spend 8–10% in `gc_alloc` where the T-Deck spends 1%, and the
+Waveshare P4 is 38% idle in this cart. On both P4s the median's step is inside
+the noise and the worst frame is what moves (the Guition P4's 48 → 53).
+
+The mechanism was checked directly rather than inferred:
+`tools/map_cache_probe.py` times instance-attribute lookups against the
+number of distinct names in the hot set, and shows a set that fits the
+reachable slots at ~0.55–0.7 µs a lookup on the S3s (0.34 on the P4) and one
+that overflows them at ~1.2 µs (0.66); at 512 the 160-name set no longer
+overflows. The `experiments/state_verb_cost`
+README had recorded exactly this thrash as an unproven hypothesis a month
+earlier.
+
 ### DECLINED 2026-09-21 — the frame-spill threshold (`VM_MAX_STATE_ON_STACK`)
 
 A MicroPython call whose frame exceeds `VM_MAX_STATE_ON_STACK` (stock: 11
@@ -262,7 +310,6 @@ never crashes, verified on glass at every threshold.
 
 | lever | targets | board | payoff | effort/risk |
 |---|---|---|---|---|
-| **map-lookup cache 128 → 512** | `mp_map_lookup`, which `moy_prof` prices at **11–20% of samples** on every board measured | all, Python tier | unmeasured; upstream claims 10–15% on attr-heavy code | one `#define`, 384 B RAM |
 | **dual-core: audio (+input) on core 1** | frees core 0 for logic+render | P4 (unwired), T-Deck (tried, reverted) | real parallelism | med |
 | **FPS chip off by default** | overhead | both | ~1ms + cleaner kid UX | trivial |
 

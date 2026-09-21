@@ -241,7 +241,13 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
     **float boxing** — REPR_A allocated per float result, and the resulting
     heap-wrap collect was the long-standing micro-stutter; the REPR_C build patch
     (unboxed 30-bit floats) fixed it. Banding is structurally gone (the SRAM-bounce
-    flush: panel DMA reads only internal SRAM).
+    flush: panel DMA reads only internal SRAM). A fourth landed 2026-09-21: the
+    **map-lookup cache**, whose index was aimed for REPR_A (a qstr key reached
+    32 of its 128 slots under REPR_C) and whose table was too small for a
+    shell + WM + cart — re-aimed in the shared build half and 512 slots per
+    console board, A/B'd on three boards. Neither half alone moves a frame and
+    1024 buys nothing over 512, so do not re-propose either on its own
+    (`docs/perf_native_gap_v1.md` §6).
   - Diagnostics, all gated behind `perf_capture`: `PERF` (`runtime/perf_line.py`,
     every board) and `device_diag`'s lines: `DRAWBRK`/`BATCH`/`DRAW2`/
     `LOOP`/`PUMP`/`I2CSTAT`/`WEBHOST`/`HITCH`. **`device_diag` is staged on

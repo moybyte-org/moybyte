@@ -187,6 +187,63 @@ def test_the_repr_C_patch_is_idempotent_on_a_warm_tree(tmp_path):
     assert r.returncode == 0 and f.read_text(encoding="utf-8") == before
 
 
+# -- the map-lookup cache index, a consequence of REPR_C ------------------------
+
+_MAP_C_STOCK = "#define MAP_CACHE_OFFSET(index) ((((uintptr_t)(index)) >> 2) % MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE)"
+
+
+def _map_c(tmp_path, line):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "map.c").write_text("// header\n%s\n" % line, encoding="utf-8")
+    return p / "map.c"
+
+
+def test_the_map_cache_patch_shifts_by_the_tag_width_repr_C_uses(tmp_path):
+    """REPR_C tags a qstr in four bits; the stock `>> 2` leaves two constant
+    bits in the slot index and a qstr key reaches 32 of 128 slots (#77)."""
+    _mpconfig(tmp_path, "#define MICROPY_OBJ_REPR    (MICROPY_OBJ_REPR_C)")
+    f = _map_c(tmp_path, _MAP_C_STOCK)
+    r = sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    body = f.read_text(encoding="utf-8")
+    assert ">> 4) % MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE" in body
+    assert ">> 2)" not in body
+
+
+def test_the_map_cache_patch_is_idempotent_on_a_warm_tree(tmp_path):
+    _mpconfig(tmp_path, "#define MICROPY_OBJ_REPR    (MICROPY_OBJ_REPR_C)")
+    f = _map_c(tmp_path, _MAP_C_STOCK)
+    sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    once = f.read_text(encoding="utf-8")
+    r = sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+
+
+def test_a_map_cache_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
+    """A silent no-op here is a REPR_C board back on 32 reachable slots with
+    nothing naming the cause -- the whole lever gone, and the frame A/B that
+    found it the only thing that could tell."""
+    _mpconfig(tmp_path, "#define MICROPY_OBJ_REPR    (MICROPY_OBJ_REPR_C)")
+    f = _map_c(tmp_path, "#define MAP_CACHE_OFFSET(index) (((index) >> 2) & 127)")
+    r = sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    assert r.returncode != 0
+    assert "map-cache shift patch did not apply" in r.stderr
+    assert ">> 2" in f.read_text(encoding="utf-8")
+
+
+def test_the_map_cache_patch_REFUSES_a_tree_that_is_not_repr_C(tmp_path):
+    """On REPR_A the stock index already reaches every slot and `>> 4` would
+    fold four qstrs into one: the patch is a consequence of REPR_C and must
+    not be takeable without it, which is what lets the Zero decline both."""
+    _mpconfig(tmp_path, "#define MICROPY_OBJ_REPR    (MICROPY_OBJ_REPR_A)")
+    f = _map_c(tmp_path, _MAP_C_STOCK)
+    r = sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    assert r.returncode != 0
+    assert "not REPR_C" in r.stderr
+    assert f.read_text(encoding="utf-8").count(_MAP_C_STOCK) == 1
+
+
 def test_a_repr_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
     """The guard is the point: a silent no-op is a board quietly running boxed
     floats again, which costs a 130-175ms GC hitch -- and, since the ESP-NOW

@@ -147,6 +147,40 @@ moybyte_patch_repr_c() {
   fi
 }
 
+# The map-lookup cache's slot index, re-aimed for REPR_C (#77). py/map.c
+# picks the slot as `index >> 2` -- "shift down by two to remove the tag
+# bits", which is REPR_A's qstr layout `(q << 2) | 2`. REPR_C tags a qstr as
+# `(q << 4) | 6` (py/obj.h), so after `>> 2` the two low bits are constant for
+# EVERY qstr key and the 128-slot cache offers attribute, global and method
+# lookups 32 slots; a gc-block pointer key (16-byte blocks) reaches the same
+# 32. Shifting by the width of the tag REPR_C actually uses gives all 128 back
+# for no RAM at all. Small-int keys fold 8-to-1 in exchange, which is a
+# false-negative hint that falls through to the normal probe, on the rarest
+# key kind. On its own this measured NULL on three boards; it pays together
+# with the 512-slot table each console board's mpconfigboard.h declares.
+#
+# A consequence of REPR_C and REFUSED without it: a REPR_A board (the Zero
+# declines REPR_C) is right at 2 and would be four times WORSE at 4, so this
+# checks that moybyte_patch_repr_c has run on the tree first. Same
+# guarded-sed shape, and the same reason the guard is the point. Reads
+# MPY_DIR.
+moybyte_patch_map_cache_for_repr_c() {
+  local f="${MPY_DIR}/py/map.c"
+  grep -q "MICROPY_OBJ_REPR_C" "${MPY_DIR}/ports/esp32/mpconfigport.h" || {
+    echo "!! map-cache shift refused -- this tree is not REPR_C (call moybyte_patch_repr_c first, or decline both)" >&2
+    exit 1
+  }
+  if ! grep -q "Moybyte: REPR_C tags a qstr" "${f}"; then
+    sed -i 's|^#define MAP_CACHE_OFFSET(index) ((((uintptr_t)(index)) >> 2) % MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE)$|#define MAP_CACHE_OFFSET(index) ((((uintptr_t)(index)) >> 4) % MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE) /* Moybyte: REPR_C tags a qstr in 4 bits, not 2 */|' \
+      "${f}"
+    grep -q "Moybyte: REPR_C tags a qstr" "${f}" || {
+      echo "!! map-cache shift patch did not apply -- py/map.c's MAP_CACHE_OFFSET line changed shape" >&2
+      exit 1
+    }
+    echo "== patched py/map.c: MAP_CACHE_OFFSET >> 4 for REPR_C"
+  fi
+}
+
 # Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
 # on demand by DOUBLING it, from the same ESP heap the Lua VM, the panel DMA
 # and the layer pool allocate from, and never gives an area back. On an 8MB

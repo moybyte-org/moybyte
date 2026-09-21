@@ -67,6 +67,12 @@ moybyte_setup_idf esp32s3 \
 #    board with the least on-glass coverage in the fleet, for no measurable win.
 #    Revisit the day something on this flash executes a cart.
 #
+# DECLINED moybyte_patch_map_cache_for_repr_c -- the map-lookup cache index
+#    re-aim (#77) is a consequence of REPR_C: it shifts by the tag width REPR_C
+#    uses, and on this REPR_A image the stock index already reaches every slot,
+#    so taking it would fold four qstrs into one. The patch refuses a tree
+#    without REPR_C anyway. Goes with REPR_C the day this board takes that.
+#
 # DECLINED moybyte_patch_psram_retune -- the #169 vendor-gate patch. This is
 #    NOT a "no carts" argument, because the PSRAM is real (8MB octal, and the
 #    heap and the lwIP buffers both live in it). It is a dependency argument:

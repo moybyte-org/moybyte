@@ -65,8 +65,10 @@ moybyte_patch_espnow_ring_race
 
 # 2e) REPR_C -- FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT (the Waveshare's
 #     build.sh carries the measured argument): every board that can hold a
-#     link runs REPR_C.
+#     link runs REPR_C. With it, the map-lookup cache index re-aimed for
+#     REPR_C (#77), paired with mpconfigboard.h's 512-slot table.
 moybyte_patch_repr_c
+moybyte_patch_map_cache_for_repr_c
 
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # MOYBYTE_GC_SPLIT_RESERVE is set by the two S3 boards' mpconfigboard.h alone,

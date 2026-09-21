@@ -62,8 +62,11 @@ MACHINE_I2C_C="${MPY_DIR}/ports/esp32/machine_i2c.c"
 # 2a) moy_lcd needs esp_lcd in the main component's REQUIRES.
 moybyte_idf_component esp_lcd
 
-# 2b) REPR_C unboxed floats (#66) -- the chip-class lever this board measured.
+# 2b) REPR_C unboxed floats (#66) -- the chip-class lever this board measured --
+#     and the map-lookup cache index re-aimed for it (#77), which pays with the
+#     512-slot table mpconfigboard.h declares and measured null alone.
 moybyte_patch_repr_c
+moybyte_patch_map_cache_for_repr_c
 moybyte_patch_gc_split_reserve
 
 # 2c) Release the GIL across machine.I2C's blocking wait (#69).

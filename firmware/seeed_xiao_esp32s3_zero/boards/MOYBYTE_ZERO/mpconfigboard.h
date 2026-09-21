@@ -88,3 +88,10 @@
 // tests/test_moy_image.py pins all five boards, because a board that is missed
 // fails at the moment a kid presses save and nowhere earlier.
 #define MICROPY_PY_DEFLATE_COMPRESS         (1)
+
+// MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE stays at MicroPython's 128 here, and the
+// REPR_C index re-aim the console boards take (tools/esp32_build_lib.sh) is
+// declined in build.sh beside REPR_C: this board is REPR_A, where the stock
+// index already reaches every slot, and it runs no cart -- the lever was
+// measured on the console boards' cart frame (#77), which this board has not
+// got.

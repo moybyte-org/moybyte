@@ -41,12 +41,14 @@ make it small (removing the delta bookkeeping, the slice copies, the
 flush_batch call or the state-id call each collapse 5µs → <1µs; defaults and
 locals count are innocent; no hidden allocation — 32B/pair, just the slice
 objects). The shape is consistent with `MICROPY_OPT_MAP_LOOKUP_CACHE`
-(128-entry direct-mapped, keyed on (map, qstr)) thrashing when a hot
-function's attr/global working set collides — enabled at
-ROM_LEVEL_EXTRA_FEATURES, i.e. on the unix build AND both boards, but
-collision patterns depend on per-build qstr numbering, so nothing here
-transfers across builds. NOT proven (that would need a cache-off rebuild);
-recorded as a hypothesis with the evidence above.
+(a 128-entry direct-mapped hint table keyed on the KEY object alone and
+shared by every map) thrashing when a hot function's attr/global working set
+collides — enabled at ROM_LEVEL_EXTRA_FEATURES, i.e. on the unix build AND
+the boards, but collision patterns depend on per-build qstr numbering, so
+nothing here transfers across builds. Not proven here; the capacity half was
+later measured on glass (2026-09-21, #77): the console boards run the cache
+at 512 slots, and on REPR_C builds the stock index reached only 32 of the
+128 — see `moybyte_patch_map_cache_for_repr_c` in `tools/esp32_build_lib.sh`.
 
 Two consequences, both recorded so they don't get re-derived:
 
