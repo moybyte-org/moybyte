@@ -225,10 +225,44 @@ alloc churn ⇒ GC collects ~2× as often. Its default was still an open product
 call when #217 retired the toggle — on the fast S3 build most carts sat near 60
 skip-OFF.
 
+### DECLINED 2026-09-21 — the frame-spill threshold (`VM_MAX_STATE_ON_STACK`)
+
+A MicroPython call whose frame exceeds `VM_MAX_STATE_ON_STACK` (stock: 11
+machine words) heap-allocates that frame on EVERY call; #63 measured the
+spilling case at 1,536 µs against 9 µs warm and fixed the single hottest
+function by replacing it with a C callable, leaving the threshold itself
+untouched. It read like the biggest lever left. Four configs on T-Deck glass,
+Brick Siege (a Python cart), 3-6 runs each, and the wide-frame recursion
+ceiling bisected on the board:
+
+| threshold / VM task stack | median fps | worst | wide-frame recursion depth |
+|---|---|---|---|
+| **11w / 16KB (stock)** | 52 | 48–51 | 45 |
+| 16w / 16KB | 52.5 | 51.5 | — |
+| 32w / 16KB | **54** | 52 | **29** |
+| 32w / 24KB | 52.5 | 52 | 52 (−8KB internal SRAM) |
+| 64w / 16KB | 53.5 | 53 | — (indistinguishable from 32w) |
+
+**The gain and the cost are ONE mechanism, which is why no setting wins.** What
+buys the fps is frames moving from the gc heap to `alloca`; what eats the
+recursion ceiling is the same frames landing on the C stack. Raising the task
+stack to compensate buys the depth back (45 → 52) and gives the median gain
+straight back (54 → 52.5) — which is §9's *"more internal SRAM for the VM's
+DATA: slower — the drivers starve"* arriving again, since the VM task stack is
+VM data. Best case is 0.7ms/frame, at this repo's own sub-millisecond wall,
+against a third of the recursion headroom on a console children write code for.
+
+What survives in every variant is a smaller one: the WORST frame improves
+48–51 → 52. If this is ever re-opened it should be for tail latency, with new
+arithmetic, not for the median. Deep recursion is safe either way — it raises
+`RuntimeError: maximum recursion depth exceeded` from `mp_cstack_check()` and
+never crashes, verified on glass at every threshold.
+
 ### Open — API-preserving (do these first)
 
 | lever | targets | board | payoff | effort/risk |
 |---|---|---|---|---|
+| **map-lookup cache 128 → 512** | `mp_map_lookup`, which `moy_prof` prices at **11–20% of samples** on every board measured | all, Python tier | unmeasured; upstream claims 10–15% on attr-heavy code | one `#define`, 384 B RAM |
 | **dual-core: audio (+input) on core 1** | frees core 0 for logic+render | P4 (unwired), T-Deck (tried, reverted) | real parallelism | med |
 | **FPS chip off by default** | overhead | both | ~1ms + cleaner kid UX | trivial |
 
