@@ -72,6 +72,17 @@ paths:
   `tests/test_guition_p4_on_glass.py` (`MOYBYTE_GUITION_P4_PORT`, attach-only
   like the S3 boards — its USB serial is the SoC's), over
   `tools/p4_autotest.py`'s `P4Board` and the shared `tests/on_glass.py` fixture.
+  - **A gesture test that fails on a board you have been driving is a DIRTY
+    DESK before it is a regression.** The suites assume the launcher they were
+    written against; a leftover menu or a scrolled shelf makes a fling land on
+    a tile instead, and the failure reads as `['launcher', 'menu'] != launcher`
+    from whichever swipe ran first — the flush test, the pointer test, anything
+    that gestures. Check `state()["stack"]` and reboot the board before
+    believing it: on 2026-09-21 that answer cost two investigations, once on
+    each S3 board, both of which went 18/18 and 15/15 the moment the desk was
+    clean. A tool that runs a cart owes the desk back when it is done
+    (`tools/prof_sample.py` does it in a `finally`), and the same applies to
+    anything you drive by hand.
   - **A check every board can make belongs in `on_glass.py`, and then EVERY
     board makes it.** The suites keep their own `def test_*` so a failure names
     its board, but the body is shared, and which boards call it is not a taste
