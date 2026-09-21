@@ -140,3 +140,17 @@ CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
 # console, and the working reference (hosted's bleprph example) runs without
 # it -- one less delta from the proven arrangement.
 CONFIG_BT_HCI_LOG_DEBUG_EN=n
+
+# --- Power management: machinery with no user ------------------------------
+# IDF's default is n; MicroPython's sdkconfig.base turns it ON for every board.
+# Nothing in this repo touches the PM API -- no machine.freq() setter, no
+# lightsleep/deepsleep, no esp_pm_* call in device/ runtime/ native/ or the
+# board modules -- and neither PM_DFS_INIT_AUTO nor tickless idle is set, so no
+# frequency scaling ever happens. What remains is only the cost:
+# esp_pm_lock_acquire is a spinlock critical section, taken per SPI/SDMMC
+# transaction and, on a P4, per DPI frame.
+#
+# A/B'd frame-neutral on the T-Deck 2026-09-20 and taken on both S3 console
+# boards first. The one behaviour lost is machine.freq(x) as a SETTER, which
+# starts raising ValueError; the getter is unaffected.
+CONFIG_PM_ENABLE=
