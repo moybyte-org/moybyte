@@ -198,6 +198,12 @@ is the authority**; what bites:
   asserted — the S3 rules, not the Waveshare's CH343 rules). esptool needs no
   BOOT button. **Backlight GPIO23 is active-HIGH** (the Waveshare's is
   active-low).
+- **Build the two P4s one at a time.** Their builds share the ESP component
+  manager's git cache under `~/.cache/Espressif/ComponentManager`, and two
+  running at once race on its `index.lock`: the second fails in `submodules`
+  with "Unable to create index.lock: File exists" and nothing else wrong
+  (2026-09-22). A retry alone passes. The two S3 boards built side by side
+  the same evening without hitting it.
 - **The C6 runs Guition's factory slave**: BLE works, ESP-NOW has no shim to talk
   to (the link fails inert, by design) until the Waveshare's `c6_slave/` image is
   flashed to it.

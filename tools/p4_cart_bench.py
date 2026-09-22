@@ -165,16 +165,20 @@ def show(res):
     # k=400 on the same build -- two rungs, one of them wrong, and nothing in
     # the old output said which had been used. Comparing two builds means
     # checking they landed on the same k.
-    # A phase row is a FRAME TIME under the console's pacing (#217): the Bench
-    # twins declare no `fps`, so the tick model runs them at 30, and a phase
-    # cheaper than the 33ms tick reads the tick -- 30.3 / p50 33 on every
-    # board, whatever its floor. Only a row ABOVE the tick measures work, and
-    # `ray` at p50 ~0 is catch-up ticks landing back to back after a long
-    # draw, not the march. `uncap 1` forces draws and leaves logic at its
-    # rate, so it does not change this. The verb table above is the
-    # measurement; the rows below are the referee's frame under a kid's pace.
-    print("  (phases are frame times under the 30Hz pace: a row at p50 33 is the"
-          " tick, not a floor; only a row above it measures work)")
+    # The Bench twins declare `"fps": "free"` (2026-09-22), so a phase row is
+    # the frame the board actually runs. A twin whose manifest lost that line
+    # would be paced at 30 like any undeclared cart, and every phase cheaper
+    # than the tick would print 30.3 / p50 33 on every board -- which is what
+    # this tool reported for twelve days after #217, reading like a floor.
+    # So a run whose IDLE row sits on the tick is called out as the pace.
+    idle = res["phases"].get("idle", {})
+    try:
+        if abs(float(idle.get("p50", 0)) - 33.0) <= 1.0:
+            print("  (idle sits on the 30Hz tick: this cart ran PACED, so the phase"
+                  " rows are the pace, not floors -- is its manifest still"
+                  " `\"fps\": \"free\"`?)")
+    except (TypeError, ValueError):
+        pass
     for ph, f in sorted(res["phases"].items()):
         print("  phase %-9s %s" % (ph, " ".join("%s=%s" % kv for kv in sorted(f.items()))))
 
