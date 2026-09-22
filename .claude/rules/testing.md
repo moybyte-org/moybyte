@@ -94,6 +94,17 @@ paths:
     desk from its card, and a suite started at thirty seconds errors every
     test with "did not answer `state`" -- a third false dead board, not a
     second failure.
+  - **A Guition S3 whose Bench reads every compute phase 1.4-1.7x slow after
+    a measurement session is a board STATE too, not the image.** On
+    2026-09-23 two Bench runs on a freshly flashed image read logic 26 →
+    38ms and `pix` 6.8 → 13µs while Brick Siege and a `py` loop on the same
+    board read normal; `moy_prof` on that state showed the fold snapshot wait
+    and `time.sleep_ms` spinning on the system timer, and a hard reset
+    (`esptool --port /dev/ttyACMn --after hard_reset read_mac`, then the
+    minute of boot) restored the previous day's floors on the same image to
+    the microsecond. Reset and re-run before believing a Bench regression on
+    that board; the suspect fence is in `native/moy_flush/moy_fold.c` and is
+    a lead, not a finding (`docs/perf_native_gap_v1.md` §6).
   - **A check every board can make belongs in `on_glass.py`, and then EVERY
     board makes it.** The suites keep their own `def test_*` so a failure names
     its board, but the body is shared, and which boards call it is not a taste

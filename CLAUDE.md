@@ -247,7 +247,15 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
     shell + WM + cart — re-aimed in the shared build half and 512 slots per
     console board, A/B'd on three boards. Neither half alone moves a frame and
     1024 buys nothing over 512, so do not re-propose either on its own
-    (`docs/perf_native_gap_v1.md` §6).
+    (`docs/perf_native_gap_v1.md` §6). A fifth on 2026-09-23: **size-class
+    run hints for `gc_alloc`** — the stock allocator keeps one hint per heap
+    area that a multi-block allocation never advances, so every one re-walked
+    the holes below the live frontier; a hint per run length
+    (`tools/patch_gc_run_hints.py`, every console board) took `gc_alloc` out
+    of all four boards' profiles and un-idled the Waveshare P4. Allocations
+    over 32 blocks still walk, by design. What is left in `mp_map_lookup`
+    after both is the kid idiom's own miss-before-hit and is written up there
+    as a VM question, not a knob — do not re-price it as a cache size.
   - Diagnostics, all gated behind `perf_capture`: `PERF` (`runtime/perf_line.py`,
     every board) and `device_diag`'s lines: `DRAWBRK`/`BATCH`/`DRAW2`/
     `LOOP`/`PUMP`/`I2CSTAT`/`WEBHOST`/`HITCH`. **`device_diag` is staged on

@@ -67,6 +67,9 @@ moybyte_idf_component esp_lcd
 #     512-slot table mpconfigboard.h declares and measured null alone.
 moybyte_patch_repr_c
 moybyte_patch_map_cache_for_repr_c
+# Size-class run hints for gc_alloc (#66): every console board takes it; the
+# lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
+moybyte_patch_gc_run_hints
 moybyte_patch_gc_split_reserve
 
 # 2c) Release the GIL across machine.I2C's blocking wait (#69).

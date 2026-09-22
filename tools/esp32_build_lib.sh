@@ -181,6 +181,17 @@ moybyte_patch_map_cache_for_repr_c() {
   fi
 }
 
+# Size-class free-run hints for gc_alloc (#66). The stock allocator keeps one
+# hint per heap area and a multi-block allocation never advances it, so each
+# one re-walks every hole below the live frontier that is too small for it --
+# 100-800 us a call on the S3 boards with a cart up. tools/patch_gc_run_hints.py
+# is the patch and its own documentation: all-or-nothing, idempotent, and it
+# refuses a tree whose lines changed shape. Independent of REPR_C.
+moybyte_patch_gc_run_hints() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_run_hints.py" "${MPY_DIR}" || exit 1
+}
+
 # Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
 # on demand by DOUBLING it, from the same ESP heap the Lua VM, the panel DMA
 # and the layer pool allocate from, and never gives an area back. On an 8MB

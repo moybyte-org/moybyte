@@ -244,6 +244,133 @@ def test_the_map_cache_patch_REFUSES_a_tree_that_is_not_repr_C(tmp_path):
     assert f.read_text(encoding="utf-8").count(_MAP_C_STOCK) == 1
 
 
+# -- size-class run hints for gc_alloc -----------------------------------------
+#
+# The stock lines tools/patch_gc_run_hints.py anchors on, in stock order, so a
+# shape change upstream turns red here before it turns into a board build that
+# quietly ships the stock allocator.
+
+_GC_C_STOCK = """\
+// gc.c
+    area->gc_last_free_atb_index = 0;
+    area->gc_last_used_block = 0;
+
+void gc_collect_end(void) {
+    for (mp_state_mem_area_t *area = &MP_STATE_MEM(area); area != NULL; area = NEXT_AREA(area)) {
+        area->gc_last_free_atb_index = 0;
+    }
+}
+
+void *gc_alloc(size_t n_bytes, unsigned int alloc_flags) {
+            for (i = area->gc_last_free_atb_index; i < area->gc_alloc_table_byte_len; i++) {
+            }
+            #if MICROPY_GC_SPLIT_HEAP
+            if (n_blocks == 1) {
+                area->gc_last_free_atb_index = (i + 1) / BLOCKS_PER_ATB; // or (size_t)-1
+            }
+            #endif
+found:
+    if (n_free == 1) {
+        #if MICROPY_GC_SPLIT_HEAP
+        MP_STATE_MEM(gc_last_free_area) = area;
+        #endif
+        area->gc_last_free_atb_index = (i + 1) / BLOCKS_PER_ATB;
+    }
+}
+
+void gc_free(void *ptr) {
+    // free head and all of its tail blocks
+    do {
+        ATB_ANY_TO_FREE(area, block);
+        block += 1;
+    } while (ATB_GET_KIND(area, block) == AT_TAIL);
+}
+
+void *gc_realloc(void *ptr_in, size_t n_bytes, bool allow_move) {
+        for (size_t bl = block + new_blocks, count = n_blocks - new_blocks; count > 0; bl++, count--) {
+            ATB_ANY_TO_FREE(area, bl);
+        }
+}
+"""
+
+_MPSTATE_H_STOCK = """\
+// mpstate.h
+typedef struct _mp_state_mem_area_t {
+    size_t gc_last_free_atb_index;
+    size_t gc_last_used_block; // The block ID of the highest block allocated in the area
+} mp_state_mem_area_t;
+"""
+
+
+def _gc_tree(tmp_path, gc_c=_GC_C_STOCK, mpstate_h=_MPSTATE_H_STOCK):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "gc.c").write_text(gc_c, encoding="utf-8")
+    (p / "mpstate.h").write_text(mpstate_h, encoding="utf-8")
+    return p / "gc.c", p / "mpstate.h"
+
+
+def _run_hints(tmp_path):
+    return sh("moybyte_patch_gc_run_hints", MPY_DIR=str(tmp_path),
+              REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def _both(gc_c, mpstate_h):
+    return gc_c.read_text(encoding="utf-8"), mpstate_h.read_text(encoding="utf-8")
+
+
+def test_the_run_hints_patch_lands_every_hunk_in_both_files(tmp_path):
+    """The field, its two resets, the scan start, the two raises, the two
+    lowers, and the byte-index fix on the area-full marker: each is a hunk,
+    and a tree missing any one of them is a different allocator."""
+    gc_c, mpstate_h = _gc_tree(tmp_path)
+    r = _run_hints(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c, h = _both(gc_c, mpstate_h)
+    assert "#define MOYBYTE_GC_RUN_CLASSES (31)" in h
+    assert "size_t gc_last_free_run_index[MOYBYTE_GC_RUN_CLASSES];" in h
+    assert "for (i = MOYBYTE_GC_SCAN_START(area, n_blocks);" in c
+    assert c.count("memset(area->gc_last_free_run_index, 0,") == 2
+    assert c.count("moybyte_gc_run_hints_raise(area, ") == 2
+    assert c.count("moybyte_gc_run_hints_lower(area, ") == 2
+    assert "static void moybyte_gc_run_hints_raise(" in c
+    assert "static void moybyte_gc_run_hints_lower(" in c
+    assert "area->gc_last_free_atb_index = i; // Moybyte" in c
+    assert "// or (size_t)-1" not in c
+
+
+def test_the_run_hints_patch_is_idempotent_on_a_warm_tree(tmp_path):
+    gc_c, mpstate_h = _gc_tree(tmp_path)
+    assert _run_hints(tmp_path).returncode == 0
+    once = _both(gc_c, mpstate_h)
+    r = _run_hints(tmp_path)
+    assert r.returncode == 0 and _both(gc_c, mpstate_h) == once
+
+
+def test_a_run_hints_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    """One hunk missing would be a tree with the helpers but not the scan
+    that reads them: nothing is written to either file, the exit names the
+    hunk, and the board build stops there."""
+    gc_c, mpstate_h = _gc_tree(tmp_path, gc_c=_GC_C_STOCK.replace(
+        "for (i = area->gc_last_free_atb_index; i < area->gc_alloc_table_byte_len; i++) {",
+        "for (i = area->gc_last_free_atb_index; i < len; i++) {"))
+    before = _both(gc_c, mpstate_h)
+    r = _run_hints(tmp_path)
+    assert r.returncode != 0
+    assert "did not apply" in r.stderr and "scan start" in r.stderr
+    assert _both(gc_c, mpstate_h) == before
+
+
+def test_a_half_applied_run_hints_tree_is_REFUSED(tmp_path):
+    """A header carrying the field beside a stock gc.c is a build that
+    compiles and never reads it; it is refused rather than patched over."""
+    gc_c, mpstate_h = _gc_tree(tmp_path)
+    assert _run_hints(tmp_path).returncode == 0
+    _gc_tree(tmp_path, mpstate_h=mpstate_h.read_text(encoding="utf-8"))
+    r = _run_hints(tmp_path)
+    assert r.returncode != 0 and "half-applied" in r.stderr
+
+
 def test_a_repr_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
     """The guard is the point: a silent no-op is a board quietly running boxed
     floats again, which costs a 130-175ms GC hitch -- and, since the ESP-NOW

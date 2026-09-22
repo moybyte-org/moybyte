@@ -60,6 +60,9 @@ moybyte_setup_idf esp32s3 \
 #     re-aimed for it (#77), paired with mpconfigboard.h's 512-slot table.
 moybyte_patch_repr_c
 moybyte_patch_map_cache_for_repr_c
+# Size-class run hints for gc_alloc (#66): every console board takes it; the
+# lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
+moybyte_patch_gc_run_hints
 moybyte_patch_gc_split_reserve
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.

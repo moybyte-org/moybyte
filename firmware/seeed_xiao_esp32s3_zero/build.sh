@@ -73,6 +73,12 @@ moybyte_setup_idf esp32s3 \
 #    so taking it would fold four qstrs into one. The patch refuses a tree
 #    without REPR_C anyway. Goes with REPR_C the day this board takes that.
 #
+# DECLINED moybyte_patch_gc_run_hints -- size-class free-run hints for gc_alloc
+#    (#66). The walk they remove is paid per multi-block allocation inside a
+#    frame loop, and this board has no frame loop: its webhost allocates per
+#    request. Taken the day something here allocates at a rate, with the
+#    rebuild and the boot check that costs.
+#
 # DECLINED moybyte_patch_psram_retune -- the #169 vendor-gate patch. This is
 #    NOT a "no carts" argument, because the PSRAM is real (8MB octal, and the
 #    heap and the lwIP buffers both live in it). It is a dependency argument:

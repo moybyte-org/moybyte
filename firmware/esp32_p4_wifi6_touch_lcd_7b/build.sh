@@ -100,6 +100,9 @@ moybyte_patch_espnow_ring_race
 #     with mpconfigboard.h's 512-slot table.
 moybyte_patch_repr_c
 moybyte_patch_map_cache_for_repr_c
+# Size-class run hints for gc_alloc (#66): every console board takes it; the
+# lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
+moybyte_patch_gc_run_hints
 
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # The patch reserves MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM outside the Python
