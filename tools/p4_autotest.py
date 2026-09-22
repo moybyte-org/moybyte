@@ -531,14 +531,38 @@ class P4Board:
         return json.loads(line.split("STATE ", 1)[1])
 
     def leave_cart(self, settle=0.8):
-        """End a running cart, and nothing else. `ws.exit()` pops whatever is
-        on top, and on a windowed board with no cart up that is the DESK --
-        which leaves an attach-only board (nothing resets it at open) reading
-        `desk` False for the next suite, six failures from one leftover
-        (Guition P4, 2026-09-21). So ask the board first."""
-        if self.state().get("cart"):
-            self.pyexec("ws.exit()")
-            self.drain(settle)
+        """End a running cart and leave the board where it was found. On the
+        windowed tier `ws.exit()` from a cart pops through to the bare
+        launcher and the DESK goes with it (measured on the Guition P4,
+        2026-09-22: `['launcher', 'desk', 'desktop']` -> `['launcher']`), so an
+        attach-only board -- nothing resets it at open -- then reads `desk`
+        False on every test of its suite, six failures from one leftover. So:
+        exit only when a cart is up, and reopen the desk if there was one.
+        `desk` is None on a fullscreen tier, which is the "no desk to put
+        back" answer and never a 0."""
+        st = self.state()
+        if not st.get("cart"):
+            return
+        had_desk = st.get("desk")
+        self.pyexec("ws.exit()")
+        # The close lands over a few frames, so poll the stack rather than
+        # sleep: a fixed wait once read the cart as still up, put no desk
+        # back, and the desk went a frame later (2026-09-22).
+        st = self._settle(lambda s: not s.get("cart"), settle)
+        if had_desk and not st.get("desk"):
+            self.pyexec("ws.open_desk()")
+            self._settle(lambda s: s.get("desk"), settle)
+
+    def _settle(self, done, settle, timeout=6.0):
+        """Poll `state` until `done(state)` or `timeout`, then one more
+        `settle` of quiet so the next command lands on a stable desk."""
+        end = time.time() + timeout
+        st = self.state()
+        while not done(st) and time.time() < end:
+            self.drain(0.25)
+            st = self.state()
+        self.drain(settle)
+        return st
 
     def tap(self, x, y, settle=0.4):
         self.cmd("tap %d %d" % (x, y))

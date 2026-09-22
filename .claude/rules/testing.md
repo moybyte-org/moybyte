@@ -77,11 +77,14 @@ paths:
     written against; a leftover menu or a scrolled shelf makes a fling land on
     a tile instead, and the failure reads as `['launcher', 'menu'] != launcher`
     from whichever swipe ran first — the flush test, the pointer test, anything
-    that gestures. The windowed boards have a second shape: `ws.exit()` with no
-    cart up pops the DESK itself, and every test then reads `desk` False and
-    `order` empty — six failures from one leftover, on the attach-only Guition
-    P4 where nothing resets the board at open (the Waveshare's fixture does,
-    which is why the same sequence passes there). Check `state()["stack"]` and reboot the board before
+    that gestures. The windowed boards have a second shape: closing a cart with
+    `ws.exit()` pops through to the bare launcher and the DESK goes with it
+    (`['launcher', 'desk', 'desktop']` → `['launcher']`, measured 2026-09-22),
+    and every test then reads `desk` False and `order` empty — six failures
+    from one leftover, on the attach-only Guition P4 where nothing resets the
+    board at open (the Waveshare's fixture does, which is why the same
+    sequence passes there). `P4Board.leave_cart()` reopens the desk it found
+    for that reason. Check `state()["stack"]` and reboot the board before
     believing it: on 2026-09-21 that answer cost two investigations, once on
     each S3 board, both of which went 18/18 and 15/15 the moment the desk was
     clean. A tool that runs a cart owes the desk back when it is done
