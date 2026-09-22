@@ -165,6 +165,16 @@ def show(res):
     # k=400 on the same build -- two rungs, one of them wrong, and nothing in
     # the old output said which had been used. Comparing two builds means
     # checking they landed on the same k.
+    # A phase row is a FRAME TIME under the console's pacing (#217): the Bench
+    # twins declare no `fps`, so the tick model runs them at 30, and a phase
+    # cheaper than the 33ms tick reads the tick -- 30.3 / p50 33 on every
+    # board, whatever its floor. Only a row ABOVE the tick measures work, and
+    # `ray` at p50 ~0 is catch-up ticks landing back to back after a long
+    # draw, not the march. `uncap 1` forces draws and leaves logic at its
+    # rate, so it does not change this. The verb table above is the
+    # measurement; the rows below are the referee's frame under a kid's pace.
+    print("  (phases are frame times under the 30Hz pace: a row at p50 33 is the"
+          " tick, not a floor; only a row above it measures work)")
     for ph, f in sorted(res["phases"].items()):
         print("  phase %-9s %s" % (ph, " ".join("%s=%s" % kv for kv in sorted(f.items()))))
 
