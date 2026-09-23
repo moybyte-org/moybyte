@@ -102,9 +102,17 @@ paths:
     and `time.sleep_ms` spinning on the system timer, and a hard reset
     (`esptool --port /dev/ttyACMn --after hard_reset read_mac`, then the
     minute of boot) restored the previous day's floors on the same image to
-    the microsecond. Reset and re-run before believing a Bench regression on
-    that board; the suspect fence is in `native/moy_flush/moy_fold.c` and is
-    a lead, not a finding (`docs/perf_native_gap_v1.md` §6).
+    the microsecond. It recurred the same day after a second profiler pass.
+    Reset and re-run before believing a Bench regression on that board, and
+    READ THE COUNTER FIRST while it is still slow: `py
+    __import__('moy_axs').snap_stats()` is `(snaps, snaps_sync, timeouts,
+    wait_us)`, and the suspect is `native/moy_flush/moy_fold.c`'s snap-dead
+    fence -- one snapshot copy that times out retires the DMA engine for the
+    session and every later snapshot is a CPU memcpy, which would read as
+    `timeouts` > 0 with `snaps_sync` climbing per frame (a clean session
+    reads `snaps_sync` 0 and `timeouts` 0 after a whole Bench). Not yet read
+    in the slow state, so it is a lead, not a finding
+    (`docs/perf_native_gap_v1.md` §6).
   - **A check every board can make belongs in `on_glass.py`, and then EVERY
     board makes it.** The suites keep their own `def test_*` so a failure names
     its board, but the body is shared, and which boards call it is not a taste

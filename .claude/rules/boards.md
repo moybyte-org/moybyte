@@ -198,6 +198,15 @@ is the authority**; what bites:
   asserted — the S3 rules, not the Waveshare's CH343 rules). esptool needs no
   BOOT button. **Backlight GPIO23 is active-HIGH** (the Waveshare's is
   active-low).
+- **Never reset ONE patched file in a board's `.build/micropython` by hand.**
+  The guarded patchers are per file, but `moybyte_patch_native_code_free`
+  applies with `patch(1)` to the esp32 port's `main.c` AND its
+  `mpconfigport.h` as one unit and keys its "already applied" check on the
+  header: a `git checkout` of the header alone (2026-09-23, undoing an A/B)
+  left `main.c` patched, the next build saw "Reversed (or previously applied)
+  patch detected", left a `.rej`, and stopped before REPR_C and the rest
+  re-applied. Reset the two together, delete any `.rej`, and rebuild: every
+  patcher is idempotent from stock.
 - **Build the two P4s one at a time.** Their builds share the ESP component
   manager's git cache under `~/.cache/Espressif/ComponentManager`, and two
   running at once race on its `index.lock`: the second fails in `submodules`

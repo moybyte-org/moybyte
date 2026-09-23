@@ -377,15 +377,12 @@ floor equal to the 2026-09-22 run, every verb inside its spread — which
 says the Bench's phases were never allocator-bound and the lever is a
 game-shaped one.
 
-What the P4 profiles show now, and the next lever they name: with `gc_alloc`
-gone, `vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` hold
-19% of the Waveshare's samples and 17% of the Guition P4's, FreeRTOS SMP
-critical sections that the S3 profiles do not show at all. The P4 records no
-caller (`mepc` is one frame deep), so who takes them is unproven; the
-candidate is the GIL round-robin (`MICROPY_PY_THREAD_GIL_VM_DIVISOR`, stock
-32: every 32 bytecodes the VM gives and retakes a FreeRTOS mutex, a spinlock
-pair on RISC-V SMP) on an image where no Python thread exists to hand to. It
-is in the open table below with that price, untested.
+What the P4 profiles show now: with `gc_alloc` gone,
+`vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` hold 19% of
+the Waveshare's samples and 17% of the Guition P4's, FreeRTOS SMP critical
+sections that the S3 profiles do not show at all. The P4 records no caller
+(`mepc` is one frame deep), so who takes them is unproven; the GIL
+round-robin was the candidate and is DECLINED below.
 
 A false reading, recorded so it is not re-investigated: the Guition S3's
 first two Bench runs after the flash read every compute phase 1.4–1.7x slow
@@ -394,9 +391,39 @@ the probe read normal; `moy_prof` on that state put 9% of samples in
 `moy_fold_snap_wait` and `time.sleep_ms` spinning on the system timer. A
 hard reset (`esptool --after hard_reset read_mac`) restored the 2026-09-22
 floors to the microsecond on the same image, and a stock rebuild was never
-needed. The suspect is the fold's snap-dead fence in `moy_fold.c` — a copy
-that once times out turns every later snapshot into a CPU memcpy until
-reboot — and it is a lead, not a finding.
+needed. It recurred the same day after a second profiler pass and cleared
+the same way. The suspect is the fold's snap-dead fence in `moy_fold.c` — a
+copy that once times out turns every later snapshot into a CPU memcpy until
+reboot — and `.claude/rules/testing.md` names the counter to read while it
+is slow; it is a lead, not a finding.
+
+### DECLINED 2026-09-23 — the GIL round-robin divisor (`MICROPY_PY_THREAD_GIL_VM_DIVISOR`)
+
+The VM gives and retakes the GIL every 32 branches so another Python thread
+can run (`py/vm.c`'s `pending_exception_check`), a FreeRTOS mutex pair each
+time. No Python thread exists on either P4, so the bounce buys nothing
+there, and it was the named candidate for the 17–19% of P4 samples in SMP
+critical-section exits. The port defines the divisor unguarded, so the A/B
+took a guard patch (`#ifndef` around the port's line) plus 1024 in each
+board's `mpconfigboard.h`; same boards, same day, against dev `f4180be`,
+Brick Siege diag on three runs a side, and the Bench referee for the
+interpreter-bound phases:
+
+| board | fps / worst, 32 → 1024 | critical-section share | Bench float / logic / table ms |
+|---|---|---|---|
+| Waveshare P4 | 62.5 / 62 → 62.5–63 / 62 | 19.0% → 18.8% | 33 / 19 / 23 → 33 / 19 / 23 |
+| T-Deck | 55 / 54–56 → 53.5–56.5 / 53–54 | none either side | 43 / 23 / 26 → 43 / 23 / 27 |
+| Guition S3 | 50 / 48–49 → 50.5–51.5 / 50 | none either side | 45 / 26 / 29 → 45 / 26 / 29 |
+| Guition P4 | not measured — its silicon twin was null on all three meters | | |
+
+**Null on every meter on every board**, so the guard patch and the values
+were removed the same day and nothing of it ships. What it settles: the P4's
+critical-section share is NOT the GIL bounce. `vPortClearInterruptMaskFromISR`
+is the ISR-side exit, which points at interrupt handlers — the DSI vsync,
+the PPA and GDMA completions, the I2S audio DMA, and the profiler's own
+GPTimer — rather than the VM, and the next step is to count interrupts per
+frame by source, not to re-price a VM knob. Do not re-propose the divisor
+without a caller in hand.
 
 ### DECLINED 2026-09-21 — the frame-spill threshold (`VM_MAX_STATE_ON_STACK`)
 
@@ -437,7 +464,7 @@ never crashes, verified on glass at every threshold.
 |---|---|---|---|---|
 | **dual-core: audio (+input) on core 1** | frees core 0 for logic+render | P4 (unwired), T-Deck (tried, reverted) | real parallelism | med |
 | **FPS chip off by default** | overhead | both | ~1ms + cleaner kid UX | trivial |
-| **P4 critical sections** — `vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` are 17–19% of a Brick Siege profile on both P4s once `gc_alloc` is gone (§6, 2026-09-23), FreeRTOS SMP spinlock pairs the S3 profiles never show. Caller unproven (the P4 records one frame). Candidate: the GIL round-robin, `MICROPY_PY_THREAD_GIL_VM_DIVISOR` (stock 32) on an image with no Python thread to hand to | dispatch | both P4s | up to ~3ms of a 16ms frame if it is the GIL | one `mpconfigboard.h` line + an A/B; per-board verdict, the S3 does not have the tax |
+| **P4 critical sections** — `vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` are 17–19% of a Brick Siege profile on both P4s once `gc_alloc` is gone (§6, 2026-09-23), FreeRTOS SMP spinlock pairs the S3 profiles never show. Caller unproven (the P4 records one frame). The GIL round-robin divisor was the candidate and measured NULL on every meter (§6, DECLINED 2026-09-23); the `FromISR` exit names interrupt handlers (DSI vsync, PPA/GDMA completions, I2S audio DMA, the profiler's own timer), so the next step is to count interrupts per frame by source | dispatch | both P4s | up to ~3ms of a 16ms frame if a source is found | interrupt accounting first; no knob until a caller is in hand |
 
 **Render-overlap is CLOSED, not open** (it sat in the table above until
 2026-08-15, which is how a 2026-08-09 perf hunt came to spend its last lead
