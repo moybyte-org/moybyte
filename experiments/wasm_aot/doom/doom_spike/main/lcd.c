@@ -175,3 +175,27 @@ void lcd_blit_indexed(const uint8_t *frame, const uint32_t *pal)
 }
 
 #endif /* CONFIG_IDF_TARGET_ESP32S3 */
+
+void lcd_read_state(uint8_t *madctl, uint8_t *colmod, uint8_t *im)
+{
+    *madctl = *colmod = *im = 0xff;
+    esp_lcd_panel_io_rx_param(s_io, 0x0B, madctl, 1);
+    esp_lcd_panel_io_rx_param(s_io, 0x0C, colmod, 1);
+    esp_lcd_panel_io_rx_param(s_io, 0x0D, im, 1);
+}
+
+void lcd_reassert_mode(void)
+{
+    /* everything the picture's format depends on, minus reset and SLPOUT:
+     * MADCTL, COLMOD, the register table (NORON, porch, gamma, ...), INVON,
+     * DISPON. Cheap: a few dozen bytes of parameters. */
+    uint8_t madctl = 0x68, colmod = 0x55;
+    esp_lcd_panel_io_tx_param(s_io, 0x36, &madctl, 1);
+    esp_lcd_panel_io_tx_param(s_io, 0x3A, &colmod, 1);
+    for (size_t i = 0; i < sizeof(INIT) / sizeof(INIT[0]); i++) {
+        const lcd_cmd_t *c = &INIT[i];
+        esp_lcd_panel_io_tx_param(s_io, c->cmd, c->len ? c->data : NULL, c->len);
+    }
+    esp_lcd_panel_io_tx_param(s_io, 0x21, NULL, 0);     /* INVON */
+    esp_lcd_panel_io_tx_param(s_io, 0x29, NULL, 0);     /* DISPON */
+}

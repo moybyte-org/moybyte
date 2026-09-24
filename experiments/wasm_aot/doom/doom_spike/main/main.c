@@ -86,6 +86,20 @@ static void frame_diag(wasm_exec_env_t env, const uint8_t *frame, const uint32_t
         printf("FRAMECRC gametic=%d crc=%08x\n", tic, (unsigned)c);
     }
     extern volatile int g_dump_request;
+    /* the panel's own account of its mode registers, every ~2 s and on 'o':
+     * static that persists across frames is a panel-state question */
+    /* This panel answers register reads with 0xff (no SDO), so the probe is
+     * blind; the experiment is the re-assert itself: every ~2 s the mode
+     * registers and the init table go out again. Static that is panel-state
+     * drift then heals within 2 s; static that survives is not. */
+    if (g_dump_request || (s_draws % 40 == 0)) {
+        lcd_reassert_mode();
+        if (g_dump_request) {
+            uint8_t madctl, colmod, im;
+            lcd_read_state(&madctl, &colmod, &im);
+            printf("PANEL reasserted (readback madctl=%02x colmod=%02x im=%02x)\n", madctl, colmod, im);
+        }
+    }
     if ((s_draws && s_draws % DUMP_EVERY == 0) || g_dump_request) {
         g_dump_request = 0;
         printf("FRAMECRC gametic=%d crc=%08x (dump)\n", tic,
