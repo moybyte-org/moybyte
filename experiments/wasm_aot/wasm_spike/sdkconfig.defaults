@@ -13,3 +13,15 @@ CONFIG_WAMR_ENABLE_AOT=y
 CONFIG_WAMR_ENABLE_REF_TYPES=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_spike.csv"
+# The console's P4 build runs without the IRAM/DRAM PMP split (MicroPython's
+# base config); with the split on, the P4 reports no exec-capable heap at all.
+CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n
+# PSRAM as the console's P4 build has it (hex, 200 MHz, in the heap), so an
+# executable mapping can come from PSRAM; XIP_FROM_PSRAM stays OFF -- that is
+# the one PMP layout that gives the PSRAM heap RW without X.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MEMTEST=
+# CONFIG_SPIRAM_XIP_FROM_PSRAM is not set

@@ -8,8 +8,10 @@ import time
 
 import serial
 
-PORT = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyACM0"
-SECS = float(sys.argv[2]) if len(sys.argv) > 2 else 60
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+PORT = ARGS[0] if ARGS else "/dev/ttyACM0"
+SECS = float(ARGS[1]) if len(ARGS) > 1 else 60
+PULSE = "--pulse" in sys.argv    # the P4's CH343: DTR low, pulse RTS to reset (board.toml [serial])
 
 
 def main():
@@ -22,6 +24,11 @@ def main():
             time.sleep(0.2)
     if not ser:
         raise SystemExit("port never came back")
+    if PULSE:
+        ser.setDTR(False)
+        ser.setRTS(True)
+        time.sleep(0.1)
+        ser.setRTS(False)
     deadline = time.time() + SECS
     while time.time() < deadline:
         raw = ser.readline()

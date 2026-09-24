@@ -6,6 +6,14 @@
  * 20 rows via two internal-SRAM DMA bounce buffers -- the panel DMA only
  * ever reads internal SRAM (the #66 SRAM-bounce design).
  */
+#include "sdkconfig.h"
+#if !CONFIG_IDF_TARGET_ESP32S3
+/* Headless on any other target (the P4's glass is the DSI tier, not a spike's
+ * concern): the blit is counted by the caller and dropped here. */
+#include "lcd.h"
+void lcd_init(void) {}
+void lcd_blit_indexed(const uint8_t *frame, const uint32_t *pal) { (void)frame; (void)pal; }
+#else
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -165,3 +173,5 @@ void lcd_blit_indexed(const uint8_t *frame, const uint32_t *pal)
         esp_lcd_panel_draw_bitmap(s_panel, 0, y, W, y + BAND_ROWS, dst);
     }
 }
+
+#endif /* CONFIG_IDF_TARGET_ESP32S3 */

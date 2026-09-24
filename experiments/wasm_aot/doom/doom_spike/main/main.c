@@ -27,7 +27,9 @@
 
 /* From the patched WAMR esp-idf platform (toolchain/patch_wamr_s3.py): the
  * header only declares it inside the component's own build. */
+#if CONFIG_IDF_TARGET_ESP32S3
 void os_register_xip_window(const void *ibus, const void *dbus, size_t size);
+#endif
 
 #include "lcd.h"
 #include "input.h"
@@ -355,9 +357,14 @@ static void *doom_main(void *arg)
         /* One MMU table serves both buses on the S3, so mapping the same
          * pages twice hands back one address: the instruction alias of a
          * DATA mapping is a fixed offset away. */
+#if CONFIG_IDF_TARGET_ESP32S3
         const uint8_t *inst = data_ptr + (SOC_IROM_LOW - SOC_DROM_LOW);
         os_register_xip_window(inst, data_ptr, aot_len);
         printf("DOOM xip inst=%p data=%p\n", inst, data_ptr);
+#else
+        /* the P4's bus is unified: the DATA mapping is fetchable as it is */
+        printf("DOOM xip at %p (unified bus)\n", data_ptr);
+#endif
     }
     printf("DOOM module mode=%s bytes=%u at %p\n", mode, (unsigned)aot_len, buf);
 

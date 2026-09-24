@@ -1,4 +1,4 @@
-"""Patch the vendored WAMR clone for AOT on the ESP32-S3 (#158, 2026-09-24).
+"""Patch the vendored WAMR clone for AOT on the ESP32-S3 and ESP32-P4 (#158, 2026-09-24).
 
 On the S3 the flash and PSRAM MMU serves both buses from one table, so code
 in PSRAM at data address D is fetched at D + 0x06000000 -- but the
@@ -105,4 +105,43 @@ patch("core/iwasm/aot/arch/aot_reloc_xtensa.c",
       '        return false;' % MARK, must=False)
 patch("core/iwasm/aot/arch/aot_reloc_xtensa.c",
       '#include "aot_reloc.h"', '#include <stdio.h>\n#include "aot_reloc.h"', must=False)
+# 6) ESP32-P4: PSRAM is executable by default -- IDF's cpu_region_protect.c
+#    gives "External RAM" no PMP entry at all ("default all permissions"), the
+#    only region that is (the flash rodata mapping is R). What stops WAMR is
+#    the heap: MALLOC_CAP_EXEC names internal L2MEM only, and under the
+#    default CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT that comes back empty. So on the
+#    P4 an executable mapping comes from PSRAM first, and the loader's
+#    os_icache_flush() -- called once the text is copied and relocated -- does
+#    the write-back and instruction-cache invalidate the unified bus needs.
+patch("core/shared/platform/esp-idf/espidf_memmap.c",
+      "#else\n        uint32_t mem_caps = MALLOC_CAP_EXEC;\n#endif\n",
+      "#elif CONFIG_IDF_TARGET_ESP32P4\n"
+      "        /* %s: PSRAM carries no PMP entry on the P4, so it is RWX; the\n"
+      "         * internal exec heap is the fallback (present only with\n"
+      "         * CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n). */\n"
+      "        uint32_t mem_caps = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > size + 64\n"
+      "                                ? MALLOC_CAP_SPIRAM : MALLOC_CAP_EXEC;\n"
+      "        os_printf(\"WAMR exec mmap %u bytes from %s\\n\", (unsigned)size,\n"
+      "                  mem_caps == MALLOC_CAP_SPIRAM ? \"PSRAM\" : \"internal exec heap\");\n"
+      "#else\n        uint32_t mem_caps = MALLOC_CAP_EXEC;\n#endif\n" % MARK)
+patch("core/shared/platform/esp-idf/espidf_memmap.c",
+      "void\nos_icache_flush(void *start, size_t len)\n{}\n",
+      "void\nos_icache_flush(void *start, size_t len)\n{\n"
+      "#if CONFIG_IDF_TARGET_ESP32P4\n"
+      "    /* %s: the text was written through the data cache; push it out and\n"
+      "     * drop whatever the instruction cache holds for that range. */\n"
+      "    if (start && len) {\n"
+      "        uintptr_t a = (uintptr_t)start & ~(uintptr_t)63;   /* 64 B lines; M2C wants aligned */\n"
+      "        size_t n = (((uintptr_t)start + len + 63) & ~(uintptr_t)63) - a;\n"
+      "        esp_cache_msync((void *)a, n, ESP_CACHE_MSYNC_FLAG_DIR_C2M);\n"
+      "        esp_cache_msync((void *)a, n, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_INST);\n"
+      "        __asm__ volatile(\"fence.i\" ::: \"memory\");\n"
+      "    }\n"
+      "#else\n    (void)start;\n    (void)len;\n#endif\n}\n" % MARK)
+patch("core/shared/platform/esp-idf/espidf_memmap.c",
+      '#include "platform_api_extension.h"\n',
+      '#include "platform_api_extension.h"\n#if CONFIG_IDF_TARGET_ESP32P4\n#include "esp_cache.h"   /* %s */\n#endif\n' % MARK)
+patch("build-scripts/esp-idf/wamr/CMakeLists.txt",
+      "                       REQUIRES pthread lwip esp_timer\n",
+      "                       REQUIRES pthread lwip esp_timer esp_mm   # esp_mm: %s\n" % MARK)
 print("ok")

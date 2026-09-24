@@ -57,5 +57,20 @@ if [ -x "${WAMRC}" ]; then
     ls -la "${out}"
   done
 else
-  echo "== no Xtensa wamrc at ${WAMRC}; wasm only"
+  echo "== no Xtensa wamrc at ${WAMRC}; skipping the S3 modules"
+fi
+
+# 4) The P4's, with the prebuilt wamrc: the M extension matters (without it
+#    LLVM emits __umodsi3 and friends, which WAMR's RISC-V symbol table lacks).
+WAMRC_P4="${WAMRC_P4:-${ROOT}/wamrc_bin/wamrc}"
+if [ -x "${WAMRC_P4}" ]; then
+  for variant in xip plain; do
+    xipflag=""; [ "${variant}" = xip ] && xipflag="--xip"
+    out="${HERE}/doom_riscv32_${variant}.aot"
+    echo "== wamrc riscv32 ${variant} -> ${out}"
+    "${WAMRC_P4}" --target=riscv32 --target-abi=ilp32f --cpu=generic-rv32 \
+      --cpu-features=+m,+a,+f,+c ${xipflag} --opt-level=3 --size-level=3 \
+      -o "${out}" "${HERE}/doom.wasm"
+    ls -la "${out}"
+  done
 fi

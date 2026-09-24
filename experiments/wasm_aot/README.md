@@ -6,9 +6,10 @@ Measured 2026-07-27 on the host + **ESP32-P4 on glass**, and 2026-09-24 on the
 the same shape: one workload, run under every candidate runtime, compared on the
 same board at the same clock.
 
-**Verdict: interpreted WASM is not worth a third runtime (1.09× Lua). AOT is (16× on
-the P4, 9× the interpreter on the S3), and on the S3 it carries Doom at 21–26 fps
-with a third of every frame spent on the SPI panel.**
+**Verdict: interpreted WASM is not worth a third runtime (1.09× Lua). AOT is (18× the
+interpreter on the P4, 9× on the S3), it loads from a FILE into PSRAM on both boards,
+and it carries Doom: 21–26 fps on the S3's glass with a third of every frame spent
+on the SPI panel, ~19 ms of work per frame on the P4.**
 
 ## ESP32-S3 (T-Deck), 2026-09-24 — the Player tier is in scope
 
@@ -109,6 +110,44 @@ WAD is a partition and the module is a partition — the store / install half of
 #158 is untouched, though on the S3 it can now be "copy the `.aot` into PSRAM"
 rather than "write a flash partition".
 
+## ESP32-P4, revisited 2026-09-24 — "a cart is a file" holds here too
+
+The July constraint below ("plain AOT can never load on this board; XIP is the
+only route") was a HEAP fact, not a hardware one. IDF's `cpu_region_protect.c`
+gives the P4's external RAM no PMP entry at all ("default all permissions" — its
+own comment), and the one region that is locked read-only is the flash rodata
+mapping, which is exactly where the July run had embedded its `.aot`. What made
+`MALLOC_CAP_EXEC` come back empty was `CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT`
+(default on; the console's P4 build runs with it OFF), and WAMR only ever asks
+for that capability. So `toolchain/patch_wamr_s3.py` step 6 has the P4 take an
+executable mapping from PSRAM, and does the cache sync a unified bus needs after
+the loader has written the text (`esp_cache_msync` write-back, instruction-cache
+invalidate, `fence.i`). Same 6502 core, same board, console clock and PSRAM (hex,
+200 MHz):
+
+| runtime | instr/s | vs interp | `spin` |
+|---|---|---|---|
+| WASM fast-interp | 0.189 M | 1.0× | — |
+| AOT XIP from a flash partition (July's only route) | 2.786 M | 14.7× | 475 M/s |
+| **AOT loaded into PSRAM** (`--target=riscv32 --target-abi=ilp32f`) | **3.505 M** | **18.5×** | **570 M/s** |
+
+Direct calls and LLVM intrinsics buy the PSRAM-resident module 25% over XIP, as
+the July write-up predicted. **Doom too**: the same `doom.wasm` compiled with
+`--cpu-features=+m,+a,+f,+c` (without `+m` LLVM emits `__umodsi3` libcalls WAMR's
+symbol table lacks; the double-float helpers it still wants are all registered),
+loaded from the partition into PSRAM in 470 ms, ran the E1M1 demo headless at
+**~19 ms per frame** — 50 fps with no panel in the loop — against the S3's ~26 ms
+of Doom work per frame. Only 1.4× the S3 at 1.5× the clock: Doom's renderer
+walks a 5 MB linear memory in PSRAM, and the P4's PSRAM path is the wall #77 and
+`p4-ppa-reads-psram-slowly` already describe. `CHIP=p4 doom/flash_doom.sh` and
+`doom/read_doom.py PORT --pulse` are the P4 halves; the app is headless there
+(the P4's glass is the DSI tier, not a spike's).
+
+So the install story is now the SAME on both boards: read the `.aot` — from SD,
+from a download, from anywhere — into PSRAM and call it. The flash-partition
+XIP path stays available on both as the PSRAM-cheaper option (0.7 MB of PSRAM for
+Doom's text), and it is the slower one on both.
+
 ## The workload
 
 A representative **6502 interpreter inner loop** — fetch → decode → dispatch →
@@ -155,23 +194,27 @@ for the PPU/APU and the console's own frame cost.
 
 ## Hardware-learned constraints (the valuable part)
 
-**1. The P4 registers ZERO exec-capable heap** — measured, `heap_caps_get_free_size(
-MALLOC_CAP_EXEC) == 0`. WAMR's esp-idf `os_mmap()` allocates AOT text with
-`MALLOC_CAP_EXEC`, so **plain AOT can never load on this board**; it fails with
-"allocate memory failed". XIP is not an optimisation here, it is the only route.
+**1. The P4 registers ZERO exec-capable heap under the default
+`CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT`** — measured, `heap_caps_get_free_size(
+MALLOC_CAP_EXEC) == 0`, and WAMR's esp-idf `os_mmap()` allocates AOT text with
+`MALLOC_CAP_EXEC` alone, so plain AOT fails with "allocate memory failed" on a
+stock WAMR. That is the heap's answer, not the chip's: PSRAM carries no PMP entry
+and executes fine (the P4 section above), and with the split off — how the console
+builds — the internal heap is exec-capable too (378 KB free in the bare app).
 
-**2. XIP code must be mapped on the INSTRUCTION bus, which breaks "a cart is a file."**
-Embedding the `.aot` in a `const` array puts it in flash `.rodata` = the DROM (data)
-mapping; it loads fine and then faults on the first call (`Instruction access fault`,
-`MTVAL` inside the DROM range). It has to live in its own flash partition, mapped with
+**2. XIP code cannot live in flash `.rodata`.** Embedding the `.aot` in a `const`
+array puts it in the DROM mapping, which the PMP locks read-only; it loads fine and
+then faults on the first call (`Instruction access fault`, `MTVAL` inside the DROM
+range). An XIP module needs its own flash partition, mapped with
 `esp_partition_mmap(..., ESP_PARTITION_MMAP_INST, ...)` — see `partitions_spike.csv`.
-**Consequence for #158: you cannot read `main.aot` out of a `.moy` folder on SD/VFS and
-call it.** Installing a WASM cart means writing its AOT into a scratch partition and
-re-mapping (`esp_partition_write` works at runtime) — an install step with flash wear,
-not open-and-run. In a browser this constraint does not exist.
+That is the XIP route's constraint only: a plain `.aot` read out of a `.moy` folder
+on SD/VFS into PSRAM and called works on this board (the P4 section above), which is
+the install story #158 wants. The partition write is the option that saves PSRAM,
+not the only door.
 
 **3. XIP is the SLOWER AOT mode** (indirect calls through a symbol table, no LLVM
-intrinsics), so 2.828 M is the **pessimistic** AOT figure, not the optimistic one.
+intrinsics), so 2.828 M is the **pessimistic** AOT figure — the PSRAM-resident
+module measured 3.505 M on the same board (above).
 
 **4. Footprint: ~180 KB internal RAM** for runtime + module, against the Lua core's
 31 KB heap. Fine on the P4; on the S3's 512 KB this is the harder problem (cf. #66).

@@ -25,3 +25,9 @@ doom/wasmaot.bin
 doom/doom_spike/build/
 doom/doom_spike/sdkconfig
 doom/doom_spike/sdkconfig.old
+wasm_spike/build_p4/
+wasm_spike/sdkconfig.p4
+wasm_spike/sdkconfig.p4.old
+doom/doom_spike/build_p4/
+doom/doom_spike/sdkconfig.p4
+doom/doom_spike/sdkconfig.p4.old

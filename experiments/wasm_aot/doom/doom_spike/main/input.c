@@ -5,6 +5,13 @@
  * every key here is a timed hold: a press puts the Doom key down and a
  * deadline releases it, and rolling the ball keeps extending its direction.
  */
+#include "sdkconfig.h"
+#if !CONFIG_IDF_TARGET_ESP32S3
+#include "input.h"
+void input_init(void) {}
+void input_poll(void) {}
+uint32_t input_pop_key(void) { return 0; }
+#else
 #include <ctype.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -188,3 +195,5 @@ void input_poll(void)
         }
     }
 }
+
+#endif /* CONFIG_IDF_TARGET_ESP32S3 */

@@ -15,8 +15,9 @@ constraints they were measured under are in `../README.md`.
 | `wasm_imports.py` | lists a module's imports; the host must provide every one. |
 | `doom_host.py` | the reference run: the same module under wasmtime on the host with the same six imports, `--png` to dump a frame. If it traps here the module is wrong; if only the board traps, the port is. |
 | `doom_spike/` | the ESP-IDF app: WAMR + the natives, the WASI stubs wasi-libc drags in, the ST7789 blit (`lcd.c`, the console's own bring-up sequence, 20-row bands through two internal-SRAM DMA bounce buffers), the C3 keyboard and trackball (`input.c`). Partitions: 2 MB app, 3 MB `wasmaot` (16-byte `MOYAOT` header + module), 5 MB `wad`. |
-| `flash_doom.sh PORT [module]` | flashes app + module (+ `../doom1.wad`, skip with `SKIP_WAD=1`). REPLACES the console firmware; restore with `make firmware-flash-tdeck-mainline PORT=...`. |
-| `read_doom.py PORT [secs]` | attach-only serial reader (the T-Deck's `[serial]` rule) printing the `DOOM` lines. |
+| `flash_doom.sh PORT [module]` | flashes app + module (+ `../doom1.wad`, skip with `SKIP_WAD=1`). `CHIP=p4` flashes `doom_spike/build_p4` to the P4 (bootloader at 0x2000, 32 MB). REPLACES the console firmware; restore with `make firmware-flash-tdeck-mainline PORT=...` / `make firmware-flash-p4 PORT=...`. |
+| `read_doom.py PORT [secs] [--pulse]` | serial reader printing the `DOOM` lines: attach-only for the T-Deck (its `[serial]` rule), `--pulse` resets the P4's CH343 first. |
+| `sdkconfig.defaults.esp32p4` | the P4 build (`idf.py -B build_p4 -D SDKCONFIG=sdkconfig.p4 set-target esp32p4 build`): console clock, L2 cache, PSRAM, UART console; headless — `lcd.c` and `input.c` compile to stubs off the S3. |
 
 Controls on the T-Deck: trackball rolls = arrows (turn / walk), click = fire,
 keyboard `w a s d` = arrows, `space` = fire, `e` = use, `enter`, `q` = escape.
@@ -34,4 +35,7 @@ python read_doom.py /dev/ttyACM0 90
 ```
 
 `build_wasm.sh` expects `../toolchain/wasi-sdk` (wasi-sdk 24), `../doomgeneric`
-(ozkl/doomgeneric) and `../doom1.wad` (the shareware IWAD, 4,196,020 bytes).
+(ozkl/doomgeneric) and `../doom1.wad` (the shareware IWAD, 4,196,020 bytes). For
+the P4 it also emits `doom_riscv32_plain.aot` / `doom_riscv32_xip.aot` with the
+prebuilt wamrc (`--cpu-features=+m,+a,+f,+c`: without `+m` the module wants
+`__umodsi3`, which WAMR's RISC-V symbol table does not carry).
