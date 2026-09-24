@@ -52,6 +52,8 @@ static int s_last_crc_tic = -1;
 #define CRC_EVERY_TICS 500
 #define DUMP_EVERY 2500
 
+static void heap_line(const char *when);
+
 static uint32_t crc32_buf(const uint8_t *p, size_t n, uint32_t crc)
 {
     crc = ~crc;
@@ -83,7 +85,12 @@ static void frame_diag(wasm_exec_env_t env, const uint8_t *frame, const uint32_t
         c = crc32_buf((const uint8_t *)pal, 1024, c);
         printf("FRAMECRC gametic=%d crc=%08x\n", tic, (unsigned)c);
     }
-    if (s_draws && s_draws % DUMP_EVERY == 0) {
+    extern volatile int g_dump_request;
+    if ((s_draws && s_draws % DUMP_EVERY == 0) || g_dump_request) {
+        g_dump_request = 0;
+        printf("FRAMECRC gametic=%d crc=%08x (dump)\n", tic,
+               (unsigned)crc32_buf((const uint8_t *)pal, 1024, crc32_buf(frame, 320 * 200, 0)));
+        heap_line("dump");
         static const char hex[] = "0123456789abcdef";
         static char line[2 * 320 + 2];
         printf("FRAME gametic=%d\n", tic);

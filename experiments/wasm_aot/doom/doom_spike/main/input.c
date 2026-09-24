@@ -63,6 +63,7 @@ static int s_click_down;
 static int64_t s_next_kbd_us;
 static i2c_master_dev_handle_t s_kbd;
 static int s_raw;                 /* the matrix streams (0x03 accepted) */
+volatile int g_dump_request;      /* 'o' pressed: main.c dumps the next frame */
 static uint64_t s_matrix_down;    /* Doom keys down per the last matrix read */
 
 /* the vendor matrix: byte index, bit -> ASCII (device/moybyte/input.py) */
@@ -161,6 +162,9 @@ static void matrix_poll(const uint8_t *d)
     uint64_t changed = now_down ^ s_matrix_down;
     for (unsigned i = 0; i < MATRIX_N; i++) {
         if (changed & (1ULL << i)) {
+            if (MATRIX[i].ascii == 'o' && ((now_down >> i) & 1)) {
+                g_dump_request = 1;        /* diagnostics: dump this frame */
+            }
             post((now_down >> i) & 1, map_ascii(MATRIX[i].ascii));
         }
     }
@@ -251,6 +255,9 @@ void input_poll(void)
         else {
             uint8_t c = 0;
             if (i2c_master_receive(s_kbd, &c, 1, 5) == ESP_OK && c) {
+                if (c == 'o') {
+                    g_dump_request = 1;
+                }
                 uint8_t k = map_ascii(c);
                 hold(k, (k >= 0xa0 && k <= 0xaf) ? 220 : 60);
             }

@@ -36,10 +36,42 @@ int system(const char *command)
     return -1;
 }
 
+uint32_t moy_canary_hi[64];
+extern uint32_t moy_canary_lo[64];
+#define CANARY 0xC0DEC0DEu
+
+static void canary_fill(void)
+{
+    for (int i = 0; i < 64; i++) {
+        moy_canary_lo[i] = CANARY;
+        moy_canary_hi[i] = CANARY;
+    }
+}
+
+static void canary_check(const char *name, uint32_t *c)
+{
+    static int reported;
+    for (int i = 0; i < 64; i++) {
+        if (c[i] != CANARY) {
+            if (reported < 8) {
+                reported++;
+                printf("CANARY %s clobbered at [%d]: %08x %08x %08x %08x (colors at %p, lo at %p, hi at %p)\n",
+                       name, i, (unsigned)c[i], (unsigned)c[i + 1 < 64 ? i + 1 : i],
+                       (unsigned)c[i + 2 < 64 ? i + 2 : i], (unsigned)c[i + 3 < 64 ? i + 3 : i],
+                       (void *)colors, (void *)moy_canary_lo, (void *)moy_canary_hi);
+            }
+            c[i] = CANARY;      /* re-arm so the next hit reports too */
+            return;
+        }
+    }
+}
+
 void DG_Init(void) {}
 
 void DG_DrawFrame(void)
 {
+    canary_check("lo", moy_canary_lo);
+    canary_check("hi", moy_canary_hi);
     moy_draw(DG_ScreenBuffer, colors);
 }
 
@@ -128,6 +160,9 @@ EXPORT("dg_start") void dg_start(int zone_mb)
     static char *argv[] = { "doom", "-iwad", "doom1.wad", "-mb", mb, "-nosound", NULL };
     snprintf(mb, sizeof(mb), "%d", zone_mb);
     setvbuf(stdout, NULL, _IONBF, 0);   /* every printf reaches the serial console at once */
+    canary_fill();
+    printf("CANARY armed: lo=%p colors=%p hi=%p\n", (void *)moy_canary_lo, (void *)colors,
+           (void *)moy_canary_hi);
     doomgeneric_Create(6, argv);
 }
 

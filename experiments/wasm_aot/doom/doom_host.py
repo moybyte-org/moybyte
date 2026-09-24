@@ -49,6 +49,9 @@ def get_key():
 
 
 def draw(frame_off, pal_off):
+    if not state["frames"]:
+        print("== screen buffer at %d, palette (colors[]) at %d; stack region ends at %d"
+              % (frame_off, pal_off, 658320), flush=True)
     state["frames"] += 1
     m = mem()
     state["last"] = (bytes(m.read(store, frame_off, frame_off + 320 * 200)),
