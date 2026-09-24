@@ -31,7 +31,7 @@ from device_boot import apply_touch
 # Named CARTS because that is what it is to everything downstream -- the
 # compression is a storage detail of this one import.
 from carts_data import CARTS_Z as CARTS
-from device_util import _ticks_ms, _ticks_diff, _diag_note, _diag_log
+from device_util import _ticks_ms, _ticks_diff, _sleep_ms, _diag_note, _diag_log
 from device_input import TrackBall, Touch
 from device_audio import make_audio
 from device_canvas import DeviceCanvas
@@ -215,8 +215,7 @@ def run_desktop(fps_cap=60):
                     poller = _p
                     keyboard._poller_owned = True
                     touch._source = poller.consume_touch
-                    _diag_note("input", "poller thread running (#69, %dms cadence)"
-                               % poller.period)
+                    _diag_note("input", "poller thread running (#69, one pass per frame)")
             except Exception as exc:  # noqa: BLE001 -- input must never fail closed
                 _diag_note("input", "poller setup failed: %s" % (exc,))
                 poller = None
@@ -336,6 +335,13 @@ def run_desktop(fps_cap=60):
             keyboard._poller_owned = False
             touch._source = None
             poller = None
+        # The poller thread makes one pass per frame, when this thread lets it:
+        # kick() readies it and sleep_ms(0) (the port's GIL release + taskYIELD)
+        # runs it. Without the yield a free-running cart never lets go of the
+        # GIL and the thread starves (InputPoller's docstring has the numbers).
+        if poller is not None:
+            poller.kick()
+            _sleep_ms(0)
         try:
             if poller is not None:
                 poller.consume()
@@ -387,6 +393,14 @@ def run_desktop(fps_cap=60):
 
     def _tail(now):
         loop = d.loop
+        # The second half of the poller's pass (#69): the thread let go of the
+        # GIL for its I2C read and needs it back to stage the result, and a
+        # frame that never blocks would hand it over only at the next frame's
+        # kick -- one pass per two frames (measured 35/s under Brick Siege at
+        # 55fps). This yield, after present, lets the pass finish inside its
+        # own frame.
+        if poller is not None:
+            _sleep_ms(0)
         # #183: close the SD bracket. A DRAWN frame here means the first panel
         # flush after the SD session completed, so the bus survived it.
         if store.traced and loop.drew:

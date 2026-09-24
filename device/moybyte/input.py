@@ -872,16 +872,25 @@ class InputPoller:
     The I2CSTAT counters keep updating from this thread, so stalls stay
     measurable -- smooth frames + nonzero I2CSTAT maxima is exactly the
     signature that the isolation works. _poll_once is the whole per-pass body,
-    factored out so host tests drive it without a thread."""
+    factored out so host tests drive it without a thread.
 
-    POLL_MS = 12       # cadence (~80Hz; each pass = 1 kbd read + 1 touch read)
+    PACING: one pass per frame, gated by the frame loop, not a timer. The
+    thread blocks on a lock that kick() releases once a frame; that is ONE
+    GIL handoff per pass. It used to sleep 12ms between passes, and on this
+    port a sleep re-takes the GIL every FreeRTOS tick to service pending
+    callbacks -- a dozen handoffs per pass, each granted only when the frame
+    loop let go of the GIL, which a free-running cart whose frame never
+    blocks does almost never. Measured 2026-09-23 on glass: 59 passes/s at
+    the desk, 30 under a paced cart, 2-39 under free-running Brick Siege,
+    zero I2C timeouts -- a key read twice a second and held for the seconds
+    between, and lockstep netplay shipping that stale mask."""
 
-    def __init__(self, keyboard, touch, period_ms=None):
+    def __init__(self, keyboard, touch):
         self.kbd = keyboard
         self.touch = touch
-        self.period = self.POLL_MS if period_ms is None else period_ms
         self.alive = False
         self._stop = False
+        self._gate = None              # the per-frame lock kick() releases
         # Keyboard staging: which mode the LAST pass saw, plus the two state
         # shapes that mode needs (only one is ever live at a time, but keeping
         # both named -- instead of one mixed 3-tuple -- makes consume() read
@@ -899,6 +908,9 @@ class InputPoller:
         the synchronous path (this must never take input down)."""
         try:
             import _thread
+            gate = _thread.allocate_lock()
+            gate.acquire()                 # held: the thread waits for the first kick
+            self._gate = gate
             _thread.start_new_thread(self._run, ())
             self.alive = True
             return True
@@ -909,13 +921,24 @@ class InputPoller:
     # -- poller thread side ---------------------------------------------
     def _run(self):
         self.alive = True
+        gate = self._gate
         while not self._stop:
+            gate.acquire()                 # blocks with the GIL released, once
+            if self._stop:
+                break
             try:
                 self._poll_once()
             except Exception:   # noqa: BLE001 -- one bad pass must not kill input
                 pass
-            _sleep_ms(self.period)
         self.alive = False
+
+    def kick(self):
+        """Once per frame, before consume(): let the thread make one pass.
+        Releasing readies it; the caller's sleep_ms(0) right after is the
+        port's GIL release + taskYIELD, which is what actually runs it."""
+        g = self._gate
+        if g is not None and g.locked():
+            g.release()
 
     def _poll_once(self):
         """One full bus pass: pending kbd mode switch, one keyboard read, one
@@ -993,11 +1016,12 @@ class InputPoller:
 
     def stop(self):
         self._stop = True
+        self.kick()                        # wake the thread so it sees the flag
 
 
 # Clock shims: ONE body, runtime/ticks.py, re-exported by the device tier's
 # leaf module (this file carried its own copy until 2026-08-18).
 try:
-    from device_util import _sleep_ms, _ticks_ms, _ticks_diff, _ticks_us
+    from device_util import _ticks_ms, _ticks_diff, _ticks_us
 except ImportError:  # host, loaded by path outside pytest's device finder
-    from runtime.ticks import _sleep_ms, _ticks_ms, _ticks_diff, _ticks_us
+    from runtime.ticks import _ticks_ms, _ticks_diff, _ticks_us
