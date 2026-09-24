@@ -15,6 +15,7 @@ HERE = __file__.rsplit("/", 1)[0]
 WAD = open(HERE + "/../doom1.wad", "rb").read()
 TICKS = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 200
 PNG = sys.argv[sys.argv.index("--png") + 1] if "--png" in sys.argv else None
+EVERY = int(sys.argv[sys.argv.index("--every") + 1]) if "--every" in sys.argv else 0
 
 cfg = Config()
 cfg.wasm_backtrace_details = True
@@ -80,12 +81,9 @@ t = time.time()
 exports["dg_start"](store, 3)
 print("== dg_start ok in %.2fs, memory %d pages" % (time.time() - t, state["mem"].size(store)))
 t = time.time()
-for i in range(TICKS):
-    exports["dg_tick"](store)
-dt = time.time() - t
-print("== %d ticks in %.2fs (%.1f ticks/s), %d frames drawn" % (TICKS, dt, TICKS / dt, state["frames"]))
 
-if PNG and state["last"]:
+
+def dump(path):
     import zlib
     frame, pal = state["last"]
     rows = []
@@ -103,5 +101,16 @@ if PNG and state["last"]:
         return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
     png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 320, 200, 8, 2, 0, 0, 0))
            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
-    open(PNG, "wb").write(png)
-    print("== wrote", PNG)
+    open(path, "wb").write(png)
+    print("== wrote", path, flush=True)
+
+
+for i in range(TICKS):
+    exports["dg_tick"](store)
+    if EVERY and PNG and (i + 1) % EVERY == 0 and state["last"]:
+        dump(PNG.replace(".png", "_%05d.png" % (i + 1)))
+dt = time.time() - t
+print("== %d ticks in %.2fs (%.1f ticks/s), %d frames drawn" % (TICKS, dt, TICKS / dt, state["frames"]))
+
+if PNG and state["last"]:
+    dump(PNG)

@@ -1,9 +1,16 @@
 /*
  * T-Deck input for the Doom spike: the trackball (four GPIOs pulse low when
- * rolled, GPIO0 is the click) and the C3 keyboard controller at I2C 0x55,
- * which reports one ASCII byte per PRESS and nothing on release or hold. So
- * every key here is a timed hold: a press puts the Doom key down and a
- * deadline releases it, and rolling the ball keeps extending its direction.
+ * rolled, GPIO0 is the click) and the C3 keyboard controller at I2C 0x55.
+ *
+ * The keyboard has two modes. Its default reports one ASCII byte per PRESS
+ * and nothing on hold or release, so a game cannot know a key is still down;
+ * command 0x03 switches it to streaming the raw key MATRIX (five bytes, one
+ * bit per key, level state), which is what the console uses for hold-to-move
+ * (device/moybyte/input.py, RAW_KEYS -- the table below is that one). Firmware
+ * older than 2025-06-12 ignores 0x03 and keeps sending ASCII; that is detected
+ * the way the console detects it (bytes 1-4 zero, a printable in byte 0) and
+ * the session falls back to timed holds. Rolling the ball keeps extending its
+ * direction either way.
  */
 #include "sdkconfig.h"
 #if !CONFIG_IDF_TARGET_ESP32S3
@@ -13,6 +20,7 @@ void input_poll(void) {}
 uint32_t input_pop_key(void) { return 0; }
 #else
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "driver/gpio.h"
@@ -54,6 +62,25 @@ static held_t s_held[12];
 static int s_click_down;
 static int64_t s_next_kbd_us;
 static i2c_master_dev_handle_t s_kbd;
+static int s_raw;                 /* the matrix streams (0x03 accepted) */
+static uint64_t s_matrix_down;    /* Doom keys down per the last matrix read */
+
+/* the vendor matrix: byte index, bit -> ASCII (device/moybyte/input.py) */
+typedef struct {
+    uint8_t byte, bit, ascii;
+} matrix_key_t;
+static const matrix_key_t MATRIX[] = {
+    { 0, 0x01, 'q' }, { 0, 0x02, 'w' }, { 0, 0x08, 'a' }, { 0, 0x20, ' ' },
+    { 1, 0x01, 'e' }, { 1, 0x02, 's' }, { 1, 0x04, 'd' }, { 1, 0x08, 'p' },
+    { 1, 0x10, 'x' }, { 1, 0x20, 'z' },
+    { 2, 0x01, 'r' }, { 2, 0x02, 'g' }, { 2, 0x04, 't' }, { 2, 0x10, 'v' },
+    { 2, 0x20, 'c' }, { 2, 0x40, 'f' },
+    { 3, 0x01, 'u' }, { 3, 0x02, 'h' }, { 3, 0x04, 'y' }, { 3, 0x08, '\r' },
+    { 3, 0x10, 'b' }, { 3, 0x20, 'n' }, { 3, 0x40, 'j' },
+    { 4, 0x01, 'o' }, { 4, 0x02, 'l' }, { 4, 0x04, 'i' }, { 4, 0x08, 0x08 },
+    { 4, 0x20, 'm' }, { 4, 0x40, 'k' },
+};
+#define MATRIX_N (sizeof(MATRIX) / sizeof(MATRIX[0]))
 
 static void post(int pressed, uint8_t key)
 {
@@ -101,6 +128,8 @@ static void IRAM_ATTR tb_isr(void *arg)
     s_pulses[(int)arg]++;
 }
 
+/* The console's scheme: W A S D steer, L (right thumb, home row) and SPACE
+ * fire, K uses; ENTER confirms, BACKSPACE is the menu key. Z/X strafe. */
 static uint8_t map_ascii(uint8_t c)
 {
     switch (c) {
@@ -110,14 +139,32 @@ static uint8_t map_ascii(uint8_t c)
         case 'd': return KEY_RIGHTARROW;
         case 'z': return KEY_STRAFE_L;
         case 'x': return KEY_STRAFE_R;
-        case ' ': return KEY_FIRE;
-        case 'e': return KEY_USE;
+        case ' ':
+        case 'l': return KEY_FIRE;
+        case 'k': return KEY_USE;
         case '\r':
         case '\n': return KEY_ENTER;
-        case 'q': return KEY_ESCAPE;
-        case 0x08: return KEY_BACKSPACE;
+        case 0x08: return KEY_ESCAPE;
         default: return (uint8_t)tolower(c);
     }
+}
+
+/* Raw matrix: five level bytes -> Doom key edges against the last read. */
+static void matrix_poll(const uint8_t *d)
+{
+    uint64_t now_down = 0;
+    for (unsigned i = 0; i < MATRIX_N; i++) {
+        if (d[MATRIX[i].byte] & MATRIX[i].bit) {
+            now_down |= 1ULL << i;
+        }
+    }
+    uint64_t changed = now_down ^ s_matrix_down;
+    for (unsigned i = 0; i < MATRIX_N; i++) {
+        if (changed & (1ULL << i)) {
+            post((now_down >> i) & 1, map_ascii(MATRIX[i].ascii));
+        }
+    }
+    s_matrix_down = now_down;
 }
 
 void input_init(void)
@@ -160,6 +207,11 @@ void input_init(void)
             s_kbd = NULL;
         }
     }
+    if (s_kbd) {
+        uint8_t raw_cmd = 0x03;
+        s_raw = i2c_master_transmit(s_kbd, &raw_cmd, 1, 20) == ESP_OK;
+    }
+    printf("INPUT keyboard=%s raw_mode=%d\n", s_kbd ? "found" : "absent", s_raw);
 }
 
 void input_poll(void)
@@ -181,10 +233,27 @@ void input_poll(void)
 
     if (s_kbd && now >= s_next_kbd_us) {
         s_next_kbd_us = now + 30000;
-        uint8_t c = 0;
-        if (i2c_master_receive(s_kbd, &c, 1, 5) == ESP_OK && c) {
-            uint8_t k = map_ascii(c);
-            hold(k, (k >= 0xa0 && k <= 0xaf) ? 220 : 60);
+        if (s_raw) {
+            uint8_t d[5] = { 0 };
+            if (i2c_master_receive(s_kbd, d, 5, 5) == ESP_OK) {
+                if (d[0] > 0x20 && !d[1] && !d[2] && !d[3] && !d[4]) {
+                    /* a printable byte where a matrix should be: the firmware
+                     * ignored 0x03 -- stay on ASCII + timed holds from here */
+                    s_raw = 0;
+                    uint8_t k = map_ascii(d[0]);
+                    hold(k, (k >= 0xa0 && k <= 0xaf) ? 220 : 60);
+                }
+                else {
+                    matrix_poll(d);
+                }
+            }
+        }
+        else {
+            uint8_t c = 0;
+            if (i2c_master_receive(s_kbd, &c, 1, 5) == ESP_OK && c) {
+                uint8_t k = map_ascii(c);
+                hold(k, (k >= 0xa0 && k <= 0xaf) ? 220 : 60);
+            }
         }
     }
 

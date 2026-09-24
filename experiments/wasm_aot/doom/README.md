@@ -19,9 +19,13 @@ constraints they were measured under are in `../README.md`.
 | `read_doom.py PORT [secs] [--pulse]` | serial reader printing the `DOOM` lines: attach-only for the T-Deck (its `[serial]` rule), `--pulse` resets the P4's CH343 first. |
 | `sdkconfig.defaults.esp32p4` | the P4 build (`idf.py -B build_p4 -D SDKCONFIG=sdkconfig.p4 set-target esp32p4 build`): console clock, L2 cache, PSRAM, UART console; headless — `lcd.c` and `input.c` compile to stubs off the S3. |
 
-Controls on the T-Deck: trackball rolls = arrows (turn / walk), click = fire,
-keyboard `w a s d` = arrows, `space` = fire, `e` = use, `enter`, `q` = escape.
-The C3 keyboard reports presses only, so every key is a timed hold.
+Controls on the T-Deck follow the console's scheme: `w a s d` steer, `l` and
+`space` fire, `k` uses, `z`/`x` strafe, `enter` confirms, `backspace` is the
+menu key; the trackball turns and walks, its click fires. Held keys keep
+firing: the keyboard is switched to its raw matrix mode (command 0x03, five
+level bytes, the console's `RAW_KEYS` table), and key edges come from diffing
+reads. Keyboard firmware older than 2025-06-12 ignores that command and reports
+presses only; the driver detects it and falls back to timed holds.
 
 ## Reproducing
 

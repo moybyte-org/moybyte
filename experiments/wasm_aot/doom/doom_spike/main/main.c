@@ -421,10 +421,12 @@ static void *doom_main(void *arg)
             int64_t now = esp_timer_get_time();
             double secs = (now - win_start) / 1e6;
             printf("DOOM mode=%s frames=%u fps=%.1f tick_avg=%.1fms tick_max=%.1fms "
-                   "draw_avg=%.1fms draws=%u\n",
+                   "draw_avg=%.1fms draws=%u internal=%u spiram=%u\n",
                    mode, (unsigned)frames, REPORT_EVERY / secs,
                    tick_us / 1000.0 / REPORT_EVERY, tick_max / 1000.0,
-                   s_draws ? s_draw_us / 1000.0 / s_draws : 0.0, (unsigned)s_draws);
+                   s_draws ? s_draw_us / 1000.0 / s_draws : 0.0, (unsigned)s_draws,
+                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
             win_start = now;
             tick_us = tick_max = 0;
             s_draw_us = 0;
