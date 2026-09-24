@@ -22,12 +22,27 @@
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
+#include "soc/soc.h"
+#include "sdkconfig.h"
 #include "wasm_export.h"
 #include "bh_platform.h"
 
+/* From the patched WAMR esp-idf platform (toolchain/patch_wamr_s3.py): the
+ * header only declares it inside the component's own build. */
+void os_register_xip_window(const void *ibus, const void *dbus, size_t size);
+
 #include "core6502_wasm.h"
+/* The AOT headers are generated per target arch by build.sh; a build without
+ * an AOT compiler for this arch (no Xtensa wamrc yet) still measures the
+ * interpreter and the EXEC heap. */
+#if __has_include("core6502_aot.h")
 #include "core6502_aot.h"
+#define HAVE_AOT 1
+#endif
+#if __has_include("core6502_aot_xip.h")
 #include "core6502_aot_xip.h"
+#define HAVE_AOT_XIP 1
+#endif
 
 #define SPIKE_STACK_SIZE (32 * 1024)
 
@@ -121,10 +136,13 @@ spike_main(void *arg)
      * P4 registers no EXEC-capable heap, plain AOT can never load and XIP
      * (execute-in-place from flash .rodata) is the only route. Print both so
      * the failure mode is data, not inference. */
-    printf("SPIKE boot heap_internal=%u exec=%u largest_exec=%u\n",
+    printf("SPIKE boot target=%s heap_internal=%u exec=%u largest_exec=%u "
+           "spiram=%u\n",
+           CONFIG_IDF_TARGET,
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC),
-           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_EXEC));
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_EXEC),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     RuntimeInitArgs init_args;
     memset(&init_args, 0, sizeof(RuntimeInitArgs));
@@ -141,20 +159,31 @@ spike_main(void *arg)
     /* AOT first, on the freshest heap -- the plain build needs a contiguous
      * EXEC allocation and must not be judged on a heap the interpreter has
      * already churned. */
+#ifdef HAVE_AOT
     run_module("aot", core6502_aot, core6502_aot_len);
+#else
+    printf("SPIKE aot skipped (no AOT built for this arch)\n");
+#endif
 
     /* XIP AOT: the code executes where it lies, so it must be reachable on the
      * INSTRUCTION bus. Embedding it in .rodata puts it in the DROM (data)
      * mapping -> executing it faults ("Instruction access fault", measured).
      * So map its flash partition with ESP_PARTITION_MMAP_INST instead. */
+#ifdef HAVE_AOT_XIP
     const esp_partition_t *part = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA, 0xff, "wasmaot");
+#else
+    const esp_partition_t *part = NULL;
+    printf("SPIKE aotxip skipped (no XIP AOT built for this arch)\n");
+#endif
     if (!part) {
+#ifdef HAVE_AOT_XIP
         printf("SPIKE ERR no wasmaot partition\n");
+#endif
     }
     else {
-        const void *inst_ptr = NULL;
-        esp_partition_mmap_handle_t mh;
+        const void *inst_ptr = NULL, *data_ptr = NULL;
+        esp_partition_mmap_handle_t mh, dh;
         esp_err_t e = esp_partition_mmap(part, 0, part->size,
                                          ESP_PARTITION_MMAP_INST,
                                          &inst_ptr, &mh);
@@ -163,7 +192,25 @@ spike_main(void *arg)
         }
         else {
             printf("SPIKE xip mapped at %p (inst bus)\n", inst_ptr);
+#ifdef HAVE_AOT_XIP
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+            /* The S3's instruction alias is fetch-only: the loader reads the
+             * file through a DATA mapping of the same partition and the
+             * patched runtime fetches through the INST one. */
+            /* One MMU table serves both buses on the S3, so a second mmap of
+             * the same pages hands back the same address: derive the data
+             * alias instead (measured: a DATA mmap returned the INST vaddr). */
+            data_ptr = (const uint8_t *)inst_ptr - (SOC_IROM_LOW - SOC_DROM_LOW);
+            (void)dh;
+            os_register_xip_window(inst_ptr, data_ptr, part->size);
+            printf("SPIKE xip data alias %p magic=%02x%02x%02x%02x\n", data_ptr,
+                   ((const uint8_t *)data_ptr)[0], ((const uint8_t *)data_ptr)[1],
+                   ((const uint8_t *)data_ptr)[2], ((const uint8_t *)data_ptr)[3]);
+            run_module("aotxip", (uint8_t *)data_ptr, core6502_aot_xip_len);
+#else
             run_module("aotxip", (uint8_t *)inst_ptr, core6502_aot_xip_len);
+#endif
+#endif
             esp_partition_munmap(mh);
         }
     }
@@ -177,7 +224,7 @@ spike_main(void *arg)
 void
 app_main(void)
 {
-    vTaskDelay(pdMS_TO_TICKS(1500));   /* let the serial host attach */
+    vTaskDelay(pdMS_TO_TICKS(3000));   /* let the serial host attach (the S3 re-enumerates after reset) */
 
     pthread_t tid;
     pthread_attr_t attr;

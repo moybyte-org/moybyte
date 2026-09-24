@@ -8,3 +8,20 @@ wasm_spike/sdkconfig
 wasm_spike/sdkconfig.old
 wamr/
 wamrc_bin/
+*_linked.aot
+wasm_spike/build_s3/
+wasm_spike/sdkconfig.s3
+wasm_spike/sdkconfig.s3.old
+# the S3 half: toolchains, vendored sources and build products
+toolchain/wasi-sdk/
+toolchain/.venv/
+toolchain/*.log
+doomgeneric/
+doom1.wad
+doom/src/
+doom/*.wasm
+doom/*.aot
+doom/wasmaot.bin
+doom/doom_spike/build/
+doom/doom_spike/sdkconfig
+doom/doom_spike/sdkconfig.old

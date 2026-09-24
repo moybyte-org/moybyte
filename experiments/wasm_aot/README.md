@@ -1,10 +1,113 @@
 # wasm_aot — is a WASM cart runtime fast enough for an emulator / 3D game? (#158)
 
-Measured 2026-07-27, host + **ESP32-P4 on glass**. Sibling of `experiments/lua_bridge/`
-(the #67 Lua spike) and deliberately the same shape: one workload, run under every
-candidate runtime, compared on the same board at the same clock.
+Measured 2026-07-27 on the host + **ESP32-P4 on glass**, and 2026-09-24 on the
+**ESP32-S3 (LilyGO T-Deck) on glass**, where the same modules run and **Doom runs**
+(`doom/`). Sibling of `experiments/lua_bridge/` (the #67 Lua spike) and deliberately
+the same shape: one workload, run under every candidate runtime, compared on the
+same board at the same clock.
 
-**Verdict: interpreted WASM is not worth a third runtime (1.09× Lua). AOT is (16×).**
+**Verdict: interpreted WASM is not worth a third runtime (1.09× Lua). AOT is (16× on
+the P4, 9× the interpreter on the S3), and on the S3 it carries Doom at 21–26 fps
+with a third of every frame spent on the SPI panel.**
+
+## ESP32-S3 (T-Deck), 2026-09-24 — the Player tier is in scope
+
+Same 6502 core, same three runtimes, on the T-Deck at the console's own settings
+(240 MHz, 32 KB icache / 64 KB dcache / 32 B lines, octal PSRAM; the spike runs PSRAM
+at 80 MHz where the console runs 120). The wasm is unchanged; the AOT is
+`wamrc --target=xtensa --cpu=esp32s3 --size-level=0` (why that flag: below).
+
+| runtime | instr/s | NES fps (CPU only) | vs interp | `spin` |
+|---|---|---|---|---|
+| WASM fast-interp (WAMR 2.4.5) | 0.172 M | 17.3 | 1.0× | 12.3 M/s |
+| **WASM AOT, relocated into PSRAM** | **1.467 M** | **148** | **8.5×** | 273.6 M/s |
+| **WASM AOT, XIP from a flash partition** | **1.541 M** | **155** | **9.0×** | 273.2 M/s |
+
+(P4, for scale: interp 0.188 M, AOT-XIP 2.828 M at 360 MHz. The S3 interpreter is
+within 1% of the P4's on this dispatch-heavy core; the S3's Lua was not measured on
+this core.) Identical cycle counts (5,997,400) in all three modes.
+
+**And Doom** — doomgeneric compiled to wasm32 (wasi-sdk 24), 320×200, the shareware
+IWAD in a 5 MB flash partition, a 5 MB linear memory with a 3 MB zone, sound off —
+runs on the T-Deck's glass, demo and menus, through **six imports**: ticks, sleep,
+key, draw-frame, WAD size, WAD read. That draw-frame import is the "framebuffer
+verb" the P4 write-up said any real C cart is gated on, in its smallest form.
+
+| module (all `--size-level=0`) | .aot | Doom's own ms/frame | fps in the E1M1 demo |
+|---|---|---|---|
+| XIP from flash (`--xip`: indirect calls, no LLVM intrinsics, bounds checks) | 912 KB | ~33 | ~21 |
+| plain AOT relocated into PSRAM (direct calls, intrinsics, bounds checks) | 992 KB | ~26 | ~25 |
+| XIP from flash, `--bounds-checks=0` (the sandbox priced, not proposed) | 753 KB | ~24 | ~26 |
+
+Every frame also pays **13.0 ms for the panel**: 128 KB over the ST7789's 80 MHz SPI,
+blitted synchronously in the game thread through two internal-SRAM bounce buffers.
+That is the T-Deck's physical wire, and the obvious next lever: hand the flush to
+core 0 the way `native/moy_flush` does and the frame is Doom's own time, i.e. the
+35 Hz tic cap. The title screen already sits at 34 fps (Doom's 35 Hz). Load: 170 ms
+(XIP) / 290 ms (PSRAM), Doom's own init 0.5 s; PSRAM free while running 2.9 MB (XIP)
+/ 2.2 MB (PSRAM-resident); internal SRAM free ~100 KB with WAMR, the LCD driver and
+a 160 KB game thread stack up.
+
+`doom/README.md` has the pieces and the reproduce steps; `doom/doom_host.py` runs
+the same module under wasmtime on the host with the same six imports (the reference
+that separated a module fault from a port fault twice).
+
+### What the S3 taught, in the order it bit
+
+1. **The prebuilt `wamrc` has no Xtensa backend.** `--target=xtensa` fails with
+   "llvm get target from triple (xtensa-pc-linux-gnu) failed", and Espressif's
+   esp-clang tarballs ship no LLVM dev libraries to link one against.
+   `toolchain/build_wamrc_xtensa.sh` builds what WAMR's own `build_llvm.py
+   --platform xtensa` would — Espressif's LLVM fork at `xtensa_release_18.1.2`, X86 +
+   experimental Xtensa, static, no tools — then wamrc against it. ~45 min, ~3 GB.
+   The P4 write-up's "same prebuilt wamrc, `--target=xtensa`" was wrong.
+2. **The S3's instruction-bus alias is fetch-only.** PSRAM at data address D is
+   fetched at D + 0x0600_0000 (one MMU table serves both buses,
+   `SOC_MMU_LINEAR_ADDR_MASK`), but a load or store through that alias is
+   `LoadProhibited` / `StoreProhibited`. So AOT code may not READ its own text — and
+   Xtensa code reads its literal pool with PC-relative `l32r`. Hence
+   **`--size-level=0`** (LLVM's large code model): constants materialise in
+   registers, `literal_size=0`, and an XIP module carries **zero relocations**.
+   Without it: `LoadProhibited` on the first literal, and past 256 KB of text the
+   `l32r` cannot reach the pool at all ("target address out of range").
+3. **WAMR's esp-idf "dual bus mirror" (`WASM_MEM_DUAL_BUS_MIRROR`, on by default
+   for the S3) is broken on IDF 5.5**: its delta is `SOC_IROM_LOW - SOC_IROM_HIGH`
+   (lands outside every mapped range; should be `- SOC_DROM_LOW`) and it clears fresh
+   exec memory through the fetch-only alias. `toolchain/patch_wamr_s3.py` fixes both,
+   marker-guarded. With that, a plain `.aot` relocates into PSRAM and runs — which is
+   the S3's "a cart is a file": no partition-install step, unlike the P4.
+4. **XIP from flash splits the same way**: the loader parses the file through the
+   DATA mapping, the CPU fetches through the INST one. Asking `esp_partition_mmap`
+   for both returns the SAME address (shared table), so the alias is the constant
+   delta; the patch's `os_get_ibus_mirror()` / `os_register_xip_window()` carry it
+   into the loader's `module->code`.
+5. **The esp-idf loader refuses an XIP file with text relocations** ("cannot apply
+   relocation to text section ... --enable-indirect-mode"). `aot_prelink.py`
+   resolves the `l32r` ones on the host and strips the group — only needed when a
+   module is built with a size level other than 0; `aot_dump.py` shows what a
+   file carries.
+6. **wamrc compiles the WASI pointer conversions INTO the module.** It knows
+   libc-wasi's signatures (`fd_write` is `(i*i*)i`), so a host stub declared
+   `(iiii)i` receives native pointers and rejects them as "out of bounds memory
+   access" — before Doom has printed a byte. Host WASI stubs must use WAMR's own
+   signature strings and take native pointers. An hour, and the reason
+   `doom_host.py` exists.
+7. **The fast interpreter's loader patches bytecode in place**: a `.wasm` handed
+   to it straight off the flash mapping dies with "Dbus write to cache rejected".
+   Copy it to RAM first; `.aot` files load fine from the mapping.
+8. `MALLOC_CAP_EXEC` on the S3 is 263 KB of internal SRAM with
+   `CONFIG_ESP_SYSTEM_MEMPROT_FEATURE` off (the 6502 spike's config) and **0** with it
+   on (the Doom app's) — moot once code lives in PSRAM or flash, but it is why the
+   two apps print different `exec=` lines.
+
+### What this does not prove
+
+A bare ESP-IDF app, not the console: no WM, no Python VM, no WiFi beside it, PSRAM
+at 80 MHz where the console tunes 120. No sound. Input is demo-grade (the C3
+keyboard reports presses only, so keys are timed holds; the trackball turns). The
+WAD is a partition and the module is a partition — the store / install half of
+#158 is untouched, though on the S3 it can now be "copy the `.aot` into PSRAM"
+rather than "write a flash partition".
 
 ## The workload
 
@@ -75,8 +178,8 @@ intrinsics), so 2.828 M is the **pessimistic** AOT figure, not the optimistic on
 
 **5. AOT is per-architecture.** The portable artifact is the `.wasm`; the `.aot` is a
 disposable build product. A store would fan out riscv32-ilp32f (P4) and xtensa (S3,
-**untested**) alongside the `.wasm` for host and browser — and the browser, needing no
-AOT at all, is the fastest tier because it JITs.
+measured above) alongside the `.wasm` for host and browser — and the browser, needing
+no AOT at all, is the fastest tier because it JITs.
 
 ## Integration gotchas — six, none hard, all invisible until you hit them
 
@@ -95,8 +198,9 @@ Recorded because they are the honest cost of "a third runtime" (cf. #67's tail):
 6. DROM vs IROM for XIP (above).
 
 Also: `wamrc` ships as a **prebuilt x86-64 binary** in WAMR's GitHub releases — no LLVM
-build needed. Runtime and `wamrc` versions must match (AOT files carry a format
-version); this spike pinned both to **WAMR-2.4.5**.
+build needed **for riscv32**; the Xtensa backend is not in it (S3 section, item 1).
+Runtime and `wamrc` versions must match (AOT files carry a format version); this
+spike pinned both to **WAMR-2.4.5**.
 
 ## What this does and does not prove
 
@@ -132,7 +236,12 @@ sets the pace.
 ```
 
 `build.sh` documents the toolchain: clang's wasm32 backend + `rust-lld` as the wasm
-linker (no `wasm-ld` on this box), and the prebuilt `wamrc`.
+linker (no `wasm-ld` on this box), and the prebuilt `wamrc`. `TARGET=s3 ./build.sh`
+builds the Xtensa modules instead (needs `toolchain/build_wamrc_xtensa.sh` first),
+the device half is `idf.py -B build_s3 -D SDKCONFIG=sdkconfig.s3 set-target esp32s3
+build`, flashed with `--before usb_reset` at 0x0/0x8000/0x10000 plus the XIP module
+at 0x210000, and read with `read_spike.py PORT --attach` (the T-Deck is attach-only).
+Restore the console with `make firmware-flash-tdeck-mainline PORT=...`.
 
 **The device half replaces the console firmware.** Restore with
 `make firmware-flash-p4 PORT=/dev/ttyACM0` and verify with `tools/p4_autotest.py`.
