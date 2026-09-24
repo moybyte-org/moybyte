@@ -51,7 +51,10 @@ a 160 KB game thread stack up.
 
 `doom/README.md` has the pieces and the reproduce steps; `doom/doom_host.py` runs
 the same module under wasmtime on the host with the same six imports (the reference
-that separated a module fault from a port fault twice).
+that separated a module fault from a port fault twice). It also records the one
+on-glass defect play found and the demo never did: after minutes the ST7789 lost its
+mode registers to a misread command byte and showed static while Doom's frames stayed
+clean; the driver now re-tells the panel its mode every frame.
 
 ### What the S3 taught, in the order it bit
 

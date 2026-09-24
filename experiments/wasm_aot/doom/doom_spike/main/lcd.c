@@ -150,6 +150,8 @@ void lcd_init(void)
 
 void lcd_blit_indexed(const uint8_t *frame, const uint32_t *pal)
 {
+    static uint32_t frames;
+    lcd_reassert_mode((++frames % 40) == 0);
     uint16_t lut[256];
     for (int i = 0; i < 256; i++) {
         uint32_t c = pal[i];                       /* b, g, r, a from the LSB */
@@ -176,22 +178,24 @@ void lcd_blit_indexed(const uint8_t *frame, const uint32_t *pal)
 
 #endif /* CONFIG_IDF_TARGET_ESP32S3 */
 
-void lcd_read_state(uint8_t *madctl, uint8_t *colmod, uint8_t *im)
+/* THE STATIC. After minutes of play the glass turned to false-colour static
+ * in strips while the frame Doom rendered stayed pixel-clean (dumped and
+ * checked, 2026-09-25): a command byte on the SPI had been misread and the
+ * panel was no longer in the pixel format / addressing it was set up in. Every
+ * frame rewrites the whole picture, so the only thing that can make static
+ * PERSIST is panel state. The panel answers register reads with 0xff (no SDO
+ * on this board), so it cannot be watched; it is re-told instead: MADCTL and
+ * COLMOD before every frame (four tiny polling transactions), the whole
+ * register table every ~2 s. Measured: a 40-minute play session with no
+ * visible corruption after this went in; before it, minutes. */
+void lcd_reassert_mode(bool full)
 {
-    *madctl = *colmod = *im = 0xff;
-    esp_lcd_panel_io_rx_param(s_io, 0x0B, madctl, 1);
-    esp_lcd_panel_io_rx_param(s_io, 0x0C, colmod, 1);
-    esp_lcd_panel_io_rx_param(s_io, 0x0D, im, 1);
-}
-
-void lcd_reassert_mode(void)
-{
-    /* everything the picture's format depends on, minus reset and SLPOUT:
-     * MADCTL, COLMOD, the register table (NORON, porch, gamma, ...), INVON,
-     * DISPON. Cheap: a few dozen bytes of parameters. */
     uint8_t madctl = 0x68, colmod = 0x55;
     esp_lcd_panel_io_tx_param(s_io, 0x36, &madctl, 1);
     esp_lcd_panel_io_tx_param(s_io, 0x3A, &colmod, 1);
+    if (!full) {
+        return;
+    }
     for (size_t i = 0; i < sizeof(INIT) / sizeof(INIT[0]); i++) {
         const lcd_cmd_t *c = &INIT[i];
         esp_lcd_panel_io_tx_param(s_io, c->cmd, c->len ? c->data : NULL, c->len);
