@@ -105,8 +105,17 @@ def dump(path):
     print("== wrote", path, flush=True)
 
 
+import zlib as _zlib
+last_crc_tic = -1
 for i in range(TICKS):
     exports["dg_tick"](store)
+    if "dg_gametic" in exports and state["last"]:
+        tic = exports["dg_gametic"](store)
+        if tic % 500 == 0 and tic != last_crc_tic:
+            last_crc_tic = tic
+            frame, pal = state["last"]
+            print("FRAMECRC gametic=%d crc=%08x" % (tic, _zlib.crc32(pal, _zlib.crc32(frame)) & 0xFFFFFFFF),
+                  flush=True)
     if EVERY and PNG and (i + 1) % EVERY == 0 and state["last"]:
         dump(PNG.replace(".png", "_%05d.png" % (i + 1)))
 dt = time.time() - t

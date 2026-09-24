@@ -135,3 +135,11 @@ EXPORT("dg_tick") void dg_tick(void)
 {
     doomgeneric_Tick();
 }
+
+/* Doom's tic counter, so a frame the host and the board both rendered at the
+ * same gametic can be compared: the demo is deterministic per tic. */
+extern int gametic;
+EXPORT("dg_gametic") int dg_gametic(void)
+{
+    return gametic;
+}

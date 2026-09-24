@@ -42,6 +42,65 @@ static const uint8_t *s_wad;
 static uint32_t s_wad_len;
 static int64_t s_draw_us;
 static uint32_t s_draws;
+static wasm_function_inst_t s_gametic_fn;
+static int s_last_crc_tic = -1;
+
+/* Diagnostics for "the screen goes blocky after minutes": is it the frame
+ * Doom rendered, or the panel path? A CRC of the frame at every 500th gametic
+ * (comparable with doom_host.py's, the demo being deterministic per tic), and
+ * every DUMP_EVERY frames the whole frame as hex for read_doom.py to save. */
+#define CRC_EVERY_TICS 500
+#define DUMP_EVERY 2500
+
+static uint32_t crc32_buf(const uint8_t *p, size_t n, uint32_t crc)
+{
+    crc = ~crc;
+    while (n--) {
+        crc ^= *p++;
+        for (int k = 0; k < 8; k++) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+    }
+    return ~crc;
+}
+
+static void frame_diag(wasm_exec_env_t env, const uint8_t *frame, const uint32_t *pal)
+{
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(env);
+    int tic = -1;
+    if (s_gametic_fn) {
+        uint32_t argv[1] = { 0 };
+        if (wasm_runtime_call_wasm(env, s_gametic_fn, 0, argv)) {
+            tic = (int)argv[0];
+        }
+        else {
+            wasm_runtime_clear_exception(inst);
+        }
+    }
+    if (tic >= 0 && tic % CRC_EVERY_TICS == 0 && tic != s_last_crc_tic) {
+        s_last_crc_tic = tic;
+        uint32_t c = crc32_buf(frame, 320 * 200, 0);
+        c = crc32_buf((const uint8_t *)pal, 1024, c);
+        printf("FRAMECRC gametic=%d crc=%08x\n", tic, (unsigned)c);
+    }
+    if (s_draws && s_draws % DUMP_EVERY == 0) {
+        static const char hex[] = "0123456789abcdef";
+        static char line[2 * 320 + 2];
+        printf("FRAME gametic=%d\n", tic);
+        for (int y = 0; y < 200 + 4; y++) {          /* 200 rows, then the palette as 4 rows */
+            const uint8_t *row = y < 200 ? frame + y * 320 : (const uint8_t *)pal + (y - 200) * 256;
+            int n = y < 200 ? 320 : 256;
+            for (int x = 0; x < n; x++) {
+                line[2 * x] = hex[row[x] >> 4];
+                line[2 * x + 1] = hex[row[x] & 15];
+            }
+            line[2 * n] = '\n';
+            line[2 * n + 1] = 0;
+            fputs(line, stdout);
+        }
+        printf("FRAMEEND\n");
+    }
+}
 
 /* ---- the console's verbs (module "env") ---------------------------------- */
 
@@ -77,6 +136,7 @@ static void n_draw(wasm_exec_env_t env, uint32_t frame_off, uint32_t pal_off)
     lcd_blit_indexed(frame, pal);
     s_draw_us += esp_timer_get_time() - t0;
     s_draws++;
+    frame_diag(env, frame, pal);
 }
 
 static uint32_t n_wad_size(wasm_exec_env_t env)
@@ -396,6 +456,7 @@ static void *doom_main(void *arg)
 
     lcd_init();
     input_init();
+    s_gametic_fn = wasm_runtime_lookup_function(inst, "dg_gametic");
 
     t0 = esp_timer_get_time();
     if (!call_i(inst, env, "dg_start", ZONE_MB)) {
@@ -424,13 +485,12 @@ static void *doom_main(void *arg)
                    "draw_avg=%.1fms draws=%u internal=%u spiram=%u\n",
                    mode, (unsigned)frames, REPORT_EVERY / secs,
                    tick_us / 1000.0 / REPORT_EVERY, tick_max / 1000.0,
-                   s_draws ? s_draw_us / 1000.0 / s_draws : 0.0, (unsigned)s_draws,
+                   s_draw_us / 1000.0 / REPORT_EVERY, (unsigned)s_draws,
                    (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                    (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
             win_start = now;
             tick_us = tick_max = 0;
             s_draw_us = 0;
-            s_draws = 0;
         }
     }
 }
