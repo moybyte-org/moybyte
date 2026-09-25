@@ -12,11 +12,12 @@
 set -euo pipefail
 
 WAMR_VERSION="${WAMR_VERSION:-2.4.5}"
-# The runtime comes from Moybyte's fork, pinned by hash: one commit over the
-# upstream 2.4.5 tag carrying the ESP32-S3 / ESP32-P4 platform fixes (#158).
+# The runtime comes from Moybyte's fork, pinned by hash: the ESP32-S3 / ESP32-P4
+# platform work over the upstream 2.4.5 tag (#158). The console vendors the same
+# commit (native/moy_wasm/wamr_vendor.json; tests/test_wamr_vendor.py pins both).
 WAMR_REPO="${WAMR_REPO:-https://github.com/moybyte-org/wasm-micro-runtime.git}"
 WAMR_BRANCH="${WAMR_BRANCH:-moybyte-2.4.5}"
-WAMR_PIN="${WAMR_PIN:-47cb969c448e5853b92a10e8cef86e3ca04be3ce}"
+WAMR_PIN="${WAMR_PIN:-88631c5fd2dd30a3fe9cf40549d82d156ae5c0a3}"
 # TARGET=p4 (riscv32, the prebuilt wamrc) or TARGET=s3 (xtensa: needs the
 # wamrc toolchain/build_wamrc_xtensa.sh builds -- the prebuilt one has no
 # Xtensa backend, measured 2026-09-24).
