@@ -217,8 +217,10 @@ is done. A guard is a test or a check script, never prose.
 
 ## Decision points, all the owner's
 
-- After phase 1: ship the tier on every console board, or wait for the
-  S3 diet.
+- ~~After phase 1: ship the tier on every console board, or wait for the
+  S3 diet.~~ Decided 2026-09-25: ship on every board. The S3 boards' floor
+  breach is the console's with WiFi up, not the tier's; WiFi is not meant to
+  be on while a cart plays, and the S3 diet is a later item of its own.
 - Whether the Doom glue under `experiments/wasm_aot/doom/` is marked
   GPL-2.0-or-later, which is what linking into doomgeneric implies.
 - Human testing on every touched board before any of this reaches master.
