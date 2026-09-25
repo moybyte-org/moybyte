@@ -557,7 +557,6 @@ typedef struct {
     // task when the request is done OR when the thread asks for the VM, and
     // `vm_done` tells the thread its VM request ran
     SemaphoreHandle_t go, back, vm_done;
-    StaticSemaphore_t go_buf, back_buf, vm_done_buf;
     volatile int op;
     volatile int what;
     volatile float dt;
@@ -569,13 +568,15 @@ typedef struct {
     TaskHandle_t thread;            // the session's task, once it runs
 } sess_t;
 
-static sess_t g_sess;
+// The live session, or NULL. Allocated per session, from PSRAM, so an idle
+// desk carries a pointer and not the struct.
+static sess_t *g_sess;
 
 // On the task: wait for the thread's answer, serving every VM request that
-// arrives first.
+// arrives first. The caller set `waiting` before it woke the thread, so a
+// request the thread makes at once is never refused as unserved.
 static void sess_wait(sess_t *s)
 {
-    s->waiting = true;
     for (;;) {
         xSemaphoreTake(s->back, portMAX_DELAY);
         void (*fn)(void *) = s->vm_fn;
@@ -591,8 +592,8 @@ static void sess_wait(sess_t *s)
 
 int moy_wasm_on_vm(void (*fn)(void *arg), void *arg)
 {
-    sess_t *s = &g_sess;
-    if (!s->live || !s->waiting || xTaskGetCurrentTaskHandle() != s->thread) {
+    sess_t *s = g_sess;
+    if (!s || !s->live || !s->waiting || xTaskGetCurrentTaskHandle() != s->thread) {
         return -1;
     }
     s->vm_arg = arg;
@@ -726,57 +727,83 @@ opened:
 
 int moy_wasm_session_live(void)
 {
-    return g_sess.live;
+    return g_sess != NULL && g_sess->live;
+}
+
+static void sess_free(sess_t *s)
+{
+    if (s->file) {
+        heap_caps_free(s->file);
+    }
+    if (s->go) {
+        vSemaphoreDelete(s->go);
+    }
+    if (s->back) {
+        vSemaphoreDelete(s->back);
+    }
+    if (s->vm_done) {
+        vSemaphoreDelete(s->vm_done);
+    }
+    heap_caps_free(s);
+    if (g_sess == s) {
+        g_sess = NULL;
+    }
 }
 
 void moy_wasm_session_close(void)
 {
-    sess_t *s = &g_sess;
-    if (!s->live) {
+    sess_t *s = g_sess;
+    if (!s || !s->live) {
         return;
     }
     s->op = SESS_CLOSE;
+    s->waiting = true;
     xSemaphoreGive(s->go);
     sess_wait(s);
     MP_THREAD_GIL_EXIT();
     pthread_join(s->tid, NULL);
     MP_THREAD_GIL_ENTER();
-    if (s->file) {
-        heap_caps_free(s->file);
-        s->file = NULL;
-    }
-    s->live = false;
-    s->thread = NULL;
+    sess_free(s);
 }
 
 int moy_wasm_session_open(const char *path, const char *want_sha,
                           const moy_wasm_ops *ops, char *err, size_t errlen)
 {
-    sess_t *s = &g_sess;
-    if (s->live || g_run.started) {
+    if (moy_wasm_session_live() || g_run.started) {
         snprintf(err, errlen, "a wasm run is already live");
         return 1;
     }
-    if (!s->go) {
-        s->go = xSemaphoreCreateBinaryStatic(&s->go_buf);
-        s->back = xSemaphoreCreateBinaryStatic(&s->back_buf);
-        s->vm_done = xSemaphoreCreateBinaryStatic(&s->vm_done_buf);
+    sess_t *s = heap_caps_calloc(1, sizeof(sess_t), PSRAM_CAPS);
+    if (!s) {
+        snprintf(err, errlen, "no PSRAM for the cart's session");
+        return 1;
+    }
+    s->go = xSemaphoreCreateBinary();
+    s->back = xSemaphoreCreateBinary();
+    s->vm_done = xSemaphoreCreateBinary();
+    if (!s->go || !s->back || !s->vm_done) {
+        sess_free(s);
+        snprintf(err, errlen, "no memory for the cart's session");
+        return 1;
     }
     s->ops = ops;
-    s->want_sha[0] = 0;
     if (want_sha && strlen(want_sha) == 64) {
         memcpy(s->want_sha, want_sha, 65);
     }
-    s->err[0] = 0;
-    s->vm_fn = NULL;
-    s->waiting = false;
-    s->thread = NULL;
-    read_module(mp_obj_new_str(path, strlen(path)), &s->file, &s->file_len);
+    g_sess = s;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        read_module(mp_obj_new_str(path, strlen(path)), &s->file, &s->file_len);
+        nlr_pop();
+    } else {
+        sess_free(s);
+        nlr_jump(nlr.ret_val);
+    }
+    s->waiting = true;
     int pe = moy_wasm_spawn(&s->tid, sess_thread, s, MOY_WASM_STACK_BYTES,
                             MOY_WASM_STACK_PSRAM, MOY_WASM_CORE, MOY_WASM_PRIO);
     if (pe != 0) {
-        heap_caps_free(s->file);
-        s->file = NULL;
+        sess_free(s);
         snprintf(err, errlen, "could not start the cart's thread");
         return 1;
     }
@@ -792,14 +819,15 @@ int moy_wasm_session_open(const char *path, const char *want_sha,
 
 int moy_wasm_session_call(int what, float dt, char *err, size_t errlen)
 {
-    sess_t *s = &g_sess;
-    if (!s->live) {
+    sess_t *s = g_sess;
+    if (!s || !s->live) {
         snprintf(err, errlen, "no cart session");
         return 1;
     }
     s->op = SESS_CALL;
     s->what = what;
     s->dt = dt;
+    s->waiting = true;
     xSemaphoreGive(s->go);
     sess_wait(s);
     if (s->rc != 0) {

@@ -2318,14 +2318,41 @@ enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW };
 #include "libmoy/moy_wasm.h"
 #include "moy_wasm_session.h"
 
-static moy_wasm W;               // libmoy's per-run state for the table
-static int W_bound;              // moy_wasm_open succeeded
-static int W_dead;               // trapped: never called again
+// A compiled cart's run state. Allocated per session, from PSRAM where there
+// is any: libmoy's per-run struct alone is about 4 KB (eight layer canvases),
+// and as static data it would sit in internal SRAM for the whole boot -- the
+// resource the S3 boards gate the tier on. Only the pointer is static.
+typedef struct {
+    moy_wasm w;                  // libmoy's per-run state for the table
+    int bound;                   // moy_wasm_open succeeded
+    int dead;                    // trapped: never called again
+    char dir[192];               // the cart's folder: `read`'s only root
+    char file[MOY_WASM_NAME_MAX + 1];   // the file held open, if any
+} wrun_t;
+
+static wrun_t *WR;
 static const uint8_t *g_whead;   // the canonical .wasm's head, for the check
 static size_t g_whead_len;
 static uint32_t g_wpages;        // the manifest's "memory"
-static char g_wdir[192];         // the cart's folder: `read`'s only root
-static char g_wfile_name[MOY_WASM_NAME_MAX + 1];   // the file held open, if any
+
+static wrun_t *wrun_new(void)
+{
+#ifdef MOYCORE_PSRAM
+    wrun_t *r = (wrun_t *)heap_caps_calloc(1, sizeof(wrun_t),
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (r) return r;
+#endif
+    return (wrun_t *)calloc(1, sizeof(wrun_t));
+}
+
+static void wrun_free(wrun_t *r)
+{
+#ifdef MOYCORE_PSRAM
+    heap_caps_free(r);
+#else
+    free(r);
+#endif
+}
 
 typedef struct {
     const char *name;
@@ -2339,7 +2366,7 @@ static void wfile_forget(void)
 {
     mp_obj_t f = MP_STATE_VM(moycore_wasm_file);
     MP_STATE_VM(moycore_wasm_file) = MP_OBJ_NULL;
-    g_wfile_name[0] = 0;
+    if (WR) WR->file[0] = 0;
     if (f != MP_OBJ_NULL) {
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
@@ -2358,15 +2385,15 @@ static void read_on_vm(void *arg)
     q->got = 0;
     if (nlr_push(&nlr) == 0) {
         mp_obj_t f = MP_STATE_VM(moycore_wasm_file);
-        if (f == MP_OBJ_NULL || strcmp(g_wfile_name, q->name) != 0) {
+        if (f == MP_OBJ_NULL || strcmp(WR->file, q->name) != 0) {
             wfile_forget();
-            char path[sizeof(g_wdir) + MOY_WASM_NAME_MAX + 2];
-            snprintf(path, sizeof(path), "%s/%s", g_wdir, q->name);
+            char path[sizeof(WR->dir) + MOY_WASM_NAME_MAX + 2];
+            snprintf(path, sizeof(path), "%s/%s", WR->dir, q->name);
             mp_obj_t args[2] = { mp_obj_new_str(path, strlen(path)),
                                  MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
             f = mp_call_function_n_kw(MP_OBJ_FROM_PTR(&mp_builtin_open_obj), 2, 0, args);
             MP_STATE_VM(moycore_wasm_file) = f;
-            snprintf(g_wfile_name, sizeof(g_wfile_name), "%s", q->name);
+            snprintf(WR->file, sizeof(WR->file), "%s", q->name);
         }
         int e = 0;
         mp_off_t size = mp_stream_seek(f, 0, MP_SEEK_END, &e);
@@ -2467,27 +2494,27 @@ static int wo_loaded(void *user, wasm_module_t module, char *err, size_t errlen)
 static int wo_bound(void *user, wasm_exec_env_t env, char *err, size_t errlen)
 {
     (void)user;
-    if (moy_wasm_open(&W, &RUN.con, env) != 0) {
+    if (moy_wasm_open(&WR->w, &RUN.con, env) != 0) {
         snprintf(err, errlen, "a hook is missing");
         return 1;
     }
-    W_bound = 1;
+    WR->bound = 1;
     return 0;
 }
 
 static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
 {
     (void)user;
-    if (what == WCALL_INIT) return moy_wasm_init(&W, err, errlen);
-    if (what == WCALL_UPDATE) return moy_wasm_update(&W, dt, err, errlen);
-    return moy_wasm_draw(&W, err, errlen);
+    if (what == WCALL_INIT) return moy_wasm_init(&WR->w, err, errlen);
+    if (what == WCALL_UPDATE) return moy_wasm_update(&WR->w, dt, err, errlen);
+    return moy_wasm_draw(&WR->w, err, errlen);
 }
 
 static void wo_unbound(void *user)
 {
     (void)user;
-    if (W_bound) moy_wasm_close(&W);
-    W_bound = 0;
+    if (WR->bound) moy_wasm_close(&WR->w);
+    WR->bound = 0;
 }
 
 static const moy_wasm_ops WASM_OPS = {
@@ -2498,7 +2525,7 @@ static const moy_wasm_ops WASM_OPS = {
 // canvas is cleared before the console paints its report over it.
 static void wasm_trapped(void)
 {
-    W_dead = 1;
+    WR->dead = 1;
     moy_reset_state(&RUN.canvas);
     moy_cls(&RUN.canvas, 0);
 }
@@ -2506,13 +2533,14 @@ static void wasm_trapped(void)
 static int wasm_begin(const char *path, const char *sha, const char *dir,
                       int swapped, char *err, size_t errlen)
 {
-    memset(&W, 0, sizeof(W));
-    W.read = hw_read;
-    W.wire_swapped = swapped;
-    W_bound = 0;
-    W_dead = 0;
-    snprintf(g_wdir, sizeof(g_wdir), "%s", dir);
-    g_wfile_name[0] = 0;
+    if (!WR && (WR = wrun_new()) == NULL) {
+        snprintf(err, errlen, "no memory for the cart's run state");
+        return 1;
+    }
+    memset(WR, 0, sizeof(*WR));
+    WR->w.read = hw_read;
+    WR->w.wire_swapped = swapped;
+    snprintf(WR->dir, sizeof(WR->dir), "%s", dir);
     RUN.con.host.cfg = hw_cfg;
     RUN.con.host.layer_new = hw_layer_new;
     RUN.con.host.layer_free = hw_layer_free;
@@ -2532,7 +2560,7 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
 static int wasm_tick_c(float dt, int draw, char *err, size_t errlen)
 {
     uint32_t t0 = (uint32_t)mp_hal_ticks_us(), t1;
-    if (W_dead) {
+    if (!WR || WR->dead) {
         snprintf(err, errlen, "the cart is not running");
         return 1;
     }
@@ -2542,7 +2570,7 @@ static int wasm_tick_c(float dt, int draw, char *err, size_t errlen)
     }
     t1 = (uint32_t)mp_hal_ticks_us();
     // quit() ends the cart where it stands (proposals/wasm-runtime.md).
-    if (draw && !W.quitting
+    if (draw && !WR->w.quitting
         && moy_wasm_session_call(WCALL_DRAW, 0.0f, err, errlen) != 0) {
         wasm_trapped();
         return 1;
@@ -2557,6 +2585,10 @@ static void wasm_end(void)
     if (RUN.wasm) moy_wasm_session_close();
     RUN.wasm = 0;
     wfile_forget();
+    if (WR) {
+        wrun_free(WR);
+        WR = NULL;
+    }
 }
 #endif // MOY_WASM
 
@@ -2602,7 +2634,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_open_obj, 6, 6, mod_wasm_ope
 static mp_obj_t mod_wasm_quit(void)
 {
 #if MOY_WASM
-    return mp_obj_new_bool(RUN.wasm && W.quitting);
+    return mp_obj_new_bool(RUN.wasm && WR && WR->w.quitting);
 #else
     return mp_const_false;
 #endif
