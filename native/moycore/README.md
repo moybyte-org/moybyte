@@ -25,11 +25,12 @@ console -- canvas, snapshot, audio queue, pmem, flags, `tick`, `view`,
 (`libmoy/moy_wasm.c`, vendored) in place of a Lua state. `run_begin`'s last
 argument says which: False builds the console alone, and `wasm_open(module,
 wasm_head, pages, wasm_sha, cart_dir, wire_swapped)` hands it to the ENGINE,
-`native/moy_wasm`, which owns the runtime, the load, the provenance key and the
-thread everything WAMR does runs on. This half binds and nothing else: it
-registers the table, checks the module's shape against the manifest's pages
-before its memory exists, binds the instance to the console and calls the
-three hooks, each on the engine's thread through its session callbacks
+`native/moy_wasm`, which owns the runtime, the signature, the load, the
+provenance key and the thread everything WAMR does runs on. This half binds
+and nothing else: it registers the table, checks the module's shape against
+the manifest's pages before its memory exists, binds the instance to the
+console and calls the three hooks, each on the engine's thread through its
+session callbacks
 (`native/moy_wasm/moy_wasm_session.h`). `tick` then runs `_update` and `_draw`
 there and times the halves for `tick_split`.
 

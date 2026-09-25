@@ -107,9 +107,11 @@ def test_the_hello_module_carries_its_key(tmp_path, chip):
     if not (shutil.which("clang") or os.path.isfile(
             os.path.join(wm.SPIKE, "toolchain", "wasi-sdk", "bin", "clang"))):
         pytest.skip("no clang with a wasm32 backend")
+    from test_wasm_signing import TEST_KEYS, sign_with_test_key
     out = str(tmp_path / "hello.aot")
     wasm = wm.hello_wasm()
-    text = wm.build(wasm, chip, out)
+    text = wm.build(wasm, chip, out, sign_with=sign_with_test_key)
     data = open(out, "rb").read()
     assert data[:4] == b"\0aot"
     assert text.encode() in data
+    assert wm.verify(data, chip, TEST_KEYS) is None

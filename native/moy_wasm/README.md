@@ -14,7 +14,7 @@ moycore drives (see "A cart's session").
 | the build | `micropython.cmake`: the runtime as its own static library, AOT only, no interpreter, no WASI, no builtin libc |
 | the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report; a cart's session |
 | the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through |
-| the key | `moy_wasm_key.h`: the provenance key a module must carry, per chip |
+| the key | `moy_wasm_key.h`: the provenance key a module must carry, per chip, and the layout of its signature |
 | the thread | `moy_wasm_thread.c`: the run's pthread, stack placed per board |
 
 Which boards take it is `board.toml` data: each console board's
@@ -32,10 +32,11 @@ moy_wasm.result()        # waits (the VM lock released), then a dict
 
 `start(path, export, args=(), loops=1, stack=None, psram_stack=None)` reads the
 module file through the VFS (the T-Deck's SD and the P4s' flash store look the
-same) into a PSRAM buffer and starts a thread that does, `loops` times over:
-load, check the key, instantiate, call `export(*args)` with i32 arguments, and
-unload. `stack`/`psram_stack` override the board's setting for a measurement.
-One run at a time.
+same) into a PSRAM buffer, checks its signature (see Provenance; a refused
+module ends the run at once, with no thread) and starts a thread that does,
+`loops` times over: load, check the key, instantiate, call `export(*args)`
+with i32 arguments, and unload. `stack`/`psram_stack` override the board's
+setting for a measurement. One run at a time.
 
 **Everything WAMR does happens on that thread**, the runtime's init and
 teardown included: WAMR's platform layer calls `pthread_self()`, and IDF
@@ -59,10 +60,10 @@ line, `FORK` the fork commit, `STACK` the board's default `(bytes, in_psram)`,
 
 ## A cart's session
 
-A compiled cart the Player runs is a session: the same thread, pool, load and
-provenance check as a run, held open for the cart's life, with moycore — the
-host half, which owns the console — supplying the callbacks
-(`moy_wasm_session.h`). The thread calls them once the runtime is up (moycore
+A compiled cart the Player runs is a session: the same signature check,
+thread, pool, load and provenance check as a run, held open for the cart's
+life, with moycore — the host half, which owns the console — supplying the
+callbacks (`moy_wasm_session.h`). The thread calls them once the runtime is up (moycore
 registers libmoy's import table), once the module is loaded and its key checked
 (the module's shape against the manifest's `memory`, `moy_wasm_check`), once it
 is instantiated (bind it to the console) and for each hook, and before teardown.
@@ -161,7 +162,24 @@ plus the chip's block in `moy_wasm_key.h`, byte for byte; an absent, malformed
 or different key is refused with the first field that differs, after the
 parse and before anything in the module runs. `tools/wasm_module.py` reads the
 same header to write keys and to choose wamrc's flags, so a module it builds
-carries exactly the key this check wants. Signing arrives with phase 3.
+carries exactly the key this check wants.
+
+**And the file is signed the way OTA images are.** A module file is the
+module, then an RSA signature (PKCS#1 v1.5, SHA-256), its length and the magic
+`moybyte-sig1`; the signature covers a text naming the chip, the module's
+length and its sha256, so every byte of the module -- the key section included
+-- is under it (`moy_wasm_key.h` states the layout and the text, and
+`tools/wasm_module.py` reads them from there). The check runs on the
+MicroPython task the moment the file is read, before the thread exists: the
+engine hashes the module and hands the text to `moy_ota.verify_sig`, the one
+body every OTA manifest is checked with, against the keys the image trusts
+(`moy_ota.OTA_PUBLIC_KEYS`). An unsigned module, a malformed trailer, a
+signature for another chip, a byte changed anywhere or a key the image does not
+trust is refused as `refused: unsigned module` / `malformed signature` /
+`bad signature`, and the runtime never sees it. `tools/wasm_module.py` signs
+every module it builds with the OTA signing key (`$MOYBYTE_OTA_SIGNING_KEY`,
+else the file `make ota-keygen` writes) and `verify` answers as a board
+would; `--unsigned` builds a module a board refuses.
 
 ## Stopping a run
 
@@ -184,6 +202,11 @@ current answer.
   from the clone's git objects when `experiments/wasm_aot/wamr` has it), the
   interpreter and compiler stayed behind, and one pin names it everywhere.
 - `tests/test_wasm_module.py`: the key and the flags the builder derives.
+- `tests/test_wasm_signing.py`: the signature, through the device's own
+  `moy_ota.verify_sig` with a throwaway key -- a signed module verifies and
+  comes back as it was built; a byte changed anywhere, the key section
+  included, another chip's signature, another key's, an unsigned module and a
+  malformed trailer are refused.
 - `tests/test_moycore_glue.py`: the device glue's `WasmRun` over a fake moycore
   (the arguments `wasm_open` gets, the refusals before it).
 - `tests/test_wasm_cart.py`: the same import table on the host, over WAMR built
@@ -191,13 +214,16 @@ current answer.
   golden, the hooks under the tick model, a trap, quit, the runtime-missing
   panel, and the store's handling of a compiled cart.
 - On glass, every declaring board's suite: the idle cost against a module-free
-  image of the same tree, the hello module and four foreign modules, the two
-  stack placements, the termination answer, a Lua cart after a wasm run, a
-  load/unload loop under a live cart and WiFi, and a run with WiFi and BLE up;
-  then the Player path — the hello and blit carts run from the launcher at
-  their fps floors, and a cart with no module for this chip refused. The suites
-  build the modules with the pinned compilers
-  (`python3 tools/wasm_module.py compilers`) and push them into the board's
-  store: the phase-1 modules under `wasm_hello/`, which is not a `.moy` folder
-  and never lists as a cart, and the fixture carts as `wasm_hello.moy` and
-  `wasm_blit.moy`.
+  image of the same tree, the hello module and six a board refuses (no key,
+  another fork, other flags, another chip, no signature, one byte of a signed
+  module's key changed), the two stack placements, the termination answer, a
+  Lua cart after a wasm run, a load/unload loop under a live cart and WiFi,
+  and a run with WiFi and BLE up; then the Player path — the hello and blit
+  carts run from the launcher at their fps floors, a cart with no module for
+  this chip refused, and a cart whose module was tampered with after signing
+  refused. The suites build the modules with the pinned compilers
+  (`python3 tools/wasm_module.py compilers`), sign them with the OTA signing
+  key (a suite without it skips the wasm checks, saying why), and push them
+  into the board's store: the phase-1 modules under `wasm_hello/`, which is
+  not a `.moy` folder and never lists as a cart, and the fixture carts as
+  `wasm_hello.moy` and `wasm_blit.moy`.

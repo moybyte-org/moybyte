@@ -11,8 +11,10 @@
 // stack is its own setting per board rather than whatever the VM's task has.
 //
 // The Python side reads the module FILE (through the VFS, so the T-Deck's SD
-// and the P4s' flash store look the same) into a PSRAM buffer, starts the
-// thread, and collects a report when it ends. One run at a time.
+// and the P4s' flash store look the same) into a PSRAM buffer, checks its
+// signature (moy_wasm_key.h) -- a module whose signature does not verify never
+// reaches the runtime -- starts the thread, and collects a report when it
+// ends. One run at a time.
 //
 // A cart the Player runs is a SESSION (phase 3, moy_wasm_session.h): the same
 // thread and the same load and key check, held open across the cart's life,
@@ -45,6 +47,8 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/idf_additions.h"   // pxTaskGetStackStart
+
+#include "mbedtls/sha256.h"
 
 #include "wasm_export.h"
 #include "moy_wasm_key.h"
@@ -116,6 +120,7 @@ typedef struct {
     // the MicroPython side's bookkeeping
     pthread_t tid;
     bool started;
+    bool threaded;                 // the thread was spawned (a refused module never has one)
     int64_t t_start;
     int64_t t_end;
     volatile bool finished;
@@ -428,6 +433,67 @@ static void read_module(mp_obj_t path, uint8_t **out, uint32_t *out_len)
     *out_len = (uint32_t)size;
 }
 
+// The module's signature (moy_wasm_key.h): NULL when the file is a module
+// this board trusts, with *module_len set to the module's length without its
+// trailer; otherwise the refusal. The RSA check is moy_ota.verify_sig -- the
+// body and the keys every OTA manifest is checked with -- so this runs on the
+// MicroPython task, before the run's thread exists.
+static const char *verify_module(const uint8_t *file, uint32_t len, uint32_t *module_len)
+{
+    const uint32_t magic = sizeof(MOY_WASM_SIG_MAGIC) - 1;
+    if (len < magic + 4 || memcmp(file + len - magic, MOY_WASM_SIG_MAGIC, magic) != 0) {
+        return "unsigned module";
+    }
+    const uint8_t *lp = file + len - magic - 4;
+    uint32_t k = lp[0] | (uint32_t)lp[1] << 8 | (uint32_t)lp[2] << 16 | (uint32_t)lp[3] << 24;
+    if (k < 64 || k > 1024 || k > len - magic - 4) {
+        return "malformed signature";
+    }
+    uint32_t n = len - magic - 4 - k;
+
+    uint8_t digest[32];
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    mbedtls_sha256_starts(&ctx, 0);
+    for (uint32_t at = 0; at < n; at += 65536) {
+        mbedtls_sha256_update(&ctx, file + at, n - at < 65536 ? n - at : 65536);
+    }
+    mbedtls_sha256_finish(&ctx, digest);
+    mbedtls_sha256_free(&ctx);
+
+    static const char hex[] = "0123456789abcdef";
+    char text[sizeof(MOY_WASM_SIG_SCHEME) + sizeof(KEY_CHIP) + 16 + 64];
+    int tl = snprintf(text, sizeof(text), MOY_WASM_SIG_SCHEME "\n%s\n%u\n", KEY_CHIP,
+                      (unsigned)n);
+    for (int i = 0; i < 32; i++) {
+        text[tl++] = hex[digest[i] >> 4];
+        text[tl++] = hex[digest[i] & 15];
+    }
+    const char *why = "bad signature";
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        vstr_t sig;
+        vstr_init(&sig, 2 * k);
+        const uint8_t *sp = lp - k;
+        for (uint32_t i = 0; i < k; i++) {
+            vstr_add_byte(&sig, hex[sp[i] >> 4]);
+            vstr_add_byte(&sig, hex[sp[i] & 15]);
+        }
+        mp_obj_t ota = mp_import_name(MP_QSTR_moy_ota, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_t ok = mp_call_function_2(mp_load_attr(ota, MP_QSTR_verify_sig),
+                                         mp_obj_new_bytes((const byte *)text, tl),
+                                         mp_obj_new_str_from_vstr(&sig));
+        if (mp_obj_is_true(ok)) {
+            why = NULL;
+        }
+        nlr_pop();
+    } else {
+        why = "the signature could not be checked";
+    }
+    *module_len = n;
+    return why;
+}
+
 static void read_file(run_t *r, mp_obj_t path)
 {
     read_module(path, &r->file, &r->file_len);
@@ -435,10 +501,11 @@ static void read_file(run_t *r, mp_obj_t path)
 
 // start(path, export, args=(), loops=1, stack=None, psram_stack=None)
 //
-// Reads the module file, then runs `loops` passes of load / check / instantiate
+// Reads the module file and checks its signature, then runs `loops` passes of load / check / instantiate
 // / call export(*args) / unload on a new thread, and returns at once. `stack`
 // and `psram_stack` override the board's settings for this run (a measurement,
-// not a product knob). done() says when it ended, result() collects it.
+// not a product knob). done() says when it ended, result() collects it; a
+// module refused for its signature ends at once, with no thread.
 static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args)
 {
     enum { ARG_path, ARG_export, ARG_args, ARG_loops, ARG_stack, ARG_psram_stack };
@@ -495,6 +562,13 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     r->stack_psram = a[ARG_psram_stack].u_obj == mp_const_none
                          ? MOY_WASM_STACK_PSRAM : mp_obj_is_true(a[ARG_psram_stack].u_obj);
     read_file(r, a[ARG_path].u_obj);
+    const char *why = verify_module(r->file, r->file_len, &r->file_len);
+    if (why) {
+        fail(r, "refused", why);
+        r->started = true;
+        r->finished = true;
+        return mp_const_none;
+    }
 
     // The low-water mark covers the run's whole cost, its thread's stack and
     // control block included, so the monitor starts before the thread exists.
@@ -510,6 +584,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("could not start the run's thread"));
     }
     r->started = true;
+    r->threaded = true;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(mod_start_obj, 2, mod_start);
@@ -799,6 +874,12 @@ int moy_wasm_session_open(const char *path, const char *want_sha,
         sess_free(s);
         nlr_jump(nlr.ret_val);
     }
+    const char *why = verify_module(s->file, s->file_len, &s->file_len);
+    if (why) {
+        snprintf(err, errlen, "refused: %s", why);
+        sess_free(s);
+        return 1;
+    }
     s->waiting = true;
     int pe = moy_wasm_spawn(&s->tid, sess_thread, s, MOY_WASM_STACK_BYTES,
                             MOY_WASM_STACK_PSRAM, MOY_WASM_CORE, MOY_WASM_PRIO);
@@ -851,12 +932,16 @@ static mp_obj_t mod_result(void)
     if (!r->started) {
         return mp_const_none;
     }
-    MP_THREAD_GIL_EXIT();
-    pthread_join(r->tid, NULL);
-    MP_THREAD_GIL_ENTER();
-    size_t sram_min = heap_caps_get_minimum_free_size(SRAM_CAPS);
-    size_t psram_min = heap_caps_get_minimum_free_size(PSRAM_CAPS);
-    heap_caps_monitor_local_minimum_free_size_stop();
+    size_t sram_min = r->sram_before;
+    size_t psram_min = 0;
+    if (r->threaded) {
+        MP_THREAD_GIL_EXIT();
+        pthread_join(r->tid, NULL);
+        MP_THREAD_GIL_ENTER();
+        sram_min = heap_caps_get_minimum_free_size(SRAM_CAPS);
+        psram_min = heap_caps_get_minimum_free_size(PSRAM_CAPS);
+        heap_caps_monitor_local_minimum_free_size_stop();
+    }
     r->started = false;
     uint32_t module_bytes = r->file_len;
     release(r);

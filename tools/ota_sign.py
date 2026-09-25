@@ -69,6 +69,7 @@ SHA256_DER = bytes((
 ))
 
 ENV_KEY = "MOYBYTE_OTA_SIGNING_KEY"      # PEM, or a path to one
+DEFAULT_KEY = os.path.expanduser("~/.moybyte-ota-signing-key.pem")   # where keygen writes
 
 
 def canonical(manifest):
@@ -229,7 +230,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     g = sub.add_parser("keygen", help="generate a signing key (run this once)")
-    g.add_argument("--out", default=os.path.expanduser("~/.moybyte-ota-signing-key.pem"))
+    g.add_argument("--out", default=DEFAULT_KEY)
 
     s = sub.add_parser("sign", help="add a `sig` to a manifest, in place")
     s.add_argument("manifest")

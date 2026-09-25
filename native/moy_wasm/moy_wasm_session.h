@@ -40,10 +40,12 @@ typedef struct {
 } moy_wasm_ops;
 
 // Open a session on the module file `path` (read through the VFS into
-// PSRAM, as moy_wasm.start reads its module). `want_sha` is the canonical
-// .wasm's sha256 as 64 hex characters, which the module's key must name, or
-// NULL to take whatever wasm the key names. Returns 0 with the cart bound, or
-// non-zero with the refusal in `err`; a file that cannot be read raises.
+// PSRAM and its signature checked, as moy_wasm.start reads its module; an
+// unsigned or tampered module is refused before the thread exists).
+// `want_sha` is the canonical .wasm's sha256 as 64 hex characters, which the
+// module's key must name, or NULL to take whatever wasm the key names.
+// Returns 0 with the cart bound, or non-zero with the refusal in `err`; a
+// file that cannot be read raises.
 int moy_wasm_session_open(const char *path, const char *want_sha,
                           const moy_wasm_ops *ops, char *err, size_t errlen);
 

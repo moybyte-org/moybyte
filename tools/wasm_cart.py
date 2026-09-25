@@ -13,8 +13,9 @@ manifest's `main`. Everything else in the folder, `src/` included, is copied as
 it is, so the Code tab has the source to show.
 
 `--chip` adds the per-chip AOT module a board loads, built by
-`tools/wasm_module.py` with the pinned compiler and carrying the provenance key
-that board's build wants. How a board finds it is host policy, and it is one
+`tools/wasm_module.py` with the pinned compiler, carrying the provenance key
+that board's build wants and signed with the OTA signing key (that tool says
+where the key comes from). How a board finds it is host policy, and it is one
 rule, `aot_name`: the manifest's `main` with `.wasm` replaced by
 `.<chip>.aot`, in the cart's folder -- `device/moycore_glue.py`'s `aot_path`
 states the same rule and `tests/test_wasm_cart.py` holds the two equal. A

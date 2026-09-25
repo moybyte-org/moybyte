@@ -101,6 +101,10 @@ def test_a_compiled_cart_without_this_chips_module_is_refused(board, wasm_carts)
     on_glass.wasm_missing_module_is_refused(board, WASM_BOARD_DIR)
 
 
+def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_carts):
+    on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
+
+
 def test_state_snapshot_has_the_fullscreen_tier_shape(board):
     on_glass.fullscreen_tier_state(board)
 

@@ -28,6 +28,22 @@
 #define MOY_WASM_KEY_SECTION "moybyte.key"
 #define MOY_WASM_KEY_MAGIC "moybyte-aot 1\n"
 
+// The signature. A module FILE is the module, then its signature, then the
+// signature's length in bytes (4, little-endian), then MOY_WASM_SIG_MAGIC:
+//
+//     <module> <signature> <length> "moybyte-sig1"
+//
+// The signature is the OTA scheme's -- RSA, PKCS#1 v1.5, SHA-256, checked by
+// moy_ota.verify_sig against the keys in moy_ota.OTA_PUBLIC_KEYS -- over the
+// text
+//
+//     MOY_WASM_SIG_SCHEME "\n" <chip> "\n" <module length> "\n" <sha256 hex>
+//
+// so it covers every byte of the module, the key section included. A board
+// strips the trailer and loads the module only after the signature verifies.
+#define MOY_WASM_SIG_MAGIC "moybyte-sig1"
+#define MOY_WASM_SIG_SCHEME "moybyte-aot-sig 1"
+
 // ESP32-S3: Xtensa LX7. --size-level=0 is the large code model, which keeps
 // constants out of a literal pool: the S3 fetches AOT text through the
 // instruction-bus alias, and a load through that alias faults.

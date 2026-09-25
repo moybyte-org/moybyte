@@ -5,6 +5,7 @@
     python3 tools/wasm_module.py hello --chip esp32p4 -o hello_p4.aot
     python3 tools/wasm_module.py key --chip esp32s3          # print the key tail
     python3 tools/wasm_module.py compilers                   # where wamrc is, by hash
+    python3 tools/wasm_module.py verify cart_s3.aot --chip esp32s3
 
 A per-architecture module is native code, so a board runs one only if its
 provenance key says which wasm it came from, which runtime fork it was
@@ -22,6 +23,16 @@ against -- and the fork commit is native/moy_wasm/wamr_vendor.json's, the
 runtime the board was built with. A module this tool builds therefore carries
 the key the board wants by construction, and a module anything else builds is
 refused.
+
+EVERY MODULE IS SIGNED, the way an OTA manifest is: RSA, PKCS#1 v1.5, SHA-256,
+with the OTA signing key (`tools/ota_sign.py`: $MOYBYTE_OTA_SIGNING_KEY, a PEM
+or a path to one, else the key `make ota-keygen` writes), over a text naming
+the chip and the module's length and sha256 -- so the signature covers every
+byte of the module, its key section included. The signature rides after the
+module in the same file; the layout and the text are native/moy_wasm/
+moy_wasm_key.h's, which this tool reads, and the board checks it with
+moy_ota.verify_sig against the keys its image trusts before the runtime sees
+a byte. `--unsigned` builds a module a board must refuse.
 
 THE COMPILERS are fixed binaries, pinned by sha256 below: the Xtensa one built
 by experiments/wasm_aot/toolchain/build_wamrc_xtensa.sh (Espressif's LLVM, the
@@ -49,7 +60,14 @@ import tempfile
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TOOLS = os.path.join(ROOT, "tools")
+if TOOLS not in sys.path:
+    sys.path.insert(0, TOOLS)
+
+import ota_sign  # noqa: E402
+
 KEY_HEADER = os.path.join(ROOT, "native", "moy_wasm", "moy_wasm_key.h")
+MOY_OTA = os.path.join(ROOT, "device", "moy_ota.py")
 VENDOR_STAMP = os.path.join(ROOT, "native", "moy_wasm", "wamr_vendor.json")
 SPIKE = os.path.join(ROOT, "experiments", "wasm_aot")
 DIST = os.path.join(SPIKE, "toolchain", "dist")
@@ -128,6 +146,93 @@ def key_tail(chip, fork=None, override=None):
 def key_text(wasm, chip, fork=None, override=None):
     return (KEY_MAGIC + "wasm %s\n" % hashlib.sha256(wasm).hexdigest()
             + key_tail(chip, fork, override))
+
+
+# -- the signature ----------------------------------------------------------------
+
+
+def _define(name, header=KEY_HEADER):
+    text = open(header, encoding="utf-8").read()
+    m = re.search(r'#define %s "([^"\n]*)"' % name, text)
+    if not m:
+        raise ToolError("no %s in %s" % (name, header))
+    return m.group(1)
+
+
+def sig_magic():
+    return _define("MOY_WASM_SIG_MAGIC").encode()
+
+
+def sig_scheme():
+    return _define("MOY_WASM_SIG_SCHEME")
+
+
+def signed_text(module, chip):
+    """What a module's signature covers (moy_wasm_key.h)."""
+    return ("%s\n%s\n%d\n%s" % (sig_scheme(), chip, len(module),
+                                 hashlib.sha256(module).hexdigest())).encode()
+
+
+def attach(module, signature):
+    """The module file: `module`, then `signature` (bytes), its length and the
+    magic."""
+    return (module + signature + len(signature).to_bytes(4, "little")
+            + sig_magic())
+
+
+def split(data):
+    """(module, signature bytes) of a signed module file, or (data, None)
+    when it carries no signature trailer."""
+    magic = sig_magic()
+    if len(data) < len(magic) + 4 or not data.endswith(magic):
+        return data, None
+    k = int.from_bytes(data[-len(magic) - 4:-len(magic)], "little")
+    end = len(data) - len(magic) - 4
+    if not 64 <= k <= 1024 or k > end:
+        return data, b""
+    return data[:end - k], data[end - k:end]
+
+
+def signing_key(source=None):
+    """The OTA signing key as PEM bytes: `source`, $MOYBYTE_OTA_SIGNING_KEY,
+    or the file `make ota-keygen` writes; None when there is none."""
+    key = ota_sign.read_key(source)
+    if key is None and os.path.isfile(ota_sign.DEFAULT_KEY):
+        key = ota_sign.read_key(ota_sign.DEFAULT_KEY)
+    return key
+
+
+def sign(module, chip, key):
+    """The signed module file for `module` (bytes) built for `chip`. `key` is
+    the signing key as PEM bytes, or a callable taking the signed text and
+    returning the signature's bytes (how a test signs with a throwaway key)."""
+    text = signed_text(module, chip)
+    sig = key(text) if callable(key) else bytes.fromhex(ota_sign._sign_bytes(text, key))
+    return attach(module, sig)
+
+
+def _verifier():
+    """device/moy_ota.py's verify_sig: the body and the keys a board checks a
+    module with."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("moy_ota_wasm_module", MOY_OTA)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.verify_sig
+
+
+def verify(data, chip, keys=None):
+    """None when `data` is a module file a board of `chip` trusting `keys`
+    (default: the image's OTA_PUBLIC_KEYS) loads, otherwise the refusal the
+    board gives."""
+    module, sig = split(data)
+    if sig is None:
+        return "unsigned module"
+    if not sig:
+        return "malformed signature"
+    if not _verifier()(signed_text(module, chip), sig.hex(), keys):
+        return "bad signature"
+    return None
 
 
 def wamrc_flags(chip, override=None):
@@ -244,12 +349,22 @@ def compiler(target, fetch=True):
 # -- building -------------------------------------------------------------------
 
 
-def build(wasm, chip, out, key=True, fork=None, override=None):
-    """Compile `wasm` (bytes) for `chip` into `out`. Returns the key text.
+def build(wasm, chip, out, key=True, fork=None, override=None, sign_with=None,
+          signed=True):
+    """Compile `wasm` (bytes) for `chip` into `out`, signed with `sign_with`
+    (sign()'s `key`; default signing_key()). Returns the key text.
 
     `fork` and `override` build a module this tree's boards must REFUSE: a key
     naming another runtime, or flags (and a key saying so) the board's build
-    does not want."""
+    does not want; `signed=False` leaves the signature off, another such
+    module."""
+    pem = None
+    if signed:
+        pem = sign_with or signing_key()
+        if pem is None:
+            raise ToolError("no signing key: set $%s, pass --key, or run `make "
+                            "ota-keygen` (--unsigned builds a module a board "
+                            "refuses)" % ota_sign.ENV_KEY)
     target = dict(fields(chip, override))["target"]
     text = key_text(wasm, chip, fork, override)
     src = with_custom_section(wasm, KEY_SECTION, text.encode()) if key else wasm
@@ -265,6 +380,11 @@ def build(wasm, chip, out, key=True, fork=None, override=None):
         if r.returncode != 0 or not os.path.isfile(out):
             raise ToolError("wamrc failed (%s):\n%s%s"
                             % (" ".join(cmd), r.stdout, r.stderr))
+    if pem is not None:
+        with open(out, "rb") as f:
+            module = f.read()
+        with open(out, "wb") as f:
+            f.write(sign(module, chip, pem))
     return text if key else None
 
 
@@ -321,22 +441,38 @@ def main(argv):
         p.add_argument("--field", action="append", default=[], metavar="NAME=VALUE",
                        help="build with another value for a key field, e.g. "
                        "size=3 (a module the board must refuse); repeatable")
+        p.add_argument("--key", dest="signing_key",
+                       help="the signing key, PEM or a path (default: $%s, then "
+                       "%s)" % (ota_sign.ENV_KEY, ota_sign.DEFAULT_KEY))
+        p.add_argument("--unsigned", action="store_true",
+                       help="leave the signature off (a module the board must refuse)")
     k = sub.add_parser("key", help="print the key tail a chip's build wants")
     k.add_argument("--chip", required=True, choices=sorted(targets()))
+    v = sub.add_parser("verify", help="check a module's signature as a board would")
+    v.add_argument("aot")
+    v.add_argument("--chip", required=True, choices=sorted(targets()))
     sub.add_parser("compilers", help="locate and verify the pinned compilers")
     args = ap.parse_args(argv)
     try:
         if args.cmd == "key":
             sys.stdout.write(key_tail(args.chip))
             return 0
+        if args.cmd == "verify":
+            with open(args.aot, "rb") as f:
+                why = verify(f.read(), args.chip)
+            print("%s: %s" % (args.aot, "signed, trusted" if why is None
+                              else "REFUSED: %s" % why))
+            return 0 if why is None else 1
         if args.cmd == "compilers":
             for target in sorted(COMPILERS):
                 print("%-8s %s" % (target, compiler(target)))
             return 0
         wasm = hello_wasm() if args.cmd == "hello" else open(args.wasm, "rb").read()
         override = dict(f.split("=", 1) for f in args.field)
+        pem = signing_key(args.signing_key) if args.signing_key else None
         text = build(wasm, args.chip, args.out, key=not args.no_key,
-                     fork=args.fork, override=override)
+                     fork=args.fork, override=override, sign_with=pem,
+                     signed=not args.unsigned)
         print("%s: %d bytes%s" % (args.out, os.path.getsize(args.out),
                                   "" if text is None else ", wasm %s"
                                   % hashlib.sha256(wasm).hexdigest()[:16]))

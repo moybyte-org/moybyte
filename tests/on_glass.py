@@ -481,13 +481,38 @@ def _wasm_chip(board_dir):
 _WASM_BUILT = {}
 
 
+def wasm_signing_key():
+    """The OTA signing key a board's image trusts, or a skip: a module signed
+    with anything else is refused, so without it there is nothing to load."""
+    from tools import wasm_module as wm
+    key = wm.signing_key()
+    if key is None:
+        pytest.skip("no OTA signing key ($MOYBYTE_OTA_SIGNING_KEY or the file "
+                    "`make ota-keygen` writes): a board loads only modules "
+                    "signed with the key its image trusts")
+    return key
+
+
+def wasm_tamper(path):
+    """Flip one byte of the module's provenance key, which its signature
+    covers, and leave the signature as it was."""
+    with open(path, "rb") as f:
+        data = bytearray(f.read())
+    at = data.index(b"moybyte-aot 1\n") + len("moybyte-aot 1\nwasm ")
+    data[at] ^= 0x01
+    with open(path, "wb") as f:
+        f.write(bytes(data))
+
+
 def wasm_modules(chip):
     """{name: local .aot} for `chip`, built once per session: the hello
-    module, and four a board must refuse -- no key, another fork, other
-    flags (the key saying so), another chip."""
+    module, and six a board must refuse -- no key, another fork, other flags
+    (the key saying so), another chip, no signature, and a signed module with
+    one byte of its key changed."""
     if chip not in _WASM_BUILT:
         import tempfile
         from tools import wasm_module as wm
+        key = wasm_signing_key()
         out = tempfile.mkdtemp(prefix="moy_wasm_%s_" % chip)
         wasm = wm.hello_wasm()
         other = "esp32p4" if chip == "esp32s3" else "esp32s3"
@@ -496,9 +521,12 @@ def wasm_modules(chip):
                             ("nokey", chip, {"key": False}),
                             ("badfork", chip, {"fork": "0" * 40}),
                             ("badflags", chip, {"override": {"opt": "2"}}),
-                            ("otherchip", other, {})):
+                            ("otherchip", other, {}),
+                            ("unsigned", chip, {"signed": False}),
+                            ("tampered", chip, {})):
             mods[name] = os.path.join(out, name + ".aot")
-            wm.build(wasm, c, mods[name], **kw)
+            wm.build(wasm, c, mods[name], sign_with=key, **kw)
+        wasm_tamper(mods["tampered"])
         _WASM_BUILT[chip] = mods, hashlib.sha256(wasm).hexdigest()
     return _WASM_BUILT[chip]
 
@@ -582,8 +610,9 @@ def wasm_idle_cost_is_bounded(board, baseline, ble_at_boot):
 def wasm_hello_runs_and_foreign_modules_are_refused(board, board_dir, paths):
     """The engine end to end: this build's key is the tool's, the hello module
     loads from the cart store and returns the core's cycle count on the run
-    thread, and every module the key does not vouch for is refused before
-    anything in it runs."""
+    thread, and every module the key or the signature does not vouch for is
+    refused before anything in it runs -- another chip's by its signature,
+    which names the chip it was signed for."""
     from tools import wasm_module as wm
     chip = _wasm_chip(board_dir)
     assert board.pyval("__import__('moy_wasm').KEY", strict=True) == wm.key_tail(chip)
@@ -600,7 +629,9 @@ def wasm_hello_runs_and_foreign_modules_are_refused(board, board_dir, paths):
     for name, why in (("nokey", "refused: no moybyte.key"),
                       ("badfork", "refused: key mismatch 'fork 0000"),
                       ("badflags", "refused: key mismatch 'opt 2'"),
-                      ("otherchip", "load: ")):
+                      ("otherchip", "refused: bad signature"),
+                      ("unsigned", "refused: unsigned module"),
+                      ("tampered", "refused: bad signature")):
         r = wasm_run(board, paths[name], "step", (20000,))
         assert not r["ok"] and r["loops"] == 0, (name, r)
         assert r["error"].startswith(why), (name, r["error"])
@@ -788,6 +819,7 @@ def wasm_carts_push(board, board_dir):
     {name: title}."""
     import tempfile
     from tools import wasm_cart
+    wasm_signing_key()
     chip = _wasm_chip(board_dir)
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     tmp = tempfile.mkdtemp(prefix="moy_wasm_carts_")
@@ -858,30 +890,62 @@ def wasm_cart_holds_its_floor(board, title, floor, check=None):
     return fps
 
 
-def wasm_missing_module_is_refused(board, board_dir):
-    """A compiled cart whose module was compiled for another chip is refused
-    before anything runs: the Player's panel names it, and the desk comes back."""
-    chip = _wasm_chip(board_dir)
-    other = "esp32p4" if chip == "esp32s3" else "esp32s3"
+def _wasm_fixture_variant(board, board_dir, chip, title, slug, change=None):
+    """The hello cart built for `chip` under another title, `change(folder)`
+    applied, pushed as `wasm_<slug>.moy` and rescanned."""
     import tempfile
     from tools import wasm_cart
-    tmp = tempfile.mkdtemp(prefix="moy_wasm_other_")
-    out = os.path.join(tmp, "other.moy")
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_%s_" % slug)
+    out = os.path.join(tmp, slug + ".moy")
     wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "hello.moy"), out,
-                    chips=(other,))
+                    chips=(chip,))
     with open(os.path.join(out, "manifest.json")) as f:
-        man = f.read().replace('"Hello Wasm"', '"Other Chip Wasm"')
+        man = f.read().replace('"Hello Wasm"', '"%s"' % title)
     with open(os.path.join(out, "manifest.json"), "w") as f:
         f.write(man)
+    if change is not None:
+        change(out)
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
-    _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_other.moy")
+    _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_" + slug + ".moy")
     board.pyval("len(ws.rescan_carts() or ())", timeout=60)
-    board.cmd("run other chip wasm", wait_for="REMOTE run")
+
+
+def _wasm_run_error(board, title):
+    """Run `title` from the launcher and return the Player's cart_error."""
+    board.cmd("run %s" % title.lower(), wait_for="REMOTE run")
     try:
         board.drain(2.0)
-        err = board.state().get("cart_error") or ""
+        return board.state().get("cart_error") or ""
     finally:
         board.leave_cart()
         board.drain(1.0)
+
+
+def wasm_tampered_module_is_refused(board, board_dir):
+    """A compiled cart whose module was changed after it was signed -- one byte
+    of its provenance key -- is refused on the Player's panel before anything
+    in it loads, and the desk comes back."""
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+
+    def _tamper(folder):
+        from tools import wasm_cart
+        wasm_tamper(os.path.join(folder, wasm_cart.aot_name("main.wasm", chip)))
+
+    _wasm_fixture_variant(board, board_dir, chip, "Tampered Wasm", "tampered",
+                          _tamper)
+    err = _wasm_run_error(board, "Tampered Wasm")
+    assert "refused: bad signature" in err, err
+    return err
+
+
+def wasm_missing_module_is_refused(board, board_dir):
+    """A compiled cart whose module was compiled for another chip is refused
+    before anything runs: the Player's panel names it, and the desk comes back."""
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    other = "esp32p4" if chip == "esp32s3" else "esp32s3"
+    _wasm_fixture_variant(board, board_dir, other, "Other Chip Wasm", "other")
+    err = _wasm_run_error(board, "Other Chip Wasm")
     assert "no module compiled for this board" in err, err
     return err
