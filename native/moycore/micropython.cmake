@@ -2,9 +2,11 @@
 # micropython.mk beside it -- the boards build cmake, the unix pin build and
 # the wasm runner build make, and the two must stay in step.
 #
-# Two sources only: this module's MicroPython binding, and libmoy's Lua binding
-# wrapped by libmoy_binding.c (which carries the pragmas a 32-bit Lua needs and
-# a vendored file must not). It compiles NEITHER a raster NOR a VM -- the image
+# This module's MicroPython binding, libmoy's Lua binding wrapped by
+# libmoy_binding.c (which carries the pragmas a 32-bit Lua needs and a vendored
+# file must not), its PICO-8 machine the same way, and its wasm import table
+# (libmoy/moy_wasm.c) -- which compiles to nothing unless the engine,
+# native/moy_wasm, is in the build and defines MOY_WASM. It compiles NEITHER a raster NOR a VM -- the image
 # already has moy_gfx's vendored libmoy and moy_lua's vendored Lua 5.4, and a
 # second copy of either would be a duplicate-symbol link error. So the include
 # paths point at those siblings, and moycore requires both in the build.
@@ -15,6 +17,7 @@ target_sources(usermod_moycore INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoycore.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy_binding.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy_p8_binding.c
+    ${CMAKE_CURRENT_LIST_DIR}/libmoy/moy_wasm.c
 )
 
 target_include_directories(usermod_moycore INTERFACE

@@ -66,6 +66,11 @@ try:
 except ImportError:                      # a build without the module
     _moycore = None
 
+try:
+    import moy_wasm as _moy_wasm         # the compiled cart's engine
+except ImportError:                      # a build without it: no wasm runtime
+    _moy_wasm = None
+
 # Hoisted out of _refresh, where it was an `import` statement executed once per
 # frame. Device-only, so it stays optional: the host and the web runner have no
 # device_util and simply skip the time slot (libmoy adds the intra-tick elapsed
@@ -213,7 +218,7 @@ class MoycoreRun:
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
-            self.snap, self.aq, self.pmem_img, cfg, flags)
+            self.snap, self.aq, self.pmem_img, cfg, flags, True)
         # The superset, on top of libmoy's table and BEFORE the cart runs.
         # Anything callable in the namespace that libmoy did not already
         # install: registering a name libmoy owns would shadow the C verb with
@@ -434,11 +439,167 @@ class MoycoreRun:
                 _moycore.close()
 
 
+# -- the compiled cart (docs/wasm_tier_plan_2026-09.md, phase 3) ------------
+
+def aot_path(cart_dir, main, chip):
+    """Where a cart's compiled module for `chip` sits: its `main` with `.wasm`
+    replaced by `.<chip>.aot`, in the cart's folder. How a board finds the
+    module is host policy (the plan); tools/wasm_cart.py's `aot_name` states
+    the same rule and tests/test_wasm_cart.py holds the two equal."""
+    stem = main[:-5] if main.endswith(".wasm") else main
+    return "%s/%s.%s.aot" % (cart_dir, stem, chip)
+
+
+def wasm_head(path):
+    """The canonical module's bytes up to the end of its memory section --
+    what moy_wasm_check reads the declared memory from. Sections run in id
+    order and memory (5) precedes code and data, so this is the module's
+    small head, never its body. Everything read, when the file ends first."""
+    with open(path, "rb") as f:
+        data = f.read(8)
+        if data[:4] != b"\0asm":
+            return data
+        while True:
+            sid = f.read(1)
+            if not sid:
+                return data
+            data += sid
+            n = shift = 0
+            while True:
+                b = f.read(1)
+                if not b:
+                    return data
+                data += b
+                n |= (b[0] & 0x7F) << shift
+                shift += 7
+                if not b[0] & 0x80:
+                    break
+            if sid[0] > 5:
+                return data
+            body = f.read(n)
+            data += body
+            if sid[0] == 5 or len(body) < n:
+                return data
+
+
+def _sha256_file(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(4096)
+            if not b:
+                break
+            h.update(b)
+    return "".join("%02x" % c for c in h.digest())
+
+
+class WasmRun(MoycoreRun):
+    """One compiled cart run: moycore's console with libmoy's wasm import
+    table on it and the engine (moy_wasm) running the cart's module on its own
+    thread. The same shape as MoycoreRun -- the snapshot, the tick, quit, view,
+    the audio queue and pmem are that class's -- so only construction is
+    written here."""
+
+    def __init__(self, ws, ns, src):
+        del src                          # a compiled cart has no source text
+        if (_moycore is None or not getattr(_moycore, "WASM", 0)
+                or _moy_wasm is None):
+            raise RuntimeError("moycore has no wasm engine in this build")
+        project = getattr(ws, "project", None)
+        cart = getattr(project, "cart", None) or ws.cart or {}
+        path = cart["path"]
+        main = cart.get("main", "main.wasm")
+        pages = cart.get("memory")
+        if not pages:
+            raise RuntimeError('refused: the manifest declares no "memory"')
+        module = aot_path(path, main, _moy_wasm.CHIP)
+        try:
+            open(module, "rb").close()
+        except OSError:
+            raise RuntimeError("no module compiled for this board (%s)"
+                               % module[len(path) + 1:])
+        head = wasm_head(path + "/" + main)
+        sha = _sha256_file(path + "/" + main)
+        self.ws = ws
+        self.ns = ns
+        self._dt = 0.0
+        canvas = ws.canvas
+        sheet = getattr(project, "sheet", None) if project is not None else None
+        tilemap = getattr(project, "tilemap", None) if project is not None else None
+        flags = getattr(project, "flags", None) if project is not None else None
+        self._I_BTN = _moycore.SNAP_BTN
+        self._I_BTNP = _moycore.SNAP_BTNP
+        self._I_TIME = _moycore.SNAP_TIME_MS
+        self._I_SNAP = snap_slots(_moycore)
+        self._aq_ops = audio_ops(_moycore)
+        self._touch_out = [0, 0, 0, 0]
+        self._I_QUIT = _moycore.SNAP_QUIT
+        self._I_KEY = _moycore.SNAP_KEY
+        self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
+        self.aq = array("h", bytearray(2 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
+        self.pmem_img = array("i", bytearray(4 * 256))
+        pmem = getattr(ws, "pmem", None)
+        cells = getattr(pmem, "cells", None) if pmem is not None else None
+        if cells is not None:
+            for i in range(min(256, len(cells))):
+                self.pmem_img[i] = int(cells[i])
+        wire = getattr(canvas, "_wire", None)
+        import device_canvas
+        if wire is None:
+            wire = device_canvas._PAL565_WIRE_BUF
+        swapped = device_canvas.PAL565_WIRE is not device_canvas.PAL565
+        cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
+        self._layers = self._images = None
+        _moycore.run_begin(
+            canvas._buf, canvas.w, canvas.h, wire,
+            getattr(sheet, "pix", None),
+            getattr(tilemap, "cells", None),
+            getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
+            self.snap, self.aq, self.pmem_img, cfg, flags, False)
+        self.snap[_moycore.SNAP_PLAYERS] = 1
+        err = _moycore.wasm_open(module, head, int(pages), sha, path, swapped)
+        if err:
+            try:
+                _moycore.close()
+            finally:
+                raise RuntimeError(err)
+        self._view = None
+        self._sync_view()
+        self.init = None                 # _init ran inside wasm_open
+        self.update = self._update
+        self.draw = self._draw_noop
+
+
 def make_moycore_runtime(ws):
-    """The `ws.lua_runtime`-shaped factory, or None when unavailable."""
+    """The Lua runtime factory, or None when unavailable."""
     if _moycore is None:
         return None
 
     def _make(ns, src):
         return MoycoreRun(ws, ns, src)
     return _make
+
+
+def make_wasm_runtime(ws):
+    """The compiled-cart runtime factory, or None when this build has no
+    engine (moycore's WASM flag is the build's own answer)."""
+    if (_moycore is None or not getattr(_moycore, "WASM", 0)
+            or _moy_wasm is None):
+        return None
+
+    def _make(ns, src):
+        return WasmRun(ws, ns, src)
+    return _make
+
+
+def make_runtimes(ws):
+    """`ws.runtimes` for this build: every runtime the image carries, by the
+    manifest name a cart gives it. An absent key is a runtime this build lacks,
+    and the Player's runtime-missing panel is what a cart naming it gets."""
+    out = {}
+    for name, make in (("lua", make_moycore_runtime), ("wasm", make_wasm_runtime)):
+        rt = make(ws)
+        if rt is not None:
+            out[name] = rt
+    return out

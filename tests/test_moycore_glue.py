@@ -160,10 +160,11 @@ class FakeMoycore(types.ModuleType):
         self.pmem_image_result = True
         self.pmem_image_fill = None
         self.closes = 0
+        self.wasm_open_err = None
         for verb in ("run_begin", "register", "exec", "load", "tick",
                      "tick_split", "pmem_image", "retarget", "close",
                      "active", "view", "set_sram_floor", "alloc_stats",
-                     "get_global"):
+                     "get_global", "wasm_open"):
             assert verb in C_NAMES, verb
             setattr(self, verb, getattr(self, "_" + verb))
 
@@ -235,6 +236,10 @@ class FakeMoycore(types.ModuleType):
 
     def _get_global(self, name):
         return None
+
+    def _wasm_open(self, *a):
+        self._log("wasm_open", *a)
+        return self.wasm_open_err
 
 
 class Clock:
@@ -476,11 +481,17 @@ class World:
     in a file exercise the first one's board.
     """
 
-    NAMES = ("moycore", "device_util", "device_canvas", "lua_ext")
+    NAMES = ("moycore", "device_util", "device_canvas", "lua_ext", "moy_wasm")
 
     def __init__(self, moycore=True, device_util=True, flat_lua_ext=True,
-                 wire_fallback=b"\1" * 128):
+                 wire_fallback=b"\1" * 128, wasm_chip=None):
         self.saved = {n: sys.modules.get(n, KeyError) for n in self.NAMES}
+        if wasm_chip is None:
+            sys.modules["moy_wasm"] = None     # no engine in this build
+        else:
+            mw = types.ModuleType("moy_wasm")
+            mw.CHIP = wasm_chip
+            sys.modules["moy_wasm"] = mw
         if not flat_lua_ext:
             sys.modules["lua_ext"] = None      # no frozen flat name: the host
         self.clock = Clock()
@@ -499,6 +510,8 @@ class World:
         if wire_fallback is not None:
             dc = types.ModuleType("device_canvas")
             dc._PAL565_WIRE_BUF = wire_fallback
+            dc.PAL565 = (0, 0xF800)
+            dc.PAL565_WIRE = (0, 0x00F8)       # a byte-swapped panel
             sys.modules["device_canvas"] = dc
         else:
             sys.modules["device_canvas"] = None
@@ -533,7 +546,7 @@ def w():
 
 
 def test_a_build_without_the_module_yields_no_runtime_rather_than_an_error():
-    """`device_boot.lua_runtime` prints "lua runtime ABSENT" off this None and
+    """`device_boot.runtimes` prints "lua runtime ABSENT" off this None and
     a `"runtime": "lua"` cart opens the Player's runtime-missing panel."""
     world = World(moycore=False)
     try:
@@ -1663,3 +1676,131 @@ def test_device_canvas_mirrors_no_member_the_c_dropped(first, src, c_prefix,
     assert not stray, (
         "device_canvas keeps %s, which %s's enum does not define"
         % (sorted(stray), src.name))
+
+
+# -- the compiled cart (WasmRun) -------------------------------------------------
+
+
+class _CartProject(FakeProject):
+    def __init__(self, cart, **kw):
+        super().__init__(**kw)
+        self.cart = cart
+
+
+_MODULE = """
+(module
+  (import "moy" "cls" (func $cls (param i32)))
+  (memory (export "memory") 3 3)
+  (func (export "_init"))
+  (func (export "_update") (param f32))
+  (func (export "_draw") (call $cls (i32.const 1))))
+"""
+
+
+def _compiled(tmp_path, chips=("esp32s3",), memory=3):
+    """A compiled cart folder: a module assembled from WAT, and a stand-in
+    compiled module per chip (the glue only checks it is there and hands the
+    path on -- the engine is what reads it)."""
+    from tools import wat
+    d = tmp_path / "hello.moy"
+    d.mkdir()
+    main = d / "main.wasm"
+    main.write_bytes(wat.assemble(_MODULE))
+    cart = {"path": str(d), "main": "main.wasm", "runtime": "wasm",
+            "memory": memory}
+    for chip in chips:
+        with open(_glue_aot(cart, chip), "wb") as f:
+            f.write(b"aot")
+    return cart, str(main)
+
+
+def _glue_aot(cart, chip):
+    world = World()
+    try:
+        return world.mod.aot_path(cart["path"], cart["main"], chip)
+    finally:
+        world.close()
+
+
+def _wasm_world(chip="esp32s3"):
+    world = World(wasm_chip=chip)
+    world.core.WASM = 1
+    return world
+
+
+def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
+    import hashlib
+    cart, main = _compiled(tmp_path)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
+        assert world.core.rb("vm") is False
+        _v, module, head, pages, sha, cdir, swapped = world.core.calls[1]
+        assert module == cart["path"] + "/main.esp32s3.aot"
+        blob = open(main, "rb").read()
+        assert blob.startswith(head) and len(head) < len(blob)
+        assert pages == 3 and cdir == cart["path"] and swapped is True
+        assert sha == hashlib.sha256(blob).hexdigest()
+        # the frame is MoycoreRun's: _update ticks, draw is the fused no-op
+        assert run.init is None and run.draw() is None
+        run.update(1 / 30)
+        assert "tick" in world.core.verbs()
+    finally:
+        world.close()
+
+
+def test_a_cart_with_no_module_for_this_chip_is_refused(tmp_path):
+    cart, _main = _compiled(tmp_path, chips=("esp32p4",))
+    world = _wasm_world("esp32s3")
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(RuntimeError, match="no module compiled for this board"):
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert "run_begin" not in world.core.verbs()
+    finally:
+        world.close()
+
+
+def test_a_refused_or_trapped_open_closes_the_console(tmp_path):
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_err = "refused: key mismatch 'opt 2'"
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(RuntimeError, match="key mismatch"):
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.closes == 1
+    finally:
+        world.close()
+
+
+def test_a_manifest_without_memory_is_refused_before_anything_loads(tmp_path):
+    cart, _main = _compiled(tmp_path, memory=None)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(RuntimeError, match="memory"):
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.verbs() == []
+    finally:
+        world.close()
+
+
+def test_the_runtimes_map_names_what_the_build_carries():
+    world = _wasm_world()
+    try:
+        assert sorted(world.mod.make_runtimes(FakeWs())) == ["lua", "wasm"]
+    finally:
+        world.close()
+    world = World()                    # moycore, no engine
+    try:
+        assert sorted(world.mod.make_runtimes(FakeWs())) == ["lua"]
+    finally:
+        world.close()
+    world = World(moycore=False)
+    try:
+        assert world.mod.make_runtimes(FakeWs()) == {}
+    finally:
+        world.close()

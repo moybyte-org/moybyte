@@ -14,8 +14,14 @@
 // and the P4s' flash store look the same) into a PSRAM buffer, starts the
 // thread, and collects a report when it ends. One run at a time.
 //
-// See README.md for the memory placement, the provenance key and the answer to
-// "can a runaway export be stopped".
+// A cart the Player runs is a SESSION (phase 3, moy_wasm_session.h): the same
+// thread and the same load and key check, held open across the cart's life,
+// with moycore -- the host half, which owns the console and the import table --
+// supplying the callbacks the thread calls at each step. The engine binds no
+// verb itself.
+//
+// See README.md for the memory placement, the provenance key, the session and
+// the answer to "can a runaway export be stopped".
 
 #include <stdint.h>
 #include <stdio.h>
@@ -42,6 +48,7 @@
 
 #include "wasm_export.h"
 #include "moy_wasm_key.h"
+#include "moy_wasm_session.h"
 #include "moy_wasm_thread.h"
 
 // -- per-board settings (mpconfigboard.h) -------------------------------------
@@ -124,8 +131,10 @@ static StaticSemaphore_t g_lock_buf;
 
 #if CONFIG_IDF_TARGET_ESP32S3
 #define KEY_TARGET MOY_WASM_KEY_ESP32S3
+#define KEY_CHIP "esp32s3"
 #elif CONFIG_IDF_TARGET_ESP32P4
 #define KEY_TARGET MOY_WASM_KEY_ESP32P4
+#define KEY_CHIP "esp32p4"
 #else
 #error "moy_wasm: no provenance key for this target (moy_wasm_key.h)"
 #endif
@@ -390,8 +399,8 @@ static void release(run_t *r)
 }
 
 // The whole file, through the VFS, into PSRAM. Called between frames, like
-// every other store read.
-static void read_file(run_t *r, mp_obj_t path)
+// every other store read. Raises; on success the caller owns *out.
+static void read_module(mp_obj_t path, uint8_t **out, uint32_t *out_len)
 {
     mp_obj_t args[2] = { path, MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
     mp_obj_t f = mp_call_function_n_kw(MP_OBJ_FROM_PTR(&mp_builtin_open_obj), 2, 0, args);
@@ -404,18 +413,24 @@ static void read_file(run_t *r, mp_obj_t path)
         mp_stream_close(f);
         mp_raise_ValueError(MP_ERROR_TEXT("module file is empty, unreadable or too big"));
     }
-    r->file = heap_caps_malloc((size_t)size, PSRAM_CAPS);
-    if (!r->file) {
+    uint8_t *buf = heap_caps_malloc((size_t)size, PSRAM_CAPS);
+    if (!buf) {
         mp_stream_close(f);
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("no PSRAM for the module file"));
     }
-    mp_uint_t got = mp_stream_rw(f, r->file, (mp_uint_t)size, &e, MP_STREAM_RW_READ);
+    mp_uint_t got = mp_stream_rw(f, buf, (mp_uint_t)size, &e, MP_STREAM_RW_READ);
     mp_stream_close(f);
     if (e != 0 || got != (mp_uint_t)size) {
-        release(r);
+        heap_caps_free(buf);
         mp_raise_OSError(e ? e : MP_EIO);
     }
-    r->file_len = (uint32_t)size;
+    *out = buf;
+    *out_len = (uint32_t)size;
+}
+
+static void read_file(run_t *r, mp_obj_t path)
+{
+    read_module(path, &r->file, &r->file_len);
 }
 
 // start(path, export, args=(), loops=1, stack=None, psram_stack=None)
@@ -441,6 +456,9 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     run_t *r = &g_run;
     if (r->started) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a run is live; collect it with result()"));
+    }
+    if (moy_wasm_session_live()) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a cart's session is live"));
     }
     if (!g_lock) {
         g_lock = xSemaphoreCreateMutexStatic(&g_lock_buf);
@@ -522,6 +540,274 @@ static mp_obj_t mod_terminate(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_terminate_obj, mod_terminate);
 
+// -- the session (moy_wasm_session.h) ----------------------------------------
+
+enum { SESS_CALL = 1, SESS_CLOSE = 2 };
+
+typedef struct {
+    // the MicroPython side's
+    bool live;
+    pthread_t tid;
+    const moy_wasm_ops *ops;
+    char want_sha[65];
+    // handed to the thread, freed by it once the load is done
+    uint8_t *file;
+    uint32_t file_len;
+    // the handshake: `go` wakes the thread for a request, `back` wakes the
+    // task when the request is done OR when the thread asks for the VM, and
+    // `vm_done` tells the thread its VM request ran
+    SemaphoreHandle_t go, back, vm_done;
+    StaticSemaphore_t go_buf, back_buf, vm_done_buf;
+    volatile int op;
+    volatile int what;
+    volatile float dt;
+    volatile int rc;
+    char err[ERR_MAX];
+    void (*volatile vm_fn)(void *);
+    void *volatile vm_arg;
+    volatile bool waiting;          // the task is in sess_wait and can serve
+    TaskHandle_t thread;            // the session's task, once it runs
+} sess_t;
+
+static sess_t g_sess;
+
+// On the task: wait for the thread's answer, serving every VM request that
+// arrives first.
+static void sess_wait(sess_t *s)
+{
+    s->waiting = true;
+    for (;;) {
+        xSemaphoreTake(s->back, portMAX_DELAY);
+        void (*fn)(void *) = s->vm_fn;
+        if (fn == NULL) {
+            break;
+        }
+        s->vm_fn = NULL;
+        fn(s->vm_arg);
+        xSemaphoreGive(s->vm_done);
+    }
+    s->waiting = false;
+}
+
+int moy_wasm_on_vm(void (*fn)(void *arg), void *arg)
+{
+    sess_t *s = &g_sess;
+    if (!s->live || !s->waiting || xTaskGetCurrentTaskHandle() != s->thread) {
+        return -1;
+    }
+    s->vm_arg = arg;
+    s->vm_fn = fn;
+    xSemaphoreGive(s->back);
+    xSemaphoreTake(s->vm_done, portMAX_DELAY);
+    return 0;
+}
+
+static int sess_fail(sess_t *s, const char *what, const char *detail)
+{
+    snprintf(s->err, sizeof(s->err), "%.40s%s%.110s", what, detail ? ": " : "",
+             detail ? detail : "");
+    return 1;
+}
+
+static void *sess_thread(void *arg)
+{
+    sess_t *s = arg;
+    const moy_wasm_ops *ops = s->ops;
+    char err[ERR_MAX];
+    int rc = 0;
+    bool up = false;
+    wasm_module_t module = NULL;
+    wasm_module_inst_t inst = NULL;
+    wasm_exec_env_t env = NULL;
+    s->thread = xTaskGetCurrentTaskHandle();
+
+    uint8_t *pool = heap_caps_malloc(MOY_WASM_POOL_BYTES, PSRAM_CAPS);
+    if (!pool) {
+        rc = sess_fail(s, "no PSRAM for the runtime pool", NULL);
+        goto opened;
+    }
+    RuntimeInitArgs init;
+    memset(&init, 0, sizeof(init));
+    init.mem_alloc_type = Alloc_With_Pool;
+    init.mem_alloc_option.pool.heap_buf = pool;
+    init.mem_alloc_option.pool.heap_size = MOY_WASM_POOL_BYTES;
+    if (!wasm_runtime_full_init(&init)) {
+        rc = sess_fail(s, "runtime init", NULL);
+        goto opened;
+    }
+    up = true;
+    err[0] = 0;
+    if (ops->runtime_up && ops->runtime_up(ops->user, err, sizeof(err))) {
+        rc = sess_fail(s, "import table", err);
+        goto opened;
+    }
+    LoadArgs la;
+    memset(&la, 0, sizeof(la));
+    la.name = "";
+    la.wasm_binary_freeable = true;
+    module = wasm_runtime_load_ex(s->file, s->file_len, &la, err, sizeof(err));
+    if (!module) {
+        rc = sess_fail(s, "load", err);
+        goto opened;
+    }
+    {
+        run_t scratch;
+        memset(&scratch, 0, sizeof(scratch));
+        if (!check_key(&scratch, module)) {
+            memcpy(s->err, scratch.err, sizeof(s->err));
+            rc = 1;
+            goto opened;
+        }
+        if (s->want_sha[0] && memcmp(scratch.wasm_hash, s->want_sha, 64) != 0) {
+            rc = sess_fail(s, "refused", "the module was compiled from another main.wasm");
+            goto opened;
+        }
+    }
+    // The module copied what it keeps (freeable), so the file goes back now.
+    heap_caps_free(s->file);
+    s->file = NULL;
+    err[0] = 0;
+    if (ops->loaded && ops->loaded(ops->user, module, err, sizeof(err))) {
+        rc = sess_fail(s, "refused", err);
+        goto opened;
+    }
+    inst = wasm_runtime_instantiate(module, MOY_WASM_EXEC_STACK, 0, err, sizeof(err));
+    if (!inst) {
+        rc = sess_fail(s, "instantiate", err);
+        goto opened;
+    }
+    env = wasm_runtime_create_exec_env(inst, MOY_WASM_EXEC_STACK);
+    if (!env) {
+        rc = sess_fail(s, "exec env", "out of pool");
+        goto opened;
+    }
+    wasm_runtime_set_native_stack_boundary(
+        env, pxTaskGetStackStart(NULL) + MOY_WASM_STACK_GUARD);
+    err[0] = 0;
+    if (ops->bound && ops->bound(ops->user, env, err, sizeof(err))) {
+        rc = sess_fail(s, "bind", err);
+        goto opened;
+    }
+
+opened:
+    s->rc = rc;
+    xSemaphoreGive(s->back);               // the open is answered
+    for (;;) {
+        xSemaphoreTake(s->go, portMAX_DELAY);
+        if (s->op == SESS_CLOSE) {
+            break;
+        }
+        // A failed open is closed by its opener and never called.
+        s->err[0] = 0;
+        s->rc = ops->call(ops->user, s->what, s->dt, s->err, sizeof(s->err));
+        xSemaphoreGive(s->back);
+    }
+    if (up && ops->unbound) {
+        ops->unbound(ops->user);
+    }
+    if (env) {
+        wasm_runtime_destroy_exec_env(env);
+    }
+    if (inst) {
+        wasm_runtime_deinstantiate(inst);
+    }
+    if (module) {
+        wasm_runtime_unload(module);
+    }
+    if (up) {
+        wasm_runtime_destroy();
+    }
+    if (pool) {
+        heap_caps_free(pool);
+    }
+    xSemaphoreGive(s->back);               // closed
+    return NULL;
+}
+
+int moy_wasm_session_live(void)
+{
+    return g_sess.live;
+}
+
+void moy_wasm_session_close(void)
+{
+    sess_t *s = &g_sess;
+    if (!s->live) {
+        return;
+    }
+    s->op = SESS_CLOSE;
+    xSemaphoreGive(s->go);
+    sess_wait(s);
+    MP_THREAD_GIL_EXIT();
+    pthread_join(s->tid, NULL);
+    MP_THREAD_GIL_ENTER();
+    if (s->file) {
+        heap_caps_free(s->file);
+        s->file = NULL;
+    }
+    s->live = false;
+    s->thread = NULL;
+}
+
+int moy_wasm_session_open(const char *path, const char *want_sha,
+                          const moy_wasm_ops *ops, char *err, size_t errlen)
+{
+    sess_t *s = &g_sess;
+    if (s->live || g_run.started) {
+        snprintf(err, errlen, "a wasm run is already live");
+        return 1;
+    }
+    if (!s->go) {
+        s->go = xSemaphoreCreateBinaryStatic(&s->go_buf);
+        s->back = xSemaphoreCreateBinaryStatic(&s->back_buf);
+        s->vm_done = xSemaphoreCreateBinaryStatic(&s->vm_done_buf);
+    }
+    s->ops = ops;
+    s->want_sha[0] = 0;
+    if (want_sha && strlen(want_sha) == 64) {
+        memcpy(s->want_sha, want_sha, 65);
+    }
+    s->err[0] = 0;
+    s->vm_fn = NULL;
+    s->waiting = false;
+    s->thread = NULL;
+    read_module(mp_obj_new_str(path, strlen(path)), &s->file, &s->file_len);
+    int pe = moy_wasm_spawn(&s->tid, sess_thread, s, MOY_WASM_STACK_BYTES,
+                            MOY_WASM_STACK_PSRAM, MOY_WASM_CORE, MOY_WASM_PRIO);
+    if (pe != 0) {
+        heap_caps_free(s->file);
+        s->file = NULL;
+        snprintf(err, errlen, "could not start the cart's thread");
+        return 1;
+    }
+    s->live = true;
+    sess_wait(s);
+    if (s->rc != 0) {
+        snprintf(err, errlen, "%s", s->err);
+        moy_wasm_session_close();
+        return 1;
+    }
+    return 0;
+}
+
+int moy_wasm_session_call(int what, float dt, char *err, size_t errlen)
+{
+    sess_t *s = &g_sess;
+    if (!s->live) {
+        snprintf(err, errlen, "no cart session");
+        return 1;
+    }
+    s->op = SESS_CALL;
+    s->what = what;
+    s->dt = dt;
+    xSemaphoreGive(s->go);
+    sess_wait(s);
+    if (s->rc != 0) {
+        snprintf(err, errlen, "%s", s->err);
+    }
+    return s->rc;
+}
+
 static void put(mp_obj_t d, qstr k, mp_obj_t v)
 {
     mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(k), v);
@@ -592,6 +878,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_mem_obj, mod_mem);
 
 static MP_DEFINE_STR_OBJ(mod_key_obj, "fork " MOY_WASM_FORK_COMMIT "\n" KEY_TARGET);
 static MP_DEFINE_STR_OBJ(mod_fork_obj, MOY_WASM_FORK_COMMIT);
+static MP_DEFINE_STR_OBJ(mod_chip_obj, KEY_CHIP);
 
 static const mp_rom_obj_tuple_t mod_stack_obj = {
     {&mp_type_tuple}, 2,
@@ -611,6 +898,9 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_FORK), MP_ROM_PTR(&mod_fork_obj) },
     { MP_ROM_QSTR(MP_QSTR_STACK), MP_ROM_PTR(&mod_stack_obj) },
     { MP_ROM_QSTR(MP_QSTR_POOL), MP_ROM_INT(MOY_WASM_POOL_BYTES) },
+    // The chip the key's block is for: the name a cart's compiled module
+    // carries beside its main.wasm (tools/wasm_cart.py's aot_name).
+    { MP_ROM_QSTR(MP_QSTR_CHIP), MP_ROM_PTR(&mod_chip_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_wasm_globals, moy_wasm_globals_table);
 

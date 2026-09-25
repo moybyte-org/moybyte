@@ -102,7 +102,7 @@ aq = array("h", bytearray(2 * (1 + 4 * 32)))
 
 def begin():
     moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq,
-                      None, None, None)
+                      None, None, None, True)
 
 
 def run(tag, src, frames):

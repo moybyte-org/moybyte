@@ -52,7 +52,8 @@ UNASKED = {
 # `--help` that exits 2 rather than 0: a hand-rolled positional CLI printing
 # its usage, which is a usage ERROR here. It still has to answer at once and
 # without touching hardware, so these are asked, just not for a 0.
-USAGE_EXIT_2 = {"board_config.py", "gen_gsl_fw.py", "import_p8.py"}
+USAGE_EXIT_2 = {"board_config.py", "gen_gsl_fw.py", "import_p8.py",
+                "wat.py"}         # VENDORED (`make vendor-libmoy`)
 
 # The one tool that drives a board without offering `--board`: it IS the
 # driver, and its standalone tour is the Waveshare P4's own (`--port`).

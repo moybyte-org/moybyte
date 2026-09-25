@@ -1,7 +1,8 @@
 # moy_wasm: the WebAssembly cart tier's engine -- the vendored WAMR runtime
 # (wamr/, AOT only, tools/vendor_wamr.py) and the MicroPython binding that
-# runs a module on its own thread (modmoy_wasm.c). Device-only: there is no
-# .mk twin, because the unix and wasm ports have no board to run AOT code on.
+# runs a module on its own thread (modmoy_wasm.c), including the cart session
+# moycore drives (moy_wasm_session.h). Device-only: there is no .mk twin,
+# because the unix and wasm ports have no board to run AOT code on.
 #
 # The runtime builds as its OWN static library, not as usermod sources, for
 # three reasons that are each enough: its -D switches (BH_MALLOC, the build
@@ -157,6 +158,13 @@ target_include_directories(usermod_moy_wasm INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
     ${MOY_WAMR_CORE}/iwasm/include
 )
+
+# MOY_WASM is what compiles moycore's half of the tier -- the vendored
+# libmoy/moy_wasm.c import table and its host callbacks -- so a build carrying
+# this engine gets the Player path and one without it (the unix and web
+# builds, the Zero) compiles none of it. It reaches every usermod source,
+# which is harmless: nothing else in the tree reads it.
+target_compile_definitions(usermod_moy_wasm INTERFACE MOY_WASM=1)
 
 target_link_libraries(usermod_moy_wasm INTERFACE moy_wamr)
 target_link_libraries(usermod INTERFACE usermod_moy_wasm)
