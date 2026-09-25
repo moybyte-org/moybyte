@@ -303,13 +303,14 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # blit_game upscales it, same as both boards.
     ws.make_game_canvas = lambda w, h: web_canvas.WebSystemCanvas(
         web_canvas.WebCompositor(int(w), int(h)))
-    # Lua carts: moycore, the SAME native module and glue both boards run --
+    # Cart runtimes: moycore, the SAME native module and glue the boards run --
     # third architecture, one engine. A build without the usermod still boots
-    # (a lua cart opens the Player's runtime-missing panel).
-    lua_runtime = None
+    # (a lua cart opens the Player's runtime-missing panel), and this build
+    # carries no wasm engine, so a compiled cart opens it too.
+    runtimes = {}
     try:
-        from moycore_glue import make_moycore_runtime
-        lua_runtime = make_moycore_runtime(ws)
+        from moycore_glue import make_runtimes
+        runtimes = make_runtimes(ws)
     except ImportError:
         pass
     # The board-agnostic service wiring, in the one canonical order (host + both
@@ -331,7 +332,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     console.wire_workstation_core(
         ws, moy_carts, carts_root, _make_api,
         None,
-        make_audio=_make_audio, lua_runtime=lua_runtime, can_manage=True,
+        make_audio=_make_audio, runtimes=runtimes, can_manage=True,
         pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
     # AUTHORING IS ON, BOTH TIERS (owner call): the browser build is the whole
     # console, not the player-only runner #151 originally scoped -- the Make tile

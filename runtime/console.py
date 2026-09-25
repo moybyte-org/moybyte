@@ -686,11 +686,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # radio, it is simply never armed.
         self.link = None
         self.carts_store = None     # injected: cart store module (moy_carts API)
-        # #67 dual-runtime seam: factory(ns, src) -> a running Lua cart handle
-        # (.init/.update/.draw callables + .close()). build_workstation injects
-        # runtime/lua_host.MoycoreHostRun; the device injects moycore_glue's.
-        # None = "runtime": "lua" carts open the error panel.
-        self.lua_runtime = None
+        # The cart-runtime seam (#67, docs/wasm_tier_plan_2026-09.md): a
+        # manifest's "runtime" name -> factory(ns, src) returning a running cart
+        # handle (.init/.update/.draw callables + .close()). build_workstation
+        # maps "lua" and "wasm" to runtime/lua_host's and runtime/wasm_host's
+        # runs; the device maps moycore_glue's. A runtime this build lacks is an
+        # ABSENT KEY, and a cart naming it opens the error panel.
+        self.runtimes = {}
         # OTA firmware updater (#53): injected by the device (moy_ota.OtaUpdater); None
         # on the host. When present AND the build is OTA-capable, Settings grows an
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
@@ -1930,6 +1932,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
             self.crash_line = None
             self.go_home()
             return True
+        # A compiled cart has no source to throw the kid into: its trap stays on
+        # the error panel, which offers no EDIT (docs/wasm_tier_plan_2026-09.md).
+        if self.cart.get("runtime") == "wasm":
+            return False
         err = self.cart_error or "crashed"
         line = self.crash_line
         # THE FILE THAT RAISED, not the file the tab was left on (SPEC.md 4,
@@ -2767,8 +2773,16 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         return self.carts_store.cart_sources(self.cart)
 
     def code_file_name(self):
-        """The script the Code tab is on. Never None once a cart is open."""
-        return self.code_file or (self.cart or {}).get("main", "main.py")
+        """The script the Code tab is on. Never None once a cart with code is
+        open; a compiled cart's code is its first `src/` file, and one that
+        ships none has no Code tab and answers None."""
+        if self.code_file:
+            return self.code_file
+        cart = self.cart or {}
+        if cart.get("runtime") == "wasm":
+            srcs = self.code_sources()
+            return srcs[0] if srcs else None
+        return cart.get("main", "main.py")
 
     def open_code_file(self, name):
         """Show another of the cart's scripts in the Code tab.
@@ -4154,7 +4168,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
 
 
 def wire_workstation_core(ws, store, carts_root, make_api, wifi,
-                          make_audio=None, lua_runtime=None, can_manage=None,
+                          make_audio=None, runtimes=None, can_manage=None,
                           before_slim=None, pointer=None, inp=None,
                           keyboard=None):
     """The board-agnostic Workstation service wiring, in the ONE canonical order
@@ -4171,8 +4185,8 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     ws.make_api = make_api
     if make_audio is not None:
         ws.make_audio = make_audio
-    if lua_runtime is not None:
-        ws.lua_runtime = lua_runtime
+    if runtimes:
+        ws.runtimes = dict(runtimes)
     ws.carts_store = store
     ws.carts_root = carts_root
     ws.can_manage = (carts_root is not None) if can_manage is None else can_manage

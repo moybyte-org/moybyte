@@ -261,6 +261,18 @@ def _exc_cart_line(exc, fname="<cart>"):
     return getattr(exc, "lineno", None)            # SyntaxError caught at compile
 
 
+# The cart runtimes a manifest may name besides the console's own Python, and
+# how the runtime-missing panel says each. A build carries a runtime when
+# `ws.runtimes` maps its name to a factory; an absent key is the panel.
+RUNTIME_NAMES = {"lua": "Lua", "wasm": "wasm"}
+
+
+def _compiled(cart):
+    """True for a compiled ("runtime": "wasm") cart: no source to show, no
+    line to mark, no EDIT action on its error panel."""
+    return (cart or {}).get("runtime") == "wasm"
+
+
 def _lua_err_text(exc):
     """_err_text minus any appended "stack traceback:" block (#67 Phase 5): the
     panel is the same kid-short one-liner on every backend, and the raise
@@ -436,9 +448,10 @@ class Player:
         self._app_id = None           # the crash guard's key for this run (#160), or None
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
-        self._lua = None              # #67: the running "lua" cart's runtime state (a
-                                      # ws.lua_runtime handle; _close_lua() on exit so a
-                                      # cart's whole Lua heap dies with its run)
+        self._lua = None              # #67: the running runtime cart's state -- the
+                                      # handle a ws.runtimes factory returned, Lua or
+                                      # wasm; _close_lua() on exit so the cart's whole
+                                      # heap dies with its run
         self._sram_run = None         # #211: the Lua allocator's headroom report for the
                                       # run that ENDED, kept until the next run starts
         self._net = None              # #65: the running cart's net.* service, when it
@@ -1004,8 +1017,8 @@ class Player:
         src = project.cart["src"]
         _rt = project.cart.get("runtime", "python")
         if _rt != "python":
-            ok = self._start_lua(_rt, ns, src, t0, h0,
-                                 (t_reclaim, t_audio, t_api))
+            ok = self._start_runtime(_rt, ns, src, t0, h0,
+                                     (t_reclaim, t_audio, t_api))
             if ok:
                 self._arm_pacing(cart)
             return ok
@@ -1527,36 +1540,38 @@ class Player:
                         cost = _sp[0] / 1000.0        # ms -> s, the update half
                 sched.note_tick(cost)
 
-    def _start_lua(self, runtime, ns, src, t0, h0, t_pre):
-        """Start a "runtime": "lua" cart (#67 Phase 2) through the injected
-        `ws.lua_runtime` factory -- runtime/lua_host.MoycoreHostRun on the
-        host, moycore_glue's runtime on the device. The cart gets
-        the SAME make_api namespace a Python cart got (the factory registers
-        those callables as the cart's Lua globals), so permission gating, pmem,
+    def _start_runtime(self, runtime, ns, src, t0, h0, t_pre):
+        """Start a cart on a runtime other than the console's Python: `"lua"`
+        (#67) or `"wasm"` (docs/wasm_tier_plan_2026-09.md), through the factory
+        `ws.runtimes` maps it to -- runtime/lua_host.MoycoreHostRun or
+        runtime/wasm_host.WasmHostRun on the host, moycore_glue's runs on the
+        device. The cart gets the SAME make_api namespace a Python cart got
+        (a Lua factory registers those callables as the cart's globals; a wasm
+        one reads its config and pmem from it), so permission gating, pmem,
         audio and quit() semantics are identical by construction. No
         auto-native, no code cache -- those are Python-compiler concerns. A
-        missing runtime or a Lua load/_init error lands on the normal cart
-        error panel (crash-line mapping for Lua tracebacks is Phase 5)."""
+        runtime this build lacks is an ABSENT KEY, and it and a load/_init
+        error land on the normal cart error panel."""
         ws = self.ws
         t_reclaim, t_audio, t_api = t_pre
         # Same measurement-mode gate as start(): no heap walks in kid mode.
         _hs = _heap_stats if self._diag_enabled() else (lambda: (-1, -1))
         self._native_ins = None        # RUNSTART diag: no auto-native on this path
         self._native_fail = None
-        make_lua = getattr(ws, "lua_runtime", None)
+        make = (getattr(ws, "runtimes", None) or {}).get(runtime)
         t5 = _ticks_ms()
         t_exec = -1
         t_init = -1
         lua = None
         try:
-            if runtime != "lua":
+            if runtime not in RUNTIME_NAMES:
                 raise ValueError("unknown cart runtime '%s'" % runtime)
-            if make_lua is None:
-                # The graceful floor: a lua cart on a build without the runtime
-                # (today: every device build) opens the panel, never a hang.
-                raise RuntimeError("needs the Lua runtime "
-                                   "(not in this build yet)")
-            lua = make_lua(ns, src)
+            if make is None:
+                # The graceful floor: a cart on a build without its runtime
+                # opens the panel, never a hang.
+                raise RuntimeError("needs the %s runtime (not in this build)"
+                                   % RUNTIME_NAMES[runtime])
+            lua = make(ns, src)
             t_exec = _ticks_diff(_ticks_ms(), t5)
             t6 = _ticks_ms()
             if lua.init is not None:
@@ -1571,9 +1586,13 @@ class Player:
             self.cart_error = _lua_err_text(exc)
             # a load/syntax or _init error carries its `cart:N:` position, so
             # EDIT drops on the line exactly like a Python SyntaxError (#24) --
-            # and on a cart of several scripts, in the FILE that raised.
-            self.crash_file, self.crash_line = _lua_cart_where(
-                self.cart_error, self.ws.cart)
+            # and on a cart of several scripts, in the FILE that raised. A
+            # compiled cart has no line to drop on.
+            if runtime == "wasm":
+                self.crash_file, self.crash_line = None, None
+            else:
+                self.crash_file, self.crash_line = _lua_cart_where(
+                    self.cart_error, self.ws.cart)
             self.ns = ns
             h1 = _hs()
             self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
@@ -1786,7 +1805,12 @@ class Player:
         # mark the line on EDIT (#24): a Lua cart's line comes from the
         # error text's `cart:N:` position (#67 Phase 5); a Python cart's
         # from the traceback, mapped back through the nativize insert.
-        if self._lua is not None:
+        if self._lua is not None and _compiled(ws.cart):
+            # A trap: the run already cleared its canvas, and there is no
+            # source line to mark (docs/wasm_tier_plan_2026-09.md).
+            self.cart_error = _lua_err_text(exc)
+            self.crash_file, self.crash_line = None, None
+        elif self._lua is not None:
             self.cart_error = _lua_err_text(exc)
             self.crash_file, self.crash_line = _lua_cart_where(
                 self.cart_error, ws.cart)
@@ -1981,7 +2005,11 @@ class Player:
         max_rows = (h - 30) // _CODE_LH
         for i in range(min(len(lines), max_rows)):
             cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, NAMES["peach"], 1)
-        cv.print("TAP CODE TO SEE WHY", x + 8, y + h - 12, NAMES["yellow"], 1)
+        # A compiled cart's trap has no source line behind it and no EDIT
+        # action, so the panel points at the way out instead.
+        hint = ("TAP HOME TO LEAVE" if _compiled(self.ws.cart)
+                else "TAP CODE TO SEE WHY")
+        cv.print(hint, x + 8, y + h - 12, NAMES["yellow"], 1)
 
     def _draw_hold_progress(self):
         """The TRANSIENT hold-to-exit affordance (Stage 5, spec Section 12): a small

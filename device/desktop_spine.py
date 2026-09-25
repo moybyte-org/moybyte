@@ -215,16 +215,16 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         return DeviceCanvas(_LayerComp(int(w), int(h), gfx))
 
     ws.make_game_canvas = _mk_game_canvas
-    # The Lua probe's line goes to the boot's own sink unless the board has a
-    # ring to route it through.
-    lua_log = None if board_log is None else (lambda m: log("carts", m))
-    lua_runtime = boot.lua_runtime(ws, log=lua_log)
-    # The shared service wiring: api/audio/lua + store/root/can_manage + WiFi
+    # The runtime probe's lines go to the boot's own sink unless the board has
+    # a ring to route them through.
+    rt_log = None if board_log is None else (lambda m: log("carts", m))
+    runtimes = boot.runtimes(ws, log=rt_log)
+    # The shared service wiring: api/audio/runtimes + store/root/can_manage + WiFi
     # + the #66 slim_carts diet + pointer/keyboard + the boot loads, in the
     # ONE canonical order the host uses too.
     wire_workstation_core(ws, moy_carts, carts_root, make_api,
                           make_wifi(moy_carts, carts_root),
-                          make_audio=make_audio, lua_runtime=lua_runtime,
+                          make_audio=make_audio, runtimes=runtimes,
                           before_slim=before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
     if ble_keyboard is not None:

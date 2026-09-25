@@ -219,7 +219,7 @@ def test_bullet_storm_runs_on_moycore(tmp_path):
 
 def test_missing_runtime_opens_the_panel_not_a_hang(tmp_path):
     ws = _ws(tmp_path)
-    ws.lua_runtime = None                                # a device-shaped build
+    ws.runtimes.pop("lua", None)                       # a device-shaped build
     _open(ws, "Sakura Lua")
     assert ws.player.cart_error is not None
     assert "Lua runtime" in ws.player.cart_error

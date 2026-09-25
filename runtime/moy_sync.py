@@ -79,6 +79,11 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     loss -- a peer would land the trashed copy back as a live file, or drop
     the only copy the kid could still restore.
   * Binary/unreadable files -- the wire is JSON text, same rule as the pull.
+    That includes a compiled cart's module (its `main.wasm`, and a board's
+    compiled `<main>.<chip>.aot` beside it): a "runtime": "wasm" cart's
+    manifest, assets and `src/` cross like any cart's and its module does not,
+    so a compiled cart does NOT sync between a browser and a board. It plays
+    where its module was put (docs/wasm_tier_plan_2026-09.md).
 
 Wire shape (one POST per batch, bounded so it fits the transport's 64KB
 request cap; the client sends ONE batch at a time and waits for the answer,

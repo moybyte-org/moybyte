@@ -310,14 +310,16 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         # was a cart running on the runtime we were trying to retire.
         return MoycoreHostRun(_ws, ns, src)
 
-    lua_runtime = _make_lua if moycore_supports("") else None
+    runtimes = {}
+    if moycore_supports(""):
+        runtimes["lua"] = _make_lua
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards). WiFi (#38) is the fake host service over the
     # same moy_carts wifi.json store the device uses; the pointer ranges over the
     # SYSTEM canvas (the surface the cursor moves on), so it's sized to that.
     console.wire_workstation_core(
         ws, moy_carts, carts_dir, make_api, make_wifi(moy_carts, carts_dir),
-        make_audio=make_audio, lua_runtime=lua_runtime, can_manage=True,
+        make_audio=make_audio, runtimes=runtimes, can_manage=True,
         pointer=console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h), inp=inp)
     # Multiplayer (#65): a host-side fake net transport (the sim's fake radio, for
     # net.*), so a "multiplayer"-permission cart runs in the sim. Unlinked here (a

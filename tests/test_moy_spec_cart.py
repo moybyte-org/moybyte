@@ -299,7 +299,7 @@ def test_host_lua_sandbox_matches_the_device_ceiling(tmp_path):
                      type="game", runtime="lua", main="main.lua")
     from runtime import host_app
     ws = host_app.build_workstation(root)
-    if getattr(ws, "lua_runtime", None) is None:
+    if "lua" not in ws.runtimes:
         import pytest
         pytest.skip("no Lua runtime -- runtime/lua_binding needs a C compiler")
     _open(ws, "Sandbox")
@@ -317,11 +317,11 @@ def test_unknown_runtime_is_refused_cleanly(tmp_path):
     from runtime import moy_carts
     root = str(tmp_path / "carts")
     Path(root).mkdir(parents=True)
-    moy_carts.create("Wasm", root, src="(module)\n", type="game",
-                     runtime="wasm", main="main.wasm")
+    moy_carts.create("Forth", root, src=": main ;\n", type="game",
+                     runtime="forth", main="main.fs")
     ws = _ws(tmp_path)
-    _open(ws, "Wasm")
-    assert ws.cart_error and "wasm" in ws.cart_error
+    _open(ws, "Forth")
+    assert ws.cart_error and "forth" in ws.cart_error
     # and the refusal must not have left a half-started world behind
     assert ws.player._lua is None
 
@@ -336,7 +336,7 @@ def test_lua_runtime_still_runs(tmp_path):
                      src="function _draw()\n  cls(3)\nend\n")
     from runtime import host_app
     ws = host_app.build_workstation(root)
-    if getattr(ws, "lua_runtime", None) is None:
+    if "lua" not in ws.runtimes:
         import pytest
         pytest.skip("no Lua runtime -- runtime/lua_binding needs a C compiler")
     _open(ws, "Luacart")

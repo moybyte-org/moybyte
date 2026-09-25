@@ -199,6 +199,9 @@ class EditorApp:
         self.project = project
         ws = self.ws
         ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        # Another cart may ladder differently (a compiled cart without `src/`
+        # has no Code tab), so the lent zone repaints whatever tab it lands on.
+        self.zone_gen += 1
         ws.set_menu_view("cards" if (ws.cart.get("edit")
                                      or ws.cart.get("broken")) else "code")
 
@@ -262,6 +265,10 @@ class EditorApp:
         source of truth; ws.menu_view projects onto it."""
         ws = self.ws
         ws._dirty = True             # sub-view change always repaints (#44)
+        if view == "code" and ws.cart is not None and not ws.code_sources():
+            # A compiled cart that ships no `src/` has no Code tab: there is no
+            # text behind its main.wasm to show (docs/wasm_tier_plan_2026-09.md).
+            view = "cards"
         if view != self.tab and self.project is ws.project:
             # (#111) autosave-only: the OUTGOING tab still owes whatever it
             # holds (the exact verb the removed SAVE icon used to dispatch) --
@@ -459,7 +466,7 @@ class EditorApp:
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
             _ui.button(cv, th, proj, "", glyph="projects", kind="normal",
                        glyph_draw=ws._glyph)
-            _ui.tab_row(cv, th, tabs_area, _TAB_CHIPS, self.tab,
+            _ui.tab_row(cv, th, tabs_area, self._chips(), self.tab,
                         icon_for=getattr(ws, "_icon_image_keyed", None),
                         ink=band_ink)
             _ui.button(cv, th, play_r, "PLAY", kind="play", glyph="run",
@@ -468,7 +475,7 @@ class EditorApp:
         x0, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON      # icon side (16*fs)
         stride = ic                         # 0-gap ladder (#88) -- see _ZONE_STRIDE
-        for i, (tab, glyph) in enumerate(_ZONE_TABS):
+        for i, (tab, glyph) in enumerate(self._ladder()):
             x = x0 + i * stride
             if x + ic > x0 + w:
                 break                       # ran out of lent width -- draw what fits
@@ -484,6 +491,24 @@ class EditorApp:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_redo())
             else:
                 ws._icon(glyph, x, y0, cv)
+
+    def _has_code(self):
+        """Whether the open cart has a Code tab: every cart whose main is text
+        does, and a compiled cart only when it ships `src/`."""
+        return bool(self.ws.cart is None or self.ws.code_sources())
+
+    def _ladder(self):
+        """The base-density ladder for the open cart: `_ZONE_TABS`, less the
+        Code tab when there is no code (the draw and the hit test share it)."""
+        if self._has_code():
+            return _ZONE_TABS
+        return tuple(t for t in _ZONE_TABS if t[0] != "code")
+
+    def _chips(self):
+        """The shelf-density twin of `_ladder`."""
+        if self._has_code():
+            return _TAB_CHIPS
+        return tuple(t for t in _TAB_CHIPS if t[0] != "code")
 
     def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
         """Draw the UNDO/REDO bar icon (#88), dimmed when the journal has nothing to
@@ -542,7 +567,7 @@ class EditorApp:
                 return self._activate_zone_tab(_ZONE_PROJECTS)
             if _in(px, py, play_r):
                 return self._activate_zone_tab(None)
-            slim = [(tid, label) for tid, label, _ic in _TAB_CHIPS]
+            slim = [(tid, label) for tid, label, _ic in self._chips()]
             for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim,
                                                         self._zone_scale()):
                 if _in(px, py, r):
@@ -551,7 +576,7 @@ class EditorApp:
         x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
         ic = h if h > 0 else _BAR_ICON
         stride = ic                         # 0-gap ladder (#88) -- matches draw_zone
-        for i, (tab, _glyph) in enumerate(_ZONE_TABS):
+        for i, (tab, _glyph) in enumerate(self._ladder()):
             x = x0 + i * stride
             if x + ic > x0 + w:
                 break

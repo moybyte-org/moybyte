@@ -363,26 +363,28 @@ def test_the_seed_progress_bar_is_wired_into_the_store_call():
     assert canvas.paints == 2
 
 
-# -- the Lua runtime ----------------------------------------------------------
+# -- the cart runtimes --------------------------------------------------------
 
 
 def test_a_build_without_moycore_says_absent_rather_than_failing(capsys):
     boot, _, _ = _boot()
     # No `moycore_glue` on the host: exactly the shape of a board built without
-    # the native module, where a `runtime: lua` cart opens the Player's
-    # runtime-missing panel instead of crashing.
-    assert boot.lua_runtime(FakeWs()) is None
-    assert "Moybyte lua runtime ABSENT" in capsys.readouterr().out
+    # the native modules, where a `runtime: lua` or `runtime: wasm` cart opens
+    # the Player's runtime-missing panel instead of crashing -- an absent key.
+    assert boot.runtimes(FakeWs()) == {}
+    out = capsys.readouterr().out
+    assert "Moybyte lua runtime ABSENT" in out
+    assert "Moybyte wasm runtime ABSENT" in out
 
 
-def test_the_lua_status_can_be_routed_to_a_boards_own_log():
+def test_the_runtime_status_can_be_routed_to_a_boards_own_log():
     boot, _, _ = _boot()
     lines = []
-    boot.lua_runtime(FakeWs(), log=lines.append)
+    boot.runtimes(FakeWs(), log=lines.append)
     # The T-Deck sends it to the offline diag ring: that board's USB-CDC RX is
     # dead under the desktop, so a status that is not recorded cannot be asked
     # for afterwards.
-    assert lines == ["lua runtime ABSENT"]
+    assert lines == ["lua runtime ABSENT", "wasm runtime ABSENT"]
 
 
 # -- the internal-SRAM census -------------------------------------------------
@@ -402,7 +404,7 @@ def test_the_sram_census_names_its_four_stages_in_boot_order(monkeypatch):
     boot, _, _ = _boot()
 
     boot.load_carts(FakeStore(), [{"title": "s"}])
-    boot.lua_runtime(FakeWs())
+    boot.runtimes(FakeWs())
     boot.start_frames(FakeWs())
 
     assert seen == ["rd-entry", "carts", "console", "desktop-up"]
@@ -700,7 +702,7 @@ def test_the_boot_steps_run_in_ONE_order():
     exists to make loud."""
     seq = [m for m, _ in _calls_on(_fn(SPINE, "build_desktop"), "boot")]
     assert seq == ["note", "note", "load_carts", "note",
-                   "lua_runtime", "start_frames"], seq
+                   "runtimes", "start_frames"], seq
 
 
 def test_both_boards_pump_the_frame_the_same_way():

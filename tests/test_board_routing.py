@@ -917,14 +917,14 @@ def test_one_lua_runtime_wired():
     for src_path in ((_REPO / "runtime" / "device_boot.py"),
                      (Path("firmware/web_runner") / "web_boot.py")):
         src = src_path.read_text(encoding="utf-8")
-        assert "from moycore_glue import make_moycore_runtime" in src, src_path
+        assert "from moycore_glue import make_runtimes" in src, src_path
         assert "make_lua_runtime" not in src, "%s still builds the old runtime" % src_path
         assert "except ImportError" in src, src_path
     for src_path in ((ROOT / "modules" / "moy_runtime.py"),
                      (Path("firmware/esp32_p4_wifi6_touch_lcd_7b") / "modules"
                       / "moy_runtime.py")):
         src = runtime_text(src_path)
-        assert "boot.lua_runtime(ws" in src, src_path
+        assert "boot.runtimes(ws" in src, src_path
         assert "make_lua_runtime" not in src, "%s still builds the old runtime" % src_path
     assert not (ROOT / "modules" / "moy_lua_glue.py").exists()
     api_src = (DEVICE / "device_api.py").read_text(encoding="utf-8")

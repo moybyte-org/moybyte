@@ -238,30 +238,33 @@ class DeviceBoot:
             self.say("%s carts unavailable: %s" % (media, exc))
         return []
 
-    def lua_runtime(self, ws, log=None):
-        """The #67 Lua cart runtime, and a line saying whether it is in this image.
+    def runtimes(self, ws, log=None):
+        """The cart runtimes in this image (`ws.runtimes`), and a line each
+        saying whether it is here.
 
-        ONE runtime and no chooser (2026-08-13): moycore runs the cart's whole
-        frame inside libmoy -- `_update` and `_draw` back to back in C, one
-        upcall per frame instead of hundreds -- and moybyte's superset verbs
-        ride it as registered trampolines. A build without the module returns
-        None and a `"runtime": "lua"` cart opens the Player's runtime-missing
-        panel, which is the same graceful floor a build without a Lua VM always
-        had.
+        "lua" (#67): ONE runtime and no chooser (2026-08-13) -- moycore runs
+        the cart's whole frame inside libmoy, `_update` and `_draw` back to back
+        in C, one upcall per frame instead of hundreds -- and moybyte's superset
+        verbs ride it as registered trampolines. "wasm"
+        (docs/wasm_tier_plan_2026-09.md): the same console with libmoy's wasm
+        import table on it, and the moy_wasm engine running the cart's module.
+        A runtime this build lacks is an absent key, and a cart naming it opens
+        the Player's runtime-missing panel -- the graceful floor.
 
         `log` defaults to the boot's own serial line; the T-Deck passes its diag
         sink so the answer also lands in the offline ring.
         """
         sram_census("console")
-        rt = None
+        rts = {}
         try:
-            from moycore_glue import make_moycore_runtime
-            rt = make_moycore_runtime(ws)
+            from moycore_glue import make_runtimes
+            rts = make_runtimes(ws)
         except ImportError:
             pass
-        (log or self.say)("lua runtime %s"
-                          % ("ON (moycore)" if rt is not None else "ABSENT"))
-        return rt
+        say = log or self.say
+        say("lua runtime %s" % ("ON (moycore)" if "lua" in rts else "ABSENT"))
+        say("wasm runtime %s" % ("ON (moy_wasm)" if "wasm" in rts else "ABSENT"))
+        return rts
 
     def start_frames(self, ws):
         """The last boot step: say the desktop is about to paint, start the

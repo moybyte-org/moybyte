@@ -454,6 +454,24 @@ def _read_main(path, name):
         return _read_recover(full)
 
 
+def _compiled_sources(path):
+    """A compiled cart's source, as (name, text) under `src/` in name order --
+    the text files among them. Never required and never verified against the
+    module (proposals/wasm-runtime.md): it is what the Code tab shows, and a
+    cart that ships none has no Code tab."""
+    out = []
+    try:
+        names = sorted(os.listdir(path + "/src"))
+    except OSError:
+        return out
+    for n in names:
+        try:
+            out.append(("src/" + n, _read(path + "/src/" + n)))
+        except (OSError, ValueError, UnicodeError):
+            continue                # a subfolder, or bytes that are not text
+    return out
+
+
 def _project_title(path):
     """A cart folder's own name as a title -- what a cart is called when its
     manifest can no longer say."""
@@ -516,14 +534,25 @@ def load(path, src=True):
         # the moybyte fields, so the defaults below flip on this flag -- moybyte's
         # own carts ("moybyte-cart-v1", or no format at all) keep theirs.
         spec = man.get("format") == "moy-1"
-        mainf = man.get("main", "main.lua" if spec else "main.py")
+        runtime = man.get("runtime", "lua" if spec else "python")
+        # A COMPILED cart (proposals/wasm-runtime.md): its main is a module,
+        # not text, so it is never read here -- the runtime loads it from the
+        # folder. What text it has is its optional `src/` (the Code tab).
+        compiled = runtime == "wasm"
+        mainf = man.get("main", "main.wasm" if compiled else
+                        ("main.lua" if spec else "main.py"))
         if broken and not _exists(path + "/" + mainf):
             # No manifest to name the program, so take whichever is there.
             for alt in ("main.py", "main.lua"):
                 if _exists(path + "/" + alt):
                     mainf = alt
                     break
-        if src:
+        if src and compiled:
+            if not _exists(path + "/" + mainf) and not broken:
+                print("Moybyte cart main missing:", path)
+                return None
+            src = ""            # a module has no text; `src/` below is the code
+        elif src:
             try:
                 src = _read_main(path, mainf)
             except OSError as exc:
@@ -554,7 +583,9 @@ def load(path, src=True):
         # together on a slim scan.
         before = []
         after = []
-        if src is not None:
+        if src is not None and compiled:
+            after = _compiled_sources(path)
+        elif src is not None:
             names = man.get("sources") or ()
             if names and mainf not in names:
                 # SPEC.md 4 requires it. Running main last (which is where an
@@ -617,8 +648,13 @@ def load(path, src=True):
             # The #67 dual-runtime seam: which VM runs this cart ("python" today,
             # "lua" via the injected runtime), and which file `src` came from --
             # save_code/duplicate/seed must write THAT file back, never main.py.
-            "runtime": man.get("runtime", "lua" if spec else "python"),
+            "runtime": runtime,
             "main": mainf,
+            # A compiled cart's linear memory in 64 KiB pages, which its module
+            # must declare exactly (proposals/wasm-runtime.md, "Memory"); None
+            # for every other runtime, and for a compiled cart that forgot it --
+            # which its runtime refuses before anything loads.
+            "memory": _int_or(man.get("memory"), None) if compiled else None,
             # 0 = pre-versioning (re-seedable). SPEC.md 3.1 leaves `version` to
             # the author, so a hand-typed "1.2" must read as unversioned rather
             # than take the cart down with it.
@@ -835,10 +871,11 @@ def multi_script(cart):
     """Whether THIS cart's runtime loads more than its main file.
 
     A Lua cart does -- SPEC.md 4, and `lua_ext.cart_chunks` builds the list --
-    while the console's Python tier runs `main` and nothing else. So a second
-    script listed on a python cart would be a file that silently never runs,
-    which is worse than not offering to make one."""
-    return (cart or {}).get("runtime", "python") != "python"
+    while the console's Python tier runs `main` and nothing else, and a
+    compiled cart is one module (`sources` does not apply to it). So a second
+    script listed on either would be a file that silently never runs, which is
+    worse than not offering to make one."""
+    return (cart or {}).get("runtime", "python") == "lua"
 
 
 def add_source(cart, name, text=""):
@@ -927,9 +964,14 @@ def runtime_compile_check(cart, src):
 
 def cart_sources(cart):
     """A cart's scripts in load order, `main` among them. A cart that declares
-    no `sources` answers `[main]`, which is what its absence MEANS."""
+    no `sources` answers `[main]`, which is what its absence MEANS.
+
+    A compiled cart answers its `src/` files and never its main: the module is
+    not text, and an empty answer is what takes the Code tab away."""
     if not cart:
         return []
+    if cart.get("runtime") == "wasm":
+        return [n for n, _ in cart.get("src_after") or ()]
     return ([n for n, _ in cart.get("src_before") or ()]
             + [cart.get("main", "main.py")]
             + [n for n, _ in cart.get("src_after") or ()])
@@ -940,7 +982,10 @@ def source_text(cart, name=None):
     file. `name` None -- or main's own name -- is `src`."""
     if not cart:
         return None
-    if name is None or name == cart.get("main", "main.py"):
+    if cart.get("runtime") == "wasm":
+        srcs = cart.get("src_after") or ()
+        name = name if name is not None else (srcs[0][0] if srcs else None)
+    elif name is None or name == cart.get("main", "main.py"):
         return cart.get("src")
     for key in ("src_before", "src_after"):
         for n, text in cart.get(key) or ():
@@ -985,6 +1030,13 @@ def save_code(cart, src, force=False, name=None):
     ok, msg = runtime_compile_check(cart, src)
     if not ok and not force:
         return SAVE_BAD_SYNTAX, msg
+    if cart.get("runtime") == "wasm":
+        # A compiled cart's code is its `src/`; its main is a module that no
+        # text write may ever replace.
+        srcs = cart_sources(cart)
+        name = name if name is not None else (srcs[0] if srcs else None)
+        if name not in srcs:
+            return SAVE_BAD_SYNTAX, "a compiled cart has no such source"
     if name is None:
         name = cart.get("main", "main.py")
     _write_atomic(cart["path"] + "/" + name, src)
@@ -1514,6 +1566,8 @@ def _copy_cart_files(src, dst, main):
 
 
 def duplicate(cart, root=CARTS_DIR, new_title=None):
+    if cart.get("runtime") == "wasm" and cart.get("path"):
+        return _duplicate_compiled(cart, root, new_title)
     dup = create(new_title or (cart["title"] + " copy"), root,
                  src=cart["src"], cfg=dict(cart["cfg"]), edit=cart["edit"], type=cart["type"],
                  runtime=cart.get("runtime", "python"), main=cart.get("main", "main.py"),
@@ -1539,6 +1593,38 @@ def duplicate(cart, root=CARTS_DIR, new_title=None):
         _copy_cart_files(src_path, dup["path"], dup["main"])
         return load(dup["path"])
     return dup
+
+
+def _duplicate_compiled(cart, root, new_title):
+    """A compiled cart's copy: its own manifest under the new title, its module
+    as the bytes it is, and the rest of the folder as `_copy_cart_files` takes
+    it. create() is for carts whose main is text."""
+    src_path = cart["path"]
+    try:
+        man = json.loads(_read_recover(src_path + "/manifest.json"))
+    except (OSError, ValueError):
+        return None
+    title = new_title or (cart["title"] + " copy")
+    d = _unique_dir(root, slug(title))
+    _mkdir(d)
+    man["title"] = title
+    _write(d + "/manifest.json", json.dumps(man))
+    _write(d + "/config.json", json.dumps(dict(cart.get("cfg") or {})))
+    main = cart.get("main", "main.wasm")
+    _copy_bytes(src_path + "/" + main, d + "/" + main)
+    _copy_cart_files(src_path, d, main)
+    return load(d)
+
+
+def _copy_bytes(src, dst, chunk=4096):
+    """Copy a file that is not text, in chunks."""
+    with open(src, "rb") as fi:
+        with open(dst, "wb") as fo:
+            while True:
+                b = fi.read(chunk)
+                if not b:
+                    break
+                fo.write(b)
 
 
 def delete(cart):

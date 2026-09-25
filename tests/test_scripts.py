@@ -151,7 +151,7 @@ def test_a_python_script_runs_through_the_real_player(tmp_path):
 def test_a_lua_script_runs_the_same_way(tmp_path):
     import pytest
     ws = _ws(tmp_path)
-    if ws.lua_runtime is None:
+    if "lua" not in ws.runtimes:
         pytest.skip("no host Lua binding in this build")
     con = _run(ws, "hi.lua", "print('one')\nprint('two', 3)\n")
     assert con.text() == "one\ntwo 3"

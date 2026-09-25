@@ -32,7 +32,7 @@ WHAT COUNTS AS AN INJECTION. Two sites, because the wiring lives in two:
     is not thereby a board that has an FPS preference the others lack.
 
   * an argument to `console.wire_workstation_core`, which is where `make_api`,
-    `wifi`, `make_audio`, `lua_runtime`, `keyboard`, `pointer`, `can_manage`
+    `wifi`, `make_audio`, `runtimes`, `keyboard`, `pointer`, `can_manage`
     and the store actually land on `ws`. That mapping is DERIVED from
     `wire_workstation_core`'s own body rather than restated here, so a new
     parameter that assigns to `ws` is picked up without editing this file --
@@ -101,7 +101,8 @@ INJECTED = True     # the target wires this service; anything else must be a
 SERVICES = {
     "make_api": "the cart API factory: what a cart's globals are built from",
     "make_audio": "the audio backend the AudioBank model is played through",
-    "lua_runtime": "the .moy `runtime: lua` cart engine (#67 -> moycore)",
+    "runtimes": "the .moy cart engines by manifest runtime (#67 lua -> moycore, "
+                "wasm -> moycore over moy_wasm)",
     "make_game_canvas": "per-run canvas factory for a cart with a small raster",
     "carts_store": "the moy_carts module the shell reads/writes the store with",
     "carts_root": "where that store lives on this target",
@@ -133,7 +134,7 @@ WIRING = {
     "tdeck": {
         "make_api": INJECTED,
         "make_audio": INJECTED,
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -167,7 +168,7 @@ WIRING = {
                       "on the hardware and unwired; until it is, injecting a "
                       "backend would give the console an audio path that plays "
                       "into nothing",
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -201,7 +202,7 @@ WIRING = {
                       "on the hardware and unwired; until it is, injecting a "
                       "backend would give the console an audio path that plays "
                       "into nothing",
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -234,7 +235,7 @@ WIRING = {
                       "is unverified, and its board.toml denies the moy_audio "
                       "usermod for the same reason. Wire both together at "
                       "stage 5",
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -266,7 +267,7 @@ WIRING = {
     "host": {
         "make_api": INJECTED,
         "make_audio": INJECTED,
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -308,7 +309,7 @@ WIRING = {
     "web": {
         "make_api": INJECTED,
         "make_audio": INJECTED,
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -589,7 +590,7 @@ def test_the_extractor_still_sees_the_wiring():
     """A parse that finds nothing would make every assertion below vacuous --
     and this file reads four sources by path, any of which can be moved."""
     pmap = _wire_param_map()
-    for expect in ("make_api", "wifi", "make_audio", "lua_runtime", "keyboard"):
+    for expect in ("make_api", "wifi", "make_audio", "runtimes", "keyboard"):
         assert expect in pmap, "wire_workstation_core no longer wires %s" % expect
     for target in TARGETS:
         found = injections(target)
@@ -693,7 +694,7 @@ def test_the_four_boards_wire_one_service_set():
             if svc not in sets[b]:
                 assert WIRING[b][svc] is not INJECTED, (
                     "%s lacks %s and its row does not say why" % (b, svc))
-    assert {"make_api", "lua_runtime", "make_game_canvas", "carts_store",
+    assert {"make_api", "runtimes", "make_game_canvas", "carts_store",
             "carts_root", "wifi", "pointer", "keyboard", "updater",
             "webhost", "reboot_hook", "net", "link", "perf_capture"} <= common, (
         sorted(common))

@@ -97,6 +97,18 @@ except ImportError:                     # host: the runtime package
     from runtime.widgets import _in
 
 
+
+def _edit_kind(cart):
+    """The crash bar's EDIT|CODE slot for `cart`: True for a cart with a
+    Make-it-mine schema (pencil), False for code (the < > glyph), None for a
+    compiled ("runtime": "wasm") cart, whose trap offers no EDIT action at
+    all (docs/wasm_tier_plan_2026-09.md)."""
+    if not cart:
+        return False
+    if cart.get("runtime") == "wasm":
+        return None
+    return bool(cart.get("edit"))
+
 class BarLayer:
     """The unified 18px top bar (#46), migrated out of Workstation as
     its own surface (docs/history/shell_layers_refactor_v1.md Phase 2) and reshaped into a
@@ -369,7 +381,7 @@ class BarLayer:
         explicit invalidators bump (look.set_icon_sheet, etc.)."""
         ws = self.ws
         owner = self._zone_owner(where)
-        has_edit = bool(ws.cart.get("edit")) if ws.cart else False
+        has_edit = _edit_kind(ws.cart)
         return (where, self._clock_text(), has_edit, id(ws.look.icon_sheet),
                 getattr(self._bar_canvas(where), "font_scale", 1),
                 bool(ws.can_manage),
@@ -407,7 +419,8 @@ class BarLayer:
             # IconSheet slot) so it never goes blank on a device with an older saved theme.
             ws._glyph("menu", _SYSMENU_BTN, th["chrome_ink"], cv)
             ws._icon("home", _HOME_BTN[0], _HOME_BTN[1], cv)
-            ws._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
+            if has_edit is not None:            # a compiled cart has neither
+                ws._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
             ws._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
             ws._icon("map", _MAP_BTN[0], _MAP_BTN[1], cv)
             ws._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
@@ -630,6 +643,8 @@ class BarLayer:
         elif _in(px, py, _HOME_BTN):
             ws.go_home()
         elif _in(px, py, _MENU_BTN):
+            if _edit_kind(ws.cart) is None:
+                return False
             ws._open_menu()
         elif _in(px, py, _PAINT_BTN):
             ws._open_paint()
