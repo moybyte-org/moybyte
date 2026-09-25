@@ -3,7 +3,7 @@
 `MoycoreHostRun(ws, ns, src)` runs the cart through `runtime/lua_binding` --
 libmoy's own binding over the same vendored Lua 5.4 the firmware compiles,
 LUA_32BITS and all -- so the host is not a different program from the device.
-Player._start_lua drives it; a Lua error surfaces as a normal Python exception,
+Player._start_runtime drives it; a Lua error surfaces as a normal Python exception,
 so the Player's existing crash-to-code panel needs nothing special.
 
 **lupa is GONE (2026-08-14), and with it `LuaCartRun` and the PRELUDE that

@@ -88,9 +88,11 @@ error popup over it (`ws._crash_to_code`). On a cart of several scripts
 on a PICO-8 port that is as often the generated half as the game, and a marker
 on somebody else's line N is worse than none (#89). The marker then RE-CHECKS on every
 edit/undo — it retires only when the source actually parses again, and follows
-the live syntax error while it doesn't. The old panel survives only as the
-no-open-cart fallback. This is still the caller model: the crash path is just
-one more pop, into the one place the fix can happen.)*
+the live syntax error while it doesn't. The old panel survives as the
+no-open-cart fallback, and for a compiled (`"runtime": "wasm"`) cart, whose
+trap has no source line behind it: the panel reports it, offers no EDIT, and
+points at HOME. This is still the caller model: the crash path is just one more
+pop, into the one place the fix can happen.)*
 
 ---
 

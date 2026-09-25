@@ -328,6 +328,7 @@ game, the ≡ menu and Settings work, the Editor's seven tabs work.
 | splash forever, no launcher | read the last `boot:` line; it names the step |
 | launcher, but no sound | stage 5 answers this with a number, not an ear |
 | `lua runtime ABSENT` | `moycore` is not in the image; Lua carts open the runtime-missing panel, which is the designed floor |
+| `wasm runtime ABSENT` | `moycore` has no `moy_wasm` engine beside it in the image; compiled (`"runtime": "wasm"`) carts open the same panel |
 
 ---
 

@@ -1,16 +1,19 @@
-# moy_wasm — the WebAssembly cart tier's engine (phase 1)
+# moy_wasm — the WebAssembly cart tier's engine
 
 `docs/wasm_tier_plan_2026-09.md` is the plan; this is the module its phase 1
-built. It is the ENGINE only: the vendored WAMR runtime and the thread a
-module runs on. There are no verbs here and no import table — that is C in
-libmoy beside the Lua binding, hosted by moycore (phases 2 and 3) — so a
-module that imports anything fails to instantiate today.
+built and its phase 3 opened to the Player. It is the ENGINE only: the vendored
+WAMR runtime and the thread a module runs on. There are no verbs here and no
+import table — that is C in libmoy beside the Lua binding
+(`native/moycore/libmoy/moy_wasm.c`, vendored), hosted by moycore — so a module
+run through `start()` below can import nothing, and a cart runs as a SESSION
+moycore drives (see "A cart's session").
 
 | piece | where |
 |---|---|
 | the runtime | `wamr/`: the AOT-only subset of Moybyte's WAMR fork (the plan's "carried as a fork"), copied by `tools/vendor_wamr.py` at the commit `wamr_vendor.json` records (`make vendor-wamr`; `tests/test_wamr_vendor.py` holds the copy to the fork) |
 | the build | `micropython.cmake`: the runtime as its own static library, AOT only, no interpreter, no WASI, no builtin libc |
-| the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report |
+| the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report; a cart's session |
+| the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through |
 | the key | `moy_wasm_key.h`: the provenance key a module must carry, per chip |
 | the thread | `moy_wasm_thread.c`: the run's pthread, stack placed per board |
 
@@ -53,6 +56,42 @@ are in it), plus `psram_min`.
 psram_free, psram_largest)`. `KEY` is the key this build wants after the wasm
 line, `FORK` the fork commit, `STACK` the board's default `(bytes, in_psram)`,
 `POOL` the runtime pool's size.
+
+## A cart's session
+
+A compiled cart the Player runs is a session: the same thread, pool, load and
+provenance check as a run, held open for the cart's life, with moycore — the
+host half, which owns the console — supplying the callbacks
+(`moy_wasm_session.h`). The thread calls them once the runtime is up (moycore
+registers libmoy's import table), once the module is loaded and its key checked
+(the module's shape against the manifest's `memory`, `moy_wasm_check`), once it
+is instantiated (bind it to the console) and for each hook, and before teardown.
+`moy_wasm_session_open` also refuses a module whose key names another
+`main.wasm` than the cart's (its sha256, which the board computes).
+
+The MicroPython task blocks in each call while the thread runs the hook — the
+thread is at the VM's priority on the VM's core, so it IS the VM's time — and
+while it waits it serves `moy_wasm_on_vm` requests: the two imports that need
+the VM, the cart's own file read (through the VFS, the last file held open) and
+the config lookup, run on the task, so the thread never touches MicroPython.
+One session at a time, never beside a `start()` run.
+
+Where a board finds a cart's compiled module is host policy: `<main>.<chip>.aot`
+beside `main.wasm` in the cart's folder, `CHIP` naming the chip
+(`tools/wasm_cart.py` builds it; `moycore_glue.aot_path` finds it). A cart with
+no module for this chip is refused on the Player's panel. The sync RPC declines
+binary files, so a module never crosses between a browser and a board
+(`runtime/moy_sync.py`): a compiled cart plays where its module was put.
+
+**A full-frame blit presents above the tick model's 30 on every board.** The
+plan expected the S3 to sit at or under it; measured on 2026-09-25 (the figures
+are #158's) the Blit Wasm fixture — the cart's own raster rewriting all
+320 x 240 indices plus the host's 256-entry palette resolve, every frame — ran
+unpaced at over 45 fps on every console board, the Guition P4 lowest, the
+Waveshare P4 at its 60 cap. A frame on this tier costs what the CART's raster
+costs; the resolve is a few milliseconds. Each suite pins a floor for that
+fixture and for the hello cart (`tests/test_*_on_glass.py`), measured with WiFi
+off, the state a cart plays in.
 
 ## Where the memory goes
 
@@ -145,11 +184,20 @@ current answer.
   from the clone's git objects when `experiments/wasm_aot/wamr` has it), the
   interpreter and compiler stayed behind, and one pin names it everywhere.
 - `tests/test_wasm_module.py`: the key and the flags the builder derives.
+- `tests/test_moycore_glue.py`: the device glue's `WasmRun` over a fake moycore
+  (the arguments `wasm_open` gets, the refusals before it).
+- `tests/test_wasm_cart.py`: the same import table on the host, over WAMR built
+  for Linux at this pin (`runtime/wasm_binding.py`) — the hello cart's pixel
+  golden, the hooks under the tick model, a trap, quit, the runtime-missing
+  panel, and the store's handling of a compiled cart.
 - On glass, every declaring board's suite: the idle cost against a module-free
   image of the same tree, the hello module and four foreign modules, the two
   stack placements, the termination answer, a Lua cart after a wasm run, a
-  load/unload loop under a live cart and WiFi, and a run with WiFi and BLE up.
-  The suites build the modules with the pinned compilers
+  load/unload loop under a live cart and WiFi, and a run with WiFi and BLE up;
+  then the Player path — the hello and blit carts run from the launcher at
+  their fps floors, and a cart with no module for this chip refused. The suites
+  build the modules with the pinned compilers
   (`python3 tools/wasm_module.py compilers`) and push them into the board's
-  store under `wasm_hello/`, which is not a `.moy` folder and never lists as a
-  cart.
+  store: the phase-1 modules under `wasm_hello/`, which is not a `.moy` folder
+  and never lists as a cart, and the fixture carts as `wasm_hello.moy` and
+  `wasm_blit.moy`.

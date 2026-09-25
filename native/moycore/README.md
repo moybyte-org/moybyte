@@ -17,6 +17,39 @@ half: what a *moybyte* console is made of.
 | pmem | a C array with a dirty flag, the shape the device already defers it to (#66) |
 | tile flags | 512 bytes COPIED in at `run_begin` (SPEC.md 3.5) -- the one buffer here that is not the caller's, because C writes it (`fset`, a poke to `0x3000`, the p8 shim's `__moy_map_flags`) and the caller may hand over a plain `bytes` |
 
+## The compiled cart (`run_begin(..., vm=False)` + `wasm_open`)
+
+A `"runtime": "wasm"` cart (docs/wasm_tier_plan_2026-09.md) runs on the SAME
+console -- canvas, snapshot, audio queue, pmem, flags, `tick`, `view`,
+`pmem_image`, `retarget`, `close` -- with libmoy's wasm import table
+(`libmoy/moy_wasm.c`, vendored) in place of a Lua state. `run_begin`'s last
+argument says which: False builds the console alone, and `wasm_open(module,
+wasm_head, pages, wasm_sha, cart_dir, wire_swapped)` hands it to the ENGINE,
+`native/moy_wasm`, which owns the runtime, the load, the provenance key and the
+thread everything WAMR does runs on. This half binds and nothing else: it
+registers the table, checks the module's shape against the manifest's pages
+before its memory exists, binds the instance to the console and calls the
+three hooks, each on the engine's thread through its session callbacks
+(`native/moy_wasm/moy_wasm_session.h`). `tick` then runs `_update` and `_draw`
+there and times the halves for `tick_split`.
+
+Every host callback the table reaches from that thread is a C read or write
+against the console except two that need the VM -- `read`, the cart's own
+folder through the VFS, and `cfg`, the config dict -- and those run on the
+MicroPython task through `moy_wasm_on_vm` while it waits on the call. The
+run's own state (libmoy's per-run struct, about 4 KB) and a layer's pixels come
+from PSRAM and go back at `close()`, so an idle desk carries a pointer, not the
+struct. A trap clears the
+canvas before the console paints its report, so the frame it interrupted is
+never presented; `quit()` ends the cart where it stands (`wasm_quit()` says so).
+
+It compiles only when the engine is in the image: `native/moy_wasm`'s cmake
+defines `MOY_WASM`, `moycore.WASM` is 1 there and 0 on the unix and wasm-runner
+builds, where `libmoy/moy_wasm.c` is an empty translation unit. The MicroPython
+surface is unconditional, because qstr scanning does not see that define.
+`device/moycore_glue.py`'s `WasmRun` is the glue; the host twin is
+`runtime/moyhost_wasm.c`.
+
 ## What it does NOT compile
 
 Neither the raster nor a Lua VM: the binary already has one of each
