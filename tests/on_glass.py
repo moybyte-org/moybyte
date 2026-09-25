@@ -457,12 +457,15 @@ WASM_DIR = "wasm_hello"
 # step(20000) on a fresh instance: the 6502 core's cycle count, identical on
 # every runtime the spike measured.
 WASM_STEP_20000 = 59973
-# What building the module in may cost the idle desk's internal SRAM, against
-# a module-free image of the same tree on a fresh boot. Measured 2026-09-25:
-# free fell 1464-1508 bytes on all four boards; the largest block fell 0 (both
-# P4s), 2048 (Guition S3) and 4096 (T-Deck) -- it moves in the heap's own
-# steps as the static data shifts the regions, so its bound carries one more.
-WASM_IDLE_FREE_COST_MAX = 2048
+# What building the tier in may cost the idle desk's internal SRAM, against a
+# module-free image of the same tree on a fresh boot. Measured 2026-09-25 with
+# the Player path in: free fell 2344-2432 bytes on all four boards -- the
+# engine's static data, and the 880-byte import table, which WAMR sorts in
+# place and so must be writable; every per-cart structure is allocated when a
+# cart opens, from PSRAM. The largest block fell 0 (both P4s), 2048 (Guition
+# S3) and 4096 (T-Deck) -- it moves in the heap's own steps as the static data
+# shifts the regions, so its bound carries one more.
+WASM_IDLE_FREE_COST_MAX = 3072
 WASM_IDLE_LARGEST_COST_MAX = 6144
 # What one run may take from internal SRAM beyond the idle desk's, with the
 # board's own run stack: the thread's control block and bookkeeping (~0.8-1 KB
@@ -603,19 +606,41 @@ def wasm_hello_runs_and_foreign_modules_are_refused(board, board_dir, paths):
         assert r["error"].startswith(why), (name, r["error"])
 
 
+# The internal-SRAM stack variant is attempted only when the heap's largest
+# free block holds this many stacks: the variant takes a whole stack from the
+# region WiFi, BLE and the display's DMA share, and a desk that has had its
+# radios up this boot keeps a few KB there (about 7 KB on the T-Deck, measured
+# 2026-09-25) -- not enough to try it without starving the board.
+WASM_INTERNAL_STACK_ROOM = 2
+
+
 def wasm_run_stack_placements(board, paths):
-    """The run stack in PSRAM and in internal SRAM: the same answer, what each
-    costs the internal heap for the run, and how fast. Returns both results
-    for the report; the board's own setting is `moy_wasm.STACK`."""
+    """The run stack in PSRAM (the boards' setting, `moy_wasm.STACK`) and in
+    internal SRAM: the same answer, what each costs the internal heap for the
+    run, and how fast. The internal variant runs only when the internal heap
+    has room for it (WASM_INTERNAL_STACK_ROOM stacks in one block); otherwise
+    it is recorded as skipped with the free figures that decided it, the same
+    on a fresh board and a warm one. Returns {psram: result or None}."""
     out = {}
+    stack = board.pyval("__import__('moy_wasm').STACK[0]", strict=True)
     for psram in (True, False):
+        if not psram:
+            free, largest = board.pyval("__import__('moy_wasm').mem()[:2]",
+                                        strict=True)
+            if largest < WASM_INTERNAL_STACK_ROOM * stack:
+                print("\nWASM stack internal: skipped -- internal free %d, "
+                      "largest block %d, wants %d" % (
+                          free, largest, WASM_INTERNAL_STACK_ROOM * stack))
+                out[psram] = None
+                continue
         r = wasm_run(board, paths["hello"], "step", (400000,), psram_stack=psram)
         assert r["ok"], r["error"]
         out[psram] = r
         print("\nWASM stack %s: step(400000) %d us, stack used %d, run cost "
               "internal %d" % ("PSRAM" if psram else "internal", r["call_us"],
                                r["stack_used"], r["sram_before"] - r["sram_min"]))
-    assert out[True]["value"] == out[False]["value"]
+    if out[False] is not None:
+        assert out[True]["value"] == out[False]["value"]
     return out
 
 
@@ -641,10 +666,12 @@ def wasm_runaway_runs_to_its_end(board, paths, n=400000000):
 
 def wasm_lua_after_wasm_keeps_its_sram(board, paths):
     """Guard 3: a Lua cart run after a wasm run keeps the internal SRAM it had
-    before one -- moycore's report says no PSRAM fallback, the same as a
-    control run just before the wasm run. The control is what makes the
-    reading mean something: on a desk whose radios have already taken the
-    internal heap, the Lua VM falls back with or without wasm."""
+    before one -- moycore's report says the same about PSRAM fallback as a
+    control run just before the wasm run. A COMPARISON, never an absolute: a
+    console whose radios have been up this boot already sits below the Lua
+    floor (#158), so the control falls back by itself there and the question
+    is only whether the wasm run changed the answer. Same on a fresh board and
+    a warm one."""
     def lua_run():
         board.cmd("run sakura lua", wait_for="REMOTE run")
         board.drain(2.5)
@@ -659,10 +686,6 @@ def wasm_lua_after_wasm_keeps_its_sram(board, paths):
     after = lua_run()
     print("\nWASM Lua sram before the wasm run %r, after %r" % (control, after))
     assert after["psram_fallback"] == control["psram_fallback"], (control, after)
-    assert after["psram_fallback"] is False, (
-        "the Lua VM fell back to PSRAM (%r) -- %s" % (after, "and the control "
-        "run did too: this desk's internal heap was spent before the test"
-        if control["psram_fallback"] else ""))
     return control, after
 
 
@@ -700,13 +723,15 @@ def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
 def wasm_low_water_with_radios_up(board, paths):
     """Guard 2: with WiFi and BLE up, a run takes at most WASM_RUN_SRAM_MAX of
     internal SRAM beyond what the idle desk already had (the heap's
-    local-minimum monitor, started before the run's thread exists).
+    local-minimum monitor, started before the run's thread exists) -- a
+    COMPARISON against the desk it ran on, never an absolute floor.
 
     Returned beside it: the low-water mark against moycore's internal-SRAM
     floor. On the S3 boards the console with both radios up already sits
     below that floor before any wasm runs (measured on a module-free image,
-    #158) -- so the floor comparison is a fact about the console, reported,
-    and the run's own cost is what this pins."""
+    #158), and WiFi is not meant to be on while a cart plays -- so the floor
+    comparison is a fact about the console, reported, and the run's own cost is
+    what this pins."""
     board.cmd("py ws.wifi_hold('wasm')", wait_for="PY", timeout=20)
     try:
         assert board.pyval("%s.start()" % _ble(board), timeout=30) is True
@@ -723,3 +748,140 @@ def wasm_low_water_with_radios_up(board, paths):
              "at or above" if r["sram_min"] >= floor else "BELOW"))
     assert cost <= WASM_RUN_SRAM_MAX, (cost, r)
     return r["sram_before"], r["sram_min"], floor
+
+
+# -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) -----------------
+#
+# A compiled cart run from the launcher: tests/fixtures/wasm/ built for this
+# board's chip by tools/wasm_cart.py (WAT assembled, the module compiled with
+# the pinned compiler, the key this build wants), pushed into the store as a
+# .moy folder over `recv`, rescanned, and run with `run` like any cart. The fps
+# floors are the suites' own, per board, measured with WiFi off -- the state a
+# cart plays in.
+
+WASM_CARTS = {"hello": "Hello Wasm", "blit": "Blit Wasm"}
+
+
+def _push_folder(board, board_dir, local, dest):
+    """Every file under `local` to `dest` on the board, over `recv`."""
+    import push_cart as pc
+    from tools import board_config
+    ser = board_config.load(board_dir)["serial"]
+    names = pc.cart_files(local)
+    was = pc.quiet_diag(board)
+    try:
+        win = pc.raw_window(board, int(ser.get("window") or 4096))
+        assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
+        board.pyval("ws._g['_mkdir'](%r)" % dest)
+        for sub in pc.sub_dirs(names):
+            board.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
+        for name in names:
+            pc.push_file_raw(board, os.path.join(local, name), dest + "/" + name,
+                             win)
+    finally:
+        pc.restore_diag(board, was)
+
+
+def wasm_carts_push(board, board_dir):
+    """Build the compiled fixture carts for this board's chip, push each into
+    the store as `<name>.moy`, and rescan so the launcher lists them. Returns
+    {name: title}."""
+    import tempfile
+    from tools import wasm_cart
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_carts_")
+    for name in WASM_CARTS:
+        out = os.path.join(tmp, name + ".moy")
+        wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / (name + ".moy")),
+                        out, chips=(chip,))
+        _push_folder(board, board_dir, out,
+                     root.rstrip("/") + "/wasm_" + name + ".moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", timeout=20,
+                         strict=True)
+    for title in WASM_CARTS.values():
+        assert title in titles, "%s is not on the shelf after the push" % title
+    return dict(WASM_CARTS)
+
+
+def wasm_cart_fps(board, title, seconds=10.0, check=None):
+    """Run `title` from the launcher, check it ticks with no error on the
+    wasm runtime, and read its drawn fps off the PERF line over `seconds`
+    (the first sample is the start and is dropped). `check(board)` runs once
+    the cart is up. Leaves the desk as it was found. Returns (median drawn
+    fps, [every sample's (drawn, looped)])."""
+    from runtime.perf_line import parse_perf
+    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.5)
+        st = board.state()
+        assert st.get("cart") == title, st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        if check is not None:
+            check(board)
+        n0 = len(board.lines)
+        board.drain(seconds)
+        st = board.state()
+        assert not st.get("cart_error"), st["cart_error"]
+        slug = title.replace(" ", "_")
+        got = [parse_perf(ln) for ln in board.perf_lines(n0)]
+        samples = [g["fps"] for g in got if g.get("cart") == slug]
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    assert len(samples) >= 3, "too few PERF samples under %s: %r" % (title, got)
+    drawn = sorted(s[0] for s in samples[1:])
+    median = drawn[len(drawn) // 2]
+    print("\nWASM %s: drawn fps %s (median %s)" % (
+        title, [s[0] for s in samples], median))
+    return median, samples
+
+
+def hello_read_its_greeting(board):
+    """The hello cart's `read` crossed to the VM and back: its greeting's
+    black band spans the text (8 pixels a character) only when the read
+    returned the file's bytes; with nothing read it is 8 pixels wide and row 9
+    at x=100 is the blit's gradient."""
+    px = board.pyval("(lambda b, i: b[i] | b[i + 1] << 8)"
+                     "(ws.canvas._buf, 2 * (9 * ws.canvas.w + 100))", strict=True)
+    black = board.pyval("ws.canvas._wire[0]", strict=True)
+    assert px == black, "the greeting was not read: pixel %#06x" % px
+
+
+def wasm_cart_holds_its_floor(board, title, floor, check=None):
+    """The compiled cart presents at or above this board's pinned floor."""
+    fps, _samples = wasm_cart_fps(board, title, check=check)
+    assert fps >= floor, "%s drew %s fps, under the floor %s" % (title, fps, floor)
+    return fps
+
+
+def wasm_missing_module_is_refused(board, board_dir):
+    """A compiled cart whose module was compiled for another chip is refused
+    before anything runs: the Player's panel names it, and the desk comes back."""
+    chip = _wasm_chip(board_dir)
+    other = "esp32p4" if chip == "esp32s3" else "esp32s3"
+    import tempfile
+    from tools import wasm_cart
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_other_")
+    out = os.path.join(tmp, "other.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "hello.moy"), out,
+                    chips=(other,))
+    with open(os.path.join(out, "manifest.json")) as f:
+        man = f.read().replace('"Hello Wasm"', '"Other Chip Wasm"')
+    with open(os.path.join(out, "manifest.json"), "w") as f:
+        f.write(man)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_other.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.cmd("run other chip wasm", wait_for="REMOTE run")
+    try:
+        board.drain(2.0)
+        err = board.state().get("cart_error") or ""
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    assert "no module compiled for this board" in err, err
+    return err

@@ -75,6 +75,35 @@ def test_a_lua_cart_after_a_wasm_run_keeps_its_sram(board, wasm):
     on_glass.wasm_lua_after_wasm_keeps_its_sram(board, wasm)
 
 
+# -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) ---------------
+# Compiled carts from the launcher, WiFi off -- the state a cart plays in, so
+# before the radio guards. The floors are this board's median drawn fps
+# measured on 2026-09-25, less a margin; the measurements are the owner's to
+# post, and native/moy_wasm/README.md states the per-board ceiling.
+WASM_HELLO_FPS_FLOOR = 27
+WASM_BLIT_FPS_FLOOR = 38
+
+
+@pytest.fixture(scope="module")
+def wasm_carts(board):
+    return on_glass.wasm_carts_push(board, WASM_BOARD_DIR)
+
+
+def test_the_hello_wasm_cart_holds_its_floor(board, wasm_carts):
+    on_glass.wasm_cart_holds_its_floor(board, wasm_carts["hello"],
+                                       WASM_HELLO_FPS_FLOOR,
+                                       check=on_glass.hello_read_its_greeting)
+
+
+def test_a_full_frame_blit_cart_holds_its_floor(board, wasm_carts):
+    on_glass.wasm_cart_holds_its_floor(board, wasm_carts["blit"],
+                                       WASM_BLIT_FPS_FLOOR)
+
+
+def test_a_compiled_cart_without_this_chips_module_is_refused(board, wasm_carts):
+    on_glass.wasm_missing_module_is_refused(board, WASM_BOARD_DIR)
+
+
 def test_boots_to_the_desk(board):
     st = board.state()
     assert st.get("desk") is True
