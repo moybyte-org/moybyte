@@ -13,6 +13,7 @@ for the rules. Reading it top to bottom is the slow path.
 | change the shell / a WM / an app | `runtime/README.md` (per-file map), `docs/app_api_v1.md` | pixel goldens are the net, and the 320×240/1× row does NOT exercise the toolkit |
 | add a cart verb | `docs/moy_cart_api.md`, and SPEC.md in the moy-spec repo | the verb table is a PUBLIC spec; Python and Lua must agree verbatim |
 | add the wasm cart tier / touch a compiled cart | `docs/wasm_tier_plan_2026-09.md`, then `experiments/wasm_aot/README.md` | the ABI is moy-spec's (proposals/wasm-runtime.md), the measurements are **#158**, and how a host EXECUTES a module never enters the spec |
+| touch `native/moy_wasm/` (the wasm engine) | its README, then `docs/wasm_tier_plan_2026-09.md` | the runtime is VENDORED from our WAMR fork (`make vendor-wamr`, the pin is `native/moy_wasm/wamr_pin.h`): fix it in the fork and re-vendor, never edit the copy; a board TAKES or denies it in its board.toml, and the on-glass guard in every suite is the gate |
 | change the PICO-8 importer or its Lua shim | `PICO8.md` and `p8_lua_port.py` in the moy-spec repo | `tools/p8_lua_port.py` is VENDORED (`make vendor-p8-import`); the corpus gate `make -C libmoy p8-carts` is the net, and a cart that fails only on a board is usually the frame cadence (`run_cart --dt`) |
 | touch audio | `native/moy_audio/libmoy/UPSTREAM.md` | it is VENDORED — fix it upstream in moy-spec and re-vendor, never here |
 | touch multiplayer | `docs/netplay_v1.md` | the payload is INPUTS, never state; a missing input STALLS, it never extrapolates |
