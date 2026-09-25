@@ -24,8 +24,8 @@ console -- canvas, snapshot, audio queue, pmem, flags, `tick`, `view`,
 `pmem_image`, `retarget`, `close` -- with libmoy's wasm import table
 (`libmoy/moy_wasm.c`, vendored) in place of a Lua state. `run_begin`'s last
 argument says which: False builds the console alone, and `wasm_open(module,
-wasm_head, pages, wasm_sha, cart_dir, wire_swapped)` hands it to the ENGINE,
-`native/moy_wasm`, which owns the runtime, the signature, the load, the
+wasm_head, pages, wasm_sha, cart_dir, wire_swapped, gate)` hands it to the
+ENGINE, `native/moy_wasm`, which owns the runtime, the signature, the load, the
 provenance key and the thread everything WAMR does runs on. This half binds
 and nothing else: it registers the table, checks the module's shape against
 the manifest's pages before its memory exists, binds the instance to the
@@ -37,8 +37,11 @@ there and times the halves for `tick_split`.
 Every host callback the table reaches from that thread is a C read or write
 against the console except two that need the VM -- `read`, the cart's own
 folder through the VFS, and `cfg`, the config dict -- and those run on the
-MicroPython task through `moy_wasm_on_vm` while it waits on the call. The
-run's own state (libmoy's per-run struct, about 4 KB), the table's
+MicroPython task through `moy_wasm_on_vm` while it waits on the call. Each
+`read` runs inside `gate(fn)`, the store's own gate (`ws._with_sd`), as every
+other store access does: on the T-Deck that drains the panel's flush before
+the card, which shares its SPI bus, is touched. The run's own state (libmoy's
+per-run struct, about 4 KB), the table's
 registration storage -- libmoy's table is a read-only template that
 `moy_wasm_register` copies into storage the host keeps until the runtime is
 destroyed -- and a layer's pixels come from PSRAM and go back at `close()`, so

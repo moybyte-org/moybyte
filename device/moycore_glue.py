@@ -558,7 +558,11 @@ class WasmRun(MoycoreRun):
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
             self.snap, self.aq, self.pmem_img, cfg, flags, False)
         self.snap[_moycore.SNAP_PLAYERS] = 1
-        err = _moycore.wasm_open(module, head, int(pages), sha, path, swapped)
+        # Every `read` the cart makes runs inside the store's gate, as every
+        # other store access does: on the T-Deck it drains the panel's flush
+        # first, because the card shares the panel's SPI bus.
+        err = _moycore.wasm_open(module, head, int(pages), sha, path, swapped,
+                                 getattr(ws, "_with_sd", None))
         if err:
             try:
                 _moycore.close()

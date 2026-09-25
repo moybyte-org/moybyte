@@ -1734,14 +1734,17 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
     world = _wasm_world()
     try:
         ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        ws._with_sd = lambda fn: fn()
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
-        _v, module, head, pages, sha, cdir, swapped = world.core.calls[1]
+        _v, module, head, pages, sha, cdir, swapped, gate = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.aot"
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
         assert pages == 3 and cdir == cart["path"] and swapped is True
+        # the cart's reads take the store's gate, as every store access does
+        assert gate is ws._with_sd
         assert sha == hashlib.sha256(blob).hexdigest()
         # the frame is MoycoreRun's: _update ticks, draw is the fused no-op
         assert run.init is None and run.draw() is None

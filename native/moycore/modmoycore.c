@@ -2384,44 +2384,66 @@ static void wfile_forget(void)
     }
 }
 
-// On the MicroPython task: one read of the cart's own file. The last file
-// stays open, so a cart streaming its data file in chunks opens it once.
+static wread_t *g_wread;          // the read wasm_read_now serves
+
+// One read of the cart's own file, raising when it is absent or unreadable.
+// The last file stays open, so a cart streaming its data file in chunks opens
+// it once. A MicroPython function so the board's storage gate can run it.
+static mp_obj_t wasm_read_now(void)
+{
+    wread_t *q = g_wread;
+    mp_obj_t f = MP_STATE_VM(moycore_wasm_file);
+    if (f == MP_OBJ_NULL || strcmp(WR->file, q->name) != 0) {
+        wfile_forget();
+        char path[sizeof(WR->dir) + MOY_WASM_NAME_MAX + 2];
+        snprintf(path, sizeof(path), "%s/%s", WR->dir, q->name);
+        mp_obj_t args[2] = { mp_obj_new_str(path, strlen(path)),
+                             MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
+        f = mp_call_function_n_kw(MP_OBJ_FROM_PTR(&mp_builtin_open_obj), 2, 0, args);
+        MP_STATE_VM(moycore_wasm_file) = f;
+        snprintf(WR->file, sizeof(WR->file), "%s", q->name);
+    }
+    int e = 0;
+    mp_off_t size = mp_stream_seek(f, 0, MP_SEEK_END, &e);
+    if (e == 0 && size > (mp_off_t)q->offset) {
+        uint32_t left = (uint32_t)(size - (mp_off_t)q->offset);
+        if (q->len == 0) {
+            q->got = left;
+        } else {
+            mp_stream_seek(f, (mp_off_t)q->offset, MP_SEEK_SET, &e);
+            if (e == 0) {
+                mp_uint_t n = mp_stream_rw(f, q->dst, q->len < left ? q->len : left,
+                                           &e, MP_STREAM_RW_READ);
+                q->got = (uint32_t)n;
+            }
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(wasm_read_now_obj, wasm_read_now);
+
+// On the MicroPython task: the read, inside the board's storage gate when
+// wasm_open was handed one -- the store every other read and write goes
+// through, which on the T-Deck drains the panel's flush first, because the SD
+// card shares its SPI bus.
 static void read_on_vm(void *arg)
 {
     wread_t *q = (wread_t *)arg;
     nlr_buf_t nlr;
     q->got = 0;
+    g_wread = q;
     if (nlr_push(&nlr) == 0) {
-        mp_obj_t f = MP_STATE_VM(moycore_wasm_file);
-        if (f == MP_OBJ_NULL || strcmp(WR->file, q->name) != 0) {
-            wfile_forget();
-            char path[sizeof(WR->dir) + MOY_WASM_NAME_MAX + 2];
-            snprintf(path, sizeof(path), "%s/%s", WR->dir, q->name);
-            mp_obj_t args[2] = { mp_obj_new_str(path, strlen(path)),
-                                 MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
-            f = mp_call_function_n_kw(MP_OBJ_FROM_PTR(&mp_builtin_open_obj), 2, 0, args);
-            MP_STATE_VM(moycore_wasm_file) = f;
-            snprintf(WR->file, sizeof(WR->file), "%s", q->name);
-        }
-        int e = 0;
-        mp_off_t size = mp_stream_seek(f, 0, MP_SEEK_END, &e);
-        if (e == 0 && size > (mp_off_t)q->offset) {
-            uint32_t left = (uint32_t)(size - (mp_off_t)q->offset);
-            if (q->len == 0) {
-                q->got = left;
-            } else {
-                mp_stream_seek(f, (mp_off_t)q->offset, MP_SEEK_SET, &e);
-                if (e == 0) {
-                    mp_uint_t n = mp_stream_rw(f, q->dst, q->len < left ? q->len : left,
-                                               &e, MP_STREAM_RW_READ);
-                    q->got = (uint32_t)n;
-                }
-            }
+        mp_obj_t gate = MP_STATE_VM(moycore_wasm_gate);
+        if (gate != MP_OBJ_NULL && gate != mp_const_none) {
+            mp_call_function_1(gate, MP_OBJ_FROM_PTR(&wasm_read_now_obj));
+        } else {
+            wasm_read_now();
         }
         nlr_pop();
     } else {
         wfile_forget();                 // absent or unreadable reads 0
     }
+    g_wread = NULL;
 }
 
 static uint32_t hw_read(void *user, const char *name, uint32_t offset,
@@ -2593,6 +2615,7 @@ static void wasm_end(void)
     if (RUN.wasm) moy_wasm_session_close();
     RUN.wasm = 0;
     wfile_forget();
+    MP_STATE_VM(moycore_wasm_gate) = MP_OBJ_NULL;
     if (WR) {
         wrun_free(WR);
         WR = NULL;
@@ -2600,8 +2623,8 @@ static void wasm_end(void)
 }
 #endif // MOY_WASM
 
-// wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped)
-//   -> None, or the refusal or trap as text
+// wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
+//           gate=None) -> None, or the refusal or trap as text
 //
 // After run_begin(..., vm=False): load the compiled module at `module_path`
 // on the engine, check it against the canonical .wasm's head (`wasm_head`,
@@ -2609,14 +2632,15 @@ static void wasm_end(void)
 // before its memory exists, refuse it unless its key names `wasm_sha`, bind it
 // to this console and run _init. `cart_dir` is the only folder `read` sees;
 // `wire_swapped` says the canvas stores its words byte-swapped, which a
-// palette blit must match. A refusal or a trap closes nothing -- close() does.
+// palette blit must match. `gate(fn)` is the board's storage gate: every
+// `read` runs inside it. A refusal or a trap closes nothing -- close() does.
 static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
 {
-    (void)n_args;
     if (!RUN.open || RUN.L || RUN.wasm)
         mp_raise_msg(&mp_type_RuntimeError,
                      MP_ERROR_TEXT("moycore: wasm_open wants a run begun with vm=False"));
 #if MOY_WASM
+    MP_STATE_VM(moycore_wasm_gate) = n_args > 6 ? a[6] : MP_OBJ_NULL;
     char err[192];
     size_t hlen = 0;
     g_whead = (const uint8_t *)buf_r(a[1], &hlen);
@@ -2630,12 +2654,13 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
     if (rc) return mp_obj_new_str(err, strlen(err));
     return mp_const_none;
 #else
+    (void)n_args;
     (void)a;
     mp_raise_msg(&mp_type_RuntimeError,
                  MP_ERROR_TEXT("moycore: this build has no wasm engine"));
 #endif
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_open_obj, 6, 6, mod_wasm_open);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_open_obj, 6, 7, mod_wasm_open);
 
 // wasm_quit() -> whether the cart called quit(): it ended itself, and the
 // run must not call it again.
@@ -3078,6 +3103,7 @@ MP_REGISTER_MODULE(MP_QSTR_moycore, moycore_user_cmodule);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_calls);
 // The compiled cart's open data file (`read`), held between its reads.
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_file);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_gate);
 // The PICO-8 machine's Python-owned buffers (p8_memory), kept alive here.
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8mem);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8rom);
