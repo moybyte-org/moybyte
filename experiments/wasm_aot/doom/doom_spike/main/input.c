@@ -7,10 +7,9 @@
  * command 0x03 switches it to streaming the raw key MATRIX (five bytes, one
  * bit per key, level state), which is what the console uses for hold-to-move
  * (device/moybyte/input.py, RAW_KEYS -- the table below is that one). Firmware
- * older than 2025-06-12 ignores 0x03 and keeps sending ASCII; that is detected
- * the way the console detects it (bytes 1-4 zero, a printable in byte 0) and
- * the session falls back to timed holds. Rolling the ball keeps extending its
- * direction either way.
+ * older than 2025-06-12 ignores 0x03 and keeps sending ASCII; on such a board
+ * build with KBD_ASCII_ONLY and keys are timed holds. Rolling the ball keeps
+ * extending its direction either way.
  */
 #include "sdkconfig.h"
 #if !CONFIG_IDF_TARGET_ESP32S3
@@ -281,10 +280,12 @@ void input_init(void)
             s_kbd = NULL;
         }
     }
+#ifndef KBD_ASCII_ONLY
     if (s_kbd) {
         uint8_t raw_cmd = 0x03;
         s_raw = i2c_master_transmit(s_kbd, &raw_cmd, 1, 20) == ESP_OK;
     }
+#endif
     printf("INPUT keyboard=%s raw_mode=%d\n", s_kbd ? "found" : "absent", s_raw);
 }
 
@@ -308,18 +309,18 @@ void input_poll(void)
     if (s_kbd && now >= s_next_kbd_us) {
         s_next_kbd_us = now + 30000;
         if (s_raw) {
+            /* No runtime "this looks like ASCII" fallback: a matrix frame with
+             * two keys down in column 0 (W + Space = 0x22) is indistinguishable
+             * from a printable byte, and taking it for one switched this
+             * driver to single-byte reads while the keyboard kept streaming
+             * the matrix -- every matrix byte then read as an ASCII code, and
+             * A's byte, 0x08, is Backspace, the menu key (2026-09-25). The
+             * mode is decided once at start-up (did 0x03 get an ACK) and the
+             * firmware that ignores it is a build-time concern, not a guess
+             * made mid-fight. */
             uint8_t d[5] = { 0 };
             if (i2c_master_receive(s_kbd, d, 5, 5) == ESP_OK) {
-                if (d[0] > 0x20 && !d[1] && !d[2] && !d[3] && !d[4]) {
-                    /* a printable byte where a matrix should be: the firmware
-                     * ignored 0x03 -- stay on ASCII + timed holds from here */
-                    s_raw = 0;
-                    uint8_t k = map_ascii(d[0]);
-                    hold(k, (k >= 0xa0 && k <= 0xaf) ? 220 : 60);
-                }
-                else {
-                    matrix_poll(d);
-                }
+                matrix_poll(d);
             }
         }
         else {

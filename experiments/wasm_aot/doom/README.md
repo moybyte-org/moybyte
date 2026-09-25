@@ -27,7 +27,12 @@ menu key; the trackball turns and walks, its click fires. Held keys keep
 firing: the keyboard is switched to its raw matrix mode (command 0x03, five
 level bytes, the console's `RAW_KEYS` table), and key edges come from diffing
 reads. Keyboard firmware older than 2025-06-12 ignores that command and reports
-presses only; the driver detects it and falls back to timed holds.
+presses only; build with `KBD_ASCII_ONLY` for such a board and keys are timed
+holds. The driver does NOT guess mid-session: a matrix frame with two keys down
+in column 0 (W + Space reads 0x22) is indistinguishable from a printable ASCII
+byte, and a guess that took it for one switched to single-byte reads while the
+keyboard kept streaming the matrix -- every matrix byte then read as an ASCII
+code, and A's byte, 0x08, is Backspace, the menu key.
 
 The matrix has no diodes, so it GHOSTS: three held keys on three corners of a
 rectangle read the fourth corner as pressed. W + A + L (forward, turn, fire) put
