@@ -459,13 +459,13 @@ WASM_DIR = "wasm_hello"
 WASM_STEP_20000 = 59973
 # What building the tier in may cost the idle desk's internal SRAM, against a
 # module-free image of the same tree on a fresh boot. Measured 2026-09-25 with
-# the Player path in: free fell 2344-2432 bytes on all four boards -- the
-# engine's static data, and the 880-byte import table, which WAMR sorts in
-# place and so must be writable; every per-cart structure is allocated when a
-# cart opens, from PSRAM. The largest block fell 0 (both P4s), 2048 (Guition
-# S3) and 4096 (T-Deck) -- it moves in the heap's own steps as the static data
-# shifts the regions, so its bound carries one more.
-WASM_IDLE_FREE_COST_MAX = 3072
+# the import table's registration storage allocated per session from PSRAM:
+# free fell 1496-1536 bytes on all four boards, the engine's and moycore's
+# static data; every per-cart structure, the table's storage included, is
+# allocated when a cart opens, from PSRAM. The largest block fell 0 (both
+# P4s), 2048 (Guition S3) and 4096 (T-Deck) -- it moves in the heap's own
+# steps as the static data shifts the regions, so its bound carries one more.
+WASM_IDLE_FREE_COST_MAX = 2048
 WASM_IDLE_LARGEST_COST_MAX = 6144
 # What one run may take from internal SRAM beyond the idle desk's, with the
 # board's own run stack: the thread's control block and bookkeeping (~0.8-1 KB

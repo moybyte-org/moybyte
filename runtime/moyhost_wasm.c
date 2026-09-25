@@ -52,6 +52,9 @@ typedef struct {
 } host_wasm;
 
 static int g_runtime;        /* 1 once WAMR is up and the table registered */
+/* The table's registration storage: WAMR sorts it in place and points at it
+ * until the runtime is destroyed, which on the host is never. */
+static NativeSymbol *g_natives;
 
 /* The cart's own files, and nothing else (the proposal's `read`). The name
  * arrives checked by the binding -- relative, no empty, "." or ".." segment --
@@ -104,9 +107,13 @@ static void put_err(char *err, int errlen, const char *what, const char *detail)
 int hw_runtime(void)
 {
     if (!g_runtime) {
+        uint32_t n = 0;
+        moy_wasm_natives(&n);
+        if (!g_natives && !(g_natives = (NativeSymbol *)malloc(n * sizeof *g_natives)))
+            return 0;
         if (!wasm_runtime_init()) return 0;
         wasm_runtime_set_log_level(WASM_LOG_LEVEL_FATAL);
-        if (moy_wasm_register() != 0) {
+        if (moy_wasm_register(g_natives) != 0) {
             wasm_runtime_destroy();
             return 0;
         }
@@ -277,7 +284,7 @@ int hw_get_view(host_wasm *r, int *w, int *h)
 void hw_free(host_wasm *r)
 {
     if (!r) return;
-    if (r->bound) moy_wasm_close(&r->w);
+    moy_wasm_close(&r->w);
     if (r->env) wasm_runtime_destroy_exec_env(r->env);
     if (r->inst) wasm_runtime_deinstantiate(r->inst);
     if (r->module) wasm_runtime_unload(r->module);

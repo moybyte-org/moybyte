@@ -37,9 +37,11 @@ Every host callback the table reaches from that thread is a C read or write
 against the console except two that need the VM -- `read`, the cart's own
 folder through the VFS, and `cfg`, the config dict -- and those run on the
 MicroPython task through `moy_wasm_on_vm` while it waits on the call. The
-run's own state (libmoy's per-run struct, about 4 KB) and a layer's pixels come
-from PSRAM and go back at `close()`, so an idle desk carries a pointer, not the
-struct. A trap clears the
+run's own state (libmoy's per-run struct, about 4 KB), the table's
+registration storage -- libmoy's table is a read-only template that
+`moy_wasm_register` copies into storage the host keeps until the runtime is
+destroyed -- and a layer's pixels come from PSRAM and go back at `close()`, so
+an idle desk carries a pointer, not the struct or the table. A trap clears the
 canvas before the console paints its report, so the frame it interrupted is
 never presented; `quit()` ends the cart where it stands (`wasm_quit()` says so).
 

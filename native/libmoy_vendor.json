@@ -12,12 +12,12 @@
     "native/moycore/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moycore/libmoy/moy_lua.c": "45b30acfd8894ec9642b4bdaea1c014516165dc25beeb7f3486b7efccefd97ec",
     "native/moycore/libmoy/moy_p8.c": "d3dac60efd94c44dbc215bcd5cf350dc41220f9cc384c38add292143ac97a678",
-    "native/moycore/libmoy/moy_wasm.c": "a86a19076583ebccc65e4f62d695621f159ce531901dc17f0d094c929e430f15",
-    "native/moycore/libmoy/moy_wasm.h": "35db783f96949ca3a1fa30e44897abd8afcb7c873efda6224e5dc10e04a3366c",
+    "native/moycore/libmoy/moy_wasm.c": "1447ad186f7af0b9409761186a9096865259da714e735dafc45a3ea85e6b6aec",
+    "native/moycore/libmoy/moy_wasm.h": "bd5ee2a2274db7b3435b9860f2829c98a46b4848bc2b5fd9b51d76432f294791",
     "tools/wat.py": "1700e761a13572827ef3319e5f4cc19d84578294be0efcc60c43c9664be8fffe"
   },
   "upstream": {
-    "commit": "55ef6571feae1e7c5f790de95f1f2da32acffa8c",
+    "commit": "36685eae3ee74212c28d13f36e319b33a4a17ed9",
     "date": "2026-09-25",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"

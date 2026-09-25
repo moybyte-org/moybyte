@@ -599,7 +599,7 @@ static int32_t w_read(env_t e, const uint8_t *name, uint32_t nlen, uint32_t offs
 /* One row per import, in the order of proposals/wasm-imports.json. The
  * signature strings are WAMR's: 'i' an i32, 'f' an f32, '*~' a pointer and
  * the length WAMR bounds-checks it by, before the parenthesis the result. */
-static NativeSymbol NATIVES[] = {
+static const NativeSymbol NATIVES[] = {
     {"cls", FN(w_cls), "(i)", NULL},
     {"background", FN(w_background), "(i)", NULL},
     {"view", FN(w_view), "(ii)", NULL},
@@ -657,17 +657,19 @@ static NativeSymbol NATIVES[] = {
     {"read", FN(w_read), "(*~i*~)i", NULL},
 };
 
-NativeSymbol *moy_wasm_natives(uint32_t *count)
+const NativeSymbol *moy_wasm_natives(uint32_t *count)
 {
     if (count) *count = (uint32_t)(sizeof NATIVES / sizeof NATIVES[0]);
     return NATIVES;
 }
 
-int moy_wasm_register(void)
+int moy_wasm_register(NativeSymbol *storage)
 {
     uint32_t n;
-    NativeSymbol *s = moy_wasm_natives(&n);
-    return wasm_runtime_register_natives(MOY_WASM_MODULE, s, n) ? 0 : -1;
+    const NativeSymbol *t = moy_wasm_natives(&n);
+    if (!storage) return -1;
+    memcpy(storage, t, n * sizeof *storage);
+    return wasm_runtime_register_natives(MOY_WASM_MODULE, storage, n) ? 0 : -1;
 }
 
 /* -- the module's shape ---------------------------------------------------- */
@@ -873,7 +875,9 @@ int moy_wasm_draw(moy_wasm *w, char *err, size_t errlen)
 void moy_wasm_close(moy_wasm *w)
 {
     int i;
-    moy_host *h = &w->con->host;
+    moy_host *h;
+    if (!w || !w->con) return;
+    h = &w->con->host;
     for (i = 0; i < w->n_layers; i++)
         if (h->layer_free) h->layer_free(h->user, w->layers[i].pix);
     w->n_layers = 0;

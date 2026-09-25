@@ -17,7 +17,7 @@
  * the stack size, signing, the memory floor -- stays in the port.
  *
  *   wasm_runtime_init();
- *   moy_wasm_register();                       // once, before any load
+ *   moy_wasm_register(storage);                // once, before any load
  *   module = wasm_runtime_load(...);
  *   if (moy_wasm_check(module, wasm, size, manifest_pages, err, sizeof err))
  *       refuse;
@@ -86,13 +86,17 @@ typedef struct moy_wasm {
     int in_draw, blits, quitting;
 } moy_wasm;
 
-/* The import table as WAMR native symbols, and its row count. The array is
- * the binding's; WAMR sorts it in place when it is registered. */
-NativeSymbol *moy_wasm_natives(uint32_t *count);
+/* The import table as WAMR native symbols, and its row count: a read-only
+ * template, so it costs the host no writable memory. */
+const NativeSymbol *moy_wasm_natives(uint32_t *count);
 
 /* Register the table under module "moy". Once, after wasm_runtime_init and
- * before the first wasm_runtime_load. Returns 0 on success. */
-int moy_wasm_register(void);
+ * before the first wasm_runtime_load. `storage` is the host's: room for the
+ * row count moy_wasm_natives reports. WAMR sorts it in place and keeps
+ * pointing at it, so it stays allocated until wasm_runtime_destroy -- which
+ * lets a host place it where its writable memory is cheap. Returns 0 on
+ * success. */
+int moy_wasm_register(NativeSymbol *storage);
 
 /* The proposal's module shape, checked on a LOADED module before it is
  * instantiated -- so before its linear memory is allocated: every import is a
@@ -128,7 +132,8 @@ int moy_wasm_update(moy_wasm *w, float dt, char *err, size_t errlen);
 int moy_wasm_draw  (moy_wasm *w, char *err, size_t errlen);
 
 /* Release the cart's layers through con->host.layer_free and unbind the
- * instance. The instance, exec env and module stay the host's to destroy. */
+ * instance. The instance, exec env and module stay the host's to destroy.
+ * Safe on a zeroed moy_wasm that was never opened and after a failed open. */
 void moy_wasm_close(moy_wasm *w);
 
 #ifdef __cplusplus

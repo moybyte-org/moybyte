@@ -2324,10 +2324,13 @@ enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW };
 // resource the S3 boards gate the tier on. Only the pointer is static.
 typedef struct {
     moy_wasm w;                  // libmoy's per-run state for the table
-    int bound;                   // moy_wasm_open succeeded
     int dead;                    // trapped: never called again
     char dir[192];               // the cart's folder: `read`'s only root
     char file[MOY_WASM_NAME_MAX + 1];   // the file held open, if any
+    // The import table's registration storage: WAMR sorts it in place and
+    // points at it until the runtime is destroyed, so it lives as long as
+    // this struct does -- freed by wasm_end, after the session's teardown.
+    NativeSymbol *natives;
 } wrun_t;
 
 static wrun_t *WR;
@@ -2335,23 +2338,28 @@ static const uint8_t *g_whead;   // the canonical .wasm's head, for the check
 static size_t g_whead_len;
 static uint32_t g_wpages;        // the manifest's "memory"
 
-static wrun_t *wrun_new(void)
+static void *wmem_calloc(size_t n, size_t size)
 {
 #ifdef MOYCORE_PSRAM
-    wrun_t *r = (wrun_t *)heap_caps_calloc(1, sizeof(wrun_t),
-                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (r) return r;
+    void *p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p) return p;
 #endif
-    return (wrun_t *)calloc(1, sizeof(wrun_t));
+    return calloc(n, size);
+}
+
+static void wmem_free(void *p)
+{
+#ifdef MOYCORE_PSRAM
+    heap_caps_free(p);
+#else
+    free(p);
+#endif
 }
 
 static void wrun_free(wrun_t *r)
 {
-#ifdef MOYCORE_PSRAM
-    heap_caps_free(r);
-#else
-    free(r);
-#endif
+    wmem_free(r->natives);
+    wmem_free(r);
 }
 
 typedef struct {
@@ -2455,30 +2463,28 @@ static const char *hw_cfg(void *user, const char *key)
 static moy_pixel *hw_layer_new(void *user, int w, int h)
 {
     (void)user;
-#ifdef MOYCORE_PSRAM
-    return (moy_pixel *)heap_caps_calloc((size_t)w * (size_t)h, sizeof(moy_pixel),
-                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#else
-    return (moy_pixel *)calloc((size_t)w * (size_t)h, sizeof(moy_pixel));
-#endif
+    return (moy_pixel *)wmem_calloc((size_t)w * (size_t)h, sizeof(moy_pixel));
 }
 
 static void hw_layer_free(void *user, moy_pixel *p)
 {
     (void)user;
-#ifdef MOYCORE_PSRAM
-    heap_caps_free(p);
-#else
-    free(p);
-#endif
+    wmem_free(p);
 }
 
 // -- the engine's callbacks, on its thread --
 
 static int wo_runtime_up(void *user, char *err, size_t errlen)
 {
+    uint32_t n = 0;
     (void)user;
-    if (moy_wasm_register() != 0) {
+    moy_wasm_natives(&n);
+    WR->natives = (NativeSymbol *)wmem_calloc(n, sizeof(NativeSymbol));
+    if (!WR->natives) {
+        snprintf(err, errlen, "no memory for the import table");
+        return 1;
+    }
+    if (moy_wasm_register(WR->natives) != 0) {
         snprintf(err, errlen, "the import table did not register");
         return 1;
     }
@@ -2498,7 +2504,6 @@ static int wo_bound(void *user, wasm_exec_env_t env, char *err, size_t errlen)
         snprintf(err, errlen, "a hook is missing");
         return 1;
     }
-    WR->bound = 1;
     return 0;
 }
 
@@ -2513,8 +2518,7 @@ static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
 static void wo_unbound(void *user)
 {
     (void)user;
-    if (WR->bound) moy_wasm_close(&WR->w);
-    WR->bound = 0;
+    moy_wasm_close(&WR->w);
 }
 
 static const moy_wasm_ops WASM_OPS = {
@@ -2533,11 +2537,15 @@ static void wasm_trapped(void)
 static int wasm_begin(const char *path, const char *sha, const char *dir,
                       int swapped, char *err, size_t errlen)
 {
-    if (!WR && (WR = wrun_new()) == NULL) {
+    wfile_forget();
+    if (WR) {
+        wrun_free(WR);
+        WR = NULL;
+    }
+    if ((WR = (wrun_t *)wmem_calloc(1, sizeof(wrun_t))) == NULL) {
         snprintf(err, errlen, "no memory for the cart's run state");
         return 1;
     }
-    memset(WR, 0, sizeof(*WR));
     WR->w.read = hw_read;
     WR->w.wire_swapped = swapped;
     snprintf(WR->dir, sizeof(WR->dir), "%s", dir);
