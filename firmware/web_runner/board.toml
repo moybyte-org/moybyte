@@ -70,6 +70,19 @@ why  = """
 The host's Lua cart runner over runtime/lua_binding, a ctypes build of the
 boards' Lua. The browser runs moycore, compiled in as a usermod."""
 
+
+[[modules.shared.deny]]
+file = "wasm_host.py"
+kind = "host-only"
+why  = """
+The host's compiled-cart runner, over `wasm_binding`. The browser build carries no wasm engine, so a compiled cart opens the runtime-missing panel."""
+
+[[modules.shared.deny]]
+file = "wasm_binding.py"
+kind = "host-only"
+why  = """
+ctypes over libmoy's wasm import table and WAMR built for Linux, fetched and
+compiled on demand -- no compiler, git or cmake on a board."""
 [[modules.shared.deny]]
 file = "gfx_binding.py"
 kind = "host-only"

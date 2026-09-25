@@ -93,7 +93,8 @@ class MoycoreHostRun:
                                getattr(project, "sheet", None),
                                getattr(project, "tilemap", None),
                                wire=wire, indexed=indexed,
-                               flags=getattr(project, "flags", None))
+                               flags=getattr(project, "flags", None),
+                               cfg=ns.get("_moy_cfg"))
         # The superset, registered on top of libmoy's table before the cart
         # runs -- see the device glue for why this is registration and not a
         # second runtime.

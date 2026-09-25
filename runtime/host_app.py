@@ -288,7 +288,9 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # runtime/lua_binding -- libmoy's own binding over the same vendored 5.4 the
     # firmware compiles, LUA_32BITS and all. A "lua" cart with no native module
     # available opens the Player's runtime-missing panel, exactly as a device
-    # build without it does.
+    # build without it does. The same rule for "wasm": runtime/wasm_binding is
+    # libmoy's import table over WAMR built for Linux at the boards' pin, and
+    # no compiler (or no WAMR) is an absent key.
     #
     # lupa is GONE (2026-08-14). It survived as the fallback for carts using
     # moybyte's superset, and then as the fallback for a host with no C
@@ -299,8 +301,10 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # a compiler is the same trade, and it was refused there.
     try:
         from runtime.lua_host import MoycoreHostRun, moycore_supports
+        from runtime import wasm_host
     except ImportError:  # pragma: no cover
         from lua_host import MoycoreHostRun, moycore_supports
+        import wasm_host
 
     def _make_lua(ns, src, _ws=ws):
         # No fallback and no silent decline. A decline used to be swallowed, and
@@ -310,9 +314,14 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         # was a cart running on the runtime we were trying to retire.
         return MoycoreHostRun(_ws, ns, src)
 
+    def _make_wasm(ns, src, _ws=ws):
+        return wasm_host.WasmHostRun(_ws, ns, src)
+
     runtimes = {}
     if moycore_supports(""):
         runtimes["lua"] = _make_lua
+    if wasm_host.available():
+        runtimes["wasm"] = _make_wasm
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards). WiFi (#38) is the fake host service over the
     # same moy_carts wifi.json store the device uses; the pointer ranges over the

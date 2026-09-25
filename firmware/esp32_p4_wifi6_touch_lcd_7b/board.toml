@@ -138,6 +138,19 @@ file = "lua_host.py"
 kind = "host-only"
 why  = "The host's Lua cart runner. The device's is `moycore`, driven by moycore_glue.py."
 
+
+[[modules.shared.deny]]
+file = "wasm_host.py"
+kind = "host-only"
+why  = """
+The host's compiled-cart runner, over `wasm_binding`. The device's is moycore's wasm half, driven by moycore_glue.py over the moy_wasm engine."""
+
+[[modules.shared.deny]]
+file = "wasm_binding.py"
+kind = "host-only"
+why  = """
+ctypes over libmoy's wasm import table and WAMR built for Linux, fetched and
+compiled on demand -- no compiler, git or cmake on a board."""
 [[modules.shared.deny]]
 file = "input.py"
 kind = "host-only"

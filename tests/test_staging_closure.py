@@ -145,16 +145,19 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 HOST_ONLY = {
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "lua_host",
                        "input", "audio_binding", "lua_binding", "gfx_binding",
-                       "native_build", "simulate_desktop"},
+                       "native_build", "simulate_desktop", "wasm_host",
+                       "wasm_binding"},
     "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
            "audio_binding", "lua_binding", "gfx_binding", "native_build",
-           "simulate_desktop"},
+           "simulate_desktop", "wasm_host", "wasm_binding"},
     "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
                    "audio_binding", "lua_binding", "gfx_binding",
-                   "native_build", "simulate_desktop"},
+                   "native_build", "simulate_desktop", "wasm_host",
+                   "wasm_binding"},
     "guition-p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
                    "audio_binding", "lua_binding", "gfx_binding",
-                   "native_build", "simulate_desktop"},
+                   "native_build", "simulate_desktop", "wasm_host",
+                   "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
     # Zero ALLOWLISTS `runtime/` and could not stage one of these by omission:
     # the failure this catches is somebody adding a name to a group, and a
@@ -162,14 +165,15 @@ HOST_ONLY = {
     # stops working the moment a second allowlist board appears.
     "zero": {"host_app", "host_api", "host_canvas", "lua_host", "input",
              "audio_binding", "lua_binding", "gfx_binding",
-             "native_build", "simulate_desktop"},
+             "native_build", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
     # the one that would look most plausible to stage, because it is the host's
     # half of the very module device_canvas imports.
     "web": {"host_app", "lua_host", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "native_build", "host_canvas"},
+            "gfx_binding", "native_build", "host_canvas", "wasm_host",
+            "wasm_binding"},
 }
 
 # Modules a build GENERATES into the frozen tree. They are not in git and not
