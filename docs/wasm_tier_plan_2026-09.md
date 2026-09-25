@@ -71,12 +71,22 @@ the decisions below record what they changed.
   port follows the Celeste rule in `THIRD_PARTY.md`: a recipe fetches both,
   prints both licences, builds the cart on the developer's machine, and it
   is never hosted, seeded or shipped. As a Player cart it fits the P4 boards.
-  On the T-Deck the console reserves PSRAM for the Lua VM, panel DMA and
-  layer pool (`firmware/lilygo_t_deck_plus_mainline/boards/MOYBYTE_TDECK/mpconfigboard.h`)
-  and the Python heap may grow into the rest, so Doom's fixed memory does not
-  fit beside the shell; there it stays the flash-partition spike demo unless
-  a reduced zone measured in phase 3 fits. Doom is still the cart that found
-  the ABI's gaps: the 256-entry blit palette and the asset read.
+  On the T-Deck it is a measurement, not a verdict: see the next decision.
+  Doom is still the cart that found the ABI's gaps: the 256-entry blit
+  palette and the asset read.
+- **A compiled cart's memory is the cart-runtime reserve, not free PSRAM.**
+  The T-Deck keeps a fixed slice of PSRAM out of the Python heap for the
+  Lua VM, the compositor's framebuffer and the layer pool
+  (`firmware/lilygo_t_deck_plus_mainline/boards/MOYBYTE_TDECK/mpconfigboard.h`,
+  enforced by the split-heap patch in `tools/esp32_build_lib.sh`). A wasm cart
+  runs with no Lua VM, so its linear memory and relocated text take the VM's
+  share of that same slice, and the tier's floor on a board is the slice minus
+  the framebuffer and the pool. Doom on the T-Deck therefore means one of
+  three levers, measured in phase 3 in this order: a smaller zone (its
+  `-mb` knob) and which levels survive it; a larger reserve at build time and
+  what the shell loses; the text in flash through a partition, which costs a
+  partition-table change and a full-erase reflash per device. If none fits,
+  the T-Deck keeps the spike demo.
 
 ## The phases
 
