@@ -150,6 +150,53 @@ static uint8_t map_ascii(uint8_t c)
     }
 }
 
+/* GHOSTING. The matrix has no diodes, so three held keys on three corners of
+ * a rectangle read the fourth corner as pressed too -- and W + A + L (forward,
+ * turn, fire on the home row) put that phantom on BACKSPACE, the menu key:
+ * the menu opened by itself mid-fight and the game paused (2026-09-25). The
+ * matrix cannot tell W+A+L from W+A+Backspace, so a press that completes a
+ * rectangle with three keys already down is ambiguous, and the tie goes to
+ * the key a player is likelier to mean: fire/use/move over letters over the
+ * menu key. Wrong at worst costs a menu keypress; right keeps the fight. */
+static int key_priority(uint8_t ascii)
+{
+    switch (map_ascii(ascii)) {
+        case KEY_UPARROW: case KEY_DOWNARROW: case KEY_LEFTARROW: case KEY_RIGHTARROW:
+        case KEY_FIRE: case KEY_USE: case KEY_STRAFE_L: case KEY_STRAFE_R:
+            return 3;
+        case KEY_ENTER:
+            return 2;
+        case KEY_ESCAPE:
+            return 0;
+        default:
+            return 1;
+    }
+}
+
+static int completes_rectangle(unsigned i, uint64_t down)
+{
+    uint8_t c = MATRIX[i].byte, r = MATRIX[i].bit;
+    for (unsigned j = 0; j < MATRIX_N; j++) {          /* same column, other row */
+        if (j == i || !((down >> j) & 1) || MATRIX[j].byte != c) {
+            continue;
+        }
+        for (unsigned k = 0; k < MATRIX_N; k++) {      /* same row, other column */
+            if (k == i || !((down >> k) & 1) || MATRIX[k].bit != r || MATRIX[k].byte == c) {
+                continue;
+            }
+            for (unsigned m = 0; m < MATRIX_N; m++) {  /* the opposite corner */
+                if (((down >> m) & 1) && MATRIX[m].byte == MATRIX[k].byte
+                    && MATRIX[m].bit == MATRIX[j].bit) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+static uint64_t s_reported;   /* keys posted as down (a suppressed ghost never is) */
+
 /* Raw matrix: five level bytes -> Doom key edges against the last read. */
 static void matrix_poll(const uint8_t *d)
 {
@@ -159,14 +206,37 @@ static void matrix_poll(const uint8_t *d)
             now_down |= 1ULL << i;
         }
     }
-    uint64_t changed = now_down ^ s_matrix_down;
+    /* releases first: anything reported down that the matrix no longer shows */
     for (unsigned i = 0; i < MATRIX_N; i++) {
-        if (changed & (1ULL << i)) {
-            if (MATRIX[i].ascii == 'o' && ((now_down >> i) & 1)) {
-                g_dump_request = 1;        /* diagnostics: dump this frame */
-            }
-            post((now_down >> i) & 1, map_ascii(MATRIX[i].ascii));
+        if (((s_reported >> i) & 1) && !((now_down >> i) & 1)) {
+            s_reported &= ~(1ULL << i);
+            post(0, map_ascii(MATRIX[i].ascii));
         }
+    }
+    /* presses: new keys, minus the losers of any rectangle they complete */
+    uint64_t fresh = now_down & ~s_matrix_down & ~s_reported;
+    int best = -1, best_pri = -1;
+    for (unsigned i = 0; i < MATRIX_N; i++) {
+        if (((fresh >> i) & 1) && completes_rectangle(i, now_down)) {
+            int pri = key_priority(MATRIX[i].ascii);
+            if (pri > best_pri) {
+                best_pri = pri;
+                best = (int)i;
+            }
+        }
+    }
+    for (unsigned i = 0; i < MATRIX_N; i++) {
+        if (!((fresh >> i) & 1)) {
+            continue;
+        }
+        if (completes_rectangle(i, now_down) && (int)i != best) {
+            continue;                       /* the ghost corner: never reported */
+        }
+        if (MATRIX[i].ascii == 'o') {
+            g_dump_request = 1;             /* diagnostics: dump this frame */
+        }
+        s_reported |= 1ULL << i;
+        post(1, map_ascii(MATRIX[i].ascii));
     }
     s_matrix_down = now_down;
 }

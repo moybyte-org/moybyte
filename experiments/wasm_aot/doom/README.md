@@ -29,6 +29,14 @@ level bytes, the console's `RAW_KEYS` table), and key edges come from diffing
 reads. Keyboard firmware older than 2025-06-12 ignores that command and reports
 presses only; the driver detects it and falls back to timed holds.
 
+The matrix has no diodes, so it GHOSTS: three held keys on three corners of a
+rectangle read the fourth corner as pressed. W + A + L (forward, turn, fire) put
+that phantom on Backspace, the menu key, and the menu opened by itself
+mid-fight. A press that completes a rectangle with three keys already down is
+ambiguous to the hardware; the driver gives it to the gameplay key (fire, use,
+move) over a letter over the menu key, and the loser is never reported. Space
+as fire sits in W's and A's own column and cannot ghost with them at all.
+
 ## Reproducing
 
 ```bash
