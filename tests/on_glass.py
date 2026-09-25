@@ -19,6 +19,7 @@ swipe coordinates, and the tail of the idle-blank check -- the P4 pins `power
 """
 
 import contextlib
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -441,3 +442,284 @@ def wm_meters_answer_for_the_frame_they_measured(board, win="settings"):
         "%s never carried a number across a whole window drag (saw %r) -- "
         "the column is dead, not merely quiet" % (missing, seen))
     return seen
+
+
+# -- the WebAssembly engine (docs/wasm_tier_plan_2026-09.md, phase 1) --------
+#
+# native/moy_wasm on glass: the spike's 6502 core built by tools/wasm_module.py
+# for this board's chip with the pinned compilers, pushed into the board's
+# cart store, and run on the engine's own thread -- plus the plan's four
+# guards. The numbers pinned below were measured on 2026-09-25 (#158 carries
+# them); a guard that trips is a regression in internal SRAM, which on the S3
+# boards is the resource the whole tier is gated on.
+
+WASM_DIR = "wasm_hello"
+# step(20000) on a fresh instance: the 6502 core's cycle count, identical on
+# every runtime the spike measured.
+WASM_STEP_20000 = 59973
+# What building the module in may cost the idle desk's internal SRAM, against
+# a module-free image of the same tree on a fresh boot. Measured 2026-09-25:
+# free fell 1464-1508 bytes on all four boards; the largest block fell 0 (both
+# P4s), 2048 (Guition S3) and 4096 (T-Deck) -- it moves in the heap's own
+# steps as the static data shifts the regions, so its bound carries one more.
+WASM_IDLE_FREE_COST_MAX = 2048
+WASM_IDLE_LARGEST_COST_MAX = 6144
+# What one run may take from internal SRAM beyond the idle desk's, with the
+# board's own run stack: the thread's control block and bookkeeping (~0.8-1 KB
+# measured with a PSRAM stack; an internal stack adds its whole size).
+WASM_RUN_SRAM_MAX = 2048
+
+
+def _wasm_chip(board_dir):
+    from tools import board_config
+    return board_config.load(board_dir)["board"]["chip"]
+
+
+_WASM_BUILT = {}
+
+
+def wasm_modules(chip):
+    """{name: local .aot} for `chip`, built once per session: the hello
+    module, and four a board must refuse -- no key, another fork, other
+    flags (the key saying so), another chip."""
+    if chip not in _WASM_BUILT:
+        import tempfile
+        from tools import wasm_module as wm
+        out = tempfile.mkdtemp(prefix="moy_wasm_%s_" % chip)
+        wasm = wm.hello_wasm()
+        other = "esp32p4" if chip == "esp32s3" else "esp32s3"
+        mods = {}
+        for name, c, kw in (("hello", chip, {}),
+                            ("nokey", chip, {"key": False}),
+                            ("badfork", chip, {"fork": "0" * 40}),
+                            ("badflags", chip, {"override": {"opt": "2"}}),
+                            ("otherchip", other, {})):
+            mods[name] = os.path.join(out, name + ".aot")
+            wm.build(wasm, c, mods[name], **kw)
+        _WASM_BUILT[chip] = mods, hashlib.sha256(wasm).hexdigest()
+    return _WASM_BUILT[chip]
+
+
+def wasm_push(board, board_dir):
+    """Push this chip's modules to <ws.carts_root>/wasm_hello/ over the one
+    upload transport (`recv`). A folder without the .moy suffix, so the
+    launcher never lists it as a cart. Returns {name: path on the board}."""
+    import push_cart as pc
+    from tools import board_config
+    mods, _sha = wasm_modules(_wasm_chip(board_dir))
+    ser = board_config.load(board_dir)["serial"]
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    dest = root.rstrip("/") + "/" + WASM_DIR
+    was = pc.quiet_diag(board)
+    try:
+        win = pc.raw_window(board, int(ser.get("window") or 4096))
+        assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
+        board.pyval("ws._g['_mkdir'](%r)" % dest)
+        for name, local in sorted(mods.items()):
+            pc.push_file_raw(board, local, "%s/%s.aot" % (dest, name), win)
+    finally:
+        pc.restore_diag(board, was)
+    return {name: "%s/%s.aot" % (dest, name) for name in mods}
+
+
+def wasm_run(board, path, export, args=(), timeout=180.0, during=None, **kw):
+    """One run through moy_wasm.start() -> result(). `during(board)` is called
+    while the run's thread is live, before waiting for it."""
+    extra = "".join(", %s=%r" % kv for kv in sorted(kw.items()))
+    line = board.cmd("py __import__('moy_wasm').start(%r, %r, %r%s)"
+                     % (path, export, tuple(args), extra),
+                     wait_for="PY", timeout=30)
+    assert line and line.strip() == "PY None", line
+    if during is not None:
+        during(board)
+    import time
+    end = time.time() + timeout
+    while not board.pyval("__import__('moy_wasm').done()", strict=True):
+        assert time.time() < end, "the run did not end in %gs" % timeout
+        board.drain(0.2)
+    return board.pyval("__import__('moy_wasm').result()", timeout=60,
+                       strict=True)
+
+
+def _internal_heap(board):
+    regs = board.pyval("__import__('esp32').idf_heap_info(0x804)", strict=True)
+    return sum(r[1] for r in regs), max(r[2] for r in regs)
+
+
+def _ble(board):
+    return "(getattr(ws, 'ble_keyboard', None) or ws.keyboard)"
+
+
+def wasm_idle_cost_is_bounded(board, baseline, ble_at_boot):
+    """Guard 1: the idle desk's internal SRAM with the engine built in, against
+    `baseline` -- (free, largest block) measured on a module-free image of the
+    same tree on a fresh boot, within WASM_IDLE_FREE_COST_MAX and
+    WASM_IDLE_LARGEST_COST_MAX.
+
+    A fresh boot is the only fair comparison, because two radios keep what
+    they took: the WiFi driver holds its allocation after the lease powers it
+    down, and BLE once started stays up. A desk that has had either this boot
+    (beyond what the board starts by itself) is refused with the reason,
+    never compared."""
+    assert board.pyval("__import__('moy_wasm').FORK", strict=True)
+    if board.pyval("bool(getattr(ws.wifi, 'driver_up', False))", strict=True):
+        pytest.skip("the WiFi driver has run this boot and keeps its internal "
+                    "RAM; reboot the board and run the suite first")
+    if not ble_at_boot and board.pyval(
+            "bool(getattr(%s, 'available', False))" % _ble(board), strict=True):
+        pytest.skip("BLE was started this boot; reboot the board first")
+    free, largest = _internal_heap(board)
+    print("\nWASM idle internal: free=%d largest=%d (module-free image: %d / %d)"
+          % (free, largest, baseline[0], baseline[1]))
+    assert free >= baseline[0] - WASM_IDLE_FREE_COST_MAX, (free, baseline)
+    assert largest >= baseline[1] - WASM_IDLE_LARGEST_COST_MAX, (largest, baseline)
+    return free, largest
+
+
+def wasm_hello_runs_and_foreign_modules_are_refused(board, board_dir, paths):
+    """The engine end to end: this build's key is the tool's, the hello module
+    loads from the cart store and returns the core's cycle count on the run
+    thread, and every module the key does not vouch for is refused before
+    anything in it runs."""
+    from tools import wasm_module as wm
+    chip = _wasm_chip(board_dir)
+    assert board.pyval("__import__('moy_wasm').KEY", strict=True) == wm.key_tail(chip)
+    r = wasm_run(board, paths["hello"], "step", (20000,))
+    assert r["ok"], r["error"]
+    assert r["value"] == WASM_STEP_20000, r
+    assert r["loops"] == 1 and r["mismatches"] == 0, r
+    assert r["wasm"] == wasm_modules(chip)[1], r["wasm"]
+    assert 0 < r["stack_used"] < r["stack"], r
+    print("\nWASM hello step(20000): load %d us, instantiate %d us, call %d us, "
+          "stack %d of %d (%s), pool peak %d"
+          % (r["load_us"], r["inst_us"], r["call_us"], r["stack_used"], r["stack"],
+             "PSRAM" if r["stack_psram"] else "internal", r["pool_peak"]))
+    for name, why in (("nokey", "refused: no moybyte.key"),
+                      ("badfork", "refused: key mismatch 'fork 0000"),
+                      ("badflags", "refused: key mismatch 'opt 2'"),
+                      ("otherchip", "load: ")):
+        r = wasm_run(board, paths[name], "step", (20000,))
+        assert not r["ok"] and r["loops"] == 0, (name, r)
+        assert r["error"].startswith(why), (name, r["error"])
+
+
+def wasm_run_stack_placements(board, paths):
+    """The run stack in PSRAM and in internal SRAM: the same answer, what each
+    costs the internal heap for the run, and how fast. Returns both results
+    for the report; the board's own setting is `moy_wasm.STACK`."""
+    out = {}
+    for psram in (True, False):
+        r = wasm_run(board, paths["hello"], "step", (400000,), psram_stack=psram)
+        assert r["ok"], r["error"]
+        out[psram] = r
+        print("\nWASM stack %s: step(400000) %d us, stack used %d, run cost "
+              "internal %d" % ("PSRAM" if psram else "internal", r["call_us"],
+                               r["stack_used"], r["sram_before"] - r["sram_min"]))
+    assert out[True]["value"] == out[False]["value"]
+    return out
+
+
+def wasm_runaway_runs_to_its_end(board, paths, n=400000000):
+    """What terminate() can do (README.md, "Stopping a run"): it raises the
+    exception in the instance, and AOT code reads it only when an import
+    returns. The hello module's `spin` calls none, so it runs to its natural
+    end and THEN reports the termination. This pins that answer; a fork that
+    adds loop-edge checks changes it, and this is the test to update then."""
+    ref = wasm_run(board, paths["hello"], "spin", (n,))
+    assert ref["ok"], ref["error"]
+
+    def _stop(b):
+        b.drain(ref["call_us"] / 5e6)
+        assert b.pyval("__import__('moy_wasm').terminate()", strict=True) is True
+
+    r = wasm_run(board, paths["hello"], "spin", (n,), during=_stop)
+    assert not r["ok"] and "terminated by user" in r["error"], r
+    assert r["terminated"] is True
+    assert r["run_us"] >= 0.9 * ref["run_us"], (r["run_us"], ref["run_us"])
+    return ref["call_us"], r["run_us"]
+
+
+def wasm_lua_after_wasm_keeps_its_sram(board, paths):
+    """Guard 3: a Lua cart run after a wasm run keeps the internal SRAM it had
+    before one -- moycore's report says no PSRAM fallback, the same as a
+    control run just before the wasm run. The control is what makes the
+    reading mean something: on a desk whose radios have already taken the
+    internal heap, the Lua VM falls back with or without wasm."""
+    def lua_run():
+        board.cmd("run sakura lua", wait_for="REMOTE run")
+        board.drain(2.5)
+        assert board.state().get("cart"), "the Lua cart did not start"
+        board.leave_cart()
+        board.drain(1.0)
+        return board.state()["sram"]
+
+    control = lua_run()
+    r = wasm_run(board, paths["hello"], "step", (20000,), loops=5)
+    assert r["ok"], r["error"]
+    after = lua_run()
+    print("\nWASM Lua sram before the wasm run %r, after %r" % (control, after))
+    assert after["psram_fallback"] == control["psram_fallback"], (control, after)
+    assert after["psram_fallback"] is False, (
+        "the Lua VM fell back to PSRAM (%r) -- %s" % (after, "and the control "
+        "run did too: this desk's internal heap was spent before the test"
+        if control["psram_fallback"] else ""))
+    return control, after
+
+
+def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
+    """Guard 4: load / key check / instantiate / call / unload, `loops` times
+    over, while a cart animates every frame and the WiFi radio is up -- the
+    cache sync at each load runs with the other core busy. Every pass must
+    return the same cycle count (a stale instruction cache would not)."""
+    board.cmd("py ws.wifi_hold('wasm')", wait_for="PY", timeout=20)
+    try:
+        board.cmd("run star", wait_for="REMOTE run")
+        board.drain(2.5)
+        assert board.state().get("cart"), "the animating cart did not start"
+        seen = {}
+
+        def _frames(b):
+            seen["f0"] = b.state()["frames"]
+
+        r = wasm_run(board, paths["hello"], "step", (20000,), loops=loops,
+                     during=_frames)
+        drew = board.state()["frames"] - seen["f0"]
+        board.leave_cart()
+        print("\nWASM %d load/unload passes under a live cart + WiFi: %d us, "
+              "load %d..%d us, %d frames drawn meanwhile"
+              % (r["loops"], r["run_us"], r["load_us"], r["load_us_max"], drew))
+        assert r["ok"], r["error"]
+        assert r["loops"] == loops and r["mismatches"] == 0, r
+        assert r["value"] == WASM_STEP_20000, r
+        assert drew > 0, "no frame drew while the loop ran"
+        return r, drew
+    finally:
+        board.cmd("py ws.wifi_release('wasm')", wait_for="PY", timeout=20)
+
+
+def wasm_low_water_with_radios_up(board, paths):
+    """Guard 2: with WiFi and BLE up, a run takes at most WASM_RUN_SRAM_MAX of
+    internal SRAM beyond what the idle desk already had (the heap's
+    local-minimum monitor, started before the run's thread exists).
+
+    Returned beside it: the low-water mark against moycore's internal-SRAM
+    floor. On the S3 boards the console with both radios up already sits
+    below that floor before any wasm runs (measured on a module-free image,
+    #158) -- so the floor comparison is a fact about the console, reported,
+    and the run's own cost is what this pins."""
+    board.cmd("py ws.wifi_hold('wasm')", wait_for="PY", timeout=20)
+    try:
+        assert board.pyval("%s.start()" % _ble(board), timeout=30) is True
+        board.drain(3.0)
+        r = wasm_run(board, paths["hello"], "step", (20000,), loops=20)
+        floor = board.pyval("__import__('moycore').sram_report()[2]", strict=True)
+    finally:
+        board.cmd("py ws.wifi_release('wasm')", wait_for="PY", timeout=20)
+    assert r["ok"], r["error"]
+    cost = r["sram_before"] - r["sram_min"]
+    print("\nWASM with WiFi+BLE up: internal before %d, low-water %d (run cost "
+          "%d), moycore floor %d -> %s the floor"
+          % (r["sram_before"], r["sram_min"], cost, floor,
+             "at or above" if r["sram_min"] >= floor else "BELOW"))
+    assert cost <= WASM_RUN_SRAM_MAX, (cost, r)
+    return r["sram_before"], r["sram_min"], floor

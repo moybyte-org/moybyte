@@ -41,6 +41,46 @@ def board():
         b.drain(1.0)
 
 
+# The engine's idle cost (docs/wasm_tier_plan_2026-09.md, guard 1). FIRST in
+# the file on purpose: the comparison is against a fresh boot, and the wasm
+# block at the end brings the radios up. Measured 2026-09-25 on a module-free
+# image of the same tree, at the launcher right after boot: (free, largest)
+# internal SRAM.
+WASM_IDLE_BASELINE = (280483, 188416)
+WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
+
+
+def test_the_wasm_engine_costs_the_idle_desk_at_most_a_constant(board):
+    on_glass.wasm_idle_cost_is_bounded(board, WASM_IDLE_BASELINE,
+                                       ble_at_boot=True)
+
+@pytest.fixture(scope="module")
+def wasm(board):
+    return on_glass.wasm_push(board, WASM_BOARD_DIR)
+
+
+# The rest of the engine's checks that bring no radio up, while the desk is
+# still fresh: the Lua guard in particular needs an internal heap the radios
+# have not spent, or its control run falls back to PSRAM by itself.
+
+
+def test_the_hello_module_runs_and_foreign_modules_are_refused(board, wasm):
+    on_glass.wasm_hello_runs_and_foreign_modules_are_refused(
+        board, WASM_BOARD_DIR, wasm)
+
+
+def test_the_run_stack_works_in_psram_and_internal_sram(board, wasm):
+    on_glass.wasm_run_stack_placements(board, wasm)
+
+
+def test_terminate_reaches_a_runaway_only_at_its_end(board, wasm):
+    on_glass.wasm_runaway_runs_to_its_end(board, wasm)
+
+
+def test_a_lua_cart_after_a_wasm_run_keeps_its_sram(board, wasm):
+    on_glass.wasm_lua_after_wasm_keeps_its_sram(board, wasm)
+
+
 def test_boots_to_the_desk(board):
     st = board.state()
     assert st.get("desk") is True
@@ -581,3 +621,15 @@ def test_a_cart_runs_and_exits(board):
     and the shell's own close, while the fullscreen tiers pin the kid-facing
     flag."""
     on_glass.cart_runs_and_exits(board, "star", door="shell", clear=3)
+
+# -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
+# LAST in the file: both bring WiFi up (released again) and the second starts
+# BLE, and the WiFi driver keeps its internal RAM for the rest of the boot.
+
+
+def test_load_unload_loop_under_a_live_cart_and_wifi(board, wasm):
+    on_glass.wasm_load_unload_under_flush_and_wifi(board, wasm)
+
+
+def test_a_run_with_wifi_and_ble_up_costs_at_most_a_constant(board, wasm):
+    on_glass.wasm_low_water_with_radios_up(board, wasm)
