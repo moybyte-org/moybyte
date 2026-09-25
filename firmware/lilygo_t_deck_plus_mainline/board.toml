@@ -332,13 +332,22 @@ tools/board_config.py stage-native stages the copies and generates the
 .staged/micropython.cmake include list that the board's tracked
 native/micropython.cmake pulls in.
 
-This board denies NOTHING: the T-Deck drives all eight shared modules (moy_gfx,
-moy_alloc, moy_sd, moy_audio, moy_lua, moycore, moy_web, moy_flush) plus its
-own native/moy_lcd, which lives in the board tree and is not staged. moy_flush
-is the odd one -- it registers no MicroPython module at all; it is the banded-
+This board denies NOTHING: the T-Deck drives every shared module plus its own
+native/moy_lcd, which lives in the board tree and is not staged. moy_flush is
+the odd one -- it registers no MicroPython module at all; it is the banded-
 flush engine moy_lcd and the Guition's moy_axs share, and it rides this
 declaration because this is where "which C crosses to which board" is written
 down."""
+
+[[native.shared.take]]
+module = "moy_wasm"
+why = """
+The WebAssembly cart tier's engine (docs/wasm_tier_plan_2026-09.md): the
+vendored WAMR runtime, AOT only, and the thread a module runs on. The tier
+ships on every console board or on none, so this board takes it. Its internal
+SRAM is the tighter of the two S3 floors, and the on-glass suite's wasm checks
+are the gate on it. The run stack's size and placement are this board's
+MOY_WASM_* settings in mpconfigboard.h, with the measurement that chose them."""
 
 # ---------------------------------------------------------------------------
 

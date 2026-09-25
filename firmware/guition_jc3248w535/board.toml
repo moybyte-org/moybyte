@@ -294,6 +294,16 @@ definition drives no audio. moy_audio's synth half is board-agnostic; its I2S
 plumbing wants pins nobody has measured. device_audio.py is likewise absent
 from this board's device allowlist. Flip both together at stage 5."""
 
+[[native.shared.take]]
+module = "moy_wasm"
+why = """
+The WebAssembly cart tier's engine (docs/wasm_tier_plan_2026-09.md): the
+vendored WAMR runtime, AOT only, and the thread a module runs on. The tier
+ships on every console board or on none, so this board takes it. It is the
+floor board for memory, and the on-glass suite's wasm checks are the gate on
+it. The run stack's size and placement are this board's MOY_WASM_* settings in
+mpconfigboard.h, with the measurement that chose them."""
+
 # ---------------------------------------------------------------------------
 
 [modules.device]

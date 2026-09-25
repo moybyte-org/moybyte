@@ -26,6 +26,7 @@ separate question from what is committed.
 | Component | Where it lives here | Upstream | Licence | Modified? |
 |---|---|---|---|---|
 | Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
+| WAMR 2.4.5 AOT runtime (WebAssembly cart engine), Moybyte's fork | `native/moy_wasm/wamr/` | [moybyte-org/wasm-micro-runtime](https://github.com/moybyte-org/wasm-micro-runtime) (fork of [bytecodealliance/wasm-micro-runtime](https://github.com/bytecodealliance/wasm-micro-runtime)) | Apache-2.0 WITH LLVM-exception | **Yes** — the fork's commits |
 | `esp_lcd_ek79007` panel driver | `native/p4/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
 | `esp_lcd_jd9365` panel driver, Guition's build | `native/p4/moy_dsi/vendor_jd9365/` | Espressif's component as shipped in [Guition's JC8012P4A1C demo](https://github.com/DevinWatson/10.1-inch-ESP32P4-Xiaozhi-ESP32-C6-JC8012P4A1C_I_W_Y) | Apache-2.0 | No |
 | GSL3680 touch firmware (JC8012P4A1C glass) | `firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py` | Silead, via the same Guition demo (`esp_lcd_gsl3680.h`) | vendor firmware, redistributed as shipped | Transcribed (`tools/gen_gsl_fw.py`) |
@@ -69,6 +70,34 @@ targets.
   simply not vendored.
 - `modmoy_lua.c` and `micropython.cmake` in the parent directory are Moybyte's
   own bridge code, not Lua's, and are under this repository's licence.
+
+### 2.2 WAMR — the WebAssembly cart engine
+
+`native/moy_wasm/wamr/`
+
+The `moy_wasm` native module (issue #158, `docs/wasm_tier_plan_2026-09.md`)
+embeds the AOT half of the WebAssembly Micro Runtime, compiled into every
+console board's image (the headless Zero denies it).
+
+- **Upstream:** WAMR 2.4.5 — <https://github.com/bytecodealliance/wasm-micro-runtime>,
+  taken from Moybyte's fork <https://github.com/moybyte-org/wasm-micro-runtime>,
+  branch `moybyte-2.4.5`, at the commit `native/moy_wasm/wamr_vendor.json`
+  records. `tools/vendor_wamr.py` copies an explicit file list from that commit:
+  the AOT loader and runtime, the common layer, the esp-idf platform layer, the
+  allocator and the utilities; the interpreter, the compiler, WASI and the
+  builtin libc stay behind.
+- **Licence:** Apache-2.0 WITH LLVM-exception. Full text:
+  [`.../moy_wasm/wamr/LICENSE`](native/moy_wasm/wamr/LICENSE); upstream's own
+  third-party notes travel as
+  [`.../moy_wasm/wamr/ATTRIBUTIONS.md`](native/moy_wasm/wamr/ATTRIBUTIONS.md).
+- **Modified: yes, in the fork, never here.** The fork's commits over the 2.4.5
+  tag change the esp-idf platform layer (AOT text in PSRAM on the ESP32-S3 and
+  ESP32-P4, PSRAM-only data allocations above a threshold, a range-scoped cache
+  sync, a real native-stack boundary) and two loader details; its history is
+  the record. `tests/test_wamr_vendor.py` fails on any edit to the copy.
+- `modmoy_wasm.c`, `moy_wasm_key.h`, the generated `wamr_pin.h` and
+  `micropython.cmake` in the parent directory are Moybyte's own code, under this
+  repository's licence.
 
 ### 2.3 Espressif `esp_lcd_ek79007` — the P4 panel driver
 
@@ -488,7 +517,7 @@ image. Nothing else is pulled in.
 
 | Project | Upstream | Licence |
 |---|---|---|
-| WAMR (wasm-micro-runtime) 2.4.5, taken from Moybyte's fork at branch `moybyte-2.4.5` (one commit over the upstream tag: esp-idf platform fixes so AOT text runs from PSRAM on the ESP32-S3 and ESP32-P4), plus upstream's prebuilt `wamrc` release binary | <https://github.com/moybyte-org/wasm-micro-runtime> (fork of <https://github.com/wasm-micro-runtime/wasm-micro-runtime>) | Apache-2.0 WITH LLVM-exception |
+| WAMR (wasm-micro-runtime) 2.4.5, taken from Moybyte's fork at branch `moybyte-2.4.5` (the esp-idf platform work over the upstream tag that §2.2 describes, at the same pinned commit), plus upstream's prebuilt `wamrc` release binary | <https://github.com/moybyte-org/wasm-micro-runtime> (fork of <https://github.com/wasm-micro-runtime/wasm-micro-runtime>) | Apache-2.0 WITH LLVM-exception |
 | Espressif's LLVM fork, branch `xtensa_release_18.1.2`, built once by the toolchain script to give `wamrc` an Xtensa backend; never vendored | <https://github.com/espressif/llvm-project> | Apache-2.0 WITH LLVM-exception |
 | wasi-sdk 24, the clang/wasi-libc toolchain `experiments/wasm_aot/doom/build_wasm.sh` compiles with; a gitignored download, never vendored | <https://github.com/WebAssembly/wasi-sdk> | Apache-2.0 WITH LLVM-exception (wasi-libc: Apache-2.0 / MIT) |
 | doomgeneric (id Software's DOOM, ozkl's portable fork), the engine `build_wasm.sh` stages from a gitignored checkout the developer fetches; never vendored | <https://github.com/ozkl/doomgeneric> | **GPL-2.0** |

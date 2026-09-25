@@ -113,7 +113,7 @@ them back on the next visit — but anything that existed *only* here is.
   `[modules.shared]` is an ALLOWLIST rather than a denylist, and its board file
   argues the case at length: a denylist is right when the source tree's default
   answer is yes, `runtime/` IS the console, and this board is not one.
-- **One shared C module, `moy_web`.** The other seven are denied with the
+- **One shared C module, `moy_web`.** Every other one is denied with the
   hardware or the workload that is missing.
 
 ## Provisioning (the store, not the modules)

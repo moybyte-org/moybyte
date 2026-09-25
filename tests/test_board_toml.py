@@ -336,6 +336,46 @@ def test_every_native_denial_names_a_module_and_says_why(board):
 
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_native_take_names_a_module_and_says_why(board):
+    """A take is a written yes, held to a denial's standard: a module that
+    exists, and a reason."""
+    for name, entry in board_config.native_takes(BOARDS[board]).items():
+        assert entry.get("why", "").strip(), (
+            "%s takes native module %r without a why" % (board, name))
+        assert (ROOT / "native" / name / "micropython.cmake").exists(), (
+            "%s takes native module %r which does not exist under native/"
+            % (board, name))
+        assert name not in board_config.native_denials(BOARDS[board]), name
+
+
+# The WebAssembly tier ships on every console board or on none
+# (docs/wasm_tier_plan_2026-09.md), so its engine is the one shared module
+# whose default "yes" is not enough: every board file decides it in writing.
+CONSOLE_BOARDS = ("tdeck", "p4", "guition-s3", "guition-p4")
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_board_decides_the_wasm_engine(board):
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert "moy_wasm" in takes or "moy_wasm" in denies, (
+        "%s/board.toml neither takes nor denies moy_wasm" % board)
+    staged = "moy_wasm" in board_config.native_modules(BOARDS[board], ROOT)
+    assert staged == (board in CONSOLE_BOARDS), (
+        "%s: the wasm tier is on every console board or on none" % board)
+
+
+def test_a_module_both_taken_and_denied_is_refused(tmp_path):
+    (tmp_path / "board.toml").write_text(
+        '[native]\n[native.shared]\nsource = "native"\n'
+        '[[native.shared.deny]]\nmodule = "moy_wasm"\nwhy = "no"\n'
+        '[[native.shared.take]]\nmodule = "moy_wasm"\nwhy = "yes"\n',
+        encoding="utf-8")
+    with pytest.raises(ValueError):
+        board_config.native_modules(tmp_path, ROOT)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
 def test_build_sh_stages_native_via_the_declaration(board):
     """No hand-written native list in build.sh -- the same both-halves check
     as the Python side: the script must reach the stager (via the shared build

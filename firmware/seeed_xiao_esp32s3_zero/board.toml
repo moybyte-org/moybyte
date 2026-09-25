@@ -280,7 +280,7 @@ why = """
 The C-module twin of the Python staging, and the one place this board keeps the
 siblings' DENYLIST shape -- because `native/` really does default to yes: a new
 shared C module is a capability every board that has the hardware should get,
-and the seven denials below are all the same sentence with different nouns.
+and every denial below is the same sentence with different nouns.
 
 What crosses is exactly ONE module, `moy_web`, and it is the module that
 justifies this board having an image at all: the browser console rides the
@@ -361,3 +361,12 @@ HTTP, which is bounded by the network and is measured by timing the request.
 
 The sampler is also internal SRAM while armed, on the board with the least of
 it and the 8MB flash where every module is spent twice, once per OTA slot."""
+
+[[native.shared.deny]]
+module = "moy_wasm"
+why = """
+The WebAssembly cart engine (the vendored WAMR runtime and the thread a module
+runs on). This board runs no cart in any language -- a cart paired with it runs
+in the browser, whose own engine executes a wasm cart -- so the runtime would
+be flash spent in both OTA slots for code nothing calls."""
+

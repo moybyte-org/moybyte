@@ -100,3 +100,14 @@
 // nothing over 512, so 512 is the knee. The method and the other boards'
 // tables are in #77.
 #define MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE   (512)
+
+// The WebAssembly engine's run thread (native/moy_wasm): its stack size and
+// whether it lives in PSRAM. PSRAM, measured 2026-09-25 on the Guition S3 with
+// the hello module: an internal stack costs a run its whole size in internal
+// SRAM (17 KB with this one) against about 1 KB for a PSRAM one, and the two
+// ran step(400000) in 276 vs 277 ms. With WiFi and BLE up this board has no
+// 17 KB to give. 16 KB is eight times the hello module's high-water mark
+// (2.2 KB); a stack overflow traps cleanly (the AOT stack check), it does not
+// corrupt.
+#define MOY_WASM_STACK_BYTES                (16 * 1024)
+#define MOY_WASM_STACK_PSRAM                (1)

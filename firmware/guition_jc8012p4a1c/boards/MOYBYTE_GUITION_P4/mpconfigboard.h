@@ -67,3 +67,11 @@
 // slots at 100 distinct names already, which is the 32-slot REPR_C arithmetic
 // showing on glass. Tables in #77.
 #define MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE   (512)
+
+// The WebAssembly engine's run thread (native/moy_wasm): its stack size and
+// whether it lives in PSRAM -- the S3 boards' setting, where an internal stack
+// costs a run its whole size in internal SRAM for no speed (their
+// mpconfigboard.h carries the numbers). This board has the internal SRAM to
+// spare; it keeps the same setting so a cart meets one stack on every board.
+#define MOY_WASM_STACK_BYTES                (16 * 1024)
+#define MOY_WASM_STACK_PSRAM                (1)

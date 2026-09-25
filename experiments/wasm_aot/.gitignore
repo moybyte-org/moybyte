@@ -31,3 +31,5 @@ wasm_spike/sdkconfig.p4.old
 doom/doom_spike/build_p4/
 doom/doom_spike/sdkconfig.p4
 doom/doom_spike/sdkconfig.p4.old
+# the pinned compilers (tools/wasm_module.py), fetched or built, never committed
+toolchain/dist/

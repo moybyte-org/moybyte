@@ -19,7 +19,10 @@
 #  (the asset converter and the Lua porter) and the guards/report file it shares
 #  with the CLI, plus shims/zlib.py. The stager
 #  maps runtime/ and device/ and has no third source; build.sh carries those
-#  three with the reason written beside the copy.
+#  three with the reason written beside the copy. The WebAssembly engine
+#  (native/moy_wasm) is deliberately not among those usermods: the browser runs
+#  a wasm cart as a sibling module in its own engine, never an engine inside
+#  the engine (docs/wasm_tier_plan_2026-09.md).
 
 [board]
 name = "web_runner"

@@ -384,9 +384,29 @@ def native_denials(board_dir):
     return out
 
 
+def native_takes(board_dir):
+    """{module name: entry} -- every shared NATIVE module this board TAKES by a
+    written decision (`[[native.<source>.take]]`, a module and a `why`).
+
+    The default for a shared module is still "yes", so most modules need no
+    entry at all. A take is for the ones where crossing is itself the decision
+    -- the WebAssembly engine, whose tier ships on every console board or on
+    none (docs/wasm_tier_plan_2026-09.md) -- so every board file says yes or no
+    to it with a reason, and tests/test_board_toml.py holds each one to that."""
+    out = {}
+    for _name, nat in native_sources(board_dir):
+        for e in nat.get("take", []):
+            out[e["module"]] = e
+    return out
+
+
 def _native_of(nat, root):
     """(module name, source dir) for one native source table."""
     deny = {e["module"] for e in nat.get("deny", [])}
+    both = deny & {e["module"] for e in nat.get("take", [])}
+    if both:
+        raise ValueError("board.toml both takes and denies native %s"
+                         % ", ".join(sorted(both)))
     src = Path(root) / nat.get("source", "native")
     return [(p.name, p) for p in sorted(src.iterdir())
             if p.is_dir() and (p / "micropython.cmake").exists()
