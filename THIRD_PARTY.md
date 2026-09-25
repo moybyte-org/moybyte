@@ -488,7 +488,8 @@ image. Nothing else is pulled in.
 
 | Project | Upstream | Licence |
 |---|---|---|
-| WAMR (wasm-micro-runtime) `WAMR-2.4.5`, plus a prebuilt `wamrc` release binary | <https://github.com/bytecodealliance/wasm-micro-runtime> | Apache-2.0 WITH LLVM-exception |
+| WAMR (wasm-micro-runtime) 2.4.5, taken from Moybyte's fork at branch `moybyte-2.4.5` (one commit over the upstream tag: esp-idf platform fixes so AOT text runs from PSRAM on the ESP32-S3 and ESP32-P4), plus upstream's prebuilt `wamrc` release binary | <https://github.com/moybyte-org/wasm-micro-runtime> (fork of <https://github.com/wasm-micro-runtime/wasm-micro-runtime>) | Apache-2.0 WITH LLVM-exception |
+| Espressif's LLVM fork, branch `xtensa_release_18.1.2`, built once by the toolchain script to give `wamrc` an Xtensa backend; never vendored | <https://github.com/espressif/llvm-project> | Apache-2.0 WITH LLVM-exception |
 
 `experiments/wasm_aot/core6502.c` and `spike6502.lua` are Moybyte's own
 hand-written 8-opcode benchmark cores, not derived from any emulator.

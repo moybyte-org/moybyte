@@ -22,9 +22,16 @@ and it moves to `docs/history/` when the tier ships.
   player and the browser runner, are moy-spec's. The binding stays a
   *proposal* until phase 5's two-host golden; nothing before that is a public
   promise.
-- **Friction lives in code, not prose.** The board-specific knowledge goes
-  upstream into WAMR, the binding ships inside libmoy, the compiler ships
-  prebuilt. A port adds a component and a call, exactly as it does for Lua.
+- **Friction lives in code, not prose.** The board-specific knowledge lives
+  in a pinned fork of WAMR, the binding ships inside libmoy, the compiler
+  ships prebuilt. A port adds a component and a call, exactly as it does
+  for Lua.
+- **WAMR is carried as a fork, pinned by hash.** moybyte-org/wasm-micro-runtime,
+  branch `moybyte-2.4.5`: one commit over the upstream 2.4.5 tag with the
+  ESP32-S3 and ESP32-P4 platform fixes, and the whole upgrade path is
+  rebasing that commit onto the next tag. Upstreaming is optional and off
+  the critical path (decided 2026-09-25, to stay clear of upstream's
+  contribution process).
 - **How a host executes the module is host policy** (AOT, XIP, per-arch
   caches, an interpreter for small carts) and never enters the spec. The
   `.wasm` is the only artifact in a cart.
@@ -36,29 +43,10 @@ and it moves to `docs/history/` when the tier ships.
 
 Each step names its repository, what it produces, and what says it is done.
 
-### Phase 0 — close the spike (now, alongside phase 1)
-
-- **moybyte.** Restore the T-Deck to the console firmware
-  (`make firmware-flash-tdeck-mainline`). The spike stays under
-  `experiments/wasm_aot/` as the worked example. Done: the T-Deck on-glass
-  suite passes again.
-- **moybyte → upstream WAMR.** The patches
-  `experiments/wasm_aot/toolchain/patch_wamr_s3.py` applies become a pull
-  request to bytecodealliance/wasm-micro-runtime: the ESP32-S3 dual-bus delta
-  and the memset through the fetch-only alias, the instruction-bus mirror for
-  AOT text in PSRAM, the XIP window registry, the ESP32-P4 executable-PSRAM
-  mapping and its cache sync. Until it merges, moybyte pins the WAMR version
-  and applies the script at build time. Done: a WAMR release loads the
-  spike's modules unpatched.
-- **moy-spec.** Correct the proposal's claims the September runs falsified:
-  the P4 "must XIP from a flash partition", "Xtensa untested", "wamrc ships
-  prebuilt", and the memory-floor argument that leaned on the partition.
-  Close its open item 1 against #158. Add the two Doom findings as open
-  items. Done: moy-spec's docs check passes and #158 records the edit.
-- **moybyte.** #158's body carries the verdict (both boards load a module
-  from a file into PSRAM; Doom runs) and its maturity rung is bumped.
-
 ### Phase 1 — the gate: WAMR inside the real console image (moybyte)
+
+The spike is closed: the T-Deck is back on the console firmware, the fork is
+pinned, the moy-spec proposal is corrected, and #158 carries the verdict.
 
 - A native module beside `native/moy_lua/` (new: native/moy_wasm) wrapping
   WAMR's ESP-IDF component with the AOT loader only: no interpreter, no

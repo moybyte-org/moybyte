@@ -77,13 +77,13 @@ clean; the driver now re-tells the panel its mode every frame.
 3. **WAMR's esp-idf "dual bus mirror" (`WASM_MEM_DUAL_BUS_MIRROR`, on by default
    for the S3) is broken on IDF 5.5**: its delta is `SOC_IROM_LOW - SOC_IROM_HIGH`
    (lands outside every mapped range; should be `- SOC_DROM_LOW`) and it clears fresh
-   exec memory through the fetch-only alias. `toolchain/patch_wamr_s3.py` fixes both,
-   marker-guarded. With that, a plain `.aot` relocates into PSRAM and runs — which is
+   exec memory through the fetch-only alias. Moybyte's WAMR fork (branch
+   `moybyte-2.4.5`, pinned by `build.sh`) fixes both. With that, a plain `.aot` relocates into PSRAM and runs — which is
    the S3's "a cart is a file": no partition-install step, unlike the P4.
 4. **XIP from flash splits the same way**: the loader parses the file through the
    DATA mapping, the CPU fetches through the INST one. Asking `esp_partition_mmap`
    for both returns the SAME address (shared table), so the alias is the constant
-   delta; the patch's `os_get_ibus_mirror()` / `os_register_xip_window()` carry it
+   delta; the fork's `os_get_ibus_mirror()` / `os_register_xip_window()` carry it
    into the loader's `module->code`.
 5. **The esp-idf loader refuses an XIP file with text relocations** ("cannot apply
    relocation to text section ... --enable-indirect-mode"). `aot_prelink.py`
@@ -122,7 +122,7 @@ own comment), and the one region that is locked read-only is the flash rodata
 mapping, which is exactly where the July run had embedded its `.aot`. What made
 `MALLOC_CAP_EXEC` come back empty was `CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT`
 (default on; the console's P4 build runs with it OFF), and WAMR only ever asks
-for that capability. So `toolchain/patch_wamr_s3.py` step 6 has the P4 take an
+for that capability. So the fork's esp-idf platform has the P4 take an
 executable mapping from PSRAM, and does the cache sync a unified bus needs after
 the loader has written the text (`esp_cache_msync` write-back, instruction-cache
 invalidate, `fence.i`). Same 6502 core, same board, console clock and PSRAM (hex,

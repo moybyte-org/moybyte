@@ -46,7 +46,7 @@ as fire sits in W's and A's own column and cannot ghost with them at all.
 
 ```bash
 ../toolchain/build_wamrc_xtensa.sh        # once: an Xtensa-capable wamrc (~45 min)
-python3 ../toolchain/patch_wamr_s3.py     # once per fresh WAMR clone
+[ -d ../wamr ] || ../build.sh                # once: clones the pinned WAMR fork
 ./build_wasm.sh                           # doom.wasm + both .aot
 cd doom_spike && idf.py set-target esp32s3 && idf.py build && cd ..
 ./flash_doom.sh /dev/ttyACM0 doom_xtensa_xip.aot

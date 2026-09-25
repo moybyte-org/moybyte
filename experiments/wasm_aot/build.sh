@@ -6,11 +6,17 @@
 #  - clang has a wasm32 backend but Ubuntu ships no `wasm-ld`; rust-lld (from the
 #    rustup toolchain) links wasm fine with `-flavor wasm`, and needs
 #    LD_LIBRARY_PATH pointing at the toolchain's lib dir to find its libLLVM.
-#  - `wamrc` ships PREBUILT for x86-64 in WAMR's GitHub releases -- no LLVM build.
+#  - `wamrc` ships PREBUILT for x86-64 in WAMR's GitHub releases -- no LLVM build
+#    (RISC-V targets; the Xtensa backend is toolchain/build_wamrc_xtensa.sh).
 #  - runtime and wamrc versions MUST match (AOT files carry a format version).
 set -euo pipefail
 
 WAMR_VERSION="${WAMR_VERSION:-2.4.5}"
+# The runtime comes from Moybyte's fork, pinned by hash: one commit over the
+# upstream 2.4.5 tag carrying the ESP32-S3 / ESP32-P4 platform fixes (#158).
+WAMR_REPO="${WAMR_REPO:-https://github.com/moybyte-org/wasm-micro-runtime.git}"
+WAMR_BRANCH="${WAMR_BRANCH:-moybyte-2.4.5}"
+WAMR_PIN="${WAMR_PIN:-47cb969c448e5853b92a10e8cef86e3ca04be3ce}"
 # TARGET=p4 (riscv32, the prebuilt wamrc) or TARGET=s3 (xtensa: needs the
 # wamrc toolchain/build_wamrc_xtensa.sh builds -- the prebuilt one has no
 # Xtensa backend, measured 2026-09-24).
@@ -18,12 +24,15 @@ TARGET="${TARGET:-p4}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "${HERE}"
 
-# 1) WAMR source at the pinned tag (runtime for the device build) + prebuilt wamrc
+# 1) WAMR source at the pinned commit (runtime for the device build) + prebuilt wamrc
 if [ ! -d wamr ]; then
-  echo "== cloning WAMR ${WAMR_VERSION}"
-  git clone --depth 1 -b "WAMR-${WAMR_VERSION}" \
-    https://github.com/bytecodealliance/wasm-micro-runtime.git wamr
+  echo "== cloning WAMR ${WAMR_BRANCH} (${WAMR_PIN:0:12})"
+  git clone --depth 1 -b "${WAMR_BRANCH}" "${WAMR_REPO}" wamr
 fi
+[ "$(git -C wamr rev-parse HEAD)" = "${WAMR_PIN}" ] || {
+  echo "wamr/ is at $(git -C wamr rev-parse --short HEAD), not the pinned ${WAMR_PIN:0:12}" >&2
+  exit 1
+}
 if [ ! -x wamrc_bin/wamrc ]; then
   echo "== fetching prebuilt wamrc ${WAMR_VERSION}"
   mkdir -p wamrc_bin
