@@ -490,6 +490,16 @@ image. Nothing else is pulled in.
 |---|---|---|
 | WAMR (wasm-micro-runtime) 2.4.5, taken from Moybyte's fork at branch `moybyte-2.4.5` (one commit over the upstream tag: esp-idf platform fixes so AOT text runs from PSRAM on the ESP32-S3 and ESP32-P4), plus upstream's prebuilt `wamrc` release binary | <https://github.com/moybyte-org/wasm-micro-runtime> (fork of <https://github.com/wasm-micro-runtime/wasm-micro-runtime>) | Apache-2.0 WITH LLVM-exception |
 | Espressif's LLVM fork, branch `xtensa_release_18.1.2`, built once by the toolchain script to give `wamrc` an Xtensa backend; never vendored | <https://github.com/espressif/llvm-project> | Apache-2.0 WITH LLVM-exception |
+| wasi-sdk 24, the clang/wasi-libc toolchain `experiments/wasm_aot/doom/build_wasm.sh` compiles with; a gitignored download, never vendored | <https://github.com/WebAssembly/wasi-sdk> | Apache-2.0 WITH LLVM-exception (wasi-libc: Apache-2.0 / MIT) |
+| doomgeneric (id Software's DOOM, ozkl's portable fork), the engine `build_wasm.sh` stages from a gitignored checkout the developer fetches; never vendored | <https://github.com/ozkl/doomgeneric> | **GPL-2.0** |
+| DOOM shareware IWAD `doom1.wad` (1993), a gitignored file the developer obtains; never vendored, never redistributed | id Software | id Software Limited Use licence: free unmodified copies only, no consideration, no derivative works |
+
+**The Doom port is the `ports/celeste.moy` case, not a cart of ours.**
+`experiments/wasm_aot/doom/dg_moy.c` is the platform glue doomgeneric links
+against, so everything `build_wasm.sh` produces is a derivative of GPL code
+carrying a WAD under id's terms: it is built locally as a demo, and it must not
+be hosted, seeded, sold, or shipped in a product image, exactly as §7 says of
+Celeste. No `.wasm`, `.aot` or `.wad` is tracked by this repository.
 
 `experiments/wasm_aot/core6502.c` and `spike6502.lua` are Moybyte's own
 hand-written 8-opcode benchmark cores, not derived from any emulator.

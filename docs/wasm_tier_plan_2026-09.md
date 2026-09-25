@@ -2,176 +2,221 @@
 
 **What this is.** The steps that turn the #158 spike into a third cart
 runtime, in the order their dependencies force, with the repository each step
-lands in and the guard that says it is done. Measurements live in #158. The
-ABI lives in moy-spec (proposals/wasm-runtime.md, which SPEC.md §15 points
-at). This document is the sequence and the decisions that fix it; it is dated,
-and it moves to `docs/history/` when the tier ships.
+lands in and the executable guard that says it is done. Measurements live in
+#158. The ABI lives in moy-spec (proposals/wasm-runtime.md, which SPEC.md §15
+points at). This document is the sequence and the decisions that fix it; it
+is dated, and it moves to `docs/history/` when the tier ships. Revised
+2026-09-25 after three adversarial reviews (architecture, hardware, product);
+the decisions below record what they changed.
 
 ## Decisions this plan rests on (2026-09-25)
 
 - **WebAssembly, not native ELF.** The lineup is three instruction sets plus
   a browser; one `.wasm` runs on all of them and the per-architecture module
   is a derived cache. Linear memory is bounded and imports are the only
-  capability surface, so a cart cannot reach the console heap or the radio.
-  There is no firmware symbol table to version. The cart's memory is one
-  fixed block sized by its manifest. The author's toolchain is clang.
+  capability surface. There is no firmware symbol table to version. The
+  cart's memory is one fixed block sized by its manifest. The author's
+  toolchain is clang.
+- **A per-architecture module is native code, and is trusted only by
+  provenance.** The sandbox lives in the compiler's output, not in the loader,
+  so a board loads a module only if its custom section carries the full key
+  (wasm hash, fork commit, compiler flags, target) and the file is signed the
+  way OTA images are. A tampered or foreign module is refused, and a test
+  proves it.
 - **A moy-spec binding, not a moybyte-only runtime.** SPEC.md §3.1 already
   makes an unknown `runtime` a clean refusal, so a host that lacks the tier
-  pays nothing. The import table *is* the verb table, which is the spec's
-  own subject. The hosts that would run it beyond the boards, the desktop
-  player and the browser runner, are moy-spec's. The binding stays a
-  *proposal* until phase 5's two-host golden; nothing before that is a public
-  promise.
+  pays nothing. The import table *is* the verb table, which is the spec's own
+  subject; libmoy's README names a wasm import table as the second binding
+  it was shaped for. Until phase 4 promotes it, one line under SPEC.md §15
+  names `"wasm"` the reference console's vendor runtime, and every public
+  piece before that (the libmoy file, the CLI check) is labelled as tracking
+  the proposal.
+- **One engine, one import table, every tier.** The host runs the same C
+  binding over WAMR through ctypes, exactly as `runtime/lua_host.py` runs
+  Lua, because a host and a device that disagree about what a verb does is
+  the disease that deleted lupa. There is no wasmtime tier; the spike's host
+  runner stays an oracle inside `experiments/wasm_aot/doom/`. The browser
+  adapts the same C thunks in JavaScript.
+- **The module shape is moycore's.** A native module (new: native/moy_wasm)
+  is the ENGINE only: the vendored runtime and the thread a cart runs on. The
+  import table is C in libmoy beside the Lua binding, and moycore hosts it
+  with the snapshot-in, queue-out contract it already has. The Player's one
+  Lua hook becomes a map of runtime factories, so a missing runtime is an
+  absent key.
 - **Friction lives in code, not prose.** The board-specific knowledge lives
-  in a pinned fork of WAMR, the binding ships inside libmoy, the compiler
-  ships prebuilt. A port adds a component and a call, exactly as it does
-  for Lua.
+  in a pinned fork of WAMR, vendored as sources like everything else the
+  boards compile (`tools/vendor_libmoy.py` says why: no network fetch inside a
+  build). The compiler ships prebuilt. A port adds a component and a call.
 - **WAMR is carried as a fork, pinned by hash.** moybyte-org/wasm-micro-runtime,
-  branch `moybyte-2.4.5`: one commit over the upstream 2.4.5 tag with the
-  ESP32-S3 and ESP32-P4 platform fixes, and the whole upgrade path is
-  rebasing that commit onto the next tag. Upstreaming is optional and off
-  the critical path (decided 2026-09-25, to stay clear of upstream's
-  contribution process).
-- **How a host executes the module is host policy** (AOT, XIP, per-arch
-  caches, an interpreter for small carts) and never enters the spec. The
-  `.wasm` is the only artifact in a cart.
-- **Doom is the first cart.** It is the demo that proves the tier, and the
-  port that found the draft ABI's two gaps: the frame blit needs a 256-entry
-  palette, and a ported engine needs a clock and a file-read import.
+  branch `moybyte-2.4.5` over the upstream 2.4.5 tag, holding the ESP32-S3 and
+  ESP32-P4 platform work. Fork policy: the pin moves only for a security fix,
+  an ESP-IDF bump, or a feature the tier needs; every move rebuilds the
+  compilers and every module, and re-runs the hello and Doom checks on both
+  chip families and on Linux; the cache key carries the fork commit, so a
+  stale module reads as absent, never migrated. Upstreaming is optional and
+  off the critical path.
+- **How a host executes the module is host policy** (AOT, XIP, caches, an
+  interpreter for small carts) and never enters the spec. No interpreter is
+  built into the boards: a cart without a matching signed module is refused,
+  which means a browser-authored or Zero-synced cart cannot play on a board
+  until a compiler service exists. That is stated, not hidden.
+- **Cart storage is the board's.** The SD card on the T-Deck, the flash VFS on
+  the P4 boards; an SD card can become a P4 requirement if cart sizes demand
+  it. Assets are read through the cart's own folder and nothing else.
+- **Every console board, not two.** Each board declares or denies the module
+  in its `board.toml` with a reason, and the gate runs on every board that
+  declares it. The Guition S3 is the floor board for memory.
+- **Doom is a locally built demo, never a cart of ours.** doomgeneric is GPL
+  and the shareware WAD forbids consideration and derivative works, so the
+  port follows the Celeste rule in `THIRD_PARTY.md`: a recipe fetches both,
+  prints both licences, builds the cart on the developer's machine, and it
+  is never hosted, seeded or shipped. As a Player cart it fits the P4 boards.
+  On the T-Deck the console reserves PSRAM for the Lua VM, panel DMA and
+  layer pool (`firmware/lilygo_t_deck_plus_mainline/boards/MOYBYTE_TDECK/mpconfigboard.h`)
+  and the Python heap may grow into the rest, so Doom's fixed memory does not
+  fit beside the shell; there it stays the flash-partition spike demo unless
+  a reduced zone measured in phase 3 fits. Doom is still the cart that found
+  the ABI's gaps: the 256-entry blit palette and the asset read.
 
 ## The phases
 
-Each step names its repository, what it produces, and what says it is done.
+Each step names its repository, what it produces, and the guard that says it
+is done. A guard is a test or a check script, never prose.
 
 ### Phase 1 — the gate: WAMR inside the real console image (moybyte)
 
-The spike is closed: the T-Deck is back on the console firmware, the fork is
-pinned, the moy-spec proposal is corrected, and #158 carries the verdict.
+- **Vendor the runtime.** The AOT-only subset of the fork under the new
+  native module, through the vendoring script with a stamp and a test that
+  the copy matches the pinned commit. No interpreter, no WASI, no builtin
+  libc. Each board declares or denies the module in `board.toml`.
+- **The cart's thread.** WAMR asserts on a task that is not a pthread, and the
+  MicroPython task is one. Each run gets a pthread whose stack placement and
+  size are a per-board setting, its boundary handed to the runtime so the
+  AOT stack check is real, its high-water mark measured. A PSRAM stack is
+  measured too, since internal SRAM has no room for the spike's stack beside
+  WiFi and BLE.
+- **Allocation policy, in the fork.** Data allocations above a small
+  threshold go to PSRAM on both chips; when PSRAM is short the load is
+  refused, never silently served from the internal exec heap. The S3 cache
+  sync at load stalls the other core the way ESP-IDF's flash operations do,
+  or invalidates by range, because the console runs the flush feeder, WiFi
+  and BLE on core 0 while a module loads.
+- **Provenance.** The loader checks the module's custom section for the full
+  key: wasm hash, fork commit, compiler flags (size level, bounds checks,
+  target CPU and features, XIP or plain). Signing arrives with phase 3.
+- **Termination.** Confirm that a cart whose update never returns can be
+  stopped from the Player's side, and record how; if it cannot, the plan
+  says what the board does instead.
+- **The compiler as an artifact.** Static wamrc builds for the S3 and for
+  RISC-V, built once per (LLVM tag, fork commit) from the recipe now in
+  `experiments/wasm_aot/toolchain/build_wamrc_xtensa.sh`, published as
+  release assets on the fork and fetched by hash. Preflight never builds
+  LLVM and no module is ever committed; the test harness builds the hello
+  module with the fetched compiler.
+- **Guard, on glass, in every declaring board's suite:**
+  1. idle desktop, module built in versus not: internal free and largest
+     block differ by at most a constant the test asserts (measured first,
+     recorded in #158, then pinned);
+  2. during a wasm run with WiFi and BLE up, the low-water internal free
+     (the heap's local-minimum monitor) stays at or above the main region's
+     floor;
+  3. a Lua cart run after the wasm cart exits reports no PSRAM fallback
+     through moycore's memory report;
+  4. a load/unload loop while the flush and WiFi run, for the cache sync.
+- **Decision point:** which boards carry the tier in the first release. If
+  the S3 boards fail the guard they wait for a diet; the P4 boards and the
+  browser go first. The plan keeps its shape either way.
 
-- A native module beside `native/moy_lua/` (new: native/moy_wasm) wrapping
-  WAMR's ESP-IDF component with the AOT loader only: no interpreter, no
-  WASI, no builtin libc. The runtime's pool lives in PSRAM; one executable
-  mapping per loaded cart. Python surface: load a module file with a memory
-  size, call an export, unload.
-- Both console boards build with it. The build's headroom line and the
-  boot's internal-SRAM figure are compared against the previous build and
-  recorded in #158.
-- A hello module (the spike's 6502 core will do) loads from the SD card as a
-  per-architecture file into PSRAM and runs from the REPL on both boards.
-- **Guard:** a case in `tests/test_tdeck_on_glass.py` and
-  `tests/test_p4_on_glass.py` that loads the hello module and checks its
-  return value.
-- **Kill criterion:** internal SRAM on the T-Deck after runtime init must
-  leave the flush's bounce buffers (`native/moy_flush/moy_flush.c`) and the
-  Lua tier's allocator floor intact. If it does not, the tier ships on the
-  P4 and in the browser first and the S3 waits for a diet. The plan does not
-  change shape either way.
+### Phase 2 — the ABI and the import table (moy-spec, small)
 
-### Phase 2 — the ABI revision (moy-spec)
+- Revise proposals/wasm-runtime.md into a binding candidate: the marshalling
+  rules the Lua verbs already need (string arguments, multiple returns,
+  overloads by argument count, layer handles); the import list as a
+  machine-readable table the C binding, the check command and the browser
+  adapter are all tested against; `time()` as the clock, so no clock import;
+  no blocking import; a read-only asset read scoped to the cart's folder,
+  pinned now rather than waiting for #108; `blit` with a 256-entry palette;
+  the manifest's fixed memory size and the tier's floor (open item 8); what a
+  trap does.
+- libmoy gains the import table beside its Lua binding, behind a build flag,
+  bound to whatever module instance the caller hands it (the `moy_lua_open`
+  shape). WAMR is not a libmoy dependency; load policy, the pool, refusal and
+  signing stay in the port layers.
+- The existing CLI check command learns wasm carts: imports only from
+  `"moy"`, the required exports, memory minimum equal to maximum equal to
+  the manifest.
+- **Guards:** a test that the import table equals the verb table, the shape
+  of the deny-list test in `tests/test_moycore_glue.py`; refusal fixtures (a
+  foreign import, a memory mismatch, a missing export) the check command
+  fails on; moy-spec's docs check.
 
-Revise proposals/wasm-runtime.md from a draft into a binding candidate:
+### Phase 3 — the Player path (moybyte)
 
-- **Manifest.** `"runtime": "wasm"`, `"main"`, and a fixed linear-memory
-  size the host checks against the module's own declaration before it
-  allocates anything. The compiled tier's memory floor (the draft's open
-  item 8), sized from Doom and the hello cart.
-- **Imports.** Module `"moy"`: the verb table; `blit` with a 256-entry
-  palette; `blit565`; a millisecond clock; asset or file read, decided
-  together with #108; `snd` with its rate and channel count pinned by phase
-  4's implementation.
-- **Profile and exports** unchanged: wasm32 MVP, `_init`, `_update`, `_draw`,
-  `memory`, no WASI imports. A libc story for ports: wasi-libc linked without
-  WASI imports, standard output through a log import.
-- **The C header** waits until the import list survives phase 4, as the draft
-  already says.
-- **A check command in the moy CLI** (new) that validates a module against
-  the profile: imports only from `"moy"`, the required exports present,
-  memory minimum equal to maximum equal to the manifest. Standard library
-  only, a small section parser.
-- **Guard:** moy-spec's docs check; the check command has tests against one
-  conforming and one non-conforming module.
+- moycore hosts the vendored import table; the Player dispatches
+  `"runtime": "wasm"` through the runtime map, and a build without the module
+  shows the existing runtime-missing panel.
+- The store stops reading `main` as text for a wasm cart
+  (`runtime/moy_carts.py`); the Code tab is absent unless the cart ships
+  `src/` (`runtime/text_modes.py`); a trap opens the error panel with no EDIT
+  action; the sync RPC keeps declining binary files (`runtime/moy_sync.py`),
+  and the plan says so rather than pretending wasm carts sync.
+- The blit lands in the cart's canvas under `docs/surface_model_v1.md` §4:
+  one canvas class, no new invalidation path. The console path adds a
+  full-frame write the spike skipped, so the plan states a per-board ceiling
+  rather than the spike's rate: a full-frame blit cart on the S3 presents at
+  or under the tick model's 30, and the guard carries a PERF fps floor.
+- `.aot` signing with the OTA key; a tampered module is refused.
+- The hello cart runs as a Player cart on the host (ctypes over WAMR) and on
+  every declaring board. Doom runs from the launcher on a P4 board, built by
+  the recipe; on the T-Deck a reduced zone is measured once, and if it does
+  not fit the T-Deck keeps the spike demo.
+- **Guards:** a host golden for the hello cart at the 320×240 row; the
+  on-glass hello in each declaring suite with the fps floor; the tampered
+  module refused; Doom's frame CRC against the host run at named tics, with
+  the level transition the spike saw excluded by name.
 
-### Phase 3 — the binding inside libmoy (moy-spec, vendored into moybyte)
+### Phase 4 — second host and promotion (moy-spec; when a second author or host exists)
 
-- A wasm binding beside libmoy's Lua binding: the native-symbol table that
-  maps `"moy"` imports onto libmoy's verbs, `blit` and `blit565` resolved
-  into libmoy's canvas, the fixed memory, and the load policy: the canonical
-  `.wasm`, a host-supplied per-architecture module when the host has one,
-  otherwise a clean refusal. WAMR is the engine on boards and on the desktop;
-  the browser binds in JavaScript (phase 5).
-- **Guard:** libmoy's test target runs the hello cart under WAMR on Linux
-  and checks a frame CRC.
-- moybyte re-vendors (`make vendor-libmoy`) and the phase-1 module's spike
-  imports are replaced by the libmoy table.
-
-### Phase 4 — the Player path (moybyte)
-
-- **Host.** A sibling of `runtime/lua_host.py` runs a wasm cart through
-  wasmtime on the PC, its imports trampolining to the canvas, so the dev
-  loop never leaves the host.
-- **Boards.** `"runtime": "wasm"` dispatches to the phase-3 binding;
-  `runtime/device_boot.py`'s runtime-missing screen covers a board built
-  without it.
-- **Tick.** `_update` and `_draw` run under `runtime/tick_model.py` exactly
-  as Lua's do. A blit lands in the cart's canvas under
-  `docs/surface_model_v1.md` §4: one canvas class, no new invalidation path.
-- **Diagnostics.** The PERF line covers wasm carts. The PC sampler sees AOT
-  text as one unnamed bucket, since the module carries no symbols; recorded,
-  not fixed.
-- **Doom as a `.moy`.** The port under `experiments/wasm_aot/doom/`
-  repackaged on the `"moy"` imports, the WAD as a cart asset read through the
-  file import, a 256-entry blit. A store cart, not a seed cart, because of
-  its size. Licences into `THIRD_PARTY.md`: doomgeneric is GPL-2.0, the
-  shareware WAD ships as shareware.
-- **Guard:** the hello cart in both on-glass suites; Doom's frame CRC at
-  fixed game tics matches the host run, which the spike's harness already
-  checks.
-
-### Phase 5 — second host and conformance (moy-spec)
-
-- The desktop player (the SDL2 port) runs wasm carts through the phase-3
-  binding under WAMR.
-- The browser runner instantiates the cart as a sibling module with imports
-  bound to the runner's exported verbs. Never an engine inside the engine.
-- A wasm twin of one conformance scene, the flat-shaded raycaster whose Lua
-  sibling is already measured, passes the existing goldens on a board, in the
-  desktop player and in the browser.
+- The desktop player runs wasm carts through libmoy's table under WAMR.
+- The browser runner instantiates the cart as a sibling module whose imports
+  are JavaScript adapters over the same C thunks. Never an engine inside the
+  engine.
+- One conformance scene per new import, with an RGB golden type decided in
+  phase 2 because the palette-index goldens cannot represent a 256-entry
+  blit; refusal fixtures run on every host.
 - Then, and not before: the proposal becomes a binding section of SPEC.md,
-  the C header freezes, and PORTING.md gets its section: what a host needs,
-  how it refuses, the floor.
+  the C header freezes, the distribution notes move to PORTING.md, and
+  SPEC.md §15's vendor-runtime line goes.
 
-### Phase 6 — toolchain and distribution (when a second author or host exists)
+### Phase 5 — distribution (later)
 
-- **moy-spec releases** carry a prebuilt wamrc for the ESP32-S3 and for
-  RISC-V. CI builds the recipe in
-  `experiments/wasm_aot/toolchain/build_wamrc_xtensa.sh` once and caches it.
-  The CLI's build command drives clang and, given an architecture, wamrc.
-- **moybyte's store** serves per-architecture modules beside the canonical
-  `.wasm`, keyed by the wasm hash, the architecture and the WAMR version,
-  with an on-device cache directory. Compiling in the cloud so a cart can be
-  written on the device alone is a separate proposal on top of this.
+- The store serves signed per-architecture modules beside the canonical
+  `.wasm`, keyed by the full key, with an on-device cache directory.
+- Compiling in the cloud so a cart can be written on the device alone is a
+  separate proposal on top of this.
 
-## Decision points
+## Decision points, all the owner's
 
-- **After phase 1:** the S3 is in the first release, or the P4 and the
-  browser go first.
-- **After phase 5:** the proposal is promoted to a binding, or it stays a
-  vendor runtime. Nothing before phase 5 is a public promise.
+- After phase 1: which boards carry the tier in the first release.
+- Whether the Doom glue under `experiments/wasm_aot/doom/` is marked
+  GPL-2.0-or-later, which is what linking into doomgeneric implies.
+- Human testing on every touched board before any of this reaches master.
+- After phase 4: promote the proposal to a binding, or keep the vendor
+  runtime. Nothing before phase 4 is a public promise.
+- Whether an SD card becomes a P4 requirement.
 
 ## Deliberately not in this plan
 
-- A Lua-to-wasm path. The proposal's answer is "nothing, deliberately", and
-  it stands.
+- A wasmtime host tier.
+- `blit565`. The proposal measured it as the slow route on the floor board;
+  it returns when a cart that is inherently direct-colour asks for it.
+- PCM audio. Doom runs silent; `snd`'s rate and channels are pinned by the
+  first cart that needs them, and `moy_audio` is vendored from moy-spec.
+- moybyte's superset verbs for wasm carts, and a libc story beyond "no WASI
+  imports".
+- A Lua-to-wasm path. The proposal's answer is "nothing, deliberately".
 - The cloud compiler.
-- An interpreter fallback as a spec feature. It is host policy, and #158's
+- An interpreter as a spec feature. It is host policy, and #158's
   measurements say it does not pay for itself.
 - A framebuffer for Lua carts. SPEC.md §12.6 stands; §15 carves the one
   exception, for a cart that owns its own memory.
-
-## Housekeeping the spike left
-
-- The T-Deck's panel lost its mode registers minutes into play under the
-  spike's own driver (`experiments/wasm_aot/doom/README.md`, "the static").
-  The console's driver may share the exposure: soak the console on the
-  T-Deck, and if it reproduces, re-assert the registers in the flush. Not
-  part of the tier.
