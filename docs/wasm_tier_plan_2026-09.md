@@ -66,12 +66,21 @@ the decisions below record what they changed.
 - **Every console board, not two.** Each board declares or denies the module
   in its `board.toml` with a reason, and the gate runs on every board that
   declares it. The Guition S3 is the floor board for memory.
+- **One cart, every board: no fragmentation.** A compiled cart that runs on
+  a P4 board and not on an S3 board is not a moybyte cart, exactly as the
+  Lua tier's floor exists so a script cart runs on modest hardware. The
+  compiled tier's floor is therefore the FLOOR board's share of the
+  cart-runtime reserve, a cart's manifest may declare memory up to that
+  floor and no more, the check command and the store refuse above it, and
+  the tier ships on every console board or on none. A cart that needs more
+  than the floor is a demo, not a cart.
 - **Doom is a locally built demo, never a cart of ours.** doomgeneric is GPL
   and the shareware WAD forbids consideration and derivative works, so the
   port follows the Celeste rule in `THIRD_PARTY.md`: a recipe fetches both,
   prints both licences, builds the cart on the developer's machine, and it
-  is never hosted, seeded or shipped. As a Player cart it fits the P4 boards.
-  On the T-Deck it is a measurement, not a verdict: see the next decision.
+  is never hosted, seeded or shipped. It runs from the launcher only if it
+  fits the tier's floor, on every board; that is a measurement, not a
+  verdict, and the next decision names the levers.
   Doom is still the cart that found the ABI's gaps: the 256-entry blit
   palette and the asset read.
 - **A compiled cart's memory is the cart-runtime reserve, not free PSRAM.**
@@ -85,8 +94,8 @@ the decisions below record what they changed.
   three levers, measured in phase 3 in this order: a smaller zone (its
   `-mb` knob) and which levels survive it; a larger reserve at build time and
   what the shell loses; the text in flash through a partition, which costs a
-  partition-table change and a full-erase reflash per device. If none fits,
-  the T-Deck keeps the spike demo.
+  partition-table change and a full-erase reflash per device. If none fits
+  the floor, Doom stays the spike demo on every board.
 
 ## The phases
 
@@ -133,9 +142,9 @@ is done. A guard is a test or a check script, never prose.
   3. a Lua cart run after the wasm cart exits reports no PSRAM fallback
      through moycore's memory report;
   4. a load/unload loop while the flush and WiFi run, for the cache sync.
-- **Decision point:** which boards carry the tier in the first release. If
-  the S3 boards fail the guard they wait for a diet; the P4 boards and the
-  browser go first. The plan keeps its shape either way.
+- **Decision point:** whether the tier ships. If the S3 boards fail the
+  guard, the tier waits for a diet on the S3; it does not ship on a subset
+  of the lineup. The plan keeps its shape either way.
 
 ### Phase 2 — the ABI and the import table (moy-spec, small)
 
@@ -147,7 +156,8 @@ is done. A guard is a test or a check script, never prose.
   no blocking import; a read-only asset read scoped to the cart's folder,
   pinned now rather than waiting for #108; `blit` with a 256-entry palette;
   the manifest's fixed memory size and the tier's floor (open item 8); what a
-  trap does.
+  trap does. The floor is the floor board's share of the reserve, and the
+  check command refuses a manifest above it.
 - libmoy gains the import table beside its Lua binding, behind a build flag,
   bound to whatever module instance the caller hands it (the `moy_lua_open`
   shape). WAMR is not a libmoy dependency; load policy, the pool, refusal and
@@ -177,9 +187,9 @@ is done. A guard is a test or a check script, never prose.
   or under the tick model's 30, and the guard carries a PERF fps floor.
 - `.aot` signing with the OTA key; a tampered module is refused.
 - The hello cart runs as a Player cart on the host (ctypes over WAMR) and on
-  every declaring board. Doom runs from the launcher on a P4 board, built by
-  the recipe; on the T-Deck a reduced zone is measured once, and if it does
-  not fit the T-Deck keeps the spike demo.
+  every declaring board. Doom, built by the recipe, runs from the launcher
+  on every board or on none: the three levers are measured once on the
+  floor board, and if none fits, Doom stays the spike demo.
 - **Guards:** a host golden for the hello cart at the 320×240 row; the
   on-glass hello in each declaring suite with the fps floor; the tampered
   module refused; Doom's frame CRC against the host run at named tics, with
@@ -207,7 +217,8 @@ is done. A guard is a test or a check script, never prose.
 
 ## Decision points, all the owner's
 
-- After phase 1: which boards carry the tier in the first release.
+- After phase 1: ship the tier on every console board, or wait for the
+  S3 diet.
 - Whether the Doom glue under `experiments/wasm_aot/doom/` is marked
   GPL-2.0-or-later, which is what linking into doomgeneric implies.
 - Human testing on every touched board before any of this reaches master.
