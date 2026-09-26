@@ -462,9 +462,8 @@ def main(argv=None):
 
     board = P4Board(a.port, board_dir=board_dir)
     try:
-        # Opening the port already rebooted the board (see above), so this is
-        # not so much a probe as a wait -- but it stays a probe, because a
-        # future cable or port that does NOT reset gets the fast path for free.
+        # Opening the port does not reset the board (see above): one that
+        # answers is driven as it stands, and only a silent one is reset.
         board.drain(0.4)
         if a.reset or board.pyval("1", timeout=8.0) != 1:
             log("  board not answering; resetting")
