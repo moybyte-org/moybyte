@@ -30,13 +30,15 @@ moy_wasm.done()          # False while the thread runs
 moy_wasm.result()        # waits (the VM lock released), then a dict
 ```
 
-`start(path, export, args=(), loops=1, stack=None, psram_stack=None)` reads the
+`start(path, export, args=(), loops=1, stack=None, psram_stack=None, pool=None)` reads the
 module file through the VFS (the T-Deck's SD and the P4s' flash store look the
 same) into a PSRAM buffer, checks its signature (see Provenance; a refused
 module ends the run at once, with no thread) and starts a thread that does,
 `loops` times over: load, check the key, instantiate, call `export(*args)`
 with i32 arguments, and unload. `stack`/`psram_stack` override the board's
-setting for a measurement. One run at a time.
+setting and `pool` the pool's sizing rule, for a measurement: a module's
+`pool_peak` under a pool bigger than the rule's is what the rule has to hold.
+One run at a time.
 
 **Everything WAMR does happens on that thread**, the runtime's init and
 teardown included: WAMR's platform layer calls `pthread_self()`, and IDF
@@ -105,7 +107,7 @@ nothing else. During a run:
 | what | where |
 |---|---|
 | the module file | PSRAM, read once; a run keeps it for its passes, a cart's session frees it once the module is loaded (below) |
-| the runtime's pool (module and instance structures, the module's data segments, the exec env) | PSRAM, `MOY_WASM_POOL_BYTES` (256 KB) plus an eighth of the module (`MOY_WASM_POOL_SHARE`), allocated at the run's start and freed at its end |
+| the runtime's pool (module and instance structures, the module's data segments, the loader's relocation tables while it relocates, the exec env) | PSRAM, `MOY_WASM_POOL_BYTES` (256 KB) plus a quarter of the module (`MOY_WASM_POOL_SHARE`), allocated at the run's start and freed at its end |
 | the AOT text | PSRAM: the S3 fetches it through the instruction-bus alias, the P4's external RAM carries no PMP entry |
 | linear memory, AOT data sections, any runtime allocation of 1 KB or more | PSRAM only (`WASM_ESPIDF_PSRAM_THRESHOLD` in the fork's esp-idf platform) |
 | the run's stack | per board, `MOY_WASM_STACK_BYTES` / `MOY_WASM_STACK_PSRAM` in `mpconfigboard.h`: 16 KB in PSRAM on every board |
@@ -127,14 +129,13 @@ manifest declares, loads it, and frees it before instantiating, so the
 linear memory takes that block back: read into a block of its own size, the
 file left a hole below the text that the linear memory could not use, and a
 cart that fit the free PSRAM in total was refused for want of one block. The
-loader copies what it keeps from a freeable load except the data segments --
-the fork's AOT loader reads the module's `is_binary_freeable` before
-`wasm_runtime_load` has set it -- so `moy_wasm_load.c` gives the module its
-own copies, in the pool, before the file goes. Without them the instantiation
-copied the data segments out of a freed file, which the reused block had
-already zeroed: a Doom build trapped on its first call through a function
-table, and the hello cart's file name read as nothing (the hello cart's
-greeting check in every suite is the guard).
+load is freeable: the fork's AOT loader copies everything the module keeps,
+its data segments included, into the pool, so nothing points into the file
+once the load returns. A data segment left pointing into the file would be
+copied out of freed memory at instantiation, which the reused block has
+already zeroed -- a Doom build traps on its first call through a function
+table, and the hello cart's file name reads as nothing. The hello cart's
+greeting check in every suite is the guard.
 
 The AOT native-stack check is live: the run hands the runtime its stack's low
 end plus a 2 KB guard (`wasm_runtime_set_native_stack_boundary`), and the fork

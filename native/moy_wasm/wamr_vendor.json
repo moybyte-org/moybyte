@@ -5,7 +5,7 @@
     "native/moy_wasm/wamr/core/config.h": "589dabe8ca01f472b744576593d7371b37c174524b2eb307e26c0296002dcc06",
     "native/moy_wasm/wamr/core/iwasm/aot/aot_intrinsic.c": "4a79281e93abb3ba944ce45fc8a12370cc1a2babd58c99b10624b3252db1b855",
     "native/moy_wasm/wamr/core/iwasm/aot/aot_intrinsic.h": "0d13f69af73c1e51ed9131724c658b6c2773a11c3c301d2392be7b4cbc9bd375",
-    "native/moy_wasm/wamr/core/iwasm/aot/aot_loader.c": "aaeee30061b8a3cc9b0cd038f7ed01019b1b16d7a3aa9f4d1be4c06be6946516",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_loader.c": "7f8e12ff80252191256f764cb332a157e1ce03634623cb30f3f8908ed8f8eb6f",
     "native/moy_wasm/wamr/core/iwasm/aot/aot_reloc.h": "ffedfda32dc9c579bbc993f3f5fd3fa5d69a687b33e59533bee5752153c79a7d",
     "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.c": "9032aa7a5a883b413ee4558d78498eba19efc210fafa8e5371b3610b671aac6b",
     "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.h": "65834f0c9247794df2771fed9cf3005701cef86cc06311c414591dd25f0e4f27",
@@ -88,8 +88,8 @@
   },
   "upstream": {
     "branch": "moybyte-2.4.5",
-    "commit": "88631c5fd2dd30a3fe9cf40549d82d156ae5c0a3",
-    "date": "2026-09-25",
+    "commit": "fd7933f9898252cdfb81a0cfb4213096e16e452a",
+    "date": "2026-09-26",
     "repo": "moybyte-org/wasm-micro-runtime"
   }
 }

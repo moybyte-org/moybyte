@@ -4456,6 +4456,11 @@ load(const uint8 *buf, uint32 size, AOTModule *module,
 
     module->package_version = version;
 
+    /* load_from_sections decides from this flag whether to copy what it keeps
+       (the memory init data among it) out of the caller's buffer, so it must
+       hold before the sections are loaded. */
+    module->is_binary_freeable = wasm_binary_freeable;
+
     if (!create_sections(module, buf, size, &section_list, error_buf,
                          error_buf_size))
         return false;

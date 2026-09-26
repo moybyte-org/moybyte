@@ -52,7 +52,6 @@
 
 #include "wasm_export.h"
 #include "moy_wasm_key.h"
-#include "moy_wasm_load.h"
 #include "moy_wasm_session.h"
 #include "moy_wasm_thread.h"
 
@@ -67,19 +66,19 @@
 #define MOY_WASM_STACK_PSRAM (1)
 #endif
 // The runtime's allocator pool, PSRAM, held only while a run is live. It
-// carries the module's and the instance's structures, the copies a load makes
-// of the data segments, and the exec env; the text and the linear memory are
-// separate PSRAM mappings. The structures and the data segments grow with the
-// module, so the pool is sized from it: MOY_WASM_POOL_BYTES, plus one byte in
-// MOY_WASM_POOL_SHARE of the module's. Measured 2026-09-26 on the Waveshare
-// P4: the hello module peaks near 11 KB; Doom's 1 MB module peaks at 294 KB
-// while it loads and holds 195 KB once its 156 KB of data segments are its
-// own, where this sizes 383 KB.
+// carries the module's and the instance's structures, the loader's copies of
+// the data segments and its relocation tables while it relocates, and the
+// exec env; the text and the linear memory are separate PSRAM mappings. The
+// structures, the data segments and the relocations grow with the module, so
+// the pool is sized from it: MOY_WASM_POOL_BYTES, plus one byte in
+// MOY_WASM_POOL_SHARE of the module's -- a share that holds the load's peak,
+// when the loader has copied the data segments and holds its relocation
+// tables at once. start()'s `pool` argument measures a module against it.
 #ifndef MOY_WASM_POOL_BYTES
 #define MOY_WASM_POOL_BYTES (256 * 1024)
 #endif
 #ifndef MOY_WASM_POOL_SHARE
-#define MOY_WASM_POOL_SHARE 8
+#define MOY_WASM_POOL_SHARE 4
 #endif
 // Where the thread runs: the MicroPython task's core and priority, so a run
 // takes the VM's time and never the core the radios and the flush feeder use.
@@ -113,6 +112,7 @@ typedef struct {
     uint32_t loops;
     uint32_t stack_bytes;
     bool stack_psram;
+    uint32_t pool_asked;           // a measurement's pool size; 0 is the engine's rule
     // what it found (written by the thread, read after the join)
     bool ok;
     char err[ERR_MAX];
@@ -269,10 +269,6 @@ static bool one_pass(run_t *r, uint32_t pass)
     if (!check_key(r, module)) {
         goto out;
     }
-    if (!moy_wasm_own_data(module, r->file, r->file_len)) {
-        fail(r, "load", "no pool for the data segments");
-        goto out;
-    }
 
     t0 = esp_timer_get_time();
     inst = wasm_runtime_instantiate(module, MOY_WASM_EXEC_STACK, 0, err, sizeof(err));
@@ -370,7 +366,7 @@ out:
 
 static void run_passes(run_t *r)
 {
-    r->pool = pool_bytes(r->file_len);
+    r->pool = r->pool_asked ? r->pool_asked : pool_bytes(r->file_len);
     uint8_t *pool = heap_caps_malloc(r->pool, PSRAM_CAPS);
     if (!pool) {
         fail(r, "no PSRAM for the runtime pool", NULL);
@@ -533,16 +529,18 @@ static void read_file(run_t *r, mp_obj_t path)
     read_module(path, 0, &r->file, &r->file_len);
 }
 
-// start(path, export, args=(), loops=1, stack=None, psram_stack=None)
+// start(path, export, args=(), loops=1, stack=None, psram_stack=None, pool=None)
 //
 // Reads the module file and checks its signature, then runs `loops` passes of load / check / instantiate
-// / call export(*args) / unload on a new thread, and returns at once. `stack`
-// and `psram_stack` override the board's settings for this run (a measurement,
-// not a product knob). done() says when it ended, result() collects it; a
-// module refused for its signature ends at once, with no thread.
+// / call export(*args) / unload on a new thread, and returns at once. `stack`,
+// `psram_stack` and `pool` override the board's settings and the pool's
+// sizing rule for this run (a measurement, not a product knob: result()'s
+// `pool_peak` under a pool bigger than the rule's is what the rule must
+// hold). done() says when it ended, result() collects it; a module refused
+// for its signature ends at once, with no thread.
 static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args)
 {
-    enum { ARG_path, ARG_export, ARG_args, ARG_loops, ARG_stack, ARG_psram_stack };
+    enum { ARG_path, ARG_export, ARG_args, ARG_loops, ARG_stack, ARG_psram_stack, ARG_pool };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_path, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_export, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
@@ -550,6 +548,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
         { MP_QSTR_loops, MP_ARG_INT, {.u_int = 1} },
         { MP_QSTR_stack, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_psram_stack, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_pool, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, a);
@@ -584,6 +583,10 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     if (stack < 4096 || stack > 256 * 1024) {
         mp_raise_ValueError(MP_ERROR_TEXT("stack must be 4KB..256KB"));
     }
+    mp_int_t pool = a[ARG_pool].u_obj == mp_const_none ? 0 : mp_obj_get_int(a[ARG_pool].u_obj);
+    if (pool != 0 && (pool < 16 * 1024 || pool > 16 * 1024 * 1024)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("pool must be 16KB..16MB"));
+    }
 
     memset(r, 0, sizeof(*r));
     memcpy(r->export_name, name, name_len);
@@ -595,6 +598,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     r->stack_bytes = (uint32_t)stack;
     r->stack_psram = a[ARG_psram_stack].u_obj == mp_const_none
                          ? MOY_WASM_STACK_PSRAM : mp_obj_is_true(a[ARG_psram_stack].u_obj);
+    r->pool_asked = (uint32_t)pool;
     read_file(r, a[ARG_path].u_obj);
     const char *why = verify_module(r->file, r->file_len, &r->file_len);
     if (why) {
@@ -774,12 +778,8 @@ static void *sess_thread(void *arg)
             goto opened;
         }
     }
-    // The module keeps copies of what it needs (moy_wasm_own_data gives it
-    // the data segments the loader did not copy), so the file goes back now.
-    if (!moy_wasm_own_data(module, s->file, s->file_len)) {
-        rc = sess_fail(s, "load", "no pool for the data segments");
-        goto opened;
-    }
+    // A freeable load copies what the module keeps, its data segments
+    // included, so the file goes back now.
     heap_caps_free(s->file);
     s->file = NULL;
     err[0] = 0;
