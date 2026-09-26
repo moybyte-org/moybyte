@@ -66,21 +66,22 @@ the decisions below record what they changed.
 - **Every console board, not two.** Each board declares or denies the module
   in its `board.toml` with a reason, and the gate runs on every board that
   declares it. The Guition S3 is the floor board for memory.
-- **One cart, every board: no fragmentation.** A compiled cart that runs on
-  a P4 board and not on an S3 board is not a moybyte cart, exactly as the
-  Lua tier's floor exists so a script cart runs on modest hardware. The
-  compiled tier's floor is therefore the FLOOR board's share of the
-  cart-runtime reserve, a cart's manifest may declare memory up to that
-  floor and no more, the check command and the store refuse above it, and
-  the tier ships on every console board or on none. A cart that needs more
-  than the floor is a demo, not a cart.
+- **The floor defines a portable cart; a bigger cart is allowed and says
+  so.** The tier ships on every console board, and the compiled tier's floor
+  is the FLOOR board's share of the cart-runtime reserve: a cart within it
+  runs on every board. A cart above it is allowed (decided 2026-09-26, for
+  Doom first): the check command warns rather than refuses, and a board that
+  cannot fit it refuses at launch with a plain notice to the player, never an
+  error panel or a crash. Raising what a board can fit is the kernel work in
+  the C re-architecture issue, not a per-cart exception.
 - **Doom is a locally built demo, never a cart of ours.** doomgeneric is GPL
   and the shareware WAD forbids consideration and derivative works, so the
   port follows the Celeste rule in `THIRD_PARTY.md`: a recipe fetches both,
   prints both licences, builds the cart on the developer's machine, and it
-  is never hosted, seeded or shipped. It runs from the launcher only if it
-  fits the tier's floor, on every board; that is a measurement, not a
-  verdict, and the next decision names the levers.
+  is never seeded or shipped with the firmware. It runs from the launcher
+  on a board that can fit it (the Waveshare P4 today) and shows the notice
+  on one that cannot; the next decision names the levers that would widen
+  that set.
   Doom is still the cart that found the ABI's gaps: the 256-entry blit
   palette and the asset read.
 - **A compiled cart's memory is the cart-runtime reserve, not free PSRAM.**
@@ -94,8 +95,10 @@ the decisions below record what they changed.
   three levers, measured in phase 3 in this order: a smaller zone (its
   `-mb` knob) and which levels survive it; a larger reserve at build time and
   what the shell loses; the text in flash through a partition, which costs a
-  partition-table change and a full-erase reflash per device. If none fits
-  the floor, Doom stays the spike demo on every board.
+  partition-table change and a full-erase reflash per device. Measured
+  2026-09-26 (#158): at the current reserve none fits the floor board, so
+  the reserve and the flash partition stay as they are and the lever is the
+  kernel work in #224 instead.
 
 ## The phases
 
@@ -104,36 +107,30 @@ is done. A guard is a test or a check script, never prose.
 
 ### Landed
 
-Phases 1 and 2 and the Player half of phase 3 are in (2026-09-25): the
-engine is vendored and taken by every console board, moy-spec carries the
-binding candidate and libmoy's import table, and a compiled cart runs from
-the launcher on the host and on all four boards, under guards in every
-on-glass suite. The numbers are on #158; how each piece works is its README
-(`native/moy_wasm/README.md`, `native/moycore/README.md`, and the proposal in
-moy-spec). A full-frame blit cart presents well above the tick model's 30 on
-every board, so the per-board fps floor the guards pin is the ceiling that
-matters, not a predicted one.
+Phases 1 and 2 and all of phase 3 are in (2026-09-25/26): the engine is
+vendored and taken by every console board; moy-spec carries the binding
+candidate and libmoy's import table; a compiled cart runs from the launcher
+on the host and on all four boards under guards in every on-glass suite;
+modules are signed the way OTA images are; and Doom builds from a local
+recipe and runs where it fits. The numbers and the fit measurement are on
+#158; how each piece works is its README (`native/moy_wasm/README.md`,
+`native/moycore/README.md`, `experiments/wasm_aot/doom/README.md`, and the
+proposal in moy-spec).
 
-### Phase 3, the rest — Doom, signing, the table's storage (moybyte)
+### Phase 3, closing — the notice and the loader fix (moybyte)
 
-- **The table's storage.** Re-vendor libmoy for its read-only import table
-  and host-owned registration storage, and allocate that storage per session
-  in PSRAM, which returns its bytes of internal SRAM on every board; drop the
-  workaround moycore carries for closing an unopened binding.
-- **Signing.** Per-architecture modules are signed with the OTA key and a
-  board loads only a signed module whose key matches; a tampered module is a
-  fixture the on-glass suites refuse.
-- **Doom, built by the recipe.** A recipe fetches doomgeneric and the
-  shareware WAD, prints both licences, and builds a `.moy` locally on the
-  `"moy"` imports: `blit` with its 256-entry palette, the WAD through the
-  cart's own `read`, `time()` as the clock, no blocking import, pacing from
-  the tick model. It runs from the launcher on every board or on none: the
-  three levers (a smaller zone, a larger reserve, text in flash) are measured
-  once on the floor board, and if none fits, Doom stays the spike demo.
-- **Guards:** the tampered module refused on glass; Doom's frame CRC against
-  the host run at named tics, with the level transition the spike saw
-  excluded by name; if Doom fits, its launcher run in every suite with an
-  fps floor.
+- **A cart that cannot fit says so.** Before a compiled cart loads, the
+  Player compares its load footprint (declared memory, this chip's module,
+  the engine's pool) with what the board can give it, and a cart that cannot
+  fit opens a plain notice naming both figures, never an error panel. A load
+  that still fails for memory maps to the same notice. A cart the store has
+  no room for says so at install.
+- **The loader bug goes to the fork.** WAMR's AOT loader reads
+  `is_binary_freeable` before setting it; the fix is one line in the fork,
+  re-vendored, and the engine's copy-the-segments workaround goes.
+- **Guards:** a fixture cart declaring more memory than any board has is
+  refused with the notice on every board and on the host; the hello cart's
+  file-read check keeps guarding the loader fix.
 
 ### Phase 4 — second host and promotion (moy-spec; when a second author or host exists)
 
