@@ -122,25 +122,6 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
     on_glass.wasm_read_of_a_folder_reads_nothing(board, WASM_BOARD_DIR)
 
 
-# The compiled tier's showcase, Jet Teapot (ports/jet/README.md), from the
-# launcher: uncapped with WiFi off, in Phong -- the costliest of its three
-# shadings and the steadiest to measure -- at half and at full width. The
-# floors sit about a fifth under what this board drew when they were set
-# (2026-09-26); the figures are #158's. The cart stays installed as it ships.
-JET_HALF_FPS_FLOOR = 10
-JET_FULL_FPS_FLOOR = 7
-
-
-def test_the_jet_showcase_holds_its_floor_at_half_width(board):
-    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_HALF_FPS_FLOOR,
-                                 width="half", shading="phong")
-
-
-def test_the_jet_showcase_holds_its_floor_at_full_width(board):
-    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_FULL_FPS_FLOOR,
-                                 shading="phong")
-
-
 # Doom, built by the recipe (experiments/wasm_aot/doom/): skips until the
 # developer has built the cart, which is never in the repository or CI.
 def test_doom_frames_match_the_host(board):
@@ -687,6 +668,33 @@ def test_a_cart_runs_and_exits(board):
     and the shell's own close, while the fullscreen tiers pin the kid-facing
     flag."""
     on_glass.cart_runs_and_exits(board, "star", door="shell", clear=3)
+
+# The compiled tier's showcase, Jet Teapot (ports/jet/README.md), from the
+# launcher: uncapped with WiFi off, in Phong -- the costliest of its three
+# shadings and the steadiest to measure -- at half and at full width. The
+# floors sit about a fifth under what this board drew when they were set
+# (2026-09-26); the figures are #158's. The cart stays installed as it ships.
+#
+# HERE, after the OTA block and before the radios, not beside the other wasm
+# floors: the showcase's first run leaves this board's live heap ~90 KB bigger
+# for good and a full collect ~95 ms where a fresh boot's takes ~72, and a
+# collect that lands while a long `py` line trickles into this UART's 256-byte
+# ring drops bytes with no recovery. The OTA block's junk-signature line is the
+# longest the suite sends; with the showcase ahead of it, it arrived as a
+# SyntaxError on every run.
+JET_HALF_FPS_FLOOR = 10
+JET_FULL_FPS_FLOOR = 7
+
+
+def test_the_jet_showcase_holds_its_floor_at_half_width(board):
+    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_HALF_FPS_FLOOR,
+                                 width="half", shading="phong")
+
+
+def test_the_jet_showcase_holds_its_floor_at_full_width(board):
+    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_FULL_FPS_FLOOR,
+                                 shading="phong")
+
 
 # -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
 # LAST in the file: both bring WiFi up (released again) and the second starts
