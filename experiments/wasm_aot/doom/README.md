@@ -37,13 +37,18 @@ licences in `LICENSES.txt`.
 
 `dg_cart.c` is the glue, on the proposal's imports:
 
-- **Pacing is the tick model's.** `_update` turns the console's input into key
-  events and runs the game tics `time()` says are due -- `TryRunTics` returns
-  when none is, where Doom's own loop would sleep -- and `_draw` renders and
-  blits. The screen melt takes one step a frame for the tics of `time()` since
-  the last, with no game tic run until it ends, where Doom runs it as a loop
-  waiting on the clock; the game then catches up, as Doom's own loop does
-  after a melt. No sleep, no wait, no clock but `time()`.
+- **Pacing is Doom's own clock.** The manifest declares `"fps": "free"`, so
+  the tick model does not pace the cart: every loop frame runs `_update`,
+  which turns the console's input into key events and runs the game tics
+  `time()` says are due -- `TryRunTics` returns when none is, where Doom's own
+  loop would sleep -- and `_draw`, which renders and blits. Paced at the
+  console's 30, a board slower than that would spend loop frames on ticks in
+  which Doom has nothing to do and draw fewer frames for it, and a faster one
+  would draw fewer than Doom's 35 tics a second. The screen melt takes one step a frame
+  for the tics of `time()` since the last, with no game tic run until it
+  ends, where Doom runs it as a loop waiting on the clock; the game then
+  catches up, as Doom's own loop does after a melt. No sleep, no wait, no
+  clock but `time()`.
 - **The screen** is `blit` with Doom's 256-entry palette, the 320 x 200 frame
   letterboxed into the 320 x 240 canvas (Doom draws straight into the cart's
   frame). Silent: `-nosound`.

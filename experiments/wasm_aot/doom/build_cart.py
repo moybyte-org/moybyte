@@ -370,7 +370,7 @@ def build(zone_mb, heap_kb, stack_kb, out_dir, chips=("esp32s3", "esp32p4")):
     with open(os.path.join(cart, "doom1.wad"), "wb") as f:
         f.write(wad)
     manifest = {"format": "moy-1", "title": "Doom", "runtime": "wasm",
-                "main": "main.wasm", "memory": memory // PAGE,
+                "main": "main.wasm", "memory": memory // PAGE, "fps": "free",
                 "input": ["buttons", "touch", "keyboard"]}
     with open(os.path.join(cart, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)

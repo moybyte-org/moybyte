@@ -7,9 +7,10 @@
  *
  * The console keeps the time (time()), the input (btn, touch, key), the WAD
  * (the cart's own read) and the screen (blit, with Doom's 256-entry palette).
- * The pacing is the tick model's: _update runs the game tics time() says are
- * due and returns, _draw renders and blits. Nothing here sleeps or waits, and
- * the cart is silent (-nosound).
+ * The pacing is Doom's own clock: the manifest declares "fps": "free", so
+ * every loop frame runs _update, which runs the game tics time() says are due
+ * and returns, and _draw, which renders and blits. Nothing here sleeps or
+ * waits, and the cart is silent (-nosound).
  *
  * pmem carries what a test reads back (frames.py reads it; README.md lays it
  * out): the frame CRC at every CRC_EVERY-th gametic, the zone's low-water
