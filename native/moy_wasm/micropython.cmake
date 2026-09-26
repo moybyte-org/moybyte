@@ -107,8 +107,12 @@ else()
 endif()
 
 # moy_wasm_thread.c rides here too: it needs the pthread component's
-# esp_pthread.h, which the MicroPython component cannot see.
-add_library(moy_wamr STATIC ${MOY_WAMR_SRCS} ${CMAKE_CURRENT_LIST_DIR}/moy_wasm_thread.c)
+# esp_pthread.h, which the MicroPython component cannot see. So does
+# moy_wasm_load.c: it reads the runtime's structures, whose layout is this
+# target's configuration.
+add_library(moy_wamr STATIC ${MOY_WAMR_SRCS}
+    ${CMAKE_CURRENT_LIST_DIR}/moy_wasm_thread.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_wasm_load.c)
 
 idf_build_get_property(_moy_wamr_inc INCLUDE_DIRECTORIES GENERATOR_EXPRESSION)
 idf_build_get_property(_moy_wamr_opts COMPILE_OPTIONS GENERATOR_EXPRESSION)

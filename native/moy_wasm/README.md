@@ -48,7 +48,8 @@ time and never core 0's radios and flush feeder.
 whose value differed from the first), `loops`, the module's `wasm` hash from
 its key, `load_us`/`load_us_max`, `inst_us`, `call_us` (first, `_min`,
 `_max`), `run_us`, `stack`/`stack_psram`/`stack_used` (the thread's high-water
-mark), `pool`/`pool_peak`, and the internal-SRAM account: `sram_before` (free
+mark), `pool`/`pool_peak` (the pool's size for this module and its high-water
+mark), and the internal-SRAM account: `sram_before` (free
 when the run was started) and `sram_min` (the heap's local-minimum monitor,
 started before the thread exists, so the thread's own stack and control block
 are in it), plus `psram_min`.
@@ -56,7 +57,8 @@ are in it), plus `psram_min`.
 `mem()` → `(internal_free, internal_largest, internal_min_since_boot,
 psram_free, psram_largest)`. `KEY` is the key this build wants after the wasm
 line, `FORK` the fork commit, `STACK` the board's default `(bytes, in_psram)`,
-`POOL` the runtime pool's size.
+`POOL` the runtime pool's base size (a run's `pool` adds a share of its
+module's).
 
 ## A cart's session
 
@@ -102,8 +104,8 @@ nothing else. During a run:
 
 | what | where |
 |---|---|
-| the module file | PSRAM, read once, freed at the end of the run |
-| the runtime's pool (module and instance structures, the exec env) | PSRAM, `MOY_WASM_POOL_BYTES` (256 KB), allocated at the run's start and freed at its end |
+| the module file | PSRAM, read once; a run keeps it for its passes, a cart's session frees it once the module is loaded (below) |
+| the runtime's pool (module and instance structures, the module's data segments, the exec env) | PSRAM, `MOY_WASM_POOL_BYTES` (256 KB) plus an eighth of the module (`MOY_WASM_POOL_SHARE`), allocated at the run's start and freed at its end |
 | the AOT text | PSRAM: the S3 fetches it through the instruction-bus alias, the P4's external RAM carries no PMP entry |
 | linear memory, AOT data sections, any runtime allocation of 1 KB or more | PSRAM only (`WASM_ESPIDF_PSRAM_THRESHOLD` in the fork's esp-idf platform) |
 | the run's stack | per board, `MOY_WASM_STACK_BYTES` / `MOY_WASM_STACK_PSRAM` in `mpconfigboard.h`: 16 KB in PSRAM on every board |
@@ -118,6 +120,21 @@ internal SRAM against about 1 KB for a PSRAM one, at the same speed
 (`step(400000)` 276 vs 277 ms), and with WiFi and BLE up that board has no
 17 KB to give. The number that pins this is `WASM_RUN_SRAM_MAX` in
 `tests/on_glass.py`.
+
+**A cart's module file is gone before its memory is allocated.** The
+session reads the file into a block the size of the linear memory the
+manifest declares, loads it, and frees it before instantiating, so the
+linear memory takes that block back: read into a block of its own size, the
+file left a hole below the text that the linear memory could not use, and a
+cart that fit the free PSRAM in total was refused for want of one block. The
+loader copies what it keeps from a freeable load except the data segments --
+the fork's AOT loader reads the module's `is_binary_freeable` before
+`wasm_runtime_load` has set it -- so `moy_wasm_load.c` gives the module its
+own copies, in the pool, before the file goes. Without them the instantiation
+copied the data segments out of a freed file, which the reused block had
+already zeroed: a Doom build trapped on its first call through a function
+table, and the hello cart's file name read as nothing (the hello cart's
+greeting check in every suite is the guard).
 
 The AOT native-stack check is live: the run hands the runtime its stack's low
 end plus a 2 KB guard (`wasm_runtime_set_native_stack_boundary`), and the fork

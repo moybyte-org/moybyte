@@ -44,9 +44,11 @@ typedef struct {
 // unsigned or tampered module is refused before the thread exists).
 // `want_sha` is the canonical .wasm's sha256 as 64 hex characters, which the
 // module's key must name, or NULL to take whatever wasm the key names.
-// Returns 0 with the cart bound, or non-zero with the refusal in `err`; a
-// file that cannot be read raises.
-int moy_wasm_session_open(const char *path, const char *want_sha,
+// `memory` is the linear memory the manifest declares, in bytes: the file is
+// read into a block that size, which the linear memory takes back once the
+// load is done. Returns 0 with the cart bound, or non-zero with the refusal
+// in `err`; a file that cannot be read raises.
+int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memory,
                           const moy_wasm_ops *ops, char *err, size_t errlen);
 
 // Run ops->call(what, dt) on the session's thread and wait for it. 0, or

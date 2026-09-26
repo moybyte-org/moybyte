@@ -2574,7 +2574,11 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
     RUN.con.host.cfg = hw_cfg;
     RUN.con.host.layer_new = hw_layer_new;
     RUN.con.host.layer_free = hw_layer_free;
-    if (moy_wasm_session_open(path, sha, &WASM_OPS, err, errlen) != 0) {
+    // The linear memory the manifest declares, which the engine reads the
+    // module into so the memory can take the block back; a declaration past
+    // any board's PSRAM holds nothing and is refused at the check.
+    uint32_t memory = g_wpages <= 1024 ? g_wpages * 65536u : 0;
+    if (moy_wasm_session_open(path, sha, memory, &WASM_OPS, err, errlen) != 0) {
         wfile_forget();
         return 1;
     }
