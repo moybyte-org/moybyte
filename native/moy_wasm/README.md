@@ -195,7 +195,7 @@ fork <the fork commit this image runs>
 target xtensa          | riscv32
 cpu esp32s3            | generic-rv32
 abi -                  | ilp32f
-features -             | +m,+a,+f,+c
+features -             | +m,+a,+f,+c,+unaligned-scalar-mem
 opt 3
 size 0                 | 3
 bounds 1
@@ -209,6 +209,25 @@ or different key is refused with the first field that differs, after the
 parse and before anything in the module runs. `tools/wasm_module.py` reads the
 same header to write keys and to choose wamrc's flags, so a module it builds
 carries exactly the key this check wants.
+
+### Misaligned access
+
+WebAssembly lets any load or store be misaligned, so an access whose address
+the compiler cannot see is emitted at alignment 1, and a backend that thinks
+its target cannot take a misaligned word splits it: four byte loads, shifts
+and ors for every `i32.load`, four byte stores for every `i32.store`. Both
+chips take a misaligned load or store of any width in hardware, so both
+compilers are told so. On the P4 it is the `+unaligned-scalar-mem` feature in
+the key. The Xtensa backend has no such feature, so the fork's compiler knows
+it from the cpu: for `--cpu=esp32s3` an access is emitted at its own width.
+What the split cost the Jet showcase, on both chips, is in #158.
+
+The guard is a module that sweeps misaligned loads and stores of every
+width, floating point included, across 72 KB of linear memory, so it crosses
+every cache line in it and at least one MMU page, and counts every access
+that read or wrote other bytes than byte-wise composition says
+(`tests/fixtures/wasm/misaligned.c`). Every declaring board's suite runs it
+and wants 0; a core that trapped instead would take the board down with it.
 
 **And the file is signed the way OTA images are.** A module file is the
 module, then an RSA signature (PKCS#1 v1.5, SHA-256), its length and the magic

@@ -88,7 +88,7 @@
   },
   "upstream": {
     "branch": "moybyte-2.4.5",
-    "commit": "fd7933f9898252cdfb81a0cfb4213096e16e452a",
+    "commit": "0be18b702622b1bd7c406b22983cd80fbb5bdb4f",
     "date": "2026-09-26",
     "repo": "moybyte-org/wasm-micro-runtime"
   }

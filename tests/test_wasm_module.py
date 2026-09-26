@@ -58,8 +58,8 @@ def test_the_flags_are_the_key_s_fields():
         "--bounds-checks=1", "--stack-bounds-checks=1"]
     assert wm.wamrc_flags("esp32p4") == [
         "--target=riscv32", "--cpu=generic-rv32", "--target-abi=ilp32f",
-        "--cpu-features=+m,+a,+f,+c", "--opt-level=3", "--size-level=3",
-        "--bounds-checks=1", "--stack-bounds-checks=1"]
+        "--cpu-features=+m,+a,+f,+c,+unaligned-scalar-mem", "--opt-level=3",
+        "--size-level=3", "--bounds-checks=1", "--stack-bounds-checks=1"]
 
 
 def test_an_override_changes_the_key_and_the_flags_together():

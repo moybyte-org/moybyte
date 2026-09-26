@@ -38,10 +38,11 @@ a byte. `--unsigned` builds a module a board must refuse.
 
 THE COMPILERS are fixed binaries, pinned by sha256 below: the Xtensa one built
 by experiments/wasm_aot/toolchain/build_wamrc_xtensa.sh (Espressif's LLVM, the
-fork's wamr-compiler), the RISC-V one WAMR's own 2.4.5 release build. They are
-looked up in experiments/wasm_aot/toolchain/dist/ (gitignored), fetched from
-the fork's release assets into it when absent, and refused when their hash is
-not the pin. $MOYBYTE_WAMRC_<TARGET> points at another binary for an
+fork's wamr-compiler at the commit the runtime is vendored from), the RISC-V
+one WAMR's own 2.4.5 release build. They are looked up in
+experiments/wasm_aot/toolchain/dist/ (gitignored), fetched from the fork's
+release assets into it when absent, and refused when their hash is not the
+pin. $MOYBYTE_WAMRC_<TARGET> points at another binary for an
 experiment, and says so. No module is ever committed; tests build theirs.
 
 THE HELLO MODULE is experiments/wasm_aot/core6502.c, the spike's 6502 core,
@@ -74,17 +75,18 @@ VENDOR_STAMP = os.path.join(ROOT, "native", "moy_wasm", "wamr_vendor.json")
 SPIKE = os.path.join(ROOT, "experiments", "wasm_aot")
 DIST = os.path.join(SPIKE, "toolchain", "dist")
 HELLO_SRC = os.path.join(SPIKE, "core6502.c")
+MISALIGNED_SRC = os.path.join(ROOT, "tests", "fixtures", "wasm", "misaligned.c")
 
 KEY_SECTION = "moybyte.key"
 KEY_MAGIC = "moybyte-aot 1\n"
 
 # The compilers, by the key's `target` field. `sha256` is the pin; `url` is
 # where a missing binary is fetched from (the fork's release assets).
-RELEASE = "https://github.com/moybyte-org/wasm-micro-runtime/releases/download/wamrc-2.4.5-moybyte-1"
+RELEASE = "https://github.com/moybyte-org/wasm-micro-runtime/releases/download/wamrc-2.4.5-moybyte-2"
 COMPILERS = {
     "xtensa": {
         "file": "wamrc-xtensa",
-        "sha256": "d002751b22c9f52b11b2601c69f95d8f99c4d1456289962b5bc9e5a2c6318a3d",
+        "sha256": "d1f943aa5fddcfe6c2228f77c5663bf322780851cd2a714b7862ded33b8d64e1",
         "url": RELEASE + "/wamrc-xtensa",
     },
     "riscv32": {
@@ -409,6 +411,18 @@ def _linker():
 
 def hello_wasm():
     """The spike's 6502 core as a wasm module (bytes)."""
+    return _c_wasm(HELLO_SRC)
+
+
+def misaligned_wasm():
+    """The misaligned-access guard (tests/fixtures/wasm/misaligned.c) as a
+    wasm module (bytes): its `check` export counts the misaligned loads and
+    stores that read or wrote the wrong bytes."""
+    return _c_wasm(MISALIGNED_SRC)
+
+
+def _c_wasm(src):
+    """One freestanding C file as a wasm module (bytes)."""
     clang = os.path.join(SPIKE, "toolchain", "wasi-sdk", "bin", "clang")
     if not os.path.isfile(clang):
         clang = shutil.which("clang")
@@ -416,9 +430,10 @@ def hello_wasm():
         raise ToolError("no clang with a wasm32 backend")
     link, env = _linker()
     with tempfile.TemporaryDirectory() as tmp:
-        obj, out = os.path.join(tmp, "core6502.o"), os.path.join(tmp, "core6502.wasm")
+        stem = os.path.splitext(os.path.basename(src))[0]
+        obj, out = os.path.join(tmp, stem + ".o"), os.path.join(tmp, stem + ".wasm")
         for cmd, e in (([clang, "--target=wasm32", "-O2", "-ffreestanding",
-                         "-fno-builtin", "-c", "-o", obj, HELLO_SRC], None),
+                         "-fno-builtin", "-c", "-o", obj, src], None),
                        (link + ["--no-entry", "--export-dynamic", "-o", out, obj], env)):
             r = subprocess.run(cmd, capture_output=True, text=True, env=e)
             if r.returncode != 0:

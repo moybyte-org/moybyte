@@ -60,6 +60,10 @@ def test_the_hello_module_runs_and_foreign_modules_are_refused(board, wasm):
         board, WASM_BOARD_DIR, wasm)
 
 
+def test_a_misaligned_load_or_store_of_any_width_is_exact(board, wasm):
+    on_glass.wasm_misaligned_access_is_exact(board, wasm)
+
+
 def test_the_run_stack_works_in_psram_and_internal_sram(board, wasm):
     on_glass.wasm_run_stack_placements(board, wasm)
 

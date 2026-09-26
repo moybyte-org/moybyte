@@ -49,7 +49,9 @@
 
 // ESP32-S3: Xtensa LX7. --size-level=0 is the large code model, which keeps
 // constants out of a literal pool: the S3 fetches AOT text through the
-// instruction-bus alias, and a load through that alias faults.
+// instruction-bus alias, and a load through that alias faults. The LX7 takes a
+// misaligned load or store in hardware, which the fork's compiler knows from
+// the cpu (native/moy_wasm/README.md, "Misaligned access").
 #define MOY_WASM_KEY_ESP32S3 \
     "target xtensa\n" \
     "cpu esp32s3\n" \
@@ -63,11 +65,14 @@
 
 // ESP32-P4: RV32IMAFC, hard-float single ABI. Without +m LLVM emits
 // __umodsi3 and friends, which WAMR's RISC-V symbol table does not carry.
+// +unaligned-scalar-mem because the P4 takes a misaligned load or store in
+// hardware: without it every access whose alignment the compiler cannot see
+// is split into bytes (native/moy_wasm/README.md, "Misaligned access").
 #define MOY_WASM_KEY_ESP32P4 \
     "target riscv32\n" \
     "cpu generic-rv32\n" \
     "abi ilp32f\n" \
-    "features +m,+a,+f,+c\n" \
+    "features +m,+a,+f,+c,+unaligned-scalar-mem\n" \
     "opt 3\n" \
     "size 3\n" \
     "bounds 1\n" \

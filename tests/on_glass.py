@@ -506,9 +506,9 @@ def wasm_tamper(path):
 
 def wasm_modules(chip):
     """{name: local .aot} for `chip`, built once per session: the hello
-    module, and six a board must refuse -- no key, another fork, other flags
-    (the key saying so), another chip, no signature, and a signed module with
-    one byte of its key changed."""
+    module, the misaligned-access guard, and six a board must refuse -- no
+    key, another fork, other flags (the key saying so), another chip, no
+    signature, and a signed module with one byte of its key changed."""
     if chip not in _WASM_BUILT:
         import tempfile
         from tools import wasm_module as wm
@@ -526,6 +526,8 @@ def wasm_modules(chip):
                             ("tampered", chip, {})):
             mods[name] = os.path.join(out, name + ".aot")
             wm.build(wasm, c, mods[name], sign_with=key, **kw)
+        mods["misaligned"] = os.path.join(out, "misaligned.aot")
+        wm.build(wm.misaligned_wasm(), chip, mods["misaligned"], sign_with=key)
         wasm_tamper(mods["tampered"])
         _WASM_BUILT[chip] = mods, hashlib.sha256(wasm).hexdigest()
     return _WASM_BUILT[chip]
@@ -635,6 +637,18 @@ def wasm_hello_runs_and_foreign_modules_are_refused(board, board_dir, paths):
         r = wasm_run(board, paths[name], "step", (20000,))
         assert not r["ok"] and r["loops"] == 0, (name, r)
         assert r["error"].startswith(why), (name, r["error"])
+
+
+def wasm_misaligned_access_is_exact(board, paths):
+    """The compilers emit an access whose alignment they cannot see at its own
+    width, because the boards' cores take a misaligned load or store in
+    hardware (native/moy_wasm/README.md, "Misaligned access"). The guard
+    module sweeps misaligned loads and stores of every width across 72 KB of
+    linear memory and counts the ones that read or wrote the wrong bytes."""
+    r = wasm_run(board, paths["misaligned"], "check")
+    assert r["ok"], r["error"]
+    print("\nWASM misaligned sweep: %d wrong, call %d us" % (r["value"], r["call_us"]))
+    assert r["value"] == 0, r
 
 
 # The internal-SRAM stack variant is attempted only when the heap's largest
