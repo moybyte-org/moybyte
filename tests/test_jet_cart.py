@@ -1,0 +1,282 @@
+"""The compiled tier's showcase cart, Jet Teapot, on the host
+(ports/jet/README.md; docs/wasm_tier_plan_2026-09.md, "The showcase cart").
+
+What is pinned here:
+
+  * the module tools/jet_cart.py builds imports only the console's table --
+    nothing from WASI -- and a sibling moy-spec's `moy check` passes it with
+    no finding but the one every compiled cart draws until the proposal is
+    promoted;
+  * the frame at two fixed camera poses, full width and half width, as PIXEL
+    GOLDENS: RGB565 frames through the same binding and golden mechanism the
+    wasm fixtures use (tests/test_wasm_cart.py), with the HUD off, because the
+    HUD's figures are the host clock's;
+  * Jet's colour byte order against blit565's little-endian rule, with a pixel
+    whose colour the test computes on its own: the sky gradient's bottom row;
+  * the HUD is drawn over the blit by the ordinary verbs -- its strip and only
+    its strip differs from the same frame without it;
+  * the heap Jet uses stays inside what the declared memory leaves it, and
+    flying through the model does not trap.
+
+The build needs wasi-sdk 24 (tools/jet_cart.py fetches it by sha256 when it is
+absent) and the host wasm binding. Without either the tests SKIP on a bench
+and FAIL under `CI` or `MOYBYTE_REQUIRE_HOST_WASM`, where a skip would hide
+the tier.
+"""
+
+import hashlib
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+
+from runtime import host_app
+from ws_helpers import open_cart
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+GOLDEN_FILE = os.path.join(ROOT, "tests", "shell_goldens", "jet_teapot.json")
+UPDATE_ENV = "MOYBYTE_UPDATE_GOLDENS"
+TITLE = "Jet Teapot"
+W, H = 320, 240
+DT = 1.0 / 60.0            # the cart's declared rate: one logic tick a frame
+HUD_H = 10
+CART_BUTTONS = ("left", "right", "up", "down", "a", "b")
+PM_HEAP_PEAK_KB, PM_HEAP_KB = 0, 1
+
+
+def _required():
+    return bool(os.environ.get("CI") or os.environ.get("MOYBYTE_REQUIRE_HOST_WASM"))
+
+
+def _skip_or_fail(why):
+    if _required():
+        pytest.fail(why)
+    pytest.skip(why)
+
+
+@pytest.fixture(scope="module")
+def jet():
+    """tools.jet_cart with its module built (and cached), or a skip."""
+    from runtime import wasm_binding, wasm_host
+    from tools import jet_cart
+    if not wasm_host.available():
+        _skip_or_fail("no host wasm binding: %s" % (wasm_binding.why_unavailable() or "?"))
+    try:
+        sdk = jet_cart.wasi_sdk(fetch=True)
+        jet_cart.compile_wasm(sdk)
+    except Exception as exc:  # noqa: BLE001
+        _skip_or_fail("the showcase cart did not build: %s" % exc)
+    return jet_cart
+
+
+def _ws(tmp_path, jet, **config):
+    root = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    jet.build(root, config=config)
+    ws = host_app.build_workstation(root)
+    ws.look.set_theme_variant("dark", persist=False)
+    open_cart(ws, TITLE)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    assert type(ws.player._lua).__name__ == "WasmHostRun"
+    ws.player.uncap_mode(True)           # every frame draws: one tick, one frame
+    return ws
+
+
+def _frames(ws, n, hold=()):
+    for _ in range(n):
+        ws.pointer.visible = False
+        ws._toast_until = 0
+        ws.show_fps = ws.perf_hud = ws.perf_capture = False
+        for b in CART_BUTTONS:
+            ws.input.set_held(b, b in hold)
+        ws.input.begin_frame()
+        ws._dirty = True
+        ws.frame(DT)
+    assert ws.player.cart_error is None, ws.player.cart_error
+
+
+def _rgb565(ws, x, y):
+    """The canvas pixel as RGB565, whatever order the canvas stores words in."""
+    from runtime import wasm_host
+    cv = ws.sys_canvas
+    i = 2 * (y * cv.w + x)
+    word = cv._buf[i] | cv._buf[i + 1] << 8
+    if wasm_host._wire_swapped():
+        word = ((word >> 8) | (word << 8)) & 0xFFFF
+    return word
+
+
+def _pmem(ws):
+    return ws.player._lua._run.pmem()[1]
+
+
+# -- the module ------------------------------------------------------------------
+
+
+def test_the_module_imports_only_the_console(jet):
+    wasm = jet.compile_wasm()
+    got = jet.imports(wasm)
+    assert got and all(m == "moy" for m, _n in got), got
+    assert {n for _m, n in got} <= jet.console_imports()
+    assert "blit565" in {n for _m, n in got}
+
+
+def test_the_module_matches_the_manifest(jet):
+    """One memory, the manifest's, minimum equal to maximum, and no absolute
+    path in the binary (the build maps them out)."""
+    from tools import wasm_module
+    wasm = jet.compile_wasm()
+    pages = jet.manifest()["memory"]
+    mems = [body for sid, _n, body in wasm_module.sections(wasm) if sid == 5]
+    assert mems, "no memory section"
+    # count 1, flags 1 (has max), min, max
+    n, i = wasm_module._read_leb(mems[0], 0)
+    assert n == 1 and mems[0][i] == 1
+    lo, i = wasm_module._read_leb(mems[0], i + 1)
+    hi, _ = wasm_module._read_leb(mems[0], i)
+    assert lo == hi == pages
+    assert ROOT.encode() not in wasm and b"/home/" not in wasm
+
+
+def test_moy_check_passes_the_built_cart(jet, tmp_path):
+    """moy-spec's own check, when a checkout sits beside this one: no error,
+    and no warning but the runtime's -- the one every compiled cart draws
+    while the binding tracks the proposal."""
+    from vendor_check import spec_checkout
+    spec = spec_checkout("moy.py")
+    if spec is None:
+        pytest.skip("no moy-spec checkout")
+    cart = jet.build(str(tmp_path))
+    r = subprocess.run([sys.executable, os.path.join(spec, "moy.py"), "check", cart],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    findings = [ln.split()[:2] for ln in r.stdout.splitlines()
+                if ln.strip().startswith(("error", "warn"))]
+    assert findings == [["warn", "manifest.runtime:"]], r.stdout
+
+
+def test_the_toolchain_is_the_tier_s(jet):
+    """One wasi-sdk for the tier's compiled carts: the pin the other C cart's
+    recipe builds with."""
+    import importlib.util
+    path = os.path.join(ROOT, "experiments", "wasm_aot", "doom", "build_cart.py")
+    spec = importlib.util.spec_from_file_location("doom_build_cart", path)
+    doom = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(doom)
+    assert (jet.WASI_SDK_URL, jet.WASI_SDK_SHA256) == (doom.WASI_SDK_URL,
+                                                       doom.WASI_SDK_SHA256)
+
+
+# -- the frame --------------------------------------------------------------------
+
+# (name, config, [(frames, buttons held), ...]): the start pose -- the
+# example's camera and the Flat third of its shading cycle -- and a flown one
+# in Phong: backed off and climbed, then turned a little right.
+POSES = (
+    ("start", {}, ((8, ()),)),
+    ("flown", {"shading": "phong"}, ((24, ("down", "a")), (6, ("right",)))),
+)
+
+
+def _golden_frame(tmp_path, jet, width, pose):
+    _name, config, legs = pose
+    ws = _ws(tmp_path, jet, width=width, hud=False, **config)
+    for frames, hold in legs:
+        _frames(ws, frames, hold)
+    assert (ws.sys_canvas.w, ws.sys_canvas.h) == (W, H)
+    return hashlib.sha256(bytes(ws.sys_canvas._buf)).hexdigest()
+
+
+@pytest.mark.parametrize("width", ("full", "half"))
+@pytest.mark.parametrize("pose", POSES, ids=[p[0] for p in POSES])
+def test_the_frame_golden(tmp_path, request, jet, width, pose):
+    """The frame the cart presents at a fixed pose, hashed against committed
+    bytes. Re-baseline deliberately, as the shell goldens are:
+    `MOYBYTE_UPDATE_GOLDENS=1` or `--update-goldens`."""
+    key = "%s_%s" % (width, pose[0])
+    got = _golden_frame(tmp_path, jet, width, pose)
+    update = (os.environ.get(UPDATE_ENV)
+              or request.config.getoption("--update-goldens", default=False))
+    table = {}
+    if os.path.isfile(GOLDEN_FILE):
+        with open(GOLDEN_FILE) as f:
+            table = json.load(f)
+    if update:
+        table[key] = got
+        with open(GOLDEN_FILE, "w") as f:
+            json.dump(table, f, indent=2, sort_keys=True)
+            f.write("\n")
+        return
+    assert key in table, "no golden for %s; record it with %s=1" % (key, UPDATE_ENV)
+    assert got == table[key], (
+        "the showcase frame %s moved (%s != %s). Re-baseline only if you can say "
+        "which pixel moved and why: %s=1 .venv/bin/python -m pytest "
+        "tests/test_jet_cart.py -k golden" % (key, got, table[key], UPDATE_ENV))
+
+
+def _sky(y):
+    """The scene's background gradient at row y, as RGB565 -- the example's
+    formula, restated here so the colour is known independently of Jet."""
+    r = 12 + y * 24 // H
+    g = 28 + y * 56 // H
+    b = 54 + y * 72 // H
+    return (r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)
+
+
+@pytest.mark.parametrize("width", ("full", "half"))
+def test_jet_s_byte_order_is_blit565_s(tmp_path, jet, width):
+    """Jet stores RGB565 in the machine's order, and wasm's is little-endian,
+    which is blit565's: no swap in the cart. The bottom row's corners are sky
+    at the start pose, a colour whose two byte orders differ."""
+    ws = _ws(tmp_path, jet, width=width, hud=False)
+    _frames(ws, 2)
+    want = _sky(H - 1)
+    swapped = ((want >> 8) | (want << 8)) & 0xFFFF
+    assert want != swapped
+    for x in (0, 1, W - 2, W - 1):
+        assert _rgb565(ws, x, H - 1) == want, (x, hex(_rgb565(ws, x, H - 1)), hex(want))
+
+
+def test_the_hud_is_drawn_over_the_blit(tmp_path, jet):
+    """The same frame with and without the HUD: they differ in the HUD's strip
+    and nowhere else, and the strip holds the HUD's two palette colours, not
+    the frame -- the verbs called after blit565 land on top of it."""
+    on = _ws(tmp_path / "on", jet, hud=True)
+    off = _ws(tmp_path / "off", jet, hud=False)
+    _frames(on, 4)
+    _frames(off, 4)
+    a, b = bytes(on.sys_canvas._buf), bytes(off.sys_canvas._buf)
+    row = 2 * W
+    assert a[HUD_H * row:] == b[HUD_H * row:]
+    assert a[:HUD_H * row] != b[:HUD_H * row]
+    ink = {_rgb565(on, x, y) for y in range(HUD_H) for x in range(W)}
+    assert len(ink) == 2, sorted(map(hex, ink))
+    assert _rgb565(off, W // 2, 0) == _sky(0)
+    assert _rgb565(on, W - 1, 0) != _sky(0)
+
+
+# -- memory and flight --------------------------------------------------------------
+
+
+def test_the_heap_fits_the_declared_memory(tmp_path, jet):
+    """The declared memory leaves the heap room for the model's load and
+    Jet's queues, with a quarter to spare; runtime.cpp reports its peak."""
+    ws = _ws(tmp_path, jet)
+    _frames(ws, 30, ("right",))
+    pm = _pmem(ws)
+    peak, size = pm[PM_HEAP_PEAK_KB], pm[PM_HEAP_KB]
+    assert 0 < peak and 0 < size
+    assert peak * 4 <= size * 3, (peak, size)
+
+
+@pytest.mark.parametrize("width", ("full", "half"))
+def test_flying_through_the_teapot_does_not_trap(tmp_path, jet, width):
+    """Forward through the model and out the other side, climbing, then
+    turning back: near-plane clipping, the camera inside the mesh, and the
+    interlaced fields, with no trap."""
+    ws = _ws(tmp_path, jet, width=width, interlaced=True)
+    _frames(ws, 150, ("up",))
+    _frames(ws, 60, ("up", "a", "left"))
+    _frames(ws, 60, ("down", "b"))
