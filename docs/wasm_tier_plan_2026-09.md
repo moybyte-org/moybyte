@@ -148,6 +148,13 @@ proposal reserves that import for: pixels that are direct-colour by nature.
   the cart joins the seed roster.
 - **Guards:** a host golden for the showcase frame at fixed camera poses; the
   cart from the launcher in every on-glass suite with a pinned fps floor.
+- **Where it goes next** (CLAUDE.md's placement rule): the teapot and further
+  JetExamples ports (the tropical island, the mail-plane sprite demo, the
+  neon car, one effects demo) become moybyte-org's MIT carts repo, each
+  after its own asset-licence check; JetExamples' template-cube becomes a
+  `moy new --jet` starter in moy-spec with the import header; the installer
+  and index tools move from gpl-carts into moy-spec's CLI so both carts
+  repos share them. moybyte keeps the seeding and the on-glass guards.
 
 ### Phase 4 — promotion (moy-spec; the owner's decision)
 
