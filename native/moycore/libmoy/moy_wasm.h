@@ -1,20 +1,30 @@
-/* libmoy's wasm binding: proposals/wasm-runtime.md's import table, over WAMR.
+/* libmoy's wasm binding: proposals/wasm-runtime.md's import table.
  *
  * TRACKS THE PROPOSAL, which is not part of core 0.3. The table is
  * proposals/wasm-imports.json; test/wasm_table_check.py holds this file's
  * NativeSymbol array equal to it, row for row and signature for signature.
  *
- * BUILT ONLY WHEN ASKED. src/moy_wasm.c compiles to nothing unless MOY_WASM is
- * defined, and it is the only file in libmoy that includes WAMR's
- * wasm_export.h, from whatever include path the caller provides -- WAMR is
- * not vendored here and nothing else in the library needs it. It also needs
- * the direct-colour build (MOY_PIXEL_RGB565): a palette blit's 256 colours do
- * not fit the 64 indices an indexed canvas holds.
+ * BUILT ONLY WHEN ASKED, over one of two engines. src/moy_wasm.c compiles to
+ * nothing unless one of these is defined:
+ *
+ *   MOY_WASM     over WAMR. It is the only file in libmoy that includes
+ *                WAMR's wasm_export.h, from whatever include path the caller
+ *                provides -- WAMR is not vendored here and nothing else in
+ *                the library needs it.
+ *   MOY_WASM_JS  over a JavaScript embedder's own engine: the cart is a
+ *                sibling WebAssembly module whose "moy" imports are adapters
+ *                over this table's functions (port/wasm/page/cart.js). The
+ *                embedder supplies the two functions at the end of this file
+ *                that reach the cart's memory, which C cannot address.
+ *
+ * Either way the verbs are the same C functions, and so are the rules they
+ * enforce. It also needs the direct-colour build (MOY_PIXEL_RGB565): a palette
+ * blit's 256 colours do not fit the 64 indices an indexed canvas holds.
  *
  * The shape is moy_lua_open's. The host owns the engine and hands the binding
- * a module instance's exec env and a moy_console; the binding owns nothing but
- * the per-run state below. Load policy -- AOT or not, where the module lives,
- * the stack size, signing, the memory floor -- stays in the port.
+ * a moy_console; the binding owns nothing but the per-run state below. Load
+ * policy -- AOT or not, where the module lives, the stack size, signing, the
+ * memory a cart may have -- stays in the port. Over WAMR:
  *
  *   wasm_runtime_init();
  *   moy_wasm_register(storage);                // once, before any load
@@ -29,6 +39,17 @@
  *   moy_wasm_update(&w, dt, err, sizeof err);
  *   moy_wasm_draw(&w, err, sizeof err);        // non-zero: do NOT present
  *   moy_wasm_close(&w);
+ *
+ * Over a JavaScript engine, where the embedder calls the cart's exports:
+ *
+ *   if (moy_wasm_check_bytes(wasm, size, manifest_pages, err, sizeof err))
+ *       refuse;
+ *   memset(&w, 0, sizeof w); w.read = my_read; w.read_user = me;
+ *   moy_wasm_bind(&w, &con);
+ *   ...the embedder instantiates the module; then, around each hook:
+ *   moy_wasm_begin(&w, MOY_WASM_DRAW);         // then the export, then
+ *   moy_wasm_end(&w, threw);                   // non-zero: do NOT present
+ *   moy_wasm_close(&w);
  */
 
 #ifndef MOY_WASM_H_INCLUDED
@@ -38,7 +59,19 @@
 #include <stddef.h>
 
 #include "moy.h"
+
+#ifdef MOY_WASM_JS
+/* WAMR's NativeSymbol, field for field: the table is the same data under
+ * either engine, and a JavaScript embedder reads it out of this memory. */
+typedef struct NativeSymbol {
+    const char *symbol;
+    void *func_ptr;
+    const char *signature;
+    void *attachment;
+} NativeSymbol;
+#else
 #include "wasm_export.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,8 +90,13 @@ extern "C" {
  * reads as absent. */
 #define MOY_WASM_NAME_MAX 255
 
+/* The three hooks, in the order moy_wasm_begin numbers them. */
+#define MOY_WASM_INIT   0
+#define MOY_WASM_UPDATE 1
+#define MOY_WASM_DRAW   2
+
 typedef struct moy_wasm {
-    /* -- the host's, set before moy_wasm_open ------------------------------ */
+    /* -- the host's, set before the binding is opened ---------------------- */
 
     /* The cart's own files (the proposal's `read`). `name` is NUL-terminated
      * and already checked to stay inside the cart's folder: relative,
@@ -74,11 +112,15 @@ typedef struct moy_wasm {
      * colours the same way; 0 means canonical, moy_canvas_init's default. */
     int wire_swapped;
 
-    /* -- the binding's own, set by moy_wasm_open ------------------------- */
+    /* -- the binding's own, set by moy_wasm_open / moy_wasm_bind ---------- */
     moy_console *con;
+#ifdef MOY_WASM_JS
+    const char *trap;                       /* the first trap of this call */
+#else
     wasm_exec_env_t env;
     wasm_module_inst_t inst;
     wasm_function_inst_t hooks[3];          /* _init, _update, _draw */
+#endif
     moy_canvas *screen;                     /* con->canvas at open */
     moy_canvas *target;                     /* what the drawing verbs draw on */
     moy_canvas layers[MOY_WASM_LAYERS];     /* handle h is layers[h - 1] */
@@ -86,9 +128,32 @@ typedef struct moy_wasm {
     int in_draw, blits, quitting;
 } moy_wasm;
 
-/* The import table as WAMR native symbols, and its row count: a read-only
- * template, so it costs the host no writable memory. */
+/* The import table, and its row count: a read-only template, so it costs the
+ * host no writable memory. Each row's func_ptr is the verb, its first
+ * argument the engine's handle on the call -- a WAMR exec env, or under
+ * MOY_WASM_JS the moy_wasm itself -- and its signature WAMR's string for the
+ * rest: 'i' an i32, 'f' an f32, '*~' a pointer into the cart's memory and the
+ * length it covers, already translated to one the host can address. */
 const NativeSymbol *moy_wasm_natives(uint32_t *count);
+
+/* The proposal's module shape, from the module's bytes alone, so any engine
+ * can refuse a module before it is instantiated: every import is a function
+ * from "moy" named in the table at the row's type; _init, _update(f32) and
+ * _draw are exported at their types and a memory as "memory"; the module
+ * defines exactly one memory, not shared, whose minimum and maximum are both
+ * `pages` (the manifest's "memory"); and it has no start function. `wasm` is
+ * the whole of main.wasm. Returns 0, or non-zero with the first failure in
+ * `err`. */
+int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
+                         char *err, size_t errlen);
+
+/* Release the cart's layers through con->host.layer_free and unbind the
+ * instance. The instance, and under WAMR its exec env and module, stay the
+ * host's to destroy. Safe on a zeroed moy_wasm that was never opened and
+ * after a failed open. */
+void moy_wasm_close(moy_wasm *w);
+
+#ifndef MOY_WASM_JS
 
 /* Register the table under module "moy". Once, after wasm_runtime_init and
  * before the first wasm_runtime_load. `storage` is the host's: room for the
@@ -98,13 +163,8 @@ const NativeSymbol *moy_wasm_natives(uint32_t *count);
  * success. */
 int moy_wasm_register(NativeSymbol *storage);
 
-/* The proposal's module shape, checked on a LOADED module before it is
- * instantiated -- so before its linear memory is allocated: every import is a
- * function from "moy" that the table resolved at the table's type; _init,
- * _update(f32) and _draw are exported at their types and a memory as
- * "memory"; the module defines exactly one memory, not shared, whose minimum
- * and maximum are both `pages` (the manifest's "memory"). Returns 0, or
- * non-zero with the first failure in `err`.
+/* The module shape moy_wasm_check_bytes checks, on a LOADED module before it
+ * is instantiated -- so before its linear memory is allocated.
  *
  * `wasm` is the cart's main.wasm, or any prefix of it that reaches its memory
  * section: WAMR reshapes a memory the module never grows, so the declared
@@ -131,10 +191,39 @@ int moy_wasm_init  (moy_wasm *w, char *err, size_t errlen);
 int moy_wasm_update(moy_wasm *w, float dt, char *err, size_t errlen);
 int moy_wasm_draw  (moy_wasm *w, char *err, size_t errlen);
 
-/* Release the cart's layers through con->host.layer_free and unbind the
- * instance. The instance, exec env and module stay the host's to destroy.
- * Safe on a zeroed moy_wasm that was never opened and after a failed open. */
-void moy_wasm_close(moy_wasm *w);
+#else /* MOY_WASM_JS */
+
+/* Bind to `con`: the imports draw on con->canvas (the screen) and call
+ * con->host. Leaves the host fields above untouched. */
+void moy_wasm_bind(moy_wasm *w, moy_console *con);
+
+/* Around each call the embedder makes to one of the cart's hooks. begin sets
+ * up what the hook runs under (the screen as the target; for _draw the
+ * background repaint and the one-blit allowance). end takes whether the
+ * call threw, and returns 0 when the hook returned or the cart quit -- quit()
+ * unwinds by throwing -- and non-zero on a trap. A trapped instance must not
+ * be called again, and a frame whose _draw trapped must not be presented. */
+void moy_wasm_begin(moy_wasm *w, int hook);
+int  moy_wasm_end(moy_wasm *w, int threw);
+
+/* The binding's own trap, raised during the import call that just returned,
+ * or NULL. The adapter throws when this is set, which unwinds the cart exactly
+ * as a trap does, and moy_wasm_end clears it. */
+const char *moy_wasm_trapped(const moy_wasm *w);
+
+/* -- the embedder's, over the cart's own memory -------------------------- */
+
+/* `n` bytes of the cart's linear memory at `offset`, copied where C can
+ * address them and kept until the import call returns; NULL when the range
+ * leaves the memory. */
+uint8_t *moy_wasm_js_span(moy_wasm *w, uint32_t offset, uint32_t n);
+
+/* Copy `n` bytes into the cart's linear memory at `offset`. 0 when the range
+ * leaves the memory, and then nothing is written. */
+int moy_wasm_js_store(moy_wasm *w, uint32_t offset, const uint8_t *src,
+                      uint32_t n);
+
+#endif /* MOY_WASM_JS */
 
 #ifdef __cplusplus
 }

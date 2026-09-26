@@ -570,6 +570,41 @@ def test_scroll_rect_moves_pixels_and_leaves_the_vacated_span():
     assert row0[:2] == (0, 1)          # untouched, per the device kernel
 
 
+def _window_expect(before, src, src_w, src_h, sx, sy):
+    """What blit_window must leave in a W x H destination: the source's
+    pixels from (sx, sy) at the destination's OWN stride, for as many rows
+    and columns as the source still has, and `before` everywhere else."""
+    cw = min(W, src_w - sx)
+    ch = min(H, src_h - sy)
+    out = list(before)
+    for y in range(ch):
+        for x in range(cw):
+            out[y * W + x] = src[(sy + y) * src_w + sx + x]
+    return tuple(out)
+
+
+def test_blit_window_keeps_the_screen_stride_when_the_source_runs_out():
+    """A source narrower than the window past (sx, sy) copies its columns
+    into each destination row at the destination's stride, and leaves the
+    columns it has no pixels for untouched. The shape this pins sheared:
+    the kernel narrowed the copy width and then stepped destination rows by
+    it too, so row 1 landed at column `cw` of row 0 and the picture leaned.
+
+    Every destination and source word is distinct, so a pixel from the
+    wrong row or column cannot pass for the right one."""
+    before = tuple(0x8000 | i for i in range(W * H))
+    for src_w, src_h, sx, sy in ((6, 4, 0, 0),      # narrower AND shorter
+                                 (32, 16, 20, 2),   # past the right edge
+                                 (10, 20, 0, 3),    # narrower, taller
+                                 (32, 5, 4, 0)):    # wider, shorter
+        src = tuple(0x4000 | i for i in range(src_w * src_h))
+        buf = bytearray(struct.pack("<%dH" % (W * H), *before))
+        sbuf = bytearray(struct.pack("<%dH" % len(src), *src))
+        g.blit_window(buf, W, H, sbuf, src_w, sx, sy)
+        assert _px(buf) == _window_expect(before, src, src_w, src_h, sx, sy), \
+            (src_w, src_h, sx, sy)
+
+
 def test_the_async_pair_refuses_so_callers_take_the_sync_path():
     """Not a stub for its own sake: returning False puts device_canvas on the
     same branch a board takes when its DMA driver declines the copy, so the

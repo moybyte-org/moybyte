@@ -464,22 +464,10 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     def draw_layer(layer, cam_x=0, cam_y=0):
         # draw_layer(layer, cam_x, cam_y): blit the visible W x H window of `layer` at
         # the camera offset into the framebuffer (this frame's background; draw actors
-        # on top afterwards). The camera is clamped to [0, layer - screen] so the full
-        # window always lands -- no torn edge at the world boundary.
-        lc = layer._canvas
-        cx = int(cam_x)
-        cy = int(cam_y)
-        maxx = lc.w - canvas.w
-        maxy = lc.h - canvas.h
-        if cx < 0:
-            cx = 0
-        elif maxx > 0 and cx > maxx:
-            cx = maxx
-        if cy < 0:
-            cy = 0
-        elif maxy > 0 and cy > maxy:
-            cy = maxy
-        canvas.blit_window_from(lc, cx, cy)
+        # on top afterwards). The canvas clamps the camera per axis into
+        # [0, max(0, layer - screen)] (SPEC.md 6), so the window never leaves the
+        # layer -- no torn edge at the world boundary.
+        canvas.blit_window_from(layer._canvas, cam_x, cam_y)
 
     def image(a, mapping=None, transparent="."):
         # Two forms, dispatched on the first arg (str vs ASCII rows):

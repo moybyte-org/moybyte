@@ -628,8 +628,9 @@ def assemble(text):
 
 
 def build_cart(src, dst):
-    """Copy a fixture cart folder, assembling its main.wat into main.wasm --
-    the form a host loads. The .wat itself is not copied."""
+    """Copy a fixture cart folder, subfolders included, assembling its
+    main.wat into main.wasm -- the form a host loads. The .wat itself is not
+    copied."""
     import os
     import shutil
     if not os.path.isdir(dst):
@@ -641,6 +642,8 @@ def build_cart(src, dst):
                 blob = assemble(f.read())
             with open(os.path.join(dst, "main.wasm"), "wb") as f:
                 f.write(blob)
+        elif os.path.isdir(full):
+            shutil.copytree(full, os.path.join(dst, entry))
         elif os.path.isfile(full):
             shutil.copyfile(full, os.path.join(dst, entry))
 

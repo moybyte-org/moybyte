@@ -256,9 +256,9 @@ class _FakeGfx:
 
     @staticmethod
     def blit_window(dst, dw, dh, src, src_w, sx, sy):
-        # #54 scroll engine: copy a dw x dh window of `src` (a wider pre-rendered
-        # background, stride src_w) at (sx, sy) into `dst` (stride dw, contiguous) --
-        # a faithful transcription of moy_gfx_blit_window in modmoy_gfx.c.
+        # #54 scroll engine: copy a dw x dh window of `src` (stride src_w) at
+        # (sx, sy) into `dst` (stride dw, contiguous) -- a faithful transcription
+        # of mg_blit_window in moy_gfx_kernels.c.
         d = memoryview(dst).cast("H")
         s = memoryview(src).cast("H")
         dcap = len(d)
@@ -269,9 +269,10 @@ class _FakeGfx:
             sx = 0
         if sy < 0:
             sy = 0
-        if sx + dw > src_w:                       # clamp window to source width
-            dw = src_w - sx
-        if dw <= 0:
+        cw = dw                                   # copy width; dw stays the stride
+        if sx + cw > src_w:
+            cw = src_w - sx
+        if cw <= 0:
             return
         if dw * dh > dcap:                        # dst guard
             dh = dcap // dw
@@ -283,7 +284,7 @@ class _FakeGfx:
         for row in range(dh):
             d0 = row * dw
             s0 = (sy + row) * src_w + sx
-            for col in range(dw):
+            for col in range(cw):
                 d[d0 + col] = s[s0 + col]
 
     @staticmethod
@@ -938,6 +939,67 @@ def test_scroll_layer_window_copy_matches_host():
             host.blit_window_from(lh, cam[0], cam[1])
             dev.blit_window_from(ld, cam[0], cam[1])
             _assert_same(host, dev, "scroll gfx=%s cam=%s" % (gfx, cam))
+
+
+def _bg_index(x, y):
+    return (x * 3 + y * 7) % 32            # indices 0..31: the backdrop
+
+
+def _layer_index(x, y):
+    return 32 + (x * 5 + y * 11) % 32      # indices 32..63: never a backdrop value
+
+
+def test_a_layer_smaller_than_the_screen_lands_unsheared_at_the_origin():
+    """SPEC.md 6's clamp, on every lane: each camera axis clamps into
+    [0, max(0, layer - screen)], and where the layer is the smaller one the
+    screen past it keeps what it held.
+
+    The expected picture is computed here from the rule, not taken from
+    either raster, so the three canvases agreeing cannot hide a shared
+    mistake: the compiled kernel (`Canvas`, libmoy + moy_gfx over ctypes),
+    the `_FakeGfx` transcription, and DeviceCanvas's own Python fallback.
+    Backdrop and layer draw from disjoint halves of the palette and neither
+    repeats along a row or a column within the frame, so a row stepped by
+    the wrong stride -- the shear a narrow layer used to take -- or a camera
+    that did not clamp shows as a wrong index at a named pixel."""
+    shapes = (
+        # (layer w, h, asked camera, the camera the rule gives)
+        (40, 30, (500, 300), (0, 0)),       # narrower and shorter, past the corner
+        (40, 30, (-9, -4), (0, 0)),
+        (100, 30, (20, 99), (20, 0)),       # wider, shorter
+        (100, 30, (99, 5), (36, 0)),        # ...asked past its right edge
+        (40, 80, (13, 10), (0, 10)),        # narrower, taller
+        (40, 80, (0, 60), (0, 32)),
+    )
+    canvases = (("kernel", lambda: Canvas(W, H)),
+                ("transcription", lambda: _both(True)[2]),
+                ("fallback", lambda: _both(False)[2]))
+    for lw, lh, cam, (cx, cy) in shapes:
+        expect = []
+        for y in range(H):
+            for x in range(W):
+                if x < lw - cx and y < lh - cy:
+                    idx = _layer_index(x + cx, y + cy)
+                else:
+                    idx = _bg_index(x, y)
+                expect.append(rgb565(palette.MOY64[idx]))
+        for name, make in canvases:
+            c = make()
+            for y in range(H):
+                for x in range(W):
+                    c.pix(x, y, _bg_index(x, y))
+            lay = c.new_layer(lw, lh)
+            for y in range(lh):
+                for x in range(lw):
+                    lay.pix(x, y, _layer_index(x, y))
+            c.blit_window_from(lay, cam[0], cam[1])
+            got = _host_rgb565(c) if name == "kernel" else _dev_rgb565(c)
+            if got != expect:
+                i = next(i for i, (a, b) in enumerate(zip(got, expect)) if a != b)
+                raise AssertionError(
+                    "%s: a %dx%d layer asked at %s drew %#06x at (%d,%d), the "
+                    "rule says %#06x" % (name, lw, lh, cam, got[i], i % W,
+                                         i // W, expect[i]))
 
 
 # --------------------------------------------------------------------------- #

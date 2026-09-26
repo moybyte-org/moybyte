@@ -6,7 +6,7 @@
     "h": 240
   },
   "generated_by": "moycore 0.3.0",
-  "provenance": "Rendered by moycore. Confirmed pixel-identical on all core scenes by the reference console's own rasterizer (conformance/parity.py), by libmoy and the WebAssembly player built from it (the tiebreaker SPEC.md 11 names), and by an ESP32-P4 over serial. Note that ALL FIVE now share moycore's lineage -- the board ran a hand transcription until 2026-08-07 and now calls libmoy too. See conformance/README.md, 'The independent check, and its loss'.",
+  "provenance": "Rendered by moycore. Confirmed pixel-identical on all core scenes by libmoy and the WebAssembly player built from it (the tiebreaker SPEC.md 11 names). The reference console's own rasterizer (conformance/parity.py) and an ESP32-P4 over serial matched every scene the suite held before the layer_* scenes. Note that ALL of them now share moycore's lineage -- the board ran a hand transcription until 2026-08-07 and now calls libmoy too. See conformance/README.md, 'The independent check, and its loss'.",
   "scenes": [
     {
       "name": "primitives",
@@ -98,6 +98,41 @@
       "calls": 20,
       "frame_sha256": "c71888eea693eb43fa1c399f36478d422af26ac49d01af4215566936e7b8a169",
       "note": "Tile flags (SPEC.md 3.5, 7.1, 7.2): map(..., layers) draws only\nthe cells whose tile shares a flag bit with the mask; fset\nchanges that on the next map(); a mask against no flags draws\nnothing. The scene restores what it edits first."
+    },
+    {
+      "name": "layer_left",
+      "core": true,
+      "calls": 77,
+      "frame_sha256": "7094bde2d73b25bc88c6ed0cfafc094e047ce7855dbd4a119a1fb69043ed1f03",
+      "note": "draw_layer (SPEC.md 6) past the left edge of a layer wider than\nthe screen: the camera clamps to 0 on x, and to 0 on y where the\nlayer is shorter, and the screen below the layer is not written."
+    },
+    {
+      "name": "layer_right",
+      "core": true,
+      "calls": 77,
+      "frame_sha256": "cef9b2328138d12b1e6d374a2dfd9b9c9b44a4918e1f73c17016a097246ddb61",
+      "note": "draw_layer past the right edge and above the top: x clamps to\nlayer - screen, y to 0."
+    },
+    {
+      "name": "layer_top",
+      "core": true,
+      "calls": 72,
+      "frame_sha256": "cd1a6ad7adf9628e423d53a1413248d8e7685d7da3af6f8022cb7bdd53cbb9fe",
+      "note": "draw_layer past the top edge of a layer taller than the screen:\ny clamps to 0, x to 0 where the layer is narrower, and the\nscreen right of the layer is not written."
+    },
+    {
+      "name": "layer_bottom",
+      "core": true,
+      "calls": 72,
+      "frame_sha256": "a68bab3d48725b2db137264665f3b90fe5aefef23a583f49cc9316ab44f476df",
+      "note": "draw_layer past the bottom edge and left of the left: y clamps\nto layer - screen, x to 0."
+    },
+    {
+      "name": "layer_small",
+      "core": true,
+      "calls": 62,
+      "frame_sha256": "d7dbcba059b87958cc96324a6193363ad1c72beb7d0e6b8119f27ff156f444e9",
+      "note": "draw_layer of a layer narrower and shorter than the screen,\nasked for past its far corner: the camera is 0 on both axes,\nthe rest of the screen is not written, and the screen's camera,\nclip and pal do not apply."
     },
     {
       "name": "provisional",

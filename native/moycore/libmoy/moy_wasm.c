@@ -1,4 +1,4 @@
-/* The wasm binding: proposals/wasm-runtime.md's import table over WAMR.
+/* The wasm binding: proposals/wasm-runtime.md's import table.
  *
  * The Lua binding's twin (src/moy_lua.c), and deliberately the same shape:
  * every verb is a thin call into the raster or the host seam, and the only
@@ -8,15 +8,24 @@
  * and the table is proposals/wasm-imports.json; test/wasm_table_check.py holds
  * NATIVES below equal to it.
  *
+ * Two engines drive the same verbs (include/moy_wasm.h): WAMR under MOY_WASM,
+ * a JavaScript embedder's own engine under MOY_WASM_JS. What differs is four
+ * small functions -- which binding a call belongs to, how a trap is raised,
+ * and how the cart's memory is read and written -- and they are the first
+ * thing below. Everything after them is one body of code.
+ *
  * Every pointer a cart hands over is an offset into its linear memory and is
- * bounds-checked before it is touched: by WAMR for a '*~' pair in a
- * signature, here for the rest. A range outside the memory, a handle
- * make_layer never returned and a blit outside _draw set the instance's
- * exception, which is a trap: the call that made it returns non-zero and the
- * host ends the cart.
+ * bounds-checked before it is touched: by the engine's adapter for a '*~'
+ * pair in a signature (WAMR, or cart.js), here for the rest. A range outside
+ * the memory, a handle make_layer never returned and a blit outside _draw are
+ * a trap: the call that made it unwinds the cart and the host ends it.
  */
 
-#ifdef MOY_WASM
+#if defined(MOY_WASM) || defined(MOY_WASM_JS)
+
+#if defined(MOY_WASM) && defined(MOY_WASM_JS)
+#error "moy_wasm.c runs over one engine: define MOY_WASM or MOY_WASM_JS, not both"
+#endif
 
 #ifndef MOY_PIXEL_RGB565
 #error "moy_wasm.c needs the direct-colour build (MOY_PIXEL_RGB565): a palette blit's 256 colours do not fit an indexed canvas"
@@ -38,9 +47,13 @@
 #define FN(f) ((void *)(f))
 #endif
 
-typedef wasm_exec_env_t env_t;
-
 static const char *const HOOKS[3] = { "_init", "_update", "_draw" };
+
+/* -- the engine: which binding, a trap, the cart's memory ------------------ */
+
+#ifdef MOY_WASM
+
+typedef wasm_exec_env_t env_t;
 
 /* The binding behind an import call, or NULL -- and a trap -- when the
  * instance has none yet: a start function reaching the console. */
@@ -65,23 +78,65 @@ static uint8_t *span(moy_wasm *w, uint32_t off, uint64_t n)
     return (uint8_t *)wasm_runtime_addr_app_to_native(w->inst, (uint64_t)off);
 }
 
+/* `n` bytes into linear memory at `off`: 0, with the instance trapped, when
+ * the range leaves it. */
+static int store(moy_wasm *w, uint32_t off, const uint8_t *src, uint32_t n)
+{
+    uint8_t *p = span(w, off, n);
+    if (!p) return 0;
+    memcpy(p, src, n);
+    return 1;
+}
+
+#else /* MOY_WASM_JS: the adapter calls each verb with the binding itself */
+
+typedef moy_wasm *env_t;
+
+/* A range that leaves linear memory, in the words WAMR uses for it. */
+static const char OUT_OF_BOUNDS[] = "out of bounds memory access";
+
+static moy_wasm *bound(env_t w) { return w; }
+
+static void trap(moy_wasm *w, const char *msg)
+{
+    if (!w->trap) w->trap = msg;
+}
+
+/* A copy of `n` bytes at linear-memory offset `off`, alive until the import
+ * returns, or NULL with the cart trapped. */
+static uint8_t *span(moy_wasm *w, uint32_t off, uint64_t n)
+{
+    uint8_t *p = n > 0xFFFFFFFFu ? NULL : moy_wasm_js_span(w, off, (uint32_t)n);
+    if (!p) trap(w, OUT_OF_BOUNDS);
+    return p;
+}
+
+static int store(moy_wasm *w, uint32_t off, const uint8_t *src, uint32_t n)
+{
+    if (moy_wasm_js_store(w, off, src, n)) return 1;
+    trap(w, OUT_OF_BOUNDS);
+    return 0;
+}
+
+#endif
+
+/* -- marshalling ------------------------------------------------------------ */
+
 /* Several results: consecutive little-endian i32 at `out`, nothing when out
- * is 0. Returns 0 when `out` is not a valid range (the instance is trapped). */
+ * is 0. Returns 0 when `out` is not a valid range (the cart is trapped). */
 static int results(moy_wasm *w, uint32_t out, const int32_t *v, int n)
 {
-    uint8_t *p;
+    uint8_t b[16];
     int i;
     if (!out) return 1;
-    p = span(w, out, (uint64_t)n * 4u);
-    if (!p) return 0;
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < n && i < 4; i++) {
         uint32_t u = (uint32_t)v[i];
-        p[i * 4 + 0] = (uint8_t)(u & 0xFFu);
-        p[i * 4 + 1] = (uint8_t)((u >> 8) & 0xFFu);
-        p[i * 4 + 2] = (uint8_t)((u >> 16) & 0xFFu);
-        p[i * 4 + 3] = (uint8_t)(u >> 24);
+        b[i * 4 + 0] = (uint8_t)(u & 0xFFu);
+        b[i * 4 + 1] = (uint8_t)((u >> 8) & 0xFFu);
+        b[i * 4 + 2] = (uint8_t)((u >> 16) & 0xFFu);
+        b[i * 4 + 3] = (uint8_t)(u >> 24);
     }
-    return 1;
+    return store(w, out, b, (uint32_t)i * 4u);
 }
 
 static moy_canvas *layer_of(moy_wasm *w, int32_t h)
@@ -135,7 +190,8 @@ static void w_trib(env_t e, int32_t x1, int32_t y1, int32_t x2, int32_t y2,
                    int32_t x3, int32_t y3, int32_t c)
 { moy_wasm *w = bound(e); if (w) moy_trib(w->target, x1, y1, x2, y2, x3, y3, c); }
 
-/* '*~': WAMR has checked the bytes are inside linear memory. */
+/* '*~': the engine's adapter has checked the bytes are inside linear
+ * memory. */
 static void w_print(env_t e, const uint8_t *s, uint32_t len, int32_t x, int32_t y, int32_t c)
 { moy_wasm *w = bound(e); if (w) moy_print(w->target, s, (size_t)len, x, y, c); }
 
@@ -663,6 +719,7 @@ const NativeSymbol *moy_wasm_natives(uint32_t *count)
     return NATIVES;
 }
 
+#ifdef MOY_WASM
 int moy_wasm_register(NativeSymbol *storage)
 {
     uint32_t n;
@@ -671,6 +728,7 @@ int moy_wasm_register(NativeSymbol *storage)
     memcpy(storage, t, n * sizeof *storage);
     return wasm_runtime_register_natives(MOY_WASM_MODULE, storage, n) ? 0 : -1;
 }
+#endif
 
 /* -- the module's shape ---------------------------------------------------- */
 
@@ -734,6 +792,247 @@ static int memory_of(const uint8_t *wasm, size_t size, uint32_t *flags,
     return -1;
 }
 
+/* The memory rules of the module shape: one memory of the module's own, not
+ * shared or 64-bit, whose minimum and maximum are both `pages`. */
+static int check_memory(const uint8_t *wasm, size_t size, uint32_t pages,
+                        char *err, size_t errlen)
+{
+    uint32_t flags = 0, lo = 0, hi = 0;
+    int m = memory_of(wasm, size, &flags, &lo, &hi);
+    if (m == -1)
+        return fail(err, errlen, "the module's bytes do not reach a readable memory section");
+    if (m == -2)
+        return fail(err, errlen, "the module defines no memory of its own");
+    if (m == -3)
+        return fail(err, errlen, "the module defines more than one memory");
+    if (m == -4)
+        return fail(err, errlen, "the memory has no maximum");
+    if (flags & ~1u)
+        return fail(err, errlen, "the memory is shared or 64-bit");
+    if (lo != pages || hi != pages)
+        return fail(err, errlen, "the memory is %u..%u pages; the manifest declares %u",
+                    (unsigned)lo, (unsigned)hi, (unsigned)pages);
+    return 0;
+}
+
+/* -- the shape from the module's bytes -------------------------------------- */
+
+typedef struct {
+    const uint8_t *p, *end;
+} reader;
+
+static int rd_byte(reader *r, uint8_t *v)
+{
+    if (r->p >= r->end) return 0;
+    *v = *r->p++;
+    return 1;
+}
+
+static int rd_leb(reader *r, uint32_t *v) { return leb(&r->p, r->end, v); }
+
+/* A name, left where it is: its bytes and their count. */
+static int rd_name(reader *r, const uint8_t **s, uint32_t *n)
+{
+    if (!rd_leb(r, n) || *n > (size_t)(r->end - r->p)) return 0;
+    *s = r->p;
+    r->p += *n;
+    return 1;
+}
+
+/* Skip a vector of single-byte value types; its start and count out. */
+static int rd_types(reader *r, const uint8_t **v, uint32_t *n)
+{
+    if (!rd_leb(r, n) || *n > (size_t)(r->end - r->p)) return 0;
+    *v = r->p;
+    r->p += *n;
+    return 1;
+}
+
+/* Function type `index` of the type section in `types`: its param and result
+ * value types, each one byte. 0 when there is no such type or it is not a
+ * plain function type. */
+static int type_at(reader types, uint32_t index, const uint8_t **params,
+                   uint32_t *np, const uint8_t **res, uint32_t *nr)
+{
+    uint32_t n, i, k;
+    uint8_t form;
+    if (!rd_leb(&types, &n) || index >= n) return 0;
+    for (i = 0; i <= index; i++) {
+        if (!rd_byte(&types, &form) || form != 0x60) return 0;
+        if (!rd_types(&types, params, np) || !rd_types(&types, res, nr)) return 0;
+        for (k = 0; k < *np; k++)
+            if ((*params)[k] < 0x7C || (*params)[k] > 0x7F) return 0;
+        for (k = 0; k < *nr; k++)
+            if ((*res)[k] < 0x7C || (*res)[k] > 0x7F) return 0;
+    }
+    return 1;
+}
+
+/* A WAMR signature string as the value types it stands for. */
+static int sig_types(const char *sig, uint8_t *params, uint32_t *np,
+                     uint8_t *res, uint32_t *nr)
+{
+    uint8_t *out = params;
+    uint32_t *n = np;
+    *np = *nr = 0;
+    if (*sig++ != '(') return 0;
+    for (; *sig; sig++) {
+        uint8_t t;
+        if (*sig == ')') {
+            out = res;
+            n = nr;
+            continue;
+        }
+        switch (*sig) {
+        case 'i': case '*': case '~': case '$': t = 0x7F; break;
+        case 'I': t = 0x7E; break;
+        case 'f': t = 0x7D; break;
+        case 'F': t = 0x7C; break;
+        default: return 0;
+        }
+        if (*n >= 16) return 0;
+        out[(*n)++] = t;
+    }
+    return 1;
+}
+
+/* Is the module's type `index` exactly the table row `row`'s? */
+static int row_type_is(reader types, uint32_t index, const NativeSymbol *row)
+{
+    uint8_t want_p[16], want_r[16];
+    uint32_t wnp, wnr, np, nr;
+    const uint8_t *params, *res;
+    if (!sig_types(row->signature, want_p, &wnp, want_r, &wnr)) return 0;
+    if (!type_at(types, index, &params, &np, &res, &nr)) return 0;
+    return np == wnp && nr == wnr && !memcmp(params, want_p, np)
+        && !memcmp(res, want_r, nr);
+}
+
+static const NativeSymbol *row_named(const uint8_t *name, uint32_t n)
+{
+    uint32_t count, i;
+    const NativeSymbol *t = moy_wasm_natives(&count);
+    for (i = 0; i < count; i++)
+        if (strlen(t[i].symbol) == n && !memcmp(t[i].symbol, name, n)) return &t[i];
+    return NULL;
+}
+
+/* The type index of function `index` in the module's index space, imported
+ * functions first. */
+static int func_type_index(reader imports, reader funcs, uint32_t index,
+                           uint32_t *type)
+{
+    uint32_t n, i, seen = 0, k;
+    if (rd_leb(&imports, &n)) {
+        for (i = 0; i < n; i++) {
+            const uint8_t *s;
+            uint32_t len, t;
+            uint8_t kind;
+            if (!rd_name(&imports, &s, &len) || !rd_name(&imports, &s, &len)
+                || !rd_byte(&imports, &kind) || kind != 0 || !rd_leb(&imports, &t))
+                return 0;
+            if (seen++ == index) {
+                *type = t;
+                return 1;
+            }
+        }
+    }
+    if (!rd_leb(&funcs, &n) || index - seen >= n) return 0;
+    for (k = 0; k <= index - seen; k++)
+        if (!rd_leb(&funcs, type)) return 0;
+    return 1;
+}
+
+int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
+                         char *err, size_t errlen)
+{
+    reader r, sec[12];
+    int have[12] = {0}, seen[3] = {0, 0, 0}, memory = 0, h;
+    uint32_t n = 0, i;
+
+    if (!wasm || size < 8 || memcmp(wasm, "\0asm\1\0\0\0", 8) != 0)
+        return fail(err, errlen, "not a WebAssembly module");
+    r.p = wasm + 8;
+    r.end = wasm + size;
+    while (r.p < r.end) {
+        uint8_t id;
+        uint32_t len;
+        if (!rd_byte(&r, &id) || !rd_leb(&r, &len) || len > (size_t)(r.end - r.p))
+            return fail(err, errlen, "the module's sections do not parse");
+        if (id < 12) {
+            sec[id].p = r.p;
+            sec[id].end = r.p + len;
+            have[id] = 1;
+        }
+        r.p += len;
+    }
+    for (i = 0; i < 12; i++)
+        if (!have[i]) sec[i].p = sec[i].end = wasm + size;
+
+    if (check_memory(wasm, size, pages, err, errlen)) return -1;
+
+    r = sec[2];
+    if (have[2] && !rd_leb(&r, &n))
+        return fail(err, errlen, "the import section does not parse");
+    for (i = 0; have[2] && i < n; i++) {
+        const uint8_t *mod, *name;
+        uint32_t ml, nl, type;
+        uint8_t kind;
+        const NativeSymbol *row;
+        if (!rd_name(&r, &mod, &ml) || !rd_name(&r, &name, &nl) || !rd_byte(&r, &kind))
+            return fail(err, errlen, "the import section does not parse");
+        if (ml != strlen(MOY_WASM_MODULE) || memcmp(mod, MOY_WASM_MODULE, ml))
+            return fail(err, errlen, "imports %.*s.%.*s: a compiled cart imports only from module \"moy\"",
+                        (int)ml, (const char *)mod, (int)nl, (const char *)name);
+        if (kind != 0)
+            return fail(err, errlen, "imports %.*s.%.*s as something other than a function",
+                        (int)ml, (const char *)mod, (int)nl, (const char *)name);
+        if (!rd_leb(&r, &type))
+            return fail(err, errlen, "the import section does not parse");
+        row = row_named(name, nl);
+        if (!row || !row_type_is(sec[1], type, row))
+            return fail(err, errlen, "imports %.*s.%.*s, which is not in the import table at that type",
+                        (int)ml, (const char *)mod, (int)nl, (const char *)name);
+    }
+
+    r = sec[7];
+    if (have[7] && !rd_leb(&r, &n))
+        return fail(err, errlen, "the export section does not parse");
+    for (i = 0; have[7] && i < n; i++) {
+        const uint8_t *name, *params, *res;
+        uint32_t nl, index, type, np, nr;
+        uint8_t kind;
+        if (!rd_name(&r, &name, &nl) || !rd_byte(&r, &kind) || !rd_leb(&r, &index))
+            return fail(err, errlen, "the export section does not parse");
+        if (kind == 2 && nl == 6 && !memcmp(name, "memory", 6)) {
+            memory = 1;
+            continue;
+        }
+        if (kind != 0) continue;
+        for (h = 0; h < 3; h++) {
+            if (strlen(HOOKS[h]) != nl || memcmp(HOOKS[h], name, nl)) continue;
+            if (!func_type_index(sec[2], sec[3], index, &type)
+                || !type_at(sec[1], type, &params, &np, &res, &nr)
+                || nr != 0 || np != (h == 1 ? 1u : 0u)
+                || (np == 1 && params[0] != 0x7D))
+                return fail(err, errlen, "%s is not at the proposal's type", HOOKS[h]);
+            seen[h] = 1;
+        }
+    }
+    for (h = 0; h < 3; h++)
+        if (!seen[h])
+            return fail(err, errlen, "no %s export", HOOKS[h]);
+    if (!memory)
+        return fail(err, errlen, "no memory export");
+    if (have[8])
+        return fail(err, errlen, "the module has a start function; nothing may run before _init");
+    return 0;
+}
+
+#ifdef MOY_WASM
+
+/* -- the shape from a loaded module (WAMR) ---------------------------------- */
+
 /* Is `t` (params) -> () with the given param kinds? */
 static int hook_type(wasm_func_type_t t, uint32_t nparams, wasm_valkind_t kind)
 {
@@ -749,25 +1048,11 @@ int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
                    uint32_t pages, char *err, size_t errlen)
 {
     int32_t i, n;
-    int seen[3] = {0, 0, 0}, memory = 0, m;
-    uint32_t flags = 0, lo = 0, hi = 0;
+    int seen[3] = {0, 0, 0}, memory = 0;
     wasm_import_t im;
     wasm_export_t ex;
 
-    m = memory_of(wasm, size, &flags, &lo, &hi);
-    if (m == -1)
-        return fail(err, errlen, "the module's bytes do not reach a readable memory section");
-    if (m == -2)
-        return fail(err, errlen, "the module defines no memory of its own");
-    if (m == -3)
-        return fail(err, errlen, "the module defines more than one memory");
-    if (m == -4)
-        return fail(err, errlen, "the memory has no maximum");
-    if (flags & ~1u)
-        return fail(err, errlen, "the memory is shared or 64-bit");
-    if (lo != pages || hi != pages)
-        return fail(err, errlen, "the memory is %u..%u pages; the manifest declares %u",
-                    (unsigned)lo, (unsigned)hi, (unsigned)pages);
+    if (check_memory(wasm, size, pages, err, errlen)) return -1;
 
     n = wasm_runtime_get_import_count(module);
     for (i = 0; i < n; i++) {
@@ -807,17 +1092,46 @@ int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
     return 0;
 }
 
+#endif /* MOY_WASM */
+
 /* -- running the cart ------------------------------------------------------ */
+
+/* What every hook runs under: the screen as the target, and for _draw the
+ * background repaint (moy_lua_draw's, when the host did not take it over) and
+ * the one blit a _draw may make. */
+static void begin(moy_wasm *w, int hook)
+{
+    moy_console *con = w->con;
+    w->target = w->screen;
+    if (hook == MOY_WASM_DRAW) {
+        if (con->has_bg && !con->host.background) moy_cls(w->screen, con->bg);
+        w->in_draw = 1;
+        w->blits = 0;
+    }
+}
+
+static void end(moy_wasm *w)
+{
+    w->target = w->screen;
+    w->in_draw = 0;
+}
+
+static void attach(moy_wasm *w, moy_console *con)
+{
+    w->con = con;
+    w->screen = w->target = con->canvas;
+    w->n_layers = 0;
+    w->in_draw = w->blits = w->quitting = 0;
+}
+
+#ifdef MOY_WASM
 
 int moy_wasm_open(moy_wasm *w, moy_console *con, wasm_exec_env_t env)
 {
     int h;
-    w->con = con;
+    attach(w, con);
     w->env = env;
     w->inst = wasm_runtime_get_module_inst(env);
-    w->screen = w->target = con->canvas;
-    w->n_layers = 0;
-    w->in_draw = w->blits = w->quitting = 0;
     for (h = 0; h < 3; h++) {
         w->hooks[h] = wasm_runtime_lookup_function(w->inst, HOOKS[h]);
         if (!w->hooks[h]) return -1;
@@ -829,9 +1143,9 @@ int moy_wasm_open(moy_wasm *w, moy_console *con, wasm_exec_env_t env)
 static int call(moy_wasm *w, int h, uint32_t argc, uint32_t *argv, char *err, size_t errlen)
 {
     int ok;
-    w->target = w->screen;
+    begin(w, h);
     ok = wasm_runtime_call_wasm(w->env, w->hooks[h], argc, argv);
-    w->target = w->screen;
+    end(w);
     if (ok) return 0;
     if (w->quitting) {                      /* SPEC.md 9: an ending, not a failure */
         wasm_runtime_clear_exception(w->inst);
@@ -847,30 +1161,50 @@ static int call(moy_wasm *w, int h, uint32_t argc, uint32_t *argv, char *err, si
 int moy_wasm_init(moy_wasm *w, char *err, size_t errlen)
 {
     uint32_t argv[1] = {0};
-    return call(w, 0, 0, argv, err, errlen);
+    return call(w, MOY_WASM_INIT, 0, argv, err, errlen);
 }
 
 int moy_wasm_update(moy_wasm *w, float dt, char *err, size_t errlen)
 {
     uint32_t argv[1];
     memcpy(&argv[0], &dt, sizeof dt);
-    return call(w, 1, 1, argv, err, errlen);
+    return call(w, MOY_WASM_UPDATE, 1, argv, err, errlen);
 }
 
 int moy_wasm_draw(moy_wasm *w, char *err, size_t errlen)
 {
     uint32_t argv[1] = {0};
-    int r;
-    moy_console *con = w->con;
-    /* background(c) repaints before every _draw, as moy_lua_draw does, when
-     * the host did not take it over. */
-    if (con->has_bg && !con->host.background) moy_cls(w->screen, con->bg);
-    w->in_draw = 1;
-    w->blits = 0;
-    r = call(w, 2, 0, argv, err, errlen);
-    w->in_draw = 0;
-    return r;
+    return call(w, MOY_WASM_DRAW, 0, argv, err, errlen);
 }
+
+#else /* MOY_WASM_JS */
+
+void moy_wasm_bind(moy_wasm *w, moy_console *con)
+{
+    attach(w, con);
+    w->trap = NULL;
+}
+
+void moy_wasm_begin(moy_wasm *w, int hook)
+{
+    w->trap = NULL;
+    begin(w, hook);
+}
+
+/* A cart that swallowed the adapter's throw still trapped: w->trap says so. */
+int moy_wasm_end(moy_wasm *w, int threw)
+{
+    end(w);
+    if (!threw && !w->trap) return 0;
+    return w->quitting ? 0 : 1;             /* SPEC.md 9: an ending, not a failure */
+}
+
+const char *moy_wasm_trapped(const moy_wasm *w)
+{
+    return w->trap;
+}
+
+#endif
 
 void moy_wasm_close(moy_wasm *w)
 {
@@ -881,13 +1215,15 @@ void moy_wasm_close(moy_wasm *w)
     for (i = 0; i < w->n_layers; i++)
         if (h->layer_free) h->layer_free(h->user, w->layers[i].pix);
     w->n_layers = 0;
+#ifdef MOY_WASM
     if (w->inst) wasm_runtime_set_custom_data(w->inst, NULL);
+#endif
 }
 
 #else
 
-/* Without MOY_WASM this file is empty on purpose: libmoy has no dependencies
+/* Without an engine this file is empty on purpose: libmoy has no dependencies
  * unless a host asks for this binding. ISO C wants one declaration. */
 typedef int moy_wasm_not_built;
 
-#endif /* MOY_WASM */
+#endif /* MOY_WASM || MOY_WASM_JS */

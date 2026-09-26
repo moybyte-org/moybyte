@@ -898,12 +898,13 @@ static mp_obj_t moy_gfx_line(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_line_obj, 14, 14, moy_gfx_line);
 
-// blit_window(dst, dw, dh, src, src_w, sx, sy) -- copy a dw x dh window from a wider
+// blit_window(dst, dw, dh, src, src_w, sx, sy) -- copy a dw x dh window from an
 // RGB565 `src` (src_w px/row) at (sx, sy) into `dst` (dw px/row, contiguous). The scroll
 // engine's core op (#43): a flat per-row memcpy, no tile lookup / colorkey / scale, so
 // it's far cheaper than re-running map() over a scrolling background -- the cart pre-
 // renders the level into a wide buffer once, then each frame blits the camera window.
-// Bounds-clamped to both buffers.
+// Bounds-clamped to both buffers: where the source runs out before the window does,
+// the rest of `dst` is left as it was.
 static mp_obj_t moy_gfx_blit_window(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     size_t dcap, scap;

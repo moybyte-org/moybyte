@@ -83,8 +83,8 @@ def carts_root(board):
 
 def push_cart(board, cart_dir, name, log=print):
     """Write a cart folder into <ws.carts_root>/<name>.moy and make the launcher
-    see it, without rebooting -- a reset costs ~40s and the suite has nine
-    scenes."""
+    see it, without rebooting -- a reset costs ~40s, and the suite would pay
+    it once per scene."""
     root = carts_root(board)
     dst = "%s/%s.moy" % (root, name)
     board.pyexec(

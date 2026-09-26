@@ -8,7 +8,7 @@ point, and it is what makes it different in kind from the checks it must not
 be confused with:
 
   * `tests/spec_conformance/hashes.json` pins the CART raster (320x240,
-    ten recorded verb traces). It says nothing about a single shell pixel.
+    the spec's recorded verb traces). It says nothing about a single shell pixel.
   * `tests/test_responsive_editors.py` builds TWO workstations *now* and
     compares them -- a live-vs-live A/B. A refactor that moves both arms
     passes green. It also asserts layout attributes against the constants in

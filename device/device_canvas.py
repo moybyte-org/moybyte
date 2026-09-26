@@ -261,7 +261,7 @@ def to_indices(buf, wire=None, strict=True):
 
     EXACT, not approximate: MOY64's 64 entries resolve to 64 DISTINCT RGB565
     words, so the reverse map is total. `tests/test_spec_conformance.py` proves
-    the round trip on all ten spec scenes -- every vendored golden hash comes
+    the round trip on every spec scene -- every vendored golden hash comes
     back identical through a 565 canvas.
 
     It exists because several things downstream of a canvas are index-native and
@@ -2693,6 +2693,10 @@ class DeviceCanvas:
         # a full frame) when present, else a memoryview row-copy fallback (no framebuf,
         # so it also runs under the host parity test). Overwrites -- it's the background,
         # drawn first each frame, erasing last frame's sprites for free.
+        # SPEC.md 6: each axis of the camera clamps into [0, max(0, layer - screen)],
+        # so the window never leaves the layer; on an axis where the layer is smaller
+        # than the screen the camera is 0 and the screen past the layer keeps what it
+        # held.
         # #63: flush BOTH sides -- this canvas's queued sprites (drawn, then overwritten
         # by the opaque copy, exactly as immediate mode) and the source layer's, so its
         # pixels are complete before we read them.
@@ -2704,8 +2708,14 @@ class DeviceCanvas:
             _fb()
         cam_x = int(cam_x)
         cam_y = int(cam_y)
+        mx = layer.w - self.w
+        my = layer.h - self.h
+        if cam_x > mx:
+            cam_x = mx
         if cam_x < 0:
             cam_x = 0
+        if cam_y > my:
+            cam_y = my
         if cam_y < 0:
             cam_y = 0
         # Async layer copy (#54 Stage 2): if sync_back predicted THIS restore and
@@ -2765,7 +2775,7 @@ class DeviceCanvas:
         if dh <= 0:
             return
         for row in range(dh):
-            d0 = row * dw
+            d0 = row * self.w
             s0 = (cam_y + row) * src_w + cam_x
             d[d0:d0 + dw] = s[s0:s0 + dw]
 

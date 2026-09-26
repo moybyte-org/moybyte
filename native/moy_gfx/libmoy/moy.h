@@ -184,9 +184,10 @@ void moy_reset_state(moy_canvas *c);
  * the per-frame half of it.
  *
  * Like cls, this is a COMPOSITING verb rather than a drawing one: it ignores
- * dst's camera, clip and pal, and writes whole rows. Source coordinates are
- * clamped, so a window hanging off the layer copies the edge rather than
- * reading past it. */
+ * dst's camera, clip and pal, and copies rows as they are. Each axis of the
+ * camera is clamped into [0, max(0, src - dst)], so the window never leaves
+ * the layer; where src is smaller than dst, the part of dst past src's edge
+ * is left as it was. */
 void moy_blit_window(moy_canvas *dst, const moy_canvas *src, int cam_x, int cam_y);
 
 /* -- drawing (SPEC.md 6) ------------------------------------------------- */

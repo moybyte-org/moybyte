@@ -228,8 +228,9 @@ void mg_blit_window(uint16_t *dst, size_t dcap, int dw, int dh,
     if (dw <= 0 || dh <= 0 || src_w <= 0) return;
     if (sx < 0) sx = 0;
     if (sy < 0) sy = 0;
-    if (sx + dw > src_w) dw = src_w - sx;         /* clamp window to source */
-    if (dw <= 0) return;
+    int cw = dw;                                  /* copy width; dw stays the stride */
+    if (sx + cw > src_w) cw = src_w - sx;
+    if (cw <= 0) return;
     if ((size_t)dw * (size_t)dh > dcap) dh = (int)(dcap / (size_t)dw);
     int src_rows = (int)(scap / (size_t)src_w);
     if (sy + dh > src_rows) dh = src_rows - sy;
@@ -237,7 +238,7 @@ void mg_blit_window(uint16_t *dst, size_t dcap, int dw, int dh,
     for (int row = 0; row < dh; row++) {
         memcpy(dst + (size_t)row * (size_t)dw,
                src + (size_t)(sy + row) * (size_t)src_w + (size_t)sx,
-               (size_t)dw * 2u);
+               (size_t)cw * 2u);
     }
 }
 

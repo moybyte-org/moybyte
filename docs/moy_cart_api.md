@@ -323,8 +323,8 @@ re-drawing the background every frame.
 | call | does |
 |---|---|
 | `background(x)` | **declare the backdrop once** — a color (`background(col("dark_blue"))`) or a painted Image (`background(image("bg"))`) — and the engine repaints it at the start of every frame automatically. Your `_draw` then only draws the moving things: no `cls`, no backdrop blit, nothing to overdraw. `background()` with no args clears it |
-| `make_layer(w, h)` | create an off-screen layer (wider than the screen). Draw into it once with the **same verbs** (`cls`/`map`/`spr`/`rect`/…) via the layer's methods |
-| `draw_layer(layer, cam_x=0, cam_y=0)` | blit the visible `W×H` window of `layer` at the camera offset (clamped to the layer bounds). Draw actors on top afterwards |
+| `make_layer(w, h)` | create an off-screen layer of any size (a scroller's is wider than the screen). Draw into it once with the **same verbs** (`cls`/`map`/`spr`/`rect`/…) via the layer's methods |
+| `draw_layer(layer, cam_x=0, cam_y=0)` | blit the screen-sized window of `layer` whose top-left is `(cam_x, cam_y)`. Each axis of the camera is clamped into `[0, max(0, layer − screen)]`, so the window never leaves the layer: on an axis where the layer is smaller than the screen the camera is 0, and the screen past the layer's edge keeps what it held. Like `cls` it ignores the screen's `camera`/`clip`/`pal`. Draw actors on top afterwards |
 
 ## Scenes (placed actors, `#85`)
 
