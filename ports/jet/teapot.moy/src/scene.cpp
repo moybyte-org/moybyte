@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 CubeCoders Limited
+// Copyright (c) 2026 Nikola Jovicic
+//
 // The Utah teapot under a flying camera: JetExamples' esp32-lighting-teapot
 // scene (main/Teapot.hpp, MIT, CubeCoders Limited) on the console. The light,
 // the glaze, the gradient, the rocking and the Flat / Gouraud / Phong cycle

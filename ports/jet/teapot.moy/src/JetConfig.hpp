@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 CubeCoders Limited
+// Copyright (c) 2026 Nikola Jovicic
+//
 // Jet's compile-time configuration for this cart: JetExamples'
 // esp32-lighting-teapot/main/firmware/JetConfig.hpp, less what belongs to that
 // example's ESP32 runtime (its S3 raster worker, internal-RAM scratch and

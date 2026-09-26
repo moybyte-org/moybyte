@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Nikola Jovicic
+//
 // The console's imports this cart uses: module "moy", each at its row's type in
 // moy-spec's proposals/wasm-imports.json. Nothing else is imported.
 #pragma once

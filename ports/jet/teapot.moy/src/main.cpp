@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Nikola Jovicic
+//
 // Jet Teapot: a 3D scene rendered by Jet (github.com/CubeCoders/Jet, MIT), a
 // software rasteriser that writes RGB565, handed to the console whole through
 // blit565 with a HUD drawn over it by the ordinary verbs. scene.cpp is the

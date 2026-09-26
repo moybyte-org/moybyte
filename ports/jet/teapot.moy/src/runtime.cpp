@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Nikola Jovicic
+//
 // The C library edges a compiled cart owns: the heap, and the calls wasi-libc's
 // stdio makes to the host. The module links wasi-libc and libc++ for the rest
 // (the containers, the string and number routines Jet's OBJ loader calls,

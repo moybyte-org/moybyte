@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nikola Jovicic
 """Re-vendor Jet, and the teapot scene's model and notices, into ports/jet.
 
     make vendor-jet                                   # the clones at the pins below

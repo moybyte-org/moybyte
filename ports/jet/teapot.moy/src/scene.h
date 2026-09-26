@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Nikola Jovicic
+//
 // The teapot scene as main.cpp drives it. scene.cpp is compiled once per Jet
 // build -- full width, and half width in a renamed namespace -- and each
 // compilation defines one of the two tables below.

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nikola Jovicic
 """Build the compiled tier's showcase cart: Jet Teapot (ports/jet/README.md).
 
     python3 tools/jet_cart.py /tmp/carts                  # -> /tmp/carts/teapot.moy
