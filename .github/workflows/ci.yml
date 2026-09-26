@@ -53,6 +53,24 @@ jobs:
       - name: Install package
         run: make setup
 
+      # The compiled showcase cart's host goldens (tests/test_jet_cart.py) build
+      # it with wasi-sdk 24, a 119 MB download. Cached under the sha256 the
+      # build pins (tools/jet_cart.py's WASI_SDK_SHA256), so a runner fetches it
+      # once per pin rather than once per run; the fetch is a step of its own
+      # so a cold cache is not paid inside a test.
+      - name: wasi-sdk pin
+        id: wasi_sdk
+        run: echo "sha256=$(sed -n 's/^WASI_SDK_SHA256 = "\(.*\)"$/\1/p' tools/jet_cart.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache wasi-sdk
+        uses: actions/cache@v4
+        with:
+          path: experiments/wasm_aot/toolchain/wasi-sdk
+          key: wasi-sdk-${{ steps.wasi_sdk.outputs.sha256 }}
+
+      - name: wasi-sdk for the compiled showcase cart
+        run: .venv/bin/python tools/jet_cart.py --toolchain
+
       # The COMPILED-VS-COMPILED lane. tests/test_gfx_binding.py's
       # test_matches_the_native_moy_gfx drives the same ops through the host's
       # ctypes binding and through the REAL native moy_gfx under a desktop

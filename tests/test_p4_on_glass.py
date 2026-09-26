@@ -122,6 +122,25 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
     on_glass.wasm_read_of_a_folder_reads_nothing(board, WASM_BOARD_DIR)
 
 
+# The compiled tier's showcase, Jet Teapot (ports/jet/README.md), from the
+# launcher: uncapped with WiFi off, in Phong -- the costliest of its three
+# shadings and the steadiest to measure -- at half and at full width. The
+# floors sit about a fifth under what this board drew when they were set
+# (2026-09-26); the figures are #158's. The cart stays installed as it ships.
+JET_HALF_FPS_FLOOR = 10
+JET_FULL_FPS_FLOOR = 7
+
+
+def test_the_jet_showcase_holds_its_floor_at_half_width(board):
+    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_HALF_FPS_FLOOR,
+                                 width="half", shading="phong")
+
+
+def test_the_jet_showcase_holds_its_floor_at_full_width(board):
+    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_FULL_FPS_FLOOR,
+                                 shading="phong")
+
+
 # Doom, built by the recipe (experiments/wasm_aot/doom/): skips until the
 # developer has built the cart, which is never in the repository or CI.
 def test_doom_frames_match_the_host(board):

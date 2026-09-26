@@ -891,6 +891,73 @@ def wasm_cart_holds_its_floor(board, title, floor, check=None):
     return fps
 
 
+# The compiled tier's showcase, Jet Teapot (ports/jet/README.md): built for
+# this board's chip by tools/jet_cart.py, its module signed, pushed as
+# jet_teapot.moy. It declares 60, so its floor is measured UNCAPPED -- every
+# loop frame draws -- which is the rate Jet reaches on the board rather than a
+# divisor of 60, with WiFi off and `diag 1` as the other floors are.
+
+JET_TITLE = "Jet Teapot"
+
+
+def jet_push(board, board_dir, **config):
+    """Build the showcase cart for this board's chip, with `config` over its
+    config.json, push it into the store as jet_teapot.moy (files whose hash
+    already matches are skipped, so a mode change sends config.json alone)
+    and rescan. Returns its title."""
+    import tempfile
+    from tools import jet_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    cart = jet_cart.build(tempfile.mkdtemp(prefix="moy_jet_"), chips=(chip,),
+                          config=config or None)
+    _push_folder(board, board_dir, cart, root.rstrip("/") + "/jet_teapot.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", timeout=20,
+                         strict=True)
+    assert JET_TITLE in titles, "%s is not on the shelf after the push" % JET_TITLE
+    return JET_TITLE
+
+
+def jet_fps(board, seconds=10.0):
+    """The showcase run uncapped from the launcher with `diag 1`: (median
+    drawn fps, median render ms -- the cart's _draw, Jet's render and the
+    blit565 and HUD over it). Leaves uncap and diag as it found them."""
+    from runtime.perf_line import parse_perf
+    st = board.state()
+    diag_was, uncap_was = st.get("diag"), bool(st.get("uncap"))
+    board.cmd("diag 1", wait_for="REMOTE diag on")
+    board.cmd("uncap 1", wait_for="REMOTE uncap")
+    n0 = len(board.lines)
+    try:
+        fps, _samples = wasm_cart_fps(board, JET_TITLE, seconds)
+    finally:
+        board.cmd("uncap %d" % uncap_was, wait_for="REMOTE uncap")
+        if not diag_was:
+            board.cmd("diag 0", wait_for="REMOTE diag off")
+    slug = JET_TITLE.replace(" ", "_")
+    render = sorted(g["render"] for g in map(parse_perf, board.perf_lines(n0))
+                    if g.get("cart") == slug and g.get("render") is not None)
+    ms = render[len(render) // 2] if render else None
+    print("JET %s: drawn fps %s, render %s ms" % (board.expect_board, fps, ms))
+    return fps, ms
+
+
+def jet_holds_its_floor(board, board_dir, floor, **config):
+    """The showcase in the mode `config` names presents at or above this
+    board's pinned floor, uncapped. The cart stays installed, with the
+    config.json it ships with."""
+    jet_push(board, board_dir, **config)
+    try:
+        fps, _ms = jet_fps(board)
+    finally:
+        jet_push(board, board_dir)
+    assert fps >= floor, "%s (%s) drew %s fps uncapped, under the floor %s" % (
+        JET_TITLE, config or "as shipped", fps, floor)
+    return fps
+
+
 def _wasm_fixture_variant(board, board_dir, chip, title, slug, change=None):
     """The hello cart built for `chip` under another title, `change(folder)`
     applied, pushed as `wasm_<slug>.moy` and rescanned."""

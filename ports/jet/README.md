@@ -105,10 +105,13 @@ computes itself — a value whose two byte orders differ.
 Measure with WiFi off and `uncap 1`, so every loop frame draws; the manifest
 declares 60 and the tick model otherwise holds the drawn rate to a divisor of
 it. PERF gives the console's figure and the HUD gives the cart's own; the
-numbers, per board and mode, are #158's. The native figure they are set
-against is the example's own `VALIDATION.md` in JetExamples at the pin: the
-same teapot on an ESP32-S3 at 480 × 320, half width, field-interlaced, two
-raster cores, no sandbox.
+numbers, per board and mode, are #158's. Every console board's on-glass suite
+runs the cart from the launcher that way, in Phong at half and full width,
+against a floor of its own (`tests/on_glass.py`'s `jet_holds_its_floor`), and
+leaves it installed as it ships. The native figure they are set against is the
+example's own `VALIDATION.md` in JetExamples at the pin: the same teapot on an
+ESP32-S3 at 480 × 320, half width, field-interlaced, two raster cores, no
+sandbox.
 
 ## Seeding (design; nothing seeds it yet)
 
@@ -143,14 +146,15 @@ hand and never committed.
    LLVM's libc++, whose LLVM exception waives attribution for compiled code —
    before the cart ships in a product image (THIRD_PARTY.md §2.7).
 
-**What it costs, as of 2026-09-26.** CI: the job fetches wasi-sdk 24
-(a 119 MB tarball) and the two pinned `wamrc` builds (58 MB and 79 MB), all
-cacheable under their sha256 pins, and compiles for well under a minute on a
-runner; the host test suite already fetches wasi-sdk to build this cart for
-its goldens. Each console image: about 340 KB more in its packed roster — a
-chip's module is most of it — against the headroom the build prints, which
-the S3 boards' slots decide. First boot: the seed writes about 770 KB into the
-store. The alternative that costs the image nothing is to publish the built
-cart per chip beside the firmware images and let the store install it
-(phase 5's distribution); it needs a network the first time, which a seed
-does not.
+**What it costs, as of 2026-09-26.** CI: the job fetches wasi-sdk 24 (a 119 MB
+tarball) and the two pinned `wamrc` builds (58 MB and 79 MB), all cacheable
+under their sha256 pins, and compiles for well under a minute on a runner; the
+host CI job already keeps wasi-sdk in its cache under that pin for this cart's
+goldens (`.github/workflows/ci.yml`, and the same step in
+`tools/preflight.sh`), so the seeding job shares it. Each console image: about
+340 KB more in its packed roster — a chip's module is most of it — against the
+headroom the build prints, which the S3 boards' slots decide. First boot: the
+seed writes about 770 KB into the store. The alternative that costs the image
+nothing is to publish the built cart per chip beside the firmware images and
+let the store install it (phase 5's distribution); it needs a network the
+first time, which a seed does not.

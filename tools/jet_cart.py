@@ -5,6 +5,7 @@
 
     python3 tools/jet_cart.py /tmp/carts                  # -> /tmp/carts/teapot.moy
     python3 tools/jet_cart.py /tmp/carts --chip esp32s3 --chip esp32p4
+    python3 tools/jet_cart.py --toolchain                 # fetch wasi-sdk if absent
 
 The cart's source is ports/jet/teapot.moy/: its manifest, config, model,
 licences and `src/` (C++), all copied into the built cart as they are. This
@@ -361,13 +362,26 @@ def build(out_dir, chips=(), sdk=None, config=None, verbose=False):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("out", help="where the built teapot.moy folder goes")
+    ap.add_argument("out", nargs="?", help="where the built teapot.moy folder goes")
+    ap.add_argument("--toolchain", action="store_true",
+                    help="only make sure wasi-sdk 24 is here (fetched by sha256 when "
+                    "absent) and print where; what CI and preflight run before the "
+                    "suite, so the download is one step of its own")
     ap.add_argument("--chip", action="append", default=[],
                     help="also compile and sign the module for this chip (esp32s3, "
                     "esp32p4); repeatable")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="show the compiler's warnings")
     args = ap.parse_args(argv)
+    if args.toolchain:
+        try:
+            print(wasi_sdk())
+        except (BuildError, OSError) as exc:
+            print("jet_cart: %s" % exc, file=sys.stderr)
+            return 2
+        return 0
+    if not args.out:
+        ap.error("the output folder is required")
     try:
         cart = build(args.out, args.chip, verbose=args.verbose)
     except (BuildError, wasm_module.ToolError) as exc:

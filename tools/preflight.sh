@@ -61,6 +61,9 @@ step() {                        # step "name" cmd...
 # a warm build is under a minute.
 step "desktop MicroPython with the native usermods" make unix-micropython
 step "docs agree with the tree"                     "${PY}" tools/check_docs.py
+# CI's cached step: the toolchain the showcase cart's goldens build with,
+# fetched by its pinned sha256 when absent (a no-op when it is here).
+step "wasi-sdk for the compiled showcase cart"      "${PY}" tools/jet_cart.py --toolchain
 step "suite (redraw excluded)" \
   "${PY}" -m pytest -q --ignore=tests/test_redraw_on_change.py
 step "redraw suite, alone"     "${PY}" -m pytest -q tests/test_redraw_on_change.py
