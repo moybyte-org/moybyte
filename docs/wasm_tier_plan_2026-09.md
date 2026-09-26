@@ -159,21 +159,18 @@ proposal reserves that import for: pixels that are direct-colour by nature.
 - **Guards:** a host golden for the showcase frame at fixed camera poses; the
   cart from the launcher in every on-glass suite with a pinned fps floor.
 
-### Phase 4 — second host and promotion (moy-spec)
+### Phase 4 — promotion (moy-spec; the owner's decision)
 
-Started 2026-09-26 on the owner's call, ahead of a second author, so the
-binding is tested on more than one host before anyone depends on it.
+The second and third hosts are in (2026-09-26): moy-spec's desktop player
+runs compiled carts on Linux, Windows and macOS, and its web player runs a
+cart as a sibling module whose imports are JavaScript adapters over the
+binding's own C. Conformance scenes for every wasm-only import, the ordinary
+verbs, a trap and the refusal fixtures hold every host to identical RGB565
+frames (#158). What remains is promotion:
 
-- The desktop player runs wasm carts through libmoy's table under WAMR.
-- The browser runner instantiates the cart as a sibling module whose imports
-  are JavaScript adapters over the same C thunks. Never an engine inside the
-  engine.
-- One conformance scene per new import, with an RGB golden type decided in
-  phase 2 because the palette-index goldens cannot represent a 256-entry
-  blit; refusal fixtures run on every host.
-- Then, and not before: the proposal becomes a binding section of SPEC.md,
-  the C header freezes, the distribution notes move to PORTING.md, and
-  SPEC.md §15's vendor-runtime line goes.
+- The proposal becomes a binding section of SPEC.md, the C header freezes,
+  the distribution notes move to PORTING.md, and SPEC.md §15's vendor-runtime
+  wording goes.
 
 ### Phase 5 — distribution (later)
 
