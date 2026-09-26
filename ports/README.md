@@ -1,14 +1,23 @@
-# ports/ — third-party carts ported to the Lua runtime (dev/test material)
+# ports/ — third-party carts ported to the console (dev/test material)
 
-Carts in this folder are **conformance and stress tests for the #67 Lua cart
-runtime**, ported from other fantasy consoles with the moy-spec CLI's
-`moy port` (the one converter, spec-side — `p8_lua_port.py` there).
-They are deliberately **NOT seed carts**: seeding is declared per cart now (a
+Carts in this folder are **conformance and stress tests for the cart
+runtimes**: carts from other fantasy consoles ported to the #67 Lua runtime
+with the moy-spec CLI's `moy port` (the one converter, spec-side —
+`p8_lua_port.py` there), and `jet/`, a third-party engine's example compiled
+for the WebAssembly tier. They are deliberately **NOT seed carts**: seeding is declared per cart now (a
 `system_carts/*/manifest.json` carries `"system": true` and an `"order"`, and
 `tools/gen_device_carts.py` reads those), and nothing here carries either
 declaration or lives in `system_carts/` — so none of it is baked into a
 firmware image or seeded onto a device. To play one, copy the `.moy` folder into a cart store
 (the tests do exactly that into a tmp store).
+
+## jet/ — Jet Teapot, the compiled tier's showcase
+
+A `"runtime": "wasm"` cart on Jet, CubeCoders' MIT software rasteriser,
+porting one of Jet's own example scenes; its frame reaches the console through
+`blit565`. `jet/README.md` is the authority: how it is built
+(`tools/jet_cart.py`), how Jet is vendored (`make vendor-jet`), its modes and
+memory, and the design for seeding it, which nothing does yet.
 
 ## p8/ — the PICO-8 conformance corpus, ONE cart each (2026-09-11)
 
