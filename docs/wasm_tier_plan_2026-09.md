@@ -80,9 +80,11 @@ the decisions below record what they changed.
   2026-09-26), which publishes built carts with their source; its installer
   fetches Debian's WAD rather than anyone hosting it, and Doom is never
   seeded, preloaded or shipped with a console (`THIRD_PARTY.md`). It runs from the launcher
-  on a board that can fit it (the Waveshare P4 today) and shows the notice
-  on one that cannot; the next decision names the levers that would widen
-  that set.
+  on a board that can fit it and shows the notice on one that cannot: the
+  Waveshare P4 always, the T-Deck from a fresh boot but not after a session
+  has fragmented its PSRAM, the Guition S3 never, and the Guition P4's store
+  cannot hold the cart (#158). The next decision names the levers that would
+  widen that set.
   Doom is still the cart that found the ABI's gaps: the 256-entry blit
   palette and the asset read.
 - **A compiled cart's memory is the cart-runtime reserve, not free PSRAM.**
@@ -112,26 +114,13 @@ Phases 1 and 2 and all of phase 3 are in (2026-09-25/26): the engine is
 vendored and taken by every console board; moy-spec carries the binding
 candidate and libmoy's import table; a compiled cart runs from the launcher
 on the host and on all four boards under guards in every on-glass suite;
-modules are signed the way OTA images are; and Doom builds from a local
-recipe and runs where it fits. The numbers and the fit measurement are on
+modules are signed the way OTA images are; a cart too big for a board opens
+a plain notice instead of failing, and a full store says so; the loader
+bug is fixed in the fork; and Doom builds from a local recipe and runs
+where it fits. The numbers and the fit measurement are on
 #158; how each piece works is its README (`native/moy_wasm/README.md`,
 `native/moycore/README.md`, `experiments/wasm_aot/doom/README.md`, and the
 proposal in moy-spec).
-
-### Phase 3, closing — the notice and the loader fix (moybyte)
-
-- **A cart that cannot fit says so.** Before a compiled cart loads, the
-  Player compares its load footprint (declared memory, this chip's module,
-  the engine's pool) with what the board can give it, and a cart that cannot
-  fit opens a plain notice naming both figures, never an error panel. A load
-  that still fails for memory maps to the same notice. A cart the store has
-  no room for says so at install.
-- **The loader bug goes to the fork.** WAMR's AOT loader reads
-  `is_binary_freeable` before setting it; the fix is one line in the fork,
-  re-vendored, and the engine's copy-the-segments workaround goes.
-- **Guards:** a fixture cart declaring more memory than any board has is
-  refused with the notice on every board and on the host; the hello cart's
-  file-read check keeps guarding the loader fix.
 
 ### The showcase cart — Jet (moybyte)
 
