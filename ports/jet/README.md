@@ -68,11 +68,14 @@ python3 tools/jet_cart.py /tmp/carts --chip esp32s3 --chip esp32p4   # + signed 
 python3 tools/push_cart.py /tmp/carts/teapot.moy --board guition_s3  # onto a board
 ```
 
-It compiles with wasi-sdk 24's clang (C++17, `-fno-exceptions -fno-rtti`),
-links wasi-libc and libc++ statically, and defines the four WASI calls their
-stdio makes, writing nowhere, so the module imports nothing but `"moy"`. The
-heap is `runtime.cpp`'s own first-fit allocator over the memory above the
-static data. `tests/test_jet_cart.py` holds the build to the console's import
+It compiles with wasi-sdk 24's clang (C++17, `-fno-exceptions -fno-rtti`,
+the rasterizer's per-pixel shading calls inlined -- `tools/jet_cart.py` says
+why), links wasi-libc and libc++ statically, and defines the four WASI calls
+their stdio makes, writing nowhere, so the module imports nothing but
+`"moy"`. The heap is `runtime.cpp`'s own first-fit allocator over the memory
+above the static data, whose end it takes from the linker rather than asking
+the memory its size (the file says what asking costs).
+`tests/test_jet_cart.py` holds the build to the console's import
 table and a sibling moy-spec's `moy check`, whose one finding is the warning
 every compiled cart draws while the binding tracks the proposal.
 

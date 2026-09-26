@@ -128,8 +128,8 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
 # shadings and the steadiest to measure -- at half and at full width. The
 # floors sit about a fifth under what this board drew when they were set
 # (2026-09-26); the figures are #158's. The cart stays installed as it ships.
-JET_HALF_FPS_FLOOR = 5
-JET_FULL_FPS_FLOOR = 4
+JET_HALF_FPS_FLOOR = 9
+JET_FULL_FPS_FLOOR = 7
 
 
 def test_the_jet_showcase_holds_its_floor_at_half_width(board):

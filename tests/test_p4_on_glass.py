@@ -686,8 +686,8 @@ def test_a_cart_runs_and_exits(board):
 # ring drops bytes with no recovery. The OTA block's junk-signature line is the
 # longest the suite sends; with the showcase ahead of it, it arrived as a
 # SyntaxError on every run.
-JET_HALF_FPS_FLOOR = 10
-JET_FULL_FPS_FLOOR = 7
+JET_HALF_FPS_FLOOR = 16
+JET_FULL_FPS_FLOOR = 13
 
 
 def test_the_jet_showcase_holds_its_floor_at_half_width(board):
