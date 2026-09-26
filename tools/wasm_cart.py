@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nikola Jovicic
 """Build a compiled ("runtime": "wasm") cart folder a host or a board can run.
 
     python3 tools/wasm_cart.py tests/fixtures/wasm/hello.moy /tmp/hello.moy

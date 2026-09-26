@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nikola Jovicic
 """Sign an OTA manifest, so a device can tell our firmware from someone else's.
 
 The threat this closes is a network attacker, which is the realistic one for a

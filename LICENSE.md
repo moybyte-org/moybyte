@@ -14,7 +14,7 @@ license.** Contact the maintainers.
 | This repository: the system, firmware, tools and built-in carts | [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) |
 | The `.moy` cart format and cart API | an open specification anyone may implement; [moy-spec](https://github.com/moybyte-org/moy-spec), including its player, is MIT |
 | Carts you make | yours — nothing here claims them |
-| `tools/wasm_module.py` and `native/moy_wasm/moy_wasm_key.h`, which build and key a compiled cart's modules | MIT, so a GPL cart can publish its complete build scripts |
+| The tools that build, key and sign a compiled cart's modules: `tools/wasm_module.py`, `tools/wasm_cart.py`, `tools/ota_sign.py` and `native/moy_wasm/moy_wasm_key.h` (`tools/wat.py` is moy-spec's, already MIT) | MIT, so a GPL cart can publish its complete build scripts |
 | Files from other projects | their own licenses, listed in [THIRD_PARTY.md](THIRD_PARTY.md) |
 
 The Functional Source License is source-available, not OSI-approved open source.
