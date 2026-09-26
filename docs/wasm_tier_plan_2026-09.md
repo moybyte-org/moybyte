@@ -132,6 +132,32 @@ proposal in moy-spec).
   refused with the notice on every board and on the host; the hello cart's
   file-read check keeps guarding the loader fix.
 
+### The showcase cart — Jet (moybyte)
+
+The tier's demo is a 3D cart on Jet (https://github.com/CubeCoders/Jet), an
+MIT-licensed, dependency-free C++17 software rasteriser built for the
+ESP32-S3 that renders RGB565 into caller-owned colour and depth buffers
+(chosen 2026-09-26). It is shippable where Doom is not: MIT, no game data,
+and small enough to sit under the floor, so it runs on every board and can
+be seeded. It is also the first real user of `blit565`, the case the
+proposal reserves that import for: pixels that are direct-colour by nature.
+
+- Jet compiled to wasm32 (no exceptions, no RTTI) linking against the
+  `"moy"` imports only, taken the way the repo takes C libraries: vendored at
+  a pinned commit with a stamp and a test, never fetched inside a build.
+- A cart porting one of Jet's own example scenes: the d-pad flies the
+  camera, models load through the cart's own `read`, `_draw` renders into the
+  cart's buffers and hands the frame to `blit565`, and a HUD drawn with
+  ordinary verbs over it shows the two mixing. `blit565`'s byte order is
+  fixed by the proposal; Jet's own output order is checked, not assumed.
+- Measured on every board with WiFi off, full and half-width, against Jet's
+  native figure on the S3, and the sandbox's cost stated (#158).
+- How a compiled cart is seeded: its modules are build products, so the
+  firmware build produces and signs them; the design is settled here before
+  the cart joins the seed roster.
+- **Guards:** a host golden for the showcase frame at fixed camera poses; the
+  cart from the launcher in every on-glass suite with a pinned fps floor.
+
 ### Phase 4 — second host and promotion (moy-spec)
 
 Started 2026-09-26 on the owner's call, ahead of a second author, so the
