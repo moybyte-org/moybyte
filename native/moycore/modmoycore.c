@@ -2327,6 +2327,7 @@ typedef struct {
     int dead;                    // trapped: never called again
     char dir[192];               // the cart's folder: `read`'s only root
     char file[MOY_WASM_NAME_MAX + 1];   // the file held open, if any
+    uint32_t file_size;          // its size, read once when it was opened
     // The import table's registration storage: WAMR sorts it in place and
     // points at it until the runtime is destroyed, so it lives as long as
     // this struct does -- freed by wasm_end, after the session's teardown.
@@ -2393,6 +2394,7 @@ static mp_obj_t wasm_read_now(void)
 {
     wread_t *q = g_wread;
     mp_obj_t f = MP_STATE_VM(moycore_wasm_file);
+    int e = 0;
     if (f == MP_OBJ_NULL || strcmp(WR->file, q->name) != 0) {
         wfile_forget();
         char path[sizeof(WR->dir) + MOY_WASM_NAME_MAX + 2];
@@ -2400,13 +2402,21 @@ static mp_obj_t wasm_read_now(void)
         mp_obj_t args[2] = { mp_obj_new_str(path, strlen(path)),
                              MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
         f = mp_call_function_n_kw(MP_OBJ_FROM_PTR(&mp_builtin_open_obj), 2, 0, args);
+        // The size is read once, here: on a FAT card a seek to the end walks
+        // the file's cluster chain, which costs a read of a WAD-sized file
+        // milliseconds every time.
+        mp_off_t end = mp_stream_seek(f, 0, MP_SEEK_END, &e);
+        if (e != 0 || end < 0) {
+            mp_stream_close(f);
+            mp_raise_OSError(e ? e : MP_EIO);
+        }
         MP_STATE_VM(moycore_wasm_file) = f;
         snprintf(WR->file, sizeof(WR->file), "%s", q->name);
+        WR->file_size = (uint64_t)end > UINT32_MAX ? UINT32_MAX : (uint32_t)end;
     }
-    int e = 0;
-    mp_off_t size = mp_stream_seek(f, 0, MP_SEEK_END, &e);
-    if (e == 0 && size > (mp_off_t)q->offset) {
-        uint32_t left = (uint32_t)(size - (mp_off_t)q->offset);
+    uint32_t size = WR->file_size;
+    if (size > q->offset) {
+        uint32_t left = size - q->offset;
         if (q->len == 0) {
             q->got = left;
         } else {

@@ -31,6 +31,8 @@
 #endif
 
 #define MOY_SD_SECTOR 512
+// Sectors per multi-block read: a 4 KB bounce, taken per read call.
+#define MOY_SD_RUN 8
 
 #if MOY_SD_HAVE_IDF
 static sdmmc_card_t *s_card = NULL;
@@ -134,6 +136,27 @@ static mp_obj_t moy_sd_read(mp_obj_t start_in, mp_obj_t buf_in, mp_obj_t count_i
         mp_raise_ValueError(MP_ERROR_TEXT("moy_sd: read buffer too small"));
     }
     uint8_t *dst = (uint8_t *)bi.buf;
+    // A run of sectors is one multi-block transfer through a bounce of its
+    // own, taken for this call and given back: one command per run instead
+    // of one per sector halves a large read. When internal DMA memory cannot
+    // give the run, the read goes sector by sector through the standing
+    // bounce.
+    uint32_t run = count < MOY_SD_RUN ? count : MOY_SD_RUN;
+    uint8_t *big = run > 1 ? heap_caps_malloc((size_t)run * MOY_SD_SECTOR,
+                                              MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) : NULL;
+    if (big != NULL) {
+        for (uint32_t i = 0; i < count; i += run) {
+            uint32_t n = count - i < run ? count - i : run;
+            esp_err_t err = sdmmc_read_sectors(s_card, big, start + i, n);
+            if (err != ESP_OK) {
+                heap_caps_free(big);
+                moy_sd_check(err, "read");
+            }
+            memcpy(dst + (size_t)i * MOY_SD_SECTOR, big, (size_t)n * MOY_SD_SECTOR);
+        }
+        heap_caps_free(big);
+        return mp_const_none;
+    }
     for (uint32_t i = 0; i < count; i++) {
         esp_err_t err = sdmmc_read_sectors(s_card, s_bounce, start + i, 1);
         moy_sd_check(err, "read");

@@ -71,9 +71,13 @@ def with_sd_live(fn):
     for the rest of the session; see this module's header for what a teardown
     costs."""
     global _live_mounted
-    import os
-
     if not _live_mounted:
+        # Imported here, never on the resident path: MicroPython looks for a
+        # file overriding a built-in like `os` along the whole path every time
+        # the import runs, which costs a session milliseconds on this board --
+        # and a running compiled cart's every `read` is a session.
+        import os
+
         try:
             from machine import Pin
 

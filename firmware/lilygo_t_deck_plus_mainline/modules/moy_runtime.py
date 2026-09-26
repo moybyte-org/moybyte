@@ -75,8 +75,10 @@ SERIAL_CMDS = True
 POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
 
 # #183: print a phase bracket around every SD session. This board has no REPL to
-# interrogate once the desktop owns the loop, so the trace IS the diagnostic --
-# and it only fires on commits, never per frame.
+# interrogate once the desktop owns the loop, so the trace IS the diagnostic.
+# It fires per store session -- a commit, a cover load, and every `read` a
+# running compiled cart makes, which for a cart streaming its data file is
+# several a second; the lines cost a fraction of a millisecond each.
 SD_TRACE = True
 
 # WHERE THE STORE LIVES WHEN THERE IS NO CARD. This board's carts normally live
