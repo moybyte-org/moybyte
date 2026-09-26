@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Nikola Jovicic
+//
 // The provenance key a module must carry to load on this board.
 //
 // A per-architecture module is native code, so the sandbox is whatever the

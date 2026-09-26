@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Nikola Jovicic
 """Build a per-chip WebAssembly module a board will load: .wasm -> .aot + key.
 
     python3 tools/wasm_module.py build cart.wasm --chip esp32s3 -o cart_s3.aot
