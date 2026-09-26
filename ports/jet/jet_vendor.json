@@ -1,0 +1,46 @@
+{
+  "files": {
+    "ports/jet/jet/LICENSE": "e1b2f37275330b67e3b2354554265691c914d032fbff90b5cc7189313e97249f",
+    "ports/jet/jet/src/BlendSpans.cpp": "4a53950e195c2cca2e472917ad4861661667a09e1484ebde2291e44729e503ff",
+    "ports/jet/jet/src/BlendSpans.hpp": "a4c429db186f6348560700ca279beda0ed234c9768e0feb4d16d7ce71012d859",
+    "ports/jet/jet/src/Camera.cpp": "9dbb0a6a2e9996cd88dfd84fa2ef72f5d567630a7da68b4df23aa89f0db6ba5f",
+    "ports/jet/jet/src/Camera.hpp": "d57ce190b41a55e0f08e6310947ccaa6c0dc97ea071e0ef62be7a97ec7455e2b",
+    "ports/jet/jet/src/DepthBuckets.hpp": "21b02a20a600e6f457d4836a104685dbdf14edcbc4784f895c0ed4c76b0b4fb9",
+    "ports/jet/jet/src/FastMath.hpp": "0814e71248d9ac3affbf23de10dbada623721b53e6c2192b3edcb4adb6442205",
+    "ports/jet/jet/src/Light.cpp": "00eaf8871699d7f6a8086e4015f8d12bb700a9bfb82ef8aa4615a3276e0fd2d7",
+    "ports/jet/jet/src/Light.hpp": "7e1fc421971224326c069479c7c764646e866e539c722077fd12088601a64f7e",
+    "ports/jet/jet/src/Material.cpp": "292ef0175624b07dceb9d0928bab7deb6cb33e47e02b5065f735c04e2d5201a0",
+    "ports/jet/jet/src/Material.hpp": "7ffdb459368c7cf90f33ba6355f9c9d146fadbaf5aa49c5fb6a45e8467494941",
+    "ports/jet/jet/src/ObjLoader.h": "dd84e49ebc3ab3188ea2048880329fdfdb0332afade6fadb526a8ed3a06dda89",
+    "ports/jet/jet/src/Object.cpp": "35482065eb3475b906330f2e2629f849c79b536170b61842b9d4c1843cd489a9",
+    "ports/jet/jet/src/Object.hpp": "63e9ea17bc8855287841a673d337017023fdd9768e040ee78ddb0e695af2cbd3",
+    "ports/jet/jet/src/Picking.hpp": "4e491eda389edcaab8a15673d10d898dcc275504d049cc31717071cc290f426d",
+    "ports/jet/jet/src/PostFX.cpp": "820b13f1a2a022d7d118f5e8e4ee95d84be52fa9deb84e78f9fdfda70be9a5a4",
+    "ports/jet/jet/src/PostFX.hpp": "c194e3cb07097c0510959c3d78c69f8cb5915687341576ec72867397630f2eef",
+    "ports/jet/jet/src/Renderer.cpp": "22d6577052d9493eab606af217f789560618e5df918ff43d551ad5b5df90ac5e",
+    "ports/jet/jet/src/Renderer.hpp": "e0d81d11b374fccf88dc0fc07195d204ba07688b2ff3fe746090897fe824386d",
+    "ports/jet/jet/src/Scene.cpp": "41708d19373e4dae6e47fde4afc843f138269fa9f4a7eff17fa1da16336cf1d7",
+    "ports/jet/jet/src/Scene.hpp": "040b24b2f9cbf6a8d80b63c20e5d38f00e432ba1925dcde572fb9c892e639035",
+    "ports/jet/jet/src/Shader.hpp": "96344d2fbe2d4d0bebc18d9d3a3b8de51c91f85c6598e35156bd1ff52b6d4c19",
+    "ports/jet/jet/src/Specular.hpp": "f590dba0c22ce62a8ac5e99b7f647c83ca23378c2b199518b5479d01f858f210",
+    "ports/jet/jet/src/Sprite2D.cpp": "64b987a3c914520e1b8c51f55d5a2e7842fd1d4a21d2d58a76d18b0af2c7051f",
+    "ports/jet/jet/src/Sprite2D.hpp": "daacbc99217e22bd83619cc9b02b663aeb8636c2619ad908274d19f64ca41cf1",
+    "ports/jet/jet/src/Texture.hpp": "4c2d8a4b95cb10069045322d31144b88c0c5e124ce69338074d946c4189c5f49",
+    "ports/jet/jet/src/TextureSpans.hpp": "0134c2d28b7f82b81f4b6a9f89cfae6f2e6194dc84ff72f3eb9d3ec7c6ea3cb5",
+    "ports/jet/jet/src/TriangleSpans.hpp": "927631789b3595705079df2c861d18b3763c251a78e940aac945d7d63232da74",
+    "ports/jet/jet/src/TrigLUT.cpp": "678df2a0d4e08f5d63580e17f0f97c53fc6770a82e17b1ae934a0be1d5c2fc25",
+    "ports/jet/jet/src/TrigLUT.hpp": "9762626b5badf2be3176a43907ea535de0eb1359def37cd49e121806ff88cf77",
+    "ports/jet/teapot.moy/LICENSES.txt": "bdb7ed2382102071ea37616de813c9d84c4b6a1234f3d4294fa2efd7cedd68f3",
+    "ports/jet/teapot.moy/teapot.obj": "106598e3fefe1fba3434231adeebf7d9aa4911c4a90578f8131f185d09721bd7"
+  },
+  "upstream": {
+    "commit": "19018b52c04d92c615d1ade2db5eb7198c7af21c",
+    "date": "2026-09-25",
+    "examples": {
+      "commit": "57b05a240f5bcaa02a18d62a1206ce7053dc09dc",
+      "date": "2026-09-25",
+      "repo": "CubeCoders/JetExamples"
+    },
+    "repo": "CubeCoders/Jet"
+  }
+}

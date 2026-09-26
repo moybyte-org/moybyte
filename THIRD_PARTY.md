@@ -27,6 +27,8 @@ separate question from what is committed.
 |---|---|---|---|---|
 | Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
 | WAMR 2.4.5 AOT runtime (WebAssembly cart engine), Moybyte's fork | `native/moy_wasm/wamr/` | [moybyte-org/wasm-micro-runtime](https://github.com/moybyte-org/wasm-micro-runtime) (fork of [bytecodealliance/wasm-micro-runtime](https://github.com/bytecodealliance/wasm-micro-runtime)) | Apache-2.0 WITH LLVM-exception | **Yes** — the fork's commits |
+| Jet software 3D rasteriser (the compiled showcase cart) | `ports/jet/jet/` | [CubeCoders/Jet](https://github.com/CubeCoders/Jet) | MIT | No |
+| Utah teapot mesh + the scene it is lit in (the showcase cart) | `ports/jet/teapot.moy/teapot.obj`, `ports/jet/teapot.moy/src/scene.cpp` | [CubeCoders/JetExamples](https://github.com/CubeCoders/JetExamples), from freeglut's teapot data | MIT; freeglut's X11-style notice | Converted to OBJ; the scene ported |
 | `esp_lcd_ek79007` panel driver | `native/p4/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
 | `esp_lcd_jd9365` panel driver, Guition's build | `native/p4/moy_dsi/vendor_jd9365/` | Espressif's component as shipped in [Guition's JC8012P4A1C demo](https://github.com/DevinWatson/10.1-inch-ESP32P4-Xiaozhi-ESP32-C6-JC8012P4A1C_I_W_Y) | Apache-2.0 | No |
 | GSL3680 touch firmware (JC8012P4A1C glass) | `firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py` | Silead, via the same Guition demo (`esp_lcd_gsl3680.h`) | vendor firmware, redistributed as shipped | Transcribed (`tools/gen_gsl_fw.py`) |
@@ -253,6 +255,35 @@ component generates around it (`COLMOD` 0x55, `MADCTL`, `INVOFF`, `SLPOUT`,
   idle-filler lift detection are Moybyte's, written against the observed
   behaviour of the part (`firmware/guition_jc3248w535/README.md` records it).
 
+### 2.7 Jet — the compiled showcase cart's rasteriser
+
+`ports/jet/jet/`
+
+The showcase cart for the compiled (`"runtime": "wasm"`) tier,
+`ports/jet/teapot.moy/`, compiles Jet into its module; nothing in any firmware
+image does. The module is a build product (`tools/jet_cart.py`) and is never
+committed.
+
+- **Upstream:** Jet — <https://github.com/CubeCoders/Jet>, at the commit that
+  JetExamples (<https://github.com/CubeCoders/JetExamples>) carries as its
+  `components/Jet` submodule at the JetExamples commit `ports/jet/jet_vendor.json`
+  records. `tools/vendor_jet.py` copies the sources the cart compiles and the
+  headers they include, under upstream's paths.
+- **Licence:** MIT. Copyright (c) 2026 CubeCoders Limited. Full text:
+  [`ports/jet/jet/LICENSE`](ports/jet/jet/LICENSE), and the cart carries it in
+  its own `LICENSES.txt`.
+- **Modified: no.** `tests/test_jet_vendor.py` fails on any edit to the copy.
+  The cart builds Jet twice into one module, the second time with its
+  namespaces renamed on the compiler's command line; no file changes for it.
+- The cart's own `src/` is Moybyte's code under this repository's licence,
+  except `src/scene.cpp`, which ports JetExamples' `esp32-lighting-teapot`
+  scene (`main/Teapot.hpp`, MIT, the same copyright and text) and says so.
+- **What the built module also contains:** compiled code from wasi-sdk 24's
+  wasi-libc and LLVM's libc++/libc++abi (§6.4's toolchain). A built cart is
+  not published by this repository; before one ships in a product, its
+  `LICENSES.txt` carries those libraries' notices as well
+  (`ports/jet/README.md`, "Seeding").
+
 ---
 
 ## 3. Data and assets
@@ -355,6 +386,26 @@ legibility at button size.
 
 The separate 16×16 top-bar icon art (`_ICON_ART` in the same file, persisted as
 `system_icons.moygfx`) is hand-authored Moybyte work.
+
+### 3.3a The Utah teapot — the showcase cart's model
+
+`ports/jet/teapot.moy/teapot.obj`
+
+Martin Newell's teapot as JetExamples' `esp32-lighting-teapot` renders it:
+that example's generated mesh (`main/TeapotMesh.hpp`, 822 vertices with smooth
+normals, 1,560 triangles), which its generator evaluates from the teapot
+control points freeglut ships (`fg_teapot_data.h`, which the example keeps
+under its `assets`).
+
+- **Upstream:** <https://github.com/CubeCoders/JetExamples> at the commit
+  `ports/jet/jet_vendor.json` records; the control points are freeglut's
+  (<https://github.com/freeglut/freeglut>, `src/fg_teapot_data.h`).
+- **Licence:** the example is MIT (CubeCoders Limited); the teapot data carries
+  freeglut's X11-style permission notice, reproduced in the cart's
+  [`LICENSES.txt`](ports/jet/teapot.moy/LICENSES.txt).
+- **Modified: converted.** `tools/vendor_jet.py` writes the example's integer
+  vertices and normals as OBJ at the scales Jet's loader multiplies back by, so
+  the mesh the cart loads is the example's, value for value.
 
 ### 3.4 Board pin assignments — LilyGO T-Deck
 
@@ -519,7 +570,7 @@ image. Nothing else is pulled in.
 |---|---|---|
 | WAMR (wasm-micro-runtime) 2.4.5, taken from Moybyte's fork at branch `moybyte-2.4.5` (the esp-idf platform work over the upstream tag that §2.2 describes, at the same pinned commit), plus upstream's prebuilt `wamrc` release binary | <https://github.com/moybyte-org/wasm-micro-runtime> (fork of <https://github.com/wasm-micro-runtime/wasm-micro-runtime>) | Apache-2.0 WITH LLVM-exception |
 | Espressif's LLVM fork, branch `xtensa_release_18.1.2`, built once by the toolchain script to give `wamrc` an Xtensa backend; never vendored | <https://github.com/espressif/llvm-project> | Apache-2.0 WITH LLVM-exception |
-| wasi-sdk 24, the clang/wasi-libc toolchain `experiments/wasm_aot/doom/build_wasm.sh` and `build_cart.py` compile with; a gitignored download (`build_cart.py` fetches the release tarball by sha256 when it is absent), never vendored | <https://github.com/WebAssembly/wasi-sdk> | Apache-2.0 WITH LLVM-exception (wasi-libc: Apache-2.0 / MIT) |
+| wasi-sdk 24, the clang/wasi-libc/libc++ toolchain `experiments/wasm_aot/doom/build_wasm.sh`, `build_cart.py` and the showcase cart's `tools/jet_cart.py` compile with; a gitignored download (`build_cart.py` and `jet_cart.py` fetch the release tarball by sha256 when it is absent), never vendored | <https://github.com/WebAssembly/wasi-sdk> | Apache-2.0 WITH LLVM-exception (wasi-libc: Apache-2.0 / MIT) |
 | doomgeneric (id Software's DOOM, ozkl's portable fork), the engine `build_wasm.sh` stages from a gitignored checkout the developer fetches and `build_cart.py` fetches at a pinned commit into its gitignored cache, checked by the sha256 of its tree; never vendored | <https://github.com/ozkl/doomgeneric> | **GPL-2.0** |
 | DOOM shareware IWAD `doom1.wad` v1.9 (1993), a gitignored file the developer obtains; `build_cart.py` fetches Debian's `doom-wad-shareware` source package (<http://deb.debian.org/debian/pool/non-free/d/doom-wad-shareware/>) into its gitignored cache and checks the tarball and the WAD by sha256; never vendored, never redistributed | id Software | id Software Limited Use licence: free unmodified copies only, no consideration, no derivative works |
 
