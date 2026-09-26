@@ -132,7 +132,10 @@ proposal in moy-spec).
   refused with the notice on every board and on the host; the hello cart's
   file-read check keeps guarding the loader fix.
 
-### Phase 4 — second host and promotion (moy-spec; when a second author or host exists)
+### Phase 4 — second host and promotion (moy-spec)
+
+Started 2026-09-26 on the owner's call, ahead of a second author, so the
+binding is tested on more than one host before anyone depends on it.
 
 - The desktop player runs wasm carts through libmoy's table under WAMR.
 - The browser runner instantiates the cart as a sibling module whose imports
