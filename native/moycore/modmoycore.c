@@ -2503,7 +2503,7 @@ static int wo_runtime_up(void *user, char *err, size_t errlen)
     moy_wasm_natives(&n);
     WR->natives = (NativeSymbol *)wmem_calloc(n, sizeof(NativeSymbol));
     if (!WR->natives) {
-        snprintf(err, errlen, "no memory for the import table");
+        snprintf(err, errlen, "out of memory: no PSRAM for the import table");
         return 1;
     }
     if (moy_wasm_register(WR->natives) != 0) {
@@ -2565,7 +2565,7 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
         WR = NULL;
     }
     if ((WR = (wrun_t *)wmem_calloc(1, sizeof(wrun_t))) == NULL) {
-        snprintf(err, errlen, "no memory for the cart's run state");
+        snprintf(err, errlen, "out of memory: no PSRAM for the cart's run state");
         return 1;
     }
     WR->w.read = hw_read;

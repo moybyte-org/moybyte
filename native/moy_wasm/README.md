@@ -15,6 +15,7 @@ moycore drives (see "A cart's session").
 | the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report; a cart's session |
 | the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through |
 | the key | `moy_wasm_key.h`: the provenance key a module must carry, per chip, and the layout of its signature |
+| the footprint | `moy_wasm_footprint.h`: what a load takes -- the pool, the block a module file is read into, the run stack -- stated once for the engine, the Player's fit check and the host twin |
 | the thread | `moy_wasm_thread.c`: the run's pthread, stack placed per board |
 
 Which boards take it is `board.toml` data: each console board's
@@ -57,7 +58,11 @@ started before the thread exists, so the thread's own stack and control block
 are in it), plus `psram_min`.
 
 `mem()` → `(internal_free, internal_largest, internal_min_since_boot,
-psram_free, psram_largest)`. `KEY` is the key this build wants after the wasm
+psram_free, psram_largest)`. `footprint(memory, module_bytes)` → `(total,
+block)`: what loading a module file of `module_bytes` for a cart declaring
+`memory` bytes of linear memory holds in PSRAM at its peak, and the largest
+single free block that peak asks for (see "A cart too big for the board").
+`KEY` is the key this build wants after the wasm
 line, `FORK` the fork commit, `STACK` the board's default `(bytes, in_psram)`,
 `POOL` the runtime pool's base size (a run's `pool` adds a share of its
 module's).
@@ -141,6 +146,29 @@ The AOT native-stack check is live: the run hands the runtime its stack's low
 end plus a 2 KB guard (`wasm_runtime_set_native_stack_boundary`), and the fork
 reports the calling task's real stack start where upstream reported none. An
 overflow traps as "native stack overflow".
+
+## A cart too big for the board
+
+A cart above the tier's floor is allowed, and a board that cannot fit it says
+so before anything loads (the plan's 2026-09-26 decision). The Player asks the
+runtime what the cart's load takes -- `moycore_glue.WasmRuntime.footprint`:
+the manifest's `memory`, this chip's signed module as it sits in the store,
+through `footprint()` above -- and compares it with `mem()`'s PSRAM free total
+and largest block. A cart that does not fit opens the fit NOTICE: the Player's
+panel under the title "Too big for this console." naming the cart, what it
+needs and what the board has free, with the same way out as every panel and
+no EDIT (`runtime/player.py`'s `fit_notice`). The footprint is the file's
+block (which the linear memory takes back), the pool, the module's own size
+for the text and data the loader maps, and the run stack; it over-counts the
+text by the module's relocations and symbols, so a cart it passes has the
+room.
+
+A load that runs out of memory anyway -- the heap in more pieces than the
+free total suggests -- gets the same notice: every allocation failure on the
+start path, the engine's and moycore's and WAMR's "allocate ... failed", reads
+`out of memory: ...`, and a MemoryError reads the same. The host twin refuses
+by the same header against `wasm_host.MEMORY_LIMIT`, the biggest board's
+PSRAM, so a cart the host refuses is one no board could run.
 
 ## The cache sync
 
@@ -226,11 +254,14 @@ current answer.
   included, another chip's signature, another key's, an unsigned module and a
   malformed trailer are refused.
 - `tests/test_moycore_glue.py`: the device glue's `WasmRun` over a fake moycore
-  (the arguments `wasm_open` gets, the refusals before it).
+  (the arguments `wasm_open` gets, the refusals before it) and the runtime's
+  fit report (what it asks `footprint()`, through the store's gate).
 - `tests/test_wasm_cart.py`: the same import table on the host, over WAMR built
   for Linux at this pin (`runtime/wasm_binding.py`) — the hello cart's pixel
   golden, the hooks under the tick model, a trap, quit, the runtime-missing
-  panel, and the store's handling of a compiled cart.
+  panel, the fit notice (the footprint against the header's rule, the huge
+  fixture past any board, the host's limit, a load that still runs out), and
+  the store's handling of a compiled cart.
 - On glass, every declaring board's suite: the idle cost against a module-free
   image of the same tree, the hello module and six a board refuses (no key,
   another fork, other flags, another chip, no signature, one byte of a signed
@@ -238,10 +269,12 @@ current answer.
   Lua cart after a wasm run, a load/unload loop under a live cart and WiFi,
   and a run with WiFi and BLE up; then the Player path — the hello and blit
   carts run from the launcher at their fps floors, a cart with no module for
-  this chip refused, and a cart whose module was tampered with after signing
-  refused. The suites build the modules with the pinned compilers
+  this chip refused, a cart whose module was tampered with after signing
+  refused, and the huge fixture -- 40 MB of declared memory, past every
+  board's PSRAM -- refused with the fit notice, the hello cart running after
+  it. The suites build the modules with the pinned compilers
   (`python3 tools/wasm_module.py compilers`), sign them with the OTA signing
   key (a suite without it skips the wasm checks, saying why), and push them
   into the board's store: the phase-1 modules under `wasm_hello/`, which is
   not a `.moy` folder and never lists as a cart, and the fixture carts as
-  `wasm_hello.moy` and `wasm_blit.moy`.
+  `wasm_hello.moy`, `wasm_blit.moy` and `wasm_huge.moy`.

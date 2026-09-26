@@ -29,6 +29,7 @@
 
 #include "moy.h"
 #include "moy_wasm.h"
+#include "moy_wasm_footprint.h"
 #include "moyhost_console.h"
 
 #ifndef MOY_WASM
@@ -101,6 +102,23 @@ static void put_err(char *err, int errlen, const char *what, const char *detail)
     if (err && errlen > 0)
         snprintf(err, (size_t)errlen, "%s%s%s", what, detail ? ": " : "",
                  detail ? detail : "");
+}
+
+/* What a failure for want of memory says first, as the boards' engine says
+ * it (native/moy_wasm/modmoy_wasm.c): the Player reads it as the notice a
+ * cart too big for the console gets. `what` otherwise. */
+static const char *or_oom(const char *msg, const char *what)
+{
+    return strstr(msg, "allocate") ? "out of memory" : what;
+}
+
+/* A load's footprint by the boards' own sizing (moy_wasm_footprint.h): the
+ * host twin refuses a cart over its configured limit by the same arithmetic
+ * a board refuses one over its free PSRAM. */
+void hw_footprint(uint64_t memory, uint64_t module_len, uint64_t *total,
+                  uint64_t *block)
+{
+    moy_wasm_footprint(memory, module_len, total, block);
 }
 
 /* 1 when WAMR is up with the import table registered -- once per process. */
@@ -196,7 +214,7 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
     r->module = wasm_runtime_load(r->bytes, (uint32_t)n, msg, sizeof msg);
     if (!r->module) {
         free(copy);
-        put_err(err, errlen, "load", msg);
+        put_err(err, errlen, or_oom(msg, "load"), msg);
         return 1;
     }
     if (pages <= 0) {
@@ -212,7 +230,7 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
     free(copy);
     r->inst = wasm_runtime_instantiate(r->module, HW_STACK, 0, msg, sizeof msg);
     if (!r->inst) {
-        put_err(err, errlen, "instantiate", msg);
+        put_err(err, errlen, or_oom(msg, "instantiate"), msg);
         return 1;
     }
     r->env = wasm_runtime_create_exec_env(r->inst, HW_STACK);

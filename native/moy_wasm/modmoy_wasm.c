@@ -51,35 +51,16 @@
 #include "mbedtls/sha256.h"
 
 #include "wasm_export.h"
+#include "moy_wasm_footprint.h"
 #include "moy_wasm_key.h"
 #include "moy_wasm_session.h"
 #include "moy_wasm_thread.h"
 
 // -- per-board settings (mpconfigboard.h) -------------------------------------
 
-// The run thread's stack: its size, and whether it lives in PSRAM. Each board
-// sets both with the measurement that chose them beside the setting.
-#ifndef MOY_WASM_STACK_BYTES
-#define MOY_WASM_STACK_BYTES (16 * 1024)
-#endif
-#ifndef MOY_WASM_STACK_PSRAM
-#define MOY_WASM_STACK_PSRAM (1)
-#endif
-// The runtime's allocator pool, PSRAM, held only while a run is live. It
-// carries the module's and the instance's structures, the loader's copies of
-// the data segments and its relocation tables while it relocates, and the
-// exec env; the text and the linear memory are separate PSRAM mappings. The
-// structures, the data segments and the relocations grow with the module, so
-// the pool is sized from it: MOY_WASM_POOL_BYTES, plus one byte in
-// MOY_WASM_POOL_SHARE of the module's -- a share that holds the load's peak,
-// when the loader has copied the data segments and holds its relocation
-// tables at once. start()'s `pool` argument measures a module against it.
-#ifndef MOY_WASM_POOL_BYTES
-#define MOY_WASM_POOL_BYTES (256 * 1024)
-#endif
-#ifndef MOY_WASM_POOL_SHARE
-#define MOY_WASM_POOL_SHARE 4
-#endif
+// The run stack and the runtime pool are moy_wasm_footprint.h's: what a load
+// takes is stated once, for the engine and for the Player's fit check.
+//
 // Where the thread runs: the MicroPython task's core and priority, so a run
 // takes the VM's time and never the core the radios and the flush feeder use.
 #ifndef MOY_WASM_CORE
@@ -157,6 +138,17 @@ static StaticSemaphore_t g_lock_buf;
 
 static const char KEY_TAIL[] = "fork " MOY_WASM_FORK_COMMIT "\n" KEY_TARGET;
 
+// What a failure for want of memory says first, whichever allocation it was:
+// the Player reads it as a cart this board cannot fit, the notice a cart
+// too big for the board gets before it loads (moy_wasm_footprint.h).
+#define OUT_OF_MEMORY "out of memory"
+
+// WAMR's text for a load or an instantiation that could not allocate.
+static bool alloc_failed(const char *err)
+{
+    return strstr(err, "allocate") != NULL;
+}
+
 static void fail(run_t *r, const char *what, const char *detail)
 {
     r->ok = false;
@@ -229,7 +221,7 @@ static bool check_key(run_t *r, wasm_module_t module)
 
 static size_t pool_bytes(uint32_t module_len)
 {
-    return MOY_WASM_POOL_BYTES + module_len / MOY_WASM_POOL_SHARE;
+    return (size_t)moy_wasm_pool_bytes(module_len);
 }
 
 static void set_live(run_t *r, wasm_module_inst_t inst)
@@ -257,7 +249,7 @@ static bool one_pass(run_t *r, uint32_t pass)
     wasm_module_t module = wasm_runtime_load_ex(r->file, r->file_len, &la, err, sizeof(err));
     int64_t dt = esp_timer_get_time() - t0;
     if (!module) {
-        fail(r, "load", err);
+        fail(r, alloc_failed(err) ? OUT_OF_MEMORY : "load", err);
         return false;
     }
     if (pass == 0) {
@@ -273,12 +265,12 @@ static bool one_pass(run_t *r, uint32_t pass)
     t0 = esp_timer_get_time();
     inst = wasm_runtime_instantiate(module, MOY_WASM_EXEC_STACK, 0, err, sizeof(err));
     if (!inst) {
-        fail(r, "instantiate", err);
+        fail(r, alloc_failed(err) ? OUT_OF_MEMORY : "instantiate", err);
         goto out;
     }
     env = wasm_runtime_create_exec_env(inst, MOY_WASM_EXEC_STACK);
     if (!env) {
-        fail(r, "exec env", "out of pool");
+        fail(r, OUT_OF_MEMORY, "no pool for the exec env");
         goto out;
     }
     if (pass == 0) {
@@ -369,7 +361,7 @@ static void run_passes(run_t *r)
     r->pool = r->pool_asked ? r->pool_asked : pool_bytes(r->file_len);
     uint8_t *pool = heap_caps_malloc(r->pool, PSRAM_CAPS);
     if (!pool) {
-        fail(r, "no PSRAM for the runtime pool", NULL);
+        fail(r, OUT_OF_MEMORY, "no PSRAM for the runtime pool");
         return;
     }
     RuntimeInitArgs init;
@@ -424,13 +416,11 @@ static void release(run_t *r)
 // every other store read. Raises; on success the caller owns *out.
 //
 // `hold` is the linear memory the module will ask for once it is loaded, and
-// the file is read into a block that size: the load allocates the text and
-// the runtime's pool while the file is held, so a file read into a block of
-// its own size leaves a hole the linear memory cannot use and the free PSRAM
-// around it in two pieces. Freed after the load, a block the linear memory's
-// size is where the linear memory goes. The extra thirty-second and the KB
-// cover TLSF, which rounds a request up to its size class's boundary (a
-// thirty-second of the request) before it looks, and the mapping's header.
+// the file is read into a block that size (moy_wasm_file_block): the load
+// allocates the text and the runtime's pool while the file is held, so a file
+// read into a block of its own size leaves a hole the linear memory cannot
+// use and the free PSRAM around it in two pieces. Freed after the load, a
+// block the linear memory's size is where the linear memory goes.
 static void read_module(mp_obj_t path, uint32_t hold, uint8_t **out, uint32_t *out_len)
 {
     mp_obj_t args[2] = { path, MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
@@ -444,8 +434,8 @@ static void read_module(mp_obj_t path, uint32_t hold, uint8_t **out, uint32_t *o
         mp_stream_close(f);
         mp_raise_ValueError(MP_ERROR_TEXT("module file is empty, unreadable or too big"));
     }
-    size_t block = hold ? (size_t)hold + hold / 32 + 1024 : 0;
-    uint8_t *buf = heap_caps_malloc(block > (size_t)size ? block : (size_t)size, PSRAM_CAPS);
+    uint8_t *buf = heap_caps_malloc((size_t)moy_wasm_file_block(hold, (uint64_t)size),
+                                    PSRAM_CAPS);
     if (!buf) {
         buf = heap_caps_malloc((size_t)size, PSRAM_CAPS);
     }
@@ -738,7 +728,7 @@ static void *sess_thread(void *arg)
     size_t pool_size = pool_bytes(s->file_len);
     uint8_t *pool = heap_caps_malloc(pool_size, PSRAM_CAPS);
     if (!pool) {
-        rc = sess_fail(s, "no PSRAM for the runtime pool", NULL);
+        rc = sess_fail(s, OUT_OF_MEMORY, "no PSRAM for the runtime pool");
         goto opened;
     }
     RuntimeInitArgs init;
@@ -762,7 +752,7 @@ static void *sess_thread(void *arg)
     la.wasm_binary_freeable = true;
     module = wasm_runtime_load_ex(s->file, s->file_len, &la, err, sizeof(err));
     if (!module) {
-        rc = sess_fail(s, "load", err);
+        rc = sess_fail(s, alloc_failed(err) ? OUT_OF_MEMORY : "load", err);
         goto opened;
     }
     {
@@ -789,12 +779,12 @@ static void *sess_thread(void *arg)
     }
     inst = wasm_runtime_instantiate(module, MOY_WASM_EXEC_STACK, 0, err, sizeof(err));
     if (!inst) {
-        rc = sess_fail(s, "instantiate", err);
+        rc = sess_fail(s, alloc_failed(err) ? OUT_OF_MEMORY : "instantiate", err);
         goto opened;
     }
     env = wasm_runtime_create_exec_env(inst, MOY_WASM_EXEC_STACK);
     if (!env) {
-        rc = sess_fail(s, "exec env", "out of pool");
+        rc = sess_fail(s, OUT_OF_MEMORY, "no pool for the exec env");
         goto opened;
     }
     wasm_runtime_set_native_stack_boundary(
@@ -890,7 +880,7 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
     }
     sess_t *s = heap_caps_calloc(1, sizeof(sess_t), PSRAM_CAPS);
     if (!s) {
-        snprintf(err, errlen, "no PSRAM for the cart's session");
+        snprintf(err, errlen, OUT_OF_MEMORY ": no PSRAM for the cart's session");
         return 1;
     }
     s->go = xSemaphoreCreateBinary();
@@ -898,7 +888,7 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
     s->vm_done = xSemaphoreCreateBinary();
     if (!s->go || !s->back || !s->vm_done) {
         sess_free(s);
-        snprintf(err, errlen, "no memory for the cart's session");
+        snprintf(err, errlen, OUT_OF_MEMORY ": no memory for the cart's session");
         return 1;
     }
     s->ops = ops;
@@ -1014,6 +1004,25 @@ static mp_obj_t mod_result(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_result_obj, mod_result);
 
+// footprint(memory, module_bytes) -> (total, block): what loading a module
+// file of `module_bytes` for a cart declaring `memory` bytes of linear memory
+// takes from PSRAM at its peak, and the largest single free block it needs
+// (moy_wasm_footprint.h). mem()'s psram_free and psram_largest are what a
+// board can give it.
+static mp_obj_t mod_footprint(mp_obj_t memory_in, mp_obj_t module_in)
+{
+    mp_int_t memory = mp_obj_get_int(memory_in);
+    mp_int_t module = mp_obj_get_int(module_in);
+    if (memory < 0 || module < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("sizes must not be negative"));
+    }
+    uint64_t total, block;
+    moy_wasm_footprint((uint64_t)memory, (uint64_t)module, &total, &block);
+    mp_obj_t t[2] = { mp_obj_new_int_from_ull(total), mp_obj_new_int_from_ull(block) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_footprint_obj, mod_footprint);
+
 // mem() -> (internal_free, internal_largest, internal_min_since_boot,
 //           psram_free, psram_largest)
 static mp_obj_t mod_mem(void)
@@ -1045,6 +1054,7 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_result), MP_ROM_PTR(&mod_result_obj) },
     { MP_ROM_QSTR(MP_QSTR_terminate), MP_ROM_PTR(&mod_terminate_obj) },
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mod_mem_obj) },
+    { MP_ROM_QSTR(MP_QSTR_footprint), MP_ROM_PTR(&mod_footprint_obj) },
     // The key tail this build wants (after the wasm line), the fork commit it
     // runs, and the board's default run stack (bytes, in PSRAM).
     { MP_ROM_QSTR(MP_QSTR_KEY), MP_ROM_PTR(&mod_key_obj) },

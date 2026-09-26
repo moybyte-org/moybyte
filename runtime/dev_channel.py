@@ -422,7 +422,11 @@ def _remote_state(ws):
         st["screen"] = ws.screen
         st["frames"] = getattr(ws, "_frames_drawn", None)
         st["cart"] = (getattr(ws, "cart", None) or {}).get("title")
-        st["cart_error"] = getattr(ws, "cart_error", None)
+        # A fit notice is a panel too, and not an error: a compiled cart this
+        # console cannot hold, refused before it loaded (Player.notice).
+        notice = getattr(getattr(ws, "player", None), "notice", None)
+        st["notice"] = notice
+        st["cart_error"] = None if notice else getattr(ws, "cart_error", None)
         st["diag"] = bool(getattr(ws, "diag_live", False))
         # Idle screen blank: the harness has to be able to tell a blanked panel
         # from a hung one -- they look identical from the host end.

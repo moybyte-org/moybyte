@@ -560,9 +560,15 @@ class WasmRun(MoycoreRun):
         self.snap[_moycore.SNAP_PLAYERS] = 1
         # Every `read` the cart makes runs inside the store's gate, as every
         # other store access does: on the T-Deck it drains the panel's flush
-        # first, because the card shares the panel's SPI bus.
-        err = _moycore.wasm_open(module, head, int(pages), sha, path, swapped,
-                                 getattr(ws, "_with_sd", None))
+        # first, because the card shares the panel's SPI bus. The engine
+        # raises MemoryError when it cannot hold the module file, and a run
+        # left open here would refuse every later cart's run_begin.
+        try:
+            err = _moycore.wasm_open(module, head, int(pages), sha, path,
+                                     swapped, getattr(ws, "_with_sd", None))
+        except BaseException:
+            _moycore.close()
+            raise
         if err:
             try:
                 _moycore.close()
@@ -585,16 +591,58 @@ def make_moycore_runtime(ws):
     return _make
 
 
+# The most linear memory a footprint is asked about: 1 GiB, past any board's
+# PSRAM, so a larger declaration is simply too big and never overflows the
+# engine's machine word.
+_MAX_PAGES = 16384
+
+
+class WasmRuntime:
+    """`ws.runtimes["wasm"]`: called with `(ns, src)` it starts a WasmRun,
+    and before it does, the Player asks it what the cart's load needs
+    (`footprint`) and what this board can give (`memory`)."""
+
+    def __init__(self, ws):
+        self.ws = ws
+
+    def __call__(self, ns, src):
+        return WasmRun(self.ws, ns, src)
+
+    def footprint(self, cart):
+        """(total, block) the cart's load takes from PSRAM, by the engine's
+        own sizing (moy_wasm.footprint): its declared memory, this chip's
+        signed module and the pool that module gets. None when there is
+        nothing to measure -- no "memory", no module for this chip -- and the
+        load's own refusal says why."""
+        pages = cart.get("memory")
+        path = cart.get("path")
+        if not pages or not path:
+            return None
+        module = aot_path(path, cart.get("main", "main.wasm"), _moy_wasm.CHIP)
+        import os
+        gate = getattr(self.ws, "_with_sd", None)
+        try:
+            size = (gate(lambda: os.stat(module)[6]) if gate is not None
+                    else os.stat(module)[6])
+        except OSError:
+            return None
+        if not size:
+            return None
+        return _moy_wasm.footprint(min(int(pages), _MAX_PAGES) * 65536, size)
+
+    def memory(self):
+        """(free, largest block) of PSRAM, the engine's own report."""
+        m = _moy_wasm.mem()
+        return m[3], m[4]
+
+
 def make_wasm_runtime(ws):
-    """The compiled-cart runtime factory, or None when this build has no
-    engine (moycore's WASM flag is the build's own answer)."""
+    """The compiled-cart runtime, or None when this build has no engine
+    (moycore's WASM flag is the build's own answer)."""
     if (_moycore is None or not getattr(_moycore, "WASM", 0)
             or _moy_wasm is None):
         return None
-
-    def _make(ns, src):
-        return WasmRun(ws, ns, src)
-    return _make
+    return WasmRuntime(ws)
 
 
 def make_runtimes(ws):

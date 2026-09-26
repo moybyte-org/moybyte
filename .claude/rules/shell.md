@@ -104,6 +104,10 @@ to whoever called it.
   -- `"lua"`, and `"wasm"` (a compiled cart, `docs/wasm_tier_plan_2026-09.md`,
   on the same moycore console over the `native/moy_wasm` engine). A runtime a
   build lacks is an ABSENT KEY, and its carts open the runtime-missing panel.
+  A compiled cart the console has no room for opens that same panel as a
+  NOTICE, never an error: the Player compares the cart's load footprint with
+  what the runtime reports free before anything loads, and a load that runs
+  out anyway maps to the same notice (`native/moy_wasm/README.md`).
   `docs/moycore_direction.md` is the direction doc and `native/moycore/` the
   implementation; the decisions and traps:
   - **There is exactly ONE Lua runtime and no chooser.** The old trampoline engine

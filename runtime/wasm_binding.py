@@ -42,7 +42,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = native_build.ROOT
 _LIBMOY = native_build.LIBMOY                           # the raster + moy.h
 _BINDING_DIR = os.path.join(_ROOT, "native", "moycore", "libmoy")   # moy_wasm.c/.h
-_PIN_H = os.path.join(_ROOT, "native", "moy_wasm", "wamr_pin.h")
+_ENGINE_DIR = os.path.join(_ROOT, "native", "moy_wasm")   # moy_wasm_footprint.h
+_PIN_H = os.path.join(_ENGINE_DIR, "wamr_pin.h")
 _SHIM = os.path.join(_HERE, "moyhost_wasm.c")
 _CACHE = os.path.join(_ROOT, ".build", "host_wasm")
 WAMR_DIR = os.path.join(_ROOT, ".build", "host_wamr")
@@ -189,14 +190,15 @@ def build(verbose=False):
     if got is None:
         return None
     inc, lib = got
-    names = list(_RASTER) + ["moy_wasm.c", "moy_wasm.h", "moyhost_console.h"]
+    names = list(_RASTER) + ["moy_wasm.c", "moy_wasm.h", "moyhost_console.h",
+                             "moy_wasm_footprint.h"]
     cflags = native_build.BASE_CFLAGS + [
         "-DMOY_WASM=1", "-DMOY_PIXEL_RGB565=1", "-isystem", inc,
         # The pin rides the cache key: a moved pin is another runtime.
         "-DMOYHOST_WAMR_PIN=%s" % pin()]
     path = native_build.build(
         "moyhost_wasm", _SHIM, names, _CACHE, cflags=cflags,
-        libmoy_dir=(_LIBMOY, _BINDING_DIR, _HERE),
+        libmoy_dir=(_LIBMOY, _BINDING_DIR, _HERE, _ENGINE_DIR),
         link_flags=[lib, "-lm", "-lpthread", "-ldl"], verbose=verbose)
     if path is None:
         _WHY[0] = "no C compiler"
@@ -242,12 +244,29 @@ def _lib():
             d.hw_get_view.argtypes = [_P, ctypes.POINTER(_I), ctypes.POINTER(_I)]
             d.hw_get_view.restype = _I
             d.hw_free.argtypes = [_P]
+            _U64P = ctypes.POINTER(ctypes.c_uint64)
+            d.hw_footprint.argtypes = [ctypes.c_uint64, ctypes.c_uint64, _U64P, _U64P]
+            d.hw_footprint.restype = None
             if not d.hw_runtime():
                 _WHY[0] = "WAMR did not initialise"
                 _LIB[0] = False
             else:
                 _LIB[0] = d
     return _LIB[0] or None
+
+
+def footprint(memory, module_len):
+    """(total, block): what a load of a `module_len`-byte module for a cart
+    declaring `memory` bytes of linear memory takes at its peak, and the
+    largest single block it asks for -- the boards' own sizing
+    (native/moy_wasm/moy_wasm_footprint.h), compiled into this binding."""
+    d = _lib()
+    if d is None:
+        raise RuntimeError("no host wasm binding (%s)" % (why_unavailable() or "?"))
+    total, block = ctypes.c_uint64(0), ctypes.c_uint64(0)
+    d.hw_footprint(int(memory), int(module_len), ctypes.byref(total),
+                   ctypes.byref(block))
+    return total.value, block.value
 
 
 SNAP_LEN = 14

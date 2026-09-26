@@ -314,14 +314,11 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         # was a cart running on the runtime we were trying to retire.
         return MoycoreHostRun(_ws, ns, src)
 
-    def _make_wasm(ns, src, _ws=ws):
-        return wasm_host.WasmHostRun(_ws, ns, src)
-
     runtimes = {}
     if moycore_supports(""):
         runtimes["lua"] = _make_lua
     if wasm_host.available():
-        runtimes["wasm"] = _make_wasm
+        runtimes["wasm"] = wasm_host.WasmHostRuntime(ws)
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards). WiFi (#38) is the fake host service over the
     # same moy_carts wifi.json store the device uses; the pointer ranges over the

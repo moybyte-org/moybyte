@@ -273,6 +273,73 @@ def _compiled(cart):
     return (cart or {}).get("runtime") == "wasm"
 
 
+# A compiled cart bigger than this console can hold (docs/wasm_tier_plan_2026-09.md:
+# a cart above the floor is allowed, and a board that cannot fit it says so).
+# It is refused before it loads, on the runtime-missing panel's mechanism --
+# the run never starts and cart_error holds the text -- and the panel is drawn
+# as a NOTICE rather than an error: nothing went wrong, the cart is bigger than
+# this console. A load that still runs out of memory gets the same notice; the
+# engines on every tier begin that failure's text with _OUT_OF_MEMORY.
+NOTICE_TITLE = "Too big for this console."
+_OUT_OF_MEMORY = "out of memory"
+_MB = 1024 * 1024
+
+
+class _TooBig(Exception):
+    """A compiled cart the fit check refused; args[0] is the notice."""
+
+
+def _mb(n, up):
+    """`n` bytes as MB to one decimal, rounded UP for what a cart needs and
+    DOWN for what the console has, so a refusal never reads as a fit."""
+    tenths = (int(n) * 10 + (_MB - 1 if up else 0)) // _MB
+    return "%d.%d MB" % (tenths // 10, tenths % 10)
+
+
+def fit_notice(title, need, have):
+    """The notice for a cart whose load needs `need` -- (total, largest
+    block) -- where the console has `have` -- (free, largest free block):
+    the cart, what it needs and what this console has free. Either figure
+    may be None when it could not be read; the notice then says what it can."""
+    title = title or "This game"
+    if need is None or have is None:
+        return "%s needs more memory than this console has free." % title
+    total, block = need
+    free, largest = have
+    if total > free:
+        return ("%s needs %s of memory to run. This console has %s free."
+                % (title, _mb(total, True), _mb(free, False)))
+    if block > largest:
+        return ("%s needs %s of memory in one piece. The biggest piece this "
+                "console has free is %s." % (title, _mb(block, True),
+                                              _mb(largest, False)))
+    return ("%s needs %s of memory to run. This console has %s free, but not "
+            "in pieces it can use." % (title, _mb(total, True), _mb(free, False)))
+
+
+def _cart_fit(make, cart):
+    """(need, have) from a runtime that can say what a cart's load takes
+    (`footprint`) and what it can give (`memory`), or None when it cannot:
+    a runtime with no such report, a cart with nothing to measure, or a
+    report that failed -- the load then answers for itself."""
+    fp = getattr(make, "footprint", None)
+    mem = getattr(make, "memory", None)
+    if fp is None or mem is None:
+        return None
+    try:
+        need = fp(cart)
+        if need is None:
+            return None
+        return need, mem()
+    except Exception:  # noqa: BLE001 -- a report is advisory; the load decides
+        return None
+
+
+def _out_of_memory(exc):
+    """True for a start that failed for want of memory."""
+    return isinstance(exc, MemoryError) or _OUT_OF_MEMORY in _err_text(exc)
+
+
 def _lua_err_text(exc):
     """_err_text minus any appended "stack traceback:" block (#67 Phase 5): the
     panel is the same kid-short one-liner on every backend, and the raise
@@ -416,6 +483,8 @@ class Player:
         self._update = None
         self._draw = None
         self.cart_error = None        # last cart failure text -> on-canvas error panel
+        self._notice = None           # the fit notice's text: the panel is a notice
+                                      # while cart_error still holds it (`notice`)
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self.crash_file = None        # WHICH of the cart's scripts that line is in
                                       # (SPEC.md 4), or None for main/no crash
@@ -1571,6 +1640,14 @@ class Player:
                 # opens the panel, never a hang.
                 raise RuntimeError("needs the %s runtime (not in this build)"
                                    % RUNTIME_NAMES[runtime])
+            if runtime == "wasm":
+                # A compiled cart's load footprint against what this console
+                # can give it, before anything loads.
+                fit = _cart_fit(make, ws.cart or {})
+                if fit is not None and (fit[0][0] > fit[1][0]
+                                        or fit[0][1] > fit[1][1]):
+                    raise _TooBig(fit_notice((ws.cart or {}).get("title"),
+                                             fit[0], fit[1]))
             lua = make(ns, src)
             t_exec = _ticks_diff(_ticks_ms(), t5)
             t6 = _ticks_ms()
@@ -1587,9 +1664,19 @@ class Player:
             # a load/syntax or _init error carries its `cart:N:` position, so
             # EDIT drops on the line exactly like a Python SyntaxError (#24) --
             # and on a cart of several scripts, in the FILE that raised. A
-            # compiled cart has no line to drop on.
+            # compiled cart has no line to drop on; one this console cannot
+            # hold gets the fit notice, whether the check refused it or its
+            # load ran out of memory.
             if runtime == "wasm":
                 self.crash_file, self.crash_line = None, None
+                if isinstance(exc, _TooBig):
+                    self._notice = self.cart_error = exc.args[0]
+                elif _out_of_memory(exc):
+                    print("Moybyte cart load:", self.cart_error)
+                    fit = _cart_fit(make, ws.cart or {})
+                    self._notice = self.cart_error = fit_notice(
+                        (ws.cart or {}).get("title"),
+                        fit[0] if fit else None, fit[1] if fit else None)
             else:
                 self.crash_file, self.crash_line = _lua_cart_where(
                     self.cart_error, self.ws.cart)
@@ -1599,7 +1686,8 @@ class Player:
                                 _ticks_diff(_ticks_ms(), t0),
                                 h0[0], h1[0], h0[1], h1[1])
             self._print_run_diag("RUNERR", "err=%s" % self.cart_error)
-            print("Moybyte cart error:", self.cart_error)
+            print("Moybyte cart %s:" % ("notice" if self.notice else "error"),
+                  self.cart_error)
             return False
         self._lua = lua
         self.cart_error = None
@@ -1978,11 +2066,20 @@ class Player:
 
     # -- crash chrome + the transient exit toast (the Player's own UX) --------
 
+    @property
+    def notice(self):
+        """The fit notice's text while it is the panel up, else None: a
+        compiled cart this console cannot hold, refused before it loaded."""
+        n = self._notice
+        return n if n is not None and n == self.cart_error else None
+
     def _draw_error_panel(self, cv=None):
         # A friendly on-canvas crash report (the device never reaches serial, so
         # this is the ONLY error surface). Drawn with the indexed API only: a red
         # box + a short title + the exception text, word-wrapped and truncated to
         # fit. The CODE/EDIT button below it stays live so the kid can fix the cart.
+        # The fit notice is the same panel in calmer colours under its own
+        # title: nothing went wrong, the cart is bigger than this console.
         # `cv` defaults to the GAME canvas (a crashed running cart); the system-
         # domain cards tab passes ws.sys_canvas so its defensive fallback stays
         # visible on a distinct system canvas (#39 step 3).
@@ -1996,15 +2093,19 @@ class Player:
         h = min(132, cv.h - 16)
         x = (cv.w - w) // 2
         y = min(40, (cv.h - h) // 2)
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["red"])
-        cv.rect(x, y, w, 14, NAMES["red"])
-        cv.print("Your game stopped.", x + 6, y + 4, NAMES["white"], 1)
+        notice = self.notice is not None
+        edge = NAMES["orange"] if notice else NAMES["red"]
+        cv.rect(x, y, w, h, NAMES["dark_blue"] if notice else NAMES["dark_purple"])
+        cv.rectb(x, y, w, h, edge)
+        cv.rect(x, y, w, 14, edge)
+        cv.print(NOTICE_TITLE if notice else "Your game stopped.", x + 6, y + 4,
+                 NAMES["black"] if notice else NAMES["white"], 1)
         cols = (w - 16) // 8                       # 8px monospace cells
         lines = _wrap(self.cart_error or "Unknown error", cols)
         max_rows = (h - 30) // _CODE_LH
+        ink = NAMES["white"] if notice else NAMES["peach"]
         for i in range(min(len(lines), max_rows)):
-            cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, NAMES["peach"], 1)
+            cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, ink, 1)
         # A compiled cart's trap has no source line behind it and no EDIT
         # action, so the panel points at the way out instead.
         hint = ("TAP HOME TO LEAVE" if _compiled(self.ws.cart)

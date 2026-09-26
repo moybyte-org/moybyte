@@ -17,6 +17,10 @@ No compiler, no WAMR, no wasm carts on the host -- the rule `lua_host` states
 for Lua, and the Player says so through the runtime-missing panel exactly as a
 device build without the module does.
 
+A cart bigger than the host's configured limit (`MEMORY_LIMIT`) gets the
+notice a board with too little free PSRAM gives it, by the boards' own
+footprint arithmetic (`WasmHostRuntime`).
+
 Canonical home is runtime/; tests import it as runtime.wasm_host.
 """
 
@@ -26,6 +30,11 @@ try:
 except ImportError:                                  # pragma: no cover
     from lua_host import MoycoreHostRun
     from lua_ext import snap_slots, audio_ops
+
+
+# What the host gives a compiled cart: the most any console board has, the
+# P4's 32 MB of PSRAM, so a cart the host refuses is one no board could run.
+MEMORY_LIMIT = 32 * 1024 * 1024
 
 
 def available():
@@ -45,6 +54,37 @@ def _wire_swapped():
     except ImportError:
         from device import device_canvas as dc
     return dc.PAL565_WIRE is not dc.PAL565
+
+
+class WasmHostRuntime:
+    """`ws.runtimes["wasm"]` on the host: called with `(ns, src)` it starts
+    a WasmHostRun, and before it does, the Player asks it what the cart's load
+    needs (`footprint`) and what the host gives (`memory`) -- the device
+    glue's `moycore_glue.WasmRuntime`, with `MEMORY_LIMIT` for free PSRAM."""
+
+    def __init__(self, ws):
+        self.ws = ws
+
+    def __call__(self, ns, src):
+        return WasmHostRun(self.ws, ns, src)
+
+    def footprint(self, cart):
+        """(total, block) by the boards' sizing, the host's module being
+        the cart's own main.wasm; None with nothing to measure."""
+        import os
+        from runtime import wasm_binding
+        pages = cart.get("memory")
+        path = cart.get("path")
+        if not pages or not path:
+            return None
+        try:
+            size = os.path.getsize(os.path.join(path, cart.get("main", "main.wasm")))
+        except OSError:
+            return None
+        return wasm_binding.footprint(int(pages) * 65536, size)
+
+    def memory(self):
+        return MEMORY_LIMIT, MEMORY_LIMIT
 
 
 class WasmHostRun(MoycoreHostRun):
