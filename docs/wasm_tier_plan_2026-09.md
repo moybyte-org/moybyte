@@ -139,10 +139,13 @@ CLAUDE.md's placement rule:
   CLI so both carts repos share them. moybyte keeps the seeding and the
   on-glass guards. Seeding a compiled cart is designed in
   `ports/jet/README.md` and waits on #124's gate.
-- On the S3 the cart renders at about 4–5× Jet's native time. The candidates
-  are software bounds checks, frame and depth buffers in PSRAM, and Jet's S3
-  fast paths compiled out; a half-width frame is widened to 320 before
-  `blit565`, which is why half width saves only about a fifth.
+- The compiled tier's render cost against native (#158): the per-chip
+  compilers used to split every memory access they could not prove
+  aligned into single bytes, and the cart kept its per-pixel shading calls
+  out of line; both are fixed. Per pixel on one core, Jet's raster runs
+  about 1.6× native and its setup about 2×. What remains is the software
+  bounds checks (unmeasured), frame, depth and transform buffers in PSRAM,
+  and the console's frame copy, which is PSRAM-bound.
 
 ### Phase 4 — promotion (moy-spec; the owner's decision)
 
