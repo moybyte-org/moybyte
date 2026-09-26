@@ -15,10 +15,7 @@ quantize first.
 
 ## Credits
 
-- **Jet** and the teapot example it ports: [CubeCoders](https://github.com/CubeCoders/Jet), written by PhonicUK. MIT.
-- **The Utah teapot:** Martin Newell (1975). The mesh comes from freeglut's teapot data by Pawel W. Olszta, built from Juhana Kouhia's archive of the original.
-
-The cart's `LICENSES.txt` carries both notices.
+Jet is by [CubeCoders](https://github.com/CubeCoders/Jet) (PhonicUK).
 
 ## Playing it
 
