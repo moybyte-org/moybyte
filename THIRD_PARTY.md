@@ -523,15 +523,17 @@ image. Nothing else is pulled in.
 | doomgeneric (id Software's DOOM, ozkl's portable fork), the engine `build_wasm.sh` stages from a gitignored checkout the developer fetches and `build_cart.py` fetches at a pinned commit into its gitignored cache, checked by the sha256 of its tree; never vendored | <https://github.com/ozkl/doomgeneric> | **GPL-2.0** |
 | DOOM shareware IWAD `doom1.wad` v1.9 (1993), a gitignored file the developer obtains; `build_cart.py` fetches Debian's `doom-wad-shareware` source package (<http://deb.debian.org/debian/pool/non-free/d/doom-wad-shareware/>) into its gitignored cache and checks the tarball and the WAD by sha256; never vendored, never redistributed | id Software | id Software Limited Use licence: free unmodified copies only, no consideration, no derivative works |
 
-**The Doom port is the `ports/celeste.moy` case, not a cart of ours.**
-`experiments/wasm_aot/doom/dg_moy.c` (the spike's) and `dg_cart.c` (the
-cart's) are the platform glue doomgeneric links against, so everything
-`build_wasm.sh` and `build_cart.py` produce is a derivative of GPL code
-carrying a WAD under id's terms: it is built locally as a demo, and it must not
-be hosted, seeded, sold, pushed to a store, or shipped in a product image,
-exactly as §7 says of Celeste. `build_cart.py` prints both licences before it
-builds and writes them into the cart as `LICENSES.txt`. No `.wasm`, `.aot`,
-`.wad` or built cart is tracked by this repository.
+**Doom lives in its own repository, not in this one's products.** The
+cart's glue and recipe are GPL-2.0-or-later in
+<https://github.com/moybyte-org/gpl-carts>, which publishes built carts as a
+free, opt-in download with their complete source. The shareware WAD is never
+hosted there or here: that repository's installer fetches Debian's copy and
+prints id's terms first, since they allow free copies but no consideration
+and no derivative works. Doom is never seeded, preloaded, sold with a
+console, or shipped in a product image, exactly as §7 says of Celeste. The
+spike's glue under `experiments/wasm_aot/doom/` is the same GPL derivative
+and is built only locally. No `.wasm`, `.aot`, `.wad` or built cart is
+tracked by this repository.
 
 `experiments/wasm_aot/core6502.c` and `spike6502.lua` are Moybyte's own
 hand-written 8-opcode benchmark cores, not derived from any emulator.

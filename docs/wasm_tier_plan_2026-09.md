@@ -74,11 +74,12 @@ the decisions below record what they changed.
   cannot fit it refuses at launch with a plain notice to the player, never an
   error panel or a crash. Raising what a board can fit is the kernel work in
   the C re-architecture issue, not a per-cart exception.
-- **Doom is a locally built demo, never a cart of ours.** doomgeneric is GPL
-  and the shareware WAD forbids consideration and derivative works, so the
-  port follows the Celeste rule in `THIRD_PARTY.md`: a recipe fetches both,
-  prints both licences, builds the cart on the developer's machine, and it
-  is never seeded or shipped with the firmware. It runs from the launcher
+- **Doom lives in moybyte-org/gpl-carts, never in the firmware.** doomgeneric
+  is GPL and the shareware WAD forbids consideration and derivative works, so
+  the glue and recipe are GPL-2.0-or-later in that repository (decided
+  2026-09-26), which publishes built carts with their source; its installer
+  fetches Debian's WAD rather than anyone hosting it, and Doom is never
+  seeded, preloaded or shipped with a console (`THIRD_PARTY.md`). It runs from the launcher
   on a board that can fit it (the Waveshare P4 today) and shows the notice
   on one that cannot; the next decision names the levers that would widen
   that set.
@@ -187,8 +188,8 @@ binding is tested on more than one host before anyone depends on it.
   S3 diet.~~ Decided 2026-09-25: ship on every board. The S3 boards' floor
   breach is the console's with WiFi up, not the tier's; WiFi is not meant to
   be on while a cart plays, and the S3 diet is a later item of its own.
-- Whether the Doom glue under `experiments/wasm_aot/doom/` is marked
-  GPL-2.0-or-later, which is what linking into doomgeneric implies.
+- ~~Whether the Doom glue is marked GPL-2.0-or-later.~~ Decided 2026-09-26:
+  it is, in moybyte-org/gpl-carts, which is Doom's home.
 - Human testing on every touched board before any of this reaches master.
 - After phase 4: promote the proposal to a binding, or keep the vendor
   runtime. Nothing before phase 4 is a public promise.
