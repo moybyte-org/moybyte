@@ -33,3 +33,7 @@ doom/doom_spike/sdkconfig.p4
 doom/doom_spike/sdkconfig.p4.old
 # the pinned compilers (tools/wasm_module.py), fetched or built, never committed
 toolchain/dist/
+# doom/build_cart.py: its downloads, its staged engine and the cart it builds
+doom/cache/
+doom/stage/
+doom/out/

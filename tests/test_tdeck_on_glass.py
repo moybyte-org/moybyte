@@ -111,6 +111,20 @@ def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_c
     on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
 
 
+# Doom, built by the recipe (experiments/wasm_aot/doom/): it does not fit the
+# floor board's cart-runtime reserve with the shell resident -- its load needs
+# the linear memory's block, the pool and the text at once, about as much
+# PSRAM as the Guition S3's launcher leaves -- and this board carries the same
+# 3 MB reserve, so this skips, saying so, until the reserve or the cart changes.
+DOOM_SHORT = ("Doom does not fit the 3 MB cart-runtime reserve of the S3 boards "
+              "with the shell resident (measured 2026-09-26 on the Guition S3, "
+              "the floor board; experiments/wasm_aot/doom/README.md)")
+
+
+def test_doom_frames_match_the_host(board):
+    on_glass.doom_frames_match_the_host(board, WASM_BOARD_DIR, short=DOOM_SHORT)
+
+
 def test_state_snapshot_has_the_fullscreen_tier_shape(board):
     on_glass.fullscreen_tier_state(board)
 

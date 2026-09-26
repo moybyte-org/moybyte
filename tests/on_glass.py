@@ -939,6 +939,156 @@ def wasm_tampered_module_is_refused(board, board_dir):
     return err
 
 
+# -- Doom, built by the recipe (experiments/wasm_aot/doom/build_cart.py) --------
+#
+# Opt-in by construction: the cart links GPL code and carries the shareware
+# WAD, so it is never in the repository or in CI, and these skip, saying so,
+# until the developer has built it. What they hold: the cart runs from the
+# launcher, and the frame Doom renders at each named gametic is the frame the
+# host renders there (frames.py; the attract loop's transitions excluded by
+# name).
+
+DOOM_TICS = 3000
+
+
+def _doom():
+    import importlib.util
+    path = ROOT / "experiments" / "wasm_aot" / "doom" / "frames.py"
+    spec = importlib.util.spec_from_file_location("doom_frames", str(path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    if not os.path.isfile(os.path.join(mod.CART, "main.wasm")):
+        pytest.skip("the recipe's Doom cart is not built (python3 experiments/"
+                    "wasm_aot/doom/build_cart.py): doomgeneric and the WAD are "
+                    "never in the repository or CI")
+    return mod
+
+
+_DOOM_HOST = {}
+
+_CHUNKED_SHA = '''
+def _sha_chunked(p):
+    import hashlib
+    try:
+        f = open(p, 'rb')
+    except OSError:
+        return None
+    h = hashlib.sha256()
+    while True:
+        blk = f.read(8192)
+        if not blk:
+            break
+        h.update(blk)
+    f.close()
+    return ''.join('%02x' % c for c in h.digest())
+'''
+
+
+def doom_host_crcs(tics=DOOM_TICS):
+    """The host run's frame CRCs, once per session."""
+    frames = _doom()
+    if tics not in _DOOM_HOST:
+        _DOOM_HOST[tics] = frames.host_crcs(tics=tics)[0]
+    return _DOOM_HOST[tics]
+
+
+def doom_push(board, board_dir):
+    """The recipe's cart into the store as doom.moy, less the other chip's
+    module; files already current are not sent again."""
+    import shutil
+    import tempfile
+    frames = _doom()
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    tmp = tempfile.mkdtemp(prefix="moy_doom_")
+    local = os.path.join(tmp, "doom.moy")
+    shutil.copytree(frames.CART, local)
+    for name in os.listdir(local):
+        if name.endswith(".aot") and not name.endswith(".%s.aot" % chip):
+            os.remove(os.path.join(local, name))
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    dest = root.rstrip("/") + "/doom.moy"
+    # A store without the room is the board's storage, not the cart's fault:
+    # the plan leaves an SD card for the P4 boards to the owner.
+    have = board.pyval("(lambda o, d: {n: o.stat(d + '/' + n)[6] for n in o.listdir(d)})"
+                       "(__import__('os'), %r) if %r.rstrip('/').split('/')[-1] in "
+                       "__import__('os').listdir(%r) else {}" % (dest, dest, root),
+                       timeout=30) or {}
+    need = sum(os.path.getsize(os.path.join(local, n)) - (have.get(n) or 0)
+               for n in os.listdir(local))
+    st = board.pyval("__import__('os').statvfs(%r)" % root, timeout=30, strict=True)
+    free = st[0] * st[3]
+    if need > free:
+        pytest.skip("the cart store at %s has %d bytes free and the Doom cart "
+                    "needs %d more: the store cannot hold it" % (root, free, need))
+    # The WAD is 4 MB, more than the push's own check reads into memory to
+    # hash, so it is hashed here in pieces and left out when it is current.
+    import hashlib
+    wad = os.path.join(local, "doom1.wad")
+    with open(wad, "rb") as f:
+        want = hashlib.sha256(f.read()).hexdigest()
+    assert board.pyexec(_CHUNKED_SHA), "could not install the hash helper"
+    if board.pyval("ws._g['_sha_chunked'](%r)" % (dest + "/doom1.wad"),
+                   timeout=300) == want:
+        os.remove(wad)
+    _push_folder(board, board_dir, local, dest)
+    board.pyval("len(ws.rescan_carts() or ())", timeout=90)
+    return frames
+
+
+def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None):
+    """Doom from the launcher, WiFi off, until gametic `tics`: every frame CRC
+    the board records at a named gametic is the host's, outside the named
+    transitions. Returns (median drawn fps, compared, excluded). `short` is
+    the reason a board's cart-runtime reserve cannot hold the cart, which
+    skips it -- the floor verdict, stated where the board's suite calls this."""
+    import time
+    from runtime.perf_line import parse_perf
+    if short:
+        pytest.skip(short)
+    frames = doom_push(board, board_dir)
+    host = doom_host_crcs(tics)
+    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    pm = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
+          "(__import__('array').array('i', bytearray(1024)))")
+    line = board.cmd("run doom", wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(5.0)
+        n0 = len(board.lines)
+        end = time.time() + tics / 35.0 * 3 + 60
+        while True:
+            st = board.state(timeout=30)
+            assert st.get("cart") == "Doom", st.get("cart")
+            assert not st.get("cart_error"), st["cart_error"]
+            img = board.pyval(pm, timeout=30, strict=True)
+            if img[frames.PM_GAMETIC] >= tics:
+                break
+            assert time.time() < end, "gametic %d of %d" % (img[frames.PM_GAMETIC], tics)
+            board.drain(5.0)
+        got = [parse_perf(ln) for ln in board.perf_lines(n0)]
+    finally:
+        board.leave_cart()
+        board.drain(1.5)
+    assert not frames.error(img), frames.error(img)
+    mine = frames.crcs(img)
+    compared, skipped = [], []
+    for tic, crc in sorted(host.items()):
+        why = frames.excluded(tic)
+        if why:
+            skipped.append((tic, why))
+            continue
+        assert mine.get(tic) == crc, "gametic %d: board %08x, host %08x" % (
+            tic, mine.get(tic, 0), crc)
+        compared.append(tic)
+    drawn = sorted([g["fps"][0] for g in got if g.get("cart") == "Doom"][1:])
+    fps = drawn[len(drawn) // 2] if drawn else None
+    print("\nDOOM frames: %d gametics match the host, excluded %r; drawn fps %s"
+          % (len(compared), skipped, drawn))
+    assert compared, "no gametic compared"
+    return fps, compared, skipped
+
+
 def wasm_missing_module_is_refused(board, board_dir):
     """A compiled cart whose module was compiled for another chip is refused
     before anything runs: the Player's panel names it, and the desk comes back."""

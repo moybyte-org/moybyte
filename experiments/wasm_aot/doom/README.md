@@ -1,12 +1,106 @@
-# doom/ — Doom as a WASM cart on the T-Deck (ESP32-S3), #158
+# doom/ — Doom as a WASM module: the #158 spike, and the cart built by recipe
 
-The S3 half of the #158 spike, measured 2026-09-24. doomgeneric compiled to
-wasm32 with wasi-sdk, AOT-compiled for Xtensa with the wamrc that
-`../toolchain/build_wamrc_xtensa.sh` builds, run by WAMR on the LilyGO T-Deck
-with the panel, keyboard and trackball driven natively. The numbers and the
-constraints they were measured under are in `../README.md`.
+Two things live here. The **cart**: `build_cart.py` builds Doom as a
+`"runtime": "wasm"` cart on the console's own imports, on the developer's
+machine, for the developer (below). The **spike**: the S3 half of #158,
+measured 2026-09-24 -- doomgeneric compiled to wasm32 with wasi-sdk,
+AOT-compiled for Xtensa with the wamrc that `../toolchain/build_wamrc_xtensa.sh`
+builds, run by WAMR on the LilyGO T-Deck with the panel, keyboard and
+trackball driven natively by an app that replaces the console firmware. The
+spike's numbers and the constraints they were measured under are in
+`../README.md`.
 
-## The pieces
+## The cart: `build_cart.py`
+
+```bash
+python3 experiments/wasm_aot/doom/build_cart.py        # -> out/doom.moy, zone 1 MiB
+python3 tools/push_cart.py experiments/wasm_aot/doom/out/doom.moy --board p4
+```
+
+The recipe fetches doomgeneric at the commit the spike ran (GitHub's tarball,
+checked by the sha256 of its tree, because GitHub does not promise the
+tarball's bytes), the shareware `doom1.wad` v1.9 from Debian's archive (the
+`doom-wad-shareware` source package's upstream tarball, and the WAD in it, each
+checked by sha256), and wasi-sdk 24 when `../toolchain/wasi-sdk` does not have
+it. It prints doomgeneric's GPL notice and id's licence -- the text Debian's
+copyright file carries -- before it builds anything, stages the engine with the
+glue, patches the seams below, links `main.wasm` with no import outside
+`"moy"`, and compiles and signs a module per chip with `tools/wasm_module.py`
+(the pinned compilers, the OTA signing key). Everything it downloads or writes
+stays under this directory's gitignored `cache/`, `stage/` and `out/`.
+
+**It is never committed, seeded or pushed to a store** (THIRD_PARTY.md, the
+Celeste rule): the cart links GPL code and carries a WAD whose licence forbids
+consideration and derivative works, so it exists on the machine that built it
+and the boards that machine pushes it to. The cart folder carries both
+licences in `LICENSES.txt`.
+
+`dg_cart.c` is the glue, on the proposal's imports:
+
+- **Pacing is the tick model's.** `_update` turns the console's input into key
+  events and runs the game tics `time()` says are due -- `TryRunTics` returns
+  when none is, where Doom's own loop would sleep -- and `_draw` renders and
+  blits. The screen melt takes one step a frame for the tics of `time()` since
+  the last, with no game tic run until it ends, where Doom runs it as a loop
+  waiting on the clock; the game then catches up, as Doom's own loop does
+  after a melt. No sleep, no wait, no clock but `time()`.
+- **The screen** is `blit` with Doom's 256-entry palette, the 320 x 200 frame
+  letterboxed into the 320 x 240 canvas (Doom draws straight into the cart's
+  frame). Silent: `-nosound`.
+- **The WAD** is the cart's own file, through `read`. On a board every read
+  runs inside the store's gate, which on the T-Deck drains the panel's flush
+  first (the card shares its SPI bus).
+- **No WASI.** wasi-libc's calls land in the glue: stdout and stderr keep a
+  fatal `I_Error`'s line, `exit(0)` is `quit()`, any other exit traps, and
+  there are no files but the WAD.
+- **Input, on every board.** The buttons (SPEC.md 7.3): the d-pad walks and
+  turns, `a` fires (selects in a menu, `y` at a prompt), `b` uses (backs out of
+  a menu, `n` at a prompt), `run` opens the menu. A board with no buttons
+  plays on its touch screen, a 3 x 3 pad over the whole canvas: the top row
+  walks forward (turning at the corners), the middle row turns and, in the
+  centre, fires; the bottom row uses, walks back and opens the menu. One
+  pointer, so one action at a time. Where there is a keyboard, `,` and `.`
+  strafe.
+- **config.json** carries the zone (`zone`, Doom's `-mb` in whole MiB) and
+  `args`, more of Doom's own flags (`-warp 1 3`), read at `_init`, so either
+  can change without a rebuild as long as the manifest's memory holds the
+  zone.
+- **pmem is what a test reads back**: slot 0 the last CRC index and slots
+  1..199 the CRC of the frame at every 500th gametic (rendered at that tic, so
+  it is the same frame on every host whatever the host's draw cadence -- the
+  spectre fuzz's phase is reset for it, since it walks across frames), 200..231
+  a fatal `I_Error`'s text, 240 the zone asked for, 241 the zone's lowest free
+  KB (free plus purgeable), 242 the heap's headroom after `_init` in KB, 243 the
+  gametic and 244 the map. `frames.py` reads it, runs the cart on the host twin
+  for the same CRCs, and names the attract loop's transitions;
+  `tests/test_doom_cart.py` holds the host run (the frames do not depend on
+  the draw cadence; every level of the episode loads and plays at the cart's
+  zone) and `tests/on_glass.py`'s `doom_frames_match_the_host` holds a board
+  to it. Both skip until the recipe has built the cart.
+
+**Where it runs: nowhere from the launcher, yet (2026-09-26).** The plan's
+rule is every board or none, measured on the floor board, the Guition S3. The
+recipe's default is the smallest zone the shareware episode loads and plays
+in (`-mb 1`: every level warped to and played, and the attract loop's three
+demos, on the host twin); smaller is not a whole MiB. At that zone the cart
+does not fit the S3's 3 MB cart-runtime reserve with the shell resident: a
+cart's load holds the linear memory's block, the runtime pool and the text at
+once, and the launcher leaves about that much PSRAM free, so the board
+refuses it cleanly ("allocate linear memory failed" or, some boots, the load).
+A larger reserve (`MOYBYTE_GC_SPLIT_RESERVE`) is the lever that fits it, at
+the Python heap's expense: the board then runs Doom from its launcher with
+every frame CRC equal to the host's. Text in flash would take the text out of
+PSRAM, and costs a partition per board and a full-erase reflash of every
+device. Neither is taken here (#158 carries the tier's figures). The
+P4 boards run the cart from the launcher, and their suites hold its frames to
+the host's; the S3 suites skip the check, saying why.
+
+The seams the recipe patches in the staged copy, each asserted: the IWAD
+search answers for `doom1.wad`; `DG_ScreenBuffer` is the cart's frame; the
+wait in `TryRunTics` is a return; each game tic calls `DG_AfterTic` (the CRC,
+the zone's low-water mark); `D_Display` begins the melt and steps it.
+
+## The spike's pieces
 
 | file | what |
 |---|---|

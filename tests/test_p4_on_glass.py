@@ -114,6 +114,12 @@ def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_c
     on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
 
 
+# Doom, built by the recipe (experiments/wasm_aot/doom/): skips until the
+# developer has built the cart, which is never in the repository or CI.
+def test_doom_frames_match_the_host(board):
+    on_glass.doom_frames_match_the_host(board, WASM_BOARD_DIR)
+
+
 def test_boots_to_the_desk(board):
     st = board.state()
     assert st.get("desk") is True
