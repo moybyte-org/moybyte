@@ -408,6 +408,16 @@ def luaprof_line(st, rng, top=10):
     return " | ".join(out)
 
 
+def _recv_err(ws, exc, got, total):
+    """The RECV ERR text for a write that failed: `store full ...` when the
+    store says it had no room (moy_carts.store_full), which the push tool and
+    the screen both put plainly; the exception otherwise."""
+    full = getattr(getattr(ws, "carts_store", None), "store_full", None)
+    if full is not None and full(exc):
+        return "store full after %d of %d bytes" % (got, total)
+    return "%s: %s" % (type(exc).__name__, exc)
+
+
 def _remote_state(ws):
     """One-line JSON snapshot for the `state` command -- the assertion source an
     on-glass harness reads instead of pixels. Every field best-effort: a broken
@@ -995,7 +1005,7 @@ class DevChannel:
                   % (self.rx, self.lines, self.dropped, len(self.buf),
                      self.raw), diag)
 
-    def _recv(self, line, parts):
+    def _recv(self, line, parts, ws=None):
         """`recv <nbytes> <window> <path>`: nbytes RAW off stdin into
         <path>.new, in windows the host may not run ahead of.
 
@@ -1020,6 +1030,8 @@ class DevChannel:
                                                         this offset
             RECV done <sha12> <nbytes>                  what landed, hashed
             RECV ERR <what>                             gave up; tmp removed
+            RECV ERR store full after <n> of <total>    the store has no room;
+                                                        the screen says so too
             RECV caps max=<n> idle=<ms>                 bare `recv`: the probe
 
         `RECV caps` is the whole capability handshake. An image without this
@@ -1127,13 +1139,14 @@ class DevChannel:
                 self.raw += n
                 print("RECV ack %d" % got)
         except Exception as exc:  # noqa: BLE001 -- a full store must not kill the loop
-            err = "%s: %s" % (type(exc).__name__, exc)
+            err = _recv_err(ws, exc, got, total)
         finally:
             _kbd_intr(3)
             try:
                 f.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001 -- a close can be the write that fails
+                if err is None:
+                    err = _recv_err(ws, exc, got, total)
         if err is None:
             # Hash the FILE, not the buffer that filled it. `open(p,'wb')` has
             # reported a byte count on this console for a file that read back
@@ -1159,6 +1172,9 @@ class DevChannel:
             except Exception:  # noqa: BLE001 -- it may never have been created
                 pass
             print("RECV ERR %s" % err)
+            say = getattr(ws, "notice", None)
+            if err.startswith("store full") and say is not None:
+                say("CAN'T ADD CART", "the store is full", "warn")
             return
         print("RECV done %s %d" % (sha.digest().hex()[:12], got))
 
@@ -1436,7 +1452,7 @@ class DevChannel:
         if cmd == "recv":
             # The one command that leaves the line discipline: everything after
             # its newline is payload, not commands. See _recv.
-            self._recv(line, parts)
+            self._recv(line, parts, ws)
             return
         if cmd == "py" and len(parts) > 1:
             code = line.split(None, 1)[1]

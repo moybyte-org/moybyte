@@ -55,8 +55,15 @@ seconds per cart over a cable that does hundreds of KB/s -- and keeping it
 alongside `recv` would mean two upload protocols, one of them exercised only by
 boards nobody had flashed. So a board whose firmware predates `recv` does not
 get a slower push; it gets one line saying to flash it. What survives on the
-`py` channel is the small stuff: the already-current hash, the mkdir, and the
-rename.
+`py` channel is the small stuff: the already-current hash, the mkdir, the
+store's room and the rename.
+
+A STORE WITHOUT THE ROOM IS ONE LINE, NOT A TRACEBACK. Before the first window
+the tool weighs what the push adds against the free bytes of the store it
+lands on and refuses a cart that cannot fit, so nothing half-arrives; a store
+that fills anyway (a card rounds every file up to its clusters) answers `RECV
+ERR store full ...`, the board's banner says CAN'T ADD CART, and the tool
+says the same thing in one line. Every other failure is one line as well.
 """
 import argparse
 import glob
@@ -119,10 +126,12 @@ def serial_cfg(board):
         sys.exit("%s/board.toml has no [serial] section" % d)
     return ser
 
-# The only device-side helpers left: the already-current check and the mkdir.
-# `_sha` reads the file back rather than trusting what was written, which is the
-# same thing the board does at the end of a `recv` -- and the reason both do is
-# item 2 above.
+# The only device-side helpers left: the already-current check, the mkdir and
+# the store's room. `_sha` reads the file back rather than trusting what was
+# written, which is the same thing the board does at the end of a `recv` -- and
+# the reason both do is item 2 above. `_room` is the free bytes of the store a
+# path is on (None where the board cannot say), `_size` a file's size there (0
+# when it is not there yet).
 HELPERS = """
 import hashlib, os
 def _sha(p):
@@ -132,8 +141,44 @@ def _mkdir(p):
     try: os.mkdir(p)
     except Exception: pass
     return 1
+def _room(p):
+    try:
+        st = os.statvfs(p)
+        return st[0] * st[3]
+    except Exception: return None
+def _size(p):
+    try: return os.stat(p)[6]
+    except Exception: return 0
 ws._g['_sha'] = _sha; ws._g['_mkdir'] = _mkdir
+ws._g['_room'] = _room; ws._g['_size'] = _size
 """
+
+
+class StoreFull(RuntimeError):
+    """The board's store has no room for the cart."""
+
+
+def _mb(n):
+    return "%.1f MB" % (n / (1024.0 * 1024.0))
+
+
+def check_room(b, cart, names, dest):
+    """Refuse, before a byte is sent, a cart the store cannot hold: what the
+    push adds (each file's size less the size it replaces) against the free
+    bytes of the store `dest` is on. A board that cannot say how much room it
+    has is pushed to, and the board's own `store full` answer stops it."""
+    root = dest.rstrip("/").rsplit("/", 1)[0] or "/"
+    free = b.pyval("ws._g['_room'](%r)" % root, timeout=30)
+    if not isinstance(free, int):
+        return
+    need = 0
+    for f in names:
+        local = os.path.getsize(os.path.join(cart, f))
+        have = b.pyval("ws._g['_size'](%r)" % (dest + "/" + f), timeout=30)
+        need += local - (have if isinstance(have, int) else 0)
+    if need > free:
+        raise StoreFull("the cart does not fit: it needs %s more and the store "
+                        "at %s has %s free" % (_mb(need), root, _mb(free)))
 
 
 # A board that advertises `recv` but declares no window in its [serial] block
@@ -272,6 +317,9 @@ def push_file_raw(b, src, dst, window, verbose=False):
     # not as a command -- and every byte after it would be off by that much.
     b._write_line("recv %d %d %s" % (len(raw), window, dst))
     r, seen = _recv_reply(b, seen, timeout=30.0)
+    if r and r[0] == "ERR" and r[1:3] == ["store", "full"]:
+        raise StoreFull("%s did not fit: the board's store is full (%s)"
+                        % (name, " ".join(r[1:])))
     if not r or r[0] != "ready":
         raise RuntimeError("%s: the board did not arm the raw upload (%s)"
                            % (name, " ".join(r or ["no reply"])))
@@ -310,6 +358,9 @@ def push_file_raw(b, src, dst, window, verbose=False):
                 print("     re-sending the window at %d" % sent)
             continue
         if r[0] == "ERR":
+            if r[1:3] == ["store", "full"]:
+                raise StoreFull("%s did not fit: the board's store is full (%s)"
+                                % (name, " ".join(r[1:])))
             raise RuntimeError("%s: the board stopped the upload: %s"
                                % (name, " ".join(r[1:])))
         if r[0] != "ack" or r[1:2] != [str(sent)]:
@@ -452,15 +503,25 @@ def main(argv=None):
                  a.board, win))
         if not b.pyexec(HELPERS):
             sys.exit("could not install the upload helpers")
-        b.pyval("ws._g['_mkdir'](%r)" % dest)
-        for sub in sub_dirs(names):
-            b.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
-        wrote = 0
-        for f in names:
-            if a.force:
-                b.pyval("__import__('os').remove(%r) or 1" % (dest + "/" + f))
-            wrote += push_file_raw(b, os.path.join(cart, f), dest + "/" + f,
-                                   win, verbose=a.verbose)
+        # A store without the room says so in one line, before or during the
+        # push, and so does any other failure: this is a command a person
+        # reads, not a traceback.
+        try:
+            check_room(b, cart, names, dest)
+            b.pyval("ws._g['_mkdir'](%r)" % dest)
+            for sub in sub_dirs(names):
+                b.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
+            wrote = 0
+            for f in names:
+                if a.force:
+                    b.pyval("__import__('os').remove(%r) or 1" % (dest + "/" + f))
+                wrote += push_file_raw(b, os.path.join(cart, f), dest + "/" + f,
+                                       win, verbose=a.verbose)
+        except StoreFull as exc:
+            sys.exit("STORE FULL: %s. Nothing more was written; free some room "
+                     "on the board and push again." % exc)
+        except RuntimeError as exc:
+            sys.exit(str(exc))
         print("%d file%s written, %d already current"
               % (wrote, "" if wrote == 1 else "s", len(names) - wrote))
         # The store is scanned at boot, so a pushed cart appears on the next one.

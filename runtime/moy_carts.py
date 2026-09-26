@@ -1460,6 +1460,39 @@ NEW_TEMPLATE = {
 }
 
 
+# errno ENOSPC: what every store's filesystem (FAT on a card, littlefs on the
+# P4s' flash, the host's) raises for a write that does not fit.
+ENOSPC = 28
+
+
+def store_full(exc):
+    """True for an error that says the store has no room left. A copy or an
+    install that fails this way is a notice to the kid ("the store is full"), never
+    a silent half-cart: the writers below remove what they had written."""
+    if not isinstance(exc, OSError):
+        return False
+    code = getattr(exc, "errno", None)
+    if code is None and exc.args:
+        code = exc.args[0]
+    return code == ENOSPC
+
+
+def _whole_or_none(d, fn):
+    """`fn()`, which writes a new cart folder `d`. When the store runs out of
+    room part way, the folder goes with it -- a cart missing its module or its
+    main is one the shelf would list and the Player could never run -- and the
+    error is raised for the caller to say so."""
+    try:
+        return fn()
+    except OSError as exc:
+        if store_full(exc):
+            try:
+                _rmtree(d)
+            except OSError:
+                pass
+        raise
+
+
 def _unique_dir(root, base):
     d = root + "/" + base + ".moy"
     if not _exists(d):
@@ -1485,6 +1518,14 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
     another "moy-1" cart at its declared tick, not a restamped moybyte one."""
     d = _unique_dir(root, slug(title))
     _mkdir(d)
+    return _whole_or_none(d, lambda: _create_in(
+        d, title, src, cfg, edit, type, runtime, main, scenes, scene_order,
+        author, palette, extensions, format, fps, icon, canvas))
+
+
+def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
+               scene_order, author, palette, extensions, format, fps, icon,
+               canvas):
     manifest = {
         "format": format or CART_FORMAT, "title": title, "type": type,
         "runtime": runtime, "main": main, "edit": edit or [],
@@ -1540,7 +1581,8 @@ def _copy_cart_files(src, dst, main):
     """Copy a cart folder's asset files (one level of subfolders -- images/,
     scenes/, docs/) into a fresh copy. Degrade-don't-throw like load():
     an unreadable entry is skipped, never fatal, so a copy can lose one asset but
-    never fail outright."""
+    never fail outright -- except when the store is full, which raises: a copy
+    that ran out of room is not a copy."""
     try:
         names = os.listdir(src)
     except OSError:
@@ -1554,15 +1596,17 @@ def _copy_cart_files(src, dst, main):
         except OSError:
             try:
                 _write(d, _read(s))      # a plain file
-            except (OSError, ValueError, UnicodeError):
-                pass
+            except (OSError, ValueError, UnicodeError) as exc:
+                if store_full(exc):
+                    raise
             continue
         _mkdir(d)
         for kid in kids:
             try:
                 _write(d + "/" + kid, _read(s + "/" + kid))
-            except (OSError, ValueError, UnicodeError):
-                pass
+            except (OSError, ValueError, UnicodeError) as exc:
+                if store_full(exc):
+                    raise
 
 
 def duplicate(cart, root=CARTS_DIR, new_title=None):
@@ -1590,7 +1634,8 @@ def duplicate(cart, root=CARTS_DIR, new_title=None):
     # answer for a cart authored by a newer build.
     src_path = cart.get("path")
     if src_path and dup is not None:
-        _copy_cart_files(src_path, dup["path"], dup["main"])
+        _whole_or_none(dup["path"], lambda: _copy_cart_files(
+            src_path, dup["path"], dup["main"]))
         return load(dup["path"])
     return dup
 
@@ -1608,11 +1653,14 @@ def _duplicate_compiled(cart, root, new_title):
     d = _unique_dir(root, slug(title))
     _mkdir(d)
     man["title"] = title
-    _write(d + "/manifest.json", json.dumps(man))
-    _write(d + "/config.json", json.dumps(dict(cart.get("cfg") or {})))
     main = cart.get("main", "main.wasm")
-    _copy_bytes(src_path + "/" + main, d + "/" + main)
-    _copy_cart_files(src_path, d, main)
+
+    def _fill():
+        _write(d + "/manifest.json", json.dumps(man))
+        _write(d + "/config.json", json.dumps(dict(cart.get("cfg") or {})))
+        _copy_bytes(src_path + "/" + main, d + "/" + main)
+        _copy_cart_files(src_path, d, main)
+    _whole_or_none(d, _fill)
     return load(d)
 
 
