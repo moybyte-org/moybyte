@@ -68,14 +68,28 @@ class _FakeFile:
 
 
 class _FakeFS:
-    """The device's storage: `open` plus the three os verbs the tool reaches
-    for. `corrupt` appends a byte to every file that is closed, which is what a
-    dropped upload chunk looks like from up here -- a hash that does not match."""
+    """The device's storage: `open` plus the os verbs the tool reaches for.
+    `corrupt` appends a byte to every file that is closed, which is what a
+    dropped upload chunk looks like from up here -- a hash that does not match.
+    `free` is the room the store reports (`statvfs`); None is a board that
+    cannot say."""
 
-    def __init__(self, files=None, corrupt=False):
+    def __init__(self, files=None, corrupt=False, free=None):
         self.files = dict(files or {})
         self.dirs = set()
         self.corrupt = corrupt
+        self.free = free
+
+    def statvfs(self, path):
+        if self.free is None:
+            raise OSError("EINVAL")
+        return (4096, 4096, 1024, self.free // 4096, self.free // 4096,
+                0, 0, 0, 0, 255)
+
+    def stat(self, path):
+        if path not in self.files:
+            raise OSError("ENOENT: " + path)
+        return (0x8000, 0, 0, 0, 0, 0, len(self.files[path]), 0, 0, 0)
 
     def open(self, path, mode="r"):
         return _FakeFile(self, path, mode)
@@ -119,9 +133,11 @@ class _FakeConsole:
 
     def __init__(self, board="p4", carts_root="/moy/carts", files=None,
                  corrupt=False, has_recv=True, max_window=32768,
-                 drop_at=None, flip_at=None, stall_at=None):
+                 drop_at=None, flip_at=None, stall_at=None, free=None,
+                 full_at=None):
         self.port = "/dev/fake"
-        self.fs = _FakeFS(files, corrupt)
+        self.fs = _FakeFS(files, corrupt, free)
+        self.full_at = full_at          # the store runs out of room here
         self.ws = _WS(carts_root)
         self.board = board
         self.has_recv = has_recv        # False = an image from before `recv`
@@ -218,6 +234,13 @@ class _FakeConsole:
                 want = rx["n"] - rx["got"]
             if len(rx["buf"]) < want:
                 continue
+            if self.full_at is not None and rx["got"] + want > self.full_at:
+                # dev_channel's answer when the store refuses a write: the
+                # tmp goes and the words say why, plainly.
+                self._rx = None
+                self.fs.files.pop(rx["tmp"], None)
+                return self._say("RECV ERR store full after %d of %d bytes"
+                                 % (rx["got"], rx["n"]))
             rx["f"].write(bytes(rx["buf"]))
             rx["got"] += len(rx["buf"])
             del rx["buf"][:]
@@ -755,3 +778,55 @@ def test_only_reaches_a_file_inside_a_subfolder(monkeypatch, tmp_path):
     assert push_cart.main([cart, "--board", "tdeck",
                            "--only", "scenes/x.moyscene"]) == 0
     assert list(dev.fs.files) == ["/sd/carts/demo.moy/scenes/x.moyscene"]
+
+
+# -- a store without the room ---------------------------------------------------
+
+
+def test_a_cart_the_store_cannot_hold_is_refused_before_a_byte_is_sent(
+        monkeypatch, tmp_path):
+    """What the push adds against the room the store reports, before the first
+    window: one plain line, no traceback, and nothing on the board -- the
+    Guition P4's internal store and a 5.7 MB cart are the case this is for."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts", free=8192)
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": BIG, "manifest.json": b"{}\n"})
+    with pytest.raises(SystemExit) as exc:
+        push_cart.main([cart, "--board", "tdeck"])
+    msg = str(exc.value)
+    assert msg.startswith("STORE FULL: the cart does not fit"), msg
+    assert "/sd/carts" in msg and "free" in msg
+    assert [l for l in dev.sent if l.startswith("recv ")] == []
+    assert dev.fs.files == {}
+
+
+def test_a_file_that_replaces_one_counts_only_what_it_adds(monkeypatch, tmp_path):
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts", free=4096,
+                       files={"/sd/carts/demo.moy/main.lua": b"x" * 9000})
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": BIG})
+    assert push_cart.main([cart, "--board", "tdeck"]) == 0
+    assert dev.fs.files["/sd/carts/demo.moy/main.lua"] == BIG
+
+
+def test_a_store_that_fills_during_the_push_says_so_plainly(monkeypatch, tmp_path):
+    """The room check can pass and the store still fill (a card's clusters
+    round every file up): the board's `store full` is the same plain line."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts", full_at=5000)
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": BIG})
+    with pytest.raises(SystemExit) as exc:
+        push_cart.main([cart, "--board", "tdeck"])
+    msg = str(exc.value)
+    assert msg.startswith("STORE FULL: main.lua did not fit: the board's store "
+                          "is full"), msg
+    assert "/sd/carts/demo.moy/main.lua" not in dev.fs.files
+
+
+def test_any_other_failure_is_one_line_too(monkeypatch, tmp_path):
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts", corrupt=True)
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": SOURCE})
+    with pytest.raises(SystemExit) as exc:
+        push_cart.main([cart, "--board", "tdeck"])
+    assert "hash" in str(exc.value) and "left the old file" in str(exc.value)

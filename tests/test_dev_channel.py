@@ -506,6 +506,91 @@ def test_a_host_that_goes_quiet_takes_the_tmp_with_it(tmp_path, capsys):
     assert poll.waits == [RECV_IDLE_MS] * (RECV_DEAD_WINDOWS + 1)
 
 
+class _StoreWS(FakeWS):
+    """A console with a store and a notice banner, for `recv`'s full store."""
+
+    def __init__(self):
+        super().__init__()
+        from runtime import moy_carts
+        self.carts_store = moy_carts
+        self.notices = []
+
+    def notice(self, title, sub="", kind="ok", ms=6000):
+        self.notices.append((title, sub, kind))
+
+
+def _full_open(monkeypatch, room):
+    """`open` whose written files hold `room` bytes and then fail as a full
+    store does."""
+    import builtins
+    real = builtins.open
+
+    class Full:
+        def __init__(self, f):
+            self.f = f
+            self.n = 0
+
+        def write(self, data):
+            if self.n + len(data) > room:
+                raise OSError(28, "No space left on device")
+            self.n += len(data)
+            return self.f.write(bytes(data))
+
+        def __getattr__(self, name):
+            return getattr(self.f, name)
+
+    monkeypatch.setattr(builtins, "open",
+                        lambda p, m="r", *a, **k: Full(real(p, m, *a, **k))
+                        if "w" in m else real(p, m, *a, **k))
+
+
+def test_a_store_with_no_room_stops_the_upload_plainly_and_on_screen(
+        tmp_path, capsys, monkeypatch):
+    """A cart that does not fit is a plain `store full` from the board -- the
+    words push_cart puts in front of the person pushing -- and the console's
+    banner says it to whoever is looking at the glass. The half-written file
+    goes, as on every other failure."""
+    ws, ch = make(_StoreWS())
+    raw = FakeRawIn(EVERY_BYTE)
+    poll = FakePoll(raw)
+    ch._rawin, ch._poll, ch._ipoll = raw, poll, poll.ipoll
+    _full_open(monkeypatch, 700)
+    dst = str(tmp_path / "main.aot")
+    ch.run(ws, "recv %d 512 %s" % (len(EVERY_BYTE), dst))
+    said = _said(capsys)
+    assert said[-1] == "RECV ERR store full after 512 of %d bytes" % len(EVERY_BYTE)
+    assert ws.notices == [("CAN'T ADD CART", "the store is full", "warn")]
+    assert not (tmp_path / "main.aot.new").exists()
+
+
+def test_another_write_failure_is_named_and_not_called_a_full_store(
+        tmp_path, capsys, monkeypatch):
+    import builtins
+    real = builtins.open
+
+    class Broken:
+        def __init__(self, f):
+            self.f = f
+
+        def write(self, data):
+            raise OSError(5, "EIO")
+
+        def __getattr__(self, name):
+            return getattr(self.f, name)
+
+    ws, ch = make(_StoreWS())
+    raw = FakeRawIn(EVERY_BYTE)
+    poll = FakePoll(raw)
+    ch._rawin, ch._poll, ch._ipoll = raw, poll, poll.ipoll
+    monkeypatch.setattr(builtins, "open",
+                        lambda p, m="r", *a, **k: Broken(real(p, m, *a, **k))
+                        if "w" in m else real(p, m, *a, **k))
+    ch.run(ws, "recv %d 512 %s" % (len(EVERY_BYTE), str(tmp_path / "x")))
+    said = _said(capsys)
+    assert said[-1].startswith("RECV ERR OSError:"), said[-1]
+    assert ws.notices == []
+
+
 class FeedingPoll(FakePoll):
     """FakePoll, but a host that WROTE during `on_dry` is answered.
 

@@ -84,19 +84,23 @@ launch with the fit notice (`native/moy_wasm/README.md`, "A cart too big for
 the board"). The recipe's default is the smallest zone the shareware episode
 loads and plays in (`-mb 1`: every level warped to and played, and the attract
 loop's three demos, on the host twin); smaller is not a whole MiB. At that
-zone the cart does not fit the S3 boards' 3 MB cart-runtime reserve with the
-shell resident: its load holds the linear memory's block, the runtime pool
-and the text at once, more than the launcher leaves free, so the Player shows
-the notice before anything loads. A larger reserve (`MOYBYTE_GC_SPLIT_RESERVE`)
-is the lever that fits it, at the Python heap's expense: the board then runs
-Doom from its launcher with every frame CRC equal to the host's. Text in flash
+zone the cart sits at the edge of the S3 boards' 3 MB cart-runtime reserve
+with the shell resident: its load holds the linear memory's block, the
+runtime pool and the text at once. The Guition S3's launcher leaves less
+than that free, so the Player shows the notice before anything loads. The
+T-Deck's leaves a few hundred KB more than the cart needs on a fresh boot,
+and it runs; once the radios and a session's carts have taken their share,
+it shows the notice. A larger reserve (`MOYBYTE_GC_SPLIT_RESERVE`) is the
+lever that fits it on the Guition S3, at the Python heap's expense: the board
+then runs Doom from its launcher with every frame CRC equal to the host's.
+Text in flash
 would take the text out of PSRAM, and costs a partition per board and a
 full-erase reflash of every device. Neither is taken here (#158 carries the
 tier's figures). The Waveshare P4 runs the cart from the launcher and its
-suite holds the frames to the host's; the T-Deck's suite holds it to the
-notice; the Guition S3's skips, saying why; and the Guition P4's internal
-store cannot hold the cart, which `tools/push_cart.py` says before it sends a
-byte.
+suite holds the frames to the host's; the T-Deck's suite holds it to
+whichever the fit check says; the Guition S3's skips, saying why; and the
+Guition P4's internal store cannot hold the cart, which `tools/push_cart.py`
+says before it sends a byte.
 
 The seams the recipe patches in the staged copy, each asserted: the IWAD
 search answers for `doom1.wad`; `DG_ScreenBuffer` is the cart's frame; the

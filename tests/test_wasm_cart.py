@@ -12,6 +12,10 @@ What is pinned here:
   * a trap ends the run with no partial frame on the canvas, no crash-to-code
     and no EDIT action on its panel; quit() ends it as the cart's own choice;
   * a build without the runtime (an absent key) opens the runtime-missing panel;
+  * a cart bigger than the console -- the huge fixture, past any board's PSRAM,
+    or any cart past the host's configured limit -- opens the fit NOTICE by
+    the boards' own footprint arithmetic, not an error panel, and a load that
+    still runs out of memory gets the same notice;
   * the store never reads a compiled cart's main as text, the Code tab exists
     only when the cart ships `src/`, no text write ever reaches its module, a
     copy carries the module's bytes, and the sync walk leaves it home.
@@ -243,6 +247,24 @@ QUITTER = """
 """
 
 
+def test_a_folder_reads_as_a_missing_file(tmp_path):
+    """`read` of a name that is a folder in the cart -- the cart's own src/ --
+    reads nothing and sizes 0, as a missing file does, where stdio would open
+    the folder on Linux and answer its size query with garbage. A file beside
+    it still reads."""
+    _binding_or_skip()
+
+    def _readdir(root):
+        wasm_cart.build(os.path.join(FIXTURES, "readdir.moy"),
+                        os.path.join(root, "readdir.moy"))
+    root = _store(tmp_path, _readdir)
+    ws = host_app.build_workstation(root)
+    open_cart(ws, "Read Dir Wasm")
+    assert ws.player.cart_error is None, ws.player.cart_error
+    size = os.path.getsize(os.path.join(root, "readdir.moy", "manifest.json"))
+    assert _pmem(ws)[:3] == [0, 0, size], _pmem(ws)[:3]
+
+
 def test_quit_ends_the_cart_as_its_own_choice(tmp_path):
     _binding_or_skip()
     ws = host_app.build_workstation(_store(
@@ -333,6 +355,27 @@ def test_a_copy_carries_the_module_bytes(tmp_path):
     assert host_app.moy_carts.cart_sources(dup) == ["src/main.wat"]
 
 
+def test_a_copy_the_store_has_no_room_for_leaves_no_half_cart(tmp_path, monkeypatch):
+    """A module is the biggest file a cart carries, and a card that fills
+    while it is copied must not leave a folder the shelf would list and the
+    Player could never run: the copy goes, and the shell says CAN'T COPY."""
+    root = _store(tmp_path, _hello)
+    ws = host_app.build_workstation(root)
+    before = sorted(os.listdir(root))
+
+    def _full(src, dst, chunk=4096):
+        with open(dst, "wb") as f:
+            f.write(b"\0" * 100)
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(host_app.moy_carts, "_copy_bytes", _full)
+    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
+                         if it.get("title") == "Hello Wasm")
+    ws.carts.dup()
+    assert sorted(os.listdir(root)) == before
+    assert not any(c["title"] == "Hello Wasm copy" for c in ws.carts.all)
+    assert ws._notice == ("CAN'T COPY", "the store is full", "warn")
+
+
 def test_the_sync_walk_leaves_the_module_home(tmp_path):
     """The sync RPC declines binary files, so a compiled cart's module never
     crosses (runtime/moy_sync.py says so): its manifest and text do."""
@@ -341,6 +384,185 @@ def test_the_sync_walk_leaves_the_module_home(tmp_path):
     path = os.path.join(root, "hello.moy")
     assert moy_sync._read_text(os.path.join(path, "main.wasm")) is None
     assert moy_sync._read_text(os.path.join(path, "manifest.json")) is not None
+
+
+# -- a cart this console cannot fit ---------------------------------------------
+#
+# docs/wasm_tier_plan_2026-09.md: a cart above the floor is allowed, and a
+# console that cannot fit it refuses at launch with a plain notice -- never an
+# error panel, never a crash. The host refuses by its configured limit
+# (wasm_host.MEMORY_LIMIT) with the boards' own footprint arithmetic.
+
+HUGE = os.path.join(FIXTURES, "huge.moy")
+
+
+def _huge(root):
+    wasm_cart.build(HUGE, os.path.join(root, "huge.moy"))
+
+
+def _px(cv, x, y):
+    i = 2 * (y * cv.w + x)
+    return cv._buf[i] | cv._buf[i + 1] << 8
+
+
+def test_the_footprint_is_the_boards_own_arithmetic():
+    """wasm_binding.footprint is native/moy_wasm/moy_wasm_footprint.h
+    compiled into the host binding -- the header the boards' engine allocates
+    by -- so a host and a board refuse by the same numbers. Pinned here
+    against the rule the header states: the file's block (the linear
+    memory's, TLSF's rounding and the mapping's header on top, never smaller
+    than the file), the pool (256 KB and a quarter of the module), the module
+    itself and the 16 KB run stack; the block is the largest of those as the
+    heap must find it free."""
+    _binding_or_skip()
+    from runtime import wasm_binding
+
+    def heap(n):
+        return n + n // 32 + 1024
+
+    for memory, module in ((3 * 65536, 4000), (26 * 65536, 1000774),
+                           (0, 5000), (65536, 3000000), (640 * 65536, 103)):
+        total, block = wasm_binding.footprint(memory, module)
+        file_block = max(heap(memory) if memory else 0, module)
+        pool = 256 * 1024 + module // 4
+        assert total == file_block + pool + module + 16 * 1024, (memory, module)
+        assert block == heap(max(file_block, pool, module)), (memory, module)
+
+
+def test_the_engine_and_the_host_twin_share_one_statement_of_the_rule():
+    """Routing, not arithmetic: the pool and the stack are defined once, in
+    the header both tiers compile, and the engine reads its file block from
+    it rather than restating the formula."""
+    native = os.path.join(ROOT, "native")
+    defs = []
+    for dirpath, _dirs, names in os.walk(native):
+        if "/wamr" in dirpath or ".staged" in dirpath:
+            continue
+        for name in names:
+            if name.endswith((".c", ".h")):
+                text = open(os.path.join(dirpath, name), encoding="utf-8").read()
+                if "#define MOY_WASM_POOL_SHARE" in text:
+                    defs.append(name)
+    assert defs == ["moy_wasm_footprint.h"], defs
+    engine = open(os.path.join(native, "moy_wasm", "modmoy_wasm.c"),
+                  encoding="utf-8").read()
+    assert "moy_wasm_file_block(" in engine and "hold / 32" not in engine
+    host = open(os.path.join(ROOT, "runtime", "moyhost_wasm.c"),
+                encoding="utf-8").read()
+    assert '#include "moy_wasm_footprint.h"' in host
+
+
+def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
+    """The huge fixture declares 40 MB, more than any board has: refused
+    before it loads, naming the cart, what it needs and what this console has
+    free, on the Player's panel drawn as a notice -- no error title, no EDIT,
+    the same way out -- and the console runs the next cart as before."""
+    _binding_or_skip()
+    from runtime import bar_layer, player
+    from runtime.dev_channel import _remote_state
+    ws = host_app.build_workstation(_store(tmp_path, _huge, _hello))
+    open_cart(ws, "Huge Wasm")
+    p = ws.player
+    assert p.notice is not None and p.notice == p.cart_error
+    assert p.notice == ("Huge Wasm needs 41.6 MB of memory to run. This "
+                        "console has 32.0 MB free."), p.notice
+    assert p._lua is None and p._update is None and p._draw is None
+    assert not ws.wm.top_is("menu"), "a notice threw into the Editor"
+    _frames(ws, 3)
+    cv = ws.canvas
+    x, y = (cv.w - min(292, cv.w - 12)) // 2, min(40, (cv.h - min(132, cv.h - 16)) // 2)
+    assert _px(cv, x + 1, y + 1) == cv._wire[ws.player.NAMES["orange"]]
+    assert _px(cv, x + 1, y + 1) != cv._wire[ws.player.NAMES["red"]]
+    assert player.NOTICE_TITLE == "Too big for this console."
+    st = _remote_state(ws)
+    assert st["notice"] == p.notice and st["cart_error"] is None
+    assert bar_layer._edit_kind(ws.cart) is None
+    ws._exit_to_caller()
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.cart_error is None and ws.player.notice is None
+    _frames(ws, 3)
+    assert ws.player.cart_error is None, ws.player.cart_error
+
+
+def test_the_hosts_configured_limit_is_what_it_refuses_by(tmp_path, monkeypatch):
+    """The host twin behaves as a board does: a cart whose footprint is over
+    MEMORY_LIMIT gets the notice, and the same cart under it runs."""
+    _binding_or_skip()
+    from runtime import wasm_host
+    ws = host_app.build_workstation(_store(tmp_path, _hello))
+    monkeypatch.setattr(wasm_host, "MEMORY_LIMIT", 300 * 1024)
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.notice == ("Hello Wasm needs 0.5 MB of memory to run. "
+                                "This console has 0.2 MB free."), ws.player.notice
+    ws._exit_to_caller()
+    monkeypatch.undo()
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.cart_error is None and ws.player.notice is None
+
+
+class _Runtime:
+    """The host runtime with its reports kept and its start replaced."""
+
+    def __init__(self, real, start=None, memory=None):
+        self.real = real
+        self.start = start
+        self.mem = memory
+
+    def footprint(self, cart):
+        return self.real.footprint(cart)
+
+    def memory(self):
+        return self.mem if self.mem is not None else self.real.memory()
+
+    def __call__(self, ns, src):
+        if self.start is not None:
+            raise self.start
+        return self.real(ns, src)
+
+
+def test_a_load_that_still_runs_out_of_memory_gets_the_same_notice(tmp_path):
+    """The fit check passed, and the load failed for memory anyway -- the
+    engines' "out of memory" text, or a MemoryError -- which is the same
+    notice, saying the free total was there and not in usable pieces."""
+    _binding_or_skip()
+    ws = host_app.build_workstation(_store(tmp_path, _hello))
+    real = ws.runtimes["wasm"]
+    want = ("Hello Wasm needs 0.5 MB of memory to run. This console has "
+            "32.0 MB free, but not in pieces it can use.")
+    for exc in (RuntimeError("out of memory: AOT module instantiate failed: "
+                             "allocate linear memory failed"),
+                MemoryError("no PSRAM for the module file")):
+        ws.runtimes["wasm"] = _Runtime(real, start=exc)
+        open_cart(ws, "Hello Wasm")
+        assert ws.player.notice == want, ws.player.notice
+        ws._exit_to_caller()
+    # any other start failure stays an error, with its own words
+    ws.runtimes["wasm"] = _Runtime(real, start=RuntimeError("refused: bad signature"))
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.notice is None
+    assert ws.player.cart_error.endswith("refused: bad signature")
+
+
+def test_a_console_whose_largest_block_is_too_small_says_so(tmp_path):
+    _binding_or_skip()
+    ws = host_app.build_workstation(_store(tmp_path, _hello))
+    ws.runtimes["wasm"] = _Runtime(ws.runtimes["wasm"],
+                                   memory=(32 * 1024 * 1024, 100 * 1024))
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.notice == ("Hello Wasm needs 0.3 MB of memory in one "
+                                "piece. The biggest piece this console has "
+                                "free is 0.0 MB."), ws.player.notice
+
+
+def test_the_notice_never_reads_as_a_fit():
+    """What a cart needs rounds up and what the console has rounds down, so
+    a refusal can never print the same two numbers."""
+    from runtime.player import fit_notice
+    mb = 1024 * 1024
+    text = fit_notice("Doom", (int(2.95 * mb), mb), (int(2.94 * mb), 2 * mb))
+    assert text == "Doom needs 3.0 MB of memory to run. This console has 2.9 MB free."
+    assert fit_notice("Doom", None, None) == (
+        "Doom needs more memory than this console has free.")
 
 
 # -- the compiled module's name on a board ---------------------------------------

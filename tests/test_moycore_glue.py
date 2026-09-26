@@ -1807,3 +1807,91 @@ def test_the_runtimes_map_names_what_the_build_carries():
         assert world.mod.make_runtimes(FakeWs()) == {}
     finally:
         world.close()
+
+
+# -- the fit check's report (Player: a cart too big for the board) ---------------
+
+
+class _Engine:
+    """moy_wasm's two reports: `footprint` records what it was asked."""
+
+    def __init__(self, world, free=(2_900_000, 1_900_000)):
+        self.asked = []
+        self.free = free
+        world.mod._moy_wasm.footprint = self._footprint
+        world.mod._moy_wasm.mem = lambda: (90_000, 50_000, 40_000) + self.free
+
+    def _footprint(self, memory, module):
+        self.asked.append((memory, module))
+        return memory + module, memory
+
+
+def test_the_runtime_reports_the_carts_footprint_by_the_engines_rule(tmp_path):
+    """The Player's fit check reads the engine's own sizing -- the manifest's
+    memory in bytes and this chip's signed module as it sits in the store --
+    through the store's gate, and the engine's PSRAM report for what the board
+    can give. The arithmetic is the engine's (moy_wasm.footprint), never here."""
+    cart, _main = _compiled(tmp_path, chips=("esp32s3", "esp32p4"))
+    world = _wasm_world("esp32s3")
+    try:
+        engine = _Engine(world)
+        gated = []
+        ws = FakeWs(project=_CartProject(cart))
+        ws._with_sd = lambda fn: gated.append(fn) or fn()
+        rt = world.mod.make_wasm_runtime(ws)
+        assert rt.footprint(cart) == (3 * 65536 + 3, 3 * 65536)
+        assert engine.asked == [(3 * 65536, len(b"aot"))]
+        assert len(gated) == 1
+        assert rt.memory() == engine.free
+        # and it is still the factory the Player calls to start the run
+        assert isinstance(rt(make_ns(), None), world.mod.WasmRun)
+    finally:
+        world.close()
+
+
+def test_a_declaration_past_any_board_is_asked_about_capped_not_overflowed(tmp_path):
+    cart, _main = _compiled(tmp_path)
+    cart["memory"] = 65536                 # 4 GiB: wasm32's whole space
+    world = _wasm_world()
+    try:
+        engine = _Engine(world)
+        world.mod.make_wasm_runtime(FakeWs()).footprint(cart)
+        (memory, _module), = engine.asked
+        assert 32 * 1024 * 1024 < memory < 2 ** 31
+    finally:
+        world.close()
+
+
+def test_nothing_to_measure_leaves_the_refusal_to_the_load(tmp_path):
+    """No module for this chip, or no "memory": no report, so the load's own
+    refusal is what the kid sees, by name."""
+    cart, _main = _compiled(tmp_path, chips=("esp32p4",))
+    world = _wasm_world("esp32s3")
+    try:
+        engine = _Engine(world)
+        rt = world.mod.make_wasm_runtime(FakeWs())
+        assert rt.footprint(cart) is None
+        assert rt.footprint(dict(cart, memory=None)) is None
+        assert engine.asked == []
+    finally:
+        world.close()
+
+
+def test_an_open_that_raises_closes_the_console(tmp_path):
+    """The engine raises MemoryError when it cannot hold the module file. A
+    run left open would refuse every later cart's run_begin ("a run is
+    already open"), Lua carts included."""
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+
+    def _no_psram(*a):
+        world.core._log("wasm_open", *a)
+        raise MemoryError("no PSRAM for the module file")
+    world.core.wasm_open = _no_psram
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(MemoryError):
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.closes == 1
+    finally:
+        world.close()

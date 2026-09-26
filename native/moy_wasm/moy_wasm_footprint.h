@@ -31,7 +31,9 @@
 // the pool is sized from it: MOY_WASM_POOL_BYTES, plus one byte in
 // MOY_WASM_POOL_SHARE of the module's -- a share that holds the load's peak,
 // when the loader has copied the data segments and holds its relocation
-// tables at once. start()'s `pool` argument measures a module against it.
+// tables at once. start()'s `pool` argument measures a module against it:
+// Doom's 1 MB P4 module peaked at 450 KB under a 1 MB pool on the Waveshare
+// P4 (2026-09-26), where this sizes 510 KB and an eighth would size 383 KB.
 #ifndef MOY_WASM_POOL_BYTES
 #define MOY_WASM_POOL_BYTES (256 * 1024)
 #endif

@@ -852,6 +852,7 @@ def wasm_cart_fps(board, title, seconds=10.0, check=None):
         st = board.state()
         assert st.get("cart") == title, st.get("cart")
         assert not st.get("cart_error"), st["cart_error"]
+        assert not st.get("notice"), st["notice"]
         if check is not None:
             check(board)
         n0 = len(board.lines)
@@ -921,6 +922,34 @@ def _wasm_run_error(board, title):
         board.drain(1.0)
 
 
+def wasm_read_of_a_folder_reads_nothing(board, board_dir):
+    """`read` of a name that is a folder in the cart reads as a missing file on
+    the board's VFS route (moycore's read, through the store's gate): the
+    Read Dir fixture writes the size query and a 16-byte read of its own src/
+    folder, and the size query of its manifest, into pmem at _init."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_readdir_")
+    out = os.path.join(tmp, "readdir.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "readdir.moy"), out,
+                    chips=(chip,))
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_readdir.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    size = os.path.getsize(os.path.join(out, "manifest.json"))
+    pm = ("(lambda a: (__import__('moycore').pmem_image(a), list(a)[:3])[1])"
+          "(__import__('array').array('i', bytearray(1024)))")
+    got = []
+
+    def _probe(b):
+        got.append(b.pyval(pm, timeout=30, strict=True))
+    _runs_clean(board, "Read Dir Wasm", check=_probe)
+    assert got == [[0, 0, size]], got
+    return got[0]
+
+
 def wasm_tampered_module_is_refused(board, board_dir):
     """A compiled cart whose module was changed after it was signed -- one byte
     of its provenance key -- is refused on the Player's panel before anything
@@ -937,6 +966,87 @@ def wasm_tampered_module_is_refused(board, board_dir):
     err = _wasm_run_error(board, "Tampered Wasm")
     assert "refused: bad signature" in err, err
     return err
+
+
+# -- a cart too big for the board (docs/wasm_tier_plan_2026-09.md) --------------
+#
+# A compiled cart above what a board can fit is allowed, and the board refuses
+# it at launch with a plain notice -- never an error panel, never a crash. The
+# Player compares the cart's load footprint, by the engine's own sizing
+# (`moy_wasm.footprint`), with the engine's PSRAM report before anything loads.
+
+HUGE_TITLE = "Huge Wasm"
+
+
+def wasm_fit(board, title):
+    """((total, block), (free, largest)) the Player's fit check reads for
+    the cart `title`: its footprint and this board's free PSRAM."""
+    return board.pyval(
+        "(lambda c, r: (r.footprint(c), r.memory()))"
+        "([c for c in ws.carts.all if c['title'] == %r][0], ws.runtimes['wasm'])"
+        % title, timeout=30, strict=True)
+
+
+def _notice_on_launch(board, title):
+    """Run `title` from the launcher and return the fit notice it opened,
+    asserting it is a notice and not an error, and that nothing loaded."""
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.0)
+        st = board.state()
+        assert st.get("cart") == title, st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        notice = st.get("notice") or ""
+        assert notice.startswith(title + " needs ") and " MB " in notice, notice
+        assert board.pyval("ws.player._lua is None", strict=True) is True
+        return notice
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+
+
+def _runs_clean(board, title, check=None):
+    """`title` runs from the launcher with no error and no notice."""
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.5)
+        st = board.state()
+        assert st.get("cart") == title, st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        assert not st.get("notice"), st["notice"]
+        if check is not None:
+            check(board)
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+
+
+def wasm_too_big_cart_opens_the_notice(board, board_dir):
+    """The huge fixture declares 40 MB of linear memory, more than any board
+    has: launching it opens the fit notice -- naming the cart, what it needs
+    and what this board has free -- where an error panel used to be, and the
+    board stays healthy: the hello cart runs after it and reads its greeting,
+    the file-read path the loader fix is guarded by. Returns (notice, need,
+    have)."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_huge_")
+    out = os.path.join(tmp, "huge.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "huge.moy"), out,
+                    chips=(chip,))
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_huge.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    need, have = wasm_fit(board, HUGE_TITLE)
+    assert need[0] > have[0], (need, have)
+    notice = _notice_on_launch(board, HUGE_TITLE)
+    print("\nWASM fit notice: %r (footprint %r, free %r)" % (notice, need, have))
+    _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)
+    return notice, need, have
 
 
 # -- Doom, built by the recipe (experiments/wasm_aot/doom/build_cart.py) --------
@@ -1036,17 +1146,21 @@ def doom_push(board, board_dir):
     return frames
 
 
-def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None):
+def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,
+                               pushed=None):
     """Doom from the launcher, WiFi off, until gametic `tics`: every frame CRC
     the board records at a named gametic is the host's, outside the named
     transitions. Returns (median drawn fps, compared, excluded). `short` is
     the reason a board's cart-runtime reserve cannot hold the cart, which
-    skips it -- the floor verdict, stated where the board's suite calls this."""
+    skips it -- the floor verdict, stated where the board's suite calls this.
+    `pushed` is doom_push's answer when the caller has already pushed."""
     import time
     from runtime.perf_line import parse_perf
     if short:
         pytest.skip(short)
-    frames = doom_push(board, board_dir)
+    frames = pushed or doom_push(board, board_dir)
+    need, have = wasm_fit(board, "Doom")
+    print("\nDOOM fit: footprint %r, free %r" % (need, have))
     host = doom_host_crcs(tics)
     assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
     pm = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
@@ -1061,6 +1175,7 @@ def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None):
             st = board.state(timeout=30)
             assert st.get("cart") == "Doom", st.get("cart")
             assert not st.get("cart_error"), st["cart_error"]
+            assert not st.get("notice"), st["notice"]
             img = board.pyval(pm, timeout=30, strict=True)
             if img[frames.PM_GAMETIC] >= tics:
                 break
@@ -1087,6 +1202,26 @@ def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None):
           % (len(compared), skipped, drawn))
     assert compared, "no gametic compared"
     return fps, compared, skipped
+
+
+def doom_runs_or_opens_the_notice(board, board_dir):
+    """Doom on a board whose free PSRAM sits near the cart's footprint and
+    moves with what the shell holds: the fit check decides, and the board
+    does what it said. Where the footprint fits what the board reports free,
+    the cart runs and its frames are the host's (doom_frames_match_the_host);
+    where it does not, launching it opens the fit notice -- never an error
+    panel or a crash -- and a compiled cart runs after it. Returns ("runs",
+    fps, compared, excluded) or ("notice", notice, need, have)."""
+    frames = doom_push(board, board_dir)
+    need, have = wasm_fit(board, "Doom")
+    print("\nDOOM fit: footprint %r, free %r" % (need, have))
+    if need[0] <= have[0] and need[1] <= have[1]:
+        return ("runs",) + doom_frames_match_the_host(board, board_dir,
+                                                     pushed=frames)
+    notice = _notice_on_launch(board, "Doom")
+    print("\nDOOM fit notice: %r" % notice)
+    _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)
+    return "notice", notice, need, have
 
 
 def wasm_missing_module_is_refused(board, board_dir):

@@ -260,8 +260,9 @@ current answer.
   for Linux at this pin (`runtime/wasm_binding.py`) — the hello cart's pixel
   golden, the hooks under the tick model, a trap, quit, the runtime-missing
   panel, the fit notice (the footprint against the header's rule, the huge
-  fixture past any board, the host's limit, a load that still runs out), and
-  the store's handling of a compiled cart.
+  fixture past any board, the host's limit, a load that still runs out), a
+  folder in the cart reading as a missing file, and the store's handling of a
+  compiled cart.
 - On glass, every declaring board's suite: the idle cost against a module-free
   image of the same tree, the hello module and six a board refuses (no key,
   another fork, other flags, another chip, no signature, one byte of a signed
@@ -270,11 +271,12 @@ current answer.
   and a run with WiFi and BLE up; then the Player path — the hello and blit
   carts run from the launcher at their fps floors, a cart with no module for
   this chip refused, a cart whose module was tampered with after signing
-  refused, and the huge fixture -- 40 MB of declared memory, past every
+  refused, the huge fixture -- 40 MB of declared memory, past every
   board's PSRAM -- refused with the fit notice, the hello cart running after
-  it. The suites build the modules with the pinned compilers
+  it, and the Read Dir fixture's `read` of its own `src/` folder reading
+  nothing, as a missing file does. The suites build the modules with the pinned compilers
   (`python3 tools/wasm_module.py compilers`), sign them with the OTA signing
   key (a suite without it skips the wasm checks, saying why), and push them
   into the board's store: the phase-1 modules under `wasm_hello/`, which is
   not a `.moy` folder and never lists as a cart, and the fixture carts as
-  `wasm_hello.moy`, `wasm_blit.moy` and `wasm_huge.moy`.
+  `wasm_hello.moy`, `wasm_blit.moy`, `wasm_huge.moy` and `wasm_readdir.moy`.

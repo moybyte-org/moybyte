@@ -114,6 +114,14 @@ def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_c
     on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
 
 
+def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_carts):
+    on_glass.wasm_too_big_cart_opens_the_notice(board, WASM_BOARD_DIR)
+
+
+def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
+    on_glass.wasm_read_of_a_folder_reads_nothing(board, WASM_BOARD_DIR)
+
+
 # Doom, built by the recipe (experiments/wasm_aot/doom/): skips until the
 # developer has built the cart, which is never in the repository or CI.
 def test_doom_frames_match_the_host(board):

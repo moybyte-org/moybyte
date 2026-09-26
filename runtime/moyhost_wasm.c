@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "moy.h"
 #include "moy_wasm.h"
@@ -59,16 +60,20 @@ static NativeSymbol *g_natives;
 
 /* The cart's own files, and nothing else (the proposal's `read`). The name
  * arrives checked by the binding -- relative, no empty, "." or ".." segment --
- * so joining it to the folder cannot leave it. */
+ * so joining it to the folder cannot leave it. Anything but a regular file
+ * reads as a missing one: stdio opens a folder on Linux, and its size query
+ * answers garbage, where a board's VFS refuses to open it at all. */
 static uint32_t hw_read(void *user, const char *name, uint32_t offset,
                         uint8_t *dst, uint32_t len)
 {
     host_wasm *r = (host_wasm *)user;
     char path[HW_PATH_MAX + 260];
+    struct stat st;
     FILE *f;
     long size;
     uint32_t got = 0;
     snprintf(path, sizeof path, "%s/%s", r->dir, name);
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) return 0;
     f = fopen(path, "rb");
     if (!f) return 0;
     if (fseek(f, 0, SEEK_END) == 0 && (size = ftell(f)) >= 0
