@@ -84,7 +84,15 @@ HALF_RENAMES = {"Renderer": "JetHalf", "Primitives": "JetHalfPrimitives",
 BUILDS["half"] += ["-D%s=%s" % kv for kv in sorted(HALF_RENAMES.items())]
 
 CXXFLAGS = ["--target=wasm32-wasi", "-std=c++17", "-O2", "-fno-exceptions",
-            "-fno-rtti", "-fno-threadsafe-statics", "-Wall",
+            "-fno-rtti", "-fno-threadsafe-statics",
+            # The per-pixel shading calls in Jet's rasterizer (the lighting
+            # term, a vector's length, the Phong highlight) sit in blocks
+            # clang's static estimate calls cold, whose inline threshold is
+            # 45, so they stayed calls: one call per pixel for each, which the
+            # AOT compiler keeps. At 300 all three inline (the highlight's
+            # cost is 275).
+            "-mllvm", "-inline-cold-callsite-threshold=300",
+            "-Wall",
             # TrigLUT.hpp defines M_PI after the C library has.
             "-Wno-macro-redefined",
             # Jet's own, at the pin: helpers, locals and fields it keeps but

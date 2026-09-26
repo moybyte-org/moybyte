@@ -7,10 +7,11 @@ What is pinned here:
     nothing from WASI -- and a sibling moy-spec's `moy check` passes it with
     no finding but the one every compiled cart draws until the proposal is
     promoted;
-  * the frame at two fixed camera poses, full width and half width, as PIXEL
-    GOLDENS: RGB565 frames through the same binding and golden mechanism the
-    wasm fixtures use (tests/test_wasm_cart.py), with the HUD off, because the
-    HUD's figures are the host clock's;
+  * the frame at two fixed camera poses, full width, half width and half
+    width interlaced, as PIXEL GOLDENS: RGB565 frames through the same
+    binding and golden mechanism the wasm fixtures use
+    (tests/test_wasm_cart.py), with the HUD off, because the HUD's figures
+    are the host clock's;
   * Jet's colour byte order against blit565's little-endian rule, with a pixel
     whose colour the test computes on its own: the sky gradient's bottom row;
   * the HUD is drawn over the blit by the ordinary verbs -- its strip and only
@@ -180,16 +181,22 @@ POSES = (
 )
 
 
+# The frame's make, by the golden key's first part: an interlaced frame is
+# the field it rendered over the one it rendered the frame before.
+WIDTHS = {"full": {"width": "full"}, "half": {"width": "half"},
+          "half_i": {"width": "half", "interlaced": True}}
+
+
 def _golden_frame(tmp_path, jet, width, pose):
     _name, config, legs = pose
-    ws = _ws(tmp_path, jet, width=width, hud=False, **config)
+    ws = _ws(tmp_path, jet, hud=False, **WIDTHS[width], **config)
     for frames, hold in legs:
         _frames(ws, frames, hold)
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (W, H)
     return hashlib.sha256(bytes(ws.sys_canvas._buf)).hexdigest()
 
 
-@pytest.mark.parametrize("width", ("full", "half"))
+@pytest.mark.parametrize("width", WIDTHS)
 @pytest.mark.parametrize("pose", POSES, ids=[p[0] for p in POSES])
 def test_the_frame_golden(tmp_path, request, jet, width, pose):
     """The frame the cart presents at a fixed pose, hashed against committed

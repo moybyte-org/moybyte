@@ -100,15 +100,19 @@ void update(float dt, const CartInput *in)
 
 #if HALF_WIDTH_BUFFERS
 // Jet's half-width buffer holds one word per two output columns; the console
-// takes a whole 320-wide frame, so each word is written twice.
-void widen()
+// takes a whole 320-wide frame, so each word is written twice. Every
+// `step`-th row from `first`: an interlaced frame renders one field, and the
+// other field's rows in the frame are already the last frame's.
+void widen(int first, int step)
 {
-    const uint32_t *src = reinterpret_cast<const uint32_t *>(color);
-    uint32_t *dst = reinterpret_cast<uint32_t *>(frame);
-    for (int i = 0; i < CART_W / 2 * CART_H / 2; ++i) {
-        const uint32_t two = src[i];
-        dst[2 * i] = (two & 0xFFFFu) * 0x10001u;
-        dst[2 * i + 1] = (two >> 16) * 0x10001u;
+    for (int y = first; y < CART_H; y += step) {
+        const uint32_t *src = reinterpret_cast<const uint32_t *>(color + y * (CART_W / 2));
+        uint32_t *dst = reinterpret_cast<uint32_t *>(frame + y * CART_W);
+        for (int i = 0; i < CART_W / 4; ++i) {
+            const uint32_t two = src[i];
+            dst[2 * i] = (two & 0xFFFFu) * 0x10001u;
+            dst[2 * i + 1] = (two >> 16) * 0x10001u;
+        }
     }
 }
 #endif
@@ -117,7 +121,13 @@ int render()
 {
     scene->render();
 #if HALF_WIDTH_BUFFERS
-    widen();
+    if (scene->getRenderer()->interlacedMode) {
+        // The field render() just drew: Jet draws the odd rows of an even
+        // frame, and has counted the frame.
+        widen((scene->frameCounter - 1) % 2 == 0 ? 1 : 0, 2);
+    } else {
+        widen(0, 1);
+    }
 #endif
     return scene->lastFrameRasterizedTriangles;
 }

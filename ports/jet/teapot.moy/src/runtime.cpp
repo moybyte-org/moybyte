@@ -7,17 +7,21 @@
 // libm) and imports nothing but "moy".
 //
 // The heap is the linear memory above the stack and the static data: from
-// __heap_base to the end of the memory the manifest declares, which never
-// grows. First fit over an address-ordered free list, neighbours merged on
-// free; every block 16-aligned with a 16-byte header. Jet allocates its
-// meshes and queues while the scene loads and its per-frame vectors keep their
-// capacity, so the list stays short.
+// __heap_base to __heap_end, the end of the memory the manifest declares,
+// which never grows. Both are the linker's, never `memory.size`: a module
+// that asks for its memory's size anywhere is one the AOT compiler assumes
+// can grow, and then every function reloads linear memory's base and bound
+// after every call it makes. First fit over an address-ordered free list,
+// neighbours merged on free; every block 16-aligned with a 16-byte header.
+// Jet allocates its meshes and queues while the scene loads and its
+// per-frame vectors keep their capacity, so the list stays short.
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
 extern "C" {
 extern unsigned char __heap_base;
+extern unsigned char __heap_end;
 
 namespace {
 
@@ -41,7 +45,7 @@ void start()
 {
     if (brk_ptr) return;
     brk_ptr = round_up((uintptr_t)&__heap_base);
-    heap_end = (uintptr_t)__builtin_wasm_memory_size(0) * 65536u;
+    heap_end = (uintptr_t)&__heap_end;
 }
 
 Block *header(void *p) { return (Block *)((unsigned char *)p - HEADER); }
