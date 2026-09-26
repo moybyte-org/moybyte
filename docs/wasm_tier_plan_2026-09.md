@@ -82,7 +82,8 @@ the decisions below record what they changed.
   seeded, preloaded or shipped with a console (`THIRD_PARTY.md`). It runs from the launcher
   on a board that can fit it and shows the notice on one that cannot: the
   Waveshare P4 always, the T-Deck from a fresh boot but not after a session
-  has fragmented its PSRAM, the Guition S3 never, and the Guition P4's store
+  has left about 200 KB less PSRAM free (its largest block unchanged, so
+  retained rather than fragmented), the Guition S3 never, and the Guition P4's store
   cannot hold the cart (#158). The next decision names the levers that would
   widen that set.
   Doom is still the cart that found the ABI's gaps: the 256-entry blit
