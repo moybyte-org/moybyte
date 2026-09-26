@@ -121,10 +121,13 @@ Git history has the rest — do not reintroduce the format.)
 **Where a piece belongs (owner, 2026-09-26).** What a cart author needs to make
 a game that plays on every moy host goes to moy-spec: the verb table, libmoy,
 the bindings, the CLI, conformance, starter templates. moybyte-org's own
-finished carts live in git repos split by licence, the GPL ones in
+installable carts live in git repos split by licence, the GPL ones in
 moybyte-org/gpl-carts; carts users make go through the planned store
 (#122–#124), not git. What is about how a console runs them stays here:
-boards, the shell, the store, OTA, per-chip compiling and signing, seeding.
+boards, the shell, the store, OTA, per-chip compiling and signing, and the
+seed set -- `system_carts/` stays, because its apps and wallpapers are the
+shell's, most of its games are Python carts only this console runs, and the
+rest are the test fixtures and twins the perf ledger and parity harness use.
 
 The shipped shell is the **2026-07 shell** (everything-is-a-process: launcher / Player / Editor apps
 over a fullscreen-stack WM; spec `docs/shell_ux_v1.md`).
