@@ -123,38 +123,26 @@ where it fits. The numbers and the fit measurement are on
 `native/moycore/README.md`, `experiments/wasm_aot/doom/README.md`, and the
 proposal in moy-spec).
 
-### The showcase cart — Jet (moybyte)
+### The showcase — what remains
 
-The tier's demo is a 3D cart on Jet (https://github.com/CubeCoders/Jet), an
-MIT-licensed, dependency-free C++17 software rasteriser built for the
-ESP32-S3 that renders RGB565 into caller-owned colour and depth buffers
-(chosen 2026-09-26). It is shippable where Doom is not: MIT, no game data,
-and small enough to sit under the floor, so it runs on every board and can
-be seeded. It is also the first real user of `blit565`, the case the
-proposal reserves that import for: pixels that are direct-colour by nature.
+Jet Teapot, a 3D cart on Jet (https://github.com/CubeCoders/Jet, MIT), runs on
+all four boards under pinned fps floors, its model read through `read` and its
+frame handed to `blit565` under a HUD drawn with ordinary verbs; its source
+and build tools are MIT (2026-09-26; numbers on #158). What remains follows
+CLAUDE.md's placement rule:
 
-- Jet compiled to wasm32 (no exceptions, no RTTI) linking against the
-  `"moy"` imports only, taken the way the repo takes C libraries: vendored at
-  a pinned commit with a stamp and a test, never fetched inside a build.
-- A cart porting one of Jet's own example scenes: the d-pad flies the
-  camera, models load through the cart's own `read`, `_draw` renders into the
-  cart's buffers and hands the frame to `blit565`, and a HUD drawn with
-  ordinary verbs over it shows the two mixing. `blit565`'s byte order is
-  fixed by the proposal; Jet's own output order is checked, not assumed.
-- Measured on every board with WiFi off, full and half-width, against Jet's
-  native figure on the S3, and the sandbox's cost stated (#158).
-- How a compiled cart is seeded: its modules are build products, so the
-  firmware build produces and signs them; the design is settled here before
-  the cart joins the seed roster.
-- **Guards:** a host golden for the showcase frame at fixed camera poses; the
-  cart from the launcher in every on-glass suite with a pinned fps floor.
-- **Where it goes next** (CLAUDE.md's placement rule): the teapot and further
-  JetExamples ports (the tropical island, the mail-plane sprite demo, the
-  neon car, one effects demo) become moybyte-org's MIT carts repo, each
-  after its own asset-licence check; JetExamples' template-cube becomes a
-  `moy new --jet` starter in moy-spec with the import header; the installer
-  and index tools move from gpl-carts into moy-spec's CLI so both carts
-  repos share them. moybyte keeps the seeding and the on-glass guards.
+- The teapot and further JetExamples ports (the tropical island, the
+  mail-plane sprite demo, the neon car, one effects demo) become
+  moybyte-org's MIT carts repo, each after its own asset-licence check;
+  template-cube becomes a `moy new --jet` starter in moy-spec with the import
+  header; the installer and index tools move from gpl-carts into moy-spec's
+  CLI so both carts repos share them. moybyte keeps the seeding and the
+  on-glass guards. Seeding a compiled cart is designed in
+  `ports/jet/README.md` and waits on #124's gate.
+- On the S3 the cart renders at about 4–5× Jet's native time. The candidates
+  are software bounds checks, frame and depth buffers in PSRAM, and Jet's S3
+  fast paths compiled out; a half-width frame is widened to 320 before
+  `blit565`, which is why half width saves only about a fifth.
 
 ### Phase 4 — promotion (moy-spec; the owner's decision)
 
