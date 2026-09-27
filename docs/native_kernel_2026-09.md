@@ -377,7 +377,9 @@ same button through the same code. It is shaped for it: immediate mode with no
 retained tree (L7 stands), style as data (`DEFAULT_SPECS` / `DEFAULT_METRICS`,
 skins as deltas, `runtime/skin.py` unchanged), geometry pure and separate from
 drawing, drawing through canvas verbs that are already C. The cost is iteration
-speed on widgets; style changes stay free. The net is the pixel goldens on the
+speed on widgets; style changes stay free. The theme data the toolkit consumes,
+and which theming pieces are built ahead of this sprint, are
+`docs/theming_2026-09.md` §8. The net is the pixel goldens on the
 rows that exercise the toolkit — not the 320×240/1× row
 (`.claude/rules/rendering.md`).
 
@@ -470,8 +472,9 @@ stops being the OS. Sprints 5 to 7 finish the line.
 
 ## 7. What it costs
 
-- **Size.** About 45,000 lines of Python become native code (§3) — the larger
-  part of a year, not a sprint. The apps (~23,000) do not.
+- **Size.** About 45,000 lines of Python become native code (§3), crossed
+  sprint by sprint; each sprint's gate sets the pace, and this doc makes no
+  calendar estimate. The apps (~23,000) do not.
 - **Crash behaviour.** A kernel bug is a reset with no message today
   (`docs/history/moycore_plan_2026-08.md`). §5's containment and sprint 2's
   recovery floor are part of this direction, not optional.

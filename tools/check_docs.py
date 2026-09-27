@@ -111,6 +111,7 @@ NOT_OURS = (
     "firmware/lilygo_t_deck_plus_reference/",   # untracked vendor reference
     "firmware/reference_tulipcc/",              # ditto (THIRD_PARTY.md scope)
     "ports/webassembly/",    # upstream MicroPython's tree, not ours
+    "ports/esp32/main.c",    # upstream MicroPython's esp32 port
     "boards/T-Deck.json",    # upstream LilyGO's repo
     "examples/UnitTest/", "examples/I2SPlay/", "examples/Keyboard_ESP32C3",
     "extmod/font_petme128_8x8.h",               # upstream MicroPython
