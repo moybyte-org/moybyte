@@ -1135,9 +1135,9 @@ def wasm_too_big_cart_opens_the_notice(board, board_dir):
 # Opt-in by construction: the cart links GPL code and carries the shareware
 # WAD, so it is never in the repository or in CI, and these skip, saying so,
 # until the developer has built it. What they hold: the cart runs from the
-# launcher, and the frame Doom renders at each named gametic is the frame the
+# launcher, the frame Doom renders at each named gametic is the frame the
 # host renders there (frames.py; the attract loop's transitions excluded by
-# name).
+# name), and the run's median drawn fps holds the floor a suite pins.
 
 DOOM_TICS = 3000
 
@@ -1228,13 +1228,15 @@ def doom_push(board, board_dir):
 
 
 def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,
-                               pushed=None):
+                               pushed=None, floor=None):
     """Doom from the launcher, WiFi off, until gametic `tics`: every frame CRC
     the board records at a named gametic is the host's, outside the named
-    transitions. Returns (median drawn fps, compared, excluded). `short` is
-    the reason a board's cart-runtime reserve cannot hold the cart, which
-    skips it -- the floor verdict, stated where the board's suite calls this.
-    `pushed` is doom_push's answer when the caller has already pushed."""
+    transitions, and the median drawn fps over the run is at least `floor`
+    when one is given. Returns (median drawn fps, compared, excluded).
+    `short` is the reason a board's cart-runtime reserve cannot hold the
+    cart, which skips it -- the floor verdict, stated where the board's suite
+    calls this. `pushed` is doom_push's answer when the caller has already
+    pushed."""
     import time
     from runtime.perf_line import parse_perf
     if short:
@@ -1282,23 +1284,27 @@ def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,
     print("\nDOOM frames: %d gametics match the host, excluded %r; drawn fps %s"
           % (len(compared), skipped, drawn))
     assert compared, "no gametic compared"
+    if floor is not None:
+        assert fps is not None and fps >= floor, (
+            "Doom drew %s fps over the run, under the floor %s" % (fps, floor))
     return fps, compared, skipped
 
 
-def doom_runs_or_opens_the_notice(board, board_dir):
+def doom_runs_or_opens_the_notice(board, board_dir, floor=None):
     """Doom on a board whose free PSRAM sits near the cart's footprint and
     moves with what the shell holds: the fit check decides, and the board
     does what it said. Where the footprint fits what the board reports free,
-    the cart runs and its frames are the host's (doom_frames_match_the_host);
-    where it does not, launching it opens the fit notice -- never an error
-    panel or a crash -- and a compiled cart runs after it. Returns ("runs",
-    fps, compared, excluded) or ("notice", notice, need, have)."""
+    the cart runs, its frames are the host's and it holds `floor`
+    (doom_frames_match_the_host); where it does not, launching it opens the
+    fit notice -- never an error panel or a crash -- and a compiled cart runs
+    after it. Returns ("runs", fps, compared, excluded) or ("notice", notice,
+    need, have)."""
     frames = doom_push(board, board_dir)
     need, have = wasm_fit(board, "Doom")
     print("\nDOOM fit: footprint %r, free %r" % (need, have))
     if need[0] <= have[0] and need[1] <= have[1]:
         return ("runs",) + doom_frames_match_the_host(board, board_dir,
-                                                     pushed=frames)
+                                                     pushed=frames, floor=floor)
     notice = _notice_on_launch(board, "Doom")
     print("\nDOOM fit notice: %r" % notice)
     _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)

@@ -18,6 +18,7 @@ that disagrees there says which transition it was rather than failing.
 
 import json
 import os
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
@@ -78,8 +79,15 @@ def host_crcs(cart=CART, tics=6000, draw_every=1, cfg=None, buttons=None):
     run = wb.HostWasmRun(bytearray(320 * 240 * 2), 320, 240, cart, "main.wasm",
                          man["memory"], cfg=conf)
     try:
+        # The host's time() is the snapshot's clock plus the real milliseconds
+        # spent inside the current call, and _init reads it. A first tick
+        # whose clock is behind what _init read runs Doom's millisecond clock
+        # backwards, which its tic counter takes for a wrap: no tic runs
+        # again, and this loop never ends. So the clock starts past _init.
+        began = time.monotonic()
         err = run.init()
-        frame = clock = 0
+        frame = 0
+        clock = int((time.monotonic() - began) * 1000) + 1
         while not err:
             img = list(run.pmem()[1])
             if img[PM_GAMETIC] >= tics:

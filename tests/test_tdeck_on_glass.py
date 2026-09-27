@@ -146,11 +146,17 @@ def test_the_jet_showcase_holds_its_floor_at_full_width(board):
 # linear memory's block, the pool and the text at once, which is about what
 # this board's 3 MB cart-runtime reserve has free with the shell resident --
 # more on a fresh boot, less once the radios and a session's carts have run.
-# So the fit check decides, and the suite holds the board to it: the frames
-# are the host's where it fits, the fit notice where it does not. Skips until
-# the developer has built the cart.
+# So the fit check decides, and the suite holds the board to it: where it
+# fits, the frames are the host's and the run's median drawn fps holds a
+# floor about a fifth under what this board drew when it was set
+# (2026-09-27, the figures are #158's); the fit notice where it does not.
+# Skips until the developer has built the cart.
+DOOM_FPS_FLOOR = 20
+
+
 def test_doom_runs_or_opens_the_notice(board, wasm_carts):
-    on_glass.doom_runs_or_opens_the_notice(board, WASM_BOARD_DIR)
+    on_glass.doom_runs_or_opens_the_notice(board, WASM_BOARD_DIR,
+                                           floor=DOOM_FPS_FLOOR)
 
 
 def test_state_snapshot_has_the_fullscreen_tier_shape(board):

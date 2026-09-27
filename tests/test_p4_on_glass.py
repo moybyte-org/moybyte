@@ -126,10 +126,17 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
     on_glass.wasm_read_of_a_folder_reads_nothing(board, WASM_BOARD_DIR)
 
 
-# Doom, built by the recipe (experiments/wasm_aot/doom/): skips until the
-# developer has built the cart, which is never in the repository or CI.
+# Doom, built by the recipe (experiments/wasm_aot/doom/): its frames are the
+# host's, and the run's median drawn fps holds a floor about a fifth under
+# what this board drew when it was set (2026-09-27, the figures are #158's).
+# Skips until the developer has built the cart, which is never in the
+# repository or CI.
+DOOM_FPS_FLOOR = 28
+
+
 def test_doom_frames_match_the_host(board):
-    on_glass.doom_frames_match_the_host(board, WASM_BOARD_DIR)
+    on_glass.doom_frames_match_the_host(board, WASM_BOARD_DIR,
+                                        floor=DOOM_FPS_FLOOR)
 
 
 def test_boots_to_the_desk(board):

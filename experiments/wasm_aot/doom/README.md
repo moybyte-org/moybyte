@@ -102,8 +102,9 @@ Text in flash
 would take the text out of PSRAM, and costs a partition per board and a
 full-erase reflash of every device. Neither is taken here (#158 carries the
 tier's figures). The Waveshare P4 runs the cart from the launcher and its
-suite holds the frames to the host's; the T-Deck's suite holds it to
-whichever the fit check says; the Guition S3's skips, saying why; and the
+suite holds the frames to the host's and the run to a drawn-fps floor; the
+T-Deck's suite holds it to whichever the fit check says, and to a floor of
+its own where it runs; the Guition S3's skips, saying why; and the
 Guition P4's internal store cannot hold the cart, which `tools/push_cart.py`
 says before it sends a byte.
 
