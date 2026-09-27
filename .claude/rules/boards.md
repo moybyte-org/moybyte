@@ -312,7 +312,11 @@ README is the authority**; what belongs here is only what bites:
     writes go through the native `moy_sd` ATTACH (`sdspi_host_init_device`, no bus
     re-init — the ESP-IDF "Sharing the SPI Bus" pattern), which leaves the panel
     device intact. `moybyte_sd.with_sd_live(fn)` mounts once and keeps the card
-    RESIDENT for the session.
+    RESIDENT for the session, and once resident a session is `fn()` and nothing
+    else: an `import os` (or `time`) inside a function is a search of the whole
+    path for an overriding file on EVERY call -- milliseconds on this board --
+    and a compiled cart's every `read` is a store session
+    (`test_the_resident_session_imports_nothing`).
   - **Do not tear the SD device down between ops, and do not touch the CS pins.**
     A per-op `sdspi_host_deinit`, or reconfiguring `TFT_CS` via `Pin(...)`,
     corrupts the shared bus/DMA state and the NEXT PANEL FLUSH silently hangs the

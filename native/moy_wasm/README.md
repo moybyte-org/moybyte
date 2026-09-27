@@ -125,7 +125,10 @@ WiFi, BLE and the display's DMA share. The stack defaults to PSRAM for the same
 reason: measured on the Guition S3 on 2026-09-25, an internal 16 KB stack cost a run 17 KB of
 internal SRAM against about 1 KB for a PSRAM one, at the same speed
 (`step(400000)` 276 vs 277 ms), and with WiFi and BLE up that board has no
-17 KB to give. The number that pins this is `WASM_RUN_SRAM_MAX` in
+17 KB to give. A cart's session is no different: Jet Teapot on the Guition S3
+and the Waveshare P4, and Doom on the Waveshare P4, drew the same frame rate
+from the launcher with the stack internal or in PSRAM (2026-09-27), each
+using under a third of its 16 KB. The number that pins this is `WASM_RUN_SRAM_MAX` in
 `tests/on_glass.py`.
 
 **A cart's module file is gone before its memory is allocated.** The

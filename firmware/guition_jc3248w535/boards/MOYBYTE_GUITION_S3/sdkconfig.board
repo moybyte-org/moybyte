@@ -35,8 +35,13 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # DATA_CACHE_LINE_64B here, but the T-Deck's on-glass verdict was that 64B
 # lines break the CPU<->GDMA handoff in OUR SRAM-bounce flush path (horizontal
 # garbage bands), and this board runs that flush path, not ESPHome's. Per-board
-# verdicts don't transfer in either direction, so 64B is a legitimate A/B to
-# run on this glass later -- from a working 32B baseline, not blind.
+# verdicts don't transfer in either direction, so 64B was A/B'd on this glass
+# on 2026-09-27 against the 32B baseline (figures: #158): the compiled carts,
+# Brick Siege and the Bench's streaming phases (cls, scroll, layer) gained a
+# few percent, the `line` verb lost about a sixth, and the fold's GDMA
+# snapshot read back byte-exact against the canvas under animating carts.
+# Not adopted: a regressing verb, and nobody watched the glass for the bands
+# the T-Deck showed. The next attempt starts from that list.
 CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=
 CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 CONFIG_ESP32S3_DATA_CACHE_32KB=
