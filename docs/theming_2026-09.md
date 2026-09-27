@@ -52,6 +52,9 @@ for them from format 1.
 | D6 | **Themes bring wallpapers**, per **slot** (`desk`, `home`), which may differ; the user can override each slot. A theme ships static images and may name installed wallpaper carts (§4.9). |
 | D7 | **The home is one layout on every board**: the cover carousel with tabs (Games / Mine / Apps / Make), themeable, with its own wallpaper slot. **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
 
+The pictures for D1 and D7, with the shell as it rendered before, are in
+`docs/media/theming_2026-09/` (its README says which are mockups).
+
 Rejected in the same sessions, so they are not re-proposed: MOY64 grey chrome
 replacing the PICO-8 base colours, cartridge-shell or notched library cards,
 labels inside the desk tiles, and Pixel Operator replacing Tiny5 as the UI font.
