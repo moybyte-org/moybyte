@@ -50,7 +50,7 @@ for them from format 1.
 | D4 | **Apps follow the theme.** Settings, Calc and every shipped app restyle with it, because they draw through the one toolkit. App carts read it through `theme()` (§6). |
 | D5 | **Layout: both.** A theme sets the default bar layout and window mode; the user can override either in Settings, and the override survives a theme switch. Designed in the shell-layout doc (§4.8). |
 | D6 | **Themes bring wallpapers**, per **slot** (`desk`, `home`), which may differ; the user can override each slot. A theme ships static images and may name installed wallpaper carts (§4.9). |
-| D7 | **The home is one layout on every board**: the cover carousel with tabs (Games / Mine / Apps / Make), themeable, with its own wallpaper slot. How it meets #105's desk ("apps are windows, games are fullscreen") is §12's first open question, settled in the shell-layout doc. |
+| D7 | **The home is one layout on every board**: the cover carousel with tabs (Games / Mine / Apps / Make), themeable, with its own wallpaper slot. **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
 
 Rejected in the same sessions, so they are not re-proposed: MOY64 grey chrome
 replacing the PICO-8 base colours, cartridge-shell or notched library cards,
@@ -320,8 +320,10 @@ from rev 1's review:
 - **A content rectangle.** `bar_h()` is a public app-cart contract that assumes a
   top strip. A bottom taskbar or a dock needs `content_rect()`, with `bar_h()`
   kept as a derived shim.
-- **The desk and the home (#105).** Where D7's tabbed home sits against "apps
-  are windows, games are fullscreen" on the windowed tier (§12.1).
+- **The desk and the home (#105).** The desk's PLAY opens D7's home, the same
+  one the fullscreen tiers boot to, replacing the windowed tier's games-only
+  Library. What its Apps and Make tabs do on the desk, where apps are already
+  desk icons and open as windows, is written out there.
 - **Its own kernel mapping.** Bar presets, a dock and tiling grow the WMs the
   kernel's sprint 7 ports, so that doc records its scope in sprint 7.
 
@@ -347,7 +349,7 @@ installed **wallpaper carts** for them. The user can override each slot.
   the wallpaper declares itself `home_safe` (a new manifest flag, which phase 6
   lists with its side effects), or the home draws a dither scrim. A scrim is
   applied **at the wallpaper's source resolution, before the upscale blit**
-  (`blit565_scale`), which is up to 16× fewer pixels than at 1280×800 (§12.2).
+  (`blit565_scale`), which is up to 16× fewer pixels than at 1280×800 (§12.1).
 - **Prefer wallpapers that need no VM.** A live Python wallpaper keeps the
   Python VM up, against the kernel doc's memory goal (§4.4 there). Images and
   Lua or wasm wallpapers are preferred; a Python wallpaper stays allowed and is
@@ -537,17 +539,12 @@ About eighteen systems were studied; the lessons that shaped this doc:
 
 ## 12. Open questions
 
-1. **D7 against #105.** On the windowed tier the desk holds the apps and PLAY
-   opens a games-only Library. Does D7's tabbed home replace that Library there
-   (with Apps and Make tabs duplicating the desk), or does the tabbed home apply
-   to the fullscreen tiers, with the desk's PLAY opening its Games tab? The
-   shell-layout doc settles it.
-2. **Home readability:** a `home_safe` wallpaper flag, or a scrim the home always
+1. **Home readability:** a `home_safe` wallpaper flag, or a scrim the home always
    draws at source resolution (§4.9)?
-3. **Sprites in phase 3 or phase 6** (D3 allows either)?
-4. **A generator:** a theme derived from a wallpaper or one picked colour, the way
+2. **Sprites in phase 3 or phase 6** (D3 allows either)?
+3. **A generator:** a theme derived from a wallpaper or one picked colour, the way
    Material You derives one (§10)?
-5. **Theme sounds:** defined with #141, or earlier?
+4. **Theme sounds:** defined with #141, or earlier?
 
 ## 13. Sentences this doc will make false
 
@@ -562,7 +559,7 @@ Each is corrected in place by the phase that falsifies it:
 | the default look is the "night" token set; "Avoid: bevels and fake plastic controls" as a rule for every look | `docs/visual_identity_v1.md`, `docs/shell_ux_v1.md` | phase 3, scoped to the default theme |
 | "Petme128 remains the canonical runtime glyph source for v1" | `docs/visual_identity_v1.md` §5.4 | phase 4 (carts keep it; the chrome moves) |
 | `bar_h()` as the whole content contract | `docs/app_api_v1.md`, `runtime/system_api.py` | the shell-layout doc |
-| the windowed tier's Library and desk split (#105) | `docs/shell_ux_v1.md` | the shell-layout doc, per §12.1 |
+| the windowed tier's games-only Library (#105) | `docs/shell_ux_v1.md` | the shell-layout doc: the desk's PLAY opens D7's home |
 
 ## 14. Review ledger
 
@@ -582,7 +579,7 @@ CASE STANDS WITH FIXES).
 | A8 | the manifest field is `type`, not `kind`; a new type has side effects | accepted | §3, phase 6 |
 | A9 | invented role names; `theme()` and `ctx.theme` API; persisted keys; no variant axis; `light_chrome()` branches | accepted | §3 variant axis; §4.1 today's keys are the base vocabulary; seed packages; strict reading; phase 2a folds `light_chrome()` |
 | A10 | layout presets against tiers, `bar_h()`, no tiling WM | accepted | §0 scope and §4.8: layout moves to its own shell-layout doc with a tier table and `content_rect()` |
-| A11 | D7 against #105 | accepted as open | §1 D7, §12.1, §13 |
+| A11 | D7 against #105 | accepted; the owner settled it (the desk's PLAY opens the same home) | §1 D7, §4.8, §13 |
 | A12 | only D1 fenced against the kernel sprints; `skin.py unchanged` unlisted; assets as handles before handle tables exist | accepted | §8: no pixel-moving phase overlaps sprints 6–7; loader-owned `moybuf` buffers until sprint 2; §13 row |
 | A13 | the part list did not match the tables; quirks; editor content colours | accepted | §4.3: derived from the tables, quirks ruled in phase 1, "chrome" defined |
 | A14 | SOURCE counts; missing golden configs | accepted | §2 counts; phase 1 adds the cs2/fs1 and light-windowed configs |
