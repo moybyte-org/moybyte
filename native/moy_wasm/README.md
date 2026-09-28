@@ -198,7 +198,7 @@ fork <the fork commit this image runs>
 target xtensa          | riscv32
 cpu esp32s3            | generic-rv32
 abi -                  | ilp32f
-features -             | +m,+a,+f,+c,+unaligned-scalar-mem
+features -             | +m,+a,+f,+c,+fast-unaligned-access
 opt 3
 size 0                 | 3
 bounds 1
@@ -219,10 +219,11 @@ WebAssembly lets any load or store be misaligned, so an access whose address
 the compiler cannot see is emitted at alignment 1, and a backend that thinks
 its target cannot take a misaligned word splits it: four byte loads, shifts
 and ors for every `i32.load`, four byte stores for every `i32.store`. Both
-chips take a misaligned load or store of any width in hardware, so both
-compilers are told so. On the P4 it is the `+unaligned-scalar-mem` feature in
-the key. The Xtensa backend has no such feature, so the fork's compiler knows
-it from the cpu: for `--cpu=esp32s3` an access is emitted at its own width.
+chips take a misaligned load or store of any width in hardware, so the
+compiler is told so for both. On the P4 it is the `+fast-unaligned-access`
+feature in the key (the name Espressif's LLVM gives it). The Xtensa backend has
+no such feature, so the fork's compiler knows it from the cpu: for
+`--cpu=esp32s3` an access is emitted at its own width.
 What the split cost the Jet showcase, on both chips, is in #158.
 
 The guard is a module that sweeps misaligned loads and stores of every

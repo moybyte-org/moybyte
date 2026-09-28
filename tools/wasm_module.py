@@ -36,10 +36,11 @@ moy_wasm_key.h's, which this tool reads, and the board checks it with
 moy_ota.verify_sig against the keys its image trusts before the runtime sees
 a byte. `--unsigned` builds a module a board must refuse.
 
-THE COMPILERS are fixed binaries, pinned by sha256 below: the Xtensa one built
-by experiments/wasm_aot/toolchain/build_wamrc_xtensa.sh (Espressif's LLVM, the
-fork's wamr-compiler at the commit the runtime is vendored from), the RISC-V
-one WAMR's own 2.4.5 release build. They are looked up in
+THE COMPILERS are fixed binaries, pinned by sha256 below: one wamrc for both
+targets, built by experiments/wasm_aot/toolchain/build_wamrc_xtensa.sh
+(Espressif's LLVM with its Xtensa and RISC-V backends, the fork's
+wamr-compiler at the commit the runtime is vendored from), carried under
+each target's name. They are looked up in
 experiments/wasm_aot/toolchain/dist/ (gitignored), fetched from the fork's
 release assets into it when absent, and refused when their hash is not the
 pin. $MOYBYTE_WAMRC_<TARGET> points at another binary for an
@@ -82,16 +83,16 @@ KEY_MAGIC = "moybyte-aot 1\n"
 
 # The compilers, by the key's `target` field. `sha256` is the pin; `url` is
 # where a missing binary is fetched from (the fork's release assets).
-RELEASE = "https://github.com/moybyte-org/wasm-micro-runtime/releases/download/wamrc-2.4.5-moybyte-2"
+RELEASE = "https://github.com/moybyte-org/wasm-micro-runtime/releases/download/wamrc-2.4.5-moybyte-3"
 COMPILERS = {
     "xtensa": {
         "file": "wamrc-xtensa",
-        "sha256": "d1f943aa5fddcfe6c2228f77c5663bf322780851cd2a714b7862ded33b8d64e1",
+        "sha256": "56622550bcf42dde5f9f52305e4fe396ca0be357b698203fad55b369e985e85d",
         "url": RELEASE + "/wamrc-xtensa",
     },
     "riscv32": {
         "file": "wamrc-riscv32",
-        "sha256": "2b9b8b8461e07b21ceedbad87b856fe64ad711e2eb517052a1eb0249584ec72e",
+        "sha256": "56622550bcf42dde5f9f52305e4fe396ca0be357b698203fad55b369e985e85d",
         "url": RELEASE + "/wamrc-riscv32",
     },
 }

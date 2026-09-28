@@ -3,5 +3,5 @@
  * check compares a module's key against it. Do not edit. */
 #ifndef MOY_WASM_PIN_H
 #define MOY_WASM_PIN_H
-#define MOY_WASM_FORK_COMMIT "0be18b702622b1bd7c406b22983cd80fbb5bdb4f"
+#define MOY_WASM_FORK_COMMIT "f4decc3b7f2576a6aaabd2e0afbfa39b64156cdb"
 #endif

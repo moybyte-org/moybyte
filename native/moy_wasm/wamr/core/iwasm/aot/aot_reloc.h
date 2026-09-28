@@ -202,7 +202,7 @@ typedef struct {
     REG_SYM(wasm_runtime_quick_invoke_c_api_native),\
     { "memset", (void*)aot_memset },      \
     { "memmove", (void*)aot_memmove },    \
-    { "memcpy", (void*)aot_memmove },     \
+    { "memcpy", (void*)aot_memcpy },      \
     { "sqrt", (void*)aot_sqrt },          \
     { "sqrtf", (void*)aot_sqrtf },        \
     REG_SYM(fmin),                        \

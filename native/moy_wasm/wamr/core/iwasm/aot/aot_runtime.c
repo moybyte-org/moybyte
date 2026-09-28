@@ -3515,7 +3515,19 @@ aot_check_app_addr_and_convert(AOTModuleInstance *module_inst, bool is_str,
 void *
 aot_memmove(void *dest, const void *src, size_t n)
 {
+    /* A copy between ranges that do not overlap is a memcpy, which the C
+       library does faster: on the ESP32-S3 the ROM's memmove moves about
+       half the bytes a cycle its memcpy does. */
+    if ((const uint8 *)dest + n <= (const uint8 *)src
+        || (const uint8 *)src + n <= (const uint8 *)dest)
+        return memcpy(dest, src, n);
     return memmove(dest, src, n);
+}
+
+void *
+aot_memcpy(void *dest, const void *src, size_t n)
+{
+    return memcpy(dest, src, n);
 }
 
 void *

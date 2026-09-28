@@ -95,8 +95,9 @@ console board's image (the headless Zero denies it).
 - **Modified: yes, in the fork, never here.** The fork's commits over the 2.4.5
   tag change the esp-idf platform layer (AOT text in PSRAM on the ESP32-S3 and
   ESP32-P4, PSRAM-only data allocations above a threshold, a range-scoped cache
-  sync, a real native-stack boundary) and two loader details; its history is
-  the record. `tests/test_wamr_vendor.py` fails on any edit to the copy.
+  sync, a real native-stack boundary), two loader details, and in the runtime
+  a memmove that copies disjoint ranges with memcpy; its history is the
+  record. `tests/test_wamr_vendor.py` fails on any edit to the copy.
 - `modmoy_wasm.c`, `moy_wasm_key.h`, the generated `wamr_pin.h` and
   `micropython.cmake` in the parent directory are Moybyte's own code, under this
   repository's licence.
@@ -569,7 +570,7 @@ image. Nothing else is pulled in.
 | Project | Upstream | Licence |
 |---|---|---|
 | WAMR (wasm-micro-runtime) 2.4.5, taken from Moybyte's fork at branch `moybyte-2.4.5` (the esp-idf platform work over the upstream tag that §2.2 describes, at the same pinned commit), plus upstream's prebuilt `wamrc` release binary | <https://github.com/moybyte-org/wasm-micro-runtime> (fork of <https://github.com/wasm-micro-runtime/wasm-micro-runtime>) | Apache-2.0 WITH LLVM-exception |
-| Espressif's LLVM fork, branch `xtensa_release_18.1.2`, built once by the toolchain script to give `wamrc` an Xtensa backend; never vendored | <https://github.com/espressif/llvm-project> | Apache-2.0 WITH LLVM-exception |
+| Espressif's LLVM fork, branch `xtensa_release_18.1.2`, built once by the toolchain script, with one patch of ours to its Xtensa backend (`experiments/wasm_aot/toolchain/llvm-xtensa-extui.patch`), to give `wamrc` its Xtensa and RISC-V backends; never vendored | <https://github.com/espressif/llvm-project> | Apache-2.0 WITH LLVM-exception |
 | wasi-sdk 24, the clang/wasi-libc/libc++ toolchain `experiments/wasm_aot/doom/build_wasm.sh`, `build_cart.py` and the showcase cart's `tools/jet_cart.py` compile with; a gitignored download (`build_cart.py` and `jet_cart.py` fetch the release tarball by sha256 when it is absent), never vendored | <https://github.com/WebAssembly/wasi-sdk> | Apache-2.0 WITH LLVM-exception (wasi-libc: Apache-2.0 / MIT) |
 | doomgeneric (id Software's DOOM, ozkl's portable fork), the engine `build_wasm.sh` stages from a gitignored checkout the developer fetches and `build_cart.py` fetches at a pinned commit into its gitignored cache, checked by the sha256 of its tree; never vendored | <https://github.com/ozkl/doomgeneric> | **GPL-2.0** |
 | DOOM shareware IWAD `doom1.wad` v1.9 (1993), a gitignored file the developer obtains; `build_cart.py` fetches Debian's `doom-wad-shareware` source package (<http://deb.debian.org/debian/pool/non-free/d/doom-wad-shareware/>) into its gitignored cache and checks the tarball and the WAD by sha256; never vendored, never redistributed | id Software | id Software Limited Use licence: free unmodified copies only, no consideration, no derivative works |

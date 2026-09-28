@@ -65,14 +65,15 @@
 
 // ESP32-P4: RV32IMAFC, hard-float single ABI. Without +m LLVM emits
 // __umodsi3 and friends, which WAMR's RISC-V symbol table does not carry.
-// +unaligned-scalar-mem because the P4 takes a misaligned load or store in
+// +fast-unaligned-access because the P4 takes a misaligned load or store in
 // hardware: without it every access whose alignment the compiler cannot see
-// is split into bytes (native/moy_wasm/README.md, "Misaligned access").
+// is split into bytes (native/moy_wasm/README.md, "Misaligned access"). That
+// is the feature's name in the Espressif LLVM the compiler is built against.
 #define MOY_WASM_KEY_ESP32P4 \
     "target riscv32\n" \
     "cpu generic-rv32\n" \
     "abi ilp32f\n" \
-    "features +m,+a,+f,+c,+unaligned-scalar-mem\n" \
+    "features +m,+a,+f,+c,+fast-unaligned-access\n" \
     "opt 3\n" \
     "size 3\n" \
     "bounds 1\n" \

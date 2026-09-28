@@ -6,9 +6,9 @@
     "native/moy_wasm/wamr/core/iwasm/aot/aot_intrinsic.c": "4a79281e93abb3ba944ce45fc8a12370cc1a2babd58c99b10624b3252db1b855",
     "native/moy_wasm/wamr/core/iwasm/aot/aot_intrinsic.h": "0d13f69af73c1e51ed9131724c658b6c2773a11c3c301d2392be7b4cbc9bd375",
     "native/moy_wasm/wamr/core/iwasm/aot/aot_loader.c": "7f8e12ff80252191256f764cb332a157e1ce03634623cb30f3f8908ed8f8eb6f",
-    "native/moy_wasm/wamr/core/iwasm/aot/aot_reloc.h": "ffedfda32dc9c579bbc993f3f5fd3fa5d69a687b33e59533bee5752153c79a7d",
-    "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.c": "9032aa7a5a883b413ee4558d78498eba19efc210fafa8e5371b3610b671aac6b",
-    "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.h": "65834f0c9247794df2771fed9cf3005701cef86cc06311c414591dd25f0e4f27",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_reloc.h": "85975d6a9ba08cd13ba50afb4d9a253be0e81bccf47ad516e06a8c52bd1f80c1",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.c": "7a9c0dacf8f1a38f262e847f4f44e628311a43ccf14252a20aba682741148856",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.h": "79d775d6f7406730c893ba62329b5641e1356a05986a4af8e8cd598ef3b34a83",
     "native/moy_wasm/wamr/core/iwasm/aot/arch/aot_reloc_riscv.c": "4677e121347781674fa90f1bb9b467b24fc660d36b47e1299ea1b770f2e8c0f8",
     "native/moy_wasm/wamr/core/iwasm/aot/arch/aot_reloc_xtensa.c": "cbabd4b585c4d5fb652ee6b934f35c7de804bdc6977672f2ba0b0de53f409bc3",
     "native/moy_wasm/wamr/core/iwasm/common/arch/invokeNative_riscv.S": "8e6e4d38424363e4369a098ed03e03f5fa39b01ef77468c102ed644d26ff3943",
@@ -88,8 +88,8 @@
   },
   "upstream": {
     "branch": "moybyte-2.4.5",
-    "commit": "0be18b702622b1bd7c406b22983cd80fbb5bdb4f",
-    "date": "2026-09-26",
+    "commit": "f4decc3b7f2576a6aaabd2e0afbfa39b64156cdb",
+    "date": "2026-09-28",
     "repo": "moybyte-org/wasm-micro-runtime"
   }
 }
