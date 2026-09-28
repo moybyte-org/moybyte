@@ -250,6 +250,37 @@ every module it builds with the OTA signing key (`$MOYBYTE_OTA_SIGNING_KEY`,
 else the file `make ota-keygen` writes) and `verify` answers as a board
 would; `--unsigned` builds a module a board refuses.
 
+### What the checks cost, and what the compiler does about it
+
+Bounds checks stay on; the fork's compiler makes them cheap rather than
+absent. On both chips (32-bit targets, 32-bit memories) an access is one
+unsigned compare of the address against the memory's size less the access's
+end, against the one 1-byte bound -- which also catches `addr + offset`
+wrapping, so there is no second compare and three fewer bound values live
+across a function; the Xtensa loops that reloaded a spilled bound before every
+check keep it in a register. A trapping float-to-int is one branch on two
+ordered compares, the trap path telling NaN from overflow; the saturating
+conversion is LLVM's `fptosi.sat` on RISC-V, where it is a few branch-free
+instructions (on Xtensa its expansion costs more than the branches, so it
+keeps them). Every branch to the exception path is weighted cold. A memory
+declared with its maximum equal to its initial size keeps its base and bound
+across calls even when the code asks `memory.grow`. And the Xtensa backend is
+patched to select EXTUI for shifts right by 16..31 and low-bit masks.
+
+Tried and dropped, so not to be re-proposed without new evidence: LLVM's
+inductive range-check elimination (it recognises the checks only in an
+`addr < limit` form, constrains no loop in either showcase -- the wasm
+induction variables carry no no-wrap flags -- and that form bloats Jet's
+setup function 2.4x); reloading the bound at every check (it halves Jet's
+setup pressure on the S3 and costs its rasterizer more); a `umax`-based single
+check (slower on Xtensa); `fptosi.sat` on Xtensa. What remains is the check
+itself (a compare and the base add per access), the stack-check wrapper every
+wasm-to-wasm call goes through, and on the S3 register pressure: 16 registers
+against LLVM's spills, frames past the 1020 bytes `l32i` reaches, and no
+zero-overhead `loop` -- Espressif's backend disables hardware loops whenever
+literals sit in the text, which the S3's module layout requires. The figures
+are #158's.
+
 ## Stopping a run
 
 **A runaway export cannot be stopped mid-loop.** `terminate()` calls
