@@ -442,6 +442,16 @@ it is never on for play), and **DIAG SD LOG** separately gates the periodic
 diag→SD write (~115ms every 20s) so a serial-attached measurement session runs
 stutter-free; crash/cart-exit diag flushes happen regardless.
 
+**UNKNOWN SOURCES** (owner, 2026-09-29; persisted, default OFF) is the owner's
+switch for compiled carts whose module carries no signature — a cart somebody
+rebuilt from its source. Turning it ON replaces the rows with a warning
+("Carts from outside the store can run code nobody has checked. Turn this on
+only for carts you trust.") whose focus starts on KEEP OFF, so it takes the
+TURN ON button, or a move and a press; turning it OFF is one tap. With it off,
+launching such a cart opens the Player's notice ("Not signed."), which says
+where the switch is. A module whose signature is present and fails is refused
+either way (`native/moy_wasm/README.md`, "Unknown sources").
+
 ---
 
 ## 11. The OS ↔ app contract — ~5 verbs each way

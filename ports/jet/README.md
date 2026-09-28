@@ -148,9 +148,11 @@ hand and never committed.
    compiles), and uploads them as an artifact the board jobs download and bake.
 3. **A build without the key** — a pull request from a fork, or a developer
    without the release key — packs no compiled seed and says so, rather than
-   seeding a cart its own board would refuse as unsigned. A developer who
-   signs with a key of their own gets a module the image refuses unless it
-   trusts that key: that is `OTA_PUBLIC_KEYS`' policy, not a new one.
+   seeding a cart its own board refuses as unsigned unless its owner has
+   turned on Unknown sources. A developer who signs with a key of their own
+   gets a module the image refuses unless it trusts that key, whatever that
+   setting says: that is `OTA_PUBLIC_KEYS`' policy, not a new one
+   (`native/moy_wasm/README.md`, "Unknown sources").
 4. **Licences.** The seeded cart's `LICENSES.txt` gains the notices of the
    libraries compiled into `main.wasm` — wasi-libc (musl's MIT among them) and
    LLVM's libc++, whose LLVM exception waives attribution for compiled code —

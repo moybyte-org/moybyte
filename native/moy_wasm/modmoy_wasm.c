@@ -13,8 +13,9 @@
 // The Python side reads the module FILE (through the VFS, so the T-Deck's SD
 // and the P4s' flash store look the same) into a PSRAM buffer, checks its
 // signature (moy_wasm_key.h) -- a module whose signature does not verify never
-// reaches the runtime -- starts the thread, and collects a report when it
-// ends. One run at a time.
+// reaches the runtime, and one with no signature reaches it only when the
+// caller allows unsigned modules (the owner's Unknown sources setting) --
+// starts the thread, and collects a report when it ends. One run at a time.
 //
 // A cart the Player runs is a SESSION (phase 3, moy_wasm_session.h): the same
 // thread and the same load and key check, held open across the cart's life,
@@ -453,16 +454,25 @@ static void read_module(mp_obj_t path, uint32_t hold, uint8_t **out, uint32_t *o
     *out_len = (uint32_t)size;
 }
 
-// The module's signature (moy_wasm_key.h): NULL when the file is a module
-// this board trusts, with *module_len set to the module's length without its
-// trailer; otherwise the refusal. The RSA check is moy_ota.verify_sig -- the
-// body and the keys every OTA manifest is checked with -- so this runs on the
-// MicroPython task, before the run's thread exists.
-static const char *verify_module(const uint8_t *file, uint32_t len, uint32_t *module_len)
+// The module's signature (moy_wasm_key.h): NULL when the file may load, with
+// *module_len set to the module's length without any trailer; otherwise the
+// refusal. The RSA check is moy_ota.verify_sig -- the body and the keys every
+// OTA manifest is checked with -- so this runs on the MicroPython task, before
+// the run's thread exists.
+//
+// A file with no trailer loads only when `unsigned_ok`, the owner's Unknown
+// sources setting as the caller read it; its provenance key is checked on the
+// thread as every module's is. A trailer that is present must verify whatever
+// `unsigned_ok` says: a signature that does not is a module changed after it
+// was signed, or one signed with a key this image does not trust, and neither
+// is a module somebody built without signing.
+static const char *verify_module(const uint8_t *file, uint32_t len, bool unsigned_ok,
+                                 uint32_t *module_len)
 {
     const uint32_t magic = sizeof(MOY_WASM_SIG_MAGIC) - 1;
     if (len < magic + 4 || memcmp(file + len - magic, MOY_WASM_SIG_MAGIC, magic) != 0) {
-        return "unsigned module";
+        *module_len = len;
+        return unsigned_ok ? NULL : "unsigned module";
     }
     const uint8_t *lp = file + len - magic - 4;
     uint32_t k = lp[0] | (uint32_t)lp[1] << 8 | (uint32_t)lp[2] << 16 | (uint32_t)lp[3] << 24;
@@ -519,18 +529,22 @@ static void read_file(run_t *r, mp_obj_t path)
     read_module(path, 0, &r->file, &r->file_len);
 }
 
-// start(path, export, args=(), loops=1, stack=None, psram_stack=None, pool=None)
+// start(path, export, args=(), loops=1, stack=None, psram_stack=None, pool=None,
+//       allow_unsigned=False)
 //
 // Reads the module file and checks its signature, then runs `loops` passes of load / check / instantiate
 // / call export(*args) / unload on a new thread, and returns at once. `stack`,
 // `psram_stack` and `pool` override the board's settings and the pool's
 // sizing rule for this run (a measurement, not a product knob: result()'s
 // `pool_peak` under a pool bigger than the rule's is what the rule must
-// hold). done() says when it ended, result() collects it; a module refused
-// for its signature ends at once, with no thread.
+// hold). `allow_unsigned` lets a module with no signature load, as the Unknown
+// sources setting does for a cart. done() says when it ended, result()
+// collects it; a module refused for its signature ends at once, with no
+// thread.
 static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args)
 {
-    enum { ARG_path, ARG_export, ARG_args, ARG_loops, ARG_stack, ARG_psram_stack, ARG_pool };
+    enum { ARG_path, ARG_export, ARG_args, ARG_loops, ARG_stack, ARG_psram_stack, ARG_pool,
+           ARG_allow_unsigned };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_path, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_export, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
@@ -539,6 +553,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
         { MP_QSTR_stack, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_psram_stack, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_pool, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_allow_unsigned, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
     };
     mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, a);
@@ -590,7 +605,8 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
                          ? MOY_WASM_STACK_PSRAM : mp_obj_is_true(a[ARG_psram_stack].u_obj);
     r->pool_asked = (uint32_t)pool;
     read_file(r, a[ARG_path].u_obj);
-    const char *why = verify_module(r->file, r->file_len, &r->file_len);
+    const char *why = verify_module(r->file, r->file_len, a[ARG_allow_unsigned].u_bool,
+                                    &r->file_len);
     if (why) {
         fail(r, "refused", why);
         r->started = true;
@@ -872,7 +888,8 @@ void moy_wasm_session_close(void)
 }
 
 int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memory,
-                          const moy_wasm_ops *ops, char *err, size_t errlen)
+                          int allow_unsigned, const moy_wasm_ops *ops, char *err,
+                          size_t errlen)
 {
     if (moy_wasm_session_live() || g_run.started) {
         snprintf(err, errlen, "a wasm run is already live");
@@ -904,7 +921,7 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         sess_free(s);
         nlr_jump(nlr.ret_val);
     }
-    const char *why = verify_module(s->file, s->file_len, &s->file_len);
+    const char *why = verify_module(s->file, s->file_len, allow_unsigned != 0, &s->file_len);
     if (why) {
         snprintf(err, errlen, "refused: %s", why);
         sess_free(s);

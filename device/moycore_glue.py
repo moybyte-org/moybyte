@@ -691,12 +691,16 @@ class WasmRun(MoycoreRun):
         self.snap[_moycore.SNAP_PLAYERS] = 1
         # Every `read` the cart makes runs inside the store's gate, as every
         # other store access does: on the T-Deck it drains the panel's flush
-        # first, because the card shares the panel's SPI bus. The engine
-        # raises MemoryError when it cannot hold the module file, and a run
-        # left open here would refuse every later cart's run_begin.
+        # first, because the card shares the panel's SPI bus. The owner's
+        # Unknown sources setting, as it stands at this load, decides whether
+        # a module with no signature may load; the engine checks everything
+        # else either way. The engine raises MemoryError when it cannot hold
+        # the module file, and a run left open here would refuse every later
+        # cart's run_begin.
         try:
             err = _moycore.wasm_open(module, head, int(pages), sha, path,
-                                     swapped, getattr(ws, "_with_sd", None))
+                                     swapped, getattr(ws, "_with_sd", None),
+                                     bool(getattr(ws, "unknown_sources", False)))
         except BaseException:
             _moycore.close()
             raise
@@ -759,7 +763,7 @@ class WasmRuntime:
     def footprint(self, cart):
         """(total, block) the cart's load takes from PSRAM, by the engine's
         own sizing (moy_wasm.footprint): its declared memory, this chip's
-        signed module and the pool that module gets. None when there is
+        module file and the pool that module gets. None when there is
         nothing to measure -- no "memory", no module for this chip -- and the
         load's own refusal says why."""
         pages = cart.get("memory")

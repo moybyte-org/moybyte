@@ -17,7 +17,9 @@ it is, so the Code tab has the source to show.
 `--chip` adds the per-chip AOT module a board loads, built by
 `tools/wasm_module.py` with the pinned compiler, carrying the provenance key
 that board's build wants and signed with the OTA signing key (that tool says
-where the key comes from). How a board finds it is host policy, and it is one
+where the key comes from). `--unsigned` leaves the signature off: a board runs
+such a module only while its owner has Settings -> UNKNOWN SOURCES on, which
+is how a cart rebuilt from its source runs on its builder's own console. How a board finds it is host policy, and it is one
 rule, `aot_name`: the manifest's `main` with `.wasm` replaced by
 `.<chip>.aot`, in the cart's folder -- `device/moycore_glue.py`'s `aot_path`
 states the same rule and `tests/test_wasm_cart.py` holds the two equal. A
@@ -50,9 +52,10 @@ def manifest(cart):
         return json.load(f)
 
 
-def build(src, dst, chips=()):
+def build(src, dst, chips=(), signed=True):
     """Copy the cart at `src` to `dst`, assemble its source into its `main`,
-    and compile a module per chip. Returns {"main": path, chip: path, ...}."""
+    and compile a module per chip, signed unless `signed` is False. Returns
+    {"main": path, chip: path, ...}."""
     man = manifest(src)
     if man.get("runtime") != "wasm":
         raise ValueError("%s is not a compiled cart (runtime %r)"
@@ -70,7 +73,7 @@ def build(src, dst, chips=()):
         from tools import wasm_module
         for chip in chips:
             out[chip] = os.path.join(dst, aot_name(main, chip))
-            wasm_module.build(blob, chip, out[chip])
+            wasm_module.build(blob, chip, out[chip], signed=signed)
     return out
 
 
@@ -81,8 +84,12 @@ def main(argv):
     ap.add_argument("--chip", action="append", default=[],
                     help="also compile the module for this chip (esp32s3, "
                          "esp32p4); repeatable")
+    ap.add_argument("--unsigned", action="store_true",
+                    help="leave the modules' signatures off (a board runs them "
+                         "only with Unknown sources on)")
     args = ap.parse_args(argv)
-    for name, path in sorted(build(args.cart, args.out, args.chip).items()):
+    for name, path in sorted(build(args.cart, args.out, args.chip,
+                                   signed=not args.unsigned).items()):
         print("%-8s %s (%d bytes)" % (name, path, os.path.getsize(path)))
     return 0
 

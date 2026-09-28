@@ -10,6 +10,11 @@ module verifies and comes back exactly as it was built, a byte changed anywhere
 in it -- its provenance key included -- is refused, and so is a module with no
 signature, a malformed trailer, another chip's signature or another key's. The
 on-glass suites hold the board to the same answers.
+
+With the owner's Settings -> UNKNOWN SOURCES on, a module with NO signature
+passes this check (its provenance key is still checked, on the run's thread);
+every module that carries a trailer is held to it exactly as before, so the
+decision table below is the switch crossed with every kind of file.
 """
 
 import hashlib
@@ -114,6 +119,93 @@ def test_the_board_checks_with_the_ota_verifier_and_the_ota_keys():
     # Both halves of the engine refuse through it: the phase-1 run and the
     # cart's session.
     assert src.count("verify_module(") == 3
+
+
+def _tampered():
+    data = bytearray(signed())
+    data[data.index(KEY_TEXT) + 10] ^= 0x01
+    return bytes(data)
+
+
+def _malformed():
+    data = signed()
+    magic = wm.sig_magic()
+    return data[:-len(magic) - 4] + (7).to_bytes(4, "little") + magic
+
+
+# The load decision, file kind by switch: None loads (on to the provenance
+# check), anything else is the board's refusal. The switch changes exactly one
+# cell: an unsigned module. "another key" is the throwaway key's signature
+# checked against the image's own OTA_PUBLIC_KEYS, which never signed it.
+DECISIONS = (
+    ("signed", signed, TEST_KEYS, None, None),
+    ("unsigned", lambda: MODULE, TEST_KEYS, "unsigned module", None),
+    ("tampered", _tampered, TEST_KEYS, "bad signature", "bad signature"),
+    ("another chip", lambda: signed(chip="esp32p4"), TEST_KEYS,
+     "bad signature", "bad signature"),
+    ("another key", signed, None, "bad signature", "bad signature"),
+    ("malformed trailer", _malformed, TEST_KEYS,
+     "malformed signature", "malformed signature"),
+)
+
+
+@pytest.mark.parametrize("name,make,keys,off,on", DECISIONS,
+                         ids=[d[0] for d in DECISIONS])
+def test_the_load_decision_with_unknown_sources_off_and_on(name, make, keys, off, on):
+    data = make()
+    assert wm.verify(data, "esp32s3", keys) == off, name
+    assert wm.verify(data, "esp32s3", keys, unknown_sources=False) == off, name
+    assert wm.verify(data, "esp32s3", keys, unknown_sources=True) == on, name
+
+
+def test_an_unsigned_module_passes_whole_and_its_key_is_left_to_the_thread():
+    """What the switch lets through is the file as it is -- no trailer to
+    strip -- and it carries its provenance key into the load, where the
+    board's key check (the same one every signed module meets) decides."""
+    assert wm.verify(MODULE, "esp32s3", TEST_KEYS, unknown_sources=True) is None
+    assert wm.split(MODULE) == (MODULE, None)
+    assert KEY_TEXT in MODULE
+
+
+def test_the_board_decides_the_switch_where_it_decides_the_signature():
+    """The engine's check takes the switch as an argument, from both of its
+    callers, and lets an unsigned module through only on it; a trailer that
+    is present is verified before the switch is ever read. The switch is the
+    caller's on each load -- the cart session's comes from moycore's
+    wasm_open, which the device glue hands ws.unknown_sources."""
+    src = (ROOT / "native" / "moy_wasm" / "modmoy_wasm.c").read_text()
+    body = src[src.index("static const char *verify_module("):]
+    body = body[:body.index("\n}\n")]
+    assert "bool unsigned_ok" in body
+    head = body[:body.index('"malformed signature"')]
+    assert 'return unsigned_ok ? NULL : "unsigned module";' in head
+    assert body.count("unsigned_ok") == 2, "the switch is read once, for a missing trailer"
+    assert "a[ARG_allow_unsigned].u_bool" in src
+    assert "verify_module(s->file, s->file_len, allow_unsigned != 0" in src
+    core = (ROOT / "native" / "moycore" / "modmoycore.c").read_text()
+    assert "moy_wasm_session_open(path, sha, memory, allow_unsigned," in core
+    assert "n_args > 7 && mp_obj_is_true(a[7])" in core
+    glue = (ROOT / "device" / "moycore_glue.py").read_text()
+    assert 'bool(getattr(ws, "unknown_sources", False))' in glue
+
+
+def test_the_player_keys_its_notice_on_the_engines_own_words():
+    from runtime import player
+    src = (ROOT / "native" / "moy_wasm" / "modmoy_wasm.c").read_text()
+    assert 'snprintf(err, errlen, "refused: %s", why);' in src
+    assert player._UNSIGNED == "refused: " + "unsigned module"
+
+
+def test_the_verify_command_answers_for_either_setting(tmp_path, capsys):
+    path = tmp_path / "m.aot"
+    path.write_bytes(MODULE)
+    assert wm.main(["verify", str(path), "--chip", "esp32s3",
+                    "--unknown-sources"]) == 0
+    assert "unsigned, loads with Unknown sources on" in capsys.readouterr().out
+    path.write_bytes(_tampered())
+    assert wm.main(["verify", str(path), "--chip", "esp32s3",
+                    "--unknown-sources"]) == 1
+    assert "REFUSED: bad signature" in capsys.readouterr().out
 
 
 def test_the_signed_text_is_not_an_ota_manifest_text():

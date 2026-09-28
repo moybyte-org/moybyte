@@ -1760,18 +1760,55 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
-        _v, module, head, pages, sha, cdir, swapped, gate = world.core.calls[1]
+        (_v, module, head, pages, sha, cdir, swapped, gate,
+         allow_unsigned) = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.aot"
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
         assert pages == 3 and cdir == cart["path"] and swapped is True
         # the cart's reads take the store's gate, as every store access does
         assert gate is ws._with_sd
+        # a console that never turned Unknown sources on loads signed modules only
+        assert allow_unsigned is False
         assert sha == hashlib.sha256(blob).hexdigest()
         # the frame is MoycoreRun's: _update ticks, draw is the fused no-op
         assert run.init is None and run.draw() is None
         run.update(1 / 30)
         assert "tick" in world.core.verbs()
+    finally:
+        world.close()
+
+
+def test_the_load_asks_the_engine_what_unknown_sources_says_now(tmp_path):
+    """The owner's switch rides every load as it stands at that load: the
+    engine lets a module with no signature through only when it is on, and a
+    flip reaches the next cart started."""
+    cart, _main = _compiled(tmp_path)
+    for on in (True, False, True):
+        world = _wasm_world()
+        try:
+            ws = FakeWs(project=_CartProject(cart))
+            ws.unknown_sources = on
+            world.mod.WasmRun(ws, make_ns(), None)
+            assert world.core.calls[1][0] == "wasm_open"
+            assert world.core.calls[1][8] is on
+        finally:
+            world.close()
+
+
+def test_the_engines_unsigned_refusal_reaches_the_player_as_it_was_given(tmp_path):
+    """The engine's words for a module with no signature cross unchanged:
+    the Player keys its notice on them (player._UNSIGNED)."""
+    from runtime import player
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_err = player._UNSIGNED
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(RuntimeError) as exc:
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert str(exc.value) == "refused: unsigned module"
+        assert world.core.closes == 1
     finally:
         world.close()
 

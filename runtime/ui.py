@@ -88,6 +88,24 @@ def scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c, scale=1):
         cv.print("v", dn_xy[0], dn_xy[1], c, scale)
 
 
+def wrap_words(text, maxc):
+    """Greedy word-wrap of `text` into lines of at most `maxc` chars (an
+    over-long single word gets its own truncated line)."""
+    lines = []
+    cur = ""
+    for word in str(text).split():
+        cand = word if not cur else cur + " " + word
+        if len(cand) <= maxc:
+            cur = cand
+        else:
+            if cur:
+                lines.append(cur)
+            cur = word[:maxc]
+    if cur:
+        lines.append(cur)
+    return lines
+
+
 # --- rect algebra (pure tuple math; every rect is (x, y, w, h)) --------------
 
 def inset(rect, dx, dy=None):

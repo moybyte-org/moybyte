@@ -1,9 +1,10 @@
 """The Workstation's SETTINGS verbs: the `SETTINGS_TOGGLES` setters
 (`set_diag_live`/`set_diag_sd`/`set_steady`/`set_two_player`/`set_crisp_pixels`/
-`set_show_fps`) over the one `_set_toggle` tail, the second-keyboard probe local
-2P rides on, and the OTA channel choice. A mixin of `Workstation`: each verb
-writes the flat mirror, marks the repaint and persists through `prefs`. What
-the settings MEAN at boot (`load_system`'s apply cascade) stays on the kernel.
+`set_show_fps`/`set_unknown_sources`) over the one `_set_toggle` tail, the
+second-keyboard probe local 2P rides on, and the OTA channel choice. A mixin
+of `Workstation`: each verb writes the flat mirror, marks the repaint and
+persists through `prefs`. What the settings MEAN at boot (`load_system`'s
+apply cascade) stays on the kernel.
 """
 
 
@@ -112,6 +113,17 @@ class SettingsToggles:
         if not on:
             self.perf_hud = False
         self._set_toggle("show_fps", on, persist)
+
+    def set_unknown_sources(self, on, persist=True):
+        """Flip UNKNOWN SOURCES (Settings row, every tier) and persist it. ON
+        lets a compiled cart whose module carries no signature load; its
+        provenance key is still checked, and a module whose signature does
+        not verify is refused either way (native/moy_wasm/README.md). The
+        board's wasm runtime reads the flat mirror at each load, so a flip
+        applies from the next cart started. The warning before ON is the
+        Settings screen's (settings_layer.TOGGLE_CONFIRMS), not this verb's:
+        the boot apply and the dev channel come through here too."""
+        self._set_toggle("unknown_sources", bool(on), persist)
 
     def _ota_channel(self):
         """The selected OTA update channel ("stable" / "unstable" beta). Drives which

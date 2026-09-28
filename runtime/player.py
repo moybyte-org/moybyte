@@ -284,6 +284,21 @@ NOTICE_TITLE = "Too big for this console."
 _OUT_OF_MEMORY = "out of memory"
 _MB = 1024 * 1024
 
+# A compiled cart whose module carries no signature, on a console whose owner
+# has not turned Unknown sources on (native/moy_wasm/README.md): the same
+# notice under its own title, saying where the switch is. A board's engine is
+# the only thing that checks a signature, so only a board gives this refusal.
+# A module whose signature is present and does not verify keeps the error
+# panel: that module was changed after it was signed, and no switch runs it.
+UNSIGNED_TITLE = "Not signed."
+_UNSIGNED = "refused: unsigned module"
+
+
+def unsigned_notice(title):
+    """The notice for a compiled cart refused for having no signature."""
+    return ("%s isn't signed. To run it, turn on Unknown sources in Settings."
+            % (title or "This cart"))
+
 
 class _TooBig(Exception):
     """A compiled cart the fit check refused; args[0] is the notice."""
@@ -483,8 +498,9 @@ class Player:
         self._update = None
         self._draw = None
         self.cart_error = None        # last cart failure text -> on-canvas error panel
-        self._notice = None           # the fit notice's text: the panel is a notice
+        self._notice = None           # a notice's text: the panel is a notice
                                       # while cart_error still holds it (`notice`)
+        self._notice_title = NOTICE_TITLE  # ...and the title it is drawn under
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self.crash_file = None        # WHICH of the cart's scripts that line is in
                                       # (SPEC.md 4), or None for main/no crash
@@ -1666,17 +1682,24 @@ class Player:
             # and on a cart of several scripts, in the FILE that raised. A
             # compiled cart has no line to drop on; one this console cannot
             # hold gets the fit notice, whether the check refused it or its
-            # load ran out of memory.
+            # load ran out of memory; one whose module is unsigned while
+            # Unknown sources is off gets the notice that names the switch.
             if runtime == "wasm":
                 self.crash_file, self.crash_line = None, None
+                title = (ws.cart or {}).get("title")
                 if isinstance(exc, _TooBig):
                     self._notice = self.cart_error = exc.args[0]
+                    self._notice_title = NOTICE_TITLE
                 elif _out_of_memory(exc):
                     print("Moybyte cart load:", self.cart_error)
                     fit = _cart_fit(make, ws.cart or {})
                     self._notice = self.cart_error = fit_notice(
-                        (ws.cart or {}).get("title"),
-                        fit[0] if fit else None, fit[1] if fit else None)
+                        title, fit[0] if fit else None, fit[1] if fit else None)
+                    self._notice_title = NOTICE_TITLE
+                elif _UNSIGNED in self.cart_error:
+                    print("Moybyte cart load:", self.cart_error)
+                    self._notice = self.cart_error = unsigned_notice(title)
+                    self._notice_title = UNSIGNED_TITLE
             else:
                 self.crash_file, self.crash_line = _lua_cart_where(
                     self.cart_error, self.ws.cart)
@@ -2070,8 +2093,8 @@ class Player:
 
     @property
     def notice(self):
-        """The fit notice's text while it is the panel up, else None: a
-        compiled cart this console cannot hold, refused before it loaded."""
+        """A notice's text while it is the panel up, else None: a compiled
+        cart refused before it loaded, for want of room or of a signature."""
         n = self._notice
         return n if n is not None and n == self.cart_error else None
 
@@ -2080,8 +2103,9 @@ class Player:
         # this is the ONLY error surface). Drawn with the indexed API only: a red
         # box + a short title + the exception text, word-wrapped and truncated to
         # fit. The CODE/EDIT button below it stays live so the kid can fix the cart.
-        # The fit notice is the same panel in calmer colours under its own
-        # title: nothing went wrong, the cart is bigger than this console.
+        # A notice is the same panel in calmer colours under its own title:
+        # nothing went wrong, the cart is bigger than this console or is not
+        # signed.
         # `cv` defaults to the GAME canvas (a crashed running cart); the system-
         # domain cards tab passes ws.sys_canvas so its defensive fallback stays
         # visible on a distinct system canvas (#39 step 3).
@@ -2100,7 +2124,7 @@ class Player:
         cv.rect(x, y, w, h, NAMES["dark_blue"] if notice else NAMES["dark_purple"])
         cv.rectb(x, y, w, h, edge)
         cv.rect(x, y, w, 14, edge)
-        cv.print(NOTICE_TITLE if notice else "Your game stopped.", x + 6, y + 4,
+        cv.print(self._notice_title if notice else "Your game stopped.", x + 6, y + 4,
                  NAMES["black"] if notice else NAMES["white"], 1)
         cols = (w - 16) // 8                       # 8px monospace cells
         lines = _wrap(self.cart_error or "Unknown error", cols)

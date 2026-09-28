@@ -438,6 +438,9 @@ def _remote_state(ws):
         st["notice"] = notice
         st["cart_error"] = None if notice else getattr(ws, "cart_error", None)
         st["diag"] = bool(getattr(ws, "diag_live", False))
+        # Settings -> UNKNOWN SOURCES: whether a compiled cart whose module
+        # carries no signature may load on this console.
+        st["unknown_sources"] = bool(getattr(ws, "unknown_sources", False))
         # Idle screen blank: the harness has to be able to tell a blanked panel
         # from a hung one -- they look identical from the host end.
         st["psave"] = [bool(getattr(ws, "_psave_asleep", False)),
@@ -491,6 +494,8 @@ def _remote_state(ws):
             "content": None if sr is None else sr.content,
             "wifi_view": bool(sl.wifi_view),
             "bt_view": bool(getattr(sl, "bt_view", False)),
+            # the toggle whose warning is up before it turns ON, or None
+            "confirm": getattr(sl, "confirm_key", None),
         }
         win = ws.wm._wins.get("settings") if hasattr(ws.wm, "_wins") else None
         if win is not None and win.ctx is not None:
@@ -635,10 +640,13 @@ class DevChannel:
                       oscillate it (windowed tier; declines with no window)
       diag 0|1        the diagnostic frame-eaters (perf_capture + the FPS chip)
       steady 0|1      the tick model's STEADY / FREE knob (#217)
-      crisp 0|1       the #204 nearest-neighbour game composite -- these two
-                      are SETTINGS_TOGGLES entries that declared a serial word,
-                      not branches written here; a board whose capability gate
-                      says no declines the word. Neither persists, so a
+      crisp 0|1       the #204 nearest-neighbour game composite
+      unknown_sources 0|1   Settings -> UNKNOWN SOURCES: whether a compiled
+                      cart's unsigned module may load, set without the
+                      screen's warning -- these three are SETTINGS_TOGGLES
+                      entries that declared a serial word, not branches
+                      written here; a board whose capability gate says no
+                      declines the word. None persists, so a test or a
                       measurement session cannot leave the board off-default.
       uncap 0|1       DIAG: every loop frame draws while logic keeps its rate
                       -- the draw+present path flat out, the game at its own

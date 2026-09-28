@@ -508,7 +508,9 @@ def wasm_modules(chip):
     """{name: local .aot} for `chip`, built once per session: the hello
     module, the misaligned-access guard, and six a board must refuse -- no
     key, another fork, other flags (the key saying so), another chip, no
-    signature, and a signed module with one byte of its key changed."""
+    signature, and a signed module with one byte of its key changed -- plus
+    an unsigned module keyed for another fork, which the board refuses by its
+    key once Unknown sources lets it past the signature."""
     if chip not in _WASM_BUILT:
         import tempfile
         from tools import wasm_module as wm
@@ -523,6 +525,8 @@ def wasm_modules(chip):
                             ("badflags", chip, {"override": {"opt": "2"}}),
                             ("otherchip", other, {}),
                             ("unsigned", chip, {"signed": False}),
+                            ("unsigned_badfork", chip,
+                             {"signed": False, "fork": "0" * 40}),
                             ("tampered", chip, {})):
             mods[name] = os.path.join(out, name + ".aot")
             wm.build(wasm, c, mods[name], sign_with=key, **kw)
@@ -635,6 +639,24 @@ def wasm_hello_runs_and_foreign_modules_are_refused(board, board_dir, paths):
                       ("unsigned", "refused: unsigned module"),
                       ("tampered", "refused: bad signature")):
         r = wasm_run(board, paths[name], "step", (20000,))
+        assert not r["ok"] and r["loops"] == 0, (name, r)
+        assert r["error"].startswith(why), (name, r["error"])
+
+
+def wasm_unknown_sources_lets_only_a_missing_signature_through(board, paths):
+    """The engine with the owner's switch on (`allow_unsigned`, what
+    Settings -> UNKNOWN SOURCES hands every load): a module with no signature
+    loads and runs, its provenance key still checked -- an unsigned module
+    keyed for another runtime is refused by the key -- and a module whose
+    signature is present but does not verify is refused exactly as with the
+    switch off. The switch lets a missing signature through, nothing else."""
+    r = wasm_run(board, paths["unsigned"], "step", (20000,), allow_unsigned=True)
+    assert r["ok"], r["error"]
+    assert r["value"] == WASM_STEP_20000, r
+    for name, why in (("unsigned_badfork", "refused: key mismatch 'fork 0000"),
+                      ("tampered", "refused: bad signature"),
+                      ("otherchip", "refused: bad signature")):
+        r = wasm_run(board, paths[name], "step", (20000,), allow_unsigned=True)
         assert not r["ok"] and r["loops"] == 0, (name, r)
         assert r["error"].startswith(why), (name, r["error"])
 
@@ -972,15 +994,17 @@ def jet_holds_its_floor(board, board_dir, floor, **config):
     return fps
 
 
-def _wasm_fixture_variant(board, board_dir, chip, title, slug, change=None):
-    """The hello cart built for `chip` under another title, `change(folder)`
-    applied, pushed as `wasm_<slug>.moy` and rescanned."""
+def _wasm_fixture_variant(board, board_dir, chip, title, slug, change=None,
+                          signed=True):
+    """The hello cart built for `chip` under another title, its module
+    signed unless `signed` is False, `change(folder)` applied, pushed as
+    `wasm_<slug>.moy` and rescanned."""
     import tempfile
     from tools import wasm_cart
     tmp = tempfile.mkdtemp(prefix="moy_wasm_%s_" % slug)
     out = os.path.join(tmp, slug + ".moy")
     wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "hello.moy"), out,
-                    chips=(chip,))
+                    chips=(chip,), signed=signed)
     with open(os.path.join(out, "manifest.json")) as f:
         man = f.read().replace('"Hello Wasm"', '"%s"' % title)
     with open(os.path.join(out, "manifest.json"), "w") as f:
@@ -1031,22 +1055,75 @@ def wasm_read_of_a_folder_reads_nothing(board, board_dir):
     return got[0]
 
 
+TAMPERED_TITLE = "Tampered Wasm"
+
+
+def _tampered_cart(board, board_dir, chip):
+    def _tamper(folder):
+        from tools import wasm_cart
+        wasm_tamper(os.path.join(folder, wasm_cart.aot_name("main.wasm", chip)))
+
+    _wasm_fixture_variant(board, board_dir, chip, TAMPERED_TITLE, "tampered",
+                          _tamper)
+
+
 def wasm_tampered_module_is_refused(board, board_dir):
     """A compiled cart whose module was changed after it was signed -- one byte
     of its provenance key -- is refused on the Player's panel before anything
     in it loads, and the desk comes back."""
     wasm_signing_key()
-    chip = _wasm_chip(board_dir)
-
-    def _tamper(folder):
-        from tools import wasm_cart
-        wasm_tamper(os.path.join(folder, wasm_cart.aot_name("main.wasm", chip)))
-
-    _wasm_fixture_variant(board, board_dir, chip, "Tampered Wasm", "tampered",
-                          _tamper)
-    err = _wasm_run_error(board, "Tampered Wasm")
+    _tampered_cart(board, board_dir, _wasm_chip(board_dir))
+    err = _wasm_run_error(board, TAMPERED_TITLE)
     assert "refused: bad signature" in err, err
     return err
+
+
+# -- Settings -> UNKNOWN SOURCES (the owner's switch, 2026-09-29) --------------
+#
+# A compiled cart whose module carries no signature runs only while the owner
+# has the switch on; with it off, launching one opens a notice that names the
+# switch. `unknown_sources 0|1` is the dev channel's word for it: it sets the
+# switch without the screen's warning and never persists.
+
+UNSIGNED_TITLE = "Unsigned Wasm"
+UNSIGNED_NOTICE = ("%s isn't signed. To run it, turn on Unknown sources in "
+                   "Settings." % UNSIGNED_TITLE)
+
+
+def unknown_sources(board, on):
+    """Set the switch over the dev channel and check the console reached it."""
+    word = "on" if on else "off"
+    line = board.cmd("unknown_sources %d" % (1 if on else 0),
+                     wait_for="REMOTE unknown_sources")
+    assert line == "REMOTE unknown_sources " + word, line
+    assert board.state()["unknown_sources"] is bool(on)
+
+
+def wasm_unsigned_cart_follows_unknown_sources(board, board_dir):
+    """The hello cart with its module built unsigned: with the switch off
+    it opens the notice naming the switch and nothing loads; with the switch
+    on the same cart runs and reads its greeting, while a cart whose module
+    was tampered with after signing is still refused; off again, the notice
+    again. The switch is left OFF whatever happens."""
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    _wasm_fixture_variant(board, board_dir, chip, UNSIGNED_TITLE, "unsigned",
+                          signed=False)
+    _tampered_cart(board, board_dir, chip)
+    try:
+        unknown_sources(board, False)
+        notice = _notice_on_launch(board, UNSIGNED_TITLE, UNSIGNED_NOTICE)
+        unknown_sources(board, True)
+        _runs_clean(board, UNSIGNED_TITLE, check=hello_read_its_greeting)
+        err = _wasm_run_error(board, TAMPERED_TITLE)
+        assert "refused: bad signature" in err, err
+        unknown_sources(board, False)
+        assert _notice_on_launch(board, UNSIGNED_TITLE, UNSIGNED_NOTICE) == notice
+    finally:
+        board.cmd("unknown_sources 0", wait_for="REMOTE unknown_sources")
+    assert board.state()["unknown_sources"] is False
+    print("\nWASM unsigned cart: %r with the switch off, runs with it on" % notice)
+    return notice
 
 
 # -- a cart too big for the board (docs/wasm_tier_plan_2026-09.md) --------------
@@ -1068,9 +1145,10 @@ def wasm_fit(board, title):
         % title, timeout=30, strict=True)
 
 
-def _notice_on_launch(board, title):
-    """Run `title` from the launcher and return the fit notice it opened,
-    asserting it is a notice and not an error, and that nothing loaded."""
+def _notice_on_launch(board, title, text=None):
+    """Run `title` from the launcher and return the notice it opened -- the
+    fit notice, or exactly `text` -- asserting it is a notice and not an
+    error, and that nothing loaded."""
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
     assert line is not None and "no cart match" not in line, line
     try:
@@ -1079,7 +1157,10 @@ def _notice_on_launch(board, title):
         assert st.get("cart") == title, st.get("cart")
         assert not st.get("cart_error"), st["cart_error"]
         notice = st.get("notice") or ""
-        assert notice.startswith(title + " needs ") and " MB " in notice, notice
+        if text is not None:
+            assert notice == text, notice
+        else:
+            assert notice.startswith(title + " needs ") and " MB " in notice, notice
         assert board.pyval("ws.player._lua is None", strict=True) is True
         return notice
     finally:

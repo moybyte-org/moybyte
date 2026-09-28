@@ -31,10 +31,12 @@ moy_wasm.done()          # False while the thread runs
 moy_wasm.result()        # waits (the VM lock released), then a dict
 ```
 
-`start(path, export, args=(), loops=1, stack=None, psram_stack=None, pool=None)` reads the
+`start(path, export, args=(), loops=1, stack=None, psram_stack=None, pool=None,
+allow_unsigned=False)` reads the
 module file through the VFS (the T-Deck's SD and the P4s' flash store look the
 same) into a PSRAM buffer, checks its signature (see Provenance; a refused
-module ends the run at once, with no thread) and starts a thread that does,
+module ends the run at once, with no thread; `allow_unsigned` is what the
+Unknown sources setting gives a cart's load) and starts a thread that does,
 `loops` times over: load, check the key, instantiate, call `export(*args)`
 with i32 arguments, and unload. `stack`/`psram_stack` override the board's
 setting and `pool` the pool's sizing rule, for a measurement: a module's
@@ -69,7 +71,8 @@ module's).
 
 ## A cart's session
 
-A compiled cart the Player runs is a session: the same signature check,
+A compiled cart the Player runs is a session: the same signature check
+(with the console's Unknown sources setting as it stands at that load),
 thread, pool, load and provenance check as a run, held open for the cart's
 life, with moycore — the host half, which owns the console — supplying the
 callbacks (`moy_wasm_session.h`). The thread calls them once the runtime is up (moycore
@@ -155,7 +158,7 @@ overflow traps as "native stack overflow".
 A cart above the tier's floor is allowed, and a board that cannot fit it says
 so before anything loads (the plan's 2026-09-26 decision). The Player asks the
 runtime what the cart's load takes -- `moycore_glue.WasmRuntime.footprint`:
-the manifest's `memory`, this chip's signed module as it sits in the store,
+the manifest's `memory`, this chip's module file as it sits in the store,
 through `footprint()` above -- and compares it with `mem()`'s PSRAM free total
 and largest block. A cart that does not fit opens the fit NOTICE: the Player's
 panel under the title "Too big for this console." naming the cart, what it
@@ -245,10 +248,55 @@ body every OTA manifest is checked with, against the keys the image trusts
 (`moy_ota.OTA_PUBLIC_KEYS`). An unsigned module, a malformed trailer, a
 signature for another chip, a byte changed anywhere or a key the image does not
 trust is refused as `refused: unsigned module` / `malformed signature` /
-`bad signature`, and the runtime never sees it. `tools/wasm_module.py` signs
-every module it builds with the OTA signing key (`$MOYBYTE_OTA_SIGNING_KEY`,
-else the file `make ota-keygen` writes) and `verify` answers as a board
-would; `--unsigned` builds a module a board refuses.
+`bad signature`, and the runtime never sees it -- an unsigned module only
+while the owner's Unknown sources setting is off (below).
+`tools/wasm_module.py` signs every module it builds with the OTA signing key
+(`$MOYBYTE_OTA_SIGNING_KEY`, else the file `make ota-keygen` writes) and
+`verify` answers as a board would (`--unknown-sources` as a board with the
+setting on); `--unsigned` builds a module with no signature, and so does
+`tools/wasm_cart.py --unsigned` for a whole cart.
+
+### Unknown sources
+
+Signing is the default, not a lock (the plan's 2026-09-29 decision).
+Settings -> UNKNOWN SOURCES, off by default and turned on past a warning, lets
+a module with **no** signature load, so someone who rebuilds a cart from its
+source -- Doom from moybyte-org/gpl-carts, their own game -- runs it on their
+own console. The setting is the console's (`ws.unknown_sources`, persisted in
+`system.json`, on every tier); the engine is told it per load:
+`moycore_glue.WasmRun` hands it to `moycore.wasm_open`, which hands it to
+`moy_wasm_session_open` as `allow_unsigned`, and `verify_module` reads it on
+the MicroPython task before the runtime sees a byte, as it reads the
+signature. With the setting off a cart whose module is unsigned opens the
+Player's notice, "Not signed.", saying where the switch is; everything else
+refuses on the ordinary panel as before.
+
+| the module file | setting off | setting on |
+|---|---|---|
+| signed with a key the image trusts | loads | loads |
+| no signature trailer | `refused: unsigned module` | loads |
+| a byte changed after signing | `refused: bad signature` | `refused: bad signature` |
+| signed for another chip, or with a key the image does not trust | `refused: bad signature` | `refused: bad signature` |
+| a trailer whose length is out of range | `refused: malformed signature` | `refused: malformed signature` |
+
+Whatever passes goes on to the provenance key, which is checked either way:
+the setting says nothing about which runtime a module was built for, and the
+key is what keeps a module built for another fork or with other flags from
+crashing the board instead of being refused.
+
+**A signature that is present must verify, whatever the setting says.** A
+trailer is a claim that the module is the one its signer built. A claim that
+does not check out is a module changed after it was signed -- damaged on the
+card, or altered on purpose -- or one signed with a key this image does not
+carry, and none of those is what the setting is for: a cart somebody rebuilt
+from source carries no signature at all. Treating a failed signature as a
+warning sign rather than as "unsigned" also keeps the signature the only
+integrity check a signed module has, so a signed cart whose bytes went bad is
+refused instead of run as native code. It is the policy OTA manifests already
+follow (`.claude/rules/ota.md`: an unsigned manifest the owner put on the card
+may be taken, a signature that is present is always checked). The way to run
+your own build is therefore to build it unsigned; a module signed with your
+own key is refused unless the image trusts that key.
 
 ### What the checks cost, and what the compiler does about it
 
@@ -306,7 +354,11 @@ current answer.
   `moy_ota.verify_sig` with a throwaway key -- a signed module verifies and
   comes back as it was built; a byte changed anywhere, the key section
   included, another chip's signature, another key's, an unsigned module and a
-  malformed trailer are refused.
+  malformed trailer are refused -- and the table above, each kind of file with
+  Unknown sources off and on, through the tool's twin of `verify_module`.
+- `tests/test_unknown_sources.py`: the setting -- off on a fresh console,
+  persisted, the warning before it turns on, off at once, the dev channel's
+  `unknown_sources 0|1` -- and the Player's notice for an unsigned cart.
 - `tests/test_moycore_glue.py`: the device glue's `WasmRun` over a fake moycore
   (the arguments `wasm_open` gets, the refusals before it) and the runtime's
   fit report (what it asks `footprint()`, through the store's gate).
@@ -320,12 +372,17 @@ current answer.
 - On glass, every declaring board's suite: the idle cost against a module-free
   image of the same tree, the hello module and six a board refuses (no key,
   another fork, other flags, another chip, no signature, one byte of a signed
-  module's key changed), the two stack placements, the termination answer, a
+  module's key changed), the same run with `allow_unsigned` -- the unsigned
+  module runs, an unsigned module keyed for another fork is refused by its
+  key, the tampered and other-chip ones still by their signatures -- the two
+  stack placements, the termination answer, a
   Lua cart after a wasm run, a load/unload loop under a live cart and WiFi,
   and a run with WiFi and BLE up; then the Player path — the hello and blit
   carts run from the launcher at their fps floors, a cart with no module for
   this chip refused, a cart whose module was tampered with after signing
-  refused, the huge fixture -- 40 MB of declared memory, past every
+  refused, the hello cart built unsigned opening the "Not signed." notice with
+  Unknown sources off and running with it on (the tampered cart still refused
+  then), the switch left off, the huge fixture -- 40 MB of declared memory, past every
   board's PSRAM -- refused with the fit notice, the hello cart running after
   it, and the Read Dir fixture's `read` of its own `src/` folder reading
   nothing, as a missing file does. The suites build the modules with the pinned compilers

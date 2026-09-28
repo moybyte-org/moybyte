@@ -59,24 +59,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import ConfirmTap
 
 
-def _wrap_words(text, maxc):
-    """Greedy word-wrap of `text` into lines of at most `maxc` chars (an
-    over-long single word gets its own truncated line)."""
-    lines = []
-    cur = ""
-    for word in str(text).split():
-        cand = word if not cur else cur + " " + word
-        if len(cand) <= maxc:
-            cur = cand
-        else:
-            if cur:
-                lines.append(cur)
-            cur = word[:maxc]
-    if cur:
-        lines.append(cur)
-    return lines
-
-
 # The launcher's pinned "Make" tile + the picker's pinned "+ New" tile are PSEUDO-
 # entries (not real carts): a plain dict with a marker `type` + a title, flowing
 # through the SAME grid (nav/sel/tile_at) as real carts, dispatched by their type at
@@ -695,7 +677,7 @@ class Launcher:
                 ty += 8 * fs * mult + 2 * fs
         ty += 2 * fs
         maxc = max(6, (w - 4 * fs) // lay.font_w)
-        for line in _wrap_words(caption, maxc):
+        for line in _ui.wrap_words(caption, maxc):
             tw = _text_w(cv, line, 1)
             cv.print(line, x + (w - tw) // 2, ty, NAMES["dark_grey"], 1)
             ty += 10 * fs

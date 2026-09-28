@@ -40,8 +40,11 @@ typedef struct {
 } moy_wasm_ops;
 
 // Open a session on the module file `path` (read through the VFS into
-// PSRAM and its signature checked, as moy_wasm.start reads its module; an
-// unsigned or tampered module is refused before the thread exists).
+// PSRAM and its signature checked, as moy_wasm.start reads its module; a
+// tampered module, or an unsigned one while `allow_unsigned` is 0, is refused
+// before the thread exists). `allow_unsigned` is the owner's Unknown sources
+// setting as the caller read it: non-zero lets a module with no signature
+// load, its provenance key still checked.
 // `want_sha` is the canonical .wasm's sha256 as 64 hex characters, which the
 // module's key must name, or NULL to take whatever wasm the key names.
 // `memory` is the linear memory the manifest declares, in bytes: the file is
@@ -49,7 +52,8 @@ typedef struct {
 // load is done. Returns 0 with the cart bound, or non-zero with the refusal
 // in `err`; a file that cannot be read raises.
 int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memory,
-                          const moy_wasm_ops *ops, char *err, size_t errlen);
+                          int allow_unsigned, const moy_wasm_ops *ops, char *err,
+                          size_t errlen);
 
 // Run ops->call(what, dt) on the session's thread and wait for it. 0, or
 // ops->call's non-zero return with its `err`.

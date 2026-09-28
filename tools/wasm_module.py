@@ -34,7 +34,10 @@ byte of the module, its key section included. The signature rides after the
 module in the same file; the layout and the text are native/moy_wasm/
 moy_wasm_key.h's, which this tool reads, and the board checks it with
 moy_ota.verify_sig against the keys its image trusts before the runtime sees
-a byte. `--unsigned` builds a module a board must refuse.
+a byte. `--unsigned` builds a module with no signature, which a board runs
+only while its owner has Settings -> UNKNOWN SOURCES on -- the way to run a
+cart you rebuilt from its source on your own console; a module signed with a
+key the board does not trust is refused whatever that switch says.
 
 THE COMPILERS are fixed binaries, pinned by sha256 below: one wamrc for both
 targets, built by experiments/wasm_aot/toolchain/build_wamrc_xtensa.sh
@@ -226,13 +229,16 @@ def _verifier():
     return mod.verify_sig
 
 
-def verify(data, chip, keys=None):
+def verify(data, chip, keys=None, unknown_sources=False):
     """None when `data` is a module file a board of `chip` trusting `keys`
-    (default: the image's OTA_PUBLIC_KEYS) loads, otherwise the refusal the
-    board gives."""
+    (default: the image's OTA_PUBLIC_KEYS) lets through to its provenance
+    check, otherwise the refusal the board gives -- `verify_module` in
+    native/moy_wasm/modmoy_wasm.c. `unknown_sources` is the owner's setting:
+    on, a module with no signature passes; a signature that is present must
+    verify either way."""
     module, sig = split(data)
     if sig is None:
-        return "unsigned module"
+        return None if unknown_sources else "unsigned module"
     if not sig:
         return "malformed signature"
     if not _verifier()(signed_text(module, chip), sig.hex(), keys):
@@ -361,15 +367,16 @@ def build(wasm, chip, out, key=True, fork=None, override=None, sign_with=None,
 
     `fork` and `override` build a module this tree's boards must REFUSE: a key
     naming another runtime, or flags (and a key saying so) the board's build
-    does not want; `signed=False` leaves the signature off, another such
-    module."""
+    does not want. `signed=False` leaves the signature off: a module a board
+    runs only while its owner has Unknown sources on."""
     pem = None
     if signed:
         pem = sign_with or signing_key()
         if pem is None:
-            raise ToolError("no signing key: set $%s, pass --key, or run `make "
-                            "ota-keygen` (--unsigned builds a module a board "
-                            "refuses)" % ota_sign.ENV_KEY)
+            raise ToolError("no signing key: set $%s or pass --key (a board "
+                            "trusts only the keys its image carries), or build "
+                            "--unsigned, a module a board runs only with "
+                            "Unknown sources on" % ota_sign.ENV_KEY)
     target = dict(fields(chip, override))["target"]
     text = key_text(wasm, chip, fork, override)
     src = with_custom_section(wasm, KEY_SECTION, text.encode()) if key else wasm
@@ -463,12 +470,15 @@ def main(argv):
                        help="the signing key, PEM or a path (default: $%s, then "
                        "%s)" % (ota_sign.ENV_KEY, ota_sign.DEFAULT_KEY))
         p.add_argument("--unsigned", action="store_true",
-                       help="leave the signature off (a module the board must refuse)")
+                       help="leave the signature off (a module a board runs "
+                       "only with Unknown sources on)")
     k = sub.add_parser("key", help="print the key tail a chip's build wants")
     k.add_argument("--chip", required=True, choices=sorted(targets()))
     v = sub.add_parser("verify", help="check a module's signature as a board would")
     v.add_argument("aot")
     v.add_argument("--chip", required=True, choices=sorted(targets()))
+    v.add_argument("--unknown-sources", action="store_true",
+                   help="answer as a board with Unknown sources on")
     sub.add_parser("compilers", help="locate and verify the pinned compilers")
     args = ap.parse_args(argv)
     try:
@@ -477,8 +487,11 @@ def main(argv):
             return 0
         if args.cmd == "verify":
             with open(args.aot, "rb") as f:
-                why = verify(f.read(), args.chip)
-            print("%s: %s" % (args.aot, "signed, trusted" if why is None
+                data = f.read()
+            why = verify(data, args.chip, unknown_sources=args.unknown_sources)
+            ok = ("signed, trusted" if split(data)[1] else
+                  "unsigned, loads with Unknown sources on")
+            print("%s: %s" % (args.aot, ok if why is None
                               else "REFUSED: %s" % why))
             return 0 if why is None else 1
         if args.cmd == "compilers":

@@ -150,7 +150,33 @@ SETTINGS_TOGGLES = (
     # play-then-read-diag.log workflow. Crash/cart-exit flushes stay
     # unconditional either way (the safety net).
     ("diag_sd", "DIAG SD LOG", False, "set_diag_sd", None, None),
+    # UNKNOWN SOURCES (owner, 2026-09-29, docs/wasm_tier_plan_2026-09.md): a
+    # compiled cart whose module carries no signature may load -- a cart
+    # somebody rebuilt from its source, on their own console. The module's
+    # provenance key is still checked, and one whose signature is present but
+    # does not verify is refused either way (native/moy_wasm/README.md).
+    # Default OFF; ON goes through the warning in TOGGLE_CONFIRMS, OFF is
+    # immediate. Every tier carries the row, though only a board checks
+    # signatures.
+    ("unknown_sources", "UNKNOWN SOURCES", False, "set_unknown_sources", None,
+     "unknown_sources"),
 )
+
+# The toggles whose ON goes through a warning first: key -> (the warning's
+# title, what turning it on means in one or two Spoken sentences, the button
+# that turns it on). A tap, a step or A on the row opens the warning instead of
+# flipping the toggle, and the warning's keyboard focus starts on KEEP OFF, so
+# turning it on is a deliberate move and a press; turning it OFF is immediate.
+# The boot apply and the dev channel's word call the setter directly: neither
+# is somebody deciding at the screen.
+TOGGLE_CONFIRMS = {
+    "unknown_sources": (
+        "UNKNOWN SOURCES",
+        "Carts from outside the store can run code nobody has checked. "
+        "Turn this on only for carts you trust.",
+        "TURN ON"),
+}
+KEEP_OFF = "KEEP OFF"
 
 
 class SettingsLayer:
@@ -238,6 +264,13 @@ class SettingsLayer:
         # needs no new attribute here (which is what the two it replaced were).
         self._toggle_cache = None
         self._toggle_gates = [False] * len(SETTINGS_TOGGLES)
+        # The warning a TOGGLE_CONFIRMS toggle shows before it turns ON: the
+        # toggle's key while it is up (it replaces the row list, as the wifi
+        # and bluetooth panels do), and which of its two buttons has the
+        # keyboard -- 0, KEEP OFF, whenever it opens.
+        self.confirm_key = None
+        self.confirm_sel = 0
+        self._confirm_hits = _ui.Hits()
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -248,6 +281,7 @@ class SettingsLayer:
             self.close_wifi()
         if self.bt_view:
             self.close_bluetooth()
+        self.confirm_key = None
 
     # -- BLUETOOTH KEYBOARD panel (capability-gated; visual identity v1) ------
 
@@ -775,6 +809,97 @@ class SettingsLayer:
             self._bt_action(action)
         return True
 
+    # -- the warning before a TOGGLE_CONFIRMS toggle turns ON -----------------
+
+    def open_confirm(self, key):
+        """Show `key`'s warning in place of the rows, KEEP OFF focused."""
+        self.confirm_key = key
+        self.confirm_sel = 0
+        self.ws._dirty = True
+
+    def close_confirm(self):
+        """Back to the rows with the toggle as it was."""
+        self.confirm_key = None
+        self.ws._dirty = True
+
+    def _confirm_accept(self):
+        """The confirming button: turn the toggle ON through its verb (which
+        persists it) and go back to the rows."""
+        key = self.confirm_key
+        self.close_confirm()
+        for t in SETTINGS_TOGGLES:
+            if t[0] == key:
+                getattr(self.ws, t[3])(True)
+                return
+
+    def _confirm_input(self, i):
+        """Left/right move the focus between KEEP OFF and the confirming
+        button, A presses the focused one, B backs out with nothing changed."""
+        ws = self.ws
+        if i.pressed("left") and self.confirm_sel != 0:
+            self.confirm_sel = 0
+            ws._dirty = True
+        if i.pressed("right") and self.confirm_sel != 1:
+            self.confirm_sel = 1
+            ws._dirty = True
+        if i.pressed("a") or i.pressed("run"):
+            if self.confirm_sel == 1:
+                self._confirm_accept()
+            else:
+                self.close_confirm()
+        elif i.pressed("b"):
+            self.close_confirm()
+        elif i.pressed("home") or i.pressed("stop"):
+            self.close_confirm()
+            ws.go_home()
+        return True
+
+    def _confirm_pointer(self, px, py, click):
+        """Only the two buttons take a tap; the rest of the panel is text."""
+        if not click:
+            return True
+        hit = self._confirm_hits.at(px, py)
+        if hit is None:
+            return True
+        if hit[0] == "accept":
+            self._confirm_accept()
+        else:
+            self.close_confirm()
+        return True
+
+    def _draw_confirm(self):
+        """The warning, in the Settings body below its title strip: the
+        toggle's name as the panel title, what turning it on means, and the
+        two buttons -- KEEP OFF and the danger-coloured one that turns it on.
+        The draw pass registers both tap targets."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        lay = ws.layout
+        fs = lay.fs
+        fw = lay.font_w
+        _px, py, _pw, ph = lay.settings_panel
+        title, text, yes = TOGGLE_CONFIRMS[self.confirm_key]
+        body = (lay.set_x, lay.set_row_y0, lay.set_w,
+                max(1, py + ph - lay.set_row_y0 - 4 * fs))
+        content = _ui.panel(cv, th, body, title=title, fs=fs)
+        actions_r, text_r = _ui.cut_bottom(content, 24 * fs)
+        tx, ty, tw, th_h = _ui.inset(text_r, 4 * fs, 6 * fs)
+        lh = 12 * fs
+        lines = _ui.wrap_words(text, max(1, tw // fw))
+        for n in range(len(lines)):
+            y = ty + n * lh
+            if y + 8 * fs > ty + th_h:
+                break
+            cv.print(lines[n], tx, y, th["ink"], 1)
+        self._confirm_hits.clear()
+        rects = _ui.hsplit(_ui.inset(actions_r, 3 * fs), 2, 3 * fs)
+        _ui.button(cv, th, rects[0], KEEP_OFF)
+        self._confirm_hits.add(rects[0], "keep")
+        _ui.button(cv, th, rects[1], yes, kind="danger")
+        self._confirm_hits.add(rects[1], "accept")
+        _ui.focus_ring(cv, th, rects[self.confirm_sel], fs)
+
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
 
     def draw_zone(self, cv, rect):
@@ -911,7 +1036,11 @@ class SettingsLayer:
         ws = self.ws
         for t in SETTINGS_TOGGLES:
             if t[0] == key:
-                getattr(ws, t[3])(not getattr(ws, key, False))
+                on = not getattr(ws, key, False)
+                if on and key in TOGGLE_CONFIRMS:
+                    self.open_confirm(key)
+                    return
+                getattr(ws, t[3])(on)
                 return
 
     def settings_adjust(self, d):
@@ -1104,6 +1233,8 @@ class SettingsLayer:
             return self._wifi_input(i)
         if self.bt_view:
             return self._bt_input(i)
+        if self.confirm_key is not None:
+            return self._confirm_input(i)
         rows = self._settings_rows()
         # The keep-selection-visible clamp (#53) fires ONLY when the keyboard
         # moves the selection -- NOT every frame. The per-frame form fought the
@@ -1151,7 +1282,8 @@ class SettingsLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        if not self.wifi_view and not self.bt_view and not ws.show_achievements:
+        if (not self.wifi_view and not self.bt_view and self.confirm_key is None
+                and not ws.show_achievements):
             # The rows' shared press/drag/release machine: scrolls on drag,
             # activates a row only on a clean tap release.
             if self._rows_pointer(px, py, click):
@@ -1172,6 +1304,8 @@ class SettingsLayer:
             return self._wifi_pointer(px, py, click)
         if self.bt_view:
             return self._bt_pointer(px, py, click)
+        if self.confirm_key is not None:
+            return self._confirm_pointer(px, py, click)
         lay = ws.layout
         if _in(px, py, lay.set_ach):      # trophy: open the achievements view (#21)
             ws.show_achievements = True
@@ -1285,6 +1419,10 @@ class SettingsLayer:
             return
         if self.bt_view:
             self._draw_bluetooth()
+            ws.bar_layer._draw_status_strip("settings")
+            return
+        if self.confirm_key is not None:
+            self._draw_confirm()
             ws.bar_layer._draw_status_strip("settings")
             return
         # Achievements view button (#21): a trophy badge with the unlocked count.

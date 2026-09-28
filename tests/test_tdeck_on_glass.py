@@ -66,6 +66,11 @@ def test_the_hello_module_runs_and_foreign_modules_are_refused(board, wasm):
         board, WASM_BOARD_DIR, wasm)
 
 
+def test_unknown_sources_lets_only_a_missing_signature_through(board, wasm):
+    on_glass.wasm_unknown_sources_lets_only_a_missing_signature_through(
+        board, wasm)
+
+
 def test_a_misaligned_load_or_store_of_any_width_is_exact(board, wasm):
     on_glass.wasm_misaligned_access_is_exact(board, wasm)
 
@@ -128,6 +133,10 @@ def test_a_compiled_cart_without_this_chips_module_is_refused(board, wasm_carts)
 
 def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_carts):
     on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
+
+
+def test_an_unsigned_cart_runs_only_with_unknown_sources_on(board, wasm_carts):
+    on_glass.wasm_unsigned_cart_follows_unknown_sources(board, WASM_BOARD_DIR)
 
 
 def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_carts):
