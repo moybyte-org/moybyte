@@ -27,13 +27,12 @@
 // carries the module's and the instance's structures, the loader's copies of
 // the data segments and its relocation tables while it relocates, and the
 // exec env; the text and the linear memory are separate PSRAM mappings. The
-// structures, the data segments and the relocations grow with the module, so
-// the pool is sized from it: MOY_WASM_POOL_BYTES, plus one byte in
-// MOY_WASM_POOL_SHARE of the module's -- a share that holds the load's peak,
-// when the loader has copied the data segments and holds its relocation
-// tables at once. start()'s `pool` argument measures a module against it:
-// Doom's 1 MB P4 module peaked at 450 KB under a 1 MB pool on the Waveshare
-// P4 (2026-09-26), where this sizes 510 KB and an eighth would size 383 KB.
+// pool is MOY_WASM_POOL_BYTES plus one byte in MOY_WASM_POOL_SHARE of the
+// module's. The load's peak follows the data segments and the relocations
+// rather than the text, so the fixed part carries most of it and a board
+// whose loader holds more sets its own (the P4 boards' mpconfigboard.h, with
+// Doom's measurements). start()'s `pool` argument measures a module against
+// it: the run's `pool_peak` under a larger pool is what the rule must hold.
 #ifndef MOY_WASM_POOL_BYTES
 #define MOY_WASM_POOL_BYTES (256 * 1024)
 #endif

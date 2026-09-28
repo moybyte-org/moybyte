@@ -75,3 +75,12 @@
 // spare; it keeps the same setting so a cart meets one stack on every board.
 #define MOY_WASM_STACK_BYTES                (16 * 1024)
 #define MOY_WASM_STACK_PSRAM                (1)
+
+// The engine's runtime pool, its fixed part (moy_wasm_footprint.h). A RISC-V
+// load holds more than the S3's for the same cart -- its text relocations --
+// and the peak follows the data segments and relocations, not the text:
+// Doom's P4 module peaked at 460,392 B at 838 KB and 461,984 B at 790 KB,
+// where 256 KB plus a quarter of the module sizes 471 KB and 459 KB (the
+// second a load that fails). 320 KB holds it with 63 KB to spare and keeps
+// holding it as the text shrinks.
+#define MOY_WASM_POOL_BYTES                 (320 * 1024)
