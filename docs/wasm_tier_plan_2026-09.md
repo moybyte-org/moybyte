@@ -135,8 +135,7 @@ proposal in moy-spec).
 
 Jet Teapot, a 3D cart on Jet (https://github.com/CubeCoders/Jet, MIT), runs on
 all four boards under pinned fps floors, its model read through `read` and its
-frame handed to `blit565` under a HUD drawn with ordinary verbs; its source
-and build tools are MIT (2026-09-26; numbers on #158). What remains follows
+frame, HUD included, handed to `blit565`; its source and build tools are MIT (2026-09-26; numbers on #158). What remains follows
 CLAUDE.md's placement rule:
 
 - The teapot and further JetExamples ports (the tropical island, the
@@ -147,13 +146,15 @@ CLAUDE.md's placement rule:
   CLI so both carts repos share them. moybyte keeps the seeding and the
   on-glass guards. Seeding a compiled cart is designed in
   `ports/jet/README.md` and waits on #124's gate.
-- The compiled tier's render cost against native (#158): the per-chip
-  compilers used to split every memory access they could not prove
-  aligned into single bytes, and the cart kept its per-pixel shading calls
-  out of line; both are fixed. Per pixel on one core, Jet's raster runs
-  about 1.6× native and its setup about 2×. What remains is the software
-  bounds checks (unmeasured), frame, depth and transform buffers in PSRAM,
-  and the console's frame copy, which is PSRAM-bound.
+- The compiled tier's render cost against native (#158 has the numbers):
+  the per-chip compilers used to split every memory access they could not
+  prove aligned into single bytes, the cart kept its per-pixel shading calls
+  out of line, and the compiler paid five avoidable costs #158 lists; all
+  are fixed. What remains is the software bounds checks, which stay on; the
+  frame, depth and transform buffers in PSRAM, where native keeps its hot
+  buffers in internal SRAM; Jet's second raster core, which a cart has no
+  way to use; and on the P4s the console's frame copy (the S3s show the
+  cart's frame without one).
 
 ### Phase 4 — promotion (moy-spec; the owner's decision)
 
@@ -191,8 +192,6 @@ frames (#158). What remains is promotion:
 ## Deliberately not in this plan
 
 - A wasmtime host tier.
-- `blit565`. The proposal measured it as the slow route on the floor board;
-  it returns when a cart that is inherently direct-colour asks for it.
 - PCM audio. Doom runs silent; `snd`'s rate and channels are pinned by the
   first cart that needs them, and `moy_audio` is vendored from moy-spec.
 - moybyte's superset verbs for wasm carts, and a libc story beyond "no WASI
@@ -203,3 +202,7 @@ frames (#158). What remains is promotion:
   measurements say it does not pay for itself.
 - A framebuffer for Lua carts. SPEC.md §12.6 stands; §15 carves the one
   exception, for a cart that owns its own memory.
+- An ESP-IDF engine component in libmoy, so another ESP32 OS can take the
+  chip-side engine under MIT instead of re-deriving it from `native/moy_wasm`.
+  Deferred until another OS wants it (owner, 2026-09-29); moy-spec's desktop
+  and web players already show the job off the chip.
