@@ -1034,6 +1034,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return self._player_view(win)
 
 
+    def present_frame(self, cf, view):
+        # Desk world: the player WINDOW composites the game canvas itself
+        # (_draw_player_window), so a frame shown full-viewport here would
+        # land on the desktop. The play world is the parent's.
+        if self._order:
+            return False
+        return FullscreenStackWM.present_frame(self, cf, view)
+
     def composite_game(self):
         # Desk world: a no-op -- the window layer blits the game canvas into
         # the player WINDOW itself, and stamping it full-viewport would paint
@@ -1592,6 +1600,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 # a cart cannot paint over the desk around it.
                 _view(ox, oy, scale, gc.w, gc.h)
             self._content_for("desktop").draw(dt)  # Player.tick -> the game canvas
+            ws.settle_cart_frame()      # the window composites the game canvas
             if self._fps_chip_on():
                 ws._perf_layer.draw(dt)   # game domain: inside the bracket (above)
             if use_view:

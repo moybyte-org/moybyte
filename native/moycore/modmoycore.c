@@ -2557,6 +2557,21 @@ static const moy_wasm_ops WASM_OPS = {
     NULL, wo_runtime_up, wo_loaded, wo_bound, wo_call, wo_unbound,
 };
 
+// The frame hand-off (libmoy/moy_wasm.h's `frame`): while the board says it
+// can show a frame from the cart's memory (take_frames), every blit leaves its
+// frame there, owed, and the canvas is written only when something needs it
+// -- a verb over it, a settle, or the cart's next hook. On the engine's
+// thread, so it only answers.
+static volatile int g_take_frames;
+
+static int wo_frame(void *user, const uint8_t *pixels, const moy_pixel *lut)
+{
+    (void)user;
+    (void)pixels;
+    (void)lut;
+    return g_take_frames;
+}
+
 // A trap ends the run, and the frame it interrupted is never presented: the
 // canvas is cleared before the console paints its report over it.
 static void wasm_trapped(void)
@@ -2580,6 +2595,7 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
     }
     WR->w.read = hw_read;
     WR->w.wire_swapped = swapped;
+    WR->w.frame = wo_frame;
     snprintf(WR->dir, sizeof(WR->dir), "%s", dir);
     RUN.con.host.cfg = hw_cfg;
     RUN.con.host.layer_new = hw_layer_new;
@@ -2628,6 +2644,7 @@ static void wasm_end(void)
 {
     if (RUN.wasm) moy_wasm_session_close();
     RUN.wasm = 0;
+    g_take_frames = 0;
     wfile_forget();
     MP_STATE_VM(moycore_wasm_gate) = MP_OBJ_NULL;
     if (WR) {
@@ -2687,6 +2704,101 @@ static mp_obj_t mod_wasm_quit(void)
 #endif
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_quit_obj, mod_wasm_quit);
+
+// take_frames(on) -- whether a compiled cart's blits leave their frames in its
+// memory for the board to show (frame/frame_presented) instead of writing the
+// canvas. Off at every run's end.
+static mp_obj_t mod_take_frames(mp_obj_t on)
+{
+#if MOY_WASM
+    g_take_frames = mp_obj_is_true(on) ? 1 : 0;
+#else
+    (void)on;
+#endif
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_take_frames_obj, mod_take_frames);
+
+// frame(lut_out) -> the owed frame as a memoryview into the cart's memory, or
+// None. W x H bytes are blit's indices, whose 256 wire colours are copied into
+// `lut_out` (512 bytes); 2 x W x H bytes are blit565's little-endian words.
+// Valid until the cart's next hook, which the board fences.
+static mp_obj_t mod_frame(mp_obj_t lut_out)
+{
+#if MOY_WASM
+    const moy_pixel *lut = NULL;
+    const uint8_t *px = (RUN.wasm && WR) ? moy_wasm_frame(&WR->w, &lut) : NULL;
+    if (!px) return mp_const_none;
+    size_t n = (size_t)RUN.canvas.w * (size_t)RUN.canvas.h;
+    if (lut) {
+        size_t len = 0;
+        uint8_t *out = (uint8_t *)buf_w(lut_out, &len);
+        if (len < 256 * sizeof(moy_pixel))
+            mp_raise_ValueError(MP_ERROR_TEXT("frame: palette buffer too small"));
+        memcpy(out, lut, 256 * sizeof(moy_pixel));
+    } else {
+        n *= 2;
+    }
+    return mp_obj_new_memoryview('B', n, (void *)px);
+#else
+    (void)lut_out;
+    return mp_const_none;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_frame_obj, mod_frame);
+
+// frame_kept() -> whether the binding still holds a frame the canvas lacks, in
+// the copy frame_presented named: the last frame shown, which no blit has
+// replaced and no verb has written into the canvas since.
+static mp_obj_t mod_frame_kept(void)
+{
+#if MOY_WASM
+    return mp_obj_new_bool(RUN.wasm && WR && WR->w.kept != NULL);
+#else
+    return mp_const_false;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_frame_kept_obj, mod_frame_kept);
+
+// frame_settle() -- write the owed frame into the canvas now, as the blit
+// would have: for anything about to draw on the canvas, or read it, while the
+// frame is still the cart's.
+static mp_obj_t mod_frame_settle(void)
+{
+#if MOY_WASM
+    if (RUN.wasm && WR) moy_wasm_settle(&WR->w);
+#endif
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_frame_settle_obj, mod_frame_settle);
+
+// frame_presented(kept=None, off=0) -- the board has shown the owed frame.
+// `kept[off:]` is its copy of the frame, byte for byte, alive until the next
+// blit; the canvas is written from it if the cart draws on the screen before
+// then. None says the board wrote the frame into the canvas itself.
+static mp_obj_t mod_frame_presented(size_t n_args, const mp_obj_t *a)
+{
+#if MOY_WASM
+    const uint8_t *kept = NULL;
+    if (n_args > 0 && a[0] != mp_const_none) {
+        size_t len = 0;
+        size_t off = n_args > 1 ? (size_t)mp_obj_get_int(a[1]) : 0;
+        const uint8_t *b = (const uint8_t *)buf_r(a[0], &len);
+        size_t need = (size_t)RUN.canvas.w * (size_t)RUN.canvas.h;
+        if (WR && WR->w.frame_565) need *= 2;
+        if (off > len || len - off < need)
+            mp_raise_ValueError(MP_ERROR_TEXT("frame_presented: copy too small"));
+        kept = b + off;
+    }
+    if (RUN.wasm && WR) moy_wasm_presented(&WR->w, kept);
+#else
+    (void)n_args;
+    (void)a;
+#endif
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_presented_obj, 0, 2,
+                                           mod_frame_presented);
 
 #if MOY_WASM
 #define MOYCORE_WASM 1
@@ -3051,6 +3163,11 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_WASM),        MP_ROM_INT(MOYCORE_WASM) },
     { MP_ROM_QSTR(MP_QSTR_wasm_open),   MP_ROM_PTR(&mod_wasm_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_quit),   MP_ROM_PTR(&mod_wasm_quit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_take_frames), MP_ROM_PTR(&mod_take_frames_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame),       MP_ROM_PTR(&mod_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_settle), MP_ROM_PTR(&mod_frame_settle_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_kept),  MP_ROM_PTR(&mod_frame_kept_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_presented), MP_ROM_PTR(&mod_frame_presented_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick_split),  MP_ROM_PTR(&mod_tick_split_obj) },
     { MP_ROM_QSTR(MP_QSTR_profile),     MP_ROM_PTR(&mod_profile_obj) },
     { MP_ROM_QSTR(MP_QSTR_verb_stats),  MP_ROM_PTR(&mod_verb_stats_obj) },

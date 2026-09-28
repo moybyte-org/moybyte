@@ -81,7 +81,16 @@ def test_the_scenarios_cover_the_fold_as_a_whole():
                  "fold_snap_disarm_fence_and_reset_wait",
                  "fold_snap_timeout_retires_the_engine",
                  "fold_snap_timeout_on_the_feeder_is_bounded",
-                 "fold_snap_crop_bands_match_the_raster"):
+                 "fold_snap_crop_bands_match_the_raster",
+                 # A COMPILED CART'S FRAME from its own memory: the arm, both
+                 # layouts through both gathers at every alignment, and a
+                 # board's flush with the copy still in flight.
+                 "fold_frame_arm_geometry",
+                 "fold_frame_idx_bands_match_the_frame",
+                 "fold_frame_565_bands_match_the_frame",
+                 "fold_frame_patches_come_from_the_canvas",
+                 "fold_frame_shown_again_from_the_scratch",
+                 "fold_frame_through_the_engine"):
         assert name in FOLD_SCENARIOS, name
 
 
@@ -90,7 +99,8 @@ def test_the_harness_drives_the_shipped_fold_and_not_a_copy():
     require_harness()
     fold = (ROOT / "native" / "moy_flush" / "moy_fold.c").read_text(
         encoding="utf-8")
-    for symbol in ("moy_fold_arm", "moy_fold_arm_snap", "moy_fold_consume",
+    for symbol in ("moy_fold_arm", "moy_fold_arm_snap", "moy_fold_arm_frame",
+                   "moy_fold_consume",
                    "moy_fold_fence", "moy_fold_snap_fence",
                    "moy_fold_composite", "moy_fold_band",
                    "moy_fold_band_rot", "esp_async_memcpy"):
@@ -116,6 +126,7 @@ def test_both_banded_boards_link_the_shared_fold():
         assert '#include "moy_fold.h"' in src
         assert "moy_fold_arm(" in src          # the verb refuses geometry here
         assert "moy_fold_arm_snap(" in src     # ...and the DMA snapshot form
+        assert "moy_fold_arm_frame(" in src    # ...and a compiled cart's frame
         assert "moy_fold_snap_fence()" in src  # the cart's next write fences it
         assert "moy_fold_consume()" in src     # the one-shot latch, feeder idle
         assert "moy_fold_end()" in src         # ...released at frame_end
@@ -215,7 +226,8 @@ def test_a_banded_board_without_the_lever_carries_no_fold_attribute():
 # module prefix is normalised. Not a wish -- measured over the shipped files,
 # and the list is a ratchet: a pair that legitimately diverges comes off it
 # with the reason, which is the review a silent edit never gets.
-TWIN_VERBS = ("arm_fold", "arm_fold_snap", "disarm_fold", "fold_fence",
+TWIN_VERBS = ("arm_fold", "arm_fold_snap", "arm_fold_frame", "frame_arms",
+              "disarm_fold", "fold_fence",
               "fold_snap_fence", "snap_stats", "fb", "fb_index", "nfbs",
               "pending", "stats", "check", "park_pin", "backlight", "madctl")
 

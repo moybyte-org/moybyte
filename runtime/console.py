@@ -578,6 +578,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # backend attach point (like make_api): a factory (w, h) -> canvas, or
         # None on a tier that can't build one yet -- Player then refuses cleanly.
         self.make_game_canvas = None
+        # A compiled cart's frame that goes to the glass from the cart's own
+        # memory (device/moycore_glue.CartFrame), set by the run for its life
+        # on a system canvas that `presents_frames`; None everywhere else.
+        self.cart_frame = None
         self._run_canvas = None            # the bound small canvas, while a run holds it
         self._run_canvas_stock = None      # what self.canvas was before the bind
         self._run_canvas_shared = False    # True when the bind promoted stock to system
@@ -3425,7 +3429,35 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         return self.wm.game_xy(px, py)
 
     def _composite_game(self):
+        # A compiled cart's frame still in its own memory is shown from there
+        # when the WM can; otherwise it lands in the game canvas and the
+        # composite reads it as ever.
+        cf = self.cart_frame
+        if cf is not None:
+            view = cf.take()
+            if view is not None:
+                if self.wm.present_frame(cf, view):
+                    return None
+                cf.settle(self.canvas)
+            cf.nrects = 0
         return self.wm.composite_game()
+
+    def patch_cart_frame(self, x, y, w, h):
+        """Before painting an OPAQUE rect on the game canvas over a compiled
+        cart's frame -- the FPS chip, the perf HUD line: the flush takes that
+        rect from the canvas and the rest from the frame, so the frame need
+        not be written first. A rect the frame cannot take settles it."""
+        cf = self.cart_frame
+        if cf is not None and not cf.patch(x, y, w, h):
+            cf.settle(self.canvas)
+
+    def settle_cart_frame(self):
+        """Before anything draws on the game canvas over a compiled cart's
+        frame: put the frame there first, the bytes its blit would have
+        written."""
+        cf = self.cart_frame
+        if cf is not None:
+            cf.settle()
 
     # -- per-run cart canvas (SPEC.md 1/3.1) ---------------------------------
 

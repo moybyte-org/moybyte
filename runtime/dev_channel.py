@@ -534,6 +534,9 @@ def _remote_state(ws):
         # also what a fold that never fires looks like, so a default of 0 reads
         # as "working, just quiet".
         st["fold"] = getattr(comp, "fold_count", None)
+        # ...and how many of those were a compiled cart's frame, folded from
+        # the cart's memory (moy_fold.h's frame fold), by the same rule.
+        st["ffold"] = getattr(comp, "frame_fold_count", None)
         # The P4's counterpart, same None-not-0 rule: a scanning panel has no
         # pump but does have the async-PPA overlap (#58). `ppa` is the whole
         # overlap_stats tuple, whose fields that method documents; `timeouts`

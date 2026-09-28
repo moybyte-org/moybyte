@@ -75,6 +75,8 @@ class FullscreenStackWM:
         self._fb_for = None
         self._fb_fn = None
         self._bg_for = None           # ...and its blit_game probe, the same way
+        self._pf_for = None           # ...and its present_frame probe
+        self._pf_fn = None
         self._bg_fn = None
         # The view/viewport GEOMETRY is memoized (#66 lever 1, 2026-09-08). A play
         # frame asked for it five times -- letterbox, composite, blit source, and
@@ -470,6 +472,27 @@ class FullscreenStackWM:
             sc.rect(0, sy, sx, vh, _VIEWPORT_BEZEL)
         if sx + vw < sc.w:
             sc.rect(sx + vw, sy, sc.w - (sx + vw), vh, _VIEWPORT_BEZEL)
+
+    def present_frame(self, cf, view):
+        """Show a compiled cart's frame from its own memory (`view`, the
+        CartFrame `cf` owes) where composite_game would have read the game
+        canvas: the system canvas snapshots it for its flush, black bezels and
+        integer scale included, and the canvas is never written. True when it
+        took the frame; False leaves the caller to settle it and composite."""
+        gc = self.ws.canvas
+        sc = self.ws.sys_canvas
+        if sc is not self._pf_for:
+            self._pf_for = sc
+            self._pf_fn = getattr(sc, "present_frame", None)
+        pf = self._pf_fn
+        if pf is None:
+            return False
+        if sc is gc:
+            return pf(cf, view, gc, 0, 0, 1, None)
+        vp = self.viewport()
+        ox, oy, scale = vp
+        return pf(cf, view, gc, ox, oy, scale,
+                  self._vp_view if vp is self._vp_val else self._view_src())
 
     def composite_game(self):
         """Blit the fixed 320x240 GAME canvas into the SYSTEM canvas as a

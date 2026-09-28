@@ -34,10 +34,13 @@
  *   inst = wasm_runtime_instantiate(module, stack, 0, ...);
  *   env  = wasm_runtime_create_exec_env(inst, stack);
  *   memset(&w, 0, sizeof w); w.read = my_read; w.read_user = me;
+ *   w.frame = my_take;                         // optional: see `frame` below
  *   moy_wasm_open(&w, &con, env);
  *   moy_wasm_init(&w, err, sizeof err);        // then, per SPEC.md 5's tick:
  *   moy_wasm_update(&w, dt, err, sizeof err);
  *   moy_wasm_draw(&w, err, sizeof err);        // non-zero: do NOT present
+ *   px = moy_wasm_frame(&w, &lut);             // a taken frame: show it, then
+ *   moy_wasm_presented(&w, my_copy);           //   or moy_wasm_settle(&w)
  *   moy_wasm_close(&w);
  *
  * Over a JavaScript engine, where the embedder calls the cart's exports:
@@ -111,6 +114,21 @@ typedef struct moy_wasm {
      * with the two bytes swapped. A palette blit and blit565 then encode their
      * colours the same way; 0 means canonical, moy_canvas_init's default. */
     int wire_swapped;
+    /* Frame hand-off, under WAMR only (a JavaScript engine's frame is a copy
+     * that dies with the import call). NULL: every blit writes the screen.
+     * Otherwise blit and blit565 offer their frame here, where it sits in the
+     * cart's memory -- W x H index bytes for blit, whose 256 colours `lut`
+     * holds in the screen's wire form, or W x H little-endian RGB565 words for
+     * blit565, with `lut` NULL -- and a non-zero return TAKES it: the screen
+     * is not written, and the frame is OWED until the host shows it
+     * (moy_wasm_presented) or has it written (moy_wasm_settle). The binding
+     * settles an owed frame itself before a verb draws on or reads the screen
+     * and before the cart's next hook runs, so a host that takes a frame and
+     * never shows it loses nothing. A taken frame is read after the call,
+     * which is why the proposal has the cart leave it as blitted until _draw
+     * returns. */
+    int (*frame)(void *user, const uint8_t *pixels, const moy_pixel *lut);
+    void *frame_user;
 
     /* -- the binding's own, set by moy_wasm_open / moy_wasm_bind ---------- */
     moy_console *con;
@@ -126,6 +144,13 @@ typedef struct moy_wasm {
     moy_canvas layers[MOY_WASM_LAYERS];     /* handle h is layers[h - 1] */
     int n_layers;
     int in_draw, blits, quitting;
+    /* The last blit's frame while the screen does not hold it: in the cart's
+     * memory until the host shows it (`owed`), then in the host's copy
+     * (`kept`), or nowhere once it is on the screen. */
+    const uint8_t *owed;
+    const uint8_t *kept;
+    int frame_565;                          /* blit565's words, not blit's indices */
+    moy_pixel frame_lut[256];               /* a palette frame's colours, wire form */
 } moy_wasm;
 
 /* The import table, and its row count: a read-only template, so it costs the
@@ -190,6 +215,21 @@ int moy_wasm_open(moy_wasm *w, moy_console *con, wasm_exec_env_t env);
 int moy_wasm_init  (moy_wasm *w, char *err, size_t errlen);
 int moy_wasm_update(moy_wasm *w, float dt, char *err, size_t errlen);
 int moy_wasm_draw  (moy_wasm *w, char *err, size_t errlen);
+
+/* The frame the host took (see `frame` above) while it is owed: its pixels,
+ * or NULL when nothing is owed, and in `*lut` a palette frame's colours
+ * (NULL for a blit565 frame). */
+const uint8_t *moy_wasm_frame(const moy_wasm *w, const moy_pixel **lut);
+
+/* Write the owed frame into the screen now, exactly as the blit would have;
+ * nothing when nothing is owed. */
+void moy_wasm_settle(moy_wasm *w);
+
+/* The host has shown the owed frame. `kept` is a copy the host keeps, byte
+ * for byte what the cart blitted and alive until the cart's next blit: a verb
+ * that draws on the screen before then first has the screen written from it.
+ * NULL says the host wrote the frame into the screen itself. */
+void moy_wasm_presented(moy_wasm *w, const uint8_t *kept);
 
 #else /* MOY_WASM_JS */
 

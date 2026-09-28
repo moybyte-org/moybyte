@@ -1005,6 +1005,70 @@ static mp_obj_t moy_axs_arm_fold_snap(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_arm_fold_snap_obj, 10, 10,
                                            moy_axs_arm_fold_snap);
 
+// arm_fold_frame(frame, fmt, lut, scratch, gw, gh, sx, sy, vw, vh, ox, oy,
+//                scale, rects, canvas) -> where the frame's copy starts in
+// `scratch`. A compiled cart's frame, straight from its own memory: `fmt` 1
+// is blit565's little-endian RGB565, 2 is blit's index bytes with `lut` their
+// 256 colours in wire order (None for 1). The whole gw x gh frame is
+// snapshotted into `scratch` and the vw x vh rectangle at (sx, sy) of it is
+// armed, so the flush resolves the frame band by band and no canvas ever
+// holds it. `rects` (an int16 array of x, y, w, h quads, or None) are opaque
+// rects the console drew on `canvas`, the game canvas, over the frame: their
+// pixels are copied now and shown in place of the frame's. Anything the
+// synthesis cannot take is REFUSED (ValueError) with nothing copied or
+// latched. The caller has fenced (fold_fence), and fences the snapshot
+// (fold_snap_fence) before the cart's next hook; moy_fold.h has the why.
+static mp_obj_t moy_axs_arm_fold_frame(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_axs_require();
+    mp_buffer_info_t frame, scratch;
+    mp_get_buffer_raise(a[0], &frame, MP_BUFFER_READ);
+    const uint16_t *lut = NULL;
+    if (a[2] != mp_const_none) {
+        mp_buffer_info_t lb;
+        mp_get_buffer_raise(a[2], &lb, MP_BUFFER_READ);
+        if (lb.len < MOY_FOLD_LUT_BYTES) {
+            mp_raise_ValueError(MP_ERROR_TEXT("fold palette"));
+        }
+        lut = (const uint16_t *)lb.buf;
+    }
+    mp_get_buffer_raise(a[3], &scratch, MP_BUFFER_WRITE);
+    const int16_t *rects = NULL;
+    int nrects = 0;
+    mp_buffer_info_t canvas = { 0 };
+    if (a[13] != mp_const_none) {
+        mp_buffer_info_t rb;
+        mp_get_buffer_raise(a[13], &rb, MP_BUFFER_READ);
+        rects = (const int16_t *)rb.buf;
+        nrects = (int)(rb.len / (4 * sizeof(int16_t)));
+        mp_get_buffer_raise(a[14], &canvas, MP_BUFFER_READ);
+    }
+    size_t kept = 0;
+    bool async_copy = false;
+    if (!moy_fold_arm_frame((const uint8_t *)frame.buf, frame.len,
+                            mp_obj_get_int(a[1]), lut,
+                            (uint8_t *)scratch.buf, scratch.len,
+                            mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                            mp_obj_get_int(a[6]), mp_obj_get_int(a[7]),
+                            mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                            mp_obj_get_int(a[10]), mp_obj_get_int(a[11]),
+                            mp_obj_get_int(a[12]), MOY_AXS_W, MOY_AXS_H,
+                            rects, nrects, (const uint8_t *)canvas.buf,
+                            canvas.len, &kept, &async_copy)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fold geometry"));
+    }
+    return MP_OBJ_NEW_SMALL_INT((mp_int_t)kept);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_arm_fold_frame_obj, 15, 15,
+                                           moy_axs_arm_fold_frame);
+
+// frame_arms() -> a compiled cart's frames armed since boot: the frame fold's
+// liveness meter, climbing with fold_stats()[0] while such a cart plays.
+static mp_obj_t moy_axs_frame_arms(void) {
+    return mp_obj_new_int_from_uint(moy_fold.frame_arms);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_frame_arms_obj, moy_axs_frame_arms);
+
 // fold_snap_fence() -- block until the snapshot in flight has finished reading
 // the live canvas: the fence the sys canvas takes before the cart's next
 // write. One compare when nothing is in flight, which is every frame once the
@@ -1235,6 +1299,8 @@ static const mp_rom_map_elem_t moy_axs_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fold_stats), MP_ROM_PTR(&moy_axs_fold_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_fold_test),  MP_ROM_PTR(&moy_axs_fold_test_obj) },
     { MP_ROM_QSTR(MP_QSTR_arm_fold_snap), MP_ROM_PTR(&moy_axs_arm_fold_snap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_arm_fold_frame), MP_ROM_PTR(&moy_axs_arm_fold_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_arms), MP_ROM_PTR(&moy_axs_frame_arms_obj) },
     { MP_ROM_QSTR(MP_QSTR_fold_snap_fence), MP_ROM_PTR(&moy_axs_fold_snap_fence_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap_stats), MP_ROM_PTR(&moy_axs_snap_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_cmd),        MP_ROM_PTR(&moy_axs_cmd_obj) },

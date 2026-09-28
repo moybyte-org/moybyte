@@ -42,6 +42,7 @@ class PerfHud:
         tw = len(s) * 8
         x = cv.w - tw - 3
         y = cv.h - 10
+        self.ws.patch_cart_frame(x - 2, y - 1, tw + 4, 10)
         cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
         cv.print(s, x, y, NAMES["yellow"], 1)
 
@@ -73,5 +74,6 @@ class PerfHud:
         if x < 1:
             x = 1
         y = cv.h - 20            # one 8px row above the FPS chip (which sits at h-10)
+        self.ws.patch_cart_frame(x - 2, y - 1, tw + 4, 10)
         cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
         cv.print(s, x, y, NAMES["white"], 1)

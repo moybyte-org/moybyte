@@ -405,7 +405,8 @@ def test_the_base_compositor_claims_NO_board_lever():
     _lcd, comp = build()
     for lever in ("fold_supported", "fold_count", "snap_scale_fold",
                   "snap_fence", "snap_stats", "disarm_scale_fold",
-                  "fold_fence", "sd_bracket", "pump_if_pending"):
+                  "fold_fence", "sd_bracket", "pump_if_pending",
+                  "frames_supported", "frame_fold", "frame_fold_count"):
         assert not hasattr(comp, lever), lever
 
 
@@ -451,6 +452,7 @@ class FoldingLcd(FakeLcd):
         self._stats_len = stats_len
         self.snap_async = snap_async
         self.snaps = (0, 0, 0, 0)
+        self.frame_armed = 0
 
     def fold_stats(self):
         # (frames_folded, armed, inflight[, windowed]) -- modmoy_axs.c / modmoy_lcd.c
@@ -477,6 +479,18 @@ class FoldingLcd(FakeLcd):
 
     def fold_fence(self):
         self._log("fold_fence")
+
+    def arm_fold_frame(self, frame, fmt, lut, scratch, gw, gh, sx, sy, vw, vh,
+                       ox, oy, scale, rects, canvas):
+        # -> where the frame's copy starts in the scratch (both modules)
+        self._log("arm_fold_frame", (fmt, lut is not None, gw, gh, sx, sy, vw,
+                                     vh, ox, oy, scale,
+                                     None if rects is None else list(rects),
+                                     canvas is not None))
+        return 21
+
+    def frame_arms(self):
+        return self.frame_armed
 
 
 _folding_arm_fold_snap = FoldingLcd.arm_fold_snap
@@ -558,6 +572,49 @@ def test_the_snapshot_arm_passes_the_geometry_through_and_says_if_it_is_a_dma(
             comp.snap_scale_fold(live, 0, scratch, 128, 128, 0, 128, 200, 56, 1)
 
 
+@pytest.mark.parametrize("board,native,modules,cls", [
+    ("guition_panel", "moy_axs", GUITION_MODULES, "GuitionCompositor"),
+    ("tdeck_panel", "moy_lcd", TDECK_MODULES, "TDeckCompositor"),
+])
+def test_the_frame_fold_passes_a_carts_frame_through_and_counts_it(
+        board, native, modules, cls):
+    """A compiled cart's frame straight from its memory (moy_fold.h): the
+    arm carries the layout, the palette, the frame's size and the crop, and
+    answers where the copy starts in the scratch; the meter reads the C every
+    time; a refusal raises through to DeviceCanvas.present_frame, which
+    settles the frame instead."""
+    lcd = FoldingLcd()
+    with board_panel(board, native, modules, lcd) as mod:
+        comp = getattr(mod, cls)()
+        lcd.comp = comp
+        assert comp.frames_supported is True
+        lcd.calls.clear()
+        lut = bytearray(512)
+        assert comp.frame_fold(FB(1), 2, lut, FB(2), 320, 240, 0, 0, 320, 240,
+                               80, 40, 1) == 21
+        from array import array
+        assert comp.frame_fold(FB(1), 1, None, FB(2), 320, 240, 0, 0, 320, 240,
+                               80, 40, 1, array("h", [290, 229, 30, 10]),
+                               FB(4)) == 21
+        assert lcd.calls == [
+            ("arm_fold_frame",
+             (2, True, 320, 240, 0, 0, 320, 240, 80, 40, 1, None, False), 0),
+            ("arm_fold_frame",
+             (1, False, 320, 240, 0, 0, 320, 240, 80, 40, 1,
+              [290, 229, 30, 10], True), 0)]
+        lcd.frame_armed = 7
+        assert comp.frame_fold_count == 7
+        lcd.frame_armed = 9
+        assert comp.frame_fold_count == 9
+
+        def refuse(*_a, **_k):
+            raise ValueError("fold geometry")
+        lcd.arm_fold_frame = refuse
+        with pytest.raises(ValueError):
+            comp.frame_fold(FB(1), 1, None, FB(2), 320, 240, 0, 0, 320, 240,
+                            0, 0, 9)
+
+
 def test_a_banded_module_without_the_verbs_degrades():
     """`fold_supported` is probed by `DeviceCanvas.blit_game`; a panel module
     older than this Python must take the ordinary root composite rather than
@@ -569,6 +626,7 @@ def test_a_banded_module_without_the_verbs_degrades():
         comp = tp.TDeckCompositor()
         lcd.comp = comp
         assert comp.fold_supported is False
+        assert comp.frames_supported is False
 
     old = FoldingLcd()
     del FoldingLcd.arm_fold_snap        # the pre-snapshot verb set
@@ -738,9 +796,20 @@ def test_state_carries_the_whole_pump_tuple():
 
 
 def test_state_reports_fold_as_None_when_the_board_has_no_fold():
-    """None, not 0: `fold=0` is also what a fold that never fires looks like."""
+    """None, not 0: `fold=0` is also what a fold that never fires looks like.
+    The frame fold's count follows the same rule."""
     _lcd, comp = build()
-    assert _remote_state(FakeWS(comp))["fold"] is None
+    st = _remote_state(FakeWS(comp))
+    assert st["fold"] is None and st["ffold"] is None
+
+
+def test_state_reports_the_frame_fold_count_from_the_C():
+    lcd = FoldingLcd()
+    with board_panel("tdeck_panel", "moy_lcd", TDECK_MODULES, lcd) as tp:
+        comp = tp.TDeckCompositor()
+        lcd.comp = comp
+        lcd.frame_armed = 412
+        assert _remote_state(FakeWS(comp))["ffold"] == 412
 
 
 def test_state_reports_a_live_fold_count_when_the_board_has_one():

@@ -85,6 +85,24 @@
 // DMA. A copy that never completes trips the deadline ONCE: it is counted,
 // the latch is cleared, and the engine is retired for the session -- every
 // later snapshot is a memcpy, which is the shape this file shipped with.
+//
+// A COMPILED CART'S FRAME folds too, without ever reaching a canvas. libmoy's
+// wasm binding can hand the host a frame where the cart made it, in its own
+// linear memory (moy_wasm.h's `frame`): blit's index bytes with 256 colours,
+// or blit565's little-endian RGB565. `moy_fold_arm_frame` snapshots that frame
+// by the same DMA engine into a scratch and latches its FORMAT, and the band
+// synthesis resolves the palette or swaps the bytes as it fills each bounce
+// slot -- on the feeder, off the cart's core. The copy the blit used to make
+// on the VM core, frame into canvas, is gone; what is left is a DMA the VM
+// never waits for, because the snapshot's two fences above are exactly the
+// ones a frame needs: the feeder's first band waits for it, and the sys
+// canvas's `sync_back` fences it before the cart's next hook can write its
+// memory. The whole frame is copied, cropped or not, so the scratch holds a
+// copy of what the cart blitted that the binding can write into the screen
+// later (moy_wasm_presented's `kept`). The GDMA wants 64-aligned ends and a
+// cart's frame sits wherever its allocator put it, so the copy is the
+// 64-aligned span around it, and the frame starts a few bytes into the
+// scratch; a palette frame's colours ride at the scratch's tail.
 
 #ifndef MOYBYTE_MOY_FOLD_H
 #define MOYBYTE_MOY_FOLD_H
@@ -111,12 +129,42 @@
 // the engine is never asked -- its refusal is an error log per frame.
 #define MOY_FOLD_SNAP_ALIGN 64
 
+// The layout of the fold's source. WIRE is a console canvas: RGB565 in the
+// panel's byte order, what a game-canvas snapshot holds. The other two are a
+// compiled cart's frame as the cart handed it over: LE565 is blit565's
+// little-endian RGB565, byte-swapped into wire order as it is synthesized, and
+// IDX8 is blit's index bytes, resolved through 256 wire-order colours.
+#define MOY_FOLD_WIRE  0
+#define MOY_FOLD_LE565 1
+#define MOY_FOLD_IDX8  2
+
+// A frame scratch's tail holds a palette frame's colours, then the patches.
+#define MOY_FOLD_LUT_BYTES 512
+
+// PATCHES: what the console draws over a compiled cart's frame -- the FPS
+// chip and the perf HUD line, opaque rects the painter declares -- come from
+// the game canvas, the rest of the frame from the cart's. At most this many
+// rects and this many bytes of them, copied into the scratch at the arm; a
+// frame with more is settled into the canvas instead.
+#define MOY_FOLD_MAX_PATCHES 4
+#define MOY_FOLD_PATCH_BYTES 8192
+
+typedef struct {
+    int x, y, w, h;             // in the frame's own pixels
+    const uint16_t *pix;        // w x h wire pixels, in the scratch
+} moy_fold_patch_t;
+
 typedef struct {
     bool armed;                 // this frame's composite is the flush's job
     volatile bool inflight;     // the in-flight flush still reads `src`
-    const uint8_t *src;         // game pixels, RGB565 wire order, vh rows of sstride
+    const uint8_t *src;         // game pixels, `fmt` layout, vh rows of sstride
     int vw, vh;                 // the game rectangle, in GAME pixels
-    int sx, sstride;            // its x offset and row stride inside `src`
+    int sx, sstride;            // its x offset and row stride inside `src`, in pixels
+    int fmt;                    // MOY_FOLD_WIRE / LE565 / IDX8
+    const uint16_t *lut;        // IDX8: the 256 wire colours
+    int sy;                     // a frame's view top, in the frame's rows
+    int npatch;                 // a frame's patches (0 on every other arm)
+    moy_fold_patch_t patch[MOY_FOLD_MAX_PATCHES];
     int ox, oy;                 // its origin in the LOGICAL frame
     int scale;                  // integer upscale, >= 1
     uint32_t frames;            // flushes folded since boot (the liveness meter)
@@ -127,6 +175,7 @@ typedef struct {
     uint32_t snaps_sync;        // ...and the memcpys taken when it declined
     uint32_t snap_timeouts;     // copies that never completed (retires the engine)
     uint32_t snap_wait_us;      // what the last VM-side snap fence waited
+    uint32_t frame_arms;        // a compiled cart's frames armed (the lever's meter)
 } moy_fold_t;
 
 extern moy_fold_t moy_fold;
@@ -165,6 +214,27 @@ bool moy_fold_arm_snap(const uint8_t *live, size_t live_len, size_t live_off,
                        int ox, int oy, int scale, int fb_w, int fb_h,
                        bool *async_out);
 
+// VM side. Snapshot a compiled cart's frame and arm over the snapshot: the
+// frame is `gw` x `gh` pixels of `fmt` (LE565 or IDX8, with `lut` its 256 wire
+// colours) at `frame`, and the rectangle shown is `vw` x `vh` at (`sx`, `sy`)
+// of it. The whole frame is copied -- its 64-aligned span -- into `scratch`;
+// `*kept_off` is where the frame's first byte landed in it, `*async_out`
+// whether the copy is a DMA in flight. `rects` holds `nrects` (x, y, w, h)
+// quads in the frame's pixels whose content comes from `canvas` instead -- the
+// game canvas, wire order, gw pixels a row -- copied into the scratch now. The
+// scratch holds the span, MOY_FOLD_LUT_BYTES and the patches' pixels; a
+// `frame` that already sits where the copy would land in it (the last frame
+// shown, shown again) is not copied. FALSE = refused, and nothing was copied
+// or latched. The caller has fenced
+// (`moy_fold_fence`), as for `moy_fold_arm_snap`.
+bool moy_fold_arm_frame(const uint8_t *frame, size_t frame_len, int fmt,
+                        const uint16_t *lut, uint8_t *scratch,
+                        size_t scratch_len, int gw, int gh, int sx, int sy,
+                        int vw, int vh, int ox, int oy, int scale, int fb_w,
+                        int fb_h, const int16_t *rects, int nrects,
+                        const uint8_t *canvas, size_t canvas_len,
+                        size_t *kept_off, bool *async_out);
+
 // VM side, with the FEEDER IDLE (drain first). Latch the one-shot arm into the
 // frame about to be kicked and count it. True = this flush is folded.
 bool moy_fold_consume(void);
@@ -193,7 +263,7 @@ void moy_fold_snap_fence(void);
 void moy_fold_reset(void);
 
 // The composite the fold SKIPPED: black, plus the game rectangle at scale,
-// into a `fb_w` x `fb_h` RGB565 frame. Used by the disarm path on both boards,
+// into a `fb_w` x `fb_h` wire-order RGB565 frame, whatever the source's layout. Used by the disarm path on both boards,
 // and it is the reference the band synthesis below must reassemble into.
 void moy_fold_composite(uint8_t *fb, int fb_w, int fb_h);
 

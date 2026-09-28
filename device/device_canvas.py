@@ -1551,6 +1551,57 @@ class DeviceCanvas:
         if self._pump is not None:
             self._pump()               # feed the in-flight SRAM-bounce flush
 
+    # -- a compiled cart's frame, from its own memory (moy_fold.h) ---------------
+
+    @property
+    def presents_frames(self):
+        """Whether this canvas's flush can show a compiled cart's frame from
+        the cart's memory (present_frame). A compiled run asks once, to decide
+        whether its blits leave their frames there."""
+        return bool(getattr(self._comp, "frames_supported", False))
+
+    def present_frame(self, cf, view, gc, ox, oy, scale, src=None):
+        """Hand the flush a compiled cart's frame straight from its memory in
+        place of blit_game: `view` is the frame the CartFrame `cf` owes (the
+        game canvas `gc`'s size, of indices whose colours are `cf.lut` or of
+        little-endian RGB565), `src` the cart's view rect as in blit_game.
+        The compositor snapshots the whole frame by DMA into the run's
+        scratch and folds it -- black bezels, integer scale, the palette or
+        byte order resolved band by band on the feeder -- so neither canvas is
+        written; the opaque rects the console painted over it (`cf.rects`)
+        come from `gc`. `sync_back` fences the snapshot before the cart's
+        next hook; an overlay after this disarms and gets the composite, as
+        it does over any fold. False when it cannot take the frame (no room,
+        a geometry the fold refuses): the caller settles it into the game
+        canvas and composites as ever."""
+        comp = self._comp
+        gw = gc.w
+        gh = gc.h
+        if src is not None:
+            sx, sy, vw, vh = src
+        else:
+            sx = sy = 0
+            vw = gw
+            vh = gh
+        n = len(view)
+        fmt = 2 if n == gw * gh else 1
+        nr = cf.nrects
+        comp.fold_fence()
+        scr = cf.scratch(n + 128 + 512 + cf.PATCH_BYTES)
+        if scr is None:
+            return False
+        try:
+            kept = comp.frame_fold(view, fmt, cf.lut if fmt == 2 else None, scr,
+                                   gw, gh, sx, sy, vw, vh, int(ox), int(oy),
+                                   int(scale),
+                                   memoryview(cf.rects)[:4 * nr] if nr else None,
+                                   gc._buf)
+        except ValueError:
+            return False
+        self._snap_live = True
+        cf.presented(scr, kept)
+        return True
+
     def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
         # #163 span-batch: n packed int16 quads (x, y, w, h, ci) in ONE call.
         # Native lane: the shared DrawCtx loops gate_fill in C (camera/clip/pal

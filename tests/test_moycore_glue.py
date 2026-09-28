@@ -161,10 +161,14 @@ class FakeMoycore(types.ModuleType):
         self.pmem_image_fill = None
         self.closes = 0
         self.wasm_open_err = None
+        self.owed_frame = None
+        self.owed_lut = None
+        self.kept = False
         for verb in ("run_begin", "register", "exec", "load", "tick",
                      "tick_split", "pmem_image", "retarget", "close",
                      "active", "view", "set_sram_floor", "alloc_stats",
-                     "get_global", "wasm_open"):
+                     "get_global", "wasm_open", "take_frames", "frame",
+                     "frame_settle", "frame_presented", "frame_kept"):
             assert verb in C_NAMES, verb
             setattr(self, verb, getattr(self, "_" + verb))
 
@@ -240,6 +244,24 @@ class FakeMoycore(types.ModuleType):
     def _wasm_open(self, *a):
         self._log("wasm_open", *a)
         return self.wasm_open_err
+
+    def _take_frames(self, on):
+        self._log("take_frames", on)
+
+    def _frame(self, lut_out):
+        self._log("frame")
+        if self.owed_lut is not None:
+            memoryview(lut_out).cast("B")[:] = self.owed_lut
+        return self.owed_frame
+
+    def _frame_settle(self):
+        self._log("frame_settle")
+
+    def _frame_presented(self, kept=None, off=0):
+        self._log("frame_presented", kept, off)
+
+    def _frame_kept(self):
+        return self.kept
 
 
 class Clock:
@@ -1894,4 +1916,215 @@ def test_an_open_that_raises_closes_the_console(tmp_path):
             world.mod.WasmRun(ws, make_ns(), None)
         assert world.core.closes == 1
     finally:
+        world.close()
+
+
+# -- a compiled cart's frame from its own memory (CartFrame) --------------------
+
+
+class PresentingCanvas:
+    presents_frames = True
+
+
+class FakeAlloc(types.ModuleType):
+    MEMORY_SPIRAM = 1
+    MEMORY_DMA = 2
+
+    def __init__(self, room=True):
+        super().__init__("moy_alloc")
+        self.room = room
+        self.log = []
+
+    def alloc(self, n, caps):
+        self.log.append(("alloc", n, caps))
+        if not self.room:
+            raise MemoryError("no PSRAM")
+        return bytearray(n)
+
+    def free(self, buf):
+        self.log.append(("free", len(buf)))
+
+
+class FenceComp:
+    def __init__(self, log):
+        self.log = log
+
+    def fold_fence(self):
+        self.log.append(("fold_fence",))
+
+    def snap_fence(self):
+        self.log.append(("snap_fence",))
+
+    def disarm_scale_fold(self):
+        self.log.append(("disarm",))
+
+
+def test_a_compiled_cart_takes_its_frames_where_the_canvas_shows_them(tmp_path):
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        ws.sys_canvas = PresentingCanvas()
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert ("take_frames", True) in world.core.calls
+        assert world.core.verbs().index("take_frames") > world.core.verbs().index(
+            "wasm_open")
+        assert ws.cart_frame is run.frame
+        assert (run.frame.w, run.frame.h) == (320, 240)
+        assert len(bytes(run.frame.lut)) == 512
+    finally:
+        world.close()
+
+
+def test_a_canvas_that_cannot_show_them_keeps_the_blit(tmp_path):
+    cart, _main = _compiled(tmp_path)
+    for canvas in (None, types.SimpleNamespace(presents_frames=False)):
+        world = _wasm_world()
+        try:
+            ws = FakeWs(project=_CartProject(cart))
+            if canvas is not None:
+                ws.sys_canvas = canvas
+            run = world.mod.WasmRun(ws, make_ns(), None)
+            assert "take_frames" not in world.core.verbs()
+            assert run.frame is None and getattr(ws, "cart_frame", None) is None
+        finally:
+            world.close()
+
+
+def test_the_cart_frame_forwards_to_the_binding(tmp_path):
+    world = _wasm_world()
+    try:
+        cf = world.mod.CartFrame(320, 240)
+        world.core.owed_frame = view = memoryview(bytearray(320 * 240))
+        world.core.owed_lut = bytes(range(256)) * 2
+        assert cf.take() is view
+        assert bytes(cf.lut) == bytes(range(256)) * 2
+        cf.settle()
+        kept = bytearray(8)
+        cf.presented(kept, 5)
+        assert world.core.calls[-2:] == [("frame_settle",),
+                                         ("frame_presented", kept, 5)]
+    finally:
+        world.close()
+
+
+def test_the_scratch_is_the_runs_and_freed_once_nothing_reads_it(tmp_path):
+    world = _wasm_world()
+    alloc = FakeAlloc()
+    saved = sys.modules.get("moy_alloc", KeyError)
+    sys.modules["moy_alloc"] = alloc
+    try:
+        cf = world.mod.CartFrame(320, 240)
+        log = alloc.log
+        cf.close(FenceComp(log))
+        assert log == []                    # nothing taken: nothing to wait on
+        a = cf.scratch(77440)
+        assert log == [("alloc", 77440, 3)]
+        assert cf.scratch(1000) is a        # big enough: the same buffer
+        b = cf.scratch(154240)              # a blit565 frame wants more
+        assert b is not a and len(b) == 154240
+        assert log[1:] == [("free", 77440), ("alloc", 154240, 3)]
+        del log[:]
+        cf.close(FenceComp(log))
+        assert log == [("fold_fence",), ("snap_fence",), ("disarm",),
+                       ("free", 154240)]
+        alloc.room = False
+        assert cf.scratch(10) is None       # no PSRAM: the caller settles
+    finally:
+        if saved is KeyError:
+            del sys.modules["moy_alloc"]
+        else:
+            sys.modules["moy_alloc"] = saved
+        world.close()
+
+
+def test_closing_the_run_lets_go_of_the_frame_before_the_console(tmp_path):
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        ws.sys_canvas = PresentingCanvas()
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        order = []
+        run.frame.close = lambda comp: order.append(("frame", comp))
+        ws.comp = "the compositor"
+        real = world.core.close
+        world.core.close = lambda: (order.append(("console",)), real())
+        run.close()
+        assert order == [("frame", "the compositor"), ("console",)]
+        assert ws.cart_frame is None and run.frame is None
+    finally:
+        world.close()
+
+
+def test_the_cart_frame_holds_the_rects_the_console_paints_over_it(tmp_path):
+    world = _wasm_world()
+    try:
+        cf = world.mod.CartFrame(320, 240)
+        for i in range(cf.MAX_PATCHES):
+            assert cf.patch(10 * i, 5, 8, 4) is True
+        assert cf.patch(0, 0, 1, 1) is False      # full: the painter settles
+        assert list(cf.rects[:8]) == [0, 5, 8, 4, 10, 5, 8, 4]
+        assert cf.nrects == cf.MAX_PATCHES
+        cf.presented(bytearray(4), 0)
+        assert cf.nrects == 0                     # a frame's rects are its own
+    finally:
+        world.close()
+
+
+def test_a_settle_after_the_chip_keeps_the_chip(tmp_path):
+    """The frame is written over the whole canvas; the rects the console had
+    already painted over it keep their pixels."""
+    world = _wasm_world()
+    try:
+        canvas = FakeCanvas(8, 4)
+        canvas._buf[:] = bytes(range(64))
+        written = bytes([0xEE] * 64)
+
+        def settle():
+            world.core.calls.append(("frame_settle",))
+            canvas._buf[:] = written
+        world.core.frame_settle = settle
+        cf = world.mod.CartFrame(8, 4)
+        cf.patch(6, 2, 4, 4)                       # clipped to the canvas
+        cf.settle(canvas)
+        want = bytearray(written)
+        for row in (2, 3):
+            a = 2 * (row * 8 + 6)
+            want[a:a + 4] = bytes(range(64))[a:a + 4]
+        assert bytes(canvas._buf) == bytes(want)
+        assert cf.nrects == 0
+        cf.settle(canvas)                          # no rects: a plain settle
+        assert bytes(canvas._buf) == written
+    finally:
+        world.close()
+
+
+def test_a_frame_the_cart_did_not_replace_is_shown_again_from_the_scratch(tmp_path):
+    """No blit this frame, and the canvas still lacks the last frame shown:
+    take() hands back that frame's copy in the scratch, so the flush shows it
+    again rather than a canvas nothing wrote."""
+    world = _wasm_world()
+    alloc = FakeAlloc()
+    saved = sys.modules.get("moy_alloc", KeyError)
+    sys.modules["moy_alloc"] = alloc
+    try:
+        cf = world.mod.CartFrame(4, 2)
+        assert cf.take() is None                     # nothing owed, nothing shown
+        world.core.owed_frame = memoryview(bytearray(16))
+        assert len(cf.take()) == 16 and cf.fmt == 1  # a blit565 frame
+        scr = cf.scratch(64)
+        scr[5:21] = bytes(range(16))
+        cf.presented(scr, 5)
+        world.core.owed_frame = None
+        world.core.kept = True
+        again = cf.take()
+        assert bytes(again) == bytes(range(16))
+        world.core.kept = False                      # a verb wrote the canvas
+        assert cf.take() is None
+    finally:
+        if saved is KeyError:
+            del sys.modules["moy_alloc"]
+        else:
+            sys.modules["moy_alloc"] = saved
         world.close()

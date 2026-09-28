@@ -145,55 +145,127 @@ static moy_canvas *layer_of(moy_wasm *w, int32_t h)
     return &w->layers[h - 1];
 }
 
+/* -- the screen's frame ------------------------------------------------------ */
+
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) \
+    && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define MOY_WASM_LE 1
+#else
+#define MOY_WASM_LE 0
+#endif
+
+/* blit565's words into the screen, byte-swapped when the screen is. On a
+ * little-endian host the frame's bytes ARE a canonical screen's, so that is a
+ * copy, and a swapped screen takes two pixels a word when both ends are
+ * aligned. Byte by byte otherwise: a cart may hand over a frame at any
+ * address. */
+static void write_565(moy_wasm *w, moy_pixel *d, const uint8_t *px, size_t n)
+{
+    size_t i = 0;
+#if MOY_WASM_LE
+    if (!w->wire_swapped) {
+        memcpy(d, px, n * 2u);
+        return;
+    }
+    if ((((uintptr_t)d | (uintptr_t)px) & 3u) == 0) {
+        const uint32_t *s32 = (const uint32_t *)(const void *)px;
+        uint32_t *d32 = (uint32_t *)(void *)d;
+        for (; i + 1 < n; i += 2) {
+            uint32_t v = *s32++;
+            *d32++ = ((v & 0x00FF00FFu) << 8) | ((v >> 8) & 0x00FF00FFu);
+        }
+    }
+#endif
+    for (; i < n; i++) {
+        uint16_t c = (uint16_t)(px[i * 2] | (px[i * 2 + 1] << 8));
+        d[i] = w->wire_swapped ? (uint16_t)((c >> 8) | ((c & 0xFFu) << 8)) : c;
+    }
+}
+
+/* Write a frame the way blit or blit565 does: `px` is the cart's frame or the
+ * host's copy of it, in the layout frame_565 names. */
+static void write_frame(moy_wasm *w, const uint8_t *px)
+{
+    moy_canvas *s = w->screen;
+    size_t i, n = (size_t)s->w * (size_t)s->h;
+    if (w->frame_565) {
+        write_565(w, s->pix, px, n);
+    } else {
+        for (i = 0; i < n; i++) s->pix[i] = w->frame_lut[px[i]];
+    }
+}
+
+/* The screen is about to be drawn on or read: give it the frame it lacks. */
+static void settle(moy_wasm *w)
+{
+    const uint8_t *px = w->owed ? w->owed : w->kept;
+    w->owed = w->kept = NULL;
+    if (px) write_frame(w, px);
+}
+
+/* Every verb that draws on or reads its target takes it from here. */
+static moy_canvas *tgt(moy_wasm *w)
+{
+    if (w->target == w->screen && (w->owed || w->kept)) settle(w);
+    return w->target;
+}
+
 /* -- drawing (SPEC.md 6, 6.1): into the target ---------------------------- */
 
+/* cls replaces the whole target, so a frame the screen lacks is dropped
+ * rather than written first. */
 static void w_cls(env_t e, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_cls(w->target, c); }
+{
+    moy_wasm *w = bound(e);
+    if (!w) return;
+    if (w->target == w->screen) w->owed = w->kept = NULL;
+    moy_cls(w->target, c);
+}
 
 static int32_t w_pix(env_t e, int32_t x, int32_t y, int32_t c)
 {
     moy_wasm *w = bound(e);
     if (!w) return 0;
     if (c >= 0) {
-        moy_pix(w->target, x, y, c);
+        moy_pix(tgt(w), x, y, c);
         return 0;
     }
-    return moy_pget(w->target, x, y);
+    return moy_pget(tgt(w), x, y);
 }
 
 static void w_line(env_t e, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_line(w->target, x0, y0, x1, y1, c); }
+{ moy_wasm *w = bound(e); if (w) moy_line(tgt(w), x0, y0, x1, y1, c); }
 
 static void w_rect(env_t e, int32_t x, int32_t y, int32_t ww, int32_t hh, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_rect(w->target, x, y, ww, hh, c); }
+{ moy_wasm *w = bound(e); if (w) moy_rect(tgt(w), x, y, ww, hh, c); }
 
 static void w_rectb(env_t e, int32_t x, int32_t y, int32_t ww, int32_t hh, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_rectb(w->target, x, y, ww, hh, c); }
+{ moy_wasm *w = bound(e); if (w) moy_rectb(tgt(w), x, y, ww, hh, c); }
 
 static void w_circ(env_t e, int32_t cx, int32_t cy, int32_t r, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_circ(w->target, cx, cy, r, c); }
+{ moy_wasm *w = bound(e); if (w) moy_circ(tgt(w), cx, cy, r, c); }
 
 static void w_circb(env_t e, int32_t cx, int32_t cy, int32_t r, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_circb(w->target, cx, cy, r, c); }
+{ moy_wasm *w = bound(e); if (w) moy_circb(tgt(w), cx, cy, r, c); }
 
 static void w_oval(env_t e, int32_t x, int32_t y, int32_t ww, int32_t hh, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_oval(w->target, x, y, ww, hh, c); }
+{ moy_wasm *w = bound(e); if (w) moy_oval(tgt(w), x, y, ww, hh, c); }
 
 static void w_ovalb(env_t e, int32_t x, int32_t y, int32_t ww, int32_t hh, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_ovalb(w->target, x, y, ww, hh, c); }
+{ moy_wasm *w = bound(e); if (w) moy_ovalb(tgt(w), x, y, ww, hh, c); }
 
 static void w_tri(env_t e, int32_t x1, int32_t y1, int32_t x2, int32_t y2,
                   int32_t x3, int32_t y3, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_tri(w->target, x1, y1, x2, y2, x3, y3, c); }
+{ moy_wasm *w = bound(e); if (w) moy_tri(tgt(w), x1, y1, x2, y2, x3, y3, c); }
 
 static void w_trib(env_t e, int32_t x1, int32_t y1, int32_t x2, int32_t y2,
                    int32_t x3, int32_t y3, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_trib(w->target, x1, y1, x2, y2, x3, y3, c); }
+{ moy_wasm *w = bound(e); if (w) moy_trib(tgt(w), x1, y1, x2, y2, x3, y3, c); }
 
 /* '*~': the engine's adapter has checked the bytes are inside linear
  * memory. */
 static void w_print(env_t e, const uint8_t *s, uint32_t len, int32_t x, int32_t y, int32_t c)
-{ moy_wasm *w = bound(e); if (w) moy_print(w->target, s, (size_t)len, x, y, c); }
+{ moy_wasm *w = bound(e); if (w) moy_print(tgt(w), s, (size_t)len, x, y, c); }
 
 static void w_camera(env_t e, int32_t x, int32_t y, uint32_t out)
 {
@@ -234,7 +306,7 @@ static void w_tline(env_t e, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
 {
     moy_wasm *w = bound(e);
     if (!w || !w->con->sheet || !w->con->map) return;
-    moy_tline(w->target, w->con->sheet, w->con->map, x0, y0, x1, y1, u, v, du, dv, ck);
+    moy_tline(tgt(w), w->con->sheet, w->con->map, x0, y0, x1, y1, u, v, du, dv, ck);
 }
 
 /* -- the host-dependent core verbs (SPEC.md 6) ---------------------------- */
@@ -285,6 +357,7 @@ static void w_draw_layer(env_t e, int32_t h, int32_t cx, int32_t cy)
         trap(w, "moy: draw_layer: not a layer handle");
         return;
     }
+    if (w->owed || w->kept) settle(w);
     moy_blit_window(w->screen, ly, cx, cy);
 }
 
@@ -317,7 +390,7 @@ static void w_spr(env_t e, int32_t n, int32_t x, int32_t y, int32_t ck,
 {
     moy_wasm *w = bound(e);
     if (!w || !w->con->sheet) return;
-    moy_spr(w->target, w->con->sheet, n, x, y, ck, scale, flip);
+    moy_spr(tgt(w), w->con->sheet, n, x, y, ck, scale, flip);
 }
 
 static void w_sspr(env_t e, int32_t sx, int32_t sy, int32_t sw, int32_t sh,
@@ -326,7 +399,7 @@ static void w_sspr(env_t e, int32_t sx, int32_t sy, int32_t sw, int32_t sh,
 {
     moy_wasm *w = bound(e);
     if (!w || !w->con->sheet) return;
-    moy_sspr(w->target, w->con->sheet, sx, sy, sw, sh, dx, dy, dw, dh, ck, flip);
+    moy_sspr(tgt(w), w->con->sheet, sx, sy, sw, sh, dx, dy, dw, dh, ck, flip);
 }
 
 static void w_map(env_t e, int32_t mx, int32_t my, int32_t mw, int32_t mh,
@@ -334,7 +407,7 @@ static void w_map(env_t e, int32_t mx, int32_t my, int32_t mw, int32_t mh,
 {
     moy_wasm *w = bound(e);
     if (!w || !w->con->sheet || !w->con->map) return;
-    moy_map_draw_layers(w->target, w->con->map, w->con->sheet, mx, my, mw, mh,
+    moy_map_draw_layers(tgt(w), w->con->map, w->con->sheet, mx, my, mw, mh,
                         sx, sy, ck, scale, layers, w->con->flags);
 }
 
@@ -579,11 +652,24 @@ static int may_blit(moy_wasm *w)
     return 1;
 }
 
+/* The frame goes to the host when it takes it, and into the screen when it
+ * does not. Either way it replaces what the screen was owed before. */
+static void hand_over(moy_wasm *w, const uint8_t *src)
+{
+    w->owed = w->kept = NULL;
+#ifndef MOY_WASM_JS
+    if (w->frame && w->frame(w->frame_user, src, w->frame_565 ? NULL : w->frame_lut)) {
+        w->owed = src;
+        return;
+    }
+#endif
+    write_frame(w, src);
+}
+
 static void w_blit(env_t e, uint32_t frame, uint32_t pal)
 {
     moy_wasm *w = bound(e);
     moy_canvas *s;
-    moy_pixel lut[256];
     const uint8_t *src, *p = NULL;
     size_t i, n;
     if (!w || !may_blit(w)) return;
@@ -593,9 +679,10 @@ static void w_blit(env_t e, uint32_t frame, uint32_t pal)
     if (!src) return;
     if (pal && !(p = span(w, pal, 768u))) return;
     for (i = 0; i < 256; i++)
-        lut[i] = p ? wire_of(w, p[i * 3], p[i * 3 + 1], p[i * 3 + 2])
-                   : s->wire[i & 63];
-    for (i = 0; i < n; i++) s->pix[i] = lut[src[i]];
+        w->frame_lut[i] = p ? wire_of(w, p[i * 3], p[i * 3 + 1], p[i * 3 + 2])
+                            : s->wire[i & 63];
+    w->frame_565 = 0;
+    hand_over(w, src);
 }
 
 static void w_blit565(env_t e, uint32_t frame)
@@ -603,16 +690,14 @@ static void w_blit565(env_t e, uint32_t frame)
     moy_wasm *w = bound(e);
     moy_canvas *s;
     const uint8_t *src;
-    size_t i, n;
+    size_t n;
     if (!w || !may_blit(w)) return;
     s = w->screen;
     n = (size_t)s->w * (size_t)s->h;
     src = span(w, frame, (uint64_t)n * 2u);
     if (!src) return;
-    for (i = 0; i < n; i++) {
-        uint16_t c = (uint16_t)(src[i * 2] | (src[i * 2 + 1] << 8));
-        s->pix[i] = w->wire_swapped ? (uint16_t)((c >> 8) | ((c & 0xFFu) << 8)) : c;
-    }
+    w->frame_565 = 1;
+    hand_over(w, src);
 }
 
 /* -- the cart's own files: read -------------------------------------------- */
@@ -1103,8 +1188,14 @@ static void begin(moy_wasm *w, int hook)
 {
     moy_console *con = w->con;
     w->target = w->screen;
+    /* A frame the host took and never showed reaches the screen before the
+     * cart can change it. */
+    if (w->owed) settle(w);
     if (hook == MOY_WASM_DRAW) {
-        if (con->has_bg && !con->host.background) moy_cls(w->screen, con->bg);
+        if (con->has_bg && !con->host.background) {
+            w->kept = NULL;
+            moy_cls(w->screen, con->bg);
+        }
         w->in_draw = 1;
         w->blits = 0;
     }
@@ -1122,6 +1213,7 @@ static void attach(moy_wasm *w, moy_console *con)
     w->screen = w->target = con->canvas;
     w->n_layers = 0;
     w->in_draw = w->blits = w->quitting = 0;
+    w->owed = w->kept = NULL;
 }
 
 #ifdef MOY_WASM
@@ -1151,6 +1243,7 @@ static int call(moy_wasm *w, int h, uint32_t argc, uint32_t *argv, char *err, si
         wasm_runtime_clear_exception(w->inst);
         return 0;
     }
+    w->owed = NULL;                         /* a trapped _draw's frame is never shown */
     if (err && errlen) {
         const char *msg = wasm_runtime_get_exception(w->inst);
         snprintf(err, errlen, "%s", msg ? msg : "the cart trapped");
@@ -1175,6 +1268,24 @@ int moy_wasm_draw(moy_wasm *w, char *err, size_t errlen)
 {
     uint32_t argv[1] = {0};
     return call(w, MOY_WASM_DRAW, 0, argv, err, errlen);
+}
+
+const uint8_t *moy_wasm_frame(const moy_wasm *w, const moy_pixel **lut)
+{
+    if (lut) *lut = (w->owed && !w->frame_565) ? w->frame_lut : NULL;
+    return w->owed;
+}
+
+void moy_wasm_settle(moy_wasm *w)
+{
+    if (w->owed) settle(w);
+}
+
+void moy_wasm_presented(moy_wasm *w, const uint8_t *kept)
+{
+    if (!w->owed) return;
+    w->owed = NULL;
+    w->kept = kept;
 }
 
 #else /* MOY_WASM_JS */
@@ -1215,6 +1326,7 @@ void moy_wasm_close(moy_wasm *w)
     for (i = 0; i < w->n_layers; i++)
         if (h->layer_free) h->layer_free(h->user, w->layers[i].pix);
     w->n_layers = 0;
+    w->owed = w->kept = NULL;
 #ifdef MOY_WASM
     if (w->inst) wasm_runtime_set_custom_data(w->inst, NULL);
 #endif

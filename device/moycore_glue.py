@@ -494,6 +494,137 @@ def _sha256_file(path):
     return "".join("%02x" % c for c in h.digest())
 
 
+class CartFrame:
+    """A compiled cart's frame on its way to the glass straight from the
+    cart's memory (libmoy's frame hand-off, moy_fold.h's frame fold).
+
+    While a run holds one, every blit leaves its frame where the cart made it
+    and the game canvas is not written: the console's composite point hands
+    the frame to the system canvas (`present_frame`), whose flush snapshots it
+    and resolves it band by band. Anything that must draw over the frame first
+    `settle`s it into the canvas, the same bytes the blit would have written;
+    the binding does the same itself before the cart's next hook. The frame's
+    snapshot scratch is this run's, taken at the first present and freed when
+    the run closes, once nothing still reads it."""
+
+    # What moy_fold copies of the game canvas over a frame: MOY_FOLD_MAX_PATCHES
+    # rects, MOY_FOLD_PATCH_BYTES of them (native/moy_flush/moy_fold.h).
+    MAX_PATCHES = 4
+    PATCH_BYTES = 8192
+
+    def __init__(self, w, h):
+        self.w = w
+        self.h = h
+        self.lut = array("H", bytearray(512))    # a palette frame's colours
+        self.rects = array("h", bytearray(2 * 4 * self.MAX_PATCHES))
+        self.nrects = 0
+        self.kept_off = 0                # where the last frame shown sits in the scratch
+        self.fmt = 0                     # its layout: moy_fold's LE565 1 / IDX8 2
+        self._scratch = None
+
+    def take(self):
+        """The frame to show, or None: the owed one, as a view into the
+        cart's memory (w*h bytes are indices whose colours are now in `lut`,
+        2*w*h bytes little-endian RGB565) -- or, on a frame the cart did not
+        replace it, the last one shown, still in the scratch while the canvas
+        lacks it."""
+        view = _moycore.frame(self.lut)
+        if view is not None:
+            self.fmt = 2 if len(view) == self.w * self.h else 1
+            return view
+        s = self._scratch
+        if s is None or not self.fmt or not _moycore.frame_kept():
+            return None
+        n = self.w * self.h * (1 if self.fmt == 2 else 2)
+        return memoryview(s)[self.kept_off:self.kept_off + n]
+
+    def settle(self, canvas=None):
+        """Write the owed frame into the game canvas. Given the canvas, the
+        opaque rects already painted over the frame keep their pixels."""
+        n = self.nrects
+        self.nrects = 0
+        if not n or canvas is None:
+            _moycore.frame_settle()
+            return
+        buf = canvas._buf
+        stride = getattr(canvas, "_stride", canvas.w)
+        r = self.rects
+        kept = []
+        for i in range(n):
+            x = max(0, r[4 * i])
+            y = max(0, r[4 * i + 1])
+            x1 = min(canvas.w, r[4 * i] + r[4 * i + 2])
+            y1 = min(canvas.h, r[4 * i + 1] + r[4 * i + 3])
+            for row in range(y, y1):
+                a = 2 * (row * stride + x)
+                b = a + 2 * (x1 - x)
+                if b > a:
+                    kept.append((a, bytes(buf[a:b])))
+        _moycore.frame_settle()
+        for a, px in kept:
+            buf[a:a + len(px)] = px
+
+    def patch(self, x, y, w, h):
+        """The console is about to paint an opaque rect over the frame on the
+        game canvas: the flush shows the canvas there and the frame elsewhere.
+        False when the fold holds no more rects -- the painter settles."""
+        n = self.nrects
+        if n >= self.MAX_PATCHES:
+            return False
+        r = self.rects
+        r[4 * n] = x
+        r[4 * n + 1] = y
+        r[4 * n + 2] = w
+        r[4 * n + 3] = h
+        self.nrects = n + 1
+        return True
+
+    def presented(self, kept, off):
+        """The frame is on its way to the glass; `kept[off:]` is the copy
+        the binding writes the canvas from if the cart draws before its next
+        blit."""
+        _moycore.frame_presented(kept, off)
+        self.kept_off = off
+        self.nrects = 0
+
+    def scratch(self, n):
+        """At least `n` bytes of DMA-reachable PSRAM for the frame's
+        snapshot, or None when there are none to be had."""
+        s = self._scratch
+        if s is not None and len(s) >= n:
+            return s
+        self._free()
+        try:
+            import moy_alloc
+            s = moy_alloc.alloc(n, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+        except (ImportError, AttributeError, MemoryError):
+            s = None
+        self._scratch = s
+        return s
+
+    def close(self, comp):
+        """The run is over: wait out whatever still reads the scratch -- an
+        in-flight flush's synthesis, the snapshot's copy, an arm no flush has
+        taken yet -- and hand it back."""
+        if self._scratch is None:
+            return
+        for name in ("fold_fence", "snap_fence", "disarm_scale_fold"):
+            fn = getattr(comp, name, None)
+            if fn is not None:
+                fn()
+        self._free()
+
+    def _free(self):
+        s = self._scratch
+        self._scratch = None
+        if s is not None:
+            try:
+                import moy_alloc
+                moy_alloc.free(s)
+            except (ImportError, AttributeError, ValueError):
+                pass
+
+
 class WasmRun(MoycoreRun):
     """One compiled cart run: moycore's console with libmoy's wasm import
     table on it and the engine (moy_wasm) running the cart's module on its own
@@ -579,6 +710,23 @@ class WasmRun(MoycoreRun):
         self.init = None                 # _init ran inside wasm_open
         self.update = self._update
         self.draw = self._draw_noop
+        # Frames go to the glass from the cart's memory where the system
+        # canvas can show them that way; everywhere else the blit writes the
+        # canvas as it always has.
+        self.frame = None
+        if getattr(getattr(ws, "sys_canvas", None), "presents_frames", False):
+            self.frame = CartFrame(canvas.w, canvas.h)
+            ws.cart_frame = self.frame
+            _moycore.take_frames(True)
+
+    def close(self):
+        f = self.frame
+        if f is not None:
+            self.frame = None
+            if getattr(self.ws, "cart_frame", None) is f:
+                self.ws.cart_frame = None
+            f.close(getattr(self.ws, "comp", None))
+        MoycoreRun.close(self)
 
 
 def make_moycore_runtime(ws):

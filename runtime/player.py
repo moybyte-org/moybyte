@@ -1971,6 +1971,8 @@ class Player:
         # (a crash disarms the pacing itself, so the panel is never starved).
         if not render:
             return
+        if self.cart_error is not None or self._is_tool or self._home_holding:
+            ws.settle_cart_frame()          # the chrome below draws over the frame
         # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full
         # 320x240 with NO chrome (the #71 pause frame is gone). The ONLY chrome left
         # is the CRASH panel + its top bar, so EDIT/CODE stay reachable to fix the cart.

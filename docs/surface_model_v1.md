@@ -278,6 +278,19 @@ is provably unchanged" — grep-tests pin the no-op shapes; note the frozen
 *source* of shared files may still drift textually (comments, unrelated
 edits), so the gate is on executed shape, not file bytes.
 
+**A compiled cart's frame reaches the flush from the cart's own memory and
+adds nothing to the contract.** The game composite on a banded board is a
+data path, not a dirty signal: a running cart is still content-dirty on the
+frames it draws (L9), and the composite at the game→system boundary hands the
+flush the cart's frame to fold (`native/moy_flush/moy_fold.h`) where it would
+have handed it the game canvas to snapshot — the #190 fold, fed from a second
+source. Nothing decides what changed. An overlay above disarms the fold as it
+does over any game canvas; a painter that draws on the game canvas over the
+frame has the frame written there first; and the two opaque rects the shell
+draws over every play frame, the FPS chip and the perf HUD line, are DECLARED
+by the painter that draws them (`patch_cart_frame`) — a producer's statement,
+never inferred from the draw stream (L2, §8).
+
 ### 5.2 P4 — windowed on-glass
 
 `WindowedWM`. Surfaces: wallpaper/desk, each `_Win` + its chrome band, bar,

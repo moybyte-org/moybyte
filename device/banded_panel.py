@@ -265,6 +265,12 @@ class FoldingCompositor(BandedCompositor):
     it has landed before the cart's next tick on every frame measured (0.02 ms
     residual on both boards), and `snap_fence` -- taken by the sys canvas's
     `sync_back` -- is what makes that a guarantee rather than a measurement.
+
+    A COMPILED CART'S FRAME folds without a canvas at all (`frame_fold`):
+    `DeviceCanvas.present_frame` hands over the frame where the cart made it,
+    the same DMA snapshots it, and the synthesis resolves blit's palette or
+    blit565's byte order per band -- the blit's copy into the game canvas is
+    gone. `frames_supported` is how `presents_frames` asks.
     """
 
     def __init__(self, lcd, nfbs=2, async_flush=True):
@@ -273,6 +279,9 @@ class FoldingCompositor(BandedCompositor):
         # the ordinary root composite rather than raising on the first play
         # frame; `blit_game` getattrs this and takes its own path.
         self.fold_supported = hasattr(lcd, "arm_fold_snap")
+        # ...and the frame fold, a compiled cart's frame from its own memory:
+        # DeviceCanvas.presents_frames reads this.
+        self.frames_supported = hasattr(lcd, "arm_fold_frame")
 
     @property
     def fold_count(self):
@@ -327,3 +336,24 @@ class FoldingCompositor(BandedCompositor):
         """An overlay is about to paint the root: perform the skipped
         composite into the buffer being drawn, and drop the arm."""
         self._lcd.disarm_fold(self._back)
+
+    def frame_fold(self, frame, fmt, lut, scratch, gw, gh, sx, sy, vw, vh,
+                   ox, oy, scale, rects=None, canvas=None):
+        """Fold a compiled cart's frame straight from its memory: `frame` is
+        `gw` x `gh` of `fmt` (1: little-endian RGB565, 2: indices whose wire
+        colours are `lut`), the `vw` x `vh` rect at (sx, sy) shows at (ox, oy)
+        x`scale`, and `rects` (int16 x, y, w, h quads) are opaque rects the
+        console painted over it on `canvas`, the game canvas, shown from
+        there. The whole frame is snapshotted into `scratch` (the DMA, the
+        fences and the synthesis are the game fold's -- moy_fold.h); returns
+        where the frame's copy starts in it. ValueError on a shape the
+        synthesis cannot take, with nothing copied or latched."""
+        return self._lcd.arm_fold_frame(frame, fmt, lut, scratch, gw, gh, sx,
+                                        sy, vw, vh, ox, oy, scale, rects,
+                                        canvas)
+
+    @property
+    def frame_fold_count(self):
+        """Compiled carts' frames armed since boot -- the frame fold's
+        liveness proof, climbing with fold_count while such a cart plays."""
+        return self._lcd.frame_arms()
