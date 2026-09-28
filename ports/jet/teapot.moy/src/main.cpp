@@ -2,14 +2,15 @@
 // Copyright (c) 2026 Nikola Jovicic
 //
 // Jet Teapot: a 3D scene rendered by Jet (github.com/CubeCoders/Jet, MIT), a
-// software rasteriser that writes RGB565, handed to the console whole through
-// blit565 with a HUD drawn over it by the ordinary verbs. scene.cpp is the
-// scene; this is the cart: the hooks, the buttons, config.json, the buffers
-// and the HUD. ports/jet/README.md in Moybyte's tree says how it is built.
+// software rasteriser that writes RGB565, with a HUD drawn into the same
+// frame, handed to the console whole through blit565. scene.cpp is the scene;
+// this is the cart: the hooks, the buttons, config.json, the buffers and the
+// HUD. ports/jet/README.md in Moybyte's tree says how it is built.
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "hud_font.h"
 #include "moy.h"
 #include "scene.h"
 
@@ -105,11 +106,38 @@ char *put_tenths(char *at, int v10)
     return put_int(at, v10 % 10);
 }
 
-const int HUD_BG = 0;
 const int HUD_INK = 7;
 const int HUD_H = 10;
 
-void draw_hud()
+// The strip and its ink as RGB565: SPEC.md 2.2's palette entries 0 and 7.
+const uint16_t HUD_BG_565 = 0x0000;
+const uint16_t HUD_INK_565 = 0xFF9D;
+
+// `s` in the console's font into the frame at (x, y), the pixels print draws:
+// one 8px cell a byte, a byte outside 0x20-0x7F a blank cell, only the
+// glyph's set bits written.
+void frame_print(uint16_t *frame, const char *s, int len, int x, int y)
+{
+    for (int k = 0; k < len; k++, x += 8) {
+        int code = (unsigned char)s[k];
+        if (code < 0x20 || code > 0x7F) continue;
+        const uint8_t *g = HUD_FONT + (code - 0x20) * 8;
+        for (int j = 0; j < 8; j++) {
+            int px = x + j;
+            if (px < 0 || px >= CART_W) continue;
+            for (int b = 0; b < 8; b++) {
+                int py = y + b;
+                if (((g[j] >> b) & 1) && py >= 0 && py < CART_H)
+                    frame[py * CART_W + px] = HUD_INK_565;
+            }
+        }
+    }
+}
+
+// The strip and its line, into the frame before it is handed over: the same
+// pixels a rect and a print over the blit would draw, and the whole frame
+// stays the cart's, which is what lets a console show it straight from here.
+void draw_hud(uint16_t *frame)
 {
     char line[48];
     char *at = put(line, half ? "HALF" : "FULL");
@@ -123,8 +151,8 @@ void draw_hud()
     at = put(at, "MS ");
     at = put_int(at, tris);
     *at++ = 'T';
-    moy_rect(0, 0, CART_W, HUD_H, HUD_BG);
-    moy_print(line, (int)(at - line), 2, 1, HUD_INK);
+    for (int i = 0; i < CART_W * HUD_H; i++) frame[i] = HUD_BG_565;
+    frame_print(frame, line, (int)(at - line), 2, 1);
 }
 
 void draw_failure()
@@ -193,6 +221,6 @@ EXPORT("_draw") void cart_draw(void)
     const int start = moy_time();
     tris = jet->render();
     measure(moy_time() - start);
+    if (hud) draw_hud(arena);
     moy_blit565(arena);
-    if (hud) draw_hud();
 }

@@ -14,8 +14,12 @@ What is pinned here:
     are the host clock's;
   * Jet's colour byte order against blit565's little-endian rule, with a pixel
     whose colour the test computes on its own: the sky gradient's bottom row;
-  * the HUD is drawn over the blit by the ordinary verbs -- its strip and only
-    its strip differs from the same frame without it;
+  * the HUD is drawn INTO the frame the cart blits -- so the whole frame is
+    the cart's and a console can show it straight from the cart's memory --
+    and it is pixel for pixel what `rect` and `print` would draw over the
+    blit: read back off the strip glyph by glyph, drawn again by the console's
+    own verbs on the same frame without it, the two frames are byte-identical;
+    its glyphs are the console's font;
   * the heap Jet uses stays inside what the declared memory leaves it, and
     flying through the model does not trap.
 
@@ -246,12 +250,31 @@ def test_jet_s_byte_order_is_blit565_s(tmp_path, jet, width):
         assert _rgb565(ws, x, H - 1) == want, (x, hex(_rgb565(ws, x, H - 1)), hex(want))
 
 
-def test_the_hud_is_drawn_over_the_blit(tmp_path, jet):
-    """The same frame with and without the HUD: they differ in the HUD's strip
-    and nowhere else, and the strip holds the HUD's two palette colours, not
-    the frame -- the verbs called after blit565 land on top of it."""
-    on = _ws(tmp_path / "on", jet, hud=True)
-    off = _ws(tmp_path / "off", jet, hud=False)
+def _hud_line(ws):
+    """The HUD's line, read back off the strip one 8px cell at a time against
+    the console's font: a cell that is not exactly a glyph is a failure."""
+    from runtime import font
+    glyphs = {}
+    for i in range(95, -1, -1):          # the first of equal bitmaps wins: ' '
+        glyphs[font._FONT[i * 8:(i + 1) * 8]] = chr(0x20 + i)
+    out = []
+    for k in range((W - 2) // 8):
+        cols = bytes(sum(1 << b for b in range(8)
+                         if _rgb565(ws, 2 + 8 * k + j, 1 + b) != 0)
+                     for j in range(8))
+        assert cols in glyphs, "cell %d is not a glyph: %s" % (k, cols.hex())
+        out.append(glyphs[cols])
+    return "".join(out).rstrip()
+
+
+def test_the_hud_is_the_frames_and_what_the_verbs_would_draw(tmp_path, jet):
+    """The same frame with and without the HUD differs in the HUD's strip and
+    nowhere else, and the strip holds the HUD's two palette colours. Drawn
+    again by the console's own rect and print over the frame without it, the
+    line read back off the strip makes the two frames byte-identical: the
+    HUD the cart draws into its frame is the one the verbs used to draw."""
+    on = _ws(tmp_path / "on", jet, hud=True, shading="phong")
+    off = _ws(tmp_path / "off", jet, hud=False, shading="phong")
     _frames(on, 4)
     _frames(off, 4)
     a, b = bytes(on.sys_canvas._buf), bytes(off.sys_canvas._buf)
@@ -262,6 +285,27 @@ def test_the_hud_is_drawn_over_the_blit(tmp_path, jet):
     assert len(ink) == 2, sorted(map(hex, ink))
     assert _rgb565(off, W // 2, 0) == _sky(0)
     assert _rgb565(on, W - 1, 0) != _sky(0)
+    line = _hud_line(on)
+    assert line.startswith("FULL PHONG  ") and line.endswith("T"), line
+    cv = off.sys_canvas
+    cv.reset_state()
+    cv.rect(0, 0, W, HUD_H, 0)
+    cv.print(line, 2, 1, 7)
+    assert bytes(cv._buf) == a
+
+
+def test_the_hud_font_is_the_consoles():
+    """src/hud_font.h is runtime/font.py's bytes, glyph for glyph."""
+    import re
+    from runtime import font
+    path = os.path.join(ROOT, "ports", "jet", "teapot.moy", "src", "hud_font.h")
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    body = text[text.index("HUD_FONT[96 * 8] = {"):]
+    body = body[:body.index("};")]
+    body = re.sub(r"//[^\n]*", "", body)
+    got = bytes(int(v, 16) for v in re.findall(r"0x([0-9a-f]{2})", body))
+    assert got == font._FONT
 
 
 # -- memory and flight --------------------------------------------------------------

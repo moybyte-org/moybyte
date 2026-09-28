@@ -3,9 +3,9 @@
 A `"runtime": "wasm"` cart (docs/wasm_tier_plan_2026-09.md, "The showcase
 cart"): the Utah teapot, lit and depth-buffered, rendered by
 [Jet](https://github.com/CubeCoders/Jet) — CubeCoders' MIT software
-rasteriser, which writes RGB565 into buffers the caller owns — and handed to
-the console whole through `blit565`, with a HUD drawn over it by the ordinary
-verbs. It ports one of Jet's own example scenes,
+rasteriser, which writes RGB565 into buffers the caller owns — with a HUD
+drawn into the same frame, handed to the console whole through `blit565`. It
+ports one of Jet's own example scenes,
 [JetExamples](https://github.com/CubeCoders/JetExamples)' `esp32-lighting-teapot`:
 its light, glaze, sky gradient, rocking motion and Flat / Gouraud / Phong
 cycle. The camera is the player's. It is the first real user of `blit565`,
@@ -27,7 +27,12 @@ Jet is by [CubeCoders](https://github.com/CubeCoders/Jet) (PhonicUK).
 
 The HUD's strip reads the width, the shading, the whole-frame rate, the mean
 time Jet's `render()` took, and the triangles it rasterized, each averaged over
-the last second.
+the last second. The cart draws it into its own frame, before `blit565`, in
+the console's font (`src/hud_font.h`) and two of its palette's colours: the
+pixels a `rect` and a `print` over the blit would draw, which a test holds it
+to byte for byte. A frame the cart owns whole is one a banded board can show
+straight from the cart's memory (`native/moy_flush/moy_fold.h`); verbs drawn
+over it would have the console write the frame into its canvas first.
 
 `config.json` picks how the frame is made, at launch:
 
@@ -36,7 +41,7 @@ the last second.
 | `width` | `"full"`, `"half"` | Jet's `HALF_WIDTH_BUFFERS`: one stored pixel per two columns, doubled into the frame before `blit565` |
 | `interlaced` | `false`, `true` | Jet's `interlacedMode`: each frame renders every other row, alternating |
 | `shading` | `"cycle"`, `"flat"`, `"gouraud"`, `"phong"` | the example's three-second cycle, or one mode held |
-| `hud` | `true`, `false` | the HUD over the frame |
+| `hud` | `true`, `false` | the HUD in the frame's top strip |
 
 Half width is a compile-time switch in Jet, so the module carries Jet twice —
 once as is, once with the switch on and its namespaces renamed on the
@@ -52,6 +57,7 @@ buffer instead.
 |---|---|
 | the cart's source folder: manifest, config, model, licences, `src/` | `teapot.moy/` |
 | the hooks, buttons, config, buffers and HUD | `teapot.moy/src/main.cpp` |
+| the HUD's glyphs, the console's font | `teapot.moy/src/hud_font.h` |
 | the scene, compiled once per Jet build | `teapot.moy/src/scene.cpp` |
 | Jet's configuration | `teapot.moy/src/JetConfig.hpp` |
 | the heap and the WASI calls the C library makes | `teapot.moy/src/runtime.cpp` |
