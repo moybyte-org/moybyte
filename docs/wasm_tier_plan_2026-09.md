@@ -23,6 +23,14 @@ the decisions below record what they changed.
   (wasm hash, fork commit, compiler flags, target) and the file is signed the
   way OTA images are. A tampered or foreign module is refused, and a test
   proves it.
+- **The owner can run unknown sources (owner, 2026-09-29).** Signing is
+  the default, not a lock: a Settings switch, off by default and turned on
+  past a plain warning, lets a board run unsigned modules, so anyone who
+  rebuilds a cart from its source (Doom from moybyte-org/gpl-carts, their own
+  game) can run it on their own console. The provenance key is still
+  checked, because it is what keeps a module built for another runtime from
+  crashing the board. Carts published through the store never need the
+  switch: the store compiles and signs what it lists.
 - **A moy-spec binding, not a moybyte-only runtime.** SPEC.md §3.1 already
   makes an unknown `runtime` a clean refusal, so a host that lacks the tier
   pays nothing. The import table *is* the verb table, which is the spec's own
