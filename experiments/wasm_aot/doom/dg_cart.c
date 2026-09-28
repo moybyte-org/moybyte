@@ -16,6 +16,7 @@
  * out): the frame CRC at every CRC_EVERY-th gametic, the zone's low-water
  * mark, the heap's headroom, and the text of a fatal I_Error.
  */
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -393,6 +394,24 @@ int system(const char *command)
 {
     (void)command;
     return -1;
+}
+
+/* The heap ends where the linear memory ends: the manifest's memory is both
+ * its initial and its maximum size, so it never grows, and malloc's only
+ * other call, sbrk, answers from the linker's __heap_end rather than with
+ * memory.size and memory.grow. A module with neither lets the compiler load
+ * the memory's base and bound once per function instead of after every store
+ * and call, and read Doom's globals at their constant addresses unchecked. */
+extern unsigned char __heap_end;
+
+void *sbrk(intptr_t increment)
+{
+    if (increment == 0)
+        return &__heap_end;
+    if (increment < 0 || increment % 65536)
+        abort();
+    errno = ENOMEM;
+    return (void *)-1;
 }
 
 /* No files but the WAD, no environment, no clock but time(). */

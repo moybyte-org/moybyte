@@ -137,6 +137,42 @@ PATCHES = (
     ("d_main.c",
      "void D_Display (void)\n{",
      "void DG_WipeBegin(void);\nint DG_WipeStep(void);\n\nvoid D_Display (void)\n{"),
+    # Doom draws straight into the cart's frame: I_VideoBuffer IS
+    # DG_ScreenBuffer, so I_FinishUpdate has nothing to copy.
+    ("i_video.c",
+     "\tI_VideoBuffer = (byte*)Z_Malloc (SCREENWIDTH * SCREENHEIGHT, PU_STATIC, NULL);"
+     "  // For DOOM to draw on\n",
+     "\tI_VideoBuffer = (byte*)DG_ScreenBuffer;\n"),
+    ("i_video.c", "\tZ_Free (I_VideoBuffer);\n", ""),
+    ("i_video.c",
+     "    y = SCREENHEIGHT;\n",
+     "    y = I_VideoBuffer == (byte*)DG_ScreenBuffer ? 0 : SCREENHEIGHT;\n"),
+    # The column and span drawers take their texture and colormap into locals
+    # once a call: a store through the frame may alias any global, so read
+    # through the globals they were loaded again for every pixel.
+    ("r_draw.c",
+     "    // Inner loop that does the actual texture mapping,\n    //  e.g. a DDA-lile scaling.\n"
+     "    // This is as fast as it gets.\n    do \n    {\n"
+     "\t// Re-map color indices from wall texture column\n"
+     "\t//  using a lighting/special effects LUT.\n"
+     "\t*dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];\n",
+     "    const byte *source = dc_source, *colormap = dc_colormap;\n"
+     "    do \n    {\n"
+     "\t*dest = colormap[source[(frac>>FRACBITS)&127]];\n"),
+    ("r_draw.c",
+     "    dest = ylookup[ds_y] + columnofs[ds_x1];\n\n"
+     "    // We do not check for zero spans here?\n    count = ds_x2 - ds_x1;\n\n"
+     "    do\n    {\n\t// Calculate current texture index in u,v.\n"
+     "        ytemp = (position >> 4) & 0x0fc0;\n        xtemp = (position >> 26);\n"
+     "        spot = xtemp | ytemp;\n\n\t// Lookup pixel from flat texture tile,\n"
+     "\t//  re-index using light/colormap.\n\t*dest++ = ds_colormap[ds_source[spot]];\n",
+     "    dest = ylookup[ds_y] + columnofs[ds_x1];\n"
+     "    const byte *source = ds_source, *colormap = ds_colormap;\n\n"
+     "    // We do not check for zero spans here?\n    count = ds_x2 - ds_x1;\n\n"
+     "    do\n    {\n\t// Calculate current texture index in u,v.\n"
+     "        ytemp = (position >> 4) & 0x0fc0;\n        xtemp = (position >> 26);\n"
+     "        spot = xtemp | ytemp;\n\n\t// Lookup pixel from flat texture tile,\n"
+     "\t//  re-index using light/colormap.\n\t*dest++ = colormap[source[spot]];\n"),
 )
 
 GPL_NOTICE = """\

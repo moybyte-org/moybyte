@@ -111,7 +111,22 @@ says before it sends a byte.
 The seams the recipe patches in the staged copy, each asserted: the IWAD
 search answers for `doom1.wad`; `DG_ScreenBuffer` is the cart's frame; the
 wait in `TryRunTics` is a return; each game tic calls `DG_AfterTic` (the CRC,
-the zone's low-water mark); `D_Display` begins the melt and steps it.
+the zone's low-water mark); `D_Display` begins the melt and steps it; Doom's
+own screen (`I_VideoBuffer`) IS the cart's frame, so `I_FinishUpdate` copies
+nothing; and the column and span drawers (`R_DrawColumn`, `R_DrawSpan`) take
+their texture and colormap into locals once a call instead of reloading the
+globals for every pixel. The last two are the frame rate: a 64,000-byte
+`memory.copy` a frame runs through the runtime's `memmove`, which the S3's
+ROM does at about half `memcpy`'s speed (4.3 ms), and a store through the
+frame may alias any global, so the compiler reloaded both pointers per pixel.
+
+**The glue's `sbrk` answers from `__heap_end`**, never `memory.size` or
+`memory.grow` (wasi-libc's `sbrk` was the module's only user of either). A
+module with neither lets WAMR's compiler load the linear memory's base and
+bound once per function rather than after every store and call, and read
+Doom's globals at their constant addresses without a bounds check. The
+memory's size is the manifest's, initial and maximum alike, so the heap
+never grew anyway.
 
 ## The spike's pieces
 
