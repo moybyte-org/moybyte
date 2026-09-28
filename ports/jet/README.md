@@ -75,8 +75,9 @@ python3 tools/push_cart.py /tmp/carts/teapot.moy --board guition_s3  # onto a bo
 ```
 
 It compiles with wasi-sdk 24's clang (C++17, `-fno-exceptions -fno-rtti`,
-the rasterizer's per-pixel shading calls inlined -- `tools/jet_cart.py` says
-why), links wasi-libc and libc++ statically, and defines the four WASI calls
+the rasterizer's per-pixel shading calls and its per-row span step inlined,
+float-to-int casts as wasm's saturating conversions -- `tools/jet_cart.py`
+says why), links wasi-libc and libc++ statically, and defines the four WASI calls
 their stdio makes, writing nowhere, so the module imports nothing but
 `"moy"`. The heap is `runtime.cpp`'s own first-fit allocator over the memory
 above the static data, whose end it takes from the linker rather than asking
