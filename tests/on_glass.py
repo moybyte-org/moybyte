@@ -1290,6 +1290,127 @@ def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,
     return fps, compared, skipped
 
 
+# A compiled cart's frame to the glass from its own memory (moy_fold.h's frame
+# fold, on the banded boards). The proof re-arms the fold, between two frames,
+# over the copy of the last frame the flush was handed, writes the composite
+# that frame makes into the back buffer in Python -- black, then every pixel
+# through the frame's own palette or byte swap -- and has the panel module
+# synthesize every band from the fold and compare it with the same band
+# gathered from that buffer (`fold_test`): 0 differing bytes, on the chip.
+
+_FRAME_FOLD_PROOF = """
+def _ff_proof():
+    import moy_alloc
+    cf = ws.cart_frame
+    comp = ws.comp
+    gc = ws.canvas
+    gw = gc.w
+    gh = gc.h
+    fmt = cf.fmt
+    ox, oy, scale = ws.wm.viewport()
+    fbw, fbh = comp.size()
+    comp.fold_fence()
+    comp.snap_fence()
+    n = gw * gh * (1 if fmt == 2 else 2)
+    frame = memoryview(cf._scratch)[cf.kept_off:cf.kept_off + n]
+    scr = moy_alloc.alloc(len(cf._scratch), moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+    back = comp._back
+    fb = comp._fbs[back]
+    try:
+        comp.frame_fold(frame, fmt, cf.lut if fmt == 2 else None, scr, gw, gh,
+                        0, 0, gw, gh, ox, oy, scale, None, None)
+        comp.snap_fence()
+        z = bytes(2 * fbw)
+        for y in range(fbh):
+            fb[2 * fbw * y:2 * fbw * (y + 1)] = z
+        lut = cf.lut
+        row = bytearray(2 * gw * scale)
+        for y in range(gh):
+            if fmt == 2:
+                for x in range(gw):
+                    v = lut[frame[y * gw + x]]
+                    for s in range(scale):
+                        i = 2 * (x * scale + s)
+                        row[i] = v & 0xFF
+                        row[i + 1] = v >> 8
+            else:
+                for x in range(gw):
+                    j = 2 * (y * gw + x)
+                    for s in range(scale):
+                        i = 2 * (x * scale + s)
+                        row[i] = frame[j + 1]
+                        row[i + 1] = frame[j]
+            for s in range(scale):
+                a = 2 * ((oy + y * scale + s) * fbw + ox)
+                fb[a:a + len(row)] = row
+        return comp._lcd.fold_test(back)
+    finally:
+        comp.disarm_scale_fold()
+        moy_alloc.free(scr)
+"""
+
+
+def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
+                                                  seconds=6.0):
+    """The frame fold on a banded board: run `title` from the launcher with
+    the FPS chip on -- the default, and an opaque rect over every frame --
+    and every frame it draws is folded from the cart's memory (the frame
+    fold's count climbs with the fold's own), the snapshot DMA takes them all
+    and never times out, frames are in layout `fmt` (1 blit565, 2 blit), and
+    the proof above reads 0. Returns the frames folded in `seconds`."""
+    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    st = board.state()
+    fps_was = board.pyval("ws.show_fps", strict=True)
+    board.pyexec("ws.show_fps = True", strict=True)
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(3.0)
+        st = board.state()
+        assert st.get("cart") == title and not st.get("cart_error"), st
+        snaps0 = board.pyval("ws.comp.snap_stats()", strict=True)
+        f0, ff0 = st["fold"], st["ffold"]
+        board.drain(seconds)
+        st = board.state()
+        f1, ff1 = st["fold"], st["ffold"]
+        snaps1 = board.pyval("ws.comp.snap_stats()", strict=True)
+        assert board.pyval("ws.cart_frame.fmt", strict=True) == fmt
+        assert board.pyexec(_FRAME_FOLD_PROOF, strict=True)
+        bad = board.pyval("ws._g['_ff_proof']()", timeout=120, strict=True)
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+        board.pyexec("ws.show_fps = %r" % bool(fps_was))
+    print("\nFRAME FOLD %s: folded %d of %d flushes' folds in %.0fs, snap %r -> %r, "
+          "proof %r" % (title, ff1 - ff0, f1 - f0, seconds, snaps0, snaps1, bad))
+    assert ff1 - ff0 > 0, "no frame was folded from the cart's memory"
+    assert ff1 - ff0 >= f1 - f0 - 1, (
+        "folds %d, frame folds %d: frames settled into the canvas" % (f1 - f0,
+                                                                     ff1 - ff0))
+    assert snaps1[2] == snaps0[2], "a snapshot copy timed out"
+    assert snaps1[1] == snaps0[1], "a snapshot was a CPU copy"
+    assert bad == 0, "the folded frame differs from its composite: %d bytes" % bad
+    return ff1 - ff0
+
+
+def compiled_frames_keep_the_blit(board, title):
+    """A board without the frame fold: `ffold` is absent (None, never 0),
+    the run takes no frame, and the cart's frames are written into the game
+    canvas by the blit as the proposal describes."""
+    assert board.state().get("ffold") is None
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.5)
+        st = board.state()
+        assert st.get("cart") == title and not st.get("cart_error"), st
+        assert board.pyval("ws.cart_frame is None", strict=True) is True
+        assert st.get("ffold") is None
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+
+
 def doom_runs_or_opens_the_notice(board, board_dir, floor=None):
     """Doom on a board whose free PSRAM sits near the cart's footprint and
     moves with what the shell holds: the fit check decides, and the board

@@ -79,10 +79,12 @@ def test_a_lua_cart_after_a_wasm_run_keeps_its_sram(board, wasm):
 # -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) ---------------
 # Compiled carts from the launcher, WiFi off -- the state a cart plays in, so
 # before the radio guards. The floors are this board's median drawn fps
-# measured on 2026-09-25, less a margin; the measurements are the owner's to
-# post, and native/moy_wasm/README.md states the per-board ceiling.
+# less a margin -- the hello cart's measured on 2026-09-25, the blit fixture's
+# on 2026-09-28 with its frames going to the glass from the cart's memory; the
+# measurements are the owner's to post, and native/moy_wasm/README.md states
+# the per-board ceiling.
 WASM_HELLO_FPS_FLOOR = 27
-WASM_BLIT_FPS_FLOOR = 44
+WASM_BLIT_FPS_FLOOR = 50
 
 
 @pytest.fixture(scope="module")
@@ -99,6 +101,19 @@ def test_the_hello_wasm_cart_holds_its_floor(board, wasm_carts):
 def test_a_full_frame_blit_cart_holds_its_floor(board, wasm_carts):
     on_glass.wasm_cart_holds_its_floor(board, wasm_carts["blit"],
                                        WASM_BLIT_FPS_FLOOR)
+
+
+# A compiled cart's frame goes to the glass from the cart's own memory
+# (native/moy_flush/moy_fold.h's frame fold): with the FPS chip on, every flush
+# is folded from the cart, and the bands are the composite the frame makes,
+# byte for byte -- a palette frame (the blit fixture) and a blit565 one (Jet).
+def test_a_palette_frame_goes_to_the_glass_from_the_carts_memory(board, wasm_carts):
+    on_glass.compiled_frames_go_to_the_glass_from_the_cart(board, wasm_carts["blit"], 2)
+
+
+def test_a_blit565_frame_goes_to_the_glass_from_the_carts_memory(board):
+    on_glass.jet_push(board, WASM_BOARD_DIR)
+    on_glass.compiled_frames_go_to_the_glass_from_the_cart(board, on_glass.JET_TITLE, 1)
 
 
 def test_a_compiled_cart_without_this_chips_module_is_refused(board, wasm_carts):
@@ -121,9 +136,9 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
 # launcher: uncapped with WiFi off, in Phong -- the costliest of its three
 # shadings and the steadiest to measure -- at half and at full width. The
 # floors sit about a fifth under what this board drew when they were set
-# (2026-09-26); the figures are #158's. The cart stays installed as it ships.
-JET_HALF_FPS_FLOOR = 9
-JET_FULL_FPS_FLOOR = 7
+# (2026-09-28); the figures are #158's. The cart stays installed as it ships.
+JET_HALF_FPS_FLOOR = 11
+JET_FULL_FPS_FLOOR = 8
 
 
 def test_the_jet_showcase_holds_its_floor_at_half_width(board):

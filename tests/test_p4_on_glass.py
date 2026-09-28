@@ -110,6 +110,13 @@ def test_a_full_frame_blit_cart_holds_its_floor(board, wasm_carts):
                                        WASM_BLIT_FPS_FLOOR)
 
 
+# The P4s keep the blit: a windowed desk re-composites the game canvas while
+# the cart is not running, so the canvas has to hold every frame, and the
+# board says it lacks the frame fold by absence.
+def test_a_compiled_carts_frames_are_written_into_the_canvas(board, wasm_carts):
+    on_glass.compiled_frames_keep_the_blit(board, wasm_carts["blit"])
+
+
 def test_a_compiled_cart_without_this_chips_module_is_refused(board, wasm_carts):
     on_glass.wasm_missing_module_is_refused(board, WASM_BOARD_DIR)
 
@@ -684,7 +691,7 @@ def test_a_cart_runs_and_exits(board):
 # launcher: uncapped with WiFi off, in Phong -- the costliest of its three
 # shadings and the steadiest to measure -- at half and at full width. The
 # floors sit about a fifth under what this board drew when they were set
-# (2026-09-26); the figures are #158's. The cart stays installed as it ships.
+# (2026-09-28); the figures are #158's. The cart stays installed as it ships.
 #
 # HERE, after the OTA block and before the radios, not beside the other wasm
 # floors: the showcase's first run leaves this board's live heap ~90 KB bigger
@@ -693,8 +700,8 @@ def test_a_cart_runs_and_exits(board):
 # ring drops bytes with no recovery. The OTA block's junk-signature line is the
 # longest the suite sends; with the showcase ahead of it, it arrived as a
 # SyntaxError on every run.
-JET_HALF_FPS_FLOOR = 16
-JET_FULL_FPS_FLOOR = 13
+JET_HALF_FPS_FLOOR = 18
+JET_FULL_FPS_FLOOR = 14
 
 
 def test_the_jet_showcase_holds_its_floor_at_half_width(board):

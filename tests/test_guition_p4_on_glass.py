@@ -104,6 +104,13 @@ def test_a_full_frame_blit_cart_holds_its_floor(board, wasm_carts):
                                        WASM_BLIT_FPS_FLOOR)
 
 
+# The P4s keep the blit: a windowed desk re-composites the game canvas while
+# the cart is not running, so the canvas has to hold every frame, and the
+# board says it lacks the frame fold by absence.
+def test_a_compiled_carts_frames_are_written_into_the_canvas(board, wasm_carts):
+    on_glass.compiled_frames_keep_the_blit(board, wasm_carts["blit"])
+
+
 def test_a_compiled_cart_without_this_chips_module_is_refused(board, wasm_carts):
     on_glass.wasm_missing_module_is_refused(board, WASM_BOARD_DIR)
 
@@ -124,8 +131,8 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
 # launcher: uncapped with WiFi off, in Phong -- the costliest of its three
 # shadings and the steadiest to measure -- at half and at full width. The
 # floors sit about a fifth under what this board drew when they were set
-# (2026-09-26); the figures are #158's. The cart stays installed as it ships.
-JET_HALF_FPS_FLOOR = 15
+# (2026-09-28); the figures are #158's. The cart stays installed as it ships.
+JET_HALF_FPS_FLOOR = 16
 JET_FULL_FPS_FLOOR = 12
 
 
