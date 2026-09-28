@@ -135,10 +135,10 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
 
 # Doom, built by the recipe (experiments/wasm_aot/doom/): its frames are the
 # host's, and the run's median drawn fps holds a floor about a fifth under
-# what this board drew when it was set (2026-09-27, the figures are #158's).
+# what this board drew when it was set (2026-09-28, the figures are #158's).
 # Skips until the developer has built the cart, which is never in the
 # repository or CI.
-DOOM_FPS_FLOOR = 28
+DOOM_FPS_FLOOR = 32
 
 
 def test_doom_frames_match_the_host(board):

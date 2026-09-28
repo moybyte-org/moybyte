@@ -166,7 +166,7 @@ def test_the_jet_showcase_holds_its_floor_at_full_width(board):
 # floor about a fifth under what this board drew when it was set
 # (2026-09-28, the figures are #158's); the fit notice where it does not.
 # Skips until the developer has built the cart.
-DOOM_FPS_FLOOR = 23
+DOOM_FPS_FLOOR = 28
 
 
 def test_doom_runs_or_opens_the_notice(board, wasm_carts):
