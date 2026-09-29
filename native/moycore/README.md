@@ -47,7 +47,10 @@ mono, a queue of 2,048 frames; the proposal's PCM audio section) is libmoy's
 `snd` at it (`native/moy_audio/moy_audio_snd.h`): the feeder adds the queue
 into every chunk after the synth, under the same master level, so the cart's
 §8 verbs, the console's sounds and Settings' volume all still apply and the
-I2S channel never changes hands. `close()` drops what is queued. A board
+I2S channel never changes hands. While the stream plays the feeder runs a
+shallow pipeline, 128-frame blocks into a 4 x 128 ring (`modmoy_audio.c`'s
+header), so a cart's samples reach the speaker about 29 ms after it takes
+them. `close()` drops what is queued. A board
 without a speaker leaves `snd` to the binding, which drains the queue by the
 console's clock and drops the samples, so the cart meets the same
 backpressure. `moy_audio.snd_counts()` is the stream from both ends -- frames

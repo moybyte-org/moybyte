@@ -13,15 +13,17 @@
 // per-voice commit counter, and still dropped overlapping sfx. The bank
 // crosses ONCE per cart, as sounds.json text.
 //
-// THE CORE SPLIT (unchanged in shape -- #41's crackle fix)
-//   core 0 (MP VM): calls the verbs. That is all. No per-sample work, no I2S.
-//   core 1 (C task): renders blocks straight out of libmoy and writes them to
-//                    I2S, blocking on the DMA drain -- which is what paces it to
-//                    the audio clock, on a core the VM is not on. It never
-//                    touches the MicroPython heap or the GIL.
-// A mutex guards the one moy_audio struct. The task renders in small CHUNKS and
-// releases between them, so a verb called from core 0 waits tens of microseconds,
-// not a whole block.
+// THE TASK SPLIT (#41's crackle fix)
+//   the VM: calls the verbs. That is all. No per-sample work, no I2S.
+//   the feeder (a C task): renders blocks straight out of libmoy and writes
+//                    them to I2S, blocking on the DMA drain -- which is what
+//                    paces it to the audio clock, whatever the frame loop is
+//                    doing. It never touches the MicroPython heap or the GIL.
+// Both are on core 1, and so is a compiled cart's thread: the feeder runs above
+// them and takes what it renders out of the frame's time, which is why its work
+// per block has to stay small. A mutex guards the one moy_audio struct. The
+// task renders in small CHUNKS and releases between them, so a verb waits tens
+// of microseconds, not a whole block.
 //
 // FALLBACK: if the task or the I2S channel can't be created, audio_start()
 // returns False and DeviceAudio drives render() itself from the frame loop
@@ -35,6 +37,14 @@
 // at the output's 22050, so the mix is one add per sample on core 1. The
 // fallback feed plays the synth only: a cart's stream opens only while the
 // task runs, and moycore drains it by the clock otherwise.
+//
+// While a cart streams, the task runs a SHALLOW pipeline: blocks of 128
+// frames into a ring of 4 x 128, about 29 ms from the task taking a frame to
+// the speaker, where the synth's own is 256-frame blocks into 6 x 512 (about
+// 150 ms). A cart's samples arrive with the picture that caused them, so
+// every millisecond of ring is a millisecond they play late. The task swaps
+// the channel itself, between blocks, when the stream's first frame arrives
+// and when it closes.
 //
 // The synth half is checked against libmoy under the desktop VM
 // (tests/test_audio_parity.py); I2S, the core-1 task and the PSRAM bank
@@ -71,14 +81,17 @@
 // Mix/write block: small enough that the task tops the DMA up continuously,
 // large enough that per-block overhead is negligible. 256 frames @ 8 kHz = 32 ms.
 #define MOY_BLOCK_FRAMES  256
+// ...and while a compiled cart streams (see the header).
+#define MOY_STREAM_BLOCK  128
+#define MOY_STREAM_DESC   4
 // How much the task renders per mutex acquisition. libmoy's render is a pure
 // function of its state, so a block can be produced in pieces with the lock
-// dropped between them; this bounds how long a core-0 verb call can be made to
-// wait. 32 frames is ~4 ms of audio and well under 100 us of mixing.
+// dropped between them; this bounds how long a verb call can be made to wait.
+// 32 frames is ~4 ms of audio and well under 100 us of mixing.
 #define MOY_MIX_CHUNK     32
 // I2S DMA ring: dma_desc_num * dma_frame_num frames buffered in hardware.
 // 6 * 256 = 1536 frames ~= 0.19 s @ 8 kHz -- a deep cushion the task keeps
-// topped, independent of core 0's frame jitter.
+// topped, independent of the frame loop's jitter.
 #define MOY_DMA_DESC_NUM  6
 #define MOY_DMA_FRAME_NUM 512   /* 6x512 = ~140ms of hardware cushion at 22050
                                    (was 256: ~190ms at the old 8000 rate) */
@@ -114,6 +127,11 @@ static volatile uint32_t s_frames_out = 0;
 // whose output never reaches the DMA -- audibly fast playback that every
 // per-side counter calls correct.
 static volatile uint32_t s_frames_rendered = 0;   // by the core-1 task
+// The amp's pins, kept for the task to re-open the channel with, and the
+// pipeline it runs: 0 the synth's, 1 the shallow one a streaming cart gets.
+static int s_bck, s_ws, s_dout;
+static volatile int s_shallow_want = 0;
+static int s_shallow = 0;
 
 #endif
 
@@ -356,6 +374,59 @@ static mp_obj_t mod_active(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_active_obj, mod_active);
 
 #if MOY_AUDIO_HAVE_IDF
+// Open the I2S channel on the amp's pins with a ring of `desc` x `frames`,
+// enabled. 0, or -1 with nothing left open.
+static int moy_chan_open(int desc, int frames) {
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    chan_cfg.dma_desc_num = desc;
+    chan_cfg.dma_frame_num = frames;
+    chan_cfg.auto_clear = true;   // emit silence, not stale DMA, on under-run
+    if (i2s_new_channel(&chan_cfg, &s_tx_chan, NULL) != ESP_OK) {
+        s_tx_chan = NULL;
+        return -1;
+    }
+
+    // Standard Philips I2S, 16-bit mono on the T-Deck amp pins. MONO puts the
+    // sample on the left slot, which is the MAX98357's mono input.
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)s_rate),
+        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
+                                                    I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = (gpio_num_t)s_bck,
+            .ws   = (gpio_num_t)s_ws,
+            .dout = (gpio_num_t)s_dout,
+            .din  = I2S_GPIO_UNUSED,
+            .invert_flags = { .mclk_inv = false, .bclk_inv = false, .ws_inv = false },
+        },
+    };
+    if (i2s_channel_init_std_mode(s_tx_chan, &std_cfg) != ESP_OK
+        || i2s_channel_enable(s_tx_chan) != ESP_OK) {
+        i2s_del_channel(s_tx_chan);
+        s_tx_chan = NULL;
+        return -1;
+    }
+    return 0;
+}
+
+// Re-open the channel for the pipeline asked for, between blocks. The synth's
+// ring when the shallow one will not open; the task ends when neither will.
+static void moy_chan_swap(void) {
+    int want = s_shallow_want;
+    i2s_channel_disable(s_tx_chan);
+    i2s_del_channel(s_tx_chan);
+    s_tx_chan = NULL;
+    if (want && moy_chan_open(MOY_STREAM_DESC, MOY_STREAM_BLOCK) == 0) {
+        s_shallow = 1;
+        return;
+    }
+    s_shallow = 0;
+    if (moy_chan_open(MOY_DMA_DESC_NUM, MOY_DMA_FRAME_NUM) != 0) {
+        s_running = 0;
+    }
+}
+
 // --- the core-1 feeder task ----------------------------------------------
 static void moy_audio_task(void *arg) {
     (void)arg;
@@ -363,9 +434,16 @@ static void moy_audio_task(void *arg) {
     int off;
 
     while (s_running) {
+        if (s_shallow_want != s_shallow) {
+            moy_chan_swap();
+            if (!s_running) {
+                break;
+            }
+        }
+        int frames = s_shallow ? MOY_STREAM_BLOCK : MOY_BLOCK_FRAMES;
         // Render a block in chunks, dropping the lock between them so a verb
-        // from core 0 is never held up for a whole block.
-        for (off = 0; off < MOY_BLOCK_FRAMES; off += MOY_MIX_CHUNK) {
+        // is never held up for a whole block.
+        for (off = 0; off < frames; off += MOY_MIX_CHUNK) {
             moy_lock();
             if (s_inited) {
                 moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK);
@@ -381,7 +459,7 @@ static void moy_audio_task(void *arg) {
         }
 
         // Blocks here while the DMA drains -- that IS the pacing, and it happens
-        // on core 1, so the VM never stalls on it.
+        // in this task, so the VM never stalls on it.
         //
         // Write the WHOLE block, retrying the remainder after a timeout
         // (2026-08-10): the old single write dropped whatever a timeout left
@@ -399,11 +477,11 @@ static void moy_audio_task(void *arg) {
         // read 1.000. Retry until the WHOLE block is consumed; a timeout just
         // loops (s_running is the only exit), so a wedged channel parks the
         // task at 100ms polls instead of silently eating the music.
-        size_t done = 0;
-        while (done < sizeof(block) && s_running) {
+        size_t done = 0, bytes = (size_t)frames * sizeof(int16_t);
+        while (done < bytes && s_running) {
             size_t written = 0;
             i2s_channel_write(s_tx_chan, (const char *)block + done,
-                              sizeof(block) - done, &written,
+                              bytes - done, &written,
                               pdMS_TO_TICKS(MOY_WRITE_TIMEOUT_MS));
             done += written;
         }
@@ -446,38 +524,11 @@ static mp_obj_t mod_audio_start(size_t n_args, const mp_obj_t *a) {
         }
     }
 
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    chan_cfg.dma_desc_num = MOY_DMA_DESC_NUM;
-    chan_cfg.dma_frame_num = MOY_DMA_FRAME_NUM;
-    chan_cfg.auto_clear = true;   // emit silence, not stale DMA, on under-run
-    if (i2s_new_channel(&chan_cfg, &s_tx_chan, NULL) != ESP_OK) {
-        s_tx_chan = NULL;
-        return mp_const_false;
-    }
-
-    // Standard Philips I2S, 16-bit mono on the T-Deck amp pins. MONO puts the
-    // sample on the left slot, which is the MAX98357's mono input.
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)rate),
-        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
-                                                    I2S_SLOT_MODE_MONO),
-        .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = (gpio_num_t)bck,
-            .ws   = (gpio_num_t)ws,
-            .dout = (gpio_num_t)dout,
-            .din  = I2S_GPIO_UNUSED,
-            .invert_flags = { .mclk_inv = false, .bclk_inv = false, .ws_inv = false },
-        },
-    };
-    if (i2s_channel_init_std_mode(s_tx_chan, &std_cfg) != ESP_OK) {
-        i2s_del_channel(s_tx_chan);
-        s_tx_chan = NULL;
-        return mp_const_false;
-    }
-    if (i2s_channel_enable(s_tx_chan) != ESP_OK) {
-        i2s_del_channel(s_tx_chan);
-        s_tx_chan = NULL;
+    s_bck = bck;
+    s_ws = ws;
+    s_dout = dout;
+    s_shallow = 0;
+    if (moy_chan_open(MOY_DMA_DESC_NUM, MOY_DMA_FRAME_NUM) != 0) {
         return mp_const_false;
     }
 
@@ -572,6 +623,11 @@ uint32_t moy_audio_snd(const uint8_t *pcm, uint32_t n) {
         r = n ? moy_stream_write(&s_pcm, pcm, n) : moy_stream_room(&s_pcm);
     }
     moy_unlock();
+#if MOY_AUDIO_HAVE_IDF
+    if (r && n) {
+        s_shallow_want = 1;
+    }
+#endif
     return r;
 }
 
@@ -582,6 +638,9 @@ void moy_audio_snd_close(void) {
     }
     s_pcm_on = 0;
     moy_unlock();
+#if MOY_AUDIO_HAVE_IDF
+    s_shallow_want = 0;
+#endif
 }
 
 // snd_counts() -> (queued, played, starved, room, open), or None when no cart

@@ -56,14 +56,15 @@ from device_util import _diag_note
 # which is the MAX98357's mono input. So pins, power and format are all correct;
 # if it is silent the failure is the I2S *init* (made loud below) or the *feed*.
 #
-# THE FEED -- THE CRACKLE FIX (#41): a dedicated core-1 audio task.
+# THE FEED -- THE CRACKLE FIX (#41): a dedicated audio task.
 # The crackle's root cause was that the I2S feed was COUPLED to the render loop:
-# tick() ran once per frame on core 0 (the MicroPython VM core) and a render
-# frame is tens of ms, so the DMA ring drained and under-ran during a long draw.
-# A deeper ring only helped a little, because the feed CADENCE was still the slow,
-# jittery frame rate. The fix: feed I2S from a FreeRTOS task PINNED TO CORE 1, so
-# the DMA is topped up continuously no matter how slow core 0's frame is. I2S is
-# on its own pins, so core 1 owning it never touches the panel/SD path.
+# tick() ran once per frame in the MicroPython VM and a render frame is tens of
+# ms, so the DMA ring drained and under-ran during a long draw. A deeper ring
+# only helped a little, because the feed CADENCE was still the slow, jittery
+# frame rate. The fix: feed I2S from a FreeRTOS task of its own, above the VM
+# on the VM's core (core 1), so the DMA is topped up continuously no matter
+# how slow the frame is. I2S is on its own pins, so the task never touches the
+# panel/SD path.
 #
 # FALLBACK (revert-able with NO rebuild): if the core-1 task can't start, tick()
 # drives the render itself via machine.I2S non-blocking writes. Set
