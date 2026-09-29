@@ -63,7 +63,7 @@
 // takes is stated once, for the engine and for the Player's fit check.
 //
 // Where the thread runs: the MicroPython task's core and priority, so a run
-// takes the VM's time and never the core the radios and the flush feeder use.
+// takes the VM's time; only a cart's par lanes (below) reach another core.
 #ifndef MOY_WASM_CORE
 #define MOY_WASM_CORE MP_TASK_COREID
 #endif
@@ -71,13 +71,21 @@
 #define MOY_WASM_PRIO (ESP_TASK_PRIO_MIN + 1)
 #endif
 
+// A cart's par lanes (moy_wasm_session.h): one thread on every core but the
+// session's, at the session's priority, so a lane takes only what the tasks
+// above it on that core -- the flush feed and fold, the radios, IDF's own --
+// leave. A board declines them by setting MOY_WASM_ITEM_LANES to 0.
+#ifndef MOY_WASM_ITEM_LANES
+#define MOY_WASM_ITEM_LANES (portNUM_PROCESSORS - 1)
+#endif
+#ifndef MOY_WASM_LANE_PRIO
+#define MOY_WASM_LANE_PRIO MOY_WASM_PRIO
+#endif
+
 // Bytes kept below the native-stack boundary handed to the runtime: the AOT
 // code's stack check traps short of it, and the runtime's own frames and any
 // native it calls live in what is left.
 #define MOY_WASM_STACK_GUARD (2 * 1024)
-// The exec env's own stack (in the pool). AOT code runs on the native stack;
-// this carries the runtime's frames for a call.
-#define MOY_WASM_EXEC_STACK (8 * 1024)
 #define MOY_WASM_FILE_MAX (8 * 1024 * 1024)
 #define MOY_WASM_MAX_ARGS 8
 #define ERR_MAX 160
@@ -663,6 +671,28 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_terminate_obj, mod_terminate);
 
 enum { SESS_CALL = 1, SESS_CLOSE = 2 };
 
+#define LANES_MAX (MOY_WASM_ITEM_LANES > 0 ? MOY_WASM_ITEM_LANES : 1)
+
+// A lane: its thread, the work it was given and the two handshakes.
+typedef struct {
+    bool up;
+    pthread_t tid;
+    SemaphoreHandle_t go, done;
+    void (*volatile fn)(void *);
+    void *volatile arg;
+    volatile bool quit;
+    volatile int64_t t_go;          // when the work was handed over
+} lane_t;
+
+// What the lanes did since lanes() last read it: work handed over, work
+// taken back unstarted, and the microseconds from handing it over to the
+// lane starting it and from starting to returning.
+typedef struct {
+    uint32_t jobs, taken_back;
+    uint64_t wait_us, run_us;
+} lane_stats_t;
+static lane_stats_t g_lane_stats[LANES_MAX + 1];
+
 typedef struct {
     // the MicroPython side's
     bool live;
@@ -685,6 +715,7 @@ typedef struct {
     void *volatile vm_arg;
     volatile bool waiting;          // the task is in sess_wait and can serve
     TaskHandle_t thread;            // the session's task, once it runs
+    lane_t lane[LANES_MAX + 1];     // [1..]: the par lanes, started on demand
 } sess_t;
 
 // The live session, or NULL. Allocated per session, from PSRAM, so an idle
@@ -720,6 +751,104 @@ int moy_wasm_on_vm(void (*fn)(void *arg), void *arg)
     xSemaphoreGive(s->back);
     xSemaphoreTake(s->vm_done, portMAX_DELAY);
     return 0;
+}
+
+// -- the lanes ----------------------------------------------------------------
+
+static void *lane_thread(void *arg)
+{
+    lane_t *l = arg;
+    lane_stats_t *st = &g_lane_stats[l - g_sess->lane];
+    wasm_runtime_init_thread_env();
+    for (;;) {
+        xSemaphoreTake(l->go, portMAX_DELAY);
+        if (l->quit) {
+            break;
+        }
+        int64_t t0 = esp_timer_get_time();
+        l->fn(l->arg);
+        int64_t t1 = esp_timer_get_time();
+        st->wait_us += (uint64_t)(t0 - l->t_go);
+        st->run_us += (uint64_t)(t1 - t0);
+        xSemaphoreGive(l->done);
+    }
+    wasm_runtime_destroy_thread_env();
+    return NULL;
+}
+
+int moy_wasm_session_lanes(void)
+{
+    return MOY_WASM_ITEM_LANES;
+}
+
+int moy_wasm_session_lane_go(int lane, void (*fn)(void *arg), void *arg)
+{
+    sess_t *s = g_sess;
+    if (!s || lane < 1 || lane > MOY_WASM_ITEM_LANES) {
+        return 1;
+    }
+    lane_t *l = &s->lane[lane];
+    if (!l->up) {
+        if (!l->go) {
+            l->go = xSemaphoreCreateBinary();
+            l->done = xSemaphoreCreateBinary();
+        }
+        if (!l->go || !l->done) {
+            return 1;
+        }
+        // The lanes take the cores in turn, skipping the session's own.
+        int core = (MOY_WASM_CORE + lane) % portNUM_PROCESSORS;
+        if (moy_wasm_spawn(&l->tid, lane_thread, l, MOY_WASM_STACK_BYTES,
+                           MOY_WASM_STACK_PSRAM, core, MOY_WASM_LANE_PRIO) != 0) {
+            return 1;
+        }
+        l->up = true;
+    }
+    l->fn = fn;
+    l->arg = arg;
+    l->t_go = esp_timer_get_time();
+    g_lane_stats[lane].jobs++;
+    xSemaphoreGive(l->go);
+    return 0;
+}
+
+void moy_wasm_session_lane_wait(int lane)
+{
+    sess_t *s = g_sess;
+    if (s && lane >= 1 && lane <= MOY_WASM_ITEM_LANES && s->lane[lane].up) {
+        // Work the lane has not picked up yet is taken back rather than
+        // waited for: the binding waits only once every item is taken, so
+        // the lane would find none, and its core may be busy for a while
+        // with the tasks above it.
+        if (xSemaphoreTake(s->lane[lane].go, 0) == pdTRUE) {
+            g_lane_stats[lane].taken_back++;
+            return;
+        }
+        xSemaphoreTake(s->lane[lane].done, portMAX_DELAY);
+    }
+}
+
+// Join every lane's thread; from the session's thread, before the runtime
+// goes.
+static void lanes_stop(sess_t *s)
+{
+    for (int k = 1; k <= MOY_WASM_ITEM_LANES; k++) {
+        lane_t *l = &s->lane[k];
+        if (l->up) {
+            l->quit = true;
+            xSemaphoreGive(l->go);
+            pthread_join(l->tid, NULL);
+            l->up = false;
+        }
+        if (l->go) {
+            vSemaphoreDelete(l->go);
+            l->go = NULL;
+        }
+        if (l->done) {
+            vSemaphoreDelete(l->done);
+            l->done = NULL;
+        }
+    }
 }
 
 static int sess_fail(sess_t *s, const char *what, const char *detail)
@@ -827,6 +956,7 @@ opened:
     if (up && ops->unbound) {
         ops->unbound(ops->user);
     }
+    lanes_stop(s);
     if (env) {
         wasm_runtime_destroy_exec_env(env);
     }
@@ -1055,6 +1185,26 @@ static mp_obj_t mod_mem(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_mem_obj, mod_mem);
 
+// lanes() -> [(jobs, taken_back, wait_us, run_us)] per lane since the last
+// call, which resets them: how often a cart's par items were handed to each
+// lane, how often the lane had not started when every item was already
+// taken, and the time from handing over to starting, and from starting to
+// finishing.
+static mp_obj_t mod_lanes(void)
+{
+    mp_obj_t l = mp_obj_new_list(0, NULL);
+    for (int k = 1; k <= MOY_WASM_ITEM_LANES; k++) {
+        lane_stats_t *st = &g_lane_stats[k];
+        mp_obj_t t[4] = { INT(st->jobs), INT(st->taken_back),
+                          mp_obj_new_int_from_ull(st->wait_us),
+                          mp_obj_new_int_from_ull(st->run_us) };
+        mp_obj_list_append(l, mp_obj_new_tuple(4, t));
+        memset(st, 0, sizeof(*st));
+    }
+    return l;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_lanes_obj, mod_lanes);
+
 static MP_DEFINE_STR_OBJ(mod_key_obj, "fork " MOY_WASM_FORK_COMMIT "\n" KEY_TARGET);
 static MP_DEFINE_STR_OBJ(mod_fork_obj, MOY_WASM_FORK_COMMIT);
 static MP_DEFINE_STR_OBJ(mod_chip_obj, KEY_CHIP);
@@ -1071,6 +1221,7 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_result), MP_ROM_PTR(&mod_result_obj) },
     { MP_ROM_QSTR(MP_QSTR_terminate), MP_ROM_PTR(&mod_terminate_obj) },
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mod_mem_obj) },
+    { MP_ROM_QSTR(MP_QSTR_lanes), MP_ROM_PTR(&mod_lanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_footprint), MP_ROM_PTR(&mod_footprint_obj) },
     // The key tail this build wants (after the wasm line), the fork commit it
     // runs, and the board's default run stack (bytes, in PSRAM).

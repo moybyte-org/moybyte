@@ -933,12 +933,13 @@ tables_instantiate(AOTModuleInstance *module_inst, AOTModule *module,
 static void
 memories_deinstantiate(AOTModuleInstance *module_inst)
 {
+    AOTModuleInstanceExtra *extra = (AOTModuleInstanceExtra *)module_inst->e;
     uint32 i;
     AOTMemoryInstance *memory_inst;
 
     for (i = 0; i < module_inst->memory_count; i++) {
         memory_inst = module_inst->memories[i];
-        if (memory_inst) {
+        if (memory_inst && !extra->memory_borrowed) {
 #if WASM_ENABLE_SHARED_MEMORY != 0
             if (shared_memory_is_shared(memory_inst)) {
                 uint32 ref_count = shared_memory_dec_reference(memory_inst);
@@ -965,7 +966,7 @@ static AOTMemoryInstance *
 memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
                    AOTModule *module, AOTMemoryInstance *memory_inst,
                    AOTMemory *memory, uint32 memory_idx, uint32 heap_size,
-                   uint32 max_memory_pages, char *error_buf,
+                   uint32 max_memory_pages, bool borrow, char *error_buf,
                    uint32 error_buf_size)
 {
     void *heap_handle;
@@ -983,6 +984,23 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
     bool is_memory64 = memory->flags & MEMORY64_FLAG;
 
     bool is_shared_memory = false;
+
+    /* A sibling (aot_instantiate_sibling) runs over its parent's memory.
+       Compiled code reads a memory's base and bound through the instance, so
+       the sibling holds its own copy of the parent's memory instance; the
+       copy stays exact because a memory that cannot grow never moves or
+       changes size. The parent alone frees the memory. */
+    if (borrow) {
+        AOTMemoryInstance *theirs = parent->memories[memory_idx];
+        if (theirs->cur_page_count != theirs->max_page_count) {
+            set_error_buf(error_buf, error_buf_size,
+                          "a sibling instance needs a memory that cannot grow");
+            return NULL;
+        }
+        memcpy(memory_inst, theirs, sizeof(AOTMemoryInstance));
+        return memory_inst;
+    }
+
 #if WASM_ENABLE_SHARED_MEMORY != 0
     is_shared_memory = memory->flags & SHARED_MEMORY_FLAG ? true : false;
     /* Shared memory */
@@ -1213,7 +1231,7 @@ aot_get_memory_with_idx(AOTModuleInstance *module_inst, uint32 mem_idx)
 static bool
 memories_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
                      AOTModule *module, uint32 heap_size,
-                     uint32 max_memory_pages, char *error_buf,
+                     uint32 max_memory_pages, bool borrow, char *error_buf,
                      uint32 error_buf_size)
 {
     uint32 global_index, global_data_offset, length;
@@ -1235,7 +1253,7 @@ memories_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
     for (i = 0; i < memory_count; i++, memories++) {
         memory_inst = memory_instantiate(
             module_inst, parent, module, memories, &module->memories[i], i,
-            heap_size, max_memory_pages, error_buf, error_buf_size);
+            heap_size, max_memory_pages, borrow, error_buf, error_buf_size);
         if (!memory_inst) {
             return false;
         }
@@ -1877,10 +1895,11 @@ check_linked_symbol(AOTModule *module, char *error_buf, uint32 error_buf_size)
     return true;
 }
 
-AOTModuleInstance *
-aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
-                WASMExecEnv *exec_env_main, uint32 stack_size, uint32 heap_size,
-                uint32 max_memory_pages, char *error_buf, uint32 error_buf_size)
+static AOTModuleInstance *
+instantiate(AOTModule *module, AOTModuleInstance *parent,
+            WASMExecEnv *exec_env_main, uint32 stack_size, uint32 heap_size,
+            uint32 max_memory_pages, bool borrow, char *error_buf,
+            uint32 error_buf_size)
 {
     AOTModuleInstance *module_inst;
 #if WASM_ENABLE_BULK_MEMORY != 0 || WASM_ENABLE_REF_TYPES != 0
@@ -1941,6 +1960,7 @@ aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
     module_inst->e =
         (WASMModuleInstanceExtra *)((uint8 *)module_inst + extra_info_offset);
     extra = (AOTModuleInstanceExtra *)module_inst->e;
+    extra->memory_borrowed = borrow;
 
 #if WASM_ENABLE_GC != 0
     /* Initialize gc heap first since it may be used when initializing
@@ -2044,7 +2064,8 @@ aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
 
     /* Initialize memory space */
     if (!memories_instantiate(module_inst, parent, module, heap_size,
-                              max_memory_pages, error_buf, error_buf_size))
+                              max_memory_pages, borrow, error_buf,
+                              error_buf_size))
         goto fail;
 
     /* Initialize function pointers */
@@ -2268,8 +2289,11 @@ aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
     }
 #endif
 
-    if (!execute_post_instantiate_functions(module_inst, is_sub_inst,
-                                            exec_env_main)) {
+    /* A sibling runs nothing at instantiation: the start function and the
+       constructors belong to the memory, which its parent already set up. */
+    if (!borrow
+        && !execute_post_instantiate_functions(module_inst, is_sub_inst,
+                                               exec_env_main)) {
         set_error_buf(error_buf, error_buf_size, module_inst->cur_exception);
         goto fail;
     }
@@ -2284,6 +2308,23 @@ aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
 fail:
     aot_deinstantiate(module_inst, is_sub_inst);
     return NULL;
+}
+
+AOTModuleInstance *
+aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
+                WASMExecEnv *exec_env_main, uint32 stack_size, uint32 heap_size,
+                uint32 max_memory_pages, char *error_buf, uint32 error_buf_size)
+{
+    return instantiate(module, parent, exec_env_main, stack_size, heap_size,
+                       max_memory_pages, false, error_buf, error_buf_size);
+}
+
+AOTModuleInstance *
+aot_instantiate_sibling(AOTModuleInstance *parent, uint32 stack_size,
+                        char *error_buf, uint32 error_buf_size)
+{
+    return instantiate((AOTModule *)parent->module, parent, NULL, stack_size, 0,
+                       0, true, error_buf, error_buf_size);
 }
 
 #if WASM_ENABLE_DUMP_CALL_STACK != 0

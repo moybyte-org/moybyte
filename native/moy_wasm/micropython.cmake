@@ -58,7 +58,8 @@ set(MOY_WAMR_SRCS
 )
 
 # The runtime's feature set: AOT only (no interpreter, no JIT), no WASI, no
-# builtin libc, no multi-module, no threads; bulk memory and reference types
+# builtin libc, no multi-module, no thread manager or shared memory (a cart's
+# par lanes are sibling instances, README.md); bulk memory and reference types
 # because clang emits both by default; custom sections kept, because the
 # provenance key is one. The quick AOT entry stays off: it only speeds a call
 # from the host into wasm, which a cart takes a few times a frame, and its

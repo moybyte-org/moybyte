@@ -144,6 +144,9 @@ typedef struct AOTModuleInstanceExtra {
     WASMModuleInstanceCommon **import_func_module_insts;
 #endif
 
+    /* A sibling (aot_instantiate_sibling): the memories are its parent's.
+       Last, so compiled code's offsets into this struct are unchanged. */
+    bool memory_borrowed;
 } AOTModuleInstanceExtra;
 
 #if defined(BUILD_TARGET_X86_64) || defined(BUILD_TARGET_AMD_64)
@@ -558,6 +561,18 @@ aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
                 WASMExecEnv *exec_env_main, uint32 stack_size, uint32 heap_size,
                 uint32 max_memory_pages, char *error_buf,
                 uint32 error_buf_size);
+
+/**
+ * A second instance of `parent`'s module over `parent`'s own linear memory,
+ * to run its code on another thread while `parent` runs: its own globals at
+ * their declared values, tables, exception state and exec envs; the memory is
+ * borrowed, never initialized again and never freed by it. The memory must
+ * not be able to grow. No start function or constructor runs. Deinstantiate
+ * it (as a sub instance) before `parent`.
+ */
+AOTModuleInstance *
+aot_instantiate_sibling(AOTModuleInstance *parent, uint32 stack_size,
+                        char *error_buf, uint32 error_buf_size);
 
 /**
  * Deinstantiate a AOT module instance, destroy the resources.

@@ -826,7 +826,7 @@ def wasm_low_water_with_radios_up(board, paths):
 # floors are the suites' own, per board, measured with WiFi off -- the state a
 # cart plays in.
 
-WASM_CARTS = {"hello": "Hello Wasm", "blit": "Blit Wasm"}
+WASM_CARTS = {"hello": "Hello Wasm", "blit": "Blit Wasm", "par": "Par Wasm"}
 
 
 def _push_folder(board, board_dir, local, dest):
@@ -1183,6 +1183,35 @@ def _runs_clean(board, title, check=None):
     finally:
         board.leave_cart()
         board.drain(1.0)
+
+
+def wasm_par_matches_items_in_order(board, lanes=1, seconds=5.0):
+    """The Par Wasm fixture from the launcher (tests/fixtures/wasm/par.moy):
+    each frame it hands par eight items, runs the same eight in order itself
+    and counts the bytes that differ, the items that did not get their own
+    stack pointer and the frames after which the caller's did not come back
+    -- all 0 over every frame, with this board's `lanes` lanes having run
+    items beside the calling core (moy_wasm.lanes(): work handed over, and
+    not all of it taken back unstarted). Returns (frames, [lane stats])."""
+    pm = ("(lambda a: (__import__('moycore').pmem_image(a), list(a)[:5])[1])"
+          "(__import__('array').array('i', bytearray(1024)))")
+    got = {}
+
+    def _probe(b):
+        b.pyval("__import__('moy_wasm').lanes()", timeout=30, strict=True)
+        b.drain(seconds)
+        got["pm"] = b.pyval(pm, timeout=30, strict=True)
+        got["lanes"] = b.pyval("__import__('moy_wasm').lanes()", timeout=30, strict=True)
+    _runs_clean(board, WASM_CARTS["par"], check=_probe)
+    diff, frames, bad_sp, bad_caller = got["pm"][:4]
+    assert frames >= 10, got
+    assert (diff, bad_sp, bad_caller) == (0, 0, 0), got
+    stats = got["lanes"]
+    assert len(stats) == lanes, stats
+    for jobs, taken_back, _wait, run_us in stats:
+        assert jobs > taken_back and run_us > 0, stats
+    print("\nPAR %s: %d frames, lanes %s" % (board.expect_board, frames, stats))
+    return frames, stats
 
 
 def wasm_too_big_cart_opens_the_notice(board, board_dir):

@@ -108,6 +108,13 @@ def test_a_full_frame_blit_cart_holds_its_floor(board, wasm_carts):
                                        WASM_BLIT_FPS_FLOOR)
 
 
+# par (proposals/wasm-runtime.md): a compiled cart's items on this board's
+# second core leave exactly what running them in order leaves, each on its
+# own stack, and the board's one lane runs some of them.
+def test_par_items_across_the_cores_match_them_in_order(board, wasm_carts):
+    on_glass.wasm_par_matches_items_in_order(board, lanes=1)
+
+
 # A compiled cart's frame goes to the glass from the cart's own memory
 # (native/moy_flush/moy_fold.h's frame fold): with the FPS chip on, every flush
 # is folded from the cart, and the bands are the composite the frame makes,
@@ -144,10 +151,11 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
 # The compiled tier's showcase, Jet Teapot (ports/jet/README.md), from the
 # launcher: uncapped with WiFi off, in Phong -- the costliest of its three
 # shadings and the steadiest to measure -- at half and at full width. The
-# floors sit about a fifth under what this board drew when they were set
-# (2026-09-28); the figures are #158's. The cart stays installed as it ships.
-JET_HALF_FPS_FLOOR = 11
-JET_FULL_FPS_FLOOR = 8
+# floors sit about a fifth under what this board drew, its raster on both
+# cores, when they were set (2026-09-29); the figures are #158's. The cart
+# stays installed as it ships.
+JET_HALF_FPS_FLOOR = 16
+JET_FULL_FPS_FLOOR = 12
 
 
 def test_the_jet_showcase_holds_its_floor_at_half_width(board):

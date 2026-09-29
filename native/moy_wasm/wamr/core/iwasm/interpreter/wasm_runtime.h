@@ -389,6 +389,9 @@ typedef struct WASMModuleInstanceExtra {
         && WASM_ENABLE_LAZY_JIT != 0)
     WASMModuleInstance *next;
 #endif
+
+    /* A sibling (wasm_instantiate_sibling): the memories are its parent's. */
+    bool memory_borrowed;
 } WASMModuleInstanceExtra;
 
 struct AOTFuncPerfProfInfo;
@@ -556,6 +559,12 @@ wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
                  WASMExecEnv *exec_env_main, uint32 stack_size,
                  uint32 heap_size, uint32 max_memory_pages, char *error_buf,
                  uint32 error_buf_size);
+
+/* A second instance over `parent`'s own linear memory: aot_instantiate_sibling
+   in the interpreter. */
+WASMModuleInstance *
+wasm_instantiate_sibling(WASMModuleInstance *parent, uint32 stack_size,
+                         char *error_buf, uint32 error_buf_size);
 
 void
 wasm_dump_perf_profiling(const WASMModuleInstance *module_inst);

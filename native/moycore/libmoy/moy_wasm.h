@@ -36,6 +36,7 @@
  *   memset(&w, 0, sizeof w); w.read = my_read; w.read_user = me;
  *   w.frame = my_take;                         // optional: see `frame` below
  *   w.snd = my_queue;                          // optional: see `snd` below
+ *   w.lanes = n; w.lane_go = ...;              // optional: see `lanes` below
  *   moy_wasm_open(&w, &con, env);
  *   moy_wasm_init(&w, err, sizeof err);        // then, per SPEC.md 5's tick:
  *   moy_wasm_update(&w, dt, err, sizeof err);
@@ -104,6 +105,30 @@ extern "C" {
 #define MOY_WASM_UPDATE 1
 #define MOY_WASM_DRAW   2
 
+/* `par`'s items: the export each one is, the global that moves the cart's C
+ * stack, and the most cores beside the calling one a host may run them on. */
+#define MOY_WASM_ITEM    "_par"
+#define MOY_WASM_SP      "__stack_pointer"
+#ifndef MOY_WASM_LANES
+#define MOY_WASM_LANES 3
+#endif
+
+#ifndef MOY_WASM_JS
+/* One lane's own instance of the cart over the same memory, made on the
+ * lane's thread the first time it runs items, and what it last trapped on. */
+typedef struct moy_wasm_lane {
+    struct moy_wasm *w;
+    int k;                                  /* its number; 0 the calling core */
+    int dead;                               /* could not run items: never again */
+    wasm_module_inst_t inst;
+    wasm_exec_env_t env;
+    wasm_function_inst_t item;
+    uint8_t *sp;
+    volatile int32_t trapped;               /* the item it trapped on, or -1 */
+    char trap[128];
+} moy_wasm_lane;
+#endif
+
 typedef struct moy_wasm {
     /* -- the host's, set before the binding is opened ---------------------- */
 
@@ -145,11 +170,33 @@ typedef struct moy_wasm {
      * con->host.time_ms, and drops every frame. */
     uint32_t (*snd)(void *user, const uint8_t *pcm, uint32_t n);
     void *snd_user;
+#ifndef MOY_WASM_JS
+    /* Cores for `par`'s items besides the calling one, under WAMR only. With
+     * `lanes` 0 every item runs on the calling core, in order. Otherwise the
+     * calling core and lanes 1..lanes (at most MOY_WASM_LANES) each take the
+     * next untaken item until none is left: lane_go starts work(job) on lane
+     * k's thread and returns at once, non-zero when it could not; lane_wait(k)
+     * returns once that work has returned -- or at once, taking the work
+     * back, when the lane has not started it, since by then every item is
+     * taken. Every call for one lane must run on the same thread, one WAMR
+     * can run on: the first makes the lane's own instance of the cart there
+     * (wasm_runtime_instantiate_sibling). The binding frees those instances
+     * in moy_wasm_close, so a lane's thread outlives the binding
+     * (port/moy_lanes.c is such lanes over POSIX threads). */
+    int lanes;
+    int (*lane_go)(void *user, int lane, void (*work)(void *job), void *job);
+    void (*lane_wait)(void *user, int lane);
+    void *lane_user;
+    /* The wasm stack of each lane's exec env, as wasm_runtime_create_exec_env
+     * takes it; 0 is 64 KiB. */
+    uint32_t lane_stack;
+#endif
 
     /* -- the binding's own, set by moy_wasm_open / moy_wasm_bind ---------- */
     moy_console *con;
 #ifdef MOY_WASM_JS
     const char *trap;                       /* the first trap of this call */
+    char item_trap[128];                    /* an item's, when it was not ours */
 #else
     wasm_exec_env_t env;
     wasm_module_inst_t inst;
@@ -160,6 +207,15 @@ typedef struct moy_wasm {
     moy_canvas layers[MOY_WASM_LAYERS];     /* handle h is layers[h - 1] */
     int n_layers;
     int in_draw, blits, quitting;
+    int items;                              /* par's items run: imports trap */
+#ifndef MOY_WASM_JS
+    wasm_function_inst_t item;              /* the cart's _par, or NULL */
+    moy_wasm_lane lane[MOY_WASM_LANES + 1]; /* [0] is the calling core */
+    int32_t job_n, job_arg;                 /* the items running now */
+    uint32_t job_stacks, job_size;
+    int job_lanes;                          /* the lanes beside [0] they run on */
+    int32_t job_next;                       /* the next item to take */
+#endif
     /* The last blit's frame while the screen does not hold it: in the cart's
      * memory until the host shows it (`owed`), then in the host's copy
      * (`kept`), or nowhere once it is on the screen. */
@@ -272,7 +328,11 @@ int  moy_wasm_end(moy_wasm *w, int threw);
  * as a trap does, and moy_wasm_end clears it. */
 const char *moy_wasm_trapped(const moy_wasm *w);
 
-/* -- the embedder's, over the cart's own memory -------------------------- */
+/* The message of a trap moy_wasm_js_item caught, for an item that trapped
+ * outside the binding: an out-of-bounds access, an unreachable. */
+void moy_wasm_item_trap(moy_wasm *w, const char *msg);
+
+/* -- the embedder's: the cart's own memory, and a par item on it ------- */
 
 /* `n` bytes of the cart's linear memory at `offset`, copied where C can
  * address them and kept until the import call returns; NULL when the range
@@ -283,6 +343,12 @@ uint8_t *moy_wasm_js_span(moy_wasm *w, uint32_t offset, uint32_t n);
  * leaves the memory, and then nothing is written. */
 int moy_wasm_js_store(moy_wasm *w, uint32_t offset, const uint8_t *src,
                       uint32_t n);
+
+/* Run `par`'s item `i` on the cart: its _par(i, arg) with its exported
+ * __stack_pointer at `sp`, then the stack pointer as it was. 0 when the item
+ * returned; non-zero when it threw, with the trap recorded through
+ * moy_wasm_item_trap unless the binding recorded its own. */
+int moy_wasm_js_item(moy_wasm *w, int32_t i, int32_t arg, uint32_t sp);
 
 #endif /* MOY_WASM_JS */
 

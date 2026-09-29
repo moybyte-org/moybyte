@@ -31,7 +31,7 @@ static_assert(sizeof(uint16_t) == 2 && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
               "blit565 takes little-endian words; Jet stores native ones");
 
 // pmem slots a test or a measurement reads back.
-enum { PM_HEAP_PEAK_KB, PM_HEAP_KB, PM_TRIS, PM_FPS10, PM_RENDER_MS10 };
+enum { PM_HEAP_PEAK_KB, PM_HEAP_KB, PM_TRIS, PM_FPS10, PM_RENDER_MS10, PM_ITEM_STACK };
 
 const JetScene *jet = nullptr;
 bool ready = false, half = false, interlaced = false, hud = true;
@@ -45,6 +45,19 @@ bool cfg_is(const char *key, const char *want)
     char buf[16];
     int n = moy_cfg(key, (int)strlen(key), buf, sizeof buf);
     return n >= 0 && n == (int)strlen(want) && !memcmp(buf, want, n);
+}
+
+int cfg_int(const char *key, int dflt)
+{
+    char buf[16];
+    int n = moy_cfg(key, (int)strlen(key), buf, sizeof buf - 1);
+    if (n <= 0 || n >= (int)sizeof buf) return dflt;
+    int v = 0;
+    for (int i = 0; i < n; i++) {
+        if (buf[i] < '0' || buf[i] > '9') return dflt;
+        v = v * 10 + (buf[i] - '0');
+    }
+    return v;
 }
 
 int shading_from_cfg()
@@ -177,6 +190,7 @@ void measure(int render_ms)
         moy_pmem(PM_TRIS, tris, 1);
         moy_pmem(PM_FPS10, fps10, 1);
         moy_pmem(PM_RENDER_MS10, render_ms10, 1);
+        moy_pmem(PM_ITEM_STACK, (int)cart_item_stack_peak(), 1);
         report_heap();
         window_start = now;
         window_frames = window_render_ms = 0;
@@ -196,7 +210,8 @@ EXPORT("_init") void cart_init(void)
     uint16_t *color = jet->color_words ? arena + FRAME_WORDS : nullptr;
     uint16_t *depth = arena + FRAME_WORDS + jet->color_words;
     char *obj = load_file("teapot.obj");
-    ready = obj && jet->open(frame, color, depth, obj, shading_from_cfg(), interlaced);
+    ready = obj && jet->open(frame, color, depth, obj, shading_from_cfg(), interlaced,
+                             cfg_int("cores", 2));
     free(obj);
     report_heap();
 }

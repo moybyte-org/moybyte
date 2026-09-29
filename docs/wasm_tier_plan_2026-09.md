@@ -151,10 +151,13 @@ CLAUDE.md's placement rule:
   the per-chip compilers used to split every memory access they could not
   prove aligned into single bytes, the cart kept its per-pixel shading calls
   out of line, and the compiler paid five avoidable costs #158 lists; all
-  are fixed. What remains is the software bounds checks, which stay on; the
-  frame, depth and transform buffers in PSRAM, where native keeps its hot
-  buffers in internal SRAM; Jet's second raster core, which a cart has no
-  way to use; and on the P4s the console's frame copy (the S3s show the
+  are fixed. Jet's second raster core is the cart's through `par`
+  (2026-09-29), fork-join over the cart's own memory rather than threads;
+  what it buys against native's two cores is on #158. What remains is the
+  software bounds checks, which stay on; the frame, depth and transform
+  buffers in PSRAM, where native keeps its hot buffers in internal SRAM; the
+  frame's setup, which stays on one core and costs the sandbox more than the
+  raster does; and on the P4s the console's frame copy (the S3s show the
   cart's frame without one).
 
 ### Phase 4 — promotion (moy-spec; the owner's decision)

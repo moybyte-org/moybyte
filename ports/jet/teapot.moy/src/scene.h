@@ -24,10 +24,10 @@ struct JetScene {
     int color_words;
     int depth_words;
     // Build the scene over the buffers, with the model's OBJ text (loaded
-    // before this returns, then no longer needed). False when it would not
-    // load.
+    // before this returns, then no longer needed), rasterizing on `cores`
+    // cores (1 or 2). False when it would not load.
     bool (*open)(uint16_t *frame, uint16_t *color, uint16_t *depth,
-                 const char *obj, int shading, bool interlaced);
+                 const char *obj, int shading, bool interlaced, int cores);
     void (*update)(float dt, const CartInput *in);
     // Render; the whole frame is then in `frame`. The triangles rasterized.
     int (*render)(void);
@@ -35,3 +35,7 @@ struct JetScene {
 };
 
 extern "C" const JetScene jet_full, jet_half;
+
+// par across the console's cores (runtime.cpp): fn(i, ctx) for i in [0, n).
+extern "C" void cart_par(int n, void (*fn)(int i, void *ctx), void *ctx);
+extern "C" size_t cart_item_stack_peak(void);

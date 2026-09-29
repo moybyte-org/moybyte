@@ -752,6 +752,16 @@ WASM_RUNTIME_API_EXTERN void
 wasm_runtime_deinstantiate(WASMModuleInstanceCommon *module_inst);
 
 /* See wasm_export.h for description */
+WASM_RUNTIME_API_EXTERN WASMModuleInstanceCommon *
+wasm_runtime_instantiate_sibling(WASMModuleInstanceCommon *module_inst,
+                                 uint32 stack_size, char *error_buf,
+                                 uint32 error_buf_size);
+
+/* See wasm_export.h for description */
+WASM_RUNTIME_API_EXTERN void
+wasm_runtime_deinstantiate_sibling(WASMModuleInstanceCommon *sibling);
+
+/* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN WASMModuleCommon *
 wasm_runtime_get_module(WASMModuleInstanceCommon *module_inst);
 

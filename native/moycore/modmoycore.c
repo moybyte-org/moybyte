@@ -2574,6 +2574,19 @@ static const moy_wasm_ops WASM_OPS = {
     NULL, wo_runtime_up, wo_loaded, wo_bound, wo_call, wo_unbound,
 };
 
+// The cart's par items on the session's lanes, from the engine's thread.
+static int wo_lane_go(void *user, int lane, void (*work)(void *), void *job)
+{
+    (void)user;
+    return moy_wasm_session_lane_go(lane, work, job);
+}
+
+static void wo_lane_wait(void *user, int lane)
+{
+    (void)user;
+    moy_wasm_session_lane_wait(lane);
+}
+
 // The frame hand-off (libmoy/moy_wasm.h's `frame`): while the board says it
 // can show a frame from the cart's memory (take_frames), every blit leaves its
 // frame there, owed, and the canvas is written only when something needs it
@@ -2613,6 +2626,10 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
     WR->w.read = hw_read;
     WR->w.wire_swapped = swapped;
     WR->w.frame = wo_frame;
+    WR->w.lanes = moy_wasm_session_lanes();
+    WR->w.lane_go = wo_lane_go;
+    WR->w.lane_wait = wo_lane_wait;
+    WR->w.lane_stack = MOY_WASM_EXEC_STACK;
 #if MOY_AUDIO_SND
     if (moy_audio_snd_open()) WR->w.snd = wo_snd;
 #endif

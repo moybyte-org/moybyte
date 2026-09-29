@@ -16,7 +16,7 @@ moycore drives (see "A cart's session").
 | the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through |
 | the key | `moy_wasm_key.h`: the provenance key a module must carry, per chip, and the layout of its signature |
 | the footprint | `moy_wasm_footprint.h`: what a load takes -- the pool, the block a module file is read into, the run stack -- stated once for the engine, the Player's fit check and the host twin |
-| the thread | `moy_wasm_thread.c`: the run's pthread, stack placed per board |
+| the thread | `moy_wasm_thread.c`: the run's pthread, stack placed per board; a cart's par lanes are made the same way |
 
 Which boards take it is `board.toml` data: each console board's
 `[[native.shared.take]]` and the headless Zero's denial, each with its reason;
@@ -47,7 +47,8 @@ One run at a time.
 teardown included: WAMR's platform layer calls `pthread_self()`, and IDF
 answers that only for a pthread -- which the MicroPython VM's task never is.
 The thread runs on the VM's core at the VM's priority, so a run takes the VM's
-time and never core 0's radios and flush feeder.
+time; the only wasm code that runs on core 0 is a cart's `par` items (below),
+on a lane below every task already there.
 
 `result()` carries `ok`/`error`, the export's `value` (and `mismatches`: passes
 whose value differed from the first), `loops`, the module's `wasm` hash from
@@ -89,6 +90,25 @@ the VM, the cart's own file read (through the VFS, the last file held open) and
 the config lookup, run on the task, so the thread never touches MicroPython.
 One session at a time, never beside a `start()` run.
 
+**A cart's `par` items run on the session's lanes** (the proposal's
+"The cart's own work across the cores"): one thread on each core but the
+session's -- the S3s' and P4s' core 0 -- at the session's priority, pinned,
+with the run stack's size and placement, started the first time a cart calls
+`par` and joined before the runtime is torn down (`moy_wasm_session_lanes`,
+`_lane_go`, `_lane_wait`). libmoy's binding fills each with a sibling
+instance of the cart over the same linear memory (the fork's
+`wasm_runtime_instantiate_sibling`: its own globals, tables and exec env, the
+memory borrowed) and the calling core and the lane each take the next untaken
+item until none is left, so a core the display keeps busy takes fewer. At the
+session's priority a lane runs below everything else on core 0 -- the flush
+feed and fold, the radios, IDF's own tasks -- and only takes what they leave;
+work it has not started when the calling core has taken every item is taken
+back rather than waited for. `moy_wasm.lanes()` reports what the lanes did
+since it was last asked: work handed over, work taken back unstarted, and the
+microseconds from handing over to starting and from starting to finishing. A
+board declines lanes with `MOY_WASM_ITEM_LANES` 0, and then a cart's items
+run on the session's core, in order, as on any one-core host.
+
 Where a board finds a cart's compiled module is host policy: `<main>.<chip>.aot`
 beside `main.wasm` in the cart's folder, `CHIP` naming the chip
 (`tools/wasm_cart.py` builds it; `moycore_glue.aot_path` finds it). A cart with
@@ -120,6 +140,7 @@ nothing else. During a run:
 | linear memory, AOT data sections, any runtime allocation of 1 KB or more | PSRAM only (`WASM_ESPIDF_PSRAM_THRESHOLD` in the fork's esp-idf platform) |
 | the run's stack | per board, `MOY_WASM_STACK_BYTES` / `MOY_WASM_STACK_PSRAM` in `mpconfigboard.h`: 16 KB in PSRAM on every board |
 | the thread's control block | internal SRAM, under 1 KB |
+| a `par` lane, once a cart calls `par` | its thread's stack as the run stack's (16 KB, PSRAM) and control block (internal, under 1 KB); the sibling instance and its exec env, from the pool |
 
 **A load PSRAM cannot serve is refused**, never served from internal SRAM:
 the fork's allocator returns NULL for the text and for any data allocation over
@@ -167,7 +188,8 @@ no EDIT (`runtime/player.py`'s `fit_notice`). The footprint is the file's
 block (which the linear memory takes back), the pool, the module's own size
 for the text and data the loader maps, and the run stack; it over-counts the
 text by the module's relocations and symbols, so a cart it passes has the
-room.
+room. A `par` lane is not in it: a lane whose stack or instance cannot be
+made takes no items, and the session's core runs them all.
 
 A load that runs out of memory anyway -- the heap in more pieces than the
 free total suggests -- gets the same notice: every allocation failure on the
@@ -342,7 +364,8 @@ WAMR's loop-edge checks (`check_suspend_flags`) are emitted only for
 shared-memory modules under `--enable-multi-thread`, so stopping such a loop
 takes a compiler change in the fork — a flag the key would then carry — or the
 board restarting. `tests/on_glass.py`'s `wasm_runaway_runs_to_its_end` pins the
-current answer.
+current answer. A `par` item is no different: the call that handed it over
+waits for it, so an item that never returns holds the cart where it is.
 
 ## Testing
 
@@ -364,7 +387,8 @@ current answer.
   fit report (what it asks `footprint()`, through the store's gate).
 - `tests/test_wasm_cart.py`: the same import table on the host, over WAMR built
   for Linux at this pin (`runtime/wasm_binding.py`) — the hello cart's pixel
-  golden, the hooks under the tick model, a trap, quit, the runtime-missing
+  golden, the hooks under the tick model, par's items (one after another on
+  the host), a trap, quit, the runtime-missing
   panel, the fit notice (the footprint against the header's rule, the huge
   fixture past any board, the host's limit, a load that still runs out), a
   folder in the cart reading as a missing file, and the store's handling of a
@@ -378,7 +402,9 @@ current answer.
   stack placements, the termination answer, a
   Lua cart after a wasm run, a load/unload loop under a live cart and WiFi,
   and a run with WiFi and BLE up; then the Player path — the hello and blit
-  carts run from the launcher at their fps floors, a cart with no module for
+  carts run from the launcher at their fps floors, the Par fixture's items
+  across the cores leaving what the same items in order leave, with the
+  board's lane having run some of them, a cart with no module for
   this chip refused, a cart whose module was tampered with after signing
   refused, the hello cart built unsigned opening the "Not signed." notice with
   Unknown sources off and running with it on (the tampered cart still refused
@@ -390,4 +416,5 @@ current answer.
   key (a suite without it skips the wasm checks, saying why), and push them
   into the board's store: the phase-1 modules under `wasm_hello/`, which is
   not a `.moy` folder and never lists as a cart, and the fixture carts as
-  `wasm_hello.moy`, `wasm_blit.moy`, `wasm_huge.moy` and `wasm_readdir.moy`.
+  `wasm_hello.moy`, `wasm_blit.moy`, `wasm_par.moy`, `wasm_huge.moy` and
+  `wasm_readdir.moy`.

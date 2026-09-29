@@ -31,6 +31,8 @@
 
 #include <__verbose_abort>
 
+#include "moy.h"
+
 extern "C" {
 extern unsigned char __heap_base;
 extern unsigned char __heap_end;
@@ -238,6 +240,44 @@ int32_t __imported_wasi_snapshot_preview1_fd_fdstat_get(int32_t fd, int32_t out)
 {
     (void)fd, (void)out;
     return WASI_EBADF;
+}
+
+// par's items: the cart's one _par export runs the job par was handed, on a
+// stack of its own for each item. The heap above is not for them: an item
+// allocates nothing.
+struct CartJob {
+    void (*fn)(int i, void *ctx);
+    void *ctx;
+};
+
+const int ITEMS = 4;
+const size_t ITEM_STACK = 2 * 1024;
+alignas(16) unsigned char item_stacks[ITEMS][ITEM_STACK];
+
+__attribute__((export_name("_par"))) void cart_item(int32_t i, int32_t arg)
+{
+    const CartJob *job = (const CartJob *)(uintptr_t)arg;
+    job->fn(i, job->ctx);
+}
+
+void cart_par(int n, void (*fn)(int i, void *ctx), void *ctx)
+{
+    CartJob job = {fn, ctx};
+    if (n > ITEMS) __builtin_trap();
+    moy_par(n, (int32_t)(uintptr_t)&job, item_stacks, (int32_t)ITEM_STACK);
+}
+
+// The most any item's stack held, in bytes: the untouched tail of each is
+// still the zeros it started as.
+size_t cart_item_stack_peak(void)
+{
+    size_t most = 0;
+    for (int k = 0; k < ITEMS; k++) {
+        size_t low = 0;
+        while (low < ITEM_STACK && !item_stacks[k][low]) low++;
+        if (ITEM_STACK - low > most) most = ITEM_STACK - low;
+    }
+    return most;
 }
 
 size_t cart_heap_peak(void) { return peak; }

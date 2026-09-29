@@ -1780,6 +1780,34 @@ wasm_runtime_deinstantiate(WASMModuleInstanceCommon *module_inst)
     wasm_runtime_deinstantiate_internal(module_inst, false);
 }
 
+WASMModuleInstanceCommon *
+wasm_runtime_instantiate_sibling(WASMModuleInstanceCommon *module_inst,
+                                 uint32 stack_size, char *error_buf,
+                                 uint32 error_buf_size)
+{
+#if WASM_ENABLE_INTERP != 0
+    if (module_inst->module_type == Wasm_Module_Bytecode)
+        return (WASMModuleInstanceCommon *)wasm_instantiate_sibling(
+            (WASMModuleInstance *)module_inst, stack_size, error_buf,
+            error_buf_size);
+#endif
+#if WASM_ENABLE_AOT != 0
+    if (module_inst->module_type == Wasm_Module_AoT)
+        return (WASMModuleInstanceCommon *)aot_instantiate_sibling(
+            (AOTModuleInstance *)module_inst, stack_size, error_buf,
+            error_buf_size);
+#endif
+    set_error_buf(error_buf, error_buf_size,
+                  "Instantiate sibling failed, invalid module type");
+    return NULL;
+}
+
+void
+wasm_runtime_deinstantiate_sibling(WASMModuleInstanceCommon *sibling)
+{
+    wasm_runtime_deinstantiate_internal(sibling, true);
+}
+
 WASMModuleCommon *
 wasm_runtime_get_module(WASMModuleInstanceCommon *module_inst)
 {

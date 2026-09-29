@@ -348,6 +348,25 @@ def test_a_folder_reads_as_a_missing_file(tmp_path):
     assert _pmem(ws)[:3] == [0, 0, size], _pmem(ws)[:3]
 
 
+def test_par_leaves_what_running_the_items_in_order_leaves(tmp_path):
+    """The Par Wasm fixture checks itself every frame: par's eight items,
+    each on the stack the rule gives it, against the same eight called one
+    after another -- no byte differs, every item saw its own stack pointer
+    and the caller's came back. The host runs par's items in order; the
+    boards' suites run the same fixture across their cores."""
+    _binding_or_skip()
+
+    def _par(root):
+        wasm_cart.build(os.path.join(FIXTURES, "par.moy"), os.path.join(root, "par.moy"))
+    ws = host_app.build_workstation(_store(tmp_path, _par))
+    open_cart(ws, "Par Wasm")
+    assert ws.player.cart_error is None, ws.player.cart_error
+    _frames(ws, 5)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    diff, frames, bad_sp, bad_caller = _pmem(ws)[:4]
+    assert frames >= 3 and (diff, bad_sp, bad_caller) == (0, 0, 0), _pmem(ws)[:5]
+
+
 def test_quit_ends_the_cart_as_its_own_choice(tmp_path):
     _binding_or_skip()
     ws = host_app.build_workstation(_store(

@@ -40,6 +40,12 @@ against the console except two that need the VM -- `read`, the cart's own
 folder through the VFS, and `cfg`, the config dict -- and those run on the
 MicroPython task through `moy_wasm_on_vm` while it waits on the call.
 
+A cart's `par` items run on the engine's lanes: moycore hands the binding
+`moy_wasm_session_lanes()` of them and their `lane_go`/`lane_wait`, and the
+binding runs a sibling instance of the cart on each (the engine's README
+says where they run). An item reaches no console state -- an import from one
+traps -- so nothing here is touched from another core.
+
 **A compiled cart's samples go to the speaker's mixer.** `snd` (22,050 Hz
 mono, a queue of 2,048 frames; the proposal's PCM audio section) is libmoy's
 `moy_stream`, and where the image carries `moy_audio` (its cmake defines

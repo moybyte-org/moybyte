@@ -26,7 +26,12 @@ What is pinned here:
     boulevard, the credits), its buttons (left and right step the cuts and
     wrap, A shows the HUD, read back glyph by glyph), and its heap's worst
     known case -- the boulevard loaded after the pursuit's queues -- inside
-    the heap the build requires.
+    the heap the build requires;
+  * both carts draw on two cores (`par`) as they do on one: the frame their
+    bands make, clearing and widening each its own rows, is byte for byte
+    the one Jet makes in a single pass, and no item comes near the end of its
+    stack. The host runs par's items one after another; the boards' suites
+    run them across the cores.
 
 The build needs wasi-sdk 24 (tools/jet_cart.py fetches it by sha256 when it is
 absent) and the host wasm binding. Without either the tests SKIP on a bench
@@ -57,6 +62,10 @@ DT = 1.0 / 60.0            # the cart's declared rate: one logic tick a frame
 HUD_H = 10
 CART_BUTTONS = ("left", "right", "up", "down", "a", "b")
 PM_HEAP_PEAK_KB, PM_HEAP_KB = 0, 1
+PM_ITEM_STACK = 5
+# The bytes of stack each par item has (runtime.cpp's ITEM_STACK); the most
+# an item may use of it, leaving the rest for a deeper frame than any seen.
+ITEM_STACK = 2048
 
 
 def _required():
@@ -351,6 +360,23 @@ def test_the_heap_fits_the_declared_memory(tmp_path, jet):
     assert peak * 4 <= size * 3, (peak, size)
 
 
+@pytest.mark.parametrize("width", WIDTHS)
+def test_two_cores_draw_the_frame_one_core_draws(tmp_path, jet, width):
+    """The teapot's bands -- each clearing, rasterizing and widening its own
+    rows -- make the frame Jet makes in one pass, at every width, over a
+    flight that crosses the near plane."""
+    frames = []
+    for cores in (1, 2):
+        ws = _ws(tmp_path / str(cores), jet, hud=False, cores=cores, shading="phong",
+                 **WIDTHS[width])
+        _frames(ws, 20, ("up", "right"))
+        _frames(ws, 10, ("down", "a"))
+        frames.append(bytes(ws.sys_canvas._buf))
+        pm = _pmem(ws)
+        assert pm[PM_ITEM_STACK] <= ITEM_STACK // 2, pm[PM_ITEM_STACK]
+    assert frames[0] == frames[1]
+
+
 @pytest.mark.parametrize("width", ("full", "half"))
 def test_flying_through_the_teapot_does_not_trap(tmp_path, jet, width):
     """Forward through the model and out the other side, climbing, then
@@ -438,6 +464,24 @@ def test_the_film_s_heap_holds_its_worst_known_case(tmp_path, jet):
     peak, size = pm[PM_HEAP_PEAK_KB], pm[PM_HEAP_KB]
     need = jet.cart_spec("esp88").heap_min // 1024
     assert 0 < peak <= need <= size, (peak, need, size)
+
+
+FILM_PM_ITEM_STACK = 7
+
+
+@pytest.mark.parametrize("interlaced", (True, False))
+def test_the_film_on_two_cores_is_the_film_on_one(tmp_path, jet, interlaced):
+    """The film's raster and scan-out in two bands each make the frames the
+    single pass makes: the pursuit, with its reflections and sprites, both
+    fields."""
+    frames = []
+    for cores in (1, 2):
+        ws = _film(tmp_path / str(cores), jet, hud=False, cut=8, cores=cores,
+                   interlaced=interlaced)
+        _frames(ws, 45, dt=FILM_DT)
+        frames.append(bytes(ws.sys_canvas._buf))
+        assert _pmem(ws)[FILM_PM_ITEM_STACK] <= ITEM_STACK // 2
+    assert frames[0] == frames[1]
 
 
 @pytest.mark.parametrize("interlaced", (True, False))

@@ -2,5 +2,6 @@
   "width": "full",
   "interlaced": false,
   "shading": "cycle",
-  "hud": true
+  "hud": true,
+  "cores": 2
 }

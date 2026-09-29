@@ -12,7 +12,9 @@
  * a JavaScript embedder's own engine under MOY_WASM_JS. What differs is four
  * small functions -- which binding a call belongs to, how a trap is raised,
  * and how the cart's memory is read and written -- and they are the first
- * thing below. Everything after them is one body of code.
+ * thing below, and how par runs the cart's items: on the host's lanes over
+ * WAMR, one after another through the embedder under JavaScript. Everything
+ * else is one body of code.
  *
  * Every pointer a cart hands over is an offset into its linear memory and is
  * bounds-checked before it is touched: by the engine's adapter for a '*~'
@@ -55,14 +57,22 @@ static const char *const HOOKS[3] = { "_init", "_update", "_draw" };
 
 typedef wasm_exec_env_t env_t;
 
+/* What an import called from one of par's items traps with. */
+static const char ITEM_IMPORT[] = "moy: an import called from a par item";
+
 /* The binding behind an import call, or NULL -- and a trap -- when the
- * instance has none yet: a start function reaching the console. */
+ * instance has none yet (a start function reaching the console) or the call
+ * came from one of par's items, on whichever core it ran. */
 static moy_wasm *bound(env_t env)
 {
     wasm_module_inst_t inst = wasm_runtime_get_module_inst(env);
     moy_wasm *w = (moy_wasm *)wasm_runtime_get_custom_data(inst);
     if (!w)
         wasm_runtime_set_exception(inst, "moy: an import ran before the cart was bound");
+    else if (w->items) {
+        wasm_runtime_set_exception(inst, ITEM_IMPORT);
+        return NULL;
+    }
     return w;
 }
 
@@ -95,11 +105,20 @@ typedef moy_wasm *env_t;
 /* A range that leaves linear memory, in the words WAMR uses for it. */
 static const char OUT_OF_BOUNDS[] = "out of bounds memory access";
 
-static moy_wasm *bound(env_t w) { return w; }
+static const char ITEM_IMPORT[] = "moy: an import called from a par item";
 
 static void trap(moy_wasm *w, const char *msg)
 {
     if (!w->trap) w->trap = msg;
+}
+
+static moy_wasm *bound(env_t w)
+{
+    if (w->items) {
+        trap(w, ITEM_IMPORT);
+        return NULL;
+    }
+    return w;
 }
 
 /* A copy of `n` bytes at linear-memory offset `off`, alive until the import
@@ -777,6 +796,201 @@ static int32_t w_snd(env_t e, uint32_t pcm, uint32_t n)
     return (int32_t)got;
 }
 
+/* -- par: the cart's own work, across the cores ------------------------------ */
+
+/* par(n, arg, stacks, size): _par(i, arg) for every i in [0, n), each with
+ * the cart's C stack at the top of its own `size` bytes, stacks + (i + 1) *
+ * size, returning when all have returned. Where the host has lanes, the
+ * calling core and the lanes take the items in turn, the next untaken one
+ * each, so a core that is busier takes fewer; otherwise they run here, in
+ * order. An item calls no import -- `items` makes every one trap -- so it
+ * touches nothing but the cart's memory, and the frame is the same whichever
+ * core ran what.
+ *
+ * A trap in an item traps par with the message of the lowest item that
+ * trapped, which is the one a run in order stops at: items are taken in
+ * order and a core skips only items above one a core has already trapped
+ * on, so every item below the lowest trap has run. */
+static int par_ok(moy_wasm *w, int32_t n, uint32_t stacks, uint32_t size)
+{
+#ifndef MOY_WASM_JS
+    if (!w->item) {
+        trap(w, "moy: par without the _par and __stack_pointer exports");
+        return 0;
+    }
+#endif
+    if (n < 0) {
+        trap(w, "moy: par's count is negative");
+        return 0;
+    }
+    if (!size || (size & 15u) || (stacks & 15u)) {
+        trap(w, "moy: par's stacks are not 16-byte aligned");
+        return 0;
+    }
+    return span(w, stacks, (uint64_t)(uint32_t)n * size) != NULL;
+}
+
+#ifdef MOY_WASM
+
+/* "Exception: " is WAMR's prefix on the message it hands back, and its own
+ * again when the message is set. */
+static const char *bare(const char *msg)
+{
+    static const char pre[] = "Exception: ";
+    if (!msg) return "the cart trapped";
+    return strncmp(msg, pre, sizeof pre - 1) ? msg : msg + sizeof pre - 1;
+}
+
+/* Item i on lane l. 0 when it trapped, which the lane records and clears. */
+static int item_on(moy_wasm *w, moy_wasm_lane *l, int32_t i)
+{
+    uint32_t argv[2], saved, top;
+    int ok;
+    top = w->job_stacks + (uint32_t)(i + 1) * w->job_size;
+    memcpy(&saved, l->sp, 4);
+    memcpy(l->sp, &top, 4);
+    argv[0] = (uint32_t)i;
+    argv[1] = (uint32_t)w->job_arg;
+    ok = wasm_runtime_call_wasm(l->env, l->item, 2, argv);
+    memcpy(l->sp, &saved, 4);
+    if (ok) return 1;
+    snprintf(l->trap, sizeof l->trap, "%s", bare(wasm_runtime_get_exception(l->inst)));
+    wasm_runtime_clear_exception(l->inst);
+    l->trapped = i;
+    return 0;
+}
+
+/* Has any core trapped on an item below i? */
+static int trapped_below(moy_wasm *w, int32_t i)
+{
+    int k;
+    for (k = 0; k <= w->job_lanes; k++)
+        if (w->lane[k].trapped >= 0 && w->lane[k].trapped < i) return 1;
+    return 0;
+}
+
+/* The next untaken item, or job_n when none is left. */
+static int32_t take(moy_wasm *w)
+{
+#if defined(__GNUC__)
+    if (w->job_lanes)
+        return __atomic_fetch_add(&w->job_next, 1, __ATOMIC_RELAXED);
+#endif
+    return w->job_next++;
+}
+
+/* Lane l's items: the next untaken one until none is left or it traps. */
+static void items_of(moy_wasm *w, moy_wasm_lane *l)
+{
+    int32_t i;
+    while ((i = take(w)) < w->job_n)
+        if (!trapped_below(w, i) && !item_on(w, l, i)) break;
+}
+
+static int lane_sp(moy_wasm_lane *l)
+{
+    wasm_global_inst_t g;
+    if (!wasm_runtime_get_export_global_inst(l->inst, MOY_WASM_SP, &g)
+        || g.kind != WASM_I32 || !g.is_mutable)
+        return 0;
+    l->sp = (uint8_t *)g.global_data;
+    return 1;
+}
+
+/* On lane l's thread: its own instance the first time, then items. A lane
+ * that cannot make one is dead and takes none, now or later. */
+static void lane_work(void *job)
+{
+    moy_wasm_lane *l = (moy_wasm_lane *)job;
+    moy_wasm *w = l->w;
+    if (!l->inst) {
+        char err[128];
+        uint32_t stack = w->lane_stack ? w->lane_stack : 64u * 1024u;
+        l->inst = wasm_runtime_instantiate_sibling(w->inst, stack, err, sizeof err);
+        if (l->inst) {
+            wasm_runtime_set_custom_data(l->inst, w);
+            l->env = wasm_runtime_create_exec_env(l->inst, stack);
+            l->item = wasm_runtime_lookup_function(l->inst, MOY_WASM_ITEM);
+        }
+        if (!l->inst || !l->env || !l->item || !lane_sp(l)) {
+            l->dead = 1;
+            return;
+        }
+    }
+    items_of(w, l);
+}
+
+static void lanes_free(moy_wasm *w)
+{
+    int k;
+    for (k = 1; k <= MOY_WASM_LANES; k++) {
+        moy_wasm_lane *l = &w->lane[k];
+        if (l->env) wasm_runtime_destroy_exec_env(l->env);
+        if (l->inst) wasm_runtime_deinstantiate_sibling(l->inst);
+        memset(l, 0, sizeof *l);
+        l->w = w;
+        l->k = k;
+    }
+}
+
+static void w_par(env_t e, int32_t n, int32_t arg, uint32_t stacks, uint32_t size)
+{
+    moy_wasm *w = bound(e);
+    int k, lanes = 0, go[MOY_WASM_LANES + 1];
+    int32_t low = -1;
+    const char *msg = NULL;
+    if (!w || !par_ok(w, n, stacks, size) || n == 0) return;
+#if defined(__GNUC__)
+    if (w->lane_go && w->lane_wait) lanes = w->lanes;
+#endif
+    if (lanes > MOY_WASM_LANES) lanes = MOY_WASM_LANES;
+    if (lanes > n - 1) lanes = n - 1;
+    w->job_n = n;
+    w->job_arg = arg;
+    w->job_stacks = stacks;
+    w->job_size = size;
+    w->job_lanes = lanes;
+    w->job_next = 0;
+    for (k = 0; k <= lanes; k++) w->lane[k].trapped = -1;
+    w->items = 1;
+    for (k = 1; k <= lanes; k++)
+        go[k] = !w->lane[k].dead
+                && w->lane_go(w->lane_user, k, lane_work, &w->lane[k]) == 0;
+    items_of(w, &w->lane[0]);
+    for (k = 1; k <= lanes; k++)
+        if (go[k]) w->lane_wait(w->lane_user, k);
+    w->items = 0;
+    for (k = 0; k <= lanes; k++) {
+        if (w->lane[k].trapped >= 0 && (low < 0 || w->lane[k].trapped < low)) {
+            low = w->lane[k].trapped;
+            msg = w->lane[k].trap;
+        }
+    }
+    if (msg) trap(w, msg);
+}
+
+#else /* MOY_WASM_JS: the embedder runs each item, here, in order */
+
+static void w_par(env_t e, int32_t n, int32_t arg, uint32_t stacks, uint32_t size)
+{
+    moy_wasm *w = bound(e);
+    int32_t i;
+    if (!w || !par_ok(w, n, stacks, size)) return;
+    w->items = 1;
+    for (i = 0; i < n; i++)
+        if (moy_wasm_js_item(w, i, arg, stacks + (uint32_t)(i + 1) * size)) break;
+    w->items = 0;
+}
+
+void moy_wasm_item_trap(moy_wasm *w, const char *msg)
+{
+    if (w->trap) return;
+    snprintf(w->item_trap, sizeof w->item_trap, "%s", msg ? msg : "the cart trapped");
+    w->trap = w->item_trap;
+}
+
+#endif
+
 /* -- the table ------------------------------------------------------------- */
 
 /* One row per import, in the order of proposals/wasm-imports.json. The
@@ -839,6 +1053,7 @@ static const NativeSymbol NATIVES[] = {
     {"blit565", FN(w_blit565), "(i)", NULL},
     {"read", FN(w_read), "(*~i*~)i", NULL},
     {"snd", FN(w_snd), "(ii)i", NULL},
+    {"par", FN(w_par), "(iiii)", NULL},
 };
 
 const NativeSymbol *moy_wasm_natives(uint32_t *count)
@@ -1071,11 +1286,66 @@ static int func_type_index(reader imports, reader funcs, uint32_t index,
     return 1;
 }
 
+/* What par asks of the module's exports, given what the check found: `par`
+ * whether it imports par, `item` and `sp` 1 for _par at (i32, i32) -> () and
+ * a mutable i32 __stack_pointer, -1 for either at another type, 0 absent. */
+static int par_exports(int par, int item, int sp, char *err, size_t errlen)
+{
+    if (item < 0)
+        return fail(err, errlen, "%s is not at the proposal's type", MOY_WASM_ITEM);
+    if (sp < 0)
+        return fail(err, errlen, "%s is not a mutable i32 global", MOY_WASM_SP);
+    if (par && !item)
+        return fail(err, errlen, "imports par but has no %s export", MOY_WASM_ITEM);
+    if (par && !sp)
+        return fail(err, errlen, "imports par but does not export its %s", MOY_WASM_SP);
+    return 0;
+}
+
+/* Global `index` of the module's own globals in `globals`: its type byte and
+ * mutability. Imported globals are refused before this is asked. */
+static int global_at(reader globals, uint32_t index, uint8_t *type, uint8_t *mut)
+{
+    uint32_t n, i;
+    uint8_t op;
+    if (!rd_leb(&globals, &n) || index >= n) return 0;
+    for (i = 0; i <= index; i++) {
+        if (!rd_byte(&globals, type) || !rd_byte(&globals, mut)) return 0;
+        /* The initializer: skip to its end opcode. A constant expression's
+         * immediates are LEBs and fixed-width floats, none of which holds a
+         * bare 0x0B before its own end; read op by op to be sure. */
+        for (;;) {
+            if (!rd_byte(&globals, &op)) return 0;
+            if (op == 0x0B) break;
+            if (op == 0x41 || op == 0x42 || op == 0x23 || op == 0xD2) {
+                uint32_t v;
+                if (op == 0x42) {           /* i64.const: up to ten bytes */
+                    uint8_t b;
+                    do { if (!rd_byte(&globals, &b)) return 0; } while (b & 0x80u);
+                } else if (!rd_leb(&globals, &v)) {
+                    return 0;
+                }
+            } else if (op == 0x43) {
+                if ((size_t)(globals.end - globals.p) < 4) return 0;
+                globals.p += 4;
+            } else if (op == 0x44) {
+                if ((size_t)(globals.end - globals.p) < 8) return 0;
+                globals.p += 8;
+            } else if (op == 0xD0) {
+                if (!rd_byte(&globals, &op)) return 0;
+            } else {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
 int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
                          char *err, size_t errlen)
 {
     reader r, sec[12];
-    int have[12] = {0}, seen[3] = {0, 0, 0}, memory = 0, h;
+    int have[12] = {0}, seen[3] = {0, 0, 0}, memory = 0, h, par = 0, item = 0, sp = 0;
     uint32_t n = 0, i;
 
     if (!wasm || size < 8 || memcmp(wasm, "\0asm\1\0\0\0", 8) != 0)
@@ -1121,6 +1391,7 @@ int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
         if (!row || !row_type_is(sec[1], type, row))
             return fail(err, errlen, "imports %.*s.%.*s, which is not in the import table at that type",
                         (int)ml, (const char *)mod, (int)nl, (const char *)name);
+        if (nl == 3 && !memcmp(name, "par", 3)) par = 1;
     }
 
     r = sec[7];
@@ -1136,7 +1407,18 @@ int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
             memory = 1;
             continue;
         }
+        if (kind == 3 && nl == strlen(MOY_WASM_SP) && !memcmp(name, MOY_WASM_SP, nl)) {
+            uint8_t gt, gm;
+            sp = global_at(sec[6], index, &gt, &gm) && gt == 0x7F && gm == 1 ? 1 : -1;
+            continue;
+        }
         if (kind != 0) continue;
+        if (nl == strlen(MOY_WASM_ITEM) && !memcmp(name, MOY_WASM_ITEM, nl)) {
+            item = func_type_index(sec[2], sec[3], index, &type)
+                   && type_at(sec[1], type, &params, &np, &res, &nr)
+                   && nr == 0 && np == 2 && params[0] == 0x7F && params[1] == 0x7F ? 1 : -1;
+            continue;
+        }
         for (h = 0; h < 3; h++) {
             if (strlen(HOOKS[h]) != nl || memcmp(HOOKS[h], name, nl)) continue;
             if (!func_type_index(sec[2], sec[3], index, &type)
@@ -1154,7 +1436,7 @@ int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
         return fail(err, errlen, "no memory export");
     if (have[8])
         return fail(err, errlen, "the module has a start function; nothing may run before _init");
-    return 0;
+    return par_exports(par, item, sp, err, errlen);
 }
 
 #ifdef MOY_WASM
@@ -1176,7 +1458,7 @@ int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
                    uint32_t pages, char *err, size_t errlen)
 {
     int32_t i, n;
-    int seen[3] = {0, 0, 0}, memory = 0;
+    int seen[3] = {0, 0, 0}, memory = 0, par = 0, item = 0, sp = 0;
     wasm_import_t im;
     wasm_export_t ex;
 
@@ -1194,6 +1476,7 @@ int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
         if (!im.linked)
             return fail(err, errlen, "imports %s.%s, which is not in the import table at that type",
                         im.module_name, im.name);
+        if (!strcmp(im.name, "par")) par = 1;
     }
 
     n = wasm_runtime_get_export_count(module);
@@ -1204,7 +1487,16 @@ int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
             memory = 1;
             continue;
         }
+        if (ex.kind == WASM_IMPORT_EXPORT_KIND_GLOBAL && !strcmp(ex.name, MOY_WASM_SP)) {
+            sp = wasm_global_type_get_valkind(ex.u.global_type) == WASM_I32
+                 && wasm_global_type_get_mutable(ex.u.global_type) ? 1 : -1;
+            continue;
+        }
         if (ex.kind != WASM_IMPORT_EXPORT_KIND_FUNC) continue;
+        if (!strcmp(ex.name, MOY_WASM_ITEM)) {
+            item = hook_type(ex.u.func_type, 2u, WASM_I32) ? 1 : -1;
+            continue;
+        }
         for (h = 0; h < 3; h++) {
             if (strcmp(ex.name, HOOKS[h]) != 0) continue;
             if (!hook_type(ex.u.func_type, h == 1 ? 1u : 0u, WASM_F32))
@@ -1217,7 +1509,7 @@ int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
             return fail(err, errlen, "no %s export", HOOKS[i]);
     if (!memory)
         return fail(err, errlen, "no memory export");
-    return 0;
+    return par_exports(par, item, sp, err, errlen);
 }
 
 #endif /* MOY_WASM */
@@ -1255,7 +1547,7 @@ static void attach(moy_wasm *w, moy_console *con)
     w->con = con;
     w->screen = w->target = con->canvas;
     w->n_layers = 0;
-    w->in_draw = w->blits = w->quitting = 0;
+    w->in_draw = w->blits = w->quitting = w->items = 0;
     w->owed = w->kept = NULL;
     w->snd_level = w->snd_ms = w->snd_rem = 0;
     w->snd_clocked = 0;
@@ -1265,7 +1557,7 @@ static void attach(moy_wasm *w, moy_console *con)
 
 int moy_wasm_open(moy_wasm *w, moy_console *con, wasm_exec_env_t env)
 {
-    int h;
+    int h, k;
     attach(w, con);
     w->env = env;
     w->inst = wasm_runtime_get_module_inst(env);
@@ -1273,6 +1565,16 @@ int moy_wasm_open(moy_wasm *w, moy_console *con, wasm_exec_env_t env)
         w->hooks[h] = wasm_runtime_lookup_function(w->inst, HOOKS[h]);
         if (!w->hooks[h]) return -1;
     }
+    for (k = 0; k <= MOY_WASM_LANES; k++) {
+        memset(&w->lane[k], 0, sizeof w->lane[k]);
+        w->lane[k].w = w;
+        w->lane[k].k = k;
+    }
+    w->item = wasm_runtime_lookup_function(w->inst, MOY_WASM_ITEM);
+    w->lane[0].inst = w->inst;
+    w->lane[0].env = env;
+    if (w->item && !lane_sp(&w->lane[0])) w->item = NULL;
+    w->lane[0].item = w->item;
     wasm_runtime_set_custom_data(w->inst, w);
     return 0;
 }
@@ -1373,6 +1675,7 @@ void moy_wasm_close(moy_wasm *w)
     w->n_layers = 0;
     w->owed = w->kept = NULL;
 #ifdef MOY_WASM
+    lanes_free(w);
     if (w->inst) wasm_runtime_set_custom_data(w->inst, NULL);
 #endif
 }

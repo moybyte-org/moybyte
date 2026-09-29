@@ -39,6 +39,12 @@ MOY_IMPORT("read") int32_t moy_read(const char *name, int32_t name_len, int32_t 
 
 MOY_IMPORT("pmem") int32_t moy_pmem(int32_t slot, int32_t v, int32_t write);
 
+// _par(i, arg) for every i in [0, n): across the console's cores where it has
+// more than one, in order where it has one, each item with its C stack at the
+// top of its own `size` bytes from `stacks` (16-aligned); returns when every
+// item has. An item calls no import and writes nothing another item reads.
+MOY_IMPORT("par") void moy_par(int32_t n, int32_t arg, void *stacks, int32_t size);
+
 #ifdef __cplusplus
 }
 #endif

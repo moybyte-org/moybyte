@@ -34,6 +34,8 @@ extern "C" void __wasm_call_ctors(void);
 extern "C" size_t cart_heap_peak(void);
 extern "C" size_t cart_heap_size(void);
 extern "C" unsigned char __stack_low, __stack_high;
+extern "C" void cart_par(int n, void (*fn)(int i, void *ctx), void *ctx);
+extern "C" size_t cart_item_stack_peak(void);
 
 #define EXPORT(name) __attribute__((export_name(name)))
 
@@ -57,11 +59,13 @@ alignas(16) uint16_t fields[2][FIELD_W * FIELD_H];
 // pmem slots a test or a measurement reads back. Per cut, over its most
 // recent play of a second or more: the mean ms Jet took (render and the
 // film's effects) and the frames a second, both in tenths.
-enum { PM_HEAP_PEAK_KB, PM_HEAP_KB, PM_TRIS, PM_FPS10, PM_RENDER_MS10, PM_CUT, PM_STACK_KB };
+enum { PM_HEAP_PEAK_KB, PM_HEAP_KB, PM_TRIS, PM_FPS10, PM_RENDER_MS10, PM_CUT, PM_STACK_KB,
+       PM_ITEM_STACK };
 const int PM_CUT_RENDER_MS10 = 16, PM_CUT_FPS10 = 32;
 
 Renderer::Scene *scene = nullptr;
 bool ready = false, interlaced = true, hud = false;
+int cores = 2;
 float clock_s = 0;
 // The film, then the second of black it holds before the example restarts
 // the board; the cart plays it again instead.
@@ -200,6 +204,36 @@ void play()
     if (Film::shot != shown_cut) on_cut();
 }
 
+// On two cores the raster runs as Jet's own ESP32-S3 runtime runs it: the
+// frame's setup on one core, then the field's rows in two bands at once, each
+// into its own rows and its own triangle flags, merged after; a band reads
+// the other field for its reflections, never the rows the other band draws.
+// The scan-out's rows are shared the same way.
+struct Bands {
+    Renderer::Scene *scene;
+    std::vector<uint8_t> flags[2];
+};
+Bands bands;
+const int SPLIT = (FILM_H / 2) & ~1;
+
+void band(int i, void *ctx)
+{
+    Bands *b = static_cast<Bands *>(ctx);
+    b->scene->rasterizeBand(i ? SPLIT : 0, i ? FILM_H : SPLIT, b->flags[i].data());
+}
+
+void in_bands(Renderer::Scene &s)
+{
+    const int tris = s.lastFrameDrawnTriangles;
+    bands.scene = &s;
+    bands.flags[0].assign(tris ? tris : 1, 0);
+    bands.flags[1].assign(tris ? tris : 1, 0);
+    cart_par(2, band, &bands);
+    int count = 0;
+    for (int t = 0; t < tris; ++t) count += (bands.flags[0][t] | bands.flags[1][t]) != 0;
+    s.lastFrameRasterizedTriangles = count;
+}
+
 // One field into its buffer, reflecting the other, then the film's rain and
 // spray over it. The rows it drew: Jet draws the odd rows of an even frame.
 int render_field()
@@ -207,21 +241,20 @@ int render_field()
     const int parity = scene->frameCounter % 2 == 0 ? 1 : 0;
     scene->setFramebuffer(fields[parity]);
     scene->getRenderer()->reflectBuffer = fields[parity ^ 1];
-    scene->render();
+    if (cores == 2) scene->render(in_bands);
+    else scene->render();
     scene->lastFrameRasterizedTriangles += Film::effects(*scene);
     return parity;
 }
 
-// The rows of `parity` (both with -1) into the frame: each stored pixel
-// twice, then the sprites over the row in their z order.
-void scan_out(int parity)
+// The rows [y0, y1) of `parity` (both with -1) into the frame: each stored
+// pixel twice, then the sprites over the row in their z order.
+void scan_rows(int y0, int y1, int parity)
 {
-    const auto &sprites = scene->getSprites();
-    overlays.assign(sprites.begin(), sprites.end());
-    std::stable_sort(overlays.begin(), overlays.end(),
-                     [](const Sprite2D *a, const Sprite2D *b) { return a->zOrder < b->zOrder; });
     const int step = parity < 0 ? 1 : 2;
-    for (int y = parity < 0 ? 0 : parity; y < FILM_H; y += step) {
+    int y = y0;
+    if (parity >= 0 && (y & 1) != parity) ++y;
+    for (; y < y1; y += step) {
         const uint32_t *src = reinterpret_cast<const uint32_t *>(fields[y & 1] + (y >> 1) * FIELD_W);
         uint16_t *row = frame + (FILM_TOP + y) * CART_W;
         uint32_t *dst = reinterpret_cast<uint32_t *>(row);
@@ -231,6 +264,27 @@ void scan_out(int parity)
             dst[2 * i + 1] = (two >> 16) * 0x10001u;
         }
         Renderer::compositeSprites(row, CART_W, y, overlays.data(), (int)overlays.size());
+    }
+}
+
+int scan_parity;
+
+void scan_item(int i, void *)
+{
+    scan_rows(i ? SPLIT : 0, i ? FILM_H : SPLIT, scan_parity);
+}
+
+void scan_out(int parity)
+{
+    const auto &sprites = scene->getSprites();
+    overlays.assign(sprites.begin(), sprites.end());
+    std::stable_sort(overlays.begin(), overlays.end(),
+                     [](const Sprite2D *a, const Sprite2D *b) { return a->zOrder < b->zOrder; });
+    if (cores == 2) {
+        scan_parity = parity;
+        cart_par(2, scan_item, nullptr);
+    } else {
+        scan_rows(0, FILM_H, parity);
     }
 }
 
@@ -344,6 +398,7 @@ void report_memory()
     moy_pmem(PM_HEAP_PEAK_KB, (int)((cart_heap_peak() + 1023) / 1024), 1);
     moy_pmem(PM_HEAP_KB, (int)(cart_heap_size() / 1024), 1);
     moy_pmem(PM_STACK_KB, stack_used_kb(), 1);
+    moy_pmem(PM_ITEM_STACK, (int)cart_item_stack_peak(), 1);
 }
 
 // One cut's play: its frames and Jet's time over them, from its first drawn
@@ -412,6 +467,7 @@ EXPORT("_init") void cart_init(void)
     __wasm_call_ctors();
     interlaced = !cfg_is("interlaced", "0");
     hud = cfg_is("hud", "1");
+    cores = cfg_int("cores", 2) > 1 ? 2 : 1;
     if (assets) {
         Film::creditTexture.width = CREDITS_W;
         Film::creditTexture.height = CREDITS_H;

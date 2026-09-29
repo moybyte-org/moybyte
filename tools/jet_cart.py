@@ -316,6 +316,7 @@ def _compile(spec, sdk, memory, cached, verbose):
         def link(mem, extra=()):
             _run([cxx, "--target=wasm32-wasi", "-nostartfiles", "-Wl,--no-entry",
                   "-Wl,--strip-all", "-Wl,--stack-first",
+                  "-Wl,--export=__stack_pointer",
                   "-Wl,-z,stack-size=%d" % spec.stack,
                   "-Wl,--initial-memory=%d" % mem, "-Wl,--max-memory=%d" % mem]
                  + list(extra) + ["-o", out] + objs)

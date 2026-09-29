@@ -114,6 +114,13 @@ def test_a_full_frame_blit_cart_holds_its_floor(board, wasm_carts):
                                        WASM_BLIT_FPS_FLOOR)
 
 
+# par (proposals/wasm-runtime.md): a compiled cart's items on this board's
+# second core leave exactly what running them in order leaves, each on its
+# own stack, and the board's one lane runs some of them.
+def test_par_items_across_the_cores_match_them_in_order(board, wasm_carts):
+    on_glass.wasm_par_matches_items_in_order(board, lanes=1)
+
+
 # A compiled cart's frame goes to the glass from the cart's own memory
 # (native/moy_flush/moy_fold.h's frame fold): with the FPS chip on, every flush
 # is folded from the cart, and the bands are the composite the frame makes,

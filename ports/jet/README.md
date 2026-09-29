@@ -47,6 +47,7 @@ over it would have the console write the frame into its canvas first.
 | `interlaced` | `false`, `true` | Jet's `interlacedMode`: each frame renders every other row, alternating |
 | `shading` | `"cycle"`, `"flat"`, `"gouraud"`, `"phong"` | the example's three-second cycle, or one mode held |
 | `hud` | `true`, `false` | the HUD in the frame's top strip |
+| `cores` | `2`, `1` | the raster across the console's cores or on one (below) |
 
 Half width is a compile-time switch in Jet, so the teapot's module carries Jet twice —
 once as is, once with the switch on and its namespaces renamed on the
@@ -73,6 +74,7 @@ second of black.
 | `interlaced` | `true`, `false` | one field a frame, as the example plays it, or both |
 | `hud` | `false`, `true` | the HUD at launch |
 | `cut` | `1`–`12` | the cut it starts at |
+| `cores` | `2`, `1` | the raster and the scan-out across the console's cores or on one |
 
 It renders the way the example's ESP32 runtime (`components/esp32_jet`) does:
 Jet's half-width field buffers, one field a frame, the river reflecting the
@@ -93,13 +95,31 @@ The film's artwork — its textures, palettes, glow and credits — is read from
 `src/CreditMask.hpp`) rather than compiled in as initialised data, which a
 module carries a second time and a board holds a third while it loads.
 
+## Two cores
+
+Both carts draw with the console's second core the way Jet's own ESP32-S3
+runtime draws with it: the frame's setup -- the transform, the culling, the
+sort -- runs on one core, and the frame's rows are cut into bands that
+rasterize at once, each into its own rows and its own triangle flags, merged
+after. The cart hands the bands to the console through `par`
+(proposals/wasm-runtime.md in moy-spec), which runs them on as many cores as
+the console gives it, or one after another on a console with one; the frame
+is the same either way, which `tests/test_jet_cart.py` holds byte for byte
+against Jet's single pass. The teapot's bands also clear and widen their own
+rows, two bands for an interlaced frame and four for a whole one, so a core
+the display keeps busy takes fewer; ESP 88's two bands read the other field
+for their reflections, never each other's rows, and its scan-out is split the
+same way. An item has 2 KB of stack of its own (`runtime.cpp`) and uses under
+half a kilobyte, which the test holds too. What the second core buys, board
+by board, is #158's.
+
 ## Where they live
 
 | what | where |
 |---|---|
 | a cart's source folder: manifest, config, data, licences, `src/` | `teapot.moy/`, `esp88.moy/` |
 | the hooks, buttons, config, buffers and HUD | `<cart>/src/main.cpp` |
-| the imports a cart uses, from module `"moy"` only; the heap and the C library's edges; the HUD's glyphs, the console's font | `<cart>/src/moy.h`, `runtime.cpp`, `hud_font.h` — one body in both, which a test holds equal |
+| the imports a cart uses, from module `"moy"` only; the heap, `par`'s items and their stacks, and the C library's edges; the HUD's glyphs, the console's font | `<cart>/src/moy.h`, `runtime.cpp`, `hud_font.h` — one body in both, which a test holds equal |
 | the teapot's scene, compiled once per Jet build, and its Jet configuration | `teapot.moy/src/scene.cpp`, `JetConfig.hpp` |
 | Jet, vendored at the commit JetExamples pins | `jet/`, stamped in `jet_vendor.json` (`make vendor-jet`) |
 | the teapot's model, derived from the example's generated mesh | `teapot.moy/teapot.obj` (the same script) |
@@ -149,7 +169,7 @@ floor board's room at the launcher, so it runs on every console board.
 
 ESP 88: `"memory": 27` pages, 1,728 KB: a 16 KB stack (the film uses under
 6 KB, which the cart reports), then the frame, the two half-width fields and
-the artwork's arrays, then about 1.26 MB of heap. The heap holds each cut's
+the artwork's arrays, then about 1.25 MB of heap. The heap holds each cut's
 city, cars and cockpit, which the film builds when the cut begins and frees at
 the next, beside Jet's per-frame queues, which keep the capacity of the
 busiest frame drawn so far: the boulevard's city loaded after the pursuit's
@@ -185,8 +205,8 @@ sandbox.
 ESP 88 measures itself per cut: over each cut's most recent play of a second
 or more it writes the frames a second and the mean ms Jet took (render and the
 film's effects) into pmem, in tenths, at slots 32 + cut and 16 + cut (cut 0
-to 11), beside the heap's peak and size (slots 0 and 1, KB) and the stack it
-used (slot 6). One uncapped loop of the film fills all twelve. An interlaced
+to 11), beside the heap's peak and size (slots 0 and 1, KB), the stack it
+used (slot 6, KB) and the most a `par` item's stack held (slot 7, bytes). One uncapped loop of the film fills all twelve. An interlaced
 frame is one field, so its rate is the one `VALIDATION.md` gives for the S3
 in fields a second, at 480 × 320 against the cart's 320 × 198.
 

@@ -15,7 +15,9 @@
 // needs the VM (a file read through the VFS, a config lookup in a dict) gets it
 // without the thread ever touching MicroPython.
 //
-// One session at a time, and never beside a moy_wasm.start() run.
+// One session at a time, and never beside a moy_wasm.start() run. A cart's
+// par items also run on the session's lanes, threads on the other cores that
+// the host half hands libmoy's binding (moy_wasm_session_lane_go below).
 
 #ifndef MOY_WASM_SESSION_H
 #define MOY_WASM_SESSION_H
@@ -71,5 +73,23 @@ int moy_wasm_session_live(void);
 // and must catch its own exceptions. Returns 0, or -1 when there is no task
 // waiting to serve it (the call is then not made).
 int moy_wasm_on_vm(void (*fn)(void *arg), void *arg);
+
+// The wasm stack of an exec env the session's instances run on.
+#define MOY_WASM_EXEC_STACK (8 * 1024)
+
+// The session's LANES: threads on the cores the session's thread is not on,
+// where a cart's par items run beside the calling core
+// (libmoy/moy_wasm.h's `lanes`). How many this board gives: 0 on a board
+// with one core, or one that declines.
+int moy_wasm_session_lanes(void);
+
+// From the session's thread: run fn(arg) on lane `lane` (1..lanes) and return
+// at once, starting the lane's thread the first time. 0, or non-zero when the
+// lane could not be started. Every call for a lane runs on the same thread,
+// which the session joins before it tears the runtime down.
+int moy_wasm_session_lane_go(int lane, void (*fn)(void *arg), void *arg);
+
+// Wait for the fn lane `lane` was last given to return.
+void moy_wasm_session_lane_wait(int lane);
 
 #endif

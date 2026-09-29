@@ -812,6 +812,37 @@ WASM_RUNTIME_API_EXTERN void
 wasm_runtime_deinstantiate(wasm_module_inst_t module_inst);
 
 /**
+ * Instantiate a sibling of a module instance: a second instance of the same
+ * module over the first one's own linear memory, so its code can run on
+ * another thread while the first runs. It has its own globals, at their
+ * declared initial values, its own tables and its own exception, and takes
+ * exec envs like any instance; its memory is `module_inst`'s, never
+ * initialized again and never freed by it. No start function or constructor
+ * runs. The memory must be one that cannot grow (its current size is its
+ * maximum), because a memory that grew would move under the sibling.
+ * Deinstantiate the sibling with wasm_runtime_deinstantiate_sibling before
+ * `module_inst`.
+ *
+ * @param module_inst the instance whose memory the sibling runs over
+ * @param stack_size the default stack size of the sibling's exec envs
+ * @param error_buf buffer to output the error info if failed
+ * @param error_buf_size the size of the error buffer
+ *
+ * @return the sibling, or NULL with the reason in error_buf
+ */
+WASM_RUNTIME_API_EXTERN wasm_module_inst_t
+wasm_runtime_instantiate_sibling(wasm_module_inst_t module_inst,
+                                 uint32_t stack_size, char *error_buf,
+                                 uint32_t error_buf_size);
+
+/**
+ * Deinstantiate a sibling made by wasm_runtime_instantiate_sibling. Its
+ * memory stays its parent's.
+ */
+WASM_RUNTIME_API_EXTERN void
+wasm_runtime_deinstantiate_sibling(wasm_module_inst_t sibling);
+
+/**
  * Get WASM module from WASM module instance
  *
  * @param module_inst the WASM module instance to retrieve
