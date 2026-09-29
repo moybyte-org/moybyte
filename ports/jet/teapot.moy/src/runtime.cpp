@@ -11,13 +11,25 @@
 // which never grows. Both are the linker's, never `memory.size`: a module
 // that asks for its memory's size anywhere is one the AOT compiler assumes
 // can grow, and then every function reloads linear memory's base and bound
-// after every call it makes. First fit over an address-ordered free list,
-// neighbours merged on free; every block 16-aligned with a 16-byte header.
-// Jet allocates its meshes and queues while the scene loads and its
-// per-frame vectors keep their capacity, so the list stays short.
+// after every call it makes.
+//
+// Best fit over an address-ordered free list, neighbours merged on free, every
+// block 16-aligned with a 16-byte header -- and two-ended: a block of LARGE
+// bytes or more comes from the top of the heap down, a smaller one from the
+// bottom up. Jet's per-frame queues are large and outlive every scene, and
+// ESP 88 frees its city and rebuilds it at each cut, mostly in small blocks;
+// in one run of blocks the queues' growth landed above a city and the next,
+// larger city built over and past it, so the heap's high-water mark climbed
+// a queue's size a cut (to 1.4 MB playing on from the boulevard, against the
+// 1.24 MB the film ever holds at once). Kept apart, the cities churn below
+// and the queues settle above. The list is walked when a scene loads, not in
+// a frame: Jet's per-frame vectors keep their capacity.
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
+
+#include <__verbose_abort>
 
 extern "C" {
 extern unsigned char __heap_base;
@@ -34,23 +46,32 @@ struct Block {
 
 const size_t HEADER = sizeof(Block);
 const size_t ALIGN = 16;
+const size_t LARGE = 4096;
 
 Block *free_list = nullptr;
-uintptr_t brk_ptr = 0, heap_end = 0;
+// The small blocks' end and the large blocks' start: [low, high) is unused.
+uintptr_t heap_start = 0, low = 0, high = 0, heap_end = 0;
 size_t peak = 0;
 
 size_t round_up(size_t n) { return (n + ALIGN - 1) & ~(ALIGN - 1); }
 
 void start()
 {
-    if (brk_ptr) return;
-    brk_ptr = round_up((uintptr_t)&__heap_base);
-    heap_end = (uintptr_t)&__heap_end;
+    if (heap_end) return;
+    heap_start = low = round_up((uintptr_t)&__heap_base);
+    heap_end = high = (uintptr_t)&__heap_end & ~(ALIGN - 1);
 }
 
 Block *header(void *p) { return (Block *)((unsigned char *)p - HEADER); }
 
 void *payload(Block *b) { return (unsigned char *)b + HEADER; }
+
+void unlink(Block *b)
+{
+    Block **at = &free_list;
+    while (*at != b) at = &(*at)->next;
+    *at = b->next;
+}
 
 void insert(Block *b)
 {
@@ -71,11 +92,12 @@ void insert(Block *b)
             b = prev;
         }
     }
-    if ((uintptr_t)b + b->size == brk_ptr) {
-        Block **last = &free_list;
-        while (*last != b) last = &(*last)->next;
-        *last = nullptr;
-        brk_ptr = (uintptr_t)b;
+    if ((uintptr_t)b + b->size == low) {
+        unlink(b);
+        low = (uintptr_t)b;
+    } else if ((uintptr_t)b == high) {
+        unlink(b);
+        high += b->size;
     }
 }
 
@@ -85,30 +107,45 @@ void *malloc(size_t n)
 {
     start();
     if (n > heap_end) return nullptr;
-    size_t need = round_up(n ? n : 1) + HEADER;
+    const size_t need = round_up(n ? n : 1) + HEADER;
+    const bool large = need >= LARGE;
+    Block **best = nullptr;
     for (Block **at = &free_list; *at; at = &(*at)->next) {
-        Block *b = *at;
-        if (b->size < need) continue;
-        if (b->size - need >= HEADER + ALIGN) {
+        if ((*at)->size < need || (best && (*best)->size <= (*at)->size)) continue;
+        best = at;
+        if ((*at)->size == need) break;
+    }
+    Block *b;
+    if (best) {
+        b = *best;
+        if (b->size - need < HEADER + ALIGN) {
+            *best = b->next;
+        } else if (large) {
+            b->size -= need;
+            b = (Block *)((unsigned char *)b + b->size);
+            b->size = need;
+        } else {
             Block *rest = (Block *)((unsigned char *)b + need);
             rest->size = b->size - need;
             rest->used = 0;
             rest->next = b->next;
-            *at = rest;
+            *best = rest;
             b->size = need;
-        } else {
-            *at = b->next;
         }
-        b->used = 1;
-        return payload(b);
+    } else {
+        if (high - low < need) return nullptr;
+        if (large) {
+            high -= need;
+            b = (Block *)high;
+        } else {
+            b = (Block *)low;
+            low += need;
+        }
+        b->size = need;
+        const size_t in_use = (low - heap_start) + (heap_end - high);
+        if (in_use > peak) peak = in_use;
     }
-    if (heap_end - brk_ptr < need) return nullptr;
-    Block *b = (Block *)brk_ptr;
-    b->size = need;
     b->used = 1;
-    brk_ptr += need;
-    size_t in_use = brk_ptr - round_up((uintptr_t)&__heap_base);
-    if (in_use > peak) peak = in_use;
     return payload(b);
 }
 
@@ -117,7 +154,9 @@ void free(void *p)
     if (p) insert(header(p));
 }
 
-void *calloc(size_t n, size_t size)
+// Not inlined: clang 18's dead-store pass crashes on this malloc inlined
+// here beside the memset.
+__attribute__((noinline)) void *calloc(size_t n, size_t size)
 {
     if (size && n > (size_t)-1 / size) return nullptr;
     void *p = malloc(n * size);
@@ -205,6 +244,29 @@ size_t cart_heap_peak(void) { return peak; }
 size_t cart_heap_size(void)
 {
     start();
-    return heap_end - round_up((uintptr_t)&__heap_base);
+    return heap_end - heap_start;
 }
+
+// A line logged to stderr, and the messages the C++ libraries format before
+// they abort (exceptions are off, so a container that cannot allocate ends
+// there): a cart has no terminal, and formatting any of them links printf's
+// whole machinery into the module. An abort still traps, as the libraries'
+// do.
+int fprintf(FILE *stream, const char *format, ...)
+{
+    (void)stream, (void)format;
+    return 0;
+}
+
+void abort_message(const char *format, ...)
+{
+    (void)format;
+    __builtin_trap();
+}
+}
+
+void std::__libcpp_verbose_abort(const char *format, ...)
+{
+    (void)format;
+    __builtin_trap();
 }
