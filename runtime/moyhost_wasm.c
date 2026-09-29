@@ -19,6 +19,10 @@
  * key. Everything a cart can observe -- the verbs, the blit, the read, the
  * traps -- is the binding's, and the binding is the same file.
  *
+ * The cart's `snd` queues into the run's moy_stream (libmoy's, as the boards'
+ * speaker mixer uses), and the host's audio backend adds it into each block it
+ * renders (hw_snd_mix), so the stream drains at the host output's pace.
+ *
  * One run at a time, on whatever thread calls in: WAMR on Linux has no
  * pthread requirement, and the runtime is initialised once per process.
  */
@@ -29,6 +33,7 @@
 #include <sys/stat.h>
 
 #include "moy.h"
+#include "moy_audio.h"
 #include "moy_wasm.h"
 #include "moy_wasm_footprint.h"
 #include "moyhost_console.h"
@@ -51,6 +56,8 @@ typedef struct {
     moy_wasm    w;
     int         bound;       /* moy_wasm_open succeeded */
     int         dead;        /* trapped: never called again */
+    moy_stream  pcm;         /* the cart's `snd` */
+    int16_t     pcm_ring[MOY_WASM_SND_DEPTH];
 } host_wasm;
 
 static int g_runtime;        /* 1 once WAMR is up and the table registered */
@@ -87,6 +94,13 @@ static uint32_t hw_read(void *user, const char *name, uint32_t offset,
     }
     fclose(f);
     return got;
+}
+
+/* The cart's samples, queued for the host's audio backend. */
+static uint32_t hw_snd(void *user, const uint8_t *pcm, uint32_t n)
+{
+    host_wasm *r = (host_wasm *)user;
+    return n ? moy_stream_write(&r->pcm, pcm, n) : moy_stream_room(&r->pcm);
 }
 
 /* A layer's pixels: the run's own, released by moy_wasm_close. */
@@ -168,6 +182,9 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     r->w.read = hw_read;
     r->w.read_user = r;
     r->w.wire_swapped = wire_swapped ? 1 : 0;
+    moy_stream_init(&r->pcm, r->pcm_ring, MOY_WASM_SND_DEPTH, MOY_WASM_SND_RATE);
+    r->w.snd = hw_snd;
+    r->w.snd_user = r;
     HC = &r->hc;
     return r;
 }
@@ -290,6 +307,23 @@ int hw_tick(host_wasm *r, float dt, int draw, char *err, int errlen)
     if (draw && !r->w.quitting && moy_wasm_draw(&r->w, err, (size_t)errlen))
         return trapped(r);
     return 0;
+}
+
+/* Add `n` frames of the cart's stream into `out`, a block the host's output
+ * renders at `rate`, at master level `master` (0..7). */
+void hw_snd_mix(host_wasm *r, int16_t *out, int n, int rate, int master)
+{
+    moy_stream_mix(&r->pcm, out, n, rate, master);
+}
+
+/* The stream's counters: frames queued, frames mixed out, output frames that
+ * found it empty, and the room now. */
+void hw_snd_counts(host_wasm *r, uint32_t *out)
+{
+    out[0] = r->pcm.in;
+    out[1] = r->pcm.out;
+    out[2] = r->pcm.starved;
+    out[3] = moy_stream_room(&r->pcm);
 }
 
 void hw_retarget(host_wasm *r, void *pix)

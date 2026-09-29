@@ -35,6 +35,7 @@
  *   env  = wasm_runtime_create_exec_env(inst, stack);
  *   memset(&w, 0, sizeof w); w.read = my_read; w.read_user = me;
  *   w.frame = my_take;                         // optional: see `frame` below
+ *   w.snd = my_queue;                          // optional: see `snd` below
  *   moy_wasm_open(&w, &con, env);
  *   moy_wasm_init(&w, err, sizeof err);        // then, per SPEC.md 5's tick:
  *   moy_wasm_update(&w, dt, err, sizeof err);
@@ -93,6 +94,11 @@ extern "C" {
  * reads as absent. */
 #define MOY_WASM_NAME_MAX 255
 
+/* The sample stream (the proposal's `snd`): signed 16-bit mono frames at this
+ * rate, and the most a host holds that its output has not yet taken. */
+#define MOY_WASM_SND_RATE  22050
+#define MOY_WASM_SND_DEPTH 2048
+
 /* The three hooks, in the order moy_wasm_begin numbers them. */
 #define MOY_WASM_INIT   0
 #define MOY_WASM_UPDATE 1
@@ -129,6 +135,16 @@ typedef struct moy_wasm {
      * returns. */
     int (*frame)(void *user, const uint8_t *pixels, const moy_pixel *lut);
     void *frame_user;
+    /* The cart's sample stream (the proposal's `snd`). Queue up to `n`
+     * frames -- `pcm` holds them as little-endian signed 16-bit mono at
+     * MOY_WASM_SND_RATE, at any alignment -- and return how many were queued;
+     * with `n` 0, queue nothing and return how many would be. The host holds
+     * at most MOY_WASM_SND_DEPTH frames its output has not yet taken
+     * (moy_audio.h's moy_stream is such a queue). NULL is a host with no
+     * audio: the binding keeps the count itself, draining it at the rate by
+     * con->host.time_ms, and drops every frame. */
+    uint32_t (*snd)(void *user, const uint8_t *pcm, uint32_t n);
+    void *snd_user;
 
     /* -- the binding's own, set by moy_wasm_open / moy_wasm_bind ---------- */
     moy_console *con;
@@ -151,6 +167,11 @@ typedef struct moy_wasm {
     const uint8_t *kept;
     int frame_565;                          /* blit565's words, not blit's indices */
     moy_pixel frame_lut[256];               /* a palette frame's colours, wire form */
+    /* The stream with no `snd` host: frames queued and not yet drained, and
+     * the clock reading (ms, and the part of a frame left over, in
+     * thousandths) they were last drained to. */
+    uint32_t snd_level, snd_ms, snd_rem;
+    int snd_clocked;
 } moy_wasm;
 
 /* The import table, and its row count: a read-only template, so it costs the

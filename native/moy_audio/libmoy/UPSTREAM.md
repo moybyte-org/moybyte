@@ -45,6 +45,10 @@ until the Python twin is brought along.
   MicroPython binding over this library's public API. The bank, both sequencers
   and the mixer are all libmoy's; MicroPython only forwards the six §8.2 verbs.
 - **P4** — inherits it when the ES8311 codec is brought up (#82).
-- **Host sim (CPython)** — cannot link C without putting a compiler in `make
-  setup`, so `runtime/audio.py` stays a Python twin of this file. It is pinned by
-  the parity harness above rather than trusted.
+- **Host sim (CPython)** — `runtime/audio_binding.py` compiles this file into a
+  ctypes library the host's `AudioEngine` synthesizes through, pinned against
+  the reference render by the parity harness above.
+- **Compiled carts' `snd`** — `moy_stream` is the queue a cart's samples wait
+  in: `../modmoy_audio.c`'s core-1 feeder mixes it after the synth on the
+  T-Deck (`../moy_audio_snd.h`), and `runtime/moyhost_wasm.c` compiles this
+  file for the host's.

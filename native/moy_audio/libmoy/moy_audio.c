@@ -926,3 +926,92 @@ void moy_audio_render(moy_audio *a, int16_t *out, int nframes)
         out[f] = (int16_t)s;
     }
 }
+
+/* ------------------------------------------------------------- stream --- */
+
+#define STREAM_ONE 0x10000u             /* 1.0 in the 16.16 positions */
+
+void moy_stream_init(moy_stream *s, int16_t *ring, uint32_t cap, int rate)
+{
+    memset(s, 0, sizeof *s);
+    s->ring = ring;
+    s->cap = ring ? cap : 0;
+    s->rate = rate > 0 ? rate : 22050;
+}
+
+uint32_t moy_stream_room(const moy_stream *s)
+{
+    return s->cap - s->count;
+}
+
+uint32_t moy_stream_write(moy_stream *s, const uint8_t *pcm, uint32_t n)
+{
+    uint32_t room = s->cap - s->count, i, at;
+    if (n > room) n = room;
+    at = s->cap ? (s->head + s->count) % s->cap : 0;
+    for (i = 0; i < n; i++) {
+        uint16_t u = (uint16_t)(pcm[i * 2] | (pcm[i * 2 + 1] << 8));
+        s->ring[at] = (int16_t)u;
+        if (++at == s->cap) at = 0;
+    }
+    s->count += n;
+    s->in += n;
+    return n;
+}
+
+void moy_stream_clear(moy_stream *s)
+{
+    s->head = s->count = 0;
+    s->pos = 0;
+    s->last = 0;
+}
+
+static int16_t stream_pop(moy_stream *s)
+{
+    int16_t v = s->ring[s->head];
+    if (++s->head == s->cap) s->head = 0;
+    s->count--;
+    s->out++;
+    return v;
+}
+
+void moy_stream_mix(moy_stream *s, int16_t *out, int nframes, int out_rate,
+                    int master)
+{
+    int32_t gain;
+    int f;
+    if (!s->ring || out_rate <= 0) return;
+    if (out_rate != s->out_rate) {
+        s->out_rate = out_rate;
+        s->step = (uint32_t)(((uint64_t)(uint32_t)s->rate << 16) / (uint32_t)out_rate);
+        if (!s->step) s->step = 1;
+    }
+    gain = master <= 0 ? 0 : master >= 7 ? 32768 : master * 32768 / 7;
+    for (f = 0; f < nframes; f++) {
+        int32_t v, o;
+        if (s->step == STREAM_ONE) {
+            if (!s->count) {
+                if (s->in) s->starved++;
+                continue;
+            }
+            v = s->last = stream_pop(s);
+        } else {
+            while (s->pos >= STREAM_ONE && s->count) {
+                s->last = stream_pop(s);
+                s->pos -= STREAM_ONE;
+            }
+            if (!s->count) {
+                if (s->in) s->starved++;
+                if (s->pos > STREAM_ONE) s->pos = STREAM_ONE;
+                continue;
+            }
+            v = s->last + (int32_t)(((int64_t)(s->ring[s->head] - s->last)
+                                     * (int64_t)s->pos) >> 16);
+            s->pos += s->step;
+        }
+        o = out[f] + (int32_t)(((int64_t)v * gain) >> 15);
+        if (o > 32767) o = 32767;
+        if (o < -32768) o = -32768;
+        out[f] = (int16_t)o;
+    }
+}

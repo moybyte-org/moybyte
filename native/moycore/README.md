@@ -38,7 +38,21 @@ there and times the halves for `tick_split`.
 Every host callback the table reaches from that thread is a C read or write
 against the console except two that need the VM -- `read`, the cart's own
 folder through the VFS, and `cfg`, the config dict -- and those run on the
-MicroPython task through `moy_wasm_on_vm` while it waits on the call. Each
+MicroPython task through `moy_wasm_on_vm` while it waits on the call.
+
+**A compiled cart's samples go to the speaker's mixer.** `snd` (22,050 Hz
+mono, a queue of 2,048 frames; the proposal's PCM audio section) is libmoy's
+`moy_stream`, and where the image carries `moy_audio` (its cmake defines
+`MOY_AUDIO_SND`) and the core-1 feeder runs, moycore points the binding's
+`snd` at it (`native/moy_audio/moy_audio_snd.h`): the feeder adds the queue
+into every chunk after the synth, under the same master level, so the cart's
+§8 verbs, the console's sounds and Settings' volume all still apply and the
+I2S channel never changes hands. `close()` drops what is queued. A board
+without a speaker leaves `snd` to the binding, which drains the queue by the
+console's clock and drops the samples, so the cart meets the same
+backpressure. `moy_audio.snd_counts()` is the stream from both ends -- frames
+the cart queued, frames the feeder played, frames it found none -- and the
+`SNDSTREAM` diag line prints it beside `AUDIORATE`. Each
 `read` runs inside `gate(fn)`, the store's own gate (`ws._with_sd`), as every
 other store access does: on the T-Deck that drains the panel's flush before
 the card, which shares its SPI bus, is touched. The run's own state (libmoy's

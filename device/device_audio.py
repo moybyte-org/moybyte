@@ -452,6 +452,15 @@ class DeviceAudio:
                    "seam=%.4f pyr=%d feed=%s"
                    % (int(eff), rate, eff / (rate or 1), ceff / (rate or 1),
                       seam, pyr, "core1" if self._core1 else "single"))
+        # A compiled cart's `snd` stream, from both ends: what the cart queued
+        # against what the feeder played, and how often it found none.
+        try:
+            sc = self._na.snd_counts()
+        except Exception:   # noqa: BLE001 -- an older native module
+            sc = None
+        if sc is not None:
+            _diag_note("SNDSTREAM", "queued=%d played=%d starved=%d room=%d open=%d"
+                       % (sc[0], sc[1], sc[2], sc[3], 1 if sc[4] else 0))
 
     def tick(self, dt):
         """Per-frame audio work. In core-1 mode there is NONE -- the task renders

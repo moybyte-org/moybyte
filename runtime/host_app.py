@@ -121,11 +121,7 @@ class SdlAudio(FakeAudio):
             self._ok = False
 
     def tick(self, dt):
-        n = int(self.engine.rate * (dt if dt > 0.0 else 0.0))
-        if n <= 0:
-            return
-        pcm = self.engine.render(n)   # advance the mixer; bytes of LE int16 mono
-        self.rendered += n
+        pcm = self.block(dt)          # advance the mixer; bytes of LE int16 mono
         if not self._ok or not pcm:
             return
         try:

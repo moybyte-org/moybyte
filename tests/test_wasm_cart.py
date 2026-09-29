@@ -236,6 +236,59 @@ def test_a_trap_ends_the_run_with_no_partial_frame_and_no_edit(tmp_path):
     assert ws.bar_layer.handle_cart_tap(x + 1, y + 1) is False
 
 
+# A cart that keeps the console's sample queue full: every _update asks for
+# the room and fills it from a 441 Hz square wave, counting what the console
+# took into pmem slot 0.
+TONE = """
+(module
+  (import "moy" "snd" (func $snd (param i32 i32) (result i32)))
+  (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
+  (memory (export "memory") 1 1)
+  (global $sent (mut i32) (i32.const 0))
+  (func (export "_init") (local $i i32)
+    (block $done
+      (loop $each
+        (br_if $done (i32.ge_u (local.get $i) (i32.const 2048)))
+        (i32.store16 offset=1024 (i32.shl (local.get $i) (i32.const 1))
+          (select (i32.const 8000) (i32.const -8000)
+                  (i32.lt_u (i32.rem_u (local.get $i) (i32.const 50)) (i32.const 25))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $each))))
+  (func (export "_update") (param f32)
+    (global.set $sent (i32.add (global.get $sent)
+      (call $snd (i32.const 1024) (call $snd (i32.const 0) (i32.const 0)))))
+    (drop (call $pmem (i32.const 0) (global.get $sent) (i32.const 1))))
+  (func (export "_draw")))
+"""
+
+
+def test_a_carts_samples_reach_the_audio_output_at_the_rate(tmp_path):
+    """snd on the host: the cart fills the room each tick, the console's audio
+    backend mixes the stream into every block it renders, and over ten seconds
+    of frames the output takes 22050 frames a second of it -- what the
+    cart queued is what played plus what is still queued, nothing starved
+    once the stream began, and the blocks carry the tone."""
+    _binding_or_skip()
+    ws = host_app.build_workstation(_store(
+        tmp_path, _wat_cart("Tone", TONE, 1)))
+    open_cart(ws, "Tone")
+    assert ws.player.cart_error is None, ws.player.cart_error
+    run = ws.player._lua
+    assert ws.audio.stream is run._run
+    _frames(ws, 300)
+    queued, played, starved, room = run.snd_counts()
+    assert _pmem(ws)[0] == queued
+    assert queued - played == 2048 - room
+    assert starved == 0
+    # The host renders at the engine's own rate, so the stream is resampled,
+    # and the resampler holds the stream's next frame in hand.
+    assert 22050 * 10 - 2 <= played <= 22050 * 10, played
+    pcm = ws.audio.last_pcm
+    peak = max(abs(int.from_bytes(pcm[i:i + 2], "little", signed=True))
+               for i in range(0, len(pcm), 2))
+    assert peak == 8000 * ws.audio.engine.master // 7, peak
+
+
 QUITTER = """
 (module
   (import "moy" "quit" (func $quit))

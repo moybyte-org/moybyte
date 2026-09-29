@@ -27,6 +27,15 @@
 // returns False and DeviceAudio drives render() itself from the frame loop
 // (machine.I2S), with no rebuild needed.
 //
+// A COMPILED CART'S SAMPLES (moy_audio_snd.h) are mixed in, not given the
+// output: the task adds them after the synth in each chunk it renders, under
+// the same lock and the same master level. The cart may still call the §8
+// verbs, the console's own sounds keep playing over it, Settings' volume
+// reaches it, and the I2S channel never changes hands or rate -- the stream is
+// at the output's 22050, so the mix is one add per sample on core 1. The
+// fallback feed plays the synth only: a cart's stream opens only while the
+// task runs, and moycore drains it by the clock otherwise.
+//
 // The synth half is checked against libmoy under the desktop VM
 // (tests/test_audio_parity.py); I2S, the core-1 task and the PSRAM bank
 // placement were confirmed by ear on a T-Deck (2026-08-09, firmware 0.9).
@@ -38,6 +47,7 @@
 
 // libmoy, vendored. This is the whole synthesizer.
 #include "moy_audio.h"
+#include "moy_audio_snd.h"
 
 // ESP-IDF I2S + FreeRTOS exist only in the firmware build. Everything device-only
 // hides behind MOY_AUDIO_HAVE_IDF so the module still compiles (synth + render
@@ -106,6 +116,12 @@ static volatile uint32_t s_frames_out = 0;
 static volatile uint32_t s_frames_rendered = 0;   // by the core-1 task
 
 #endif
+
+// The compiled cart's stream: its ring is PSRAM, allocated the first time a
+// cart opens one and kept, and `s_pcm_on` says whether the task mixes it.
+static moy_stream s_pcm;
+static int16_t *s_pcm_ring = NULL;
+static int s_pcm_on = 0;
 
 // The Python-side half of that seam, and it lives OUTSIDE the IDF guard because
 // mod_render is what the host, the unix test build and the wasm runner call --
@@ -353,6 +369,10 @@ static void moy_audio_task(void *arg) {
             moy_lock();
             if (s_inited) {
                 moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK);
+                if (s_pcm_on) {
+                    moy_stream_mix(&s_pcm, block + off, MOY_MIX_CHUNK, s_audio.rate,
+                                   s_audio.master);
+                }
                 s_frames_rendered += MOY_MIX_CHUNK;
             } else {
                 memset(block + off, 0, sizeof(int16_t) * MOY_MIX_CHUNK);
@@ -518,6 +538,73 @@ static mp_obj_t mod_running(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_running_obj, mod_running);
 
+// --- the compiled cart's stream (moy_audio_snd.h) ---------------------------
+
+int moy_audio_snd_open(void) {
+#if MOY_AUDIO_HAVE_IDF
+    if (s_task == NULL) {
+        return 0;
+    }
+    if (s_pcm_ring == NULL) {
+        size_t bytes = MOY_AUDIO_SND_DEPTH * sizeof(int16_t);
+        s_pcm_ring = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+        if (s_pcm_ring == NULL) {
+            s_pcm_ring = heap_caps_malloc(bytes, MALLOC_CAP_DEFAULT);
+        }
+        if (s_pcm_ring == NULL) {
+            return 0;
+        }
+    }
+    moy_lock();
+    moy_stream_init(&s_pcm, s_pcm_ring, MOY_AUDIO_SND_DEPTH, MOY_AUDIO_SND_RATE);
+    s_pcm_on = 1;
+    moy_unlock();
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+uint32_t moy_audio_snd(const uint8_t *pcm, uint32_t n) {
+    uint32_t r = 0;
+    moy_lock();
+    if (s_pcm_on) {
+        r = n ? moy_stream_write(&s_pcm, pcm, n) : moy_stream_room(&s_pcm);
+    }
+    moy_unlock();
+    return r;
+}
+
+void moy_audio_snd_close(void) {
+    moy_lock();
+    if (s_pcm_on) {
+        moy_stream_clear(&s_pcm);
+    }
+    s_pcm_on = 0;
+    moy_unlock();
+}
+
+// snd_counts() -> (queued, played, starved, room, open), or None when no cart
+// has opened a stream since boot: frames the cart's `snd` queued, frames the
+// feeder mixed out of the queue, frames it rendered while the queue was empty
+// after the stream began, the queue's room now, and whether it is open.
+// Queued against played, over minutes, is the seam's two sides measured apart.
+static mp_obj_t mod_snd_counts(void) {
+    mp_obj_t t[5];
+    if (s_pcm_ring == NULL) {
+        return mp_const_none;
+    }
+    moy_lock();
+    t[0] = mp_obj_new_int_from_uint(s_pcm.in);
+    t[1] = mp_obj_new_int_from_uint(s_pcm.out);
+    t[2] = mp_obj_new_int_from_uint(s_pcm.starved);
+    t[3] = mp_obj_new_int_from_uint(moy_stream_room(&s_pcm));
+    t[4] = mp_obj_new_bool(s_pcm_on);
+    moy_unlock();
+    return mp_obj_new_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_snd_counts_obj, mod_snd_counts);
+
 // engine_sig() -> (rate, nsfx, sfx10_speed, music4_speed) read from the C
 // structs themselves (2026-08-10, the celeste tempo hunt): BANKSIG certifies
 // the PYTHON bank at push time; this reads back what libmoy actually HOLDS
@@ -585,6 +672,8 @@ static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_frames_out),   MP_ROM_PTR(&mod_frames_out_obj) },
     { MP_ROM_QSTR(MP_QSTR_engine_sig),   MP_ROM_PTR(&mod_engine_sig_obj) },
     { MP_ROM_QSTR(MP_QSTR_running),      MP_ROM_PTR(&mod_running_obj) },
+    // a compiled cart's stream (moy_audio_snd.h)
+    { MP_ROM_QSTR(MP_QSTR_snd_counts),   MP_ROM_PTR(&mod_snd_counts_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_audio_globals, moy_audio_globals_table);
 

@@ -2307,6 +2307,8 @@ static int pm_alive(void)
 // write against the console, EXCEPT two that need the VM -- `read` (the cart's
 // own folder, through the VFS) and `cfg` (the config dict) -- and those are run
 // on the MicroPython task through moy_wasm_on_vm while it waits on the call.
+// `snd` goes to the speaker's mixer where the board has one (moy_audio's
+// stream, MOY_AUDIO_SND); where it has none the binding drains it by the clock.
 //
 // Compiled only when the engine is in the build (its cmake defines MOY_WASM);
 // the MicroPython surface below is unconditional so qstr scanning, which does
@@ -2317,6 +2319,12 @@ enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW };
 #if MOY_WASM
 #include "libmoy/moy_wasm.h"
 #include "moy_wasm_session.h"
+#if MOY_AUDIO_SND
+#include "moy_audio_snd.h"
+#if MOY_AUDIO_SND_RATE != MOY_WASM_SND_RATE || MOY_AUDIO_SND_DEPTH != MOY_WASM_SND_DEPTH
+#error "moy_audio's stream is not the binding's"
+#endif
+#endif
 
 // A compiled cart's run state. Allocated per session, from PSRAM where there
 // is any: libmoy's per-run struct alone is about 4 KB (eight layer canvases),
@@ -2553,6 +2561,15 @@ static void wo_unbound(void *user)
     moy_wasm_close(&WR->w);
 }
 
+#if MOY_AUDIO_SND
+// The cart's samples, from the engine's thread into the speaker's mixer.
+static uint32_t wo_snd(void *user, const uint8_t *pcm, uint32_t n)
+{
+    (void)user;
+    return moy_audio_snd(pcm, n);
+}
+#endif
+
 static const moy_wasm_ops WASM_OPS = {
     NULL, wo_runtime_up, wo_loaded, wo_bound, wo_call, wo_unbound,
 };
@@ -2596,6 +2613,9 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
     WR->w.read = hw_read;
     WR->w.wire_swapped = swapped;
     WR->w.frame = wo_frame;
+#if MOY_AUDIO_SND
+    if (moy_audio_snd_open()) WR->w.snd = wo_snd;
+#endif
     snprintf(WR->dir, sizeof(WR->dir), "%s", dir);
     RUN.con.host.cfg = hw_cfg;
     RUN.con.host.layer_new = hw_layer_new;
@@ -2645,6 +2665,9 @@ static void wasm_end(void)
 {
     if (RUN.wasm) moy_wasm_session_close();
     RUN.wasm = 0;
+#if MOY_AUDIO_SND
+    moy_audio_snd_close();
+#endif
     g_take_frames = 0;
     wfile_forget();
     MP_STATE_VM(moycore_wasm_gate) = MP_OBJ_NULL;

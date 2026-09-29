@@ -170,6 +170,51 @@ void moy_audio_volume(moy_audio *a, int level);
 /* Mix `nframes` samples of signed 16-bit mono into `out`. */
 void moy_audio_render(moy_audio *a, int16_t *out, int nframes);
 
+/* -- a sample stream --------------------------------------------------------
+ *
+ * Signed 16-bit mono PCM that arrives from outside the synth -- a compiled
+ * cart's `snd` (proposals/wasm-runtime.md) -- queued in a ring the host owns
+ * and added into a buffer moy_audio_render has filled, under the same master
+ * level and the same saturation. The stream keeps its own rate: mixing steps
+ * through it at stream rate / output rate, interpolating linearly, so it
+ * plays at its rate whatever the output runs at, and a stream at the output's
+ * rate is added frame for frame.
+ *
+ * The synth's rules hold: no allocation, no clock, not thread-safe. Writes
+ * and mixing usually happen on different threads, and the host takes the lock
+ * it already holds around the verbs for both. */
+typedef struct {
+    int16_t *ring;              /* the host's, `cap` frames */
+    uint32_t cap;
+    uint32_t head, count;       /* the oldest queued frame, and how many */
+    int      rate;              /* the stream's, Hz */
+    int      out_rate;          /* the output rate `step` was worked out for */
+    uint32_t step;              /* rate / out_rate, 16.16 */
+    uint32_t pos;               /* 16.16, from `last` toward ring[head] */
+    int16_t  last;              /* the frame most recently passed */
+    /* Since init, wrapping: frames queued, frames mixed out of the ring, and
+     * output frames mixed with the ring empty once the stream had begun. */
+    uint32_t in, out, starved;
+} moy_stream;
+
+/* An empty stream at `rate` Hz over `ring`, which holds `cap` frames. */
+void moy_stream_init(moy_stream *s, int16_t *ring, uint32_t cap, int rate);
+
+/* Frames the ring takes now: cap less what is queued. */
+uint32_t moy_stream_room(const moy_stream *s);
+
+/* Queue up to `n` frames from `pcm`, little-endian signed 16-bit at any
+ * alignment; returns how many fitted. */
+uint32_t moy_stream_write(moy_stream *s, const uint8_t *pcm, uint32_t n);
+
+/* Drop everything queued. The counters keep counting. */
+void moy_stream_clear(moy_stream *s);
+
+/* Add `nframes` of the stream into `out`, which runs at `out_rate`, scaled
+ * by `master` (0..7, moy_audio's level). */
+void moy_stream_mix(moy_stream *s, int16_t *out, int nframes, int out_rate,
+                    int master);
+
 #ifdef __cplusplus
 }
 #endif

@@ -43,6 +43,7 @@ _ROOT = native_build.ROOT
 _LIBMOY = native_build.LIBMOY                           # the raster + moy.h
 _BINDING_DIR = os.path.join(_ROOT, "native", "moycore", "libmoy")   # moy_wasm.c/.h
 _ENGINE_DIR = os.path.join(_ROOT, "native", "moy_wasm")   # moy_wasm_footprint.h
+_AUDIO_DIR = os.path.join(_ROOT, "native", "moy_audio", "libmoy")   # moy_stream
 _PIN_H = os.path.join(_ENGINE_DIR, "wamr_pin.h")
 _SHIM = os.path.join(_HERE, "moyhost_wasm.c")
 _CACHE = os.path.join(_ROOT, ".build", "host_wasm")
@@ -191,14 +192,14 @@ def build(verbose=False):
         return None
     inc, lib = got
     names = list(_RASTER) + ["moy_wasm.c", "moy_wasm.h", "moyhost_console.h",
-                             "moy_wasm_footprint.h"]
+                             "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h"]
     cflags = native_build.BASE_CFLAGS + [
         "-DMOY_WASM=1", "-DMOY_PIXEL_RGB565=1", "-isystem", inc,
         # The pin rides the cache key: a moved pin is another runtime.
         "-DMOYHOST_WAMR_PIN=%s" % pin()]
     path = native_build.build(
         "moyhost_wasm", _SHIM, names, _CACHE, cflags=cflags,
-        libmoy_dir=(_LIBMOY, _BINDING_DIR, _HERE, _ENGINE_DIR),
+        libmoy_dir=(_LIBMOY, _BINDING_DIR, _HERE, _ENGINE_DIR, _AUDIO_DIR),
         link_flags=[lib, "-lm", "-lpthread", "-ldl"], verbose=verbose)
     if path is None:
         _WHY[0] = "no C compiler"
@@ -244,6 +245,10 @@ def _lib():
             d.hw_get_view.argtypes = [_P, ctypes.POINTER(_I), ctypes.POINTER(_I)]
             d.hw_get_view.restype = _I
             d.hw_free.argtypes = [_P]
+            d.hw_snd_mix.argtypes = [_P, _P, _I, _I, _I]
+            d.hw_snd_mix.restype = None
+            d.hw_snd_counts.argtypes = [_P, _P]
+            d.hw_snd_counts.restype = None
             _U64P = ctypes.POINTER(ctypes.c_uint64)
             d.hw_footprint.argtypes = [ctypes.c_uint64, ctypes.c_uint64, _U64P, _U64P]
             d.hw_footprint.restype = None
@@ -378,6 +383,25 @@ class HostWasmRun:
             out.append((self.aq[p], self.aq[p + 1], self.aq[p + 2], self.aq[p + 3]))
         self.aq[0] = 0
         return out
+
+    def snd_mix(self, out, nframes, rate, master):
+        """Add `nframes` of the cart's `snd` stream into `out`, a bytearray of
+        signed 16-bit mono the host's output renders at `rate` Hz, at the
+        master level (0..7). The stream plays at its own 22050 Hz whatever
+        `rate` is, and drains as fast as the output takes it."""
+        nframes = min(int(nframes), len(out) // 2)
+        if nframes <= 0 or not self._r:
+            return
+        buf = (ctypes.c_char * len(out)).from_buffer(out)
+        self._d.hw_snd_mix(self._r, ctypes.cast(buf, _P), nframes, int(rate), int(master))
+
+    def snd_counts(self):
+        """(queued, played, starved, room): frames the cart's `snd` queued,
+        frames the output mixed out, output frames that found the queue empty
+        after the stream began, and the queue's room now."""
+        c = (ctypes.c_uint32 * 4)()
+        self._d.hw_snd_counts(self._r, ctypes.cast(c, _P))
+        return tuple(c)
 
     def pmem(self):
         img = (ctypes.c_int32 * 256)()

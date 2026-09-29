@@ -735,6 +735,48 @@ static int32_t w_read(env_t e, const uint8_t *name, uint32_t nlen, uint32_t offs
     return (int32_t)got;
 }
 
+/* -- the sample stream: snd ---------------------------------------------- */
+
+/* A host with no audio: the stream is a count that drains at the rate by the
+ * console's clock, and every frame is dropped. The cart meets the backpressure
+ * it would meet where the frames are played. The clock's leftover fraction of
+ * a frame carries over, so a second of clock drains exactly the rate. */
+static uint32_t silent_room(moy_wasm *w)
+{
+    moy_host *h = &w->con->host;
+    uint32_t now = h->time_ms ? h->time_ms(h->user) : 0;
+    if (w->snd_clocked) {
+        uint64_t t = (uint64_t)(uint32_t)(now - w->snd_ms) * MOY_WASM_SND_RATE + w->snd_rem;
+        uint64_t drained = t / 1000u;
+        w->snd_rem = (uint32_t)(t % 1000u);
+        w->snd_level = drained >= w->snd_level ? 0 : w->snd_level - (uint32_t)drained;
+    }
+    w->snd_ms = now;
+    w->snd_clocked = 1;
+    return MOY_WASM_SND_DEPTH - w->snd_level;
+}
+
+/* snd(pcm, n): n frames of little-endian signed 16-bit mono at `pcm`, or with
+ * n 0 the question of how many the host would take. The frames are read only
+ * when there are some, so a query may pass any pointer. */
+static int32_t w_snd(env_t e, uint32_t pcm, uint32_t n)
+{
+    moy_wasm *w = bound(e);
+    const uint8_t *p = NULL;
+    uint32_t got, room;
+    if (!w) return 0;
+    if (n && !(p = span(w, pcm, (uint64_t)n * 2u))) return 0;
+    if (w->snd) {
+        got = w->snd(w->snd_user, p, n);
+        return (int32_t)(n && got > n ? n : got);
+    }
+    room = silent_room(w);
+    if (!n) return (int32_t)room;
+    got = n < room ? n : room;
+    w->snd_level += got;
+    return (int32_t)got;
+}
+
 /* -- the table ------------------------------------------------------------- */
 
 /* One row per import, in the order of proposals/wasm-imports.json. The
@@ -796,6 +838,7 @@ static const NativeSymbol NATIVES[] = {
     {"blit", FN(w_blit), "(ii)", NULL},
     {"blit565", FN(w_blit565), "(i)", NULL},
     {"read", FN(w_read), "(*~i*~)i", NULL},
+    {"snd", FN(w_snd), "(ii)i", NULL},
 };
 
 const NativeSymbol *moy_wasm_natives(uint32_t *count)
@@ -1214,6 +1257,8 @@ static void attach(moy_wasm *w, moy_console *con)
     w->n_layers = 0;
     w->in_draw = w->blits = w->quitting = 0;
     w->owed = w->kept = NULL;
+    w->snd_level = w->snd_ms = w->snd_rem = 0;
+    w->snd_clocked = 0;
 }
 
 #ifdef MOY_WASM

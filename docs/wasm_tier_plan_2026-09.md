@@ -95,7 +95,7 @@ the decisions below record what they changed.
   cannot hold the cart (#158). The next decision names the levers that would
   widen that set.
   Doom is still the cart that found the ABI's gaps: the 256-entry blit
-  palette and the asset read.
+  palette, the asset read and the sample stream.
 - **A compiled cart's memory is the cart-runtime reserve, not free PSRAM.**
   The T-Deck keeps a fixed slice of PSRAM out of the Python heap for the
   Lua VM, the compositor's framebuffer and the layer pool
@@ -193,8 +193,12 @@ frames (#158). What remains is promotion:
 ## Deliberately not in this plan
 
 - A wasmtime host tier.
-- PCM audio. Doom runs silent; `snd`'s rate and channels are pinned by the
-  first cart that needs them, and `moy_audio` is vendored from moy-spec.
+- Doom's music. A compiled cart's sound is `snd` (22,050 Hz mono, a
+  2,048-frame queue, pinned by Doom in the proposal), which the T-Deck mixes
+  into `moy_audio`'s output and a board with no speaker drains by the clock.
+  Doom plays its sound effects through it; its music, MUS through an OPL
+  synth, is not built, because the synth costs more of a T-Deck frame than
+  the rest of Doom's sound (#158).
 - moybyte's superset verbs for wasm carts, and a libc story beyond "no WASI
   imports".
 - A Lua-to-wasm path. The proposal's answer is "nothing, deliberately".

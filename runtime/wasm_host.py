@@ -21,6 +21,10 @@ A cart bigger than the host's configured limit (`MEMORY_LIMIT`) gets the
 notice a board with too little free PSRAM gives it, by the boards' own
 footprint arithmetic (`WasmHostRuntime`).
 
+The cart's `snd` stream is the run's; while it runs, the console's audio
+backend mixes it into every block it renders (`host_api.FakeAudio.stream`),
+so it drains at the pace the host plays, as a board's speaker drains it.
+
 Canonical home is runtime/; tests import it as runtime.wasm_host.
 """
 
@@ -128,6 +132,9 @@ class WasmHostRun(MoycoreHostRun):
             self._run.close()
             raise RuntimeError(err)
         self._sync_view()
+        self._audio = getattr(ws, "audio", None)
+        if self._audio is not None and hasattr(self._audio, "stream"):
+            self._audio.stream = self._run
         self.init = None
         self.update = self._update
         self.draw = self._draw_noop
@@ -163,7 +170,14 @@ class WasmHostRun(MoycoreHostRun):
     def exec(self, src, name="probe"):
         return "a compiled cart has no chunks to run"
 
+    def snd_counts(self):
+        """The cart's stream, as `HostWasmRun.snd_counts` counts it."""
+        return self._run.snd_counts()
+
     def close(self):
+        audio = getattr(self, "_audio", None)
+        if audio is not None and getattr(audio, "stream", None) is self._run:
+            audio.stream = None
         try:
             self.flush_pmem()
         finally:
