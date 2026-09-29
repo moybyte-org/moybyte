@@ -11,7 +11,8 @@ managers move below the app verb table; §8 maps every theming piece onto its
 sprints). **Relates to:** `docs/visual_identity_v1.md` (the default look),
 `docs/app_api_v1.md` (`ctx.theme`, the app-cart `theme()` global),
 `docs/surface_model_v1.md` (one dirty protocol), `docs/shell_ux_v1.md` (#105,
-the two worlds), `runtime/skin.py` (skins as data), #177, #146, #147, #203.
+the two worlds), `docs/studio_2026-09.md` (the Studio's chrome is drawn from
+these parts), `runtime/skin.py` (skins as data), #177, #146, #147, #203.
 Claims are labelled as in `docs/surface_model_v1.md`: **SOURCE** (read out of
 code, with the file), **ESTIMATED** (with how), **PREDICTED** (with the gate
 that settles it).
@@ -142,7 +143,8 @@ icon sheets. It never holds a cart or a script. Every key is optional (§5).
   "images":   { "desk": "desk.moyimg", "home": "home.moyimg" },
   "wallpapers": { "desk": "platinum_desk" },
   "layout":   {},
-  "sounds":   {}
+  "sounds":   {},
+  "editor":   {}
 }
 ```
 
@@ -153,8 +155,11 @@ icon sheets. It never holds a cart or a script. Every key is optional (§5).
 - **`images`** are static pictures the theme ships. **`wallpapers`** name
   installed wallpaper carts by id. An id that is not installed falls back to
   the image, then to the default (§4.9).
-- **`layout`** and **`sounds`** are reserved in format 1 and have no defined
-  keys yet. `layout` is filled by the shell-layout doc; `sounds` waits for #141.
+- **`layout`**, **`sounds`** and **`editor`** are reserved in format 1 and have
+  no defined keys yet. `layout` is filled by the shell-layout doc; `sounds`
+  waits for #141; `editor` is where code colour schemes go when they come
+  (`docs/studio_2026-09.md` §12), since syntax colours are content in format 1
+  (§4.3).
 - **Format rule:** a reader refuses a newer `format` major and ignores unknown
   keys. There is no migration pass, which is the store rule.
 
@@ -202,7 +207,10 @@ kinds in `ui.DEFAULT_SPECS` and `ui.DEFAULT_METRICS` (`button`,
 `panel_title`, `toolbar`, `scrollbar`, `status`, `focus`, `dialog`,
 `text_field`, `game_btn`, `mini_btn`, …), plus the chrome the WMs and the bar
 draw (`window`, `window.title`, `window.button.*`, `bar`, `bar.item`, `desk`,
-`desk.icon`) and the home's parts once the shell-layout doc names them. A test
+`desk.icon`), the home's parts once the shell-layout doc names them, and the
+Studio's pane parts (a pane tab with a close, the panel list, a splitter, a
+drop zone, the completion popup: `docs/studio_2026-09.md` §8), which join the
+toolkit's tables before phase 1 freezes the list. A test
 asserts the spec lists every kind the toolkit resolves. Each entry of
 `NON_DATA_QUIRKS` is ruled on in phase 1: either it becomes expressible, or it
 stays code and is recorded as such.
@@ -457,7 +465,9 @@ the toolkit rows' goldens byte-for-byte, and sprint 7's holds the P4 desk's
 on-glass suites unchanged. **No pixel-moving theming phase overlaps sprint 6
 or 7.** The restyle phases (3 and 4) land before sprint 6
 starts, or after 7 closes. After that a new theme is data and moves only its own
-goldens.
+goldens. The Studio (`docs/studio_2026-09.md` §8) moves pixels too and takes the
+same rule; its T-Deck bar rides phase 2b's re-baseline rather than making a
+second one.
 
 ## 9. Phases
 
