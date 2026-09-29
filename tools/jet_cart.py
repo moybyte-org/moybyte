@@ -1,30 +1,34 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Nikola Jovicic
-"""Build the compiled tier's showcase cart: Jet Teapot (ports/jet/README.md).
+"""Build the compiled tier's Jet carts: Jet Teapot and ESP 88 (ports/jet/README.md).
 
-    python3 tools/jet_cart.py /tmp/carts                  # -> /tmp/carts/teapot.moy
+    python3 tools/jet_cart.py /tmp/carts                  # -> /tmp/carts/{teapot,esp88}.moy
+    python3 tools/jet_cart.py /tmp/carts --cart esp88     # one of them
     python3 tools/jet_cart.py /tmp/carts --chip esp32s3 --chip esp32p4
     python3 tools/jet_cart.py --toolchain                 # fetch wasi-sdk if absent
 
-The cart's source is ports/jet/teapot.moy/: its manifest, config, model,
-licences and `src/` (C++), all copied into the built cart as they are. This
-compiles `src/` with the vendored Jet (ports/jet/jet/, tools/vendor_jet.py)
-into the manifest's `main.wasm` with wasi-sdk 24's clang, on the console's
-`"moy"` imports alone, and with `--chip` compiles and signs each board's
-module with tools/wasm_module.py (its pinned compilers and the OTA signing
-key). No module is ever committed.
+A cart's source is its folder under ports/jet/ (CARTS): its manifest, config,
+data, licences and `src/` (C++), all copied into the built cart as they are.
+This compiles `src/` with the vendored Jet (ports/jet/jet/, tools/vendor_jet.py)
+-- and for ESP 88 the film's vendored code (ports/jet/examples/) -- into the
+manifest's `main.wasm` with wasi-sdk 24's clang, on the console's `"moy"`
+imports alone, and with `--chip` compiles and signs each board's module with
+tools/wasm_module.py (its pinned compilers and the OTA signing key). No module
+is ever committed.
 
-JET IS COMPILED TWICE into the one module. Half-width buffers are a
-compile-time switch in Jet, and config.json chooses the width at launch, so
-the second build turns HALF_WIDTH_BUFFERS on and renames Jet's namespaces on
-the command line (HALF_RENAMES); scene.cpp is compiled with each and defines
-one table per build (`jet_full`, `jet_half`).
+THE TEAPOT COMPILES JET TWICE into its one module. Half-width buffers are a
+compile-time switch in Jet, and its config.json chooses the width at launch,
+so the second build turns HALF_WIDTH_BUFFERS on and renames Jet's namespaces
+on the command line (HALF_RENAMES); scene.cpp is compiled with each and
+defines one table per build (`jet_full`, `jet_half`). ESP 88 compiles Jet once,
+under the film's own configuration.
 
 THE MEMORY is the manifest's, and the link matches it: the stack first (so an
 overflow traps rather than running into the data), the static data (the frame
-and depth buffers are a fixed arena in main.cpp), then the heap to the end.
-The build refuses a memory that leaves the heap less than HEAP_MIN.
+and the render buffers are fixed arrays in main.cpp), then the heap to the
+end. The build refuses a memory that leaves the heap less than the cart's
+`heap_min`.
 
 THE TOOLCHAIN is wasi-sdk 24 -- $WASI_SDK_PATH, else
 experiments/wasm_aot/toolchain/wasi-sdk (gitignored), fetched there by sha256
@@ -56,8 +60,8 @@ if ROOT not in sys.path:
 from tools import wasm_cart, wasm_module  # noqa: E402
 
 PORT = os.path.join(ROOT, "ports", "jet")
-CART = os.path.join(PORT, "teapot.moy")
 JET_SRC = os.path.join(PORT, "jet", "src")
+FILM_MAIN = os.path.join(PORT, "examples", "esp32-neon-film", "main")
 CACHE = os.path.join(ROOT, ".build", "jet_cart")
 WASI_SDK = os.path.join(ROOT, "experiments", "wasm_aot", "toolchain", "wasi-sdk")
 LIBMOY_WASM = os.path.join(ROOT, "native", "moycore", "libmoy", "moy_wasm.c")
@@ -68,12 +72,9 @@ WASI_SDK_URL = ("https://github.com/WebAssembly/wasi-sdk/releases/download/"
                 "wasi-sdk-24/wasi-sdk-24.0-x86_64-linux.tar.gz")
 WASI_SDK_SHA256 = "c6c38aab56e5de88adf6c1ebc9c3ae8da72f88ec2b656fb024eda8d4167a0bc5"
 
-# The translation units: Jet's that the cart links, per build; the cart's own
-# that differ per build; the cart's own compiled once.
+# Jet's translation units the teapot links.
 JET_UNITS = ("BlendSpans", "Camera", "Light", "Material", "Object", "PostFX",
              "Renderer", "Scene", "Sprite2D", "TrigLUT")
-SCENE_UNITS = ("scene.cpp",)
-CART_UNITS = ("main.cpp", "runtime.cpp")
 
 BUILDS = {
     "full": ["-DHALF_WIDTH_BUFFERS=0", "-DJET_SCENE_TABLE=jet_full"],
@@ -82,6 +83,46 @@ BUILDS = {
 HALF_RENAMES = {"Renderer": "JetHalf", "Primitives": "JetHalfPrimitives",
                 "Loader": "JetHalfLoader"}
 BUILDS["half"] += ["-D%s=%s" % kv for kv in sorted(HALF_RENAMES.items())]
+
+PAGE = 65536
+STACK = 64 * 1024
+
+
+class Cart:
+    """One Jet cart: its folder under ports/jet/, Jet's units it links, the
+    builds Jet and `build_units` are compiled once each for (name: flags),
+    the cart's own units compiled once, the directories searched after its
+    `src/` and before Jet's, the stack, and the least heap its memory must
+    leave (tests/test_jet_cart.py measures each cart's peak against it)."""
+
+    def __init__(self, name, folder, jet_units, builds, build_units, units,
+                 includes, stack, heap_min):
+        self.name, self.folder = name, os.path.join(PORT, folder)
+        self.jet_units, self.builds = jet_units, builds
+        self.build_units, self.units = build_units, units
+        self.includes, self.stack, self.heap_min = includes, stack, heap_min
+
+    @property
+    def src(self):
+        return os.path.join(self.folder, "src")
+
+
+CARTS = {
+    # The heap holds the OBJ text, the loader's vertex map, the mesh and Jet's
+    # per-frame queues: they peak at about 270 KB.
+    "teapot": Cart("teapot", "teapot.moy", JET_UNITS, BUILDS, ("scene.cpp",),
+                   ("main.cpp", "runtime.cpp"), (), STACK, 384 * 1024),
+    # The film builds each cut's city, cars and cockpit on the heap when the
+    # cut begins and frees it at the next, beside Jet's per-frame queues,
+    # which keep the capacity of the busiest frame drawn so far: the
+    # boulevard's city loaded after the pursuit's queue peaks at about
+    # 1,260 KB. Its stack stays under 6 KB.
+    "esp88": Cart("esp88", "esp88.moy", JET_UNITS + ("Primitives", "Texture"),
+                  {"film": []}, (), ("main.cpp", "runtime.cpp"),
+                  (FILM_MAIN, os.path.join(FILM_MAIN, "firmware")),
+                  16 * 1024, 1280 * 1024),
+}
+DEFAULT_CART = "teapot"
 
 CXXFLAGS = ["--target=wasm32-wasi", "-std=c++17", "-O2", "-fno-exceptions",
             "-fno-rtti", "-fno-threadsafe-statics",
@@ -111,14 +152,6 @@ CXXFLAGS = ["--target=wasm32-wasi", "-std=c++17", "-O2", "-fno-exceptions",
             "-Wno-unused-function", "-Wno-unused-variable",
             "-Wno-unused-private-field", "-Wno-missing-braces"]
 
-PAGE = 65536
-STACK = 64 * 1024
-# The heap the cart needs: the OBJ text, the loader's vertex map, the mesh and
-# Jet's per-frame queues peak at about 270 KB (tests/test_jet_cart.py
-# measures it against what the memory leaves).
-HEAP_MIN = 384 * 1024
-
-
 class BuildError(RuntimeError):
     pass
 
@@ -127,8 +160,15 @@ def sha256_bytes(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def manifest():
-    with open(os.path.join(CART, "manifest.json"), encoding="utf-8") as f:
+def cart_spec(cart=DEFAULT_CART):
+    try:
+        return CARTS[cart]
+    except KeyError:
+        raise BuildError("no Jet cart %r: one of %s" % (cart, ", ".join(sorted(CARTS))))
+
+
+def manifest(cart=DEFAULT_CART):
+    with open(os.path.join(cart_spec(cart).folder, "manifest.json"), encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -188,33 +228,42 @@ def _fetch_sdk():
 # -- the module ------------------------------------------------------------------
 
 
-def _units():
+def _units(spec):
     """[(build or None, source path)] for every compile."""
     out = []
-    for build in BUILDS:
-        out += [(build, os.path.join(JET_SRC, u + ".cpp")) for u in JET_UNITS]
-        out += [(build, os.path.join(CART, "src", u)) for u in SCENE_UNITS]
-    out += [(None, os.path.join(CART, "src", u)) for u in CART_UNITS]
+    for build in spec.builds:
+        out += [(build, os.path.join(JET_SRC, u + ".cpp")) for u in spec.jet_units]
+        out += [(build, os.path.join(spec.src, u)) for u in spec.build_units]
+    out += [(None, os.path.join(spec.src, u)) for u in spec.units]
     return out
 
 
-def _inputs_key(sdk, memory):
+def _source_files(spec):
+    """Every file under the directories a compile searches, sorted."""
+    out = []
+    for d in (JET_SRC, spec.src) + tuple(spec.includes):
+        for dirpath, _dirs, names in os.walk(d):
+            out += [os.path.join(dirpath, n) for n in names]
+    return sorted(set(out))
+
+
+def _inputs_key(spec, sdk, memory):
     """The hash of everything a build reads: the sources, the flags, the
     memory and the compiler."""
     h = hashlib.sha256()
-    for d in (JET_SRC, os.path.join(CART, "src")):
-        for name in sorted(os.listdir(d)):
-            h.update(name.encode() + b"\0")
-            with open(os.path.join(d, name), "rb") as f:
-                h.update(f.read())
-    h.update(json.dumps([CXXFLAGS, BUILDS, _units_rel(), memory, STACK]).encode())
+    for path in _source_files(spec):
+        h.update(os.path.relpath(path, ROOT).encode() + b"\0")
+        with open(path, "rb") as f:
+            h.update(f.read())
+    h.update(json.dumps([CXXFLAGS, spec.builds, _units_rel(spec), memory,
+                         spec.stack]).encode())
     h.update(subprocess.run([os.path.join(sdk, "bin", "clang++"), "--version"],
                             capture_output=True, text=True).stdout.encode())
     return h.hexdigest()[:24]
 
 
-def _units_rel():
-    return [(b, os.path.relpath(p, ROOT)) for b, p in _units()]
+def _units_rel(spec):
+    return [(b, os.path.relpath(p, ROOT)) for b, p in _units(spec)]
 
 
 def _run(cmd):
@@ -224,57 +273,61 @@ def _run(cmd):
     return r.stderr
 
 
-def compile_wasm(sdk=None, memory=None, verbose=False):
-    """main.wasm's bytes at `memory` bytes of linear memory (default: the
-    manifest's). Cached by its inputs."""
+def compile_wasm(sdk=None, memory=None, verbose=False, cart=DEFAULT_CART):
+    """The cart's main.wasm bytes at `memory` bytes of linear memory (default:
+    the manifest's). Cached by its inputs."""
+    spec = cart_spec(cart)
     sdk = sdk or wasi_sdk()
     if sdk is None:
         raise BuildError("no wasi-sdk")
-    memory = memory or manifest()["memory"] * PAGE
-    key = _inputs_key(sdk, memory)
-    cached = os.path.join(CACHE, "main-%s.wasm" % key)
+    memory = memory or manifest(cart)["memory"] * PAGE
+    key = _inputs_key(spec, sdk, memory)
+    cached = os.path.join(CACHE, "%s-%s.wasm" % (spec.name, key))
     with _locked("build"):
         if not os.path.isfile(cached):
-            _compile(sdk, memory, cached, verbose)
+            _compile(spec, sdk, memory, cached, verbose)
     with open(cached, "rb") as f:
         return f.read()
 
 
-def _compile(sdk, memory, cached, verbose):
+def _compile(spec, sdk, memory, cached, verbose):
     cxx = os.path.join(sdk, "bin", "clang++")
     os.makedirs(CACHE, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=CACHE) as tmp:
-        base = CXXFLAGS + ["-ffile-prefix-map=%s/=" % ROOT,
-                           "-I", os.path.join(CART, "src"), "-I", JET_SRC]
+        base = CXXFLAGS + ["-ffile-prefix-map=%s/=" % ROOT, "-I", spec.src]
+        for d in spec.includes:
+            base += ["-I", d]
+        base += ["-I", JET_SRC]
 
         def one(i_unit):
             i, (build, src) = i_unit
             obj = os.path.join(tmp, "%03d_%s_%s.o" % (i, build or "cart",
                                                      os.path.basename(src)))
-            warnings = _run([cxx] + base + BUILDS.get(build, []) + ["-c", src, "-o", obj])
+            warnings = _run([cxx] + base + spec.builds.get(build, [])
+                            + ["-c", src, "-o", obj])
             if warnings and verbose:
                 sys.stderr.write(warnings)
             return obj
 
         with ThreadPoolExecutor(max_workers=os.cpu_count() or 2) as pool:
-            objs = list(pool.map(one, enumerate(_units())))
+            objs = list(pool.map(one, enumerate(_units(spec))))
         out = os.path.join(tmp, "main.wasm")
 
         def link(mem, extra=()):
             _run([cxx, "--target=wasm32-wasi", "-nostartfiles", "-Wl,--no-entry",
                   "-Wl,--strip-all", "-Wl,--stack-first",
-                  "-Wl,-z,stack-size=%d" % STACK,
+                  "-Wl,-z,stack-size=%d" % spec.stack,
                   "-Wl,--initial-memory=%d" % mem, "-Wl,--max-memory=%d" % mem]
                  + list(extra) + ["-o", out] + objs)
             with open(out, "rb") as f:
                 return f.read()
 
         base_at = heap_base(link(memory, ["-Wl,--export=__heap_base"]))
-        if memory - base_at < HEAP_MIN:
-            raise BuildError("the manifest's memory (%d pages) leaves the heap %d KB "
+        if memory - base_at < spec.heap_min:
+            raise BuildError("%s: the manifest's memory (%d pages) leaves the heap %d KB "
                              "above the stack and data (%d KB); it needs %d KB"
-                             % (memory // PAGE, (memory - base_at) // 1024,
-                                base_at // 1024, HEAP_MIN // 1024))
+                             % (spec.name, memory // PAGE, (memory - base_at) // 1024,
+                                base_at // 1024, spec.heap_min // 1024))
         wasm = link(memory)
     check_imports(wasm)
     tmp_cached = cached + ".part"
@@ -353,16 +406,25 @@ def heap_base(wasm):
 # -- the cart --------------------------------------------------------------------
 
 
-def build(out_dir, chips=(), sdk=None, config=None, verbose=False):
-    """The built cart folder `out_dir`/teapot.moy: the source folder, its
+def build(out_dir, chips=(), sdk=None, config=None, verbose=False, cart=DEFAULT_CART,
+          memory=None):
+    """The built cart folder `out_dir`/<cart>.moy: the source folder, its
     main.wasm, and a signed module per chip in `chips`. `config` overrides
-    config.json's keys (how a test builds a mode). Returns its path."""
-    wasm = compile_wasm(sdk, verbose=verbose)
-    man = manifest()
-    cart = os.path.join(out_dir, os.path.basename(CART))
+    config.json's keys (how a test builds a mode), `memory` the manifest's
+    (how a test measures). Returns its path."""
+    spec = cart_spec(cart)
+    wasm = compile_wasm(sdk, memory, verbose=verbose, cart=cart)
+    man = manifest(cart)
+    folder = spec.folder
+    cart = os.path.join(out_dir, os.path.basename(folder))
     if os.path.isdir(cart):
         shutil.rmtree(cart)
-    shutil.copytree(CART, cart)
+    shutil.copytree(folder, cart)
+    if memory:
+        man["memory"] = memory // PAGE
+        with open(os.path.join(cart, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(man, f, indent=2)
+            f.write("\n")
     main = man.get("main", "main.wasm")
     with open(os.path.join(cart, main), "wb") as f:
         f.write(wasm)
@@ -381,7 +443,9 @@ def build(out_dir, chips=(), sdk=None, config=None, verbose=False):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("out", nargs="?", help="where the built teapot.moy folder goes")
+    ap.add_argument("out", nargs="?", help="where the built cart folders go")
+    ap.add_argument("--cart", action="append", choices=sorted(CARTS),
+                    help="build this cart (repeatable; default: every one)")
     ap.add_argument("--toolchain", action="store_true",
                     help="only make sure wasi-sdk 24 is here (fetched by sha256 when "
                     "absent) and print where; what CI and preflight run before the "
@@ -401,21 +465,23 @@ def main(argv):
         return 0
     if not args.out:
         ap.error("the output folder is required")
-    try:
-        cart = build(args.out, args.chip, verbose=args.verbose)
-    except (BuildError, wasm_module.ToolError) as exc:
-        print("jet_cart: %s" % exc, file=sys.stderr)
-        return 2
-    man = manifest()
-    main_name = man.get("main", "main.wasm")
-    print("%s: memory %d pages (%d KB)" % (cart, man["memory"], man["memory"] * PAGE // 1024))
-    for name in sorted(os.listdir(cart)):
-        path = os.path.join(cart, name)
-        if os.path.isfile(path):
-            print("  %-22s %9d bytes" % (name, os.path.getsize(path)))
-    for chip in args.chip:
-        size = os.path.getsize(os.path.join(cart, wasm_cart.aot_name(main_name, chip)))
-        print("  %s module: %d bytes" % (chip, size))
+    for name in args.cart or sorted(CARTS):
+        try:
+            cart = build(args.out, args.chip, verbose=args.verbose, cart=name)
+        except (BuildError, wasm_module.ToolError) as exc:
+            print("jet_cart: %s" % exc, file=sys.stderr)
+            return 2
+        man = manifest(name)
+        main_name = man.get("main", "main.wasm")
+        print("%s: memory %d pages (%d KB)" % (cart, man["memory"],
+                                                man["memory"] * PAGE // 1024))
+        for entry in sorted(os.listdir(cart)):
+            path = os.path.join(cart, entry)
+            if os.path.isfile(path):
+                print("  %-22s %9d bytes" % (entry, os.path.getsize(path)))
+        for chip in args.chip:
+            size = os.path.getsize(os.path.join(cart, wasm_cart.aot_name(main_name, chip)))
+            print("  %s module: %d bytes" % (chip, size))
     return 0
 
 

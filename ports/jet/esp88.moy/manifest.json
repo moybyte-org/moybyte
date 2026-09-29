@@ -1,0 +1,9 @@
+{
+  "format": "moy-1",
+  "title": "ESP 88",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 27,
+  "fps": "free",
+  "input": ["buttons"]
+}

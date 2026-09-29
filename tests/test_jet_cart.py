@@ -1,12 +1,12 @@
-"""The compiled tier's showcase cart, Jet Teapot, on the host
+"""The compiled tier's Jet carts, Jet Teapot and ESP 88, on the host
 (ports/jet/README.md; docs/wasm_tier_plan_2026-09.md, "The showcase cart").
 
 What is pinned here:
 
-  * the module tools/jet_cart.py builds imports only the console's table --
-    nothing from WASI -- and a sibling moy-spec's `moy check` passes it with
-    no finding but the one every compiled cart draws until the proposal is
-    promoted;
+  * each module tools/jet_cart.py builds imports only the console's table --
+    nothing from WASI -- and a sibling moy-spec's `moy check` passes each cart
+    with no finding but the one every compiled cart draws until the proposal
+    is promoted; the two carts' imports header, runtime and font are one body;
   * the frame at two fixed camera poses, full width, half width and half
     width interlaced, as PIXEL GOLDENS: RGB565 frames through the same
     binding and golden mechanism the wasm fixtures use
@@ -21,7 +21,12 @@ What is pinned here:
     own verbs on the same frame without it, the two frames are byte-identical;
     its glyphs are the console's font;
   * the heap Jet uses stays inside what the declared memory leaves it, and
-    flying through the model does not trap.
+    flying through the model does not trap;
+  * ESP 88: three frames of the film as pixel goldens (the river, the
+    boulevard, the credits), its buttons (left and right step the cuts and
+    wrap, A shows the HUD, read back glyph by glyph), and its heap's worst
+    known case -- the boulevard loaded after the pursuit's queues -- inside
+    the heap the build requires.
 
 The build needs wasi-sdk 24 (tools/jet_cart.py fetches it by sha256 when it is
 absent) and the host wasm binding. Without either the tests SKIP on a bench
@@ -42,8 +47,11 @@ from ws_helpers import open_cart
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GOLDEN_FILE = os.path.join(ROOT, "tests", "shell_goldens", "jet_teapot.json")
+FILM_GOLDEN_FILE = os.path.join(ROOT, "tests", "shell_goldens", "jet_esp88.json")
 UPDATE_ENV = "MOYBYTE_UPDATE_GOLDENS"
 TITLE = "Jet Teapot"
+FILM_TITLE = "ESP 88"
+CARTS = ("teapot", "esp88")
 W, H = 320, 240
 DT = 1.0 / 60.0            # the cart's declared rate: one logic tick a frame
 HUD_H = 10
@@ -76,20 +84,20 @@ def jet():
     return jet_cart
 
 
-def _ws(tmp_path, jet, **config):
+def _ws(tmp_path, jet, cart="teapot", title=TITLE, **config):
     root = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(root)
-    jet.build(root, config=config)
+    jet.build(root, config=config, cart=cart)
     ws = host_app.build_workstation(root)
     ws.look.set_theme_variant("dark", persist=False)
-    open_cart(ws, TITLE)
+    open_cart(ws, title)
     assert ws.player.cart_error is None, ws.player.cart_error
     assert type(ws.player._lua).__name__ == "WasmHostRun"
     ws.player.uncap_mode(True)           # every frame draws: one tick, one frame
     return ws
 
 
-def _frames(ws, n, hold=()):
+def _frames(ws, n, hold=(), dt=DT):
     for _ in range(n):
         ws.pointer.visible = False
         ws._toast_until = 0
@@ -98,7 +106,7 @@ def _frames(ws, n, hold=()):
             ws.input.set_held(b, b in hold)
         ws.input.begin_frame()
         ws._dirty = True
-        ws.frame(DT)
+        ws.frame(dt)
     assert ws.player.cart_error is None, ws.player.cart_error
 
 
@@ -120,20 +128,22 @@ def _pmem(ws):
 # -- the module ------------------------------------------------------------------
 
 
-def test_the_module_imports_only_the_console(jet):
-    wasm = jet.compile_wasm()
+@pytest.mark.parametrize("cart", CARTS)
+def test_the_module_imports_only_the_console(jet, cart):
+    wasm = jet.compile_wasm(cart=cart)
     got = jet.imports(wasm)
     assert got and all(m == "moy" for m, _n in got), got
     assert {n for _m, n in got} <= jet.console_imports()
     assert "blit565" in {n for _m, n in got}
 
 
-def test_the_module_matches_the_manifest(jet):
+@pytest.mark.parametrize("cart", CARTS)
+def test_the_module_matches_the_manifest(jet, cart):
     """One memory, the manifest's, minimum equal to maximum, and no absolute
     path in the binary (the build maps them out)."""
     from tools import wasm_module
-    wasm = jet.compile_wasm()
-    pages = jet.manifest()["memory"]
+    wasm = jet.compile_wasm(cart=cart)
+    pages = jet.manifest(cart)["memory"]
     mems = [body for sid, _n, body in wasm_module.sections(wasm) if sid == 5]
     assert mems, "no memory section"
     # count 1, flags 1 (has max), min, max
@@ -145,7 +155,8 @@ def test_the_module_matches_the_manifest(jet):
     assert ROOT.encode() not in wasm and b"/home/" not in wasm
 
 
-def test_moy_check_passes_the_built_cart(jet, tmp_path):
+@pytest.mark.parametrize("cart", CARTS)
+def test_moy_check_passes_the_built_cart(jet, tmp_path, cart):
     """moy-spec's own check, when a checkout sits beside this one: no error,
     and no warning but the runtime's -- the one every compiled cart draws
     while the binding tracks the proposal."""
@@ -153,13 +164,25 @@ def test_moy_check_passes_the_built_cart(jet, tmp_path):
     spec = spec_checkout("moy.py")
     if spec is None:
         pytest.skip("no moy-spec checkout")
-    cart = jet.build(str(tmp_path))
+    cart = jet.build(str(tmp_path), cart=cart)
     r = subprocess.run([sys.executable, os.path.join(spec, "moy.py"), "check", cart],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     findings = [ln.split()[:2] for ln in r.stdout.splitlines()
                 if ln.strip().startswith(("error", "warn"))]
     assert findings == [["warn", "manifest.runtime:"]], r.stdout
+
+
+def test_the_carts_share_one_runtime():
+    """The imports header, the heap and C library edges, and the HUD's font
+    are one body in both carts' sources: each cart's src/ is complete on its
+    own, so the copies are pinned equal rather than shared."""
+    for name in ("moy.h", "runtime.cpp", "hud_font.h"):
+        bodies = set()
+        for cart in CARTS:
+            with open(os.path.join(ROOT, "ports", "jet", cart + ".moy", "src", name), "rb") as f:
+                bodies.add(f.read())
+        assert len(bodies) == 1, "%s differs between the Jet carts" % name
 
 
 def test_the_toolchain_is_the_tier_s(jet):
@@ -200,31 +223,37 @@ def _golden_frame(tmp_path, jet, width, pose):
     return hashlib.sha256(bytes(ws.sys_canvas._buf)).hexdigest()
 
 
-@pytest.mark.parametrize("width", WIDTHS)
-@pytest.mark.parametrize("pose", POSES, ids=[p[0] for p in POSES])
-def test_the_frame_golden(tmp_path, request, jet, width, pose):
-    """The frame the cart presents at a fixed pose, hashed against committed
-    bytes. Re-baseline deliberately, as the shell goldens are:
-    `MOYBYTE_UPDATE_GOLDENS=1` or `--update-goldens`."""
-    key = "%s_%s" % (width, pose[0])
-    got = _golden_frame(tmp_path, jet, width, pose)
+def _check_golden(request, path, key, got, test):
+    """`got` against the committed table at `path`. Re-baseline deliberately,
+    as the shell goldens are: `MOYBYTE_UPDATE_GOLDENS=1` or
+    `--update-goldens`."""
     update = (os.environ.get(UPDATE_ENV)
               or request.config.getoption("--update-goldens", default=False))
     table = {}
-    if os.path.isfile(GOLDEN_FILE):
-        with open(GOLDEN_FILE) as f:
+    if os.path.isfile(path):
+        with open(path) as f:
             table = json.load(f)
     if update:
         table[key] = got
-        with open(GOLDEN_FILE, "w") as f:
+        with open(path, "w") as f:
             json.dump(table, f, indent=2, sort_keys=True)
             f.write("\n")
         return
     assert key in table, "no golden for %s; record it with %s=1" % (key, UPDATE_ENV)
     assert got == table[key], (
-        "the showcase frame %s moved (%s != %s). Re-baseline only if you can say "
+        "the frame %s moved (%s != %s). Re-baseline only if you can say "
         "which pixel moved and why: %s=1 .venv/bin/python -m pytest "
-        "tests/test_jet_cart.py -k golden" % (key, got, table[key], UPDATE_ENV))
+        "tests/test_jet_cart.py -k %s" % (key, got, table[key], UPDATE_ENV, test))
+
+
+@pytest.mark.parametrize("width", WIDTHS)
+@pytest.mark.parametrize("pose", POSES, ids=[p[0] for p in POSES])
+def test_the_frame_golden(tmp_path, request, jet, width, pose):
+    """The frame the cart presents at a fixed pose, hashed against committed
+    bytes."""
+    key = "%s_%s" % (width, pose[0])
+    _check_golden(request, GOLDEN_FILE, key,
+                  _golden_frame(tmp_path, jet, width, pose), "golden")
 
 
 def _sky(y):
@@ -331,3 +360,98 @@ def test_flying_through_the_teapot_does_not_trap(tmp_path, jet, width):
     _frames(ws, 150, ("up",))
     _frames(ws, 60, ("up", "a", "left"))
     _frames(ws, 60, ("down", "b"))
+
+
+# -- ESP 88 ---------------------------------------------------------------------
+
+FILM_DT = 1.0 / 30.0
+FILM_TOP = 21                # (240 - 198) / 2: the picture between the bars
+FILM_H = 198
+PM_CUT = 5
+
+# (name, config, frames at FILM_DT): the river two seconds in, fading up
+# with its reflection; the boulevard three seconds in, the car turning out
+# of the side street; the credits held, four and a half seconds into the
+# last cut.
+FILM_POSES = (
+    ("river", {"cut": 1}, 60),
+    ("boulevard", {"cut": 7}, 90),
+    ("credits", {"cut": 12}, 135),
+)
+
+
+def _film(tmp_path, jet, **config):
+    return _ws(tmp_path, jet, cart="esp88", title=FILM_TITLE, **config)
+
+
+@pytest.mark.parametrize("pose", FILM_POSES, ids=[p[0] for p in FILM_POSES])
+def test_the_film_frame_golden(tmp_path, request, jet, pose):
+    """The frame ESP 88 presents at a fixed time in a cut, hashed against
+    committed bytes, with the letterbox above and below it black."""
+    name, config, frames = pose
+    ws = _film(tmp_path, jet, hud=False, **config)
+    _frames(ws, frames, dt=FILM_DT)
+    buf = bytes(ws.sys_canvas._buf)
+    row = 2 * W
+    assert not any(buf[:FILM_TOP * row]) and not any(buf[(FILM_TOP + FILM_H) * row:])
+    assert any(buf[FILM_TOP * row:(FILM_TOP + FILM_H) * row])
+    _check_golden(request, FILM_GOLDEN_FILE, name, hashlib.sha256(buf).hexdigest(),
+                  "film_frame")
+
+
+def test_the_film_s_buttons_step_the_cuts_and_show_the_hud(tmp_path, jet):
+    """A shows the HUD in the top bar: the cut's number and name, then the
+    rates. Right steps to the next cut, left to the one before, and both
+    wrap round the film."""
+    ws = _film(tmp_path, jet)
+    _frames(ws, 2, dt=FILM_DT)
+    assert not any(bytes(ws.sys_canvas._buf)[:FILM_TOP * 2 * W])
+    _frames(ws, 1, ("a",), dt=FILM_DT)
+    _frames(ws, 1, dt=FILM_DT)
+    assert _hud_line(ws).startswith("01 THE RIVER  "), _hud_line(ws)
+    assert _hud_line(ws).endswith("MS"), _hud_line(ws)
+    for hold, want in (("left", "12 ESP 88  "), ("right", "01 THE RIVER  "),
+                       ("right", "02 RAIN DISTRICT  ")):
+        _frames(ws, 1, (hold,), dt=FILM_DT)
+        _frames(ws, 1, dt=FILM_DT)
+        assert _hud_line(ws).startswith(want), _hud_line(ws)
+        assert _pmem(ws)[PM_CUT] == int(want[:2])
+    _frames(ws, 1, ("a",), dt=FILM_DT)
+    _frames(ws, 1, dt=FILM_DT)
+    assert not any(bytes(ws.sys_canvas._buf)[:FILM_TOP * 2 * W])
+
+
+def test_the_film_s_heap_holds_its_worst_known_case(tmp_path, jet):
+    """Jet's per-frame queues keep the capacity of the busiest frame drawn,
+    and the pursuit's is the largest: the boulevard's city loaded after it is
+    the heap's high-water mark. Played that way, the peak stays inside the
+    heap the build requires of the manifest's memory, and the film never
+    traps for want of it."""
+    ws = _film(tmp_path, jet, cut=7)
+    _frames(ws, 30 * 26, dt=FILM_DT)          # the boulevard, then the pursuit
+    assert _pmem(ws)[PM_CUT] == 9
+    for _ in range(2):                         # back to the boulevard
+        _frames(ws, 1, ("left",), dt=FILM_DT)
+        _frames(ws, 20, dt=FILM_DT)
+    pm = _pmem(ws)
+    assert pm[PM_CUT] == 7
+    peak, size = pm[PM_HEAP_PEAK_KB], pm[PM_HEAP_KB]
+    need = jet.cart_spec("esp88").heap_min // 1024
+    assert 0 < peak <= need <= size, (peak, need, size)
+
+
+@pytest.mark.parametrize("interlaced", (True, False))
+def test_the_film_draws_one_field_a_frame_or_both(tmp_path, jet, interlaced):
+    """Interlaced, as the example's runtime plays it, a frame draws one
+    field's rows and leaves the other's as they were -- black, the first
+    time; with `"interlaced": false` it draws both. The courier's street
+    opens with no fade, so every drawn row has colour in it."""
+    ws = _film(tmp_path, jet, cut=3, interlaced=interlaced)
+    _frames(ws, 1, dt=FILM_DT)
+    buf = bytes(ws.sys_canvas._buf)
+    row = 2 * W
+    lit = [any(buf[(FILM_TOP + y) * row:(FILM_TOP + y + 1) * row]) for y in range(FILM_H)]
+    if interlaced:
+        assert lit[1::2] == [True] * (FILM_H // 2) and not any(lit[0::2]), lit
+    else:
+        assert all(lit), lit

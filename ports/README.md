@@ -11,13 +11,14 @@ declaration or lives in `system_carts/` — so none of it is baked into a
 firmware image or seeded onto a device. To play one, copy the `.moy` folder into a cart store
 (the tests do exactly that into a tmp store).
 
-## jet/ — Jet Teapot, the compiled tier's showcase
+## jet/ — Jet Teapot and ESP 88, the compiled tier's showcases
 
-A `"runtime": "wasm"` cart on Jet, CubeCoders' MIT software rasteriser,
-porting one of Jet's own example scenes; its frame reaches the console through
-`blit565`. `jet/README.md` is the authority: how it is built
-(`tools/jet_cart.py`), how Jet is vendored (`make vendor-jet`), its modes and
-memory, and the design for seeding it, which nothing does yet.
+Two `"runtime": "wasm"` carts on Jet, CubeCoders' MIT software rasteriser,
+each porting one of Jet's own examples: the teapot scene and ESP 88, the neon
+city film. Their frames reach the console through `blit565`. `jet/README.md`
+is the authority: how they are built (`tools/jet_cart.py`), how Jet and the
+film are vendored (`make vendor-jet`), their modes and memory, and the design
+for seeding them, which nothing does yet.
 
 ## p8/ — the PICO-8 conformance corpus, ONE cart each (2026-09-11)
 
