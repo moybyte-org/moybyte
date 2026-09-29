@@ -71,14 +71,13 @@ try:
 except ImportError:                      # a build without it: no wasm runtime
     _moy_wasm = None
 
-# Hoisted out of _refresh, where it was an `import` statement executed once per
-# frame. Device-only, so it stays optional: the host and the web runner have no
-# device_util and simply skip the time slot (libmoy adds the intra-tick elapsed
-# term itself -- see modmoycore.c's h_time_ms).
+# The cart's clock: ms since the Player's stamp, which snap_shared writes into
+# the snapshot's time slot -- the base libmoy's time() adds the milliseconds
+# inside the tick to (modmoycore.c's h_time_ms).
 try:
-    from device_util import _ticks_ms, _ticks_diff
-except ImportError:
-    _ticks_ms = _ticks_diff = None
+    from ticks import _since_ms
+except ImportError:                      # host tests importing the device module
+    from runtime.ticks import _since_ms
 
 # What NOT to register on top of libmoy's table -- LIBMOY_VERBS (the names
 # libmoy's own binding installs) and NOT_REGISTRABLE (ours, each excluded for
@@ -164,7 +163,6 @@ class MoycoreRun:
         # lookup per frame in _refresh.
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP
-        self._I_TIME = _moycore.SNAP_TIME_MS
         # The slots and op codes lua_ext's shared bodies take, resolved once --
         # the same reason the SNAP_* lookups above are bound at construction.
         self._I_SNAP = snap_slots(_moycore)
@@ -316,12 +314,7 @@ class MoycoreRun:
             held, pressed = masks(MOY_BUTTONS)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out)
-        if _ticks_ms is not None:
-            try:
-                s[self._I_TIME] = _ticks_diff(_ticks_ms(), inp.cart_start_ms)
-            except Exception:  # noqa: BLE001
-                pass
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms)
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):
@@ -661,7 +654,6 @@ class WasmRun(MoycoreRun):
         flags = getattr(project, "flags", None) if project is not None else None
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP
-        self._I_TIME = _moycore.SNAP_TIME_MS
         self._I_SNAP = snap_slots(_moycore)
         self._aq_ops = audio_ops(_moycore)
         self._touch_out = [0, 0, 0, 0]

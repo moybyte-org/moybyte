@@ -265,16 +265,13 @@ class FakeMoycore(types.ModuleType):
 
 
 class Clock:
-    """`device_util`'s tick pair, injected -- no wall clock anywhere."""
+    """`ticks._since_ms`, injected -- no wall clock anywhere."""
 
     def __init__(self, ms=0):
         self.ms = ms
 
-    def ticks_ms(self):
-        return self.ms
-
-    def diff(self, a, b):
-        return a - b
+    def since_ms(self, start):
+        return self.ms - start
 
 
 class FakeCanvas:
@@ -498,14 +495,14 @@ LUA_SRC = "function _update() end"
 class World:
     """A freshly executed `moycore_glue` over a fresh fake `moycore`.
 
-    Re-loaded per test because `_moycore`, `_ticks_ms` and `_ticks_diff` are
-    MODULE globals bound at import: a leaked module would make the second test
-    in a file exercise the first one's board.
+    Re-loaded per test because `_moycore` and `_since_ms` are MODULE globals
+    bound at import: a leaked module would make the second test in a file
+    exercise the first one's board.
     """
 
-    NAMES = ("moycore", "device_util", "device_canvas", "lua_ext", "moy_wasm")
+    NAMES = ("moycore", "ticks", "device_canvas", "lua_ext", "moy_wasm")
 
-    def __init__(self, moycore=True, device_util=True, flat_lua_ext=True,
+    def __init__(self, moycore=True, flat_ticks=True, flat_lua_ext=True,
                  wire_fallback=b"\1" * 128, wasm_chip=None):
         self.saved = {n: sys.modules.get(n, KeyError) for n in self.NAMES}
         if wasm_chip is None:
@@ -522,13 +519,12 @@ class World:
             sys.modules["moycore"] = self.core
         else:
             sys.modules["moycore"] = None      # PEP 328: raises ImportError
-        if device_util:
-            du = types.ModuleType("device_util")
-            du._ticks_ms = self.clock.ticks_ms
-            du._ticks_diff = self.clock.diff
-            sys.modules["device_util"] = du
+        if flat_ticks:
+            tk = types.ModuleType("ticks")
+            tk._since_ms = self.clock.since_ms
+            sys.modules["ticks"] = tk
         else:
-            sys.modules["device_util"] = None
+            sys.modules["ticks"] = None        # the host: runtime.ticks
         if wire_fallback is not None:
             dc = types.ModuleType("device_canvas")
             dc._PAL565_WIRE_BUF = wire_fallback
@@ -1134,23 +1130,25 @@ def test_an_input_with_no_cart_clock_leaves_the_time_slot_alone(w):
     assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 0
 
 
-def test_a_tier_without_device_util_skips_the_time_slot_entirely():
-    """The host and the web runner have no `device_util`; libmoy adds the
-    intra-tick elapsed term itself (`h_time_ms`)."""
-    world = World(device_util=False)
+def test_the_host_import_path_reads_the_same_clock():
+    """With no flat `ticks` the glue takes `runtime.ticks` -- the clock the
+    Player stamps with -- and still fills the slot: a tier that skipped it ran
+    every Lua and compiled cart's time() at 0 plus the tick's own ms."""
+    from runtime import ticks
+    world = World(flat_ticks=False)
     try:
-        assert world.mod._ticks_ms is None and world.mod._ticks_diff is None
-        run = world.run(ws=FakeWs(inp=FakeInput(cart_start_ms=10)))
+        assert world.mod._since_ms is ticks._since_ms
+        run = world.run(ws=FakeWs(inp=FakeInput(cart_start_ms=ticks._ticks_ms() - 5000)))
         run._refresh()
-        assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 0
+        assert 5000 <= run.snap[C_CONSTS["SNAP_TIME_MS"]] < 6000
     finally:
         world.close()
 
 
 def test_the_import_of_the_clock_is_hoisted_out_of_the_frame(w):
     """It was an `import` statement executed once per frame."""
-    assert w.mod._ticks_ms == w.clock.ticks_ms
-    sys.modules["device_util"] = None            # gone mid-run: still fine
+    assert w.mod._since_ms == w.clock.since_ms
+    sys.modules["ticks"] = None                  # gone mid-run: still fine
     run = w.run(ws=FakeWs(inp=FakeInput(cart_start_ms=0)))
     w.clock.ms = 42
     run._refresh()

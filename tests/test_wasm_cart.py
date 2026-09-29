@@ -191,6 +191,36 @@ def test_the_hooks_run_under_the_tick_model(tmp_path):
     assert abs(got[3] - 33333) <= 1, got[3]      # dt is the tick's period
 
 
+# A cart that writes time() into pmem slot 0 every _update.
+CLOCK = """
+(module
+  (import "moy" "time" (func $time (result i32)))
+  (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
+  (memory (export "memory") 1 1)
+  (func (export "_init"))
+  (func (export "_update") (param f32)
+    (drop (call $pmem (i32.const 0) (call $time) (i32.const 1))))
+  (func (export "_draw")))
+"""
+
+
+def test_a_compiled_carts_time_is_the_players_cart_clock(tmp_path):
+    """time() through the Player is milliseconds since the Player stamped the
+    run, as on a board (lua_ext.snap_shared fills the snapshot's clock on
+    both). It read 0 plus the tick's own milliseconds until the host filled
+    it, and Doom's game clock never left its first tic."""
+    _binding_or_skip()
+    from runtime.ticks import _ticks_diff
+    ws = host_app.build_workstation(_store(
+        tmp_path, _wat_cart("Clock", CLOCK, 1)))
+    open_cart(ws, "Clock")
+    assert ws.player.cart_error is None, ws.player.cart_error
+    ws.input.cart_start_ms = _ticks_diff(ws.input.cart_start_ms, 5000)
+    ws.frame(_DT)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    assert 5000 <= _pmem(ws)[0] < 6000, _pmem(ws)[0]
+
+
 TRAP_IN_DRAW = """
 (module
   (import "moy" "cls" (func $cls (param i32)))

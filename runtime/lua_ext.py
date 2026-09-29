@@ -82,13 +82,13 @@ MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 # seam written twice diverges in the half nobody runs, and the d-pad incident
 # is what a silent divergence in this file's subject matter looks like.
 #
-# `pointer_state` is passed IN rather than imported, so this module keeps its
-# one property: it imports nothing, costs a frozen module and drags no
-# dependency onto a board or the wasm head.
+# `pointer_state` and `since_ms` are passed IN rather than imported, so this
+# module keeps its one property: it imports nothing, costs a frozen module and
+# drags no dependency onto a board or the wasm head.
 
 SNAP_SLOTS = ("SNAP_BTN_P1", "SNAP_BTNP_P1", "SNAP_PLAYERS",
               "SNAP_TOUCH_X", "SNAP_TOUCH_Y", "SNAP_TOUCH_DOWN",
-              "SNAP_TOUCH_MS")
+              "SNAP_TOUCH_MS", "SNAP_TIME_MS")
 
 AQ_OPS = ("AQ_SFX", "AQ_MUSIC", "AQ_BEEP", "AQ_MUSIC_STOP", "AQ_SOUND_STOP",
           "AQ_VOLUME")
@@ -104,8 +104,9 @@ def audio_ops(mod):
     return tuple(getattr(mod, name) for name in AQ_OPS)
 
 
-def snap_shared(s, inp, idx, pointer_state, out):
-    """PLAYER TWO and THE POINTER, into the snapshot the tick will read.
+def snap_shared(s, inp, idx, pointer_state, out, since_ms):
+    """PLAYER TWO, THE POINTER and THE CLOCK, into the snapshot the tick will
+    read.
 
     PLAYER TWO (#65). These slots exist in the C ABI and nothing filled them, so
     libmoy's `players()` answered 1 forever and a Lua cart could not have a
@@ -122,6 +123,11 @@ def snap_shared(s, inp, idx, pointer_state, out):
     FLAGS, not a boolean: it is the only slot h_touch has, and touch() has to
     answer "is there one", "is it down" and "did it go down this frame" out of
     it. 0 is no pointer, which is what SPEC.md 7.3 means by nil.
+
+    THE CLOCK: milliseconds since the Player stamped `cart_start_ms`
+    (`ticks._since_ms`), the base libmoy's time() adds the milliseconds inside
+    the tick to -- the same clock a Python cart's time() reads. An input with
+    no stamp leaves the slot as it was.
     """
     n = 1
     pr = getattr(inp, "players", None)
@@ -140,6 +146,9 @@ def snap_shared(s, inp, idx, pointer_state, out):
         s[idx[6]] = int(ms)
     except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
         s[idx[5]] = 0
+    start = getattr(inp, "cart_start_ms", None)
+    if start is not None:
+        s[idx[7]] = since_ms(start)
 
 
 def sync_view(ws, view, last):

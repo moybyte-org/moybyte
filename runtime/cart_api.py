@@ -35,9 +35,9 @@ try:                                    # staged/frozen flat namespace (boards, 
 except ImportError:                     # host: the runtime package
     from runtime.moy_image import Image
 try:
-    from ticks import _ticks_ms, _ticks_diff
+    from ticks import _since_ms
 except ImportError:
-    from runtime.ticks import _ticks_ms, _ticks_diff
+    from runtime.ticks import _since_ms
 try:
     from widgets import pointer_state, P_NONE, P_HELD, P_CLICK
 except ImportError:
@@ -390,9 +390,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         return (st[0], st[1], bool(st[2] & P_CLICK), False, False, 0, 0)
 
     def time():
-        # Milliseconds since the cart started (set by Workstation._start).
-        start = getattr(input, "cart_start_ms", 0)
-        return _ticks_diff(_ticks_ms(), start)
+        # Milliseconds since the Player stamped the run: the clock a Lua or a
+        # compiled cart's time() reads too (lua_ext.snap_shared).
+        return _since_ms(getattr(input, "cart_start_ms", 0))
 
     def key(code=None):
         # key([code]) -> is that ASCII key held this frame (key(ord("a"))). The

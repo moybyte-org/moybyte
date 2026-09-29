@@ -29,6 +29,7 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 # marshals ints and one string, so they ride int handles plus a Lua prelude),
 # the moy_button bit order, and the two deny lists that decide what gets
 # registered on top of libmoy's table.
+from runtime.ticks import _since_ms
 from runtime.widgets import pointer_state
 from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                              LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
@@ -175,7 +176,7 @@ class MoycoreHostRun:
                 except Exception:  # noqa: BLE001
                     pass
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out)
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms)
         err = self._run.tick(dt, self.draw_next)
         # A LUA cart ends itself the same way a Python one does. libmoy's quit()
         # is a host callback that sets SNAP_QUIT (h_quit), and nothing read it:
