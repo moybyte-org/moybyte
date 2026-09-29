@@ -332,94 +332,68 @@ game, the ≡ menu and Settings work, the Editor's seven tabs work.
 
 ---
 
-## The serial dev channel, and the RX question
+## The serial dev channel
 
-The T-Deck's shipping firmware has **no on-glass test harness** — no `state`, no
-`tap`, no `py` — where the P4 has all three (`tools/p4_autotest.py`,
-`tests/test_p4_on_glass.py`). The stated reason is that this board's USB-CDC RX
-is dead under the desktop. **That reason is wrong**, and the correction is the
-most valuable thing in this port.
+The console answers line commands on its USB serial through the one
+`runtime/dev_channel.py` every board constructs; `tests/test_tdeck_on_glass.py`
+and `tools/board.py` drive it. TX always streamed. RX takes three changes that
+are only sufficient TOGETHER (#201, 2026-08-16), each measured as a failure on
+its own:
 
-### What was recorded, and what is actually true
+1. `MICROPY_HW_ENABLE_USBDEV (0)` — `MICROPY_HW_USB_CDC = USBDEV` forces
+   `MICROPY_HW_ESP_USB_SERIAL_JTAG` to 0 on the S3 (`SOC_USB_OTG_PERIPH_NUM ==
+   1`), compiling out the ISR that fills `stdin_ringbuf`. It also gives
+   MicroPython its own TX.
+2. USB-Serial/JTAG as the **PRIMARY** ESP-IDF console. A SECONDARY console is
+   output-only by design.
+3. `MICROPY_HW_ENABLE_UART_REPL (0)` — UART0 shared the ring buffer, and its
+   floating pin is where every `SERIAL rx=1` stray byte came from.
 
-`CLAUDE.md` says "this fork's USB-CDC stack has no at-arrival interrupt-char
-scan, so Ctrl-C/REPL/commands never arrive". The revert that established the
-lore (`4faf07a`) says "select.poll reports stdin ALWAYS-READY even when empty,
-so poll-then-readline becomes a blocking read that stalled the loop ~30s".
+(2) alone HANGS the board: with USBDEV still on, `mp_hal_stdout_tx_strn` falls
+through to IDF's blocking primary console. It needs (1)'s non-blocking
+`usb_serial_jtag_tx_strn`, which gives an absent host one 200 ms timeout and
+then latches `terminal_connected = false`.
 
-The first claim is false and checkable. The fork was MicroPython
-**v1.27.0**; this build is **v1.28.0**; and every file on the CDC receive path
-is byte-identical between them — MicroPython's `mp_usbd_cdc.c`, `mp_usbd.c`,
-`mp_usbd_runtime.c`, `interrupt_char.c`, `sys_stdio_mphal.c`, and the esp32
-port's `usb.c`, `uart.c` and `main.c`. Its `mphalport.c`, `vm.c` and
-`scheduler.c` differ only cosmetically, and both builds resolve to the same
-`MICROPY_HW_USB_CDC=1` / `USB_SERIAL_JTAG=0` / `UART_REPL=1`. The at-arrival
-scan **exists**:
+`nm` is what settled it. The image recorded as having dead RX linked
+`tud_cdc_rx_cb` but neither `tusb_init` nor `usb_serial_jtag_isr_handler`, and
+bound stdin to `uart_stdout_init` on U0RXD — a header pin with nothing attached
+— so bytes written to the enumerated interface were accepted by the host stack
+and dropped. Both explanations recorded before that were wrong: "the USB-CDC
+stack has no at-arrival interrupt-char scan" (`tud_cdc_rx_cb` is linked and
+scans) and micropython#18581's "CDC only initialises at the REPL" (true of CDC,
+not the reason). The lvgl_micropython fork could not be fixed this way: its
+`MOYBYTE_REPL=jtag` mode had three independent bugs (the deletion commit
+documents them), and with all three fixed it booted and printed but took no
+input on an identical console config and identical linked symbols. The fork
+was deleted on 2026-08-17 — a verdict, not a TODO.
 
-```c
-/* shared/tinyusb/mp_usbd_cdc.c, tud_cdc_rx_cb -- identical in both trees */
-if (data_char == mp_interrupt_char) {
-    stdin_ringbuf.iget = stdin_ringbuf.iput = 0;
-    mp_sched_keyboard_interrupt();
-}
-```
+**Do NOT use the USB product id as the RX tell.** A working board enumerates
+`303a:1001`, the USB-Serial/JTAG peripheral doing its job; `303a:4001` is
+TinyUSB CDC, the arrangement that does NOT take input here.
 
-and `tud_cdc_rx_cb` is linked into the shipping image. The same revert commit
-says so itself, three lines below the wrong diagnosis: *"without a reader in
-flight, **Ctrl-C drops to a live REPL**"*.
+The channel never calls `readline()`: it registers `select.POLLIN` only (a bare
+`register()` is truthy forever, because `mphalport.c` grants `POLL_WR`
+unconditionally), reads one byte at a time after `poll` reports it, and counts
+what it swallowed — the diag tick prints `SERIAL rx=N lines=N dropped=N
+partial=N raw=N`, and `rx` climbing on an idle board with `lines=0` means
+something is injecting bytes into stdin.
 
-So **rebuilding on mainline changes nothing about RX**, in either direction.
-What was really happening has two parts, and neither is a broken `poll`:
-
-1. **`sys.stdin.readline()` blocks per character.** `sys_stdio_mphal.c`'s
-   `stdio_read` loops on `mp_hal_stdin_rx_chr`, which never returns empty. So
-   ONE byte in the ring buffer makes `poll` *correctly* report ready, and then
-   `readline()` waits for a newline that may never come. That is the ~30s stall,
-   exactly.
-2. **Something was putting that byte there.** `MICROPY_HW_ENABLE_UART_REPL` is
-   on in both builds, and UART0's ISR feeds the *same* `stdin_ringbuf`. Noise on
-   a floating U0RXD (GPIO44, on this board's expansion header) is
-   indistinguishable from a typed character. This is a hypothesis, not a
-   measurement — see below for the one line that settles it.
-
-### What this build does instead
-
-`moy_runtime._SerialChannel` is armed by default (`SERIAL_CMDS = True`) and is
-built so that both mechanisms are survivable:
-
-* it registers **`select.POLLIN` only**. A bare `register(sys.stdin)` defaults
-  to `RD|WR`, and `mphalport.c` grants `POLL_WR` unconditionally — so a bare
-  registration is truthy on every call forever, which looks exactly like "poll
-  reports stdin always-ready";
-* it **never calls `readline()`**. It reads **one byte** with
-  `sys.stdin.read(1)`, only after poll reported `RD` (which the port sets only
-  when `ringbuf_peek() != -1`), accumulating until a newline. A byte read is a
-  byte consumed, so noise costs a bounded slice of a frame and can never park
-  the loop; a partial line past 96 chars is dropped;
-* it **counts what it swallowed**, and the diag tick prints
-  `SERIAL rx=N lines=N dropped=N partial=N raw=N` (`raw` is what `recv` took
-  around the line reader, so an rx that stopped climbing during a cart push is
-  the transfer working, not the channel dying).
-
-That last line is the experiment. **`rx` climbing on an idle board with
-`lines=0` means something is injecting bytes into stdin** — mechanism 2, and
-the fix is `MICROPY_HW_ENABLE_UART_REPL (0)` in the board header, which takes
-UART0's ISR off the shared ring buffer. `rx=0` while the channel refuses
-commands means the CDC path itself, and the escalation is the S3's
-**USB-Serial/JTAG** peripheral, which fills the ring from a *true hardware ISR*
-(`usb_serial_jtag.c`) rather than a scheduled TinyUSB task — that is what the
-P4's UART behaves like, and it is why the P4's stdin commands work. On the S3
-it is mutually exclusive with CDC (`SOC_USB_OTG_PERIPH_NUM=1`).
-
-One caveat worth knowing: TinyUSB is pumped by the MicroPython scheduler, which
-the VM services at every bytecode branch. Ordinary Python loops are fine, but
-`@micropython.native` code and long native C calls do **not** check — so RX
-latency is bounded by the longest gap between VM branches, not by the poll
-cadence.
+**Flashing.** `write_flash`'s own trailing reset does not start the app; a
+separate `esptool --before default_reset --after hard_reset` does, so no human
+reset is needed (`tools/board.py tdeck flash` resets once through esptool when
+the desk does not come up). A board wedged for esptool connects with `--before
+usb_reset`, which `[flash]` declares. The ROM loader by hand — **hold the
+trackball in (it is GPIO0) while powering on** — is the recovery when an image
+wedges the USB device. **Serial reads are unreliable ACROSS a reset**: the
+device node is torn down under an open handle, so a reader that opens too
+early sees zero bytes and looks exactly like a dead board (three "the board is
+silent" conclusions in one session were this). Attach after the boot settles.
 
 ### The commands
 
-Piped whole lines, one per newline: `echo state > /dev/ttyACM0`.
+Whole lines, one per newline; `tools/board.py tdeck …` sends them with this
+board's line state and reads the reply. `DevChannel.run` is the list of
+record; the everyday ones:
 
 | command | what it does |
 |---|---|
@@ -438,9 +412,9 @@ Piped whole lines, one per newline: `echo state > /dev/ttyACM0`.
 `tools/push_cart.py` has, so an image without the command is refused rather
 than served slowly. On this board it is the easy half: the USB-Serial/JTAG ISR
 only drains what the stdin ring has room for, so the endpoint stalls and the
-HOST blocks -- real flow control, which is why `[serial] window` here is
-**16384** against the P4's 4096, where the board's ack is the only backpressure
-there is.
+HOST blocks -- real flow control, which is why this board's `[serial] window`
+is far larger than the Waveshare P4's, where the board's ack is the only
+backpressure there is.
 
 The parts that are the same on every board: the payload is read from
 `sys.stdin.buffer` (the TEXT stdin rewrites CR as it goes); the transfer runs
@@ -449,10 +423,6 @@ swallow a byte equal to the interrupt char -- and CDC's copy *empties the ring*
 when it hits one; the board hashes the file by READING IT BACK; and a host that
 stops mid-window is abandoned after 5s with the `.new` removed.
 
-If this works on glass, `tools/p4_autotest.py`'s approach points straight at
-this board and the T-Deck gains the on-glass suite it has never had. If it does
-not, the `SERIAL rx=` counter says which of the two mechanisms is responsible,
-which is more than the previous attempt could say.
 
 ---
 
@@ -467,6 +437,24 @@ modules/                board-authored: boot/main/moybyte_shell/tdeck_panel/tdec
                         + everything board.toml stages (gitignored)
 build.sh                clone -> patch -> stage -> freeze -> build -> collect
 ```
+
+The board-authored modules, and what each is for:
+
+- `moybyte_shell.py` — boot and `main()`: ONE `MODE` string over the shared
+  ladder in `device/boot_shell.py`. This board declares its name, its six-stage
+  `MODES` and `tdeck_smoke` as its smoke module, and nothing else. The
+  benchmark harness is the #63 `MOYBYTE_BENCH=1` build.
+- `moy_runtime.py` — this board's hardware half of `run_desktop()` and nothing
+  else: the panel bring-up, the input trio, the SD/panel bus gate and the serial
+  channel, over the shared boot spine (`device_boot.DeviceBoot`/`FrameLoop`).
+  `DeviceCanvas`, `make_api`, `TrackBall`/`Touch` and the seed roster are
+  imports from the shared device tier, and the console itself is staged from
+  `runtime/` with the device `make_api` and store injected into
+  `console.Workstation`.
+- `tdeck_panel.py` + `native/moy_lcd/` — the panel: `TDeckCompositor` is the
+  ping-pong with the `ASYNC_FLUSH`/`LAYER_COPY_ASYNC` levers and the
+  `bounce_stats`/`pump_last_us` meters, and `moy_lcd` owns the ST7789, the
+  banded flush and the `kick`/`pump`/`drain` protocol (below).
 
 ### `board.toml` — where the module list lives
 
@@ -708,8 +696,9 @@ with an A/B rather than inherited.
 
 ## Hard constraints this port inherits
 
-Every one of these was learned by hanging or bricking a board. `CLAUDE.md` is
-the authority; what follows is how they land in *this* tree.
+Every one of these was learned by hanging or bricking a board.
+`.claude/rules/boards.md` is the authority; what follows is how they land in
+*this* tree.
 
 - **SD shares SPI2 with the panel.** `moy_lcd.init()` runs `spi_bus_initialize()`
   once and never tears it down. Nothing may touch SD before it; the SD card
@@ -723,7 +712,7 @@ the authority; what follows is how they land in *this* tree.
   **One exception, and it is not ours:** `DeviceBoot.load_carts` opens ONE
   `with_sd_live` session around the whole seed+scan and repaints the progress
   bar *inside* it (`DeviceBoot.note` → `comp.flush()`, once per cart), so a
-  first boot genuinely interleaves panel bands with SD writes. `CLAUDE.md`
+  first boot genuinely interleaves panel bands with SD writes. The boards rule
   states the no-flush-in-session rule absolutely, and **the fork build
   has been violating it in this exact place for as long as it has had the async
   flush** — `moy_runtime` passes a bare `with_sd_live`, not the synced wrapper,
@@ -739,7 +728,7 @@ the authority; what follows is how they land in *this* tree.
   kick — long after the 2 ms pump has finished the frame — so it is very hard to
   hit, and again it is what the fork already did.
   Worth being honest about the size of this risk rather than repeating the
-  folklore: what `CLAUDE.md` records as having actually hung boards is
+  folklore: what the boards rule records as having actually hung boards is
   `sdspi_host_deinit` between ops and re-creating a `Pin` on `TFT_CS` —
   *teardown*, not concurrency. Two devices transacting on one host is what
   `spi_master`'s bus lock is for, and it is what the fork relied on for
@@ -758,13 +747,35 @@ the authority; what follows is how they land in *this* tree.
 - **80 MHz SPI is requested, not delivered.** None of MOSI(41)/SCK(40)/MISO(38)
   are the S3's IOMUX-native FSPI pins, so everything routes through the GPIO
   matrix, which caps a write-only LCD at ~40 MHz. The board's wiring is the wall.
-- **The keyboard has two modes** (ASCII vs raw matrix, `0x03`/`0x04` over I2C
-  0x55) and the console flips between them per screen. `MODE = "keyboard"` is
-  the on-glass check, and the last thing it does is send the `0x04` revert.
-- **Serial TX works during play.** RX is the one constraint this port
-  *contests* rather than inherits — see "The serial dev channel, and the RX
-  question" above. The reason previously recorded for it is wrong on the facts,
-  and the channel here is built to survive what was actually happening.
+- **The keyboard has two modes and the console flips between them per
+  screen.** It is a separate ESP32-C3 at I2C 0x55 (its firmware is in
+  `firmware/lilygo_t_deck_plus_reference/examples/Keyboard_ESP32C3`, an
+  UNTRACKED vendor tree a fresh checkout does not have; THIRD_PARTY.md's scope
+  note says why). In its default mode it returns
+  clean 1-byte ASCII (shift, sym and digits resolved on the keyboard) but
+  reports each key ONCE on the press edge with no autorepeat, so a held key can
+  only be faked for `KEY_HOLD_MS` by `TDeckKeyboard`'s latch. For true
+  hold-to-move a running cart switches it to raw-matrix mode (`0x03`,
+  `LILYGO_KB_MODE_RAW_CMD`), which streams the full key matrix every read.
+  `Workstation._set_text_mode` → `TDeckKeyboard.set_game_mode(on)` drives it:
+  ASCII for the code editor (so typing is clean, `last_key`), raw everywhere
+  else, and `0x04` (`..._MODE_KEY_CMD`) reverts — the step whose absence once
+  garbled the editor irreversibly. **A mode switch swallows its own byte, on
+  both sides of the seam**: what the C3 hands over at the revert was typed
+  while the matrix streamed, so `_disable_raw_mode` DRAINS the keyboard after
+  `0x04`, and `_set_text_mode(True)` seeds every typed-key edge with the byte
+  already in `last_key` — the matrix decodes only sixteen keys, so each half
+  covers a case the other cannot. `__init__` boots in ASCII and never enables
+  raw; raw needs keyboard firmware **≥ 2025-06-12**
+  (`T-Keyboard_..._250620.bin`), and on older firmware `_read_raw_buttons`
+  sees the stray ASCII byte and keeps the session on the 1-byte + latch path
+  (`_raw_unsupported`; class flag `RAW_GAME_MODE` force-disables raw). The
+  keyboard has no `=` `[ ] { } < > %` keys, so the code editor shows an
+  on-screen symbol palette; `0x01 <duty>` sets its backlight. `MODE =
+  "keyboard"` is the on-glass check (it dumps keys over serial), and the last
+  thing it does is send the `0x04` revert.
+- **Serial works both ways during play** — "The serial dev channel" above has
+  the three changes RX needed.
 
 ---
 

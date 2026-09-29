@@ -248,7 +248,7 @@ usb         = "1a86:55d3"
 # 768 CORRUPTS on this board, measured 2026-08-19: a 44KB cart pushed at the
 # harness default failed five times with a DIFFERENT bad hash each attempt and
 # succeeded first try at 256. This UART's stdin is a ~256-byte ring with NO flow
-# control (the same mechanism CLAUDE.md records for long `py` lines), so an
+# control (the same mechanism .claude/rules/testing.md records for long `py` lines), so an
 # over-long line is dropped as noise with no error -- only the final hash
 # catches it. USB boards backpressure and keep the default.
 chunk       = 256

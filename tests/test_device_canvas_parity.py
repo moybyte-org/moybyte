@@ -42,7 +42,7 @@ AND WHAT NEITHER ARM IS. Not a check of libmoy's raster -- read a difference in
 one of the nine verbs as impossible here, because both sides call the same
 function. That raster is pinned by the gfx-binding test above, by
 `tests/test_spec_conformance.py` against the spec's goldens, and by
-`tools/p4_conformance.py` on real glass. CLAUDE.md records why the last one
+`tools/p4_conformance.py` on real glass. .claude/rules/rendering.md records why the last one
 matters: the board once failed `provisional_tline` against the golden while this
 suite was green.
 

@@ -30,7 +30,7 @@ while accumulating a SHA-256 to verify before the same Phase-2 install path runs
 The network code is the LIVE counterpart of the host fake. The whole chain --
 TLS to github.com, the 302 to the release CDN, signature verify, the streamed
 download, install and rollback -- ran on glass on BOTH boards 2026-08-02
-(CLAUDE.md's OTA channel entry has the numbers), which also settled the
+(#53 has the numbers), which also settled the
 WiFi/LCD-DMA coexistence #38 had flagged.
 """
 
@@ -162,7 +162,7 @@ except Exception:
 OTA_CFG_NAME = "ota.json"        # /sd/update/ota.json -> {"channels": {"stable": url, ...}}
 
 # Where each channel lives when the card says nothing. The two branches publish
-# one rolling release each (CLAUDE.md -> "Branches and releases"), and CI writes
+# one rolling release each (.claude/skills/release/SKILL.md), and CI writes
 # `latest.json` beside the app image on both -- so a board straight off the
 # flasher can check for updates with no ota.json and no host of the owner's own.
 # An /sd/update/ota.json still WINS, which is how a LAN test against

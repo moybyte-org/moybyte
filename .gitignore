@@ -2,12 +2,12 @@
 .idea/
 # local Claude Code settings + agent worktrees
 # `.claude/*`, not `.claude/`: git will not descend into an excluded DIRECTORY,
-# so a `!` exception inside one can never match. The rules ARE checked in --
-# they are team-shared instructions like CLAUDE.md itself, carrying the hazards
-# that used to live in it, and they load only when Claude touches the files they
-# name.
+# so a `!` exception inside one can never match. The rules and skills ARE
+# checked in -- they are team-shared instructions like CLAUDE.md itself: a rule
+# loads when Claude touches the files it names, a skill when a task needs it.
 .claude/*
 !.claude/rules/
+!.claude/skills/
 __pycache__/
 .pytest_cache/
 *.egg-info/

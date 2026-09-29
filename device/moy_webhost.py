@@ -672,7 +672,7 @@ class WebHost(WebServer):
         self.on_stop = on_stop
         # The T-Deck's store lives on a shared-SPI SD card that must be touched
         # through moybyte_sd.with_sd_live, never directly (see that module and
-        # the hard-constraints section of CLAUDE.md). The P4 has no SD and
+        # .claude/rules/boards.md). The P4 has no SD and
         # passes None, which makes this a plain call-through.
         self._with_sd = with_sd or (lambda fn: fn())
         # ...and the SAME gate guards file STREAMING out of the store, which is

@@ -3,9 +3,10 @@
 
     .venv/bin/python tools/check_docs.py     # or plain python3; stdlib only
 
-CLAUDE.md is 10,000 words of specific claims and it is the first thing every
-session reads, so a sentence that has gone stale in it does not mislead one
-reader -- it misleads every future session until somebody notices. A review on
+CLAUDE.md is the first thing every session reads, and the rules and skills
+under `.claude/` load exactly when someone is about to act on them, so a
+sentence gone stale in any of them does not mislead one reader -- it misleads
+every future session until somebody notices. A review on
 2026-08-08 found it saying six verbs were libmoy's when nine were (the reversal
 was recorded in `native/moy_gfx/libmoy/UPSTREAM.md` the same day), pointing at
 `tools/command_canvas.py` four commits after that file was deleted, and sending
@@ -225,7 +226,6 @@ DUP_BUDGET = {
     # These pairs used to be CLAUDE.md's. The prose moved into path-scoped rules
     # on 2026-08-29, so the pins moved with it -- and every one came DOWN,
     # because the root no longer restates what the rule now owns.
-    ("CLAUDE.md", "docs/perf_native_gap_v1.md"): 5,
     (".claude/rules/shell.md", "docs/shell_ux_v1.md"): 7,
     (".claude/rules/rendering.md", "moybyte_console_plan_2026-07.md"): 6,
     (".claude/rules/carts.md",

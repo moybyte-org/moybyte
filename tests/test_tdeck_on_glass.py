@@ -12,7 +12,7 @@ DELIBERATELY NO RESET, unlike the P4 suite -- and that is now READ, not
 retyped: this board's `[serial]` block declares `attach_only` because its
 USB-Serial/JTAG is ON the SoC, so a reset tears the USB device down under the
 open handle and a reader that reopens too early sees zero bytes and looks
-exactly like a dead board (CLAUDE.md's RX section -- three separate "the board
+exactly like a dead board (the T-Deck README's RX section -- three separate "the board
 is silent" conclusions in one session were this). So this suite ATTACHES to the
 running desktop, asserts, and leaves the console where it found it: on the
 launcher.

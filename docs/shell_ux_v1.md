@@ -12,7 +12,7 @@ implemented and archived under `docs/history/` (`shell_ux_technical_plan_v1.md`,
 `shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`), while
 `docs/shell_architecture_v1.md` stays the standing direction doc. The shipped module
 map (`runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
-`Workstation` kernel) lives in `CLAUDE.md`. This doc deliberately does NOT contain
+`Workstation` kernel) lives in `runtime/README.md` and `.claude/rules/shell.md`. This doc deliberately does NOT contain
 module design, migration phases, or code; mechanisms are named only where the UX
 guarantee is meaningless without one.
 **Issues:** #29 (blocks — becomes a graduating Editor tab), #46 (the unified bar —
@@ -524,7 +524,7 @@ by `runtime/editor_app.py` (§6); `runtime/player.py` is the Player (§2);
 `runtime/project.py` is the project workspace + commit verbs (§7, §11);
 `runtime/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
 launcher/settings/bar layers are the launcher app, the Settings app, and the zoned OS
-bar. `Workstation` (`runtime/console.py`) is the kernel — see `CLAUDE.md` for the
+bar. `Workstation` (`runtime/console.py`) is the kernel — see `runtime/README.md` for the
 module map.
 
 **Issue map:**

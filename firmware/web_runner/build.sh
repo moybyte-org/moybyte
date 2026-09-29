@@ -20,7 +20,7 @@
 #                           # so runtime/ edits are testable without a rebuild
 
 # This build is Moybyte's own browser console and nothing else's (the spec repo
-# builds its own player from libmoy -- CLAUDE.md's web-runner section).
+# builds its own player from libmoy -- .claude/rules/web.md).
 #
 # Variant notes (variant/mpconfigvariant.*, copied into the port):
 #   - pyscript-shaped: GC_SPLIT_HEAP_AUTO -> collections defer to the JS<->Python

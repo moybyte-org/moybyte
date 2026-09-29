@@ -417,7 +417,7 @@ When the browser renders (the Zero's "browser is the GPU" model), the visual cei
 - **One:** ESP32-P4-WIFI6-Touch-LCD-7B (7″ 1024×600 IPS, GT911 touch, ESP32-C6 Wi-Fi6, 32MB PSRAM, SDIO 3.0, battery) — #58. Also evaluating the Guition P4 7″ board (#12). A Waveshare ESP32-S3-Touch-LCD-7 (RGB-parallel, continuous scanout) is a cheap **no-flush test bench** to de-risk the One's big-screen architecture on a chip we already ship.
 - **Zero:** Seeed XIAO ESP32-S3 Plus (16MB flash / 8MB PSRAM, same footprint) recommended; N16R8 DevKitC / Waveshare S3 as non-XIAO options; ultra-cheap no-PSRAM S3 boards viable since the Zero doesn't rasterize.
 
-### 11.2 Hard device constraints (respect these — full detail in CLAUDE.md)
+### 11.2 Hard device constraints (respect these — full detail in `.claude/rules/boards.md`)
 
 - **SD shares the SPI host with the display** on the S3 tiers. Nothing touches SD before the panel is up; live SD goes through the native `moy_sd` attach (no bus re-init); never tear the SD device down mid-session or flush the panel inside an SD op. (The #56 saga. Gone on the One — separate buses.)
 - **The `run_desktop` native-takeover loop starves USB** — no serial/REPL/esptool once "desktop running" prints. Capture boot logs passively while pressing reset.

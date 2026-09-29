@@ -69,12 +69,28 @@ nor those docs will warn you about:
   firmware), and a persistent socket's idle reaper would have dropped a client
   through a flash write — which is exactly what the old streaming port hit.
   That verdict is why the transport's WebSocket half had no consumer left and
-  was deleted in 2026-09 (`.claude/rules/boards.md` on `device/moy_webserver.py`). **ONE disconnect surface,
+  was deleted in 2026-09 (below). **ONE disconnect surface,
   and the REASON is its point**: an update or a hand-back is "expected" and
   nothing is at risk; a board that vanished is "lost", and only that one carries
   the unsynced-work warning, because board mode keeps no local store. First
   reason wins, so an update nobody needs warning about cannot later be
   re-reported as a loss.
+- **`device/moy_webserver.py` is the bare HTTP transport** `moy_webhost`
+  overrides: a non-blocking listener, `parse_request`/`http_response`, one-shot
+  serving, and a `WebServer` whose one seam is `handle_http`. The streaming web
+  view — the frame push, `device_webview.py`, the recording `TeeCanvas`, stream
+  mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py`
+  and its VM recipe — was DELETED in the 2026-08 sunset (owner decision,
+  `docs/history/moycore_plan_2026-08.md` §3.2; `tests/test_streaming_sunset.py`
+  pins the absences), and the recording stack went at stage 4 (2026-08-12)
+  because the wasm head rasterizes. Mirror-of-glass is an accepted loss: a
+  screenshot verb on the sync RPC was its recorded successor and was DROPPED
+  (owner, 2026-08-25) — the browser IS the console. The WebSocket half went in
+  2026-09, because the §3.4 sync RPC shipped as plain HTTP and nothing else
+  used it. What survives of the old view is `runtime/web_input.py` (browser
+  events → InputState/Pointer, which the sync RPC speaks); `runtime/surface.py`
+  and `wm_windowed`'s `if not self._recording` guards deliberately STAY,
+  unreachable — `docs/surface_model_v1.md` §13 records why.
 - **WASM MODE IS A SWITCH, NOT A SESSION** (owner call): no heartbeat, no presence
   detection, no timeout. While WEB CONSOLE is ON the glass PARKS on a connection
   screen — which is how the two-writer collision is **designed out rather than

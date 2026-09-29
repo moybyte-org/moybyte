@@ -344,7 +344,7 @@ installed **wallpaper carts** for them. The user can override each slot.
   like any other, and an absent one falls back to the theme's image.
 - **The default is static.** An animated wallpaper defeats the redraw gate and
   the home's retained stamp (`launcher_layer._try_stamp_retained` is skipped
-  while `ws._animating(dt)`). That is CLAUDE.md's open live-wallpaper defect. So
+  while `ws._animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
   Moy's night, the default, is a still image, or animates only small dirty
   rects.
 - **Readability at home.** A wallpaper with its own text or characters

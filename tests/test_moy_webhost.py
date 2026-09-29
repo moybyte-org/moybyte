@@ -724,7 +724,7 @@ def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
 def test_the_sd_gate_wraps_the_store_read(tmp_path):
     """On the T-Deck the store is on a shared-SPI SD card that must only be
     touched inside moybyte_sd.with_sd_live -- reading it from anywhere else is
-    the class of mistake that hangs the panel (CLAUDE.md's hard constraints).
+    the class of mistake that hangs the panel (.claude/rules/boards.md).
     The handler must go through the injected gate, not around it."""
     h = _host(tmp_path)
     calls = []

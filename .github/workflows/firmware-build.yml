@@ -4,8 +4,8 @@ name: Firmware build
 # The .bin images drop out as downloadable artifacts on each run, and land on a
 # rolling release per BRANCH (see the publish job).
 #
-# WHEN THIS RUNS -- the two branches are the two release channels (CLAUDE.md ->
-# "Branches and releases"):
+# WHEN THIS RUNS -- the two branches are the two release channels (the `release`
+# skill, .claude/skills/release/SKILL.md):
 #
 #   push to master  -> a STABLE build  -> the `firmware-latest` release, which is
 #                      what the project site's flasher writes and what the

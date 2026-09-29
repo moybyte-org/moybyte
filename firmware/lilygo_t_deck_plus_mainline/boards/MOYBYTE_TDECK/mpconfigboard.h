@@ -52,7 +52,7 @@
 #define MICROPY_HW_I2C0_SDA                 (18)
 
 // The SD card shares SPI2 with the panel and is mounted through the native
-// moy_sd attach (never machine.SDCard -- see CLAUDE.md's hard constraints), so
+// moy_sd attach (never machine.SDCard -- see .claude/rules/boards.md), so
 // the port's own SD support is deliberately NOT enabled.
 #define MICROPY_HW_ENABLE_SDCARD            (0)
 

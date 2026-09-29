@@ -394,8 +394,8 @@ floors to the microsecond on the same image, and a stock rebuild was never
 needed. It recurred the same day after a second profiler pass and cleared
 the same way. The suspect is the fold's snap-dead fence in `moy_fold.c` — a
 copy that once times out turns every later snapshot into a CPU memcpy until
-reboot — and `.claude/rules/testing.md` names the counter to read while it
-is slow; it is a lead, not a finding.
+reboot — and the Guition S3's README names the counter to read while it is
+slow; it is a lead, not a finding.
 
 ### DECLINED 2026-09-23 — the GIL round-robin divisor (`MICROPY_PY_THREAD_GIL_VM_DIVISOR`)
 

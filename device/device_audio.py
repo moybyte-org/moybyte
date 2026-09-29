@@ -30,7 +30,7 @@ native `moy_audio` + `machine.I2S` inside its methods, so no moy_runtime cycle.
 Device-only module (modules/, auto-frozen).
 
 Heard on a T-Deck (owner-verified 2026-08-09, firmware 0.9 -- and note the
-audible balance change is the SPEC, not a bug: CLAUDE.md's audio section).
+audible balance change is the SPEC, not a bug: .claude/rules/carts.md).
 The synth half is pinned off-hardware -- the same
 native module, built into a desktop MicroPython, renders bit-identically to
 libmoy across the whole parity suite (tests/test_audio_parity.py). I2S, the
@@ -46,7 +46,7 @@ from device_util import _diag_note
 # --- Audio backend (#16) -- I2S to the MAX98357 amp -------------------------
 # The T-Deck Plus has a MAX98357 I2S class-D amp + speaker on a SEPARATE
 # peripheral from the shared display/SD SPI host, so audio does NOT collide with
-# the SD/display bus-takeover constraints (see CLAUDE.md). Pin map + power gate
+# the SD/display bus-takeover constraints (.claude/rules/boards.md). Pin map + power gate
 # from the LilyGO reference (examples/I2SPlay/utilities.h):
 #     I2S_BCK = GPIO 7, I2S_WS = GPIO 5 (LRCK), I2S_DOUT = GPIO 6
 #     BOARD_POWERON = GPIO 10 must be HIGH (already driven at boot by tdeck_board)

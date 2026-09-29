@@ -134,7 +134,7 @@
 //   it down. The SD card attaches to the ALREADY-INITIALIZED host through
 //   native/moy_sd (sdspi_host_init_device, no bus re-init). Nothing may touch
 //   SD before init() has run, no SD device may be torn down between ops, and no
-//   panel flush may overlap an SD session -- see CLAUDE.md's hard constraints,
+//   panel flush may overlap an SD session -- see .claude/rules/boards.md,
 //   every line of which was learned by hanging a board.
 
 #include <string.h>

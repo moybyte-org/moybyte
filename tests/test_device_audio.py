@@ -1218,7 +1218,7 @@ def test_make_audio_wraps_the_engine_it_is_handed(h):
 
 
 def test_a_stored_master_level_survives_the_per_cart_rebuild(h):
-    """CLAUDE.md's audio section: the backend is rebuilt per run, and a level
+    """The backend is rebuilt per run, and a level
     set at the launcher used to last exactly until the next cart start. Project
     re-applies it to the engine; what this pins is the backend's half -- the
     level on the engine it is handed reaches libmoy at construction, rather

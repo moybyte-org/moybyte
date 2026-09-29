@@ -61,7 +61,7 @@ MOY_INPUT_POLLER = True
 # the expansion header) reads exactly like typed input. The board header keeps
 # UART_REPL off (#201); if `SERIAL rx=` ever climbs on an idle board, that is
 # the mechanism to suspect. (The full history of why RX was thought impossible
-# here -- and why the fork's never worked -- is in CLAUDE.md's RX section and
+# here -- and why the fork's never worked -- is in this board's README and
 # git history at 4faf07a/24ccb0b.)
 #
 # Set False to remove the channel entirely (the loop is then byte-identical to

@@ -8,7 +8,7 @@ BYTE FOR BYTE, so the important test here is not the unit ones: it is
 real native module under a unix MicroPython build and diffs the framebuffers.
 
 Without that, this file would only prove the host shim agrees with itself. The
-lesson recorded in CLAUDE.md is exactly why it matters: the board once failed
+lesson recorded in .claude/rules/rendering.md is exactly why it matters: the board once failed
 `provisional_tline` against the golden while the host passed, because the only
 lane exercising the real C kernel was on-glass conformance and it had never
 been run on that verb.

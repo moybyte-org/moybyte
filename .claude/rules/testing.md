@@ -2,6 +2,7 @@
 paths:
   - "tests/**"
   - "tools/p4_autotest.py"
+  - "tools/board.py"
   - "tools/check_docs.py"
 ---
 
@@ -49,116 +50,78 @@ paths:
     That is why the pacing tests live here (`tests/test_tick_model.py` and the
     btnp pins in `tests/test_import_p8.py`) and are worth keeping.
 
-- **An attached board is a TEST RESOURCE, not a permission gate.** `make
-  device-port` says which boards are on this machine and on which port; when one
-  is there, run its suite, build, flash, push a cart and measure without asking
-  first, and when none answers say so rather than asking whether you may. The
-  gate is a CABLE, never a person, and inventing the other reading has cost two
-  sessions: `tools/preflight.sh` used to close with the suites needing "a human
-  with them plugged in", which an agent read on 2026-09-12 as "an agent may
-  not" — it told the owner on-glass was out of reach and shipped an input-path
-  change unverified while four boards sat plugged in, then repeated the same
-  invented gate to a second session on 2026-09-20. That line now says what it
-  meant, so this paragraph is the rule and not a gloss on a sentence elsewhere.
-  Reach for the real driver (`P4Board(board_dir=…)`) and never raw pyserial: the
-  line state at open is per-board and opposite, and getting it wrong resets the
-  chip (below).
+- **An attached board is a TEST RESOURCE, not a permission gate.**
+  `tools/board.py ports` says which boards are on this machine, on which port,
+  and who holds each; when one is there, run its suite, build, flash, push a
+  cart and measure without asking first, and when none answers say so. The gate
+  is a CABLE, never a person: `tools/preflight.sh` once closed with the suites
+  needing "a human with them plugged in", which an agent read on 2026-09-12 as
+  "an agent may not" — it told the owner on-glass was out of reach and shipped
+  an input-path change unverified while four boards sat plugged in, then
+  repeated the invented gate to a second session on 2026-09-20. Drive a board
+  through `tools/board.py` or `P4Board(board_dir=…)`, never raw pyserial: the
+  line state at open is per board and opposite (`.claude/rules/boards.md`), and
+  the `on-glass` skill has the procedures.
 
-- **On-glass testing — every console board has a suite** (#156). Each is
-  gated on its own env var and shares one session in file order, leaving the
-  board where it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
+- **On-glass testing — every console board has a suite** (#156), gated on its
+  own variable and sharing one session in file order, leaving the board where
+  it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
   `tests/test_tdeck_on_glass.py` (`MOYBYTE_TDECK_PORT`),
   `tests/test_guition_on_glass.py` (`MOYBYTE_GUITION_PORT`),
-  `tests/test_guition_p4_on_glass.py` (`MOYBYTE_GUITION_P4_PORT`, attach-only
-  like the S3 boards — its USB serial is the SoC's), over
-  `tools/p4_autotest.py`'s `P4Board` and the shared `tests/on_glass.py` fixture.
+  `tests/test_guition_p4_on_glass.py` (`MOYBYTE_GUITION_P4_PORT`), over
+  `P4Board` and the shared `tests/on_glass.py` fixture, which RESETS the
+  Waveshare P4 and ATTACHES to the others as they are.
   - **A gesture test that fails on a board you have been driving is a DIRTY
     DESK before it is a regression.** The suites assume the launcher they were
     written against; a leftover menu or a scrolled shelf makes a fling land on
-    a tile instead, and the failure reads as `['launcher', 'menu'] != launcher`
-    from whichever swipe ran first — the flush test, the pointer test, anything
-    that gestures. The windowed boards have a second shape: closing a cart with
-    `ws.exit()` pops through to the bare launcher and the DESK goes with it
-    (`['launcher', 'desk', 'desktop']` → `['launcher']`, measured 2026-09-22),
-    and every test then reads `desk` False and `order` empty — six failures
-    from one leftover, on the attach-only Guition P4 where nothing resets the
-    board at open (the Waveshare's fixture does, which is why the same
-    sequence passes there). `P4Board.leave_cart()` reopens the desk it found
-    for that reason. Check `state()["stack"]` and reboot the board before
-    believing it: on 2026-09-21 that answer cost two investigations, once on
-    each S3 board, both of which went 18/18 and 15/15 the moment the desk was
-    clean. A tool that runs a cart owes the desk back when it is done
-    (`tools/prof_sample.py` does it in a `finally`), and the same applies to
-    anything you drive by hand. And give the reboot its whole boot before
-    attaching: the Guition S3 takes the better part of a minute to reach the
-    desk from its card, and a suite started at thirty seconds errors every
-    test with "did not answer `state`" -- a third false dead board, not a
-    second failure.
-  - **A Guition S3 whose Bench reads every compute phase 1.4-1.7x slow after
-    a measurement session is a board STATE too, not the image.** On
-    2026-09-23 two Bench runs on a freshly flashed image read logic 26 →
-    38ms and `pix` 6.8 → 13µs while Brick Siege and a `py` loop on the same
-    board read normal; `moy_prof` on that state showed the fold snapshot wait
-    and `time.sleep_ms` spinning on the system timer, and a hard reset
-    (`esptool --port /dev/ttyACMn --after hard_reset read_mac`, then the
-    minute of boot) restored the previous day's floors on the same image to
-    the microsecond. It recurred the same day after a second profiler pass.
-    Reset and re-run before believing a Bench regression on that board, and
-    READ THE COUNTER FIRST while it is still slow: `py
-    __import__('moy_axs').snap_stats()` is `(snaps, snaps_sync, timeouts,
-    wait_us)`, and the suspect is `native/moy_flush/moy_fold.c`'s snap-dead
-    fence -- one snapshot copy that times out retires the DMA engine for the
-    session and every later snapshot is a CPU memcpy, which would read as
-    `timeouts` > 0 with `snaps_sync` climbing per frame (a clean session
-    reads `snaps_sync` 0 and `timeouts` 0 after a whole Bench). Not yet read
-    in the slow state, so it is a lead, not a finding
-    (`docs/perf_native_gap_v1.md` §6).
+    a tile, and the failure reads as `['launcher', 'menu'] != launcher` from
+    whichever swipe ran first. The windowed boards have a second shape: closing
+    a cart with `ws.exit()` pops through to the bare launcher and the DESK goes
+    with it (`['launcher', 'desk', 'desktop']` → `['launcher']`, measured
+    2026-09-22), and every test then reads `desk` False — six failures from one
+    leftover on the attach-only Guition P4, where nothing resets the board at
+    open. `P4Board.leave_cart()` reopens the desk it found for that reason, and
+    `tools/board.py X desk` returns a board to where it boots. Check `state`'s
+    stack and reboot before believing a failure: on 2026-09-21 that answer cost
+    two investigations, one per S3 board, both of which went 18/18 and 15/15 on
+    a clean desk. A tool that runs a cart owes the desk back when it is done
+    (`tools/prof_sample.py` does it in a `finally`), and so does anything
+    driven by hand. Give a reboot its whole boot before attaching — a suite
+    started early errors every test with "did not answer `state`".
   - **A check every board can make belongs in `on_glass.py`, and then EVERY
     board makes it.** The suites keep their own `def test_*` so a failure names
-    its board, but the body is shared, and which boards call it is not a taste
-    question — it is coverage. Audited 2026-09-09: the draw gates, the baked
-    web console, the Lua-tier cart run, the `py` probe, the diag toggle, the
-    heap report and the display underruns were each pinned on ONE board and
-    silently unpinned on the others, and the shared bodies had drifted into
-    per-board copies (the desk boards each carried their own cart-run body).
-    A tier difference is expressed as an ARGUMENT to the shared body, never as
-    a second copy: `cart_runs_and_exits(door=…)` names the door a tier leaves
-    by (the fullscreen boards pin the kid-facing `cart_quit` flag; the desk
-    boards pin `ws.exit()`, because a run started from a picker arrangement
-    does not pop through the flag), and `draw_gates_are_installed(windowed=…)`
-    adds the window-buffer half only where windows exist.
-  - **The line state at open is per-board and OPPOSITE, and it is DATA.**
-    `P4Board(board_dir=…)` reads `dtr`/`rts`/`attach_only`/`chunk` from that
-    board's `[serial]` block. The P4's CH343 opens with both LOW; the two S3
-    boards' USB-Serial/JTAG is ON the SoC, so opening them low is a CHIP RESET
-    (`rst:0x15`) after which the device re-enumerates under the open handle and
-    every read returns nothing, forever — indistinguishable from a dead board.
-    `attach_only` REFUSES a reset rather than recording one.
+    its board, but the body is shared, and which boards call it is coverage,
+    not taste. Audited 2026-09-09: the draw gates, the baked web console, the
+    Lua-tier cart run, the `py` probe, the diag toggle, the heap report and the
+    display underruns were each pinned on ONE board and silently unpinned on
+    the others. A tier difference is an ARGUMENT to the shared body, never a
+    second copy: `cart_runs_and_exits(door=…)` names the door a tier leaves by
+    (the fullscreen boards pin the kid-facing `cart_quit` flag; the desk boards
+    pin `ws.exit()`, because a run started from a picker arrangement does not
+    pop through the flag), and `draw_gates_are_installed(windowed=…)` adds the
+    window-buffer half only where windows exist.
   - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
     vocabulary, and `DevChannel.run` is the list of record: every word the
     boards answer to is a branch in it, from `state`/`tap`/`swipe` through the
     measurement switches (`diag`, `verbs`, `luaprof`, `perfcnt`, `luagc`,
-    `uncap`) and the settings toggles the registry derives. A command a board cannot
-    serve DECLINES, and `recv` — the only one that stops reading lines and takes
-    raw bytes — is the ONLY cart-push transport, so a board whose image predates
-    it is refused by `tools/push_cart.py` rather than pushed too slowly. Board
-    extras arrive as a handler dict, `py` scope extras via `env`.
-    `state` is one-line JSON and assertions read console STATE, not pixels;
-    `swipe` goes through the real pointer feed; `py` evals against the live
-    console between frames.
+    `uncap`) and the settings toggles the registry derives. A command a board
+    cannot serve DECLINES. `recv` — the only one that stops reading lines and
+    takes raw bytes — is the ONLY cart-push transport, so an image that predates
+    it is refused by `tools/push_cart.py` rather than pushed slowly. Board
+    extras arrive as a handler dict, `py` scope extras via `env`. Assertions
+    read console STATE (`state` is one-line JSON), not pixels; `swipe` goes
+    through the real pointer feed; `py` evals against the live console between
+    frames. `tests/test_tools_smoke.py` holds every tool's verbs to that list.
   - **`quit` exits the DESKTOP to the REPL, not the running cart**
-    (`REMOTE quit -> REPL`). Using it to end a cart leaves the board at `>>>`,
-    after which every suite errors with "did not answer `state`" and reads like a
-    dead board. Recover with a **Ctrl-D soft reset** — it re-runs `main.py`
+    (`REMOTE quit -> REPL`), after which every suite errors with "did not
+    answer `state`". The recovery is a Ctrl-D soft reset — it re-runs `main.py`
     without re-enumerating USB, which is what makes it safe on an attach-only
-    board — but only once `>>>` has actually appeared, which is why the driver
-    sends `\r\x03` and waits before it sends `\x04`. Sent into a desktop that has
-    not reached the prompt yet (straight after `quit`), the Ctrl-D is SWALLOWED:
-    no banner, no prompt, no answer to Ctrl-C, indistinguishable from the dead
-    board it was meant to revive. That wedge clears with `esptool --port
-    /dev/ttyACMn --after hard_reset read_mac`, which drives the SoC's USB-JTAG
-    instead of the app — the port node survives, the open handle does not, so
-    reopen it afterwards.
+    board — but only once `>>>` has appeared (the driver sends `\r\x03`, waits,
+    then `\x04`). Sent into a desktop that has not reached the prompt, the
+    Ctrl-D is SWALLOWED and the board answers nothing, Ctrl-C included; that
+    wedge clears with `esptool --port <port> --after hard_reset read_mac`, which
+    drives the SoC's USB-JTAG instead of the app (the port node survives, the
+    open handle does not). `tools/board.py X reboot [--soft]` is both.
   - **Never put a call that blocks on FLASH inside a `pyexec` snippet.** `pyexec`
     uploads in chunks while `cmd` sends one line, so a real file write stalls the
     loop long enough for a streaming PERF line to interleave into the exchange;
@@ -173,10 +136,9 @@ paths:
   - Waits and staleness: **wait for `REMOTE drag done`/`swipe done`** before the
     next command; PERF's `wmr/wmw/wms` are last-sample values that go STALE when
     their pass stops running (a repeated constant means "not running"); allow ~10s
-    after a first `open picker` at a new size (cover pop-in, #155).
+    after a first `open picker` at a new size (cover pop-in, #155). `state`'s
+    `uncap` is the RUNNING cart's; the switch the next run takes is `ws._uncap`.
   - **Look system-app carts up by TITLE, never folder name** — the device seeds
     from the title slug, the host copies the source folder, and that mismatch is
     what broke `AppearanceAppLayer.is_app` on device (pinned by
     `tests/test_device_seed_parity.py`).
-  - When a T-Deck sits wedged for esptool, `--before usb_reset` connects where
-    `default_reset` write-times-out.
