@@ -12,8 +12,8 @@ Two nets, and both are DERIVED FROM SOURCE rather than listed here, the way
   * every entry-point tool answers `--help` in a subprocess, fast, with every
     `MOYBYTE_*_PORT` scrubbed from the environment -- so a tool that would OPEN
     a port to answer that fails here instead of on somebody's desk, which is
-    exactly what `tools/device_port.py` did (`--help` probed all five boards,
-    and closing an attach_only handle resets an S3-class board);
+    exactly what the old `tools/device_port.py` did (`--help` probed all five
+    boards);
   * every serial verb a tool sends through the `P4Board` driver is a word
     `DevChannel.run` actually dispatches, read out of `dev_channel.py` itself.
 
@@ -34,6 +34,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOLS = ROOT / "tools"
+sys.path.insert(0, str(TOOLS))
+
+import p4_autotest                                              # noqa: E402
 
 # A tool answering its usage has nothing to compute. Generous enough not to
 # flake on a loaded CI box, short enough to catch a tool that went to hardware:
@@ -216,7 +219,7 @@ def test_discovery_found_the_board_tools():
     }
     missing = sorted(expected - set(BOARD_IDS))
     assert not missing, "no serial verbs found in %s" % ", ".join(missing)
-    for name in ("device_port.py", "board_flash.py"):
+    for name in ("board.py", "board_flash.py"):
         assert name in ENTRY_IDS, "%s is asked for its help" % name
 
 
@@ -272,12 +275,16 @@ def test_a_board_tool_asks_which_board(tool, tmp_path):
     The line state is opposite across the boards, so a tool that guesses
     chip-resets every board but the Waveshare P4 (`tools/p4_autotest.py`'s
     `add_board_args`). Read off the HELP TEXT, because that is what a person
-    reads and what a rename would leave behind.
+    reads and what a rename would leave behind. The board is `--board`, or
+    a positional whose choices are every board id (`tools/board.py tdeck
+    state`).
     """
     if tool.name in NO_BOARD_FLAG:
         pytest.skip("it is the driver itself; its tour takes --port")
     done = _help(tool, tmp_path)
-    assert "--board" in done.stdout, (
+    ids = sorted(p4_autotest.board_dirs())
+    positional = "{%s" % ",".join(ids) in done.stdout
+    assert "--board" in done.stdout or positional, (
         "%s sends serial verbs but its help offers no --board" % tool.name)
 
 

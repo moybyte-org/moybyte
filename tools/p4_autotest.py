@@ -129,26 +129,49 @@ def declared_board_id(board_dir=P4_BOARD_DIR):
 # ---------------------------------------------------------------------------
 
 
-def usb_id_of(port, sys_tty="/sys/class/tty"):
-    """The "vid:pid" of the USB device behind a tty, or None (not USB, or not
-    Linux). Walks up from the tty's sysfs node to the first ancestor carrying
-    idVendor/idProduct -- the interface sits one or two levels below them."""
-    node = os.path.realpath(
-        os.path.join(sys_tty, os.path.basename(str(port)), "device"))
+def _usb_node(port, sys_tty):
+    """The sysfs directory of the USB device behind a tty, or None. Walks up
+    from the tty's node to the first ancestor carrying idVendor/idProduct --
+    the interface sits one or two levels below it."""
+    node = os.path.realpath(os.path.join(
+        sys_tty, os.path.basename(os.path.realpath(str(port))), "device"))
     for _ in range(6):
-        vid = os.path.join(node, "idVendor")
-        pid = os.path.join(node, "idProduct")
-        try:
-            if os.path.exists(vid) and os.path.exists(pid):
-                return "%s:%s" % (open(vid).read().strip().lower(),
-                                  open(pid).read().strip().lower())
-        except OSError:
-            return None
+        if (os.path.exists(os.path.join(node, "idVendor"))
+                and os.path.exists(os.path.join(node, "idProduct"))):
+            return node
         nxt = os.path.dirname(node)
         if nxt == node:
             break
         node = nxt
     return None
+
+
+def _read(node, name):
+    try:
+        with open(os.path.join(node, name)) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def usb_id_of(port, sys_tty="/sys/class/tty"):
+    """The "vid:pid" of the USB device behind a tty, or None (not USB, or not
+    Linux)."""
+    node = _usb_node(port, sys_tty)
+    if node is None:
+        return None
+    vid, pid = _read(node, "idVendor"), _read(node, "idProduct")
+    if vid is None or pid is None:
+        return None
+    return "%s:%s" % (vid.lower(), pid.lower())
+
+
+def usb_serial_of(port, sys_tty="/sys/class/tty"):
+    """The USB serial number behind a tty (`ID_SERIAL_SHORT`), or None. On
+    the SoC-USB boards it is the chip's MAC, the same string running and in
+    the ROM loader, so it names a physical board without opening its port."""
+    node = _usb_node(port, sys_tty)
+    return None if node is None else _read(node, "serial")
 
 
 def serial_ports():
@@ -310,6 +333,11 @@ class P4Board:
         # accepts the open and then blocks the first write forever; a bounded
         # write turns that into an exception the caller can report.
         self.ser.write_timeout = WRITE_TIMEOUT_S
+        # One driver per port. Two readers on one tty split its bytes between
+        # them: on 2026-09-28 a second open of a port an on-glass suite held
+        # read "multiple access on port" on one side and "no STATE reply" on
+        # the other. The lock makes the second open fail at once instead.
+        self.ser.exclusive = True
         # The line state AT OPEN is board-specific and load-bearing:
         #   P4 (CH343, external USB-UART): dtr/rts LOW, so opening never
         #     glitches the auto-reset circuit (reset is explicit, below).

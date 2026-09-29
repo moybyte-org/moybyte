@@ -255,7 +255,7 @@ README is the authority**; what belongs here is only what bites:
   `machine.bootloader()` is an endless loop on this chip in upstream
   MicroPython). Holding BOOT while plugging it in is the RECOVERY, not the
   routine. Its `board.toml` `[serial]`/`[flash]` and `mpconfigboard.h` carry the
-  evidence, and `tools/device_port.py` tells it from the other `303a:1001`
+  evidence, and `tools/board.py` tells it from the other `303a:1001`
   boards by its USB serial number, since it has no dev channel to ask.
 - **A pushed `.py` SHADOWS the frozen one** — `/` is searched before `.frozen` —
   so its module push is opt-in and undoable, and the board announces it at boot.

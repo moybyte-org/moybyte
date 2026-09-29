@@ -439,6 +439,9 @@ def main(argv=None):
                          "(scenes/x.moyscene); repeatable")
     ap.add_argument("--force", action="store_true",
                     help="push even when the hash already matches")
+    ap.add_argument("--no-rescan", action="store_true",
+                    help="leave the launcher's shelf as it is (it lists what "
+                         "the store held when it last scanned)")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
 
@@ -524,8 +527,13 @@ def main(argv=None):
             sys.exit(str(exc))
         print("%d file%s written, %d already current"
               % (wrote, "" if wrote == 1 else "s", len(names) - wrote))
-        # The store is scanned at boot, so a pushed cart appears on the next one.
-        print("reset the board (or `machine.reset()`) for the launcher to rescan")
+        # The launcher lists what the store held when it last scanned, so a
+        # new cart is not on the shelf -- and `run <title>` does not find it --
+        # until the store is scanned again.
+        if not a.no_rescan:
+            n = b.pyval("len(ws.rescan_carts() or ())", timeout=60)
+            print("store rescanned" if n is not None else
+                  "the rescan did not answer -- reset the board to rescan")
     finally:
         # In the finally, so a push that FAILS leaves the board as it found it.
         restore_diag(b, diag_was_on)

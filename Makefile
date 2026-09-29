@@ -170,8 +170,8 @@ preflight-web:  ## ...plus the browser suites in real Chrome
 # and diffs the framebuffers. That is the only lane in `make test` where two
 # independently COMPILED kernels are compared -- everything else either
 # compares the host to itself or compares it to a transcription, and a
-# transcription can be right while the C is wrong (CLAUDE.md records the
-# provisional_tline day). The same binary carries `moycore` and `moy_audio`,
+# transcription can be right while the C is wrong (.claude/rules/rendering.md
+# records the provisional_tline day). The same binary carries `moycore` and `moy_audio`,
 # so tests/test_moycore_loop.py, tests/test_semantic_traces.py and
 # test_audio_parity's native pass are the other consumers.
 #
@@ -409,11 +409,11 @@ ota-keygen:
 release:
 	$(PYTHON) tools/release.py $(if $(NAME),--name "$(NAME)") $(if $(NOTES),--notes "$(NOTES)") $(if $(PUSH),--push)
 
-# The answer the PORT hint points at. Every attached port, which board each one
-# is, and the exact command to paste -- resolved by tools/p4_autotest.find_port,
-# which probes the two S3 twins apart rather than guessing between them.
+# The answer the PORT hint points at: every serial port, which board each one
+# is and which process holds it, from facts that need no port opened
+# (tools/board.py). `tools/board.py ports --probe` asks the ones it cannot tell.
 device-port:  ## which serial port is which board
-	@$(PYTHON) tools/device_port.py
+	@$(PYTHON) tools/board.py ports
 
 # The other "what is actually true of this board" question: which modules cross
 # into its image. board.toml decides and tools/board_config.py answers, so ask

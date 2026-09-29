@@ -961,8 +961,10 @@ def jet_fps(board, seconds=10.0):
     drawn fps, median render ms -- the cart's _draw, Jet's render and the
     blit565 and HUD over it). Leaves uncap and diag as it found them."""
     from runtime.perf_line import parse_perf
-    st = board.state()
-    diag_was, uncap_was = st.get("diag"), bool(st.get("uncap"))
+    diag_was = board.state().get("diag")
+    # `state`'s uncap is the running cart's; the switch the next run takes is
+    # `ws._uncap`, which is what `uncap` sets.
+    uncap_was = bool(board.pyval("getattr(ws, '_uncap', False)", timeout=10))
     board.cmd("diag 1", wait_for="REMOTE diag on")
     board.cmd("uncap 1", wait_for="REMOTE uncap")
     n0 = len(board.lines)

@@ -242,7 +242,7 @@ otadata_size   = "0x2000"
 #
 # Resets remain harmless on this board (nothing holds state a reset loses), so
 # still no attach_only -- and unlike the console boards there is no dev channel
-# to answer an identity probe, so tools/device_port.py tells it apart by its USB
+# to answer an identity probe, so tools/board.py tells it apart by its USB
 # serial rather than by asking.
 dtr  = true
 rts  = true
@@ -250,7 +250,7 @@ usb  = "303a:1001"
 # THE TIEBREAK, and the one cost of the promotion. Three boards now show
 # 303a:1001, and `find_port` tells same-id boards apart by ASKING them over the
 # dev channel -- which this one does not have. Its USB serial number is stable
-# and `udevadm` prints it, so tools/device_port.py matches on this instead of a
+# and `udevadm` prints it, so tools/board.py matches on this instead of a
 # round trip.
 #
 # It is the chip's MAC, and it moved WITH the peripheral: TinyUSB reported
