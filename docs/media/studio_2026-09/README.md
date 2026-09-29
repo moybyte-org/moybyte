@@ -2,8 +2,7 @@
 
 The pictures behind `docs/studio_2026-09.md`: the middle-ground Studio the
 owner settled on, drawn at the Waveshare P4's 1024×600 and the T-Deck's
-320×240. They are kept so a later implementation can be compared against what
-was decided.
+320×240, as the record an implementation is checked against.
 
 **Every file is a hand-drawn mockup, not an engine render.** Each was drawn in
 the D1 look (`docs/theming_2026-09.md` §1) with MOY64 colours, the Tiny5 UI
@@ -21,5 +20,5 @@ the 7" screen **1:1**. They show layout and behaviour, not finished pixels.
 | `panel_minimums.png` | The panel set and its minimum sizes, with the 7" screen drawn 1:1: two rows of 320×222 panels fit, and a scrolling panel fits under Run |
 | `tdeck_320x240.png` | The T-Deck: one bar with every file of the project as a tile (the open one shows its name), undo, redo, Play and the OS's exit; no splits. Code, Sprites and Map, each at the full screen |
 
-Light is the variant drawn for the P4 screens and dark for the T-Deck; both are
-the same drawing with a different colour table (D1).
+The P4 screens are drawn in the light variant and the T-Deck in the dark one;
+D1 makes those one routine with two token tables.
