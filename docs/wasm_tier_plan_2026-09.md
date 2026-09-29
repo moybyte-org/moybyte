@@ -138,9 +138,10 @@ all four boards under pinned fps floors, its model read through `read` and its
 frame, HUD included, handed to `blit565`; its source and build tools are MIT (2026-09-26; numbers on #158). What remains follows
 CLAUDE.md's placement rule:
 
-- The teapot and further JetExamples ports (the tropical island, the
-  mail-plane sprite demo, the neon car, one effects demo) become
-  moybyte-org's MIT carts repo, each after its own asset-licence check;
+- The teapot, ESP 88 (the neon city film) and further JetExamples ports
+  (the tropical island, the mail-plane sprite demo, the neon car, one
+  effects demo) become moybyte-org's MIT carts repo, each after its own
+  asset-licence check;
   template-cube becomes a `moy new --jet` starter in moy-spec with the import
   header; the installer and index tools move from gpl-carts into moy-spec's
   CLI so both carts repos share them. moybyte keeps the seeding and the
