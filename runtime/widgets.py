@@ -280,8 +280,7 @@ def pointer_state(inp, out):
     # console.py republishes it with a position every frame whether or not the
     # pointer is alive, so reading liveness off it left a p8 cart holding a
     # cursor over its board forever and its d-pad stamped over every frame.
-    live = getattr(p, "live", None)
-    if live is not None and not live():
+    if hasattr(p, "live") and not p.live():   # hasattr: no bound method
         return out
     # Two-domain seam (#39): the game-space publication wins where the console
     # makes one (a distinct big system canvas, or a cart with a smaller

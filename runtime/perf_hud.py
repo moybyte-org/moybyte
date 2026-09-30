@@ -26,6 +26,12 @@ and reads `cv = self.ws.canvas`, so the drawing is unchanged (host == device).
 """
 
 
+# The FPS chip's glyphs: its number is drawn a digit at a time from these, so a
+# chip that paints on every game frame, with an fps that moves every few frames,
+# never formats a string.
+_DIGITS = ("0", "1", "2", "3", "4", "5", "6", "7", "8", "9")
+
+
 class PerfHud:
     def __init__(self, ws, names):
         self.ws = ws
@@ -38,13 +44,28 @@ class PerfHud:
         # corner is free. Drawn with the indexed API only (host == device).
         NAMES = self._NAMES
         cv = self.ws.canvas
-        s = "%d" % int(self.ws._fps + 0.5)
-        tw = len(s) * 8
+        n = int(self.ws._fps + 0.5)
+        if n < 0:
+            n = 0
+        nd = 1
+        m = n
+        while m >= 10:
+            m //= 10
+            nd += 1
+        tw = nd * 8
         x = cv.w - tw - 3
         y = cv.h - 10
         self.ws.patch_cart_frame(x - 2, y - 1, tw + 4, 10)
         cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
-        cv.print(s, x, y, NAMES["yellow"], 1)
+        c = NAMES["yellow"]
+        dx = x + tw - 8                  # right to left, one 8px glyph a digit
+        m = n
+        while True:
+            cv.print(_DIGITS[m % 10], dx, y, c, 1)
+            m //= 10
+            if not m:
+                break
+            dx -= 8
 
     def _fps_tap_rect(self):
         """The bottom-right corner the FPS readout lives in, used as the tap target

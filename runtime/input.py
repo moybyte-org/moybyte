@@ -143,11 +143,13 @@ class InputState:
         sources disagree about `player`). The ONE place the union is computed,
         and begin_frame is its only caller."""
         h = self._held
-        h.clear()
+        if h:
+            h.clear()
         for s in self._srcs:
             sh = s._held
             if sh:
-                h.update(sh)
+                for n in sh:           # add(), not update(): update() builds
+                    h.add(n)           # an iterator on the heap
         if self._multi:
             self._merge_players()          # split out: see _player_edges
 
@@ -192,9 +194,26 @@ class InputState:
         # Snapshot for edge detection; call once per frame before polling.
         self._merge()
         held = self._held
-        self._pressed = held - self._prev
-        self._released = self._prev - held
-        self._prev = set(held)
+        last = self._prev
+        # The edge sets are rewritten IN PLACE: this runs every loop frame,
+        # and set arithmetic here would be three new sets a frame for the
+        # collector to find.
+        pressed = self._pressed
+        released = self._released
+        if pressed:
+            pressed.clear()
+        if released:
+            released.clear()
+        for n in held:
+            if n not in last:
+                pressed.add(n)
+        for n in last:
+            if n not in held:
+                released.add(n)
+        if pressed or released:
+            last.clear()
+            for n in held:
+                last.add(n)
         self._taken = False
         if self._multi:
             self._player_edges()
@@ -267,7 +286,7 @@ class InputState:
     _mask_order = None      # the tuple _mask_bit was built from (identity key)
     _mask_bit = None
 
-    def button_masks(self, order, player=None):
+    def button_masks(self, order, player=None, out=None):
         """(held, pressed) as bitmasks over `order`, in ONE call.
 
         Exists because moycore's per-frame snapshot needs exactly these two
@@ -290,29 +309,37 @@ class InputState:
         the wrong player fails exactly as quietly as one packed in the wrong
         order. None means the union of every source -- which is what moycore
         asks for, and the two integers it reads are unchanged.
+
+        `out`, a caller-owned two-slot list, is filled and returned instead of
+        a new tuple: moycore asks every frame.
         """
         if self._mask_order is not order:
             self._mask_order = order
             self._mask_bit = {n: 1 << i for i, n in enumerate(order)}
+        h = p = 0
         if player is None or not self._multi:
             if player is not None and player != self._solo:
-                return 0, 0
-            held = self._held
-            pressed = self._pressed
+                held = pressed = ()
+            else:
+                held = self._held
+                pressed = self._pressed
         else:
             held = self._p_held.get(player)
             pressed = self._p_pressed.get(player) if self._p_pressed else None
             if held is None:
-                return 0, 0
-            if pressed is None:
+                held = pressed = ()
+            elif pressed is None:
                 pressed = ()
-        h = p = 0
         bit = self._mask_bit
         for n in held:
             h |= bit.get(n, 0)
         for n in pressed:
             p |= bit.get(n, 0)
-        return h, p
+        if out is None:
+            return h, p
+        out[0] = h
+        out[1] = p
+        return out
 
     # -- the two read views ------------------------------------------------
     #

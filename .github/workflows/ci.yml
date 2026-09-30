@@ -81,10 +81,18 @@ jobs:
       # build, and this step is what makes the check exist here.
       #
       # Deliberately NOT cached. It is ~20s from cold on a runner (clone,
-      # submodules, mpy-cross, compile) and a cache is another thing that can
+      # submodules, mpy-cross, compile), plus a second compile for the boards'
+      # object model, and a cache is another thing that can
       # go stale or miss -- and a miss that silently skipped the check is the
       # exact failure being fixed. If this step ever breaks, the tests below go
       # RED rather than quiet: the parity test fails outright when `CI` is set.
+      # ...built twice: the second time in the boards' object model (32-bit,
+      # REPR_C), which is the only binary on which a frame's allocations read
+      # as a board's (tests/test_frame_alloc.py) and which needs a 32-bit C
+      # toolchain the runner does not ship.
+      - name: A 32-bit C toolchain for the boards' object-model build
+        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends gcc-multilib
+
       - name: Build the desktop MicroPython with the native usermods
         run: make unix-micropython
 

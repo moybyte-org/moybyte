@@ -606,10 +606,13 @@ class DeviceCanvas:
         # physical buffers each flush, so this canvas must re-point its draw target
         # at it every frame (sync_back) -- a stale pointer would draw into the
         # buffer that's being DMA'd (tear). framebuf can't retarget its backing
-        # store in place, so cache one framebuf per physical buffer keyed by id(buf)
-        # and pick the matching one on each swap; no per-frame allocation. In
-        # single-buffer mode framebuffer() never moves, so sync_back is a cheap no-op.
-        self._fb_by_buf = {id(self._buf): self._fb}
+        # store in place, so cache one framebuf per physical buffer and pick the
+        # matching one on each swap, by IDENTITY (`_fb_for`): no per-frame
+        # allocation. Not a dict keyed by id(buf) -- a P4's PSRAM sits above
+        # the 30-bit small int, so its id() is a new big int on every lookup.
+        # In single-buffer mode framebuffer() never moves, so sync_back is a
+        # cheap no-op.
+        self._fb_pairs = [self._buf, self._fb]      # buf, its framebuf, ...
         # Async layer copy (#54 Stage 2): prediction + in-flight state. Armed by
         # blit_window_from when the copy shape is ONE contiguous memcpy (cam_x==0,
         # layer exactly screen-wide, full-height coverage -- sakura's shape);
@@ -803,12 +806,13 @@ class DeviceCanvas:
         buf = self._comp.back_buffer()
         if buf is not self._buf:
             self._buf = buf
-            fb = self._fb_by_buf.get(id(buf))
+            fb = self._fb_for(buf)
             if fb is None:
                 import framebuf
                 fb = framebuf.FrameBuffer(buf, self._stride, self._bh,
                                           framebuf.RGB565)
-                self._fb_by_buf[id(buf)] = fb
+                self._fb_pairs.append(buf)
+                self._fb_pairs.append(fb)
             self._fb = fb
             if self._gate_ctx is not None:
                 self._gate_ctx.set_buf(buf)   # #155: gates draw into the NEW back
@@ -1110,9 +1114,20 @@ class DeviceCanvas:
         ping-pong swaps the framebuffer every frame, so a viewport canvas onto it
         must follow (the root canvas does this in sync_back)."""
         self._buf = buf
-        self._fb = self._fb_by_buf.get(id(buf)) or self._fb
+        self._fb = self._fb_for(buf) or self._fb
         if self._gate_ctx is not None:
             self._gate_ctx.set_buf(buf)
+
+    def _fb_for(self, buf):
+        """The framebuf cached for `buf`, or None."""
+        pairs = self._fb_pairs
+        i = 0
+        n = len(pairs)
+        while i < n:
+            if pairs[i] is buf:
+                return pairs[i + 1]
+            i += 2
+        return None
 
     def _install_draw_gates(self):
         """Swap in the native rect/rectb/print/pix. Returns True if gated."""
@@ -1594,8 +1609,7 @@ class DeviceCanvas:
             kept = comp.frame_fold(view, fmt, cf.lut if fmt == 2 else None, scr,
                                    gw, gh, sx, sy, vw, vh, int(ox), int(oy),
                                    int(scale),
-                                   memoryview(cf.rects)[:4 * nr] if nr else None,
-                                   gc._buf)
+                                   cf.rect_views[nr], gc._buf)
         except ValueError:
             return False
         self._snap_live = True

@@ -168,6 +168,11 @@ class MoycoreRun:
         self._I_SNAP = snap_slots(_moycore)
         self._aq_ops = audio_ops(_moycore)
         self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
+        self._masks = [0, 0]             # reused: button_masks' answer
+        self._mask_inp = None            # the input _mask_ok answers for
+        self._mask_ok = False
+        self._split_us = array("i", bytearray(8))   # reused: tick_split's
+        self._split = [0.0, 0.0]         # reused: frame_split's answer
         self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
@@ -290,15 +295,19 @@ class MoycoreRun:
         on the module object a dozen times a frame."""
         s = self.snap
         inp = self.ws.input
-        masks = getattr(inp, "button_masks", None)
-        if masks is None:
+        if inp is not self._mask_inp:
+            # Asked once per input object: a getattr that finds the method
+            # hands back a new bound method, and this runs every frame.
+            self._mask_inp = inp
+            self._mask_ok = getattr(inp, "button_masks", None) is not None
+        if not self._mask_ok:
             # The guard is BACK, and the reason is worth keeping: it was removed
             # on the argument that every tier builds the real InputState, which
             # was wrong -- there are TWO InputState classes (runtime/input.py
             # and modules/moybyte/input.py), the boards use the second, and
             # removing this dropped a Lua cart into the crash-to-code editor
-            # with `no attribute button_masks`. A per-frame getattr is cheap
-            # insurance against an input object this file has never heard of.
+            # with `no attribute button_masks`. One getattr per input object is
+            # cheap insurance against an input this file has never heard of.
             #
             # The fallback walks MOY_BUTTONS too. It used to carry its own copy
             # of the order, which made it the fourth in the tree and -- because
@@ -311,7 +320,7 @@ class MoycoreRun:
                 if inp.pressed(name):
                     pressed |= 1 << i
         else:
-            held, pressed = masks(MOY_BUTTONS)
+            held, pressed = inp.button_masks(MOY_BUTTONS, None, self._masks)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
         snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms)
@@ -321,10 +330,15 @@ class MoycoreRun:
         self._view = sync_view(self.ws, _moycore.view(), self._view)
 
     def _drain_audio(self):
+        # The generator lives one call down: a function holding one closes over
+        # its locals in cells made on EVERY call, and this is asked every frame
+        # while the queue is almost always empty.
         n = self.aq[0]
-        if n <= 0:
-            return
-        self.aq[0] = 0
+        if n > 0:
+            self.aq[0] = 0
+            self._drain_queued(n)
+
+    def _drain_queued(self, n):
         aq = self.aq
         slots = _moycore.AQ_SLOTS
         drain_audio(self.ns, self._aq_ops,
@@ -335,7 +349,8 @@ class MoycoreRun:
         return None
 
     def frame_split(self):
-        """(update_ms, draw_ms) for the last tick, or None.
+        """[update_ms, draw_ms] for the last tick, or None. The list is the
+        run's own, rewritten by the next call: the Player asks after every tick.
 
         The loop times `update()` and `draw()` to get its logic/render split,
         and both of those happen inside our update() -- so without this the
@@ -347,11 +362,13 @@ class MoycoreRun:
         and the loop keeps its own timing, which is wrong in the old way rather
         than crashing.
         """
-        f = getattr(_moycore, "tick_split", None)
-        if f is None:
+        if not hasattr(_moycore, "tick_split"):
             return None
-        upd, drw = f()
-        return (upd / 1000.0, drw / 1000.0)
+        us = _moycore.tick_split(self._split_us)
+        out = self._split
+        out[0] = us[0] / 1000.0
+        out[1] = us[1] / 1000.0
+        return out
 
     # The Player's scheduler (#217) clears this for a logic-only tick. A module
     # built before `tick` took the flag draws every tick, which is the fused
@@ -510,6 +527,10 @@ class CartFrame:
         self.h = h
         self.lut = array("H", bytearray(512))    # a palette frame's colours
         self.rects = array("h", bytearray(2 * 4 * self.MAX_PATCHES))
+        # rect_views[n]: the first n rects, as the fold takes them -- made once
+        # rather than sliced on every frame an overlay patches.
+        self.rect_views = [None] + [memoryview(self.rects)[:4 * n]
+                                    for n in range(1, self.MAX_PATCHES + 1)]
         self.nrects = 0
         self.kept_off = 0                # where the last frame shown sits in the scratch
         self.fmt = 0                     # its layout: moy_fold's LE565 1 / IDX8 2
@@ -657,6 +678,11 @@ class WasmRun(MoycoreRun):
         self._I_SNAP = snap_slots(_moycore)
         self._aq_ops = audio_ops(_moycore)
         self._touch_out = [0, 0, 0, 0]
+        self._masks = [0, 0]
+        self._mask_inp = None
+        self._mask_ok = False
+        self._split_us = array("i", bytearray(8))
+        self._split = [0.0, 0.0]
         self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))

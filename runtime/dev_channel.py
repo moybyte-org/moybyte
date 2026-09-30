@@ -703,7 +703,7 @@ class DevChannel:
         self._poll = None
         self._stdin = None
         self._rawin = None      # sys.stdin.buffer: the same ring, 8 bits wide
-        self._ipoll = None      # ipoll where there is one -- see _recv
+        self._ipoll = None      # ipoll where there is one -- see below
         try:
             import select
             import sys
@@ -715,10 +715,11 @@ class DevChannel:
             # registration is truthy on EVERY call, forever, which looks exactly
             # like "poll reports stdin always-ready".
             self._poll.register(self._stdin, select.POLLIN)
-            # `recv` polls once PER BYTE, so the allocating `poll()` -- a fresh
-            # list of fresh tuples every call -- would hand a 124KB cart ten
-            # megabytes of garbage and a collection every few kilobytes. ipoll
-            # reuses one tuple and allocates nothing after the first call.
+            # The line reader polls every loop frame and `recv` once PER BYTE,
+            # so the allocating `poll()` -- a fresh list of fresh tuples every
+            # call -- would be garbage on every frame of every cart, and would
+            # hand a 124KB cart ten megabytes of it. ipoll reuses one tuple and
+            # allocates nothing after the first call.
             self._ipoll = getattr(self._poll, "ipoll", None) or self._poll.poll
             self.armed = True
         except Exception as exc:  # noqa: BLE001 -- the channel is optional sugar
@@ -735,8 +736,12 @@ class DevChannel:
             return False
         self.click = False
         ran = False
+        ipoll = self._ipoll
         for _ in range(SERIAL_BYTES_PER_FRAME):
-            if not self._poll.poll(0):
+            ready = False
+            for _ev in ipoll(0):
+                ready = True
+            if not ready:
                 break
             try:
                 ch = self._stdin.read(1)

@@ -171,6 +171,10 @@ class Gt911Bus:
             return bytes(self._report()[1])[:n]
         raise AssertionError("unexpected register 0x%04X" % reg)
 
+    def readfrom_mem_into(self, addr, reg, buf, addrsize=8):
+        data = self.readfrom_mem(addr, reg, len(buf), addrsize)
+        buf[:len(data)] = data
+
     def writeto_mem(self, addr, reg, buf, addrsize=8):
         self.calls.append(("clear", addr, addrsize))
         assert reg == self.REG_STATUS and buf == b"\x00"
@@ -396,7 +400,8 @@ def test_a_trackball_that_cannot_claim_its_pins_degrades_to_no_input(board):
     board.pins.fail_on.add(3)
     tb = board.trackball()
     assert tb.available is False
-    assert tb.poll() == ([0, 0, 0, 0], False)
+    counts, click = tb.poll()
+    assert counts == [0, 0, 0, 0] and click is False
     assert "unavailable" in board.note("trackball")
 
 

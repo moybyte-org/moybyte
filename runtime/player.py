@@ -537,6 +537,8 @@ class Player:
                                       # handle a ws.runtimes factory returned, Lua or
                                       # wasm; _close_lua() on exit so the cart's whole
                                       # heap dies with its run
+        self._lua_split = None        # its frame_split, bound ONCE per run: _run_ticks
+                                      # asks after every tick
         self._sram_run = None         # #211: the Lua allocator's headroom report for the
                                       # run that ENDED, kept until the next run starts
         self._net = None              # #65: the running cart's net.* service, when it
@@ -690,6 +692,7 @@ class Player:
         the exit path -- the state is unreachable either way and gc finishes it."""
         lua = self._lua
         self._lua = None
+        self._lua_split = None
         if lua is not None:
             try:
                 lua.close()
@@ -1589,6 +1592,7 @@ class Player:
         and _draw (the Lua tier)."""
         upd = self._update
         lua = self._lua
+        fs = self._lua_split
         te = self._tick_edges
         inp = self.ws.input
         sched = self.sched
@@ -1618,9 +1622,8 @@ class Player:
                 # its declared speed, which is the exact slowdown the tick
                 # model exists to refuse. The DRAWBRK split already asks this
                 # runtime the same question for the same reason.
-                _fs = getattr(lua, "frame_split", None) if lua is not None else None
-                if _fs is not None:
-                    _sp = _fs()
+                if fs is not None:
+                    _sp = fs()
                     if _sp is not None:
                         cost = _sp[0] / 1000.0        # ms -> s, the update half
                 sched.note_tick(cost)
@@ -1713,6 +1716,7 @@ class Player:
                   self.cart_error)
             return False
         self._lua = lua
+        self._lua_split = getattr(lua, "frame_split", None)
         self.cart_error = None
         self.crash_line = None
         self.crash_file = None
@@ -1774,7 +1778,10 @@ class Player:
                 # not. No-op when the cart has no net permission.
                 if self._net is not None:
                     self._net.pump()
-                dt, stalled, np = self._lockstep_step(ws, dt)
+                np = self._netplay
+                stalled = False
+                if np is not None:            # a match: its clock, its stall
+                    dt, stalled, np = self._lockstep_step(ws, dt)
                 # MICROSECONDS, not ms. These three brackets and the backdrop one
                 # above feed DRAWBRK's split, and `chrome` is what is left after
                 # subtracting them from the frame -- on a ms clock every one of
@@ -1803,7 +1810,7 @@ class Player:
                     # still say where its own time went, in microseconds, so ask
                     # -- otherwise every logic/render pair this project has
                     # recorded since #67 becomes incomparable to the next one.
-                    _fs = getattr(self._lua, "frame_split", None)
+                    _fs = self._lua_split
                     if _fs is not None:
                         _sp = _fs()
                         if _sp is not None:

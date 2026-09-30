@@ -166,8 +166,12 @@ def test_frame_walk_disarms_above_the_game():
     src = (ROOT / "runtime" / "console.py").read_text(encoding="utf-8")
     walk = src[src.index("_fold_live = False"):]
     assert walk.index("self._composite_game()") \
-        < walk.index("disarm_scale_fold") \
+        < walk.index("self._disarm_fn()") \
         < walk.index("self._draw_loading_toast()")
+    # ...and the helper is the compositor's disarm (bound once per compositor).
+    helper = src[src.index("    def _disarm_fn("):]
+    helper = helper[:helper.index("\n    def ", 1)]
+    assert '"disarm_scale_fold"' in helper
 
 
 def test_blit_game_fences_before_it_overwrites_the_scratch():

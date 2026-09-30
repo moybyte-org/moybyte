@@ -63,6 +63,7 @@ class Desktop:
     def __init__(self, name):
         self.name = name
         self.loop = None          # the FrameLoop, set by run() before its first frame
+        self._click_active = [False, False]   # poll_inputs' answer, reused
 
     # -- the touch-only tier's frame hooks --------------------------------
 
@@ -79,7 +80,10 @@ class Desktop:
         inp = self.inp
         inp.begin_frame()
         touched, click = apply_touch(self.touch, self.pointer)
-        return click, (touched or bool(inp._held) or bool(inp.last_key))
+        out = self._click_active
+        out[0] = click
+        out[1] = touched or bool(inp._held) or bool(inp.last_key)
+        return out
 
     def present(self):
         """Re-point both canvases at the compositor's new BACK buffer."""

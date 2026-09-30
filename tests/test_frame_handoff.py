@@ -251,6 +251,8 @@ class ScratchFrame(FakeCartFrame):
         self.asked = []
         self.kept = None
         self.rects = array("h", bytes(32))
+        self.rect_views = [None] + [memoryview(self.rects)[:4 * n]
+                                    for n in range(1, 5)]
 
     def scratch(self, n):
         self.asked.append(n)

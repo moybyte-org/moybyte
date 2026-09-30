@@ -399,9 +399,10 @@ class FramePump:
         self._expected = 0      # what pace() scheduled the last frame to total
         self._slept = False     # ...and whether it actually asked for a sleep
         self.last = _ticks_ms()
+        self._now_dt = [0, 0.0]  # begin()'s answer, reused: it runs every frame
 
     def begin(self):
-        """Top of the loop: `(now, dt)`, with dt clamped to 0..100ms so a hitch
+        """Top of the loop: `[now, dt]`, with dt clamped to 0..100ms so a hitch
         (a 200ms GC, an SD write) can't teleport a cart's physics. Also the
         slack learner: the real period of the frame that just ended, compared
         against what pace() scheduled for it -- only on frames that SLEPT
@@ -422,7 +423,10 @@ class FramePump:
                 self.slack -= 1
         dt = max(0.0, min(0.1, real / 1000.0))
         self.last = now
-        return now, dt
+        out = self._now_dt
+        out[0] = now
+        out[1] = dt
+        return out
 
     def tail(self, ws):
         """The once-only frame housekeeping both boards run after `ws.frame()`:
@@ -704,6 +708,12 @@ class PerfSampler:
         self._miss = 0
         self._sched = None    # WHOSE misses _miss is a baseline for
         self._ov = overlap() if overlap is not None else None
+        # The sample's values, REUSED: every field is written on every sample
+        # (None where nothing measured it), so one dict and its two pairs serve
+        # every line the board prints for as long as it is on.
+        self._v = {}
+        self._fps = [0, 0]
+        self._tick = [0, 0]
 
     def _take(self, name):
         """Read one windowed-WM meter and CLEAR it: it says what THIS sample
@@ -741,23 +751,27 @@ class PerfSampler:
             if ws.perf_capture != live:
                 ws.perf_capture = live
             cart = getattr(ws, "cart", None)
-            v = {"cart": cart.get("title") if cart else None,
-                 "fps": ((drawn - self._drawn) // self._secs,
-                         self._n // self._secs),
-                 "busy": self._busy // (self._n or 1),
-                 "draw": getattr(ws, "_draw_ms", 0),
-                 "flush": getattr(ws, "_flush_ms", 0),
-                 "logic": getattr(ws, "_upd_ms", 0),
-                 "render": getattr(ws, "_cart_ms", 0),
-                 "chrome": getattr(ws, "_chrome_ms", 0),
-                 # No windowed WM on this board, or the deep meters are off,
-                 # or the WM did not run this window: either way nothing
-                 # measured them, which is not a zero. TAKEN, not read -- see
-                 # _take.
-                 "wmr": self._take("_pf_wm_restore"),
-                 "wmw": self._take("_pf_wm_windows"),
-                 "wms": self._take("_pf_wm_stamp"),
-                 "home": getattr(ws, "_pf_home", None)}
+            v = self._v
+            fps = self._fps
+            fps[0] = (drawn - self._drawn) // self._secs
+            fps[1] = self._n // self._secs
+            v["cart"] = cart.get("title") if cart else None
+            v["fps"] = fps
+            v["busy"] = self._busy // (self._n or 1)
+            v["draw"] = getattr(ws, "_draw_ms", 0)
+            v["flush"] = getattr(ws, "_flush_ms", 0)
+            v["logic"] = getattr(ws, "_upd_ms", 0)
+            v["render"] = getattr(ws, "_cart_ms", 0)
+            v["chrome"] = getattr(ws, "_chrome_ms", 0)
+            # No windowed WM on this board, or the deep meters are off, or the
+            # WM did not run this window: either way nothing measured them,
+            # which is not a zero. TAKEN, not read -- see _take.
+            v["wmr"] = self._take("_pf_wm_restore")
+            v["wmw"] = self._take("_pf_wm_windows")
+            v["wms"] = self._take("_pf_wm_stamp")
+            v["home"] = getattr(ws, "_pf_home", None)
+            v["ppa"] = v["fence_ms"] = v["gfence_ms"] = None
+            v["tick"] = v["miss"] = None
             if self._overlap is not None:
                 # DELTAS over this sample (the counters are cumulative), and
                 # gfence_ms otherwise hides entirely: the game fence runs inside
@@ -783,7 +797,10 @@ class PerfSampler:
             pl = getattr(ws, "player", None)
             if pl is not None and pl.tick_ms:
                 sc = pl.sched
-                v["tick"] = (sc.rate, sc.div)
+                tick = self._tick
+                tick[0] = sc.rate
+                tick[1] = sc.div
+                v["tick"] = tick
                 # The baseline belongs to THAT scheduler. Every cart start
                 # builds a new one counting from 0, so subtracting the previous
                 # cart's total reported a NEGATIVE miss in the first sample of

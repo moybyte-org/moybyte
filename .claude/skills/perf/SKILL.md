@@ -83,6 +83,21 @@ at install so an unarmed frame carries no wrapper.
   all four profiles. Allocations over 32 blocks still walk, by design. What is
   left in `mp_map_lookup` is the kid idiom's miss-before-hit, a VM question —
   do not re-price it as a cache size.
+- **A play frame allocates nothing on the Python heap (2026-09-30).** The
+  collector's cost is per COLLECTION -- a whole-heap mark and sweep that stops
+  the frame and a compiled cart's sound with it -- so the lever is how often
+  one comes, which is the console's own garbage rate: the loop, inputs, dev
+  channel, Player, glue and compositor hand-off allocate zero bytes a frame,
+  and what is left is the periodic diag text (PERF, the T-Deck's diag tick,
+  AUDIORATE). `tests/test_frame_alloc.py` pins it on the desktop MicroPython
+  built in the boards' object model (32-bit, REPR_C). What allocates on a
+  board and reads as free: set arithmetic, a `getattr` that finds a method (a
+  bound method), a tuple returned to be unpacked, `str()` of a str (a copy), a
+  function holding a generator or closure (its cells are made on EVERY call,
+  early return or not), `select.poll()`'s list, I2C `readfrom`, `"%d" %`, and
+  `id()` of a pointer above the 30-bit small int (a P4's PSRAM). On glass,
+  `gc.mem_alloc()` walks the whole heap -- tens of ms a call on a T-Deck --
+  so take it over a window of seconds, never per frame.
 - **FRAMESKIP and `FPS_GOVERNOR` are deleted**; the tick model (#217,
   `runtime/tick_model.py`) is the one scheduler.
 - The launcher's live wallpaper defeats the redraw-on-change gate, so the tile

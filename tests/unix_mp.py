@@ -55,17 +55,29 @@ CANONICAL = (ROOT / ".build" / "unix_micropython" / "micropython" / "ports"
 # (2026-08-17) -- nothing creates them and the paths can no longer exist.
 CANDIDATES = (CANONICAL,)
 
+# The same target's second binary: the same modules in the BOARDS' object model
+# (32-bit words, REPR_C, single-precision floats). A heap allocation measured on
+# it is one a board makes; on the 64-bit binary every float result is a heap
+# object too. `board_model=True` asks for it, and the probe checks the word.
+BOARD_MODEL = CANONICAL.parent.parent / "build-moybyte-r32" / "micropython"
+
 _PROBED = {}
 
 
-def _provides(exe, modules):
-    """Does this binary import every one of `modules`? Cached per (exe, mods)."""
-    if not modules:
+def _provides(exe, modules, board_model=False):
+    """Does this binary import every one of `modules` (and, for the board
+    model, run on 32-bit words)? Cached per (exe, mods, model)."""
+    if not modules and not board_model:
         return True
-    key = (exe, modules)
+    key = (exe, modules, board_model)
     if key not in _PROBED:
+        code = "import sys"
+        if modules:
+            code += "; import " + ", ".join(modules)
+        if board_model:
+            code += "; assert sys.maxsize == 2147483647"
         try:
-            out = subprocess.run([exe, "-c", "import " + ", ".join(modules)],
+            out = subprocess.run([exe, "-c", code],
                                  capture_output=True, text=True, timeout=60)
             _PROBED[key] = out.returncode == 0
         except OSError:
@@ -73,8 +85,12 @@ def _provides(exe, modules):
     return _PROBED[key]
 
 
-def find_unix_mp(*modules):
+def find_unix_mp(*modules, board_model=False):
     """The first desktop MicroPython that provides `modules`, or None."""
+    if board_model:
+        if BOARD_MODEL.exists() and _provides(str(BOARD_MODEL), modules, True):
+            return str(BOARD_MODEL)
+        return None
     env = os.environ.get("MOYBYTE_MICROPYTHON")
     if env and os.path.exists(env) and _provides(env, modules):
         return env
@@ -84,12 +100,18 @@ def find_unix_mp(*modules):
     return None
 
 
-def missing_message(modules=(), why=""):
+def missing_message(modules=(), why="", board_model=False):
     msg = ["the check did not run: no desktop MicroPython with the native "
-           "usermods%s. Build one -- it takes about fifteen seconds:"
-           % (" (needs " + ", ".join(modules) + ")" if modules else "")]
+           "usermods%s%s. Build one -- it takes about fifteen seconds:"
+           % (" in the boards' object model (32-bit, REPR_C)" if board_model
+              else "",
+              " (needs " + ", ".join(modules) + ")" if modules else "")]
     msg.append("")
     msg.append("    make unix-micropython")
+    if board_model:
+        msg.append("")
+        msg.append("which builds that one only where a 32-bit C toolchain "
+                   "exists (apt install gcc-multilib).")
     if why:
         msg.append("")
         msg.append(why.strip())
@@ -106,11 +128,12 @@ def require_unix_mp(*modules, **kw):
     import pytest                       # lazy: audio_parity.py has no pytest
 
     why = kw.pop("why", "")
+    board_model = kw.pop("board_model", False)
     assert not kw, kw
-    exe = find_unix_mp(*modules)
+    exe = find_unix_mp(*modules, board_model=board_model)
     if exe is not None:
         return exe
-    text = missing_message(modules, why)
+    text = missing_message(modules, why, board_model)
     if os.environ.get("CI") or os.environ.get("MOYBYTE_REQUIRE_UNIX_MP"):
         pytest.fail(text)
     warnings.warn(UserWarning(text), stacklevel=2)

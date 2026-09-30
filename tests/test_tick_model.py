@@ -844,6 +844,7 @@ def _player_with(lua, fused_cost):
     from runtime.player import Player
     p = Player.__new__(Player)
     p._lua = lua
+    p._lua_split = getattr(lua, "frame_split", None)   # _start_runtime binds it
     p._tick_edges = None
     p._keyp_latch = 0
     p.sched = TickScheduler()

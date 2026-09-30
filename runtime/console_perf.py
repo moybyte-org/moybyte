@@ -97,6 +97,8 @@ class PerfMeters:
         self._fb_sc_fn = None
         self._lb_wm = None        # frame()'s WM / letterbox_inplace
         self._lb_fn = None
+        self._dsf_comp = None     # _disarm_fn's compositor / disarm_scale_fold
+        self._dsf_fn = None
         self._probe_sc = None     # frame()'s system-canvas probes (begin_surface
         self._probe_surf = None   # / skip_surface / view) and the game canvas's
         self._probe_sksurf = None # `buf`, re-taken only when the object changes

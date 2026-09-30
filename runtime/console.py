@@ -1771,6 +1771,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         self._deferred.append((fn, bool(toast)))
         self._dirty = True             # the acknowledgment frame must paint
 
+    def _toast_owed(self):
+        """Does a queued transition want the LOADING pill? A loop, because a
+        generator expression is three heap objects and frame() asks on every
+        painted frame."""
+        for _fn, toast in self._deferred:
+            if toast:
+                return True
+        return False
+
     def _run_deferred(self):
         """Run the deferred transitions queued BEFORE this drain started
         (frame()'s tail, after the flush presented the acknowledgment). A
@@ -3370,6 +3379,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         cv.rectb(x, y, w, h, NAMES["light_grey"])
         cv.print(label, x + 8 * fs, y + 4 * fs, NAMES["white"], fs)
 
+    def _disarm_fn(self):
+        """The compositor's disarm_scale_fold, or None: probed once per
+        compositor, because a getattr that finds a method is a bound-method
+        allocation and this is asked on every frame an overlay paints over the
+        game."""
+        comp = self.comp
+        if comp is not self._dsf_comp:
+            self._dsf_comp = comp
+            self._dsf_fn = getattr(comp, "disarm_scale_fold", None)
+        return self._dsf_fn
+
     def _flush_batches(self):
         # Draw any sprites still pending in a canvas's auto-batch (Fold 1, #63) before
         # the frame is composited / flushed to the panel, so nothing queued by the last
@@ -3912,7 +3932,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
             if _fold_live and (layer is not self._cursor_layer
                                or (self.pointer is not None
                                    and self.pointer.visible)):
-                _dsf = getattr(self.comp, "disarm_scale_fold", None)
+                _dsf = self._disarm_fn()
                 if _dsf is not None:
                     _dsf()
                 _fold_live = False
@@ -3943,7 +3963,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
             _prev_domain = layer.domain
         if _game_open:                              # game was the TOP layer
             _view()
-        if any(_t for _fn, _t in self._deferred):
+        if self._deferred and self._toast_owed():
             # #184: the acknowledgment frame -- a transition queued this
             # iteration paints its LOADING toast on top of everything; the
             # flush below presents it, and the frame TAIL then runs the
@@ -3951,7 +3971,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
             # A `toast=False` entry (the Editor's owed commit, #154) takes the
             # same tail and no pill -- the kid is not waiting on it.
             if _fold_live:                          # #190: toast paints the root
-                _dsf = getattr(self.comp, "disarm_scale_fold", None)
+                _dsf = self._disarm_fn()
                 if _dsf is not None:
                     _dsf()
                 _fold_live = False

@@ -152,6 +152,11 @@ to whoever called it.
   - **A brand-new project has no sheet and no map, and `moy_console` holds both by
     POINTER** — `spr(0,0,0)` in an empty cart used to segfault libmoy's binding: a
     board reset with no message.
+- **A play frame allocates NOTHING** -- the frame path here and in `device/`,
+  pinned by `tests/test_frame_alloc.py`; a board pays for garbage in
+  whole-heap collections that stop the frame. Reuse what a per-frame call
+  returns, bind probes once, and read the `perf` skill's list of the idioms
+  that allocate on a board before adding one.
 - **pmem persistence is DEFERRED (#66, on-glass 2026-07-14):** `pmem(i, v)` is
   RAM + a dirty mark; `Pmem.flush()` persists at cart exit (`release_world`),
   the crash capture, the workspace swap, and a periodic frame-boundary save

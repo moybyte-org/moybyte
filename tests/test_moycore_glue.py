@@ -208,9 +208,12 @@ class FakeMoycore(types.ModuleType):
         self._log("tick", dt)
         return self.tick_err
 
-    def _tick_split(self):
+    def _tick_split(self, out=None):
         self._log("tick_split")
-        return self.split
+        if out is None:
+            return self.split
+        out[0], out[1] = self.split
+        return out
 
     def _pmem_image(self, arr):
         self._log("pmem_image")
@@ -356,7 +359,7 @@ class FakeInput:
         for k, v in kw.items():
             setattr(self, k, v)
 
-    def button_masks(self, order):
+    def button_masks(self, order, player=None, out=None):
         self.mask_calls.append(order)
         h = p = 0
         for i, name in enumerate(order):
@@ -364,7 +367,10 @@ class FakeInput:
                 h |= 1 << i
             if name in self._pressed:
                 p |= 1 << i
-        return h, p
+        if out is None:
+            return h, p
+        out[0], out[1] = h, p
+        return out
 
     def held(self, name):
         return name in self._held
@@ -1452,7 +1458,7 @@ def test_the_logic_render_split_comes_back_from_the_c_side_in_ms(w):
     never happened."""
     run = w.run()
     w.core.split = (4200, 8100)
-    assert run.frame_split() == (4.2, 8.1)
+    assert list(run.frame_split()) == [4.2, 8.1]
 
 
 def test_a_build_whose_module_predates_tick_split_reports_none(w):

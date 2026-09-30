@@ -1865,6 +1865,7 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     if (RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                MP_ERROR_TEXT("moycore: a run is already open"));
     memset(&RUN, 0, sizeof(RUN));
+    MP_STATE_VM(moycore_view) = MP_OBJ_NULL;   // may name a heap a soft reset reset
     // #211's two meters belong to the RUN, so they start here and survive
     // close() -- the report is read at the exit boundary, after the VM is gone.
     g_sram_free_min = SIZE_MAX;
@@ -2768,6 +2769,14 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_take_frames_obj, mod_take_frames);
 // None. W x H bytes are blit's indices, whose 256 wire colours are copied into
 // `lut_out` (512 bytes); 2 x W x H bytes are blit565's little-endian words.
 // Valid until the cart's next hook, which the board fences.
+//
+// The view is ONE object, re-aimed at every owed frame: it is asked for on
+// every frame the cart draws, and it outlives nothing -- a frame is shown or
+// settled before the cart's next hook. It lives outside the heap, like the
+// memory it points into.
+#if MOY_WASM
+static mp_obj_array_t g_frame_view;
+#endif
 static mp_obj_t mod_frame(mp_obj_t lut_out)
 {
 #if MOY_WASM
@@ -2784,7 +2793,13 @@ static mp_obj_t mod_frame(mp_obj_t lut_out)
     } else {
         n *= 2;
     }
-    return mp_obj_new_memoryview('B', n, (void *)px);
+    mp_obj_array_t *v = &g_frame_view;
+    v->base.type = &mp_type_memoryview;
+    v->typecode = 'B';
+    v->free = 0;                     // a memoryview's offset into its buffer
+    v->len = n;
+    v->items = (void *)px;
+    return MP_OBJ_FROM_PTR(v);
 #else
     (void)lut_out;
     return mp_const_none;
@@ -2907,17 +2922,29 @@ static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_tick_obj, 1, 2, mod_tick);
 
-// tick_split() -> (update_us, draw_us) for the last tick. Microseconds, not the
-// loop's milliseconds: a cart frame this project cares about is single-digit ms
-// and a 1ms tick would quantise the split into uselessness.
-static mp_obj_t mod_tick_split(void)
+// tick_split(out=None) -> (update_us, draw_us) for the last tick. Microseconds,
+// not the loop's milliseconds: a cart frame this project cares about is
+// single-digit ms and a 1ms tick would quantise the split into uselessness.
+// Given `out` -- two int32 slots, an array("i") -- it writes the pair there and
+// returns `out`: the Player asks after every tick, and a tuple an ask is
+// garbage on every frame of every Lua and compiled cart.
+static mp_obj_t mod_tick_split(size_t n_args, const mp_obj_t *args)
 {
+    if (n_args > 0 && args[0] != mp_const_none) {
+        size_t len = 0;
+        int32_t *o = (int32_t *)buf_w(args[0], &len);
+        if (len < 2 * sizeof(int32_t))
+            mp_raise_ValueError(MP_ERROR_TEXT("tick_split: needs two int32 slots"));
+        o[0] = (int32_t)g_upd_us;
+        o[1] = (int32_t)g_draw_us;
+        return args[0];
+    }
     mp_obj_t t[2];
     t[0] = mp_obj_new_int((mp_int_t)g_upd_us);
     t[1] = mp_obj_new_int((mp_int_t)g_draw_us);
     return mp_obj_new_tuple(2, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_tick_split_obj, mod_tick_split);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_tick_split_obj, 0, 1, mod_tick_split);
 
 // pmem_image(out) -> dirty flag. The host persists at boundaries (#66), so it
 // asks for the image rather than being told about every poke.
@@ -3013,13 +3040,29 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_get_global_obj, mod_get_global);
 // now: libmoy answers the cart, the console reads the answer here, and the WM
 // composites accordingly. That is the whole shape the spec's host interface was
 // built for, and it only became available because the verb moved into core.
+//
+// The console asks after every tick, so the answer is the SAME tuple for as
+// long as the declaration stands (moycore_view, dropped by run_begin) and a new
+// one only when the cart changes it: a caller holding the last answer sees a
+// change as a different object with different values, and no change costs no
+// allocation.
 static mp_obj_t mod_view(void)
 {
     if (!RUN.open || RUN.con.view_w <= 0) return mp_const_none;
+    mp_obj_t last = MP_STATE_VM(moycore_view);
+    if (last != MP_OBJ_NULL) {
+        mp_obj_tuple_t *lt = MP_OBJ_TO_PTR(last);
+        if (MP_OBJ_SMALL_INT_VALUE(lt->items[0]) == RUN.con.view_w
+            && MP_OBJ_SMALL_INT_VALUE(lt->items[1]) == RUN.con.view_h) {
+            return last;
+        }
+    }
     mp_obj_t t[2];
-    t[0] = mp_obj_new_int(RUN.con.view_w);
-    t[1] = mp_obj_new_int(RUN.con.view_h);
-    return mp_obj_new_tuple(2, t);
+    t[0] = MP_OBJ_NEW_SMALL_INT(RUN.con.view_w);
+    t[1] = MP_OBJ_NEW_SMALL_INT(RUN.con.view_h);
+    last = mp_obj_new_tuple(2, t);
+    MP_STATE_VM(moycore_view) = last;
+    return last;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_view_obj, mod_view);
 
@@ -3283,3 +3326,5 @@ MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_gate);
 // The PICO-8 machine's Python-owned buffers (p8_memory), kept alive here.
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8mem);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8rom);
+// The last view() answer, returned again while the declaration stands.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_view);

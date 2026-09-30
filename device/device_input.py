@@ -33,6 +33,9 @@ class TrackBall:
         self._counts = [0, 0, 0, 0]
         self._click = None
         self._click_prev = 1
+        # What poll() returns, REUSED: it runs every loop frame.
+        self._taken = [0, 0, 0, 0]
+        self._out = [self._taken, False]
         try:
             from machine import Pin
 
@@ -55,7 +58,8 @@ class TrackBall:
     def poll(self):
         # Returns per-direction pulse counts [up, down, left, right] + click edge,
         # so the cursor moves proportionally to how far the ball was rolled.
-        counts = [0, 0, 0, 0]
+        # Both are the driver's own lists, valid until the next poll().
+        counts = self._taken
         for idx in range(4):
             counts[idx] = self._counts[idx]
             self._counts[idx] = 0
@@ -65,7 +69,9 @@ class TrackBall:
             if lvl == 0 and self._click_prev == 1:
                 click = True
             self._click_prev = lvl
-        return counts, click
+        out = self._out
+        out[1] = click
+        return out
 
 
 # Touch -> canvas mapping, calibrated on hardware (RUN_TOUCH_CALIBRATE byte dump).
@@ -117,6 +123,8 @@ class Touch:
     EXTRAPOLATE = False
     EXTRAP_DAMP = 0.5         # (the declined experiment's dial, kept for A/Bs)
     SAFETY_POLL_MS = 250      # gated idle still reads at ~4Hz (miswire/missed-INT net)
+    _rx_status = None         # read buffers, made on first use: a read INTO one
+    _rx_point = None          # allocates nothing, readfrom_mem() a bytes a read
     # The hold/stale/bound no-news contract is gt911.HeldPoint (#202 Phase C,
     # one copy for every GT911 board); the #74 measurements behind its 400ms
     # bound were made on THIS board and are recorded in its docstring.
@@ -237,8 +245,12 @@ class Touch:
         self._last_read_ms = _ticks_ms()   # #74: feeds the gate's safety heartbeat
         t0 = _ticks_us()
         status = None
+        st = self._rx_status
+        if st is None:
+            st = self._rx_status = bytearray(1)
         try:
-            status = self._i2c.readfrom_mem(self.addr, self.REG_STATUS, 1, addrsize=16)[0]
+            self._i2c.readfrom_mem_into(self.addr, self.REG_STATUS, st, addrsize=16)
+            status = st[0]
         except Exception:
             self._stat(t0, _ticks_us(), 0, 0, "status", status)
             return None
@@ -249,7 +261,10 @@ class Touch:
         raw = False      # ready sample, default "finger up"
         if (status & 0x0F) >= 1:
             try:
-                d = self._i2c.readfrom_mem(self.addr, self.REG_POINT0, 4, addrsize=16)
+                d = self._rx_point
+                if d is None:
+                    d = self._rx_point = bytearray(4)
+                self._i2c.readfrom_mem_into(self.addr, self.REG_POINT0, d, addrsize=16)
                 # This GT911 lays the point out as y(lo,hi) then x(lo,hi) -- see
                 # the touch calibration byte dump. Return (x_raw, y_raw) for _map.
                 raw = (d[2] | (d[3] << 8), d[0] | (d[1] << 8))

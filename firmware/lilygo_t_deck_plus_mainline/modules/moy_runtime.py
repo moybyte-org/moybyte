@@ -127,24 +127,29 @@ class _Storage:
         self.traced = False     # a traced session awaits its "panel ok"
 
     def _bracketed(self, fn, trace=False):
+        # Allocation-free on purpose: a compiled cart streaming its data file
+        # comes through here several times a second, so the trace prints its
+        # numbers as print() arguments rather than formatted strings, and the
+        # bracket is called as a method rather than fetched as a bound one.
         if trace:
             print("SD > sync")
         t = _ticks_ms()
-        self._comp.sync()
+        comp = self._comp
+        comp.sync()
         if trace:
-            print("SD > op (sync %dms)" % _ticks_diff(_ticks_ms(), t))
+            print("SD > op (sync ", _ticks_diff(_ticks_ms(), t), "ms)", sep="")
             t = _ticks_ms()
-        bracket = getattr(self._comp, "sd_bracket", None)
-        if bracket is not None:
-            bracket(True)
+        bracket = hasattr(comp, "sd_bracket")
+        if bracket:
+            comp.sd_bracket(True)
         try:
             import moybyte_sd
             return moybyte_sd.with_sd_live(fn)
         finally:
-            if bracket is not None:
-                bracket(False)
+            if bracket:
+                comp.sd_bracket(False)
             if trace:
-                print("SD < op %dms" % _ticks_diff(_ticks_ms(), t))
+                print("SD < op ", _ticks_diff(_ticks_ms(), t), "ms", sep="")
                 self.traced = True
 
     def load(self, boot, store):
@@ -318,6 +323,7 @@ def run_desktop(fps_cap=60):
     # steady per-frame cost that never crosses HITCH_MS is invisible without it.
     _acc = [0] * 12
     _t = {"kbd": 0, "inp": 0, "sb": 0, "diag": 0, "sd": 0, "web": 0}
+    _click_active = [False, False]   # _poll_inputs' answer, reused every frame
 
     def _poll_inputs(now):
         """Every input source on this board: the #69 poller (with its death
@@ -378,8 +384,10 @@ def run_desktop(fps_cap=60):
         if tclick:
             click = True
         _t["inp"] = _ticks_diff(_ticks_ms(), _t0)
-        return click, (touched or nx or ny or click
-                       or bool(getattr(inp, "last_key", None)))
+        _click_active[0] = click
+        _click_active[1] = (touched or nx or ny or click
+                            or bool(getattr(inp, "last_key", None)))
+        return _click_active
 
     def _present():
         _t0 = _ticks_ms()
@@ -447,13 +455,20 @@ def run_desktop(fps_cap=60):
                 pass
             # The PERF sample rides the shared FrameLoop.account hook with the
             # other boards (#206 item 2), on their 2s cadence.
-            _diag_drawbrk(diag, ws)
-            # DRAWBRK says how much of the frame is `render`; this says WHICH
-            # native op render is: `layer=` is the draw_layer window copy (what
-            # the async layer copy is meant to take to ~0 on a full-screen-layer
-            # cart), `fill=` is the cls bucket (what a colour `background()`
-            # costs -- a 153,600 B PSRAM write, Brick Siege's whole `bg=`).
-            _diag_draw2(diag, ws)
+            #
+            # DRAWBRK/BATCH and DRAW2 are CAPTURE meters: the phase EMAs and
+            # the per-op timers they print are written only under PERF DIAG, so
+            # in kid mode they would ring a frozen number -- and a string the
+            # collector has to come back for -- every three seconds.
+            if _live:
+                _diag_drawbrk(diag, ws)
+                # DRAWBRK says how much of the frame is `render`; this says
+                # WHICH native op render is: `layer=` is the draw_layer window
+                # copy (what the async layer copy is meant to take to ~0 on a
+                # full-screen-layer cart), `fill=` is the cls bucket (what a
+                # colour `background()` costs -- a 153,600 B PSRAM write, Brick
+                # Siege's whole `bg=`).
+                _diag_draw2(diag, ws)
             _diag_loop(diag, ws, _acc)
             for _i in range(12):
                 _acc[_i] = 0

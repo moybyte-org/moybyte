@@ -70,6 +70,12 @@ FIELDS = (
 
 _NAMES = tuple(n for n, _s, _u in FIELDS)
 
+# What format_perf walks: each field's ` name=` head and its conversions, cut
+# once here. The line is built from these pieces and joined once, because a
+# board prints it every two seconds for as long as it is on, and every
+# intermediate string is garbage the collector has to come back for.
+_PARTS = tuple((n, " " + n + "=", s, tuple(s.split("/"))) for n, s, _u in FIELDS)
+
 FAILED = "PERF sample failed: %s: %s"
 
 
@@ -77,10 +83,12 @@ def slug(name):
     """A cart title as ONE token. The line is tokenised on whitespace by both
     readers, so `cart=Brick Siege` would arrive as a field `cart=Brick` and a
     stray word -- and `Siege` looks like nothing at all."""
-    try:
-        out = str(name)
-    except Exception:  # noqa: BLE001 -- a diag never raises on its own input
-        return "?"
+    out = name
+    if not isinstance(out, str):          # str() of a str is a copy on device
+        try:
+            out = str(name)
+        except Exception:  # noqa: BLE001 -- a diag never raises on its own input
+            return "?"
     for bad in (" ", "\t", "\n", "\r"):
         out = out.replace(bad, "_")
     return out or "?"
@@ -93,25 +101,33 @@ def format_perf(values):
     to say "absent" with a number. Everything else renders through its declared
     spec, so a board cannot pick its own precision."""
     out = ["PERF"]
-    for name, spec, _unit in FIELDS:
+    for name, head, spec, convs in _PARTS:
+        out.append(head)
         v = values.get(name)
         if v is None:
-            out.append(name + "=" + ABSENT)
+            out.append(ABSENT)
         elif name == "cart":
-            out.append("cart=" + slug(v))
+            out.append(slug(v))
+        elif len(convs) == 1:
+            out.append(spec % v)
         else:
-            out.append(name + "=" + _render(spec, v))
-    return " ".join(out)
+            _render(out, convs, v)
+    return "".join(out)
 
 
-def _render(spec, v):
-    """A compound spec renders component-wise so one absent component is
-    `-` while its siblings keep their numbers."""
-    convs = spec.split("/")
-    if len(convs) == 1:
-        return spec % v
-    return "/".join(ABSENT if c is None else (f % c)
-                    for f, c in zip(convs, v))
+def _render(out, convs, v):
+    """A compound spec renders component-wise, `/`-joined, so one absent
+    component is `-` while its siblings keep their numbers."""
+    n = len(convs)
+    if len(v) < n:
+        n = len(v)
+    i = 0
+    while i < n:
+        if i:
+            out.append("/")
+        c = v[i]
+        out.append(ABSENT if c is None else convs[i] % c)
+        i += 1
 
 
 def parse_perf(line):

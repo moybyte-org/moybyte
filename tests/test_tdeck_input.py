@@ -17,6 +17,20 @@ from pathlib import Path
 DEVICE = Path("device")
 
 
+class _Bus:
+    """machine.I2C's read-INTO calls over a fake's readfrom/readfrom_mem. The
+    drivers read into buffers of their own, so a fake answers the way it
+    always has and this copies the bytes over."""
+
+    def readfrom_into(self, addr, buf):
+        data = self.readfrom(addr, len(buf))
+        buf[:len(data)] = data
+
+    def readfrom_mem_into(self, addr, reg, buf, addrsize=8):
+        data = self.readfrom_mem(addr, reg, len(buf), addrsize=addrsize)
+        buf[:len(data)] = data
+
+
 # -- the console's input order, for the driver tests below -------------------
 #
 # `InputState._held` is the union of the sources and `begin_frame` is its one
@@ -54,7 +68,7 @@ def test_capped_stall_holds_state_and_never_kills_the_keyboard():
 
     held_frame = bytes([0, 0x04, 0, 0, 0])          # "right" held in the matrix
 
-    class FlakyI2C:
+    class FlakyI2C(_Bus):
         def __init__(self):
             self.fail = False
         def readfrom(self, _addr, _size):
@@ -126,7 +140,7 @@ def test_tdeck_keyboard_reads_raw_matrix_for_real_holds():
     keyboard.raw_mode = True
     raw_frames = [bytes([0, 0x04, 0, 0, 0]), bytes([0, 0x04, 0, 0, 0]), bytes(5)]
 
-    class FakeI2C:
+    class FakeI2C(_Bus):
         def readfrom(self, _addr, _size):
             return raw_frames.pop(0)
 
@@ -167,7 +181,7 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
         keyboard.input = state
         keyboard.available = True
         keyboard.raw_mode = True
-        keyboard._i2c = type("F", (), {"readfrom": lambda s, a, n: frame})()
+        keyboard._i2c = type("F", (_Bus,), {"readfrom": lambda s, a, n: frame})()
         _kbd_frame(keyboard, state)
         return state
 
@@ -224,7 +238,7 @@ def test_input_poller_ascii_bytes_deliver_one_frame_each():
     kbd = _bare_kbd(module, state, raw=False)
     seq = [b"a", b"a", b"\x00"]
 
-    class FakeI2C:
+    class FakeI2C(_Bus):
         def readfrom(self, _a, _n):
             return seq.pop(0) if seq else b"\x00"
 
@@ -253,7 +267,7 @@ def test_input_poller_raw_holds_state_across_a_stall():
     kbd = _bare_kbd(module, state, raw=True)
     seq = [bytes([0x08, 0, 0, 0, 0]), OSError(110), bytes(5)]
 
-    class FlakyI2C:
+    class FlakyI2C(_Bus):
         def readfrom(self, _a, _n):
             r = seq.pop(0)
             if isinstance(r, Exception):
@@ -307,7 +321,7 @@ def test_input_poller_defers_mode_switch_to_the_bus_thread():
     kbd._poller_owned = True
     writes = []
 
-    class FakeI2C:
+    class FakeI2C(_Bus):
         def readfrom(self, _a, n):
             return bytes(n)
 
@@ -397,7 +411,7 @@ def test_touch_read_raw_tracks_gate_state():
     module = _load_fw_device_input()
     t = _bare_touch(module)
 
-    class FakeGT911:
+    class FakeGT911(_Bus):
         def __init__(self):
             self.frames = [(0x81, bytes([50, 0, 100, 0])),   # ready, 1 point
                            (0x80, b""),                       # ready, 0 points: up
@@ -461,7 +475,7 @@ def test_tdeck_keyboard_keeps_raw_mode_for_physical_a_bit():
     keyboard.available = True
     keyboard.raw_mode = True
 
-    class FakeI2C:
+    class FakeI2C(_Bus):
         def readfrom(self, _addr, _size):
             return bytes([0x08, 0, 0, 0, 0])
 
@@ -488,7 +502,7 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
     keyboard._held_buttons = ()
     keyboard._held_until_ms = 0
 
-    class FakeI2C:
+    class FakeI2C(_Bus):
         def readfrom(self, _addr, _size):
             return bytes([ord("d"), 0, 0, 0, 0])
 
@@ -509,7 +523,7 @@ def test_tdeck_keyboard_set_game_mode_toggles_raw():
 
     writes = []
 
-    class FakeI2C:
+    class FakeI2C(_Bus):
         def writeto(self, _addr, data):
             writes.append(bytes(data))
 
@@ -564,7 +578,7 @@ def test_the_raw_to_ascii_revert_drains_the_byte_it_produces():
     reads = []
     pending = [ord("m"), 0, 0, 0, 0]
 
-    class FakeI2C:
+    class FakeI2C(_Bus):
         def __init__(self):
             self.writes = []
 
@@ -612,7 +626,7 @@ def test_the_ascii_revert_drain_is_bounded():
 
     n = [0]
 
-    class ChattyI2C:
+    class ChattyI2C(_Bus):
         def writeto(self, _addr, _data):
             pass
 
@@ -645,7 +659,7 @@ def test_i2c_timeout_knob_engaged():
     opened = []
     writes = []
 
-    class _I2C:
+    class _I2C(_Bus):
         def __init__(self, *_a, **kw):
             opened.append(kw)
 
