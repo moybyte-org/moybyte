@@ -65,7 +65,7 @@ static int g_runtime;        /* 1 once WAMR is up and the table registered */
  * until the runtime is destroyed, which on the host is never. */
 static NativeSymbol *g_natives;
 
-/* The cart's own files, and nothing else (the proposal's `read`). The name
+/* The cart's own files, and nothing else (moy-spec SPEC.md 16.6's `read`). The name
  * arrives checked by the binding -- relative, no empty, "." or ".." segment --
  * so joining it to the folder cannot leave it. Anything but a regular file
  * reads as a missing one: stdio opens a folder on Linux, and its size query
@@ -201,7 +201,7 @@ void hw_set_flags(host_wasm *r, const uint8_t *flags, int nbytes)
 void hw_set_cfg(host_wasm *r, const char *blob, int len)
 { hc_set_cfg(&r->hc, blob, len); }
 
-/* Load the cart's module from `dir`/`main`, check it against the proposal's
+/* Load the cart's module from `dir`/`main`, check it against moy-spec SPEC.md 16's
  * shape and the manifest's `pages` BEFORE its memory exists, instantiate it
  * and bind it to the console. 0, or non-zero with the refusal in `err`. */
 int hw_load(host_wasm *r, const char *dir, const char *main, int pages,

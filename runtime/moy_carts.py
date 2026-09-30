@@ -457,7 +457,7 @@ def _read_main(path, name):
 def _compiled_sources(path):
     """A compiled cart's source, as (name, text) under `src/` in name order --
     the text files among them. Never required and never verified against the
-    module (proposals/wasm-runtime.md): it is what the Code tab shows, and a
+    module (moy-spec SPEC.md §16): it is what the Code tab shows, and a
     cart that ships none has no Code tab."""
     out = []
     try:
@@ -535,7 +535,7 @@ def load(path, src=True):
         # own carts ("moybyte-cart-v1", or no format at all) keep theirs.
         spec = man.get("format") == "moy-1"
         runtime = man.get("runtime", "lua" if spec else "python")
-        # A COMPILED cart (proposals/wasm-runtime.md): its main is a module,
+        # A COMPILED cart (moy-spec SPEC.md §16): its main is a module,
         # not text, so it is never read here -- the runtime loads it from the
         # folder. What text it has is its optional `src/` (the Code tab).
         compiled = runtime == "wasm"
@@ -651,7 +651,7 @@ def load(path, src=True):
             "runtime": runtime,
             "main": mainf,
             # A compiled cart's linear memory in 64 KiB pages, which its module
-            # must declare exactly (proposals/wasm-runtime.md, "Memory"); None
+            # must declare exactly (moy-spec SPEC.md §16.7); None
             # for every other runtime, and for a compiled cart that forgot it --
             # which its runtime refuses before anything loads.
             "memory": _int_or(man.get("memory"), None) if compiled else None,

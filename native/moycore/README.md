@@ -47,7 +47,7 @@ says where they run). An item reaches no console state -- an import from one
 traps -- so nothing here is touched from another core.
 
 **A compiled cart's samples go to the speaker's mixer.** `snd` (22,050 Hz
-mono, a queue of 2,048 frames; the proposal's PCM audio section) is libmoy's
+mono, a queue of 2,048 frames; moy-spec SPEC.md §16.9) is libmoy's
 `moy_stream`, and where the image carries `moy_audio` (its cmake defines
 `MOY_AUDIO_SND`) and the core-1 feeder runs, moycore points the binding's
 `snd` at it (`native/moy_audio/moy_audio_snd.h`): the feeder adds the queue

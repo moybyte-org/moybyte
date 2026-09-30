@@ -2,7 +2,7 @@
   "files": {
     "native/moy_audio/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moy_audio/libmoy/moy_audio.c": "0ad1024459ba4f5456db96ae1ab54fa617a03da631e231999cdf1ad0cc42eb66",
-    "native/moy_audio/libmoy/moy_audio.h": "ea6d7a02789527633acb8d9f251e673588e488600ac8d1d4b1202325151a4d52",
+    "native/moy_audio/libmoy/moy_audio.h": "140278244383a30aa00af19a69a8be8fb45e04c6b43c7315dc56e16074607afa",
     "native/moy_gfx/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moy_gfx/libmoy/moy.h": "ff7a0a00209977c80d2a16ebbf5c1ec42fce54994f69e7b51b7926eb03ae194c",
     "native/moy_gfx/libmoy/moy_canvas.c": "f6b6d8482718a66ac8140dd60bd273b1cb494746fed1d6839da2ad01cea0b750",
@@ -12,13 +12,13 @@
     "native/moycore/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moycore/libmoy/moy_lua.c": "45b30acfd8894ec9642b4bdaea1c014516165dc25beeb7f3486b7efccefd97ec",
     "native/moycore/libmoy/moy_p8.c": "d3dac60efd94c44dbc215bcd5cf350dc41220f9cc384c38add292143ac97a678",
-    "native/moycore/libmoy/moy_wasm.c": "a9a9003e8cac54c00bb21c99433a0871e1837b1547e0a8274a069c242e3a7917",
-    "native/moycore/libmoy/moy_wasm.h": "48e786e9a6dcf393fb11ee1294b9da7f7cb5345f968ef21ddbf870147676daa0",
-    "tools/wat.py": "cc6bb16412317baca798630b745bc60dd44eee8300ebc74858568bf848b2f90d"
+    "native/moycore/libmoy/moy_wasm.c": "2a8d20c94e92d23f6f5a33b2c88088a7d75f87e79fbabe6167af79d1c00691a5",
+    "native/moycore/libmoy/moy_wasm.h": "aa03764b7f9596451e7a3e652d62f43d1e6ce0544e25d7ede9e53cf97a411635",
+    "tools/wat.py": "cc7332d29d4642fede58d2521f343c836c3e4457f4b309b9f1f8553d24817796"
   },
   "upstream": {
-    "commit": "01fc13d14242356e8e98977d17db4072fa99c363",
-    "date": "2026-09-29",
+    "commit": "dcd04c78ad190f9a69f6880793e872d46c9ec6be",
+    "date": "2026-09-30",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }

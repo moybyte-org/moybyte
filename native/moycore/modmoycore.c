@@ -2668,7 +2668,7 @@ static int wasm_tick_c(float dt, int draw, char *err, size_t errlen)
         return 1;
     }
     t1 = (uint32_t)mp_hal_ticks_us();
-    // quit() ends the cart where it stands (proposals/wasm-runtime.md).
+    // quit() ends the cart where it stands (moy-spec SPEC.md 16.4).
     if (draw && !WR->w.quitting
         && moy_wasm_session_call(WCALL_DRAW, 0.0f, err, errlen) != 0) {
         wasm_trapped();

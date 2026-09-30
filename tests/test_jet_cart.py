@@ -5,8 +5,8 @@ What is pinned here:
 
   * each module tools/jet_cart.py builds imports only the console's table --
     nothing from WASI -- and a sibling moy-spec's `moy check` passes each cart
-    with no finding but the one every compiled cart draws until the proposal
-    is promoted; the two carts' imports header, runtime and font are one body;
+    with no finding at all; the two carts' imports header, runtime and font
+    are one body;
   * the frame at two fixed camera poses, full width, half width and half
     width interlaced, as PIXEL GOLDENS: RGB565 frames through the same
     binding and golden mechanism the wasm fixtures use
@@ -166,9 +166,9 @@ def test_the_module_matches_the_manifest(jet, cart):
 
 @pytest.mark.parametrize("cart", CARTS)
 def test_moy_check_passes_the_built_cart(jet, tmp_path, cart):
-    """moy-spec's own check, when a checkout sits beside this one: no error,
-    and no warning but the runtime's -- the one every compiled cart draws
-    while the binding tracks the proposal."""
+    """moy-spec's own check, when a checkout sits beside this one: no error
+    and no warning -- the binding is SPEC.md 16, so a well-formed compiled
+    cart draws none."""
     from vendor_check import spec_checkout
     spec = spec_checkout("moy.py")
     if spec is None:
@@ -179,7 +179,7 @@ def test_moy_check_passes_the_built_cart(jet, tmp_path, cart):
     assert r.returncode == 0, r.stdout + r.stderr
     findings = [ln.split()[:2] for ln in r.stdout.splitlines()
                 if ln.strip().startswith(("error", "warn"))]
-    assert findings == [["warn", "manifest.runtime:"]], r.stdout
+    assert findings == [], r.stdout
 
 
 def test_the_carts_share_one_runtime():

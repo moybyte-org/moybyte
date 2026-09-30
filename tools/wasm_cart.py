@@ -7,8 +7,8 @@
     python3 tools/wasm_cart.py tests/fixtures/wasm/hello.moy /tmp/hello.moy \\
         --chip esp32s3                  # ...plus the board's compiled module
 
-A compiled cart's portable artifact is its `main.wasm` (proposals/
-wasm-runtime.md, "The cart"), and no module is ever committed here: a cart in
+A compiled cart's portable artifact is its `main.wasm` (moy-spec SPEC.md
+16.1), and no module is ever committed here: a cart in
 this tree carries its SOURCE -- `src/main.wat` -- and this assembles it with the
 vendored `tools/wat.py` (pure Python: no wabt, no wasm-ld, no network) into the
 manifest's `main`. Everything else in the folder, `src/` included, is copied as

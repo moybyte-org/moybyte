@@ -35,7 +35,7 @@ consideration and derivative works, so it exists on the machine that built it
 and the boards that machine pushes it to. The cart folder carries both
 licences in `LICENSES.txt`.
 
-`dg_cart.c` is the glue, on the proposal's imports:
+`dg_cart.c` is the glue, on the binding's imports (moy-spec SPEC.md §16):
 
 - **Pacing is Doom's own clock.** The manifest declares `"fps": "free"`, so
   the tick model does not pace the cart: every loop frame runs `_update`,

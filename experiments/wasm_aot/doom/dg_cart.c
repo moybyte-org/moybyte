@@ -1,7 +1,7 @@
 /*
  * doomgeneric's platform half for the compiled-cart tier: Doom as a
  * "runtime": "wasm" cart whose imports are the console's own, module "moy"
- * (moy-spec proposals/wasm-runtime.md). build_cart.py stages it with
+ * (moy-spec SPEC.md 16). build_cart.py stages it with
  * doomgeneric and builds the cart; dg_moy.c is the spike's half, on the spike
  * app's imports.
  *

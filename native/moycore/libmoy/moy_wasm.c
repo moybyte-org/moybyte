@@ -1,11 +1,11 @@
-/* The wasm binding: proposals/wasm-runtime.md's import table.
+/* The wasm binding: SPEC.md 16's import table.
  *
  * The Lua binding's twin (src/moy_lua.c), and deliberately the same shape:
  * every verb is a thin call into the raster or the host seam, and the only
- * code here that is not glue is the marshalling the proposal pins -- a
+ * code here that is not glue is the marshalling SPEC.md 16.4 pins -- a
  * sentinel for each overload, an out pointer for several results, a handle
- * for a layer, bytes and a length for a string. The rules are the proposal's
- * and the table is proposals/wasm-imports.json; test/wasm_table_check.py holds
+ * for a layer, bytes and a length for a string. The rules are SPEC.md 16's
+ * and the table is wasm-imports.json; test/wasm_table_check.py holds
  * NATIVES below equal to it.
  *
  * Two engines drive the same verbs (include/moy_wasm.h): WAMR under MOY_WASM,
@@ -993,7 +993,7 @@ void moy_wasm_item_trap(moy_wasm *w, const char *msg)
 
 /* -- the table ------------------------------------------------------------- */
 
-/* One row per import, in the order of proposals/wasm-imports.json. The
+/* One row per import, in the order of wasm-imports.json. The
  * signature strings are WAMR's: 'i' an i32, 'f' an f32, '*~' a pointer and
  * the length WAMR bounds-checks it by, before the parenthesis the result. */
 static const NativeSymbol NATIVES[] = {
@@ -1292,7 +1292,7 @@ static int func_type_index(reader imports, reader funcs, uint32_t index,
 static int par_exports(int par, int item, int sp, char *err, size_t errlen)
 {
     if (item < 0)
-        return fail(err, errlen, "%s is not at the proposal's type", MOY_WASM_ITEM);
+        return fail(err, errlen, "%s is not at SPEC.md 16's type", MOY_WASM_ITEM);
     if (sp < 0)
         return fail(err, errlen, "%s is not a mutable i32 global", MOY_WASM_SP);
     if (par && !item)
@@ -1425,7 +1425,7 @@ int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
                 || !type_at(sec[1], type, &params, &np, &res, &nr)
                 || nr != 0 || np != (h == 1 ? 1u : 0u)
                 || (np == 1 && params[0] != 0x7D))
-                return fail(err, errlen, "%s is not at the proposal's type", HOOKS[h]);
+                return fail(err, errlen, "%s is not at SPEC.md 16's type", HOOKS[h]);
             seen[h] = 1;
         }
     }
@@ -1500,7 +1500,7 @@ int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
         for (h = 0; h < 3; h++) {
             if (strcmp(ex.name, HOOKS[h]) != 0) continue;
             if (!hook_type(ex.u.func_type, h == 1 ? 1u : 0u, WASM_F32))
-                return fail(err, errlen, "%s is not at the proposal's type", HOOKS[h]);
+                return fail(err, errlen, "%s is not at SPEC.md 16's type", HOOKS[h]);
             seen[h] = 1;
         }
     }

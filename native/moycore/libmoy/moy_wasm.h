@@ -1,7 +1,7 @@
-/* libmoy's wasm binding: proposals/wasm-runtime.md's import table.
+/* libmoy's wasm binding: SPEC.md 16's import table.
  *
  * TRACKS THE PROPOSAL, which is not part of core 0.3. The table is
- * proposals/wasm-imports.json; test/wasm_table_check.py holds this file's
+ * wasm-imports.json; test/wasm_table_check.py holds this file's
  * NativeSymbol array equal to it, row for row and signature for signature.
  *
  * BUILT ONLY WHEN ASKED, over one of two engines. src/moy_wasm.c compiles to
@@ -95,7 +95,7 @@ extern "C" {
  * reads as absent. */
 #define MOY_WASM_NAME_MAX 255
 
-/* The sample stream (the proposal's `snd`): signed 16-bit mono frames at this
+/* The sample stream (SPEC.md 16.9's `snd`): signed 16-bit mono frames at this
  * rate, and the most a host holds that its output has not yet taken. */
 #define MOY_WASM_SND_RATE  22050
 #define MOY_WASM_SND_DEPTH 2048
@@ -132,7 +132,7 @@ typedef struct moy_wasm_lane {
 typedef struct moy_wasm {
     /* -- the host's, set before the binding is opened ---------------------- */
 
-    /* The cart's own files (the proposal's `read`). `name` is NUL-terminated
+    /* The cart's own files (SPEC.md 16.6's `read`). `name` is NUL-terminated
      * and already checked to stay inside the cart's folder: relative,
      * '/'-separated, no empty, "." or ".." segment. Copy at most `len` bytes
      * from `offset` into `dst` and return how many were copied; with `len` 0
@@ -156,11 +156,11 @@ typedef struct moy_wasm {
      * settles an owed frame itself before a verb draws on or reads the screen
      * and before the cart's next hook runs, so a host that takes a frame and
      * never shows it loses nothing. A taken frame is read after the call,
-     * which is why the proposal has the cart leave it as blitted until _draw
+     * which is why SPEC.md 16.5 has the cart leave it as blitted until _draw
      * returns. */
     int (*frame)(void *user, const uint8_t *pixels, const moy_pixel *lut);
     void *frame_user;
-    /* The cart's sample stream (the proposal's `snd`). Queue up to `n`
+    /* The cart's sample stream (SPEC.md 16.9's `snd`). Queue up to `n`
      * frames -- `pcm` holds them as little-endian signed 16-bit mono at
      * MOY_WASM_SND_RATE, at any alignment -- and return how many were queued;
      * with `n` 0, queue nothing and return how many would be. The host holds

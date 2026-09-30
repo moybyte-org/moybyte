@@ -1534,7 +1534,7 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
 def compiled_frames_keep_the_blit(board, title):
     """A board without the frame fold: `ffold` is absent (None, never 0),
     the run takes no frame, and the cart's frames are written into the game
-    canvas by the blit as the proposal describes."""
+    canvas by the blit as SPEC.md §16.5 describes."""
     assert board.state().get("ffold") is None
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
     assert line is not None and "no cart match" not in line, line

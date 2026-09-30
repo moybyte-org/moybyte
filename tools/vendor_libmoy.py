@@ -79,7 +79,7 @@ VENDOR = {
     os.path.join(NATIVE, "moycore", "libmoy"): {
         "moy_lua.c": "libmoy/src/moy_lua.c",
         "moy_p8.c": "libmoy/src/moy_p8.c",
-        # The wasm binding (proposals/wasm-runtime.md): the import table as
+        # The wasm binding (SPEC.md 16): the import table as
         # WAMR native symbols. It compiles to nothing unless MOY_WASM is
         # defined, which only a build carrying native/moy_wasm (the engine)
         # does -- the unix and wasm-runner builds of moycore take the file and

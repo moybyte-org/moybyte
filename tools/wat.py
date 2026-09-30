@@ -7,7 +7,7 @@
 The wasm fixtures under libmoy/test/wasm/ are committed as .wat SOURCE, never as
 binaries, and this turns them into modules with nothing but Python: no wabt, no
 wasm-ld, no network. It is a test tool, not an author's toolchain -- a cart is
-built by clang (proposals/wasm-runtime.md) -- and it covers exactly what the
+built by clang (SPEC.md 16.2) -- and it covers exactly what the
 fixtures need: the wasm32 MVP profile's function, memory, global, export,
 start and data fields, every MVP numeric instruction the fixtures reach, and
 both the flat and the folded instruction forms. Anything outside that is an

@@ -173,7 +173,7 @@ void moy_audio_render(moy_audio *a, int16_t *out, int nframes);
 /* -- a sample stream --------------------------------------------------------
  *
  * Signed 16-bit mono PCM that arrives from outside the synth -- a compiled
- * cart's `snd` (proposals/wasm-runtime.md) -- queued in a ring the host owns
+ * cart's `snd` (SPEC.md 16.9) -- queued in a ring the host owns
  * and added into a buffer moy_audio_render has filled, under the same master
  * level and the same saturation. The stream keeps its own rate: mixing steps
  * through it at stream rate / output rate, interpolating linearly, so it

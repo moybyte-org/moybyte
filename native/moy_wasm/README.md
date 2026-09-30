@@ -90,7 +90,7 @@ the VM, the cart's own file read (through the VFS, the last file held open) and
 the config lookup, run on the task, so the thread never touches MicroPython.
 One session at a time, never beside a `start()` run.
 
-**A cart's `par` items run on the session's lanes** (the proposal's
+**A cart's `par` items run on the session's lanes** (SPEC.md §16.10's
 "The cart's own work across the cores"): one thread on each core but the
 session's -- the S3s' and P4s' core 0 -- at the session's priority, pinned,
 with the run stack's size and placement, started the first time a cart calls

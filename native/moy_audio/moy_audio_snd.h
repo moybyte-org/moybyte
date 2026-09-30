@@ -1,4 +1,4 @@
-// A compiled cart's sample stream (moy-spec proposals/wasm-runtime.md, `snd`)
+// A compiled cart's sample stream (moy-spec SPEC.md 16.9, `snd`)
 // into this board's speaker: the C surface moycore reaches from the engine's
 // thread. The stream is libmoy's moy_stream, and the core-1 feeder adds it
 // after the synth in every block it renders, under the same master level.
