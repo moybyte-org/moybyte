@@ -502,6 +502,53 @@ def main(argv=None):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def connect(board, port, verbose=False):
+    """A live, identity-checked P4Board on `board`'s `port`: attached and
+    verified (never pulsed) for an `attach_only` board, reset only when a
+    silent one does not already answer -- resetting unconditionally cost the
+    P4 a 60s boot on every push. Exits (one line) on a wrong or unresponsive
+    board; the caller owns `.close()`.
+
+    Shared by `_push` and `tools/refresh_wasm.py`, which both need a
+    connected board and nothing else from a push's setup."""
+    ser = serial_cfg(board)
+    board_dir = os.path.join(ROOT, BOARDS[board])
+    b = P4Board(port, log=(print if verbose else (lambda s: None)),
+                board_dir=board_dir)
+    # The chunk a `py` line may carry -- only the helper install's, since the
+    # payload does not ride `py` at all. Still per board: the P4's UART
+    # drops an over-long line as noise with no error (see its board.toml).
+    b.CHUNK = int(ser.get("chunk") or P4Board.CHUNK)
+    if ser.get("attach_only"):
+        # ATTACH: never pulse the line. P4Board.reset() is CH343-specific and
+        # on a USB-Serial/JTAG board it re-enumerates the device under our own
+        # open handle, after which every read returns nothing, forever.
+        if b.pyval("1+1", timeout=20) != 2:
+            b.close()
+            sys.exit("%s is not responding -- this board is attached to, not "
+                     "reset, so its console must already be running" % port)
+        # Liveness is not identity: the two S3s share a usb id and both
+        # answer. A cart pushed to the wrong board's store is a silent
+        # wrong outcome, so a POSITIVE mismatch refuses here.
+        try:
+            b.verify_board()
+        except RuntimeError as exc:
+            b.close()
+            sys.exit(str(exc))
+    else:
+        # A running desk answers and names itself; a reset is for a silent
+        # board only (its boot banner is the other way to learn who it is).
+        if b.pyval("1+1", timeout=20) == 2:
+            try:
+                b.verify_board()
+            except RuntimeError as exc:
+                b.close()
+                sys.exit(str(exc))
+        else:
+            b.reset()
+    return b
+
+
 def _push(a, cart, names, local, work):
     chip = board_chip(a.board)
     module = compiled_module(cart, chip, work) if chip else None
@@ -521,39 +568,8 @@ def _push(a, cart, names, local, work):
             sys.exit("not in the cart: " + ", ".join(missing))
         names = [f for f in names if f in a.only]
     ser = serial_cfg(a.board)
-    board_dir = os.path.join(ROOT, BOARDS[a.board])
-    b = P4Board(a.port, log=(print if a.verbose else (lambda s: None)),
-                board_dir=board_dir)
-    # The chunk a `py` line may carry -- only the helper install's, since the
-    # payload does not ride `py` at all. Still per board: the P4's UART
-    # drops an over-long line as noise with no error (see its board.toml).
-    b.CHUNK = int(ser.get("chunk") or P4Board.CHUNK)
+    b = connect(a.board, a.port, a.verbose)
     try:
-        if ser.get("attach_only"):
-            # ATTACH: never pulse the line. P4Board.reset() is CH343-specific and
-            # on a USB-Serial/JTAG board it re-enumerates the device under our own
-            # open handle, after which every read returns nothing, forever.
-            if b.pyval("1+1", timeout=20) != 2:
-                sys.exit("%s is not responding -- this board is attached to, not "
-                         "reset, so its console must already be running" % a.port)
-            # Liveness is not identity: the two S3s share a usb id and both
-            # answer. A cart pushed to the wrong board's store is a silent
-            # wrong outcome, so a POSITIVE mismatch refuses here.
-            try:
-                b.verify_board()
-            except RuntimeError as exc:
-                sys.exit(str(exc))
-        else:
-            # A running desk answers and names itself; a reset is for a silent
-            # board only (its boot banner is the other way to learn who it is).
-            # Resetting unconditionally cost the P4 a 60s boot on every push.
-            if b.pyval("1+1", timeout=20) == 2:
-                try:
-                    b.verify_board()
-                except RuntimeError as exc:
-                    sys.exit(str(exc))
-            else:
-                b.reset()
         # The store the CONSOLE says it uses -- the Guition's is conditional on a
         # TF card being present, so asking beats declaring.
         dest = a.dest or (str(b.pyval("str(ws.carts_root)", timeout=20)).rstrip("/")
