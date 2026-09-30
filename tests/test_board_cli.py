@@ -351,6 +351,8 @@ class Wire:
             self.clock.now += 0.05
             if self.clock.now >= self.next_perf:
                 self.next_perf += 2.0
+                if not self.ws.diag_live:      # the line is PERF DIAG's
+                    return b""
                 cart = self.ws.cart["title"] if self.ws.cart else None
                 fps = self.fps[0] if self.fps else 60
                 if self.ws.cart and self.fps:
@@ -445,6 +447,9 @@ def test_perf_reports_the_median_and_restores_the_switches(clock):
     assert ws.cart is None, "perf ends its cart"
     assert ws._uncap is False and ws.diag_live is False
     assert "uncap 1" in wire.sent and "uncap 0" in wire.sent
+    # The line is PERF DIAG's, so the measurement armed it and put it back.
+    assert wire.sent.index("diag 1") < wire.sent.index("diag 0")
+    assert "(diag on" in out
 
 
 def test_perf_keeps_a_switch_that_was_already_on(clock):

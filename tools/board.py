@@ -391,7 +391,8 @@ def cmd_perf(b, a):
     held = st.get("wifi_held") or []
     status = 0
     try:
-        b.cmd("diag %d" % (1 if a.diag else 0), wait_for="REMOTE diag")
+        # The PERF line is PERF DIAG's: with the diag off a board writes none.
+        b.cmd("diag 1", wait_for="REMOTE diag")
         if a.uncap:
             b.cmd("uncap 1", wait_for="REMOTE uncap")
         for title in a.titles:
@@ -415,10 +416,10 @@ def cmd_perf(b, a):
         b.leave_cart()
         if a.uncap and not uncap_was:
             b.cmd("uncap 0", wait_for="REMOTE uncap")
-        if bool(a.diag) != diag_was:
-            b.cmd("diag %d" % diag_was, wait_for="REMOTE diag")
-    print("  (diag %s, uncap %s, wifi %s)"
-          % ("on" if a.diag else "off", "on" if a.uncap else "off",
+        if not diag_was:
+            b.cmd("diag 0", wait_for="REMOTE diag")
+    print("  (diag on, uncap %s, wifi %s)"
+          % ("on" if a.uncap else "off",
              "held by %s" % ",".join(held) if held else "off"))
     return status
 
@@ -897,7 +898,8 @@ def parser(dirs):
     p.add_argument("titles", nargs="+")
     p.add_argument("--secs", type=float, default=8.0)
     p.add_argument("--diag", action="store_true",
-                   help="PERF DIAG on: phase ms, at the diag's own cost")
+                   help="print the phase ms too (it measures under PERF DIAG "
+                        "either way: that is what writes the line)")
     p.add_argument("--uncap", action="store_true",
                    help="every loop frame draws (how the compiled carts' "
                         "floors are measured)")

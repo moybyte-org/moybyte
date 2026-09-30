@@ -323,12 +323,13 @@ class Harness:
         self.machine = None
 
     def build(self, engine=None, native=True, i2s_fails=False,
-              write_fails=False, **na_kw):
+              write_fails=False, diag=True, **na_kw):
         """Construct the REAL DeviceAudio against the doubles.
 
         `native=False` puts `None` in sys.modules under `moy_audio`, which is
         the documented way to make `import moy_audio` raise -- i.e. a build with
-        the usermod left out.
+        the usermod left out. `diag` is PERF DIAG as the sampler hands it over:
+        ON here, because most of this file reads the lines it writes.
         """
         if native:
             self.na = FakeNative(**na_kw)
@@ -339,7 +340,9 @@ class Harness:
             sys.modules["moy_audio"] = None
         self.machine = _fake_machine(i2s_fails, write_fails)
         sys.modules["machine"] = self.machine
-        return DA.DeviceAudio(engine if engine is not None else Engine())
+        da = DA.DeviceAudio(engine if engine is not None else Engine())
+        da.diag = diag
+        return da
 
     @property
     def i2s(self):
@@ -787,6 +790,22 @@ def test_the_trigger_log_is_gated_so_a_kid_build_can_drop_it(h, monkeypatch):
     da.sfx(1)
     assert h.diag.all("AUDIO") == []
     assert h.na.count("sfx") == 1                # ...and the sound still plays
+
+
+def test_with_PERF_DIAG_off_no_trigger_or_rate_line_is_written(h):
+    """Kid mode (owner call 2026-09-30): a game's sounds and the stream's
+    clock print nothing -- each line is garbage the collector stops the frame
+    for -- and the sound plays the same."""
+    da = _core1(h)
+    da.diag = False
+    da.sfx(1)
+    da.music(2)
+    _probe(h, da, frames=0, ms=0)
+    _probe(h, da, frames=44100, rend=44100, ms=2000)
+    _probe(h, da, frames=88200, rend=88200, ms=4000)
+    assert h.diag.all("AUDIO") == [] and h.diag.all("AUDIORATE") == []
+    assert h.diag.all("SNDSTREAM") == []
+    assert h.na.count("sfx") == 1
 
 
 def test_a_broken_diag_never_costs_a_trigger(h, monkeypatch):

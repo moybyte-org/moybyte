@@ -1007,7 +1007,9 @@ class Player:
         upd_ms = upd_us // 1000
         render_ms = render_us // 1000
         audio_ms = audio_us // 1000
-        if upd_ms < 10 or not self._diag_enabled():
+        # PERF DIAG's alone: a periodic line, and the HUD a kid can tap on
+        # (perf_hud) is no measurement session.
+        if upd_ms < 10 or not getattr(self.ws, "diag_live", False):
             return
         now = _ticks_ms()
         if self._slow_logic_next and _ticks_diff(now, self._slow_logic_next) < 0:

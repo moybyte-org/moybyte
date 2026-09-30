@@ -93,13 +93,17 @@ AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2
 AUDIO_MAX_FRAME = AUDIO_IBUF_FRAMES
 
 # Log each sfx/music trigger to moybyte_diag, so the owner can read on serial/SD
-# exactly what reached the mixer. Event-gated: one line per actual call.
+# exactly what reached the mixer: one line per actual call.
 AUDIO_DIAG = True
 # Print an AUDIORATE line every ~2s while sound is audible: the rate the I2S
 # peripheral actually consumes frames at, against the rate libmoy synthesised
 # for. This is the only instrument that can see a uniform playback-speed error --
-# see _rate_probe. Cheap (one counter read per frame) and quiet when silent.
+# see _rate_probe. Quiet when silent.
 AUDIO_RATE_PROBE = True
+# Both are PERF DIAG's (owner call 2026-09-30): a backend writes them only while
+# its `diag` is True, which device_boot.PerfSampler keeps equal to Settings ->
+# PERF DIAG. In kid mode a game's sounds and the stream's clock print nothing,
+# because every line is garbage the collector stops the frame for.
 
 _AUDIO_BACKEND_SEQ = 0
 
@@ -123,6 +127,8 @@ class DeviceAudio:
     (#97 -- owner decision 2026-08-11, no fallback synth, KISS). `self.engine`
     survives as the MODEL only: the bank the Music editor edits + the master
     level Settings shows."""
+
+    diag = False                # PERF DIAG, as the sampler hands it over
 
     def __init__(self, engine):
         global _AUDIO_BACKEND_SEQ
@@ -344,20 +350,20 @@ class DeviceAudio:
         if self._na is not None:
             self._sync_bank()
             self._na.sfx(int(n), -1 if chan is None else int(chan))
-        if AUDIO_DIAG:
+        if AUDIO_DIAG and self.diag:
             self._diag_trigger("sfx", n, chan)
 
     def beep(self, freq, dur=0.15):
         if self._na is not None:
             self._na.beep(float(freq), float(dur))
-        if AUDIO_DIAG:
+        if AUDIO_DIAG and self.diag:
             self._diag_trigger("beep", int(freq), None)
 
     def music(self, track, loop=True):
         if self._na is not None:
             self._sync_bank()
             self._na.music(int(track), 1 if loop else 0)
-        if AUDIO_DIAG:
+        if AUDIO_DIAG and self.diag:
             self._diag_trigger("music", track, None)
 
     def music_stop(self):
@@ -412,7 +418,7 @@ class DeviceAudio:
         which makes its accepted-frame count a clock. eff/want == 1.0 is correct;
         0.5 would be 11025 leaking into the 22050 pipe, 2.0 a frame/slot mismatch.
         Costs one counter read per frame and prints only while sound is audible."""
-        if not AUDIO_RATE_PROBE or self._na is None:
+        if not AUDIO_RATE_PROBE or not self.diag or self._na is None:
             return
         # WALL CLOCK, not summed loop dt (2026-08-10): frames_out advances on
         # core 1 through every HITCH, but the loop's dt is clamped/quantized --

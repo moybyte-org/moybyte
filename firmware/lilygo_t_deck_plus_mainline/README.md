@@ -374,8 +374,8 @@ TinyUSB CDC, the arrangement that does NOT take input here.
 The channel never calls `readline()`: it registers `select.POLLIN` only (a bare
 `register()` is truthy forever, because `mphalport.c` grants `POLL_WR`
 unconditionally), reads one byte at a time after `poll` reports it, and counts
-what it swallowed — the diag tick prints `SERIAL rx=N lines=N dropped=N
-partial=N raw=N`, and `rx` climbing on an idle board with `lines=0` means
+what it swallowed — the diag tick prints, under PERF DIAG, `SERIAL rx=N
+lines=N dropped=N partial=N raw=N`, and `rx` climbing on an idle board with `lines=0` means
 something is injecting bytes into stdin.
 
 **Flashing.** `write_flash`'s own trailing reset does not start the app; a
@@ -817,9 +817,10 @@ future flush change is read against:
   (`ASYNC_FLUSH`, or `moy_lcd.kick` missing, or `nfbs == 1`), and the PUMP line
   will be absent to match.
 * **`PUMP pump=… idle=… gaps=… feed=… bands=5 fold=0`** — a line that did not
-  exist before, printed every 3 s diag tick. Its mere presence says
-  `comp.bounce_flush` is on, i.e. the split path is running; its absence says it
-  is not, and there is no point reading anything else.
+  exist before, printed on the 3 s diag tick under PERF DIAG. With the diag on,
+  its mere presence says `comp.bounce_flush` is on, i.e. the split path is
+  running; its absence says it is not, and there is no point reading anything
+  else.
   Expect `pump≈3–4 ms` (five 30 KB PSRAM→SRAM memcpys), `bands=5`, and `fold=`
   climbing while a small-canvas cart plays, because the #190 game fold is this
   board's too (`native/moy_flush/moy_fold`), so a frozen 0 there means something disarms
@@ -853,7 +854,8 @@ the only place it would ever be visible.
 And two things that would say the overlap is *wrong* rather than slow: **tearing
 or a band-shaped seam** (the ping-pong or a slot being refilled under a live DMA
 — set `ASYNC_FLUSH = False` and reflash to confirm the attribution), and **a
-hang inside an SD session** (`SD > op` as the last serial line), which would mean
+hang inside an SD session** (`SD > op` as the last serial line, with PERF DIAG
+on: the trace is its), which would mean
 a flush outlived a `sync()`. `moy_lcd.pump_stats()[6]` counts flush timeouts;
 it should stay 0.
 

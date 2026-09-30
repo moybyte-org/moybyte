@@ -137,9 +137,12 @@ paths:
     drops back, and `tests/test_board_toml.py` pins both under it.
     `SERIAL_LINE_MAX` must fit the harness's `pyexec` chunk lines — at the
     T-Deck's original 96 every P4 upload was silently dropped as noise.
+  - **A PERF line exists only under PERF DIAG** (owner call 2026-09-30: kid
+    mode writes nothing periodic), so a test that reads one arms it through
+    `on_glass.perf_diag`, which puts the diag and the FPS chip back after.
   - Waits and staleness: **wait for `REMOTE drag done`/`swipe done`** before the
-    next command; PERF's `wmr/wmw/wms` are last-sample values that go STALE when
-    their pass stops running (a repeated constant means "not running"); allow ~10s
+    next command; PERF's `wmr/wmw/wms` are TAKEN per sample, `-` when their pass
+    did not run in it; allow ~10s
     after a first `open picker` at a new size (cover pop-in, #155). `state`'s
     `uncap` is the RUNNING cart's; the switch the next run takes is `ws._uncap`.
   - **Look system-app carts up by TITLE, never folder name** — the device seeds

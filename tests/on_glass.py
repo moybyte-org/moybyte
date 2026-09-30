@@ -127,6 +127,29 @@ def py_probe_reaches_the_console(board):
     assert line == "PY True", line
 
 
+@contextlib.contextmanager
+def perf_diag(board):
+    """PERF DIAG on for a measurement that reads PERF lines, and back the way
+    it was found after.
+
+    Every periodic line a board writes -- PERF above all -- is PERF DIAG's
+    (owner call 2026-09-30): kid mode, the default, prints nothing periodic,
+    so whatever reads the line arms the diag itself instead of inheriting it
+    from suite order. `diag` also switches the FPS chip, so that is put back
+    too; a helper that ended on a bare `diag 0` would disarm the deep meters
+    for every suite that armed them (diag_toggle_roundtrips has the story)."""
+    was = bool(board.state().get("diag"))
+    chip = bool(board.pyval("bool(ws.show_fps)", timeout=10, strict=True))
+    if not was:
+        board.cmd("diag 1", wait_for="REMOTE diag on")
+    try:
+        yield
+    finally:
+        if not was:
+            board.cmd("diag 0", wait_for="REMOTE diag off")
+            board.pyexec("ws.show_fps = %r" % chip, strict=True)
+
+
 def diag_toggle_roundtrips(board):
     """The toggle answers both ways -- and is left where it was found.
 
@@ -341,10 +364,11 @@ def perf_line_is_the_one_format(board):
     An idle desk paints nothing, so fps= reads 0/<loop rate>. That is the
     idle-paints-zero invariant, and this line is its witness."""
     from runtime.perf_line import FIELDS, parse_perf
-    n0 = len(board.lines)
-    board.drain(5.0)
-    lines = board.perf_lines(n0)
-    assert lines, "no PERF lines in 5s"
+    with perf_diag(board):
+        n0 = len(board.lines)
+        board.drain(5.0)
+        lines = board.perf_lines(n0)
+    assert lines, "no PERF lines in 5s under PERF DIAG"
     got = parse_perf(lines[-1])
     missing = [n for n, _s, _u in FIELDS if n not in got]
     assert not missing, "%s: fields missing from %r" % (missing, lines[-1])
@@ -389,16 +413,22 @@ def wm_meters_answer_for_the_frame_they_measured(board, win="settings"):
     every frame, which is the comment at the skip.
 
     Leaves the window where it found it -- these suites are one ordered tour.
+    Returns {column: the first number it carried}.
     """
-    from runtime.perf_line import parse_perf
+    # These three are gated on `perf_capture`, and the line on PERF DIAG, so
+    # with diag off nothing is written and BOTH halves below would read `-` --
+    # the rest half passing for the wrong reason and the drag half failing for
+    # it. Armed here rather than inherited from suite order, and asserted so a
+    # board that cannot arm says so instead of quietly measuring nothing.
+    with perf_diag(board):
+        assert board.state()["diag"] is True, \
+            "the deep meters would not be written"
+        return _wm_meters_measured(board, win)
 
-    # These three are gated on `perf_capture`, so with diag off they are never
-    # written and BOTH halves below would read `-` -- the rest half passing for
-    # the wrong reason and the drag half failing for it. Armed here rather than
-    # inherited from suite order, and asserted so a board that cannot arm says
-    # so instead of quietly measuring nothing.
-    board.cmd("diag 1", wait_for="REMOTE diag on")
-    assert board.state()["diag"] is True, "the deep meters would not be written"
+
+def _wm_meters_measured(board, win):
+    """The rest half and the drag half, under a PERF DIAG already armed."""
+    from runtime.perf_line import parse_perf
 
     # `open` TOGGLES, so a window the previous test left up would be closed.
     if not (board.state().get("order") or ()):
@@ -868,9 +898,15 @@ def wasm_carts_push(board, board_dir):
 def wasm_cart_fps(board, title, seconds=10.0, check=None):
     """Run `title` from the launcher, check it ticks with no error on the
     wasm runtime, and read its drawn fps off the PERF line over `seconds`
-    (the first sample is the start and is dropped). `check(board)` runs once
-    the cart is up. Leaves the desk as it was found. Returns (median drawn
-    fps, [every sample's (drawn, looped)])."""
+    (the first sample is the start and is dropped), under PERF DIAG.
+    `check(board)` runs once the cart is up. Leaves the desk and the diag as
+    it found them. Returns (median drawn fps, [every sample's (drawn,
+    looped)])."""
+    with perf_diag(board):
+        return _wasm_cart_fps(board, title, seconds, check)
+
+
+def _wasm_cart_fps(board, title, seconds, check):
     from runtime.perf_line import parse_perf
     assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run")
@@ -953,19 +989,16 @@ def jet_fps(board, seconds=10.0):
     drawn fps, median render ms -- the cart's _draw, Jet's render and the
     blit565 and HUD over it). Leaves uncap and diag as it found them."""
     from runtime.perf_line import parse_perf
-    diag_was = board.state().get("diag")
     # `state`'s uncap is the running cart's; the switch the next run takes is
     # `ws._uncap`, which is what `uncap` sets.
     uncap_was = bool(board.pyval("getattr(ws, '_uncap', False)", timeout=10))
-    board.cmd("diag 1", wait_for="REMOTE diag on")
-    board.cmd("uncap 1", wait_for="REMOTE uncap")
-    n0 = len(board.lines)
-    try:
-        fps, _samples = wasm_cart_fps(board, JET_TITLE, seconds)
-    finally:
-        board.cmd("uncap %d" % uncap_was, wait_for="REMOTE uncap")
-        if not diag_was:
-            board.cmd("diag 0", wait_for="REMOTE diag off")
+    with perf_diag(board):
+        board.cmd("uncap 1", wait_for="REMOTE uncap")
+        n0 = len(board.lines)
+        try:
+            fps, _samples = wasm_cart_fps(board, JET_TITLE, seconds)
+        finally:
+            board.cmd("uncap %d" % uncap_was, wait_for="REMOTE uncap")
     slug = JET_TITLE.replace(" ", "_")
     render = sorted(g["render"] for g in map(parse_perf, board.perf_lines(n0))
                     if g.get("cart") == slug and g.get("render") is not None)
@@ -1352,26 +1385,27 @@ def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,
     assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
     pm = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
           "(__import__('array').array('i', bytearray(1024)))")
-    line = board.cmd("run doom", wait_for="REMOTE run", timeout=60)
-    assert line is not None and "no cart match" not in line, line
-    try:
-        board.drain(5.0)
-        n0 = len(board.lines)
-        end = time.time() + tics / 35.0 * 3 + 60
-        while True:
-            st = board.state(timeout=30)
-            assert st.get("cart") == "Doom", st.get("cart")
-            assert not st.get("cart_error"), st["cart_error"]
-            assert not st.get("notice"), st["notice"]
-            img = board.pyval(pm, timeout=30, strict=True)
-            if img[frames.PM_GAMETIC] >= tics:
-                break
-            assert time.time() < end, "gametic %d of %d" % (img[frames.PM_GAMETIC], tics)
+    with perf_diag(board):             # its fps is read off PERF
+        line = board.cmd("run doom", wait_for="REMOTE run", timeout=60)
+        assert line is not None and "no cart match" not in line, line
+        try:
             board.drain(5.0)
-        got = [parse_perf(ln) for ln in board.perf_lines(n0)]
-    finally:
-        board.leave_cart()
-        board.drain(1.5)
+            n0 = len(board.lines)
+            end = time.time() + tics / 35.0 * 3 + 60
+            while True:
+                st = board.state(timeout=30)
+                assert st.get("cart") == "Doom", st.get("cart")
+                assert not st.get("cart_error"), st["cart_error"]
+                assert not st.get("notice"), st["notice"]
+                img = board.pyval(pm, timeout=30, strict=True)
+                if img[frames.PM_GAMETIC] >= tics:
+                    break
+                assert time.time() < end, "gametic %d of %d" % (img[frames.PM_GAMETIC], tics)
+                board.drain(5.0)
+            got = [parse_perf(ln) for ln in board.perf_lines(n0)]
+        finally:
+            board.leave_cart()
+            board.drain(1.5)
     assert not frames.error(img), frames.error(img)
     mine = frames.crcs(img)
     compared, skipped = [], []

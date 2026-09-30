@@ -437,8 +437,9 @@ contract.)*
 
 Two owner-facing diagnostics rows live here too (#68, both persisted, both default
 OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement
-machinery (serial samplers + the 30s forced-GC sample — it costs felt hitches, so
-it is never on for play), and **DIAG SD LOG** separately gates the periodic
+machinery (the capture meters and every periodic serial line — PERF, the diag
+tick, the audio rate — each of which costs felt hitches, so it is never on for
+play), and **DIAG SD LOG** separately gates the periodic
 diag→SD write (~115ms every 20s) so a serial-attached measurement session runs
 stutter-free; crash/cart-exit diag flushes happen regardless.
 

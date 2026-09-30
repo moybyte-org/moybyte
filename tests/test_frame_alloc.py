@@ -18,11 +18,13 @@ unix-micropython`), with its hardware replaced underneath by fakes that return
 what the C returns in the shapes the C returns them. It runs a compiled cart,
 lets it warm up, and then counts `gc.mem_alloc()` across whole loop frames.
 
-WHAT IT PINS. Nearly every frame allocates exactly zero bytes -- with nothing
-held, and with a button held down. A frame that allocates is allowed only for
-the periodic diagnostics (the PERF line, the diag tick), which are wall-clock
-events, not frame costs. The `perf` skill lists the idioms that allocate on a
-board while reading as free; a dozen of them were on this path at once.
+WHAT IT PINS. The frames allocate nothing -- with nothing held, and with a
+button held down -- over windows long enough to take in two PERF periods and a
+T-Deck diag tick (net of a thread's straddling block, see SLACK). The console boots in kid mode (PERF DIAG off,
+the default), where nothing periodic is formatted, printed or ringed (owner
+call 2026-09-30), so there is no frame that is allowed to allocate. The `perf`
+skill lists the idioms that allocate on a board while reading as free; a dozen
+of them were on this path at once.
 
 WHEN IT FAILS. Something on the frame path allocates again, and the per-frame
 deltas are printed. What names the LINE is a MicroPython whose gc_alloc and
@@ -331,12 +333,13 @@ DONE = _thread.allocate_lock()
 DONE.acquire()
 
 
-def _frames(loop, n, held):
+def _frames(loop, ms, held):
     import fake_machine
     fake_machine.KBD[0] = 0x02 if held else 0      # "w": the up button
     from gc import mem_alloc
     out = []
-    for _ in range(n):
+    t0 = time.ticks_ms()
+    while time.ticks_diff(time.ticks_ms(), t0) < ms:
         a = mem_alloc()
         loop.step()
         out.append(mem_alloc() - a)
@@ -371,9 +374,10 @@ def measure(loop):
         loop.step()
     gc.collect()
     gc.disable()
-    info["idle"] = _frames(loop, @FRAMES@, False)
-    _frames(loop, 5, True)               # the press edge itself may allocate
-    info["held"] = _frames(loop, @FRAMES@, True)
+    info["diag"] = bool(getattr(ws, "diag_live", False))
+    info["idle"] = _frames(loop, @WINDOW_MS@, False)
+    _frames(loop, 100, True)             # the press edge itself may allocate
+    info["held"] = _frames(loop, @WINDOW_MS@, True)
     gc.enable()
     print("RESULT " + json.dumps(info))
 
@@ -437,7 +441,9 @@ MANIFEST = {"format": "moy-1", "title": "Frame Probe", "runtime": "wasm",
             "main": "main.wasm", "memory": 16, "fps": "free",
             "input": ["buttons", "touch", "keyboard"]}
 
-FRAMES = 200
+# Each measured window, in ms: two PERF periods (2 s) and a T-Deck diag tick
+# (3 s) fall inside it.
+WINDOW_MS = 4500
 
 
 def _stage(dest, exe):
@@ -489,7 +495,7 @@ def _run(tmp_path):
     _stage(tmp_path, exe)
     script = tmp_path / "driver.py"
     script.write_text(DRIVER.replace("@ROOT@", repr(str(tmp_path)))
-                      .replace("@FRAMES@", str(FRAMES)))
+                      .replace("@WINDOW_MS@", str(WINDOW_MS)))
     out_path = tmp_path / "out.txt"
     # stdin stays OPEN and silent, as a board's serial does between commands:
     # the dev channel polls it every frame.
@@ -515,20 +521,26 @@ def result(tmp_path_factory):
     return _run(tmp_path_factory.mktemp("frame_alloc"))
 
 
+# What a window may net, in bytes. Not zero: the input poller is a thread, and
+# a call of its that spills its frame to the heap can straddle two readings --
+# the block lands in one window and its free in the next. Garbage is what never
+# comes back, and a per-frame allocation of even one block nets 16 bytes a
+# frame, hundreds of frames a window.
+SLACK = 256
+
+
 def _assert_quiet(deltas, what, text):
-    zero = sum(1 for d in deltas if d == 0)
-    ordered = sorted(deltas)
-    # Periodic diagnostics (a PERF line, a diag tick) land in the odd frame;
-    # everything else must be zero, frame after frame.
-    assert ordered[len(ordered) // 2] == 0 and zero >= 0.9 * len(deltas), (
-        "%s: %d of %d frames allocated (median %d bytes); per frame: %s\n%s"
-        % (what, len(deltas) - zero, len(deltas), ordered[len(ordered) // 2],
-           deltas, text[-3000:]))
+    assert len(deltas) > 20, "%s: only %d frames measured" % (what, len(deltas))
+    spent = [d for d in deltas if d]
+    assert sum(deltas) < SLACK, (
+        "%s: %d bytes over %d frames; the frames that moved: %s\n%s"
+        % (what, sum(deltas), len(deltas), spent[:40], text[-3000:]))
 
 
 def test_the_compiled_cart_is_the_run_being_measured(result):
     info, text = result
     assert info["title"] == "Frame Probe", text[-3000:]
+    assert info["diag"] is False, "not kid mode: PERF DIAG is on"
     assert info["error"] == "None" and info["top"] == "desktop", text[-3000:]
     # The T-Deck shows a compiled cart's frame from the cart's memory, so the
     # hand-off (CartFrame -> present_frame -> the fold) is on the path.

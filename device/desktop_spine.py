@@ -331,8 +331,8 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     pump = FramePump(boot, ota, fps_cap)
     if serial_ch is not None:
         serial_ch.env["pump"] = pump
-    # The METERS follow Settings -> PERF DIAG (#68 kid mode); the sampler
-    # re-syncs it live. The PERF line itself is unconditional.
+    # The METERS and the PERF line both follow Settings -> PERF DIAG (#68 kid
+    # mode); the sampler re-syncs them live.
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
     perf = PerfSampler(ws, overlap=overlap, emit=perf_emit)
 

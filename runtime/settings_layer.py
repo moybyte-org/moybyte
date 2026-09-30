@@ -136,13 +136,15 @@ SETTINGS_TOGGLES = (
     # -- which is what prompted the off switch. Purely cosmetic: the perf
     # fields keep updating and PERF DIAG is untouched.
     ("show_fps", "SHOW FPS", True, "set_show_fps", None, None),
-    # PERF DIAG (#68 "kid mode" gate): OFF (the kid default) skips the diag
-    # costs a player can FEEL on device -- the 30s forced GC sample
-    # (~130-230ms) and the periodic diag->SD write (~115ms) -- and hushes the
-    # live serial echo. The RAM ring still collects (us-cheap) and still
-    # flushes on crash / cart exit, so "play -> crash -> read diag.log" works
-    # either way. run_desktop reads ws.diag_live each cycle, so a flip lands
-    # within a frame. Host: measurement-only, nothing to gate.
+    # PERF DIAG (#68 "kid mode" gate): OFF (the kid default) writes nothing
+    # periodic on any board -- no PERF line, no T-Deck diag tick, no audio
+    # rate lines, no deep capture meters, no periodic diag->SD write -- because
+    # a player FEELS each of them on device, the lines as garbage the collector
+    # stops the frame for (owner call 2026-09-30). The RAM ring still collects
+    # EVENTS (boot, errors, hitches) and flushes on crash / cart exit, so "play
+    # -> crash -> read diag.log" works either way. The board loop reads
+    # ws.diag_live each cycle, so a flip lands within a frame; a tool that
+    # reads PERF turns it on and puts it back. Host: nothing to gate.
     ("diag_live", "PERF DIAG", False, "set_diag_live", None, None),
     # DIAG SD LOG (#68 follow-up, owner call 2026-07-08): the periodic
     # diag->SD write is its OWN gate -- PERF DIAG ON + this OFF = serial-only

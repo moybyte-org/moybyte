@@ -78,7 +78,9 @@ POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
 # interrogate once the desktop owns the loop, so the trace IS the diagnostic.
 # It fires per store session -- a commit, a cover load, and every `read` a
 # running compiled cart makes, which for a cart streaming its data file is
-# several a second; the lines cost a fraction of a millisecond each.
+# several a second -- so it is PERF DIAG's like every other line that repeats
+# (owner call 2026-09-30): kid mode prints none of it. Chasing a wedge, turn
+# the diag on (`diag 1`) before the op.
 SD_TRACE = True
 
 # WHERE THE STORE LIVES WHEN THERE IS NO CARD. This board's carts normally live
@@ -118,13 +120,16 @@ class _Storage:
       "SD < op"   -- the NEXT PANEL FLUSH, i.e. the shared-bus corruption;
                      "SD = panel ok" (the frame tail) is what says it did not
                      happen.
-    Costs nothing when quiet: SD sessions happen on commits, not per frame.
+    It prints only under PERF DIAG (`ws`, handed over once the console
+    exists): a compiled cart streaming its data file opens several sessions a
+    second.
     """
 
     def __init__(self, comp):
         self._comp = comp
         self.on_sd = False      # did the card take the store this boot
         self.traced = False     # a traced session awaits its "panel ok"
+        self.ws = None          # the console, whose diag_live gates the trace
 
     def _bracketed(self, fn, trace=False):
         # Allocation-free on purpose: a compiled cart streaming its data file
@@ -170,7 +175,8 @@ class _Storage:
         routing it through the bracket would fail every write."""
         if not self.on_sd:
             return fn()
-        return self._bracketed(fn, SD_TRACE)
+        return self._bracketed(fn, SD_TRACE and bool(
+            getattr(self.ws, "diag_live", False)))
 
 
 def run_desktop(fps_cap=60):
@@ -257,6 +263,7 @@ def run_desktop(fps_cap=60):
     def _before_slim(_ws):
         # Set BEFORE slim_carts so the store can reload what the diet drops.
         _ws._with_sd = store.session
+        store.ws = _ws
 
     def _after_services(ws):
         _diag_log("boot", "desktop running kb=%d ball=%d touch=%d poller=%d"
@@ -456,10 +463,11 @@ def run_desktop(fps_cap=60):
             # The PERF sample rides the shared FrameLoop.account hook with the
             # other boards (#206 item 2), on their 2s cadence.
             #
-            # DRAWBRK/BATCH and DRAW2 are CAPTURE meters: the phase EMAs and
-            # the per-op timers they print are written only under PERF DIAG, so
-            # in kid mode they would ring a frozen number -- and a string the
-            # collector has to come back for -- every three seconds.
+            # Every line this tick writes is PERF DIAG's (owner call
+            # 2026-09-30): in kid mode nothing periodic is formatted, printed or
+            # ringed, because each is garbage the collector stops the frame
+            # for. The window still closes every tick, so the first LOOP line
+            # after the diag comes on is three seconds of its own.
             if _live:
                 _diag_drawbrk(diag, ws)
                 # DRAWBRK says how much of the frame is `render`; this says
@@ -469,20 +477,21 @@ def run_desktop(fps_cap=60):
                 # colour `background()` costs -- a 153,600 B PSRAM write, Brick
                 # Siege's whole `bg=`).
                 _diag_draw2(diag, ws)
-            _diag_loop(diag, ws, _acc)
+                _diag_loop(diag, ws, _acc)
+                # #66 lever 4: the bounce-feed pacing of the flush overlap --
+                # the ONE line that says whether a disappointing fps is the bus
+                # or the feeder. Prints nothing unless comp.bounce_flush, so a
+                # serialized build is silent rather than lying.
+                _diag_pump(diag, comp)
+                _diag_i2cstat(diag, keyboard, touch)
+                # The web console's SOCKET state: "serving but nobody
+                # connected" and "never started" look identical from the
+                # outside without it.
+                _diag_webhost(diag, ws)
+                if serial is not None:
+                    serial.report(diag)
             for _i in range(12):
                 _acc[_i] = 0
-            # #66 lever 4: the bounce-feed pacing of the flush overlap -- the ONE
-            # line that says whether a disappointing fps is the bus or the feeder.
-            # Prints nothing unless comp.bounce_flush, so a serialized build is
-            # silent rather than lying.
-            _diag_pump(diag, comp)
-            _diag_i2cstat(diag, keyboard, touch)
-            # The web console's SOCKET state: "serving but nobody connected" and
-            # "never started" look identical from the outside without it.
-            _diag_webhost(diag, ws)
-            if serial is not None:
-                serial.report(diag)
             _t["diag"] = _ticks_diff(_ticks_ms(), _tnow)
 
         # #68 kid mode: the periodic diag->SD write costs 80-120ms and IS a

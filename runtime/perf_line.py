@@ -1,9 +1,11 @@
 """The PERF line: ONE format, ONE field order, every board (#206 item 2).
 
-WHAT THIS IS. Every ~2s each board puts one line on serial naming what its
-frame cost. `tools/p4_perf.py` turns those into #66's per-cart numbers and
-`tools/p4_cart_bench.py` rides the same channel, so the line is a CONTRACT --
-and until 2026-08-28 it was three contracts wearing one name:
+WHAT THIS IS. Every ~2s while Settings -> PERF DIAG is on, each board puts one
+line on serial naming what its frame cost; with it off (kid mode, the default)
+there is no line at all, and whatever reads one turns the diag on for its
+measurement and puts it back (`device_boot.PerfSampler` says why).
+`tools/p4_perf.py` turns those lines into #66's per-cart numbers, so the line
+is a CONTRACT -- and until 2026-08-28 it was three contracts wearing one name:
 
     T-Deck   Moybyte <ms> PERF cart=<n> fps=<n> net=<t|-> flush=<ms> draw=<ms>
     P4       PERF fps=<d>/<n> net=<t|-> busy=<n>ms draw= ... cart=<n>
@@ -72,8 +74,8 @@ _NAMES = tuple(n for n, _s, _u in FIELDS)
 
 # What format_perf walks: each field's ` name=` head and its conversions, cut
 # once here. The line is built from these pieces and joined once, because a
-# board prints it every two seconds for as long as it is on, and every
-# intermediate string is garbage the collector has to come back for.
+# board under PERF DIAG prints it every two seconds, and every intermediate
+# string is garbage the collector has to come back for.
 _PARTS = tuple((n, " " + n + "=", s, tuple(s.split("/"))) for n, s, _u in FIELDS)
 
 FAILED = "PERF sample failed: %s: %s"

@@ -638,7 +638,8 @@ class DevChannel:
                       feed: press edge, held interpolation, real release
       drag [frames] [step]         grab the TOP window's title strip and
                       oscillate it (windowed tier; declines with no window)
-      diag 0|1        the diagnostic frame-eaters (perf_capture + the FPS chip)
+      diag 0|1        PERF DIAG: the frame-eaters (perf_capture + the FPS chip)
+                      and every periodic line, PERF included
       steady 0|1      the tick model's STEADY / FREE knob (#217)
       crisp 0|1       the #204 nearest-neighbour game composite
       unknown_sources 0|1   Settings -> UNKNOWN SOURCES: whether a compiled

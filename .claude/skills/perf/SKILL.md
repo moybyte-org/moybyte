@@ -27,9 +27,15 @@ cart it started, medians the drawn fps (a GC spike lands in one sample), ends
 the cart and puts diag and uncap back. It prints the conditions; keep them
 equal across an A/B:
 
-- **PERF DIAG** is off by default (kid mode, #68) and its meters are frame
-  eaters. `fps=` is valid either way; the phase ms need `--diag`. Say which.
-  DIAG SD LOG stays off for serial measurement (it stutters).
+- **PERF DIAG** is off by default (kid mode, #68), and with it off a board
+  writes NO periodic line -- no PERF, no diag tick, no AUDIORATE, no SD trace
+  (owner call 2026-09-30: every line is garbage the collector stops the frame
+  for). So every PERF reading is taken with the diag on: `perf`, `p4_perf.py`
+  and the on-glass helpers (`tests/on_glass.py`'s `perf_diag`) arm it and put
+  it back, and its capture meters are frame eaters that ride along -- a number
+  taken before 2026-09-30 with the diag off is not the same condition.
+  `--diag` adds the phase ms. DIAG SD LOG stays off for serial measurement (it
+  stutters).
 - **WiFi off** — the radio is a lease; `wifi_held` in `state` names holders.
 - **LINKED** means a second console in the same two-player cart made it a real
   ESP-NOW match on the shared tick (#65): move the peer and re-measure.
@@ -47,7 +53,7 @@ the best remaining lever is a few hundred µs a frame.
 
 | question | meter |
 |---|---|
-| fps and the frame split | `PERF` (`runtime/perf_line.py`, every board, ~2 s) |
+| fps and the frame split | `PERF` (`runtime/perf_line.py`, every board, ~2 s, under PERF DIAG) |
 | the S3 panel pump, draw batches, loop hitches | `device_diag`'s `DRAWBRK`/`BATCH`/`DRAW2`/`LOOP`/`PUMP`/`I2CSTAT`/`WEBHOST`/`HITCH` — staged on the T-Deck alone (each board.toml says why); elsewhere `state`'s `pump`/`fold`/`ppa`/`stages` read the same C meters |
 | instructions or memory? | `PERFCNT`: `perfcnt on [event]`, then `perfcnt` — retired instructions per cycle over update and draw (`runtime/dev_channel.py`; the strategy doc argues its readings) |
 | a Lua/p8 cart's draw | `VERBS`: `verbs on`, then `verbs` — per-frame calls and ms per verb. The canvas meters read zero on a Lua cart: it draws through libmoy's C verbs (`native/moycore/README.md`) |
@@ -88,8 +94,8 @@ at install so an unarmed frame carries no wrapper.
   the frame and a compiled cart's sound with it -- so the lever is how often
   one comes, which is the console's own garbage rate: the loop, inputs, dev
   channel, Player, glue and compositor hand-off allocate zero bytes a frame,
-  and what is left is the periodic diag text (PERF, the T-Deck's diag tick,
-  AUDIORATE). `tests/test_frame_alloc.py` pins it on the desktop MicroPython
+  and the periodic diag text is written only under PERF DIAG.
+  `tests/test_frame_alloc.py` pins it on the desktop MicroPython
   built in the boards' object model (32-bit, REPR_C). What allocates on a
   board and reads as free: set arithmetic, a `getattr` that finds a method (a
   bound method), a tuple returned to be unpacked, `str()` of a str (a copy), a
