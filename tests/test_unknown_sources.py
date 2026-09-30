@@ -242,30 +242,58 @@ def _hello_store(tmp_path):
     return root
 
 
-def test_an_unsigned_cart_opens_the_notice_that_names_the_switch(tmp_path):
+class _Interp:
+    """A successful wasm run that landed on the interpreter -- what
+    device/moycore_glue.WasmRun looks like once its own retry took over for
+    an unsigned module (the switch off) or a stale/foreign one
+    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+    2026-09-30). Neither case reaches the Player as a failure any more; both
+    look like this from here, a plain successful run with `.interp` set."""
+
+    def __init__(self, ns, src):
+        del ns, src
+        self.interp = True
+        self.init = None
+        self.draw_next = True
+
+    def update(self, dt):
+        del dt
+
+    def draw(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_an_unsigned_cart_plays_on_the_interpreter_with_a_toast(tmp_path):
+    """With the switch off an unsigned module is not refused: WasmRun
+    already retried it on the interpreter before the Player ever saw an
+    error, so the cart plays -- no notice panel, no error -- and the Player
+    arms the short toast that says it is running unoptimized. This retired
+    the "Not signed." panel (`43581ed4` introduced it for exactly this case,
+    hours before this decision)."""
     from runtime import bar_layer, player
     from runtime.dev_channel import _remote_state
     from ws_helpers import open_cart
     ws = host_app.build_workstation(_hello_store(tmp_path))
-    ws.runtimes["wasm"] = _Refusing("refused: unsigned module")
+    ws.runtimes["wasm"] = _Interp
     open_cart(ws, "Hello Wasm")
     p = ws.player
-    assert p.notice == ("Hello Wasm isn't signed. To run it, turn on Unknown "
-                        "sources in Settings."), p.notice
-    assert p._notice_title == player.UNSIGNED_TITLE == "Not signed."
-    assert p._lua is None and not ws.wm.top_is("menu")
+    assert p.notice is None and p.cart_error is None
+    assert p._lua is not None and p._lua.interp
+    assert not ws.wm.top_is("menu")
     st = _remote_state(ws)
-    assert st["notice"] == p.notice and st["cart_error"] is None
+    assert st["notice"] is None and st["cart_error"] is None
     assert bar_layer._edit_kind(ws.cart) is None
-    host_app.ConsoleDriver(ws).frame(DT)
-    cv = ws.canvas
-    x = (cv.w - min(292, cv.w - 12)) // 2
-    y = min(40, (cv.h - min(132, cv.h - 16)) // 2)
-    at = 2 * (cv._stride * (y + 1) + x + 1)
-    assert (cv._buf[at] | cv._buf[at + 1] << 8) == cv._wire[p.NAMES["orange"]]
+    assert ws._notice == (player.INTERP_NOTICE_TITLE, player.INTERP_NOTICE_SUB, "warn")
+    assert ws.notice_active()
 
 
 def test_a_module_whose_signature_fails_keeps_the_error_panel(tmp_path):
+    """Tamper evidence is the one refusal WasmRun never retries -- it is
+    the engine's own decision, made before the Player is asked anything --
+    so from here it is still an ordinary failed run."""
     from ws_helpers import open_cart
     ws = host_app.build_workstation(_hello_store(tmp_path))
     for text in ("refused: bad signature", "refused: malformed signature"):
@@ -274,15 +302,3 @@ def test_a_module_whose_signature_fails_keeps_the_error_panel(tmp_path):
         assert ws.player.notice is None
         assert ws.player.cart_error.endswith(text)
         ws._exit_to_caller()
-
-
-def test_a_module_built_for_another_runtime_opens_the_update_notice(tmp_path):
-    from ws_helpers import open_cart
-    ws = host_app.build_workstation(_hello_store(tmp_path))
-    ws.runtimes["wasm"] = _Refusing(
-        "refused: key mismatch 'fork 0000' (this build: 'fork 1111')")
-    open_cart(ws, "Hello Wasm")
-    assert ws.player.notice == ("Hello Wasm was built for another version of "
-                                "this console. Install an updated copy to "
-                                "play it.")
-    assert ws.player.cart_error == ws.player.notice

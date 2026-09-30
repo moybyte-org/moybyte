@@ -1,0 +1,26 @@
+{
+  "_comment": "GENERATED-BY-HAND, not by tools/vendor_wamr.py. `covers` names every file whose bytes are part of MOY_WASM_FORMAT_VERSION's meaning -- the vendored AOT loader and runtime ABI, never the interpreter or the compiler's sources, which a module never depends on -- plus `compilers`, the wamrc pins in tools/wasm_module.py's COMPILERS that this format's modules were built with. `stamp` is tools/wasm_module.py's format_stamp() over both, in this order. Bump MOY_WASM_FORMAT_VERSION in moy_wasm_key.h and re-run `python3 tools/wasm_module.py format-stamp --write` (or hand-edit `stamp`) in the SAME commit that changes any of this -- that is what tests/test_wasm_format_version.py checks for. See moy_wasm_key.h's 'WHY A FORMAT VERSION' comment and docs/wasm_tier_plan_2026-09.md's 'A cart survives its firmware' (2026-09-30).",
+  "covers": [
+    "native/moy_wasm/wamr/core/config.h",
+    "native/moy_wasm/wamr/core/version.h",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_intrinsic.c",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_intrinsic.h",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_loader.c",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_reloc.h",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.c",
+    "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.h",
+    "native/moy_wasm/wamr/core/iwasm/aot/arch/aot_reloc_riscv.c",
+    "native/moy_wasm/wamr/core/iwasm/aot/arch/aot_reloc_xtensa.c",
+    "native/moy_wasm/wamr/core/iwasm/common/arch/invokeNative_riscv.S",
+    "native/moy_wasm/wamr/core/iwasm/common/arch/invokeNative_xtensa.s",
+    "native/moy_wasm/wamr/core/iwasm/common/wasm_memory.c",
+    "native/moy_wasm/wamr/core/iwasm/common/wasm_memory.h",
+    "native/moy_wasm/wamr/core/iwasm/common/wasm_runtime_common.c",
+    "native/moy_wasm/wamr/core/iwasm/common/wasm_runtime_common.h"
+  ],
+  "compilers": [
+    "riscv32",
+    "xtensa"
+  ],
+  "stamp": "abd8009725e56724aeca12957f742bf3618714c03b7e6055eb4f1e8994d67eee"
+}

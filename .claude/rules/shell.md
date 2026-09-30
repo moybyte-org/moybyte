@@ -107,9 +107,12 @@ to whoever called it.
   A compiled cart the console has no room for opens that same panel as a
   NOTICE, never an error: the Player compares the cart's load footprint with
   what the runtime reports free before anything loads, and a load that runs
-  out anyway maps to the same notice (`native/moy_wasm/README.md`). So does a
-  cart whose module is unsigned while Settings -> UNKNOWN SOURCES is off, under
-  its own title; a module whose signature fails stays an error.
+  out anyway maps to the same notice (`native/moy_wasm/README.md`). A cart
+  with no module for this console, one built for another chip or format, or
+  one whose module is unsigned while Settings -> UNKNOWN SOURCES is off is
+  never refused either (2026-09-30, "A cart survives its firmware"): it plays
+  on the interpreter instead, with a short toast, never a panel. Only tamper
+  evidence -- a signature present but not verifying -- still stays an error.
   `docs/moycore_direction.md` is the direction doc and `native/moycore/` the
   implementation; the decisions and traps:
   - **There is exactly ONE Lua runtime and no chooser.** The old trampoline engine

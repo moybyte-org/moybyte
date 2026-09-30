@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Re-vendor the AOT-only WAMR runtime from Moybyte's fork into native/moy_wasm.
+"""Re-vendor the WAMR runtime from Moybyte's fork into native/moy_wasm.
 
     make vendor-wamr                                  # the fork clone's HEAD
     make vendor-wamr WAMR=/path/to/clone COMMIT=<sha>
@@ -7,11 +7,12 @@
 
 The runtime the boards compile is moybyte-org/wasm-micro-runtime, branch
 moybyte-2.4.5 (docs/wasm_tier_plan_2026-09.md: "WAMR is carried as a fork,
-pinned by hash"). This copies the subset an AOT-only engine needs -- the AOT
-loader and runtime, the common layer, the esp-idf platform, the allocator and
-the utilities -- and none of the interpreter, the compiler, WASI, the builtin
-libc, the tests or the samples. The interpreter and compiler HEADERS that the
-AOT code includes for shared types do come across; their sources do not.
+pinned by hash"). This copies the subset the engine needs -- the AOT loader
+and runtime, the interpreter tier (both of WAMR's interpreters and the plain
+.wasm loader, landed 2026-09-30), the common layer, the esp-idf platform, the
+allocator and the utilities -- and none of the compiler, WASI, the builtin
+libc, the mini loader, the tests or the samples. The compilation-tier HEADERS
+the AOT code includes for shared types come across; its sources do not.
 
 Files are read from the clone's GIT OBJECTS at one commit (`git show
 <commit>:<path>`), never from its working tree, so a stamp names exactly the
@@ -85,14 +86,26 @@ FILES = [
     "core/iwasm/common/wasm_shared_memory.c",
     "core/iwasm/common/wasm_shared_memory.h",
     "core/iwasm/common/wasm_suspend_flags.h",
-    # headers the AOT code includes for types it shares with the compiler and
-    # the interpreter -- headers only, no sources
+    # headers the AOT code includes for types it shares with the compiler --
+    # headers only, no sources
     "core/iwasm/compilation/aot.h",
     "core/iwasm/compilation/aot_stack_frame.h",
+    # the interpreter tier (docs/wasm_tier_plan_2026-09.md, "A cart survives
+    # its firmware", 2026-09-30): the loader for plain .wasm bytecode and both
+    # of WAMR's interpreters, so a board picks classic or fast by #158's
+    # measurement the same way it already picks its reloc arch -- one file
+    # compiled, one left on disk unused (micropython.cmake's
+    # MOY_WASM_FAST_INTERP). No mini loader: WASM_ENABLE_MINI_LOADER stays 0,
+    # the same decision the AOT build already made for the loader's full
+    # validation.
     "core/iwasm/interpreter/wasm.h",
     "core/iwasm/interpreter/wasm_interp.h",
+    "core/iwasm/interpreter/wasm_interp_classic.c",
+    "core/iwasm/interpreter/wasm_interp_fast.c",
+    "core/iwasm/interpreter/wasm_loader.c",
     "core/iwasm/interpreter/wasm_loader.h",
     "core/iwasm/interpreter/wasm_opcode.h",
+    "core/iwasm/interpreter/wasm_runtime.c",
     "core/iwasm/interpreter/wasm_runtime.h",
     # the allocator
     "core/shared/mem-alloc/ems/ems_alloc.c",

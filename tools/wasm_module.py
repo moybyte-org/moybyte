@@ -10,9 +10,10 @@
     python3 tools/wasm_module.py verify cart_s3.aot --chip esp32s3
 
 A per-architecture module is native code, so a board runs one only if its
-provenance key says which wasm it came from, which runtime fork it was
-compiled for and with which compiler flags (docs/wasm_tier_plan_2026-09.md,
-native/moy_wasm/README.md). This tool is the one place a key is written:
+provenance key says which wasm it came from, which COMPILED-CODE FORMAT
+VERSION it was built against and with which compiler flags
+(docs/wasm_tier_plan_2026-09.md, native/moy_wasm/README.md). This tool is the
+one place a key is written:
 
   1. hash the canonical .wasm (the key's `wasm` line);
   2. append the key to a copy as the custom section `moybyte.key`;
@@ -21,10 +22,17 @@ native/moy_wasm/README.md). This tool is the one place a key is written:
 
 The flags are not written here. They are the chip's block in
 native/moy_wasm/moy_wasm_key.h -- the same text the board's check compares
-against -- and the fork commit is native/moy_wasm/wamr_vendor.json's, the
-runtime the board was built with. A module this tool builds therefore carries
-the key the board wants by construction, and a module anything else builds is
-refused.
+against -- and the format version is that header's `MOY_WASM_FORMAT_VERSION`.
+A module this tool builds therefore carries the key the board wants by
+construction, and a module anything else builds is refused.
+
+A module's key no longer names the fork commit (owner, 2026-09-30, ESP 88):
+`native/moy_wasm/wasm_format_version.json` names the vendored files and the
+compiler pins that make up the format, and `format_stamp()` below hashes them
+the same way `tests/test_wasm_format_version.py` does, so a change to any of
+them fails that test unless MOY_WASM_FORMAT_VERSION moves with it. A board a
+cart's module does not match by chip+format is simply absent to it -- it
+plays on the interpreter instead of refusing (native/moy_wasm/README.md).
 
 EVERY MODULE IS SIGNED, the way an OTA manifest is: RSA, PKCS#1 v1.5, SHA-256,
 with the OTA signing key (`tools/ota_sign.py`: $MOYBYTE_OTA_SIGNING_KEY, a PEM
@@ -76,6 +84,7 @@ import ota_sign  # noqa: E402
 KEY_HEADER = os.path.join(ROOT, "native", "moy_wasm", "moy_wasm_key.h")
 MOY_OTA = os.path.join(ROOT, "device", "moy_ota.py")
 VENDOR_STAMP = os.path.join(ROOT, "native", "moy_wasm", "wamr_vendor.json")
+FORMAT_STAMP = os.path.join(ROOT, "native", "moy_wasm", "wasm_format_version.json")
 SPIKE = os.path.join(ROOT, "experiments", "wasm_aot")
 DIST = os.path.join(SPIKE, "toolchain", "dist")
 HELLO_SRC = os.path.join(SPIKE, "core6502.c")
@@ -124,8 +133,38 @@ def targets(header=KEY_HEADER):
 
 
 def fork_commit(stamp=VENDOR_STAMP):
+    """The fork commit the vendored runtime was copied from -- diagnostic only
+    (`moy_wasm.FORK`) since 2026-09-30: it plays no part in the key (ESP 88,
+    "A cart survives its firmware")."""
     with open(stamp, encoding="utf-8") as f:
         return json.load(f)["upstream"]["commit"]
+
+
+def format_version(header=KEY_HEADER):
+    """This tree's compiled-code format version, MOY_WASM_FORMAT_VERSION in
+    moy_wasm_key.h -- what the key's `format` line names."""
+    return _define("MOY_WASM_FORMAT_VERSION", header)
+
+
+def format_stamp(stamp=FORMAT_STAMP):
+    """The sha256 that `format_version()` is supposed to cover: every file
+    wasm_format_version.json's `covers` names (path then bytes, in order) plus
+    each `compilers` target's pinned sha256 from COMPILERS above, in that
+    order. `tests/test_wasm_format_version.py` fails when this differs from
+    the stamp recorded in the file, which is the guard the build step asks
+    for: a change to the AOT loader/runtime ABI or the pinned compiler that
+    does not also move MOY_WASM_FORMAT_VERSION (and re-record this stamp)."""
+    with open(stamp, encoding="utf-8") as f:
+        spec = json.load(f)
+    h = hashlib.sha256()
+    for rel in spec["covers"]:
+        h.update(rel.encode())
+        with open(os.path.join(ROOT, rel), "rb") as f:
+            h.update(f.read())
+    for target in spec["compilers"]:
+        h.update(target.encode())
+        h.update(COMPILERS[target]["sha256"].encode())
+    return h.hexdigest()
 
 
 def fields(chip, override=None):
@@ -144,22 +183,24 @@ def fields(chip, override=None):
     return out
 
 
-def key_tail(chip, fork=None, override=None):
-    """Everything after the key's wasm line, exactly as the board compares it."""
-    lines = ["fork %s" % (fork or fork_commit())]
+def key_tail(chip, format=None, override=None):
+    """Everything after the key's wasm line, exactly as the board compares it.
+    `format` is a compiled-code format version to write instead of this
+    tree's own (a module the board must refuse, like `override`)."""
+    lines = ["format %s" % (format or format_version())]
     lines += ["%s %s" % kv for kv in fields(chip, override)]
     return "\n".join(lines) + "\n"
 
 
-def key_text(wasm, chip, fork=None, override=None):
+def key_text(wasm, chip, format=None, override=None):
     return (KEY_MAGIC + "wasm %s\n" % hashlib.sha256(wasm).hexdigest()
-            + key_tail(chip, fork, override))
+            + key_tail(chip, format, override))
 
 
 def key_matches(data, wasm, chip):
     """True when the module file `data` carries exactly the key a board of
     `chip` built from this tree wants for `wasm`: that .wasm's hash, this
-    runtime fork and this chip's compiler flags."""
+    tree's compiled-code format version and this chip's compiler flags."""
     return key_text(wasm, chip).encode() in data
 
 
@@ -367,15 +408,16 @@ def compiler(target, fetch=True):
 # -- building -------------------------------------------------------------------
 
 
-def build(wasm, chip, out, key=True, fork=None, override=None, sign_with=None,
+def build(wasm, chip, out, key=True, format=None, override=None, sign_with=None,
           signed=True):
     """Compile `wasm` (bytes) for `chip` into `out`, signed with `sign_with`
     (sign()'s `key`; default signing_key()). Returns the key text.
 
-    `fork` and `override` build a module this tree's boards must REFUSE: a key
-    naming another runtime, or flags (and a key saying so) the board's build
-    does not want. `signed=False` leaves the signature off: a module a board
-    runs only while its owner has Unknown sources on."""
+    `format` and `override` build a module this tree's boards must REFUSE: a
+    key naming another compiled-code format version, or flags (and a key
+    saying so) the board's build does not want. `signed=False` leaves the
+    signature off: a module a board runs only while its owner has Unknown
+    sources on."""
     pem = None
     if signed:
         pem = sign_with or signing_key()
@@ -385,7 +427,7 @@ def build(wasm, chip, out, key=True, fork=None, override=None, sign_with=None,
                             "--unsigned, a module a board runs only with "
                             "Unknown sources on" % ota_sign.ENV_KEY)
     target = dict(fields(chip, override))["target"]
-    text = key_text(wasm, chip, fork, override)
+    text = key_text(wasm, chip, format, override)
     src = with_custom_section(wasm, KEY_SECTION, text.encode()) if key else wasm
     with tempfile.TemporaryDirectory() as tmp:
         wpath = os.path.join(tmp, "in.wasm")
@@ -468,8 +510,8 @@ def main(argv):
         p.add_argument("-o", "--out", required=True)
         p.add_argument("--no-key", action="store_true",
                        help="leave the key out (a module the board must refuse)")
-        p.add_argument("--fork", help="write another fork commit into the key "
-                       "(a module the board must refuse)")
+        p.add_argument("--format", help="write another compiled-code format "
+                       "version into the key (a module the board must refuse)")
         p.add_argument("--field", action="append", default=[], metavar="NAME=VALUE",
                        help="build with another value for a key field, e.g. "
                        "size=3 (a module the board must refuse); repeatable")
@@ -487,10 +529,29 @@ def main(argv):
     v.add_argument("--unknown-sources", action="store_true",
                    help="answer as a board with Unknown sources on")
     sub.add_parser("compilers", help="locate and verify the pinned compilers")
+    fs = sub.add_parser("format-stamp", help="print or refresh the compiled-code "
+                        "format version's stamp (wasm_format_version.json)")
+    fs.add_argument("--write", action="store_true",
+                    help="rewrite wasm_format_version.json's stamp in place")
     args = ap.parse_args(argv)
     try:
         if args.cmd == "key":
             sys.stdout.write(key_tail(args.chip))
+            return 0
+        if args.cmd == "format-stamp":
+            got = format_stamp()
+            if args.write:
+                with open(FORMAT_STAMP, encoding="utf-8") as f:
+                    spec = json.load(f)
+                spec["stamp"] = got
+                with open(FORMAT_STAMP, "w", encoding="utf-8", newline="\n") as f:
+                    json.dump(spec, f, indent=2)
+                    f.write("\n")
+                print("%s: wrote stamp %s (MOY_WASM_FORMAT_VERSION %s -- bump "
+                      "it too if this is an ABI change)"
+                      % (FORMAT_STAMP, got[:16], format_version()))
+            else:
+                print(got)
             return 0
         if args.cmd == "verify":
             with open(args.aot, "rb") as f:
@@ -509,7 +570,7 @@ def main(argv):
         override = dict(f.split("=", 1) for f in args.field)
         pem = signing_key(args.signing_key) if args.signing_key else None
         text = build(wasm, args.chip, args.out, key=not args.no_key,
-                     fork=args.fork, override=override, sign_with=pem,
+                     format=args.format, override=override, sign_with=pem,
                      signed=not args.unsigned)
         print("%s: %d bytes%s" % (args.out, os.path.getsize(args.out),
                                   "" if text is None else ", wasm %s"

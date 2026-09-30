@@ -1,12 +1,14 @@
 """tools/wasm_module.py writes the provenance key the board's check wants.
 
 The board side (native/moy_wasm/modmoy_wasm.c) compares a module's
-`moybyte.key` section against "fork <commit>" plus its chip's block in
-moy_wasm_key.h, byte for byte. The tool derives the same text and the wamrc
-flags from that header and from the vendored fork commit, so the two cannot
-disagree by construction; these tests pin the derivation. The on-glass suites
-compare the tool's key against the one a live board reports (`moy_wasm.KEY`),
-which is the end-to-end half.
+`moybyte.key` section against "format <MOY_WASM_FORMAT_VERSION>" plus its
+chip's block in moy_wasm_key.h, byte for byte (owner, 2026-09-30, ESP 88: the
+key stopped naming the fork commit, which moved on every re-vendor for
+reasons that did not touch what an installed module needs from the runtime it
+loads into). The tool derives the same text and the wamrc flags from that
+header, so the two cannot disagree by construction; these tests pin the
+derivation. The on-glass suites compare the tool's key against the one a live
+board reports (`moy_wasm.KEY`), which is the end-to-end half.
 """
 
 import os
@@ -35,13 +37,23 @@ def test_the_s3_block_keeps_the_large_code_model():
     assert dict(wm.targets()["esp32s3"])["size"] == "0"
 
 
-def test_the_key_names_the_vendored_fork():
+def test_the_key_names_this_trees_format_version_not_the_fork():
+    fmt = wm.format_version()
+    header = open(os.path.join(ROOT, "native", "moy_wasm", "moy_wasm_key.h")).read()
+    assert '#define MOY_WASM_FORMAT_VERSION "%s"' % fmt in header
+    tail = wm.key_tail("esp32s3")
+    assert tail.startswith("format %s\ntarget xtensa\n" % fmt)
+    assert tail.endswith("xip 0\n")
+    assert "fork" not in tail
+
+
+def test_the_fork_commit_is_still_read_for_diagnostics_only():
+    """FORK (moy_wasm.FORK) still reports which fork commit the engine was
+    vendored from -- useful, but no longer part of the key."""
     commit = wm.fork_commit()
     pin = open(os.path.join(ROOT, "native", "moy_wasm", "wamr_pin.h")).read()
     assert '"%s"' % commit in pin
-    tail = wm.key_tail("esp32s3")
-    assert tail.startswith("fork %s\ntarget xtensa\n" % commit)
-    assert tail.endswith("xip 0\n")
+    assert re.fullmatch(r"[0-9a-f]{40}", commit)
 
 
 def test_the_full_key_leads_with_the_magic_and_the_wasm_hash():
@@ -71,9 +83,9 @@ def test_an_override_changes_the_key_and_the_flags_together():
 
 def test_the_c_check_is_built_from_the_same_header():
     """Routing, not behaviour: the board's expected key is the header's chip
-    block after the fork line, which is what key_tail() writes."""
+    block after the format line, which is what key_tail() writes."""
     src = open(os.path.join(ROOT, "native", "moy_wasm", "modmoy_wasm.c")).read()
-    assert '"fork " MOY_WASM_FORK_COMMIT "\\n" KEY_TARGET' in src
+    assert '"format " MOY_WASM_FORMAT_VERSION "\\n" KEY_TARGET' in src
     for chip in wm.targets():
         assert "#define KEY_TARGET MOY_WASM_KEY_%s" % chip.upper() in src
 

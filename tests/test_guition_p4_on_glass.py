@@ -123,8 +123,16 @@ def test_a_compiled_carts_frames_are_written_into_the_canvas(board, wasm_carts):
     on_glass.compiled_frames_keep_the_blit(board, wasm_carts["blit"])
 
 
-def test_a_compiled_cart_without_this_chips_module_is_refused(board, wasm_carts):
-    on_glass.wasm_missing_module_is_refused(board, WASM_BOARD_DIR)
+def test_a_compiled_cart_with_no_module_runs_on_the_interpreter(board, wasm_carts):
+    on_glass.wasm_no_module_at_all_runs_on_the_interpreter(board, WASM_BOARD_DIR)
+
+
+def test_a_module_for_another_chip_runs_on_the_interpreter(board, wasm_carts):
+    on_glass.wasm_a_module_for_another_chip_runs_on_the_interpreter(board, WASM_BOARD_DIR)
+
+
+def test_a_stale_format_module_runs_on_the_interpreter(board, wasm_carts):
+    on_glass.wasm_stale_format_module_runs_on_the_interpreter(board, WASM_BOARD_DIR)
 
 
 def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_carts):

@@ -19,11 +19,21 @@ it is, so the Code tab has the source to show.
 that board's build wants and signed with the OTA signing key (that tool says
 where the key comes from). `--unsigned` leaves the signature off: a board runs
 such a module only while its owner has Settings -> UNKNOWN SOURCES on, which
-is how a cart rebuilt from its source runs on its builder's own console. How a board finds it is host policy, and it is one
-rule, `aot_name`: the manifest's `main` with `.wasm` replaced by
-`.<chip>.aot`, in the cart's folder -- `device/moycore_glue.py`'s `aot_path`
-states the same rule and `tests/test_wasm_cart.py` holds the two equal. A
-module compiled for another `main.wasm` is refused by its key's wasm hash.
+is how a cart rebuilt from its source runs on its builder's own console.
+
+A `.moy` carries `main.wasm` plus any number of these, one per chip and
+compiled-code format version it has been built for (SPEC.md 16: "a host may
+keep a compiled form of the module beside it"), so the cart stays portable off
+a console and nothing is ever evicted to make room for a fresh one -- each
+module just counts toward the cart's size. How a board finds ITS module is
+host policy, and it is one rule, `aot_name`: the manifest's `main` with
+`.wasm` replaced by `.<chip>.f<format>.aot`, in the cart's folder --
+`device/moycore_glue.py`'s `aot_path` states the same rule (reading the
+running engine's own chip and format, `_moy_wasm.CHIP`/`_moy_wasm.FORMAT`) and
+`tests/test_wasm_cart.py` holds the two equal. A module built for a format
+this console's engine has moved past is simply the wrong file name -- it is
+never opened, never refused, and the cart runs on the interpreter instead
+(native/moy_wasm/README.md, "A cart survives its firmware").
 """
 
 import argparse
@@ -41,10 +51,15 @@ from tools import wat  # noqa: E402
 SOURCE = os.path.join("src", "main.wat")
 
 
-def aot_name(main, chip):
-    """The compiled module's file name beside `main` for `chip`."""
+def aot_name(main, chip, format=None):
+    """The compiled module's file name beside `main` for `chip` and a
+    compiled-code format version (default: this tree's own,
+    tools.wasm_module.format_version())."""
+    if format is None:
+        from tools import wasm_module
+        format = wasm_module.format_version()
     stem = main[:-5] if main.endswith(".wasm") else main
-    return "%s.%s.aot" % (stem, chip)
+    return "%s.%s.f%s.aot" % (stem, chip, format)
 
 
 def manifest(cart):

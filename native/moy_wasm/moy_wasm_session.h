@@ -42,20 +42,27 @@ typedef struct {
 } moy_wasm_ops;
 
 // Open a session on the module file `path` (read through the VFS into
-// PSRAM and its signature checked, as moy_wasm.start reads its module; a
-// tampered module, or an unsigned one while `allow_unsigned` is 0, is refused
-// before the thread exists). `allow_unsigned` is the owner's Unknown sources
-// setting as the caller read it: non-zero lets a module with no signature
-// load, its provenance key still checked.
-// `want_sha` is the canonical .wasm's sha256 as 64 hex characters, which the
-// module's key must name, or NULL to take whatever wasm the key names.
+// PSRAM; a tampered AOT module, or an unsigned one while `allow_unsigned` is
+// 0, is refused before the thread exists). `allow_unsigned` is the owner's
+// Unknown sources setting as the caller read it: non-zero lets an AOT module
+// with no signature load, its provenance key still checked.
+// `want_sha` is the canonical .wasm's sha256 as 64 hex characters, which an
+// AOT module's key must name, or NULL to take whatever wasm the key names.
 // `memory` is the linear memory the manifest declares, in bytes: the file is
 // read into a block that size, which the linear memory takes back once the
 // load is done. Returns 0 with the cart bound, or non-zero with the refusal
 // in `err`; a file that cannot be read raises.
+//
+// `interp` is non-zero when `path` is a cart's own main.wasm, run on the
+// interpreter tier (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+// firmware", 2026-09-30): no moybyte.key section, no signature and no
+// Unknown sources check -- WAMR's bytecode validation is the sandbox, not
+// provenance -- and moy_wasm_session_lanes() reports 0 lanes for the
+// session's life, so a cart's par items run in declaration order instead of
+// across cores (the same fallback a board with MOY_WASM_ITEM_LANES 0 takes).
 int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memory,
-                          int allow_unsigned, const moy_wasm_ops *ops, char *err,
-                          size_t errlen);
+                          int allow_unsigned, int interp, const moy_wasm_ops *ops,
+                          char *err, size_t errlen);
 
 // Run ops->call(what, dt) on the session's thread and wait for it. 0, or
 // ops->call's non-zero return with its `err`.

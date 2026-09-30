@@ -451,13 +451,29 @@ class MoycoreRun:
 
 # -- the compiled cart (docs/wasm_tier_plan_2026-09.md, phase 3) ------------
 
-def aot_path(cart_dir, main, chip):
-    """Where a cart's compiled module for `chip` sits: its `main` with `.wasm`
-    replaced by `.<chip>.aot`, in the cart's folder. How a board finds the
+# The only two AOT refusals that are TAMPER EVIDENCE -- a module whose
+# signature bytes are present but do not verify -- and so stay a hard
+# refusal to the ordinary error panel. Every other reason an AOT open can
+# fail (no file by this console's name, unsigned while Unknown sources is
+# off, a corrupted key) means only that THIS console's copy of the module is
+# unusable, not that the cart is; WasmRun retries those on the interpreter
+# instead ("A cart survives its firmware", 2026-09-30).
+_AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature")
+
+
+def aot_path(cart_dir, main, chip, format):
+    """Where a cart's compiled module for `chip` and a compiled-code format
+    version sits: its `main` with `.wasm` replaced by `.<chip>.f<format>.aot`,
+    in the cart's folder. `format` is normally `_moy_wasm.FORMAT`, this
+    console's own. A cart may carry any number of these (one per chip and
+    format it has been built for, docs/wasm_tier_plan_2026-09.md, "A cart
+    survives its firmware") -- this names only the one THIS console would
+    take; a name that does not exist is not this console's, and the cart
+    plays on the interpreter instead of refusing. How a board finds the
     module is host policy (the plan); tools/wasm_cart.py's `aot_name` states
     the same rule and tests/test_wasm_cart.py holds the two equal."""
     stem = main[:-5] if main.endswith(".wasm") else main
-    return "%s/%s.%s.aot" % (cart_dir, stem, chip)
+    return "%s/%s.%s.f%s.aot" % (cart_dir, stem, chip, format)
 
 
 def wasm_head(path):
@@ -658,14 +674,24 @@ class WasmRun(MoycoreRun):
         pages = cart.get("memory")
         if not pages:
             raise RuntimeError('refused: the manifest declares no "memory"')
-        module = aot_path(path, main, _moy_wasm.CHIP)
+        # A module for THIS console (chip + compiled-code format version) is
+        # found by name, never opened to find out whether it matches
+        # (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+        # 2026-09-30): a stale or foreign one is simply the wrong file name,
+        # so it is absent to this console, same as no module at all, and the
+        # cart plays on the interpreter -- main.wasm itself, which needs
+        # neither key nor signature. `self.interp` is what the Player reads
+        # to show the short toast (never the blocking notice a missing or
+        # unsigned module used to get).
+        module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
+        has_module = True
         try:
             open(module, "rb").close()
         except OSError:
-            raise RuntimeError("no module compiled for this board (%s)"
-                               % module[len(path) + 1:])
+            has_module = False
         head = wasm_head(path + "/" + main)
         sha = _sha256_file(path + "/" + main)
+        self.interp = not has_module
         self.ws = ws
         self.ns = ns
         self._dt = 0.0
@@ -711,14 +737,31 @@ class WasmRun(MoycoreRun):
         # other store access does: on the T-Deck it drains the panel's flush
         # first, because the card shares the panel's SPI bus. The owner's
         # Unknown sources setting, as it stands at this load, decides whether
-        # a module with no signature may load; the engine checks everything
-        # else either way. The engine raises MemoryError when it cannot hold
-        # the module file, and a run left open here would refuse every later
-        # cart's run_begin.
+        # an AOT module with no signature may load; the engine checks
+        # everything else either way. The engine raises MemoryError when it
+        # cannot hold the module file, and a run left open here would refuse
+        # every later cart's run_begin.
+        gate = getattr(ws, "_with_sd", None)
+        unknown_sources = bool(getattr(ws, "unknown_sources", False))
+
+        def _open(target, target_sha, interp):
+            return _moycore.wasm_open(target, head, int(pages), target_sha, path,
+                                      swapped, gate, unknown_sources, interp)
+
         try:
-            err = _moycore.wasm_open(module, head, int(pages), sha, path,
-                                     swapped, getattr(ws, "_with_sd", None),
-                                     bool(getattr(ws, "unknown_sources", False)))
+            if has_module:
+                err = _open(module, sha, False)
+                if err and not err.startswith(_AOT_TAMPER_EVIDENCE):
+                    # Not tamper evidence -- a mismatched or unsigned module,
+                    # despite carrying this console's own file name (rare: a
+                    # push tool built it unsigned, or the file is corrupt).
+                    # The cart itself is fine; only this console's copy of
+                    # its module is unusable, so it plays on the interpreter,
+                    # exactly as it would have with no module at all.
+                    self.interp = True
+                    err = _open(path + "/" + main, None, True)
+            else:
+                err = _open(path + "/" + main, None, True)
         except BaseException:
             _moycore.close()
             raise
@@ -780,22 +823,35 @@ class WasmRuntime:
 
     def footprint(self, cart):
         """(total, block) the cart's load takes from PSRAM, by the engine's
-        own sizing (moy_wasm.footprint): its declared memory, this chip's
-        module file and the pool that module gets. None when there is
-        nothing to measure -- no "memory", no module for this chip -- and the
-        load's own refusal says why."""
+        own sizing (moy_wasm.footprint): its declared memory, the file it
+        loads and the pool that file gets. None when there is nothing to
+        measure -- no "memory", no cart path -- and the load's own refusal
+        says why.
+
+        The file is this console's own AOT module when the cart carries one,
+        or main.wasm itself when it does not -- the cart plays on the
+        interpreter either way (docs/wasm_tier_plan_2026-09.md, "A cart
+        survives its firmware"), so the fit check still has a real file to
+        size against rather than skipping a cart with no matching module."""
         pages = cart.get("memory")
         path = cart.get("path")
         if not pages or not path:
             return None
-        module = aot_path(path, cart.get("main", "main.wasm"), _moy_wasm.CHIP)
+        main = cart.get("main", "main.wasm")
+        module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
         import os
         gate = getattr(self.ws, "_with_sd", None)
+
+        def _size(p):
+            return gate(lambda: os.stat(p)[6]) if gate is not None else os.stat(p)[6]
+
         try:
-            size = (gate(lambda: os.stat(module)[6]) if gate is not None
-                    else os.stat(module)[6])
+            size = _size(module)
         except OSError:
-            return None
+            try:
+                size = _size(path + "/" + main)
+            except OSError:
+                return None
         if not size:
             return None
         return _moy_wasm.footprint(min(int(pages), _MAX_PAGES) * 65536, size)

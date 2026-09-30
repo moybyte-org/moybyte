@@ -24,6 +24,8 @@ set(MOY_WAMR_SRCS
     ${MOY_WAMR_CORE}/iwasm/aot/aot_intrinsic.c
     ${MOY_WAMR_CORE}/iwasm/aot/aot_loader.c
     ${MOY_WAMR_CORE}/iwasm/aot/aot_runtime.c
+    ${MOY_WAMR_CORE}/iwasm/interpreter/wasm_loader.c
+    ${MOY_WAMR_CORE}/iwasm/interpreter/wasm_runtime.c
     ${MOY_WAMR_CORE}/iwasm/common/wasm_blocking_op.c
     ${MOY_WAMR_CORE}/iwasm/common/wasm_c_api.c
     ${MOY_WAMR_CORE}/iwasm/common/wasm_exec_env.c
@@ -57,7 +59,19 @@ set(MOY_WAMR_SRCS
     ${MOY_WAMR_CORE}/shared/utils/runtime_timer.c
 )
 
-# The runtime's feature set: AOT only (no interpreter, no JIT), no WASI, no
+# Which of WAMR's two interpreters ships (docs/wasm_tier_plan_2026-09.md, "A
+# cart survives its firmware", 2026-09-30; the numbers are #158's): classic is
+# the default on every console board -- on the image-size budget every board
+# is picked against (the two P4s' headroom was the tightest), the fast
+# interpreter's precomputed dispatch costs more flash than its speed is worth
+# for a cart tier that already has a faster tier (AOT) for anything that
+# needs it. A board can still ask for fast by setting the CMake cache entry
+# before this file runs.
+if(NOT DEFINED MOY_WASM_FAST_INTERP)
+    set(MOY_WASM_FAST_INTERP 0)
+endif()
+
+# The runtime's feature set: AOT plus the interpreter (no JIT), no WASI, no
 # builtin libc, no multi-module, no thread manager or shared memory (a cart's
 # par lanes are sibling instances, README.md); bulk memory and reference types
 # because clang emits both by default; custom sections kept, because the
@@ -69,8 +83,8 @@ set(MOY_WAMR_DEFS
     BH_MALLOC=wasm_runtime_malloc
     BH_FREE=wasm_runtime_free
     WASM_ENABLE_AOT=1
-    WASM_ENABLE_INTERP=0
-    WASM_ENABLE_FAST_INTERP=0
+    WASM_ENABLE_INTERP=1
+    WASM_ENABLE_FAST_INTERP=${MOY_WASM_FAST_INTERP}
     WASM_ENABLE_JIT=0
     WASM_ENABLE_LIBC_BUILTIN=0
     WASM_ENABLE_LIBC_WASI=0
@@ -89,6 +103,11 @@ set(MOY_WAMR_DEFS
     WASM_DISABLE_STACK_HW_BOUND_CHECK=0
     WASM_DISABLE_WAKEUP_BLOCKING_OP=0
 )
+if(MOY_WASM_FAST_INTERP)
+    list(APPEND MOY_WAMR_SRCS ${MOY_WAMR_CORE}/iwasm/interpreter/wasm_interp_fast.c)
+else()
+    list(APPEND MOY_WAMR_SRCS ${MOY_WAMR_CORE}/iwasm/interpreter/wasm_interp_classic.c)
+endif()
 if(CONFIG_IDF_TARGET_ARCH_XTENSA)
     list(APPEND MOY_WAMR_SRCS
         ${MOY_WAMR_CORE}/iwasm/aot/arch/aot_reloc_xtensa.c

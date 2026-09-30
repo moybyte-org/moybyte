@@ -912,6 +912,11 @@ def parser(dirs):
     p.add_argument("--only", action="append")
     p.add_argument("--dest")
     p.add_argument("--no-rescan", action="store_true")
+    p = verb("refresh-wasm", help="re-push every compiled cart this checkout "
+                                  "has the source for (tools/refresh_wasm.py) "
+                                  "-- what a format-version bump asks for")
+    p.add_argument("paths", nargs="*",
+                   help="default: system_carts/ and ports/")
     p = verb("shot", help="the glass as a PNG")
     p.add_argument("out")
     p.add_argument("--source", choices=("screen", "game"), default="screen",
@@ -971,6 +976,14 @@ def main(argv=None):
             if a.no_rescan:
                 argv2.append("--no-rescan")
             return push_cart.main(argv2)
+        if a.verb == "refresh-wasm":
+            port = a.port or resolve(a.board, dirs)[0]
+            if not a.force:
+                refuse_if_held(port)
+            import refresh_wasm
+            paths = a.paths or list(refresh_wasm.DEFAULT_PATHS)
+            done = refresh_wasm.refresh(paths, a.board, port)
+            return 0 if done or not refresh_wasm.find_compiled_carts(paths) else 1
         if a.verb == "port":
             port = stable(a.port or resolve(a.board, dirs)[0])
             held = holders(port)

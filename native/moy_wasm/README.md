@@ -10,11 +10,11 @@ moycore drives (see "A cart's session").
 
 | piece | where |
 |---|---|
-| the runtime | `wamr/`: the AOT-only subset of Moybyte's WAMR fork (the plan's "carried as a fork"), copied by `tools/vendor_wamr.py` at the commit `wamr_vendor.json` records (`make vendor-wamr`; `tests/test_wamr_vendor.py` holds the copy to the fork) |
-| the build | `micropython.cmake`: the runtime as its own static library, AOT only, no interpreter, no WASI, no builtin libc |
-| the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report; a cart's session |
+| the runtime | `wamr/`: the AOT-plus-interpreter subset of Moybyte's WAMR fork (the plan's "carried as a fork"), copied by `tools/vendor_wamr.py` at the commit `wamr_vendor.json` records (`make vendor-wamr`; `tests/test_wamr_vendor.py` holds the copy to the fork) |
+| the build | `micropython.cmake`: the runtime as its own static library -- AOT plus WAMR's classic interpreter (no JIT, no WASI, no builtin libc); `MOY_WASM_FAST_INTERP` picks the fast interpreter instead, unset on every console board (#158: classic costs less flash for a fallback tier that is never the speed path) |
+| the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report; a cart's session, AOT or interpreted |
 | the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through |
-| the key | `moy_wasm_key.h`: the provenance key a module must carry, per chip, and the layout of its signature |
+| the key | `moy_wasm_key.h`: the provenance key an AOT module must carry, per chip, its compiled-code FORMAT VERSION, and the layout of its signature -- main.wasm on the interpreter carries none and needs none |
 | the footprint | `moy_wasm_footprint.h`: what a load takes -- the pool, the block a module file is read into, the run stack -- stated once for the engine, the Player's fit check and the host twin |
 | the thread | `moy_wasm_thread.c`: the run's pthread, stack placed per board; a cart's par lanes are made the same way |
 
@@ -66,9 +66,11 @@ block)`: what loading a module file of `module_bytes` for a cart declaring
 `memory` bytes of linear memory holds in PSRAM at its peak, and the largest
 single free block that peak asks for (see "A cart too big for the board").
 `KEY` is the key this build wants after the wasm
-line, `FORK` the fork commit, `STACK` the board's default `(bytes, in_psram)`,
-`POOL` the runtime pool's base size (a run's `pool` adds a share of its
-module's).
+line, `FORMAT` the compiled-code format version alone, `FORK` the fork commit
+this engine was vendored from (diagnostic only since 2026-09-30 -- it plays no
+part in the key, see Provenance), `STACK` the board's default `(bytes,
+in_psram)`, `POOL` the runtime pool's base size (a run's `pool` adds a share
+of its module's).
 
 ## A cart's session
 
@@ -107,14 +109,27 @@ back rather than waited for. `moy_wasm.lanes()` reports what the lanes did
 since it was last asked: work handed over, work taken back unstarted, and the
 microseconds from handing over to starting and from starting to finishing. A
 board declines lanes with `MOY_WASM_ITEM_LANES` 0, and then a cart's items
-run on the session's core, in order, as on any one-core host.
+run on the session's core, in order, as on any one-core host -- the same
+fallback an INTERPRETED session takes unconditionally (`moy_wasm_session_lanes`
+reports 0 lanes whenever the live session is running main.wasm rather than an
+AOT module): no sibling-instance trick is attempted over the interpreter's
+module, so a cart's `par` items run in declaration order on the calling core.
 
-Where a board finds a cart's compiled module is host policy: `<main>.<chip>.aot`
-beside `main.wasm` in the cart's folder, `CHIP` naming the chip
-(`tools/wasm_cart.py` builds it; `moycore_glue.aot_path` finds it). A cart with
-no module for this chip is refused on the Player's panel. The sync RPC declines
-binary files, so a module never crosses between a browser and a board
-(`runtime/moy_sync.py`): a compiled cart plays where its module was put.
+Where a board finds a cart's compiled module is host policy: `<main>.<chip>.f<format>.aot`
+beside `main.wasm` in the cart's folder, `CHIP`/`FORMAT` naming this engine's
+chip and compiled-code format version (`tools/wasm_cart.py`'s `aot_name`
+builds the name; `moycore_glue.aot_path` finds it). A cart may carry any
+number of these -- one per chip and format it has been built for -- so it
+stays portable off a console (SPEC.md 16: "a host may keep a compiled form of
+the module beside it ... a cart is complete without it"); nothing is ever
+evicted, a module simply counts toward the cart's size. **A cart with no
+module by this console's own name is not refused** (2026-09-30, "A cart
+survives its firmware", ESP 88): `device/moycore_glue.WasmRun` opens
+`main.wasm` itself on the interpreter instead, with no key and no signature,
+and the Player's toast says it is running unoptimized (below). The sync RPC
+declines binary files, so a module never crosses between a browser and a
+board (`runtime/moy_sync.py`): a compiled cart plays where its module was
+put, or on the interpreter where it was not.
 
 **A full-frame blit presents above the tick model's 30 on every board.** The
 plan expected the S3 to sit at or under it; measured on 2026-09-25 (the figures
@@ -213,13 +228,14 @@ on-glass load/unload loop under a live cart and WiFi is the guard.
 
 ## Provenance
 
-A per-architecture module is native code; the sandbox is whatever the compiler
-emitted. So a module loads only if its custom section `moybyte.key` says:
+A per-architecture (AOT) module is native code; the sandbox is whatever the
+compiler emitted. So a module loads only if its custom section `moybyte.key`
+says:
 
 ```
 moybyte-aot 1
 wasm <sha256 of the canonical .wasm>
-fork <the fork commit this image runs>
+format <MOY_WASM_FORMAT_VERSION>
 target xtensa          | riscv32
 cpu esp32s3            | generic-rv32
 abi -                  | ilp32f
@@ -231,12 +247,30 @@ stack-bounds 1
 xip 0
 ```
 
-Everything after the wasm line must equal `"fork " MOY_WASM_FORK_COMMIT "\n"`
-plus the chip's block in `moy_wasm_key.h`, byte for byte; an absent, malformed
-or different key is refused with the first field that differs, after the
-parse and before anything in the module runs. `tools/wasm_module.py` reads the
-same header to write keys and to choose wamrc's flags, so a module it builds
-carries exactly the key this check wants.
+Everything after the wasm line must equal `"format " MOY_WASM_FORMAT_VERSION
+"\n"` plus the chip's block in `moy_wasm_key.h`, byte for byte; an absent,
+malformed or different key is refused with the first field that differs,
+after the parse and before anything in the module runs. `tools/wasm_module.py`
+reads the same header to write keys and to choose wamrc's flags, so a module
+it builds carries exactly the key this check wants.
+
+**The key names a compiled-code FORMAT VERSION, never the fork commit**
+(owner, 2026-09-30, ESP 88: docs/wasm_tier_plan_2026-09.md, "A cart survives
+its firmware"). `MOY_WASM_FORMAT_VERSION` is hand-bumped, only when a change
+reaches what makes an old AOT module unsafe or wrong on a new runtime -- the
+vendored AOT loader and runtime ABI, or the pinned compiler --
+`wasm_format_version.json` names exactly which vendored files and compiler
+pins that is, and `tests/test_wasm_format_version.py` fails the moment one of
+them moves without the version moving too. Re-vendoring the fork for a reason
+that does not touch that list (a security fix elsewhere, an IDF bump) no
+longer stales a single module already on a board: `FORK` (`moy_wasm.FORK`)
+still reports which fork commit the engine was vendored from, but it is
+diagnostic only. This check never even SEES a stale-format module in the
+ordinary case, because a board finds its module by a name that encodes the
+format (`main.<chip>.f<format>.aot`, "A cart's session" above) -- a module
+built against another format is simply the wrong file name, so it is never
+opened at all, and the check below is the defence against a same-named file
+that is corrupt or hand-tampered, not the everyday staleness path.
 
 ### Misaligned access
 
@@ -282,32 +316,43 @@ setting on); `--unsigned` builds a module with no signature, and so does
 
 Signing is the default, not a lock (the plan's 2026-09-29 decision).
 Settings -> UNKNOWN SOURCES, off by default and turned on past a warning, lets
-a module with **no** signature load, so someone who rebuilds a cart from its
-source -- Doom from moybyte-org/gpl-carts, their own game -- runs it on their
-own console. The setting is the console's (`ws.unknown_sources`, persisted in
-`system.json`, on every tier); the engine is told it per load:
-`moycore_glue.WasmRun` hands it to `moycore.wasm_open`, which hands it to
-`moy_wasm_session_open` as `allow_unsigned`, and `verify_module` reads it on
-the MicroPython task before the runtime sees a byte, as it reads the
-signature. With the setting off a cart whose module is unsigned opens the
-Player's notice, "Not signed.", saying where the switch is. A module whose
-key names another runtime, chip or set of flags -- every installed module after
-a firmware update that moves the fork pin -- opens the "Needs an update."
-notice, since the cart is only out of date. A signature that fails refuses on
-the ordinary error panel: that module was changed after it was signed.
+a module with **no** signature load AT FULL SPEED (native trust), so someone
+who rebuilds a cart from its source -- Doom from moybyte-org/gpl-carts, their
+own game -- runs it on their own console. The setting is the console's
+(`ws.unknown_sources`, persisted in `system.json`, on every tier); the engine
+is told it per load: `moycore_glue.WasmRun` hands it to `moycore.wasm_open`,
+which hands it to `moy_wasm_session_open` as `allow_unsigned`, and
+`verify_module` reads it on the MicroPython task before the runtime sees a
+byte, as it reads the signature.
+
+**With the setting off an unsigned module is IGNORED, not refused** (2026-09-30,
+"A cart survives its firmware" -- this retired the "Not signed." panel
+`43581ed4` had added hours earlier for exactly this case): `WasmRun` catches
+the engine's `refused: unsigned module` and retries the open on the
+interpreter, `main.wasm` itself, which needs neither signature nor switch, so
+the cart plays regardless -- natively when the switch is on, interpreted with
+a short toast when it is off. The same retry covers a corrupted or
+mismatched AOT module (rare: its file name matched this console's chip and
+format, its content did not) -- ANY AOT refusal falls back to the
+interpreter **except tamper evidence**: a signature that is PRESENT but does
+not verify is the one case that still refuses to the ordinary error panel,
+because that module was changed after it was signed, which is not staleness.
 
 | the module file | setting off | setting on |
 |---|---|---|
-| signed with a key the image trusts | loads | loads |
-| no signature trailer | `refused: unsigned module` | loads |
-| a byte changed after signing | `refused: bad signature` | `refused: bad signature` |
-| signed for another chip, or with a key the image does not trust | `refused: bad signature` | `refused: bad signature` |
-| a trailer whose length is out of range | `refused: malformed signature` | `refused: malformed signature` |
+| signed with a key the image trusts | loads natively | loads natively |
+| no signature trailer | interpreter, toast | loads natively |
+| a byte changed after signing | `refused: bad signature` (panel) | `refused: bad signature` (panel) |
+| signed for another chip, or with a key the image does not trust | `refused: bad signature` (panel) | `refused: bad signature` (panel) |
+| a trailer whose length is out of range | `refused: malformed signature` (panel) | `refused: malformed signature` (panel) |
+| key content does not match this console (name matched by chance, or corrupt) | interpreter, toast | interpreter, toast |
+| no module by this console's name at all | interpreter, toast | interpreter, toast |
 
-Whatever passes goes on to the provenance key, which is checked either way:
-the setting says nothing about which runtime a module was built for, and the
-key is what keeps a module built for another fork or with other flags from
-crashing the board instead of being refused.
+Whatever passes signing goes on to the provenance key, which is checked
+either way: the setting says nothing about which format or chip a module was
+built for. In the ordinary case the key never even matters for staleness,
+because the FILE NAME already encodes chip and format (Provenance above) --
+what the key still guards against is a same-named file whose content lies.
 
 **A signature that is present must verify, whatever the setting says.** A
 trailer is a claim that the module is the one its signer built. A claim that
@@ -317,9 +362,11 @@ carry, and none of those is what the setting is for: a cart somebody rebuilt
 from source carries no signature at all. Treating a failed signature as a
 warning sign rather than as "unsigned" also keeps the signature the only
 integrity check a signed module has, so a signed cart whose bytes went bad is
-refused instead of run as native code. It is the policy OTA manifests already
-follow (`.claude/rules/ota.md`: an unsigned manifest the owner put on the card
-may be taken, a signature that is present is always checked). The way to run
+refused instead of run as native code -- and never silently downgraded to the
+interpreter either, which would hide the same tampering behind a slower
+frame rate instead of a panel. It is the policy OTA manifests already follow
+(`.claude/rules/ota.md`: an unsigned manifest the owner put on the card may
+be taken, a signature that is present is always checked). The way to run
 your own build is therefore to build it unsigned; a module signed with your
 own key is refused unless the image trusts that key.
 
@@ -354,6 +401,36 @@ zero-overhead `loop` -- Espressif's backend disables hardware loops whenever
 literals sit in the text, which the S3's module layout requires. The figures
 are #158's.
 
+## The interpreter tier
+
+Every console board also carries WAMR's interpreter (classic;
+`MOY_WASM_FAST_INTERP` picks the fast one instead, unset on every board here --
+#158 measured it costing more flash for no speed win a fallback tier needs).
+`moy_wasm_session_open`'s `interp` argument is what tells the engine to skip
+the AOT path entirely: no `moybyte.key` section, no signature, no
+`want_sha` cross-check, because it is loading `main.wasm` -- the canonical,
+portable module every cart carries -- straight, the same `wasm_runtime_load_ex`
+/ `wasm_runtime_instantiate` calls an AOT session makes, since WAMR dispatches
+on the module's own bytes either way. Everything downstream of that load is
+identical: the same import table (`native/moycore/libmoy/moy_wasm.c`, which
+never distinguishes AOT from interpreted -- it is written at the
+`wasm_exec_env_t` level, which is execution-mode-agnostic by construction),
+the same session callbacks, the same hooks. `snd` works on it, because the
+audio import is part of that same table; `par` runs its items in declaration
+order on the calling core, never across lanes (`moy_wasm_session_lanes`
+reports 0 for an interpreted session, "A cart's session" above).
+
+**The engine never decides to fall back; `device/moycore_glue.WasmRun` does**,
+in Python: it looks for this console's own module by name first, and only
+opens the interpreter when there is none, or when the one it found does not
+check out for a reason that is not tamper evidence (Unknown sources, ESP 88's
+"Provenance" section). `self.interp` is the fact the Player reads --
+`runtime/player.py`'s `_start_runtime` -- to arm `ws.notice(INTERP_NOTICE_TITLE,
+INTERP_NOTICE_SUB, "warn")`, the timed system banner
+(`runtime/console_notices.py`, the same mechanism "MOYBYTE UPDATED" uses),
+never the blocking crash-panel notice: the cart is already playing by the
+time the toast appears.
+
 ## Stopping a run
 
 **A runaway export cannot be stopped mid-loop.** `terminate()` calls
@@ -374,50 +451,69 @@ waits for it, so an item that never returns holds the cart where it is.
 
 - `tests/test_wamr_vendor.py`: the copy is the fork at the pinned commit (read
   from the clone's git objects when `experiments/wasm_aot/wamr` has it), the
-  interpreter and compiler stayed behind, and one pin names it everywhere.
+  compiler stayed behind, both interpreters and the plain loader came across,
+  and one pin names the fork commit everywhere (diagnostic, not the key).
+- `tests/test_wasm_format_version.py`: the format-version stamp matches the
+  files and compiler pins `wasm_format_version.json` covers, every covered
+  file is one `vendor-wamr` actually copies, and the key names the format,
+  never a fork commit.
 - `tests/test_wasm_module.py`: the key and the flags the builder derives.
 - `tests/test_wasm_signing.py`: the signature, through the device's own
   `moy_ota.verify_sig` with a throwaway key -- a signed module verifies and
   comes back as it was built; a byte changed anywhere, the key section
   included, another chip's signature, another key's, an unsigned module and a
   malformed trailer are refused -- and the table above, each kind of file with
-  Unknown sources off and on, through the tool's twin of `verify_module`.
+  Unknown sources off and on, through the tool's twin of `verify_module`; and
+  that only the two tamper-evidence refusals are what `WasmRun` never retries.
 - `tests/test_unknown_sources.py`: the setting -- off on a fresh console,
   persisted, the warning before it turns on, off at once, the dev channel's
-  `unknown_sources 0|1` -- and the Player's notice for an unsigned cart.
+  `unknown_sources 0|1` -- and that an unsigned cart plays on the interpreter
+  with the toast (switch off) or natively with none (switch on), never the
+  old blocking notice.
 - `tests/test_moycore_glue.py`: the device glue's `WasmRun` over a fake moycore
-  (the arguments `wasm_open` gets, the refusals before it) and the runtime's
-  fit report (what it asks `footprint()`, through the store's gate).
+  (the arguments `wasm_open` gets, AOT and interpreted), the retry -- an
+  unsigned or key-mismatched AOT open falls back to the interpreter and
+  `interp` is true, a bad signature never retries, a module found by no name
+  at all goes straight to the interpreter with one `wasm_open` call -- and the
+  runtime's fit report (what it asks `footprint()`, sizing against main.wasm
+  itself when there is no module for this chip).
 - `tests/test_wasm_cart.py`: the same import table on the host, over WAMR built
-  for Linux at this pin (`runtime/wasm_binding.py`) — the hello cart's pixel
-  golden, the hooks under the tick model, par's items (one after another on
-  the host), a trap, quit, the runtime-missing
-  panel, the fit notice (the footprint against the header's rule, the huge
-  fixture past any board, the host's limit, a load that still runs out), a
-  folder in the cart reading as a missing file, and the store's handling of a
-  compiled cart.
+  for Linux at this pin (`runtime/wasm_binding.py`, which always runs
+  main.wasm directly -- there is no per-chip AOT concept on the host) — the
+  hello cart's pixel golden, the hooks under the tick model, par's items (one
+  after another on the host), a trap, quit, the runtime-missing panel, the fit
+  notice (the footprint against the header's rule, the huge fixture past any
+  board, the host's limit, a load that still runs out), a folder in the cart
+  reading as a missing file, and the store's handling of a compiled cart.
+- `tests/test_push_cart.py` / `tests/test_refresh_wasm.py`: a push compiles an
+  unsigned module only when this board's chip+format has none, replaces one
+  built for another main.wasm, and leaves every OTHER chip's module in the
+  cart folder unpushed and undeleted; a refresh walks every compiled cart this
+  checkout has the source for and re-pushes each.
 - On glass, every declaring board's suite: the idle cost against a module-free
   image of the same tree, the hello module and six a board refuses (no key,
-  another fork, other flags, another chip, no signature, one byte of a signed
-  module's key changed), the same run with `allow_unsigned` -- the unsigned
-  module runs, an unsigned module keyed for another fork is refused by its
-  key, the tampered and other-chip ones still by their signatures -- the two
-  stack placements, the termination answer, a
-  Lua cart after a wasm run, a load/unload loop under a live cart and WiFi,
-  and a run with WiFi and BLE up; then the Player path — the hello and blit
-  carts run from the launcher at their fps floors, the Par fixture's items
-  across the cores leaving what the same items in order leave, with the
-  board's lane having run some of them, a cart with no module for
-  this chip refused, a cart whose module was tampered with after signing
-  refused, the hello cart built unsigned opening the "Not signed." notice with
-  Unknown sources off and running with it on (the tampered cart still refused
-  then), the switch left off, the huge fixture -- 40 MB of declared memory, past every
+  another format, other flags, another chip, no signature, one byte of a
+  signed module's key changed), the same run with `allow_unsigned` -- the
+  unsigned module runs, an unsigned module keyed for another format is
+  refused by its key, the tampered and other-chip ones still by their
+  signatures -- the two stack placements, the termination answer, a Lua cart
+  after a wasm run, a load/unload loop under a live cart and WiFi, and a run
+  with WiFi and BLE up; then the Player path — the hello and blit carts run
+  from the launcher at their fps floors, the Par fixture's items across the
+  cores leaving what the same items in order leave, with the board's lane
+  having run some of them, a cart whose module was tampered with after
+  signing refused, the huge fixture -- 40 MB of declared memory, past every
   board's PSRAM -- refused with the fit notice, the hello cart running after
   it, and the Read Dir fixture's `read` of its own `src/` folder reading
-  nothing, as a missing file does. The suites build the modules with the pinned compilers
-  (`python3 tools/wasm_module.py compilers`), sign them with the OTA signing
-  key (a suite without it skips the wasm checks, saying why), and push them
-  into the board's store: the phase-1 modules under `wasm_hello/`, which is
-  not a `.moy` folder and never lists as a cart, and the fixture carts as
-  `wasm_hello.moy`, `wasm_blit.moy`, `wasm_par.moy`, `wasm_huge.moy` and
-  `wasm_readdir.moy`.
+  nothing, as a missing file does. **The interpreter tier, on every board**:
+  a cart with no module, one built for another chip, and one named for a
+  stale format all play on the interpreter with the short toast and the
+  hello cart's greeting check; an unsigned cart follows Unknown sources --
+  the interpreter and its toast with the switch off, native and no toast with
+  it on, a tampered one still refused either way. The suites build the
+  modules with the pinned compilers (`python3 tools/wasm_module.py
+  compilers`), sign them with the OTA signing key (a suite without it skips
+  the wasm checks, saying why), and push them into the board's store: the
+  phase-1 modules under `wasm_hello/`, which is not a `.moy` folder and never
+  lists as a cart, and the fixture carts as `wasm_hello.moy`, `wasm_blit.moy`,
+  `wasm_par.moy`, `wasm_huge.moy` and `wasm_readdir.moy`.

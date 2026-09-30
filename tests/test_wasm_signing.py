@@ -189,11 +189,19 @@ def test_the_board_decides_the_switch_where_it_decides_the_signature():
     assert 'bool(getattr(ws, "unknown_sources", False))' in glue
 
 
-def test_the_player_keys_its_notice_on_the_engines_own_words():
-    from runtime import player
+def test_only_tamper_evidence_stays_a_hard_refusal():
+    """device.moycore_glue._AOT_TAMPER_EVIDENCE is the engine's own refusal
+    text for a SIGNATURE that does not verify -- the one case a WasmRun does
+    not retry on the interpreter (docs/wasm_tier_plan_2026-09.md, "A cart
+    survives its firmware", 2026-09-30). "unsigned module" (no signature at
+    all, the Unknown sources case) is deliberately NOT in that tuple: it is
+    retried, never a panel."""
+    from device import moycore_glue as glue
     src = (ROOT / "native" / "moy_wasm" / "modmoy_wasm.c").read_text()
     assert 'snprintf(err, errlen, "refused: %s", why);' in src
-    assert player._UNSIGNED == "refused: " + "unsigned module"
+    for text in glue._AOT_TAMPER_EVIDENCE:
+        assert ('"%s"' % text[len("refused: "):]) in src, text
+    assert not any("unsigned" in text for text in glue._AOT_TAMPER_EVIDENCE)
 
 
 def test_the_verify_command_answers_for_either_setting(tmp_path, capsys):

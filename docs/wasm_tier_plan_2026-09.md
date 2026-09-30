@@ -20,9 +20,11 @@ the decisions below record what they changed.
 - **A per-architecture module is native code, and is trusted only by
   provenance.** The sandbox lives in the compiler's output, not in the loader,
   so a board loads a module only if its custom section carries the full key
-  (wasm hash, fork commit, compiler flags, target) and the file is signed the
-  way OTA images are. A tampered or foreign module is refused, and a test
-  proves it.
+  (wasm hash, compiled-code format version, compiler flags, target) and the
+  file is signed the way OTA images are. A module for another chip or format
+  is simply not this console's -- it is never opened, the interpreter plays
+  the cart instead (2026-09-30, below); a TAMPERED one -- present signature
+  bytes that do not verify -- is refused, and a test proves it.
 - **The owner can run unknown sources (owner, 2026-09-29).** Signing is
   the default, not a lock: a Settings switch, off by default and turned on
   past a plain warning, lets a board run unsigned modules, so anyone who
@@ -59,14 +61,20 @@ the decisions below record what they changed.
   ESP32-P4 platform work. Fork policy: the pin moves only for a security fix,
   an ESP-IDF bump, or a feature the tier needs; every move rebuilds the
   compilers and every module, and re-runs the hello and Doom checks on both
-  chip families and on Linux; the cache key carries the fork commit, so a
-  stale module reads as absent, never migrated. Upstreaming is optional and
-  off the critical path.
+  chip families and on Linux. Upstreaming is optional and off the critical
+  path. The module's provenance key no longer names the fork commit (below,
+  2026-09-30): re-vendoring alone no longer stales an installed module.
 - **How a host executes the module is host policy** (AOT, XIP, caches, an
-  interpreter for small carts) and never enters the spec. No interpreter is
-  built into the boards: a cart without a matching signed module is refused,
-  which means a browser-authored or Zero-synced cart cannot play on a board
-  until a compiler service exists. That is stated, not hidden.
+  interpreter) and never enters the spec. **Every console board also carries
+  WAMR's interpreter (owner, 2026-09-30)**, so nothing is ever refused for
+  want of a module: a cart with none for this chip, or whose module has gone
+  stale, plays on it instead, slower, with a short notice. A
+  browser-authored or Zero-synced cart therefore plays on a board with no
+  compiler involved. #158's spike measured an interpreter not paying for
+  itself on speed alone; that number priced fps, never what a moved runtime
+  pin does to every *installed* cart (ESP 88), which is what forced the
+  reversal -- see "A cart survives its firmware" below. The interpreter
+  chosen and its per-board cost are #158's.
 - **Cart storage is the board's.** The SD card on the T-Deck, the flash VFS on
   the P4 boards; an SD card can become a P4 requirement if cart sizes demand
   it. Assets are read through the cart's own folder and nothing else.
@@ -110,6 +118,47 @@ the decisions below record what they changed.
   2026-09-26 (#158): at the current reserve none fits the floor board, so
   the reserve and the flash partition stay as they are and the lever is the
   kernel work in #224 instead.
+- **A cart survives its firmware (owner, 2026-09-30).** ESP 88: a T-Deck that
+  took an OTA carrying a re-vendored WAMR fork refused every compiled cart
+  already on its card, because the provenance key named the fork commit and
+  re-vendoring moves it for reasons that do not touch what a module needs
+  from the runtime it loads into. A board depends only on moy-spec now:
+  - **A `.moy` carries `main.wasm` plus any number of compiled modules**,
+    each named for what it runs on -- chip and compiled-code format version,
+    e.g. `main.esp32s3.f1.aot` (`tools/wasm_cart.py`'s `aot_name`,
+    `device/moycore_glue.py`'s `aot_path`). SPEC.md 16 already permits
+    exactly this (quoted in `native/moy_wasm/README.md`'s "A cart's
+    session"), so the spec needs no change. Off a console, the cart is
+    fully portable.
+  - **Push and install copy `main.wasm` plus only the module matching the
+    target console**; a cart with none gets one compiled on the spot,
+    unsigned (`tools/push_cart.py`'s `compiled_module` already did this for
+    push; moy-spec's `moy install` does the same).
+  - **On the console the cart folder is self-contained.** A console of the
+    same chip and format takes its module as it is; any other console runs
+    the cart on the interpreter until it gets its own. Nothing is evicted --
+    a module counts toward the cart's size, checked at install, and leaves
+    only with the cart.
+  - **The key names a compiled-code FORMAT VERSION, not the fork commit**
+    (`native/moy_wasm/moy_wasm_key.h`'s `MOY_WASM_FORMAT_VERSION`), hand-bumped
+    only for a change that reaches the vendored AOT loader/runtime ABI or the
+    pinned compiler -- `native/moy_wasm/wasm_format_version.json` names the
+    exact scope and `tests/test_wasm_format_version.py` is the guard. A
+    module goes stale only when the format moves, which is rare by design;
+    routine re-vendoring no longer stales an installed cart. Mechanism and
+    trust table: `native/moy_wasm/README.md`'s "Provenance" and "Unknown
+    sources".
+  - **The interpreter is WAMR's, vendored like the AOT runtime**
+    (`make vendor-wamr`; `native/moy_wasm/wamr/`, never hand-edited) and
+    built into every console board's image -- classic, per #158's
+    classic-vs-fast measurement (the two P4s' headroom was the tightest it
+    was picked against); mechanism and cost:
+    `native/moy_wasm/README.md`'s "The interpreter tier".
+    The Player runs `main.wasm` on it whenever no valid AOT module matches,
+    with a short toast (`runtime/console_notices.py`'s toast, not the
+    blocking notice panel -- the cart plays, just slower), which retires
+    the "Needs an update." panel `43581ed4` added for exactly the case this
+    decision now plays through instead.
 
 ## The phases
 
@@ -208,8 +257,11 @@ module a board needs when a cart has none.
   imports".
 - A Lua-to-wasm path. The proposal's answer is "nothing, deliberately".
 - The cloud compiler.
-- An interpreter as a spec feature. It is host policy, and #158's
-  measurements say it does not pay for itself.
+- An interpreter as a SPEC feature -- it stays host policy, SPEC.md §16's own
+  words; nothing requires a host to carry one. The interpreter itself
+  shipped 2026-09-30 anyway, on every console board -- "A cart survives its
+  firmware" above is why the earlier "does not pay for itself" read of #158
+  stopped being the deciding question.
 - A framebuffer for Lua carts. SPEC.md §12.6 stands; §15 carves the one
   exception, for a cart that owns its own memory.
 - An ESP-IDF engine component in libmoy, so another ESP32 OS can take the

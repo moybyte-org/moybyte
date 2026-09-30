@@ -43,6 +43,7 @@ host execution of), 82 red, no survivors.
 
 import ast
 import importlib.util
+import os
 import re
 import sys
 import types
@@ -161,6 +162,10 @@ class FakeMoycore(types.ModuleType):
         self.pmem_image_fill = None
         self.closes = 0
         self.wasm_open_err = None
+        # A retry (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+        # firmware") calls wasm_open a second time; set this to a list to
+        # answer each call in turn instead of the same wasm_open_err always.
+        self.wasm_open_errs = None
         self.owed_frame = None
         self.owed_lut = None
         self.kept = False
@@ -246,6 +251,8 @@ class FakeMoycore(types.ModuleType):
 
     def _wasm_open(self, *a):
         self._log("wasm_open", *a)
+        if self.wasm_open_errs is not None:
+            return self.wasm_open_errs.pop(0) if self.wasm_open_errs else None
         return self.wasm_open_err
 
     def _take_frames(self, on):
@@ -516,6 +523,7 @@ class World:
         else:
             mw = types.ModuleType("moy_wasm")
             mw.CHIP = wasm_chip
+            mw.FORMAT = "1"     # this tree's own MOY_WASM_FORMAT_VERSION
             sys.modules["moy_wasm"] = mw
         if not flat_lua_ext:
             sys.modules["lua_ext"] = None      # no frozen flat name: the host
@@ -1740,10 +1748,10 @@ def _compiled(tmp_path, chips=("esp32s3",), memory=3):
     return cart, str(main)
 
 
-def _glue_aot(cart, chip):
+def _glue_aot(cart, chip, format="1"):
     world = World()
     try:
-        return world.mod.aot_path(cart["path"], cart["main"], chip)
+        return world.mod.aot_path(cart["path"], cart["main"], chip, format)
     finally:
         world.close()
 
@@ -1765,8 +1773,8 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
         (_v, module, head, pages, sha, cdir, swapped, gate,
-         allow_unsigned) = world.core.calls[1]
-        assert module == cart["path"] + "/main.esp32s3.aot"
+         allow_unsigned, interp) = world.core.calls[1]
+        assert module == cart["path"] + "/main.esp32s3.f1.aot"
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
         assert pages == 3 and cdir == cart["path"] and swapped is True
@@ -1774,6 +1782,8 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert gate is ws._with_sd
         # a console that never turned Unknown sources on loads signed modules only
         assert allow_unsigned is False
+        assert interp is False         # a module by this console's own name -- AOT
+        assert not run.interp
         assert sha == hashlib.sha256(blob).hexdigest()
         # the frame is MoycoreRun's: _update ticks, draw is the fused no-op
         assert run.init is None and run.draw() is None
@@ -1800,43 +1810,78 @@ def test_the_load_asks_the_engine_what_unknown_sources_says_now(tmp_path):
             world.close()
 
 
-def test_the_engines_unsigned_refusal_reaches_the_player_as_it_was_given(tmp_path):
-    """The engine's words for a module with no signature cross unchanged:
-    the Player keys its notice on them (player._UNSIGNED)."""
-    from runtime import player
+def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
+    """The engine's refusal for a module with no signature (Unknown sources
+    off) is not tamper evidence, so WasmRun retries the open on the
+    interpreter -- main.wasm itself -- instead of raising
+    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+    2026-09-30). The cart plays; run.interp says so."""
+    cart, main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_errs = ["refused: unsigned module", None]
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert run.interp
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert len(opens) == 2
+        assert opens[0][1] == cart["path"] + "/main.esp32s3.f1.aot"
+        assert opens[0][9] is False            # AOT, tried first
+        assert opens[1][1] == main             # the retry is main.wasm itself
+        assert opens[1][9] is True              # on the interpreter
+        assert world.core.closes == 0
+    finally:
+        world.close()
+
+
+def test_a_cart_with_no_module_for_this_chip_runs_on_the_interpreter(tmp_path):
+    """A stale or absent module is never opened at all -- it is simply the
+    wrong file name -- so the cart goes straight to the interpreter, one
+    wasm_open call, no failed attempt logged."""
+    cart, main = _compiled(tmp_path, chips=("esp32p4",))
+    world = _wasm_world("esp32s3")
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert run.interp
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert len(opens) == 1
+        assert opens[0][1] == main
+        assert opens[0][9] is True
+        assert "run_begin" in world.core.verbs()
+    finally:
+        world.close()
+
+
+def test_a_key_mismatch_retries_then_a_trap_still_closes_the_console(tmp_path):
+    """A corrupted or mismatched AOT file (rare: the name matched, the
+    content did not) is retried on the interpreter same as an absent one; if
+    THAT also fails, the failure is real and closes the console."""
     cart, _main = _compiled(tmp_path)
     world = _wasm_world()
-    world.core.wasm_open_err = player._UNSIGNED
+    world.core.wasm_open_errs = ["refused: key mismatch 'opt 2'", "a trap in _init"]
     try:
         ws = FakeWs(project=_CartProject(cart))
-        with pytest.raises(RuntimeError) as exc:
+        with pytest.raises(RuntimeError, match="a trap in _init"):
             world.mod.WasmRun(ws, make_ns(), None)
-        assert str(exc.value) == "refused: unsigned module"
         assert world.core.closes == 1
     finally:
         world.close()
 
 
-def test_a_cart_with_no_module_for_this_chip_is_refused(tmp_path):
-    cart, _main = _compiled(tmp_path, chips=("esp32p4",))
-    world = _wasm_world("esp32s3")
-    try:
-        ws = FakeWs(project=_CartProject(cart))
-        with pytest.raises(RuntimeError, match="no module compiled for this board"):
-            world.mod.WasmRun(ws, make_ns(), None)
-        assert "run_begin" not in world.core.verbs()
-    finally:
-        world.close()
-
-
-def test_a_refused_or_trapped_open_closes_the_console(tmp_path):
+def test_a_bad_signature_never_retries(tmp_path):
+    """Tamper evidence -- a signature present but wrong -- is the one AOT
+    refusal that stays a hard refusal: no interpreter retry, straight to the
+    ordinary error panel."""
     cart, _main = _compiled(tmp_path)
     world = _wasm_world()
-    world.core.wasm_open_err = "refused: key mismatch 'opt 2'"
+    world.core.wasm_open_err = "refused: bad signature"
     try:
         ws = FakeWs(project=_CartProject(cart))
-        with pytest.raises(RuntimeError, match="key mismatch"):
+        with pytest.raises(RuntimeError, match="bad signature"):
             world.mod.WasmRun(ws, make_ns(), None)
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert len(opens) == 1
         assert world.core.closes == 1
     finally:
         world.close()
@@ -1925,16 +1970,32 @@ def test_a_declaration_past_any_board_is_asked_about_capped_not_overflowed(tmp_p
         world.close()
 
 
+def test_no_module_for_this_chip_sizes_against_main_wasm_instead(tmp_path):
+    """No module for this chip: the cart plays on the interpreter instead of
+    refusing (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+    firmware"), so the fit check sizes against main.wasm itself -- still a
+    real file, still a real report -- rather than giving up."""
+    cart, main = _compiled(tmp_path, chips=("esp32p4",))
+    world = _wasm_world("esp32s3")
+    try:
+        engine = _Engine(world)
+        rt = world.mod.make_wasm_runtime(FakeWs())
+        assert rt.footprint(cart) == (3 * 65536 + os.path.getsize(main), 3 * 65536)
+        assert engine.asked == [(3 * 65536, os.path.getsize(main))]
+    finally:
+        world.close()
+
+
 def test_nothing_to_measure_leaves_the_refusal_to_the_load(tmp_path):
-    """No module for this chip, or no "memory": no report, so the load's own
-    refusal is what the kid sees, by name."""
+    """No "memory" declared, or no cart path at all: genuinely nothing to
+    size, so the load's own refusal is what the kid sees, by name."""
     cart, _main = _compiled(tmp_path, chips=("esp32p4",))
     world = _wasm_world("esp32s3")
     try:
         engine = _Engine(world)
         rt = world.mod.make_wasm_runtime(FakeWs())
-        assert rt.footprint(cart) is None
         assert rt.footprint(dict(cart, memory=None)) is None
+        assert rt.footprint({"memory": 3}) is None       # no "path"
         assert engine.asked == []
     finally:
         world.close()

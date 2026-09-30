@@ -448,9 +448,11 @@ switch for compiled carts whose module carries no signature — a cart somebody
 rebuilt from its source. Turning it ON replaces the rows with a warning
 ("Unsigned carts can do anything on this console. Only run ones you
 trust.") whose focus starts on KEEP OFF, so it takes the
-TURN ON button, or a move and a press; turning it OFF is one tap. With it off,
-launching such a cart opens the Player's notice ("Not signed."), which says
-where the switch is. A module whose signature is present and fails is refused
+TURN ON button, or a move and a press; turning it OFF is one tap. With it on,
+an unsigned module runs at full native speed; with it off the module is
+ignored and the cart plays on the interpreter instead, with a short toast
+saying so (2026-09-30, "A cart survives its firmware") — never a blocking
+notice, either way. A module whose signature is present and fails is refused
 either way (`native/moy_wasm/README.md`, "Unknown sources").
 
 ---

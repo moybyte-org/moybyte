@@ -2613,7 +2613,8 @@ static void wasm_trapped(void)
 }
 
 static int wasm_begin(const char *path, const char *sha, const char *dir,
-                      int swapped, int allow_unsigned, char *err, size_t errlen)
+                      int swapped, int allow_unsigned, int interp, char *err,
+                      size_t errlen)
 {
     wfile_forget();
     if (WR) {
@@ -2642,8 +2643,8 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
     // module into so the memory can take the block back; a declaration past
     // any board's PSRAM holds nothing and is refused at the check.
     uint32_t memory = g_wpages <= 1024 ? g_wpages * 65536u : 0;
-    if (moy_wasm_session_open(path, sha, memory, allow_unsigned, &WASM_OPS, err,
-                              errlen) != 0) {
+    if (moy_wasm_session_open(path, sha, memory, allow_unsigned, interp, &WASM_OPS,
+                              err, errlen) != 0) {
         wfile_forget();
         return 1;
     }
@@ -2697,8 +2698,8 @@ static void wasm_end(void)
 #endif // MOY_WASM
 
 // wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
-//           gate=None, allow_unsigned=False) -> None, or the refusal or trap
-//           as text
+//           gate=None, allow_unsigned=False, interp=False) -> None, or the
+//           refusal or trap as text
 //
 // After run_begin(..., vm=False): load the compiled module at `module_path`
 // on the engine, check it against the canonical .wasm's head (`wasm_head`,
@@ -2708,8 +2709,12 @@ static void wasm_end(void)
 // `wire_swapped` says the canvas stores its words byte-swapped, which a
 // palette blit must match. `gate(fn)` is the board's storage gate: every
 // `read` runs inside it. `allow_unsigned` is the owner's Unknown sources
-// setting: true lets a module with no signature load (moy_wasm_session.h).
-// A refusal or a trap closes nothing -- close() does.
+// setting: true lets an AOT module with no signature load
+// (moy_wasm_session.h). `interp` is true when `module_path` IS the cart's own
+// main.wasm, run on the interpreter tier (docs/wasm_tier_plan_2026-09.md, "A
+// cart survives its firmware", 2026-09-30): no key, no signature, no Unknown
+// sources check, and `wasm_sha` is ignored. A refusal or a trap closes
+// nothing -- close() does.
 static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
 {
     if (!RUN.open || RUN.L || RUN.wasm)
@@ -2725,7 +2730,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
     const char *sha = a[3] == mp_const_none ? NULL : mp_obj_str_get_str(a[3]);
     int rc = wasm_begin(mp_obj_str_get_str(a[0]), sha, mp_obj_str_get_str(a[4]),
                         mp_obj_is_true(a[5]), n_args > 7 && mp_obj_is_true(a[7]),
-                        err, sizeof(err));
+                        n_args > 8 && mp_obj_is_true(a[8]), err, sizeof(err));
     g_whead = NULL;
     g_whead_len = 0;
     if (rc) return mp_obj_new_str(err, strlen(err));
@@ -2737,7 +2742,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                  MP_ERROR_TEXT("moycore: this build has no wasm engine"));
 #endif
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_open_obj, 6, 8, mod_wasm_open);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_open_obj, 6, 9, mod_wasm_open);
 
 // wasm_quit() -> whether the cart called quit(): it ended itself, and the
 // run must not call it again.

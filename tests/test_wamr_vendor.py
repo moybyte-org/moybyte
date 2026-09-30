@@ -1,7 +1,8 @@
 """The vendored WAMR runtime is still the fork's code at the pinned commit.
 
-native/moy_wasm/wamr/ is the AOT-only subset of moybyte-org/wasm-micro-runtime
-(branch moybyte-2.4.5), copied by tools/vendor_wamr.py and stamped in
+native/moy_wasm/wamr/ is the AOT-plus-interpreter subset of
+moybyte-org/wasm-micro-runtime (branch moybyte-2.4.5), copied by
+tools/vendor_wamr.py and stamped in
 native/moy_wasm/wamr_vendor.json. The runtime is carried as a fork pinned by
 hash (docs/wasm_tier_plan_2026-09.md), so a fix belongs in the fork and
 arrives here by re-vendoring; an edit made here survives only until the next
@@ -51,15 +52,31 @@ def test_every_file_in_the_copy_is_in_the_manifest(manifest):
                 "to tools/vendor_wamr.py's FILES or delete it" % rel)
 
 
-def test_the_copy_is_aot_only(manifest):
-    """No interpreter, no compiler, no WASI, no builtin libc: headers the AOT
-    code shares types through may cross, their sources may not."""
+def test_the_copy_carries_no_compiler_or_wasi_or_libc(manifest):
+    """AOT plus the interpreter tier (2026-09-30, "A cart survives its
+    firmware"): no compiler, no WASI, no builtin libc, no JIT. Headers the AOT
+    code shares types through may cross, the compilation tier's sources may
+    not."""
     for rel in manifest["files"]:
         if not rel.endswith((".c", ".s", ".S")):
             continue
-        for banned in ("/interpreter/", "/compilation/", "/libc-wasi/",
+        for banned in ("/compilation/", "/libc-wasi/",
                        "/libc-builtin/", "/fast-jit/", "/samples/", "/tests/"):
             assert banned not in rel, rel
+
+
+def test_the_interpreter_tier_is_classic_plus_fast_plus_the_loader(manifest):
+    """Both of WAMR's interpreters are vendored (micropython.cmake compiles
+    exactly one, chosen by MOY_WASM_FAST_INTERP, the same shape as the two
+    reloc arches) alongside the plain .wasm loader -- never the mini loader,
+    the same full-validation decision the AOT build already made."""
+    interp = {rel for rel in manifest["files"] if "/interpreter/" in rel}
+    for rel in ("core/iwasm/interpreter/wasm_loader.c",
+                "core/iwasm/interpreter/wasm_runtime.c",
+                "core/iwasm/interpreter/wasm_interp_classic.c",
+                "core/iwasm/interpreter/wasm_interp_fast.c"):
+        assert "native/moy_wasm/wamr/" + rel in interp, rel
+    assert not any("mini_loader" in rel for rel in interp)
 
 
 def test_one_pin_everywhere(manifest):

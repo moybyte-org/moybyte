@@ -145,7 +145,7 @@ static StaticSemaphore_t g_lock_buf;
 #error "moy_wasm: no provenance key for this target (moy_wasm_key.h)"
 #endif
 
-static const char KEY_TAIL[] = "fork " MOY_WASM_FORK_COMMIT "\n" KEY_TARGET;
+static const char KEY_TAIL[] = "format " MOY_WASM_FORMAT_VERSION "\n" KEY_TARGET;
 
 // What a failure for want of memory says first, whichever allocation it was:
 // the Player reads it as a cart this board cannot fit, the notice a cart
@@ -696,6 +696,8 @@ static lane_stats_t g_lane_stats[LANES_MAX + 1];
 typedef struct {
     // the MicroPython side's
     bool live;
+    bool interp;                    // running main.wasm on the interpreter --
+                                     // no key, no signature, no par lanes
     pthread_t tid;
     const moy_wasm_ops *ops;
     char want_sha[65];
@@ -778,6 +780,14 @@ static void *lane_thread(void *arg)
 
 int moy_wasm_session_lanes(void)
 {
+    // An interpreted session declines lanes the same way a one-core board
+    // does (README.md): no sibling instance trick is attempted over the
+    // interpreter's module, so a cart's par items run in declaration order
+    // on the calling core instead (docs/wasm_tier_plan_2026-09.md, "A cart
+    // survives its firmware", 2026-09-30).
+    if (g_sess && g_sess->interp) {
+        return 0;
+    }
     return MOY_WASM_ITEM_LANES;
 }
 
@@ -900,7 +910,10 @@ static void *sess_thread(void *arg)
         rc = sess_fail(s, alloc_failed(err) ? OUT_OF_MEMORY : "load", err);
         goto opened;
     }
-    {
+    // An interpreted session is main.wasm itself: no moybyte.key section, no
+    // signature, nothing to check -- its sandbox is WAMR's bytecode
+    // validation, not provenance (moy_wasm_key.h's "WHY A FORMAT VERSION").
+    if (!s->interp) {
         run_t scratch;
         memset(&scratch, 0, sizeof(scratch));
         if (!check_key(&scratch, module)) {
@@ -1018,8 +1031,8 @@ void moy_wasm_session_close(void)
 }
 
 int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memory,
-                          int allow_unsigned, const moy_wasm_ops *ops, char *err,
-                          size_t errlen)
+                          int allow_unsigned, int interp, const moy_wasm_ops *ops,
+                          char *err, size_t errlen)
 {
     if (moy_wasm_session_live() || g_run.started) {
         snprintf(err, errlen, "a wasm run is already live");
@@ -1039,6 +1052,7 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         return 1;
     }
     s->ops = ops;
+    s->interp = interp != 0;
     if (want_sha && strlen(want_sha) == 64) {
         memcpy(s->want_sha, want_sha, 65);
     }
@@ -1051,11 +1065,16 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         sess_free(s);
         nlr_jump(nlr.ret_val);
     }
-    const char *why = verify_module(s->file, s->file_len, allow_unsigned != 0, &s->file_len);
-    if (why) {
-        snprintf(err, errlen, "refused: %s", why);
-        sess_free(s);
-        return 1;
+    // main.wasm carries no signature and needs none: the interpreter is the
+    // sandbox (moy_wasm_key.h). Everything else -- AOT modules -- still goes
+    // through the Unknown sources gate as before.
+    if (!s->interp) {
+        const char *why = verify_module(s->file, s->file_len, allow_unsigned != 0, &s->file_len);
+        if (why) {
+            snprintf(err, errlen, "refused: %s", why);
+            sess_free(s);
+            return 1;
+        }
     }
     s->waiting = true;
     int pe = moy_wasm_spawn(&s->tid, sess_thread, s, MOY_WASM_STACK_BYTES,
@@ -1205,7 +1224,8 @@ static mp_obj_t mod_lanes(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_lanes_obj, mod_lanes);
 
-static MP_DEFINE_STR_OBJ(mod_key_obj, "fork " MOY_WASM_FORK_COMMIT "\n" KEY_TARGET);
+static MP_DEFINE_STR_OBJ(mod_key_obj, "format " MOY_WASM_FORMAT_VERSION "\n" KEY_TARGET);
+static MP_DEFINE_STR_OBJ(mod_format_obj, MOY_WASM_FORMAT_VERSION);
 static MP_DEFINE_STR_OBJ(mod_fork_obj, MOY_WASM_FORK_COMMIT);
 static MP_DEFINE_STR_OBJ(mod_chip_obj, KEY_CHIP);
 
@@ -1223,9 +1243,12 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mod_mem_obj) },
     { MP_ROM_QSTR(MP_QSTR_lanes), MP_ROM_PTR(&mod_lanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_footprint), MP_ROM_PTR(&mod_footprint_obj) },
-    // The key tail this build wants (after the wasm line), the fork commit it
-    // runs, and the board's default run stack (bytes, in PSRAM).
+    // The key tail this build wants (after the wasm line), the compiled-code
+    // format version and the fork commit the engine was vendored from
+    // (diagnostic only -- FORK plays no part in the key since 2026-09-30, ESP
+    // 88), and the board's default run stack (bytes, in PSRAM).
     { MP_ROM_QSTR(MP_QSTR_KEY), MP_ROM_PTR(&mod_key_obj) },
+    { MP_ROM_QSTR(MP_QSTR_FORMAT), MP_ROM_PTR(&mod_format_obj) },
     { MP_ROM_QSTR(MP_QSTR_FORK), MP_ROM_PTR(&mod_fork_obj) },
     { MP_ROM_QSTR(MP_QSTR_STACK), MP_ROM_PTR(&mod_stack_obj) },
     // The runtime pool's base size; a module adds a share of its own.

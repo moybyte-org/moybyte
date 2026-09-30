@@ -58,16 +58,24 @@ get a slower push; it gets one line saying to flash it. What survives on the
 `py` channel is the small stuff: the already-current hash, the mkdir, the
 store's room and the rename.
 
-A COMPILED CART GETS ITS MODULE HERE. A board runs a `"runtime": "wasm"` cart
-only from a module compiled for its chip (`main.<chip>.aot` beside
-`main.wasm`, native/moy_wasm/README.md), and a cart made with moy-spec's `moy
-build` carries none. So when the cart has no module for this board's chip --
+A COMPILED CART GETS ONLY ITS OWN BOARD'S MODULE HERE. A cart may carry any
+number of compiled modules (SPEC.md 16: one per chip and compiled-code format
+version, `main.<chip>.f<format>.aot` beside `main.wasm`,
+native/moy_wasm/README.md, "A cart survives its firmware") so it stays
+portable off a console, but this push copies `main.wasm` plus ONLY the one
+this board's chip and this tree's format would take -- every OTHER module
+already sitting in the cart folder is left there, unpushed, exactly as a
+`.gitignore`d build artifact would be. A cart made with moy-spec's `moy build`
+carries none at all. So when the cart has no module for this board's chip --
 the chip is its board.toml's `[board] chip` -- or has one built for another
-main.wasm or another runtime, this compiles one with tools/wasm_module.py,
-UNSIGNED, and pushes it in its place; the cart folder itself is left as it
-was. An unsigned module runs only while the console's Settings -> Unknown
-sources is on, so when the module going over is unsigned the tool asks the
-console, and says so plainly before the push if it is off.
+main.wasm, this compiles one with tools/wasm_module.py, UNSIGNED, and pushes
+it in its place; the cart folder itself is left as it was. Nothing is ever
+evicted: a module already on the board from an earlier push stays there
+whether or not this push touches it. An unsigned module runs at full speed
+only while the console's Settings -> Unknown sources is on; with it off the
+module is ignored and the cart plays on the interpreter instead, so when the
+module going over is unsigned the tool says so plainly before the push
+either way.
 
 A STORE WITHOUT THE ROOM IS ONE LINE, NOT A TRACEBACK. Before the first window
 the tool weighs what the push adds against the free bytes of the store it
@@ -418,6 +426,16 @@ def compiled_module(cart, chip, work, log=print):
     return name, out, False
 
 
+def other_compiled_modules(names, keep):
+    """This cart's OTHER compiled modules among `names` -- every `.aot` file
+    besides `keep`, the one a push selected for this board. A cart may carry
+    any number of them (one per chip and compiled-code format version, "A
+    cart survives its firmware"), and a push leaves every one it does not
+    need exactly where it was, unpushed -- portable, but not this board's
+    business."""
+    return [n for n in names if n.endswith(".aot") and n != keep]
+
+
 def cart_files(cart):
     """Every file in the cart folder, RELATIVE to it, forward-slashed.
 
@@ -492,6 +510,11 @@ def _push(a, cart, names, local, work):
         local[name] = path
         if name not in names:
             names = sorted(names + [name])
+        skip = other_compiled_modules(names, name)
+        if skip:
+            names = [n for n in names if n not in skip]
+            print("not pushing %s (another chip/format's module, unneeded here)"
+                 % ", ".join(skip))
     if a.only:
         missing = [f for f in a.only if f not in names]
         if missing:

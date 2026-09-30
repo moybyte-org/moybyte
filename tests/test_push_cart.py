@@ -886,7 +886,8 @@ def test_a_compiled_cart_without_a_module_gets_one_compiled_and_pushed(
     dev.ws.unknown_sources = unknown_sources
     monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
     assert push_cart.main([cart, "--board", "tdeck"]) == 0
-    module = dev.fs.files["/sd/carts/demo.moy/main.esp32s3.aot"]
+    module = dev.fs.files["/sd/carts/demo.moy/main.esp32s3.f%s.aot"
+                          % wm.format_version()]
     with open(os.path.join(cart, "main.wasm"), "rb") as f:
         wasm = f.read()
     assert dev.fs.files["/sd/carts/demo.moy/main.wasm"] == wasm
@@ -903,9 +904,10 @@ def test_a_module_built_for_another_main_wasm_is_replaced(monkeypatch, tmp_path,
                                                           capsys):
     """A stale module -- main.wasm rebuilt since -- is one the board refuses
     by its key, so the push compiles a fresh one in its place."""
-    from tools import wasm_module as wm
+    from tools import wasm_cart, wasm_module as wm
     cart = _compiled_cart(tmp_path)
-    stale = os.path.join(cart, "main.esp32p4.aot")
+    name = wasm_cart.aot_name("main.wasm", "esp32p4")   # this tree's own format
+    stale = os.path.join(cart, name)
     wm.build(b"\0asm\1\0\0\0", "esp32p4", stale,
              signed=False)
     dev = _FakeConsole(board="p4", carts_root="/moy/carts")
@@ -915,6 +917,32 @@ def test_a_module_built_for_another_main_wasm_is_replaced(monkeypatch, tmp_path,
     assert push_cart.main([cart, "--board", "p4"]) == 0
     with open(os.path.join(cart, "main.wasm"), "rb") as f:
         wasm = f.read()
-    assert wm.key_matches(dev.fs.files["/moy/carts/demo.moy/main.esp32p4.aot"],
+    assert wm.key_matches(dev.fs.files["/moy/carts/demo.moy/" + name],
                           wasm, "esp32p4")
     assert "built for another main.wasm" in capsys.readouterr().out
+
+
+@needs_wamrc
+def test_a_module_for_another_chip_is_left_unpushed(monkeypatch, tmp_path):
+    """A portable cart may carry a module per chip and format
+    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware"); a push
+    takes only the one THIS board's chip wants and leaves every other one
+    sitting in the cart folder, unpushed -- it is not this board's module to
+    carry, and nothing about pushing it should evict it either."""
+    from tools import wasm_cart
+    cart = _compiled_cart(tmp_path)
+    with open(os.path.join(cart, "main.wasm"), "rb") as f:
+        wasm = f.read()
+    other = os.path.join(cart, wasm_cart.aot_name("main.wasm", "esp32p4"))
+    from tools import wasm_module as wm
+    wm.build(wasm, "esp32p4", other, signed=False)
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    assert push_cart.main([cart, "--board", "tdeck"]) == 0
+    pushed = [p for p in dev.fs.files if p.startswith("/sd/carts/demo.moy/")]
+    assert not any(p.endswith(".esp32p4.f%s.aot" % wm.format_version())
+                   for p in pushed), pushed
+    assert any(p.endswith(".esp32s3.f%s.aot" % wm.format_version())
+              for p in pushed), pushed
+    # unpushed, not deleted: still on disk, right where it was built
+    assert os.path.isfile(other)

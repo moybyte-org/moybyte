@@ -672,10 +672,17 @@ def test_the_notice_never_reads_as_a_fit():
 
 def test_the_tool_and_the_board_name_the_compiled_module_alike():
     from device import moycore_glue
+    from tools import wasm_module
+    fmt = wasm_module.format_version()
     for main in ("main.wasm", "doom.wasm", "game"):
         for chip in ("esp32s3", "esp32p4"):
-            assert (moycore_glue.aot_path("/c", main, chip)
+            assert (moycore_glue.aot_path("/c", main, chip, fmt)
                     == "/c/" + wasm_cart.aot_name(main, chip))
+            for other in ("0", "2", "99"):
+                if other == fmt:
+                    continue
+                assert (moycore_glue.aot_path("/c", main, chip, other)
+                        == "/c/" + wasm_cart.aot_name(main, chip, other))
 
 
 def test_the_board_reads_the_head_up_to_the_memory_section(tmp_path):

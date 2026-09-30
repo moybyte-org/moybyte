@@ -284,34 +284,21 @@ NOTICE_TITLE = "Too big for this console."
 _OUT_OF_MEMORY = "out of memory"
 _MB = 1024 * 1024
 
-# A compiled cart whose module carries no signature, on a console whose owner
-# has not turned Unknown sources on (native/moy_wasm/README.md): the same
-# notice under its own title, saying where the switch is. A board's engine is
-# the only thing that checks a signature, so only a board gives this refusal.
-# A module whose signature is present and does not verify keeps the error
-# panel: that module was changed after it was signed, and no switch runs it.
-UNSIGNED_TITLE = "Not signed."
-_UNSIGNED = "refused: unsigned module"
-
-# A compiled cart whose module was built for another runtime, chip or set of
-# compiler flags (its provenance key does not match this build's): nothing is
-# wrong with the cart, it is out of date for this console -- a firmware update
-# that moves the runtime makes every installed module this -- so it is a notice
-# too. The engine's refusal text starts with _KEY_MISMATCH.
-OUTDATED_TITLE = "Needs an update."
-_KEY_MISMATCH = "refused: key mismatch"
-
-
-def unsigned_notice(title):
-    """The notice for a compiled cart refused for having no signature."""
-    return ("%s isn't signed. To run it, turn on Unknown sources in Settings."
-            % (title or "This cart"))
-
-
-def outdated_notice(title):
-    """The notice for a compiled cart built for another version of the console."""
-    return ("%s was built for another version of this console. Install an "
-            "updated copy to play it." % (title or "This cart"))
+# A compiled cart whose module does not run natively on this console -- none
+# for this chip and compiled-code format, one with no signature while the
+# owner has Unknown sources off, or one whose content is corrupt -- is never
+# refused for it (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+# firmware", 2026-09-30): device/moycore_glue.WasmRun retries it on the
+# interpreter before this layer ever sees an error, so the cart plays, only
+# slower, and INTERP_NOTICE is the short toast that says so (`ws.notice`,
+# runtime/console_notices.py -- it expires on its own, never a panel to
+# dismiss). This retired the "Not signed." and "Needs an update." panels a
+# module in either state used to get (`43581ed4`): both are now this toast. A
+# module whose SIGNATURE is present and does not verify still keeps the
+# ordinary error panel -- that module was changed after it was signed, which
+# is tamper evidence, not staleness, and no switch and no interpreter runs it.
+INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
+INTERP_NOTICE_SUB = "interpreted, not compiled"
 
 
 class _TooBig(Exception):
@@ -1684,6 +1671,12 @@ class Player:
                     raise _TooBig(fit_notice((ws.cart or {}).get("title"),
                                              fit[0], fit[1]))
             lua = make(ns, src)
+            if runtime == "wasm" and getattr(lua, "interp", False):
+                # Not an error and not a panel: the cart plays, on the
+                # interpreter rather than the module this console wanted.
+                notice = getattr(ws, "notice", None)
+                if notice is not None:
+                    notice(INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB, "warn")
             t_exec = _ticks_diff(_ticks_ms(), t5)
             t6 = _ticks_ms()
             if lua.init is not None:
@@ -1701,8 +1694,10 @@ class Player:
             # and on a cart of several scripts, in the FILE that raised. A
             # compiled cart has no line to drop on; one this console cannot
             # hold gets the fit notice, whether the check refused it or its
-            # load ran out of memory; one whose module is unsigned while
-            # Unknown sources is off gets the notice that names the switch.
+            # load ran out of memory. Every OTHER compiled-cart refusal
+            # (no/stale module, unsigned with the switch off) was already
+            # retried on the interpreter inside WasmRun -- what reaches here
+            # is a real error (a trap, a bad signature, a malformed cart).
             if runtime == "wasm":
                 self.crash_file, self.crash_line = None, None
                 title = (ws.cart or {}).get("title")
@@ -1715,14 +1710,6 @@ class Player:
                     self._notice = self.cart_error = fit_notice(
                         title, fit[0] if fit else None, fit[1] if fit else None)
                     self._notice_title = NOTICE_TITLE
-                elif _UNSIGNED in self.cart_error:
-                    print("Moybyte cart load:", self.cart_error)
-                    self._notice = self.cart_error = unsigned_notice(title)
-                    self._notice_title = UNSIGNED_TITLE
-                elif _KEY_MISMATCH in self.cart_error:
-                    print("Moybyte cart load:", self.cart_error)
-                    self._notice = self.cart_error = outdated_notice(title)
-                    self._notice_title = OUTDATED_TITLE
             else:
                 self.crash_file, self.crash_line = _lua_cart_where(
                     self.cart_error, self.ws.cart)
