@@ -692,8 +692,10 @@ class PerfSampler:
     off -- kid mode, the default -- nothing periodic is formatted, printed or
     ringed on any board, because every line is garbage the collector comes back
     for in a stop-the-world pass. Whatever reads the line turns the diag on for
-    its measurement and puts it back (`tools/p4_perf.py`, `tools/board.py perf`,
-    `tests/on_glass.py`'s `perf_diag`). The window still closes every period
+    its measurement and puts it back (`--diag` on `tools/p4_perf.py` and
+    `tools/board.py perf`, `tests/on_glass.py`'s `perf_diag`); the tools'
+    default, the shipping fps, reads `ws._frames_drawn` -- the counter `fps=`
+    is taken from -- with the diag off. The window still closes every period
     while it is off, so the first line after it comes on is a whole period of
     its own; the PPA deltas, whose baseline is only read under the diag, print
     `-` in that one line.

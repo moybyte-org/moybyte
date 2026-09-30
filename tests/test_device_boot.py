@@ -1413,9 +1413,9 @@ PERF_BOARDS = {
 #   tdeck    the values behind `Moybyte 2698583 PERF cart=Sakura_Lua fps=53
 #            net=- flush=0 draw=14`, plus the columns its old five-field line
 #            never carried. The slug and the `-` come straight from it.
-#   p4_dark  the P4 with the deep meters OFF, which is how tools/p4_perf.py
-#            measures: nothing writes _pf_wm_*, so those read `-` -- "not
-#            measured" and "measured zero" are different answers.
+#   p4_dark  the P4 in a sample the windowed WM did not run in: nothing wrote
+#            _pf_wm_*, so those read `-` -- "not measured" and "measured
+#            zero" are different answers.
 PERF_CASES = {
     "p4": (
         {"cart": None, "fps": (0, 62), "net": None, "busy": 2,

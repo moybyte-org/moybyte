@@ -391,13 +391,15 @@ def cmd_perf(b, a):
     held = st.get("wifi_held") or []
     status = 0
     try:
-        # The PERF line is PERF DIAG's: with the diag off a board writes none.
-        b.cmd("diag 1", wait_for="REMOTE diag")
+        # Off for the shipping fps, which p4_perf reads off the drawn-frame
+        # counter; on for --diag, whose phases only the PERF line carries.
+        b.cmd("diag %d" % (1 if a.diag else 0), wait_for="REMOTE diag")
         if a.uncap:
             b.cmd("uncap 1", wait_for="REMOTE uncap")
         for title in a.titles:
             try:
-                r = p4_perf.measure(b, title, a.secs, lambda *x: None)
+                r = p4_perf.measure(b, title, a.secs, lambda *x: None,
+                                    diag=a.diag)
             except RuntimeError as exc:
                 print("%s: ERROR %s" % (title, exc))
                 status = 1
@@ -416,10 +418,10 @@ def cmd_perf(b, a):
         b.leave_cart()
         if a.uncap and not uncap_was:
             b.cmd("uncap 0", wait_for="REMOTE uncap")
-        if not diag_was:
-            b.cmd("diag 0", wait_for="REMOTE diag")
-    print("  (diag on, uncap %s, wifi %s)"
-          % ("on" if a.uncap else "off",
+        if bool(a.diag) != diag_was:
+            b.cmd("diag %d" % diag_was, wait_for="REMOTE diag")
+    print("  (diag %s, uncap %s, wifi %s)"
+          % ("on" if a.diag else "off", "on" if a.uncap else "off",
              "held by %s" % ",".join(held) if held else "off"))
     return status
 
@@ -898,8 +900,7 @@ def parser(dirs):
     p.add_argument("titles", nargs="+")
     p.add_argument("--secs", type=float, default=8.0)
     p.add_argument("--diag", action="store_true",
-                   help="print the phase ms too (it measures under PERF DIAG "
-                        "either way: that is what writes the line)")
+                   help="PERF DIAG on: phase ms, at the diag's own cost")
     p.add_argument("--uncap", action="store_true",
                    help="every loop frame draws (how the compiled carts' "
                         "floors are measured)")

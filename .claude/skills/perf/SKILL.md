@@ -27,15 +27,16 @@ cart it started, medians the drawn fps (a GC spike lands in one sample), ends
 the cart and puts diag and uncap back. It prints the conditions; keep them
 equal across an A/B:
 
-- **PERF DIAG** is off by default (kid mode, #68), and with it off a board
-  writes NO periodic line -- no PERF, no diag tick, no AUDIORATE, no SD trace
-  (owner call 2026-09-30: every line is garbage the collector stops the frame
-  for). So every PERF reading is taken with the diag on: `perf`, `p4_perf.py`
-  and the on-glass helpers (`tests/on_glass.py`'s `perf_diag`) arm it and put
-  it back, and its capture meters are frame eaters that ride along -- a number
-  taken before 2026-09-30 with the diag off is not the same condition.
-  `--diag` adds the phase ms. DIAG SD LOG stays off for serial measurement (it
-  stutters).
+- **PERF DIAG** is off by default (kid mode, #68) and its meters are frame
+  eaters, so `perf` and `p4_perf.py` measure the SHIPPING fps with it off.
+  With it off a board writes no periodic line at all -- no PERF, no diag tick,
+  no AUDIORATE, no SD trace (owner call 2026-09-30: every line is garbage the
+  collector stops the frame for) -- so that fps is read off the drawn-frame
+  counter (`ws._frames_drawn`, the one PERF's `fps=` is taken from) across 2 s
+  windows. `--diag` turns the diag on and reads the PERF lines for the phase
+  ms; the on-glass helpers (`tests/on_glass.py`'s `perf_diag`) arm it too,
+  because the suites' floors were set with it on. Say which. DIAG SD LOG stays
+  off for serial measurement (it stutters).
 - **WiFi off** — the radio is a lease; `wifi_held` in `state` names holders.
 - **LINKED** means a second console in the same two-player cart made it a real
   ESP-NOW match on the shared tick (#65): move the peer and re-measure.

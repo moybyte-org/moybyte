@@ -20,19 +20,22 @@ filter here, and the Guition printed a different field set from the P4's. There
 is ONE format now (runtime/perf_line.py), written by one body on every board,
 and this parses it with the module that writes it.
 
-Under Settings -> PERF DIAG the board prints a PERF line every ~2s carrying
-drawn-fps and the frame budget split (draw / flush / logic / render / chrome).
-This runs each cart, waits for the numbers to settle, and reports the median of
-the samples it saw -- median rather than mean because a GC spike lands in
-exactly one sample and should not move the answer.
+This runs each cart, waits for the numbers to settle, and reports the median
+of 2 s windows -- median rather than mean because a GC spike lands in exactly
+one window and should not move the answer.
 
-THE DIAG IS ON FOR EVERY MEASUREMENT, and put back after. With PERF DIAG off
-(kid mode, the default) a board writes no periodic line at all (owner call
-2026-09-30: each is garbage its collector stops the frame for), so the line is
-there only while this has the diag on. That makes every reading a PERF DIAG
-reading: `perf_capture` and the FPS chip ride along, and they are frame eaters
-of their own (#68) -- keep that in mind against a number taken before
-2026-09-30 with the diag off. --diag prints the per-phase ms as well.
+THE SHIPPING FPS IS THE DEFAULT: PERF DIAG stays OFF, because `perf_capture`
+and the on-screen FPS chip are themselves frame eaters (#68) and a number taken
+with them on is not what a kid gets. With the diag off a board writes no PERF
+line at all (owner call 2026-09-30: kid mode writes nothing periodic), so the
+drawn rate is read from the console's own counter instead -- `ws._frames_drawn`
+against `pump.last`, the board's clock at the top of the frame the read lands
+in, at the edges of each window. It is the counter PERF's `fps=` is taken from,
+so the two agree (tests/test_board_cli.py holds them together on a paced and an
+uncapped run of the real console), and `ws.perf_net()` gives the lockstep rate
+the line would have carried. --diag turns PERF DIAG on for the run and reads
+the PERF lines instead, adding the per-phase ms (draw / flush / logic / render
+/ chrome) at the diag's own cost; the diag is put back as it was either way.
 
 A row marked LINKED is NOT that cart's fps. A second console left in the same
 two-player cart forms a real ESP-NOW match, and a linked game draws on the
@@ -75,12 +78,27 @@ DEFAULT_ROSTER = [
 ]
 
 
-def measure(board, title, secs, log):
-    """Run `title` from the launcher and read its PERF samples for `secs`;
-    the caller has PERF DIAG on, which is what makes the board write them.
-    None if the board has no such cart; RuntimeError if it started and then
-    failed, or if no sample names it. `tools/board.py perf` is the other
-    caller."""
+# The window the drawn-frame counter is read across: PERF's own period, so a
+# median over these is the same statistic as one over PERF samples.
+WINDOW_S = 2.0
+
+# One read of the counter, between two frames: the board's clock at the top of
+# this frame, the frames drawn before it, the lockstep rate since the last read
+# (None with no session) and the cart the console is running.
+COUNTER = ("(pump.last, ws._frames_drawn, ws.perf_net(), "
+           "(ws.cart or {}).get('title'))")
+
+# MicroPython's ticks_ms wraps here.
+_TICKS_PERIOD = 1 << 30
+
+
+def measure(board, title, secs, log, diag=False):
+    """Run `title` from the launcher and measure its drawn fps for `secs`:
+    from the drawn-frame counter with PERF DIAG off, from its PERF samples
+    (phases included) under `diag`, which the caller has switched on. None if
+    the board has no such cart; RuntimeError if it started and then failed, or
+    if what was measured names another cart. `tools/board.py perf` is the
+    other caller."""
     board.leave_cart()
     line = board.cmd("run %s" % title, wait_for="REMOTE run", timeout=20.0)
     if line is None:
@@ -89,15 +107,60 @@ def measure(board, title, secs, log):
         return None
     # The title the console matched, which is what its PERF lines name.
     running = line.split("REMOTE run ", 1)[-1].strip() or title
-    # Discard the first samples: a cart's opening frames build sprite caches and
-    # touch cold flash, which is real but is not what it runs at.
+    # Discard the first seconds: a cart's opening frames build sprite caches
+    # and touch cold flash, which is real but is not what it runs at.
     board.drain(4.0)
-    n0 = len(board.lines)
-    board.drain(secs)
+    if diag:
+        return _from_perf(board, running, title, secs)
+    return _from_counter(board, running, secs)
+
+
+def window_fps(a, b):
+    """Drawn fps between two COUNTER reads."""
+    ms = (b[0] - a[0]) % _TICKS_PERIOD
+    return (b[1] - a[1]) * 1000.0 / ms if ms else None
+
+
+def _from_counter(board, running, secs):
+    reads = [board.pyval(COUNTER, timeout=10.0, strict=True)]
+    for _ in range(max(1, int(round(secs / WINDOW_S)))):
+        board.drain(WINDOW_S)
+        reads.append(board.pyval(COUNTER, timeout=10.0, strict=True))
+    _check_ran(board, running)
+    other = sorted({str(r[3]) for r in reads if r[3] != running})
+    if other:
+        raise RuntimeError("the console ran %s, not %s"
+                           % ("/".join(other), running))
+    fps = [f for f in (window_fps(a, b) for a, b in zip(reads, reads[1:]))
+           if f is not None]
+    if not fps:
+        return None
+    # The lockstep rate over each window; the first read's covers the time
+    # before it, so it is not this cart's. See _from_perf for why it matters.
+    ticks = [r[2] for r in reads[1:] if isinstance(r[2], (int, float))]
+    return {
+        "title": running,
+        "n": len(fps),
+        "linked": statistics.median(ticks) if ticks else None,
+        "fps": statistics.median(fps),
+        "min": min(fps),
+        "cart": slug(running),
+        "phases": {k: None
+                   for k in ("draw", "flush", "logic", "render", "chrome")},
+    }
+
+
+def _check_ran(board, running):
     st = board.state()
     if st.get("cart_error") or st.get("notice"):
         raise RuntimeError("%s did not run: %s"
                            % (running, st.get("cart_error") or st.get("notice")))
+
+
+def _from_perf(board, running, title, secs):
+    n0 = len(board.lines)
+    board.drain(secs)
+    _check_ran(board, running)
     seen = [p for p in (parse_perf(l) for l in board.lines[n0:]) if p]
     # Only this cart's samples: a line printed from the launcher before the
     # cart came up is the launcher's frame, not the cart's.
@@ -150,8 +213,8 @@ def main(argv=None):
     add_board_args(ap)
     ap.add_argument("--secs", type=float, default=8.0, help="sample window per cart")
     ap.add_argument("--diag", action="store_true",
-                    help="print the per-phase ms too (every measurement runs "
-                         "under PERF DIAG: its lines are the reading)")
+                    help="PERF DIAG on for the run: the per-phase ms from its "
+                         "lines, at the diag's own cost (NOT the shipping fps)")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
 
@@ -166,7 +229,7 @@ def main(argv=None):
         if board.pyval("1", timeout=8.0) != 1 and not board.attach_only:
             board.reset()
         diag_was = bool(board.state().get("diag"))
-        board.cmd("diag 1", wait_for="REMOTE diag")
+        board.cmd("diag %d" % (1 if a.diag else 0), wait_for="REMOTE diag")
         try:
             board.drain(0.5)
             print("%-18s %6s %6s %5s   %s"
@@ -176,7 +239,7 @@ def main(argv=None):
             linked = False
             for title in roster:
                 try:
-                    r = measure(board, title, a.secs, log)
+                    r = measure(board, title, a.secs, log, diag=a.diag)
                 except RuntimeError as exc:
                     print("%-18s  ERROR %s" % (title, exc))
                     continue
@@ -192,10 +255,10 @@ def main(argv=None):
                 rows.append((title, r))
             board.leave_cart()
         finally:
-            if not diag_was:
-                board.cmd("diag 0", wait_for="REMOTE diag")
+            if bool(a.diag) != diag_was:
+                board.cmd("diag %d" % diag_was, wait_for="REMOTE diag")
         if linked:
-            print("\nLINKED: the board's own PERF line reported a lockstep tick "
+            print("\nLINKED: the board reported a lockstep tick "
                   "rate (net=), so another\nconsole on this desk is in the same "
                   "two-player cart and that run was a real\nESP-NOW match "
                   "drawing on the shared tick (#65). That number is the match's,"

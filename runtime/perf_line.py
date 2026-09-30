@@ -4,8 +4,10 @@ WHAT THIS IS. Every ~2s while Settings -> PERF DIAG is on, each board puts one
 line on serial naming what its frame cost; with it off (kid mode, the default)
 there is no line at all, and whatever reads one turns the diag on for its
 measurement and puts it back (`device_boot.PerfSampler` says why).
-`tools/p4_perf.py` turns those lines into #66's per-cart numbers, so the line
-is a CONTRACT -- and until 2026-08-28 it was three contracts wearing one name:
+`tools/p4_perf.py --diag` reads the line for #66's per-phase numbers (its
+default, the shipping fps, reads the same `_frames_drawn` counter with the diag
+off), so the line is a CONTRACT -- and until 2026-08-28 it was three contracts
+wearing one name:
 
     T-Deck   Moybyte <ms> PERF cart=<n> fps=<n> net=<t|-> flush=<ms> draw=<ms>
     P4       PERF fps=<d>/<n> net=<t|-> busy=<n>ms draw= ... cart=<n>
@@ -28,8 +30,9 @@ doctrine and the whole reason `fold=0` hid for weeks: a frozen 0 is also what a
 broken lever looks like, so a board with no lever must say so. `net=-` and
 `cart=-` already spelled it; every optional field now follows. The T-Deck and
 the Guition have no PPA and no DSI fences, and neither runs the windowed WM, so
-those columns read `-` there -- and a P4 with the deep meters off reads `-` in
-the wm columns too, which is the honest answer to "what did you measure".
+those columns read `-` there -- and a P4 whose windowed WM did not run in a
+sample reads `-` in the wm columns too, which is the honest answer to "what did
+you measure".
 
 TOKENISABLE ON WHITESPACE, because that is what both readers do. Hence two
 rules the emitter enforces rather than trusting callers with: a cart title is

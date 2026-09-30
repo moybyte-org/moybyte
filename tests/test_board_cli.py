@@ -277,6 +277,10 @@ class WS:
         self.pmem = None
         self.canvas = Canvas(8, 4)
         self.homes = 0
+        self.net_tps = None           # a lockstep rate, when a test sets one
+
+    def perf_net(self):
+        return self.net_tps
 
     @property
     def screen(self):
@@ -311,21 +315,45 @@ class WS:
         self.wm._stack = ["launcher", "desk"]
 
 
+class Pump:
+    """FramePump.last: the board's ticks_ms at the top of the current frame,
+    which is where a dev command runs."""
+
+    def __init__(self, clock):
+        self.clock = clock
+
+    @property
+    def last(self):
+        return int(self.clock.now * 1000)
+
+
 class Wire:
     """The serial port: lines written go to the real DevChannel, what it
-    prints comes back, and a running cart emits a PERF line every 2 s."""
+    prints comes back, a running cart draws at the head of `fps` -- the rate
+    moves on every 2 s -- and under PERF DIAG it emits a PERF line every 2 s
+    naming the rate it drew at."""
 
     port = "/dev/fake"
 
     def __init__(self, ws, clock, fps=(58, 60, 57, 59, 60), comp=None):
         self.ws, self.clock = ws, clock
         self.ch = DevChannel(ws, types.SimpleNamespace(
-            place=lambda x, y: None, down=False), env={"comp": comp})
+            place=lambda x, y: None, down=False),
+            env={"comp": comp, "pump": Pump(clock)})
         self.to_host = b""
         self.pending = b""
         self.sent = []
         self.fps = list(fps)
         self.next_perf = clock.now + 2.0
+        self._drawn = float(ws._frames_drawn)
+
+    def _tick(self, dt):
+        """The console's frames over `dt` s: a cart draws at the head rate,
+        the idle launcher draws nothing."""
+        self.clock.now += dt
+        if self.ws.cart and self.fps:
+            self._drawn += self.fps[0] * dt
+            self.ws._frames_drawn = int(self._drawn)
 
     def write(self, data):
         self.pending += data
@@ -348,15 +376,15 @@ class Wire:
 
     def read(self, n=1):
         if not self.to_host:
-            self.clock.now += 0.05
+            self._tick(0.05)
             if self.clock.now >= self.next_perf:
                 self.next_perf += 2.0
-                if not self.ws.diag_live:      # the line is PERF DIAG's
-                    return b""
                 cart = self.ws.cart["title"] if self.ws.cart else None
                 fps = self.fps[0] if self.fps else 60
                 if self.ws.cart and self.fps:
                     self.fps.append(self.fps.pop(0))
+                if not self.ws.diag_live:      # the line is PERF DIAG's
+                    return b""
                 self.to_host += (format_perf({
                     "cart": cart, "fps": (fps, 60), "render": 9.0,
                     "logic": 3.0}) + "\n").encode()
@@ -447,9 +475,9 @@ def test_perf_reports_the_median_and_restores_the_switches(clock):
     assert ws.cart is None, "perf ends its cart"
     assert ws._uncap is False and ws.diag_live is False
     assert "uncap 1" in wire.sent and "uncap 0" in wire.sent
-    # The line is PERF DIAG's, so the measurement armed it and put it back.
-    assert wire.sent.index("diag 1") < wire.sent.index("diag 0")
-    assert "(diag on" in out
+    # The shipping fps: PERF DIAG stays off, and the reading is the counter's.
+    assert "diag 1" not in wire.sent and "(diag off" in out
+    assert any(line.startswith("py (pump.last") for line in wire.sent)
 
 
 def test_perf_keeps_a_switch_that_was_already_on(clock):
@@ -473,8 +501,97 @@ def test_perf_refuses_samples_that_name_another_cart(clock, monkeypatch):
 
     ws.launch_named = wrong
     code, out = run(board.cmd_perf, b, args(titles=["Brick Siege"], secs=4.0,
-                                            diag=False, uncap=False))
+                                            diag=True, uncap=False))
     assert code == 1 and "PERF names cart=Other" in out
+
+
+@pytest.mark.parametrize("rate", [30, 60])
+def test_the_counter_reads_what_the_PERF_line_reads(clock, rate):
+    """The shipping fps (PERF DIAG off, the drawn-frame counter) and --diag's
+    (the PERF samples) are the same number off the same console -- a paced
+    cart drawing 30 and an uncapped one drawing 60 -- so a new row compares
+    with #66's."""
+    import p4_perf
+    got = {}
+    for diag in (False, True):
+        ws, wire, b = console(clock, fps=(rate,))
+        ws.diag_live = diag
+        got[diag] = p4_perf.measure(b, "Brick Siege", 8.0, lambda *x: None,
+                                    diag=diag)
+    assert abs(got[False]["fps"] - got[True]["fps"]) < 1.0, got
+    assert abs(got[False]["fps"] - rate) < 1.0, got
+    assert got[False]["n"] == 4 and got[False]["phases"]["render"] is None
+    assert got[True]["phases"]["render"] == 9.0
+
+
+def test_the_counter_names_a_lockstep_match(clock):
+    import p4_perf
+    ws, wire, b = console(clock, fps=(30,))
+    ws.net_tps = 30.0
+    r = p4_perf.measure(b, "Brick Siege", 4.0, lambda *x: None)
+    assert r["linked"] == 30.0
+
+
+def test_the_counter_refuses_a_run_of_another_cart(clock):
+    import p4_perf
+    ws, wire, b = console(clock)
+    real = ws.launch_named
+
+    def wrong(name):
+        got = real(name)
+        ws.cart = {"title": "Other"}
+        return got
+
+    ws.launch_named = wrong
+    with pytest.raises(RuntimeError, match="ran Other, not Brick Siege"):
+        p4_perf.measure(b, "Brick Siege", 4.0, lambda *x: None)
+
+
+def _perf_run(tmp_path, monkeypatch, uncap):
+    """Coin Quest -- the paced fixture, 30 by default -- on the REAL host
+    console for 7 s of 60 Hz loop, under the real PerfSampler with PERF DIAG
+    on: each PERF line's drawn fps, beside the drawn-frame counter read the way
+    tools/p4_perf.py reads it, at the same instants."""
+    import p4_perf
+    from runtime import device_boot
+    from runtime.perf_line import parse_perf
+    from ws_helpers import build_ws, open_cart
+    ms = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: ms[0])
+    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    ws = build_ws(tmp_path)
+    ws._uncap = uncap
+    open_cart(ws, "Coin Quest")
+    assert ws.cart_error is None, ws.cart_error
+    ws.diag_live = True
+    out = []
+    sampler = device_boot.PerfSampler(ws, emit=out.append)
+    reads = []
+    for f in range(7 * 60):
+        ws.input.begin_frame()
+        ws.frame(1 / 60.0)
+        ms[0] = (f + 1) * 1000 // 60
+        n = len(out)
+        sampler.account(0, 1, 0)
+        if len(out) != n:
+            reads.append((ms[0], ws._frames_drawn))
+    perf = [parse_perf(l)["fps"][0] for l in out]
+    counter = [p4_perf.window_fps(a, b) for a, b in zip(reads, reads[1:])]
+    return perf[1:], counter
+
+
+@pytest.mark.parametrize("uncap, rate", [(False, 30), (True, 60)])
+def test_the_counter_is_the_one_PERF_is_taken_from(tmp_path, monkeypatch,
+                                                   uncap, rate):
+    """On the real console, a paced cart and an uncapped one: the drawn-frame
+    counter across a PERF window is that line's drawn fps, to the whole frame
+    per second the line truncates to. A paced cart's tick-only frames are not
+    drawn frames in either."""
+    perf, counter = _perf_run(tmp_path, monkeypatch, uncap)
+    assert len(counter) >= 2 and len(counter) == len(perf), (perf, counter)
+    for p, c in zip(perf, counter):
+        assert p <= c < p + 1, (perf, counter)
+        assert abs(c - rate) <= 1.0, (perf, counter)
 
 
 def test_pmem_flushes_the_cart_before_reading(clock):
