@@ -325,9 +325,8 @@ which hands it to `moy_wasm_session_open` as `allow_unsigned`, and
 `verify_module` reads it on the MicroPython task before the runtime sees a
 byte, as it reads the signature.
 
-**With the setting off an unsigned module is IGNORED, not refused** (2026-09-30,
-"A cart survives its firmware" -- this retired the "Not signed." panel
-`43581ed4` had added hours earlier for exactly this case): `WasmRun` catches
+**With the setting off an unsigned module is IGNORED, not refused** (the plan's
+"A cart survives its firmware"): `WasmRun` catches
 the engine's `refused: unsigned module` and retries the open on the
 interpreter, `main.wasm` itself, which needs neither signature nor switch, so
 the cart plays regardless -- natively when the switch is on, interpreted with

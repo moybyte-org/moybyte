@@ -1135,9 +1135,7 @@ def unknown_sources(board, on):
 def wasm_unsigned_cart_follows_unknown_sources(board, board_dir):
     """The hello cart with its module built unsigned: with the switch off it
     is IGNORED, same as an absent module, and plays on the interpreter with
-    the short toast (2026-09-30, "A cart survives its firmware" -- this
-    retired the blocking "Not signed." panel `43581ed4` had added hours
-    earlier for exactly this case); with the switch on the same module runs
+    the short toast; with the switch on the same module runs
     natively (native trust) and reads its greeting, with no toast. A cart
     whose module was tampered with after signing is still refused either
     way -- that is tamper evidence, not staleness. The switch is left OFF

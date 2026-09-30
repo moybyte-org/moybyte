@@ -270,9 +270,7 @@ def test_an_unsigned_cart_plays_on_the_interpreter_with_a_toast(tmp_path):
     """With the switch off an unsigned module is not refused: WasmRun
     already retried it on the interpreter before the Player ever saw an
     error, so the cart plays -- no notice panel, no error -- and the Player
-    arms the short toast that says it is running unoptimized. This retired
-    the "Not signed." panel (`43581ed4` introduced it for exactly this case,
-    hours before this decision)."""
+    arms the short toast that says it is running unoptimized."""
     from runtime import bar_layer, player
     from runtime.dev_channel import _remote_state
     from ws_helpers import open_cart

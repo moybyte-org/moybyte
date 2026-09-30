@@ -292,9 +292,7 @@ _MB = 1024 * 1024
 # interpreter before this layer ever sees an error, so the cart plays, only
 # slower, and INTERP_NOTICE is the short toast that says so (`ws.notice`,
 # runtime/console_notices.py -- it expires on its own, never a panel to
-# dismiss). This retired the "Not signed." and "Needs an update." panels a
-# module in either state used to get (`43581ed4`): both are now this toast. A
-# module whose SIGNATURE is present and does not verify still keeps the
+# dismiss). A module whose SIGNATURE is present and does not verify keeps the
 # ordinary error panel -- that module was changed after it was signed, which
 # is tamper evidence, not staleness, and no switch and no interpreter runs it.
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
