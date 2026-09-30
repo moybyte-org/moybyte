@@ -3,8 +3,8 @@
 **What this is.** The steps that turn the #158 spike into a third cart
 runtime, in the order their dependencies force, with the repository each step
 lands in and the executable guard that says it is done. Measurements live in
-#158. The ABI lives in moy-spec (proposals/wasm-runtime.md, which SPEC.md §15
-points at). This document is the sequence and the decisions that fix it; it
+#158. The ABI is moy-spec's SPEC.md §16, the WebAssembly binding, and its
+open items are proposals/wasm-runtime.md's. This document is the sequence and the decisions that fix it; it
 is dated, and it moves to `docs/history/` when the tier ships. Revised
 2026-09-25 after three adversarial reviews (architecture, hardware, product);
 the decisions below record what they changed.
@@ -35,10 +35,9 @@ the decisions below record what they changed.
   makes an unknown `runtime` a clean refusal, so a host that lacks the tier
   pays nothing. The import table *is* the verb table, which is the spec's own
   subject; libmoy's README names a wasm import table as the second binding
-  it was shaped for. Until phase 4 promotes it, one line under SPEC.md §15
-  names `"wasm"` the reference console's vendor runtime, and every public
-  piece before that (the libmoy file, the CLI check) is labelled as tracking
-  the proposal.
+  it was shaped for. Phase 4 made it SPEC.md §16, an optional binding beside
+  Lua (2026-09-30); until then SPEC.md §15 named `"wasm"` the reference
+  console's vendor runtime.
 - **One engine, one import table, every tier.** The host runs the same C
   binding over WAMR through ctypes, exactly as `runtime/lua_host.py` runs
   Lua, because a host and a device that disagree about what a verb does is
@@ -138,15 +137,16 @@ all four boards under pinned fps floors, its model read through `read` and its
 frame, HUD included, handed to `blit565`; its source and build tools are MIT (2026-09-26; numbers on #158). What remains follows
 CLAUDE.md's placement rule:
 
-- The teapot, ESP 88 (the neon city film) and further JetExamples ports
-  (the tropical island, the mail-plane sprite demo, the neon car, one
-  effects demo) become moybyte-org's MIT carts repo, each after its own
-  asset-licence check;
-  template-cube becomes a `moy new --jet` starter in moy-spec with the import
-  header; the installer and index tools move from gpl-carts into moy-spec's
-  CLI so both carts repos share them. moybyte keeps the seeding and the
-  on-glass guards. Seeding a compiled cart is designed in
-  `ports/jet/README.md` and waits on #124's gate.
+- The teapot and ESP 88 are moybyte-org/mit-carts' (2026-09-30), which
+  builds and publishes them by recipe with `tools/jet_cart.py` at a pinned
+  moybyte commit; `ports/jet/` keeps a stamped copy for the guards (its
+  README says why). Further JetExamples ports (the tropical island, the
+  mail-plane sprite demo, the neon car, one effects demo) join mit-carts,
+  each after its own asset-licence check. template-cube is moy-spec's `moy
+  new --jet` starter, and `moy install` and `moy index` are moy-spec's, which
+  both carts repositories use. moybyte keeps the seeding and the on-glass
+  guards; seeding a compiled cart is designed in `ports/jet/README.md` and
+  waits on #124's gate.
 - The compiled tier's render cost against native (#158 has the numbers):
   the per-chip compilers used to split every memory access they could not
   prove aligned into single bytes, the cart kept its per-pixel shading calls
@@ -160,18 +160,20 @@ CLAUDE.md's placement rule:
   raster does; and on the P4s the console's frame copy (the S3s show the
   cart's frame without one).
 
-### Phase 4 — promotion (moy-spec; the owner's decision)
+### Phase 4 — promotion (moy-spec; landed 2026-09-30)
 
-The second and third hosts are in (2026-09-26): moy-spec's desktop player
-runs compiled carts on Linux, Windows and macOS, and its web player runs a
-cart as a sibling module whose imports are JavaScript adapters over the
-binding's own C. Conformance scenes for every wasm-only import, the ordinary
-verbs, a trap and the refusal fixtures hold every host to identical RGB565
-frames (#158). What remains is promotion:
-
-- The proposal becomes a binding section of SPEC.md, the C header freezes,
-  the distribution notes move to PORTING.md, and SPEC.md §15's vendor-runtime
-  wording goes.
+moy-spec's desktop player runs compiled carts on Linux, Windows and macOS, and
+its web player runs a cart as a sibling module whose imports are JavaScript
+adapters over the binding's own C; conformance scenes for every wasm-only
+import, the ordinary verbs, a trap and the refusal fixtures hold every host to
+identical RGB565 frames (#158). The binding is SPEC.md §16, optional beside
+Lua (§15); its measurements are RATIONALE.md's and how a host executes a
+module is PORTING.md's. `libmoy/include/moy_cart.h` is the import table as C,
+held row for row to `wasm-imports.json`, and `moy check` passes a well-formed
+compiled cart with nothing to warn about. A cart author's loop is moy-spec's:
+`moy new --wasm` and `--jet`, `moy build` with a pinned wasi-sdk, `moy play`
+rebuilding on save (COMPILED.md), and `tools/push_cart.py` compiles the
+module a board needs when a cart has none.
 
 ### Phase 5 — distribution (later)
 
@@ -189,15 +191,15 @@ frames (#158). What remains is promotion:
 - ~~Whether the Doom glue is marked GPL-2.0-or-later.~~ Decided 2026-09-26:
   it is, in moybyte-org/gpl-carts, which is Doom's home.
 - Human testing on every touched board before any of this reaches master.
-- After phase 4: promote the proposal to a binding, or keep the vendor
-  runtime. Nothing before phase 4 is a public promise.
+- ~~After phase 4: promote the proposal to a binding, or keep the vendor
+  runtime.~~ Decided: promoted, SPEC.md §16 (2026-09-30).
 - Whether an SD card becomes a P4 requirement.
 
 ## Deliberately not in this plan
 
 - A wasmtime host tier.
 - Doom's music. A compiled cart's sound is `snd` (22,050 Hz mono, a
-  2,048-frame queue, pinned by Doom in the proposal), which the T-Deck mixes
+  2,048-frame queue, pinned by Doom in SPEC.md §16.9), which the T-Deck mixes
   into `moy_audio`'s output and a board with no speaker drains by the clock.
   Doom plays its sound effects through it; its music, MUS through an OPL
   synth, is not built, because the synth costs more of a T-Deck frame than

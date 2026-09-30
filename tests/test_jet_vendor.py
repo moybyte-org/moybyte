@@ -1,13 +1,16 @@
-"""The vendored Jet, the film's code, and the carts' derived data are still upstream's.
+"""The vendored Jet, the film's code and the Jet carts are still their homes'.
 
-ports/jet/jet/ is the subset of CubeCoders' Jet the Jet carts compile;
+ports/jet/jet/ is the subset of CubeCoders' Jet the Jet carts compile, and
 ports/jet/examples/ is ESP 88's code from JetExamples with the one change
-tools/vendor_jet.py's PATCHES records; ports/jet/teapot.moy/teapot.obj,
-ports/jet/esp88.moy/assets.bin and both carts' LICENSES.txt are derived from
-JetExamples -- all by tools/vendor_jet.py and stamped in
-ports/jet/jet_vendor.json. A fix to Jet or the film belongs upstream and
-arrives here by re-vendoring; an edit made here survives only until the next
-re-vendor silently reverts it. These are the checks that make it loud.
+tools/vendor_jet.py's PATCHES records -- stamped in ports/jet/jet_vendor.json.
+ports/jet/teapot.moy/ and esp88.moy/ are moybyte-org/mit-carts' two carts,
+copied by tools/vendor_jet_carts.py and stamped in
+ports/jet/jet_carts_vendor.json; their data (teapot.obj, assets.bin, both
+LICENSES.txt) is what tools/vendor_jet.py derives from JetExamples at the pin,
+which the last of the vendor tests re-derives. A fix belongs upstream -- Jet,
+JetExamples or mit-carts -- and arrives here by re-vendoring; an edit made
+here survives only until the next re-vendor silently reverts it. These are the
+checks that make it loud.
 """
 
 import os
@@ -20,6 +23,7 @@ from vendor_check import check_files_match, check_manifest_not_empty, load_manif
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFEST = os.path.join(ROOT, "ports", "jet", "jet_vendor.json")
+CARTS_STAMP = os.path.join(ROOT, "ports", "jet", "jet_carts_vendor.json")
 
 
 @pytest.fixture(scope="module")
@@ -158,9 +162,43 @@ def test_the_copy_is_upstream_at_the_pinned_commits(manifest):
     assert upstream["commit"] == up["commit"], (
         "JetExamples at %s pins Jet %s, the stamp says %s"
         % (up["examples"]["commit"][:12], upstream["commit"][:12], up["commit"][:12]))
-    assert sorted(files) == sorted(manifest["files"])
+    assert sorted(files) == sorted(list(manifest["files"]) + list(vendor_jet.cart_data()))
     for rel, data in sorted(files.items()):
         got = sha256(os.path.join(ROOT, rel))
         assert vendor_jet.sha256_bytes(data) == got, (
             "%s differs from what upstream at the pins derives -- fix it upstream "
             "and re-run `make vendor-jet`" % rel)
+
+
+# -- the carts: mit-carts' copy ------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def carts_stamp():
+    return load_manifest(CARTS_STAMP, "vendor-jet-carts")
+
+
+def test_the_carts_stamp_names_a_mit_carts_commit(carts_stamp):
+    check_manifest_not_empty(carts_stamp)
+    assert carts_stamp["upstream"]["repo"] == "moybyte-org/mit-carts"
+    assert re.fullmatch(r"[0-9a-f]{40}", carts_stamp["upstream"]["commit"])
+
+
+def test_the_carts_are_mit_carts_copy(carts_stamp):
+    check_files_match(carts_stamp, "moybyte-org/mit-carts' carts/<id>/",
+                      "vendor-jet-carts")
+
+
+def test_every_file_in_a_cart_folder_is_in_the_stamp(carts_stamp):
+    from tools import vendor_jet_carts
+    assert vendor_jet_carts.vendored_now() == sorted(carts_stamp["files"]), (
+        "a file sits in ports/jet/<cart>.moy that mit-carts does not have, or the "
+        "other way round: change the cart in mit-carts and `make vendor-jet-carts`")
+
+
+def test_the_carts_data_is_what_vendor_jet_derives(carts_stamp):
+    """vendor_jet.py derives four of the carts' files; they are in the copy,
+    and vendor_jet.py itself writes none of them here."""
+    from tools import vendor_jet
+    assert set(vendor_jet.cart_data()) <= set(carts_stamp["files"])
+    assert not set(vendor_jet.cart_data()) & set(vendor_jet.vendored_paths())

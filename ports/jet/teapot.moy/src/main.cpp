@@ -11,7 +11,7 @@
 #include <string.h>
 
 #include "hud_font.h"
-#include "moy.h"
+#include "moy_cart.h"
 #include "scene.h"
 
 extern "C" void __wasm_call_ctors(void);

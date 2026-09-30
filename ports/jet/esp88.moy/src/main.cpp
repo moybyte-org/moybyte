@@ -28,7 +28,7 @@
 #define FILM_RENDER_HEIGHT 198
 #include "Film.hpp"
 #include "hud_font.h"
-#include "moy.h"
+#include "moy_cart.h"
 
 extern "C" void __wasm_call_ctors(void);
 extern "C" size_t cart_heap_peak(void);

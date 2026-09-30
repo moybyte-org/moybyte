@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Nikola Jovicic
-"""Re-vendor Jet, and the two Jet carts' upstream sources and data, into ports/jet.
+"""Re-vendor Jet and ESP 88's film code into ports/jet; derive the Jet carts' data.
 
     make vendor-jet                                   # the clones at the pins below
     make vendor-jet EXAMPLES_COMMIT=<sha>             # another JetExamples commit
@@ -16,12 +16,21 @@ commit is the one that commit carries as its `components/Jet` submodule, so
 the engine is the one the examples were written and measured against, and the
 two cannot drift apart.
 
-What crosses:
+What crosses into ports/jet:
 
   * from Jet: the sources the cart compiles and the headers they include
     (FILES), and the licence, into ports/jet/jet/ under upstream's paths;
-  * from JetExamples, DERIVED rather than copied, into the cart's source
-    folder ports/jet/teapot.moy/:
+  * from JetExamples' esp32-neon-film, the film's own code into
+    ports/jet/examples/ under upstream's paths (FILM_FILES), World.hpp with
+    the one change PATCHES records.
+
+The carts themselves are moybyte-org/mit-carts', and ports/jet/<cart>.moy/ is
+tools/vendor_jet_carts.py's stamped copy of them. Their data is still DERIVED
+here from JetExamples, which is how it was made and how the tests prove it is
+still upstream's: `--carts DIR` writes it into a mit-carts checkout's carts/,
+and tests/test_jet_vendor.py re-derives it and compares. The data:
+
+  * for the teapot (carts/teapot/):
       - teapot.obj: the example's generated mesh (esp32-lighting-teapot/main/
         TeapotMesh.hpp -- 822 vertices with smooth normals, 1,560 triangles)
         written as an OBJ the cart reads through `read` and Jet's own loader.
@@ -31,10 +40,7 @@ What crosses:
       - LICENSES.txt: Jet's licence, which JetExamples carries word for word,
         and the permission notice of the freeglut teapot data the mesh was
         generated from (esp32-lighting-teapot/assets/fg_teapot_data.h);
-  * from JetExamples' esp32-neon-film, the film's own code into
-    ports/jet/examples/ under upstream's paths (FILM_FILES), World.hpp with
-    the one change PATCHES records, and DERIVED into the cart's source folder
-    ports/jet/esp88.moy/:
+  * for ESP 88 (carts/esp88/):
       - assets.bin: the film's artwork as the cart reads it through `read`
         into zeroed arrays, rather than as initialised data compiled into the
         module (see ASSETS);
@@ -46,9 +52,10 @@ working tree (tools/vendor_wamr.py's rule). Why vendor instead of fetching in
 the build: tools/vendor_libmoy.py's answer -- a build that fetches is a build
 that needs the network.
 
-The stamp is ports/jet/jet_vendor.json (both commits and a sha256 per file);
-tests/test_jet_vendor.py holds the copy to it, and re-derives everything from
-the clones when they are at hand.
+The stamp is ports/jet/jet_vendor.json (both commits and a sha256 per file it
+writes); tests/test_jet_vendor.py holds the copy to it, and re-derives
+everything -- the carts' data included -- from the clones when they are at
+hand.
 """
 
 import argparse
@@ -480,15 +487,21 @@ def _rel(path):
     return os.path.relpath(path, ROOT).replace(os.sep, "/")
 
 
+def cart_data():
+    """The derived files that are the carts' data, by where they sit in the
+    vendored copy: {repo-relative path: (mit-carts cart id, file name)}."""
+    return {_rel(os.path.join(CART, "teapot.obj")): ("teapot", "teapot.obj"),
+            _rel(os.path.join(CART, "LICENSES.txt")): ("teapot", "LICENSES.txt"),
+            _rel(os.path.join(FILM_CART, "assets.bin")): ("esp88", "assets.bin"),
+            _rel(os.path.join(FILM_CART, "LICENSES.txt")): ("esp88", "LICENSES.txt")}
+
+
 def vendored_paths():
-    """Every file this script owns, repo-relative."""
+    """Every file this script writes here, repo-relative: Jet and the film's
+    code, not the carts' data (cart_data()), which is mit-carts'."""
     return sorted([_rel(os.path.join(DEST, rel)) for rel in FILES]
-                  + [_rel(os.path.join(CART, "teapot.obj")),
-                     _rel(os.path.join(CART, "LICENSES.txt")),
-                     _rel(os.path.join(EXAMPLES_DEST, EXAMPLES_LICENSE))]
-                  + [_rel(os.path.join(EXAMPLES_DEST, FILM_DIR, n)) for n in FILM_FILES]
-                  + [_rel(os.path.join(FILM_CART, "assets.bin")),
-                     _rel(os.path.join(FILM_CART, "LICENSES.txt"))])
+                  + [_rel(os.path.join(EXAMPLES_DEST, EXAMPLES_LICENSE))]
+                  + [_rel(os.path.join(EXAMPLES_DEST, FILM_DIR, n)) for n in FILM_FILES])
 
 
 def from_clones(jet_clone, examples_clone, examples_commit=EXAMPLES_COMMIT):
@@ -514,6 +527,9 @@ def main(argv):
                     help="the JetExamples commit to vendor from (default: the pin)")
     ap.add_argument("--check", action="store_true",
                     help="report what would change; write nothing")
+    ap.add_argument("--carts", metavar="DIR",
+                    help="also write the carts' derived data into DIR/<cart id>/ "
+                    "(a moybyte-org/mit-carts checkout's carts/)")
     args = ap.parse_args(argv)
 
     for path, repo in ((args.jet, JET_REPO), (args.examples, EXAMPLES_REPO)):
@@ -530,6 +546,18 @@ def main(argv):
           % (upstream["examples"]["commit"][:12], upstream["commit"][:12], SUBMODULE))
 
     changed = []
+    data = cart_data()
+    derived = dict((rel, files.pop(rel)) for rel in data)
+    for rel, blob_ in sorted(derived.items()):
+        if not args.carts:
+            break
+        dst = os.path.join(args.carts, *data[rel])
+        if os.path.isfile(dst) and sha256_file(dst) == sha256_bytes(blob_):
+            continue
+        changed.append(dst)
+        if not args.check:
+            with open(dst, "wb") as f:
+                f.write(blob_)
     for rel, data in sorted(files.items()):
         dst = os.path.join(ROOT, rel)
         if os.path.isfile(dst) and sha256_file(dst) == sha256_bytes(data):

@@ -5,8 +5,8 @@ What is pinned here:
 
   * each module tools/jet_cart.py builds imports only the console's table --
     nothing from WASI -- and a sibling moy-spec's `moy check` passes each cart
-    with no finding at all; the two carts' imports header, runtime and font
-    are one body;
+    with no finding at all; the two carts' imports header (moy-spec's
+    moy_cart.h), runtime and font are one body;
   * the frame at two fixed camera poses, full width, half width and half
     width interlaced, as PIXEL GOLDENS: RGB565 frames through the same
     binding and golden mechanism the wasm fixtures use
@@ -183,10 +183,11 @@ def test_moy_check_passes_the_built_cart(jet, tmp_path, cart):
 
 
 def test_the_carts_share_one_runtime():
-    """The imports header, the heap and C library edges, and the HUD's font
-    are one body in both carts' sources: each cart's src/ is complete on its
-    own, so the copies are pinned equal rather than shared."""
-    for name in ("moy.h", "runtime.cpp", "hud_font.h"):
+    """The imports header (moy-spec's moy_cart.h), the heap and C library
+    edges, and the HUD's font are one body in both carts' sources: each
+    cart's src/ is complete on its own, so the copies are pinned equal rather
+    than shared."""
+    for name in ("moy_cart.h", "runtime.cpp", "hud_font.h"):
         bodies = set()
         for cart in CARTS:
             with open(os.path.join(ROOT, "ports", "jet", cart + ".moy", "src", name), "rb") as f:

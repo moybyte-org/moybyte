@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-hero site-tiles sync-issues test vendor-jet vendor-libmoy vendor-p8-import vendor-wamr
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-hero site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-p8-import vendor-wamr
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -341,15 +341,25 @@ vendor-wamr:
 vendor-p8-import:
 	$(PYTHON) tools/vendor_p8_import.py $(if $(SPEC),--spec $(SPEC))
 
-# Re-vendor Jet -- the rasteriser the compiled showcase cart compiles -- and
-# derive the cart's teapot.obj and LICENSES.txt from Jet's examples, reading
-# clones of both (.build/jet/, or JET=/EXAMPLES=) at the JetExamples pin, whose
-# Jet submodule is Jet's pin. Stamps ports/jet/jet_vendor.json;
+# Re-vendor Jet -- the rasteriser the compiled showcase carts compile -- and ESP
+# 88's film code, reading clones of both (.build/jet/, or JET=/EXAMPLES=) at the
+# JetExamples pin, whose Jet submodule is Jet's pin. The carts' derived data
+# (teapot.obj, assets.bin, their LICENSES.txt) is mit-carts'; `tools/vendor_jet.py
+# --carts <mit-carts>/carts` writes it there. Stamps ports/jet/jet_vendor.json;
 # tests/test_jet_vendor.py holds the copy to it.
 #   make vendor-jet
 #   make vendor-jet EXAMPLES_COMMIT=<sha>
 vendor-jet:
 	$(PYTHON) tools/vendor_jet.py $(if $(JET),--jet $(JET)) $(if $(EXAMPLES),--examples $(EXAMPLES)) $(if $(EXAMPLES_COMMIT),--examples-commit $(EXAMPLES_COMMIT))
+
+# Re-vendor the Jet carts themselves -- Jet Teapot and ESP 88, whose home is
+# moybyte-org/mit-carts -- into ports/jet/<cart>.moy, from a clone's git objects
+# (../mit-carts, $MOYBYTE_MIT_CARTS or MIT=) at its HEAD or COMMIT=. Stamps
+# ports/jet/jet_carts_vendor.json; tests/test_jet_vendor.py holds the copy to it.
+#   make vendor-jet-carts
+#   make vendor-jet-carts MIT=/path/to/mit-carts COMMIT=<sha>
+vendor-jet-carts:
+	$(PYTHON) tools/vendor_jet_carts.py $(if $(MIT),--mit $(MIT)) $(if $(COMMIT),--commit $(COMMIT))
 
 # The T-Deck build (mainline MicroPython -- the only T-Deck build since the
 # fork's deletion, 2026-08-17). The `lilygo-micropython` names below are the

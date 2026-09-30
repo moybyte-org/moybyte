@@ -262,9 +262,10 @@ component generates around it (`COLMOD` 0x55, `MADCTL`, `INVOFF`, `SLPOUT`,
 `ports/jet/jet/`
 
 The compiled (`"runtime": "wasm"`) tier's Jet carts, `ports/jet/teapot.moy/`
-and `ports/jet/esp88.moy/`, compile Jet into their modules; nothing in any
-firmware image does. A module is a build product (`tools/jet_cart.py`) and is
-never committed.
+and `ports/jet/esp88.moy/` -- moybyte-org/mit-carts' carts, copied here by
+`tools/vendor_jet_carts.py` for the tests and guards -- compile Jet into their
+modules; nothing in any firmware image does. A module is a build product
+(`tools/jet_cart.py`) and is never committed.
 
 - **Upstream:** Jet — <https://github.com/CubeCoders/Jet>, at the commit that
   JetExamples (<https://github.com/CubeCoders/JetExamples>) carries as its
@@ -284,8 +285,8 @@ never committed.
   artwork.
 - **What the built module also contains:** compiled code from wasi-sdk 24's
   wasi-libc and LLVM's libc++/libc++abi (§6.4's toolchain). A built cart is
-  not published by this repository; before one ships in a product, its
-  `LICENSES.txt` carries those libraries' notices as well
+  not published by this repository (mit-carts publishes them); before one ships
+  in a product, its `LICENSES.txt` carries those libraries' notices as well
   (`ports/jet/README.md`, "Seeding").
 
 ---
@@ -407,9 +408,11 @@ under its `assets`).
 - **Licence:** the example is MIT (CubeCoders Limited); the teapot data carries
   freeglut's X11-style permission notice, reproduced in the cart's
   [`LICENSES.txt`](ports/jet/teapot.moy/LICENSES.txt).
-- **Modified: converted.** `tools/vendor_jet.py` writes the example's integer
-  vertices and normals as OBJ at the scales Jet's loader multiplies back by, so
-  the mesh the cart loads is the example's, value for value.
+- **Modified: converted.** `tools/vendor_jet.py` derives it -- the example's
+  integer vertices and normals as OBJ, at the scales Jet's loader multiplies
+  back by, so the mesh the cart loads is the example's, value for value -- into
+  mit-carts, whose copy of the cart is vendored here, and
+  `tests/test_jet_vendor.py` re-derives it and compares.
 
 ### 3.3b ESP 88 — the film's code and artwork
 

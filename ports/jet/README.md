@@ -5,13 +5,24 @@ cart") rendered by [Jet](https://github.com/CubeCoders/Jet) — CubeCoders' MIT
 software rasteriser, which writes RGB565 into buffers the caller owns — each
 porting one of [JetExamples](https://github.com/CubeCoders/JetExamples)' own
 examples and handing its frame to the console whole through `blit565`, the
-import the proposal keeps for pixels that are direct-colour by nature:
+import SPEC.md §16.5 keeps for pixels that are direct-colour by nature:
 
 - **Jet Teapot** (`teapot.moy/`): the Utah teapot, lit and depth-buffered,
   from `esp32-lighting-teapot` — its light, glaze, sky gradient, rocking
   motion and Flat / Gouraud / Phong cycle, with the camera the player's.
 - **ESP 88** (`esp88.moy/`): `esp32-neon-film`, the two-minute neon city film
   in twelve cuts, played in a loop.
+
+**Their home is [moybyte-org/mit-carts](https://github.com/moybyte-org/mit-carts)**,
+which builds and publishes them: a change to a cart lands there. The two
+folders here are its carts/<id>/, less that repository's own cart.json,
+recipe and README, copied by `tools/vendor_jet_carts.py` (`make
+vendor-jet-carts`) and stamped in `jet_carts_vendor.json`, because this
+repository's tests and on-glass guards build them and a build here never
+fetches; `tests/test_jet_vendor.py` makes an edit to the copy loud. What stays
+this repository's own is Jet and the film's code (`make vendor-jet`), and the
+build, `tools/jet_cart.py`, which mit-carts' recipe also runs at a pinned
+moybyte commit, so the flags have one home.
 
 ## Credits
 
@@ -22,15 +33,8 @@ Jet and ESP 88 are by [CubeCoders](https://github.com/CubeCoders/Jet) (PhonicUK)
 A Phong-lit surface is a gradient, which a 256-entry palette would have to
 quantize first; this is the cart that made `blit565` earn its place.
 
-### Playing it
-
-| button | does |
-|---|---|
-| left / right | turn |
-| up / down | fly forward / back, level |
-| A / B | climb / sink |
-
-The HUD's strip reads the width, the shading, the whole-frame rate, the mean
+Its buttons and its `config.json` keys (`width`, `interlaced`, `shading`,
+`hud`, `cores`) are mit-carts' `carts/teapot/README.md`. The HUD's strip reads the width, the shading, the whole-frame rate, the mean
 time Jet's `render()` took, and the triangles it rasterized, each averaged over
 the last second. The cart draws it into its own frame, before `blit565`, in
 the console's font (`src/hud_font.h`) and two of its palette's colours: the
@@ -38,16 +42,6 @@ pixels a `rect` and a `print` over the blit would draw, which a test holds it
 to byte for byte. A frame the cart owns whole is one a banded board can show
 straight from the cart's memory (`native/moy_flush/moy_fold.h`); verbs drawn
 over it would have the console write the frame into its canvas first.
-
-`config.json` picks how the frame is made, at launch:
-
-| key | values | what it is |
-|---|---|---|
-| `width` | `"full"`, `"half"` | Jet's `HALF_WIDTH_BUFFERS`: one stored pixel per two columns, doubled into the frame before `blit565` |
-| `interlaced` | `false`, `true` | Jet's `interlacedMode`: each frame renders every other row, alternating |
-| `shading` | `"cycle"`, `"flat"`, `"gouraud"`, `"phong"` | the example's three-second cycle, or one mode held |
-| `hud` | `true`, `false` | the HUD in the frame's top strip |
-| `cores` | `2`, `1` | the raster across the console's cores or on one (below) |
 
 Half width is a compile-time switch in Jet, so the teapot's module carries Jet twice —
 once as is, once with the switch on and its namespaces renamed on the
@@ -62,19 +56,8 @@ buffer instead.
 The film's own code builds and animates every cut — the city, the cars, the
 cockpit, the rain, the lens pulls — through `Film::seek`, and the cart plays
 it from its own clock, looping where the example restarts its board after a
-second of black.
-
-| button | does |
-|---|---|
-| left / right | the cut before / after, wrapping round the film |
-| A | the HUD: the cut, the whole-frame rate and the mean ms Jet took, over the last second, in the letterbox's top rows |
-
-| `config.json` key | values | what it is |
-|---|---|---|
-| `interlaced` | `true`, `false` | one field a frame, as the example plays it, or both |
-| `hud` | `false`, `true` | the HUD at launch |
-| `cut` | `1`–`12` | the cut it starts at |
-| `cores` | `2`, `1` | the raster and the scan-out across the console's cores or on one |
+second of black. Its buttons and `config.json` keys are mit-carts'
+`carts/esp88/README.md`.
 
 It renders the way the example's ESP32 runtime (`components/esp32_jet`) does:
 Jet's half-width field buffers, one field a frame, the river reflecting the
@@ -102,7 +85,7 @@ runtime draws with it: the frame's setup -- the transform, the culling, the
 sort -- runs on one core, and the frame's rows are cut into bands that
 rasterize at once, each into its own rows and its own triangle flags, merged
 after. The cart hands the bands to the console through `par`
-(proposals/wasm-runtime.md in moy-spec), which runs them on as many cores as
+(SPEC.md §16.10 in moy-spec), which runs them on as many cores as
 the console gives it, or one after another on a console with one; the frame
 is the same either way, which `tests/test_jet_cart.py` holds byte for byte
 against Jet's single pass. The teapot's bands also clear and widen their own
@@ -117,14 +100,14 @@ by board, is #158's.
 
 | what | where |
 |---|---|
-| a cart's source folder: manifest, config, data, licences, `src/` | `teapot.moy/`, `esp88.moy/` |
+| a cart's folder: manifest, config, data, licences, `src/` -- mit-carts' copy | `teapot.moy/`, `esp88.moy/`, stamped in `jet_carts_vendor.json` (`make vendor-jet-carts`) |
 | the hooks, buttons, config, buffers and HUD | `<cart>/src/main.cpp` |
-| the imports a cart uses, from module `"moy"` only; the heap, `par`'s items and their stacks, and the C library's edges; the HUD's glyphs, the console's font | `<cart>/src/moy.h`, `runtime.cpp`, `hud_font.h` — one body in both, which a test holds equal |
+| the imports, moy-spec's header; the heap, `par`'s items and their stacks, and the C library's edges; the HUD's glyphs, the console's font | `<cart>/src/moy_cart.h`, `runtime.cpp`, `hud_font.h` — one body in both, which a test holds equal |
 | the teapot's scene, compiled once per Jet build, and its Jet configuration | `teapot.moy/src/scene.cpp`, `JetConfig.hpp` |
 | Jet, vendored at the commit JetExamples pins | `jet/`, stamped in `jet_vendor.json` (`make vendor-jet`) |
-| the teapot's model, derived from the example's generated mesh | `teapot.moy/teapot.obj` (the same script) |
+| the teapot's model, derived from the example's generated mesh | `teapot.moy/teapot.obj` (derived by the same script, `--carts` writing it into mit-carts) |
 | the film's code and Jet configuration, from the same JetExamples commit | `examples/esp32-neon-film/main/` (the same script) |
-| the film's artwork, derived from its generated headers | `esp88.moy/assets.bin` (the same script) |
+| the film's artwork, derived from its generated headers | `esp88.moy/assets.bin` (the same, `--carts`) |
 
 A built cart is its source folder plus `main.wasm`, and a board's signed
 `main.<chip>.aot`; none of those is ever committed.
@@ -146,8 +129,8 @@ allocator over the memory above the static data, whose end it takes from the
 linker rather than asking the memory its size (the file says what asking
 costs, and why it is best fit from both ends).
 `tests/test_jet_cart.py` holds each build to the console's import
-table and a sibling moy-spec's `moy check`, whose one finding is the warning
-every compiled cart draws while the binding tracks the proposal.
+table and to a sibling moy-spec's `moy check`, which has nothing to warn
+about.
 
 ## Memory
 
@@ -217,11 +200,12 @@ so a seeded copy needs what `tools/jet_cart.py --chip` produces — `main.wasm`
 and each chip's module, signed with the OTA key — made by the build, never by
 hand and never committed.
 
-1. **Where it lives.** The source folder moves to `system_carts/` with
-   `"system": true` and an `"order"`, and `tools/gen_device_carts.py`, which
-   packs the roster into each image, learns one thing: a system cart whose
-   runtime is `wasm` is not read as text but taken from a directory of built
-   carts (`--compiled DIR`), one per chip, and a board's image packs only its
+1. **Where it comes from.** The build of the copy here, whose `main.wasm` is
+   the one mit-carts' release carries, gets a roster entry with `"system":
+   true` and an `"order"`, and `tools/gen_device_carts.py`, which packs the
+   roster into each image, learns one thing: a system cart whose runtime is
+   `wasm` is not read as text but taken from a directory of built carts
+   (`--compiled DIR`), one per chip, and a board's image packs only its
    own chip's module beside `main.wasm`. Its roster entry is deflated like
    every other seed.
 2. **Who signs.** Today the OTA key is a repository secret that only the
