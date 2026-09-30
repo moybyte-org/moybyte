@@ -927,9 +927,19 @@ static void *sess_thread(void *arg)
         }
     }
     // A freeable load copies what the module keeps, its data segments
-    // included, so the file goes back now.
-    heap_caps_free(s->file);
-    s->file = NULL;
+    // included, so the file goes back now -- true for an AOT module (the
+    // fork's AOT loader, README.md's "A cart's module file is gone before
+    // its memory is allocated"), but NOT for an interpreted one: WAMR's
+    // classic interpreter walks function bodies from the loaded module's
+    // OWN buffer rather than compiling them out of it, so freeing it early
+    // left the interpreter executing out of freed (and soon reused) PSRAM,
+    // which read back as garbage bytecode -- an early, spurious
+    // "Exception: unreachable" on every interpreted run. An interpreted
+    // session keeps the file until teardown instead.
+    if (!s->interp) {
+        heap_caps_free(s->file);
+        s->file = NULL;
+    }
     err[0] = 0;
     if (ops->loaded && ops->loaded(ops->user, module, err, sizeof(err))) {
         rc = sess_fail(s, "refused", err);
