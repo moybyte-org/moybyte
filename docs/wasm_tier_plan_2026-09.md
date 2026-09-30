@@ -156,9 +156,7 @@ the decisions below record what they changed.
     `native/moy_wasm/README.md`'s "The interpreter tier".
     The Player runs `main.wasm` on it whenever no valid AOT module matches,
     with a short toast (`runtime/console_notices.py`'s toast, not the
-    blocking notice panel -- the cart plays, just slower), which retires
-    the "Needs an update." panel `43581ed4` added for exactly the case this
-    decision now plays through instead.
+    blocking notice panel -- the cart plays, just slower).
 
 ## The phases
 
@@ -242,7 +240,9 @@ module a board needs when a cart has none.
 - Human testing on every touched board before any of this reaches master.
 - ~~After phase 4: promote the proposal to a binding, or keep the vendor
   runtime.~~ Decided: promoted, SPEC.md §16 (2026-09-30).
-- Whether an SD card becomes a P4 requirement.
+- ~~Whether an SD card becomes a P4 requirement.~~ Decided 2026-09-30: no
+  requirement; on the P4s, as on the Guition S3, a card when present is the
+  cart store and the internal flash store is the fallback (#58).
 
 ## Deliberately not in this plan
 
