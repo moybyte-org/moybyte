@@ -1784,6 +1784,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert allow_unsigned is False
         assert interp is False         # a module by this console's own name -- AOT
         assert not run.interp
+        assert run.interp_cause is None
         assert sha == hashlib.sha256(blob).hexdigest()
         # the frame is MoycoreRun's: _update ticks, draw is the fused no-op
         assert run.init is None and run.draw() is None
@@ -1815,7 +1816,9 @@ def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
     off) is not tamper evidence, so WasmRun retries the open on the
     interpreter -- main.wasm itself -- instead of raising
     (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
-    2026-09-30). The cart plays; run.interp says so."""
+    2026-09-30). The cart plays; run.interp says so, and interp_cause says
+    why -- "unsigned", so the Player's notice reads "isn't signed" rather
+    than "needs an update"."""
     cart, main = _compiled(tmp_path)
     world = _wasm_world()
     world.core.wasm_open_errs = ["refused: unsigned module", None]
@@ -1823,6 +1826,7 @@ def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
         ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert run.interp
+        assert run.interp_cause == "unsigned"
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 2
         assert opens[0][1] == cart["path"] + "/main.esp32s3.f1.aot"
@@ -1837,18 +1841,39 @@ def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
 def test_a_cart_with_no_module_for_this_chip_runs_on_the_interpreter(tmp_path):
     """A stale or absent module is never opened at all -- it is simply the
     wrong file name -- so the cart goes straight to the interpreter, one
-    wasm_open call, no failed attempt logged."""
+    wasm_open call, no failed attempt logged. interp_cause reads "missing",
+    so the Player's notice says the cart needs an update."""
     cart, main = _compiled(tmp_path, chips=("esp32p4",))
     world = _wasm_world("esp32s3")
     try:
         ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert run.interp
+        assert run.interp_cause == "missing"
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
         assert opens[0][1] == main
         assert opens[0][9] is True
         assert "run_begin" in world.core.verbs()
+    finally:
+        world.close()
+
+
+def test_a_key_mismatch_that_retries_clean_reads_as_missing(tmp_path):
+    """A corrupted or mismatched AOT file (rare: the name matched, the
+    content did not) is retried on the interpreter same as an absent one,
+    and reads the same cause -- "missing", never "unsigned" -- so the
+    Player's notice says the cart needs an update, not that it isn't
+    signed."""
+    cart, main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_errs = ["refused: key mismatch 'opt 2'", None]
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert run.interp and run.interp_cause == "missing"
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert opens[1][1] == main
     finally:
         world.close()
 

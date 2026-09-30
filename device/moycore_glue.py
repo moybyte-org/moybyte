@@ -460,6 +460,11 @@ class MoycoreRun:
 # instead ("A cart survives its firmware", 2026-09-30).
 _AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature")
 
+# The one non-tamper refusal that names a SIGNED-vs-not cause rather than a
+# stale/foreign module: `self.interp_cause` reads this to pick the notice's
+# sub-line ("isn't signed" against "needs an update", runtime/player.py).
+_AOT_UNSIGNED = "refused: unsigned module"
+
 
 def aot_path(cart_dir, main, chip, format):
     """Where a cart's compiled module for `chip` and a compiled-code format
@@ -681,8 +686,9 @@ class WasmRun(MoycoreRun):
         # so it is absent to this console, same as no module at all, and the
         # cart plays on the interpreter -- main.wasm itself, which needs
         # neither key nor signature. `self.interp` is what the Player reads
-        # to show the short toast (never the blocking notice a missing or
-        # unsigned module used to get).
+        # to show the short notice (never the blocking panel a missing or
+        # unsigned module used to get); `self.interp_cause` ("missing" or
+        # "unsigned") is which sub-line it shows.
         module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
         has_module = True
         try:
@@ -692,6 +698,7 @@ class WasmRun(MoycoreRun):
         head = wasm_head(path + "/" + main)
         sha = _sha256_file(path + "/" + main)
         self.interp = not has_module
+        self.interp_cause = "missing" if self.interp else None
         self.ws = ws
         self.ns = ns
         self._dt = 0.0
@@ -759,6 +766,8 @@ class WasmRun(MoycoreRun):
                     # its module is unusable, so it plays on the interpreter,
                     # exactly as it would have with no module at all.
                     self.interp = True
+                    self.interp_cause = ("unsigned" if err.startswith(_AOT_UNSIGNED)
+                                         else "missing")
                     err = _open(path + "/" + main, None, True)
             else:
                 err = _open(path + "/" + main, None, True)

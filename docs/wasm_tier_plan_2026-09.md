@@ -155,8 +155,10 @@ the decisions below record what they changed.
     was picked against); mechanism and cost:
     `native/moy_wasm/README.md`'s "The interpreter tier".
     The Player runs `main.wasm` on it whenever no valid AOT module matches,
-    with a short toast (`runtime/console_notices.py`'s toast, not the
-    blocking notice panel -- the cart plays, just slower).
+    with a short system notice by cause (`runtime/console_notices.py`'s
+    `_draw_notice`, the "MOYBYTE UPDATED" banner, never the achievement
+    toast, and never the blocking notice panel -- the cart plays, just
+    slower).
 
 ## The phases
 

@@ -1116,7 +1116,7 @@ def wasm_tampered_module_is_refused(board, board_dir):
 # A compiled cart whose module carries no signature runs at full speed only
 # while the owner has the switch on; with it off, it is ignored -- same as
 # no module at all -- and the cart plays on the interpreter with the short
-# toast (2026-09-30, "A cart survives its firmware"). `unknown_sources 0|1`
+# notice (2026-09-30, "A cart survives its firmware"). `unknown_sources 0|1`
 # is the dev channel's word for the switch: it sets it without the screen's
 # warning and never persists.
 
@@ -1135,8 +1135,8 @@ def unknown_sources(board, on):
 def wasm_unsigned_cart_follows_unknown_sources(board, board_dir):
     """The hello cart with its module built unsigned: with the switch off it
     is IGNORED, same as an absent module, and plays on the interpreter with
-    the short toast; with the switch on the same module runs
-    natively (native trust) and reads its greeting, with no toast. A cart
+    the short "isn't signed" notice; with the switch on the same module runs
+    natively (native trust) and reads its greeting, with no notice. A cart
     whose module was tampered with after signing is still refused either
     way -- that is tamper evidence, not staleness. The switch is left OFF
     whatever happens."""
@@ -1147,8 +1147,8 @@ def wasm_unsigned_cart_follows_unknown_sources(board, board_dir):
     _tampered_cart(board, board_dir, chip)
     try:
         unknown_sources(board, False)
-        toast = _runs_on_interpreter(board, UNSIGNED_TITLE,
-                                     check=hello_read_its_greeting)
+        notice = _runs_on_interpreter(board, UNSIGNED_TITLE, cause="unsigned",
+                                      check=hello_read_its_greeting)
         unknown_sources(board, True)
 
         def _native_and_greets(b):
@@ -1158,14 +1158,14 @@ def wasm_unsigned_cart_follows_unknown_sources(board, board_dir):
         err = _wasm_run_error(board, TAMPERED_TITLE)
         assert "refused: bad signature" in err, err
         unknown_sources(board, False)
-        assert _runs_on_interpreter(board, UNSIGNED_TITLE,
-                                    check=hello_read_its_greeting) == toast
+        assert _runs_on_interpreter(board, UNSIGNED_TITLE, cause="unsigned",
+                                    check=hello_read_its_greeting) == notice
     finally:
         board.cmd("unknown_sources 0", wait_for="REMOTE unknown_sources")
     assert board.state()["unknown_sources"] is False
-    print("\nWASM unsigned cart: %r toast with the switch off, native with it on"
-          % (toast,))
-    return toast
+    print("\nWASM unsigned cart: %r notice with the switch off, native with it on"
+          % (notice,))
+    return notice
 
 
 # -- a cart too big for the board (docs/wasm_tier_plan_2026-09.md) --------------
@@ -1227,15 +1227,26 @@ def _runs_clean(board, title, check=None):
         board.drain(1.0)
 
 
-INTERP_TOAST = ("RUNNING SLOWLY", "interpreted, not compiled")
+INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
+# The sub-line by cause (runtime/player.py's INTERP_NOTICE_SUB, duplicated
+# here because this file drives a real board over serial rather than
+# importing the runtime): "missing" covers no module for this console at
+# all, one built for another chip, and one left over from an older format --
+# every one of those is simply the wrong file name to this console, so the
+# Player cannot tell them apart and shows the same "needs an update"; a
+# module that matched this console's name but carried no signature while
+# Unknown sources is off is "unsigned".
+INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed"}
 
 
-def _runs_on_interpreter(board, title, check=None):
+def _runs_on_interpreter(board, title, check=None, cause="missing"):
     """`title` runs clean (no blocking notice, no error) AND landed on the
     interpreter tier: `ws.player._lua.interp` is true and the short system
-    toast (`runtime/console_notices.py`) named it, exactly the same as a cart
-    with no module at all (docs/wasm_tier_plan_2026-09.md, "A cart survives
-    its firmware", 2026-09-30). Returns the toast (title, sub)."""
+    notice (`runtime/console_notices.py`'s `_draw_notice`, the "MOYBYTE
+    UPDATED" banner, never the achievement toast) named it with the sub-line
+    `cause` says, exactly the same as a cart with no module at all
+    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+    2026-09-30). Returns the notice (title, sub)."""
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
     try:
@@ -1245,12 +1256,12 @@ def _runs_on_interpreter(board, title, check=None):
         assert not st.get("cart_error"), st["cart_error"]
         assert not st.get("notice"), st["notice"]
         assert board.pyval("bool(ws.player._lua.interp)", strict=True) is True
-        toast = board.pyval("list(ws._notice[:2]) if ws._notice else None",
-                            strict=True)
-        assert toast == list(INTERP_TOAST), toast
+        notice = board.pyval("list(ws._notice[:2]) if ws._notice else None",
+                             strict=True)
+        assert notice == [INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB[cause]], notice
         if check is not None:
             check(board)
-        return toast
+        return notice
     finally:
         board.leave_cart()
         board.drain(1.0)
@@ -1623,8 +1634,8 @@ def wasm_a_module_for_another_chip_runs_on_the_interpreter(board, board_dir):
     """A compiled cart whose only module was built for another chip is
     simply the wrong file name to this console (2026-09-30, "A cart survives
     its firmware") -- never opened, never refused -- so it plays on the
-    interpreter with the short toast, exactly a hello cart with no module at
-    all does."""
+    interpreter with the short "needs an update" notice, exactly a hello
+    cart with no module at all does."""
     wasm_signing_key()
     chip = _wasm_chip(board_dir)
     other = "esp32p4" if chip == "esp32s3" else "esp32s3"
@@ -1635,8 +1646,8 @@ def wasm_a_module_for_another_chip_runs_on_the_interpreter(board, board_dir):
 def wasm_no_module_at_all_runs_on_the_interpreter(board, board_dir):
     """The hello cart with NO compiled module in its folder at all -- just
     main.wasm, as moy-spec's `moy build` leaves it -- plays on the
-    interpreter from the launcher, with the short toast, on every console
-    board."""
+    interpreter from the launcher, with the short "needs an update" notice,
+    on every console board."""
     _wasm_fixture_variant(board, board_dir, _wasm_chip(board_dir),
                           NO_MODULE_TITLE, "nomodule", chips=())
     return _runs_on_interpreter(board, NO_MODULE_TITLE, check=hello_read_its_greeting)

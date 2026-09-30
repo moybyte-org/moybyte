@@ -126,7 +126,8 @@ evicted, a module simply counts toward the cart's size. **A cart with no
 module by this console's own name is not refused** (2026-09-30, "A cart
 survives its firmware", ESP 88): `device/moycore_glue.WasmRun` opens
 `main.wasm` itself on the interpreter instead, with no key and no signature,
-and the Player's toast says it is running unoptimized (below). The sync RPC
+and the Player's notice says it needs an update to run at full speed (below).
+The sync RPC
 declines binary files, so a module never crosses between a browser and a
 board (`runtime/moy_sync.py`): a compiled cart plays where its module was
 put, or on the interpreter where it was not.
@@ -330,9 +331,10 @@ byte, as it reads the signature.
 the engine's `refused: unsigned module` and retries the open on the
 interpreter, `main.wasm` itself, which needs neither signature nor switch, so
 the cart plays regardless -- natively when the switch is on, interpreted with
-a short toast when it is off. The same retry covers a corrupted or
-mismatched AOT module (rare: its file name matched this console's chip and
-format, its content did not) -- ANY AOT refusal falls back to the
+a short "isn't signed" notice when it is off. The same retry covers a
+corrupted or mismatched AOT module (rare: its file name matched this
+console's chip and format, its content did not; that one reads as "needs an
+update", the same as no module at all) -- ANY AOT refusal falls back to the
 interpreter **except tamper evidence**: a signature that is PRESENT but does
 not verify is the one case that still refuses to the ordinary error panel,
 because that module was changed after it was signed, which is not staleness.
@@ -340,12 +342,12 @@ because that module was changed after it was signed, which is not staleness.
 | the module file | setting off | setting on |
 |---|---|---|
 | signed with a key the image trusts | loads natively | loads natively |
-| no signature trailer | interpreter, toast | loads natively |
+| no signature trailer | interpreter, "isn't signed" | loads natively |
 | a byte changed after signing | `refused: bad signature` (panel) | `refused: bad signature` (panel) |
 | signed for another chip, or with a key the image does not trust | `refused: bad signature` (panel) | `refused: bad signature` (panel) |
 | a trailer whose length is out of range | `refused: malformed signature` (panel) | `refused: malformed signature` (panel) |
-| key content does not match this console (name matched by chance, or corrupt) | interpreter, toast | interpreter, toast |
-| no module by this console's name at all | interpreter, toast | interpreter, toast |
+| key content does not match this console (name matched by chance, or corrupt) | interpreter, "needs an update" | interpreter, "needs an update" |
+| no module by this console's name at all | interpreter, "needs an update" | interpreter, "needs an update" |
 
 Whatever passes signing goes on to the provenance key, which is checked
 either way: the setting says nothing about which format or chip a module was
@@ -424,11 +426,12 @@ in Python: it looks for this console's own module by name first, and only
 opens the interpreter when there is none, or when the one it found does not
 check out for a reason that is not tamper evidence (Unknown sources, ESP 88's
 "Provenance" section). `self.interp` is the fact the Player reads --
-`runtime/player.py`'s `_start_runtime` -- to arm `ws.notice(INTERP_NOTICE_TITLE,
-INTERP_NOTICE_SUB, "warn")`, the timed system banner
-(`runtime/console_notices.py`, the same mechanism "MOYBYTE UPDATED" uses),
-never the blocking crash-panel notice: the cart is already playing by the
-time the toast appears.
+`runtime/player.py`'s `_start_runtime` -- to arm the timed system notice
+(`runtime/console_notices.py`'s `_draw_notice`, the same mechanism "MOYBYTE
+UPDATED" uses, never `_draw_toast`'s achievement banner): `ws.notice(
+INTERP_NOTICE_TITLE, sub, "warn")`, where `sub` is `self.interp_cause`
+("missing" or "unsigned") read through `INTERP_NOTICE_SUB`. It never blocks
+the crash panel: the cart is already playing by the time the notice appears.
 
 ## Stopping a run
 
@@ -487,8 +490,11 @@ waits for it, so an item that never returns holds the cart where it is.
 - `tests/test_push_cart.py` / `tests/test_refresh_wasm.py`: a push compiles an
   unsigned module only when this board's chip+format has none, replaces one
   built for another main.wasm, and leaves every OTHER chip's module in the
-  cart folder unpushed and undeleted; a refresh walks every compiled cart this
-  checkout has the source for and re-pushes each.
+  cart folder unpushed and undeleted; a refresh asks the BOARD which compiled
+  carts it actually has (`ws.carts.all`, never a local folder walk -- Jet's
+  own source carries no `main.wasm` to walk to), rebuilds one that has gone
+  stale from a known local recipe (`tools/refresh_wasm.py`'s `known_sources`),
+  and prunes whatever module the board can no longer use.
 - On glass, every declaring board's suite: the idle cost against a module-free
   image of the same tree, the hello module and six a board refuses (no key,
   another format, other flags, another chip, no signature, one byte of a
@@ -506,10 +512,11 @@ waits for it, so an item that never returns holds the cart where it is.
   it, and the Read Dir fixture's `read` of its own `src/` folder reading
   nothing, as a missing file does. **The interpreter tier, on every board**:
   a cart with no module, one built for another chip, and one named for a
-  stale format all play on the interpreter with the short toast and the
-  hello cart's greeting check; an unsigned cart follows Unknown sources --
-  the interpreter and its toast with the switch off, native and no toast with
-  it on, a tampered one still refused either way. The suites build the
+  stale format all play on the interpreter with the short "needs an update"
+  notice and the hello cart's greeting check; an unsigned cart follows
+  Unknown sources -- the interpreter and its "isn't signed" notice with the
+  switch off, native and no notice with it on, a tampered one still refused
+  either way. The suites build the
   modules with the pinned compilers (`python3 tools/wasm_module.py
   compilers`), sign them with the OTA signing key (a suite without it skips
   the wasm checks, saying why), and push them into the board's store: the

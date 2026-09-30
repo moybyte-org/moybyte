@@ -450,10 +450,11 @@ rebuilt from its source. Turning it ON replaces the rows with a warning
 trust.") whose focus starts on KEEP OFF, so it takes the
 TURN ON button, or a move and a press; turning it OFF is one tap. With it on,
 an unsigned module runs at full native speed; with it off the module is
-ignored and the cart plays on the interpreter instead, with a short toast
-saying so (2026-09-30, "A cart survives its firmware") — never a blocking
-notice, either way. A module whose signature is present and fails is refused
-either way (`native/moy_wasm/README.md`, "Unknown sources").
+ignored and the cart plays on the interpreter instead, with a short system
+notice ("isn't signed") saying so (2026-09-30, "A cart survives its
+firmware") — never the blocking crash panel, either way. A module whose
+signature is present and fails is refused either way
+(`native/moy_wasm/README.md`, "Unknown sources").
 
 ---
 

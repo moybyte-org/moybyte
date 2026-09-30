@@ -290,13 +290,27 @@ _MB = 1024 * 1024
 # refused for it (docs/wasm_tier_plan_2026-09.md, "A cart survives its
 # firmware", 2026-09-30): device/moycore_glue.WasmRun retries it on the
 # interpreter before this layer ever sees an error, so the cart plays, only
-# slower, and INTERP_NOTICE is the short toast that says so (`ws.notice`,
-# runtime/console_notices.py -- it expires on its own, never a panel to
-# dismiss). A module whose SIGNATURE is present and does not verify keeps the
-# ordinary error panel -- that module was changed after it was signed, which
-# is tamper evidence, not staleness, and no switch and no interpreter runs it.
+# slower, and INTERP_NOTICE is the short system NOTICE that says so
+# (`ws.notice`, runtime/console_notices.py's `_draw_notice` -- the same body
+# "MOYBYTE UPDATED" uses, never `_draw_toast`'s achievement banner, and it
+# expires on its own rather than needing a dismissal). A module whose
+# SIGNATURE is present and does not verify keeps the ordinary error panel --
+# that module was changed after it was signed, which is tamper evidence, not
+# staleness, and no switch and no interpreter runs it.
+#
+# The sub-line says what to do, by cause (`WasmRun.interp_cause`): a cart
+# with no module by this console's own name -- none built yet, or one left
+# over from a format this console has moved past -- needs a fresh build;
+# one whose module matched but carried no signature while Unknown sources is
+# off is simply not signed. Any other non-tamper refusal (a corrupt or
+# foreign-chip key despite a matching file name) reads the same as "missing":
+# this console's copy is not one it can use, whatever the reason.
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
-INTERP_NOTICE_SUB = "interpreted, not compiled"
+INTERP_NOTICE_SUB = {
+    "missing": "needs an update",
+    "unsigned": "isn't signed",
+}
+INTERP_NOTICE_SUB_DEFAULT = INTERP_NOTICE_SUB["missing"]
 
 
 class _TooBig(Exception):
@@ -1672,9 +1686,14 @@ class Player:
             if runtime == "wasm" and getattr(lua, "interp", False):
                 # Not an error and not a panel: the cart plays, on the
                 # interpreter rather than the module this console wanted.
+                # The sub-line names the cause; an unrecognised or absent one
+                # (a fixture, or a runtime that predates interp_cause) reads
+                # as "missing", the more common case.
                 notice = getattr(ws, "notice", None)
                 if notice is not None:
-                    notice(INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB, "warn")
+                    sub = INTERP_NOTICE_SUB.get(getattr(lua, "interp_cause", None),
+                                                INTERP_NOTICE_SUB_DEFAULT)
+                    notice(INTERP_NOTICE_TITLE, sub, "warn")
             t_exec = _ticks_diff(_ticks_ms(), t5)
             t6 = _ticks_ms()
             if lua.init is not None:

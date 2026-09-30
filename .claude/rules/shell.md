@@ -111,8 +111,9 @@ to whoever called it.
   with no module for this console, one built for another chip or format, or
   one whose module is unsigned while Settings -> UNKNOWN SOURCES is off is
   never refused either (2026-09-30, "A cart survives its firmware"): it plays
-  on the interpreter instead, with a short toast, never a panel. Only tamper
-  evidence -- a signature present but not verifying -- still stays an error.
+  on the interpreter instead, with a short notice naming the cause ("needs an
+  update" or "isn't signed"), never a panel. Only tamper evidence -- a
+  signature present but not verifying -- still stays an error.
   `docs/moycore_direction.md` is the direction doc and `native/moycore/` the
   implementation; the decisions and traps:
   - **There is exactly ONE Lua runtime and no chooser.** The old trampoline engine

@@ -248,11 +248,13 @@ class _Interp:
     an unsigned module (the switch off) or a stale/foreign one
     (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
     2026-09-30). Neither case reaches the Player as a failure any more; both
-    look like this from here, a plain successful run with `.interp` set."""
+    look like this from here, a plain successful run with `.interp` set and
+    `.interp_cause` naming which of the two it was."""
 
-    def __init__(self, ns, src):
+    def __init__(self, ns, src, cause="unsigned"):
         del ns, src
         self.interp = True
+        self.interp_cause = cause
         self.init = None
         self.draw_next = True
 
@@ -266,17 +268,22 @@ class _Interp:
         pass
 
 
-def test_an_unsigned_cart_plays_on_the_interpreter_with_a_toast(tmp_path):
+def _open_interp_hello(tmp_path, cause):
+    from ws_helpers import open_cart
+    ws = host_app.build_workstation(_hello_store(tmp_path))
+    ws.runtimes["wasm"] = lambda ns, src: _Interp(ns, src, cause=cause)
+    open_cart(ws, "Hello Wasm")
+    return ws
+
+
+def test_an_unsigned_cart_plays_on_the_interpreter_with_a_notice(tmp_path):
     """With the switch off an unsigned module is not refused: WasmRun
     already retried it on the interpreter before the Player ever saw an
     error, so the cart plays -- no notice panel, no error -- and the Player
-    arms the short toast that says it is running unoptimized."""
+    arms the short system notice that says the cart isn't signed."""
     from runtime import bar_layer, player
     from runtime.dev_channel import _remote_state
-    from ws_helpers import open_cart
-    ws = host_app.build_workstation(_hello_store(tmp_path))
-    ws.runtimes["wasm"] = _Interp
-    open_cart(ws, "Hello Wasm")
+    ws = _open_interp_hello(tmp_path, "unsigned")
     p = ws.player
     assert p.notice is None and p.cart_error is None
     assert p._lua is not None and p._lua.interp
@@ -284,7 +291,19 @@ def test_an_unsigned_cart_plays_on_the_interpreter_with_a_toast(tmp_path):
     st = _remote_state(ws)
     assert st["notice"] is None and st["cart_error"] is None
     assert bar_layer._edit_kind(ws.cart) is None
-    assert ws._notice == (player.INTERP_NOTICE_TITLE, player.INTERP_NOTICE_SUB, "warn")
+    assert ws._notice == (player.INTERP_NOTICE_TITLE,
+                          player.INTERP_NOTICE_SUB["unsigned"], "warn")
+    assert ws.notice_active()
+
+
+def test_a_cart_with_no_matching_module_plays_with_a_needs_update_notice(tmp_path):
+    """The same fallback, for the other cause: no module by this console's
+    name at all, or one left over from a format this console has moved past.
+    The Player's notice reads "needs an update" rather than "isn't signed"."""
+    from runtime import player
+    ws = _open_interp_hello(tmp_path, "missing")
+    assert ws._notice == (player.INTERP_NOTICE_TITLE,
+                          player.INTERP_NOTICE_SUB["missing"], "warn")
     assert ws.notice_active()
 
 
