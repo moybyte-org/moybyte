@@ -216,6 +216,7 @@ def stats():
 ''',
     "moy_wasm.py": '''
 CHIP = "xtensa"
+FORMAT = "1"
 
 
 def footprint(mem, size):
@@ -251,7 +252,7 @@ def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
 
 
 def wasm_open(module, head, pages, sha, path, swapped, gate=None,
-              allow_unsigned=False):
+              allow_unsigned=False, interp=False):
     _gate[0] = gate
     return None
 
@@ -479,9 +480,12 @@ def _stage(dest, exe):
     cart.mkdir(parents=True)
     (cart / "manifest.json").write_text(json.dumps(MANIFEST))
     # The module head up to its memory section (1 page), and a placeholder for
-    # this chip's compiled module: the shim's engine never reads either.
+    # this chip's compiled module: the shim's engine never reads either. Named
+    # for the shim's FORMAT too (moy_wasm.py above), or moycore_glue finds no
+    # module by that name and this test measures the interpreter fallback
+    # instead of the AOT path it means to.
     (cart / "main.wasm").write_bytes(b"\0asm\1\0\0\0\5\3\1\0\x10")
-    (cart / "main.xtensa.aot").write_bytes(b"AOT")
+    (cart / "main.xtensa.f1.aot").write_bytes(b"AOT")
     (cart / "config.json").write_text("{}")
 
 
