@@ -157,10 +157,10 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
 # The compiled tier's showcase, Jet Teapot (ports/jet/README.md), from the
 # launcher: uncapped with WiFi off, in Phong -- the costliest of its three
 # shadings and the steadiest to measure -- at half and at full width. The
-# floors sit about a fifth under what this board drew when they were set
-# (2026-09-28); the figures are #158's. The cart stays installed as it ships.
-JET_HALF_FPS_FLOOR = 11
-JET_FULL_FPS_FLOOR = 8
+# floors sit about a fifth under what this board drew, its raster on both
+# cores, when they were set (2026-09-30); the figures are #158's. The cart stays installed as it ships.
+JET_HALF_FPS_FLOOR = 15
+JET_FULL_FPS_FLOOR = 12
 
 
 def test_the_jet_showcase_holds_its_floor_at_half_width(board):
