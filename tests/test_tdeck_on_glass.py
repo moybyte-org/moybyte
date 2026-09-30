@@ -40,10 +40,12 @@ def board():
 
 # The engine's idle cost (docs/wasm_tier_plan_2026-09.md, guard 1). FIRST in
 # the file on purpose: the comparison is against a fresh boot, and the wasm
-# block at the end brings the radios up. Measured 2026-09-25 on a module-free
+# block at the end brings the radios up. Measured 2026-09-30 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
-# internal SRAM.
-WASM_IDLE_BASELINE = (122535, 81920)
+# internal SRAM. That image is board.toml's moy_wasm `take` turned to `deny`,
+# built from an EMPTY build dir: a configured one keeps the engine in its
+# module table and fails to link.
+WASM_IDLE_BASELINE = (122343, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 
