@@ -245,41 +245,30 @@ attach_only = false
 # board's own `_ota_build.BOARD` answer, which the harness verifies after
 # attach/reset.
 usb         = "1a86:55d3"
-# 768 CORRUPTS on this board, measured 2026-08-19: a 44KB cart pushed at the
-# harness default failed five times with a DIFFERENT bad hash each attempt and
-# succeeded first try at 256. This UART's stdin is a ~256-byte ring with NO flow
-# control (the same mechanism .claude/rules/testing.md records for long `py` lines), so an
-# over-long line is dropped as noise with no error -- only the final hash
-# catches it. USB boards backpressure and keep the default.
-chunk       = 256
+# THIS BOARD'S SERIAL IS A UART WITH NO FLOW CONTROL: a byte that arrives with
+# the stdin ring full is dropped with no error, and only a hash or a parse
+# notices. The ring is 4 KB (tools/patch_stdin_ring.py, sized 2026-09-30): a
+# heap collection stalls the reader for up to ~95 ms, 1.1 KB at line rate, and
+# the harness's longest line fits it whole. On the stock 260 bytes the two
+# numbers below were the smallest that held (768 corrupted a push five times
+# running, 2026-08-19; windows of 2048 and 4096 never completed one).
+#
+# The `py`-line chunk, how much of a snippet one `pyexec` line carries. Its
+# %r escaping can nearly double it and the line still fits the ring. 1024,
+# measured 2026-09-30: a 255 KB cart pushed 4/4 with its helpers installed at
+# 1024, and 70 lines of 256-2560 characters, each in one write, went 70/70
+# with a collection forced every 200 ms.
+chunk       = 1024
 # The RAW window (`recv`, the dev channel's 8-bit upload path): how many bytes
-# the host may put on the wire before it must wait for the board's ack. THE ACK
-# IS THIS BOARD'S ONLY BACKPRESSURE -- the same 260-byte ring with no flow
-# control that makes 768 corrupt above -- so the window is deliberately the
-# small one: a stall anywhere inside it becomes a named timeout after 4KB
-# rather than after 32, and 4KB is also the buffer the board allocates for it.
-# It is NOT a rate limit; the ack costs one round trip per window and a 124KB
-# cart is 31 of them.
-#
-# WHAT THE ACK DOES NOT DO, measured 2026-09-11: it does not stop a byte being
-# dropped INSIDE a window. Between acks the host blasts the whole window and
-# the board must keep up for all of it; when it falls behind for ~25ms the ring
-# overflows and a handful of bytes (2, 7, 12 were seen) vanish with no error.
-# On this board that happened about once every 300 windows -- one failed 120KB
-# push in five -- and shrinking the window does NOT fix it: 512 failed a 120KB
-# file where 2048 passed, in the same session. The fix is recovery, not
-# avoidance (RECV_RETRIES in runtime/dev_channel.py): a short window is thrown
-# away and asked for again, and 8 pushes of a 120KB cart then went 8/8 with 6
-# re-sends absorbed.
-#
-# 1024, measured 2026-09-15. Recovery absorbs a dropped byte; it cannot absorb
-# a window the board never sees at all, and that is what 2048 and 4096 do here
-# -- a 79KB file failed 3/3 at each with "timeout after 0 of 79036", the
-# board's two-empty-windows verdict, while 1024 went 3/3 clean. The ring is
-# ~256 bytes with no flow control, so the ack is the only backpressure there
-# is: the larger the window, the longer this board's frame loop has to keep up
-# unaided, and for 4KB it does not.
-window      = 1024
+# the host may put on the wire before it must wait for the board's ack. The ack
+# is this board's only backpressure, and a window smaller than the ring lands
+# whole even if the board reads none of it until the last byte is in, so no
+# stall inside a window can drop a byte. 3072 is three quarters of the ring.
+# Measured 2026-09-30 with the same cart: 4/4 at 2048 and 8/8 at 3072, two of
+# those with a collection forced every 200 ms and three with the diag stream
+# on, no window re-sent. It is NOT the rate limit -- the board's file write is
+# -- so it buys little: a 150 KB file took 27 s at 3072 and 31 s at 1024.
+window      = 3072
 
 [monitor]
 baud = 115200

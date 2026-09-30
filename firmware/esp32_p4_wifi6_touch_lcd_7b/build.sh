@@ -104,6 +104,12 @@ moybyte_patch_map_cache_for_repr_c
 # lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
 moybyte_patch_gc_run_hints
 
+# 2f) A 4 KB stdin ring, in TCM: this board's serial is the CH343's UART, with
+#     no flow control, and the stock 260 bytes are 23 ms of line rate against a
+#     heap collection of up to ~95 ms. tools/patch_stdin_ring.py carries the
+#     sizing and why TCM.
+moybyte_patch_stdin_ring
+
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # The patch reserves MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM outside the Python
 # heap, and that define is set by the two S3 boards' mpconfigboard.h alone, so a

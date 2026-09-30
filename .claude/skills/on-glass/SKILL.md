@@ -50,9 +50,9 @@ tools/board.py tdeck tail 10 --send "diag 1" --grep PERF
 tools/board.py tdeck perf "Brick Siege"       # see the perf skill
 ```
 
-`perf` ends its cart and puts diag and uncap back, `push` puts diag back,
-`shot`/`pmem`/`state`/`mem` change nothing, and `desk` returns a board to where
-it boots (no cart, launcher on top, the desk
+`perf` ends its cart and puts diag and uncap back, `push` changes only the
+store, `shot`/`pmem`/`state`/`mem` change nothing, and `desk` returns a board
+to where it boots (no cart, launcher on top, the desk
 open on a windowed tier). **Leave a board the way you found it** — a leftover
 menu or cart is what the next suite trips on.
 

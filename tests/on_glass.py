@@ -547,15 +547,11 @@ def wasm_push(board, board_dir):
     ser = board_config.load(board_dir)["serial"]
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     dest = root.rstrip("/") + "/" + WASM_DIR
-    was = pc.quiet_diag(board)
-    try:
-        win = pc.raw_window(board, int(ser.get("window") or 4096))
-        assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
-        board.pyval("ws._g['_mkdir'](%r)" % dest)
-        for name, local in sorted(mods.items()):
-            pc.push_file_raw(board, local, "%s/%s.aot" % (dest, name), win)
-    finally:
-        pc.restore_diag(board, was)
+    win = pc.raw_window(board, int(ser.get("window") or 4096))
+    assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
+    board.pyval("ws._g['_mkdir'](%r)" % dest)
+    for name, local in sorted(mods.items()):
+        pc.push_file_raw(board, local, "%s/%s.aot" % (dest, name), win)
     return {name: "%s/%s.aot" % (dest, name) for name in mods}
 
 
@@ -835,18 +831,14 @@ def _push_folder(board, board_dir, local, dest):
     from tools import board_config
     ser = board_config.load(board_dir)["serial"]
     names = pc.cart_files(local)
-    was = pc.quiet_diag(board)
-    try:
-        win = pc.raw_window(board, int(ser.get("window") or 4096))
-        assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
-        board.pyval("ws._g['_mkdir'](%r)" % dest)
-        for sub in pc.sub_dirs(names):
-            board.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
-        for name in names:
-            pc.push_file_raw(board, os.path.join(local, name), dest + "/" + name,
-                             win)
-    finally:
-        pc.restore_diag(board, was)
+    win = pc.raw_window(board, int(ser.get("window") or 4096))
+    assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
+    board.pyval("ws._g['_mkdir'](%r)" % dest)
+    for sub in pc.sub_dirs(names):
+        board.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
+    for name in names:
+        pc.push_file_raw(board, os.path.join(local, name), dest + "/" + name,
+                         win)
 
 
 def wasm_carts_push(board, board_dir):

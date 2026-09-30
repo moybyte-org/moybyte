@@ -128,11 +128,15 @@ paths:
     the reader then parses the fragment as a COMMAND and `int()`s its argument,
     surfacing as a `PY ERR` that names nothing that is wrong. Issue those as their
     own short `cmd`.
-  - **A UART board's stdin ring is ~256 bytes with NO flow control**, so
-    `_write_line` paces bursts and any other writer of long lines must too (USB
-    boards backpressure and never need it). `SERIAL_LINE_MAX` must fit the
-    harness's `pyexec` chunk lines — at the T-Deck's original 96 every P4 upload
-    was silently dropped as noise.
+  - **The Waveshare P4's serial is a UART with NO flow control**: a byte that
+    arrives with its stdin ring full is dropped with no error, and only a hash
+    or a parse notices. Its ring is 4 KB (`tools/patch_stdin_ring.py`), which
+    holds a harness line or a whole `recv` window while a heap collection
+    stalls the reader, so `_write_line` writes every line in one burst on
+    every board; a `[serial]` chunk or window that outgrows the ring brings the
+    drops back, and `tests/test_board_toml.py` pins both under it.
+    `SERIAL_LINE_MAX` must fit the harness's `pyexec` chunk lines — at the
+    T-Deck's original 96 every P4 upload was silently dropped as noise.
   - Waits and staleness: **wait for `REMOTE drag done`/`swipe done`** before the
     next command; PERF's `wmr/wmw/wms` are last-sample values that go STALE when
     their pass stops running (a repeated constant means "not running"); allow ~10s

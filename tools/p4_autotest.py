@@ -375,35 +375,14 @@ class P4Board:
 
     # -- plumbing ---------------------------------------------------------
 
-    # UART boards have NO FLOW CONTROL: the P4's CH343 feeds a ~256-byte
-    # stdin ring that the console drains once per ~20ms frame, so a long line
-    # written in one burst (115200 baud = ~11.5 bytes/ms) overflows the ring
-    # mid-line and arrives corrupted -- measured 2026-08-17: 768-byte `py`
-    # lines failed 3/3 in one write and passed 3/3 sliced at 128B/20ms. The
-    # old device readline masked this by blocking mid-frame and draining
-    # continuously; the shared dev channel drains per frame, so the WRITER
-    # must respect the ring. Short lines (a burst under the ring size) go out
-    # in one write. USB boards (T-Deck) have host-side backpressure and never
-    # need this, but the pacing costs them nothing on short commands.
-    # 96B/40ms, not the 128B/20ms that first measured clean: under PERF DIAG
-    # the loop drops toward ~25fps (40ms frames), and two 128B slices landing
-    # inside one frame gap total 256B -- exactly the ring, zero margin. The
-    # suite's longest line (a 512-char junk-signature probe) failed right
-    # there. 96B per 40ms keeps the worst in-window arrival under half a ring
-    # at any loop rate the console actually runs.
-    PACE_SLICE = 96            # bytes per write burst (ring/2 - headroom)
-    PACE_GAP_S = 0.04          # a diag-slowed frame period between bursts
-
+    # One write per line, on every board. The USB boards backpressure; the
+    # Waveshare P4's UART has no flow control, and its 4 KB stdin ring
+    # (tools/patch_stdin_ring.py) holds a whole harness line -- a `pyexec`
+    # chunk at twice its size, escaped -- while a heap collection stalls the
+    # reader.
     def _write_line(self, text):
-        data = text.encode() + b"\n"
-        if len(data) <= self.PACE_SLICE:
-            self.ser.write(data)
-            self.ser.flush()
-            return
-        for i in range(0, len(data), self.PACE_SLICE):
-            self.ser.write(data[i:i + self.PACE_SLICE])
-            self.ser.flush()
-            time.sleep(self.PACE_GAP_S)
+        self.ser.write(text.encode() + b"\n")
+        self.ser.flush()
 
 
     def _pump(self):
@@ -621,32 +600,14 @@ class P4Board:
 
     # -- the `py` probe hook ----------------------------------------------
 
-    # The device reads dev commands with one sys.stdin.readline() per frame, so
-    # a command must fit the USB-CDC RX ring, and multi-line snippets upload in
-    # chunks and exec once.
-    #
-    # 120 was set after a ~1KB one-liner came back truncated (2026-07-26) and
-    # the size was never re-measured. It was expensive: ONE ROUND TRIP COSTS
-    # 201ms (measured 2026-08-07 -- the device answers one command per frame,
-    # and the desktop's frame is not fast), so the conformance harness spent
-    # ~85 round trips a scene, most of them uploading 120 characters at a time.
-    #
-    # Re-measured, five tries per size: 120, 400, 512, 640, 768, 900 and 1000
-    # all pass 5/5 -- and 256 passes 3/5. So the 2026-07-26 failure was not
-    # length at all, it was the INTERMITTENT lost reply that shows up at every
-    # size. `cmd` retries once for that (below), and the chunk was sized for
-    # round trips instead: 768 is 6x fewer.
-    #
-    # 768 WAS WRONG, and the 5/5 above is why it survived a fortnight: this
-    # UART's stdin is a ~256-byte ring with NO flow control, so an over-long
-    # line is dropped as NOISE with no error -- the failure is silent, and it
-    # only bites once the frame loop is slow enough (a cart running, PERF diag
-    # streaming) that the ring fills between drains. The board.toml measurement
-    # of 2026-08-19 caught it on a 44KB cart push (five failures, a different
-    # bad hash each time; clean first try at 256), and the same size is what
-    # the conformance harness and the RSA-verifier test upload through -- both
-    # failed here as `SyntaxError: invalid syntax` / `ValueError: incorrect
-    # padding` from a corrupted chunk, which names nothing that is wrong.
+    # Multi-line snippets upload in chunks and exec once. ONE ROUND TRIP COSTS
+    # ~200ms (measured 2026-08-07 -- the device answers one command per frame),
+    # so the chunk is sized for round trips, and a reply that goes missing at
+    # any size is `cmd`'s one retry, not a reason to shrink it. On a UART board
+    # the stdin ring bounds it too: a byte that arrives with the ring full is
+    # dropped with no error, and a corrupted chunk surfaces as `SyntaxError:
+    # invalid syntax` or `ValueError: incorrect padding`, which names nothing
+    # that is wrong.
     #
     # So the size is READ from the board's own [serial] declaration rather than
     # kept as a second copy of the number. The literal below is only the

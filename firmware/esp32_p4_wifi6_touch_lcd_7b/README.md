@@ -95,16 +95,18 @@ UI while watching the glass:
 
 **`recv` is the one command that stops reading lines**, and this board is the
 one it was sized for: everything about its shape is this UART. Stdin here is a
-~256-byte ring fed by an ISR with **no flow control** — the same mechanism
-that makes a 768-char `py` line corrupt — so the host may only have one
-`window` of bytes in flight and must then wait for the board's ack, which is
-written *after* the file write, when nothing is on the wire. `[serial] window`
-in `board.toml` is **4096** here, four times smaller than the USB boards',
-whose USB-Serial/JTAG backpressures for real. A byte the ring drops is
-invisible to both ends, so the board simply never completes that window: its
-idle timeout fires after 5s, it removes the `.new` and prints how far it got.
-A byte that arrives *wrong* is caught by the sha256 the board takes by reading
-the file back. The T-Deck's README carries the rest, which is shared. `recv` is
+4 KB ring (`tools/patch_stdin_ring.py`) fed by an ISR with **no flow
+control**, so the host may only have one `window` of bytes in flight and must
+then wait for the board's ack, which is written *after* the file write, when
+nothing is on the wire. `[serial] window` in `board.toml` is **3072** here,
+three quarters of the ring, so a window lands whole however long a heap
+collection stalls the reader; the USB boards' is 16384, because their
+USB-Serial/JTAG backpressures for real. A byte lost anyway is invisible to
+both ends, so the board never completes that window: after `RECV_IDLE_MS` of
+silence it throws the window away and asks for it again (`RECV retry`), and
+after `RECV_RETRIES` it removes the `.new` and prints how far it got. A byte
+that arrives *wrong* is caught by the sha256 the board takes by reading the
+file back. The T-Deck's README carries the rest, which is shared. `recv` is
 the ONLY cart-push transport, so an image without the command answers
 `REMOTE ? recv` and the tool stops with one line saying to flash the board.
 

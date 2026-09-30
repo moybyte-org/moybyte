@@ -40,8 +40,9 @@ tty split its bytes, and a second open steals replies from whatever suite or
 agent opened it first.
 
 LEAVING THE DESK. `perf` ends its cart and restores diag and uncap; `push`
-restores diag; `shot`, `pmem`, `state` and `mem` change nothing. `run`, `tap`,
-`swipe` and `open` change the console on purpose, and `desk` undoes them.
+changes the store and rescans it; `shot`, `pmem`, `state` and `mem` change
+nothing. `run`, `tap`, `swipe` and `open` change the console on purpose, and
+`desk` undoes them.
 """
 
 import argparse

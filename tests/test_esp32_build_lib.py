@@ -371,6 +371,63 @@ def test_a_half_applied_run_hints_tree_is_REFUSED(tmp_path):
     assert r.returncode != 0 and "half-applied" in r.stderr
 
 
+# -- the stdin ring for a UART console -----------------------------------------
+
+_MPHALPORT_STOCK = """\
+TaskHandle_t mp_main_task_handle;
+
+static uint8_t stdin_ringbuf_array[260];
+ringbuf_t stdin_ringbuf = {stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 0};
+"""
+
+
+def _mphalport(tmp_path, text=_MPHALPORT_STOCK):
+    p = tmp_path / "ports" / "esp32"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "mphalport.c"
+    f.write_text(text, encoding="utf-8")
+    return f
+
+
+def _stdin_ring(tmp_path):
+    return sh("moybyte_patch_stdin_ring", MPY_DIR=str(tmp_path),
+              REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_stdin_ring_patch_sizes_the_array_the_ring_is_built_over(tmp_path):
+    """The ring takes its size from `sizeof` the array, so the array is the
+    whole edit -- the only place the number lives -- and its section is TCM,
+    where it leaves the L2MEM heap's layout alone."""
+    f = _mphalport(tmp_path)
+    r = _stdin_ring(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    assert "static uint8_t TCM_DRAM_ATTR stdin_ringbuf_array[4096];" in c
+    assert "#include \"esp_attr.h\"" in c
+    assert "[260]" not in c
+    assert "{stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 0}" in c
+
+
+def test_the_stdin_ring_patch_is_idempotent_on_a_warm_tree(tmp_path):
+    f = _mphalport(tmp_path)
+    assert _stdin_ring(tmp_path).returncode == 0
+    once = f.read_text(encoding="utf-8")
+    r = _stdin_ring(tmp_path)
+    assert r.returncode == 0 and r.stdout.strip() == ""
+    assert f.read_text(encoding="utf-8") == once
+
+
+def test_a_stdin_ring_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    """A silent no-op is a board back on 260 bytes, which drops a long line
+    whenever a collection lands in it and names nothing."""
+    f = _mphalport(tmp_path, _MPHALPORT_STOCK.replace("[260]", "[512]"))
+    before = f.read_text(encoding="utf-8")
+    r = _stdin_ring(tmp_path)
+    assert r.returncode != 0
+    assert "did not apply" in r.stderr and "ring array" in r.stderr
+    assert f.read_text(encoding="utf-8") == before
+
+
 def test_a_repr_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
     """The guard is the point: a silent no-op is a board quietly running boxed
     floats again, which costs a 130-175ms GC hitch -- and, since the ESP-NOW

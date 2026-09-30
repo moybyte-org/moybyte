@@ -192,6 +192,17 @@ moybyte_patch_gc_run_hints() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_run_hints.py" "${MPY_DIR}" || exit 1
 }
 
+# A 4 KB stdin ring, in the ESP32-P4's TCM, for a board whose serial is a
+# UART. The port's stock ring is 260 bytes and the UART has no flow control, so
+# a heap collection landing while a long line arrives drops bytes with no
+# error. tools/patch_stdin_ring.py is the patch, its sizing and its placement:
+# all-or-nothing, idempotent. A USB-Serial/JTAG board backpressures and
+# declines it.
+moybyte_patch_stdin_ring() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_stdin_ring.py" "${MPY_DIR}" || exit 1
+}
+
 # Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
 # on demand by DOUBLING it, from the same ESP heap the Lua VM, the panel DMA
 # and the layer pool allocate from, and never gives an area back. On an 8MB

@@ -145,6 +145,11 @@ moybyte_patch_psram_retune
 # component is the P4's radio: a C6 slave over SDIO. This board's WiFi and BLE
 # are on-die, and nothing in its build pulls esp_hosted in at all.
 
+# DECLINED moybyte_patch_stdin_ring -- the 4 KB stdin ring for a UART console.
+# This board's serial is the SoC's USB-Serial/JTAG, whose ISR takes only what
+# the ring has room for while the USB host waits with the rest, so a heap
+# collection costs it throughput and never a byte; the internal SRAM stays.
+
 # ---------------------------------------------------------------------------
 # 3) Stage: the shared native modules (board.toml [native.shared] -- the
 #    C-module list is DATA, exactly like the Python one; there is no module

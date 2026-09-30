@@ -43,10 +43,10 @@ def board():
 
 # The engine's idle cost (docs/wasm_tier_plan_2026-09.md, guard 1). FIRST in
 # the file on purpose: the comparison is against a fresh boot, and the wasm
-# block at the end brings the radios up. Measured 2026-09-25 on a module-free
+# block at the end brings the radios up. Measured 2026-09-30 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
 # internal SRAM.
-WASM_IDLE_BASELINE = (280483, 188416)
+WASM_IDLE_BASELINE = (276743, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
 
@@ -115,6 +115,13 @@ def test_a_full_frame_blit_cart_holds_its_floor(board, wasm_carts):
                                        WASM_BLIT_FPS_FLOOR)
 
 
+# par (proposals/wasm-runtime.md): a compiled cart's items on this board's
+# second core leave exactly what running them in order leaves, each on its
+# own stack, and the board's one lane runs some of them.
+def test_par_items_across_the_cores_match_them_in_order(board, wasm_carts):
+    on_glass.wasm_par_matches_items_in_order(board, lanes=1)
+
+
 # The P4s keep the blit: a windowed desk re-composites the game canvas while
 # the cart is not running, so the canvas has to hold every frame, and the
 # board says it lacks the frame fold by absence.
@@ -140,6 +147,25 @@ def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_cart
 
 def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
     on_glass.wasm_read_of_a_folder_reads_nothing(board, WASM_BOARD_DIR)
+
+
+# The compiled tier's showcase, Jet Teapot (ports/jet/README.md), from the
+# launcher: uncapped with WiFi off, in Phong -- the costliest of its three
+# shadings and the steadiest to measure -- at half and at full width. The
+# floors sit about a fifth under what this board drew, its raster on both
+# cores, when they were set (2026-09-30); the figures are #158's. The cart stays installed as it ships.
+JET_HALF_FPS_FLOOR = 22
+JET_FULL_FPS_FLOOR = 18
+
+
+def test_the_jet_showcase_holds_its_floor_at_half_width(board):
+    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_HALF_FPS_FLOOR,
+                                 width="half", shading="phong")
+
+
+def test_the_jet_showcase_holds_its_floor_at_full_width(board):
+    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_FULL_FPS_FLOOR,
+                                 shading="phong")
 
 
 # Doom, built by the recipe (experiments/wasm_aot/doom/): its frames are the
@@ -695,40 +721,6 @@ def test_a_cart_runs_and_exits(board):
     and the shell's own close, while the fullscreen tiers pin the kid-facing
     flag."""
     on_glass.cart_runs_and_exits(board, "star", door="shell", clear=3)
-
-# The compiled tier's showcase, Jet Teapot (ports/jet/README.md), from the
-# launcher: uncapped with WiFi off, in Phong -- the costliest of its three
-# shadings and the steadiest to measure -- at half and at full width. The
-# floors sit about a fifth under what this board drew, its raster on both
-# cores, when they were set (2026-09-30); the figures are #158's. The cart stays installed as it ships.
-#
-# HERE, after the OTA block and before the radios, not beside the other wasm
-# floors: the showcase's first run leaves this board's live heap ~90 KB bigger
-# for good and a full collect ~95 ms where a fresh boot's takes ~72, and a
-# collect that lands while a long `py` line trickles into this UART's 256-byte
-# ring drops bytes with no recovery. The OTA block's junk-signature line is the
-# longest the suite sends; with the showcase ahead of it, it arrived as a
-# SyntaxError on every run.
-JET_HALF_FPS_FLOOR = 22
-JET_FULL_FPS_FLOOR = 18
-
-
-def test_the_jet_showcase_holds_its_floor_at_half_width(board):
-    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_HALF_FPS_FLOOR,
-                                 width="half", shading="phong")
-
-
-def test_the_jet_showcase_holds_its_floor_at_full_width(board):
-    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_FULL_FPS_FLOOR,
-                                 shading="phong")
-
-
-# par (proposals/wasm-runtime.md): a compiled cart's items on this board's
-# second core leave exactly what running them in order leaves, each on its
-# own stack, and the board's one lane runs some of them. After the OTA block
-# for the showcase's reason above: its run leaves the live heap bigger.
-def test_par_items_across_the_cores_match_them_in_order(board, wasm_carts):
-    on_glass.wasm_par_matches_items_in_order(board, lanes=1)
 
 
 # -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------

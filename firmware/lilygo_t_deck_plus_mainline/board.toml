@@ -314,11 +314,11 @@ attach_only = true
 # `_ota_build.BOARD` (safe here: attach_only boards open without resetting).
 usb         = "303a:1001"
 # USB backpressures, so the default chunk is safe here -- measured 2026-08-19, a
-# 44KB cart pushed clean at 768 in 45s, twice as fast as the P4 needs at 256.
+# 44KB cart pushed clean at 768 in 45s.
 chunk       = 768
 # The RAW window (`recv`, the dev channel's 8-bit upload path): how many bytes
-# the host may put on the wire before it must wait for the board's ack. Four
-# times the P4's, and for a different reason -- this board's USB-Serial/JTAG
+# the host may put on the wire before it must wait for the board's ack. Bigger
+# than the P4's, and for a different reason -- this board's USB-Serial/JTAG
 # ISR only drains what the stdin ring has room for, so the endpoint stalls and
 # the HOST blocks; the window here buys fewer round trips, it is not the safety
 # margin it is on the P4. The ceiling is the board's own RECV_MAX_WINDOW

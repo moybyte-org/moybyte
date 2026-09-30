@@ -112,10 +112,10 @@ RECV_MAX_WINDOW = 32768
 # It is not a rate floor, and it is no longer fatal: see RECV_RETRIES.
 RECV_IDLE_MS = 2000
 # How many windows may be re-sent before the transfer is abandoned. A UART ring
-# with no flow control drops a byte with no error when the board falls behind
-# for ~25ms, and one dropped byte used to kill the whole cart: measured on the
-# P4, a handful of bytes (2, 7, 12) lost about once every 300 windows, which is
-# a failed 120KB push one time in five. The file only ever advances by WHOLE
+# with no flow control drops a byte with no error when it overflows, and one
+# dropped byte used to kill the whole cart: on the P4's stock 260-byte ring, a
+# handful of bytes (2, 7, 12) lost about once every 300 windows, which was a
+# failed 120KB push one time in five. The file only ever advances by WHOLE
 # windows, so `got` is a resync point that costs nothing to keep -- the board
 # throws the short window away and asks for it again. The final sha still has
 # to agree, so a retry that resynced wrongly fails loudly rather than landing a
@@ -717,9 +717,8 @@ class DevChannel:
             self._poll.register(self._stdin, select.POLLIN)
             # `recv` polls once PER BYTE, so the allocating `poll()` -- a fresh
             # list of fresh tuples every call -- would hand a 124KB cart ten
-            # megabytes of garbage and buy a handful of collections in the
-            # middle of a transfer the P4's 260-byte ring cannot pause for.
-            # ipoll reuses one tuple and allocates nothing after the first call.
+            # megabytes of garbage and a collection every few kilobytes. ipoll
+            # reuses one tuple and allocates nothing after the first call.
             self._ipoll = getattr(self._poll, "ipoll", None) or self._poll.poll
             self.armed = True
         except Exception as exc:  # noqa: BLE001 -- the channel is optional sugar
@@ -1020,16 +1019,17 @@ class DevChannel:
         """`recv <nbytes> <window> <path>`: nbytes RAW off stdin into
         <path>.new, in windows the host may not run ahead of.
 
-        THE WINDOW IS THE ONLY BACKPRESSURE THE P4 HAS. Its stdin is a
-        260-byte ring fed by a UART ISR with no flow control -- a byte that
-        arrives with the ring full is dropped, silently, which is the same
-        mechanism that makes 768-char `py` lines corrupt on that board. So the
-        host writes one window and then WAITS: the ack below is written after
+        THE WINDOW IS THE ONLY BACKPRESSURE THE P4 HAS. Its stdin is a 4 KB
+        ring fed by a UART ISR with no flow control -- a byte that arrives with
+        the ring full is dropped, silently -- so the host writes one window,
+        smaller than the ring, and then WAITS: the ack below is written after
         the file write, when nothing is in flight, and until the host reads it
-        no further byte is on the wire. USB boards backpressure for real (the
-        USB-Serial/JTAG ISR only drains what the ring has room for, and CDC's
-        stalls the endpoint), so their window is bigger for fewer round trips,
-        not for safety. Both numbers live in board.toml.
+        no further byte is on the wire. A window the ring holds whole survives
+        any stall inside it, a heap collection included. USB boards
+        backpressure for real (the USB-Serial/JTAG ISR only drains what the
+        ring has room for, and CDC's stalls the endpoint), so their window is
+        bigger for fewer round trips, not for safety. Both numbers live in
+        board.toml.
 
         The transcript, which tools/push_cart.py is the reader of record for:
 
@@ -1079,12 +1079,7 @@ class DevChannel:
         except Exception as exc:  # noqa: BLE001 -- a bad path is an answer
             print("RECV ERR cannot open %s: %s" % (tmp, exc))
             return
-        import gc
         import hashlib
-        # The inner loop allocates NOTHING, so collect before it rather than
-        # during: a collect on the P4 costs more than the ring holds at line
-        # rate, and a dropped byte there is invisible until the final hash.
-        gc.collect()
         buf = bytearray(window)
         mv = memoryview(buf)
         one = bytearray(1)

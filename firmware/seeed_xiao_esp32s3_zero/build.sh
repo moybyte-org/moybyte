@@ -116,6 +116,11 @@ moybyte_setup_idf esp32s3 \
 #    component is the P4's radio (a C6 slave over SDIO); this board's WiFi is
 #    on-die and its build pulls esp_hosted in nowhere.
 #
+# DECLINED moybyte_patch_stdin_ring -- the 4 KB stdin ring for a UART console.
+#    This board speaks USB-Serial/JTAG, which backpressures: its ISR takes only
+#    what the ring has room for and the USB host waits with the rest, so a
+#    collection costs it throughput and never a byte.
+#
 #    Also not applied, and never were: the esp_lcd tx_color no-acquire patch
 #    (there is no panel) and the #69 I2C GIL release (no input poller, no I2C
 #    device on the bus).

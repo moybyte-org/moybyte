@@ -659,12 +659,12 @@ class ReSendingHost:
 def test_a_dropped_byte_costs_its_window_and_not_the_cart(tmp_path, capsys):
     """The failure this whole retry exists for, end to end.
 
-    A UART ring with no flow control drops a byte with no error when the board
-    falls behind for ~25ms. Measured on the P4: a handful of bytes lost about
-    once every 300 windows, which killed a 120KB push one time in five. The
-    file only ever advances by WHOLE windows, so the board can throw the short
-    one away and name the boundary it is still standing on -- and the cart
-    lands byte-exact, hash and all, having paid one window."""
+    A UART ring with no flow control drops a byte with no error when it
+    overflows. Measured on the P4's stock 260-byte ring: a handful of bytes
+    lost about once every 300 windows, which killed a 120KB push one time in
+    five. The file only ever advances by WHOLE windows, so the board can throw
+    the short one away and name the boundary it is still standing on -- and
+    the cart lands byte-exact, hash and all, having paid one window."""
     payload = EVERY_BYTE                      # 1280 B = 5 windows of 256
     host = ReSendingHost(payload, 256, drop=(1, 3))
     ws, ch = make()

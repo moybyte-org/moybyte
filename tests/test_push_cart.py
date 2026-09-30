@@ -308,7 +308,6 @@ class _FakeConsole:
 def _driver(device, board="p4"):
     b = p4_autotest.P4Board(None, ser=device, board_dir=BOARD_DIRS[board])
     b.CHUNK = int(push_cart.serial_cfg(board)["chunk"])
-    b.PACE_GAP_S = 0            # the write pacing is p4_autotest's, not this
     return b
 
 
@@ -395,9 +394,10 @@ def test_the_board_argument_is_required(tmp_path):
 def test_the_raw_upload_is_windowed_at_the_boards_own_declaration(
         tmp_path, board):
     """The host may not run ahead of the ack, and how far ahead it may run is
-    board.toml's call: 4096 on the P4, whose UART has no flow control and whose
-    ack is the only backpressure there is; 16384 on the USB boards, where the
-    window buys round trips rather than safety."""
+    board.toml's call: 3072 on the P4, whose UART has no flow control, so its
+    ack is the only backpressure there is and a window has to fit its stdin
+    ring; 16384 on the USB boards, where the window buys round trips rather
+    than safety."""
     dev = _FakeConsole(board=board)
     b, window = _raw(dev, board)
     src = _cart(tmp_path, {"main.lua": BIG}) + "/main.lua"
@@ -421,14 +421,14 @@ def test_the_raw_upload_carries_every_byte_value(tmp_path):
 
 
 def test_a_byte_the_ring_dropped_costs_its_window_not_the_cart(tmp_path):
-    """The P4's failure, exactly: a byte arrives with the 260-byte ring full
-    and is gone with no error. The board is then one byte short of the window
-    for ever and its idle timeout fires -- but nothing of that window reached
-    the file, so it asks for the window again instead of losing the cart.
+    """A UART's failure, exactly: a byte arrives with the stdin ring full and
+    is gone with no error. The board is then one byte short of the window for
+    ever and its idle timeout fires -- but nothing of that window reached the
+    file, so it asks for the window again instead of losing the cart.
 
-    Measured on glass before this existed: a handful of bytes lost about once
-    every 300 windows, which failed a 120KB push one push in five, on the only
-    transport a cart has to that board."""
+    Measured on the P4's stock 260-byte ring before this existed: a handful of
+    bytes lost about once every 300 windows, which failed a 120KB push one
+    push in five, on the only transport a cart has to that board."""
     dst = "/moy/carts/demo.moy/main.lua"
     dev = _FakeConsole(files={dst: b"the cart that still works\n"},
                        drop_at=5000)
@@ -437,8 +437,8 @@ def test_a_byte_the_ring_dropped_costs_its_window_not_the_cart(tmp_path):
     assert push_cart.push_file_raw(b, src, dst, window) is True
     assert dev.fs.files[dst] == BIG                     # byte-exact, hash agreed
     # The boundaries come from the board's DECLARED window, not a number typed
-    # here: that value is a tuning knob (the P4's board.toml carries three
-    # measurements of it), and a test that pins it fails on the day it moves
+    # here: that value is a tuning knob (the P4's board.toml carries its
+    # measurements), and a test that pins it fails on the day it moves
     # while saying nothing about the retry this is here to check.
     assert [l for l in dev.said if l.startswith("RECV retry")] == [
         "RECV retry %d" % (5000 // window * window)]     # the window it was in
@@ -642,9 +642,7 @@ def test_the_probe_runs_once_for_the_whole_cart(monkeypatch, tmp_path):
 
 def _factory(device):
     def make(port, log=None, board_dir=None):
-        b = p4_autotest.P4Board(None, ser=device, board_dir=board_dir)
-        b.PACE_GAP_S = 0
-        return b
+        return p4_autotest.P4Board(None, ser=device, board_dir=board_dir)
     return make
 
 

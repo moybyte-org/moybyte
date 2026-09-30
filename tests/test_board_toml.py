@@ -597,12 +597,22 @@ def test_the_soc_usb_boards_are_attach_only_and_the_external_uart_is_not():
         str(_DEVICE_BOARDS["guition-s3"]))["serial"]["usb"]
 
 
-def test_the_p4_chunk_stays_under_its_uart_ring():
-    """Measured 2026-08-19: a 44KB cart at the harness default of 768 failed
-    five times with a DIFFERENT bad hash each attempt and went clean at 256.
-    That UART's stdin ring is ~256 bytes with no flow control, so this is a
-    hardware bound, not a tuning preference -- raising it re-breaks the push."""
-    assert board_config.load(str(P4))["serial"]["chunk"] <= 256
+def test_the_p4s_chunk_and_window_fit_the_ring_its_build_gives_it():
+    """The Waveshare P4's serial is a UART with no flow control, so a byte
+    that arrives with the stdin ring full is dropped with no error: a `py`
+    line and a `recv` window each have to fit the ring whole. The ring is the
+    one tools/patch_stdin_ring.py gives this board's build -- on the stock 260
+    bytes a chunk of 768 corrupted a push five times running (2026-08-19). A
+    chunk's %r escaping can nearly double it, behind a ~40-byte prefix, and a
+    ring holds one byte less than its size."""
+    from tools import patch_stdin_ring
+    build = (P4 / "build.sh").read_text(encoding="utf-8")
+    assert re.search(r"^moybyte_patch_stdin_ring$", build, re.M), \
+        "the P4 build no longer takes the stdin ring its [serial] is sized for"
+    ser = board_config.load(str(P4))["serial"]
+    holds = patch_stdin_ring.RING_BYTES - 1
+    assert 2 * ser["chunk"] + 64 <= holds, (ser["chunk"], holds)
+    assert ser["window"] <= holds, (ser["window"], holds)
 
 
 def test_push_cart_holds_no_per_board_branch():
