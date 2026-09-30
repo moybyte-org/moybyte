@@ -268,10 +268,21 @@ def test_an_unsigned_cart_opens_the_notice_that_names_the_switch(tmp_path):
 def test_a_module_whose_signature_fails_keeps_the_error_panel(tmp_path):
     from ws_helpers import open_cart
     ws = host_app.build_workstation(_hello_store(tmp_path))
-    for text in ("refused: bad signature", "refused: malformed signature",
-                 "refused: key mismatch 'fork 0000'"):
+    for text in ("refused: bad signature", "refused: malformed signature"):
         ws.runtimes["wasm"] = _Refusing(text)
         open_cart(ws, "Hello Wasm")
         assert ws.player.notice is None
         assert ws.player.cart_error.endswith(text)
         ws._exit_to_caller()
+
+
+def test_a_module_built_for_another_runtime_opens_the_update_notice(tmp_path):
+    from ws_helpers import open_cart
+    ws = host_app.build_workstation(_hello_store(tmp_path))
+    ws.runtimes["wasm"] = _Refusing(
+        "refused: key mismatch 'fork 0000' (this build: 'fork 1111')")
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.notice == ("Hello Wasm was built for another version of "
+                                "this console. Install an updated copy to "
+                                "play it.")
+    assert ws.player.cart_error == ws.player.notice

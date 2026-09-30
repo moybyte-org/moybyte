@@ -290,8 +290,11 @@ own console. The setting is the console's (`ws.unknown_sources`, persisted in
 `moy_wasm_session_open` as `allow_unsigned`, and `verify_module` reads it on
 the MicroPython task before the runtime sees a byte, as it reads the
 signature. With the setting off a cart whose module is unsigned opens the
-Player's notice, "Not signed.", saying where the switch is; everything else
-refuses on the ordinary panel as before.
+Player's notice, "Not signed.", saying where the switch is. A module whose
+key names another runtime, chip or set of flags -- every installed module after
+a firmware update that moves the fork pin -- opens the "Needs an update."
+notice, since the cart is only out of date. A signature that fails refuses on
+the ordinary error panel: that module was changed after it was signed.
 
 | the module file | setting off | setting on |
 |---|---|---|

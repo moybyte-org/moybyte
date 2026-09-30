@@ -293,11 +293,25 @@ _MB = 1024 * 1024
 UNSIGNED_TITLE = "Not signed."
 _UNSIGNED = "refused: unsigned module"
 
+# A compiled cart whose module was built for another runtime, chip or set of
+# compiler flags (its provenance key does not match this build's): nothing is
+# wrong with the cart, it is out of date for this console -- a firmware update
+# that moves the runtime makes every installed module this -- so it is a notice
+# too. The engine's refusal text starts with _KEY_MISMATCH.
+OUTDATED_TITLE = "Needs an update."
+_KEY_MISMATCH = "refused: key mismatch"
+
 
 def unsigned_notice(title):
     """The notice for a compiled cart refused for having no signature."""
     return ("%s isn't signed. To run it, turn on Unknown sources in Settings."
             % (title or "This cart"))
+
+
+def outdated_notice(title):
+    """The notice for a compiled cart built for another version of the console."""
+    return ("%s was built for another version of this console. Install an "
+            "updated copy to play it." % (title or "This cart"))
 
 
 class _TooBig(Exception):
@@ -1705,6 +1719,10 @@ class Player:
                     print("Moybyte cart load:", self.cart_error)
                     self._notice = self.cart_error = unsigned_notice(title)
                     self._notice_title = UNSIGNED_TITLE
+                elif _KEY_MISMATCH in self.cart_error:
+                    print("Moybyte cart load:", self.cart_error)
+                    self._notice = self.cart_error = outdated_notice(title)
+                    self._notice_title = OUTDATED_TITLE
             else:
                 self.crash_file, self.crash_line = _lua_cart_where(
                     self.cart_error, self.ws.cart)
