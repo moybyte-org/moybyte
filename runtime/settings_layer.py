@@ -172,8 +172,8 @@ SETTINGS_TOGGLES = (
 TOGGLE_CONFIRMS = {
     "unknown_sources": (
         "UNKNOWN SOURCES",
-        "Carts from outside the store can run code nobody has checked. "
-        "Turn this on only for carts you trust.",
+        "Unsigned carts can do anything on this console. "
+        "Only run ones you trust.",
         "TURN ON"),
 }
 KEEP_OFF = "KEEP OFF"

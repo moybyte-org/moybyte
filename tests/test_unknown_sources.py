@@ -85,8 +85,8 @@ def test_tapping_the_row_opens_the_warning_and_changes_nothing(tmp_path):
     assert ws.unknown_sources is False and KEY not in ws.system
     title, text, yes = TOGGLE_CONFIRMS[KEY]
     assert title == "UNKNOWN SOURCES" and yes == "TURN ON"
-    assert text == ("Carts from outside the store can run code nobody has "
-                    "checked. Turn this on only for carts you trust.")
+    assert text == ("Unsigned carts can do anything on this console. "
+                    "Only run ones you trust.")
     drv.frame(DT)
     verbs = [v for _r, v, _a in sl._confirm_hits._items]
     assert verbs == ["keep", "accept"]
