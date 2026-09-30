@@ -52,6 +52,17 @@ shaped it are:
     `read(n)` blocks inside `mp_hal_stdin_rx_chr` with no timeout, so a host
     that dies mid-window would park the frame loop forever; poll-per-byte is
     what makes the idle timeout below able to exist at all.
+
+`moy push` REACHES THE CONSOLE HERE TOO: moy-spec's `moy push` finds a console
+by writing `moy?` to every USB serial port and copies a cart line by line
+(proposals/sideload.md in moy-spec, tier 1). The channel answers `moy?` with
+the console's descriptor and takes `moy-put`, `moy-del`, `moy-rescan` and
+`moy-run` into the store, the same way `recv` does -- a `.new` renamed only
+when every byte arrived, the stamp beside it dropped. Base64 at a line a
+frame is slower than `recv` and needs no tool but moy's, which is the point.
+A compiled cart pushed that way carries no module for this board's chip --
+only tools/push_cart.py builds one -- and `moy-rescan` says so in a
+`moy-note` line the tool shows to the person pushing.
 """
 
 try:                                    # device: ticks is frozen flat
@@ -126,6 +137,10 @@ RECV_RETRIES = 8
 # the other end is gone, and two of those end it in ~4s -- about what the one
 # fatal timeout above used to cost.
 RECV_DEAD_WINDOWS = 2
+# A `moy-put` in flight drains this much a frame instead of
+# SERIAL_BYTES_PER_FRAME, on a stdin with no poll to wait on (see _moy_drain,
+# which takes the whole file at once where there is one).
+MOY_PUT_BYTES_PER_FRAME = 4096
 
 
 def _kbd_intr(ch):
@@ -418,6 +433,105 @@ def _recv_err(ws, exc, got, total):
     return "%s: %s" % (type(exc).__name__, exc)
 
 
+def _moy_path(ws, rel):
+    """`<carts_root>/<rel>` for a path `moy push` names, or None when it would
+    leave the store: every segment non-empty and neither `.` nor `..`, no `\\`
+    and no NUL (proposals/sideload.md: paths never escape cart_root)."""
+    root = getattr(ws, "carts_root", None)
+    if not root or not rel:
+        return None
+    for seg in rel.split("/"):
+        if not seg or seg in (".", "..") or "\\" in seg or "\0" in seg:
+            return None
+    return str(root).rstrip("/") + "/" + rel
+
+
+def _moy_mkdirs(path):
+    """Every folder above `path`, shallowest first."""
+    import os
+    parts = path.split("/")[:-1]
+    for i in range(2, len(parts) + 1):
+        d = "/".join(parts[:i])
+        try:
+            os.mkdir(d)
+        except OSError:
+            pass
+
+
+def _moy_remove(path):
+    import os
+    try:
+        entries = os.listdir(path)
+    except OSError:
+        os.remove(path)
+        return
+    for name in entries:
+        _moy_remove(path + "/" + name)
+    os.rmdir(path)
+
+
+def _moy_chip():
+    """This board's chip, as its compiled carts' modules name it; None on a
+    build without the WebAssembly engine."""
+    try:
+        import moy_wasm
+        return moy_wasm.CHIP
+    except (ImportError, AttributeError):
+        return None
+
+
+def _moy_descriptor(ws):
+    """proposals/sideload.md's descriptor, answered to `moy?`."""
+    try:
+        import _ota_build
+        board = _ota_build.BOARD
+    except (ImportError, AttributeError):
+        board = "host"
+    desc = {"moy_console": "0.1", "name": "Moybyte %s" % board,
+            "transports": ["serial"], "cart_root": "carts",
+            "runtimes": ["lua", "wasm"] if _moy_chip() else ["lua"]}
+    root = getattr(ws, "carts_root", None)
+    if root:
+        try:
+            import os
+            st = os.statvfs(str(root))
+            desc["free_kb"] = st[0] * st[3] // 1024
+        except (OSError, AttributeError):
+            pass
+    return desc
+
+
+def _moy_notes(folders, ws):
+    """What a `moy push` of `folders` leaves unplayable here: a compiled cart
+    with no module for this board's chip, which `moy push` cannot build."""
+    chip = _moy_chip()
+    root = getattr(ws, "carts_root", None)
+    if not chip or not root:
+        return []
+    import json
+    import os
+    notes = []
+    for folder in sorted(folders):
+        base = str(root).rstrip("/") + "/" + folder
+        try:
+            with open(base + "/manifest.json") as f:
+                man = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(man, dict) or man.get("runtime") != "wasm":
+            continue
+        main = man.get("main") or "main.wasm"
+        stem = main[:-5] if main.endswith(".wasm") else main
+        try:
+            os.stat("%s/%s.%s.aot" % (base, stem, chip))
+        except OSError:
+            notes.append("%s is a compiled cart, and this console runs one only "
+                         "from a module built for its chip (%s). Push it with "
+                         "Moybyte's tools/push_cart.py, which builds that module."
+                         % (folder, chip))
+    return notes
+
+
 def _remote_state(ws):
     """One-line JSON snapshot for the `state` command -- the assertion source an
     on-glass harness reads instead of pixels. Every field best-effort: a broken
@@ -705,6 +819,8 @@ class DevChannel:
         self._stdin = None
         self._rawin = None      # sys.stdin.buffer: the same ring, 8 bits wide
         self._ipoll = None      # ipoll where there is one -- see below
+        self._put = None        # the `moy-put` in flight: see _moy_put
+        self._pushed = set()    # cart folders `moy-put` wrote this session
         try:
             import select
             import sys
@@ -738,7 +854,9 @@ class DevChannel:
         self.click = False
         ran = False
         ipoll = self._ipoll
-        for _ in range(SERIAL_BYTES_PER_FRAME):
+        budget = (MOY_PUT_BYTES_PER_FRAME if self._put is not None
+                  else SERIAL_BYTES_PER_FRAME)
+        for _ in range(budget):
             ready = False
             for _ev in ipoll(0):
                 ready = True
@@ -759,7 +877,10 @@ class DevChannel:
                     self.lines += 1
                     ran = True
                     try:
-                        self.run(ws, line)
+                        if self._put is not None:
+                            self._moy_put_line(ws, line)
+                        else:
+                            self.run(ws, line)
                     except Exception as exc:  # noqa: BLE001 -- never kill the loop
                         print("REMOTE ERR %s: %s" % (type(exc).__name__, exc))
             else:
@@ -1190,6 +1311,151 @@ class DevChannel:
             return
         print("RECV done %s %d" % (sha.digest().hex()[:12], got))
 
+    # -- proposals/sideload.md's tier 1 (moy-spec), for `moy push` ----------
+
+    def _moy(self, ws, cmd, parts, line):
+        """The tier-1 lines. True when `cmd` was one of them."""
+        if cmd == "moy?":
+            import json
+            print("moy-info %s" % json.dumps(_moy_descriptor(ws)))
+        elif cmd == "moy-put":
+            self._moy_put(ws, parts)
+        elif cmd == "moy-del":
+            self._moy_del(ws, parts)
+        elif cmd == "moy-rescan":
+            for note in _moy_notes(self._pushed, ws):
+                print("moy-note %s" % note)
+            self._pushed = set()
+            rescan = getattr(ws, "rescan_carts", None)
+            if rescan is not None:
+                rescan()
+            print("moy-ok")
+        elif cmd == "moy-run":
+            name = line.split(None, 1)[1] if len(parts) > 1 else ""
+            launch = getattr(ws, "launch_named", None)
+            if launch is not None and launch(name):
+                print("moy-ok")
+            else:
+                print("moy-err no cart called %s" % name)
+        else:
+            return False
+        return True
+
+    def _moy_put(self, ws, parts):
+        """`moy-put <path> <bytes>`: the base64 lines that follow, up to a
+        line holding `.`, land in `<carts_root>/<path>` -- through a `.new`
+        renamed only once exactly `<bytes>` arrived."""
+        dst = _moy_path(ws, parts[1] if len(parts) == 3 else "")
+        try:
+            size = int(parts[2]) if len(parts) == 3 else -1
+        except ValueError:
+            size = -1
+        if dst is None or size < 0:
+            print("moy-err usage: moy-put <path in the cart store> <bytes>")
+            return
+        try:
+            _moy_mkdirs(dst)
+            f = open(dst + ".new", "wb")
+        except Exception as exc:  # noqa: BLE001 -- a bad store is an answer
+            print("moy-err cannot write %s: %s" % (parts[1], exc))
+            return
+        self._put = [parts[1], dst, f, size, 0, None]
+        print("moy-ok")
+        self._moy_drain(ws)
+
+    def _moy_drain(self, ws):
+        """The rest of a `moy-put`, read straight off stdin to its `.`, the
+        way `recv` reads a window: the tool streams the whole file's lines
+        once it has `moy-ok`, and taken a line a frame they are paced by the
+        stdin ring, a few hundred bytes a loop. A stream that stops for
+        RECV_IDLE_MS ends the put as short. Where stdin has no poll to wait
+        on, the frame loop's reader takes the lines instead."""
+        ipoll = self._ipoll
+        rd = self._stdin.read if self._stdin is not None else None
+        if ipoll is None or rd is None:
+            return
+        line = bytearray(SERIAL_LINE_MAX)
+        n = 0
+        while self._put is not None:
+            ready = False
+            for _ in ipoll(RECV_IDLE_MS):
+                ready = True
+            ch = rd(1) if ready else ""
+            if not ch:
+                if self._put[5] is None:
+                    self._put[5] = "the stream stopped after %d bytes" % self._put[4]
+                self._moy_put_line(ws, ".")
+                return
+            self.rx += 1
+            if ch in ("\n", "\r"):
+                if n:
+                    self._moy_put_line(ws, bytes(line[:n]).decode().strip())
+                    n = 0
+            elif n < SERIAL_LINE_MAX:
+                line[n] = ord(ch) & 0xFF
+                n += 1
+            elif self._put[5] is None:
+                self._put[5] = "a line longer than %d" % SERIAL_LINE_MAX
+
+    def _moy_put_line(self, ws, line):
+        """One line of a `moy-put`: base64 to append, or `.` to finish."""
+        put = self._put
+        rel, dst, f, size, got, err = put
+        if line != ".":
+            if err is None:
+                try:
+                    import binascii
+                    data = binascii.a2b_base64(line)
+                    f.write(data)
+                    put[4] = got + len(data)
+                except ValueError:
+                    put[5] = "a line that is not base64"
+                except Exception as exc:  # noqa: BLE001 -- a full store is an answer
+                    put[5] = _recv_err(ws, exc, got, size)
+            return
+        self._put = None
+        try:
+            f.close()
+        except Exception as exc:  # noqa: BLE001 -- a close can be the write that fails
+            if err is None:
+                err = _recv_err(ws, exc, got, size)
+        if err is None and got != size:
+            err = "%d of %d bytes arrived" % (got, size)
+        import os
+        if err is not None:
+            try:
+                os.remove(dst + ".new")
+            except OSError:
+                pass
+            print("moy-err %s: %s" % (rel, err))
+            say = getattr(ws, "notice", None)
+            if err.startswith("store full") and say is not None:
+                say("CAN'T ADD CART", "the store is full", "warn")
+            return
+        for gone in (dst, dst + ".bak"):
+            # The stamped .bak describes the bytes it sat beside (moy_fs, #154);
+            # left behind, it would "recover" them over what just arrived.
+            try:
+                os.remove(gone)
+            except OSError:
+                pass
+        os.rename(dst + ".new", dst)
+        self._pushed.add(rel.split("/")[0])
+        print("moy-ok")
+
+    def _moy_del(self, ws, parts):
+        """`moy-del <path>`: a file, or a whole cart folder, from the store."""
+        dst = _moy_path(ws, parts[1] if len(parts) == 2 else "")
+        if dst is None:
+            print("moy-err usage: moy-del <path in the cart store>")
+            return
+        try:
+            _moy_remove(dst)
+        except OSError as exc:
+            print("moy-err cannot delete %s: %s" % (parts[1], exc))
+            return
+        print("moy-ok")
+
     def run(self, ws, line):
         parts = line.split()
         cmd = parts[0]
@@ -1466,6 +1732,9 @@ class DevChannel:
             # its newline is payload, not commands. See _recv.
             self._recv(line, parts, ws)
             return
+        if cmd.startswith("moy"):
+            if self._moy(ws, cmd, parts, line):
+                return
         if cmd == "py" and len(parts) > 1:
             code = line.split(None, 1)[1]
             env = {"ws": ws, "wm": ws.wm, "pointer": self.pointer}

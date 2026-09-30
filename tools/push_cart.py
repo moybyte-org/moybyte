@@ -58,6 +58,17 @@ get a slower push; it gets one line saying to flash it. What survives on the
 `py` channel is the small stuff: the already-current hash, the mkdir, the
 store's room and the rename.
 
+A COMPILED CART GETS ITS MODULE HERE. A board runs a `"runtime": "wasm"` cart
+only from a module compiled for its chip (`main.<chip>.aot` beside
+`main.wasm`, native/moy_wasm/README.md), and a cart made with moy-spec's `moy
+build` carries none. So when the cart has no module for this board's chip --
+the chip is its board.toml's `[board] chip` -- or has one built for another
+main.wasm or another runtime, this compiles one with tools/wasm_module.py,
+UNSIGNED, and pushes it in its place; the cart folder itself is left as it
+was. An unsigned module runs only while the console's Settings -> Unknown
+sources is on, so when the module going over is unsigned the tool asks the
+console, and says so plainly before the push if it is off.
+
 A STORE WITHOUT THE ROOM IS ONE LINE, NOT A TRACEBACK. Before the first window
 the tool weighs what the push adds against the free bytes of the store it
 lands on and refuses a cart that cannot fit, so nothing half-arrives; a store
@@ -68,8 +79,11 @@ says the same thing in one line. Every other failure is one line as well.
 import argparse
 import glob
 import hashlib
+import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -162,7 +176,7 @@ def _mb(n):
     return "%.1f MB" % (n / (1024.0 * 1024.0))
 
 
-def check_room(b, cart, names, dest):
+def check_room(b, local, names, dest):
     """Refuse, before a byte is sent, a cart the store cannot hold: what the
     push adds (each file's size less the size it replaces) against the free
     bytes of the store `dest` is on. A board that cannot say how much room it
@@ -173,9 +187,9 @@ def check_room(b, cart, names, dest):
         return
     need = 0
     for f in names:
-        local = os.path.getsize(os.path.join(cart, f))
+        local_size = os.path.getsize(local[f])
         have = b.pyval("ws._g['_size'](%r)" % (dest + "/" + f), timeout=30)
-        need += local - (have if isinstance(have, int) else 0)
+        need += local_size - (have if isinstance(have, int) else 0)
     if need > free:
         raise StoreFull("the cart does not fit: it needs %s more and the store "
                         "at %s has %s free" % (_mb(need), root, _mb(free)))
@@ -355,6 +369,55 @@ def push_file_raw(b, src, dst, window, verbose=False):
     return True
 
 
+def board_chip(board):
+    """The chip a board's compiled-cart modules are built for, from its
+    board.toml; None for a board that declares none."""
+    cfg = board_config.load(os.path.join(ROOT, BOARDS[board]))
+    return cfg.get("board", {}).get("chip")
+
+
+def compiled_module(cart, chip, work, log=print):
+    """For a compiled cart, (its module's file name for `chip`, the local path
+    of the module to push under it, whether that module is signed); None for a
+    cart that is not compiled. The cart's own module when it carries the key
+    this board wants for its main.wasm; otherwise one compiled now, unsigned,
+    into `work`."""
+    try:
+        with open(os.path.join(cart, "manifest.json"), encoding="utf-8") as f:
+            man = json.load(f)
+    except (OSError, ValueError):
+        return None             # not a cart this can read; pushed as it is
+    if not isinstance(man, dict) or man.get("runtime") != "wasm":
+        return None
+    sys.path.insert(0, ROOT)
+    from tools import wasm_cart, wasm_module
+    main = man.get("main") or "main.wasm"
+    try:
+        with open(os.path.join(cart, main), "rb") as f:
+            wasm = f.read()
+    except OSError:
+        sys.exit("%s is a compiled cart with no %s: build it first (moy build %s)"
+                 % (cart, main, cart))
+    name = wasm_cart.aot_name(main, chip)
+    have = os.path.join(cart, name)
+    if os.path.isfile(have):
+        with open(have, "rb") as f:
+            data = f.read()
+        if wasm_module.key_matches(data, wasm, chip):
+            return name, have, bool(wasm_module.split(data)[1])
+        log("%s was built for another main.wasm or another runtime; compiling "
+            "a fresh one for %s, unsigned" % (name, chip))
+    else:
+        log("%s has no module for this board's chip (%s); compiling one, unsigned"
+            % (os.path.basename(cart), chip))
+    out = os.path.join(work, name)
+    try:
+        wasm_module.build(wasm, chip, out, signed=False)
+    except wasm_module.ToolError as exc:
+        sys.exit("could not compile the module for %s: %s" % (chip, exc))
+    return name, out, False
+
+
 def cart_files(cart):
     """Every file in the cart folder, RELATIVE to it, forward-slashed.
 
@@ -413,6 +476,22 @@ def main(argv=None):
     if not os.path.isdir(cart):
         sys.exit("not a cart folder: " + cart)
     names = cart_files(cart)
+    local = dict((f, os.path.join(cart, f)) for f in names)
+    work = tempfile.mkdtemp(prefix="push_cart-")
+    try:
+        return _push(a, cart, names, local, work)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _push(a, cart, names, local, work):
+    chip = board_chip(a.board)
+    module = compiled_module(cart, chip, work) if chip else None
+    if module is not None:
+        name, path, _signed = module
+        local[name] = path
+        if name not in names:
+            names = sorted(names + [name])
     if a.only:
         missing = [f for f in a.only if f not in names]
         if missing:
@@ -466,11 +545,18 @@ def main(argv=None):
                  a.board, win))
         if not b.pyexec(HELPERS):
             sys.exit("could not install the upload helpers")
+        if module is not None and not module[2] and module[0] in names:
+            on = b.pyval("int(bool(getattr(ws, 'unknown_sources', False)))", timeout=20)
+            if on == 0:
+                print("NOTE: %s's module is unsigned, and this console has Unknown "
+                      "sources off, so it will refuse to run the cart. Turn on "
+                      "Settings -> Unknown sources on the console to play it."
+                      % os.path.basename(cart))
         # A store without the room says so in one line, before or during the
         # push, and so does any other failure: this is a command a person
         # reads, not a traceback.
         try:
-            check_room(b, cart, names, dest)
+            check_room(b, local, names, dest)
             b.pyval("ws._g['_mkdir'](%r)" % dest)
             for sub in sub_dirs(names):
                 b.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
@@ -478,7 +564,7 @@ def main(argv=None):
             for f in names:
                 if a.force:
                     b.pyval("__import__('os').remove(%r) or 1" % (dest + "/" + f))
-                wrote += push_file_raw(b, os.path.join(cart, f), dest + "/" + f,
+                wrote += push_file_raw(b, local[f], dest + "/" + f,
                                        win, verbose=a.verbose)
         except StoreFull as exc:
             sys.exit("STORE FULL: %s. Nothing more was written; free some room "

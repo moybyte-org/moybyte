@@ -1075,3 +1075,194 @@ def test_luaprof_declines_on_a_board_without_the_lua_tier(capsys):
     assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
     ch.run(ws, "luagc")
     assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
+
+
+# -- `moy push`: proposals/sideload.md's tier 1 (moy-spec) --------------------
+#
+# Driven through poll(), the way moy-spec's sideload.py reaches a board: lines
+# on the TEXT stdin, a whole file's base64 streamed without waiting, and the
+# replies read back off the channel's prints.
+
+
+class FakeText:
+    """`sys.stdin`: characters, only the ones that have arrived."""
+
+    def __init__(self, text=""):
+        self.data = list(text)
+
+    def read(self, n):
+        return self.data.pop(0) if self.data else ""
+
+
+class FakeTextPoll:
+    def __init__(self, stdin):
+        self.stdin = stdin
+
+    def ipoll(self, timeout=-1):
+        return ((None, 1),) if self.stdin.data else ()
+
+
+class _StoreWS2(FakeWS):
+    """A console with a cart store at `root`, a rescan and a launcher."""
+
+    def __init__(self, root):
+        super().__init__()
+        self.carts_root = str(root)
+        self.rescans = 0
+        self.launched = []
+        self.notices = []
+
+    def rescan_carts(self):
+        self.rescans += 1
+
+    def launch_named(self, name):
+        self.launched.append(name)
+        return name if name == "Plasma" else None
+
+    def notice(self, title, sub="", kind="ok", ms=6000):
+        self.notices.append((title, sub, kind))
+
+
+def text_channel(root):
+    ws = _StoreWS2(root)
+    ws, ch = make(ws)
+    stdin = FakeText()
+    poll = FakeTextPoll(stdin)
+    ch._stdin, ch._ipoll, ch.armed = stdin, poll.ipoll, True
+    return ws, ch, stdin
+
+
+def pump(ws, ch, stdin, frames=200):
+    """Frames until stdin is drained; how many it took."""
+    for n in range(frames):
+        if not stdin.data:
+            return n
+        ch.poll(ws)
+    raise AssertionError("stdin never drained")
+
+
+def put_lines(path, data):
+    """What sideload.push_serial writes for one file."""
+    import base64
+    b64 = base64.b64encode(data).decode()
+    lines = ["moy-put %s %d" % (path, len(data))]
+    lines += [b64[i:i + 504] for i in range(0, len(b64), 504)]
+    return "\n".join(lines + ["."]) + "\n"
+
+
+def test_moy_query_answers_the_descriptor(tmp_path, capsys):
+    """`moy?` is the whole probe: one `moy-info` line of JSON."""
+    ws, ch, stdin = text_channel(tmp_path)
+    stdin.data = list("moy?\n")
+    pump(ws, ch, stdin)
+    line = _said(capsys, "moy-info ")[0]
+    desc = json.loads(line[len("moy-info "):])
+    assert desc["moy_console"] == "0.1"
+    assert desc["transports"] == ["serial"]
+    assert "lua" in desc["runtimes"] and desc["free_kb"] > 0
+
+
+def test_moy_put_writes_a_cart_through_a_new_and_rescans(tmp_path, capsys):
+    """A pushed cart lands whole in the store, every byte value included, the
+    stamped .bak beside an old copy dropped; the rescan puts it on the shelf.
+    A whole file streams in few frames, not a line a frame."""
+    ws, ch, stdin = text_channel(tmp_path)
+    (tmp_path / "plasma.moy").mkdir()
+    (tmp_path / "plasma.moy" / "main.lua").write_bytes(b"old")
+    (tmp_path / "plasma.moy" / "main.lua.bak").write_bytes(b"stamp")
+    big = bytes(range(256)) * 64
+    stdin.data = list(put_lines("plasma.moy/main.lua", b"function _draw() end\n")
+                      + put_lines("plasma.moy/data/blob.bin", big)
+                      + "moy-rescan\n")
+    frames = pump(ws, ch, stdin)
+    said = _said(capsys, "moy-")
+    assert said == ["moy-ok"] * 5
+    assert (tmp_path / "plasma.moy" / "main.lua").read_bytes() == b"function _draw() end\n"
+    assert not (tmp_path / "plasma.moy" / "main.lua.bak").exists()
+    assert (tmp_path / "plasma.moy" / "data" / "blob.bin").read_bytes() == big
+    assert not list(tmp_path.rglob("*.new"))
+    assert ws.rescans == 1
+    assert frames < 12
+
+
+def test_moy_put_refuses_a_path_outside_the_store(tmp_path, capsys):
+    ws, ch, stdin = text_channel(tmp_path / "carts")
+    for path in ("../evil.lua", "a//b", "a/./b", "a\\b", ""):
+        ch.run(ws, "moy-put %s 4" % path)
+    assert _said(capsys, "moy-") == ["moy-err usage: moy-put <path in the cart store> <bytes>"] * 5
+    assert ch._put is None
+
+
+def test_a_short_moy_put_leaves_nothing_behind(tmp_path, capsys):
+    """A file whose lines came up short -- a byte lost on a UART -- is refused
+    by its count, and the old file stays."""
+    ws, ch, stdin = text_channel(tmp_path)
+    (tmp_path / "c.moy").mkdir()
+    (tmp_path / "c.moy" / "main.lua").write_bytes(b"kept")
+    text = put_lines("c.moy/main.lua", b"0123456789").replace("moy-put c.moy/main.lua 10",
+                                                               "moy-put c.moy/main.lua 12")
+    stdin.data = list(text)
+    pump(ws, ch, stdin)
+    assert _said(capsys, "moy-") == ["moy-ok", "moy-err c.moy/main.lua: 10 of 12 bytes arrived"]
+    assert (tmp_path / "c.moy" / "main.lua").read_bytes() == b"kept"
+    assert not list(tmp_path.rglob("*.new"))
+
+
+def test_a_full_store_is_said_plainly_to_moy_push_and_on_screen(tmp_path, capsys,
+                                                              monkeypatch):
+    ws, ch, stdin = text_channel(tmp_path)
+    from runtime import moy_carts
+    ws.carts_store = moy_carts
+    _full_open(monkeypatch, 100)
+    stdin.data = list(put_lines("big.moy/main.wasm", bytes(1000)))
+    pump(ws, ch, stdin)
+    said = _said(capsys, "moy-")
+    assert said[0] == "moy-ok" and said[1].startswith("moy-err big.moy/main.wasm: store full")
+    assert ws.notices == [("CAN'T ADD CART", "the store is full", "warn")]
+    assert not list(tmp_path.rglob("*.new"))
+
+
+def test_a_compiled_cart_without_its_module_is_noted_at_rescan(tmp_path, capsys,
+                                                             monkeypatch):
+    """`moy push` cannot build the module a board runs a compiled cart from, so
+    the rescan says so -- in a moy-note, which the tool shows the person."""
+    from runtime import dev_channel
+    monkeypatch.setattr(dev_channel, "_moy_chip", lambda: "esp32s3")
+    ws, ch, stdin = text_channel(tmp_path)
+    man = b'{"format": "moy-1", "title": "P", "runtime": "wasm", "memory": 4}'
+    stdin.data = list(put_lines("p.moy/manifest.json", man)
+                      + put_lines("p.moy/main.wasm", b"\0asm\1\0\0\0")
+                      + put_lines("q.moy/manifest.json", man)
+                      + put_lines("q.moy/main.wasm", b"\0asm\1\0\0\0")
+                      + put_lines("q.moy/main.esp32s3.aot", b"module")
+                      + "moy-rescan\n")
+    pump(ws, ch, stdin)
+    notes = _said(capsys, "moy-note ")
+    assert len(notes) == 1 and notes[0].startswith("moy-note p.moy is a compiled cart")
+    assert "tools/push_cart.py" in notes[0]
+
+
+def test_moy_del_and_moy_run(tmp_path, capsys):
+    ws, ch, stdin = text_channel(tmp_path)
+    (tmp_path / "old.moy" / "src").mkdir(parents=True)
+    (tmp_path / "old.moy" / "src" / "main.c").write_bytes(b"x")
+    (tmp_path / "old.moy" / "manifest.json").write_bytes(b"{}")
+    ch.run(ws, "moy-del old.moy")
+    ch.run(ws, "moy-run Plasma")
+    ch.run(ws, "moy-run Nothing Here")
+    assert _said(capsys, "moy-") == ["moy-ok", "moy-ok", "moy-err no cart called Nothing Here"]
+    assert not (tmp_path / "old.moy").exists()
+
+
+def test_a_put_whose_stream_stops_ends_short_and_leaves_nothing(tmp_path, capsys):
+    """The tool died mid-file: no `.` ever comes. The put ends on the idle
+    timeout as short, and the frame loop has its channel back."""
+    ws, ch, stdin = text_channel(tmp_path)
+    text = put_lines("d.moy/main.lua", bytes(2000))
+    stdin.data = list(text[:text.rindex("\n.")])        # every line but the `.`
+    pump(ws, ch, stdin)
+    said = _said(capsys, "moy-")
+    assert said[0] == "moy-ok"
+    assert said[1].startswith("moy-err d.moy/main.lua: the stream stopped after")
+    assert ch._put is None
+    assert not list(tmp_path.rglob("*.new")) and not (tmp_path / "d.moy" / "main.lua").exists()

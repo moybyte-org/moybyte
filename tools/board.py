@@ -9,7 +9,8 @@
     tools/board.py tdeck leave                  end the cart, put the desk back
     tools/board.py tdeck desk                   back to the launcher/desk from anywhere
     tools/board.py tdeck perf "Brick Siege"     median drawn fps; --diag adds phase ms
-    tools/board.py tdeck push ports/x.moy       copy a cart folder to the store, rescan
+    tools/board.py tdeck push ports/x.moy       copy a cart folder to the store, rescan;
+                                                a compiled cart gets its chip's module
     tools/board.py tdeck shot /tmp/tdeck.png    the glass as a PNG (--source game: the cart)
     tools/board.py tdeck pmem [--text]          the running cart's 256 pmem cells
     tools/board.py tdeck mem                    python heap, internal SRAM, PSRAM
@@ -904,7 +905,9 @@ def parser(dirs):
     p.add_argument("--uncap", action="store_true",
                    help="every loop frame draws (how the compiled carts' "
                         "floors are measured)")
-    p = verb("push", help="copy a cart folder to the store, rescan")
+    p = verb("push", help="copy a cart folder to the store, rescan (a compiled "
+                          "cart with no module for the board's chip gets one, "
+                          "unsigned)")
     p.add_argument("cart")
     p.add_argument("--only", action="append")
     p.add_argument("--dest")

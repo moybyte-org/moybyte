@@ -156,6 +156,13 @@ def key_text(wasm, chip, fork=None, override=None):
             + key_tail(chip, fork, override))
 
 
+def key_matches(data, wasm, chip):
+    """True when the module file `data` carries exactly the key a board of
+    `chip` built from this tree wants for `wasm`: that .wasm's hash, this
+    runtime fork and this chip's compiler flags."""
+    return key_text(wasm, chip).encode() in data
+
+
 # -- the signature ----------------------------------------------------------------
 
 

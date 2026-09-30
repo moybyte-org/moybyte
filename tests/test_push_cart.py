@@ -23,6 +23,7 @@ under test is what the tool DOES about each, not how long it waits.
 import builtins as _builtins
 import hashlib
 import os
+import shutil
 import sys
 import types
 
@@ -828,3 +829,92 @@ def test_any_other_failure_is_one_line_too(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         push_cart.main([cart, "--board", "tdeck"])
     assert "hash" in str(exc.value) and "left the old file" in str(exc.value)
+
+
+# -- a compiled cart gets the module its board runs it from ----------------------
+
+
+def _compilers_here():
+    from tools import wasm_module as wm
+    return all(os.path.isfile(os.path.join(wm.DIST, p["file"]))
+               for p in wm.COMPILERS.values())
+
+
+needs_wamrc = pytest.mark.skipif(
+    not _compilers_here(), reason="no pinned wamrc in experiments/wasm_aot/"
+    "toolchain/dist (tools/wasm_module.py compilers fetches them)")
+
+
+def _compiled_cart(tmp_path):
+    """moy-spec's `moy build` output, as far as a board is concerned: a
+    manifest, main.wasm, and no module."""
+    from tools import wasm_cart
+    out = str(tmp_path / "demo.moy")
+    wasm_cart.build(os.path.join(ROOT, "tests", "fixtures", "wasm", "hello.moy"), out)
+    for extra in ("src",):
+        shutil.rmtree(os.path.join(out, extra), ignore_errors=True)
+    return out
+
+
+def test_a_lua_cart_has_no_module_to_build(tmp_path):
+    cart = _cart(tmp_path, {"manifest.json": b'{"title": "Demo"}\n',
+                            "main.lua": b"x = 1\n"})
+    assert push_cart.compiled_module(cart, "esp32s3", str(tmp_path)) is None
+
+
+def test_a_compiled_cart_with_no_main_wasm_says_to_build_it(tmp_path):
+    cart = _cart(tmp_path, {"manifest.json": b'{"title": "D", "runtime": "wasm", '
+                                             b'"memory": 1}\n'})
+    with pytest.raises(SystemExit) as exc:
+        push_cart.compiled_module(cart, "esp32s3", str(tmp_path))
+    assert "moy build" in str(exc.value)
+
+
+@needs_wamrc
+@pytest.mark.parametrize("unknown_sources", [False, True])
+def test_a_compiled_cart_without_a_module_gets_one_compiled_and_pushed(
+        monkeypatch, tmp_path, capsys, unknown_sources):
+    """The board runs the cart only from a module for its chip, and a cart
+    made with `moy build` carries none: the push compiles one, unsigned, and
+    sends it beside main.wasm, leaving the cart folder as it was. Unsigned
+    runs only with Unknown sources on, which the tool asks the console about
+    and says plainly before the push when it is off."""
+    from tools import wasm_module as wm
+    cart = _compiled_cart(tmp_path)
+    before = sorted(os.listdir(cart))
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    dev.ws.unknown_sources = unknown_sources
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    assert push_cart.main([cart, "--board", "tdeck"]) == 0
+    module = dev.fs.files["/sd/carts/demo.moy/main.esp32s3.aot"]
+    with open(os.path.join(cart, "main.wasm"), "rb") as f:
+        wasm = f.read()
+    assert dev.fs.files["/sd/carts/demo.moy/main.wasm"] == wasm
+    assert wm.key_matches(module, wasm, "esp32s3")
+    assert wm.split(module)[1] is None                  # unsigned
+    assert sorted(os.listdir(cart)) == before           # the cart is untouched
+    out = capsys.readouterr().out
+    assert ("Unknown sources off" in out) is (not unknown_sources)
+    assert out.index("compiling one, unsigned") < out.index("demo.moy ->")
+
+
+@needs_wamrc
+def test_a_module_built_for_another_main_wasm_is_replaced(monkeypatch, tmp_path,
+                                                          capsys):
+    """A stale module -- main.wasm rebuilt since -- is one the board refuses
+    by its key, so the push compiles a fresh one in its place."""
+    from tools import wasm_module as wm
+    cart = _compiled_cart(tmp_path)
+    stale = os.path.join(cart, "main.esp32p4.aot")
+    wm.build(b"\0asm\1\0\0\0", "esp32p4", stale,
+             signed=False)
+    dev = _FakeConsole(board="p4", carts_root="/moy/carts")
+    dev.ws.unknown_sources = True
+    monkeypatch.setattr(p4_autotest.P4Board, "reset", lambda self, **kw: None)
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    assert push_cart.main([cart, "--board", "p4"]) == 0
+    with open(os.path.join(cart, "main.wasm"), "rb") as f:
+        wasm = f.read()
+    assert wm.key_matches(dev.fs.files["/moy/carts/demo.moy/main.esp32p4.aot"],
+                          wasm, "esp32p4")
+    assert "built for another main.wasm" in capsys.readouterr().out
