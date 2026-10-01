@@ -212,7 +212,7 @@ doc; the grouping the sprints follow:
 | the roles and their services | `runtime/app_context.py`, `runtime/system_api.py`, `runtime/artwork.py`, the wallpaper role | 5 |
 | the toolkit's core | `runtime/ui.py` | 6 |
 | the window managers | `runtime/wm_windowed.py`, `runtime/wm_desk.py`, `runtime/wm_chrome.py`, the rest of `runtime/console.py` | 7 |
-| apps (stay Python) | the launcher, Settings, Files, Paint, Calc, Notes, Storybook, Appearance, the Editor and its tabs, `runtime/blocks.py` (the block compiler is an editor's) | — |
+| apps (stay Python) | the launcher, Settings, Files, Paint, Calc, Notes, Storybook, Appearance, the Editor and its tabs (the Studio, `docs/studio_2026-09.md`, panes and docking included), `runtime/blocks.py` (the block compiler is an editor's) | — |
 
 The Zero companion board (`firmware/seeed_xiao_esp32s3_zero/`) is a fifth
 target: headless, the cart store, running the webhost and the sync RPC. Every
@@ -469,6 +469,14 @@ before anything crosses.
 
 Sprint 4 is where the memory half's acceptance test is met, and where Python
 stops being the OS. Sprints 5 to 7 finish the line.
+
+**The Studio's Run pane is sprint 7's concern.** `docs/studio_2026-09.md` docks
+the playtest window into a pane the Editor lends, which is new policy in
+`runtime/wm_windowed.py`. It lands before sprint 7 starts, so the port carries
+it, or it is designed into sprint 7; it never lands during sprint 6 or 7, whose
+gates hold pixels (`docs/theming_2026-09.md` §8 sets the same rule for
+theming). The Player in the pane is the same Player, so sprint 4's gate is
+unaffected.
 
 ## 7. What it costs
 
