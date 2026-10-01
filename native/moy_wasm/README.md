@@ -295,6 +295,21 @@ that read or wrote other bytes than byte-wise composition says
 (`tests/fixtures/wasm/misaligned.c`). Every declaring board's suite runs it
 and wants 0; a core that trapped instead would take the board down with it.
 
+### Float-to-int conversions
+
+wasm's saturating conversions give 0 for a NaN and the nearest end of the
+range past either end. On the ESP32-S3, TRUNC.S already clamps past both
+ends of the int32 range and gives INT32_MAX for a NaN of either sign, and
+UTRUNC.S clamps above the range but gives neither 0 nor a clamp below it --
+read off a T-Deck, not the ISA manual. So for `--cpu=esp32s3` the fork's
+compiler emits TRUNC.S and 0 for a NaN, and UTRUNC.S and 0 for anything not
+`>= 0`, where the generic expansion was three branches against two float
+constants. The guard is a module that converts NaNs of both signs, the
+infinities, both ends of the range and their neighbours, from float and from
+double, and counts the results that are not wasm's
+(`tests/fixtures/wasm/conversions.c`); every console board's suite runs it
+and wants 0.
+
 **And the file is signed the way OTA images are.** A module file is the
 module, then an RSA signature (PKCS#1 v1.5, SHA-256), its length and the magic
 `moybyte-sig1`; the signature covers a text naming the chip, the module's
@@ -378,17 +393,30 @@ own key is refused unless the image trusts that key.
 Bounds checks stay on; the fork's compiler makes them cheap rather than
 absent. On both chips (32-bit targets, 32-bit memories) an access is one
 unsigned compare of the address against the memory's size less the access's
-end, against the one 1-byte bound -- which also catches `addr + offset`
-wrapping, so there is no second compare and three fewer bound values live
-across a function; the Xtensa loops that reloaded a spilled bound before every
-check keep it in a register. A trapping float-to-int is one branch on two
-ordered compares, the trap path telling NaN from overflow; the saturating
-conversion is LLVM's `fptosi.sat` on RISC-V, where it is a few branch-free
-instructions (on Xtensa its expansion costs more than the branches, so it
-keeps them). Every branch to the exception path is weighted cold. A memory
-declared with its maximum equal to its initial size keeps its base and bound
-across calls even when the code asks `memory.grow`. And the Xtensa backend is
-patched to select EXTUI for shifts right by 16..31 and low-bit masks.
+end, which also catches `addr + offset` wrapping. A memory declared with its
+maximum equal to its initial size cannot grow, so that limit is a constant
+the register allocator rematerializes instead of a bound held, and spilled,
+across the function; the module says so (`WASM_FEATURE_FIXED_MEMORY_BOUND`)
+and the runtime refuses an instance whose memory is not exactly that size. On
+RISC-V a byte at offset 0 keeps the loaded bound, because LLVM turns a compare
+against `size - 1` into a shift and a compare. Any other memory compares
+against its bound loaded at entry, which a fixed-size memory also keeps across
+calls when the code asks `memory.grow`.
+
+A function that calls others directly checks the native stack once, at its
+entry, for the largest frame it calls directly, and calls their bodies
+straight; the precheck wrapper that checks a function's own frame is left for
+what enters it another way, an export or `call_indirect`. On Xtensa the body
+keeps its short call from its wrapper and the other functions reach it through
+an alias, a long call.
+
+A trapping float-to-int is one branch on two ordered compares, the trap path
+telling NaN from overflow; the saturating conversion is LLVM's `fptosi.sat`
+on RISC-V and TRUNC.S and a NaN check on the ESP32-S3 ("Float-to-int
+conversions" below). Every branch to the exception path is weighted cold. On
+Xtensa a square root is a call, and it goes to newlib's `__ieee754_sqrtf`
+directly rather than through `sqrtf`'s errno wrapper. And the Xtensa backend
+is patched to select EXTUI for shifts right by 16..31 and low-bit masks.
 
 Tried and dropped, so not to be re-proposed without new evidence: LLVM's
 inductive range-check elimination (it recognises the checks only in an
@@ -396,11 +424,17 @@ inductive range-check elimination (it recognises the checks only in an
 induction variables carry no no-wrap flags -- and that form bloats Jet's
 setup function 2.4x); reloading the bound at every check (it halves Jet's
 setup pressure on the S3 and costs its rasterizer more); a `umax`-based single
-check (slower on Xtensa); `fptosi.sat` on Xtensa. What remains is the check
-itself (a compare and the base add per access), the stack-check wrapper every
-wasm-to-wasm call goes through, and on the S3 register pressure: 16 registers
-against LLVM's spills, frames past the 1020 bytes `l32i` reaches, and no
-zero-overhead `loop` -- Espressif's backend disables hardware loops whenever
+check (slower on Xtensa); `fptosi.sat` on Xtensa; a constant limit for a byte
+at offset 0 on RISC-V (the shift above, an instruction more in Doom's span
+loops); letting LLVM inline a function's body at its direct calls (about 1%
+on Doom, nothing on Jet, 10% more code); ordering an Xtensa frame's slots by
+how often they are used, so the hot ones sit within the 1020 bytes `l32i`
+reaches (it took 5% off Jet's S3 frame while its setup function's frame was
+1184 bytes; with constant limits no function in Jet, ESP 88 or Doom has a
+frame past 1020 bytes). What remains is the check itself (a compare and the
+base add per access) and, on the S3, register pressure: 16 registers and the
+float values of a setup loop in stack slots, and no zero-overhead `loop` --
+Espressif's backend builds hardware loops only when asked, and never when
 literals sit in the text, which the S3's module layout requires. The figures
 are #158's.
 

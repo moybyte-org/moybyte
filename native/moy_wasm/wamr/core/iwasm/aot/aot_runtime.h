@@ -35,6 +35,10 @@ extern "C" {
  * and not at the beginning of each function call */
 #define WASM_FEATURE_FRAME_PER_FUNCTION (1 << 12)
 #define WASM_FEATURE_FRAME_NO_FUNC_IDX (1 << 13)
+/* The module's code checks a linear-memory access against the size its one
+   memory declares, a constant, so an instance's memory must be exactly that
+   size (moybyte) */
+#define WASM_FEATURE_FIXED_MEMORY_BOUND (1 << 16)
 
 typedef enum AOTSectionType {
     AOT_SECTION_TYPE_TARGET_INFO = 0,
@@ -351,6 +355,10 @@ typedef struct AOTModule {
 
     /* Whether the underlying wasm binary buffer can be freed */
     bool is_binary_freeable;
+
+    /* The code checks memory accesses against the declared size of the
+       module's memory (WASM_FEATURE_FIXED_MEMORY_BOUND) */
+    bool fixed_memory_bound;
 
     /* `.data` sections merged into one mmaped to reduce the tlb cache miss */
     uint8 *merged_data_sections;

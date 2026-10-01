@@ -25,6 +25,19 @@ typedef struct {
 /* clang-format off */
 #define REG_SYM(symbol) { #symbol, (void *)symbol }
 
+#if defined(BUILD_TARGET_XTENSA) && defined(__NEWLIB__)
+/* A square root the code calls goes to newlib's IEEE one, not through
+   sqrtf's errno wrapper: wasm's sqrt is the correctly rounded result, and a
+   NaN below 0 without an errno. */
+float __ieee754_sqrtf(float);
+double __ieee754_sqrt(double);
+#define AOT_SQRTF_SYM (void *)__ieee754_sqrtf
+#define AOT_SQRT_SYM (void *)__ieee754_sqrt
+#else
+#define AOT_SQRTF_SYM (void *)aot_sqrtf
+#define AOT_SQRT_SYM (void *)aot_sqrt
+#endif
+
 #if WASM_ENABLE_BULK_MEMORY != 0
 #define REG_BULK_MEMORY_SYM()             \
     REG_SYM(aot_memory_init),             \
@@ -203,8 +216,8 @@ typedef struct {
     { "memset", (void*)aot_memset },      \
     { "memmove", (void*)aot_memmove },    \
     { "memcpy", (void*)aot_memcpy },      \
-    { "sqrt", (void*)aot_sqrt },          \
-    { "sqrtf", (void*)aot_sqrtf },        \
+    { "sqrt", AOT_SQRT_SYM },             \
+    { "sqrtf", AOT_SQRTF_SYM },           \
     REG_SYM(fmin),                        \
     REG_SYM(fminf),                       \
     REG_SYM(fmax),                        \

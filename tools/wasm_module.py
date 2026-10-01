@@ -89,22 +89,23 @@ SPIKE = os.path.join(ROOT, "experiments", "wasm_aot")
 DIST = os.path.join(SPIKE, "toolchain", "dist")
 HELLO_SRC = os.path.join(SPIKE, "core6502.c")
 MISALIGNED_SRC = os.path.join(ROOT, "tests", "fixtures", "wasm", "misaligned.c")
+CONVERSIONS_SRC = os.path.join(ROOT, "tests", "fixtures", "wasm", "conversions.c")
 
 KEY_SECTION = "moybyte.key"
 KEY_MAGIC = "moybyte-aot 1\n"
 
 # The compilers, by the key's `target` field. `sha256` is the pin; `url` is
 # where a missing binary is fetched from (the fork's release assets).
-RELEASE = "https://github.com/moybyte-org/wasm-micro-runtime/releases/download/wamrc-2.4.5-moybyte-3"
+RELEASE = "https://github.com/moybyte-org/wasm-micro-runtime/releases/download/wamrc-2.4.5-moybyte-4"
 COMPILERS = {
     "xtensa": {
         "file": "wamrc-xtensa",
-        "sha256": "56622550bcf42dde5f9f52305e4fe396ca0be357b698203fad55b369e985e85d",
+        "sha256": "731e53a93b96232868c5560cd8869b055549350f252f86e977879d6076245248",
         "url": RELEASE + "/wamrc-xtensa",
     },
     "riscv32": {
         "file": "wamrc-riscv32",
-        "sha256": "56622550bcf42dde5f9f52305e4fe396ca0be357b698203fad55b369e985e85d",
+        "sha256": "731e53a93b96232868c5560cd8869b055549350f252f86e977879d6076245248",
         "url": RELEASE + "/wamrc-riscv32",
     },
 }
@@ -476,6 +477,13 @@ def misaligned_wasm():
     wasm module (bytes): its `check` export counts the misaligned loads and
     stores that read or wrote the wrong bytes."""
     return _c_wasm(MISALIGNED_SRC)
+
+
+def conversions_wasm():
+    """The saturating-conversion guard (tests/fixtures/wasm/conversions.c) as
+    a wasm module (bytes): its `check` export counts the float-to-int
+    conversions at the limits that gave other than wasm's answer."""
+    return _c_wasm(CONVERSIONS_SRC)
 
 
 def _c_wasm(src):

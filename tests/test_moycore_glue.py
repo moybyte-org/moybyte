@@ -51,6 +51,8 @@ from pathlib import Path
 
 import pytest
 
+from tools.wasm_module import format_version
+
 ROOT = Path(__file__).resolve().parent.parent
 GLUE_SRC = ROOT / "device" / "moycore_glue.py"
 C_SRC = ROOT / "native" / "moycore" / "modmoycore.c"
@@ -523,7 +525,7 @@ class World:
         else:
             mw = types.ModuleType("moy_wasm")
             mw.CHIP = wasm_chip
-            mw.FORMAT = "1"     # this tree's own MOY_WASM_FORMAT_VERSION
+            mw.FORMAT = format_version()
             sys.modules["moy_wasm"] = mw
         if not flat_lua_ext:
             sys.modules["lua_ext"] = None      # no frozen flat name: the host
@@ -1748,10 +1750,11 @@ def _compiled(tmp_path, chips=("esp32s3",), memory=3):
     return cart, str(main)
 
 
-def _glue_aot(cart, chip, format="1"):
+def _glue_aot(cart, chip, format=None):
     world = World()
     try:
-        return world.mod.aot_path(cart["path"], cart["main"], chip, format)
+        return world.mod.aot_path(cart["path"], cart["main"], chip,
+                                  format or format_version())
     finally:
         world.close()
 
@@ -1774,7 +1777,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert world.core.rb("vm") is False
         (_v, module, head, pages, sha, cdir, swapped, gate,
          allow_unsigned, interp) = world.core.calls[1]
-        assert module == cart["path"] + "/main.esp32s3.f1.aot"
+        assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
         assert pages == 3 and cdir == cart["path"] and swapped is True
@@ -1829,7 +1832,7 @@ def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
         assert run.interp_cause == "unsigned"
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 2
-        assert opens[0][1] == cart["path"] + "/main.esp32s3.f1.aot"
+        assert opens[0][1] == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         assert opens[0][9] is False            # AOT, tried first
         assert opens[1][1] == main             # the retry is main.wasm itself
         assert opens[1][9] is True              # on the interpreter

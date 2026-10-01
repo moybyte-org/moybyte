@@ -14,6 +14,9 @@
 # mask of the low 1..16 bits, where it emitted SSR + SRL and an AND against a
 # mask held in a register.
 #
+# wamrc is built with its source paths mapped out, so the binary is the same
+# from any checkout of this tree.
+#
 # Espressif's LLVM 18.1.2 spells RISC-V's misaligned-access feature
 # +fast-unaligned-access (upstream 18.1.8 renamed it +unaligned-scalar-mem),
 # which is why the P4's key names that one.
@@ -65,7 +68,9 @@ ninja -j"${JOBS}"
 echo "== building wamrc"
 cd "${HERE}/wamr/wamr-compiler"
 mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake .. -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_FLAGS="-ffile-prefix-map=${HERE}/wamr/=" \
+  -DCMAKE_CXX_FLAGS="-ffile-prefix-map=${HERE}/wamr/="
 make -j"${JOBS}"
 ls -la "${HERE}/wamr/wamr-compiler/build/wamrc"
 "${HERE}/wamr/wamr-compiler/build/wamrc" --version || true

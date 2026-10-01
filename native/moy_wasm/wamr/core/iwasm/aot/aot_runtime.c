@@ -2068,6 +2068,22 @@ instantiate(AOTModule *module, AOTModuleInstance *parent,
                               error_buf_size))
         goto fail;
 
+    if (module->fixed_memory_bound) {
+        uint64 declared = module->memory_count
+                              ? (uint64)module->memories[0].num_bytes_per_page
+                                    * module->memories[0].init_page_count
+                              : 0;
+        if (!module->memory_count || module_inst->memory_count < 1
+            || module_inst->memories[0]->memory_data_size != declared) {
+            set_error_buf_v(error_buf, error_buf_size,
+                            "the module's code checks memory accesses "
+                            "against its declared %" PRIu64
+                            " bytes; this instance's memory is not that size",
+                            declared);
+            goto fail;
+        }
+    }
+
     /* Initialize function pointers */
     if (!init_func_ptrs(module_inst, module, error_buf, error_buf_size))
         goto fail;

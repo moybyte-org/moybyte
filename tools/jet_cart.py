@@ -135,8 +135,8 @@ CXXFLAGS = ["--target=wasm32-wasi", "-std=c++17", "-O2", "-fno-exceptions",
             "-mllvm", "-inline-cold-callsite-threshold=300",
             # The span walk's per-row step (TriangleSpans::beginRow, cost
             # 265) sits just over the default threshold of 225, so every
-            # row paid a call and the AOT compiler's stack-check wrapper
-            # around it. At 300 it inlines; the module comes out smaller.
+            # row paid a call. At 300 it inlines; the module comes out
+            # smaller.
             "-mllvm", "-inline-threshold=300",
             # A C cast from float to int is undefined out of range, which
             # wasm's saturating conversion honours in one instruction. The

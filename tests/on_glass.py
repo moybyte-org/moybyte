@@ -540,7 +540,8 @@ def wasm_modules(chip):
     by the key exactly as it always has (the Player-level interpreter
     fallback is a layer above it, in device/moycore_glue.py, that this
     function's caller does not go through): the hello module, the
-    misaligned-access guard, and six a board must refuse -- no key, another
+    misaligned-access guard, the saturating-conversion guard, and six a board
+    must refuse -- no key, another
     compiled-code format version, other flags (the key saying so), another
     chip, no signature, and a signed module with one byte of its key changed
     -- plus an unsigned module keyed for another format, which the board
@@ -566,6 +567,8 @@ def wasm_modules(chip):
             wm.build(wasm, c, mods[name], sign_with=key, **kw)
         mods["misaligned"] = os.path.join(out, "misaligned.aot")
         wm.build(wm.misaligned_wasm(), chip, mods["misaligned"], sign_with=key)
+        mods["conversions"] = os.path.join(out, "conversions.aot")
+        wm.build(wm.conversions_wasm(), chip, mods["conversions"], sign_with=key)
         wasm_tamper(mods["tampered"])
         _WASM_BUILT[chip] = mods, hashlib.sha256(wasm).hexdigest()
     return _WASM_BUILT[chip]
@@ -700,6 +703,19 @@ def wasm_misaligned_access_is_exact(board, paths):
     r = wasm_run(board, paths["misaligned"], "check")
     assert r["ok"], r["error"]
     print("\nWASM misaligned sweep: %d wrong, call %d us" % (r["value"], r["call_us"]))
+    assert r["value"] == 0, r
+
+
+def wasm_saturating_conversions_are_exact(board, paths):
+    """The compiler's saturating float-to-int conversions give wasm's answer
+    at every limit on this board's core -- on the ESP32-S3 they are TRUNC.S
+    and a NaN check, which leans on what the core does past the int32 range
+    (native/moy_wasm/README.md, "Float-to-int conversions"). The guard module
+    converts NaNs, the infinities and both ends of the range and counts the
+    results that differ."""
+    r = wasm_run(board, paths["conversions"], "check")
+    assert r["ok"], r["error"]
+    print("\nWASM saturating conversions: %d wrong" % r["value"])
     assert r["value"] == 0, r
 
 

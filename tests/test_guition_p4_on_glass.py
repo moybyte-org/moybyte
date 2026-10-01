@@ -72,6 +72,10 @@ def test_a_misaligned_load_or_store_of_any_width_is_exact(board, wasm):
     on_glass.wasm_misaligned_access_is_exact(board, wasm)
 
 
+def test_a_saturating_float_to_int_conversion_is_exact(board, wasm):
+    on_glass.wasm_saturating_conversions_are_exact(board, wasm)
+
+
 def test_the_run_stack_works_in_psram_and_internal_sram(board, wasm):
     on_glass.wasm_run_stack_placements(board, wasm)
 

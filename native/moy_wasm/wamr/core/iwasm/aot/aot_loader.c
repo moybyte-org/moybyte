@@ -607,6 +607,8 @@ load_target_info_section(const uint8 *buf, const uint8 *buf_end,
 #if WASM_ENABLE_DUMP_CALL_STACK != 0
     module->feature_flags = target_info.feature_flags;
 #endif
+    module->fixed_memory_bound =
+        (target_info.feature_flags & WASM_FEATURE_FIXED_MEMORY_BOUND) != 0;
 
     /* Finally, check feature flags */
     return check_feature_flags(error_buf, error_buf_size,

@@ -41,6 +41,7 @@ from pathlib import Path
 
 import pytest
 
+from tools.wasm_module import format_version
 from unix_mp import require_unix_mp
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -216,7 +217,7 @@ def stats():
 ''',
     "moy_wasm.py": '''
 CHIP = "xtensa"
-FORMAT = "1"
+FORMAT = "@FORMAT@"
 
 
 def footprint(mem, size):
@@ -475,7 +476,7 @@ def _stage(dest, exe):
     fakes = dest / "fakes"
     fakes.mkdir()
     for name, body in FAKES.items():
-        (fakes / name).write_text(body.lstrip("\n"))
+        (fakes / name).write_text(body.lstrip("\n").replace("@FORMAT@", format_version()))
     cart = dest / "carts" / "frame_probe.moy"
     cart.mkdir(parents=True)
     (cart / "manifest.json").write_text(json.dumps(MANIFEST))
@@ -485,7 +486,7 @@ def _stage(dest, exe):
     # module by that name and this test measures the interpreter fallback
     # instead of the AOT path it means to.
     (cart / "main.wasm").write_bytes(b"\0asm\1\0\0\0\5\3\1\0\x10")
-    (cart / "main.xtensa.f1.aot").write_bytes(b"AOT")
+    (cart / ("main.xtensa.f%s.aot" % format_version())).write_bytes(b"AOT")
     (cart / "config.json").write_text("{}")
 
 
