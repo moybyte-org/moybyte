@@ -34,7 +34,7 @@ THE STORE PATH IS DISCOVERED, NOT DECLARED: it comes from the live console's
 else the internal VFS, #202), so a hardcoded path would be wrong on that board
 half the time and a second source of truth on the others.
 
-FOUR THINGS THIS GETS RIGHT, each of which cost an attempt:
+FIVE THINGS THIS GETS RIGHT, each of which cost an attempt:
 
   1. `P4Board.pyexec` stages ITS OWN snippet in `ws._up`, so every helper has to
      be defined BEFORE anything else goes there or the upload is silently wiped.
@@ -47,6 +47,12 @@ FOUR THINGS THIS GETS RIGHT, each of which cost an attempt:
   4. Verify the hash of a `.new` and rename only then. A half-written main.lua
      is a cart that will not load, and the board is not where you want to
      discover that.
+  5. The already-current hash reads 8KB at a time (HELPERS' `_sha`). A multi-MB
+     file read in one `.read()` costs well over the device's own 30s `py`
+     timeout, whose retry then queues a SECOND read behind the first and leaves
+     the board still busy with both when `recv` arrives to arm the upload --
+     which surfaces as "the board did not arm the raw upload (no reply)", nowhere
+     near the hash that actually stalled it.
 
 ONE TRANSPORT, AND NO FALLBACK: the dev channel's `recv`
 (runtime/dev_channel.py's header and `_recv` are the authority). Carrying the
@@ -151,14 +157,28 @@ def serial_cfg(board):
 # The only device-side helpers left: the already-current check, the mkdir and
 # the store's room. `_sha` reads the file back rather than trusting what was
 # written, which is the same thing the board does at the end of a `recv` -- and
-# the reason both do is item 2 above. `_room` is the free bytes of the store a
+# the reason both do is item 2 above. It reads in 8KB pieces, not whole: a 4MB
+# file read in one `.read()` costs over a minute on the Waveshare P4's internal
+# flash, against ~5s chunked -- long past `cmd`'s 30s wait, whose retry then
+# queues a SECOND full read behind the first and starves the `recv` that is
+# meant to arm the upload right after. `_room` is the free bytes of the store a
 # path is on (None where the board cannot say), `_size` a file's size there (0
 # when it is not there yet).
 HELPERS = """
 import hashlib, os
 def _sha(p):
-    try: return hashlib.sha256(open(p, 'rb').read()).digest().hex()[:12]
+    try: f = open(p, 'rb')
     except Exception: return None
+    h = hashlib.sha256()
+    try:
+        while True:
+            b = f.read(8192)
+            if not b: break
+            h.update(b)
+    except Exception:
+        f.close(); return None
+    f.close()
+    return h.digest().hex()[:12]
 def _mkdir(p):
     try: os.mkdir(p)
     except Exception: pass

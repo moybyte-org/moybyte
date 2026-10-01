@@ -909,7 +909,9 @@ def parser(dirs):
                           "cart with no module for the board's chip gets one, "
                           "unsigned)")
     p.add_argument("cart")
-    p.add_argument("--only", action="append")
+    p.add_argument("--only", action="append",
+                   help="push just this file, as its path inside the cart "
+                        "(scenes/x.moyscene); repeatable")
     p.add_argument("--dest")
     p.add_argument("--no-rescan", action="store_true")
     p = verb("refresh-wasm", help="rebuild the stale compiled-cart modules "

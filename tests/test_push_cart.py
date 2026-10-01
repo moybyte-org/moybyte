@@ -48,6 +48,7 @@ BOARD_DIRS = {
 class _FakeFile:
     def __init__(self, fs, path, mode):
         self.fs, self.path, self.mode = fs, path, mode
+        self.pos = 0
         if "w" in mode:
             self.buf = b""
         elif path in fs.files:
@@ -60,7 +61,16 @@ class _FakeFile:
         return len(data)
 
     def read(self, n=-1):
-        return self.buf
+        # A REAL cursor, not "return the whole buffer every call": `_sha`
+        # (push_cart.HELPERS) reads a file in 8KB pieces, and a mock that
+        # answered every `read(8192)` with the full buffer would either loop
+        # forever or hide exactly the bug a chunked reader exists to avoid.
+        if n is None or n < 0:
+            out = self.buf[self.pos:]
+        else:
+            out = self.buf[self.pos:self.pos + n]
+        self.pos += len(out)
+        return out
 
     def close(self):
         if "w" in self.mode:
@@ -540,6 +550,23 @@ def test_a_file_whose_hash_already_matches_is_not_uploaded(tmp_path):
     assert dev.acks == []
 
 
+def test_a_big_files_already_current_check_reads_in_pieces(tmp_path):
+    """`_sha` (push_cart.HELPERS) reads 8KB at a time, not the file whole: a 4MB
+    WAD read in one `open(p, 'rb').read()` measured 71s on the Waveshare P4
+    against 5.5s chunked -- long enough that `cmd`'s resend doubled the wait and
+    starved the `recv` meant to follow it, which is what "did not arm the raw
+    upload (no reply)" actually was. BIG is bigger than one 8KB chunk, so this
+    exercises more than one `read(8192)` -- a reader that only consumed the
+    first piece would hash a truncated prefix and wrongly decide to re-upload."""
+    dst = "/moy/carts/demo.moy/main.lua"
+    assert len(BIG) > 8192
+    dev = _FakeConsole(files={dst: BIG})
+    b, window = _raw(dev)
+    src = _cart(tmp_path, {"main.lua": BIG}) + "/main.lua"
+    assert push_cart.push_file_raw(b, src, dst, window) is False
+    assert dev.acks == []
+
+
 def test_a_corrupt_upload_leaves_the_old_file_in_place(tmp_path):
     """The .new is verified BEFORE the rename. A half-written main.lua is a
     cart that will not load, and the board is not where you want to find out.
@@ -732,6 +759,19 @@ def test_only_pushes_the_named_file_and_refuses_one_the_cart_lacks(
     with pytest.raises(SystemExit) as exc:
         push_cart.main([cart, "--board", "tdeck", "--only", "sprites.json"])
     assert "sprites.json" in str(exc.value)
+
+
+def test_only_is_repeatable_and_pushes_every_named_file(monkeypatch, tmp_path):
+    """`--only` is `action="append"`, so it names several files by being given
+    more than once -- not a comma-separated list, and not capped at one."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.py": b"x = 1\n", "config.json": b"{}\n",
+                            "manifest.json": b'{"title": "Demo"}\n'})
+    assert push_cart.main([cart, "--board", "tdeck", "--only", "main.py",
+                           "--only", "config.json"]) == 0
+    assert sorted(dev.fs.files) == ["/sd/carts/demo.moy/config.json",
+                                    "/sd/carts/demo.moy/main.py"]
 
 
 def _sub(cart, rel, data):

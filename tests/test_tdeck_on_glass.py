@@ -204,6 +204,13 @@ def test_doom_runs_or_opens_the_notice(board, wasm_carts):
                                            floor=DOOM_FPS_FLOOR)
 
 
+# A file doom1.wad's size (4196020 bytes): the same regression, over this
+# board's USB-Serial/JTAG rather than the Waveshare's unflow-controlled UART.
+def test_a_doom_sized_file_is_skipped_when_current_and_sent_when_not(board):
+    on_glass.big_push_skips_when_current_and_sends_when_changed(
+        board, WASM_BOARD_DIR)
+
+
 def test_state_snapshot_has_the_fullscreen_tier_shape(board):
     on_glass.fullscreen_tier_state(board)
 

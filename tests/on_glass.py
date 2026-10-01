@@ -1365,23 +1365,6 @@ def _doom():
 
 _DOOM_HOST = {}
 
-_CHUNKED_SHA = '''
-def _sha_chunked(p):
-    import hashlib
-    try:
-        f = open(p, 'rb')
-    except OSError:
-        return None
-    h = hashlib.sha256()
-    while True:
-        blk = f.read(8192)
-        if not blk:
-            break
-        h.update(blk)
-    f.close()
-    return ''.join('%02x' % c for c in h.digest())
-'''
-
 
 def doom_host_crcs(tics=DOOM_TICS):
     """The host run's frame CRCs, once per session."""
@@ -1393,7 +1376,10 @@ def doom_host_crcs(tics=DOOM_TICS):
 
 def doom_push(board, board_dir):
     """The recipe's cart into the store as doom.moy, less the other chip's
-    module; files already current are not sent again."""
+    module. `_push_folder` -> `push_file_raw` reads the already-current hash
+    in pieces (`push_cart.HELPERS`), so the 4 MB WAD is left out when it is
+    current the same way any other file is -- no second copy of that check
+    here."""
     import shutil
     import tempfile
     from tools import wasm_cart
@@ -1422,19 +1408,80 @@ def doom_push(board, board_dir):
     if need > free:
         pytest.skip("the cart store at %s has %d bytes free and the Doom cart "
                     "needs %d more: the store cannot hold it" % (root, free, need))
-    # The WAD is 4 MB, more than the push's own check reads into memory to
-    # hash, so it is hashed here in pieces and left out when it is current.
-    import hashlib
-    wad = os.path.join(local, "doom1.wad")
-    with open(wad, "rb") as f:
-        want = hashlib.sha256(f.read()).hexdigest()
-    assert board.pyexec(_CHUNKED_SHA), "could not install the hash helper"
-    if board.pyval("ws._g['_sha_chunked'](%r)" % (dest + "/doom1.wad"),
-                   timeout=300) == want:
-        os.remove(wad)
     _push_folder(board, board_dir, local, dest)
     board.pyval("len(ws.rescan_carts() or ())", timeout=90)
     return frames
+
+
+# A file doom1.wad's size (4196020 bytes): what regressed "the board did not
+# arm the raw upload (no reply)" -- push_cart's already-current check read a
+# file that size whole instead of in pieces, long past `cmd`'s 30s wait, whose
+# retry then queued a second whole read behind the first and starved the
+# `recv` meant to arm the upload right after. On a throwaway cart folder,
+# never doom.moy, so an installed Doom is never put at risk here. Pushing the
+# file once (there is nothing on the board under this name, so this is this
+# test's "changed") and once more unchanged exercises both sides; the send is
+# slow by design on the Waveshare P4's UART, whose ack is its only
+# backpressure -- several minutes for 4MB, under a second for the skip.
+BIG_PUSH_NAME = "_bigpush.moy"
+BIG_PUSH_SIZE = 4196020
+
+
+def big_push_skips_when_current_and_sends_when_changed(board, board_dir):
+    """Push BIG_PUSH_SIZE bytes to a throwaway cart, confirm the board's own
+    hash agrees, then push the SAME bytes again and confirm nothing goes back
+    over the wire. Returns (send_s, skip_s). Removes the throwaway cart
+    whether this passes or raises."""
+    import hashlib
+    import shutil
+    import tempfile
+    import time
+    import push_cart as pc
+    from tools import board_config
+
+    tmp = tempfile.mkdtemp(prefix="moy_bigpush_")
+    local = os.path.join(tmp, BIG_PUSH_NAME)
+    os.mkdir(local)
+    path = os.path.join(local, "big.bin")
+    data = bytes((i * 2654435761 + 1) % 256 for i in range(BIG_PUSH_SIZE))
+    with open(path, "wb") as f:
+        f.write(data)
+
+    ser = board_config.load(board_dir)["serial"]
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    dest = root.rstrip("/") + "/" + BIG_PUSH_NAME
+    file_dest = dest + "/big.bin"
+    try:
+        win = pc.raw_window(board, int(ser.get("window") or 4096))
+        assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
+        board.pyval("ws._g['_mkdir'](%r)" % dest)
+
+        t0 = time.time()
+        assert pc.push_file_raw(board, path, file_dest, win) is True, (
+            "a file with nothing on the board under its name must be sent")
+        send_s = time.time() - t0
+        want = hashlib.sha256(data).hexdigest()[:12]
+        got = board.pyval("ws._g['_sha'](%r)" % file_dest, timeout=60,
+                          strict=True)
+        assert got == want, (got, want)
+
+        t0 = time.time()
+        assert pc.push_file_raw(board, path, file_dest, win) is False, (
+            "an unchanged big file must be skipped, not resent")
+        skip_s = time.time() - t0
+        assert skip_s < 20, (
+            "the already-current check took %.1fs: it read the file whole "
+            "again instead of in pieces" % skip_s)
+    finally:
+        board.pyexec("""
+import os
+try: os.remove(%r)
+except Exception: pass
+try: os.rmdir(%r)
+except Exception: pass
+""" % (file_dest, dest))
+        shutil.rmtree(tmp, ignore_errors=True)
+    return send_s, skip_s
 
 
 def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,

@@ -203,6 +203,14 @@ def test_doom_frames_match_the_host(board):
                                         floor=DOOM_FPS_FLOOR)
 
 
+# A file doom1.wad's size (4196020 bytes): the regression for "the board did
+# not arm the raw upload (no reply)" on this UART. Slow by design (this
+# board's ack is its only backpressure) -- measured ~8 minutes for the send.
+def test_a_doom_sized_file_is_skipped_when_current_and_sent_when_not(board):
+    on_glass.big_push_skips_when_current_and_sends_when_changed(
+        board, WASM_BOARD_DIR)
+
+
 def test_boots_to_the_desk(board):
     st = board.state()
     assert st.get("desk") is True
