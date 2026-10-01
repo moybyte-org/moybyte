@@ -205,7 +205,9 @@ block (which the linear memory takes back), the pool, the module's own size
 for the text and data the loader maps, and the run stack; it over-counts the
 text by the module's relocations and symbols, so a cart it passes has the
 room. A `par` lane is not in it: a lane whose stack or instance cannot be
-made takes no items, and the session's core runs them all.
+made takes no items, and the session's core runs them all. That shape is
+AOT's; a cart with no module for this console sizes by "The interpreter
+tier"'s rule below instead, whose file is never reused.
 
 A load that runs out of memory anyway -- the heap in more pieces than the
 free total suggests -- gets the same notice: every allocation failure on the
@@ -420,6 +422,23 @@ the same session callbacks, the same hooks. `snd` works on it, because the
 audio import is part of that same table; `par` runs its items in declaration
 order on the calling core, never across lanes (`moy_wasm_session_lanes`
 reports 0 for an interpreted session, "A cart's session" above).
+
+**An interpreted session's pool is sized by its own rule, not AOT's**
+(`moy_wasm_footprint.h`'s `moy_wasm_interp_pool_bytes`/`moy_wasm_interp_footprint`,
+decided 2026-10-01): the AOT pool above is sized for relocations and a symbol
+table an interpreted load never builds, and sizing one by the other was an
+approximation that cost two things -- a session's own PSRAM pool could be the
+wrong size for what classic actually needs, and the fit check's "needs N MB"
+could name a number with no relation to why a load actually failed. The
+engine picks the rule by `moy_wasm_session`'s own `interp` flag, so the real
+load and `device/moycore_glue.WasmRuntime.footprint`'s pre-check (via
+`moy_wasm.interp_footprint`, `footprint`'s twin) agree; the interpreted
+footprint also counts the module file as RESIDENT rather than reused -- the
+"module file is gone before its memory is allocated" guarantee above is
+AOT's alone, so an interpreted cart's file and its linear memory are two live
+allocations, not one reused as the other. The host (`runtime/wasm_host.py`)
+always sizes by this rule too, because it always interprets. Measured peaks,
+the margin and the classic-vs-fast decision are #158's.
 
 **The engine never decides to fall back; `device/moycore_glue.WasmRun` does**,
 in Python: it looks for this console's own module by name first, and only

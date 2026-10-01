@@ -832,16 +832,19 @@ class WasmRuntime:
 
     def footprint(self, cart):
         """(total, block) the cart's load takes from PSRAM, by the engine's
-        own sizing (moy_wasm.footprint): its declared memory, the file it
-        loads and the pool that file gets. None when there is nothing to
-        measure -- no "memory", no cart path -- and the load's own refusal
-        says why.
+        own sizing (moy_wasm.footprint / interp_footprint): its declared
+        memory, the file it loads and the pool that file gets. None when
+        there is nothing to measure -- no "memory", no cart path -- and the
+        load's own refusal says why.
 
-        The file is this console's own AOT module when the cart carries one,
-        or main.wasm itself when it does not -- the cart plays on the
-        interpreter either way (docs/wasm_tier_plan_2026-09.md, "A cart
-        survives its firmware"), so the fit check still has a real file to
-        size against rather than skipping a cart with no matching module."""
+        The file is this console's own AOT module when the cart carries one;
+        when it does not, the cart plays on the interpreter instead
+        (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware"), and
+        the fit check sizes against main.wasm itself with the INTERPRETED
+        rule -- its pool is a different (measured) shape, and its module file
+        is never freed back to the linear memory the way an AOT load's is
+        (native/moy_wasm/README.md, "The interpreter tier") -- rather than
+        skipping a cart with no matching module, or sizing it as AOT would."""
         pages = cart.get("memory")
         path = cart.get("path")
         if not pages or not path:
@@ -854,16 +857,21 @@ class WasmRuntime:
         def _size(p):
             return gate(lambda: os.stat(p)[6]) if gate is not None else os.stat(p)[6]
 
+        interp = False
         try:
             size = _size(module)
         except OSError:
+            interp = True
             try:
                 size = _size(path + "/" + main)
             except OSError:
                 return None
         if not size:
             return None
-        return _moy_wasm.footprint(min(int(pages), _MAX_PAGES) * 65536, size)
+        memory = min(int(pages), _MAX_PAGES) * 65536
+        if interp:
+            return _moy_wasm.interp_footprint(memory, size)
+        return _moy_wasm.footprint(memory, size)
 
     def memory(self):
         """(free, largest block) of PSRAM, the engine's own report."""

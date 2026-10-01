@@ -252,6 +252,8 @@ def _lib():
             _U64P = ctypes.POINTER(ctypes.c_uint64)
             d.hw_footprint.argtypes = [ctypes.c_uint64, ctypes.c_uint64, _U64P, _U64P]
             d.hw_footprint.restype = None
+            d.hw_interp_footprint.argtypes = [ctypes.c_uint64, ctypes.c_uint64, _U64P, _U64P]
+            d.hw_interp_footprint.restype = None
             if not d.hw_runtime():
                 _WHY[0] = "WAMR did not initialise"
                 _LIB[0] = False
@@ -271,6 +273,20 @@ def footprint(memory, module_len):
     total, block = ctypes.c_uint64(0), ctypes.c_uint64(0)
     d.hw_footprint(int(memory), int(module_len), ctypes.byref(total),
                    ctypes.byref(block))
+    return total.value, block.value
+
+
+def interp_footprint(memory, module_len):
+    """`footprint`'s twin for a session with no AOT module -- the one the
+    host always runs by (`wasm_host.WasmHostRuntime`): the module file is
+    never freed back to the linear memory, so the two are separate,
+    simultaneous allocations over the interpreter's own (smaller) pool."""
+    d = _lib()
+    if d is None:
+        raise RuntimeError("no host wasm binding (%s)" % (why_unavailable() or "?"))
+    total, block = ctypes.c_uint64(0), ctypes.c_uint64(0)
+    d.hw_interp_footprint(int(memory), int(module_len), ctypes.byref(total),
+                          ctypes.byref(block))
     return total.value, block.value
 
 

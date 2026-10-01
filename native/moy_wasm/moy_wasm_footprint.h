@@ -46,6 +46,28 @@ static inline uint64_t moy_wasm_pool_bytes(uint64_t module_len)
     return MOY_WASM_POOL_BYTES + module_len / MOY_WASM_POOL_SHARE;
 }
 
+// The runtime pool for an INTERPRETED session (main.wasm, no AOT module for
+// this console): its own, smaller rule -- the classic interpreter's load
+// keeps the whole parsed module (every function's bytecode, the loader's
+// per-function block-address cache) in the pool for the run's life, but that
+// shape measures SMALLER than AOT's relocation and symbol tables, which the
+// rule above is sized for and an interpreted session never builds. The base
+// and the share below clear the hello cart, Jet Teapot and ESP 88's measured
+// `pool_peak` (moy_wasm.start(path, "_init", pool=<big>), a T-Deck and a
+// Waveshare P4, 2026-10-01) with 1.4-2.5x margin; the peaks themselves are
+// #158's, not restated here.
+#ifndef MOY_WASM_INTERP_POOL_BYTES
+#define MOY_WASM_INTERP_POOL_BYTES (32 * 1024)
+#endif
+#ifndef MOY_WASM_INTERP_POOL_SHARE
+#define MOY_WASM_INTERP_POOL_SHARE 6
+#endif
+
+static inline uint64_t moy_wasm_interp_pool_bytes(uint64_t module_len)
+{
+    return MOY_WASM_INTERP_POOL_BYTES + module_len / MOY_WASM_INTERP_POOL_SHARE;
+}
+
 // The free block the heap needs to serve an allocation of `n` bytes: TLSF
 // rounds a request up to its size class's boundary (a thirty-second of the
 // request) before it looks, and the mapping carries a header.
@@ -78,6 +100,25 @@ static inline void moy_wasm_footprint(uint64_t memory, uint64_t module_len,
     uint64_t big = file > pool ? file : pool;
     *total = file + pool + module_len + (MOY_WASM_STACK_PSRAM ? MOY_WASM_STACK_BYTES : 0);
     *block = moy_wasm_heap_block(big > module_len ? big : module_len);
+}
+
+// A load's footprint for an INTERPRETED session (main.wasm, no module for
+// this console): unlike AOT's, the file is never freed back to the linear
+// memory -- the classic interpreter walks bytecode out of it for the run's
+// life (README.md's "A cart's module file is gone before its memory is
+// allocated" is true for AOT, not this) -- so the file's block and the
+// linear memory are two separate allocations, live together, on top of the
+// interpreter's own (smaller) pool.
+static inline void moy_wasm_interp_footprint(uint64_t memory, uint64_t module_len,
+                                             uint64_t *total, uint64_t *block)
+{
+    uint64_t file = moy_wasm_file_block(memory, module_len);
+    uint64_t mem = memory ? moy_wasm_heap_block(memory) : 0;
+    uint64_t pool = moy_wasm_interp_pool_bytes(module_len);
+    uint64_t big = file > mem ? file : mem;
+    big = big > pool ? big : pool;
+    *total = file + mem + pool + (MOY_WASM_STACK_PSRAM ? MOY_WASM_STACK_BYTES : 0);
+    *block = moy_wasm_heap_block(big);
 }
 
 #endif

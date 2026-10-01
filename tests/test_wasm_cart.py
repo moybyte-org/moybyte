@@ -566,7 +566,10 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     open_cart(ws, "Huge Wasm")
     p = ws.player
     assert p.notice is not None and p.notice == p.cart_error
-    assert p.notice == ("Huge Wasm needs 41.6 MB of memory to run. This "
+    # The host always interprets (there is no AOT tier on it), so this is the
+    # interpreted rule's number: the module file is never reused for the
+    # linear memory, so a 40 MB declaration holds two ~41 MB blocks at once.
+    assert p.notice == ("Huge Wasm needs 82.6 MB of memory to run. This "
                         "console has 32.0 MB free."), p.notice
     assert p._lua is None and p._update is None and p._draw is None
     assert not ws.wm.top_is("menu"), "a notice threw into the Editor"

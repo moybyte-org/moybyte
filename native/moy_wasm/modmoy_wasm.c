@@ -880,7 +880,12 @@ static void *sess_thread(void *arg)
     wasm_exec_env_t env = NULL;
     s->thread = xTaskGetCurrentTaskHandle();
 
-    size_t pool_size = pool_bytes(s->file_len);
+    // The interpreter's own, smaller rule when there is no AOT module for
+    // this console (moy_wasm_footprint.h's "The interpreter tier"): the AOT
+    // rule above is sized for relocations and symbol tables a main.wasm
+    // session never builds.
+    size_t pool_size = s->interp ? (size_t)moy_wasm_interp_pool_bytes(s->file_len)
+                                 : pool_bytes(s->file_len);
     uint8_t *pool = heap_caps_malloc(pool_size, PSRAM_CAPS);
     if (!pool) {
         rc = sess_fail(s, OUT_OF_MEMORY, "no PSRAM for the runtime pool");
@@ -1199,6 +1204,25 @@ static mp_obj_t mod_footprint(mp_obj_t memory_in, mp_obj_t module_in)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_footprint_obj, mod_footprint);
 
+// interp_footprint(memory, module_bytes) -> (total, block): footprint()'s
+// twin for a session with no AOT module for this console (moy_wasm_session's
+// `interp`): the module file is never freed back to the linear memory, so
+// the two are separate, simultaneous allocations over the interpreter's own
+// pool (moy_wasm_footprint.h's `moy_wasm_interp_footprint`).
+static mp_obj_t mod_interp_footprint(mp_obj_t memory_in, mp_obj_t module_in)
+{
+    mp_int_t memory = mp_obj_get_int(memory_in);
+    mp_int_t module = mp_obj_get_int(module_in);
+    if (memory < 0 || module < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("sizes must not be negative"));
+    }
+    uint64_t total, block;
+    moy_wasm_interp_footprint((uint64_t)memory, (uint64_t)module, &total, &block);
+    mp_obj_t t[2] = { mp_obj_new_int_from_ull(total), mp_obj_new_int_from_ull(block) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_interp_footprint_obj, mod_interp_footprint);
+
 // mem() -> (internal_free, internal_largest, internal_min_since_boot,
 //           psram_free, psram_largest)
 static mp_obj_t mod_mem(void)
@@ -1253,6 +1277,7 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mod_mem_obj) },
     { MP_ROM_QSTR(MP_QSTR_lanes), MP_ROM_PTR(&mod_lanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_footprint), MP_ROM_PTR(&mod_footprint_obj) },
+    { MP_ROM_QSTR(MP_QSTR_interp_footprint), MP_ROM_PTR(&mod_interp_footprint_obj) },
     // The key tail this build wants (after the wasm line), the compiled-code
     // format version and the fork commit the engine was vendored from
     // (diagnostic only -- FORK plays no part in the key since 2026-09-30, ESP
@@ -1261,8 +1286,11 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_FORMAT), MP_ROM_PTR(&mod_format_obj) },
     { MP_ROM_QSTR(MP_QSTR_FORK), MP_ROM_PTR(&mod_fork_obj) },
     { MP_ROM_QSTR(MP_QSTR_STACK), MP_ROM_PTR(&mod_stack_obj) },
-    // The runtime pool's base size; a module adds a share of its own.
+    // The runtime pool's base size; a module adds a share of its own. An
+    // interpreted session (no module for this console) uses its own,
+    // smaller base instead (moy_wasm_interp_pool_bytes).
     { MP_ROM_QSTR(MP_QSTR_POOL), MP_ROM_INT(MOY_WASM_POOL_BYTES) },
+    { MP_ROM_QSTR(MP_QSTR_INTERP_POOL), MP_ROM_INT(MOY_WASM_INTERP_POOL_BYTES) },
     // The chip the key's block is for: the name a cart's compiled module
     // carries beside its main.wasm (tools/wasm_cart.py's aot_name).
     { MP_ROM_QSTR(MP_QSTR_CHIP), MP_ROM_PTR(&mod_chip_obj) },

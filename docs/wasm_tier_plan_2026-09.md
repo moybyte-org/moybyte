@@ -158,7 +158,17 @@ the decisions below record what they changed.
     with a short system notice by cause (`runtime/console_notices.py`'s
     `_draw_notice`, the "MOYBYTE UPDATED" banner, never the achievement
     toast, and never the blocking notice panel -- the cart plays, just
-    slower).
+    slower). **Its pool is sized by its own rule, measured against AOT's
+    assumption of one** (owner, 2026-10-01): the engine's pool was sized for
+    an AOT load alone, so an interpreted session's -- a bigger, differently
+    shaped one, by what the classic interpreter actually keeps resident --
+    either took the wrong amount of PSRAM or printed a fit notice with no
+    relation to the real shortfall; `moy_wasm_footprint.h`'s
+    `moy_wasm_interp_pool_bytes`/`moy_wasm_interp_footprint` is the rule, from
+    measured `pool_peak`s re-affirming classic over fast as the shipping
+    choice. The fast interpreter was re-measured once at that same pass under
+    a pool sized to load, confirming the slowdown is the reason it stays off,
+    not a memory one; numbers for both are #158's.
 
 ## The phases
 

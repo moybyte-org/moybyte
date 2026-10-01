@@ -140,6 +140,14 @@ void hw_footprint(uint64_t memory, uint64_t module_len, uint64_t *total,
     moy_wasm_footprint(memory, module_len, total, block);
 }
 
+/* interp_footprint's twin: the host always interprets a cart's own main.wasm
+ * (there is no AOT tier here), so this is the one WasmHostRuntime sizes by. */
+void hw_interp_footprint(uint64_t memory, uint64_t module_len, uint64_t *total,
+                         uint64_t *block)
+{
+    moy_wasm_interp_footprint(memory, module_len, total, block);
+}
+
 /* 1 when WAMR is up with the import table registered -- once per process. */
 int hw_runtime(void)
 {

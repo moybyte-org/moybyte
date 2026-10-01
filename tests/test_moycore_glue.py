@@ -1946,16 +1946,24 @@ def test_the_runtimes_map_names_what_the_build_carries():
 
 
 class _Engine:
-    """moy_wasm's two reports: `footprint` records what it was asked."""
+    """moy_wasm's reports: `footprint`/`interp_footprint` record what each
+    was asked -- the AOT and the interpreted rule are two different engine
+    calls (device/moycore_glue.WasmRuntime.footprint picks between them)."""
 
     def __init__(self, world, free=(2_900_000, 1_900_000)):
         self.asked = []
+        self.interp_asked = []
         self.free = free
         world.mod._moy_wasm.footprint = self._footprint
+        world.mod._moy_wasm.interp_footprint = self._interp_footprint
         world.mod._moy_wasm.mem = lambda: (90_000, 50_000, 40_000) + self.free
 
     def _footprint(self, memory, module):
         self.asked.append((memory, module))
+        return memory + module, memory
+
+    def _interp_footprint(self, memory, module):
+        self.interp_asked.append((memory, module))
         return memory + module, memory
 
 
@@ -1998,15 +2006,17 @@ def test_a_declaration_past_any_board_is_asked_about_capped_not_overflowed(tmp_p
 def test_no_module_for_this_chip_sizes_against_main_wasm_instead(tmp_path):
     """No module for this chip: the cart plays on the interpreter instead of
     refusing (docs/wasm_tier_plan_2026-09.md, "A cart survives its
-    firmware"), so the fit check sizes against main.wasm itself -- still a
-    real file, still a real report -- rather than giving up."""
+    firmware"), so the fit check sizes against main.wasm itself, through the
+    INTERPRETED rule (a real file, a real report, never the AOT one) rather
+    than giving up."""
     cart, main = _compiled(tmp_path, chips=("esp32p4",))
     world = _wasm_world("esp32s3")
     try:
         engine = _Engine(world)
         rt = world.mod.make_wasm_runtime(FakeWs())
         assert rt.footprint(cart) == (3 * 65536 + os.path.getsize(main), 3 * 65536)
-        assert engine.asked == [(3 * 65536, os.path.getsize(main))]
+        assert engine.interp_asked == [(3 * 65536, os.path.getsize(main))]
+        assert engine.asked == []
     finally:
         world.close()
 

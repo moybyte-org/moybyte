@@ -74,7 +74,12 @@ class WasmHostRuntime:
 
     def footprint(self, cart):
         """(total, block) by the boards' sizing, the host's module being
-        the cart's own main.wasm; None with nothing to measure."""
+        the cart's own main.wasm; None with nothing to measure.
+
+        The host always interprets (there is no AOT tier here -- "How a host
+        EXECUTES a module is host policy", and this one's policy is WAMR's
+        interpreter on every cart), so it sizes by the INTERPRETED rule, not
+        the AOT one a board uses only when it has a matching module."""
         import os
         from runtime import wasm_binding
         pages = cart.get("memory")
@@ -85,7 +90,7 @@ class WasmHostRuntime:
             size = os.path.getsize(os.path.join(path, cart.get("main", "main.wasm")))
         except OSError:
             return None
-        return wasm_binding.footprint(int(pages) * 65536, size)
+        return wasm_binding.interp_footprint(int(pages) * 65536, size)
 
     def memory(self):
         return MEMORY_LIMIT, MEMORY_LIMIT
