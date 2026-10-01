@@ -186,6 +186,54 @@ def make_host_wifi(store=None, root=None):
     return HostWifi(store, root)
 
 
+class _HostResponse:
+    def __init__(self, resp, status, length):
+        self._r = resp
+        self.status = status
+        self.length = length
+
+    def readinto(self, buf):
+        return self._r.readinto(buf) if self._r is not None else 0
+
+    def close(self):
+        r, self._r = self._r, None
+        if r is not None:
+            r.close()
+
+
+class HostCartNet:
+    """The network Get Carts fetches through on the host (#124):
+    `runtime/cart_index.py`'s transport over urllib, which follows redirects
+    and checks certificates.
+    The board's twin is device/cart_net.py; both answer `online()` and
+    `open(url)` -> status / length / readinto / close. The PC is already on a
+    network, so `online()` has nothing to dial."""
+
+    def __init__(self, timeout=30):
+        self.timeout = timeout
+
+    def online(self):
+        return True
+
+    def open(self, url):
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "moybyte-carts"})
+        try:
+            r = urllib.request.urlopen(req, timeout=self.timeout)
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            return _HostResponse(None, exc.code, None)
+        length = r.headers.get("Content-Length")
+        return _HostResponse(r, r.status, int(length) if length else None)
+
+
+def make_host_cart_net():
+    """Live-sim factory for Get Carts' network (simulate_desktop wires it;
+    tests wire a transport over their own local server, or none)."""
+    return HostCartNet()
+
+
 _SEED_PRESERVE = ("config.json", "pmem.json")   # the kid's tuning + saves, kept across a re-seed
 
 

@@ -525,6 +525,12 @@ The partition table is byte-for-byte the deleted fork build's, so boards that
 took their last update from it install this build over plain OTA."""
 
 [[modules.device.group]]
+files = ["cart_net.py"]
+why = """
+Get Carts' network (#124): the app's transport for indexes and carts, over
+moy_ota's HTTP client and its wait for the link."""
+
+[[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]
 why = """
 STAGE 6. The socket/HTTP transport core that survived the streaming sunset,

@@ -702,6 +702,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self._updater = None
         self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
+        # The network Get Carts fetches carts through (#124, runtime/cart_index.py):
+        # `online()` and `open(url)`, injected by a board (device/cart_net.py)
+        # and by the live simulator (host_app.HostCartNet). None elsewhere --
+        # the app then says this console has no way to fetch.
+        self.cart_net = None
         # Serve the web console FROM this console (moycore plan 3.4 pull half):
         # injected by the device (moy_webhost.WebHost); None on the host and on a
         # build without it, which is what makes the Settings row appear only where
@@ -4105,8 +4110,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         Idempotent per tag. The holders: "web" (wasm mode, released when its
         socket actually closes), "update" (the online update screen), "settings"
         (the WIFI panel), "cart" (a run with the "network" permission), "link"
-        (a match). A new consumer of the network takes a tag here and releases
-        it on its way out, or the radio never goes off again."""
+        (a match), "carts" (the Get Carts app while it fetches). A new consumer
+        of the network takes a tag here and releases it on its way out, or the
+        radio never goes off again."""
         w = self.wifi
         if w is None:
             return False

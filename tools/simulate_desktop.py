@@ -345,6 +345,9 @@ def main():
         # Live run -> report the desktop's REAL WiFi connection/IP (your PC is online),
         # so network features test against real Python sockets. Headless keeps FakeWifi.
         ws.wifi = host_app.make_host_wifi(host_app.moy_carts, ws.carts_root)
+        # Get Carts fetches from the live indexes, or from the ones an
+        # `indexes.json` beside the carts folder names (a LAN mirror).
+        ws.cart_net = host_app.make_host_cart_net()
     # The scripted demo tour drives no gameplay input, so default it to autoplay
     # (so the GIF is lively); a live, interactive session defaults to PLAY.
     autoplay = args.autoplay if args.autoplay is not None else args.demo

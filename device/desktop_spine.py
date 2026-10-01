@@ -263,6 +263,13 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
             ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
         except Exception as exc:  # noqa: BLE001
             log("boot", "OTA wifi wiring failed: %s" % exc)
+    # The network Get Carts fetches indexes and carts through (#124), over the
+    # OTA's HTTP client; the app takes its own radio lease.
+    try:
+        from cart_net import make_cart_net
+        ws.cart_net = make_cart_net(ws.wifi, autoconnect_wifi)
+    except Exception as exc:  # noqa: BLE001 -- no store network is a notice in the app
+        log("boot", "Get Carts network unavailable: %s" % exc)
     if c6_updater is not None and ws.updater is not None:
         # The companion radio's own updater (#7/#58): Settings -> UPGRADE C6
         # RADIO. Failure is a missing Settings row, never a boot failure.

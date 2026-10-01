@@ -130,10 +130,13 @@ the decisions below record what they changed.
     exactly this (quoted in `native/moy_wasm/README.md`'s "A cart's
     session"), so the spec needs no change. Off a console, the cart is
     fully portable.
-  - **Push and install copy `main.wasm` plus only the module matching the
-    target console**; a cart with none gets one compiled on the spot,
-    unsigned (`tools/push_cart.py`'s `compiled_module` already did this for
-    push; moy-spec's `moy install` does the same).
+  - **A console takes `main.wasm` plus only the module matching it.** A push
+    compiles one on the spot, unsigned, for a cart with none
+    (`tools/push_cart.py`'s `compiled_module`); the Get Carts app installs
+    only this console's module out of a release (`runtime/cart_index.py`,
+    #124), and with none the cart plays on the interpreter. moy-spec's `moy
+    install` writes every module, because a PC does not know which console
+    the card goes into.
   - **On the console the cart folder is self-contained.** A console of the
     same chip and format takes its module as it is; any other console runs
     the cart on the interpreter until it gets its own. Nothing is evicted --
@@ -235,10 +238,13 @@ compiled cart with nothing to warn about. A cart author's loop is moy-spec's:
 rebuilding on save (COMPILED.md), and `tools/push_cart.py` compiles the
 module a board needs when a cart has none.
 
-### Phase 5 — distribution (later)
+### Phase 5 — distribution
 
-- The store serves signed per-architecture modules beside the canonical
-  `.wasm`, keyed by the full key, with an on-device cache directory.
+- The carts repositories publish each compiled cart's signed per-chip
+  modules beside `main.wasm` in its release asset, and a console's Get Carts
+  app (#124) installs `main.wasm` with the one module named for its chip and
+  format; an update rebuilds that set when the index lists a module the
+  installed copy lacks.
 - Compiling in the cloud so a cart can be written on the device alone is a
   separate proposal on top of this.
 

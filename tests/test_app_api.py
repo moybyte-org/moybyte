@@ -25,7 +25,7 @@ def test_builtin_apps_are_registered(tmp_path):
     ws = _ws(tmp_path)
     kinds = [app.id for app, _t in ws._apps]
     assert kinds == ["artwork", "appearance", "storybook",
-                     "files", "calc"]
+                     "files", "calc", "getcarts"]
     for kind in kinds:
         assert ws._content_layers[kind] is not None       # router wired
     assert ws.app_min_size("artwork") == (310, 230)       # registered minimum
@@ -182,7 +182,7 @@ import pytest
 _DT = 1.0 / 30.0
 _MAX_FRAMES = 6
 _SHIPPED_APPS = ("artwork", "appearance", "storybook",
-                 "files", "calc")
+                 "files", "calc", "getcarts")
 
 
 class _NakedApp:

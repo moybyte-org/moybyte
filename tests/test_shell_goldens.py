@@ -135,6 +135,7 @@ from pathlib import Path
 
 import pytest
 
+from cart_store_fixtures import GPL_URL, MIT_URL, MemNet, snapshot
 from ws_helpers import open_cart
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -182,7 +183,7 @@ GOLDEN_EXCLUDE = {}
 # test_every_registered_app_is_covered), so adding a tab or an app without
 # adding its golden is a red test rather than a silent coverage hole.
 TABS = ("cards", "blocks", "code", "paint", "map", "scene", "music")
-APPS = ("artwork", "appearance", "storybook", "files", "calc")
+APPS = ("artwork", "appearance", "storybook", "files", "calc", "getcarts")
 
 # Apps that are CARTS, not registered layers (#181): rendered by RUNNING them,
 # so what these hash is the app bar over a cart's own 320x240 raster, composited
@@ -381,8 +382,10 @@ def _surface_plan(ws, cfg):
             ws.set_menu_view(tab)
         plan.append(("editor_" + tab, enter))
     for app in APPS:
-        plan.append(("app_" + app,
-                     lambda app=app: ws.open_app(ws._apps_by_id[app])))
+        enter = (lambda app=app: ws.open_app(ws._apps_by_id[app]))
+        if app == "getcarts":
+            enter = _open_get_carts(ws)
+        plan.append(("app_" + app, enter))
     for surface, title in APP_CARTS:
         plan.append(("app_" + surface,
                      lambda title=title: open_cart(ws, title)))
@@ -415,6 +418,20 @@ def _surface_plan(ws, cfg):
     plan.append(("web_console", park))
     plan.append(("web_console_address", park_revealed))
     return plan
+
+
+def _open_get_carts(ws):
+    """Get Carts over the two live indexes' snapshots (tests/fixtures/carts)
+    through an in-memory transport, so its golden is the LIST a kid sees on a
+    fresh console rather than the no-network notice. The store's free space is
+    the one machine-dependent number on that screen, so it is pinned."""
+    def enter():
+        ws.cart_net = MemNet({GPL_URL: snapshot("gpl-index.json"),
+                              MIT_URL: snapshot("mit-index.json")})
+        app = ws._apps_by_id["getcarts"]
+        app._inst.free = lambda: (64 * 1048576, 4096)
+        ws.open_app(app)
+    return enter
 
 
 def surface_names(config_name):

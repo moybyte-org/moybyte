@@ -34,6 +34,7 @@ cart's manifest permissions rather than on a class constant.
     ctx.wallpaper   the desktop backdrop capability (Appearance + Paint)
     ctx.artwork     the ArtworkService capability handle (Paint's model)
     ctx.clipboard   the system cut/copy/paste buffer (#132)
+    ctx.install     carts from outside: the network, its lease, the store (#124)
     ctx.shell       THE ESCAPE HATCH -- see below
 
 `ctx.files` and `ctx.carts` are deliberately two roles and not one. Apps use
@@ -100,7 +101,7 @@ NO_STORE = _NoStore()
 # The complete role vocabulary. `AppContext` refuses an unknown NEED, so a typo
 # in a NEEDS tuple fails at construction instead of at the first draw.
 ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
-         "notify", "wallpaper", "artwork", "clipboard", "shell")
+         "notify", "wallpaper", "artwork", "clipboard", "install", "shell")
 
 
 # -- damage ------------------------------------------------------------------
@@ -122,6 +123,13 @@ class Damage:
     def all(self):
         """Repaint the whole system surface next frame."""
         self.__ws._dirty = True
+
+    def again(self):
+        """Ask for one more frame from WITHIN `draw()`, where `all()` is lost
+        (the frame clears the flag after the draw). An app that works a slice
+        per frame -- an install's download -- keeps the frames coming this
+        way."""
+        self.__ws.request_frame()
 
 
 # -- surface -----------------------------------------------------------------
@@ -837,6 +845,83 @@ class WallpaperRole(_StoreRole):
         return ws.carts_store.save_artwork(blob, ws.carts_root)
 
 
+# -- the cart installer -----------------------------------------------------
+
+class Installer:
+    """Carts from outside (#124): the network a store fetches with, the radio
+    lease it fetches under, and the store session it installs inside.
+    `runtime/cart_index.py` does the installing; this is what it is handed.
+
+    A role of its own and not a widening of `carts`: authoring a project and
+    pulling a stranger's cart off the internet are different grants, and one
+    app holds this one. Never a cart's (`system_api.NEVER_GRANTED`). Unlike the
+    storage roles its verbs raise -- the installer drives them a slice per
+    frame and turns every failure into a screen of its own."""
+
+    def __init__(self, ws):
+        self.__ws = ws
+        self.__store = ws.store
+
+    def net(self):
+        """The transport (`online()`, `open(url)`), or None where this console
+        has no way to fetch."""
+        return self.__ws.cart_net
+
+    def hold(self):
+        """Take the radio under the "carts" lease. True when it came up."""
+        return self.__ws.wifi_hold("carts")
+
+    def release(self):
+        self.__ws.wifi_release("carts")
+
+    def root(self):
+        return self.__ws.carts_root
+
+    def writable(self):
+        return self.__store.writable()
+
+    def session(self, fn):
+        """`fn()` inside ONE store session (the SD gate on the T-Deck)."""
+        return self.__store.call(fn)
+
+    def rescan(self):
+        """Re-read the store, so the shelf shows what came and went."""
+        self.__ws.carts.rescan()
+
+    def free(self):
+        """`(free bytes, block size)` of the store the carts live on, or None
+        when it cannot say. Call inside `session` (on the T-Deck the card's
+        free count is read off the card)."""
+        try:
+            import os
+            st = os.statvfs(self.__ws.carts_root)
+        except (ImportError, OSError, AttributeError, TypeError):
+            return None
+        return st[0] * st[4], st[0]
+
+    def find(self, folder):
+        """The scanned cart whose `.moy` folder is `folder`, or None."""
+        tail = "/" + folder
+        for c in self.__ws.carts.all:
+            if str(c.get("path") or "").replace("\\", "/").endswith(tail):
+                return c
+        return None
+
+    def runtimes(self):
+        """The cart runtimes this build carries ("lua", "wasm")."""
+        return tuple(self.__ws.runtimes)
+
+    def chip(self):
+        """`(chip, compiled-code format)` of this console's compiled tier --
+        what its modules are named for -- or `(None, None)` where there is
+        none (the host)."""
+        try:
+            import moy_wasm
+            return moy_wasm.CHIP, moy_wasm.FORMAT
+        except (ImportError, AttributeError):
+            return None, None
+
+
 # -- the context itself ------------------------------------------------------
 
 class AppContext:
@@ -881,5 +966,7 @@ class AppContext:
             # and the consumers PASS it on (CodeEditor takes `clip=`), so a
             # wrapper would have to be unwrapped again.
             self.clipboard = getattr(ws, "clipboard", None)
+        if "install" in needs:
+            self.install = Installer(ws)
         if "shell" in needs:
             self.shell = ws

@@ -7,7 +7,8 @@ off unless something holds it. `Workstation.wifi_hold(tag)` powers it up and
 the last `wifi_release(tag)` powers it down (radio_off), so a console on a shelf
 spends nothing on WiFi. The holders are the web console, the online update
 screen, the Settings WIFI panel, a cart with the "network" permission for the
-length of its run, and the ESP-NOW link for a match. What persists is the
+length of its run, the ESP-NOW link for a match, and the Get Carts app while it
+fetches. What persists is the
 CREDENTIAL: the moy_carts wifi.json store, which autoconnect_wifi() replays when
 a holder needs the link.
 

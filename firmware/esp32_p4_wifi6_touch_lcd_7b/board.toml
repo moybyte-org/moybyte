@@ -473,6 +473,12 @@ VFS) and its board identity comes from the generated `_ota_build.py`. Verified
 end to end on this board's glass 2026-08-02."""
 
 [[modules.device.group]]
+files = ["cart_net.py"]
+why = """
+Get Carts' network (#124): the app's transport for indexes and carts, over
+moy_ota's HTTP client and its wait for the link."""
+
+[[modules.device.group]]
 files = ["moy_c6_update.py"]
 why = """
 The C6 radio's own updater (#7/#58): Settings -> UPGRADE C6 RADIO downloads

@@ -117,6 +117,8 @@ SERVICES = {
                   "UPGRADE C6 RADIO (#7/#58): downloads the shimmed slave "
                   "image and streams it over SDIO",
     "webhost": "the #192 board-served web console (Settings -> WEB CONSOLE)",
+    "cart_net": "the #124 network the Get Carts app fetches indexes and carts "
+                "through",
     "reboot_hook": "the sysmenu Reboot row's real reset",
     "net": "the #65 multiplayer transport behind net.* in a cart",
     "gpio": "the #9 physical-pin backend behind pin_write/pin_read in a cart",
@@ -150,6 +152,7 @@ WIRING = {
         "updater": INJECTED,
         "c6_updater": "its radio is the S3's own silicon -- there is no co-processor to update. The row becomes INJECTED the day a board grows a companion radio chip",
         "webhost": INJECTED,
+        "cart_net": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "no pins to give. This board's GPIOs are spent -- panel, SD,\n"
@@ -186,6 +189,7 @@ WIRING = {
         "updater": INJECTED,
         "c6_updater": INJECTED,
         "webhost": INJECTED,
+        "cart_net": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
@@ -220,6 +224,7 @@ WIRING = {
         "updater": INJECTED,
         "c6_updater": INJECTED,
         "webhost": INJECTED,
+        "cart_net": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
@@ -254,6 +259,7 @@ WIRING = {
         "c6_updater": "same as the T-Deck: this S3's radio is on-die, there "
                       "is no co-processor to flash",
         "webhost": INJECTED,
+        "cart_net": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "same as the T-Deck: a smart display spends its pins on the\n"
@@ -290,6 +296,10 @@ WIRING = {
         "webhost": "the host IS the machine the browser runs on -- serving the "
                    "wasm console to itself has no user. `tools/simulate_desktop"
                    ".py` and firmware/web_runner cover that ground",
+        "cart_net": "build_workstation is what tests build, and a test never "
+                    "reaches the internet: tools/simulate_desktop.py wires "
+                    "host_app.HostCartNet for a live run, tests/test_cart_store.py "
+                    "a transport over its own server",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
         "net": INJECTED,
@@ -340,6 +350,9 @@ WIRING = {
                       "as the updater row, one level down",
         "webhost": "this build is what a webhost SERVES. A page hosting itself "
                    "is the same circle the host row describes",
+        "cart_net": "a page fetches through the browser, not a socket the "
+                    "console owns, and the web roster leaves Get Carts out (its "
+                    "manifest targets host and device)",
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
                "a sim fake for a solo desktop and would mean nothing here",
