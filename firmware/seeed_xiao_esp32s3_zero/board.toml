@@ -370,3 +370,11 @@ runs on). This board runs no cart in any language -- a cart paired with it runs
 in the browser, whose own engine executes a wasm cart -- so the runtime would
 be flash spent in both OTA slots for code nothing calls."""
 
+[[native.shared.deny]]
+module = "moy_serial"
+why = """
+The console's stdin read from C in blocks, and its UART rate: the dev channel's
+`recv`, which is how a cart reaches a console board over serial. This board has
+no dev channel -- it speaks a bare REPL -- and its carts arrive over the network
+from the browser console, so nothing here would call it."""
+

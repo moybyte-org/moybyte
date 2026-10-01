@@ -81,10 +81,19 @@ moybyte_patch_gc_run_hints
 # timing-tuner patch (#169); this is an ESP32-P4 and the file does not exist
 # in its build.
 
-# DECLINED moybyte_patch_stdin_ring -- the Waveshare's 4 KB stdin ring. Its
-# serial is a UART; this board's is the SoC's USB-Serial/JTAG, whose ISR
-# takes only what the ring has room for while the USB host waits with the
-# rest, so a heap collection costs it throughput and never a byte.
+# DECLINED moybyte_patch_stdin_ring -- the Waveshare's 4 KB stdin ring and its
+# UART RX wake. Its serial is a UART; this board's is the SoC's
+# USB-Serial/JTAG, whose ISR takes only what the ring has room for while the
+# USB host waits with the rest, so a heap collection costs it throughput and
+# never a byte, and which already wakes the reader.
+
+# LittleFS sized for a flash store: the cart store is this board's internal
+# flash, which the stock sizes program 128 bytes at a time and search for free
+# blocks 256 at a time. tools/patch_lfs_sizes.py carries the measurements.
+moybyte_patch_lfs_sizes
+
+# DECLINED moybyte_patch_sdcard_runs -- machine.SDCard in multi-block runs.
+# This console has no card in play: carts live on the internal flash VFS.
 
 # ---------------------------------------------------------------------------
 # 3) Stage: the shared native modules + the P4 silicon tier (board.toml

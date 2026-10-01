@@ -111,3 +111,9 @@
 // corrupt.
 #define MOY_WASM_STACK_BYTES                (16 * 1024)
 #define MOY_WASM_STACK_PSRAM                (1)
+
+// The console's stdin ring, grown into PSRAM by native/moy_serial on the first
+// `recv`: twice the [serial] window, so the window the host sends on an ack
+// lands while the store writes the last one instead of stalling the USB
+// endpoint at the port's 260 bytes. The module's header says which boards may.
+#define MOY_SERIAL_RING_BYTES               (32768)

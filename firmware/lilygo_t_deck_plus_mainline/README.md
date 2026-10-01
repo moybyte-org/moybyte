@@ -405,7 +405,7 @@ record; the everyday ones:
 | `steady 0\|1` | the tick model's STEADY / FREE knob (#217; `skip`/`gov` decline and name it) |
 | `mem` | a forced collect, then the live/free split |
 | `py <code>` | eval/exec one line against the LIVE console (`ws`, `wm`, `pointer` in scope) |
-| `recv <n> <window> <path>` | take `n` RAW bytes off stdin into `<path>.new`, acking every `window` |
+| `recv <n> <window> [rate=<baud>] <path>` | take `n` RAW bytes off stdin into `<path>.new`, acking every `window` (`rate=` is the Waveshare P4's) |
 | `quit` | leave the desktop for the REPL, cleanly |
 
 **`recv` leaves the line discipline**, and it is the only cart-push transport
@@ -416,12 +416,17 @@ HOST blocks -- real flow control, which is why this board's `[serial] window`
 is far larger than the Waveshare P4's, where the board's ack is the only
 backpressure there is.
 
-The parts that are the same on every board: the payload is read from
-`sys.stdin.buffer` (the TEXT stdin rewrites CR as it goes); the transfer runs
-with `micropython.kbd_intr(-1)`, because `tud_cdc_rx_cb`/`usb_serial_jtag.c`
+The parts that are the same on every board: the payload is read off the
+stdin ring from C in blocks (`native/moy_serial`), never through the TEXT
+stdin, which rewrites CR as it goes; the transfer runs with
+`micropython.kbd_intr(-1)`, because `tud_cdc_rx_cb`/`usb_serial_jtag.c`
 swallow a byte equal to the interrupt char -- and CDC's copy *empties the ring*
-when it hits one; the board hashes the file by READING IT BACK; and a host that
-stops mid-window is abandoned after 5s with the `.new` removed.
+when it hits one; each window is acked before its file write, so the next one
+is on its way while the store writes; the whole transfer is one session of the
+console's storage gate, because this card shares the panel's SPI host; the
+board hashes the file by READING IT BACK; and a host that stops mid-window is
+offered the window back after `RECV_IDLE_MS` and abandoned after
+`RECV_DEAD_WINDOWS` empty ones, with the `.new` removed.
 
 
 ---

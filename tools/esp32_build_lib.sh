@@ -193,14 +193,35 @@ moybyte_patch_gc_run_hints() {
 }
 
 # A 4 KB stdin ring, in the ESP32-P4's TCM, for a board whose serial is a
-# UART. The port's stock ring is 260 bytes and the UART has no flow control, so
-# a heap collection landing while a long line arrives drops bytes with no
-# error. tools/patch_stdin_ring.py is the patch, its sizing and its placement:
-# all-or-nothing, idempotent. A USB-Serial/JTAG board backpressures and
-# declines it.
+# UART, and an RX ISR that wakes the reader. The port's stock ring is 260 bytes
+# and the UART has no flow control, so a heap collection landing while a long
+# line arrives drops bytes with no error; and the stock UART ISR never wakes
+# the MicroPython task, so a reader waiting on the ring sleeps out its tick.
+# tools/patch_stdin_ring.py is the patch, its sizing and its placement:
+# all-or-nothing per file, idempotent. A USB-Serial/JTAG board backpressures,
+# already wakes its reader, and declines it.
 moybyte_patch_stdin_ring() {
   [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_stdin_ring.py" "${MPY_DIR}" || exit 1
+}
+
+# LittleFS's default program size and lookahead, 32 -> 256 each, so a P4's
+# flash store programs 1 KB of a file at a time instead of 128 bytes and walks
+# the filesystem for free blocks an eighth as often. tools/patch_lfs_sizes.py is
+# the patch and the measurements; all-or-nothing, idempotent. Only a board
+# whose cart store is its internal flash takes it.
+moybyte_patch_lfs_sizes() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_lfs_sizes.py" "${MPY_DIR}" || exit 1
+}
+
+# machine.SDCard moves sectors in multi-block runs through an internal DMA
+# bounce, where IDF moves a PSRAM buffer one single-block command per sector.
+# tools/patch_sdcard_runs.py is the patch; all-or-nothing, idempotent. Only a
+# board whose card is machine.SDCard takes it.
+moybyte_patch_sdcard_runs() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_sdcard_runs.py" "${MPY_DIR}" || exit 1
 }
 
 # Split-heap growth reserve. MicroPython's esp32 port grows the Python heap

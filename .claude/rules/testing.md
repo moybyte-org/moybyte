@@ -134,7 +134,10 @@ paths:
     holds a harness line or a whole `recv` window while a heap collection
     stalls the reader, so `_write_line` writes every line in one burst on
     every board; a `[serial]` chunk or window that outgrows the ring brings the
-    drops back, and `tests/test_board_toml.py` pins both under it.
+    drops back, and `tests/test_board_toml.py` pins both under it. Its console
+    is 115200 for every line; only a `recv` payload runs at `[serial]
+    recv_baud`, switched and switched back inside the one command, so a test
+    that talks to the board after a push talks at 115200.
     `SERIAL_LINE_MAX` must fit the harness's `pyexec` chunk lines — at the
     T-Deck's original 96 every P4 upload was silently dropped as noise.
   - **A PERF line exists only under PERF DIAG** (owner call 2026-09-30: kid

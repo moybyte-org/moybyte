@@ -381,11 +381,40 @@ ringbuf_t stdin_ringbuf = {stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 
 """
 
 
-def _mphalport(tmp_path, text=_MPHALPORT_STOCK):
+_UART_STOCK = """\
+// RXFIFO Full interrupt threshold. Set the same as the ESP-IDF UART driver
+#define RXFIFO_FULL_THR (SOC_UART_FIFO_LEN - 8)
+
+void uart_stdout_init(void) {
+    uart_hal_ena_intr_mask(&repl_hal, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
+}
+
+static void IRAM_ATTR uart_irq_handler(void *arg) {
+    uint8_t rbuf[SOC_UART_FIFO_LEN];
+    int len;
+    len = uart_hal_get_rxfifo_len(&repl_hal);
+    uart_hal_read_rxfifo(&repl_hal, rbuf, &len);
+
+    for (int i = 0; i < len; i++) {
+        if (rbuf[i] == mp_interrupt_char) {
+            mp_sched_keyboard_interrupt();
+        } else {
+            // this is an inline function so will be in IRAM
+            ringbuf_put(&stdin_ringbuf, rbuf[i]);
+        }
+    }
+}
+
+#endif // MICROPY_HW_ENABLE_UART_REPL
+"""
+
+
+def _mphalport(tmp_path, text=_MPHALPORT_STOCK, uart=_UART_STOCK):
     p = tmp_path / "ports" / "esp32"
     p.mkdir(parents=True, exist_ok=True)
     f = p / "mphalport.c"
     f.write_text(text, encoding="utf-8")
+    (p / "uart.c").write_text(uart, encoding="utf-8")
     return f
 
 
@@ -408,13 +437,56 @@ def test_the_stdin_ring_patch_sizes_the_array_the_ring_is_built_over(tmp_path):
     assert "{stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 0}" in c
 
 
+def test_the_uart_rx_isr_wakes_the_reader(tmp_path):
+    """The USB-Serial/JTAG ISR notifies the MicroPython task when bytes land
+    and the UART's did not, so a reader waiting on an empty ring slept out
+    every tick. The notify goes after the ring is fed, once per interrupt."""
+    _mphalport(tmp_path)
+    assert _stdin_ring(tmp_path).returncode == 0
+    c = (tmp_path / "ports" / "esp32" / "uart.c").read_text(encoding="utf-8")
+    put = c.index("ringbuf_put(&stdin_ringbuf, rbuf[i]);")
+    wake = c.index("vTaskNotifyGiveFromISR(mp_main_task_handle, &woken);")
+    assert put < wake < c.index("#endif // MICROPY_HW_ENABLE_UART_REPL")
+    assert "portYIELD_FROM_ISR();" in c
+
+
+def test_the_uart_isr_drains_early_and_resets_an_overflowed_fifo(tmp_path):
+    """A payload at megabits leaves the stock threshold 40 us of slack; a
+    quarter-full threshold leaves ~0.5 ms, and an overflow that happens anyway
+    resets the FIFO before it is read, so a lost byte is a short window."""
+    _mphalport(tmp_path)
+    assert _stdin_ring(tmp_path).returncode == 0
+    c = (tmp_path / "ports" / "esp32" / "uart.c").read_text(encoding="utf-8")
+    assert "#define RXFIFO_FULL_THR (SOC_UART_FIFO_LEN / 4)" in c
+    assert "UART_INTR_RXFIFO_TOUT | UART_INTR_RXFIFO_OVF);" in c
+    reset = c.index("uart_ll_rxfifo_rst(repl_hal.dev);")
+    assert reset < c.index("len = uart_hal_get_rxfifo_len(&repl_hal);")
+
+
 def test_the_stdin_ring_patch_is_idempotent_on_a_warm_tree(tmp_path):
     f = _mphalport(tmp_path)
     assert _stdin_ring(tmp_path).returncode == 0
     once = f.read_text(encoding="utf-8")
+    uart = (tmp_path / "ports" / "esp32" / "uart.c").read_text(encoding="utf-8")
     r = _stdin_ring(tmp_path)
     assert r.returncode == 0 and r.stdout.strip() == ""
     assert f.read_text(encoding="utf-8") == once
+    assert (tmp_path / "ports" / "esp32" / "uart.c").read_text(
+        encoding="utf-8") == uart
+
+
+def test_a_tree_with_the_ring_but_not_the_wake_gets_the_wake(tmp_path):
+    """Each file carries its own marker: a build tree that took the ring
+    before the wake existed takes the wake and leaves the ring alone."""
+    f = _mphalport(tmp_path)
+    assert _stdin_ring(tmp_path).returncode == 0
+    ring = f.read_text(encoding="utf-8")
+    (tmp_path / "ports" / "esp32" / "uart.c").write_text(_UART_STOCK,
+                                                         encoding="utf-8")
+    assert _stdin_ring(tmp_path).returncode == 0
+    assert f.read_text(encoding="utf-8") == ring
+    assert "vTaskNotifyGiveFromISR" in (
+        tmp_path / "ports" / "esp32" / "uart.c").read_text(encoding="utf-8")
 
 
 def test_a_stdin_ring_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
@@ -426,6 +498,108 @@ def test_a_stdin_ring_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path)
     assert r.returncode != 0
     assert "did not apply" in r.stderr and "ring array" in r.stderr
     assert f.read_text(encoding="utf-8") == before
+
+
+# -- machine.SDCard in multi-block runs ----------------------------------------
+
+_SDCARD_STOCK = """\
+#include "sdmmc_cmd.h"
+#define _SECTOR_SIZE(self) (self->card.csd.sector_size)
+
+static mp_obj_t machine_sdcard_readblocks(mp_obj_t self_in, mp_obj_t block_num, mp_obj_t buf) {
+    mp_get_buffer_raise(buf, &bufinfo, MP_BUFFER_WRITE);
+    err = sdmmc_read_sectors(&(self->card), bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self));
+    return mp_obj_new_bool(err == ESP_OK);
+}
+
+static mp_obj_t machine_sdcard_writeblocks(mp_obj_t self_in, mp_obj_t block_num, mp_obj_t buf) {
+    mp_get_buffer_raise(buf, &bufinfo, MP_BUFFER_READ);
+    err = sdmmc_write_sectors(&(self->card), bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self));
+    return mp_obj_new_bool(err == ESP_OK);
+}
+"""
+
+
+def _sdcard(tmp_path, text=_SDCARD_STOCK):
+    p = tmp_path / "ports" / "esp32"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "machine_sdcard.c"
+    f.write_text(text, encoding="utf-8")
+    return f, sh("moybyte_patch_sdcard_runs", MPY_DIR=str(tmp_path),
+                 REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_sdcard_patch_routes_both_block_verbs_through_the_runs(tmp_path):
+    """IDF moves a PSRAM buffer one single-block command per sector; both
+    verbs go through the run helper instead, and the helper is defined before
+    the first of them."""
+    f, r = _sdcard(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    assert "sdmmc_read_sectors(&(self->card), bufinfo.buf" not in c
+    assert "sdmmc_write_sectors(&(self->card), bufinfo.buf" not in c
+    helper = c.index("static esp_err_t moybyte_sd_xfer(")
+    assert helper < c.index("moybyte_sd_xfer(&(self->card), bufinfo.buf, "
+                            "mp_obj_get_int(block_num), bufinfo.len / "
+                            "_SECTOR_SIZE(self), false);")
+    assert helper < c.index("_SECTOR_SIZE(self), true);")
+
+
+def test_the_sdcard_patch_is_idempotent_and_refuses_a_changed_line(tmp_path):
+    f, r = _sdcard(tmp_path)
+    once = f.read_text(encoding="utf-8")
+    r = sh("moybyte_patch_sdcard_runs", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    g, r = _sdcard(tmp_path / "b", _SDCARD_STOCK.replace("bufinfo.len /", "n /"))
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert g.read_text(encoding="utf-8") == _SDCARD_STOCK.replace(
+        "bufinfo.len /", "n /")
+
+
+# -- LittleFS's sizes on a flash store ------------------------------------------
+
+_LFS_STOCK = """\
+static const mp_arg_t lfs_make_allowed_args[] = {
+    { MP_QSTR_, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+    { MP_QSTR_readsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} },
+    { MP_QSTR_progsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} },
+    { MP_QSTR_lookahead, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} },
+};
+"""
+
+
+def _lfs(tmp_path, text=_LFS_STOCK):
+    p = tmp_path / "extmod"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "vfs_lfs.c"
+    f.write_text(text, encoding="utf-8")
+    return f, sh("moybyte_patch_lfs_sizes", MPY_DIR=str(tmp_path),
+                 REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_lfs_patch_moves_two_defaults_and_not_the_read_size(tmp_path):
+    """The defaults are the whole change: `_boot.py` mounts the store with no
+    sizes named. The read size stays stock."""
+    f, r = _lfs(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    assert "{ MP_QSTR_progsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 256} }," in c
+    assert "{ MP_QSTR_lookahead, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 256} }," in c
+    assert "{ MP_QSTR_readsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} }," in c
+
+
+def test_the_lfs_patch_is_idempotent_and_refuses_a_changed_line(tmp_path):
+    f, _r = _lfs(tmp_path)
+    once = f.read_text(encoding="utf-8")
+    r = sh("moybyte_patch_lfs_sizes", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    changed = _LFS_STOCK.replace("lookahead, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32}",
+                                 "lookahead, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 64}")
+    g, r = _lfs(tmp_path / "b", changed)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert g.read_text(encoding="utf-8") == changed
 
 
 def test_a_repr_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):

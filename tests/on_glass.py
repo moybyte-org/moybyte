@@ -584,11 +584,11 @@ def wasm_push(board, board_dir):
     ser = board_config.load(board_dir)["serial"]
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     dest = root.rstrip("/") + "/" + WASM_DIR
-    win = pc.raw_window(board, int(ser.get("window") or 4096))
+    link = pc.raw_link(board, ser)
     assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
-    board.pyval("ws._g['_mkdir'](%r)" % dest)
+    board.pyval("ws._g['_mkdirs'](%r)" % [dest])
     for name, local in sorted(mods.items()):
-        pc.push_file_raw(board, local, "%s/%s.aot" % (dest, name), win)
+        pc.push_file_raw(board, local, "%s/%s.aot" % (dest, name), link)
     return {name: "%s/%s.aot" % (dest, name) for name in mods}
 
 
@@ -881,14 +881,13 @@ def _push_folder(board, board_dir, local, dest):
     from tools import board_config
     ser = board_config.load(board_dir)["serial"]
     names = pc.cart_files(local)
-    win = pc.raw_window(board, int(ser.get("window") or 4096))
+    link = pc.raw_link(board, ser)
     assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
-    board.pyval("ws._g['_mkdir'](%r)" % dest)
-    for sub in pc.sub_dirs(names):
-        board.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
+    board.pyval("ws._g['_mkdirs'](%r)"
+                % ([dest] + [dest + "/" + sub for sub in pc.sub_dirs(names)]))
     for name in names:
         pc.push_file_raw(board, os.path.join(local, name), dest + "/" + name,
-                         win)
+                         link)
 
 
 def wasm_carts_push(board, board_dir):
@@ -1420,9 +1419,9 @@ def doom_push(board, board_dir):
 # `recv` meant to arm the upload right after. On a throwaway cart folder,
 # never doom.moy, so an installed Doom is never put at risk here. Pushing the
 # file once (there is nothing on the board under this name, so this is this
-# test's "changed") and once more unchanged exercises both sides; the send is
-# slow by design on the Waveshare P4's UART, whose ack is its only
-# backpressure -- several minutes for 4MB, under a second for the skip.
+# test's "changed") and once more unchanged exercises both sides. The send is
+# the store's pace -- about a minute for 4MB on a P4's flash, seconds on an SD
+# card -- and the skip is one hash on the board.
 BIG_PUSH_NAME = "_bigpush.moy"
 BIG_PUSH_SIZE = 4196020
 
@@ -1452,12 +1451,12 @@ def big_push_skips_when_current_and_sends_when_changed(board, board_dir):
     dest = root.rstrip("/") + "/" + BIG_PUSH_NAME
     file_dest = dest + "/big.bin"
     try:
-        win = pc.raw_window(board, int(ser.get("window") or 4096))
+        link = pc.raw_link(board, ser)
         assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
-        board.pyval("ws._g['_mkdir'](%r)" % dest)
+        board.pyval("ws._g['_mkdirs'](%r)" % [dest])
 
         t0 = time.time()
-        assert pc.push_file_raw(board, path, file_dest, win) is True, (
+        assert pc.push_file_raw(board, path, file_dest, link) is True, (
             "a file with nothing on the board under its name must be sent")
         send_s = time.time() - t0
         want = hashlib.sha256(data).hexdigest()[:12]
@@ -1466,7 +1465,7 @@ def big_push_skips_when_current_and_sends_when_changed(board, board_dir):
         assert got == want, (got, want)
 
         t0 = time.time()
-        assert pc.push_file_raw(board, path, file_dest, win) is False, (
+        assert pc.push_file_raw(board, path, file_dest, link) is False, (
             "an unchanged big file must be skipped, not resent")
         skip_s = time.time() - t0
         assert skip_s < 20, (

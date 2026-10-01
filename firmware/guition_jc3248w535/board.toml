@@ -266,7 +266,10 @@ chunk       = 768
 # ISR only drains what the stdin ring has room for, so the endpoint stalls and
 # the HOST blocks; the window here buys fewer round trips, it is not the safety
 # margin it is on the P4. The ceiling is the board's own RECV_MAX_WINDOW
-# (dev_channel), and the window is also the buffer it allocates.
+# (dev_channel), and the window is also the buffer it allocates. The board acks
+# a window before writing it, and its stdin ring is MOY_SERIAL_RING_BYTES
+# (mpconfigboard.h), twice this, so the next window lands while the card
+# writes the last instead of stalling at the port's 260-byte ring.
 window      = 16384
 
 [monitor]

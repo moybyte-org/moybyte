@@ -92,25 +92,39 @@ UI while watching the glass:
 - `steady 0|1` — A/B the tick model's STEADY / FREE knob (#217; non-persisting)
 - `bt status|scan|forget` — inspect/restart BLE-keyboard discovery or clear its local bond keys (`fast=(rx, drops, queued, peak, enabled)`)
 - `bt trace 0|1` — print raw HID notification bytes, native queue age, and decoded held input state
-- `recv <n> <window> <path>` — take `n` RAW bytes off stdin into `<path>.new` (see below)
+- `recv <n> <window> [rate=<baud>] <path>` — take `n` RAW bytes off stdin into `<path>.new`, the payload at `<baud>` (see below)
 - `quit` — leave the desktop for the REPL
 
 **`recv` is the one command that stops reading lines**, and this board is the
 one it was sized for: everything about its shape is this UART. Stdin here is a
-4 KB ring (`tools/patch_stdin_ring.py`) fed by an ISR with **no flow
+4 KB ring in TCM (`tools/patch_stdin_ring.py`) fed by an ISR with **no flow
 control**, so the host may only have one `window` of bytes in flight and must
-then wait for the board's ack, which is written *after* the file write, when
-nothing is on the wire. `[serial] window` in `board.toml` is **3072** here,
-three quarters of the ring, so a window lands whole however long a heap
-collection stalls the reader; the USB boards' is 16384, because their
-USB-Serial/JTAG backpressures for real. A byte lost anyway is invisible to
-both ends, so the board never completes that window: after `RECV_IDLE_MS` of
-silence it throws the window away and asks for it again (`RECV retry`), and
-after `RECV_RETRIES` it removes the `.new` and prints how far it got. A byte
-that arrives *wrong* is caught by the sha256 the board takes by reading the
-file back. The T-Deck's README carries the rest, which is shared. `recv` is
-the ONLY cart-push transport, so an image without the command answers
-`REMOTE ? recv` and the tool stops with one line saying to flash the board.
+then wait for the board's ack. The board acks a window as soon as it is in the
+buffer and writes it after, so the next window crosses while the flash
+writes; `[serial] window` in `board.toml` is **3072** here, three quarters of
+the ring, so it lands whole however long that write or a heap collection
+stalls the reader. The USB boards' window is 16384, because their
+USB-Serial/JTAG backpressures for real.
+
+The console UART runs at **115200** for every line -- `moy push`, a terminal
+and the boot log all expect it -- and a file bigger than one window crosses at
+`[serial] recv_baud` instead (**2 Mbaud**): `recv ... rate=<baud>` switches the
+UART once `RECV ready` has left, a sync from the host proves the new rate
+before any payload, and the board is back at 115200 the moment the last ack is
+out, where a second sync meets it. A board that does not answer at the rate
+costs the push one file's wait and the rest goes at 115200. The ISR drains the
+FIFO a quarter full, resets it on an overflow and wakes the reader, which
+`moy_serial.readinto` (`native/moy_serial`) runs from C, so the line is not the
+limit at that rate: the flash store's write is.
+
+A byte lost anyway is invisible to both ends, so the board never completes
+that window: after `RECV_IDLE_MS` of silence it throws the window away and asks
+for it again (`RECV retry`), and after `RECV_RETRIES` it removes the `.new` and
+prints how far it got. A byte that arrives *wrong* is caught by the sha256 the
+board takes by reading the file back. The T-Deck's README carries the rest,
+which is shared. `recv` is the ONLY cart-push transport, so an image without
+the command answers `REMOTE ? recv` and the tool stops with one line saying to
+flash the board.
 
 `moy_runtime.run_touch_calibrate()` (REPL-invokable) draws corner targets and
 dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs; the

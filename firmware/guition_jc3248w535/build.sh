@@ -88,6 +88,15 @@ moybyte_patch_psram_retune
 # the ring has room for while the USB host waits with the rest, so a heap
 # collection costs it throughput and never a byte; the internal SRAM stays.
 
+# DECLINED moybyte_patch_lfs_sizes -- LittleFS sized for a flash store. The
+# store is this board's TF card; the internal VFS it falls back to without one
+# keeps the stock sizes, unmeasured here.
+
+# machine.SDCard in multi-block runs: the store is this board's TF card, and
+# IDF writes a PSRAM buffer one single-block command per sector, each waiting
+# out the card's busy time. tools/patch_sdcard_runs.py carries the why.
+moybyte_patch_sdcard_runs
+
 # ---------------------------------------------------------------------------
 # 3) Stage: shared native modules (board.toml [native.shared]) with the web
 #    blob generated into the staged copy, then the shared Python modules

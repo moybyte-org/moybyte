@@ -95,13 +95,14 @@ NATIVE = {
     # STAGED like one, so it is declared like one.
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
-                       "moy_wasm"},
+                       "moy_wasm", "moy_serial"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush along with moy_sd and moy_audio.
     # moy_c6 is the ESP-NOW-over-hosted shim + C6 plumbing (#7, the espnow
     # track -- docs/history/espnow_p4_2026-08.md).
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
-           "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof", "moy_wasm"},
+           "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof", "moy_wasm",
+           "moy_serial"},
     # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
     # four P4 modules are the SILICON tier (native/p4, a second board.toml
     # source) since the day this board became their second consumer -- it
@@ -109,12 +110,12 @@ NATIVE = {
     # through a board define rather than a second panel module.
     "guition-p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_dsi", "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof",
-                   "moy_wasm"},
+                   "moy_wasm", "moy_serial"},
     # The Guition denies moy_sd + moy_audio for now (stage 4/5 of its bring-up,
     # see its board.toml); moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
-                   "moy_flush", "moy_axs", "moy_prof", "moy_wasm"},
+                   "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
     # running on it. `moy_web` is the only shared C module it compiles in, and
     # it is the module that justifies the board having an image at all -- the

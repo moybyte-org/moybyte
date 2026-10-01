@@ -116,6 +116,12 @@ moybyte_setup_idf esp32s3 \
 #    component is the P4's radio (a C6 slave over SDIO); this board's WiFi is
 #    on-die and its build pulls esp_hosted in nowhere.
 #
+# DECLINED moybyte_patch_lfs_sizes -- LittleFS sized for a flash store.
+#    Its store is the record, and the sizes were measured on the P4s' flash only.
+#
+# DECLINED moybyte_patch_sdcard_runs -- machine.SDCard in multi-block runs.
+#    This board has no card: its store is the internal flash VFS.
+#
 # DECLINED moybyte_patch_stdin_ring -- the 4 KB stdin ring for a UART console.
 #    This board speaks USB-Serial/JTAG, which backpressures: its ISR takes only
 #    what the ring has room for and the USB host waits with the rest, so a

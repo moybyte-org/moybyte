@@ -55,7 +55,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   (image, offset, baud, the otadata region erased FIRST so a board that has
   taken an OTA boots the slot just written, and the reset strategy — the T-Deck
   declares `usb_reset`) for `tools/board_flash.py`; `[serial]` (the line state
-  at open, `attach_only`, the `py` chunk, the `recv` window) for `P4Board` and
+  at open, `attach_only`, the `py` chunk, the `recv` window and, on the
+  Waveshare P4, the `recv_baud` its payload crosses at) for `P4Board` and
   `tools/push_cart.py`. No tool restates them, and the CI matrix is one row a
   board.
 - **The frame loop is shared** (`device_boot.FrameLoop`, #202 Phase B): inputs

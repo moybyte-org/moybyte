@@ -615,6 +615,27 @@ def test_the_p4s_chunk_and_window_fit_the_ring_its_build_gives_it():
     assert ser["window"] <= holds, (ser["window"], holds)
 
 
+def test_a_grown_stdin_ring_holds_a_window_and_never_meets_a_uart_isr():
+    """MOY_SERIAL_RING_BYTES moves a board's stdin ring into PSRAM so the
+    window the host sends on an ack lands while the store writes. It has to
+    hold a whole window, fit the ring's 16-bit count, and stay off a console
+    whose RX ISR runs with the cache off: the Waveshare P4's UART ISR is IRAM
+    and fills the ring during a flash write, which is why its ring is in TCM."""
+    found = {}
+    for name, d in _DEVICE_BOARDS.items():
+        for h in (d / "boards").glob("*/mpconfigboard.h"):
+            m = re.search(r"^#define MOY_SERIAL_RING_BYTES\s+\((\d+)\)",
+                          h.read_text(encoding="utf-8"), re.M)
+            if m:
+                found[name] = int(m.group(1))
+    assert set(found) == {"tdeck", "guition-s3", "guition-p4"}, found
+    for name, ring in found.items():
+        ser = board_config.load(str(_DEVICE_BOARDS[name]))["serial"]
+        assert 2 * ser["window"] <= ring <= 65535, (name, ring, ser["window"])
+        build = (_DEVICE_BOARDS[name] / "build.sh").read_text(encoding="utf-8")
+        assert not re.search(r"^moybyte_patch_stdin_ring$", build, re.M), name
+
+
 def test_push_cart_holds_no_per_board_branch():
     """The board differences are DATA (#202 Phase A). The tool may name the
     board dirs in its BOARDS map; it may not branch on which board it is."""

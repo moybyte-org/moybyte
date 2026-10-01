@@ -25,7 +25,8 @@ push is resumable.
 
 THE BOARD DIFFERENCES ARE DATA, not branches here: each board.toml carries a
 [serial] block with the line state at open, whether the board may be reset, the
-`py`-line chunk and the raw upload window (#202 Phase A's pattern, the same one
+`py`-line chunk, the raw upload window and, where the console is a UART, the
+rate its payload crosses at (#202 Phase A's pattern, the same one
 [flash]/[monitor] follow). Read those declarations before changing anything here
 -- each field records a failure that cost an attempt.
 
@@ -105,6 +106,9 @@ import board_config                                              # noqa: E402
 from p4_autotest import P4Board                                  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+from runtime.dev_channel import (RECV_DEAD_WINDOWS, RECV_IDLE_MS,  # noqa: E402
+                                 RECV_SYNC, RECV_SYNC_MS)
 
 
 def _boards(root=ROOT):
@@ -154,45 +158,70 @@ def serial_cfg(board):
         sys.exit("%s/board.toml has no [serial] section" % d)
     return ser
 
-# The only device-side helpers left: the already-current check, the mkdir and
-# the store's room. `_sha` reads the file back rather than trusting what was
-# written, which is the same thing the board does at the end of a `recv` -- and
-# the reason both do is item 2 above. It reads in 8KB pieces, not whole: a 4MB
-# file read in one `.read()` costs over a minute on the Waveshare P4's internal
-# flash, against ~5s chunked -- long past `cmd`'s 30s wait, whose retry then
-# queues a SECOND full read behind the first and starves the `recv` that is
-# meant to arm the upload right after. `_room` is the free bytes of the store a
-# path is on (None where the board cannot say), `_size` a file's size there (0
-# when it is not there yet).
+# The only device-side helpers left: the already-current check, the mkdir, the
+# store's room and the rename -- each one round trip, and each inside the
+# console's storage gate (`ws._with_sd`), because on the T-Deck the card shares
+# the panel's SPI host and a store op that overlaps a panel transfer hangs the
+# board. `_sha` reads the file back rather than trusting what was written,
+# which is what the board does at the end of a `recv` too -- item 2 above --
+# and answers None without reading when the size already differs. It reads in
+# 8KB pieces, not whole (item 5). `_room` is the free bytes of the store a
+# path is on (None where the board cannot say), `_sizes` each file's size
+# there (0 when it is not there yet), and `_put` moves a verified `.new` over
+# its file and drops the stamp beside it (see push_file_raw).
 HELPERS = """
 import hashlib, os
-def _sha(p):
-    try: f = open(p, 'rb')
-    except Exception: return None
-    h = hashlib.sha256()
-    try:
-        while True:
-            b = f.read(8192)
-            if not b: break
-            h.update(b)
-    except Exception:
-        f.close(); return None
-    f.close()
-    return h.digest().hex()[:12]
-def _mkdir(p):
-    try: os.mkdir(p)
-    except Exception: pass
-    return 1
-def _room(p):
-    try:
-        st = os.statvfs(p)
-        return st[0] * st[3]
-    except Exception: return None
+def _gated(fn):
+    g = getattr(ws, '_with_sd', None)
+    return fn() if g is None else g(fn)
 def _size(p):
     try: return os.stat(p)[6]
     except Exception: return 0
-ws._g['_sha'] = _sha; ws._g['_mkdir'] = _mkdir
-ws._g['_room'] = _room; ws._g['_size'] = _size
+def _sha(p, n=-1):
+    def go():
+        if n >= 0 and _size(p) != n: return None
+        try: f = open(p, 'rb')
+        except Exception: return None
+        h = hashlib.sha256()
+        try:
+            while True:
+                b = f.read(8192)
+                if not b: break
+                h.update(b)
+        except Exception:
+            f.close(); return None
+        f.close()
+        return h.digest().hex()[:12]
+    return _gated(go)
+def _rm(p):
+    try: os.remove(p)
+    except Exception: pass
+    return 1
+def _mkdirs(ps):
+    def go():
+        for p in ps:
+            try: os.mkdir(p)
+            except Exception: pass
+        return 1
+    return _gated(go)
+def _room(p):
+    def go():
+        try:
+            st = os.statvfs(p)
+            return st[0] * st[3]
+        except Exception: return None
+    return _gated(go)
+def _sizes(ps):
+    return _gated(lambda: [_size(p) for p in ps])
+def _put(tmp, dst):
+    def go():
+        _rm(dst)
+        os.rename(tmp, dst)
+        _rm(dst + '.bak')
+        return 1
+    return _gated(go)
+def _drop(p):
+    return _gated(lambda: _rm(p))
 """
 
 
@@ -213,22 +242,22 @@ def check_room(b, local, names, dest):
     free = b.pyval("ws._g['_room'](%r)" % root, timeout=30)
     if not isinstance(free, int):
         return
-    need = 0
-    for f in names:
-        local_size = os.path.getsize(local[f])
-        have = b.pyval("ws._g['_size'](%r)" % (dest + "/" + f), timeout=30)
-        need += local_size - (have if isinstance(have, int) else 0)
+    have = b.pyval("ws._g['_sizes'](%r)" % [dest + "/" + f for f in names],
+                   timeout=30)
+    if not isinstance(have, list) or len(have) != len(names):
+        have = [0] * len(names)
+    need = sum(os.path.getsize(local[f]) - h for f, h in zip(names, have))
     if need > free:
         raise StoreFull("the cart does not fit: it needs %s more and the store "
                         "at %s has %s free" % (_mb(need), root, _mb(free)))
 
 
 # A board that advertises `recv` but declares no window in its [serial] block
-# gets this one. It is nobody's declared window: the P4's is 3072 (three
-# quarters of its UART's stdin ring) and the USB boards' is 16384. Every board in
-# the tree that HAS a dev channel declares one, so this is only what an
-# undeclared board would get: big enough to be worth a round trip, small enough
-# not to ask a board that has said nothing to keep up with 16KB unaided.
+# gets this one. It is nobody's declared window: the Waveshare P4's is 3072
+# (three quarters of its UART's stdin ring) and the USB boards' is 16384. Every
+# board in the tree that HAS a dev channel declares one, so this is only what
+# an undeclared board would get: big enough to be worth a round trip, small
+# enough not to ask a board that has said nothing to keep up with 16KB unaided.
 RAW_WINDOW_FALLBACK = 4096
 # How many windows a single file may have to re-send before the push gives up.
 # The board asks for one when a window arrives short -- a byte lost on the way.
@@ -239,10 +268,36 @@ RAW_MAX_RETRIES = 24
 # session, and the console answers a command at frame cadence -- a board with a
 # cart running and the diag lines streaming is not a fast responder.
 RAW_PROBE_S = 6.0
+# The board acks a window before writing it, so the next window's write can
+# wait out the store's write of the last one -- on a USB board the endpoint
+# stalls until the board reads again. The driver's own write timeout is sized
+# for a line, not for that.
+RAW_WRITE_S = 30.0
+# `recv rate=`: how long to wait for the board's `RECV sync` before giving the
+# rate up. Longer than the board's own wait (RECV_SYNC_MS), so by the time
+# this side goes back to the console rate the board is already there.
+RATE_SYNC_S = RECV_SYNC_MS / 1000.0 + 1.5
+# ...and after giving it up, how long the board may still be listening at the
+# payload rate: it heard the sync but its answer never arrived here, so it
+# waits out a window that is not coming, RECV_DEAD_WINDOWS idle timeouts.
+RATE_SETTLE_S = RECV_DEAD_WINDOWS * RECV_IDLE_MS / 1000.0 + 1.0
 
 
-def raw_window(b, declared, log=None):
-    """The window to blast in -- or a one-line exit naming the firmware.
+class Link:
+    """What one session knows about the board's `recv`: the window, the
+    console UART's own rate where the board can switch it (from its caps
+    line), and the payload rate -- the board.toml's `recv_baud`, or None
+    where there is none, the board cannot switch, or a switch has failed this
+    session."""
+
+    def __init__(self, window, console=None, rate=None):
+        self.window = int(window)
+        self.console = console
+        self.rate = rate if (rate and console and rate != console) else None
+
+
+def raw_link(b, ser, log=None):
+    """The session's Link -- or a one-line exit naming the firmware.
 
     ONE probe per session, and the answer is POSITIVE either way: an image with
     the command prints `RECV caps max=<n>`, one without prints `REMOTE ? recv`
@@ -250,6 +305,7 @@ def raw_window(b, declared, log=None):
     interpret. There is no second transport to fall back to (see the header),
     so a no ends the run here, before a single byte of cart has been sent."""
     log = log or (lambda s: None)
+    declared = int(ser.get("window") or RAW_WINDOW_FALLBACK)
     b._write_line("recv")
     seen = len(b.lines)
     end = time.time() + RAW_PROBE_S
@@ -267,12 +323,15 @@ def raw_window(b, declared, log=None):
                          "current image; there is no slower push to fall back "
                          "to." % line.strip())
             if "RECV caps" in line:
+                window, console = declared, None
                 for tok in line.split():
                     if tok.startswith("max="):
                         # The BOARD's ceiling wins over the declaration: it is
                         # the side that allocates the buffer.
-                        return min(int(declared), int(tok[4:]))
-                return int(declared)
+                        window = min(declared, int(tok[4:]))
+                    elif tok.startswith("rate="):
+                        console = int(tok[5:])
+                return Link(window, console, ser.get("recv_baud"))
     sys.exit("no answer to the `recv` probe in %gs -- the console is running "
              "(it answered up to here), so its dev channel is from before the "
              "raw upload landed, or it is wedged. Flash a current image."
@@ -299,29 +358,68 @@ def _recv_reply(b, seen, timeout=60.0):
         b._pump()
 
 
-def push_file_raw(b, src, dst, window, verbose=False):
+class RateRefused(RuntimeError):
+    """The board did not answer at the payload rate."""
+
+
+def push_file_raw(b, src, dst, link, verbose=False):
     """One file over the dev channel's raw receive. True if it was written.
 
     The host writes one window and then WAITS for the ack, which is what keeps
-    the P4's flow-control-free UART safe (its board.toml carries the why). A
-    window that comes back short does not end the push: the board throws it
-    away, names the boundary its file is still on, and this re-sends from
-    there -- see RECV_RETRIES in runtime/dev_channel.py for why one dropped
-    byte used to cost a whole cart. Only a board out of retries, or one that
-    has gone quiet entirely, raises -- by file name, with the board's words."""
+    the Waveshare P4's flow-control-free UART safe (its board.toml carries the
+    why). A window that comes back short does not end the push: the board
+    throws it away, names the boundary its file is still on, and this re-sends
+    from there -- see RECV_RETRIES in runtime/dev_channel.py for why one
+    dropped byte used to cost a whole cart. Only a board out of retries, or
+    one that has gone quiet entirely, raises -- by file name, with the board's
+    words.
+
+    A file bigger than one window goes at `link.rate` where there is one; a
+    board that does not answer at that rate costs this file a wait and the
+    rest of the session the rate."""
     name = os.path.basename(src)
     raw = open(src, "rb").read()
     want = hashlib.sha256(raw).hexdigest()[:12]
-    if b.pyval("ws._g['_sha'](%r)" % dst) == want:
+    if b.pyval("ws._g['_sha'](%r, %d)" % (dst, len(raw))) == want:
         print("  = %-16s %d B (already current)" % (name, len(raw)))
         return False
     tmp = dst + ".new"
     t0 = time.time()
+    fast = link.rate if len(raw) > link.window else None
+    try:
+        got = _upload(b, raw, dst, link, fast, name, verbose)
+    except RateRefused as exc:
+        link.rate = None
+        print("  ! %s: no answer at %d baud, so this push goes on at %d"
+              % (name, exc.args[0], link.console))
+        b.drain(RATE_SETTLE_S)
+        b._write_line("")
+        got = _upload(b, raw, dst, link, None, name, verbose)
+    if got != want:
+        b.pyval("ws._g['_drop'](%r)" % tmp)
+        raise RuntimeError("%s: hash %s != %s -- left the old file in place"
+                           % (name, got, want))
+    # moy_fs's invariant (#154): a file the store published carries a stamped
+    # `.bak` describing it, and a writer that puts different bytes at the path
+    # has to drop that stamp -- or the board's next read "recovers" the kid's
+    # own last save over what was just pushed. `_put` does the rename and the
+    # drop in one round trip.
+    b.pyval("ws._g['_put'](%r, %r)" % (tmp, dst))
+    print("  > %-16s %d B in %.1fs  sha %s%s"
+          % (name, len(raw), time.time() - t0, want,
+             "  (%d baud)" % fast if fast and link.rate else ""))
+    return True
+
+
+def _upload(b, raw, dst, link, fast, name, verbose):
+    """`recv` one file, at `fast` baud when given; the board's sha12."""
+    window, console = link.window, link.console
     seen = len(b.lines)
     # NO RESEND anywhere on this path (`cmd`'s retry exists for a lost REPLY):
     # a second `recv` line would arrive after the board armed -- as payload,
     # not as a command -- and every byte after it would be off by that much.
-    b._write_line("recv %d %d %s" % (len(raw), window, dst))
+    b._write_line("recv %d %d %s%s" % (len(raw), window,
+                                       "rate=%d " % fast if fast else "", dst))
     r, seen = _recv_reply(b, seen, timeout=30.0)
     if r and r[0] == "ERR" and r[1:3] == ["store", "full"]:
         raise StoreFull("%s did not fit: the board's store is full (%s)"
@@ -329,72 +427,91 @@ def push_file_raw(b, src, dst, window, verbose=False):
     if not r or r[0] != "ready":
         raise RuntimeError("%s: the board did not arm the raw upload (%s)"
                            % (name, " ".join(r or ["no reply"])))
-    sent = 0
-    n = (len(raw) + window - 1) // window
-    resent = 0
-    while sent < len(raw):
-        blk = raw[sent:sent + window]
-        b.ser.write(blk)
-        b.ser.flush()
-        sent += len(blk)
-        r, seen = _recv_reply(b, seen)
-        if r is None:
-            raise RuntimeError(
-                "%s: no ack for the window ending at %d/%d B -- the board went "
-                "quiet mid-upload" % (name, sent, len(raw)))
-        if r[0] == "retry":
-            # That window arrived short -- a byte lost on the way. The board
-            # wrote nothing, so it names the boundary it is still standing on
-            # and this sends the window again from there. Believe the BOARD's
-            # offset rather than our own: it is the one that knows what reached
-            # the file, and a disagreement would corrupt the rest of the push.
-            try:
-                sent = int(r[1])
-            except (IndexError, ValueError):
-                raise RuntimeError("%s: the board asked for a re-send but "
-                                   "named no offset (%s)"
-                                   % (name, " ".join(r)))
-            resent += 1
-            if resent > RAW_MAX_RETRIES:
+    at = None
+    was = b.ser.write_timeout
+    try:
+        if fast and "rate=%d" % fast in r:
+            # The board switched the moment `ready` had left it. Whatever this
+            # switch puts on the line ends at the sync, which is how the board
+            # knows the payload starts after it.
+            b.ser.baudrate = fast
+            at = fast
+            b.ser.write(RECV_SYNC)
+            b.ser.flush()
+            r, seen = _recv_reply(b, seen, timeout=RATE_SYNC_S)
+            if not r or r[0] != "sync":
+                b.ser.baudrate = console
+                at = None
+                raise RateRefused(fast)
+        b.ser.write_timeout = RAW_WRITE_S
+        sent = 0
+        n = (len(raw) + window - 1) // window
+        resent = 0
+        while sent < len(raw):
+            blk = raw[sent:sent + window]
+            b.ser.write(blk)
+            b.ser.flush()
+            sent += len(blk)
+            r, seen = _recv_reply(b, seen)
+            if r is None:
                 raise RuntimeError(
-                    "%s: %d windows re-sent and still dropping at %d/%d B -- "
-                    "that is a cable, not a hiccup"
-                    % (name, resent, sent, len(raw)))
+                    "%s: no ack for the window ending at %d/%d B -- the board "
+                    "went quiet mid-upload" % (name, sent, len(raw)))
+            if r[0] == "retry":
+                # That window arrived short -- a byte lost on the way. The
+                # board wrote nothing of it, so it names the boundary it is
+                # still standing on and this sends the window again from
+                # there. Believe the BOARD's offset rather than our own: it is
+                # the one that knows what reached the file, and a disagreement
+                # would corrupt the rest of the push.
+                try:
+                    sent = int(r[1])
+                except (IndexError, ValueError):
+                    raise RuntimeError("%s: the board asked for a re-send but "
+                                       "named no offset (%s)"
+                                       % (name, " ".join(r)))
+                resent += 1
+                if resent > RAW_MAX_RETRIES:
+                    raise RuntimeError(
+                        "%s: %d windows re-sent and still dropping at %d/%d B "
+                        "-- that is a cable, not a hiccup"
+                        % (name, resent, sent, len(raw)))
+                if verbose:
+                    print("     re-sending the window at %d" % sent)
+                continue
+            if r[0] == "ERR":
+                if r[1:3] == ["store", "full"]:
+                    raise StoreFull("%s did not fit: the board's store is full "
+                                    "(%s)" % (name, " ".join(r[1:])))
+                raise RuntimeError("%s: the board stopped the upload: %s"
+                                   % (name, " ".join(r[1:])))
+            if r[0] != "ack" or r[1:2] != [str(sent)]:
+                raise RuntimeError(
+                    "%s: window %d/%d acked %s, expected %d -- bytes were lost "
+                    "on the wire" % (name, (sent + window - 1) // window, n,
+                                     " ".join(r[1:]), sent))
+            if at and sent == len(raw):
+                # The board went back to the console rate right behind that
+                # ack; its `done` comes after this sync, at that rate.
+                b.ser.baudrate = console
+                at = None
+                b.ser.write(RECV_SYNC)
+                b.ser.flush()
             if verbose:
-                print("     re-sending the window at %d" % sent)
-            continue
-        if r[0] == "ERR":
-            if r[1:3] == ["store", "full"]:
-                raise StoreFull("%s did not fit: the board's store is full (%s)"
-                                % (name, " ".join(r[1:])))
-            raise RuntimeError("%s: the board stopped the upload: %s"
-                               % (name, " ".join(r[1:])))
-        if r[0] != "ack" or r[1:2] != [str(sent)]:
-            raise RuntimeError(
-                "%s: window %d/%d acked %s, expected %d -- bytes were lost on "
-                "the wire" % (name, (sent + window - 1) // window, n,
-                              " ".join(r[1:]), sent))
-        if verbose:
-            print("     window %d/%d" % ((sent + window - 1) // window, n))
-    r, seen = _recv_reply(b, seen)
-    if r is None or r[0] != "done":
-        raise RuntimeError("%s: the board never reported what it wrote (%s)"
-                           % (name, " ".join(r or ["no reply"])))
-    got = r[1]
-    if got != want:
-        b.pyval("__import__('os').remove(%r) or 1" % tmp)
-        raise RuntimeError("%s: hash %s != %s -- left the old file in place"
-                           % (name, got, want))
-    b.pyval("__import__('os').remove(%r) or 1" % dst)     # no-op if absent
-    b.pyval("__import__('os').rename(%r, %r) or 1" % (tmp, dst))
-    # moy_fs's invariant (#154): a file the store published carries a stamped
-    # `.bak` describing it, and a writer that puts different bytes at the path
-    # has to drop that stamp -- or the board's next read "recovers" the kid's own
-    # last save over what was just pushed.
-    b.pyval("__import__('os').remove(%r) or 1" % (dst + ".bak"))   # no-op if absent
-    print("  > %-16s %d B in %.0fs  sha %s"
-          % (name, len(raw), time.time() - t0, want))
-    return True
+                print("     window %d/%d" % ((sent + window - 1) // window, n))
+        r, seen = _recv_reply(b, seen)
+        if r is None or r[0] != "done":
+            raise RuntimeError("%s: the board never reported what it wrote (%s)"
+                               % (name, " ".join(r or ["no reply"])))
+        return r[1]
+    finally:
+        b.ser.write_timeout = was
+        if at:
+            # Out of the payload on an error: the board says ERR at the payload
+            # rate and goes back, and this newline ends whatever the switch
+            # left in its line reader.
+            b.ser.baudrate = console
+            b._write_line("")
 
 
 def board_chip(board):
@@ -477,8 +594,8 @@ def cart_files(cart):
 
 
 def sub_dirs(names):
-    """The folders those paths need, SHALLOWEST FIRST -- `_mkdir` is one
-    os.mkdir and does not make parents."""
+    """The folders those paths need, SHALLOWEST FIRST -- `_mkdirs` makes them
+    in order with one os.mkdir each, which does not make parents."""
     out = set()
     for n in names:
         parts = n.split("/")[:-1]
@@ -597,11 +714,11 @@ def _push(a, cart, names, local, work):
         # ONE probe per session, before the first file: `recv` is a property of
         # the IMAGE, not of the cart, and asking per file would spend a round
         # trip each time to learn the same thing.
-        win = raw_window(b, int(ser.get("window") or RAW_WINDOW_FALLBACK),
-                         log=(print if a.verbose else None))
-        print("%s -> %s  (%d file%s, %s, raw %d)"
+        link = raw_link(b, ser, log=(print if a.verbose else None))
+        print("%s -> %s  (%d file%s, %s, raw %d%s)"
               % (cart, dest, len(names), "" if len(names) == 1 else "s",
-                 a.board, win))
+                 a.board, link.window,
+                 ", %d baud" % link.rate if link.rate else ""))
         if not b.pyexec(HELPERS):
             sys.exit("could not install the upload helpers")
         if module is not None and not module[2] and module[0] in names:
@@ -616,15 +733,14 @@ def _push(a, cart, names, local, work):
         # reads, not a traceback.
         try:
             check_room(b, local, names, dest)
-            b.pyval("ws._g['_mkdir'](%r)" % dest)
-            for sub in sub_dirs(names):
-                b.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
+            b.pyval("ws._g['_mkdirs'](%r)"
+                    % ([dest] + [dest + "/" + sub for sub in sub_dirs(names)]))
             wrote = 0
             for f in names:
                 if a.force:
-                    b.pyval("__import__('os').remove(%r) or 1" % (dest + "/" + f))
+                    b.pyval("ws._g['_drop'](%r)" % (dest + "/" + f))
                 wrote += push_file_raw(b, local[f], dest + "/" + f,
-                                       win, verbose=a.verbose)
+                                       link, verbose=a.verbose)
         except StoreFull as exc:
             sys.exit("STORE FULL: %s. Nothing more was written; free some room "
                      "on the board and push again." % exc)

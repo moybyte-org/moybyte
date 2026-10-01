@@ -263,12 +263,21 @@ chunk       = 1024
 # the host may put on the wire before it must wait for the board's ack. The ack
 # is this board's only backpressure, and a window smaller than the ring lands
 # whole even if the board reads none of it until the last byte is in, so no
-# stall inside a window can drop a byte. 3072 is three quarters of the ring.
-# Measured 2026-09-30 with the same cart: 4/4 at 2048 and 8/8 at 3072, two of
-# those with a collection forced every 200 ms and three with the diag stream
-# on, no window re-sent. It is NOT the rate limit -- the board's file write is
-# -- so it buys little: a 150 KB file took 27 s at 3072 and 31 s at 1024.
+# stall inside a window can drop a byte -- the board acks before its file
+# write, so the stall a window most often meets is that write. 3072 is three
+# quarters of the ring. Measured 2026-09-30 with the same cart: 4/4 at 2048 and
+# 8/8 at 3072, two of those with a collection forced every 200 ms and three
+# with the diag stream on, no window re-sent.
 window      = 3072
+# The UART rate a `recv` payload crosses at (`recv rate=`, tools/push_cart.py):
+# the console stays at 115200 for every line -- `moy push`, a terminal and the
+# boot log expect it -- and switches for a file bigger than one window, between
+# two syncs. Picked 2026-10-01 from 1.5, 2, 3 and 4 Mbaud, 256 KB pushes each:
+# every rate landed byte-exact on an idle desk, and under Jet Teapot with a
+# collection forced every 200 ms 2 Mbaud went 8/8 with no window re-sent where
+# 3 Mbaud lost one sync in 8. Past ~1 Mbaud the rate is not the limit; the
+# flash store's write is, so the margin is worth more than the 5% 3 Mbaud buys.
+recv_baud   = 2000000
 
 [monitor]
 baud = 115200

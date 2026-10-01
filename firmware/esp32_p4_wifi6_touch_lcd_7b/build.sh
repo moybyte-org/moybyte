@@ -104,11 +104,21 @@ moybyte_patch_map_cache_for_repr_c
 # lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
 moybyte_patch_gc_run_hints
 
-# 2f) A 4 KB stdin ring, in TCM: this board's serial is the CH343's UART, with
-#     no flow control, and the stock 260 bytes are 23 ms of line rate against a
-#     heap collection of up to ~95 ms. tools/patch_stdin_ring.py carries the
-#     sizing and why TCM.
+# 2f) A 4 KB stdin ring, in TCM, and a UART RX ISR that wakes the reader: this
+#     board's serial is the CH343's UART, with no flow control, and the stock
+#     260 bytes are 23 ms of line rate against a heap collection of up to
+#     ~95 ms. tools/patch_stdin_ring.py carries the sizing, why TCM, and why
+#     the wake.
 moybyte_patch_stdin_ring
+
+# LittleFS sized for a flash store: the cart store is this board's internal
+# flash, which the stock sizes program 128 bytes at a time and search for free
+# blocks 256 at a time. tools/patch_lfs_sizes.py carries the measurements.
+moybyte_patch_lfs_sizes
+
+# DECLINED moybyte_patch_sdcard_runs -- machine.SDCard in multi-block runs.
+# This console has no card in play: carts live on the internal flash VFS (the
+# moy_sd denial in board.toml says the same for the T-Deck's module).
 
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # The patch reserves MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM outside the Python

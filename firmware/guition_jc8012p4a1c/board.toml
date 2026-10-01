@@ -239,6 +239,9 @@ usb         = "303a:1001"
 # USB-Serial/JTAG ISR only drains what the stdin ring has room for, so the
 # endpoint stalls and the HOST blocks -- the window buys fewer round trips,
 # it is not the safety margin it is on the Waveshare's unflow-controlled UART.
+# The board acks a window before writing it, and its stdin ring is
+# MOY_SERIAL_RING_BYTES (mpconfigboard.h), twice the window, so the next window
+# lands between the flash operations of the last one's write.
 chunk       = 768
 window      = 16384
 
