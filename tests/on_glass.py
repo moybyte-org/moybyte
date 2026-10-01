@@ -1380,14 +1380,16 @@ def doom_push(board, board_dir):
     module; files already current are not sent again."""
     import shutil
     import tempfile
+    from tools import wasm_cart
     frames = _doom()
     wasm_signing_key()
     chip = _wasm_chip(board_dir)
     tmp = tempfile.mkdtemp(prefix="moy_doom_")
     local = os.path.join(tmp, "doom.moy")
     shutil.copytree(frames.CART, local)
+    keep = wasm_cart.aot_name("main.wasm", chip)
     for name in os.listdir(local):
-        if name.endswith(".aot") and not name.endswith(".%s.aot" % chip):
+        if name.endswith(".aot") and name != keep:
             os.remove(os.path.join(local, name))
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     dest = root.rstrip("/") + "/doom.moy"
