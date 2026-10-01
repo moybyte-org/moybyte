@@ -124,11 +124,13 @@ SETTINGS_TOGGLES = (
     # and a heavy menu does not condemn the game; OFF (FREE) it follows load
     # on every draw frame and judders at transitions. Default ON.
     ("steady", "STEADY", True, "set_steady", None, "steady"),
-    # CRISP PIXELS (#204): nearest-neighbour game composite instead of the
-    # PPA's fixed-bilinear scaler. Sits by STEADY -- both are play-time
-    # quality/perf trades. Default OFF: smooth is the shipped behaviour, and
-    # the trade is sharp pixel art against a real per-frame CPU cost the async
-    # PPA path does not pay.
+    # CRISP PIXELS (#204): nearest-neighbour composite of the palette-based
+    # game -- every cart drawn through the canvas, and a compiled cart's
+    # palette frames -- instead of the PPA's fixed-bilinear scaler; a compiled
+    # cart's direct-colour (blit565) frame keeps the bilinear scale either
+    # way. Sits by STEADY -- both are play-time quality/perf trades. Default
+    # OFF: smooth is the shipped behaviour, and the trade is sharp pixel art
+    # against a real per-frame CPU cost the async PPA path does not pay.
     ("crisp_pixels", "CRISP PIXELS", False, "set_crisp_pixels",
      _gate_crisp_scale, "crisp"),
     # SHOW FPS: the in-game FPS chip (default ON). It rides the GAME canvas and

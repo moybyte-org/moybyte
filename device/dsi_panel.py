@@ -286,6 +286,21 @@ class P4Compositor:
         elif self._pending is not None:
             self.present_pending()
 
+    def snap_fence(self):
+        """A compiled cart's frame snapshot (p4_canvas.present_frame) has
+        landed: the fence sync_back takes before the cart's next hook writes
+        the memory it was copied from."""
+        import moy_ppa
+        moy_ppa.snap_wait()
+
+    def frame_fence(self):
+        """Nothing still writes or reads a compiled cart's frame copy: the
+        snapshot and every PPA op over it (its run's scratch is about to be
+        freed)."""
+        import moy_ppa
+        moy_ppa.snap_wait()
+        moy_ppa.sync()
+
     def overlap_stats(self):
         """OVERLAP_FIELDS, cumulative since boot. Every slot is measured here:
         the deferred show, the reuse fence in flush(), the "game" fence in
@@ -559,7 +574,8 @@ class RotatedCompositor:
         self.angle = angle
         self._stale = [None, None, None]
 
-    def mark_game(self, src, sw, sh, ox, oy, scale, paint, quiet, direct):
+    def mark_game(self, src, sw, sh, ox, oy, scale, paint, quiet, direct,
+                  frame=None):
         """The canvas's word about THIS frame's game composite (one per frame):
         `src` the game canvas's RGB565 buffer (sw x sh) to land at landscape
         (ox, oy) scaled by `scale`; `paint()` composites it into the paint
@@ -567,9 +583,17 @@ class RotatedCompositor:
         `quiet()` answers at flush time whether anything ELSE drew this
         frame (the canvas's draw gates); `direct` allows the one-op
         scale+rotate straight into the scan buffer (bilinear -- crisp mode
-        says no and takes the paint route)."""
+        says no and takes the paint route).
+
+        `frame` marks a compiled cart's frame (p4_canvas.present_frame):
+        `src` is its snapshot, a copy nothing writes until the next frame's,
+        so the direct route scales it from there with no copy of its own --
+        the (bx, by, bw, bh) block of it, then each patch (bx, by, bw, bh,
+        landing x, landing y) from the patch picture -- and those ops may
+        outlive the present fence. The tuple is (bx, by, bw, bh, picture,
+        picture rows, patches, patch count)."""
         self._game = (src, int(sw), int(sh), int(ox), int(oy), int(scale),
-                      paint, quiet, bool(direct))
+                      paint, quiet, bool(direct), frame)
 
     def note_damage(self, x, y, w, h):
         """The WM's word that THIS frame changed the paint buffer inside this
@@ -663,14 +687,18 @@ class RotatedCompositor:
             self._ppa.rotate(*(args + (False, wb)))
 
     def _rot_scale(self, nb, wb, *args):
+        """moy_ppa.rotate_scale, as _rot: `args` are its leading ten, then
+        an optional source block."""
+        head = args[:10]
+        blk = args[10:]
         try:
-            self._ppa.rotate_scale(*(args + (nb, wb)))
+            self._ppa.rotate_scale(*(head + (nb, wb) + blk))
         except OSError:
             if not nb:
                 raise
             self._ppa.sync()
             self._refused += 1
-            self._ppa.rotate_scale(*(args + (False, wb)))
+            self._ppa.rotate_scale(*(head + (False, wb) + blk))
 
     # A paint-buffer block of at least this many pixels is rotated through the
     # SRAM bounce (moy_ppa.rotate_bounce -- the AXI GDMA copies its rows into
@@ -717,6 +745,25 @@ class RotatedCompositor:
         self._rot(nb, False, fb, self._pw, self._ph, px, py,
                   paint, self._w, self._h, x, y, w, h, self.angle)
         return 1
+
+    def _frame_ops(self, nb, fb, px, py, src, sw, sh, scale, frame):
+        """A compiled cart's frame straight to scan buffer `fb` at portrait
+        (px, py): its view block scaled and rotated from the snapshot, then
+        its patches from the patch picture over it. Returns the ops queued,
+        every one of which reads only those two buffers."""
+        bx, by, bw, bh, pic, rows, pr, npatch = frame
+        self._ppa.snap_wait()
+        self._rot_scale(nb, False, fb, self._pw, self._ph, px, py, src, sw, sh,
+                        scale, self.angle, bx, by, bw, bh)
+        for k in range(npatch):
+            j = 6 * k
+            qx, qy, _qw, _qh = rotate_rect(pr[j + 4], pr[j + 5],
+                                           pr[j + 2] * scale, pr[j + 3] * scale,
+                                           self.angle, self._w, self._h)
+            self._rot_scale(nb, False, fb, self._pw, self._ph, qx, qy, pic, sw,
+                            rows, scale, self.angle, pr[j], pr[j + 1],
+                            pr[j + 2], pr[j + 3])
+        return 1 + npatch
 
     def _scratch_for(self, n):
         if self._scratch is None or self._scratch_n < n:
@@ -826,11 +873,15 @@ class RotatedCompositor:
         # converged.
         rects = None            # this frame's landscape rects, game first
         direct_game = False     # rects[0] is the game, straight from its canvas
+        tail = 1                # the direct game's ops the present may leave flying
         painted = False         # the game composite reached the paint buffer
         grect = None
         if game is not None:
-            src, sw, sh, ox, oy, scale, paint, quiet, direct = game
-            grect = (ox, oy, sw * scale, sh * scale)
+            src, sw, sh, ox, oy, scale, paint, quiet, direct, frame = game
+            if frame is None:
+                grect = (ox, oy, sw * scale, sh * scale)
+            else:
+                grect = (ox, oy, frame[2] * scale, frame[3] * scale)
             # Noted damage (or a deferred stamp) means the WM drew, whatever
             # the gates say (a blit-only window render moves none of them).
             if damage is None and stamp is None and quiet():
@@ -902,7 +953,11 @@ class RotatedCompositor:
                 for (x, y, w, h) in rects[1:]:
                     ops += self._rotate(fb, paint_buf, x, y, w, h, nb)
                 px, py, _pw, _ph = changed[0]
-                if nb:
+                if frame is not None:
+                    tail = self._frame_ops(nb, fb, px, py, src, sw, sh, scale,
+                                           frame)
+                    ops += tail
+                elif nb:
                     n = sw * sh * 2
                     scr = self._scratch_for(n)
                     self._rot(True, False, scr, sw, sh, 0, 0, src, sw, sh,
@@ -952,8 +1007,10 @@ class RotatedCompositor:
         if nb:
             # Everything older than this frame's ops must have landed before
             # the buffer painted next is touched; a direct game frame's copy
-            # of the game canvas must have landed before the cart's tick.
-            self._keep = 1 if direct_game else ops
+            # of the game canvas must have landed before the cart's tick. A
+            # compiled cart's frame reads its snapshot alone, so all of its
+            # ops may fly on.
+            self._keep = tail if direct_game else ops
             self._pending = back
             self._def_n += 1
             return                            # shown at the next present
@@ -978,6 +1035,17 @@ class RotatedCompositor:
         if self._pending is not None:
             self._ppa.sync()
             self._present(True)
+
+    def snap_fence(self):
+        """P4Compositor.snap_fence: the frame snapshot has landed."""
+        self._ppa.snap_wait()
+
+    def frame_fence(self):
+        """P4Compositor.frame_fence: nothing writes or reads the frame copy."""
+        if self._game is not None and self._game[9] is not None:
+            self._game = None
+        self._ppa.snap_wait()
+        self._ppa.sync()
 
     def async_stats(self):
         """(deferred frames, shown at a present, shown by the next flush,

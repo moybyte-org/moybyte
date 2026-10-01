@@ -563,10 +563,15 @@ class RotatingPpa(FakePpa):
         self.wbs.append((dst, wb))
 
     def rotate_scale(self, dst, dw, dh, dx, dy, src, sw, sh, scale, angle,
-                     nb=False, wb=True):
-        self.direct.append((dst, dx, dy, src, sw, sh, scale, angle))
+                     nb=False, wb=True, *block):
+        self.direct.append((dst, dx, dy, src, sw, sh, scale, angle) + block)
         self.nbs.append(nb)
         self.wbs.append((dst, wb))
+
+    snap_waits = 0
+
+    def snap_wait(self):
+        self.snap_waits += 1
 
     def wait(self, keep):
         self.waits.append(keep)
@@ -1616,3 +1621,263 @@ def test_the_ppa_bounce_meters_do_not_collide_with_the_compositor_verb():
     src = PPA_C.read_text(encoding="utf-8")
     assert "MP_QSTR_rotate_bounce_stats" in src
     assert "MP_QSTR_bounce_stats" not in src
+
+
+# -- a compiled cart's frame (p4_canvas.present_frame) -------------------------
+#
+# A compiled cart's blit565 frame reaches the glass from the cart's memory:
+# the PPA scales it from there (the Waveshare, whose deferred composite is a
+# "game" show fenced before the cart's next hook) or from the GDMA snapshot
+# (the rotated compositor, whose quiet-frame ops outlive that fence), and the
+# snapshot is the copy a frame the cart did not replace is shown again from.
+# The canvas is driven on an instance built without its constructor, which
+# wants MicroPython's framebuf.
+
+
+class FramePpa:
+    """`moy_ppa`'s frame surface, recording every call in order."""
+
+    def __init__(self):
+        self.calls = []
+        self.off = 24
+
+    def wait(self, keep):
+        self.calls.append(("wait", keep))
+        return True
+
+    def snap(self, scratch, frame):
+        self.calls.append(("snap", scratch, frame))
+        return self.off
+
+    def snap_wait(self):
+        self.calls.append(("snap_wait",))
+
+    def sync(self):
+        self.calls.append(("sync",))
+
+    def blit_async(self, *a):
+        self.calls.append(("blit_async",) + a)
+
+    def blit_scale(self, *a):
+        self.calls.append(("blit_scale",) + a)
+
+    def blit_crisp(self, *a):
+        self.calls.append(("blit_crisp",) + a)
+        return True
+
+
+class CopyGfx:
+    def __init__(self):
+        self.copies = []
+
+    def blit565(self, *a):
+        self.copies.append(a)
+
+
+class FrameStub:
+    """device/moycore_glue.CartFrame's surface, recording."""
+
+    MAX_PATCHES = 4
+
+    def __init__(self, room=True):
+        from array import array
+        self.rects = array("h", bytes(2 * 4 * 4))
+        self.nrects = 0
+        self.room = room
+        self.presented_with = None
+        self.scr = None
+
+    def patch(self, x, y, w, h):
+        r = self.rects
+        n = self.nrects
+        r[4 * n:4 * n + 4] = __import__("array").array("h", [x, y, w, h])
+        self.nrects = n + 1
+
+    def scratch(self, n):
+        if not self.room:
+            return None
+        if self.scr is None or len(self.scr) < n:
+            self.scr = bytearray(n)
+        return self.scr
+
+    def kept_view(self, s, off, n):
+        return ("kept", off, n)
+
+    def presented(self, kept, off):
+        self.presented_with = (kept, off)
+        self.nrects = 0
+
+
+def _p4_canvas_class():
+    spec = importlib.util.spec_from_file_location(
+        "p4_canvas_frame_under_test", DEVICE / "p4_canvas.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.P4SystemCanvas
+
+
+def _frame_canvas(comp, ppa, w=1024, h=600):
+    P = _p4_canvas_class()
+    cv = P.__new__(P)
+    cv._ppa = ppa
+    cv._comp = comp
+    cv._gfx = CopyGfx()
+    cv._buf = bytearray(8)
+    cv.w = w
+    cv.h = h
+    cv._snap_live = False
+    cv._pic = None
+    cv._pic_for = None
+    cv._fr = None
+    cv._fr_patches = [0] * 24
+    cv._paint_frame_fn = cv._paint_frame
+    cv._gate_state = None
+    return P, cv
+
+
+FGC = types.SimpleNamespace(w=320, h=240, _buf=bytearray(2 * 320 * 240))
+
+
+def test_the_waveshare_scales_a_565_frame_from_the_carts_memory():
+    comp = types.SimpleNamespace(rotated=False, _composite_pending=False)
+    ppa = FramePpa()
+    P, cv = _frame_canvas(comp, ppa)
+    cf = FrameStub()
+    view = memoryview(bytearray(2 * 320 * 240))
+    assert cv.present_frame(cf, view, FGC, 192, 60, 2, None, True) is True
+    scr = cf.scr
+    assert ppa.calls == [
+        ("wait", 0),                       # nothing reads the last copy
+        ("snap", scr, view),               # the GDMA copy, beside the scale
+        ("blit_async", cv._buf, 1024, 600, 192, 60, view, 320, 240, 2,
+         0, 0, 320, 240),                  # straight from the cart's memory
+    ]
+    assert comp._composite_pending is True, "a game show: fenced before the tick"
+    assert cf.presented_with == (scr, 24)
+    assert cv._snap_live is True, "sync_back fences the snapshot"
+    # The scratch holds the snapshot's span and, past it, the patch picture.
+    assert len(scr) >= 2 * 320 * 240 + 128 + 2 * 320 * P.PATCH_ROWS
+
+
+def test_a_full_paint_lands_the_frame_and_the_chip_now():
+    comp = types.SimpleNamespace(rotated=False, _composite_pending=False)
+    ppa = FramePpa()
+    P, cv = _frame_canvas(comp, ppa)
+    cf = FrameStub()
+    cf.patch(289, 229, 28, 10)                   # the FPS chip
+    view = memoryview(bytearray(2 * 320 * 240))
+    assert cv.present_frame(cf, view, FGC, 100, 40, 2, (8, 4, 304, 232),
+                            False) is True
+    blits = [c for c in ppa.calls if c[0].startswith("blit")]
+    assert blits[0] == ("blit_scale", cv._buf, 1024, 600, 100, 40, view, 320,
+                        240, 2, 8, 4, 304, 232)
+    # The chip from the game canvas, clipped to the view, over the frame.
+    assert blits[1] == ("blit_scale", cv._buf, 1024, 600,
+                        100 + (289 - 8) * 2, 40 + (229 - 4) * 2, FGC._buf, 320,
+                        240, 2, 289, 229, 23, 7)
+    assert comp._composite_pending is False
+    assert cv._gfx.copies == [], "the Waveshare reads the chip where it is"
+
+
+def test_crisp_pixels_leave_a_direct_colour_frame_bilinear():
+    comp = types.SimpleNamespace(rotated=False, _composite_pending=False)
+    ppa = FramePpa()
+    P, cv = _frame_canvas(comp, ppa)
+    smooth = P._smooth
+    P._smooth = False                            # CRISP PIXELS on
+    try:
+        view = memoryview(bytearray(2 * 320 * 240))
+        assert cv.present_frame(FrameStub(), view, FGC, 192, 60, 2) is True
+    finally:
+        P._smooth = smooth
+    assert [c[0] for c in ppa.calls] == ["wait", "snap", "blit_scale"]
+
+
+def test_the_p4_declines_what_it_cannot_show_and_touches_nothing():
+    comp = types.SimpleNamespace(rotated=False, _composite_pending=False)
+    for view, ox, cf in (
+            (memoryview(bytearray(320 * 240)), 192, FrameStub()),    # palette
+            (memoryview(bytearray(2 * 320 * 240)), 900, FrameStub()),  # off glass
+            (memoryview(bytearray(2 * 320 * 240)), 192, FrameStub(room=False))):
+        ppa = FramePpa()
+        P, cv = _frame_canvas(comp, ppa)
+        assert cv.present_frame(cf, view, FGC, ox, 60, 2) is False
+        assert ppa.calls == [] and cf.presented_with is None
+        assert cv._snap_live is False
+
+
+def test_the_p4_shows_direct_colour_frames_and_leaves_palette_ones_to_the_blit():
+    P = _p4_canvas_class()
+    cv = P.__new__(P)
+    cv._ppa = FramePpa()
+    assert P.presents_frames.fget(cv) is True
+    assert cv.presents_palette_frames is False
+    cv._ppa = None
+    assert P.presents_frames.fget(cv) is False
+    cv._ppa = types.SimpleNamespace(blit_scale=None)   # a moy_ppa with no snapshot
+    assert P.presents_frames.fget(cv) is False
+
+
+def test_the_rotated_compositor_scales_the_snapshot_and_its_patches_direct():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        step(comp)                                   # the full frame first
+        fp = FramePpa()
+        P, cv = _frame_canvas(comp, fp, 1280, 800)
+        cv._buf = comp.framebuffer()
+        cv._gates_unchanged = lambda: True
+        cf = FrameStub()
+        view = memoryview(bytearray(2 * 320 * 240))
+        assert cv.present_frame(cf, view, FGC, 160, 50, 2, None, True) is True
+        step(comp)                       # the first game frame is full, once
+        cf.patch(289, 229, 28, 10)
+        assert cv.present_frame(cf, view, FGC, 160, 50, 2, None, True) is True
+        # The chip is copied out of the canvas into the patch picture: no op
+        # reads the game canvas once the cart's next hook can write it.
+        assert cv._gfx.copies == [(cv._pic, 320, P.PATCH_ROWS, 0, -229, FGC._buf,
+                                   320, 240, -1, 289, 0, 317, 10)]
+        n = len(ppa.rotates)
+        comp.flush()
+        assert ppa.snap_waits == 1, "the snapshot lands before the PPA reads it"
+        assert len(ppa.rotates) == n, "no copy of its own: the snapshot is one"
+        frame_op, chip_op = ppa.direct[-2:]
+        assert frame_op[3] == ("kept", 24, 2 * 320 * 240)
+        assert frame_op[8:] == (0, 0, 320, 240)
+        assert chip_op[3] is cv._pic and chip_op[8:] == (289, 0, 28, 10)
+        assert ppa.nbs[-2:] == [True, True]
+        comp.present_pending()
+        assert ppa.waits[-1] == 2, "both read only copies: they may fly on"
+
+
+def test_the_rotated_paint_route_composites_the_snapshot_blocking():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        step(comp)
+        fp = FramePpa()
+        P, cv = _frame_canvas(comp, fp, 1280, 800)
+        cv._buf = comp.framebuffer()
+        cv._gates_unchanged = lambda: False           # something else drew
+        view = memoryview(bytearray(2 * 320 * 240))
+        assert cv.present_frame(FrameStub(), view, FGC, 160, 50, 2, None,
+                                True) is True
+        comp.flush()
+        assert fp.calls[-2:] == [
+            ("snap_wait",),
+            ("blit_scale", cv._buf, 1280, 800, 160, 50, ("kept", 24, 2 * 320 * 240),
+             320, 240, 2, 0, 0, 320, 240)]
+
+
+def test_the_frame_snapshot_fences_before_it_reuses_the_scratch():
+    """moy_ppa.snap: the last copy has landed before the scratch is written
+    or found to already hold the frame, and an engine refusal is a memcpy."""
+    body = _ppa_verb_body("snap")
+    assert body.index("snap_wait_inner();") < body.index("dst + off")
+    assert "memcpy(dst + off" in body
+    assert "& ~(uintptr_t)63u" in body, "the 64-aligned span the GDMA takes"
+
+
+def test_a_frames_view_and_patches_are_source_blocks_on_both_scalers():
+    src = PPA_C.read_text(encoding="utf-8")
+    assert "srm_block(n_args, args, 9," in src          # blit_scale / blit_async
+    assert "srm_block(n_args, args, 12," in src         # rotate_scale
+    for body in (_ppa_verb_body("rotate_scale"),
+                 src[src.index("static mp_obj_t srm_blit("):]):
+        assert ".block_offset_x = (uint32_t)blk[0]" in body

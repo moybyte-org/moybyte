@@ -755,7 +755,8 @@ class DevChannel:
       diag 0|1        PERF DIAG: the frame-eaters (perf_capture + the FPS chip)
                       and every periodic line, PERF included
       steady 0|1      the tick model's STEADY / FREE knob (#217)
-      crisp 0|1       the #204 nearest-neighbour game composite
+      crisp 0|1       the #204 nearest-neighbour composite of palette-based
+                      game frames
       unknown_sources 0|1   Settings -> UNKNOWN SOURCES: whether a compiled
                       cart's unsigned module may load, set without the
                       screen's warning -- these three are SETTINGS_TOGGLES

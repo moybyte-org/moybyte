@@ -61,8 +61,11 @@ the Guition P4 that is the portrait scan buffer, turned back to the landscape
 desk. `--source game` is the cart's canvas, cropped to its view. On the two S3
 boards a small-canvas game and a compiled cart present straight from their own
 buffer (the fold), so the screen buffer shows the desk under them: use
-`--source game` for a Python or Lua cart there. The frame is taken in one
-command between two frames, then sent deflated in bands.
+`--source game` for a Python or Lua cart there. A compiled cart's frame skips
+the canvas on every console board (a P4's palette frame aside), so the canvas
+holds no frame of it: shoot the screen on a P4, and on an S3 nothing shows
+one. The frame is taken in one command between two frames, then sent
+deflated in bands.
 
 **Carts.** A folder cart pushes as it is. A compiled cart needs its per-chip
 module, built and signed on the host — the chip is `[board] chip` (`esp32s3`

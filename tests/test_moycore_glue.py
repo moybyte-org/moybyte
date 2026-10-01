@@ -257,8 +257,8 @@ class FakeMoycore(types.ModuleType):
             return self.wasm_open_errs.pop(0) if self.wasm_open_errs else None
         return self.wasm_open_err
 
-    def _take_frames(self, on):
-        self._log("take_frames", on)
+    def _take_frames(self, on, palette=True):
+        self._log("take_frames", on, palette)
 
     def _frame(self, lut_out):
         self._log("frame")
@@ -2066,6 +2066,12 @@ class PresentingCanvas:
     presents_frames = True
 
 
+class DirectColourCanvas:
+    """A P4's system canvas: it shows blit565's frames, not blit's."""
+    presents_frames = True
+    presents_palette_frames = False
+
+
 class FakeAlloc(types.ModuleType):
     MEMORY_SPIRAM = 1
     MEMORY_DMA = 2
@@ -2106,12 +2112,27 @@ def test_a_compiled_cart_takes_its_frames_where_the_canvas_shows_them(tmp_path):
         ws = FakeWs(project=_CartProject(cart))
         ws.sys_canvas = PresentingCanvas()
         run = world.mod.WasmRun(ws, make_ns(), None)
-        assert ("take_frames", True) in world.core.calls
+        assert ("take_frames", True, True) in world.core.calls
         assert world.core.verbs().index("take_frames") > world.core.verbs().index(
             "wasm_open")
         assert ws.cart_frame is run.frame
         assert (run.frame.w, run.frame.h) == (320, 240)
         assert len(bytes(run.frame.lut)) == 512
+    finally:
+        world.close()
+
+
+def test_a_canvas_without_a_palette_resolve_takes_only_direct_colour(tmp_path):
+    """A P4 shows blit565's frames from the cart's memory and leaves blit's
+    to the blit: the binding is told which layouts it takes."""
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        ws.sys_canvas = DirectColourCanvas()
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert ("take_frames", True, False) in world.core.calls
+        assert ws.cart_frame is run.frame
     finally:
         world.close()
 
@@ -2165,9 +2186,13 @@ def test_the_scratch_is_the_runs_and_freed_once_nothing_reads_it(tmp_path):
         assert b is not a and len(b) == 154240
         assert log[1:] == [("free", 77440), ("alloc", 154240, 3)]
         del log[:]
+        del world.core.calls[:]
         cf.close(FenceComp(log))
         assert log == [("fold_fence",), ("snap_fence",), ("disarm",),
                        ("free", 154240)]
+        # ...and the last frame shown went into the canvas before its copy
+        # was let go: from here on the canvas is all that holds the game.
+        assert world.core.calls == [("frame_settle",)]
         alloc.room = False
         assert cf.scratch(10) is None       # no PSRAM: the caller settles
     finally:

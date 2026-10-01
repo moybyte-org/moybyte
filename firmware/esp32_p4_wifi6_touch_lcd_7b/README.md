@@ -44,7 +44,9 @@ keyboards, mouse, media keys and gamepads are not supported. USB-HID remains
 
 **The hardware PPA (Pixel-Processing Accelerator) is wired for the game
 composite** (`moy_ppa`, ESP-IDF `esp_driver_ppa` SRM client, patched into
-IDF_COMPONENTS like `esp_lcd`; `P4SystemCanvas.blit_game` uses it, CPU fallback).
+IDF_COMPONENTS like `esp_lcd`; `P4SystemCanvas.blit_game` uses it, CPU fallback,
+and `present_frame` scales a compiled cart's direct-colour frame from the cart's
+memory).
 Colors verified pixel-identical via framebuffer readback. Two findings on
 record:
 - **The PPA only wins on UPSCALE composites.** The game→window scale is 2.6×

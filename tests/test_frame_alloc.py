@@ -269,7 +269,7 @@ def tick(dt, draw=True):
     return err
 
 
-def take_frames(on):
+def take_frames(on, palette=True):
     _state[0] = bool(on)
 
 

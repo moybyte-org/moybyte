@@ -1575,6 +1575,13 @@ class DeviceCanvas:
         whether its blits leave their frames there."""
         return bool(getattr(self._comp, "frames_supported", False))
 
+    @property
+    def presents_palette_frames(self):
+        """Whether blit's palette frames go that way too, beside blit565's:
+        the fold resolves a palette band by band, so wherever it shows
+        frames."""
+        return self.presents_frames
+
     def present_frame(self, cf, view, gc, ox, oy, scale, src=None):
         """Hand the flush a compiled cart's frame straight from its memory in
         place of blit_game: `view` is the frame the CartFrame `cf` owes (the

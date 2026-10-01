@@ -216,8 +216,9 @@ CLAUDE.md's placement rule:
   software bounds checks, which stay on; the frame, depth and transform
   buffers in PSRAM, where native keeps its hot buffers in internal SRAM; the
   frame's setup, which stays on one core and costs the sandbox more than the
-  raster does; and on the P4s the console's frame copy (the S3s show the
-  cart's frame without one).
+  raster does. No board writes a direct-colour frame into the game canvas:
+  the S3s fold it from the cart's memory, the P4s' PPA scales it from there
+  (a palette frame stays the blit's on a P4).
 
 ### Phase 4 — promotion (moy-spec; landed 2026-09-30)
 

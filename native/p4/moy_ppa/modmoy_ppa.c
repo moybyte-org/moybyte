@@ -19,6 +19,7 @@
 #include <string.h>
 #include "py/obj.h"
 #include "py/runtime.h"
+#include "py/mpthread.h"
 
 #include "driver/ppa.h"
 #include "esp_cache.h"
@@ -190,15 +191,35 @@ static mp_obj_t moy_ppa_deinit(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_deinit_obj, moy_ppa_deinit);
 
-// blit_scale(dst, dw, dh, dx, dy, src, sw, sh, scale)
-//   Integer-upscale the whole sw x sh RGB565 source into dst at (dx, dy) by
+// Read an optional source BLOCK -- (bx, by, bw, bh) of the sw x sh picture --
+// from args[i..i+3], or the whole picture when the caller passed none.
+static void srm_block(size_t n_args, const mp_obj_t *args, size_t i,
+                      mp_int_t sw, mp_int_t sh, mp_int_t *b) {
+    b[0] = 0;
+    b[1] = 0;
+    b[2] = sw;
+    b[3] = sh;
+    if (n_args < i + 4) {
+        return;
+    }
+    for (int k = 0; k < 4; k++) {
+        b[k] = mp_obj_get_int(args[i + k]);
+    }
+    if (b[0] < 0 || b[1] < 0 || b[2] <= 0 || b[3] <= 0
+            || b[0] + b[2] > sw || b[1] + b[3] > sh) {
+        mp_raise_ValueError(MP_ERROR_TEXT("source block"));
+    }
+}
+
+// blit_scale(dst, dw, dh, dx, dy, src, sw, sh, scale[, bx, by, bw, bh])
+//   Integer-upscale the sw x sh RGB565 source into dst at (dx, dy) by
 //   `scale` -- the hardware sibling of moy_gfx.blit565_scale. Blocking: returns
 //   after the DMA completes (the driver has synced caches), so the framebuffer
 //   is ready to scan out. dst must be the full-picture buffer (dw x dh); the
-//   scaled block (sw*scale x sh*scale) must land inside it (no clip yet -- the
-//   in-bounds game->window composite; cover-crop's negative offset is a
-//   follow-up that crops on the INPUT side).
-static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
+//   scaled block must land inside it (no clip). The source is the whole
+//   picture, or its (bx, by, bw, bh) block: a compiled cart's view of its
+//   frame, or a rect the console painted over one, read where it sits.
+static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t mode) {
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
     }
@@ -215,6 +236,11 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
     if (scale < 1) {
         scale = 1;
     }
+    mp_int_t blk[4];
+    srm_block(n_args, args, 9, sw, sh, blk);
+    if ((mp_int_t)src.len < sw * sh * 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("source picture"));
+    }
 
     // The out picture is the ROWS the scaled block lands on, not the whole
     // framebuffer -- the same scoping rotate()/rotate_scale() do. The driver's
@@ -229,7 +255,7 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
     // aligned; a row span inherits that only from a row stride that is a whole
     // number of lines (an RGB565 width that is a multiple of 32px), so a
     // picture that does not qualify keeps the whole buffer.
-    mp_int_t ow = sw * scale, oh = sh * scale;
+    mp_int_t ow = blk[2] * scale, oh = blk[3] * scale;
     uint8_t *out = (uint8_t *)dst.buf;
     size_t out_len = dst.len;
     mp_int_t out_h = dh, out_y = dy;
@@ -248,10 +274,10 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
             .buffer = src.buf,
             .pic_w = (uint32_t)sw,
             .pic_h = (uint32_t)sh,
-            .block_w = (uint32_t)sw,
-            .block_h = (uint32_t)sh,
-            .block_offset_x = 0,
-            .block_offset_y = 0,
+            .block_w = (uint32_t)blk[2],
+            .block_h = (uint32_t)blk[3],
+            .block_offset_x = (uint32_t)blk[0],
+            .block_offset_y = (uint32_t)blk[1],
             .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
         },
         .out = {
@@ -884,14 +910,129 @@ static mp_obj_t moy_ppa_dma_copy(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_dma_copy_obj, 5, 5, moy_ppa_dma_copy);
 
-// rotate_scale(dst, dw, dh, dx, dy, src, sw, sh, scale, angle[, nb[, wb]])
-//   The whole sw x sh RGB565 source, integer-upscaled by `scale` AND rotated
-//   by `angle` degrees counter-clockwise, into dst (dw x dh) at (dx, dy) --
-//   the quiet game frame of a landscape console on portrait glass in ONE
-//   PPA op: the game canvas goes straight to the scan buffer (150KB read,
-//   the scaled block written) instead of through the 2MB paint buffer.
-//   Bilinear like blit_scale (the PPA has no nearest mode; crisp mode takes
-//   the paint-buffer path). Blocking unless `nb` (see rotate).
+// -- THE FRAME SNAPSHOT: a compiled cart's frame, out of its memory ----------
+//
+// A compiled cart hands the console its frame where it made it, in its own
+// linear memory (libmoy's frame hand-off), and the PPA scales it from there.
+// What the console keeps of it is this copy: the frame shown again when the
+// cart does not replace it, and written into the game canvas when something
+// needs it there -- after the cart's next hook has run, by which time the
+// cart's memory is the cart's again. The AXI GDMA makes it beside whatever
+// the PPA is doing: a 320x240 frame in about 1.4 ms the VM core does not
+// wait for, where the CPU's copy of it into the canvas costs that core about
+// 2.4 ms. It shares PSRAM with the PPA's read of the same frame, and the
+// engine's widest burst (rb_dma_install's 64) is the cheapest overlap: a
+// narrower one stretched the copy over more of the scale and measured slower
+// on glass (2026-10-01). The engine wants 64-aligned ends and a frame sits
+// wherever the cart's allocator put it, so the copy is the 64-aligned span
+// around the frame and the frame starts a few bytes into the scratch -- the
+// same shape as moy_fold's snapshot on the S3 boards.
+//
+// One copy is in flight at most: `snap` fences the last one first, and
+// `snap_wait` is what a caller runs before reading the scratch, freeing it,
+// or letting the cart write the memory it was copied from. A copy that never
+// lands trips the deadline once and retires the engine for the session;
+// every later snapshot is a memcpy, as is any the engine refuses.
+
+static volatile bool s_snap_busy;
+static bool s_snap_dead;
+static uint32_t s_snaps, s_snaps_sync, s_snap_timeouts;
+static uint32_t s_snap_wait_us;
+
+static bool snap_done_cb(async_memcpy_handle_t h, async_memcpy_event_t *e, void *arg) {
+    (void)h; (void)e; (void)arg;
+    s_snap_busy = false;
+    return false;
+}
+
+static void snap_wait_inner(void) {
+    if (!s_snap_busy) {
+        s_snap_wait_us = 0;
+        return;
+    }
+    int64_t t0 = esp_timer_get_time();
+    int64_t deadline = t0 + PPA_FENCE_TIMEOUT_US;
+    MP_THREAD_GIL_EXIT();
+    while (s_snap_busy && esp_timer_get_time() < deadline) {
+    }
+    MP_THREAD_GIL_ENTER();
+    if (s_snap_busy) {
+        s_snap_busy = false;
+        s_snap_timeouts++;
+        s_snap_dead = true;
+    }
+    s_snap_wait_us = (uint32_t)(esp_timer_get_time() - t0);
+}
+
+// snap(scratch, frame) -> where in `scratch` the frame's first byte lands.
+//   Copy the 64-aligned span around `frame` into the start of `scratch`
+//   (64-aligned, at least the span long), by DMA when the engine takes it;
+//   fence with snap_wait(). A frame that already sits where its copy would
+//   land -- the last frame shown, shown again -- is not copied.
+static mp_obj_t moy_ppa_snap(mp_obj_t scratch_in, mp_obj_t frame_in) {
+    mp_buffer_info_t scr, fr;
+    mp_get_buffer_raise(scratch_in, &scr, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(frame_in, &fr, MP_BUFFER_READ);
+    uintptr_t a0 = (uintptr_t)fr.buf & ~(uintptr_t)63u;
+    size_t off = (size_t)((uintptr_t)fr.buf - a0);
+    size_t span = (off + fr.len + 63u) & ~(size_t)63u;
+    if (fr.len == 0 || scr.len < span || ((uintptr_t)scr.buf & 63u) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("snap scratch"));
+    }
+    uint8_t *dst = (uint8_t *)scr.buf;
+    snap_wait_inner();
+    if ((const uint8_t *)fr.buf == dst + off) {
+        return MP_OBJ_NEW_SMALL_INT(off);
+    }
+    if (!s_snap_dead && rb_dma_install()) {
+        s_snap_busy = true;
+        esp_err_t err = esp_async_memcpy(s_mcp, dst, (void *)a0, span, snap_done_cb, NULL);
+        if (err == ESP_OK) {
+            s_snaps++;
+            return MP_OBJ_NEW_SMALL_INT(off);
+        }
+        s_snap_busy = false;
+        if (err == ESP_ERR_INVALID_ARG) {
+            s_snap_dead = true;
+        }
+    }
+    memcpy(dst + off, fr.buf, fr.len);
+    s_snaps_sync++;
+    return MP_OBJ_NEW_SMALL_INT(off);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(moy_ppa_snap_obj, moy_ppa_snap);
+
+// snap_wait(): block until the snapshot in flight has landed (GIL released,
+//   bounded); one compare when none is.
+static mp_obj_t moy_ppa_snap_wait(void) {
+    snap_wait_inner();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_snap_wait_obj, moy_ppa_snap_wait);
+
+// snap_stats() -> (DMA snapshots, memcpy snapshots, timeouts, the last
+//   snap_wait's microseconds).
+static mp_obj_t moy_ppa_snap_stats(void) {
+    mp_obj_t t[4] = {
+        mp_obj_new_int_from_uint(s_snaps),
+        mp_obj_new_int_from_uint(s_snaps_sync),
+        mp_obj_new_int_from_uint(s_snap_timeouts),
+        mp_obj_new_int_from_uint(s_snap_wait_us),
+    };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_snap_stats_obj, moy_ppa_snap_stats);
+
+// rotate_scale(dst, dw, dh, dx, dy, src, sw, sh, scale, angle[, nb[, wb[,
+//              bx, by, bw, bh]]])
+//   The sw x sh RGB565 source -- or its (bx, by, bw, bh) block --
+//   integer-upscaled by `scale` AND rotated by `angle` degrees
+//   counter-clockwise, into dst (dw x dh) at (dx, dy) -- the quiet game frame
+//   of a landscape console on portrait glass in ONE PPA op: the game goes
+//   straight to the scan buffer (150KB read, the scaled block written)
+//   instead of through the 2MB paint buffer. Bilinear like blit_scale (the
+//   PPA has no nearest mode; crisp mode takes the paint-buffer path).
+//   Blocking unless `nb` (see rotate).
 static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
@@ -912,6 +1053,11 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
     if (scale < 1) {
         scale = 1;
     }
+    mp_int_t blk[4];
+    srm_block(n_args, args, 12, sw, sh, blk);
+    if ((mp_int_t)src.len < sw * sh * 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("source picture"));
+    }
     ppa_srm_rotation_angle_t rot;
     switch (angle) {
         case 0: rot = PPA_SRM_ROTATION_ANGLE_0; break;
@@ -921,8 +1067,8 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
         default:
             mp_raise_ValueError(MP_ERROR_TEXT("angle 0/90/180/270"));
     }
-    mp_int_t ow = (angle == 90 || angle == 270) ? sh * scale : sw * scale;
-    mp_int_t oh = (angle == 90 || angle == 270) ? sw * scale : sh * scale;
+    mp_int_t ow = (angle == 90 || angle == 270) ? blk[3] * scale : blk[2] * scale;
+    mp_int_t oh = (angle == 90 || angle == 270) ? blk[2] * scale : blk[3] * scale;
     if (dx < 0 || dy < 0 || dx + ow > dw || dy + oh > dh
             || (mp_int_t)dst.len < dw * dh * 2) {
         mp_raise_ValueError(MP_ERROR_TEXT("rotate_scale dst block"));
@@ -934,10 +1080,10 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
             .buffer = src.buf,
             .pic_w = (uint32_t)sw,
             .pic_h = (uint32_t)sh,
-            .block_w = (uint32_t)sw,
-            .block_h = (uint32_t)sh,
-            .block_offset_x = 0,
-            .block_offset_y = 0,
+            .block_w = (uint32_t)blk[2],
+            .block_h = (uint32_t)blk[3],
+            .block_offset_x = (uint32_t)blk[0],
+            .block_offset_y = (uint32_t)blk[1],
             .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
         },
         .out = {
@@ -972,7 +1118,7 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_scale_obj, 10, 12,
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_scale_obj, 10, 16,
                                            moy_ppa_rotate_scale);
 
 // wait(keep) -> bool: block until at most `keep` queued transactions remain
@@ -1016,9 +1162,9 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_done_obj, moy_ppa_done);
 
 // blit_scale(...): blocking -- returns after the DMA + cache sync completes.
 static mp_obj_t moy_ppa_blit_scale(size_t n_args, const mp_obj_t *args) {
-    return srm_blit(args, PPA_TRANS_MODE_BLOCKING);
+    return srm_blit(n_args, args, PPA_TRANS_MODE_BLOCKING);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_scale_obj, 9, 9,
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_scale_obj, 9, 13,
                                            moy_ppa_blit_scale);
 
 // blit_async(...): non-blocking -- enqueues and returns (blocks only if the
@@ -1026,9 +1172,9 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_scale_obj, 9, 9,
 // N-1 async + 1 blocking = a batch fence. Measures whether queued submission
 // beats the CPU batch blitter.
 static mp_obj_t moy_ppa_blit_async(size_t n_args, const mp_obj_t *args) {
-    return srm_blit(args, PPA_TRANS_MODE_NON_BLOCKING);
+    return srm_blit(n_args, args, PPA_TRANS_MODE_NON_BLOCKING);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_async_obj, 9, 9,
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_async_obj, 9, 13,
                                            moy_ppa_blit_async);
 
 
@@ -1285,6 +1431,9 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rotate_scale), MP_ROM_PTR(&moy_ppa_rotate_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate_bounce), MP_ROM_PTR(&moy_ppa_rotate_bounce_obj) },
     { MP_ROM_QSTR(MP_QSTR_dma_copy), MP_ROM_PTR(&moy_ppa_dma_copy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_snap), MP_ROM_PTR(&moy_ppa_snap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_snap_wait), MP_ROM_PTR(&moy_ppa_snap_wait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_snap_stats), MP_ROM_PTR(&moy_ppa_snap_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate_bounce_stats), MP_ROM_PTR(&moy_ppa_rotate_bounce_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_crisp_release), MP_ROM_PTR(&moy_ppa_crisp_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },

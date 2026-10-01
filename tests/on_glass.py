@@ -1604,10 +1604,111 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
     return ff1 - ff0
 
 
-def compiled_frames_keep_the_blit(board, title):
-    """A board without the frame fold: `ffold` is absent (None, never 0),
-    the run takes no frame, and the cart's frames are written into the game
-    canvas by the blit as SPEC.md §16.5 describes."""
+# A compiled cart's direct-colour frame on a P4: the PPA scales it from the
+# cart's memory and the GDMA snapshots it into the run's scratch
+# (device/p4_canvas.py, present_frame). The proof, between two frames: no blit
+# wrote the game canvas while the cart drew frame after frame; settling the
+# kept snapshot puts exactly its bytes into the canvas; and, on a board whose
+# composite lands in a scan buffer as it is (`glass`, the Waveshare), the game
+# rect on the buffer last composited is byte for byte the PPA's scale of that
+# snapshot -- rows above the console's patches (the FPS chip, the perf HUD
+# line), which come from the canvas.
+
+_P4_FRAME_PROOF = """
+def _p4_canvas_crc(rows):
+    import binascii
+    gc = ws.canvas
+    return binascii.crc32(memoryview(gc._buf)[:2 * gc.w * rows])
+
+def _p4_frame_proof(glass):
+    import binascii, moy_alloc, moy_ppa
+    cf = ws.cart_frame
+    comp = ws.comp
+    gc = ws.canvas
+    sc = ws.sys_canvas
+    gw = gc.w
+    gh = gc.h
+    n = 2 * gw * gh
+    moy_ppa.sync()
+    moy_ppa.snap_wait()
+    kept = cf.kept_view(cf._scratch, cf.kept_off, n)
+    bad = -1
+    if glass:
+        win = ws.wm._wins.get("desktop")
+        ox, oy, scale = ws.wm._player_view(win)
+        fbw, fbh = comp.size()
+        dst = moy_alloc.alloc(2 * fbw * fbh, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+        try:
+            moy_ppa.blit_scale(dst, fbw, fbh, ox, oy, kept, gw, gh, scale)
+            fb = comp._fbs[(comp._back - 1) % len(comp._fbs)]
+            bad = 0
+            for y in range(oy, oy + (gh - 24) * scale):
+                a = 2 * (y * fbw + ox)
+                b = a + 2 * gw * scale
+                if fb[a:b] != dst[a:b]:
+                    bad += sum(1 for i in range(a, b) if fb[i] != dst[i])
+        finally:
+            moy_alloc.free(dst)
+    want = binascii.crc32(kept)
+    cf.settle()
+    return (bad, binascii.crc32(gc._buf) == want)
+"""
+
+
+def p4_compiled_frames_go_to_the_glass_from_the_cart(board, title, glass,
+                                                     seconds=4.0):
+    """A P4's frame path for a blit565 cart: run `title` from the launcher
+    with the FPS chip on (an opaque rect over every frame), and every frame
+    it draws is snapshotted by the GDMA (no memcpy, no timeout), the game
+    canvas above the chip is never written while the frames change, and the
+    proof above reads 0 and a settle that reproduces the snapshot. Returns
+    the snapshots taken in `seconds`."""
+    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    fps_was = board.pyval("ws.show_fps", strict=True)
+    board.pyexec("ws.show_fps = True", strict=True)
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(3.0)
+        st = board.state()
+        assert st.get("cart") == title and not st.get("cart_error"), st
+        assert board.pyexec(_P4_FRAME_PROOF, strict=True)
+        rows = "ws.canvas.h - 24"
+        crc0 = board.pyval("ws._g['_p4_canvas_crc'](%s)" % rows, strict=True)
+        snaps0 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
+        f0 = st["frames"]
+        board.drain(seconds)
+        st = board.state()
+        f1 = st["frames"]
+        snaps1 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
+        crc1 = board.pyval("ws._g['_p4_canvas_crc'](%s)" % rows, strict=True)
+        assert board.pyval("ws.cart_frame.fmt", strict=True) == 1
+        bad, settled = board.pyval("ws._g['_p4_frame_proof'](%r)" % bool(glass),
+                                   timeout=120, strict=True)
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+        board.pyexec("ws.show_fps = %r" % bool(fps_was))
+    print("\nP4 FRAMES %s: %d snapshots over %d frames in %.0fs, snap %r -> %r, "
+          "glass %r, settle %r" % (title, snaps1[0] - snaps0[0], f1 - f0,
+                                   seconds, snaps0, snaps1, bad, settled))
+    assert snaps1[0] - snaps0[0] >= (f1 - f0) // 2 > 0, (
+        "the frames were not snapshotted from the cart's memory")
+    assert snaps1[1] == snaps0[1], "a snapshot was a CPU copy"
+    assert snaps1[2] == snaps0[2], "a snapshot copy timed out"
+    assert crc1 == crc0, "a blit565 frame was written into the game canvas"
+    assert settled, "the settled canvas is not the snapshot"
+    if glass:
+        assert bad == 0, "the glass differs from the snapshot's scale: %d bytes" % bad
+    return snaps1[0] - snaps0[0]
+
+
+def p4_palette_frames_keep_the_blit(board, title, seconds=2.0):
+    """A P4 shows blit565's frames from the cart's memory and leaves blit's
+    to the blit (ESP-IDF disables the PPA's palette mode): the run holds a
+    CartFrame, yet the palette fixture's frames are written into the game
+    canvas frame after frame and no snapshot is taken. The board has no
+    frame fold, and says so by absence."""
     assert board.state().get("ffold") is None
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
     assert line is not None and "no cart match" not in line, line
@@ -1615,11 +1716,19 @@ def compiled_frames_keep_the_blit(board, title):
         board.drain(2.5)
         st = board.state()
         assert st.get("cart") == title and not st.get("cart_error"), st
-        assert board.pyval("ws.cart_frame is None", strict=True) is True
-        assert st.get("ffold") is None
+        assert board.pyval("ws.cart_frame is not None", strict=True) is True
+        crc = ("__import__('binascii').crc32(ws.canvas._buf)")
+        snaps0 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
+        crc0 = board.pyval(crc, strict=True)
+        board.drain(seconds)
+        snaps1 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
+        crc1 = board.pyval(crc, strict=True)
+        assert board.pyval("ws.cart_frame.fmt", strict=True) == 0
     finally:
         board.leave_cart()
         board.drain(1.0)
+    assert snaps1[:2] == snaps0[:2], "a palette frame was snapshotted"
+    assert crc1 != crc0, "the blit did not write the canvas"
 
 
 def doom_runs_or_opens_the_notice(board, board_dir, floor=None):

@@ -120,11 +120,12 @@ def test_par_items_across_the_cores_match_them_in_order(board, wasm_carts):
     on_glass.wasm_par_matches_items_in_order(board, lanes=1)
 
 
-# The P4s keep the blit: a windowed desk re-composites the game canvas while
-# the cart is not running, so the canvas has to hold every frame, and the
-# board says it lacks the frame fold by absence.
-def test_a_compiled_carts_frames_are_written_into_the_canvas(board, wasm_carts):
-    on_glass.compiled_frames_keep_the_blit(board, wasm_carts["blit"])
+# A palette frame stays the blit's on a P4 (ESP-IDF disables the PPA's
+# palette mode); a direct-colour one goes to the glass from the cart's memory
+# (the Jet section below), and the board says it lacks the frame fold by
+# absence.
+def test_a_compiled_carts_palette_frames_are_written_into_the_canvas(board, wasm_carts):
+    on_glass.p4_palette_frames_keep_the_blit(board, wasm_carts["blit"])
 
 
 def test_a_compiled_cart_with_no_module_runs_on_the_interpreter(board, wasm_carts):
@@ -159,10 +160,10 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
 # launcher: uncapped with WiFi off, in Phong -- the costliest of its three
 # shadings and the steadiest to measure -- at half and at full width. The
 # floors sit about a fifth under what this board drew, its raster on both
-# cores, when they were set (2026-09-29); the figures are #158's. The cart
+# cores, when they were set (2026-10-01); the figures are #158's. The cart
 # stays installed as it ships.
-JET_HALF_FPS_FLOOR = 20
-JET_FULL_FPS_FLOOR = 17
+JET_HALF_FPS_FLOOR = 26
+JET_FULL_FPS_FLOOR = 22
 
 
 def test_the_jet_showcase_holds_its_floor_at_half_width(board):
@@ -173,6 +174,15 @@ def test_the_jet_showcase_holds_its_floor_at_half_width(board):
 def test_the_jet_showcase_holds_its_floor_at_full_width(board):
     on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_FULL_FPS_FLOOR,
                                  shading="phong")
+
+
+# Its blit565 frames go to the glass from the cart's memory: the PPA scales
+# them from there and the GDMA snapshots each into the run's scratch, and
+# nothing writes them into the game canvas (device/p4_canvas.py).
+def test_the_showcases_frames_go_to_the_glass_from_the_cart(board):
+    on_glass.jet_push(board, WASM_BOARD_DIR)
+    on_glass.p4_compiled_frames_go_to_the_glass_from_the_cart(
+        board, on_glass.JET_TITLE, glass=False)
 
 
 # Doom, built by the recipe (experiments/wasm_aot/doom/): skips until the

@@ -35,9 +35,12 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
     frame moves none of them — measured over 34 frames) — is ONE PPA op: the
     320×240 game canvas scaled AND rotated straight into the scan buffer,
     plus the top bar's strip (an ungated blit every play frame) rotated from
-    the paint buffer. Both the windowed player and fullscreen play take it;
-    crisp pixels (bilinear PPA declined) composite into the paint buffer
-    first and rotate the rect from there.
+    the paint buffer. Both the windowed player and fullscreen play take it,
+    and a compiled cart's direct-colour frame takes it from the GDMA
+    snapshot of the cart's memory (`P4SystemCanvas.present_frame`); crisp
+    pixels, which apply to the palette-based frames alone (bilinear PPA
+    declined), composite into the paint buffer first and rotate the rect
+    from there.
   - a DAMAGE frame (2026-09-08) — the WM painted and DESCRIBED what: a
     drag's gesture union, the window a scroll or a keystroke re-rendered
     (`WindowedWM._hand_damage` → the root canvas's `note_damage`, which only

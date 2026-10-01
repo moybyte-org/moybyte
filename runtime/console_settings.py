@@ -92,8 +92,9 @@ class SettingsToggles:
     def set_crisp_pixels(self, on, persist=True):
         """Flip the CRISP PIXELS composite (Settings row, capability-gated) and
         persist it. The mode lives on the SYSTEM canvas (set_crisp_scale --
-        the P4's P4SystemCanvas routes the game composite nearest-neighbour
-        instead of the PPA's fixed-bilinear scaler); a canvas without the hook
+        the P4's P4SystemCanvas routes the game canvas's composite
+        nearest-neighbour instead of the PPA's fixed-bilinear scaler, and
+        leaves a compiled cart's direct-colour frame bilinear); a canvas without the hook
         never shows the row, so this setter is then only ever the boot apply
         of a stale system.json key."""
         on = bool(on)

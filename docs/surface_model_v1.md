@@ -324,6 +324,13 @@ it. `end_frame()`'s ordering rule holds there too: the quiet game frame's
 rotate is queued at flush and fenced at the next present, before the cart's
 tick can write the canvas it was copied from.
 
+**A compiled cart's direct-colour frame adds nothing here either**
+(`device/p4_canvas.py`'s `present_frame`): the composite at the game
+boundary -- the play world's and the player window's -- hands the PPA the
+cart's frame, or the DMA snapshot of it, where it would have handed it the
+game canvas, and the opaque rects the shell draws over it are declared as in
+§5.1. Nothing decides what changed.
+
 ### 5.3 Host sim — reference implementation
 
 pygame; buffers are cheap, so this backend implements the contract in its

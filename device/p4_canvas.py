@@ -51,10 +51,12 @@ class P4SystemCanvas(SystemCanvas):
     # Game-composite filtering: the PPA's SRM scaler is fixed BILINEAR in
     # silicon (no nearest mode, no flag -- 2026-08-20), which smears pixel-art
     # carts. False = CRISP PIXELS (Settings row, persisted via
-    # the console's crisp-pixels setter -> set_crisp_scale below): the composite goes
-    # nearest-neighbour through moy_ppa.blit_crisp's SRAM-bounce band pipeline,
-    # falling back to the CPU kernel. A class attribute like _ppa: the one
-    # system canvas and its layers share the mode.
+    # the console's crisp-pixels setter -> set_crisp_scale below): the game
+    # canvas's composite goes nearest-neighbour through moy_ppa.blit_crisp's
+    # SRAM-bounce band pipeline, falling back to the CPU kernel. A compiled
+    # cart's direct-colour frame is scaled from the cart's memory
+    # (present_frame) and keeps the bilinear scale. A class attribute like
+    # _ppa: the one system canvas and its layers share the mode.
     _smooth = True
 
     @classmethod
@@ -104,6 +106,15 @@ class P4SystemCanvas(SystemCanvas):
         self._q_fill = -1
         self._q_text = -1
         self._q_clears = -1
+        # A compiled cart's frame (present_frame): the scratch's patch
+        # picture, viewed once per scratch rather than sliced every frame, the
+        # frame's patches, and its composite for the rotated compositor's
+        # paint route, bound once.
+        self._pic = None
+        self._pic_for = None
+        self._fr = None
+        self._fr_patches = [0] * 24       # six numbers a patch, four at most
+        self._paint_frame_fn = self._paint_frame
 
     def cls(self, c=0):
         # Counted, because a clear is the one whole-surface write the native
@@ -119,10 +130,12 @@ class P4SystemCanvas(SystemCanvas):
 
     def set_crisp_scale(self, on):
         """Settings -> CRISP PIXELS (probed by the console's crisp-pixels setter): route
-        the game composite nearest-neighbour instead of the PPA's fixed
-        bilinear. Turning crisp OFF returns blit_crisp's SRAM bounce bands to
-        the internal heap -- that pool is the Lua allocator's first choice, so
-        a mode nobody has on must not tax it."""
+        the game canvas's composite nearest-neighbour instead of the PPA's
+        fixed bilinear -- the palette-based frames, pixel art's. A compiled
+        cart's direct-colour frame (present_frame) keeps the bilinear scale
+        either way. Turning crisp OFF returns blit_crisp's SRAM bounce bands
+        to the internal heap -- that pool is the Lua allocator's first choice,
+        so a mode nobody has on must not tax it."""
         on = bool(on)
         P4SystemCanvas._smooth = not on
         ppa = self._ppa
@@ -311,6 +324,181 @@ class P4SystemCanvas(SystemCanvas):
             return
         g.blit565_scale(self._buf, self.w, self.h, ox, oy,
                         gc._buf, gc.w, gc.h, scale)
+
+    # -- a compiled cart's frame, from its own memory -------------------------
+    #
+    # A compiled cart's blit565 frame is little-endian RGB565, this panel's
+    # own order, so the PPA scales it to the glass from where the cart made
+    # it, in its linear memory, and nothing writes it into the game canvas.
+    # Beside the scale the GDMA copies it into the run's scratch
+    # (moy_ppa.snap): the copy shown again when the cart does not replace the
+    # frame, and written into the canvas (CartFrame.settle) when something
+    # needs it there, by which time the cart's next hook may have changed its
+    # memory. sync_back fences that copy before the hook (`_snap_live`, as on
+    # the S3 boards), and the next frame's copy first waits out every PPA op
+    # still reading the last one. A palette frame stays the blit's: ESP-IDF
+    # disables the PPA's palette mode.
+    #
+    # The opaque rects the console paints over a frame on the game canvas --
+    # the FPS chip, the perf HUD line, declared by their painter (`cf.rects`)
+    # -- are scaled over the frame by ops of their own: from the game canvas
+    # itself where the frame's ops are fenced before the cart's next hook (the
+    # Waveshare), and where they may outlive it (the rotated compositor) from
+    # a PATCH PICTURE at the scratch's tail, the canvas's width and
+    # PATCH_ROWS tall, the rects copied in packed down it. Each patch is six
+    # numbers in `_fr_patches`: its source block and where its scaled image
+    # lands.
+
+    PATCH_ROWS = 32
+
+    @property
+    def presents_frames(self):
+        return getattr(self._ppa, "snap", None) is not None
+
+    presents_palette_frames = False
+
+    def present_frame(self, cf, view, gc, ox, oy, scale, src=None,
+                      defer=False):
+        """Show a compiled cart's blit565 frame where blit_game would have
+        composited the game canvas: `view` is the frame the CartFrame `cf`
+        owes or keeps (the game canvas `gc`'s size), `src` the cart's view
+        rect, `defer` blit_game's -- the composite may be the frame's last
+        write. The Waveshare scales `view` itself: its deferred composite
+        is a "game" show, fenced before the cart's next hook as the canvas's
+        is. The rotated compositor's quiet-frame op outlives that fence, so
+        it scales the snapshot. CRISP PIXELS does not apply: the bilinear
+        scale is the frame's either way. False when it cannot take the
+        frame -- a palette frame, a geometry the PPA cannot place, more patch
+        rows than the picture holds, no scratch: the caller settles it into
+        the canvas and composites as ever."""
+        ppa = self._ppa
+        gw = gc.w
+        gh = gc.h
+        n = 2 * gw * gh
+        if ppa is None or len(view) != n:
+            return False
+        if src is not None:
+            sx, sy, vw, vh = src
+        else:
+            sx = 0
+            sy = 0
+            vw = gw
+            vh = gh
+        ox = int(ox)
+        oy = int(oy)
+        scale = int(scale)
+        if (ox < 0 or oy < 0 or ox + vw * scale > self.w
+                or oy + vh * scale > self.h):
+            return False
+        base = (n + 191) & ~63            # past any span the snapshot takes
+        pic_n = 2 * gw * self.PATCH_ROWS
+        scr = cf.scratch(base + pic_n)
+        if scr is None:
+            return False
+        if scr is not self._pic_for:
+            self._pic_for = scr
+            self._pic = memoryview(scr)[base:base + pic_n]
+        comp = self._comp
+        rotated = getattr(comp, "rotated", False)
+        ppa.wait(0)                       # nothing reads the last copy now
+        npatch = self._patch(cf, gc, sx, sy, vw, vh, ox, oy, scale, rotated)
+        if npatch < 0:
+            return False
+        off = ppa.snap(scr, view)
+        self._snap_live = True
+        try:
+            if rotated:
+                self._fr = (cf.kept_view(scr, off, n), gw, gh, sx, sy, vw, vh,
+                            ox, oy, scale, npatch)
+                comp.mark_game(self._fr[0], gw, gh, ox, oy, scale,
+                               self._paint_frame_fn, self._gates_unchanged,
+                               True, frame=(sx, sy, vw, vh, self._pic,
+                                            self.PATCH_ROWS,
+                                            self._fr_patches, npatch))
+            else:
+                blit = ppa.blit_async if defer else ppa.blit_scale
+                blit(self._buf, self.w, self.h, ox, oy, view, gw, gh, scale,
+                     sx, sy, vw, vh)
+                self._blit_patches(blit, gc._buf, gw, gh, scale, npatch)
+                if defer:
+                    comp._composite_pending = True
+        except (OSError, ValueError) as exc:
+            print("Moybyte P4 frame composite refused -> canvas:", exc)
+            ppa.sync()
+            return False
+        cf.presented(scr, off)
+        return True
+
+    def _patch(self, cf, gc, sx, sy, vw, vh, ox, oy, scale, copy):
+        """Record each rect the console painted over the frame, clipped to
+        the cart's view: its block and where its scaled image lands. With
+        `copy` the rects are copied out of the game canvas into the patch
+        picture first and the blocks are the picture's; without, they are
+        the canvas's own. Returns how many, or -1 when they need more rows
+        than the picture has."""
+        n = cf.nrects
+        if not n:
+            return 0
+        r = cf.rects
+        pr = self._fr_patches
+        vx1 = sx + vw
+        vy1 = sy + vh
+        rows = self.PATCH_ROWS
+        row = 0
+        k = 0
+        for i in range(n):
+            j = 4 * i
+            x0 = r[j]
+            y0 = r[j + 1]
+            x1 = x0 + r[j + 2]
+            y1 = y0 + r[j + 3]
+            if x0 < sx:
+                x0 = sx
+            if y0 < sy:
+                y0 = sy
+            if x1 > vx1:
+                x1 = vx1
+            if y1 > vy1:
+                y1 = vy1
+            if x1 <= x0 or y1 <= y0:
+                continue
+            h = y1 - y0
+            by = y0
+            if copy:
+                if row + h > rows or self._gfx is None:
+                    return -1
+                self._gfx.blit565(self._pic, gc.w, rows, 0, row - y0, gc._buf,
+                                  gc.w, gc.h, -1, x0, row, x1, row + h)
+                by = row
+                row += h
+            j = 6 * k
+            pr[j] = x0
+            pr[j + 1] = by
+            pr[j + 2] = x1 - x0
+            pr[j + 3] = h
+            pr[j + 4] = ox + (x0 - sx) * scale
+            pr[j + 5] = oy + (y0 - sy) * scale
+            k += 1
+        return k
+
+    def _blit_patches(self, blit, src, sw, sh, scale, npatch):
+        pr = self._fr_patches
+        for k in range(npatch):
+            j = 6 * k
+            blit(self._buf, self.w, self.h, pr[j + 4], pr[j + 5], src, sw, sh,
+                 scale, pr[j], pr[j + 1], pr[j + 2], pr[j + 3])
+
+    def _paint_frame(self):
+        """The rotated compositor's paint route for a frame present_frame
+        registered: its view and patches scaled into the paint buffer from
+        the snapshot, blocking."""
+        kept, gw, gh, sx, sy, vw, vh, ox, oy, scale, npatch = self._fr
+        ppa = self._ppa
+        ppa.snap_wait()
+        ppa.blit_scale(self._buf, self.w, self.h, ox, oy, kept, gw, gh, scale,
+                       sx, sy, vw, vh)
+        self._blit_patches(ppa.blit_scale, self._pic, gw, self.PATCH_ROWS,
+                           scale, npatch)
 
     # NOTE: no PPA path for the full-screen backdrop restore -- a 1:1 copy is
     # PSRAM-bandwidth-bound (measured ~26ms both ways: the DSI scan-out shares

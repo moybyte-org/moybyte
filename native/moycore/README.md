@@ -76,22 +76,27 @@ never presented; `quit()` ends the cart where it stands (`wasm_quit()` says so).
 **A frame can go to the glass from the cart's own memory.** libmoy's
 binding offers every `blit`/`blit565` frame to the host (`moy_wasm.h`'s
 `frame`), and while the board's system canvas `presents_frames` --
-`take_frames(True)`, set by `WasmRun` for its run -- moycore takes it: the
-canvas is not written, and the frame is owed. `frame(lut)` hands the owed
-frame to Python as a view into the cart's memory (a palette frame's 256 wire
+`take_frames(True, palette)`, set by `WasmRun` for its run -- moycore takes
+it: the canvas is not written, and the frame is owed. `palette` is the
+canvas's `presents_palette_frames`: a banded S3 board takes both layouts, a
+P4 blit565's alone (ESP-IDF disables the PPA's palette mode), so a palette
+frame there is written by the blit as ever. `frame(lut)` hands the owed frame
+to Python as a view into the cart's memory (a palette frame's 256 wire
 colours copied into `lut`); the console's composite point passes it to the
-system canvas (`DeviceCanvas.present_frame`), whose banded flush snapshots it
-by DMA and resolves it band by band (`native/moy_flush/moy_fold.h`), and
-`frame_presented(copy, off)` tells the binding where that snapshot keeps it.
-Everything that would read or draw over a frame the canvas lacks gets it
-first, in the binding's one conversion body: a verb over it, `frame_settle()`
-(the console's own painters and the fallback when the flush declines), and
+system canvas (`present_frame`), which snapshots it by DMA into the run's
+scratch and shows it -- a banded flush resolves it band by band
+(`native/moy_flush/moy_fold.h`), a P4's PPA scales it
+(`device/p4_canvas.py`) -- and `frame_presented(copy, off)` tells the binding
+where that snapshot keeps it. Everything that would read or draw over a frame
+the canvas lacks gets it first, in the binding's one conversion body: a verb
+over it, `frame_settle()` (the console's own painters, the fallback when the
+board declines, and the run's close -- the owed frame or the snapshot's), and
 the cart's next hook when nothing showed it; a cart that draws on the screen
-before its next blit has the screen written from the snapshot. The FPS chip
-and the perf HUD line are opaque rects, so they are declared
-(`ws.patch_cart_frame`) and the flush takes them from the game canvas instead.
-The proposal's rule is what makes the late read legal: a frame stays as
-blitted until `_draw` returns.
+before its next blit has the screen written from the snapshot, and a trap
+drops the snapshot with the frame it interrupted. The FPS chip and the perf
+HUD line are opaque rects, so they are declared (`ws.patch_cart_frame`) and
+taken from the game canvas instead. The proposal's rule is what makes the
+late read legal: a frame stays as blitted until `_draw` returns.
 
 It compiles only when the engine is in the image: `native/moy_wasm`'s cmake
 defines `MOY_WASM`, `moycore.WASM` is 1 there and 0 on the unix and wasm-runner

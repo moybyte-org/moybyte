@@ -156,10 +156,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   skipping the root composite and its read-back, and no bounce slot crosses
   into Python. A compiled cart's frame folds straight from the cart's memory
   (blit's palette or blit565's byte swap resolved per band), so no canvas holds
-  it; the P4s keep the blit, because a windowed desk re-composites the game
-  canvas while the cart is not running. The game WINDOW is the Guition S3's
-  alone — it needs a panel whose GRAM keeps the bezels. `tdeck_panel.py`'s
-  header and `moy_fold.h` are the authority.
+  it. The game WINDOW is the Guition S3's alone — it needs a panel whose GRAM
+  keeps the bezels. `tdeck_panel.py`'s header and `moy_fold.h` are the
+  authority.
 - **The panel rules live in `native/moy_lcd`'s C**: DMA only from internal
   SRAM, only the first band carries a command (what "a full-screen flush must
   be a single `tx_color`" meant), and a band fits one SPI DMA transaction — a
@@ -197,6 +196,16 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   `moy_flush`). SD power, the C6's SDMMC slot, the 200 MHz PSRAM floor and the
   VFS shadowing rule (the store root is `/moy/carts`) are the Waveshare
   README's.
+- **A compiled cart's blit565 frame skips the game canvas**
+  (`p4_canvas.present_frame`): the PPA scales it from the cart's memory, or
+  from the GDMA snapshot every frame takes into the run's scratch where the
+  op outlives the fence before the cart's next hook (the rotated
+  compositor's), and the snapshot is what a frame the cart did not replace —
+  the windowed desk's re-composite included — is shown again from. It is
+  written into the canvas only when something needs it there (the CartFrame
+  rules). A palette frame keeps the blit: ESP-IDF disables the PPA's palette
+  mode. CRISP PIXELS is the canvas composite's alone; a direct-colour frame
+  is always the bilinear scale.
 - **An async PPA op must be the frame's LAST write**, and `moy_ppa` must
   C2M-writeback a CPU-painted destination before submit, because the IDF
   driver invalidates the out window at submit. Both are ROW-SCOPED

@@ -2589,25 +2589,29 @@ static void wo_lane_wait(void *user, int lane)
 }
 
 // The frame hand-off (libmoy/moy_wasm.h's `frame`): while the board says it
-// can show a frame from the cart's memory (take_frames), every blit leaves its
-// frame there, owed, and the canvas is written only when something needs it
-// -- a verb over it, a settle, or the cart's next hook. On the engine's
-// thread, so it only answers.
+// can show a frame from the cart's memory (take_frames), every blit of a
+// layout it takes leaves its frame there, owed, and the canvas is written only
+// when something needs it -- a verb over it, a settle, or the cart's next
+// hook. On the engine's thread, so it only answers. TAKE_565 and TAKE_PALETTE
+// are the two layouts: blit565's words, and blit's indices with their colours.
+#define TAKE_565 1
+#define TAKE_PALETTE 2
 static volatile int g_take_frames;
 
 static int wo_frame(void *user, const uint8_t *pixels, const moy_pixel *lut)
 {
     (void)user;
     (void)pixels;
-    (void)lut;
-    return g_take_frames;
+    return g_take_frames & (lut ? TAKE_PALETTE : TAKE_565);
 }
 
 // A trap ends the run, and the frame it interrupted is never presented: the
-// canvas is cleared before the console paints its report over it.
+// canvas is cleared before the console paints its report over it, and the
+// last frame shown is not shown again over the report.
 static void wasm_trapped(void)
 {
     WR->dead = 1;
+    WR->w.kept = NULL;
     moy_reset_state(&RUN.canvas);
     moy_cls(&RUN.canvas, 0);
 }
@@ -2756,19 +2760,27 @@ static mp_obj_t mod_wasm_quit(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_quit_obj, mod_wasm_quit);
 
-// take_frames(on) -- whether a compiled cart's blits leave their frames in its
-// memory for the board to show (frame/frame_presented) instead of writing the
-// canvas. Off at every run's end.
-static mp_obj_t mod_take_frames(mp_obj_t on)
+// take_frames(on, palette=True) -- whether a compiled cart's blits leave
+// their frames in its memory for the board to show (frame/frame_presented)
+// instead of writing the canvas: blit565's when `on`, and blit's too unless
+// `palette` is false, for a board that cannot show a palette frame. Off at
+// every run's end.
+static mp_obj_t mod_take_frames(size_t n_args, const mp_obj_t *a)
 {
 #if MOY_WASM
-    g_take_frames = mp_obj_is_true(on) ? 1 : 0;
+    int take = 0;
+    if (mp_obj_is_true(a[0])) {
+        take = TAKE_565;
+        if (n_args < 2 || mp_obj_is_true(a[1])) take |= TAKE_PALETTE;
+    }
+    g_take_frames = take;
 #else
-    (void)on;
+    (void)n_args;
+    (void)a;
 #endif
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_take_frames_obj, mod_take_frames);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_take_frames_obj, 1, 2, mod_take_frames);
 
 // frame(lut_out) -> the owed frame as a memoryview into the cart's memory, or
 // None. W x H bytes are blit's indices, whose 256 wire colours are copied into
@@ -2825,13 +2837,22 @@ static mp_obj_t mod_frame_kept(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_frame_kept_obj, mod_frame_kept);
 
-// frame_settle() -- write the owed frame into the canvas now, as the blit
-// would have: for anything about to draw on the canvas, or read it, while the
-// frame is still the cart's.
+// frame_settle() -- write the frame the canvas lacks into it now, as the blit
+// would have: the owed one, or the last one shown from the copy
+// frame_presented named. For anything about to draw on the canvas, or read
+// it, while the frame is still the cart's or the board's. A kept frame is
+// handed back as owed so the binding's own settle writes it, in the layout
+// and with the colours of the blit that made it.
 static mp_obj_t mod_frame_settle(void)
 {
 #if MOY_WASM
-    if (RUN.wasm && WR) moy_wasm_settle(&WR->w);
+    if (RUN.wasm && WR) {
+        if (!WR->w.owed && WR->w.kept) {
+            WR->w.owed = WR->w.kept;
+            WR->w.kept = NULL;
+        }
+        moy_wasm_settle(&WR->w);
+    }
 #endif
     return mp_const_none;
 }
