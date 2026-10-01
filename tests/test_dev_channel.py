@@ -1523,22 +1523,24 @@ def test_a_full_store_is_said_plainly_to_moy_push_and_on_screen(tmp_path, capsys
 
 def test_a_compiled_cart_without_its_module_is_noted_at_rescan(tmp_path, capsys,
                                                              monkeypatch):
-    """`moy push` cannot build the module a board runs a compiled cart from, so
-    the rescan says so -- in a moy-note, which the tool shows the person."""
+    """`moy push` cannot build the module a board runs a compiled cart from
+    at full speed, so the rescan says so -- in a moy-note, which the tool shows
+    the person. The module is named for the chip AND the format."""
     from runtime import dev_channel
     monkeypatch.setattr(dev_channel, "_moy_chip", lambda: "esp32s3")
+    monkeypatch.setattr(dev_channel, "_moy_format", lambda: "2")
     ws, ch, stdin = text_channel(tmp_path)
     man = b'{"format": "moy-1", "title": "P", "runtime": "wasm", "memory": 4}'
     stdin.data = list(put_lines("p.moy/manifest.json", man)
                       + put_lines("p.moy/main.wasm", b"\0asm\1\0\0\0")
                       + put_lines("q.moy/manifest.json", man)
                       + put_lines("q.moy/main.wasm", b"\0asm\1\0\0\0")
-                      + put_lines("q.moy/main.esp32s3.aot", b"module")
+                      + put_lines("q.moy/main.esp32s3.f2.aot", b"module")
                       + "moy-rescan\n")
     pump(ws, ch, stdin)
     notes = _said(capsys, "moy-note ")
     assert len(notes) == 1 and notes[0].startswith("moy-note p.moy is a compiled cart")
-    assert "tools/push_cart.py" in notes[0]
+    assert "tools/push_cart.py" in notes[0] and "interpreter" in notes[0]
 
 
 def test_moy_del_and_moy_run(tmp_path, capsys):

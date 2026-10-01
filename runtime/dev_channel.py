@@ -497,6 +497,16 @@ def _moy_chip():
         return None
 
 
+def _moy_format():
+    """This board's compiled-code format version, which its modules' names
+    carry; None on a build without the WebAssembly engine."""
+    try:
+        import moy_wasm
+        return moy_wasm.FORMAT
+    except (ImportError, AttributeError):
+        return None
+
+
 def _moy_descriptor(ws):
     """proposals/sideload.md's descriptor, answered to `moy?`."""
     try:
@@ -519,9 +529,12 @@ def _moy_descriptor(ws):
 
 
 def _moy_notes(folders, ws):
-    """What a `moy push` of `folders` leaves unplayable here: a compiled cart
-    with no module for this board's chip, which `moy push` cannot build."""
+    """What a `moy push` of `folders` leaves slow here: a compiled cart with no
+    module for this board's chip and format, which `moy push` cannot build --
+    it plays on the interpreter (docs/wasm_tier_plan_2026-09.md, "A cart
+    survives its firmware")."""
     chip = _moy_chip()
+    fmt = _moy_format()
     root = getattr(ws, "carts_root", None)
     if not chip or not root:
         return []
@@ -540,12 +553,12 @@ def _moy_notes(folders, ws):
         main = man.get("main") or "main.wasm"
         stem = main[:-5] if main.endswith(".wasm") else main
         try:
-            os.stat("%s/%s.%s.aot" % (base, stem, chip))
+            os.stat("%s/%s.%s.f%s.aot" % (base, stem, chip, fmt))
         except OSError:
-            notes.append("%s is a compiled cart, and this console runs one only "
-                         "from a module built for its chip (%s). Push it with "
-                         "Moybyte's tools/push_cart.py, which builds that module."
-                         % (folder, chip))
+            notes.append("%s is a compiled cart with no module for this console "
+                         "(%s, format %s), so it plays slowly on the interpreter. "
+                         "Push it with Moybyte's tools/push_cart.py, which "
+                         "builds that module." % (folder, chip, fmt))
     return notes
 
 
