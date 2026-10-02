@@ -74,7 +74,7 @@ class Repo:
 
     def add(self, cid, version=1, runtime="wasm", name=None, spdx="MIT",
             modules=(("esp32s3", 2), ("esp32p4", 2)), extra=None, external=None,
-            config=b'{"speed": 2}\n', main=b"\0asm\x01\0\0\0 main"):
+            config=b'{"speed": 2}\n', main=b"\0asm\x01\0\0\0 main", cover=None):
         folder = cid + ".moy"
         name = name or cid.replace("_", " ").title()
         files = {"manifest.json": json.dumps({"format": "moy-1", "title": name,
@@ -87,6 +87,8 @@ class Repo:
             files["main.%s.f%s.aot" % (chip, fmt)] = module_bytes(chip, fmt,
                                                                  str(version).encode())
         files.update(extra or {})
+        if cover is not None:
+            files["cover.png"] = cover
         z = stored_zip(folder, files)
         rel = "releases/%s-v%d/%s.zip" % (cid, version, folder)
         self.files[rel] = z
@@ -108,6 +110,18 @@ class Repo:
             "external": [],
             "build": {"commit": "0" * 40, "keys": {}, "modules": {}, "pins": {}},
         }
+        if cover is not None:
+            # moy-spec's `moy index` (cartindex.with_cover): beside the licence,
+            # served from the repository like it.
+            self.files["carts/%s/cover.png" % cid] = cover
+            ref = {"url": "carts/%s/cover.png" % cid, "size": len(cover),
+                   "sha256": sha(cover), "w": 128, "h": 128}
+            placed = {}
+            for k, v in entry.items():
+                placed[k] = v
+                if k == "licence":
+                    placed["cover"] = ref
+            entry = placed
         for path, data, member in external or ():
             arc = tar_gz({member: data, "pkg/README": b"read me\n"})
             arel = "mirror/%s.tar.gz" % path

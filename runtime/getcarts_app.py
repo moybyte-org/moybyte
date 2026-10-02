@@ -5,10 +5,16 @@ The screens, in the order a kid meets them:
 
   CHECKING   the radio comes up under the "carts" lease and every index is
              fetched -- moybyte-org's carts repositories unless `indexes.json`
-             beside the carts folder names others (runtime/cart_index.py).
-  LIST       a big row per cart: its name, licence and size here, and where it
-             stands -- GET, ON CONSOLE, UPDATE, NAME TAKEN when a different
-             cart already has its folder, TOO BIG or CAN'T PLAY.
+             beside the carts folder names others (runtime/cart_index.py) --
+             then the covers they name that this session has not drawn yet.
+  LIST       a big row per cart: its cover when its index names one, its
+             name, licence and size here, and where it stands -- GET, ON
+             CONSOLE, UPDATE, NAME TAKEN when a different cart already has its
+             folder, TOO BIG or CAN'T PLAY. A row's cover is the reduction of
+             the 128 x 128 cover.png (SPEC.md 3.6) whose side is nearest the
+             row's height, centred on it, decoded once and kept at that size
+             (the file itself is not kept); one that does not come, or does
+             not decode, leaves the row as it is without one.
   CART       one cart: where it comes from, its licence, what it takes and
              needs, and its verbs -- GET or UPDATE, PLAY, REMOVE. A cart that
              will not fit in the store, that the engine would refuse to load
@@ -113,6 +119,11 @@ class GetCartsLayout(ListShellLayout):
         self.line_h = 12 * fs
         self.text_rows = max(1, (self.btns[1] - self.text_y - 4 * fs) // self.line_h)
         self.row_h = 30 * fs
+        rh = self.row_h - 2 * fs
+        side = 16
+        while side < 128 and abs(2 * side - rh) < abs(side - rh):
+            side *= 2
+        self.thumb = side              # a row cover's side
         self.list_y = by + 2 * fs
         self.list_rows = max(1, (by + bh - self.list_y) // self.row_h)
 
@@ -163,6 +174,9 @@ class GetCartsAppLayer(ListShellApp):
         self.arm_remove = False
         self.why = ""                 # the NOT INSTALLED screen's reason
         self.status = ""
+        self.thumbs = {}              # cover sha256 -> (side, RGB565) or None
+        self._covers = []             # the covers this check still fetches
+        self._work = None             # the decode's scratch, while checking
         self._found = []
         self._step = 0
         self._held = False
@@ -223,6 +237,8 @@ class GetCartsAppLayer(ListShellApp):
 
     def _check(self):
         self._found = []
+        self._covers = []
+        self._work = None
         self.unreached = 0
         self._step = 0
         self._go("checking")
@@ -297,6 +313,14 @@ class GetCartsAppLayer(ListShellApp):
             self._step += 1
             if self._step - 1 < len(self.indexes):
                 return
+            self._covers = self._covers_to_fetch()
+            if self._covers:
+                return
+        if self._covers:
+            self._fetch_cover(net, self._covers.pop())
+            if self._covers:
+                return
+        self._work = None
         self._release()
         if not self._found and self.unreached:
             self._go("unreached")
@@ -306,6 +330,47 @@ class GetCartsAppLayer(ListShellApp):
         self.fetched_at = _ticks_ms()
         self._build_rows()
         self._go("list")
+
+    def _covers_to_fetch(self):
+        side = self.layout.thumb
+        out = []
+        seen = {}
+        for c in self._found:
+            ref = c.get("cover")
+            if ref is None or ref["sha256"] in seen:
+                continue
+            seen[ref["sha256"]] = True
+            got = self.thumbs.get(ref["sha256"])
+            if got is None or got[0] != side:
+                out.append(c)
+        return out
+
+    def _fetch_cover(self, net, cart):
+        sha = cart["cover"]["sha256"]
+        self.thumbs[sha] = None
+        try:
+            data = _ci.fetch_cover(net, cart)
+        except _ci.InstallError as exc:
+            _ci._log(exc.detail)
+            return
+        try:
+            import cover_png as _cp
+        except ImportError:  # pragma: no cover - direct host import
+            from runtime import cover_png as _cp
+        side = self.layout.thumb
+        swapped = getattr(self._surf.canvas(), "swapped565", False)
+        try:
+            if self._work is None and _cp.native() is not None:
+                self._work = bytearray(_cp.WORK)
+            pix = _cp.decode(data, _cp.SIDE // side,
+                             _cp.RGB565_SW if swapped else _cp.RGB565, None,
+                             self._work)
+        except MemoryError:
+            pix = None
+        if pix is None:
+            _ci._log("%s's cover does not decode" % cart["id"])
+        else:
+            self.thumbs[sha] = (side, pix)
 
     def _build_rows(self):
         inst = self._inst
@@ -716,6 +781,16 @@ class GetCartsAppLayer(ListShellApp):
             elif st == "get" and row["fit"]:
                 st = "too_big"
             rect = lay.row_rect(r)
+            ref = row["cart"].get("cover")
+            pic = self.thumbs.get(ref["sha256"]) if ref is not None else None
+            if pic is not None:
+                side, pix = pic
+                h = min(side, rect[3])
+                top = (side - h) // 2
+                cv.blit565(memoryview(pix)[2 * side * top:2 * side * (top + h)],
+                           side, h, rect[0], rect[1] + (rect[3] - h) // 2)
+                shift = side + 4 * fs
+                rect = (rect[0] + shift, rect[1], rect[2] - shift, rect[3])
             on = i == self.sel
             _ui.row(cv, th, rect, row["cart"]["name"], on=on,
                     value=STATE_LABEL[st], value_ink=self._state_ink(th, st),

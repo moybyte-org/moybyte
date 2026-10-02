@@ -163,6 +163,35 @@ def test_an_indexes_file_beside_the_carts_folder_replaces_the_defaults(tmp_path)
     assert ci.load_indexes(root) == ["http://192.168.1.5:8000/index.json"]
 
 
+_VECTORS = ROOT / "tests" / "cover_vectors"
+
+
+def test_an_entry_keeps_the_cover_it_names():
+    repo = Repo(BASE)
+    data = (_VECTORS / "rgb_filters_mixed.png").read_bytes()
+    entry = repo.add("good", cover=data)
+    assert list(entry).index("cover") == list(entry).index("licence") + 1
+    (c,) = _parsed(repo)
+    assert ci.cover_ref(c) == {"url": "carts/good/cover.png", "size": len(data),
+                               "sha256": sha(data), "w": 128, "h": 128}
+
+
+@pytest.mark.parametrize("field, value", [
+    ("w", 64), ("h", 512), ("size", 65537), ("size", 0), ("sha256", "x" * 64),
+    ("url", 7), (None, "not an object")])
+def test_a_cover_the_console_cannot_read_leaves_the_cart_without_one(field, value):
+    """A cover is the row's picture and nothing else: an entry whose cover is
+    out of SPEC.md 3.6's profile or malformed keeps its cart."""
+    repo = Repo(BASE)
+    entry = repo.add("good", cover=(_VECTORS / "rgb_filters_mixed.png").read_bytes())
+    if field is None:
+        entry["cover"] = value
+    else:
+        entry["cover"][field] = value
+    (c,) = _parsed(repo)
+    assert "cover" not in c and ci.cover_ref(c) is None
+
+
 # -- INSTALLING -------------------------------------------------------------------
 
 def test_an_install_writes_exactly_the_plan_and_records_it(tmp_path):
@@ -1027,6 +1056,117 @@ def test_the_app_draws_at_every_shell_size(tmp_path):
             assert rect[0] >= 0 and rect[1] >= 0
             assert rect[0] + rect[2] <= ws.sys_canvas.w
             assert rect[1] + rect[3] <= ws.sys_canvas.h
+
+
+def _covered_shelf(rock_cover=None, unlisted=None):
+    """One repository: Jet Pot with a real RGB cover, Rock Run with
+    `rock_cover` as (index's bytes, served bytes or None for a missing file),
+    Dungeon with none. `unlisted` is a cover.png Rock Run's release carries
+    and its index does not name."""
+    jet = (_VECTORS / "rgb_filters_mixed.png").read_bytes()
+    repo = Repo("https://mit.example/carts", "Test MIT carts")
+    repo.add("jet", name="Jet Pot", cover=jet)
+    repo.add("dm", name="Dungeon")
+    if rock_cover is None:
+        repo.add("rock", name="Rock Run", runtime="lua", modules=(),
+                 extra=None if unlisted is None else {"cover.png": unlisted})
+    else:
+        listed, served = rock_cover
+        repo.add("rock", name="Rock Run", runtime="lua", modules=(), cover=listed)
+        if served is None:
+            del repo.files["carts/rock/cover.png"]
+        else:
+            repo.files["carts/rock/cover.png"] = served
+    return repo, jet, MemNet(repo.routes())
+
+
+def _canvas_rows(cv, rect):
+    """The canvas's bytes under `rect` (surface-local), row by row."""
+    x, y, w, h = rect
+    out = []
+    for yy in range(y, y + h):
+        o = 2 * ((yy + cv._oy) * cv._stride + x + cv._ox)
+        out.append(bytes(cv._buf[o:o + 2 * w]))
+    return out
+
+
+def test_the_rows_show_the_covers_the_indexes_name(tmp_path):
+    """CHECKING fetches each cover an index names while it holds the radio,
+    checks it, and keeps it decoded at the row's size -- the reduction
+    nearest the row's height, in the canvas's own byte order -- and the
+    row draws it at its left, centred and cropped to the row."""
+    from runtime import cover_png
+    repo, jet, net = _covered_shelf()
+    ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
+    _open(ws, app)
+    assert app.phase == "list"
+    assert repo.url("carts/jet/cover.png") in net.opened
+    assert "carts" not in ws._wifi_holders and ws.wifi.radio is False
+    cv = ws.sys_canvas
+    side = app.layout.thumb
+    rh = app.layout.row_h - 2 * app.layout.fs
+    assert side in (16, 32, 64, 128) and abs(side - rh) <= min(
+        abs(s - rh) for s in (16, 32, 64, 128))
+    fmt = cover_png.RGB565_SW if cv.swapped565 else cover_png.RGB565
+    want = cover_png.decode(jet, 128 // side, fmt)
+    assert app.thumbs[sha(jet)] == (side, want)
+    r = [row["cart"]["name"] for row in app.rows].index("Jet Pot") - app.top
+    x, y, w, h = app.layout.row_rect(r)
+    shown = min(side, h)
+    top = (side - shown) // 2
+    got = _canvas_rows(cv, (x, y + (h - shown) // 2, side, shown))
+    assert got == [want[2 * side * (top + i):2 * side * (top + i + 1)]
+                   for i in range(shown)]
+
+
+@pytest.mark.parametrize("fault", ["wrong bytes", "missing", "not a cover"])
+def test_a_cover_that_does_not_come_leaves_the_row_as_it_is(tmp_path, fault):
+    """A cover whose file is missing, comes back other than its index says,
+    or is not a cover (SPEC.md 3.6) draws the row exactly as a cart whose
+    index names no cover (the same release, so the same size on the row)."""
+    good = (_VECTORS / "rgb_filter2.png").read_bytes()
+    big = (_VECTORS / "size_512x512.png").read_bytes()
+    rock = {"wrong bytes": (good, good[:-1] + b"\0"), "missing": (good, None),
+            "not a cover": (big, big)}[fault]
+    views = []
+    for name, cover in (("plain", None), (fault, rock)):
+        repo, _jet, net = _covered_shelf(cover, unlisted=rock[0])
+        d = tmp_path / name.replace(" ", "_")
+        d.mkdir()
+        ws, app = _app_ws(d, net, [repo.url("index.json")])
+        _open(ws, app)
+        assert app.phase == "list"
+        assert "carts" not in ws._wifi_holders
+        i = [row["cart"]["name"] for row in app.rows].index("Rock Run")
+        assert ("cover" in app.rows[i]["cart"]) == (cover is not None)
+        views.append(_canvas_rows(ws.sys_canvas, app.layout.row_rect(i - app.top)))
+    assert views[0] == views[1]
+
+
+def test_a_second_check_fetches_only_the_covers_it_has_not_drawn(tmp_path):
+    repo, jet, net = _covered_shelf()
+    ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
+    _open(ws, app)
+    _tap(ws, app, "check")
+    _frames(ws, app)
+    assert app.phase == "list"
+    assert net.opened.count(repo.url("carts/jet/cover.png")) == 1
+    assert net.opened.count(repo.url("index.json")) == 2
+
+
+def test_an_installed_cart_brings_its_cover_to_the_shelf(tmp_path):
+    from runtime import moy_carts
+    repo, jet, net = _covered_shelf()
+    ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
+    _open(ws, app)
+    app._tap_row([row["cart"]["name"] for row in app.rows].index("Jet Pot"))
+    ws._dirty = True
+    ws.frame(1 / 30)
+    _tap(ws, app, "btn", "GET")
+    _frames(ws, app)
+    assert app.phase == "done", app.why
+    (cart,) = [c for c in ws.carts.all if str(c.get("path", "")).endswith("/jet.moy")]
+    assert moy_carts.load_cover(cart["path"]) == jet
 
 
 # -- the MicroPython lane ------------------------------------------------------------

@@ -71,12 +71,13 @@ except ImportError:  # pragma: no cover
 
 try:
     from ticks import _ticks_ms, _ticks_diff
-    from moy_store_base import _sibling_path, _rmtree, _is_dir
+    from moy_store_base import _sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES
     from moy_fs import _exists, _mkdir
     import moy_carts as _store
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.moy_store_base import _sibling_path, _rmtree, _is_dir
+    from runtime.moy_store_base import (_sibling_path, _rmtree, _is_dir,
+                                        COVER_MAX_BYTES)
     from runtime.moy_fs import _exists, _mkdir
     from runtime import moy_carts as _store
 
@@ -244,11 +245,24 @@ def check_cart(c):
     return None
 
 
+def cover_ref(c):
+    """The cover an index entry names -- {"url", "size", "sha256", "w", "h"},
+    a cover.png of SPEC.md 3.6's profile (128 x 128, at most 64 KB) -- or
+    None. A cover is the row's picture and nothing else: a missing or
+    unreadable one is no cover, never a reason to leave the cart out."""
+    ref = c.get("cover")
+    if (_sized(ref) and isinstance(ref.get("url"), str)
+            and 0 < ref["size"] <= COVER_MAX_BYTES
+            and ref.get("w") == 128 and ref.get("h") == 128):
+        return ref
+    return None
+
+
 def parse_index(data, url):
     """The carts in an index document, each stamped with the index it came
     from (`index`) and that index's name (`shelf`). An entry this console
-    cannot read is left out and logged; a document that is not an index is an
-    InstallError."""
+    cannot read is left out and logged, and so is a `cover` it cannot (the
+    cart stays); a document that is not an index is an InstallError."""
     try:
         index = json.loads(data.decode() if isinstance(data, (bytes, bytearray)) else data)
     except (ValueError, UnicodeError) as exc:
@@ -264,6 +278,9 @@ def parse_index(data, url):
                                            else c, why))
             continue
         c = dict(c)
+        if "cover" in c and cover_ref(c) is None:
+            _log("%s: %r's cover left out" % (url, c["id"]))
+            del c["cover"]
         c["index"] = url
         c["shelf"] = str(index.get("name") or "")
         out.append(c)
@@ -491,6 +508,14 @@ def fetch(net, url, limit, size=None, sha=None):
             raise InstallError(MISMATCH, "%s hashes to %s, the index says %s"
                                % (url, got, sha))
     return bytes(out)
+
+
+def fetch_cover(net, cart):
+    """The cover.png `cart`'s index entry names (`cover_ref`), fetched and
+    checked against its size and sha256."""
+    ref = cart["cover"]
+    return fetch(net, resolve(cart["index"], ref["url"]), COVER_MAX_BYTES,
+                 ref["size"], ref["sha256"])
 
 
 def licence_text(net, cart, ref):
