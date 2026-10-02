@@ -1056,6 +1056,17 @@ for c in carts:
           sorted(os.listdir(root + "/" + c["folder"])) if job.path else "-")
 rec = ci.load_record(root)
 print("record", sorted(rec))
+bad = dict(carts[0])
+bad["folder"] = "bad.moy"
+bad["external"] = []
+asset = dict(bad["assets"][0])
+asset["sha256"] = "0" * 64
+bad["assets"] = [asset]
+job = ci.Install(bad, ci.plan(bad, "esp32p4", "2"), Net(), root, lambda fn: fn(), (),
+                 step_ms=20, archive=%(archive)r)
+while job.step():
+    pass
+print("refused", job.error == ci.MISMATCH, "bad.moy" in os.listdir(root))
 '''
 
 
@@ -1088,5 +1099,8 @@ def test_the_installer_runs_under_micropython(tmp_path, archive):
     assert "dm None" in lines[0] and "game.wad" in lines[0], out.stdout
     assert "main.esp32p4.f2.aot" in lines[1] and "esp32s3" not in lines[1], out.stdout
     assert lines[2] == "record ['dm.moy', 'jet.moy']"
+    # an InstallError raised and caught on MicroPython, which has no
+    # Exception.__init__ for a subclass to call
+    assert lines[3] == "refused True False", out.stdout
     assert (Path(root) / "dm.moy" / "game.wad").read_bytes() == wad
     assert os.listdir(Path(root).parent / ci.STAGE_DIR) == []

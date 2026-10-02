@@ -98,6 +98,16 @@ TEXT_LIMIT = 65536            # a licence text, likewise
 # a full buffer, or a file's end, is ONE store session (on the T-Deck that
 # session is the SD gate, with a panel sync in front of it); a step is as many
 # reads as fit in STEP_MS, then the frame draws the progress bar.
+#
+# Set against all four boards (2026-10-02, figures on #124): every one is
+# bound by its store, not its WiFi -- the cards write slower than the radio
+# reads, the P4s' flash stores many times slower -- so the knobs are about the
+# store and the screen. The writes: on a card the session size does not move
+# the rate; on a P4's flash 16 KB is slower than 64 KB and 128 KB is no faster
+# while a single flush holds the screen twice as long. The step: a frame
+# between steps costs under a tenth of an install at 120 ms, and 250 ms bought
+# about one percent. A step is never shorter than the unit inside it -- a
+# TLS connect, a 64 KB flush to flash -- which is what the screen waits on.
 READ_CHUNK = 16384
 WRITE_CHUNK = 65536
 STEP_MS = 120
@@ -130,7 +140,7 @@ class InstallError(Exception):
     """`text` is what the kid reads; `detail` is what serial gets."""
 
     def __init__(self, text, detail=None):
-        Exception.__init__(self, text)
+        super().__init__(text)          # MicroPython has no Exception.__init__
         self.text = text
         self.detail = detail or text
 
@@ -980,15 +990,15 @@ class Install:
     it fetches anything. On any failure the staging folder goes and the shelf
     is exactly as it was; `cancel()` does the same on purpose."""
 
-    def __init__(self, cart, p, net, root, session, accepted=(), chunk=WRITE_CHUNK,
-                 step_ms=STEP_MS, archive="ram"):
+    def __init__(self, cart, p, net, root, session, accepted=(), chunk=None,
+                 step_ms=None, archive="ram"):
         self.cart = cart
         self.plan = p
         self.net = net
         self.root = root
         self.session = session
         self.accepted = tuple(accepted)
-        self.step_ms = step_ms
+        self.step_ms = STEP_MS if step_ms is None else step_ms
         self.archive = archive
         self._in_session = False
         self.folder = cart["folder"]
@@ -1007,7 +1017,7 @@ class Install:
         self.t_all = 0
         self.scratch = bytearray(READ_CHUNK)
         self.scratch_mv = memoryview(self.scratch)
-        self.sink = _Sink(self, chunk)
+        self.sink = _Sink(self, WRITE_CHUNK if chunk is None else chunk)
         self.written = {}
         self._queue = [("asset", a) for a in cart["assets"]] \
             + [("external", e) for e in p["external"]]
