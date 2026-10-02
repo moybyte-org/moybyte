@@ -88,7 +88,8 @@ def _cover_scale(side, w, h):
 
 
 def _cover_div(it, w, h):
-    """Which decode of the cart's cover a w x h art slot draws: the BASE when
+    """Which decode of the cart's cover a card whose unselected art slot is
+    w x h draws: the BASE when
     the slot takes 128 at a whole-number scale (`_cover_scale`); under that,
     the HALF -- the grid's interim need -- unless the cart names its own icon
     (SPEC.md 3.4), which its author drew for small sizes and the card draws
@@ -108,13 +109,15 @@ def _centred(slot, size):
     return -((size - slot) // 2)
 
 
-def _draw_cover(cv, img, x, y, w, h, outer=None):
-    """A decoded cover centred in the (x, y, w, h) slot at its
-    `_cover_scale` (1x at the least: a HALF in a slot shorter than it), what
-    overflows the slot cropped by a clip to the slot inside `outer`, the
-    clip the caller draws its cards in (None: the whole canvas), which is
-    the clip it is left with."""
-    s = max(1, _cover_scale(img.w, w, h))
+def _draw_cover(cv, img, x, y, w, h, art_h, outer=None):
+    """A decoded cover centred in the (x, y, w, h) slot at the `_cover_scale`
+    of the card's UNSELECTED w x art_h slot, so selecting a card (its action
+    row shortens the slot to h) crops the cover and never rescales it -- 1x
+    at the least: a HALF in a slot shorter than it. What overflows the slot
+    is cropped by a clip to the slot inside `outer`, the clip the caller
+    draws its cards in (None: the whole canvas), which is the clip it is
+    left with."""
+    s = max(1, _cover_scale(img.w, w, art_h))
     sw = img.w * s
     sh = img.h * s
     cut = sw > w or sh > h
@@ -596,9 +599,9 @@ class Launcher:
 
     def cover_specs(self):
         """Every (cart, div) cover this grid's NEXT full draw would request --
-        each cart card's, at the size its slot takes (`_cover_div`), the
-        selected card's included (its PLAY/CHANGE row shrinks the slot).
-        Mirrors _draw_cart_card's geometry; the idle prefetch
+        each cart card's, at the size its unselected slot takes
+        (`_cover_div`; selecting a card never changes it). Mirrors
+        _draw_cart_card's geometry; the idle prefetch
         (CoverCache._prebuild_tick) walks it."""
         lay = self.layout
         fs = lay.fs
@@ -607,16 +610,13 @@ class Launcher:
         # tile takes the tall slot) -- so the sizes never need per-index rects
         # (tile_rect is None for scrolled-out cards, which a prebuild must
         # still cover).
-        cw, ch = lay.lib_card_w, lay.lib_card_h
-        btn = 0
-        if self.action_rects() is not None:
-            btn = max(13 * fs, 22) + 2 * max(2 * fs, 3)
+        cw, art_h = lay.lib_card_w, lay.lib_card_h - band_h
         out = []
         for i in range(len(self.items)):
             it = self.items[i]
             if it.get("type") in PSEUDO_TILE_TYPES or not it.get("path"):
                 continue
-            div = _cover_div(it, cw, ch - band_h - (btn if i == self.sel else 0))
+            div = _cover_div(it, cw, art_h)
             if div:
                 out.append((it, div))
         return out
@@ -639,16 +639,18 @@ class Launcher:
         # The art slot, on the theme's `dim` field: the one token that contrasts
         # BOTH the home shelf's light surface and the picker's dark tool
         # backdrop in every shipped theme. In it, the cart's cover (SPEC.md 3.6,
-        # Section 11.4) centred at the whole-number scale the slot takes,
-        # cropped to it (`_cover_scale`); under 128 the cart's own icon when it
-        # names one, else the cover's half (`_cover_div`). Without a cover: the
-        # cart's own sprite scaled up, else its type glyph in the type color
-        # (both the deterministic pre-cover look).
+        # Section 11.4) centred at the whole-number scale the unselected slot
+        # takes, cropped to the slot (`_cover_scale`; a selected card's
+        # shorter slot crops, never rescales); under 128 the cart's own icon
+        # when it names one, else the cover's half (`_cover_div`). Without a
+        # cover: the cart's own sprite scaled up, else its type glyph in the
+        # type color (both the deterministic pre-cover look).
         cv.rect(x, y, w, cover_h, th.get("dim", NAMES["dark_blue"]))
-        div = _cover_div(it, w, cover_h) if self.cover_for is not None else 0
+        art_h = h - band_h
+        div = _cover_div(it, w, art_h) if self.cover_for is not None else 0
         cover = self.cover_for(it, div) if div else None
         if cover is not None:
-            _draw_cover(cv, cover, x, y, w, cover_h, self._card_clip)
+            _draw_cover(cv, cover, x, y, w, cover_h, art_h, self._card_clip)
         else:
             img = sheet_for(it) if sheet_for is not None else None
             if img is not None:

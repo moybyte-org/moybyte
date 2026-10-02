@@ -14,6 +14,8 @@ so these assert host==device behavior."""
 
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -462,10 +464,12 @@ def test_a_cover_takes_the_next_scale_up_when_it_overflows_by_a_tenth_at_most():
     assert _cover_scale(128, 300, -4) == 0
 
 
-def _drawn_cover(slot, outer):
+def _drawn_cover(slot, outer, art_h=None):
     """A 128x128 picture of distinct words drawn by the shelf's cover draw
-    into `slot` on a 320x300 canvas whose cards clip to `outer`: the canvas's
-    words, the picture's, and the clip it was left with."""
+    into `slot` -- scaled for a card whose unselected slot is `art_h` tall
+    (None: the slot's own height) -- on a 320x300 canvas whose cards clip to
+    `outer`: the canvas's words, the picture's, and the clip it was left
+    with."""
     from runtime import host_canvas
     from runtime.cover_cache import _CoverImage
     from runtime.launcher_layer import _draw_cover
@@ -476,7 +480,8 @@ def _drawn_cover(slot, outer):
     for w_ in words:
         pix += bytes((w_ & 255, w_ >> 8))
     cv.clip(*outer)
-    _draw_cover(cv, _CoverImage(128, 128, pix), *slot, outer)
+    _draw_cover(cv, _CoverImage(128, 128, pix), *slot,
+                slot[3] if art_h is None else art_h, outer)
     left = (cv._clip_x0, cv._clip_y0, cv._clip_x1, cv._clip_y1)
     cv.clip()
     cv.flush_batch()
@@ -500,6 +505,86 @@ def test_a_near_fit_cover_is_cropped_to_its_slot_centred():
                 want = bg
             assert got[y * 320 + x] == want, (x, y)
     assert left == (10, 25, 300, 295)
+
+
+def test_a_selected_cards_shorter_slot_crops_its_cover_centred():
+    """The Guition P4's selected card: its PLAY/CHANGE row shortens the
+    258x245 slot to 258x217, and the cover keeps the 2x its unselected slot
+    takes, 39 rows cropped, 19 off the top and 20 off the bottom."""
+    sx, sy, sw, sh = 20, 30, 258, 217
+    got, words, left = _drawn_cover((sx, sy, sw, sh), (10, 25, 290, 270), 245)
+    bg = got[0]
+    ox, oy = sx + 1, sy - 19
+    for y in range(300):
+        for x in range(320):
+            if sx <= x < sx + sw and sy <= y < sy + sh and ox <= x < ox + 256:
+                want = words[((y - oy) // 2) * 128 + (x - ox) // 2]
+            else:
+                want = bg
+            assert got[y * 320 + x] == want, (x, y)
+    assert left == (10, 25, 300, 295)
+
+
+BOARD_SHELVES = {
+    "tdeck": dict(sys_size=None, font_scale=1, windowed=False),
+    "guition_s3": dict(sys_size=(480, 320), font_scale=1, windowed=False,
+                       panel_diagonal_in=3.5),
+    "p4": dict(sys_size=(1024, 600), font_scale=1, windowed=True,
+               panel_diagonal_in=7.0),
+    "guition_p4": dict(sys_size=(1280, 800), font_scale=1, windowed=True,
+                       panel_diagonal_in=10.1),
+}
+
+
+class _BlitLog:
+    """The canvas a card draws on, logging each blit565's (w, y, scale)."""
+
+    def __init__(self, cv):
+        self._cv = cv
+        self.blits = []
+
+    def blit565(self, buf, w, h, x, y, scale=1):
+        self.blits.append((w, y, scale))
+        self._cv.blit565(buf, w, h, x, y, scale)
+
+    def __getattr__(self, name):
+        return getattr(self._cv, name)
+
+
+@pytest.mark.parametrize("board", sorted(BOARD_SHELVES))
+def test_selecting_a_card_never_changes_its_covers_scale(tmp_path, board):
+    """A cover that shrank on selection would read as a glitch: on every
+    board a card's cover is the same decode at the same scale selected or
+    not (the HALF on the S3s too), and the selected card's shorter slot only
+    crops it. Its prefetch spec does not move with the selection either."""
+    ws = _ws(tmp_path, **BOARD_SHELVES[board])
+    if BOARD_SHELVES[board]["windowed"]:
+        ws.open_library()
+    ws.frame(1 / 30)
+    la = ws.launcher
+    covered, _bare = _covered_and_bare(ws)
+    i = la.items.index(covered)
+    _cover_sync(ws, covered, 1)
+    _cover_sync(ws, covered, 2)
+    specs = []
+    drawn = []
+    for selected in (False, True):
+        la.sel = i if selected else (i + 1) % len(la.items)
+        la._scroll_to_sel()
+        rect = dict(la._visible())[i]
+        specs.append([d for c, d in la.cover_specs() if c is covered])
+        log = _BlitLog(ws.sys_canvas)
+        la._card_clip = None
+        la._draw_cart_card(log, covered, rect, selected, None)
+        assert len(log.blits) == 1, (board, selected)
+        drawn.append(log.blits[0])
+    assert specs[0] == specs[1] != []
+    (w0, _y0, s0), (w1, _y1, s1) = drawn
+    assert (w0, s0) == (w1, s1)
+    if board == "guition_p4":
+        assert (w0, s0) == (128, 2)
+        if la.action_rects() is not None:
+            assert drawn[1][1] < drawn[0][1]     # cropped, centred higher
 
 
 def test_a_cover_its_card_clip_cuts_stays_inside_both():
