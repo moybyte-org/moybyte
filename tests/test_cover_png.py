@@ -413,3 +413,17 @@ def test_the_reference_reads_every_cover_on_micropython_too(tmp_path):
     for vec in _expected():
         if vec["verdict"] == "cover":
             assert got[vec["file"]] == vec["rgb888_sha256"], vec["file"]
+
+
+def test_the_two_readers_agree_on_their_constants():
+    """cover_png restates the native module's numbers so the host, which has
+    no native module, can size and name the same things. Pinned to the C."""
+    exe = require_unix_mp("moy_png")
+    names = ("WORK", "SIDE", "MAX_BYTES", "RGB888", "RGB565", "RGB565_SW", "INDEX")
+    run = subprocess.run(
+        [exe, "-c", "import moy_png; print(%s)" % ", ".join(
+            "moy_png." + n for n in names)],
+        capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    native = [int(v) for v in run.stdout.split()]
+    assert native == [getattr(cover_png, n) for n in names]
