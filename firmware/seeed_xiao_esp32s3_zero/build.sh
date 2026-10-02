@@ -122,6 +122,11 @@ moybyte_setup_idf esp32s3 \
 # DECLINED moybyte_patch_sdcard_runs -- machine.SDCard in multi-block runs.
 #    This board has no card: its store is the internal flash VFS.
 #
+# DECLINED moybyte_patch_usj_rx_init -- the USB-Serial/JTAG console taking
+#    what a host sent during the bootloader. Nothing writes to this board
+#    while it boots: it has no dev channel, and the tools know it by its USB
+#    serial number without opening it.
+#
 # DECLINED moybyte_patch_stdin_ring -- the 4 KB stdin ring for a UART console.
 #    This board speaks USB-Serial/JTAG, which backpressures: its ISR takes only
 #    what the ring has room for and the USB host waits with the rest, so a

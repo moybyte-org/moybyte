@@ -69,6 +69,11 @@ moybyte_patch_gc_split_reserve
 moybyte_patch_native_code_free
 moybyte_patch_espnow_ring_race
 
+# The console is the SoC's USB-Serial/JTAG: it takes, when it starts, what a
+# host sent during the bootloader, instead of leaving it in the FIFO for a
+# whole boot (tools/patch_usj_rx_init.py).
+moybyte_patch_usj_rx_init
+
 # 2c) PSRAM temperature retune (#169) -- REQUIRED by the 120MHz MSPI profile in
 #     sdkconfig.board (adopted 2026-08-19).
 moybyte_patch_psram_retune

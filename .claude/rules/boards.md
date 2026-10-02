@@ -182,6 +182,14 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   removes the device node from under an open handle, and a reader that opens
   early sees nothing, which reads as a dead board. Attach after the boot
   settles (`tools/board.py X wait`).
+- **A line written in a USB-Serial/JTAG board's first half second is not a
+  line.** Before the console's ISR is up the bytes sit in the endpoint, and a
+  close and reopen meanwhile delivers the host's line-state request as data:
+  0x03, Ctrl-C to the boot, which put the T-Deck at the REPL (2026-10-02).
+  `moybyte_patch_usj_rx_init` makes the console take them when it starts,
+  `wait_for_desk` writes nothing to a board just reset until it has printed a
+  line, and the dev channel reads bytes, so noise of 0x80 and up costs a line
+  instead of parking the frame on a UTF-8 read.
 
 ## The P4 boards
 

@@ -734,28 +734,50 @@ def _probe(table, dirs, known):
 # -- reset, flash, wait -------------------------------------------------------
 
 
-def wait_for_desk(name, dirs, port=None, timeout=WAIT_S, quiet=False):
+# A board just reset is not written to until it has printed a line, or until
+# this long has passed in silence (a board whose boot is already over).
+HEAR_S = 10.0
+
+
+def wait_for_desk(name, dirs, port=None, timeout=WAIT_S, quiet=False,
+                  reset=False):
     """Poll until `name` answers `state`, re-resolving the port each time (a
-    reset can move it). Returns the state."""
+    reset can move it, and on some boards replaces the node under a handle
+    held across it). Returns the state.
+
+    A board just `reset` is not written to until it has said something. A
+    USB-Serial/JTAG console that gets a line before its boot has started
+    reading holds it in the endpoint, and a host that closes and reopens the
+    port meanwhile lands its line-state request in the board's stdin -- 0x03
+    among it, Ctrl-C to the boot (tools/patch_usj_rx_init.py fixes the board
+    and has the measurement; this keeps an older image whole too). Opening
+    and closing alone is harmless, so the polls go on as before, silent."""
     end = time.time() + timeout
     last = None
+    heard = not reset
+    t0 = time.time()
     while time.time() < end:
         try:
             p = port if port and os.path.exists(port) else resolve(name, dirs)[0]
             b = P4Board(p, board_dir=dirs[name])
             try:
-                b.drain(0.5)
-                st = state_or_none(b, timeout=4.0)
+                got = b.drain(0.5 if heard else 2.0)
+                heard = heard or bool(got) or time.time() - t0 > HEAR_S
+                st = state_or_none(b, timeout=4.0) if heard else None
+                at_repl = any(ln.startswith(">>>") or "isn't defined" in ln
+                              for ln in b.lines[-8:])
             finally:
                 b.close()
             if st is not None:
                 if not quiet:
                     print("%s answers on %s  stack=%s" % (name, p, st.get("stack")))
                 return st
-            last = "no state reply"
+            last = ("it sits at the REPL -- `tools/board.py %s reboot --soft`"
+                    % name if at_repl else
+                    "no state reply" if heard else "it has said nothing yet")
         except Exception as exc:  # noqa: BLE001 -- booting: the port may not exist yet
             last = str(exc).splitlines()[0]
-        time.sleep(3.0)
+        time.sleep(3.0 if heard else 0.5)
     raise BoardError("%s did not answer within %.0fs (%s)" % (name, timeout, last))
 
 
@@ -797,7 +819,8 @@ def cmd_reboot(name, dirs, a):
             b.reset()
         finally:
             b.close()
-    wait_for_desk(name, dirs, port, a.timeout)
+    wait_for_desk(name, dirs, port, a.timeout,
+                  reset=bool(decl.get("attach_only")) and not a.soft)
     return 0
 
 
@@ -815,13 +838,13 @@ def cmd_flash(name, dirs, a):
     if not is_console(d):
         return 0
     try:
-        wait_for_desk(name, dirs, port, a.timeout / 2)
+        wait_for_desk(name, dirs, port, a.timeout / 2, reset=True)
     except BoardError:
         # A board can sit in the loader after write_flash's own reset; one
         # reset through esptool starts the image just written.
         print("no desk yet -- one reset through esptool, then waiting again")
         esptool_reset(name, dirs, port)
-        wait_for_desk(name, dirs, port, a.timeout / 2)
+        wait_for_desk(name, dirs, port, a.timeout / 2, reset=True)
     return 0
 
 

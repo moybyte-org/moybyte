@@ -15,10 +15,15 @@ between frames and runs whole lines as commands, which is also what makes a
 board scriptable: `tools/p4_autotest.py` and tests/test_p4_on_glass.py are built
 on exactly this shape.
 
-It NEVER calls readline: one byte at a time via sys.stdin.read(1), only after
-poll(0) says MP_STREAM_POLL_RD, accumulating to a newline. A byte read is a byte
-consumed, so line noise costs a bounded few bytes per frame and can never park
-the loop; an over-long partial line is dropped. And it COUNTS what it swallowed
+It NEVER calls readline: one byte at a time off `sys.stdin.buffer`, only after
+poll(0) says MP_STREAM_POLL_RD, accumulating to a newline and decoding the
+whole line. A byte read is a byte consumed, so line noise costs a bounded few
+bytes per frame and can never park the loop; an over-long partial line is
+dropped, and so is a line that is not UTF-8. NOT the text `sys.stdin`: its
+read(1) is a CHARACTER, so a byte of 0x80 or above waits inside the read for
+the rest of a UTF-8 sequence that line noise never sends -- on the T-Deck a
+USB line-state request that reached stdin during the bootloader held the first
+frame for 29 s, until the host wrote again. And it COUNTS what it swallowed
 (`rx=`), so "something is injecting into stdin" is a number rather than a
 mystery hang -- which is the diagnostic that proved RX dead on this board for
 weeks (rx stuck at 1 while a host write was accepted and discarded).
@@ -836,7 +841,7 @@ class DevChannel:
         self.pointer = pointer
         self.click = False
         self.quit = False       # `quit` asked for the REPL; run_desktop returns
-        self.buf = ""
+        self.buf = bytearray()  # the line so far, as bytes
         self.rx = 0             # bytes swallowed -- the "is something injecting?" number
         self.lines = 0          # complete commands dispatched
         self.dropped = 0        # over-long partial lines thrown away
@@ -889,6 +894,7 @@ class DevChannel:
         self.click = False
         ran = False
         ipoll = self._ipoll
+        raw = self._rawin
         budget = (MOY_PUT_BYTES_PER_FRAME if self._put is not None
                   else SERIAL_BYTES_PER_FRAME)
         for _ in range(budget):
@@ -898,23 +904,32 @@ class DevChannel:
             if not ready:
                 break
             try:
-                ch = self._stdin.read(1)
+                got = raw.read(1) if raw is not None else self._stdin.read(1)
             except UnicodeError:
-                # Bytes that are not text -- line noise, or what a UART
-                # rate switch left on the line -- cost the line they land in,
-                # never the channel.
+                # A text stdin (no 8-bit one beside it) meeting a byte that is
+                # not text costs the line it lands in, never the channel.
                 self.dropped += 1
-                self.buf = ""
+                self.buf = bytearray()
                 continue
             except Exception:  # noqa: BLE001 -- a dead stdin disarms the channel
                 self.armed = False
                 return ran
-            if not ch:
+            if not got:
                 break
+            if not isinstance(got, (bytes, bytearray)):
+                got = got.encode()
             self.rx += 1
-            if ch in ("\n", "\r"):
-                line = self.buf.strip()
-                self.buf = ""
+            c = got[0]
+            if c == 10 or c == 13:
+                try:
+                    line = bytes(self.buf).decode().strip()
+                except UnicodeError:
+                    # Bytes that are not text -- line noise, or what a UART
+                    # rate switch left on the line -- cost the line they land
+                    # in, never the channel.
+                    self.dropped += 1
+                    line = ""
+                self.buf = bytearray()
                 if line:
                     self.lines += 1
                     ran = True
@@ -926,12 +941,12 @@ class DevChannel:
                     except Exception as exc:  # noqa: BLE001 -- never kill the loop
                         print("REMOTE ERR %s: %s" % (type(exc).__name__, exc))
             else:
-                self.buf += ch
+                self.buf += got
                 if len(self.buf) > SERIAL_LINE_MAX:
                     # Not a command -- a byte source with no newline in it. Drop
-                    # the partial rather than growing a string forever.
+                    # the partial rather than growing a buffer forever.
                     self.dropped += 1
-                    self.buf = ""
+                    self.buf = bytearray()
         if self.lines == 0 and self.rx >= SERIAL_NOISE_LIMIT:
             # Kilobytes in, not one command out. That is a byte SOURCE (UART0's
             # ISR shares this ring buffer -- a floating U0RXD reads exactly like
@@ -1306,8 +1321,8 @@ class DevChannel:
         # byte it DID swallow is a byte the payload would never see, so take
         # them first. They came off the TEXT stream, which maps CR to LF, so
         # anything real in here is already corrupt; the hash is what says so.
-        pending = self.buf.encode()
-        self.buf = ""
+        pending = bytes(self.buf)
+        self.buf = bytearray()
         got = 0
         err = None
         rate = 0                # the payload rate the board is at, 0 = console
@@ -1602,10 +1617,7 @@ class DevChannel:
                             self._moy_put_line(ws, text)
                         if self._put is None:
                             # Whatever followed the `.` is the line reader's.
-                            try:
-                                self.buf += bytes(blk[j + 1:k]).decode()
-                            except UnicodeError:
-                                self.dropped += 1
+                            self.buf += blk[j + 1:k]
                             return
                 elif n < SERIAL_LINE_MAX:
                     line[n] = c

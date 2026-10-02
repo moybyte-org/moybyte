@@ -205,6 +205,18 @@ moybyte_patch_stdin_ring() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_stdin_ring.py" "${MPY_DIR}" || exit 1
 }
 
+# The USB-Serial/JTAG console takes, when it starts, the bytes a host sent
+# before it did. The stock init clears the RX interrupt of a packet that
+# landed during the bootloader and leaves the packet in the FIFO until the
+# first read of stdin, a whole boot later; meanwhile a host that reopens the
+# port gets its line-state request delivered as data, 0x03 included -- Ctrl-C
+# to the boot. tools/patch_usj_rx_init.py is the patch and the measurement;
+# idempotent. A board whose console is a UART declines it.
+moybyte_patch_usj_rx_init() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_usj_rx_init.py" "${MPY_DIR}" || exit 1
+}
+
 # LittleFS's default program size and lookahead, 32 -> 256 each, so a P4's
 # flash store programs 1 KB of a file at a time instead of 128 bytes and walks
 # the filesystem for free blocks an eighth as often. tools/patch_lfs_sizes.py is

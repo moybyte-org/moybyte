@@ -788,3 +788,97 @@ def test_the_shot_helpers_are_one_py_upload_per_shot(clock, device_modules,
                                 raw=True))
     nexts = [s for s in wire.sent if s == "py ws._g['_shot_next']()"]
     assert len(nexts) == 1, "8 KB is one band"
+
+
+# -- waiting for a board after a reset ------------------------------------------
+
+
+class _Booting:
+    """A board just reset, on a virtual clock: silent until `quiet`, its
+    console up after that (the first line), the desk answering `state` from
+    `desk` on. Records every open and the time of every `state` sent."""
+
+    def __init__(self, clock, quiet, desk, repl=False):
+        self.clock, self.quiet, self.desk, self.repl = clock, quiet, desk, repl
+        self.opens = 0
+        self.sent = []
+
+    def __call__(self, port, board_dir=None, log=None):
+        self.opens += 1
+        self.lines = []
+        return self
+
+    def drain(self, secs):
+        self.clock[0] += secs
+        if self.clock[0] >= self.quiet and not self.lines:
+            self.lines.append("Moybyte T-Deck (mainline) boot")
+            return self.lines[:]
+        return []
+
+    def state(self, timeout=8.0):
+        self.sent.append(self.clock[0])
+        self.clock[0] += timeout
+        if self.repl:
+            self.lines += [">>> state", "NameError: name 'state' isn't defined"]
+        elif self.clock[0] >= self.desk:
+            return {"stack": ["launcher"]}
+        raise RuntimeError("no STATE reply")
+
+    def close(self):
+        pass
+
+
+def _virtual_time(monkeypatch, clock):
+    def sleep(s):
+        clock[0] += s
+    monkeypatch.setattr(board, "time", types.SimpleNamespace(
+        time=lambda: clock[0], sleep=sleep))
+
+
+def test_a_board_just_reset_is_not_written_to_before_it_speaks(monkeypatch):
+    """A line that reaches a USB-Serial/JTAG console before its boot reads
+    stdin stalls the endpoint, and a reopen then lands 0x03 in the board's
+    stdin -- Ctrl-C to the boot (tools/patch_usj_rx_init.py). So after a
+    reset the waiter sends nothing until a line arrives. It still reopens
+    the port between polls: a reset can replace the node under a handle held
+    across it (the Guition S3's does), and an open alone is harmless."""
+    clock = [0.0]
+    _virtual_time(monkeypatch, clock)
+    b = _Booting(clock, quiet=2.5, desk=15.0)
+    monkeypatch.setattr(board, "P4Board", b)
+    st = board.wait_for_desk("tdeck", DIRS, port="/dev/null", quiet=True,
+                             reset=True)
+    assert st == {"stack": ["launcher"]}
+    assert b.opens > 1
+    assert b.sent and min(b.sent) >= 2.5, b.sent
+
+
+def test_a_silent_board_is_asked_once_the_quiet_has_run_out(monkeypatch):
+    """A board whose boot is already over prints nothing in kid mode."""
+    clock = [0.0]
+    _virtual_time(monkeypatch, clock)
+    b = _Booting(clock, quiet=1e9, desk=0.0)
+    monkeypatch.setattr(board, "P4Board", b)
+    assert board.wait_for_desk("tdeck", DIRS, port="/dev/null", quiet=True,
+                               reset=True)
+    assert b.sent[0] >= board.HEAR_S
+
+
+def test_a_wait_with_no_reset_asks_at_once(monkeypatch):
+    clock = [0.0]
+    _virtual_time(monkeypatch, clock)
+    b = _Booting(clock, quiet=1e9, desk=0.0)
+    monkeypatch.setattr(board, "P4Board", b)
+    assert board.wait_for_desk("tdeck", DIRS, port="/dev/null", quiet=True)
+    assert b.sent[0] < 1.0
+
+
+def test_a_board_at_the_repl_is_named_as_one(monkeypatch):
+    clock = [0.0]
+    _virtual_time(monkeypatch, clock)
+    b = _Booting(clock, quiet=0.0, desk=0.0, repl=True)
+    monkeypatch.setattr(board, "P4Board", b)
+    with pytest.raises(board.BoardError) as exc:
+        board.wait_for_desk("tdeck", DIRS, port="/dev/null", timeout=30,
+                            quiet=True, reset=True)
+    assert "REPL" in str(exc.value) and "reboot --soft" in str(exc.value)

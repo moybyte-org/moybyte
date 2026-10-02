@@ -813,10 +813,10 @@ def test_bytes_the_line_reader_already_swallowed_are_not_lost(
     swallow is one the payload would never see, and a silent one-byte shift is
     the failure this whole path is hashed to catch."""
     ws, ch, _raw, _poll = raw_channel(b"llo")
-    ch.buf = "he"
+    ch.buf = bytearray(b"he")
     ch.run(ws, "recv 5 512 %s" % (tmp_path / "a.lua"))
     assert (tmp_path / "a.lua.new").read_bytes() == b"hello"
-    assert ch.buf == ""
+    assert ch.buf == bytearray()
     assert "RECV done" in _said(capsys)[-1]
 
 
@@ -1380,7 +1380,7 @@ def text_channel(root):
     ws, ch = make(ws)
     stdin = FakeText()
     poll = FakeTextPoll(stdin)
-    ch._stdin, ch._ipoll, ch.armed = stdin, poll.ipoll, True
+    ch._stdin, ch._rawin, ch._ipoll, ch.armed = stdin, stdin, poll.ipoll, True
     return ws, ch, stdin
 
 
@@ -1402,29 +1402,59 @@ def put_lines(path, data):
     return "\n".join(lines + ["."]) + "\n"
 
 
-class NotText(FakeText):
-    """A text stdin that meets a byte which is not UTF-8, as MicroPython's
-    does: the read raises UnicodeError."""
+class FakeBytes(FakeText):
+    """`sys.stdin.buffer`: a byte at a time, only the ones that have arrived."""
+
+    def __init__(self, data=b""):
+        self.data = [bytes((b,)) for b in data]
 
     def read(self, n):
-        ch = super().read(n)
-        if ch == "\x00":
-            raise UnicodeError()
-        return ch
+        return self.data.pop(0) if self.data else b""
+
+
+def _bytes_channel(tmp_path, data):
+    ws, ch, _stdin = text_channel(tmp_path)
+    stdin = FakeBytes(data)
+    ch._stdin, ch._rawin, ch._ipoll = stdin, stdin, FakeTextPoll(stdin).ipoll
+    return ws, ch, stdin
 
 
 def test_a_byte_that_is_not_text_costs_its_line_not_the_channel(
         tmp_path, capsys):
     """A rate switch, or a payload's tail, can leave bytes on the line that are
-    not UTF-8, and MicroPython's text stdin raises on them. That drops the line
-    they are in; the channel stays armed and the next command runs."""
-    ws, ch, _stdin = text_channel(tmp_path)
-    stdin = NotText("st\x00ate\nmoy?\n")
-    ch._stdin, ch._ipoll = stdin, FakeTextPoll(stdin).ipoll
+    not UTF-8. That drops the line they are in; the channel stays armed and
+    the next command runs."""
+    ws, ch, stdin = _bytes_channel(tmp_path, b"st\xffate\nmoy?\n")
     pump(ws, ch, stdin)
     assert ch.armed is True
     assert ch.dropped == 1
     assert _said(capsys, "moy-info ")
+
+
+def test_a_byte_of_line_noise_never_waits_for_more(tmp_path, capsys):
+    """The line reader takes BYTES: a byte of 0x80 or more is part of a UTF-8
+    character to a text read(1), which then waits inside the read for the
+    rest of it. On the T-Deck a USB line-state request that reached stdin
+    during the bootloader held its first frame for 29 s that way, until the
+    host happened to write again. Here the frame drains what arrived and
+    returns, and the noise costs only its own line."""
+    ws, ch, stdin = _bytes_channel(tmp_path, b"\x00\xc2\x01\x00\x08moy?\n\xf0")
+    pump(ws, ch, stdin)
+    assert not stdin.data
+    assert ch.buf == bytearray(b"\xf0")
+    assert ch.dropped == 1
+    assert not _said(capsys, "moy-info ")
+    stdin.data = [bytes((b,)) for b in b"\nmoy?\n"]
+    pump(ws, ch, stdin)
+    assert _said(capsys, "moy-info ")
+
+
+def test_a_command_in_utf8_arrives_whole(tmp_path, capsys):
+    """A line is decoded whole, so a `py` line with a character past ASCII
+    in it runs as written."""
+    ws, ch, stdin = _bytes_channel(tmp_path, "py len('\u00e9\u00e9')\n".encode())
+    pump(ws, ch, stdin)
+    assert _said(capsys, "PY ") == ["PY 2"]
 
 
 def test_moy_query_answers_the_descriptor(tmp_path, capsys):
@@ -1480,7 +1510,7 @@ def test_moy_put_reads_through_moy_serial_and_hands_back_what_follows(
     ch.run(ws, head)
     assert (tmp_path / "c.moy" / "main.lua").read_bytes() == data
     assert _said(capsys, "moy-") == ["moy-ok", "moy-ok"]
-    assert ch.buf == "sta"
+    assert ch.buf == bytearray(b"sta")
     assert sessions == [1]
 
 

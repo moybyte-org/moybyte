@@ -111,6 +111,10 @@ moybyte_patch_gc_run_hints
 #     the wake.
 moybyte_patch_stdin_ring
 
+# DECLINED moybyte_patch_usj_rx_init -- the USB-Serial/JTAG console's start.
+# This board's console is the CH343's UART, whose ISR is installed with the
+# port and takes every byte as it arrives.
+
 # LittleFS sized for a flash store: the cart store is this board's internal
 # flash, which the stock sizes program 128 bytes at a time and search for free
 # blocks 256 at a time. tools/patch_lfs_sizes.py carries the measurements.

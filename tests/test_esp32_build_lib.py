@@ -1082,3 +1082,59 @@ def test_a_board_that_says_nothing_gets_the_default_dest(tmp_path):
     board.mkdir()
     (board / "board.toml").write_text("[board]\nota = \"x\"\n", encoding="utf-8")
     assert board_config.native_dest(board) == "native/.staged"
+
+
+# -- the USB-Serial/JTAG console's start (tools/patch_usj_rx_init.py) -----------
+
+_USJ_STOCK = """\
+static void usb_serial_jtag_handle_rx(void) {
+    size_t len = usb_serial_jtag_ll_read_rxfifo(rx_buf, req_len);
+}
+
+void usb_serial_jtag_init(void) {
+    usb_serial_jtag_ll_clr_intsts_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT |
+        USB_SERIAL_JTAG_INTR_SOF);
+    usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT |
+        USB_SERIAL_JTAG_INTR_SOF | USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+    ESP_ERROR_CHECK(esp_intr_alloc(ETS_USB_SERIAL_JTAG_INTR_SOURCE, ESP_INTR_FLAG_LEVEL1,
+        usb_serial_jtag_isr_handler, NULL, NULL));
+}
+
+void usb_serial_jtag_poll_rx(void) {
+}
+"""
+
+
+def _usj(tmp_path, text=_USJ_STOCK):
+    p = tmp_path / "ports" / "esp32"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "usb_serial_jtag.c"
+    f.write_text(text, encoding="utf-8")
+    r = sh("moybyte_patch_usj_rx_init", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    return f, r
+
+
+def test_the_usj_console_reads_its_fifo_once_its_interrupt_is_up(tmp_path):
+    """The stock init clears the interrupt of a packet that landed during the
+    bootloader; the read after the ISR is installed is what takes it, so it
+    goes inside init, after esp_intr_alloc."""
+    f, r = _usj(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    init = c.index("void usb_serial_jtag_init(void) {")
+    alloc = c.index("usb_serial_jtag_isr_handler, NULL, NULL));", init)
+    read = c.index("    usb_serial_jtag_handle_rx();\n", alloc)
+    assert read < c.index("void usb_serial_jtag_poll_rx(void)")
+    again = sh("moybyte_patch_usj_rx_init", MPY_DIR=str(tmp_path),
+               REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert again.returncode == 0 and again.stdout.strip() == ""
+    assert f.read_text(encoding="utf-8") == c
+
+
+def test_a_usj_init_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    """A silent no-op is a board whose boot a host's early line still breaks."""
+    text = _USJ_STOCK.replace("ESP_INTR_FLAG_LEVEL1", "ESP_INTR_FLAG_LEVEL2")
+    f, r = _usj(tmp_path, text)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert f.read_text(encoding="utf-8") == text

@@ -63,6 +63,11 @@ moybyte_patch_esp_hosted_bump esp32p4
 moybyte_patch_native_code_free
 moybyte_patch_espnow_ring_race
 
+# The console is the SoC's USB-Serial/JTAG: it takes, when it starts, what a
+# host sent during the bootloader, instead of leaving it in the FIFO for a
+# whole boot (tools/patch_usj_rx_init.py).
+moybyte_patch_usj_rx_init
+
 # 2e) REPR_C -- FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT (the Waveshare's
 #     build.sh carries the measured argument): every board that can hold a
 #     link runs REPR_C. With it, the map-lookup cache index re-aimed for
