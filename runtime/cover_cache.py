@@ -181,8 +181,10 @@ class CoverCache:
 
     def __init__(self, ws):
         self.ws = ws
-        # Bumped on any cover-cache change (#113: the shelf blit path pins it so
-        # a cover landing mid-drag forces a full band repaint). ONE author --
+        # Bumped on any cover-cache change and on every painted frame that
+        # deferred a build (#113: the shelf blit path pins it so a cover
+        # landing mid-drag forces a full band repaint; the home's retained
+        # stamp keys on it, see take_deferred). ONE author --
         # there is no ws mirror; launcher_layer + the tests read covers.gen.
         self.gen = 0
         # RAM-tight board (T-Deck): drop the cover pipeline when a cart RUN
@@ -231,10 +233,18 @@ class CoverCache:
         the caller re-dirties and the remaining covers land on the following
         frames. Taking it -- read AND clear in one call -- is what keeps the
         flag single-author: the gate that set it is a draw, the drain is the
-        loop, and neither has to know the other's ordering."""
+        loop, and neither has to know the other's ordering.
+
+        Taking it also moves `gen`: a frame that drew a card's placeholder
+        while its cover was still due is not a settled frame, and the home's
+        retained stamp keys on `gen`. Left alone, the next frame would stamp
+        that frame back instead of drawing the grid, no card would ask again,
+        and a cover past the idle prebuild's first screenful would stay a
+        placeholder for good."""
         if not self._deferred:
             return False
         self._deferred = False
+        self.gen += 1
         return True
 
     # -- what the grids call, once per card per painted frame ----------------

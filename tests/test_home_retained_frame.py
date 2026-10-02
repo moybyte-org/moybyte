@@ -152,3 +152,31 @@ def test_foreign_paints_reset_the_partial_streak(tmp_path):
     ws._dirty = True
     drv.frame(0.0)                                   # consecutive paint no. 2
     assert ws.launcher_layer._full_streak == 2
+
+
+def test_a_frame_that_deferred_a_cover_is_not_stamped_back(tmp_path, monkeypatch):
+    """A painted frame that drew a placeholder because its card's cover build
+    was pushed past the frame's budget is not a settled frame: the frames
+    after it draw the grid again, step the build, and every cover lands --
+    including cards past the idle prebuild's first screenful, which nothing
+    else ever decodes. Stamping that frame back left them placeholders."""
+    from runtime import cover_cache
+    ws, drv = _settle_home(tmp_path)
+    la = ws.launcher
+    ws.covers.prefetch_tick = lambda: None        # only painted frames build
+    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", 0)
+    ws.covers._drop_payloads(0)
+    la.sel = len(la.items) - 1
+    la._scroll_to_sel()
+    ws._dirty = True
+    shown = set((la.items[i].get("path")) for i, _r in la._visible())
+    want = [(it["path"], div) for it, div in la.cover_specs() if it["path"] in shown]
+    assert want, "no covered card on the last screenful"
+    for _ in range(400):
+        _quiesce(ws)
+        drv.frame(0.0)
+        if all(k in ws.covers._cache for k in want):
+            break
+    missing = [k[0].rsplit("/", 1)[-1] for k in want if k not in ws.covers._cache]
+    assert not missing, "never landed: %s" % missing
+
