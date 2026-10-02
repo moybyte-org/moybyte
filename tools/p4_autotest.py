@@ -180,6 +180,35 @@ def serial_ports():
     return sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*"))
 
 
+def identities_path():
+    """Where this machine's learned serial -> board map lives (`tools/board.py`
+    writes it)."""
+    if os.environ.get("MOYBYTE_BOARDS_FILE"):
+        return os.environ["MOYBYTE_BOARDS_FILE"]
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "moybyte", "boards.json")
+
+
+def load_identities():
+    try:
+        with open(identities_path()) as f:
+            got = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def serial_owners(dirs=None, known=None):
+    """{USB serial number: board name}, from every board.toml's [serial]
+    serial_number and this machine's learned map; a declaration wins."""
+    out = dict(load_identities() if known is None else known)
+    for name, d in (board_dirs() if dirs is None else dirs).items():
+        sn = declared_serial(d).get("serial_number")
+        if sn:
+            out[sn] = name
+    return out
+
+
 def _probe_identity(port, board_dir, log):
     """Attach to `port` with `board_dir`'s line discipline and ask who it is.
     Only ever called for attach_only declarations, where an open is side-effect
@@ -201,12 +230,17 @@ def _probe_identity(port, board_dir, log):
 
 
 def find_port(board_dir=P4_BOARD_DIR, log=None, ports=None, usb_of=None,
-              prober=None):
+              prober=None, serial_of=None, owners=None):
     """Resolve a board directory to the serial port it is plugged into.
 
     Raises RuntimeError with the full candidate picture on anything short of
     one confident answer -- a guessed port is exactly the bug this exists to
-    remove. `ports`/`usb_of`/`prober` are injectable for the host tests."""
+    remove. A port whose USB serial number already names a board
+    (`serial_owners`) is settled without an open: it is returned when it is
+    this board and never probed when it is another -- the Zero has no dev
+    channel, and a probe is a stray line on its bare REPL.
+    `ports`/`usb_of`/`prober`/`serial_of`/`owners` are injectable for the host
+    tests."""
     log = log or (lambda s: None)
     ser = declared_serial(board_dir)
     want_usb = ser.get("usb")
@@ -223,6 +257,19 @@ def find_port(board_dir=P4_BOARD_DIR, log=None, ports=None, usb_of=None,
             % (board_dir, want_usb,
                ", ".join("%s=%s" % (p, usb_of(p)) for p in allp) or "none"))
     want_id = declared_board_id(board_dir)
+    serial_of = serial_of or usb_serial_of
+    owners = serial_owners() if owners is None else owners
+    named = {p: owners.get(serial_of(p)) for p in cands}
+    mine = [p for p in cands if want_id and named[p] == want_id]
+    if len(mine) == 1:
+        log("resolved %s -> %s (usb serial)" % (board_dir, mine[0]))
+        return mine[0]
+    others = ["%s=%s" % (p, named[p]) for p in cands if named[p]]
+    cands = [p for p in cands if not named[p]]
+    if not cands:
+        raise RuntimeError(
+            "every %s port belongs to another board by its serial number (%s) "
+            "-- is %s plugged in?" % (want_usb, ", ".join(others), want_id))
     if len(cands) == 1:
         # Unique on the bus -- but NOT necessarily unique by design: both S3s
         # declare 303a:1001, so with one of them unplugged the survivor

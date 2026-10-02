@@ -95,9 +95,15 @@ def _usb_map(m):
     return lambda p: m.get(p)
 
 
+# No port's serial number is known: these tests are about the usb id and the
+# probe, and must not read this machine's real ports or its learned map.
+NO_SERIALS = dict(serial_of=lambda p: None, owners={})
+
+
 def test_a_unique_usb_match_resolves_without_probing():
     got = p4_autotest.find_port(
-        P4, ports=["/dev/ttyACM0", "/dev/ttyACM3"],
+        P4, **NO_SERIALS,
+        ports=["/dev/ttyACM0", "/dev/ttyACM3"],
         usb_of=_usb_map({"/dev/ttyACM0": "303a:1001",
                          "/dev/ttyACM3": "1a86:55d3"}),
         prober=lambda p: pytest.fail("must not probe a unique match"))
@@ -107,7 +113,8 @@ def test_a_unique_usb_match_resolves_without_probing():
 def test_no_match_names_every_port_it_saw():
     with pytest.raises(RuntimeError) as e:
         p4_autotest.find_port(
-            P4, ports=["/dev/ttyACM0"],
+            P4, **NO_SERIALS,
+            ports=["/dev/ttyACM0"],
             usb_of=_usb_map({"/dev/ttyACM0": "303a:1001"}))
     assert "1a86:55d3" in str(e.value) and "/dev/ttyACM0" in str(e.value)
 
@@ -115,7 +122,8 @@ def test_no_match_names_every_port_it_saw():
 def test_twins_are_split_by_asking_each_board():
     answers = {"/dev/ttyACM1": "guition_s3", "/dev/ttyACM2": "tdeck"}
     got = p4_autotest.find_port(
-        TDECK, ports=["/dev/ttyACM1", "/dev/ttyACM2"],
+        TDECK, **NO_SERIALS,
+        ports=["/dev/ttyACM1", "/dev/ttyACM2"],
         usb_of=_usb_map({"/dev/ttyACM1": "303a:1001",
                          "/dev/ttyACM2": "303a:1001"}),
         prober=lambda p: answers[p])
@@ -125,7 +133,8 @@ def test_twins_are_split_by_asking_each_board():
 def test_twins_with_no_matching_answer_refuse_with_the_picture():
     with pytest.raises(RuntimeError) as e:
         p4_autotest.find_port(
-            TDECK, ports=["/dev/ttyACM1", "/dev/ttyACM2"],
+            TDECK, **NO_SERIALS,
+            ports=["/dev/ttyACM1", "/dev/ttyACM2"],
             usb_of=_usb_map({"/dev/ttyACM1": "303a:1001",
                              "/dev/ttyACM2": "303a:1001"}),
             prober=lambda p: None)
@@ -138,7 +147,8 @@ def test_a_non_attach_board_never_probes_bystanders():
     therefore a refusal, not a probe."""
     with pytest.raises(RuntimeError) as e:
         p4_autotest.find_port(
-            P4, ports=["/dev/ttyACM3", "/dev/ttyACM5"],
+            P4, **NO_SERIALS,
+            ports=["/dev/ttyACM3", "/dev/ttyACM5"],
             usb_of=_usb_map({"/dev/ttyACM3": "1a86:55d3",
                              "/dev/ttyACM5": "1a86:55d3"}),
             prober=lambda p: pytest.fail("probed a non-attach board"))
@@ -151,7 +161,8 @@ def test_a_lone_twin_is_still_interrogated():
     Observed live 2026-08-24: the Guition resolved to the T-Deck's port."""
     with pytest.raises(RuntimeError) as e:
         p4_autotest.find_port(
-            GUITION, ports=["/dev/ttyACM1"],
+            GUITION, **NO_SERIALS,
+            ports=["/dev/ttyACM1"],
             usb_of=_usb_map({"/dev/ttyACM1": "303a:1001"}),
             prober=lambda p: "tdeck")
     assert "tdeck" in str(e.value) and "guition_s3" in str(e.value)
@@ -161,10 +172,44 @@ def test_a_lone_silent_twin_is_accepted_for_downstream_verify():
     """A board that does not answer might be wedged or mid-boot; find_port
     hands it over and P4Board.verify_board() is the second gate."""
     got = p4_autotest.find_port(
-        GUITION, ports=["/dev/ttyACM1"],
+        GUITION, **NO_SERIALS,
+        ports=["/dev/ttyACM1"],
         usb_of=_usb_map({"/dev/ttyACM1": "303a:1001"}),
         prober=lambda p: None)
     assert got == "/dev/ttyACM1"
+
+
+def test_a_port_another_board_owns_is_never_probed():
+    """The Zero shares 303a:1001 and has no dev channel: a probe is a stray
+    line on its bare REPL. Its serial number is in its board.toml, so a twin
+    search rules it out without opening it."""
+    answers = {"/dev/ttyACM2": "tdeck"}
+    got = p4_autotest.find_port(
+        TDECK, ports=["/dev/ttyACM0", "/dev/ttyACM2"],
+        usb_of=_usb_map({"/dev/ttyACM0": "303a:1001",
+                         "/dev/ttyACM2": "303a:1001"}),
+        serial_of={"/dev/ttyACM0": "ZERO-SN", "/dev/ttyACM2": None}.get,
+        owners={"ZERO-SN": "xiao_zero"},
+        prober=lambda p: answers[p])
+    assert got == "/dev/ttyACM2"
+
+
+def test_a_port_whose_serial_names_this_board_needs_no_probe():
+    got = p4_autotest.find_port(
+        TDECK, ports=["/dev/ttyACM1", "/dev/ttyACM2"],
+        usb_of=_usb_map({"/dev/ttyACM1": "303a:1001",
+                         "/dev/ttyACM2": "303a:1001"}),
+        serial_of={"/dev/ttyACM1": "S3-SN", "/dev/ttyACM2": "TD-SN"}.get,
+        owners={"S3-SN": "guition_s3", "TD-SN": "tdeck"},
+        prober=lambda p: pytest.fail("probed a port its serial settles"))
+    assert got == "/dev/ttyACM2"
+
+
+def test_the_zeros_declared_serial_is_an_owner():
+    owners = p4_autotest.serial_owners(known={})
+    zero = p4_autotest.declared_serial(
+        p4_autotest.board_dirs()["xiao_zero"])["serial_number"]
+    assert owners[zero] == "xiao_zero"
 
 
 # -- reading replies off a noisy wire ----------------------------------------

@@ -95,21 +95,8 @@ def is_console(board_dir):
 # -- which port: facts that need no open --------------------------------------
 
 
-def identities_path():
-    """Where this machine's learned serial -> board map lives."""
-    if os.environ.get("MOYBYTE_BOARDS_FILE"):
-        return os.environ["MOYBYTE_BOARDS_FILE"]
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return os.path.join(base, "moybyte", "boards.json")
-
-
-def load_identities():
-    try:
-        with open(identities_path()) as f:
-            got = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    return got if isinstance(got, dict) else {}
+identities_path = pa.identities_path
+load_identities = pa.load_identities
 
 
 def learn(serial, board):
