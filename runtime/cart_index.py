@@ -47,11 +47,37 @@ A crash at any point leaves the old cart or the new one, never half of either:
 `recover`, which the app runs when it opens, removes an unfinished build and
 puts back an old copy whose replacement never moved in.
 
-Host == device: MicroPython-safe (`deflate` inflates there, `zlib` on
-CPython), and the network is injected -- urllib on the host
-(runtime/host_app.py), the board's TLS client on a board (device/cart_net.py).
-A transport's `open(url)` answers an object with `status`, `length` (None when
+Host == device == browser: MicroPython-safe (`deflate` inflates there, `zlib`
+on CPython), and the network is injected -- urllib on the host
+(runtime/host_app.py), the board's TLS client on a board (device/cart_net.py),
+the page's fetch in the browser (firmware/web_runner/carts_link.py). A
+transport's `open(url)` answers an object with `status`, `length` (None when
 unknown), `readinto(buf)` and `close()`.
+
+A transport may be NON-BLOCKING, and the browser's is: its bytes arrive between
+frames, while no Python runs, so nothing here may wait for them inside a step.
+Its answer has `status` None until the response head is in, and `ready(n)`,
+True once `n` bytes (or the end of the body, or a failure) are in hand; a
+blocking transport has no `ready`. `Fetch`, `Reach` and `Install` all give the
+frame back while a non-blocking answer is on its way, and each reads only what
+`ready` vouches for.
+
+A transport with `cors` set (the browser's) can read only what a server lets
+another origin read. A GitHub release download is not that, so it reads an
+asset's `mirror` -- the same bytes beside the index on the repository's Pages
+site (moy-spec's cartindex.py says how a repository publishes one) -- before
+its release `url`; every other console reads the release first and falls back
+to the mirror. An external file such a console cannot read from its archive's
+hosts is one the player SUPPLIES instead (`Install`'s `supplied`, the Get Carts
+app's file picker), checked like a download.
+
+Where the store of record is not the files this module writes (the browser's
+OPFS behind its in-memory VFS), a KEEPER is injected (`Install`'s `keep`):
+`commit(folder, stage, record, done)` makes the staged folder and the record
+durable together and then calls `done(why, full)` once -- `why` empty when
+they are, else the reason, `full` when the store had no room;
+`landed(folder)` hears that the folder moved into the carts folder;
+`record(text)` makes a record without a folder durable (a removal).
 """
 
 import binascii
@@ -112,6 +138,12 @@ TEXT_LIMIT = 65536            # a licence text, likewise
 READ_CHUNK = 16384
 WRITE_CHUNK = 65536
 STEP_MS = 120
+
+# The most one unit of the pipeline reads from the network at once: a zip
+# member's local header with the longest name and extra field it can carry.
+# A non-blocking transport is read only once this much (or the rest of the
+# body and its end) is in hand, so no unit ever waits inside a step.
+GATE = 4 + 26 + 65535 + 65535
 
 SAVES = "pmem.json"           # always carried across an update
 CONFIG = "config.json"        # carried when the kid changed it
@@ -192,6 +224,28 @@ def plain_name(name):
     segment, no dot first (moy-spec's rule, so `..` and hidden files never)."""
     return (isinstance(name, str) and bool(name) and "/" not in name
             and "\\" not in name and "\0" not in name and not name.startswith("."))
+
+
+def mirror_ok(ref):
+    """An asset's `mirror` as moy-spec's check_index allows it: a path relative
+    to the index that stays beside it."""
+    if not isinstance(ref, str) or not ref or ref.startswith("/") or "\\" in ref \
+            or ":" in ref:
+        return False
+    for seg in ref.split("/"):
+        if seg in ("", ".", ".."):
+            return False
+    return True
+
+
+def asset_urls(asset, cors=False):
+    """Where `asset` is fetched from, in the order to try: its release `url`
+    then its mirror -- or, for a transport that can only read what CORS lets
+    it (`cors`), the mirror first."""
+    m = asset.get("mirror")
+    if not mirror_ok(m):
+        return [asset["url"]]
+    return [m, asset["url"]] if cors else [asset["url"], m]
 
 
 def _sha(s):
@@ -297,6 +351,14 @@ def parse_index(data, url):
         if "cover" in c and cover_ref(c) is None:
             _log("%s: %r's cover left out" % (url, c["id"]))
             del c["cover"]
+        assets = []
+        for a in c["assets"]:
+            if "mirror" in a and not mirror_ok(a["mirror"]):
+                _log("%s: %r's mirror %r left out" % (url, c["id"], a["mirror"]))
+                a = dict(a)
+                del a["mirror"]
+            assets.append(a)
+        c["assets"] = assets
         c["index"] = url
         c["shelf"] = str(index.get("name") or "")
         out.append(c)
@@ -400,9 +462,12 @@ def load_record(root):
     return dict(got) if got else {}
 
 
+def record_text(rec):
+    return json.dumps({"version": 1, "carts": rec})
+
+
 def save_record(root, rec):
-    _store._write_sibling(root, RECORD_NAME,
-                          json.dumps({"version": 1, "carts": rec}))
+    _store._write_sibling(root, RECORD_NAME, record_text(rec))
 
 
 def record_entry(cart, p):
@@ -467,10 +532,19 @@ def recover(root):
     return len(names)
 
 
-def remove(root, folder):
+def remove(root, folder, keep=None):
     """Take `folder` off the shelf: one rename out of the carts folder (so a
     crash mid-delete never leaves half a cart listed), then the delete, then
-    the record. Call inside one store session."""
+    the record. Call inside one store session.
+
+    With a keeper the record without the cart goes to the store of record
+    FIRST, ahead of the folder's deletion: a record that outlives its folder
+    would one day offer an UPDATE over a kid's own cart of the same name,
+    while a folder that outlives its record is only offered again."""
+    rec = load_record(root)
+    had = rec.pop(folder, None) is not None
+    if keep is not None and had:
+        keep.record(record_text(rec))
     base = stage_root(root)
     _mkdir(base)
     gone = base + "/" + folder + ".gone"
@@ -478,71 +552,211 @@ def remove(root, folder):
         _rmtree(gone)
     os.rename(root + "/" + folder, gone)
     _rmtree(gone)
-    rec = load_record(root)
-    if rec.pop(folder, None) is not None:
+    if had:
         save_record(root, rec)
 
 
 # -- fetching -------------------------------------------------------------------
 
-def fetch(net, url, limit, size=None, sha=None):
-    """The bytes at `url`, whole, refusing more than `limit` -- and, given
-    `size`/`sha`, refusing anything that is not exactly that."""
-    if size is not None:
-        limit = size
-    try:
-        resp = net.open(url)
-    except Exception as exc:  # noqa: BLE001 -- every transport error is "unreachable"
-        raise InstallError(net_text(net, UNREACHABLE), "%s: %s" % (url, exc))
-    try:
-        if resp.status != 200:
-            raise InstallError(UNREACHABLE, "%s: HTTP %d" % (url, resp.status))
-        out = bytearray()
-        chunk = bytearray(4096)
-        mv = memoryview(chunk)
-        while True:
-            try:
-                n = resp.readinto(mv)
-            except Exception as exc:  # noqa: BLE001
-                raise InstallError(net_text(net, STOPPED), "%s: %s" % (url, exc))
-            if not n:
-                break
-            out.extend(mv[:n])
-            if len(out) > limit:
-                raise InstallError(MISMATCH, "%s is larger than %d bytes" % (url, limit))
-    finally:
+class Fetch:
+    """One small document whole -- an index, a licence text, a cover -- at
+    most `limit` bytes and, given `size`/`sha`, exactly those. `step()` is True
+    while the answer is still on its way (only a non-blocking transport ever
+    says so) and raises an InstallError when it cannot be had; then `data`
+    holds the bytes."""
+
+    def __init__(self, net, url, limit, size=None, sha=None):
+        self.net = net
+        self.url = url
+        self.size = size
+        self.sha = sha
+        self.limit = limit if size is None else size
+        self.data = None
+        self._out = bytearray()
+        self._buf = bytearray(4096)
         try:
-            resp.close()
-        except Exception:  # noqa: BLE001
-            pass
-    if size is not None and len(out) != size:
-        raise InstallError(MISMATCH, "%s is %d bytes, the index says %d"
-                           % (url, len(out), size))
-    if sha is not None:
-        got = _hex(hashlib.sha256(out).digest())
-        if got != sha:
-            raise InstallError(MISMATCH, "%s hashes to %s, the index says %s"
-                               % (url, got, sha))
-    return bytes(out)
+            self._resp = net.open(url)
+        except Exception as exc:  # noqa: BLE001 -- every transport error is "unreachable"
+            raise InstallError(net_text(net, UNREACHABLE), "%s: %s" % (url, exc))
+
+    def step(self):
+        resp = self._resp
+        if resp is None:
+            return False
+        try:
+            if resp.status is None:
+                return True
+            if resp.status != 200:
+                raise InstallError(UNREACHABLE, "%s: HTTP %d" % (self.url, resp.status))
+            ready = getattr(resp, "ready", None)
+            mv = memoryview(self._buf)
+            while True:
+                if ready is not None and not ready(1):
+                    return True
+                try:
+                    n = resp.readinto(mv)
+                except Exception as exc:  # noqa: BLE001
+                    raise InstallError(net_text(self.net, STOPPED), "%s: %s"
+                                       % (self.url, exc))
+                if not n:
+                    break
+                self._out.extend(mv[:n])
+                if len(self._out) > self.limit:
+                    raise InstallError(MISMATCH, "%s is larger than %d bytes"
+                                       % (self.url, self.limit))
+        except InstallError:
+            self.close()
+            raise
+        self.close()
+        out, self._out = self._out, None
+        if self.size is not None and len(out) != self.size:
+            raise InstallError(MISMATCH, "%s is %d bytes, the index says %d"
+                               % (self.url, len(out), self.size))
+        if self.sha is not None:
+            got = _hex(hashlib.sha256(out).digest())
+            if got != self.sha:
+                raise InstallError(MISMATCH, "%s hashes to %s, the index says %s"
+                                   % (self.url, got, self.sha))
+        self.data = bytes(out)
+        return False
+
+    def close(self):
+        resp, self._resp = self._resp, None
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
-def fetch_cover(net, cart):
-    """The cover.png `cart`'s index entry names (`cover_ref`), fetched and
-    checked against its size and sha256."""
+def index_fetch(net, url):
+    return Fetch(net, url, INDEX_LIMIT)
+
+
+def cover_fetch(net, cart):
+    """The cover.png `cart`'s index entry names (`cover_ref`), to be checked
+    against its size and sha256."""
     ref = cart["cover"]
-    return fetch(net, resolve(cart["index"], ref["url"]), COVER_MAX_BYTES,
+    return Fetch(net, resolve(cart["index"], ref["url"]), COVER_MAX_BYTES,
                  ref["size"], ref["sha256"])
 
 
-def licence_text(net, cart, ref):
+def licence_fetch(net, cart, ref):
     """A licence the index names (`ref`: {"url", "size", "sha256", "name"}),
-    fetched and checked, as text."""
-    data = fetch(net, resolve(cart["index"], ref["url"]), TEXT_LIMIT,
+    to be checked; `as_text` reads what it fetched."""
+    return Fetch(net, resolve(cart["index"], ref["url"]), TEXT_LIMIT,
                  ref["size"], ref["sha256"])
+
+
+def as_text(data):
     try:
         return data.decode()
     except UnicodeError:
         return "".join(chr(b) if b < 128 else "?" for b in data)
+
+
+class Reach:
+    """Which of `urls` this console can read: the first whose answer comes
+    back 200, the body never read. `step()` is True while an answer is on its
+    way; then `url` is the one that answered, or None. Asked only by a
+    console whose transport cannot read every host (the browser's), about an
+    external file's archive, before it offers the player a file of their
+    own."""
+
+    def __init__(self, net, urls):
+        self.net = net
+        self.urls = list(urls)
+        self.url = None
+        self.why = []
+        self._resp = None
+        self._at = None
+
+    def step(self):
+        while True:
+            resp = self._resp
+            if resp is None:
+                if not self.urls:
+                    return False
+                self._at = self.urls.pop(0)
+                try:
+                    resp = self._resp = self.net.open(self._at)
+                except Exception as exc:  # noqa: BLE001 -- try the next one
+                    self.why.append("%s: %s" % (self._at, exc))
+                    continue
+            if resp.status is None:
+                return True
+            self.close()
+            if resp.status == 200:
+                self.url = self._at
+                self.urls = []
+                return False
+            self.why.append("%s: HTTP %d" % (self._at, resp.status))
+
+    def close(self):
+        resp, self._resp = self._resp, None
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+class FileCheck:
+    """A file the player supplied (`path`), held to the index's `size` and
+    `sha` a slice per `step()`, so a 4 MB file never stops a frame. `step()`
+    is True while more remains; then `why` is None when it is the file, or
+    what is wrong with it in the player's words."""
+
+    CHUNK = 65536
+
+    def __init__(self, path, size, sha):
+        self.path = path
+        self.size = size
+        self.sha = sha
+        self.why = None
+        self.done = 0
+        self._h = hashlib.sha256()
+        self._buf = bytearray(self.CHUNK)
+        self._f = None
+
+    def step(self, budget_ms=STEP_MS):
+        t = _ticks_ms()
+        try:
+            if self._f is None:
+                self._f = open(self.path, "rb")
+            mv = memoryview(self._buf)
+            while True:
+                n = self._f.readinto(mv)
+                if not n:
+                    break
+                self.done += n
+                if self.done > self.size:
+                    return self._end("it is larger than the %d bytes it should be"
+                                     % self.size)
+                self._h.update(mv[:n])
+                if _ticks_diff(_ticks_ms(), t) >= budget_ms:
+                    return True
+        except OSError as exc:
+            return self._end("it could not be read (%s)" % exc)
+        if self.done != self.size:
+            return self._end("it is %d bytes, and the right one is %d"
+                             % (self.done, self.size))
+        if _hex(self._h.digest()) != self.sha:
+            return self._end("its bytes are not the ones the cart was made with")
+        return self._end(None)
+
+    def _end(self, why):
+        self.why = why
+        self.close()
+        return False
+
+    def close(self):
+        f, self._f = self._f, None
+        if f is not None:
+            try:
+                f.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # -- the streaming install --------------------------------------------------------
@@ -583,6 +797,17 @@ class _Fetched:
         self.left -= n
         job.done += n
         return n
+
+    def ready(self):
+        """True when the next unit can read what it needs without waiting --
+        always, from a blocking transport; from a non-blocking one, once GATE
+        bytes are in hand, or the rest of the body and its end."""
+        if self.checked:
+            return True
+        r = getattr(self.resp, "ready", None)
+        if r is None:
+            return True
+        return r(self.left + 1 if self.left < GATE else GATE)
 
     def drain(self):
         """Read what is left, hashing it, without keeping it."""
@@ -738,7 +963,9 @@ class _ZipReader:
         if self.member is not None:
             return self._data()
         if self.tail:
-            self.src.drain()
+            if self.src.left:
+                self.src.readinto(self.job.scratch)
+                return True
             return False
         sig = _exact(self.src, 4, self.job)
         if sig == b"PK\x03\x04":
@@ -1018,6 +1245,79 @@ class _TarGzReader:
         self.job.in_store(_drop)
 
 
+class _Local:
+    """An external file the player supplied, where this console could not
+    fetch it from its archive's hosts (the browser): copied from where it was
+    put into the build and held to the index's size and sha256 on the way,
+    exactly as the file out of a downloaded archive is."""
+
+    def __init__(self, job, path, ext):
+        self.job = job
+        self.ext = ext
+        self.left = ext["size"]
+        self.h = hashlib.sha256()
+        self.f = job.in_store(lambda: open(path, "rb"))
+        job.sink.begin(ext["path"])
+
+    def unit(self):
+        return self.job.in_store(self._unit)
+
+    def _unit(self):
+        job = self.job
+        name = self.ext["path"]
+        if self.left:
+            mv = job.sink.space(self.left)
+            n = self.f.readinto(mv)
+            if not n:
+                raise InstallError(MISMATCH, "%s is %d bytes short" % (name, self.left))
+            self.h.update(mv[:n])
+            job.sink.wrote(n)
+            job.done += n
+            self.left -= n
+            if self.left:
+                return True
+        if self.f.read(1):
+            raise InstallError(MISMATCH, "%s is larger than the index says (%d bytes)"
+                               % (name, self.ext["size"]))
+        job.sink.end()
+        got = _hex(self.h.digest())
+        if got != self.ext["sha256"]:
+            raise InstallError(MISMATCH, "%s hashes to %s, the index says %s"
+                               % (name, got, self.ext["sha256"]))
+        return False
+
+    def close(self):
+        f, self.f = self.f, None
+        if f is not None:
+            try:
+                f.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+class _Opening:
+    """A download being opened: the URLs still to try, the answer awaited."""
+
+    def __init__(self, urls, size, sha, what, then):
+        self.urls = list(urls)
+        self.size = size
+        self.sha = sha
+        self.what = what
+        self.then = then              # ("asset" | "external", the index's item)
+        self.url = None
+        self.resp = None
+        self.why = []
+        self.text = UNREACHABLE       # what its failures add up to, in the kid's words
+
+    def close(self):
+        resp, self.resp = self.resp, None
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 class Install:
     """Install (or update) one cart, a slice per frame:
 
@@ -1028,26 +1328,40 @@ class Install:
     `session(fn)` runs `fn()` inside one store session (the console's SD gate,
     a call-through on flash). `accepted` names the external files whose
     licence the kid accepted; an install with one not accepted refuses before
-    it fetches anything. On any failure the staging folder goes and the shelf
-    is exactly as it was; `cancel()` does the same on purpose."""
+    it fetches anything. `supplied` maps an external file's path to a file the
+    player gave instead of its archive. On any failure the staging folder goes
+    and the shelf is exactly as it was; `cancel()` does the same on purpose.
+
+    With a `keep` (the module docstring's keeper) the checked build goes to the
+    store of record before it moves into place, and moves only once that store
+    has it: `keeping` is True meanwhile, and there is no cancelling -- every
+    byte is already checked, and the keeper finishes the job when its answer
+    comes, whether or not anybody is still stepping it."""
 
     def __init__(self, cart, p, net, root, session, accepted=(), chunk=None,
-                 step_ms=None, archive="ram"):
+                 step_ms=None, archive="ram", supplied=None, keep=None):
         self.cart = cart
         self.plan = p
         self.net = net
         self.root = root
         self.session = session
         self.accepted = tuple(accepted)
+        self.supplied = dict(supplied or {})
+        self.keep = keep
+        self.keeping = False
         self.step_ms = STEP_MS if step_ms is None else step_ms
         self.archive = archive
         self._in_session = False
         self.folder = cart["folder"]
         self.stage = stage_root(root) + "/" + self.folder
         self.target = root + "/" + self.folder
-        self.total = p["download_bytes"]
+        self.total = 0
+        for a in cart["assets"]:
+            self.total += a["size"]
         for e in p["external"]:
-            self.total += e["size"]       # the inflate half moves the bar too
+            self.total += e["size"]       # the inflate (or the copy) moves the bar too
+            if e["path"] not in self.supplied:
+                self.total += e["archive"]["size"]
         self.done = 0
         self.error = None
         self.detail = None
@@ -1061,10 +1375,13 @@ class Install:
         self.sink = _Sink(self, WRITE_CHUNK if chunk is None else chunk)
         self.written = {}
         self._queue = [("asset", a) for a in cart["assets"]] \
-            + [("external", e) for e in p["external"]]
+            + [("local" if e["path"] in self.supplied else "external", e)
+               for e in p["external"]]
         self._reader = None
         self._src = None
+        self._opening = None
         self._started = None
+        self._reported = False
 
     # -- the store, timed ------------------------------------------------------
 
@@ -1085,42 +1402,64 @@ class Install:
     # -- the frame's slice ---------------------------------------------------------
 
     def step(self, budget_ms=None):
-        """Do up to `budget_ms` of work. True while more remains."""
+        """Do up to `budget_ms` of work. True while more remains -- including
+        while a non-blocking transport's bytes, or the keeper's answer, are
+        still on their way."""
         if self.finished:
             return False
+        if self.keeping:
+            return True
         budget = self.step_ms if budget_ms is None else budget_ms
         t = _ticks_ms()
         try:
             if self._started is None:
                 self._begin()
             while True:
-                if self._reader is None and not self._next():
-                    self._commit()
-                    self._close(ok=True)
-                    return False
+                if self._reader is None:
+                    if self._opening is None and not self._next():
+                        self._commit()
+                        return not self.finished
+                    if self._reader is None and not self._open_step():
+                        return True
+                if self._src is not None and not self._src.ready():
+                    return True
                 if not self._reader.unit():
                     self._end_source()
                 if _ticks_diff(_ticks_ms(), t) >= budget:
                     return True
-        except InstallError as exc:
-            self._fail(exc.text, exc.detail)
-        except MemoryError:
-            self._fail(NO_MEMORY, "out of memory at %d of %d bytes"
-                       % (self.done, self.total))
-        except OSError as exc:
-            self._fail(FULL if _store.store_full(exc) else NO_WRITE,
-                       "%s: %s" % (self.folder, exc))
         except Exception as exc:  # noqa: BLE001 -- an install never takes the shell down
-            self._fail(STOPPED, "%s: %r" % (self.folder, exc))
+            self._failed(exc)
         finally:
             self.t_all += _ticks_diff(_ticks_ms(), t)
-            if self.finished and self.done:
-                _log(self.report())
+            self._report_once()
         return False
 
+    def _report_once(self):
+        if self.finished and self.done and not self._reported:
+            self._reported = True
+            _log(self.report())
+
+    def _failed(self, exc):
+        """End the job on `exc`, in the kid's words."""
+        if isinstance(exc, InstallError):
+            self._fail(exc.text, exc.detail)
+        elif isinstance(exc, MemoryError):
+            self._fail(NO_MEMORY, "out of memory at %d of %d bytes"
+                       % (self.done, self.total))
+        elif isinstance(exc, OSError):
+            self._fail(FULL if _store.store_full(exc) else NO_WRITE,
+                       "%s: %s" % (self.folder, exc))
+        else:
+            self._fail(STOPPED, "%s: %r" % (self.folder, exc))
+
     def cancel(self):
+        """Stop, keeping nothing. False once the keeper has the build: past
+        that point the cart lands."""
+        if self.keeping:
+            return False
         if not self.finished:
             self._fail(None, "cancelled")
+        return True
 
     def rate(self):
         """Bytes per second so far, or 0."""
@@ -1152,56 +1491,73 @@ class Install:
         self.in_store(_fresh)
 
     def _next(self):
+        """The next file to fetch or copy: True when there was one."""
         if not self._queue:
             return False
         kind, item = self._queue.pop(0)
-        index = self.cart["index"]
-        if kind == "asset":
-            self._src = self._open([item["url"]], item["size"], item["sha256"],
-                                   item["name"], index)
-            self._reader = _ZipReader(self, self._src, self.cart, item)
+        if kind == "local":
+            self._reader = _Local(self, self.supplied[item["path"]], item)
+        elif kind == "asset":
+            self._opening = _Opening(asset_urls(item, getattr(self.net, "cors", False)),
+                                     item["size"], item["sha256"], item["name"],
+                                     (kind, item))
         else:
             arc = item["archive"]
             if arc.get("format") != "tar.gz":
                 raise InstallError(PACKING, "%s: archive format %r"
                                    % (item["path"], arc.get("format")))
-            self._src = self._open(arc["urls"], arc["size"], arc["sha256"],
-                                   "the archive holding " + item["path"], index)
-            self._reader = _TarGzReader(self, self._src, item)
+            self._opening = _Opening(arc["urls"], arc["size"], arc["sha256"],
+                                     "the archive holding " + item["path"], (kind, item))
         return True
 
-    def _open(self, urls, size, sha, what, index):
-        """The first of `urls` that answers 200 with the size the index says."""
-        why = []
-        text = UNREACHABLE
-        for u in urls:
-            url = resolve(index, u)
-            t = _ticks_ms()
-            try:
-                resp = self.net.open(url)
-            except Exception as exc:  # noqa: BLE001 -- try the next mirror
-                why.append("%s: %s" % (url, exc))
-                text = net_text(self.net, text)
-                continue
-            finally:
-                self.t_net += _ticks_diff(_ticks_ms(), t)
-            if resp.status != 200 or (resp.length is not None and resp.length != size):
-                why.append("%s: HTTP %d, %s bytes" % (url, resp.status, resp.length))
+    def _open_step(self):
+        """Open the download in hand from the first of its URLs that answers
+        200 with the size the index says. False while an answer is awaited."""
+        o = self._opening
+        while True:
+            if o.resp is None:
+                if not o.urls:
+                    raise InstallError(o.text, "could not get %s: %s"
+                                       % (o.what, "; ".join(o.why)))
+                o.url = resolve(self.cart["index"], o.urls.pop(0))
+                t = _ticks_ms()
                 try:
-                    resp.close()
-                except Exception:  # noqa: BLE001
-                    pass
+                    o.resp = self.net.open(o.url)
+                except Exception as exc:  # noqa: BLE001 -- try the next mirror
+                    o.why.append("%s: %s" % (o.url, exc))
+                    o.text = net_text(self.net, o.text)
+                    continue
+                finally:
+                    self.t_net += _ticks_diff(_ticks_ms(), t)
+            resp = o.resp
+            if resp.status is None:
+                return False
+            if resp.status != 200 or (resp.length is not None and resp.length != o.size):
+                o.why.append("%s: HTTP %d, %s bytes" % (o.url, resp.status, resp.length))
+                o.close()
                 continue
-            _log("fetching %s (%d bytes)" % (url, size))
-            return _Fetched(self, resp, size, sha, what)
-        raise InstallError(text, "could not get %s: %s" % (what, "; ".join(why)))
+            _log("fetching %s (%d bytes)" % (o.url, o.size))
+            self._src = _Fetched(self, resp, o.size, o.sha, o.what)
+            o.resp = None
+            kind, item = o.then
+            if kind == "asset":
+                self._reader = _ZipReader(self, self._src, self.cart, item)
+            else:
+                self._reader = _TarGzReader(self, self._src, item)
+            self._opening = None
+            return True
 
     def _end_source(self):
-        self._src.finish()
+        if self._src is not None:
+            self._src.finish()
         check = getattr(self._reader, "check", None)
         if check is not None:
             check()
-        self._src.close()
+        if self._src is not None:
+            self._src.close()
+        close = getattr(self._reader, "close", None)
+        if close is not None and self._src is None:
+            close()
         self._src = None
         self._reader = None
 
@@ -1214,24 +1570,62 @@ class Install:
             raise InstallError(MISMATCH, "%s holds files the plan does not"
                                % self.folder)
         entry = record_entry(self.cart, self.plan)
+        if self.keep is None:
+            self.in_store(lambda: self._swap(entry, True))
+            self._landed()
+            return
 
-        def _swap():
+        def _prepare():
             rec = load_record(self.root)
-            old = rec.get(self.folder)
             if _exists(self.target):
-                self._carry(old)
-                aside = self.stage + ".old"
-                if _exists(aside):
-                    _rmtree(aside)
-                os.rename(self.target, aside)
-                os.rename(self.stage, self.target)
-                _rmtree(aside)
-            else:
-                os.rename(self.stage, self.target)
+                self._carry(rec.get(self.folder))
             rec[self.folder] = entry
-            save_record(self.root, rec)
-        self.in_store(_swap)
+            return record_text(rec)
+        text = self.in_store(_prepare)
+        self.keeping = True
+        self.keep.commit(self.folder, self.stage, text,
+                         lambda why, full=False: self._kept(entry, why, full))
+
+    def _kept(self, entry, why, full):
+        """The keeper's answer: the build is durable (`why` empty) and moves
+        into place, or it is not and nothing changed."""
+        t = _ticks_ms()
+        self.keeping = False
+        try:
+            if why:
+                raise InstallError(FULL if full else NO_WRITE,
+                                   "%s: %s" % (self.folder, why))
+            self.in_store(lambda: self._swap(entry, False))
+            self.keep.landed(self.folder)
+            self._landed()
+        except Exception as exc:  # noqa: BLE001 -- an install never takes the shell down
+            self._failed(exc)
+        finally:
+            self.t_all += _ticks_diff(_ticks_ms(), t)
+            self._report_once()
+
+    def _swap(self, entry, carry):
+        """The build into the carts folder by one rename (the old copy aside
+        first), and the record. Inside one store session."""
+        rec = load_record(self.root)
+        old = rec.get(self.folder)
+        if _exists(self.target):
+            if carry:
+                self._carry(old)
+            aside = self.stage + ".old"
+            if _exists(aside):
+                _rmtree(aside)
+            os.rename(self.target, aside)
+            os.rename(self.stage, self.target)
+            _rmtree(aside)
+        else:
+            os.rename(self.stage, self.target)
+        rec[self.folder] = entry
+        save_record(self.root, rec)
+
+    def _landed(self):
         self.path = self.target
+        self._close(ok=True)
 
     def _carry(self, old):
         """The kid's own files from the copy being replaced: the saves always,
@@ -1258,6 +1652,9 @@ class Install:
     def _close(self, ok):
         self.finished = True
         self.sink.abort()
+        if self._opening is not None:
+            self._opening.close()
+            self._opening = None
         if self._src is not None:
             self._src.close()
             self._src = None

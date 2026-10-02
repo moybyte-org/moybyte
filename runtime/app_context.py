@@ -879,6 +879,31 @@ class Installer:
         has no way to fetch."""
         return self.__ws.cart_net
 
+    def home(self):
+        """Where this console's carts are got instead, when not here: "board"
+        on a page a console serves, "headless" on one a console with no screen
+        serves, else None."""
+        return self.__ws.cart_home
+
+    def keep(self):
+        """The store of record's keeper (`runtime/cart_index.py`), where the
+        files an install writes are not it -- the browser's OPFS -- else
+        None."""
+        return self.__ws.cart_keep
+
+    def can_pick(self):
+        """True where the player can hand this console a file of their own (a
+        browser page), for an external file it cannot fetch."""
+        return self.__ws.cart_pick is not None
+
+    def pick(self, name, size, host):
+        """Ask the player for their own copy of `name` (`size` bytes, which
+        this console cannot fetch from `host`). A handle whose `poll()` is
+        None until they answer, then ("file", path) or ("cancel",); `close()`
+        takes the question away. None where nothing can ask."""
+        ask = self.__ws.cart_pick
+        return None if ask is None else ask(name, size, host)
+
     def hold(self):
         """Take the radio under the "carts" lease. True when it came up."""
         return self.__ws.wifi_hold("carts")
@@ -902,8 +927,12 @@ class Installer:
 
     def free(self):
         """`(free bytes, block size)` of the store the carts live on, or None
-        when it cannot say. Call inside `session` (on the T-Deck the card's
+        when it cannot say -- the keeper's answer where there is one, which is
+        the store of record's. Call inside `session` (on the T-Deck the card's
         free count is read off the card)."""
+        keep = self.__ws.cart_keep
+        if keep is not None:
+            return keep.free()
         try:
             import os
             st = os.statvfs(self.__ws.carts_root)

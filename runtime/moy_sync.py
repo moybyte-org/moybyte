@@ -1012,6 +1012,26 @@ class StoreWatcher:
             if text is not None:
                 self._snap[rel] = (size, mtime, _crc(text))
 
+    def adopt(self, unit):
+        """Take the cart folder `unit` AS IS, with nothing pending for it: its
+        files reached the store of record by another road (an install the
+        browser's keeper committed whole, runtime/cart_index.py), so shipping
+        them again would only rewrite what is there -- and the files the wire
+        cannot carry would be missing from it."""
+        prefix = unit + "/"
+        for rel in list(self._pending):
+            if rel.startswith(prefix):
+                del self._pending[rel]
+        if unit in self._pending_dc:
+            self._pending_dc.remove(unit)
+        for rel in list(self._snap):
+            if rel.startswith(prefix):
+                del self._snap[rel]
+        for rel, size, mtime in self._walk_dir(self.root + "/" + unit, unit, 0):
+            text = self._read(self.root + "/" + rel)
+            if text is not None:
+                self._snap[rel] = (size, mtime, _crc(text))
+
     # -- change detection ----------------------------------------------------
 
     def sweep(self):

@@ -23,19 +23,29 @@ The screens, in the order a kid meets them:
   LICENCE    a file the cart needs that its repository does not host (Doom's
              WAD) shows its licence before it is fetched. NO has the focus;
              I AGREE is the only way on.
+  YOUR COPY  a console that can be handed a file (the browser) first asks
+             whether it can read that file's hosts at all; where it cannot,
+             the player chooses their own copy, which is held to the index's
+             size and sha256 before anything is downloaded.
   GETTING    the download, a slice per frame (`cart_index.Install.step`), with
-             its progress and CANCEL.
+             its progress and CANCEL -- until the build is checked and goes to
+             a store of record that is not these files (the browser's), when
+             it can no longer be cancelled and says so.
   READY / NOT INSTALLED  how it ended. A failed or cancelled install changed
              nothing on the shelf.
+  ON THE CONSOLE  a page a board serves: the carts it shows are the board's,
+             and the board gets its own, so this one fetches nothing.
 
 The installing is cart_index's; this module is the screens and the lease. The
 radio is held while something is fetched -- the indexes, a licence and the
 download it leads to -- and let go as soon as that ends: never while the kid
 browses, never into a cart (PLAY lets go first), never past `close()`.
 
-Blocking work (dialling the network, fetching an index) runs one frame after
-its screen is shown, so CHECKING is on the glass before the wait starts -- the
-update screen's arm (runtime/update_ui.py).
+Work that may wait (dialling the network, fetching an index) runs one frame
+after its screen is shown, so CHECKING is on the glass before the wait starts
+-- the update screen's arm (runtime/update_ui.py). Every fetch is a
+`cart_index` job stepped once a frame, which on a board or the host finishes
+in that step and in the browser gives the frame back until its bytes come.
 """
 
 import json
@@ -78,7 +88,7 @@ STATE_LABEL = {"get": "GET", "installed": "ON CONSOLE", "update": "UPDATE",
 ARCHIVE_RAM_SHARE = 4
 
 # The phases whose work runs a slice per frame from draw().
-BUSY = ("checking", "licence_fetch", "connecting", "getting")
+BUSY = ("checking", "licence_fetch", "probing", "picked", "connecting", "getting")
 
 
 def _mb(n):
@@ -180,6 +190,14 @@ class GetCartsAppLayer(ListShellApp):
         self._work = None             # the decode's scratch, while checking
         self._found = []
         self._step = 0
+        self._fetch = None            # the cart_index job in hand, and what it is
+        self._fetching = None
+        self.supplied = {}            # external path -> the player's own copy
+        self._ext = 0                 # the external the probe or pick is on
+        self._pick = None             # the page's file question, while it is up
+        self._picked = []             # answered ones whose files the install reads
+        self._filecheck = None        # the FileCheck of a picked file
+        self.pick_why = None          # what was wrong with the last one
         self._held = False
         self._rows_scroll = None      # ListShellApp's touch model
         self._rows_taps = None
@@ -188,9 +206,11 @@ class GetCartsAppLayer(ListShellApp):
 
     def open(self):
         self.arm_remove = False
-        self.job = None
+        self.job = None               # one the keeper still holds lands by itself
         self.lic = None
-        if self._inst.net() is None:
+        if self._inst.home() is not None:
+            self._go("board")
+        elif self._inst.net() is None:
             self._go("nonet")
         else:
             self._recover()
@@ -211,9 +231,10 @@ class GetCartsAppLayer(ListShellApp):
         self._clamp_list(len(self.rows))
 
     def close(self):
-        if self.job is not None and not self.job.finished:
-            self.job.cancel()
+        if self.job is not None and not self.job.finished and self.job.cancel():
             self._go("cart" if self.cur is not None else "list")
+        self._drop_fetch()
+        self._unpick()
         self._release()
 
     # -- the lease -----------------------------------------------------------------
@@ -237,6 +258,7 @@ class GetCartsAppLayer(ListShellApp):
         self._damage.all()
 
     def _check(self):
+        self._drop_fetch()
         self._found = []
         self._covers = []
         self._work = None
@@ -244,6 +266,31 @@ class GetCartsAppLayer(ListShellApp):
         self.starved = False
         self._step = 0
         self._go("checking")
+
+    def _drop_fetch(self):
+        job, self._fetch = self._fetch, None
+        self._fetching = None
+        if job is not None:
+            job.close()
+
+    def _fetched(self, start, what):
+        """The fetch job `what` names, started by `start()` the first time and
+        stepped after: its bytes once they are all in, else None (still on its
+        way). Raises the job's InstallError, with the job let go."""
+        if self._fetching != what:
+            self._drop_fetch()
+            self._fetch = start()
+            self._fetching = what
+        try:
+            if self._fetch.step():
+                return None
+        except _ci.InstallError:
+            self._drop_fetch()
+            raise
+        data = self._fetch.data
+        self._fetch = None
+        self._fetching = None
+        return data
 
     def _recover(self):
         root = self._inst.root()
@@ -256,6 +303,8 @@ class GetCartsAppLayer(ListShellApp):
 
     def _pump(self):
         """The BUSY phases' slice of work, one per drawn frame."""
+        if self.phase == "pick":
+            self._poll_pick()
         if self.phase not in BUSY:
             return
         if not self.armed:
@@ -268,6 +317,10 @@ class GetCartsAppLayer(ListShellApp):
                 self._pump_check()
             elif ph == "licence_fetch":
                 self._pump_licence()
+            elif ph == "probing":
+                self._pump_probe()
+            elif ph == "picked":
+                self._pump_picked()
             elif ph == "connecting":
                 self._pump_connect()
             else:
@@ -314,8 +367,10 @@ class GetCartsAppLayer(ListShellApp):
         if i < len(self.indexes):
             url = self.indexes[i]
             try:
-                self._found.extend(_ci.parse_index(_ci.fetch(net, url, _ci.INDEX_LIMIT),
-                                                   url))
+                data = self._fetched(lambda: _ci.index_fetch(net, url), ("index", i))
+                if data is None:
+                    return
+                self._found.extend(_ci.parse_index(data, url))
             except _ci.InstallError as exc:
                 self.unreached += 1
                 self.starved = self.starved or exc.text == _ci.NET_MEMORY
@@ -327,7 +382,9 @@ class GetCartsAppLayer(ListShellApp):
             if self._covers:
                 return
         if self._covers:
-            self._fetch_cover(net, self._covers.pop())
+            if not self._fetch_cover(net, self._covers[-1]):
+                return
+            self._covers.pop()
             if self._covers:
                 return
         self._work = None
@@ -356,13 +413,17 @@ class GetCartsAppLayer(ListShellApp):
         return out
 
     def _fetch_cover(self, net, cart):
+        """One cover fetched and decoded: False while its bytes are on their
+        way, True once it is drawn or known not to come."""
         sha = cart["cover"]["sha256"]
         self.thumbs[sha] = None
         try:
-            data = _ci.fetch_cover(net, cart)
+            data = self._fetched(lambda: _ci.cover_fetch(net, cart), ("cover", sha))
         except _ci.InstallError as exc:
             _ci._log(exc.detail)
-            return
+            return True
+        if data is None:
+            return False
         try:
             import cover_png as _cp
         except ImportError:  # pragma: no cover - direct host import
@@ -381,6 +442,7 @@ class GetCartsAppLayer(ListShellApp):
             _ci._log("%s's cover does not decode" % cart["id"])
         else:
             self.thumbs[sha] = (side, pix)
+        return True
 
     def _build_rows(self):
         inst = self._inst
@@ -507,7 +569,7 @@ class GetCartsAppLayer(ListShellApp):
                 self._release()
                 self.status = "NOT FETCHED"
                 self._go("cart")
-        elif ph in BUSY:
+        elif ph in BUSY or ph == "pick":
             self._cancel()
         elif ph == "done":
             if verb == "PLAY":
@@ -523,6 +585,8 @@ class GetCartsAppLayer(ListShellApp):
         if self.blocker(self.cur) is not None:
             return
         self.accepted = []
+        self.supplied = {}
+        self.pick_why = None
         self.arm_remove = False
         self._next_licence()
 
@@ -533,18 +597,121 @@ class GetCartsAppLayer(ListShellApp):
                 self._go("licence_fetch")
                 return
         self.lic = None
-        self._go("connecting")
+        self._ext = 0
+        if self._inst.can_pick() and self.cur["plan"]["external"]:
+            self._go("probing")
+        else:
+            self._go("connecting")
 
     def _pump_licence(self):
         if not self._online():
             self._fail(_ci.NET_MEMORY if self._starved() else "WiFi isn't connected.")
             return
         ext = self.lic[0]
-        self._lic_text = _ci.licence_text(self._inst.net(), self.cur["cart"],
-                                          ext["licence"])
+        net = self._inst.net()
+        cart = self.cur["cart"]
+        data = self._fetched(lambda: _ci.licence_fetch(net, cart, ext["licence"]),
+                             ("licence", ext["path"]))
+        if data is None:
+            return
+        self._lic_text = _ci.as_text(data)
         self.lic[1] = self._wrap(self._lic_text)
         self.lic[2] = 0
         self._go("licence", focus=1)       # NO has the focus
+
+    # -- YOUR COPY: an external file this console cannot fetch -----------------
+
+    def _external(self):
+        ext = self.cur["plan"]["external"]
+        return ext[self._ext] if self._ext < len(ext) else None
+
+    def _next_external(self):
+        self._ext += 1
+        self.pick_why = None
+        if self._external() is None:
+            self._go("connecting")
+        else:
+            self._go("probing")
+
+    def _pump_probe(self):
+        """Can this console read the external file's archive from any of its
+        hosts? Yes: the install fetches it. No: the player picks a copy."""
+        e = self._external()
+        if e is None:
+            self._go("connecting")
+            return
+        if not self._online():
+            self._fail("WiFi isn't connected.")
+            return
+        if self._fetching != ("reach", self._ext):
+            self._drop_fetch()
+            net = self._inst.net()
+            index = self.cur["cart"]["index"]
+            self._fetch = _ci.Reach(net, [_ci.resolve(index, u)
+                                          for u in e["archive"]["urls"]])
+            self._fetching = ("reach", self._ext)
+        if self._fetch.step():
+            return
+        reach, self._fetch, self._fetching = self._fetch, None, None
+        if reach.url is not None:
+            self._next_external()
+            return
+        _ci._log("%s: no host this console can read (%s)"
+                 % (e["path"], "; ".join(reach.why)))
+        self._ask_pick()
+
+    def _ask_pick(self):
+        e = self._external()
+        if self._pick is not None:
+            self._pick.close()        # a question answered with the wrong file
+        self._pick = self._inst.pick(e["path"], e["size"],
+                                     _host_of(e["archive"]["urls"][0]))
+        if self._pick is None:
+            self._fail(_ci.UNREACHABLE)
+            return
+        self._go("pick")
+
+    def _poll_pick(self):
+        got = self._pick.poll() if self._pick is not None else None
+        if got is None:
+            return
+        if got[0] != "file":
+            self._unpick()
+            self._release()
+            self.status = "NOT FETCHED"
+            self._go("cart")
+            return
+        e = self._external()
+        self._filecheck = _ci.FileCheck(got[1], e["size"], e["sha256"])
+        self._go("picked")
+
+    def _pump_picked(self):
+        """The picked file held to the index, a slice a frame."""
+        chk = self._filecheck
+        if chk.step():
+            return
+        self._filecheck = None
+        e = self._external()
+        if chk.why is None:
+            self.supplied[e["path"]] = chk.path
+            self._picked.append(self._pick)
+            self._pick = None
+            self._next_external()
+            return
+        self.pick_why = "That isn't %s: %s." % (e["path"], chk.why)
+        self._ask_pick()
+
+    def _unpick(self):
+        """Every question to the player goes, and the files they answered with:
+        the install has read them, or will not."""
+        p, self._pick = self._pick, None
+        done, self._picked = self._picked, []
+        for q in [p] + done:
+            if q is not None:
+                q.close()
+        chk, self._filecheck = self._filecheck, None
+        if chk is not None:
+            chk.close()
 
     def _wrap(self, text):
         cols = self.layout.cols
@@ -567,7 +734,8 @@ class GetCartsAppLayer(ListShellApp):
                            and mem[1] < ARCHIVE_RAM_SHARE * arc) else "ram"
         self.job = _ci.Install(row["cart"], row["plan"], self._inst.net(),
                                self._inst.root(), self._inst.session, self.accepted,
-                               archive=keep)
+                               archive=keep, supplied=self.supplied,
+                               keep=self._inst.keep())
         self._go("getting")
         self.armed = True
 
@@ -576,6 +744,7 @@ class GetCartsAppLayer(ListShellApp):
         if job.step():
             return
         self._release()
+        self._unpick()
         if job.path:
             self._inst.rescan()
             self._build_rows()
@@ -586,15 +755,20 @@ class GetCartsAppLayer(ListShellApp):
             self._go("cart")
 
     def _cancel(self):
-        """B, or a tap on CANCEL -- never A, which a kid presses at anything."""
+        """B, or a tap on CANCEL -- never A, which a kid presses at anything.
+        Not once the keeper has the build: it lands."""
         checking = self.phase == "checking"
-        if self.job is not None and not self.job.finished:
-            self.job.cancel()
+        if self.job is not None and not self.job.finished and not self.job.cancel():
+            return
+        self._drop_fetch()
+        self._unpick()
         self._release()
         self.status = "STOPPED" if checking else "STOPPED. NOTHING CHANGED."
         self._go("cart" if self.cur is not None and not checking else "list")
 
     def _fail(self, why):
+        self._drop_fetch()
+        self._unpick()
         self._release()
         self.why = why
         self._go("failed")
@@ -615,8 +789,9 @@ class GetCartsAppLayer(ListShellApp):
         self.arm_remove = False
         row = self.cur
         root = self._inst.root()
+        keep = self._inst.keep()
         try:
-            self._inst.session(lambda: _ci.remove(root, row["cart"]["folder"]))
+            self._inst.session(lambda: _ci.remove(root, row["cart"]["folder"], keep))
         except Exception as exc:  # noqa: BLE001 -- the folder stays; say so
             _ci._log("remove failed: %s" % exc)
             self.status = "CAN'T REMOVE IT"
@@ -632,7 +807,7 @@ class GetCartsAppLayer(ListShellApp):
         ph = self.phase
         if ph == "licence":
             self._press("NO")
-        elif ph in BUSY:
+        elif ph in BUSY or ph == "pick":
             self._cancel()
         elif ph in ("cart", "done", "failed"):
             self.status = ""
@@ -646,7 +821,9 @@ class GetCartsAppLayer(ListShellApp):
             return self._verbs()
         if ph == "licence":
             return ("I AGREE", "NO")
-        if ph in BUSY:
+        if ph == "getting" and self.job is not None and self.job.keeping:
+            return ()
+        if ph in BUSY or ph == "pick":
             return ("CANCEL",)
         if ph == "done":
             return ("PLAY", "OK")
@@ -674,7 +851,7 @@ class GetCartsAppLayer(ListShellApp):
             step = -1 if i.pressed("left") else 1
             self.focus = (self.focus + step) % len(verbs)
             self._damage.all()
-        elif i.pressed("a") and verbs and ph not in BUSY:
+        elif i.pressed("a") and verbs and ph not in BUSY and ph != "pick":
             verb = verbs[min(self.focus, len(verbs) - 1)]
             if ph != "cart" or self._enabled(verb):
                 self._press(verb)
@@ -731,8 +908,8 @@ class GetCartsAppLayer(ListShellApp):
             self._chip(cv, th, "CHECK", lay.head2, "check")
             self._draw_list(cv, th)
         else:
-            if ph not in BUSY and ph not in ("nonet", "nowifi", "unreached",
-                                             "nomemory"):
+            if ph not in BUSY and ph not in ("pick", "nonet", "nowifi", "unreached",
+                                             "nomemory", "board"):
                 self._chip(cv, th, "<", lay.head, "back")
             title = self.cur["cart"]["name"] if self.cur is not None else "GET CARTS"
             x = lay.head[0] + lay.head[2] + 8 * fs
@@ -882,6 +1059,14 @@ class GetCartsAppLayer(ListShellApp):
         """(title, lines) for the screens that are only words and a button."""
         ph = self.phase
         name = self.cur["cart"]["name"] if self.cur is not None else ""
+        if ph == "board":
+            lines = ["This page shows the carts kept on the console that served it."]
+            if self._inst.home() == "headless":
+                lines.append("A console with no screen can't get carts.")
+            else:
+                lines.append("Get new carts on the console itself: turn WEB CONSOLE "
+                             "off there and open Get Carts.")
+            return "ON THE CONSOLE", lines
         if ph == "nonet":
             return "NO INTERNET", ["This console has no way to fetch carts."]
         if ph == "nowifi":
@@ -897,9 +1082,22 @@ class GetCartsAppLayer(ListShellApp):
                 ["Shelf %d of %d" % (step + 1, n)] if n and self._step else [])
         if ph == "licence_fetch":
             return "ONE MOMENT", ["Getting the licence..."]
+        if ph == "probing":
+            return "ONE MOMENT", ["Looking for %s..." % self._external()["path"]]
+        if ph in ("pick", "picked"):
+            e = self._external()
+            lines = [] if self.pick_why is None else [self.pick_why]
+            lines.append("This console can't fetch %s from %s."
+                         % (e["path"], _host_of(e["archive"]["urls"][0])))
+            lines.append("Choose your own copy of %s (%s) in the box below."
+                         % (e["path"], _mb(e["size"])) if ph == "pick"
+                         else "Checking your copy...")
+            return "YOUR COPY", lines
         if ph == "connecting":
             return "CONNECTING", ["Turning on WiFi..."]
         if ph == "getting":
+            if self.job is not None and self.job.keeping:
+                return "GETTING", [name, "Putting it on the shelf..."]
             return "GETTING", [name]
         if ph == "done":
             return "READY", ["%s is on your shelf." % name]
@@ -915,6 +1113,8 @@ class GetCartsAppLayer(ListShellApp):
         scale = 2 if len(title) * 16 * fs <= lay.body[2] - 8 * fs else 1
         ink = th["danger"] if self.phase in ("failed", "nowifi", "unreached",
                                              "nomemory", "nonet") else th["play"]
+        if self.phase == "pick" and self.pick_why is not None:
+            ink = th["danger"]
         cv.print(title, x, y, ink, scale)
         y += 8 * fs * scale + 8 * fs
         for text in lines:

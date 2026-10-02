@@ -13,8 +13,9 @@
 #  moy_lua / moy_audio / moycore / moy_png ride micropython.mk fragments into the wasm
 #  port, structurally unlike the boards' USER_C_MODULES cmake), the generated
 #  `palette.py` literal twin, the runner's own authored modules (web_boot.py /
-#  web_canvas.py / gpio_link.py / web_p8.py), which build.sh copies by name the
-#  way a board's tracked modules/ files simply exist -- and the p8 importer
+#  web_canvas.py / gpio_link.py / update_link.py / carts_link.py / web_p8.py),
+#  which build.sh copies by name the way a board's tracked modules/ files
+#  simply exist -- and the p8 importer
 #  (#194), the one set of modules staged out of `tools/`: the two VENDORED files
 #  (the asset converter and the Lua porter) and the guards/report file it shares
 #  with the CLI, plus shims/zlib.py. The stager

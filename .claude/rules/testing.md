@@ -17,9 +17,9 @@ paths:
   `tests/test_device_make_api.py`.
 
 - **The hosted console has a CI net, and its skips have TEETH.**
-  `tests/test_web_sync_e2e.py` and `tests/test_web_persist_e2e.py` are the only
-  checks that drive the wasm head in real headless Chrome; both are gated on
-  `MOYBYTE_WEB_E2E` and are run by `.github/workflows/web-e2e.yml` (path-filtered,
+  The `tests/test_web_*_e2e.py` suites (sync, persist, p8, update, store) are
+  the only checks that drive the wasm head in real headless Chrome; all are
+  gated on `MOYBYTE_WEB_E2E` and are run by `.github/workflows/web-e2e.yml` (path-filtered,
   sharing pages.yml's wasm cache key). Prerequisites resolve through
   `tests/web_e2e.py`, which warns and skips on a bench but FAILS under
   `CI`/`MOYBYTE_REQUIRE_WEB_E2E` — same doctrine as `MOYBYTE_REQUIRE_UNIX_MP`.

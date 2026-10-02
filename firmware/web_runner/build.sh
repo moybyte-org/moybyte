@@ -218,7 +218,7 @@ mkdir -p "${STAGE_DIR}/modules"
 # answering rather than off the console actually binding one. A headless Zero
 # therefore had no update row at all. tests/test_staging_closure.py now derives
 # this list rather than trusting it.
-for _mod in web_boot web_canvas gpio_link update_link web_p8; do
+for _mod in web_boot web_canvas gpio_link update_link carts_link web_p8; do
   cp "${SCRIPT_DIR}/${_mod}.py" "${STAGE_DIR}/modules/${_mod}.py"
 done
 

@@ -1,10 +1,10 @@
-"""What the two browser end-to-end suites need, and what an absence MEANS.
+"""What the browser end-to-end suites need, and what an absence MEANS.
 
-`tests/test_web_sync_e2e.py` and `tests/test_web_persist_e2e.py` are the only
-checks in the tree that drive the HOSTED CONSOLE -- the wasm head a visitor to
-moybyte.com touches, and the same page a board serves over WiFi -- in a real
-browser. Both are gated on `MOYBYTE_WEB_E2E` because they cost a Chrome window
-and a couple of minutes, and both used to carry their own copy of the same
+The `tests/test_web_*_e2e.py` suites are the only checks in the tree that
+drive the HOSTED CONSOLE -- the wasm head a visitor to moybyte.com touches,
+and the same page a board serves over WiFi -- in a real browser. All are gated
+on `MOYBYTE_WEB_E2E` because they cost a Chrome window and a couple of
+minutes, and the first two used to carry their own copy of the same
 prerequisite ladder (chrome, node, a dist/ new enough to have the thing under
 test) with a bare `pytest.skip` at every rung.
 
@@ -63,6 +63,13 @@ FEATURES = {
     # lives in the wasm, so the .wasm is not part of this probe.
     "update": (lambda: "__moyLinkLost" in (DIST / "index.html").read_text(),
                "dist/index.html predates the firmware strip (#41/#53)"),
+    # #124: the worker's carts pump, the page's file question, and the
+    # frozen bridge in the wasm -- three halves that go stale separately.
+    "carts": (lambda: ("cartsPump" in (DIST / "worker.js").read_text()
+                       and "pkSend" in (DIST / "index.html").read_text()
+                       and b"carts_link" in (DIST / "micropython.wasm").read_bytes()),
+              "dist/ predates Get Carts in the browser (no carts pump, no file "
+              "question, or no carts_link frozen in the wasm)"),
 }
 
 

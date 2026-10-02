@@ -703,10 +703,19 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         self._updater = None
         self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
         # The network Get Carts fetches carts through (#124, runtime/cart_index.py):
-        # `online()` and `open(url)`, injected by a board (device/cart_net.py)
-        # and by the live simulator (host_app.HostCartNet). None elsewhere --
-        # the app then says this console has no way to fetch.
+        # `online()` and `open(url)`, injected by a board (device/cart_net.py),
+        # by the live simulator (host_app.HostCartNet) and by a browser page
+        # that keeps its own carts (firmware/web_runner/carts_link.py). None
+        # elsewhere -- the app then says this console has no way to fetch.
         self.cart_net = None
+        # The rest of the browser's half of Get Carts, None everywhere else:
+        # `cart_keep`, the keeper that makes an install durable in OPFS;
+        # `cart_pick(name, size, host)`, the page's file picker for an external
+        # file the page cannot fetch; `cart_home`, "board" or "headless" on a
+        # page a console serves, whose carts that console gets itself.
+        self.cart_keep = None
+        self.cart_pick = None
+        self.cart_home = None
         # Serve the web console FROM this console (moycore plan 3.4 pull half):
         # injected by the device (moy_webhost.WebHost); None on the host and on a
         # build without it, which is what makes the Settings row appear only where

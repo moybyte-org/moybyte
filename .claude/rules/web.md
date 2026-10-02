@@ -42,7 +42,11 @@ nor those docs will warn you about:
 - **The substrate is OPFS, not IndexedDB**: the ops ARE file writes at paths, so a
   cart folder stays a cart folder. No OPFS (private window, blocked site data,
   `file://`) runs in memory and **the page says so**; a quota failure requeues, and
-  after three gives up ONCE and says that too.
+  after three gives up ONCE and says that too. A returning browser's shelf is
+  OPFS's, never the bundle's -- except a SYSTEM cart the store has never had
+  (a new app, a new seed game), which is seeded into it the way a board seeds a
+  built-in it lacks (`moy_store.missingSystemCarts`). Without that, nobody who
+  had visited before a system cart shipped would ever see it.
 - **The journal lives with the STORE OF RECORD** (owner call) — there is one
   durable journal per cart, where the cart durably lives, so a kid gets undo on
   both ends without a byte of history on the wire. **The wire predicate itself
@@ -59,6 +63,35 @@ nor those docs will warn you about:
   REFUSE the batch instead of writing `drawings/…` into its carts store. A files
   path must start with a `FILE_KINDS` kind, which is the one rule keeping
   `.history/` and `trash/` home in both directions.
+- **Get Carts runs in a page that keeps its own carts (#124), and in no other.**
+  In site mode `carts_link.py` gives the console the page's fetch
+  (`ws.cart_net`), an OPFS keeper (`ws.cart_keep`) and the page's file picker
+  (`ws.cart_pick`); a board-served page gets `ws.cart_home` instead and the app
+  says the board gets its own carts -- the two-writer rule again, and the sync
+  wire could not carry a module anyway. What bites:
+  - **Nothing may wait for the network inside a step.** The VM has no
+    ASYNCIFY and the worker delivers bytes only between frames, so every fetch
+    is a `cart_index` job that gives the frame back; a Python loop waiting for
+    `ready` is a hung tab. A body goes into a spool file in the VFS -- the
+    page's memory -- and never through the 16 MB heap.
+  - **A page cannot read a release download or Debian's archive** (neither
+    sends a CORS header). It reads an asset's `mirror` on the carts
+    repository's Pages site first (moy-spec's cartindex.py), and an external
+    file is the player's own copy, chosen through a REAL page control (the card
+    under the canvas): a browser opens its file dialog only from a click on
+    one, never from a tap the console relays a frame later.
+  - **The sweep cannot persist an install**: the wire carries text and covers,
+    never a module or a WAD. The keeper writes the folder and the record into
+    OPFS behind one marker file (`moy_store.commitInstall`), boot rolls an
+    interrupted one forward or away before the store is read
+    (`recoverInstalls`), and the watcher ADOPTS the landed folder instead of
+    shipping it. `store_test.mjs` interrupts an update at every change it
+    makes.
+  - **The shelves are the serving host's**: an `indexes.json` beside the page
+    replaces the defaults, read once at boot.
+  - **The browser carries no compiled-cart engine**, so every compiled cart in
+    the published indexes lists as CAN'T PLAY here, Doom included; the browser
+    path is driven end to end with Lua carts (`tests/test_web_store_e2e.py`).
 - **THE PAGE IS THE SERVING BOARD'S UPDATE SURFACE** (#41/#53, 2026-08-29), and
   what it does depends on whether that board has glass. Headless: the strip IS
   the update screen — two taps, then a polled progress read, because the board

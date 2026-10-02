@@ -119,6 +119,11 @@ SERVICES = {
     "webhost": "the #192 board-served web console (Settings -> WEB CONSOLE)",
     "cart_net": "the #124 network the Get Carts app fetches indexes and carts "
                 "through",
+    "cart_keep": "the #124 keeper that makes an install durable where the store "
+                 "of record is not the files cart_index writes",
+    "cart_pick": "the #124 question for the player's own copy of an external "
+                 "file this console cannot fetch",
+    "cart_home": "where carts are got instead, on a page a console serves",
     "reboot_hook": "the sysmenu Reboot row's real reset",
     "net": "the #65 multiplayer transport behind net.* in a cart",
     "gpio": "the #9 physical-pin backend behind pin_write/pin_read in a cart",
@@ -153,6 +158,11 @@ WIRING = {
         "c6_updater": "its radio is the S3's own silicon -- there is no co-processor to update. The row becomes INJECTED the day a board grows a companion radio chip",
         "webhost": INJECTED,
         "cart_net": INJECTED,
+        "cart_keep": "the store a board writes IS its store of record; one rename "
+                     "makes an install durable",
+        "cart_pick": "a board reads every host over its own TLS client -- no "
+                     "CORS between it and an archive -- so it never asks",
+        "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "no pins to give. This board's GPIOs are spent -- panel, SD,\n"
@@ -190,6 +200,11 @@ WIRING = {
         "c6_updater": INJECTED,
         "webhost": INJECTED,
         "cart_net": INJECTED,
+        "cart_keep": "the store a board writes IS its store of record; one rename "
+                     "makes an install durable",
+        "cart_pick": "a board reads every host over its own TLS client -- no "
+                     "CORS between it and an archive -- so it never asks",
+        "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
@@ -225,6 +240,11 @@ WIRING = {
         "c6_updater": INJECTED,
         "webhost": INJECTED,
         "cart_net": INJECTED,
+        "cart_keep": "the store a board writes IS its store of record; one rename "
+                     "makes an install durable",
+        "cart_pick": "a board reads every host over its own TLS client -- no "
+                     "CORS between it and an archive -- so it never asks",
+        "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
@@ -260,6 +280,11 @@ WIRING = {
                       "is no co-processor to flash",
         "webhost": INJECTED,
         "cart_net": INJECTED,
+        "cart_keep": "the store a board writes IS its store of record; one rename "
+                     "makes an install durable",
+        "cart_pick": "a board reads every host over its own TLS client -- no "
+                     "CORS between it and an archive -- so it never asks",
+        "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "same as the T-Deck: a smart display spends its pins on the\n"
@@ -300,6 +325,10 @@ WIRING = {
                     "reaches the internet: tools/simulate_desktop.py wires "
                     "host_app.HostCartNet for a live run, tests/test_cart_store.py "
                     "a transport over its own server",
+        "cart_keep": "the host's carts folder is its store of record, as a "
+                     "board's is",
+        "cart_pick": "urllib reads any host, so the simulator never asks",
+        "cart_home": "the simulator is a console of its own",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
         "net": INJECTED,
@@ -350,9 +379,10 @@ WIRING = {
                       "as the updater row, one level down",
         "webhost": "this build is what a webhost SERVES. A page hosting itself "
                    "is the same circle the host row describes",
-        "cart_net": "a page fetches through the browser, not a socket the "
-                    "console owns, and the web roster leaves Get Carts out (its "
-                    "manifest targets host and device)",
+        "cart_net": INJECTED,
+        "cart_keep": INJECTED,
+        "cart_pick": INJECTED,
+        "cart_home": INJECTED,
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
                "a sim fake for a solo desktop and would mean nothing here",

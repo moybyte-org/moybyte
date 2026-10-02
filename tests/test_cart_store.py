@@ -58,6 +58,15 @@ def _install(cart, root, net, chip="esp32s3", fmt=2, accepted=None, session=_ses
     return job
 
 
+def _whole(job):
+    """A Fetch run to its end, as a blocking transport does in one step."""
+    n = 0
+    while job.step():
+        n += 1
+        assert n < 10000
+    return job.data
+
+
 def _parsed(repo):
     return ci.parse_index(repo.index(), repo.url("index.json"))
 
@@ -245,10 +254,10 @@ def test_the_licence_text_is_checked_too():
     cart = _cart(repo, "dm")
     ref = cart["external"][0]["licence"]
     routes = repo.routes()
-    assert "fun" in ci.licence_text(MemNet(routes), cart, ref)
+    assert "fun" in ci.as_text(_whole(ci.licence_fetch(MemNet(routes), cart, ref)))
     routes[ci.resolve(cart["index"], ref["url"])] = b"x" * ref["size"]
     with pytest.raises(ci.InstallError) as exc:
-        ci.licence_text(MemNet(routes), cart, ref)
+        _whole(ci.licence_fetch(MemNet(routes), cart, ref))
     assert exc.value.text == ci.MISMATCH
 
 
@@ -427,7 +436,7 @@ def test_a_connection_that_cannot_open_for_memory_says_to_restart(tmp_path):
     job = _install(cart, root, _Starved(routes))
     assert job.error == ci.NET_MEMORY
     with pytest.raises(ci.InstallError) as exc:
-        ci.fetch(_Starved(routes), cart["assets"][0]["url"], 1000)
+        ci.Fetch(_Starved(routes), cart["assets"][0]["url"], 1000)
     assert exc.value.text == ci.NET_MEMORY
 
 

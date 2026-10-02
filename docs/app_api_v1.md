@@ -94,7 +94,7 @@ roles it declared:
 | `ctx.wallpaper` | the desktop-backdrop capability (this app and Paint only) |
 | `ctx.artwork` | the ArtworkService handle (Paint's document model) |
 | `ctx.clipboard` | the system cut/copy/paste buffer (#132) |
-| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, the store session an install writes in, this console's chip and compiled-code format |
+| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, the store session an install writes in, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves |
 | `ctx.shell` | the escape hatch -- see below |
 
 Read that module for the signatures; it is the authority and this table is a

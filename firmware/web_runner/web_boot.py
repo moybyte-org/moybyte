@@ -344,6 +344,12 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # can_manage is wired AFTER the launcher was built, so rebuild the shelf for it
     # to appear.
     ws.launcher.items = ws._launcher_items(ws.carts.all)
+    # Get Carts (#124), by where this page's carts live (`_cart_seams`).
+    seams = _cart_seams(ws, _S.get("store_mode"))
+    ws.cart_net = seams[0]
+    ws.cart_keep = seams[1]
+    ws.cart_pick = seams[2]
+    ws.cart_home = seams[3]
     # The Moybyte shell's achievements are gamification for the kid console,
     # not part of a cart player (and doubly not of the brand-neutral spec
     # bundle). The REAL trigger is the Achievements core's note() (e.g.
@@ -428,6 +434,62 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     if cart:
         open_cart(cart)
     return True
+
+
+def _cart_seams(ws, mode):
+    """(cart_net, cart_keep, cart_pick, cart_home) for Get Carts (#124), by
+    the page's mode, which is where its carts live.
+
+    BOARD: the carts this page shows are the serving console's, and that
+    console gets its own -- with its own module for its own chip, and while
+    this page is connected its glass is parked, so the two never install side
+    by side. The page fetches nothing and the app says where carts come from
+    ("board"; `update_enable` learns whether that console has a screen).
+    SITE: the page's own store, so the page's fetch is the network and OPFS
+    keeps what lands (`carts_link`). NONE (no OPFS): the same network, and an
+    install lives in this tab like every other edit here, which the page
+    already says out loud."""
+    if mode == "board":
+        return None, None, None, "board"
+    if mode not in ("site", "none"):
+        return None, None, None, None
+    try:
+        import carts_link
+    except ImportError as exc:       # never block a boot
+        print("carts link unavailable:", exc)
+        return None, None, None, None
+
+    def _wake():
+        ws._dirty = True
+    link = carts_link.CartsLink(wake=_wake, landed=_cart_landed)
+    _S["carts"] = link
+    keep = carts_link.WebCartKeep(link) if mode == "site" else None
+    return carts_link.WebCartNet(link), keep, link.pick, None
+
+
+def _cart_landed(folder):
+    """A cart the keeper made durable moved into the carts folder: its files
+    are not news for the sweep (OPFS already holds them, binary module and
+    all, which the sweep could never carry), and the shelf shows it."""
+    w = (_S.get("watchers") or {}).get("carts")
+    if w is not None:
+        w.adopt(folder)
+    _rescan()
+
+
+def carts_poll_json():
+    """What the worker's carts pump should start or stop, or ""."""
+    link = _S.get("carts")
+    return link.poll_json() if link is not None else ""
+
+
+def carts_event_json(text):
+    """An answer from the worker: a response head or end, a keeper's verdict,
+    a picked file, the store's room."""
+    link = _S.get("carts")
+    if link is not None:
+        link.event_json(text)
+    return ""
 
 
 def _build_watchers(carts_root, site):
@@ -879,6 +941,9 @@ def services_json():
         "gpio": getattr(ws, "gpio", None) is not None,
         "net": getattr(ws, "net", None) is not None,
         "can_manage": bool(getattr(ws, "can_manage", False)),
+        "cart_net": getattr(ws, "cart_net", None) is not None,
+        "cart_keep": getattr(ws, "cart_keep", None) is not None,
+        "cart_home": getattr(ws, "cart_home", None),
     })
 
 
@@ -910,6 +975,8 @@ def update_enable(status_json):
         _S["ws"].updater = _S["update"]
     except Exception as exc:         # noqa: BLE001 -- never block a boot
         print("update unavailable:", exc)
+    if _S["ws"].cart_home is not None and not doc.get("screen"):
+        _S["ws"].cart_home = "headless"
     return ""
 
 

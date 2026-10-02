@@ -31,6 +31,9 @@
 //                        PICO-8 .p8 / .p8.png, which is CONVERTED first (#194)
 //   {t:"edit", cart, tab}  open a cart in the Editor (the import report's
 //                        action); `tab` optionally lands on paint/map/music
+//   {t:"picked", id, name, buf}  the player's own copy of a file Get Carts
+//                        asked for ({t:"pick"}), TRANSFERRED; or
+//   {t:"picked", id, cancel}     ...the player closed the question
 // worker -> main:
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
@@ -51,6 +54,10 @@
 //                        words; `report` is the p8 compatibility summary (the
 //                        shared writer's own lines) when there was one
 //   {t:"edited", s, ok}  the result of an "open in editor"
+//   {t:"pick", id, name, size, host}  Get Carts needs a file this page cannot
+//                        fetch from `host`: the page asks the player for theirs
+//   {t:"unpick", id}     ...and the question is over
+//   {t:"installed", folder, d}  an install reached the browser's store
 import { loadMicroPython } from "./micropython.mjs";
 import * as store from "./moy_store.mjs";
 
@@ -154,6 +161,34 @@ const GPIO_MS = 33;
 let updatePoll = null, updateWants = null, updateAck = null, updateOff = null;
 let updateBusy = false, lastUpdateAt = 0;
 const UPDATE_MS = 1000;
+// GET CARTS (#124), site mode: the console's carts_link queues what it needs
+// -- a fetch, a drop, an install to keep, a record, a file from the player --
+// and this pump does it and answers through cartsSay. Polled every frame
+// while anything is under way and every CARTS_IDLE_MS otherwise: the answers
+// themselves never wait on the poll, only a new request does.
+//
+// A fetch's body is written into a SPOOL FILE in the VFS as fetch hands it
+// over, and the console reads that file as far as it has grown: the bytes
+// live in this worker's memory and never in the VM's heap. Python can only
+// read between frames, which is exactly when these callbacks run.
+let cartsPoll = null, cartsEvent = null, lastCartsAt = 0;
+const CARTS_IDLE_MS = 100;
+const NET_DIR = "/moy/net";
+const cartsLive = new Map();          // id -> {ac, stream, path} or {pick}
+function cartsSay(ev) {
+    if (!cartsEvent) return;
+    try { cartsEvent(JSON.stringify(ev)); }
+    catch (e) { console.log("[moy] carts: answer refused -- " + e); }
+}
+// One OPFS writer at a time: the sweep's batches and an install's commit both
+// write the carts store, in the order they were asked for.
+let opfsChain = Promise.resolve();
+function opfsSerial(fn) {
+    const p = opfsChain.then(fn);
+    opfsChain = p.catch(() => { });
+    return p;
+}
+
 // MODE 1 (#193): the same batches, applied into OPFS instead of POSTed. `mode`
 // is decided ONCE at boot, before anything is written, because it decides where
 // the VFS is seeded FROM -- a board's carts.json, or the browser's own store.
@@ -236,6 +271,9 @@ function mkdirs(p) {
 // the path. Only the carts-specific export/import code below names a root
 // directly; everything else iterates store.ROOTS.
 const CARTS_ROOT = store.rootById("carts").vfs;
+// Get Carts' record, beside the carts folder as on every console
+// (runtime/cart_index.py's RECORD_NAME, moy_store_base._sibling_path).
+const RECORD_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.RECORD_NAME;
 
 function writeStore(root, files) {
     // mkdirs(root) even for an empty set: a root with no files YET (a board's
@@ -316,6 +354,17 @@ async function seedRoot(root, data, site) {
         return "none";
     }
     try {
+        if (root.id === "carts") {
+            // An install a reload interrupted finishes or goes BEFORE the
+            // store is read, and the record comes with the carts it describes.
+            const n = await store.recoverInstalls(s);
+            if (n) console.log("[moy] carts: " + n + " interrupted install(s) finished");
+            const rec = await store.readRecord(s);
+            if (rec !== null) {
+                mkdirs(RECORD_VFS.slice(0, RECORD_VFS.lastIndexOf("/")));
+                mp.FS.writeFile(RECORD_VFS, rec);
+            }
+        }
         if (await store.isEmpty(s)) {
             // First visit: the served bundle is the seed AND the baseline, so
             // the shelf is never empty and the first sweep has nothing to say.
@@ -328,7 +377,13 @@ async function seedRoot(root, data, site) {
         // The local store WINS over the served bundle: it is the kid's work, and
         // the bundle is only ever the factory seed. "load" (vs "seed") is the
         // evidence that a reload READ FROM local rather than re-seeding fresh.
-        writeStore(root.vfs, await store.readAll(s));
+        // The one thing the bundle still brings is a system cart this store has
+        // never had, seeded into it like a first visit's.
+        const local = await store.readAll(s);
+        const added = root.id === "carts" ? store.missingSystemCarts(local, data) : {};
+        if (Object.keys(added).length) await store.seed(s, added);
+        writeStore(root.vfs, local);
+        writeStore(root.vfs, added);
         return "load";
     } catch (e) {
         writeStore(root.vfs, data);
@@ -525,11 +580,15 @@ async function init(search) {
     // FROZEN-first, like the page was: a ship build bakes the console into the wasm
     // and has no modules.json; a --stage-only dev dist adds one, and loading it into
     // /modules (first on sys.path) shadows the frozen copies.
-    const [mods, cartsRes, files] = await Promise.all([
+    // indexes.json: the shelves Get Carts lists, chosen by whoever SERVES this
+    // page -- the browser's twin of a board's indexes.json beside its carts.
+    // Absent (moybyte.com, a board) means the console's default shelves.
+    const [mods, cartsRes, files, shelves] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
         fetch(withPin("carts.json")),
         fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
-            .catch(() => null)]);
+            .catch(() => null),
+        fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null)]);
     if (cartsRes.status === 403) {
         // A PINNED BOARD, and this page cannot read it. Stop the boot here --
         // there is nothing to boot, and seeding the VFS from an error body
@@ -548,6 +607,10 @@ async function init(search) {
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
     await initStore({ carts: carts, files: files });
+    if (mode !== "board" && shelves && Array.isArray(shelves.indexes)) {
+        mp.FS.writeFile(CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/indexes.json",
+                        JSON.stringify({ indexes: shelves.indexes }));
+    }
     say("booting console...");
 
     let cart = qs.get("cart");
@@ -599,7 +662,7 @@ async function init(search) {
         + "sync_poll_json, sync_ack, sync_off, sync_config, store_mode, "
         + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
-        + "services_json, "
+        + "services_json, carts_poll_json, carts_event_json, "
         + "import_p8_json, edit_cart, open_cart");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
@@ -612,6 +675,9 @@ async function init(search) {
     syncAck = mp.globals.get("sync_ack");
     syncOff = mp.globals.get("sync_off");
     rescan = mp.globals.get("rescan_store");
+    cartsPoll = mp.globals.get("carts_poll_json");
+    cartsEvent = mp.globals.get("carts_event_json");
+    if (keep) cartsSay({ room: [keep.usage, keep.quota] });
     importP8Json = mp.globals.get("import_p8_json");
     editCart = mp.globals.get("edit_cart");
     openCart = mp.globals.get("open_cart");
@@ -835,7 +901,7 @@ async function pumpLocal(body) {
             try { syncAck(1); } catch (e) { }  // keep; ack so it does not requeue
             return;
         }
-        const r = await store.applyOps(s, ops);
+        const r = await opfsSerial(() => store.applyOps(s, ops));
         if (r.errors.length)
             console.log("[moy] persist: " + r.errors.length + " op(s) refused, first "
                 + JSON.stringify(r.errors[0]));
@@ -859,6 +925,154 @@ async function pumpLocal(body) {
     } finally {
         syncBusy = false;
     }
+}
+
+function cartsPump() {
+    if (!cartsPoll) return;
+    const now = performance.now();
+    if (!cartsLive.size && now - lastCartsAt < CARTS_IDLE_MS) return;
+    lastCartsAt = now;
+    let jobs = "";
+    try { jobs = cartsPoll(); } catch (e) { return; }
+    if (!jobs) return;
+    for (const j of JSON.parse(jobs)) {
+        if (j.op === "get") cartsGet(j);
+        else if (j.op === "drop") cartsDrop(j.id);
+        else if (j.op === "keep") cartsKeep(j);
+        else if (j.op === "record") cartsRecord(j);
+        else if (j.op === "pick") {
+            cartsLive.set(j.id, { pick: true });
+            self.postMessage({ t: "pick", id: j.id, name: j.name, size: j.size, host: j.host });
+        } else if (j.op === "unpick") {
+            cartsDrop(j.id);
+            self.postMessage({ t: "unpick", id: j.id });
+        }
+    }
+}
+
+async function cartsGet(j) {
+    mkdirs(NET_DIR);
+    const path = NET_DIR + "/" + j.id;
+    mp.FS.writeFile(path, new Uint8Array(0));
+    const live = { ac: new AbortController(), stream: null, path };
+    cartsLive.set(j.id, live);
+    const mine = () => cartsLive.get(j.id) === live;
+    let r;
+    try {
+        // no-cache: revalidate, so CHECK reads the shelf as it is now.
+        r = await fetch(j.url, { signal: live.ac.signal, cache: "no-cache" });
+    } catch (e) {
+        // CORS and no network look the same from here, and both mean this
+        // page cannot read that host: status 0.
+        if (mine()) cartsSay({ id: j.id, status: 0, error: String((e && e.message) || e) });
+        return;
+    }
+    if (!mine()) return;
+    cartsSay({ id: j.id, status: r.status });
+    if (r.status !== 200 || !r.body) {
+        try { live.ac.abort(); } catch (e) { }
+        return;
+    }
+    try {
+        const reader = r.body.getReader();
+        live.stream = mp.FS.open(path, "w");
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (!mine()) return;
+            if (done) break;
+            mp.FS.write(live.stream, value, 0, value.length);
+        }
+        mp.FS.close(live.stream);
+        live.stream = null;
+        cartsSay({ id: j.id, end: 1 });
+    } catch (e) {
+        if (mine()) cartsSay({ id: j.id, error: String((e && e.message) || e) });
+    }
+}
+
+// The console let an answer (or a question to the player) go: stop it, and
+// take its spool or its picked file with it.
+function cartsDrop(id) {
+    const live = cartsLive.get(id);
+    cartsLive.delete(id);
+    if (!live) return;
+    if (live.ac) { try { live.ac.abort(); } catch (e) { } }
+    if (live.stream) { try { mp.FS.close(live.stream); } catch (e) { } }
+    try { mp.FS.unlink(live.path || (NET_DIR + "/pick-" + id)); } catch (e) { }
+}
+
+// The staged folder the console checked, made durable with its record
+// (moy_store.commitInstall). Twice the cart's bytes must fit what the browser
+// will keep, because the commit writes a staging copy before the shelf's:
+// short of that it says FULL now, with nothing changed.
+async function cartsKeep(j) {
+    const t0 = performance.now();
+    const s = opfsStores.carts;
+    const live = { keep: true };
+    cartsLive.set(j.id, live);
+    const answer = (ev) => { cartsLive.delete(j.id); cartsSay(Object.assign({ id: j.id }, ev)); };
+    if (!s) { answer({ error: "this browser is not keeping carts" }); return; }
+    let files = [], bytes = 0;
+    try {
+        for (const name of mp.FS.readdir(j.stage)) {
+            if (name === "." || name === "..") continue;
+            const data = mp.FS.readFile(j.stage + "/" + name);
+            files.push({ name, data });
+            bytes += data.length;
+        }
+    } catch (e) {
+        answer({ error: "the build is not there: " + e });
+        return;
+    }
+    try {
+        const est = await navigator.storage.estimate();
+        if (est && typeof est.quota === "number" && typeof est.usage === "number"
+                && est.quota - est.usage < 2 * bytes) {
+            answer({ error: "needs " + 2 * bytes + " bytes, the browser keeps "
+                     + (est.quota - est.usage) + " more", full: 1 });
+            return;
+        }
+    } catch (e) { /* no estimate: try, and the write says if it cannot */ }
+    try {
+        await opfsSerial(() => store.commitInstall(s, j.folder, files, j.record));
+    } catch (e) {
+        const full = !!(e && (e.name === "QuotaExceededError"));
+        answer({ error: String((e && e.message) || e), full: full ? 1 : 0 });
+        return;
+    }
+    files = null;
+    const d = "installed " + j.folder + " in " + (performance.now() - t0).toFixed(0) + "ms";
+    answer({ kept: 1 });
+    self.postMessage({ t: "installed", folder: j.folder, d: d });
+    if (mode === "site") sitePersist(d);
+    cartsRoom();
+}
+
+function cartsRecord(j) {
+    const s = opfsStores.carts;
+    if (!s) return;
+    opfsSerial(() => store.writeRecord(s, j.record))
+        .then(() => cartsRoom())
+        .catch((e) => console.log("[moy] carts: the record was not kept -- " + e));
+}
+
+function cartsRoom() {
+    if (!navigator.storage || typeof navigator.storage.estimate !== "function") return;
+    navigator.storage.estimate()
+        .then((e) => cartsSay({ room: [e.usage, e.quota] }))
+        .catch(() => { });
+}
+
+// The player's answer to {t:"pick"}: the file into the VFS where the console
+// checks it against the index, or the question closed.
+function cartsPicked(m) {
+    if (!cartsLive.has(m.id)) return;
+    if (m.cancel || !m.buf) { cartsSay({ id: m.id, cancel: 1 }); return; }
+    mkdirs(NET_DIR);
+    const path = NET_DIR + "/pick-" + m.id;
+    mp.FS.writeFile(path, new Uint8Array(m.buf));
+    cartsLive.set(m.id, { pick: true, path });
+    cartsSay({ id: m.id, picked: path });
 }
 
 function syncPump() {
@@ -1043,6 +1257,7 @@ function loop() {
         syncPump();
         gpioPump();
         updatePump();
+        cartsPump();
     } catch (e) {
         self.postMessage({ t: "error", s: String((e && e.message) || e) });
         running = false;
@@ -1147,6 +1362,8 @@ self.onmessage = async (ev) => {
                 self.postMessage({ t: "imported", ok: false,
                     s: "import failed: " + ((e && e.message) || e) });
             }
+        } else if (m.t === "picked") {
+            cartsPicked(m);
         } else if (m.t === "edit") {
             // The import report's one action. Like export, a failure is a
             // MESSAGE and never the fatal {t:"error"}: the console is fine.

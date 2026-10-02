@@ -7,7 +7,7 @@
   "main": "main.py",
   "system": true,
   "order": 320,
-  "targets": ["host", "device"],
+  "targets": ["host", "device", "web"],
   "app": {
     "id": "getcarts",
     "entry": "getcarts_app:GetCartsAppLayer",

@@ -67,6 +67,7 @@ class Repo:
         self.base = base.rstrip("/")
         self.name = name
         self.files = {}
+        self.releases = {}        # full URL -> bytes, served by another host
         self.carts = []
 
     def url(self, rel):
@@ -74,7 +75,12 @@ class Repo:
 
     def add(self, cid, version=1, runtime="wasm", name=None, spdx="MIT",
             modules=(("esp32s3", 2), ("esp32p4", 2)), extra=None, external=None,
-            config=b'{"speed": 2}\n', main=b"\0asm\x01\0\0\0 main", cover=None):
+            config=b'{"speed": 2}\n', main=b"\0asm\x01\0\0\0 main", cover=None,
+            release=None, mirror=False):
+        """`release` puts the release asset on another host (a GitHub release
+        download's base URL) instead of under `base`; `mirror` serves a copy
+        under `base` too and names it in the index, the way moy-spec's
+        `moy index --mirror releases` does."""
         folder = cid + ".moy"
         name = name or cid.replace("_", " ").title()
         files = {"manifest.json": json.dumps({"format": "moy-1", "title": name,
@@ -91,7 +97,14 @@ class Repo:
             files["cover.png"] = cover
         z = stored_zip(folder, files)
         rel = "releases/%s-v%d/%s.zip" % (cid, version, folder)
-        self.files[rel] = z
+        if release is None:
+            self.files[rel] = z
+            asset_url = self.url(rel)
+        else:
+            asset_url = "%s/%s" % (release.rstrip("/"), rel)
+            self.releases[asset_url] = z
+            if mirror:
+                self.files[rel] = z
         lic = ("The MIT licence of %s.\n" % name).encode()
         self.files["carts/%s/LICENSES.txt" % cid] = lic
         entry = {
@@ -103,13 +116,15 @@ class Repo:
                         "size": len(lic), "sha256": sha(lic)},
             "source": self.url("tree/x/carts/" + cid),
             "release": self.url("releases/tag/%s-v%d" % (cid, version)),
-            "assets": [{"name": folder + ".zip", "url": self.url(rel), "size": len(z),
+            "assets": [{"name": folder + ".zip", "url": asset_url, "size": len(z),
                         "sha256": sha(z),
                         "files": dict((fn, {"size": len(b), "sha256": sha(b)})
                                       for fn, b in files.items())}],
             "external": [],
             "build": {"commit": "0" * 40, "keys": {}, "modules": {}, "pins": {}},
         }
+        if mirror:
+            entry["assets"][0]["mirror"] = rel
         if cover is not None:
             # moy-spec's `moy index` (cartindex.with_cover): beside the licence,
             # served from the repository like it.
@@ -146,7 +161,9 @@ class Repo:
 
     def routes(self):
         """{full URL: bytes} for an in-memory transport."""
-        return dict((self.url(rel), data) for rel, data in self.files.items())
+        out = dict((self.url(rel), data) for rel, data in self.files.items())
+        out.update(self.releases)
+        return out
 
 
 class _Resp:

@@ -2,8 +2,8 @@ name: Web console E2E
 
 # The HOSTED CONSOLE, in a real browser, on every push that can break it.
 #
-# Two suites in this repo drive the wasm head the way a visitor to moybyte.com
-# does -- real headless Chrome, the shipped page, the real launcher UI:
+# These suites drive the wasm head the way a visitor to moybyte.com does --
+# real headless Chrome, the shipped page, the real launcher UI:
 #
 #   tests/test_web_sync_e2e.py     Make -> +New through the page, and the cart
 #                                  must land as FILES on the board twin's disk
@@ -19,8 +19,15 @@ name: Web console E2E
 #                                  editor -- plus the refusal case, because an
 #                                  import that silently ran wrong is the worst
 #                                  outcome this feature has.
+#   tests/test_web_store_e2e.py    #124: Get Carts installs from a local index
+#                                  over CORS -- the mirror, never the release;
+#                                  a file the page cannot fetch is the
+#                                  player's own; a wrong cart installs nothing
+#                                  -- into OPFS whole, and the cart plays on a
+#                                  second load. A board-served page fetches
+#                                  nothing.
 #
-# Both are gated on MOYBYTE_WEB_E2E, and until this workflow existed nothing set
+# All are gated on MOYBYTE_WEB_E2E, and until this workflow existed nothing set
 # it: the whole browser tier -- the thing a visitor actually touches -- had no
 # automated net, and a regression in it was silent. `make test` still does not
 # pay for them; this job does, and only when something that feeds them moved.
@@ -50,6 +57,7 @@ on:
       - "system_carts/**"          # the twin's seeded shelf
       - "tests/test_web_*"
       - "tests/web_e2e.py"
+      - "tests/cart_store_fixtures.py"  # the store suite builds its carts with it
       - "tests/fixtures/**"         # the p8 cart the drop suite imports
       - "tools/p8_import.py"        # the vendored converter the wasm freezes
       - "tools/p8_lua_port.py"      # ...the vendored PORTER, frozen beside it
@@ -64,6 +72,7 @@ on:
       - "system_carts/**"
       - "tests/test_web_*"
       - "tests/web_e2e.py"
+      - "tests/cart_store_fixtures.py"
       - "tests/fixtures/**"
       - "tools/p8_import.py"
       - "tools/p8_lua_port.py"
@@ -156,7 +165,8 @@ jobs:
         run: |
           .venv/bin/python -m pytest -rs --junitxml=web-e2e.xml \
             tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
-            tests/test_web_p8_e2e.py tests/test_web_update_e2e.py
+            tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
+            tests/test_web_store_e2e.py
 
       # pytest was green -- but was it green over anything? The prerequisite
       # skips fail hard above, so this catches the other way of proving nothing:
