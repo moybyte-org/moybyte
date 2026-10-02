@@ -49,11 +49,11 @@ this chip -- the same thing an ordinary push already does for any compiled
 cart.
 
 WHAT IT REMOVES: every `.aot` file left in the cart's folder besides the one
-this board just confirmed or wrote -- a foreign chip's module, or one from a
-format this engine has moved past. An ordinary push never evicts a module
-(a cart is meant to stay portable off the console it is pushed from), but a
-refresh's whole job is tidying what one SPECIFIC board's storage holds now
-that its format is pinned, so this is the one place that cleanup belongs.
+this board confirmed or wrote -- a foreign chip's module, or one from a
+format this engine has moved past. A cart it pushes is left that way by the
+push itself (`push_cart.push_files` keeps only the modules a push carries);
+a cart already current is tidied here, since a refresh's whole job is what
+one SPECIFIC board's storage holds now that its format is pinned.
 """
 
 import argparse
@@ -203,9 +203,7 @@ def refresh(board, port, paths=DEFAULT_PATHS, log=print, verbose=False):
             except Exception as exc:  # noqa: BLE001 -- a board hiccup, not this cart's fault
                 log("  refused: could not read %s (%s)" % (cart_path, exc))
                 continue
-            if wanted in names:
-                log("  already current (%s)" % wanted)
-            else:
+            if wanted not in names:
                 src = materialize(title, known, work)
                 if src is None:
                     log("  refused: no known source for %r -- push it again "
@@ -220,6 +218,9 @@ def refresh(board, port, paths=DEFAULT_PATHS, log=print, verbose=False):
                 if rc != 0:
                     log("  push_cart exited %r" % rc)
                     continue
+                done += 1
+                continue
+            log("  already current (%s)" % wanted)
             done += 1
             stale = [n for n in names if n.endswith(".aot") and n != wanted]
             if stale:

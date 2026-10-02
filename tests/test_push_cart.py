@@ -115,6 +115,15 @@ class _FakeFS:
             raise OSError("ENOENT: " + path)
         del self.files[path]
 
+    def listdir(self, path):
+        pre = path.rstrip("/") + "/"
+        out = set(p[len(pre):].split("/", 1)[0]
+                  for p in list(self.files) + list(self.dirs)
+                  if p.startswith(pre))
+        if not out and path not in self.dirs:
+            raise OSError("ENOENT: " + path)
+        return sorted(out)
+
     def rename(self, src, dst):
         self.files[dst] = self.files.pop(src)
 
@@ -1133,8 +1142,8 @@ def test_a_module_for_another_chip_is_left_unpushed(monkeypatch, tmp_path):
     """A portable cart may carry a module per chip and format
     (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware"); a push
     takes only the one THIS board's chip wants and leaves every other one
-    sitting in the cart folder, unpushed -- it is not this board's module to
-    carry, and nothing about pushing it should evict it either."""
+    sitting in the host's cart folder, unpushed -- it is not this board's
+    module to carry, and the push takes nothing out of the folder it reads."""
     from tools import wasm_cart
     cart = _compiled_cart(tmp_path)
     with open(os.path.join(cart, "main.wasm"), "rb") as f:
@@ -1152,3 +1161,123 @@ def test_a_module_for_another_chip_is_left_unpushed(monkeypatch, tmp_path):
               for p in pushed), pushed
     # unpushed, not deleted: still on disk, right where it was built
     assert os.path.isfile(other)
+
+
+# -- the modules a push leaves on the board ---------------------------------------
+#
+# A module is keyed to the main.wasm it was compiled from. The Waveshare's Doom
+# test pushed a locally built main.wasm into a doom.moy Get Carts had
+# installed, and the release's module stayed beside it: the console sized the
+# cart by a module for another main.wasm and refused it. A push that carries a
+# compiled cart's main or a module of it leaves the folder holding only the
+# modules it carried.
+
+
+def _fake_compiled_cart(tmp_path, wasm=b"\0asm\1\0\0\0 demo", chip="esp32s3"):
+    """A compiled cart whose module for `chip` carries the key push_cart
+    wants for its main.wasm -- the key is what the tool reads, so no
+    compiler is needed to make one it will push as it is."""
+    from tools import wasm_cart, wasm_module as wm
+    cart = _cart(tmp_path, {"manifest.json": b'{"title": "Demo", "runtime": '
+                                             b'"wasm", "memory": 1}\n',
+                            "main.wasm": wasm})
+    name = wasm_cart.aot_name("main.wasm", chip)
+    with open(os.path.join(cart, name), "wb") as f:
+        f.write(b"module " + wm.key_text(wasm, chip).encode())
+    return cart, name
+
+
+def test_the_stale_modules_are_every_module_of_main_the_push_does_not_carry():
+    there = ["main.wasm", "main.esp32s3.f2.aot", "main.esp32s3.f1.aot",
+             "main.esp32p4.f2.aot", "pmem.json", "teapot.obj",
+             "other.esp32s3.f2.aot", "main.esp32s3.aot"]
+    stale = push_cart.stale_modules
+    assert stale("main.wasm", ["main.wasm", "main.esp32s3.f2.aot"], there) == [
+        "main.esp32s3.f1.aot", "main.esp32p4.f2.aot"]
+    # main.wasm alone -- moy build's output -- leaves no module behind it
+    assert stale("main.wasm", ["main.wasm", "manifest.json"], there) == [
+        "main.esp32s3.f2.aot", "main.esp32s3.f1.aot", "main.esp32p4.f2.aot"]
+    # a module alone is the compiled side too
+    assert stale("main.wasm", ["main.esp32s3.f2.aot"], there) == [
+        "main.esp32s3.f1.aot", "main.esp32p4.f2.aot"]
+    # a push that carries neither leaves every module where it is
+    assert stale("main.wasm", ["config.json"], there) == []
+    # only the modules of the cart's own main
+    assert stale("other.wasm", ["other.wasm"], there) == ["other.esp32s3.f2.aot"]
+
+
+def test_a_compiled_push_leaves_only_the_modules_it_carries(monkeypatch, tmp_path,
+                                                          capsys):
+    """The Waveshare's Doom, in miniature: a release installed its main.wasm
+    and its module, an older format's module and another chip's sit beside
+    them, and a push of a new main.wasm with this chip's module leaves that
+    module and nothing else -- the kid's saves untouched."""
+    from tools import wasm_module as wm
+    cart, name = _fake_compiled_cart(tmp_path)
+    d = "/sd/carts/demo.moy"
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts", files={
+        d + "/main.wasm": b"the release's main.wasm",
+        d + "/" + name: b"the release's module",
+        d + "/main.esp32s3.f0.aot": b"an older format's module",
+        d + "/main.esp32p4.f%s.aot" % wm.format_version(): b"another chip's",
+        d + "/pmem.json": b"{}"})
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    assert push_cart.main([cart, "--board", "tdeck"]) == 0
+    with open(os.path.join(cart, name), "rb") as f:
+        module = f.read()
+    assert dev.fs.files == {
+        d + "/main.wasm": b"\0asm\1\0\0\0 demo",
+        d + "/manifest.json": open(os.path.join(cart, "manifest.json"), "rb").read(),
+        d + "/" + name: module,
+        d + "/pmem.json": b"{}"}
+    out = capsys.readouterr().out
+    assert "main.esp32s3.f0.aot" in out and "removed" in out
+
+
+def test_a_push_that_leaves_the_compiled_side_alone_keeps_the_modules(
+        monkeypatch, tmp_path):
+    """`--only config.json` changes nothing a module is keyed to."""
+    cart, name = _fake_compiled_cart(tmp_path)
+    (tmp_path / "demo.moy" / "config.json").write_bytes(b'{"zone": 2}\n')
+    d = "/sd/carts/demo.moy"
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts",
+                       files={d + "/" + name: b"a module",
+                              d + "/main.esp32s3.f0.aot": b"an older one"})
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    assert push_cart.main([cart, "--board", "tdeck",
+                           "--only", "config.json"]) == 0
+    assert dev.fs.files[d + "/" + name] == b"a module"
+    assert dev.fs.files[d + "/main.esp32s3.f0.aot"] == b"an older one"
+
+
+def test_a_lua_carts_push_takes_nothing_out(monkeypatch, tmp_path):
+    d = "/sd/carts/demo.moy"
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts",
+                       files={d + "/main.esp32s3.f2.aot": b"not this cart's"})
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"manifest.json": b'{"title": "Demo"}\n',
+                            "main.lua": b"x = 1\n"})
+    assert push_cart.main([cart, "--board", "tdeck"]) == 0
+    assert dev.fs.files[d + "/main.esp32s3.f2.aot"] == b"not this cart's"
+
+
+def test_the_on_glass_suites_push_through_the_same_body(tmp_path):
+    """Every on-glass push of a cart folder (Doom, Jet, the wasm fixtures)
+    goes through `push_files`, so a suite's push leaves the folder as a
+    push_cart push would."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import on_glass
+    cart, name = _fake_compiled_cart(tmp_path, chip="esp32p4")
+    d = "/moy/carts/doom.moy"
+    dev = _FakeConsole(board="p4", carts_root="/moy/carts", files={
+        d + "/main.wasm": b"the release's main.wasm",
+        d + "/" + name: b"the release's module"})
+    b = _driver(dev, "p4")
+    on_glass._push_folder(b, BOARD_DIRS["p4"], cart, d)
+    with open(os.path.join(cart, name), "rb") as f:
+        assert dev.fs.files[d + "/" + name] == f.read()
+    dev2 = _FakeConsole(board="p4", carts_root="/moy/carts", files={
+        d + "/" + name: b"the release's module"})
+    os.remove(os.path.join(cart, name))
+    on_glass._push_folder(_driver(dev2, "p4"), BOARD_DIRS["p4"], cart, d)
+    assert not any(p.endswith(".aot") for p in dev2.fs.files), dev2.fs.files

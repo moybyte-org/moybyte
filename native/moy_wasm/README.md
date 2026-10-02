@@ -542,8 +542,10 @@ waits for it, so an item that never returns holds the cart where it is.
   reading as a missing file, and the store's handling of a compiled cart.
 - `tests/test_push_cart.py` / `tests/test_refresh_wasm.py`: a push compiles an
   unsigned module only when this board's chip+format has none, replaces one
-  built for another main.wasm, and leaves every OTHER chip's module in the
-  cart folder unpushed and undeleted; a refresh asks the BOARD which compiled
+  built for another main.wasm, leaves every OTHER chip's module in the host's
+  cart folder unpushed and undeleted, and leaves the board's folder holding
+  only the modules it carried (the on-glass suites push through the same
+  body); a refresh asks the BOARD which compiled
   carts it actually has (`ws.carts.all`, never a local folder walk -- Jet's
   own source carries no `main.wasm` to walk to), rebuilds one that has gone
   stale from a known local recipe (`tools/refresh_wasm.py`'s `known_sources`),

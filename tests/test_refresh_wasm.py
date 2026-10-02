@@ -92,9 +92,10 @@ class FakeBoard:
 def _wire(monkeypatch, carts_all, files, chip=CHIP, pushed=None):
     """Point refresh_wasm at a FakeBoard reporting `carts_all`/`files`, a
     fixed chip, and a `push_cart.main` that -- unless a test overrides it --
-    simulates a clean push by writing the wanted module (and main.wasm, for a
-    cart that had none) into the destination's file set. Returns the list of
-    argv lists every push_cart.main call recorded."""
+    simulates a clean push: the modules the push does not carry leave the
+    destination by push_cart's own rule (`stale_modules`), and the wanted
+    module and main.wasm land in it. Returns the list of argv lists every
+    push_cart.main call recorded."""
     boards = []
 
     def fake_connect(board, port, verbose=False):
@@ -113,8 +114,11 @@ def _wire(monkeypatch, carts_all, files, chip=CHIP, pushed=None):
         src, dest = argv[0], argv[argv.index("--dest") + 1]
         man = json.load(open(os.path.join(src, "manifest.json"), encoding="utf-8"))
         main = man.get("main", "main.wasm")
-        files.setdefault(dest, set()).add(main)
-        files[dest].add(wanted(main, chip))
+        carried = set(os.listdir(src)) | {main, wanted(main, chip)}
+        there = files.setdefault(dest, set())
+        there.difference_update(push_cart.stale_modules(main, carried,
+                                                        sorted(there)))
+        there.update((main, wanted(main, chip)))
         return 0
     monkeypatch.setattr(push_cart, "main", fake_push_main)
     return calls, boards

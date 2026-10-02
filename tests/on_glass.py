@@ -876,18 +876,17 @@ WASM_CARTS = {"hello": "Hello Wasm", "blit": "Blit Wasm", "par": "Par Wasm"}
 
 
 def _push_folder(board, board_dir, local, dest):
-    """Every file under `local` to `dest` on the board, over `recv`."""
+    """Every file under `local` to `dest` on the board, over `recv`, through
+    `push_cart.push_files` -- so `dest` keeps only the compiled modules
+    `local` carries."""
     import push_cart as pc
     from tools import board_config
     ser = board_config.load(board_dir)["serial"]
     names = pc.cart_files(local)
     link = pc.raw_link(board, ser)
     assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
-    board.pyval("ws._g['_mkdirs'](%r)"
-                % ([dest] + [dest + "/" + sub for sub in pc.sub_dirs(names)]))
-    for name in names:
-        pc.push_file_raw(board, os.path.join(local, name), dest + "/" + name,
-                         link)
+    pc.push_files(board, {n: os.path.join(local, n) for n in names}, names,
+                  dest, link)
 
 
 def wasm_carts_push(board, board_dir):
@@ -1374,16 +1373,19 @@ def doom_host_crcs(tics=DOOM_TICS):
 
 
 def doom_push(board, board_dir):
-    """The recipe's cart into the store as doom.moy, less the other chip's
-    module. `_push_folder` -> `push_file_raw` reads the already-current hash
-    in pieces (`push_cart.HELPERS`), so the 4 MB WAD is left out when it is
-    current the same way any other file is -- no second copy of that check
-    here."""
+    """The recipe's cart into the store as doom.moy with one module: this
+    chip's, for this tree's format and the cart's own main.wasm -- the
+    recipe's when it is that, else one compiled and signed here. Whatever
+    else doom.moy held (a Get Carts install's module, say) is gone after
+    the push (`push_cart.push_files`). `_push_folder` -> `push_file_raw`
+    reads the already-current hash in pieces (`push_cart.HELPERS`), so the
+    4 MB WAD is left out when it is current the same way any other file is
+    -- no second copy of that check here."""
     import shutil
     import tempfile
-    from tools import wasm_cart
+    from tools import wasm_cart, wasm_module
     frames = _doom()
-    wasm_signing_key()
+    key = wasm_signing_key()
     chip = _wasm_chip(board_dir)
     tmp = tempfile.mkdtemp(prefix="moy_doom_")
     local = os.path.join(tmp, "doom.moy")
@@ -1392,6 +1394,15 @@ def doom_push(board, board_dir):
     for name in os.listdir(local):
         if name.endswith(".aot") and name != keep:
             os.remove(os.path.join(local, name))
+    with open(os.path.join(local, "main.wasm"), "rb") as f:
+        wasm = f.read()
+    module = os.path.join(local, keep)
+    current = False
+    if os.path.isfile(module):
+        with open(module, "rb") as f:
+            current = wasm_module.key_matches(f.read(), wasm, chip)
+    if not current:
+        wasm_module.build(wasm, chip, module, sign_with=key)
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     dest = root.rstrip("/") + "/doom.moy"
     # A store without the room is the board's storage, not the cart's fault:
@@ -1831,8 +1842,8 @@ def wasm_stale_format_module_runs_on_the_interpreter(board, board_dir):
     past (a firmware update that bumped MOY_WASM_FORMAT_VERSION, ESP 88's
     fix): named for the OLD format, so this console never finds it by name
     and the cart plays on the interpreter instead -- the stale file stays in
-    the cart folder, still counting toward its size, until a refresh
-    replaces it (nothing is evicted)."""
+    the cart folder, still counting toward its size, until a refresh or a
+    push replaces it (nothing evicts it to make room)."""
     wasm_signing_key()
     chip = _wasm_chip(board_dir)
 

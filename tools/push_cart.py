@@ -76,13 +76,20 @@ already sitting in the cart folder is left there, unpushed, exactly as a
 carries none at all. So when the cart has no module for this board's chip --
 the chip is its board.toml's `[board] chip` -- or has one built for another
 main.wasm, this compiles one with tools/wasm_module.py, UNSIGNED, and pushes
-it in its place; the cart folder itself is left as it was. Nothing is ever
-evicted: a module already on the board from an earlier push stays there
-whether or not this push touches it. An unsigned module runs at full speed
-only while the console's Settings -> Unknown sources is on; with it off the
-module is ignored and the cart plays on the interpreter instead, so when the
-module going over is unsigned the tool says so plainly before the push
-either way.
+it in its place; the cart folder itself is left as it was. An unsigned module
+runs at full speed only while the console's Settings -> Unknown sources is
+on; with it off the module is ignored and the cart plays on the interpreter
+instead, so when the module going over is unsigned the tool says so plainly
+before the push either way.
+
+ON THE BOARD, THE FOLDER KEEPS ONLY THE MODULES THE PUSH CARRIES. A module is
+keyed to the main.wasm it was compiled from, so one already in the folder --
+from an earlier push, or the release Get Carts installed -- belongs to a
+main.wasm this push may be replacing, and a console that loads it refuses it
+or sizes the cart by it. A push that carries the cart's `main.wasm` or any of
+its modules removes every other module of that main from the folder first
+(`push_files`); a push that touches neither, such as `--only config.json`,
+leaves them alone.
 
 A STORE WITHOUT THE ROOM IS ONE LINE, NOT A TRACEBACK. Before the first window
 the tool weighs what the push adds against the free bytes of the store it
@@ -107,6 +114,7 @@ from p4_autotest import P4Board                                  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from runtime.cart_index import module_parts                      # noqa: E402
 from runtime.dev_channel import (RECV_DEAD_WINDOWS, RECV_IDLE_MS,  # noqa: E402
                                  RECV_SYNC, RECV_SYNC_MS)
 
@@ -167,8 +175,9 @@ def serial_cfg(board):
 # and answers None without reading when the size already differs. It reads in
 # 8KB pieces, not whole (item 5). `_room` is the free bytes of the store a
 # path is on (None where the board cannot say), `_sizes` each file's size
-# there (0 when it is not there yet), and `_put` moves a verified `.new` over
-# its file and drops the stamp beside it (see push_file_raw).
+# there (0 when it is not there yet), `_ls` what a folder holds ([] when it is
+# not there), and `_put` moves a verified `.new` over its file and drops the
+# stamp beside it (see push_file_raw).
 HELPERS = """
 import hashlib, os
 def _gated(fn):
@@ -213,6 +222,11 @@ def _room(p):
     return _gated(go)
 def _sizes(ps):
     return _gated(lambda: [_size(p) for p in ps])
+def _ls(d):
+    def go():
+        try: return sorted(os.listdir(d))
+        except Exception: return []
+    return _gated(go)
 def _put(tmp, dst):
     def go():
         _rm(dst)
@@ -573,6 +587,65 @@ def other_compiled_modules(names, keep):
     return [n for n in names if n.endswith(".aot") and n != keep]
 
 
+def compiled_main(local):
+    """The `main` of the compiled cart whose files `local` maps (a path
+    inside the cart -> the host file pushed under it), or None when they are
+    not a compiled cart's."""
+    path = local.get("manifest.json")
+    if path is None:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            man = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(man, dict) or man.get("runtime") != "wasm":
+        return None
+    return man.get("main") or "main.wasm"
+
+
+def stale_modules(main, names, there):
+    """The modules of `main` among `there` (what the cart's folder on the
+    board holds) that a push of `names` does not carry, when the push carries
+    the cart's compiled side -- `main` or one of its modules; [] when it
+    carries neither. Every module is keyed to the main.wasm it was compiled
+    from, so one the push leaves behind belongs to some other main.wasm."""
+    stem = main[:-5] if main.endswith(".wasm") else main
+
+    def ours(name):
+        parts = module_parts(name)
+        return parts is not None and parts[0] == stem
+
+    if main not in names and not any(ours(n) for n in names):
+        return []
+    return [n for n in there if ours(n) and n not in names]
+
+
+def push_files(b, local, names, dest, link, force=False, verbose=False):
+    """Push `names` -- paths inside the cart, each from the host file
+    `local[name]` -- into `dest` on the board over `recv`, with the helpers
+    installed. Returns how many were written. The folders are made first,
+    then every module `stale_modules` names is removed, so the folder never
+    holds a module for a main.wasm it no longer has; `force` sends files
+    whose hash already matches."""
+    b.pyval("ws._g['_mkdirs'](%r)"
+            % ([dest] + [dest + "/" + sub for sub in sub_dirs(names)]))
+    main = compiled_main(local)
+    if main is not None:
+        there = b.pyval("ws._g['_ls'](%r)" % dest, timeout=30, strict=True)
+        for name in stale_modules(main, names, there):
+            b.pyval("ws._g['_drop'](%r)" % (dest + "/" + name), timeout=30,
+                    strict=True)
+            print("  - %-16s removed (a module this push does not carry)" % name)
+    wrote = 0
+    for f in names:
+        if force:
+            b.pyval("ws._g['_drop'](%r)" % (dest + "/" + f))
+        wrote += push_file_raw(b, local[f], dest + "/" + f, link,
+                               verbose=verbose)
+    return wrote
+
+
 def cart_files(cart):
     """Every file in the cart folder, RELATIVE to it, forward-slashed.
 
@@ -733,14 +806,8 @@ def _push(a, cart, names, local, work):
         # reads, not a traceback.
         try:
             check_room(b, local, names, dest)
-            b.pyval("ws._g['_mkdirs'](%r)"
-                    % ([dest] + [dest + "/" + sub for sub in sub_dirs(names)]))
-            wrote = 0
-            for f in names:
-                if a.force:
-                    b.pyval("ws._g['_drop'](%r)" % (dest + "/" + f))
-                wrote += push_file_raw(b, local[f], dest + "/" + f,
-                                       link, verbose=a.verbose)
+            wrote = push_files(b, local, names, dest, link, force=a.force,
+                               verbose=a.verbose)
         except StoreFull as exc:
             sys.exit("STORE FULL: %s. Nothing more was written; free some room "
                      "on the board and push again." % exc)

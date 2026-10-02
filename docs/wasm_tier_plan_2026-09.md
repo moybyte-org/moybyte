@@ -132,16 +132,19 @@ the decisions below record what they changed.
     fully portable.
   - **A console takes `main.wasm` plus only the module matching it.** A push
     compiles one on the spot, unsigned, for a cart with none
-    (`tools/push_cart.py`'s `compiled_module`); the Get Carts app installs
+    (`tools/push_cart.py`'s `compiled_module`), and leaves the cart's folder
+    on the board holding only the modules it carried (`push_files`): a
+    module is keyed to the main.wasm it was compiled from, so one a push left
+    behind would belong to a main.wasm it replaced. The Get Carts app installs
     only this console's module out of a release (`runtime/cart_index.py`,
     #124), and with none the cart plays on the interpreter. moy-spec's `moy
     install` writes every module, because a PC does not know which console
     the card goes into.
   - **On the console the cart folder is self-contained.** A console of the
     same chip and format takes its module as it is; any other console runs
-    the cart on the interpreter until it gets its own. Nothing is evicted --
-    a module counts toward the cart's size, checked at install, and leaves
-    only with the cart.
+    the cart on the interpreter until it gets its own. Nothing is evicted to
+    make room -- a module counts toward the cart's size, checked at install,
+    and leaves with the cart or with the main.wasm it was compiled from.
   - **The key names a compiled-code FORMAT VERSION, not the fork commit**
     (`native/moy_wasm/moy_wasm_key.h`'s `MOY_WASM_FORMAT_VERSION`), hand-bumped
     only for a change that reaches the vendored AOT loader/runtime ABI or the
