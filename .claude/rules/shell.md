@@ -90,12 +90,13 @@ to whoever called it.
   - **Blocks↔code graduation is one-way and reversible only by undo**: a diverging
     code commit stores `"graduated": true`, the Blocks tab goes read-only, and
     undoing past that commit un-graduates.
-  - **Wallpaper previews keep a sidecar; cover thumbs DO NOT** (#155) — and the
+  - **Wallpaper previews keep a sidecar; covers DO NOT** (#155) — and the
     contrast is the point. A computed preview FRAME is far dearer to rebuild than
-    to read, so it caches to disk; a cover's RLE decode got ~three orders of
-    magnitude cheaper, so a per-size sidecar cost the same as rebuilding while
-    also charging a write per cover per size. Covers cache PARSED RUNS in RAM
-    instead. **Do not re-add cover thumbs.**
+    to read, so it caches to disk; a cover (`cover.png`, SPEC.md 3.6) is a few KB
+    of file and a native decode, so `runtime/cover_cache.py` keeps the FILE and
+    ONE decoded 128x128 base in RAM and draws it at a whole-number scale (no
+    per-size variants, docs/theming_2026-09.md P8). **Do not re-add cover
+    sidecars.**
   - **`files/trash/` is restorable and never confirms**, and WALL/GAME/wallpaper
     are **copy-on-use** — a kid's drawing is never mutated by being used
     (#108's comments hold that design discussion).

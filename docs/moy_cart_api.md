@@ -19,7 +19,7 @@ PC simulator and on the device — same names, same pixels.
 ## The shape of a cart
 
 A cart is a single `main.py` inside a `.moy` folder (`manifest.json` + `main.py` +
-`config.json`, optional sprite sheet / tilemap / sounds / paint images). It defines up
+`config.json`, optional sprite sheet / tilemap / sounds / paint images / cover). It defines up
 to three lifecycle functions and calls the API by name — **no imports**; every name
 below is pre-injected as a global. (A cart can also be written in **Lua** —
 `main.lua` + `"runtime": "lua"` in the manifest, same API — see
@@ -32,6 +32,11 @@ the manifest declares the list and the console loads it (SPEC.md §4). A PICO-8 
 the standing case, with its generated compat layer in `p8.lua` ahead of the `main.lua`
 a person opens — and one more script per PICO-8 tab after it, because tabs are where
 that cart's author put its structure.
+
+A `cover.png` beside the manifest is the cart's picture on the shelf: a 128x128
+PNG, indexed or RGB, at most 64 KB (SPEC.md §3.6 has the profile). Paint opens it,
+a cart without one shows its icon instead, and a file outside the profile is
+ignored, never refused.
 
 ```python
 # a tiny cart: move a ball with the D-pad

@@ -122,7 +122,6 @@ def test_a_blob_that_is_not_a_picture_reads_as_absent(bad):
     """None, never a raise: every caller on every tier treats a picture it
     cannot read as one that is not there."""
     assert moy_image.decode_moyimg(bad) is None
-    assert moy_image.moyimg_runs(bad) is None
 
 
 def test_a_retired_rle_blob_reads_as_absent():
@@ -131,11 +130,19 @@ def test_a_retired_rle_blob_reads_as_absent():
     there is no migration that will (CLAUDE.md, 2026-09-07): a card carrying one
     reads as a picture that is not there, which is what every caller already
     draws as a placeholder."""
-    packed = moy_image.pack_runs(_art(64, 48))
+    art = _art(64, 48)
+    packed = bytearray()
+    pos = 0
+    while pos < len(art):
+        count = 1
+        while (pos + count < len(art) and count < 255
+               and art[pos + count] == art[pos]):
+            count += 1
+        packed += bytes((count, art[pos]))
+        pos += count
     blob = json.dumps({"format": "moyimg-v1", "w": 64, "h": 48, "codec": "rle",
-                       "data": moy_image._b64_encode(packed)})
+                       "data": moy_image._b64_encode(bytes(packed))})
     assert moy_image.decode_moyimg(blob) is None
-    assert moy_image.moyimg_runs(blob) is None
 
 
 def test_extra_header_keys_survive_a_decode():
@@ -147,105 +154,11 @@ def test_extra_header_keys_survive_a_decode():
     assert moy_image.decode_moyimg(json.dumps(meta)) == (8, 4, art)
 
 
-# -- runs: the cover shelf's cache, now DERIVED from the raster --------------
-
-def test_runs_and_pixels_are_the_same_picture():
-    art = _art(64, 48)
-    blob = moy_image.encode_moyimg(64, 48, art)
-    w, h, packed = moy_image.moyimg_runs(blob)
-    assert (w, h) == (64, 48) and len(packed) % 2 == 0
-    out = bytearray()
-    for i in range(0, len(packed), 2):
-        assert 1 <= packed[i] <= 255 and packed[i + 1] <= 63
-        out.extend(bytes((packed[i + 1],)) * packed[i])
-    assert bytes(out) == art
-
-
-def test_a_run_never_exceeds_the_byte_it_is_counted_in():
-    """255 is the cap a `count` byte can hold; a 300-long stretch is two runs."""
-    packed = moy_image.pack_runs(bytes((9,)) * 300)
-    assert packed == bytes((255, 9, 45, 9))
-
-
-def _whole_raster_runs(text):
-    """What `moyimg_runs` did before it streamed: inflate the lot, then scan it.
-    The reference the streaming reader has to match byte for byte."""
-    got = moy_image.decode_moyimg(text)
-    return None if got is None else (got[0], got[1], moy_image.pack_runs(got[2]))
-
-
-@pytest.mark.parametrize("asset", sorted(
-    (ROOT / "system_carts").glob("**/*.moyimg")), ids=lambda p: p.parent.parent.name)
-def test_streamed_runs_are_the_whole_raster_runs(asset):
-    """The reader the launcher's idle prefetch runs once per cover. It reads the
-    deflate stream a kilobyte at a time instead of inflating a 76,800-byte
-    raster to derive 15KB of runs from -- and the ONLY thing that makes that a
-    safe swap is that the bytes are identical, because a run that spans a piece
-    boundary is an invitation to emit two runs where the scan emitted one."""
-    text = asset.read_text()
-    assert moy_image.moyimg_runs(text) == _whole_raster_runs(text)
-
-
-@pytest.mark.parametrize("name,pix", [
-    ("one flat colour", bytes((5,)) * 76800),
-    ("a run longer than a piece", bytes((3,)) * 5000 + bytes(range(64)) * 10),
-    ("runs that land exactly on 255", b"".join(bytes((v & 63,)) * 255 for v in range(40))),
-    ("runs that land exactly on a piece", b"".join(bytes((v & 63,)) * 1024 for v in range(12))),
-    ("one pixel", bytes((1,))),
-    ("no run longer than one", bytes((i & 63) for i in range(9000))),
-])
-def test_a_run_across_a_piece_boundary_packs_as_one_run(name, pix):
-    """The cases the boundary merge exists for. A 600-long run must come out
-    255/255/90 wherever the reader happened to cut, never 255/255/255/35."""
-    blob = moy_image.encode_moyimg(len(pix), 1, pix)
-    got = moy_image.moyimg_runs(blob)
-    assert got == _whole_raster_runs(blob), name
-    out = bytearray()
-    for i in range(0, len(got[2]), 2):
-        assert 1 <= got[2][i] <= 255 and got[2][i + 1] <= 63
-        out.extend(bytes((got[2][i + 1],)) * got[2][i])
-    assert bytes(out) == pix, name
-
-
-def test_the_runs_reader_never_inflates_a_whole_raster():
-    """The allocation that took both S3 boards to the REPL a few minutes after a
-    flash: 76,800 CONTIGUOUS bytes, asked for on an idle prefetch frame, on a
-    heap with hundreds of KB free and no run that size (#66). The one-shot
-    inflater must not be on this path at all."""
-    art = _art(320, 240)
-    blob = moy_image.encode_moyimg(320, 240, art)
-    sizes = []
-    real = moy_image._inflate_chunks
-
-    def watched(raw, chunk=moy_image._INFLATE_CHUNK, _r=real):
-        for piece in _r(raw, chunk):
-            sizes.append(len(piece))
-            yield piece
-
-    moy_image._inflate_chunks = watched
-    moy_image._inflate = _no_inflate
-    try:
-        got = moy_image.moyimg_runs(blob)
-    finally:
-        moy_image._inflate_chunks = real
-        moy_image._inflate = _REAL_INFLATE
-    assert got == (320, 240, moy_image.pack_runs(art))
-    assert sum(sizes) == 320 * 240 and max(sizes) <= moy_image._INFLATE_CHUNK
-    assert len(sizes) > 60, "one piece is a whole raster by another name"
-
-
-_REAL_INFLATE = moy_image._inflate
-
-
-def _no_inflate(raw):
-    raise AssertionError("the streaming reader inflated the whole raster")
-
-
 def test_a_heap_that_says_no_is_not_a_missing_picture():
-    """MemoryError is the one exception these readers pass on. Swallowed as
+    """MemoryError is the one exception this reader passes on. Swallowed as
     None it becomes "your drawing is gone" -- which Paint and `image()` would
     then cache and act on -- where raised it is a caller's choice to skip one
-    picture and come back to it, which is exactly what the cover shelf does."""
+    picture and come back to it."""
     art = _art(16, 16)
     blob = moy_image.encode_moyimg(16, 16, art)
     real = moy_image._inflate
@@ -255,22 +168,10 @@ def test_a_heap_that_says_no_is_not_a_missing_picture():
             moy_image.decode_moyimg(blob)
     finally:
         moy_image._inflate = real
-    real_chunks = moy_image._inflate_chunks
-    moy_image._inflate_chunks = _starved_chunks
-    try:
-        with pytest.raises(MemoryError):
-            moy_image.moyimg_runs(blob)
-    finally:
-        moy_image._inflate_chunks = real_chunks
 
 
 def _starved(raw):
     raise MemoryError("memory allocation failed, allocating 76800 bytes")
-
-
-def _starved_chunks(raw, chunk=1024):
-    raise MemoryError("memory allocation failed, allocating 76800 bytes")
-    yield b""                      # noqa -- makes this a generator like the real one
 
 
 @pytest.mark.parametrize("chunk", [1, 7, 1024, 100000])
@@ -292,21 +193,6 @@ def test_the_streaming_compressor_writes_a_picture_anything_can_read(chunk):
     assert moy_image._inflate(got) == art
     whole = moy_image._deflate(art)
     assert len(got) <= len(whole) * 1.05 + 64
-
-
-def test_the_native_run_scanner_agrees_with_the_python_one():
-    """moy_gfx.encode_runs is the host's Python loop in C. On a build without
-    it (the host) this asserts the fallback against itself, which is worth the
-    two lines it costs: the test is the same on the tier that has one."""
-    art = _art(320, 240)
-    native = moy_image._encode_runs()
-    got = moy_image.pack_runs(art)
-    out = bytearray()
-    for i in range(0, len(got), 2):
-        out.extend(bytes((got[i + 1],)) * got[i])
-    assert bytes(out) == art
-    if native is not None:
-        assert native(art) == got
 
 
 # -- the boards can compress -------------------------------------------------
@@ -347,7 +233,7 @@ def test_no_asset_in_the_tree_is_the_retired_codec():
         got = moy_image.decode_moyimg(p.read_text())
         assert got is not None and len(got[2]) == got[0] * got[1], p
         seen += 1
-    assert seen >= 13, "the seed pictures went missing, not the codec"
+    assert seen >= 2, "the seed pictures went missing, not the codec"
 
 
 # -- and on a real MicroPython ----------------------------------------------
@@ -368,25 +254,21 @@ host = open("host.moyimg").read()
 hgot = moy_image.decode_moyimg(host)
 assert hgot is not None and bytes(hgot[2]) == art, "a board could not read the host's"
 
-# The two STREAMING halves, on the implementation that actually runs them: the
-# shelf reads a cover through DeflateIO.read(n) and `_deflate_pieces` writes
-# one through repeated DeflateIO.write(). Neither is CPython's decompressobj/
-# compressobj, and this is the only place either is driven by the real thing --
-# which is how we know `deflate` closes a block per write and CPython does not.
+# The STREAMING writer, on the implementation that actually runs it:
+# `_deflate_pieces` writes through repeated DeflateIO.write(), which is not
+# CPython's compressobj, and this is the only place it is driven by the real
+# thing -- which is how we know `deflate` closes a block per write and CPython
+# does not.
 pieces = [art[i:i + 1024] for i in range(0, len(art), 1024)]
 streamed_blob = moy_image._deflate_pieces(pieces)
-assert moy_image._inflate(streamed_blob) == art, \\
-    "a board could not read the picture it wrote piece by piece"
+assert moy_image._inflate(streamed_blob) == art, "a board could not read the picture it wrote piece by piece"
 piecewise = len(streamed_blob)
-streamed = moy_image.moyimg_runs(blob)
-whole = moy_image.pack_runs(moy_image.decode_moyimg(blob)[2])
-assert bytes(streamed[2]) == bytes(whole), "the streamed runs are not the runs"
 
 meta = json.loads(blob)
 raw = moy_image._b64_decode(meta["data"])
 print("RESULT " + json.dumps({
     "bytes": len(blob), "same_as_host": blob == host, "piecewise": piecewise,
-    "wbits": (raw[0] >> 4) + 8, "runs": len(streamed[2]),
+    "wbits": (raw[0] >> 4) + 8,
 }))
 """
 
@@ -415,7 +297,6 @@ def test_the_codec_round_trips_on_the_interpreter_the_board_runs(tmp_path):
     assert line, r.stdout[-3000:]
     got = json.loads(line[0][len("RESULT "):])
     assert got["wbits"] == moy_image.MOYIMG_WBITS
-    assert got["runs"] > 0
     # A writer that streams its raster into the compressor pays a RATIO, not a
     # byte-identity -- `deflate` closes a block per write where CPython's
     # compressobj does not. Measured here rather than assumed, because a writer

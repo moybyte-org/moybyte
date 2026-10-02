@@ -13,17 +13,19 @@ except ImportError:  # pragma: no cover
     os = None
 
 try:
-    from moy_fs import (_exists, _mkdir, _read, _read_recover, _write_atomic)
+    from moy_fs import (_exists, _mkdir, _read, _read_recover, _write_atomic,
+                        _read_bytes, _write_bytes)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_exists, _mkdir, _read, _read_recover, _write_atomic)
+    from runtime.moy_fs import (_exists, _mkdir, _read, _read_recover,
+                                _write_atomic, _read_bytes, _write_bytes)
 try:
     from moy_journal import (journal_append)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_journal import (journal_append)
 try:
-    from moy_store_base import (CARTS_DIR, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _is_dir, _sibling_path, ensure_dirs, slug)
+    from moy_store_base import (CARTS_DIR, COVER_FILE, COVER_MAX_BYTES, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _is_dir, _sibling_path, ensure_dirs, slug)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _is_dir, _sibling_path, ensure_dirs, slug)
+    from runtime.moy_store_base import (CARTS_DIR, COVER_FILE, COVER_MAX_BYTES, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _is_dir, _sibling_path, ensure_dirs, slug)
 
 
 # --- user files (#108): the kid's creations as real files -------------------
@@ -243,8 +245,12 @@ def list_project_files(kind, root=CARTS_DIR):
 
 def load_project_file(kind, name, root=CARTS_DIR):
     """One project file's text, or None -- through `_read_recover`, so a crash
-    mid-save reads the `.bak` exactly as `load()` does for the manifest."""
+    mid-save reads the `.bak` exactly as `load()` does for the manifest. The
+    cart's cover is the one that is not text: it comes back as its BYTES."""
     try:
+        if str(name) == COVER_FILE:
+            return _read_bytes(project_file_path(kind, name, root),
+                               COVER_MAX_BYTES)
         return _read_recover(project_file_path(kind, name, root))
     except OSError:
         return None
@@ -254,8 +260,14 @@ def save_project_file(kind, name, text, root=CARTS_DIR):
     """Write one project file atomically and record it in the project's undo
     journal (#111), which is the shape `Project.commit_config` already has for
     config.json. A journal failure never fails the write -- the edit is on
-    disk, the kid just loses one undo step."""
+    disk, the kid just loses one undo step.
+
+    The cover is BYTES (SPEC.md 3.6), published whole and not journaled: the
+    journal holds text, and Paint keeps a picture's undo itself."""
     path = project_file_path(kind, name, root)
+    if str(name) == COVER_FILE:
+        _write_bytes(path, text)
+        return str(name)
     _write_atomic(path, text)
     try:
         journal_append(project_dir(kind, root), str(name), text)

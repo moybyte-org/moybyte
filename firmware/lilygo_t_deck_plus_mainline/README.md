@@ -726,12 +726,9 @@ Every one of these was learned by hanging or bricking a board.
   blocking flush could not overlap anything. If a first boot wedges with
   `SD > op` as the last serial line, this is the first place to look, and
   `ASYNC_FLUSH = False` is the test.
-  A second, narrower one: `Workstation._cover_prefetch_tick` reads a cover blob
-  off `/sd` on idle frames through a bare `store.load_image`, not through
-  `ws._with_sd`, so it takes no `sync()` either. It is gated on **three**
-  consecutive quiet frames, which at the frame cap is ~50 ms after the last
-  kick — long after the 2 ms pump has finished the frame — so it is very hard to
-  hit, and again it is what the fork already did.
+  The cover prefetch is not one of them: `CoverCache._src_load` reads a cart's
+  `cover.png` off `/sd` on idle frames through `ws._with_sd`, like every other
+  store read (`tests/test_cover_pipeline.py` pins the gate).
   Worth being honest about the size of this risk rather than repeating the
   folklore: what the boards rule records as having actually hung boards is
   `sdspi_host_deinit` between ops and re-creating a `Pin` on `TFT_CS` —

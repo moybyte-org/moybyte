@@ -81,6 +81,7 @@ mp_obj_str_t`), which is the property that actually mattered.
   main(argv)                       CLI: write the module (or stdout)
 """
 
+import base64
 import json
 import os
 import sys
@@ -262,6 +263,12 @@ def build_carts(system_carts_dir):
         flags = os.path.join(base, "flags.moyflags")      # tile flags (SPEC.md 3.5)
         if os.path.exists(flags):
             cart["flags"] = _read(flags)
+        cover = os.path.join(base, "cover.png")           # the cover, optional (SPEC.md 3.6)
+        if os.path.exists(cover):
+            # Base64 TEXT, because a roster is JSON and literal source: the one
+            # binary file a seed carries, written back as bytes by seed_builtins.
+            with open(cover, "rb") as f:
+                cart["cover"] = base64.b64encode(f.read()).decode("ascii")
         images_dir = os.path.join(base, "images")          # paint-image assets, optional (#63)
         if os.path.isdir(images_dir):
             images = {}

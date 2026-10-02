@@ -363,11 +363,13 @@ def test_duplicate_carries_every_asset(tmp_path):
     (p / "sounds.json").write_text(json.dumps({"sfx": [], "music": []}))
     (p / "blocks.json").write_text(json.dumps({"blocks": []}))
     for sub, fn, blob in (
-            ("images", "cover.moyimg",
+            ("images", "bg.moyimg",
              json.dumps({"format": "moyimg-v1", "w": 1, "h": 1,
                          "codec": "rle", "data": "AA"})),):
         (p / sub).mkdir()
         (p / sub / fn).write_text(blob)
+    from ws_helpers import cover_bytes
+    (p / "cover.png").write_bytes(cover_bytes(9))
 
     src = moy_carts.load(str(p))
     dup = moy_carts.duplicate(src, root)
@@ -376,7 +378,8 @@ def test_duplicate_carries_every_asset(tmp_path):
     assert dup["flags"] == src["flags"]
     assert dup["sounds"] == src["sounds"]
     assert dup["blocks"] == src["blocks"]
-    assert set(dup["images"]) == {"cover"}
+    assert set(dup["images"]) == {"bg"}
+    assert moy_carts.load_cover(dup["path"]) == cover_bytes(9)
 
 
 # -- tile flags (SPEC.md 3.5) --------------------------------------------------

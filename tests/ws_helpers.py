@@ -122,3 +122,16 @@ class StubInput:
 
     def pressed(self, n):
         return False
+
+
+def cover_bytes(value=5, stripes=None):
+    """A cart cover (SPEC.md 3.6) in the profile: 128x128 console-palette
+    indices, one flat colour `value` -- or, with `stripes`, a second colour on
+    every other row, so a reduction or a wrong sample has something to show."""
+    from runtime import cover_png
+    pix = bytearray([value]) * (cover_png.SIDE * cover_png.SIDE)
+    if stripes is not None:
+        for y in range(1, cover_png.SIDE, 2):
+            pix[y * cover_png.SIDE:(y + 1) * cover_png.SIDE] = (
+                bytes([stripes]) * cover_png.SIDE)
+    return cover_png.encode_indexed(bytes(pix), cover_png.moy64())

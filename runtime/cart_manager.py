@@ -142,7 +142,7 @@ class CartManager:
             if not cart.get("path") or cart.get("lazy"):
                 continue
             try:
-                ws.covers.icon_sheet_for(cart)   # bake the grid icon while the art is here
+                ws.covers.sheet_icon(cart)   # bake the grid icon while the art is here
             except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
                 pass
             for k in _HEAVY_CART_KEYS:

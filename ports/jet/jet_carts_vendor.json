@@ -3,6 +3,7 @@
     "ports/jet/esp88.moy/LICENSES.txt": "b526fb14126ea64979b108de6980d36bab79794b0f642aba28014a2f114ff83f",
     "ports/jet/esp88.moy/assets.bin": "475b8d26629209f8bcbac1684789d684a0efa2e48a62c019822fc19734c30eed",
     "ports/jet/esp88.moy/config.json": "d67c6a0fbea4ee776c04cb1455779681e6035e9f6a0fdc481fec133a761bd753",
+    "ports/jet/esp88.moy/cover.png": "55733716c5cb945d8f965b4b56cff155d992caef422c4850740dca038f778864",
     "ports/jet/esp88.moy/manifest.json": "d22cfad8b77e5fc48c042af714344d45e0d0c83e383e9c55392827a10843b59a",
     "ports/jet/esp88.moy/src/Assets.hpp": "63f44787d19b59b3ebc2955879aa7b88d56b8c3a59f7fc9ba3e7e663ca70e397",
     "ports/jet/esp88.moy/src/CreditMask.hpp": "0dcdc5ed8454e07fcc9f4993175745785159dc55e01b7832c88acd68135123ac",
@@ -12,6 +13,7 @@
     "ports/jet/esp88.moy/src/runtime.cpp": "2c68c936df582265110894ccdac80945a7c2e4ce94c2559fc496eabf00390c8c",
     "ports/jet/teapot.moy/LICENSES.txt": "bdb7ed2382102071ea37616de813c9d84c4b6a1234f3d4294fa2efd7cedd68f3",
     "ports/jet/teapot.moy/config.json": "b467d52646e43dc618da0c00b0a3eeeb5fd855c55135da0fd6182f0fdc256dc6",
+    "ports/jet/teapot.moy/cover.png": "98b5541cff95dc87a703a0244b97b5307d8e997f81e644a35715aa18a96a68ae",
     "ports/jet/teapot.moy/manifest.json": "706fb16200206921277e949eaac7db686ab92aea95f31fe461605e4b9d3fdde7",
     "ports/jet/teapot.moy/src/JetConfig.hpp": "97531ff2d1149a344902f1079d6802ab872b49c173c44e3102622f0069ea392e",
     "ports/jet/teapot.moy/src/hud_font.h": "10292331feb74f0ee16ffac8c93af0e20a6d8ce8c1fc09a0a83b0ad7e8efa579",
@@ -23,8 +25,8 @@
     "ports/jet/teapot.moy/teapot.obj": "106598e3fefe1fba3434231adeebf7d9aa4911c4a90578f8131f185d09721bd7"
   },
   "upstream": {
-    "commit": "40591df8364acdcf2084b544b286f4eb7b3a2500",
-    "date": "2026-09-30",
+    "commit": "17d2fd50b6280a445da24cf00e2a934d488ec0fe",
+    "date": "2026-10-02",
     "repo": "moybyte-org/mit-carts"
   }
 }

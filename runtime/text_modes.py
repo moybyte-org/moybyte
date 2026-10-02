@@ -214,9 +214,13 @@ def _indent(value, depth):
 
 
 def is_image(filename):
-    """True when `filename` is a drawing (the drawings kind's extension), which
-    is the one thing the router sends somewhere other than a text page."""
-    return ext_of(filename) == IMAGE_EXT
+    """True when `filename` is a picture -- a drawing (the drawings kind's
+    extension) or a cart's `cover.png` (SPEC.md 3.6) -- which is the one thing
+    the router sends somewhere other than a text page: to Paint."""
+    name = str(filename)
+    slash = max(name.rfind("/"), name.rfind("\\"))
+    return (ext_of(name) == IMAGE_EXT
+            or name[slash + 1:] == _store.COVER_FILE)
 
 
 def lang_for(filename):

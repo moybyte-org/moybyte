@@ -351,104 +351,94 @@ def test_library_shelf_panel_paints_surface(tmp_path):
     assert ws.sys_canvas.pix(px + 2, py + 2) == th["surface"]
 
 
-def _cover_sync(ws, cart, w, h):
-    """Pump the TIME-SLICED cover build to completion -- one slice per call,
+def _cover_sync(ws, cart, div=1):
+    """Pump the TIME-SLICED cover decode to completion -- one slice per call,
     exactly as successive frames would -- and return the finished cache entry
-    (the image, or None for a definitive no-cover miss)."""
-    key = (cart.get("path"), w, h)
+    (the picture, or None for a definitive no-cover miss)."""
+    key = (cart.get("path"), div)
     for _ in range(500):
         ws.covers._built = False           # what frame() resets each frame
-        ws.covers.cover_for(cart, w, h)
+        ws.covers._ms = 0
+        ws.covers.cover_for(cart, div)
         if key in ws.covers._cache:
             return ws.covers._cache[key]
-    raise AssertionError("cover build never finished")
+    raise AssertionError("cover decode never finished")
 
 
-def test_cover_art_contract(tmp_path):
-    """Section 11.4: a cart's images/cover.moyimg is its static Library cover,
-    cover-cropped to the exact card size; carts without one fall back (None ->
-    sprite/glyph). Cached per (path, size)."""
-    ws = _ws(tmp_path, sys_size=(1024, 600))
-    covered = fallback = None
+def _covered_and_bare(ws):
     from runtime import moy_carts
+    covered = fallback = None
     for it in ws.launcher.items:
         if not it.get("path"):
             continue
-        has = moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE)
+        has = moy_carts.load_cover(it["path"])
         if has and covered is None:
             covered = it
         elif not has and fallback is None:
             fallback = it
-    assert covered is not None            # the seed games ship covers now
-    img = _cover_sync(ws, covered, 200, 150)
-    assert img is not None and (img.w, img.h) == (200, 150)
-    assert len(img.pix) == 200 * 150
-    assert max(img.pix) < 64              # valid MOY64 indices only (Section 12)
-    assert img._paint                     # native device + compact web bitmap paths
-    assert ws.covers.cover_for(covered, 200, 150) is img       # memoised
+    return covered, fallback
+
+
+def test_cover_art_contract(tmp_path):
+    """Section 11.4 / SPEC.md 3.6: a cart's cover.png is its Library cover,
+    decoded ONCE into a 128x128 base in the system canvas's 565 byte order;
+    carts without one fall back (None -> icon/glyph). Cached per cart."""
+    from runtime import cover_png, moy_carts
+    ws = _ws(tmp_path, sys_size=(1024, 600))
+    covered, fallback = _covered_and_bare(ws)
+    assert covered is not None            # the seed games ship covers
+    img = _cover_sync(ws, covered)
+    assert img is not None and (img.w, img.h) == (128, 128)
+    order = (cover_png.RGB565_SW if ws.sys_canvas.swapped565
+             else cover_png.RGB565)
+    assert bytes(img.pix) == cover_png.decode(
+        moy_carts.load_cover(covered["path"]), 1, order)
+    assert ws.covers.cover_for(covered) is img       # memoised
     if fallback is not None:
-        assert _cover_sync(ws, fallback, 200, 150) is None  # deterministic fallback
+        assert _cover_sync(ws, fallback) is None   # deterministic fallback
 
 
-def test_cover_builds_are_time_sliced_and_faithful(tmp_path):
-    """#66: decoding one 320x240 cover in one go measured 0.5-1.7s on the
-    T-Deck, so _cover_for runs a RESUMABLE job -- at most one ~8ms slice per
-    frame -- and the finished pixels must equal the one-shot decode + crop."""
-    from runtime import moy_carts
+def test_cover_decodes_are_time_sliced_and_faithful(tmp_path, monkeypatch):
+    """#66: a decode a frame cannot afford runs as a RESUMABLE job, a slice
+    per frame, and the finished pixels equal the one-shot decode."""
+    from runtime import cover_cache, cover_png, moy_carts
     ws = _ws(tmp_path, sys_size=(1024, 600))
-    covered = next(it for it in ws.launcher.items
-                   if it.get("path") and
-                   moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE))
-    other = next(it for it in ws.launcher.items
-                 if it.get("path") and it is not covered)
-    key = (covered["path"], 200, 150)
+    covered, _bare = _covered_and_bare(ws)
+    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", 0)
+    monkeypatch.setattr(cover_cache, "_COVER_ROWS", 8)
+    key = (covered["path"], 1)
     ws.covers._built = False
-    ws.covers.cover_for(covered, 200, 150)
-    # The first ask either finished within its slice or left a job in flight
-    # (with the redraw gate re-armed) -- it never blocks the frame open-ended.
-    assert key in ws.covers._cache or key in ws.covers._jobs
-    if key not in ws.covers._cache:
-        assert ws.covers._deferred
-        # The frame budget is ONE build slice: a second cart's ask this frame
-        # defers without even starting its job.
-        before = dict(ws.covers._jobs)
-        assert ws.covers.cover_for(other, 200, 150) is None
-        assert list(ws.covers._jobs) == list(before)
-    img = _cover_sync(ws, covered, 200, 150)
-    # Reference: the one-shot decode + centered cover-crop (the pre-slicing
-    # implementation, inlined).
-    blob = moy_carts.load_image(covered["path"], moy_carts.COVER_IMAGE)
-    sw, sh, pix = moy_carts.decode_moyimg(blob)
-    w, h = 200, 150
-    cw_ = min(sw, sh * w // h) or 1
-    ch_ = min(sh, sw * h // w) or 1
-    ox, oy = (sw - cw_) // 2, (sh - ch_) // 2
-    want = bytearray(w * h)
-    di = 0
-    for dy in range(h):
-        row = (oy + dy * ch_ // h) * sw + ox
-        for dx in range(w):
-            want[di] = pix[row + dx * cw_ // w]
-            di += 1
-    assert bytes(img.pix) == bytes(want)
+    ws.covers.cover_for(covered)
+    # The first ask left a job in flight with the redraw gate re-armed -- it
+    # never holds the frame open-ended.
+    assert key in ws.covers._jobs and ws.covers._deferred
+    steps = 0
+    while key not in ws.covers._cache:
+        ws.covers._built = False
+        ws.covers._ms = 0
+        ws.covers.cover_for(covered)
+        steps += 1
+    assert steps >= 128 // 8 - 1
+    order = (cover_png.RGB565_SW if ws.sys_canvas.swapped565
+             else cover_png.RGB565)
+    assert bytes(ws.covers._cache[key].pix) == cover_png.decode(
+        moy_carts.load_cover(covered["path"]), 1, order)
 
 
-def test_cover_cache_is_bounded_across_resize_variants(tmp_path):
-    """Repeated Make-window resizes must not retain every derived indexed+RGB
-    cover forever on the P4 heap."""
-    from runtime import cover_cache, moy_carts
+def test_a_relayout_keeps_one_base_per_cover(tmp_path):
+    """No per-size variants (docs/theming_2026-09.md, P8): every layout of
+    every grid draws the same cached base, so a relayout adds nothing -- but
+    the grid's interim HALF, for a card too small for 128."""
     ws = _ws(tmp_path, sys_size=(1024, 600))
-    covered = next(it for it in ws.launcher.items
-                   if it.get("path") and
-                   moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE))
-    first = _cover_sync(ws, covered, 120, 90)
-    assert first is not None
-
-    for i in range(80):
-        _cover_sync(ws, covered, 120 + i, 90 + i)
-    assert len(ws.covers._cache) <= cover_cache._COVER_CACHE_MAX_ENTRIES
-    assert ws.covers._pixels <= cover_cache._COVER_CACHE_MAX_PIXELS
-    assert len(ws.covers._order) == len(ws.covers._cache)
+    covered, _bare = _covered_and_bare(ws)
+    first = _cover_sync(ws, covered)
+    for scale in (2, 1, 3, 1):              # each one a relayout of both grids
+        ws.look.set_font_scale(scale, persist=False)
+        ws._dirty = True
+        ws.frame(1 / 30)
+        assert _cover_sync(ws, covered) is first
+    divs = sorted(k[1] for k in ws.covers._cache if k[0] == covered["path"])
+    assert divs in ([1], [1, 2])
 
 
 def test_home_draw_includes_action_row_desktop(tmp_path):

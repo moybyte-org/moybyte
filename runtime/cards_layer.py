@@ -999,7 +999,7 @@ class CardsLayer:
             ws.editor_app.set_tab(tab)
             return
         if _modes.is_image(name):
-            # A cart's OWN image (`images/cover.moyimg`) is a picture, so it
+            # A cart's OWN image (`images/*.moyimg`, `cover.png`) is a picture, so it
             # takes the picture door -- the same `ws.open_image` the Files
             # router takes, opening it in Paint on this project's kind and
             # writing it back in place. A picture is never refused for its

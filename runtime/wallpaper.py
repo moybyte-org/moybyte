@@ -27,9 +27,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, _SilentAudio, _Blit, _err_text
 try:
-    from moy_image import cover_sig, load_wallpaper_preview, save_wallpaper_preview
+    from moy_image import text_sig, load_wallpaper_preview, save_wallpaper_preview
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_image import (cover_sig, load_wallpaper_preview,
+    from runtime.moy_image import (text_sig, load_wallpaper_preview,
                                    save_wallpaper_preview)
 
 
@@ -445,7 +445,7 @@ class Wallpaper:
             return False
 
     def _src_sig(self, cart):
-        """cover_sig of the cart's SOURCE -- the staleness stamp for computed
+        """text_sig of the cart's SOURCE -- the staleness stamp for computed
         previews. Rehydrates a slimmed cart (#66) just long enough to read it."""
         src = cart.get("src")
         if src is None:
@@ -456,7 +456,7 @@ class Wallpaper:
             finally:
                 if cart is not getattr(ws, "_fat_cart", None):
                     ws.carts.reslim(cart)
-        return cover_sig(src) if src else None
+        return text_sig(src) if src else None
 
     def _static_preview(self, w, h):
         """The COMPUTED (thumbnail-model) preview of the current wallpaper

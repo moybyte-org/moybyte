@@ -45,14 +45,15 @@ try:
                                 IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
                                 SCENE_EXT, _normalize_canvas, _canvas_str,
                                 _sibling_path, slug, ensure_dirs, _is_dir,
-                                _rmtree)
+                                _rmtree, COVER_FILE, COVER_MAX_BYTES)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
                                         IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
                                         TILE_FLAGS, SCENES_DIR, SCENE_EXT,
                                         _normalize_canvas, _canvas_str,
                                         _sibling_path, slug, ensure_dirs,
-                                        _is_dir, _rmtree)
+                                        _is_dir, _rmtree, COVER_FILE,
+                                        COVER_MAX_BYTES)
 
 
 # Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
@@ -114,12 +115,6 @@ def _normalize_input_kinds(value):
 
 
 ARTWORK_NAME = "artwork.moyimg"
-# Cartridge COVER ART (visual identity v1 Section 11.4): a cart folder may carry
-# images/cover.moyimg -- static authored cover art the Library shelf draws
-# full-bleed on the card. The deterministic fallback when absent is the cart's
-# sprite tile 0 / type glyph (the pre-cover look). tools/gen_covers.py captures a
-# gameplay frame for the seed games; Paint art or any moyimg works the same.
-COVER_IMAGE = "cover"
 DECK_NAME = "deck.json"
 
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
@@ -159,27 +154,69 @@ def flags_to_hex(flags):
 # under their pre-extraction names so every caller, test and `store.X` lookup is
 # unchanged. Same bare-or-package fallback as every shared module.
 try:
-    from moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg, moyimg_runs,
-                           decode_moyimg, cover_sig)
+    from moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg,
+                           decode_moyimg, text_sig)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                         _write_atomic, _read_recover, _read_bak, _forget_bak,
-                        set_publish_root)
+                        set_publish_root, _read_bytes, _write_bytes)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg,
-                                   moyimg_runs, decode_moyimg, cover_sig)
+                                   decode_moyimg, text_sig)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover, _read_bak,
-                                _forget_bak, set_publish_root)
+                                _forget_bak, set_publish_root, _read_bytes,
+                                _write_bytes)
 
 
 def load_image(path, name):
     """One paint-image blob (images/<name>.moyimg) for the cart at `path`, or
-    None. The Library shelf reads covers through this (COVER_IMAGE) so a
-    slimmed cart (#66 live-set diet) never needs rehydrating for its card."""
+    None."""
     try:
         return _read(path + "/" + IMAGES_DIR + "/" + name + IMAGE_EXT)
     except OSError:
         return None
+
+
+def load_cover(path):
+    """The cart at `path`'s cover.png bytes, or None -- no file, or one larger
+    than any cover can be (cover_png.MAX_BYTES). The shelf reads covers through
+    this, so a slimmed cart (#66 live-set diet) never rehydrates for its card.
+    The bytes are not checked here: cover_png decides what is a cover."""
+    try:
+        return _read_bytes(path + "/" + COVER_FILE, COVER_MAX_BYTES)
+    except OSError:
+        return None
+
+
+def save_cover(cart, data):
+    """Publish `data` as the cart's cover.png, whole (moy_fs._write_bytes)."""
+    _write_bytes(cart["path"] + "/" + COVER_FILE, data)
+
+
+def _cover_png():
+    # Imported where it is used: the headless Zero carries this store and no
+    # cover reader, and never asks for one.
+    try:
+        import cover_png
+    except ImportError:  # pragma: no cover - host fallback when not yet aliased
+        from runtime import cover_png
+    return cover_png
+
+
+def decode_cover(data):
+    """`(128, 128, indices)` for a cover.png's bytes -- each pixel the nearest
+    console-palette colour, exact for a cover written in that palette -- or
+    None when the bytes are no cover. What Paint opens a cart's cover as."""
+    cp = _cover_png()
+    pix = cp.decode(data, 1, cp.INDEX, cp.moy64())
+    return None if pix is None else (cp.SIDE, cp.SIDE, pix)
+
+
+def encode_cover(indices):
+    """128 x 128 console-palette indices -> the bytes of a cover.png: indexed,
+    the palette as its PLTE. What Paint saves a cart's cover as."""
+    cp = _cover_png()
+    return cp.encode_indexed(indices, cp.moy64())
 
 
 def load_images(path):
@@ -1595,16 +1632,16 @@ def _copy_cart_files(src, dst, main):
             kids = os.listdir(s)         # a subfolder (images/, scenes/, ...)
         except OSError:
             try:
-                _write(d, _read(s))      # a plain file
-            except (OSError, ValueError, UnicodeError) as exc:
+                _copy_bytes(s, d)        # a plain file -- cover.png is not text
+            except (OSError, ValueError) as exc:
                 if store_full(exc):
                     raise
             continue
         _mkdir(d)
         for kid in kids:
             try:
-                _write(d + "/" + kid, _read(s + "/" + kid))
-            except (OSError, ValueError, UnicodeError) as exc:
+                _copy_bytes(s + "/" + kid, d + "/" + kid)
+            except (OSError, ValueError) as exc:
                 if store_full(exc):
                     raise
 

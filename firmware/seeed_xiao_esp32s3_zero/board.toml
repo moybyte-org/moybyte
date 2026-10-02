@@ -155,6 +155,15 @@ path nothing on this board can call. This is the same decision `provision.sh`
 carried in a comment from 2026-08-25; it moves here because this file is now
 the declaration and a comment in a shell script is not."""
 
+[[modules.shared.lazy]]
+module = "cover_png"
+why = """
+`moy_carts.decode_cover()`/`encode_cover()` reach the cover reader through the
+same kind of ladder (`import cover_png` / `from runtime import cover_png`), and
+their only caller is Paint, opening and saving a cart's cover.png -- which this
+board does not freeze, having no console. The covers themselves are served as
+the files they are; the browser console decodes them."""
+
 # ---------------------------------------------------------------------------
 
 [modules.device]
@@ -369,6 +378,15 @@ The WebAssembly cart engine (the vendored WAMR runtime and the thread a module
 runs on). This board runs no cart in any language -- a cart paired with it runs
 in the browser, whose own engine executes a wasm cart -- so the runtime would
 be flash spent in both OTA slots for code nothing calls."""
+
+[[native.shared.deny]]
+module = "moy_png"
+why = """
+The cover reader (SPEC.md 3.6): a cart's cover.png decoded into a shelf's
+pixels. This board draws no shelf -- the browser console paired with it reads
+a cart's covers itself, with the reader its own build carries -- and it serves
+the files as they are, so a decoder here would be flash in both OTA slots for a
+picture nothing shows."""
 
 [[native.shared.deny]]
 module = "moy_serial"

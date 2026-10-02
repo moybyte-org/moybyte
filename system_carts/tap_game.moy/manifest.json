@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 7,
+  "version": 8,
   "title": "Tap Game",
   "type": "game",
   "runtime": "python",

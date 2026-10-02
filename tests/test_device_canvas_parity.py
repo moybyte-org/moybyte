@@ -2334,3 +2334,57 @@ def test_scroll_layer_buffer_is_off_gc_heap():
             sys.modules.pop("moy_alloc", None)
         else:
             sys.modules["moy_alloc"] = saved
+
+
+def test_blit565_places_direct_colour_on_every_lane():
+    """`DeviceCanvas.blit565` -- a cover's draw: words in the canvas's own byte
+    order, opaque, camera and clip honoured, `pal()` not -- at scale 1 (the
+    kernel's blit565), scaled inside the clip (blit565_scale) and scaled
+    across it (a widened row at a time). The picture is computed from the
+    rule, and the kernel, the transcription and the Python fallback must all
+    draw it."""
+    sw, sh = 5, 4
+    words = [((i * 2654435761) >> 7) & 0xFFFF for i in range(sw * sh)]
+    cases = (
+        # (x, y, scale, clip rect or None, camera)
+        (2, 3, 1, None, (0, 0)),
+        (-2, -1, 1, None, (0, 0)),
+        (10, 10, 2, None, (0, 0)),
+        (50, 40, 3, None, (0, 0)),
+        (8, 6, 2, (12, 9, 20, 11), (0, 0)),
+        (20, 10, 3, (0, 0, 30, 20), (4, -2)),
+    )
+    canvases = (("kernel", lambda: Canvas(W, H)),
+                ("transcription", lambda: _both(True)[2]),
+                ("fallback", lambda: _both(False)[2]))
+    for x, y, s, clip, cam in cases:
+        bx, by = x - cam[0], y - cam[1]
+        cx0, cy0, cx1, cy1 = 0, 0, W, H
+        if clip is not None:
+            cx0, cy0 = max(0, clip[0]), max(0, clip[1])
+            cx1, cy1 = min(W, clip[0] + clip[2]), min(H, clip[1] + clip[3])
+        bg = rgb565(palette.MOY64[3])
+        expect = []
+        for py in range(H):
+            for px in range(W):
+                inside = (cx0 <= px < cx1 and cy0 <= py < cy1
+                          and bx <= px < bx + sw * s and by <= py < by + sh * s)
+                expect.append(words[((py - by) // s) * sw + (px - bx) // s]
+                              if inside else bg)
+        for name, make in canvases:
+            c = make()
+            c.cls(3)
+            src = bytearray()
+            for w_ in words:
+                src += (bytes((w_ >> 8, w_ & 255)) if c.swapped565
+                        else bytes((w_ & 255, w_ >> 8)))
+            if clip is not None:
+                c.clip(*clip)
+            c.camera(*cam)
+            c.pal(3, 9)                    # direct colour has no index to remap
+            c.blit565(bytes(src), sw, sh, x, y, s)
+            c.pal()
+            c.camera()
+            c.clip()
+            got = (_host_rgb565(c) if name == "kernel" else _dev_rgb565(c))
+            assert got == expect, (name, x, y, s, clip, cam)

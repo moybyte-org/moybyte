@@ -157,6 +157,40 @@ def _remove(path):
         pass
 
 
+def _read_bytes(path, cap):
+    """A binary file's bytes, or None when it is larger than `cap` -- read a
+    piece at a time, so an oversized file never costs a buffer its own size.
+    OSError (no such file) goes on through."""
+    parts = []
+    n = 0
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(4096)
+            if not b:
+                break
+            n += len(b)
+            if n > cap:
+                return None
+            parts.append(b)
+    return b"".join(parts)
+
+
+def _write_bytes(path, data):
+    """Publish a BINARY file whole: written beside it as `<path>.tmp`, then
+    renamed over it, so a crash leaves the previous file or the new one --
+    never a torn one. The text machinery below (the stamp, the `.bak` redo
+    log) is for text; a binary file in this store is a picture, which a torn
+    write would only have made unreadable."""
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    try:
+        os.rename(tmp, path)
+    except OSError:                   # FAT: a rename does not replace
+        _remove(path)
+        os.rename(tmp, path)
+
+
 def _copy(src, dst):
     """Copy a file by read/write (no shutil on MicroPython). Overwrites the
     destination in place, so the previous good file is never deleted ahead of a

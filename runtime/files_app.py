@@ -291,9 +291,10 @@ class FilesAppLayer(ListShellApp):
         if cart is not None and fname == cart.get("main", "main.py"):
             return "code", cart
         if _modes.is_image(fname):
-            # A cart's own image (`images/cover.moyimg`) is a PICTURE like any
-            # other, so it takes the picture door -- Paint opens it on the
-            # project kind and writes it back into the cart's folder.
+            # A cart's own image (`images/*.moyimg`, its `cover.png`) is a
+            # PICTURE like any other, so it takes the picture door -- Paint
+            # opens it on the project kind and writes it back into the cart's
+            # folder.
             return "paint", name
         return _modes.mode_for(fname), name
 

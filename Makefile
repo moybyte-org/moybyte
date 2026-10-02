@@ -221,8 +221,10 @@ UNIX_MP_NATIVE := native
 # moy_web is here so the BAKED web console is exercised as code on a real
 # MicroPython -- its memoryview is handed straight at flash-mapped rodata and
 # must stay read-only, which is the kind of thing that otherwise fails first on
-# glass. Its blob table is generated (see the recipe below).
-UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web
+# glass. Its blob table is generated (see the recipe below). moy_png is the
+# cover reader, here so tests/test_cover_png.py holds the boards' C to the
+# host's Python reader and to moy-spec's vectors.
+UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 
 .PHONY: unix-micropython

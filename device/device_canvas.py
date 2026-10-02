@@ -224,6 +224,12 @@ try:
     PAL565_WIRE = PAL565
 except ImportError:
     PAL565_WIRE = PAL565_SW
+# The byte order of every word a canvas holds, for whoever produces 565 words to
+# hand it directly (`DeviceCanvas.blit565`): True where the panel takes them high
+# byte first -- the S3 boards, and the host and the browser, which keep that order
+# -- and False on the P4's DPI.
+WIRE_SWAPPED = PAL565_WIRE is PAL565_SW
+
 # Buffer form of PAL565_WIRE for the native blit_indices kernel (#63): the C reads the
 # palette via the BUFFER PROTOCOL (moy_gfx_buf_r), and a tuple has none ("object with
 # buffer protocol required"). An array("H") is a contiguous uint16 buffer AND still
@@ -558,6 +564,9 @@ class DeviceCanvas:
     this is what keeps complex carts off the slow per-pixel Python path. framebuf
     over the same buffer still serves text/lines/pixels and is the fallback on an
     image built without moy_gfx."""
+
+    # The order of the 565 words in this canvas's buffer (WIRE_SWAPPED above).
+    swapped565 = WIRE_SWAPPED
 
     # PARTIAL-repaint capability (the Library shelf's drag fast path, see
     # runtime/canvas.py): with the #40 ping-pong double buffer the back buffer
@@ -2619,6 +2628,74 @@ class DeviceCanvas:
                 self._pump()           # #66: feed the bounce flush between native ops
             return
         self._fb.text(_fb_text(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
+
+    def blit565(self, buf, w, h, x, y, scale=1):
+        """Place a w x h picture of RGB565 words -- already in this canvas's
+        byte order, `swapped565` -- at (x, y), `scale` (a whole number) times
+        its size. Opaque; camera and clip honoured; pal() does not apply,
+        because direct colour has no index to remap. A cart's cover is drawn
+        this way (runtime/cover_cache.py): the console's one picture whose
+        pixels are colours, not palette indices."""
+        self.flush_batch()
+        w = int(w)
+        h = int(h)
+        scale = int(scale)
+        if w <= 0 or h <= 0 or scale < 1:
+            return
+        x = int(x) - self._cam_x
+        y = int(y) - self._cam_y
+        cx0 = self._clip_x0
+        cy0 = self._clip_y0
+        cx1 = self._clip_x1
+        cy1 = self._clip_y1
+        g = self._gfx
+        if g is not None and scale == 1:
+            g.blit565(self._buf, self._stride, self._bh, x, y, buf, w, h, -1,
+                      cx0, cy0, cx1, cy1)
+            return
+        sw = w * scale
+        sh = h * scale
+        if (g is not None and x >= cx0 and y >= cy0 and x + sw <= cx1
+                and y + sh <= cy1):
+            g.blit565_scale(self._buf, self._stride, self._bh, x, y, buf, w, h,
+                            scale)
+            return
+        # Scaled and clipped (or no kernel): a source row at a time, widened
+        # into one scratch row and stamped `scale` times inside the clip.
+        x0 = max(x, cx0)
+        x1 = min(x + sw, cx1)
+        if x1 <= x0:
+            return
+        row = bytearray(2 * sw)
+        if g is not None:
+            mv = memoryview(buf)
+            for sy in range(h):
+                ty = y + sy * scale
+                if ty + scale <= cy0 or ty >= cy1:
+                    continue
+                g.blit565_scale(row, sw, 1, 0, 0, mv[2 * w * sy:2 * w * (sy + 1)],
+                                w, 1, scale)
+                for k in range(scale):
+                    g.blit565(self._buf, self._stride, self._bh, x, ty + k, row,
+                              sw, 1, -1, cx0, cy0, cx1, cy1)
+            return
+        d = self._buf
+        stride = self._stride
+        for sy in range(h):
+            src = 2 * w * sy
+            for sx in range(w):
+                a = buf[src + 2 * sx]
+                b = buf[src + 2 * sx + 1]
+                for k in range(scale):
+                    o = 2 * (sx * scale + k)
+                    row[o] = a
+                    row[o + 1] = b
+            for k in range(scale):
+                ty = y + sy * scale + k
+                if ty < cy0 or ty >= cy1:
+                    continue
+                o = 2 * (ty * stride + x0)
+                d[o:o + 2 * (x1 - x0)] = row[2 * (x0 - x):2 * (x1 - x)]
 
     def blit_indices(self, indices, iw, ih, x, y):
         # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index

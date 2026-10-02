@@ -68,6 +68,39 @@ MAKE_TILE_TYPE = "make"          # launcher slot 0: tap -> Editor project-picker
 NEW_TILE_TYPE = "new"            # picker slot 0: tap -> create a game + open the Editor
 PSEUDO_TILE_TYPES = (MAKE_TILE_TYPE, NEW_TILE_TYPE)
 
+# A cover's side (SPEC.md 3.6) and the two decodes of it a card draws:
+# CoverCache's BASE and HALF (cover_cache.py names them).
+_COVER_SIDE = 128
+_COVER_BASE = 1
+_COVER_HALF = 2
+
+
+def _cover_div(it, w, h):
+    """Which decode of the cart's cover a w x h art slot draws: the BASE when
+    the slot holds 128 at a whole-number scale; under that, the HALF -- the
+    grid's interim need -- unless the cart names its own icon (SPEC.md 3.4),
+    which its author drew for small sizes and the card draws instead. 0: no
+    cover in this slot at all."""
+    if w >= _COVER_SIDE and h >= _COVER_SIDE:
+        return _COVER_BASE
+    if it.get("icon") or w < _COVER_SIDE // 2 or h <= 0:
+        return 0
+    return _COVER_HALF
+
+
+def _draw_cover(cv, img, x, y, w, h):
+    """A decoded cover centred in the (x, y, w, h) slot: at the largest
+    whole-number scale it takes, or -- a HALF in a slot shorter than it --
+    centre-cropped top and bottom to the slot's height."""
+    s = min(w // img.w, h // img.h)
+    if s >= 1:
+        cv.blit565(img.pix, img.w, img.h, x + (w - img.w * s) // 2,
+                   y + (h - img.h * s) // 2, s)
+        return
+    top = (img.h - h) // 2
+    rows = memoryview(img.pix)[2 * img.w * top:2 * img.w * (top + h)]
+    cv.blit565(rows, img.w, h, x + (w - img.w) // 2, y, 1)
+
 
 def make_tile():
     return {"type": MAKE_TILE_TYPE, "title": "Make", "path": None}
@@ -139,8 +172,8 @@ class Launcher:
         self.icon_for = None          # optional kind -> 16x16 IconSheet Image (console
                                       # wires ws._bar_image) -- the shelf's pseudo cards
                                       # draw the real themeable pencil/plus icon big
-        self.cover_for = None         # optional (cart, w, h) -> full-bleed cover
-                                      # blittable (visual identity v1 Section 11.4)
+        self.cover_for = None         # optional (cart, div) -> the cart's decoded
+                                      # cover (CoverCache.cover_for, SPEC.md 3.6)
         self.favorite_for = None      # optional cart -> bool (console wires
                                       # ws.carts.is_favorite as a bound method,
                                       # #105): when set, the SELECTED card's corner star
@@ -522,10 +555,11 @@ class Launcher:
         self._draw_scroll_ui(cv)
 
     def cover_specs(self):
-        """Every (cart, w, h) cover this grid's NEXT full draw would request --
-        the unselected cover size for every cart card, plus the selected card's
-        (its PLAY/CHANGE row shrinks the crop). Mirrors _draw_cart_card's
-        geometry; the idle prefetch (CoverCache._prebuild_tick) walks it."""
+        """Every (cart, div) cover this grid's NEXT full draw would request --
+        each cart card's, at the size its slot takes (`_cover_div`), the
+        selected card's included (its PLAY/CHANGE row shrinks the slot).
+        Mirrors _draw_cart_card's geometry; the idle prefetch
+        (CoverCache._prebuild_tick) walks it."""
         lay = self.layout
         fs = lay.fs
         band_h = max(14 * fs, 20)
@@ -542,9 +576,9 @@ class Launcher:
             it = self.items[i]
             if it.get("type") in PSEUDO_TILE_TYPES or not it.get("path"):
                 continue
-            hh = ch - band_h - (btn if i == self.sel else 0)
-            if cw > 0 and hh > 0:
-                out.append((it, cw, hh))
+            div = _cover_div(it, cw, ch - band_h - (btn if i == self.sel else 0))
+            if div:
+                out.append((it, div))
         return out
 
     def _draw_cart_card(self, cv, it, rect, selected, sheet_for):
@@ -562,17 +596,20 @@ class Launcher:
         if ar is not None:
             btn_area = max(13 * fs, 22) + 2 * max(2 * fs, 3)
         cover_h = h - band_h - btn_area
-        # Cover: authored images/cover.moyimg art FULL-BLEED when the cart has
-        # one (Section 11.4), else the cart's own sprite scaled up on the dark
-        # field, else its type glyph in the type color (both the deterministic
-        # fallback). The field is the theme's `dim` tint: the one token that
-        # contrasts BOTH the home shelf's light surface and the picker's dark
-        # tool backdrop in every shipped theme.
-        cover = self.cover_for(it, w, cover_h) if self.cover_for is not None else None
+        # The art slot, on the theme's `dim` field: the one token that contrasts
+        # BOTH the home shelf's light surface and the picker's dark tool
+        # backdrop in every shipped theme. In it, the cart's cover (SPEC.md 3.6,
+        # Section 11.4) centred at the largest whole-number scale the slot
+        # takes; under 128 the cart's own icon when it names one, else the
+        # cover's half (`_cover_div`). Without a cover: the cart's own sprite
+        # scaled up, else its type glyph in the type color (both the
+        # deterministic pre-cover look).
+        cv.rect(x, y, w, cover_h, th.get("dim", NAMES["dark_blue"]))
+        div = _cover_div(it, w, cover_h) if self.cover_for is not None else 0
+        cover = self.cover_for(it, div) if div else None
         if cover is not None:
-            cv.spr(cover, x, y, 1)
+            _draw_cover(cv, cover, x, y, w, cover_h)
         else:
-            cv.rect(x, y, w, cover_h, th.get("dim", NAMES["dark_blue"]))
             img = sheet_for(it) if sheet_for is not None else None
             if img is not None:
                 sc = max(1, min((w - 6 * fs) // 16, (cover_h - 4 * fs) // 16))
@@ -845,10 +882,10 @@ def _drag_partial(layer, cv, dt, grid, kind, fill, strip, timed=False):
             if delta:                              # ...and where it came from
                 damage.append((old_stamp[0] - delta, old_stamp[1],
                                old_stamp[2], old_stamp[3]))
-        grid.draw_shift(cv, ws.covers.icon_sheet_for, delta, damage, fill)
+        grid.draw_shift(cv, ws.covers.sheet_icon, delta, damage, fill)
     else:
         fill(cv, (bx, by, bw, bh))
-        grid.draw(cv, ws.covers.icon_sheet_for)
+        grid.draw(cv, ws.covers.sheet_icon)
     # Re-pin the cover gen POST-draw: a cover landing during the card draw
     # is in these pixels, so the recorded key must carry the new gen.
     region.note_painted(ws._frames_drawn, (grid.sel, layer._statics, ws.covers.gen),
@@ -1082,7 +1119,7 @@ class LauncherHomeLayer:
         # the "LIBRARY" header and the footer cartridge count. The scrolling
         # card grid + its scroll arrows/bar draw inside it (Launcher._draw_shelf).
         self._draw_shelf_panel(cv)
-        ws.launcher.draw(cv, ws.covers.icon_sheet_for)
+        ws.launcher.draw(cv, ws.covers.sheet_icon)
         # #113: record this full paint in the shelf's blit ring (offset + the
         # state the pixels depend on + the cursor stamp about to land on top),
         # so an eligible drag frame can shift instead of repainting every card.
@@ -1499,7 +1536,7 @@ class EditorPickerLayer:
         self._dots(cv, (0, by, bx, bh), 0)
         self._dots(cv, (bx + bw, by, W - (bx + bw), bh), 0)
         self._dots(cv, (bx, by, bw, bh), self._dot_xoff())
-        ws.picker.draw(cv, ws.covers.icon_sheet_for)
+        ws.picker.draw(cv, ws.covers.sheet_icon)
         # #113: record this full paint in the blit ring + advance the streak.
         ws.picker._scroll_region().note_painted(
             ws._frames_drawn,

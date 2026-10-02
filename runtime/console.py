@@ -2401,9 +2401,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         """Open a PICTURE in Paint -- the ONE image door, taken by the Files
         router and by the Editor's ADVANCED files row alike (#108).
 
-        `cart` names a project whose OWN image this is (`images/cover.moyimg`):
-        Paint then reads and writes it on that project's kind, in place, so an
-        edited cover is the cover. Without one it is a gallery drawing. False
+        `cart` names a project whose OWN image this is (`images/<name>.moyimg`,
+        or its `cover.png`): Paint then reads and writes it on that project's
+        kind, in place, so an edited cover is the cover. Without one it is a gallery drawing. False
         when this build carries no Paint app, which each door reports on its
         own status line -- but a picture is never REFUSED for its shape: one
         Paint cannot edit opens read-only rather than not at all."""

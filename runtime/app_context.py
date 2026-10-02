@@ -471,6 +471,18 @@ class Files(_StoreRole):
         store = self._store()
         return store.decode_moyimg(blob) if (store is not None and blob) else None
 
+    # A cart's cover (SPEC.md 3.6) is the one picture that is not a moyimg:
+    # Paint opens it as 128 x 128 indices in the console palette and saves it
+    # back as an indexed cover.png.
+
+    def decode_cover(self, blob):
+        store = self._store()
+        return store.decode_cover(blob) if (store is not None and blob) else None
+
+    def encode_cover(self, indices):
+        store = self._store()
+        return store.encode_cover(indices) if store is not None else None
+
     def sig(self, blob):
         """The content signature a copy is stamped with, so a later edit can
         offer "your drawing changed -> UPDATE"."""

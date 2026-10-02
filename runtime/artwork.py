@@ -38,6 +38,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import ConfirmTap
 
+try:
+    from moy_store_base import COVER_FILE
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import COVER_FILE
+
+# A cart's cover is this square, always (SPEC.md 3.6).
+COVER_SIDE = 128
+
 # #186: the desktop backdrop's resampled indices. Off-heap for the same reason
 # its RGB565 bake is (device_canvas._paint_bake_buf) -- a screenful of indices
 # is 153,600 bytes on the Guition's 480x320 desk, and that board's largest
@@ -1056,11 +1064,19 @@ class ArtworkService:
     # -- the open document (a named files item) -------------------------------
     #
     # The doc pointer is a `(kind, name)` PAIR, because a picture is not only a
-    # drawing: a cart's own `images/cover.moyimg` opens here too (#108), on the
-    # project kind (`moy_carts.PROJECT_KIND`), and is written back to the cart's
-    # folder rather than into the gallery. `drawings` is the default and the
-    # only kind the auto-naming, trash and copy-on-use verbs know -- a project
-    # image was NAMED by the format, so there is nothing to auto-name.
+    # drawing: a cart's own images (`images/<name>.moyimg`, #108) and its cover
+    # (`cover.png`, SPEC.md 3.6) open here too, on the project kind
+    # (`moy_carts.PROJECT_KIND`), and are written back to the cart's folder
+    # rather than into the gallery. `drawings` is the default and the only kind
+    # the auto-naming, trash and copy-on-use verbs know -- a project image was
+    # NAMED by the format, so there is nothing to auto-name.
+    #
+    # THE COVER is a 128 x 128 canvas in the console palette, saved as an
+    # indexed cover.png. A cover in direct colour opens with each pixel mapped
+    # to its nearest palette colour, and is rewritten only once the kid draws
+    # on it -- opening and leaving writes nothing. A cover.png outside the
+    # profile (or one that does not decode) opens as a BLANK 128 x 128 cover,
+    # editable, that replaces the bad file the first time it is saved.
 
     DRAWINGS = "drawings"
 
@@ -1081,6 +1097,10 @@ class ArtworkService:
 
     def why_read_only(self):
         return self._why
+
+    def _cover_doc(self):
+        """True while the open picture is a cart's cover.png."""
+        return self.doc_kind() != self.DRAWINGS and self.doc_name() == COVER_FILE
 
     def _open_drawing(self):
         """The open picture's name IF it is a gallery drawing, else None. The
@@ -1145,6 +1165,13 @@ class ArtworkService:
         name, blob = got
         if name is not None:
             self._set_doc_name(name, kind)
+        if self._cover_doc():
+            self._cached = files.decode_cover(blob)
+            if self._cached is None:
+                self._cached = (COVER_SIDE, COVER_SIDE,
+                                bytes((PaintDocument.PAPER,))
+                                * (COVER_SIDE * COVER_SIDE))
+            return self._cached
         self._cached = files.decode_image(blob)
         if self._cached is None:
             if blob:
@@ -1175,7 +1202,13 @@ class ArtworkService:
             return False
         files = self._files
         kind = self.doc_kind()
-        blob = files.encode_image(w, h, indices)
+        if self._cover_doc():
+            if w != COVER_SIDE or h != COVER_SIDE:
+                self.last_error = "BAD SIZE"
+                return False
+            blob = files.encode_cover(indices)
+        else:
+            blob = files.encode_image(w, h, indices)
         name = self.doc_name()
 
         def _write(f):
