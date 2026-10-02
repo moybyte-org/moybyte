@@ -54,6 +54,16 @@ CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288
 # once the desktop is up, which is what makes a healthy boot mean "healthy".
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
+# --- ESP-Hosted SDIO clock: 20 MHz, not the 40 the component defaults to ---
+# At 40 MHz this board's SDIO link to its C6 fails reads under a sustained
+# download (`H_SDIO_DRV: sdio_read_task: Failed to read data`, CRC errors
+# 0x109, dropped packets) and stays wedged until a reset: Get Carts' 1.9 MB
+# release asset failed every time, from a fresh boot too (2026-10-02, #124).
+# The Waveshare -- the same C6, the same pins, 40 MHz -- holds the same
+# download, so this is this board's wiring, not the protocol. The host drives
+# the SDIO clock and the slave follows it, so it is set here and nowhere else.
+CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=20000
+
 # --- WiFi: the S3 boards' set, spelled in THIS board's knob namespace -------
 # The two S3 boards took Espressif's "Iperf rank" set on 2026-08-21 (0890249)
 # and this board was recorded there as untouched BY CONSTRUCTION: its WiFi is

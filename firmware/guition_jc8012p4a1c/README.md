@@ -269,14 +269,16 @@ for the C6/audio pins, which agree with the BSP.
   PPA live, settings window, picker, a Python cart and a Lua cart run and
   exit, idle blank + wake, PERF lines, 0 underruns after the tour).
 - **WiFi/BLE against Guition's factory C6 slave**: BLE comes up (the keyboard
-  scanner runs from the first frame), but ESP-Hosted 2.12.12's
+  scanner runs from the first frame), and ESP-Hosted 2.12.12's
   `Req_FeatureControl` RPC times out TWICE at boot (`rpc_core: Timeout waiting
-  for Resp for [0x183]`, 5s each) before the WLAN service gives up — the
-  factory slave (`JC-C6-slave_v2.3.2.bin`) predates that RPC. The console
-  degrades exactly as designed (no WiFi row lit, `wifi=[False, None, None]`),
-  and the fix is the same as the ESP-NOW one: flash the Waveshare's
-  `c6_slave/` image (hosted 2.12.12 + the shim) to this C6. Until then a boot
-  costs those 10s.
+  for Resp for [0x183]`, 5s each) — the factory slave
+  (`JC-C6-slave_v2.3.2.bin`) predates that RPC, so a boot costs those 10s.
+  WiFi itself works: the radio is a lease (`.claude/rules/boards.md`), and
+  when a holder brings it up it joins a saved network and downloads. A
+  sustained download needs ESP-Hosted's SDIO clock at 20 MHz on this board;
+  `boards/MOYBYTE_GUITION_P4/sdkconfig.board` says why. Flashing the
+  Waveshare's `c6_slave/` image (hosted 2.12.12 + the shim) to this C6 would
+  answer the RPC and bring ESP-NOW.
 
 ## Open items (what a human with a finger and a desk decides)
 
@@ -287,8 +289,8 @@ for the C6/audio pins, which agree with the BSP.
    the same chip and the same SDIO; flashing it here is Phase D of
    `docs/history/espnow_p4_2026-08.md` on this board, and the publisher does
    not stage a `c6` block in this board's manifest yet.
-4. WiFi against the factory slave — two 5s RPC timeouts per boot and no WLAN
-   (the section above); the shimmed slave image is the fix for 3 and 4 at once.
+4. The factory slave's two 5s RPC timeouts per boot (the section above); the
+   shimmed slave image is the fix for 3 and 4 at once.
 5. BLE keyboard (unverified: nothing paired), audio (#82, same codec as the
    Waveshare), the TF slot (LDO4, a future removable-cart workflow),
    backlight PWM (one line in `guition_p4_display.py` when wanted).
