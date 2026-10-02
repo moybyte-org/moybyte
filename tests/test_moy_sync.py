@@ -969,3 +969,35 @@ def test_an_unchanged_cover_ships_nothing(tmp_path):
     _bump_mtime(p)
     w.sweep()
     assert [o["p"] for o in _drain(w)] == ["hop.moy/cover.png"]
+
+
+def test_a_file_the_wire_cannot_carry_is_read_once_not_every_sweep(tmp_path):
+    """A compiled cart's main.wasm, its data, a WAD: binary files that never
+    cross. The sweep reads one when it first sees it or it moves, and passes
+    it by stat otherwise -- a browser sweeping a store that holds Doom's 4 MB
+    WAD read the WAD whole every second, and the cart drew a frame a second.
+    It never becomes an op: not when it lands, not when it changes, not when
+    it goes."""
+    root = _store(tmp_path)
+    wad = root / "hop.moy" / "game.wad"
+    wad.write_bytes(bytes(range(256)) * 64)
+    reads = []
+
+    def read(path):
+        reads.append(path.rsplit("/", 1)[1])
+        return moy_sync._read_payload(path)
+    w = StoreWatcher(str(root), read=read)
+    assert reads.count("game.wad") == 1
+    for _ in range(3):
+        w.sweep()
+    assert reads.count("game.wad") == 1, reads
+    assert w.take() is None
+    wad.write_bytes(bytes(range(256)) * 65)
+    _bump_mtime(wad)
+    w.sweep()
+    w.sweep()
+    assert reads.count("game.wad") == 2, reads         # the move, once
+    assert w.take() is None
+    wad.unlink()
+    w.sweep()
+    assert w.take() is None, "a file that never crossed was deleted over the wire"

@@ -975,6 +975,13 @@ class StoreWatcher:
     unchanged on a second-granularity VFS. The crc also keeps a byte-identical
     rewrite (the reload path re-writing every pulled file) from re-shipping
     the whole store.
+
+    A file the wire cannot carry (a binary one other than a cover: a compiled
+    cart's main.wasm, a data file, a WAD) is in the snapshot too, its crc None,
+    so the stat walk passes it like any unchanged file: read once, it is not
+    read again until it moves, and it never becomes an op, written or deleted.
+    Left out, it was read whole on EVERY sweep, which is seconds of a frame
+    per sweep for a cart that carries megabytes.
     """
 
     def __init__(self, root, listdir=None, isdir=None, read=None,
@@ -1008,9 +1015,12 @@ class StoreWatcher:
         self._partial = None
         self._hot = ()
         for rel, size, mtime in self._walk():
-            text = self._read(self.root + "/" + rel)
-            if text is not None:
-                self._snap[rel] = (size, mtime, _crc(text))
+            self._snap[rel] = (size, mtime, self._crc_of(rel))
+
+    def _crc_of(self, rel):
+        """The crc of `rel`'s payload, or None for one the wire cannot carry."""
+        text = self._read(self.root + "/" + rel)
+        return None if text is None else _crc(text)
 
     def adopt(self, unit):
         """Take the cart folder `unit` AS IS, with nothing pending for it: its
@@ -1028,9 +1038,7 @@ class StoreWatcher:
             if rel.startswith(prefix):
                 del self._snap[rel]
         for rel, size, mtime in self._walk_dir(self.root + "/" + unit, unit, 0):
-            text = self._read(self.root + "/" + rel)
-            if text is not None:
-                self._snap[rel] = (size, mtime, _crc(text))
+            self._snap[rel] = (size, mtime, self._crc_of(rel))
 
     # -- change detection ----------------------------------------------------
 
@@ -1051,10 +1059,10 @@ class StoreWatcher:
             if old is not None and old[0] == size and old[1] == mtime \
                     and rel not in self._hot:
                 continue                      # the fast path: nothing moved
-            text = self._read(self.root + "/" + rel)
-            if text is None:
-                continue                      # unreadable, or binary: not synced
-            c = _crc(text)
+            c = self._crc_of(rel)
+            if c is None:                     # unreadable, or binary: not synced
+                self._snap[rel] = (size, mtime, None)
+                continue
             if old is not None and old[2] == c:
                 self._snap[rel] = (size, mtime, c)
                 continue                      # touched, not changed
@@ -1063,8 +1071,10 @@ class StoreWatcher:
         for rel in list(self._snap):
             if rel in seen:
                 continue
-            del self._snap[rel]
+            gone = self._snap.pop(rel)
             self._pending.pop(rel, None)
+            if gone[2] is None:
+                continue                      # never crossed: nothing to delete
             unit = self._unit(rel)
             if unit is not None and unit not in units:
                 if unit not in self._pending_dc:
@@ -1072,9 +1082,10 @@ class StoreWatcher:
             else:
                 self._pending[rel] = "d"
         # Files written in the newest observed second get re-read next sweep:
-        # a second write inside that same second is invisible to stat.
+        # a second write inside that same second is invisible to stat. Not a
+        # file the wire cannot carry: there is nothing such a write could ship.
         self._hot = tuple(rel for rel, v in self._snap.items()
-                          if v[1] >= maxm - 1)
+                          if v[1] >= maxm - 1 and v[2] is not None)
         return bool(self._pending or self._pending_dc or self._partial)
 
     def _unit(self, rel):
