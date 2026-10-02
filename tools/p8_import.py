@@ -24,13 +24,19 @@ the sheet is a near-verbatim nibble copy; only padding to the sheet grid differs
                               unmodelled.
   music_start_map(...)        pattern index -> track index, for the `music(n)`
                               remap the port shim needs.
-  _title_from(...)            a display title from `__label__`, else the filename.
+  label_cover(...)            __label__ -> cover.png (SPEC.md 3.6): 128x128,
+                              indexed in PICO-8's 32 colours, or None for a
+                              cart with no label. A `.p8.png`'s label is read
+                              from the cartridge picture (read_p8).
+  _title_from(...)            a display title from the code's header comment,
+                              else the filename.
 
 NOT handled here: `__map__` (p8_lua_port writes `map.moymap`) and `__gff__`
 (per-sprite flag bits -- moy core has no sprite-flag model).
 """
 
 import os
+import struct
 
 
 
@@ -513,6 +519,144 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
 
 
 # --------------------------------------------------------------------------
+# __label__  ->  cover.png   (SPEC.md 3.6)
+# --------------------------------------------------------------------------
+# A PICO-8 label is 128x128 -- a cover's size exactly, so it maps 1:1. In a
+# .p8 it is `__label__`: 128 lines of 128 characters, 0-9 and a-f for the base
+# sixteen, g-v for the secret sixteen (PICO-8's 128-143). In a .p8.png it is
+# the picture itself: the 160x205 cartridge draws the label at (16, 24), in a
+# one-pixel near-black frame inside the grey template -- checked against every
+# cart of the conformance corpus and Celeste Classic's 15133.p8.png, and pinned
+# by libmoy/test/p8_label_check.py. The cartridge's steganography owns each
+# channel's low two bits, so a label pixel is matched on the high six, and to
+# the nearest colour when it is none of them: a cart saved before PICO-8
+# changed its green from #00E756 carries the old one.
+
+LABEL_X = 16
+LABEL_Y = 24
+LABEL_SIZE = 128
+LABEL_DIGITS = "0123456789abcdefghijklmnopqrstuv"
+
+# PICO-8's sixteen (SPEC.md 2's 0-15, byte for byte), then its secret sixteen.
+P8_COLOURS = (
+    "000000 1D2B53 7E2553 008751 AB5236 5F574F C2C3C7 FFF1E8 "
+    "FF004D FFA300 FFEC27 00E436 29ADFF 83769C FF77A8 FFCCAA "
+    "291814 111D35 422136 125359 742F29 49333B A28879 F3EF7D "
+    "BE1250 FF6C24 A8E72E 00B543 065AB5 754665 FF6E59 FF9D81").split()
+
+
+def _rgb(hexes):
+    return [(int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)) for c in hexes]
+
+
+def _p8png_label(w, px):
+    """The label region of a cartridge picture (RGBA rows, `w` wide) as
+    `__label__` lines."""
+    pal = _rgb(P8_COLOURS)
+    exact = {}
+    for i in range(len(pal)):
+        r, g, b = pal[i]
+        exact[(r & 0xFC, g & 0xFC, b & 0xFC)] = i
+    lines = []
+    for y in range(LABEL_Y, LABEL_Y + LABEL_SIZE):
+        row = []
+        for x in range(LABEL_X, LABEL_X + LABEL_SIZE):
+            o = (y * w + x) * 4
+            r, g, b = px[o], px[o + 1], px[o + 2]
+            i = exact.get((r & 0xFC, g & 0xFC, b & 0xFC))
+            if i is None:
+                best = None
+                for j in range(len(pal)):
+                    pr, pg, pb = pal[j]
+                    d = (pr - r) * (pr - r) + (pg - g) * (pg - g) + (pb - b) * (pb - b)
+                    if best is None or d < best:
+                        best, i = d, j
+            row.append(LABEL_DIGITS[i])
+        lines.append("".join(row))
+    return lines
+
+
+def _crc32(data):
+    for name in ("zlib", "binascii"):
+        try:
+            return __import__(name).crc32(data) & 0xFFFFFFFF
+        except (ImportError, AttributeError):
+            pass
+    return _crc32_by_hand(data)
+
+
+def _crc32_by_hand(data):
+    crc = 0xFFFFFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ (0xEDB88320 if crc & 1 else 0)
+    return crc ^ 0xFFFFFFFF
+
+
+def _zlib_stream(raw):
+    """`raw` as a zlib stream: compressed where this Python can, else in
+    stored blocks, which every inflater reads and which keep a label cover
+    far inside SPEC.md 3.6's size limit."""
+    try:
+        import zlib
+        return zlib.compress(raw, 9)
+    except (ImportError, AttributeError):
+        return _zlib_stored(raw)
+
+
+def _zlib_stored(raw):
+    out = bytearray(b"\x78\x01")
+    for at in range(0, len(raw), 65535):
+        block = raw[at:at + 65535]
+        out.append(1 if at + 65535 >= len(raw) else 0)
+        out.extend(struct.pack("<HH", len(block), len(block) ^ 0xFFFF))
+        out.extend(block)
+    a, b = 1, 0
+    for byte in raw:
+        a = (a + byte) % 65521
+        b = (b + a) % 65521
+    out.extend(struct.pack(">I", (b << 16) | a))
+    return bytes(out)
+
+
+def _png_chunk(tag, body):
+    return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", _crc32(tag + body))
+
+
+def label_cover(label_lines):
+    """`__label__` lines -> cover.png's bytes, or None when the cart has no
+    label or an all-black one. Indexed, its PLTE PICO-8's 32 colours in the
+    label's own numbering, every row unfiltered."""
+    rows = [str(line).strip().lower() for line in label_lines[:LABEL_SIZE]]
+    raw = bytearray()
+    lit = False
+    for y in range(LABEL_SIZE):
+        line = rows[y] if y < len(rows) else ""
+        raw.append(0)
+        for x in range(LABEL_SIZE):
+            v = LABEL_DIGITS.find(line[x]) if x < len(line) else 0
+            if v < 0:
+                v = 0
+            if v:
+                lit = True
+            raw.append(v)
+    if not lit:
+        return None
+    plte = bytearray()
+    for r, g, b in _rgb(P8_COLOURS):
+        plte.append(r)
+        plte.append(g)
+        plte.append(b)
+    return (b"\x89PNG\r\n\x1a\n"
+            + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", LABEL_SIZE, LABEL_SIZE, 8, 3,
+                                              0, 0, 0))
+            + _png_chunk(b"PLTE", bytes(plte))
+            + _png_chunk(b"IDAT", _zlib_stream(bytes(raw)))
+            + _png_chunk(b"IEND", b""))
+
+
+# --------------------------------------------------------------------------
 # .p8.png -> sections   (the BBS cart format: one ROM byte per pixel, hidden in
 # the 2 low bits of each A,R,G,B channel; 160x205 = 0x8000 ROM + trailer)
 # --------------------------------------------------------------------------
@@ -718,6 +862,10 @@ def _png_scanlines(data):
 
 def _p8png_rom(data):
     w, h, px = _png_scanlines(data)
+    return _rom_of(w, h, px)
+
+
+def _rom_of(w, h, px):
     rom = bytearray(w * h)
     for i in range(w * h):
         r, g, b, a = px[i * 4:i * 4 + 4]
@@ -822,7 +970,11 @@ def read_p8(path):
     with open(path, "rb") as f:
         blob = f.read()
     if blob[:8] == b"\x89PNG\r\n\x1a\n":
-        return _p8png_sections(_p8png_rom(blob))
+        w, h, px = _png_scanlines(blob)
+        sections = _p8png_sections(_rom_of(w, h, px))
+        if w >= LABEL_X + LABEL_SIZE and h >= LABEL_Y + LABEL_SIZE:
+            sections["label"] = _p8png_label(w, px)
+        return sections
     try:
         text = blob.decode("utf-8")       # a .p8 PICO-8 wrote is valid UTF-8
     except UnicodeError:
