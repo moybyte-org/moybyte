@@ -2230,10 +2230,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
     # -- the app bar contract: a HOST GUARANTEE, not a per-app ritual ---------
     #
     # On the fullscreen tiers a registered app shows the minimal exitable bar
-    # (title + status + the context-X, spec shell_ux_v1.md Section 9). Every app
-    # used to hand-write BOTH halves -- `_draw_status_strip("tool")` last in its
-    # draw() and `handle_bar_tap("tool", ...)` first in its handle_pointer() --
-    # and an app that forgot either became UNEXITABLE, silently, on device only.
+    # (title + status + the context-X, spec shell_ux_v1.md Section 9), the "app"
+    # strip: the "tool" strip's drawing, on the SYSTEM canvas the app draws on
+    # (bar_layer._zone_is_game). An app that drew or routed its own bar and
+    # forgot either half became UNEXITABLE, silently, on device only.
     # The router already knows it is drawing a registered app, so it owns the
     # contract: frame()'s draw walk paints the strip AFTER the app's draw()
     # (chrome over content) and handle_pointer's walk routes the band BEFORE the
@@ -2243,11 +2243,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
     # and routes no bar tap must still show the strip's pixels and still exit on
     # its context-X, and so must all seven shipped apps, parametrized.
     #
-    # SCOPE, deliberately narrow: this owns the "tool" strip for REGISTERED APPS
+    # SCOPE, deliberately narrow: this owns the "app" strip for REGISTERED APPS
     # ONLY. The other strip kinds -- "menu" (the Editor surfaces), "settings",
-    # "home"/"picker" (launcher_layer), "desk" (wm_windowed) and "desktop" (the
-    # running cart's crash chrome / a running TOOL CART's bar, _draw_tool_bar
-    # above) -- stay with their surfaces. Collapsing the kinds would pick one and
+    # "home"/"picker" (launcher_layer), "desk" (wm_windowed), "tool" (a running
+    # TOOL CART's bar, _draw_tool_bar above) and "desktop" (the running cart's
+    # crash chrome) -- stay with their surfaces. Collapsing the kinds would pick one and
     # silently break the context-X on the rest.
     def _app_bar_route(self, app, px, py):
         """Route a click at (px, py) against registered `app`'s bar band.
@@ -2259,7 +2259,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         lay = getattr(app, "layout", None)
         band = getattr(lay, "bar_h", None)
         if band is None:                    # an app with no layout of its own
-            band = self.bar_layer._bar_h("tool")
+            band = self.bar_layer._bar_h("app")
         if py >= band:
             return None
         # The context-X in that band is an EXIT path, so hard-commit first: an
@@ -2268,7 +2268,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         commit = getattr(app, "commit", None)
         if commit is not None:
             commit()
-        return bool(self.bar_layer.handle_bar_tap("tool", px, py))
+        return bool(self.bar_layer.handle_bar_tap("app", px, py))
 
     def open(self):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
@@ -3920,7 +3920,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # comp has no fold (host/P4/web).
         _fold_live = False
         # THE APP BAR CONTRACT, draw half (docs/app_api_v1.md): a REGISTERED
-        # system app gets the minimal exitable "tool" strip drawn over its
+        # system app gets the minimal exitable "app" strip drawn over its
         # content by the router -- the app draws no bar of its own. Resolved
         # ONCE per frame (the walk cannot change either term): `_apps_by_id`
         # while the fullscreen chrome rules apply, None in the windowed desk
@@ -3964,7 +3964,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
                 _lb_done = True
             layer.draw(dt)
             if _appbar is not None and layer.id in _appbar:
-                self.bar_layer._draw_status_strip("tool")   # host guarantee
+                self.bar_layer._draw_status_strip("app")    # host guarantee
             _prev_domain = layer.domain
         if _game_open:                              # game was the TOP layer
             _view()

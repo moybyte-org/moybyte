@@ -239,10 +239,22 @@ class BarLayer:
         canvas, so its exitable strip has to be the responsive geometry too --
         the fixed cluster would leave the context-X stranded 700px left of the
         right edge on the P4. `app_full_canvas` is False for every game, every
-        fixed app cart and every shipped system app, so nothing else moves."""
-        return where == "tool" and not getattr(self.ws, "app_full_canvas", False)
+        fixed app cart and every shipped system app, so nothing else moves.
+
+        "app" is a REGISTERED system app's strip (console.py's host guarantee):
+        the app draws on the SYSTEM canvas, so its strip does too, and takes
+        the fixed cluster only where that canvas IS the 320x240 game canvas.
+        Drawn on the game canvas instead, a board with a separate system
+        canvas (the Guition S3's 480x320) showed the app's bar band empty and
+        had no context-X under the finger."""
+        ws = self.ws
+        if where == "app":
+            return ws.sys_canvas is ws.canvas
+        return where == "tool" and not getattr(ws, "app_full_canvas", False)
 
     def _bar_canvas(self, where):
+        if where == "app":
+            return self.ws.sys_canvas
         if where == "desktop" or self._zone_is_game(where):
             return self.ws.canvas
         return self.ws.sys_canvas
@@ -275,7 +287,7 @@ class BarLayer:
         WM's title strip carries min/max/close instead. Always False on the
         fullscreen-stack tiers (ws.windowed_chrome stays False there)."""
         return getattr(self.ws, "windowed_chrome", False) and where not in (
-            "home", "desk", "desktop", "tool")
+            "home", "desk", "desktop", "tool", "app")
 
     # -- draw + cache (the #43 strip, generalized to every `where`) -----------
 
@@ -430,7 +442,7 @@ class BarLayer:
             ws._icon(ws._wifi_icon_kind(), _BAR_WIFI[0], _BAR_WIFI[1], cv)
             ws._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
             return
-        if where == "tool":
+        if where in ("tool", "app"):
             # Part 4: the minimal TOOL bar. A tool/app runs WITH a bar so it's EXITABLE
             # (games stay fullscreen-bar-hidden). It draws on the fixed 320x240 GAME canvas
             # like the running cart. RIGHT zone = the OS status cluster + the context-X (the
@@ -614,7 +626,7 @@ class BarLayer:
         # tool, but the Editor tab if a tool is ever PLAYed from the editor); every other
         # taskbar app (Editor/Settings) uses the screen-string exit.
         if where not in ("home", "desk") and _in(px, py, x_hit):
-            if where == "tool":
+            if where in ("tool", "app"):
                 ws._exit_to_caller()
             else:
                 ws.exit()
