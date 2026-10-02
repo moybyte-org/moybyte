@@ -285,6 +285,48 @@ def test_every_failure_leaves_the_shelf_as_it_was(tmp_path, name, fault, text):
     _untouched(root, "jet.moy")
 
 
+@pytest.mark.parametrize("archive", ["ram", "store"])
+def test_an_external_file_installs_from_ram_or_from_a_file(tmp_path, archive):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    wad = os.urandom(90000)
+    repo.add("dm", external=[("game.wad", wad, "pkg/game.wad")])
+    cart = _cart(repo, "dm")
+    p = ci.plan(cart, "esp32s3", 2)
+    depth = [0, 0]
+
+    def session(fn):
+        depth[0] += 1
+        depth[1] = max(depth[1], depth[0])
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+    job = ci.Install(cart, p, MemNet(repo.routes()), root, session, ["game.wad"],
+                     step_ms=5, archive=archive)
+    while job.step():
+        pass
+    assert job.error is None, job.detail
+    assert (Path(job.path) / "game.wad").read_bytes() == wad
+    assert depth[1] == 1, "a store session was opened inside another"
+    assert os.listdir(Path(root).parent / ci.STAGE_DIR) == []
+
+
+@pytest.mark.parametrize("archive", ["ram", "store"])
+def test_a_bad_member_leaves_no_archive_behind(tmp_path, archive):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("dm", external=[("game.wad", os.urandom(30000), "pkg/game.wad")])
+    cart = _cart(repo, "dm")
+    cart["external"][0]["sha256"] = "2" * 64
+    job = ci.Install(cart, ci.plan(cart, "esp32s3", 2), MemNet(repo.routes()), root,
+                     _session, ["game.wad"], archive=archive)
+    while job.step():
+        pass
+    assert job.error == ci.MISMATCH
+    _untouched(root, "dm.moy")
+
+
 def test_a_dropped_connection_stops_cleanly(tmp_path):
     root = _store(tmp_path)
     repo = Repo(BASE)
@@ -480,6 +522,7 @@ def test_a_crash_at_any_point_of_the_swap_is_put_right(tmp_path, left):
         (stage / "jet.moy" / "half").write_text("x")
     if left == "gone":                        # a removal that crashed mid-delete
         (stage / "other.moy.gone").mkdir()
+        (stage / "jet.moy.archive").write_bytes(b"half an archive")
     assert ci.recover(root) >= 1
     assert (target / "pmem.json").read_text() == "saves"
     assert os.listdir(stage) == []
@@ -833,6 +876,83 @@ def test_remove_needs_two_taps(tmp_path):
     assert not any(str(c.get("path", "")).endswith("/jet.moy") for c in ws.carts.all)
 
 
+def test_a_cart_too_big_to_run_is_refused_before_its_download(tmp_path):
+    """The Player's own check -- the engine's footprint for the index's
+    `memory` and this console's module, against what the engine reports free
+    -- asked on the CART screen, so a console never downloads a cart it would
+    refuse to load. On the host the limit is wasm_host.MEMORY_LIMIT."""
+    from runtime import wasm_host
+    gpl, mit, net = _shelves(tmp_path)
+    big = wasm_host.MEMORY_LIMIT // 65536 + 1
+    mit.add("huge", name="Huge Game")
+    mit.carts[-1]["memory"] = big
+    mit.files["index.json"] = mit.index()
+    net.routes.update(mit.routes())
+    ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
+    if "wasm" not in ws.runtimes:
+        pytest.skip("no host wasm runtime")
+    _open(ws, app)
+    row = next(r for r in app.rows if r["cart"]["id"] == "huge")
+    assert row["fit"] and row["fit"].startswith("Huge Game needs")
+    small = next(r for r in app.rows if r["cart"]["id"] == "jet")
+    assert small["fit"] is None
+    app._tap_row(app.rows.index(row))
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert app.blocker(app.cur) == row["fit"]
+    assert ("btn", "GET") not in [(v, a) for _r, v, a in app.hits._items]
+    app.handle_input(_In("a"))
+    assert app.phase == "cart" and app.job is None
+    assert not [u for u in net.opened if u.endswith(".zip")]
+
+
+def test_doom_is_refused_where_the_engine_has_too_little_free(tmp_path):
+    """Doom from the live index against a console reporting the S3s' 3 MB
+    cart-runtime reserve free, by the engine's own AOT arithmetic: refused
+    with the notice the Player gives, before anything is fetched."""
+    from runtime import wasm_binding
+    if not wasm_binding.HostWasmRun.available():
+        pytest.skip("no host wasm binding")
+
+    class S3Engine:
+        def footprint_of(self, pages, module_len, interp):
+            of = wasm_binding.interp_footprint if interp else wasm_binding.footprint
+            return of(int(pages) * 65536, int(module_len))
+
+        def memory(self):
+            return 3 * 1048576, 3 * 1048576
+    net = MemNet({GPL_URL: snapshot("gpl-index.json")})
+    ws, app = _app_ws(tmp_path, net, [GPL_URL])
+    ws.runtimes["wasm"] = S3Engine()
+    app._inst.chip = lambda: ("esp32s3", "2")
+    _open(ws, app)
+    doom = app.rows[0]
+    assert doom["cart"]["id"] == "doom" and doom["plan"]["module"] == "main.esp32s3.f2.aot"
+    assert doom["fit"] and "Doom needs" in doom["fit"] and "MB" in doom["fit"]
+    assert net.opened == [GPL_URL]
+
+
+def test_the_archive_goes_to_a_file_where_memory_is_short(tmp_path):
+    gpl, mit, net = _shelves(tmp_path)
+    ws, app = _app_ws(tmp_path, net, [gpl.url("index.json")])
+    _open(ws, app)
+    app._inst.memory = lambda: (65536, 65536)
+    app._tap_row(0)
+    ws.frame(1 / 30)
+    app._press("GET")
+    _frames(ws, app)
+    app._press("I AGREE")
+    ws._dirty = True
+    ws.frame(1 / 30)
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert app.job is not None and app.job.archive == "store"
+    _frames(ws, app)
+    assert app.phase == "done", app.why
+    assert (tmp_path / "carts" / "dm.moy" / "game.wad").exists()
+    assert os.listdir(tmp_path / ci.STAGE_DIR) == []
+
+
 def test_buttons_walk_the_screens_without_a_finger(tmp_path):
     gpl, mit, net = _shelves(tmp_path)
     ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
@@ -929,7 +1049,7 @@ root = %(root)r
 for c in carts:
     p = ci.plan(c, "esp32p4", "2")
     job = ci.Install(c, p, Net(), root, lambda fn: fn(),
-                     [e["path"] for e in p["external"]], step_ms=20)
+                     [e["path"] for e in p["external"]], step_ms=20, archive=%(archive)r)
     while job.step():
         pass
     print(c["id"], job.error, job.detail if job.error else "",
@@ -939,7 +1059,8 @@ print("record", sorted(rec))
 '''
 
 
-def test_the_installer_runs_under_micropython(tmp_path):
+@pytest.mark.parametrize("archive", ["ram", "store"])
+def test_the_installer_runs_under_micropython(tmp_path, archive):
     from unix_mp import require_unix_mp
     exe = require_unix_mp(why="the deflate half of cart_index only exists there")
     repo = Repo("https://mp.example/carts")
@@ -959,7 +1080,7 @@ def test_the_installer_runs_under_micropython(tmp_path):
     script.write_text(_MP_SCRIPT % {
         "runtime": str(ROOT / "runtime"), "map": str(tmp_path / "map.json"),
         "index": url_map[repo.url("index.json")], "index_url": repo.url("index.json"),
-        "root": root})
+        "root": root, "archive": archive})
     out = subprocess.run([exe, "-X", "heapsize=4M", str(script)], capture_output=True,
                          text=True, timeout=120)
     assert out.returncode == 0, out.stdout + out.stderr
@@ -968,3 +1089,4 @@ def test_the_installer_runs_under_micropython(tmp_path):
     assert "main.esp32p4.f2.aot" in lines[1] and "esp32s3" not in lines[1], out.stdout
     assert lines[2] == "record ['dm.moy', 'jet.moy']"
     assert (Path(root) / "dm.moy" / "game.wad").read_bytes() == wad
+    assert os.listdir(Path(root).parent / ci.STAGE_DIR) == []

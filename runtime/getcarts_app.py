@@ -7,12 +7,13 @@ The screens, in the order a kid meets them:
              fetched -- moybyte-org's carts repositories unless `indexes.json`
              beside the carts folder names others (runtime/cart_index.py).
   LIST       a big row per cart: its name, licence and size here, and where it
-             stands -- GET, ON CONSOLE, UPDATE, or NAME TAKEN when a different
-             cart already has its folder.
+             stands -- GET, ON CONSOLE, UPDATE, NAME TAKEN when a different
+             cart already has its folder, TOO BIG or CAN'T PLAY.
   CART       one cart: where it comes from, its licence, what it takes and
              needs, and its verbs -- GET or UPDATE, PLAY, REMOVE. A cart that
-             will not fit, or that this console cannot play, says why and
-             offers no GET.
+             will not fit in the store, that the engine would refuse to load
+             (the Player's check, asked of the index before the download), or
+             that this console cannot play says why and offers no GET.
   LICENCE    a file the cart needs that its repository does not host (Doom's
              WAD) shows its licence before it is fetched. NO has the focus;
              I AGREE is the only way on.
@@ -47,10 +48,12 @@ try:
     import cart_index as _ci
     from moy_fs import _exists, _read
     from ticks import _ticks_ms, _ticks_diff
+    from player import fit_notice as _fit_notice
 except ImportError:  # pragma: no cover - direct host import
     from runtime import cart_index as _ci
     from runtime.moy_fs import _exists, _read
     from runtime.ticks import _ticks_ms, _ticks_diff
+    from runtime.player import fit_notice as _fit_notice
 
 
 # An index fetched this session is reused for this long before the app checks
@@ -58,7 +61,15 @@ except ImportError:  # pragma: no cover - direct host import
 REFRESH_MS = 600000
 
 STATE_LABEL = {"get": "GET", "installed": "ON CONSOLE", "update": "UPDATE",
-               "taken": "NAME TAKEN"}
+               "taken": "NAME TAKEN", "too_big": "TOO BIG", "noplay": "CAN'T PLAY"}
+
+# An external file's archive is held in RAM while it is checked and unpacked
+# when it is under this share of the largest free block a compiled cart loads
+# into, and kept in a file beside the build otherwise. The P4s' 32 MB clear it
+# (and their flash store writes slowly); on an S3 the archive would sit in a
+# Python heap that never shrinks, out of reach of the cart it was fetched for
+# until a reboot, while its card writes fast.
+ARCHIVE_RAM_SHARE = 4
 
 # The phases whose work runs a slice per frame from draw().
 BUSY = ("checking", "licence_fetch", "connecting", "getting")
@@ -320,15 +331,18 @@ class GetCartsAppLayer(ListShellApp):
                 out.append({"cart": c, "plan": p,
                             "state": _ci.cart_state(c, p, entry, present, man),
                             "runs": c["runtime"] in _ci.RUNTIMES
-                            and c["runtime"] in have})
+                            and c["runtime"] in have,
+                            "fit": None})
             return out, (inst.free() if root is not None else None)
         try:
             rows, free = inst.session(_scan)
         except Exception as exc:  # noqa: BLE001 -- an unreadable store lists everything as GET
             _ci._log("store scan failed: %s" % exc)
             rows = [{"cart": c, "plan": _ci.plan(c, chip, fmt), "state": "get",
-                     "runs": False} for c in carts]
+                     "runs": False, "fit": None} for c in carts]
             free = None
+        for r in rows:
+            r["fit"] = self._fit_why(r)
         rows.sort(key=lambda r: r["cart"]["name"].lower())
         self.rows = rows
         self.free = free
@@ -363,12 +377,30 @@ class GetCartsAppLayer(ListShellApp):
             return ("UPDATE", "PLAY", "REMOVE")
         return ()
 
+    def _fit_why(self, row):
+        """The Player's own refusal, asked before the download: a compiled
+        cart whose load -- its declared memory and this console's module (or
+        main.wasm, interpreted), by the engine's sizing -- needs more than the
+        engine reports free. None when it fits, or nobody can say."""
+        c, p = row["cart"], row["plan"]
+        if c["runtime"] != "wasm" or not c.get("memory") or p["load_bytes"] is None:
+            return None
+        fit = self._inst.fit("wasm", c["memory"], p["load_bytes"], p["module"] is None)
+        if fit is None:
+            return None
+        need, have = fit
+        if need[0] > have[0] or need[1] > have[1]:
+            return _fit_notice(c["name"], need, have)
+        return None
+
     def blocker(self, row):
         """Why `row` cannot be installed here, or None."""
         if not self._inst.writable() or self._inst.root() is None:
             return "This console has nowhere to keep carts."
         if not row["runs"]:
             return "This console can't play this kind of cart."
+        if row.get("fit"):
+            return row["fit"]
         if self.free is not None:
             need = _ci.need_bytes(row["plan"], self.free[1])
             if need > self.free[0]:
@@ -452,8 +484,15 @@ class GetCartsAppLayer(ListShellApp):
             self._fail("WiFi isn't connected.")
             return
         row = self.cur
+        arc = 0
+        for e in row["plan"]["external"]:
+            arc += e["archive"]["size"]
+        mem = self._inst.memory()
+        keep = "store" if (arc and mem is not None
+                           and mem[1] < ARCHIVE_RAM_SHARE * arc) else "ram"
         self.job = _ci.Install(row["cart"], row["plan"], self._inst.net(),
-                               self._inst.root(), self._inst.session, self.accepted)
+                               self._inst.root(), self._inst.session, self.accepted,
+                               archive=keep)
         self._go("getting")
         self.armed = True
 
@@ -672,6 +711,10 @@ class GetCartsAppLayer(ListShellApp):
                 break
             row = self.rows[i]
             st = row["state"]
+            if st == "get" and not row["runs"]:
+                st = "noplay"
+            elif st == "get" and row["fit"]:
+                st = "too_big"
             rect = lay.row_rect(r)
             on = i == self.sel
             _ui.row(cv, th, rect, row["cart"]["name"], on=on,

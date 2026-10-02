@@ -24,8 +24,10 @@ What it does differently, because a console is not a PC:
     interpreter (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware").
   * it streams. The release asset is a STORED zip (the carts repositories build
     it sorted and uncompressed), so its members are cut out of the socket as
-    they pass, and an external tar.gz is inflated the same way. Nothing is held
-    whole in RAM, and `Install.step` does a bounded slice per frame.
+    they pass. An external file's tar.gz is kept whole while its hash is
+    checked -- in RAM, or in a file beside the build where memory is short
+    (`_TarGzReader` says why) -- and then inflated. `Install.step` does a
+    bounded slice per frame.
   * it updates in place: a newer version, or files that differ from what was
     installed (a module for this console's format, say), replaces the folder
     through the same staging, carrying the kid's saves and an edited config.
@@ -69,12 +71,12 @@ except ImportError:  # pragma: no cover
 
 try:
     from ticks import _ticks_ms, _ticks_diff
-    from moy_store_base import _sibling_path, _rmtree
+    from moy_store_base import _sibling_path, _rmtree, _is_dir
     from moy_fs import _exists, _mkdir
     import moy_carts as _store
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.moy_store_base import _sibling_path, _rmtree
+    from runtime.moy_store_base import _sibling_path, _rmtree, _is_dir
     from runtime.moy_fs import _exists, _mkdir
     from runtime import moy_carts as _store
 
@@ -287,6 +289,9 @@ def plan(cart, chip=None, fmt=None):
       external        the cart's external files (each needs its licence accepted)
       store_bytes     what the written files add up to
       download_bytes  what is fetched (whole assets, whole archives)
+      load_bytes      the file a compiled cart's load reads -- this console's
+                      module, or main.wasm when it plays on the interpreter --
+                      which the fit check sizes it by; None for other runtimes
     """
     files = {}
     module = None
@@ -310,7 +315,20 @@ def plan(cart, chip=None, fmt=None):
         down += a["size"]
     for e in ext:
         down += e["archive"]["size"]
-    return {"files": files, "module": module, "external": ext,
+    load = None
+    if cart["runtime"] == "wasm":
+        if module is not None:
+            load = files[module]["size"]
+        else:
+            stem = "main"
+            for a in cart["assets"]:
+                for fn in a["files"]:
+                    parts = module_parts(fn)
+                    if parts is not None:
+                        stem = parts[0]
+            main = files.get(stem + ".wasm")
+            load = main["size"] if main is not None else None
+    return {"files": files, "module": module, "external": ext, "load_bytes": load,
             "slow": cart["runtime"] == "wasm" and bool(chip) and module is None,
             "store_bytes": store, "download_bytes": down}
 
@@ -399,8 +417,10 @@ def recover(root):
         if n.endswith(".old") and not _exists(root + "/" + n[:-4]):
             os.rename(p, root + "/" + n[:-4])
             _log("put back %s" % n[:-4])
-        else:
+        elif _is_dir(p):
             _rmtree(p)
+        else:
+            os.remove(p)
     return len(names)
 
 
@@ -585,11 +605,17 @@ class _Sink:
         self.mv = memoryview(self.buf)
         self.fill = 0
         self.name = None
+        self.cart_file = True
+        self.path = None
         self.f = None
         self.size = 0
 
-    def begin(self, name):
+    def begin(self, name, path=None):
+        """Start the cart's file `name`, or with `path` a file outside the
+        cart (an external file's archive), which `end` does not count."""
         self.name = name
+        self.cart_file = path is None
+        self.path = path or self.job.stage + "/" + name
         self.fill = 0
         self.size = 0
         self.f = None
@@ -611,11 +637,12 @@ class _Sink:
 
     def end(self):
         self._flush(True)
-        self.job.written[self.name] = self.size
+        if self.cart_file:
+            self.job.written[self.name] = self.size
         self.name = None
 
     def _flush(self, close):
-        path = self.job.stage + "/" + self.name
+        path = self.path
         data = self.mv[:self.fill]
 
         def _io():
@@ -776,26 +803,39 @@ def _cstr(b):
 
 
 class _TarGzReader:
-    """An external file's archive, in two halves. FETCH: the archive's bytes go
-    into one buffer in RAM as they arrive, hashed against the index, and the
-    hash is settled before anything is inflated, so the inflater only ever sees
-    bytes the index vouched for. INFLATE: the tar inside is walked from that
-    buffer and the one member the index names is written as the external's
-    path, hashed against its own sha256.
+    """An external file's archive, in two halves. FETCH: the archive's bytes
+    are kept whole as they arrive -- in RAM, or (`job.archive == "store"`) in
+    a file beside the build -- hashed against the index, and the hash is
+    settled before anything is inflated, so the inflater only ever sees bytes
+    the index vouched for. INFLATE: the tar inside is walked from those bytes
+    and the one member the index names is written as the external's path,
+    hashed against its own sha256.
 
-    Why a buffer and not the socket: MicroPython's `deflate.DeflateIO` pulls
+    Why whole and not off the socket: MicroPython's `deflate.DeflateIO` pulls
     its source ONE BYTE per call, and through a Python-level stream that is a
     method call per compressed byte (1.76 million for Doom's WAD). Over a
-    native `io.BytesIO` the same inflate is a C loop -- 84ms against 1.5s for
-    the whole WAD on the desktop build -- and MicroPython's `BytesIO(n)`
-    preallocates without a copy, so the archive costs its own size once."""
+    native stream -- `io.BytesIO`, or an open file -- the same inflate is a C
+    loop: 84ms against 1.5s for the whole WAD on the desktop build.
+
+    RAM or a file is the console's call (`Install`'s `archive`). In RAM,
+    MicroPython's `BytesIO(n)` preallocates without a copy, so the archive
+    costs its own size once -- but on a board whose Python heap grows and
+    never shrinks, that size stays out of what a compiled cart can load into
+    until a reboot. In a file it costs a write and a read of its size."""
 
     def __init__(self, job, src, ext):
         self.job = job
         self.src = src
         self.ext = ext
         self.want = ext["archive"]["member"]
-        self.buf = _io.BytesIO(ext["archive"]["size"]) if _MP else _io.BytesIO()
+        self.path = None
+        self.buf = None
+        if job.archive == "store":
+            self.path = stage_root(job.root) + "/" + job.folder + ".archive"
+            job.sink.begin(None, self.path)
+        else:
+            self.buf = _io.BytesIO(ext["archive"]["size"]) if _MP else _io.BytesIO()
+        self.f = None
         self.gz = None
         self.member = None        # [bytes left, sha256 or None, padding]
         self.long = None
@@ -804,6 +844,11 @@ class _TarGzReader:
     def unit(self):
         if self.gz is None:
             return self._fetch()
+        if self.f is None:
+            return self._step()
+        return self.job.in_store(self._step)
+
+    def _step(self):
         if self.member is not None:
             return self._data()
         hdr = bytearray(512)
@@ -850,15 +895,25 @@ class _TarGzReader:
         return True
 
     def _fetch(self):
-        mv = self.job.scratch_mv
-        n = self.src.readinto(mv)
-        self.buf.write(mv[:n])
+        if self.buf is None:
+            sink = self.job.sink
+            mv = sink.space(self.src.left)
+            sink.wrote(self.src.readinto(mv))
+        else:
+            mv = self.job.scratch_mv
+            n = self.src.readinto(mv)
+            self.buf.write(mv[:n])
         if self.src.left:
             return True
         self.src.finish()
         self.src.close()
-        self.buf.seek(0)
-        self.gz = _gunzip(self.buf)
+        if self.buf is None:
+            self.job.sink.end()
+            self.f = self.job.in_store(lambda: open(self.path, "rb"))
+            self.gz = _gunzip(self.f)
+        else:
+            self.buf.seek(0)
+            self.gz = _gunzip(self.buf)
         return True
 
     def _data(self):
@@ -893,7 +948,23 @@ class _TarGzReader:
     def check(self):
         if not self.found:
             raise InstallError(MISMATCH, "the archive has no %s" % self.want)
+        self.close()
+
+    def close(self):
+        """Let the archive go: the buffer, or the file and its bytes."""
         self.buf = None
+        self.gz = None
+        f, self.f = self.f, None
+        path, self.path = self.path, None
+        if f is None and path is None:
+            return
+
+        def _drop():
+            if f is not None:
+                f.close()
+            if path is not None and _exists(path):
+                os.remove(path)
+        self.job.in_store(_drop)
 
 
 class Install:
@@ -910,7 +981,7 @@ class Install:
     is exactly as it was; `cancel()` does the same on purpose."""
 
     def __init__(self, cart, p, net, root, session, accepted=(), chunk=WRITE_CHUNK,
-                 step_ms=STEP_MS):
+                 step_ms=STEP_MS, archive="ram"):
         self.cart = cart
         self.plan = p
         self.net = net
@@ -918,6 +989,8 @@ class Install:
         self.session = session
         self.accepted = tuple(accepted)
         self.step_ms = step_ms
+        self.archive = archive
+        self._in_session = False
         self.folder = cart["folder"]
         self.stage = stage_root(root) + "/" + self.folder
         self.target = root + "/" + self.folder
@@ -945,10 +1018,17 @@ class Install:
     # -- the store, timed ------------------------------------------------------
 
     def in_store(self, fn):
+        """`fn()` in a store session -- the one already open, if a caller
+        holds one (an inflate step reads the archive and writes the member
+        inside a single session)."""
+        if self._in_session:
+            return fn()
         t = _ticks_ms()
+        self._in_session = True
         try:
             return self.session(fn)
         finally:
+            self._in_session = False
             self.t_store += _ticks_diff(_ticks_ms(), t)
 
     # -- the frame's slice ---------------------------------------------------------
@@ -1128,7 +1208,13 @@ class Install:
         if self._src is not None:
             self._src.close()
             self._src = None
-        self._reader = None
+        reader, self._reader = self._reader, None
+        drop = getattr(reader, "close", None)
+        if drop is not None:
+            try:
+                drop()
+            except Exception as exc:  # noqa: BLE001 -- recover() finishes it next open
+                _log("%s: archive left for recover: %s" % (self.folder, exc))
         if ok:
             return
         try:

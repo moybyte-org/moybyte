@@ -893,10 +893,16 @@ class WasmRuntime:
                 return None
         if not size:
             return None
+        return self.footprint_of(pages, size, interp)
+
+    def footprint_of(self, pages, module_len, interp):
+        """`footprint` from the numbers alone: `pages` of declared memory and
+        a module file of `module_len` bytes, interpreted or not. What Get
+        Carts asks before a download, off the index (#124)."""
         memory = min(int(pages), _MAX_PAGES) * 65536
         if interp:
-            return _moy_wasm.interp_footprint(memory, size)
-        return _moy_wasm.footprint(memory, size)
+            return _moy_wasm.interp_footprint(memory, int(module_len))
+        return _moy_wasm.footprint(memory, int(module_len))
 
     def memory(self):
         """(free, largest block) of PSRAM, the engine's own report."""

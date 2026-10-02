@@ -911,6 +911,34 @@ class Installer:
         """The cart runtimes this build carries ("lua", "wasm")."""
         return tuple(self.__ws.runtimes)
 
+    def fit(self, runtime, pages, module_len, interp):
+        """`(need, have)` for a cart of `runtime` declaring `pages` of memory
+        whose module file is `module_len` bytes: what its load needs --
+        `(total, largest block)` by the engine's own sizing -- and what this
+        console has free. The Player's check before a load, asked of the
+        numbers alone. None when the runtime cannot say."""
+        rt = self.__ws.runtimes.get(runtime)
+        of = getattr(rt, "footprint_of", None)
+        mem = getattr(rt, "memory", None)
+        if of is None or mem is None or not pages:
+            return None
+        try:
+            need = of(pages, module_len, interp)
+            return None if need is None else (need, mem())
+        except Exception:  # noqa: BLE001 -- a report is advisory
+            return None
+
+    def memory(self):
+        """`(free, largest block)` of the memory a compiled cart loads into,
+        as the engine reports it, or None where no engine says."""
+        mem = getattr(self.__ws.runtimes.get("wasm"), "memory", None)
+        if mem is None:
+            return None
+        try:
+            return mem()
+        except Exception:  # noqa: BLE001
+            return None
+
     def chip(self):
         """`(chip, compiled-code format)` of this console's compiled tier --
         what its modules are named for -- or `(None, None)` where there is
