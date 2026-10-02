@@ -844,7 +844,10 @@ def wasm_low_water_with_radios_up(board, paths):
     below that floor before any wasm runs (measured on a module-free image,
     #158), and WiFi is not meant to be on while a cart plays -- so the floor
     comparison is a fact about the console, reported, and the run's own cost is
-    what this pins."""
+    what this pins. A radio this started is stopped again: the board leaves
+    with BLE as it found it."""
+    ble_was_up = board.pyval("bool(getattr(%s, 'available', False))" % _ble(board),
+                             strict=True)
     board.cmd("py ws.wifi_hold('wasm')", wait_for="PY", timeout=20)
     try:
         assert board.pyval("%s.start()" % _ble(board), timeout=30) is True
@@ -853,6 +856,10 @@ def wasm_low_water_with_radios_up(board, paths):
         floor = board.pyval("__import__('moycore').sram_report()[2]", strict=True)
     finally:
         board.cmd("py ws.wifi_release('wasm')", wait_for="PY", timeout=20)
+        if not ble_was_up:
+            # The radio holds about 45 KB of internal RAM while it is up, and
+            # left up it cost the next TLS download its memory (2026-10-02).
+            board.pyval("%s.stop()" % _ble(board), timeout=30)
     assert r["ok"], r["error"]
     cost = r["sram_before"] - r["sram_min"]
     print("\nWASM with WiFi+BLE up: internal before %d, low-water %d (run cost "

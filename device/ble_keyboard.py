@@ -412,6 +412,37 @@ class BleHidKeyboard:
             self._log("Moybyte BLE keyboard unavailable:", exc)
             return False
 
+    def stop(self):
+        """Power the radio down: what start() brought up, given back. The
+        controller and the NimBLE host hold their memory in INTERNAL RAM for
+        as long as the radio is active -- about 45 KB on the T-Deck
+        (2026-10-02), the difference between a TLS download that runs and
+        one that cannot -- and only deactivating returns it. The console
+        never calls this: once started, BLE is up until a restart, because
+        a start() after it timed out on the T-Deck with WiFi up and kept
+        what it had taken. The on-glass suites call it to put a board's
+        radio back the way they found it."""
+        if not self.available:
+            return False
+        if self.state in ("scanning", "found"):
+            try:
+                self.ble.gap_scan(None)
+            except Exception:
+                pass
+        if self._conn is not None:
+            try:
+                self.ble.gap_disconnect(self._conn)
+            except Exception:
+                pass
+        self._reset_connection()
+        try:
+            self.ble.active(False)
+        except Exception as exc:
+            self.error = str(exc)
+        self.available = False
+        self.state = "off"
+        return True
+
     def status(self):
         return self.state, self.name, self.passkey
 

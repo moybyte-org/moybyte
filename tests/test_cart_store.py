@@ -370,6 +370,75 @@ def test_a_dropped_connection_stops_cleanly(tmp_path):
     _untouched(root, "jet.moy")
 
 
+class _Starved(MemNet):
+    """A board transport whose console has spent its internal RAM: with
+    `cut`, every body fails halfway the way the T-Deck's did after its
+    on-glass suite (a bare EPERM from the hardware AES), and the transport
+    says so when asked."""
+
+    def __init__(self, routes, starved=True, cut=False):
+        MemNet.__init__(self, routes)
+        self.starved = starved
+        self.asked = 0
+        if cut:
+            for url, data in list(self.routes.items()):
+                self.routes[url] = (lambda d=data: _Eperm(d, len(d) // 2))
+
+    def out_of_memory(self):
+        self.asked += 1
+        return self.starved
+
+
+class _Eperm(_Resp):
+    def __init__(self, data, cut):
+        _Resp.__init__(self, data[:cut], 200, len(data))
+
+    def readinto(self, buf):
+        n = self._b.readinto(buf)
+        if not n:
+            raise OSError(1, "EPERM")
+        return n
+
+
+@pytest.mark.parametrize("starved,text", [(True, ci.NET_MEMORY), (False, ci.STOPPED)])
+def test_a_download_that_runs_out_of_memory_says_to_restart(tmp_path, starved, text):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    cart = _cart(repo, "jet")
+    net = _Starved(repo.routes(), starved, cut=True)
+    job = _install(cart, root, net)
+    assert job.error == text
+    assert net.asked
+    assert "EPERM" in job.detail
+    _untouched(root, "jet.moy")
+
+
+def test_a_connection_that_cannot_open_for_memory_says_to_restart(tmp_path):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    cart = _cart(repo, "jet")
+    routes = {}
+    for url in repo.routes():
+        def _fail():
+            raise OSError(12, "ENOMEM")
+        routes[url] = _fail
+    job = _install(cart, root, _Starved(routes))
+    assert job.error == ci.NET_MEMORY
+    with pytest.raises(ci.InstallError) as exc:
+        ci.fetch(_Starved(routes), cart["assets"][0]["url"], 1000)
+    assert exc.value.text == ci.NET_MEMORY
+
+
+def test_a_transport_that_cannot_answer_keeps_the_plain_reason(tmp_path):
+    class Broken(MemNet):
+        def out_of_memory(self):
+            raise RuntimeError("no heap report")
+    assert ci.net_text(Broken(), ci.STOPPED) == ci.STOPPED
+    assert ci.net_text(MemNet(), ci.UNREACHABLE) == ci.UNREACHABLE
+
+
 def test_more_bytes_than_the_index_says_is_refused(tmp_path):
     root = _store(tmp_path)
     repo = Repo(BASE)
@@ -710,6 +779,39 @@ def test_the_board_transport_waits_for_a_late_link(monkeypatch):
     assert cart_net.CartNet(None).online() is False
 
 
+def test_the_board_transport_says_when_its_internal_ram_is_spent(monkeypatch):
+    """`out_of_memory` reads the internal DMA-capable heap -- where the TLS
+    crypto's DMA and the radio's buffers come from -- against TLS_SRAM_MIN;
+    a console that cannot report its heap is never called out of memory."""
+    import types
+    sys.path.insert(0, str(ROOT / "device"))
+    import cart_net
+    asked = []
+    regions = []
+
+    def heap_info(caps):
+        asked.append(caps)
+        return regions
+    monkeypatch.setitem(sys.modules, "esp32",
+                        types.SimpleNamespace(idf_heap_info=heap_info))
+    wifi = types.SimpleNamespace(driver_up=True)
+    net = cart_net.CartNet(wifi=wifi)
+    regions[:] = [(200000, cart_net.TLS_SRAM_MIN // 2, 1000, 0),
+                  (8000, cart_net.TLS_SRAM_MIN // 2 - 1, 1000, 0)]
+    assert net.out_of_memory() is True
+    regions[:] = [(200000, cart_net.TLS_SRAM_MIN, 9000, 0)]
+    assert net.out_of_memory() is False
+    assert asked == [0x808, 0x808]
+    # A radio whose driver has not come up this boot needs its own share too:
+    # short of it, WiFi does not come up at all.
+    wifi.driver_up = False
+    assert net.out_of_memory() is True
+    regions[:] = [(200000, cart_net.TLS_SRAM_MIN + cart_net.RADIO_SRAM, 9000, 0)]
+    assert net.out_of_memory() is False
+    monkeypatch.setitem(sys.modules, "esp32", None)
+    assert net.out_of_memory() is False
+
+
 # -- THE APP ---------------------------------------------------------------------
 
 class _In:
@@ -1029,6 +1131,66 @@ def test_an_unreachable_shelf_offers_to_try_again(tmp_path):
     _tap(ws, app, "btn", "TRY AGAIN")
     _frames(ws, app)
     assert app.phase == "nowifi"
+    assert "carts" not in ws._wifi_holders
+
+
+def test_a_shelf_out_of_reach_for_memory_says_to_restart(tmp_path):
+    """Every index failed and the console said it had no memory for the
+    connection: the screen names that and the restart, never SHELF AWAY."""
+    gpl, mit, _net = _shelves(tmp_path)
+    net = _Starved(gpl.routes(), starved=True, cut=True)
+    ws, app = _app_ws(tmp_path, net, [gpl.url("index.json")])
+    _open(ws, app)
+    assert app.phase == "nomemory"
+    title, lines = app._message()
+    assert title == "MEMORY FULL" and lines == [ci.NET_MEMORY]
+    assert "Restart the console" in ci.NET_MEMORY
+    assert "carts" not in ws._wifi_holders
+    net.starved = False
+    _tap(ws, app, "btn", "TRY AGAIN")
+    _frames(ws, app)
+    assert app.phase == "unreached"
+
+
+class _NoRadio(MemNet):
+    """A radio that will not come up, and whose console may be out of the
+    memory that takes."""
+
+    def __init__(self, starved):
+        MemNet.__init__(self, {})
+        self.up = False
+        self.starved = starved
+
+    def out_of_memory(self):
+        return self.starved
+
+
+@pytest.mark.parametrize("starved,phase", [(True, "nomemory"), (False, "nowifi")])
+def test_a_radio_that_cannot_come_up_for_memory_says_to_restart(tmp_path, starved,
+                                                               phase):
+    """The radio's driver takes its receive buffers from the same internal
+    RAM a download needs; a console that spent it cannot bring WiFi up, and
+    that is not a network to join."""
+    ws, app = _app_ws(tmp_path, _NoRadio(starved), ["https://x.example/i.json"])
+    _open(ws, app)
+    assert app.phase == phase
+    assert "carts" not in ws._wifi_holders
+
+
+def test_an_install_out_of_memory_says_to_restart(tmp_path):
+    gpl, mit, net = _shelves(tmp_path)
+    ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
+    _open(ws, app)
+    starved = _Starved(net.routes, cut=True)
+    ws.cart_net = starved
+    i = [r["cart"]["name"] for r in app.rows].index("Jet Pot")
+    app._tap_row(i)
+    ws.frame(1 / 30)
+    app._press("GET")
+    _frames(ws, app, n=400)
+    assert app.phase == "failed"
+    title, lines = app._message()
+    assert title == "NOT INSTALLED" and lines[0] == ci.NET_MEMORY
     assert "carts" not in ws._wifi_holders
 
 

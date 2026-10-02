@@ -161,6 +161,7 @@ class GetCartsAppLayer(ListShellApp):
         self.fetched_at = None
         self.indexes = ()
         self.unreached = 0
+        self.starved = False          # an index failed for want of memory
         self.free = None              # (bytes, block) of the store
         self.sel = 0
         self.top = 0
@@ -240,6 +241,7 @@ class GetCartsAppLayer(ListShellApp):
         self._covers = []
         self._work = None
         self.unreached = 0
+        self.starved = False
         self._step = 0
         self._go("checking")
 
@@ -288,11 +290,18 @@ class GetCartsAppLayer(ListShellApp):
         self._release()
         return False
 
+    def _starved(self):
+        """True when the transport says the console has no memory left for a
+        connection -- the radio's driver and a TLS download take theirs from
+        the same internal RAM, so a radio that will not come up can be that
+        too, not a network the kid has to join."""
+        return _ci.net_text(self._inst.net(), None) == _ci.NET_MEMORY
+
     def _pump_check(self):
         net = self._inst.net()
         if self._step == 0:
             if not self._online():
-                self._go("nowifi")
+                self._go("nomemory" if self._starved() else "nowifi")
                 return
             root = self._inst.root()
             if root is not None and self._inst.writable():
@@ -309,6 +318,7 @@ class GetCartsAppLayer(ListShellApp):
                                                    url))
             except _ci.InstallError as exc:
                 self.unreached += 1
+                self.starved = self.starved or exc.text == _ci.NET_MEMORY
                 _ci._log(exc.detail)
             self._step += 1
             if self._step - 1 < len(self.indexes):
@@ -323,7 +333,7 @@ class GetCartsAppLayer(ListShellApp):
         self._work = None
         self._release()
         if not self._found and self.unreached:
-            self._go("unreached")
+            self._go("nomemory" if self.starved else "unreached")
             return
         self.carts = self._found
         self._found = []
@@ -504,7 +514,7 @@ class GetCartsAppLayer(ListShellApp):
                 self._play()
             else:
                 self._go("list")
-        elif ph in ("nowifi", "unreached"):
+        elif ph in ("nowifi", "unreached", "nomemory"):
             self._check()
         elif ph == "failed":
             self._go("cart" if self.cur is not None else "list")
@@ -527,7 +537,7 @@ class GetCartsAppLayer(ListShellApp):
 
     def _pump_licence(self):
         if not self._online():
-            self._fail("WiFi isn't connected.")
+            self._fail(_ci.NET_MEMORY if self._starved() else "WiFi isn't connected.")
             return
         ext = self.lic[0]
         self._lic_text = _ci.licence_text(self._inst.net(), self.cur["cart"],
@@ -546,7 +556,7 @@ class GetCartsAppLayer(ListShellApp):
 
     def _pump_connect(self):
         if not self._online():
-            self._fail("WiFi isn't connected.")
+            self._fail(_ci.NET_MEMORY if self._starved() else "WiFi isn't connected.")
             return
         row = self.cur
         arc = 0
@@ -640,7 +650,7 @@ class GetCartsAppLayer(ListShellApp):
             return ("CANCEL",)
         if ph == "done":
             return ("PLAY", "OK")
-        if ph in ("nowifi", "unreached"):
+        if ph in ("nowifi", "unreached", "nomemory"):
             return ("TRY AGAIN",)
         if ph == "failed":
             return ("OK",)
@@ -721,7 +731,8 @@ class GetCartsAppLayer(ListShellApp):
             self._chip(cv, th, "CHECK", lay.head2, "check")
             self._draw_list(cv, th)
         else:
-            if ph not in BUSY and ph not in ("nonet", "nowifi", "unreached"):
+            if ph not in BUSY and ph not in ("nonet", "nowifi", "unreached",
+                                             "nomemory"):
                 self._chip(cv, th, "<", lay.head, "back")
             title = self.cur["cart"]["name"] if self.cur is not None else "GET CARTS"
             x = lay.head[0] + lay.head[2] + 8 * fs
@@ -877,6 +888,8 @@ class GetCartsAppLayer(ListShellApp):
             return "WIFI IS OFF", ["Join a network in the WiFi app, then try again."]
         if ph == "unreached":
             return "SHELF AWAY", ["Couldn't reach the cart shelf. Try again soon."]
+        if ph == "nomemory":
+            return "MEMORY FULL", [_ci.NET_MEMORY]
         if ph == "checking":
             n = len(self.indexes)
             step = max(0, min(self._step - 1, n))
@@ -901,7 +914,7 @@ class GetCartsAppLayer(ListShellApp):
         x, y = lay.body[0] + 4 * fs, lay.text_y + 4 * fs
         scale = 2 if len(title) * 16 * fs <= lay.body[2] - 8 * fs else 1
         ink = th["danger"] if self.phase in ("failed", "nowifi", "unreached",
-                                             "nonet") else th["play"]
+                                             "nomemory", "nonet") else th["play"]
         cv.print(title, x, y, ink, scale)
         y += 8 * fs * scale + 8 * fs
         for text in lines:

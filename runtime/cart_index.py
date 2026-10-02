@@ -125,6 +125,7 @@ FULL = "The store is full."
 NO_WRITE = "Can't write to the store."
 NO_LICENCE = "Its licence wasn't accepted."
 NO_MEMORY = "Not enough memory free to unpack it."
+NET_MEMORY = "Not enough memory free to download. Restart the console, then try again."
 
 _MP = getattr(sys, "implementation", None) is not None \
     and sys.implementation.name == "micropython"
@@ -144,6 +145,21 @@ class InstallError(Exception):
         super().__init__(text)          # MicroPython has no Exception.__init__
         self.text = text
         self.detail = detail or text
+
+
+def net_text(net, text):
+    """`text` for a network failure, or NET_MEMORY when the transport says
+    this console has no memory left for a connection (`out_of_memory`, a
+    board transport's; the host's has none). A TLS read that cannot get the
+    memory it needs fails with a bare errno, which reads as a dropped
+    connection unless something asks."""
+    starved = getattr(net, "out_of_memory", None)
+    if starved is None:
+        return text
+    try:
+        return NET_MEMORY if starved() else text
+    except Exception:  # noqa: BLE001 -- the question never costs the answer
+        return text
 
 
 def _hex(digest):
@@ -477,7 +493,7 @@ def fetch(net, url, limit, size=None, sha=None):
     try:
         resp = net.open(url)
     except Exception as exc:  # noqa: BLE001 -- every transport error is "unreachable"
-        raise InstallError(UNREACHABLE, "%s: %s" % (url, exc))
+        raise InstallError(net_text(net, UNREACHABLE), "%s: %s" % (url, exc))
     try:
         if resp.status != 200:
             raise InstallError(UNREACHABLE, "%s: HTTP %d" % (url, resp.status))
@@ -488,7 +504,7 @@ def fetch(net, url, limit, size=None, sha=None):
             try:
                 n = resp.readinto(mv)
             except Exception as exc:  # noqa: BLE001
-                raise InstallError(STOPPED, "%s: %s" % (url, exc))
+                raise InstallError(net_text(net, STOPPED), "%s: %s" % (url, exc))
             if not n:
                 break
             out.extend(mv[:n])
@@ -557,7 +573,7 @@ class _Fetched:
         try:
             n = self.resp.readinto(mv)
         except Exception as exc:  # noqa: BLE001 -- a dropped socket is a stopped download
-            raise InstallError(STOPPED, "%s: %s at %d of %d bytes"
+            raise InstallError(net_text(job.net, STOPPED), "%s: %s at %d of %d bytes"
                                % (self.what, exc, self.size - self.left, self.size))
         job.t_net += _ticks_diff(_ticks_ms(), t)
         if not n:
@@ -1157,6 +1173,7 @@ class Install:
     def _open(self, urls, size, sha, what, index):
         """The first of `urls` that answers 200 with the size the index says."""
         why = []
+        text = UNREACHABLE
         for u in urls:
             url = resolve(index, u)
             t = _ticks_ms()
@@ -1164,6 +1181,7 @@ class Install:
                 resp = self.net.open(url)
             except Exception as exc:  # noqa: BLE001 -- try the next mirror
                 why.append("%s: %s" % (url, exc))
+                text = net_text(self.net, text)
                 continue
             finally:
                 self.t_net += _ticks_diff(_ticks_ms(), t)
@@ -1176,7 +1194,7 @@ class Install:
                 continue
             _log("fetching %s (%d bytes)" % (url, size))
             return _Fetched(self, resp, size, sha, what)
-        raise InstallError(UNREACHABLE, "could not get %s: %s" % (what, "; ".join(why)))
+        raise InstallError(text, "could not get %s: %s" % (what, "; ".join(why)))
 
     def _end_source(self):
         self._src.finish()
