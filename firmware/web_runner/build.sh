@@ -406,6 +406,25 @@ cp "${STAGE_DIR}/carts.json" "${STAGE_DIR}/index.html" "${DIST_DIR}/"
 sed "s|\"./moy_store.mjs\"|\"./moy_store.mjs?v=${MOY_BUILD}\"|" \
   "${SCRIPT_DIR}/worker.js" > "${DIST_DIR}/worker.js"
 cp "${SCRIPT_DIR}/moy_store.mjs" "${DIST_DIR}/"
+# The two worker modules ship WITHOUT THEIR COMMENTS. They ride every board
+# image, and the prose in them is most of their bytes (worker.js gzips to
+# under half without it): the source is where it is read. emsdk's own terser
+# re-prints them with comments=false and nothing else -- no compression, no
+# renaming, still one statement a line -- so the code that runs is the code in
+# the tree, and a stack trace still names its function.
+# tests/test_web_worker_protocol.py holds dist/ to that.
+JS_NODE="$(ls -d "${EMSDK_DIR}"/node/*/bin 2>/dev/null | head -1)/node"
+[ -x "${JS_NODE}" ] || JS_NODE="$(command -v node || true)"
+TERSER="${EMSDK_DIR}/upstream/emscripten/node_modules/terser/bin/terser"
+if [ -z "${JS_NODE}" ] || [ ! -f "${TERSER}" ]; then
+  echo "build.sh: no terser under ${EMSDK_DIR} (or no node) to strip the worker's comments" >&2
+  exit 1
+fi
+for f in worker.js moy_store.mjs; do
+  "${JS_NODE}" "${TERSER}" "${DIST_DIR}/${f}" --module \
+    --format comments=false,beautify=true -o "${DIST_DIR}/${f}.tmp"
+  mv "${DIST_DIR}/${f}.tmp" "${DIST_DIR}/${f}"
+done
 if [ "${STAGE_ONLY}" = "1" ]; then
   cp "${STAGE_DIR}/modules.json" "${DIST_DIR}/"
 else

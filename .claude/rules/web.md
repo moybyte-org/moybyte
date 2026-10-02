@@ -27,7 +27,10 @@ nor those docs will warn you about:
   serves without reflashing it, so "which console is this board serving?" is
   answered by its firmware version alone. Changing a web build means
   `firmware/web_runner/build.sh`, then rebuild and reflash. An oversized image is
-  a BUILD FAILURE on every board.
+  a BUILD FAILURE on every board. For that reason the two worker modules ship
+  without their comments (build.sh re-prints them with emsdk's terser, nothing
+  else changed): read `worker.js` and `moy_store.mjs` in the tree, not in
+  `dist/`.
 - **`worker.js` STATICALLY imports `moy_store.mjs`**, so it must be in
   `moy_webhost.ASSETS`: a board that does not serve it serves a console that
   cannot boot.
