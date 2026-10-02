@@ -246,9 +246,11 @@ function writeStore(root, files) {
     // watching for it.
     mkdirs(root);
     for (const rel in files) {
+        const data = store.fileData(files[rel]);   // text, or a cover's bytes
+        if (data === null) continue;
         const full = root + "/" + rel;
         mkdirs(full.slice(0, full.lastIndexOf("/")));
-        mp.FS.writeFile(full, files[rel]);
+        mp.FS.writeFile(full, data);
     }
 }
 

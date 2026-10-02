@@ -61,7 +61,8 @@ function makeFile(sync) {
         kind: "file",
         data: new Uint8Array(0),
         async getFile() {
-            return { text: async () => dec.decode(fh.data) };
+            return { text: async () => dec.decode(fh.data),
+                     arrayBuffer: async () => fh.data.slice().buffer };
         },
     };
     if (sync) {
@@ -224,6 +225,33 @@ for (const sync of [true, false]) {
        && back["a.moy/journal/journal.jsonl"] === '{"seq": 1}\n'
        && back["a.moy/journal/s/0001-main.py"] === "print(1)\n",
        JSON.stringify(jr.errors) + " " + JSON.stringify(Object.keys(back)));
+}
+
+// ---- a cart's cover crosses as BYTES (SPEC.md 3.6) ---------------------------
+{
+    const s = await store.openStore(fakeNav(true));
+    const png = new Uint8Array(40000);
+    for (let i = 0; i < png.length; i++) png[i] = (i * 37 + (i >> 9)) & 255;
+    const b64 = store.toBase64(png);
+    await store.seed(s, { "c.moy/manifest.json": "{}", "c.moy/cover.png": { b: b64 } });
+    let all = await store.readAll(s);
+    ok("a seeded cover reads back as {b: base64} of the same bytes",
+       all["c.moy/cover.png"] && all["c.moy/cover.png"].b === b64);
+    ok("fileData turns that back into the bytes",
+       store.fileData(all["c.moy/cover.png"]).length === png.length
+       && store.fileData(all["c.moy/cover.png"]).every((v, i) => v === png[i]));
+    const third = Math.ceil(png.length / 3 / 3) * 3;
+    const r = await store.applyOps(s, [
+        { p: "c.moy/cover.png", b: store.toBase64(png.subarray(0, third)), part: 0 },
+        { p: "c.moy/cover.png", b: store.toBase64(png.subarray(third, 2 * third)), part: 1 },
+        { p: "c.moy/cover.png", b: store.toBase64(png.subarray(2 * third)), part: 2 },
+        { p: "c.moy/cover.png", pub: 1 },
+        { p: "c.moy/main.py", b: "AAAA" },
+    ]);
+    all = await store.readAll(s);
+    ok("a chunked cover publishes whole, and only a cover takes bytes",
+       r.applied === 4 && r.errors.length === 1 && r.errors[0][1] === "not a binary file"
+       && all["c.moy/cover.png"].b === b64, JSON.stringify(r.errors));
 }
 
 // The two predicates are two QUESTIONS, and the answers differ on exactly one

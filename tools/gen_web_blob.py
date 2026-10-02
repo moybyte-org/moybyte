@@ -67,9 +67,13 @@ def asset_names():
     """
     path = os.path.join(TDECK_MODULES, "moy_webhost.py")
     # The modules dir on sys.path, because moy_webhost imports its sibling
-    # transport by plain name the way the device does.
+    # transport by plain name the way the device does -- and this tree's root,
+    # so its `from runtime import moy_sync` reads THIS tree's runtime and not
+    # whichever checkout an installed package points at.
     if TDECK_MODULES not in sys.path:
         sys.path.insert(0, TDECK_MODULES)
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
     spec = importlib.util.spec_from_file_location("_moy_webhost_for_blob", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

@@ -78,12 +78,14 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     still recoverable here but not there turns last-writer-wins into data
     loss -- a peer would land the trashed copy back as a live file, or drop
     the only copy the kid could still restore.
-  * Binary/unreadable files -- the wire is JSON text, same rule as the pull.
+  * Binary files but one -- the wire is JSON text, same rule as the pull.
     That includes a compiled cart's module (its `main.wasm`, and a board's
     compiled `<main>.<chip>.aot` beside it): a "runtime": "wasm" cart's
     manifest, assets and `src/` cross like any cart's and its module does not,
     so a compiled cart does NOT sync between a browser and a board. It plays
-    where its module was put (docs/wasm_tier_plan_2026-09.md).
+    where its module was put (docs/wasm_tier_plan_2026-09.md). The one binary
+    file that DOES cross is a cart's cover, `cover.png` (SPEC.md 3.6,
+    BINARY_FILES): as base64, `"b"` where text rides as `"t"`.
 
 Wire shape (one POST per batch, bounded so it fits the transport's 64KB
 request cap; the client sends ONE batch at a time and waits for the answer,
@@ -94,6 +96,7 @@ so ops apply in order):
       {"p": "cart.moy/big.lua", "t": "<piece>", "part": 0},  # chunked: begin
       {"p": "cart.moy/big.lua", "t": "<piece>", "part": 1},  #   ...append
       {"p": "cart.moy/big.lua", "pub": 1},                   #   ...publish
+      {"p": "cart.moy/cover.png", "b": "<base64>"},          # a binary file
       {"p": "cart.moy/old.py", "d": 1},                      # delete file
       {"p": "cart.moy", "dc": 1}]}                           # delete cart
 
@@ -133,10 +136,15 @@ except ImportError:  # pragma: no cover
 
 try:
     from moy_fs import (_mkdir, _write, _remove, _exists, _copy, _write_atomic,
-                        _crc32)
+                        _crc32, _write_bytes)
 except ImportError:  # host / CPython: the runtime package
     from runtime.moy_fs import (_mkdir, _write, _remove, _exists, _copy,
-                                _write_atomic, _crc32)
+                                _write_atomic, _crc32, _write_bytes)
+
+try:
+    import binascii as _binascii
+except ImportError:  # pragma: no cover -- every target ships binascii
+    import ubinascii as _binascii
 
 
 # The carts batch keeps v1 FOREVER: it is the shape every already-flashed
@@ -157,6 +165,30 @@ FILES_ROOT_ID = "files"
 # under it.
 PART_MAX = 16 * 1024
 BATCH_BUDGET = 32 * 1024
+
+# The binary files that DO cross, by name: a cart's cover (SPEC.md 3.6), in
+# base64 -- `"b"` in a batch op where text is `"t"`, `{"b": ...}` as a value in a
+# pull bundle. A binary chunk is BINARY_PART bytes, which is PART_MAX characters
+# of base64 exactly, so every piece decodes on its own. Every other binary file
+# stays home (the module docstring says why). firmware/web_runner/moy_store.mjs
+# carries the JS mirror, pinned by tests/test_web_store.py.
+BINARY_FILES = ("cover.png",)
+BINARY_PART = PART_MAX * 3 // 4
+
+
+def is_binary(path):
+    """True when the file at `path` (a name, a rel or a full path) crosses the
+    wire as bytes."""
+    return path[path.rfind("/") + 1:] in BINARY_FILES
+
+
+def b64(data):
+    """`data` as base64 text, no newline."""
+    out = _binascii.b2a_base64(data)
+    if not isinstance(out, str):
+        out = out.decode("ascii")
+    return out.strip()
+
 
 # What never crosses the wire, in either direction. journal/ is the durable
 # undo history (each side keeps its own); thumbs/ is a regenerable per-size
@@ -281,9 +313,9 @@ def files_root(carts_root):
 # manifest would only move the coupling.
 # ---------------------------------------------------------------------------
 
-# The files whose write can change what the LAUNCHER shows -- a cover sheet or a
-# manifest (title/order). Only a shelf-bearing root consults this.
-_SHELF_FILES = ("manifest.json", "sheet.json")
+# The files whose write can change what the LAUNCHER shows -- a cover, a cover
+# sheet or a manifest (title/order). Only a shelf-bearing root consults this.
+_SHELF_FILES = ("manifest.json", "sheet.json", "cover.png")
 
 
 class Root:
@@ -464,6 +496,41 @@ def _read_text(path):
         except (UnicodeError, ValueError):
             return None                      # binary/unreadable: skip, permanent
     return _retry_io(_open, None)
+
+
+def _read_payload(path):
+    """What a watcher ships of the file at `path`: its text, its BYTES for a
+    BINARY_FILES name, or None (skip it). Retried on OSError like `_read_text`."""
+    if not is_binary(path):
+        return _read_text(path)
+
+    def _open():
+        with open(path, "rb") as f:
+            return f.read()
+    return _retry_io(_open, None)
+
+
+def read_binary_b64(path, chunk=None):
+    """A binary file as base64 pieces for a PULL, or None -- the
+    `read_text_chunks` of a BINARY_FILES name: a bounded read at a time, each a
+    whole number of 3-byte groups, so the pieces join into one base64 value."""
+    chunk = chunk or STORE_READ_CHUNK * 3 // 4
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return None
+    return _b64_pieces(f, chunk - chunk % 3)
+
+
+def _b64_pieces(f, chunk):
+    try:
+        while True:
+            piece = f.read(chunk)
+            if not piece:
+                return
+            yield b64(piece)
+    finally:
+        _close_quietly(f)
 
 
 # How much of a file one store-pull piece carries, and with it the whole
@@ -761,13 +828,16 @@ def _apply_one(root, op, desc, journal=False):
         return None, desc.shelf and parts[-1] in _SHELF_FILES
     if op.get("pub"):
         _publish(full)
-        if journal and desc.journals:
+        if journal and desc.journals and not is_binary(parts[-1]):
             # Read the file BACK rather than re-assembling the chunks: they
             # arrived across several requests and were never all resident here,
             # which is the point of chunking. One bounded read is the cheap half
             # of the snapshot this is about to write anyway.
             _journal_commit(root, parts, _read_text(full))
         return None, _shelf_dirty(desc, parts, new_item)
+    data = op.get("b")
+    if data is not None:
+        return _apply_binary(root, parts, full, op, data, desc, new_item)
     text = op.get("t")
     if not isinstance(text, str):
         return "no text", False
@@ -790,6 +860,34 @@ def _apply_one(root, op, desc, journal=False):
     else:
         with open(full + ".tmp", "a") as f:
             f.write(text)
+        return None, False
+    return None, _shelf_dirty(desc, parts, new_item)
+
+
+def _apply_binary(root, parts, full, op, data, desc, new_item):
+    """A `"b"` op: base64 of a BINARY_FILES file, whole or one chunk of it. Not
+    journaled -- the journal holds text, and the picture is its own record."""
+    if not is_binary(parts[-1]):
+        return "not a binary file", False
+    if not isinstance(data, str) or len(data) > PART_MAX * 2:
+        return "op too large", False
+    try:
+        raw = _binascii.a2b_base64(data)
+    except Exception:  # noqa: BLE001 -- binascii.Error is a ValueError on CPython only
+        return "bad base64", False
+    if desc.ensure:
+        _mkdir(root)
+    _mkdirs(root, parts[:-1])
+    part = op.get("part")
+    if part is None:
+        _write_bytes(full, raw)
+    elif part == 0:
+        with open(full + ".tmp", "wb") as f:
+            f.write(raw)
+        return None, False           # nothing published yet
+    else:
+        with open(full + ".tmp", "ab") as f:
+            f.write(raw)
         return None, False
     return None, _shelf_dirty(desc, parts, new_item)
 
@@ -886,7 +984,7 @@ class StoreWatcher:
         self.skip = skip or _skip    # what this watcher will not sweep
         self._listdir = listdir      # injected for host tests; None = real fs
         self._isdir = isdir
-        self._read = read or _read_text
+        self._read = read or _read_payload
         self._snap = {}              # rel -> (size, mtime, crc)
         self._pending = {}           # rel -> "w" | "d"
         self._pending_dc = []        # cart folders to delete, in order
@@ -935,7 +1033,7 @@ class StoreWatcher:
                 continue                      # the fast path: nothing moved
             text = self._read(self.root + "/" + rel)
             if text is None:
-                continue                      # binary/unreadable: not synced
+                continue                      # unreadable, or binary: not synced
             c = _crc(text)
             if old is not None and old[2] == c:
                 self._snap[rel] = (size, mtime, c)
@@ -1065,7 +1163,8 @@ class StoreWatcher:
                 ops.append({"p": rel, "d": 1})
                 paths.append(rel)
                 continue
-            if len(text) > PART_MAX:
+            binary = not isinstance(text, str)
+            if len(text) > (BINARY_PART if binary else PART_MAX):
                 budget = self._emit_parts(ops, rel, text, 0, budget)
                 if self._partial is not None:
                     del self._pending[rel]
@@ -1073,6 +1172,8 @@ class StoreWatcher:
                     return ops
                 paths.append(rel)
                 continue
+            if binary:
+                text = b64(text)
             # A whole-file op (<=PART_MAX) subtracts AFTER it is appended, so
             # left unguarded it can push a batch past BATCH_BUDGET by a whole
             # file -- and a ~48KB batch, JSON-escaped, can breach the transport's
@@ -1082,7 +1183,7 @@ class StoreWatcher:
             # ships (it is <=PART_MAX, comfortably under the cap).
             if ops and len(text) > budget:
                 break
-            ops.append({"p": rel, "t": text})
+            ops.append({"p": rel, ("b" if binary else "t"): text})
             budget -= len(text)
             paths.append(rel)
         if not ops:
@@ -1093,12 +1194,19 @@ class StoreWatcher:
         return ops
 
     def _emit_parts(self, ops, rel, text, idx, budget):
-        """Emit chunk ops for `text` from part `idx` until done or the budget
-        runs out; sets/clears self._partial accordingly."""
-        total = (len(text) + PART_MAX - 1) // PART_MAX
+        """Emit chunk ops for `text` (or a binary file's bytes, BINARY_PART at
+        a time, each piece its own base64) from part `idx` until done or the
+        budget runs out; sets/clears self._partial accordingly."""
+        binary = not isinstance(text, str)
+        step = BINARY_PART if binary else PART_MAX
+        total = (len(text) + step - 1) // step
         while idx < total and budget > 0:
-            piece = text[idx * PART_MAX:(idx + 1) * PART_MAX]
-            ops.append({"p": rel, "t": piece, "part": idx})
+            piece = text[idx * step:(idx + 1) * step]
+            if binary:
+                piece = b64(piece)
+                ops.append({"p": rel, "b": piece, "part": idx})
+            else:
+                ops.append({"p": rel, "t": piece, "part": idx})
             budget -= len(piece)
             idx += 1
         if idx < total:
@@ -1151,4 +1259,6 @@ class StoreWatcher:
 
 
 def _crc(text):
+    if not isinstance(text, str):
+        return _crc32(text) & 0xFFFFFFFF           # a BINARY_FILES file's bytes
     return _crc32(text.encode("utf-8")) & 0xFFFFFFFF

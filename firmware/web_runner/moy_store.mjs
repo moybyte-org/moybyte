@@ -57,6 +57,38 @@ function skipIn(name, dirs, files) {
 
 export function skipName(name) { return skipIn(name, SKIP_DIRS, SKIP_FILES); }
 
+// The binary files that cross by name -- a cart's cover (SPEC.md 3.6) -- the
+// JS mirror of runtime/moy_sync's BINARY_FILES. They travel as base64: `b`
+// where text rides as `t` in a batch op, `{b: ...}` as a value in a served
+// bundle, and as BYTES once they are in the VFS or this store.
+const BINARY_FILES = ["cover.png"];
+
+export function isBinary(rel) {
+    return BINARY_FILES.indexOf(String(rel).slice(String(rel).lastIndexOf("/") + 1)) >= 0;
+}
+
+export function fromBase64(b) {
+    const s = atob(b);
+    const out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+}
+
+export function toBase64(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000)
+        s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+}
+
+// One bundle value as what a file holds: a string for text, the bytes of a
+// `{b: base64}` value, or null for a value that is neither.
+export function fileData(v) {
+    if (typeof v === "string") return v;
+    if (v && typeof v.b === "string") return fromBase64(v.b);
+    return null;
+}
+
 export function skipLocal(name) {
     return skipIn(name, SITE_SKIP_DIRS, SITE_SKIP_FILES);
 }
@@ -234,7 +266,7 @@ async function dirFor(store, segs, create) {
 async function writeText(store, parts, text) {
     const dir = await dirFor(store, parts.slice(0, -1), true);
     const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true });
-    const bytes = enc.encode(text);
+    const bytes = typeof text === "string" ? enc.encode(text) : text;
     // Sync access handles are the worker-only fast path AND the widest-support
     // one (they landed in OPFS before createWritable did); createWritable is
     // the fallback for a main-thread caller or a browser without them.
@@ -261,6 +293,7 @@ async function removeAt(store, parts, recursive) {
 // the board's `apply_ops` cannot drift about what a batch means:
 //   {p, t}            whole-file write
 //   {p, t, part: n}   chunk n of a big file (parts buffer until `pub`)
+//   {p, b}            the same two for a binary file (a cover), in base64
 //   {p, pub: 1}       publish the buffered chunks
 //   {p, d: 1}         delete one file
 //   {p, dc: 1}        delete a whole cart folder
@@ -312,6 +345,21 @@ async function applyOne(store, op) {
         await writeText(store, parts, buf);
         return null;
     }
+    if (op.b !== undefined) {
+        if (!isBinary(key)) return "not a binary file";
+        if (typeof op.b !== "string") return "no bytes";
+        const bytes = fromBase64(op.b);
+        if (op.part === undefined || op.part === null) {
+            await writeText(store, parts, bytes);
+            return null;
+        }
+        const had = op.part === 0 ? new Uint8Array(0) : (store.parts.get(key) || new Uint8Array(0));
+        const joined = new Uint8Array(had.length + bytes.length);
+        joined.set(had, 0);
+        joined.set(bytes, had.length);
+        store.parts.set(key, joined);
+        return null;
+    }
     if (typeof op.t !== "string") return "no text";
     if (op.part === undefined || op.part === null) {
         await writeText(store, parts, op.t);
@@ -325,8 +373,9 @@ async function applyOne(store, op) {
     return null;
 }
 
-// Every syncable file in the local store as {rel: text}. This is what a site-mode
-// boot writes into the VFS INSTEAD of the served carts.json.
+// Every syncable file in the local store as {rel: text}, and {rel: {b: base64}}
+// for a binary one -- the served bundle's shape. This is what a site-mode boot
+// writes into the VFS INSTEAD of the served carts.json.
 export async function readAll(store) {
     const out = {};
     await walk(store.carts, "", out, 0);
@@ -349,7 +398,8 @@ async function walk(dir, prefix, out, depth) {
         // the VFS must not be seeded with them either.
         if (rel.indexOf("/") < 0) continue;
         const f = await handle.getFile();
-        out[rel] = await f.text();
+        out[rel] = isBinary(rel) ? { b: toBase64(new Uint8Array(await f.arrayBuffer())) }
+                                 : await f.text();
     }
 }
 
@@ -365,8 +415,9 @@ export async function seed(store, carts) {
     let n = 0;
     for (const rel in carts) {
         const parts = safeSegments(rel, skipLocal);
-        if (!parts || parts.length < 2) continue;
-        await writeText(store, parts, carts[rel]);
+        const data = fileData(carts[rel]);
+        if (!parts || parts.length < 2 || data === null) continue;
+        await writeText(store, parts, data);
         n++;
     }
     return n;

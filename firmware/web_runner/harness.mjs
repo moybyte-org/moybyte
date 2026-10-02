@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { fileData } from "./moy_store.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = resolve(process.env.MOY_DIST || join(HERE, "dist"));
@@ -41,7 +42,7 @@ mkdirs("/moy/carts");
 for (const rel in carts) {
     const full = "/moy/carts/" + rel;
     mkdirs(full.slice(0, full.lastIndexOf("/")));
-    mp.FS.writeFile(full, carts[rel]);
+    mp.FS.writeFile(full, fileData(carts[rel]));
 }
 
 const t0 = performance.now();

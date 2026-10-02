@@ -199,10 +199,12 @@ _entries = moy_sync._entries
 _is_dir = moy_sync._is_dir
 _read_text = moy_sync._read_text
 _read_chunks = moy_sync.read_text_chunks
+_is_binary = moy_sync.is_binary
 
 
 def pack_store(carts_root, listdir=None, read=None, isdir=None, tops=None):
-    """The whole store as the page's bundle shape: {"<top>/<rel>": text}.
+    """The whole store as the page's bundle shape: {"<top>/<rel>": text}, and
+    {"<top>/<rel>": {"b": base64}} for a BINARY_FILES file -- a cart's cover.
 
     The shape is `worker.js`'s, not a new one -- it is what the dev twin
     (`firmware/web_runner/serve.py --carts`, which calls THIS function) serves
@@ -247,6 +249,11 @@ def _pack_dir(out, path, prefix, _listdir, _isdir, _read):
         rel = prefix + "/" + name
         if isdir_:
             _pack_dir(out, full, rel, _listdir, _isdir, _read)
+            continue
+        if _is_binary(name):
+            pieces = moy_sync.read_binary_b64(full)
+            if pieces is not None:
+                out[rel] = {"b": "".join(pieces)}
             continue
         text = _read(full)
         if text is not None:             # binary/unreadable: skip, never crash
@@ -294,13 +301,22 @@ def _stream_dir(path, prefix, _listdir, _isdir, _read, first):
             for piece in _stream_dir(full, rel, _listdir, _isdir, _read, first):
                 yield piece
             continue
-        pieces = _value_pieces(full, _read)
+        binary = _is_binary(name)
+        pieces = (moy_sync.read_binary_b64(full) if binary
+                  else _value_pieces(full, _read))
         if pieces is None:               # binary/unreadable: skip, never crash
             continue
         if not first[0]:
             yield ","
         first[0] = False
         yield _jstr(rel)
+        if binary:
+            # A cover (moy_sync.BINARY_FILES): base64 needs no escaping.
+            yield ':{"b":"'
+            for piece in pieces:
+                yield piece
+            yield '"}'
+            continue
         yield ':"'
         for piece in pieces:
             yield _jesc(piece)

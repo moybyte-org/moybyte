@@ -124,7 +124,8 @@ NATIVE = {
     # drift behind the board serving it. Every other one is denied in its
     # board.toml, each with the hardware or the workload that is missing.
     "zero": {"moy_web"},
-    "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "js", "jsffi"},
+    "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
+            "jsffi"},
 }
 
 # Host-only modules that must NEVER reach a given target: staging one is the
