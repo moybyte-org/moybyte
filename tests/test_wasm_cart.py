@@ -70,6 +70,10 @@ def _hello(root):
     wasm_cart.build(HELLO, os.path.join(root, "hello.moy"))
 
 
+def _tier(root):
+    wasm_cart.build(os.path.join(FIXTURES, "tier.moy"), os.path.join(root, "tier.moy"))
+
+
 def _wat_cart(title, src, pages, **manifest):
     """A compiled cart assembled from inline WAT, as a store builder."""
     def build(root):
@@ -147,6 +151,51 @@ def test_the_hello_cart_golden_at_the_320x240_row(tmp_path, request):
         "the hello cart's frame moved (%s != %s). Re-baseline only if you can "
         "say which pixel moved and why: %s=1 .venv/bin/python -m pytest "
         "tests/test_wasm_cart.py -k golden" % (got, want, UPDATE_ENV))
+
+
+def test_the_tier_cart_frame_is_the_one_every_tier_holds(tmp_path, request):
+    """The tier cart (tests/fixtures/wasm/tier.moy) draws the same frame on
+    every tier: par's four bands into a 565 frame, blit565, then `read`'s and
+    `cfg`'s text and a circle over it. This is the host's side of its golden
+    (tests/tier_frame.py); tests/test_web_wasm_e2e.py holds the browser's
+    canvas to the same digest. Re-baseline as the hello golden is."""
+    import tier_frame
+    import device_canvas as dc
+    _binding_or_skip()
+    ws = host_app.build_workstation(_store(tmp_path, _tier))
+    open_cart(ws, "Tier Wasm")
+    _frames(ws, GOLDEN_FRAMES)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    cv = ws.sys_canvas
+    assert (cv.w, cv.h) == (tier_frame.W, tier_frame.H)
+    got = tier_frame.digest(tier_frame.from_canvas(cv._buf, dc.PAL565_WIRE is not dc.PAL565))
+    if os.environ.get(UPDATE_ENV) or request.config.getoption("--update-goldens",
+                                                              default=False):
+        tier_frame.GOLDEN.write_text(json.dumps({tier_frame.ROW: got}, indent=2,
+                                                sort_keys=True) + "\n")
+        return
+    assert got == tier_frame.golden(), (
+        "the tier cart's frame moved. Re-baseline only if you can say which "
+        "pixel moved and why: %s=1 .venv/bin/python -m pytest "
+        "tests/test_wasm_cart.py -k tier" % UPDATE_ENV)
+
+
+def test_the_tier_cart_streams_and_traps_on_the_host(tmp_path):
+    """Its other two halves: every _update fills the stream's room through
+    `snd`, which the host's output drains, and button A traps -- the run ends
+    on the error panel with no EDIT, as every compiled cart's trap does."""
+    _binding_or_skip()
+    ws = host_app.build_workstation(_store(tmp_path, _tier))
+    open_cart(ws, "Tier Wasm")
+    _frames(ws, 10)
+    queued, played, _starved, room = ws.player._lua.snd_counts()[:4]
+    assert queued > 0 and played > 0 and queued - played + room == 2048
+    ws.input.set_held("a", True)
+    for _ in range(3):
+        ws.input.begin_frame()
+        ws._dirty = True
+        ws.frame(_DT)
+    assert "unreachable" in (ws.player.cart_error or ""), ws.player.cart_error
 
 
 # A cart that counts its hooks into pmem: slot 0 the _init calls, 1 the

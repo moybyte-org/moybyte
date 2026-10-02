@@ -28,10 +28,18 @@ build from before the pin prompt can still prove the sync loop, and reporting
 it as unable to would be a false red on the half that works.
 """
 
+import json
 import os
+import re
 import shutil
 import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
 import warnings
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -122,3 +130,92 @@ def free_port():
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+class Host:
+    """A static host over `{path: bytes}`, with or without CORS, that writes
+    down every path it was asked for. A single range (`bytes=a-b`) answers
+    206 with those bytes and is written down in `ranges`, as GitHub Pages
+    answers one; a preflight (OPTIONS) is refused with 405, as Pages refuses
+    it, and written down in `preflights` -- a page that needed one could not
+    have read the host."""
+
+    def __init__(self, cors):
+        self.files = {}
+        self.asked = []
+        self.ranges = []
+        self.preflights = []
+        host = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_OPTIONS(self):
+                host.preflights.append(self.path)
+                self.send_response(405)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def do_GET(self):
+                path = self.path.split("?", 1)[0]
+                host.asked.append(path)
+                body = host.files.get(path)
+                m = re.match(r"bytes=(\d+)-(\d+)$", self.headers.get("Range") or "")
+                if body is not None and m:
+                    a, b = int(m.group(1)), int(m.group(2))
+                    host.ranges.append((path, a, b))
+                    part = body[a:b + 1]
+                    self.send_response(206)
+                    self.send_header("Content-Range", "bytes %d-%d/%d" % (a, b, len(body)))
+                    body = part
+                else:
+                    self.send_response(200 if body is not None else 404)
+                if cors:
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(body or b"")))
+                self.end_headers()
+                if body:
+                    self.wfile.write(body)
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.base = "http://127.0.0.1:%d" % self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def stop(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def serve(site, port):
+    """serve.py over a static `site` (the page's own host), and its base URL."""
+    import pytest
+    p = subprocess.Popen([sys.executable, "serve.py", str(port), str(site)],
+                         cwd=RUNNER, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    base = "http://127.0.0.1:%d" % port
+    for _ in range(50):
+        try:
+            urllib.request.urlopen(base + "/index.html", timeout=1).read(64)
+            return p, base
+        except OSError:
+            if p.poll() is not None:
+                pytest.fail("serve.py died on startup")
+            time.sleep(0.1)
+    p.terminate()
+    pytest.fail("serve.py never answered")
+
+
+def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000):
+    """One browsershot scenario against `base` in the Chrome profile
+    `profile`: (its stdout, every `js` step's value in order)."""
+    path = tmp_path / ("%s.json" % name)
+    path.write_text(json.dumps({"query": query, "boot_ms": boot_ms, "steps": steps}))
+    r = subprocess.run(
+        ["node", "browsershot.mjs", str(path), str(tmp_path / ("shots_" + name))],
+        cwd=RUNNER, env=dict(os.environ, MOY_BASE=base, MOY_PROFILE=str(profile),
+                             **(env or {})),
+        capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, "browsershot %s failed:\n%s\n%s" % (
+        name, r.stdout[-4000:], r.stderr[-500:])
+    js = [json.loads(j) for j in re.findall(r"js -> (.*)$", r.stdout, re.M)]
+    return r.stdout, js

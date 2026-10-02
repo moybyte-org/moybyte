@@ -62,6 +62,17 @@ blocking transport has no `ready`. `Fetch`, `Reach` and `Install` all give the
 frame back while a non-blocking answer is on its way, and each reads only what
 `ready` vouches for.
 
+A transport with `ranges` set (the browser's) can also be asked for part of a
+file -- `open(url, span=(start, n))`, answered 206 with those `n` bytes -- and
+then a release asset this console keeps only some of is read in PIECES: its
+zip's central directory first, then each run of members it keeps, so the
+other chips' modules are never fetched (`_Ranged`). Every member it keeps is
+checked against the index's sha256 as ever; the asset's own hash, which also
+covers what was skipped, is the one check a ranged read cannot make, and
+nothing it would vouch for is written. A server that answers a range with the
+whole file (200) gets the whole-asset read, which is what every console
+without `ranges` makes.
+
 A transport with `cors` set (the browser's) can read only what a server lets
 another origin read. A GitHub release download is not that, so it reads an
 asset's `mirror` -- the same bytes beside the index on the repository's Pages
@@ -144,6 +155,12 @@ STEP_MS = 120
 # A non-blocking transport is read only once this much (or the rest of the
 # body and its end) is in hand, so no unit ever waits inside a step.
 GATE = 4 + 26 + 65535 + 65535
+
+# A ranged read's first piece: the end of the zip, sized for the central
+# directory the index's file names make (`_cd_bytes`) and this much more for
+# extra fields and a comment. A directory that begins before it is fetched
+# again from where it begins.
+TAIL_SLACK = 256
 
 SAVES = "pmem.json"           # always carried across an update
 CONFIG = "config.json"        # carried when the kid changed it
@@ -383,9 +400,40 @@ def load_indexes(root):
 
 # -- what this console takes ------------------------------------------------------
 
-def plan(cart, chip=None, fmt=None):
+def _cd_bytes(cart, asset):
+    """The central directory and end record a zip of `asset`'s files takes
+    with no extra fields or comments."""
+    n = 22
+    for fn in asset["files"]:
+        n += 46 + len(cart["folder"]) + 1 + len(fn)
+    return n
+
+
+def _tail_bytes(cart, asset):
+    return min(asset["size"], _cd_bytes(cart, asset) + TAIL_SLACK)
+
+
+def _ranged_bytes(cart, asset, keep):
+    """What a ranged read of `asset` fetches when it keeps `keep`: its tail
+    and each kept member with its local header (30 bytes and the name, more
+    when a member carries an extra field)."""
+    n = _tail_bytes(cart, asset)
+    for fn in keep:
+        n += 30 + len(cart["folder"]) + 1 + len(fn) + asset["files"][fn]["size"]
+    return n
+
+
+def _kept(asset, files):
+    """The members of `asset` a console keeps, when it keeps some and not
+    all; else None, and the asset is best read whole."""
+    keep = [fn for fn in asset["files"] if fn in files]
+    return keep if 0 < len(keep) < len(asset["files"]) else None
+
+
+def plan(cart, chip=None, fmt=None, ranges=False):
     """What installing `cart` means on a console of `chip` running compiled-code
-    format `fmt` (both None where no compiled tier exists, the host):
+    format `fmt` (both None where no compiled tier exists, the host), whose
+    transport can (`ranges`) read part of a file or cannot:
 
       files           {name: {"size", "sha256"}} -- everything written
       module          this console's module's name, or None
@@ -393,7 +441,8 @@ def plan(cart, chip=None, fmt=None):
                       compiled tier -- it plays on the interpreter
       external        the cart's external files (each needs its licence accepted)
       store_bytes     what the written files add up to
-      download_bytes  what is fetched (whole assets, whole archives)
+      download_bytes  what is fetched: whole assets, or with `ranges` the pieces
+                      of one this console keeps only some of; whole archives
       load_bytes      the file a compiled cart's load reads -- this console's
                       module, or main.wasm when it plays on the interpreter --
                       which the fit check sizes it by; None for other runtimes
@@ -417,7 +466,8 @@ def plan(cart, chip=None, fmt=None):
         store += meta["size"]
     down = 0
     for a in cart["assets"]:
-        down += a["size"]
+        keep = _kept(a, files) if ranges else None
+        down += a["size"] if keep is None else _ranged_bytes(cart, a, keep)
     for e in ext:
         down += e["archive"]["size"]
     load = None
@@ -773,7 +823,7 @@ class _Fetched:
         self.left = size
         self.sha = sha
         self.what = what
-        self.h = hashlib.sha256()
+        self.h = hashlib.sha256() if sha is not None else None
         self.checked = False
 
     def readinto(self, buf):
@@ -793,7 +843,8 @@ class _Fetched:
         if not n:
             raise InstallError(STOPPED, "%s ended at %d of %d bytes"
                                % (self.what, self.size - self.left, self.size))
-        self.h.update(mv[:n])
+        if self.h is not None:
+            self.h.update(mv[:n])
         self.left -= n
         job.done += n
         return n
@@ -827,6 +878,9 @@ class _Fetched:
         if extra:
             raise InstallError(MISMATCH, "%s is larger than the index says (%d bytes)"
                                % (self.what, self.size))
+        if self.h is None:              # a ranged piece: its members are checked
+            self.checked = True
+            return
         got = _hex(self.h.digest())
         if got != self.sha:
             raise InstallError(MISMATCH, "%s hashes to %s, the index says %s"
@@ -949,19 +1003,23 @@ class _ZipReader:
     headers already said everything, and the asset's sha256 vouches for all of
     it."""
 
-    def __init__(self, job, src, cart, asset):
+    def __init__(self, job, src, cart, asset, seen=None, run=False):
         self.job = job
         self.src = src
         self.prefix = cart["folder"] + "/"
         self.files = asset["files"]
-        self.seen = {}
+        self.seen = {} if seen is None else seen
+        self.run = run            # a ranged read's run: members, then its end
         self.member = None        # [name, bytes left, sha256 or None, data descriptor]
         self.tail = False
 
     def unit(self):
-        """One bounded piece of work. False once the asset is done."""
+        """One bounded piece of work. False once the asset (or the run) is
+        done."""
         if self.member is not None:
             return self._data()
+        if self.run and not self.src.left:
+            return False
         if self.tail:
             if self.src.left:
                 self.src.readinto(self.job.scratch)
@@ -971,7 +1029,7 @@ class _ZipReader:
         if sig == b"PK\x03\x04":
             self._local()
             return True
-        if sig in (b"PK\x01\x02", b"PK\x05\x06"):
+        if sig in (b"PK\x01\x02", b"PK\x05\x06") and not self.run:
             missing = [fn for fn in self.files if fn not in self.seen]
             if missing:
                 raise InstallError(MISMATCH, "the zip has no %s" % ", ".join(missing))
@@ -1029,6 +1087,196 @@ class _ZipReader:
             _skip(self.src, 12 if bytes(d) == b"PK\x07\x08" else 8, self.job)
         self.member = None
         return True
+
+
+# The most of a zip's end its end record can be from: the record and the
+# longest comment.
+ZIP_END_MAX = 22 + 65535
+
+
+def _zip_end(tail):
+    """Where the zip's end record starts in `tail` (the end of the file), or
+    -1: the last signature whose comment runs exactly to the end."""
+    i = len(tail) - 22
+    while i >= 0:
+        if tail[i] == 0x50 and tail[i + 1] == 0x4B and tail[i + 2] == 5 \
+                and tail[i + 3] == 6 and i + 22 + _u16(tail, i + 20) == len(tail):
+            return i
+        i -= 1
+    return -1
+
+
+class _Ranged:
+    """A release asset read in pieces (the module docstring's `ranges`): the
+    end of its zip, whose central directory says where every member starts,
+    then each run of members this console keeps, read as a stored zip's
+    members are (`_ZipReader`), each checked against the index. It is the
+    job's source (`ready`, `finish`, `close`) and its reader (`unit`) at
+    once. It asks the asset's first URL (the mirror, on a console with
+    `cors`); an answer to its first range that is not 206 -- the whole file,
+    a refusal, no answer -- sends the asset back to the queue, to be read
+    whole from every URL the way a console without `ranges` reads it."""
+
+    def __init__(self, job, url, cart, asset, keep):
+        self.job = job
+        self.url = resolve(cart["index"], url)
+        self.cart = cart
+        self.asset = asset
+        self.size = asset["size"]
+        self.keep = keep
+        self.what = asset["name"]
+        self.counted = _ranged_bytes(cart, asset, keep)   # its share of job.total
+        self.tail_n = _tail_bytes(cart, asset)
+        self.spent = 0            # the end's bytes read so far
+        self.resp = None          # the answer awaited, or being read
+        self.need = 0             # what that answer must have in hand
+        self.runs = None          # [(start, end)] once the directory is read
+        self.src = None           # a run's bytes
+        self.zip = None           # and its members
+        self.seen = {}
+        self.whole = False        # the server sent the file: read it whole
+        self._open(self.size - self.tail_n, self.tail_n)
+
+    def _open(self, start, n):
+        """Ask for `n` bytes from `start`."""
+        job = self.job
+        t = _ticks_ms()
+        try:
+            self.resp = job.net.open(self.url, span=(start, n))
+        except Exception as exc:  # noqa: BLE001 -- a dropped request is a stopped one
+            raise InstallError(net_text(job.net, STOPPED), "%s: %s" % (self.url, exc))
+        finally:
+            job.t_net += _ticks_diff(_ticks_ms(), t)
+        self.need = n
+
+    def _count(self, n):
+        """The read fetches `n` bytes in all, as far as it now knows."""
+        self.job.total += n - self.counted
+        self.counted = n
+
+    def ready(self):
+        if self.src is not None:
+            return self.src.ready()
+        resp = self.resp
+        if resp is None or resp.status is None:
+            return resp is None
+        if resp.status != 206:
+            return True
+        r = getattr(resp, "ready", None)
+        return r is None or r(self.need)
+
+    def unit(self):
+        if self.zip is not None:
+            if self.zip.unit():
+                return True
+            self.src.finish()
+            self.src.close()
+            self.src = self.zip = None
+            return True
+        resp = self.resp
+        if resp is not None:
+            return self._answered(resp)
+        if not self.runs:
+            return False
+        start, end = self.runs.pop(0)
+        self._open(start, end - start)
+        return True
+
+    def _answered(self, resp):
+        """The head of the answer in hand is in: read on, or decide."""
+        if resp.status != 206 and self.runs is None:
+            _log("%s: no range from %s (HTTP %s), reading it whole"
+                 % (self.what, self.url, resp.status))
+            self.close()
+            self.whole = True
+            self.job.whole.append(self.asset)
+            self.job._queue.insert(0, ("asset", self.asset))
+            self._count(self.spent + self.size)
+            return False
+        if resp.status != 206:
+            self.close()
+            raise InstallError(STOPPED, "%s: HTTP %d for a range of %s"
+                               % (self.url, resp.status, self.what))
+        if self.runs is not None:
+            self.resp = None
+            self.src = _Fetched(self.job, resp, self.need, None, self.what)
+            self.zip = _ZipReader(self.job, self.src, self.cart, self.asset,
+                                  self.seen, run=True)
+            return True
+        tail = bytes(_exact(_Fetched(self.job, resp, self.need, None, self.what),
+                            self.need, self.job))
+        self.spent += len(tail)
+        self.close()
+        self._directory(tail)
+        return True
+
+    def _directory(self, tail):
+        """The runs to read, from the zip's end in `tail`."""
+        i = _zip_end(tail)
+        if i < 0:
+            whole = min(self.size, ZIP_END_MAX)
+            if len(tail) >= whole:
+                raise InstallError(PACKING, "%s has no zip end record" % self.what)
+            # A comment longer than the slack: ask for all the end could be.
+            self._count(self.counted + whole)
+            self._open(self.size - whole, whole)
+            return
+        count, cd_off = _u16(tail, i + 10), _u32(tail, i + 16)
+        base = self.size - len(tail)
+        if cd_off < base:
+            # A directory longer than the index's names make: fetch it whole.
+            self._count(self.counted + self.size - cd_off)
+            self._open(cd_off, self.size - cd_off)
+            return
+        prefix = self.cart["folder"] + "/"
+        names = {}
+        j = cd_off - base
+        for _ in range(count):
+            if j + 46 > len(tail) or bytes(tail[j:j + 4]) != b"PK\x01\x02":
+                raise InstallError(PACKING, "%s's zip directory is malformed" % self.what)
+            n, x, c = _u16(tail, j + 28), _u16(tail, j + 30), _u16(tail, j + 32)
+            name = bytes(tail[j + 46:j + 46 + n]).decode()
+            fn = name[len(prefix):] if name.startswith(prefix) else None
+            if fn not in self.asset["files"] or fn in names:
+                raise InstallError(MISMATCH, "the zip holds %s, which the index does "
+                                             "not list (or lists once)" % name)
+            names[fn] = _u32(tail, j + 42)
+            j += 46 + n + x + c
+        missing = [fn for fn in self.asset["files"] if fn not in names]
+        if missing:
+            raise InstallError(MISMATCH, "the zip has no %s" % ", ".join(missing))
+        order = sorted((off, fn) for fn, off in names.items())
+        runs = []
+        for k, (off, fn) in enumerate(order):
+            end = order[k + 1][0] if k + 1 < len(order) else cd_off
+            if fn in self.keep:
+                if runs and runs[-1][1] == off:
+                    runs[-1] = (runs[-1][0], end)
+                else:
+                    runs.append((off, end))
+        fetched = self.spent
+        for start, end in runs:
+            fetched += end - start
+        self._count(fetched)
+        self.runs = runs
+
+    def finish(self):
+        if self.whole:
+            return
+        missing = [fn for fn in self.keep if fn not in self.seen]
+        if missing:
+            raise InstallError(MISMATCH, "the zip has no %s" % ", ".join(missing))
+
+    def close(self):
+        resp, self.resp = self.resp, None
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001
+                pass
+        src, self.src = self.src, None
+        if src is not None:
+            src.close()
 
 
 class _ZlibStream:
@@ -1355,9 +1603,12 @@ class Install:
         self.folder = cart["folder"]
         self.stage = stage_root(root) + "/" + self.folder
         self.target = root + "/" + self.folder
+        self.ranges = bool(getattr(net, "ranges", False))
+        self.whole = []                   # assets a ranged read handed back
         self.total = 0
         for a in cart["assets"]:
-            self.total += a["size"]
+            keep = _kept(a, p["files"]) if self.ranges else None
+            self.total += a["size"] if keep is None else _ranged_bytes(cart, a, keep)
         for e in p["external"]:
             self.total += e["size"]       # the inflate (or the copy) moves the bar too
             if e["path"] not in self.supplied:
@@ -1498,8 +1749,13 @@ class Install:
         if kind == "local":
             self._reader = _Local(self, self.supplied[item["path"]], item)
         elif kind == "asset":
-            self._opening = _Opening(asset_urls(item, getattr(self.net, "cors", False)),
-                                     item["size"], item["sha256"], item["name"],
+            urls = asset_urls(item, getattr(self.net, "cors", False))
+            keep = _kept(item, self.plan["files"]) \
+                if self.ranges and item not in self.whole else None
+            if keep is not None:
+                self._reader = self._src = _Ranged(self, urls[0], self.cart, item, keep)
+                return True
+            self._opening = _Opening(urls, item["size"], item["sha256"], item["name"],
                                      (kind, item))
         else:
             arc = item["archive"]

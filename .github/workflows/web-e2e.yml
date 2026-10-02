@@ -26,6 +26,12 @@ name: Web console E2E
 #                                  -- into OPFS whole, and the cart plays on a
 #                                  second load. A board-served page fetches
 #                                  nothing.
+#   tests/test_web_wasm_e2e.py     a compiled cart on the browser's own engine:
+#                                  the tier cart's frame is the host's golden,
+#                                  its samples reach the page and its trap the
+#                                  error panel; Jet Teapot and ESP 88 play; Get
+#                                  Carts installs one by range, no module
+#                                  fetched, and it plays.
 #
 # All are gated on MOYBYTE_WEB_E2E, and until this workflow existed nothing set
 # it: the whole browser tier -- the thing a visitor actually touches -- had no
@@ -58,7 +64,12 @@ on:
       - "tests/test_web_*"
       - "tests/web_e2e.py"
       - "tests/cart_store_fixtures.py"  # the store suite builds its carts with it
-      - "tests/fixtures/**"         # the p8 cart the drop suite imports
+      - "tests/fixtures/**"         # the p8 cart the drop suite imports, the wasm carts
+      - "tests/tier_frame.py"       # the tier cart's golden, shared with the host
+      - "native/**"                 # the C the browser build compiles, its engine included
+      - "ports/jet/**"              # the Jet carts the wasm suite builds
+      - "tools/jet_cart.py"
+      - "tools/wasm_cart.py"
       - "tools/p8_import.py"        # the vendored converter the wasm freezes
       - "tools/p8_lua_port.py"      # ...the vendored PORTER, frozen beside it
       - "tools/p8_writer.py"        # ...and the .moy writer it shares with the CLI
@@ -74,6 +85,11 @@ on:
       - "tests/web_e2e.py"
       - "tests/cart_store_fixtures.py"
       - "tests/fixtures/**"
+      - "tests/tier_frame.py"
+      - "native/**"
+      - "ports/jet/**"
+      - "tools/jet_cart.py"
+      - "tools/wasm_cart.py"
       - "tools/p8_import.py"
       - "tools/p8_lua_port.py"
       - "tools/p8_writer.py"
@@ -161,12 +177,28 @@ jobs:
       - name: Build the browser console
         run: firmware/web_runner/build.sh
 
+      # The wasm suite builds Jet Teapot and ESP 88 the way mit-carts' recipe
+      # does, with wasi-sdk 24 -- ci.yml's cache, under the sha256 the build
+      # pins, so a runner fetches it once.
+      - name: wasi-sdk pin
+        id: wasi_sdk
+        run: echo "sha256=$(sed -n 's/^WASI_SDK_SHA256 = "\(.*\)"$/\1/p' tools/jet_cart.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache wasi-sdk
+        uses: actions/cache@v4
+        with:
+          path: experiments/wasm_aot/toolchain/wasi-sdk
+          key: wasi-sdk-${{ steps.wasi_sdk.outputs.sha256 }}
+
+      - name: wasi-sdk for the Jet carts
+        run: .venv/bin/python tools/jet_cart.py --toolchain
+
       - name: Drive the hosted console in real Chrome
         run: |
           .venv/bin/python -m pytest -rs --junitxml=web-e2e.xml \
             tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
             tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
-            tests/test_web_store_e2e.py
+            tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py
 
       # pytest was green -- but was it green over anything? The prerequisite
       # skips fail hard above, so this catches the other way of proving nothing:

@@ -27,6 +27,7 @@ in the browser's MEMFS, so they are ephemeral: a reload resets the machine.
 JS contract (see worker.js):
     boot(carts_root, cart=None, ...) -> build the Workstation
     assets_json()                 -> the page's metadata payload (JSON string)
+    state_json()                  -> the dev channel's `state`, for a harness
     step_frame_json(dt, ahead)    -> tick one frame; "" when the redraw was
                                      skipped (#44 dirty gate), else a small
                                      JSON string; the PIXELS travel separately
@@ -305,8 +306,9 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         web_canvas.WebCompositor(int(w), int(h)))
     # Cart runtimes: moycore, the SAME native module and glue the boards run --
     # third architecture, one engine. A build without the usermod still boots
-    # (a lua cart opens the Player's runtime-missing panel), and this build
-    # carries no wasm engine, so a compiled cart opens it too.
+    # (a lua cart opens the Player's runtime-missing panel). A compiled cart
+    # runs on the browser's own WebAssembly engine (native/moy_wasm_web and the
+    # worker's cart engine) through the same WasmRun a board uses.
     runtimes = {}
     try:
         from moycore_glue import make_runtimes
@@ -792,6 +794,23 @@ def step_frame_json(dt, audio_ahead=-1.0):
         "audio": audio_b64,
         "input": web_input.effective_input_kinds(ws),
     })
+
+
+def state_json():
+    """The console's `state`: the dev channel's one-line snapshot -- the keys
+    every on-glass suite reads -- plus this page's sample stream
+    (`moy_audio.snd_counts()`: frames a compiled cart queued, frames the page's
+    audio pull mixed, frames it found none, the room, whether it is open), for
+    a harness driving the page (`window.__moyState()`)."""
+    import dev_channel
+    st = dev_channel._remote_state(_S["ws"])
+    try:
+        import moy_audio
+        sc = moy_audio.snd_counts()
+    except (ImportError, AttributeError):
+        sc = None
+    st["snd"] = list(sc) if sc is not None else None
+    return json.dumps(st)
 
 
 def _apply(events):

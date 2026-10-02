@@ -29,14 +29,11 @@ bench and FAILS under CI. ~3 Chrome boots, ~90s.
 import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
-import threading
 import time
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -47,40 +44,6 @@ from web_e2e import RUNNER, ROOT, DIST
 pytestmark = pytest.mark.skipif(
     not os.environ.get("MOYBYTE_WEB_E2E"),
     reason="MOYBYTE_WEB_E2E not set (spawns headless Chrome for ~90s)")
-
-
-class _Host:
-    """A static host over `{path: bytes}`, with or without CORS, that writes
-    down every path it was asked for."""
-
-    def __init__(self, cors):
-        self.files = {}
-        self.asked = []
-        host = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *a):
-                pass
-
-            def do_GET(self):
-                path = self.path.split("?", 1)[0]
-                host.asked.append(path)
-                body = host.files.get(path)
-                self.send_response(200 if body is not None else 404)
-                if cors:
-                    self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Content-Length", str(len(body or b"")))
-                self.end_headers()
-                if body:
-                    self.wfile.write(body)
-
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.base = "http://127.0.0.1:%d" % self.httpd.server_address[1]
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-
-    def stop(self):
-        self.httpd.shutdown()
-        self.httpd.server_close()
 
 
 def _lua(folder, title, colour, extra=None):
@@ -154,22 +117,6 @@ def _console(tmp_path, index_url):
     return site
 
 
-def _serve(site, port):
-    p = subprocess.Popen([sys.executable, "serve.py", str(port), str(site)],
-                         cwd=RUNNER, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-    base = "http://127.0.0.1:%d" % port
-    for _ in range(50):
-        try:
-            urllib.request.urlopen(base + "/index.html", timeout=1).read(64)
-            return p, base
-        except OSError:
-            if p.poll() is not None:
-                pytest.fail("serve.py died on startup")
-            time.sleep(0.1)
-    p.terminate()
-    pytest.fail("serve.py never answered")
-
-
 def _layout():
     """Where the app draws on the 320x240 handheld tier -- its own layout
     class, so a tap lands where the console drew."""
@@ -215,31 +162,17 @@ _FORGET_APP = """(async () => {
 })()"""
 
 
-def _run(tmp_path, name, query, steps, base, profile, env=None):
-    path = tmp_path / ("%s.json" % name)
-    path.write_text(json.dumps({"query": query, "boot_ms": 15000, "steps": steps}))
-    r = subprocess.run(
-        ["node", "browsershot.mjs", str(path), str(tmp_path / ("shots_" + name))],
-        cwd=RUNNER, env=dict(os.environ, MOY_BASE=base, MOY_PROFILE=str(profile),
-                             **(env or {})),
-        capture_output=True, text=True, timeout=300)
-    assert r.returncode == 0, "browsershot %s failed:\n%s\n%s" % (
-        name, r.stdout[-4000:], r.stderr[-500:])
-    js = [json.loads(j) for j in re.findall(r"js -> (.*)$", r.stdout, re.M)]
-    return r.stdout, js
-
-
 def test_a_hosted_console_installs_carts_into_its_own_store(tmp_path):
     web_e2e.require("store", "carts")
-    pages, releases = _Host(cors=True), _Host(cors=False)
+    pages, releases = web_e2e.Host(cors=True), web_e2e.Host(cors=False)
     data_bin, wad = _shelf(pages, releases)
     (tmp_path / "doom1.wad").write_bytes(wad)
     site = _console(tmp_path, pages.base + "/index.json")
-    server, base = _serve(site, web_e2e.free_port())
+    server, base = web_e2e.serve(site, web_e2e.free_port())
     profile = tmp_path / "chrome"
     at = _layout()
     try:
-        out, js = _run(tmp_path, "install", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=get_carts.moy", [
             {"note": "Get Carts opened at boot; the index came from PAGES", "wait": 4000},
             {"shot": "list"},
             {"js": "window.__moyPersist ? window.__moyPersist.mode : 'none'"},
@@ -301,7 +234,7 @@ def test_a_hosted_console_installs_carts_into_its_own_store(tmp_path):
 
         # A SECOND LOAD in the same browser: the shelf, the record and the bytes
         # come back out of OPFS -- and the installed cart plays.
-        out2, js2 = _run(tmp_path, "reload", "?handheld=1&dev=1", [
+        out2, js2 = web_e2e.run(tmp_path, "reload", "?handheld=1&dev=1", [
             {"wait": 2500},
             {"js": "pzAsk(), 'asked'"}, {"wait": 600},
             {"js": "Array.from(document.getElementById('pzc').options)"
@@ -315,7 +248,7 @@ def test_a_hosted_console_installs_carts_into_its_own_store(tmp_path):
             "a system cart the store never had did not come from the bundle"
         assert js2[2].startswith("loaded "), js2[2]
 
-        out3, js3 = _run(tmp_path, "play", "?handheld=1&dev=1&cart=rock.moy", [
+        out3, js3 = web_e2e.run(tmp_path, "play", "?handheld=1&dev=1&cart=rock.moy", [
             {"wait": 3000}, {"js": "assCart"}, {"shot": "rock_plays"},
             {"js": "JSON.stringify(window.__moyPersist || null)"},
         ], base, profile)
@@ -335,7 +268,7 @@ def test_a_board_served_page_gets_no_carts_of_its_own(tmp_path, board, home):
     from -- by whether that console has a screen -- and fetches nothing, not
     even an index its host names."""
     web_e2e.require("store", "carts")
-    pages = _Host(cors=True)
+    pages = web_e2e.Host(cors=True)
     pages.files["/index.json"] = b'{"version": 1, "carts": []}'
     store = tmp_path / "store"
     store.mkdir()
@@ -353,7 +286,7 @@ def test_a_board_served_page_gets_no_carts_of_its_own(tmp_path, board, home):
                 break
             except OSError:
                 time.sleep(0.1)
-        out, js = _run(tmp_path, "board", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "board", "?handheld=1&dev=1&cart=get_carts.moy", [
             {"wait": 2500},
             {"js": "window.__moyPersist ? window.__moyPersist.mode : 'none'"},
             {"js": "JSON.stringify((window.__moyUpdate || {}).services || null)"},

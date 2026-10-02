@@ -13,7 +13,7 @@ moycore drives (see "A cart's session").
 | the runtime | `wamr/`: the AOT-plus-interpreter subset of Moybyte's WAMR fork (the plan's "carried as a fork"), copied by `tools/vendor_wamr.py` at the commit `wamr_vendor.json` records (`make vendor-wamr`; `tests/test_wamr_vendor.py` holds the copy to the fork) |
 | the build | `micropython.cmake`: the runtime as its own static library -- AOT plus WAMR's classic interpreter (no JIT, no WASI, no builtin libc); `MOY_WASM_FAST_INTERP` picks the fast interpreter instead, unset on every console board (#158: classic costs less flash for a fallback tier that is never the speed path) |
 | the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report; a cart's session, AOT or interpreted |
-| the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through |
+| the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through -- the browser's engine (`native/moy_wasm_web`) implements it too |
 | the key | `moy_wasm_key.h`: the provenance key an AOT module must carry, per chip, its compiled-code FORMAT VERSION, and the layout of its signature -- main.wasm on the interpreter carries none and needs none |
 | the footprint | `moy_wasm_footprint.h`: what a load takes -- the pool, the block a module file is read into, the run stack -- stated once for the engine, the Player's fit check and the host twin |
 | the thread | `moy_wasm_thread.c`: the run's pthread, stack placed per board; a cart's par lanes are made the same way |
@@ -128,9 +128,11 @@ survives its firmware", ESP 88): `device/moycore_glue.WasmRun` opens
 `main.wasm` itself on the interpreter instead, with no key and no signature,
 and the Player's notice says it needs an update to run at full speed (below).
 The sync RPC
-declines binary files, so a module never crosses between a browser and a
-board (`runtime/moy_sync.py`): a compiled cart plays where its module was
-put, or on the interpreter where it was not.
+declines binary files, so neither a module nor `main.wasm` crosses between a
+browser and a board (`runtime/moy_sync.py`): a compiled cart plays where it
+was put -- on a board natively or on the interpreter, in a page that keeps its
+own carts on the browser's engine (`native/moy_wasm_web`); a page a board
+serves never lists it, having no `main.wasm` to scan.
 
 **A full-frame blit presents above the tick model's 30 on every board.** The
 plan expected the S3 to sit at or under it; measured on 2026-09-25 (the figures

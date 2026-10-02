@@ -711,15 +711,30 @@ class WasmRun(MoycoreRun):
         # to show the short notice (never the blocking panel a missing or
         # unsigned module used to get); `self.interp_cause` ("missing" or
         # "unsigned") is which sub-line it shows.
-        module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
-        has_module = True
+        #
+        # An engine with no compiled-module tier -- the browser's
+        # (native/moy_wasm_web), whose CHIP is None -- runs main.wasm itself
+        # at its full speed: no module is looked for, none is missing, and
+        # the cart is never "slow" for it.
+        native = _moy_wasm.CHIP is not None
+        has_module = False
+        module = None
+        if native:
+            module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
+            try:
+                open(module, "rb").close()
+                has_module = True
+            except OSError:
+                pass
+        # main.wasm is the cart: an AOT module is a compiled form of it. A
+        # cart without one is off the shelf already (moy_carts.load), so this
+        # is the file gone between the scan and the run, refused by name.
         try:
-            open(module, "rb").close()
+            head = wasm_head(path + "/" + main)
         except OSError:
-            has_module = False
-        head = wasm_head(path + "/" + main)
-        sha = _sha256_file(path + "/" + main)
-        self.interp = not has_module
+            raise RuntimeError("refused: this cart's %s is not on this console" % main)
+        sha = _sha256_file(path + "/" + main) if has_module else None
+        self.interp = native and not has_module
         self.interp_cause = "missing" if self.interp else None
         self.ws = ws
         self.ns = ns
@@ -869,24 +884,29 @@ class WasmRuntime:
         rule -- its pool is a different (measured) shape, and its module file
         is never freed back to the linear memory the way an AOT load's is
         (native/moy_wasm/README.md, "The interpreter tier") -- rather than
-        skipping a cart with no matching module, or sizing it as AOT would."""
+        skipping a cart with no matching module, or sizing it as AOT would.
+        An engine with no compiled-module tier (CHIP None, the browser's)
+        sizes main.wasm by its one rule."""
         pages = cart.get("memory")
         path = cart.get("path")
         if not pages or not path:
             return None
         main = cart.get("main", "main.wasm")
-        module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
         import os
         gate = getattr(self.ws, "_with_sd", None)
 
         def _size(p):
             return gate(lambda: os.stat(p)[6]) if gate is not None else os.stat(p)[6]
 
-        interp = False
-        try:
-            size = _size(module)
-        except OSError:
-            interp = True
+        size = None
+        interp = True
+        if _moy_wasm.CHIP is not None:
+            try:
+                size = _size(aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT))
+                interp = False
+            except OSError:
+                pass
+        if size is None:
             try:
                 size = _size(path + "/" + main)
             except OSError:
@@ -905,7 +925,9 @@ class WasmRuntime:
         return _moy_wasm.footprint(memory, int(module_len))
 
     def memory(self):
-        """(free, largest block) of PSRAM, the engine's own report."""
+        """(free, largest block) of the memory a cart loads into, the
+        engine's own report: PSRAM on a board, the largest memory the
+        browser gives one module there."""
         m = _moy_wasm.mem()
         return m[3], m[4]
 

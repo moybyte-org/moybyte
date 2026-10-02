@@ -2311,13 +2311,25 @@ static int pm_alive(void)
 // `snd` goes to the speaker's mixer where the board has one (moy_audio's
 // stream, MOY_AUDIO_SND); where it has none the binding drains it by the clock.
 //
-// Compiled only when the engine is in the build (its cmake defines MOY_WASM);
-// the MicroPython surface below is unconditional so qstr scanning, which does
-// not see that define, finds every name.
+// Compiled only when an engine is in the build: the boards' (native/moy_wasm,
+// WAMR -- its cmake defines MOY_WASM) or the browser's (native/moy_wasm_web,
+// the page's own WebAssembly engine -- its Makefile fragment defines
+// MOY_WASM_JS). Both implement the same session surface; where libmoy's
+// binding differs by engine (moy_wasm.h) -- registering the table, checking a
+// loaded module, binding, calling a hook, par's lanes, the frame hand-off --
+// so do the callbacks below, and nothing else does. The MicroPython surface
+// below is unconditional so qstr scanning, which does not see those defines,
+// finds every name.
 
 enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW };
 
-#if MOY_WASM
+#if MOY_WASM || MOY_WASM_JS
+#define MOYCORE_WASM 1
+#else
+#define MOYCORE_WASM 0
+#endif
+
+#if MOYCORE_WASM
 #include "libmoy/moy_wasm.h"
 #include "moy_wasm_session.h"
 #if MOY_AUDIO_SND
@@ -2337,10 +2349,12 @@ typedef struct {
     char dir[192];               // the cart's folder: `read`'s only root
     char file[MOY_WASM_NAME_MAX + 1];   // the file held open, if any
     uint32_t file_size;          // its size, read once when it was opened
+#if MOY_WASM
     // The import table's registration storage: WAMR sorts it in place and
     // points at it until the runtime is destroyed, so it lives as long as
     // this struct does -- freed by wasm_end, after the session's teardown.
     NativeSymbol *natives;
+#endif
 } wrun_t;
 
 static wrun_t *WR;
@@ -2368,7 +2382,9 @@ static void wmem_free(void *p)
 
 static void wrun_free(wrun_t *r)
 {
+#if MOY_WASM
     wmem_free(r->natives);
+#endif
     wmem_free(r);
 }
 
@@ -2517,8 +2533,9 @@ static void hw_layer_free(void *user, moy_pixel *p)
 
 static int wo_runtime_up(void *user, char *err, size_t errlen)
 {
-    uint32_t n = 0;
     (void)user;
+#if MOY_WASM
+    uint32_t n = 0;
     moy_wasm_natives(&n);
     WR->natives = (NativeSymbol *)wmem_calloc(n, sizeof(NativeSymbol));
     if (!WR->natives) {
@@ -2529,31 +2546,64 @@ static int wo_runtime_up(void *user, char *err, size_t errlen)
         snprintf(err, errlen, "the import table did not register");
         return 1;
     }
+#else
+    // The page's adapters read the table where it is (moy_web_natives).
+    (void)err;
+    (void)errlen;
+#endif
     return 0;
 }
 
-static int wo_loaded(void *user, wasm_module_t module, char *err, size_t errlen)
+static int wo_loaded(void *user, moy_wasm_module module, char *err, size_t errlen)
 {
     (void)user;
+#if MOY_WASM
     return moy_wasm_check(module, g_whead, g_whead_len, g_wpages, err, errlen);
+#else
+    return moy_wasm_check_bytes(module->bytes, module->size, g_wpages, err, errlen);
+#endif
 }
 
-static int wo_bound(void *user, wasm_exec_env_t env, char *err, size_t errlen)
+static int wo_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
 {
     (void)user;
+#if MOY_WASM
     if (moy_wasm_open(&WR->w, &RUN.con, env) != 0) {
         snprintf(err, errlen, "a hook is missing");
         return 1;
     }
+#else
+    // The binding the page's adapters call the table with.
+    (void)err;
+    (void)errlen;
+    moy_wasm_bind(&WR->w, &RUN.con);
+    env->binding = &WR->w;
+#endif
     return 0;
 }
 
 static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
 {
     (void)user;
+#if MOY_WASM
     if (what == WCALL_INIT) return moy_wasm_init(&WR->w, err, errlen);
     if (what == WCALL_UPDATE) return moy_wasm_update(&WR->w, dt, err, errlen);
     return moy_wasm_draw(&WR->w, err, errlen);
+#else
+    // The page calls the export; the binding brackets the call. A trap the
+    // binding raised names itself; anything else the cart threw (an
+    // unreachable, an access outside its memory) is the engine's message.
+    int hook = what == WCALL_INIT ? MOY_WASM_INIT
+             : what == WCALL_UPDATE ? MOY_WASM_UPDATE : MOY_WASM_DRAW;
+    moy_wasm_begin(&WR->w, hook);
+    err[0] = 0;
+    int threw = moy_wasm_session_export(hook, dt, err, errlen);
+    if (!moy_wasm_end(&WR->w, threw)) return 0;
+    const char *trap = moy_wasm_trapped(&WR->w);
+    if (trap) snprintf(err, errlen, "%s", trap);
+    else if (!err[0]) snprintf(err, errlen, "the cart trapped");
+    return 1;
+#endif
 }
 
 static void wo_unbound(void *user)
@@ -2575,6 +2625,7 @@ static const moy_wasm_ops WASM_OPS = {
     NULL, wo_runtime_up, wo_loaded, wo_bound, wo_call, wo_unbound,
 };
 
+#if MOY_WASM
 // The cart's par items on the session's lanes, from the engine's thread.
 static int wo_lane_go(void *user, int lane, void (*work)(void *), void *job)
 {
@@ -2604,6 +2655,7 @@ static int wo_frame(void *user, const uint8_t *pixels, const moy_pixel *lut)
     (void)pixels;
     return g_take_frames & (lut ? TAKE_PALETTE : TAKE_565);
 }
+#endif // MOY_WASM
 
 // A trap ends the run, and the frame it interrupted is never presented: the
 // canvas is cleared before the console paints its report over it, and the
@@ -2631,11 +2683,13 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
     }
     WR->w.read = hw_read;
     WR->w.wire_swapped = swapped;
+#if MOY_WASM
     WR->w.frame = wo_frame;
     WR->w.lanes = moy_wasm_session_lanes();
     WR->w.lane_go = wo_lane_go;
     WR->w.lane_wait = wo_lane_wait;
     WR->w.lane_stack = MOY_WASM_EXEC_STACK;
+#endif
 #if MOY_AUDIO_SND
     if (moy_audio_snd_open()) WR->w.snd = wo_snd;
 #endif
@@ -2691,7 +2745,9 @@ static void wasm_end(void)
 #if MOY_AUDIO_SND
     moy_audio_snd_close();
 #endif
+#if MOY_WASM
     g_take_frames = 0;
+#endif
     wfile_forget();
     MP_STATE_VM(moycore_wasm_gate) = MP_OBJ_NULL;
     if (WR) {
@@ -2699,7 +2755,7 @@ static void wasm_end(void)
         WR = NULL;
     }
 }
-#endif // MOY_WASM
+#endif // MOYCORE_WASM
 
 // wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
 //           gate=None, allow_unsigned=False, interp=False) -> None, or the
@@ -2724,7 +2780,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
     if (!RUN.open || RUN.L || RUN.wasm)
         mp_raise_msg(&mp_type_RuntimeError,
                      MP_ERROR_TEXT("moycore: wasm_open wants a run begun with vm=False"));
-#if MOY_WASM
+#if MOYCORE_WASM
     MP_STATE_VM(moycore_wasm_gate) = n_args > 6 ? a[6] : MP_OBJ_NULL;
     char err[192];
     size_t hlen = 0;
@@ -2752,7 +2808,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_open_obj, 6, 9, mod_wasm_ope
 // run must not call it again.
 static mp_obj_t mod_wasm_quit(void)
 {
-#if MOY_WASM
+#if MOYCORE_WASM
     return mp_obj_new_bool(RUN.wasm && WR && WR->w.quitting);
 #else
     return mp_const_false;
@@ -2886,12 +2942,6 @@ static mp_obj_t mod_frame_presented(size_t n_args, const mp_obj_t *a)
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_presented_obj, 0, 2,
                                            mod_frame_presented);
 
-#if MOY_WASM
-#define MOYCORE_WASM 1
-#else
-#define MOYCORE_WASM 0
-#endif
-
 static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
 {
     if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
@@ -2904,7 +2954,7 @@ static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
     g_tick_ms = (uint32_t)mp_hal_ticks_ms();   // h_time_ms counts from here
     if (!RUN.L) {
         // A compiled cart: its two hooks on the engine's thread.
-#if MOY_WASM
+#if MOYCORE_WASM
         if (wasm_tick_c(dt, draw, err, sizeof(err)) != 0)
             return mp_obj_new_str(err, strlen(err));
         return mp_const_none;
@@ -3003,7 +3053,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_retarget_obj, mod_retarget);
 
 static mp_obj_t mod_close(void)
 {
-#if MOY_WASM
+#if MOYCORE_WASM
     wasm_end();                  // the session first: it draws on the console
 #endif
     if (RUN.L) lua_close(RUN.L);

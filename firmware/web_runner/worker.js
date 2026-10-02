@@ -21,6 +21,7 @@
 //   {t:"init", search}   boot the console; `search` is location.search (tier + cart)
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
 //   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
+//   {t:"state"}          the console's `state` (web_boot.state_json), for a harness
 //   {t:"run"}            start stepping (the page's play-button gesture)
 //   {t:"fbret", b}       a framebuffer being handed BACK for reuse (see below)
 //   {t:"reload"}         dev hot-reload: re-read carts.json/files.json, restart
@@ -58,12 +59,13 @@
 //                        fetch from `host`: the page asks the player for theirs
 //   {t:"unpick", id}     ...and the question is over
 //   {t:"installed", folder, d}  an install reached the browser's store
+//   {t:"state", json}    the answer to {t:"state"}
 import { loadMicroPython } from "./micropython.mjs";
 import * as store from "./moy_store.mjs";
 
 let mp = null, step = null, applyEvents = null, assets = null, reload = null;
 // The p8 drop's two Python entry points (#194), bound at boot like the rest.
-let importP8Json = null, editCart = null, openCart = null;
+let importP8Json = null, editCart = null, openCart = null, stateJson = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
 let fbAddr = null, fbLen = null;
@@ -257,6 +259,207 @@ function wpFlush() {
 setInterval(wpFlush, WP_MS);
 
 function say(s) { self.postMessage({ t: "status", s: s }); }
+
+// A COMPILED CART ("runtime": "wasm"), run beside the console as a SIBLING
+// WebAssembly module: this worker's own engine compiles and instantiates the
+// cart's main.wasm, never an engine inside the VM. The console drives it
+// exactly as a board's does -- moycore through the session surface
+// (native/moy_wasm/moy_wasm_session.h), which native/moy_wasm_web implements
+// by calling `Module.moyEngine` below to open, bind, run a hook and close --
+// so the Player, the fit check, the canvas and the verbs are the boards'.
+//
+// The cart's "moy" imports are adapters over libmoy's import table, generated
+// from the table's own signature strings (moy_web_natives): every verb the
+// cart calls is the C function every host calls (moycore's libmoy/moy_wasm.c),
+// with the same marshalling, blit, read and traps. This is moy-spec's web
+// player's adapter (runner/cart.js) on this worker's VM. The two modules have
+// separate memories, so a pointer the cart hands over is an offset into ITS
+// memory: where a row says '*~' -- a pointer and the length it covers -- the
+// range is bounds-checked against the cart's memory, copied into the VM's,
+// passed to C as that copy, and copied back when the call returns. A pointer
+// a row carries as a plain i32 (blit's frame, camera's out) is the binding's
+// to reach, through span() and store() (`Module.moyCart`, libmoy's embed.c).
+// A trap the binding raises is thrown as a JavaScript exception, which
+// unwinds the cart exactly as a wasm trap does.
+//
+// A cart's par items run here, on this one thread, one after another: the
+// cart's memory is not shared, so no other worker could reach it. The binding
+// calls item() for each, which moves the cart's own stack pointer as every
+// host does.
+const OUT_OF_BOUNDS = "out of bounds memory access";
+class CartTrap extends Error {}
+
+function installCartEngine(M) {
+    const dec = new TextDecoder();
+    const u32 = () => new Uint32Array(M.HEAPU8.buffer);   // fresh: growth replaces it
+    const cstr = (p) => {
+        const h = M.HEAPU8;
+        let e = p;
+        while (h[e]) e++;
+        return dec.decode(h.subarray(p, e));
+    };
+    // '*~' is one pointer-and-length pair; every other letter one scalar.
+    const params = (sig) => {
+        const inner = /^\((.*)\)(.?)$/.exec(sig)[1];
+        const out = [];
+        for (let k = 0; k < inner.length; k++) {
+            if (inner[k] === "*" && inner[k + 1] === "~") { out.push("span"); k++; }
+            else out.push(inner[k]);
+        }
+        return out;
+    };
+    let C = null;              // the VM's exports this engine calls (open's `vm`)
+    let w = 0;                 // the binding the table is called with
+    let instance = null, memory = null, imports = null, limit = -1;
+    let owned = [];            // the VM-side copies of the current import call
+    const cartBytes = () => new Uint8Array(memory.buffer);
+    const scratch = (n) => {
+        const p = C.malloc(n > 0 ? n : 1);
+        owned.push(p);
+        return p;
+    };
+    const trapText = (p) => (p ? cstr(p) : "");
+    const reach = {
+        // One of par's items: _par(i, arg) with the cart's stack pointer at sp,
+        // then the stack pointer as it was. 0 when it returned; 1 when it threw,
+        // with the trap recorded unless the binding recorded its own.
+        item(i, arg, sp) {
+            const ex = instance.exports;
+            const g = ex.__stack_pointer;
+            const saved = g.value;
+            g.value = sp;
+            try {
+                ex._par(i, arg);
+                return 0;
+            } catch (e) {
+                if (!(e instanceof Error)) throw e;
+                if (!C.trapped(w)) {
+                    const msg = String(e.message || e);
+                    const b = new TextEncoder().encode(msg + "\0");
+                    const p = C.malloc(b.length);
+                    M.HEAPU8.set(b, p);
+                    C.itemTrap(w, p);
+                    C.free(p);
+                }
+                return 1;
+            } finally {
+                g.value = saved;
+            }
+        },
+        span(off, n) {
+            const mem = cartBytes();
+            if (off + n > mem.length) return 0;
+            const p = scratch(n);
+            M.HEAPU8.set(mem.subarray(off, off + n), p);
+            return p;
+        },
+        store(off, src, n) {
+            const mem = cartBytes();
+            if (off + n > mem.length) return 0;
+            mem.set(M.HEAPU8.subarray(src, src + n), off);
+            return 1;
+        },
+    };
+    // One import per row of the table, each an adapter over the row's C.
+    function adapters() {
+        const cp = C.malloc(4);
+        const base = C.natives(cp);
+        const n = u32()[cp >> 2];
+        C.free(cp);
+        const out = {};
+        for (let i = 0; i < n; i++) {
+            const h = u32(), at = (base >> 2) + i * 4;   // NativeSymbol: four words
+            const name = cstr(h[at]), fn = C.fn(h[at + 1]), kinds = params(cstr(h[at + 2]));
+            out[name] = (...args) => {
+                if (!w) throw new CartTrap("moy: an import ran before the cart was bound");
+                const cargs = [w];
+                const copies = [];
+                const outer = owned;
+                let a = 0;
+                owned = [];
+                try {
+                    for (const k of kinds) {
+                        if (k !== "span") { cargs.push(args[a++]); continue; }
+                        const off = args[a++] >>> 0, len = args[a++] >>> 0;
+                        const mem = cartBytes();
+                        if (off + len > mem.length) throw new CartTrap(OUT_OF_BOUNDS);
+                        const p = scratch(len);
+                        M.HEAPU8.set(mem.subarray(off, off + len), p);
+                        copies.push([off, p, len]);
+                        cargs.push(p, len);
+                    }
+                    const r = fn(...cargs);
+                    for (const [off, p, len] of copies)
+                        cartBytes().set(M.HEAPU8.subarray(p, p + len), off);
+                    const t = C.trapped(w);
+                    if (t) throw new CartTrap(trapText(t));
+                    return r;
+                } finally {
+                    for (const p of owned) C.free(p);
+                    owned = outer;
+                }
+            };
+        }
+        return out;
+    }
+    M.moyEngine = {
+        // Compile and instantiate the cart (the session's load, which the host
+        // half has already checked against SPEC.md 16's shape). "" when it
+        // stands, else why it does not, in the words the Player reads: a
+        // memory the browser would not give is "out of memory".
+        open(bytes, vm) {
+            C = vm;
+            try {
+                if (!imports) imports = adapters();
+                const module = new WebAssembly.Module(bytes);
+                instance = new WebAssembly.Instance(module, { moy: imports });
+            } catch (e) {
+                instance = null;
+                const msg = String((e && e.message) || e);
+                if (e instanceof RangeError) return "out of memory: " + msg;
+                return (e instanceof WebAssembly.CompileError ? "load: " : "instantiate: ") + msg;
+            }
+            memory = instance.exports.memory;
+            M.moyCart = reach;
+            return "";
+        },
+        bind(binding) { w = binding; },
+        // One hook: null when it returned, else what it threw. Only an Error is
+        // the cart's: anything else is the VM's own unwinding passing through.
+        hook(h, dt) {
+            const ex = instance.exports;
+            try {
+                if (h === 0) ex._init();
+                else if (h === 1) ex._update(dt);
+                else ex._draw();
+                return null;
+            } catch (e) {
+                if (!(e instanceof Error)) throw e;
+                return String(e.message || e);
+            }
+        },
+        close() {
+            instance = memory = null;
+            w = 0;
+            M.moyCart = null;
+        },
+        // The largest memory, in pages, this browser gives one module: the
+        // fit check's figure, found once by allocating it.
+        limitPages() {
+            if (limit < 0) {
+                limit = 0;
+                for (let p = 65536; p >= 16; p >>= 1) {
+                    try {
+                        new WebAssembly.Memory({ initial: p, maximum: p });
+                        limit = p;
+                        break;
+                    } catch (e) { }
+                }
+            }
+            return limit;
+        },
+    };
+}
 
 function mkdirs(p) {
     let cur = "";
@@ -576,6 +779,7 @@ async function init(search) {
     // permanent frame tax, not headroom.
     mp = await loadMicroPython({ heapsize: 16 * 1024 * 1024,
         stdout: (l) => console.log("[moy]", l) });
+    installCartEngine(mp._module);
     say("loading console...");
     // FROZEN-first, like the page was: a ship build bakes the console into the wasm
     // and has no modules.json; a --stage-only dev dist adds one, and loading it into
@@ -663,7 +867,7 @@ async function init(search) {
         + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
         + "services_json, carts_poll_json, carts_event_json, "
-        + "import_p8_json, edit_cart, open_cart");
+        + "import_p8_json, edit_cart, open_cart, state_json");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
@@ -681,6 +885,7 @@ async function init(search) {
     importP8Json = mp.globals.get("import_p8_json");
     editCart = mp.globals.get("edit_cart");
     openCart = mp.globals.get("open_cart");
+    stateJson = mp.globals.get("state_json");
     if (gpioPins) {
         gpioPoll = mp.globals.get("gpio_poll_json");
         gpioAck = mp.globals.get("gpio_ack_json");
@@ -959,8 +1164,12 @@ async function cartsGet(j) {
     const mine = () => cartsLive.get(j.id) === live;
     let r;
     try {
-        // no-cache: revalidate, so CHECK reads the shelf as it is now.
-        r = await fetch(j.url, { signal: live.ac.signal, cache: "no-cache" });
+        // no-cache: revalidate, so CHECK reads the shelf as it is now. A
+        // range (part of a release asset, cart_index's ranged read) is one
+        // `bytes=a-b`, which a page may send any host without a preflight.
+        const opt = { signal: live.ac.signal, cache: "no-cache" };
+        if (j.range) opt.headers = { Range: "bytes=" + j.range[0] + "-" + j.range[1] };
+        r = await fetch(j.url, opt);
     } catch (e) {
         // CORS and no network look the same from here, and both mean this
         // page cannot read that host: status 0.
@@ -969,7 +1178,7 @@ async function cartsGet(j) {
     }
     if (!mine()) return;
     cartsSay({ id: j.id, status: r.status });
-    if (r.status !== 200 || !r.body) {
+    if ((r.status !== 200 && r.status !== 206) || !r.body) {
         try { live.ac.abort(); } catch (e) { }
         return;
     }
@@ -1275,6 +1484,8 @@ self.onmessage = async (ev) => {
             inbox.push(m.json);
         } else if (m.t === "ahead") {
             ahead = m.v;
+        } else if (m.t === "state") {
+            self.postMessage({ t: "state", json: stateJson ? stateJson() : "null" });
         } else if (m.t === "run") {
             // lastStep too: a (re)start must begin with a clean 1/60 dt, not a
             // clamped jump measured from whenever the loop last ran.

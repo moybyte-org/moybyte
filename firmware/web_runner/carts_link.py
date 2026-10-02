@@ -25,7 +25,8 @@ which the worker reads out of the VFS staging folder by path.
 
 Events the worker sends back (`event_json`), each a JSON object:
     {"id": n, "status": s}        a response head (0: no answer at all -- a
-                                  host this page may not read, or no network)
+                                  host this page may not read, or no network;
+                                  206 for a request with a range)
     {"id": n, "end": 1}           the body is all in the spool
     {"id": n, "error": "..."}     the fetch, the keep or the pick failed
     {"id": n, "kept": 1}          the keeper's commit is durable
@@ -171,12 +172,16 @@ class WebCartNet:
     """`ws.cart_net` in a page that keeps its own carts: the page's fetch.
 
     `cors` because a page reads only what a server lets another origin read,
-    which is why cart_index reads an asset's mirror first here. The page is
-    online by the browser's lights, so `online()` has nothing to dial; a fetch
-    that cannot reach anything answers status 0, and the store says it could
-    not reach the shelf."""
+    which is why cart_index reads an asset's mirror first here. `ranges`
+    because a fetch can ask for part of a file (`span`, a single Range a page
+    may send any host without asking first), which is how this console --
+    which keeps no compiled module -- reads a release asset without its
+    modules. The page is online by the browser's lights, so `online()` has
+    nothing to dial; a fetch that cannot reach anything answers status 0, and
+    the store says it could not reach the shelf."""
 
     cors = True
+    ranges = True
 
     def __init__(self, link):
         self.link = link
@@ -184,10 +189,13 @@ class WebCartNet:
     def online(self):
         return True
 
-    def open(self, url):
+    def open(self, url, span=None):
         a = _Answer(self.link, self.link._id())
         self.link._live[a.rid] = a
-        self.link.queue({"op": "get", "id": a.rid, "url": url})
+        job = {"op": "get", "id": a.rid, "url": url}
+        if span is not None:
+            job["range"] = [span[0], span[0] + span[1] - 1]
+        self.link.queue(job)
         return a
 
 

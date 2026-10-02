@@ -51,11 +51,11 @@ class _Trickle:
         if self.status is None:
             self.status = self.want_status
             return
-        if self.status == 200:
+        if self.status in (200, 206):
             self.got = min(len(self.body), self.got + self.chunk)
 
     def _ended(self):
-        return self.status is not None and (self.status != 200
+        return self.status is not None and (self.status not in (200, 206)
                                             or self.got == len(self.body))
 
     def ready(self, n):
@@ -107,6 +107,37 @@ class Trickle:
     def tick(self):
         for r in self.live:
             r.tick()
+
+
+class Ranged(Trickle):
+    """The browser's transport, which can also ask for part of a file
+    (`span`): a host answers 206 with those bytes, or -- `ignore` -- the
+    whole file, or -- `refuse` -- nothing a page may read (status 0, a
+    preflight a host turned down). `spans` is every range asked for."""
+
+    ranges = True
+
+    def __init__(self, routes, ignore=False, refuse=False, **kw):
+        Trickle.__init__(self, routes, **kw)
+        self.ignore = ignore
+        self.refuse = refuse
+        self.spans = []
+
+    def open(self, url, span=None):
+        if span is None:
+            return Trickle.open(self, url)
+        self.opened.append(url)
+        self.spans.append((url, span[0], span[1]))
+        if self.refuse or url in self.unreadable:
+            r = _Trickle(b"", 0, self.chunk)
+        elif url not in self.routes:
+            r = _Trickle(b"not found", 404, self.chunk)
+        elif self.ignore:
+            r = _Trickle(self.routes[url], 200, self.chunk)
+        else:
+            r = _Trickle(self.routes[url][span[0]:span[0] + span[1]], 206, self.chunk)
+        self.live.append(r)
+        return r
 
 
 def _store(tmp_path):
@@ -203,6 +234,139 @@ def test_a_browser_that_can_read_neither_says_it_cannot_reach_the_shelf(tmp_path
     _run(job, net)
     assert job.error == ci.UNREACHABLE and "HTTP 0" in job.detail
     _untouched(root, "jet.moy")
+
+
+# -- a ranged read: only the members this console keeps ------------------------------
+
+def _zip_members(z):
+    """{name: (header start, data end)} of a stored zip's members."""
+    import zipfile
+    import io
+    out = {}
+    with zipfile.ZipFile(io.BytesIO(z)) as zf:
+        for info in zf.infolist():
+            h = info.header_offset
+            n = int.from_bytes(z[h + 26:h + 28], "little")
+            x = int.from_bytes(z[h + 28:h + 30], "little")
+            out[info.filename] = (h, h + 30 + n + x + info.compress_size)
+    return out
+
+
+@pytest.mark.parametrize("chunk", [1, 777, 1 << 20])
+def test_the_browser_reads_only_the_members_it_keeps(tmp_path, chunk):
+    """A console with no compiled tier keeps main.wasm and the cart's files,
+    never a chip's module: it reads the zip's directory and then the runs of
+    members it keeps, and no byte of a module crosses. What lands is byte for
+    byte what the whole read installs, every member checked."""
+    repo = Repo(BASE)
+    repo.add("jet", release=GITHUB, mirror=True, cover=b"\x89PNG fake cover",
+             extra={"assets.bin": os.urandom(40000)})
+    cart = _cart(repo, "jet")
+    asset = cart["assets"][0]
+    mirror = repo.url(asset["mirror"])
+    z = repo.files[asset["mirror"]]
+    p = ci.plan(cart, None, None, ranges=True)
+    assert not [fn for fn in p["files"] if fn.endswith(".aot")]
+    assert p["download_bytes"] < asset["size"]
+    root = _store(tmp_path)
+    net = Ranged(repo.routes(), cors=True, unreadable=[asset["url"]], chunk=chunk)
+    job = ci.Install(cart, p, net, root, _session, step_ms=1000)
+    _run(job, net, limit=10 ** 7)
+    assert job.error is None, job.detail
+    assert set(net.opened) == {mirror}, net.opened
+    members = _zip_members(z)
+    tail = net.spans[0]
+    assert tail[1] + tail[2] == len(z) and tail[2] <= ci._cd_bytes(cart, asset) \
+        + ci.TAIL_SLACK
+    for url, start, n in net.spans[1:]:
+        for name, (a, b) in members.items():
+            if name.endswith(".aot"):
+                assert start + n <= a or start >= b, "a module's bytes were fetched"
+    assert job.done == job.total == p["download_bytes"]
+    whole = Path(_store(tmp_path / "w"))
+    _run(ci.Install(cart, ci.plan(cart), MemNet(repo.routes()), str(whole), _session))
+    assert sorted(os.listdir(job.path)) == sorted(p["files"])
+    for fn in p["files"]:
+        assert (Path(job.path) / fn).read_bytes() == (whole / "jet.moy" / fn).read_bytes()
+    assert ci.load_record(root)["jet.moy"]["files"] == ci.record_entry(cart, p)["files"]
+
+
+@pytest.mark.parametrize("how", ["ignore", "refuse"])
+def test_a_host_that_gives_no_range_gets_the_asset_read_whole(tmp_path, how):
+    """A server that sends the whole file for a range, or a range the page
+    may not send it: the asset goes back to be read whole, from every URL,
+    and installs exactly as it would have."""
+    repo = Repo(BASE)
+    repo.add("jet", release=GITHUB, mirror=True)
+    cart = _cart(repo, "jet")
+    asset = cart["assets"][0]
+    root = _store(tmp_path)
+    net = Ranged(repo.routes(), cors=True, unreadable=[asset["url"]],
+                 **{how: True})
+    p = ci.plan(cart, None, None, ranges=True)
+    job = ci.Install(cart, p, net, root, _session)
+    _run(job, net)
+    assert job.error is None, job.detail
+    assert len(net.spans) == 1
+    assert net.opened == [repo.url(asset["mirror"])] * 2
+    assert job.done == job.total
+    assert sorted(os.listdir(job.path)) == sorted(p["files"])
+
+
+def test_a_member_whose_bytes_are_wrong_lands_nothing_from_a_ranged_read(tmp_path):
+    repo = Repo(BASE)
+    repo.add("jet", release=GITHUB, mirror=True)
+    cart = _cart(repo, "jet")
+    asset = cart["assets"][0]
+    z = bytearray(repo.files[asset["mirror"]])
+    a, b = _zip_members(bytes(z))["jet.moy/main.wasm"]
+    z[b - 1] ^= 0xFF
+    routes = repo.routes()
+    routes[repo.url(asset["mirror"])] = bytes(z)
+    root = _store(tmp_path)
+    net = Ranged(routes, cors=True, unreadable=[asset["url"]])
+    job = ci.Install(cart, ci.plan(cart, None, None, True), net, root, _session)
+    _run(job, net)
+    assert job.error == ci.MISMATCH and "main.wasm" in job.detail, job.detail
+    _untouched(root, "jet.moy")
+
+
+def test_a_directory_longer_than_its_names_is_fetched_from_where_it_begins(tmp_path):
+    """A zip comment longer than the slack pushes the directory out of the
+    first range; the read asks again from where the end record says it
+    begins, and installs."""
+    repo = Repo(BASE)
+    repo.add("jet", release=GITHUB, mirror=True)
+    cart = _cart(repo, "jet")
+    asset = cart["assets"][0]
+    z = bytearray(repo.files[asset["mirror"]])
+    comment = b"c" * (ci.TAIL_SLACK + 500)
+    z[-2:] = len(comment).to_bytes(2, "little")
+    z += comment
+    z = bytes(z)
+    asset["size"], asset["sha256"] = len(z), sha(z)
+    routes = repo.routes()
+    routes[repo.url(asset["mirror"])] = z
+    root = _store(tmp_path)
+    net = Ranged(routes, cors=True, unreadable=[asset["url"]])
+    job = ci.Install(cart, ci.plan(cart, None, None, True), net, root, _session)
+    _run(job, net)
+    assert job.error is None, job.detail
+    assert net.spans[0][1] + net.spans[0][2] == len(z)
+    assert net.spans[1][1] + net.spans[1][2] == len(z) and net.spans[1][2] > net.spans[0][2]
+    assert job.done == job.total
+
+
+def test_a_cart_whose_every_member_is_kept_is_read_whole(tmp_path):
+    repo = Repo(BASE)
+    repo.add("tune", runtime="lua", modules=(), release=GITHUB, mirror=True)
+    cart = _cart(repo, "tune")
+    p = ci.plan(cart, None, None, ranges=True)
+    assert p["download_bytes"] == cart["assets"][0]["size"]
+    net = Ranged(repo.routes(), cors=True, unreadable=[cart["assets"][0]["url"]])
+    job = ci.Install(cart, p, net, _store(tmp_path), _session)
+    _run(job, net)
+    assert job.error is None and net.spans == []
 
 
 # -- a non-blocking transport ---------------------------------------------------------
@@ -784,6 +948,22 @@ def test_the_bridge_reads_a_spool_only_as_far_as_it_has_grown(link):
     a.close()
     assert json.loads(lk.poll_json()) == [{"op": "drop", "id": a.rid}]
     lk.event_json(json.dumps({"id": a.rid, "end": 1}))   # a late answer: ignored
+
+
+def test_the_bridge_asks_the_page_for_a_range_and_reads_its_206(link):
+    """A ranged read's piece: the page's fetch is asked for `bytes=a-b` (the
+    worker's cartsGet sends it as one Range), and a 206 is read like a 200."""
+    mod, lk, spool, _woke, _landed = link
+    net = mod.WebCartNet(lk)
+    assert net.ranges is True
+    a = net.open("https://pages.example/carts/a.zip", span=(100, 50))
+    assert json.loads(lk.poll_json()) == [{"op": "get", "id": a.rid, "range": [100, 149],
+                                           "url": "https://pages.example/carts/a.zip"}]
+    (spool / str(a.rid)).write_bytes(b"x" * 50)
+    lk.event_json(json.dumps({"id": a.rid, "status": 206}))
+    lk.event_json(json.dumps({"id": a.rid, "end": 1}))
+    buf = bytearray(64)
+    assert a.status == 206 and a.ready(51) and a.readinto(buf) == 50
 
 
 def test_the_bridge_reports_a_host_it_may_not_read_as_status_zero(link):

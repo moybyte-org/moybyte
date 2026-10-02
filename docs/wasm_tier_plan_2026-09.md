@@ -45,7 +45,9 @@ the decisions below record what they changed.
   Lua, because a host and a device that disagree about what a verb does is
   the disease that deleted lupa. There is no wasmtime tier; the spike's host
   runner stays an oracle inside `experiments/wasm_aot/doom/`. The browser
-  adapts the same C thunks in JavaScript.
+  adapts the same C thunks in JavaScript: its own engine runs the cart's
+  `main.wasm` as a sibling module behind the boards' session surface
+  (`native/moy_wasm_web`).
 - **The module shape is moycore's.** A native module (new: native/moy_wasm)
   is the ENGINE only: the vendored runtime and the thread a cart runs on. The
   import table is C in libmoy beside the Lua binding, and moycore hosts it
@@ -195,6 +197,14 @@ where it fits. The numbers and the fit measurement are on
 `native/moycore/README.md`, `experiments/wasm_aot/doom/README.md`, and the
 proposal in moy-spec).
 
+The browser tier is in too (2026-10-02, owner's ask): the hosted console
+runs a compiled cart's `main.wasm` on the browser's own engine through the
+same moycore, `WasmRun` and Player, with moy-spec's web-player adapters over
+libmoy's import table (`native/moy_wasm_web`'s README), and the tier cart's
+frame is the host's golden pixel for pixel (`tests/test_web_wasm_e2e.py`).
+Nothing native applies there -- no module, key, signature or switch -- and
+Get Carts installs `main.wasm` and the cart's files alone.
+
 ### The showcase — what remains
 
 Jet Teapot, a 3D cart on Jet (https://github.com/CubeCoders/Jet, MIT), runs on
@@ -247,7 +257,9 @@ module a board needs when a cart has none.
   modules beside `main.wasm` in its release asset, and a console's Get Carts
   app (#124) installs `main.wasm` with the one module named for its chip and
   format; an update rebuilds that set when the index lists a module the
-  installed copy lacks.
+  installed copy lacks. A browser installs `main.wasm` with no module, and
+  reads the asset by range so the modules are never fetched
+  (`runtime/cart_index.py`'s `_Ranged`).
 - Compiling in the cloud so a cart can be written on the device alone is a
   separate proposal on top of this.
 

@@ -9,6 +9,8 @@
     "native/moy_gfx/libmoy/moy_data.c": "091a8271274d6165dd8ac73e1d577c65c6cf86a03da44223368c564eddbd366c",
     "native/moy_gfx/libmoy/moy_pixel.h": "46cf4139a46bbf8f641e8f9ec98982ff21482734d352b196b40b86fd82a17d40",
     "native/moy_gfx/libmoy/moy_sprite.c": "5d95ef9aeb5d2322511ca58a6223b63af01a5dd0d9fdcb516022be9519c9ec57",
+    "native/moy_wasm_web/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
+    "native/moy_wasm_web/libmoy/embed.c": "4128d0dae5245595cb43c0dfd89dd617e0fe0bac5a2335902c5dd8e609321633",
     "native/moycore/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moycore/libmoy/moy_lua.c": "45b30acfd8894ec9642b4bdaea1c014516165dc25beeb7f3486b7efccefd97ec",
     "native/moycore/libmoy/moy_p8.c": "d3dac60efd94c44dbc215bcd5cf350dc41220f9cc384c38add292143ac97a678",
@@ -17,8 +19,8 @@
     "tools/wat.py": "cc7332d29d4642fede58d2521f343c836c3e4457f4b309b9f1f8553d24817796"
   },
   "upstream": {
-    "commit": "dcd04c78ad190f9a69f6880793e872d46c9ec6be",
-    "date": "2026-09-30",
+    "commit": "cf2cf7fb0dfe0cecb239a918f1eb89dfabc5b5fc",
+    "date": "2026-10-02",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }

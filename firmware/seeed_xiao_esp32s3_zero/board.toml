@@ -376,8 +376,9 @@ module = "moy_wasm"
 why = """
 The WebAssembly cart engine (the vendored WAMR runtime and the thread a module
 runs on). This board runs no cart in any language -- a cart paired with it runs
-in the browser, whose own engine executes a wasm cart -- so the runtime would
-be flash spent in both OTA slots for code nothing calls."""
+in the browser console it serves, whose compiled tier is the browser's own
+WebAssembly engine running a cart's main.wasm (native/moy_wasm_web) -- so the
+runtime would be flash spent in both OTA slots for code nothing calls."""
 
 [[native.shared.deny]]
 module = "moy_png"

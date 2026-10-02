@@ -1862,6 +1862,65 @@ def test_a_cart_with_no_module_for_this_chip_runs_on_the_interpreter(tmp_path):
         world.close()
 
 
+def _browser_world():
+    """The browser's engine (native/moy_wasm_web): `moy_wasm` with no
+    compiled-module tier, CHIP and FORMAT None."""
+    world = _wasm_world()
+    world.mod._moy_wasm.CHIP = None
+    world.mod._moy_wasm.FORMAT = None
+    return world
+
+
+def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_path):
+    """The browser runs main.wasm itself on its own engine: no module is
+    looked for (the cart's chips' modules are not this console's), none is
+    missing, so the run is not `interp` and the Player shows no slow-play
+    notice -- and main.wasm needs no hash, key or signature."""
+    cart, main = _compiled(tmp_path, chips=("esp32s3", "esp32p4"))
+    world = _browser_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert not run.interp and run.interp_cause is None
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert len(opens) == 1
+        (_v, module, head, pages, sha, _cdir, _sw, _gate, _unknown, interp) = opens[0]
+        assert module == main and sha is None and interp is True
+        assert open(main, "rb").read().startswith(head) and pages == 3
+    finally:
+        world.close()
+
+
+def test_an_engine_with_no_compiled_tier_sizes_main_wasm_by_its_one_rule(tmp_path):
+    cart, main = _compiled(tmp_path, chips=("esp32s3",))
+    world = _browser_world()
+    try:
+        engine = _Engine(world)
+        rt = world.mod.make_wasm_runtime(FakeWs())
+        assert rt.footprint(cart) == (3 * 65536 + os.path.getsize(main), 3 * 65536)
+        assert engine.interp_asked == [(3 * 65536, os.path.getsize(main))]
+        assert engine.asked == []
+    finally:
+        world.close()
+
+
+@pytest.mark.parametrize("make", [_wasm_world, _browser_world])
+def test_a_cart_without_its_main_wasm_is_refused_by_name(tmp_path, make):
+    """main.wasm is the cart. One that has gone between the shelf's scan
+    (which lists no cart without its main) and the run is a plain refusal
+    before the console is begun, not an error from inside the engine."""
+    cart, main = _compiled(tmp_path, chips=())
+    os.remove(main)
+    world = make()
+    try:
+        with pytest.raises(RuntimeError) as e:
+            world.mod.WasmRun(FakeWs(project=_CartProject(cart)), make_ns(), None)
+        assert str(e.value) == "refused: this cart's main.wasm is not on this console"
+        assert "run_begin" not in world.core.verbs()
+    finally:
+        world.close()
+
+
 def test_a_key_mismatch_that_retries_clean_reads_as_missing(tmp_path):
     """A corrupted or mismatched AOT file (rare: the name matched, the
     content did not) is retried on the interpreter same as an absent one,

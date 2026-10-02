@@ -89,9 +89,30 @@ nor those docs will warn you about:
     makes.
   - **The shelves are the serving host's**: an `indexes.json` beside the page
     replaces the defaults, read once at boot.
-  - **The browser carries no compiled-cart engine**, so every compiled cart in
-    the published indexes lists as CAN'T PLAY here, Doom included; the browser
-    path is driven end to end with Lua carts (`tests/test_web_store_e2e.py`).
+  - **A page keeps no compiled module**, so a release asset is read by RANGE
+    (`ranges` on the page's transport, `cart_index._Ranged`): the zip's
+    directory, then the runs of members it keeps -- a cart's modules are most
+    of its asset and never cross. Any first range not answered 206 (a host that
+    ignores ranges, a refused preflight) reads the asset whole.
+    `tests/test_web_wasm_e2e.py` installs a compiled cart this way and plays
+    it; `tests/test_web_store_e2e.py` drives the Lua side.
+- **A compiled cart runs on the BROWSER'S engine, behind the boards' session
+  surface** (`native/moy_wasm_web`, its README). The cart's `main.wasm` is a
+  sibling module the worker instantiates (`worker.js`'s cart engine, moy-spec's
+  web-player adapters over libmoy's import table); moycore, `WasmRun`, the
+  Player and the canvas are the boards'. What bites:
+  - **Nothing on a board is reimplemented here, and nothing native applies**:
+    no AOT module, key, signature or Unknown sources -- `moy_wasm.CHIP` is None,
+    so WasmRun opens `main.wasm` and is never "slow" for it.
+  - **A hook's catch rethrows anything that is not an `Error`**: the VM's own
+    longjmp unwinds as a JavaScript exception through the cart's frames, and
+    swallowing it would strand MicroPython's nlr.
+  - **A page a board serves gets no `main.wasm`** (the wire carries text and
+    covers), so its scan leaves the board's compiled carts off its shelf
+    (`moy_carts.load`: no main, no cart); they play on the board.
+  - **The site-mode sweep must pass a file it cannot carry by stat**
+    (`moy_sync.StoreWatcher`, crc None): when it re-read every binary file on
+    every sweep, an installed Doom drew a frame a second.
 - **THE PAGE IS THE SERVING BOARD'S UPDATE SURFACE** (#41/#53, 2026-08-29), and
   what it does depends on whether that board has glass. Headless: the strip IS
   the update screen — two taps, then a polled progress read, because the board

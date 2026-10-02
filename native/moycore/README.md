@@ -98,12 +98,17 @@ HUD line are opaque rects, so they are declared (`ws.patch_cart_frame`) and
 taken from the game canvas instead. The proposal's rule is what makes the
 late read legal: a frame stays as blitted until `_draw` returns.
 
-It compiles only when the engine is in the image: `native/moy_wasm`'s cmake
-defines `MOY_WASM`, `moycore.WASM` is 1 there and 0 on the unix and wasm-runner
-builds, where `libmoy/moy_wasm.c` is an empty translation unit. The MicroPython
-surface is unconditional, because qstr scanning does not see that define.
-`device/moycore_glue.py`'s `WasmRun` is the glue; the host twin is
-`runtime/moyhost_wasm.c`.
+It compiles only when an engine is in the image: `native/moy_wasm`'s cmake
+defines `MOY_WASM` on the boards, and in the web runner `native/moy_wasm_web`'s
+fragment defines `MOY_WASM_JS` -- the browser's own WebAssembly engine behind
+the same session surface, whose binding is libmoy's JavaScript-embedder build.
+Where libmoy's API differs by engine (registering the table, checking a loaded
+module, binding, calling a hook, `par`'s lanes, the frame hand-off) so do the
+session callbacks, and nothing else does. `moycore.WASM` is 1 in both and 0 on
+the unix build, where `libmoy/moy_wasm.c` is an empty translation unit. The
+MicroPython surface is unconditional, because qstr scanning does not see those
+defines. `device/moycore_glue.py`'s `WasmRun` is the glue on every tier but the
+host, whose twin is `runtime/moyhost_wasm.c`.
 
 ## What it does NOT compile
 

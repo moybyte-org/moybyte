@@ -36,7 +36,10 @@
 // reaches it, and the I2S channel never changes hands or rate -- the stream is
 // at the output's 22050, so the mix is one add per sample on core 1. The
 // fallback feed plays the synth only: a cart's stream opens only while the
-// task runs, and moycore drains it by the clock otherwise.
+// task runs, and moycore drains it by the clock otherwise. A build with no
+// IDF has no task and no fallback feed: what pulls its audio is render()
+// (the web runner's, once a frame), so there the stream is mixed into what
+// render() returns, after the synth, the same way.
 //
 // While a cart streams, the task runs a SHALLOW pipeline: blocks of 128
 // frames into a ring of 4 x 128, about 29 ms from the task taking a frame to
@@ -340,6 +343,10 @@ static mp_obj_t mod_render(size_t n_args, const mp_obj_t *a) {
     } else {
         s_audio.rate = s_rate;
         moy_audio_render(&s_audio, (int16_t *)bi.buf, (int)nframes);
+        if (s_pcm_on) {
+            moy_stream_mix(&s_pcm, (int16_t *)bi.buf, (int)nframes, s_audio.rate,
+                           s_audio.master);
+        }
         s_frames_pyrender += (uint32_t)nframes;
     }
     moy_unlock();
@@ -349,8 +356,9 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_render_obj, 2, 3,
                                            mod_render);
 
 // active() -> int. Bit c per sounding voice, bit 4 for a running music track,
-// bit 5 for the beep. Non-zero is "something is audible" -- what the Music
-// editor's preview and the console's redraw gate ask.
+// bit 5 for the beep, bit 6 for a compiled cart's stream holding frames not
+// yet mixed. Non-zero is "something is audible" -- what the Music editor's
+// preview, the console's redraw gate and the web runner's pull ask.
 static mp_obj_t mod_active(void) {
     uint32_t mask = 0;
     int i;
@@ -367,6 +375,9 @@ static mp_obj_t mod_active(void) {
         if (s_audio.bleft > 0.0f) {
             mask |= (uint32_t)1 << 5;
         }
+    }
+    if (s_pcm_on && s_pcm.count > 0) {
+        mask |= (uint32_t)1 << 6;
     }
     moy_unlock();
     return mp_obj_new_int_from_uint(mask);
@@ -591,29 +602,33 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_running_obj, mod_running);
 
 // --- the compiled cart's stream (moy_audio_snd.h) ---------------------------
 
+// With IDF the core-1 task is what plays the stream, so it opens only while
+// the task runs. Without IDF, render() is what plays it (see the header).
 int moy_audio_snd_open(void) {
+    size_t bytes = MOY_AUDIO_SND_DEPTH * sizeof(int16_t);
 #if MOY_AUDIO_HAVE_IDF
     if (s_task == NULL) {
         return 0;
     }
     if (s_pcm_ring == NULL) {
-        size_t bytes = MOY_AUDIO_SND_DEPTH * sizeof(int16_t);
         s_pcm_ring = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
         if (s_pcm_ring == NULL) {
             s_pcm_ring = heap_caps_malloc(bytes, MALLOC_CAP_DEFAULT);
         }
-        if (s_pcm_ring == NULL) {
-            return 0;
-        }
+    }
+#else
+    if (s_pcm_ring == NULL) {
+        s_pcm_ring = malloc(bytes);
+    }
+#endif
+    if (s_pcm_ring == NULL) {
+        return 0;
     }
     moy_lock();
     moy_stream_init(&s_pcm, s_pcm_ring, MOY_AUDIO_SND_DEPTH, MOY_AUDIO_SND_RATE);
     s_pcm_on = 1;
     moy_unlock();
     return 1;
-#else
-    return 0;
-#endif
 }
 
 uint32_t moy_audio_snd(const uint8_t *pcm, uint32_t n) {

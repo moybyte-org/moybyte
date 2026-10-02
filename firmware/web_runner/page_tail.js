@@ -28,6 +28,11 @@ if(assetsJSON&&(assetsBusy||now-assetsAt<ASSETS_MIN_MS)){res(JSON.parse(assetsJS
 assetsWait.push([res,rej]);
 assetsBusy=true;assetsAt=now;
 WORKER.postMessage({t:"assets"});});}
+// The console's `state` -- the dev channel's snapshot, the keys an on-glass
+// suite reads -- for a harness driving this page: a promise of the object.
+var stateWait=[];
+window.__moyState=function(){return new Promise(function(ok){stateWait.push(ok);
+WORKER.postMessage({t:"state"});});};
 function onWorker(m){
 if(m.t==="status"){sEl.textContent=m.s;}
 else if(m.t==="assets"){assetsJSON=m.json;assetsBusy=false;
@@ -60,6 +65,8 @@ else if(m.t==="pin"){pinAsk(m.tried);}
 else if(m.t==="pick"){pkAsk(m);}
 else if(m.t==="unpick"){pkDone(m.id);}
 else if(m.t==="installed"){window.__moyInstalled=m.folder;}
+else if(m.t==="state"){var sw=stateWait;stateWait=[];
+for(var si=0;si<sw.length;si++)sw[si](JSON.parse(m.json));}
 else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
 // THE SEAM the pump that sees failures calls. Nothing counts failures yet --
 // the sync push still requeues forever on a board that has gone -- and when

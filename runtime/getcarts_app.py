@@ -449,13 +449,14 @@ class GetCartsAppLayer(ListShellApp):
         root = inst.root()
         chip, fmt = inst.chip()
         have = inst.runtimes()
+        ranges = bool(getattr(inst.net(), "ranges", False))
         carts = self.carts
 
         def _scan():
             rec = _ci.load_record(root) if root is not None else {}
             out = []
             for c in carts:
-                p = _ci.plan(c, chip, fmt)
+                p = _ci.plan(c, chip, fmt, ranges)
                 folder = "%s/%s" % (root, c["folder"])
                 present = root is not None and _exists(folder)
                 entry = rec.get(c["folder"])
@@ -475,7 +476,7 @@ class GetCartsAppLayer(ListShellApp):
             rows, free = inst.session(_scan)
         except Exception as exc:  # noqa: BLE001 -- an unreadable store lists everything as GET
             _ci._log("store scan failed: %s" % exc)
-            rows = [{"cart": c, "plan": _ci.plan(c, chip, fmt), "state": "get",
+            rows = [{"cart": c, "plan": _ci.plan(c, chip, fmt, ranges), "state": "get",
                      "runs": False, "fit": None} for c in carts]
             free = None
         for r in rows:

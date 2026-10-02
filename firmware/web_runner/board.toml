@@ -10,8 +10,9 @@
 #  now, exactly as it does for the boards.
 #
 #  What this file does NOT cover: the emscripten usermod staging (moy_gfx /
-#  moy_lua / moy_audio / moycore / moy_png ride micropython.mk fragments into the wasm
-#  port, structurally unlike the boards' USER_C_MODULES cmake), the generated
+#  moy_lua / moy_audio / moycore / moy_png / moy_wasm_web ride micropython.mk
+#  fragments into the wasm port, structurally unlike the boards' USER_C_MODULES
+#  cmake), the generated
 #  `palette.py` literal twin, the runner's own authored modules (web_boot.py /
 #  web_canvas.py / gpio_link.py / update_link.py / carts_link.py / web_p8.py),
 #  which build.sh copies by name the way a board's tracked modules/ files
@@ -20,10 +21,11 @@
 #  (the asset converter and the Lua porter) and the guards/report file it shares
 #  with the CLI, plus shims/zlib.py. The stager
 #  maps runtime/ and device/ and has no third source; build.sh carries those
-#  three with the reason written beside the copy. The WebAssembly engine
-#  (native/moy_wasm) is deliberately not among those usermods: the browser runs
-#  a wasm cart as a sibling module in its own engine, never an engine inside
-#  the engine (docs/wasm_tier_plan_2026-09.md).
+#  three with the reason written beside the copy. The boards' WebAssembly
+#  engine (native/moy_wasm, WAMR) is deliberately not among those usermods: the
+#  browser runs a compiled cart as a sibling module on its own engine, never an
+#  engine inside the engine, and native/moy_wasm_web is that engine's session
+#  surface (its README).
 
 [board]
 name = "web_runner"
@@ -76,7 +78,10 @@ boards' Lua. The browser runs moycore, compiled in as a usermod."""
 file = "wasm_host.py"
 kind = "host-only"
 why  = """
-The host's compiled-cart runner, over `wasm_binding`. The browser build carries no wasm engine, so a compiled cart opens the runtime-missing panel."""
+The host's compiled-cart runner, over `wasm_binding` and WAMR built for Linux.
+The browser runs a compiled cart through the boards' own glue
+(device/moycore_glue.WasmRun, staged below) on its own WebAssembly engine
+(native/moy_wasm_web)."""
 
 [[modules.shared.deny]]
 file = "wasm_binding.py"
