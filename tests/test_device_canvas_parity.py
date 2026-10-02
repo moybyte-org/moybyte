@@ -2339,10 +2339,11 @@ def test_scroll_layer_buffer_is_off_gc_heap():
 def test_blit565_places_direct_colour_on_every_lane():
     """`DeviceCanvas.blit565` -- a cover's draw: words in the canvas's own byte
     order, opaque, camera and clip honoured, `pal()` not -- at scale 1 (the
-    kernel's blit565), scaled inside the clip (blit565_scale) and scaled
-    across it (a widened row at a time). The picture is computed from the
-    rule, and the kernel, the transcription and the Python fallback must all
-    draw it."""
+    kernel's blit565), scaled inside the clip (blit565_scale), scaled across
+    it (a widened row at a time), and cut by it only top and bottom (the rows
+    wholly inside in one call, the cut edge rows a row at a time -- a cover
+    cropped to its card). The picture is computed from the rule, and the
+    kernel, the transcription and the Python fallback must all draw it."""
     sw, sh = 5, 4
     words = [((i * 2654435761) >> 7) & 0xFFFF for i in range(sw * sh)]
     cases = (
@@ -2353,6 +2354,11 @@ def test_blit565_places_direct_colour_on_every_lane():
         (50, 40, 3, None, (0, 0)),
         (8, 6, 2, (12, 9, 20, 11), (0, 0)),
         (20, 10, 3, (0, 0, 30, 20), (4, -2)),
+        (14, 8, 3, (10, 10, 40, 8), (0, 0)),
+        (14, 8, 3, (10, 10, 40, 2), (0, 0)),
+        (14, 8, 2, (0, 0, W, 13), (0, 0)),
+        (14, 8, 2, (0, 11, W, H), (0, 0)),
+        (16, 12, 3, (10, 10, 40, 8), (2, 4)),
     )
     canvases = (("kernel", lambda: Canvas(W, H)),
                 ("transcription", lambda: _both(True)[2]),

@@ -441,6 +441,87 @@ def test_a_relayout_keeps_one_base_per_cover(tmp_path):
     assert divs in ([1], [1, 2])
 
 
+def test_a_cover_takes_the_next_scale_up_when_it_overflows_by_a_tenth_at_most():
+    """The one rule that picks a cover's scale (`_cover_scale`): the largest
+    whole number that fits the art slot, or the next one up when that
+    overflows the slot by at most 10% each way. The Guition P4's 258x245 card
+    takes 2x (11 px over); the Waveshare's 206x173 stays at 1x (2x would be
+    48% over)."""
+    from runtime.launcher_layer import _cover_scale
+    assert _cover_scale(128, 258, 245) == 2
+    assert _cover_scale(128, 206, 173) == 1
+    assert _cover_scale(128, 256, 256) == 2
+    assert _cover_scale(128, 233, 233) == 2      # 256 is 9.9% over 233
+    assert _cover_scale(128, 232, 400) == 1      # ... and 10.3% over 232
+    assert _cover_scale(128, 400, 232) == 1
+    assert _cover_scale(128, 120, 120) == 1      # 1x near-fits too
+    assert _cover_scale(128, 116, 300) == 0
+    assert _cover_scale(64, 97, 75) == 1
+    assert _cover_scale(64, 85, 49) == 0
+    assert _cover_scale(128, 0, 0) == 0
+    assert _cover_scale(128, 300, -4) == 0
+
+
+def _drawn_cover(slot, outer):
+    """A 128x128 picture of distinct words drawn by the shelf's cover draw
+    into `slot` on a 320x300 canvas whose cards clip to `outer`: the canvas's
+    words, the picture's, and the clip it was left with."""
+    from runtime import host_canvas
+    from runtime.cover_cache import _CoverImage
+    from runtime.launcher_layer import _draw_cover
+    cv = host_canvas.make_canvas(320, 300)
+    cv.cls(3)
+    words = [((i * 2654435761) >> 9) & 0xFFFF for i in range(128 * 128)]
+    pix = bytearray()
+    for w_ in words:
+        pix += bytes((w_ & 255, w_ >> 8))
+    cv.clip(*outer)
+    _draw_cover(cv, _CoverImage(128, 128, pix), *slot, outer)
+    left = (cv._clip_x0, cv._clip_y0, cv._clip_x1, cv._clip_y1)
+    cv.clip()
+    cv.flush_batch()
+    return list(memoryview(cv._buf).cast("H")), words, left
+
+
+def test_a_near_fit_cover_is_cropped_to_its_slot_centred():
+    """2x of a 128 cover in the Guition P4's 258x245 slot is 256x256: one
+    column of slot either side, 5 rows cropped off the top and 6 off the
+    bottom, nothing drawn outside the slot -- and the cards' clip is what the
+    draw leaves behind."""
+    sx, sy, sw, sh = 20, 30, 258, 245
+    got, words, left = _drawn_cover((sx, sy, sw, sh), (10, 25, 290, 270))
+    bg = got[0]
+    ox, oy = sx + 1, sy - 5
+    for y in range(300):
+        for x in range(320):
+            if sx <= x < sx + sw and sy <= y < sy + sh and ox <= x < ox + 256:
+                want = words[((y - oy) // 2) * 128 + (x - ox) // 2]
+            else:
+                want = bg
+            assert got[y * 320 + x] == want, (x, y)
+    assert left == (10, 25, 300, 295)
+
+
+def test_a_cover_its_card_clip_cuts_stays_inside_both():
+    """A card scrolled half out of the shelf: the crop is the slot inside the
+    cards' clip, so the cover never draws past the shelf's edge."""
+    got, _words, left = _drawn_cover((20, 30, 258, 245), (10, 25, 100, 270))
+    bg = got[0]
+    assert all(got[y * 320 + x] == bg for y in range(300) for x in range(110, 320))
+    assert got[40 * 320 + 60] != bg
+    assert left == (10, 25, 110, 295)
+
+
+def test_a_cover_that_fits_draws_centred_and_leaves_the_clip_alone():
+    """The Waveshare's 206x173 slot takes 1x: the cover centred, the clip
+    never touched."""
+    got, words, left = _drawn_cover((20, 30, 206, 173), (10, 25, 290, 270))
+    ox, oy = 20 + (206 - 128) // 2, 30 + (173 - 128) // 2
+    assert all(got[(oy + y) * 320 + ox + x] == words[y * 128 + x]
+               for y in range(128) for x in range(128))
+    assert left == (10, 25, 300, 295)
+
+
 def test_home_draw_includes_action_row_desktop(tmp_path):
     """The desktop-density home frame actually paints the PLAY row (signal green
     is reserved for PLAY, so its presence is a faithful marker)."""

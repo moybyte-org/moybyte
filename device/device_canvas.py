@@ -2654,12 +2654,20 @@ class DeviceCanvas:
                       cx0, cy0, cx1, cy1)
             return
         sw = w * scale
-        sh = h * scale
-        if (g is not None and x >= cx0 and y >= cy0 and x + sw <= cx1
-                and y + sh <= cy1):
-            g.blit565_scale(self._buf, self._stride, self._bh, x, y, buf, w, h,
-                            scale)
-            return
+        # Inside the clip across: the source rows wholly inside it go to the
+        # kernel in one call, and only the edge rows the clip cuts through
+        # take the row-at-a-time lane below.
+        a = b = 0
+        if g is not None and x >= cx0 and x + sw <= cx1:
+            a = max(0, -((y - cy0) // scale))
+            b = min(h, (cy1 - y) // scale)
+            if a < b:
+                g.blit565_scale(self._buf, self._stride, self._bh, x,
+                                y + a * scale,
+                                memoryview(buf)[2 * w * a:2 * w * b], w, b - a,
+                                scale)
+                if a == 0 and b == h:
+                    return
         # Scaled and clipped (or no kernel): a source row at a time, widened
         # into one scratch row and stamped `scale` times inside the clip.
         x0 = max(x, cx0)
@@ -2670,6 +2678,8 @@ class DeviceCanvas:
         if g is not None:
             mv = memoryview(buf)
             for sy in range(h):
+                if a <= sy < b:
+                    continue
                 ty = y + sy * scale
                 if ty + scale <= cy0 or ty >= cy1:
                     continue

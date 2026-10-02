@@ -644,7 +644,9 @@ only after the visual slice proves the required dimensions.
 *Decided 2026-10-02 (owner):* the contract is `cover.png` in the cart folder's root,
 moy-spec's SPEC.md §3.6 -- a 128x128 PNG, indexed or RGB, at most 64 KB -- read by
 `runtime/cover_png.py` and drawn in direct colour, centred at the largest
-whole-number scale the card's art slot takes. Under 128 the Library grid draws the
+whole-number scale the card's art slot takes -- or the next one up, its overflow
+cropped, when that overflows the slot by at most 10% each way (the Guition P4's
+258x245 slot takes 2x). Under 128 the Library grid draws the
 cart's own §3.4 icon when it names one, else the cover's 64x64 half; carts without a
 cover keep the sprite/glyph fallback deterministically. `tools/gen_covers.py`
 captures a gameplay frame for each seed game and squares it to 128x128 in the
