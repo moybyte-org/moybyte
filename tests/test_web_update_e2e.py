@@ -243,8 +243,17 @@ def test_an_update_says_so_and_does_not_cry_wolf(tmp_path):
         assert "do not reload" not in e["body"], e
 
 
-def _probes_while(scenario, base, outdir, kill_after, victim):
-    """`_probes`, but `victim` is terminated `kill_after` seconds in.
+def _probes_while(scenario, base, outdir, victim):
+    """`_probes`, but `victim` is terminated the moment the scenario's own
+    FIRST probe (every link_vanish* scenario's `{"js": "...at:'live'..."}`,
+    right after boot) answers -- not a wall-clock guess. A fixed
+    `kill_after` tuned against one boot speed raced the scenario's later
+    steps once boot stopped taking a fixed worst-case sleep: boot finishing
+    sooner let a click-driven mutation (link_vanish.json's Make -> +New)
+    reach and clear the sweep before the guessed kill ever fired, so the
+    board vanished with nothing outstanding to lose. Unplugging as soon as
+    boot's own probe is seen reproduces the original intent -- gone before
+    anything the scenario does afterward -- at whatever speed boot runs.
 
     The scenario has to keep running while the server dies, so browsershot goes
     through Popen rather than subprocess.run -- there is no other way to unplug
@@ -254,21 +263,35 @@ def _probes_while(scenario, base, outdir, kill_after, victim):
         ["node", "browsershot.mjs", "scenarios/" + scenario, str(outdir)],
         cwd=RUNNER, env=dict(os.environ, MOY_BASE=base),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    err_chunks = []
+
+    def _drain_stderr():
+        for line in run.stderr:
+            err_chunks.append(line)
+
+    et = threading.Thread(target=_drain_stderr, daemon=True)
+    et.start()
+
+    lines = []
     killed = [False]
-
-    def _kill():
-        time.sleep(kill_after)
-        if run.poll() is None:
-            victim.terminate()
-            killed[0] = True
-
-    t = threading.Thread(target=_kill, daemon=True)
-    t.start()
-    try:
-        out, err = run.communicate(timeout=300)
-    finally:
-        t.join(timeout=5)
-    assert killed[0], "the board outlived the scenario -- nothing was unplugged"
+    for line in run.stdout:
+        lines.append(line)
+        if not killed[0]:
+            m = re.match(r"^   js -> (.*)$", line.rstrip("\n"))
+            if m:
+                try:
+                    d = json.loads(json.loads(m.group(1)))
+                except (ValueError, TypeError):
+                    d = {}
+                if d.get("at") == "live":
+                    victim.terminate()
+                    killed[0] = True
+    run.wait(timeout=300)
+    et.join(timeout=5)
+    out, err = "".join(lines), "".join(err_chunks)
+    assert killed[0], \
+        "the 'live' probe never answered -- nothing was unplugged:\n%s\n%s" % (
+            out[-3000:], err[-500:])
     assert run.returncode == 0, \
         "browsershot failed:\n%s\n%s" % (out[-3000:], err[-500:])
     probes = {}
@@ -291,7 +314,7 @@ def test_the_page_notices_a_board_that_actually_vanished(tmp_path):
     web_e2e.require("update")
     with _twin(tmp_path, "headless") as (base, _server):
         p, out = _probes_while("link_vanish.json", base, tmp_path / "shots",
-                               kill_after=12.0, victim=_server)
+                               victim=_server)
         assert p["live"]["fn"] == "function", p["live"]
         assert p["live"]["link"] is None, \
             "the panel was up before the board was unplugged: %r" % (p["live"],)
@@ -323,7 +346,7 @@ def test_an_idle_page_still_notices_and_does_not_cry_wolf(tmp_path):
     web_e2e.require("update")
     with _twin(tmp_path, "headless") as (base, _server):
         p, out = _probes_while("link_vanish_idle.json", base, tmp_path / "shots",
-                               kill_after=10.0, victim=_server)
+                               victim=_server)
         assert p["live"]["fn"] == "function", p["live"]
         assert p["live"]["link"] is None, p["live"]
 

@@ -14,6 +14,10 @@
 //   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"js":"..."} {"note":"..."}
 //   {"file":"path|$ENVVAR","as":"__name"}   local bytes -> window.__name
 //                                           (an ArrayBuffer, for the drop paths)
+//   {"waitFor":"<js expression>","timeout":ms}   poll the expression (as
+//                                           truthy) instead of guessing how
+//                                           long it takes; `timeout` is the
+//                                           ceiling, not the wait
 // -- with coordinates in CANVAS pixels (the page's own 1024x600-style space);
 // they are mapped through the canvas's on-screen rect for you.
 //
@@ -158,8 +162,45 @@ if (scenario.device) {
     await cdp("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     await cdp("Emulation.setEmitTouchEventsForMouse", { enabled: true, configuration: "mobile" });
 }
+// READY, not a guess: `#s` is the page's own status line, mirroring every
+// {t:"status"} the worker posts (worker.js's say()) -- "live" once boot()
+// has run and the first assets landed, or the terminal "needs a pin"/crash
+// text when boot stops short of that. boot_ms stays only as the ceiling for
+// a console that never answers (or, for a pin-gated page with no ?pin=, the
+// ceiling IS the wait -- "needs a pin" already ends it well under that).
+async function waitLive(timeoutMs) {
+    const terminal = new Set(["live", "console crash (see devtools)", "this console needs a pin"]);
+    const deadline = Date.now() + timeoutMs;
+    let status = "";
+    while (Date.now() < deadline) {
+        try {
+            status = (await evaluate(`(function(){var e=document.getElementById("s");
+                return e?e.textContent:"";})()`)) || "";
+        } catch (e) { status = ""; }           // mid-navigation: the DOM is not there yet
+        if (terminal.has(status)) return status;
+        await sleep(100);
+    }
+    return status;
+}
 await cdp("Page.navigate", { url: `${ORIGIN}/${scenario.query || ""}` });
-await sleep(scenario.boot_ms || 6000);
+const bootMs = scenario.boot_ms || 6000;
+const bootStatus = await waitLive(bootMs);
+console.log("boot -> " + (bootStatus || "(still booting after " + bootMs + "ms)"));
+
+// A {"waitFor": expr} step's general form: poll until truthy, `timeout` the
+// ceiling rather than the wait, same shape as waitLive above but over any
+// expression a scenario needs -- a wall-clock guess races whatever it was
+// covering for the moment something upstream (boot, here) gets faster.
+async function waitForExpr(expr, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let last;
+    while (Date.now() < deadline) {
+        try { last = await evaluate(expr); } catch (e) { last = undefined; }
+        if (last) return last;
+        await sleep(100);
+    }
+    return last;
+}
 
 // Canvas rect, so scenario coordinates are CANVAS pixels like every other probe.
 async function canvasRect() {
@@ -194,6 +235,10 @@ for (const step of scenario.steps || []) {
     try {
         if (step.note != null) console.log("--", step.note);
         if (step.wait != null) await sleep(step.wait);
+        if (step.waitFor != null) {
+            const got = await waitForExpr(step.waitFor, step.timeout || 10000);
+            console.log("   waitFor ->", JSON.stringify(got));
+        }
         if (step.move) { await mouse("mouseMoved", step.move[0], step.move[1]); await sleep(60); }
         if (step.click) {
             await mouse("mousePressed", step.click[0], step.click[1]);

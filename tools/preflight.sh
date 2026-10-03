@@ -82,7 +82,7 @@ if [ "${WEB}" = "1" ]; then
   step "...and the blob it baked is still what the binary serves" \
     make unix-micropython
   step "browser suites in real Chrome" \
-    env MOYBYTE_WEB_E2E=1 "${PY}" -m pytest -rs -q \
+    env MOYBYTE_WEB_E2E=1 "${PY}" -m pytest -p xdist -n 4 -rs -q \
       tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
       tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
       tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py
