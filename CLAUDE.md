@@ -117,6 +117,11 @@ tools/board.py ports       # which board is on which port, and who holds it
   landed outcome. No model identifiers in commits or files.
 - Comments and docs state what IS; the story of a change goes in its commit
   message.
+- **Every turn re-reads the whole conversation**, so a session's cost is turns ×
+  context. Find code with `grep -n`, then read the range you need; never read a
+  file over ~20 KB whole, and never read session transcripts under `~/.claude`.
+  Wait for a build or a suite by running it in the background and taking its
+  completion notice, never a `sleep`/`until` polling loop.
 
 ## Where the rest lives
 
