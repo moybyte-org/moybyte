@@ -61,10 +61,12 @@ from editors import PaintEditor, KeyEdge, _pe_line
 # The shared pre-literate glyph vocabulary (#89-#93 icon pass): the tool row draws a
 # 12x12 chrome glyph per button instead of a one-char label. Imported for the
 # membership check that keeps the letter as a fallback if a kind is ever missing.
+# `default_icon_pixels` is the icon editor's per-slot RESET (#90) -- chrome.py owns
+# the baked default art, PaintEditor.reset_tile stays sheet-agnostic.
 try:
-    from chrome import _GLYPHS
+    from chrome import _GLYPHS, default_icon_pixels
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
-    from runtime.chrome import _GLYPHS
+    from runtime.chrome import _GLYPHS, default_icon_pixels
 
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
@@ -508,6 +510,11 @@ class PaintLayer:
             pe.select(1)
         elif _in(px, py, lay.size_btn):        # cycle 1x1 / 2x2 / 3x3 (#30)
             pe.cycle_size()
+        elif _in(px, py, lay.get_btn) and ws._editing_icons:
+            # RESET (icon editor only, #90): the shared sheet's GET has no meaning
+            # here, so this slot repurposes to restore the SELECTED icon slot's
+            # pixels to its built-in default -- one undo step, other slots untouched.
+            pe.reset_tile(pe.n, default_icon_pixels(pe.n))
         elif _in(px, py, lay.get_btn) and not ws._editing_icons:
             ws.share_tile_get()              # import the tile from the shared sheet
         elif _in(px, py, lay.put_btn) and not ws._editing_icons:
@@ -749,8 +756,13 @@ class PaintLayer:
         cv.rectb(ppx, ppy, dim * ps, dim * ps, NAMES["dark_grey"])
         # Cross-cart sprite reuse (#18): GET pulls this tile out of the shared sheet,
         # PUT pushes it in. Hidden in the theme editor -- the shared sheet is 8x8 cart
-        # sprites, not the 16x16 icon theme, so GET/PUT don't apply there.
-        if not ws._editing_icons:
+        # sprites, not the 16x16 icon theme, so GET/PUT don't apply there; its freed
+        # GET slot repurposes to RESET (#90), the only icon-only control.
+        if ws._editing_icons:
+            # "rotate"'s circular-arrow glyph doubles as a refresh/restore cue here --
+            # the same reuse idiom as "fill" serving both the bucket and map FLOOD.
+            ws._icon_btn("rotate", "RESET", lay.get_btn, NAMES["dark_purple"], cv)
+        else:
             ws._icon_btn("get", "GET", lay.get_btn, NAMES["indigo"], cv)
             ws._icon_btn("put", "PUT", lay.put_btn, NAMES["dark_green"], cv)
             fbtn = getattr(lay, "files_btn", None)

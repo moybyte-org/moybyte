@@ -1211,6 +1211,31 @@ def _default_icon_sheet():
     return sheet
 
 
+def default_icon_pixels(n):
+    """The TILE*TILE flat palette-index list `_default_icon_sheet` bakes into
+    icon slot n: `_ICON_ART`'s rows for the kind mapped there, or all-transparent
+    (0) for a slot no kind claims -- the same blank a fresh IconSheet starts
+    with. Used by the icon editor's per-slot RESET (#90): restoring one slot
+    needs the ONE tile's worth of default pixels, not a whole re-bake."""
+    t = IconSheet.TILE
+    pix = [0] * (t * t)
+    kind = None
+    for k, slot in _ICON.items():
+        if slot == n:
+            kind = k
+            break
+    rows = _ICON_ART.get(kind) if kind is not None else None
+    if rows:
+        for ly in range(t):
+            row = rows[ly] if ly < len(rows) else ""
+            for lx in range(t):
+                ch = row[lx] if lx < len(row) else "."
+                c = _nibble(ch)
+                if c >= 0:
+                    pix[ly * t + lx] = c
+    return pix
+
+
 def _cursor_delta(n):
     # n = net pulses this frame on one axis. Precise on a slow roll
     # (1 pulse -> _CURSOR_BASE + _CURSOR_ACCEL px), accelerates super-linearly on a

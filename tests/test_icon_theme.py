@@ -278,3 +278,96 @@ def test_theme_editor_starts_from_default_when_no_file(tmp_path):
     drv.frame(1 / 30)
     assert ws.paint.sheet.TILE == 16 and ws.paint.sheet.count == 32
     assert not ws.paint.sheet.is_blank()                     # the baked default is painted
+
+
+# -- per-icon reset-to-default (#90) -----------------------------------------
+#
+# The icon editor's RESET control repurposes the GET button's slot: the shared
+# sprite sheet GET/PUT have no meaning on a 16x16 icon theme (they're hidden
+# there, see _draw_paint), so that freed rect becomes the one icon-only control.
+
+def test_reset_restores_the_selected_slot_to_its_default(tmp_path):
+    from runtime import chrome, host_app, console as C
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_theme()
+    drv.frame(1 / 30)
+    n = chrome._ICON["home"]
+    ws.paint.n = n
+    ox, oy = ws.look.icon_sheet.tile_origin(n)
+    default_tl = chrome.default_icon_pixels(n)[0]
+    ws.paint.color = (default_tl + 1) % 16 or 1          # guaranteed to differ
+    ws.paint.paint(0, 0)                                 # vandalize the top-left pixel
+    assert ws.look.icon_sheet.pget(ox, oy) != default_tl
+    drv.click(*_center(C._PAINT_GET))                    # RESET, in icon-editing mode
+    drv.frame(1 / 30)
+    assert ws.look.icon_sheet.pget(ox, oy) == default_tl
+
+
+def test_reset_is_undoable(tmp_path):
+    from runtime import chrome, host_app, console as C
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_theme()
+    drv.frame(1 / 30)
+    n = chrome._ICON["home"]
+    ws.paint.n = n
+    ox, oy = ws.look.icon_sheet.tile_origin(n)
+    default_tl = chrome.default_icon_pixels(n)[0]
+    vandal = (default_tl + 1) % 16 or 1
+    ws.paint.color = vandal
+    ws.paint.paint(0, 0)
+    drv.click(*_center(C._PAINT_GET))
+    drv.frame(1 / 30)
+    assert ws.look.icon_sheet.pget(ox, oy) == default_tl
+    assert ws.paint.undo() is True
+    assert ws.look.icon_sheet.pget(ox, oy) == vandal     # back to the vandalized pixel
+
+
+def test_reset_leaves_other_slots_alone(tmp_path):
+    from runtime import chrome, host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_theme()
+    drv.frame(1 / 30)
+    home_n = chrome._ICON["home"]
+    edit_n = chrome._ICON["edit"]
+    sheet = ws.look.icon_sheet
+    hx, hy = sheet.tile_origin(home_n)
+    ex, ey = sheet.tile_origin(edit_n)
+    sheet.pset(hx, hy, 9)
+    sheet.pset(ex, ey, 9)                                 # vandalize BOTH slots
+    ws.paint.n = home_n
+    ws.paint.reset_tile(home_n, chrome.default_icon_pixels(home_n))
+    assert sheet.pget(hx, hy) == chrome.default_icon_pixels(home_n)[0]
+    assert sheet.pget(ex, ey) == 9                        # the OTHER slot is untouched
+
+
+def test_reset_persists_through_save_icons(tmp_path):
+    from runtime import chrome, editors as _editors, host_app, moy_carts
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_theme()
+    drv.frame(1 / 30)
+    n = chrome._ICON["home"]
+    ws.paint.n = n
+    sheet = ws.look.icon_sheet
+    ox, oy = sheet.tile_origin(n)
+    sheet.pset(ox, oy, 9)
+    ws.paint.reset_tile(n, chrome.default_icon_pixels(n))
+    ws.look.save_icons()                                  # the same hard-commit path
+    hexs = moy_carts.load_system_icons(ws.carts_root)
+    reloaded = _editors.IconSheet.from_hex(hexs)
+    assert reloaded.pget(ox, oy) == chrome.default_icon_pixels(n)[0]
+
+
+def test_reset_on_an_already_default_slot_is_a_noop(tmp_path):
+    from runtime import chrome, host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_theme()
+    drv.frame(1 / 30)
+    n = chrome._ICON["home"]
+    ws.paint.n = n
+    ws.paint.reset_tile(n, chrome.default_icon_pixels(n))  # already default
+    assert ws.paint.can_undo() is False

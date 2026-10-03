@@ -495,6 +495,34 @@ class PaintEditor(OpHistoryMixin):
                 buf[i] = 0
         self._record(build)
 
+    def reset_tile(self, n, pixels):
+        """Overwrite ONE tile (n, a single sheet.TILE x sheet.TILE square) with
+        `pixels` (a flat TILE*TILE sequence of palette indices), as one undo step --
+        independent of the current multi-tile SIZE, so resetting the selected slot
+        of a bigger sprite touches only that slot's own tile and leaves the rest of
+        the block (and every other sprite) alone. The caller supplies `pixels`
+        (PaintEditor has no notion of a "default" sprite); the icon editor's RESET
+        passes chrome.default_icon_pixels(n). A no-op reset (pixels already match)
+        records nothing."""
+        t = self.sheet.TILE
+        ox, oy = self.sheet.tile_origin(n)
+        sh = self.sheet
+        pre = bytearray(t * t)
+        k = 0
+        for ly in range(t):
+            for lx in range(t):
+                pre[k] = sh.pget(ox + lx, oy + ly)
+                k += 1
+        post = bytes(pixels)
+        if bytes(pre) == post:
+            return
+        k = 0
+        for ly in range(t):
+            for lx in range(t):
+                sh.pset(ox + lx, oy + ly, post[k])
+                k += 1
+        self._push_diff(n, 1, bytes(pre), post)
+
     # -- shape tools (RECT / LINE / OVAL, #90) -------------------------------
 
     def shape_points(self, x0, y0, x1, y1):
