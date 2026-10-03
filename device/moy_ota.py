@@ -154,14 +154,14 @@ BOARD = "tdeck"
 #       (and the version) via a generated `_ota_build` module from MOYBYTE_OTA_CHANNEL, so
 #       the committed default stays "stable" and the channel is a build choice -- clean
 #       across merges, not a per-branch source edit.
-FIRMWARE_VERSION = 11            # v11: Compiled carts (C, C++ or Rust as WebAssembly) on every tier: native on the boards, on the browser's own engine, keeping their own files. Get Carts installs published carts from moybyte-org/carts on boards and in the browser. Covers on the shelf and in the store. Much faster USB pushes. T-Deck boot and memory fixes. moy core 0.4.
+FIRMWARE_VERSION = 12            # v12: Fix release. Firmware updates over WiFi stream straight into the spare slot, so the Guition boards (whose internal flash cannot hold the image) update again. Compiled carts in the browser no longer fail to load on a first open that grows the console's memory.
 #   FIRMWARE_NAME -- what a HUMAN calls this release ("0.6"), and the only version anyone
 #       outside the code ever reads: the update screen, the manifest label, the git tag.
 #       Deliberately separate from FIRMWARE_VERSION above, which exists solely so the
 #       device can order two builds with `>` -- it is signed as an int, and betas stamp a
 #       build epoch into it, so it can never carry a dotted name. `make release NAME=0.7`
 #       sets this; MAJOR.MINOR, with a third component only when a release is purely a fix.
-FIRMWARE_NAME = "0.14"
+FIRMWARE_NAME = "0.14.1"
 FIRMWARE_CHANNEL = "stable"
 FIRMWARE_LABEL = None
 try:
