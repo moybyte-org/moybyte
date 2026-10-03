@@ -983,8 +983,10 @@ make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 firmware/web_runner/build.sh &amp;&amp; make site</pre>
   <footer>
     <a href="https://github.com/moybyte-org/moybyte">Source</a> &middot;
-    <a href="https://github.com/moybyte-org/moy-spec">The cartridge spec (moy core 0.3)</a> &middot;
+    <a href="https://github.com/moybyte-org/moy-spec">The cartridge spec (moy core 0.4)</a> &middot;
     <a href="https://github.com/moybyte-org/moybyte/blob/master/docs/moy_cart_api.md">Cart API</a> &middot;
+    <a href="https://github.com/moybyte-org/moy-spec">Compiled carts</a> &middot;
+    <a href="https://github.com/moybyte-org/carts">Get Carts</a> &middot;
     <a href="https://github.com/moybyte-org/moybyte/issues">Issues</a>
     <br><br>
     Source-available (FSL-1.1-MIT): free to run, modify, teach with, and to make

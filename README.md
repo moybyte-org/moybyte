@@ -21,7 +21,7 @@ Carts draw in 64 indexed colours on a 320×240 screen on every target. The shell
 around them adapts to the screen, from a 320×240 handheld to a 10″ desktop.
 
 This repo is the reference implementation of
-[moy core 0.3](https://github.com/moybyte-org/moy-spec), the public spec for the
+[moy core 0.4](https://github.com/moybyte-org/moy-spec), the public spec for the
 cart format and its verbs.
 
 <p align="center">
@@ -74,6 +74,11 @@ Tap a tile to read about it.
 <td width="33%" valign="top"><details><summary><img src="docs/media/features/browser.gif" width="192" height="144" alt="A console's screen lifting off into a browser window"><br><b>In the browser</b></summary>The same console runs in a tab and keeps your carts there. A board can also serve it over WiFi, so a phone or laptop edits that board’s carts.</details></td>
 </tr>
 </table>
+
+Carts other people publish install over WiFi from Get Carts, the console's
+store, on boards and in the browser console alike, from the index at
+[moybyte-org/carts](https://github.com/moybyte-org/carts) (each cart under its
+own licence).
 
 ## Try it
 
@@ -148,6 +153,12 @@ For Lua, set `"runtime": "lua"` in the manifest and write `main.lua`.
 `system_carts/sakura_lua.moy` is a Lua copy of `system_carts/sakura.moy`, and a
 test checks that they draw the same pixels.
 
+A cart can also be compiled: C, C++ or Rust built to WebAssembly instead of
+written in Python or Lua ([moy-spec](https://github.com/moybyte-org/moy-spec)'s
+`COMPILED.md`). A board runs it through a native compile for its own chip, with
+an interpreter fallback; the browser console runs it on the browser's own
+WebAssembly engine. Doom, Jet Teapot and ESP 88 are compiled carts.
+
 - [`docs/moy_cart_api.md`](docs/moy_cart_api.md) — the verb table.
 - `system_carts/` — the 30 built-in carts, from a 70-line tap game to Brick Siege.
 - [`docs/blocks_tap_game.md`](docs/blocks_tap_game.md) — building
@@ -158,9 +169,9 @@ test checks that they draw the same pixels.
 The cart format and verbs are a public spec,
 [moybyte-org/moy-spec](https://github.com/moybyte-org/moy-spec) (MIT), so carts
 don't depend on this implementation. It has `SPEC.md`, its own browser player, a
-`moy` command-line tool (`new`, `run`, `export`, `port`, …) and a PICO-8
-converter. The spec covers what a game uses; the shell, editors, window manager
-and app API in this repo are outside it.
+`moy` command-line tool (`new`, `play`, `build`, `push`, `install`, `port`, …)
+and a PICO-8 converter. The spec covers what a game uses; the shell, editors,
+window manager and app API in this repo are outside it.
 
 ## Flash a board
 
