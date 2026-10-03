@@ -90,8 +90,7 @@ Filter what you can pick up today with `gh issue list --label build:host`. Color
 
 Some issues are **persistent, continuously-updated ledgers**, not one-shot tasks to
 close: the performance ledger (#66), the P4 port status (#58), the native-gap lever
-roadmap (#77), the compositor→WM path (#73), the launcher/UI-perf sibling (#86).
-Tag these `tracker`. The dashboard rolls them into a
+roadmap (#77). Tag these `tracker`. The dashboard rolls them into a
 **"Living trackers"** section and marks them ⏳ elsewhere so they're never mistaken for
 closeable work. Read a tracker for current state; don't try to finish it.
 
@@ -99,18 +98,17 @@ closeable work. Read a tracker for current state; don't try to finish it.
 
 Each subsystem has a `tracker` **umbrella issue** whose body carries the current
 status, a maturity rung, and a **"known gaps / wishlist"** checklist — so a gap can
-be recorded even when no standalone issue exists yet (e.g. "the code editor has no
-jump-to-definition"). Concrete work items are **GitHub native sub-issues** of the
+be recorded even when no standalone issue exists yet (e.g. "the map editor has no
+layers"). Concrete work items are **GitHub native sub-issues** of the
 umbrella (parent shows a live progress checklist; each child links back to its
 parent). A child has exactly **one** parent — pick the primary area; any secondary
 area stays a plain `area:*` label, so the dashboard still lists it under both.
 
-Current umbrellas: Authoring & editors (#88) → Code (#89) / Sprite-Paint (#90) /
-Map (#91) / Music (#92) / Blocks (#93) / Config (#94); Carts (#95); Apps (#96);
-Audio (#97); Input (#98); Multiplayer (#99); Web view (#100); OTA (#101); AI (#102);
-Tooling (#103); Launcher (#105); plus the pre-existing P4 (#58) and
-Compositor/WM (#73). Perf (#66/#77/#86) stays a
-cross-cutting axis, not a task-parent.
+Current umbrellas: Authoring & editors (#88) → Sprite-Paint (#90) / Map (#91) /
+Music (#92) / Blocks (#93) / Config (#94); Carts (#95); Audio (#97); Input (#98);
+Multiplayer (#99); AI (#102); Tooling (#103); Launcher (#105); Charm (#140); plus
+the pre-existing P4 (#58). Perf (#66/#77) stays a cross-cutting axis, not a
+task-parent.
 
 To add a new subsystem tracker: open an issue titled `[tracker] <name> — …`, label it
 `tracker` + its `area:*` + a `maturity:*`, give it a status + gaps body, and nest the
