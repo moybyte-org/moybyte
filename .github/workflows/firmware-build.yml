@@ -116,6 +116,11 @@ jobs:
     env:
       WANT: ${{ github.event.inputs.board || 'both' }}
       IDF_CCACHE_ENABLE: "1"
+      # ccache 4 writes ~/.cache/ccache unless told; the cache step below saves
+      # this directory, so name it. The size cap keeps five boards' caches
+      # inside the repository's 10 GB Actions cache.
+      CCACHE_DIR: /home/runner/.ccache
+      CCACHE_MAXSIZE: 400M
       MOYBYTE_BUILD_JOBS: "4"
       # The image's baked OTA identity (#53): build.sh stamps CHANNEL/VERSION/
       # LABEL into a generated _ota_build.py from this. Deriving it from the REF
@@ -172,17 +177,26 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Cache the installed Xtensa/RISC-V toolchains + ccache (the expensive parts);
-      # the .build/ clone itself is too big for the 10 GB cache, so it is fetched fresh.
-      - name: Cache ESP-IDF toolchains + ccache
+      # Cache the installed Xtensa/RISC-V toolchains (the expensive part); the
+      # .build/ clone itself is too big for the 10 GB cache, so it is fetched fresh.
+      - name: Cache ESP-IDF toolchains
         if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.espressif
-            ~/.ccache
+          path: ~/.espressif
           key: idf-${{ matrix.board }}-${{ runner.os }}-v1
           restore-keys: idf-${{ matrix.board }}-${{ runner.os }}-
+
+      # ccache rolls: a key per run saves this run's objects, and the prefix
+      # restores the newest. A fixed key would be saved once and never again
+      # (a primary-key hit does not save), so its objects would only ever age.
+      - name: Cache ccache
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ matrix.board }}-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: ccache-${{ matrix.board }}-${{ runner.os }}-
 
       # A restored ~/.espressif carries python_env/idf5.5_pyX.Y_env whose
       # bin/python3 is a SYMLINK into /opt/hostedtoolcache. `Free disk space`
@@ -289,6 +303,7 @@ jobs:
           else
             echo "== warm .build cache: single pass is patched"
           fi
+          ccache -s | head -12 || true
 
       # The P4's radio is a SECOND processor with its own firmware: the C6
       # slave (the espnow shim -- docs/espnow_p4_2026-08.md). Built from the
