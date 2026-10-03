@@ -263,6 +263,80 @@ def test_dup_rehydrates_the_source_first(tmp_path):
     assert moy_carts.load(copy["path"]).get("src")
 
 
+# -- a store with no room -------------------------------------------------------
+
+
+def _full_after(monkeypatch, n):
+    """The store's writes succeed `n` times, then fail as a full card does."""
+    real = moy_carts._write
+    left = [n]
+
+    def _write(path, data):
+        if left[0] <= 0:
+            raise OSError(28, "No space left on device")
+        left[0] -= 1
+        return real(path, data)
+    monkeypatch.setattr(moy_carts, "_write", _write)
+
+
+def _first_real(grid):
+    grid.sel = next(i for i, it in enumerate(grid.items) if it.get("path"))
+    return grid.selected()
+
+
+def test_a_copy_the_store_has_no_room_for_says_so_and_leaves_nothing(
+        tmp_path, monkeypatch):
+    """The picker's COPY on a full store: the half-written copy goes (a cart
+    whose manifest landed and whose main did not is a tile that can never
+    run), the roster is as it was, and the system banner says why nothing
+    appeared -- where it used to be a line on a serial port nobody reads."""
+    import os
+    ws = build_ws(tmp_path)
+    target = _first_real(ws.picker)
+    root = str(ws.carts_root)
+    before = sorted(os.listdir(root))
+    n0 = len(ws.carts.all)
+    _full_after(monkeypatch, 1)            # the manifest lands, then no room
+    ws.carts.dup()
+    assert sorted(os.listdir(root)) == before
+    assert len(ws.carts.all) == n0
+    assert not any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
+    assert ws._notice == ("CAN'T COPY", "the store is full", "warn")
+    assert ws.notice_active()
+
+
+def test_a_new_cart_the_store_has_no_room_for_says_so(tmp_path, monkeypatch):
+    import os
+    ws = build_ws(tmp_path)
+    root = str(ws.carts_root)
+    before = sorted(os.listdir(root))
+    _full_after(monkeypatch, 0)
+    assert ws.carts.new() is None
+    assert sorted(os.listdir(root)) == before
+    assert ws._notice == ("CAN'T MAKE", "the store is full", "warn")
+
+
+def test_a_copy_that_fails_for_another_reason_stays_quiet(tmp_path, monkeypatch):
+    """Only a full store is the banner: an unreadable asset is still skipped
+    (degrade-don't-throw), and an unexpected failure prints, as before."""
+    ws = build_ws(tmp_path)
+    _first_real(ws.picker)
+
+    def _broken(cart, root):
+        raise OSError(5, "I/O error")
+    monkeypatch.setattr(moy_carts, "duplicate", _broken)
+    ws.carts.dup()
+    assert ws._notice is None
+
+
+def test_the_store_knows_a_full_store_from_every_other_failure():
+    assert moy_carts.store_full(OSError(28, "No space left on device"))
+    exc = OSError(28)                      # MicroPython's shape: args only
+    assert moy_carts.store_full(exc)
+    assert not moy_carts.store_full(OSError(2, "ENOENT"))
+    assert not moy_carts.store_full(ValueError(28))
+
+
 def test_delete_prefers_the_open_cart_over_the_pickers_selection(tmp_path):
     """The sysmenu DELETE CART path: a cart opened from the picker is not
     necessarily still the picker's selection."""

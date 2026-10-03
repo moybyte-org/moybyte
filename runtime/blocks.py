@@ -1,3 +1,19 @@
+# Map (grep -n a name to jump there):
+#   categories             the insert menu's category ids
+#   block_def              the catalog entry for a block type id
+#   make_block             build a block dict
+#   empty_program          a new program with the three lifecycle hats
+#   BlockError             a program names an unknown block type or slot
+#   walk_tree              visit every block under the roots
+#   collect_vars           the declared variables
+#   collect_procs          the declared custom blocks
+#   -- per-object scripts  a scene object's own scripts, run per live actor
+#   sanitize_var_name      a kid's typed name made a safe Python identifier
+#   parse_number_literal   a kid's typed number made a stored literal
+#   compile_blocks         a block program -> cart source
+#   source_roundtrips      does the source still match the program (graduation)
+#   loads                  blocks.json text -> program
+#   dumps                  program -> blocks.json text
 # Moybyte block-programming model + blocks -> Python compiler (issue #29, Part 1).
 #
 # This is the data model and the compiler for the structured-outline block editor

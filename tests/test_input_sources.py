@@ -524,6 +524,9 @@ class _FakeI2C:
     def readfrom(self, _addr, _size):
         return self.frame
 
+    def readfrom_into(self, _addr, buf):
+        buf[:] = self.frame
+
 
 def _tdeck_keyboard(inp):
     kbd = device_input.TDeckKeyboard.__new__(device_input.TDeckKeyboard)

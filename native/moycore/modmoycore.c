@@ -53,6 +53,8 @@
 #include "py/mphal.h"
 #include "py/objlist.h"
 #include "py/objstr.h"
+#include "py/stream.h"
+#include "py/builtin.h"
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -193,7 +195,8 @@ enum { AQ_SFX = 0, AQ_MUSIC, AQ_BEEP, AQ_MUSIC_STOP, AQ_SOUND_STOP, AQ_VOLUME };
 #define AQ_MAX   32
 
 typedef struct {
-    lua_State  *L;
+    lua_State  *L;               // the cart's VM; NULL for a compiled cart
+    int         wasm;            // a compiled cart's session is open
     moy_console con;
     moy_canvas  canvas;
     moy_sheet   sheet;
@@ -1117,7 +1120,7 @@ static int l_map_masked(lua_State *L)
 // cart executes, because a cart captures its globals into locals at load.
 static mp_obj_t mod_register(mp_obj_t name_obj, mp_obj_t fn)
 {
-    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
+    if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
     mp_obj_t calls = MP_STATE_VM(moycore_calls);
     if (calls == MP_OBJ_NULL) {
@@ -1345,7 +1348,7 @@ static mp_obj_t mod_profile(mp_obj_t on_obj)
 {
     int on = mp_obj_is_true(on_obj);
     g_prof_arm = (uint8_t)on;
-    if (!RUN.open) return mp_const_none;
+    if (!RUN.L) return mp_const_none;
     if (on) prof_install(RUN.L);
     else prof_uninstall(RUN.L);
     return mp_obj_new_int(g_prof_n);
@@ -1365,7 +1368,7 @@ static mp_obj_t mod_verb_stats(void)
     int i, n = 0;
     mp_obj_t rows[PROF_MAX];
     mp_obj_t out[3];
-    if (!RUN.open || !g_prof_on) return mp_const_none;
+    if (!RUN.L || !g_prof_on) return mp_const_none;
     lua_getfield(RUN.L, LUA_REGISTRYINDEX, PROF_NAMES);
     for (i = 0; i < g_prof_n; i++) {
         mp_obj_t t[4];
@@ -1664,7 +1667,7 @@ static mp_obj_t mod_lua_profile(size_t n_args, const mp_obj_t *args)
     g_lp_arm_iv = interval;
     g_lp_arm_lo = lo;
     g_lp_arm_hi = hi;
-    if (!RUN.open) return mp_const_none;
+    if (!RUN.L) return mp_const_none;
     if (!on) { lprof_uninstall(RUN.L); return MP_OBJ_NEW_SMALL_INT(0); }
     return mp_obj_new_int(lprof_install(RUN.L, interval, lo, hi));
 }
@@ -1826,7 +1829,7 @@ static mp_obj_t mod_lua_gc_mode(size_t n_args, const mp_obj_t *args)
     mp_obj_t out[3];
     g_gc_mode = mode;
     g_gc_a = a; g_gc_b = b; g_gc_c = c;
-    if (!RUN.open) return mp_const_none;
+    if (!RUN.L) return mp_const_none;
     lua_gc_apply(RUN.L, mode, a, b, c);
     // GCCOUNT, never GCCOLLECT: this is read DURING a measurement window and a
     // full collect here would be the thing that made the next frame cheap.
@@ -1841,9 +1844,11 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lua_gc_mode_obj, 0, 4,
 // -- the module surface ------------------------------------------------------
 
 // run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h,
-//           snap, audio_q, pmem_bytes, cfg, flags)
+//           snap, audio_q, pmem_bytes, cfg, flags, vm)
 //
 // Builds the console and opens the VM with libmoy's verb table -- and STOPS.
+// `vm` False builds the console alone, for a compiled cart: wasm_open() then
+// hands it to the engine instead of a Lua state.
 // The cart is loaded by load() afterwards, because between the two the host
 // registers its extension verbs, and a cart captures its globals into locals
 // as it executes. Doing both here left no window for that, which is how the
@@ -1855,10 +1860,12 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lua_gc_mode_obj, 0, 4,
 // here except the VM.
 static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
 {
-    if (n_args != 13) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 13 args"));
+    if (n_args != 14) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 14 args"));
+    int vm = mp_obj_is_true(a[13]);
     if (RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                MP_ERROR_TEXT("moycore: a run is already open"));
     memset(&RUN, 0, sizeof(RUN));
+    MP_STATE_VM(moycore_view) = MP_OBJ_NULL;   // may name a heap a soft reset reset
     // #211's two meters belong to the RUN, so they start here and survive
     // close() -- the report is read at the exit boundary, after the VM is gone.
     g_sram_free_min = SIZE_MAX;
@@ -1955,7 +1962,13 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     hs->touch = h_touch;  hs->key = h_key;  hs->keyp = h_keyp;
     hs->textmode = h_textmode;  hs->quit = h_quit;
     hs->cfg = h_cfg;
+    RUN.con.flags = g_map_flags;
 
+    if (!vm) {
+        // A compiled cart: the console and nothing on it until wasm_open().
+        RUN.open = 1;
+        return mp_const_none;
+    }
     RUN.L = lua_newstate(l_alloc, NULL);
     if (RUN.L == NULL) mp_raise_msg(&mp_type_MemoryError,
                                     MP_ERROR_TEXT("moycore: no VM"));
@@ -1991,7 +2004,7 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     RUN.open = 1;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 13, 13, mod_run_begin);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 14, 14, mod_run_begin);
 
 // Run one chunk. Shared by exec() and load(); the only difference between them
 // is whether _init follows.
@@ -2026,7 +2039,7 @@ static mp_obj_t run_chunk(mp_obj_t src_obj, mp_obj_t name_obj)
 // load() closes.
 static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
 {
-    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
+    if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
     return run_chunk(src_obj, name_obj);
 }
@@ -2045,7 +2058,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
 // `verbs` is the only meter that sees this tier at all.
 static mp_obj_t mod_load(mp_obj_t chunks_obj)
 {
-    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
+    if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
     size_t nchunks = 0;
     mp_obj_t *chunks = NULL;
@@ -2074,16 +2087,36 @@ static mp_obj_t mod_load(mp_obj_t chunks_obj)
         return mp_obj_new_str(err, strlen(err));
     // The parse burst is over, and it is the run's high-water mark: a 130KB
     // source becomes tokens, short strings and tables that are all garbage by
-    // the time _init returns. Nothing else collects here -- Lua's collector is
-    // incremental and moy_lua_init does not ask -- so the burst would sit in
-    // the pool until the cart's own churn walked it out, one step at a time,
-    // holding chunks the frame loop is about to need. One full collect, once,
-    // before the first frame; on moss moss it is the difference between the
-    // cart loading and `not enough memory`.
+    // the time _init returns. Nothing else collects here -- a Lua collector
+    // only ever runs in steps at the allocator, and moy_lua_init does not
+    // ask -- so the burst would sit in the pool until the cart's own churn
+    // walked it out, one step at a time, holding chunks the frame loop is
+    // about to need. One full collect, once, before the first frame; on moss
+    // moss it is the difference between the cart loading and `not enough
+    // memory`.
     lua_gc(RUN.L, LUA_GCCOLLECT);
+    // ...and then GENERATIONAL, because Lua's default INCREMENTAL collector is
+    // not incremental at a frame's scale. `incstep` paces itself against the
+    // ALLOCATION RATE -- it does (stepmul/WORK2MEM) work units per byte the
+    // cart allocates, 12.5 of them at the default stepmul, i.e. about a
+    // hundred bytes of traversal per byte allocated -- so once a cycle starts
+    // it walks a heap several times over within one frame's worth of churn and
+    // the cart pays the whole cycle as ONE stop-the-world pause. `gcstepsize`
+    // does not divide it: it sets how often a step runs, never how much of the
+    // cycle is left to do, and lowering it measured NULL. A minor collection
+    // instead traverses only what was allocated since the last one, which is a
+    // frame's worth by construction.
+    //
+    // That cycle was #107's residual stutter, and on glass (P4, dank tomb,
+    // 2026-09-20) one 60s soak of it held one 42ms frame in every ~49 -- a
+    // dropped tick at the cart's 60Hz logic, and felt. The same soak
+    // generational held none above 27ms, with the VM's heap peak a third
+    // lower; #107 carries the arms.
+    lua_gc_apply(RUN.L, 3, -1, -1, -1);
     // AFTER that collect, never before: an armed `stop` has to not apply to
     // the load burst, which is the run's high-water mark and the one thing
-    // that must still be collected.
+    // that must still be collected. And after the line above, so `luagc inc`
+    // can put a run back on the default schedule for an A/B.
     if (g_gc_mode >= 0) lua_gc_apply(RUN.L, g_gc_mode, g_gc_a, g_gc_b, g_gc_c);
     return mp_const_none;
 }
@@ -2092,14 +2125,14 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_load_obj, mod_load);
 // gc() -> the VM's heap in KB after a FULL collect, or None with no run.
 //
 // A DIAGNOSTIC and a test verb, not a frame-loop one: a full collect is the
-// stop-the-world kind, and the cart's own churn is what the incremental
-// collector is tuned for. It exists because `collectgarbage` is one of the
-// names SPEC.md 4.1 takes AWAY from a cart, so nothing else can ask the VM to
-// settle -- which is exactly what tests/test_moycore_pool.py has to do to see
-// a burst's garbage die and its chunks go back.
+// stop-the-world kind, and a running cart's churn is what the generational
+// collector load() installs is there for. It exists because `collectgarbage`
+// is one of the names SPEC.md 4.1 takes AWAY from a cart, so nothing else can
+// ask the VM to settle -- which is exactly what tests/test_moycore_pool.py has
+// to do to see a burst's garbage die and its chunks go back.
 static mp_obj_t mod_gc(void)
 {
-    if (!RUN.open) return mp_const_none;
+    if (!RUN.L) return mp_const_none;
     lua_gc(RUN.L, LUA_GCCOLLECT);
     return mp_obj_new_int(lua_gc(RUN.L, LUA_GCCOUNT));
 }
@@ -2260,6 +2293,808 @@ static int pm_alive(void)
     return g_pm_have;
 }
 
+// -- the compiled cart (docs/wasm_tier_plan_2026-09.md, phase 3) -----------
+//
+// A "runtime": "wasm" cart runs on THIS console -- the same canvas, snapshot,
+// audio queue, pmem and flags a Lua cart has -- with libmoy's wasm binding
+// (libmoy/moy_wasm.c, vendored) as its import table in place of a Lua state.
+// The ENGINE is native/moy_wasm: the runtime, the load, the provenance key and
+// the thread everything WAMR does runs on (moy_wasm_session.h). This half binds
+// and nothing else: it registers the table, checks the module's shape against
+// the manifest, binds the instance to the console, and calls the three hooks --
+// each on the engine's thread, through the callbacks below.
+//
+// Every host callback the binding reaches from that thread is a C read or
+// write against the console, EXCEPT the ones that need the VM -- `read` (the
+// cart's own folder, through the VFS), `cfg` (the config dict) and the cart's
+// written files (runtime/cart_files.py) -- and those are run on the
+// MicroPython task through moy_wasm_on_vm while it waits on the call.
+// `snd` goes to the speaker's mixer where the board has one (moy_audio's
+// stream, MOY_AUDIO_SND); where it has none the binding drains it by the clock.
+//
+// Compiled only when an engine is in the build: the boards' (native/moy_wasm,
+// WAMR -- its cmake defines MOY_WASM) or the browser's (native/moy_wasm_web,
+// the page's own WebAssembly engine -- its Makefile fragment defines
+// MOY_WASM_JS). Both implement the same session surface; where libmoy's
+// binding differs by engine (moy_wasm.h) -- registering the table, checking a
+// loaded module, binding, calling a hook, par's lanes, the frame hand-off --
+// so do the callbacks below, and nothing else does. The MicroPython surface
+// below is unconditional so qstr scanning, which does not see those defines,
+// finds every name.
+
+enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW };
+
+#if MOY_WASM || MOY_WASM_JS
+#define MOYCORE_WASM 1
+#else
+#define MOYCORE_WASM 0
+#endif
+
+#if MOYCORE_WASM
+#include "libmoy/moy_wasm.h"
+#include "moy_wasm_session.h"
+#if MOY_AUDIO_SND
+#include "moy_audio_snd.h"
+#if MOY_AUDIO_SND_RATE != MOY_WASM_SND_RATE || MOY_AUDIO_SND_DEPTH != MOY_WASM_SND_DEPTH
+#error "moy_audio's stream is not the binding's"
+#endif
+#endif
+
+// A compiled cart's run state. Allocated per session, from PSRAM where there
+// is any: libmoy's per-run struct alone is about 4 KB (eight layer canvases),
+// and as static data it would sit in internal SRAM for the whole boot -- the
+// resource the S3 boards gate the tier on. Only the pointer is static.
+typedef struct {
+    moy_wasm w;                  // libmoy's per-run state for the table
+    int dead;                    // trapped: never called again
+    char dir[192];               // the cart's folder: `read`'s only root
+    char file[192 + MOY_WASM_NAME_MAX + 2];  // the file held open, if any
+    char *writable;              // the manifest's "writable", libmoy's form
+    uint32_t file_size;          // its size, read once when it was opened
+#if MOY_WASM
+    // The import table's registration storage: WAMR sorts it in place and
+    // points at it until the runtime is destroyed, so it lives as long as
+    // this struct does -- freed by wasm_end, after the session's teardown.
+    NativeSymbol *natives;
+#endif
+} wrun_t;
+
+static wrun_t *WR;
+static const uint8_t *g_whead;   // the canonical .wasm's head, for the check
+static size_t g_whead_len;
+static uint32_t g_wpages;        // the manifest's "memory"
+
+static void *wmem_calloc(size_t n, size_t size)
+{
+#ifdef MOYCORE_PSRAM
+    void *p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p) return p;
+#endif
+    return calloc(n, size);
+}
+
+static void wmem_free(void *p)
+{
+#ifdef MOYCORE_PSRAM
+    heap_caps_free(p);
+#else
+    free(p);
+#endif
+}
+
+static void wrun_free(wrun_t *r)
+{
+#if MOY_WASM
+    wmem_free(r->natives);
+#endif
+    wmem_free(r->writable);
+    wmem_free(r);
+}
+
+typedef struct {
+    const char *name;            // a path in the cart's folder, or NULL and
+    const char *full;            // the file's own path (a written copy)
+    uint32_t offset;
+    uint8_t *dst;
+    uint32_t len;
+    uint32_t got;
+} wread_t;
+
+static void wfile_forget(void)
+{
+    mp_obj_t f = MP_STATE_VM(moycore_wasm_file);
+    MP_STATE_VM(moycore_wasm_file) = MP_OBJ_NULL;
+    if (WR) WR->file[0] = 0;
+    if (f != MP_OBJ_NULL) {
+        nlr_buf_t nlr;
+        if (nlr_push(&nlr) == 0) {
+            mp_stream_close(f);
+            nlr_pop();
+        }
+    }
+}
+
+static wread_t *g_wread;          // the read wasm_read_now serves
+
+// One read of the cart's own file, raising when it is absent or unreadable.
+// The last file stays open, so a cart streaming its data file in chunks opens
+// it once. A MicroPython function so the board's storage gate can run it.
+static mp_obj_t wasm_read_now(void)
+{
+    wread_t *q = g_wread;
+    mp_obj_t f = MP_STATE_VM(moycore_wasm_file);
+    int e = 0;
+    char path[sizeof(WR->file)];
+    if (q->full) snprintf(path, sizeof(path), "%s", q->full);
+    else snprintf(path, sizeof(path), "%s/%s", WR->dir, q->name);
+    if (f == MP_OBJ_NULL || strcmp(WR->file, path) != 0) {
+        wfile_forget();
+        mp_obj_t args[2] = { mp_obj_new_str(path, strlen(path)),
+                             MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
+        f = mp_call_function_n_kw(MP_OBJ_FROM_PTR(&mp_builtin_open_obj), 2, 0, args);
+        // The size is read once, here: on a FAT card a seek to the end walks
+        // the file's cluster chain, which costs a read of a WAD-sized file
+        // milliseconds every time.
+        mp_off_t end = mp_stream_seek(f, 0, MP_SEEK_END, &e);
+        if (e != 0 || end < 0) {
+            mp_stream_close(f);
+            mp_raise_OSError(e ? e : MP_EIO);
+        }
+        MP_STATE_VM(moycore_wasm_file) = f;
+        snprintf(WR->file, sizeof(WR->file), "%s", path);
+        WR->file_size = (uint64_t)end > UINT32_MAX ? UINT32_MAX : (uint32_t)end;
+    }
+    uint32_t size = WR->file_size;
+    if (size > q->offset) {
+        uint32_t left = size - q->offset;
+        if (q->len == 0) {
+            q->got = left;
+        } else {
+            mp_stream_seek(f, (mp_off_t)q->offset, MP_SEEK_SET, &e);
+            if (e == 0) {
+                mp_uint_t n = mp_stream_rw(f, q->dst, q->len < left ? q->len : left,
+                                           &e, MP_STREAM_RW_READ);
+                q->got = (uint32_t)n;
+            }
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(wasm_read_now_obj, wasm_read_now);
+
+// On the MicroPython task: the read, inside the board's storage gate when
+// wasm_open was handed one -- the store every other read and write goes
+// through, which on the T-Deck drains the panel's flush first, because the SD
+// card shares its SPI bus.
+static void read_on_vm(void *arg)
+{
+    wread_t *q = (wread_t *)arg;
+    nlr_buf_t nlr;
+    q->got = 0;
+    g_wread = q;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t gate = MP_STATE_VM(moycore_wasm_gate);
+        if (gate != MP_OBJ_NULL && gate != mp_const_none) {
+            mp_call_function_1(gate, MP_OBJ_FROM_PTR(&wasm_read_now_obj));
+        } else {
+            wasm_read_now();
+        }
+        nlr_pop();
+    } else {
+        wfile_forget();                 // absent or unreadable reads 0
+    }
+    g_wread = NULL;
+}
+
+static uint32_t hw_read(void *user, const char *name, uint32_t offset,
+                        uint8_t *dst, uint32_t len)
+{
+    wread_t q = { name, NULL, offset, dst, len, 0 };
+    (void)user;
+    if (moy_wasm_on_vm(read_on_vm, &q) != 0) return 0;
+    return q.got;
+}
+
+// -- the cart's written files (moy-spec SPEC.md 16.12) --
+//
+// libmoy's binding holds every path to the manifest's "writable" entries and
+// the size cap before it reaches these. The store is runtime/cart_files.py's
+// CartFiles, which wasm_open is handed and which takes the store's gate
+// itself; its methods run here on the MicroPython task. A written copy is
+// read through the held-open file `read` uses, by its own path.
+
+enum { FOP_READ, FOP_WRITE, FOP_ERASE, FOP_LIST };
+
+typedef struct {
+    int op;
+    const char *path;            // the path, or list's prefix
+    const uint8_t *data;         // write's
+    uint32_t offset;             // read's
+    uint32_t index;              // list's
+    uint8_t *dst;                // read's and list's
+    uint32_t len;                // write's length; read's and list's room
+    int32_t r;
+} wfiles_t;
+
+// files.<name>(args...) on the store wasm_open was handed.
+static mp_obj_t files_call(const char *name, size_t n, const mp_obj_t *args)
+{
+    mp_obj_t dest[2 + 3];
+    mp_load_method(MP_STATE_VM(moycore_wasm_files), qstr_from_str(name), dest);
+    for (size_t i = 0; i < n; i++) dest[2 + i] = args[i];
+    return mp_call_method_n_kw(n, 0, dest);
+}
+
+static void files_on_vm(void *arg)
+{
+    wfiles_t *q = (wfiles_t *)arg;
+    mp_obj_t files = MP_STATE_VM(moycore_wasm_files);
+    nlr_buf_t nlr;
+    q->r = q->op == FOP_WRITE ? MOY_WASM_FAILED : -1;
+    if (files == MP_OBJ_NULL || files == mp_const_none) return;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t a[2];
+        a[0] = mp_obj_new_bytes((const byte *)q->path, strlen(q->path));
+        if (q->op == FOP_READ) {
+            mp_obj_t where = files_call("where", 1, a);
+            if (where != mp_const_none) {
+                wread_t rq = { NULL, mp_obj_str_get_str(where), q->offset, q->dst,
+                               q->len, 0 };
+                read_on_vm(&rq);
+                q->r = (int32_t)rq.got;
+            }
+        } else if (q->op == FOP_WRITE) {
+            wfile_forget();              // the held-open file may be the old copy
+            a[1] = mp_obj_new_memoryview('B', q->len, (void *)q->data);
+            q->r = (int32_t)mp_obj_get_int(files_call("write", 2, a));
+        } else if (q->op == FOP_ERASE) {
+            wfile_forget();
+            q->r = (int32_t)mp_obj_get_int(files_call("erase", 1, a));
+        } else {
+            a[1] = mp_obj_new_int_from_uint(q->index);
+            mp_obj_t name = files_call("name", 2, a);
+            if (name != mp_const_none) {
+                mp_buffer_info_t b;
+                mp_get_buffer_raise(name, &b, MP_BUFFER_READ);
+                memcpy(q->dst, b.buf, b.len < q->len ? b.len : q->len);
+                q->r = (int32_t)b.len;
+            }
+        }
+        nlr_pop();
+    }
+}
+
+static int32_t files_ask(wfiles_t *q)
+{
+    if (moy_wasm_on_vm(files_on_vm, q) != 0) return q->op == FOP_WRITE ? MOY_WASM_FAILED : -1;
+    return q->r;
+}
+
+static int32_t hw_written(void *user, const char *path, uint32_t offset,
+                          uint8_t *dst, uint32_t len)
+{
+    wfiles_t q = { FOP_READ, path, NULL, offset, 0, dst, len, -1 };
+    (void)user;
+    return files_ask(&q);
+}
+
+static int32_t hw_write(void *user, const char *path, const uint8_t *data, uint32_t len)
+{
+    wfiles_t q = { FOP_WRITE, path, data, 0, 0, NULL, len, MOY_WASM_FAILED };
+    (void)user;
+    return files_ask(&q);
+}
+
+static int32_t hw_erase(void *user, const char *path)
+{
+    wfiles_t q = { FOP_ERASE, path, NULL, 0, 0, NULL, 0, -1 };
+    (void)user;
+    return files_ask(&q);
+}
+
+static int32_t hw_list(void *user, const char *prefix, uint32_t index, uint8_t *dst,
+                       uint32_t len)
+{
+    wfiles_t q = { FOP_LIST, prefix, NULL, 0, index, dst, len, -1 };
+    (void)user;
+    return files_ask(&q);
+}
+
+typedef struct {
+    const char *key;
+    const char *val;
+} wcfg_t;
+
+static void cfg_on_vm(void *arg)
+{
+    wcfg_t *q = (wcfg_t *)arg;
+    nlr_buf_t nlr;
+    q->val = NULL;
+    if (nlr_push(&nlr) == 0) {
+        q->val = h_cfg(NULL, q->key);
+        nlr_pop();
+    }
+}
+
+// The dict owns the string, or h_cfg's static buffer does; the binding copies
+// it before the next call.
+static const char *hw_cfg(void *user, const char *key)
+{
+    wcfg_t q = { key, NULL };
+    (void)user;
+    if (moy_wasm_on_vm(cfg_on_vm, &q) != 0) return NULL;
+    return q.val;
+}
+
+// A layer's pixels: PSRAM, the run's own, released by moy_wasm_close.
+static moy_pixel *hw_layer_new(void *user, int w, int h)
+{
+    (void)user;
+    return (moy_pixel *)wmem_calloc((size_t)w * (size_t)h, sizeof(moy_pixel));
+}
+
+static void hw_layer_free(void *user, moy_pixel *p)
+{
+    (void)user;
+    wmem_free(p);
+}
+
+// -- the engine's callbacks, on its thread --
+
+static int wo_runtime_up(void *user, char *err, size_t errlen)
+{
+    (void)user;
+#if MOY_WASM
+    uint32_t n = 0;
+    moy_wasm_natives(&n);
+    WR->natives = (NativeSymbol *)wmem_calloc(n, sizeof(NativeSymbol));
+    if (!WR->natives) {
+        snprintf(err, errlen, "out of memory: no PSRAM for the import table");
+        return 1;
+    }
+    if (moy_wasm_register(WR->natives) != 0) {
+        snprintf(err, errlen, "the import table did not register");
+        return 1;
+    }
+#else
+    // The page's adapters read the table where it is (moy_web_natives).
+    (void)err;
+    (void)errlen;
+#endif
+    return 0;
+}
+
+static int wo_loaded(void *user, moy_wasm_module module, char *err, size_t errlen)
+{
+    (void)user;
+#if MOY_WASM
+    return moy_wasm_check(module, g_whead, g_whead_len, g_wpages, err, errlen);
+#else
+    return moy_wasm_check_bytes(module->bytes, module->size, g_wpages, err, errlen);
+#endif
+}
+
+static int wo_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
+{
+    (void)user;
+#if MOY_WASM
+    if (moy_wasm_open(&WR->w, &RUN.con, env) != 0) {
+        snprintf(err, errlen, "a hook is missing");
+        return 1;
+    }
+#else
+    // The binding the page's adapters call the table with.
+    (void)err;
+    (void)errlen;
+    moy_wasm_bind(&WR->w, &RUN.con);
+    env->binding = &WR->w;
+#endif
+    return 0;
+}
+
+static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
+{
+    (void)user;
+#if MOY_WASM
+    if (what == WCALL_INIT) return moy_wasm_init(&WR->w, err, errlen);
+    if (what == WCALL_UPDATE) return moy_wasm_update(&WR->w, dt, err, errlen);
+    return moy_wasm_draw(&WR->w, err, errlen);
+#else
+    // The page calls the export; the binding brackets the call. A trap the
+    // binding raised names itself; anything else the cart threw (an
+    // unreachable, an access outside its memory) is the engine's message.
+    int hook = what == WCALL_INIT ? MOY_WASM_INIT
+             : what == WCALL_UPDATE ? MOY_WASM_UPDATE : MOY_WASM_DRAW;
+    moy_wasm_begin(&WR->w, hook);
+    err[0] = 0;
+    int threw = moy_wasm_session_export(hook, dt, err, errlen);
+    if (!moy_wasm_end(&WR->w, threw)) return 0;
+    const char *trap = moy_wasm_trapped(&WR->w);
+    if (trap) snprintf(err, errlen, "%s", trap);
+    else if (!err[0]) snprintf(err, errlen, "the cart trapped");
+    return 1;
+#endif
+}
+
+static void wo_unbound(void *user)
+{
+    (void)user;
+    moy_wasm_close(&WR->w);
+}
+
+#if MOY_AUDIO_SND
+// The cart's samples, from the engine's thread into the speaker's mixer.
+static uint32_t wo_snd(void *user, const uint8_t *pcm, uint32_t n)
+{
+    (void)user;
+    return moy_audio_snd(pcm, n);
+}
+#endif
+
+static const moy_wasm_ops WASM_OPS = {
+    NULL, wo_runtime_up, wo_loaded, wo_bound, wo_call, wo_unbound,
+};
+
+#if MOY_WASM
+// The cart's par items on the session's lanes, from the engine's thread.
+static int wo_lane_go(void *user, int lane, void (*work)(void *), void *job)
+{
+    (void)user;
+    return moy_wasm_session_lane_go(lane, work, job);
+}
+
+static void wo_lane_wait(void *user, int lane)
+{
+    (void)user;
+    moy_wasm_session_lane_wait(lane);
+}
+
+// The frame hand-off (libmoy/moy_wasm.h's `frame`): while the board says it
+// can show a frame from the cart's memory (take_frames), every blit of a
+// layout it takes leaves its frame there, owed, and the canvas is written only
+// when something needs it -- a verb over it, a settle, or the cart's next
+// hook. On the engine's thread, so it only answers. TAKE_565 and TAKE_PALETTE
+// are the two layouts: blit565's words, and blit's indices with their colours.
+#define TAKE_565 1
+#define TAKE_PALETTE 2
+static volatile int g_take_frames;
+
+static int wo_frame(void *user, const uint8_t *pixels, const moy_pixel *lut)
+{
+    (void)user;
+    (void)pixels;
+    return g_take_frames & (lut ? TAKE_PALETTE : TAKE_565);
+}
+#endif // MOY_WASM
+
+// A trap ends the run, and the frame it interrupted is never presented: the
+// canvas is cleared before the console paints its report over it, and the
+// last frame shown is not shown again over the report.
+static void wasm_trapped(void)
+{
+    WR->dead = 1;
+    WR->w.kept = NULL;
+    moy_reset_state(&RUN.canvas);
+    moy_cls(&RUN.canvas, 0);
+}
+
+static int wasm_begin(const char *path, const char *sha, const char *dir,
+                      const char *writable, size_t writable_len,
+                      int swapped, int allow_unsigned, int interp, char *err,
+                      size_t errlen)
+{
+    wfile_forget();
+    if (WR) {
+        wrun_free(WR);
+        WR = NULL;
+    }
+    if ((WR = (wrun_t *)wmem_calloc(1, sizeof(wrun_t))) == NULL) {
+        snprintf(err, errlen, "out of memory: no PSRAM for the cart's run state");
+        return 1;
+    }
+    WR->w.read = hw_read;
+    WR->w.wire_swapped = swapped;
+    // The manifest's "writable" entries, NUL-separated as Python joined them,
+    // and two NULs to end libmoy's list.
+    if (writable_len) {
+        WR->writable = (char *)wmem_calloc(writable_len + 2, 1);
+        if (!WR->writable) {
+            snprintf(err, errlen, "out of memory: no PSRAM for the cart's run state");
+            return 1;
+        }
+        memcpy(WR->writable, writable, writable_len);
+        WR->w.writable = WR->writable;
+    }
+    WR->w.written = hw_written;
+    WR->w.write = hw_write;
+    WR->w.erase = hw_erase;
+    WR->w.list = hw_list;
+#if MOY_WASM
+    WR->w.frame = wo_frame;
+    WR->w.lanes = moy_wasm_session_lanes();
+    WR->w.lane_go = wo_lane_go;
+    WR->w.lane_wait = wo_lane_wait;
+    WR->w.lane_stack = MOY_WASM_EXEC_STACK;
+#endif
+#if MOY_AUDIO_SND
+    if (moy_audio_snd_open()) WR->w.snd = wo_snd;
+#endif
+    snprintf(WR->dir, sizeof(WR->dir), "%s", dir);
+    RUN.con.host.cfg = hw_cfg;
+    RUN.con.host.layer_new = hw_layer_new;
+    RUN.con.host.layer_free = hw_layer_free;
+    // The linear memory the manifest declares, which the engine reads the
+    // module into so the memory can take the block back; a declaration past
+    // any board's PSRAM holds nothing and is refused at the check.
+    uint32_t memory = g_wpages <= 1024 ? g_wpages * 65536u : 0;
+    if (moy_wasm_session_open(path, sha, memory, allow_unsigned, interp, &WASM_OPS,
+                              err, errlen) != 0) {
+        wfile_forget();
+        return 1;
+    }
+    RUN.wasm = 1;
+    g_tick_ms = (uint32_t)mp_hal_ticks_ms();
+    if (moy_wasm_session_call(WCALL_INIT, 0.0f, err, errlen) != 0) {
+        wasm_trapped();
+        return 1;
+    }
+    return 0;
+}
+
+static int wasm_tick_c(float dt, int draw, char *err, size_t errlen)
+{
+    uint32_t t0 = (uint32_t)mp_hal_ticks_us(), t1;
+    if (!WR || WR->dead) {
+        snprintf(err, errlen, "the cart is not running");
+        return 1;
+    }
+    if (moy_wasm_session_call(WCALL_UPDATE, dt, err, errlen) != 0) {
+        wasm_trapped();
+        return 1;
+    }
+    t1 = (uint32_t)mp_hal_ticks_us();
+    // quit() ends the cart where it stands (moy-spec SPEC.md 16.4).
+    if (draw && !WR->w.quitting
+        && moy_wasm_session_call(WCALL_DRAW, 0.0f, err, errlen) != 0) {
+        wasm_trapped();
+        return 1;
+    }
+    g_upd_us = t1 - t0;
+    g_draw_us = draw ? (uint32_t)mp_hal_ticks_us() - t1 : 0;
+    return 0;
+}
+
+static void wasm_end(void)
+{
+    if (RUN.wasm) moy_wasm_session_close();
+    RUN.wasm = 0;
+#if MOY_AUDIO_SND
+    moy_audio_snd_close();
+#endif
+#if MOY_WASM
+    g_take_frames = 0;
+#endif
+    wfile_forget();
+    MP_STATE_VM(moycore_wasm_gate) = MP_OBJ_NULL;
+    MP_STATE_VM(moycore_wasm_files) = MP_OBJ_NULL;
+    if (WR) {
+        wrun_free(WR);
+        WR = NULL;
+    }
+}
+#endif // MOYCORE_WASM
+
+// wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
+//           gate=None, allow_unsigned=False, interp=False, writable=None,
+//           files=None) -> None, or the refusal or trap as text
+//
+// After run_begin(..., vm=False): load the compiled module at `module_path`
+// on the engine, check it against the canonical .wasm's head (`wasm_head`,
+// enough of main.wasm to reach its memory section) and the manifest's `pages`
+// before its memory exists, refuse it unless its key names `wasm_sha`, bind it
+// to this console and run _init. `cart_dir` is the only folder `read` sees;
+// `wire_swapped` says the canvas stores its words byte-swapped, which a
+// palette blit must match. `gate(fn)` is the board's storage gate: every
+// `read` runs inside it. `allow_unsigned` is the owner's Unknown sources
+// setting: true lets an AOT module with no signature load
+// (moy_wasm_session.h). `interp` is true when `module_path` IS the cart's own
+// main.wasm, run on the interpreter tier (docs/wasm_tier_plan_2026-09.md, "A
+// cart survives its firmware", 2026-09-30): no key, no signature, no Unknown
+// sources check, and `wasm_sha` is ignored. `writable` is the manifest's
+// "writable" entries joined by NUL characters, and `files` the cart's written
+// files (runtime/cart_files.py's CartFiles), which write, erase, list and a
+// written copy's read reach (moy-spec SPEC.md 16.12). A refusal or a trap
+// closes nothing -- close() does.
+static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
+{
+    if (!RUN.open || RUN.L || RUN.wasm)
+        mp_raise_msg(&mp_type_RuntimeError,
+                     MP_ERROR_TEXT("moycore: wasm_open wants a run begun with vm=False"));
+#if MOYCORE_WASM
+    MP_STATE_VM(moycore_wasm_gate) = n_args > 6 ? a[6] : MP_OBJ_NULL;
+    MP_STATE_VM(moycore_wasm_files) = n_args > 10 ? a[10] : MP_OBJ_NULL;
+    char err[192];
+    size_t hlen = 0, wlen = 0;
+    const char *writable = NULL;
+    if (n_args > 9 && a[9] != mp_const_none) writable = mp_obj_str_get_data(a[9], &wlen);
+    g_whead = (const uint8_t *)buf_r(a[1], &hlen);
+    g_whead_len = hlen;
+    g_wpages = (uint32_t)mp_obj_get_int(a[2]);
+    const char *sha = a[3] == mp_const_none ? NULL : mp_obj_str_get_str(a[3]);
+    int rc = wasm_begin(mp_obj_str_get_str(a[0]), sha, mp_obj_str_get_str(a[4]),
+                        writable, wlen,
+                        mp_obj_is_true(a[5]), n_args > 7 && mp_obj_is_true(a[7]),
+                        n_args > 8 && mp_obj_is_true(a[8]), err, sizeof(err));
+    g_whead = NULL;
+    g_whead_len = 0;
+    if (rc) return mp_obj_new_str(err, strlen(err));
+    return mp_const_none;
+#else
+    (void)n_args;
+    (void)a;
+    mp_raise_msg(&mp_type_RuntimeError,
+                 MP_ERROR_TEXT("moycore: this build has no wasm engine"));
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_open_obj, 6, 11, mod_wasm_open);
+
+// wasm_quit() -> whether the cart called quit(): it ended itself, and the
+// run must not call it again.
+static mp_obj_t mod_wasm_quit(void)
+{
+#if MOYCORE_WASM
+    return mp_obj_new_bool(RUN.wasm && WR && WR->w.quitting);
+#else
+    return mp_const_false;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_quit_obj, mod_wasm_quit);
+
+// wasm_table() -> the names in this console's import table (libmoy's
+// moy_wasm_natives), every function a compiled cart may import from "moy":
+// what the Player holds a module's imports to before it loads one
+// (moycore_glue.missing_imports). () in a build with no wasm engine.
+static mp_obj_t mod_wasm_table(void)
+{
+#if MOYCORE_WASM
+    uint32_t n = 0;
+    const NativeSymbol *rows = moy_wasm_natives(&n);
+    mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(n, NULL));
+    for (uint32_t i = 0; i < n; i++)
+        t->items[i] = mp_obj_new_str(rows[i].symbol, strlen(rows[i].symbol));
+    return MP_OBJ_FROM_PTR(t);
+#else
+    return mp_const_empty_tuple;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_table_obj, mod_wasm_table);
+
+// take_frames(on, palette=True) -- whether a compiled cart's blits leave
+// their frames in its memory for the board to show (frame/frame_presented)
+// instead of writing the canvas: blit565's when `on`, and blit's too unless
+// `palette` is false, for a board that cannot show a palette frame. Off at
+// every run's end.
+static mp_obj_t mod_take_frames(size_t n_args, const mp_obj_t *a)
+{
+#if MOY_WASM
+    int take = 0;
+    if (mp_obj_is_true(a[0])) {
+        take = TAKE_565;
+        if (n_args < 2 || mp_obj_is_true(a[1])) take |= TAKE_PALETTE;
+    }
+    g_take_frames = take;
+#else
+    (void)n_args;
+    (void)a;
+#endif
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_take_frames_obj, 1, 2, mod_take_frames);
+
+// frame(lut_out) -> the owed frame as a memoryview into the cart's memory, or
+// None. W x H bytes are blit's indices, whose 256 wire colours are copied into
+// `lut_out` (512 bytes); 2 x W x H bytes are blit565's little-endian words.
+// Valid until the cart's next hook, which the board fences.
+//
+// The view is ONE object, re-aimed at every owed frame: it is asked for on
+// every frame the cart draws, and it outlives nothing -- a frame is shown or
+// settled before the cart's next hook. It lives outside the heap, like the
+// memory it points into.
+#if MOY_WASM
+static mp_obj_array_t g_frame_view;
+#endif
+static mp_obj_t mod_frame(mp_obj_t lut_out)
+{
+#if MOY_WASM
+    const moy_pixel *lut = NULL;
+    const uint8_t *px = (RUN.wasm && WR) ? moy_wasm_frame(&WR->w, &lut) : NULL;
+    if (!px) return mp_const_none;
+    size_t n = (size_t)RUN.canvas.w * (size_t)RUN.canvas.h;
+    if (lut) {
+        size_t len = 0;
+        uint8_t *out = (uint8_t *)buf_w(lut_out, &len);
+        if (len < 256 * sizeof(moy_pixel))
+            mp_raise_ValueError(MP_ERROR_TEXT("frame: palette buffer too small"));
+        memcpy(out, lut, 256 * sizeof(moy_pixel));
+    } else {
+        n *= 2;
+    }
+    mp_obj_array_t *v = &g_frame_view;
+    v->base.type = &mp_type_memoryview;
+    v->typecode = 'B';
+    v->free = 0;                     // a memoryview's offset into its buffer
+    v->len = n;
+    v->items = (void *)px;
+    return MP_OBJ_FROM_PTR(v);
+#else
+    (void)lut_out;
+    return mp_const_none;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_frame_obj, mod_frame);
+
+// frame_kept() -> whether the binding still holds a frame the canvas lacks, in
+// the copy frame_presented named: the last frame shown, which no blit has
+// replaced and no verb has written into the canvas since.
+static mp_obj_t mod_frame_kept(void)
+{
+#if MOY_WASM
+    return mp_obj_new_bool(RUN.wasm && WR && WR->w.kept != NULL);
+#else
+    return mp_const_false;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_frame_kept_obj, mod_frame_kept);
+
+// frame_settle() -- write the frame the canvas lacks into it now, as the blit
+// would have: the owed one, or the last one shown from the copy
+// frame_presented named. For anything about to draw on the canvas, or read
+// it, while the frame is still the cart's or the board's. A kept frame is
+// handed back as owed so the binding's own settle writes it, in the layout
+// and with the colours of the blit that made it.
+static mp_obj_t mod_frame_settle(void)
+{
+#if MOY_WASM
+    if (RUN.wasm && WR) {
+        if (!WR->w.owed && WR->w.kept) {
+            WR->w.owed = WR->w.kept;
+            WR->w.kept = NULL;
+        }
+        moy_wasm_settle(&WR->w);
+    }
+#endif
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_frame_settle_obj, mod_frame_settle);
+
+// frame_presented(kept=None, off=0) -- the board has shown the owed frame.
+// `kept[off:]` is its copy of the frame, byte for byte, alive until the next
+// blit; the canvas is written from it if the cart draws on the screen before
+// then. None says the board wrote the frame into the canvas itself.
+static mp_obj_t mod_frame_presented(size_t n_args, const mp_obj_t *a)
+{
+#if MOY_WASM
+    const uint8_t *kept = NULL;
+    if (n_args > 0 && a[0] != mp_const_none) {
+        size_t len = 0;
+        size_t off = n_args > 1 ? (size_t)mp_obj_get_int(a[1]) : 0;
+        const uint8_t *b = (const uint8_t *)buf_r(a[0], &len);
+        size_t need = (size_t)RUN.canvas.w * (size_t)RUN.canvas.h;
+        if (WR && WR->w.frame_565) need *= 2;
+        if (off > len || len - off < need)
+            mp_raise_ValueError(MP_ERROR_TEXT("frame_presented: copy too small"));
+        kept = b + off;
+    }
+    if (RUN.wasm && WR) moy_wasm_presented(&WR->w, kept);
+#else
+    (void)n_args;
+    (void)a;
+#endif
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_presented_obj, 0, 2,
+                                           mod_frame_presented);
+
 static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
 {
     if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
@@ -2270,6 +3105,16 @@ static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
     moy_reset_state(&RUN.canvas);
     float dt = (float)mp_obj_get_float(args[0]);
     g_tick_ms = (uint32_t)mp_hal_ticks_ms();   // h_time_ms counts from here
+    if (!RUN.L) {
+        // A compiled cart: its two hooks on the engine's thread.
+#if MOYCORE_WASM
+        if (wasm_tick_c(dt, draw, err, sizeof(err)) != 0)
+            return mp_obj_new_str(err, strlen(err));
+        return mp_const_none;
+#else
+        return mp_const_none;
+#endif
+    }
     // The sample clock re-bases per FRAME. Without this the gap from the last
     // sample of one frame to the first of the next -- the whole of the host's
     // Python frame, flush included -- is charged to whichever cart function
@@ -2306,17 +3151,29 @@ static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_tick_obj, 1, 2, mod_tick);
 
-// tick_split() -> (update_us, draw_us) for the last tick. Microseconds, not the
-// loop's milliseconds: a cart frame this project cares about is single-digit ms
-// and a 1ms tick would quantise the split into uselessness.
-static mp_obj_t mod_tick_split(void)
+// tick_split(out=None) -> (update_us, draw_us) for the last tick. Microseconds,
+// not the loop's milliseconds: a cart frame this project cares about is
+// single-digit ms and a 1ms tick would quantise the split into uselessness.
+// Given `out` -- two int32 slots, an array("i") -- it writes the pair there and
+// returns `out`: the Player asks after every tick, and a tuple an ask is
+// garbage on every frame of every Lua and compiled cart.
+static mp_obj_t mod_tick_split(size_t n_args, const mp_obj_t *args)
 {
+    if (n_args > 0 && args[0] != mp_const_none) {
+        size_t len = 0;
+        int32_t *o = (int32_t *)buf_w(args[0], &len);
+        if (len < 2 * sizeof(int32_t))
+            mp_raise_ValueError(MP_ERROR_TEXT("tick_split: needs two int32 slots"));
+        o[0] = (int32_t)g_upd_us;
+        o[1] = (int32_t)g_draw_us;
+        return args[0];
+    }
     mp_obj_t t[2];
     t[0] = mp_obj_new_int((mp_int_t)g_upd_us);
     t[1] = mp_obj_new_int((mp_int_t)g_draw_us);
     return mp_obj_new_tuple(2, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_tick_split_obj, mod_tick_split);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_tick_split_obj, 0, 1, mod_tick_split);
 
 // pmem_image(out) -> dirty flag. The host persists at boundaries (#66), so it
 // asks for the image rather than being told about every poke.
@@ -2349,6 +3206,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_retarget_obj, mod_retarget);
 
 static mp_obj_t mod_close(void)
 {
+#if MOYCORE_WASM
+    wasm_end();                  // the session first: it draws on the console
+#endif
     if (RUN.L) lua_close(RUN.L);
     RUN.L = NULL;
 #if MOYCORE_POOL
@@ -2374,7 +3234,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_close_obj, mod_close);
 // binding owns the VM but not the host's curiosity about it.
 static mp_obj_t mod_get_global(mp_obj_t name_obj)
 {
-    if (!RUN.open) return mp_const_none;
+    if (!RUN.L) return mp_const_none;
     lua_getglobal(RUN.L, mp_obj_str_get_str(name_obj));
     mp_obj_t out = mp_const_none;
     switch (lua_type(RUN.L, -1)) {
@@ -2409,13 +3269,29 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_get_global_obj, mod_get_global);
 // now: libmoy answers the cart, the console reads the answer here, and the WM
 // composites accordingly. That is the whole shape the spec's host interface was
 // built for, and it only became available because the verb moved into core.
+//
+// The console asks after every tick, so the answer is the SAME tuple for as
+// long as the declaration stands (moycore_view, dropped by run_begin) and a new
+// one only when the cart changes it: a caller holding the last answer sees a
+// change as a different object with different values, and no change costs no
+// allocation.
 static mp_obj_t mod_view(void)
 {
     if (!RUN.open || RUN.con.view_w <= 0) return mp_const_none;
+    mp_obj_t last = MP_STATE_VM(moycore_view);
+    if (last != MP_OBJ_NULL) {
+        mp_obj_tuple_t *lt = MP_OBJ_TO_PTR(last);
+        if (MP_OBJ_SMALL_INT_VALUE(lt->items[0]) == RUN.con.view_w
+            && MP_OBJ_SMALL_INT_VALUE(lt->items[1]) == RUN.con.view_h) {
+            return last;
+        }
+    }
     mp_obj_t t[2];
-    t[0] = mp_obj_new_int(RUN.con.view_w);
-    t[1] = mp_obj_new_int(RUN.con.view_h);
-    return mp_obj_new_tuple(2, t);
+    t[0] = MP_OBJ_NEW_SMALL_INT(RUN.con.view_w);
+    t[1] = MP_OBJ_NEW_SMALL_INT(RUN.con.view_h);
+    last = mp_obj_new_tuple(2, t);
+    MP_STATE_VM(moycore_view) = last;
+    return last;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_view_obj, mod_view);
 
@@ -2600,6 +3476,16 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_TICK_DRAW),   MP_ROM_INT(1) },
+    // The compiled cart: 1 when the engine is in this build (wasm_open works).
+    { MP_ROM_QSTR(MP_QSTR_WASM),        MP_ROM_INT(MOYCORE_WASM) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_open),   MP_ROM_PTR(&mod_wasm_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_quit),   MP_ROM_PTR(&mod_wasm_quit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_table),  MP_ROM_PTR(&mod_wasm_table_obj) },
+    { MP_ROM_QSTR(MP_QSTR_take_frames), MP_ROM_PTR(&mod_take_frames_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame),       MP_ROM_PTR(&mod_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_settle), MP_ROM_PTR(&mod_frame_settle_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_kept),  MP_ROM_PTR(&mod_frame_kept_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_presented), MP_ROM_PTR(&mod_frame_presented_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick_split),  MP_ROM_PTR(&mod_tick_split_obj) },
     { MP_ROM_QSTR(MP_QSTR_profile),     MP_ROM_PTR(&mod_profile_obj) },
     { MP_ROM_QSTR(MP_QSTR_verb_stats),  MP_ROM_PTR(&mod_verb_stats_obj) },
@@ -2664,6 +3550,12 @@ MP_REGISTER_MODULE(MP_QSTR_moycore, moycore_user_cmodule);
 // the Lua closures reference them only by INDEX, which the collector cannot
 // see. Cleared at close().
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_calls);
+// The compiled cart's open data file (`read`), held between its reads.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_file);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_gate);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_files);
 // The PICO-8 machine's Python-owned buffers (p8_memory), kept alive here.
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8mem);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8rom);
+// The last view() answer, returned again while the declaration stands.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_view);

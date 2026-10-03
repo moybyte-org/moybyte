@@ -112,7 +112,12 @@ def test_touch_drag_scrolls_the_rows(tmp_path):
 def test_scroll_position_survives_the_release(tmp_path):
     """Letting go must leave the list where the finger put it -- the second
     half of the on-glass report ('when i drag and let go i get thrown at the
-    start')."""
+    start').
+
+    A release may COAST from there: the rows are kinetic since #113 Phase 5, so
+    the position this pins is where the motion comes to REST, never a snap back
+    to the top. Once at rest nothing may move it again without input.
+    """
     from runtime import host_app
     ws = _ws(tmp_path)
     _force_ota_rows(ws)
@@ -122,11 +127,15 @@ def test_scroll_position_survives_the_release(tmp_path):
     row_h = lay.set_row_h
     x = lay.set_x + lay.set_w // 2
     _drag_rows(ws, drv, x, lay.set_row_y0 + 4 * row_h, -3 * row_h)
-    top = ws.settings_layer.set_top
-    assert top > 0
+    released = ws.settings_layer.set_top
+    assert released > 0
+    for _ in range(60):                     # let any fling run itself out
+        drv.frame(1 / 30)
+    rest = ws.settings_layer.set_top
+    assert rest >= released                 # it coasted onward, never backwards
     for _ in range(20):                     # idle frames: nothing may re-snap it
         drv.frame(1 / 30)
-    assert ws.settings_layer.set_top == top
+    assert ws.settings_layer.set_top == rest
 
 
 def test_drag_carries_the_selection_into_view(tmp_path):
@@ -240,3 +249,111 @@ def test_the_c6_row_is_capability_gated_and_opens_the_flow(tmp_path):
     ws.update_ui.open_update_c6 = lambda: opened.append(1)
     ws.settings_layer._activate_settings_action("update_c6")
     assert opened == [1]
+
+
+# -- #113 Phase 5: the rows travel by PIXELS ------------------------------
+# set_top stays the row-slot state of record, but the ScrollRegion underneath it
+# now carries the offset a finger actually produced, and rows draw at their slot
+# MINUS that sub-row remainder. Before the conversion a drag shorter than one row
+# moved nothing at all, and the list jumped a whole row when it finally crossed.
+
+
+def _drag_hold(ws, drv, x, y0, dy, steps=12):
+    """Press and drag by dy WITHOUT releasing, so the view can be read
+    mid-gesture -- before a release can turn leftover velocity into a fling."""
+    _feed(ws, drv, x, y0, press=True)
+    for i in range(1, steps + 1):
+        _feed(ws, drv, x, y0 + dy * i // steps)
+
+
+def _settle(ws, drv, x, y, n=6):
+    """Hold still, then let go. The release-velocity EMA decays toward zero
+    while the finger does not move, so this is a STOP and not a fling -- the
+    region's own hold-then-release rule, used here to isolate the static
+    offset from the kinetic behaviour tested separately below."""
+    for _ in range(n):
+        _feed(ws, drv, x, y)
+    _feed(ws, drv, x, y, down=False)
+
+
+def _settings_drv(tmp_path):
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    _force_ota_rows(ws)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    return ws, drv
+
+
+def test_a_sub_row_drag_moves_the_rows_by_pixels(tmp_path):
+    ws, drv = _settings_drv(tmp_path)
+    sl = ws.settings_layer
+    lay = ws.layout
+    row_h = lay.set_row_h
+    x = lay.set_x + lay.set_w // 2
+    y_before = sl._settings_row_rect(0)[1]
+    _drag_hold(ws, drv, x, lay.set_row_y0 + 4 * row_h, -(row_h - 6))
+    y_after = sl._settings_row_rect(0)[1]
+    assert sl.set_top == 0                      # no whole row was crossed
+    assert 0 < y_before - y_after < row_h       # ... yet the rows MOVED, by pixels
+
+
+def test_the_row_below_the_fold_becomes_partly_visible(tmp_path):
+    """A pixel offset puts a PARTIAL row at the bottom edge, so visibility is a
+    band intersection and not a slot range. The draw clips it to the band."""
+    ws, drv = _settings_drv(tmp_path)
+    sl = ws.settings_layer
+    lay = ws.layout
+    vis = sl._settings_visible()
+    assert len(sl._settings_rows()) > vis       # genuinely overflows
+    assert not sl._settings_row_visible(vis)    # fully below the fold at rest
+    _drag_hold(ws, drv, lay.set_x + lay.set_w // 2,
+               lay.set_row_y0 + 4 * lay.set_row_h, -(lay.set_row_h - 6))
+    assert sl._settings_row_visible(vis)        # its top edge is inside the band now
+
+
+def test_a_dpad_step_lands_row_aligned(tmp_path):
+    """The keyboard thinks in ROWS: whatever sub-row remainder a finger left
+    behind, a d-pad step puts the list back on a row boundary."""
+    ws, drv = _settings_drv(tmp_path)
+    sl = ws.settings_layer
+    lay = ws.layout
+    x = lay.set_x + lay.set_w // 2
+    y = lay.set_row_y0 + 4 * lay.set_row_h
+    dy = -(lay.set_row_h - 6)
+    _drag_hold(ws, drv, x, y, dy)
+    _settle(ws, drv, x, y + dy)
+    assert sl._scroll_px() > 0                  # the finger left a remainder
+    drv.press("down")
+    drv.frame(1 / 30)
+    assert sl._scroll_px() == 0                 # the step re-aligned it
+
+
+def test_a_released_fling_coasts_the_rows(tmp_path):
+    """ScrollRegion has carried the fling physics all along, but nothing here
+    ticked it, so a Settings fling stopped dead on the release frame."""
+    ws, drv = _settings_drv(tmp_path)
+    sl = ws.settings_layer
+    lay = ws.layout
+    x = lay.set_x + lay.set_w // 2
+    _drag_rows(ws, drv, x, lay.set_row_y0 + 5 * lay.set_row_h,
+               -4 * lay.set_row_h, steps=3)
+    assert sl.rows_flinging()                   # the release armed a fling
+    assert ws._animating(1 / 30)                # ... and the redraw gate knows
+    off = sl.scroll.offset
+    drv.frame(1 / 30)
+    assert sl.scroll.offset != off              # it coasted with no input at all
+
+
+def test_a_fling_comes_to_rest(tmp_path):
+    """Friction stops it, and the row slot agrees with where the pixels landed."""
+    ws, drv = _settings_drv(tmp_path)
+    sl = ws.settings_layer
+    lay = ws.layout
+    x = lay.set_x + lay.set_w // 2
+    _drag_rows(ws, drv, x, lay.set_row_y0 + 5 * lay.set_row_h,
+               -4 * lay.set_row_h, steps=3)
+    for _ in range(200):
+        drv.frame(1 / 30)
+    assert not sl.rows_flinging()
+    assert sl.set_top == int(sl.scroll.offset) // lay.set_row_h

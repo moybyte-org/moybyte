@@ -113,7 +113,7 @@ them back on the next visit — but anything that existed *only* here is.
   `[modules.shared]` is an ALLOWLIST rather than a denylist, and its board file
   argues the case at length: a denylist is right when the source tree's default
   answer is yes, `runtime/` IS the console, and this board is not one.
-- **One shared C module, `moy_web`.** The other seven are denied with the
+- **One shared C module, `moy_web`.** Every other one is denied with the
   hardware or the workload that is missing.
 
 ## Provisioning (the store, not the modules)
@@ -599,7 +599,7 @@ new image's host did not come up.
 - **Flashing needs no button dance any more** (2026-08-30). This board took the
   USB-Serial/JTAG promotion the console boards use, so
   `make firmware-flash-zero PORT=…` resets it into the loader and back out with
-  nothing to hold. `make device-port` prints which port it is.
+  nothing to hold. `tools/board.py ports` prints which port it is.
 
   Everything below about the BOOT hold is what that replaced, and is kept
   because the BOOT hold is still the RECOVERY. Three ways in were tried on the
@@ -623,7 +623,7 @@ new image's host did not come up.
 
 - **It now shares `303a:1001` with the two console S3 boards**, and unlike them
   it has no dev channel to answer "which board are you". `board.toml` names its
-  USB `serial_number` and `tools/device_port.py` matches on that. Read yours
+  USB `serial_number` and `tools/board.py` matches on that. Read yours
   with `udevadm info -q property -n /dev/ttyACM0 | grep ID_SERIAL_SHORT` if you
   are working with a different unit.
 

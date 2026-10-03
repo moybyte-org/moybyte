@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   verbs_line         the VERBS line: where a Lua frame's time goes
+#   perfcnt_line       the PERFCNT line: instructions per cycle
+#   luaprof_line       the LUAPROF line: the interpreter's split
+#   DevChannel         the serial line commands: one class, every board
+#   DevChannel.run     the command table of record
+#   DevChannel.poll    drain the bytes a frame may take
+#   DevChannel.report  the per-tick diag line
 """The serial DEV CHANNEL: drive a running console over the board's serial line.
 
 ONE implementation, every board that has a working stdin. Extracted from the
@@ -15,10 +23,15 @@ between frames and runs whole lines as commands, which is also what makes a
 board scriptable: `tools/p4_autotest.py` and tests/test_p4_on_glass.py are built
 on exactly this shape.
 
-It NEVER calls readline: one byte at a time via sys.stdin.read(1), only after
-poll(0) says MP_STREAM_POLL_RD, accumulating to a newline. A byte read is a byte
-consumed, so line noise costs a bounded few bytes per frame and can never park
-the loop; an over-long partial line is dropped. And it COUNTS what it swallowed
+It NEVER calls readline: one byte at a time off `sys.stdin.buffer`, only after
+poll(0) says MP_STREAM_POLL_RD, accumulating to a newline and decoding the
+whole line. A byte read is a byte consumed, so line noise costs a bounded few
+bytes per frame and can never park the loop; an over-long partial line is
+dropped, and so is a line that is not UTF-8. NOT the text `sys.stdin`: its
+read(1) is a CHARACTER, so a byte of 0x80 or above waits inside the read for
+the rest of a UTF-8 sequence that line noise never sends -- on the T-Deck a
+USB line-state request that reached stdin during the bootloader held the first
+frame for 29 s, until the host wrote again. And it COUNTS what it swallowed
 (`rx=`), so "something is injecting into stdin" is a number rather than a
 mystery hang -- which is the diagnostic that proved RX dead on this board for
 weeks (rx stuck at 1 while a host write was accepted and discarded).
@@ -48,16 +61,28 @@ shaped it are:
     KeyboardInterrupt -- and TinyUSB's CDC path additionally EMPTIES the ring
     when it hits one. So the transfer runs with `micropython.kbd_intr(-1)`,
     exactly as pyexec's raw-paste mode does, restored in a `finally`.
-  * every read is preceded by a poll that already promised a byte. A bulk
-    `read(n)` blocks inside `mp_hal_stdin_rx_chr` with no timeout, so a host
-    that dies mid-window would park the frame loop forever; poll-per-byte is
-    what makes the idle timeout below able to exist at all.
+  * a bulk `read(n)` blocks inside `mp_hal_stdin_rx_chr` with no timeout, so
+    a host that dies mid-window would park the frame loop forever. The boards
+    read the ring from C instead (native/moy_serial: blocks as they land, and
+    an idle timeout); where that module is absent every byte is preceded by a
+    poll that already promised it, which is the same timeout at a byte a poll.
+
+`moy push` REACHES THE CONSOLE HERE TOO: moy-spec's `moy push` finds a console
+by writing `moy?` to every USB serial port and copies a cart line by line
+(proposals/sideload.md in moy-spec, tier 1). The channel answers `moy?` with
+the console's descriptor and takes `moy-put`, `moy-del`, `moy-rescan` and
+`moy-run` into the store, the same way `recv` does -- a `.new` renamed only
+when every byte arrived, the stamp beside it dropped. Base64 at a line a
+frame is slower than `recv` and needs no tool but moy's, which is the point.
+A compiled cart pushed that way carries no module for this board's chip --
+only tools/push_cart.py builds one -- and `moy-rescan` says so in a
+`moy-note` line the tool shows to the person pushing.
 """
 
 try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms
+    from ticks import _ticks_diff, _ticks_ms
 except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms
+    from runtime.ticks import _ticks_diff, _ticks_ms
 try:                       # device (device_util is staged from device/)
     from device_util import _diag_log
 except ImportError:        # host / test -- no diag ring; print is it
@@ -69,6 +94,10 @@ try:                       # device: the interrupt-char switch `recv` needs
     import micropython as _micropython
 except ImportError:        # host CPython: nothing intercepts a payload byte
     _micropython = None
+try:                       # device: the console's stdin read from C, and its rate
+    import moy_serial as _moy_serial
+except ImportError:        # host CPython, the unix port: `_fill`'s own loop
+    _moy_serial = None
 
 # The ONE declaration of the persisted ON/OFF settings (#209 section 7). The
 # serial words below are derived from it -- an entry with a `dev` name IS the
@@ -107,15 +136,21 @@ SERIAL_NOISE_LIMIT = 16384
 RECV_MAX_WINDOW = 32768
 # No byte for this long inside a window and the window is given up on. A host
 # that is alive but slow refreshes it with every byte -- inside a window bytes
-# arrive 87us apart at 115200 -- so a quiet stretch this long means the stream
+# arrive microseconds apart -- so a quiet stretch this long means the stream
 # STOPPED, which on a ring with no flow control means bytes were dropped.
 # It is not a rate floor, and it is no longer fatal: see RECV_RETRIES.
 RECV_IDLE_MS = 2000
+# `recv rate=`: what the host sends after each switch of the UART's rate, and
+# how long the board waits for it. Anything ahead of it on the line is what
+# the switch left there and is dropped. The host waits longer than this before
+# it gives the rate up, so the board is back at the console's own by then.
+RECV_SYNC = b"\xa5\x5aRECV-SYNC\x5a\xa5"
+RECV_SYNC_MS = 1000
 # How many windows may be re-sent before the transfer is abandoned. A UART ring
-# with no flow control drops a byte with no error when the board falls behind
-# for ~25ms, and one dropped byte used to kill the whole cart: measured on the
-# P4, a handful of bytes (2, 7, 12) lost about once every 300 windows, which is
-# a failed 120KB push one time in five. The file only ever advances by WHOLE
+# with no flow control drops a byte with no error when it overflows, and one
+# dropped byte used to kill the whole cart: on the P4's stock 260-byte ring, a
+# handful of bytes (2, 7, 12) lost about once every 300 windows, which was a
+# failed 120KB push one time in five. The file only ever advances by WHOLE
 # windows, so `got` is a resync point that costs nothing to keep -- the board
 # throws the short window away and asks for it again. The final sha still has
 # to agree, so a retry that resynced wrongly fails loudly rather than landing a
@@ -126,6 +161,10 @@ RECV_RETRIES = 8
 # the other end is gone, and two of those end it in ~4s -- about what the one
 # fatal timeout above used to cost.
 RECV_DEAD_WINDOWS = 2
+# A `moy-put` in flight drains this much a frame instead of
+# SERIAL_BYTES_PER_FRAME, on a stdin with no poll to wait on (see _moy_drain,
+# which takes the whole file at once where there is one).
+MOY_PUT_BYTES_PER_FRAME = 4096
 
 
 def _kbd_intr(ch):
@@ -139,6 +178,12 @@ def _kbd_intr(ch):
     values."""
     if _micropython is not None:
         _micropython.kbd_intr(ch)
+
+
+def _console_rate():
+    """The console UART's rate where this build can switch it, else None."""
+    baud = getattr(_moy_serial, "baud", None)
+    return baud() if baud is not None else None
 
 
 # Can this build carry an arbitrary byte on stdin at all? A device that cannot
@@ -408,6 +453,128 @@ def luaprof_line(st, rng, top=10):
     return " | ".join(out)
 
 
+def _recv_err(ws, exc, got, total):
+    """The RECV ERR text for a write that failed: `store full ...` when the
+    store says it had no room (moy_carts.store_full), which the push tool and
+    the screen both put plainly; the exception otherwise."""
+    full = getattr(getattr(ws, "carts_store", None), "store_full", None)
+    if full is not None and full(exc):
+        return "store full after %d of %d bytes" % (got, total)
+    return "%s: %s" % (type(exc).__name__, exc)
+
+
+def _moy_path(ws, rel):
+    """`<carts_root>/<rel>` for a path `moy push` names, or None when it would
+    leave the store: every segment non-empty and neither `.` nor `..`, no `\\`
+    and no NUL (proposals/sideload.md: paths never escape cart_root)."""
+    root = getattr(ws, "carts_root", None)
+    if not root or not rel:
+        return None
+    for seg in rel.split("/"):
+        if not seg or seg in (".", "..") or "\\" in seg or "\0" in seg:
+            return None
+    return str(root).rstrip("/") + "/" + rel
+
+
+def _moy_mkdirs(path):
+    """Every folder above `path`, shallowest first."""
+    import os
+    parts = path.split("/")[:-1]
+    for i in range(2, len(parts) + 1):
+        d = "/".join(parts[:i])
+        try:
+            os.mkdir(d)
+        except OSError:
+            pass
+
+
+def _moy_remove(path):
+    import os
+    try:
+        entries = os.listdir(path)
+    except OSError:
+        os.remove(path)
+        return
+    for name in entries:
+        _moy_remove(path + "/" + name)
+    os.rmdir(path)
+
+
+def _moy_chip():
+    """This board's chip, as its compiled carts' modules name it; None on a
+    build without the WebAssembly engine."""
+    try:
+        import moy_wasm
+        return moy_wasm.CHIP
+    except (ImportError, AttributeError):
+        return None
+
+
+def _moy_format():
+    """This board's compiled-code format version, which its modules' names
+    carry; None on a build without the WebAssembly engine."""
+    try:
+        import moy_wasm
+        return moy_wasm.FORMAT
+    except (ImportError, AttributeError):
+        return None
+
+
+def _moy_descriptor(ws):
+    """proposals/sideload.md's descriptor, answered to `moy?`."""
+    try:
+        import _ota_build
+        board = _ota_build.BOARD
+    except (ImportError, AttributeError):
+        board = "host"
+    desc = {"moy_console": "0.1", "name": "Moybyte %s" % board,
+            "transports": ["serial"], "cart_root": "carts",
+            "runtimes": ["lua", "wasm"] if _moy_chip() else ["lua"]}
+    root = getattr(ws, "carts_root", None)
+    if root:
+        try:
+            import os
+            st = os.statvfs(str(root))
+            desc["free_kb"] = st[0] * st[3] // 1024
+        except (OSError, AttributeError):
+            pass
+    return desc
+
+
+def _moy_notes(folders, ws):
+    """What a `moy push` of `folders` leaves slow here: a compiled cart with no
+    module for this board's chip and format, which `moy push` cannot build --
+    it plays on the interpreter (docs/wasm_tier_plan_2026-09.md, "A cart
+    survives its firmware")."""
+    chip = _moy_chip()
+    fmt = _moy_format()
+    root = getattr(ws, "carts_root", None)
+    if not chip or not root:
+        return []
+    import json
+    import os
+    notes = []
+    for folder in sorted(folders):
+        base = str(root).rstrip("/") + "/" + folder
+        try:
+            with open(base + "/manifest.json") as f:
+                man = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(man, dict) or man.get("runtime") != "wasm":
+            continue
+        main = man.get("main") or "main.wasm"
+        stem = main[:-5] if main.endswith(".wasm") else main
+        try:
+            os.stat("%s/%s.%s.f%s.aot" % (base, stem, chip, fmt))
+        except OSError:
+            notes.append("%s is a compiled cart with no module for this console "
+                         "(%s, format %s), so it plays slowly on the interpreter. "
+                         "Push it with Moybyte's tools/push_cart.py, which "
+                         "builds that module." % (folder, chip, fmt))
+    return notes
+
+
 def _remote_state(ws):
     """One-line JSON snapshot for the `state` command -- the assertion source an
     on-glass harness reads instead of pixels. Every field best-effort: a broken
@@ -422,8 +589,15 @@ def _remote_state(ws):
         st["screen"] = ws.screen
         st["frames"] = getattr(ws, "_frames_drawn", None)
         st["cart"] = (getattr(ws, "cart", None) or {}).get("title")
-        st["cart_error"] = getattr(ws, "cart_error", None)
+        # A fit notice is a panel too, and not an error: a compiled cart this
+        # console cannot hold, refused before it loaded (Player.notice).
+        notice = getattr(getattr(ws, "player", None), "notice", None)
+        st["notice"] = notice
+        st["cart_error"] = None if notice else getattr(ws, "cart_error", None)
         st["diag"] = bool(getattr(ws, "diag_live", False))
+        # Settings -> UNKNOWN SOURCES: whether a compiled cart whose module
+        # carries no signature may load on this console.
+        st["unknown_sources"] = bool(getattr(ws, "unknown_sources", False))
         # Idle screen blank: the harness has to be able to tell a blanked panel
         # from a hung one -- they look identical from the host end.
         st["psave"] = [bool(getattr(ws, "_psave_asleep", False)),
@@ -477,6 +651,8 @@ def _remote_state(ws):
             "content": None if sr is None else sr.content,
             "wifi_view": bool(sl.wifi_view),
             "bt_view": bool(getattr(sl, "bt_view", False)),
+            # the toggle whose warning is up before it turns ON, or None
+            "confirm": getattr(sl, "confirm_key", None),
         }
         win = ws.wm._wins.get("settings") if hasattr(ws.wm, "_wins") else None
         if win is not None and win.ctx is not None:
@@ -520,6 +696,9 @@ def _remote_state(ws):
         # also what a fold that never fires looks like, so a default of 0 reads
         # as "working, just quiet".
         st["fold"] = getattr(comp, "fold_count", None)
+        # ...and how many of those were a compiled cart's frame, folded from
+        # the cart's memory (moy_fold.h's frame fold), by the same rule.
+        st["ffold"] = getattr(comp, "frame_fold_count", None)
         # The P4's counterpart, same None-not-0 rule: a scanning panel has no
         # pump but does have the async-PPA overlap (#58). `ppa` is the whole
         # overlap_stats tuple, whose fields that method documents; `timeouts`
@@ -616,12 +795,17 @@ class DevChannel:
                       feed: press edge, held interpolation, real release
       drag [frames] [step]         grab the TOP window's title strip and
                       oscillate it (windowed tier; declines with no window)
-      diag 0|1        the diagnostic frame-eaters (perf_capture + the FPS chip)
+      diag 0|1        PERF DIAG: the frame-eaters (perf_capture + the FPS chip)
+                      and every periodic line, PERF included
       steady 0|1      the tick model's STEADY / FREE knob (#217)
-      crisp 0|1       the #204 nearest-neighbour game composite -- these two
-                      are SETTINGS_TOGGLES entries that declared a serial word,
-                      not branches written here; a board whose capability gate
-                      says no declines the word. Neither persists, so a
+      crisp 0|1       the #204 nearest-neighbour composite of palette-based
+                      game frames
+      unknown_sources 0|1   Settings -> UNKNOWN SOURCES: whether a compiled
+                      cart's unsigned module may load, set without the
+                      screen's warning -- these three are SETTINGS_TOGGLES
+                      entries that declared a serial word, not branches
+                      written here; a board whose capability gate says no
+                      declines the word. None persists, so a test or a
                       measurement session cannot leave the board off-default.
       uncap 0|1       DIAG: every loop frame draws while logic keeps its rate
                       -- the draw+present path flat out, the game at its own
@@ -640,10 +824,12 @@ class DevChannel:
                       the live lockstep match, as JSON. `on`/`off` arm it by
                       hand (the Player only arms it for a multiplayer cart)
       py <code>       eval/exec one line against the LIVE console
-      recv <n> <window> <path>     take n RAW bytes off stdin into <path>.new,
-                      acking every <window> of them; prints the sha256 prefix
-                      of what it wrote. Bare `recv` answers with the caps line
-                      an older image cannot fake (see _recv)
+      recv <n> <window> [rate=<baud>] <path>   take n RAW bytes off stdin
+                      into <path>.new, acking every <window> of them, the
+                      payload at <baud> where the console UART can switch;
+                      prints the sha256 prefix of what it wrote. Bare `recv`
+                      answers with the caps line an older image cannot fake
+                      (see _recv)
       quit            leave the desktop for the REPL
 
     BOARD BITS ARE INJECTED: `set_backlight`, `idle` (an IdleBlank), `env`
@@ -663,7 +849,7 @@ class DevChannel:
         self.pointer = pointer
         self.click = False
         self.quit = False       # `quit` asked for the REPL; run_desktop returns
-        self.buf = ""
+        self.buf = bytearray()  # the line so far, as bytes
         self.rx = 0             # bytes swallowed -- the "is something injecting?" number
         self.lines = 0          # complete commands dispatched
         self.dropped = 0        # over-long partial lines thrown away
@@ -678,7 +864,10 @@ class DevChannel:
         self._poll = None
         self._stdin = None
         self._rawin = None      # sys.stdin.buffer: the same ring, 8 bits wide
-        self._ipoll = None      # ipoll where there is one -- see _recv
+        self._ipoll = None      # ipoll where there is one -- see below
+        self._one = bytearray(1)  # `_fill`'s byte when there is no moy_serial
+        self._put = None        # the `moy-put` in flight: see _moy_put
+        self._pushed = set()    # cart folders `moy-put` wrote this session
         try:
             import select
             import sys
@@ -690,11 +879,12 @@ class DevChannel:
             # registration is truthy on EVERY call, forever, which looks exactly
             # like "poll reports stdin always-ready".
             self._poll.register(self._stdin, select.POLLIN)
-            # `recv` polls once PER BYTE, so the allocating `poll()` -- a fresh
-            # list of fresh tuples every call -- would hand a 124KB cart ten
-            # megabytes of garbage and buy a handful of collections in the
-            # middle of a transfer the P4's 260-byte ring cannot pause for.
-            # ipoll reuses one tuple and allocates nothing after the first call.
+            # The line reader polls every loop frame, and `recv` and
+            # `moy-put` poll once PER BYTE where there is no moy_serial, so
+            # the allocating `poll()` -- a fresh list of fresh tuples every
+            # call -- would be garbage on every frame of every cart, and
+            # megabytes of it per cart. ipoll reuses one tuple and allocates
+            # nothing after the first call.
             self._ipoll = getattr(self._poll, "ipoll", None) or self._poll.poll
             self.armed = True
         except Exception as exc:  # noqa: BLE001 -- the channel is optional sugar
@@ -711,34 +901,60 @@ class DevChannel:
             return False
         self.click = False
         ran = False
-        for _ in range(SERIAL_BYTES_PER_FRAME):
-            if not self._poll.poll(0):
+        ipoll = self._ipoll
+        raw = self._rawin
+        budget = (MOY_PUT_BYTES_PER_FRAME if self._put is not None
+                  else SERIAL_BYTES_PER_FRAME)
+        for _ in range(budget):
+            ready = False
+            for _ev in ipoll(0):
+                ready = True
+            if not ready:
                 break
             try:
-                ch = self._stdin.read(1)
+                got = raw.read(1) if raw is not None else self._stdin.read(1)
+            except UnicodeError:
+                # A text stdin (no 8-bit one beside it) meeting a byte that is
+                # not text costs the line it lands in, never the channel.
+                self.dropped += 1
+                self.buf = bytearray()
+                continue
             except Exception:  # noqa: BLE001 -- a dead stdin disarms the channel
                 self.armed = False
                 return ran
-            if not ch:
+            if not got:
                 break
+            if not isinstance(got, (bytes, bytearray)):
+                got = got.encode()
             self.rx += 1
-            if ch in ("\n", "\r"):
-                line = self.buf.strip()
-                self.buf = ""
+            c = got[0]
+            if c == 10 or c == 13:
+                try:
+                    line = bytes(self.buf).decode().strip()
+                except UnicodeError:
+                    # Bytes that are not text -- line noise, or what a UART
+                    # rate switch left on the line -- cost the line they land
+                    # in, never the channel.
+                    self.dropped += 1
+                    line = ""
+                self.buf = bytearray()
                 if line:
                     self.lines += 1
                     ran = True
                     try:
-                        self.run(ws, line)
+                        if self._put is not None:
+                            self._moy_put_line(ws, line)
+                        else:
+                            self.run(ws, line)
                     except Exception as exc:  # noqa: BLE001 -- never kill the loop
                         print("REMOTE ERR %s: %s" % (type(exc).__name__, exc))
             else:
-                self.buf += ch
+                self.buf += got
                 if len(self.buf) > SERIAL_LINE_MAX:
                     # Not a command -- a byte source with no newline in it. Drop
-                    # the partial rather than growing a string forever.
+                    # the partial rather than growing a buffer forever.
                     self.dropped += 1
-                    self.buf = ""
+                    self.buf = bytearray()
         if self.lines == 0 and self.rx >= SERIAL_NOISE_LIMIT:
             # Kilobytes in, not one command out. That is a byte SOURCE (UART0's
             # ISR shares this ring buffer -- a floating U0RXD reads exactly like
@@ -991,32 +1207,50 @@ class DevChannel:
                   % (self.rx, self.lines, self.dropped, len(self.buf),
                      self.raw), diag)
 
-    def _recv(self, line, parts):
-        """`recv <nbytes> <window> <path>`: nbytes RAW off stdin into
-        <path>.new, in windows the host may not run ahead of.
+    def _recv(self, line, parts, ws=None):
+        """`recv <nbytes> <window> [rate=<baud>] <path>`: nbytes RAW off stdin
+        into <path>.new, in windows the host may not run ahead of.
 
-        THE WINDOW IS THE ONLY BACKPRESSURE THE P4 HAS. Its stdin is a
-        260-byte ring fed by a UART ISR with no flow control -- a byte that
-        arrives with the ring full is dropped, silently, which is the same
-        mechanism that makes 768-char `py` lines corrupt on that board. So the
-        host writes one window and then WAITS: the ack below is written after
-        the file write, when nothing is in flight, and until the host reads it
-        no further byte is on the wire. USB boards backpressure for real (the
-        USB-Serial/JTAG ISR only drains what the ring has room for, and CDC's
-        stalls the endpoint), so their window is bigger for fewer round trips,
+        THE WINDOW IS THE ONLY BACKPRESSURE THE WAVESHARE P4 HAS. Its stdin is
+        a 4 KB ring fed by a UART ISR with no flow control -- a byte that
+        arrives with the ring full is dropped, silently -- so the host writes
+        one window, smaller than the ring, and then WAITS for its ack. The ack
+        goes out as soon as the window is in the buffer and BEFORE the file
+        write, so the next window crosses the wire while the store writes: at
+        most one window is ever in flight, and the ring holds it whole through
+        any stall, the write and a heap collection included. USB boards
+        backpressure for real (the USB-Serial/JTAG ISR only drains what the
+        ring has room for), so their window is bigger for fewer round trips,
         not for safety. Both numbers live in board.toml.
+
+        `rate=<baud>` runs the payload at another UART rate where the build
+        can switch its console's (moy_serial.baud), and the console goes back
+        to its own rate before anything else is said. Every switch is followed
+        by the host's RECV_SYNC, so a byte the switch left on the line is
+        dropped rather than taken as payload. A board that cannot switch
+        ignores the token and the payload comes at the console's rate.
 
         The transcript, which tools/push_cart.py is the reader of record for:
 
-            RECV ready <nbytes> <window> <path>.new     armed; send window 1
-            RECV ack <bytes so far>                     one per window, after
-                                                        the file write
-            RECV retry <bytes so far>                   that window came up
-                                                        short; re-send FROM
-                                                        this offset
-            RECV done <sha12> <nbytes>                  what landed, hashed
-            RECV ERR <what>                             gave up; tmp removed
-            RECV caps max=<n> idle=<ms>                 bare `recv`: the probe
+            RECV ready <n> <window> [rate=<baud>] <path>.new   armed; with a
+                                                  rate, the board is at it now
+            RECV sync <baud>                      the host's sync arrived at
+                                                  the new rate; send window 1
+            RECV ack <bytes so far>               one per window, before its
+                                                  write; after the last one the
+                                                  board is back at the console
+                                                  rate and waits for a sync
+            RECV retry <bytes so far>             that window came up short;
+                                                  re-send FROM this offset
+            RECV done <sha12> <nbytes>            what landed, hashed
+            RECV ERR <what>                       gave up; tmp removed; said
+                                                  at the payload's rate when
+                                                  that is where the host is
+            RECV ERR store full after <n> of <total>   the store has no room;
+                                                  the screen says so too
+            RECV caps max=<n> idle=<ms> [rate=<baud>]  bare `recv`: the probe;
+                                                  rate= is the console's, and
+                                                  says this board can switch
 
         `RECV caps` is the whole capability handshake. An image without this
         command answers `REMOTE ? recv` from the same dispatcher, which is a
@@ -1024,17 +1258,25 @@ class DevChannel:
         stops there and says the firmware is too old, rather than blasting
         bytes at a board that is still reading lines.
 
+        The transfer runs inside the console's storage gate (`ws._with_sd`):
+        on the T-Deck the card shares the panel's SPI host, and a store op
+        that overlaps a panel transfer hangs the board.
+
         Nothing is left half-written: the payload lands in a .new the caller
         renames only after the hash agrees, and every failure path here removes
         it before printing why."""
         raw = self._rawin
-        if raw is None or self._ipoll is None or not RECV_8BIT:
+        polled = raw is not None and self._ipoll is not None
+        if not RECV_8BIT or (_moy_serial is None and not polled):
             print("RECV ERR no 8-bit route on this build (stdin.buffer=%s "
                   "poll=%s kbd_intr=%s)"
                   % (raw is not None, self._ipoll is not None, RECV_8BIT))
             return
         if len(parts) < 4:
-            print("RECV caps max=%d idle=%d" % (RECV_MAX_WINDOW, RECV_IDLE_MS))
+            rate = _console_rate()
+            print("RECV caps max=%d idle=%d%s"
+                  % (RECV_MAX_WINDOW, RECV_IDLE_MS,
+                     " rate=%d" % rate if rate else ""))
             return
         try:
             total = int(parts[1])
@@ -1046,38 +1288,72 @@ class DevChannel:
             print("RECV ERR %d bytes / window %d (max %d)"
                   % (total, window, RECV_MAX_WINDOW))
             return
-        tmp = line.split(None, 3)[3] + ".new"
+        path = line.split(None, 3)[3]
+        fast = 0
+        if path.startswith("rate="):
+            tok, _, path = path.partition(" ")
+            path = path.strip()
+            try:
+                fast = int(tok[5:])
+            except ValueError:
+                print("RECV ERR bad rate: %s" % tok)
+                return
+        console = _console_rate() if fast else None
+        if not console or fast == console:
+            fast = 0
+        gate = getattr(ws, "_with_sd", None)
+        args = (ws, total, window, path + ".new", fast, console)
+        err, said = (self._recv_file(*args) if gate is None
+                     else gate(lambda: self._recv_file(*args)))
+        if err is None:
+            return
+        if not said:
+            print("RECV ERR %s" % err)
+        say = getattr(ws, "notice", None)
+        if err.startswith("store full") and say is not None:
+            say("CAN'T ADD CART", "the store is full", "warn")
+
+    def _recv_file(self, ws, total, window, tmp, fast, console):
+        """The body of `recv`: (None, _) once it has printed `RECV done`,
+        else (the error, whether it was already said at the payload's
+        rate)."""
         try:
             f = open(tmp, "wb")
         except Exception as exc:  # noqa: BLE001 -- a bad path is an answer
-            print("RECV ERR cannot open %s: %s" % (tmp, exc))
-            return
-        import gc
+            return "cannot open %s: %s" % (tmp, exc), False
         import hashlib
-        # The inner loop allocates NOTHING, so collect before it rather than
-        # during: a collect on the P4 costs more than the ring holds at line
-        # rate, and a dropped byte there is invisible until the final hash.
-        gc.collect()
         buf = bytearray(window)
         mv = memoryview(buf)
-        one = bytearray(1)
-        ipoll = self._ipoll
-        rd = raw.readinto
         # The line reader dispatched this command the instant it saw the
         # newline, so its partial buffer is empty here by construction -- but a
         # byte it DID swallow is a byte the payload would never see, so take
         # them first. They came off the TEXT stream, which maps CR to LF, so
         # anything real in here is already corrupt; the hash is what says so.
-        pending = self.buf.encode()
-        self.buf = ""
+        pending = bytes(self.buf)
+        self.buf = bytearray()
         got = 0
         err = None
+        rate = 0                # the payload rate the board is at, 0 = console
+        synced = False          # the host's closing sync is still to come
+        said = False
         _kbd_intr(-1)
-        print("RECV ready %d %d %s" % (total, window, tmp))
+        print("RECV ready %d %d %s%s"
+              % (total, window, "rate=%d " % fast if fast else "", tmp))
         left = RECV_RETRIES
         empty = 0
         try:
-            while got < total:
+            if fast:
+                _moy_serial.baud(fast)
+                rate = fast
+                if self._sync(RECV_SYNC_MS):
+                    print("RECV sync %d" % fast)
+                else:
+                    # Nobody to say it to: the host gives up on its own clock,
+                    # which is longer, and comes back at the console rate.
+                    _moy_serial.baud(console)
+                    rate = 0
+                    err = "no sync at %d" % fast
+            while err is None and got < total:
                 n = total - got
                 if n > window:
                     n = window
@@ -1089,24 +1365,16 @@ class DevChannel:
                         i = n
                     buf[0:i] = pending[:i]
                     pending = pending[i:]
-                while i < n:
-                    ready = False
-                    for _ in ipoll(RECV_IDLE_MS):
-                        ready = True
-                    if not ready:
-                        break
-                    rd(one)
-                    buf[i] = one[0]
-                    i += 1
+                i = self._fill(buf, i, n, RECV_IDLE_MS)
                 if i < n:
                     # The stream stopped inside the window, which on a ring
                     # with no flow control is what a DROPPED byte looks like:
                     # the host wrote the whole window and is now waiting for an
-                    # ack it will never get. Nothing has been written to the
-                    # file, so `got` is still a window boundary -- throw the
-                    # short window away and ask for it again. The wire is quiet
-                    # by construction (that is what the timeout just proved),
-                    # so nothing is in flight to prefix the re-send.
+                    # ack it will never get. Nothing of it has been written,
+                    # so `got` is still a window boundary -- throw the short
+                    # window away and ask for it again. The wire is quiet by
+                    # construction (that is what the timeout just proved), so
+                    # nothing is in flight to prefix the re-send.
                     empty = empty + 1 if i == 0 else 0
                     if left <= 0 or empty >= RECV_DEAD_WINDOWS:
                         # `got`, not `got + i`: the i bytes of this window are
@@ -1118,25 +1386,58 @@ class DevChannel:
                     pending = held
                     print("RECV retry %d" % got)
                     continue
-                f.write(mv[:n])
+                print("RECV ack %d" % (got + n))
+                last = got + n == total
+                if last and rate:
+                    # Back to the console rate the moment the ack has left,
+                    # which is before the host can have read it; the host's
+                    # sync at that rate waits in the ring for the end.
+                    _moy_serial.baud(console)
+                    rate = 0
+                    synced = True
+                try:
+                    f.write(mv[:n])
+                except Exception:  # noqa: BLE001 -- said below, by the caller
+                    if not last:
+                        # The host had the ack and is sending the next window:
+                        # take it off the wire, so it never reaches the line
+                        # reader as commands.
+                        self._fill(buf, 0, min(window, total - got - n),
+                                   RECV_IDLE_MS)
+                    raise
                 got += n
                 self.raw += n
-                print("RECV ack %d" % got)
         except Exception as exc:  # noqa: BLE001 -- a full store must not kill the loop
-            err = "%s: %s" % (type(exc).__name__, exc)
+            err = _recv_err(ws, exc, got, total)
         finally:
-            _kbd_intr(3)
+            if rate:
+                # The host is still at the payload's rate, waiting on a
+                # window's reply: say it there, then go back.
+                if err is not None:
+                    print("RECV ERR %s" % err)
+                    said = True
+                _moy_serial.baud(console)
             try:
                 f.close()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001 -- a close can be the write that fails
+                if err is None:
+                    err = _recv_err(ws, exc, got, total)
+            if synced:
+                # Still with the interrupt char off: what the host's switch
+                # back left on the line is the sync's to drop, and a 0x03 in
+                # it would otherwise interrupt the console.
+                try:
+                    self._sync(RECV_SYNC_MS)
+                except Exception:  # noqa: BLE001 -- the transfer is decided
+                    pass
+            _kbd_intr(3)
         if err is None:
             # Hash the FILE, not the buffer that filled it. `open(p,'wb')` has
             # reported a byte count on this console for a file that read back
             # EMPTY (push_cart's header, item 2), and a hash taken from RAM
             # would agree with the host about a cart that is not on the store.
             # Read back through the same window buffer -- a whole-file read
-            # would be a 124KB transient on a board that has not got one.
+            # would be a transient the size of the file.
             sha = hashlib.sha256()
             try:
                 f = open(tmp, "rb")
@@ -1154,9 +1455,258 @@ class DevChannel:
                 os.remove(tmp)
             except Exception:  # noqa: BLE001 -- it may never have been created
                 pass
-            print("RECV ERR %s" % err)
-            return
+            return err, said
         print("RECV done %s %d" % (sha.digest().hex()[:12], got))
+        return None, False
+
+    def _fill(self, buf, i, n, idle_ms):
+        """buf[i:n] off stdin; the index reached, short only once the stream
+        has been quiet for idle_ms. moy_serial reads the ring from C where
+        the build has it; this loop polls before every byte, because a bulk
+        read blocks in `mp_hal_stdin_rx_chr` with no timeout at all."""
+        if _moy_serial is not None:
+            return _moy_serial.readinto(buf, i, n, idle_ms)
+        ipoll = self._ipoll
+        rd = self._rawin.readinto
+        one = self._one
+        while i < n:
+            ready = False
+            for _ in ipoll(idle_ms):
+                ready = True
+            if not ready:
+                break
+            rd(one)
+            buf[i] = one[0]
+            i += 1
+        return i
+
+    def _sync(self, ms):
+        """True once RECV_SYNC has arrived, within `ms`. Whatever comes before
+        it is what a rate switch leaves on the line, and is dropped."""
+        tok = RECV_SYNC
+        k = len(tok)
+        seen = bytearray(k)
+        one = self._one
+        t0 = _ticks_ms()
+        n = 0
+        while True:
+            left = ms - _ticks_diff(_ticks_ms(), t0)
+            if left <= 0 or self._fill(one, 0, 1, left) < 1:
+                return False
+            seen[0:k - 1] = seen[1:k]
+            seen[k - 1] = one[0]
+            n += 1
+            if n >= k and seen == tok:
+                return True
+
+    # -- proposals/sideload.md's tier 1 (moy-spec), for `moy push` ----------
+
+    def _moy(self, ws, cmd, parts, line):
+        """The tier-1 lines. True when `cmd` was one of them."""
+        if cmd == "moy?":
+            import json
+            print("moy-info %s" % json.dumps(_moy_descriptor(ws)))
+        elif cmd == "moy-put":
+            self._moy_put(ws, parts)
+        elif cmd == "moy-del":
+            self._moy_del(ws, parts)
+        elif cmd == "moy-rescan":
+            for note in _moy_notes(self._pushed, ws):
+                print("moy-note %s" % note)
+            self._pushed = set()
+            # The answer goes out first: a rescan of a full store can run
+            # past the sender's ten-second wait, and whatever the sender asks
+            # next queues behind it on the line.
+            print("moy-ok")
+            rescan = getattr(ws, "rescan_carts", None)
+            if rescan is not None:
+                rescan()
+        elif cmd == "moy-run":
+            name = line.split(None, 1)[1] if len(parts) > 1 else ""
+            launch = getattr(ws, "launch_named", None)
+            if launch is not None and launch(name):
+                print("moy-ok")
+            else:
+                print("moy-err no cart called %s" % name)
+        else:
+            return False
+        return True
+
+    def _moy_put(self, ws, parts):
+        """`moy-put <path> <bytes>`: the base64 lines that follow, up to a
+        line holding `.`, land in `<carts_root>/<path>` -- through a `.new`
+        renamed only once exactly `<bytes>` arrived. The file is written
+        inside the console's storage gate, as `recv`'s is."""
+        dst = _moy_path(ws, parts[1] if len(parts) == 3 else "")
+        try:
+            size = int(parts[2]) if len(parts) == 3 else -1
+        except ValueError:
+            size = -1
+        if dst is None or size < 0:
+            print("moy-err usage: moy-put <path in the cart store> <bytes>")
+            return
+        gate = getattr(ws, "_with_sd", None)
+        if gate is None:
+            self._moy_put_open(ws, parts[1], dst, size)
+        else:
+            gate(lambda: self._moy_put_open(ws, parts[1], dst, size))
+
+    def _moy_put_open(self, ws, rel, dst, size):
+        """Arm the put. Where the board reads stdin from C the file is taken
+        into RAM and written at its `.`: the stream has no flow control but
+        the stdin ring, and a store write inside it -- a flash erase, the
+        walk for a free block -- outlasts the ring on a UART at 115200.
+        Where RAM cannot hold it, or on the host, it streams to the file."""
+        try:
+            _moy_mkdirs(dst)
+            sink = None
+            if _moy_serial is not None:
+                try:
+                    sink = bytearray(size)
+                except MemoryError:
+                    sink = None
+            if sink is None:
+                sink = open(dst + ".new", "wb")
+        except Exception as exc:  # noqa: BLE001 -- a bad store is an answer
+            print("moy-err cannot write %s: %s" % (rel, exc))
+            return
+        self._put = [rel, dst, sink, size, 0, None]
+        print("moy-ok")
+        self._moy_drain(ws)
+
+    def _moy_drain(self, ws):
+        """The rest of a `moy-put`, read straight off stdin to its `.`, the
+        way `recv` reads a window: the tool streams the whole file's lines
+        once it has `moy-ok`, with no flow control but the stdin ring's, so
+        the reader has to keep up with the line -- a byte a poll does not on
+        a P4, and the ring overflows while the store writes. moy_serial takes
+        what has arrived in one call; where it is absent, a byte a poll. A
+        stream that stops for RECV_IDLE_MS ends the put as short. Where stdin
+        has no poll to wait on, the frame loop's reader takes the lines
+        instead."""
+        ipoll = self._ipoll
+        rd = self._stdin.read if self._stdin is not None else None
+        if _moy_serial is None and (ipoll is None or rd is None):
+            return
+        line = bytearray(SERIAL_LINE_MAX)
+        n = 0
+        blk = bytearray(512 if _moy_serial is not None else 1)
+        while self._put is not None:
+            if _moy_serial is not None:
+                k = _moy_serial.readinto(blk, 0, 1, RECV_IDLE_MS)
+                if k:
+                    k = _moy_serial.readinto(blk, 1, len(blk), 0)
+            else:
+                ready = False
+                for _ in ipoll(RECV_IDLE_MS):
+                    ready = True
+                ch = rd(1) if ready else ""
+                k = 1 if ch else 0
+                if k:
+                    blk[0] = ord(ch) & 0xFF
+            if not k:
+                if self._put[5] is None:
+                    self._put[5] = "the stream stopped after %d bytes" % self._put[4]
+                self._moy_put_line(ws, ".")
+                return
+            self.rx += k
+            for j in range(k):
+                c = blk[j]
+                if c == 10 or c == 13:
+                    if n:
+                        try:
+                            text = bytes(line[:n]).decode().strip()
+                        except UnicodeError:
+                            text = None
+                            if self._put[5] is None:
+                                self._put[5] = "a line that is not base64"
+                        n = 0
+                        if text is not None:
+                            self._moy_put_line(ws, text)
+                        if self._put is None:
+                            # Whatever followed the `.` is the line reader's.
+                            self.buf += blk[j + 1:k]
+                            return
+                elif n < SERIAL_LINE_MAX:
+                    line[n] = c
+                    n += 1
+                elif self._put[5] is None:
+                    self._put[5] = "a line longer than %d" % SERIAL_LINE_MAX
+
+    def _moy_put_line(self, ws, line):
+        """One line of a `moy-put`: base64 to append, or `.` to finish."""
+        put = self._put
+        rel, dst, f, size, got, err = put
+        held = isinstance(f, bytearray)
+        if line != ".":
+            if err is None:
+                try:
+                    import binascii
+                    data = binascii.a2b_base64(line)
+                    if not held:
+                        f.write(data)
+                    elif got + len(data) > size:
+                        raise ValueError
+                    else:
+                        f[got:got + len(data)] = data
+                    put[4] = got + len(data)
+                except ValueError:
+                    put[5] = "a line that is not base64"
+                except Exception as exc:  # noqa: BLE001 -- a full store is an answer
+                    put[5] = _recv_err(ws, exc, got, size)
+            return
+        self._put = None
+        if held and err is None and got == size:
+            try:
+                out = open(dst + ".new", "wb")
+                try:
+                    out.write(f)
+                finally:
+                    out.close()
+            except Exception as exc:  # noqa: BLE001 -- a full store is an answer
+                err = _recv_err(ws, exc, 0, size)
+        elif not held:
+            try:
+                f.close()
+            except Exception as exc:  # noqa: BLE001 -- a close can be the write that fails
+                if err is None:
+                    err = _recv_err(ws, exc, got, size)
+        if err is None and got != size:
+            err = "%d of %d bytes arrived" % (got, size)
+        import os
+        if err is not None:
+            try:
+                os.remove(dst + ".new")
+            except OSError:
+                pass
+            print("moy-err %s: %s" % (rel, err))
+            say = getattr(ws, "notice", None)
+            if err.startswith("store full") and say is not None:
+                say("CAN'T ADD CART", "the store is full", "warn")
+            return
+        for gone in (dst, dst + ".bak"):
+            # The stamped .bak describes the bytes it sat beside (moy_fs, #154);
+            # left behind, it would "recover" them over what just arrived.
+            try:
+                os.remove(gone)
+            except OSError:
+                pass
+        os.rename(dst + ".new", dst)
+        self._pushed.add(rel.split("/")[0])
+        print("moy-ok")
+
+    def _moy_del(self, ws, parts):
+        """`moy-del <path>`: a file, or a whole cart folder, from the store."""
+        dst = _moy_path(ws, parts[1] if len(parts) == 2 else "")
+        if dst is None:
+            print("moy-err usage: moy-del <path in the cart store>")
+            return
+        try:
+            _moy_remove(dst)
+        except OSError as exc:
+            print("moy-err cannot delete %s: %s" % (parts[1], exc))
+            return
+        print("moy-ok")
 
     def run(self, ws, line):
         parts = line.split()
@@ -1432,8 +1982,11 @@ class DevChannel:
         if cmd == "recv":
             # The one command that leaves the line discipline: everything after
             # its newline is payload, not commands. See _recv.
-            self._recv(line, parts)
+            self._recv(line, parts, ws)
             return
+        if cmd.startswith("moy"):
+            if self._moy(ws, cmd, parts, line):
+                return
         if cmd == "py" and len(parts) > 1:
             code = line.split(None, 1)[1]
             env = {"ws": ws, "wm": ws.wm, "pointer": self.pointer}

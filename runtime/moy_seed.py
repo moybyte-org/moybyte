@@ -9,13 +9,19 @@ the core, so `moy_carts` re-exports these names rather than the reverse.
 import json
 
 try:
-    from moy_fs import (_exists, _mkdir, _read, _read_recover, _write)
+    from moy_fs import (_exists, _mkdir, _read, _read_recover, _write,
+                        _write_bytes)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_exists, _mkdir, _read, _read_recover, _write)
+    from runtime.moy_fs import (_exists, _mkdir, _read, _read_recover, _write,
+                                _write_bytes)
 try:
-    from moy_store_base import (CARTS_DIR, CART_FORMAT, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _rmtree, _sibling_path, slug)
+    from moy_image import _b64_decode
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _rmtree, _sibling_path, slug)
+    from runtime.moy_image import _b64_decode
+try:
+    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _rmtree, _sibling_path, slug)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _rmtree, _sibling_path, slug)
 
 
 def _cart_version(path):
@@ -160,6 +166,9 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
         flags = cart.get("flags")                 # tile flags (SPEC.md 3.5), optional
         if flags:
             _write(d + "/" + FLAGS_NAME, flags)
+        cover = cart.get("cover")                 # cover.png as base64, optional (SPEC.md 3.6)
+        if cover:
+            _write_bytes(d + "/" + COVER_FILE, _b64_decode(cover))
         images = cart.get("images")               # {name: .moyimg blob}, optional (#63)
         if images:
             _mkdir(d + "/" + IMAGES_DIR)

@@ -1,9 +1,14 @@
 """Regression tests for #111 (owner decision: remove SAVE -- autosave is the only
-model). SAVE the button and the concept are gone; every real exit path (a tab
-switch, PLAY, PROJECTS, a window/context-X close, a workspace swap, going home)
-must hard-commit whatever the kid was editing, so an edit immediately followed by
-an exit -- with NO wait for the idle-typing debounce and NO explicit save call --
+model). SAVE the button and the concept are gone; every real exit path (PLAY,
+PROJECTS, a window/context-X close, a workspace swap, going home) must
+hard-commit whatever the kid was editing, so an edit immediately followed by an
+exit -- with NO wait for the idle-typing debounce and NO explicit save call --
 is never lost.
+
+A TAB SWITCH is the one leaving event that does not write inside itself (#154):
+it OWES the commit and the frame that paints the destination pays it, so the
+tap is not charged a write the kid watches. `_switch` below is that pair, and
+the exit paths still pay anything owed before they do their own write.
 
 Driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver), so these assert host == device behavior."""
@@ -143,10 +148,20 @@ def test_windowed_artwork_window_close_commits_the_drawing(tmp_path):
 
 # -- the clean-tab guard (P4 tab-switch cost, on-glass 2026-07-25) -----------
 #
-# save_current() skips a tab that provably has nothing to persist. On the P4 a
-# commit is ~800ms of flash write + ~175ms of journal, so an unguarded commit
-# made merely WALKING the tab ladder cost 0.5-1.4s per switch. These pin both
-# halves: an untouched tab writes nothing, a real edit still commits on exit.
+# save_tab() skips a tab that provably has nothing to persist. A commit is the
+# dearest thing the Editor does -- serialize the asset, write it, append a
+# full-file journal snapshot -- so an unguarded one made merely WALKING the tab
+# ladder cost 0.5-1.4s per switch. These pin both halves: an untouched tab
+# writes nothing, a real edit still commits.
+
+
+def _switch(ws, tab):
+    """A tab switch as the kid makes it: the tap, then the frame that paints
+    the destination -- which is where the owed commit is paid (#154). Both
+    halves, because the guarantee is about the pair and neither alone."""
+    ws.editor_app.set_tab(tab)
+    ws.frame(1 / 30)
+
 
 def _writes_during(ws, fn):
     """Count store writes fn() performs (the verbs every commit_* routes to)."""
@@ -182,8 +197,8 @@ def test_untouched_tab_switch_writes_nothing(tmp_path):
     # shelf -- and NOT one whose `_init` authors its own map (Bench msets
     # there, so its map is legitimately dirty before the walk starts).
     _open_in_editor_by_title(ws, "Hop Quest")
-    ws.editor_app.set_tab("code")
-    hits = _writes_during(ws, lambda: [ws.editor_app.set_tab(t)
+    _switch(ws, "code")
+    hits = _writes_during(ws, lambda: [_switch(ws, t)
                                        for t in ("paint", "map", "scene",
                                                  "music", "cards", "code")])
     assert hits == [], "an untouched tab ladder walk still wrote: %s" % hits
@@ -191,7 +206,8 @@ def test_untouched_tab_switch_writes_nothing(tmp_path):
 
 def test_a_real_edit_still_commits_on_tab_switch(tmp_path):
     """The guard must never swallow an actual edit -- each tab's own mutation
-    verb (not the set_text loader) marks it dirty, and the switch persists it."""
+    verb (not the set_text loader) marks it dirty, and the switch's frame
+    persists it."""
     from runtime import moy_carts
     ws = _ws(tmp_path)
     title = next(c["title"] for c in ws.launcher.items if c.get("path"))
@@ -199,33 +215,101 @@ def test_a_real_edit_still_commits_on_tab_switch(tmp_path):
     _open_in_editor_by_title(ws, title)
 
     # code: type a character through the real edit verb
-    ws.editor_app.set_tab("code")
+    _switch(ws, "code")
     ws.editor.goto_row(0, 0)
     ws.editor.insert("#")
-    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("paint"))
+    hits = _writes_during(ws, lambda: _switch(ws, "paint"))
     assert "save_code" in hits, hits
     assert moy_carts.load(path)["src"].startswith("#")
 
     # paint: one pset
     ws.sheet.pset(0, 0, 7)
-    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("map"))
+    hits = _writes_during(ws, lambda: _switch(ws, "map"))
     assert "save_sprites" in hits, hits
 
     # map: one tile
     ws.tilemap.mset(0, 0, 1)
-    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("scene"))
+    hits = _writes_during(ws, lambda: _switch(ws, "scene"))
     assert "save_map" in hits, hits
 
     # scene: place one actor through the editor verb (#154: scene joined the
     # guard, so a real placement must still commit)
     ws.scene_ui.sceneedit.place(16, 16)
-    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("music"))
+    hits = _writes_during(ws, lambda: _switch(ws, "music"))
     assert "save_scene" in hits, hits
 
     # music: one real mutation on the current SFX step
     ws.music_ui.musicedit.toggle_rest()
-    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("code"))
+    hits = _writes_during(ws, lambda: _switch(ws, "code"))
     assert "save_sounds" in hits, hits
+
+
+# -- the commit is OWED by the switch, paid by the frame (#154) --------------
+#
+# Measured on glass 2026-09-20 (T-Deck, carts on SD): leaving a painted sprite
+# tab froze the tap for 2.2s before the destination appeared. Nothing needed
+# those bytes on disk within the frame -- the project stays open and every
+# editor core stays live across a switch -- so the switch marks the debt and
+# `ws.defer` pays it behind the frame that already painted the new tab, the
+# same contract pmem has had since #66.
+
+def test_a_tab_switch_writes_nothing_inside_the_switch(tmp_path):
+    """The tap itself must not touch the store, however dirty the tab is."""
+    ws = _ws(tmp_path)
+    title = next(c["title"] for c in ws.launcher.items if c.get("path"))
+    _open_in_editor_by_title(ws, title)
+    ws.editor_app.set_tab("paint")
+    ws.frame(1 / 30)
+    ws.sheet.pset(0, 0, 7)
+    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("code"))
+    assert hits == [], "the switch wrote inside the interaction: %s" % hits
+    assert "paint" in ws.editor_app._pending, ws.editor_app._pending
+    hits = _writes_during(ws, lambda: ws.frame(1 / 30))
+    assert "save_sprites" in hits, hits
+    assert ws.editor_app._pending == [], ws.editor_app._pending
+
+
+def test_a_hard_exit_pays_a_commit_the_switch_still_owes(tmp_path):
+    """The frame drain is a courtesy; the guarantee is that every hard exit
+    pays the debt first. Going home with NO frame in between must still land
+    the sprite edit the kid made two tabs ago."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    title = next(c["title"] for c in ws.launcher.items if c.get("path"))
+    path = _cart_path_by_title(ws, title)
+    _open_in_editor_by_title(ws, title)
+    ws.editor_app.set_tab("paint")
+    ws.frame(1 / 30)
+    ws.sheet.pset(0, 0, 7)
+    ws.editor_app.set_tab("code")      # owes a sprite commit, no frame runs
+    ws.exit()                          # context-X -> go_home
+    assert ws.screen == "launcher"
+    from runtime.editors import SpriteSheet
+    sheet = SpriteSheet.from_hex(moy_carts.load(path)["sprites"])
+    assert sheet.tget(0, 0, 0) == 7, \
+        "going home must pay a commit the tab switch still owed"
+
+
+def test_a_workspace_swap_pays_the_outgoing_project_s_debt(tmp_path):
+    """The other boundary that must never see a pending commit: the Project
+    object is replaced wholesale, so a debt left unpaid would be written
+    against the WRONG project's editors -- or not at all."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    carts = [c for c in ws.launcher.items if c.get("path")]
+    first, second = carts[0], carts[1]
+    ws._open_workspace(first)
+    ws.editor_app.open(ws.project)
+    ws.editor_app.set_tab("paint")
+    ws.frame(1 / 30)
+    ws.sheet.pset(0, 0, 7)
+    ws.editor_app.set_tab("code")      # owes a sprite commit
+    ws._open_workspace(second)         # PROJECTS -> a different project
+    assert ws.editor_app._pending == [], ws.editor_app._pending
+    from runtime.editors import SpriteSheet
+    sheet = SpriteSheet.from_hex(moy_carts.load(first["path"])["sprites"])
+    assert sheet.tget(0, 0, 0) == 7, \
+        "the swap must pay the outgoing project's owed commit"
 
 
 def test_code_undo_is_not_mistaken_for_clean(tmp_path):
@@ -240,7 +324,7 @@ def test_code_undo_is_not_mistaken_for_clean(tmp_path):
     assert ws.editor.dirty is False
     assert not ws.editor_app._tab_is_clean("code"), \
         "content differs from the persisted source -- must NOT read as clean"
-    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("cards"))
+    hits = _writes_during(ws, lambda: _switch(ws, "cards"))
     assert "save_code" in hits, hits
 
 
@@ -289,9 +373,9 @@ def test_a_half_typed_line_survives_a_tab_switch_and_keeps_its_badge(tmp_path):
     ed.row, ed.col = 1, 4
     where = (ed.row, ed.col)
 
-    ws.set_menu_view("paint")
+    _switch(ws, "paint")
 
-    assert "x = (" in moy_carts.load(path)["src"]
+    assert "    x = (\n" in moy_carts.load(path)["src"]
     assert (ws.save_status or "").startswith("SYNTAX"), ws.save_status
     assert ws.code_err_row == 2                  # the inline marker still points at it
     assert (ed.row, ed.col) == where, "the hard commit must not yank the caret"

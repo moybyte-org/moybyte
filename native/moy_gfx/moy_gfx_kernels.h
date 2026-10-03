@@ -281,8 +281,10 @@ void mg_blit565_scale(uint16_t *dst, size_t dcap, int dw, int dh,
                       const uint16_t *src, size_t scap, int sw, int sh,
                       int scale);
 
-/* Copy a dw x dh window from a wider RGB565 source: the scroll engine's core
- * op (#43), clamped to BOTH buffers. */
+/* Copy a dw x dh window from an RGB565 source into dst (dw px/row): the
+ * scroll engine's core op (#43), clamped to BOTH buffers. A source narrower
+ * or shorter than the window past (sx, sy) copies what it has into the
+ * window's top-left and leaves the rest of dst as it was. */
 void mg_blit_window(uint16_t *dst, size_t dcap, int dw, int dh,
                     const uint16_t *src, size_t scap, int src_w, int sx, int sy);
 

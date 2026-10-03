@@ -138,6 +138,19 @@ file = "lua_host.py"
 kind = "host-only"
 why  = "The host's Lua cart runner. The device's is `moycore`, driven by moycore_glue.py."
 
+
+[[modules.shared.deny]]
+file = "wasm_host.py"
+kind = "host-only"
+why  = """
+The host's compiled-cart runner, over `wasm_binding`. The device's is moycore's wasm half, driven by moycore_glue.py over the moy_wasm engine."""
+
+[[modules.shared.deny]]
+file = "wasm_binding.py"
+kind = "host-only"
+why  = """
+ctypes over libmoy's wasm import table and WAMR built for Linux, fetched and
+compiled on demand -- no compiler, git or cmake on a board."""
 [[modules.shared.deny]]
 file = "input.py"
 kind = "host-only"
@@ -232,41 +245,39 @@ attach_only = false
 # board's own `_ota_build.BOARD` answer, which the harness verifies after
 # attach/reset.
 usb         = "1a86:55d3"
-# 768 CORRUPTS on this board, measured 2026-08-19: a 44KB cart pushed at the
-# harness default failed five times with a DIFFERENT bad hash each attempt and
-# succeeded first try at 256. This UART's stdin is a ~256-byte ring with NO flow
-# control (the same mechanism CLAUDE.md records for long `py` lines), so an
-# over-long line is dropped as noise with no error -- only the final hash
-# catches it. USB boards backpressure and keep the default.
-chunk       = 256
+# THIS BOARD'S SERIAL IS A UART WITH NO FLOW CONTROL: a byte that arrives with
+# the stdin ring full is dropped with no error, and only a hash or a parse
+# notices. The ring is 4 KB (tools/patch_stdin_ring.py, sized 2026-09-30): a
+# heap collection stalls the reader for up to ~95 ms, 1.1 KB at line rate, and
+# the harness's longest line fits it whole. On the stock 260 bytes the two
+# numbers below were the smallest that held (768 corrupted a push five times
+# running, 2026-08-19; windows of 2048 and 4096 never completed one).
+#
+# The `py`-line chunk, how much of a snippet one `pyexec` line carries. Its
+# %r escaping can nearly double it and the line still fits the ring. 1024,
+# measured 2026-09-30: a 255 KB cart pushed 4/4 with its helpers installed at
+# 1024, and 70 lines of 256-2560 characters, each in one write, went 70/70
+# with a collection forced every 200 ms.
+chunk       = 1024
 # The RAW window (`recv`, the dev channel's 8-bit upload path): how many bytes
-# the host may put on the wire before it must wait for the board's ack. THE ACK
-# IS THIS BOARD'S ONLY BACKPRESSURE -- the same 260-byte ring with no flow
-# control that makes 768 corrupt above -- so the window is deliberately the
-# small one: a stall anywhere inside it becomes a named timeout after 4KB
-# rather than after 32, and 4KB is also the buffer the board allocates for it.
-# It is NOT a rate limit; the ack costs one round trip per window and a 124KB
-# cart is 31 of them.
-#
-# WHAT THE ACK DOES NOT DO, measured 2026-09-11: it does not stop a byte being
-# dropped INSIDE a window. Between acks the host blasts the whole window and
-# the board must keep up for all of it; when it falls behind for ~25ms the ring
-# overflows and a handful of bytes (2, 7, 12 were seen) vanish with no error.
-# On this board that happened about once every 300 windows -- one failed 120KB
-# push in five -- and shrinking the window does NOT fix it: 512 failed a 120KB
-# file where 2048 passed, in the same session. The fix is recovery, not
-# avoidance (RECV_RETRIES in runtime/dev_channel.py): a short window is thrown
-# away and asked for again, and 8 pushes of a 120KB cart then went 8/8 with 6
-# re-sends absorbed.
-#
-# 1024, measured 2026-09-15. Recovery absorbs a dropped byte; it cannot absorb
-# a window the board never sees at all, and that is what 2048 and 4096 do here
-# -- a 79KB file failed 3/3 at each with "timeout after 0 of 79036", the
-# board's two-empty-windows verdict, while 1024 went 3/3 clean. The ring is
-# ~256 bytes with no flow control, so the ack is the only backpressure there
-# is: the larger the window, the longer this board's frame loop has to keep up
-# unaided, and for 4KB it does not.
-window      = 1024
+# the host may put on the wire before it must wait for the board's ack. The ack
+# is this board's only backpressure, and a window smaller than the ring lands
+# whole even if the board reads none of it until the last byte is in, so no
+# stall inside a window can drop a byte -- the board acks before its file
+# write, so the stall a window most often meets is that write. 3072 is three
+# quarters of the ring. Measured 2026-09-30 with the same cart: 4/4 at 2048 and
+# 8/8 at 3072, two of those with a collection forced every 200 ms and three
+# with the diag stream on, no window re-sent.
+window      = 3072
+# The UART rate a `recv` payload crosses at (`recv rate=`, tools/push_cart.py):
+# the console stays at 115200 for every line -- `moy push`, a terminal and the
+# boot log expect it -- and switches for a file bigger than one window, between
+# two syncs. Picked 2026-10-01 from 1.5, 2, 3 and 4 Mbaud, 256 KB pushes each:
+# every rate landed byte-exact on an idle desk, and under Jet Teapot with a
+# collection forced every 200 ms 2 Mbaud went 8/8 with no window re-sent where
+# 3 Mbaud lost one sync in 8. Past ~1 Mbaud the rate is not the limit; the
+# flash store's write is, so the margin is worth more than the 5% 3 Mbaud buys.
+recv_baud   = 2000000
 
 [monitor]
 baud = 115200
@@ -317,6 +328,16 @@ framebuffer continuously, so there is no per-frame transfer, no band, no
 bounce and no completion ISR. Staging it would compile a FreeRTOS task and a
 DMA-SRAM allocation into the image for code nothing calls. A DSI board that
 ever needs a push path is a new decision, not a flip of this one."""
+
+[[native.shared.take]]
+module = "moy_wasm"
+why = """
+The WebAssembly cart tier's engine (docs/wasm_tier_plan_2026-09.md): the
+vendored WAMR runtime, AOT only, and the thread a module runs on. The tier
+ships on every console board or on none, so this board takes it. Its internal
+SRAM is not the constraint the S3 boards' is; the on-glass suite runs the same
+wasm checks. The run stack's size and placement are this board's MOY_WASM_*
+settings in mpconfigboard.h, with the measurement that chose them."""
 
 [native.p4]
 source   = "native/p4"
@@ -450,6 +471,12 @@ The OTA updater (#53). Board-agnostic: its staging directory is a constructor
 argument (this console has no SD, so run_desktop passes a path on the internal
 VFS) and its board identity comes from the generated `_ota_build.py`. Verified
 end to end on this board's glass 2026-08-02."""
+
+[[modules.device.group]]
+files = ["cart_net.py"]
+why = """
+Get Carts' network (#124): the app's transport for indexes and carts, over
+moy_ota's HTTP client and its wait for the link."""
 
 [[modules.device.group]]
 files = ["moy_c6_update.py"]

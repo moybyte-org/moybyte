@@ -1,3 +1,14 @@
+# Map (grep -n a name to jump there):
+#   color                             a colour name or palette index -> index
+#   -- Pointer UI layout              the 320x240 pointer-UI constants
+#   -- Desktop shell                  chrome_scale_floor, Layout, CodeLayout
+#   Layout                            responsive desktop-shell geometry
+#   CodeLayout                        responsive code-editor geometry
+#   -- Button icon glyphs             the pre-literate icon vocabulary
+#   -- the unified top bar's icon theme  the bar's icon sheet
+#   -- Panel THEMES                   the theme token tables
+#   -- Light variants                 theme_colors
+#   theme_colors                      the full token dict for a theme and variant
 """The console's stateless base layer -- the chrome + geometry the shared Moybyte
 console draws with, extracted from console.py so the Workstation kernel is alone in
 that file.

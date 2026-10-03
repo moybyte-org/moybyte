@@ -70,7 +70,8 @@ def test_idle_debounce_autosaves_and_journals_invisibly(tmp_path):
     assert new in (Path(path) / "main.py").read_text()
     ents = [e for e in _entries(path) if e["file"] == "main.py"]
     assert ents, "the idle debounce must journal a durable step"
-    assert (Path(path) / "journal" / ents[-1]["snap"]).read_text() == new
+    from runtime import moy_journal
+    assert moy_journal._journal_read_snap(path + "/journal", ents[-1]) == new
     # Invisible (spec Section 7): the autosave does NOT flash the SAVE status.
     assert ws.save_status != "SAVED"
 

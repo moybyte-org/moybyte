@@ -1,4 +1,20 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   board_dirs          {ota id: board dir}, discovered from board.toml
+#   declared_serial     a board's [serial] block
+#   usb_serial_of       the USB serial number behind a tty
+#   load_identities     this machine's learned serial -> board map
+#   find_port           a board dir -> its serial port
+#   add_board_args      the --board/--port pair
+#   DeviceError         the board answered `py` with an exception
+#   P4Board             the serial driver every board tool goes through
+#   P4Board.cmd         one dev command and its reply
+#   P4Board.reset       hard reset (CH343 boards only) and wait
+#   P4Board.state       the console's state, parsed
+#   P4Board.leave_cart  end a cart, leave the board where it was
+#   P4Board.pyval       evaluate an expression on the board
+#   P4Board.pyexec      run a snippet on the board
+#   _tour               the standalone tour `main` runs
 """On-glass P4 test driver: the host half of the serial test harness.
 
 The P4 desktop's serial dev commands (`swipe` / `tap` / `open` / `state` /
@@ -129,21 +145,16 @@ def declared_board_id(board_dir=P4_BOARD_DIR):
 # ---------------------------------------------------------------------------
 
 
-def usb_id_of(port, sys_tty="/sys/class/tty"):
-    """The "vid:pid" of the USB device behind a tty, or None (not USB, or not
-    Linux). Walks up from the tty's sysfs node to the first ancestor carrying
-    idVendor/idProduct -- the interface sits one or two levels below them."""
-    node = os.path.realpath(
-        os.path.join(sys_tty, os.path.basename(str(port)), "device"))
+def _usb_node(port, sys_tty):
+    """The sysfs directory of the USB device behind a tty, or None. Walks up
+    from the tty's node to the first ancestor carrying idVendor/idProduct --
+    the interface sits one or two levels below it."""
+    node = os.path.realpath(os.path.join(
+        sys_tty, os.path.basename(os.path.realpath(str(port))), "device"))
     for _ in range(6):
-        vid = os.path.join(node, "idVendor")
-        pid = os.path.join(node, "idProduct")
-        try:
-            if os.path.exists(vid) and os.path.exists(pid):
-                return "%s:%s" % (open(vid).read().strip().lower(),
-                                  open(pid).read().strip().lower())
-        except OSError:
-            return None
+        if (os.path.exists(os.path.join(node, "idVendor"))
+                and os.path.exists(os.path.join(node, "idProduct"))):
+            return node
         nxt = os.path.dirname(node)
         if nxt == node:
             break
@@ -151,10 +162,67 @@ def usb_id_of(port, sys_tty="/sys/class/tty"):
     return None
 
 
+def _read(node, name):
+    try:
+        with open(os.path.join(node, name)) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def usb_id_of(port, sys_tty="/sys/class/tty"):
+    """The "vid:pid" of the USB device behind a tty, or None (not USB, or not
+    Linux)."""
+    node = _usb_node(port, sys_tty)
+    if node is None:
+        return None
+    vid, pid = _read(node, "idVendor"), _read(node, "idProduct")
+    if vid is None or pid is None:
+        return None
+    return "%s:%s" % (vid.lower(), pid.lower())
+
+
+def usb_serial_of(port, sys_tty="/sys/class/tty"):
+    """The USB serial number behind a tty (`ID_SERIAL_SHORT`), or None. On
+    the SoC-USB boards it is the chip's MAC, the same string running and in
+    the ROM loader, so it names a physical board without opening its port."""
+    node = _usb_node(port, sys_tty)
+    return None if node is None else _read(node, "serial")
+
+
 def serial_ports():
     """The serial device nodes worth considering, sorted."""
     import glob
     return sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*"))
+
+
+def identities_path():
+    """Where this machine's learned serial -> board map lives (`tools/board.py`
+    writes it)."""
+    if os.environ.get("MOYBYTE_BOARDS_FILE"):
+        return os.environ["MOYBYTE_BOARDS_FILE"]
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "moybyte", "boards.json")
+
+
+def load_identities():
+    try:
+        with open(identities_path()) as f:
+            got = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def serial_owners(dirs=None, known=None):
+    """{USB serial number: board name}, from every board.toml's [serial]
+    serial_number and this machine's learned map; a declaration wins."""
+    out = dict(load_identities() if known is None else known)
+    for name, d in (board_dirs() if dirs is None else dirs).items():
+        sn = declared_serial(d).get("serial_number")
+        if sn:
+            out[sn] = name
+    return out
 
 
 def _probe_identity(port, board_dir, log):
@@ -178,12 +246,17 @@ def _probe_identity(port, board_dir, log):
 
 
 def find_port(board_dir=P4_BOARD_DIR, log=None, ports=None, usb_of=None,
-              prober=None):
+              prober=None, serial_of=None, owners=None):
     """Resolve a board directory to the serial port it is plugged into.
 
     Raises RuntimeError with the full candidate picture on anything short of
     one confident answer -- a guessed port is exactly the bug this exists to
-    remove. `ports`/`usb_of`/`prober` are injectable for the host tests."""
+    remove. A port whose USB serial number already names a board
+    (`serial_owners`) is settled without an open: it is returned when it is
+    this board and never probed when it is another -- the Zero has no dev
+    channel, and a probe is a stray line on its bare REPL.
+    `ports`/`usb_of`/`prober`/`serial_of`/`owners` are injectable for the host
+    tests."""
     log = log or (lambda s: None)
     ser = declared_serial(board_dir)
     want_usb = ser.get("usb")
@@ -200,6 +273,19 @@ def find_port(board_dir=P4_BOARD_DIR, log=None, ports=None, usb_of=None,
             % (board_dir, want_usb,
                ", ".join("%s=%s" % (p, usb_of(p)) for p in allp) or "none"))
     want_id = declared_board_id(board_dir)
+    serial_of = serial_of or usb_serial_of
+    owners = serial_owners() if owners is None else owners
+    named = {p: owners.get(serial_of(p)) for p in cands}
+    mine = [p for p in cands if want_id and named[p] == want_id]
+    if len(mine) == 1:
+        log("resolved %s -> %s (usb serial)" % (board_dir, mine[0]))
+        return mine[0]
+    others = ["%s=%s" % (p, named[p]) for p in cands if named[p]]
+    cands = [p for p in cands if not named[p]]
+    if not cands:
+        raise RuntimeError(
+            "every %s port belongs to another board by its serial number (%s) "
+            "-- is %s plugged in?" % (want_usb, ", ".join(others), want_id))
     if len(cands) == 1:
         # Unique on the bus -- but NOT necessarily unique by design: both S3s
         # declare 303a:1001, so with one of them unplugged the survivor
@@ -310,6 +396,11 @@ class P4Board:
         # accepts the open and then blocks the first write forever; a bounded
         # write turns that into an exception the caller can report.
         self.ser.write_timeout = WRITE_TIMEOUT_S
+        # One driver per port. Two readers on one tty split its bytes between
+        # them: on 2026-09-28 a second open of a port an on-glass suite held
+        # read "multiple access on port" on one side and "no STATE reply" on
+        # the other. The lock makes the second open fail at once instead.
+        self.ser.exclusive = True
         # The line state AT OPEN is board-specific and load-bearing:
         #   P4 (CH343, external USB-UART): dtr/rts LOW, so opening never
         #     glitches the auto-reset circuit (reset is explicit, below).
@@ -347,35 +438,14 @@ class P4Board:
 
     # -- plumbing ---------------------------------------------------------
 
-    # UART boards have NO FLOW CONTROL: the P4's CH343 feeds a ~256-byte
-    # stdin ring that the console drains once per ~20ms frame, so a long line
-    # written in one burst (115200 baud = ~11.5 bytes/ms) overflows the ring
-    # mid-line and arrives corrupted -- measured 2026-08-17: 768-byte `py`
-    # lines failed 3/3 in one write and passed 3/3 sliced at 128B/20ms. The
-    # old device readline masked this by blocking mid-frame and draining
-    # continuously; the shared dev channel drains per frame, so the WRITER
-    # must respect the ring. Short lines (a burst under the ring size) go out
-    # in one write. USB boards (T-Deck) have host-side backpressure and never
-    # need this, but the pacing costs them nothing on short commands.
-    # 96B/40ms, not the 128B/20ms that first measured clean: under PERF DIAG
-    # the loop drops toward ~25fps (40ms frames), and two 128B slices landing
-    # inside one frame gap total 256B -- exactly the ring, zero margin. The
-    # suite's longest line (a 512-char junk-signature probe) failed right
-    # there. 96B per 40ms keeps the worst in-window arrival under half a ring
-    # at any loop rate the console actually runs.
-    PACE_SLICE = 96            # bytes per write burst (ring/2 - headroom)
-    PACE_GAP_S = 0.04          # a diag-slowed frame period between bursts
-
+    # One write per line, on every board. The USB boards backpressure; the
+    # Waveshare P4's UART has no flow control, and its 4 KB stdin ring
+    # (tools/patch_stdin_ring.py) holds a whole harness line -- a `pyexec`
+    # chunk at twice its size, escaped -- while a heap collection stalls the
+    # reader.
     def _write_line(self, text):
-        data = text.encode() + b"\n"
-        if len(data) <= self.PACE_SLICE:
-            self.ser.write(data)
-            self.ser.flush()
-            return
-        for i in range(0, len(data), self.PACE_SLICE):
-            self.ser.write(data[i:i + self.PACE_SLICE])
-            self.ser.flush()
-            time.sleep(self.PACE_GAP_S)
+        self.ser.write(text.encode() + b"\n")
+        self.ser.flush()
 
 
     def _pump(self):
@@ -530,6 +600,40 @@ class P4Board:
             raise RuntimeError("no STATE reply")
         return json.loads(line.split("STATE ", 1)[1])
 
+    def leave_cart(self, settle=0.8):
+        """End a running cart and leave the board where it was found. On the
+        windowed tier `ws.exit()` from a cart pops through to the bare
+        launcher and the DESK goes with it (measured on the Guition P4,
+        2026-09-22: `['launcher', 'desk', 'desktop']` -> `['launcher']`), so an
+        attach-only board -- nothing resets it at open -- then reads `desk`
+        False on every test of its suite, six failures from one leftover. So:
+        exit only when a cart is up, and reopen the desk if there was one.
+        `desk` is None on a fullscreen tier, which is the "no desk to put
+        back" answer and never a 0."""
+        st = self.state()
+        if not st.get("cart"):
+            return
+        had_desk = st.get("desk")
+        self.pyexec("ws.exit()")
+        # The close lands over a few frames, so poll the stack rather than
+        # sleep: a fixed wait once read the cart as still up, put no desk
+        # back, and the desk went a frame later (2026-09-22).
+        st = self._settle(lambda s: not s.get("cart"), settle)
+        if had_desk and not st.get("desk"):
+            self.pyexec("ws.open_desk()")
+            self._settle(lambda s: s.get("desk"), settle)
+
+    def _settle(self, done, settle, timeout=6.0):
+        """Poll `state` until `done(state)` or `timeout`, then one more
+        `settle` of quiet so the next command lands on a stable desk."""
+        end = time.time() + timeout
+        st = self.state()
+        while not done(st) and time.time() < end:
+            self.drain(0.25)
+            st = self.state()
+        self.drain(settle)
+        return st
+
     def tap(self, x, y, settle=0.4):
         self.cmd("tap %d %d" % (x, y))
         self.drain(settle)
@@ -559,32 +663,14 @@ class P4Board:
 
     # -- the `py` probe hook ----------------------------------------------
 
-    # The device reads dev commands with one sys.stdin.readline() per frame, so
-    # a command must fit the USB-CDC RX ring, and multi-line snippets upload in
-    # chunks and exec once.
-    #
-    # 120 was set after a ~1KB one-liner came back truncated (2026-07-26) and
-    # the size was never re-measured. It was expensive: ONE ROUND TRIP COSTS
-    # 201ms (measured 2026-08-07 -- the device answers one command per frame,
-    # and the desktop's frame is not fast), so the conformance harness spent
-    # ~85 round trips a scene, most of them uploading 120 characters at a time.
-    #
-    # Re-measured, five tries per size: 120, 400, 512, 640, 768, 900 and 1000
-    # all pass 5/5 -- and 256 passes 3/5. So the 2026-07-26 failure was not
-    # length at all, it was the INTERMITTENT lost reply that shows up at every
-    # size. `cmd` retries once for that (below), and the chunk was sized for
-    # round trips instead: 768 is 6x fewer.
-    #
-    # 768 WAS WRONG, and the 5/5 above is why it survived a fortnight: this
-    # UART's stdin is a ~256-byte ring with NO flow control, so an over-long
-    # line is dropped as NOISE with no error -- the failure is silent, and it
-    # only bites once the frame loop is slow enough (a cart running, PERF diag
-    # streaming) that the ring fills between drains. The board.toml measurement
-    # of 2026-08-19 caught it on a 44KB cart push (five failures, a different
-    # bad hash each time; clean first try at 256), and the same size is what
-    # the conformance harness and the RSA-verifier test upload through -- both
-    # failed here as `SyntaxError: invalid syntax` / `ValueError: incorrect
-    # padding` from a corrupted chunk, which names nothing that is wrong.
+    # Multi-line snippets upload in chunks and exec once. ONE ROUND TRIP COSTS
+    # ~200ms (measured 2026-08-07 -- the device answers one command per frame),
+    # so the chunk is sized for round trips, and a reply that goes missing at
+    # any size is `cmd`'s one retry, not a reason to shrink it. On a UART board
+    # the stdin ring bounds it too: a byte that arrives with the ring full is
+    # dropped with no error, and a corrupted chunk surfaces as `SyntaxError:
+    # invalid syntax` or `ValueError: incorrect padding`, which names nothing
+    # that is wrong.
     #
     # So the size is READ from the board's own [serial] declaration rather than
     # kept as a second copy of the number. The literal below is only the

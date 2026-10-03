@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { fileData } from "./moy_store.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -40,7 +41,7 @@ export async function loadConsole(opts = {}) {
     for (const rel in carts) {
         const f = "/moy/carts/" + rel;
         mkdirs(f.slice(0, f.lastIndexOf("/")));
-        mp.FS.writeFile(f, carts[rel]);
+        mp.FS.writeFile(f, fileData(carts[rel]));
     }
 
     // py(expr): evaluate a Python expression that returns JSON TEXT and hand back

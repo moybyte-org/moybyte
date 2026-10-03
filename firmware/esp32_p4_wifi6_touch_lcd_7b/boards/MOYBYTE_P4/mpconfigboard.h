@@ -43,3 +43,35 @@
 // tests/test_moy_image.py pins all five boards, because a board that is missed
 // fails at the moment a kid presses save and nowhere earlier.
 #define MICROPY_PY_DEFLATE_COMPRESS         (1)
+
+// The map-lookup cache, 128 -> 512 slots (384 bytes of .bss) -- the T-Deck's
+// mpconfigboard.h explains the mechanism and the REPR_C half the shared build
+// applies. A/B'd on this board's own glass, 2026-09-21, Brick Siege, diag on,
+// three runs a side:
+//
+//     stock                     fps 55.5   worst 54-56   mp_map_lookup 10-13%
+//     re-aimed index, 128       fps 55     worst 49-55                 12.8%
+//     re-aimed index, 512       fps 56.5   worst 55-56                 11.7%
+//
+// The median's step is inside this board's noise: Brick Siege leaves this
+// chip 38% idle, so a cheaper lookup mostly buys more idle. What carries it
+// is that the sampled share and the on-board lookup probe move exactly as on
+// the S3 boards, for 384 bytes on a 32MB board. Tables in #77.
+#define MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE   (512)
+
+// The WebAssembly engine's run thread (native/moy_wasm): its stack size and
+// whether it lives in PSRAM -- the S3 boards' setting, where an internal stack
+// costs a run its whole size in internal SRAM for no speed (their
+// mpconfigboard.h carries the numbers). This board has the internal SRAM to
+// spare; it keeps the same setting so a cart meets one stack on every board.
+#define MOY_WASM_STACK_BYTES                (16 * 1024)
+#define MOY_WASM_STACK_PSRAM                (1)
+
+// The engine's runtime pool, its fixed part (moy_wasm_footprint.h). A RISC-V
+// load holds more than the S3's for the same cart -- its text relocations --
+// and the peak follows the data segments and relocations, not the text:
+// Doom's P4 module peaked at 460,392 B at 838 KB and 461,984 B at 790 KB,
+// where 256 KB plus a quarter of the module sizes 471 KB and 459 KB (the
+// second a load that fails). 320 KB holds it with 63 KB to spare and keeps
+// holding it as the text shrinks.
+#define MOY_WASM_POOL_BYTES                 (320 * 1024)

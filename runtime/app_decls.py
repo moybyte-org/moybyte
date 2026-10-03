@@ -29,4 +29,5 @@ APPS = [
     {'id': 'storybook', 'entry': 'storybook_app:StorybookAppLayer', 'text_mode': False, 'order': 40, 'folder': 'storybook', 'title': 'Storybook'},
     {'id': 'files', 'entry': 'files_app:FilesAppLayer', 'text_mode': True, 'order': 60, 'folder': 'files', 'title': 'Files'},
     {'id': 'calc', 'entry': 'calc_app:CalcAppLayer', 'text_mode': False, 'order': 70, 'folder': 'calc', 'title': 'Calc'},
+    {'id': 'getcarts', 'entry': 'getcarts_app:GetCartsAppLayer', 'text_mode': False, 'order': 80, 'folder': 'get_carts', 'title': 'Get Carts'},
 ]

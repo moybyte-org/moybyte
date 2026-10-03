@@ -1,14 +1,33 @@
+# Map (grep -n a name to jump there):
+#   _CoverImage                a decoded cover in RGB565
+#   _CoverJob                  a resumable decode of one cover
+#   CoverCache                 the cover and icon caches, budgets and warmers
+#   CoverCache.cover_for       a cart's cover at a reduction
+#   CoverCache.sheet_icon      the icon out of a cart's sprite sheet
+#   CoverCache.invalidate_all  drop everything a store rescan could change
+#   CoverCache.diet_release    drop the cover pipeline before a cart runs
+#   CoverCache.prefetch_tick   warm one cart's cover file
 """The shelf's COVER + ICON pipeline (#209 landing C) -- `Workstation.covers`.
 
-`_CoverImage`, `_CoverJob` and every verb that builds, caches, budgets, warms
-and releases a Library card's art -- plus the cart DESKTOP-ICON cache, which
-joins them here because it is the same lifetime and had no invalidation at all
-(see `invalidate_all`). This is the FRAME-HOT collaborator: the grids call
-`cover_for` once per card per painted shelf frame through an injected bound
-method, and `frame()` touches this object exactly twice -- once at its top
-(`begin_frame`, the per-frame build budget) and once at its tail
-(`take_deferred`, the re-arm that keeps frames coming until a deferred build
-lands). Nothing here is reached through a Workstation forward.
+A cart's cover is its `cover.png` (SPEC.md 3.6), read by runtime/cover_png.py
+-- the native `moy_png` on a board and in the browser, its Python twin on the
+host. What is cached is ONE decoded picture per cover, the BASE: its 128 x 128
+pixels as RGB565 in the system canvas's byte order, which the shelf draws at a
+whole-number scale through `DeviceCanvas.blit565` (docs/theming_2026-09.md,
+P8: one cached base size per cover, an integer upscale at draw, no per-size
+variants). Two other decodes of the same file exist, each for one consumer:
+
+  * HALF, 64 x 64, its box-filtered reduction: the Library GRID's interim need,
+    for a card whose art slot is under 128 and whose cart names no icon;
+  * ICON, 16 x 16, a reduction in palette indices: the desktop icon of a cart
+    that names no SPEC.md 3.4 icon (`icon_sheet_for`).
+
+This is the FRAME-HOT collaborator: the grids call `cover_for` once per card
+per painted shelf frame through an injected bound method, and `frame()` touches
+this object exactly twice -- once at its top (`begin_frame`, the per-frame build
+budget) and once at its tail (`take_deferred`, the re-arm that keeps frames
+coming until a deferred build lands). Nothing here is reached through a
+Workstation forward.
 
 ## `gen` has ONE author
 
@@ -24,23 +43,24 @@ re-scan (`invalidate_all`).
 ## The #186 free order is ONE body
 
 Cover payloads live OUTSIDE the MP gc heap on device (`moybuf`), so every drop
-path has to FREE them -- and an in-flight `_CoverJob` aliases both a runs blob
+path has to FREE them -- and an in-flight `_CoverJob` aliases both a source file
 and the shared decode scratch. The order is the whole invariant: **jobs are
-dropped FIRST, then the payloads are freed**. Reversed, `_free_runs`'s
+dropped FIRST, then the payloads are freed**. Reversed, `_free_src`'s
 job-alias guard sees a live job, declines the free, and the LRU entry is then
-discarded anyway -- the blob leaks for the rest of the session; and the
-scratch free, which has no guard at all, would hand a decoding job freed
-memory. Both drop paths (`invalidate_all` on a store re-scan, `diet_release`
-before a cart runs on the RAM-tight tier) go through `_drop_payloads`, which is
-the only place that order exists, and `tests/test_cover_cache.py` perturbs it.
+discarded anyway -- the file leaks for the rest of the session; and the scratch
+free, which has no guard at all, would hand a decoding job freed memory. Both
+drop paths (`invalidate_all` on a store re-scan, `diet_release` before a cart
+runs on the RAM-tight tier) go through `_drop_payloads`, which is the only place
+that order exists, and `tests/test_cover_cache.py` perturbs it.
 
 ## What is read THROUGH `ws`, per call
 
 The cart store, the storage gate (`_with_sd`), the cost meter, the roster
-(`ws.carts.all`) and
-the two grids. None of them is knowable when this object is built: the store is
-injected by `wire_workstation_core`, and on the boards `_with_sd` is swapped for
-the native SD attach after that. Same rule the sibling collaborators follow.
+(`ws.carts.all`), the system canvas (whose 565 byte order a cover is decoded
+into) and the two grids. None of them is knowable when this object is built:
+the store is injected by `wire_workstation_core`, and on the boards `_with_sd`
+is swapped for the native SD attach after that. Same rule the sibling
+collaborators follow.
 """
 
 try:
@@ -53,221 +73,111 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
 
-# Derived Library covers are sizeable on the desktop tier and DeviceCanvas adds a
-# 2-byte RGB565 bake to each cached indexed image.  Keep the cache comfortably
-# bounded for the P4 heap while retaining enough variants for the root Library,
-# the Make window, and selected/unselected card heights at the same time.
+try:
+    import cover_png
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import cover_png
+
+# #186 moy_buf: cover payloads (source files, decoded pictures, the decode
+# scratch) live OUTSIDE the MP gc heap on device, so a warm shelf stops taxing
+# every GC collect. On the host this is a transparent no-op layer.
+try:
+    import moybuf as _moybuf
+except ImportError:
+    from runtime import moybuf as _moybuf
+
+# The three decodes of a cover, named by the reduction each one is (the
+# `div` cover_png takes): see the module docstring for who asks for which.
+BASE = 1
+HALF = 2
+ICON = 8
+SIDE = cover_png.SIDE
+
+# Decoded pictures, LRU-bounded by count and by bytes. A BASE is 32KB, so the
+# byte cap holds 48 of them -- every cover on a full shelf, with the picker's
+# beside them.
 _COVER_CACHE_MAX_ENTRIES = 64
-_COVER_CACHE_MAX_PIXELS = 768 * 1024
-# Parsed cover RUNS, kept so a relayout neither re-reads nor re-parses.
-# Measured per cover on P4 glass: read the blob 46.9ms + parse it 17.1ms, against
-# a native decode 0.89ms + crop 0.76ms. So the expensive half is the I/O and the
-# interpreted base64/RLE parse, and THAT is what must be cached -- not the
-# decoded bitmap (a first attempt cached that instead: 77KB per cover, which at
-# this board's ~470KB/s flash cost 164ms to reload and made things worse).
-# Runs are ~15KB, so this holds far more covers in less RAM.
-_COVER_RUNS_MAX_BYTES = 512 * 1024
-# diet: how many newest LRU entries (covers AND run blobs) SURVIVE the
-# release at cart start -- the visible shelf stays warm, the long tail leaves
-# the heap. ~6 covers x (8-24KB bake + ~15KB runs) ~= 150KB retained.
+_COVER_CACHE_MAX_BYTES = 48 * SIDE * SIDE * 2
+# Cover FILES, kept so a second decode of the same cover (another size, or a
+# rebuild after the diet) reads no storage. A cover is at most 64KB and most are
+# a few KB, so this holds every cover a shelf has.
+_COVER_SRC_MAX_BYTES = 512 * 1024
+# diet: how many newest LRU entries (pictures AND files) SURVIVE the release at
+# cart start -- the visible shelf stays warm, the long tail leaves the heap.
 _COVER_DIET_KEEP = 6
 
+# How long one _CoverJob.step may run inside a frame, and the per-frame budget
+# for cover BUILDS (cover_for). Sized for the warm case (2026-07-27): a
+# transition frame arrives with the whole visible set pending, and at 20ms the
+# picker's covers land on the FIRST painted frame instead of spreading over
+# two or three full repaints. The first build of a frame always proceeds; the
+# budget only gates the SECOND onward.
+_COVER_SLICE_MS = 20
+# Output rows a decode advances between clock checks: a BASE is 128 of them.
+_COVER_ROWS = 16
 
 class _CoverImage:
-    """Minimal blittable for a card's COVER art (visual identity v1 Section
-    11.4): both canvas backends' spr() read only .w/.h/.pix/.transparent, the
-    same contract as editors._SheetSprite."""
+    """A decoded cover: `pix` is w * h RGB565 words in the system canvas's
+    byte order (BASE, HALF), drawn by `DeviceCanvas.blit565` -- or w * h
+    palette indices (ICON), a sprite like any icon, drawn by `spr`."""
 
     def __init__(self, w, h, pix):
         self.w = w
         self.h = h
         self.pix = pix
         self.transparent = -1
-        # Covers are opaque MOY64 bitmaps, just like Paint images.  This marker
-        # selects DeviceCanvas's native blit_indices bake instead of the generic
-        # per-pixel path.
-        self._paint = True
-
-
-# How long one _CoverJob.step may run inside a frame, and the per-frame budget
-# for cover BUILDS (cover_for). Sized for the warm case (2026-07-27): with the
-# runs prefetched a native build is ~2ms, and a transition frame arrives with
-# the whole visible set pending -- at 8ms the picker's ~9 covers spread over 2-3
-# painted frames (each a full ~190ms repaint via the _deferred re-arm),
-# at 20ms they land on the FIRST frame (p4_clicks: open_picker 376 -> ~190ms).
-# The cold path is unshaped by this constant: the first build of a frame always
-# proceeds (one ~50ms blob load), and the budget only gates the SECOND onward,
-# which a 20ms ceiling still refuses after any load. Python-fallback jobs (host
-# without moy_gfx) just step in chunkier slices -- the host is fast.
-_COVER_SLICE_MS = 20
-# Per-palette-index run templates for the RLE fill (built lazily, 64 x 255B):
-# a run decodes as ONE C-level slice copy instead of a per-pixel loop.
-_COVER_RUNS = None
-
-# The native indexed crop, when this build has one (device only; the host keeps
-# the Python loop and both produce identical bytes).
-try:
-    import moy_gfx as _moy_gfx
-    _CROP_INDEX = getattr(_moy_gfx, "crop_index", None)
-    _DECODE_RUNS = getattr(_moy_gfx, "decode_runs", None)
-except ImportError:
-    _CROP_INDEX = None
-    _DECODE_RUNS = None
-
-# #186 moy_buf: cover payloads (parsed runs, cover bitmaps, the decode
-# scratch) live OUTSIDE the MP gc heap on device, so a warm shelf stops
-# taxing every GC collect. On the host this is a transparent no-op layer.
-try:
-    import moybuf as _moybuf
-except ImportError:
-    from runtime import moybuf as _moybuf
 
 
 class _CoverJob:
-    """A RESUMABLE cover build. Decoding a 320x240 RLE cover + cover-cropping
-    it to the card in one go measured 0.5-1.7s per cover on the T-Deck (#66)
-    -- one frozen frame per cover even under the one-build-per-frame budget.
-    So the build is a little state machine instead: step(t0) advances the
-    decode (RLE runs -> the full indexed bitmap, slice-assign fills) and then
-    the crop (nearest-sample rows via a precomputed column map) until
-    _COVER_SLICE_MS of the frame is spent, and cover_for re-steps it on the
-    following frames until `done`. Any malformed input just finishes with
-    img=None -- a corrupt cover means no cover, never a crash."""
+    """A RESUMABLE decode of one cover at one reduction: `step(t0)` advances
+    it _COVER_ROWS output rows at a time until _COVER_SLICE_MS of the frame is
+    spent, and cover_for re-steps it on the following frames until `done`. A
+    file that turns out not to decode just finishes with img=None -- a corrupt
+    cover means no cover, never a crash.
 
-    def __init__(self, runs, w, h, src=None, buf=None):
-        global _COVER_RUNS
+    `src` is the cover file and `pix` the decode scratch it runs in; both are
+    ALIASED here until the job is done, which is what the #186 order guards."""
+
+    def __init__(self, src, div, swapped, work):
         self.done = False
         self.img = None
-        self.w = int(w)
-        self.h = int(h)
-        self.sw, self.sh, self.packed = runs
-        # `src` is an already-decoded source bitmap, letting a caller skip
-        # straight to the crop. Unused by the console now that the decode itself
-        # is native (~0.9ms) and the expensive part turned out to be reading and
-        # PARSING the blob -- which CoverCache caches as runs instead -- but
-        # kept because it is the natural seam and the crop tests drive it.
-        total = self.sw * self.sh
-        if src is not None and len(src) == total:
-            self.pix = src
-            self.pos = total                    # decode phase already complete
-            self.i = len(self.packed)
+        self.src = src
+        self.pix = work
+        self.div = div
+        if div == ICON:
+            fmt = cover_png.INDEX
+            pal = cover_png.moy64()
         else:
-            # `buf` is a REUSED scratch buffer. A source bitmap is ~77KB, and
-            # allocating one per build cost 116ms on P4 glass -- a big
-            # MicroPython allocation whose gc collect dwarfed the 0.9ms decode it
-            # was for. Only safe with the native decode, which finishes in a
-            # single step: the interpreted fallback keeps partial state in `pix`
-            # across frames, so it must own its buffer.
-            if buf is not None and len(buf) >= total:
-                self.pix = buf
-            else:
-                self.pix = bytearray(total)
-            self.pos = 0              # decode write cursor (pixels)
-            self.i = 0                # decode read cursor (packed bytes)
-        self.out = None               # crop dest (created when decode ends)
-        self.dy = 0                   # crop row cursor
-        self.xmap = None
-        if _COVER_RUNS is None:
-            _COVER_RUNS = tuple(bytes((v,)) * 255 for v in range(64))
+            fmt = cover_png.RGB565_SW if swapped else cover_png.RGB565
+            pal = None
+        self.side = SIDE // div
+        self.job = cover_png.Job(src, div, fmt, pal, work)
+        self.out = bytearray(cover_png.out_size(div, fmt)) if self.job.ok else None
+        if not self.job.ok:
+            self.done = True
 
     def step(self, t0):
         """Advance until ~_COVER_SLICE_MS after t0. Sets self.done (and
-        self.img) when the build finishes or the input turns out corrupt."""
+        self.img) when the decode finishes or the file turns out not to be
+        a cover."""
         try:
-            self._step(t0)
+            while not self.done:
+                r = self.job.rows(self.out, _COVER_ROWS)
+                if r < 0:
+                    self.done = True
+                elif r > 0:
+                    # #186: the picture moves off the gc heap (take() copies
+                    # into moy_buf storage on device; on the host it adopts
+                    # `out` unchanged, zero copies).
+                    self.img = _CoverImage(self.side, self.side,
+                                           _moybuf.take(self.out))
+                    self.out = None
+                    self.done = True
+                elif _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
+                    return
         except Exception:  # noqa: BLE001 -- corrupt cover -> no cover
             self.img = None
             self.done = True
-
-    def _step(self, t0):
-        packed = self.packed
-        n = len(packed)
-        pix = self.pix
-        total = self.sw * self.sh
-        # NATIVE decode (#155): the entire RLE stream in ONE C call. This is what
-        # the whole time-slicing machinery was for -- interpreted, a 320x240 cover
-        # cost 0.5-1.7s. The slow Python walk below stays as the host path and the
-        # fallback, and produces identical bytes.
-        if self.i < n and _DECODE_RUNS is not None:
-            got = _DECODE_RUNS(pix, total, packed)
-            if got != total:
-                self.img = None
-                self.done = True
-                return
-            self.i = n
-            self.pos = total
-        while self.i < n:
-            i = self.i
-            pos = self.pos
-            for _ in range(128):      # a batch of runs between clock checks
-                if i >= n:
-                    break
-                count = packed[i]
-                value = packed[i + 1]
-                if count < 1 or value > 63 or pos + count > total:
-                    self.img = None
-                    self.done = True
-                    return
-                if count == 1:
-                    pix[pos] = value
-                else:
-                    pix[pos:pos + count] = _COVER_RUNS[value][:count]
-                pos += count
-                i += 2
-            self.i = i
-            self.pos = pos
-            if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
-                return
-        if self.pos != total:         # short stream: corrupt -> no cover
-            self.img = None
-            self.done = True
-            return
-        # -- crop phase: match the card's aspect with a centered source
-        # window, then nearest-sample it to exactly (w, h), a row per check.
-        w, h, sw, sh = self.w, self.h, self.sw, self.sh
-        if self.xmap is None:
-            cw_ = min(sw, sh * w // h) or 1
-            ch_ = min(sh, sw * h // w) or 1
-            ox = (sw - cw_) // 2
-            self._ox = ox
-            self._oy = (sh - ch_) // 2
-            self._cw = cw_
-            self._ch = ch_
-            self.xmap = [ox + dx * cw_ // w for dx in range(w)]
-            self.out = bytearray(w * h)
-            # NATIVE crop (#155): the whole window in ONE C call. With the decode
-            # now cached, the crop is what a relayout pays -- ~20k nearest
-            # samples per card, which is 20-40ms of interpreted loop but well
-            # under a millisecond in C. Byte-identical by construction (same
-            # integer floors, same source window); pinned by test_cover_pipeline.
-            if _CROP_INDEX is not None:
-                try:
-                    if _CROP_INDEX(self.out, w, h, pix, sw, sh,
-                                   ox, self._oy, cw_, ch_):
-                        self.dy = h
-                        # #186: the finished card bitmap moves off the gc heap
-                        # (take() copies into moy_buf storage on device; on the
-                        # host it adopts `out` unchanged, zero copies).
-                        self.img = _CoverImage(w, h, _moybuf.take(self.out))
-                        self.done = True
-                        return
-                except Exception:  # noqa: BLE001 -- any surprise -> Python loop
-                    pass
-        xmap = self.xmap
-        out = self.out
-        while self.dy < h:
-            dy = self.dy
-            base = (self._oy + dy * self._ch // h) * sw
-            di = dy * w
-            for dx in range(w):
-                out[di] = pix[base + xmap[dx]]
-                di += 1
-            self.dy = dy + 1
-            if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
-                return
-        self.img = _CoverImage(w, h, _moybuf.take(out))   # #186: off the gc heap
-        self.done = True
-
 
 
 class CoverCache:
@@ -280,8 +190,10 @@ class CoverCache:
 
     def __init__(self, ws):
         self.ws = ws
-        # Bumped on any cover-cache change (#113: the shelf blit path pins it so
-        # a cover landing mid-drag forces a full band repaint). ONE author --
+        # Bumped on any cover-cache change and on every painted frame that
+        # deferred a build (#113: the shelf blit path pins it so a cover
+        # landing mid-drag forces a full band repaint; the home's retained
+        # stamp keys on it, see take_deferred). ONE author --
         # there is no ws mirror; launcher_layer + the tests read covers.gen.
         self.gen = 0
         # RAM-tight board (T-Deck): drop the cover pipeline when a cart RUN
@@ -289,22 +201,22 @@ class CoverCache:
         # keep covers warm (windows leave the desk visible, and RAM is not
         # scarce). The `if` that reads it is kernel policy, in Workstation._start.
         self.diet = False
-        # cart path -> desktop-icon sprite Image (or None). CLEARED by
-        # invalidate_all since #209 landing C: before that it was written at one
-        # site and cleared at none, so a re-seed or a browser sync kept stale
-        # desk icons and a deleted cart's Image never went away.
+        # cart path -> desktop-icon sprite Image (or None) from the cart's
+        # SHEET. CLEARED by invalidate_all: written at one site and cleared at
+        # none, a re-seed or a browser sync kept stale desk icons and a deleted
+        # cart's Image never went away.
         self.icons = {}
-        self._cache = {}         # (path, w, h) -> shelf-card cover blittable (or None)
-        self._order = []         # LRU keys (oldest first); bounds resize variants
-        self._pixels = 0         # indexed pixels; device RGB bakes add 2B each
-        self._jobs = {}          # (path, w, h) -> in-flight _CoverJob (time-sliced)
+        self._cache = {}         # (path, div) -> decoded cover (or None)
+        self._order = []         # LRU keys (oldest first)
+        self._bytes = 0          # bytes of decoded pictures held
+        self._jobs = {}          # (path, div) -> the in-flight _CoverJob (at most one)
         self._built = False      # per-frame cover-build budget (see cover_for)
         self._ms = 0             # ms of it spent this frame
-        self._none = {}          # paths known to carry no cover art
-        self._buf = None         # reused decode scratch (see _CoverJob)
-        self._runs = {}          # path -> (sig, runs) parsed RLE, LRU-bounded
-        self._runs_order = []    # LRU keys (oldest first)
-        self._runs_bytes = 0
+        self._none = {}          # paths known to carry no cover
+        self._buf = None         # the decode scratch, cover_png.WORK bytes
+        self._src = {}           # path -> cover file bytes, LRU-bounded
+        self._src_order = []     # LRU keys (oldest first)
+        self._src_bytes = 0
         self._deferred = False   # a build was pushed past the budget -> stay dirty
         self._seen = True        # idle prefetch armed (see prefetch_tick); True from
                                  # BOOT: covers must be warm BEFORE the first cover
@@ -330,44 +242,48 @@ class CoverCache:
         the caller re-dirties and the remaining covers land on the following
         frames. Taking it -- read AND clear in one call -- is what keeps the
         flag single-author: the gate that set it is a draw, the drain is the
-        loop, and neither has to know the other's ordering."""
+        loop, and neither has to know the other's ordering.
+
+        Taking it also moves `gen`: a frame that drew a card's placeholder
+        while its cover was still due is not a settled frame, and the home's
+        retained stamp keys on `gen`. Left alone, the next frame would stamp
+        that frame back instead of drawing the grid, no card would ask again,
+        and a cover past the idle prebuild's first screenful would stay a
+        placeholder for good."""
         if not self._deferred:
             return False
         self._deferred = False
+        self.gen += 1
         return True
 
     # -- what the grids call, once per card per painted frame ----------------
 
-    def cover_for(self, cart, w, h):
-        """The cart's COVER ART (visual identity v1 Section 11.4) as a blittable
-        sized exactly (w, h) -- images/cover.moyimg cover-cropped (fill + center
-        crop, nearest sample) -- or None when the cart carries none (the shelf
-        card falls back to sprite/glyph, the deterministic pre-cover look) OR
-        while its build is still in flight. Cached per (path, w, h); read
-        through the store so a slimmed cart (#66) never rehydrates, and cleared
-        with the icon cache on a store re-scan.
+    def cover_for(self, cart, div=BASE):
+        """The cart's cover decoded at reduction `div` (BASE, HALF or ICON) --
+        or None when the cart carries no cover, or while its decode is still
+        in flight (the card draws its icon or glyph until it lands). Cached
+        per (path, div); read through the store so a slimmed cart (#66) never
+        rehydrates, and cleared with the icon cache on a store re-scan.
 
-        Builds are TIME-SLICED and BUDGETED (#66, hardware-measured): decoding
-        one 320x240 RLE cover in interpreted code costs 0.5-1.7s on the T-Deck,
-        so a miss starts a resumable _CoverJob and each frame advances at most
-        ONE job by ~_COVER_SLICE_MS. Cards draw their sprite/glyph fallback
-        until their cover lands (covers pop in over frames, no frozen frames);
-        frame() re-arms the redraw gate while any build is pending."""
+        Decodes are TIME-SLICED and BUDGETED: a miss starts a resumable
+        _CoverJob and the frame advances it by at most ~_COVER_SLICE_MS of
+        work, so covers pop in over frames and no frame freezes; frame()
+        re-arms the redraw gate while any decode is pending."""
         ws = self.ws
         path = cart.get("path")
-        if path is None or ws.carts_store is None or w <= 0 or h <= 0:
+        if path is None or ws.carts_store is None:
             return None
         self._seen = True     # re-arm the idle prefetch (it latches off once
                               # every cart is known; a surface asking again is
                               # the cheap signal to re-check)
-        self._pb_i = 0        # the prebuild set is SIZE- and selection-keyed, so
-                              # a surface asking can have changed it. The phase-1
-                              # cursor is not reset here: runs are keyed by path
-                              # alone, so only a cache DROP makes a warmed cart
-                              # worth re-reading (#200).
+        self._pb_i = 0        # the prebuild set is selection-keyed, so a
+                              # surface asking can have changed it. The phase-1
+                              # cursor is not reset here: files are keyed by
+                              # path alone, so only a cache DROP makes a warmed
+                              # cart worth re-reading (#200).
         if path in self._none:       # known cover-less: never re-probe
             return None
-        key = (path, w, h)
+        key = (path, div)
         cache = self._cache
         if key in cache:
             order = self._order
@@ -377,96 +293,73 @@ class CoverCache:
                 pass
             order.append(key)
             return cache[key]
-        # Per-frame build budget. This used to be ONE build per frame, because a
-        # build was a 0.5-1.7s interpreted decode and even one had to be sliced.
-        # With the decode and crop both native, a build off cached runs is ~2ms,
-        # so a count of one just spread N cheap covers over N frames -- which is
-        # exactly the stutter after a resize the owner reported. Spend a TIME
-        # slice instead: cheap builds all land on the same frame, an expensive
-        # one still yields.
+        # Per-frame build budget: a TIME slice. Cheap builds all land on the
+        # same frame, an expensive one still yields.
         if self._built and self._ms >= _COVER_SLICE_MS:
             self._deferred = True
             return None
         self._built = True
         t0 = _ticks_ms()
         try:
-            return self._build(path, key, w, h, t0)
+            return self._build(path, key, div, t0)
         except (MemoryError, ValueError, OSError) as exc:
-            # The build's own allocations -- the ~77KB decode scratch and the
-            # card-sized crop -- are outside _CoverJob.step's fence, and they are
-            # the ones a fragmented S3 heap refuses (#66). Same answer as an
-            # unreadable blob: no cover for this cart this session, placeholder
-            # drawn, loop alive. `_finish` still runs so the (path, w, h) key
-            # caches the miss rather than retrying it every frame.
+            # The build's own allocations -- the decode scratch and the
+            # picture -- are outside _CoverJob.step's fence, and they are the
+            # ones a fragmented S3 heap refuses (#66). Same answer as an
+            # unreadable file: no cover for this cart this session, placeholder
+            # drawn, loop alive. `_finish` still runs so the key caches the
+            # miss rather than retrying it every frame.
             print("Moybyte cover build failed:", path, exc)
             self._none[path] = True
             self._spend(t0)
             self._jobs.pop(key, None)
             return self._finish(key, None)
 
-    def _build(self, path, key, w, h, t0):
+    def _build(self, path, key, div, t0):
         """One step of a cover build, from `cover_for`'s budget gate. Split out
-        so the fence above wraps the whole of it, allocations included."""
-        ws = self.ws
+        so the fence above wraps the whole of it, allocations included.
+
+        ONE decode is in flight at a time, because there is one scratch: a
+        decode that spans frames owns it until it finishes. So whoever asks
+        next finishes THAT one first -- its card may have scrolled away, and
+        nothing else would ever step it -- and starts its own only with budget
+        left over."""
         jobs = self._jobs
+        for other in list(jobs):
+            if other == key:
+                continue
+            job = jobs[other]
+            if not job.done:
+                job.step(t0)
+            self._spend(t0)
+            if not job.done:
+                self._deferred = True
+                return None
+            jobs.pop(other)
+            self._finish(other, job.img)
+            if self._ms >= _COVER_SLICE_MS:
+                self._deferred = True
+                return None
         job = jobs.get(key)
         if job is None:
-            # Parsed runs still in RAM? Then this size costs a native decode +
-            # crop (~1.7ms) and touches no storage at all (#155). That is what
-            # makes a relayout cheap: reading the blob is 46.9ms and parsing it
-            # 17.1ms on P4 glass, against 0.89 + 0.76ms for the two native steps.
-            # Keyed by PATH alone, deliberately. Validating against the cover's
-            # content stamp would mean READING the blob to compute it, which is
-            # the 46.9ms this cache exists to avoid -- so it uses the same trust
-            # model as the crop cache beside it: good for the session, dropped
-            # wholesale on a store re-scan (which is what a create/edit/delete
-            # goes through). Keying it on a stamp stashed on the cart dict was
-            # measured to never hit at all: the picker's dicts do not survive a
-            # relayout, so every build re-read and re-parsed the blob (53ms) and
-            # the cache was dead code.
-            runs = self._runs_get(path)
-            sig = None
-            if runs is None:
-                runs, sig = self._runs_load(path)
-                if runs is None:
+            # The cover FILE still in RAM? Then this decode touches no storage
+            # at all. Keyed by PATH alone, deliberately: validating it would
+            # mean reading the file, which is the cost this cache exists to
+            # avoid -- so it is good for the session and dropped wholesale on a
+            # store re-scan, which is what a create/edit/delete goes through.
+            src = self._src_get(path)
+            if src is None:
+                src = self._src_load(path)
+                if src is None:
                     self._spend(t0)
                     return self._finish(key, None)
-            need = runs[0] * runs[1]
-            # The shared scratch is only safe when the build cannot span frames,
-            # i.e. BOTH steps are native. With a Python crop the job keeps
-            # partial state in pix across frames and another cart's decode would
-            # overwrite it.
-            if _DECODE_RUNS is not None and _CROP_INDEX is not None:
-                if self._buf is None or len(self._buf) < need:
-                    # #186: the scratch lives off the gc heap too. Growing it
-                    # frees the old one -- unless a job still decodes into it
-                    # (the native-crop exception fallback can span frames);
-                    # then the old scratch LEAKS, bounded, never freed live.
-                    old = self._buf
-                    if old is not None:
-                        for _j in jobs.values():
-                            if _j.pix is old:
-                                old = None
-                                break
-                    if old is not None:
-                        _moybuf.free(old)
-                    self._buf = _moybuf.alloc(need)
-                job = _CoverJob(runs, w, h, buf=self._buf)
-            else:
-                job = _CoverJob(runs, w, h)
-            ws.note_cost("cover.build")   # decode + crop for one (path, w, h)
-            job.sig = sig                   # stamps the sidecar when it lands
-            jobs[key] = job
-            # Bound the half-built set: a card scrolled out of view stops
-            # being stepped -- drop some OTHER job (it just rebuilds if it
-            # ever scrolls back into view).
-            while len(jobs) > 8:
-                for old in jobs:
-                    if old != key:
-                        jobs.pop(old)
-                        break
-                else:
-                    break
+            native = cover_png.native() is not None
+            if native and self._buf is None:
+                self._buf = _moybuf.alloc(cover_png.WORK)
+            self.ws.note_cost("cover.build")     # one decode of one size
+            job = _CoverJob(src, div, self._swapped(), self._buf if native else None)
+            if not job.done:
+                jobs[key] = job
         if not job.done:
             job.step(t0)
         self._spend(t0)
@@ -474,20 +367,45 @@ class CoverCache:
             self._deferred = True    # keep frames coming until it lands
             return None
         jobs.pop(key, None)
+        if job.img is None:
+            # A file that read but does not decode is no cover, at ANY size.
+            self._none[path] = True
         return self._finish(key, job.img)
 
+    def _swapped(self):
+        """The system canvas's 565 byte order, which BASE and HALF are
+        decoded into so the draw is a straight copy."""
+        cv = getattr(self.ws, "sys_canvas", None)
+        return getattr(cv, "swapped565", True)
+
     def icon_sheet_for(self, cart):
-        """A cached sprite Image for a cart's desktop icon, or None when the cart
-        has no art (then the type glyph is drawn). Cached per cart path so the
-        grid doesn't rebuild a sheet every frame.
+        """A sprite Image for a cart's desktop icon, or None when the cart has
+        no art (then the type glyph is drawn).
+
+        A cart whose manifest names no "icon" (SPEC.md 3.4) is drawn by its
+        COVER where it has one -- the ICON reduction, built through the same
+        budgeted decode as every cover, so until it lands (or for a cart with
+        no cover) this answers the sheet's own icon, the pre-cover look."""
+        if cart.get("path") is None:                # a pinned pseudo tile (Make/New):
+            return None                             # no cart art -> draw its type glyph
+        if not cart.get("icon"):
+            img = self.cover_for(cart, ICON)
+            if img is not None:
+                return img
+        return self.sheet_icon(cart)
+
+    def sheet_icon(self, cart):
+        """The icon out of the cart's SPRITE SHEET, cached per cart path so the
+        grid doesn't rebuild a sheet every frame -- and baked by
+        `CartManager.slim` while the sheet is still in RAM.
 
         The tiles come from the manifest's "icon" (SPEC.md 3.4) -- [tile, w, h],
         or a bare tile id for 1x1 -- falling back to tile 0. The field has to be
         explicit rather than a plain tile-0 rule because tile 0 is BLANK by
         convention across the whole PICO-8 catalogue (it is why map cell 00 means
         empty), so tile 0 alone draws nothing for every converted cart."""
-        if cart.get("path") is None:                # a pinned pseudo tile (Make/New):
-            return None                             # no cart art -> draw its type glyph
+        if cart.get("path") is None:
+            return None
         key = cart.get("path") or cart.get("title")
         cache = self.icons
         if key in cache:
@@ -510,13 +428,12 @@ class CoverCache:
         """Drop EVERYTHING a store re-scan could have changed under us.
 
         The cover half of `CartManager.apply`: a create/duplicate/delete,
-        a re-seed or a browser sync can carry new or changed cover art, can
+        a re-seed or a browser sync can carry a new or changed cover, can
         change a cart's icon tile, and can take a cart away entirely -- so the
-        card bitmaps, the parsed sources (77KB apiece; holding a departed
-        cart's would be a leak), the cover-less set and the ICON cache all go.
+        pictures, the cover files, the cover-less set and the ICON cache all go.
 
         The icon cache is the one this used to miss: it was written by
-        `icon_sheet_for` and cleared nowhere, so a re-scan kept drawing the icon
+        `sheet_icon` and cleared nowhere, so a re-scan kept drawing the icon
         a cart had before it was edited, and a deleted cart's Image stayed live
         forever (docs/history/console_architecture_2026-08.md rev-2 item 10)."""
         self._drop_payloads(0)
@@ -551,15 +468,15 @@ class CoverCache:
     def _drop_payloads(self, keep, scratch=False):
         """THE #186 FREE ORDER, and the only copy of it.
 
-        In-flight jobs go FIRST: a `_CoverJob` aliases the runs blob it decodes
-        from and (when both native steps are present) the shared decode scratch.
-        Free before dropping them and `_free_runs`'s alias guard declines the
-        free while the LRU discards the entry anyway -- the blob is then leaked
-        for the session -- and the scratch, which has no guard, is handed to a
-        job that is still writing into it.
+        In-flight jobs go FIRST: a `_CoverJob` aliases the cover file it
+        decodes and the shared decode scratch. Free before dropping them and
+        `_free_src`'s alias guard declines the free while the LRU discards the
+        entry anyway -- the file is then leaked for the session -- and the
+        scratch, which has no guard, is handed to a job that is still writing
+        into it.
 
         `keep` is how many NEWEST entries of each LRU survive (0 = everything
-        goes). `scratch` frees the reusable decode buffer as well, which is a
+        goes). `scratch` frees the decode scratch as well, which is a
         RAM-release intent (diet_release) rather than an invalidation one: a
         re-scan wants the scratch kept, since nothing about it went stale."""
         self._jobs = {}                       # <- FIRST. See above.
@@ -569,44 +486,40 @@ class CoverCache:
             k = order.pop(0)
             img = cache.pop(k, None)
             if img is not None:
-                self._pixels -= len(img.pix)
+                self._bytes -= len(img.pix)
                 self._free_img(img)           # #186: pix + bakes off-heap
         if not order:
-            self._pixels = 0
-        rorder = self._runs_order
-        runs = self._runs
-        while len(rorder) > keep:
-            k = rorder.pop(0)
-            gone = runs.pop(k, None)
+            self._bytes = 0
+        sorder = self._src_order
+        src = self._src
+        while len(sorder) > keep:
+            k = sorder.pop(0)
+            gone = src.pop(k, None)
             if gone is not None:
-                self._runs_bytes -= len(gone[1][2])
-                self._free_runs(gone[1][2])
-        if not rorder:
-            self._runs_bytes = 0
+                self._src_bytes -= len(gone)
+                self._free_src(gone)
+        if not sorder:
+            self._src_bytes = 0
         if scratch and self._buf is not None:
-            _moybuf.free(self._buf)           # the 76.8KB decode scratch
+            _moybuf.free(self._buf)           # the decode scratch
             self._buf = None                  # realloc'd on demand
 
     def diet_release(self):
         """Drop the whole cover pipeline before a cart runs (cover_diet tier).
 
-        The 2026-08-03 census: on the T-Deck the shelf redesign's caches are the
-        live-set staircase -- parsed runs (~15KB x every cart, 512KB cap), the
-        cover blittables (768KB-pixel cap + the device RGB565 bakes), the 76.8KB
-        decode scratch -- all sized for the P4 and none of it read while a game
-        owns the glass, yet every GC pause marks it (114ms at the old 638KB live
-        set vs 243ms at 1427KB, measured on glass). Covers are regenerable by
-        design, so the trade is: halve the mid-play GC pause, pay a shelf
-        pop-in on the way back home (_seen re-arms the idle prefetch).
-        _none stays: knowing a cart HAS no art is a probe saved, not RAM.
+        The 2026-08-03 census: on the T-Deck the shelf's caches were the
+        live-set staircase, none of it read while a game owns the glass, yet
+        every GC pause marks it (114ms at a 638KB live set vs 243ms at 1427KB,
+        measured on glass). Covers are regenerable by design, so the trade is:
+        halve the mid-play GC pause, pay a shelf pop-in on the way back home
+        (_seen re-arms the idle prefetch). _none stays: knowing a cart HAS no
+        cover is a probe saved, not RAM.
 
         KEEPS the newest _COVER_DIET_KEEP entries of both LRUs (owner ask
         2026-08-03, "I'd rather not have pop-in"): the covers on screen when
         PLAY was tapped are the most recently touched, so the exact view the
-        kid returns to is still warm (~150KB retained vs ~800KB dropped) and
-        only cards scrolled into view later rebuild -- their normal cold path,
-        prefetch-warmed. The full fix (cover payloads in moy_alloc storage the
-        collector never scans, warm AND GC-invisible) is the standing follow-up."""
+        kid returns to is still warm and only cards scrolled into view later
+        rebuild -- their normal cold path, prefetch-warmed."""
         # The #186 order (jobs before frees) lives in _drop_payloads, which
         # invalidate_all shares -- this path just keeps a few entries and
         # hands back the decode scratch as well.
@@ -619,43 +532,32 @@ class CoverCache:
     # -- the idle warmers (frame()'s quiet branch) ---------------------------
 
     def prefetch_tick(self):
-        """Warm ONE not-yet-known cart's cover runs. Called only from the idle
+        """Warm ONE not-yet-known cart's cover file. Called only from the idle
         branch of frame(), i.e. on a frame that would otherwise do nothing.
 
-        A cover's blob read + parse is ~108ms and is charged to whichever frame
-        first needs the card. On a shelf that scrolls, that is a DRAG frame: the
-        picker measured a 577ms worst frame and a 48ms median against a 31ms
-        warm one, which is the "it takes a while for all the covers to load and
-        for it to stop stuttering" the owner reported. The work cannot be made
-        much cheaper (it is flash-bound), so it moves instead -- same reasoning as
-        the bar strip: spend it where nobody is waiting.
+        Reading a cover is flash I/O, charged to whichever frame first needs
+        the card -- on a shelf that scrolls, a DRAG frame. It cannot be made
+        much cheaper, so it moves instead -- same reasoning as the bar strip:
+        spend it where nobody is waiting.
 
         ARMED FROM BOOT (2026-07-27), not from the first cover draw. The old
         gate ("only while a surface is showing covers") kept the cache cold at
         exactly the moment it was needed: tools/p4_clicks.py measured
         back_to_desk at 1108ms and open_picker at 824ms, both of which were the
-        cover pipeline paying its ~49ms-per-cart loads ON the transition's
-        painted frames because nothing had armed the prefetch from the desk or
-        Settings. Warming from boot moves all of it into the first few idle
-        seconds of the session. The trade, accepted: an idle EDITOR now warms
-        the cache too, so the first input after a >2-quiet-frame pause can land
-        behind one in-flight flash read (~50-108ms extra latency, at most once
-        per cart per session, then never again -- the exhaustion latch below).
-        A RUNNING game is never affected: it animates, so the idle branch that
-        calls this never executes. Runs only after a couple of quiet frames so
-        the gap between two gestures is not spent on flash.
+        cover pipeline paying its loads ON the transition's painted frames
+        because nothing had armed the prefetch from the desk or Settings.
+        Warming from boot moves all of it into the first few idle seconds of
+        the session. The trade, accepted: an idle EDITOR warms the cache too,
+        so the first input after a >2-quiet-frame pause can land behind one
+        in-flight flash read, at most once per cart per session. A RUNNING game
+        is never affected: it animates, so the idle branch never executes.
 
-        ONE PASS PER ARM, both phases (#200). The walk used to be a round-robin
-        over the roster that stopped when every cart's runs were CACHED -- two
-        different questions conflated, because both LRUs evict: with more cover
-        bytes than `_COVER_RUNS_MAX_BYTES` warming the tail evicted the head, so
-        every idle frame forever re-read a blob it was about to lose (measured:
-        2000 ticks, 2000 loads, latch never cleared, against 83 ticks / 73 loads
-        for the same roster with the cache big enough). Both cursors advance
-        monotonically instead and neither is rewound by a cache miss, so the arm
-        terminates in at most (roster + prebuild specs) ticks whatever the cache
-        does; re-reading an evicted cover here could only evict another one, and
-        the shelf's draw path loads the tail lazily as it always did."""
+        ONE PASS PER ARM, both phases (#200). Both cursors advance
+        monotonically and neither is rewound by a cache miss, so the arm
+        terminates in at most (roster + prebuild specs) ticks whatever the
+        caches do -- they both evict, and a walk that re-read whatever was
+        evicted re-read a file per idle frame forever (measured: 2000 ticks,
+        2000 loads, latch never cleared)."""
         ws = self.ws
         carts = ws.carts.all
         if not self._seen or ws.carts_store is None or not carts:
@@ -667,19 +569,16 @@ class CoverCache:
             i += 1
             path = cart.get("path")
             if (not path or path in self._none
-                    or self._runs_get(path) is not None):
+                    or self._src_get(path) is not None):
                 continue
             self._pf_i = i
-            self._runs_load(path)
+            self._src_load(path)
             return
         self._pf_i = i
-        # Every cart's RUNS are known. Phase 2 (2026-07-27): pre-BUILD the cover
-        # IMAGES the shelf/picker grids' next full draw will request, so the
-        # first click pays a cache hit instead of a build. Attributed on glass:
-        # with runs warm, the first draw at a new card size still cost ~10ms
-        # per card (native decode+crop at card size) x 12 cards = ~120ms of the
-        # remaining 2x~200ms transition -- charged to the exact frames a kid is
-        # watching. Same doctrine as phase 1: pay it where nobody waits.
+        # Every cart's file is known. Phase 2 (2026-07-27): pre-DECODE the
+        # covers the shelf/picker grids' next full draw will request, so the
+        # first click pays a cache hit instead of a decode, on a frame nobody
+        # is watching.
         if self._prebuild_tick():
             return
         # Nothing left to warm: stop until something asks for covers again (a
@@ -687,16 +586,14 @@ class CoverCache:
         self._seen = False
 
     # The prebuild covers the first screenful per grid -- what a fresh session's
-    # click reveals. Scroll-ins beyond it build lazily as before (~10ms once per
-    # card, amortized over drag frames). Deliberately NOT every item: the cover
-    # cache is pixel-capped (_COVER_CACHE_MAX_PIXELS) and LRU -- prebuilding two
-    # full 29-cart grids would evict the head cards (the ones the click shows)
-    # to make room for the tail.
+    # click reveals. Scroll-ins beyond it decode lazily. Deliberately NOT every
+    # item: the picture cache is LRU and capped, and prebuilding two full grids
+    # would evict the head cards (the ones the click shows) for the tail.
     _COVER_PREBUILD_PER_GRID = 12
 
     def _prebuild_tick(self):
-        """Build ONE pending cover image from the grids' cover_specs (the exact
-        (cart, w, h) set their next full draw requests). Returns True while
+        """Decode ONE pending cover from the grids' cover_specs (the exact
+        (cart, div) set their next full draw requests). Returns True while
         there is (or may be) work left, False when the visible set is settled.
 
         Runs on idle frames only (the caller), so it must not re-arm the paint
@@ -709,8 +606,8 @@ class CoverCache:
         all on one 40x loaded, which is what the flake was).
 
         `_pb_i` is a cursor over the spec positions, not a "still uncached" test:
-        the cover LRU is pixel-capped, so a set larger than the cap evicts its
-        own head and an uncached test never runs out of work."""
+        the picture LRU is capped, so a set larger than the cap evicts its own
+        head and an uncached test never runs out of work."""
         ws = self.ws
         grids = (ws.launcher, ws.picker)
         cap = self._COVER_PREBUILD_PER_GRID
@@ -721,7 +618,7 @@ class CoverCache:
             if specs is None:
                 continue
             n = 0
-            for cart, w, h in specs():
+            for cart, div in specs():
                 if n >= cap:
                     break
                 n += 1
@@ -730,7 +627,7 @@ class CoverCache:
                 if here < at:
                     continue
                 path = cart.get("path")
-                key = (path, w, h)
+                key = (path, div)
                 if not path or path in self._none or key in self._cache:
                     self._pb_i = pos
                     continue
@@ -740,114 +637,100 @@ class CoverCache:
                 self._built = False
                 self._ms = 0
                 try:
-                    self.cover_for(cart, w, h)
+                    self.cover_for(cart, div)
                 finally:
                     self._deferred = deferred
                     self._built = built
                     self._ms = ms
-                # A job still in flight is re-stepped next tick (its decode and
-                # crop cursors only move forward); anything else is settled.
+                # A job still in flight is re-stepped next tick (its row cursor
+                # only moves forward); anything else is settled.
                 self._pb_i = here if key in self._jobs else pos
                 return True
         self._pb_i = pos
         return False
 
-    # -- the runs cache: the size-independent half of a build ----------------
+    # -- the file cache: the size-independent half of a build ----------------
 
-    def _runs_load(self, path):
-        """Read + parse this cart's cover blob into the runs cache; returns
-        (runs, sig), or (None, None) for a cart with no cover art.
-
-        This is the SIZE-INDEPENDENT half of a cover build, and the expensive one:
-        58ms to read the blob and 50ms to parse it on P4 glass, against ~2ms for
-        the decode+crop that turns runs into a card of a given size. Split out so
-        the idle prefetch can pay it while nothing is happening (see
-        prefetch_tick) instead of mid-drag, when a card scrolls into view.
+    def _src_load(self, path):
+        """Read this cart's cover file into the file cache; returns its bytes,
+        or None for a cart with no cover (or one that is not in the profile's
+        shape at all).
 
         A cover-less cart is remembered per PATH: probing for a file that is not
-        there costs 22ms on this board's flash (a listdir of images/ measured the
-        same 23.5ms, so there is no cheaper existence test), and 17 of 29 carts had
-        no cover -- 380ms of pure waste per session before this was cached."""
+        there costs 22ms on the P4's flash (a listdir measured the same, so
+        there is no cheaper existence test), and most carts have no cover."""
         ws = self.ws
         store = ws.carts_store
-        loader = getattr(store, "load_image", None)
-        cover_name = getattr(store, "COVER_IMAGE", "cover")
-        sig_fn = getattr(store, "cover_sig", None)
-        ws.note_cost("cover.blob.read")      # 58ms hit / 22ms miss on P4 flash
+        loader = getattr(store, "load_cover", None)
+        ws.note_cost("cover.blob.read")
         # Through the storage gate like every other store read here: this fires
         # from the launcher's draw and the idle prefetch, i.e. around a repaint,
         # where the T-Deck has a flush in flight over the SPI host its card
         # shares -- an sdspi transaction there is the documented hang.
         #
-        # AND IT CANNOT RAISE. Reading a cover is flash I/O plus a decode, so it
-        # can fail for reasons that are nothing to do with this cart -- a card
-        # pulled, a heap with no room left -- and it runs from the idle
-        # prefetch, where a MemoryError escaping took both S3 boards to the REPL
-        # a few minutes after a flash (2026-09-07). A cover that cannot be read
-        # is treated as one that is not there, for this session: the card draws
-        # its sprite/glyph fallback, `_none` stops it being re-probed every idle
-        # frame, and a store re-scan clears that and tries again.
+        # AND IT CANNOT RAISE. Reading a cover is flash I/O, so it can fail for
+        # reasons that are nothing to do with this cart -- a card pulled, a heap
+        # with no room left -- and it runs from the idle prefetch, where a
+        # MemoryError escaping took both S3 boards to the REPL a few minutes
+        # after a flash (2026-09-07). A cover that cannot be read is treated as
+        # one that is not there, for this session: the card draws its icon or
+        # glyph, `_none` stops it being re-probed every idle frame, and a store
+        # re-scan clears that and tries again.
         try:
-            blob = ws._with_sd(
-                lambda: loader(path, cover_name)) if loader is not None else None
-            runs = None
-            sig = None
-            if blob:
-                parse = getattr(store, "moyimg_runs", None)
-                runs = parse(blob) if parse is not None else None
-                sig = sig_fn(blob) if sig_fn is not None else None
+            data = ws._with_sd(
+                lambda: loader(path)) if loader is not None else None
+            if data and cover_png.structure(data) is None:
+                data = None
         except (MemoryError, ValueError, OSError) as exc:
             print("Moybyte cover unreadable:", path, exc)
             self._none[path] = True
-            return None, None
-        if runs is None:
-            self._none[path] = True
-            return None, None
-        # #186: the packed RLE blob (~15KB x every cart, 512KB cap) is the
-        # biggest slice of the warm shelf -- move it off the gc heap. Every
-        # consumer (len, int indexing, the native decode_runs) reads a
-        # memoryview identically; eviction frees it (_free_runs).
-        runs = (runs[0], runs[1], _moybuf.take(runs[2]))
-        self._runs_put(path, sig, runs)
-        return runs, sig
-
-    def _runs_get(self, path):
-        """The parsed (sw, sh, packed) runs for this cart's cover, or None."""
-        e = self._runs.get(path)
-        if e is None:
             return None
-        order = self._runs_order
+        if not data:
+            self._none[path] = True
+            return None
+        # #186: the file moves off the gc heap; every reader (the native decode,
+        # len, slicing) reads a memoryview identically; eviction frees it.
+        data = _moybuf.take(data)
+        self._src_put(path, data)
+        return data
+
+    def _src_get(self, path):
+        """This cart's cover file bytes, or None."""
+        data = self._src.get(path)
+        if data is None:
+            return None
+        order = self._src_order
         try:
             order.remove(path)
         except ValueError:
             pass
         order.append(path)
-        return e[1]
+        return data
 
-    def _runs_put(self, path, sig, runs):
-        """Cache parsed runs, LRU-bounded by packed bytes."""
-        cache = self._runs
-        order = self._runs_order
+    def _src_put(self, path, data):
+        """Cache a cover file, LRU-bounded by bytes."""
+        cache = self._src
+        order = self._src_order
         old = cache.get(path)
         if old is not None:
-            self._runs_bytes -= len(old[1][2])
-            self._free_runs(old[1][2])   # #186: replaced blob returns
+            self._src_bytes -= len(old)
+            self._free_src(old)          # #186: a replaced file returns
             try:
                 order.remove(path)
             except ValueError:
                 pass
-        cache[path] = (sig, runs)
+        cache[path] = data
         order.append(path)
-        self._runs_bytes += len(runs[2])
-        while order and self._runs_bytes > _COVER_RUNS_MAX_BYTES:
+        self._src_bytes += len(data)
+        while order and self._src_bytes > _COVER_SRC_MAX_BYTES:
             drop = order.pop(0)
             if drop == path:              # never evict the one just stored
                 order.insert(0, drop)
                 break
             gone = cache.pop(drop, None)
             if gone is not None:
-                self._runs_bytes -= len(gone[1][2])
-                self._free_runs(gone[1][2])   # #186 (job-alias guarded)
+                self._src_bytes -= len(gone)
+                self._free_src(gone)      # #186 (job-alias guarded)
 
     # -- build bookkeeping ---------------------------------------------------
 
@@ -864,36 +747,35 @@ class CoverCache:
         order.append(key)
         self.gen += 1
         if img is not None:
-            self._pixels += len(img.pix)
+            self._bytes += len(img.pix)
         while (len(order) > _COVER_CACHE_MAX_ENTRIES
-               or self._pixels > _COVER_CACHE_MAX_PIXELS):
+               or self._bytes > _COVER_CACHE_MAX_BYTES):
             old_key = order.pop(0)
             old_img = cache.pop(old_key, None)
             if old_img is not None:
-                self._pixels -= len(old_img.pix)
+                self._bytes -= len(old_img.pix)
                 self._free_img(old_img)   # #186: pix + bakes off-heap
         return img
 
     # -- #186 frees ----------------------------------------------------------
 
-    def _free_runs(self, packed):
-        """#186: return an evicted runs blob to off-heap storage -- unless an
-        in-flight _CoverJob still decodes from it (the LRU knows nothing
-        about jobs; leaking one blob beats a use-after-free). No-op for
-        gc-heap payloads (host / fallback)."""
+    def _free_src(self, data):
+        """#186: return an evicted cover file to off-heap storage -- unless an
+        in-flight _CoverJob still decodes from it (the LRU knows nothing about
+        jobs; leaking one file beats a use-after-free). No-op for gc-heap
+        payloads (host / fallback)."""
         for job in self._jobs.values():
-            if job.packed is packed:
+            if job.src is data:
                 return
-        _moybuf.free(packed)
+        _moybuf.free(data)
 
     def _free_img(self, img):
-        """#186: release an evicted cover blittable's off-heap payloads --
-        the indexed pixels plus any RGB565 bake the device canvas stamped on
-        it (_rgb_i / _rgb / the variant dict). Alias-safe: the hot _rgb slot
-        SHARES a variant entry's buffer, so each distinct buffer frees once.
-        Fields are nulled afterwards, so if anything ever drew an evicted
-        cover it would raise loudly instead of blitting freed memory
-        (nothing does -- pinned by the #186 audit)."""
+        """#186: release an evicted picture's off-heap payloads -- its pixels
+        plus any RGB565 bake the device canvas stamped on an ICON drawn as a
+        sprite (_rgb / the variant dict). Alias-safe: the hot _rgb slot SHARES
+        a variant entry's buffer, so each distinct buffer frees once. Fields
+        are nulled afterwards, so if anything ever drew an evicted cover it
+        would raise loudly instead of blitting freed memory."""
         if img is None:
             return
         freed = []

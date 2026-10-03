@@ -187,6 +187,421 @@ def test_the_repr_C_patch_is_idempotent_on_a_warm_tree(tmp_path):
     assert r.returncode == 0 and f.read_text(encoding="utf-8") == before
 
 
+# -- the map-lookup cache index, a consequence of REPR_C ------------------------
+
+_MAP_C_STOCK = "#define MAP_CACHE_OFFSET(index) ((((uintptr_t)(index)) >> 2) % MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE)"
+
+
+def _map_c(tmp_path, line):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "map.c").write_text("// header\n%s\n" % line, encoding="utf-8")
+    return p / "map.c"
+
+
+def test_the_map_cache_patch_shifts_by_the_tag_width_repr_C_uses(tmp_path):
+    """REPR_C tags a qstr in four bits; the stock `>> 2` leaves two constant
+    bits in the slot index and a qstr key reaches 32 of 128 slots (#77)."""
+    _mpconfig(tmp_path, "#define MICROPY_OBJ_REPR    (MICROPY_OBJ_REPR_C)")
+    f = _map_c(tmp_path, _MAP_C_STOCK)
+    r = sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    body = f.read_text(encoding="utf-8")
+    assert ">> 4) % MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE" in body
+    assert ">> 2)" not in body
+
+
+def test_the_map_cache_patch_is_idempotent_on_a_warm_tree(tmp_path):
+    _mpconfig(tmp_path, "#define MICROPY_OBJ_REPR    (MICROPY_OBJ_REPR_C)")
+    f = _map_c(tmp_path, _MAP_C_STOCK)
+    sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    once = f.read_text(encoding="utf-8")
+    r = sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+
+
+def test_a_map_cache_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
+    """A silent no-op here is a REPR_C board back on 32 reachable slots with
+    nothing naming the cause -- the whole lever gone, and the frame A/B that
+    found it the only thing that could tell."""
+    _mpconfig(tmp_path, "#define MICROPY_OBJ_REPR    (MICROPY_OBJ_REPR_C)")
+    f = _map_c(tmp_path, "#define MAP_CACHE_OFFSET(index) (((index) >> 2) & 127)")
+    r = sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    assert r.returncode != 0
+    assert "map-cache shift patch did not apply" in r.stderr
+    assert ">> 2" in f.read_text(encoding="utf-8")
+
+
+def test_the_map_cache_patch_REFUSES_a_tree_that_is_not_repr_C(tmp_path):
+    """On REPR_A the stock index already reaches every slot and `>> 4` would
+    fold four qstrs into one: the patch is a consequence of REPR_C and must
+    not be takeable without it, which is what lets the Zero decline both."""
+    _mpconfig(tmp_path, "#define MICROPY_OBJ_REPR    (MICROPY_OBJ_REPR_A)")
+    f = _map_c(tmp_path, _MAP_C_STOCK)
+    r = sh("moybyte_patch_map_cache_for_repr_c", MPY_DIR=str(tmp_path))
+    assert r.returncode != 0
+    assert "not REPR_C" in r.stderr
+    assert f.read_text(encoding="utf-8").count(_MAP_C_STOCK) == 1
+
+
+# -- size-class run hints for gc_alloc -----------------------------------------
+#
+# The stock lines tools/patch_gc_run_hints.py anchors on, in stock order, so a
+# shape change upstream turns red here before it turns into a board build that
+# quietly ships the stock allocator.
+
+_GC_C_STOCK = """\
+// gc.c
+    area->gc_last_free_atb_index = 0;
+    area->gc_last_used_block = 0;
+
+void gc_collect_end(void) {
+    for (mp_state_mem_area_t *area = &MP_STATE_MEM(area); area != NULL; area = NEXT_AREA(area)) {
+        area->gc_last_free_atb_index = 0;
+    }
+}
+
+void *gc_alloc(size_t n_bytes, unsigned int alloc_flags) {
+            for (i = area->gc_last_free_atb_index; i < area->gc_alloc_table_byte_len; i++) {
+            }
+            #if MICROPY_GC_SPLIT_HEAP
+            if (n_blocks == 1) {
+                area->gc_last_free_atb_index = (i + 1) / BLOCKS_PER_ATB; // or (size_t)-1
+            }
+            #endif
+found:
+    if (n_free == 1) {
+        #if MICROPY_GC_SPLIT_HEAP
+        MP_STATE_MEM(gc_last_free_area) = area;
+        #endif
+        area->gc_last_free_atb_index = (i + 1) / BLOCKS_PER_ATB;
+    }
+}
+
+void gc_free(void *ptr) {
+    // free head and all of its tail blocks
+    do {
+        ATB_ANY_TO_FREE(area, block);
+        block += 1;
+    } while (ATB_GET_KIND(area, block) == AT_TAIL);
+}
+
+void *gc_realloc(void *ptr_in, size_t n_bytes, bool allow_move) {
+        for (size_t bl = block + new_blocks, count = n_blocks - new_blocks; count > 0; bl++, count--) {
+            ATB_ANY_TO_FREE(area, bl);
+        }
+}
+"""
+
+_MPSTATE_H_STOCK = """\
+// mpstate.h
+typedef struct _mp_state_mem_area_t {
+    size_t gc_last_free_atb_index;
+    size_t gc_last_used_block; // The block ID of the highest block allocated in the area
+} mp_state_mem_area_t;
+"""
+
+
+def _gc_tree(tmp_path, gc_c=_GC_C_STOCK, mpstate_h=_MPSTATE_H_STOCK):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "gc.c").write_text(gc_c, encoding="utf-8")
+    (p / "mpstate.h").write_text(mpstate_h, encoding="utf-8")
+    return p / "gc.c", p / "mpstate.h"
+
+
+def _run_hints(tmp_path):
+    return sh("moybyte_patch_gc_run_hints", MPY_DIR=str(tmp_path),
+              REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def _both(gc_c, mpstate_h):
+    return gc_c.read_text(encoding="utf-8"), mpstate_h.read_text(encoding="utf-8")
+
+
+def test_the_run_hints_patch_lands_every_hunk_in_both_files(tmp_path):
+    """The field, its two resets, the scan start, the two raises, the two
+    lowers, and the byte-index fix on the area-full marker: each is a hunk,
+    and a tree missing any one of them is a different allocator."""
+    gc_c, mpstate_h = _gc_tree(tmp_path)
+    r = _run_hints(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c, h = _both(gc_c, mpstate_h)
+    assert "#define MOYBYTE_GC_RUN_CLASSES (31)" in h
+    assert "size_t gc_last_free_run_index[MOYBYTE_GC_RUN_CLASSES];" in h
+    assert "for (i = MOYBYTE_GC_SCAN_START(area, n_blocks);" in c
+    assert c.count("memset(area->gc_last_free_run_index, 0,") == 2
+    assert c.count("moybyte_gc_run_hints_raise(area, ") == 2
+    assert c.count("moybyte_gc_run_hints_lower(area, ") == 2
+    assert "static void moybyte_gc_run_hints_raise(" in c
+    assert "static void moybyte_gc_run_hints_lower(" in c
+    assert "area->gc_last_free_atb_index = i; // Moybyte" in c
+    assert "// or (size_t)-1" not in c
+
+
+def test_the_run_hints_patch_is_idempotent_on_a_warm_tree(tmp_path):
+    gc_c, mpstate_h = _gc_tree(tmp_path)
+    assert _run_hints(tmp_path).returncode == 0
+    once = _both(gc_c, mpstate_h)
+    r = _run_hints(tmp_path)
+    assert r.returncode == 0 and _both(gc_c, mpstate_h) == once
+
+
+def test_a_run_hints_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    """One hunk missing would be a tree with the helpers but not the scan
+    that reads them: nothing is written to either file, the exit names the
+    hunk, and the board build stops there."""
+    gc_c, mpstate_h = _gc_tree(tmp_path, gc_c=_GC_C_STOCK.replace(
+        "for (i = area->gc_last_free_atb_index; i < area->gc_alloc_table_byte_len; i++) {",
+        "for (i = area->gc_last_free_atb_index; i < len; i++) {"))
+    before = _both(gc_c, mpstate_h)
+    r = _run_hints(tmp_path)
+    assert r.returncode != 0
+    assert "did not apply" in r.stderr and "scan start" in r.stderr
+    assert _both(gc_c, mpstate_h) == before
+
+
+def test_a_half_applied_run_hints_tree_is_REFUSED(tmp_path):
+    """A header carrying the field beside a stock gc.c is a build that
+    compiles and never reads it; it is refused rather than patched over."""
+    gc_c, mpstate_h = _gc_tree(tmp_path)
+    assert _run_hints(tmp_path).returncode == 0
+    _gc_tree(tmp_path, mpstate_h=mpstate_h.read_text(encoding="utf-8"))
+    r = _run_hints(tmp_path)
+    assert r.returncode != 0 and "half-applied" in r.stderr
+
+
+# -- the stdin ring for a UART console -----------------------------------------
+
+_MPHALPORT_STOCK = """\
+TaskHandle_t mp_main_task_handle;
+
+static uint8_t stdin_ringbuf_array[260];
+ringbuf_t stdin_ringbuf = {stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 0};
+"""
+
+
+_UART_STOCK = """\
+// RXFIFO Full interrupt threshold. Set the same as the ESP-IDF UART driver
+#define RXFIFO_FULL_THR (SOC_UART_FIFO_LEN - 8)
+
+void uart_stdout_init(void) {
+    uart_hal_ena_intr_mask(&repl_hal, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
+}
+
+static void IRAM_ATTR uart_irq_handler(void *arg) {
+    uint8_t rbuf[SOC_UART_FIFO_LEN];
+    int len;
+    len = uart_hal_get_rxfifo_len(&repl_hal);
+    uart_hal_read_rxfifo(&repl_hal, rbuf, &len);
+
+    for (int i = 0; i < len; i++) {
+        if (rbuf[i] == mp_interrupt_char) {
+            mp_sched_keyboard_interrupt();
+        } else {
+            // this is an inline function so will be in IRAM
+            ringbuf_put(&stdin_ringbuf, rbuf[i]);
+        }
+    }
+}
+
+#endif // MICROPY_HW_ENABLE_UART_REPL
+"""
+
+
+def _mphalport(tmp_path, text=_MPHALPORT_STOCK, uart=_UART_STOCK):
+    p = tmp_path / "ports" / "esp32"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "mphalport.c"
+    f.write_text(text, encoding="utf-8")
+    (p / "uart.c").write_text(uart, encoding="utf-8")
+    return f
+
+
+def _stdin_ring(tmp_path):
+    return sh("moybyte_patch_stdin_ring", MPY_DIR=str(tmp_path),
+              REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_stdin_ring_patch_sizes_the_array_the_ring_is_built_over(tmp_path):
+    """The ring takes its size from `sizeof` the array, so the array is the
+    whole edit -- the only place the number lives -- and its section is TCM,
+    where it leaves the L2MEM heap's layout alone."""
+    f = _mphalport(tmp_path)
+    r = _stdin_ring(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    assert "static uint8_t TCM_DRAM_ATTR stdin_ringbuf_array[4096];" in c
+    assert "#include \"esp_attr.h\"" in c
+    assert "[260]" not in c
+    assert "{stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 0}" in c
+
+
+def test_the_uart_rx_isr_wakes_the_reader(tmp_path):
+    """The USB-Serial/JTAG ISR notifies the MicroPython task when bytes land
+    and the UART's did not, so a reader waiting on an empty ring slept out
+    every tick. The notify goes after the ring is fed, once per interrupt."""
+    _mphalport(tmp_path)
+    assert _stdin_ring(tmp_path).returncode == 0
+    c = (tmp_path / "ports" / "esp32" / "uart.c").read_text(encoding="utf-8")
+    put = c.index("ringbuf_put(&stdin_ringbuf, rbuf[i]);")
+    wake = c.index("vTaskNotifyGiveFromISR(mp_main_task_handle, &woken);")
+    assert put < wake < c.index("#endif // MICROPY_HW_ENABLE_UART_REPL")
+    assert "portYIELD_FROM_ISR();" in c
+
+
+def test_the_uart_isr_drains_early_and_resets_an_overflowed_fifo(tmp_path):
+    """A payload at megabits leaves the stock threshold 40 us of slack; a
+    quarter-full threshold leaves ~0.5 ms, and an overflow that happens anyway
+    resets the FIFO before it is read, so a lost byte is a short window."""
+    _mphalport(tmp_path)
+    assert _stdin_ring(tmp_path).returncode == 0
+    c = (tmp_path / "ports" / "esp32" / "uart.c").read_text(encoding="utf-8")
+    assert "#define RXFIFO_FULL_THR (SOC_UART_FIFO_LEN / 4)" in c
+    assert "UART_INTR_RXFIFO_TOUT | UART_INTR_RXFIFO_OVF);" in c
+    reset = c.index("uart_ll_rxfifo_rst(repl_hal.dev);")
+    assert reset < c.index("len = uart_hal_get_rxfifo_len(&repl_hal);")
+
+
+def test_the_stdin_ring_patch_is_idempotent_on_a_warm_tree(tmp_path):
+    f = _mphalport(tmp_path)
+    assert _stdin_ring(tmp_path).returncode == 0
+    once = f.read_text(encoding="utf-8")
+    uart = (tmp_path / "ports" / "esp32" / "uart.c").read_text(encoding="utf-8")
+    r = _stdin_ring(tmp_path)
+    assert r.returncode == 0 and r.stdout.strip() == ""
+    assert f.read_text(encoding="utf-8") == once
+    assert (tmp_path / "ports" / "esp32" / "uart.c").read_text(
+        encoding="utf-8") == uart
+
+
+def test_a_tree_with_the_ring_but_not_the_wake_gets_the_wake(tmp_path):
+    """Each file carries its own marker: a build tree that took the ring
+    before the wake existed takes the wake and leaves the ring alone."""
+    f = _mphalport(tmp_path)
+    assert _stdin_ring(tmp_path).returncode == 0
+    ring = f.read_text(encoding="utf-8")
+    (tmp_path / "ports" / "esp32" / "uart.c").write_text(_UART_STOCK,
+                                                         encoding="utf-8")
+    assert _stdin_ring(tmp_path).returncode == 0
+    assert f.read_text(encoding="utf-8") == ring
+    assert "vTaskNotifyGiveFromISR" in (
+        tmp_path / "ports" / "esp32" / "uart.c").read_text(encoding="utf-8")
+
+
+def test_a_stdin_ring_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    """A silent no-op is a board back on 260 bytes, which drops a long line
+    whenever a collection lands in it and names nothing."""
+    f = _mphalport(tmp_path, _MPHALPORT_STOCK.replace("[260]", "[512]"))
+    before = f.read_text(encoding="utf-8")
+    r = _stdin_ring(tmp_path)
+    assert r.returncode != 0
+    assert "did not apply" in r.stderr and "ring array" in r.stderr
+    assert f.read_text(encoding="utf-8") == before
+
+
+# -- machine.SDCard in multi-block runs ----------------------------------------
+
+_SDCARD_STOCK = """\
+#include "sdmmc_cmd.h"
+#define _SECTOR_SIZE(self) (self->card.csd.sector_size)
+
+static mp_obj_t machine_sdcard_readblocks(mp_obj_t self_in, mp_obj_t block_num, mp_obj_t buf) {
+    mp_get_buffer_raise(buf, &bufinfo, MP_BUFFER_WRITE);
+    err = sdmmc_read_sectors(&(self->card), bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self));
+    return mp_obj_new_bool(err == ESP_OK);
+}
+
+static mp_obj_t machine_sdcard_writeblocks(mp_obj_t self_in, mp_obj_t block_num, mp_obj_t buf) {
+    mp_get_buffer_raise(buf, &bufinfo, MP_BUFFER_READ);
+    err = sdmmc_write_sectors(&(self->card), bufinfo.buf, mp_obj_get_int(block_num), bufinfo.len / _SECTOR_SIZE(self));
+    return mp_obj_new_bool(err == ESP_OK);
+}
+"""
+
+
+def _sdcard(tmp_path, text=_SDCARD_STOCK):
+    p = tmp_path / "ports" / "esp32"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "machine_sdcard.c"
+    f.write_text(text, encoding="utf-8")
+    return f, sh("moybyte_patch_sdcard_runs", MPY_DIR=str(tmp_path),
+                 REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_sdcard_patch_routes_both_block_verbs_through_the_runs(tmp_path):
+    """IDF moves a PSRAM buffer one single-block command per sector; both
+    verbs go through the run helper instead, and the helper is defined before
+    the first of them."""
+    f, r = _sdcard(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    assert "sdmmc_read_sectors(&(self->card), bufinfo.buf" not in c
+    assert "sdmmc_write_sectors(&(self->card), bufinfo.buf" not in c
+    helper = c.index("static esp_err_t moybyte_sd_xfer(")
+    assert helper < c.index("moybyte_sd_xfer(&(self->card), bufinfo.buf, "
+                            "mp_obj_get_int(block_num), bufinfo.len / "
+                            "_SECTOR_SIZE(self), false);")
+    assert helper < c.index("_SECTOR_SIZE(self), true);")
+
+
+def test_the_sdcard_patch_is_idempotent_and_refuses_a_changed_line(tmp_path):
+    f, r = _sdcard(tmp_path)
+    once = f.read_text(encoding="utf-8")
+    r = sh("moybyte_patch_sdcard_runs", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    g, r = _sdcard(tmp_path / "b", _SDCARD_STOCK.replace("bufinfo.len /", "n /"))
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert g.read_text(encoding="utf-8") == _SDCARD_STOCK.replace(
+        "bufinfo.len /", "n /")
+
+
+# -- LittleFS's sizes on a flash store ------------------------------------------
+
+_LFS_STOCK = """\
+static const mp_arg_t lfs_make_allowed_args[] = {
+    { MP_QSTR_, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+    { MP_QSTR_readsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} },
+    { MP_QSTR_progsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} },
+    { MP_QSTR_lookahead, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} },
+};
+"""
+
+
+def _lfs(tmp_path, text=_LFS_STOCK):
+    p = tmp_path / "extmod"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "vfs_lfs.c"
+    f.write_text(text, encoding="utf-8")
+    return f, sh("moybyte_patch_lfs_sizes", MPY_DIR=str(tmp_path),
+                 REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_lfs_patch_moves_two_defaults_and_not_the_read_size(tmp_path):
+    """The defaults are the whole change: `_boot.py` mounts the store with no
+    sizes named. The read size stays stock."""
+    f, r = _lfs(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    assert "{ MP_QSTR_progsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 256} }," in c
+    assert "{ MP_QSTR_lookahead, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 256} }," in c
+    assert "{ MP_QSTR_readsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} }," in c
+
+
+def test_the_lfs_patch_is_idempotent_and_refuses_a_changed_line(tmp_path):
+    f, _r = _lfs(tmp_path)
+    once = f.read_text(encoding="utf-8")
+    r = sh("moybyte_patch_lfs_sizes", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    changed = _LFS_STOCK.replace("lookahead, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32}",
+                                 "lookahead, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 64}")
+    g, r = _lfs(tmp_path / "b", changed)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert g.read_text(encoding="utf-8") == changed
+
+
 def test_a_repr_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
     """The guard is the point: a silent no-op is a board quietly running boxed
     floats again, which costs a 130-175ms GC hitch -- and, since the ESP-NOW
@@ -258,7 +673,7 @@ def test_a_stable_build_is_stamped_with_the_release_name_not_the_counter(tmp_pat
     assert (ns["CHANNEL"], ns["VERSION"], ns["LABEL"], ns["BOARD"]) == \
         ("stable", 7, "0.9", "tdeck")
     assert js == {"channel": "stable", "version": 7,
-                  "label": "0.9", "board": "tdeck"}
+                  "label": "0.9", "board": "tdeck", "commit": "unknown"}
 
 
 @pytest.mark.xfail(strict=True, reason=(
@@ -311,6 +726,56 @@ def test_the_stamp_creates_the_dist_directory_it_writes_into(tmp_path):
            MODULES_DIR=str(tmp_path), DIST_DIR=str(dist))
     assert r.returncode == 0
     assert (dist / "ota_build.json").exists()
+
+
+def test_the_stamp_names_the_commit_the_image_was_built_from(tmp_path):
+    """`tools/board.py pass` prints it as the image's commit; `+` is a tree
+    with tracked changes on top of it."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = dict(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_NOSYSTEM="1",
+               GIT_CONFIG_GLOBAL=os.devnull, PATH=os.environ["PATH"])
+    run = lambda *a: subprocess.run(["git"] + list(a), cwd=str(repo), env=env,
+                                    check=True, capture_output=True, text=True)
+    (repo / "f").write_text("a\n")
+    run("init", "-q")
+    run("add", "f")
+    run("commit", "-q", "-m", "c")
+    sha = run("rev-parse", "--short=8", "HEAD").stdout.strip()
+    ota = _ota_py(tmp_path)
+    assert _stamp(tmp_path, ota, REPO_ROOT=str(repo))[2]["commit"] == sha
+    (repo / "f").write_text("b\n")
+    assert _stamp(tmp_path, ota, REPO_ROOT=str(repo))[2]["commit"] == sha + "+"
+    assert _stamp(tmp_path, ota)[2]["commit"] == "unknown"
+
+
+def _ccache_env(tmp_path, **env):
+    """What moybyte_ccache exports, with a stand-in `ccache` on PATH."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / "ccache").write_text("#!/bin/sh\n")
+    (bin_dir / "ccache").chmod(0o755)
+    path = "%s:%s" % (bin_dir, os.environ.get("PATH", "/usr/bin:/bin"))
+    r = sh("moybyte_ccache; env | grep -E '^(IDF_CCACHE_ENABLE|CCACHE_[A-Z]+|IDF_PATH)=' || true",
+           REPO_ROOT=str(ROOT), IDF_DIR="/x/esp-idf", PATH=path, **env)
+    assert r.returncode == 0, r.stderr
+    return dict(ln.split("=", 1) for ln in r.stdout.split())
+
+
+def test_a_local_build_shares_one_compiler_cache_rooted_at_the_main_checkout(tmp_path):
+    common = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute",
+         "--git-common-dir"], capture_output=True, text=True, check=True).stdout
+    got = _ccache_env(tmp_path)
+    assert got == {"IDF_CCACHE_ENABLE": "1",
+                   "CCACHE_BASEDIR": os.path.dirname(common.strip()),
+                   "CCACHE_NOHASHDIR": "1", "IDF_PATH": "/x/esp-idf"}
+    assert _ccache_env(tmp_path, IDF_CCACHE_ENABLE="0")["IDF_CCACHE_ENABLE"] == "0"
+
+
+def test_ci_keeps_its_own_cache_settings(tmp_path):
+    assert _ccache_env(tmp_path, CI="true") == {}
 
 
 # -- the frozen manifest --------------------------------------------------------
@@ -667,3 +1132,59 @@ def test_a_board_that_says_nothing_gets_the_default_dest(tmp_path):
     board.mkdir()
     (board / "board.toml").write_text("[board]\nota = \"x\"\n", encoding="utf-8")
     assert board_config.native_dest(board) == "native/.staged"
+
+
+# -- the USB-Serial/JTAG console's start (tools/patch_usj_rx_init.py) -----------
+
+_USJ_STOCK = """\
+static void usb_serial_jtag_handle_rx(void) {
+    size_t len = usb_serial_jtag_ll_read_rxfifo(rx_buf, req_len);
+}
+
+void usb_serial_jtag_init(void) {
+    usb_serial_jtag_ll_clr_intsts_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT |
+        USB_SERIAL_JTAG_INTR_SOF);
+    usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT |
+        USB_SERIAL_JTAG_INTR_SOF | USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+    ESP_ERROR_CHECK(esp_intr_alloc(ETS_USB_SERIAL_JTAG_INTR_SOURCE, ESP_INTR_FLAG_LEVEL1,
+        usb_serial_jtag_isr_handler, NULL, NULL));
+}
+
+void usb_serial_jtag_poll_rx(void) {
+}
+"""
+
+
+def _usj(tmp_path, text=_USJ_STOCK):
+    p = tmp_path / "ports" / "esp32"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "usb_serial_jtag.c"
+    f.write_text(text, encoding="utf-8")
+    r = sh("moybyte_patch_usj_rx_init", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    return f, r
+
+
+def test_the_usj_console_reads_its_fifo_once_its_interrupt_is_up(tmp_path):
+    """The stock init clears the interrupt of a packet that landed during the
+    bootloader; the read after the ISR is installed is what takes it, so it
+    goes inside init, after esp_intr_alloc."""
+    f, r = _usj(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    init = c.index("void usb_serial_jtag_init(void) {")
+    alloc = c.index("usb_serial_jtag_isr_handler, NULL, NULL));", init)
+    read = c.index("    usb_serial_jtag_handle_rx();\n", alloc)
+    assert read < c.index("void usb_serial_jtag_poll_rx(void)")
+    again = sh("moybyte_patch_usj_rx_init", MPY_DIR=str(tmp_path),
+               REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert again.returncode == 0 and again.stdout.strip() == ""
+    assert f.read_text(encoding="utf-8") == c
+
+
+def test_a_usj_init_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    """A silent no-op is a board whose boot a host's early line still breaks."""
+    text = _USJ_STOCK.replace("ESP_INTR_FLAG_LEVEL1", "ESP_INTR_FLAG_LEVEL2")
+    f, r = _usj(tmp_path, text)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert f.read_text(encoding="utf-8") == text

@@ -163,6 +163,19 @@ why  = """
 The host's Lua cart runner, over `lua_binding`. The device's runtime is
 `moycore` (a usermod) driven by `moycore_glue.py`."""
 
+
+[[modules.shared.deny]]
+file = "wasm_host.py"
+kind = "host-only"
+why  = """
+The host's compiled-cart runner, over `wasm_binding`. The device's is moycore's wasm half, driven by moycore_glue.py over the moy_wasm engine."""
+
+[[modules.shared.deny]]
+file = "wasm_binding.py"
+kind = "host-only"
+why  = """
+ctypes over libmoy's wasm import table and WAMR built for Linux, fetched and
+compiled on demand -- no compiler, git or cmake on a board."""
 [[modules.shared.deny]]
 file = "input.py"
 kind = "host-only"
@@ -301,15 +314,18 @@ attach_only = true
 # `_ota_build.BOARD` (safe here: attach_only boards open without resetting).
 usb         = "303a:1001"
 # USB backpressures, so the default chunk is safe here -- measured 2026-08-19, a
-# 44KB cart pushed clean at 768 in 45s, twice as fast as the P4 needs at 256.
+# 44KB cart pushed clean at 768 in 45s.
 chunk       = 768
 # The RAW window (`recv`, the dev channel's 8-bit upload path): how many bytes
-# the host may put on the wire before it must wait for the board's ack. Four
-# times the P4's, and for a different reason -- this board's USB-Serial/JTAG
+# the host may put on the wire before it must wait for the board's ack. Bigger
+# than the P4's, and for a different reason -- this board's USB-Serial/JTAG
 # ISR only drains what the stdin ring has room for, so the endpoint stalls and
 # the HOST blocks; the window here buys fewer round trips, it is not the safety
 # margin it is on the P4. The ceiling is the board's own RECV_MAX_WINDOW
-# (dev_channel), and the window is also the buffer it allocates.
+# (dev_channel), and the window is also the buffer it allocates. The board acks
+# a window before writing it, and its stdin ring is MOY_SERIAL_RING_BYTES
+# (mpconfigboard.h), twice this, so the next window lands while the card
+# writes the last instead of stalling at the port's 260-byte ring.
 window      = 16384
 
 [monitor]
@@ -332,13 +348,22 @@ tools/board_config.py stage-native stages the copies and generates the
 .staged/micropython.cmake include list that the board's tracked
 native/micropython.cmake pulls in.
 
-This board denies NOTHING: the T-Deck drives all eight shared modules (moy_gfx,
-moy_alloc, moy_sd, moy_audio, moy_lua, moycore, moy_web, moy_flush) plus its
-own native/moy_lcd, which lives in the board tree and is not staged. moy_flush
-is the odd one -- it registers no MicroPython module at all; it is the banded-
+This board denies NOTHING: the T-Deck drives every shared module plus its own
+native/moy_lcd, which lives in the board tree and is not staged. moy_flush is
+the odd one -- it registers no MicroPython module at all; it is the banded-
 flush engine moy_lcd and the Guition's moy_axs share, and it rides this
 declaration because this is where "which C crosses to which board" is written
 down."""
+
+[[native.shared.take]]
+module = "moy_wasm"
+why = """
+The WebAssembly cart tier's engine (docs/wasm_tier_plan_2026-09.md): the
+vendored WAMR runtime, AOT only, and the thread a module runs on. The tier
+ships on every console board or on none, so this board takes it. Its internal
+SRAM is the tighter of the two S3 floors, and the on-glass suite's wasm checks
+are the gate on it. The run stack's size and placement are this board's
+MOY_WASM_* settings in mpconfigboard.h, with the measurement that chose them."""
 
 # ---------------------------------------------------------------------------
 
@@ -498,6 +523,12 @@ STAGE 6. The OTA updater (#53). Board-agnostic: its staging directory is a
 constructor argument and its identity comes from the generated `_ota_build.py`.
 The partition table is byte-for-byte the deleted fork build's, so boards that
 took their last update from it install this build over plain OTA."""
+
+[[modules.device.group]]
+files = ["cart_net.py"]
+why = """
+Get Carts' network (#124): the app's transport for indexes and carts, over
+moy_ota's HTTP client and its wait for the link."""
 
 [[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]

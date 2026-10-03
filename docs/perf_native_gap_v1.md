@@ -114,16 +114,42 @@ The generic ESP-IDF speed-guide knobs are mostly already set:
 
 | knob | T-Deck (S3) | P4 |
 |---|---|---|
-| flash mode | QIO ✅ + 120MHz ✅ | QIO ✅ |
+| flash mode | DIO (a board fact — the images we flash are dio) + 120MHz ✅ | QIO ✅ |
 | compiler | `-O2` (PERF) ✅ | `-O2` ✅ |
 | PSRAM | OCT 120MHz ✅ (the owner's bump) | HEX 200MHz ✅ |
-| caches | I 32KB + D 64KB — **max** ✅ | L2 128KB (not max) |
+| caches | I 32KB + D 64KB — **max** ✅ | L2 256KB ✅ (#159; 512KB does not boot) |
 
 This is *why* the T-Deck's PSRAM bump only "helped a bit" — it was one of the
-last generic knobs. The T-Deck is near its architectural ceiling on these, and
-the P4's two "obvious" remaining knobs (`-O3` on the kernel, game canvas in
-internal SRAM) both **measured null** on glass (next section) — the generic
-build-tuning chapter is closed on both boards.
+last generic knobs. The P4's two "obvious" remaining knobs (`-O3` on the
+kernel, game canvas in internal SRAM) both **measured null** on glass (next
+section).
+
+**But "well-tuned" was read as "closed", and it was not.** The knobs surveyed
+above are the ones the *speed guide* lists. What that framing misses is the
+options MicroPython's own `ports/esp32/boards/sdkconfig.base` sets for a
+generic 4MB board and every Moybyte board then inherits — a different question
+from "did we tune IDF", and one nobody had asked. Swept 2026-09-20, it was not
+empty: `CONFIG_SPI_MASTER_ISR_IN_IRAM` sat off (base turns it off under a
+comment reading "To reduce IRAM usage"), which put the panel flush's done-ISR
+in flash on both S3 boards. So: the IDF-knob chapter is closed, the
+INHERITED-DEFAULT chapter was never opened, and the two are not the same
+survey.
+
+**And it split the two S3 boards, which is this doc's own rule arriving
+again** — same SoC, same option, opposite answers, each board's fragment
+carrying its A/B:
+
+| board | Brick Siege | verdict |
+|---|---|---|
+| T-Deck | worst-frame 48 → 51 fps, render 10 → 9ms | **SHIPPED** for 7,932 B internal SRAM |
+| Guition S3 | fps 47 → 47, worst 46 → 46, render 9 → 9 | **NULL — declined**, 7,908 B for nothing |
+
+The mechanism is the one §9 already uses as its control: the Guition runs its
+flush on a **core-0 feeder task**, off the VM's core, so a done-ISR in flash
+costs the VM nothing there; on the T-Deck the feeder and the VM share a core
+and every band completion is a flash-miss window. The win is not "ISR in
+IRAM", it is "ISR in IRAM *when it contends with the VM*" — so the lever's
+real precondition is core topology, and any third board needs its own A/B.
 
 ## 6. The lever roadmap
 
@@ -199,12 +225,246 @@ alloc churn ⇒ GC collects ~2× as often. Its default was still an open product
 call when #217 retired the toggle — on the fast S3 build most carts sat near 60
 skip-OFF.
 
+### Shipped 2026-09-21 — the map-lookup cache, in two halves (#77)
+
+`moy_prof` priced `mp_map_lookup` at 10–20% of PC samples on every board,
+against one shared `uint8_t[128]` hint table serving every map in the system
+— a console running a shell, a WM and a cart at once. Two things were wrong
+with it, and they had to be fixed TOGETHER:
+
+- **The index was aimed for REPR_A.** `py/map.c` picks the slot as
+  `index >> 2` ("shift down by two to remove the tag bits"), which is REPR_A's
+  qstr layout. REPR_C — every console board — tags a qstr `(q << 4) | 6`, so
+  after `>> 2` two bits are constant for every qstr key and the 128-slot cache
+  offered attribute, global and method lookups **32 slots**; a gc-pointer key
+  reached the same 32. `moybyte_patch_map_cache_for_repr_c`
+  (`tools/esp32_build_lib.sh`) shifts by the tag width REPR_C uses; each
+  console build script calls it beside REPR_C, it refuses a tree that is not
+  REPR_C, and the REPR_A Zero declines it in writing.
+- **The table is too small for this workload.** `MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE`
+  goes 128 → 512 in each console board's `mpconfigboard.h` (384 bytes of
+  `.bss`), each with its own verdict beside it.
+
+Brick Siege, diag on, three runs a side, the same session per board;
+"share" is `mp_map_lookup`'s slice of `moy_prof`'s samples:
+
+| arm | T-Deck fps / worst / share | Guition S3 | P4 | Guition P4 |
+|---|---|---|---|---|
+| stock | 51.5 / 49–52 / 20.1% | 47 / 42–47 / 13–17% | 55.5 / 54–56 / 10–13% | 56 / 48–55 / — |
+| re-aimed index, 128 | 52 / 47–52 / 20.3% | 48 / 46–48 / 17.3% | 55 / 49–55 / 12.8% | — |
+| re-aimed index, 512 | **55 / 52–54 / 17.5%** | **49 / 46–48 / 15.1%** | **56.5 / 55–56 / 11.7%** | **56.5 / 53–56 / 13.9%** |
+| re-aimed index, 1024 | 54.5 / 48–54 / 18.2% | — | — | — |
+
+**Neither half alone moves the frame, and 1024 buys nothing over 512.** The
+re-aim alone is null on all three boards it was tried on (32 → 128 reachable
+slots), and the size alone is the same 128 by arithmetic; together they are
+the T-Deck's biggest single lever since `-O3`. The step shrinks across the
+table because the lookup is a smaller share of each board's frame: the S3
+boards spend 8–10% in `gc_alloc` where the T-Deck spends 1%, and the
+Waveshare P4 is 38% idle in this cart. On both P4s the median's step is inside
+the noise and the worst frame is what moves (the Guition P4's 48 → 53).
+
+The mechanism was checked directly rather than inferred:
+`tools/map_cache_probe.py` times instance-attribute lookups against the
+number of distinct names in the hot set, and shows a set that fits the
+reachable slots at ~0.55–0.7 µs a lookup on the S3s (0.34 on the P4) and one
+that overflows them at ~1.2 µs (0.66); at 512 the 160-name set no longer
+overflows. The `experiments/state_verb_cost`
+README had recorded exactly this thrash as an unproven hypothesis a month
+earlier.
+
+### READ 2026-09-23 — what is left in `mp_map_lookup` is the kid idiom, not a knob
+
+With the cache re-aimed and 512 slots, `mp_map_lookup` still holds 17.5% of
+the T-Deck's Brick Siege samples (15% on the Guition S3). `moy_prof --frame 1`
+attributes each sample to the function that CALLED the one the CPU was in, so
+a lookup's cost lands on whoever asked for it, and the split on the T-Deck
+(Guition S3 in brackets) is:
+
+| who asks | share | what it is |
+|---|---|---|
+| `mp_obj_class_lookup` | 4.4% (3.6) | the class-dict probe that HITS a method, after the instance dict missed it |
+| `mp_obj_instance_load_attr` | 3.3% (2.6) | the instance-dict probe: a hit for `self.x`, a MISS for `self.method` before the class is asked |
+| `mp_map_lookup`'s own callees | 3.1% (2.3) | `qstr_hash` + `find_qstr`: hashing a qstr on a cache miss walks the qstr pool chain to find its hash |
+| `mp_load_global` | 2.4% (2.0) | a builtin (`len`, `range`, `abs`) misses the cart's globals before it hits the builtins map |
+| `mp_load_method_maybe` | 1.2% (1.0) | a method on a builtin type, `list.append` and its kin |
+| `mp_setup_code_state` | 1.0% | keyword arguments at a call |
+| stores, modules | ~1% | `self.x = …`, `math.sin` |
+
+Every row but the builtins one is the idiom the kid API is built on —
+`self.x`, `self.move()` — and the miss-before-hit shape is MicroPython's
+attribute protocol, not a table size: the instance dict is asked first, the
+class MRO second, and a subclass of an API base pays the miss twice. The fix
+for that is a VM method cache keyed by (type, name), which upstream does not
+have and which is not a build knob; it is written down here so the next pass
+does not re-price it as a cache-size question. Two levers that ARE reachable
+were priced and declined under the sub-millisecond wall: binding the builtins
+a cart uses into its globals at load would remove the 2.4% miss (≈0.4 ms on
+the T-Deck) and change what `globals()` shows a kid; a per-qstr pool index
+would remove `find_qstr`'s walk (≈0.3 ms). The `qstr_find_strn` 1–1.6%
+beside them is runtime string building (`str(score)` each frame) checking
+whether the result is already interned — the cart's code, priced.
+
+### Shipped 2026-09-23 — size-class run hints for `gc_alloc` (#66)
+
+The same Brick Siege profiles that priced the map cache put `gc_alloc` at
+2.9% of the T-Deck's samples, 8.3% of the Guition S3's, 7.0% of the P4's and
+13.5% of the Guition P4's — the one symbol whose share differed by board on
+one cart, on four builds of the same MicroPython with the same collector
+settings. The mechanism is the allocator's scan, read in `py/gc.c`: it keeps
+ONE hint per heap area, a single-block allocation advances it past itself, a
+multi-block one never does, and every collect resets it to the start of the
+area. So each multi-block allocation walks the allocation table from the hint
+through every hole too small for it, and the next one walks the same holes
+again. `moy_prof --frame 2` put the cost where that predicts: under
+`mp_obj_malloc_helper` — tuples, instances, iterators, bound methods — 11.2%
+on the Guition S3 against 1.2% on the T-Deck, with the spilled call frames
+(`m_malloc_maybe`) the same 1.2% on both.
+
+`tools/gc_alloc_probe.py` measured the walk with the cart up, in the heap
+state the game leaves: tuples of 2, 4, 16 and 64 blocks, one hundred each,
+as found and directly after `gc.collect()` (µs per allocation, the median of
+three; the stock rows are the 2026-09-21 image, the patched rows the same
+boards the same day after the flash):
+
+| board | arm | 2 blocks | 4 | 16 | 64 |
+|---|---|---|---|---|---|
+| T-Deck | stock, post-collect | 209 | 359 | 534 | 793 |
+| T-Deck | run hints, post-collect | **15** | **17** | **28** | 392 |
+| Guition S3 | stock, post-collect | 230 | 374 | 601 | 736 |
+| Guition S3 | run hints, post-collect | **11** | **15** | **28** | 308 |
+| P4 | run hints, post-collect | 7 | 10 | 19 | 294 |
+| Guition P4 | run hints, post-collect | 7 | 9 | 20 | 467 |
+
+Both S3 boards have a ~4MB PSRAM heap, a live set just under a megabyte
+after a collect, and fill it at 20–35KB/s, so a collect comes every ~100s;
+the as-found cost sat at 10–14 µs on both — the walk is concentrated after
+each collect and every frame in between pays a smaller one. The 64-block
+column is the class ceiling and is meant to be: hints cover runs of 2–32
+blocks (512 bytes), sized to the objects a frame makes; anything larger
+still walks, and the cart that makes kilobyte lists per frame is the one to
+re-price it for.
+
+The patch is `tools/patch_gc_run_hints.py`, applied by
+`moybyte_patch_gc_run_hints` in the shared build half and taken by every
+console board (the headless Zero declines it in writing): one hint per run
+length, an ATB index before which no free run that long starts. An
+allocation scans from its class's hint, and the run it finds raises every
+class of its length or more to it — no run that long starts earlier, or the
+scan would have met it; a free lowers the classes the merged run can now
+serve; a collect resets them all. Single-block allocations keep the stock
+hint alone, so the common path is unchanged, and the helpers cost 0.6–0.7%
+of a Bench profile. One stock line is corrected on the way: the "this area
+is full" marker was written in block units to a byte index and landed a
+quarter of the way in. Upstream master carries the same single hint.
+
+Brick Siege, diag on, three runs a side, the 2026-09-21 image against the
+patched one on the same boards; "share" is `gc_alloc`'s slice of `moy_prof`'s
+samples, and "gone" means it fell below the profile's 0.6% floor:
+
+| arm | T-Deck fps / worst / share | Guition S3 | P4 | Guition P4 |
+|---|---|---|---|---|
+| map cache, 512 (2026-09-21) | 55 / 52–54 / 2.9% | 49 / 46–48 / 8.3% | 56.5 / 55–56 / 7.0% | 56.5 / 53–56 / 13.5% |
+| + run hints | 55 / 54–56 / gone | 50 / 48–49 / gone | **62.5 / 62 / gone** | 57 / 54–57 / gone |
+
+The Waveshare P4 is the board that moves, and its idle share went with it:
+`esp_cpu_wait_for_intr` fell from 37.8% to 1.3%, so the frames it was
+waiting through were allocator walks on the other side of a fence. The two
+S3 boards move a frame at the worst and the Guition P4 one at the worst; on
+all three the cart is draw-bound now (`mg_fill_run` + `moy_spr` are 30–45%
+of samples). The Bench referee is UNCHANGED on all four boards — every phase
+floor equal to the 2026-09-22 run, every verb inside its spread — which
+says the Bench's phases were never allocator-bound and the lever is a
+game-shaped one.
+
+What the P4 profiles show now: with `gc_alloc` gone,
+`vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` hold 19% of
+the Waveshare's samples and 17% of the Guition P4's, FreeRTOS SMP critical
+sections that the S3 profiles do not show at all. The P4 records no caller
+(`mepc` is one frame deep), so who takes them is unproven; the GIL
+round-robin was the candidate and is DECLINED below.
+
+A false reading, recorded so it is not re-investigated: the Guition S3's
+first two Bench runs after the flash read every compute phase 1.4–1.7x slow
+(logic 26 → 38ms, table 29 → 49, `pix` 6.8 → 13.0µs) while Brick Siege and
+the probe read normal; `moy_prof` on that state put 9% of samples in
+`moy_fold_snap_wait` and `time.sleep_ms` spinning on the system timer. A
+hard reset (`esptool --after hard_reset read_mac`) restored the 2026-09-22
+floors to the microsecond on the same image, and a stock rebuild was never
+needed. It recurred the same day after a second profiler pass and cleared
+the same way. The suspect is the fold's snap-dead fence in `moy_fold.c` — a
+copy that once times out turns every later snapshot into a CPU memcpy until
+reboot — and the Guition S3's README names the counter to read while it is
+slow; it is a lead, not a finding.
+
+### DECLINED 2026-09-23 — the GIL round-robin divisor (`MICROPY_PY_THREAD_GIL_VM_DIVISOR`)
+
+The VM gives and retakes the GIL every 32 branches so another Python thread
+can run (`py/vm.c`'s `pending_exception_check`), a FreeRTOS mutex pair each
+time. No Python thread exists on either P4, so the bounce buys nothing
+there, and it was the named candidate for the 17–19% of P4 samples in SMP
+critical-section exits. The port defines the divisor unguarded, so the A/B
+took a guard patch (`#ifndef` around the port's line) plus 1024 in each
+board's `mpconfigboard.h`; same boards, same day, against dev `f4180be`,
+Brick Siege diag on three runs a side, and the Bench referee for the
+interpreter-bound phases:
+
+| board | fps / worst, 32 → 1024 | critical-section share | Bench float / logic / table ms |
+|---|---|---|---|
+| Waveshare P4 | 62.5 / 62 → 62.5–63 / 62 | 19.0% → 18.8% | 33 / 19 / 23 → 33 / 19 / 23 |
+| T-Deck | 55 / 54–56 → 53.5–56.5 / 53–54 | none either side | 43 / 23 / 26 → 43 / 23 / 27 |
+| Guition S3 | 50 / 48–49 → 50.5–51.5 / 50 | none either side | 45 / 26 / 29 → 45 / 26 / 29 |
+| Guition P4 | not measured — its silicon twin was null on all three meters | | |
+
+**Null on every meter on every board**, so the guard patch and the values
+were removed the same day and nothing of it ships. What it settles: the P4's
+critical-section share is NOT the GIL bounce. `vPortClearInterruptMaskFromISR`
+is the ISR-side exit, which points at interrupt handlers — the DSI vsync,
+the PPA and GDMA completions, the I2S audio DMA, and the profiler's own
+GPTimer — rather than the VM, and the next step is to count interrupts per
+frame by source, not to re-price a VM knob. Do not re-propose the divisor
+without a caller in hand.
+
+### DECLINED 2026-09-21 — the frame-spill threshold (`VM_MAX_STATE_ON_STACK`)
+
+A MicroPython call whose frame exceeds `VM_MAX_STATE_ON_STACK` (stock: 11
+machine words) heap-allocates that frame on EVERY call; #63 measured the
+spilling case at 1,536 µs against 9 µs warm and fixed the single hottest
+function by replacing it with a C callable, leaving the threshold itself
+untouched. It read like the biggest lever left. Four configs on T-Deck glass,
+Brick Siege (a Python cart), 3-6 runs each, and the wide-frame recursion
+ceiling bisected on the board:
+
+| threshold / VM task stack | median fps | worst | wide-frame recursion depth |
+|---|---|---|---|
+| **11w / 16KB (stock)** | 52 | 48–51 | 45 |
+| 16w / 16KB | 52.5 | 51.5 | — |
+| 32w / 16KB | **54** | 52 | **29** |
+| 32w / 24KB | 52.5 | 52 | 52 (−8KB internal SRAM) |
+| 64w / 16KB | 53.5 | 53 | — (indistinguishable from 32w) |
+
+**The gain and the cost are ONE mechanism, which is why no setting wins.** What
+buys the fps is frames moving from the gc heap to `alloca`; what eats the
+recursion ceiling is the same frames landing on the C stack. Raising the task
+stack to compensate buys the depth back (45 → 52) and gives the median gain
+straight back (54 → 52.5) — which is §9's *"more internal SRAM for the VM's
+DATA: slower — the drivers starve"* arriving again, since the VM task stack is
+VM data. Best case is 0.7ms/frame, at this repo's own sub-millisecond wall,
+against a third of the recursion headroom on a console children write code for.
+
+What survives in every variant is a smaller one: the WORST frame improves
+48–51 → 52. If this is ever re-opened it should be for tail latency, with new
+arithmetic, not for the median. Deep recursion is safe either way — it raises
+`RuntimeError: maximum recursion depth exceeded` from `mp_cstack_check()` and
+never crashes, verified on glass at every threshold.
+
 ### Open — API-preserving (do these first)
 
 | lever | targets | board | payoff | effort/risk |
 |---|---|---|---|---|
 | **dual-core: audio (+input) on core 1** | frees core 0 for logic+render | P4 (unwired), T-Deck (tried, reverted) | real parallelism | med |
 | **FPS chip off by default** | overhead | both | ~1ms + cleaner kid UX | trivial |
+| **P4 critical sections** — `vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` are 17–19% of a Brick Siege profile on both P4s once `gc_alloc` is gone (§6, 2026-09-23), FreeRTOS SMP spinlock pairs the S3 profiles never show. Caller unproven (the P4 records one frame). The GIL round-robin divisor was the candidate and measured NULL on every meter (§6, DECLINED 2026-09-23); the `FromISR` exit names interrupt handlers (DSI vsync, PPA/GDMA completions, I2S audio DMA, the profiler's own timer), so the next step is to count interrupts per frame by source | dispatch | both P4s | up to ~3ms of a 16ms frame if a source is found | interrupt accounting first; no knob until a caller is in hand |
 
 **Render-overlap is CLOSED, not open** (it sat in the table above until
 2026-08-15, which is how a 2026-08-09 perf hunt came to spend its last lead

@@ -102,6 +102,16 @@ ok("input is accepted without error",
 ok("still no errors", seen("error").length === 0,
    JSON.stringify(seen("error").map((m) => m.s)));
 
+// The console's `state` for a harness (web_boot.state_json): the dev channel's
+// snapshot, with the page's sample stream beside it.
+await onmsg({ data: { t: "state" } });
+const st = seen("state");
+ok("the state probe answers with the dev channel's snapshot", (() => {
+    if (st.length !== 1) return false;
+    const s = JSON.parse(st[0].json);
+    return "cart" in s && "cart_error" in s && "screen" in s && "snd" in s;
+})(), st.length ? st[0].json.slice(0, 120) : "no answer");
+
 // Dev reload: refetch carts, restart, push assets again.
 await onmsg({ data: { t: "reload" } });
 await sleep(200);

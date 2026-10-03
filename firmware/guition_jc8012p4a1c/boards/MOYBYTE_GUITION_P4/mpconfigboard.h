@@ -53,3 +53,40 @@
 // tests/test_moy_image.py pins all five boards, because a board that is missed
 // fails at the moment a kid presses save and nowhere earlier.
 #define MICROPY_PY_DEFLATE_COMPRESS         (1)
+
+// The map-lookup cache, 128 -> 512 slots (384 bytes of .bss) -- the T-Deck's
+// mpconfigboard.h explains the mechanism and the REPR_C half the shared build
+// applies. A/B'd on this board's own glass, 2026-09-21, Brick Siege, diag on,
+// three runs a side, stock against both halves together:
+//
+//     stock                     fps 56     worst 48-55   probe: 100 names 0.73 us
+//     re-aimed index, 512       fps 56.5   worst 53-56          100 names 0.34 us
+//
+// The median is inside this board's noise, as on the Waveshare; the tail and
+// tools/map_cache_probe.py move -- the stock image overflows the reachable
+// slots at 100 distinct names already, which is the 32-slot REPR_C arithmetic
+// showing on glass. Tables in #77.
+#define MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE   (512)
+
+// The WebAssembly engine's run thread (native/moy_wasm): its stack size and
+// whether it lives in PSRAM -- the S3 boards' setting, where an internal stack
+// costs a run its whole size in internal SRAM for no speed (their
+// mpconfigboard.h carries the numbers). This board has the internal SRAM to
+// spare; it keeps the same setting so a cart meets one stack on every board.
+#define MOY_WASM_STACK_BYTES                (16 * 1024)
+#define MOY_WASM_STACK_PSRAM                (1)
+
+// The engine's runtime pool, its fixed part (moy_wasm_footprint.h). A RISC-V
+// load holds more than the S3's for the same cart -- its text relocations --
+// and the peak follows the data segments and relocations, not the text:
+// Doom's P4 module peaked at 460,392 B at 838 KB and 461,984 B at 790 KB,
+// where 256 KB plus a quarter of the module sizes 471 KB and 459 KB (the
+// second a load that fails). 320 KB holds it with 63 KB to spare and keeps
+// holding it as the text shrinks.
+#define MOY_WASM_POOL_BYTES                 (320 * 1024)
+
+// The console's stdin ring, grown into PSRAM by native/moy_serial on the first
+// `recv`: twice the [serial] window, so the window the host sends on an ack
+// lands while the store writes the last one instead of stalling the USB
+// endpoint at the port's 260 bytes. The module's header says which boards may.
+#define MOY_SERIAL_RING_BYTES               (32768)

@@ -2,7 +2,10 @@
 re-exports them): _SheetSprite (the blittable view), SpriteSheet (8x8 tile
 sheet + PICO-8 __gfx__-style hex, #4 storage), IconSheet (16x16 tiles -- the
 editable top-bar icon theme), TileMap (grid of tile ids + map.moymap hex,
-#32 storage). Pure logic, dependency-free."""
+#32 storage). Pure logic, dependency-free (binascii aside -- every target
+ships it, and it is what keeps the hex codecs off the interpreter)."""
+
+from binascii import hexlify as _hexlify
 
 
 # moy SPEC.md 3.2 fixes a CART sheet at 128 x 256 pixels -- 16 cols x 32 rows of
@@ -38,6 +41,9 @@ SHEET_H = SHEET_ROWS * 8          # 256 px
 # question about a whole line in one C-level pass, decoding nothing.
 _NIBBLES = [bytes((_b >> 4, _b & 15)) for _b in range(256)]
 _INK = set("123456789abcdefABCDEF")
+# `_hexlify` (imported at the top) is the ENCODE half of the same bargain, and
+# `to_hex` below packs pixel pairs back into bytes so it can run: the blob's two
+# nibbles per byte are exactly what hex text is, on both sides.
 
 
 def _fill_hex_grid(pix, w, h, text):
@@ -282,12 +288,41 @@ class SpriteSheet:
         return dst_n
 
     def to_hex(self):
-        """Serialize to h lines of w hex nibbles (PICO-8 __gfx__ style)."""
+        """Serialize to h lines of w hex nibbles (PICO-8 __gfx__ style).
+
+        Pixel PAIRS are packed into bytes and hexed by binascii, the exact
+        inverse of `_fill_hex_grid`'s `bytes.fromhex` + `_NIBBLES` decode. The
+        old per-pixel "%x" allocated a string per pixel and charged 1,364ms for
+        one 33KB sheet on the T-Deck, against 222ms this way (on glass
+        2026-09-20, #154) -- two thirds of what a sprite commit cost the kid,
+        and none of it the card. A ROW at a time on purpose: packing the whole
+        sheet in one pass measured 614ms, three times worse, because the big
+        intermediate buffers cost more than the loop saves.
+
+        `w` is a multiple of the tile side (8 or 16), so the pair walk always
+        has its second pixel; the `& 15` mirrors the old mask, for ~11ms, so a
+        blob is hex whatever is in the buffer.
+
+        BLANK TAIL ROWS ARE NOT WRITTEN, which is the bigger half (#154). A
+        short blob is not a lesser blob: `_fill_hex_grid` lands one in the TOP
+        rows with tile ids unchanged and leaves the rest blank, which is what
+        every pre-512 cart and every PICO-8 import already is. Brick Siege
+        paints 16 of its 256 rows, so the whole-sheet blob charged its every
+        save 33,023 characters to persist 2,063 -- and a store write is a floor
+        plus the payload. `rstrip` finds the last painted pixel in C for 5ms
+        (measured on glass 2026-09-20, T-Deck). An entirely blank sheet
+        serializes to "", which every reader of the blob already treats as no
+        art at all."""
         w = self.w
-        return "\n".join(
-            "".join("%x" % (self.pix[y * w + x] & 15) for x in range(w))
-            for y in range(self.h)
-        )
+        pix = self.pix
+        ink = len(pix.rstrip(b"\x00"))          # one past the last painted pixel
+        rows = []
+        for y in range(min(self.h, -(-ink // w))):
+            row = pix[y * w:y * w + w]
+            rows.append(str(_hexlify(bytes(
+                ((row[i] & 15) << 4) | (row[i + 1] & 15)
+                for i in range(0, w, 2))), "ascii"))
+        return "\n".join(rows)
 
     @classmethod
     def from_hex(cls, text, cols=SHEET_COLS, rows=SHEET_ROWS, spec=True):
@@ -483,12 +518,15 @@ class TileMap:
         self.gen += 1
 
     def to_hex(self):
-        """Serialize to `w h` + h rows of w*2 hex digits (one byte/cell)."""
-        rows = ["%d %d" % (self.w, self.h)]
+        """Serialize to `w h` + h rows of w*2 hex digits (one byte/cell).
+
+        A cell IS a byte, so a row hexes in one binascii call with nothing to
+        pack -- the sheet's encode without its pair walk (#154)."""
         w = self.w
+        cells = self.cells
+        rows = ["%d %d" % (w, self.h)]
         for y in range(self.h):
-            base = y * w
-            rows.append("".join("%02x" % self.cells[base + x] for x in range(w)))
+            rows.append(str(_hexlify(cells[y * w:y * w + w]), "ascii"))
         return "\n".join(rows)
 
     @classmethod

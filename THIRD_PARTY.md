@@ -26,6 +26,10 @@ separate question from what is committed.
 | Component | Where it lives here | Upstream | Licence | Modified? |
 |---|---|---|---|---|
 | Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
+| WAMR 2.4.5 AOT runtime (WebAssembly cart engine), Moybyte's fork | `native/moy_wasm/wamr/` | [moybyte-org/wasm-micro-runtime](https://github.com/moybyte-org/wasm-micro-runtime) (fork of [bytecodealliance/wasm-micro-runtime](https://github.com/bytecodealliance/wasm-micro-runtime)) | Apache-2.0 WITH LLVM-exception | **Yes** — the fork's commits |
+| Jet software 3D rasteriser (the compiled Jet carts) | `ports/jet/jet/` | [CubeCoders/Jet](https://github.com/CubeCoders/Jet) | MIT | No |
+| Utah teapot mesh + the scene it is lit in (the showcase cart) | `ports/jet/teapot.moy/teapot.obj`, `ports/jet/teapot.moy/src/scene.cpp` | [CubeCoders/JetExamples](https://github.com/CubeCoders/JetExamples), from freeglut's teapot data | MIT; freeglut's X11-style notice | Converted to OBJ; the scene ported |
+| ESP 88, the neon city film: its code and artwork (the ESP 88 cart) | `ports/jet/examples/`, `ports/jet/esp88.moy/assets.bin` | [CubeCoders/JetExamples](https://github.com/CubeCoders/JetExamples) (`esp32-neon-film`) | MIT | One line (the film's frame size); artwork repacked, glow and credits scaled |
 | `esp_lcd_ek79007` panel driver | `native/p4/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
 | `esp_lcd_jd9365` panel driver, Guition's build | `native/p4/moy_dsi/vendor_jd9365/` | Espressif's component as shipped in [Guition's JC8012P4A1C demo](https://github.com/DevinWatson/10.1-inch-ESP32P4-Xiaozhi-ESP32-C6-JC8012P4A1C_I_W_Y) | Apache-2.0 | No |
 | GSL3680 touch firmware (JC8012P4A1C glass) | `firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py` | Silead, via the same Guition demo (`esp_lcd_gsl3680.h`) | vendor firmware, redistributed as shipped | Transcribed (`tools/gen_gsl_fw.py`) |
@@ -69,6 +73,35 @@ targets.
   simply not vendored.
 - `modmoy_lua.c` and `micropython.cmake` in the parent directory are Moybyte's
   own bridge code, not Lua's, and are under this repository's licence.
+
+### 2.2 WAMR — the WebAssembly cart engine
+
+`native/moy_wasm/wamr/`
+
+The `moy_wasm` native module (issue #158, `docs/wasm_tier_plan_2026-09.md`)
+embeds the AOT half of the WebAssembly Micro Runtime, compiled into every
+console board's image (the headless Zero denies it).
+
+- **Upstream:** WAMR 2.4.5 — <https://github.com/bytecodealliance/wasm-micro-runtime>,
+  taken from Moybyte's fork <https://github.com/moybyte-org/wasm-micro-runtime>,
+  branch `moybyte-2.4.5`, at the commit `native/moy_wasm/wamr_vendor.json`
+  records. `tools/vendor_wamr.py` copies an explicit file list from that commit:
+  the AOT loader and runtime, the common layer, the esp-idf platform layer, the
+  allocator and the utilities; the interpreter, the compiler, WASI and the
+  builtin libc stay behind.
+- **Licence:** Apache-2.0 WITH LLVM-exception. Full text:
+  [`.../moy_wasm/wamr/LICENSE`](native/moy_wasm/wamr/LICENSE); upstream's own
+  third-party notes travel as
+  [`.../moy_wasm/wamr/ATTRIBUTIONS.md`](native/moy_wasm/wamr/ATTRIBUTIONS.md).
+- **Modified: yes, in the fork, never here.** The fork's commits over the 2.4.5
+  tag change the esp-idf platform layer (AOT text in PSRAM on the ESP32-S3 and
+  ESP32-P4, PSRAM-only data allocations above a threshold, a range-scoped cache
+  sync, a real native-stack boundary), two loader details, and in the runtime
+  a memmove that copies disjoint ranges with memcpy; its history is the
+  record. `tests/test_wamr_vendor.py` fails on any edit to the copy.
+- `modmoy_wasm.c`, `moy_wasm_key.h`, the generated `wamr_pin.h` and
+  `micropython.cmake` in the parent directory are Moybyte's own code, under this
+  repository's licence.
 
 ### 2.3 Espressif `esp_lcd_ek79007` — the P4 panel driver
 
@@ -224,6 +257,38 @@ component generates around it (`COLMOD` 0x55, `MADCTL`, `INVOFF`, `SLPOUT`,
   idle-filler lift detection are Moybyte's, written against the observed
   behaviour of the part (`firmware/guition_jc3248w535/README.md` records it).
 
+### 2.7 Jet — the compiled Jet carts' rasteriser
+
+`ports/jet/jet/`
+
+The compiled (`"runtime": "wasm"`) tier's Jet carts, `ports/jet/teapot.moy/`
+and `ports/jet/esp88.moy/` -- moybyte-org/carts' Jet carts, copied here by
+`tools/vendor_jet_carts.py` for the tests and guards -- compile Jet into their
+modules; nothing in any firmware image does. A module is a build product
+(`tools/jet_cart.py`) and is never committed.
+
+- **Upstream:** Jet — <https://github.com/CubeCoders/Jet>, at the commit that
+  JetExamples (<https://github.com/CubeCoders/JetExamples>) carries as its
+  `components/Jet` submodule at the JetExamples commit `ports/jet/jet_vendor.json`
+  records. `tools/vendor_jet.py` copies the sources the carts compile and the
+  headers they include, under upstream's paths.
+- **Licence:** MIT. Copyright (c) 2026 CubeCoders Limited. Full text:
+  [`ports/jet/jet/LICENSE`](ports/jet/jet/LICENSE), and each cart carries it in
+  its own `LICENSES.txt`.
+- **Modified: no.** `tests/test_jet_vendor.py` fails on any edit to the copy.
+  The teapot builds Jet twice into one module, the second time with its
+  namespaces renamed on the compiler's command line; no file changes for it.
+- A cart's own `src/` is MIT (`LICENSE.md`), except what ports JetExamples
+  code and says so, with CubeCoders' copyright beside ours: the teapot's
+  `src/scene.cpp` (from `esp32-lighting-teapot/main/Teapot.hpp`), and ESP 88's
+  `src/main.cpp` and `src/Assets.hpp`, which drive the film and declare its
+  artwork.
+- **What the built module also contains:** compiled code from wasi-sdk 24's
+  wasi-libc and LLVM's libc++/libc++abi (§6.4's toolchain). A built cart is
+  not published by this repository (moybyte-org/carts publishes them); before one ships
+  in a product, its `LICENSES.txt` carries those libraries' notices as well
+  (`ports/jet/README.md`, "Seeding").
+
 ---
 
 ## 3. Data and assets
@@ -326,6 +391,53 @@ legibility at button size.
 
 The separate 16×16 top-bar icon art (`_ICON_ART` in the same file, persisted as
 `system_icons.moygfx`) is hand-authored Moybyte work.
+
+### 3.3a The Utah teapot — the showcase cart's model
+
+`ports/jet/teapot.moy/teapot.obj`
+
+Martin Newell's teapot as JetExamples' `esp32-lighting-teapot` renders it:
+that example's generated mesh (`main/TeapotMesh.hpp`, 822 vertices with smooth
+normals, 1,560 triangles), which its generator evaluates from the teapot
+control points freeglut ships (`fg_teapot_data.h`, which the example keeps
+under its `assets`).
+
+- **Upstream:** <https://github.com/CubeCoders/JetExamples> at the commit
+  `ports/jet/jet_vendor.json` records; the control points are freeglut's
+  (<https://github.com/freeglut/freeglut>, `src/fg_teapot_data.h`).
+- **Licence:** the example is MIT (CubeCoders Limited); the teapot data carries
+  freeglut's X11-style permission notice, reproduced in the cart's
+  [`LICENSES.txt`](ports/jet/teapot.moy/LICENSES.txt).
+- **Modified: converted.** `tools/vendor_jet.py` derives it -- the example's
+  integer vertices and normals as OBJ, at the scales Jet's loader multiplies
+  back by, so the mesh the cart loads is the example's, value for value -- into
+  moybyte-org/carts, whose copy of the cart is vendored here, and
+  `tests/test_jet_vendor.py` re-derives it and compares.
+
+### 3.3b ESP 88 — the film's code and artwork
+
+`ports/jet/examples/`, `ports/jet/esp88.moy/assets.bin`
+
+JetExamples' `esp32-neon-film`, CubeCoders' film: its code
+(`main/Film.hpp`, `World.hpp`, `City.hpp`, `Vehicle.hpp`, `RoadTrack.hpp`,
+`firmware/JetConfig.hpp`) under upstream's paths, and its artwork. That
+example's README ("Licence and assets" in JetExamples) calls the car and city
+original procedural work: the code builds every mesh, and the example's own
+Python generators made the textures and the closing credits with Pillow. The signs, dashboard and credits
+carry text those scripts rasterised from a system font; the pixels are the
+example's, and no font file is part of them or of this repository. The
+example's generated concept images (`references/`) are not taken.
+
+- **Upstream:** <https://github.com/CubeCoders/JetExamples> at the commit
+  `ports/jet/jet_vendor.json` records.
+- **Licence:** MIT, CubeCoders Limited; [`ports/jet/examples/LICENSE`](ports/jet/examples/LICENSE),
+  and the cart's [`LICENSES.txt`](ports/jet/esp88.moy/LICENSES.txt).
+- **Modified:** `World.hpp` by one line, which makes the film's frame size a
+  default the build overrides (`tools/vendor_jet.py`'s `PATCHES`). The
+  artwork (`main/Assets.hpp` and `main/CreditMask.hpp` upstream) is repacked
+  into `assets.bin` for the cart to read; the glow's falloff and the credits
+  are scaled to two thirds, the credits box-filtered from the example's finest
+  mask. `tests/test_jet_vendor.py` re-derives all of it from the clones.
 
 ### 3.4 Board pin assignments — LilyGO T-Deck
 
@@ -488,7 +600,26 @@ image. Nothing else is pulled in.
 
 | Project | Upstream | Licence |
 |---|---|---|
-| WAMR (wasm-micro-runtime) `WAMR-2.4.5`, plus a prebuilt `wamrc` release binary | <https://github.com/bytecodealliance/wasm-micro-runtime> | Apache-2.0 WITH LLVM-exception |
+| WAMR (wasm-micro-runtime) 2.4.5, taken from Moybyte's fork at branch `moybyte-2.4.5` (the esp-idf platform work over the upstream tag that §2.2 describes, at the same pinned commit), plus upstream's prebuilt `wamrc` release binary | <https://github.com/moybyte-org/wasm-micro-runtime> (fork of <https://github.com/wasm-micro-runtime/wasm-micro-runtime>) | Apache-2.0 WITH LLVM-exception |
+| Espressif's LLVM fork, branch `xtensa_release_18.1.2`, built once by the toolchain script, with one patch of ours to its Xtensa backend (`experiments/wasm_aot/toolchain/llvm-xtensa-extui.patch`), to give `wamrc` its Xtensa and RISC-V backends; never vendored | <https://github.com/espressif/llvm-project> | Apache-2.0 WITH LLVM-exception |
+| wasi-sdk 24, the clang/wasi-libc/libc++ toolchain `experiments/wasm_aot/doom/build_wasm.sh`, `build_cart.py` and the showcase cart's `tools/jet_cart.py` compile with; a gitignored download (`build_cart.py` and `jet_cart.py` fetch the release tarball by sha256 when it is absent), never vendored | <https://github.com/WebAssembly/wasi-sdk> | Apache-2.0 WITH LLVM-exception (wasi-libc: Apache-2.0 / MIT) |
+| doomgeneric (id Software's DOOM, ozkl's portable fork), the engine `build_wasm.sh` stages from a gitignored checkout the developer fetches and `build_cart.py` fetches at a pinned commit into its gitignored cache, checked by the sha256 of its tree; never vendored | <https://github.com/ozkl/doomgeneric> | **GPL-2.0** |
+| DOOM shareware IWAD `doom1.wad` v1.9 (1993), a gitignored file the developer obtains; `build_cart.py` fetches Debian's `doom-wad-shareware` source package (<http://deb.debian.org/debian/pool/non-free/d/doom-wad-shareware/>) into its gitignored cache and checks the tarball and the WAD by sha256; never vendored, never redistributed | id Software | id Software Limited Use licence: free unmodified copies only, no consideration, no derivative works |
+
+**Doom lives in the carts repository, not in this one's products.** The
+cart's glue and recipe are GPL-2.0-or-later in `carts/doom/` of
+<https://github.com/moybyte-org/carts>, each cart there under the licence in
+its own folder, which publishes built carts as a free, opt-in download with
+their complete source. The shareware WAD is never in this repository or in
+that one's git history or releases; that repository's Pages site gives it
+away, free and unmodified, beside id's terms (owner, 2026-10-03), which allow
+free copies but no consideration and no derivative works. Its installers
+show those terms before fetching it, from that copy or from Debian's. Doom
+and its WAD are never seeded, preloaded, sold with a console, or shipped in a
+product image, exactly as §7 says of Celeste. The
+spike's glue under `experiments/wasm_aot/doom/` is the same GPL derivative
+and is built only locally. No `.wasm`, `.aot`, `.wad` or built cart is
+tracked by this repository.
 
 `experiments/wasm_aot/core6502.c` and `spike6502.lua` are Moybyte's own
 hand-written 8-opcode benchmark cores, not derived from any emulator.

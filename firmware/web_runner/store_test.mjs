@@ -19,6 +19,15 @@ function ok(name, cond, extra = "") {
 const enc = new TextEncoder(), dec = new TextDecoder();
 
 // ---- a fake OPFS ------------------------------------------------------------
+// CRASH, when set, counts every change the fake makes to its contents and
+// throws once it has allowed `left` of them -- a reload at that exact point,
+// with the store left as far as it got (truncate and write are two changes,
+// as they are on a real sync access handle).
+let CRASH = null;
+function change() {
+    if (CRASH && CRASH.left-- <= 0) throw new Error("the page went away here");
+}
+
 function makeDir(sync) {
     const children = new Map();
     const dir = {
@@ -27,6 +36,7 @@ function makeDir(sync) {
             let c = children.get(name);
             if (!c) {
                 if (!opts || !opts.create) throw new Error("NotFoundError: " + name);
+                change();
                 c = makeDir(sync);
                 children.set(name, c);
             }
@@ -37,6 +47,7 @@ function makeDir(sync) {
             let c = children.get(name);
             if (!c) {
                 if (!opts || !opts.create) throw new Error("NotFoundError: " + name);
+                change();
                 c = makeFile(sync);
                 children.set(name, c);
             }
@@ -48,6 +59,14 @@ function makeDir(sync) {
             if (!c) throw new Error("NotFoundError: " + name);
             if (c.kind === "directory" && !(opts && opts.recursive) && c._size())
                 throw new Error("InvalidModificationError");
+            // A recursive removal is not atomic on a real filesystem: entry by
+            // entry, so a reload can land half way through one.
+            if (c.kind === "directory") {
+                const inner = [];
+                for await (const [k] of c.entries()) inner.push(k);
+                for (const k of inner) await c.removeEntry(k, { recursive: true });
+            }
+            change();
             children.delete(name);
         },
         async *entries() { for (const [k, v] of children) yield [k, v]; },
@@ -61,13 +80,15 @@ function makeFile(sync) {
         kind: "file",
         data: new Uint8Array(0),
         async getFile() {
-            return { text: async () => dec.decode(fh.data) };
+            return { text: async () => dec.decode(fh.data),
+                     arrayBuffer: async () => fh.data.slice().buffer };
         },
     };
     if (sync) {
         fh.createSyncAccessHandle = async () => ({
-            truncate(n) { fh.data = fh.data.slice(0, n); },
+            truncate(n) { change(); fh.data = fh.data.slice(0, n); },
             write(bytes, o) {
+                change();
                 const at = (o && o.at) || 0;
                 const out = new Uint8Array(Math.max(fh.data.length, at + bytes.length));
                 out.set(fh.data, 0);
@@ -78,7 +99,7 @@ function makeFile(sync) {
         });
     } else {
         fh.createWritable = async () => ({
-            async write(bytes) { fh.data = bytes; },
+            async write(bytes) { change(); fh.data = bytes; },
             async close() { },
         });
     }
@@ -226,6 +247,159 @@ for (const sync of [true, false]) {
        JSON.stringify(jr.errors) + " " + JSON.stringify(Object.keys(back)));
 }
 
+// ---- a cart's cover crosses as BYTES (SPEC.md 3.6) ---------------------------
+{
+    const s = await store.openStore(fakeNav(true));
+    const png = new Uint8Array(40000);
+    for (let i = 0; i < png.length; i++) png[i] = (i * 37 + (i >> 9)) & 255;
+    const b64 = store.toBase64(png);
+    await store.seed(s, { "c.moy/manifest.json": "{}", "c.moy/cover.png": { b: b64 } });
+    let all = await store.readAll(s);
+    ok("a seeded cover reads back as {b: base64} of the same bytes",
+       all["c.moy/cover.png"] && all["c.moy/cover.png"].b === b64);
+    ok("fileData turns that back into the bytes",
+       store.fileData(all["c.moy/cover.png"]).length === png.length
+       && store.fileData(all["c.moy/cover.png"]).every((v, i) => v === png[i]));
+    const third = Math.ceil(png.length / 3 / 3) * 3;
+    const r = await store.applyOps(s, [
+        { p: "c.moy/cover.png", b: store.toBase64(png.subarray(0, third)), part: 0 },
+        { p: "c.moy/cover.png", b: store.toBase64(png.subarray(third, 2 * third)), part: 1 },
+        { p: "c.moy/cover.png", b: store.toBase64(png.subarray(2 * third)), part: 2 },
+        { p: "c.moy/cover.png", pub: 1 },
+        { p: "c.moy/main.py", b: "AAAA" },
+    ]);
+    all = await store.readAll(s);
+    ok("a chunked cover publishes whole, and only a cover takes bytes",
+       r.applied === 4 && r.errors.length === 1 && r.errors[0][1] === "not a binary file"
+       && all["c.moy/cover.png"].b === b64, JSON.stringify(r.errors));
+}
+
+// ---- Get Carts' installs: old or new, at every point a reload can land --------
+{
+    const bin = (n, seed) => {
+        const b = new Uint8Array(n);
+        for (let i = 0; i < n; i++) b[i] = (i * seed + (i >> 7)) & 255;
+        return b;
+    };
+    const OLD = { "manifest.json": enc.encode('{"title":"Jet","v":1}'),
+                  "main.wasm": bin(3000, 7), "pmem.json": enc.encode('{"0": 5}') };
+    const NEW = { "manifest.json": enc.encode('{"title":"Jet","v":2}'),
+                  "main.wasm": bin(5000, 11), "game.wad": bin(9000, 13),
+                  "pmem.json": enc.encode('{"0": 5}') };
+    const OLD_REC = '{"version": 1, "carts": {"jet.moy": {"version": 1}}}';
+    const NEW_REC = '{"version": 1, "carts": {"jet.moy": {"version": 2}}}';
+    const asFiles = (set) => Object.keys(set).map((name) => ({ name, data: set[name] }));
+    const same = (all, set) => {
+        const keys = Object.keys(all).filter((k) => k.startsWith("jet.moy/")).sort();
+        const want = Object.keys(set).map((k) => "jet.moy/" + k).sort();
+        if (keys.join() !== want.join()) return false;
+        return want.every((k) => {
+            const v = store.fileData(all[k]);
+            const b = typeof v === "string" ? enc.encode(v) : v;
+            const w = set[k.slice(8)];
+            return b.length === w.length && b.every((x, i) => x === w[i]);
+        });
+    };
+    const fresh = async () => {
+        const s = await store.openStore(fakeNav(true));
+        await store.seed(s, { "other.moy/main.lua": "x = 1" });
+        await store.commitInstall(s, "jet.moy", asFiles(OLD), OLD_REC);
+        return s;
+    };
+    const s0 = await fresh();
+    let all = await store.readAll(s0);
+    ok("an install lands whole, binary files as bytes", same(all, OLD)
+       && all["jet.moy/main.wasm"] instanceof Uint8Array, JSON.stringify(Object.keys(all)));
+    ok("...with its record", await store.readRecord(s0) === OLD_REC);
+    ok("...and leaves no staging", (await (async () => {
+        const st = await s0.dir.getDirectoryHandle(store.STAGE_DIR);
+        for await (const _e of st.entries()) return false;
+        return true; })()));
+    ok("a text file still reads back as text", typeof all["jet.moy/manifest.json"] === "string");
+
+    // How many changes a whole update makes, then a reload after each one.
+    const probe = await fresh();
+    CRASH = { left: 1e9 };
+    await store.commitInstall(probe, "jet.moy", asFiles(NEW), NEW_REC);
+    const total = 1e9 - CRASH.left;
+    CRASH = null;
+    let olds = 0, news = 0, bad = [];
+    for (let k = 0; k < total; k++) {
+        const s = await fresh();
+        CRASH = { left: k };
+        let threw = false;
+        try { await store.commitInstall(s, "jet.moy", asFiles(NEW), NEW_REC); }
+        catch (e) { threw = true; }
+        CRASH = null;
+        if (!threw) { bad.push(k + ": no crash"); continue; }
+        await store.recoverInstalls(s);
+        all = await store.readAll(s);
+        const rec = await store.readRecord(s);
+        const left = [];
+        for await (const [n] of (await s.dir.getDirectoryHandle(store.STAGE_DIR)).entries())
+            left.push(n);
+        if (same(all, OLD) && rec === OLD_REC) olds++;
+        else if (same(all, NEW) && rec === NEW_REC) news++;
+        else bad.push(k + ": " + JSON.stringify(Object.keys(all)) + " " + rec);
+        if (left.length) bad.push(k + ": staging left " + left.join());
+        if (all["other.moy/main.lua"] !== "x = 1") bad.push(k + ": another cart changed");
+    }
+    ok("a reload at any of an update's " + total + " changes leaves the old cart or the new",
+       !bad.length && olds > 0 && news > 0,
+       bad.slice(0, 4).join(" | ") + " old=" + olds + " new=" + news);
+
+    // A recovery that is itself interrupted still finishes on the next boot.
+    let twice = [];
+    for (let k = 0; k < total; k++) {
+        const s = await fresh();
+        CRASH = { left: k };
+        try { await store.commitInstall(s, "jet.moy", asFiles(NEW), NEW_REC); } catch (e) { }
+        for (let j = 0; j < 40; j++) {
+            CRASH = { left: j };
+            try { await store.recoverInstalls(s); CRASH = null; break; } catch (e) { }
+        }
+        CRASH = null;
+        await store.recoverInstalls(s);
+        all = await store.readAll(s);
+        const rec = await store.readRecord(s);
+        if (!((same(all, OLD) && rec === OLD_REC) || (same(all, NEW) && rec === NEW_REC)))
+            twice.push(k);
+    }
+    ok("an interrupted recovery is finished by the next one", !twice.length,
+       twice.join(","));
+
+    const s1 = await fresh();
+    let refused = false;
+    try { await store.commitInstall(s1, "../evil", asFiles(NEW), NEW_REC); }
+    catch (e) { refused = true; }
+    ok("a folder that is not a plain name is refused", refused);
+    await store.writeRecord(s1, '{"version": 1, "carts": {}}');
+    ok("a removal's record is written alone",
+       await store.readRecord(s1) === '{"version": 1, "carts": {}}');
+}
+
+// ---- a returning browser still gets a system cart it never had ---------------
+{
+    const local = { "star.moy/manifest.json": '{"title":"Star","system":true}',
+                    "mine.moy/manifest.json": '{"title":"Mine"}' };
+    const bundle = {
+        "star.moy/manifest.json": '{"title":"Star","system":true,"version":9}',
+        "star.moy/main.py": "new code",
+        "get_carts.moy/manifest.json": '{"title":"Get Carts","system":true}',
+        "get_carts.moy/main.py": "pass",
+        "get_carts.moy/cover.png": { b: "AAAA" },
+        "demo.moy/manifest.json": '{"title":"Demo"}',
+        "demo.moy/main.py": "x",
+    };
+    const got = store.missingSystemCarts(local, bundle);
+    ok("a system cart the store lacks comes from the bundle, whole",
+       Object.keys(got).sort().join() ===
+       "get_carts.moy/cover.png,get_carts.moy/main.py,get_carts.moy/manifest.json",
+       JSON.stringify(Object.keys(got)));
+    ok("one the store has is never touched, and a non-system cart never added",
+       !("star.moy/main.py" in got) && !("demo.moy/main.py" in got));
+}
+
 // The two predicates are two QUESTIONS, and the answers differ on exactly one
 // thing. Pinned here because a single predicate is what this used to be, and
 // collapsing them again would either ship a board somebody else's history or
@@ -288,6 +462,54 @@ function deflatedZip(name, text) {
 const defl = await store.unzip(deflatedZip("x.moy/main.py", "hello deflate\n"));
 ok("a DEFLATED zip reads too", defl.length === 1 && dec.decode(defl[0].data) === "hello deflate\n",
    defl.length ? dec.decode(defl[0].data) : "no entries");
+
+// ---- a compiled cart's written files (moy-spec SPEC.md 16.12) -----------------
+{
+    const OLD = enc.encode("old save"), NEW = enc.encode("the new, longer save");
+    const w = await store.openWritten(fakeNav(true));
+    await store.commitWritten(w, "doom", "doomsav0.dsg", OLD);
+    let got = await store.readWritten(w);
+    ok("a written file reads back as it was written",
+       Object.keys(got).join() === "doom/doomsav0.dsg" && dec.decode(got["doom/doomsav0.dsg"]) === "old save",
+       JSON.stringify(Object.keys(got)));
+    // A reload at every change commitWritten makes: the file is the old save or
+    // the new one, whole, and nothing of the attempt is left behind.
+    let probe = await store.openWritten(fakeNav(true));
+    await store.commitWritten(probe, "doom", "doomsav0.dsg", OLD);
+    CRASH = { left: 1e9 };
+    await store.commitWritten(probe, "doom", "doomsav0.dsg", NEW);
+    const steps = 1e9 - CRASH.left;
+    CRASH = null;
+    let torn = 0, newer = 0;
+    for (let k = 0; k < steps; k++) {
+        const s = await store.openWritten(fakeNav(true));
+        await store.commitWritten(s, "doom", "doomsav0.dsg", OLD);
+        CRASH = { left: k };
+        try { await store.commitWritten(s, "doom", "doomsav0.dsg", NEW); } catch (e) { }
+        CRASH = null;
+        const after = await store.readWritten(s);
+        const text = after["doom/doomsav0.dsg"] ? dec.decode(after["doom/doomsav0.dsg"]) : null;
+        if (text !== "old save" && text !== "the new, longer save") torn++;
+        if (text === "the new, longer save") newer++;
+        const d = await s.dir.getDirectoryHandle("doom");
+        for await (const [n] of d.entries()) if (n.includes("~")) torn++;
+    }
+    ok("a reload at any of " + steps + " steps of a write leaves the old save or the new, whole",
+       torn === 0 && newer > 0, "torn " + torn + ", new " + newer);
+    await store.commitWritten(w, "doom", "default.cfg", NEW);
+    await store.commitWritten(w, "jet", "options.cfg", OLD);
+    await store.dropWritten(w, "doom", "doomsav0.dsg");
+    got = await store.readWritten(w);
+    ok("an erase takes one file", Object.keys(got).sort().join() === "doom/default.cfg,jet/options.cfg",
+       Object.keys(got).join());
+    await store.dropWritten(w, "doom", null);
+    got = await store.readWritten(w);
+    ok("a removed cart's files go, and another cart's stay", Object.keys(got).join() === "jet/options.cfg",
+       Object.keys(got).join());
+    let refused = false;
+    try { await store.commitWritten(w, "..", "x", OLD); } catch (e) { refused = true; }
+    ok("a written path that is not one name in one folder is refused", refused);
+}
 
 // ---- naming -----------------------------------------------------------------
 const have = { "star.moy": 1, "star_2.moy": 1 };

@@ -117,6 +117,23 @@ def test_a_kids_saves_still_cross_the_wire(tmp_path):
         assert bundle.get("hop.moy/pmem.json") == "[41, 0, 0]", who
 
 
+def test_a_carts_cover_crosses_the_wire_as_its_bytes(tmp_path):
+    """The one binary file a pull carries: a cart's cover.png (SPEC.md 3.6),
+    as {"b": base64} -- the page's writeStore writes it as bytes. A compiled
+    module beside it stays home. Both walkers, and the streamed one in
+    pieces that must join into the one value."""
+    import base64
+    root = _store(tmp_path)
+    data = bytes((i * 37 + 11) & 255 for i in range(10000))
+    (root / "hop.moy" / "cover.png").write_bytes(data)
+    (root / "hop.moy" / "main.wasm").write_bytes(b"\0asm\1\0\0\0\xff\xfe")
+    packed = wh.pack_store(str(root))
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    for bundle, who in ((packed, "pack_store"), (streamed, "stream_store_json")):
+        assert base64.b64decode(bundle["hop.moy/cover.png"]["b"]) == data, who
+        assert "hop.moy/main.wasm" not in bundle, who
+
+
 def test_a_loose_file_beside_the_carts_is_not_a_cart(tmp_path):
     b = wh.pack_store(str(_store(tmp_path)))
     assert not any(k.startswith("loose") for k in b)
@@ -724,7 +741,7 @@ def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
 def test_the_sd_gate_wraps_the_store_read(tmp_path):
     """On the T-Deck the store is on a shared-SPI SD card that must only be
     touched inside moybyte_sd.with_sd_live -- reading it from anywhere else is
-    the class of mistake that hangs the panel (CLAUDE.md's hard constraints).
+    the class of mistake that hangs the panel (.claude/rules/boards.md).
     The handler must go through the injected gate, not around it."""
     h = _host(tmp_path)
     calls = []

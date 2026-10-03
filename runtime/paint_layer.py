@@ -1,3 +1,9 @@
+# Map (grep -n a name to jump there):
+#   -- paint geometry  the paint tab's constants (console.py imports them back)
+#   -- tool palette    the tool row
+#   PaintLayout        responsive paint-editor geometry
+#   PaintLayer         the paint editor content layer: draw, strokes, keys
+#   ThemeLayer         the icon-theme editor (EDIT ICONS)
 """The sprite/icon PAINT editor (#4/#30), extracted from Workstation
 (runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 

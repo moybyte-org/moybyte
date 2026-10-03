@@ -131,12 +131,21 @@ def _paeth(a, b, c):
     return b if pb <= pc else c
 
 
-def rom_to_png(rom):
+# Where a cartridge draws its LABEL (the 128x128 that becomes cover.png), and
+# PICO-8's base sixteen colours -- SPEC.md 2's 0-15, byte for byte.
+LABEL_X = 16
+LABEL_Y = 24
+P8_BASE = ("000000 1D2B53 7E2553 008751 AB5236 5F574F C2C3C7 FFF1E8 "
+           "FF004D FFA300 FFEC27 00E436 29ADFF 83769C FF77A8 FFCCAA").split()
+
+
+def rom_to_png(rom, label=None):
     """The cart ROM -> a PICO-8-shaped `.p8.png`, low two bits per channel.
 
-    The high six bits are the visible label; a gradient rather than zeros, so a
-    reader that took the WRONG bits would produce garbage instead of quietly
-    reading a black picture as an empty cart."""
+    The high six bits are the visible picture: inside the label region the
+    `.p8`'s `__label__` (its base-sixteen digits), elsewhere a gradient rather
+    than zeros, so a reader that took the WRONG bits would produce garbage
+    instead of quietly reading a black picture as an empty cart."""
     assert len(rom) == ROM_LEN, len(rom)
     raw = bytearray()
     prev = bytearray(PNG_W * 4)
@@ -146,9 +155,15 @@ def rom_to_png(rom):
             v = rom[y * PNG_W + x]
             # ARGB order, 2 bits each -- the converter reads
             # ((a&3)<<6)|((r&3)<<4)|((g&3)<<2)|(b&3).
-            line[x * 4 + 0] = ((x & 0x3F) << 2) | ((v >> 4) & 3)      # R
-            line[x * 4 + 1] = ((y & 0x3F) << 2) | ((v >> 2) & 3)      # G
-            line[x * 4 + 2] = (((x ^ y) & 0x3F) << 2) | (v & 3)       # B
+            hi = (x & 0x3F) << 2, (y & 0x3F) << 2, ((x ^ y) & 0x3F) << 2
+            lx, ly = x - LABEL_X, y - LABEL_Y
+            if label and 0 <= lx < 128 and 0 <= ly < 128:
+                c = P8_BASE[int(label[ly][lx], 16)]
+                hi = (int(c[0:2], 16) & 0xFC, int(c[2:4], 16) & 0xFC,
+                      int(c[4:6], 16) & 0xFC)
+            line[x * 4 + 0] = hi[0] | ((v >> 4) & 3)                  # R
+            line[x * 4 + 1] = hi[1] | ((v >> 2) & 3)                  # G
+            line[x * 4 + 2] = hi[2] | (v & 3)                         # B
             line[x * 4 + 3] = (0x3F << 2) | ((v >> 6) & 3)            # A
         ftype = y % 5
         enc = bytearray(len(line))
@@ -190,7 +205,9 @@ def tiny_dash_png(parse_p8):
     because the encode is 131k interpreted filter steps and several tests want
     the same bytes."""
     if not _PNG_MEMO:
-        _PNG_MEMO.append(rom_to_png(sections_to_rom(parse_p8(read_p8_text()))))
+        sections = parse_p8(read_p8_text())
+        _PNG_MEMO.append(rom_to_png(sections_to_rom(sections),
+                                    sections.get("label")))
     return _PNG_MEMO[0]
 
 

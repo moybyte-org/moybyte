@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   UpdateUI                     the firmware-update screens: SD, online, C6
+#   UpdateUI.open_update         the SD update screen
+#   UpdateUI.open_update_online  the online update flow
+#   UpdateUI.open_update_c6      the C6 radio upgrade
+#   UpdateUI._pump_update        one frame of an install
+#   UpdateUI._draw_update        the update screen's draw
 """The firmware-update (OTA) screen's UI layer (#53), extracted from Workstation
 (runtime/console.py).
 

@@ -1,3 +1,9 @@
+# Map (grep -n a name to jump there):
+#   journal_append    record a commit: snapshot and op batch
+#   journal_undo      restore the previous snapshot
+#   journal_redo      re-apply the next snapshot
+#   journal_can_undo  can undo, read-only
+#   journal_compact   drop the oldest entries to the budget
 # The per-project undo/redo journal (#7, Stage 7 of docs/history/shell_ux_technical_plan_v1.md),
 # extracted from moy_carts.py (which re-exports every name here, so `store.journal_*`
 # call sites and tests are unchanged). MicroPython-safe (json + os only); file
@@ -18,9 +24,13 @@ except ImportError:  # pragma: no cover
     _time = None
 
 try:
-    from moy_fs import _mkdir, _read, _write, _write_atomic, _remove
+    from moy_fs import (_mkdir, _read, _write, _write_atomic, _remove,
+                        _claim_bak, _read_stamped, _stamp_of, _read_recover,
+                        _forget_bak)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import _mkdir, _read, _write, _write_atomic, _remove
+    from runtime.moy_fs import (_mkdir, _read, _write, _write_atomic, _remove,
+                                _claim_bak, _read_stamped, _stamp_of,
+                                _read_recover, _forget_bak)
 
 
 def _set_graduated_flag(cart_dir, value):
@@ -38,22 +48,37 @@ def _set_graduated_flag(cart_dir, value):
 # cart's files, in <cart>.moy/journal/:
 #
 #   journal.jsonl  APPEND-ONLY -- one JSON line per commit event:
-#                  {"seq": N, "ts": ..., "file": "main.py", "snap": "s/000N-main.py"}
-#                  the entry points at a FULL-FILE snapshot under journal/s/. Full
-#                  snapshots, not diffs: MicroPython-safe (no difflib), and one bad
-#                  snapshot loses one step, never the whole history.
+#                  {"seq": N, "ts": ..., "file": "main.py", "snap": "s/000N-main.py",
+#                   "len": C, "crc": X}
+#                  the entry points at a FULL-FILE snapshot under journal/s/ and
+#                  carries that snapshot's STAMP (chars + crc32). Full snapshots, not
+#                  diffs: MicroPython-safe (no difflib), and one bad snapshot loses one
+#                  step, never the whole history. The stamp is what lets the NEXT
+#                  commit's no-op check answer without reading the snapshot back.
 #   cursor.json    {"cursors": {file: seq, ...}, "seq": N, "bytes": B} -- a PER-FILE
 #                  undo position map (#111: one cursor per journaled file, so an undo
 #                  on one file/tab never walks another file's timeline, and redo only
 #                  lights up on the tab that actually has something ahead). Plus a
 #                  legacy scalar `seq` (= the max applied seq across files, kept purely
-#                  for old readers/tools + the reboot-cursor test) and the running total
-#                  snapshot bytes (B, the rotation gate). Written via _write_atomic: a
-#                  tiny fixed-size file whose atomic rename is what makes the cursor
-#                  torn-write-proof. A cursor with no "cursors" map, missing or torn,
-#                  defaults every file to its newest entry (the safe 'everything
-#                  applied' state); no older cursor shape is read.
-#   s/000N-<file>  the per-commit full-file snapshots.
+#                  for old readers/tools). A cursor with no "cursors" map, missing AND
+#                  unrecoverable, or torn beyond recovery, defaults every file to its
+#                  newest entry -- the safe 'everything applied' state, and no older
+#                  cursor shape is read.
+#                  The file EXISTS ONLY WHILE SOMETHING IS REWOUND: a commit whose map
+#                  is that same default removes it instead of writing it, because an
+#                  absent cursor already says exactly that and saying it costs three
+#                  file opens on a card (#154). When it is written it goes through
+#                  _write_atomic and comes back through _read_recover, which is the
+#                  pair that makes it torn-write-proof -- the write alone is not: a
+#                  plain read of a torn cursor never opens the backup beside it.
+#   s/000N-<file>  the per-commit full-file snapshots. Usually not written at all:
+#                  every commit_* verb publishes the same bytes through _write_atomic
+#                  first, which leaves them in the live file's spent crash backup, and
+#                  the snapshot CLAIMS that file with a rename (`_claim_bak`). Such an
+#                  entry is marked `"stamped": 1` and keeps moy_fs's stamp line as its
+#                  first line, so it is read back through `_read_stamped`. A caller
+#                  whose bytes were never published -- the graduation BASELINE entry --
+#                  fails the stamp check and gets a plain written snapshot.
 #
 # CADENCE (v1.1 pinned): the line APPEND is a raw open(path, "a") -- O(1), one line
 # appended per commit -- and NEVER _write_atomic (which rewrites the whole file, so
@@ -62,12 +87,14 @@ def _set_graduated_flag(cart_dir, value):
 # and journal_compact (rotation) -- both between-frames like every SD op.
 #
 # TORN-WRITE ORDERING GUARANTEE (must survive any edit to journal_append): a commit
-# writes the SNAPSHOT first, THEN raw-appends the log line, THEN atomically rewrites the
-# cursor. So a power loss can only ever leave (a) an UNREFERENCED orphan snapshot or
-# (b) a torn last log line -- both dropped at load (json.loads-guarded), never a cursor
-# pointing at a half-written entry. Moving to a per-file cursor MAP does not change this:
-# the map is still written LAST, via _write_atomic, so it is only ever advanced to seqs
-# whose snapshot + log line are already durable.
+# puts the SNAPSHOT down first, THEN raw-appends the log line, THEN settles the cursor.
+# So a power loss can only ever leave (a) an UNREFERENCED orphan snapshot or (b) a torn
+# last log line -- both dropped at load (json.loads-guarded), never a cursor pointing at
+# a half-written entry. Neither the per-file cursor MAP nor the two cheaper shapes the
+# steps now take change that: the snapshot may arrive as a RENAME of the publish backup
+# rather than a write, and the cursor may be REMOVED rather than written (an absent one
+# reads as the same map) -- but each still happens in this order, and the cursor is only
+# ever advanced to seqs whose snapshot and log line are already durable.
 #
 # WALK (#111 PER-FILE): each file F carries its own cursor C[F] = the seq of F's applied
 #   (live) snapshot. A walk takes an OPTIONAL `files` filter (a tuple of journal file
@@ -81,7 +108,9 @@ def _set_graduated_flag(cart_dir, value):
 #   a NEW commit of file F while F is rewound TRUNCATES only F's redo tail (Google-Docs
 #   rule, PER-FILE -- other files' redo tails survive).
 #
-# ROTATION: a per-project cap of 64 entries OR 512KB of snapshots (whichever first);
+# ROTATION: a per-project cap of 64 entries OR 512KB of snapshots (whichever first,
+# measured by summing the entries' own recorded `len` -- derived, so it cannot drift
+# and costs no os.stat per snapshot);
 # journal_compact drops the OLDEST entries + their snapshots (a full journal.jsonl
 # rewrite + snapshot deletes -- the one place the journal is not append-only). It
 # never drops any file's current-state snapshot or the redo tail.
@@ -150,9 +179,33 @@ def _journal_newest_by_file(entries):
     return newest
 
 
+def _journal_read_cursor_file(cur_path):
+    """cursor.json's parsed dict, or None when it is missing/torn/not a dict.
+
+    The ONE read of that file per commit: both things a commit needs off it -- the
+    per-file map and the running byte total -- come from this call, because the card
+    charges a whole file open for a second one (#154).
+
+    And it reads through `_read_recover`, which is what makes the three-write publish
+    the cursor is written with mean anything: a plain read of a torn cursor falls back
+    to the safe default and the backup beside it is never consulted, so the write was
+    paying for a recovery nothing asked for."""
+    try:
+        data = json.loads(_read_recover(cur_path))
+    except (OSError, ValueError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _journal_cursors(cur_path, entries):
-    """The PER-FILE undo position map {file: seq} (#111). Every journaled file has an
-    entry; a file's cursor is the seq of its applied (live) snapshot. Resolution order:
+    """The PER-FILE undo position map {file: seq} (#111) -- see `_journal_cursors_of`."""
+    return _journal_cursors_of(_journal_read_cursor_file(cur_path), entries)
+
+
+def _journal_cursors_of(data, entries):
+    """The PER-FILE undo position map {file: seq} (#111) out of an already-read
+    cursor.json dict. Every journaled file has an entry; a file's cursor is the seq
+    of its applied (live) snapshot. Resolution order:
 
       * a NEW-format cursor.json ({"cursors": {...}}) -> use it, validated to ints and
         BACKFILLED so any file present in the journal but missing from the map defaults
@@ -161,11 +214,7 @@ def _journal_cursors(cur_path, entries):
         its newest entry (safe state); no older cursor shape is read.
     """
     default = _journal_newest_by_file(entries)
-    try:
-        data = json.loads(_read(cur_path))
-    except (OSError, ValueError, TypeError):
-        return default
-    if not isinstance(data, dict):
+    if data is None:
         return default
     raw = data.get("cursors")
     if isinstance(raw, dict):
@@ -197,14 +246,20 @@ def _journal_cursor(cur_path, entries):
     return _journal_max_applied(_journal_cursors(cur_path, entries))
 
 
-def _journal_bytes(cur_path):
-    """The running total snapshot bytes recorded in cursor.json (0 when absent), the
-    cheap rotation gate so a normal append never has to stat every snapshot."""
-    try:
-        data = json.loads(_read(cur_path))
-        return int(data.get("bytes", 0))
-    except (OSError, ValueError, TypeError, AttributeError):
-        return 0
+def _journal_total_len(entries):
+    """The rotation gate: how many characters of snapshot the journal is holding.
+
+    DERIVED from the entries, which each record their snapshot's `len` -- so it is
+    free (they are already loaded and parsed), it cannot drift the way a counter
+    carried in cursor.json did, and it costs no os.stat per snapshot, which on a
+    card is a file lookup each (#154)."""
+    total = 0
+    for e in entries:
+        try:
+            total += int(e.get("len") or 0)
+        except (TypeError, ValueError):
+            pass
+    return total
 
 
 def _journal_prune_cursors(cursors, entries):
@@ -220,16 +275,28 @@ def _journal_prune_cursors(cursors, entries):
     return out
 
 
-def _journal_write_cursors(cur_path, cursors, total_bytes):
-    # cursor.json is tiny + fixed-shape -> _write_atomic (its atomic rename is the
-    # torn-write proofing the append deliberately skips). Writes the per-file map plus a
-    # legacy scalar `seq` (max applied) for old readers. This is the LAST write of a
-    # commit (see the TORN-WRITE ORDERING GUARANTEE at the top).
+def _journal_write_cursors(cur_path, cursors, entries):
+    """Persist the per-file cursor map -- or REMOVE it, which says the same thing.
+
+    An ABSENT cursor already means "every file at its newest entry", the safe state
+    documented at the top of this module. That is exactly the map a commit leaves
+    whenever nothing is rewound, which is every commit a kid makes without pressing
+    UNDO -- so writing it says nothing a reader could not work out, and on the card
+    it says it in three file opens (the marker, the backup, the file) for ~200
+    bytes, which the T-Deck priced at 130 ms per commit (#154).
+
+    A REWOUND cursor is a position nothing can recompute, so that one is written,
+    through _write_atomic and read back through _read_recover. Either way this is
+    the LAST step of a commit -- see the TORN-WRITE ORDERING GUARANTEE above."""
     cmap = {}
     for f, s in cursors.items():
         cmap[f] = int(s)
+    if cmap == _journal_newest_by_file(entries):
+        _remove(cur_path)
+        _forget_bak(cur_path)       # else the next _read_recover heals the stale one back
+        return
     _write_atomic(cur_path, json.dumps(
-        {"cursors": cmap, "seq": _journal_max_applied(cmap), "bytes": int(total_bytes)}))
+        {"cursors": cmap, "seq": _journal_max_applied(cmap)}))
 
 
 def _journal_rewrite(log_path, entries):
@@ -238,24 +305,54 @@ def _journal_rewrite(log_path, entries):
     _write_atomic(log_path, "".join(json.dumps(e) + "\n" for e in entries))
 
 
-def _journal_current_snap(entries, cursor, file):
-    """The snapshot representing `file`'s current live state = the latest entry for
+def _journal_current_entry(entries, cursor, file):
+    """The entry representing `file`'s current live state = the latest entry for
     that file with seq <= cursor (or None if the file has no snapshot yet)."""
     best = None
     for e in entries:                      # ascending -> the last match <= cursor wins
         if e["file"] == file and e["seq"] <= cursor:
             best = e
+    return best
+
+
+def _journal_current_snap(entries, cursor, file):
+    """That entry's snapshot path, relative to journal/ (or None)."""
+    best = _journal_current_entry(entries, cursor, file)
     return best["snap"] if best else None
 
 
-def _journal_total_bytes(jdir, entries):
-    total = 0
-    for e in entries:
-        try:
-            total += os.stat(jdir + "/" + e["snap"])[6]   # [6] = st_size (host + MicroPython)
-        except OSError:
-            pass
-    return total
+def _journal_is_current(entry, jdir, new_bytes, stamp):
+    """Is `entry`'s snapshot already exactly `new_bytes`? The ceiling check that
+    keeps a debounce firing with nothing changed off the card entirely.
+
+    An entry that RECORDS its stamp answers from `stamp` -- the length plus a
+    crc32, which costs 17 ms over a 20 KB file against the 52 ms the card charges
+    to read that snapshot back (#154). An older entry carries no crc and is
+    compared by reading, exactly as before."""
+    if entry.get("crc") is not None:
+        return entry.get("len") == stamp[0] and entry["crc"] == stamp[1]
+    try:
+        return _read(jdir + "/" + entry["snap"]) == new_bytes
+    except OSError:
+        return False
+
+
+def _journal_put_snap(live_path, dest, new_bytes, stamp):
+    """Put `new_bytes` at `dest`; True when it landed STAMPED.
+
+    The bytes are usually already on the card: every commit_* verb publishes them
+    through `_write_atomic` first, which leaves a stamped copy in the live file's
+    spent crash backup. Claiming that file is a rename where writing the payload a
+    third time is 7.1 ms per KB (#154) -- 31 ms against 189 ms for a 20 KB
+    main.py on the T-Deck. A caller whose bytes were never published (the
+    graduation BASELINE entry) fails the stamp check and writes its own copy.
+
+    Raises OSError when the journal folders are not there yet, which is how they
+    get made -- see the caller."""
+    if _claim_bak(live_path, dest, stamp):
+        return True
+    _write(dest, new_bytes)
+    return False
 
 
 def _journal_read_snap(jdir, entry):
@@ -266,12 +363,22 @@ def _journal_read_snap(jdir, entry):
     Validated against the recorded `len`: a length mismatch (truncated / 0-byte from a
     device power loss -- snapshots are non-atomic, no fsync) is rejected; an entry that
     legitimately snapshotted an empty file (len == 0) still restores cleanly. Legacy
-    entries without a recorded `len` fall back to "reject an empty read as likely-torn"."""
+    entries without a recorded `len` fall back to "reject an empty read as likely-torn".
+
+    A `stamped` entry is a CLAIMED publish backup (`_journal_put_snap`): its own first
+    line is a crc over the payload, so it is checked against that as well -- strictly
+    more than `len` can see, and the `len` check still runs in case the stamp line
+    itself was the torn part."""
+    exp = entry.get("len")
+    if entry.get("stamped"):
+        data = _read_stamped(jdir + "/" + entry["snap"])
+        if data is None or (exp is not None and len(data) != int(exp)):
+            return None
+        return data
     try:
         data = _read(jdir + "/" + entry["snap"])
     except OSError:
         return None                            # missing snapshot -> refuse
-    exp = entry.get("len")
     if exp is None:
         return data if data else None          # unlabelled: an empty read is likely torn
     if len(data) != int(exp):
@@ -330,19 +437,17 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
         return None
     jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
     entries = _journal_load_entries(log_path)   # empty when there's no journal/ yet
-    cursors = _journal_cursors(cur_path, entries)   # #111: per-file cursor map
-    total = _journal_bytes(cur_path)
+    curdata = _journal_read_cursor_file(cur_path)   # ONE read; both values come off it
+    cursors = _journal_cursors_of(curdata, entries)  # #111: per-file cursor map
+    total = _journal_total_len(entries)
+    stamp = _stamp_of(new_bytes)                # (chars, crc32) -- the entry's own label
     # -- ceiling / no-op dedup: identical to THIS FILE's current state -> write NOTHING
     #    (a debounce that fires with nothing changed must not touch the card). Checked
     #    BEFORE any _mkdir so a no-op append leaves no empty journal/ folder behind.
     cf = cursors.get(file)
-    cur_snap = _journal_current_snap(entries, cf, file) if cf is not None else None
-    if cur_snap is not None:
-        try:
-            if _read(jdir + "/" + cur_snap) == new_bytes:
-                return None
-        except OSError:
-            pass
+    cur_entry = _journal_current_entry(entries, cf, file) if cf is not None else None
+    if cur_entry is not None and _journal_is_current(cur_entry, jdir, new_bytes, stamp):
+        return None
     # -- Google-Docs rule, PER-FILE: a commit of `file` while `file` is rewound truncates
     #    only THIS FILE's redo tail (other files' redo tails survive). The ONE non-append
     #    rewrite on the commit path (rare -- only right after an undo of this file).
@@ -354,7 +459,7 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
             _remove(jdir + "/" + e["snap"])
         entries = [e for e in entries if e["seq"] not in cut]
         _journal_rewrite(log_path, entries)
-        total = _journal_total_bytes(jdir, entries)   # recompute exactly after the cut
+        total = _journal_total_len(entries)          # recompute exactly after the cut
         cursors = _journal_prune_cursors(cursors, entries)  # drop any now-empty file
     # -- assign the next seq (global-monotonic: max remaining + 1, so surviving other-file
     #    entries above the cut keep unique seqs), write the snapshot, then RAW-append.
@@ -365,17 +470,22 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
     # re-make a folder that exists after the project's first one (#154). The
     # snapshot is the first write that needs them -- the redo-tail rewrite above
     # only runs when there are already entries, so the dirs already exist there.
+    live = cart_dir + "/" + file
     try:
-        _write(jdir + "/" + snap, new_bytes)          # snapshot BEFORE the log line
+        stamped = _journal_put_snap(live, jdir + "/" + snap, new_bytes, stamp)
     except OSError:
         _mkdir(jdir)
         _mkdir(snap_dir)
-        _write(jdir + "/" + snap, new_bytes)
-    # `len` is the snapshot's recorded length: undo/redo validate the on-disk snapshot
-    # against it before copying it over the live file, so a torn/truncated snapshot (a
-    # device power loss + FAT cache reordering -- snapshots are non-atomic) is REFUSED
-    # rather than silently overwriting good work with garbage/empty.
-    entry = {"seq": seq, "ts": _journal_ts(), "file": file, "snap": snap, "len": len(new_bytes)}
+        stamped = _journal_put_snap(live, jdir + "/" + snap, new_bytes, stamp)
+    # `len` + `crc` are the snapshot's recorded stamp: undo/redo validate the on-disk
+    # snapshot against them before copying it over the live file, so a torn/truncated
+    # snapshot (a device power loss + FAT cache reordering -- snapshots are non-atomic)
+    # is REFUSED rather than silently overwriting good work with garbage/empty. `crc` is
+    # additive and also answers the next commit's dedup without reading this file back.
+    entry = {"seq": seq, "ts": _journal_ts(), "file": file, "snap": snap,
+             "len": stamp[0], "crc": stamp[1]}
+    if stamped:
+        entry["stamped"] = 1                          # a claimed publish backup
     if grad is not None:
         entry["grad"] = int(grad)                     # Stage 8 graduation rider
     if ops:
@@ -384,7 +494,7 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
         f.write(json.dumps(entry) + "\n")
     total += len(new_bytes)
     cursors[file] = seq                               # this file now applied at the new commit
-    _journal_write_cursors(cur_path, cursors, total)  # cursor map advances (atomic, LAST)
+    _journal_write_cursors(cur_path, cursors, entries + [entry])   # cursor LAST
     # -- graduation flip rides this exact durable step (Stage 8): the manifest's
     #    `graduated` follows the appended entry's grad. Guarded -- a manifest hiccup
     #    must not undo the append that just succeeded (the entry is already durable).
@@ -488,7 +598,7 @@ def journal_undo(cart_dir, files=None):
         return None                        # snapshot missing/torn -> REFUSE, live file intact
     _write_atomic(cart_dir + "/" + file, data)
     cursors[file] = new_cursor             # step ONLY this file's cursor back
-    _journal_write_cursors(cur_path, cursors, _journal_bytes(cur_path))
+    _journal_write_cursors(cur_path, cursors, entries)
     _journal_apply_grad(cart_dir, target)  # Stage 8: un-graduate past a graduating commit
     return file
 
@@ -537,7 +647,7 @@ def journal_redo(cart_dir, files=None):
         return None                        # snapshot missing/torn -> REFUSE, live file intact
     _write_atomic(cart_dir + "/" + file, data)
     cursors[file] = nxt["seq"]             # step ONLY this file's cursor forward
-    _journal_write_cursors(cur_path, cursors, _journal_bytes(cur_path))
+    _journal_write_cursors(cur_path, cursors, entries)
     _journal_apply_grad(cart_dir, nxt)     # Stage 8: re-graduate on redo past the commit
     return file
 
@@ -563,17 +673,14 @@ def journal_compact(cart_dir):
     droppable = [e for e in entries if e["seq"] not in keep]
     droppable.sort(key=lambda e: e["seq"])  # oldest first
     remaining = list(entries)
-    total = _journal_total_bytes(jdir, remaining)
+    total = _journal_total_len(remaining)
     dropped = []
     di = 0
     while ((len(remaining) > JOURNAL_MAX_ENTRIES or total > JOURNAL_MAX_BYTES)
            and di < len(droppable)):
         victim = droppable[di]
         di += 1
-        try:
-            total -= os.stat(jdir + "/" + victim["snap"])[6]
-        except OSError:
-            pass
+        total -= int(victim.get("len") or 0)
         remaining = [e for e in remaining if e["seq"] != victim["seq"]]
         dropped.append(victim)
     if not dropped:
@@ -582,5 +689,5 @@ def journal_compact(cart_dir):
         _remove(jdir + "/" + e["snap"])
     _journal_rewrite(log_path, remaining)
     cursors = _journal_prune_cursors(cursors, remaining)
-    _journal_write_cursors(cur_path, cursors, _journal_total_bytes(jdir, remaining))
+    _journal_write_cursors(cur_path, cursors, remaining)
     return len(dropped)

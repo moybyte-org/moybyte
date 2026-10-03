@@ -28,6 +28,11 @@ if(assetsJSON&&(assetsBusy||now-assetsAt<ASSETS_MIN_MS)){res(JSON.parse(assetsJS
 assetsWait.push([res,rej]);
 assetsBusy=true;assetsAt=now;
 WORKER.postMessage({t:"assets"});});}
+// The console's `state` -- the dev channel's snapshot, the keys an on-glass
+// suite reads -- for a harness driving this page: a promise of the object.
+var stateWait=[];
+window.__moyState=function(){return new Promise(function(ok){stateWait.push(ok);
+WORKER.postMessage({t:"state"});});};
 function onWorker(m){
 if(m.t==="status"){sEl.textContent=m.s;}
 else if(m.t==="assets"){assetsJSON=m.json;assetsBusy=false;
@@ -57,6 +62,11 @@ if(m.report)p8Report(m.report,m.ok,m.dir);}
 else if(m.t==="update"){updBound(m);}
 else if(m.t==="edited"){window.__moyEdited=m.s;pzSay(m.s,!m.ok);}
 else if(m.t==="pin"){pinAsk(m.tried);}
+else if(m.t==="pick"){pkAsk(m);}
+else if(m.t==="unpick"){pkDone(m.id);}
+else if(m.t==="installed"){window.__moyInstalled=m.folder;}
+else if(m.t==="state"){var sw=stateWait;stateWait=[];
+for(var si=0;si<sw.length;si++)sw[si](JSON.parse(m.json));}
 else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
 // THE SEAM the pump that sees failures calls. Nothing counts failures yet --
 // the sync push still requeues forever on a board that has gone -- and when
@@ -198,6 +208,32 @@ if(P8X)P8X.addEventListener("click",function(){P8.style.display="none";});
 if(P8E)P8E.addEventListener("click",function(){if(!WORKER||!p8Cart)return;
 pzSay("opening "+p8Cart+" in the editor...",false);
 WORKER.postMessage({t:"edit",cart:p8Cart});});
+// ---- Get Carts' file question (#124) ------------------------------------------
+// The console needs a file this page cannot fetch (its host sends no CORS
+// header) and asks for the player's own copy. The answer goes back as bytes;
+// the CONSOLE holds it to the index's size and sha256, here nothing is
+// checked, so there is one check and it is the one every console runs.
+var PK=document.getElementById("pk"),PKH=document.getElementById("pkh"),
+PKB=document.getElementById("pkb"),PKN=document.getElementById("pkn"),
+PKI=document.getElementById("pki"),PKX=document.getElementById("pkx"),pkId=null;
+function pkAsk(m){pkId=m.id;
+PKH.textContent="Get Carts needs "+m.name;
+PKB.textContent="This page can't fetch it from "+(m.host||"its host")
++". Choose your own copy ("+m.size+" bytes); the console checks it is the right one.";
+PKN.textContent=m.name;PK.style.display="block";
+// Readable by the browser harness, the way __moyReport is.
+window.__moyPick={id:m.id,name:m.name,size:m.size};}
+function pkDone(id){if(id!==undefined&&id!==pkId)return;
+pkId=null;PK.style.display="none";window.__moyPick=null;}
+// The file goes to the worker TRANSFERRED: a WAD is megabytes.
+function pkSend(file){if(!WORKER||pkId===null||!file)return;var id=pkId;pkDone(id);
+file.arrayBuffer().then(function(buf){
+WORKER.postMessage({t:"picked",id:id,name:file.name,buf:buf},[buf]);})
+.catch(function(){WORKER.postMessage({t:"picked",id:id,cancel:1});});}
+if(PKI)PKI.addEventListener("change",function(){if(PKI.files&&PKI.files[0])pkSend(PKI.files[0]);
+PKI.value="";});
+if(PKX)PKX.addEventListener("click",function(){if(!WORKER||pkId===null)return;var id=pkId;
+pkDone(id);WORKER.postMessage({t:"picked",id:id,cancel:1});});
 // The loader module hands the worker over once constructed.
 window.__moyAttach=function(w){WORKER=w;w.onmessage=function(e){onWorker(e.data);};};
 // ?pad=1 forces the touch controls on ANY device (desktop demos, touch laptops).

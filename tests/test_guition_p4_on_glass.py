@@ -35,6 +35,170 @@ def board():
         b.cmd("diag 0")
 
 
+# The engine's idle cost (docs/wasm_tier_plan_2026-09.md, guard 1). FIRST in
+# the file on purpose: the comparison is against a fresh boot, and the wasm
+# block at the end brings the radios up. Measured 2026-09-25 on a module-free
+# image of the same tree, at the launcher right after boot: (free, largest)
+# internal SRAM.
+WASM_IDLE_BASELINE = (188991, 94208)
+WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
+
+
+def test_the_wasm_engine_costs_the_idle_desk_at_most_a_constant(board):
+    on_glass.wasm_idle_cost_is_bounded(board, WASM_IDLE_BASELINE,
+                                       ble_at_boot=True)
+
+@pytest.fixture(scope="module")
+def wasm(board):
+    return on_glass.wasm_push(board, WASM_BOARD_DIR)
+
+
+# The rest of the engine's checks that bring no radio up, while the desk is
+# still fresh: the Lua guard in particular needs an internal heap the radios
+# have not spent, or its control run falls back to PSRAM by itself.
+
+
+def test_the_hello_module_runs_and_foreign_modules_are_refused(board, wasm):
+    on_glass.wasm_hello_runs_and_foreign_modules_are_refused(
+        board, WASM_BOARD_DIR, wasm)
+
+
+def test_unknown_sources_lets_only_a_missing_signature_through(board, wasm):
+    on_glass.wasm_unknown_sources_lets_only_a_missing_signature_through(
+        board, wasm)
+
+
+def test_a_misaligned_load_or_store_of_any_width_is_exact(board, wasm):
+    on_glass.wasm_misaligned_access_is_exact(board, wasm)
+
+
+def test_a_saturating_float_to_int_conversion_is_exact(board, wasm):
+    on_glass.wasm_saturating_conversions_are_exact(board, wasm)
+
+
+def test_the_run_stack_works_in_psram_and_internal_sram(board, wasm):
+    on_glass.wasm_run_stack_placements(board, wasm)
+
+
+def test_terminate_reaches_a_runaway_only_at_its_end(board, wasm):
+    on_glass.wasm_runaway_runs_to_its_end(board, wasm)
+
+
+def test_a_lua_cart_after_a_wasm_run_keeps_its_sram(board, wasm):
+    on_glass.wasm_lua_after_wasm_keeps_its_sram(board, wasm)
+
+
+# -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) ---------------
+# Compiled carts from the launcher, WiFi off -- the state a cart plays in, so
+# before the radio guards. The floors are this board's median drawn fps
+# measured on 2026-09-25, less a margin; the measurements are the owner's to
+# post, and native/moy_wasm/README.md states the per-board ceiling.
+WASM_HELLO_FPS_FLOOR = 27
+WASM_BLIT_FPS_FLOOR = 38
+
+
+@pytest.fixture(scope="module")
+def wasm_carts(board):
+    return on_glass.wasm_carts_push(board, WASM_BOARD_DIR)
+
+
+def test_the_hello_wasm_cart_holds_its_floor(board, wasm_carts):
+    on_glass.wasm_cart_holds_its_floor(board, wasm_carts["hello"],
+                                       WASM_HELLO_FPS_FLOOR,
+                                       check=on_glass.hello_read_its_greeting)
+
+
+def test_a_full_frame_blit_cart_holds_its_floor(board, wasm_carts):
+    on_glass.wasm_cart_holds_its_floor(board, wasm_carts["blit"],
+                                       WASM_BLIT_FPS_FLOOR)
+
+
+# par (moy-spec SPEC.md §16.10): a compiled cart's items on this board's
+# second core leave exactly what running them in order leaves, each on its
+# own stack, and the board's one lane runs some of them.
+def test_par_items_across_the_cores_match_them_in_order(board, wasm_carts):
+    on_glass.wasm_par_matches_items_in_order(board, lanes=1)
+
+
+# A palette frame stays the blit's on a P4 (ESP-IDF disables the PPA's
+# palette mode); a direct-colour one goes to the glass from the cart's memory
+# (the Jet section below), and the board says it lacks the frame fold by
+# absence.
+def test_a_compiled_carts_palette_frames_are_written_into_the_canvas(board, wasm_carts):
+    on_glass.p4_palette_frames_keep_the_blit(board, wasm_carts["blit"])
+
+
+def test_a_compiled_cart_with_no_module_runs_on_the_interpreter(board, wasm_carts):
+    on_glass.wasm_no_module_at_all_runs_on_the_interpreter(board, WASM_BOARD_DIR)
+
+
+def test_a_module_for_another_chip_runs_on_the_interpreter(board, wasm_carts):
+    on_glass.wasm_a_module_for_another_chip_runs_on_the_interpreter(board, WASM_BOARD_DIR)
+
+
+def test_a_stale_format_module_runs_on_the_interpreter(board, wasm_carts):
+    on_glass.wasm_stale_format_module_runs_on_the_interpreter(board, WASM_BOARD_DIR)
+
+
+def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_carts):
+    on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
+
+
+def test_an_unsigned_cart_runs_only_with_unknown_sources_on(board, wasm_carts):
+    on_glass.wasm_unsigned_cart_follows_unknown_sources(board, WASM_BOARD_DIR)
+
+
+def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_carts):
+    on_glass.wasm_too_big_cart_opens_the_notice(board, WASM_BOARD_DIR)
+
+
+def test_a_compiled_cart_for_a_newer_console_opens_the_notice(board, wasm_carts):
+    on_glass.wasm_newer_cart_opens_the_notice(board, WASM_BOARD_DIR)
+
+
+def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
+    on_glass.wasm_read_of_a_folder_reads_nothing(board, WASM_BOARD_DIR)
+
+
+def test_a_compiled_carts_written_files_outlive_its_session(board, wasm_carts):
+    on_glass.wasm_written_files_outlive_the_session(board, WASM_BOARD_DIR)
+
+
+# The compiled tier's showcase, Jet Teapot (ports/jet/README.md), from the
+# launcher: uncapped with WiFi off, in Phong -- the costliest of its three
+# shadings and the steadiest to measure -- at half and at full width. The
+# floors sit about a fifth under what this board drew, its raster on both
+# cores, when they were set (2026-10-01); the figures are #158's. The cart
+# stays installed as it ships.
+JET_HALF_FPS_FLOOR = 26
+JET_FULL_FPS_FLOOR = 22
+
+
+def test_the_jet_showcase_holds_its_floor_at_half_width(board):
+    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_HALF_FPS_FLOOR,
+                                 width="half", shading="phong")
+
+
+def test_the_jet_showcase_holds_its_floor_at_full_width(board):
+    on_glass.jet_holds_its_floor(board, WASM_BOARD_DIR, JET_FULL_FPS_FLOOR,
+                                 shading="phong")
+
+
+# Its blit565 frames go to the glass from the cart's memory: the PPA scales
+# them from there and the GDMA snapshots each into the run's scratch, and
+# nothing writes them into the game canvas (device/p4_canvas.py).
+def test_the_showcases_frames_go_to_the_glass_from_the_cart(board):
+    on_glass.jet_push(board, WASM_BOARD_DIR)
+    on_glass.p4_compiled_frames_go_to_the_glass_from_the_cart(
+        board, on_glass.JET_TITLE, glass=False)
+
+
+# Doom, built by the recipe (experiments/wasm_aot/doom/): skips until the
+# developer has built the cart, which is never in the repository or CI.
+def test_doom_frames_match_the_host(board):
+    on_glass.doom_frames_match_the_host(board, WASM_BOARD_DIR)
+
+
 def test_boots_to_the_desk(board):
     st = board.state()
     assert st.get("desk") is True
@@ -222,3 +386,15 @@ def test_draw_gates_take_the_traffic(board):
 
 def test_the_web_console_is_baked_into_this_image(board):
     on_glass.web_console_is_baked_into_the_image(board)
+
+# -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
+# LAST in the file: both bring WiFi up (released again) and the second starts
+# BLE, and the WiFi driver keeps its internal RAM for the rest of the boot.
+
+
+def test_load_unload_loop_under_a_live_cart_and_wifi(board, wasm):
+    on_glass.wasm_load_unload_under_flush_and_wifi(board, wasm)
+
+
+def test_a_run_with_wifi_and_ble_up_costs_at_most_a_constant(board, wasm):
+    on_glass.wasm_low_water_with_radios_up(board, wasm)

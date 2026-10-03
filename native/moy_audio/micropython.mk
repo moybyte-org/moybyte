@@ -9,8 +9,9 @@
 #   * the webassembly runner -- firmware/web_runner/build.sh stages this
 #     directory into .build/usermods/moy_audio and this fragment is what it
 #     builds. Without ESP_IDF_VERSION the I2S half and the core-1 task compile
-#     out and only the synth + the render entry remain, which is all the runner
-#     needs: it pulls finished PCM per frame and the page plays it.
+#     out and only the synth, a compiled cart's stream and the render entry
+#     remain, which is all the runner needs: it pulls finished PCM per frame
+#     and the page plays it.
 #
 # libmoy/moy_audio.c is SPEC.md 8 itself (see libmoy/UPSTREAM.md) -- it is
 # compiled in, not reimplemented, which is the whole point of the directory.
@@ -21,3 +22,9 @@ SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/modmoy_audio.c
 SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/libmoy/moy_audio.c
 
 CFLAGS_USERMOD += -I$(MOY_AUDIO_MOD_DIR) -I$(MOY_AUDIO_MOD_DIR)/libmoy
+
+# MOY_AUDIO_SND points moycore's compiled tier at this module's stream
+# (moy_audio_snd.h), as the cmake twin does for a board's speaker: in the web
+# runner a compiled cart's `snd` is mixed into what render() hands the page.
+# The unix build carries no wasm engine, so nothing there reads it.
+CFLAGS_USERMOD += -DMOY_AUDIO_SND=1

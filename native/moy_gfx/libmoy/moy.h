@@ -44,7 +44,7 @@
 extern "C" {
 #endif
 
-#define MOY_VERSION "0.3.0"
+#define MOY_VERSION "0.4.0"
 
 /* SPEC.md 1: the console is a fixed-size machine. */
 #define MOY_W            320
@@ -184,9 +184,10 @@ void moy_reset_state(moy_canvas *c);
  * the per-frame half of it.
  *
  * Like cls, this is a COMPOSITING verb rather than a drawing one: it ignores
- * dst's camera, clip and pal, and writes whole rows. Source coordinates are
- * clamped, so a window hanging off the layer copies the edge rather than
- * reading past it. */
+ * dst's camera, clip and pal, and copies rows as they are. Each axis of the
+ * camera is clamped into [0, max(0, src - dst)], so the window never leaves
+ * the layer; where src is smaller than dst, the part of dst past src's edge
+ * is left as it was. */
 void moy_blit_window(moy_canvas *dst, const moy_canvas *src, int cam_x, int cam_y);
 
 /* -- drawing (SPEC.md 6) ------------------------------------------------- */
@@ -229,7 +230,7 @@ void moy_fillp_reset(moy_canvas *c);
 void moy_oval  (moy_canvas *c, int x, int y, int w, int h, int col);
 void moy_ovalb (moy_canvas *c, int x, int y, int w, int h, int col);
 
-/* PROVISIONAL -- SPEC.md 6.1 is unsettled and these are not part of core 0.3. */
+/* SPEC.md 6.1's triangles, filled and outlined. */
 void moy_tri   (moy_canvas *c, int x1, int y1, int x2, int y2, int x3, int y3, int col);
 void moy_trib  (moy_canvas *c, int x1, int y1, int x2, int y2, int x3, int y3, int col);
 

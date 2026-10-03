@@ -1,3 +1,12 @@
+# Map (grep -n a name to jump there):
+#   _Refused              a compiled cart refused before it loads
+#   newer_notice          the notice for a cart built for a newer console
+#   fit_notice            the notice for a cart too big to load
+#   Player                runs one cart: start, tick every frame, always exit
+#   Player.start          start or re-run a cart under make_api
+#   Player.frame_plan     what this loop frame is for the cart
+#   Player.tick           one frame of the running cart
+#   Player.release_world  drop the dead run's world at exit
 """The cart PLAYER -- the run-loop black box (Stage 2 of
 docs/history/shell_ux_technical_plan_v1.md).
 
@@ -261,6 +270,146 @@ def _exc_cart_line(exc, fname="<cart>"):
     return getattr(exc, "lineno", None)            # SyntaxError caught at compile
 
 
+# The cart runtimes a manifest may name besides the console's own Python, and
+# how the runtime-missing panel says each. A build carries a runtime when
+# `ws.runtimes` maps its name to a factory; an absent key is the panel.
+RUNTIME_NAMES = {"lua": "Lua", "wasm": "wasm"}
+
+
+def _compiled(cart):
+    """True for a compiled ("runtime": "wasm") cart: no source to show, no
+    line to mark, no EDIT action on its error panel."""
+    return (cart or {}).get("runtime") == "wasm"
+
+
+# A compiled cart bigger than this console can hold (docs/wasm_tier_plan_2026-09.md:
+# a cart above the floor is allowed, and a board that cannot fit it says so).
+# It is refused before it loads, on the runtime-missing panel's mechanism --
+# the run never starts and cart_error holds the text -- and the panel is drawn
+# as a NOTICE rather than an error: nothing went wrong, the cart is bigger than
+# this console. A load that still runs out of memory gets the same notice; the
+# engines on every tier begin that failure's text with _OUT_OF_MEMORY.
+NOTICE_TITLE = "Too big for this console."
+_OUT_OF_MEMORY = "out of memory"
+
+# A compiled cart whose module imports a name this console's import table
+# lacks was built for a newer console (moy-spec SPEC.md 16.3), and is refused
+# the same way, before it loads, with a notice naming what is missing: never
+# a load error, never a trap when the cart first calls the import. Every
+# tier's runtime answers `missing(cart)` through one comparison,
+# device/moycore_glue.missing_imports.
+NEWER_TITLE = "Needs a newer console."
+_MB = 1024 * 1024
+
+# A compiled cart whose module does not run natively on this console -- none
+# for this chip and compiled-code format, one with no signature while the
+# owner has Unknown sources off, or one whose content is corrupt -- is never
+# refused for it (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+# firmware", 2026-09-30): device/moycore_glue.WasmRun retries it on the
+# interpreter before this layer ever sees an error, so the cart plays, only
+# slower, and INTERP_NOTICE is the short system NOTICE that says so
+# (`ws.notice`, runtime/console_notices.py's `_draw_notice` -- the same body
+# "MOYBYTE UPDATED" uses, never `_draw_toast`'s achievement banner, and it
+# expires on its own rather than needing a dismissal). A module whose
+# SIGNATURE is present and does not verify keeps the ordinary error panel --
+# that module was changed after it was signed, which is tamper evidence, not
+# staleness, and no switch and no interpreter runs it.
+#
+# The sub-line says what to do, by cause (`WasmRun.interp_cause`): a cart
+# with no module by this console's own name -- none built yet, or one left
+# over from a format this console has moved past -- needs a fresh build;
+# one whose module matched but carried no signature while Unknown sources is
+# off is simply not signed; one whose module calls a helper this firmware's
+# runtime does not register is waiting on the CONSOLE, not the cart. Any
+# other non-tamper refusal (a corrupt or foreign-chip key despite a matching
+# file name) reads the same as "missing": this console's copy is not one it
+# can use, whatever the reason.
+INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
+INTERP_NOTICE_SUB = {
+    "missing": "needs an update",
+    "unsigned": "isn't signed",
+    "firmware": "console needs an update",
+}
+INTERP_NOTICE_SUB_DEFAULT = INTERP_NOTICE_SUB["missing"]
+
+
+class _Refused(Exception):
+    """A compiled cart refused before it loads: args are the notice and
+    the title it is drawn under."""
+
+
+def newer_notice(title, missing):
+    """The notice for a cart whose module imports `missing`, names this
+    console's import table lacks."""
+    return ("%s needs a newer console (missing: %s). Update the firmware."
+            % (title or "This game", ", ".join(missing)))
+
+
+def _mb(n, up):
+    """`n` bytes as MB to one decimal, rounded UP for what a cart needs and
+    DOWN for what the console has, so a refusal never reads as a fit."""
+    tenths = (int(n) * 10 + (_MB - 1 if up else 0)) // _MB
+    return "%d.%d MB" % (tenths // 10, tenths % 10)
+
+
+def fit_notice(title, need, have):
+    """The notice for a cart whose load needs `need` -- (total, largest
+    block) -- where the console has `have` -- (free, largest free block):
+    the cart, what it needs and what this console has free. Either figure
+    may be None when it could not be read; the notice then says what it can."""
+    title = title or "This game"
+    if need is None or have is None:
+        return "%s needs more memory than this console has free." % title
+    total, block = need
+    free, largest = have
+    if total > free:
+        return ("%s needs %s of memory to run. This console has %s free."
+                % (title, _mb(total, True), _mb(free, False)))
+    if block > largest:
+        return ("%s needs %s of memory in one piece. The biggest piece this "
+                "console has free is %s." % (title, _mb(block, True),
+                                              _mb(largest, False)))
+    return ("%s needs %s of memory to run. This console has %s free, but not "
+            "in pieces it can use." % (title, _mb(total, True), _mb(free, False)))
+
+
+def _cart_fit(make, cart):
+    """(need, have) from a runtime that can say what a cart's load takes
+    (`footprint`) and what it can give (`memory`), or None when it cannot:
+    a runtime with no such report, a cart with nothing to measure, or a
+    report that failed -- the load then answers for itself."""
+    fp = getattr(make, "footprint", None)
+    mem = getattr(make, "memory", None)
+    if fp is None or mem is None:
+        return None
+    try:
+        need = fp(cart)
+        if need is None:
+            return None
+        return need, mem()
+    except Exception:  # noqa: BLE001 -- a report is advisory; the load decides
+        return None
+
+
+def _cart_missing(make, cart):
+    """What the cart imports that the runtime's table lacks, from a runtime
+    that can say (`missing`), or None: a runtime with no such report, a cart
+    that imports nothing missing, or a report that failed -- the load then
+    answers for itself."""
+    fn = getattr(make, "missing", None)
+    if fn is None:
+        return None
+    try:
+        return fn(cart) or None
+    except Exception:  # noqa: BLE001 -- a report is advisory; the load decides
+        return None
+
+
+def _out_of_memory(exc):
+    """True for a start that failed for want of memory."""
+    return isinstance(exc, MemoryError) or _OUT_OF_MEMORY in _err_text(exc)
+
+
 def _lua_err_text(exc):
     """_err_text minus any appended "stack traceback:" block (#67 Phase 5): the
     panel is the same kid-short one-liner on every backend, and the raise
@@ -404,6 +553,9 @@ class Player:
         self._update = None
         self._draw = None
         self.cart_error = None        # last cart failure text -> on-canvas error panel
+        self._notice = None           # a notice's text: the panel is a notice
+                                      # while cart_error still holds it (`notice`)
+        self._notice_title = NOTICE_TITLE  # ...and the title it is drawn under
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self.crash_file = None        # WHICH of the cart's scripts that line is in
                                       # (SPEC.md 4), or None for main/no crash
@@ -436,9 +588,12 @@ class Player:
         self._app_id = None           # the crash guard's key for this run (#160), or None
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
-        self._lua = None              # #67: the running "lua" cart's runtime state (a
-                                      # ws.lua_runtime handle; _close_lua() on exit so a
-                                      # cart's whole Lua heap dies with its run)
+        self._lua = None              # #67: the running runtime cart's state -- the
+                                      # handle a ws.runtimes factory returned, Lua or
+                                      # wasm; _close_lua() on exit so the cart's whole
+                                      # heap dies with its run
+        self._lua_split = None        # its frame_split, bound ONCE per run: _run_ticks
+                                      # asks after every tick
         self._sram_run = None         # #211: the Lua allocator's headroom report for the
                                       # run that ENDED, kept until the next run starts
         self._net = None              # #65: the running cart's net.* service, when it
@@ -592,6 +747,7 @@ class Player:
         the exit path -- the state is unreachable either way and gc finishes it."""
         lua = self._lua
         self._lua = None
+        self._lua_split = None
         if lua is not None:
             try:
                 lua.close()
@@ -906,7 +1062,9 @@ class Player:
         upd_ms = upd_us // 1000
         render_ms = render_us // 1000
         audio_ms = audio_us // 1000
-        if upd_ms < 10 or not self._diag_enabled():
+        # PERF DIAG's alone: a periodic line, and the HUD a kid can tap on
+        # (perf_hud) is no measurement session.
+        if upd_ms < 10 or not getattr(self.ws, "diag_live", False):
             return
         now = _ticks_ms()
         if self._slow_logic_next and _ticks_diff(now, self._slow_logic_next) < 0:
@@ -1004,8 +1162,8 @@ class Player:
         src = project.cart["src"]
         _rt = project.cart.get("runtime", "python")
         if _rt != "python":
-            ok = self._start_lua(_rt, ns, src, t0, h0,
-                                 (t_reclaim, t_audio, t_api))
+            ok = self._start_runtime(_rt, ns, src, t0, h0,
+                                     (t_reclaim, t_audio, t_api))
             if ok:
                 self._arm_pacing(cart)
             return ok
@@ -1491,6 +1649,7 @@ class Player:
         and _draw (the Lua tier)."""
         upd = self._update
         lua = self._lua
+        fs = self._lua_split
         te = self._tick_edges
         inp = self.ws.input
         sched = self.sched
@@ -1520,43 +1679,69 @@ class Player:
                 # its declared speed, which is the exact slowdown the tick
                 # model exists to refuse. The DRAWBRK split already asks this
                 # runtime the same question for the same reason.
-                _fs = getattr(lua, "frame_split", None) if lua is not None else None
-                if _fs is not None:
-                    _sp = _fs()
+                if fs is not None:
+                    _sp = fs()
                     if _sp is not None:
                         cost = _sp[0] / 1000.0        # ms -> s, the update half
                 sched.note_tick(cost)
 
-    def _start_lua(self, runtime, ns, src, t0, h0, t_pre):
-        """Start a "runtime": "lua" cart (#67 Phase 2) through the injected
-        `ws.lua_runtime` factory -- runtime/lua_host.MoycoreHostRun on the
-        host, moycore_glue's runtime on the device. The cart gets
-        the SAME make_api namespace a Python cart got (the factory registers
-        those callables as the cart's Lua globals), so permission gating, pmem,
+    def _start_runtime(self, runtime, ns, src, t0, h0, t_pre):
+        """Start a cart on a runtime other than the console's Python: `"lua"`
+        (#67) or `"wasm"` (docs/wasm_tier_plan_2026-09.md), through the factory
+        `ws.runtimes` maps it to -- runtime/lua_host.MoycoreHostRun or
+        runtime/wasm_host.WasmHostRun on the host, moycore_glue's runs on the
+        device. The cart gets the SAME make_api namespace a Python cart got
+        (a Lua factory registers those callables as the cart's globals; a wasm
+        one reads its config and pmem from it), so permission gating, pmem,
         audio and quit() semantics are identical by construction. No
         auto-native, no code cache -- those are Python-compiler concerns. A
-        missing runtime or a Lua load/_init error lands on the normal cart
-        error panel (crash-line mapping for Lua tracebacks is Phase 5)."""
+        runtime this build lacks is an ABSENT KEY, and it and a load/_init
+        error land on the normal cart error panel."""
         ws = self.ws
         t_reclaim, t_audio, t_api = t_pre
         # Same measurement-mode gate as start(): no heap walks in kid mode.
         _hs = _heap_stats if self._diag_enabled() else (lambda: (-1, -1))
         self._native_ins = None        # RUNSTART diag: no auto-native on this path
         self._native_fail = None
-        make_lua = getattr(ws, "lua_runtime", None)
+        make = (getattr(ws, "runtimes", None) or {}).get(runtime)
         t5 = _ticks_ms()
         t_exec = -1
         t_init = -1
         lua = None
         try:
-            if runtime != "lua":
+            if runtime not in RUNTIME_NAMES:
                 raise ValueError("unknown cart runtime '%s'" % runtime)
-            if make_lua is None:
-                # The graceful floor: a lua cart on a build without the runtime
-                # (today: every device build) opens the panel, never a hang.
-                raise RuntimeError("needs the Lua runtime "
-                                   "(not in this build yet)")
-            lua = make_lua(ns, src)
+            if make is None:
+                # The graceful floor: a cart on a build without its runtime
+                # opens the panel, never a hang.
+                raise RuntimeError("needs the %s runtime (not in this build)"
+                                   % RUNTIME_NAMES[runtime])
+            if runtime == "wasm":
+                # A compiled cart's imports against this console's table, and
+                # its load footprint against what this console can give it,
+                # before anything loads.
+                cart = ws.cart or {}
+                missing = _cart_missing(make, cart)
+                if missing:
+                    raise _Refused(newer_notice(cart.get("title"), missing),
+                                   NEWER_TITLE)
+                fit = _cart_fit(make, cart)
+                if fit is not None and (fit[0][0] > fit[1][0]
+                                        or fit[0][1] > fit[1][1]):
+                    raise _Refused(fit_notice(cart.get("title"), fit[0], fit[1]),
+                                   NOTICE_TITLE)
+            lua = make(ns, src)
+            if runtime == "wasm" and getattr(lua, "interp", False):
+                # Not an error and not a panel: the cart plays, on the
+                # interpreter rather than the module this console wanted.
+                # The sub-line names the cause; an unrecognised or absent one
+                # (a fixture, or a runtime that predates interp_cause) reads
+                # as "missing", the more common case.
+                notice = getattr(ws, "notice", None)
+                if notice is not None:
+                    sub = INTERP_NOTICE_SUB.get(getattr(lua, "interp_cause", None),
+                                                INTERP_NOTICE_SUB_DEFAULT)
+                    notice(INTERP_NOTICE_TITLE, sub, "warn")
             t_exec = _ticks_diff(_ticks_ms(), t5)
             t6 = _ticks_ms()
             if lua.init is not None:
@@ -1571,18 +1756,40 @@ class Player:
             self.cart_error = _lua_err_text(exc)
             # a load/syntax or _init error carries its `cart:N:` position, so
             # EDIT drops on the line exactly like a Python SyntaxError (#24) --
-            # and on a cart of several scripts, in the FILE that raised.
-            self.crash_file, self.crash_line = _lua_cart_where(
-                self.cart_error, self.ws.cart)
+            # and on a cart of several scripts, in the FILE that raised. A
+            # compiled cart has no line to drop on; one built for a newer
+            # console gets the newer-console notice, and one this console
+            # cannot hold gets the fit notice, whether the check refused it or
+            # its load ran out of memory. Every OTHER compiled-cart refusal
+            # (no/stale module, unsigned with the switch off) was already
+            # retried on the interpreter inside WasmRun -- what reaches here
+            # is a real error (a trap, a bad signature, a malformed cart).
+            if runtime == "wasm":
+                self.crash_file, self.crash_line = None, None
+                title = (ws.cart or {}).get("title")
+                if isinstance(exc, _Refused):
+                    self._notice = self.cart_error = exc.args[0]
+                    self._notice_title = exc.args[1]
+                elif _out_of_memory(exc):
+                    print("Moybyte cart load:", self.cart_error)
+                    fit = _cart_fit(make, ws.cart or {})
+                    self._notice = self.cart_error = fit_notice(
+                        title, fit[0] if fit else None, fit[1] if fit else None)
+                    self._notice_title = NOTICE_TITLE
+            else:
+                self.crash_file, self.crash_line = _lua_cart_where(
+                    self.cart_error, self.ws.cart)
             self.ns = ns
             h1 = _hs()
             self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
                                 _ticks_diff(_ticks_ms(), t0),
                                 h0[0], h1[0], h0[1], h1[1])
             self._print_run_diag("RUNERR", "err=%s" % self.cart_error)
-            print("Moybyte cart error:", self.cart_error)
+            print("Moybyte cart %s:" % ("notice" if self.notice else "error"),
+                  self.cart_error)
             return False
         self._lua = lua
+        self._lua_split = getattr(lua, "frame_split", None)
         self.cart_error = None
         self.crash_line = None
         self.crash_file = None
@@ -1644,7 +1851,10 @@ class Player:
                 # not. No-op when the cart has no net permission.
                 if self._net is not None:
                     self._net.pump()
-                dt, stalled, np = self._lockstep_step(ws, dt)
+                np = self._netplay
+                stalled = False
+                if np is not None:            # a match: its clock, its stall
+                    dt, stalled, np = self._lockstep_step(ws, dt)
                 # MICROSECONDS, not ms. These three brackets and the backdrop one
                 # above feed DRAWBRK's split, and `chrome` is what is left after
                 # subtracting them from the frame -- on a ms clock every one of
@@ -1673,7 +1883,7 @@ class Player:
                     # still say where its own time went, in microseconds, so ask
                     # -- otherwise every logic/render pair this project has
                     # recorded since #67 becomes incomparable to the next one.
-                    _fs = getattr(self._lua, "frame_split", None)
+                    _fs = self._lua_split
                     if _fs is not None:
                         _sp = _fs()
                         if _sp is not None:
@@ -1786,7 +1996,12 @@ class Player:
         # mark the line on EDIT (#24): a Lua cart's line comes from the
         # error text's `cart:N:` position (#67 Phase 5); a Python cart's
         # from the traceback, mapped back through the nativize insert.
-        if self._lua is not None:
+        if self._lua is not None and _compiled(ws.cart):
+            # A trap: the run already cleared its canvas, and there is no
+            # source line to mark (docs/wasm_tier_plan_2026-09.md).
+            self.cart_error = _lua_err_text(exc)
+            self.crash_file, self.crash_line = None, None
+        elif self._lua is not None:
             self.cart_error = _lua_err_text(exc)
             self.crash_file, self.crash_line = _lua_cart_where(
                 self.cart_error, ws.cart)
@@ -1859,6 +2074,8 @@ class Player:
         # (a crash disarms the pacing itself, so the panel is never starved).
         if not render:
             return
+        if self.cart_error is not None or self._is_tool or self._home_holding:
+            ws.settle_cart_frame()          # the chrome below draws over the frame
         # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full
         # 320x240 with NO chrome (the #71 pause frame is gone). The ONLY chrome left
         # is the CRASH panel + its top bar, so EDIT/CODE stay reachable to fix the cart.
@@ -1954,11 +2171,22 @@ class Player:
 
     # -- crash chrome + the transient exit toast (the Player's own UX) --------
 
+    @property
+    def notice(self):
+        """A notice's text while it is the panel up, else None: a compiled
+        cart refused before it loaded, for want of room, of a signature or of
+        an import this console has."""
+        n = self._notice
+        return n if n is not None and n == self.cart_error else None
+
     def _draw_error_panel(self, cv=None):
         # A friendly on-canvas crash report (the device never reaches serial, so
         # this is the ONLY error surface). Drawn with the indexed API only: a red
         # box + a short title + the exception text, word-wrapped and truncated to
         # fit. The CODE/EDIT button below it stays live so the kid can fix the cart.
+        # A notice is the same panel in calmer colours under its own title:
+        # nothing went wrong, the cart is bigger than this console, needs a
+        # newer one, or is not signed.
         # `cv` defaults to the GAME canvas (a crashed running cart); the system-
         # domain cards tab passes ws.sys_canvas so its defensive fallback stays
         # visible on a distinct system canvas (#39 step 3).
@@ -1972,16 +2200,24 @@ class Player:
         h = min(132, cv.h - 16)
         x = (cv.w - w) // 2
         y = min(40, (cv.h - h) // 2)
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["red"])
-        cv.rect(x, y, w, 14, NAMES["red"])
-        cv.print("Your game stopped.", x + 6, y + 4, NAMES["white"], 1)
+        notice = self.notice is not None
+        edge = NAMES["orange"] if notice else NAMES["red"]
+        cv.rect(x, y, w, h, NAMES["dark_blue"] if notice else NAMES["dark_purple"])
+        cv.rectb(x, y, w, h, edge)
+        cv.rect(x, y, w, 14, edge)
+        cv.print(self._notice_title if notice else "Your game stopped.", x + 6, y + 4,
+                 NAMES["black"] if notice else NAMES["white"], 1)
         cols = (w - 16) // 8                       # 8px monospace cells
         lines = _wrap(self.cart_error or "Unknown error", cols)
         max_rows = (h - 30) // _CODE_LH
+        ink = NAMES["white"] if notice else NAMES["peach"]
         for i in range(min(len(lines), max_rows)):
-            cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, NAMES["peach"], 1)
-        cv.print("TAP CODE TO SEE WHY", x + 8, y + h - 12, NAMES["yellow"], 1)
+            cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, ink, 1)
+        # A compiled cart's trap has no source line behind it and no EDIT
+        # action, so the panel points at the way out instead.
+        hint = ("TAP HOME TO LEAVE" if _compiled(self.ws.cart)
+                else "TAP CODE TO SEE WHY")
+        cv.print(hint, x + 8, y + h - 12, NAMES["yellow"], 1)
 
     def _draw_hold_progress(self):
         """The TRANSIENT hold-to-exit affordance (Stage 5, spec Section 12): a small

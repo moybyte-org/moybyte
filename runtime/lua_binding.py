@@ -90,10 +90,10 @@ def build(verbose=False):
     lua = _lua_names()
     if not lua or not os.path.isfile(os.path.join(_BINDING_DIR, "moy_lua.c")):
         return None
-    names = list(_RASTER) + ["moy_lua.c", "moy_p8.c"] + lua
+    names = list(_RASTER) + ["moy_lua.c", "moy_p8.c", "moyhost_console.h"] + lua
     return native_build.build(
         "moyhost_lua", _SHIM, names, _CACHE, cflags=_CFLAGS,
-        libmoy_dir=(_LIBMOY, _BINDING_DIR, _LUA),
+        libmoy_dir=(_LIBMOY, _BINDING_DIR, _LUA, _HERE),
         # Lua's own math (pow/fmod/floor) -- a no-op against glibc >= 2.34,
         # which folded libm into libc, and required everywhere older.
         link_flags=["-lm"], verbose=verbose)
@@ -118,6 +118,7 @@ def _lib():
             d.hl_set_sheet.argtypes = [_P, _P, _I]
             d.hl_set_map.argtypes = [_P, _P, _I, _I, _I]
             d.hl_set_flags.argtypes = [_P, _P, _I]
+            d.hl_set_cfg.argtypes = [_P, _P, _I]
             d.hl_retarget.argtypes = [_P, _P]
             d.hl_load.argtypes = [_P, ctypes.POINTER(_C), ctypes.POINTER(_I),
                                   ctypes.POINTER(_C), _I, _P, _I]
@@ -149,6 +150,27 @@ def _lib():
             d.hl_free.argtypes = [_P]
             _LIB[0] = d
     return _LIB[0] or None
+
+
+def cfg_blob(cfg):
+    """A config dict as the "key\\0value\\0" table moyhost_console.h's h_cfg
+    reads: a string without its quotes, a boolean as 1/0, a number as
+    config.json spells it -- modmoycore.c's h_cfg rules, so a cart reads the
+    same text on the host as on a board."""
+    out = bytearray()
+    for k, v in sorted((cfg or {}).items()):
+        if isinstance(v, bool):
+            text = "1" if v else "0"
+        elif isinstance(v, int):
+            text = "%d" % v
+        elif isinstance(v, float):
+            text = "%.7g" % v
+        elif isinstance(v, str):
+            text = v
+        else:
+            continue                   # a list/dict/None is not a value
+        out += str(k).encode() + b"\0" + text.encode() + b"\0"
+    return bytes(out)
 
 
 SNAP_LEN = 14
@@ -197,7 +219,7 @@ class HostLuaRun:
         return _lib() is not None
 
     def __init__(self, buf, w, h, sheet=None, tilemap=None, wire=None,
-                 indexed=None, flags=None):
+                 indexed=None, flags=None, cfg=None):
         d = _lib()
         if d is None:
             raise RuntimeError("no host lua binding")
@@ -252,6 +274,9 @@ class HostLuaRun:
             # the run keeps pointing at.
             blob = bytes(flags)
             d.hl_set_flags(self._r, ctypes.c_char_p(blob), len(blob))
+        blob = cfg_blob(cfg)
+        if blob:
+            d.hl_set_cfg(self._r, ctypes.c_char_p(blob), len(blob))
 
     # The dispatch callback's C signature; kept alive on the instance because
     # ctypes will collect a CFUNCTYPE object the C side is still holding.

@@ -102,13 +102,13 @@ def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
     moycore one, and a frame must reach the canvas."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    assert ws.lua_runtime is not None
+    assert ws.runtimes.get("lua") is not None
     ns = ws.make_api(ws.canvas, ws.input, {}, ws.sheet, ws.audio,
                      ws.tilemap, ws.pmem, None, {})
     src = ("local n = 0\n"
            "function _update(dt) n = n + 1 end\n"
            "function _draw() cls(0) rect(0, 0, n * 3, 5, 8) end\n")
-    run = ws.lua_runtime(ns, src)
+    run = ws.runtimes["lua"](ns, src)
     try:
         assert isinstance(run, lua_host.MoycoreHostRun), \
             "the cart did not run on the boards' Lua"

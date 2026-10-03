@@ -898,12 +898,13 @@ static mp_obj_t moy_gfx_line(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_line_obj, 14, 14, moy_gfx_line);
 
-// blit_window(dst, dw, dh, src, src_w, sx, sy) -- copy a dw x dh window from a wider
+// blit_window(dst, dw, dh, src, src_w, sx, sy) -- copy a dw x dh window from an
 // RGB565 `src` (src_w px/row) at (sx, sy) into `dst` (dw px/row, contiguous). The scroll
 // engine's core op (#43): a flat per-row memcpy, no tile lookup / colorkey / scale, so
 // it's far cheaper than re-running map() over a scrolling background -- the cart pre-
 // renders the level into a wide buffer once, then each frame blits the camera window.
-// Bounds-clamped to both buffers.
+// Bounds-clamped to both buffers: where the source runs out before the window does,
+// the rest of `dst` is left as it was.
 static mp_obj_t moy_gfx_blit_window(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     size_t dcap, scap;
@@ -1730,134 +1731,6 @@ void moy_gfx_capi_tline(moy_gfx_draw_ctx_t *c, int x0, int y0, int x1, int y1,
     moy_tline(&mc, &s, &m, x0, y0, x1, y1, u, v, du, dv, ck);
 }
 
-// decode_runs(dst, npix, packed) -> pixels written, or -1 on a corrupt stream.
-// Expands a MOY64 run-length stream -- byte pairs (count, value), count >= 1,
-// value <= 63 -- into an indexed bitmap. The cover-art decode (#155).
-//
-// This is the operation the whole time-sliced _CoverJob machinery existed for:
-// interpreted, one 320x240 cover cost 0.5-1.7s, so it had to be spread over
-// frames and cached to a sidecar. In C it is a memset loop. That also undoes the
-// sidecar trade: the raw source is 77KB and this board reads its internal flash
-// at ~470KB/s (measured: 164ms per source read), while the RLE blob it came from
-// is a fraction of the size -- so reading the small blob and decoding natively
-// beats reading a big pre-decoded one.
-static mp_obj_t moy_gfx_decode_runs(mp_obj_t dst_obj, mp_obj_t npix_obj,
-                                    mp_obj_t packed_obj) {
-    mp_buffer_info_t dbi, pbi;
-    mp_get_buffer_raise(dst_obj, &dbi, MP_BUFFER_WRITE);
-    mp_get_buffer_raise(packed_obj, &pbi, MP_BUFFER_READ);
-    mp_int_t total = mp_obj_get_int(npix_obj);
-    if (total < 0 || (size_t)total > dbi.len) {
-        return MP_OBJ_NEW_SMALL_INT(-1);
-    }
-    uint8_t *dst = (uint8_t *)dbi.buf;
-    const uint8_t *p = (const uint8_t *)pbi.buf;
-    size_t n = pbi.len & ~(size_t)1;          // whole (count, value) pairs only
-    mp_int_t pos = 0;
-    for (size_t i = 0; i < n; i += 2) {
-        mp_int_t count = p[i];
-        uint8_t value = p[i + 1];
-        if (count < 1 || value > 63 || pos + count > total) {
-            return MP_OBJ_NEW_SMALL_INT(-1);
-        }
-        memset(dst + pos, value, (size_t)count);
-        pos += count;
-    }
-    return MP_OBJ_NEW_SMALL_INT(pos);
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_decode_runs_obj, moy_gfx_decode_runs);
-
-// encode_runs(src) -> the (count, value) byte pairs decode_runs reads back.
-//
-// The other half of the pair, and native for the same reason: interpreted, a
-// 320x240 walk is the 0.5-1.7s the time-sliced cover builder was built around.
-// It is reached from moy_image.pack_runs, which is how a cover blob becomes the
-// runs the Library shelf caches -- since 2026-09-07 a .moyimg holds a deflate
-// stream, so the runs are DERIVED from the raster rather than read off the file.
-//
-// Two passes: count the runs, then allocate exactly that. The one-pass version
-// has to size for the worst case (2 bytes per pixel -- 150 KB for one cover on
-// a board that is trying to draw a shelf), which is the allocation this whole
-// pipeline exists to avoid.
-static mp_obj_t moy_gfx_encode_runs(mp_obj_t src_obj) {
-    mp_buffer_info_t sbi;
-    mp_get_buffer_raise(src_obj, &sbi, MP_BUFFER_READ);
-    const uint8_t *src = (const uint8_t *)sbi.buf;
-    size_t total = sbi.len;
-    size_t pairs = 0;
-    for (size_t pos = 0; pos < total; ) {
-        uint8_t value = src[pos] & 63;
-        size_t count = 1;
-        while (pos + count < total && count < 255 && (src[pos + count] & 63) == value) {
-            count++;
-        }
-        pairs++;
-        pos += count;
-    }
-    vstr_t vstr;
-    vstr_init_len(&vstr, pairs * 2);
-    uint8_t *dst = (uint8_t *)vstr.buf;
-    size_t i = 0;
-    for (size_t pos = 0; pos < total; ) {
-        uint8_t value = src[pos] & 63;
-        size_t count = 1;
-        while (pos + count < total && count < 255 && (src[pos + count] & 63) == value) {
-            count++;
-        }
-        dst[i++] = (uint8_t)count;
-        dst[i++] = value;
-        pos += count;
-    }
-    return mp_obj_new_bytes_from_vstr(&vstr);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_encode_runs_obj, moy_gfx_encode_runs);
-
-// crop_index(dst, dw, dh, src, sw, sh, ox, oy, cw, ch) -- nearest-sample the
-// (ox, oy, cw, ch) window of an INDEXED source (1 byte/pixel) into a dw x dh
-// indexed destination. The cover-art crop (#155).
-//
-// Covers are MOY64 indices, not RGB565, so this stays in the index domain: the
-// shared console caches one indexed blittable that the host draws per-pixel and
-// the device bakes to RGB565 once. Routing it through the PPA instead would mean
-// converting to 565 first and handing back a device-only representation, to save
-// a fraction of a millisecond -- the crop is only ~20k pixels. The DECODE was
-// the expensive half (0.5-1.7s) and that is now cached; this is what is left.
-//
-// Reproduces runtime/console.py _CoverJob's crop EXACTLY (same integer floors,
-// same column map), so a native and a Python crop are byte-identical.
-static mp_obj_t moy_gfx_crop_index(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    mp_buffer_info_t dbi, sbi;
-    mp_get_buffer_raise(a[0], &dbi, MP_BUFFER_WRITE);
-    mp_int_t dw = mp_obj_get_int(a[1]);
-    mp_int_t dh = mp_obj_get_int(a[2]);
-    mp_get_buffer_raise(a[3], &sbi, MP_BUFFER_READ);
-    mp_int_t sw = mp_obj_get_int(a[4]);
-    mp_int_t sh = mp_obj_get_int(a[5]);
-    mp_int_t ox = mp_obj_get_int(a[6]);
-    mp_int_t oy = mp_obj_get_int(a[7]);
-    mp_int_t cw = mp_obj_get_int(a[8]);
-    mp_int_t ch = mp_obj_get_int(a[9]);
-    if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 || cw <= 0 || ch <= 0
-        || ox < 0 || oy < 0 || ox + cw > sw || oy + ch > sh
-        || (size_t)(sw * sh) > sbi.len
-        || (size_t)(dw * dh) > dbi.len) {
-        return mp_const_false;
-    }
-    uint8_t *dst = (uint8_t *)dbi.buf;
-    const uint8_t *src = (const uint8_t *)sbi.buf;
-    for (mp_int_t dy = 0; dy < dh; dy++) {
-        const uint8_t *srow = src + (size_t)(oy + dy * ch / dh) * (size_t)sw;
-        uint8_t *drow = dst + (size_t)dy * (size_t)dw;
-        for (mp_int_t dx = 0; dx < dw; dx++) {
-            drow[dx] = srow[ox + dx * cw / dw];
-        }
-    }
-    return mp_const_true;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_crop_index_obj, 10, 10,
-                                           moy_gfx_crop_index);
-
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
 // cropped rects are packed row-by-row in C (the slow Stage 2 Python path).
@@ -2088,9 +1961,6 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_scroll_rect), MP_ROM_PTR(&moy_gfx_scroll_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
     { MP_ROM_QSTR(MP_QSTR_text),       MP_ROM_PTR(&moy_gfx_text_obj) },
-    { MP_ROM_QSTR(MP_QSTR_decode_runs), MP_ROM_PTR(&moy_gfx_decode_runs_obj) },
-    { MP_ROM_QSTR(MP_QSTR_encode_runs), MP_ROM_PTR(&moy_gfx_encode_runs_obj) },
-    { MP_ROM_QSTR(MP_QSTR_crop_index), MP_ROM_PTR(&moy_gfx_crop_index_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },
     #ifdef MOY_GFX_HAS_MEMBENCH
     { MP_ROM_QSTR(MP_QSTR_membench),   MP_ROM_PTR(&moy_gfx_membench_obj) },

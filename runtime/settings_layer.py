@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   -- settings-screen geometry      the Settings constants (console.py imports them back)
+#   -- the settings-toggle registry  the rows a toggle derives
+#   SettingsLayer                    the Settings content layer: rows, panels, flings
+#   SettingsLayer.settings_adjust    step the selected row
+#   SettingsLayer.open_bluetooth     the Bluetooth keyboard picker
+#   SettingsLayer.draw               the Settings app
 """The Settings app (#28/#39/#53), extracted from Workstation (runtime/console.py) as
 its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 
@@ -124,11 +131,13 @@ SETTINGS_TOGGLES = (
     # and a heavy menu does not condemn the game; OFF (FREE) it follows load
     # on every draw frame and judders at transitions. Default ON.
     ("steady", "STEADY", True, "set_steady", None, "steady"),
-    # CRISP PIXELS (#204): nearest-neighbour game composite instead of the
-    # PPA's fixed-bilinear scaler. Sits by STEADY -- both are play-time
-    # quality/perf trades. Default OFF: smooth is the shipped behaviour, and
-    # the trade is sharp pixel art against a real per-frame CPU cost the async
-    # PPA path does not pay.
+    # CRISP PIXELS (#204): nearest-neighbour composite of the palette-based
+    # game -- every cart drawn through the canvas, and a compiled cart's
+    # palette frames -- instead of the PPA's fixed-bilinear scaler; a compiled
+    # cart's direct-colour (blit565) frame keeps the bilinear scale either
+    # way. Sits by STEADY -- both are play-time quality/perf trades. Default
+    # OFF: smooth is the shipped behaviour, and the trade is sharp pixel art
+    # against a real per-frame CPU cost the async PPA path does not pay.
     ("crisp_pixels", "CRISP PIXELS", False, "set_crisp_pixels",
      _gate_crisp_scale, "crisp"),
     # SHOW FPS: the in-game FPS chip (default ON). It rides the GAME canvas and
@@ -136,13 +145,15 @@ SETTINGS_TOGGLES = (
     # -- which is what prompted the off switch. Purely cosmetic: the perf
     # fields keep updating and PERF DIAG is untouched.
     ("show_fps", "SHOW FPS", True, "set_show_fps", None, None),
-    # PERF DIAG (#68 "kid mode" gate): OFF (the kid default) skips the diag
-    # costs a player can FEEL on device -- the 30s forced GC sample
-    # (~130-230ms) and the periodic diag->SD write (~115ms) -- and hushes the
-    # live serial echo. The RAM ring still collects (us-cheap) and still
-    # flushes on crash / cart exit, so "play -> crash -> read diag.log" works
-    # either way. run_desktop reads ws.diag_live each cycle, so a flip lands
-    # within a frame. Host: measurement-only, nothing to gate.
+    # PERF DIAG (#68 "kid mode" gate): OFF (the kid default) writes nothing
+    # periodic on any board -- no PERF line, no T-Deck diag tick, no audio
+    # rate lines, no deep capture meters, no periodic diag->SD write -- because
+    # a player FEELS each of them on device, the lines as garbage the collector
+    # stops the frame for (owner call 2026-09-30). The RAM ring still collects
+    # EVENTS (boot, errors, hitches) and flushes on crash / cart exit, so "play
+    # -> crash -> read diag.log" works either way. The board loop reads
+    # ws.diag_live each cycle, so a flip lands within a frame; a tool that
+    # reads PERF turns it on and puts it back. Host: nothing to gate.
     ("diag_live", "PERF DIAG", False, "set_diag_live", None, None),
     # DIAG SD LOG (#68 follow-up, owner call 2026-07-08): the periodic
     # diag->SD write is its OWN gate -- PERF DIAG ON + this OFF = serial-only
@@ -150,7 +161,33 @@ SETTINGS_TOGGLES = (
     # play-then-read-diag.log workflow. Crash/cart-exit flushes stay
     # unconditional either way (the safety net).
     ("diag_sd", "DIAG SD LOG", False, "set_diag_sd", None, None),
+    # UNKNOWN SOURCES (owner, 2026-09-29, docs/wasm_tier_plan_2026-09.md): a
+    # compiled cart whose module carries no signature may load -- a cart
+    # somebody rebuilt from its source, on their own console. The module's
+    # provenance key is still checked, and one whose signature is present but
+    # does not verify is refused either way (native/moy_wasm/README.md).
+    # Default OFF; ON goes through the warning in TOGGLE_CONFIRMS, OFF is
+    # immediate. Every tier carries the row, though only a board checks
+    # signatures.
+    ("unknown_sources", "UNKNOWN SOURCES", False, "set_unknown_sources", None,
+     "unknown_sources"),
 )
+
+# The toggles whose ON goes through a warning first: key -> (the warning's
+# title, what turning it on means in one or two Spoken sentences, the button
+# that turns it on). A tap, a step or A on the row opens the warning instead of
+# flipping the toggle, and the warning's keyboard focus starts on KEEP OFF, so
+# turning it on is a deliberate move and a press; turning it OFF is immediate.
+# The boot apply and the dev channel's word call the setter directly: neither
+# is somebody deciding at the screen.
+TOGGLE_CONFIRMS = {
+    "unknown_sources": (
+        "UNKNOWN SOURCES",
+        "Unsigned carts can do anything on this console. "
+        "Only run ones you trust.",
+        "TURN ON"),
+}
+KEEP_OFF = "KEEP OFF"
 
 
 class SettingsLayer:
@@ -238,15 +275,24 @@ class SettingsLayer:
         # needs no new attribute here (which is what the two it replaced were).
         self._toggle_cache = None
         self._toggle_gates = [False] * len(SETTINGS_TOGGLES)
+        # The warning a TOGGLE_CONFIRMS toggle shows before it turns ON: the
+        # toggle's key while it is up (it replaces the row list, as the wifi
+        # and bluetooth panels do), and which of its two buttons has the
+        # keyboard -- 0, KEEP OFF, whenever it opens.
+        self.confirm_key = None
+        self.confirm_sel = 0
+        self._confirm_hits = _ui.Hits()
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
         self.set_msel = 0
         self.set_top = 0
+        self._sync_scroll_from_top()
         if self.wifi_view:
             self.close_wifi()
         if self.bt_view:
             self.close_bluetooth()
+        self.confirm_key = None
 
     # -- BLUETOOTH KEYBOARD panel (capability-gated; visual identity v1) ------
 
@@ -774,6 +820,97 @@ class SettingsLayer:
             self._bt_action(action)
         return True
 
+    # -- the warning before a TOGGLE_CONFIRMS toggle turns ON -----------------
+
+    def open_confirm(self, key):
+        """Show `key`'s warning in place of the rows, KEEP OFF focused."""
+        self.confirm_key = key
+        self.confirm_sel = 0
+        self.ws._dirty = True
+
+    def close_confirm(self):
+        """Back to the rows with the toggle as it was."""
+        self.confirm_key = None
+        self.ws._dirty = True
+
+    def _confirm_accept(self):
+        """The confirming button: turn the toggle ON through its verb (which
+        persists it) and go back to the rows."""
+        key = self.confirm_key
+        self.close_confirm()
+        for t in SETTINGS_TOGGLES:
+            if t[0] == key:
+                getattr(self.ws, t[3])(True)
+                return
+
+    def _confirm_input(self, i):
+        """Left/right move the focus between KEEP OFF and the confirming
+        button, A presses the focused one, B backs out with nothing changed."""
+        ws = self.ws
+        if i.pressed("left") and self.confirm_sel != 0:
+            self.confirm_sel = 0
+            ws._dirty = True
+        if i.pressed("right") and self.confirm_sel != 1:
+            self.confirm_sel = 1
+            ws._dirty = True
+        if i.pressed("a") or i.pressed("run"):
+            if self.confirm_sel == 1:
+                self._confirm_accept()
+            else:
+                self.close_confirm()
+        elif i.pressed("b"):
+            self.close_confirm()
+        elif i.pressed("home") or i.pressed("stop"):
+            self.close_confirm()
+            ws.go_home()
+        return True
+
+    def _confirm_pointer(self, px, py, click):
+        """Only the two buttons take a tap; the rest of the panel is text."""
+        if not click:
+            return True
+        hit = self._confirm_hits.at(px, py)
+        if hit is None:
+            return True
+        if hit[0] == "accept":
+            self._confirm_accept()
+        else:
+            self.close_confirm()
+        return True
+
+    def _draw_confirm(self):
+        """The warning, in the Settings body below its title strip: the
+        toggle's name as the panel title, what turning it on means, and the
+        two buttons -- KEEP OFF and the danger-coloured one that turns it on.
+        The draw pass registers both tap targets."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        lay = ws.layout
+        fs = lay.fs
+        fw = lay.font_w
+        _px, py, _pw, ph = lay.settings_panel
+        title, text, yes = TOGGLE_CONFIRMS[self.confirm_key]
+        body = (lay.set_x, lay.set_row_y0, lay.set_w,
+                max(1, py + ph - lay.set_row_y0 - 4 * fs))
+        content = _ui.panel(cv, th, body, title=title, fs=fs)
+        actions_r, text_r = _ui.cut_bottom(content, 24 * fs)
+        tx, ty, tw, th_h = _ui.inset(text_r, 4 * fs, 6 * fs)
+        lh = 12 * fs
+        lines = _ui.wrap_words(text, max(1, tw // fw))
+        for n in range(len(lines)):
+            y = ty + n * lh
+            if y + 8 * fs > ty + th_h:
+                break
+            cv.print(lines[n], tx, y, th["ink"], 1)
+        self._confirm_hits.clear()
+        rects = _ui.hsplit(_ui.inset(actions_r, 3 * fs), 2, 3 * fs)
+        _ui.button(cv, th, rects[0], KEEP_OFF)
+        self._confirm_hits.add(rects[0], "keep")
+        _ui.button(cv, th, rects[1], yes, kind="danger")
+        self._confirm_hits.add(rects[1], "accept")
+        _ui.focus_ring(cv, th, rects[self.confirm_sel], fs)
+
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
 
     def draw_zone(self, cv, rect):
@@ -910,7 +1047,11 @@ class SettingsLayer:
         ws = self.ws
         for t in SETTINGS_TOGGLES:
             if t[0] == key:
-                getattr(ws, t[3])(not getattr(ws, key, False))
+                on = not getattr(ws, key, False)
+                if on and key in TOGGLE_CONFIRMS:
+                    self.open_confirm(key)
+                    return
+                getattr(ws, t[3])(on)
                 return
 
     def settings_adjust(self, d):
@@ -964,23 +1105,62 @@ class SettingsLayer:
         area = (lay.set_x, lay.set_row_y0, lay.set_w,
                 self._settings_visible() * lay.set_row_h)
         self.scroll.set(area, len(rows) * lay.set_row_h)
-        # Keep the sub-row remainder while a drag is active.  Re-snapping from
-        # set_top on every pointer sample discards normal 3-5px finger movement,
-        # so a gradual drag can never accumulate enough travel to cross a row.
-        if not self.scroll.drag_active:
-            self.scroll.offset = self.set_top * lay.set_row_h
         return self.scroll
+
+    def rows_flinging(self):
+        """True while a released kinetic fling is coasting the rows (#113).
+        The console's redraw gate reads it -- a fling is a per-frame change with
+        no input behind it, which is exactly what the gate exists to notice."""
+        return self.scroll is not None and self.scroll.animating
+
+    def rows_anim_frame(self, dt):
+        """Advance a live fling one frame (dt in SECONDS, the loop's tick),
+        called at the top of the draw so the painted offset is this frame's.
+
+        set_top follows the coasting offset the same way it follows a drag, so
+        the cues and the keyboard clamp stay consistent with the pixels. The
+        selection is NOT dragged along: a fling is a look-around, and yanking
+        the highlight through a dozen rows on the way past is not what the
+        finger asked for -- the range clamp in handle_input still guarantees it
+        cannot strand anything.
+        """
+        sr = self.scroll
+        if sr is None or not sr.animating:
+            return False
+        if not sr.tick(dt * 1000.0):
+            return False
+        rows = len(self._settings_rows())
+        vis = self._settings_visible()
+        top = int(sr.offset) // self.ws.layout.set_row_h
+        self.set_top = max(0, min(max(0, rows - vis), top))
+        return True
+
+    def _sync_scroll_from_top(self):
+        """Push set_top into the region's pixel offset -- the ONE direction the
+        row slot drives the pixels.
+
+        The region carries the offset a finger produced and set_top follows it
+        (`_rows_pointer`); this is the opposite push, for the movers that think
+        in ROWS: a d-pad step, a reset, the range clamp. Re-snapping outside
+        those used to happen on every pointer sample, which is what discarded
+        the sub-row remainder and made the list travel a row at a time.
+        """
+        if self.scroll is not None:
+            self.scroll.offset = self.set_top * self.ws.layout.set_row_h
+            self.scroll.stop()        # a row-aligned jump kills a live fling
 
     def _rows_pointer(self, px, py, click):
         """The row list's pointer machine -- the SAME shared ui.DragTap the
-        Library shelf rides: a held drag scrolls the rows (snapped to whole
-        rows; set_top stays the state of record), and a row activates only on
-        a clean tap RELEASE -- so letting go of a scroll can never 'click' the
-        row under the finger. Returns True when it consumed a tap."""
+        Library shelf rides: a held drag scrolls the rows by PIXELS (the region
+        owns the offset, set_top follows it as the row-slot state of record),
+        and a row activates only on a clean tap RELEASE -- so letting go of a
+        scroll can never 'click' the row under the finger. Returns True when it
+        consumed a tap."""
         ws = self.ws
         sr = self._scroll_region()
         press = self._taps.frame(px, py, click, ws.pointer.down,
-                                 slop=4 * ws.layout.fs + 2)
+                                 slop=4 * ws.layout.fs + 2,
+                                 dt_ms=ws._pointer_dt_ms)
         if self._taps.dragging:
             rows = len(self._settings_rows())
             vis = self._settings_visible()
@@ -1012,14 +1192,49 @@ class SettingsLayer:
         rows = len(self._settings_rows())
         vis = self._settings_visible()
         self.set_top = self._clamp_scroll(self.set_top, self.set_msel, vis, rows)
+        self._sync_scroll_from_top()   # a d-pad step lands row-aligned
+
+    def _rows_viewport(self):
+        """The band the rows occupy -- the SAME rect the ScrollRegion measures its
+        view by, so the clip and the scroll extent cannot drift apart."""
+        lay = self.ws.layout
+        return (lay.set_x, lay.set_row_y0, lay.set_w,
+                self._settings_visible() * lay.set_row_h)
+
+    def _scroll_px(self):
+        """The live offset's SUB-ROW remainder in pixels -- the whole of what
+        makes this list travel by pixels instead of snapping a row at a time.
+
+        set_top remains the row-slot state of record (the cues, the keyboard
+        clamp and the selection all think in rows); the region underneath it
+        carries what a finger actually moved. Rows draw at their slot MINUS this
+        remainder. Zero when no region exists yet, which is the old slot
+        arithmetic exactly -- a keyboard-only tier never builds one.
+        """
+        sr = self.scroll
+        if sr is None:
+            return 0
+        d = int(sr.offset) - self.set_top * self.ws.layout.set_row_h
+        # A region left stale by a shrinking row set or a font-scale change can
+        # hold an offset that no longer belongs to set_top. A remainder outside
+        # one row says the two have diverged, and the slot is the one to trust.
+        return d if 0 <= d < self.ws.layout.set_row_h else 0
 
     def _settings_row_visible(self, i):
-        return self.set_top <= i < self.set_top + self._settings_visible()
+        # A pixel offset puts a PARTIAL row at each edge, so visibility is a band
+        # intersection rather than a slot range: row i shows whenever its own band
+        # overlaps the viewport at all. The draw clips to that viewport, and the
+        # pointer loop hit-tests the real rect -- so a half-row is tappable exactly
+        # where it is drawn, and never outside the panel.
+        _vx, vy, _vw, vh = self._rows_viewport()
+        _x, y, _w, h = self._settings_row_rect(i)
+        return y < vy + vh and y + h > vy
 
     def _settings_row_rect(self, i):
-        # Scrolled position: row i sits in on-screen slot (i - set_top). Rows outside
-        # the visible window get an off-panel rect that the draw + pointer loops skip.
-        return self.ws.layout.settings_row_rect(i - self.set_top)
+        # Scrolled position: row i sits in on-screen slot (i - set_top), lifted by
+        # the sub-row remainder so the list travels by pixels.
+        x, y, w, h = self.ws.layout.settings_row_rect(i - self.set_top)
+        return (x, y - self._scroll_px(), w, h)
 
     # -- Layer facets: input + pointer ---------------------------------------
 
@@ -1029,6 +1244,8 @@ class SettingsLayer:
             return self._wifi_input(i)
         if self.bt_view:
             return self._bt_input(i)
+        if self.confirm_key is not None:
+            return self._confirm_input(i)
         rows = self._settings_rows()
         # The keep-selection-visible clamp (#53) fires ONLY when the keyboard
         # moves the selection -- NOT every frame. The per-frame form fought the
@@ -1045,8 +1262,15 @@ class SettingsLayer:
         # Range-only safety clamp (what the per-frame _settings_scroll used to
         # provide): a shrinking row set / a font-scale change must not strand
         # set_top past the end. No selection nudge -- that is the drag's fight.
-        self.set_top = max(0, min(self.set_top,
-                                  max(0, len(rows) - self._settings_visible())))
+        capped = max(0, min(self.set_top,
+                            max(0, len(rows) - self._settings_visible())))
+        if capped != self.set_top:
+            # Only on an ACTUAL strand. This clamp runs every frame, and pushing
+            # unconditionally would re-snap the offset each one -- which is the
+            # per-sample re-snap that used to eat the sub-row remainder, and
+            # would now also kill a fling on its first coasting frame.
+            self.set_top = capped
+            self._sync_scroll_from_top()
         if i.pressed("left"):
             self.settings_adjust(-1)
         if i.pressed("right"):
@@ -1069,7 +1293,8 @@ class SettingsLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        if not self.wifi_view and not self.bt_view and not ws.show_achievements:
+        if (not self.wifi_view and not self.bt_view and self.confirm_key is None
+                and not ws.show_achievements):
             # The rows' shared press/drag/release machine: scrolls on drag,
             # activates a row only on a clean tap release.
             if self._rows_pointer(px, py, click):
@@ -1090,6 +1315,8 @@ class SettingsLayer:
             return self._wifi_pointer(px, py, click)
         if self.bt_view:
             return self._bt_pointer(px, py, click)
+        if self.confirm_key is not None:
+            return self._confirm_pointer(px, py, click)
         lay = ws.layout
         if _in(px, py, lay.set_ach):      # trophy: open the achievements view (#21)
             ws.show_achievements = True
@@ -1161,6 +1388,9 @@ class SettingsLayer:
         fs = lay.fs
         px, py, pw, ph = lay.settings_panel
         th = ws.theme_colors
+        # A coasting fling advances BEFORE anything paints, so the rows below are
+        # drawn at this frame's offset rather than the previous one's.
+        self.rows_anim_frame(dt)
         # Backdrop. FULLSCREEN tiers keep the live wallpaper behind the panel (the
         # honest preview this app is partly about). Inside a WM WINDOW that is pure
         # waste: the window already sits ON the desktop wallpaper, and rendering the
@@ -1202,6 +1432,10 @@ class SettingsLayer:
             self._draw_bluetooth()
             ws.bar_layer._draw_status_strip("settings")
             return
+        if self.confirm_key is not None:
+            self._draw_confirm()
+            ws.bar_layer._draw_status_strip("settings")
+            return
         # Achievements view button (#21): a trophy badge with the unlocked count.
         sa = lay.set_ach
         cv.rect(sa[0], sa[1], sa[2], sa[3], th["hilite"])
@@ -1212,9 +1446,17 @@ class SettingsLayer:
         cv.print(str(ws.ach.count()), bx + 13 * fs,
                  by + 4 + (bh - 14 * fs) // 2, th["selection_ink"], 1)
         rows = self._settings_rows()
+        # A pixel offset leaves a PARTIAL row at each edge; the clip is what cuts
+        # it to the band instead of letting it bleed over the panel's frame. The
+        # chevrons + scrollbar are chrome ABOUT the band, so they stay outside it.
+        clip = getattr(cv, "clip", None)
+        if clip is not None:
+            clip(*self._rows_viewport())
         for i in range(len(rows)):
             if self._settings_row_visible(i):
                 self._draw_settings_row(i)
+        if clip is not None:
+            clip()
         self._draw_settings_more(rows)
         ws.bar_layer._draw_status_strip("settings")
 

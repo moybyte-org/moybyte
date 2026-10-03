@@ -142,7 +142,7 @@ class CartManager:
             if not cart.get("path") or cart.get("lazy"):
                 continue
             try:
-                ws.covers.icon_sheet_for(cart)   # bake the grid icon while the art is here
+                ws.covers.sheet_icon(cart)   # bake the grid icon while the art is here
             except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
                 pass
             for k in _HEAVY_CART_KEYS:
@@ -229,6 +229,7 @@ class CartManager:
                 ws.carts_store.scan(ws.carts_root, src=False)))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte new cart failed:", exc)
+            self._say_if_full(exc, "CAN'T MAKE")
             return None
         self.apply(items)
         return new
@@ -248,6 +249,16 @@ class CartManager:
                 ws.carts_store.scan(ws.carts_root, src=False))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte duplicate failed:", exc)
+            self._say_if_full(exc, "CAN'T COPY")
+
+    def _say_if_full(self, exc, refusal):
+        """A store that ran out of room says so on screen, in the system
+        notice banner -- the voice's refusal idiom over its reason
+        (docs/os_voice_v1.md): the store removed what it had written, so all
+        that is left to do is tell the kid why nothing appeared."""
+        full = getattr(self.ws.carts_store, "store_full", None)
+        if full is not None and full(exc):
+            self.ws.notice(refusal, "the store is full", "warn")
 
     def delete(self):
         # Delete the OPEN cart when one is open (the sysmenu DELETE CART -- a cart opened

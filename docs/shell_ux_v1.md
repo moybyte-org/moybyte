@@ -12,7 +12,7 @@ implemented and archived under `docs/history/` (`shell_ux_technical_plan_v1.md`,
 `shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`), while
 `docs/shell_architecture_v1.md` stays the standing direction doc. The shipped module
 map (`runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
-`Workstation` kernel) lives in `CLAUDE.md`. This doc deliberately does NOT contain
+`Workstation` kernel) lives in `runtime/README.md` and `.claude/rules/shell.md`. This doc deliberately does NOT contain
 module design, migration phases, or code; mechanisms are named only where the UX
 guarantee is meaningless without one.
 **Issues:** #29 (blocks — becomes a graduating Editor tab), #46 (the unified bar —
@@ -88,9 +88,11 @@ error popup over it (`ws._crash_to_code`). On a cart of several scripts
 on a PICO-8 port that is as often the generated half as the game, and a marker
 on somebody else's line N is worse than none (#89). The marker then RE-CHECKS on every
 edit/undo — it retires only when the source actually parses again, and follows
-the live syntax error while it doesn't. The old panel survives only as the
-no-open-cart fallback. This is still the caller model: the crash path is just
-one more pop, into the one place the fix can happen.)*
+the live syntax error while it doesn't. The old panel survives as the
+no-open-cart fallback, and for a compiled (`"runtime": "wasm"`) cart, whose
+trap has no source line behind it: the panel reports it, offers no EDIT, and
+points at HOME. This is still the caller model: the crash path is just one more
+pop, into the one place the fix can happen.)*
 
 ---
 
@@ -286,11 +288,13 @@ gentlest:
 
 There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
-stood for. Every tab-leaving event (switching tabs, PLAY, PROJECTS, a window/context-X
-close, a workspace swap, going home) hard-commits whichever tab was showing, on top of
-the idle debounce -- exactly what SAVE used to do, just automatic. The debounce runs
-on EVERY tab (#154), so by the time one of those events fires it usually finds nothing
-left to write.
+stood for. Every hard exit (PLAY, PROJECTS, a window/context-X close, a workspace
+swap, going home) hard-commits whichever tab was showing, on top of the idle
+debounce -- exactly what SAVE used to do, just automatic. Switching tabs OWES the
+commit rather than taking it inside the tap (#154): the frame that paints the
+destination pays it, and the next hard exit pays anything still owed. The debounce
+runs on EVERY tab (#154), so by the time one of those events fires it usually finds
+nothing left to write.
 
 The ladder is the icons → blocks → code progression (#29) made spatial: growth is
 "one tab to the right," and every rung is visible from every other rung.
@@ -304,9 +308,10 @@ Two guarantees, stated as UX law:
 - **Save is never required — there is no SAVE.** No "unsaved changes" state, no save
   prompt on exit, no SAVE button anywhere (#111): edits persist continuously — a
   an idle autosave debounce on every tab -- armed by typing on the code tab and by
-  touch on the drawn ones -- plus hard commits on every tab-leaving event (a tab
-  switch, PLAY, PROJECTS, a window/context-X close, a workspace swap, going home,
-  and the reboot into a new firmware image). A
+  touch on the drawn ones -- plus hard commits on every hard exit (PLAY, PROJECTS,
+  a window/context-X close, a workspace swap, going home, and the reboot into a new
+  firmware image), and a tab switch's commit paid by the frame that paints the
+  destination. A
   kid can pull the battery mid-edit and lose (at most) the last idle-debounce window.
   (`commit` in the §10 contract is the app telling the OS "persist this" — the exit
   paths above are simply every place that telling now happens automatically.)
@@ -432,10 +437,24 @@ contract.)*
 
 Two owner-facing diagnostics rows live here too (#68, both persisted, both default
 OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement
-machinery (serial samplers + the 30s forced-GC sample — it costs felt hitches, so
-it is never on for play), and **DIAG SD LOG** separately gates the periodic
+machinery (the capture meters and every periodic serial line — PERF, the diag
+tick, the audio rate — each of which costs felt hitches, so it is never on for
+play), and **DIAG SD LOG** separately gates the periodic
 diag→SD write (~115ms every 20s) so a serial-attached measurement session runs
 stutter-free; crash/cart-exit diag flushes happen regardless.
+
+**UNKNOWN SOURCES** (owner, 2026-09-29; persisted, default OFF) is the owner's
+switch for compiled carts whose module carries no signature — a cart somebody
+rebuilt from its source. Turning it ON replaces the rows with a warning
+("Unsigned carts can do anything on this console. Only run ones you
+trust.") whose focus starts on KEEP OFF, so it takes the
+TURN ON button, or a move and a press; turning it OFF is one tap. With it on,
+an unsigned module runs at full native speed; with it off the module is
+ignored and the cart plays on the interpreter instead, with a short system
+notice ("isn't signed") saying so (2026-09-30, "A cart survives its
+firmware") — never the blocking crash panel, either way. A module whose
+signature is present and fails is refused either way
+(`native/moy_wasm/README.md`, "Unknown sources").
 
 ---
 
@@ -509,7 +528,7 @@ by `runtime/editor_app.py` (§6); `runtime/player.py` is the Player (§2);
 `runtime/project.py` is the project workspace + commit verbs (§7, §11);
 `runtime/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
 launcher/settings/bar layers are the launcher app, the Settings app, and the zoned OS
-bar. `Workstation` (`runtime/console.py`) is the kernel — see `CLAUDE.md` for the
+bar. `Workstation` (`runtime/console.py`) is the kernel — see `runtime/README.md` for the
 module map.
 
 **Issue map:**

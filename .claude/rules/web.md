@@ -27,7 +27,10 @@ nor those docs will warn you about:
   serves without reflashing it, so "which console is this board serving?" is
   answered by its firmware version alone. Changing a web build means
   `firmware/web_runner/build.sh`, then rebuild and reflash. An oversized image is
-  a BUILD FAILURE on every board.
+  a BUILD FAILURE on every board. For that reason the two worker modules ship
+  without their comments (build.sh re-prints them with emsdk's terser, nothing
+  else changed): read `worker.js` and `moy_store.mjs` in the tree, not in
+  `dist/`.
 - **`worker.js` STATICALLY imports `moy_store.mjs`**, so it must be in
   `moy_webhost.ASSETS`: a board that does not serve it serves a console that
   cannot boot.
@@ -42,7 +45,11 @@ nor those docs will warn you about:
 - **The substrate is OPFS, not IndexedDB**: the ops ARE file writes at paths, so a
   cart folder stays a cart folder. No OPFS (private window, blocked site data,
   `file://`) runs in memory and **the page says so**; a quota failure requeues, and
-  after three gives up ONCE and says that too.
+  after three gives up ONCE and says that too. A returning browser's shelf is
+  OPFS's, never the bundle's -- except a SYSTEM cart the store has never had
+  (a new app, a new seed game), which is seeded into it the way a board seeds a
+  built-in it lacks (`moy_store.missingSystemCarts`). Without that, nobody who
+  had visited before a system cart shipped would ever see it.
 - **The journal lives with the STORE OF RECORD** (owner call) — there is one
   durable journal per cart, where the cart durably lives, so a kid gets undo on
   both ends without a byte of history on the wire. **The wire predicate itself
@@ -59,6 +66,57 @@ nor those docs will warn you about:
   REFUSE the batch instead of writing `drawings/…` into its carts store. A files
   path must start with a `FILE_KINDS` kind, which is the one rule keeping
   `.history/` and `trash/` home in both directions.
+- **Get Carts runs in a page that keeps its own carts (#124), and in no other.**
+  In site mode `carts_link.py` gives the console the page's fetch
+  (`ws.cart_net`), an OPFS keeper (`ws.cart_keep`) and the page's file picker
+  (`ws.cart_pick`); a board-served page gets `ws.cart_home` instead and the app
+  says the board gets its own carts -- the two-writer rule again, and the sync
+  wire could not carry a module anyway. What bites:
+  - **Nothing may wait for the network inside a step.** The VM has no
+    ASYNCIFY and the worker delivers bytes only between frames, so every fetch
+    is a `cart_index` job that gives the frame back; a Python loop waiting for
+    `ready` is a hung tab. A body goes into a spool file in the VFS -- the
+    page's memory -- and never through the 16 MB heap.
+  - **A page cannot read a release download or Debian's archive** (neither
+    sends a CORS header). It reads an asset's `mirror`, and an external
+    file's, on the carts repository's Pages site first (moy-spec's
+    cartindex.py). An external file it can read from neither is the player's
+    own copy, chosen through a REAL page control (the card under the canvas):
+    a browser opens its file dialog only from a click on one, never from a tap
+    the console relays a frame later.
+  - **The sweep cannot persist an install**: the wire carries text and covers,
+    never a module or a WAD. The keeper writes the folder and the record into
+    OPFS behind one marker file (`moy_store.commitInstall`), boot rolls an
+    interrupted one forward or away before the store is read
+    (`recoverInstalls`), and the watcher ADOPTS the landed folder instead of
+    shipping it. `store_test.mjs` interrupts an update at every change it
+    makes.
+  - **The shelves are the serving host's**: an `indexes.json` beside the page
+    replaces the defaults, read once at boot.
+  - **A page keeps no compiled module**, so a release asset is read by RANGE
+    (`ranges` on the page's transport, `cart_index._Ranged`): the zip's
+    directory, then the runs of members it keeps -- a cart's modules are most
+    of its asset and never cross. Any first range not answered 206 (a host that
+    ignores ranges, a refused preflight) reads the asset whole.
+    `tests/test_web_wasm_e2e.py` installs a compiled cart this way and plays
+    it; `tests/test_web_store_e2e.py` drives the Lua side.
+- **A compiled cart runs on the BROWSER'S engine, behind the boards' session
+  surface** (`native/moy_wasm_web`, its README). The cart's `main.wasm` is a
+  sibling module the worker instantiates (`worker.js`'s cart engine, moy-spec's
+  web-player adapters over libmoy's import table); moycore, `WasmRun`, the
+  Player and the canvas are the boards'. What bites:
+  - **Nothing on a board is reimplemented here, and nothing native applies**:
+    no AOT module, key, signature or Unknown sources -- `moy_wasm.CHIP` is None,
+    so WasmRun opens `main.wasm` and is never "slow" for it.
+  - **A hook's catch rethrows anything that is not an `Error`**: the VM's own
+    longjmp unwinds as a JavaScript exception through the cart's frames, and
+    swallowing it would strand MicroPython's nlr.
+  - **A page a board serves gets no `main.wasm`** (the wire carries text and
+    covers), so its scan leaves the board's compiled carts off its shelf
+    (`moy_carts.load`: no main, no cart); they play on the board.
+  - **The site-mode sweep must pass a file it cannot carry by stat**
+    (`moy_sync.StoreWatcher`, crc None): when it re-read every binary file on
+    every sweep, an installed Doom drew a frame a second.
 - **THE PAGE IS THE SERVING BOARD'S UPDATE SURFACE** (#41/#53, 2026-08-29), and
   what it does depends on whether that board has glass. Headless: the strip IS
   the update screen — two taps, then a polled progress read, because the board
@@ -69,12 +127,28 @@ nor those docs will warn you about:
   firmware), and a persistent socket's idle reaper would have dropped a client
   through a flash write — which is exactly what the old streaming port hit.
   That verdict is why the transport's WebSocket half had no consumer left and
-  was deleted in 2026-09 (`.claude/rules/boards.md` on `device/moy_webserver.py`). **ONE disconnect surface,
+  was deleted in 2026-09 (below). **ONE disconnect surface,
   and the REASON is its point**: an update or a hand-back is "expected" and
   nothing is at risk; a board that vanished is "lost", and only that one carries
   the unsynced-work warning, because board mode keeps no local store. First
   reason wins, so an update nobody needs warning about cannot later be
   re-reported as a loss.
+- **`device/moy_webserver.py` is the bare HTTP transport** `moy_webhost`
+  overrides: a non-blocking listener, `parse_request`/`http_response`, one-shot
+  serving, and a `WebServer` whose one seam is `handle_http`. The streaming web
+  view — the frame push, `device_webview.py`, the recording `TeeCanvas`, stream
+  mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py`
+  and its VM recipe — was DELETED in the 2026-08 sunset (owner decision,
+  `docs/history/moycore_plan_2026-08.md` §3.2; `tests/test_streaming_sunset.py`
+  pins the absences), and the recording stack went at stage 4 (2026-08-12)
+  because the wasm head rasterizes. Mirror-of-glass is an accepted loss: a
+  screenshot verb on the sync RPC was its recorded successor and was DROPPED
+  (owner, 2026-08-25) — the browser IS the console. The WebSocket half went in
+  2026-09, because the §3.4 sync RPC shipped as plain HTTP and nothing else
+  used it. What survives of the old view is `runtime/web_input.py` (browser
+  events → InputState/Pointer, which the sync RPC speaks); `runtime/surface.py`
+  and `wm_windowed`'s `if not self._recording` guards deliberately STAY,
+  unreachable — `docs/surface_model_v1.md` §13 records why.
 - **WASM MODE IS A SWITCH, NOT A SESSION** (owner call): no heartbeat, no presence
   detection, no timeout. While WEB CONSOLE is ON the glass PARKS on a connection
   screen — which is how the two-writer collision is **designed out rather than
@@ -97,6 +171,10 @@ nor those docs will warn you about:
   `browsershot.mjs` drives the shipped page in real headless Chrome. **The page
   waits behind a play-button splash unless the scenario passes `?dev=1`**, so a
   scenario that forgets it screenshots a blank canvas and looks like a raster bug.
+  For a one-off look at a page, `tools/web.py shot URL` prints the PNG's path
+  and the page's errors (`shot /?dev=1` serves this tree's dist for the shot;
+  `tools/web.py serve` serves it on a free port until stopped). It drives the
+  SYSTEM Chrome through Playwright, the `web` extra: never `playwright install`.
 - **The p8 import is UPSTREAM of us, BOTH halves.** SPEC.md says what a
   converted cart MEANS, so corrections are worked out in moy-spec and travel
   HERE — and once they did not: upstream fixed a pitch offset, our hand-copy

@@ -1,3 +1,19 @@
+# Map (grep -n a name to jump there):
+#   arm_prompt                 take the keyboard for a modal prompt
+#   ConfirmTap                 a two-tap guard on a destructive button
+#   _Blit                      the cursor sprite's blittable
+#   Pointer                    a screen-space cursor
+#   -- achievements            Achievements, Clipboard, Pmem
+#   Achievements               the milestones a kid has unlocked
+#   Clipboard                  the one system clipboard
+#   Pmem                       a cart's 256 persistent signed ints
+#   -- placed-actor scenes     Actor, Scenes, SceneWorld
+#   Actor                      one placed actor from a scene
+#   Scenes                     a cart's scenes, parsed
+#   SceneWorld                 the live actor world a cart mutates
+#   _SilentAudio               the no-op audio backend
+#   -- reusable overlay popup  Popup
+#   Popup                      a self-contained dropdown overlay
 """Self-contained console support widgets, extracted from Workstation
 (runtime/console.py) -- the cohesive, boundaried little classes with their own state
 that don't belong to any one surface Layer or the router:
@@ -280,8 +296,7 @@ def pointer_state(inp, out):
     # console.py republishes it with a position every frame whether or not the
     # pointer is alive, so reading liveness off it left a p8 cart holding a
     # cursor over its board forever and its d-pad stamped over every frame.
-    live = getattr(p, "live", None)
-    if live is not None and not live():
+    if hasattr(p, "live") and not p.live():   # hasattr: no bound method
         return out
     # Two-domain seam (#39): the game-space publication wins where the console
     # makes one (a distinct big system canvas, or a cart with a smaller

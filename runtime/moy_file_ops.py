@@ -17,9 +17,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_fs import (_copy, _exists, _forget_bak, _mkdir, _read, _remove, _write_atomic)
 try:
-    from moy_image import (cover_sig)
+    from moy_image import (text_sig)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_image import (cover_sig)
+    from runtime.moy_image import (text_sig)
 try:
     from moy_store_base import (CARTS_DIR, _is_dir, _rmtree, ensure_dirs)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -401,7 +401,7 @@ def empty_trash(root=CARTS_DIR):
 # When a user file is COPIED into a consuming cart (a drawing -> a project's
 # images/bg, or the wallpaper copy), the copied JSON blob gains two optional
 # keys: `src` ("<kind>/<name>", the origin file) and `sig` (a content signature
-# of the source blob at copy time -- the cover_sig stamp pattern from #86).
+# of the source blob at copy time -- the text_sig stamp pattern from #86).
 # PURE METADATA: never resolved at runtime, ignored by every decoder (they read
 # only format/w/h/data/cells/body). It powers two PULL-BASED affordances --
 # "your drawing changed -> UPDATE" (re-read the source; a differing sig offers a
@@ -411,8 +411,8 @@ def empty_trash(root=CARTS_DIR):
 # source can never break anything.
 
 def content_sig(text):
-    """A cheap content stamp for a user-file blob (reuses the #86 cover_sig)."""
-    return cover_sig(text) if text else 0
+    """A cheap content stamp for a user-file blob (moy_image.text_sig)."""
+    return text_sig(text) if text else 0
 
 
 def stamp_provenance(blob, kind, name, sig):

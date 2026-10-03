@@ -363,26 +363,28 @@ def test_the_seed_progress_bar_is_wired_into_the_store_call():
     assert canvas.paints == 2
 
 
-# -- the Lua runtime ----------------------------------------------------------
+# -- the cart runtimes --------------------------------------------------------
 
 
 def test_a_build_without_moycore_says_absent_rather_than_failing(capsys):
     boot, _, _ = _boot()
     # No `moycore_glue` on the host: exactly the shape of a board built without
-    # the native module, where a `runtime: lua` cart opens the Player's
-    # runtime-missing panel instead of crashing.
-    assert boot.lua_runtime(FakeWs()) is None
-    assert "Moybyte lua runtime ABSENT" in capsys.readouterr().out
+    # the native modules, where a `runtime: lua` or `runtime: wasm` cart opens
+    # the Player's runtime-missing panel instead of crashing -- an absent key.
+    assert boot.runtimes(FakeWs()) == {}
+    out = capsys.readouterr().out
+    assert "Moybyte lua runtime ABSENT" in out
+    assert "Moybyte wasm runtime ABSENT" in out
 
 
-def test_the_lua_status_can_be_routed_to_a_boards_own_log():
+def test_the_runtime_status_can_be_routed_to_a_boards_own_log():
     boot, _, _ = _boot()
     lines = []
-    boot.lua_runtime(FakeWs(), log=lines.append)
+    boot.runtimes(FakeWs(), log=lines.append)
     # The T-Deck sends it to the offline diag ring: that board's USB-CDC RX is
     # dead under the desktop, so a status that is not recorded cannot be asked
     # for afterwards.
-    assert lines == ["lua runtime ABSENT"]
+    assert lines == ["lua runtime ABSENT", "wasm runtime ABSENT"]
 
 
 # -- the internal-SRAM census -------------------------------------------------
@@ -402,7 +404,7 @@ def test_the_sram_census_names_its_four_stages_in_boot_order(monkeypatch):
     boot, _, _ = _boot()
 
     boot.load_carts(FakeStore(), [{"title": "s"}])
-    boot.lua_runtime(FakeWs())
+    boot.runtimes(FakeWs())
     boot.start_frames(FakeWs())
 
     assert seen == ["rd-entry", "carts", "console", "desktop-up"]
@@ -700,7 +702,7 @@ def test_the_boot_steps_run_in_ONE_order():
     exists to make loud."""
     seq = [m for m, _ in _calls_on(_fn(SPINE, "build_desktop"), "boot")]
     assert seq == ["note", "note", "load_carts", "note",
-                   "lua_runtime", "start_frames"], seq
+                   "runtimes", "start_frames"], seq
 
 
 def test_both_boards_pump_the_frame_the_same_way():
@@ -1411,9 +1413,9 @@ PERF_BOARDS = {
 #   tdeck    the values behind `Moybyte 2698583 PERF cart=Sakura_Lua fps=53
 #            net=- flush=0 draw=14`, plus the columns its old five-field line
 #            never carried. The slug and the `-` come straight from it.
-#   p4_dark  the P4 with the deep meters OFF, which is how tools/p4_perf.py
-#            measures: nothing writes _pf_wm_*, so those read `-` -- "not
-#            measured" and "measured zero" are different answers.
+#   p4_dark  the P4 in a sample the windowed WM did not run in: nothing wrote
+#            _pf_wm_*, so those read `-` -- "not measured" and "measured
+#            zero" are different answers.
 PERF_CASES = {
     "p4": (
         {"cart": None, "fps": (0, 62), "net": None, "busy": 2,
@@ -1540,9 +1542,9 @@ def test_the_reader_strips_the_diag_rings_uptime_stamp():
 class PerfWs:
     """The Workstation surface the sampler reads, and nothing else. Absent
     attributes are how a board says it has no lever, so this sets only what the
-    case names."""
+    case names. PERF DIAG is ON: the line is written only under it."""
 
-    def __init__(self, net=None, cart=None, meters=(), diag_live=False):
+    def __init__(self, net=None, cart=None, meters=(), diag_live=True):
         self._frames_drawn = 0
         self.diag_live = diag_live
         self.perf_capture = False
@@ -1757,6 +1759,73 @@ def test_the_meters_follow_PERF_DIAG_live(monkeypatch):
         s = device_boot.PerfSampler(ws, emit=lambda _l: None)
         _drive(monkeypatch, s, ws, 2, 0, 0)
         assert ws.perf_capture is live
+
+
+def test_with_PERF_DIAG_off_nothing_periodic_is_written(monkeypatch):
+    """Kid mode, the default (owner call 2026-09-30): no line is formatted or
+    emitted on any board, period after period -- every one is garbage the
+    collector stops the frame for -- while the capture meters still follow the
+    switch and the window still closes, so turning it on starts clean."""
+    _clock(monkeypatch)
+    out = []
+    ws = PerfWs(net=12.0, cart="Doom", diag_live=False)
+    ws.perf_capture = True
+    ws.perf_net = lambda: (_ for _ in ()).throw(AssertionError(
+        "perf_net CONSUMES its window: it is read only for a line"))
+    s = device_boot.PerfSampler(ws, emit=out.append)
+    for _ in range(5):
+        _drive(monkeypatch, s, ws, 30, 20, 0)
+    assert out == []
+    assert ws.perf_capture is False
+    assert s._n == 0 and s._busy == 0      # the window closed every period
+
+
+def test_the_first_line_after_the_diag_comes_on_counts_its_own_window(
+        monkeypatch):
+    """A tool turns the diag on, reads, and turns it off again. Its first
+    line must be ONE period's -- fps, busy and the tick misses of that window,
+    not everything since boot -- and the PPA deltas, whose baseline is read only
+    under the diag, say `-` for that one line rather than a count over the
+    whole time it was off."""
+    _clock(monkeypatch)
+    out = []
+    ws = PerfWs(diag_live=False)
+    sched = _FakeSched(rate=30, div=1, misses=0)
+    ws.player = _FakePlayer(sched)
+    ov = [(0, 0, 0, 0, 0, 0, 0)]
+    s = device_boot.PerfSampler(ws, overlap=lambda: ov[0], emit=out.append)
+    for i in range(3):                     # off: 100 misses, 900 PPA ops
+        sched.misses += 100
+        ov[0] = tuple(x + 300 for x in ov[0])
+        _drive(monkeypatch, s, ws, 30, 20, 10 * (i + 1))
+    assert out == []
+    ws.diag_live = True
+    sched.misses += 2
+    ov[0] = tuple(x + 5 for x in ov[0])
+    _drive(monkeypatch, s, ws, 30, 20, 30 + 60)
+    first = parse_perf(out[-1])
+    assert first["miss"] == 2.0
+    assert first["fps"] == (30.0, 15.0)    # 60 drawn, 30 looped, over 2 s
+    assert first["ppa"] is None and first["fence_ms"] is None
+    ov[0] = tuple(x + 7 for x in ov[0])
+    _drive(monkeypatch, s, ws, 30, 20, 90 + 60)
+    assert parse_perf(out[-1])["ppa"] == (7.0, 7.0, 7.0, 7.0, 7.0)
+
+
+def test_the_audio_backends_periodic_lines_follow_PERF_DIAG(monkeypatch):
+    """The backend is rebuilt per cart, and its AUDIORATE/SNDSTREAM probe is
+    periodic too: the sampler hands it the switch with the capture meters'."""
+    for live in (True, False):
+        _clock(monkeypatch)
+        ws = PerfWs(diag_live=live)
+        ws.audio = type("A", (), {"diag": not live})()
+        s = device_boot.PerfSampler(ws, emit=lambda _l: None)
+        _drive(monkeypatch, s, ws, 2, 0, 0)
+        assert ws.audio.diag is live
+    ws = PerfWs()
+    ws.audio = object()                    # a backend with no periodic lines
+    s = device_boot.PerfSampler(ws, emit=lambda _l: None)
+    _drive(monkeypatch, s, ws, 2, 0, 0)
 
 
 # -- what each board declares ---------------------------------------------------

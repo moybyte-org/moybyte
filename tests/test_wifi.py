@@ -786,3 +786,22 @@ def test_a_device_radio_that_will_not_stop_is_a_diag_line_not_a_crash(tmp_path):
         assert dev.wlan is None
     finally:
         sys.modules.pop("network", None)
+
+
+def test_the_device_remembers_that_its_driver_came_up(tmp_path):
+    """`driver_up` is one-way: radio_off() stops the radio but the ESP-IDF
+    driver keeps its internal-RAM allocation for the rest of the boot, so the
+    on-glass idle-SRAM check (tests/on_glass.py, the wasm engine's) refuses a
+    desk that has had it up rather than comparing against a fresh boot."""
+    net = _FakeNetwork()
+    dev = _device_wifi_over(net, tmp_path)
+    try:
+        assert dev.driver_up is False
+        dev.radio_off()
+        assert dev.driver_up is False
+        dev.radio_on()
+        assert dev.driver_up is True
+        dev.radio_off()
+        assert dev.driver_up is True
+    finally:
+        sys.modules.pop("network", None)

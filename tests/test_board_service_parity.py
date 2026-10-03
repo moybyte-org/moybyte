@@ -32,7 +32,7 @@ WHAT COUNTS AS AN INJECTION. Two sites, because the wiring lives in two:
     is not thereby a board that has an FPS preference the others lack.
 
   * an argument to `console.wire_workstation_core`, which is where `make_api`,
-    `wifi`, `make_audio`, `lua_runtime`, `keyboard`, `pointer`, `can_manage`
+    `wifi`, `make_audio`, `runtimes`, `keyboard`, `pointer`, `can_manage`
     and the store actually land on `ws`. That mapping is DERIVED from
     `wire_workstation_core`'s own body rather than restated here, so a new
     parameter that assigns to `ws` is picked up without editing this file --
@@ -101,7 +101,8 @@ INJECTED = True     # the target wires this service; anything else must be a
 SERVICES = {
     "make_api": "the cart API factory: what a cart's globals are built from",
     "make_audio": "the audio backend the AudioBank model is played through",
-    "lua_runtime": "the .moy `runtime: lua` cart engine (#67 -> moycore)",
+    "runtimes": "the .moy cart engines by manifest runtime (#67 lua -> moycore, "
+                "wasm -> moycore over moy_wasm)",
     "make_game_canvas": "per-run canvas factory for a cart with a small raster",
     "carts_store": "the moy_carts module the shell reads/writes the store with",
     "carts_root": "where that store lives on this target",
@@ -116,6 +117,13 @@ SERVICES = {
                   "UPGRADE C6 RADIO (#7/#58): downloads the shimmed slave "
                   "image and streams it over SDIO",
     "webhost": "the #192 board-served web console (Settings -> WEB CONSOLE)",
+    "cart_net": "the #124 network the Get Carts app fetches indexes and carts "
+                "through",
+    "cart_keep": "the #124 keeper that makes an install durable where the store "
+                 "of record is not the files cart_index writes",
+    "cart_pick": "the #124 question for the player's own copy of an external "
+                 "file this console cannot fetch",
+    "cart_home": "where carts are got instead, on a page a console serves",
     "reboot_hook": "the sysmenu Reboot row's real reset",
     "net": "the #65 multiplayer transport behind net.* in a cart",
     "gpio": "the #9 physical-pin backend behind pin_write/pin_read in a cart",
@@ -133,7 +141,7 @@ WIRING = {
     "tdeck": {
         "make_api": INJECTED,
         "make_audio": INJECTED,
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -149,6 +157,12 @@ WIRING = {
         "updater": INJECTED,
         "c6_updater": "its radio is the S3's own silicon -- there is no co-processor to update. The row becomes INJECTED the day a board grows a companion radio chip",
         "webhost": INJECTED,
+        "cart_net": INJECTED,
+        "cart_keep": "the store a board writes IS its store of record; one rename "
+                     "makes an install durable",
+        "cart_pick": "a board reads every host over its own TLS client -- no "
+                     "CORS between it and an archive -- so it never asks",
+        "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "no pins to give. This board's GPIOs are spent -- panel, SD,\n"
@@ -167,7 +181,7 @@ WIRING = {
                       "on the hardware and unwired; until it is, injecting a "
                       "backend would give the console an audio path that plays "
                       "into nothing",
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -185,6 +199,12 @@ WIRING = {
         "updater": INJECTED,
         "c6_updater": INJECTED,
         "webhost": INJECTED,
+        "cart_net": INJECTED,
+        "cart_keep": "the store a board writes IS its store of record; one rename "
+                     "makes an install durable",
+        "cart_pick": "a board reads every host over its own TLS client -- no "
+                     "CORS between it and an archive -- so it never asks",
+        "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
@@ -201,7 +221,7 @@ WIRING = {
                       "on the hardware and unwired; until it is, injecting a "
                       "backend would give the console an audio path that plays "
                       "into nothing",
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -219,6 +239,12 @@ WIRING = {
         "updater": INJECTED,
         "c6_updater": INJECTED,
         "webhost": INJECTED,
+        "cart_net": INJECTED,
+        "cart_keep": "the store a board writes IS its store of record; one rename "
+                     "makes an install durable",
+        "cart_pick": "a board reads every host over its own TLS client -- no "
+                     "CORS between it and an archive -- so it never asks",
+        "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
@@ -234,7 +260,7 @@ WIRING = {
                       "is unverified, and its board.toml denies the moy_audio "
                       "usermod for the same reason. Wire both together at "
                       "stage 5",
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -253,6 +279,12 @@ WIRING = {
         "c6_updater": "same as the T-Deck: this S3's radio is on-die, there "
                       "is no co-processor to flash",
         "webhost": INJECTED,
+        "cart_net": INJECTED,
+        "cart_keep": "the store a board writes IS its store of record; one rename "
+                     "makes an install durable",
+        "cart_pick": "a board reads every host over its own TLS client -- no "
+                     "CORS between it and an archive -- so it never asks",
+        "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
         "net": INJECTED,
         "gpio": "same as the T-Deck: a smart display spends its pins on the\n"
@@ -266,7 +298,7 @@ WIRING = {
     "host": {
         "make_api": INJECTED,
         "make_audio": INJECTED,
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -289,6 +321,14 @@ WIRING = {
         "webhost": "the host IS the machine the browser runs on -- serving the "
                    "wasm console to itself has no user. `tools/simulate_desktop"
                    ".py` and firmware/web_runner cover that ground",
+        "cart_net": "build_workstation is what tests build, and a test never "
+                    "reaches the internet: tools/simulate_desktop.py wires "
+                    "host_app.HostCartNet for a live run, tests/test_cart_store.py "
+                    "a transport over its own server",
+        "cart_keep": "the host's carts folder is its store of record, as a "
+                     "board's is",
+        "cart_pick": "urllib reads any host, so the simulator never asks",
+        "cart_home": "the simulator is a console of its own",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
         "net": INJECTED,
@@ -308,7 +348,7 @@ WIRING = {
     "web": {
         "make_api": INJECTED,
         "make_audio": INJECTED,
-        "lua_runtime": INJECTED,
+        "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
         "carts_root": INJECTED,
@@ -339,6 +379,10 @@ WIRING = {
                       "as the updater row, one level down",
         "webhost": "this build is what a webhost SERVES. A page hosting itself "
                    "is the same circle the host row describes",
+        "cart_net": INJECTED,
+        "cart_keep": INJECTED,
+        "cart_pick": INJECTED,
+        "cart_home": INJECTED,
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
                "a sim fake for a solo desktop and would mean nothing here",
@@ -589,7 +633,7 @@ def test_the_extractor_still_sees_the_wiring():
     """A parse that finds nothing would make every assertion below vacuous --
     and this file reads four sources by path, any of which can be moved."""
     pmap = _wire_param_map()
-    for expect in ("make_api", "wifi", "make_audio", "lua_runtime", "keyboard"):
+    for expect in ("make_api", "wifi", "make_audio", "runtimes", "keyboard"):
         assert expect in pmap, "wire_workstation_core no longer wires %s" % expect
     for target in TARGETS:
         found = injections(target)
@@ -693,7 +737,7 @@ def test_the_four_boards_wire_one_service_set():
             if svc not in sets[b]:
                 assert WIRING[b][svc] is not INJECTED, (
                     "%s lacks %s and its row does not say why" % (b, svc))
-    assert {"make_api", "lua_runtime", "make_game_canvas", "carts_store",
+    assert {"make_api", "runtimes", "make_game_canvas", "carts_store",
             "carts_root", "wifi", "pointer", "keyboard", "updater",
             "webhost", "reboot_hook", "net", "link", "perf_capture"} <= common, (
         sorted(common))

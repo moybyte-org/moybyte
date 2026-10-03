@@ -63,7 +63,7 @@ Design notes:
 - **Non-blocking.** `sfx`/`music` only *enqueue* on a software mixer; they never
   block the frame. Playback is advanced once per frame by the runtime
   (`audio.tick(dt)`), so it fits the **single-threaded desktop loop** — the same
-  constraint that governs SD ops today (see `CLAUDE.md`). No background task is
+  constraint that governs SD ops today (see `.claude/rules/boards.md`). No background task is
   required for v1 (see §6).
 - **`beep` is the zero-data escape hatch** — a cart with no sound bank can still
   make a tone. It is sugar for "a one-step SFX at this frequency".
@@ -245,7 +245,7 @@ I2S_DOUT = GPIO 6   (data out)
 
 **Crucially, I2S is a *separate* peripheral from the shared SPI host** that the
 display + SD fight over — so audio does **not** collide with the display/SD bus
-takeover constraints (`CLAUDE.md`). That removes the scariest risk; the open risk
+takeover constraints (`.claude/rules/boards.md`). That removes the scariest risk; the open risk
 is purely CPU budget in the single-threaded loop.
 
 Also crucial: **`BOARD_POWERON` (GPIO 10) must be HIGH** to power the board

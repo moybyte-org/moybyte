@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   adv_has_hid                      does an advertisement name a HID keyboard
+#   decode_keyboard_report           a boot report -> (modifiers, usages)
+#   usage_to_keycode                 one HID usage -> a console key
+#   buttons_for_key                  a typed byte -> the buttons it fires
+#   BleHidKeyboard                   one BLE HID keyboard feeding the console
+#   BleHidKeyboard.settings_devices  the discovered keyboards
+#   BleHidKeyboard.connect_device    persist and connect one
+#   BleHidKeyboard.forget            forget the keyboard and its bond
+#   BleHidKeyboard.poll              apply the latest report
 """Bluetooth LE HID keyboard input -- the shared device driver (#202 Phase C).
 
 Born as the P4's `p4_ble_keyboard.py` and PROMOTED to the shared device tree
@@ -411,6 +421,37 @@ class BleHidKeyboard:
             self.state = "off"
             self._log("Moybyte BLE keyboard unavailable:", exc)
             return False
+
+    def stop(self):
+        """Power the radio down: what start() brought up, given back. The
+        controller and the NimBLE host hold their memory in INTERNAL RAM for
+        as long as the radio is active -- about 45 KB on the T-Deck
+        (2026-10-02), the difference between a TLS download that runs and
+        one that cannot -- and only deactivating returns it. The console
+        never calls this: once started, BLE is up until a restart, because
+        a start() after it timed out on the T-Deck with WiFi up and kept
+        what it had taken. The on-glass suites call it to put a board's
+        radio back the way they found it."""
+        if not self.available:
+            return False
+        if self.state in ("scanning", "found"):
+            try:
+                self.ble.gap_scan(None)
+            except Exception:
+                pass
+        if self._conn is not None:
+            try:
+                self.ble.gap_disconnect(self._conn)
+            except Exception:
+                pass
+        self._reset_connection()
+        try:
+            self.ble.active(False)
+        except Exception as exc:
+            self.error = str(exc)
+        self.available = False
+        self.state = "off"
+        return True
 
     def status(self):
         return self.state, self.name, self.passkey

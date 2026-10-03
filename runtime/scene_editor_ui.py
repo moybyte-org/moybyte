@@ -1,3 +1,8 @@
+# Map (grep -n a name to jump there):
+#   SceneLayout          responsive scene-editor geometry
+#   SceneEditorUI        the placement editor's UI: world, palette, props
+#   SceneEditorUI.build  build the SceneEditor over a scene
+#   SceneEditorUI.save   persist the edited scene
 """The scene (placed-actor) placement editor's UI layer (#85 Stage 2): a panned
 WYSIWYG view of the WORLD on the left -- the tilemap as the backdrop, the fixed
 320x240 game viewport as a frame, every placed actor as its sprite -- a paged

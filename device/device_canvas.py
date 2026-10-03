@@ -1,3 +1,17 @@
+# Map (grep -n a name to jump there):
+#   to_indices                   an RGB565 framebuffer back to palette indices
+#   ellipse                      the ellipse inscribed in a box
+#   tri_spans                    a filled triangle's spans
+#   _MaskedRegion                a cell grid standing in for a tilemap
+#   DeviceCanvas                 the kid drawing API on the device, every board
+#   DeviceCanvas.sync_back       re-point the draw target at the back buffer
+#   DeviceCanvas.palette         swap the RGB table
+#   DeviceCanvas.blit_game       the fullscreen WM's game composite
+#   DeviceCanvas.present_frame   a compiled cart's frame to the flush
+#   DeviceCanvas.blit565         place an RGB565 picture
+#   DeviceCanvas.reclaim_layers  return a dead program's layer buffers
+#   SystemCanvas                 DeviceCanvas plus the system-surface contract
+#   _LayerComp                   the compositor stand-in a layer canvas draws through
 """The device DRAWING backend (extracted from moy_runtime.py) -- the single most
 performance-critical + native-coupled unit on the device.
 
@@ -224,6 +238,12 @@ try:
     PAL565_WIRE = PAL565
 except ImportError:
     PAL565_WIRE = PAL565_SW
+# The byte order of every word a canvas holds, for whoever produces 565 words to
+# hand it directly (`DeviceCanvas.blit565`): True where the panel takes them high
+# byte first -- the S3 boards, and the host and the browser, which keep that order
+# -- and False on the P4's DPI.
+WIRE_SWAPPED = PAL565_WIRE is PAL565_SW
+
 # Buffer form of PAL565_WIRE for the native blit_indices kernel (#63): the C reads the
 # palette via the BUFFER PROTOCOL (moy_gfx_buf_r), and a tuple has none ("object with
 # buffer protocol required"). An array("H") is a contiguous uint16 buffer AND still
@@ -261,7 +281,7 @@ def to_indices(buf, wire=None, strict=True):
 
     EXACT, not approximate: MOY64's 64 entries resolve to 64 DISTINCT RGB565
     words, so the reverse map is total. `tests/test_spec_conformance.py` proves
-    the round trip on all ten spec scenes -- every vendored golden hash comes
+    the round trip on every spec scene -- every vendored golden hash comes
     back identical through a 565 canvas.
 
     It exists because several things downstream of a canvas are index-native and
@@ -559,6 +579,9 @@ class DeviceCanvas:
     over the same buffer still serves text/lines/pixels and is the fallback on an
     image built without moy_gfx."""
 
+    # The order of the 565 words in this canvas's buffer (WIRE_SWAPPED above).
+    swapped565 = WIRE_SWAPPED
+
     # PARTIAL-repaint capability (the Library shelf's drag fast path, see
     # runtime/canvas.py): with the #40 ping-pong double buffer the back buffer
     # holds the frame BEFORE last -> 2. (Single-buffer mode retains frame-1;
@@ -606,10 +629,13 @@ class DeviceCanvas:
         # physical buffers each flush, so this canvas must re-point its draw target
         # at it every frame (sync_back) -- a stale pointer would draw into the
         # buffer that's being DMA'd (tear). framebuf can't retarget its backing
-        # store in place, so cache one framebuf per physical buffer keyed by id(buf)
-        # and pick the matching one on each swap; no per-frame allocation. In
-        # single-buffer mode framebuffer() never moves, so sync_back is a cheap no-op.
-        self._fb_by_buf = {id(self._buf): self._fb}
+        # store in place, so cache one framebuf per physical buffer and pick the
+        # matching one on each swap, by IDENTITY (`_fb_for`): no per-frame
+        # allocation. Not a dict keyed by id(buf) -- a P4's PSRAM sits above
+        # the 30-bit small int, so its id() is a new big int on every lookup.
+        # In single-buffer mode framebuffer() never moves, so sync_back is a
+        # cheap no-op.
+        self._fb_pairs = [self._buf, self._fb]      # buf, its framebuf, ...
         # Async layer copy (#54 Stage 2): prediction + in-flight state. Armed by
         # blit_window_from when the copy shape is ONE contiguous memcpy (cam_x==0,
         # layer exactly screen-wide, full-height coverage -- sakura's shape);
@@ -803,12 +829,13 @@ class DeviceCanvas:
         buf = self._comp.back_buffer()
         if buf is not self._buf:
             self._buf = buf
-            fb = self._fb_by_buf.get(id(buf))
+            fb = self._fb_for(buf)
             if fb is None:
                 import framebuf
                 fb = framebuf.FrameBuffer(buf, self._stride, self._bh,
                                           framebuf.RGB565)
-                self._fb_by_buf[id(buf)] = fb
+                self._fb_pairs.append(buf)
+                self._fb_pairs.append(fb)
             self._fb = fb
             if self._gate_ctx is not None:
                 self._gate_ctx.set_buf(buf)   # #155: gates draw into the NEW back
@@ -1110,9 +1137,20 @@ class DeviceCanvas:
         ping-pong swaps the framebuffer every frame, so a viewport canvas onto it
         must follow (the root canvas does this in sync_back)."""
         self._buf = buf
-        self._fb = self._fb_by_buf.get(id(buf)) or self._fb
+        self._fb = self._fb_for(buf) or self._fb
         if self._gate_ctx is not None:
             self._gate_ctx.set_buf(buf)
+
+    def _fb_for(self, buf):
+        """The framebuf cached for `buf`, or None."""
+        pairs = self._fb_pairs
+        i = 0
+        n = len(pairs)
+        while i < n:
+            if pairs[i] is buf:
+                return pairs[i + 1]
+            i += 2
+        return None
 
     def _install_draw_gates(self):
         """Swap in the native rect/rectb/print/pix. Returns True if gated."""
@@ -1550,6 +1588,63 @@ class DeviceCanvas:
                         src_buf, vw, vh, scale)
         if self._pump is not None:
             self._pump()               # feed the in-flight SRAM-bounce flush
+
+    # -- a compiled cart's frame, from its own memory (moy_fold.h) ---------------
+
+    @property
+    def presents_frames(self):
+        """Whether this canvas's flush can show a compiled cart's frame from
+        the cart's memory (present_frame). A compiled run asks once, to decide
+        whether its blits leave their frames there."""
+        return bool(getattr(self._comp, "frames_supported", False))
+
+    @property
+    def presents_palette_frames(self):
+        """Whether blit's palette frames go that way too, beside blit565's:
+        the fold resolves a palette band by band, so wherever it shows
+        frames."""
+        return self.presents_frames
+
+    def present_frame(self, cf, view, gc, ox, oy, scale, src=None):
+        """Hand the flush a compiled cart's frame straight from its memory in
+        place of blit_game: `view` is the frame the CartFrame `cf` owes (the
+        game canvas `gc`'s size, of indices whose colours are `cf.lut` or of
+        little-endian RGB565), `src` the cart's view rect as in blit_game.
+        The compositor snapshots the whole frame by DMA into the run's
+        scratch and folds it -- black bezels, integer scale, the palette or
+        byte order resolved band by band on the feeder -- so neither canvas is
+        written; the opaque rects the console painted over it (`cf.rects`)
+        come from `gc`. `sync_back` fences the snapshot before the cart's
+        next hook; an overlay after this disarms and gets the composite, as
+        it does over any fold. False when it cannot take the frame (no room,
+        a geometry the fold refuses): the caller settles it into the game
+        canvas and composites as ever."""
+        comp = self._comp
+        gw = gc.w
+        gh = gc.h
+        if src is not None:
+            sx, sy, vw, vh = src
+        else:
+            sx = sy = 0
+            vw = gw
+            vh = gh
+        n = len(view)
+        fmt = 2 if n == gw * gh else 1
+        nr = cf.nrects
+        comp.fold_fence()
+        scr = cf.scratch(n + 128 + 512 + cf.PATCH_BYTES)
+        if scr is None:
+            return False
+        try:
+            kept = comp.frame_fold(view, fmt, cf.lut if fmt == 2 else None, scr,
+                                   gw, gh, sx, sy, vw, vh, int(ox), int(oy),
+                                   int(scale),
+                                   cf.rect_views[nr], gc._buf)
+        except ValueError:
+            return False
+        self._snap_live = True
+        cf.presented(scr, kept)
+        return True
 
     def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
         # #163 span-batch: n packed int16 quads (x, y, w, h, ci) in ONE call.
@@ -2548,6 +2643,84 @@ class DeviceCanvas:
             return
         self._fb.text(_fb_text(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
 
+    def blit565(self, buf, w, h, x, y, scale=1):
+        """Place a w x h picture of RGB565 words -- already in this canvas's
+        byte order, `swapped565` -- at (x, y), `scale` (a whole number) times
+        its size. Opaque; camera and clip honoured; pal() does not apply,
+        because direct colour has no index to remap. A cart's cover is drawn
+        this way (runtime/cover_cache.py): the console's one picture whose
+        pixels are colours, not palette indices."""
+        self.flush_batch()
+        w = int(w)
+        h = int(h)
+        scale = int(scale)
+        if w <= 0 or h <= 0 or scale < 1:
+            return
+        x = int(x) - self._cam_x
+        y = int(y) - self._cam_y
+        cx0 = self._clip_x0
+        cy0 = self._clip_y0
+        cx1 = self._clip_x1
+        cy1 = self._clip_y1
+        g = self._gfx
+        if g is not None and scale == 1:
+            g.blit565(self._buf, self._stride, self._bh, x, y, buf, w, h, -1,
+                      cx0, cy0, cx1, cy1)
+            return
+        sw = w * scale
+        # Inside the clip across: the source rows wholly inside it go to the
+        # kernel in one call, and only the edge rows the clip cuts through
+        # take the row-at-a-time lane below.
+        a = b = 0
+        if g is not None and x >= cx0 and x + sw <= cx1:
+            a = max(0, -((y - cy0) // scale))
+            b = min(h, (cy1 - y) // scale)
+            if a < b:
+                g.blit565_scale(self._buf, self._stride, self._bh, x,
+                                y + a * scale,
+                                memoryview(buf)[2 * w * a:2 * w * b], w, b - a,
+                                scale)
+                if a == 0 and b == h:
+                    return
+        # Scaled and clipped (or no kernel): a source row at a time, widened
+        # into one scratch row and stamped `scale` times inside the clip.
+        x0 = max(x, cx0)
+        x1 = min(x + sw, cx1)
+        if x1 <= x0:
+            return
+        row = bytearray(2 * sw)
+        if g is not None:
+            mv = memoryview(buf)
+            for sy in range(h):
+                if a <= sy < b:
+                    continue
+                ty = y + sy * scale
+                if ty + scale <= cy0 or ty >= cy1:
+                    continue
+                g.blit565_scale(row, sw, 1, 0, 0, mv[2 * w * sy:2 * w * (sy + 1)],
+                                w, 1, scale)
+                for k in range(scale):
+                    g.blit565(self._buf, self._stride, self._bh, x, ty + k, row,
+                              sw, 1, -1, cx0, cy0, cx1, cy1)
+            return
+        d = self._buf
+        stride = self._stride
+        for sy in range(h):
+            src = 2 * w * sy
+            for sx in range(w):
+                a = buf[src + 2 * sx]
+                b = buf[src + 2 * sx + 1]
+                for k in range(scale):
+                    o = 2 * (sx * scale + k)
+                    row[o] = a
+                    row[o + 1] = b
+            for k in range(scale):
+                ty = y + sy * scale + k
+                if ty < cy0 or ty >= cy1:
+                    continue
+                o = 2 * (ty * stride + x0)
+                d[o:o + 2 * (x1 - x0)] = row[2 * (x0 - x):2 * (x1 - x)]
+
     def blit_indices(self, indices, iw, ih, x, y):
         # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index
         # to RGB565 via the panel-wire-order PAL565_WIRE table. The "images are data, not draw calls"
@@ -2693,6 +2866,10 @@ class DeviceCanvas:
         # a full frame) when present, else a memoryview row-copy fallback (no framebuf,
         # so it also runs under the host parity test). Overwrites -- it's the background,
         # drawn first each frame, erasing last frame's sprites for free.
+        # SPEC.md 6: each axis of the camera clamps into [0, max(0, layer - screen)],
+        # so the window never leaves the layer; on an axis where the layer is smaller
+        # than the screen the camera is 0 and the screen past the layer keeps what it
+        # held.
         # #63: flush BOTH sides -- this canvas's queued sprites (drawn, then overwritten
         # by the opaque copy, exactly as immediate mode) and the source layer's, so its
         # pixels are complete before we read them.
@@ -2704,8 +2881,14 @@ class DeviceCanvas:
             _fb()
         cam_x = int(cam_x)
         cam_y = int(cam_y)
+        mx = layer.w - self.w
+        my = layer.h - self.h
+        if cam_x > mx:
+            cam_x = mx
         if cam_x < 0:
             cam_x = 0
+        if cam_y > my:
+            cam_y = my
         if cam_y < 0:
             cam_y = 0
         # Async layer copy (#54 Stage 2): if sync_back predicted THIS restore and
@@ -2765,7 +2948,7 @@ class DeviceCanvas:
         if dh <= 0:
             return
         for row in range(dh):
-            d0 = row * dw
+            d0 = row * self.w
             s0 = (cam_y + row) * src_w + cam_x
             d[d0:d0 + dw] = s[s0:s0 + dw]
 

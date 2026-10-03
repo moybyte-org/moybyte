@@ -22,7 +22,7 @@ def test_a_declared_view_reaches_the_console(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ns = ws.make_api(ws.canvas, ws.input, {}, ws.sheet, ws.audio,
                      ws.tilemap, ws.pmem, None, {})
-    run = ws.lua_runtime(ns, "function _init() view(128, 120) end\n"
+    run = ws.runtimes["lua"](ns, "function _init() view(128, 120) end\n"
                              "function _update(dt) end\n"
                              "function _draw() cls(0) end\n")
     try:
@@ -47,7 +47,7 @@ def test_a_view_changed_mid_run_follows(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ns = ws.make_api(ws.canvas, ws.input, {}, ws.sheet, ws.audio,
                      ws.tilemap, ws.pmem, None, {})
-    run = ws.lua_runtime(ns, "n = 0\n"
+    run = ws.runtimes["lua"](ns, "n = 0\n"
                              "function _update(dt)\n"
                              "  n = n + 1\n"
                              "  if n == 2 then view(160, 120) end\n"

@@ -1694,6 +1694,379 @@ static void sc_fold_snap_crop_bands_match_the_raster(void) {
     CHECK_EQ(moy_fold.snaps_sync, 0);
 }
 
+// A COMPILED CART'S FRAME (moy_fold_arm_frame): the frame as the cart left it
+// in its linear memory -- blit's index bytes with 256 colours, or blit565's
+// little-endian RGB565 -- snapshotted whole and resolved as each band is
+// synthesized. The frame sits wherever the cart's allocator put it, so it is
+// placed `skew` bytes past a 64-byte boundary, with room either side for the
+// aligned span the engine copies. The oracle is written from the cart's bytes
+// and the palette alone, never from the scratch.
+
+#define FRAME_MAX (320 * 240 * 2)
+static uint8_t f_lin[64 + FRAME_MAX + 64] __attribute__((aligned(64)));
+static uint8_t f_fscr[FRAME_MAX + 128 + MOY_FOLD_LUT_BYTES + MOY_FOLD_PATCH_BYTES]
+    __attribute__((aligned(64)));
+static uint16_t f_canvas[320 * 240];            // the game canvas patches come from
+static int16_t f_rects[4 * (MOY_FOLD_MAX_PATCHES + 1)];
+static int f_nrects;
+static uint16_t f_lut[256];
+
+static size_t frame_bytes(int fmt, int gw, int gh) {
+    return (size_t)gw * (size_t)gh * (fmt == MOY_FOLD_IDX8 ? 1u : 2u);
+}
+
+static uint8_t *frame_fill(int fmt, int gw, int gh, int skew) {
+    uint8_t *fr = f_lin + 64 + skew;
+    memset(f_lin, 0xEE, sizeof f_lin);
+    memset(f_fscr, 0x11, sizeof f_fscr);
+    for (int i = 0; i < 256; i++) {
+        f_lut[i] = (uint16_t)(0x2000u + (unsigned)i * 157u);
+    }
+    for (int y = 0; y < gh; y++) {
+        for (int x = 0; x < gw; x++) {
+            size_t i = (size_t)y * (size_t)gw + (size_t)x;
+            if (fmt == MOY_FOLD_IDX8) {
+                fr[i] = (uint8_t)(x * 7 + y * 13 + (x ^ y));
+            } else {
+                uint16_t v = (uint16_t)(0x1000u + (unsigned)(y * 61 + x * 7)
+                                        + ((unsigned)(x ^ y) << 5));
+                fr[2 * i] = (uint8_t)(v & 0xFFu);
+                fr[2 * i + 1] = (uint8_t)(v >> 8);
+            }
+        }
+    }
+    return fr;
+}
+
+static uint16_t frame_wire(int fmt, const uint8_t *fr, int gw, int x, int y) {
+    size_t i = (size_t)y * (size_t)gw + (size_t)x;
+    if (fmt == MOY_FOLD_IDX8) {
+        return f_lut[fr[i]];
+    }
+    return (uint16_t)((fr[2 * i] << 8) | fr[2 * i + 1]);
+}
+
+// A frame pixel in wire order, or the game canvas's where a patch covers it.
+static uint16_t frame_or_patch(int fmt, const uint8_t *fr, int gw, int x,
+                               int y) {
+    for (int i = 0; i < f_nrects; i++) {
+        int rx = f_rects[4 * i], ry = f_rects[4 * i + 1];
+        int rw = f_rects[4 * i + 2], rh = f_rects[4 * i + 3];
+        if (x >= rx && x < rx + rw && y >= ry && y < ry + rh) {
+            return f_canvas[(size_t)y * (size_t)gw + (size_t)x];
+        }
+    }
+    return frame_wire(fmt, fr, gw, x, y);
+}
+
+static void ref_composite_frame(uint16_t *fb, int fb_w, int fb_h, int fmt,
+                                const uint8_t *fr, int gw, int sx, int sy,
+                                int vw, int vh, int ox, int oy, int scale) {
+    memset(fb, 0, (size_t)fb_w * (size_t)fb_h * 2u);
+    for (int y = 0; y < vh * scale; y++) {
+        for (int x = 0; x < vw * scale; x++) {
+            fb[(size_t)(oy + y) * (size_t)fb_w + (size_t)(ox + x)] =
+                frame_or_patch(fmt, fr, gw, sx + x / scale, sy + y / scale);
+        }
+    }
+}
+
+// Arm over a frame; returns whether the copy is a DMA in flight.
+static bool frame_arm_or_fail(int fmt, const uint8_t *fr, int gw, int gh,
+                              int sx, int sy, int vw, int vh, int ox, int oy,
+                              int scale, int fb_w, int fb_h, size_t *kept) {
+    bool as = false;
+    if (!moy_fold_arm_frame(fr, frame_bytes(fmt, gw, gh), fmt, f_lut, f_fscr,
+                            sizeof f_fscr, gw, gh, sx, sy, vw, vh, ox, oy,
+                            scale, fb_w, fb_h, f_rects, f_nrects,
+                            (const uint8_t *)f_canvas, sizeof f_canvas, kept,
+                            &as)) {
+        h_fail("frame arm refused fmt %d %dx%d, %dx%d at (%d,%d) -> (%d,%d) "
+               "x%d in %dx%d", fmt, gw, gh, vw, vh, sx, sy, ox, oy, scale,
+               fb_w, fb_h);
+    }
+    return as;
+}
+
+// Both gathers against the frame's own composite, then again after the
+// cart's memory has been spoiled: a band reads the snapshot, never the cart.
+static void frame_check(int fmt, int skew, int gw, int gh, int sx, int sy,
+                        int vw, int vh, int ox, int oy, int scale, int rot,
+                        int band_rows) {
+    const int fb_w = (rot < 0) ? FOLD_W : FOLD_LW;
+    const int fb_h = (rot < 0) ? FOLD_H : FOLD_LH;
+    uint8_t *fr = frame_fill(fmt, gw, gh, skew);
+    size_t kept = 99;
+    CHECK(frame_arm_or_fail(fmt, fr, gw, gh, sx, sy, vw, vh, ox, oy, scale,
+                            fb_w, fb_h, &kept));
+    CHECK_EQ(kept, (size_t)skew);
+    ref_composite_frame(f_ref, fb_w, fb_h, fmt, fr, gw, sx, sy, vw, vh, ox,
+                        oy, scale);
+    char what[120];
+    for (int pass = 0; pass < 2; pass++) {
+        snprintf(what, sizeof what, "frame fmt %d skew %d %dx%d@(%d,%d)/%d -> "
+                 "(%d,%d) x%d rot %d pass %d", fmt, skew, vw, vh, sx, sy, gw,
+                 ox, oy, scale, rot, pass);
+        if (rot < 0) {
+            fold_gather_linear(fb_w, fb_h, band_rows);
+            fold_expect(what, fb_w, fb_h);
+        } else {
+            fold_gather_rot_and_expect(what, rot, 0, 0, FOLD_PW, FOLD_PH);
+        }
+        CHECK_EQ(moy_fold.copying, false);
+        memset(f_lin, 0x77, sizeof f_lin);
+    }
+    // The skipped composite -- the disarm's -- resolves the frame the same.
+    moy_fold_composite((uint8_t *)f_got, fb_w, fb_h);
+    snprintf(what, sizeof what, "frame fmt %d skew %d composite", fmt, skew);
+    fold_expect(what, fb_w, fb_h);
+    CHECK(moy_fold_disarm());
+}
+
+static void sc_fold_frame_arm_geometry(void) {
+    size_t kept = 0;
+    bool as = false;
+    uint8_t *fr = frame_fill(MOY_FOLD_IDX8, 320, 240, 13);
+    const size_t n8 = frame_bytes(MOY_FOLD_IDX8, 320, 240);
+    // Taken: blit's frame 13 bytes past a boundary. It lands 13 bytes into the
+    // scratch, the rectangle starts there, and the palette rides the tail.
+    CHECK(moy_fold_arm_frame(fr, n8, MOY_FOLD_IDX8, f_lut, f_fscr,
+                             sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0, 1,
+                             FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(as);
+    CHECK_EQ(kept, 13);
+    CHECK_EQ(moy_fold.armed, true);
+    CHECK_EQ(moy_fold.fmt, MOY_FOLD_IDX8);
+    CHECK(moy_fold.src == f_fscr + 13);
+    CHECK(moy_fold.lut == (const uint16_t *)(f_fscr + ((13 + n8 + 63) & ~(size_t)63)));
+    CHECK_EQ(moy_fold.npatch, 0);
+    CHECK_EQ(memcmp(moy_fold.lut, f_lut, MOY_FOLD_LUT_BYTES), 0);
+    CHECK_EQ(moy_fold.sstride, 320);
+    CHECK_EQ(moy_fold.frame_arms, 1);
+    moy_fold_snap_fence();
+    CHECK_EQ(memcmp(f_fscr + 13, fr, n8), 0);
+    CHECK(moy_fold_disarm());
+    // blit565's frame, cropped: the whole frame is copied, the rectangle
+    // starts at its row and column.
+    fr = frame_fill(MOY_FOLD_LE565, 320, 240, 2);
+    const size_t n16 = frame_bytes(MOY_FOLD_LE565, 320, 240);
+    CHECK(moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                             sizeof f_fscr, 320, 240, 16, 8, 288, 224, 16, 8,
+                             1, FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK_EQ(kept, 2);
+    CHECK(moy_fold.src == f_fscr + 2 + 8 * 320 * 2);
+    CHECK_EQ(moy_fold.sx, 16);
+    CHECK(moy_fold.lut == NULL);
+    moy_fold_snap_fence();
+    CHECK_EQ(memcmp(f_fscr + 2, fr, n16), 0);
+    CHECK(moy_fold_disarm());
+    CHECK_EQ(moy_fold.frame_arms, 2);
+    int submits = h_dma_submits();
+    uint32_t snaps = moy_fold.snaps, sync = moy_fold.snaps_sync;
+    // Refused, with nothing copied or latched: no frame, no scratch, a layout
+    // that is not a frame's, a palette frame without its palette, a frame
+    // shorter than its size, a scratch without room for the span and the
+    // palette (or of odd length), a rectangle outside the frame, and the
+    // geometry the other arms refuse.
+    CHECK(!moy_fold_arm_frame(NULL, n8, MOY_FOLD_IDX8, f_lut, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0, 1,
+                              FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n8, MOY_FOLD_IDX8, f_lut, NULL,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0, 1,
+                              FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_WIRE, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0, 1,
+                              FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n8, MOY_FOLD_IDX8, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0, 1,
+                              FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16 - 1, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0, 1,
+                              FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              n16 + MOY_FOLD_LUT_BYTES, 320, 240, 0, 0, 320,
+                              240, 0, 0, 1, FOLD_W, FOLD_H, NULL, 0, NULL, 0,
+                              &kept, &as));
+    // Patches: more rects than the fold holds, more bytes than it copies,
+    // rects with no canvas to take them from, and a canvas smaller than the
+    // frame.
+    int16_t five[20] = { 0, 0, 4, 4, 8, 0, 4, 4, 16, 0, 4, 4, 24, 0, 4, 4,
+                         32, 0, 4, 4 };
+    int16_t big[4] = { 0, 0, 320, 20 };
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0,
+                              1, FOLD_W, FOLD_H, five, 5,
+                              (const uint8_t *)f_canvas, sizeof f_canvas,
+                              &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0,
+                              1, FOLD_W, FOLD_H, big, 1,
+                              (const uint8_t *)f_canvas, sizeof f_canvas,
+                              &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0,
+                              1, FOLD_W, FOLD_H, five, 1, NULL, 0, &kept,
+                              &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0,
+                              1, FOLD_W, FOLD_H, five, 1,
+                              (const uint8_t *)f_canvas, 100, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr - 1, 320, 240, 0, 0, 320, 240, 0,
+                              0, 1, FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 8, 0, 320, 240, 0, 0, 1,
+                              FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 1, 320, 240, 0, 0, 1,
+                              FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 8, 0, 1,
+                              FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK(!moy_fold_arm_frame(fr, n16, MOY_FOLD_LE565, NULL, f_fscr,
+                              sizeof f_fscr, 320, 240, 0, 0, 320, 240, 0, 0, 0,
+                              FOLD_W, FOLD_H, NULL, 0, NULL, 0, &kept, &as));
+    CHECK_EQ(moy_fold.armed, false);
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK_EQ(h_dma_submits(), submits);
+    CHECK_EQ(moy_fold.snaps, snaps);
+    CHECK_EQ(moy_fold.snaps_sync, sync);
+    CHECK_EQ(moy_fold.frame_arms, 2);
+}
+
+static void sc_fold_frame_idx_bands_match_the_frame(void) {
+    // The T-Deck's whole screen, at every alignment a cart's frame can have;
+    // a declared small canvas cropped and scaled; the Guition's game window
+    // both ways up.
+    for (int skew = 0; skew < 64; skew += 13) {
+        frame_check(MOY_FOLD_IDX8, skew, 320, 240, 0, 0, 320, 240, 0, 0, 1,
+                    -1, 32);
+    }
+    frame_check(MOY_FOLD_IDX8, 7, 160, 120, 8, 4, 144, 112, 16, 8, 2, -1, 36);
+    frame_check(MOY_FOLD_IDX8, 40, 320, 240, 0, 0, 320, 240, 80, 40, 1, 0, 32);
+    frame_check(MOY_FOLD_IDX8, 1, 320, 240, 0, 0, 320, 240, 80, 40, 1, 1, 32);
+    CHECK_EQ(moy_fold.snaps_sync, 0);
+}
+
+static void sc_fold_frame_565_bands_match_the_frame(void) {
+    // Word-aligned (two pixels a word), half-word aligned and odd (a byte at a
+    // time): the same pixels either way.
+    frame_check(MOY_FOLD_LE565, 0, 320, 240, 0, 0, 320, 240, 0, 0, 1, -1, 32);
+    frame_check(MOY_FOLD_LE565, 2, 320, 240, 0, 0, 320, 240, 0, 0, 1, -1, 32);
+    frame_check(MOY_FOLD_LE565, 33, 320, 240, 0, 0, 320, 240, 0, 0, 1, -1, 32);
+    frame_check(MOY_FOLD_LE565, 4, 160, 120, 8, 4, 144, 112, 16, 8, 2, -1, 36);
+    frame_check(MOY_FOLD_LE565, 8, 320, 240, 0, 0, 320, 240, 80, 40, 1, 0, 32);
+    frame_check(MOY_FOLD_LE565, 3, 320, 240, 16, 0, 288, 240, 96, 40, 1, 1, 32);
+    CHECK_EQ(moy_fold.snaps_sync, 0);
+}
+
+static void sc_fold_frame_patches_come_from_the_canvas(void) {
+    // What the console draws over a frame: the FPS chip in the corner, the
+    // perf HUD line over it, a rect half off the frame and one wholly off it.
+    for (int i = 0; i < 320 * 240; i++) {
+        f_canvas[i] = (uint16_t)(0x8000u | (unsigned)(i * 11));
+    }
+    const int16_t rects[16] = { 293, 229, 27, 10,  230, 219, 90, 10,
+                                -6, 100, 20, 8,   400, 10, 8, 8 };
+    memcpy(f_rects, rects, sizeof rects);
+    f_nrects = 4;
+    for (int fmt = MOY_FOLD_LE565; fmt <= MOY_FOLD_IDX8; fmt++) {
+        frame_check(fmt, 5, 320, 240, 0, 0, 320, 240, 0, 0, 1, -1, 32);
+        CHECK_EQ(moy_fold.npatch, 3);            // the one off the frame is none
+        frame_check(fmt, 9, 320, 240, 0, 0, 320, 240, 80, 40, 1, 0, 32);
+        frame_check(fmt, 2, 320, 240, 0, 0, 320, 240, 80, 40, 1, 1, 32);
+        frame_check(fmt, 0, 320, 240, 16, 8, 288, 224, 16, 8, 1, -1, 36);
+    }
+    // The patches were copied at the arm: the canvas is the console's to
+    // draw on again the moment the arm returns.
+    uint8_t *fr = frame_fill(MOY_FOLD_IDX8, 320, 240, 3);
+    size_t kept = 0;
+    frame_arm_or_fail(MOY_FOLD_IDX8, fr, 320, 240, 0, 0, 320, 240, 0, 0, 1,
+                      FOLD_W, FOLD_H, &kept);
+    ref_composite_frame(f_ref, FOLD_W, FOLD_H, MOY_FOLD_IDX8, fr, 320, 0, 0,
+                        320, 240, 0, 0, 1);
+    for (int i = 0; i < 320 * 240; i++) {
+        f_canvas[i] = 0x1234;
+    }
+    fold_gather_linear(FOLD_W, FOLD_H, 32);
+    fold_expect("patches copied at the arm", FOLD_W, FOLD_H);
+    CHECK(moy_fold_disarm());
+    f_nrects = 0;
+}
+
+static void sc_fold_frame_shown_again_from_the_scratch(void) {
+    // The last frame shown, handed over again from the copy the scratch keeps
+    // (the cart drew no new one): it is where the arm would copy it, so it is
+    // armed in place -- no copy, no DMA -- and its bands are its composite.
+    uint8_t *fr = frame_fill(MOY_FOLD_IDX8, 320, 240, 29);
+    size_t kept = 0;
+    frame_arm_or_fail(MOY_FOLD_IDX8, fr, 320, 240, 0, 0, 320, 240, 0, 0, 1,
+                      FOLD_W, FOLD_H, &kept);
+    ref_composite_frame(f_ref, FOLD_W, FOLD_H, MOY_FOLD_IDX8, fr, 320, 0, 0,
+                        320, 240, 0, 0, 1);
+    moy_fold_snap_fence();
+    CHECK(moy_fold_disarm());
+    memset(f_lin, 0x77, sizeof f_lin);            // the cart's memory moved on
+    int submits = h_dma_submits();
+    uint32_t snaps = moy_fold.snaps, sync = moy_fold.snaps_sync;
+    size_t again = 0;
+    frame_arm_or_fail(MOY_FOLD_IDX8, f_fscr + kept, 320, 240, 0, 0, 320, 240,
+                      0, 0, 1, FOLD_W, FOLD_H, &again);
+    CHECK_EQ(again, kept);
+    CHECK_EQ(h_dma_submits(), submits);
+    CHECK_EQ(moy_fold.snaps, snaps);
+    CHECK_EQ(moy_fold.snaps_sync, sync);
+    CHECK_EQ(moy_fold.copying, false);
+    fold_gather_linear(FOLD_W, FOLD_H, 32);
+    fold_expect("the kept frame, shown again", FOLD_W, FOLD_H);
+    CHECK(moy_fold_disarm());
+}
+
+static void sc_fold_frame_through_the_engine(void) {
+    // A board's flush of a frame whose snapshot is still in flight when the
+    // feeder reaches band 0: every band is the frame's -- the scratch holds
+    // poison until the copy lands -- and the cart's memory can be spoiled
+    // the moment the snapshot fence lets it go.
+    bd_start(&OPS2);
+    B.synth_us = 0;
+    B.tx_us = 2000;
+    B.fold_synth = true;
+    uint8_t *fr = frame_fill(MOY_FOLD_IDX8, 320, 240, 21);
+    size_t kept = 0;
+    CHECK(frame_arm_or_fail(MOY_FOLD_IDX8, fr, 320, 240, 0, 0, 320, 240, 80,
+                            40, 1, FOLD_LW, FOLD_LH, &kept));
+    ref_composite_frame(f_ref, FOLD_LW, FOLD_LH, MOY_FOLD_IDX8, fr, 320, 0, 0,
+                        320, 240, 80, 40, 1);
+    int64_t lands = h_dma_lands_at();
+    CHECK(moy_fold_consume());
+    B.expect_src = g_fb;
+    moy_flush_kick(g_fb, PANEL_ROWS);
+    CHECK(moy_flush_drain());
+    CHECK_EQ(B.nbands, FULL_BANDS);
+    CHECK(B.bands[0].t_in < lands);
+    CHECK(B.bands[0].t_out >= lands);
+    fold_expect("engine-fed frame", FOLD_LW, FOLD_LH);
+    CHECK_EQ(moy_fold.inflight, false);
+    // The next frame, blit565 this time, over the same scratch: the caller's
+    // fence, then the arm; and once the snapshot fence has let the cart's
+    // memory go, the cart spoils it before the flush even starts.
+    moy_fold_fence();
+    B.nbands = 0;
+    fr = frame_fill(MOY_FOLD_LE565, 320, 240, 6);
+    ref_composite_frame(f_ref, FOLD_LW, FOLD_LH, MOY_FOLD_LE565, fr, 320, 0,
+                        0, 320, 240, 80, 40, 1);
+    CHECK(frame_arm_or_fail(MOY_FOLD_LE565, fr, 320, 240, 0, 0, 320, 240, 80,
+                            40, 1, FOLD_LW, FOLD_LH, &kept));
+    moy_fold_snap_fence();
+    memset(f_lin, 0x77, sizeof f_lin);
+    CHECK(moy_fold_consume());
+    moy_flush_kick(g_fb, PANEL_ROWS);
+    CHECK(moy_flush_drain());
+    fold_expect("engine-fed blit565 frame", FOLD_LW, FOLD_LH);
+    CHECK_EQ(moy_fold.frame_arms, 2);
+    CHECK_EQ(moy_flush.timeouts, 0);
+}
+
 // ---------------------------------------------------------------------------
 
 typedef struct {
@@ -1767,6 +2140,16 @@ static const scenario_t SCENARIOS[] = {
       sc_fold_snap_timeout_on_the_feeder_is_bounded },
     { "fold_snap_crop_bands_match_the_raster",
       sc_fold_snap_crop_bands_match_the_raster },
+    { "fold_frame_arm_geometry", sc_fold_frame_arm_geometry },
+    { "fold_frame_idx_bands_match_the_frame",
+      sc_fold_frame_idx_bands_match_the_frame },
+    { "fold_frame_565_bands_match_the_frame",
+      sc_fold_frame_565_bands_match_the_frame },
+    { "fold_frame_patches_come_from_the_canvas",
+      sc_fold_frame_patches_come_from_the_canvas },
+    { "fold_frame_shown_again_from_the_scratch",
+      sc_fold_frame_shown_again_from_the_scratch },
+    { "fold_frame_through_the_engine", sc_fold_frame_through_the_engine },
 };
 
 #define N_SCENARIOS ((int)(sizeof SCENARIOS / sizeof SCENARIOS[0]))

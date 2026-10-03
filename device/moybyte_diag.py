@@ -76,47 +76,93 @@ def _ticks_ms():
 
 
 class _Ring(object):
-    """A bounded ring buffer of formatted log lines.
+    """A bounded ring buffer of log lines.
 
     Bounds on BOTH count (max_lines) and total bytes (max_bytes); appending past
     either drops the oldest lines first. Pure Python with no hardware deps, so the
-    host unit tests exercise it directly."""
+    host unit tests exercise it directly.
+
+    A line logged here is kept as its PARTS -- stamp, tag, message, in three
+    parallel lists -- and formatted only when the ring is READ (a flush, a dump).
+    A board logs a line every second or so for as long as it is on and reads
+    the ring at a crash or a cart exit, so formatting on the way in made a
+    second copy of every message for the collector to find. The byte budget
+    counts the line as it will read, so the bounds are the same either way. A
+    line appended already formatted (`append`) carries no stamp."""
 
     def __init__(self, max_lines=MAX_LINES, max_bytes=MAX_BYTES):
         self.max_lines = max_lines
         self.max_bytes = max_bytes
-        self._lines = []
+        self._t = []
+        self._tag = []
+        self._msg = []
         self._bytes = 0
 
     def append(self, line):
         # Defensive: only ever store strings, never let a weird value raise here.
-        try:
-            line = str(line)
-        except Exception:
-            line = "<unprintable>"
-        self._lines.append(line)
-        self._bytes += len(line) + 1   # +1 for the newline the dump joins with
+        # A str is stored as it is: MicroPython's str() of a str is a COPY.
+        if not isinstance(line, str):
+            try:
+                line = str(line)
+            except Exception:
+                line = "<unprintable>"
+        self._push(None, None, line)
+
+    def add(self, t, tag, msg):
+        """One line as its parts; `lines()` renders it as format_line would."""
+        self._push(t, tag, msg)
+
+    def _push(self, t, tag, msg):
+        self._t.append(t)
+        self._tag.append(tag)
+        self._msg.append(msg)
+        self._bytes += _size(t, tag, msg)
         self._trim()
 
     def _trim(self):
         # Drop oldest until BOTH bounds hold. Keep at least one line so a single
         # over-long line still records (truncated to the byte cap below).
-        while len(self._lines) > self.max_lines and self._lines:
-            dropped = self._lines.pop(0)
-            self._bytes -= len(dropped) + 1
-        while self._bytes > self.max_bytes and len(self._lines) > 1:
-            dropped = self._lines.pop(0)
-            self._bytes -= len(dropped) + 1
+        while len(self._msg) > self.max_lines and self._msg:
+            self._drop()
+        while self._bytes > self.max_bytes and len(self._msg) > 1:
+            self._drop()
+
+    def _drop(self):
+        t = self._t.pop(0)
+        tag = self._tag.pop(0)
+        self._bytes -= _size(t, tag, self._msg.pop(0))
 
     def lines(self):
-        return list(self._lines)
+        out = []
+        for i in range(len(self._msg)):
+            t = self._t[i]
+            m = self._msg[i]
+            out.append(m if t is None else format_line(self._tag[i], m, t))
+        return out
 
     def text(self):
-        return "\n".join(self._lines)
+        return "\n".join(self.lines())
 
     def clear(self):
-        self._lines = []
+        self._t = []
+        self._tag = []
+        self._msg = []
         self._bytes = 0
+
+
+def _size(t, tag, msg):
+    """The bytes one ring line takes as read back, +1 for the newline the dump
+    joins with: format_line's `<t> <tag> <msg>` for a stamped line."""
+    if t is None:
+        return len(msg) + 1
+    n = 1
+    if t < 0:
+        n = 2
+        t = -t
+    while t >= 10:
+        t //= 10
+        n += 1
+    return n + len(tag) + len(msg) + 3
 
 
 def format_line(tag, msg, t=None):
@@ -128,19 +174,24 @@ def format_line(tag, msg, t=None):
     and the dump's line markers)."""
     if t is None:
         t = _ticks_ms()
-    try:
-        tag = str(tag)
-    except Exception:
-        tag = "?"
-    try:
-        msg = str(msg)
-    except Exception:
-        msg = "<unprintable>"
+    tag = _as_str(tag, "?")
+    msg = _as_str(msg, "<unprintable>")
     line = "%d %s %s" % (t, tag, msg)
     # Collapse any embedded newlines so one entry stays one line.
     if "\n" in line:
         line = line.replace("\r", " ").replace("\n", " ")
     return line
+
+
+def _as_str(v, bad):
+    """`v` as a str: itself when it is one (MicroPython's str() of a str is a
+    COPY, and every diag line passes through here), `bad` when str() raises."""
+    if isinstance(v, str):
+        return v
+    try:
+        return str(v)
+    except Exception:
+        return bad
 
 
 # Module-level ring; created once, survives the whole session.
@@ -177,16 +228,21 @@ def log(tag, msg):
     if not ENABLED:
         return
     try:
-        line = format_line(tag, msg)
+        t = _ticks_ms()
+        tag = _as_str(tag, "?")
+        msg = _as_str(msg, "<unprintable>")
     except Exception:
         return
     if ECHO_LIVE:
         try:
-            print("Moybyte", line)
+            if "\n" in msg or "\r" in msg:
+                print("Moybyte", format_line(tag, msg, t))
+            else:
+                print("Moybyte", t, tag, msg)     # the same line, never built
         except Exception:
             pass
     try:
-        _ring.append(line)
+        _ring.add(t, tag, msg)
     except Exception:
         pass
 
@@ -363,6 +419,6 @@ def ring(tag, msg):
     if not ENABLED:
         return
     try:
-        _ring.append(format_line(tag, msg))
+        _ring.add(_ticks_ms(), _as_str(tag, "?"), _as_str(msg, "<unprintable>"))
     except Exception:
         pass

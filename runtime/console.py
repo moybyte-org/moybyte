@@ -1,3 +1,26 @@
+# Map (grep -n a name to jump there):
+#   splash_image                     the Moy mascot as a 16x16 blittable
+#   draw_splash                      paint the boot logo
+#   Workstation                      the console: canvases, the process stack, the store, every frame
+#   Workstation._init_canvases       the system and game canvases
+#   Workstation._init_components     the collaborators every surface reaches through ws
+#   -- the layer stack               the compositor and router's layer list
+#   -- user apps                     app identity and the crash guard
+#   -- WEB CONSOLE                   forwards to the web collaborator
+#   -- top-bar system menu           the bar's menu groups
+#   -- open-cart workspace forwards  Project forwards
+#   -- cart-run forwards             Player forwards
+#   -- run / exit                    launch_named, run_script, go_home, the return stack
+#   -- the app bar contract          the bar every app gets
+#   -- the desk                      the windowed tier's make world
+#   -- cart management               create, duplicate, delete
+#   -- pointer                       handle_pointer
+#   -- frame + drawing               frame: one console frame
+#   -- two-domain composite          the game viewport and its coordinates
+#   -- per-run cart canvas           the run's own game canvas
+#   -- redraw-on-change              the redraw gate
+#   -- content-layer draw bodies     what frame() routes each layer to
+#   wire_workstation_core            the board-agnostic service wiring
 """The shared Moybyte v0.4 console UI -- launcher + desktop + cards/code/paint
 editors + the trackball/touch Pointer. Backend-agnostic: it draws through an
 injected `canvas` (host Canvas or device DeviceCanvas -- identical TIC-80 API +
@@ -578,6 +601,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # backend attach point (like make_api): a factory (w, h) -> canvas, or
         # None on a tier that can't build one yet -- Player then refuses cleanly.
         self.make_game_canvas = None
+        # A compiled cart's frame that goes to the glass from the cart's own
+        # memory (device/moycore_glue.CartFrame), set by the run for its life
+        # on a system canvas that `presents_frames`; None everywhere else.
+        self.cart_frame = None
         self._run_canvas = None            # the bound small canvas, while a run holds it
         self._run_canvas_stock = None      # what self.canvas was before the bind
         self._run_canvas_shared = False    # True when the bind promoted stock to system
@@ -686,16 +713,32 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # radio, it is simply never armed.
         self.link = None
         self.carts_store = None     # injected: cart store module (moy_carts API)
-        # #67 dual-runtime seam: factory(ns, src) -> a running Lua cart handle
-        # (.init/.update/.draw callables + .close()). build_workstation injects
-        # runtime/lua_host.MoycoreHostRun; the device injects moycore_glue's.
-        # None = "runtime": "lua" carts open the error panel.
-        self.lua_runtime = None
+        # The cart-runtime seam (#67, docs/wasm_tier_plan_2026-09.md): a
+        # manifest's "runtime" name -> factory(ns, src) returning a running cart
+        # handle (.init/.update/.draw callables + .close()). build_workstation
+        # maps "lua" and "wasm" to runtime/lua_host's and runtime/wasm_host's
+        # runs; the device maps moycore_glue's. A runtime this build lacks is an
+        # ABSENT KEY, and a cart naming it opens the error panel.
+        self.runtimes = {}
         # OTA firmware updater (#53): injected by the device (moy_ota.OtaUpdater); None
         # on the host. When present AND the build is OTA-capable, Settings grows an
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self._updater = None
         self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
+        # The network Get Carts fetches carts through (#124, runtime/cart_index.py):
+        # `online()` and `open(url)`, injected by a board (device/cart_net.py),
+        # by the live simulator (host_app.HostCartNet) and by a browser page
+        # that keeps its own carts (firmware/web_runner/carts_link.py). None
+        # elsewhere -- the app then says this console has no way to fetch.
+        self.cart_net = None
+        # The rest of the browser's half of Get Carts, None everywhere else:
+        # `cart_keep`, the keeper that makes an install durable in OPFS;
+        # `cart_pick(name, size, host)`, the page's file picker for an external
+        # file the page cannot fetch; `cart_home`, "board" or "headless" on a
+        # page a console serves, whose carts that console gets itself.
+        self.cart_keep = None
+        self.cart_pick = None
+        self.cart_home = None
         # Serve the web console FROM this console (moycore plan 3.4 pull half):
         # injected by the device (moy_webhost.WebHost); None on the host and on a
         # build without it, which is what makes the Settings row appear only where
@@ -1746,7 +1789,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
 
     # -- run / exit (Stage 2: the run/return stack discipline) ----------------
 
-    def defer(self, fn):
+    def defer(self, fn, toast=True):
         """#184: schedule a heavy transition (cart start, editor open, PLAY)
         instead of running it inside the pointer walk. The tap frame paints its
         acknowledgment (selection highlight + the LOADING toast) and PRESENTS
@@ -1754,9 +1797,25 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         that same frame's tail -- so the 1-2s a cart start costs happens
         behind a frame that already shows the tap landed, not behind a frozen
         stale shelf. defer() marks dirty so the acknowledgment frame always
-        paints (the redraw gate can't skip it)."""
-        self._deferred.append(fn)
+        paints (the redraw gate can't skip it).
+
+        `toast=False` queues work the kid is NOT waiting on -- the Editor's
+        owed commit (#154), which rides the same tail because the frame has
+        already painted the destination. It gets the same drain and the same
+        DEFER line, and no pill: SAVE IS INVISIBLE (spec Section 7), and a
+        'LOADING...' over a tab that has already finished switching would
+        announce the one thing the shell promises never to show."""
+        self._deferred.append((fn, bool(toast)))
         self._dirty = True             # the acknowledgment frame must paint
+
+    def _toast_owed(self):
+        """Does a queued transition want the LOADING pill? A loop, because a
+        generator expression is three heap objects and frame() asks on every
+        painted frame."""
+        for _fn, toast in self._deferred:
+            if toast:
+                return True
+        return False
 
     def _run_deferred(self):
         """Run the deferred transitions queued BEFORE this drain started
@@ -1765,7 +1824,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         its own result must paint first."""
         q = self._deferred
         for _ in range(len(q)):
-            fn = q.pop(0)
+            fn, _toast = q.pop(0)
             _t0 = _ticks_ms() if self.perf_capture else 0
             fn()
             if self.perf_capture:
@@ -1923,6 +1982,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
             self.crash_line = None
             self.go_home()
             return True
+        # A compiled cart has no source to throw the kid into: its trap stays on
+        # the error panel, which offers no EDIT (docs/wasm_tier_plan_2026-09.md).
+        if self.cart.get("runtime") == "wasm":
+            return False
         err = self.cart_error or "crashed"
         line = self.crash_line
         # THE FILE THAT RAISED, not the file the tab was left on (SPEC.md 4,
@@ -2199,10 +2262,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
     # -- the app bar contract: a HOST GUARANTEE, not a per-app ritual ---------
     #
     # On the fullscreen tiers a registered app shows the minimal exitable bar
-    # (title + status + the context-X, spec shell_ux_v1.md Section 9). Every app
-    # used to hand-write BOTH halves -- `_draw_status_strip("tool")` last in its
-    # draw() and `handle_bar_tap("tool", ...)` first in its handle_pointer() --
-    # and an app that forgot either became UNEXITABLE, silently, on device only.
+    # (title + status + the context-X, spec shell_ux_v1.md Section 9), the "app"
+    # strip: the "tool" strip's drawing, on the SYSTEM canvas the app draws on
+    # (bar_layer._zone_is_game). An app that drew or routed its own bar and
+    # forgot either half became UNEXITABLE, silently, on device only.
     # The router already knows it is drawing a registered app, so it owns the
     # contract: frame()'s draw walk paints the strip AFTER the app's draw()
     # (chrome over content) and handle_pointer's walk routes the band BEFORE the
@@ -2212,11 +2275,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
     # and routes no bar tap must still show the strip's pixels and still exit on
     # its context-X, and so must all seven shipped apps, parametrized.
     #
-    # SCOPE, deliberately narrow: this owns the "tool" strip for REGISTERED APPS
+    # SCOPE, deliberately narrow: this owns the "app" strip for REGISTERED APPS
     # ONLY. The other strip kinds -- "menu" (the Editor surfaces), "settings",
-    # "home"/"picker" (launcher_layer), "desk" (wm_windowed) and "desktop" (the
-    # running cart's crash chrome / a running TOOL CART's bar, _draw_tool_bar
-    # above) -- stay with their surfaces. Collapsing the kinds would pick one and
+    # "home"/"picker" (launcher_layer), "desk" (wm_windowed), "tool" (a running
+    # TOOL CART's bar, _draw_tool_bar above) and "desktop" (the running cart's
+    # crash chrome) -- stay with their surfaces. Collapsing the kinds would pick one and
     # silently break the context-X on the rest.
     def _app_bar_route(self, app, px, py):
         """Route a click at (px, py) against registered `app`'s bar band.
@@ -2228,7 +2291,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         lay = getattr(app, "layout", None)
         band = getattr(lay, "bar_h", None)
         if band is None:                    # an app with no layout of its own
-            band = self.bar_layer._bar_h("tool")
+            band = self.bar_layer._bar_h("app")
         if py >= band:
             return None
         # The context-X in that band is an EXIT path, so hard-commit first: an
@@ -2237,7 +2300,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         commit = getattr(app, "commit", None)
         if commit is not None:
             commit()
-        return bool(self.bar_layer.handle_bar_tap("tool", px, py))
+        return bool(self.bar_layer.handle_bar_tap("app", px, py))
 
     def open(self):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
@@ -2370,9 +2433,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         """Open a PICTURE in Paint -- the ONE image door, taken by the Files
         router and by the Editor's ADVANCED files row alike (#108).
 
-        `cart` names a project whose OWN image this is (`images/cover.moyimg`):
-        Paint then reads and writes it on that project's kind, in place, so an
-        edited cover is the cover. Without one it is a gallery drawing. False
+        `cart` names a project whose OWN image this is (`images/<name>.moyimg`,
+        or its `cover.png`): Paint then reads and writes it on that project's
+        kind, in place, so an edited cover is the cover. Without one it is a gallery drawing. False
         when this build carries no Paint app, which each door reports on its
         own status line -- but a picture is never REFUSED for its shape: one
         Paint cannot edit opens read-only rather than not at all."""
@@ -2760,8 +2823,16 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         return self.carts_store.cart_sources(self.cart)
 
     def code_file_name(self):
-        """The script the Code tab is on. Never None once a cart is open."""
-        return self.code_file or (self.cart or {}).get("main", "main.py")
+        """The script the Code tab is on. Never None once a cart with code is
+        open; a compiled cart's code is its first `src/` file, and one that
+        ships none has no Code tab and answers None."""
+        if self.code_file:
+            return self.code_file
+        cart = self.cart or {}
+        if cart.get("runtime") == "wasm":
+            srcs = self.code_sources()
+            return srcs[0] if srcs else None
+        return cart.get("main", "main.py")
 
     def open_code_file(self, name):
         """Show another of the cart's scripts in the Code tab.
@@ -3345,6 +3416,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         cv.rectb(x, y, w, h, NAMES["light_grey"])
         cv.print(label, x + 8 * fs, y + 4 * fs, NAMES["white"], fs)
 
+    def _disarm_fn(self):
+        """The compositor's disarm_scale_fold, or None: probed once per
+        compositor, because a getattr that finds a method is a bound-method
+        allocation and this is asked on every frame an overlay paints over the
+        game."""
+        comp = self.comp
+        if comp is not self._dsf_comp:
+            self._dsf_comp = comp
+            self._dsf_fn = getattr(comp, "disarm_scale_fold", None)
+        return self._dsf_fn
+
     def _flush_batches(self):
         # Draw any sprites still pending in a canvas's auto-batch (Fold 1, #63) before
         # the frame is composited / flushed to the panel, so nothing queued by the last
@@ -3404,7 +3486,35 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         return self.wm.game_xy(px, py)
 
     def _composite_game(self):
+        # A compiled cart's frame still in its own memory is shown from there
+        # when the WM can; otherwise it lands in the game canvas and the
+        # composite reads it as ever.
+        cf = self.cart_frame
+        if cf is not None:
+            view = cf.take()
+            if view is not None:
+                if self.wm.present_frame(cf, view):
+                    return None
+                cf.settle(self.canvas)
+            cf.nrects = 0
         return self.wm.composite_game()
+
+    def patch_cart_frame(self, x, y, w, h):
+        """Before painting an OPAQUE rect on the game canvas over a compiled
+        cart's frame -- the FPS chip, the perf HUD line: the flush takes that
+        rect from the canvas and the rest from the frame, so the frame need
+        not be written first. A rect the frame cannot take settles it."""
+        cf = self.cart_frame
+        if cf is not None and not cf.patch(x, y, w, h):
+            cf.settle(self.canvas)
+
+    def settle_cart_frame(self):
+        """Before anything draws on the game canvas over a compiled cart's
+        frame: put the frame there first, the bytes its blit would have
+        written."""
+        cf = self.cart_frame
+        if cf is not None:
+            cf.settle()
 
     # -- per-run cart canvas (SPEC.md 1/3.1) ---------------------------------
 
@@ -3565,6 +3675,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # asynchronously. A static wallpaper would otherwise close the redraw
         # gate after its first frame and hide newly-found devices/status changes.
         if kind == "settings" and self.settings_layer.bluetooth_animating():
+            return True
+        # A released kinetic fling coasts the Settings rows for a second or so
+        # after the finger is gone (#113 Phase 5). Without this the gate closes
+        # on the release frame and the list stops dead under the thumb.
+        if kind == "settings" and self.settings_layer.rows_flinging():
             return True
         # (The Appearance app's monitor shows a COMPUTED still on every tier,
         # so it needs no live-wallpaper redraw exception -- the gate closes
@@ -3837,7 +3952,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         # comp has no fold (host/P4/web).
         _fold_live = False
         # THE APP BAR CONTRACT, draw half (docs/app_api_v1.md): a REGISTERED
-        # system app gets the minimal exitable "tool" strip drawn over its
+        # system app gets the minimal exitable "app" strip drawn over its
         # content by the router -- the app draws no bar of its own. Resolved
         # ONCE per frame (the walk cannot change either term): `_apps_by_id`
         # while the fullscreen chrome rules apply, None in the windowed desk
@@ -3854,7 +3969,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
             if _fold_live and (layer is not self._cursor_layer
                                or (self.pointer is not None
                                    and self.pointer.visible)):
-                _dsf = getattr(self.comp, "disarm_scale_fold", None)
+                _dsf = self._disarm_fn()
                 if _dsf is not None:
                     _dsf()
                 _fold_live = False
@@ -3881,17 +3996,19 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
                 _lb_done = True
             layer.draw(dt)
             if _appbar is not None and layer.id in _appbar:
-                self.bar_layer._draw_status_strip("tool")   # host guarantee
+                self.bar_layer._draw_status_strip("app")    # host guarantee
             _prev_domain = layer.domain
         if _game_open:                              # game was the TOP layer
             _view()
-        if self._deferred:
+        if self._deferred and self._toast_owed():
             # #184: the acknowledgment frame -- a transition queued this
             # iteration paints its LOADING toast on top of everything; the
             # flush below presents it, and the frame TAIL then runs the
             # transition. The panel retains this frame for the whole stall.
+            # A `toast=False` entry (the Editor's owed commit, #154) takes the
+            # same tail and no pill -- the kid is not waiting on it.
             if _fold_live:                          # #190: toast paints the root
-                _dsf = getattr(self.comp, "disarm_scale_fold", None)
+                _dsf = self._disarm_fn()
                 if _dsf is not None:
                     _dsf()
                 _fold_live = False
@@ -4025,8 +4142,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         Idempotent per tag. The holders: "web" (wasm mode, released when its
         socket actually closes), "update" (the online update screen), "settings"
         (the WIFI panel), "cart" (a run with the "network" permission), "link"
-        (a match). A new consumer of the network takes a tag here and releases
-        it on its way out, or the radio never goes off again."""
+        (a match), "carts" (the Get Carts app while it fetches). A new consumer
+        of the network takes a tag here and releases it on its way out, or the
+        radio never goes off again."""
         w = self.wifi
         if w is None:
             return False
@@ -4140,7 +4258,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
 
 
 def wire_workstation_core(ws, store, carts_root, make_api, wifi,
-                          make_audio=None, lua_runtime=None, can_manage=None,
+                          make_audio=None, runtimes=None, can_manage=None,
                           before_slim=None, pointer=None, inp=None,
                           keyboard=None):
     """The board-agnostic Workstation service wiring, in the ONE canonical order
@@ -4157,8 +4275,8 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     ws.make_api = make_api
     if make_audio is not None:
         ws.make_audio = make_audio
-    if lua_runtime is not None:
-        ws.lua_runtime = lua_runtime
+    if runtimes:
+        ws.runtimes = dict(runtimes)
     ws.carts_store = store
     ws.carts_root = carts_root
     ws.can_manage = (carts_root is not None) if can_manage is None else can_manage

@@ -185,3 +185,36 @@ def test_the_mode_is_decided_before_anything_is_written():
     # on whatever it finds, so a late seed would ship the whole store as changes.
     body = worker[worker.index("async function init("):]
     assert body.index("initStore({") < body.index("mp.runPython")
+
+
+def test_get_carts_layout_agrees_across_languages():
+    """Get Carts in the browser (#124) splits one layout between Python and
+    the worker: the record and the staging folder beside the carts store
+    (cart_index's names, which OPFS keeps under the same ones), and the
+    spool directory the worker streams a fetch into and carts_link reads.
+    A drift is an install the next boot cannot find, or a response nobody
+    reads."""
+    import sys
+    from runtime import cart_index
+    from runtime.moy_store_base import _sibling_path
+
+    js = _read("firmware", "web_runner", "moy_store.mjs")
+    worker = _read("firmware", "web_runner", "worker.js")
+
+    def const(src, name):
+        m = re.search(r'const %s = "([^"]*)"' % name, src)
+        assert m, "no %s" % name
+        return m.group(1)
+
+    assert const(js, "RECORD_NAME") == cart_index.RECORD_NAME
+    assert const(js, "STAGE_DIR") == cart_index.STAGE_DIR
+    # The worker derives the VFS record from the carts root the same way
+    # moy_store_base._sibling_path does.
+    assert "store.RECORD_NAME" in worker
+    assert _sibling_path("/moy/carts", cart_index.RECORD_NAME) == "/moy/installed.json"
+    sys.path.insert(0, _RUNNER)
+    try:
+        import carts_link
+    finally:
+        sys.path.remove(_RUNNER)
+    assert const(worker, "NET_DIR") == carts_link.SPOOL

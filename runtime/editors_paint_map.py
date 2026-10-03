@@ -1,3 +1,15 @@
+# Map (grep -n a name to jump there):
+#   -- shape rasterizers     the RECT/LINE/OVAL point sets
+#   _PaintOps                PaintEditor's undo op codec
+#   PaintEditor              pixel-paint state over a sprite-sheet tile
+#   PaintEditor.fill         flood fill
+#   PaintEditor.stamp_shape  commit the active shape
+#   PaintEditor.paste        stamp the clipboard
+#   _MapOps                  MapEditor's undo op codec
+#   MapEditor                tile placement over a TileMap and its sheet
+#   MapEditor.fill_rect      fill a rectangle of cells
+#   MapEditor.flood          flood fill on the map
+#   MapEditor.paste          stamp the clipboard
 """PaintEditor (#4) + MapEditor (#32) -- pixel-paint state over a sheet tile
 and tile-placement state over a TileMap. Split out of editors.py (which
 re-exports them).

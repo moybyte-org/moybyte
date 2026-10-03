@@ -10,8 +10,8 @@ name: CI
 # human-in-the-loop gates). See the classify-hardware-impact job below for the
 # hand-off this workflow leaves for a human (or a future automated step).
 
-# Both branches, deliberately. `dev` is the UNTESTED branch (see CLAUDE.md ->
-# "Branches and releases"), which makes it the branch that most needs the suite:
+# Both branches, deliberately. `dev` is the UNTESTED branch (see the `release`
+# skill, .claude/skills/release/SKILL.md), which makes it the branch that most needs the suite:
 # it is the only automated gate work gets before a human decides it is ready for
 # master. A red dev is information, not an embarrassment.
 on:
@@ -53,6 +53,44 @@ jobs:
       - name: Install package
         run: make setup
 
+      # The compiled showcase cart's host goldens (tests/test_jet_cart.py) build
+      # it with wasi-sdk 24, a 119 MB download. Cached under the sha256 the
+      # build pins (tools/jet_cart.py's WASI_SDK_SHA256), so a runner fetches it
+      # once per pin rather than once per run; the fetch is a step of its own
+      # so a cold cache is not paid inside a test.
+      - name: wasi-sdk pin
+        id: wasi_sdk
+        run: echo "sha256=$(sed -n 's/^WASI_SDK_SHA256 = "\(.*\)"$/\1/p' tools/jet_cart.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache wasi-sdk
+        uses: actions/cache@v4
+        with:
+          path: experiments/wasm_aot/toolchain/wasi-sdk
+          key: wasi-sdk-${{ steps.wasi_sdk.outputs.sha256 }}
+
+      - name: wasi-sdk for the compiled showcase cart
+        run: .venv/bin/python tools/jet_cart.py --toolchain
+
+      # The pinned AOT compilers (tools/wasm_module.py's COMPILERS, one 65 MB
+      # binary under each target's name), for the checks that compile a module
+      # with a console chip's own flags: tests/test_aot_symbols.py -- every
+      # symbol a module calls resolves in that chip's relocation table, which
+      # FAILS under CI rather than skipping without them -- and the key and
+      # push tests. Cached under the pins; the fetch checks each hash.
+      - name: wamrc pins
+        id: wamrc
+        run: |
+          echo "sha256=$(grep -o '"sha256": "[0-9a-f]*"' tools/wasm_module.py | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pinned wamrc
+        uses: actions/cache@v4
+        with:
+          path: experiments/wasm_aot/toolchain/dist
+          key: wamrc-${{ steps.wamrc.outputs.sha256 }}
+
+      - name: The pinned wamrc for the AOT checks
+        run: .venv/bin/python tools/wasm_module.py compilers
+
       # The COMPILED-VS-COMPILED lane. tests/test_gfx_binding.py's
       # test_matches_the_native_moy_gfx drives the same ops through the host's
       # ctypes binding and through the REAL native moy_gfx under a desktop
@@ -63,10 +101,18 @@ jobs:
       # build, and this step is what makes the check exist here.
       #
       # Deliberately NOT cached. It is ~20s from cold on a runner (clone,
-      # submodules, mpy-cross, compile) and a cache is another thing that can
+      # submodules, mpy-cross, compile), plus a second compile for the boards'
+      # object model, and a cache is another thing that can
       # go stale or miss -- and a miss that silently skipped the check is the
       # exact failure being fixed. If this step ever breaks, the tests below go
       # RED rather than quiet: the parity test fails outright when `CI` is set.
+      # ...built twice: the second time in the boards' object model (32-bit,
+      # REPR_C), which is the only binary on which a frame's allocations read
+      # as a board's (tests/test_frame_alloc.py) and which needs a 32-bit C
+      # toolchain the runner does not ship.
+      - name: A 32-bit C toolchain for the boards' object-model build
+        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends gcc-multilib
+
       - name: Build the desktop MicroPython with the native usermods
         run: make unix-micropython
 

@@ -19,7 +19,7 @@ PC simulator and on the device — same names, same pixels.
 ## The shape of a cart
 
 A cart is a single `main.py` inside a `.moy` folder (`manifest.json` + `main.py` +
-`config.json`, optional sprite sheet / tilemap / sounds / paint images). It defines up
+`config.json`, optional sprite sheet / tilemap / sounds / paint images / cover). It defines up
 to three lifecycle functions and calls the API by name — **no imports**; every name
 below is pre-injected as a global. (A cart can also be written in **Lua** —
 `main.lua` + `"runtime": "lua"` in the manifest, same API — see
@@ -32,6 +32,11 @@ the manifest declares the list and the console loads it (SPEC.md §4). A PICO-8 
 the standing case, with its generated compat layer in `p8.lua` ahead of the `main.lua`
 a person opens — and one more script per PICO-8 tab after it, because tabs are where
 that cart's author put its structure.
+
+A `cover.png` beside the manifest is the cart's picture on the shelf: a 128x128
+PNG, indexed or RGB, at most 64 KB (SPEC.md §3.6 has the profile). Paint opens it,
+a cart without one shows its icon instead, and a file outside the profile is
+ignored, never refused.
 
 ```python
 # a tiny cart: move a ball with the D-pad
@@ -323,8 +328,8 @@ re-drawing the background every frame.
 | call | does |
 |---|---|
 | `background(x)` | **declare the backdrop once** — a color (`background(col("dark_blue"))`) or a painted Image (`background(image("bg"))`) — and the engine repaints it at the start of every frame automatically. Your `_draw` then only draws the moving things: no `cls`, no backdrop blit, nothing to overdraw. `background()` with no args clears it |
-| `make_layer(w, h)` | create an off-screen layer (wider than the screen). Draw into it once with the **same verbs** (`cls`/`map`/`spr`/`rect`/…) via the layer's methods |
-| `draw_layer(layer, cam_x=0, cam_y=0)` | blit the visible `W×H` window of `layer` at the camera offset (clamped to the layer bounds). Draw actors on top afterwards |
+| `make_layer(w, h)` | create an off-screen layer of any size (a scroller's is wider than the screen). Draw into it once with the **same verbs** (`cls`/`map`/`spr`/`rect`/…) via the layer's methods |
+| `draw_layer(layer, cam_x=0, cam_y=0)` | blit the screen-sized window of `layer` whose top-left is `(cam_x, cam_y)`. Each axis of the camera is clamped into `[0, max(0, layer − screen)]`, so the window never leaves the layer: on an axis where the layer is smaller than the screen the camera is 0, and the screen past the layer's edge keeps what it held. Like `cls` it ignores the screen's `camera`/`clip`/`pal`. Draw actors on top afterwards |
 
 ## Scenes (placed actors, `#85`)
 

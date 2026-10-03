@@ -477,8 +477,9 @@ def test_a_chunked_publish_is_journaled_from_what_landed(tmp_path):
     entries = moy_journal._journal_load_entries(
         str(root / "hop.moy" / "journal" / "journal.jsonl"))
     assert len(entries) == 1 and entries[0]["file"] == "big.lua"
-    snap = root / "hop.moy" / "journal" / entries[0]["snap"]
-    assert snap.read_text() == big, "the snapshot is one chunk, not the file"
+    assert moy_journal._journal_read_snap(
+        str(root / "hop.moy" / "journal"), entries[0]) == big, \
+        "the snapshot is one chunk, not the file"
 
 
 def test_a_files_push_is_never_journaled(tmp_path):
@@ -880,3 +881,123 @@ def test_same_second_second_write_is_caught_by_the_hot_set(tmp_path):
     w.sweep()
     ops = _drain(w)
     assert {"p": "hop.moy/main.py", "t": "def _draw():\n    cls(2)\n"} in ops
+
+
+# -- a cart's cover crosses as bytes (SPEC.md 3.6) ------------------------------
+
+def _push_all(src, dst, journal=False):
+    """Sweep `src`, apply every batch into `dst`; returns (ops, shelf_dirty)."""
+    w = StoreWatcher(str(src))
+    w._snap = {}                       # a fresh browser: everything is new
+    w.sweep()
+    sent = []
+    dirty = False
+    while True:
+        body = w.take_json()
+        if not body:
+            return sent, dirty
+        ops, _pin, rid = parse_batch(body)
+        applied, errors, shelf = apply_ops(str(dst), ops, rid, journal=journal)
+        assert not errors, errors
+        dirty = dirty or shelf
+        sent.extend(ops)
+        w.ack(True)
+
+
+def test_a_cover_crosses_the_wire_as_its_bytes(tmp_path):
+    from ws_helpers import cover_bytes
+    root = _store(tmp_path)
+    data = cover_bytes(7, stripes=3)
+    (root / "hop.moy" / "cover.png").write_bytes(data)
+    dst = tmp_path / "board"
+    dst.mkdir()
+    ops, dirty = _push_all(root, dst, journal=True)
+    cover = [o for o in ops if o["p"] == "hop.moy/cover.png"]
+    assert cover and "b" in cover[0] and "t" not in cover[0]
+    assert (dst / "hop.moy" / "cover.png").read_bytes() == data
+    assert dirty, "a new cover is a change the shelf shows"
+    journal = dst / "hop.moy" / "journal"
+    if journal.exists():
+        assert "cover.png" not in " ".join(
+            p.read_text(errors="replace") for p in journal.rglob("*") if p.is_file())
+
+
+def test_a_big_cover_crosses_in_parts_each_its_own_base64(tmp_path):
+    """A cover past one part (any RGB cover in stored blocks is) is sent
+    BINARY_PART bytes at a time -- PART_MAX characters of base64, so every
+    piece decodes alone -- and published whole at `pub`."""
+    root = _store(tmp_path)
+    data = bytes((i * 131 + (i >> 7)) & 255 for i in range(60000))
+    (root / "hop.moy" / "cover.png").write_bytes(data)
+    dst = tmp_path / "board"
+    dst.mkdir()
+    ops, _dirty = _push_all(root, dst)
+    parts = [o for o in ops if o["p"] == "hop.moy/cover.png"]
+    assert len(parts) >= 5 and parts[-1] == {"p": "hop.moy/cover.png", "pub": 1}
+    assert all(len(o["b"]) <= PART_MAX for o in parts[:-1])
+    assert (dst / "hop.moy" / "cover.png").read_bytes() == data
+    assert not (dst / "hop.moy" / "cover.png.tmp").exists()
+
+
+def test_only_the_cover_crosses_as_bytes(tmp_path):
+    """A compiled module stays home (docs/wasm_tier_plan_2026-09.md), and a
+    receiver refuses bytes under any other name."""
+    root = _store(tmp_path)
+    (root / "hop.moy" / "main.wasm").write_bytes(b"\0asm\1\0\0\0\xff")
+    dst = tmp_path / "board"
+    dst.mkdir()
+    ops, _dirty = _push_all(root, dst)
+    assert not [o for o in ops if o["p"].endswith("main.wasm")]
+    applied, errors, _ = apply_ops(str(dst), [
+        {"p": "hop.moy/main.py", "b": "AAAA"},
+        {"p": "hop.moy/cover.png", "b": "not base64!"}])
+    assert applied == 0
+    assert [r for _i, r in errors] == ["not a binary file", "bad base64"]
+
+
+def test_an_unchanged_cover_ships_nothing(tmp_path):
+    from ws_helpers import cover_bytes
+    root = _store(tmp_path)
+    p = root / "hop.moy" / "cover.png"
+    p.write_bytes(cover_bytes(5))
+    w = StoreWatcher(str(root))
+    p.write_bytes(cover_bytes(5))
+    _bump_mtime(p)
+    w.sweep()
+    assert w.take() is None
+    p.write_bytes(cover_bytes(6))
+    _bump_mtime(p)
+    w.sweep()
+    assert [o["p"] for o in _drain(w)] == ["hop.moy/cover.png"]
+
+
+def test_a_file_the_wire_cannot_carry_is_read_once_not_every_sweep(tmp_path):
+    """A compiled cart's main.wasm, its data, a WAD: binary files that never
+    cross. The sweep reads one when it first sees it or it moves, and passes
+    it by stat otherwise -- a browser sweeping a store that holds Doom's 4 MB
+    WAD read the WAD whole every second, and the cart drew a frame a second.
+    It never becomes an op: not when it lands, not when it changes, not when
+    it goes."""
+    root = _store(tmp_path)
+    wad = root / "hop.moy" / "game.wad"
+    wad.write_bytes(bytes(range(256)) * 64)
+    reads = []
+
+    def read(path):
+        reads.append(path.rsplit("/", 1)[1])
+        return moy_sync._read_payload(path)
+    w = StoreWatcher(str(root), read=read)
+    assert reads.count("game.wad") == 1
+    for _ in range(3):
+        w.sweep()
+    assert reads.count("game.wad") == 1, reads
+    assert w.take() is None
+    wad.write_bytes(bytes(range(256)) * 65)
+    _bump_mtime(wad)
+    w.sweep()
+    w.sweep()
+    assert reads.count("game.wad") == 2, reads         # the move, once
+    assert w.take() is None
+    wad.unlink()
+    w.sweep()
+    assert w.take() is None, "a file that never crossed was deleted over the wire"

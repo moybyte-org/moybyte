@@ -67,6 +67,18 @@ moybyte_setup_idf esp32s3 \
 #    board with the least on-glass coverage in the fleet, for no measurable win.
 #    Revisit the day something on this flash executes a cart.
 #
+# DECLINED moybyte_patch_map_cache_for_repr_c -- the map-lookup cache index
+#    re-aim (#77) is a consequence of REPR_C: it shifts by the tag width REPR_C
+#    uses, and on this REPR_A image the stock index already reaches every slot,
+#    so taking it would fold four qstrs into one. The patch refuses a tree
+#    without REPR_C anyway. Goes with REPR_C the day this board takes that.
+#
+# DECLINED moybyte_patch_gc_run_hints -- size-class free-run hints for gc_alloc
+#    (#66). The walk they remove is paid per multi-block allocation inside a
+#    frame loop, and this board has no frame loop: its webhost allocates per
+#    request. Taken the day something here allocates at a rate, with the
+#    rebuild and the boot check that costs.
+#
 # DECLINED moybyte_patch_psram_retune -- the #169 vendor-gate patch. This is
 #    NOT a "no carts" argument, because the PSRAM is real (8MB octal, and the
 #    heap and the lwIP buffers both live in it). It is a dependency argument:
@@ -103,6 +115,22 @@ moybyte_setup_idf esp32s3 \
 # DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
 #    component is the P4's radio (a C6 slave over SDIO); this board's WiFi is
 #    on-die and its build pulls esp_hosted in nowhere.
+#
+# DECLINED moybyte_patch_lfs_sizes -- LittleFS sized for a flash store.
+#    Its store is the record, and the sizes were measured on the P4s' flash only.
+#
+# DECLINED moybyte_patch_sdcard_runs -- machine.SDCard in multi-block runs.
+#    This board has no card: its store is the internal flash VFS.
+#
+# DECLINED moybyte_patch_usj_rx_init -- the USB-Serial/JTAG console taking
+#    what a host sent during the bootloader. Nothing writes to this board
+#    while it boots: it has no dev channel, and the tools know it by its USB
+#    serial number without opening it.
+#
+# DECLINED moybyte_patch_stdin_ring -- the 4 KB stdin ring for a UART console.
+#    This board speaks USB-Serial/JTAG, which backpressures: its ISR takes only
+#    what the ring has room for and the USB host waits with the rest, so a
+#    collection costs it throughput and never a byte.
 #
 #    Also not applied, and never were: the esp_lcd tx_color no-acquire patch
 #    (there is no panel) and the #69 I2C GIL release (no input poller, no I2C

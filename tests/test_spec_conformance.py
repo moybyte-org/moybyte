@@ -104,10 +104,24 @@ def replay(calls, canvas, sheet=None, tilemap=None, flags=None):
     """Run a trace against a Canvas. The spec's own replayer, transcribed --
     ~40 lines in any language, which is the point of publishing traces at all.
     Verbs are CART-facing (`spr(n, ...)`), because that is what SPEC.md
-    specifies and what a Lua cart calls."""
+    specifies and what a Lua cart calls.
+
+    Layers (SPEC.md 6) are three trace verbs: `make_layer k w h` makes layer
+    k, `target k` sends the drawing verbs after it to layer k (0 is the
+    screen), and `draw_layer k cx cy` composites layer k onto the screen
+    whatever the target is. The camera clamp is the canvas's, so this hands
+    the requested camera over untouched."""
+    screen = canvas
+    layers = {}
     for call in calls:
         verb, a = call[0], call[1:]
-        if verb == "cls":
+        if verb == "make_layer":
+            layers[a[0]] = screen.new_layer(a[1], a[2])
+        elif verb == "target":
+            canvas = screen if a[0] == 0 else layers[a[0]]
+        elif verb == "draw_layer":
+            screen.blit_window_from(layers[a[0]], a[1], a[2])
+        elif verb == "cls":
             canvas.cls(a[0])
         elif verb == "pix":
             canvas.pix(a[0], a[1], a[2])
@@ -267,7 +281,7 @@ def test_every_core_scene_is_present_and_counted():
     names = _scene_names()
     core = [n for n, is_core, _ in names if is_core]
     # Core 0.3 counts every scene: 6.1's two were reported-but-excluded before.
-    assert len(core) == 15, "expected SPEC.md's 15 core scenes, found %r" % (core,)
+    assert len(core) == 20, "expected SPEC.md's 20 core scenes, found %r" % (core,)
     for name, _, _ in names:
         assert os.path.exists(os.path.join(HERE, "traces", name + ".json")), name
         assert os.path.isdir(os.path.join(HERE, "carts", name + ".moy")), name

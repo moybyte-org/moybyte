@@ -25,7 +25,7 @@ def test_builtin_apps_are_registered(tmp_path):
     ws = _ws(tmp_path)
     kinds = [app.id for app, _t in ws._apps]
     assert kinds == ["artwork", "appearance", "storybook",
-                     "files", "calc"]
+                     "files", "calc", "getcarts"]
     for kind in kinds:
         assert ws._content_layers[kind] is not None       # router wired
     assert ws.app_min_size("artwork") == (310, 230)       # registered minimum
@@ -167,13 +167,13 @@ def test_calc_is_app_rejects_lookalikes(tmp_path):
 
 # -- the bar contract is a HOST GUARANTEE (ui_refactor_2026-08 Phase 2) --------
 #
-# Until 2026-08-19 every app hand-wrote both halves of this -- the
-# `_draw_status_strip("tool")` last in draw() and the `handle_bar_tap("tool")`
-# first in handle_pointer() -- and an app that forgot either became UNEXITABLE,
-# silently, on device only. The router owns it now, so these are BEHAVIOURAL
-# assertions, not a call-site count: a stub app that knows nothing about the bar
-# must still show the strip and still exit on its context-X, and so must all
-# seven shipped apps, through the same assertion.
+# The router draws a registered app's strip ("app") and routes its band, so
+# these are BEHAVIOURAL assertions, not a call-site count: a stub app that knows
+# nothing about the bar must still show the strip and still exit on its
+# context-X, and so must all seven shipped apps, through the same assertion --
+# on the 320x240 handheld, whose system canvas IS the game canvas, and on the
+# Guition S3's 480x320, whose system canvas is its own (the strip once went to
+# the hidden game canvas there and left the app's bar band empty).
 
 import hashlib
 
@@ -182,7 +182,7 @@ import pytest
 _DT = 1.0 / 30.0
 _MAX_FRAMES = 6
 _SHIPPED_APPS = ("artwork", "appearance", "storybook",
-                 "files", "calc")
+                 "files", "calc", "getcarts")
 
 
 class _NakedApp:
@@ -262,15 +262,15 @@ def _settle(ws):
     raise AssertionError("surface never settled in %d frames" % _MAX_FRAMES)
 
 
-def _mute_tool_strip(ws):
-    """Suppress ONLY the "tool" strip, leaving the other six strip kinds alone
-    -- the desk, launcher, picker, editor-menu and Settings bars are not this
-    phase's and must keep drawing, so a pixel difference here names the app bar
-    and nothing else."""
+def _mute_app_strip(ws):
+    """Suppress ONLY the registered app's strip, leaving the other strip kinds
+    alone -- the desk, launcher, picker, editor-menu, Settings and tool-cart
+    bars must keep drawing, so a pixel difference here names the app bar and
+    nothing else."""
     orig = ws.bar_layer._draw_status_strip
 
     def muted(where):
-        if where == "tool":
+        if where == "app":
             return
         return orig(where)
 
@@ -280,7 +280,7 @@ def _mute_tool_strip(ws):
 def _band(ws, frame):
     """The bar band's rows and everything below it, as two hashes."""
     stride = ws.sys_canvas.w * 2
-    rows = ws.bar_layer._bar_h("tool")
+    rows = ws.bar_layer._bar_h("app")
     top = frame[:stride * rows]
     rest = frame[stride * rows:]
     return hashlib.sha256(top).hexdigest(), hashlib.sha256(rest).hexdigest()
@@ -300,16 +300,21 @@ def _open_app_kind(ws, kind):
     return app
 
 
+_SIZES = {"handheld": {}, "guition_s3": {"sys_size": (480, 320),
+                                         "panel_diagonal_in": 3.5}}
+
+
+@pytest.mark.parametrize("size", sorted(_SIZES))
 @pytest.mark.parametrize("kind", _SHIPPED_APPS + ("naked",))
-def test_host_draws_the_app_bar_without_the_app_asking(tmp_path, kind):
+def test_host_draws_the_app_bar_without_the_app_asking(tmp_path, kind, size):
     """The strip's PIXELS appear over a registered app on the fullscreen tier,
     including over an app whose draw() never mentions a bar."""
-    ws = _ws(tmp_path)
+    ws = _ws(tmp_path, **_SIZES[size])
     _open_app_kind(ws, kind)
     assert ws.screen == kind
     assert not ws.windowed_chrome
     with_bar = _settle(ws)
-    _mute_tool_strip(ws)
+    _mute_app_strip(ws)
     without_bar = _settle(ws)
     top_a, rest_a = _band(ws, with_bar)
     top_b, rest_b = _band(ws, without_bar)
@@ -317,11 +322,12 @@ def test_host_draws_the_app_bar_without_the_app_asking(tmp_path, kind):
     assert rest_a == rest_b, kind + ": the bar leaked outside its band"
 
 
+@pytest.mark.parametrize("size", sorted(_SIZES))
 @pytest.mark.parametrize("kind", _SHIPPED_APPS + ("naked",))
-def test_host_routes_the_context_x_and_the_app_exits(tmp_path, kind):
+def test_host_routes_the_context_x_and_the_app_exits(tmp_path, kind, size):
     """A tap on the context-X exits, and the app never sees the tap -- the bar
     is routed BEFORE handle_pointer, not after it."""
-    ws = _ws(tmp_path)
+    ws = _ws(tmp_path, **_SIZES[size])
     app = _open_app_kind(ws, kind)
     assert ws.screen == kind
     x, y, w, h = ws.layout.context_x_btn
@@ -336,12 +342,12 @@ def test_host_routes_the_context_x_and_the_app_exits(tmp_path, kind):
 
 def test_the_windowed_tier_still_suppresses_the_app_bar(tmp_path):
     """In the desk world the WM's title strip carries the close, so the host
-    must draw NO tool strip -- muting it may not change a single pixel."""
+    must draw NO app strip -- muting it may not change a single pixel."""
     ws = _ws(tmp_path, sys_size=(1024, 600), windowed=True)
     ws.open_app(ws._apps_by_id["calc"])
     assert ws.windowed_chrome                     # the make world is open
     with_bar = _settle(ws)
-    _mute_tool_strip(ws)
+    _mute_app_strip(ws)
     without_bar = _settle(ws)
     assert with_bar == without_bar
 

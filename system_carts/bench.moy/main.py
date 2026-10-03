@@ -96,14 +96,15 @@ TABLE_N = 1024             # entries in the container that phase walks. Big
 # wide rects are sequential writes. #163's finding in cart form -- "the win is
 # fewer AND WIDER spans, contiguity as much as call count".
 #
-# WHAT THE NUMBER MEANS NOW. Ray Test declared `"fps": "free"` and reported its
-# own free-running fps, because a dt-scaled cart a kid drives should run as
-# fast as the board can. The bench is frame-paced like every other cart here,
-# so this row is a FRAME TIME under the console's pacing: on a board where the
-# scene costs more than the tick budget (every board so far -- the march is
-# tens of ms) it is the work, and where it costs less the row reads the pace
-# and the RAY-FLOOR delta is what still measures the march. The camera turns
-# itself instead of being driven, so the workload is the same every run.
+# WHAT THE NUMBER MEANS. The bench declares `"fps": "free"` (owner call,
+# 2026-09-22), as Ray Test did before it folded in here: the tick model runs
+# it unpaced, so every phase row is the frame the board can actually run and
+# the FLOOR row is a floor. It was frame-paced for twelve days after #217,
+# and in that time every phase cheaper than the tick printed the 33ms tick
+# on every board and the ray row printed catch-up ticks; a referee that
+# reads the pace measures nothing, which is why this is the one cart that
+# declares free without being dt-scaled. The camera turns itself instead of
+# being driven, so the workload is the same every run.
 CEIL = 1                     # dark_blue
 FLOOR = 5                    # dark_grey
 TC = 0.99755                 # one turn step, precomputed: cos/sin of ~0.07 rad.

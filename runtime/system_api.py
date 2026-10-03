@@ -90,6 +90,8 @@ lost feature rather than a granted capability.)
     executable content, i.e. escalate itself; this is the single most important
     entry in the list and it is why `ctx.files` and `ctx.carts` were split into
     two roles in the first place.
+  * `install` -- carts from the internet, written into the store. It is
+    `carts`' reason twice over: executable content, and somebody else's.
   * `wallpaper` / `artwork` -- capability handles held by exactly one shipped
     app each. `artwork` stays IDENTITY-gated in the Player (Paint's own cart,
     by title+permission+slug), which a renamed copy cannot inherit.
@@ -173,7 +175,7 @@ def is_text_app(cart):
 # Roles a cart is never handed, whatever its manifest says. Enforced by
 # `_ROLE_FOR` being an allowlist; named here so the refusal is READABLE and so
 # `tests/test_user_apps.py` can pin it against `app_context.ROLES`.
-NEVER_GRANTED = ("shell", "carts", "wallpaper", "artwork",
+NEVER_GRANTED = ("shell", "carts", "install", "wallpaper", "artwork",
                  "damage", "surface", "notify")
 
 

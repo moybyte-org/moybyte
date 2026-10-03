@@ -439,13 +439,14 @@ def test_recv_writes_every_byte_value_and_hashes_what_it_wrote(
     assert raw.over_read is False
 
 
-def test_the_ack_comes_after_the_write_never_before(
+def test_the_ack_goes_out_before_the_write_and_the_next_read_after_it(
         tmp_path, capsys, monkeypatch):
     """The host puts the next window on the wire the moment it reads the ack,
-    and on the P4 that window has no flow control behind it -- so the file
-    write happens while nothing is in flight, and the ack is what ends that
-    quiet. Observed at the one instant it can be: the board asking for the
-    first byte of window two, which is where the host is still waiting."""
+    so acking before the file write lets that window cross while the store
+    writes -- and it is still the ONLY window in flight, which the Waveshare's
+    ring holds whole whatever the write costs. Observed at both instants: the
+    write, with the ack already out, and the board asking for window two's
+    first byte, with window one already on disk."""
     import builtins
 
     real = builtins.open
@@ -457,6 +458,8 @@ def test_the_ack_comes_after_the_write_never_before(
             self.f = f
 
         def write(self, data):
+            if not wrote:
+                seen["at_write"] = capsys.readouterr().out
             wrote.append(len(data))
             return self.f.write(bytes(data))
 
@@ -465,20 +468,18 @@ def test_the_ack_comes_after_the_write_never_before(
 
     def on_dry():
         # The board asks again after each re-send offer, so this fires more
-        # than once now; the instant being observed is the FIRST one -- the
-        # board waiting on window two, with window one already on disk.
-        if "wrote" in seen:
-            return
-        seen["wrote"] = list(wrote)
-        seen["out"] = capsys.readouterr().out
+        # than once; the instant being observed is the FIRST one -- the board
+        # waiting on window two.
+        if "wrote" not in seen:
+            seen["wrote"] = list(wrote)
 
     ws, ch, _raw, _poll = raw_channel(EVERY_BYTE[:512], on_dry=on_dry)
     monkeypatch.setattr(builtins, "open",
                         lambda p, m="r", *a, **k: Noted(real(p, m, *a, **k))
                         if "w" in m else real(p, m, *a, **k))
     ch.run(ws, "recv %d 512 %s" % (len(EVERY_BYTE), str(tmp_path / "main.lua")))
-    assert seen["wrote"] == [512]                  # written before the wait
-    assert "RECV ack 512" in seen["out"]           # and acked before it
+    assert "RECV ack 512" in seen["at_write"]      # acked before the write
+    assert seen["wrote"] == [512]                  # written before the next read
 
 
 def test_a_host_that_goes_quiet_takes_the_tmp_with_it(tmp_path, capsys):
@@ -504,6 +505,91 @@ def test_a_host_that_goes_quiet_takes_the_tmp_with_it(tmp_path, capsys):
         "RECV retry 512"] * RECV_DEAD_WINDOWS
     assert not (tmp_path / "main.lua.new").exists()
     assert poll.waits == [RECV_IDLE_MS] * (RECV_DEAD_WINDOWS + 1)
+
+
+class _StoreWS(FakeWS):
+    """A console with a store and a notice banner, for `recv`'s full store."""
+
+    def __init__(self):
+        super().__init__()
+        from runtime import moy_carts
+        self.carts_store = moy_carts
+        self.notices = []
+
+    def notice(self, title, sub="", kind="ok", ms=6000):
+        self.notices.append((title, sub, kind))
+
+
+def _full_open(monkeypatch, room):
+    """`open` whose written files hold `room` bytes and then fail as a full
+    store does."""
+    import builtins
+    real = builtins.open
+
+    class Full:
+        def __init__(self, f):
+            self.f = f
+            self.n = 0
+
+        def write(self, data):
+            if self.n + len(data) > room:
+                raise OSError(28, "No space left on device")
+            self.n += len(data)
+            return self.f.write(bytes(data))
+
+        def __getattr__(self, name):
+            return getattr(self.f, name)
+
+    monkeypatch.setattr(builtins, "open",
+                        lambda p, m="r", *a, **k: Full(real(p, m, *a, **k))
+                        if "w" in m else real(p, m, *a, **k))
+
+
+def test_a_store_with_no_room_stops_the_upload_plainly_and_on_screen(
+        tmp_path, capsys, monkeypatch):
+    """A cart that does not fit is a plain `store full` from the board -- the
+    words push_cart puts in front of the person pushing -- and the console's
+    banner says it to whoever is looking at the glass. The half-written file
+    goes, as on every other failure."""
+    ws, ch = make(_StoreWS())
+    raw = FakeRawIn(EVERY_BYTE)
+    poll = FakePoll(raw)
+    ch._rawin, ch._poll, ch._ipoll = raw, poll, poll.ipoll
+    _full_open(monkeypatch, 700)
+    dst = str(tmp_path / "main.aot")
+    ch.run(ws, "recv %d 512 %s" % (len(EVERY_BYTE), dst))
+    said = _said(capsys)
+    assert said[-1] == "RECV ERR store full after 512 of %d bytes" % len(EVERY_BYTE)
+    assert ws.notices == [("CAN'T ADD CART", "the store is full", "warn")]
+    assert not (tmp_path / "main.aot.new").exists()
+
+
+def test_another_write_failure_is_named_and_not_called_a_full_store(
+        tmp_path, capsys, monkeypatch):
+    import builtins
+    real = builtins.open
+
+    class Broken:
+        def __init__(self, f):
+            self.f = f
+
+        def write(self, data):
+            raise OSError(5, "EIO")
+
+        def __getattr__(self, name):
+            return getattr(self.f, name)
+
+    ws, ch = make(_StoreWS())
+    raw = FakeRawIn(EVERY_BYTE)
+    poll = FakePoll(raw)
+    ch._rawin, ch._poll, ch._ipoll = raw, poll, poll.ipoll
+    monkeypatch.setattr(builtins, "open",
+                        lambda p, m="r", *a, **k: Broken(real(p, m, *a, **k))
+                        if "w" in m else real(p, m, *a, **k))
+    ch.run(ws, "recv %d 512 %s" % (len(EVERY_BYTE), str(tmp_path / "x")))
+    said = _said(capsys)
+    assert said[-1].startswith("RECV ERR OSError:"), said[-1]
+    assert ws.notices == []
 
 
 class FeedingPoll(FakePoll):
@@ -574,12 +660,12 @@ class ReSendingHost:
 def test_a_dropped_byte_costs_its_window_and_not_the_cart(tmp_path, capsys):
     """The failure this whole retry exists for, end to end.
 
-    A UART ring with no flow control drops a byte with no error when the board
-    falls behind for ~25ms. Measured on the P4: a handful of bytes lost about
-    once every 300 windows, which killed a 120KB push one time in five. The
-    file only ever advances by WHOLE windows, so the board can throw the short
-    one away and name the boundary it is still standing on -- and the cart
-    lands byte-exact, hash and all, having paid one window."""
+    A UART ring with no flow control drops a byte with no error when it
+    overflows. Measured on the P4's stock 260-byte ring: a handful of bytes
+    lost about once every 300 windows, which killed a 120KB push one time in
+    five. The file only ever advances by WHOLE windows, so the board can throw
+    the short one away and name the boundary it is still standing on -- and
+    the cart lands byte-exact, hash and all, having paid one window."""
     payload = EVERY_BYTE                      # 1280 B = 5 windows of 256
     host = ReSendingHost(payload, 256, drop=(1, 3))
     ws, ch = make()
@@ -699,7 +785,7 @@ def test_a_build_that_cannot_go_8_bit_declines_instead(tmp_path, capsys):
 def test_bare_recv_is_the_capability_line(capsys):
     """The whole handshake. An image without the command answers `REMOTE ?
     recv` from the same dispatcher, which is a positive no -- see
-    tools/push_cart.raw_window."""
+    tools/push_cart.raw_link."""
     from runtime.dev_channel import RECV_IDLE_MS, RECV_MAX_WINDOW
 
     ws, ch, _raw, _poll = raw_channel()
@@ -727,10 +813,10 @@ def test_bytes_the_line_reader_already_swallowed_are_not_lost(
     swallow is one the payload would never see, and a silent one-byte shift is
     the failure this whole path is hashed to catch."""
     ws, ch, _raw, _poll = raw_channel(b"llo")
-    ch.buf = "he"
+    ch.buf = bytearray(b"he")
     ch.run(ws, "recv 5 512 %s" % (tmp_path / "a.lua"))
     assert (tmp_path / "a.lua.new").read_bytes() == b"hello"
-    assert ch.buf == ""
+    assert ch.buf == bytearray()
     assert "RECV done" in _said(capsys)[-1]
 
 
@@ -742,6 +828,257 @@ def test_a_channel_with_no_8_bit_stdin_declines_the_probe_too(capsys):
     ch._rawin = None
     ch.run(ws, "recv")
     assert "RECV ERR no 8-bit route" in _said(capsys)[0]
+
+
+# -- `recv` over native/moy_serial, and the payload at another UART rate -------
+#
+# The boards read the ring from C (moy_serial.readinto) and the Waveshare P4
+# switches its console UART for the payload (moy_serial.baud). The fakes below
+# put both over the same FakeRawIn, and RateHost is push_cart's half of the
+# rate protocol over a wire that only carries what both ends say at the same
+# rate.
+
+
+class FakeMoySerial:
+    """native/moy_serial without a UART REPL: `readinto` over FakeRawIn,
+    giving up when nothing has arrived, which on a board is idle_ms of quiet."""
+
+    def __init__(self, raw, on_dry=None):
+        self.raw = raw
+        self.on_dry = on_dry
+        self.quiet = []
+
+    def readinto(self, buf, i, n, idle_ms):
+        while i < n:
+            if not self.raw.data and self.on_dry is not None:
+                self.on_dry()
+            if not self.raw.data:
+                self.quiet.append(idle_ms)
+                break
+            buf[i] = self.raw.data.pop(0)
+            i += 1
+        return i
+
+
+class FakeUartSerial(FakeMoySerial):
+    """...and with one: `baud` switches the rate the board is listening at."""
+
+    def __init__(self, raw, rate=115200, on_dry=None):
+        super().__init__(raw, on_dry)
+        self.rate = rate
+        self.switches = []
+
+    def baud(self, rate=None):
+        if rate is not None:
+            self.rate = rate
+            self.switches.append(rate)
+        return self.rate
+
+
+class RateHost:
+    """tools/push_cart's side of `recv rate=`, in miniature.
+
+    The board's lines reach it only when it is at the rate they were said at,
+    and its bytes reach the board only when the board is at its rate --
+    anything else arrives as noise, which is what a mismatched UART makes of
+    it. It reacts when the board next waits for bytes, which is the earliest a
+    real host can have read the line."""
+
+    NOISE = b"\xfe\x00"
+
+    def __init__(self, payload, window, fast, console=115200, sync=True,
+                 noise=b""):
+        from runtime.dev_channel import RECV_SYNC
+        self.payload, self.window, self.fast = payload, window, fast
+        self.rate = console
+        self.console = console
+        self.sync, self.noise = sync, noise
+        self.SYNC = RECV_SYNC
+        self.raw = FakeRawIn()
+        self.mod = FakeUartSerial(self.raw, console, self.on_dry)
+        self.said = []          # (line, the board's rate when it said it)
+        self.heard = []
+        self.done = 0
+        self.sent = 0
+
+    def board_print(self, *args, **kw):
+        self.said.append((" ".join(str(a) for a in args), self.mod.rate))
+
+    def write(self, data):
+        self.raw.data.extend(data if self.mod.rate == self.rate
+                             else self.NOISE * len(data))
+
+    def _send(self):
+        blk = self.payload[self.sent:self.sent + self.window]
+        self.sent += len(blk)
+        self.write(blk)
+
+    def on_dry(self):
+        while self.done < len(self.said):
+            line, rate = self.said[self.done]
+            self.done += 1
+            if rate != self.rate or not line.startswith("RECV "):
+                continue
+            self.heard.append(line)
+            words = line.split()
+            if words[1] == "ready" and "rate=%d" % self.fast in words:
+                self.rate = self.fast
+                if self.sync:
+                    self.write(self.noise)
+                    self.write(self.SYNC)
+            elif words[1] in ("ready", "sync"):
+                self._send()
+            elif words[1] == "ack":
+                if int(words[2]) == len(self.payload):
+                    if self.rate != self.console:
+                        self.rate = self.console
+                        self.write(self.SYNC)
+                else:
+                    self._send()
+            elif words[1] == "retry":
+                self.sent = int(words[2])
+                self._send()
+            elif words[1] == "ERR":
+                self.rate = self.console
+
+
+def rate_channel(monkeypatch, host, ws=None, mod=None):
+    import runtime.dev_channel as dc
+    ws, ch = make(ws)
+    ch._rawin = host.raw
+    monkeypatch.setattr(dc, "_moy_serial", mod or host.mod)
+    monkeypatch.setattr(dc, "print", host.board_print, raising=False)
+    return ws, ch
+
+
+def test_the_payload_runs_at_the_rate_and_the_console_comes_back(
+        tmp_path, monkeypatch):
+    """The Waveshare's console UART stays at its own rate for every line --
+    `moy push`, a terminal and the boot log all expect it -- and only the
+    payload runs fast. The board switches after `ready` has left, hears the
+    host's sync at the new rate, and is back at the console rate the moment
+    the last ack is out; the end sync is taken off the wire before `done`."""
+    payload = EVERY_BYTE * 3
+    host = RateHost(payload, 512, fast=2000000, noise=b"\x00\xff\x13")
+    ws, ch = rate_channel(monkeypatch, host)
+    dst = tmp_path / "main.aot"
+    ch.run(ws, "recv %d 512 rate=2000000 %s" % (len(payload), dst))
+    host.on_dry()                             # the host reads the last line
+    assert (tmp_path / "main.aot.new").read_bytes() == payload
+    assert host.mod.switches == [2000000, 115200]
+    assert host.mod.rate == 115200
+    assert host.heard[0] == "RECV ready %d 512 rate=2000000 %s.new" % (
+        len(payload), dst)
+    assert host.heard[1] == "RECV sync 2000000"
+    assert host.heard[-1] == "RECV done %s %d" % (
+        hashlib.sha256(payload).hexdigest()[:12], len(payload))
+    acks = [l for l in host.heard if l.startswith("RECV ack")]
+    assert len(acks) == len(range(0, len(payload), 512))
+    assert host.raw.data == bytearray()       # both syncs consumed
+
+
+def test_no_sync_at_the_new_rate_puts_the_console_back_and_keeps_nothing(
+        tmp_path, monkeypatch):
+    """A rate the link cannot carry shows as a sync that never arrives. The
+    board goes back to the console rate on its own clock, so the host -- which
+    waits longer -- finds it there; nothing was written."""
+    payload = EVERY_BYTE
+    host = RateHost(payload, 512, fast=6000000, sync=False)
+    ws, ch = rate_channel(monkeypatch, host)
+    ch.run(ws, "recv %d 512 rate=6000000 %s" % (len(payload),
+                                                 tmp_path / "main.aot"))
+    assert host.mod.switches == [6000000, 115200]
+    assert host.said[-1] == ("RECV ERR no sync at 6000000", 115200)
+    assert not (tmp_path / "main.aot.new").exists()
+
+
+def test_a_failure_at_the_payload_rate_is_said_there_before_going_back(
+        tmp_path, monkeypatch):
+    """The host is at the payload's rate, waiting on a window's reply, so that
+    is where the board says it -- and the window the host had already sent on
+    the ack is taken off the wire, so its bytes never reach the line reader as
+    commands."""
+    payload = EVERY_BYTE * 2
+    host = RateHost(payload, 512, fast=2000000)
+    ws, ch = rate_channel(monkeypatch, host, _StoreWS())
+    _full_open(monkeypatch, 700)
+    ch.run(ws, "recv %d 512 rate=2000000 %s" % (len(payload),
+                                                 tmp_path / "main.aot"))
+    assert ("RECV ERR store full after 512 of %d bytes" % len(payload),
+            2000000) in host.said
+    assert host.mod.rate == 115200
+    assert host.raw.data == bytearray()
+    assert ws.notices == [("CAN'T ADD CART", "the store is full", "warn")]
+    assert not (tmp_path / "main.aot.new").exists()
+
+
+def test_a_board_that_cannot_switch_takes_the_payload_at_its_own_rate(
+        tmp_path, monkeypatch):
+    """`rate=` is a request. A build with no UART REPL to switch (the USB
+    boards) says `ready` without it, and the host streams at the console's
+    rate -- the token never reaches the path."""
+    payload = EVERY_BYTE
+    host = RateHost(payload, 512, fast=2000000)
+    ws, ch = rate_channel(monkeypatch, host,
+                          mod=FakeMoySerial(host.raw, host.on_dry))
+    dst = tmp_path / "main.lua"
+    ch.run(ws, "recv %d 512 rate=2000000 %s" % (len(payload), dst))
+    assert host.said[0][0] == "RECV ready %d 512 %s.new" % (len(payload), dst)
+    assert (tmp_path / "main.lua.new").read_bytes() == payload
+
+
+def test_moy_serial_reads_the_window_and_times_out_the_same(
+        tmp_path, capsys, monkeypatch):
+    """The C reader is the same contract as the poll loop: the window as it
+    lands, and a quiet stretch of RECV_IDLE_MS as the end of a short one."""
+    import runtime.dev_channel as dc
+    from runtime.dev_channel import RECV_DEAD_WINDOWS, RECV_IDLE_MS
+
+    raw = FakeRawIn(EVERY_BYTE[:700])
+    mod = FakeMoySerial(raw)
+    monkeypatch.setattr(dc, "_moy_serial", mod)
+    ws, ch = make()
+    ch._rawin = raw
+    ch.run(ws, "recv 5000 512 %s" % (tmp_path / "main.lua"))
+    assert _said(capsys)[-1] == "RECV ERR timeout after 512 of 5000 bytes"
+    assert mod.quiet == [RECV_IDLE_MS] * (RECV_DEAD_WINDOWS + 1)
+
+
+def test_the_caps_line_names_the_console_rate_only_where_it_can_switch(
+        capsys, monkeypatch):
+    import runtime.dev_channel as dc
+    from runtime.dev_channel import RECV_IDLE_MS, RECV_MAX_WINDOW
+
+    raw = FakeRawIn()
+    monkeypatch.setattr(dc, "_moy_serial", FakeUartSerial(raw, 115200))
+    ws, ch = make()
+    ch._rawin = raw
+    ch.run(ws, "recv")
+    monkeypatch.setattr(dc, "_moy_serial", FakeMoySerial(raw))
+    ch.run(ws, "recv")
+    assert _said(capsys) == [
+        "RECV caps max=%d idle=%d rate=115200" % (RECV_MAX_WINDOW, RECV_IDLE_MS),
+        "RECV caps max=%d idle=%d" % (RECV_MAX_WINDOW, RECV_IDLE_MS)]
+
+
+def test_the_transfer_runs_inside_the_storage_gate(tmp_path, capsys):
+    """On the T-Deck the card shares the panel's SPI host, and a store op that
+    overlaps a panel transfer hangs the board -- so the whole transfer, read
+    back included, is one session of the console's gate."""
+    ws, ch, _raw, _poll = raw_channel(EVERY_BYTE)
+    sessions = []
+
+    def gate(fn):
+        sessions.append("in")
+        try:
+            return fn()
+        finally:
+            sessions.append("out")
+
+    ws._with_sd = gate
+    ch.run(ws, "recv %d 512 %s" % (len(EVERY_BYTE), tmp_path / "main.lua"))
+    assert sessions == ["in", "out"]
+    assert "RECV done" in _said(capsys)[-1]
 
 
 # -- the VERBS line (the Lua/p8 per-verb profiler's report) -------------------
@@ -990,3 +1327,273 @@ def test_luaprof_declines_on_a_board_without_the_lua_tier(capsys):
     assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
     ch.run(ws, "luagc")
     assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
+
+
+# -- `moy push`: proposals/sideload.md's tier 1 (moy-spec) --------------------
+#
+# Driven through poll(), the way moy-spec's sideload.py reaches a board: lines
+# on the TEXT stdin, a whole file's base64 streamed without waiting, and the
+# replies read back off the channel's prints.
+
+
+class FakeText:
+    """`sys.stdin`: characters, only the ones that have arrived."""
+
+    def __init__(self, text=""):
+        self.data = list(text)
+
+    def read(self, n):
+        return self.data.pop(0) if self.data else ""
+
+
+class FakeTextPoll:
+    def __init__(self, stdin):
+        self.stdin = stdin
+
+    def ipoll(self, timeout=-1):
+        return ((None, 1),) if self.stdin.data else ()
+
+
+class _StoreWS2(FakeWS):
+    """A console with a cart store at `root`, a rescan and a launcher."""
+
+    def __init__(self, root):
+        super().__init__()
+        self.carts_root = str(root)
+        self.rescans = 0
+        self.launched = []
+        self.notices = []
+
+    def rescan_carts(self):
+        self.rescans += 1
+
+    def launch_named(self, name):
+        self.launched.append(name)
+        return name if name == "Plasma" else None
+
+    def notice(self, title, sub="", kind="ok", ms=6000):
+        self.notices.append((title, sub, kind))
+
+
+def text_channel(root):
+    ws = _StoreWS2(root)
+    ws, ch = make(ws)
+    stdin = FakeText()
+    poll = FakeTextPoll(stdin)
+    ch._stdin, ch._rawin, ch._ipoll, ch.armed = stdin, stdin, poll.ipoll, True
+    return ws, ch, stdin
+
+
+def pump(ws, ch, stdin, frames=200):
+    """Frames until stdin is drained; how many it took."""
+    for n in range(frames):
+        if not stdin.data:
+            return n
+        ch.poll(ws)
+    raise AssertionError("stdin never drained")
+
+
+def put_lines(path, data):
+    """What sideload.push_serial writes for one file."""
+    import base64
+    b64 = base64.b64encode(data).decode()
+    lines = ["moy-put %s %d" % (path, len(data))]
+    lines += [b64[i:i + 504] for i in range(0, len(b64), 504)]
+    return "\n".join(lines + ["."]) + "\n"
+
+
+class FakeBytes(FakeText):
+    """`sys.stdin.buffer`: a byte at a time, only the ones that have arrived."""
+
+    def __init__(self, data=b""):
+        self.data = [bytes((b,)) for b in data]
+
+    def read(self, n):
+        return self.data.pop(0) if self.data else b""
+
+
+def _bytes_channel(tmp_path, data):
+    ws, ch, _stdin = text_channel(tmp_path)
+    stdin = FakeBytes(data)
+    ch._stdin, ch._rawin, ch._ipoll = stdin, stdin, FakeTextPoll(stdin).ipoll
+    return ws, ch, stdin
+
+
+def test_a_byte_that_is_not_text_costs_its_line_not_the_channel(
+        tmp_path, capsys):
+    """A rate switch, or a payload's tail, can leave bytes on the line that are
+    not UTF-8. That drops the line they are in; the channel stays armed and
+    the next command runs."""
+    ws, ch, stdin = _bytes_channel(tmp_path, b"st\xffate\nmoy?\n")
+    pump(ws, ch, stdin)
+    assert ch.armed is True
+    assert ch.dropped == 1
+    assert _said(capsys, "moy-info ")
+
+
+def test_a_byte_of_line_noise_never_waits_for_more(tmp_path, capsys):
+    """The line reader takes BYTES: a byte of 0x80 or more is part of a UTF-8
+    character to a text read(1), which then waits inside the read for the
+    rest of it. On the T-Deck a USB line-state request that reached stdin
+    during the bootloader held its first frame for 29 s that way, until the
+    host happened to write again. Here the frame drains what arrived and
+    returns, and the noise costs only its own line."""
+    ws, ch, stdin = _bytes_channel(tmp_path, b"\x00\xc2\x01\x00\x08moy?\n\xf0")
+    pump(ws, ch, stdin)
+    assert not stdin.data
+    assert ch.buf == bytearray(b"\xf0")
+    assert ch.dropped == 1
+    assert not _said(capsys, "moy-info ")
+    stdin.data = [bytes((b,)) for b in b"\nmoy?\n"]
+    pump(ws, ch, stdin)
+    assert _said(capsys, "moy-info ")
+
+
+def test_a_command_in_utf8_arrives_whole(tmp_path, capsys):
+    """A line is decoded whole, so a `py` line with a character past ASCII
+    in it runs as written."""
+    ws, ch, stdin = _bytes_channel(tmp_path, "py len('\u00e9\u00e9')\n".encode())
+    pump(ws, ch, stdin)
+    assert _said(capsys, "PY ") == ["PY 2"]
+
+
+def test_moy_query_answers_the_descriptor(tmp_path, capsys):
+    """`moy?` is the whole probe: one `moy-info` line of JSON."""
+    ws, ch, stdin = text_channel(tmp_path)
+    stdin.data = list("moy?\n")
+    pump(ws, ch, stdin)
+    line = _said(capsys, "moy-info ")[0]
+    desc = json.loads(line[len("moy-info "):])
+    assert desc["moy_console"] == "0.1"
+    assert desc["transports"] == ["serial"]
+    assert "lua" in desc["runtimes"] and desc["free_kb"] > 0
+
+
+def test_moy_put_writes_a_cart_through_a_new_and_rescans(tmp_path, capsys):
+    """A pushed cart lands whole in the store, every byte value included, the
+    stamped .bak beside an old copy dropped; the rescan puts it on the shelf.
+    A whole file streams in few frames, not a line a frame."""
+    ws, ch, stdin = text_channel(tmp_path)
+    (tmp_path / "plasma.moy").mkdir()
+    (tmp_path / "plasma.moy" / "main.lua").write_bytes(b"old")
+    (tmp_path / "plasma.moy" / "main.lua.bak").write_bytes(b"stamp")
+    big = bytes(range(256)) * 64
+    stdin.data = list(put_lines("plasma.moy/main.lua", b"function _draw() end\n")
+                      + put_lines("plasma.moy/data/blob.bin", big)
+                      + "moy-rescan\n")
+    frames = pump(ws, ch, stdin)
+    said = _said(capsys, "moy-")
+    assert said == ["moy-ok"] * 5
+    assert (tmp_path / "plasma.moy" / "main.lua").read_bytes() == b"function _draw() end\n"
+    assert not (tmp_path / "plasma.moy" / "main.lua.bak").exists()
+    assert (tmp_path / "plasma.moy" / "data" / "blob.bin").read_bytes() == big
+    assert not list(tmp_path.rglob("*.new"))
+    assert ws.rescans == 1
+    assert frames < 12
+
+
+def test_moy_put_reads_through_moy_serial_and_hands_back_what_follows(
+        tmp_path, capsys, monkeypatch):
+    """On a board the drain takes what has arrived from C in one call: the
+    line reader polling a byte at a time cannot keep up with the stream on a
+    P4. Bytes after the `.` belong to the line reader, and a store write runs
+    inside the console's storage gate."""
+    import runtime.dev_channel as dc
+
+    data = bytes(range(256)) * 3
+    ws, ch, _stdin = text_channel(tmp_path)
+    sessions = []
+    ws._with_sd = lambda fn: sessions.append(1) or fn()
+    head, rest = put_lines("c.moy/main.lua", data).split("\n", 1)
+    raw = FakeRawIn((rest + "sta").encode())
+    monkeypatch.setattr(dc, "_moy_serial", FakeMoySerial(raw))
+    ch.run(ws, head)
+    assert (tmp_path / "c.moy" / "main.lua").read_bytes() == data
+    assert _said(capsys, "moy-") == ["moy-ok", "moy-ok"]
+    assert ch.buf == bytearray(b"sta")
+    assert sessions == [1]
+
+
+def test_moy_put_refuses_a_path_outside_the_store(tmp_path, capsys):
+    ws, ch, stdin = text_channel(tmp_path / "carts")
+    for path in ("../evil.lua", "a//b", "a/./b", "a\\b", ""):
+        ch.run(ws, "moy-put %s 4" % path)
+    assert _said(capsys, "moy-") == ["moy-err usage: moy-put <path in the cart store> <bytes>"] * 5
+    assert ch._put is None
+
+
+def test_a_short_moy_put_leaves_nothing_behind(tmp_path, capsys):
+    """A file whose lines came up short -- a byte lost on a UART -- is refused
+    by its count, and the old file stays."""
+    ws, ch, stdin = text_channel(tmp_path)
+    (tmp_path / "c.moy").mkdir()
+    (tmp_path / "c.moy" / "main.lua").write_bytes(b"kept")
+    text = put_lines("c.moy/main.lua", b"0123456789").replace("moy-put c.moy/main.lua 10",
+                                                               "moy-put c.moy/main.lua 12")
+    stdin.data = list(text)
+    pump(ws, ch, stdin)
+    assert _said(capsys, "moy-") == ["moy-ok", "moy-err c.moy/main.lua: 10 of 12 bytes arrived"]
+    assert (tmp_path / "c.moy" / "main.lua").read_bytes() == b"kept"
+    assert not list(tmp_path.rglob("*.new"))
+
+
+def test_a_full_store_is_said_plainly_to_moy_push_and_on_screen(tmp_path, capsys,
+                                                              monkeypatch):
+    ws, ch, stdin = text_channel(tmp_path)
+    from runtime import moy_carts
+    ws.carts_store = moy_carts
+    _full_open(monkeypatch, 100)
+    stdin.data = list(put_lines("big.moy/main.wasm", bytes(1000)))
+    pump(ws, ch, stdin)
+    said = _said(capsys, "moy-")
+    assert said[0] == "moy-ok" and said[1].startswith("moy-err big.moy/main.wasm: store full")
+    assert ws.notices == [("CAN'T ADD CART", "the store is full", "warn")]
+    assert not list(tmp_path.rglob("*.new"))
+
+
+def test_a_compiled_cart_without_its_module_is_noted_at_rescan(tmp_path, capsys,
+                                                             monkeypatch):
+    """`moy push` cannot build the module a board runs a compiled cart from
+    at full speed, so the rescan says so -- in a moy-note, which the tool shows
+    the person. The module is named for the chip AND the format."""
+    from runtime import dev_channel
+    monkeypatch.setattr(dev_channel, "_moy_chip", lambda: "esp32s3")
+    monkeypatch.setattr(dev_channel, "_moy_format", lambda: "2")
+    ws, ch, stdin = text_channel(tmp_path)
+    man = b'{"format": "moy-1", "title": "P", "runtime": "wasm", "memory": 4}'
+    stdin.data = list(put_lines("p.moy/manifest.json", man)
+                      + put_lines("p.moy/main.wasm", b"\0asm\1\0\0\0")
+                      + put_lines("q.moy/manifest.json", man)
+                      + put_lines("q.moy/main.wasm", b"\0asm\1\0\0\0")
+                      + put_lines("q.moy/main.esp32s3.f2.aot", b"module")
+                      + "moy-rescan\n")
+    pump(ws, ch, stdin)
+    notes = _said(capsys, "moy-note ")
+    assert len(notes) == 1 and notes[0].startswith("moy-note p.moy is a compiled cart")
+    assert "tools/push_cart.py" in notes[0] and "interpreter" in notes[0]
+
+
+def test_moy_del_and_moy_run(tmp_path, capsys):
+    ws, ch, stdin = text_channel(tmp_path)
+    (tmp_path / "old.moy" / "src").mkdir(parents=True)
+    (tmp_path / "old.moy" / "src" / "main.c").write_bytes(b"x")
+    (tmp_path / "old.moy" / "manifest.json").write_bytes(b"{}")
+    ch.run(ws, "moy-del old.moy")
+    ch.run(ws, "moy-run Plasma")
+    ch.run(ws, "moy-run Nothing Here")
+    assert _said(capsys, "moy-") == ["moy-ok", "moy-ok", "moy-err no cart called Nothing Here"]
+    assert not (tmp_path / "old.moy").exists()
+
+
+def test_a_put_whose_stream_stops_ends_short_and_leaves_nothing(tmp_path, capsys):
+    """The tool died mid-file: no `.` ever comes. The put ends on the idle
+    timeout as short, and the frame loop has its channel back."""
+    ws, ch, stdin = text_channel(tmp_path)
+    text = put_lines("d.moy/main.lua", bytes(2000))
+    stdin.data = list(text[:text.rindex("\n.")])        # every line but the `.`
+    pump(ws, ch, stdin)
+    said = _said(capsys, "moy-")
+    assert said[0] == "moy-ok"
+    assert said[1].startswith("moy-err d.moy/main.lua: the stream stopped after")
+    assert ch._put is None
+    assert not list(tmp_path.rglob("*.new")) and not (tmp_path / "d.moy" / "main.lua").exists()

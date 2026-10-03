@@ -324,10 +324,12 @@ def keyboard(phase_s=_KBD_PHASE_S):
         kbd.set_game_mode(raw)
         if poller is not None:
             # The poller owns the bus, so the mode switch it was just handed is
-            # applied by the poller between reads, not from here. Give it a beat
-            # to take effect before measuring, or phase 3 spends its first
-            # samples in the mode phase 2 left behind.
-            time.sleep_ms(80)
+            # applied by the poller on a pass, and a pass happens per kick (one
+            # per frame in the console). Give it a few before measuring, or
+            # phase 3 spends its first samples in the mode phase 2 left behind.
+            for _ in range(4):
+                poller.kick()
+                time.sleep_ms(20)
         base_n = kbd.stat_n
         base_max = kbd.stat_max_us
         base_o5 = kbd.stat_over5
@@ -345,6 +347,8 @@ def keyboard(phase_s=_KBD_PHASE_S):
             # sources is derived, so merging before the poll reads back the
             # PREVIOUS pass's buttons.
             if poller is not None:
+                poller.kick()
+                time.sleep_ms(0)        # the yield that runs the pass
                 poller.consume()
             else:
                 kbd.poll()
@@ -385,7 +389,7 @@ def keyboard(phase_s=_KBD_PHASE_S):
     poller = InputPoller(kbd, None)
     if poller.start():
         kbd._poller_owned = True
-        print("Moybyte kbd: poller thread up (%dms cadence)" % poller.period)
+        print("Moybyte kbd: poller thread up (one pass per kick)")
         _run_phase("3 raw poller", True, poller, phase_s)
         poller.stop()
         kbd._poller_owned = False

@@ -3,7 +3,7 @@ on-canvas error panel so a broken cart fails LOUDLY (visibly) instead of silentl
 (the device's native run loop starves USB, so a print() never reaches serial).
 
 These exercise the SOFTWARE hardening only; the underlying SD/SPI bus-sharing
-hang is a hardware-only concern (see CLAUDE.md "Hard device constraints") and is
+hang is a hardware-only concern (see .claude/rules/boards.md) and is
 out of scope here."""
 
 from pathlib import Path

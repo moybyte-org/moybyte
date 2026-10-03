@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   EditorApp            the authoring app: a project across a tab ladder
+#   EditorApp.set_tab    switch tab, building its editor
+#   EditorApp.leave      PLAY: leave the tab, committing it
+#   EditorApp.draw_zone  the tab ladder, UNDO/REDO and PLAY
+#   EditorApp.zone_tap   hit-test the ladder and dispatch
+#   EditorApp.save_tab   route one tab's commit to its owner
 """The EDITOR app (Stage 3 of docs/history/shell_ux_technical_plan_v1.md).
 
 `EditorApp` is the console's authoring app: ONE app, opened on a `Project`, whose
@@ -60,10 +67,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # destinations, so they're never highlighted; so is PLAY (None).
 #
 # SAVE is GONE (#111, owner decision 2026-07-21): autosave is the only model now --
-# an idle-typing debounce commits mid-edit, and every tab-leaving event (a tab
-# switch, PLAY, PROJECTS, a window/context-X, a workspace swap, going home) hard-
-# commits whichever tab was showing via save_current() -- the exact verb the SAVE
-# icon used to dispatch, now called automatically instead of from a tap. See
+# an idle-typing debounce commits mid-edit, and every hard exit (PLAY, PROJECTS, a
+# window/context-X, a workspace swap, going home) hard-commits whichever tab was
+# showing via save_current() -- the exact verb the SAVE icon used to dispatch, now
+# called automatically instead of from a tap. A TAB SWITCH owes its commit instead
+# of taking it (#154, commit_later): the switch is not a boundary, so the frame
+# that paints the destination pays, and every hard exit pays the debt first. See
 # set_tab/leave below and the exit-path call sites in console.py/wm_windowed.py.
 #
 # Fits 320px: 11 icons * 16px = 176px inside the ~202px lent zone -- UNDO/REDO (#88)
@@ -87,10 +96,11 @@ _ZONE_TABS = (
 )
 _ZONE_STRIDE = _BAR_ICON        # 0-gap ladder (#88) -- see the block comment above
 
-# The tabs save_current() can route a commit to, derived from the ladder rather
-# than listed a second time. The sentinels (PROJECTS/UNDO/REDO) and PLAY (None)
-# are actions; "theme" is the EDIT-ICONS reuse of the paint renderer and commits
-# through its own leave, so it is not a tab here either.
+# The tabs save_tab() can route a commit to -- and the only ones commit_later
+# will owe -- derived from the ladder rather than listed a second time. The
+# sentinels (PROJECTS/UNDO/REDO) and PLAY (None) are actions; "theme" is the
+# EDIT-ICONS reuse of the paint renderer and commits through its own leave, so
+# it is not a tab here either.
 COMMIT_TABS = tuple(t for t, _g in _ZONE_TABS
                     if isinstance(t, str) and not t.startswith("\x00"))
 
@@ -147,6 +157,13 @@ class EditorApp:
         # below, since the `tab` setter reads it (mirrors Launcher.__init__'s
         # zone_gen-before-sel ordering).
         self.zone_gen = 0
+        # Tabs that OWE a commit (#154): a tab switch marks the outgoing tab
+        # here instead of writing inside the tap, and `flush_pending` pays the
+        # debt behind the frame that already painted the destination. Same
+        # contract `pmem` has had since #66 -- RAM plus a mark, flushed off the
+        # interaction and on every hard exit -- and the same exposure: one
+        # frame, since `ws.defer` drains at that frame's own tail.
+        self._pending = []
         self.tab = "cards"            # active view -- ws.menu_view projects onto this:
                                       # "cards" | "code" | "paint" | "map" | "blocks"
                                       # | "music" | "theme" (theme = the EDIT-ICONS
@@ -189,6 +206,9 @@ class EditorApp:
         self.project = project
         ws = self.ws
         ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        # Another cart may ladder differently (a compiled cart without `src/`
+        # has no Code tab), so the lent zone repaints whatever tab it lands on.
+        self.zone_gen += 1
         ws.set_menu_view("cards" if (ws.cart.get("edit")
                                      or ws.cart.get("broken")) else "code")
 
@@ -252,13 +272,18 @@ class EditorApp:
         source of truth; ws.menu_view projects onto it."""
         ws = self.ws
         ws._dirty = True             # sub-view change always repaints (#44)
+        if view == "code" and ws.cart is not None and not ws.code_sources():
+            # A compiled cart that ships no `src/` has no Code tab: there is no
+            # text behind its main.wasm to show (docs/wasm_tier_plan_2026-09.md).
+            view = "cards"
         if view != self.tab and self.project is ws.project:
-            # (#111) autosave-only: a tab switch is an exit path for the OUTGOING
-            # tab -- hard-commit whatever it holds (the exact verb the removed SAVE
-            # icon used to dispatch) before the ladder moves on. Reads self.tab
-            # BEFORE it's reassigned below, so save_current() persists the right
-            # target. A same-tab call (view == self.tab, e.g. open()'s landing
-            # set_menu_view) is a no-op here -- nothing changed to commit. The
+            # (#111) autosave-only: the OUTGOING tab still owes whatever it
+            # holds (the exact verb the removed SAVE icon used to dispatch) --
+            # commit_later takes the debt and the frame behind this switch pays
+            # it. Reads self.tab BEFORE it's reassigned below, so the debt names
+            # the right target. A same-tab call (view == self.tab, e.g.
+            # open()'s landing set_menu_view) is a no-op here -- nothing
+            # changed to commit. The
             # `self.project is ws.project` guard skips a stale/never-opened editor
             # (self.tab defaults to "cards" from __init__, meaningless if EditorApp.
             # open() was never actually called for the CURRENT project -- e.g. a
@@ -266,7 +291,12 @@ class EditorApp:
             # never the Editor) -- without it a plain RUN followed by a direct
             # set_menu_view call would spuriously commit_config() a "cards" tab
             # that was never really open (confirmed by test_journal_wiring.py).
-            self.save_current()
+            #
+            # The commit is OWED, not taken (#154): a dirty sprite tab charged
+            # this tap 2.2s on the T-Deck before the new tab appeared, and a
+            # switch is not a process boundary -- the data stays in RAM and the
+            # project stays open, so nothing needs it on disk within the frame.
+            self.commit_later(self.tab)
         self.tab = view              # the `tab` setter bumps zone_gen on a real change
                                      # (Stage 4, #46: the lent zone's highlight moved)
         if view == "code":
@@ -315,7 +345,8 @@ class EditorApp:
             # Build the MusicEditor over the open cart's live AudioBank (#50): the
             # SAME bank the running cart plays through, so an edit is heard immediately
             # by the preview AND by the cart on resume. Edits go straight into that
-            # bank; a tab-leave/PLAY hard-commit persists it to sounds.json (#111).
+            # bank; the tab-leave debt / a PLAY hard-commit persists it to
+            # sounds.json (#111).
             ws.music_ui.build()
         self._relayout_tab(view)
         ws._set_text_mode(view == "code")
@@ -415,8 +446,9 @@ class EditorApp:
     # ("menu") from their draw() (+ ws.bar_layer.handle_bar_tap("menu", ...) from
     # handle_pointer), so the bar is identical across all six Editor tabs and each
     # tab's own RUN/SAVE/CLOSE chrome was dissolved into it -- SAVE itself is GONE
-    # now (#111): every tab-leaving event calls save_current() automatically (see
-    # set_tab/leave above), so there is no tap-driven affordance left to draw here.
+    # now (#111): every hard exit calls save_current() automatically and a tab
+    # switch owes its commit to the next frame (see set_tab/leave above), so
+    # there is no tap-driven affordance left to draw here.
 
     def draw_zone(self, cv, rect):
         """Draw the tab ladder + UNDO/REDO + PLAY inside the rect the bar lent us,
@@ -441,7 +473,7 @@ class EditorApp:
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
             _ui.button(cv, th, proj, "", glyph="projects", kind="normal",
                        glyph_draw=ws._glyph)
-            _ui.tab_row(cv, th, tabs_area, _TAB_CHIPS, self.tab,
+            _ui.tab_row(cv, th, tabs_area, self._chips(), self.tab,
                         icon_for=getattr(ws, "_icon_image_keyed", None),
                         ink=band_ink)
             _ui.button(cv, th, play_r, "PLAY", kind="play", glyph="run",
@@ -450,7 +482,7 @@ class EditorApp:
         x0, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON      # icon side (16*fs)
         stride = ic                         # 0-gap ladder (#88) -- see _ZONE_STRIDE
-        for i, (tab, glyph) in enumerate(_ZONE_TABS):
+        for i, (tab, glyph) in enumerate(self._ladder()):
             x = x0 + i * stride
             if x + ic > x0 + w:
                 break                       # ran out of lent width -- draw what fits
@@ -466,6 +498,24 @@ class EditorApp:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_redo())
             else:
                 ws._icon(glyph, x, y0, cv)
+
+    def _has_code(self):
+        """Whether the open cart has a Code tab: every cart whose main is text
+        does, and a compiled cart only when it ships `src/`."""
+        return bool(self.ws.cart is None or self.ws.code_sources())
+
+    def _ladder(self):
+        """The base-density ladder for the open cart: `_ZONE_TABS`, less the
+        Code tab when there is no code (the draw and the hit test share it)."""
+        if self._has_code():
+            return _ZONE_TABS
+        return tuple(t for t in _ZONE_TABS if t[0] != "code")
+
+    def _chips(self):
+        """The shelf-density twin of `_ladder`."""
+        if self._has_code():
+            return _TAB_CHIPS
+        return tuple(t for t in _TAB_CHIPS if t[0] != "code")
 
     def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
         """Draw the UNDO/REDO bar icon (#88), dimmed when the journal has nothing to
@@ -524,7 +574,7 @@ class EditorApp:
                 return self._activate_zone_tab(_ZONE_PROJECTS)
             if _in(px, py, play_r):
                 return self._activate_zone_tab(None)
-            slim = [(tid, label) for tid, label, _ic in _TAB_CHIPS]
+            slim = [(tid, label) for tid, label, _ic in self._chips()]
             for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim,
                                                         self._zone_scale()):
                 if _in(px, py, r):
@@ -533,7 +583,7 @@ class EditorApp:
         x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
         ic = h if h > 0 else _BAR_ICON
         stride = ic                         # 0-gap ladder (#88) -- matches draw_zone
-        for i, (tab, _glyph) in enumerate(_ZONE_TABS):
+        for i, (tab, _glyph) in enumerate(self._ladder()):
             x = x0 + i * stride
             if x + ic > x0 + w:
                 break
@@ -564,21 +614,21 @@ class EditorApp:
         elif tab == _ZONE_REDO:   # REDO (#88)
             ws.history.redo()
         else:                     # PLAY (tab is None)
-            # #184: deferred -- the hard-commit (~850ms SD, #154) + compile +
-            # exec + first-world build run behind the next painted frame
-            # (LOADING toast), never inside the bar tap that asked for them.
+            # #184: deferred -- the hard-commit (#154, seconds on a dirty
+            # asset tab) + compile + exec + first-world build run behind the
+            # next painted frame (LOADING toast), never inside the bar tap
+            # that asked for them.
             ws.defer(ws._leave_menu)
         return True
 
     def _tab_is_clean(self, tab):
-        """True when `tab` PROVABLY has nothing to persist, so save_current can
+        """True when `tab` PROVABLY has nothing to persist, so save_tab can
         skip the whole commit.
 
-        Why this exists (on-glass P4, 2026-07-25): every exit path hard-commits
+        Why this exists (on-glass P4, 2026-07-25): every leaving event committed
         the outgoing tab, and a commit is expensive -- serialize the asset
-        (`to_hex`, ~220ms), write it to flash (~800ms: _write_atomic costs five
-        littlefs metadata ops), then append a full-file snapshot to the undo
-        journal (~175ms). With no guard that ran even when the kid had merely
+        (`to_hex`), write it to flash, then append a full-file snapshot to the
+        undo journal. With no guard that ran even when the kid had merely
         LOOKED at a tab, so walking the tab ladder cost 0.5-1.4s PER SWITCH
         ("slow switching between project tabs"). Measured on glass: map 1356ms,
         paint 1145ms, music 919ms, code 579ms, cards 534ms -- against a
@@ -600,7 +650,7 @@ class EditorApp:
         buffer through it, so an undo/redo leaves a changed document flagged
         clean. Code therefore compares content against the last persisted source
         (moy_carts.save_code keeps cart["src"] in step) -- an O(n) compare of a
-        few KB, nothing next to the ~800ms flash write it guards."""
+        few KB, nothing next to the flash write it guards (#154)."""
         ws = self.ws
 
         def _quiet(hist):
@@ -643,22 +693,70 @@ class EditorApp:
                     and _quiet(proj.config_hist))
         return False                 # unknown tab: commit as before
 
+    def commit_later(self, tab):
+        """Owe `tab` a commit instead of taking it now (#154).
+
+        A tab switch is the ONE leaving event that is not a boundary: the
+        project stays open, every editor core stays live, and the bytes are
+        still in RAM -- so the only thing writing inside the tap buys is a
+        shorter power-loss window, and it charges the kid the whole write to
+        get it. On the T-Deck that write is what a paint-then-switch tap cost:
+        2.2s of frozen glass before the destination tab appeared.
+
+        `ws.defer` is the mechanism the console already has for this (#184,
+        PLAY and a cart launch ride it): the frame paints the destination and
+        PRESENTS it, then runs the queue at its own tail. So the debt is paid
+        in the same frame that showed the switch -- one frame of exposure, not
+        the idle debounce's seconds -- and `save_current` pays anything still
+        owed before every hard exit does its own write, which is what makes
+        the queue's drain a courtesy rather than the guarantee.
+
+        Only the ladder's real tabs are owed (COMMIT_TABS): "theme" and the
+        `None` sentinel `_open_workspace` leaves behind commit nothing, and
+        queuing them would only make flush_pending walk further."""
+        if tab not in COMMIT_TABS:
+            return                     # nothing this one could owe
+        if tab not in self._pending:
+            self._pending.append(tab)
+        defer = getattr(self.ws, "defer", None)
+        if defer is None:              # no frame loop to drain it -- pay now
+            self.flush_pending()
+        else:
+            defer(self.flush_pending, toast=False)
+
+    def flush_pending(self):
+        """Pay every commit `commit_later` owes, oldest first. Idempotent and
+        cheap when nothing is owed, which is every frame but the one after a
+        tab switch. Named for the DEFER diag line, which prints it by name."""
+        while self._pending:
+            self.save_tab(self._pending.pop(0))
+
     def save_current(self):
         """Hard-commit the ACTIVE tab (#111: the autosave-only model's persist verb --
-        SAVE was a tap dispatching here; now every exit path calls this directly: a
-        tab switch (set_tab), PLAY (leave), a workspace swap (console.py's
-        _open_workspace, reached from PROJECTS -> pick a project) and going home
-        (console.py's go_home), and a window/context-X close (wm_windowed.py's
-        close_window_kind)). Each tab keeps its own persist verb; this just routes
-        to whichever tab is up. Because it is the hard path, the code tab's save is
+        SAVE was a tap dispatching here; now every exit path calls this directly:
+        PLAY (leave), a workspace swap (console.py's _open_workspace, reached from
+        PROJECTS -> pick a project) and going home (console.py's go_home), a
+        window/context-X close (wm_windowed.py's close_window_kind), the OTA reboot
+        (update_ui) and the idle debounce (history_router). A TAB SWITCH owes its
+        commit instead -- see commit_later -- and this pays that debt first, so a
+        hard exit persists everything the session touched and not just the tab in
+        front of the kid. Each tab keeps its own persist verb; this just routes to
+        whichever tab is up. Because it is the hard path, the code tab's save is
         FORCED here: half-typed Python is written rather than lost (#154). Config
         persists via commit_config (no re-run -- PLAY
         runs, handled separately in leave() so a crash can't overwrite good config).
         The theme (EDIT ICONS) tab has no bar zone, so it's never routed here -- its
         own CLOSE/leave hard-commits via ws.look.save_icons()
         (paint_layer.ThemeLayer.leave)."""
+        self.flush_pending()
+        self.save_tab(self.tab)
+
+    def save_tab(self, tab):
+        """Route ONE tab's commit to that tab's own persist verb, skipping a tab
+        the clean guard can prove has nothing to write. The body `save_current`
+        has always had, taking the tab as an argument so a debt `commit_later`
+        recorded can still be paid once the ladder has moved on."""
         ws = self.ws
-        tab = self.tab
         if self._tab_is_clean(tab):
             return                   # nothing changed -> nothing to persist
         if tab == "code":

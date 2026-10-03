@@ -1,11 +1,13 @@
-# The portable moyimg codec + cover-thumb sidecars, extracted from moy_carts.py
-# (which re-exports every name here, so store call sites and tests are unchanged).
+# The portable moyimg codec + the wallpaper-preview sidecar, extracted from
+# moy_carts.py (which re-exports every name here, so store call sites and tests
+# are unchanged).
 #
-# encode/decode_moyimg: the ``moyimg-v1`` indexed-bitmap blob -- ONE format.
-# moyimg_runs: the same blob as (count, value) runs, for the cover builder.
+# encode/decode_moyimg: the ``moyimg-v1`` indexed-bitmap blob -- ONE format, the
+# one every user picture and a cart's images/ are written in. A cart's COVER is
+# not one of them: it is `cover.png` (runtime/cover_png.py, SPEC.md 3.6).
 # The wallpaper-preview sidecar cache (the Appearance monitor's computed frame)
-# reads instead of re-rendering the cart -- regenerable, plain writes,
-# readers validate magic + size + stamp.
+# reads instead of re-rendering the cart -- regenerable, plain writes, readers
+# validate magic + size + stamp.
 #
 # MicroPython-safe (json + binascii + deflate; _mkdir from the moy_fs leaf).
 
@@ -165,8 +167,7 @@ def _inflate(raw):
     """A zlib stream -> its bytes, with the window the STREAM declares.
 
     ONE allocation the size of the whole raster -- 76,800 bytes for a 320x240
-    picture. Only a reader that genuinely needs pixels calls this; the cover
-    shelf streams instead (`_inflate_chunks`)."""
+    picture. Only a reader that genuinely needs pixels calls this."""
     try:
         import deflate
     except ImportError:                  # CPython
@@ -176,65 +177,11 @@ def _inflate(raw):
     return deflate.DeflateIO(_io.BytesIO(raw), deflate.ZLIB).read()
 
 
-# How much raster the streaming reader holds at once. 1 KB: the piece and the
-# runs it packs into are both transient, so the whole read lives in a couple of
-# KB against a 76,800-byte raster -- and the per-piece overhead is one native
-# call, so a larger chunk buys nothing measurable and costs working set.
-_INFLATE_CHUNK = 1024
-
-
-def _inflate_chunks(raw, chunk=_INFLATE_CHUNK):
-    """The same zlib stream, yielded in pieces of at most `chunk` bytes.
-
-    The other half of the compressor seam, and it exists because of a heap. A
-    320x240 cover inflates to a CONTIGUOUS 76,800-byte block, and an S3 that has
-    loaded a store has hundreds of KB free with no run that size (#66) -- so the
-    reader that runs once per cover per session was asking for exactly the block
-    the heap refuses first, on the launcher's idle prefetch, where the
-    MemoryError took the loop down rather than one thumbnail.
-
-    Both tiers can hand their output back a piece at a time and neither
-    advertises it the same way: MicroPython's DeflateIO is a stream, so `read(n)`
-    is the whole story, while CPython's decompressobj needs `max_length` to bound
-    its OUTPUT -- feeding it bounded INPUT bounds nothing, because a KB of
-    deflate expands to a megabyte of flat colour, which is exactly the picture a
-    kid draws first."""
-    try:
-        import deflate
-    except ImportError:                  # CPython
-        import zlib
-        d = zlib.decompressobj()
-        pos = 0
-        n = len(raw)
-        while True:
-            if d.unconsumed_tail:
-                src = d.unconsumed_tail
-            elif pos < n:
-                src = raw[pos:pos + chunk]
-                pos += chunk
-            else:
-                src = b""
-            out = d.decompress(src, chunk)
-            if out:
-                yield out
-            elif not src:
-                return
-        return
-    import io as _io
-    stream = deflate.DeflateIO(_io.BytesIO(raw), deflate.ZLIB)
-    while True:
-        out = stream.read(chunk)
-        if not out:
-            return
-        yield out
-
-
 def _blob_header(text):
     """A ``.moyimg``'s ``(w, h, zlib stream)``, or None when it is not one.
 
-    Both readers share it, so the header is parsed once -- and the base64 STRING
-    (as big again as the stream it carries) is dropped HERE rather than held
-    alive across the inflate. MemoryError is the one exception that goes on
+    The base64 STRING (as big again as the stream it carries) is dropped HERE
+    rather than held alive across the inflate. MemoryError is the one exception that goes on
     through: "this board could not read it just now" and "this is not a picture"
     are different answers, and only the second one is permanent."""
     try:
@@ -272,8 +219,7 @@ def decode_moyimg(text):
     deliberately so -- it is the one failure that says nothing about the file.
     Swallowed as None it becomes "your drawing is gone", which the Paint and
     `image()` callers would then cache and act on; raised, it is a caller's
-    choice to skip this one picture and try again later, which is what the cover
-    shelf does.
+    choice to skip this one picture and try again later.
 
     The whole raster is still built here, because a caller that asks for pixels
     needs pixels -- and the retry after a collect is `moy_carts._read_main`'s
@@ -301,158 +247,22 @@ def decode_moyimg(text):
     return (w, h, pix)
 
 
-def pack_runs(pix):
-    """An indexed raster -> ``(count, value)`` byte pairs, count 1..255.
-
-    The mirror of moy_gfx's `decode_runs`, and native for the same reason: a
-    320x240 walk costs 0.5-1.7s interpreted on a board, which is the whole
-    history of the time-sliced cover builder. The Python body below is the host
-    path and the fallback, and produces identical bytes."""
-    native = _encode_runs()
-    if native is not None:
-        got = native(pix)
-        if got is not None:
-            return got
-    out = bytearray()
-    pos = 0
-    total = len(pix)
-    while pos < total:
-        value = pix[pos] & 63
-        count = 1
-        while pos + count < total and count < 255 \
-                and (pix[pos + count] & 63) == value:
-            count += 1
-        out.append(count)
-        out.append(value)
-        pos += count
-    return bytes(out)
-
-
-_ENCODE_RUNS = False       # False = not looked up yet; None = this build has none
-
-
-def _encode_runs():
-    """moy_gfx.encode_runs when this build has one. Looked up LAZILY: moy_image
-    is staged to targets with no compositor at all (the headless Zero), and on
-    the host `moy_gfx` is not an importable module -- gfx_binding is."""
-    global _ENCODE_RUNS
-    if _ENCODE_RUNS is False:
-        try:
-            import moy_gfx
-            _ENCODE_RUNS = getattr(moy_gfx, "encode_runs", None)
-        except ImportError:
-            _ENCODE_RUNS = None
-    return _ENCODE_RUNS
-
-
-def _run_bytes(count, value):
-    """A run of `count` `value`s as 255-capped ``(count, value)`` pairs.
-
-    Byte-identical to what a whole-raster scan produces for the same run, which
-    is the property the streaming reader below exists to keep."""
-    if count <= 0:
-        return b""
-    if count <= 255:
-        return bytes((count, value))
-    out = bytearray()
-    while count > 255:
-        out.append(255)
-        out.append(value)
-        count -= 255
-    if count:
-        out.append(count)
-        out.append(value)
-    return bytes(out)
-
-
-def moyimg_runs(text):
-    """A ``.moyimg`` as ``(w, h, packed_run_bytes)``, or None.
-
-    What the Library shelf caches per cart (cover_cache._runs_load): the
-    size-INDEPENDENT half of a cover build, ~15KB against the 77KB raster whose
-    caching was measured and rejected. `decode_moyimg` stays the one-shot
-    decoder for everything that wants pixels.
-
-    STREAMED (2026-09-07), and that is the whole point of it. This runs once per
-    cover per session on the launcher's idle prefetch, and the version that
-    inflated the raster whole asked a fragmented S3 heap for 76,800 contiguous
-    bytes to derive 15KB of runs from -- the allocation that heap refuses first,
-    on the tick with the least right to raise. Now at most a KB of raster is in
-    hand at a time and the runs accumulate as they are read.
-
-    A run that spans a piece boundary is what makes this a merge rather than a
-    concatenation, and the merge is why the output is byte-identical to the
-    whole-raster one: the OPEN run is held as a plain count instead of being
-    written down, so it is packed once, when it ends, at whatever length it
-    reached. Everything between the first and last run of a piece is already
-    final and goes out in one copy. The pieces are joined at the end rather than
-    appended into a growing buffer, so the one big contiguous allocation this
-    makes is the result itself, at exactly its size.
-
-    A picture in the RETIRED RLE codec reads as absent here (the stream it
-    carries is not a zlib one) rather than raising -- the shelf draws its
-    placeholder for a blob no reader in the tree speaks."""
-    got = _blob_header(text)
-    if got is None:
-        return None
-    w, h, raw = got
-    got = None
-    parts = []
-    value = -1                # the run left OPEN across a piece boundary
-    count = 0                 # ...and its length, which may exceed 255
-    seen = 0
-    try:
-        for piece in _inflate_chunks(raw):
-            seen += len(piece)
-            packed = pack_runs(piece)
-            n = len(packed)
-            i = 0
-            # A 255-capped run arrives as several pairs, so the leading ones are
-            # walked, not peeked at.
-            while i < n and packed[i + 1] == value:
-                count += packed[i]
-                i += 2
-            if i >= n:
-                continue                   # this whole piece continued one run
-            if count > 0:
-                parts.append(_run_bytes(count, value))
-            value = packed[n - 1]
-            count = 0
-            j = n
-            while j > i and packed[j - 1] == value:
-                count += packed[j - 2]
-                j -= 2
-            if j > i:
-                parts.append(packed[i:j])
-    except MemoryError:
-        raise
-    except Exception:  # noqa: BLE001 -- a corrupt or retired blob is not a picture
-        return None
-    if seen != w * h:
-        return None
-    if count > 0:
-        parts.append(_run_bytes(count, value))
-    return (w, h, b"".join(parts))
-
-
-# --- cover thumbnails (#66 launcher shelf): decoded-crop sidecars -------------
+# --- the wallpaper preview: a decoded-frame sidecar ----------------------------
 #
-# Decoding a 320x240 RLE cover costs 0.5-1.7s interpreted on the T-Deck, so the
-# console (CoverCache.cover_for) builds each card-sized crop ONCE and persists it
-# Sidecars hold raw indexed pixels: <cart>/thumbs/<prefix><w>x<h>.mct = b"MCT1" + a 4-byte LE
-# stamp of the cover blob it was built from (cover_sig) + the w*h pix bytes.
-# An edited cover changes the stamp -> the stale thumb is ignored and rebuilt;
-# a deleted cart takes its thumbs with it; a re-seed wipe just regenerates.
-# Regenerable cache, so: plain writes (no atomic dance), best-effort saves, and
-# every reader validates magic + size + stamp before trusting a byte.
+# <cart>/thumbs/<prefix><w>x<h>.mct = b"MCT1" + a 4-byte LE stamp of the source it
+# was rendered from (text_sig) + the w*h pix bytes. An edited source changes
+# the stamp -> the stale sidecar is ignored and rebuilt; a deleted cart takes its
+# thumbs with it; a re-seed wipe just regenerates. Regenerable cache, so: plain
+# writes (no atomic dance), best-effort saves, and every reader validates
+# magic + size + stamp before trusting a byte.
 
 THUMBS_DIR = "thumbs"
 
 
-def cover_sig(text):
-    """A cheap content stamp for a cover blob (NOT a hash): its length mixed
-    with head+tail character sums -- a paint edit virtually always moves one of
-    them. A collision only ever means one stale thumbnail, never a crash."""
+def text_sig(text):
+    """A cheap content stamp for a text blob (NOT a hash): its length mixed
+    with head+tail character sums -- an edit virtually always moves one of
+    them. A collision only ever means one stale sidecar, never a crash."""
     s = 0
     for ch in text[:64]:
         s += ord(ch)
@@ -491,8 +301,8 @@ def _save_thumb(path, w, h, sig, pix, prefix=""):
 def load_wallpaper_preview(path, w, h, sig):
     """The Appearance monitor's COMPUTED preview frame for the wallpaper cart
     at `path` (thumbs/wp<w>x<h>.mct) -- raw indexed pix, or None when absent,
-    stale (the stamp is cover_sig of the cart's SOURCE, so an edit rebuilds)
-    or corrupt. Same regenerable-sidecar contract as the cover thumbs."""
+    stale (the stamp is text_sig of the cart's SOURCE, so an edit rebuilds)
+    or corrupt."""
     return _load_thumb(path, w, h, sig, "wp")
 
 

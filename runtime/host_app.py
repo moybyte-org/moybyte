@@ -121,11 +121,7 @@ class SdlAudio(FakeAudio):
             self._ok = False
 
     def tick(self, dt):
-        n = int(self.engine.rate * (dt if dt > 0.0 else 0.0))
-        if n <= 0:
-            return
-        pcm = self.engine.render(n)   # advance the mixer; bytes of LE int16 mono
-        self.rendered += n
+        pcm = self.block(dt)          # advance the mixer; bytes of LE int16 mono
         if not self._ok or not pcm:
             return
         try:
@@ -188,6 +184,54 @@ def make_host_wifi(store=None, root=None):
     """Live-sim factory: real-connection-aware WiFi (simulate_desktop wires this for
     interactive runs; tests/headless keep the deterministic FakeWifi)."""
     return HostWifi(store, root)
+
+
+class _HostResponse:
+    def __init__(self, resp, status, length):
+        self._r = resp
+        self.status = status
+        self.length = length
+
+    def readinto(self, buf):
+        return self._r.readinto(buf) if self._r is not None else 0
+
+    def close(self):
+        r, self._r = self._r, None
+        if r is not None:
+            r.close()
+
+
+class HostCartNet:
+    """The network Get Carts fetches through on the host (#124):
+    `runtime/cart_index.py`'s transport over urllib, which follows redirects
+    and checks certificates.
+    The board's twin is device/cart_net.py; both answer `online()` and
+    `open(url)` -> status / length / readinto / close. The PC is already on a
+    network, so `online()` has nothing to dial."""
+
+    def __init__(self, timeout=30):
+        self.timeout = timeout
+
+    def online(self):
+        return True
+
+    def open(self, url):
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "moybyte-carts"})
+        try:
+            r = urllib.request.urlopen(req, timeout=self.timeout)
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            return _HostResponse(None, exc.code, None)
+        length = r.headers.get("Content-Length")
+        return _HostResponse(r, r.status, int(length) if length else None)
+
+
+def make_host_cart_net():
+    """Live-sim factory for Get Carts' network (simulate_desktop wires it;
+    tests wire a transport over their own local server, or none)."""
+    return HostCartNet()
 
 
 _SEED_PRESERVE = ("config.json", "pmem.json")   # the kid's tuning + saves, kept across a re-seed
@@ -288,7 +332,9 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # runtime/lua_binding -- libmoy's own binding over the same vendored 5.4 the
     # firmware compiles, LUA_32BITS and all. A "lua" cart with no native module
     # available opens the Player's runtime-missing panel, exactly as a device
-    # build without it does.
+    # build without it does. The same rule for "wasm": runtime/wasm_binding is
+    # libmoy's import table over WAMR built for Linux at the boards' pin, and
+    # no compiler (or no WAMR) is an absent key.
     #
     # lupa is GONE (2026-08-14). It survived as the fallback for carts using
     # moybyte's superset, and then as the fallback for a host with no C
@@ -299,8 +345,10 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # a compiler is the same trade, and it was refused there.
     try:
         from runtime.lua_host import MoycoreHostRun, moycore_supports
+        from runtime import wasm_host
     except ImportError:  # pragma: no cover
         from lua_host import MoycoreHostRun, moycore_supports
+        import wasm_host
 
     def _make_lua(ns, src, _ws=ws):
         # No fallback and no silent decline. A decline used to be swallowed, and
@@ -310,14 +358,18 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         # was a cart running on the runtime we were trying to retire.
         return MoycoreHostRun(_ws, ns, src)
 
-    lua_runtime = _make_lua if moycore_supports("") else None
+    runtimes = {}
+    if moycore_supports(""):
+        runtimes["lua"] = _make_lua
+    if wasm_host.available():
+        runtimes["wasm"] = wasm_host.WasmHostRuntime(ws)
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards). WiFi (#38) is the fake host service over the
     # same moy_carts wifi.json store the device uses; the pointer ranges over the
     # SYSTEM canvas (the surface the cursor moves on), so it's sized to that.
     console.wire_workstation_core(
         ws, moy_carts, carts_dir, make_api, make_wifi(moy_carts, carts_dir),
-        make_audio=make_audio, lua_runtime=lua_runtime, can_manage=True,
+        make_audio=make_audio, runtimes=runtimes, can_manage=True,
         pointer=console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h), inp=inp)
     # Multiplayer (#65): a host-side fake net transport (the sim's fake radio, for
     # net.*), so a "multiplayer"-permission cart runs in the sim. Unlinked here (a

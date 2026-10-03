@@ -1,0 +1,233 @@
+{
+ "_": "SPEC.md 3.6's cover profile, as files. A host's reader takes each file's bytes and either shows a cover or ignores the file; for a cover, rgb888_sha256 is the sha256 of its 128x128 pixels as R, G, B bytes, row-major from the top-left. Regenerate with conformance/covers/build.py.",
+ "vectors": [
+  {
+   "file": "rgb_filter0.png",
+   "verdict": "cover",
+   "bytes": 40406,
+   "note": "colour type 2, every row filter 0",
+   "rgb888_sha256": "96fca248a1d318d0d036bc3d2a0b467692a28368794ec452a607fd60c546756a"
+  },
+  {
+   "file": "indexed_filter0.png",
+   "verdict": "cover",
+   "bytes": 2183,
+   "note": "colour type 3, 16 entries, every row filter 0",
+   "rgb888_sha256": "6a4f70fa83718aa53956cd18c4c035643cbde259028a85300553cb31e341870a"
+  },
+  {
+   "file": "rgb_filter1.png",
+   "verdict": "cover",
+   "bytes": 5684,
+   "note": "colour type 2, every row filter 1",
+   "rgb888_sha256": "96fca248a1d318d0d036bc3d2a0b467692a28368794ec452a607fd60c546756a"
+  },
+  {
+   "file": "indexed_filter1.png",
+   "verdict": "cover",
+   "bytes": 2210,
+   "note": "colour type 3, 16 entries, every row filter 1",
+   "rgb888_sha256": "6a4f70fa83718aa53956cd18c4c035643cbde259028a85300553cb31e341870a"
+  },
+  {
+   "file": "rgb_filter2.png",
+   "verdict": "cover",
+   "bytes": 6165,
+   "note": "colour type 2, every row filter 2",
+   "rgb888_sha256": "96fca248a1d318d0d036bc3d2a0b467692a28368794ec452a607fd60c546756a"
+  },
+  {
+   "file": "indexed_filter2.png",
+   "verdict": "cover",
+   "bytes": 2315,
+   "note": "colour type 3, 16 entries, every row filter 2",
+   "rgb888_sha256": "6a4f70fa83718aa53956cd18c4c035643cbde259028a85300553cb31e341870a"
+  },
+  {
+   "file": "rgb_filter3.png",
+   "verdict": "cover",
+   "bytes": 8731,
+   "note": "colour type 2, every row filter 3",
+   "rgb888_sha256": "96fca248a1d318d0d036bc3d2a0b467692a28368794ec452a607fd60c546756a"
+  },
+  {
+   "file": "indexed_filter3.png",
+   "verdict": "cover",
+   "bytes": 3079,
+   "note": "colour type 3, 16 entries, every row filter 3",
+   "rgb888_sha256": "6a4f70fa83718aa53956cd18c4c035643cbde259028a85300553cb31e341870a"
+  },
+  {
+   "file": "rgb_filter4.png",
+   "verdict": "cover",
+   "bytes": 8238,
+   "note": "colour type 2, every row filter 4",
+   "rgb888_sha256": "96fca248a1d318d0d036bc3d2a0b467692a28368794ec452a607fd60c546756a"
+  },
+  {
+   "file": "indexed_filter4.png",
+   "verdict": "cover",
+   "bytes": 2623,
+   "note": "colour type 3, 16 entries, every row filter 4",
+   "rgb888_sha256": "6a4f70fa83718aa53956cd18c4c035643cbde259028a85300553cb31e341870a"
+  },
+  {
+   "file": "rgb_filters_mixed.png",
+   "verdict": "cover",
+   "bytes": 11927,
+   "note": "colour type 2, the five filters mixed row by row",
+   "rgb888_sha256": "96fca248a1d318d0d036bc3d2a0b467692a28368794ec452a607fd60c546756a"
+  },
+  {
+   "file": "indexed_filters_mixed.png",
+   "verdict": "cover",
+   "bytes": 2959,
+   "note": "colour type 3, the five filters mixed row by row",
+   "rgb888_sha256": "6a4f70fa83718aa53956cd18c4c035643cbde259028a85300553cb31e341870a"
+  },
+  {
+   "file": "palette_1.png",
+   "verdict": "cover",
+   "bytes": 171,
+   "note": "a one-entry PLTE: every pixel index 0",
+   "rgb888_sha256": "26a07ef9cad0ab70732142786b5bd24b7dd8d0ab7a3d788c8a242c3c5e2b4b78"
+  },
+  {
+   "file": "palette_256.png",
+   "verdict": "cover",
+   "bytes": 4317,
+   "note": "a 256-entry PLTE, every entry used",
+   "rgb888_sha256": "a8073d11d293a822a4a9f69d0d2a9a0bd1c916623973d08ee28055f619aa78d6"
+  },
+  {
+   "file": "rgb_stored.png",
+   "verdict": "cover",
+   "bytes": 49348,
+   "note": "colour type 2 in stored deflate blocks: no compression at all, and still under the size limit",
+   "rgb888_sha256": "96fca248a1d318d0d036bc3d2a0b467692a28368794ec452a607fd60c546756a"
+  },
+  {
+   "file": "ancillary_and_split_idat.png",
+   "verdict": "cover",
+   "bytes": 6118,
+   "note": "ancillary chunks before and after the image data, and the zlib stream split over four IDAT chunks, one of them empty",
+   "rgb888_sha256": "d14cc125a09d6ca5b6be67f15392e0ec93e8c52f7b84ed0c9a349a059f708a30"
+  },
+  {
+   "file": "rgb_with_suggested_plte.png",
+   "verdict": "cover",
+   "bytes": 8264,
+   "note": "colour type 2 carrying a PLTE, which PNG allows as a suggestion and a reader skips",
+   "rgb888_sha256": "d0350759a4fdb299d2fcb277ffce39e306dc353b581af7626a16af6aa8864aef"
+  },
+  {
+   "file": "size_limit_exact.png",
+   "verdict": "cover",
+   "bytes": 65536,
+   "note": "exactly 65536 bytes",
+   "rgb888_sha256": "52dcdff7a9ee20177c4110c7e721aef7866e6e1e44580f0a664b7e1811f9e510"
+  },
+  {
+   "file": "size_limit_plus_one.png",
+   "verdict": "ignored",
+   "bytes": 65537,
+   "note": "65537 bytes, one over"
+  },
+  {
+   "file": "size_127x128.png",
+   "verdict": "ignored",
+   "bytes": 5626,
+   "note": "127 wide"
+  },
+  {
+   "file": "size_128x129.png",
+   "verdict": "ignored",
+   "bytes": 5724,
+   "note": "129 high"
+  },
+  {
+   "file": "size_1x1.png",
+   "verdict": "ignored",
+   "bytes": 69,
+   "note": "1x1"
+  },
+  {
+   "file": "size_512x512.png",
+   "verdict": "ignored",
+   "bytes": 11628,
+   "note": "512x512"
+  },
+  {
+   "file": "interlaced.png",
+   "verdict": "ignored",
+   "bytes": 6272,
+   "note": "Adam7 interlaced"
+  },
+  {
+   "file": "depth16.png",
+   "verdict": "ignored",
+   "bytes": 9708,
+   "note": "colour type 2 at bit depth 16"
+  },
+  {
+   "file": "rgba.png",
+   "verdict": "ignored",
+   "bytes": 6101,
+   "note": "colour type 6 (RGBA), every pixel opaque"
+  },
+  {
+   "file": "trns.png",
+   "verdict": "ignored",
+   "bytes": 2196,
+   "note": "colour type 3 with a tRNS chunk"
+  },
+  {
+   "file": "greyscale.png",
+   "verdict": "ignored",
+   "bytes": 604,
+   "note": "colour type 0 (greyscale)"
+  },
+  {
+   "file": "indexed_depth4.png",
+   "verdict": "ignored",
+   "bytes": 208,
+   "note": "colour type 3 at bit depth 4"
+  },
+  {
+   "file": "truncated_idat.png",
+   "verdict": "ignored",
+   "bytes": 2870,
+   "note": "the zlib stream cut in half; every chunk is well formed"
+  },
+  {
+   "file": "bad_zlib.png",
+   "verdict": "ignored",
+   "bytes": 5684,
+   "note": "the first deflate block has the reserved block type 3"
+  },
+  {
+   "file": "bad_filter.png",
+   "verdict": "ignored",
+   "bytes": 5684,
+   "note": "row 40 names filter type 5"
+  },
+  {
+   "file": "index_past_plte.png",
+   "verdict": "ignored",
+   "bytes": 2186,
+   "note": "one pixel names entry 16 of a 16-entry PLTE"
+  },
+  {
+   "file": "indexed_no_plte.png",
+   "verdict": "ignored",
+   "bytes": 2123,
+   "note": "colour type 3 with no PLTE"
+  },
+  {
+   "file": "not_png.png",
+   "verdict": "ignored",
+   "bytes": 70,
+   "note": "not a PNG at all"
+  }
+ ]
+}

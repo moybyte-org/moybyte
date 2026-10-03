@@ -1,0 +1,46 @@
+diff --git a/llvm/lib/Target/Xtensa/XtensaInstrInfo.td b/llvm/lib/Target/Xtensa/XtensaInstrInfo.td
+index 4e149fb8f..1728217a5 100644
+--- a/llvm/lib/Target/Xtensa/XtensaInstrInfo.td
++++ b/llvm/lib/Target/Xtensa/XtensaInstrInfo.td
+@@ -249,6 +249,41 @@ let usesCustomInserter = 1 in {
+                     [(set AR:$r, (srl AR:$t, AR:$sa))]>;
+ }
+ 
++// EXTUI for a logical shift right by 16..31 and for a mask of the low 1..16
++// bits, alone or after a shift: one instruction where SRLI's 4-bit amount
++// needs SSR + SRL and AND needs its mask in a register.
++def extui_shr16_31 : ImmLeaf<i32, [{ return Imm >= 16 && Imm <= 31; }]>;
++def extui_lowmask : ImmLeaf<i32, [{
++  return Imm > 0 && Imm <= 0xffff && isMask_64((uint64_t)Imm);
++}]>;
++def extui_imm_xf : SDNodeXForm<imm, [{
++  return CurDAG->getTargetConstant(N->getZExtValue(), SDLoc(N), MVT::i32);
++}]>;
++def extui_rest_xf : SDNodeXForm<imm, [{
++  return CurDAG->getTargetConstant(32 - N->getZExtValue(), SDLoc(N), MVT::i32);
++}]>;
++def extui_width_xf : SDNodeXForm<imm, [{
++  return CurDAG->getTargetConstant(
++      llvm::countr_one((uint32_t)N->getZExtValue()), SDLoc(N), MVT::i32);
++}]>;
++def extui_srl_and : PatFrag<(ops node:$x, node:$sa, node:$m),
++                            (and (srl node:$x, node:$sa), node:$m), [{
++  auto *SA = dyn_cast<ConstantSDNode>(N->getOperand(0).getOperand(1));
++  auto *M = dyn_cast<ConstantSDNode>(N->getOperand(1));
++  if (!SA || !M)
++    return false;
++  uint64_t Mask = M->getZExtValue(), Sh = SA->getZExtValue();
++  return Mask > 0 && Mask <= 0xffff && isMask_64(Mask) && Sh <= 31 &&
++         Sh + llvm::countr_one(Mask) <= 32;
++}]>;
++
++def : Pat<(i32 (srl AR:$t, (i32 extui_shr16_31:$sa))),
++          (EXTUI AR:$t, (extui_imm_xf $sa), (extui_rest_xf $sa))>;
++def : Pat<(i32 (and AR:$t, (i32 extui_lowmask:$m))),
++          (EXTUI AR:$t, 0, (extui_width_xf $m))>;
++def : Pat<(i32 (extui_srl_and AR:$t, (i32 imm:$sa), (i32 imm:$m))),
++          (EXTUI AR:$t, (extui_imm_xf $sa), (extui_width_xf $m))>;
++
+ //===----------------------------------------------------------------------===//
+ // Load and store instructions
+ //===----------------------------------------------------------------------===//

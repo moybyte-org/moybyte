@@ -27,6 +27,7 @@ in the browser's MEMFS, so they are ephemeral: a reload resets the machine.
 JS contract (see worker.js):
     boot(carts_root, cart=None, ...) -> build the Workstation
     assets_json()                 -> the page's metadata payload (JSON string)
+    state_json()                  -> the dev channel's `state`, for a harness
     step_frame_json(dt, ahead)    -> tick one frame; "" when the redraw was
                                      skipped (#44 dirty gate), else a small
                                      JSON string; the PIXELS travel separately
@@ -303,13 +304,15 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # blit_game upscales it, same as both boards.
     ws.make_game_canvas = lambda w, h: web_canvas.WebSystemCanvas(
         web_canvas.WebCompositor(int(w), int(h)))
-    # Lua carts: moycore, the SAME native module and glue both boards run --
+    # Cart runtimes: moycore, the SAME native module and glue the boards run --
     # third architecture, one engine. A build without the usermod still boots
-    # (a lua cart opens the Player's runtime-missing panel).
-    lua_runtime = None
+    # (a lua cart opens the Player's runtime-missing panel). A compiled cart
+    # runs on the browser's own WebAssembly engine (native/moy_wasm_web and the
+    # worker's cart engine) through the same WasmRun a board uses.
+    runtimes = {}
     try:
-        from moycore_glue import make_moycore_runtime
-        lua_runtime = make_moycore_runtime(ws)
+        from moycore_glue import make_runtimes
+        runtimes = make_runtimes(ws)
     except ImportError:
         pass
     # The board-agnostic service wiring, in the one canonical order (host + both
@@ -331,7 +334,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     console.wire_workstation_core(
         ws, moy_carts, carts_root, _make_api,
         None,
-        make_audio=_make_audio, lua_runtime=lua_runtime, can_manage=True,
+        make_audio=_make_audio, runtimes=runtimes, can_manage=True,
         pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
     # AUTHORING IS ON, BOTH TIERS (owner call): the browser build is the whole
     # console, not the player-only runner #151 originally scoped -- the Make tile
@@ -343,6 +346,12 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # can_manage is wired AFTER the launcher was built, so rebuild the shelf for it
     # to appear.
     ws.launcher.items = ws._launcher_items(ws.carts.all)
+    # Get Carts (#124), by where this page's carts live (`_cart_seams`).
+    seams = _cart_seams(ws, _S.get("store_mode"))
+    ws.cart_net = seams[0]
+    ws.cart_keep = seams[1]
+    ws.cart_pick = seams[2]
+    ws.cart_home = seams[3]
     # The Moybyte shell's achievements are gamification for the kid console,
     # not part of a cart player (and doubly not of the brand-neutral spec
     # bundle). The REAL trigger is the Achievements core's note() (e.g.
@@ -427,6 +436,62 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     if cart:
         open_cart(cart)
     return True
+
+
+def _cart_seams(ws, mode):
+    """(cart_net, cart_keep, cart_pick, cart_home) for Get Carts (#124), by
+    the page's mode, which is where its carts live.
+
+    BOARD: the carts this page shows are the serving console's, and that
+    console gets its own -- with its own module for its own chip, and while
+    this page is connected its glass is parked, so the two never install side
+    by side. The page fetches nothing and the app says where carts come from
+    ("board"; `update_enable` learns whether that console has a screen).
+    SITE: the page's own store, so the page's fetch is the network and OPFS
+    keeps what lands (`carts_link`). NONE (no OPFS): the same network, and an
+    install lives in this tab like every other edit here, which the page
+    already says out loud."""
+    if mode == "board":
+        return None, None, None, "board"
+    if mode not in ("site", "none"):
+        return None, None, None, None
+    try:
+        import carts_link
+    except ImportError as exc:       # never block a boot
+        print("carts link unavailable:", exc)
+        return None, None, None, None
+
+    def _wake():
+        ws._dirty = True
+    link = carts_link.CartsLink(wake=_wake, landed=_cart_landed)
+    _S["carts"] = link
+    keep = carts_link.WebCartKeep(link) if mode == "site" else None
+    return carts_link.WebCartNet(link), keep, link.pick, None
+
+
+def _cart_landed(folder):
+    """A cart the keeper made durable moved into the carts folder: its files
+    are not news for the sweep (OPFS already holds them, binary module and
+    all, which the sweep could never carry), and the shelf shows it."""
+    w = (_S.get("watchers") or {}).get("carts")
+    if w is not None:
+        w.adopt(folder)
+    _rescan()
+
+
+def carts_poll_json():
+    """What the worker's carts pump should start or stop, or ""."""
+    link = _S.get("carts")
+    return link.poll_json() if link is not None else ""
+
+
+def carts_event_json(text):
+    """An answer from the worker: a response head or end, a keeper's verdict,
+    a picked file, the store's room."""
+    link = _S.get("carts")
+    if link is not None:
+        link.event_json(text)
+    return ""
 
 
 def _build_watchers(carts_root, site):
@@ -731,6 +796,33 @@ def step_frame_json(dt, audio_ahead=-1.0):
     })
 
 
+def state_json():
+    """The console's `state`: the dev channel's one-line snapshot -- the keys
+    every on-glass suite reads -- plus this page's sample stream
+    (`moy_audio.snd_counts()`: frames a compiled cart queued, frames the page's
+    audio pull mixed, frames it found none, the room, whether it is open) and
+    the running cart's first eight pmem slots, for a harness driving the page
+    (`window.__moyState()`)."""
+    import dev_channel
+    st = dev_channel._remote_state(_S["ws"])
+    try:
+        import moy_audio
+        sc = moy_audio.snd_counts()
+    except (ImportError, AttributeError):
+        sc = None
+    st["snd"] = list(sc) if sc is not None else None
+    # The running cart's first pmem slots, where a fixture reports its checks:
+    # the run's flush, which hands a moved image to the console's pmem to be
+    # kept at the next boundary as the periodic flush does, then its image.
+    run = getattr(getattr(_S["ws"], "player", None), "_lua", None)
+    flush = getattr(run, "flush_pmem", None)
+    if flush is not None:
+        flush()
+    img = getattr(run, "pmem_img", None)
+    st["pmem"] = list(img)[:8] if img is not None else None
+    return json.dumps(st)
+
+
 def _apply(events):
     d = _S["driver"]
     rest = []
@@ -878,6 +970,9 @@ def services_json():
         "gpio": getattr(ws, "gpio", None) is not None,
         "net": getattr(ws, "net", None) is not None,
         "can_manage": bool(getattr(ws, "can_manage", False)),
+        "cart_net": getattr(ws, "cart_net", None) is not None,
+        "cart_keep": getattr(ws, "cart_keep", None) is not None,
+        "cart_home": getattr(ws, "cart_home", None),
     })
 
 
@@ -909,6 +1004,8 @@ def update_enable(status_json):
         _S["ws"].updater = _S["update"]
     except Exception as exc:         # noqa: BLE001 -- never block a boot
         print("update unavailable:", exc)
+    if _S["ws"].cart_home is not None and not doc.get("screen"):
+        _S["ws"].cart_home = "headless"
     return ""
 
 

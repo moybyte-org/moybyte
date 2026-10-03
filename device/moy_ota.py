@@ -1,3 +1,15 @@
+# Map (grep -n a name to jump there):
+#   wait_online                      report the link, dialling saved credentials first
+#   -- manifest signing              verify_sig's key and rules
+#   OtaUpdater                       stepwise OTA install into the inactive slot
+#   OtaUpdater.boot_check            read the last install's marker
+#   OtaUpdater.begin                 open the image and the target slot
+#   OtaUpdater.check_online          fetch and parse a channel's manifest
+#   OtaUpdater.download_step         stream a slice to the card
+#   OtaUpdater.download_finish       verify size and sha256
+#   -- the streaming HTTP(S) client  parse_url, http_open, http_open_once, verify_sig
+#   http_open                        http_open_once plus redirects
+#   verify_sig                       does a signature sign the payload
 """OTA firmware updater for the device (#53): flash a new app image from SD.
 
 The Moybyte build now ships a DUAL-APP partition table (otadata + ota_0 + ota_1,
@@ -30,7 +42,7 @@ while accumulating a SHA-256 to verify before the same Phase-2 install path runs
 The network code is the LIVE counterpart of the host fake. The whole chain --
 TLS to github.com, the 302 to the release CDN, signature verify, the streamed
 download, install and rollback -- ran on glass on BOTH boards 2026-08-02
-(CLAUDE.md's OTA channel entry has the numbers), which also settled the
+(#53 has the numbers), which also settled the
 WiFi/LCD-DMA coexistence #38 had flagged.
 """
 
@@ -162,7 +174,7 @@ except Exception:
 OTA_CFG_NAME = "ota.json"        # /sd/update/ota.json -> {"channels": {"stable": url, ...}}
 
 # Where each channel lives when the card says nothing. The two branches publish
-# one rolling release each (CLAUDE.md -> "Branches and releases"), and CI writes
+# one rolling release each (.claude/skills/release/SKILL.md), and CI writes
 # `latest.json` beside the app image on both -- so a board straight off the
 # flasher can check for updates with no ota.json and no host of the owner's own.
 # An /sd/update/ota.json still WINS, which is how a LAN test against
@@ -1162,122 +1174,17 @@ class OtaUpdater:
                 except Exception:
                     pass
 
-    # -- minimal streaming HTTP(S) client (no urequests: it buffers the whole body) --
+    # -- the streaming HTTP(S) client is the module's (below); Get Carts
+    #    (device/cart_net.py) rides the same one --
 
     def _parse_url(self, url):
-        if url.startswith("https://"):
-            scheme, rest, port = "https", url[8:], 443
-        elif url.startswith("http://"):
-            scheme, rest, port = "http", url[7:], 80
-        else:
-            raise ValueError("bad url")
-        slash = rest.find("/")
-        if slash < 0:
-            hostport, path = rest, "/"
-        else:
-            hostport, path = rest[:slash], rest[slash:]
-        if ":" in hostport:
-            host, p = hostport.split(":", 1)
-            port = int(p)
-        else:
-            host = hostport
-        return scheme, host, port, path
+        return parse_url(url)
 
     def _http_open(self, url, hops=4):
-        """`_http_open_once` + redirect following, which is what makes the
-        GitHub-hosted channels (DEFAULT_CHANNEL_URLS) reachable: a release
-        download is a 302 to the objects.githubusercontent.com CDN, and the
-        manifest beside it redirects the same way. Returns the FINAL response."""
-        seen = 0
-        while True:
-            sock, code, clen, rest, loc = self._http_open_once(url)
-            if code not in (301, 302, 303, 307, 308) or not loc or seen >= hops:
-                return sock, code, clen, rest
-            try:
-                sock.close()
-            except Exception:
-                pass
-            seen += 1
-            # A relative Location is legal; resolve it against the current host.
-            if loc.startswith("/"):
-                scheme, host, port, _ = self._parse_url(url)
-                dflt = 443 if scheme == "https" else 80
-                loc = "%s://%s%s%s" % (scheme, host,
-                                       "" if port == dflt else ":%d" % port, loc)
-            _log("redirect %d -> %s" % (code, loc))
-            url = loc
+        return http_open(url, hops)
 
     def _http_open_once(self, url):
-        """Connect + send GET + read the response headers. Returns
-        (sock, status_code, content_length, leftover_body_bytes, location)."""
-        import socket
-
-        scheme, host, port, path = self._parse_url(url)
-        _log("http_open %s host=%s port=%d path=%s" % (scheme, host, port, path))
-        ai = socket.getaddrinfo(host, port)[0]
-        _log("getaddrinfo ->", ai[-1])
-        sock = socket.socket(ai[0], ai[1], ai[2])
-        sock.settimeout(15)
-        sock.connect(ai[-1])
-        _log("connected")
-        if scheme == "https":
-            import ssl
-
-            sock = ssl.wrap_socket(sock, server_hostname=host)
-            _log("tls wrapped")
-        req = ("GET %s HTTP/1.0\r\nHost: %s\r\n"
-               "User-Agent: moybyte-ota\r\nConnection: close\r\n\r\n" % (path, host))
-        sock.write(req.encode())
-        _log("request sent, reading headers")
-
-        # Byte-wise on purpose: a chunked read would swallow the first of the
-        # body, and this runs twice per update, not per frame.
-        #
-        # The cap is 16K because GitHub's headers are not small. Its release
-        # redirect measured 5147 bytes on 2026-08-02 -- 3626 of them a single
-        # Content-Security-Policy header, with the Location we need at byte 95.
-        # Under the old 4096 cap that worked only because Location happened to
-        # come FIRST; reorder those two headers and the redirect vanishes with
-        # no error to show for it. A bytearray + a tail check rather than
-        # `hdr += b` and `in`, both of which are O(n^2) over 5K of header.
-        t0 = _ms()
-        hdr = bytearray()
-        while hdr[-4:] != b"\r\n\r\n":
-            b = sock.read(1)
-            if not b:
-                break
-            hdr += b
-            if len(hdr) > 16384:
-                _log("WARNING: header block over 16K, giving up on the rest")
-                break
-        head, _, rest = bytes(hdr).partition(b"\r\n\r\n")
-        lines = head.split(b"\r\n")
-        code = 0
-        if lines and b" " in lines[0]:
-            try:
-                code = int(lines[0].split(b" ")[1])
-            except Exception:
-                code = 0
-        clen = 0
-        loc = None
-        for ln in lines[1:]:
-            low = ln.lower()
-            if low.startswith(b"content-length:"):
-                try:
-                    clen = int(ln.split(b":", 1)[1].strip())
-                except Exception:
-                    clen = 0
-            elif low.startswith(b"location:"):
-                try:
-                    loc = ln.split(b":", 1)[1].strip().decode()
-                except Exception:
-                    loc = None
-        # The header SIZE and the time to read it, because both are guesses until a
-        # board reports them: GitHub's redirect measured 5147 bytes from the host,
-        # and this reads it one byte at a time through TLS.
-        _log("http status=%d content-length=%d hdr=%dB in %dms loc=%s"
-             % (code, clen, len(hdr), _ms_since(t0), loc))
-        return sock, code, clen, rest, loc
+        return http_open_once(url)
 
     def _http_get_text(self, url, limit=8192):
         """Fetch a small text resource (the manifest) fully into RAM."""
@@ -1325,6 +1232,133 @@ def _log(*a):
         print("Moybyte OTA:", *a)
     except Exception:
         pass
+
+
+# -- the streaming HTTP(S) client (no urequests: it buffers the whole body) ------
+
+AGENT = "moybyte-ota"
+
+
+def parse_url(url):
+    if url.startswith("https://"):
+        scheme, rest, port = "https", url[8:], 443
+    elif url.startswith("http://"):
+        scheme, rest, port = "http", url[7:], 80
+    else:
+        raise ValueError("bad url")
+    slash = rest.find("/")
+    if slash < 0:
+        hostport, path = rest, "/"
+    else:
+        hostport, path = rest[:slash], rest[slash:]
+    if ":" in hostport:
+        host, p = hostport.split(":", 1)
+        port = int(p)
+    else:
+        host = hostport
+    return scheme, host, port, path
+
+
+def http_open(url, hops=4, agent=AGENT, log=None):
+    """`http_open_once` + redirect following, which is what makes the
+    GitHub-hosted channels (DEFAULT_CHANNEL_URLS) reachable: a release
+    download is a 302 to the objects.githubusercontent.com CDN, and the
+    manifest beside it redirects the same way. Returns the FINAL response as
+    (sock, status, content_length, leftover_body_bytes); the body is the
+    socket's to read. `agent` is the User-Agent, `log` the trace's sink."""
+    log = log or _log
+    seen = 0
+    while True:
+        sock, code, clen, rest, loc = http_open_once(url, agent, log)
+        if code not in (301, 302, 303, 307, 308) or not loc or seen >= hops:
+            return sock, code, clen, rest
+        try:
+            sock.close()
+        except Exception:
+            pass
+        seen += 1
+        # A relative Location is legal; resolve it against the current host.
+        if loc.startswith("/"):
+            scheme, host, port, _ = parse_url(url)
+            dflt = 443 if scheme == "https" else 80
+            loc = "%s://%s%s%s" % (scheme, host,
+                                   "" if port == dflt else ":%d" % port, loc)
+        log("redirect %d -> %s" % (code, loc))
+        url = loc
+
+
+def http_open_once(url, agent=AGENT, log=None):
+    """Connect + send GET + read the response headers. Returns
+    (sock, status_code, content_length, leftover_body_bytes, location)."""
+    import socket
+
+    log = log or _log
+    scheme, host, port, path = parse_url(url)
+    log("http_open %s host=%s port=%d path=%s" % (scheme, host, port, path))
+    ai = socket.getaddrinfo(host, port)[0]
+    log("getaddrinfo ->", ai[-1])
+    sock = socket.socket(ai[0], ai[1], ai[2])
+    sock.settimeout(15)
+    sock.connect(ai[-1])
+    log("connected")
+    if scheme == "https":
+        import ssl
+
+        sock = ssl.wrap_socket(sock, server_hostname=host)
+        log("tls wrapped")
+    req = ("GET %s HTTP/1.0\r\nHost: %s\r\n"
+           "User-Agent: %s\r\nConnection: close\r\n\r\n" % (path, host, agent))
+    sock.write(req.encode())
+    log("request sent, reading headers")
+
+    # Byte-wise on purpose: a chunked read would swallow the first of the
+    # body, and this runs twice per update, not per frame.
+    #
+    # The cap is 16K because GitHub's headers are not small. Its release
+    # redirect measured 5147 bytes on 2026-08-02 -- 3626 of them a single
+    # Content-Security-Policy header, with the Location we need at byte 95.
+    # Under the old 4096 cap that worked only because Location happened to
+    # come FIRST; reorder those two headers and the redirect vanishes with
+    # no error to show for it. A bytearray + a tail check rather than
+    # `hdr += b` and `in`, both of which are O(n^2) over 5K of header.
+    t0 = _ms()
+    hdr = bytearray()
+    while hdr[-4:] != b"\r\n\r\n":
+        b = sock.read(1)
+        if not b:
+            break
+        hdr += b
+        if len(hdr) > 16384:
+            log("WARNING: header block over 16K, giving up on the rest")
+            break
+    head, _, rest = bytes(hdr).partition(b"\r\n\r\n")
+    lines = head.split(b"\r\n")
+    code = 0
+    if lines and b" " in lines[0]:
+        try:
+            code = int(lines[0].split(b" ")[1])
+        except Exception:
+            code = 0
+    clen = 0
+    loc = None
+    for ln in lines[1:]:
+        low = ln.lower()
+        if low.startswith(b"content-length:"):
+            try:
+                clen = int(ln.split(b":", 1)[1].strip())
+            except Exception:
+                clen = 0
+        elif low.startswith(b"location:"):
+            try:
+                loc = ln.split(b":", 1)[1].strip().decode()
+            except Exception:
+                loc = None
+    # The header SIZE and the time to read it, because both are guesses until a
+    # board reports them: GitHub's redirect measured 5147 bytes from the host,
+    # and this reads it one byte at a time through TLS.
+    log("http status=%d content-length=%d hdr=%dB in %dms loc=%s"
+         % (code, clen, len(hdr), _ms_since(t0), loc))
+    return sock, code, clen, rest, loc
 
 
 def verify_sig(payload, sig, keys=None):

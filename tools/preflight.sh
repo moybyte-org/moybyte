@@ -61,6 +61,12 @@ step() {                        # step "name" cmd...
 # a warm build is under a minute.
 step "desktop MicroPython with the native usermods" make unix-micropython
 step "docs agree with the tree"                     "${PY}" tools/check_docs.py
+# CI's cached step: the toolchain the showcase cart's goldens build with,
+# fetched by its pinned sha256 when absent (a no-op when it is here).
+step "wasi-sdk for the compiled showcase cart"      "${PY}" tools/jet_cart.py --toolchain
+# CI's cached step too: the pinned wamrc the AOT checks compile with, fetched
+# and hash-checked when absent.
+step "the pinned wamrc for the AOT checks"          "${PY}" tools/wasm_module.py compilers
 step "suite (redraw excluded)" \
   "${PY}" -m pytest -q --ignore=tests/test_redraw_on_change.py
 step "redraw suite, alone"     "${PY}" -m pytest -q tests/test_redraw_on_change.py
@@ -78,7 +84,8 @@ if [ "${WEB}" = "1" ]; then
   step "browser suites in real Chrome" \
     env MOYBYTE_WEB_E2E=1 "${PY}" -m pytest -rs -q \
       tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
-      tests/test_web_p8_e2e.py tests/test_web_update_e2e.py
+      tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
+      tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py
 fi
 
 if [ "${fails}" -ne 0 ]; then
@@ -86,6 +93,7 @@ if [ "${fails}" -ne 0 ]; then
   exit 1
 fi
 printf '\npreflight: green. A push should be too.\n'
-printf 'ON-GLASS IS NOT IN HERE: the four board suites need the boards, and\n'
-printf 'nothing but a human with them plugged in can run them (see\n'
-printf '.claude/rules/testing.md). `make device-port` names the ports.\n'
+printf 'ON-GLASS IS NOT IN HERE: the board suites need a board CONNECTED to\n'
+printf 'this machine, which CI has none of. Whoever is at this checkout --\n'
+printf 'person or agent -- runs them when one is plugged in, no permission\n'
+printf 'needed. `tools/board.py ports` says which board is on which port.\n'

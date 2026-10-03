@@ -136,6 +136,19 @@ file = "lua_host.py"
 kind = "host-only"
 why  = "The host's Lua cart runner. The device's is `moycore`, driven by moycore_glue.py."
 
+
+[[modules.shared.deny]]
+file = "wasm_host.py"
+kind = "host-only"
+why  = """
+The host's compiled-cart runner, over `wasm_binding`. The device's is moycore's wasm half, driven by moycore_glue.py over the moy_wasm engine."""
+
+[[modules.shared.deny]]
+file = "wasm_binding.py"
+kind = "host-only"
+why  = """
+ctypes over libmoy's wasm import table and WAMR built for Linux, fetched and
+compiled on demand -- no compiler, git or cmake on a board."""
 [[modules.shared.deny]]
 file = "input.py"
 kind = "host-only"
@@ -226,6 +239,9 @@ usb         = "303a:1001"
 # USB-Serial/JTAG ISR only drains what the stdin ring has room for, so the
 # endpoint stalls and the HOST blocks -- the window buys fewer round trips,
 # it is not the safety margin it is on the Waveshare's unflow-controlled UART.
+# The board acks a window before writing it, and its stdin ring is
+# MOY_SERIAL_RING_BYTES (mpconfigboard.h), twice the window, so the next window
+# lands between the flash operations of the last one's write.
 chunk       = 768
 window      = 16384
 
@@ -278,6 +294,16 @@ framebuffer continuously, so there is no per-frame transfer, no band, no
 bounce and no completion ISR. Staging it would compile a FreeRTOS task and a
 DMA-SRAM allocation into the image for code nothing calls. A DSI board that
 ever needs a push path is a new decision, not a flip of this one."""
+
+[[native.shared.take]]
+module = "moy_wasm"
+why = """
+The WebAssembly cart tier's engine (docs/wasm_tier_plan_2026-09.md): the
+vendored WAMR runtime, AOT only, and the thread a module runs on. The tier
+ships on every console board or on none, so this board takes it. Its internal
+SRAM is not the constraint the S3 boards' is; the on-glass suite runs the same
+wasm checks. The run stack's size and placement are this board's MOY_WASM_*
+settings in mpconfigboard.h, with the measurement that chose them."""
 
 [native.p4]
 source   = "native/p4"
@@ -414,6 +440,12 @@ The OTA updater (#53). Board-agnostic: its staging directory is a constructor
 argument (this console has no SD, so run_desktop passes a path on the internal
 VFS) and its board identity comes from the generated `_ota_build.py` --
 `guition_p4`, a manifest of its own, since an app image is board-specific."""
+
+[[modules.device.group]]
+files = ["cart_net.py"]
+why = """
+Get Carts' network (#124): the app's transport for indexes and carts, over
+moy_ota's HTTP client and its wait for the link."""
 
 [[modules.device.group]]
 files = ["moy_c6_update.py"]

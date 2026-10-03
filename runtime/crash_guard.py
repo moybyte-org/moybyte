@@ -36,13 +36,15 @@ survived them or not.
 ## What it costs, stated plainly
 
 Two small `system.json` writes per guarded open: one at `arm`, one at the heal.
-On the P4 a settings write is ~800 ms of flash, so this is NOT free and it is
-NOT armed for games -- a game that always crashes shows the panel and the kid
+A settings write is flash, so this is NOT free, and it is NOT armed for games --
+a game that always crashes shows the panel and the kid
 moves on, which is not a brick. It is armed for the content that runs itself, or
 that the shell runs on the kid's behalf: `type: "app"` carts today (see
 `Player.start`), the wallpaper next (the actual #160 report). Both are opened
 deliberately and rarely, alongside a cart load and a compile that already cost
-more than the write does.
+more than the write does. What a write actually costs on each board is #154's
+to state, and it is a per-write floor plus the payload -- a small dict like this
+one is the cheap end of that.
 
 `HEAL_FRAMES` is small on purpose (3): the window between "armed" and "healed"
 is the window in which an unrelated power pull charges a false strike, and three

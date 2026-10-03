@@ -641,11 +641,18 @@ authored code, but changing the copy model is not part of this visual redesign.
 six games in the Library to synthesize live covers. Define the manifest/store contract
 only after the visual slice proves the required dimensions.
 
-*Status (2026-07-12): SHIPPED.* The contract is `images/cover.moyimg` in the cart
-folder (any MOY64 `.moyimg`); the Library shelf cover-crops it full-bleed onto the
-card, and carts without one keep the sprite/glyph fallback deterministically.
-`tools/gen_covers.py` captures a clean gameplay frame for each seed game (committed
-artifacts, hand-replaceable; manifest versions bumped for the #47 re-seed).
+*Decided 2026-10-02 (owner):* the contract is `cover.png` in the cart folder's root,
+moy-spec's SPEC.md §3.6 -- a 128x128 PNG, indexed or RGB, at most 64 KB -- read by
+`runtime/cover_png.py` and drawn in direct colour, centred at the largest
+whole-number scale the card's art slot takes -- or the next one up, its overflow
+cropped, when that overflows the slot by at most 10% each way (the Guition P4's
+258x245 slot takes 2x). Under 128 the Library grid draws the
+cart's own §3.4 icon when it names one, else the cover's 64x64 half; carts without a
+cover keep the sprite/glyph fallback deterministically. `tools/gen_covers.py`
+captures a gameplay frame for each seed game and squares it to 128x128 in the
+console palette (committed artifacts, hand-replaceable in Paint; manifest versions
+bumped for the #47 re-seed). It replaced `images/cover.moyimg` (2026-07-12), which
+is no longer read.
 
 ### 11.5 A second system UI font?
 

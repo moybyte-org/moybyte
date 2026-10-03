@@ -29,7 +29,9 @@ to whoever called it.
     exit and returns to the CALLER — launcher→launcher, Editor-PLAY→the same tab.
     A crash becomes the **crash-to-code throw**: the run exits into the Editor's
     Code tab with the caret on the crashing line. The parked OOPS panel survives
-    only as the no-open-cart fallback.
+    as the no-open-cart fallback, and as the whole answer to a compiled
+    (`"runtime": "wasm"`) cart's trap, which has no source line to throw to and
+    offers no EDIT.
   - **There is NO SAVE and no dirty star** (#111). Commits ride a typing-idle
     debounce plus every exit path; a commit also appends the undo journal and runs
     graduation detection.
@@ -88,18 +90,33 @@ to whoever called it.
   - **Blocks↔code graduation is one-way and reversible only by undo**: a diverging
     code commit stores `"graduated": true`, the Blocks tab goes read-only, and
     undoing past that commit un-graduates.
-  - **Wallpaper previews keep a sidecar; cover thumbs DO NOT** (#155) — and the
+  - **Wallpaper previews keep a sidecar; covers DO NOT** (#155) — and the
     contrast is the point. A computed preview FRAME is far dearer to rebuild than
-    to read, so it caches to disk; a cover's RLE decode got ~three orders of
-    magnitude cheaper, so a per-size sidecar cost the same as rebuilding while
-    also charging a write per cover per size. Covers cache PARSED RUNS in RAM
-    instead. **Do not re-add cover thumbs.**
+    to read, so it caches to disk; a cover (`cover.png`, SPEC.md 3.6) is a few KB
+    of file and a native decode, so `runtime/cover_cache.py` keeps the FILE and
+    ONE decoded 128x128 base in RAM and draws it at a whole-number scale (no
+    per-size variants, docs/theming_2026-09.md P8). **Do not re-add cover
+    sidecars.**
   - **`files/trash/` is restorable and never confirms**, and WALL/GAME/wallpaper
     are **copy-on-use** — a kid's drawing is never mutated by being used
     (#108's comments hold that design discussion).
-- **Dual cart runtimes (#67): a manifest `"runtime": "lua"` routes `Player.start`
-  through `ws.lua_runtime`.** `docs/moycore_direction.md` is the direction doc and
-  `native/moycore/` the implementation; the decisions and traps:
+- **Cart runtimes (#67): a manifest `"runtime"` other than python routes
+  `Player.start` through `ws.runtimes`, a map of the runtimes this build carries**
+  -- `"lua"`, and `"wasm"` (a compiled cart, `docs/wasm_tier_plan_2026-09.md`,
+  on the same moycore console over the `native/moy_wasm` engine). A runtime a
+  build lacks is an ABSENT KEY, and its carts open the runtime-missing panel.
+  A compiled cart the console has no room for opens that same panel as a
+  NOTICE, never an error: the Player compares the cart's load footprint with
+  what the runtime reports free before anything loads, and a load that runs
+  out anyway maps to the same notice (`native/moy_wasm/README.md`). A cart
+  with no module for this console, one built for another chip or format, or
+  one whose module is unsigned while Settings -> UNKNOWN SOURCES is off is
+  never refused either (2026-09-30, "A cart survives its firmware"): it plays
+  on the interpreter instead, with a short notice naming the cause ("needs an
+  update" or "isn't signed"), never a panel. Only tamper evidence -- a
+  signature present but not verifying -- still stays an error.
+  `docs/moycore_direction.md` is the direction doc and `native/moycore/` the
+  implementation; the decisions and traps:
   - **There is exactly ONE Lua runtime and no chooser.** The old trampoline engine
     (`LuaCartRun`, `bind_draw`, the `spr_gate` batch protocol, `moy_lua_glue`) is
     DELETED and `import moy_lua` is meant to fail. Read the deletion commit before
@@ -140,6 +157,11 @@ to whoever called it.
   - **A brand-new project has no sheet and no map, and `moy_console` holds both by
     POINTER** — `spr(0,0,0)` in an empty cart used to segfault libmoy's binding: a
     board reset with no message.
+- **A play frame allocates NOTHING** -- the frame path here and in `device/`,
+  pinned by `tests/test_frame_alloc.py`; a board pays for garbage in
+  whole-heap collections that stop the frame. Reuse what a per-frame call
+  returns, bind probes once, and read the `perf` skill's list of the idioms
+  that allocate on a board before adding one.
 - **pmem persistence is DEFERRED (#66, on-glass 2026-07-14):** `pmem(i, v)` is
   RAM + a dirty mark; `Pmem.flush()` persists at cart exit (`release_world`),
   the crash capture, the workspace swap, and a periodic frame-boundary save
@@ -147,8 +169,8 @@ to whoever called it.
   (probe-attributed on glass; #66). The
   perf_capture-gated `PMEM save=<ms>` diag line shows the deferred cadence.
 - `runtime/font.py` — petme128 8×8 font, the ONE glyph source both backends rasterize (#62): the host draws it per-pixel, the device passes its blob to the native `moy_gfx.text` kernel (staged as `moy_font` at build; framebuf.text — same glyphs, no clip rect — is the no-gfx fallback).
-- **UI scrolling is kinetic + scroll-as-blit (#113, 2026-07-22 — the living plan/status issue):** `ui.ScrollRegion` owns the fling physics (all dt INJECTED from the loop — never a clock — so tests are exact-trajectory deterministic) plus a painted-frame ring; an eligible drag/fling frame SHIFTS the retained pixels via the `scroll_rect` system verb (ONE implementation on every tier since the canvas flip — `DeviceCanvas.scroll_rect` over `moy_gfx.scroll_rect`, which the host reaches through `runtime/gfx_binding.py`; the old host `canvas.py` lane is deleted) and repaints only the exposed band (`Launcher.draw_shift` — the home shelf + Editor picker pilots; Settings still row-snaps, its pixel-smooth conversion is #113 Phase 5). The learned rule: **everything inside a scrolled band must be a pure function of the offset** (the picker's dots now ride the scroll in-band). The ring pins sel/statics/`ws._cover_gen` and measures against `RETAINED_FRAMES` paints back (host/layers 1, device root ping-pong 2). Web transport: the `scr` op shifts the browser's retained buffer (never deduped to `{"same":1}` — replaying a shift double-applies), covers + the static wallpaper composite ship ONCE via `/assets` (`ws.cover_assets`, serial names), and the windowed WM's gesture-vs-window checks resolve by IDENTITY (`_wins.get(key) is win` — the shared "make" group's `win.kind` is the CONTENT kind, so `key == win.kind` never matched and silently disabled the drag content-freeze/stamp-defer everywhere).
-- `runtime/host_app.py` — host glue: host `make_api`, `build_workstation()` (injects `ws.lua_runtime` when the native binding builds, #67), `ConsoleDriver` (mouse=touch, arrows=trackball). Not on device.
+- **UI scrolling is kinetic + scroll-as-blit (#113, 2026-07-22 — the living plan/status issue):** `ui.ScrollRegion` owns the fling physics (all dt INJECTED from the loop — never a clock — so tests are exact-trajectory deterministic) plus a painted-frame ring; an eligible drag/fling frame SHIFTS the retained pixels via the `scroll_rect` system verb (ONE implementation on every tier since the canvas flip — `DeviceCanvas.scroll_rect` over `moy_gfx.scroll_rect`, which the host reaches through `runtime/gfx_binding.py`; the old host `canvas.py` lane is deleted) and repaints only the exposed band (`Launcher.draw_shift` — the home shelf + Editor picker pilots). **The row slot is never the whole scroll state**: Settings' rows travel by PIXELS (#113 Phase 5) — `set_top` stays the row-slot state of record that the cues and the keyboard clamp read, while the region underneath carries what the finger moved, and `_scroll_px()` is the sub-row remainder the rows draw at. The pushes go ONE way each: a finger pulls `set_top` from the region, and only the row-minded movers (a d-pad step, a reset, the range clamp) push back via `_sync_scroll_from_top`, which also kills a live fling. A per-sample re-snap is what ate the remainder before. The shared list shell (`app_shell.py`, Files/Storybook) still row-snaps and feeds its `DragTap` no dt, so it has no fling — that is the remaining Phase 5 rollout. The learned rule: **everything inside a scrolled band must be a pure function of the offset** (the picker's dots now ride the scroll in-band). The ring pins sel/statics/`ws.covers.gen` and measures against `RETAINED_FRAMES` paints back (host/layers 1, device root ping-pong 2). The windowed WM's gesture-vs-window checks resolve by IDENTITY (`_wins.get(key) is win` — the shared "make" group's `win.kind` is the CONTENT kind, so `key == win.kind` never matched and silently disabled the drag content-freeze/stamp-defer everywhere).
+- `runtime/host_app.py` — host glue: host `make_api`, `build_workstation()` (maps `ws.runtimes` -- "lua" and "wasm" -- for each native binding that builds, #67), `ConsoleDriver` (mouse=touch, arrows=trackball). Not on device.
 
 (The pre-unification host UI — `shell.py`/`workstation.py`/`engine.py`/`api.py`/
 `cartridge.py` — was removed once the shared console replaced it; issue #17.)
@@ -216,7 +238,8 @@ Record and gates: #206, #207, #208.
 
 - **ONE `PERF` line, one producer, every board.** `runtime/perf_line.py` holds
   the field table, the formatter AND the parser, measured by
-  `device_boot.PerfSampler` on `FrameLoop.account`. **A field a board cannot
+  `device_boot.PerfSampler` on `FrameLoop.account` and written only under PERF
+  DIAG, like every periodic line (kid mode writes none). **A field a board cannot
   measure prints `-`, never `0`.** Cart titles are slugged and compounds join with
   `/`, because both readers split on whitespace and an inner `=` reads as a field.
   `tools/p4_perf.py` requires `--board`: it used to default to the P4's dtr/rts

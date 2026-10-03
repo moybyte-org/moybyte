@@ -83,6 +83,14 @@
 #
 # `_forget_bak` is the same drop, done by the writer rather than the next reader:
 # a foreign writer that calls it leaves nothing stale behind at all.
+#
+# THE BACKUP IS SPENT ONCE STEP 3 RETURNS, and `_claim_bak` is what that buys. The
+# marker's stamp then fits the published file, so no read reaches the backup again
+# before the next save overwrites it -- which means a second writer that wants those
+# same bytes on the medium can take the FILE rather than put the payload down twice.
+# The undo journal's snapshots are that writer (#154): claiming one is a rename where
+# writing it is 7.1 ms per KB on a card. The claimant keeps the stamp line and reads
+# back through `_read_stamped`, and `path` then has no backup until its next save.
 
 try:
     import os
@@ -147,6 +155,40 @@ def _remove(path):
         os.remove(path)
     except OSError:
         pass
+
+
+def _read_bytes(path, cap):
+    """A binary file's bytes, or None when it is larger than `cap` -- read a
+    piece at a time, so an oversized file never costs a buffer its own size.
+    OSError (no such file) goes on through."""
+    parts = []
+    n = 0
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(4096)
+            if not b:
+                break
+            n += len(b)
+            if n > cap:
+                return None
+            parts.append(b)
+    return b"".join(parts)
+
+
+def _write_bytes(path, data):
+    """Publish a BINARY file whole: written beside it as `<path>.tmp`, then
+    renamed over it, so a crash leaves the previous file or the new one --
+    never a torn one. The text machinery below (the stamp, the `.bak` redo
+    log) is for text; a binary file in this store is a picture, which a torn
+    write would only have made unreadable."""
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    try:
+        os.rename(tmp, path)
+    except OSError:                   # FAT: a rename does not replace
+        _remove(path)
+        os.rename(tmp, path)
 
 
 def _copy(src, dst):
@@ -275,15 +317,18 @@ def _bak_stamp(path):
         return None
 
 
-def _read_bak(path):
-    """The backup's text, or None when it cannot be trusted.
+def _read_stamped(path):
+    """A stamped file's payload, or None when it cannot be trusted.
 
-    A stamped backup is returned only if it matches its own stamp (a torn one is
-    refused). An UNSTAMPED backup is legacy -- the pre-#154 rename rotation, or
-    `moy_sync._publish`'s -- and is returned whole, which is all those writers
-    ever promised."""
+    Returned only if the text matches the stamp on its first line, so a torn file
+    is refused rather than published. An UNSTAMPED file is legacy -- the pre-#154
+    rename rotation, or `moy_sync._publish`'s -- and is returned whole, which is
+    all those writers ever promised.
+
+    Two readers share this: the crash backup beside a published file, and a
+    journal snapshot that CLAIMED one (`_claim_bak`)."""
     try:
-        with open(path + ".bak", "r") as f:
+        with open(path, "r") as f:
             head = f.readline()
             rest = f.read()
     except OSError:
@@ -293,7 +338,12 @@ def _read_bak(path):
         return head + rest
     if _fits(rest, stamp):
         return rest
-    return None                       # torn backup: refuse it, never publish garbage
+    return None                       # torn: refuse it, never publish garbage
+
+
+def _read_bak(path):
+    """The text of the backup beside `path` -- see `_read_stamped`."""
+    return _read_stamped(path + ".bak")
 
 
 def _write_atomic(path, data):
@@ -327,6 +377,35 @@ def _forget_bak(path):
     without going through `_write_atomic`: a stamp left describing content that is
     no longer there would make the next read 'recover' over the new file."""
     _remove(path + ".bak")
+
+
+def _claim_bak(path, dest, stamp):
+    """Move `path`'s finished crash backup to `dest`. True when it was taken.
+
+    Once `_write_atomic(path, data)` has returned, `<path>.bak` holds a stamped
+    copy of exactly what is now published AND is spent: the marker's stamp fits
+    the published file, so no read reaches the backup before the next save
+    overwrites it. A second writer that wants those same bytes on the medium can
+    therefore TAKE that file instead of putting the payload down again -- a
+    rename against 7.1 ms per KB on the T-Deck's card (#154).
+
+    Claimed only when the backup's own stamp equals `stamp` -- the caller's
+    `_stamp_of(data)`, which it already holds -- so the check is one line read,
+    never the payload. A caller whose bytes were never published (the journal's
+    graduation BASELINE entry) fails that test and writes its own copy.
+
+    `dest` keeps the stamp line, so whoever reads it reads through
+    `_read_stamped`. And `path` is left with no backup until its next save: the
+    spare copy has MOVED rather than gone, but `_read_recover` no longer knows
+    where, so a `path` that disappears outright is a re-raise where it used to
+    heal. Only claim for bytes something else is keeping."""
+    if _bak_stamp(path) != stamp:
+        return False
+    try:
+        os.rename(path + ".bak", dest)
+    except OSError:                   # no backup, or `dest`'s folder is not there yet
+        return False
+    return True
 
 
 def _heal(path, data):

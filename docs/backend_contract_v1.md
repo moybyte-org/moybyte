@@ -367,7 +367,8 @@ The one target still declaring its denylist inline in shell is
 
 **Also declared out of scope by name** (same "None means absent" pattern, other
 objects — listed so they are decisions rather than omissions): `ws.wifi`,
-`ws.updater`, `ws.web_hook`, `ws.can_manage`, `ws.lua_runtime`.
+`ws.updater`, `ws.web_hook`, `ws.can_manage`, and `ws.runtimes`, where absence
+is a missing key.
 
 ---
 

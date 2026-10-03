@@ -96,7 +96,33 @@ moybyte_patch_espnow_ring_race
 #     perf A/B ran the same day, paired on the same tree and flash cycle:
 #     Sky Run 58.0 -> 56.5, Sakura 51.0 -> 51.5 -- ~1.5fps on one cart,
 #     noise on the other. It would not have gotten a vote anyway.
+#     With it, the map-lookup cache index re-aimed for REPR_C (#77), paired
+#     with mpconfigboard.h's 512-slot table.
 moybyte_patch_repr_c
+moybyte_patch_map_cache_for_repr_c
+# Size-class run hints for gc_alloc (#66): every console board takes it; the
+# lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
+moybyte_patch_gc_run_hints
+
+# 2f) A 4 KB stdin ring, in TCM, and a UART RX ISR that wakes the reader: this
+#     board's serial is the CH343's UART, with no flow control, and the stock
+#     260 bytes are 23 ms of line rate against a heap collection of up to
+#     ~95 ms. tools/patch_stdin_ring.py carries the sizing, why TCM, and why
+#     the wake.
+moybyte_patch_stdin_ring
+
+# DECLINED moybyte_patch_usj_rx_init -- the USB-Serial/JTAG console's start.
+# This board's console is the CH343's UART, whose ISR is installed with the
+# port and takes every byte as it arrives.
+
+# LittleFS sized for a flash store: the cart store is this board's internal
+# flash, which the stock sizes program 128 bytes at a time and search for free
+# blocks 256 at a time. tools/patch_lfs_sizes.py carries the measurements.
+moybyte_patch_lfs_sizes
+
+# DECLINED moybyte_patch_sdcard_runs -- machine.SDCard in multi-block runs.
+# This console has no card in play: carts live on the internal flash VFS (the
+# moy_sd denial in board.toml says the same for the T-Deck's module).
 
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # The patch reserves MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM outside the Python

@@ -292,6 +292,17 @@ def test_a_failing_op_leaves_the_card_resident(w):
     assert "moy_sd.init" not in w.kinds()
 
 
+def test_the_resident_session_imports_nothing(w):
+    """Once the card is resident a session is fn() and nothing else. An import
+    of `os` runs MicroPython's search for an overriding file along the whole
+    path, every time: on the T-Deck that cost each session more than the read
+    it wrapped, and a compiled cart streaming its data file opens a session
+    for every `read`."""
+    w.mod.with_sd_live(lambda: None)
+    sys.modules["os"] = None       # PEP 328: any import of os now raises
+    assert w.mod.with_sd_live(lambda: "read") == "read"
+
+
 def test_a_card_someone_else_already_mounted_is_not_mounted_twice(w):
     w.os(mounted=True)
     w.mod.with_sd_live(lambda: None)

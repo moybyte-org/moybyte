@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Cut a release: merge `dev` into `master` and bump the firmware version.
 
-The two branches are the two OTA channels (CLAUDE.md -> "Branches and
-releases"). `dev` is where work lands and where CI publishes beta images from;
+The two branches are the two OTA channels (the `release` skill,
+.claude/skills/release/SKILL.md). `dev` is where work lands and where CI publishes beta images from;
 `master` is what users get -- the site's flasher and the stable OTA channel both
 read the release that a master build publishes. The merge IS the release event,
 so the version bump belongs to it and not to the commit that happened to be

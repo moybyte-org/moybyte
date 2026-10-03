@@ -1,5 +1,6 @@
-// Moybyte T-Deck (mainline MicroPython). Board facts only -- everything tuned
-// for performance lives in sdkconfig.board beside this file.
+// Moybyte T-Deck (mainline MicroPython). Board facts, plus the MicroPython-level
+// knobs sdkconfig cannot carry, each with its verdict beside it; everything
+// tuned at the IDF level lives in sdkconfig.board beside this file.
 
 #ifndef MICROPY_HW_BOARD_NAME
 #define MICROPY_HW_BOARD_NAME               "Moybyte T-Deck (mainline)"
@@ -51,7 +52,7 @@
 #define MICROPY_HW_I2C0_SDA                 (18)
 
 // The SD card shares SPI2 with the panel and is mounted through the native
-// moy_sd attach (never machine.SDCard -- see CLAUDE.md's hard constraints), so
+// moy_sd attach (never machine.SDCard -- see .claude/rules/boards.md), so
 // the port's own SD support is deliberately NOT enabled.
 #define MICROPY_HW_ENABLE_SDCARD            (0)
 
@@ -81,3 +82,38 @@
 // tests/test_moy_image.py pins all five boards, because a board that is missed
 // fails at the moment a kid presses save and nowhere earlier.
 #define MICROPY_PY_DEFLATE_COMPRESS         (1)
+
+// The map-lookup cache, 128 -> 512 slots (384 bytes of .bss). One shared
+// uint8_t table hints where a key was last found in ANY map, and this console
+// runs a shell, a WM and a cart through it at once. Under REPR_C the stock
+// index reaches only 32 of the 128 slots for a qstr key -- the shared build
+// half re-aims it (moybyte_patch_map_cache_for_repr_c) -- and the two halves
+// were A/B'd apart on this board's glass, 2026-09-21, Brick Siege, diag on,
+// three runs a side:
+//
+//     stock                     fps 51.5   worst 49-52   mp_map_lookup 20.1%
+//     re-aimed index, 128       fps 52     worst 47-52                 20.3%
+//     re-aimed index, 512       fps 55     worst 52-54                 17.5%
+//     re-aimed index, 1024      fps 54.5   worst 48-54                 18.2%
+//
+// Neither half alone moves the frame; together they do, and 1024 buys
+// nothing over 512, so 512 is the knee. The method and the other boards'
+// tables are in #77.
+#define MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE   (512)
+
+// The WebAssembly engine's run thread (native/moy_wasm): its stack size and
+// whether it lives in PSRAM. PSRAM, measured 2026-09-25 on the Guition S3 with
+// the hello module: an internal stack costs a run its whole size in internal
+// SRAM (17 KB with this one) against about 1 KB for a PSRAM one, and the two
+// ran step(400000) in 276 vs 277 ms. With WiFi and BLE up this board has no
+// 17 KB to give. 16 KB is eight times the hello module's high-water mark
+// (2.2 KB); a stack overflow traps cleanly (the AOT stack check), it does not
+// corrupt.
+#define MOY_WASM_STACK_BYTES                (16 * 1024)
+#define MOY_WASM_STACK_PSRAM                (1)
+
+// The console's stdin ring, grown into PSRAM by native/moy_serial on the first
+// `recv`: twice the [serial] window, so the window the host sends on an ack
+// lands while the store writes the last one instead of stalling the USB
+// endpoint at the port's 260 bytes. The module's header says which boards may.
+#define MOY_SERIAL_RING_BYTES               (32768)

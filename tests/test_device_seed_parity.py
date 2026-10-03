@@ -178,6 +178,31 @@ def test_embedded_images_match_or_both_absent():
             assert "images" not in cart, folder + " has no images/ but embeds one"
 
 
+def test_embedded_cover_matches_cover_png_or_both_absent(tmp_path):
+    """A seed's cover.png (SPEC.md 3.6) rides the roster as base64 -- the one
+    binary file a seed carries -- and seed_builtins writes the same BYTES
+    back, so a board shows the cover the source folder holds."""
+    import base64
+    from runtime import moy_carts
+    carts = _carts_by_title()
+    covered = 0
+    for title, cart in carts.items():
+        folder = TITLE_TO_FOLDER[title]
+        path = SYSTEM_CARTS / (folder + ".moy") / "cover.png"
+        if path.exists():
+            covered += 1
+            assert base64.b64decode(cart.get("cover", "")) == path.read_bytes(), \
+                "embedded cover drifted from " + folder + "/cover.png"
+            root = str(tmp_path / folder)
+            moy_carts.ensure_dirs(root)
+            moy_carts.seed_builtins([cart], root)
+            seeded = moy_carts.scan(root)[0]
+            assert moy_carts.load_cover(seeded["path"]) == path.read_bytes()
+        else:
+            assert "cover" not in cart, folder + " has no cover.png but embeds one"
+    assert covered >= 13, "the seed covers went missing"
+
+
 def test_embedded_edit_and_cfg_match_manifest():
     carts = _carts_by_title()
     for title, cart in carts.items():

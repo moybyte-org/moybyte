@@ -1,3 +1,12 @@
+# Map (grep -n a name to jump there):
+#   -- the T-Deck keyboard, in ONE place  the matrix layout and its key codes
+#   decode_raw                        five raw matrix bytes -> (buttons, last key)
+#   -- multi-source input             every producer owns a source; the state is the merge
+#   InputSource                       one producer's held set and key
+#   InputState                        the merged input every surface reads
+#   InputState.button_masks           (held, pressed) as bitmasks in one call
+#   TDeckKeyboard                     the T-Deck's I2C keyboard: ASCII and raw-matrix modes
+#   InputPoller                       the input poller thread, paced by the frame
 BUTTONS = (
     "up",
     "down",
@@ -298,11 +307,13 @@ class InputState:
         computed, and begin_frame is its only caller. In place: no per-frame set
         allocation on top of the edge math below."""
         h = self._held
-        h.clear()
+        if h:
+            h.clear()
         for s in self._srcs:
             sh = s._held
             if sh:
-                h.update(sh)
+                for n in sh:           # add(), not update(): update() builds
+                    h.add(n)           # an iterator on the heap
         if self._multi:
             self._merge_players()          # split out: see _player_edges
 
@@ -337,9 +348,26 @@ class InputState:
     def begin_frame(self):
         self._merge()
         held = self._held
-        self._pressed = held - self._last
-        self._released = self._last - held
-        self._last = set(held)
+        last = self._last
+        # The edge sets are rewritten IN PLACE: this runs every loop frame,
+        # and set arithmetic here would be three new sets a frame for the
+        # collector to find.
+        pressed = self._pressed
+        released = self._released
+        if pressed:
+            pressed.clear()
+        if released:
+            released.clear()
+        for n in held:
+            if n not in last:
+                pressed.add(n)
+        for n in last:
+            if n not in held:
+                released.add(n)
+        if pressed or released:
+            last.clear()
+            for n in held:
+                last.add(n)
         self._taken = False
         if self._multi:
             self._player_edges()
@@ -438,7 +466,7 @@ class InputState:
     _mask_order = None      # the tuple _mask_bit was built from (identity key)
     _mask_bit = None
 
-    def button_masks(self, order, player=None):
+    def button_masks(self, order, player=None, out=None):
         """(held, pressed) as bitmasks over `order`, in ONE call -- moycore's
         per-frame snapshot needs exactly these two integers and was building
         them with sixteen held/pressed calls (~6.35us each here).
@@ -462,29 +490,37 @@ class InputState:
         wrong order -- no crash, no test, no frame hash. None means the union
         (every source, every player), which is what moycore's snapshot asks
         for and what it has always got: the two integers it reads are
-        unchanged."""
+        unchanged.
+
+        `out`, a caller-owned two-slot list, is filled and returned instead
+        of a new tuple: moycore asks every frame."""
         if self._mask_order is not order:
             self._mask_order = order
             self._mask_bit = {n: 1 << i for i, n in enumerate(order)}
+        h = p = 0
         if player is None or not self._multi:
             if player is not None and player != self._solo:
-                return 0, 0
-            held = self._held
-            pressed = self._pressed
+                held = pressed = ()
+            else:
+                held = self._held
+                pressed = self._pressed
         else:
             held = self._p_held.get(player)
             pressed = self._p_pressed.get(player) if self._p_pressed else None
             if held is None:
-                return 0, 0
-            if pressed is None:
+                held = pressed = ()
+            elif pressed is None:
                 pressed = ()
-        h = p = 0
         bit = self._mask_bit
         for n in held:
             h |= bit.get(n, 0)
         for n in pressed:
             p |= bit.get(n, 0)
-        return h, p
+        if out is None:
+            return h, p
+        out[0] = h
+        out[1] = p
+        return out
 
     # -- the two read views ------------------------------------------------
     #
@@ -734,12 +770,27 @@ class TDeckKeyboard:
                 break
         self._held_until_ms = 0
 
+    _rx1 = None        # the driver's read buffers, made on first use: a read
+    _rx5 = None        # INTO one allocates nothing, where readfrom() hands back
+                       # a new bytes object every frame
+    _raw_key = None    # the matrix bytes _raw_last was decoded from
+
     def _timed_read(self, nbytes):
-        """The one place a keyboard I2C transaction happens: readfrom + #69 latency
-        stats (a 5-byte read at 400kHz is ~135us nominal; anything in the ms range
-        is the C3 clock-stretching or bus contention -- exactly what I2CSTAT sizes)."""
+        """The one place a keyboard I2C transaction happens: readfrom_into + #69
+        latency stats (a 5-byte read at 400kHz is ~135us nominal; anything in the
+        ms range is the C3 clock-stretching or bus contention -- exactly what
+        I2CSTAT sizes). Returns the driver's own buffer, valid until the next
+        read."""
+        if nbytes == 5:
+            data = self._rx5
+            if data is None:
+                data = self._rx5 = bytearray(5)
+        else:
+            data = self._rx1
+            if data is None:
+                data = self._rx1 = bytearray(1)
         t0 = _ticks_us()
-        data = self._i2c.readfrom(self.KEYBOARD_ADDR, nbytes)
+        self._i2c.readfrom_into(self.KEYBOARD_ADDR, data)
         el = _ticks_diff(_ticks_us(), t0)
         self.stat_n += 1
         if el > self.stat_max_us:
@@ -769,8 +820,7 @@ class TDeckKeyboard:
         try:
             data = self._timed_read(1)
             self._err_run = 0
-            if data:
-                return data[0]
+            return data[0]
         except Exception as exc:
             self._read_error(exc, "read")
         return 0
@@ -798,10 +848,8 @@ class TDeckKeyboard:
             # consecutive-failure limit ends the session (see _read_error).
             self._read_error(exc, "raw read")
             return self._raw_last
-        if len(data) < 5:
-            self.raw_mode = False
-            self._raw_last = ((), 0)
-            return self._raw_last
+        if data == self._raw_key:
+            return self._raw_last           # the matrix did not move
         if data[1] == 0 and data[2] == 0 and data[3] == 0 and data[4] == 0:
             key = data[0]
             buttons = self._buttons_for_key(key) if key > 0x20 else ()
@@ -816,6 +864,7 @@ class TDeckKeyboard:
                 return (buttons, key)
 
         self._raw_last = decode_raw(data)   # held across a capped stall (see above)
+        self._raw_key = bytes(data)
         return self._raw_last
 
     def _buttons_for_key(self, key):
@@ -872,16 +921,25 @@ class InputPoller:
     The I2CSTAT counters keep updating from this thread, so stalls stay
     measurable -- smooth frames + nonzero I2CSTAT maxima is exactly the
     signature that the isolation works. _poll_once is the whole per-pass body,
-    factored out so host tests drive it without a thread."""
+    factored out so host tests drive it without a thread.
 
-    POLL_MS = 12       # cadence (~80Hz; each pass = 1 kbd read + 1 touch read)
+    PACING: one pass per frame, gated by the frame loop, not a timer. The
+    thread blocks on a lock that kick() releases once a frame; that is ONE
+    GIL handoff per pass. It used to sleep 12ms between passes, and on this
+    port a sleep re-takes the GIL every FreeRTOS tick to service pending
+    callbacks -- a dozen handoffs per pass, each granted only when the frame
+    loop let go of the GIL, which a free-running cart whose frame never
+    blocks does almost never. Measured 2026-09-23 on glass: 59 passes/s at
+    the desk, 30 under a paced cart, 2-39 under free-running Brick Siege,
+    zero I2C timeouts -- a key read twice a second and held for the seconds
+    between, and lockstep netplay shipping that stale mask."""
 
-    def __init__(self, keyboard, touch, period_ms=None):
+    def __init__(self, keyboard, touch):
         self.kbd = keyboard
         self.touch = touch
-        self.period = self.POLL_MS if period_ms is None else period_ms
         self.alive = False
         self._stop = False
+        self._gate = None              # the per-frame lock kick() releases
         # Keyboard staging: which mode the LAST pass saw, plus the two state
         # shapes that mode needs (only one is ever live at a time, but keeping
         # both named -- instead of one mixed 3-tuple -- makes consume() read
@@ -899,6 +957,9 @@ class InputPoller:
         the synchronous path (this must never take input down)."""
         try:
             import _thread
+            gate = _thread.allocate_lock()
+            gate.acquire()                 # held: the thread waits for the first kick
+            self._gate = gate
             _thread.start_new_thread(self._run, ())
             self.alive = True
             return True
@@ -909,13 +970,24 @@ class InputPoller:
     # -- poller thread side ---------------------------------------------
     def _run(self):
         self.alive = True
+        gate = self._gate
         while not self._stop:
+            gate.acquire()                 # blocks with the GIL released, once
+            if self._stop:
+                break
             try:
                 self._poll_once()
             except Exception:   # noqa: BLE001 -- one bad pass must not kill input
                 pass
-            _sleep_ms(self.period)
         self.alive = False
+
+    def kick(self):
+        """Once per frame, before consume(): let the thread make one pass.
+        Releasing readies it; the caller's sleep_ms(0) right after is the
+        port's GIL release + taskYIELD, which is what actually runs it."""
+        g = self._gate
+        if g is not None and g.locked():
+            g.release()
 
     def _poll_once(self):
         """One full bus pass: pending kbd mode switch, one keyboard read, one
@@ -924,13 +996,14 @@ class InputPoller:
         kbd = self.kbd
         if kbd is not None and kbd.available:
             kbd.apply_pending_mode()
-            buttons, key = kbd._read_stage()
+            staged = kbd._read_stage()
             self._kbd_is_raw = kbd.raw_mode
             if self._kbd_is_raw:
-                self._raw_stage = (buttons, key)
+                self._raw_stage = staged     # the driver's own (buttons, key)
             else:
-                self._ascii_buttons = buttons
+                self._ascii_buttons = staged[0]
                 # ASCII bytes are one-shot events: queue each one (bounded).
+                key = staged[1]
                 if key and len(self._keyq) < 16:
                     self._keyq.append(key)
         t = self.touch
@@ -943,8 +1016,7 @@ class InputPoller:
             # traffic ~10x. Touch.should_read() owns the decision -- INT edge
             # pending, touch in progress, safety heartbeat, or gate-not-engaged
             # all read; a fake/legacy touch object without the method always reads.
-            sr = getattr(t, "should_read", None)
-            if sr is None or sr():
+            if not hasattr(t, "should_read") or t.should_read():
                 r = t.read_raw()
                 if r is False:
                     self._tup = True
@@ -956,10 +1028,9 @@ class InputPoller:
         """Apply the staged keyboard state to InputState -- the frame loop's
         replacement for keyboard.poll(). Cheap and I2C-free."""
         if self._kbd_is_raw:
-            buttons, key = self._raw_stage
+            self.kbd._apply(self._raw_stage)
         else:
-            buttons, key = self._ascii_buttons, self._dequeue_key()
-        self.kbd._apply((buttons, key))
+            self.kbd._apply((self._ascii_buttons, self._dequeue_key()))
 
     def _dequeue_key(self):
         """Pop the next queued ASCII byte for delivery this frame -- unless
@@ -993,11 +1064,12 @@ class InputPoller:
 
     def stop(self):
         self._stop = True
+        self.kick()                        # wake the thread so it sees the flag
 
 
 # Clock shims: ONE body, runtime/ticks.py, re-exported by the device tier's
 # leaf module (this file carried its own copy until 2026-08-18).
 try:
-    from device_util import _sleep_ms, _ticks_ms, _ticks_diff, _ticks_us
+    from device_util import _ticks_ms, _ticks_diff, _ticks_us
 except ImportError:  # host, loaded by path outside pytest's device finder
-    from runtime.ticks import _sleep_ms, _ticks_ms, _ticks_diff, _ticks_us
+    from runtime.ticks import _ticks_ms, _ticks_diff, _ticks_us

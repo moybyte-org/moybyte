@@ -58,8 +58,8 @@ Lua twin reports over serial too: both carts write a fixed PMEM layout the tool
 reads live via `moycore.pmem_image`, so `--json`/`--diff` speak one format for
 both twins; `tests/test_bench_pmem_report.py` locks the three layout copies
 together), `tools/p4_bench.py` (the console's own UI-panel bench),
-`tools/p4_conformance.py --board p4 --serve` (holds the board — opening the port
-REBOOTS it, which cost a full boot per scene; the suite went 12min → 4m45).
+`tools/p4_conformance.py --board p4 --serve` (holds the board across the suite,
+so the capture helper installs once and the desk stays where it is).
 
 **`tests/test_spec_conformance.py` is that gate** (suite vendored under
 `tests/spec_conformance/`, see its UPSTREAM.md). It replays the spec's recorded

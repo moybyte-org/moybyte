@@ -14,6 +14,8 @@ so these assert host==device behavior."""
 
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -351,104 +353,258 @@ def test_library_shelf_panel_paints_surface(tmp_path):
     assert ws.sys_canvas.pix(px + 2, py + 2) == th["surface"]
 
 
-def _cover_sync(ws, cart, w, h):
-    """Pump the TIME-SLICED cover build to completion -- one slice per call,
+def _cover_sync(ws, cart, div=1):
+    """Pump the TIME-SLICED cover decode to completion -- one slice per call,
     exactly as successive frames would -- and return the finished cache entry
-    (the image, or None for a definitive no-cover miss)."""
-    key = (cart.get("path"), w, h)
+    (the picture, or None for a definitive no-cover miss)."""
+    key = (cart.get("path"), div)
     for _ in range(500):
         ws.covers._built = False           # what frame() resets each frame
-        ws.covers.cover_for(cart, w, h)
+        ws.covers._ms = 0
+        ws.covers.cover_for(cart, div)
         if key in ws.covers._cache:
             return ws.covers._cache[key]
-    raise AssertionError("cover build never finished")
+    raise AssertionError("cover decode never finished")
 
 
-def test_cover_art_contract(tmp_path):
-    """Section 11.4: a cart's images/cover.moyimg is its static Library cover,
-    cover-cropped to the exact card size; carts without one fall back (None ->
-    sprite/glyph). Cached per (path, size)."""
-    ws = _ws(tmp_path, sys_size=(1024, 600))
-    covered = fallback = None
+def _covered_and_bare(ws):
     from runtime import moy_carts
+    covered = fallback = None
     for it in ws.launcher.items:
         if not it.get("path"):
             continue
-        has = moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE)
+        has = moy_carts.load_cover(it["path"])
         if has and covered is None:
             covered = it
         elif not has and fallback is None:
             fallback = it
-    assert covered is not None            # the seed games ship covers now
-    img = _cover_sync(ws, covered, 200, 150)
-    assert img is not None and (img.w, img.h) == (200, 150)
-    assert len(img.pix) == 200 * 150
-    assert max(img.pix) < 64              # valid MOY64 indices only (Section 12)
-    assert img._paint                     # native device + compact web bitmap paths
-    assert ws.covers.cover_for(covered, 200, 150) is img       # memoised
+    return covered, fallback
+
+
+def test_cover_art_contract(tmp_path):
+    """Section 11.4 / SPEC.md 3.6: a cart's cover.png is its Library cover,
+    decoded ONCE into a 128x128 base in the system canvas's 565 byte order;
+    carts without one fall back (None -> icon/glyph). Cached per cart."""
+    from runtime import cover_png, moy_carts
+    ws = _ws(tmp_path, sys_size=(1024, 600))
+    covered, fallback = _covered_and_bare(ws)
+    assert covered is not None            # the seed games ship covers
+    img = _cover_sync(ws, covered)
+    assert img is not None and (img.w, img.h) == (128, 128)
+    order = (cover_png.RGB565_SW if ws.sys_canvas.swapped565
+             else cover_png.RGB565)
+    assert bytes(img.pix) == cover_png.decode(
+        moy_carts.load_cover(covered["path"]), 1, order)
+    assert ws.covers.cover_for(covered) is img       # memoised
     if fallback is not None:
-        assert _cover_sync(ws, fallback, 200, 150) is None  # deterministic fallback
+        assert _cover_sync(ws, fallback) is None   # deterministic fallback
 
 
-def test_cover_builds_are_time_sliced_and_faithful(tmp_path):
-    """#66: decoding one 320x240 cover in one go measured 0.5-1.7s on the
-    T-Deck, so _cover_for runs a RESUMABLE job -- at most one ~8ms slice per
-    frame -- and the finished pixels must equal the one-shot decode + crop."""
-    from runtime import moy_carts
+def test_cover_decodes_are_time_sliced_and_faithful(tmp_path, monkeypatch):
+    """#66: a decode a frame cannot afford runs as a RESUMABLE job, a slice
+    per frame, and the finished pixels equal the one-shot decode."""
+    from runtime import cover_cache, cover_png, moy_carts
     ws = _ws(tmp_path, sys_size=(1024, 600))
-    covered = next(it for it in ws.launcher.items
-                   if it.get("path") and
-                   moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE))
-    other = next(it for it in ws.launcher.items
-                 if it.get("path") and it is not covered)
-    key = (covered["path"], 200, 150)
+    covered, _bare = _covered_and_bare(ws)
+    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", 0)
+    monkeypatch.setattr(cover_cache, "_COVER_ROWS", 8)
+    key = (covered["path"], 1)
     ws.covers._built = False
-    ws.covers.cover_for(covered, 200, 150)
-    # The first ask either finished within its slice or left a job in flight
-    # (with the redraw gate re-armed) -- it never blocks the frame open-ended.
-    assert key in ws.covers._cache or key in ws.covers._jobs
-    if key not in ws.covers._cache:
-        assert ws.covers._deferred
-        # The frame budget is ONE build slice: a second cart's ask this frame
-        # defers without even starting its job.
-        before = dict(ws.covers._jobs)
-        assert ws.covers.cover_for(other, 200, 150) is None
-        assert list(ws.covers._jobs) == list(before)
-    img = _cover_sync(ws, covered, 200, 150)
-    # Reference: the one-shot decode + centered cover-crop (the pre-slicing
-    # implementation, inlined).
-    blob = moy_carts.load_image(covered["path"], moy_carts.COVER_IMAGE)
-    sw, sh, pix = moy_carts.decode_moyimg(blob)
-    w, h = 200, 150
-    cw_ = min(sw, sh * w // h) or 1
-    ch_ = min(sh, sw * h // w) or 1
-    ox, oy = (sw - cw_) // 2, (sh - ch_) // 2
-    want = bytearray(w * h)
-    di = 0
-    for dy in range(h):
-        row = (oy + dy * ch_ // h) * sw + ox
-        for dx in range(w):
-            want[di] = pix[row + dx * cw_ // w]
-            di += 1
-    assert bytes(img.pix) == bytes(want)
+    ws.covers.cover_for(covered)
+    # The first ask left a job in flight with the redraw gate re-armed -- it
+    # never holds the frame open-ended.
+    assert key in ws.covers._jobs and ws.covers._deferred
+    steps = 0
+    while key not in ws.covers._cache:
+        ws.covers._built = False
+        ws.covers._ms = 0
+        ws.covers.cover_for(covered)
+        steps += 1
+    assert steps >= 128 // 8 - 1
+    order = (cover_png.RGB565_SW if ws.sys_canvas.swapped565
+             else cover_png.RGB565)
+    assert bytes(ws.covers._cache[key].pix) == cover_png.decode(
+        moy_carts.load_cover(covered["path"]), 1, order)
 
 
-def test_cover_cache_is_bounded_across_resize_variants(tmp_path):
-    """Repeated Make-window resizes must not retain every derived indexed+RGB
-    cover forever on the P4 heap."""
-    from runtime import cover_cache, moy_carts
+def test_a_relayout_keeps_one_base_per_cover(tmp_path):
+    """No per-size variants (docs/theming_2026-09.md, P8): every layout of
+    every grid draws the same cached base, so a relayout adds nothing -- but
+    the grid's interim HALF, for a card too small for 128."""
     ws = _ws(tmp_path, sys_size=(1024, 600))
-    covered = next(it for it in ws.launcher.items
-                   if it.get("path") and
-                   moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE))
-    first = _cover_sync(ws, covered, 120, 90)
-    assert first is not None
+    covered, _bare = _covered_and_bare(ws)
+    first = _cover_sync(ws, covered)
+    for scale in (2, 1, 3, 1):              # each one a relayout of both grids
+        ws.look.set_font_scale(scale, persist=False)
+        ws._dirty = True
+        ws.frame(1 / 30)
+        assert _cover_sync(ws, covered) is first
+    divs = sorted(k[1] for k in ws.covers._cache if k[0] == covered["path"])
+    assert divs in ([1], [1, 2])
 
-    for i in range(80):
-        _cover_sync(ws, covered, 120 + i, 90 + i)
-    assert len(ws.covers._cache) <= cover_cache._COVER_CACHE_MAX_ENTRIES
-    assert ws.covers._pixels <= cover_cache._COVER_CACHE_MAX_PIXELS
-    assert len(ws.covers._order) == len(ws.covers._cache)
+
+def test_a_cover_takes_the_next_scale_up_when_it_overflows_by_a_tenth_at_most():
+    """The one rule that picks a cover's scale (`_cover_scale`): the largest
+    whole number that fits the art slot, or the next one up when that
+    overflows the slot by at most 10% each way. The Guition P4's 258x245 card
+    takes 2x (11 px over); the Waveshare's 206x173 stays at 1x (2x would be
+    48% over)."""
+    from runtime.launcher_layer import _cover_scale
+    assert _cover_scale(128, 258, 245) == 2
+    assert _cover_scale(128, 206, 173) == 1
+    assert _cover_scale(128, 256, 256) == 2
+    assert _cover_scale(128, 233, 233) == 2      # 256 is 9.9% over 233
+    assert _cover_scale(128, 232, 400) == 1      # ... and 10.3% over 232
+    assert _cover_scale(128, 400, 232) == 1
+    assert _cover_scale(128, 120, 120) == 1      # 1x near-fits too
+    assert _cover_scale(128, 116, 300) == 0
+    assert _cover_scale(64, 97, 75) == 1
+    assert _cover_scale(64, 85, 49) == 0
+    assert _cover_scale(128, 0, 0) == 0
+    assert _cover_scale(128, 300, -4) == 0
+
+
+def _drawn_cover(slot, outer, art_h=None):
+    """A 128x128 picture of distinct words drawn by the shelf's cover draw
+    into `slot` -- scaled for a card whose unselected slot is `art_h` tall
+    (None: the slot's own height) -- on a 320x300 canvas whose cards clip to
+    `outer`: the canvas's words, the picture's, and the clip it was left
+    with."""
+    from runtime import host_canvas
+    from runtime.cover_cache import _CoverImage
+    from runtime.launcher_layer import _draw_cover
+    cv = host_canvas.make_canvas(320, 300)
+    cv.cls(3)
+    words = [((i * 2654435761) >> 9) & 0xFFFF for i in range(128 * 128)]
+    pix = bytearray()
+    for w_ in words:
+        pix += bytes((w_ & 255, w_ >> 8))
+    cv.clip(*outer)
+    _draw_cover(cv, _CoverImage(128, 128, pix), *slot,
+                slot[3] if art_h is None else art_h, outer)
+    left = (cv._clip_x0, cv._clip_y0, cv._clip_x1, cv._clip_y1)
+    cv.clip()
+    cv.flush_batch()
+    return list(memoryview(cv._buf).cast("H")), words, left
+
+
+def test_a_near_fit_cover_is_cropped_to_its_slot_centred():
+    """2x of a 128 cover in the Guition P4's 258x245 slot is 256x256: one
+    column of slot either side, 5 rows cropped off the top and 6 off the
+    bottom, nothing drawn outside the slot -- and the cards' clip is what the
+    draw leaves behind."""
+    sx, sy, sw, sh = 20, 30, 258, 245
+    got, words, left = _drawn_cover((sx, sy, sw, sh), (10, 25, 290, 270))
+    bg = got[0]
+    ox, oy = sx + 1, sy - 5
+    for y in range(300):
+        for x in range(320):
+            if sx <= x < sx + sw and sy <= y < sy + sh and ox <= x < ox + 256:
+                want = words[((y - oy) // 2) * 128 + (x - ox) // 2]
+            else:
+                want = bg
+            assert got[y * 320 + x] == want, (x, y)
+    assert left == (10, 25, 300, 295)
+
+
+def test_a_selected_cards_shorter_slot_crops_its_cover_centred():
+    """The Guition P4's selected card: its PLAY/CHANGE row shortens the
+    258x245 slot to 258x217, and the cover keeps the 2x its unselected slot
+    takes, 39 rows cropped, 19 off the top and 20 off the bottom."""
+    sx, sy, sw, sh = 20, 30, 258, 217
+    got, words, left = _drawn_cover((sx, sy, sw, sh), (10, 25, 290, 270), 245)
+    bg = got[0]
+    ox, oy = sx + 1, sy - 19
+    for y in range(300):
+        for x in range(320):
+            if sx <= x < sx + sw and sy <= y < sy + sh and ox <= x < ox + 256:
+                want = words[((y - oy) // 2) * 128 + (x - ox) // 2]
+            else:
+                want = bg
+            assert got[y * 320 + x] == want, (x, y)
+    assert left == (10, 25, 300, 295)
+
+
+BOARD_SHELVES = {
+    "tdeck": dict(sys_size=None, font_scale=1, windowed=False),
+    "guition_s3": dict(sys_size=(480, 320), font_scale=1, windowed=False,
+                       panel_diagonal_in=3.5),
+    "p4": dict(sys_size=(1024, 600), font_scale=1, windowed=True,
+               panel_diagonal_in=7.0),
+    "guition_p4": dict(sys_size=(1280, 800), font_scale=1, windowed=True,
+                       panel_diagonal_in=10.1),
+}
+
+
+class _BlitLog:
+    """The canvas a card draws on, logging each blit565's (w, y, scale)."""
+
+    def __init__(self, cv):
+        self._cv = cv
+        self.blits = []
+
+    def blit565(self, buf, w, h, x, y, scale=1):
+        self.blits.append((w, y, scale))
+        self._cv.blit565(buf, w, h, x, y, scale)
+
+    def __getattr__(self, name):
+        return getattr(self._cv, name)
+
+
+@pytest.mark.parametrize("board", sorted(BOARD_SHELVES))
+def test_selecting_a_card_never_changes_its_covers_scale(tmp_path, board):
+    """A cover that shrank on selection would read as a glitch: on every
+    board a card's cover is the same decode at the same scale selected or
+    not (the HALF on the S3s too), and the selected card's shorter slot only
+    crops it. Its prefetch spec does not move with the selection either."""
+    ws = _ws(tmp_path, **BOARD_SHELVES[board])
+    if BOARD_SHELVES[board]["windowed"]:
+        ws.open_library()
+    ws.frame(1 / 30)
+    la = ws.launcher
+    covered, _bare = _covered_and_bare(ws)
+    i = la.items.index(covered)
+    _cover_sync(ws, covered, 1)
+    _cover_sync(ws, covered, 2)
+    specs = []
+    drawn = []
+    for selected in (False, True):
+        la.sel = i if selected else (i + 1) % len(la.items)
+        la._scroll_to_sel()
+        rect = dict(la._visible())[i]
+        specs.append([d for c, d in la.cover_specs() if c is covered])
+        log = _BlitLog(ws.sys_canvas)
+        la._card_clip = None
+        la._draw_cart_card(log, covered, rect, selected, None)
+        assert len(log.blits) == 1, (board, selected)
+        drawn.append(log.blits[0])
+    assert specs[0] == specs[1] != []
+    (w0, _y0, s0), (w1, _y1, s1) = drawn
+    assert (w0, s0) == (w1, s1)
+    if board == "guition_p4":
+        assert (w0, s0) == (128, 2)
+        if la.action_rects() is not None:
+            assert drawn[1][1] < drawn[0][1]     # cropped, centred higher
+
+
+def test_a_cover_its_card_clip_cuts_stays_inside_both():
+    """A card scrolled half out of the shelf: the crop is the slot inside the
+    cards' clip, so the cover never draws past the shelf's edge."""
+    got, _words, left = _drawn_cover((20, 30, 258, 245), (10, 25, 100, 270))
+    bg = got[0]
+    assert all(got[y * 320 + x] == bg for y in range(300) for x in range(110, 320))
+    assert got[40 * 320 + 60] != bg
+    assert left == (10, 25, 110, 295)
+
+
+def test_a_cover_that_fits_draws_centred_and_leaves_the_clip_alone():
+    """The Waveshare's 206x173 slot takes 1x: the cover centred, the clip
+    never touched."""
+    got, words, left = _drawn_cover((20, 30, 206, 173), (10, 25, 290, 270))
+    ox, oy = 20 + (206 - 128) // 2, 30 + (173 - 128) // 2
+    assert all(got[(oy + y) * 320 + ox + x] == words[y * 128 + x]
+               for y in range(128) for x in range(128))
+    assert left == (10, 25, 300, 295)
 
 
 def test_home_draw_includes_action_row_desktop(tmp_path):

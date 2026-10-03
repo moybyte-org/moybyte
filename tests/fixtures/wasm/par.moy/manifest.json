@@ -1,0 +1,8 @@
+{
+  "format": "moy-1",
+  "title": "Par Wasm",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 4,
+  "fps": "free"
+}

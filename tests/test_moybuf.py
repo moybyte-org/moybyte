@@ -1,4 +1,4 @@
-"""#186 moy_buf: cover payloads (parsed runs, card bitmaps, bakes) move OFF
+"""#186 moy_buf: cover payloads (cover files, decoded pictures, bakes) move OFF
 the MP gc heap on device, and every eviction path must FREE them -- while
 never freeing a payload an in-flight _CoverJob still reads (leak beats
 use-after-free). The host has no moy_alloc, so these tests install a
@@ -37,15 +37,12 @@ class _Tracker:
         self.freed += 1
 
 
-def _cover_text(w, h, value):
-    return moy_carts.encode_moyimg(w, h, bytes([value]) * (w * h))
-
-
 def _mk_cart(tmp_path, name="Covered", value=5):
+    from ws_helpers import cover_bytes
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     cart = moy_carts.create(name, root, src="def _draw():\n    pass\n")
-    moy_carts.save_image(cart, "cover", _cover_text(64, 48, value))
+    moy_carts.save_cover(cart, cover_bytes(value))
     return cart
 
 
@@ -57,11 +54,11 @@ def _tracked_ws(tmp_path, monkeypatch):
     return ws, tr
 
 
-def _land(ws, cart, w, h, frames=300):
+def _land(ws, cart, div=1, frames=300):
     for _ in range(frames):
         ws.covers._built = False          # frame() resets these once per frame
         ws.covers._ms = 0
-        img = ws.covers.cover_for(cart, w, h)
+        img = ws.covers.cover_for(cart, div)
         if img is not None:
             return img
     raise AssertionError("cover never landed")
@@ -70,19 +67,19 @@ def _land(ws, cart, w, h, frames=300):
 def test_cover_payloads_live_off_heap(tmp_path, monkeypatch):
     cart = _mk_cart(tmp_path)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
-    img = _land(ws, cart, 40, 30)
-    assert isinstance(img.pix, memoryview)               # the card bitmap
-    runs = ws.covers._runs_get(cart["path"])
-    assert runs is not None and isinstance(runs[2], memoryview)  # the blob
-    assert id(img.pix) in tr.live and id(runs[2]) in tr.live
+    img = _land(ws, cart)
+    assert isinstance(img.pix, memoryview)               # the picture
+    src = ws.covers._src_get(cart["path"])
+    assert src is not None and isinstance(src, memoryview)  # the file
+    assert id(img.pix) in tr.live and id(src) in tr.live
 
 
 def test_rescan_frees_every_payload(tmp_path, monkeypatch):
     a = _mk_cart(tmp_path, "CoverA", 5)
     b = _mk_cart(tmp_path, "CoverB", 9)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
-    _land(ws, a, 40, 30)
-    _land(ws, b, 40, 30)
+    _land(ws, a)
+    _land(ws, b)
     assert tr.live                                       # payloads are warm
     ws.carts.apply(list(ws.carts.all))                 # the store re-scan
     assert tr.live == {}                                 # ...frees ALL of it
@@ -93,34 +90,37 @@ def test_cover_lru_eviction_frees_the_old_card(tmp_path, monkeypatch):
     cart = _mk_cart(tmp_path)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
     monkeypatch.setattr(cover_cache, "_COVER_CACHE_MAX_ENTRIES", 1)
-    img1 = _land(ws, cart, 40, 30)
+    img1 = _land(ws, cart)
     freed_before = tr.freed
-    _land(ws, cart, 20, 15)              # second size evicts the first card
+    _land(ws, cart, 2)                   # the second size evicts the first
     assert tr.freed > freed_before
     assert img1.pix is None              # nulled: a stale draw raises, loudly
 
 
-def test_runs_eviction_frees_unless_a_job_reads_it(tmp_path, monkeypatch):
+def test_file_eviction_frees_unless_a_job_reads_it(tmp_path, monkeypatch):
     from runtime import cover_cache
     a = _mk_cart(tmp_path, "CoverA", 5)
     b = _mk_cart(tmp_path, "CoverB", 9)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
-    _land(ws, a, 40, 30)
-    blob_a = ws.covers._runs_get(a["path"])[2]
-    # Shrink the byte cap so the next put evicts cart A's runs entry.
-    monkeypatch.setattr(cover_cache, "_COVER_RUNS_MAX_BYTES", 1)
+    _land(ws, a)
+    blob_a = ws.covers._src_get(a["path"])
+    # Shrink the byte cap so the next put evicts cart A's file.
+    monkeypatch.setattr(cover_cache, "_COVER_SRC_MAX_BYTES", 1)
 
-    class _Job:                          # an in-flight decode holding the blob
-        packed = blob_a
+    class _Job:                          # an in-flight decode holding the file
+        src = blob_a
         pix = None
+        done = True
+        img = None
 
-    ws.covers._jobs[("fake", 1, 1)] = _Job()
-    _land(ws, b, 40, 30)                 # loads + puts B -> evicts A
-    assert ws.covers._runs_get(a["path"]) is None         # evicted from the LRU
+    ws.covers._jobs[("fake", 1)] = _Job()
+    # Store B's file the way a load does: the put evicts A's.
+    ws.covers._src_put(b["path"], tr.take(moy_carts.load_cover(b["path"])))
+    assert ws.covers._src_get(a["path"]) is None          # evicted from the LRU
     assert id(blob_a) in tr.live         # ...but NOT freed: the job reads it
     # With the job gone, the same eviction path frees.
     ws.covers._jobs = {}
-    ws.covers._free_runs(blob_a)
+    ws.covers._free_src(blob_a)
     assert id(blob_a) not in tr.live
 
 

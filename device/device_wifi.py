@@ -7,7 +7,8 @@ off unless something holds it. `Workstation.wifi_hold(tag)` powers it up and
 the last `wifi_release(tag)` powers it down (radio_off), so a console on a shelf
 spends nothing on WiFi. The holders are the web console, the online update
 screen, the Settings WIFI panel, a cart with the "network" permission for the
-length of its run, and the ESP-NOW link for a match. What persists is the
+length of its run, the ESP-NOW link for a match, and the Get Carts app while it
+fetches. What persists is the
 CREDENTIAL: the moy_carts wifi.json store, which autoconnect_wifi() replays when
 a holder needs the link.
 
@@ -43,6 +44,10 @@ class DeviceWifi:
         # the radio up only on first real use (scan/connect), never at boot. Whether WiFi
         # and the display can coexist at all on this RAM budget is an open #38 question.
         self.wlan = None
+        # Whether the driver has been brought up this boot. One-way: radio_off()
+        # stops the radio but the driver keeps its internal-RAM allocation, so a
+        # measurement of the idle desk's internal SRAM has to know.
+        self.driver_up = False
 
     def _ensure_wlan(self):
         """Bring the radio up on demand (never at boot -- see __init__)."""
@@ -51,6 +56,7 @@ class DeviceWifi:
         try:
             import network
             self.wlan = network.WLAN(network.STA_IF)
+            self.driver_up = True
             self.wlan.active(True)
         except Exception as exc:  # noqa: BLE001 -- no radio / no network module -> degrade
             _diag_note("wifi", "WLAN unavailable, offline: %s" % (exc,))

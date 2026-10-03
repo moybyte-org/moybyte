@@ -51,3 +51,35 @@
 // tests/test_moy_image.py pins all five boards, because a board that is missed
 // fails at the moment a kid presses save and nowhere earlier.
 #define MICROPY_PY_DEFLATE_COMPRESS         (1)
+
+// The map-lookup cache, 128 -> 512 slots (384 bytes of .bss) -- the T-Deck's
+// mpconfigboard.h explains the mechanism and the REPR_C half the shared build
+// applies. A/B'd on this board's own glass, 2026-09-21, Brick Siege, diag on,
+// three runs a side:
+//
+//     stock                     fps 47     worst 42-47   mp_map_lookup 13-17%
+//     re-aimed index, 128       fps 48     worst 46-48                 17.3%
+//     re-aimed index, 512       fps 49     worst 46-48                 15.1%
+//
+// A smaller win than the T-Deck's (this board is 8-10% gc_alloc where the
+// T-Deck is 1%, so the lookup is a smaller share of its frame), and the
+// median's step is near this board's run-to-run noise; the tail and the
+// sampled share move the same way, which is what carries it. Tables in #77.
+#define MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE   (512)
+
+// The WebAssembly engine's run thread (native/moy_wasm): its stack size and
+// whether it lives in PSRAM. PSRAM, measured 2026-09-25 on the Guition S3 with
+// the hello module: an internal stack costs a run its whole size in internal
+// SRAM (17 KB with this one) against about 1 KB for a PSRAM one, and the two
+// ran step(400000) in 276 vs 277 ms. With WiFi and BLE up this board has no
+// 17 KB to give. 16 KB is eight times the hello module's high-water mark
+// (2.2 KB); a stack overflow traps cleanly (the AOT stack check), it does not
+// corrupt.
+#define MOY_WASM_STACK_BYTES                (16 * 1024)
+#define MOY_WASM_STACK_PSRAM                (1)
+
+// The console's stdin ring, grown into PSRAM by native/moy_serial on the first
+// `recv`: twice the [serial] window, so the window the host sends on an ack
+// lands while the store writes the last one instead of stalling the USB
+// endpoint at the port's 260 bytes. The module's header says which boards may.
+#define MOY_SERIAL_RING_BYTES               (32768)

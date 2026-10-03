@@ -1,0 +1,88 @@
+-- layer_bottom -- a moy conformance cart. GENERATED; do not edit.
+-- Regenerate with: python3 conformance/build.py
+--
+-- One static frame replaying a recorded verb trace. Compare the frame
+-- your host renders against conformance/golden/layer_bottom.png -- SPEC.md 11
+-- calls conformance pixel-identical, so any difference is a bug in one
+-- of the two implementations and the point is to find out which.
+--
+-- draw_layer past the bottom edge and left of the left: y clamps
+-- to layer - screen, x to 0.
+
+local L1
+
+function _init()
+  L1 = make_layer(240, 320)
+end
+
+function _draw()
+  cls(1)
+  rect(0, 0, 10, 240, 2)
+  rect(20, 0, 10, 240, 3)
+  rect(40, 0, 10, 240, 4)
+  rect(60, 0, 10, 240, 2)
+  rect(80, 0, 10, 240, 3)
+  rect(100, 0, 10, 240, 4)
+  rect(120, 0, 10, 240, 2)
+  rect(140, 0, 10, 240, 3)
+  rect(160, 0, 10, 240, 4)
+  rect(180, 0, 10, 240, 2)
+  rect(200, 0, 10, 240, 3)
+  rect(220, 0, 10, 240, 4)
+  rect(240, 0, 10, 240, 2)
+  rect(260, 0, 10, 240, 3)
+  rect(280, 0, 10, 240, 4)
+  rect(300, 0, 10, 240, 2)
+  rect(0, 5, 320, 4, 5)
+  rect(0, 25, 320, 4, 6)
+  rect(0, 45, 320, 4, 5)
+  rect(0, 65, 320, 4, 6)
+  rect(0, 85, 320, 4, 5)
+  rect(0, 105, 320, 4, 6)
+  rect(0, 125, 320, 4, 5)
+  rect(0, 145, 320, 4, 6)
+  rect(0, 165, 320, 4, 5)
+  rect(0, 185, 320, 4, 6)
+  rect(0, 205, 320, 4, 5)
+  rect(0, 225, 320, 4, 6)
+  L1:cls(0)
+  L1:rect(0, 0, 8, 320, 16)
+  L1:rect(16, 0, 8, 320, 17)
+  L1:rect(32, 0, 8, 320, 18)
+  L1:rect(48, 0, 8, 320, 19)
+  L1:rect(64, 0, 8, 320, 20)
+  L1:rect(80, 0, 8, 320, 21)
+  L1:rect(96, 0, 8, 320, 22)
+  L1:rect(112, 0, 8, 320, 23)
+  L1:rect(128, 0, 8, 320, 24)
+  L1:rect(144, 0, 8, 320, 25)
+  L1:rect(160, 0, 8, 320, 26)
+  L1:rect(176, 0, 8, 320, 27)
+  L1:rect(192, 0, 8, 320, 28)
+  L1:rect(208, 0, 8, 320, 29)
+  L1:rect(224, 0, 8, 320, 30)
+  L1:rect(0, 12, 240, 2, 48)
+  L1:rect(0, 28, 240, 2, 49)
+  L1:rect(0, 44, 240, 2, 50)
+  L1:rect(0, 60, 240, 2, 51)
+  L1:rect(0, 76, 240, 2, 52)
+  L1:rect(0, 92, 240, 2, 53)
+  L1:rect(0, 108, 240, 2, 54)
+  L1:rect(0, 124, 240, 2, 55)
+  L1:rect(0, 140, 240, 2, 56)
+  L1:rect(0, 156, 240, 2, 57)
+  L1:rect(0, 172, 240, 2, 58)
+  L1:rect(0, 188, 240, 2, 59)
+  L1:rect(0, 204, 240, 2, 60)
+  L1:rect(0, 220, 240, 2, 61)
+  L1:rect(0, 236, 240, 2, 62)
+  L1:rect(0, 252, 240, 2, 63)
+  L1:rect(0, 268, 240, 2, 48)
+  L1:rect(0, 284, 240, 2, 49)
+  L1:rect(0, 300, 240, 2, 50)
+  L1:rect(0, 316, 240, 2, 51)
+  L1:rectb(0, 0, 240, 320, 8)
+  L1:line(0, 0, 239, 319, 7)
+  L1:print("240X320", 4, 4, 7)
+  draw_layer(L1, -44, 400)
+end

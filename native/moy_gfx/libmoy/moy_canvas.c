@@ -674,29 +674,29 @@ float moy_rnd(moy_console *con, float n)
  * it composites a finished buffer rather than drawing into one, which is the
  * same reason cls ignores them.
  *
- * The clamp is what makes a layer usable as a scrolling world without the cart
- * doing bounds arithmetic: a window that runs off the edge repeats the edge
- * column or row instead of reading outside the buffer. A host that wants the
- * other behaviour clamps its own camera before calling. */
+ * Each axis of the camera is clamped into [0, max(0, layer - screen)], so the
+ * window never leaves the layer: a scrolling world stops at its own edge
+ * without the cart doing bounds arithmetic. Where the layer is smaller than
+ * the screen the camera on that axis is 0 and the screen beyond the layer is
+ * not written. */
+static int moy_window_axis(int cam, int span)
+{
+    if (cam < 0 || span <= 0) return 0;
+    return cam > span ? span : cam;
+}
+
 void moy_blit_window(moy_canvas *dst, const moy_canvas *src, int cam_x, int cam_y)
 {
-    int y;
+    int w, h, y;
     if (!dst || !src || !dst->pix || !src->pix) return;
-    if (src->w <= 0 || src->h <= 0) return;
-    for (y = 0; y < dst->h; y++) {
-        int sy = cam_y + y;
-        int x;
-        const moy_pixel *srow;
-        moy_pixel *drow;
-        if (sy < 0) sy = 0;
-        if (sy >= src->h) sy = src->h - 1;
-        srow = src->pix + (size_t)sy * (size_t)src->w;
-        drow = dst->pix + (size_t)y * (size_t)dst->w;
-        for (x = 0; x < dst->w; x++) {
-            int sx = cam_x + x;
-            if (sx < 0) sx = 0;
-            if (sx >= src->w) sx = src->w - 1;
-            drow[x] = srow[sx];
-        }
+    if (src->w <= 0 || src->h <= 0 || dst->w <= 0 || dst->h <= 0) return;
+    cam_x = moy_window_axis(cam_x, src->w - dst->w);
+    cam_y = moy_window_axis(cam_y, src->h - dst->h);
+    w = src->w - cam_x < dst->w ? src->w - cam_x : dst->w;
+    h = src->h - cam_y < dst->h ? src->h - cam_y : dst->h;
+    for (y = 0; y < h; y++) {
+        memcpy(dst->pix + (size_t)y * (size_t)dst->w,
+               src->pix + (size_t)(cam_y + y) * (size_t)src->w + (size_t)cam_x,
+               (size_t)w * sizeof(moy_pixel));
     }
 }

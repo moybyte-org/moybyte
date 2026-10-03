@@ -104,6 +104,24 @@ def test_sprite_sheet_tiles_and_hex_roundtrip():
     assert img.pix[2 * 8 + 1] == 9          # local (1,2)
 
 
+def test_sheet_hex_stops_at_the_last_painted_row():
+    """#154: a store write is a floor plus the PAYLOAD, so the blob carries the
+    painted rows and stops. A short blob is the format's own case -- from_hex
+    lands it in the top rows with tile ids unchanged -- so the round trip is
+    exact and a sheet with nothing on it serializes to nothing at all."""
+    sh = SpriteSheet(cols=4, rows=4, spec=False)        # 32x32
+    assert sh.to_hex() == ""                            # blank: no rows, no file
+    sh.pset(0, 10, 3)                                   # last ink on pixel row 10
+    blob = sh.to_hex()
+    assert len(blob.split("\n")) == 11                  # rows 0..10, not 32
+    back = SpriteSheet.from_hex(blob, cols=4, rows=4, spec=False)
+    assert back.pix == sh.pix
+    sh.pset(0, 31, 4)                                   # ink on the LAST row
+    assert len(sh.to_hex().split("\n")) == 32
+    assert SpriteSheet.from_hex(sh.to_hex(), cols=4, rows=4,
+                                spec=False).pix == sh.pix
+
+
 # -- tilemap (#32) ---------------------------------------------------------
 
 def test_tilemap_mget_mset_empty_and_roundtrip():

@@ -6,20 +6,34 @@
 #  - clang has a wasm32 backend but Ubuntu ships no `wasm-ld`; rust-lld (from the
 #    rustup toolchain) links wasm fine with `-flavor wasm`, and needs
 #    LD_LIBRARY_PATH pointing at the toolchain's lib dir to find its libLLVM.
-#  - `wamrc` ships PREBUILT for x86-64 in WAMR's GitHub releases -- no LLVM build.
+#  - `wamrc` ships PREBUILT for x86-64 in WAMR's GitHub releases -- no LLVM build
+#    (RISC-V targets; the Xtensa backend is toolchain/build_wamrc_xtensa.sh).
 #  - runtime and wamrc versions MUST match (AOT files carry a format version).
 set -euo pipefail
 
 WAMR_VERSION="${WAMR_VERSION:-2.4.5}"
+# The runtime comes from Moybyte's fork, pinned by hash: the ESP32-S3 / ESP32-P4
+# platform work over the upstream 2.4.5 tag (#158). The console vendors the same
+# commit (native/moy_wasm/wamr_vendor.json; tests/test_wamr_vendor.py pins both).
+WAMR_REPO="${WAMR_REPO:-https://github.com/moybyte-org/wasm-micro-runtime.git}"
+WAMR_BRANCH="${WAMR_BRANCH:-moybyte-2.4.5}"
+WAMR_PIN="${WAMR_PIN:-3e3909d8ce86afe8112f30b70427d3ffc5456f72}"
+# TARGET=p4 (riscv32, the prebuilt wamrc) or TARGET=s3 (xtensa: needs the
+# wamrc toolchain/build_wamrc_xtensa.sh builds -- the prebuilt one has no
+# Xtensa backend, measured 2026-09-24).
+TARGET="${TARGET:-p4}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "${HERE}"
 
-# 1) WAMR source at the pinned tag (runtime for the device build) + prebuilt wamrc
+# 1) WAMR source at the pinned commit (runtime for the device build) + prebuilt wamrc
 if [ ! -d wamr ]; then
-  echo "== cloning WAMR ${WAMR_VERSION}"
-  git clone --depth 1 -b "WAMR-${WAMR_VERSION}" \
-    https://github.com/bytecodealliance/wasm-micro-runtime.git wamr
+  echo "== cloning WAMR ${WAMR_BRANCH} (${WAMR_PIN:0:12})"
+  git clone --depth 1 -b "${WAMR_BRANCH}" "${WAMR_REPO}" wamr
 fi
+[ "$(git -C wamr rev-parse HEAD)" = "${WAMR_PIN}" ] || {
+  echo "wamr/ is at $(git -C wamr rev-parse --short HEAD), not the pinned ${WAMR_PIN:0:12}" >&2
+  exit 1
+}
 if [ ! -x wamrc_bin/wamrc ]; then
   echo "== fetching prebuilt wamrc ${WAMR_VERSION}"
   mkdir -p wamrc_bin
@@ -39,12 +53,27 @@ LD_LIBRARY_PATH="${TC}/lib" "${LLD}" -flavor wasm --no-entry --export-dynamic \
 
 # 3) AOT variants. The P4 needs XIP (it has NO exec-capable heap -- see README);
 #    the plain riscv32 build is kept only to demonstrate that failure mode.
-echo "== compiling AOT (riscv32 ilp32f, plain + xip; and host x86_64)"
-./wamrc_bin/wamrc --target=riscv32 --target-abi=ilp32f --opt-level=3 --size-level=3 \
-  -o core6502_riscv32.aot core6502.wasm
-./wamrc_bin/wamrc --xip --target=riscv32 --target-abi=ilp32f --opt-level=3 --size-level=3 \
-  -o core6502_riscv32_xip.aot core6502.wasm
-./wamrc_bin/wamrc --opt-level=3 --size-level=3 -o core6502_x64.aot core6502.wasm
+#    The S3 gets both too: it HAS exec heap, so plain AOT is the fast path
+#    there and XIP the flash-resident one.
+if [ "${TARGET}" = s3 ]; then
+  WAMRC_X="${WAMRC_X:-wamr/wamr-compiler/build/wamrc}"
+  [ -x "${WAMRC_X}" ] || { echo "no Xtensa wamrc at ${WAMRC_X}: run toolchain/build_wamrc_xtensa.sh"; exit 1; }
+  echo "== compiling AOT (xtensa esp32s3, plain + xip)"
+  "${WAMRC_X}" --target=xtensa --cpu=esp32s3 --opt-level=3 --size-level=0 \
+    -o core6502_xtensa.aot core6502.wasm
+  "${WAMRC_X}" --xip --target=xtensa --cpu=esp32s3 --opt-level=3 --size-level=0 \
+    -o core6502_xtensa_xip.aot core6502.wasm
+  AOT_PLAIN=core6502_xtensa.aot; AOT_XIP=core6502_xtensa_xip.aot
+else
+  echo "== compiling AOT (riscv32 ilp32f, plain + xip; and host x86_64)"
+  ./wamrc_bin/wamrc --target=riscv32 --target-abi=ilp32f --opt-level=3 --size-level=3 \
+    -o core6502_riscv32.aot core6502.wasm
+  ./wamrc_bin/wamrc --xip --target=riscv32 --target-abi=ilp32f --opt-level=3 --size-level=3 \
+    -o core6502_riscv32_xip.aot core6502.wasm
+  ./wamrc_bin/wamrc --opt-level=3 --size-level=3 -o core6502_x64.aot core6502.wasm
+  AOT_PLAIN=core6502_riscv32.aot; AOT_XIP=core6502_riscv32_xip.aot
+fi
+export AOT_PLAIN AOT_XIP
 
 # 4) Headers the device app embeds. NB the XIP blob is NOT embedded for execution
 #    (flash .rodata is on the data bus and faults); it is flashed to the wasmaot
@@ -52,9 +81,10 @@ echo "== compiling AOT (riscv32 ilp32f, plain + xip; and host x86_64)"
 #    its length.
 echo "== generating headers"
 python3 - <<'PY'
+import os
 specs = [("core6502.wasm", "core6502_wasm.h", "core6502_wasm", False),
-         ("core6502_riscv32.aot", "core6502_aot.h", "core6502_aot", False),
-         ("core6502_riscv32_xip.aot", "core6502_aot_xip.h", "core6502_aot_xip", True)]
+         (os.environ["AOT_PLAIN"], "core6502_aot.h", "core6502_aot", False),
+         (os.environ["AOT_XIP"], "core6502_aot_xip.h", "core6502_aot_xip", True)]
 for src, hdr, var, is_const in specs:
     d = open(src, "rb").read()
     rows = ["    " + ", ".join("0x%02x" % b for b in d[i:i + 12]) + ","

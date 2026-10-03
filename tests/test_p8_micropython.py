@@ -42,11 +42,13 @@ The `.p8.png` case is the one worth the seconds: the PNG unfilter is the
 heaviest interpreted loop in the feature, and every filter type is exercised
 because tests/p8_fixture.py rotates through all five.
 
-MEMORY, measured here 2026-08-29: the fixture imports inside MicroPython's
-2MB unix default; a real BBS cart (Celeste, ~8000 lines) does NOT and needs
-about 8MB. The browser gives the VM 16MB (worker.js), so that is headroom
-rather than a limit -- but it is the number a future DEVICE leg has to clear,
-and it is why this suite drives the small fixture rather than a real cart.
+MEMORY: the driver gives the VM HEAP, which the fixture's `.p8.png` form
+needs since the importer also reads the cartridge's label into a cover.png (it
+outgrew the unix port's default with that, moy-spec 1d8c7d2); a real BBS cart
+(Celeste, ~8000 lines) needs about 8MB. The browser gives the VM 16MB
+(worker.js), so that is headroom rather than a limit -- but it is the number a
+future DEVICE leg has to clear, and it is why this suite drives the small
+fixture rather than a real cart.
 """
 
 import json
@@ -62,6 +64,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 SHIM = os.path.join(ROOT, "firmware", "web_runner", "shims", "zlib.py")
+HEAP = "4M"
 
 
 def _stage(tmp_path):
@@ -161,7 +164,7 @@ def _drive(tmp_path, cart, name="run.py"):
             "MicroPython. The browser runs those exact files.")
     with open(os.path.join(str(tmp_path), name), "w", encoding="utf-8") as f:
         f.write(_SHA + DRIVER)
-    r = subprocess.run([exe, name, cart], cwd=str(tmp_path),
+    r = subprocess.run([exe, "-X", "heapsize=" + HEAP, name, cart], cwd=str(tmp_path),
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, "MicroPython refused the import:\n%s\n%s" % (
         r.stdout[-3000:], r.stderr[-3000:])
@@ -177,9 +180,9 @@ def test_the_whole_import_runs_on_micropython(tmp_path, form):
 
     assert got["sections_problem"] is None
     assert got["title"] == "tiny dash"
-    assert got["files"] == ["flags.moyflags", "main.lua", "manifest.json",
-                            "map.moymap", "p8.lua", "sounds.json",
-                            "sprites.moygfx"]
+    assert got["files"] == ["cover.png", "flags.moyflags", "main.lua",
+                            "manifest.json", "map.moymap", "p8.lua",
+                            "sounds.json", "sprites.moygfx"]
     assert got["manifest"]["canvas"] == "128x128"
     assert got["manifest"]["main"] == "main.lua"
     assert got["manifest"]["sources"] == ["p8.lua", "main.lua"]

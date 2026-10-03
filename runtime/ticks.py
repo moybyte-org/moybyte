@@ -42,6 +42,12 @@ def _ticks_diff(a, b):
         return a - b
 
 
+def _since_ms(start):
+    """Milliseconds from tick `start` to now. A cart's clock is this from the
+    Player's `cart_start_ms` stamp, on every tier and every runtime."""
+    return _ticks_diff(_ticks_ms(), start)
+
+
 def _sleep_ms(ms):
     # The trio's sleeping sibling: MicroPython's sleep_ms, host-shimmed the
     # same way (device_boot's pace step, the input poller's period).

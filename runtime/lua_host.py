@@ -3,7 +3,7 @@
 `MoycoreHostRun(ws, ns, src)` runs the cart through `runtime/lua_binding` --
 libmoy's own binding over the same vendored Lua 5.4 the firmware compiles,
 LUA_32BITS and all -- so the host is not a different program from the device.
-Player._start_lua drives it; a Lua error surfaces as a normal Python exception,
+Player._start_runtime drives it; a Lua error surfaces as a normal Python exception,
 so the Player's existing crash-to-code panel needs nothing special.
 
 **lupa is GONE (2026-08-14), and with it `LuaCartRun` and the PRELUDE that
@@ -29,6 +29,7 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 # marshals ints and one string, so they ride int handles plus a Lua prelude),
 # the moy_button bit order, and the two deny lists that decide what gets
 # registered on top of libmoy's table.
+from runtime.ticks import _since_ms
 from runtime.widgets import pointer_state
 from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                              LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
@@ -93,7 +94,8 @@ class MoycoreHostRun:
                                getattr(project, "sheet", None),
                                getattr(project, "tilemap", None),
                                wire=wire, indexed=indexed,
-                               flags=getattr(project, "flags", None))
+                               flags=getattr(project, "flags", None),
+                               cfg=ns.get("_moy_cfg"))
         # The superset, registered on top of libmoy's table before the cart
         # runs -- see the device glue for why this is registration and not a
         # second runtime.
@@ -174,7 +176,7 @@ class MoycoreHostRun:
                 except Exception:  # noqa: BLE001
                     pass
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out)
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms)
         err = self._run.tick(dt, self.draw_next)
         # A LUA cart ends itself the same way a Python one does. libmoy's quit()
         # is a host callback that sets SNAP_QUIT (h_quit), and nothing read it:

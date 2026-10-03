@@ -32,13 +32,21 @@ class FakeAudio:
     engine.render() from an SDL stream instead of just recording.
 
     `tick(dt)` renders a block each frame so render() is exercised on the same
-    schedule the device's per-frame I2S feeder would use."""
+    schedule the device's per-frame I2S feeder would use. The fraction of a
+    frame `dt` leaves over is carried to the next tick, so the blocks add up
+    to the engine's rate exactly.
+
+    `stream` is a compiled cart's `snd` queue while one runs (the host run,
+    `wasm_binding.HostWasmRun`); each block mixes it in after the synth, under
+    the master level, as the boards' speaker mixer does."""
 
     def __init__(self, engine):
         self.engine = engine
         self.calls = []           # [("sfx", n, chan), ("beep", f, d), ...]
         self.rendered = 0         # total PCM frames pulled via tick()
         self.last_pcm = b""       # most recent tick()'s PCM block (drained by the web console)
+        self.stream = None
+        self._carry = 0.0
 
     def sfx(self, n, chan=None):
         self.calls.append(("sfx", int(n), chan))
@@ -70,14 +78,29 @@ class FakeAudio:
         and web backends answer from libmoy, which owns the sequencers there."""
         return self.engine.is_active()
 
+    def block(self, dt):
+        """The PCM `dt` stands for, as bytes of signed 16-bit mono: the synth,
+        then the cart's stream mixed in. b"" when `dt` covers no whole frame."""
+        want = self.engine.rate * max(0.0, dt) + self._carry
+        n = int(want)
+        self._carry = want - n
+        if n <= 0:
+            return b""
+        pcm = self.engine.render(n)
+        if self.stream is not None:
+            buf = bytearray(pcm)
+            self.stream.snd_mix(buf, n, self.engine.rate, self.engine.master)
+            pcm = bytes(buf)
+        self.rendered += n
+        return pcm
+
     def tick(self, dt):
-        n = int(self.engine.rate * max(0.0, dt))
-        if n > 0:
+        pcm = self.block(dt)
+        if pcm:
             # Keep the rendered block (was discarded) so the web console can stream the
             # FINISHED PCM to the browser -- no second synth in JS (audio.py stays the
             # single source of truth). The device/headless paths just ignore last_pcm.
-            self.last_pcm = self.engine.render(n)
-            self.rendered += n
+            self.last_pcm = pcm
 
     def take_pcm(self):
         """Hand off the last tick()'s PCM (signed-16 LE mono bytes) and clear it. The

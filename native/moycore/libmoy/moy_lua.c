@@ -728,7 +728,7 @@ static const luaL_Reg VERBS[] = {
     {"volume", l_volume},
     {"touch", l_touch}, {"key", l_key}, {"keyp", l_keyp},
     {"textmode", l_textmode},
-    /* PROVISIONAL -- SPEC.md 6.1, not part of core 0.3. */
+    /* SPEC.md 6.1, the 3D verbs. */
     {"tri", l_tri}, {"trib", l_trib}, {"sspr", l_sspr}, {"tline", l_tline},
     {NULL, NULL}
 };

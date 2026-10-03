@@ -6,7 +6,7 @@ already do that -- but the four things the extraction put at risk and the one
 bug it fixes:
 
   * **the #186 free order.** Payloads live off the gc heap on device, an
-    in-flight `_CoverJob` aliases both a runs blob and the shared decode
+    in-flight `_CoverJob` aliases both a cover file and the shared decode
     scratch, and the invariant is that jobs are dropped BEFORE anything is
     freed. It used to be two hand-copies (`carts.apply` and the diet release);
     it is one body now, so it gets a perturbation test rather than a comment --
@@ -34,8 +34,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime import cover_cache, moy_carts  # noqa: E402
-from ws_helpers import build_ws  # noqa: E402
+from runtime import cover_cache, cover_png, moy_carts  # noqa: E402
+from ws_helpers import build_ws, cover_bytes  # noqa: E402
 
 
 class _Tracker:
@@ -68,15 +68,11 @@ class _Tracker:
         self.freed += 1
 
 
-def _cover_text(w, h, value):
-    return moy_carts.encode_moyimg(w, h, bytes([value]) * (w * h))
-
-
 def _mk_cart(tmp_path, name="Covered", value=5):
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     cart = moy_carts.create(name, root, src="def _draw():\n    pass\n")
-    moy_carts.save_image(cart, "cover", _cover_text(64, 48, value))
+    moy_carts.save_cover(cart, cover_bytes(value))
     return cart
 
 
@@ -88,11 +84,11 @@ def _tracked_ws(tmp_path, monkeypatch):
     return ws, tr
 
 
-def _land(ws, cart, w, h, frames=300):
-    """Step the per-frame budget until this (cart, w, h) cover lands."""
+def _land(ws, cart, div=cover_cache.BASE, frames=300):
+    """Step the per-frame budget until this (cart, div) cover lands."""
     for _ in range(frames):
         ws.covers.begin_frame()
-        img = ws.covers.cover_for(cart, w, h)
+        img = ws.covers.cover_for(cart, div)
         if img is not None:
             return img
     raise AssertionError("cover never landed")
@@ -101,9 +97,10 @@ def _land(ws, cart, w, h, frames=300):
 class _FakeJob:
     """An in-flight decode holding a payload -- what a mid-scroll rescan sees."""
 
-    def __init__(self, packed=None, pix=None):
-        self.packed = packed
+    def __init__(self, src=None, pix=None):
+        self.src = src
         self.pix = pix
+        self.done = False
 
 
 # -- the #186 free order --------------------------------------------------------
@@ -118,35 +115,35 @@ def test_a_rescan_frees_a_blob_an_in_flight_job_was_reading(tmp_path, monkeypatc
     not survive it."""
     cart = _mk_cart(tmp_path)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
-    _land(ws, cart, 40, 30)
-    blob = ws.covers._runs_get(cart["path"])[2]
+    _land(ws, cart)
+    blob = ws.covers._src_get(cart["path"])
     assert id(blob) in tr.live
-    ws.covers._jobs[("half-built", 1, 1)] = _FakeJob(packed=blob)
+    ws.covers._jobs[("half-built", 1)] = _FakeJob(src=blob)
 
     ws.covers.invalidate_all()
 
     assert id(blob) not in tr.live, (
-        "the blob outlived the cart -- the frees ran before the jobs were dropped")
+        "the file outlived the cart -- the frees ran before the jobs were dropped")
     assert ws.covers._jobs == {}
 
 
 def test_the_reversed_order_leaks_the_blob(tmp_path, monkeypatch):
     """The perturbation, EXECUTED. This is the body `_drop_payloads` must never
     become, run against the same state as the test above: free first, drop the
-    jobs after, and `_free_runs`'s alias guard declines every free while the
+    jobs after, and `_free_src`'s alias guard declines every free while the
     LRU discards the entries anyway. Nothing raises; the memory is simply gone
     for the session, which is why the order needed a test and not a comment."""
     cart = _mk_cart(tmp_path)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
-    _land(ws, cart, 40, 30)
+    _land(ws, cart)
     covers = ws.covers
-    blob = covers._runs_get(cart["path"])[2]
-    covers._jobs[("half-built", 1, 1)] = _FakeJob(packed=blob)
+    blob = covers._src_get(cart["path"])
+    covers._jobs[("half-built", 1)] = _FakeJob(src=blob)
 
-    for entry in list(covers._runs.values()):      # <- the mutant: frees FIRST
-        covers._free_runs(entry[1][2])
-    covers._runs = {}
-    covers._runs_order = []
+    for entry in list(covers._src.values()):       # <- the mutant: frees FIRST
+        covers._free_src(entry)
+    covers._src = {}
+    covers._src_order = []
     covers._jobs = {}                              # ...jobs after
 
     assert id(blob) in tr.live      # leaked, silently -- exactly the #186 defect
@@ -160,14 +157,18 @@ def test_no_payload_is_freed_while_a_job_is_still_in_flight(tmp_path, monkeypatc
     a = _mk_cart(tmp_path, "CoverA", 5)
     b = _mk_cart(tmp_path, "CoverB", 9)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
-    _land(ws, a, 40, 30)
-    _land(ws, b, 40, 30)
+    _land(ws, a)
+    _land(ws, b)
     covers = ws.covers
+    # The host decodes with no scratch (the native reader is the one that
+    # takes it), so hand it one: it is the free with no guard at all.
+    if covers._buf is None:
+        covers._buf = tr.alloc(cover_png.WORK)
     scratch = covers._buf
 
-    covers._jobs[("half-built", 1, 1)] = _FakeJob(packed=None, pix=scratch)
+    covers._jobs[("half-built", 1)] = _FakeJob(src=None, pix=scratch)
     covers.diet_release()
-    covers._jobs[("half-built", 2, 2)] = _FakeJob(packed=None)
+    covers._jobs[("half-built", 2)] = _FakeJob(src=None)
     covers.invalidate_all()
 
     assert tr.jobs_at_free, "nothing was freed -- the test proves nothing"
@@ -214,7 +215,7 @@ def _tile0(nibble):
 
 
 def test_a_rescan_rebuilds_the_icon_from_the_new_art(tmp_path):
-    """The rev-2 item 10 bug: `_icon_cache` was written by `icon_sheet_for` and
+    """The rev-2 item 10 bug: `_icon_cache` was written by `sheet_icon` and
     cleared by nothing, so an edited cart kept the icon it had before the edit
     for the rest of the session -- on the shelf card and the desk column both.
 
@@ -282,7 +283,7 @@ def test_gen_bumps_on_a_build_a_diet_release_and_a_rescan(tmp_path):
     covers = ws.covers
 
     at_boot = covers.gen
-    _land(ws, cart, 40, 30)                    # _finish
+    _land(ws, cart)                            # _finish
     after_build = covers.gen
     assert after_build > at_boot
 
@@ -304,7 +305,7 @@ def test_a_definitive_miss_bumps_gen_too(tmp_path):
     cart = next(c for c in ws.carts.all if c["path"] == bare["path"])
     before = ws.covers.gen
     ws.covers.begin_frame()
-    assert ws.covers.cover_for(cart, 40, 30) is None
+    assert ws.covers.cover_for(cart) is None
     assert ws.covers.gen > before
 
 
@@ -354,16 +355,16 @@ def test_a_second_build_past_the_budget_defers_and_re_arms_the_gate(tmp_path):
     b = _mk_cart(tmp_path, "CoverB", 9)
     ws = build_ws(tmp_path)
     covers = ws.covers
-    _land(ws, a, 40, 30)                  # warm the runs so a build is cheap
-    _land(ws, b, 40, 30)
+    _land(ws, a)                          # warm the files so a build is cheap
+    _land(ws, b)
     covers._cache = {}
     covers._order = []
-    covers._pixels = 0
+    covers._bytes = 0
 
     covers.begin_frame()
     covers._ms = cover_cache._COVER_SLICE_MS + 1    # this frame is spent
     covers._built = True
-    assert covers.cover_for(a, 41, 31) is None
+    assert covers.cover_for(a, cover_cache.HALF) is None
     assert covers.take_deferred() is True
 
 
@@ -421,25 +422,27 @@ def test_the_diet_release_keeps_the_newest_entries_of_both_lrus(tmp_path):
     live = {c["path"]: c for c in ws.carts.all}
     order = [live[c["path"]] for c in carts]
     for cart in order:
-        _land(ws, cart, 40, 30)
+        _land(ws, cart)
     assert len(covers._cache) == len(order)
 
     covers.diet_release()
 
     assert len(covers._cache) == keep
-    assert len(covers._runs) == keep
-    newest = [(c["path"], 40, 30) for c in order[-keep:]]
+    assert len(covers._src) == keep
+    newest = [(c["path"], cover_cache.BASE) for c in order[-keep:]]
     assert sorted(covers._cache) == sorted(newest)
-    assert sorted(covers._runs) == sorted(c["path"] for c in order[-keep:])
+    assert sorted(covers._src) == sorted(c["path"] for c in order[-keep:])
 
 
 def test_the_diet_release_hands_back_the_decode_scratch_and_re_arms(tmp_path):
-    """The scratch is 76.8KB of the live set and nothing reads it while a game
-    owns the glass; `_seen` re-arms so the walk home warms the shelf again."""
+    """The scratch is the decode's whole working set and nothing reads it while
+    a game owns the glass; `_seen` re-arms so the walk home warms the shelf
+    again."""
     cart = _mk_cart(tmp_path)
     ws = build_ws(tmp_path)
     covers = ws.covers
-    _land(ws, cart, 40, 30)
+    _land(ws, cart)
+    covers._buf = bytearray(cover_png.WORK)
     covers._seen = False
     covers.diet_release()
     assert covers._buf is None
@@ -452,7 +455,7 @@ def test_a_run_releases_the_caches_only_on_the_diet_tier(tmp_path):
     desk visible, and RAM is not scarce there)."""
     cart = _mk_cart(tmp_path)
     ws = build_ws(tmp_path)
-    _land(ws, cart, 40, 30)
+    _land(ws, cart)
     live = next(c for c in ws.carts.all if c["path"] == cart["path"])
     ws._open_workspace(live)
     assert ws.covers.diet is False
@@ -478,16 +481,105 @@ def test_a_rescan_forgets_that_a_cart_had_no_cover(tmp_path):
     ws = build_ws(tmp_path)
     cart = next(c for c in ws.carts.all if c["path"] == bare["path"])
     ws.covers.begin_frame()
-    assert ws.covers.cover_for(cart, 40, 30) is None
+    assert ws.covers.cover_for(cart) is None
     assert cart["path"] in ws.covers._none
 
     ws.covers.diet_release()
     assert cart["path"] in ws.covers._none          # RAM pressure keeps it
 
     stored = next(c for c in moy_carts.scan(root) if c["path"] == bare["path"])
-    moy_carts.save_image(stored, "cover", _cover_text(64, 48, 7))
+    moy_carts.save_cover(stored, cover_bytes(7))
     ws.carts.apply(moy_carts.scan(root))
     assert ws.covers._none == {}
 
     fresh = next(c for c in ws.carts.all if c["path"] == bare["path"])
-    assert _land(ws, fresh, 40, 30) is not None
+    assert _land(ws, fresh) is not None
+
+
+# -- the three decodes, and the one scratch ---------------------------------------
+
+def test_one_base_per_cover_and_two_reductions_beside_it(tmp_path):
+    """The base is the 128x128 picture in the system canvas's byte order --
+    what the shelf draws at a whole-number scale; HALF is the grid's interim
+    64x64, ICON a 16x16 sprite in palette indices. All three from the one
+    file, which is read once."""
+    cart = _mk_cart(tmp_path, value=9)
+    ws = build_ws(tmp_path)
+    ws.costs.clear()
+    base = _land(ws, cart)
+    half = _land(ws, cart, cover_cache.HALF)
+    icon = _land(ws, cart, cover_cache.ICON)
+    assert ws.costs.get("cover.blob.read") == 1
+    order = (cover_png.RGB565_SW if ws.sys_canvas.swapped565
+             else cover_png.RGB565)
+    data = moy_carts.load_cover(cart["path"])
+    assert (base.w, base.h) == (128, 128)
+    assert bytes(base.pix) == cover_png.decode(data, 1, order)
+    assert (half.w, half.h) == (64, 64)
+    assert bytes(half.pix) == cover_png.decode(data, 2, order)
+    assert (icon.w, icon.h) == (16, 16)
+    assert set(bytes(icon.pix)) == {9}            # a palette cover maps exactly
+
+
+def test_a_cart_naming_no_icon_draws_its_cover_as_its_desk_icon(tmp_path):
+    """SPEC.md 3.4 says a host may draw the cover where a cart names no icon,
+    so the desk does: the ICON reduction, once it lands -- the sheet's own
+    icon until then. A cart that names one keeps it."""
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    made = moy_carts.create("Iconless", root, src="def _draw():\n    pass\n")
+    moy_carts.save_sprites(made, _tile0("5"))
+    moy_carts.save_cover(made, cover_bytes(12))
+    ws = build_ws(tmp_path)
+    cart = next(c for c in ws.carts.all if c["title"] == "Iconless")
+    assert not cart.get("icon")
+    for _ in range(50):
+        ws.covers.begin_frame()
+        img = ws.covers.icon_sheet_for(cart)
+        if img is not None and (img.w, img.h) == (16, 16):
+            break
+    assert (img.w, img.h) == (16, 16) and set(bytes(img.pix)) == {12}
+
+    named = dict(cart, icon=(0, 1, 1))
+    assert ws.covers.icon_sheet_for(named) is ws.covers.sheet_icon(named)
+
+
+def test_one_decode_at_a_time_and_the_next_ask_finishes_it(tmp_path, monkeypatch):
+    """There is ONE scratch, so one decode is in flight: whoever asks next
+    steps the one already going -- its card may have scrolled away, and
+    nothing else would ever finish it -- before starting its own."""
+    a = _mk_cart(tmp_path, "CoverA", 5)
+    b = _mk_cart(tmp_path, "CoverB", 9)
+    ws = build_ws(tmp_path)
+    covers = ws.covers
+    monkeypatch.setattr(cover_cache, "_COVER_ROWS", 1)
+    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", 0)
+    covers.begin_frame()
+    assert covers.cover_for(a) is None
+    assert list(covers._jobs) == [(a["path"], cover_cache.BASE)]
+    for _ in range(400):
+        covers.begin_frame()
+        covers.cover_for(b)
+        assert len(covers._jobs) <= 1
+        if (b["path"], cover_cache.BASE) in covers._cache:
+            break
+    assert (a["path"], cover_cache.BASE) in covers._cache
+    assert (b["path"], cover_cache.BASE) in covers._cache
+
+
+def test_a_file_that_does_not_decode_is_no_cover_at_any_size(tmp_path):
+    """A cover.png in the profile's shape whose data is broken reads, then
+    fails at the decode -- and is then known cover-less, so neither size is
+    tried again and the card keeps its icon or glyph."""
+    cart = _mk_cart(tmp_path)
+    data = bytearray(moy_carts.load_cover(cart["path"]))
+    idat = bytes(data).index(b"IDAT") + 4
+    data[idat + 2] ^= 0xFF                       # the first deflate block
+    moy_carts.save_cover(cart, bytes(data))
+    ws = build_ws(tmp_path)
+    live = next(c for c in ws.carts.all if c["path"] == cart["path"])
+    for _ in range(20):
+        ws.covers.begin_frame()
+        ws.covers.cover_for(live)
+    assert live["path"] in ws.covers._none
+    assert ws.covers.cover_for(live, cover_cache.HALF) is None

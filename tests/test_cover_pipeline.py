@@ -1,51 +1,43 @@
-"""The cover-art pipeline (#155): read the RLE blob, decode it, crop it to the
-card, cache what is expensive.
+"""The cover pipeline (#155, SPEC.md 3.6): read a cart's cover.png, decode it,
+cache what is expensive.
 
-What is expensive was measured on P4 glass: reading the blob 46.9ms and PARSING
-it (base64 + RLE) 17.1ms, against a native decode 0.89ms and a native crop
-0.76ms. So the parsed RUNS are what get cached in RAM; the decode and crop are
-cheap enough to redo per size, which is what makes a window resize cheap.
+What is expensive is the READ: flash, behind the storage gate, and on the S3
+boards a card shared with the panel. So the file is read once per session and
+kept; the decode that turns it into the shelf's 128x128 base is native and
+cheap, and the base itself is cached and drawn at a whole-number scale, so a
+relayout -- a window resize, the hop between the Library and the picker --
+touches neither the file nor the decoder.
 
-Two caches were tried and removed, both because a sidecar read cost more than
-the work it saved on a board whose flash reads at ~470KB/s: a 77KB decoded
-SOURCE (164ms per read), and #86's per-size crop sidecars (~66ms to read, the
-same as rebuilding from the blob, plus a ~30ms write per cover per size)."""
+Two caches were tried and removed in the RLE era, both because a sidecar read
+cost more than the work it saved on a board whose flash reads at ~470KB/s: a
+decoded SOURCE (164ms per read) and per-size crop sidecars (~66ms to read, the
+same as rebuilding, plus a write per cover per size). Nothing here writes."""
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime import moy_carts  # noqa: E402
+from runtime import cover_cache, cover_png, moy_carts  # noqa: E402
+from ws_helpers import cover_bytes  # noqa: E402
 
-
-def _cover_text(w, h, value):
-    return moy_carts.encode_moyimg(w, h, bytes([value]) * (w * h))
+BASE = cover_cache.BASE
+HALF = cover_cache.HALF
 
 
 def _mk_cart_with_cover(tmp_path, value=5):
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     cart = moy_carts.create("Covered", root, src="def _draw():\n    pass\n")
-    moy_carts.save_image(cart, "cover", _cover_text(64, 48, value))
+    moy_carts.save_cover(cart, cover_bytes(value))
     return cart
 
 
-# -- store level ----------------------------------------------------------------
-
-def test_cover_sig_moves_with_content():
-    a = _cover_text(64, 48, 5)
-    b = _cover_text(64, 48, 9)
-    assert moy_carts.cover_sig(a) != moy_carts.cover_sig(b)
-    assert moy_carts.cover_sig(a) == moy_carts.cover_sig(a)
-
-
-# -- console level ---------------------------------------------------------------
-
-def _land_cover(ws, cart, w, h, frames=300):
-    """Step the per-frame cover budget until the (w, h) cover lands."""
+def _land_cover(ws, cart, div=BASE, frames=300):
+    """Step the per-frame cover budget until the cover lands."""
     for _ in range(frames):
         ws.covers._built = False          # frame() resets this once per frame
-        img = ws.covers.cover_for(cart, w, h)
+        ws.covers._ms = 0
+        img = ws.covers.cover_for(cart, div)
         if img is not None:
             return img
     raise AssertionError("cover never landed")
@@ -55,131 +47,141 @@ def _clear_ram_caches(ws):
     # mirror the store re-scan clear
     ws.covers._cache = {}
     ws.covers._order = []
-    ws.covers._pixels = 0
+    ws.covers._bytes = 0
     ws.covers._jobs = {}
-    ws.covers._runs = {}
-    ws.covers._runs_order = []
-    ws.covers._runs_bytes = 0
+    ws.covers._src = {}
+    ws.covers._src_order = []
+    ws.covers._src_bytes = 0
 
 
-def test_edited_cover_invalidates_the_thumb(tmp_path):
+def _first_word(img, ws):
+    """The cover's top-left pixel as a palette index, through the canvas's
+    own byte order."""
+    from device.device_canvas import PAL565_WIRE
+    w = img.pix[0] | (img.pix[1] << 8)
+    return list(PAL565_WIRE).index(w)
+
+
+# -- store level ----------------------------------------------------------------
+
+def test_the_store_reads_a_cover_as_bytes_and_refuses_an_oversized_one(tmp_path):
+    cart = _mk_cart_with_cover(tmp_path)
+    data = moy_carts.load_cover(cart["path"])
+    assert data == cover_bytes(5)
+    assert cover_png.decode(data) is not None
+    moy_carts.save_cover(cart, b"\0" * (moy_carts.COVER_MAX_BYTES + 1))
+    assert moy_carts.load_cover(cart["path"]) is None
+    assert moy_carts.COVER_MAX_BYTES == cover_png.MAX_BYTES
+
+
+def test_a_cart_with_no_cover_reads_none(tmp_path):
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("Bare", root, src="def _draw():\n    pass\n")
+    assert moy_carts.load_cover(cart["path"]) is None
+
+
+def test_a_copy_of_a_cart_keeps_its_cover(tmp_path):
+    """The picker's COPY copies the folder byte for byte -- a copy that read
+    every file as text would lose the one that is not."""
+    cart = _mk_cart_with_cover(tmp_path, value=12)
+    root = str(tmp_path / "carts")
+    loaded = moy_carts.load(cart["path"])
+    dup = moy_carts.duplicate(loaded, root)
+    assert moy_carts.load_cover(dup["path"]) == cover_bytes(12)
+
+
+# -- console level ---------------------------------------------------------------
+
+def test_an_edited_cover_is_read_again_once_the_caches_drop(tmp_path):
     from runtime import host_app
     cart = _mk_cart_with_cover(tmp_path, value=5)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _land_cover(ws, cart, 40, 30)
+    img = _land_cover(ws, cart)
+    assert _first_word(img, ws) == 5
 
-    # edit the cover art -> the old sidecar is stale and must NOT be served
-    moy_carts.save_image(cart, "cover", _cover_text(64, 48, 9))
+    moy_carts.save_cover(cart, cover_bytes(9))
     _clear_ram_caches(ws)
-    img = _land_cover(ws, cart, 40, 30)
-    assert img.pix[0] == 9                       # rebuilt from the NEW art
-    # ...and the rebuild refreshed the sidecar for the next session
-    _clear_ram_caches(ws)
-    ws.covers._built = False
-    img2 = ws.covers.cover_for(cart, 40, 30)
-    assert img2 is not None and img2.pix[0] == 9 and ws.covers._jobs == {}
+    img = _land_cover(ws, cart)
+    assert _first_word(img, ws) == 9                # rebuilt from the NEW file
 
 
-# -- resize must not re-decode (#155) -------------------------------------------
-
-def test_a_new_size_re_crops_instead_of_re_decoding(tmp_path):
+def test_a_relayout_needs_no_storage_and_no_decode(tmp_path):
     """Owner, on glass 2026-07-26: "covers are remade every time you resize the
-    launcher."
-
-    Both the cover cache and its thumb sidecar are keyed by (path, w, h), so any
-    relayout -- a window resize, or the hop between the fullscreen Library and
-    the windowed picker -- missed on every cover and re-ran the 0.5-1.7s RLE
-    decode for each one. The decode is size-INDEPENDENT; only the crop after it
-    depends on the size. So the SOURCE is cached and a new size adopts it,
-    finishing in a single step instead of hundreds."""
+    launcher." The base is ONE size, drawn at whatever whole-number scale a
+    card takes, so a new card size is a cache hit."""
     from runtime import host_app
-    cart = _mk_cart_with_cover(tmp_path, value=5)
+    cart = _mk_cart_with_cover(tmp_path)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _land_cover(ws, cart, 40, 30)
-    runs = ws.covers._runs_get(cart["path"])
-    assert runs is not None and runs[0] == 64 and runs[1] == 48, \
-        "the parsed runs were not cached"
-
-    # A DIFFERENT size, with no sidecar for it: one step, no decode.
-    _clear_ram_caches(ws)
+    img = _land_cover(ws, cart)
+    ws.costs.clear()
     ws.covers._built = False
-    img = ws.covers.cover_for(cart, 24, 18)
-    assert img is not None, "a new size still needed multiple frames"
-    assert len(img.pix) == 24 * 18 and img.pix[0] == 5
+    assert ws.covers.cover_for(cart, BASE) is img
+    assert ws.costs.get("cover.build", 0) == 0
+    assert ws.costs.get("cover.blob.read", 0) == 0
+
+
+def test_the_second_size_of_a_cover_reads_no_storage(tmp_path):
+    """HALF is a second decode of the SAME file, which is still in RAM."""
+    from runtime import host_app
+    cart = _mk_cart_with_cover(tmp_path)
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _land_cover(ws, cart)
+    ws.costs.clear()
+    half = _land_cover(ws, cart, HALF)
+    assert (half.w, half.h) == (64, 64)
+    assert ws.costs.get("cover.blob.read", 0) == 0
 
 
 def test_an_edited_cover_is_picked_up_after_a_rescan(tmp_path):
-    """The runs cache is keyed by path and trusted for the session -- computing a
-    content stamp would mean reading the blob, which is the cost it exists to
-    avoid. A re-scan is what drops it, and that is the path a cover edit takes."""
+    """The file cache is keyed by path and trusted for the session -- a content
+    stamp would mean reading the file, which is the cost it exists to avoid. A
+    re-scan is what drops it, and that is the path a cover edit takes."""
     from runtime import host_app
     cart = _mk_cart_with_cover(tmp_path, value=5)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    img = _land_cover(ws, cart, 40, 30)
-    assert img.pix[0] == 5
-    moy_carts.save_image(cart, "cover", _cover_text(64, 48, 9))
+    img = _land_cover(ws, cart)
+    assert _first_word(img, ws) == 5
+    moy_carts.save_cover(cart, cover_bytes(9))
     ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))
     cart = next(c for c in ws.carts.all if c.get("path") == cart["path"])
-    img = _land_cover(ws, cart, 24, 18)
-    assert img.pix[0] == 9, "a re-scan did not drop the cached runs"
+    img = _land_cover(ws, cart)
+    assert _first_word(img, ws) == 9, "a re-scan did not drop the cached file"
 
 
-def test_the_runs_cache_is_bounded(tmp_path):
-    """Runs are ~15KB each, so the cache must stay bounded."""
-    from runtime import cover_cache, host_app
+def test_the_file_cache_is_bounded(tmp_path, monkeypatch):
+    from runtime import host_app
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     carts = []
-    # 320x240 sources are 76.8KB each, so ten of them must overrun the cap.
     for i in range(10):
         c = moy_carts.create("C%d" % i, root, src="def _draw():\n    pass\n")
-        moy_carts.save_image(c, "cover", _cover_text(320, 240, i + 1))
+        moy_carts.save_cover(c, cover_bytes(i + 1, stripes=i + 20))
         carts.append(c)
+    cap = 2 * len(cover_bytes(1, stripes=20))
+    monkeypatch.setattr(cover_cache, "_COVER_SRC_MAX_BYTES", cap)
     ws = host_app.build_workstation(root)
     for c in carts:
-        _land_cover(ws, c, 40, 30, frames=2000)
-    assert ws.covers._runs_bytes <= cover_cache._COVER_RUNS_MAX_BYTES
-    assert len(ws.covers._runs) == len(ws.covers._runs_order)
+        _land_cover(ws, c, frames=2000)
+    assert ws.covers._src_bytes <= cap
+    assert len(ws.covers._src) == len(ws.covers._src_order)
 
 
-def test_native_and_python_crops_are_byte_identical(tmp_path):
-    """The native crop (moy_gfx.crop_index) exists so a relayout costs a
-    millisecond instead of 20-40ms per card. It is only safe because it
-    reproduces the Python crop exactly -- same integer floors, same source
-    window. This runs the Python path directly and compares.
-
-    (On the host there is no moy_gfx, so the fast path is absent and this
-    pins the REFERENCE the device kernel was written against; the device half
-    is executed by tests/test_device_canvas_parity.py.)"""
-    from runtime import cover_cache
-    from runtime.console import _ticks_ms
-
-    def python_crop(pix, sw, sh, w, h):
-        cw_ = min(sw, sh * w // h) or 1
-        ch_ = min(sh, sw * h // w) or 1
-        ox = (sw - cw_) // 2
-        oy = (sh - ch_) // 2
-        xmap = [ox + dx * cw_ // w for dx in range(w)]
-        out = bytearray(w * h)
-        for dy in range(h):
-            base = (oy + dy * ch_ // h) * sw
-            for dx in range(w):
-                out[dy * w + dx] = pix[base + xmap[dx]]
-        return bytes(out)
-
-    # A source with structure, so a wrong sample lands on a different value.
-    sw, sh = 64, 48
-    pix = bytearray((x * 7 + y * 3) & 63 for y in range(sh) for x in range(sw))
-    for (w, h) in ((40, 30), (24, 18), (64, 48), (17, 41), (7, 5), (100, 20)):
-        job = cover_cache._CoverJob((sw, sh, b""), w, h, src=pix)
-        # step() is time-sliced, so drive it to completion (the native path
-        # finishes in the first call; the Python loop takes several).
-        for _ in range(2000):
-            if job.done:
-                break
-            job.step(_ticks_ms())
-        assert job.done and job.img is not None, (w, h)
-        assert job.img.pix == python_crop(pix, sw, sh, w, h), (w, h)
+def test_the_picture_cache_is_bounded(tmp_path, monkeypatch):
+    from runtime import host_app
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    carts = []
+    for i in range(6):
+        c = moy_carts.create("C%d" % i, root, src="def _draw():\n    pass\n")
+        moy_carts.save_cover(c, cover_bytes(i + 1))
+        carts.append(c)
+    monkeypatch.setattr(cover_cache, "_COVER_CACHE_MAX_BYTES", 3 * 128 * 128 * 2)
+    ws = host_app.build_workstation(root)
+    for c in carts:
+        _land_cover(ws, c)
+    assert ws.covers._bytes <= 3 * 128 * 128 * 2
+    assert len(ws.covers._cache) == len(ws.covers._order) <= 3
 
 
 # -- idle prefetch (#155, P4 glass 2026-07-26) ----------------------------------
@@ -191,18 +193,18 @@ def _mk_carts_with_covers(tmp_path, n, with_cover=3):
     for i in range(n):
         c = moy_carts.create("C%d" % i, root, src="def _draw():\n    pass\n")
         if i < with_cover:
-            moy_carts.save_image(c, "cover", _cover_text(32, 24, i + 1))
+            moy_carts.save_cover(c, cover_bytes(i + 1))
         out.append(c)
     return root, out
 
 
-def test_idle_frames_prefetch_cover_runs(tmp_path):
-    """A cover's blob read + parse is ~108ms on P4 flash and is SIZE-INDEPENDENT.
-    Charged lazily, it lands on the frame that first needs the card -- during a
-    shelf drag, that is a drag frame, which is why the picker measured a 577ms
-    worst frame. Idle frames do nothing, so they pay it instead.
+def test_idle_frames_prefetch_cover_files(tmp_path):
+    """A cover's read is flash and SIZE-INDEPENDENT. Charged lazily, it lands
+    on the frame that first needs the card -- during a shelf drag, a drag
+    frame, which is why the picker measured a 577ms worst frame. Idle frames do
+    nothing, so they pay it instead.
 
-    The assertion is that runs become cached while the console is idle WITHOUT
+    The assertion is that files become cached while the console is idle WITHOUT
     any surface having drawn a cover first -- armed from boot (2026-07-27).
     The old first-draw arming kept the cache cold at exactly the moment it was
     needed: p4_clicks measured back_to_desk at 1108ms / open_picker at 824ms,
@@ -220,7 +222,7 @@ def test_idle_frames_prefetch_cover_runs(tmp_path):
     for _ in range(200):
         ws.covers.prefetch_tick()
     for c in covered:
-        assert ws.covers._runs_get(c["path"]) is not None, c["path"]
+        assert ws.covers._src_get(c["path"]) is not None, c["path"]
 
 
 def test_rescan_rearms_the_prefetch(tmp_path):
@@ -237,27 +239,26 @@ def test_rescan_rearms_the_prefetch(tmp_path):
     ws.carts.apply(list(ws.carts.all))    # the re-scan path (create/dup/delete)
     assert ws.covers._seen                   # re-armed...
     want = carts[0]["path"]
-    assert ws.covers._runs_get(want) is None  # ...and the cache really was cleared
+    assert ws.covers._src_get(want) is None  # ...and the cache really was cleared
     for _ in range(200):
         ws.covers.prefetch_tick()
-    assert ws.covers._runs_get(want) is not None   # idle re-warms with no draw
+    assert ws.covers._src_get(want) is not None   # idle re-warms with no draw
 
 
-def test_prefetch_prebuilds_visible_cover_images(tmp_path):
-    """Phase 2 (2026-07-27): once every cart's runs are warm, idle ticks also
-    BUILD the cover images the shelf/picker grids' next full draw requests
-    (cover_specs' first screenful) -- on glass the first draw at a new card
-    size cost ~10ms per card, charged to the transition's painted frames. The
+def test_prefetch_prebuilds_visible_covers(tmp_path):
+    """Phase 2 (2026-07-27): once every cart's file is warm, idle ticks also
+    DECODE the covers the shelf/picker grids' next full draw requests
+    (cover_specs' first screenful), so the first click pays a cache hit. The
     idle builds must not leak a dirty re-arm (covers._deferred)."""
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=3)
-    ws = host_app.build_workstation(root)
+    ws = host_app.build_workstation(root, sys_size=(1024, 600))
     for _ in range(400):
         ws.covers.prefetch_tick()
-    assert ws.covers._seen is False          # runs AND prebuild fully exhausted
+    assert ws.covers._seen is False          # files AND prebuild fully exhausted
     assert ws.covers._deferred is False     # no repaint re-arm from idle work
     specs = ws.launcher.cover_specs()[:ws.covers._COVER_PREBUILD_PER_GRID]
-    want = [(c.get("path"), w, h) for c, w, h in specs
+    want = [(c.get("path"), div) for c, div in specs
             if c.get("path") not in ws.covers._none]
     assert want, "no cover-bearing specs in the fixture"
     for key in want:
@@ -265,29 +266,28 @@ def test_prefetch_prebuilds_visible_cover_images(tmp_path):
 
 
 def test_prefetch_makes_a_later_build_touch_no_storage(tmp_path):
-    """The point of warming runs: the build that follows must not read flash."""
+    """The point of warming files: the build that follows must not read flash."""
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=3)
     ws = host_app.build_workstation(root)
-    # By PATH: carts.all also holds the seeded built-ins, most of which have no
-    # cover at all, so an index into it is not necessarily a fixture cart.
+    # By PATH: carts.all also holds the seeded built-ins.
     want = carts[-1]["path"]
     target = next(c for c in ws.carts.all if c.get("path") == want)
     first = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
-    _land_cover(ws, first, 20, 15)                 # arm
+    _land_cover(ws, first)                         # arm
     for _ in range(200):
         ws.covers.prefetch_tick()
 
     reads = []
-    orig = ws.carts_store.load_image
+    orig = ws.carts_store.load_cover
 
-    def spy(path, name, _orig=orig):
+    def spy(path, _orig=orig):
         reads.append(path)
-        return _orig(path, name)
-    ws.carts_store.load_image = spy
-    img = _land_cover(ws, target, 20, 15)
+        return _orig(path)
+    ws.carts_store.load_cover = spy
+    img = _land_cover(ws, target, HALF)
     assert img is not None
-    assert reads == [], "the build re-read the blob the prefetch already parsed"
+    assert reads == [], "the build re-read the file the prefetch already holds"
 
 
 def test_prefetch_stops_once_every_cart_is_known(tmp_path):
@@ -296,11 +296,8 @@ def test_prefetch_stops_once_every_cart_is_known(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=1)
     ws = host_app.build_workstation(root)
-    # Land the one fixture cart that HAS a cover, looked up by path -- carts.all[0]
-    # is whichever seeded system cart sorts first, which is not a fixture cart and
-    # need not have cover art at all.
     covered = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
-    _land_cover(ws, covered, 20, 15)
+    _land_cover(ws, covered)
     for _ in range(200):
         ws.covers.prefetch_tick()
     assert ws.covers._seen is False
@@ -317,49 +314,48 @@ def _tick_to_convergence(ws, limit=400):
         "cart list forever (#200)" % limit)
 
 
-def test_prefetch_stops_with_a_runs_cache_too_small_for_every_cover(
+def test_prefetch_stops_with_a_file_cache_too_small_for_every_cover(
         tmp_path, monkeypatch):
-    """The walk must converge under RUNS-cache pressure (#200).
+    """The walk must converge under FILE-cache pressure (#200).
 
-    Its convergence test used to be "are this cart's runs cached?", which is a
-    different question from "have I warmed this cart", because the runs cache is
+    Its convergence test used to be "is this cart's file cached?", which is a
+    different question from "have I warmed this cart", because the cache is
     LRU and byte-capped: warming the tail evicts the head, the head reads as
-    unknown again, and the round-robin re-reads a blob per idle frame forever
-    (~108ms of flash each on the P4). Measured before the fix on this fixture:
-    2000 ticks, 2000 blob loads, still armed."""
-    from runtime import cover_cache, host_app
-    monkeypatch.setattr(cover_cache, "_COVER_RUNS_MAX_BYTES", 4096)
+    unknown again, and the round-robin re-reads a file per idle frame forever.
+    Measured before the fix: 2000 ticks, 2000 loads, still armed."""
+    from runtime import host_app
+    monkeypatch.setattr(cover_cache, "_COVER_SRC_MAX_BYTES", 1024)
     root, carts = _mk_carts_with_covers(tmp_path, 24, with_cover=24)
-    ws = host_app.build_workstation(root)
+    ws = host_app.build_workstation(root, sys_size=(1024, 600))
     loads = []
-    inner = ws.covers._runs_load
-    monkeypatch.setattr(ws.covers, "_runs_load",
+    inner = ws.covers._src_load
+    monkeypatch.setattr(ws.covers, "_src_load",
                         lambda p: (loads.append(p), inner(p))[1])
 
     ticks = _tick_to_convergence(ws)
 
     # The cap is far below what the covers need, so the head IS evicted...
-    assert ws.covers._runs_bytes <= 4096
-    assert len(ws.covers._runs) < len(loads)
+    assert ws.covers._src_bytes <= 1024 or len(ws.covers._src) == 1
+    assert len(ws.covers._src) < len(loads)
     # ...and the arm still costs one pass over the roster plus, at worst, one
-    # re-read per prebuilt cover (its runs having been evicted behind it).
+    # re-read per prebuilt cover (its file having been evicted behind it).
     budget = len(ws.carts.all) + 2 * cover_cache.CoverCache._COVER_PREBUILD_PER_GRID
     assert len(loads) <= budget, (
-        "%d blob loads for %d carts in %d ticks" % (
+        "%d file loads for %d carts in %d ticks" % (
             len(loads), len(ws.carts.all), ticks))
 
 
-def test_prefetch_stops_with_a_cover_cache_too_small_for_the_visible_set(
+def test_prefetch_stops_with_a_picture_cache_too_small_for_the_visible_set(
         tmp_path, monkeypatch):
     """Same shape one phase later (#200): the PREBUILD walked the grids' specs
-    until none was uncached, and the cover cache is pixel-capped and LRU, so a
-    visible set larger than the cap evicts its own head and that test never runs
-    out of work. Every one of those idle ticks also bumped `gen`, which is the
-    shelf's band-repaint key."""
-    from runtime import cover_cache, host_app
-    monkeypatch.setattr(cover_cache, "_COVER_CACHE_MAX_PIXELS", 0)
+    until none was uncached, and the picture cache is capped and LRU, so a
+    visible set larger than the cap evicts its own head and that test never
+    runs out of work. Every one of those idle ticks also bumped `gen`, which is
+    the shelf's band-repaint key."""
+    from runtime import host_app
+    monkeypatch.setattr(cover_cache, "_COVER_CACHE_MAX_BYTES", 0)
     root, carts = _mk_carts_with_covers(tmp_path, 12, with_cover=12)
-    ws = host_app.build_workstation(root)
+    ws = host_app.build_workstation(root, sys_size=(1024, 600))
 
     _tick_to_convergence(ws)
 
@@ -388,39 +384,39 @@ def test_prefetch_converges_on_a_machine_too_slow_for_the_build_budget(
     assert ws.covers._ms == 10 ** 6
 
 
-def test_cover_blob_read_budget(tmp_path):
-    """Each cart's cover blob must be read from storage AT MOST ONCE per session.
+def test_cover_file_read_budget(tmp_path):
+    """Each cart's cover file must be read from storage AT MOST ONCE per session.
 
-    A read is 58ms on P4 flash (22ms even when the file is absent), so a repeat
-    read is a stall the owner feels. Two separate bugs here re-read blobs -- a
-    cache keyed on a stamp stashed on a cart dict that did not survive a relayout,
-    and per-size keying that missed on every resize -- and neither announced
-    itself. This is the budget that would have."""
+    A read is ~58ms on P4 flash (22ms even when the file is absent), so a
+    repeat read is a stall the owner feels. Two separate bugs re-read files in
+    the RLE era -- a cache keyed on a stamp stashed on a cart dict that did not
+    survive a relayout, and per-size keying that missed on every resize -- and
+    neither announced itself. This is the budget that would have."""
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=4)
     ws = host_app.build_workstation(root)
     mine = [c for c in ws.carts.all
             if c.get("path") in [x["path"] for x in carts]]
     ws.costs.clear()
-    for size in ((40, 30), (24, 18), (40, 30)):      # includes a RELAYOUT
+    for div in (BASE, HALF, BASE):                   # includes a second size
         for c in mine:
-            _land_cover(ws, c, *size)
+            _land_cover(ws, c, div)
     reads = ws.costs.get("cover.blob.read", 0)
-    assert reads >= 1, "no blob read counted -- is ws.note_cost still wired?"
+    assert reads >= 1, "no file read counted -- is ws.note_cost still wired?"
     assert reads <= len(mine), (
-        "read %d blobs for %d carts across three layouts -- the runs cache is not "
+        "read %d files for %d carts across three asks -- the file cache is not "
         "holding" % (reads, len(mine)))
 
 
-def test_the_cover_blob_read_takes_the_storage_gate(tmp_path):
-    """A cover blob is a STORE read, so it goes through `ws._with_sd`.
+def test_the_cover_file_read_takes_the_storage_gate(tmp_path):
+    """A cover file is a STORE read, so it goes through `ws._with_sd`.
 
     On the T-Deck the gate drains the panel and brackets the session because
     the card shares the panel's SPI host, and an sdspi transaction overlapping
     band queueing from the core-0 feeder is the documented Cache/MMU panic.
-    This read is the one most likely to hit that: `_cover_runs_load` is reached
-    from the launcher's DRAW and from `_cover_prefetch_tick`, i.e. on frames
-    where the previous flush is still in flight.
+    This read is the one most likely to hit that: it is reached from the
+    launcher's DRAW and from the idle prefetch, i.e. on frames where the
+    previous flush is still in flight.
     """
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 2, with_cover=2)
@@ -437,7 +433,7 @@ def test_the_cover_blob_read_takes_the_storage_gate(tmp_path):
             depth[0] -= 1
 
     class _Spy:
-        """The real store, watching only load_image's gate depth."""
+        """The real store, watching only load_cover's gate depth."""
 
         def __init__(self, store):
             self._store = store
@@ -445,98 +441,46 @@ def test_the_cover_blob_read_takes_the_storage_gate(tmp_path):
         def __getattr__(self, name):
             return getattr(self._store, name)
 
-        def load_image(self, *a, **kw):
+        def load_cover(self, *a, **kw):
             reads.append(depth[0])
-            return self._store.load_image(*a, **kw)
+            return self._store.load_cover(*a, **kw)
 
     ws._with_sd = gate
     ws.carts_store = _Spy(ws.carts_store)
     for c in [c for c in ws.carts.all
               if c.get("path") in [x["path"] for x in carts]]:
-        _land_cover(ws, c, 40, 30)
+        _land_cover(ws, c)
 
-    assert reads, "no cover blob was read -- retarget this test"
-    assert 0 not in reads, "a cover blob was read outside the storage gate"
-
-
-def _card_from_runs(packed, sw, sh, w, h):
-    """The card the retired RLE blob's runs would have produced, through the
-    same builder the shelf uses."""
-    from runtime.cover_cache import _CoverJob
-    job = _CoverJob((sw, sh, bytes(packed)), w, h)
-    while not job.done:
-        job.step(0)
-    return bytes(job.img.pix)
+    assert reads, "no cover file was read -- retarget this test"
+    assert 0 not in reads, "a cover file was read outside the storage gate"
 
 
-def test_the_same_picture_makes_the_same_card_whichever_codec_wrote_it(tmp_path):
-    """The one-format change (2026-09-07) moved every cover's BYTES and must
-    have moved no cover's PIXELS. The runs the shelf caches used to be read off
-    the file; they are DERIVED from the raster now, so this compares a card
-    built from a compressed cover against one built from the retired blob of
-    the same picture -- the comparison that tells a re-encoding from a
-    re-drawing."""
-    from runtime import host_app, moy_image
-
-    art = bytearray(64 * 48)
-    for i in range(len(art)):
-        art[i] = ((i // 64) // 3 + (i % 64) // 5) & 63     # bands, not one run
-    art = bytes(art)
-
-    packed = bytearray()
-    pos = 0
-    while pos < len(art):
-        value = art[pos]
-        count = 1
-        while pos + count < len(art) and count < 255 and art[pos + count] == value:
-            count += 1
-        packed += bytes((count, value))
-        pos += count
-    fresh = moy_carts.encode_moyimg(64, 48, art)
-    assert "codec" not in fresh and len(fresh) < len(packed)
-
-    # The runs the shelf caches are the same runs either way...
-    assert moy_carts.moyimg_runs(fresh) == (64, 48, bytes(packed))
-    assert moy_image.decode_moyimg(fresh) == (64, 48, art)
-
-    # ...and so is the card the launcher draws.
-    root = str(tmp_path / "carts")
-    moy_carts.ensure_dirs(root)
-    cart = moy_carts.create("Banded", root, src="def _draw():\n    pass\n")
-    moy_carts.save_image(cart, "cover", fresh)
-    ws = host_app.build_workstation(root)
-    img = _land_cover(ws, cart, 40, 30)
-    assert bytes(img.pix) == _card_from_runs(packed, 64, 48, 40, 30)
-
-
-# -- the idle tick never ends the session (2026-09-07) ------------------------
+# -- what is NOT a cover, and the idle tick never ends the session ---------------
 #
-# Both S3 boards reached the desk on the first boot after a flash, passed a few
-# checks and dropped to the REPL within minutes. The store's covers had all just
-# been rewritten, so the launcher's cover cache had to rebuild every thumbnail on
-# that first desk -- and inflating one asked a heap that had already loaded a
-# store for a 76,800-byte contiguous block it did not have. The MemoryError came
-# out of the idle prefetch, which is the frame with nobody waiting on it and the
-# least right of any frame to end a session.
+# Both S3 boards once reached the desk on the first boot after a flash, passed a
+# few checks and dropped to the REPL within minutes: the idle prefetch asked a
+# store-loaded heap for a block it did not have, and the MemoryError came out of
+# the frame with nobody waiting on it and the least right of any frame to end a
+# session (2026-09-07).
 
-def _starve_the_parse(ws, exc):
-    """Make the store's cover parse fail the way a loaded heap does."""
-    def boom(_blob):
+def _starve_the_read(ws, exc):
+    """Make the store's cover read fail the way a loaded heap does."""
+    def boom(_path):
         raise exc
-    ws.carts_store.moyimg_runs = boom
+    ws.carts_store.load_cover = boom
 
 
 def test_a_cover_the_heap_refuses_does_not_kill_the_prefetch(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=3)
     ws = host_app.build_workstation(root)
-    real = ws.carts_store.moyimg_runs
-    _starve_the_parse(ws, MemoryError("memory allocation failed, allocating 76800 bytes"))
+    real = ws.carts_store.load_cover
+    _starve_the_read(ws, MemoryError("memory allocation failed, allocating 16384 bytes"))
     try:
         for _ in range(400):
             ws.covers.prefetch_tick()      # must not raise
     finally:
-        ws.carts_store.moyimg_runs = real
+        ws.carts_store.load_cover = real
     assert ws.covers._seen is False, "the walk must still converge and disarm"
     for c in carts[:3]:
         assert c["path"] in ws.covers._none, "a cover it cannot read is skipped"
@@ -544,61 +488,74 @@ def test_a_cover_the_heap_refuses_does_not_kill_the_prefetch(tmp_path):
 
 def test_a_cover_the_heap_refuses_draws_the_placeholder(tmp_path):
     """`cover_for` returning None is what makes the card fall back to its
-    sprite/glyph -- the deterministic pre-cover look -- so the shelf still
+    icon/glyph -- the deterministic pre-cover look -- so the shelf still
     paints, it just paints without that one picture."""
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 2, with_cover=1)
     ws = host_app.build_workstation(root)
     cart = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
-    real = ws.carts_store.moyimg_runs
-    _starve_the_parse(ws, MemoryError("memory allocation failed"))
+    real = ws.carts_store.load_cover
+    _starve_the_read(ws, MemoryError("memory allocation failed"))
     try:
         for _ in range(8):
             ws.covers._built = False
-            assert ws.covers.cover_for(cart, 40, 30) is None
+            assert ws.covers.cover_for(cart) is None
     finally:
-        ws.carts_store.moyimg_runs = real
+        ws.carts_store.load_cover = real
     assert cart["path"] in ws.covers._none
 
 
-def test_a_cover_in_the_retired_codec_draws_the_placeholder(tmp_path):
-    """The strict reader reaches the shelf. There is no migration that rewrites
-    a legacy cover (CLAUDE.md, 2026-09-07), so a card carrying one has to read
-    as a cover that is not there -- a placeholder, on a prefetch that keeps
-    walking, and never an exception out of the idle frame."""
-    import json
-    from runtime import host_app, moy_image
-    root, carts = _mk_carts_with_covers(tmp_path, 2, with_cover=1)
+def test_an_old_images_cover_moyimg_is_not_a_cover(tmp_path):
+    """The strict reader reaches the shelf (CLAUDE.md, "No store migrations
+    until there are users"): a cart still carrying the retired
+    images/cover.moyimg has no cover, on a prefetch that keeps walking."""
+    from runtime import host_app
+    root, carts = _mk_carts_with_covers(tmp_path, 2, with_cover=0)
+    cart = carts[0]
+    moy_carts.save_image(cart, "cover", moy_carts.encode_moyimg(
+        64, 48, bytes(64 * 48)))
     ws = host_app.build_workstation(root)
-    cart = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
-    packed = moy_image.pack_runs(bytes(((i * 37) & 63) for i in range(64 * 48)))
-    moy_carts.save_image(cart, "cover", json.dumps({
-        "format": "moyimg-v1", "w": 64, "h": 48, "codec": "rle",
-        "data": moy_carts._b64_encode(packed)}))
-    ws.covers.invalidate_all()
-    assert ws.covers.cover_for(cart, 40, 30) is None
+    live = next(c for c in ws.carts.all if c.get("path") == cart["path"])
+    ws.covers._built = False
+    assert ws.covers.cover_for(live) is None
     for _ in range(200):
         ws.covers.prefetch_tick()          # must not raise
-    assert cart["path"] in ws.covers._none
+    assert live["path"] in ws.covers._none
+
+
+def test_a_cover_outside_the_profile_draws_the_placeholder(tmp_path):
+    """A PNG of the wrong size is ignored -- the cart is never refused for it
+    (SPEC.md 3.6) -- and is read once, then known to be no cover."""
+    from runtime import host_app
+    root, carts = _mk_carts_with_covers(tmp_path, 1, with_cover=0)
+    cart = carts[0]
+    wrong = (ROOT / "tests" / "cover_vectors" / "size_127x128.png").read_bytes()
+    moy_carts.save_cover(cart, wrong)
+    ws = host_app.build_workstation(root)
+    live = next(c for c in ws.carts.all if c.get("path") == cart["path"])
+    ws.covers._built = False
+    assert ws.covers.cover_for(live) is None
+    assert live["path"] in ws.covers._none
+    assert ws.covers._src_get(live["path"]) is None
 
 
 def test_a_build_that_cannot_allocate_is_one_missing_cover(tmp_path):
-    """The blob read fine; it is the build's OWN allocations -- the ~77KB decode
-    scratch and the card-sized crop -- that a fragmented heap refuses, and they
-    sit outside _CoverJob.step's fence."""
-    from runtime import cover_cache, host_app
+    """The file read fine; it is the build's OWN allocations -- the decode
+    scratch and the picture -- that a fragmented heap refuses, and they sit
+    outside _CoverJob.step's fence."""
+    from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 2, with_cover=1)
     ws = host_app.build_workstation(root)
     cart = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
     real = cover_cache._CoverJob
 
     def boom(*a, **k):
-        raise MemoryError("memory allocation failed, allocating 76800 bytes")
+        raise MemoryError("memory allocation failed, allocating 38912 bytes")
 
     cover_cache._CoverJob = boom
     try:
         ws.covers._built = False
-        assert ws.covers.cover_for(cart, 40, 30) is None
+        assert ws.covers.cover_for(cart) is None
         for _ in range(200):
             ws.covers.prefetch_tick()      # the prebuild walk goes here too
     finally:

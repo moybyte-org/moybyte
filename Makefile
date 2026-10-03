@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-hero site-tiles sync-issues test vendor-libmoy vendor-p8-import
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-hero site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-p8-import vendor-wamr
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -170,8 +170,8 @@ preflight-web:  ## ...plus the browser suites in real Chrome
 # and diffs the framebuffers. That is the only lane in `make test` where two
 # independently COMPILED kernels are compared -- everything else either
 # compares the host to itself or compares it to a transcription, and a
-# transcription can be right while the C is wrong (CLAUDE.md records the
-# provisional_tline day). The same binary carries `moycore` and `moy_audio`,
+# transcription can be right while the C is wrong (.claude/rules/rendering.md
+# records the provisional_tline day). The same binary carries `moycore` and `moy_audio`,
 # so tests/test_moycore_loop.py, tests/test_semantic_traces.py and
 # test_audio_parity's native pass are the other consumers.
 #
@@ -182,7 +182,8 @@ preflight-web:  ## ...plus the browser suites in real Chrome
 # prevent. Hence a real target, and a CI step that runs it.
 #
 # ~15s from cold (2s clone, 4s submodules, 2s mpy-cross, 5s compile on 12
-# cores) and under a second warm, which is why there is no cache to go stale --
+# cores), a second compile for the object-model build below, and under a
+# second warm, which is why there is no cache to go stale --
 # a cache MISS that silently skipped the check is the failure being fixed here,
 # so the cheapest honest answer is to always build.
 #
@@ -204,14 +205,26 @@ UNIX_MP_DIR ?= .build/unix_micropython
 UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
 UNIX_MP_USERMODS := $(UNIX_MP_DIR)/usermods
 UNIX_MP := $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython
+# The same tree built a second time the way the BOARDS build MicroPython's
+# object model: 32-bit words, REPR_C (a float result is not a heap object) and
+# single-precision floats, so one GC block is 16 bytes and a float costs what it
+# costs on glass. The 64-bit build boxes every float, which buries what a frame
+# really allocates; tests/test_frame_alloc.py measures on this one. It needs a
+# 32-bit C toolchain (gcc-multilib) and is skipped, out loud, without one.
+UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-r32/micropython
+UNIX_MP_R32_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 \
+	-DMICROPY_OBJ_REPR=MICROPY_OBJ_REPR_C \
+	-DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
 UNIX_MP_NATIVE := native
 # Every native module that ships a Makefile fragment. moy_alloc/moy_sd have
 # none (ESP-IDF only) and are skipped by the port's own discovery anyway.
 # moy_web is here so the BAKED web console is exercised as code on a real
 # MicroPython -- its memoryview is handed straight at flash-mapped rodata and
 # must stay read-only, which is the kind of thing that otherwise fails first on
-# glass. Its blob table is generated (see the recipe below).
-UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web
+# glass. Its blob table is generated (see the recipe below). moy_png is the
+# cover reader, here so tests/test_cover_png.py holds the boards' C to the
+# host's Python reader and to moy-spec's vectors.
+UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 
 .PHONY: unix-micropython
@@ -243,15 +256,26 @@ unix-micropython:
 # (or the reverse once it is gone), and re-running make does NOT converge. It
 # cost a confused half hour when moy_web landed with a `names()` verb.
 # Regenerating is ~5s and only happens when a usermod source actually changed.
-	@f=$(UNIX_MP_SRC)/ports/unix/build-moybyte/frozen_content.c; \
+	@for b in build-moybyte build-moybyte-r32; do \
+	  f=$(UNIX_MP_SRC)/ports/unix/$$b/frozen_content.c; \
 	  if [ -f "$$f" ] && [ -n "$$(find -L $(UNIX_MP_USERMODS)/ -name '*.[ch]' \
-	      -newer "$$f" -print -quit 2>/dev/null)" ]; then rm -f "$$f"; fi
+	      -newer "$$f" -print -quit 2>/dev/null)" ]; then rm -f "$$f"; fi; done
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
 	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1 \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
+	@if echo 'int main(void){return 0;}' | cc -m32 -x c - -o /dev/null 2>/dev/null; then \
+	  $(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
+	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 MICROPY_PY_BTREE=0 \
+	    MICROPY_FORCE_32BIT=1 BUILD=build-moybyte-r32 \
+	    CFLAGS_EXTRA="$(UNIX_MP_R32_CFLAGS)" \
+	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS) && \
+	  echo "...and in the boards' object model (32-bit, REPR_C): $(UNIX_MP_R32)"; \
+	else \
+	  echo "no 32-bit C toolchain (gcc-multilib): the boards' object-model build is skipped"; \
+	fi
 
 # Build the project site into _site/ (the GitHub Pages source). Embeds the web
 # runner's dist/ as the playable player, so build that first for a live page:
@@ -298,6 +322,16 @@ sync-issues:
 vendor-libmoy:
 	$(PYTHON) tools/vendor_libmoy.py $(if $(SPEC),--spec $(SPEC))
 
+# Re-vendor the AOT-only WAMR runtime -- the WebAssembly cart engine --
+# from Moybyte's fork (experiments/wasm_aot/wamr, or WAMR=/path) at its HEAD or
+# COMMIT=<sha>, into native/moy_wasm/wamr with the stamp
+# native/moy_wasm/wamr_vendor.json; tests/test_wamr_vendor.py holds the copy to
+# it, and to the WAMR_PIN in experiments/wasm_aot/build.sh.
+#   make vendor-wamr
+#   make vendor-wamr WAMR=/path/to/clone COMMIT=<sha>
+vendor-wamr:
+	$(PYTHON) tools/vendor_wamr.py $(if $(WAMR),--wamr $(WAMR)) $(if $(COMMIT),--commit $(COMMIT))
+
 # Re-vendor moy-spec's PICO-8 asset converter (tools/p8_import.py), the same way
 # and for the same reason: SPEC.md 8.1 is what says what a converted note MEANS,
 # so the converter belongs upstream and travels HERE. It was a hand-copy once;
@@ -308,6 +342,26 @@ vendor-libmoy:
 #   make vendor-p8-import SPEC=/path/to/moy-spec
 vendor-p8-import:
 	$(PYTHON) tools/vendor_p8_import.py $(if $(SPEC),--spec $(SPEC))
+
+# Re-vendor Jet -- the rasteriser the compiled showcase carts compile -- and ESP
+# 88's film code, reading clones of both (.build/jet/, or JET=/EXAMPLES=) at the
+# JetExamples pin, whose Jet submodule is Jet's pin. The carts' derived data
+# (teapot.obj, assets.bin, their LICENSES.txt) is the carts repository's;
+# `tools/vendor_jet.py --carts <carts>/carts` writes it there. Stamps ports/jet/jet_vendor.json;
+# tests/test_jet_vendor.py holds the copy to it.
+#   make vendor-jet
+#   make vendor-jet EXAMPLES_COMMIT=<sha>
+vendor-jet:
+	$(PYTHON) tools/vendor_jet.py $(if $(JET),--jet $(JET)) $(if $(EXAMPLES),--examples $(EXAMPLES)) $(if $(EXAMPLES_COMMIT),--examples-commit $(EXAMPLES_COMMIT))
+
+# Re-vendor the Jet carts themselves -- Jet Teapot and ESP 88, whose home is
+# moybyte-org/carts -- into ports/jet/<cart>.moy, from a clone's git objects
+# (../carts, $MOYBYTE_CARTS or CARTS_REPO=) at its HEAD or COMMIT=. Stamps
+# ports/jet/jet_carts_vendor.json; tests/test_jet_vendor.py holds the copy to it.
+#   make vendor-jet-carts
+#   make vendor-jet-carts CARTS_REPO=/path/to/carts COMMIT=<sha>
+vendor-jet-carts:
+	$(PYTHON) tools/vendor_jet_carts.py $(if $(CARTS_REPO),--carts $(CARTS_REPO)) $(if $(COMMIT),--commit $(COMMIT))
 
 # The T-Deck build (mainline MicroPython -- the only T-Deck build since the
 # fork's deletion, 2026-08-17). The `lilygo-micropython` names below are the
@@ -389,11 +443,11 @@ ota-keygen:
 release:
 	$(PYTHON) tools/release.py $(if $(NAME),--name "$(NAME)") $(if $(NOTES),--notes "$(NOTES)") $(if $(PUSH),--push)
 
-# The answer the PORT hint points at. Every attached port, which board each one
-# is, and the exact command to paste -- resolved by tools/p4_autotest.find_port,
-# which probes the two S3 twins apart rather than guessing between them.
+# The answer the PORT hint points at: every serial port, which board each one
+# is and which process holds it, from facts that need no port opened
+# (tools/board.py). `tools/board.py ports --probe` asks the ones it cannot tell.
 device-port:  ## which serial port is which board
-	@$(PYTHON) tools/device_port.py
+	@$(PYTHON) tools/board.py ports
 
 # The other "what is actually true of this board" question: which modules cross
 # into its image. board.toml decides and tools/board_config.py answers, so ask

@@ -1,3 +1,22 @@
+# Map (grep -n a name to jump there):
+#   parse_flags                a flags blob -> 512 bytes
+#   load_cover                 a cart's cover.png bytes
+#   decode_cover               cover.png bytes -> 128x128 indices
+#   encode_cover               128x128 indices -> cover.png bytes
+#   load_images                a cart's paint-image assets
+#   load_scenes                a cart's scene assets
+#   -- sibling stores          load_artwork, save_artwork, load_deck, save_deck
+#   -- the document codec      encode_text, decode_text, load, scan
+#   -- manifest metadata       save_manifest_meta, add_source, compile_check
+#   -- a cart's SCRIPTS        cart_sources, source_text, set_source, save_code
+#   -- block source            load_blocks, save_blocks
+#   -- persistent cart memory  load_pmem, save_pmem
+#   -- shared sprite sheet     load_shared_sheet, save_shared_sheet
+#   -- system icon theme       load_system_icons
+#   -- known WiFi networks     load_wifi, save_wifi, remember_wifi
+#   -- system settings         load_system, save_system
+#   -- achievements            load_achievements, save_achievements
+#   -- cart management         store_full, create, new_from_template, duplicate
 # Moybyte SD cartridge store.
 #
 # Cartridges live as .moy folders under /sd/moybyte/carts/<name>.moy/:
@@ -45,14 +64,15 @@ try:
                                 IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
                                 SCENE_EXT, _normalize_canvas, _canvas_str,
                                 _sibling_path, slug, ensure_dirs, _is_dir,
-                                _rmtree)
+                                _rmtree, COVER_FILE, COVER_MAX_BYTES)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
                                         IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
                                         TILE_FLAGS, SCENES_DIR, SCENE_EXT,
                                         _normalize_canvas, _canvas_str,
                                         _sibling_path, slug, ensure_dirs,
-                                        _is_dir, _rmtree)
+                                        _is_dir, _rmtree, COVER_FILE,
+                                        COVER_MAX_BYTES)
 
 
 # Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
@@ -62,6 +82,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # purely advisory: absent/invalid -> None, and every consumer treats None as "show
 # everything" (today's behaviour), so an undeclared cart is a zero-regression no-op.
 INPUT_KINDS = ("buttons", "touch", "keyboard")
+
+
+def _str_list(v):
+    """`v` when it is a list of strings, else None."""
+    if isinstance(v, list) and all(isinstance(x, str) for x in v):
+        return v
+    return None
 
 
 def _int_or(value, default):
@@ -114,12 +141,6 @@ def _normalize_input_kinds(value):
 
 
 ARTWORK_NAME = "artwork.moyimg"
-# Cartridge COVER ART (visual identity v1 Section 11.4): a cart folder may carry
-# images/cover.moyimg -- static authored cover art the Library shelf draws
-# full-bleed on the card. The deterministic fallback when absent is the cart's
-# sprite tile 0 / type glyph (the pre-cover look). tools/gen_covers.py captures a
-# gameplay frame for the seed games; Paint art or any moyimg works the same.
-COVER_IMAGE = "cover"
 DECK_NAME = "deck.json"
 
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
@@ -159,27 +180,69 @@ def flags_to_hex(flags):
 # under their pre-extraction names so every caller, test and `store.X` lookup is
 # unchanged. Same bare-or-package fallback as every shared module.
 try:
-    from moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg, moyimg_runs,
-                           decode_moyimg, cover_sig)
+    from moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg,
+                           decode_moyimg, text_sig)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                         _write_atomic, _read_recover, _read_bak, _forget_bak,
-                        set_publish_root)
+                        set_publish_root, _read_bytes, _write_bytes)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg,
-                                   moyimg_runs, decode_moyimg, cover_sig)
+                                   decode_moyimg, text_sig)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover, _read_bak,
-                                _forget_bak, set_publish_root)
+                                _forget_bak, set_publish_root, _read_bytes,
+                                _write_bytes)
 
 
 def load_image(path, name):
     """One paint-image blob (images/<name>.moyimg) for the cart at `path`, or
-    None. The Library shelf reads covers through this (COVER_IMAGE) so a
-    slimmed cart (#66 live-set diet) never needs rehydrating for its card."""
+    None."""
     try:
         return _read(path + "/" + IMAGES_DIR + "/" + name + IMAGE_EXT)
     except OSError:
         return None
+
+
+def load_cover(path):
+    """The cart at `path`'s cover.png bytes, or None -- no file, or one larger
+    than any cover can be (cover_png.MAX_BYTES). The shelf reads covers through
+    this, so a slimmed cart (#66 live-set diet) never rehydrates for its card.
+    The bytes are not checked here: cover_png decides what is a cover."""
+    try:
+        return _read_bytes(path + "/" + COVER_FILE, COVER_MAX_BYTES)
+    except OSError:
+        return None
+
+
+def save_cover(cart, data):
+    """Publish `data` as the cart's cover.png, whole (moy_fs._write_bytes)."""
+    _write_bytes(cart["path"] + "/" + COVER_FILE, data)
+
+
+def _cover_png():
+    # Imported where it is used: the headless Zero carries this store and no
+    # cover reader, and never asks for one.
+    try:
+        import cover_png
+    except ImportError:  # pragma: no cover - host fallback when not yet aliased
+        from runtime import cover_png
+    return cover_png
+
+
+def decode_cover(data):
+    """`(128, 128, indices)` for a cover.png's bytes -- each pixel the nearest
+    console-palette colour, exact for a cover written in that palette -- or
+    None when the bytes are no cover. What Paint opens a cart's cover as."""
+    cp = _cover_png()
+    pix = cp.decode(data, 1, cp.INDEX, cp.moy64())
+    return None if pix is None else (cp.SIDE, cp.SIDE, pix)
+
+
+def encode_cover(indices):
+    """128 x 128 console-palette indices -> the bytes of a cover.png: indexed,
+    the palette as its PLTE. What Paint saves a cart's cover as."""
+    cp = _cover_png()
+    return cp.encode_indexed(indices, cp.moy64())
 
 
 def load_images(path):
@@ -454,6 +517,24 @@ def _read_main(path, name):
         return _read_recover(full)
 
 
+def _compiled_sources(path):
+    """A compiled cart's source, as (name, text) under `src/` in name order --
+    the text files among them. Never required and never verified against the
+    module (moy-spec SPEC.md §16): it is what the Code tab shows, and a
+    cart that ships none has no Code tab."""
+    out = []
+    try:
+        names = sorted(os.listdir(path + "/src"))
+    except OSError:
+        return out
+    for n in names:
+        try:
+            out.append(("src/" + n, _read(path + "/src/" + n)))
+        except (OSError, ValueError, UnicodeError):
+            continue                # a subfolder, or bytes that are not text
+    return out
+
+
 def _project_title(path):
     """A cart folder's own name as a title -- what a cart is called when its
     manifest can no longer say."""
@@ -516,14 +597,25 @@ def load(path, src=True):
         # the moybyte fields, so the defaults below flip on this flag -- moybyte's
         # own carts ("moybyte-cart-v1", or no format at all) keep theirs.
         spec = man.get("format") == "moy-1"
-        mainf = man.get("main", "main.lua" if spec else "main.py")
+        runtime = man.get("runtime", "lua" if spec else "python")
+        # A COMPILED cart (moy-spec SPEC.md §16): its main is a module,
+        # not text, so it is never read here -- the runtime loads it from the
+        # folder. What text it has is its optional `src/` (the Code tab).
+        compiled = runtime == "wasm"
+        mainf = man.get("main", "main.wasm" if compiled else
+                        ("main.lua" if spec else "main.py"))
         if broken and not _exists(path + "/" + mainf):
             # No manifest to name the program, so take whichever is there.
             for alt in ("main.py", "main.lua"):
                 if _exists(path + "/" + alt):
                     mainf = alt
                     break
-        if src:
+        if src and compiled:
+            if not _exists(path + "/" + mainf) and not broken:
+                print("Moybyte cart main missing:", path)
+                return None
+            src = ""            # a module has no text; `src/` below is the code
+        elif src:
             try:
                 src = _read_main(path, mainf)
             except OSError as exc:
@@ -554,7 +646,9 @@ def load(path, src=True):
         # together on a slim scan.
         before = []
         after = []
-        if src is not None:
+        if src is not None and compiled:
+            after = _compiled_sources(path)
+        elif src is not None:
             names = man.get("sources") or ()
             if names and mainf not in names:
                 # SPEC.md 4 requires it. Running main last (which is where an
@@ -617,8 +711,17 @@ def load(path, src=True):
             # The #67 dual-runtime seam: which VM runs this cart ("python" today,
             # "lua" via the injected runtime), and which file `src` came from --
             # save_code/duplicate/seed must write THAT file back, never main.py.
-            "runtime": man.get("runtime", "lua" if spec else "python"),
+            "runtime": runtime,
             "main": mainf,
+            # A compiled cart's linear memory in 64 KiB pages, which its module
+            # must declare exactly (moy-spec SPEC.md §16.7); None
+            # for every other runtime, and for a compiled cart that forgot it --
+            # which its runtime refuses before anything loads.
+            "memory": _int_or(man.get("memory"), None) if compiled else None,
+            # A compiled cart's "writable" paths (moy-spec SPEC.md §16.12): the
+            # list as the manifest has it, which libmoy's binding holds every
+            # path to; None for every other runtime and for a cart with none.
+            "writable": _str_list(man.get("writable")) if compiled else None,
             # 0 = pre-versioning (re-seedable). SPEC.md 3.1 leaves `version` to
             # the author, so a hand-typed "1.2" must read as unversioned rather
             # than take the cart down with it.
@@ -835,10 +938,11 @@ def multi_script(cart):
     """Whether THIS cart's runtime loads more than its main file.
 
     A Lua cart does -- SPEC.md 4, and `lua_ext.cart_chunks` builds the list --
-    while the console's Python tier runs `main` and nothing else. So a second
-    script listed on a python cart would be a file that silently never runs,
-    which is worse than not offering to make one."""
-    return (cart or {}).get("runtime", "python") != "python"
+    while the console's Python tier runs `main` and nothing else, and a
+    compiled cart is one module (`sources` does not apply to it). So a second
+    script listed on either would be a file that silently never runs, which is
+    worse than not offering to make one."""
+    return (cart or {}).get("runtime", "python") == "lua"
 
 
 def add_source(cart, name, text=""):
@@ -927,9 +1031,14 @@ def runtime_compile_check(cart, src):
 
 def cart_sources(cart):
     """A cart's scripts in load order, `main` among them. A cart that declares
-    no `sources` answers `[main]`, which is what its absence MEANS."""
+    no `sources` answers `[main]`, which is what its absence MEANS.
+
+    A compiled cart answers its `src/` files and never its main: the module is
+    not text, and an empty answer is what takes the Code tab away."""
     if not cart:
         return []
+    if cart.get("runtime") == "wasm":
+        return [n for n, _ in cart.get("src_after") or ()]
     return ([n for n, _ in cart.get("src_before") or ()]
             + [cart.get("main", "main.py")]
             + [n for n, _ in cart.get("src_after") or ()])
@@ -940,7 +1049,10 @@ def source_text(cart, name=None):
     file. `name` None -- or main's own name -- is `src`."""
     if not cart:
         return None
-    if name is None or name == cart.get("main", "main.py"):
+    if cart.get("runtime") == "wasm":
+        srcs = cart.get("src_after") or ()
+        name = name if name is not None else (srcs[0][0] if srcs else None)
+    elif name is None or name == cart.get("main", "main.py"):
         return cart.get("src")
     for key in ("src_before", "src_after"):
         for n, text in cart.get(key) or ():
@@ -985,6 +1097,13 @@ def save_code(cart, src, force=False, name=None):
     ok, msg = runtime_compile_check(cart, src)
     if not ok and not force:
         return SAVE_BAD_SYNTAX, msg
+    if cart.get("runtime") == "wasm":
+        # A compiled cart's code is its `src/`; its main is a module that no
+        # text write may ever replace.
+        srcs = cart_sources(cart)
+        name = name if name is not None else (srcs[0] if srcs else None)
+        if name not in srcs:
+            return SAVE_BAD_SYNTAX, "a compiled cart has no such source"
     if name is None:
         name = cart.get("main", "main.py")
     _write_atomic(cart["path"] + "/" + name, src)
@@ -1025,7 +1144,7 @@ try:
                              JOURNAL_SNAP_DIR, journal_append, journal_undo,
                              journal_redo, journal_can_undo, journal_can_redo,
                              _journal_paths, _journal_load_entries,
-                             _journal_current_snap, _journal_total_bytes)
+                             _journal_current_snap, _journal_total_len)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
                                      JOURNAL_SNAP_DIR, journal_append,
@@ -1033,7 +1152,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                      journal_can_undo, journal_can_redo,
                                      _journal_paths, _journal_load_entries,
                                      _journal_current_snap,
-                                     _journal_total_bytes)
+                                     _journal_total_len)
 
 
 def _import_blocks():
@@ -1408,6 +1527,39 @@ NEW_TEMPLATE = {
 }
 
 
+# errno ENOSPC: what every store's filesystem (FAT on a card, littlefs on the
+# P4s' flash, the host's) raises for a write that does not fit.
+ENOSPC = 28
+
+
+def store_full(exc):
+    """True for an error that says the store has no room left. A copy or an
+    install that fails this way is a notice to the kid ("the store is full"), never
+    a silent half-cart: the writers below remove what they had written."""
+    if not isinstance(exc, OSError):
+        return False
+    code = getattr(exc, "errno", None)
+    if code is None and exc.args:
+        code = exc.args[0]
+    return code == ENOSPC
+
+
+def _whole_or_none(d, fn):
+    """`fn()`, which writes a new cart folder `d`. When the store runs out of
+    room part way, the folder goes with it -- a cart missing its module or its
+    main is one the shelf would list and the Player could never run -- and the
+    error is raised for the caller to say so."""
+    try:
+        return fn()
+    except OSError as exc:
+        if store_full(exc):
+            try:
+                _rmtree(d)
+            except OSError:
+                pass
+        raise
+
+
 def _unique_dir(root, base):
     d = root + "/" + base + ".moy"
     if not _exists(d):
@@ -1433,6 +1585,14 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
     another "moy-1" cart at its declared tick, not a restamped moybyte one."""
     d = _unique_dir(root, slug(title))
     _mkdir(d)
+    return _whole_or_none(d, lambda: _create_in(
+        d, title, src, cfg, edit, type, runtime, main, scenes, scene_order,
+        author, palette, extensions, format, fps, icon, canvas))
+
+
+def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
+               scene_order, author, palette, extensions, format, fps, icon,
+               canvas):
     manifest = {
         "format": format or CART_FORMAT, "title": title, "type": type,
         "runtime": runtime, "main": main, "edit": edit or [],
@@ -1488,7 +1648,8 @@ def _copy_cart_files(src, dst, main):
     """Copy a cart folder's asset files (one level of subfolders -- images/,
     scenes/, docs/) into a fresh copy. Degrade-don't-throw like load():
     an unreadable entry is skipped, never fatal, so a copy can lose one asset but
-    never fail outright."""
+    never fail outright -- except when the store is full, which raises: a copy
+    that ran out of room is not a copy."""
     try:
         names = os.listdir(src)
     except OSError:
@@ -1501,19 +1662,23 @@ def _copy_cart_files(src, dst, main):
             kids = os.listdir(s)         # a subfolder (images/, scenes/, ...)
         except OSError:
             try:
-                _write(d, _read(s))      # a plain file
-            except (OSError, ValueError, UnicodeError):
-                pass
+                _copy_bytes(s, d)        # a plain file -- cover.png is not text
+            except (OSError, ValueError) as exc:
+                if store_full(exc):
+                    raise
             continue
         _mkdir(d)
         for kid in kids:
             try:
-                _write(d + "/" + kid, _read(s + "/" + kid))
-            except (OSError, ValueError, UnicodeError):
-                pass
+                _copy_bytes(s + "/" + kid, d + "/" + kid)
+            except (OSError, ValueError) as exc:
+                if store_full(exc):
+                    raise
 
 
 def duplicate(cart, root=CARTS_DIR, new_title=None):
+    if cart.get("runtime") == "wasm" and cart.get("path"):
+        return _duplicate_compiled(cart, root, new_title)
     dup = create(new_title or (cart["title"] + " copy"), root,
                  src=cart["src"], cfg=dict(cart["cfg"]), edit=cart["edit"], type=cart["type"],
                  runtime=cart.get("runtime", "python"), main=cart.get("main", "main.py"),
@@ -1536,9 +1701,45 @@ def duplicate(cart, root=CARTS_DIR, new_title=None):
     # answer for a cart authored by a newer build.
     src_path = cart.get("path")
     if src_path and dup is not None:
-        _copy_cart_files(src_path, dup["path"], dup["main"])
+        _whole_or_none(dup["path"], lambda: _copy_cart_files(
+            src_path, dup["path"], dup["main"]))
         return load(dup["path"])
     return dup
+
+
+def _duplicate_compiled(cart, root, new_title):
+    """A compiled cart's copy: its own manifest under the new title, its module
+    as the bytes it is, and the rest of the folder as `_copy_cart_files` takes
+    it. create() is for carts whose main is text."""
+    src_path = cart["path"]
+    try:
+        man = json.loads(_read_recover(src_path + "/manifest.json"))
+    except (OSError, ValueError):
+        return None
+    title = new_title or (cart["title"] + " copy")
+    d = _unique_dir(root, slug(title))
+    _mkdir(d)
+    man["title"] = title
+    main = cart.get("main", "main.wasm")
+
+    def _fill():
+        _write(d + "/manifest.json", json.dumps(man))
+        _write(d + "/config.json", json.dumps(dict(cart.get("cfg") or {})))
+        _copy_bytes(src_path + "/" + main, d + "/" + main)
+        _copy_cart_files(src_path, d, main)
+    _whole_or_none(d, _fill)
+    return load(d)
+
+
+def _copy_bytes(src, dst, chunk=4096):
+    """Copy a file that is not text, in chunks."""
+    with open(src, "rb") as fi:
+        with open(dst, "wb") as fo:
+            while True:
+                b = fi.read(chunk)
+                if not b:
+                    break
+                fo.write(b)
 
 
 def delete(cart):

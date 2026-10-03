@@ -84,9 +84,15 @@ def test_the_roster_carries_free_through_to_the_boards():
 # misses, a graze, a spawn queue). Adding a cart here is that audit. The two Lua
 # carts are audited the same way: the pace comes from the manifest, not from
 # the runtime, so a Lua game that counted frames would be just as wrong.
+#
+# The Bench twins are the one deliberate exception to the audit's terms: a
+# phase IS n frames of one workload, counted on purpose, and they declare free
+# so a phase row is the frame the board can run rather than the 30Hz tick --
+# paced, every phase cheaper than the tick read 30.3 / p50 33 on every board
+# for twelve days after #217 (owner call 2026-09-22, numbers in #66).
 FREE_SEEDS = {"Star Catcher", "Brick Siege", "Brick Siege Lua", "Tiny Runner",
               "Letter Blitz", "Harpoon Pop", "Tap Only Red", "Pixel Pet",
-              "Bullet Storm"}
+              "Bullet Storm", "Bench", "Bench Lua"}
 
 
 def test_only_audited_seed_games_declare_free():

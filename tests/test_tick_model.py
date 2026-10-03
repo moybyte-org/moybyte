@@ -752,7 +752,7 @@ def test_an_imported_p8_cart_is_paced_by_the_host_now(tmp_path):
     from tools import import_p8
     from runtime import moy_carts
     ws = _ws(tmp_path)
-    if getattr(ws, "lua_runtime", None) is None:
+    if "lua" not in ws.runtimes:
         pytest.skip("no host Lua binding")
     src = ("pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
            "ticks = 0\nfunction _update60() ticks = ticks + 1 end\n"
@@ -844,6 +844,7 @@ def _player_with(lua, fused_cost):
     from runtime.player import Player
     p = Player.__new__(Player)
     p._lua = lua
+    p._lua_split = getattr(lua, "frame_split", None)   # _start_runtime binds it
     p._tick_edges = None
     p._keyp_latch = 0
     p.sched = TickScheduler()

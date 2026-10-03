@@ -79,7 +79,30 @@ VENDOR = {
     os.path.join(NATIVE, "moycore", "libmoy"): {
         "moy_lua.c": "libmoy/src/moy_lua.c",
         "moy_p8.c": "libmoy/src/moy_p8.c",
+        # The wasm binding (SPEC.md 16): the import table. It compiles to
+        # nothing unless an engine is in the build -- MOY_WASM where
+        # native/moy_wasm (WAMR, the boards) is, MOY_WASM_JS where
+        # native/moy_wasm_web (the browser's own engine) is; the unix build of
+        # moycore takes the file and gets an empty translation unit.
+        "moy_wasm.c": "libmoy/src/moy_wasm.c",
+        "moy_wasm.h": "libmoy/include/moy_wasm.h",
         "LICENSE": "LICENSE",
+    },
+    # The browser's wasm engine (native/moy_wasm_web): what libmoy's binding
+    # asks of a JavaScript embedder in C under MOY_WASM_JS -- the reaches into
+    # a sibling cart's memory, the run of a par item, and the exports the
+    # page's adapters call. moy-spec's own web player links the same file; the
+    # binding it serves is moycore's moy_wasm.c above.
+    os.path.join(NATIVE, "moy_wasm_web", "libmoy"): {
+        "embed.c": "libmoy/port/wasm/embed.c",
+        "LICENSE": "LICENSE",
+    },
+    # The WebAssembly text assembler moy-spec's own wasm fixtures are built
+    # with. The one file here that is not C: moybyte's wasm carts under test
+    # are WAT source too (never a committed binary), and this turns them into
+    # modules with nothing but Python -- no wabt, no wasm-ld, no network.
+    os.path.join(ROOT, "tools"): {
+        "wat.py": "tools/wat.py",
     },
 }
 

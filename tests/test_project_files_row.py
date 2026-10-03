@@ -19,6 +19,8 @@ from runtime import host_app, moy_carts, text_modes
 
 from ws_helpers import build_ws
 
+ROOT = Path(__file__).resolve().parent.parent
+
 
 _SRC = "def _init():\n    pass\n\n\ndef _draw():\n    cls(1)\n"
 
@@ -172,28 +174,27 @@ def test_an_asset_routes_to_its_own_tab(tmp_path):
 
 
 def test_a_cart_image_opens_in_paint_on_the_projects_kind(tmp_path):
-    """`cover.moyimg` used to answer NO EDITOR FOR THIS. It is a PICTURE, so it
-    takes the picture door -- Paint, on this project's kind, writing back into
-    the cart's own folder."""
+    """A cart's own image is a PICTURE, so it takes the picture door -- Paint,
+    on this project's kind, writing back into the cart's own folder."""
     ws = build_ws(tmp_path)
     cart = _project(ws, "Cover")
     path = Path(cart["path"])
     (path / "images").mkdir()
-    (path / "images" / "cover.moyimg").write_text(
+    (path / "images" / "bg.moyimg").write_text(
         moy_carts.encode_moyimg(4, 4, bytes((12,)) * 16))
     cart = ws.carts.reload(cart)
     cl = _on_config(ws, cart)
     cl._open_files()
-    cl._files_open("images/cover.moyimg")
+    cl._files_open("images/bg.moyimg")
 
     assert ws.wm.top_kind() == "artwork"
-    assert ws.artwork.doc_name() == "images/cover.moyimg"
+    assert ws.artwork.doc_name() == "images/bg.moyimg"
     assert ws.artwork.doc_kind() == moy_carts.project_kind(cart["path"])
     assert ws.artwork.editable()
 
     # ...and Paint writes it back to the CART, not into the gallery.
     ws.artwork.save(bytes((9,)) * 16, 4, 4)
-    blob = (path / "images" / "cover.moyimg").read_text()
+    blob = (path / "images" / "bg.moyimg").read_text()
     assert moy_carts.decode_moyimg(blob) == (4, 4, bytes((9,)) * 16)
     assert not moy_carts.list_files("drawings", ws.carts_root)
 
@@ -384,18 +385,18 @@ def test_a_project_kind_has_no_files_history_sidecar(tmp_path):
 
 def test_leaving_paint_returns_to_the_config_tab_through_the_loader(tmp_path):
     """The picture door keeps the loader in the loop exactly as the text door
-    does: the cover is written, the folder is re-read, and the Editor is where
-    the X lands."""
+    does: the picture is written, the folder is re-read, and the Editor is
+    where the X lands."""
     ws = build_ws(tmp_path)
     cart = _project(ws, "Cover2")
     path = Path(cart["path"])
     (path / "images").mkdir()
-    (path / "images" / "cover.moyimg").write_text(
+    (path / "images" / "bg.moyimg").write_text(
         moy_carts.encode_moyimg(4, 4, bytes((12,)) * 16))
     cart = ws.carts.reload(cart)
     cl = _on_config(ws, cart)
     cl._open_files()
-    cl._files_open("images/cover.moyimg")
+    cl._files_open("images/bg.moyimg")
     assert ws.wm.top_kind() == "artwork"
     assert ws._project_return is cart
 
@@ -404,5 +405,65 @@ def test_leaving_paint_returns_to_the_config_tab_through_the_loader(tmp_path):
 
     assert ws.wm.top_kind() == "menu" and ws.editor_app.tab == "cards"
     assert ws.project.cart.get("path") == cart["path"]
-    blob = (path / "images" / "cover.moyimg").read_text()
+    blob = (path / "images" / "bg.moyimg").read_text()
     assert moy_carts.decode_moyimg(blob) == (4, 4, bytes((5,)) * 16)
+
+
+# -- the cart's cover (SPEC.md 3.6) ---------------------------------------------
+
+def _cover_project(ws, name, data):
+    cart = _project(ws, name)
+    Path(cart["path"], "cover.png").write_bytes(data)
+    cart = ws.carts.reload(cart)
+    cl = _on_config(ws, cart)
+    cl._open_files()
+    cl._files_open("cover.png")
+    return cart, Path(cart["path"], "cover.png")
+
+
+def test_a_carts_cover_opens_in_paint_as_a_128_canvas_in_the_palette(tmp_path):
+    from ws_helpers import cover_bytes
+    ws = build_ws(tmp_path)
+    cart, path = _cover_project(ws, "Covered", cover_bytes(12, stripes=4))
+    assert ws.wm.top_kind() == "artwork"
+    assert ws.artwork.doc_name() == "cover.png"
+    assert ws.artwork.doc_kind() == moy_carts.project_kind(cart["path"])
+    w, h, pix = ws.artwork.load()
+    assert (w, h) == (128, 128)
+    assert pix[:128] == bytes((12,)) * 128 and pix[128:256] == bytes((4,)) * 128
+
+    # ...and Paint writes it back as an indexed cover.png, in the profile.
+    drawn = bytes((i // 128) % 64 for i in range(128 * 128))
+    assert ws.artwork.save(drawn, 128, 128)
+    data = path.read_bytes()
+    from runtime import cover_png
+    assert data[25] == 3                                  # colour type: indexed
+    assert cover_png.decode(data, 1, cover_png.INDEX, cover_png.moy64()) == drawn
+    assert not moy_carts.list_files("drawings", ws.carts_root)
+
+
+def test_a_direct_colour_cover_maps_to_the_palette_and_is_written_only_when_drawn(tmp_path):
+    """An RGB cover opens with each pixel its nearest palette colour, and
+    leaving Paint without drawing writes nothing -- the file the author made
+    stays as it is."""
+    ws = build_ws(tmp_path)
+    teapot = (ROOT / "ports" / "jet" / "teapot.moy" / "cover.png").read_bytes()
+    cart, path = _cover_project(ws, "Teapotish", teapot)
+    w, h, pix = ws.artwork.load()
+    assert (w, h) == (128, 128) and max(pix) < 64
+    layer = ws._apps_by_id["artwork"]
+    layer.close()
+    assert path.read_bytes() == teapot
+
+
+def test_a_cover_outside_the_profile_opens_blank_and_saving_replaces_it(tmp_path):
+    ws = build_ws(tmp_path)
+    wrong = (ROOT / "tests" / "cover_vectors" / "size_127x128.png").read_bytes()
+    cart, path = _cover_project(ws, "Wrong", wrong)
+    w, h, pix = ws.artwork.load()
+    assert (w, h) == (128, 128) and len(set(pix)) == 1
+    assert ws.artwork.editable()
+    assert path.read_bytes() == wrong              # nothing written by opening
+    assert ws.artwork.save(bytes((8,)) * (128 * 128), 128, 128)
+    from runtime import cover_png
+    assert cover_png.decode(path.read_bytes()) is not None

@@ -6,8 +6,8 @@ from somewhere durable. Actions artifacts expire; committing 7.4 MB of .bin per
 build would outgrow the whole repository within a month. A release costs a clone
 nothing, keeps the images forever, and gives humans a download page.
 
-TWO releases, one per branch/channel, and they never mix (CLAUDE.md ->
-"Branches and releases"):
+TWO releases, one per branch/channel, and they never mix (the `release` skill,
+.claude/skills/release/SKILL.md):
 
     master -> `firmware-latest`   stable: the site's flasher + the stable OTA
     dev    -> `firmware-beta`     beta:   the unstable OTA channel only

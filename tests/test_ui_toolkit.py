@@ -339,8 +339,11 @@ def test_settings_drag_release_never_clicks_a_row(tmp_path):
     assert ws.screen == "settings"
     # A clean tap (press + release, no travel) still selects the row it landed
     # on -- activation just moved from the press edge to the release.
-    sl.set_top = 0
-    sl.set_msel = 0
+    # Reset through the real path: since #113 Phase 5 the region owns the pixel
+    # offset, so the row slot alone is no longer the whole scroll state -- and
+    # the drag above left a fling coasting, which the next press would CATCH
+    # (stopping it instead of activating a row, exactly as intended).
+    sl.reset()
     idx = 1                                # WALLPAPER (row 0 is WIFI -- avoid it)
     assert sl._settings_row_visible(idx)
     x, y, w, h = sl._settings_row_rect(idx)

@@ -336,6 +336,46 @@ def test_every_native_denial_names_a_module_and_says_why(board):
 
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_native_take_names_a_module_and_says_why(board):
+    """A take is a written yes, held to a denial's standard: a module that
+    exists, and a reason."""
+    for name, entry in board_config.native_takes(BOARDS[board]).items():
+        assert entry.get("why", "").strip(), (
+            "%s takes native module %r without a why" % (board, name))
+        assert (ROOT / "native" / name / "micropython.cmake").exists(), (
+            "%s takes native module %r which does not exist under native/"
+            % (board, name))
+        assert name not in board_config.native_denials(BOARDS[board]), name
+
+
+# The WebAssembly tier ships on every console board or on none
+# (docs/wasm_tier_plan_2026-09.md), so its engine is the one shared module
+# whose default "yes" is not enough: every board file decides it in writing.
+CONSOLE_BOARDS = ("tdeck", "p4", "guition-s3", "guition-p4")
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_board_decides_the_wasm_engine(board):
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert "moy_wasm" in takes or "moy_wasm" in denies, (
+        "%s/board.toml neither takes nor denies moy_wasm" % board)
+    staged = "moy_wasm" in board_config.native_modules(BOARDS[board], ROOT)
+    assert staged == (board in CONSOLE_BOARDS), (
+        "%s: the wasm tier is on every console board or on none" % board)
+
+
+def test_a_module_both_taken_and_denied_is_refused(tmp_path):
+    (tmp_path / "board.toml").write_text(
+        '[native]\n[native.shared]\nsource = "native"\n'
+        '[[native.shared.deny]]\nmodule = "moy_wasm"\nwhy = "no"\n'
+        '[[native.shared.take]]\nmodule = "moy_wasm"\nwhy = "yes"\n',
+        encoding="utf-8")
+    with pytest.raises(ValueError):
+        board_config.native_modules(tmp_path, ROOT)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
 def test_build_sh_stages_native_via_the_declaration(board):
     """No hand-written native list in build.sh -- the same both-halves check
     as the Python side: the script must reach the stager (via the shared build
@@ -557,12 +597,43 @@ def test_the_soc_usb_boards_are_attach_only_and_the_external_uart_is_not():
         str(_DEVICE_BOARDS["guition-s3"]))["serial"]["usb"]
 
 
-def test_the_p4_chunk_stays_under_its_uart_ring():
-    """Measured 2026-08-19: a 44KB cart at the harness default of 768 failed
-    five times with a DIFFERENT bad hash each attempt and went clean at 256.
-    That UART's stdin ring is ~256 bytes with no flow control, so this is a
-    hardware bound, not a tuning preference -- raising it re-breaks the push."""
-    assert board_config.load(str(P4))["serial"]["chunk"] <= 256
+def test_the_p4s_chunk_and_window_fit_the_ring_its_build_gives_it():
+    """The Waveshare P4's serial is a UART with no flow control, so a byte
+    that arrives with the stdin ring full is dropped with no error: a `py`
+    line and a `recv` window each have to fit the ring whole. The ring is the
+    one tools/patch_stdin_ring.py gives this board's build -- on the stock 260
+    bytes a chunk of 768 corrupted a push five times running (2026-08-19). A
+    chunk's %r escaping can nearly double it, behind a ~40-byte prefix, and a
+    ring holds one byte less than its size."""
+    from tools import patch_stdin_ring
+    build = (P4 / "build.sh").read_text(encoding="utf-8")
+    assert re.search(r"^moybyte_patch_stdin_ring$", build, re.M), \
+        "the P4 build no longer takes the stdin ring its [serial] is sized for"
+    ser = board_config.load(str(P4))["serial"]
+    holds = patch_stdin_ring.RING_BYTES - 1
+    assert 2 * ser["chunk"] + 64 <= holds, (ser["chunk"], holds)
+    assert ser["window"] <= holds, (ser["window"], holds)
+
+
+def test_a_grown_stdin_ring_holds_a_window_and_never_meets_a_uart_isr():
+    """MOY_SERIAL_RING_BYTES moves a board's stdin ring into PSRAM so the
+    window the host sends on an ack lands while the store writes. It has to
+    hold a whole window, fit the ring's 16-bit count, and stay off a console
+    whose RX ISR runs with the cache off: the Waveshare P4's UART ISR is IRAM
+    and fills the ring during a flash write, which is why its ring is in TCM."""
+    found = {}
+    for name, d in _DEVICE_BOARDS.items():
+        for h in (d / "boards").glob("*/mpconfigboard.h"):
+            m = re.search(r"^#define MOY_SERIAL_RING_BYTES\s+\((\d+)\)",
+                          h.read_text(encoding="utf-8"), re.M)
+            if m:
+                found[name] = int(m.group(1))
+    assert set(found) == {"tdeck", "guition-s3", "guition-p4"}, found
+    for name, ring in found.items():
+        ser = board_config.load(str(_DEVICE_BOARDS[name]))["serial"]
+        assert 2 * ser["window"] <= ring <= 65535, (name, ring, ser["window"])
+        build = (_DEVICE_BOARDS[name] / "build.sh").read_text(encoding="utf-8")
+        assert not re.search(r"^moybyte_patch_stdin_ring$", build, re.M), name
 
 
 def test_push_cart_holds_no_per_board_branch():

@@ -1,3 +1,15 @@
+# Map (grep -n a name to jump there):
+#   reserve_p8_memory     take the PICO-8 buffers while the heap is whole
+#   MoycoreRun            one Lua cart run under moycore
+#   -- the compiled cart  aot_path, wasm_head, missing_imports, CartFrame, WasmRun
+#   aot_path              where a cart's compiled module for a chip lives
+#   missing_imports       what a module imports that this console's table lacks
+#   CartFrame             a compiled cart's frame on its way to the glass
+#   WasmRun               one compiled cart run
+#   make_moycore_runtime  the Lua runtime factory
+#   WasmRuntime           ws.runtimes["wasm"]
+#   make_wasm_runtime     the compiled-cart runtime, or None
+#   make_runtimes         every runtime this image has
 """The host half of moycore (stage 2): what the frame loop does around tick().
 
 `LuaCartRun` next door registers ~40 Python closures as Lua globals and the
@@ -62,18 +74,27 @@ except ImportError:                      # host tests importing the device modul
     from runtime.widgets import pointer_state
 
 try:
+    import cart_files as _cart_files
+except ImportError:                      # host tests importing the device module
+    from runtime import cart_files as _cart_files
+
+try:
     import moycore as _moycore
 except ImportError:                      # a build without the module
     _moycore = None
 
-# Hoisted out of _refresh, where it was an `import` statement executed once per
-# frame. Device-only, so it stays optional: the host and the web runner have no
-# device_util and simply skip the time slot (libmoy adds the intra-tick elapsed
-# term itself -- see modmoycore.c's h_time_ms).
 try:
-    from device_util import _ticks_ms, _ticks_diff
-except ImportError:
-    _ticks_ms = _ticks_diff = None
+    import moy_wasm as _moy_wasm         # the compiled cart's engine
+except ImportError:                      # a build without it: no wasm runtime
+    _moy_wasm = None
+
+# The cart's clock: ms since the Player's stamp, which snap_shared writes into
+# the snapshot's time slot -- the base libmoy's time() adds the milliseconds
+# inside the tick to (modmoycore.c's h_time_ms).
+try:
+    from ticks import _since_ms
+except ImportError:                      # host tests importing the device module
+    from runtime.ticks import _since_ms
 
 # What NOT to register on top of libmoy's table -- LIBMOY_VERBS (the names
 # libmoy's own binding installs) and NOT_REGISTRABLE (ours, each excluded for
@@ -159,12 +180,16 @@ class MoycoreRun:
         # lookup per frame in _refresh.
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP
-        self._I_TIME = _moycore.SNAP_TIME_MS
         # The slots and op codes lua_ext's shared bodies take, resolved once --
         # the same reason the SNAP_* lookups above are bound at construction.
         self._I_SNAP = snap_slots(_moycore)
         self._aq_ops = audio_ops(_moycore)
         self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
+        self._masks = [0, 0]             # reused: button_masks' answer
+        self._mask_inp = None            # the input _mask_ok answers for
+        self._mask_ok = False
+        self._split_us = array("i", bytearray(8))   # reused: tick_split's
+        self._split = [0.0, 0.0]         # reused: frame_split's answer
         self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
@@ -213,7 +238,7 @@ class MoycoreRun:
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
-            self.snap, self.aq, self.pmem_img, cfg, flags)
+            self.snap, self.aq, self.pmem_img, cfg, flags, True)
         # The superset, on top of libmoy's table and BEFORE the cart runs.
         # Anything callable in the namespace that libmoy did not already
         # install: registering a name libmoy owns would shadow the C verb with
@@ -287,15 +312,19 @@ class MoycoreRun:
         on the module object a dozen times a frame."""
         s = self.snap
         inp = self.ws.input
-        masks = getattr(inp, "button_masks", None)
-        if masks is None:
+        if inp is not self._mask_inp:
+            # Asked once per input object: a getattr that finds the method
+            # hands back a new bound method, and this runs every frame.
+            self._mask_inp = inp
+            self._mask_ok = getattr(inp, "button_masks", None) is not None
+        if not self._mask_ok:
             # The guard is BACK, and the reason is worth keeping: it was removed
             # on the argument that every tier builds the real InputState, which
             # was wrong -- there are TWO InputState classes (runtime/input.py
             # and modules/moybyte/input.py), the boards use the second, and
             # removing this dropped a Lua cart into the crash-to-code editor
-            # with `no attribute button_masks`. A per-frame getattr is cheap
-            # insurance against an input object this file has never heard of.
+            # with `no attribute button_masks`. One getattr per input object is
+            # cheap insurance against an input this file has never heard of.
             #
             # The fallback walks MOY_BUTTONS too. It used to carry its own copy
             # of the order, which made it the fourth in the tree and -- because
@@ -308,25 +337,25 @@ class MoycoreRun:
                 if inp.pressed(name):
                     pressed |= 1 << i
         else:
-            held, pressed = masks(MOY_BUTTONS)
+            held, pressed = inp.button_masks(MOY_BUTTONS, None, self._masks)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out)
-        if _ticks_ms is not None:
-            try:
-                s[self._I_TIME] = _ticks_diff(_ticks_ms(), inp.cart_start_ms)
-            except Exception:  # noqa: BLE001
-                pass
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms)
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):
         self._view = sync_view(self.ws, _moycore.view(), self._view)
 
     def _drain_audio(self):
+        # The generator lives one call down: a function holding one closes over
+        # its locals in cells made on EVERY call, and this is asked every frame
+        # while the queue is almost always empty.
         n = self.aq[0]
-        if n <= 0:
-            return
-        self.aq[0] = 0
+        if n > 0:
+            self.aq[0] = 0
+            self._drain_queued(n)
+
+    def _drain_queued(self, n):
         aq = self.aq
         slots = _moycore.AQ_SLOTS
         drain_audio(self.ns, self._aq_ops,
@@ -337,7 +366,8 @@ class MoycoreRun:
         return None
 
     def frame_split(self):
-        """(update_ms, draw_ms) for the last tick, or None.
+        """[update_ms, draw_ms] for the last tick, or None. The list is the
+        run's own, rewritten by the next call: the Player asks after every tick.
 
         The loop times `update()` and `draw()` to get its logic/render split,
         and both of those happen inside our update() -- so without this the
@@ -349,11 +379,13 @@ class MoycoreRun:
         and the loop keeps its own timing, which is wrong in the old way rather
         than crashing.
         """
-        f = getattr(_moycore, "tick_split", None)
-        if f is None:
+        if not hasattr(_moycore, "tick_split"):
             return None
-        upd, drw = f()
-        return (upd / 1000.0, drw / 1000.0)
+        us = _moycore.tick_split(self._split_us)
+        out = self._split
+        out[0] = us[0] / 1000.0
+        out[1] = us[1] / 1000.0
+        return out
 
     # The Player's scheduler (#217) clears this for a logic-only tick. A module
     # built before `tick` took the flag draws every tick, which is the fused
@@ -434,11 +466,616 @@ class MoycoreRun:
                 _moycore.close()
 
 
+# -- the compiled cart (docs/wasm_tier_plan_2026-09.md, phase 3) ------------
+
+# The only two AOT refusals that are TAMPER EVIDENCE -- a module whose
+# signature bytes are present but do not verify -- and so stay a hard
+# refusal to the ordinary error panel. Every other reason an AOT open can
+# fail (no file by this console's name, unsigned while Unknown sources is
+# off, a corrupted key) means only that THIS console's copy of the module is
+# unusable, not that the cart is; WasmRun retries those on the interpreter
+# instead ("A cart survives its firmware", 2026-09-30).
+_AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature")
+
+# The one non-tamper refusal that names a SIGNED-vs-not cause rather than a
+# stale/foreign module: `self.interp_cause` reads this to pick the notice's
+# sub-line ("isn't signed" against "needs an update", runtime/player.py).
+_AOT_UNSIGNED = "refused: unsigned module"
+
+# A load that stops on a helper the module calls and this firmware's runtime
+# does not register ("load: AOT module load failed: resolve symbol <name>
+# failed", #229) is the CONSOLE's gap, not the cart's: the module is the one
+# this console's chip and format name, and a firmware that registers the
+# helper loads it. `self.interp_cause` reads it as "firmware".
+_AOT_UNRESOLVED = "resolve symbol "
+
+
+def aot_path(cart_dir, main, chip, format):
+    """Where a cart's compiled module for `chip` and a compiled-code format
+    version sits: its `main` with `.wasm` replaced by `.<chip>.f<format>.aot`,
+    in the cart's folder. `format` is normally `_moy_wasm.FORMAT`, this
+    console's own. A cart may carry any number of these (one per chip and
+    format it has been built for, docs/wasm_tier_plan_2026-09.md, "A cart
+    survives its firmware") -- this names only the one THIS console would
+    take; a name that does not exist is not this console's, and the cart
+    plays on the interpreter instead of refusing. How a board finds the
+    module is host policy (the plan); tools/wasm_cart.py's `aot_name` states
+    the same rule and tests/test_wasm_cart.py holds the two equal."""
+    stem = main[:-5] if main.endswith(".wasm") else main
+    return "%s/%s.%s.f%s.aot" % (cart_dir, stem, chip, format)
+
+
+def wasm_head(path):
+    """The canonical module's bytes up to the end of its memory section --
+    what moy_wasm_check reads the declared memory from. Sections run in id
+    order and memory (5) precedes code and data, so this is the module's
+    small head, never its body. Everything read, when the file ends first."""
+    with open(path, "rb") as f:
+        data = f.read(8)
+        if data[:4] != b"\0asm":
+            return data
+        while True:
+            sid = f.read(1)
+            if not sid:
+                return data
+            data += sid
+            n = shift = 0
+            while True:
+                b = f.read(1)
+                if not b:
+                    return data
+                data += b
+                n |= (b[0] & 0x7F) << shift
+                shift += 7
+                if not b[0] & 0x80:
+                    break
+            if sid[0] > 5:
+                return data
+            body = f.read(n)
+            data += body
+            if sid[0] == 5 or len(body) < n:
+                return data
+
+
+
+def _uleb(b, i):
+    """The unsigned LEB128 at `b[i]`, and the index past it."""
+    v = shift = 0
+    while True:
+        c = b[i]
+        i += 1
+        v |= (c & 0x7F) << shift
+        shift += 7
+        if not c & 0x80:
+            return v, i
+
+
+def _limits(b, i):
+    """Past a table's or a memory's limits at `b[i]`."""
+    flags = b[i]
+    _, i = _uleb(b, i + 1)
+    if flags & 1:
+        _, i = _uleb(b, i)
+    return i
+
+
+def missing_imports(head, table):
+    """The names a compiled cart's module imports from "moy" that `table` --
+    this console's import table (`moycore.wasm_table()` on a board and in the
+    browser, `wasm_binding.table()` on the host) -- lacks, in the order the
+    module declares them. Every tier's runtime answers the Player's
+    `missing(cart)` through this, and the Player refuses a cart that names
+    any before it loads: a cart built for a newer console's table (moy-spec
+    SPEC.md 16.3). `head` is the module through its import section at least
+    (`wasm_head`). An import from another module or of another kind is the
+    cart's own error, which the engine's load check names; bytes that do not
+    parse answer what was read before them."""
+    out = []
+    if len(head) < 8 or head[:4] != b"\0asm":
+        return out
+    have = set(table)
+    i = 8
+    try:
+        while i < len(head):
+            sid = head[i]
+            size, i = _uleb(head, i + 1)
+            if sid != 2:
+                if sid > 2:
+                    return out
+                i += size
+                continue
+            count, i = _uleb(head, i)
+            for _ in range(count):
+                n, i = _uleb(head, i)
+                module = head[i:i + n]
+                n, i = _uleb(head, i + n)
+                name = head[i:i + n]
+                i += n
+                kind = head[i]
+                i += 1
+                if kind == 0:
+                    _, i = _uleb(head, i)
+                elif kind == 1:
+                    i = _limits(head, i + 1)
+                elif kind == 2:
+                    i = _limits(head, i)
+                elif kind == 3:
+                    i += 2
+                else:
+                    return out
+                if kind == 0 and module == b"moy":
+                    name = name.decode("utf-8")
+                    if name not in have and name not in out:
+                        out.append(name)
+            return out
+    except (IndexError, ValueError):
+        pass
+    return out
+
+
+def _sha256_file(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(4096)
+            if not b:
+                break
+            h.update(b)
+    return "".join("%02x" % c for c in h.digest())
+
+
+class CartFrame:
+    """A compiled cart's frame on its way to the glass straight from the
+    cart's memory (libmoy's frame hand-off): moy_fold.h's frame fold on the
+    banded S3 boards, the PPA's scale on the P4s (p4_canvas.present_frame).
+
+    While a run holds one, every blit the board takes leaves its frame where
+    the cart made it and the game canvas is not written: the console's
+    composite point hands the frame to the system canvas (`present_frame`),
+    which shows it from there and snapshots it by DMA into this run's
+    scratch -- the copy shown again when the cart does not replace the frame.
+    Anything that must draw over the frame first `settle`s it into the
+    canvas, the same bytes the blit would have written; the binding does the
+    same itself before the cart's next hook. The scratch is taken at the
+    first present and freed when the run closes, once nothing still reads
+    it."""
+
+    # What moy_fold copies of the game canvas over a frame: MOY_FOLD_MAX_PATCHES
+    # rects, MOY_FOLD_PATCH_BYTES of them (native/moy_flush/moy_fold.h).
+    MAX_PATCHES = 4
+    PATCH_BYTES = 8192
+
+    def __init__(self, w, h):
+        self.w = w
+        self.h = h
+        self.lut = array("H", bytearray(512))    # a palette frame's colours
+        self.rects = array("h", bytearray(2 * 4 * self.MAX_PATCHES))
+        # rect_views[n]: the first n rects, as the fold takes them -- made once
+        # rather than sliced on every frame an overlay patches.
+        self.rect_views = [None] + [memoryview(self.rects)[:4 * n]
+                                    for n in range(1, self.MAX_PATCHES + 1)]
+        self.nrects = 0
+        self.kept_off = 0                # where the last frame shown sits in the scratch
+        self.fmt = 0                     # its layout: moy_fold's LE565 1 / IDX8 2
+        self._scratch = None
+        self._kv = None                  # kept_view's slice, and what it was cut for
+        self._kv_s = None
+        self._kv_off = -1
+        self._kv_n = -1
+
+    def take(self):
+        """The frame to show, or None: the owed one, as a view into the
+        cart's memory (w*h bytes are indices whose colours are now in `lut`,
+        2*w*h bytes little-endian RGB565) -- or, on a frame the cart did not
+        replace it, the last one shown, still in the scratch while the canvas
+        lacks it."""
+        view = _moycore.frame(self.lut)
+        if view is not None:
+            self.fmt = 2 if len(view) == self.w * self.h else 1
+            return view
+        s = self._scratch
+        if s is None or not self.fmt or not _moycore.frame_kept():
+            return None
+        return self.kept_view(s, self.kept_off,
+                              self.w * self.h * (1 if self.fmt == 2 else 2))
+
+    def kept_view(self, s, off, n):
+        """`s[off:off + n]`, the frame's copy in the scratch, sliced once for
+        as long as the copy lands in the same place."""
+        if s is not self._kv_s or off != self._kv_off or n != self._kv_n:
+            self._kv = memoryview(s)[off:off + n]
+            self._kv_s = s
+            self._kv_off = off
+            self._kv_n = n
+        return self._kv
+
+    def settle(self, canvas=None):
+        """Write the frame the game canvas lacks into it: the owed one, or
+        the last one shown from its copy. Given the canvas, the opaque rects
+        already painted over the frame keep their pixels."""
+        n = self.nrects
+        self.nrects = 0
+        if not n or canvas is None:
+            _moycore.frame_settle()
+            return
+        buf = canvas._buf
+        stride = getattr(canvas, "_stride", canvas.w)
+        r = self.rects
+        kept = []
+        for i in range(n):
+            x = max(0, r[4 * i])
+            y = max(0, r[4 * i + 1])
+            x1 = min(canvas.w, r[4 * i] + r[4 * i + 2])
+            y1 = min(canvas.h, r[4 * i + 1] + r[4 * i + 3])
+            for row in range(y, y1):
+                a = 2 * (row * stride + x)
+                b = a + 2 * (x1 - x)
+                if b > a:
+                    kept.append((a, bytes(buf[a:b])))
+        _moycore.frame_settle()
+        for a, px in kept:
+            buf[a:a + len(px)] = px
+
+    def patch(self, x, y, w, h):
+        """The console is about to paint an opaque rect over the frame on the
+        game canvas: the flush shows the canvas there and the frame elsewhere.
+        False when the fold holds no more rects -- the painter settles."""
+        n = self.nrects
+        if n >= self.MAX_PATCHES:
+            return False
+        r = self.rects
+        r[4 * n] = x
+        r[4 * n + 1] = y
+        r[4 * n + 2] = w
+        r[4 * n + 3] = h
+        self.nrects = n + 1
+        return True
+
+    def presented(self, kept, off):
+        """The frame is on its way to the glass; `kept[off:]` is the copy
+        the binding writes the canvas from if the cart draws before its next
+        blit."""
+        _moycore.frame_presented(kept, off)
+        self.kept_off = off
+        self.nrects = 0
+
+    def scratch(self, n):
+        """At least `n` bytes of DMA-reachable PSRAM for the frame's
+        snapshot, or None when there are none to be had."""
+        s = self._scratch
+        if s is not None and len(s) >= n:
+            return s
+        self._free()
+        try:
+            import moy_alloc
+            s = moy_alloc.alloc(n, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+        except (ImportError, AttributeError, MemoryError):
+            s = None
+        self._scratch = s
+        return s
+
+    def close(self, comp):
+        """The run is over: wait out whatever still reads the scratch -- an
+        in-flight flush's synthesis, the snapshot's copy, an arm no flush has
+        taken yet, a PPA op -- put the last frame shown into the canvas, which
+        is all that holds the game from here on, and hand the scratch back."""
+        if self._scratch is None:
+            return
+        for name in ("fold_fence", "snap_fence", "frame_fence",
+                     "disarm_scale_fold"):
+            fn = getattr(comp, name, None)
+            if fn is not None:
+                fn()
+        _moycore.frame_settle()
+        self._free()
+
+    def _free(self):
+        s = self._scratch
+        self._scratch = None
+        self._kv = self._kv_s = None
+        if s is not None:
+            try:
+                import moy_alloc
+                moy_alloc.free(s)
+            except (ImportError, AttributeError, ValueError):
+                pass
+
+
+class WasmRun(MoycoreRun):
+    """One compiled cart run: moycore's console with libmoy's wasm import
+    table on it and the engine (moy_wasm) running the cart's module on its own
+    thread. The same shape as MoycoreRun -- the snapshot, the tick, quit, view,
+    the audio queue and pmem are that class's -- so only construction is
+    written here."""
+
+    def __init__(self, ws, ns, src):
+        del src                          # a compiled cart has no source text
+        if (_moycore is None or not getattr(_moycore, "WASM", 0)
+                or _moy_wasm is None):
+            raise RuntimeError("moycore has no wasm engine in this build")
+        project = getattr(ws, "project", None)
+        cart = getattr(project, "cart", None) or ws.cart or {}
+        path = cart["path"]
+        main = cart.get("main", "main.wasm")
+        pages = cart.get("memory")
+        if not pages:
+            raise RuntimeError('refused: the manifest declares no "memory"')
+        # A module for THIS console (chip + compiled-code format version) is
+        # found by name, never opened to find out whether it matches
+        # (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+        # 2026-09-30): a stale or foreign one is simply the wrong file name,
+        # so it is absent to this console, same as no module at all, and the
+        # cart plays on the interpreter -- main.wasm itself, which needs
+        # neither key nor signature. `self.interp` is what the Player reads
+        # to show the short notice (never the blocking panel a missing or
+        # unsigned module used to get); `self.interp_cause` ("missing",
+        # "unsigned" or "firmware") is which sub-line it shows.
+        #
+        # An engine with no compiled-module tier -- the browser's
+        # (native/moy_wasm_web), whose CHIP is None -- runs main.wasm itself
+        # at its full speed: no module is looked for, none is missing, and
+        # the cart is never "slow" for it.
+        native = _moy_wasm.CHIP is not None
+        has_module = False
+        module = None
+        if native:
+            module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
+            try:
+                open(module, "rb").close()
+                has_module = True
+            except OSError:
+                pass
+        # main.wasm is the cart: an AOT module is a compiled form of it. A
+        # cart without one is off the shelf already (moy_carts.load), so this
+        # is the file gone between the scan and the run, refused by name.
+        try:
+            head = wasm_head(path + "/" + main)
+        except OSError:
+            raise RuntimeError("refused: this cart's %s is not on this console" % main)
+        sha = _sha256_file(path + "/" + main) if has_module else None
+        self.interp = native and not has_module
+        self.interp_cause = "missing" if self.interp else None
+        self.ws = ws
+        self.ns = ns
+        self._dt = 0.0
+        canvas = ws.canvas
+        sheet = getattr(project, "sheet", None) if project is not None else None
+        tilemap = getattr(project, "tilemap", None) if project is not None else None
+        flags = getattr(project, "flags", None) if project is not None else None
+        self._I_BTN = _moycore.SNAP_BTN
+        self._I_BTNP = _moycore.SNAP_BTNP
+        self._I_SNAP = snap_slots(_moycore)
+        self._aq_ops = audio_ops(_moycore)
+        self._touch_out = [0, 0, 0, 0]
+        self._masks = [0, 0]
+        self._mask_inp = None
+        self._mask_ok = False
+        self._split_us = array("i", bytearray(8))
+        self._split = [0.0, 0.0]
+        self._I_QUIT = _moycore.SNAP_QUIT
+        self._I_KEY = _moycore.SNAP_KEY
+        self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
+        self.aq = array("h", bytearray(2 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
+        self.pmem_img = array("i", bytearray(4 * 256))
+        pmem = getattr(ws, "pmem", None)
+        cells = getattr(pmem, "cells", None) if pmem is not None else None
+        if cells is not None:
+            for i in range(min(256, len(cells))):
+                self.pmem_img[i] = int(cells[i])
+        wire = getattr(canvas, "_wire", None)
+        import device_canvas
+        if wire is None:
+            wire = device_canvas._PAL565_WIRE_BUF
+        swapped = device_canvas.PAL565_WIRE is not device_canvas.PAL565
+        cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
+        self._layers = self._images = None
+        _moycore.run_begin(
+            canvas._buf, canvas.w, canvas.h, wire,
+            getattr(sheet, "pix", None),
+            getattr(tilemap, "cells", None),
+            getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
+            self.snap, self.aq, self.pmem_img, cfg, flags, False)
+        self.snap[_moycore.SNAP_PLAYERS] = 1
+        # Every `read` the cart makes runs inside the store's gate, as every
+        # other store access does: on the T-Deck it drains the panel's flush
+        # first, because the card shares the panel's SPI bus. The owner's
+        # Unknown sources setting, as it stands at this load, decides whether
+        # an AOT module with no signature may load; the engine checks
+        # everything else either way. The engine raises MemoryError when it
+        # cannot hold the module file, and a run left open here would refuse
+        # every later cart's run_begin.
+        gate = getattr(ws, "_with_sd", None)
+        unknown_sources = bool(getattr(ws, "unknown_sources", False))
+        # The cart's written files (moy-spec SPEC.md 16.12), kept beside the
+        # carts store under the same gate; in the browser the page's keeper
+        # makes each write durable in OPFS (runtime/cart_files.py).
+        writable = cart.get("writable") or ()
+        files = _cart_files.CartFiles(path, gate, getattr(ws, "cart_keep", None))
+        joined = "\0".join(writable) if writable else None
+
+        def _open(target, target_sha, interp):
+            return _moycore.wasm_open(target, head, int(pages), target_sha, path,
+                                      swapped, gate, unknown_sources, interp,
+                                      joined, files)
+
+        try:
+            if has_module:
+                err = _open(module, sha, False)
+                if err and not err.startswith(_AOT_TAMPER_EVIDENCE):
+                    # Not tamper evidence -- a mismatched or unsigned module,
+                    # despite carrying this console's own file name (rare: a
+                    # push tool built it unsigned, or the file is corrupt),
+                    # or one calling a helper this firmware lacks. The cart
+                    # itself is fine; only this console cannot use its
+                    # module, so it plays on the interpreter, exactly as it
+                    # would have with no module at all.
+                    self.interp = True
+                    self.interp_cause = (
+                        "unsigned" if err.startswith(_AOT_UNSIGNED)
+                        else "firmware" if _AOT_UNRESOLVED in err
+                        else "missing")
+                    err = _open(path + "/" + main, None, True)
+            else:
+                err = _open(path + "/" + main, None, True)
+        except BaseException:
+            _moycore.close()
+            raise
+        if err:
+            try:
+                _moycore.close()
+            finally:
+                raise RuntimeError(err)
+        self._view = None
+        self._sync_view()
+        self.init = None                 # _init ran inside wasm_open
+        self.update = self._update
+        self.draw = self._draw_noop
+        # Frames go to the glass from the cart's memory where the system
+        # canvas can show them that way -- blit565's on every such board,
+        # blit's where it can also resolve a palette; everywhere else the
+        # blit writes the canvas as it always has.
+        self.frame = None
+        sc = getattr(ws, "sys_canvas", None)
+        if getattr(sc, "presents_frames", False):
+            self.frame = CartFrame(canvas.w, canvas.h)
+            ws.cart_frame = self.frame
+            _moycore.take_frames(
+                True, bool(getattr(sc, "presents_palette_frames", True)))
+
+    def close(self):
+        f = self.frame
+        if f is not None:
+            self.frame = None
+            if getattr(self.ws, "cart_frame", None) is f:
+                self.ws.cart_frame = None
+            f.close(getattr(self.ws, "comp", None))
+        MoycoreRun.close(self)
+
+
 def make_moycore_runtime(ws):
-    """The `ws.lua_runtime`-shaped factory, or None when unavailable."""
+    """The Lua runtime factory, or None when unavailable."""
     if _moycore is None:
         return None
 
     def _make(ns, src):
         return MoycoreRun(ws, ns, src)
     return _make
+
+
+# The most linear memory a footprint is asked about: 1 GiB, past any board's
+# PSRAM, so a larger declaration is simply too big and never overflows the
+# engine's machine word.
+_MAX_PAGES = 16384
+
+
+class WasmRuntime:
+    """`ws.runtimes["wasm"]`: called with `(ns, src)` it starts a WasmRun,
+    and before it does, the Player asks it what the cart imports that this
+    console lacks (`missing`), what the cart's load needs (`footprint`) and
+    what this board can give (`memory`)."""
+
+    def __init__(self, ws):
+        self.ws = ws
+
+    def __call__(self, ns, src):
+        return WasmRun(self.ws, ns, src)
+
+    def footprint(self, cart):
+        """(total, block) the cart's load takes from PSRAM, by the engine's
+        own sizing (moy_wasm.footprint / interp_footprint): its declared
+        memory, the file it loads and the pool that file gets. None when
+        there is nothing to measure -- no "memory", no cart path -- and the
+        load's own refusal says why.
+
+        The file is this console's own AOT module when the cart carries one;
+        when it does not, the cart plays on the interpreter instead
+        (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware"), and
+        the fit check sizes against main.wasm itself with the INTERPRETED
+        rule -- its pool is a different (measured) shape, and its module file
+        is never freed back to the linear memory the way an AOT load's is
+        (native/moy_wasm/README.md, "The interpreter tier") -- rather than
+        skipping a cart with no matching module, or sizing it as AOT would.
+        An engine with no compiled-module tier (CHIP None, the browser's)
+        sizes main.wasm by its one rule."""
+        pages = cart.get("memory")
+        path = cart.get("path")
+        if not pages or not path:
+            return None
+        main = cart.get("main", "main.wasm")
+        import os
+        gate = getattr(self.ws, "_with_sd", None)
+
+        def _size(p):
+            return gate(lambda: os.stat(p)[6]) if gate is not None else os.stat(p)[6]
+
+        size = None
+        interp = True
+        if _moy_wasm.CHIP is not None:
+            try:
+                size = _size(aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT))
+                interp = False
+            except OSError:
+                pass
+        if size is None:
+            try:
+                size = _size(path + "/" + main)
+            except OSError:
+                return None
+        if not size:
+            return None
+        return self.footprint_of(pages, size, interp)
+
+    def missing(self, cart):
+        """The names the cart's main.wasm imports that this console's table
+        lacks (`missing_imports`), which the Player refuses it for before it
+        loads. [] when there is nothing to read -- no module, or an engine
+        that does not report its table -- and the load answers for itself."""
+        table = getattr(_moycore, "wasm_table", None)
+        path = cart.get("path")
+        if table is None or not path:
+            return []
+        p = path + "/" + cart.get("main", "main.wasm")
+        gate = getattr(self.ws, "_with_sd", None)
+        try:
+            head = gate(lambda: wasm_head(p)) if gate is not None else wasm_head(p)
+        except OSError:
+            return []
+        return missing_imports(head, table())
+
+    def footprint_of(self, pages, module_len, interp):
+        """`footprint` from the numbers alone: `pages` of declared memory and
+        a module file of `module_len` bytes, interpreted or not. What Get
+        Carts asks before a download, off the index (#124)."""
+        memory = min(int(pages), _MAX_PAGES) * 65536
+        if interp:
+            return _moy_wasm.interp_footprint(memory, int(module_len))
+        return _moy_wasm.footprint(memory, int(module_len))
+
+    def memory(self):
+        """(free, largest block) of the memory a cart loads into, the
+        engine's own report: PSRAM on a board, the largest memory the
+        browser gives one module there."""
+        m = _moy_wasm.mem()
+        return m[3], m[4]
+
+
+def make_wasm_runtime(ws):
+    """The compiled-cart runtime, or None when this build has no engine
+    (moycore's WASM flag is the build's own answer)."""
+    if (_moycore is None or not getattr(_moycore, "WASM", 0)
+            or _moy_wasm is None):
+        return None
+    return WasmRuntime(ws)
+
+
+def make_runtimes(ws):
+    """`ws.runtimes` for this build: every runtime the image carries, by the
+    manifest name a cart gives it. An absent key is a runtime this build lacks,
+    and the Player's runtime-missing panel is what a cart naming it gets."""
+    out = {}
+    for name, make in (("lua", make_moycore_runtime), ("wasm", make_wasm_runtime)):
+        rt = make(ws)
+        if rt is not None:
+            out[name] = rt
+    return out

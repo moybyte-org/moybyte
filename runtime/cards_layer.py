@@ -1,3 +1,9 @@
+# Map (grep -n a name to jump there):
+#   _Prompt                  one open dialog and what OK does
+#   -- card geometry         the cards' constants (console.py imports them back)
+#   CardsLayout              responsive "Make it mine" geometry
+#   CardsLayer               the cards content layer: draw, input, prompts
+#   CardsLayer.scroll_cards  scroll the cards window
 """The "Make it mine" config-card editor (#3/#15), extracted from Workstation
 (runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 
@@ -999,7 +1005,7 @@ class CardsLayer:
             ws.editor_app.set_tab(tab)
             return
         if _modes.is_image(name):
-            # A cart's OWN image (`images/cover.moyimg`) is a picture, so it
+            # A cart's OWN image (`images/*.moyimg`, `cover.png`) is a picture, so it
             # takes the picture door -- the same `ws.open_image` the Files
             # router takes, opening it in Paint on this project's kind and
             # writing it back in place. A picture is never refused for its

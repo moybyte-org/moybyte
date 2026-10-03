@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   -- Layout geometry              baseline 320x240 constants and BlockLayout
+#   BlockLayout                     responsive block-editor geometry
+#   BlockEditorUI                   the structured-outline UI over a cart's block program
+#   BlockEditorUI.build             build the BlockEditor over the cart's program
+#   BlockEditorUI.save_blocks       compile-on-save to the cart's source
+#   BlockEditorUI.graduate_to_code  the one-way graduation to code
 """The block editor's UI layer (issue #29 Part 2): the structured-outline
 screen, its modal insert menu, and the inline number/name/text prompts drawn
 over a cart's block program.

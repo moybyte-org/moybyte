@@ -63,10 +63,20 @@ moybyte_patch_esp_hosted_bump esp32p4
 moybyte_patch_native_code_free
 moybyte_patch_espnow_ring_race
 
+# The console is the SoC's USB-Serial/JTAG: it takes, when it starts, what a
+# host sent during the bootloader, instead of leaving it in the FIFO for a
+# whole boot (tools/patch_usj_rx_init.py).
+moybyte_patch_usj_rx_init
+
 # 2e) REPR_C -- FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT (the Waveshare's
 #     build.sh carries the measured argument): every board that can hold a
-#     link runs REPR_C.
+#     link runs REPR_C. With it, the map-lookup cache index re-aimed for
+#     REPR_C (#77), paired with mpconfigboard.h's 512-slot table.
 moybyte_patch_repr_c
+moybyte_patch_map_cache_for_repr_c
+# Size-class run hints for gc_alloc (#66): every console board takes it; the
+# lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
+moybyte_patch_gc_run_hints
 
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # MOYBYTE_GC_SPLIT_RESERVE is set by the two S3 boards' mpconfigboard.h alone,
@@ -75,6 +85,20 @@ moybyte_patch_repr_c
 # DECLINED moybyte_patch_psram_retune -- not applicable: an ESP32-S3 MSPI
 # timing-tuner patch (#169); this is an ESP32-P4 and the file does not exist
 # in its build.
+
+# DECLINED moybyte_patch_stdin_ring -- the Waveshare's 4 KB stdin ring and its
+# UART RX wake. Its serial is a UART; this board's is the SoC's
+# USB-Serial/JTAG, whose ISR takes only what the ring has room for while the
+# USB host waits with the rest, so a heap collection costs it throughput and
+# never a byte, and which already wakes the reader.
+
+# LittleFS sized for a flash store: the cart store is this board's internal
+# flash, which the stock sizes program 128 bytes at a time and search for free
+# blocks 256 at a time. tools/patch_lfs_sizes.py carries the measurements.
+moybyte_patch_lfs_sizes
+
+# DECLINED moybyte_patch_sdcard_runs -- machine.SDCard in multi-block runs.
+# This console has no card in play: carts live on the internal flash VFS.
 
 # ---------------------------------------------------------------------------
 # 3) Stage: the shared native modules + the P4 silicon tier (board.toml

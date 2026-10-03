@@ -410,7 +410,7 @@ def test_the_notes_and_drawings_grids_page_through_everything(tmp_path):
 
 # -- a cart's own image is a PICTURE ------------------------------------------
 
-def _cart_image(cart, name="cover.moyimg", w=4, h=4, value=12):
+def _cart_image(cart, name="bg.moyimg", w=4, h=4, value=12):
     import os
     d = os.path.join(cart["path"], "images")
     if not os.path.isdir(d):
@@ -421,7 +421,7 @@ def _cart_image(cart, name="cover.moyimg", w=4, h=4, value=12):
 
 
 def test_a_cart_image_opens_in_paint_from_the_projects_root(tmp_path):
-    """`cover.moyimg` answered NO EDITOR FOR THIS. A picture always has one."""
+    """A cart's own image is a PICTURE, and a picture always has an editor."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
     cart = _a_project(ws)
@@ -448,7 +448,7 @@ def test_paint_writes_a_cart_image_back_into_the_cart(tmp_path):
     kind = moy_carts.project_kind(cart["path"])
     assert moy_carts.decode_moyimg(
         moy_carts.load_file(kind, name, ws.carts_root)) == (4, 4, bytes((3,)) * 16)
-    assert "cover" not in moy_carts.list_files("drawings", ws.carts_root)
+    assert "bg" not in moy_carts.list_files("drawings", ws.carts_root)
 
 
 def test_a_gallery_drawing_still_opens_on_the_drawings_kind(tmp_path):
@@ -485,7 +485,7 @@ def test_a_picture_paint_cannot_read_opens_read_only_from_files(tmp_path):
 
 
 def test_the_deep_chain_still_finds_its_way_back_to_files(tmp_path):
-    """Files -> a project -> that cart's cover -> Paint. Every X walks one step
+    """Files -> a project -> that cart's image -> Paint. Every X walks one step
     back out: the Editor's Config tab, then the Files shelf, then the launcher.
     The app return has to survive the two hops that are not apps."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))

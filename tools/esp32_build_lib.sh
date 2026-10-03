@@ -81,6 +81,29 @@ moybyte_setup_idf() {
     command -v idf.py >/dev/null 2>&1 || { echo "!! idf.py still missing after install.sh" >&2; exit 1; }
   fi
   set -u
+  moybyte_ccache
+}
+
+# One compiler cache for every checkout of this repository on this machine: the
+# main checkout and each worktree (tools/worktree.py) build through ccache's
+# one directory. Paths under the main checkout are hashed relative to the
+# build directory (CCACHE_BASEDIR) and the build directory itself is not
+# hashed (CCACHE_NOHASHDIR: only the ELF's debug info names it, never the
+# .bin), so a worktree's first build reuses what another tree compiled. The
+# IDF is named by the path the build was given (a worktree's link), not by
+# the directory activate.py resolves it to, so its sources sit at the same
+# relative place from every tree's build. Local only: CI sets its own
+# IDF_CCACHE_ENABLE and keeps its cache per board. Each setting the caller
+# made wins.
+moybyte_ccache() {
+  [ -z "${CI:-}" ] || return 0
+  command -v ccache >/dev/null 2>&1 || return 0
+  local common
+  common="$(git -C "${REPO_ROOT}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  export IDF_CCACHE_ENABLE="${IDF_CCACHE_ENABLE:-1}"
+  export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$(dirname "${common}")}"
+  export CCACHE_NOHASHDIR="${CCACHE_NOHASHDIR:-1}"
+  export IDF_PATH="${IDF_DIR}"
 }
 
 # Append an IDF component to the esp32 port's IDF_COMPONENTS list (idempotent).
@@ -145,6 +168,95 @@ moybyte_patch_repr_c() {
     }
     echo "== patched mpconfigport.h: MICROPY_OBJ_REPR_C (#66)"
   fi
+}
+
+# The map-lookup cache's slot index, re-aimed for REPR_C (#77). py/map.c
+# picks the slot as `index >> 2` -- "shift down by two to remove the tag
+# bits", which is REPR_A's qstr layout `(q << 2) | 2`. REPR_C tags a qstr as
+# `(q << 4) | 6` (py/obj.h), so after `>> 2` the two low bits are constant for
+# EVERY qstr key and the 128-slot cache offers attribute, global and method
+# lookups 32 slots; a gc-block pointer key (16-byte blocks) reaches the same
+# 32. Shifting by the width of the tag REPR_C actually uses gives all 128 back
+# for no RAM at all. Small-int keys fold 8-to-1 in exchange, which is a
+# false-negative hint that falls through to the normal probe, on the rarest
+# key kind. On its own this measured NULL on three boards; it pays together
+# with the 512-slot table each console board's mpconfigboard.h declares.
+#
+# A consequence of REPR_C and REFUSED without it: a REPR_A board (the Zero
+# declines REPR_C) is right at 2 and would be four times WORSE at 4, so this
+# checks that moybyte_patch_repr_c has run on the tree first. Same
+# guarded-sed shape, and the same reason the guard is the point. Reads
+# MPY_DIR.
+moybyte_patch_map_cache_for_repr_c() {
+  local f="${MPY_DIR}/py/map.c"
+  grep -q "MICROPY_OBJ_REPR_C" "${MPY_DIR}/ports/esp32/mpconfigport.h" || {
+    echo "!! map-cache shift refused -- this tree is not REPR_C (call moybyte_patch_repr_c first, or decline both)" >&2
+    exit 1
+  }
+  if ! grep -q "Moybyte: REPR_C tags a qstr" "${f}"; then
+    sed -i 's|^#define MAP_CACHE_OFFSET(index) ((((uintptr_t)(index)) >> 2) % MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE)$|#define MAP_CACHE_OFFSET(index) ((((uintptr_t)(index)) >> 4) % MICROPY_OPT_MAP_LOOKUP_CACHE_SIZE) /* Moybyte: REPR_C tags a qstr in 4 bits, not 2 */|' \
+      "${f}"
+    grep -q "Moybyte: REPR_C tags a qstr" "${f}" || {
+      echo "!! map-cache shift patch did not apply -- py/map.c's MAP_CACHE_OFFSET line changed shape" >&2
+      exit 1
+    }
+    echo "== patched py/map.c: MAP_CACHE_OFFSET >> 4 for REPR_C"
+  fi
+}
+
+# Size-class free-run hints for gc_alloc (#66). The stock allocator keeps one
+# hint per heap area and a multi-block allocation never advances it, so each
+# one re-walks every hole below the live frontier that is too small for it --
+# 100-800 us a call on the S3 boards with a cart up. tools/patch_gc_run_hints.py
+# is the patch and its own documentation: all-or-nothing, idempotent, and it
+# refuses a tree whose lines changed shape. Independent of REPR_C.
+moybyte_patch_gc_run_hints() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_run_hints.py" "${MPY_DIR}" || exit 1
+}
+
+# A 4 KB stdin ring, in the ESP32-P4's TCM, for a board whose serial is a
+# UART, and an RX ISR that wakes the reader. The port's stock ring is 260 bytes
+# and the UART has no flow control, so a heap collection landing while a long
+# line arrives drops bytes with no error; and the stock UART ISR never wakes
+# the MicroPython task, so a reader waiting on the ring sleeps out its tick.
+# tools/patch_stdin_ring.py is the patch, its sizing and its placement:
+# all-or-nothing per file, idempotent. A USB-Serial/JTAG board backpressures,
+# already wakes its reader, and declines it.
+moybyte_patch_stdin_ring() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_stdin_ring.py" "${MPY_DIR}" || exit 1
+}
+
+# The USB-Serial/JTAG console takes, when it starts, the bytes a host sent
+# before it did. The stock init clears the RX interrupt of a packet that
+# landed during the bootloader and leaves the packet in the FIFO until the
+# first read of stdin, a whole boot later; meanwhile a host that reopens the
+# port gets its line-state request delivered as data, 0x03 included -- Ctrl-C
+# to the boot. tools/patch_usj_rx_init.py is the patch and the measurement;
+# idempotent. A board whose console is a UART declines it.
+moybyte_patch_usj_rx_init() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_usj_rx_init.py" "${MPY_DIR}" || exit 1
+}
+
+# LittleFS's default program size and lookahead, 32 -> 256 each, so a P4's
+# flash store programs 1 KB of a file at a time instead of 128 bytes and walks
+# the filesystem for free blocks an eighth as often. tools/patch_lfs_sizes.py is
+# the patch and the measurements; all-or-nothing, idempotent. Only a board
+# whose cart store is its internal flash takes it.
+moybyte_patch_lfs_sizes() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_lfs_sizes.py" "${MPY_DIR}" || exit 1
+}
+
+# machine.SDCard moves sectors in multi-block runs through an internal DMA
+# bounce, where IDF moves a PSRAM buffer one single-block command per sector.
+# tools/patch_sdcard_runs.py is the patch; all-or-nothing, idempotent. Only a
+# board whose card is machine.SDCard takes it.
+moybyte_patch_sdcard_runs() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_sdcard_runs.py" "${MPY_DIR}" || exit 1
 }
 
 # Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
@@ -250,10 +362,10 @@ moybyte_stage_native() {
 # ("tdeck"/"p4"), $2 the path to the moy_ota.py this image freezes (the SHARED
 # device/moy_ota.py -- both boards freeze a staged copy of the same file, so
 # both read the same source of FIRMWARE_VERSION/FIRMWARE_NAME). Writes
-# ${MODULES_DIR}/_ota_build.py and ${DIST_DIR}/ota_build.json, and echoes the
-# identity. The CHANNEL is a BUILD choice (MOYBYTE_OTA_CHANNEL, default
-# stable), so it stays clean across merges; a beta's VERSION is the build
-# epoch, auto-newer on every publish.
+# ${MODULES_DIR}/_ota_build.py and ${DIST_DIR}/ota_build.json (which also
+# names the commit), and echoes the identity. The CHANNEL is a BUILD choice
+# (MOYBYTE_OTA_CHANNEL, default stable), so it stays clean across merges; a
+# beta's VERSION is the build epoch, auto-newer on every publish.
 moybyte_ota_identity() {
   local board_id="$1" ota_py="$2"
   OTA_CHANNEL="${MOYBYTE_OTA_CHANNEL:-stable}"
@@ -283,9 +395,17 @@ VERSION = ${OTA_VERSION}
 LABEL = "${OTA_LABEL}"
 BOARD = "${board_id}"
 EOF
+  # The commit the image is built from (REPO_ROOT's), `+` when tracked files
+  # differ from it. The JSON only: the image does not change with the commit.
+  local commit="unknown"
+  if [ -n "${REPO_ROOT:-}" ] && commit="$(git -C "${REPO_ROOT}" rev-parse --short=8 HEAD 2>/dev/null)"; then
+    git -C "${REPO_ROOT}" diff --quiet HEAD -- 2>/dev/null || commit="${commit}+"
+  else
+    commit="unknown"
+  fi
   mkdir -p "${DIST_DIR}"
   cat > "${DIST_DIR}/ota_build.json" <<EOF
-{"channel": "${OTA_CHANNEL}", "version": ${OTA_VERSION}, "label": "${OTA_LABEL}", "board": "${board_id}"}
+{"channel": "${OTA_CHANNEL}", "version": ${OTA_VERSION}, "label": "${OTA_LABEL}", "board": "${board_id}", "commit": "${commit}"}
 EOF
   echo "OTA build identity: board=${board_id} channel=${OTA_CHANNEL} version=${OTA_VERSION} label='${OTA_LABEL}'"
 }

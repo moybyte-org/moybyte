@@ -94,6 +94,7 @@ roles it declared:
 | `ctx.wallpaper` | the desktop-backdrop capability (this app and Paint only) |
 | `ctx.artwork` | the ArtworkService handle (Paint's document model) |
 | `ctx.clipboard` | the system cut/copy/paste buffer (#132) |
+| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, the store session an install writes in, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves |
 | `ctx.shell` | the escape hatch -- see below |
 
 Read that module for the signatures; it is the authority and this table is a
@@ -130,7 +131,8 @@ app will never be granted. Giving the widget the files role closes it.
 `close()` is optional and the host calls it when your app comes off the screen,
 whatever route took it there. Implement it if you persist on an idle debounce --
 it should be **change-gated and cheap**, because a pop home must not cost a
-flash write for an app nobody edited (~800ms on the P4).
+store write for an app nobody edited — a write is a floor plus the payload
+(#154), and the floor alone is more than a frame.
 
 `commit()` (see "The bar contract" below) is its forced twin for an explicit
 exit GESTURE: the bar's context-X, or the WM strip's X on the windowed tier.
@@ -242,8 +244,8 @@ proves it with one cart source opened twice, one manifest line apart.
 | `launch` | `open_app(id)` |
 
 Never grantable, whatever a manifest says: `shell`, `carts` (a cart that can
-author carts can escalate itself), `wallpaper`, `artwork`, `damage`, `surface`,
-`clipboard`, `notify`. Firmware update and reboot are not roles at all. The
+author carts can escalate itself), `install` (the same, with somebody else's
+cart), `wallpaper`, `artwork`, `damage`, `surface`, `notify`. Firmware update and reboot are not roles at all. The
 enforcement is that the permission table is an ALLOWLIST, so a role nobody
 mapped is ungrantable by construction; a test asserts every role in
 `app_context.ROLES` is classified as one or the other, so ADDING a role forces

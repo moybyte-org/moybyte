@@ -1,0 +1,7 @@
+{
+  "format": "moy-1",
+  "title": "Read Dir Wasm",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 1
+}

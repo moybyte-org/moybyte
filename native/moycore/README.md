@@ -17,6 +17,103 @@ half: what a *moybyte* console is made of.
 | pmem | a C array with a dirty flag, the shape the device already defers it to (#66) |
 | tile flags | 512 bytes COPIED in at `run_begin` (SPEC.md 3.5) -- the one buffer here that is not the caller's, because C writes it (`fset`, a poke to `0x3000`, the p8 shim's `__moy_map_flags`) and the caller may hand over a plain `bytes` |
 
+## The compiled cart (`run_begin(..., vm=False)` + `wasm_open`)
+
+A `"runtime": "wasm"` cart (docs/wasm_tier_plan_2026-09.md) runs on the SAME
+console -- canvas, snapshot, audio queue, pmem, flags, `tick`, `view`,
+`pmem_image`, `retarget`, `close` -- with libmoy's wasm import table
+(`libmoy/moy_wasm.c`, vendored) in place of a Lua state. `run_begin`'s last
+argument says which: False builds the console alone, and `wasm_open(module,
+wasm_head, pages, wasm_sha, cart_dir, wire_swapped, gate, allow_unsigned)`
+hands it to the ENGINE, `native/moy_wasm`, which owns the runtime, the
+signature (`allow_unsigned` is the console's Unknown sources setting), the
+load, the provenance key and the thread everything WAMR does runs on. This half binds
+and nothing else: it registers the table, checks the module's shape against
+the manifest's pages before its memory exists, binds the instance to the
+console and calls the three hooks, each on the engine's thread through its
+session callbacks
+(`native/moy_wasm/moy_wasm_session.h`). `tick` then runs `_update` and `_draw`
+there and times the halves for `tick_split`. `wasm_table()` is the table's
+names, which the Player holds a module's imports to before it opens one
+(`device/moycore_glue.missing_imports`).
+
+Every host callback the table reaches from that thread is a C read or write
+against the console except the ones that need the VM -- `read`, the cart's own
+folder through the VFS; `cfg`, the config dict; and the cart's written files
+(moy-spec SPEC.md §16.12: `write`, `erase`, `list` and `read`'s written copy),
+which `wasm_open` hands it as `runtime/cart_files.py`'s store -- and those run
+on the MicroPython task through `moy_wasm_on_vm` while it waits on the call.
+
+A cart's `par` items run on the engine's lanes: moycore hands the binding
+`moy_wasm_session_lanes()` of them and their `lane_go`/`lane_wait`, and the
+binding runs a sibling instance of the cart on each (the engine's README
+says where they run). An item reaches no console state -- an import from one
+traps -- so nothing here is touched from another core.
+
+**A compiled cart's samples go to the speaker's mixer.** `snd` (22,050 Hz
+mono, a queue of 2,048 frames; moy-spec SPEC.md §16.9) is libmoy's
+`moy_stream`, and where the image carries `moy_audio` (its cmake defines
+`MOY_AUDIO_SND`) and the core-1 feeder runs, moycore points the binding's
+`snd` at it (`native/moy_audio/moy_audio_snd.h`): the feeder adds the queue
+into every chunk after the synth, under the same master level, so the cart's
+§8 verbs, the console's sounds and Settings' volume all still apply and the
+I2S channel never changes hands. While the stream plays the feeder runs a
+shallow pipeline, 128-frame blocks into a 4 x 128 ring (`modmoy_audio.c`'s
+header), so a cart's samples reach the speaker about 29 ms after it takes
+them. `close()` drops what is queued. A board
+without a speaker leaves `snd` to the binding, which drains the queue by the
+console's clock and drops the samples, so the cart meets the same
+backpressure. `moy_audio.snd_counts()` is the stream from both ends -- frames
+the cart queued, frames the feeder played, frames it found none -- and the
+`SNDSTREAM` diag line prints it beside `AUDIORATE`. Each
+`read` runs inside `gate(fn)`, the store's own gate (`ws._with_sd`), as every
+other store access does: on the T-Deck that drains the panel's flush before
+the card, which shares its SPI bus, is touched. The run's own state (libmoy's
+per-run struct, about 4 KB), the table's
+registration storage -- libmoy's table is a read-only template that
+`moy_wasm_register` copies into storage the host keeps until the runtime is
+destroyed -- and a layer's pixels come from PSRAM and go back at `close()`, so
+an idle desk carries a pointer, not the struct or the table. A trap clears the
+canvas before the console paints its report, so the frame it interrupted is
+never presented; `quit()` ends the cart where it stands (`wasm_quit()` says so).
+
+**A frame can go to the glass from the cart's own memory.** libmoy's
+binding offers every `blit`/`blit565` frame to the host (`moy_wasm.h`'s
+`frame`), and while the board's system canvas `presents_frames` --
+`take_frames(True, palette)`, set by `WasmRun` for its run -- moycore takes
+it: the canvas is not written, and the frame is owed. `palette` is the
+canvas's `presents_palette_frames`: a banded S3 board takes both layouts, a
+P4 blit565's alone (ESP-IDF disables the PPA's palette mode), so a palette
+frame there is written by the blit as ever. `frame(lut)` hands the owed frame
+to Python as a view into the cart's memory (a palette frame's 256 wire
+colours copied into `lut`); the console's composite point passes it to the
+system canvas (`present_frame`), which snapshots it by DMA into the run's
+scratch and shows it -- a banded flush resolves it band by band
+(`native/moy_flush/moy_fold.h`), a P4's PPA scales it
+(`device/p4_canvas.py`) -- and `frame_presented(copy, off)` tells the binding
+where that snapshot keeps it. Everything that would read or draw over a frame
+the canvas lacks gets it first, in the binding's one conversion body: a verb
+over it, `frame_settle()` (the console's own painters, the fallback when the
+board declines, and the run's close -- the owed frame or the snapshot's), and
+the cart's next hook when nothing showed it; a cart that draws on the screen
+before its next blit has the screen written from the snapshot, and a trap
+drops the snapshot with the frame it interrupted. The FPS chip and the perf
+HUD line are opaque rects, so they are declared (`ws.patch_cart_frame`) and
+taken from the game canvas instead. The proposal's rule is what makes the
+late read legal: a frame stays as blitted until `_draw` returns.
+
+It compiles only when an engine is in the image: `native/moy_wasm`'s cmake
+defines `MOY_WASM` on the boards, and in the web runner `native/moy_wasm_web`'s
+fragment defines `MOY_WASM_JS` -- the browser's own WebAssembly engine behind
+the same session surface, whose binding is libmoy's JavaScript-embedder build.
+Where libmoy's API differs by engine (registering the table, checking a loaded
+module, binding, calling a hook, `par`'s lanes, the frame hand-off) so do the
+session callbacks, and nothing else does. `moycore.WASM` is 1 in both and 0 on
+the unix build, where `libmoy/moy_wasm.c` is an empty translation unit. The
+MicroPython surface is unconditional, because qstr scanning does not see those
+defines. `device/moycore_glue.py`'s `WasmRun` is the glue on every tier but the
+host, whose twin is `runtime/moyhost_wasm.c`.
+
 ## What it does NOT compile
 
 Neither the raster nor a Lua VM: the binary already has one of each
@@ -247,6 +344,18 @@ ARMS as well as sets, so it survives the relaunch every A/B tool performs, and
 an armed mode is applied AFTER `load()`'s settling collect so a `stop` never
 applies to the parse burst — the run's high-water mark, and the one thing that
 must still be collected.
+
+**A run is GENERATIONAL, and Lua's own default is not.** `load()` sets the mode
+itself, because the default INCREMENTAL collector is not incremental at a
+frame's scale: `incstep` paces itself against the ALLOCATION RATE — about a
+hundred bytes of traversal per byte the cart allocates, at the default
+`stepmul` — so once a cycle starts it walks a heap several times over inside
+one frame's worth of churn, and the cart pays the whole cycle as ONE
+stop-the-world pause. `gcstepsize` does not divide that: it says how often a
+step runs, never how much of the cycle is left to do, and lowering it measured
+NULL on glass. A minor collection traverses only what was allocated since the
+last one, which is a frame's worth by construction. #107 is where the numbers
+live, and `luagc inc` is how a run goes back on Lua's schedule for an A/B.
 
 **Stopping it is the direct measurement of what it costs**, which is why the
 verb exists at all: the difference between a window with the collector running

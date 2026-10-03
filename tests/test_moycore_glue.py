@@ -43,12 +43,15 @@ host execution of), 82 red, no survivors.
 
 import ast
 import importlib.util
+import os
 import re
 import sys
 import types
 from pathlib import Path
 
 import pytest
+
+from tools.wasm_module import format_version
 
 ROOT = Path(__file__).resolve().parent.parent
 GLUE_SRC = ROOT / "device" / "moycore_glue.py"
@@ -160,10 +163,19 @@ class FakeMoycore(types.ModuleType):
         self.pmem_image_result = True
         self.pmem_image_fill = None
         self.closes = 0
+        self.wasm_open_err = None
+        # A retry (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+        # firmware") calls wasm_open a second time; set this to a list to
+        # answer each call in turn instead of the same wasm_open_err always.
+        self.wasm_open_errs = None
+        self.owed_frame = None
+        self.owed_lut = None
+        self.kept = False
         for verb in ("run_begin", "register", "exec", "load", "tick",
                      "tick_split", "pmem_image", "retarget", "close",
                      "active", "view", "set_sram_floor", "alloc_stats",
-                     "get_global"):
+                     "get_global", "wasm_open", "take_frames", "frame",
+                     "frame_settle", "frame_presented", "frame_kept"):
             assert verb in C_NAMES, verb
             setattr(self, verb, getattr(self, "_" + verb))
 
@@ -203,9 +215,12 @@ class FakeMoycore(types.ModuleType):
         self._log("tick", dt)
         return self.tick_err
 
-    def _tick_split(self):
+    def _tick_split(self, out=None):
         self._log("tick_split")
-        return self.split
+        if out is None:
+            return self.split
+        out[0], out[1] = self.split
+        return out
 
     def _pmem_image(self, arr):
         self._log("pmem_image")
@@ -236,18 +251,39 @@ class FakeMoycore(types.ModuleType):
     def _get_global(self, name):
         return None
 
+    def _wasm_open(self, *a):
+        self._log("wasm_open", *a)
+        if self.wasm_open_errs is not None:
+            return self.wasm_open_errs.pop(0) if self.wasm_open_errs else None
+        return self.wasm_open_err
+
+    def _take_frames(self, on, palette=True):
+        self._log("take_frames", on, palette)
+
+    def _frame(self, lut_out):
+        self._log("frame")
+        if self.owed_lut is not None:
+            memoryview(lut_out).cast("B")[:] = self.owed_lut
+        return self.owed_frame
+
+    def _frame_settle(self):
+        self._log("frame_settle")
+
+    def _frame_presented(self, kept=None, off=0):
+        self._log("frame_presented", kept, off)
+
+    def _frame_kept(self):
+        return self.kept
+
 
 class Clock:
-    """`device_util`'s tick pair, injected -- no wall clock anywhere."""
+    """`ticks._since_ms`, injected -- no wall clock anywhere."""
 
     def __init__(self, ms=0):
         self.ms = ms
 
-    def ticks_ms(self):
-        return self.ms
-
-    def diff(self, a, b):
-        return a - b
+    def since_ms(self, start):
+        return self.ms - start
 
 
 class FakeCanvas:
@@ -332,7 +368,7 @@ class FakeInput:
         for k, v in kw.items():
             setattr(self, k, v)
 
-    def button_masks(self, order):
+    def button_masks(self, order, player=None, out=None):
         self.mask_calls.append(order)
         h = p = 0
         for i, name in enumerate(order):
@@ -340,7 +376,10 @@ class FakeInput:
                 h |= 1 << i
             if name in self._pressed:
                 p |= 1 << i
-        return h, p
+        if out is None:
+            return h, p
+        out[0], out[1] = h, p
+        return out
 
     def held(self, name):
         return name in self._held
@@ -471,16 +510,23 @@ LUA_SRC = "function _update() end"
 class World:
     """A freshly executed `moycore_glue` over a fresh fake `moycore`.
 
-    Re-loaded per test because `_moycore`, `_ticks_ms` and `_ticks_diff` are
-    MODULE globals bound at import: a leaked module would make the second test
-    in a file exercise the first one's board.
+    Re-loaded per test because `_moycore` and `_since_ms` are MODULE globals
+    bound at import: a leaked module would make the second test in a file
+    exercise the first one's board.
     """
 
-    NAMES = ("moycore", "device_util", "device_canvas", "lua_ext")
+    NAMES = ("moycore", "ticks", "device_canvas", "lua_ext", "moy_wasm")
 
-    def __init__(self, moycore=True, device_util=True, flat_lua_ext=True,
-                 wire_fallback=b"\1" * 128):
+    def __init__(self, moycore=True, flat_ticks=True, flat_lua_ext=True,
+                 wire_fallback=b"\1" * 128, wasm_chip=None):
         self.saved = {n: sys.modules.get(n, KeyError) for n in self.NAMES}
+        if wasm_chip is None:
+            sys.modules["moy_wasm"] = None     # no engine in this build
+        else:
+            mw = types.ModuleType("moy_wasm")
+            mw.CHIP = wasm_chip
+            mw.FORMAT = format_version()
+            sys.modules["moy_wasm"] = mw
         if not flat_lua_ext:
             sys.modules["lua_ext"] = None      # no frozen flat name: the host
         self.clock = Clock()
@@ -489,16 +535,17 @@ class World:
             sys.modules["moycore"] = self.core
         else:
             sys.modules["moycore"] = None      # PEP 328: raises ImportError
-        if device_util:
-            du = types.ModuleType("device_util")
-            du._ticks_ms = self.clock.ticks_ms
-            du._ticks_diff = self.clock.diff
-            sys.modules["device_util"] = du
+        if flat_ticks:
+            tk = types.ModuleType("ticks")
+            tk._since_ms = self.clock.since_ms
+            sys.modules["ticks"] = tk
         else:
-            sys.modules["device_util"] = None
+            sys.modules["ticks"] = None        # the host: runtime.ticks
         if wire_fallback is not None:
             dc = types.ModuleType("device_canvas")
             dc._PAL565_WIRE_BUF = wire_fallback
+            dc.PAL565 = (0, 0xF800)
+            dc.PAL565_WIRE = (0, 0x00F8)       # a byte-swapped panel
             sys.modules["device_canvas"] = dc
         else:
             sys.modules["device_canvas"] = None
@@ -533,7 +580,7 @@ def w():
 
 
 def test_a_build_without_the_module_yields_no_runtime_rather_than_an_error():
-    """`device_boot.lua_runtime` prints "lua runtime ABSENT" off this None and
+    """`device_boot.runtimes` prints "lua runtime ABSENT" off this None and
     a `"runtime": "lua"` cart opens the Player's runtime-missing panel."""
     world = World(moycore=False)
     try:
@@ -1099,23 +1146,25 @@ def test_an_input_with_no_cart_clock_leaves_the_time_slot_alone(w):
     assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 0
 
 
-def test_a_tier_without_device_util_skips_the_time_slot_entirely():
-    """The host and the web runner have no `device_util`; libmoy adds the
-    intra-tick elapsed term itself (`h_time_ms`)."""
-    world = World(device_util=False)
+def test_the_host_import_path_reads_the_same_clock():
+    """With no flat `ticks` the glue takes `runtime.ticks` -- the clock the
+    Player stamps with -- and still fills the slot: a tier that skipped it ran
+    every Lua and compiled cart's time() at 0 plus the tick's own ms."""
+    from runtime import ticks
+    world = World(flat_ticks=False)
     try:
-        assert world.mod._ticks_ms is None and world.mod._ticks_diff is None
-        run = world.run(ws=FakeWs(inp=FakeInput(cart_start_ms=10)))
+        assert world.mod._since_ms is ticks._since_ms
+        run = world.run(ws=FakeWs(inp=FakeInput(cart_start_ms=ticks._ticks_ms() - 5000)))
         run._refresh()
-        assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 0
+        assert 5000 <= run.snap[C_CONSTS["SNAP_TIME_MS"]] < 6000
     finally:
         world.close()
 
 
 def test_the_import_of_the_clock_is_hoisted_out_of_the_frame(w):
     """It was an `import` statement executed once per frame."""
-    assert w.mod._ticks_ms == w.clock.ticks_ms
-    sys.modules["device_util"] = None            # gone mid-run: still fine
+    assert w.mod._since_ms == w.clock.since_ms
+    sys.modules["ticks"] = None                  # gone mid-run: still fine
     run = w.run(ws=FakeWs(inp=FakeInput(cart_start_ms=0)))
     w.clock.ms = 42
     run._refresh()
@@ -1419,7 +1468,7 @@ def test_the_logic_render_split_comes_back_from_the_c_side_in_ms(w):
     never happened."""
     run = w.run()
     w.core.split = (4200, 8100)
-    assert run.frame_split() == (4.2, 8.1)
+    assert list(run.frame_split()) == [4.2, 8.1]
 
 
 def test_a_build_whose_module_predates_tick_split_reports_none(w):
@@ -1663,3 +1712,692 @@ def test_device_canvas_mirrors_no_member_the_c_dropped(first, src, c_prefix,
     assert not stray, (
         "device_canvas keeps %s, which %s's enum does not define"
         % (sorted(stray), src.name))
+
+
+# -- the compiled cart (WasmRun) -------------------------------------------------
+
+
+class _CartProject(FakeProject):
+    def __init__(self, cart, **kw):
+        super().__init__(**kw)
+        self.cart = cart
+
+
+_MODULE = """
+(module
+  (import "moy" "cls" (func $cls (param i32)))
+  (memory (export "memory") 3 3)
+  (func (export "_init"))
+  (func (export "_update") (param f32))
+  (func (export "_draw") (call $cls (i32.const 1))))
+"""
+
+
+def _compiled(tmp_path, chips=("esp32s3",), memory=3):
+    """A compiled cart folder: a module assembled from WAT, and a stand-in
+    compiled module per chip (the glue only checks it is there and hands the
+    path on -- the engine is what reads it)."""
+    from tools import wat
+    d = tmp_path / "hello.moy"
+    d.mkdir()
+    main = d / "main.wasm"
+    main.write_bytes(wat.assemble(_MODULE))
+    cart = {"path": str(d), "main": "main.wasm", "runtime": "wasm",
+            "memory": memory}
+    for chip in chips:
+        with open(_glue_aot(cart, chip), "wb") as f:
+            f.write(b"aot")
+    return cart, str(main)
+
+
+def _glue_aot(cart, chip, format=None):
+    world = World()
+    try:
+        return world.mod.aot_path(cart["path"], cart["main"], chip,
+                                  format or format_version())
+    finally:
+        world.close()
+
+
+def _wasm_world(chip="esp32s3"):
+    world = World(wasm_chip=chip)
+    world.core.WASM = 1
+    return world
+
+
+def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
+    import hashlib
+    cart, main = _compiled(tmp_path)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        ws._with_sd = lambda fn: fn()
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
+        assert world.core.rb("vm") is False
+        (_v, module, head, pages, sha, cdir, swapped, gate,
+         allow_unsigned, interp, writable, files) = world.core.calls[1]
+        assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
+        blob = open(main, "rb").read()
+        assert blob.startswith(head) and len(head) < len(blob)
+        assert pages == 3 and cdir == cart["path"] and swapped is True
+        # the cart's reads take the store's gate, as every store access does
+        assert gate is ws._with_sd
+        # a console that never turned Unknown sources on loads signed modules only
+        assert allow_unsigned is False
+        assert interp is False         # a module by this console's own name -- AOT
+        # the cart declares no writable paths; its files are kept beside the
+        # store, under the same gate
+        assert writable is None
+        assert files.dir == os.path.dirname(cart["path"]).rsplit("/", 1)[0] \
+            + "/written/" + os.path.basename(cart["path"])[:-4]
+        assert files.gate is ws._with_sd
+        assert not run.interp
+        assert run.interp_cause is None
+        assert sha == hashlib.sha256(blob).hexdigest()
+        # the frame is MoycoreRun's: _update ticks, draw is the fused no-op
+        assert run.init is None and run.draw() is None
+        run.update(1 / 30)
+        assert "tick" in world.core.verbs()
+    finally:
+        world.close()
+
+
+def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
+    """The manifest's "writable" entries go to wasm_open as one string, NUL
+    between them, which moycore hands libmoy's binding as its list; the
+    store is the cart's, beside the carts store, with the page's keeper when
+    the console has one (moy-spec SPEC.md 16.12)."""
+    cart, _main = _compiled(tmp_path)
+    cart["writable"] = ["saves/", "options.cfg"]
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        keep = object()
+        ws.cart_keep = keep
+        world.mod.WasmRun(ws, make_ns(), None)
+        call = world.core.calls[1]
+        assert call[0] == "wasm_open"
+        assert call[10] == "saves/\0options.cfg"
+        assert call[11].keep is keep and call[11].id == "hello"
+    finally:
+        world.close()
+
+
+def test_the_load_asks_the_engine_what_unknown_sources_says_now(tmp_path):
+    """The owner's switch rides every load as it stands at that load: the
+    engine lets a module with no signature through only when it is on, and a
+    flip reaches the next cart started."""
+    cart, _main = _compiled(tmp_path)
+    for on in (True, False, True):
+        world = _wasm_world()
+        try:
+            ws = FakeWs(project=_CartProject(cart))
+            ws.unknown_sources = on
+            world.mod.WasmRun(ws, make_ns(), None)
+            assert world.core.calls[1][0] == "wasm_open"
+            assert world.core.calls[1][8] is on
+        finally:
+            world.close()
+
+
+def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
+    """The engine's refusal for a module with no signature (Unknown sources
+    off) is not tamper evidence, so WasmRun retries the open on the
+    interpreter -- main.wasm itself -- instead of raising
+    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+    2026-09-30). The cart plays; run.interp says so, and interp_cause says
+    why -- "unsigned", so the Player's notice reads "isn't signed" rather
+    than "needs an update"."""
+    cart, main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_errs = ["refused: unsigned module", None]
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert run.interp
+        assert run.interp_cause == "unsigned"
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert len(opens) == 2
+        assert opens[0][1] == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
+        assert opens[0][9] is False            # AOT, tried first
+        assert opens[1][1] == main             # the retry is main.wasm itself
+        assert opens[1][9] is True              # on the interpreter
+        assert world.core.closes == 0
+    finally:
+        world.close()
+
+
+def test_a_cart_with_no_module_for_this_chip_runs_on_the_interpreter(tmp_path):
+    """A stale or absent module is never opened at all -- it is simply the
+    wrong file name -- so the cart goes straight to the interpreter, one
+    wasm_open call, no failed attempt logged. interp_cause reads "missing",
+    so the Player's notice says the cart needs an update."""
+    cart, main = _compiled(tmp_path, chips=("esp32p4",))
+    world = _wasm_world("esp32s3")
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert run.interp
+        assert run.interp_cause == "missing"
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert len(opens) == 1
+        assert opens[0][1] == main
+        assert opens[0][9] is True
+        assert "run_begin" in world.core.verbs()
+    finally:
+        world.close()
+
+
+def _browser_world():
+    """The browser's engine (native/moy_wasm_web): `moy_wasm` with no
+    compiled-module tier, CHIP and FORMAT None."""
+    world = _wasm_world()
+    world.mod._moy_wasm.CHIP = None
+    world.mod._moy_wasm.FORMAT = None
+    return world
+
+
+def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_path):
+    """The browser runs main.wasm itself on its own engine: no module is
+    looked for (the cart's chips' modules are not this console's), none is
+    missing, so the run is not `interp` and the Player shows no slow-play
+    notice -- and main.wasm needs no hash, key or signature."""
+    cart, main = _compiled(tmp_path, chips=("esp32s3", "esp32p4"))
+    world = _browser_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert not run.interp and run.interp_cause is None
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert len(opens) == 1
+        (_v, module, head, pages, sha, _cdir, _sw, _gate, _unknown, interp,
+         _writable, _files) = opens[0]
+        assert module == main and sha is None and interp is True
+        assert open(main, "rb").read().startswith(head) and pages == 3
+    finally:
+        world.close()
+
+
+def test_an_engine_with_no_compiled_tier_sizes_main_wasm_by_its_one_rule(tmp_path):
+    cart, main = _compiled(tmp_path, chips=("esp32s3",))
+    world = _browser_world()
+    try:
+        engine = _Engine(world)
+        rt = world.mod.make_wasm_runtime(FakeWs())
+        assert rt.footprint(cart) == (3 * 65536 + os.path.getsize(main), 3 * 65536)
+        assert engine.interp_asked == [(3 * 65536, os.path.getsize(main))]
+        assert engine.asked == []
+    finally:
+        world.close()
+
+
+@pytest.mark.parametrize("make", [_wasm_world, _browser_world])
+def test_a_cart_without_its_main_wasm_is_refused_by_name(tmp_path, make):
+    """main.wasm is the cart. One that has gone between the shelf's scan
+    (which lists no cart without its main) and the run is a plain refusal
+    before the console is begun, not an error from inside the engine."""
+    cart, main = _compiled(tmp_path, chips=())
+    os.remove(main)
+    world = make()
+    try:
+        with pytest.raises(RuntimeError) as e:
+            world.mod.WasmRun(FakeWs(project=_CartProject(cart)), make_ns(), None)
+        assert str(e.value) == "refused: this cart's main.wasm is not on this console"
+        assert "run_begin" not in world.core.verbs()
+    finally:
+        world.close()
+
+
+def test_a_module_this_firmware_cannot_link_reads_as_the_firmware(tmp_path):
+    """A load that stops on a helper the module calls and this firmware's
+    runtime does not register (#229: `__fixsfdi` on the P4) is retried on
+    the interpreter like any non-tamper refusal, but the cause is the
+    console's -- "firmware" -- so the Player's notice does not tell the
+    player the cart needs an update."""
+    cart, main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_errs = [
+        "load: AOT module load failed: resolve symbol __fixsfdi failed", None]
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert run.interp and run.interp_cause == "firmware"
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert [o[9] for o in opens] == [False, True]
+        assert opens[1][1] == main
+    finally:
+        world.close()
+
+
+def test_a_key_mismatch_that_retries_clean_reads_as_missing(tmp_path):
+    """A corrupted or mismatched AOT file (rare: the name matched, the
+    content did not) is retried on the interpreter same as an absent one,
+    and reads the same cause -- "missing", never "unsigned" -- so the
+    Player's notice says the cart needs an update, not that it isn't
+    signed."""
+    cart, main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_errs = ["refused: key mismatch 'opt 2'", None]
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert run.interp and run.interp_cause == "missing"
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert opens[1][1] == main
+    finally:
+        world.close()
+
+
+def test_a_key_mismatch_retries_then_a_trap_still_closes_the_console(tmp_path):
+    """A corrupted or mismatched AOT file (rare: the name matched, the
+    content did not) is retried on the interpreter same as an absent one; if
+    THAT also fails, the failure is real and closes the console."""
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_errs = ["refused: key mismatch 'opt 2'", "a trap in _init"]
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(RuntimeError, match="a trap in _init"):
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.closes == 1
+    finally:
+        world.close()
+
+
+def test_a_bad_signature_never_retries(tmp_path):
+    """Tamper evidence -- a signature present but wrong -- is the one AOT
+    refusal that stays a hard refusal: no interpreter retry, straight to the
+    ordinary error panel."""
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_err = "refused: bad signature"
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(RuntimeError, match="bad signature"):
+            world.mod.WasmRun(ws, make_ns(), None)
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert len(opens) == 1
+        assert world.core.closes == 1
+    finally:
+        world.close()
+
+
+def test_a_manifest_without_memory_is_refused_before_anything_loads(tmp_path):
+    cart, _main = _compiled(tmp_path, memory=None)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(RuntimeError, match="memory"):
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.verbs() == []
+    finally:
+        world.close()
+
+
+def test_the_runtimes_map_names_what_the_build_carries():
+    world = _wasm_world()
+    try:
+        assert sorted(world.mod.make_runtimes(FakeWs())) == ["lua", "wasm"]
+    finally:
+        world.close()
+    world = World()                    # moycore, no engine
+    try:
+        assert sorted(world.mod.make_runtimes(FakeWs())) == ["lua"]
+    finally:
+        world.close()
+    world = World(moycore=False)
+    try:
+        assert world.mod.make_runtimes(FakeWs()) == {}
+    finally:
+        world.close()
+
+
+# -- the fit check's report (Player: a cart too big for the board) ---------------
+
+
+class _Engine:
+    """moy_wasm's reports: `footprint`/`interp_footprint` record what each
+    was asked -- the AOT and the interpreted rule are two different engine
+    calls (device/moycore_glue.WasmRuntime.footprint picks between them)."""
+
+    def __init__(self, world, free=(2_900_000, 1_900_000)):
+        self.asked = []
+        self.interp_asked = []
+        self.free = free
+        world.mod._moy_wasm.footprint = self._footprint
+        world.mod._moy_wasm.interp_footprint = self._interp_footprint
+        world.mod._moy_wasm.mem = lambda: (90_000, 50_000, 40_000) + self.free
+
+    def _footprint(self, memory, module):
+        self.asked.append((memory, module))
+        return memory + module, memory
+
+    def _interp_footprint(self, memory, module):
+        self.interp_asked.append((memory, module))
+        return memory + module, memory
+
+
+def test_the_runtime_reports_the_carts_footprint_by_the_engines_rule(tmp_path):
+    """The Player's fit check reads the engine's own sizing -- the manifest's
+    memory in bytes and this chip's signed module as it sits in the store --
+    through the store's gate, and the engine's PSRAM report for what the board
+    can give. The arithmetic is the engine's (moy_wasm.footprint), never here."""
+    cart, _main = _compiled(tmp_path, chips=("esp32s3", "esp32p4"))
+    world = _wasm_world("esp32s3")
+    try:
+        engine = _Engine(world)
+        gated = []
+        ws = FakeWs(project=_CartProject(cart))
+        ws._with_sd = lambda fn: gated.append(fn) or fn()
+        rt = world.mod.make_wasm_runtime(ws)
+        assert rt.footprint(cart) == (3 * 65536 + 3, 3 * 65536)
+        assert engine.asked == [(3 * 65536, len(b"aot"))]
+        assert len(gated) == 1
+        assert rt.memory() == engine.free
+        # and it is still the factory the Player calls to start the run
+        assert isinstance(rt(make_ns(), None), world.mod.WasmRun)
+    finally:
+        world.close()
+
+
+def test_a_declaration_past_any_board_is_asked_about_capped_not_overflowed(tmp_path):
+    cart, _main = _compiled(tmp_path)
+    cart["memory"] = 65536                 # 4 GiB: wasm32's whole space
+    world = _wasm_world()
+    try:
+        engine = _Engine(world)
+        world.mod.make_wasm_runtime(FakeWs()).footprint(cart)
+        (memory, _module), = engine.asked
+        assert 32 * 1024 * 1024 < memory < 2 ** 31
+    finally:
+        world.close()
+
+
+def test_no_module_for_this_chip_sizes_against_main_wasm_instead(tmp_path):
+    """No module for this chip: the cart plays on the interpreter instead of
+    refusing (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+    firmware"), so the fit check sizes against main.wasm itself, through the
+    INTERPRETED rule (a real file, a real report, never the AOT one) rather
+    than giving up."""
+    cart, main = _compiled(tmp_path, chips=("esp32p4",))
+    world = _wasm_world("esp32s3")
+    try:
+        engine = _Engine(world)
+        rt = world.mod.make_wasm_runtime(FakeWs())
+        assert rt.footprint(cart) == (3 * 65536 + os.path.getsize(main), 3 * 65536)
+        assert engine.interp_asked == [(3 * 65536, os.path.getsize(main))]
+        assert engine.asked == []
+    finally:
+        world.close()
+
+
+def test_nothing_to_measure_leaves_the_refusal_to_the_load(tmp_path):
+    """No "memory" declared, or no cart path at all: genuinely nothing to
+    size, so the load's own refusal is what the kid sees, by name."""
+    cart, _main = _compiled(tmp_path, chips=("esp32p4",))
+    world = _wasm_world("esp32s3")
+    try:
+        engine = _Engine(world)
+        rt = world.mod.make_wasm_runtime(FakeWs())
+        assert rt.footprint(dict(cart, memory=None)) is None
+        assert rt.footprint({"memory": 3}) is None       # no "path"
+        assert engine.asked == []
+    finally:
+        world.close()
+
+
+def test_an_open_that_raises_closes_the_console(tmp_path):
+    """The engine raises MemoryError when it cannot hold the module file. A
+    run left open would refuse every later cart's run_begin ("a run is
+    already open"), Lua carts included."""
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+
+    def _no_psram(*a):
+        world.core._log("wasm_open", *a)
+        raise MemoryError("no PSRAM for the module file")
+    world.core.wasm_open = _no_psram
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(MemoryError):
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.closes == 1
+    finally:
+        world.close()
+
+
+# -- a compiled cart's frame from its own memory (CartFrame) --------------------
+
+
+class PresentingCanvas:
+    presents_frames = True
+
+
+class DirectColourCanvas:
+    """A P4's system canvas: it shows blit565's frames, not blit's."""
+    presents_frames = True
+    presents_palette_frames = False
+
+
+class FakeAlloc(types.ModuleType):
+    MEMORY_SPIRAM = 1
+    MEMORY_DMA = 2
+
+    def __init__(self, room=True):
+        super().__init__("moy_alloc")
+        self.room = room
+        self.log = []
+
+    def alloc(self, n, caps):
+        self.log.append(("alloc", n, caps))
+        if not self.room:
+            raise MemoryError("no PSRAM")
+        return bytearray(n)
+
+    def free(self, buf):
+        self.log.append(("free", len(buf)))
+
+
+class FenceComp:
+    def __init__(self, log):
+        self.log = log
+
+    def fold_fence(self):
+        self.log.append(("fold_fence",))
+
+    def snap_fence(self):
+        self.log.append(("snap_fence",))
+
+    def disarm_scale_fold(self):
+        self.log.append(("disarm",))
+
+
+def test_a_compiled_cart_takes_its_frames_where_the_canvas_shows_them(tmp_path):
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        ws.sys_canvas = PresentingCanvas()
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert ("take_frames", True, True) in world.core.calls
+        assert world.core.verbs().index("take_frames") > world.core.verbs().index(
+            "wasm_open")
+        assert ws.cart_frame is run.frame
+        assert (run.frame.w, run.frame.h) == (320, 240)
+        assert len(bytes(run.frame.lut)) == 512
+    finally:
+        world.close()
+
+
+def test_a_canvas_without_a_palette_resolve_takes_only_direct_colour(tmp_path):
+    """A P4 shows blit565's frames from the cart's memory and leaves blit's
+    to the blit: the binding is told which layouts it takes."""
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        ws.sys_canvas = DirectColourCanvas()
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert ("take_frames", True, False) in world.core.calls
+        assert ws.cart_frame is run.frame
+    finally:
+        world.close()
+
+
+def test_a_canvas_that_cannot_show_them_keeps_the_blit(tmp_path):
+    cart, _main = _compiled(tmp_path)
+    for canvas in (None, types.SimpleNamespace(presents_frames=False)):
+        world = _wasm_world()
+        try:
+            ws = FakeWs(project=_CartProject(cart))
+            if canvas is not None:
+                ws.sys_canvas = canvas
+            run = world.mod.WasmRun(ws, make_ns(), None)
+            assert "take_frames" not in world.core.verbs()
+            assert run.frame is None and getattr(ws, "cart_frame", None) is None
+        finally:
+            world.close()
+
+
+def test_the_cart_frame_forwards_to_the_binding(tmp_path):
+    world = _wasm_world()
+    try:
+        cf = world.mod.CartFrame(320, 240)
+        world.core.owed_frame = view = memoryview(bytearray(320 * 240))
+        world.core.owed_lut = bytes(range(256)) * 2
+        assert cf.take() is view
+        assert bytes(cf.lut) == bytes(range(256)) * 2
+        cf.settle()
+        kept = bytearray(8)
+        cf.presented(kept, 5)
+        assert world.core.calls[-2:] == [("frame_settle",),
+                                         ("frame_presented", kept, 5)]
+    finally:
+        world.close()
+
+
+def test_the_scratch_is_the_runs_and_freed_once_nothing_reads_it(tmp_path):
+    world = _wasm_world()
+    alloc = FakeAlloc()
+    saved = sys.modules.get("moy_alloc", KeyError)
+    sys.modules["moy_alloc"] = alloc
+    try:
+        cf = world.mod.CartFrame(320, 240)
+        log = alloc.log
+        cf.close(FenceComp(log))
+        assert log == []                    # nothing taken: nothing to wait on
+        a = cf.scratch(77440)
+        assert log == [("alloc", 77440, 3)]
+        assert cf.scratch(1000) is a        # big enough: the same buffer
+        b = cf.scratch(154240)              # a blit565 frame wants more
+        assert b is not a and len(b) == 154240
+        assert log[1:] == [("free", 77440), ("alloc", 154240, 3)]
+        del log[:]
+        del world.core.calls[:]
+        cf.close(FenceComp(log))
+        assert log == [("fold_fence",), ("snap_fence",), ("disarm",),
+                       ("free", 154240)]
+        # ...and the last frame shown went into the canvas before its copy
+        # was let go: from here on the canvas is all that holds the game.
+        assert world.core.calls == [("frame_settle",)]
+        alloc.room = False
+        assert cf.scratch(10) is None       # no PSRAM: the caller settles
+    finally:
+        if saved is KeyError:
+            del sys.modules["moy_alloc"]
+        else:
+            sys.modules["moy_alloc"] = saved
+        world.close()
+
+
+def test_closing_the_run_lets_go_of_the_frame_before_the_console(tmp_path):
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        ws.sys_canvas = PresentingCanvas()
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        order = []
+        run.frame.close = lambda comp: order.append(("frame", comp))
+        ws.comp = "the compositor"
+        real = world.core.close
+        world.core.close = lambda: (order.append(("console",)), real())
+        run.close()
+        assert order == [("frame", "the compositor"), ("console",)]
+        assert ws.cart_frame is None and run.frame is None
+    finally:
+        world.close()
+
+
+def test_the_cart_frame_holds_the_rects_the_console_paints_over_it(tmp_path):
+    world = _wasm_world()
+    try:
+        cf = world.mod.CartFrame(320, 240)
+        for i in range(cf.MAX_PATCHES):
+            assert cf.patch(10 * i, 5, 8, 4) is True
+        assert cf.patch(0, 0, 1, 1) is False      # full: the painter settles
+        assert list(cf.rects[:8]) == [0, 5, 8, 4, 10, 5, 8, 4]
+        assert cf.nrects == cf.MAX_PATCHES
+        cf.presented(bytearray(4), 0)
+        assert cf.nrects == 0                     # a frame's rects are its own
+    finally:
+        world.close()
+
+
+def test_a_settle_after_the_chip_keeps_the_chip(tmp_path):
+    """The frame is written over the whole canvas; the rects the console had
+    already painted over it keep their pixels."""
+    world = _wasm_world()
+    try:
+        canvas = FakeCanvas(8, 4)
+        canvas._buf[:] = bytes(range(64))
+        written = bytes([0xEE] * 64)
+
+        def settle():
+            world.core.calls.append(("frame_settle",))
+            canvas._buf[:] = written
+        world.core.frame_settle = settle
+        cf = world.mod.CartFrame(8, 4)
+        cf.patch(6, 2, 4, 4)                       # clipped to the canvas
+        cf.settle(canvas)
+        want = bytearray(written)
+        for row in (2, 3):
+            a = 2 * (row * 8 + 6)
+            want[a:a + 4] = bytes(range(64))[a:a + 4]
+        assert bytes(canvas._buf) == bytes(want)
+        assert cf.nrects == 0
+        cf.settle(canvas)                          # no rects: a plain settle
+        assert bytes(canvas._buf) == written
+    finally:
+        world.close()
+
+
+def test_a_frame_the_cart_did_not_replace_is_shown_again_from_the_scratch(tmp_path):
+    """No blit this frame, and the canvas still lacks the last frame shown:
+    take() hands back that frame's copy in the scratch, so the flush shows it
+    again rather than a canvas nothing wrote."""
+    world = _wasm_world()
+    alloc = FakeAlloc()
+    saved = sys.modules.get("moy_alloc", KeyError)
+    sys.modules["moy_alloc"] = alloc
+    try:
+        cf = world.mod.CartFrame(4, 2)
+        assert cf.take() is None                     # nothing owed, nothing shown
+        world.core.owed_frame = memoryview(bytearray(16))
+        assert len(cf.take()) == 16 and cf.fmt == 1  # a blit565 frame
+        scr = cf.scratch(64)
+        scr[5:21] = bytes(range(16))
+        cf.presented(scr, 5)
+        world.core.owed_frame = None
+        world.core.kept = True
+        again = cf.take()
+        assert bytes(again) == bytes(range(16))
+        world.core.kept = False                      # a verb wrote the canvas
+        assert cf.take() is None
+    finally:
+        if saved is KeyError:
+            del sys.modules["moy_alloc"]
+        else:
+            sys.modules["moy_alloc"] = saved
+        world.close()

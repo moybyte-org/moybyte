@@ -1,4 +1,5 @@
-// The browser-local cart store (#193 mode 1) and the .moy zip codec.
+// The browser-local cart store (#193 mode 1), Get Carts' installs into it
+// (#124, `commitInstall` below), and the .moy zip codec.
 //
 // TWO WEB MODES, TOTAL, NO CROSSOVER (owner call 2026-08-25). A page served
 // FROM a board edits the BOARD's store: the sweep's batches go out as
@@ -56,6 +57,41 @@ function skipIn(name, dirs, files) {
 }
 
 export function skipName(name) { return skipIn(name, SKIP_DIRS, SKIP_FILES); }
+
+// The binary files that cross by name -- a cart's cover (SPEC.md 3.6) -- the
+// JS mirror of runtime/moy_sync's BINARY_FILES. They travel as base64: `b`
+// where text rides as `t` in a batch op, `{b: ...}` as a value in a served
+// bundle, and as BYTES once they are in the VFS or this store.
+const BINARY_FILES = ["cover.png"];
+
+export function isBinary(rel) {
+    return BINARY_FILES.indexOf(String(rel).slice(String(rel).lastIndexOf("/") + 1)) >= 0;
+}
+
+export function fromBase64(b) {
+    const s = atob(b);
+    const out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+}
+
+export function toBase64(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000)
+        s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+}
+
+// One bundle value as what a file holds: a string for text, the bytes of a
+// `{b: base64}` value, raw bytes as they are (`readAll`'s form for a file that
+// is not text -- an installed cart's module or game data), or null for a
+// value that is none of those.
+export function fileData(v) {
+    if (typeof v === "string") return v;
+    if (v instanceof Uint8Array) return v;
+    if (v && typeof v.b === "string") return fromBase64(v.b);
+    return null;
+}
 
 export function skipLocal(name) {
     return skipIn(name, SITE_SKIP_DIRS, SITE_SKIP_FILES);
@@ -205,6 +241,17 @@ export function storageNote(p) {
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+// A file read back is TEXT only when it is UTF-8 throughout, byte for byte:
+// fatal, so a module or a WAD is never mangled into replacement characters,
+// and the BOM kept, so writing the string back gives the same bytes.
+const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+// The record of what Get Carts installed, and the folder an install is built
+// in, as siblings of the carts store -- runtime/cart_index.py's RECORD_NAME
+// and STAGE_DIR, the same layout as beside a board's carts folder. Pinned
+// against the Python by tests/test_web_store.py.
+export const RECORD_NAME = "installed.json";
+export const STAGE_DIR = "install";
 
 // null when the browser has no OPFS (or refuses it -- a private window, a
 // file:// origin, site data blocked). The caller must treat null as "run in
@@ -233,8 +280,12 @@ async function dirFor(store, segs, create) {
 
 async function writeText(store, parts, text) {
     const dir = await dirFor(store, parts.slice(0, -1), true);
-    const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true });
-    const bytes = enc.encode(text);
+    await writeIn(dir, parts[parts.length - 1], text);
+}
+
+async function writeIn(dir, name, text) {
+    const fh = await dir.getFileHandle(name, { create: true });
+    const bytes = typeof text === "string" ? enc.encode(text) : text;
     // Sync access handles are the worker-only fast path AND the widest-support
     // one (they landed in OPFS before createWritable did); createWritable is
     // the fallback for a main-thread caller or a browser without them.
@@ -261,6 +312,7 @@ async function removeAt(store, parts, recursive) {
 // the board's `apply_ops` cannot drift about what a batch means:
 //   {p, t}            whole-file write
 //   {p, t, part: n}   chunk n of a big file (parts buffer until `pub`)
+//   {p, b}            the same two for a binary file (a cover), in base64
 //   {p, pub: 1}       publish the buffered chunks
 //   {p, d: 1}         delete one file
 //   {p, dc: 1}        delete a whole cart folder
@@ -312,6 +364,21 @@ async function applyOne(store, op) {
         await writeText(store, parts, buf);
         return null;
     }
+    if (op.b !== undefined) {
+        if (!isBinary(key)) return "not a binary file";
+        if (typeof op.b !== "string") return "no bytes";
+        const bytes = fromBase64(op.b);
+        if (op.part === undefined || op.part === null) {
+            await writeText(store, parts, bytes);
+            return null;
+        }
+        const had = op.part === 0 ? new Uint8Array(0) : (store.parts.get(key) || new Uint8Array(0));
+        const joined = new Uint8Array(had.length + bytes.length);
+        joined.set(had, 0);
+        joined.set(bytes, had.length);
+        store.parts.set(key, joined);
+        return null;
+    }
     if (typeof op.t !== "string") return "no text";
     if (op.part === undefined || op.part === null) {
         await writeText(store, parts, op.t);
@@ -325,8 +392,9 @@ async function applyOne(store, op) {
     return null;
 }
 
-// Every syncable file in the local store as {rel: text}. This is what a site-mode
-// boot writes into the VFS INSTEAD of the served carts.json.
+// Every syncable file in the local store as {rel: text}, and {rel: {b: base64}}
+// for a binary one -- the served bundle's shape. This is what a site-mode boot
+// writes into the VFS INSTEAD of the served carts.json.
 export async function readAll(store) {
     const out = {};
     await walk(store.carts, "", out, 0);
@@ -348,8 +416,9 @@ async function walk(dir, prefix, out, depth) {
         // Top-level files are not cart files; the sweep never ships them and
         // the VFS must not be seeded with them either.
         if (rel.indexOf("/") < 0) continue;
-        const f = await handle.getFile();
-        out[rel] = await f.text();
+        const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+        if (isBinary(rel)) { out[rel] = { b: toBase64(bytes) }; continue; }
+        try { out[rel] = strict.decode(bytes); } catch (e) { out[rel] = bytes; }
     }
 }
 
@@ -360,16 +429,247 @@ export async function isEmpty(store) {
     return true;
 }
 
+// The served bundle's SYSTEM carts (manifest "system": true) that the local
+// store lacks, as bundle entries. The local store wins over the bundle -- it is
+// the kid's work -- but a console that ships a system cart the store has never
+// had (a new app like Get Carts, a new seed game) must still reach a browser
+// that has kept its shelf since an older visit, the way a board seeds a
+// built-in it does not have (runtime/moy_seed.py). A cart the store has is
+// never touched.
+export function missingSystemCarts(local, bundle) {
+    const have = new Set(Object.keys(local).map((k) => k.split("/")[0]));
+    const system = new Set();
+    for (const rel in bundle) {
+        const cut = rel.indexOf("/");
+        if (cut < 0 || rel.slice(cut + 1) !== "manifest.json") continue;
+        const top = rel.slice(0, cut);
+        if (have.has(top) || typeof bundle[rel] !== "string") continue;
+        try {
+            const m = JSON.parse(bundle[rel]);
+            if (m && m.system === true) system.add(top);
+        } catch (e) { /* not a manifest anything reads: not a cart to add */ }
+    }
+    const out = {};
+    for (const rel in bundle) if (system.has(rel.split("/")[0])) out[rel] = bundle[rel];
+    return out;
+}
+
 // First visit: adopt the served carts.json as the local baseline.
 export async function seed(store, carts) {
     let n = 0;
     for (const rel in carts) {
         const parts = safeSegments(rel, skipLocal);
-        if (!parts || parts.length < 2) continue;
-        await writeText(store, parts, carts[rel]);
+        const data = fileData(carts[rel]);
+        if (!parts || parts.length < 2 || data === null) continue;
+        await writeText(store, parts, data);
         n++;
     }
     return n;
+}
+
+// ---------------------------------------------------------------------------
+// Get Carts' installs (#124): a cart folder and the record, durable together.
+//
+// The console checks every byte of an install in its VFS staging folder and
+// hands the result here; what comes back must be the guarantee a board's one
+// rename gives -- a reload at ANY moment finds the old cart or the new one,
+// never half of either, and never a record that disagrees with the folder.
+// OPFS has no rename for a directory, so the commit is a MARKER instead:
+//
+//   1. the files go into install/<folder>/ beside the carts store (a reload
+//      here leaves a build with no marker, which recovery removes);
+//   2. install/<folder>.commit is written, holding the new record -- the
+//      commit point;
+//   3. the roll forward: carts/<folder> is replaced by a copy of the staged
+//      files, the record is written, the marker goes, then the staging.
+//
+// A reload anywhere in 3 rolls forward again at the next boot
+// (`recoverInstalls`, before the store is read), and every step of 3 is safe
+// to repeat because the staging stays whole until the marker is gone. A
+// marker that never finished writing does not parse, and counts as none.
+// ---------------------------------------------------------------------------
+
+function plainName(name) {
+    return typeof name === "string" && !!name && name.indexOf("/") < 0
+        && name.indexOf("\\") < 0 && name.indexOf("\0") < 0 && name[0] !== ".";
+}
+
+// `store` is the carts store (openStore(nav, "carts")); `files` is
+// [{name, data: Uint8Array}], the staged folder's whole contents; `record` is
+// the record's new text. Resolves once the install is durable; throws, having
+// changed nothing on the shelf, when it could not be made so.
+export async function commitInstall(store, folder, files, record) {
+    if (!plainName(folder)) throw new Error("bad folder " + folder);
+    for (const f of files) if (!plainName(f.name)) throw new Error("bad file " + f.name);
+    const stage = await store.dir.getDirectoryHandle(STAGE_DIR, { create: true });
+    try { await stage.removeEntry(folder + ".commit"); } catch (e) { /* none */ }
+    try { await stage.removeEntry(folder, { recursive: true }); } catch (e) { /* none */ }
+    try {
+        const into = await stage.getDirectoryHandle(folder, { create: true });
+        for (const f of files) await writeIn(into, f.name, f.data);
+        await writeIn(stage, folder + ".commit", JSON.stringify({ folder, record }));
+    } catch (e) {
+        try { await stage.removeEntry(folder + ".commit"); } catch (e2) { /* none */ }
+        try { await stage.removeEntry(folder, { recursive: true }); } catch (e2) { }
+        throw e;
+    }
+    await rollForward(store, stage, folder);
+}
+
+async function readMarker(stage, folder) {
+    try {
+        const fh = await stage.getFileHandle(folder + ".commit");
+        const m = JSON.parse(await (await fh.getFile()).text());
+        return (m && m.folder === folder && typeof m.record === "string") ? m : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function rollForward(store, stage, folder) {
+    const m = await readMarker(stage, folder);
+    if (!m) return false;
+    let from = null;
+    try { from = await stage.getDirectoryHandle(folder); } catch (e) { from = null; }
+    if (from) {
+        try { await store.carts.removeEntry(folder, { recursive: true }); } catch (e) { }
+        const into = await store.carts.getDirectoryHandle(folder, { create: true });
+        for await (const [name, h] of from.entries()) {
+            if (h.kind !== "file") continue;
+            await writeIn(into, name, new Uint8Array(await (await h.getFile()).arrayBuffer()));
+        }
+        await writeIn(store.dir, RECORD_NAME, m.record);
+    }
+    await stage.removeEntry(folder + ".commit");
+    if (from) await stage.removeEntry(folder, { recursive: true });
+    return true;
+}
+
+// Finish what a reload interrupted, before anything reads the store: every
+// committed install rolls forward, and everything else in install/ (a build
+// that never reached its marker) goes. Returns how many rolled forward.
+export async function recoverInstalls(store) {
+    let stage;
+    try { stage = await store.dir.getDirectoryHandle(STAGE_DIR); } catch (e) { return 0; }
+    const names = [];
+    for await (const [name, h] of stage.entries()) names.push([name, h.kind]);
+    let n = 0;
+    for (const [name, kind] of names) {
+        if (kind === "file" && name.endsWith(".commit")
+                && await rollForward(store, stage, name.slice(0, -".commit".length))) n++;
+    }
+    const left = [];
+    for await (const [name] of stage.entries()) left.push(name);
+    for (const name of left) {
+        try { await stage.removeEntry(name, { recursive: true }); } catch (e) { }
+    }
+    return n;
+}
+
+// The record alone (a removal), or null when there is none.
+export async function writeRecord(store, text) {
+    await writeIn(store.dir, RECORD_NAME, text);
+}
+
+export async function readRecord(store) {
+    try {
+        const fh = await store.dir.getFileHandle(RECORD_NAME);
+        return await (await fh.getFile()).text();
+    } catch (e) {
+        return null;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A compiled cart's written files (moy-spec SPEC.md 16.12), in OPFS beside the
+// carts: written/<cart>/<key>, runtime/cart_files.py's layout, so the VFS the
+// console reads and this store of record hold the same names. The console
+// writes the VFS and queues the file here (carts_link's WebCartKeep), and a
+// write lands with an install's crash-safety: the bytes go to "<key>~part",
+// an empty "<key>~done" then says they are whole, and only then do they
+// replace "<key>" -- so a reload at any moment finds the old copy or the new
+// one, and readWritten finishes or discards what one left.
+// ---------------------------------------------------------------------------
+
+export const WRITTEN_ROOT = "written";
+const PART = "~part", DONE = "~done";
+
+// The written store, or null with no OPFS (the console then keeps written
+// files in this tab alone, like every other edit there).
+export async function openWritten(nav) {
+    const st = nav && nav.storage;
+    if (!st || typeof st.getDirectory !== "function") return null;
+    try {
+        const dir = await st.getDirectory();
+        return { dir: await dir.getDirectoryHandle(WRITTEN_ROOT, { create: true }) };
+    } catch (e) {
+        return null;
+    }
+}
+
+// A cart id or a key as a name in one folder: what cart_files.py writes, and
+// never a path.
+function writtenName(n) {
+    return typeof n === "string" && !!n && n !== "." && n !== ".." && !/[\/\\\0]/.test(n);
+}
+
+async function rollWritten(dir, key) {
+    const part = await dir.getFileHandle(key + PART);
+    await writeIn(dir, key, new Uint8Array(await (await part.getFile()).arrayBuffer()));
+    await dir.removeEntry(key + DONE);
+    await dir.removeEntry(key + PART);
+}
+
+// Make one written file durable. Throws, with the old copy in place, when it
+// could not be.
+export async function commitWritten(w, cart, key, bytes) {
+    if (!writtenName(cart) || !writtenName(key) || key.includes("~"))
+        throw new Error("bad written file " + cart + "/" + key);
+    const dir = await w.dir.getDirectoryHandle(cart, { create: true });
+    try { await dir.removeEntry(key + DONE); } catch (e) { /* none */ }
+    await writeIn(dir, key + PART, bytes);
+    await writeIn(dir, key + DONE, new Uint8Array(0));
+    await rollWritten(dir, key);
+}
+
+// One written file gone, or with `key` null every file the cart wrote.
+export async function dropWritten(w, cart, key) {
+    if (!writtenName(cart)) return;
+    if (key === null || key === undefined) {
+        try { await w.dir.removeEntry(cart, { recursive: true }); } catch (e) { /* none */ }
+        return;
+    }
+    if (!writtenName(key)) return;
+    let dir;
+    try { dir = await w.dir.getDirectoryHandle(cart); } catch (e) { return; }
+    try { await dir.removeEntry(key); } catch (e) { /* none */ }
+}
+
+// Every written file as {"<cart>/<key>": bytes}, after finishing each write a
+// reload interrupted: one with its marker rolls forward, one without goes.
+export async function readWritten(w) {
+    const out = {};
+    const carts = [];
+    for await (const [name, h] of w.dir.entries()) if (h.kind === "directory") carts.push(name);
+    for (const cart of carts) {
+        const dir = await w.dir.getDirectoryHandle(cart);
+        const names = [];
+        for await (const [name, h] of dir.entries()) if (h.kind === "file") names.push(name);
+        for (const n of names)
+            if (n.endsWith(DONE) && names.includes(n.slice(0, -DONE.length) + PART))
+                await rollWritten(dir, n.slice(0, -DONE.length));
+        const left = [];
+        for await (const [name] of dir.entries()) left.push(name);
+        for (const n of left) {
+            if (n.endsWith(PART) || n.endsWith(DONE)) {
+                try { await dir.removeEntry(n); } catch (e) { /* gone */ }
+                continue;
+            }
+            const fh = await dir.getFileHandle(n);
+            out[cart + "/" + n] = new Uint8Array(await (await fh.getFile()).arrayBuffer());
+        }
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------

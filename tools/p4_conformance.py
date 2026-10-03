@@ -83,8 +83,8 @@ def carts_root(board):
 
 def push_cart(board, cart_dir, name, log=print):
     """Write a cart folder into <ws.carts_root>/<name>.moy and make the launcher
-    see it, without rebooting -- a reset costs ~40s and the suite has nine
-    scenes."""
+    see it, without rebooting -- a reset costs ~40s, and the suite would pay
+    it once per scene."""
     root = carts_root(board)
     dst = "%s/%s.moy" % (root, name)
     board.pyexec(
@@ -303,8 +303,7 @@ def run_scene(board, cart_dir, log=print, frames=1.5):
     title = cart_title(cart_dir)
 
     # Leave whatever is running, so a repeat call starts from the desk.
-    board.pyexec("ws.exit()")
-    board.drain(0.6)
+    board.leave_cart(settle=0.6)
     # The diag stream OFF for the session: its PERF lines share this UART
     # with the base64 push below and the capture after, and a line landing
     # mid-chunk is a decode error or a stalled read -- the same finding
@@ -463,9 +462,8 @@ def main(argv=None):
 
     board = P4Board(a.port, board_dir=board_dir)
     try:
-        # Opening the port already rebooted the board (see above), so this is
-        # not so much a probe as a wait -- but it stays a probe, because a
-        # future cable or port that does NOT reset gets the fast path for free.
+        # Opening the port does not reset the board (see above): one that
+        # answers is driven as it stands, and only a silent one is reset.
         board.drain(0.4)
         if a.reset or board.pyval("1", timeout=8.0) != 1:
             log("  board not answering; resetting")

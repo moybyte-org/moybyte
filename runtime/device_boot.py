@@ -1,3 +1,16 @@
+# Map (grep -n a name to jump there):
+#   DeviceBoot                        the boot sequence's shared steps and its screen
+#   OtaHealth                         did the update work: the boot-side check
+#   frame_slot_ms                     the cadence one frame is measured against
+#   FramePump                         the frame loop's dt clock, head and tail
+#   IdleBlank                         blank the backlight after a spell with no input
+#   apply_touch                       one touch sample -> the shared pointer
+#   poll_webhost                      one webhost slice per frame
+#   poll_link                         one radio slice per frame
+#   PerfSampler                       the serial PERF line, one body for every board
+#   -- #210: the frame loop's per-stage deadline meters  StageMeters, FrameLoop
+#   StageMeters                       per-stage deadline accounting
+#   FrameLoop                         the device frame loop's invariant order
 """The device boot spine and frame pump -- ONE implementation, both boards (#161).
 
 WHY THIS EXISTS. Each board used to author its own `run_desktop` boot
@@ -238,30 +251,33 @@ class DeviceBoot:
             self.say("%s carts unavailable: %s" % (media, exc))
         return []
 
-    def lua_runtime(self, ws, log=None):
-        """The #67 Lua cart runtime, and a line saying whether it is in this image.
+    def runtimes(self, ws, log=None):
+        """The cart runtimes in this image (`ws.runtimes`), and a line each
+        saying whether it is here.
 
-        ONE runtime and no chooser (2026-08-13): moycore runs the cart's whole
-        frame inside libmoy -- `_update` and `_draw` back to back in C, one
-        upcall per frame instead of hundreds -- and moybyte's superset verbs
-        ride it as registered trampolines. A build without the module returns
-        None and a `"runtime": "lua"` cart opens the Player's runtime-missing
-        panel, which is the same graceful floor a build without a Lua VM always
-        had.
+        "lua" (#67): ONE runtime and no chooser (2026-08-13) -- moycore runs
+        the cart's whole frame inside libmoy, `_update` and `_draw` back to back
+        in C, one upcall per frame instead of hundreds -- and moybyte's superset
+        verbs ride it as registered trampolines. "wasm"
+        (docs/wasm_tier_plan_2026-09.md): the same console with libmoy's wasm
+        import table on it, and the moy_wasm engine running the cart's module.
+        A runtime this build lacks is an absent key, and a cart naming it opens
+        the Player's runtime-missing panel -- the graceful floor.
 
         `log` defaults to the boot's own serial line; the T-Deck passes its diag
         sink so the answer also lands in the offline ring.
         """
         sram_census("console")
-        rt = None
+        rts = {}
         try:
-            from moycore_glue import make_moycore_runtime
-            rt = make_moycore_runtime(ws)
+            from moycore_glue import make_runtimes
+            rts = make_runtimes(ws)
         except ImportError:
             pass
-        (log or self.say)("lua runtime %s"
-                          % ("ON (moycore)" if rt is not None else "ABSENT"))
-        return rt
+        say = log or self.say
+        say("lua runtime %s" % ("ON (moycore)" if "lua" in rts else "ABSENT"))
+        say("wasm runtime %s" % ("ON (moy_wasm)" if "wasm" in rts else "ABSENT"))
+        return rts
 
     def start_frames(self, ws):
         """The last boot step: say the desktop is about to paint, start the
@@ -396,9 +412,10 @@ class FramePump:
         self._expected = 0      # what pace() scheduled the last frame to total
         self._slept = False     # ...and whether it actually asked for a sleep
         self.last = _ticks_ms()
+        self._now_dt = [0, 0.0]  # begin()'s answer, reused: it runs every frame
 
     def begin(self):
-        """Top of the loop: `(now, dt)`, with dt clamped to 0..100ms so a hitch
+        """Top of the loop: `[now, dt]`, with dt clamped to 0..100ms so a hitch
         (a 200ms GC, an SD write) can't teleport a cart's physics. Also the
         slack learner: the real period of the frame that just ended, compared
         against what pace() scheduled for it -- only on frames that SLEPT
@@ -419,7 +436,10 @@ class FramePump:
                 self.slack -= 1
         dt = max(0.0, min(0.1, real / 1000.0))
         self.last = now
-        return now, dt
+        out = self._now_dt
+        out[0] = now
+        out[1] = dt
+        return out
 
     def tail(self, ws):
         """The once-only frame housekeeping both boards run after `ws.frame()`:
@@ -681,10 +701,24 @@ class PerfSampler:
     rings the same line for its offline SD log, because that board's serial was
     unreadable for months and the ring is why anything was known about it.
 
+    THE LINE IS PERF DIAG'S (owner call 2026-09-30). With Settings -> PERF DIAG
+    off -- kid mode, the default -- nothing periodic is formatted, printed or
+    ringed on any board, because every line is garbage the collector comes back
+    for in a stop-the-world pass. Whatever reads the line turns the diag on for
+    its measurement and puts it back (`--diag` on `tools/p4_perf.py` and
+    `tools/board.py perf`, `tests/on_glass.py`'s `perf_diag`); the tools'
+    default, the shipping fps, reads `ws._frames_drawn` -- the counter `fps=`
+    is taken from -- with the diag off. The window still closes every period
+    while it is off, so the first line after it comes on is a whole period of
+    its own; the PPA deltas, whose baseline is only read under the diag, print
+    `-` in that one line.
+
     The boot-time arm (`ws.perf_capture = bool(getattr(ws, "diag_live",
     False))`) stays in each board's `run_desktop`: it is a service assignment on
     the boot path, which is what `tests/test_board_service_parity.py` reads. The
-    LIVE re-sync is here, so flipping Settings -> PERF DIAG needs no reboot.
+    LIVE re-sync is here, so flipping Settings -> PERF DIAG needs no reboot --
+    for the capture meters and for the audio backend's own periodic lines,
+    which follow the same switch through its `diag` attribute.
     """
 
     def __init__(self, ws, overlap=None, period_ms=2000, emit=print):
@@ -701,6 +735,12 @@ class PerfSampler:
         self._miss = 0
         self._sched = None    # WHOSE misses _miss is a baseline for
         self._ov = overlap() if overlap is not None else None
+        # The sample's values, REUSED: every field is written on every sample
+        # (None where nothing measured it), so one dict and its two pairs serve
+        # every line the board prints for as long as it is on.
+        self._v = {}
+        self._fps = [0, 0]
+        self._tick = [0, 0]
 
     def _take(self, name):
         """Read one windowed-WM meter and CLEAR it: it says what THIS sample
@@ -726,7 +766,8 @@ class PerfSampler:
         return v
 
     def account(self, now, elapsed, sleep_ms):
-        """The `FrameLoop.account` hook: accumulate, and emit once a period."""
+        """The `FrameLoop.account` hook: accumulate, and once a period follow
+        PERF DIAG and emit the line when it is on."""
         self._n += 1
         self._busy += elapsed
         if _ticks_diff(_ticks_ms(), self._at) < 0:
@@ -737,71 +778,101 @@ class PerfSampler:
             live = bool(getattr(ws, "diag_live", False))
             if ws.perf_capture != live:
                 ws.perf_capture = live
-            cart = getattr(ws, "cart", None)
-            v = {"cart": cart.get("title") if cart else None,
-                 "fps": ((drawn - self._drawn) // self._secs,
-                         self._n // self._secs),
-                 "busy": self._busy // (self._n or 1),
-                 "draw": getattr(ws, "_draw_ms", 0),
-                 "flush": getattr(ws, "_flush_ms", 0),
-                 "logic": getattr(ws, "_upd_ms", 0),
-                 "render": getattr(ws, "_cart_ms", 0),
-                 "chrome": getattr(ws, "_chrome_ms", 0),
-                 # No windowed WM on this board, or the deep meters are off,
-                 # or the WM did not run this window: either way nothing
-                 # measured them, which is not a zero. TAKEN, not read -- see
-                 # _take.
-                 "wmr": self._take("_pf_wm_restore"),
-                 "wmw": self._take("_pf_wm_windows"),
-                 "wms": self._take("_pf_wm_stamp"),
-                 "home": getattr(ws, "_pf_home", None)}
-            if self._overlap is not None:
-                # DELTAS over this sample (the counters are cumulative), and
-                # gfence_ms otherwise hides entirely: the game fence runs inside
-                # FrameLoop's UNTIMED present() hook, so it lands in busy= and
-                # in no phase meter. The timeout count must stay 0.
-                cur = self._overlap()
-                # A slot a compositor cannot measure is None the whole way
-                # through: a 0 would read as a count this board never took.
-                d = [None if (a is None or b is None) else a - b
-                     for a, b in zip(cur, self._ov)]
-                self._ov = cur
-                v["ppa"] = (d[0], d[1], d[2], d[4], d[6])
-                v["fence_ms"] = None if d[3] is None else d[3] / 1000.0
-                v["gfence_ms"] = None if d[5] is None else d[5] / 1000.0
-            # LAST, and BARE where every field beside it is a getattr: perf_net
-            # CONSUMES its window, and `-` is a legitimate reading here, so a
-            # getattr default would let a renamed meter forge "no match"
-            # forever. A rename costs the whole line and says so.
-            v["net"] = ws.perf_net()
-            # The tick model (#217): the rate the cart's logic holds, the draw
-            # divisor it holds it at, and the frames this sample wrote debt
-            # off in -- `-` while nothing is paced, never a frozen 0.
-            pl = getattr(ws, "player", None)
-            if pl is not None and pl.tick_ms:
-                sc = pl.sched
-                v["tick"] = (sc.rate, sc.div)
-                # The baseline belongs to THAT scheduler. Every cart start
-                # builds a new one counting from 0, so subtracting the previous
-                # cart's total reported a NEGATIVE miss in the first sample of
-                # each run (`tick=60/1 miss=-424`, on glass) whenever no sample
-                # landed at the launcher in between -- which is what a `run`
-                # straight after an `exit` does.
-                if sc is not self._sched:
-                    self._sched = sc
-                    self._miss = 0
-                v["miss"] = sc.misses - self._miss
-                self._miss = sc.misses
+            aud = getattr(ws, "audio", None)
+            if aud is not None and hasattr(aud, "diag") and aud.diag != live:
+                aud.diag = live
+            if live:
+                self._sample(ws, drawn)
             else:
-                self._sched = None
-                self._miss = 0
-            self._emit(format_perf(v))
+                self._ov = None          # re-read when the diag comes back
+                self._baseline_misses(ws)
         except Exception as exc:  # noqa: BLE001 -- a diag never kills the loop
             self._emit(PERF_FAILED % (type(exc).__name__, exc))
         self._at = _ticks_ms() + self._period
         self._n = 0
         self._busy = 0
         self._drawn = drawn
+
+    def _baseline_misses(self, ws):
+        """The tick model's miss baseline, kept current whether or not a line
+        is printed, so the first line after the diag comes on counts its own
+        window. `-` while nothing is paced. Returns the misses this window, or
+        None."""
+        pl = getattr(ws, "player", None)
+        if pl is None or not pl.tick_ms:
+            self._sched = None
+            self._miss = 0
+            return None
+        sc = pl.sched
+        # The baseline belongs to THAT scheduler. Every cart start builds a
+        # new one counting from 0, so subtracting the previous cart's total
+        # reported a NEGATIVE miss in the first sample of each run
+        # (`tick=60/1 miss=-424`, on glass) whenever no sample landed at the
+        # launcher in between -- which is what a `run` straight after an
+        # `exit` does.
+        if sc is not self._sched:
+            self._sched = sc
+            self._miss = 0
+        n = sc.misses - self._miss
+        self._miss = sc.misses
+        return n
+
+    def _sample(self, ws, drawn):
+        """One PERF line from this window's accumulators and the meters."""
+        cart = getattr(ws, "cart", None)
+        v = self._v
+        fps = self._fps
+        fps[0] = (drawn - self._drawn) // self._secs
+        fps[1] = self._n // self._secs
+        v["cart"] = cart.get("title") if cart else None
+        v["fps"] = fps
+        v["busy"] = self._busy // (self._n or 1)
+        v["draw"] = getattr(ws, "_draw_ms", 0)
+        v["flush"] = getattr(ws, "_flush_ms", 0)
+        v["logic"] = getattr(ws, "_upd_ms", 0)
+        v["render"] = getattr(ws, "_cart_ms", 0)
+        v["chrome"] = getattr(ws, "_chrome_ms", 0)
+        # No windowed WM on this board, or the deep meters are off, or the WM
+        # did not run this window: either way nothing measured them, which is
+        # not a zero. TAKEN, not read -- see _take.
+        v["wmr"] = self._take("_pf_wm_restore")
+        v["wmw"] = self._take("_pf_wm_windows")
+        v["wms"] = self._take("_pf_wm_stamp")
+        v["home"] = getattr(ws, "_pf_home", None)
+        v["ppa"] = v["fence_ms"] = v["gfence_ms"] = None
+        v["tick"] = None
+        if self._overlap is not None:
+            # DELTAS over this sample (the counters are cumulative), and
+            # gfence_ms otherwise hides entirely: the game fence runs inside
+            # FrameLoop's UNTIMED present() hook, so it lands in busy= and in
+            # no phase meter. The timeout count must stay 0.
+            cur = self._overlap()
+            prev = self._ov
+            self._ov = cur
+            if prev is not None:
+                # A slot a compositor cannot measure is None the whole way
+                # through: a 0 would read as a count this board never took.
+                d = [None if (a is None or b is None) else a - b
+                     for a, b in zip(cur, prev)]
+                v["ppa"] = (d[0], d[1], d[2], d[4], d[6])
+                v["fence_ms"] = None if d[3] is None else d[3] / 1000.0
+                v["gfence_ms"] = None if d[5] is None else d[5] / 1000.0
+        # LAST, and BARE where every field beside it is a getattr: perf_net
+        # CONSUMES its window, and `-` is a legitimate reading here, so a
+        # getattr default would let a renamed meter forge "no match" forever.
+        # A rename costs the whole line and says so.
+        v["net"] = ws.perf_net()
+        # The tick model (#217): the rate the cart's logic holds, the draw
+        # divisor it holds it at, and the frames this sample wrote debt off in
+        # -- `-` while nothing is paced, never a frozen 0.
+        v["miss"] = self._baseline_misses(ws)
+        if v["miss"] is not None:
+            sc = self._sched
+            tick = self._tick
+            tick[0] = sc.rate
+            tick[1] = sc.div
+            v["tick"] = tick
+        self._emit(format_perf(v))
 
 
 # -- #210: the frame loop's per-stage deadline meters -------------------------

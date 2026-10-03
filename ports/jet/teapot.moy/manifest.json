@@ -1,0 +1,9 @@
+{
+  "format": "moy-1",
+  "title": "Jet Teapot",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 13,
+  "fps": "free",
+  "input": ["buttons"]
+}

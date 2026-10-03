@@ -260,6 +260,16 @@ def capture(cfg, carts_dir):
         out["bt_%d" % sel] = _shot(ws, lambda: sl._draw_bluetooth())
     sl.bt_view = False
 
+    # The warning before a toggle turns ON (UNKNOWN SOURCES), with the focus
+    # ring on each of its two buttons.
+    from runtime.settings_layer import TOGGLE_CONFIRMS
+    for key in sorted(TOGGLE_CONFIRMS):
+        sl.open_confirm(key)
+        for sel in range(2):
+            sl.confirm_sel = sel
+            out["confirm_%s_%d" % (key, sel)] = _shot(ws, lambda: sl._draw_confirm())
+        sl.close_confirm()
+
     # The = dropdown, one shot per highlighted row (headers + separators move
     # with it), and the ABOUT modal.
     ws.go_home()

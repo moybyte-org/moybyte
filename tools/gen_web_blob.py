@@ -5,10 +5,10 @@ The board serves a browser console (`moy_webhost`), and until now it served it
 from a copy of the web build somebody had put on the board's storage by hand.
 That copy drifts silently: on 2026-08-15 a board served a bundle old enough to
 still carry a desktop-blackout bug that had been fixed in `dist/` hours before,
-and nothing anywhere said so. The T-Deck cannot even be pushed to -- the push
-tool hands the board a url over serial, and that board's USB-CDC RX is dead
-under the desktop (CLAUDE.md, hard constraints), so its bundle went on by card
-reader or not at all.
+and nothing anywhere said so. The T-Deck could not be pushed to at all then --
+the push tool handed the board a url over serial, and that board took no serial
+input under the desktop until #201 -- so its bundle went on by card reader or
+not at all.
 
 So the image carries one. This emits a C translation unit that `.incbin`s the
 PRE-GZIPPED assets (every one in `moy_webhost.ASSETS` -- 609,268 B against
@@ -34,7 +34,7 @@ With no bundle built it emits an EMPTY table and says so loudly; `--require`
 instead. The default is soft because building the bundle needs emsdk (~1.7 GB)
 and a firmware flash is the daily loop -- but an image published to a device
 must never be the one that quietly has no console, which is what --require is
-for. Same doctrine as `MOYBYTE_REQUIRE_UNIX_MP` (CLAUDE.md).
+for. Same doctrine as `MOYBYTE_REQUIRE_UNIX_MP` (.claude/rules/testing.md).
 """
 
 from __future__ import annotations
@@ -67,9 +67,13 @@ def asset_names():
     """
     path = os.path.join(TDECK_MODULES, "moy_webhost.py")
     # The modules dir on sys.path, because moy_webhost imports its sibling
-    # transport by plain name the way the device does.
+    # transport by plain name the way the device does -- and this tree's root,
+    # so its `from runtime import moy_sync` reads THIS tree's runtime and not
+    # whichever checkout an installed package points at.
     if TDECK_MODULES not in sys.path:
         sys.path.insert(0, TDECK_MODULES)
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
     spec = importlib.util.spec_from_file_location("_moy_webhost_for_blob", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -284,7 +288,7 @@ def main(argv=None):
         # device must never be the one that quietly has no console, which is
         # the whole failure this feature exists to end. A local flash is the
         # daily loop and building the bundle needs emsdk (~1.7GB), so there it
-        # only warns. Same shape as MOYBYTE_REQUIRE_UNIX_MP (CLAUDE.md).
+        # only warns. Same shape as MOYBYTE_REQUIRE_UNIX_MP (.claude/rules/testing.md).
         req = os.environ.get("MOYBYTE_REQUIRE_WEB_BUNDLE")
         if args.require or req == "1" or (req is None
                                           and os.environ.get("CI")):

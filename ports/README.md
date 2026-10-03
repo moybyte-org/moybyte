@@ -1,14 +1,24 @@
-# ports/ — third-party carts ported to the Lua runtime (dev/test material)
+# ports/ — third-party carts ported to the console (dev/test material)
 
-Carts in this folder are **conformance and stress tests for the #67 Lua cart
-runtime**, ported from other fantasy consoles with the moy-spec CLI's
-`moy port` (the one converter, spec-side — `p8_lua_port.py` there).
-They are deliberately **NOT seed carts**: seeding is declared per cart now (a
+Carts in this folder are **conformance and stress tests for the cart
+runtimes**: carts from other fantasy consoles ported to the #67 Lua runtime
+with the moy-spec CLI's `moy port` (the one converter, spec-side —
+`p8_lua_port.py` there), and `jet/`, a third-party engine's example compiled
+for the WebAssembly tier. They are deliberately **NOT seed carts**: seeding is declared per cart now (a
 `system_carts/*/manifest.json` carries `"system": true` and an `"order"`, and
 `tools/gen_device_carts.py` reads those), and nothing here carries either
 declaration or lives in `system_carts/` — so none of it is baked into a
 firmware image or seeded onto a device. To play one, copy the `.moy` folder into a cart store
 (the tests do exactly that into a tmp store).
+
+## jet/ — Jet Teapot and ESP 88, the compiled tier's showcases
+
+Two `"runtime": "wasm"` carts on Jet, CubeCoders' MIT software rasteriser,
+each porting one of Jet's own examples: the teapot scene and ESP 88, the neon
+city film. Their frames reach the console through `blit565`. `jet/README.md`
+is the authority: how they are built (`tools/jet_cart.py`), how Jet and the
+film are vendored (`make vendor-jet`), their modes and memory, and the design
+for seeding them, which nothing does yet.
 
 ## p8/ — the PICO-8 conformance corpus, ONE cart each (2026-09-11)
 

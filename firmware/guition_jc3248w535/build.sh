@@ -56,13 +56,23 @@ moybyte_setup_idf esp32s3 \
 # ---------------------------------------------------------------------------
 
 # 2a) REPR_C unboxed floats (#66) -- the same chip-class lever the T-Deck
-#     measured; same S3, same boxing cost.
+#     measured; same S3, same boxing cost -- and the map-lookup cache index
+#     re-aimed for it (#77), paired with mpconfigboard.h's 512-slot table.
 moybyte_patch_repr_c
+moybyte_patch_map_cache_for_repr_c
+# Size-class run hints for gc_alloc (#66): every console board takes it; the
+# lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
+moybyte_patch_gc_run_hints
 moybyte_patch_gc_split_reserve
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.
 moybyte_patch_native_code_free
 moybyte_patch_espnow_ring_race
+
+# The console is the SoC's USB-Serial/JTAG: it takes, when it starts, what a
+# host sent during the bootloader, instead of leaving it in the FIFO for a
+# whole boot (tools/patch_usj_rx_init.py).
+moybyte_patch_usj_rx_init
 
 # 2c) PSRAM temperature retune (#169) -- REQUIRED by the 120MHz MSPI profile in
 #     sdkconfig.board (adopted 2026-08-19).
@@ -77,6 +87,20 @@ moybyte_patch_psram_retune
 # DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
 # component is the P4's radio: a C6 slave over SDIO. This board's WiFi and BLE
 # are on-die, and nothing in its build pulls esp_hosted in at all.
+
+# DECLINED moybyte_patch_stdin_ring -- the 4 KB stdin ring for a UART console.
+# This board's serial is the SoC's USB-Serial/JTAG, whose ISR takes only what
+# the ring has room for while the USB host waits with the rest, so a heap
+# collection costs it throughput and never a byte; the internal SRAM stays.
+
+# DECLINED moybyte_patch_lfs_sizes -- LittleFS sized for a flash store. The
+# store is this board's TF card; the internal VFS it falls back to without one
+# keeps the stock sizes, unmeasured here.
+
+# machine.SDCard in multi-block runs: the store is this board's TF card, and
+# IDF writes a PSRAM buffer one single-block command per sector, each waiting
+# out the card's busy time. tools/patch_sdcard_runs.py carries the why.
+moybyte_patch_sdcard_runs
 
 # ---------------------------------------------------------------------------
 # 3) Stage: shared native modules (board.toml [native.shared]) with the web

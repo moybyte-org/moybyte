@@ -13,7 +13,7 @@ the authority; this page is the explanation.
 Compiled with **`MOY_PIXEL_RGB565`** (set in `../micropython.cmake`, once, for
 the whole module). SPEC.md §1.1 leaves the canvas format to the host, and this
 console's is 16-bit words rather than palette indices — measured and settled,
-see CLAUDE.md's graphics section.
+see `.claude/rules/rendering.md`.
 
 **And at `-O3`, via `../libmoy_kernels.c`.** That shim exists because the ports
 build usermods at `-O2` and `modmoy_gfx.c` carries an in-source

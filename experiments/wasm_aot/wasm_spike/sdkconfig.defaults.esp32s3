@@ -1,0 +1,30 @@
+# ESP32-S3 (LilyGO T-Deck Plus) half of the spike. Loaded AFTER
+# sdkconfig.defaults (IDF applies sdkconfig.defaults.<target> on top), so the
+# P4 facts there that exist on this chip are overridden here; the ones that do
+# not exist (360MHz, L2 cache) are ignored.
+#
+# Board facts and A/B'd levers copied from
+# firmware/lilygo_t_deck_plus_mainline/boards/MOYBYTE_TDECK/sdkconfig.board so
+# the runtime runs under the console's own clock, caches and PSRAM: 240MHz,
+# 32KB icache / 64KB dcache / 32B lines, octal PSRAM, 16MB DIO flash.
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_32KB=
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MEMTEST=
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# The T-Deck's serial IS the SoC's USB-Serial/JTAG (board.toml [serial]).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

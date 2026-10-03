@@ -62,8 +62,14 @@ MACHINE_I2C_C="${MPY_DIR}/ports/esp32/machine_i2c.c"
 # 2a) moy_lcd needs esp_lcd in the main component's REQUIRES.
 moybyte_idf_component esp_lcd
 
-# 2b) REPR_C unboxed floats (#66) -- the chip-class lever this board measured.
+# 2b) REPR_C unboxed floats (#66) -- the chip-class lever this board measured --
+#     and the map-lookup cache index re-aimed for it (#77), which pays with the
+#     512-slot table mpconfigboard.h declares and measured null alone.
 moybyte_patch_repr_c
+moybyte_patch_map_cache_for_repr_c
+# Size-class run hints for gc_alloc (#66): every console board takes it; the
+# lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
+moybyte_patch_gc_run_hints
 moybyte_patch_gc_split_reserve
 
 # 2c) Release the GIL across machine.I2C's blocking wait (#69).
@@ -125,6 +131,11 @@ fi
 moybyte_patch_native_code_free
 moybyte_patch_espnow_ring_race
 
+# The console is the SoC's USB-Serial/JTAG: it takes, when it starts, what a
+# host sent during the bootloader, instead of leaving it in the FIFO for a
+# whole boot (tools/patch_usj_rx_init.py).
+moybyte_patch_usj_rx_init
+
 # 2f) PSRAM temperature retune (#169) -- REQUIRED by this board's 120MHz octal
 #     MSPI setting in sdkconfig.board, not optional alongside it.
 moybyte_patch_psram_retune
@@ -138,6 +149,19 @@ moybyte_patch_psram_retune
 # DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
 # component is the P4's radio: a C6 slave over SDIO. This board's WiFi and BLE
 # are on-die, and nothing in its build pulls esp_hosted in at all.
+
+# DECLINED moybyte_patch_lfs_sizes -- LittleFS sized for a flash store. The
+# store is the SD card; the internal VFS it falls back to without one keeps the
+# stock sizes, unmeasured here.
+
+# DECLINED moybyte_patch_sdcard_runs -- machine.SDCard in multi-block runs.
+# This board's card is not machine.SDCard, which hangs it by re-initialising the
+# panel's SPI host: it is native/moy_sd, which moves its runs itself.
+
+# DECLINED moybyte_patch_stdin_ring -- the 4 KB stdin ring for a UART console.
+# This board's serial is the SoC's USB-Serial/JTAG, whose ISR takes only what
+# the ring has room for while the USB host waits with the rest, so a heap
+# collection costs it throughput and never a byte; the internal SRAM stays.
 
 # ---------------------------------------------------------------------------
 # 3) Stage: the shared native modules (board.toml [native.shared] -- the

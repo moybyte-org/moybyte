@@ -1,3 +1,15 @@
+# Map (grep -n a name to jump there):
+#   pin_ok             may a request with this pin proceed
+#   pack_store         the whole store as the page's bundle
+#   stream_store_json  the same bundle, as JSON pieces
+#   update_status      the one /update document
+#   ConsoleUpdate      the /update backend on a board with glass
+#   WebHost            the transport, the console's pages and its store
+#   WebHost.start      bring the link up, then listen
+#   WebHost.poll       one transport poll and one slice of work
+#   WebHost.gate       None when a gated request may proceed
+#   ensure_online      connect, wait for the link, report
+#   make_webhost       the WebHost every board injects
 """Serve the moybyte web console FROM the console, over the device's own WiFi.
 
 This is what replaces the streaming web view (#100), and it is the opposite
@@ -199,10 +211,12 @@ _entries = moy_sync._entries
 _is_dir = moy_sync._is_dir
 _read_text = moy_sync._read_text
 _read_chunks = moy_sync.read_text_chunks
+_is_binary = moy_sync.is_binary
 
 
 def pack_store(carts_root, listdir=None, read=None, isdir=None, tops=None):
-    """The whole store as the page's bundle shape: {"<top>/<rel>": text}.
+    """The whole store as the page's bundle shape: {"<top>/<rel>": text}, and
+    {"<top>/<rel>": {"b": base64}} for a BINARY_FILES file -- a cart's cover.
 
     The shape is `worker.js`'s, not a new one -- it is what the dev twin
     (`firmware/web_runner/serve.py --carts`, which calls THIS function) serves
@@ -247,6 +261,11 @@ def _pack_dir(out, path, prefix, _listdir, _isdir, _read):
         rel = prefix + "/" + name
         if isdir_:
             _pack_dir(out, full, rel, _listdir, _isdir, _read)
+            continue
+        if _is_binary(name):
+            pieces = moy_sync.read_binary_b64(full)
+            if pieces is not None:
+                out[rel] = {"b": "".join(pieces)}
             continue
         text = _read(full)
         if text is not None:             # binary/unreadable: skip, never crash
@@ -294,13 +313,22 @@ def _stream_dir(path, prefix, _listdir, _isdir, _read, first):
             for piece in _stream_dir(full, rel, _listdir, _isdir, _read, first):
                 yield piece
             continue
-        pieces = _value_pieces(full, _read)
+        binary = _is_binary(name)
+        pieces = (moy_sync.read_binary_b64(full) if binary
+                  else _value_pieces(full, _read))
         if pieces is None:               # binary/unreadable: skip, never crash
             continue
         if not first[0]:
             yield ","
         first[0] = False
         yield _jstr(rel)
+        if binary:
+            # A cover (moy_sync.BINARY_FILES): base64 needs no escaping.
+            yield ':{"b":"'
+            for piece in pieces:
+                yield piece
+            yield '"}'
+            continue
         yield ':"'
         for piece in pieces:
             yield _jesc(piece)
@@ -672,7 +700,7 @@ class WebHost(WebServer):
         self.on_stop = on_stop
         # The T-Deck's store lives on a shared-SPI SD card that must be touched
         # through moybyte_sd.with_sd_live, never directly (see that module and
-        # the hard-constraints section of CLAUDE.md). The P4 has no SD and
+        # .claude/rules/boards.md). The P4 has no SD and
         # passes None, which makes this a plain call-through.
         self._with_sd = with_sd or (lambda fn: fn())
         # ...and the SAME gate guards file STREAMING out of the store, which is

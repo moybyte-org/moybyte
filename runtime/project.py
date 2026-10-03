@@ -1,3 +1,9 @@
+# Map (grep -n a name to jump there):
+#   _ConfigOps               the CONFIG tab's undo op codec
+#   Project                  the open cart's data and its persistence verbs
+#   Project.commit_code      persist validated source
+#   Project.commit_manifest  persist edited metadata
+#   Project.history_for      the op history for a tab
 """The open cart's live WORKSPACE (Stage 1 of docs/history/shell_ux_technical_plan_v1.md).
 
 `Project` holds the DATA of the one cart currently open in the console -- the cart
@@ -241,6 +247,10 @@ class Project:
             pass
         if ws.make_audio is not None:
             ws.audio = ws.make_audio(engine)
+            # A backend with periodic diag lines is born following PERF DIAG;
+            # device_boot.PerfSampler keeps it following from here.
+            if hasattr(ws.audio, "diag"):
+                ws.audio.diag = bool(getattr(ws, "diag_live", False))
         else:
             ws.audio = _SilentAudio(engine)
 

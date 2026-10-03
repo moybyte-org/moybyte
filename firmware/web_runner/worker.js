@@ -21,6 +21,7 @@
 //   {t:"init", search}   boot the console; `search` is location.search (tier + cart)
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
 //   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
+//   {t:"state"}          the console's `state` (web_boot.state_json), for a harness
 //   {t:"run"}            start stepping (the page's play-button gesture)
 //   {t:"fbret", b}       a framebuffer being handed BACK for reuse (see below)
 //   {t:"reload"}         dev hot-reload: re-read carts.json/files.json, restart
@@ -31,6 +32,9 @@
 //                        PICO-8 .p8 / .p8.png, which is CONVERTED first (#194)
 //   {t:"edit", cart, tab}  open a cart in the Editor (the import report's
 //                        action); `tab` optionally lands on paint/map/music
+//   {t:"picked", id, name, buf}  the player's own copy of a file Get Carts
+//                        asked for ({t:"pick"}), TRANSFERRED; or
+//   {t:"picked", id, cancel}     ...the player closed the question
 // worker -> main:
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
@@ -51,12 +55,17 @@
 //                        words; `report` is the p8 compatibility summary (the
 //                        shared writer's own lines) when there was one
 //   {t:"edited", s, ok}  the result of an "open in editor"
+//   {t:"pick", id, name, size, host}  Get Carts needs a file this page cannot
+//                        fetch from `host`: the page asks the player for theirs
+//   {t:"unpick", id}     ...and the question is over
+//   {t:"installed", folder, d}  an install reached the browser's store
+//   {t:"state", json}    the answer to {t:"state"}
 import { loadMicroPython } from "./micropython.mjs";
 import * as store from "./moy_store.mjs";
 
 let mp = null, step = null, applyEvents = null, assets = null, reload = null;
 // The p8 drop's two Python entry points (#194), bound at boot like the rest.
-let importP8Json = null, editCart = null, openCart = null;
+let importP8Json = null, editCart = null, openCart = null, stateJson = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
 let fbAddr = null, fbLen = null;
@@ -154,6 +163,34 @@ const GPIO_MS = 33;
 let updatePoll = null, updateWants = null, updateAck = null, updateOff = null;
 let updateBusy = false, lastUpdateAt = 0;
 const UPDATE_MS = 1000;
+// GET CARTS (#124), site mode: the console's carts_link queues what it needs
+// -- a fetch, a drop, an install to keep, a record, a file from the player --
+// and this pump does it and answers through cartsSay. Polled every frame
+// while anything is under way and every CARTS_IDLE_MS otherwise: the answers
+// themselves never wait on the poll, only a new request does.
+//
+// A fetch's body is written into a SPOOL FILE in the VFS as fetch hands it
+// over, and the console reads that file as far as it has grown: the bytes
+// live in this worker's memory and never in the VM's heap. Python can only
+// read between frames, which is exactly when these callbacks run.
+let cartsPoll = null, cartsEvent = null, lastCartsAt = 0;
+const CARTS_IDLE_MS = 100;
+const NET_DIR = "/moy/net";
+const cartsLive = new Map();          // id -> {ac, stream, path} or {pick}
+function cartsSay(ev) {
+    if (!cartsEvent) return;
+    try { cartsEvent(JSON.stringify(ev)); }
+    catch (e) { console.log("[moy] carts: answer refused -- " + e); }
+}
+// One OPFS writer at a time: the sweep's batches and an install's commit both
+// write the carts store, in the order they were asked for.
+let opfsChain = Promise.resolve();
+function opfsSerial(fn) {
+    const p = opfsChain.then(fn);
+    opfsChain = p.catch(() => { });
+    return p;
+}
+
 // MODE 1 (#193): the same batches, applied into OPFS instead of POSTed. `mode`
 // is decided ONCE at boot, before anything is written, because it decides where
 // the VFS is seeded FROM -- a board's carts.json, or the browser's own store.
@@ -223,6 +260,207 @@ setInterval(wpFlush, WP_MS);
 
 function say(s) { self.postMessage({ t: "status", s: s }); }
 
+// A COMPILED CART ("runtime": "wasm"), run beside the console as a SIBLING
+// WebAssembly module: this worker's own engine compiles and instantiates the
+// cart's main.wasm, never an engine inside the VM. The console drives it
+// exactly as a board's does -- moycore through the session surface
+// (native/moy_wasm/moy_wasm_session.h), which native/moy_wasm_web implements
+// by calling `Module.moyEngine` below to open, bind, run a hook and close --
+// so the Player, the fit check, the canvas and the verbs are the boards'.
+//
+// The cart's "moy" imports are adapters over libmoy's import table, generated
+// from the table's own signature strings (moy_web_natives): every verb the
+// cart calls is the C function every host calls (moycore's libmoy/moy_wasm.c),
+// with the same marshalling, blit, read and traps. This is moy-spec's web
+// player's adapter (runner/cart.js) on this worker's VM. The two modules have
+// separate memories, so a pointer the cart hands over is an offset into ITS
+// memory: where a row says '*~' -- a pointer and the length it covers -- the
+// range is bounds-checked against the cart's memory, copied into the VM's,
+// passed to C as that copy, and copied back when the call returns. A pointer
+// a row carries as a plain i32 (blit's frame, camera's out) is the binding's
+// to reach, through span() and store() (`Module.moyCart`, libmoy's embed.c).
+// A trap the binding raises is thrown as a JavaScript exception, which
+// unwinds the cart exactly as a wasm trap does.
+//
+// A cart's par items run here, on this one thread, one after another: the
+// cart's memory is not shared, so no other worker could reach it. The binding
+// calls item() for each, which moves the cart's own stack pointer as every
+// host does.
+const OUT_OF_BOUNDS = "out of bounds memory access";
+class CartTrap extends Error {}
+
+function installCartEngine(M) {
+    const dec = new TextDecoder();
+    const u32 = () => new Uint32Array(M.HEAPU8.buffer);   // fresh: growth replaces it
+    const cstr = (p) => {
+        const h = M.HEAPU8;
+        let e = p;
+        while (h[e]) e++;
+        return dec.decode(h.subarray(p, e));
+    };
+    // '*~' is one pointer-and-length pair; every other letter one scalar.
+    const params = (sig) => {
+        const inner = /^\((.*)\)(.?)$/.exec(sig)[1];
+        const out = [];
+        for (let k = 0; k < inner.length; k++) {
+            if (inner[k] === "*" && inner[k + 1] === "~") { out.push("span"); k++; }
+            else out.push(inner[k]);
+        }
+        return out;
+    };
+    let C = null;              // the VM's exports this engine calls (open's `vm`)
+    let w = 0;                 // the binding the table is called with
+    let instance = null, memory = null, imports = null, limit = -1;
+    let owned = [];            // the VM-side copies of the current import call
+    const cartBytes = () => new Uint8Array(memory.buffer);
+    const scratch = (n) => {
+        const p = C.malloc(n > 0 ? n : 1);
+        owned.push(p);
+        return p;
+    };
+    const trapText = (p) => (p ? cstr(p) : "");
+    const reach = {
+        // One of par's items: _par(i, arg) with the cart's stack pointer at sp,
+        // then the stack pointer as it was. 0 when it returned; 1 when it threw,
+        // with the trap recorded unless the binding recorded its own.
+        item(i, arg, sp) {
+            const ex = instance.exports;
+            const g = ex.__stack_pointer;
+            const saved = g.value;
+            g.value = sp;
+            try {
+                ex._par(i, arg);
+                return 0;
+            } catch (e) {
+                if (!(e instanceof Error)) throw e;
+                if (!C.trapped(w)) {
+                    const msg = String(e.message || e);
+                    const b = new TextEncoder().encode(msg + "\0");
+                    const p = C.malloc(b.length);
+                    M.HEAPU8.set(b, p);
+                    C.itemTrap(w, p);
+                    C.free(p);
+                }
+                return 1;
+            } finally {
+                g.value = saved;
+            }
+        },
+        span(off, n) {
+            const mem = cartBytes();
+            if (off + n > mem.length) return 0;
+            const p = scratch(n);
+            M.HEAPU8.set(mem.subarray(off, off + n), p);
+            return p;
+        },
+        store(off, src, n) {
+            const mem = cartBytes();
+            if (off + n > mem.length) return 0;
+            mem.set(M.HEAPU8.subarray(src, src + n), off);
+            return 1;
+        },
+    };
+    // One import per row of the table, each an adapter over the row's C.
+    function adapters() {
+        const cp = C.malloc(4);
+        const base = C.natives(cp);
+        const n = u32()[cp >> 2];
+        C.free(cp);
+        const out = {};
+        for (let i = 0; i < n; i++) {
+            const h = u32(), at = (base >> 2) + i * 4;   // NativeSymbol: four words
+            const name = cstr(h[at]), fn = C.fn(h[at + 1]), kinds = params(cstr(h[at + 2]));
+            out[name] = (...args) => {
+                if (!w) throw new CartTrap("moy: an import ran before the cart was bound");
+                const cargs = [w];
+                const copies = [];
+                const outer = owned;
+                let a = 0;
+                owned = [];
+                try {
+                    for (const k of kinds) {
+                        if (k !== "span") { cargs.push(args[a++]); continue; }
+                        const off = args[a++] >>> 0, len = args[a++] >>> 0;
+                        const mem = cartBytes();
+                        if (off + len > mem.length) throw new CartTrap(OUT_OF_BOUNDS);
+                        const p = scratch(len);
+                        M.HEAPU8.set(mem.subarray(off, off + len), p);
+                        copies.push([off, p, len]);
+                        cargs.push(p, len);
+                    }
+                    const r = fn(...cargs);
+                    for (const [off, p, len] of copies)
+                        cartBytes().set(M.HEAPU8.subarray(p, p + len), off);
+                    const t = C.trapped(w);
+                    if (t) throw new CartTrap(trapText(t));
+                    return r;
+                } finally {
+                    for (const p of owned) C.free(p);
+                    owned = outer;
+                }
+            };
+        }
+        return out;
+    }
+    M.moyEngine = {
+        // Compile and instantiate the cart (the session's load, which the host
+        // half has already checked against SPEC.md 16's shape). "" when it
+        // stands, else why it does not, in the words the Player reads: a
+        // memory the browser would not give is "out of memory".
+        open(bytes, vm) {
+            C = vm;
+            try {
+                if (!imports) imports = adapters();
+                const module = new WebAssembly.Module(bytes);
+                instance = new WebAssembly.Instance(module, { moy: imports });
+            } catch (e) {
+                instance = null;
+                const msg = String((e && e.message) || e);
+                if (e instanceof RangeError) return "out of memory: " + msg;
+                return (e instanceof WebAssembly.CompileError ? "load: " : "instantiate: ") + msg;
+            }
+            memory = instance.exports.memory;
+            M.moyCart = reach;
+            return "";
+        },
+        bind(binding) { w = binding; },
+        // One hook: null when it returned, else what it threw. Only an Error is
+        // the cart's: anything else is the VM's own unwinding passing through.
+        hook(h, dt) {
+            const ex = instance.exports;
+            try {
+                if (h === 0) ex._init();
+                else if (h === 1) ex._update(dt);
+                else ex._draw();
+                return null;
+            } catch (e) {
+                if (!(e instanceof Error)) throw e;
+                return String(e.message || e);
+            }
+        },
+        close() {
+            instance = memory = null;
+            w = 0;
+            M.moyCart = null;
+        },
+        // The largest memory, in pages, this browser gives one module: the
+        // fit check's figure, found once by allocating it.
+        limitPages() {
+            if (limit < 0) {
+                limit = 0;
+                for (let p = 65536; p >= 16; p >>= 1) {
+                    try {
+                        new WebAssembly.Memory({ initial: p, maximum: p });
+                        limit = p;
+                        break;
+                    } catch (e) { }
+                }
+            }
+            return limit;
+        },
+    };
+}
+
 function mkdirs(p) {
     let cur = "";
     for (const part of p.split("/")) {
@@ -236,6 +474,14 @@ function mkdirs(p) {
 // the path. Only the carts-specific export/import code below names a root
 // directly; everything else iterates store.ROOTS.
 const CARTS_ROOT = store.rootById("carts").vfs;
+// Get Carts' record, beside the carts folder as on every console
+// (runtime/cart_index.py's RECORD_NAME, moy_store_base._sibling_path).
+const RECORD_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.RECORD_NAME;
+// The files compiled carts wrote (moy-spec SPEC.md 16.12), beside the carts
+// folder too (runtime/cart_files.py), and their store of record in OPFS:
+// site mode only, where a page keeps its own carts.
+const WRITTEN_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.WRITTEN_ROOT;
+let writtenStore = null;
 
 function writeStore(root, files) {
     // mkdirs(root) even for an empty set: a root with no files YET (a board's
@@ -246,9 +492,11 @@ function writeStore(root, files) {
     // watching for it.
     mkdirs(root);
     for (const rel in files) {
+        const data = store.fileData(files[rel]);   // text, or a cover's bytes
+        if (data === null) continue;
         const full = root + "/" + rel;
         mkdirs(full.slice(0, full.lastIndexOf("/")));
-        mp.FS.writeFile(full, files[rel]);
+        mp.FS.writeFile(full, data);
     }
 }
 
@@ -314,6 +562,17 @@ async function seedRoot(root, data, site) {
         return "none";
     }
     try {
+        if (root.id === "carts") {
+            // An install a reload interrupted finishes or goes BEFORE the
+            // store is read, and the record comes with the carts it describes.
+            const n = await store.recoverInstalls(s);
+            if (n) console.log("[moy] carts: " + n + " interrupted install(s) finished");
+            const rec = await store.readRecord(s);
+            if (rec !== null) {
+                mkdirs(RECORD_VFS.slice(0, RECORD_VFS.lastIndexOf("/")));
+                mp.FS.writeFile(RECORD_VFS, rec);
+            }
+        }
         if (await store.isEmpty(s)) {
             // First visit: the served bundle is the seed AND the baseline, so
             // the shelf is never empty and the first sweep has nothing to say.
@@ -326,7 +585,13 @@ async function seedRoot(root, data, site) {
         // The local store WINS over the served bundle: it is the kid's work, and
         // the bundle is only ever the factory seed. "load" (vs "seed") is the
         // evidence that a reload READ FROM local rather than re-seeding fresh.
-        writeStore(root.vfs, await store.readAll(s));
+        // The one thing the bundle still brings is a system cart this store has
+        // never had, seeded into it like a first visit's.
+        const local = await store.readAll(s);
+        const added = root.id === "carts" ? store.missingSystemCarts(local, data) : {};
+        if (Object.keys(added).length) await store.seed(s, added);
+        writeStore(root.vfs, local);
+        writeStore(root.vfs, added);
         return "load";
     } catch (e) {
         writeStore(root.vfs, data);
@@ -365,6 +630,7 @@ async function initStore(fetched) {
         if (w === "load") loaded = true;
         if (w === "none") anyNone = true;
     }
+    if (site) await seedWritten();
     if (!site) {
         persist("board", "carts are kept on the console");
     } else if (!anySite) {
@@ -381,6 +647,42 @@ async function initStore(fetched) {
         sitePersist((loaded ? "loaded" : "seeded") + " in "
                     + (performance.now() - t0).toFixed(0) + "ms");
     }
+}
+
+// The written files OPFS keeps, into the VFS before the console boots, with
+// every write a reload interrupted finished or discarded first.
+async function seedWritten() {
+    writtenStore = await store.openWritten(navigator);
+    if (!writtenStore) return;
+    try {
+        const files = await store.readWritten(writtenStore);
+        for (const rel in files) {
+            const full = WRITTEN_VFS + "/" + rel;
+            mkdirs(full.slice(0, full.lastIndexOf("/")));
+            mp.FS.writeFile(full, files[rel]);
+        }
+    } catch (e) {
+        writtenStore = null;
+        console.log("[moy] written: OPFS failed -- " + e);
+    }
+}
+
+// A file a compiled cart wrote, from the VFS into OPFS, read as it is now:
+// writes reach the store in the order the cart made them.
+function writtenKeep(j) {
+    if (!writtenStore) return;
+    let data;
+    try { data = mp.FS.readFile(WRITTEN_VFS + "/" + j.cart + "/" + j.key); }
+    catch (e) { return; }
+    opfsSerial(() => store.commitWritten(writtenStore, j.cart, j.key, data))
+        .then(() => cartsRoom())
+        .catch((e) => console.log("[moy] written: not kept -- " + e));
+}
+
+function writtenDrop(j) {
+    if (!writtenStore) return;
+    opfsSerial(() => store.dropWritten(writtenStore, j.cart, j.key))
+        .catch((e) => console.log("[moy] written: not dropped -- " + e));
 }
 
 function vfsIsDir(p) {
@@ -519,15 +821,29 @@ async function init(search) {
     // permanent frame tax, not headroom.
     mp = await loadMicroPython({ heapsize: 16 * 1024 * 1024,
         stdout: (l) => console.log("[moy]", l) });
+    installCartEngine(mp._module);
     say("loading console...");
     // FROZEN-first, like the page was: a ship build bakes the console into the wasm
     // and has no modules.json; a --stage-only dev dist adds one, and loading it into
     // /modules (first on sys.path) shadows the frozen copies.
-    const [mods, cartsRes, files] = await Promise.all([
+    // indexes.json: the shelves Get Carts lists, chosen by whoever SERVES this
+    // page -- the browser's twin of a board's indexes.json beside its carts.
+    // Absent (moybyte.com, a board) means the console's default shelves.
+    //
+    // Every body is READ as soon as its head arrives, carts.json's included. A
+    // board serves one connection at a time and cuts off a client that stops
+    // reading for its send budget (moy_webserver.WEB_SEND_TIMEOUT). A body
+    // left unread until the other answers are in -- and they queue behind it
+    // -- stops draining once the browser's buffer is full, and the board cuts
+    // it off: a board with more carts than that serves a console that cannot
+    // boot. tests/test_web_store_e2e.py boots one over a board-shaped link.
+    const [mods, cartsRes, files, shelves] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
-        fetch(withPin("carts.json")),
+        fetch(withPin("carts.json")).then(async (r) => (
+            { status: r.status, json: r.status === 403 ? null : await r.json() })),
         fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
-            .catch(() => null)]);
+            .catch(() => null),
+        fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null)]);
     if (cartsRes.status === 403) {
         // A PINNED BOARD, and this page cannot read it. Stop the boot here --
         // there is nothing to boot, and seeding the VFS from an error body
@@ -538,7 +854,7 @@ async function init(search) {
         console.log("[moy] carts.json refused the pin");
         return;
     }
-    const carts = await cartsRes.json();
+    const carts = cartsRes.json;
     let boot = "";
     if (mods) {
         mkdirs("/modules");
@@ -546,6 +862,10 @@ async function init(search) {
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
     await initStore({ carts: carts, files: files });
+    if (mode !== "board" && shelves && Array.isArray(shelves.indexes)) {
+        mp.FS.writeFile(CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/indexes.json",
+                        JSON.stringify({ indexes: shelves.indexes }));
+    }
     say("booting console...");
 
     let cart = qs.get("cart");
@@ -597,8 +917,8 @@ async function init(search) {
         + "sync_poll_json, sync_ack, sync_off, sync_config, store_mode, "
         + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
-        + "services_json, "
-        + "import_p8_json, edit_cart, open_cart");
+        + "services_json, carts_poll_json, carts_event_json, "
+        + "import_p8_json, edit_cart, open_cart, state_json");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
@@ -610,9 +930,13 @@ async function init(search) {
     syncAck = mp.globals.get("sync_ack");
     syncOff = mp.globals.get("sync_off");
     rescan = mp.globals.get("rescan_store");
+    cartsPoll = mp.globals.get("carts_poll_json");
+    cartsEvent = mp.globals.get("carts_event_json");
+    if (keep) cartsSay({ room: [keep.usage, keep.quota] });
     importP8Json = mp.globals.get("import_p8_json");
     editCart = mp.globals.get("edit_cart");
     openCart = mp.globals.get("open_cart");
+    stateJson = mp.globals.get("state_json");
     if (gpioPins) {
         gpioPoll = mp.globals.get("gpio_poll_json");
         gpioAck = mp.globals.get("gpio_ack_json");
@@ -833,7 +1157,7 @@ async function pumpLocal(body) {
             try { syncAck(1); } catch (e) { }  // keep; ack so it does not requeue
             return;
         }
-        const r = await store.applyOps(s, ops);
+        const r = await opfsSerial(() => store.applyOps(s, ops));
         if (r.errors.length)
             console.log("[moy] persist: " + r.errors.length + " op(s) refused, first "
                 + JSON.stringify(r.errors[0]));
@@ -857,6 +1181,160 @@ async function pumpLocal(body) {
     } finally {
         syncBusy = false;
     }
+}
+
+function cartsPump() {
+    if (!cartsPoll) return;
+    const now = performance.now();
+    if (!cartsLive.size && now - lastCartsAt < CARTS_IDLE_MS) return;
+    lastCartsAt = now;
+    let jobs = "";
+    try { jobs = cartsPoll(); } catch (e) { return; }
+    if (!jobs) return;
+    for (const j of JSON.parse(jobs)) {
+        if (j.op === "get") cartsGet(j);
+        else if (j.op === "drop") cartsDrop(j.id);
+        else if (j.op === "keep") cartsKeep(j);
+        else if (j.op === "record") cartsRecord(j);
+        else if (j.op === "wput") writtenKeep(j);
+        else if (j.op === "wdel") writtenDrop(j);
+        else if (j.op === "pick") {
+            cartsLive.set(j.id, { pick: true });
+            self.postMessage({ t: "pick", id: j.id, name: j.name, size: j.size, host: j.host });
+        } else if (j.op === "unpick") {
+            cartsDrop(j.id);
+            self.postMessage({ t: "unpick", id: j.id });
+        }
+    }
+}
+
+async function cartsGet(j) {
+    mkdirs(NET_DIR);
+    const path = NET_DIR + "/" + j.id;
+    mp.FS.writeFile(path, new Uint8Array(0));
+    const live = { ac: new AbortController(), stream: null, path };
+    cartsLive.set(j.id, live);
+    const mine = () => cartsLive.get(j.id) === live;
+    let r;
+    try {
+        // no-cache: revalidate, so CHECK reads the shelf as it is now. A
+        // range (part of a release asset, cart_index's ranged read) is one
+        // `bytes=a-b`, which a page may send any host without a preflight.
+        const opt = { signal: live.ac.signal, cache: "no-cache" };
+        if (j.range) opt.headers = { Range: "bytes=" + j.range[0] + "-" + j.range[1] };
+        r = await fetch(j.url, opt);
+    } catch (e) {
+        // CORS and no network look the same from here, and both mean this
+        // page cannot read that host: status 0.
+        if (mine()) cartsSay({ id: j.id, status: 0, error: String((e && e.message) || e) });
+        return;
+    }
+    if (!mine()) return;
+    cartsSay({ id: j.id, status: r.status });
+    if ((r.status !== 200 && r.status !== 206) || !r.body) {
+        try { live.ac.abort(); } catch (e) { }
+        return;
+    }
+    try {
+        const reader = r.body.getReader();
+        live.stream = mp.FS.open(path, "w");
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (!mine()) return;
+            if (done) break;
+            mp.FS.write(live.stream, value, 0, value.length);
+        }
+        mp.FS.close(live.stream);
+        live.stream = null;
+        cartsSay({ id: j.id, end: 1 });
+    } catch (e) {
+        if (mine()) cartsSay({ id: j.id, error: String((e && e.message) || e) });
+    }
+}
+
+// The console let an answer (or a question to the player) go: stop it, and
+// take its spool or its picked file with it.
+function cartsDrop(id) {
+    const live = cartsLive.get(id);
+    cartsLive.delete(id);
+    if (!live) return;
+    if (live.ac) { try { live.ac.abort(); } catch (e) { } }
+    if (live.stream) { try { mp.FS.close(live.stream); } catch (e) { } }
+    try { mp.FS.unlink(live.path || (NET_DIR + "/pick-" + id)); } catch (e) { }
+}
+
+// The staged folder the console checked, made durable with its record
+// (moy_store.commitInstall). Twice the cart's bytes must fit what the browser
+// will keep, because the commit writes a staging copy before the shelf's:
+// short of that it says FULL now, with nothing changed.
+async function cartsKeep(j) {
+    const t0 = performance.now();
+    const s = opfsStores.carts;
+    const live = { keep: true };
+    cartsLive.set(j.id, live);
+    const answer = (ev) => { cartsLive.delete(j.id); cartsSay(Object.assign({ id: j.id }, ev)); };
+    if (!s) { answer({ error: "this browser is not keeping carts" }); return; }
+    let files = [], bytes = 0;
+    try {
+        for (const name of mp.FS.readdir(j.stage)) {
+            if (name === "." || name === "..") continue;
+            const data = mp.FS.readFile(j.stage + "/" + name);
+            files.push({ name, data });
+            bytes += data.length;
+        }
+    } catch (e) {
+        answer({ error: "the build is not there: " + e });
+        return;
+    }
+    try {
+        const est = await navigator.storage.estimate();
+        if (est && typeof est.quota === "number" && typeof est.usage === "number"
+                && est.quota - est.usage < 2 * bytes) {
+            answer({ error: "needs " + 2 * bytes + " bytes, the browser keeps "
+                     + (est.quota - est.usage) + " more", full: 1 });
+            return;
+        }
+    } catch (e) { /* no estimate: try, and the write says if it cannot */ }
+    try {
+        await opfsSerial(() => store.commitInstall(s, j.folder, files, j.record));
+    } catch (e) {
+        const full = !!(e && (e.name === "QuotaExceededError"));
+        answer({ error: String((e && e.message) || e), full: full ? 1 : 0 });
+        return;
+    }
+    files = null;
+    const d = "installed " + j.folder + " in " + (performance.now() - t0).toFixed(0) + "ms";
+    answer({ kept: 1 });
+    self.postMessage({ t: "installed", folder: j.folder, d: d });
+    if (mode === "site") sitePersist(d);
+    cartsRoom();
+}
+
+function cartsRecord(j) {
+    const s = opfsStores.carts;
+    if (!s) return;
+    opfsSerial(() => store.writeRecord(s, j.record))
+        .then(() => cartsRoom())
+        .catch((e) => console.log("[moy] carts: the record was not kept -- " + e));
+}
+
+function cartsRoom() {
+    if (!navigator.storage || typeof navigator.storage.estimate !== "function") return;
+    navigator.storage.estimate()
+        .then((e) => cartsSay({ room: [e.usage, e.quota] }))
+        .catch(() => { });
+}
+
+// The player's answer to {t:"pick"}: the file into the VFS where the console
+// checks it against the index, or the question closed.
+function cartsPicked(m) {
+    if (!cartsLive.has(m.id)) return;
+    if (m.cancel || !m.buf) { cartsSay({ id: m.id, cancel: 1 }); return; }
+    mkdirs(NET_DIR);
+    const path = NET_DIR + "/pick-" + m.id;
+    mp.FS.writeFile(path, new Uint8Array(m.buf));
+    cartsLive.set(m.id, { pick: true, path });
+    cartsSay({ id: m.id, picked: path });
 }
 
 function syncPump() {
@@ -1041,6 +1519,7 @@ function loop() {
         syncPump();
         gpioPump();
         updatePump();
+        cartsPump();
     } catch (e) {
         self.postMessage({ t: "error", s: String((e && e.message) || e) });
         running = false;
@@ -1058,6 +1537,8 @@ self.onmessage = async (ev) => {
             inbox.push(m.json);
         } else if (m.t === "ahead") {
             ahead = m.v;
+        } else if (m.t === "state") {
+            self.postMessage({ t: "state", json: stateJson ? stateJson() : "null" });
         } else if (m.t === "run") {
             // lastStep too: a (re)start must begin with a clean 1/60 dt, not a
             // clamped jump measured from whenever the loop last ran.
@@ -1145,6 +1626,8 @@ self.onmessage = async (ev) => {
                 self.postMessage({ t: "imported", ok: false,
                     s: "import failed: " + ((e && e.message) || e) });
             }
+        } else if (m.t === "picked") {
+            cartsPicked(m);
         } else if (m.t === "edit") {
             // The import report's one action. Like export, a failure is a
             // MESSAGE and never the fatal {t:"error"}: the console is fine.

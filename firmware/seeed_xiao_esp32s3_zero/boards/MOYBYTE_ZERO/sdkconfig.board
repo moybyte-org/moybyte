@@ -102,3 +102,17 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=
 CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# --- Power management: machinery with no user ------------------------------
+# IDF's default is n; MicroPython's sdkconfig.base turns it ON for every board.
+# Nothing in this repo touches the PM API -- no machine.freq() setter, no
+# lightsleep/deepsleep, no esp_pm_* call in device/ runtime/ native/ or the
+# board modules -- and neither PM_DFS_INIT_AUTO nor tickless idle is set, so no
+# frequency scaling ever happens. What remains is only the cost:
+# esp_pm_lock_acquire is a spinlock critical section, taken per SPI/SDMMC
+# transaction and, on a P4, per DPI frame.
+#
+# A/B'd frame-neutral on the T-Deck 2026-09-20 and taken on both S3 console
+# boards first. The one behaviour lost is machine.freq(x) as a SETTER, which
+# starts raising ValueError; the getter is unaffected.
+CONFIG_PM_ENABLE=

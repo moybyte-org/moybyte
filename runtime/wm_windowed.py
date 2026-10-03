@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   _LayoutCtx                    every layout object a relayout rebuilds
+#   _Win                          one open window
+#   _WindowStackLayer             the one layer that presents the window stack
+#   _PlayerWindowLayer            the quiet-frame partial repaint of a cart window
+#   WindowedWM                    the windowed tier's presentation of the back-stack
+#   WindowedWM.draw_stack         the frame router's draw list
+#   WindowedWM.keys_to_cart       focus-aware key routing
+#   WindowedWM.surface_skip       the skip-draw probe
+#   WindowedWM.close_window_kind  close one window by its kind
 """The WINDOWED window manager -- the big-screen / P4 "One" presentation tier
 (#73 / #58 "Desktop look"; spec docs/shell_ux_v1.md §3's tier table).
 
@@ -1034,6 +1044,49 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return self._player_view(win)
 
 
+    def present_frame(self, cf, view):
+        # Desk world: the player WINDOW shows the frame itself
+        # (_draw_player_window), so a frame shown full-viewport here would
+        # land on the desktop. The play world shows it where composite_game
+        # would have composited the canvas, over the same bezel.
+        if self._order:
+            return False
+        ws = self.ws
+        sc = ws.sys_canvas
+        if sc is not self._pf_for:
+            self._pf_for = sc
+            self._pf_fn = getattr(sc, "present_frame", None)
+        pf = self._pf_fn
+        if pf is None:
+            return False
+        ox, oy, scale = FullscreenStackWM.viewport(self)
+        src = self._view_src()
+        self._play_bezel(sc, ox, oy, scale, src)
+        return pf(cf, view, ws.canvas, ox, oy, scale, src)
+
+    def _window_frame(self, gc, ox, oy, scale, defer, src):
+        """The player window's composite of a compiled cart's frame: shown
+        from the cart's memory, or -- on a composite the cart drew no new
+        frame for -- from the copy of the last one shown. True when the root
+        canvas took it; otherwise the frame is settled into the game canvas,
+        which the window composites as ever (Workstation._composite_game's
+        rule)."""
+        cf = self.ws.cart_frame
+        if cf is None:
+            return False
+        view = cf.take()
+        if view is not None:
+            sc = self._root_canvas
+            if sc is not self._pf_for:
+                self._pf_for = sc
+                self._pf_fn = getattr(sc, "present_frame", None)
+            pf = self._pf_fn
+            if pf is not None and pf(cf, view, gc, ox, oy, scale, src, defer):
+                return True
+            cf.settle(gc)
+        cf.nrects = 0
+        return False
+
     def composite_game(self):
         # Desk world: a no-op -- the window layer blits the game canvas into
         # the player WINDOW itself, and stamping it full-viewport would paint
@@ -1064,16 +1117,25 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return
         ox, oy, scale = FullscreenStackWM.viewport(self)
         src = self._view_src()
-        # The letterbox bezel is STATIC: fill it only until every framebuffer
-        # holds it (the stale-by-N rule) -- it was a full-screen fill EVERY
-        # play frame (chrome=8ms of a 15ms celeste frame). Retention must end
-        # BOTH on a geometry change AND on a gap in the drawn-frame counter:
-        # anything larger than one frame means another stack painted the screen
-        # and the bezel pixels are no longer ours -- without the gap rule, N
-        # stale Library frames rotate/flicker behind the game (P4, 2026-08-01,
-        # measured as 0/32/24 bytes differing between the three framebuffers).
+        self._play_bezel(sc, ox, oy, scale, src)
+        self._blit_game(sc, gc, ox, oy, scale, src=src)
+
+    def _play_bezel(self, sc, ox, oy, scale, src):
+        """The play world's letterbox bezel, at most once a frame.
+
+        It is STATIC: fill it only until every framebuffer holds it (the
+        stale-by-N rule) -- it was a full-screen fill EVERY play frame
+        (chrome=8ms of a 15ms celeste frame). Retention must end BOTH on a
+        geometry change AND on a gap in the drawn-frame counter: anything
+        larger than one frame means another stack painted the screen and the
+        bezel pixels are no longer ours -- without the gap rule, N stale
+        Library frames rotate/flicker behind the game (P4, 2026-08-01,
+        measured as 0/32/24 bytes differing between the three
+        framebuffers)."""
+        drawn = self.ws._frames_drawn
+        if drawn == getattr(self, "_bezel_frame", -2):
+            return              # a declined frame's composite, same frame
         bkey = (ox, oy, scale, sc.w, sc.h, src)
-        drawn = ws._frames_drawn
         if bkey != getattr(self, "_bezel_key", None) \
                 or drawn != getattr(self, "_bezel_frame", -2) + 1:
             self._bezel_key = bkey
@@ -1082,7 +1144,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if self._bezel_paints < self._retained_n():
             self._bezel_paints += 1
             sc.cls(_VIEWPORT_BEZEL)    # letterbox fill
-        self._blit_game(sc, gc, ox, oy, scale, src=src)
 
     # -- drawing ---------------------------------------------------------------
 
@@ -1606,9 +1667,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # On a quiet game frame (full=False) the composite is this frame's LAST
         # framebuffer write, so a device backend may run it async and defer the
         # present (the #58 composite-overlap budget lever). A full paint draws
-        # chrome AFTER it, so it must stay synchronous -- defer=not full.
-        self._blit_game(self._root_canvas, gc, ox, oy, scale, defer=not full,
-                        src=self._view_src())
+        # chrome AFTER it, so it must stay synchronous -- defer=not full. A
+        # compiled cart's frame is shown from where it is when the root canvas
+        # can (_window_frame), the FPS chip over it a rect its painter declared.
+        src = self._view_src()
+        if not self._window_frame(gc, ox, oy, scale, not full, src):
+            self._blit_game(self._root_canvas, gc, ox, oy, scale,
+                            defer=not full, src=src)
         if full:
             self._win_chrome(win, focused)
 

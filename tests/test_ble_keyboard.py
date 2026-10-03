@@ -611,3 +611,20 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
     assert "from ble_keyboard import BleHidKeyboard" in runtime
     assert "keyboard=keyboard" in runtime    # via console.wire_workstation_core
     assert runtime.index("keyboard.poll()") < runtime.index("inp.begin_frame()")
+
+
+def test_stop_powers_the_radio_down_and_says_so(monkeypatch):
+    """stop() is start()'s undo: scanning stops, a connection drops, the
+    radio is deactivated (what gives its internal RAM back), and the driver
+    reads as off -- a second stop() has nothing to do."""
+    fake_module = types.SimpleNamespace(UUID=FakeUUID, BLE=FakeBLE)
+    monkeypatch.setitem(sys.modules, "bluetooth", fake_module)
+    radio = FakeBLE()
+    keyboard = blekbd.BleHidKeyboard(InputState(), ble=radio, store_path=None)
+    assert keyboard.available and keyboard.state == "scanning"
+    keyboard._conn = 7
+    radio.calls.clear()
+    assert keyboard.stop() is True
+    assert radio.calls == [("scan", (None,)), ("disconnect", 7), ("active", False)]
+    assert (keyboard.available, keyboard.state, keyboard._conn) == (False, "off", None)
+    assert keyboard.stop() is False

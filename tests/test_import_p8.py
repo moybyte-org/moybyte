@@ -148,6 +148,12 @@ def test_gfx_roundtrip_stable(tmp_path):
     only) and does not need to, because the grid it builds is already exactly
     what the editor would emit. That claim is only worth anything while
     something checks it here, where SpriteSheet actually exists.
+
+    The fixed point is in PIXELS, not characters: `to_hex` stops at the last
+    painted row (#154) and the stdlib converter emits the whole 128-row grid,
+    so the editor's blob is the importer's with its blank tail cut. Every way
+    the converter could really be wrong -- nibble order, row width, hex case,
+    a shifted row -- still shows up, in the prefix and in the pixels.
     """
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
@@ -156,7 +162,12 @@ def test_gfx_roundtrip_stable(tmp_path):
     # spec=False: p8's __gfx__ is 128x128, the top half of a SPEC.md 3.2 cart
     # sheet, and the importer emits exactly that region.
     sheet = SpriteSheet.from_hex(kgfx, cols=16, rows=16, spec=False)
-    assert sheet.to_hex() == kgfx
+    editor_blob = sheet.to_hex()
+    assert kgfx.startswith(editor_blob)
+    assert set(kgfx[len(editor_blob):]) <= set("0\n"), \
+        "the importer's extra rows must be BLANK, not content the editor dropped"
+    again = SpriteSheet.from_hex(editor_blob, cols=16, rows=16, spec=False)
+    assert again.pix == sheet.pix and again.to_hex() == editor_blob
 
 
 def test_sounds_parse_via_audiobank(tmp_path):
@@ -622,9 +633,9 @@ def test_both_cart_forms_produce_the_same_moy_folder(tmp_path):
     assert sa["title"] == sb["title"] == "tiny dash"
     names = sorted(p.name for p in a.iterdir())
     assert names == sorted(p.name for p in b.iterdir())
+    assert "cover.png" in names                 # the label (SPEC.md 3.6)
     for name in names:
-        assert (a / name).read_text(encoding="utf-8") == \
-               (b / name).read_text(encoding="utf-8"), \
+        assert (a / name).read_bytes() == (b / name).read_bytes(), \
             "%s differs between the .p8 and the .p8.png form" % name
 
 
@@ -1794,3 +1805,34 @@ def test_a_tabbed_cart_runs_with_its_globals_crossing_the_files(tmp_path):
                      .read_text(encoding="utf-8"))
     assert man["sources"] == ["p8.lua", "main.lua", "helpers.lua"], \
         "the cart really did run as several files"
+
+
+def test_a_ported_carts_label_is_its_cover_on_the_shelf(tmp_path):
+    """moy-spec's importer writes the label as cover.png (SPEC.md 3.6), and the
+    shelf draws it: the base it decodes is the label's own colours, pixel for
+    pixel, in the canvas's 565 byte order."""
+    from runtime import cover_png, host_app
+    root = tmp_path / "carts"
+    root.mkdir()
+    p8, _png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
+    import_p8.import_p8(p8, str(root / "tiny_dash.moy"))
+    ws = host_app.build_workstation(str(root))
+    cart = next(c for c in ws.carts.all if c.get("title") == "tiny dash")
+    img = None
+    for _ in range(100):
+        ws.covers.begin_frame()
+        img = ws.covers.cover_for(cart)
+        if img is not None:
+            break
+    assert img is not None and (img.w, img.h) == (128, 128)
+    label = import_p8.parse_p8(p8_fixture.read_p8_text())["label"]
+    order = (cover_png.RGB565_SW if ws.sys_canvas.swapped565
+             else cover_png.RGB565)
+    for x, y in ((0, 0), (96, 40), (96, 32), (20, 70), (50, 120)):
+        c = p8_fixture.P8_BASE[int(label[y][x], 16)]
+        r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+        w = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+        want = bytes((w >> 8, w & 255)) if order == cover_png.RGB565_SW \
+            else bytes((w & 255, w >> 8))
+        i = 2 * (y * 128 + x)
+        assert bytes(img.pix[i:i + 2]) == want, (x, y)

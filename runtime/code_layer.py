@@ -1,3 +1,9 @@
+# Map (grep -n a name to jump there):
+#   -- code-editor geometry           the code tab's constants (console.py imports them back)
+#   symbols_for                       the tappable symbol palette for a source language
+#   draw_symbol_keys                  the symbol palette renderer
+#   -- code-editor syntax highlighting  the token colours
+#   CodeLayer                         the code editor content layer: draw, keys, pointer
 """The Python code editor (#24/#39), extracted from Workstation (runtime/console.py)
 as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2 (the last surface).
 

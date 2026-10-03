@@ -42,7 +42,7 @@ AND WHAT NEITHER ARM IS. Not a check of libmoy's raster -- read a difference in
 one of the nine verbs as impossible here, because both sides call the same
 function. That raster is pinned by the gfx-binding test above, by
 `tests/test_spec_conformance.py` against the spec's goldens, and by
-`tools/p4_conformance.py` on real glass. CLAUDE.md records why the last one
+`tools/p4_conformance.py` on real glass. .claude/rules/rendering.md records why the last one
 matters: the board once failed `provisional_tline` against the golden while this
 suite was green.
 
@@ -256,9 +256,9 @@ class _FakeGfx:
 
     @staticmethod
     def blit_window(dst, dw, dh, src, src_w, sx, sy):
-        # #54 scroll engine: copy a dw x dh window of `src` (a wider pre-rendered
-        # background, stride src_w) at (sx, sy) into `dst` (stride dw, contiguous) --
-        # a faithful transcription of moy_gfx_blit_window in modmoy_gfx.c.
+        # #54 scroll engine: copy a dw x dh window of `src` (stride src_w) at
+        # (sx, sy) into `dst` (stride dw, contiguous) -- a faithful transcription
+        # of mg_blit_window in moy_gfx_kernels.c.
         d = memoryview(dst).cast("H")
         s = memoryview(src).cast("H")
         dcap = len(d)
@@ -269,9 +269,10 @@ class _FakeGfx:
             sx = 0
         if sy < 0:
             sy = 0
-        if sx + dw > src_w:                       # clamp window to source width
-            dw = src_w - sx
-        if dw <= 0:
+        cw = dw                                   # copy width; dw stays the stride
+        if sx + cw > src_w:
+            cw = src_w - sx
+        if cw <= 0:
             return
         if dw * dh > dcap:                        # dst guard
             dh = dcap // dw
@@ -283,7 +284,7 @@ class _FakeGfx:
         for row in range(dh):
             d0 = row * dw
             s0 = (sy + row) * src_w + sx
-            for col in range(dw):
+            for col in range(cw):
                 d[d0 + col] = s[s0 + col]
 
     @staticmethod
@@ -938,6 +939,67 @@ def test_scroll_layer_window_copy_matches_host():
             host.blit_window_from(lh, cam[0], cam[1])
             dev.blit_window_from(ld, cam[0], cam[1])
             _assert_same(host, dev, "scroll gfx=%s cam=%s" % (gfx, cam))
+
+
+def _bg_index(x, y):
+    return (x * 3 + y * 7) % 32            # indices 0..31: the backdrop
+
+
+def _layer_index(x, y):
+    return 32 + (x * 5 + y * 11) % 32      # indices 32..63: never a backdrop value
+
+
+def test_a_layer_smaller_than_the_screen_lands_unsheared_at_the_origin():
+    """SPEC.md 6's clamp, on every lane: each camera axis clamps into
+    [0, max(0, layer - screen)], and where the layer is the smaller one the
+    screen past it keeps what it held.
+
+    The expected picture is computed here from the rule, not taken from
+    either raster, so the three canvases agreeing cannot hide a shared
+    mistake: the compiled kernel (`Canvas`, libmoy + moy_gfx over ctypes),
+    the `_FakeGfx` transcription, and DeviceCanvas's own Python fallback.
+    Backdrop and layer draw from disjoint halves of the palette and neither
+    repeats along a row or a column within the frame, so a row stepped by
+    the wrong stride -- the shear a narrow layer used to take -- or a camera
+    that did not clamp shows as a wrong index at a named pixel."""
+    shapes = (
+        # (layer w, h, asked camera, the camera the rule gives)
+        (40, 30, (500, 300), (0, 0)),       # narrower and shorter, past the corner
+        (40, 30, (-9, -4), (0, 0)),
+        (100, 30, (20, 99), (20, 0)),       # wider, shorter
+        (100, 30, (99, 5), (36, 0)),        # ...asked past its right edge
+        (40, 80, (13, 10), (0, 10)),        # narrower, taller
+        (40, 80, (0, 60), (0, 32)),
+    )
+    canvases = (("kernel", lambda: Canvas(W, H)),
+                ("transcription", lambda: _both(True)[2]),
+                ("fallback", lambda: _both(False)[2]))
+    for lw, lh, cam, (cx, cy) in shapes:
+        expect = []
+        for y in range(H):
+            for x in range(W):
+                if x < lw - cx and y < lh - cy:
+                    idx = _layer_index(x + cx, y + cy)
+                else:
+                    idx = _bg_index(x, y)
+                expect.append(rgb565(palette.MOY64[idx]))
+        for name, make in canvases:
+            c = make()
+            for y in range(H):
+                for x in range(W):
+                    c.pix(x, y, _bg_index(x, y))
+            lay = c.new_layer(lw, lh)
+            for y in range(lh):
+                for x in range(lw):
+                    lay.pix(x, y, _layer_index(x, y))
+            c.blit_window_from(lay, cam[0], cam[1])
+            got = _host_rgb565(c) if name == "kernel" else _dev_rgb565(c)
+            if got != expect:
+                i = next(i for i, (a, b) in enumerate(zip(got, expect)) if a != b)
+                raise AssertionError(
+                    "%s: a %dx%d layer asked at %s drew %#06x at (%d,%d), the "
+                    "rule says %#06x" % (name, lw, lh, cam, got[i], i % W,
+                                         i // W, expect[i]))
 
 
 # --------------------------------------------------------------------------- #
@@ -2272,3 +2334,63 @@ def test_scroll_layer_buffer_is_off_gc_heap():
             sys.modules.pop("moy_alloc", None)
         else:
             sys.modules["moy_alloc"] = saved
+
+
+def test_blit565_places_direct_colour_on_every_lane():
+    """`DeviceCanvas.blit565` -- a cover's draw: words in the canvas's own byte
+    order, opaque, camera and clip honoured, `pal()` not -- at scale 1 (the
+    kernel's blit565), scaled inside the clip (blit565_scale), scaled across
+    it (a widened row at a time), and cut by it only top and bottom (the rows
+    wholly inside in one call, the cut edge rows a row at a time -- a cover
+    cropped to its card). The picture is computed from the rule, and the
+    kernel, the transcription and the Python fallback must all draw it."""
+    sw, sh = 5, 4
+    words = [((i * 2654435761) >> 7) & 0xFFFF for i in range(sw * sh)]
+    cases = (
+        # (x, y, scale, clip rect or None, camera)
+        (2, 3, 1, None, (0, 0)),
+        (-2, -1, 1, None, (0, 0)),
+        (10, 10, 2, None, (0, 0)),
+        (50, 40, 3, None, (0, 0)),
+        (8, 6, 2, (12, 9, 20, 11), (0, 0)),
+        (20, 10, 3, (0, 0, 30, 20), (4, -2)),
+        (14, 8, 3, (10, 10, 40, 8), (0, 0)),
+        (14, 8, 3, (10, 10, 40, 2), (0, 0)),
+        (14, 8, 2, (0, 0, W, 13), (0, 0)),
+        (14, 8, 2, (0, 11, W, H), (0, 0)),
+        (16, 12, 3, (10, 10, 40, 8), (2, 4)),
+    )
+    canvases = (("kernel", lambda: Canvas(W, H)),
+                ("transcription", lambda: _both(True)[2]),
+                ("fallback", lambda: _both(False)[2]))
+    for x, y, s, clip, cam in cases:
+        bx, by = x - cam[0], y - cam[1]
+        cx0, cy0, cx1, cy1 = 0, 0, W, H
+        if clip is not None:
+            cx0, cy0 = max(0, clip[0]), max(0, clip[1])
+            cx1, cy1 = min(W, clip[0] + clip[2]), min(H, clip[1] + clip[3])
+        bg = rgb565(palette.MOY64[3])
+        expect = []
+        for py in range(H):
+            for px in range(W):
+                inside = (cx0 <= px < cx1 and cy0 <= py < cy1
+                          and bx <= px < bx + sw * s and by <= py < by + sh * s)
+                expect.append(words[((py - by) // s) * sw + (px - bx) // s]
+                              if inside else bg)
+        for name, make in canvases:
+            c = make()
+            c.cls(3)
+            src = bytearray()
+            for w_ in words:
+                src += (bytes((w_ >> 8, w_ & 255)) if c.swapped565
+                        else bytes((w_ & 255, w_ >> 8)))
+            if clip is not None:
+                c.clip(*clip)
+            c.camera(*cam)
+            c.pal(3, 9)                    # direct colour has no index to remap
+            c.blit565(bytes(src), sw, sh, x, y, s)
+            c.pal()
+            c.camera()
+            c.clip()
+            got = (_host_rgb565(c) if name == "kernel" else _dev_rgb565(c))
+            assert got == expect, (name, x, y, s, clip, cam)

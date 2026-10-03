@@ -1,0 +1,117 @@
+{
+  "about": "installed.json as a console of each chip (compiled-code format 2) wrote it after installing Doom, ESP 88 and Jet Teapot v3 from the gpl-carts and mit-carts indexes (gpl-carts 3a141d8, mit-carts 0057a01)",
+  "records": {
+    "esp32p4": {
+      "carts": {
+        "doom.moy": {
+          "files": {
+            "LICENSES.txt": "7c4dd0039f694afa0e6570fb2b923506cf54b57083f099f91840c59a7d2ff886",
+            "SOURCE.txt": "1cc995635ab6f70b5e1fb9374e413338e2c750a7be966198548d2825a4987534",
+            "config.json": "272b9d5e8bcbcf2f2be82e37f4611afa0ef226ed3445f5a14a5cd017c3e512a5",
+            "cover.png": "9aa500bf2be08f91b322f4975eb749f539f4f46e8f9bf2ee6f13ccfdcba088f2",
+            "doom1.wad": "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771",
+            "main.esp32p4.f2.aot": "5a9d370b094d7db1b5469da1a1b7370c217e8c00a283700852153eddc794dc0e",
+            "main.wasm": "e4b299ac8524071c21f9009b56cf1c257c492426393c383ea8d9255d496cbd67",
+            "manifest.json": "2a1feaed6f5b6069185e36716ad4dd31de593944fc5ce26ef550d180a05658c8"
+          },
+          "id": "doom",
+          "index": "https://moybyte-org.github.io/gpl-carts/index.json",
+          "module": "main.esp32p4.f2.aot",
+          "name": "Doom",
+          "version": 3
+        },
+        "esp88.moy": {
+          "files": {
+            "LICENSES.txt": "b526fb14126ea64979b108de6980d36bab79794b0f642aba28014a2f114ff83f",
+            "SOURCE.txt": "7f8f318e12b32d0d16fb24990a3c0a3e7717b248a793c0a5ea142d10ac0337f1",
+            "assets.bin": "475b8d26629209f8bcbac1684789d684a0efa2e48a62c019822fc19734c30eed",
+            "config.json": "d67c6a0fbea4ee776c04cb1455779681e6035e9f6a0fdc481fec133a761bd753",
+            "cover.png": "55733716c5cb945d8f965b4b56cff155d992caef422c4850740dca038f778864",
+            "main.esp32p4.f2.aot": "fa3975063129049226543d3b6974c91ba3862e4ad3e76f1fa70b0a4e9eff026d",
+            "main.wasm": "868f17fb1d92f440923d6b3d1e6d86e2250930b596305704672694f0c50e47c5",
+            "manifest.json": "d22cfad8b77e5fc48c042af714344d45e0d0c83e383e9c55392827a10843b59a"
+          },
+          "id": "esp88",
+          "index": "https://moybyte-org.github.io/mit-carts/index.json",
+          "module": "main.esp32p4.f2.aot",
+          "name": "ESP 88",
+          "version": 3
+        },
+        "teapot.moy": {
+          "files": {
+            "LICENSES.txt": "bdb7ed2382102071ea37616de813c9d84c4b6a1234f3d4294fa2efd7cedd68f3",
+            "SOURCE.txt": "d1ec55cf31e89ae3db229aaad457c6dde6b9478b747abfd7bdcc12d3a42e0021",
+            "config.json": "b467d52646e43dc618da0c00b0a3eeeb5fd855c55135da0fd6182f0fdc256dc6",
+            "cover.png": "98b5541cff95dc87a703a0244b97b5307d8e997f81e644a35715aa18a96a68ae",
+            "main.esp32p4.f2.aot": "35b9419313c95a440e4e8258280f8a22fbc379dbe107921bfcb086e782305413",
+            "main.wasm": "ab8da5842c9317094b7f6317b7130d655b48e19499b716121494fc0df175579c",
+            "manifest.json": "706fb16200206921277e949eaac7db686ab92aea95f31fe461605e4b9d3fdde7",
+            "teapot.obj": "106598e3fefe1fba3434231adeebf7d9aa4911c4a90578f8131f185d09721bd7"
+          },
+          "id": "teapot",
+          "index": "https://moybyte-org.github.io/mit-carts/index.json",
+          "module": "main.esp32p4.f2.aot",
+          "name": "Jet Teapot",
+          "version": 3
+        }
+      },
+      "version": 1
+    },
+    "esp32s3": {
+      "carts": {
+        "doom.moy": {
+          "files": {
+            "LICENSES.txt": "7c4dd0039f694afa0e6570fb2b923506cf54b57083f099f91840c59a7d2ff886",
+            "SOURCE.txt": "1cc995635ab6f70b5e1fb9374e413338e2c750a7be966198548d2825a4987534",
+            "config.json": "272b9d5e8bcbcf2f2be82e37f4611afa0ef226ed3445f5a14a5cd017c3e512a5",
+            "cover.png": "9aa500bf2be08f91b322f4975eb749f539f4f46e8f9bf2ee6f13ccfdcba088f2",
+            "doom1.wad": "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771",
+            "main.esp32s3.f2.aot": "ee68b39529f38728542b122d63c0cfe6f4e07d4bb12b395769381ca1fbb33395",
+            "main.wasm": "e4b299ac8524071c21f9009b56cf1c257c492426393c383ea8d9255d496cbd67",
+            "manifest.json": "2a1feaed6f5b6069185e36716ad4dd31de593944fc5ce26ef550d180a05658c8"
+          },
+          "id": "doom",
+          "index": "https://moybyte-org.github.io/gpl-carts/index.json",
+          "module": "main.esp32s3.f2.aot",
+          "name": "Doom",
+          "version": 3
+        },
+        "esp88.moy": {
+          "files": {
+            "LICENSES.txt": "b526fb14126ea64979b108de6980d36bab79794b0f642aba28014a2f114ff83f",
+            "SOURCE.txt": "7f8f318e12b32d0d16fb24990a3c0a3e7717b248a793c0a5ea142d10ac0337f1",
+            "assets.bin": "475b8d26629209f8bcbac1684789d684a0efa2e48a62c019822fc19734c30eed",
+            "config.json": "d67c6a0fbea4ee776c04cb1455779681e6035e9f6a0fdc481fec133a761bd753",
+            "cover.png": "55733716c5cb945d8f965b4b56cff155d992caef422c4850740dca038f778864",
+            "main.esp32s3.f2.aot": "d20027ee94f604c53479a57237fbc2d2f59f6e1b0a5a9d712fb1ce5243a5cbf4",
+            "main.wasm": "868f17fb1d92f440923d6b3d1e6d86e2250930b596305704672694f0c50e47c5",
+            "manifest.json": "d22cfad8b77e5fc48c042af714344d45e0d0c83e383e9c55392827a10843b59a"
+          },
+          "id": "esp88",
+          "index": "https://moybyte-org.github.io/mit-carts/index.json",
+          "module": "main.esp32s3.f2.aot",
+          "name": "ESP 88",
+          "version": 3
+        },
+        "teapot.moy": {
+          "files": {
+            "LICENSES.txt": "bdb7ed2382102071ea37616de813c9d84c4b6a1234f3d4294fa2efd7cedd68f3",
+            "SOURCE.txt": "d1ec55cf31e89ae3db229aaad457c6dde6b9478b747abfd7bdcc12d3a42e0021",
+            "config.json": "b467d52646e43dc618da0c00b0a3eeeb5fd855c55135da0fd6182f0fdc256dc6",
+            "cover.png": "98b5541cff95dc87a703a0244b97b5307d8e997f81e644a35715aa18a96a68ae",
+            "main.esp32s3.f2.aot": "5d32aa2e5ce40deace018b679ceac885eaf0190185a1a74255461d105e6bf52c",
+            "main.wasm": "ab8da5842c9317094b7f6317b7130d655b48e19499b716121494fc0df175579c",
+            "manifest.json": "706fb16200206921277e949eaac7db686ab92aea95f31fe461605e4b9d3fdde7",
+            "teapot.obj": "106598e3fefe1fba3434231adeebf7d9aa4911c4a90578f8131f185d09721bd7"
+          },
+          "id": "teapot",
+          "index": "https://moybyte-org.github.io/mit-carts/index.json",
+          "module": "main.esp32s3.f2.aot",
+          "name": "Jet Teapot",
+          "version": 3
+        }
+      },
+      "version": 1
+    }
+  }
+}

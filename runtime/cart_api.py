@@ -1,3 +1,7 @@
+# Map (grep -n a name to jump there):
+#   color     a colour name or MOY64 index -> index
+#   _Layer    a scroll background: a wider off-screen canvas
+#   make_api  the cart's global namespace: every verb a cart calls
 """THE cart-API namespace builder (make_api) -- one body for every tier.
 
 Until 2026-08-17 this function existed twice: `runtime/host_api.py` (host sim +
@@ -35,9 +39,9 @@ try:                                    # staged/frozen flat namespace (boards, 
 except ImportError:                     # host: the runtime package
     from runtime.moy_image import Image
 try:
-    from ticks import _ticks_ms, _ticks_diff
+    from ticks import _since_ms
 except ImportError:
-    from runtime.ticks import _ticks_ms, _ticks_diff
+    from runtime.ticks import _since_ms
 try:
     from widgets import pointer_state, P_NONE, P_HELD, P_CLICK
 except ImportError:
@@ -390,9 +394,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         return (st[0], st[1], bool(st[2] & P_CLICK), False, False, 0, 0)
 
     def time():
-        # Milliseconds since the cart started (set by Workstation._start).
-        start = getattr(input, "cart_start_ms", 0)
-        return _ticks_diff(_ticks_ms(), start)
+        # Milliseconds since the Player stamped the run: the clock a Lua or a
+        # compiled cart's time() reads too (lua_ext.snap_shared).
+        return _since_ms(getattr(input, "cart_start_ms", 0))
 
     def key(code=None):
         # key([code]) -> is that ASCII key held this frame (key(ord("a"))). The
@@ -464,22 +468,10 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     def draw_layer(layer, cam_x=0, cam_y=0):
         # draw_layer(layer, cam_x, cam_y): blit the visible W x H window of `layer` at
         # the camera offset into the framebuffer (this frame's background; draw actors
-        # on top afterwards). The camera is clamped to [0, layer - screen] so the full
-        # window always lands -- no torn edge at the world boundary.
-        lc = layer._canvas
-        cx = int(cam_x)
-        cy = int(cam_y)
-        maxx = lc.w - canvas.w
-        maxy = lc.h - canvas.h
-        if cx < 0:
-            cx = 0
-        elif maxx > 0 and cx > maxx:
-            cx = maxx
-        if cy < 0:
-            cy = 0
-        elif maxy > 0 and cy > maxy:
-            cy = maxy
-        canvas.blit_window_from(lc, cx, cy)
+        # on top afterwards). The canvas clamps the camera per axis into
+        # [0, max(0, layer - screen)] (SPEC.md 6), so the window never leaves the
+        # layer -- no torn edge at the world boundary.
+        canvas.blit_window_from(layer._canvas, cam_x, cam_y)
 
     def image(a, mapping=None, transparent="."):
         # Two forms, dispatched on the first arg (str vs ASCII rows):

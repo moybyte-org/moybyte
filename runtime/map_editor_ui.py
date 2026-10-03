@@ -1,3 +1,7 @@
+# Map (grep -n a name to jump there):
+#   MapLayout          responsive map-editor geometry
+#   MapEditorUI        the map editor's UI: pan/zoom view and tile palette
+#   MapEditorUI.build  build the MapEditor over the cart's map
 """The map (tilemap) editor's UI layer (issue #32): a panned view of the map on
 the left where each cell shows the placed sprite tile, a paged tile palette on
 the right to pick the brush, a pan d-pad + zoom control, and tap-to-paint /

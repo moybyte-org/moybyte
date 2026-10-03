@@ -126,6 +126,27 @@ def test_lua_error_routes_to_the_cart_panel(tmp_path):
     assert "stack traceback" not in ws.player.cart_error
 
 
+def test_a_lua_carts_time_is_the_players_cart_clock(tmp_path):
+    """time() through the Player is milliseconds since the Player stamped the
+    run, as a Python cart's is: the host fills the snapshot's clock the way
+    the boards do (lua_ext.snap_shared). It read 0 plus the tick's own
+    milliseconds until the host filled it."""
+    _need_lua()
+    from runtime import moy_carts
+    from runtime.ticks import _ticks_diff
+    ws = _ws(tmp_path)
+    cart = moy_carts.create("Clock Lua", str(tmp_path / "carts"),
+                            src="function _update(dt) pmem(0, time()) end\n",
+                            runtime="lua", main="main.lua")
+    ws.launcher.items.append(cart)
+    _open(ws, "Clock Lua")
+    assert ws.player.cart_error is None
+    ws.input.cart_start_ms = _ticks_diff(ws.input.cart_start_ms, 5000)
+    ws.frame(1 / 30)
+    assert ws.player.cart_error is None
+    assert 5000 <= ws.player._lua._run.pmem()[1][0] < 6000
+
+
 def test_lua_crash_line_is_the_deepest_frame(tmp_path):
     # The raise point inside a helper wins over the _update call site -- the
     # same deepest-cart-frame rule the Python traceback walk applies.
@@ -219,7 +240,7 @@ def test_bullet_storm_runs_on_moycore(tmp_path):
 
 def test_missing_runtime_opens_the_panel_not_a_hang(tmp_path):
     ws = _ws(tmp_path)
-    ws.lua_runtime = None                                # a device-shaped build
+    ws.runtimes.pop("lua", None)                       # a device-shaped build
     _open(ws, "Sakura Lua")
     assert ws.player.cart_error is not None
     assert "Lua runtime" in ws.player.cart_error

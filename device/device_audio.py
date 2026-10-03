@@ -30,7 +30,7 @@ native `moy_audio` + `machine.I2S` inside its methods, so no moy_runtime cycle.
 Device-only module (modules/, auto-frozen).
 
 Heard on a T-Deck (owner-verified 2026-08-09, firmware 0.9 -- and note the
-audible balance change is the SPEC, not a bug: CLAUDE.md's audio section).
+audible balance change is the SPEC, not a bug: .claude/rules/carts.md).
 The synth half is pinned off-hardware -- the same
 native module, built into a desktop MicroPython, renders bit-identically to
 libmoy across the whole parity suite (tests/test_audio_parity.py). I2S, the
@@ -46,7 +46,7 @@ from device_util import _diag_note
 # --- Audio backend (#16) -- I2S to the MAX98357 amp -------------------------
 # The T-Deck Plus has a MAX98357 I2S class-D amp + speaker on a SEPARATE
 # peripheral from the shared display/SD SPI host, so audio does NOT collide with
-# the SD/display bus-takeover constraints (see CLAUDE.md). Pin map + power gate
+# the SD/display bus-takeover constraints (.claude/rules/boards.md). Pin map + power gate
 # from the LilyGO reference (examples/I2SPlay/utilities.h):
 #     I2S_BCK = GPIO 7, I2S_WS = GPIO 5 (LRCK), I2S_DOUT = GPIO 6
 #     BOARD_POWERON = GPIO 10 must be HIGH (already driven at boot by tdeck_board)
@@ -56,14 +56,15 @@ from device_util import _diag_note
 # which is the MAX98357's mono input. So pins, power and format are all correct;
 # if it is silent the failure is the I2S *init* (made loud below) or the *feed*.
 #
-# THE FEED -- THE CRACKLE FIX (#41): a dedicated core-1 audio task.
+# THE FEED -- THE CRACKLE FIX (#41): a dedicated audio task.
 # The crackle's root cause was that the I2S feed was COUPLED to the render loop:
-# tick() ran once per frame on core 0 (the MicroPython VM core) and a render
-# frame is tens of ms, so the DMA ring drained and under-ran during a long draw.
-# A deeper ring only helped a little, because the feed CADENCE was still the slow,
-# jittery frame rate. The fix: feed I2S from a FreeRTOS task PINNED TO CORE 1, so
-# the DMA is topped up continuously no matter how slow core 0's frame is. I2S is
-# on its own pins, so core 1 owning it never touches the panel/SD path.
+# tick() ran once per frame in the MicroPython VM and a render frame is tens of
+# ms, so the DMA ring drained and under-ran during a long draw. A deeper ring
+# only helped a little, because the feed CADENCE was still the slow, jittery
+# frame rate. The fix: feed I2S from a FreeRTOS task of its own, above the VM
+# on the VM's core (core 1), so the DMA is topped up continuously no matter
+# how slow the frame is. I2S is on its own pins, so the task never touches the
+# panel/SD path.
 #
 # FALLBACK (revert-able with NO rebuild): if the core-1 task can't start, tick()
 # drives the render itself via machine.I2S non-blocking writes. Set
@@ -92,13 +93,17 @@ AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2
 AUDIO_MAX_FRAME = AUDIO_IBUF_FRAMES
 
 # Log each sfx/music trigger to moybyte_diag, so the owner can read on serial/SD
-# exactly what reached the mixer. Event-gated: one line per actual call.
+# exactly what reached the mixer: one line per actual call.
 AUDIO_DIAG = True
 # Print an AUDIORATE line every ~2s while sound is audible: the rate the I2S
 # peripheral actually consumes frames at, against the rate libmoy synthesised
 # for. This is the only instrument that can see a uniform playback-speed error --
-# see _rate_probe. Cheap (one counter read per frame) and quiet when silent.
+# see _rate_probe. Quiet when silent.
 AUDIO_RATE_PROBE = True
+# Both are PERF DIAG's (owner call 2026-09-30): a backend writes them only while
+# its `diag` is True, which device_boot.PerfSampler keeps equal to Settings ->
+# PERF DIAG. In kid mode a game's sounds and the stream's clock print nothing,
+# because every line is garbage the collector stops the frame for.
 
 _AUDIO_BACKEND_SEQ = 0
 
@@ -122,6 +127,8 @@ class DeviceAudio:
     (#97 -- owner decision 2026-08-11, no fallback synth, KISS). `self.engine`
     survives as the MODEL only: the bank the Music editor edits + the master
     level Settings shows."""
+
+    diag = False                # PERF DIAG, as the sampler hands it over
 
     def __init__(self, engine):
         global _AUDIO_BACKEND_SEQ
@@ -343,20 +350,20 @@ class DeviceAudio:
         if self._na is not None:
             self._sync_bank()
             self._na.sfx(int(n), -1 if chan is None else int(chan))
-        if AUDIO_DIAG:
+        if AUDIO_DIAG and self.diag:
             self._diag_trigger("sfx", n, chan)
 
     def beep(self, freq, dur=0.15):
         if self._na is not None:
             self._na.beep(float(freq), float(dur))
-        if AUDIO_DIAG:
+        if AUDIO_DIAG and self.diag:
             self._diag_trigger("beep", int(freq), None)
 
     def music(self, track, loop=True):
         if self._na is not None:
             self._sync_bank()
             self._na.music(int(track), 1 if loop else 0)
-        if AUDIO_DIAG:
+        if AUDIO_DIAG and self.diag:
             self._diag_trigger("music", track, None)
 
     def music_stop(self):
@@ -411,7 +418,7 @@ class DeviceAudio:
         which makes its accepted-frame count a clock. eff/want == 1.0 is correct;
         0.5 would be 11025 leaking into the 22050 pipe, 2.0 a frame/slot mismatch.
         Costs one counter read per frame and prints only while sound is audible."""
-        if not AUDIO_RATE_PROBE or self._na is None:
+        if not AUDIO_RATE_PROBE or not self.diag or self._na is None:
             return
         # WALL CLOCK, not summed loop dt (2026-08-10): frames_out advances on
         # core 1 through every HITCH, but the loop's dt is clamped/quantized --
@@ -452,6 +459,15 @@ class DeviceAudio:
                    "seam=%.4f pyr=%d feed=%s"
                    % (int(eff), rate, eff / (rate or 1), ceff / (rate or 1),
                       seam, pyr, "core1" if self._core1 else "single"))
+        # A compiled cart's `snd` stream, from both ends: what the cart queued
+        # against what the feeder played, and how often it found none.
+        try:
+            sc = self._na.snd_counts()
+        except Exception:   # noqa: BLE001 -- an older native module
+            sc = None
+        if sc is not None:
+            _diag_note("SNDSTREAM", "queued=%d played=%d starved=%d room=%d open=%d"
+                       % (sc[0], sc[1], sc[2], sc[3], 1 if sc[4] else 0))
 
     def tick(self, dt):
         """Per-frame audio work. In core-1 mode there is NONE -- the task renders

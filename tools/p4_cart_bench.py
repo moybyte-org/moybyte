@@ -77,8 +77,7 @@ def pmem_lines(cells):
 
 
 def run_bench(board, title, secs, log):
-    board.pyexec("ws.exit()")
-    board.drain(0.8)
+    board.leave_cart()
     # Frame eaters OFF: perf_capture and the FPS chip are themselves a cost
     # (#68), and a verb timed with them on is not the shipping number.
     board.cmd("diag 0", wait_for="REMOTE diag")
@@ -166,6 +165,20 @@ def show(res):
     # k=400 on the same build -- two rungs, one of them wrong, and nothing in
     # the old output said which had been used. Comparing two builds means
     # checking they landed on the same k.
+    # The Bench twins declare `"fps": "free"` (2026-09-22), so a phase row is
+    # the frame the board actually runs. A twin whose manifest lost that line
+    # would be paced at 30 like any undeclared cart, and every phase cheaper
+    # than the tick would print 30.3 / p50 33 on every board -- which is what
+    # this tool reported for twelve days after #217, reading like a floor.
+    # So a run whose IDLE row sits on the tick is called out as the pace.
+    idle = res["phases"].get("idle", {})
+    try:
+        if abs(float(idle.get("p50", 0)) - 33.0) <= 1.0:
+            print("  (idle sits on the 30Hz tick: this cart ran PACED, so the phase"
+                  " rows are the pace, not floors -- is its manifest still"
+                  " `\"fps\": \"free\"`?)")
+    except (TypeError, ValueError):
+        pass
     for ph, f in sorted(res["phases"].items()):
         print("  phase %-9s %s" % (ph, " ".join("%s=%s" % kv for kv in sorted(f.items()))))
 
@@ -232,7 +245,7 @@ def main(argv=None):
             with open(a.json, "w") as f:
                 json.dump(res, f, indent=2, sort_keys=True)
             print("  -> %s" % a.json)
-        board.pyexec("ws.exit()")
+        board.leave_cart()
     finally:
         board.close()
     return 0

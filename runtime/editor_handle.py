@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   _Row               one buffer line, laid out
+#   EditorHandle       the cart-facing editor over one document
+#   EditorHandle.key   feed one byte
+#   EditorHandle.save  write the document
+#   EditorHandle.draw  render into a rect
+#   EditorHandle.tap   route a pointer through the last layout
 """The EDITOR HANDLE -- the console's text editor, drawn by a CART (#181, #112).
 
 Notes is the one text app and it is a cartridge

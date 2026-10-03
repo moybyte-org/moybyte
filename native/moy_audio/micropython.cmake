@@ -17,6 +17,12 @@ target_include_directories(usermod_moy_audio INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/libmoy
 )
 
+# MOY_AUDIO_SND is what points moycore's half of the compiled tier at this
+# board's speaker (moy_audio_snd.h); a board without this module leaves the
+# cart's stream to the binding, which drains it by the clock. It reaches every
+# usermod source, which is harmless: nothing else reads it.
+target_compile_definitions(usermod_moy_audio INTERFACE MOY_AUDIO_SND=1)
+
 target_link_libraries(usermod INTERFACE usermod_moy_audio)
 
 # OPEN ITEM -- the mixer runs from FLASH on the device.

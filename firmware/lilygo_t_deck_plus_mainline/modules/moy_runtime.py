@@ -31,7 +31,7 @@ from device_boot import apply_touch
 # Named CARTS because that is what it is to everything downstream -- the
 # compression is a storage detail of this one import.
 from carts_data import CARTS_Z as CARTS
-from device_util import _ticks_ms, _ticks_diff, _diag_note, _diag_log
+from device_util import _ticks_ms, _ticks_diff, _sleep_ms, _diag_note, _diag_log
 from device_input import TrackBall, Touch
 from device_audio import make_audio
 from device_canvas import DeviceCanvas
@@ -61,7 +61,7 @@ MOY_INPUT_POLLER = True
 # the expansion header) reads exactly like typed input. The board header keeps
 # UART_REPL off (#201); if `SERIAL rx=` ever climbs on an idle board, that is
 # the mechanism to suspect. (The full history of why RX was thought impossible
-# here -- and why the fork's never worked -- is in CLAUDE.md's RX section and
+# here -- and why the fork's never worked -- is in this board's README and
 # git history at 4faf07a/24ccb0b.)
 #
 # Set False to remove the channel entirely (the loop is then byte-identical to
@@ -75,8 +75,12 @@ SERIAL_CMDS = True
 POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
 
 # #183: print a phase bracket around every SD session. This board has no REPL to
-# interrogate once the desktop owns the loop, so the trace IS the diagnostic --
-# and it only fires on commits, never per frame.
+# interrogate once the desktop owns the loop, so the trace IS the diagnostic.
+# It fires per store session -- a commit, a cover load, and every `read` a
+# running compiled cart makes, which for a cart streaming its data file is
+# several a second -- so it is PERF DIAG's like every other line that repeats
+# (owner call 2026-09-30): kid mode prints none of it. Chasing a wedge, turn
+# the diag on (`diag 1`) before the op.
 SD_TRACE = True
 
 # WHERE THE STORE LIVES WHEN THERE IS NO CARD. This board's carts normally live
@@ -116,33 +120,41 @@ class _Storage:
       "SD < op"   -- the NEXT PANEL FLUSH, i.e. the shared-bus corruption;
                      "SD = panel ok" (the frame tail) is what says it did not
                      happen.
-    Costs nothing when quiet: SD sessions happen on commits, not per frame.
+    It prints only under PERF DIAG (`ws`, handed over once the console
+    exists): a compiled cart streaming its data file opens several sessions a
+    second.
     """
 
     def __init__(self, comp):
         self._comp = comp
         self.on_sd = False      # did the card take the store this boot
         self.traced = False     # a traced session awaits its "panel ok"
+        self.ws = None          # the console, whose diag_live gates the trace
 
     def _bracketed(self, fn, trace=False):
+        # Allocation-free on purpose: a compiled cart streaming its data file
+        # comes through here several times a second, so the trace prints its
+        # numbers as print() arguments rather than formatted strings, and the
+        # bracket is called as a method rather than fetched as a bound one.
         if trace:
             print("SD > sync")
         t = _ticks_ms()
-        self._comp.sync()
+        comp = self._comp
+        comp.sync()
         if trace:
-            print("SD > op (sync %dms)" % _ticks_diff(_ticks_ms(), t))
+            print("SD > op (sync ", _ticks_diff(_ticks_ms(), t), "ms)", sep="")
             t = _ticks_ms()
-        bracket = getattr(self._comp, "sd_bracket", None)
-        if bracket is not None:
-            bracket(True)
+        bracket = hasattr(comp, "sd_bracket")
+        if bracket:
+            comp.sd_bracket(True)
         try:
             import moybyte_sd
             return moybyte_sd.with_sd_live(fn)
         finally:
-            if bracket is not None:
-                bracket(False)
+            if bracket:
+                comp.sd_bracket(False)
             if trace:
-                print("SD < op %dms" % _ticks_diff(_ticks_ms(), t))
+                print("SD < op ", _ticks_diff(_ticks_ms(), t), "ms", sep="")
                 self.traced = True
 
     def load(self, boot, store):
@@ -163,7 +175,8 @@ class _Storage:
         routing it through the bracket would fail every write."""
         if not self.on_sd:
             return fn()
-        return self._bracketed(fn, SD_TRACE)
+        return self._bracketed(fn, SD_TRACE and bool(
+            getattr(self.ws, "diag_live", False)))
 
 
 def run_desktop(fps_cap=60):
@@ -215,8 +228,7 @@ def run_desktop(fps_cap=60):
                     poller = _p
                     keyboard._poller_owned = True
                     touch._source = poller.consume_touch
-                    _diag_note("input", "poller thread running (#69, %dms cadence)"
-                               % poller.period)
+                    _diag_note("input", "poller thread running (#69, one pass per frame)")
             except Exception as exc:  # noqa: BLE001 -- input must never fail closed
                 _diag_note("input", "poller setup failed: %s" % (exc,))
                 poller = None
@@ -251,6 +263,7 @@ def run_desktop(fps_cap=60):
     def _before_slim(_ws):
         # Set BEFORE slim_carts so the store can reload what the diet drops.
         _ws._with_sd = store.session
+        store.ws = _ws
 
     def _after_services(ws):
         _diag_log("boot", "desktop running kb=%d ball=%d touch=%d poller=%d"
@@ -317,6 +330,7 @@ def run_desktop(fps_cap=60):
     # steady per-frame cost that never crosses HITCH_MS is invisible without it.
     _acc = [0] * 12
     _t = {"kbd": 0, "inp": 0, "sb": 0, "diag": 0, "sd": 0, "web": 0}
+    _click_active = [False, False]   # _poll_inputs' answer, reused every frame
 
     def _poll_inputs(now):
         """Every input source on this board: the #69 poller (with its death
@@ -336,6 +350,13 @@ def run_desktop(fps_cap=60):
             keyboard._poller_owned = False
             touch._source = None
             poller = None
+        # The poller thread makes one pass per frame, when this thread lets it:
+        # kick() readies it and sleep_ms(0) (the port's GIL release + taskYIELD)
+        # runs it. Without the yield a free-running cart never lets go of the
+        # GIL and the thread starves (InputPoller's docstring has the numbers).
+        if poller is not None:
+            poller.kick()
+            _sleep_ms(0)
         try:
             if poller is not None:
                 poller.consume()
@@ -370,8 +391,10 @@ def run_desktop(fps_cap=60):
         if tclick:
             click = True
         _t["inp"] = _ticks_diff(_ticks_ms(), _t0)
-        return click, (touched or nx or ny or click
-                       or bool(getattr(inp, "last_key", None)))
+        _click_active[0] = click
+        _click_active[1] = (touched or nx or ny or click
+                            or bool(getattr(inp, "last_key", None)))
+        return _click_active
 
     def _present():
         _t0 = _ticks_ms()
@@ -387,6 +410,14 @@ def run_desktop(fps_cap=60):
 
     def _tail(now):
         loop = d.loop
+        # The second half of the poller's pass (#69): the thread let go of the
+        # GIL for its I2C read and needs it back to stage the result, and a
+        # frame that never blocks would hand it over only at the next frame's
+        # kick -- one pass per two frames (measured 35/s under Brick Siege at
+        # 55fps). This yield, after present, lets the pass finish inside its
+        # own frame.
+        if poller is not None:
+            _sleep_ms(0)
         # #183: close the SD bracket. A DRAWN frame here means the first panel
         # flush after the SD session completed, so the bus survived it.
         if store.traced and loop.drew:
@@ -431,27 +462,36 @@ def run_desktop(fps_cap=60):
                 pass
             # The PERF sample rides the shared FrameLoop.account hook with the
             # other boards (#206 item 2), on their 2s cadence.
-            _diag_drawbrk(diag, ws)
-            # DRAWBRK says how much of the frame is `render`; this says WHICH
-            # native op render is: `layer=` is the draw_layer window copy (what
-            # the async layer copy is meant to take to ~0 on a full-screen-layer
-            # cart), `fill=` is the cls bucket (what a colour `background()`
-            # costs -- a 153,600 B PSRAM write, Brick Siege's whole `bg=`).
-            _diag_draw2(diag, ws)
-            _diag_loop(diag, ws, _acc)
+            #
+            # Every line this tick writes is PERF DIAG's (owner call
+            # 2026-09-30): in kid mode nothing periodic is formatted, printed or
+            # ringed, because each is garbage the collector stops the frame
+            # for. The window still closes every tick, so the first LOOP line
+            # after the diag comes on is three seconds of its own.
+            if _live:
+                _diag_drawbrk(diag, ws)
+                # DRAWBRK says how much of the frame is `render`; this says
+                # WHICH native op render is: `layer=` is the draw_layer window
+                # copy (what the async layer copy is meant to take to ~0 on a
+                # full-screen-layer cart), `fill=` is the cls bucket (what a
+                # colour `background()` costs -- a 153,600 B PSRAM write, Brick
+                # Siege's whole `bg=`).
+                _diag_draw2(diag, ws)
+                _diag_loop(diag, ws, _acc)
+                # #66 lever 4: the bounce-feed pacing of the flush overlap --
+                # the ONE line that says whether a disappointing fps is the bus
+                # or the feeder. Prints nothing unless comp.bounce_flush, so a
+                # serialized build is silent rather than lying.
+                _diag_pump(diag, comp)
+                _diag_i2cstat(diag, keyboard, touch)
+                # The web console's SOCKET state: "serving but nobody
+                # connected" and "never started" look identical from the
+                # outside without it.
+                _diag_webhost(diag, ws)
+                if serial is not None:
+                    serial.report(diag)
             for _i in range(12):
                 _acc[_i] = 0
-            # #66 lever 4: the bounce-feed pacing of the flush overlap -- the ONE
-            # line that says whether a disappointing fps is the bus or the feeder.
-            # Prints nothing unless comp.bounce_flush, so a serialized build is
-            # silent rather than lying.
-            _diag_pump(diag, comp)
-            _diag_i2cstat(diag, keyboard, touch)
-            # The web console's SOCKET state: "serving but nobody connected" and
-            # "never started" look identical from the outside without it.
-            _diag_webhost(diag, ws)
-            if serial is not None:
-                serial.report(diag)
             _t["diag"] = _ticks_diff(_ticks_ms(), _tnow)
 
         # #68 kid mode: the periodic diag->SD write costs 80-120ms and IS a

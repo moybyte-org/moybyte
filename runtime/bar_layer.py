@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   -- bar geometry           the bar's constants (console.py imports them back)
+#   BarLayer                  the unified 18px top bar: zones, clock, status, taps
+#   BarLayer.invalidate       repaint the cached running-cart bar
+#   BarLayer.redraw_clock     repaint just the clock cell
+#   BarLayer.handle_bar_tap   the zoned bar's tap slice, shared by every surface
+#   BarLayer.handle_cart_tap  the running-cart bar's tap slice
 """The unified 18px top bar (#46), extracted from Workstation
 (runtime/console.py) as its own surface -- docs/history/shell_layers_refactor_v1.md.
 
@@ -96,6 +103,18 @@ try:
 except ImportError:                     # host: the runtime package
     from runtime.widgets import _in
 
+
+
+def _edit_kind(cart):
+    """The crash bar's EDIT|CODE slot for `cart`: True for a cart with a
+    Make-it-mine schema (pencil), False for code (the < > glyph), None for a
+    compiled ("runtime": "wasm") cart, whose trap offers no EDIT action at
+    all (docs/wasm_tier_plan_2026-09.md)."""
+    if not cart:
+        return False
+    if cart.get("runtime") == "wasm":
+        return None
+    return bool(cart.get("edit"))
 
 class BarLayer:
     """The unified 18px top bar (#46), migrated out of Workstation as
@@ -227,10 +246,22 @@ class BarLayer:
         canvas, so its exitable strip has to be the responsive geometry too --
         the fixed cluster would leave the context-X stranded 700px left of the
         right edge on the P4. `app_full_canvas` is False for every game, every
-        fixed app cart and every shipped system app, so nothing else moves."""
-        return where == "tool" and not getattr(self.ws, "app_full_canvas", False)
+        fixed app cart and every shipped system app, so nothing else moves.
+
+        "app" is a REGISTERED system app's strip (console.py's host guarantee):
+        the app draws on the SYSTEM canvas, so its strip does too, and takes
+        the fixed cluster only where that canvas IS the 320x240 game canvas.
+        Drawn on the game canvas instead, a board with a separate system
+        canvas (the Guition S3's 480x320) showed the app's bar band empty and
+        had no context-X under the finger."""
+        ws = self.ws
+        if where == "app":
+            return ws.sys_canvas is ws.canvas
+        return where == "tool" and not getattr(ws, "app_full_canvas", False)
 
     def _bar_canvas(self, where):
+        if where == "app":
+            return self.ws.sys_canvas
         if where == "desktop" or self._zone_is_game(where):
             return self.ws.canvas
         return self.ws.sys_canvas
@@ -263,7 +294,7 @@ class BarLayer:
         WM's title strip carries min/max/close instead. Always False on the
         fullscreen-stack tiers (ws.windowed_chrome stays False there)."""
         return getattr(self.ws, "windowed_chrome", False) and where not in (
-            "home", "desk", "desktop", "tool")
+            "home", "desk", "desktop", "tool", "app")
 
     # -- draw + cache (the #43 strip, generalized to every `where`) -----------
 
@@ -369,7 +400,7 @@ class BarLayer:
         explicit invalidators bump (look.set_icon_sheet, etc.)."""
         ws = self.ws
         owner = self._zone_owner(where)
-        has_edit = bool(ws.cart.get("edit")) if ws.cart else False
+        has_edit = _edit_kind(ws.cart)
         return (where, self._clock_text(), has_edit, id(ws.look.icon_sheet),
                 getattr(self._bar_canvas(where), "font_scale", 1),
                 bool(ws.can_manage),
@@ -407,7 +438,8 @@ class BarLayer:
             # IconSheet slot) so it never goes blank on a device with an older saved theme.
             ws._glyph("menu", _SYSMENU_BTN, th["chrome_ink"], cv)
             ws._icon("home", _HOME_BTN[0], _HOME_BTN[1], cv)
-            ws._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
+            if has_edit is not None:            # a compiled cart has neither
+                ws._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
             ws._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
             ws._icon("map", _MAP_BTN[0], _MAP_BTN[1], cv)
             ws._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
@@ -417,7 +449,7 @@ class BarLayer:
             ws._icon(ws._wifi_icon_kind(), _BAR_WIFI[0], _BAR_WIFI[1], cv)
             ws._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
             return
-        if where == "tool":
+        if where in ("tool", "app"):
             # Part 4: the minimal TOOL bar. A tool/app runs WITH a bar so it's EXITABLE
             # (games stay fullscreen-bar-hidden). It draws on the fixed 320x240 GAME canvas
             # like the running cart. RIGHT zone = the OS status cluster + the context-X (the
@@ -601,7 +633,7 @@ class BarLayer:
         # tool, but the Editor tab if a tool is ever PLAYed from the editor); every other
         # taskbar app (Editor/Settings) uses the screen-string exit.
         if where not in ("home", "desk") and _in(px, py, x_hit):
-            if where == "tool":
+            if where in ("tool", "app"):
                 ws._exit_to_caller()
             else:
                 ws.exit()
@@ -630,6 +662,8 @@ class BarLayer:
         elif _in(px, py, _HOME_BTN):
             ws.go_home()
         elif _in(px, py, _MENU_BTN):
+            if _edit_kind(ws.cart) is None:
+                return False
             ws._open_menu()
         elif _in(px, py, _PAINT_BTN):
             ws._open_paint()

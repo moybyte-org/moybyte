@@ -63,6 +63,7 @@ class Desktop:
     def __init__(self, name):
         self.name = name
         self.loop = None          # the FrameLoop, set by run() before its first frame
+        self._click_active = [False, False]   # poll_inputs' answer, reused
 
     # -- the touch-only tier's frame hooks --------------------------------
 
@@ -79,7 +80,10 @@ class Desktop:
         inp = self.inp
         inp.begin_frame()
         touched, click = apply_touch(self.touch, self.pointer)
-        return click, (touched or bool(inp._held) or bool(inp.last_key))
+        out = self._click_active
+        out[0] = click
+        out[1] = touched or bool(inp._held) or bool(inp.last_key)
+        return out
 
     def present(self):
         """Re-point both canvases at the compositor's new BACK buffer."""
@@ -215,16 +219,16 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         return DeviceCanvas(_LayerComp(int(w), int(h), gfx))
 
     ws.make_game_canvas = _mk_game_canvas
-    # The Lua probe's line goes to the boot's own sink unless the board has a
-    # ring to route it through.
-    lua_log = None if board_log is None else (lambda m: log("carts", m))
-    lua_runtime = boot.lua_runtime(ws, log=lua_log)
-    # The shared service wiring: api/audio/lua + store/root/can_manage + WiFi
+    # The runtime probe's lines go to the boot's own sink unless the board has
+    # a ring to route them through.
+    rt_log = None if board_log is None else (lambda m: log("carts", m))
+    runtimes = boot.runtimes(ws, log=rt_log)
+    # The shared service wiring: api/audio/runtimes + store/root/can_manage + WiFi
     # + the #66 slim_carts diet + pointer/keyboard + the boot loads, in the
     # ONE canonical order the host uses too.
     wire_workstation_core(ws, moy_carts, carts_root, make_api,
                           make_wifi(moy_carts, carts_root),
-                          make_audio=make_audio, lua_runtime=lua_runtime,
+                          make_audio=make_audio, runtimes=runtimes,
                           before_slim=before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
     if ble_keyboard is not None:
@@ -259,6 +263,13 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
             ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
         except Exception as exc:  # noqa: BLE001
             log("boot", "OTA wifi wiring failed: %s" % exc)
+    # The network Get Carts fetches indexes and carts through (#124), over the
+    # OTA's HTTP client; the app takes its own radio lease.
+    try:
+        from cart_net import make_cart_net
+        ws.cart_net = make_cart_net(ws.wifi, autoconnect_wifi)
+    except Exception as exc:  # noqa: BLE001 -- no store network is a notice in the app
+        log("boot", "Get Carts network unavailable: %s" % exc)
     if c6_updater is not None and ws.updater is not None:
         # The companion radio's own updater (#7/#58): Settings -> UPGRADE C6
         # RADIO. Failure is a missing Settings row, never a boot failure.
@@ -327,8 +338,8 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     pump = FramePump(boot, ota, fps_cap)
     if serial_ch is not None:
         serial_ch.env["pump"] = pump
-    # The METERS follow Settings -> PERF DIAG (#68 kid mode); the sampler
-    # re-syncs it live. The PERF line itself is unconditional.
+    # The METERS and the PERF line both follow Settings -> PERF DIAG (#68 kid
+    # mode); the sampler re-syncs them live.
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
     perf = PerfSampler(ws, overlap=overlap, emit=perf_emit)
 

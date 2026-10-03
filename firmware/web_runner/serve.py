@@ -26,6 +26,14 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # there. `glass` is a console: the
                                             # trigger hands its own screen back
                                             # and this page stops being it.
+    python serve.py ... --carts D --one-link  # ...over a board's LINK: one
+                                            # connection at a time, each send
+                                            # held to the board's budget
+                                            # (moy_webserver.WEB_SEND_TIMEOUT),
+                                            # so a request waits behind the
+                                            # one being served and a client
+                                            # that stops reading is cut off,
+                                            # as on glass.
     python serve.py ... --carts D --pin NNNN  # ...with a board's PIN GATE on
                                             # top. The dev loop stays PINLESS by
                                             # default and is meant to: a
@@ -82,6 +90,11 @@ if "--close-after" in args:
     i = args.index("--close-after")
     close_after = float(args[i + 1])
     del args[i:i + 2]
+one_link = "--one-link" in args
+if one_link:
+    args.remove("--one-link")
+    if "--carts" not in sys.argv:
+        raise SystemExit("--one-link needs --carts (it is part of the board twin)")
 if "--pin" in args:
     i = args.index("--pin")
     pin = args[i + 1]
@@ -102,6 +115,12 @@ else:
     sys.path.insert(0, os.path.join(_repo, "device"))   # flat sibling imports
     import moy_webhost                                  # noqa: E402
     from moy_webserver import query_param as _query      # noqa: E402
+    from moy_webserver import WEB_SEND_TIMEOUT          # noqa: E402
+    # The twin's piece of a body over `--one-link`. A board's is 1 KB
+    # (moy_webserver's CHUNK); this is bigger only so a loopback link moves a
+    # big store at a rate a test can wait for -- the budget per piece, which is
+    # what cuts a client off, is the board's own.
+    _LINK_CHUNK = 65536
     from runtime import moy_sync                        # noqa: E402
 
     class _TwinOta:
@@ -224,7 +243,15 @@ else:
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            self.wfile.write(body)
+            if not one_link:
+                self.wfile.write(body)
+                return
+            # A board's send: piece by piece, each held to the send budget
+            # (the handler's `timeout`), so a client that stops reading for
+            # longer than that is cut off mid-body.
+            mv = memoryview(body)
+            for at in range(0, len(mv), _LINK_CHUNK):
+                self.wfile.write(mv[at:at + _LINK_CHUNK])
 
         def _closing(self):
             """True (and the 503 already sent) once the goodbye window opens.
@@ -344,12 +371,18 @@ else:
             self._send(200, json.dumps(
                 {"ok": applied, "err": [list(e) for e in errors[:8]]}).encode())
 
+    if one_link:
+        Handler.timeout = WEB_SEND_TIMEOUT
+
     handler = Handler
 
-with http.server.ThreadingHTTPServer(("0.0.0.0", port), handler) as srv:
+server_class = http.server.HTTPServer if one_link else http.server.ThreadingHTTPServer
+with server_class(("0.0.0.0", port), handler) as srv:
     note = (" + carts/sync over %s" % carts_dir) if carts_dir else ""
     if update_mode:
         note += " + a faked /update (%s)" % update_mode
+    if one_link:
+        note += " over one link at a time"
     print("serving %s at http://127.0.0.1:%d/%s%s"
           % (root, port, "?pin=%s" % pin if pin else "", note))
     srv.serve_forever()

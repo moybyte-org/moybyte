@@ -134,6 +134,22 @@ board-specific here is where a pushed cart lands: `python tools/push_cart.py
 reports (`ws.carts_root` -- the TF card when one is in the slot, the internal
 VFS when not).
 
+**A Bench that reads every compute phase 1.4-1.7x slow after a measurement
+session is a board STATE, not the image.** On 2026-09-23 two Bench runs on a
+freshly flashed image read logic 26 → 38 ms and `pix` 6.8 → 13 µs while Brick
+Siege and a `py` loop read normal; `moy_prof` put the time in the fold snapshot
+wait and `time.sleep_ms` spinning on the system timer, and a hard reset
+(`tools/board.py guition_s3 reboot`) restored the previous day's floors on the
+same image. It recurred the same day after a second profiler pass. Reset and
+re-run before believing a Bench regression here, and read the counter FIRST
+while it is still slow: `py __import__('moy_axs').snap_stats()` is `(snaps,
+snaps_sync, timeouts, wait_us)`. The suspect is `native/moy_flush/moy_fold.c`'s
+snap-dead fence — one snapshot copy that times out retires the DMA engine for
+the session, and every later snapshot is a CPU memcpy — which would read as
+`timeouts` > 0 with `snaps_sync` climbing per frame (a clean session reads both
+0 after a whole Bench). It has not been read in the slow state yet, so it is a
+lead, not a finding (`docs/perf_native_gap_v1.md` §6).
+
 ## Bring-up log
 
 * 2026-09-05 -- **the flush's failure paths are proven, not assumed** (#205;
