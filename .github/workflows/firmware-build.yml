@@ -300,6 +300,7 @@ jobs:
         run: |
           IDF=${{ matrix.dir }}/.build/esp-idf/export.sh
           if [ -f "$IDF" ]; then WARM=1; else WARM=0; fi
+          ccache -z > /dev/null || true    # the stats printed below are this run's
           make ${{ matrix.make_target }}
           if [ "$WARM" = "0" ]; then
             echo "== cold .build: esp-idf was fetched this pass -- second (guaranteed-patched) pass"
