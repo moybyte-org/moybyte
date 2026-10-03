@@ -390,6 +390,113 @@ def test_erase_toggle_makes_fill_transparent():
     assert _region(pe) == [0] * 64
 
 
+# -- mirror-draw toggle (#90) -------------------------------------------------
+
+def test_mirror_off_by_default_and_paint_is_unaffected():
+    pe = _pe()
+    assert pe.mirror is False
+    pe.color = 4
+    pe.paint(0, 0)
+    assert _region(pe)[0] == 4 and _region(pe)[7] == 0   # no echo at the far edge
+
+
+def test_mirror_toggle_echoes_pen_across_the_vertical_centre():
+    pe = _pe()
+    pe.color = 7
+    pe.toggle_mirror()
+    assert pe.mirror is True
+    pe.paint(1, 3)                      # dim is 8 -> mirror column is 8-1-1 = 6
+    assert pe.sheet.pget(*_xy(pe, 1, 3)) == 7
+    assert pe.sheet.pget(*_xy(pe, 6, 3)) == 7
+    assert _region(pe).count(7) == 2    # nothing else painted
+
+
+def test_mirror_toggle_echoes_erase_too():
+    # Erase writes through the SAME paint() ink path, so the mirror echoes a
+    # carved-out hole exactly like a painted pixel.
+    pe = _pe()
+    pe.color = 5
+    pe.paint(1, 0)
+    pe.paint(6, 0)
+    assert _region(pe)[:8] == [0, 5, 0, 0, 0, 0, 5, 0]
+    pe.toggle_erase()
+    pe.toggle_mirror()
+    pe.paint(1, 0)                      # erases column 1 AND its mirror, column 6
+    assert _region(pe)[:8] == [0, 0, 0, 0, 0, 0, 0, 0]
+
+
+def test_mirror_respects_multi_tile_size():
+    # A 2x2 sprite mirrors across the WHOLE 16px span, not each 8px tile on its own.
+    pe = _pe()
+    pe.cycle_size()                     # 2x2 (16x16)
+    assert pe.dim == 16
+    pe.color = 9
+    pe.toggle_mirror()
+    pe.paint(2, 0)                      # mirror column is 16-1-2 = 13, in the FAR tile
+    assert pe.sheet.pget(*_xy(pe, 2, 0)) == 9
+    assert pe.sheet.pget(*_xy(pe, 13, 0)) == 9
+    assert pe.sheet.pget(*_xy(pe, 5, 0)) == 0   # not mirrored onto the near tile's edge
+
+
+def test_mirrored_stroke_is_one_undo_step():
+    pe = _pe()
+    pe.color = 3
+    pe.toggle_mirror()
+    pe.begin_stroke()
+    for x in range(4):
+        pe.paint(x, 0)                  # paints x=0..3 AND their mirrors x=7..4
+    pe.end_stroke()
+    assert _region(pe)[:8] == [3] * 8
+    assert pe.can_undo()
+    pe.undo()
+    assert _region(pe)[:8] == [0] * 8   # the whole mirrored stroke reverts together
+    assert not pe.can_undo()
+
+
+def test_mirror_toggle_does_not_affect_fill():
+    pe = _pe()
+    pe.color = 6
+    pe.tool = pe.FILL
+    pe.toggle_mirror()
+    pe.fill(0, 0)
+    assert _region(pe) == [6] * 64      # fill floods everything anyway, but mirror
+                                         # plays no part: a half-flood is never possible
+
+
+def test_mirror_toggle_does_not_affect_shapes():
+    pe = _pe()
+    pe.color = 8
+    pe.tool = pe.LINE
+    pe.toggle_mirror()
+    pe.stamp_shape(0, 0, 3, 0)          # a horizontal line on the left half only
+    assert _region(pe)[:8] == [8, 8, 8, 8, 0, 0, 0, 0]   # no mirrored echo on the right
+
+
+def test_mirror_toggle_button(tmp_path):
+    from runtime import console as C
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    ws.paint.color = 9
+    ox, oy = ws.sheet.tile_origin(ws.paint.n)
+
+    _tap_tool(drv, ws, "mirror")
+    assert ws.paint.mirror is True
+
+    cx, cy = _cell_center(C, 1, 2, ws.paint.dim)
+    drv.touch(cx, cy)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.sheet.pget(ox + 1, oy + 2) == 9
+    assert ws.sheet.pget(ox + 6, oy + 2) == 9      # the mirrored echo landed too
+
+    _tap_tool(drv, ws, "mirror")
+    assert ws.paint.mirror is False
+
+
 # -- region select / copy / paste (#90) --------------------------------------
 
 def test_selection_normalizes_and_clamps():

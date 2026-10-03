@@ -220,6 +220,8 @@ class PaintEditor(OpHistoryMixin):
         self.size = 1         # sprite side length in tiles (1=8x8, 2=16x16, ...)
         self.tool = self.PEN  # active tool (PEN / FILL / RECT / LINE / OVAL / SELECT, #90)
         self.erase = False    # color-erase toggle (#90): paint/fill/shapes write index 0
+        self.mirror = False   # mirror-draw toggle (#90): PEN/erase strokes echo across
+                               # the editable region's vertical centre (shapes/fill don't)
         # Region select / copy / paste (#90). `sel` is the active grid-local selection
         # rectangle (x0,y0,x1,y1 inclusive) or None; `clip` is the copied region as
         # (w, h, bytes) or None. Both default off so a freshly-opened editor renders
@@ -250,10 +252,20 @@ class PaintEditor(OpHistoryMixin):
         return 0 if self.erase else (self.color & 15)
 
     def paint(self, lx, ly):
-        """Paint grid-local pixel (lx, ly) within the size*8 region at tile n."""
+        """Paint grid-local pixel (lx, ly) within the size*8 region at tile n. With
+        the mirror toggle on, also paints (dim-1-lx, ly) -- the SAME ink, across the
+        whole multi-tile region (not per-tile), so the reflection lands in whichever
+        constituent tile it falls in. Both pixels write before either's undo diff is
+        captured (begin_stroke/end_stroke bracket the call), so a mirrored stroke is
+        still one undo step (#90)."""
         if 0 <= lx < self.dim and 0 <= ly < self.dim:
             ox, oy = self._origin()
-            self.sheet.pset(ox + lx, oy + ly, self._ink())
+            ink = self._ink()
+            self.sheet.pset(ox + lx, oy + ly, ink)
+            if self.mirror:
+                mx = self.dim - 1 - lx
+                if mx != lx:
+                    self.sheet.pset(ox + mx, oy + ly, ink)
 
     def pick(self, lx, ly):
         if 0 <= lx < self.dim and 0 <= ly < self.dim:
@@ -294,6 +306,14 @@ class PaintEditor(OpHistoryMixin):
         transparent color) so a kid can carve holes in a sprite without hunting for the
         color-0 swatch (#90). A display flag only in spirit -- the pixels really change."""
         self.erase = not self.erase
+
+    def toggle_mirror(self):
+        """Flip the mirror-draw toggle (#90): while on, `paint()` echoes every PEN/
+        erase pixel across the editable region's vertical centre, so a kid can draw
+        a symmetric face/ship by drawing only its left half. FILL and the RECT/LINE/
+        OVAL shapes read this flag never -- a reflected flood or shape wasn't asked
+        for, and leaving them out keeps the toggle's effect legible."""
+        self.mirror = not self.mirror
 
     # -- region snapshot / restore (undo primitive, #90) ---------------------
 

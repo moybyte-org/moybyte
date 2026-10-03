@@ -113,7 +113,7 @@ _PAINT_FILES = (210, 178, 92, 20)
 # TWO compact rows of single-glyph tool buttons drawn just below the pixel grid.
 # Row 1 = the drawing MODES (the pen / bucket / rect / line / oval / select tools).
 # Row 2 = the whole-sprite transforms (flip / rotate 90 / shift-with-wrap x4 / clear)
-# plus the copy/paste/erase actions. UNDO/REDO left this row in #111: the ONE bar
+# plus the copy/paste/erase/mirror actions. UNDO/REDO left this row in #111: the ONE bar
 # UNDO/REDO pair is now THE undo (routed to this editor's op-history, console.py), so
 # the two freed slots just widen the remaining mode buttons (spacing).
 # The drawing tools are direct mode buttons (touch-first, no chords): a tap selects
@@ -121,14 +121,14 @@ _PAINT_FILES = (210, 178, 92, 20)
 # are the fallback if a glyph is ever missing; the glyphs (chrome.py _GLYPHS) are
 # the pre-literate primary cue. Order within each tuple is the hit-test/draw order.
 _TOOL_ROW1 = ("pen", "fill", "rect", "line", "oval", "select")
-_TOOL_ROW2 = ("copy", "paste", "erase", "fliph", "flipv", "rot",
+_TOOL_ROW2 = ("copy", "paste", "erase", "mirror", "fliph", "flipv", "rot",
               "sleft", "sright", "sup", "sdown", "clear")
 _TOOLS = _TOOL_ROW1 + _TOOL_ROW2       # flat order; tool_btns follows it (row1, row2)
 _TOOL_LABEL = {
     "pen": "P", "fill": "F", "rect": "R", "line": "L",
     "oval": "O", "select": "S", "copy": "C", "paste": "V", "erase": "E",
-    "fliph": "H", "flipv": "M", "rot": "T", "sleft": "<", "sright": ">",
-    "sup": "^", "sdown": "v", "clear": "X",
+    "mirror": "|", "fliph": "H", "flipv": "M", "rot": "T", "sleft": "<",
+    "sright": ">", "sup": "^", "sdown": "v", "clear": "X",
 }
 # The pre-literate glyph for each tool (#89-#93 icon pass): a 12x12 chrome glyph
 # (runtime/chrome.py _GLYPHS) drawn centered instead of the single-char label, so
@@ -137,7 +137,7 @@ _TOOL_LABEL = {
 _TOOL_GLYPH = {
     "pen": "edit", "fill": "fill",
     "rect": "rect_tool", "line": "line", "oval": "circle", "select": "select",
-    "copy": "copy", "paste": "paste", "erase": "eraser",
+    "copy": "copy", "paste": "paste", "erase": "eraser", "mirror": "mirror",
     "fliph": "flip_h", "flipv": "flip_v", "rot": "rotate",
     "sleft": "arr_l", "sright": "arr_r", "sup": "arr_u", "sdown": "arr_d",
     "clear": "clear",
@@ -549,6 +549,8 @@ class PaintLayer:
             self._paste_default(pe)
         elif tid == "erase":
             pe.toggle_erase()
+        elif tid == "mirror":
+            pe.toggle_mirror()
         elif tid == "fliph":
             pe.flip_h()
         elif tid == "flipv":
@@ -578,11 +580,12 @@ class PaintLayer:
             pe.paste(0, 0)
 
     def _draw_tools(self):
-        """Draw the compact tool row: the drawing MODES, the FILL toggle, and the
-        whole-sprite transforms. Each button carries a centered 12x12 chrome GLYPH (the
-        #89-#93 icon pass -- pen/fill/flip/rotate/shift-arrows/clear) instead of its
-        one-char label, so the row reads as pictures on the pre-literate tiers. The
-        active drawing tool is accented; copy/paste dim when unusable (undo/redo moved
+        """Draw the compact tool row: the drawing MODES, the erase/mirror toggles, and
+        the whole-sprite transforms. Each button carries a centered 12x12 chrome GLYPH
+        (the #89-#93 icon pass -- pen/fill/flip/rotate/shift-arrows/clear, plus #90's
+        mirror axis) instead of its one-char label, so the row reads as pictures on
+        the pre-literate tiers. The active drawing tool is accented, and so are the
+        erase/mirror toggles when armed; copy/paste dim when unusable (undo/redo moved
         to the ONE bar pair, #111). Drawn on the panel
         surface directly (indexed primitives + ws._glyph), so host == device; the glyph
         follows the canvas font scale (#39). If a glyph kind were ever missing, ws._glyph
@@ -600,9 +603,10 @@ class PaintLayer:
         for i in range(len(btns)):
             tid = _TOOLS[i]
             x, y, w, h = btns[i]
-            # The active drawing MODE is accented; so is the erase toggle when armed.
+            # The active drawing MODE is accented; so are the erase/mirror toggles
+            # when armed.
             active = (tid in _TOOL_MODE and pe.tool == _TOOL_MODE[tid]) or (
-                tid == "erase" and pe.erase)
+                tid == "erase" and pe.erase) or (tid == "mirror" and pe.mirror)
             enabled = True
             if tid in ("copy", "paste"):
                 # copy needs a selection, paste needs a clip -- dim when unusable.
