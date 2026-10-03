@@ -162,6 +162,10 @@ def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
     on_glass.wasm_read_of_a_folder_reads_nothing(board, WASM_BOARD_DIR)
 
 
+def test_a_compiled_carts_written_files_outlive_its_session(board, wasm_carts):
+    on_glass.wasm_written_files_outlive_the_session(board, WASM_BOARD_DIR)
+
+
 # The compiled tier's showcase, Jet Teapot (ports/jet/README.md), from the
 # launcher: uncapped with WiFi off, in Phong -- the costliest of its three
 # shadings and the steadiest to measure -- at half and at full width. The

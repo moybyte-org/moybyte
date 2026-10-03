@@ -1,7 +1,6 @@
 /* libmoy's wasm binding: SPEC.md 16's import table.
  *
- * TRACKS THE PROPOSAL, which is not part of core 0.3. The table is
- * wasm-imports.json; test/wasm_table_check.py holds this file's
+ * The table is wasm-imports.json; test/wasm_table_check.py holds this file's
  * NativeSymbol array equal to it, row for row and signature for signature.
  *
  * BUILT ONLY WHEN ASKED, over one of two engines. src/moy_wasm.c compiles to
@@ -34,6 +33,7 @@
  *   inst = wasm_runtime_instantiate(module, stack, 0, ...);
  *   env  = wasm_runtime_create_exec_env(inst, stack);
  *   memset(&w, 0, sizeof w); w.read = my_read; w.read_user = me;
+ *   w.writable = entries; w.write = ...;       // optional: see `writable` below
  *   w.frame = my_take;                         // optional: see `frame` below
  *   w.snd = my_queue;                          // optional: see `snd` below
  *   w.lanes = n; w.lane_go = ...;              // optional: see `lanes` below
@@ -91,9 +91,18 @@ extern "C" {
 #define MOY_WASM_LAYERS 8
 #endif
 
-/* The longest file name `read` and key `cfg` accept, in bytes. A longer one
- * reads as absent. */
+/* The longest file name `read` and `list` and key `cfg` accept, in bytes. A
+ * longer one reads as absent. */
 #define MOY_WASM_NAME_MAX 255
+
+/* The cart's writable files (SPEC.md 16.12): the longest path `write` and
+ * `erase` accept, in bytes, the most one `write` keeps, and write's answers
+ * past 0, which a host's `write` returns as they are. */
+#define MOY_WASM_PATH_MAX  64
+#define MOY_WASM_WRITE_MAX 1048576
+#define MOY_WASM_NOT_WRITABLE (-1)
+#define MOY_WASM_NO_ROOM      (-2)
+#define MOY_WASM_FAILED       (-3)
 
 /* The sample stream (SPEC.md 16.9's `snd`): signed 16-bit mono frames at this
  * rate, and the most a host holds that its output has not yet taken. */
@@ -141,6 +150,40 @@ typedef struct moy_wasm {
     uint32_t (*read)(void *user, const char *name, uint32_t offset,
                      uint8_t *dst, uint32_t len);
     void *read_user;
+    /* The cart's writable files (SPEC.md 16.12). `writable` is the manifest's
+     * "writable" entries, each NUL-terminated, one after another and ended by
+     * an empty one -- "saves/\0options.cfg\0\0" -- or NULL when it declares
+     * none. The binding holds every path to them and ignores an entry that
+     * breaks SPEC.md 16.12's rule, so a host hands them over as it read them.
+     *
+     * The four functions keep the cart's written files, per cart and outside
+     * its folder, and every `path` they are handed is well-formed and
+     * writable. With `write` NULL the host keeps none: every write answers
+     * MOY_WASM_FAILED and every erase -1.
+     *
+     *   written  read's contract on the written copy of `path`: copy at most
+     *            `len` bytes from `offset` into `dst` and return how many; with
+     *            `len` 0, how many remain from `offset`. -1 when there is no
+     *            written copy, and `read` then answers from the cart's folder.
+     *   write    replace the written copy with the `len` bytes at `data` (at
+     *            most MOY_WASM_WRITE_MAX), atomically -- the old copy whole
+     *            until the new one is -- and kept before it returns. 0,
+     *            MOY_WASM_NO_ROOM or MOY_WASM_FAILED.
+     *   erase    remove the written copy: 0, or -1 when there is none.
+     *   list     the `index`-th path, counting from 0 in bytewise order, of
+     *            the cart's files that begin with `prefix`: every file in its
+     *            folder and every written one, a path that is both counted
+     *            once. Copy at most `len` bytes of it into `dst` and return its
+     *            whole length, or -1 past the last. NULL: every list answers
+     *            -1. */
+    const char *writable;
+    int32_t (*written)(void *user, const char *path, uint32_t offset,
+                       uint8_t *dst, uint32_t len);
+    int32_t (*write)(void *user, const char *path, const uint8_t *data, uint32_t len);
+    int32_t (*erase)(void *user, const char *path);
+    int32_t (*list)(void *user, const char *prefix, uint32_t index,
+                    uint8_t *dst, uint32_t len);
+    void *files_user;
     /* 1 when the canvas's wire words (moy_canvas_wire) are canonical RGB565
      * with the two bytes swapped. A palette blit and blit565 then encode their
      * colours the same way; 0 means canonical, moy_canvas_init's default. */

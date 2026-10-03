@@ -4,7 +4,7 @@
     "native/moy_audio/libmoy/moy_audio.c": "0ad1024459ba4f5456db96ae1ab54fa617a03da631e231999cdf1ad0cc42eb66",
     "native/moy_audio/libmoy/moy_audio.h": "140278244383a30aa00af19a69a8be8fb45e04c6b43c7315dc56e16074607afa",
     "native/moy_gfx/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
-    "native/moy_gfx/libmoy/moy.h": "ff7a0a00209977c80d2a16ebbf5c1ec42fce54994f69e7b51b7926eb03ae194c",
+    "native/moy_gfx/libmoy/moy.h": "ee11b68a1674dceb01bae8e95e38cda844f2c275dc3705a94db99581b758e288",
     "native/moy_gfx/libmoy/moy_canvas.c": "f6b6d8482718a66ac8140dd60bd273b1cb494746fed1d6839da2ad01cea0b750",
     "native/moy_gfx/libmoy/moy_data.c": "091a8271274d6165dd8ac73e1d577c65c6cf86a03da44223368c564eddbd366c",
     "native/moy_gfx/libmoy/moy_pixel.h": "46cf4139a46bbf8f641e8f9ec98982ff21482734d352b196b40b86fd82a17d40",
@@ -12,15 +12,15 @@
     "native/moy_wasm_web/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moy_wasm_web/libmoy/embed.c": "4128d0dae5245595cb43c0dfd89dd617e0fe0bac5a2335902c5dd8e609321633",
     "native/moycore/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
-    "native/moycore/libmoy/moy_lua.c": "45b30acfd8894ec9642b4bdaea1c014516165dc25beeb7f3486b7efccefd97ec",
+    "native/moycore/libmoy/moy_lua.c": "40351c47f697a534ca59a79a286b82750e7c84f1912a085bd39631ae3967a77a",
     "native/moycore/libmoy/moy_p8.c": "d3dac60efd94c44dbc215bcd5cf350dc41220f9cc384c38add292143ac97a678",
-    "native/moycore/libmoy/moy_wasm.c": "2a8d20c94e92d23f6f5a33b2c88088a7d75f87e79fbabe6167af79d1c00691a5",
-    "native/moycore/libmoy/moy_wasm.h": "aa03764b7f9596451e7a3e652d62f43d1e6ce0544e25d7ede9e53cf97a411635",
+    "native/moycore/libmoy/moy_wasm.c": "c3c091d6c99312d5db23ff1a859e02a628f88146b5165675482e1ae3af042f5c",
+    "native/moycore/libmoy/moy_wasm.h": "162703cdb5c8e5bfe8fb6b6a5b072a3cde63d54e10e252a9035011ab6ff592fe",
     "tools/wat.py": "cc7332d29d4642fede58d2521f343c836c3e4457f4b309b9f1f8553d24817796"
   },
   "upstream": {
-    "commit": "cf2cf7fb0dfe0cecb239a918f1eb89dfabc5b5fc",
-    "date": "2026-10-02",
+    "commit": "db62230eb615d2f0b084964bdfe44922cd7cfa58",
+    "date": "2026-10-03",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }

@@ -664,12 +664,16 @@ def test_an_update_keeps_the_saves_and_an_edited_config(tmp_path):
     folder = Path(root) / "jet.moy"
     (folder / "pmem.json").write_text('{"0": 900}')
     (folder / "config.json").write_text('{"speed": 9}')         # the kid's own
+    written = Path(root).parent / "written" / "jet"
+    written.mkdir(parents=True)
+    (written / "saves%2fslot1.sav").write_bytes(b"level 3")    # what the cart wrote
     repo.add("jet", version=2, config=b'{"speed": 2}')
     assert _state(repo, root, "jet") == "update"
     job = _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
     assert job.error is None
     assert (folder / "pmem.json").read_text() == '{"0": 900}'
     assert (folder / "config.json").read_text() == '{"speed": 9}'
+    assert (written / "saves%2fslot1.sav").read_bytes() == b"level 3"
     assert (folder / "main.wasm").read_bytes().endswith(b"2")
     assert ci.load_record(root)["jet.moy"]["version"] == 2
     assert _state(repo, root, "jet") == "installed"
@@ -744,15 +748,35 @@ def test_a_crash_at_any_point_of_the_swap_is_put_right(tmp_path, left):
     assert os.listdir(stage) == []
 
 
-def test_remove_takes_the_folder_and_its_record(tmp_path):
+def test_remove_takes_the_folder_its_record_and_what_it_wrote(tmp_path):
     root = _store(tmp_path)
     repo = Repo(BASE)
     repo.add("jet")
+    repo.add("doom")
     _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
-    ci.remove(root, "jet.moy")
+    _install(_cart(repo, "doom"), root, MemNet(repo.routes()))
+    base = Path(root).parent / "written"
+    for cid in ("jet", "doom"):
+        (base / cid).mkdir(parents=True)
+        (base / cid / "options.cfg").write_bytes(b"x")
+
+    class Keep:
+        def __init__(self):
+            self.said = []
+
+        def record(self, text):
+            self.said.append(("record",))
+
+        def erased(self, cid, key):
+            self.said.append(("erased", cid, key))
+    keep = Keep()
+    ci.remove(root, "jet.moy", keep)
     assert not (Path(root) / "jet.moy").exists()
     assert "jet.moy" not in ci.load_record(root)
     assert _state(repo, root, "jet") == "get"
+    assert not (base / "jet").exists()
+    assert (base / "doom" / "options.cfg").exists()       # another cart's stay
+    assert keep.said == [("record",), ("erased", "jet", None)]
 
 
 def test_room_is_counted_in_the_stores_blocks():

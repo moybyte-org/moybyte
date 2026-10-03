@@ -1776,7 +1776,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
         (_v, module, head, pages, sha, cdir, swapped, gate,
-         allow_unsigned, interp) = world.core.calls[1]
+         allow_unsigned, interp, writable, files) = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
@@ -1786,6 +1786,12 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         # a console that never turned Unknown sources on loads signed modules only
         assert allow_unsigned is False
         assert interp is False         # a module by this console's own name -- AOT
+        # the cart declares no writable paths; its files are kept beside the
+        # store, under the same gate
+        assert writable is None
+        assert files.dir == os.path.dirname(cart["path"]).rsplit("/", 1)[0] \
+            + "/written/" + os.path.basename(cart["path"])[:-4]
+        assert files.gate is ws._with_sd
         assert not run.interp
         assert run.interp_cause is None
         assert sha == hashlib.sha256(blob).hexdigest()
@@ -1793,6 +1799,27 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert run.init is None and run.draw() is None
         run.update(1 / 30)
         assert "tick" in world.core.verbs()
+    finally:
+        world.close()
+
+
+def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
+    """The manifest's "writable" entries go to wasm_open as one string, NUL
+    between them, which moycore hands libmoy's binding as its list; the
+    store is the cart's, beside the carts store, with the page's keeper when
+    the console has one (moy-spec SPEC.md 16.12)."""
+    cart, _main = _compiled(tmp_path)
+    cart["writable"] = ["saves/", "options.cfg"]
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        keep = object()
+        ws.cart_keep = keep
+        world.mod.WasmRun(ws, make_ns(), None)
+        call = world.core.calls[1]
+        assert call[0] == "wasm_open"
+        assert call[10] == "saves/\0options.cfg"
+        assert call[11].keep is keep and call[11].id == "hello"
     finally:
         world.close()
 
@@ -1884,7 +1911,8 @@ def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_pa
         assert not run.interp and run.interp_cause is None
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
-        (_v, module, head, pages, sha, _cdir, _sw, _gate, _unknown, interp) = opens[0]
+        (_v, module, head, pages, sha, _cdir, _sw, _gate, _unknown, interp,
+         _writable, _files) = opens[0]
         assert module == main and sha is None and interp is True
         assert open(main, "rb").read().startswith(head) and pages == 3
     finally:

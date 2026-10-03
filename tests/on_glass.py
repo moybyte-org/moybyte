@@ -1111,6 +1111,57 @@ def wasm_read_of_a_folder_reads_nothing(board, board_dir):
     return got[0]
 
 
+FILES_TITLE = "Files Wasm"
+FILES_FOLDER = "wasm_files.moy"
+_PMEM4 = ("(lambda a: (__import__('moycore').pmem_image(a), list(a)[:4])[1])"
+          "(__import__('array').array('i', bytearray(1024)))")
+
+
+def wasm_files_push(board, board_dir, fresh=True):
+    """The Files Wasm fixture (tests/fixtures/wasm/wasm_files.moy, a compiled
+    cart's writable files, moy-spec SPEC.md 16.12) built for this board's chip
+    and pushed into the store; with `fresh`, the files it wrote before go, so
+    its next run is a first turn."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_files_")
+    out = os.path.join(tmp, FILES_FOLDER)
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / FILES_FOLDER), out,
+                    chips=(chip,))
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    _push_folder(board, board_dir, out, root.rstrip("/") + "/" + FILES_FOLDER)
+    if fresh:
+        board.pyval("ws._with_sd(lambda: __import__('cart_files').remove("
+                    "str(ws.carts_root), %r)) or 1" % FILES_FOLDER, timeout=30)
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+
+
+def wasm_files_turn(board):
+    """Run Files Wasm once and answer its report: [turn, failed checks, the
+    failed checks' bits, paths listed under "saves/"]."""
+    got = []
+
+    def _probe(b):
+        got.append(b.pyval(_PMEM4, timeout=30, strict=True))
+    _runs_clean(board, FILES_TITLE, check=_probe)
+    return got[0]
+
+
+def wasm_written_files_outlive_the_session(board, board_dir):
+    """A compiled cart's written files on the board's store, through moycore
+    and runtime/cart_files.py under the store's gate: the first run writes
+    (over a shipped default, "Case" beside "case" -- which the T-Deck's FAT
+    card must keep apart), the second run, a new session, finds every file
+    and erases them. The reboot between the two is the on-glass pass's
+    (`tools/board.py <board> reboot`); a suite keeps its one reset."""
+    wasm_files_push(board, board_dir)
+    first = wasm_files_turn(board)
+    second = wasm_files_turn(board)
+    assert (first, second) == ([1, 0, 0, 4], [2, 0, 0, 4]), (first, second)
+
+
 TAMPERED_TITLE = "Tampered Wasm"
 
 

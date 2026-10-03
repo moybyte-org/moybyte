@@ -180,6 +180,16 @@ the decisions below record what they changed.
     choice. The fast interpreter was re-measured once at that same pass under
     a pool sized to load, confirming the slowdown is the reason it stays off,
     not a memory one; numbers for both are #158's.
+- **A compiled cart keeps files (owner, 2026-10-03).** moy-spec 0.4's
+  SPEC.md §16.12: a cart declares `writable` paths in its own namespace and
+  writes whole files there -- atomically, kept when the call returns, at most
+  1 MiB each, no budget and no fit check, so any write may answer "no room" --
+  with `read` answering a written copy before the shipped file and `list`
+  enumerating both. A Lua cart keeps `pmem` alone. Every tier keeps a cart's
+  files beside its carts store, `written/<cart>/` (`runtime/cart_files.py`):
+  an install, an update or a push never touches them, and Get Carts' REMOVE
+  takes them with the cart. A user's own files (ROMs, books) are a separate
+  capability, a console file picker (#231).
 
 ## The phases
 

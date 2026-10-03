@@ -581,6 +581,98 @@ export async function readRecord(store) {
 }
 
 // ---------------------------------------------------------------------------
+// A compiled cart's written files (moy-spec SPEC.md 16.12), in OPFS beside the
+// carts: written/<cart>/<key>, runtime/cart_files.py's layout, so the VFS the
+// console reads and this store of record hold the same names. The console
+// writes the VFS and queues the file here (carts_link's WebCartKeep), and a
+// write lands with an install's crash-safety: the bytes go to "<key>~part",
+// an empty "<key>~done" then says they are whole, and only then do they
+// replace "<key>" -- so a reload at any moment finds the old copy or the new
+// one, and readWritten finishes or discards what one left.
+// ---------------------------------------------------------------------------
+
+export const WRITTEN_ROOT = "written";
+const PART = "~part", DONE = "~done";
+
+// The written store, or null with no OPFS (the console then keeps written
+// files in this tab alone, like every other edit there).
+export async function openWritten(nav) {
+    const st = nav && nav.storage;
+    if (!st || typeof st.getDirectory !== "function") return null;
+    try {
+        const dir = await st.getDirectory();
+        return { dir: await dir.getDirectoryHandle(WRITTEN_ROOT, { create: true }) };
+    } catch (e) {
+        return null;
+    }
+}
+
+// A cart id or a key as a name in one folder: what cart_files.py writes, and
+// never a path.
+function writtenName(n) {
+    return typeof n === "string" && !!n && n !== "." && n !== ".." && !/[\/\\\0]/.test(n);
+}
+
+async function rollWritten(dir, key) {
+    const part = await dir.getFileHandle(key + PART);
+    await writeIn(dir, key, new Uint8Array(await (await part.getFile()).arrayBuffer()));
+    await dir.removeEntry(key + DONE);
+    await dir.removeEntry(key + PART);
+}
+
+// Make one written file durable. Throws, with the old copy in place, when it
+// could not be.
+export async function commitWritten(w, cart, key, bytes) {
+    if (!writtenName(cart) || !writtenName(key) || key.includes("~"))
+        throw new Error("bad written file " + cart + "/" + key);
+    const dir = await w.dir.getDirectoryHandle(cart, { create: true });
+    try { await dir.removeEntry(key + DONE); } catch (e) { /* none */ }
+    await writeIn(dir, key + PART, bytes);
+    await writeIn(dir, key + DONE, new Uint8Array(0));
+    await rollWritten(dir, key);
+}
+
+// One written file gone, or with `key` null every file the cart wrote.
+export async function dropWritten(w, cart, key) {
+    if (!writtenName(cart)) return;
+    if (key === null || key === undefined) {
+        try { await w.dir.removeEntry(cart, { recursive: true }); } catch (e) { /* none */ }
+        return;
+    }
+    if (!writtenName(key)) return;
+    let dir;
+    try { dir = await w.dir.getDirectoryHandle(cart); } catch (e) { return; }
+    try { await dir.removeEntry(key); } catch (e) { /* none */ }
+}
+
+// Every written file as {"<cart>/<key>": bytes}, after finishing each write a
+// reload interrupted: one with its marker rolls forward, one without goes.
+export async function readWritten(w) {
+    const out = {};
+    const carts = [];
+    for await (const [name, h] of w.dir.entries()) if (h.kind === "directory") carts.push(name);
+    for (const cart of carts) {
+        const dir = await w.dir.getDirectoryHandle(cart);
+        const names = [];
+        for await (const [name, h] of dir.entries()) if (h.kind === "file") names.push(name);
+        for (const n of names)
+            if (n.endsWith(DONE) && names.includes(n.slice(0, -DONE.length) + PART))
+                await rollWritten(dir, n.slice(0, -DONE.length));
+        const left = [];
+        for await (const [name] of dir.entries()) left.push(name);
+        for (const n of left) {
+            if (n.endsWith(PART) || n.endsWith(DONE)) {
+                try { await dir.removeEntry(n); } catch (e) { /* gone */ }
+                continue;
+            }
+            const fh = await dir.getFileHandle(n);
+            out[cart + "/" + n] = new Uint8Array(await (await fh.getFile()).arrayBuffer());
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // The .moy zip -- the no-account escape hatch (#193).
 //
 // A zip carries NO journal, deliberately: it is built with `skipName` (the wire

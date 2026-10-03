@@ -800,8 +800,9 @@ def state_json():
     """The console's `state`: the dev channel's one-line snapshot -- the keys
     every on-glass suite reads -- plus this page's sample stream
     (`moy_audio.snd_counts()`: frames a compiled cart queued, frames the page's
-    audio pull mixed, frames it found none, the room, whether it is open), for
-    a harness driving the page (`window.__moyState()`)."""
+    audio pull mixed, frames it found none, the room, whether it is open) and
+    the running cart's first eight pmem slots, for a harness driving the page
+    (`window.__moyState()`)."""
     import dev_channel
     st = dev_channel._remote_state(_S["ws"])
     try:
@@ -810,6 +811,15 @@ def state_json():
     except (ImportError, AttributeError):
         sc = None
     st["snd"] = list(sc) if sc is not None else None
+    # The running cart's first pmem slots, where a fixture reports its checks:
+    # the run's flush, which hands a moved image to the console's pmem to be
+    # kept at the next boundary as the periodic flush does, then its image.
+    run = getattr(getattr(_S["ws"], "player", None), "_lua", None)
+    flush = getattr(run, "flush_pmem", None)
+    if flush is not None:
+        flush()
+    img = getattr(run, "pmem_img", None)
+    st["pmem"] = list(img)[:8] if img is not None else None
     return json.dumps(st)
 
 

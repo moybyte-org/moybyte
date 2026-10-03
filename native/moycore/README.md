@@ -36,9 +36,11 @@ session callbacks
 there and times the halves for `tick_split`.
 
 Every host callback the table reaches from that thread is a C read or write
-against the console except two that need the VM -- `read`, the cart's own
-folder through the VFS, and `cfg`, the config dict -- and those run on the
-MicroPython task through `moy_wasm_on_vm` while it waits on the call.
+against the console except the ones that need the VM -- `read`, the cart's own
+folder through the VFS; `cfg`, the config dict; and the cart's written files
+(moy-spec SPEC.md §16.12: `write`, `erase`, `list` and `read`'s written copy),
+which `wasm_open` hands it as `runtime/cart_files.py`'s store -- and those run
+on the MicroPython task through `moy_wasm_on_vm` while it waits on the call.
 
 A cart's `par` items run on the engine's lanes: moycore hands the binding
 `moy_wasm_session_lanes()` of them and their `lane_go`/`lane_wait`, and the

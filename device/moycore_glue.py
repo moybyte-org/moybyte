@@ -62,6 +62,11 @@ except ImportError:                      # host tests importing the device modul
     from runtime.widgets import pointer_state
 
 try:
+    import cart_files as _cart_files
+except ImportError:                      # host tests importing the device module
+    from runtime import cart_files as _cart_files
+
+try:
     import moycore as _moycore
 except ImportError:                      # a build without the module
     _moycore = None
@@ -794,10 +799,17 @@ class WasmRun(MoycoreRun):
         # every later cart's run_begin.
         gate = getattr(ws, "_with_sd", None)
         unknown_sources = bool(getattr(ws, "unknown_sources", False))
+        # The cart's written files (moy-spec SPEC.md 16.12), kept beside the
+        # carts store under the same gate; in the browser the page's keeper
+        # makes each write durable in OPFS (runtime/cart_files.py).
+        writable = cart.get("writable") or ()
+        files = _cart_files.CartFiles(path, gate, getattr(ws, "cart_keep", None))
+        joined = "\0".join(writable) if writable else None
 
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
-                                      swapped, gate, unknown_sources, interp)
+                                      swapped, gate, unknown_sources, interp,
+                                      joined, files)
 
         try:
             if has_module:

@@ -397,6 +397,79 @@ def test_a_folder_reads_as_a_missing_file(tmp_path):
     assert _pmem(ws)[:3] == [0, 0, size], _pmem(ws)[:3]
 
 
+def _files(root):
+    wasm_cart.build(os.path.join(FIXTURES, "wasm_files.moy"),
+                    os.path.join(root, "wasm_files.moy"))
+
+
+def _written(root):
+    """The Files Wasm cart's written folder, beside the carts store."""
+    d = os.path.join(os.path.dirname(root), "written", "wasm_files")
+    return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+
+def test_a_carts_written_files_outlive_a_restart(tmp_path):
+    """Files Wasm checks itself over two turns (its src/main.wat says what):
+    the first writes over a shipped default, keeps "Case" and "case" apart and
+    lists what it wrote with what it shipped; the second, on a console started
+    afresh over the same store, finds all of it and erases it, so the third is
+    a first again. The files live beside the carts store, under the names
+    moy-spec's libmoy/port/moy_files.c gives them, and the cart's folder is
+    never written."""
+    _binding_or_skip()
+    root = _store(tmp_path, _files)
+    folder = os.path.join(root, "wasm_files.moy")
+    shipped = sorted(os.listdir(folder))
+    for turn in (1, 2, 1):
+        ws = host_app.build_workstation(root)
+        open_cart(ws, "Files Wasm")
+        assert ws.player.cart_error is None, ws.player.cart_error
+        assert _pmem(ws)[:4] == [turn, 0, 0, 4], _pmem(ws)[:4]
+        ws.player.release_world()
+        if turn == 1:
+            assert _written(root) == ["options.cfg", "saves%2f%43ase.sav",
+                                      "saves%2fcase.sav", "saves%2fslot1.sav"]
+        else:
+            assert _written(root) == []
+        assert sorted(os.listdir(folder)) == shipped
+
+
+def test_a_write_cut_short_leaves_the_last_whole_copy(tmp_path):
+    """A power loss mid-write leaves "<key>~part" (torn) or "<key>~done"
+    (whole, not yet in place): the next session drops the first and puts the
+    second in place, and only whole copies are ever read."""
+    from runtime import cart_files
+    cart = tmp_path / "carts" / "wasm_files.moy"
+    cart.mkdir(parents=True)
+    d = tmp_path / "written" / "wasm_files"
+    d.mkdir(parents=True)
+    (d / "options.cfg").write_bytes(b"old")
+    (d / "options.cfg~done").write_bytes(b"new")
+    (d / "saves%2fslot1.sav~part").write_bytes(b"to")
+    f = cart_files.CartFiles(str(cart))
+    assert sorted(os.listdir(d)) == ["options.cfg"]
+    assert f.read(b"options.cfg", 0, 16) == b"new"
+    assert f.read(b"saves/slot1.sav", 0, 0) is None
+    assert f.write(b"saves/slot1.sav", b"whole") == 0
+    assert sorted(os.listdir(d)) == ["options.cfg", "saves%2fslot1.sav"]
+    assert f.name(b"saves/", 0) == b"saves/slot1.sav" and f.name(b"saves/", 1) is None
+    assert f.erase(b"saves/slot1.sav") == 0 and f.erase(b"saves/slot1.sav") == -1
+
+
+def test_the_key_is_the_desktop_players(tmp_path):
+    """One rule names a written file on every host: moy-spec's
+    libmoy/port/moy_files.c, whose own test pins these same names."""
+    from runtime import cart_files
+    for path, want in ((b"saves/slot1.sav", "saves%2fslot1.sav"),
+                       (b"saves/Case.sav", "saves%2f%43ase.sav"),
+                       (b".hidden", "%2ehidden"), (b"trail.", "trail%2e"),
+                       (b"a b%c~d", "a%20b%25c%7ed"), (b"con.cfg", "%63on.cfg"),
+                       (b"com1", "%63om1"), (b"console.cfg", "console.cfg")):
+        assert cart_files.key(path) == want
+        assert cart_files.path_of(want) == path
+    assert cart_files.path_of("x~done") is None
+
+
 def test_par_leaves_what_running_the_items_in_order_leaves(tmp_path):
     """The Par Wasm fixture checks itself every frame: par's eight items,
     each on the stack the rule gives it, against the same eight called one

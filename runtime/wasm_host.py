@@ -21,6 +21,9 @@ A cart bigger than the host's configured limit (`MEMORY_LIMIT`) gets the
 notice a board with too little free PSRAM gives it, by the boards' own
 footprint arithmetic (`WasmHostRuntime`).
 
+The cart's written files (moy-spec SPEC.md 16.12) are kept beside the carts
+store, `written/<cart>/`, by runtime/cart_files.py, as every tier keeps them.
+
 The cart's `snd` stream is the run's; while it runs, the console's audio
 backend mixes it into every block it renders (`host_api.FakeAudio.stream`),
 so it drains at the pace the host plays, as a board's speaker drains it.
@@ -31,9 +34,11 @@ Canonical home is runtime/; tests import it as runtime.wasm_host.
 try:
     from runtime.lua_host import MoycoreHostRun
     from runtime.lua_ext import snap_slots, audio_ops
+    from runtime.cart_files import CartFiles
 except ImportError:                                  # pragma: no cover
     from lua_host import MoycoreHostRun
     from lua_ext import snap_slots, audio_ops
+    from cart_files import CartFiles
 
 
 # What the host gives a compiled cart: the most any console board has, the
@@ -120,7 +125,8 @@ class WasmHostRun(MoycoreHostRun):
             sheet=getattr(project, "sheet", None),
             tilemap=getattr(project, "tilemap", None),
             wire=getattr(canvas, "_wire", None), wire_swapped=_wire_swapped(),
-            flags=getattr(project, "flags", None), cfg=ns.get("_moy_cfg"))
+            flags=getattr(project, "flags", None), cfg=ns.get("_moy_cfg"),
+            files=CartFiles(cart["path"]), writable=cart.get("writable"))
         self._ns = ns
         self._ws = ws
         self._layers = self._images = None

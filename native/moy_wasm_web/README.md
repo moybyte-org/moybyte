@@ -32,7 +32,10 @@ moycore's `ops->call` as on a board, which brackets the call with the
 binding's `moy_wasm_begin`/`moy_wasm_end` and has the session run the export
 (`moy_wasm_session_export`). Everything runs on the page's one thread, the
 VM's: `moy_wasm_on_vm` runs its request at once, which is how the cart's
-`read` reaches the store through the same `open` a board's does, and there are
+`read` reaches the store through the same `open` a board's does, and its
+`write`, `erase` and `list` reach `runtime/cart_files.py` -- which keeps the
+written files in the VFS and has the worker make each durable in OPFS, with
+an install's crash-safety (`moy_store.mjs`'s `commitWritten`) -- and there are
 no lanes, so a cart's `par` items run in order through the binding, each with
 its own stack pointer (SPEC.md §16.10's one-core host).
 

@@ -253,7 +253,7 @@ def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
 
 
 def wasm_open(module, head, pages, sha, path, swapped, gate=None,
-              allow_unsigned=False, interp=False):
+              allow_unsigned=False, interp=False, writable=None, files=None):
     _gate[0] = gate
     return None
 

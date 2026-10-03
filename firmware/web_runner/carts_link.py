@@ -1,6 +1,6 @@
 """Get Carts in the browser (#124): the page's fetch behind `ws.cart_net`, the
-OPFS keeper behind `ws.cart_keep` and the page's file picker behind
-`ws.cart_pick` -- what a board does with a socket and its own store, done by
+OPFS keeper behind `ws.cart_keep` (which keeps compiled carts' written files
+too) and the page's file picker behind `ws.cart_pick` -- what a board does with a socket and its own store, done by
 the worker for this VM. Only a page that keeps its own carts (site mode) gets
 them; a page a board serves shows the board's carts, and the board gets its
 own (web_boot sets `ws.cart_home` instead).
@@ -246,6 +246,25 @@ class WebCartKeep:
         if room is None or room[0] is None or room[1] is None:
             return None
         return max(0, room[1] - room[0]), 1
+
+    # -- a compiled cart's written files (runtime/cart_files.py) ---------------
+    # The console writes the VFS; the worker makes each file durable in OPFS
+    # (moy_store's commitWritten) in the order they were written, and drops
+    # one, or with `key` None every file a removed cart wrote.
+
+    def wrote(self, cart, key):
+        self.link.queue({"op": "wput", "cart": cart, "key": key})
+
+    def erased(self, cart, key):
+        self.link.queue({"op": "wdel", "cart": cart, "key": key})
+
+    def fits(self, n):
+        """Whether the browser has room for `n` more bytes, as it last said;
+        True when it has not said."""
+        room = self.link.room
+        if room is None or room[0] is None or room[1] is None:
+            return True
+        return room[1] - room[0] >= n
 
 
 class _Pick:

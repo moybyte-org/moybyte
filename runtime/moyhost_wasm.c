@@ -58,6 +58,9 @@ typedef struct {
     int         dead;        /* trapped: never called again */
     moy_stream  pcm;         /* the cart's `snd` */
     int16_t     pcm_ring[MOY_WASM_SND_DEPTH];
+    int32_t   (*files)(int op, const char *path, uint32_t arg, uint8_t *buf,
+                       uint32_t len);   /* the cart's written files */
+    char       *writable;    /* the manifest's "writable", libmoy's form */
 } host_wasm;
 
 static int g_runtime;        /* 1 once WAMR is up and the table registered */
@@ -165,6 +168,58 @@ int hw_runtime(void)
         g_runtime = 1;
     }
     return 1;
+}
+
+/* The cart's written files (moy-spec SPEC.md 16.12). The binding holds every
+ * path to the manifest's "writable" entries; the store is Python's
+ * (runtime/cart_files.py), reached through one callback that takes the
+ * operation, as the boards' moycore reaches it on the VM task. */
+enum { HW_FILE_READ, HW_FILE_WRITE, HW_FILE_ERASE, HW_FILE_LIST };
+
+static int32_t hw_written(void *u, const char *path, uint32_t offset, uint8_t *dst,
+                          uint32_t len)
+{
+    host_wasm *r = (host_wasm *)u;
+    return r->files ? r->files(HW_FILE_READ, path, offset, dst, len) : -1;
+}
+
+static int32_t hw_write(void *u, const char *path, const uint8_t *data, uint32_t len)
+{
+    host_wasm *r = (host_wasm *)u;
+    return r->files ? r->files(HW_FILE_WRITE, path, 0, (uint8_t *)data, len)
+                    : MOY_WASM_FAILED;
+}
+
+static int32_t hw_erase(void *u, const char *path)
+{
+    host_wasm *r = (host_wasm *)u;
+    return r->files ? r->files(HW_FILE_ERASE, path, 0, NULL, 0) : -1;
+}
+
+static int32_t hw_list(void *u, const char *prefix, uint32_t index, uint8_t *dst,
+                       uint32_t len)
+{
+    host_wasm *r = (host_wasm *)u;
+    return r->files ? r->files(HW_FILE_LIST, prefix, index, dst, len) : -1;
+}
+
+/* The store and the manifest's "writable" entries joined by NULs (`len`
+ * bytes), before hw_load. */
+void hw_set_files(host_wasm *r,
+                  int32_t (*fn)(int, const char *, uint32_t, uint8_t *, uint32_t),
+                  const char *writable, int len)
+{
+    r->files = fn;
+    free(r->writable);
+    r->writable = NULL;
+    if (writable && len > 0 && (r->writable = (char *)calloc((size_t)len + 2, 1)) != NULL)
+        memcpy(r->writable, writable, (size_t)len);
+    r->w.writable = r->writable;
+    r->w.written = hw_written;
+    r->w.write = hw_write;
+    r->w.erase = hw_erase;
+    r->w.list = hw_list;
+    r->w.files_user = r;
 }
 
 /* `nbytes` is the caller's buffer size, CHECKED: ctypes hands over a bare
@@ -354,6 +409,7 @@ void hw_free(host_wasm *r)
     if (r->inst) wasm_runtime_deinstantiate(r->inst);
     if (r->module) wasm_runtime_unload(r->module);
     free(r->bytes);
+    free(r->writable);
     hc_close(&r->hc);
     free(r);
 }

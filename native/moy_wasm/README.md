@@ -87,9 +87,11 @@ is instantiated (bind it to the console) and for each hook, and before teardown.
 
 The MicroPython task blocks in each call while the thread runs the hook — the
 thread is at the VM's priority on the VM's core, so it IS the VM's time — and
-while it waits it serves `moy_wasm_on_vm` requests: the two imports that need
-the VM, the cart's own file read (through the VFS, the last file held open) and
-the config lookup, run on the task, so the thread never touches MicroPython.
+while it waits it serves `moy_wasm_on_vm` requests: the imports that need the
+VM -- the cart's own file read (through the VFS, the last file held open), the
+config lookup, and the cart's written files (moy-spec SPEC.md §16.12,
+`runtime/cart_files.py`) -- run on the task, so the thread never touches
+MicroPython.
 One session at a time, never beside a `start()` run.
 
 **A cart's `par` items run on the session's lanes** (SPEC.md §16.10's

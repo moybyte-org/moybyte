@@ -208,6 +208,36 @@ def build(verbose=False):
 
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
 
+# The cart's written files (moyhost_wasm.c's hw_set_files): (op, path, arg,
+# buf, len) -> i32, op 0 a written copy's read, 1 write, 2 erase, 3 list.
+_FILES_FN = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int, ctypes.c_char_p,
+                             ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32)
+_FILE_READ, _FILE_WRITE, _FILE_ERASE, _FILE_LIST = range(4)
+
+
+def _files_fn(files):
+    """The C callback over `files` (runtime/cart_files.py's CartFiles)."""
+    def call(op, path, arg, buf, n):
+        try:
+            if op == _FILE_READ:
+                got = files.read(path, arg, n)
+                if got is None or isinstance(got, int):
+                    return -1 if got is None else got
+                ctypes.memmove(buf, got, len(got))
+                return len(got)
+            if op == _FILE_WRITE:
+                return files.write(path, ctypes.string_at(buf, n) if n else b"")
+            if op == _FILE_ERASE:
+                return files.erase(path)
+            name = files.name(path, arg)
+            if name is None:
+                return -1
+            ctypes.memmove(buf, name, min(len(name), n))
+            return len(name)
+        except Exception:          # noqa: BLE001 -- a store failure is an answer
+            return -3 if op == _FILE_WRITE else -1
+    return _FILES_FN(call)
+
 
 def _lib():
     if _LIB[0] is None:
@@ -232,6 +262,8 @@ def _lib():
             d.hw_set_map.argtypes = [_P, _P, _I, _I, _I]
             d.hw_set_flags.argtypes = [_P, _P, _I]
             d.hw_set_cfg.argtypes = [_P, _P, _I]
+            d.hw_set_files.argtypes = [_P, _FILES_FN, _P, _I]
+            d.hw_set_files.restype = None
             d.hw_load.argtypes = [_P, _C, _C, _I, _P, _I]
             d.hw_load.restype = _I
             d.hw_init.argtypes = [_P, _P, _I]
@@ -318,7 +350,7 @@ class HostWasmRun:
 
     def __init__(self, buf, w, h, cart_dir, main, pages, sheet=None,
                  tilemap=None, wire=None, wire_swapped=False, flags=None,
-                 cfg=None):
+                 cfg=None, files=None, writable=None):
         d = _lib()
         if d is None:
             raise RuntimeError("no host wasm binding (%s)" % (why_unavailable() or "?"))
@@ -361,6 +393,13 @@ class HostWasmRun:
         blob = cfg_blob(cfg)
         if blob:
             d.hw_set_cfg(self._r, ctypes.c_char_p(blob), len(blob))
+        # The cart's written files and its "writable" entries, NUL-joined.
+        self._files_fn = None
+        if files is not None:
+            self._files_fn = _files_fn(files)
+            joined = b"\0".join(e.encode("utf-8") for e in (writable or ()))
+            d.hw_set_files(self._r, self._files_fn, ctypes.c_char_p(joined) if joined else None,
+                           len(joined))
         err = ctypes.create_string_buffer(256)
         if d.hw_load(self._r, os.fsencode(cart_dir), os.fsencode(main),
                      int(pages or 0), ctypes.cast(err, _P), 256):

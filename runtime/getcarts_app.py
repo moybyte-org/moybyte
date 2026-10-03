@@ -1112,7 +1112,9 @@ class GetCartsAppLayer(ListShellApp):
             for ln in _ui.wrap_words(why, lay.cols):
                 y = self._line(cv, ln, y, th["danger"])
         if self.arm_remove:
-            self._line(cv, "Tap REMOVE again. Its saves go too.", y, th["danger"])
+            for ln in _ui.wrap_words("Tap REMOVE again. Its saves and the files it "
+                                     "wrote go too.", lay.cols):
+                y = self._line(cv, ln, y, th["danger"])
 
     def _draw_licence(self, cv, th):
         lay = self.layout

@@ -65,6 +65,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 INPUT_KINDS = ("buttons", "touch", "keyboard")
 
 
+def _str_list(v):
+    """`v` when it is a list of strings, else None."""
+    if isinstance(v, list) and all(isinstance(x, str) for x in v):
+        return v
+    return None
+
+
 def _int_or(value, default):
     """`value` as an int, or `default` when it is absent or malformed. Manifest
     fields are hand-editable, so a bad one must DEGRADE -- an exception here
@@ -692,6 +699,10 @@ def load(path, src=True):
             # for every other runtime, and for a compiled cart that forgot it --
             # which its runtime refuses before anything loads.
             "memory": _int_or(man.get("memory"), None) if compiled else None,
+            # A compiled cart's "writable" paths (moy-spec SPEC.md §16.12): the
+            # list as the manifest has it, which libmoy's binding holds every
+            # path to; None for every other runtime and for a cart with none.
+            "writable": _str_list(man.get("writable")) if compiled else None,
             # 0 = pre-versioning (re-seedable). SPEC.md 3.1 leaves `version` to
             # the author, so a hand-typed "1.2" must read as unversioned rather
             # than take the cart down with it.

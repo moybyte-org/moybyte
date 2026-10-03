@@ -477,6 +477,11 @@ const CARTS_ROOT = store.rootById("carts").vfs;
 // Get Carts' record, beside the carts folder as on every console
 // (runtime/cart_index.py's RECORD_NAME, moy_store_base._sibling_path).
 const RECORD_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.RECORD_NAME;
+// The files compiled carts wrote (moy-spec SPEC.md 16.12), beside the carts
+// folder too (runtime/cart_files.py), and their store of record in OPFS:
+// site mode only, where a page keeps its own carts.
+const WRITTEN_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.WRITTEN_ROOT;
+let writtenStore = null;
 
 function writeStore(root, files) {
     // mkdirs(root) even for an empty set: a root with no files YET (a board's
@@ -625,6 +630,7 @@ async function initStore(fetched) {
         if (w === "load") loaded = true;
         if (w === "none") anyNone = true;
     }
+    if (site) await seedWritten();
     if (!site) {
         persist("board", "carts are kept on the console");
     } else if (!anySite) {
@@ -641,6 +647,42 @@ async function initStore(fetched) {
         sitePersist((loaded ? "loaded" : "seeded") + " in "
                     + (performance.now() - t0).toFixed(0) + "ms");
     }
+}
+
+// The written files OPFS keeps, into the VFS before the console boots, with
+// every write a reload interrupted finished or discarded first.
+async function seedWritten() {
+    writtenStore = await store.openWritten(navigator);
+    if (!writtenStore) return;
+    try {
+        const files = await store.readWritten(writtenStore);
+        for (const rel in files) {
+            const full = WRITTEN_VFS + "/" + rel;
+            mkdirs(full.slice(0, full.lastIndexOf("/")));
+            mp.FS.writeFile(full, files[rel]);
+        }
+    } catch (e) {
+        writtenStore = null;
+        console.log("[moy] written: OPFS failed -- " + e);
+    }
+}
+
+// A file a compiled cart wrote, from the VFS into OPFS, read as it is now:
+// writes reach the store in the order the cart made them.
+function writtenKeep(j) {
+    if (!writtenStore) return;
+    let data;
+    try { data = mp.FS.readFile(WRITTEN_VFS + "/" + j.cart + "/" + j.key); }
+    catch (e) { return; }
+    opfsSerial(() => store.commitWritten(writtenStore, j.cart, j.key, data))
+        .then(() => cartsRoom())
+        .catch((e) => console.log("[moy] written: not kept -- " + e));
+}
+
+function writtenDrop(j) {
+    if (!writtenStore) return;
+    opfsSerial(() => store.dropWritten(writtenStore, j.cart, j.key))
+        .catch((e) => console.log("[moy] written: not dropped -- " + e));
 }
 
 function vfsIsDir(p) {
@@ -1154,6 +1196,8 @@ function cartsPump() {
         else if (j.op === "drop") cartsDrop(j.id);
         else if (j.op === "keep") cartsKeep(j);
         else if (j.op === "record") cartsRecord(j);
+        else if (j.op === "wput") writtenKeep(j);
+        else if (j.op === "wdel") writtenDrop(j);
         else if (j.op === "pick") {
             cartsLive.set(j.id, { pick: true });
             self.postMessage({ t: "pick", id: j.id, name: j.name, size: j.size, host: j.host });

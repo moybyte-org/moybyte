@@ -2305,9 +2305,10 @@ static int pm_alive(void)
 // each on the engine's thread, through the callbacks below.
 //
 // Every host callback the binding reaches from that thread is a C read or
-// write against the console, EXCEPT two that need the VM -- `read` (the cart's
-// own folder, through the VFS) and `cfg` (the config dict) -- and those are run
-// on the MicroPython task through moy_wasm_on_vm while it waits on the call.
+// write against the console, EXCEPT the ones that need the VM -- `read` (the
+// cart's own folder, through the VFS), `cfg` (the config dict) and the cart's
+// written files (runtime/cart_files.py) -- and those are run on the
+// MicroPython task through moy_wasm_on_vm while it waits on the call.
 // `snd` goes to the speaker's mixer where the board has one (moy_audio's
 // stream, MOY_AUDIO_SND); where it has none the binding drains it by the clock.
 //
@@ -2347,7 +2348,8 @@ typedef struct {
     moy_wasm w;                  // libmoy's per-run state for the table
     int dead;                    // trapped: never called again
     char dir[192];               // the cart's folder: `read`'s only root
-    char file[MOY_WASM_NAME_MAX + 1];   // the file held open, if any
+    char file[192 + MOY_WASM_NAME_MAX + 2];  // the file held open, if any
+    char *writable;              // the manifest's "writable", libmoy's form
     uint32_t file_size;          // its size, read once when it was opened
 #if MOY_WASM
     // The import table's registration storage: WAMR sorts it in place and
@@ -2385,11 +2387,13 @@ static void wrun_free(wrun_t *r)
 #if MOY_WASM
     wmem_free(r->natives);
 #endif
+    wmem_free(r->writable);
     wmem_free(r);
 }
 
 typedef struct {
-    const char *name;
+    const char *name;            // a path in the cart's folder, or NULL and
+    const char *full;            // the file's own path (a written copy)
     uint32_t offset;
     uint8_t *dst;
     uint32_t len;
@@ -2420,10 +2424,11 @@ static mp_obj_t wasm_read_now(void)
     wread_t *q = g_wread;
     mp_obj_t f = MP_STATE_VM(moycore_wasm_file);
     int e = 0;
-    if (f == MP_OBJ_NULL || strcmp(WR->file, q->name) != 0) {
+    char path[sizeof(WR->file)];
+    if (q->full) snprintf(path, sizeof(path), "%s", q->full);
+    else snprintf(path, sizeof(path), "%s/%s", WR->dir, q->name);
+    if (f == MP_OBJ_NULL || strcmp(WR->file, path) != 0) {
         wfile_forget();
-        char path[sizeof(WR->dir) + MOY_WASM_NAME_MAX + 2];
-        snprintf(path, sizeof(path), "%s/%s", WR->dir, q->name);
         mp_obj_t args[2] = { mp_obj_new_str(path, strlen(path)),
                              MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
         f = mp_call_function_n_kw(MP_OBJ_FROM_PTR(&mp_builtin_open_obj), 2, 0, args);
@@ -2436,7 +2441,7 @@ static mp_obj_t wasm_read_now(void)
             mp_raise_OSError(e ? e : MP_EIO);
         }
         MP_STATE_VM(moycore_wasm_file) = f;
-        snprintf(WR->file, sizeof(WR->file), "%s", q->name);
+        snprintf(WR->file, sizeof(WR->file), "%s", path);
         WR->file_size = (uint64_t)end > UINT32_MAX ? UINT32_MAX : (uint32_t)end;
     }
     uint32_t size = WR->file_size;
@@ -2484,10 +2489,115 @@ static void read_on_vm(void *arg)
 static uint32_t hw_read(void *user, const char *name, uint32_t offset,
                         uint8_t *dst, uint32_t len)
 {
-    wread_t q = { name, offset, dst, len, 0 };
+    wread_t q = { name, NULL, offset, dst, len, 0 };
     (void)user;
     if (moy_wasm_on_vm(read_on_vm, &q) != 0) return 0;
     return q.got;
+}
+
+// -- the cart's written files (moy-spec SPEC.md 16.12) --
+//
+// libmoy's binding holds every path to the manifest's "writable" entries and
+// the size cap before it reaches these. The store is runtime/cart_files.py's
+// CartFiles, which wasm_open is handed and which takes the store's gate
+// itself; its methods run here on the MicroPython task. A written copy is
+// read through the held-open file `read` uses, by its own path.
+
+enum { FOP_READ, FOP_WRITE, FOP_ERASE, FOP_LIST };
+
+typedef struct {
+    int op;
+    const char *path;            // the path, or list's prefix
+    const uint8_t *data;         // write's
+    uint32_t offset;             // read's
+    uint32_t index;              // list's
+    uint8_t *dst;                // read's and list's
+    uint32_t len;                // write's length; read's and list's room
+    int32_t r;
+} wfiles_t;
+
+// files.<name>(args...) on the store wasm_open was handed.
+static mp_obj_t files_call(const char *name, size_t n, const mp_obj_t *args)
+{
+    mp_obj_t dest[2 + 3];
+    mp_load_method(MP_STATE_VM(moycore_wasm_files), qstr_from_str(name), dest);
+    for (size_t i = 0; i < n; i++) dest[2 + i] = args[i];
+    return mp_call_method_n_kw(n, 0, dest);
+}
+
+static void files_on_vm(void *arg)
+{
+    wfiles_t *q = (wfiles_t *)arg;
+    mp_obj_t files = MP_STATE_VM(moycore_wasm_files);
+    nlr_buf_t nlr;
+    q->r = q->op == FOP_WRITE ? MOY_WASM_FAILED : -1;
+    if (files == MP_OBJ_NULL || files == mp_const_none) return;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t a[2];
+        a[0] = mp_obj_new_bytes((const byte *)q->path, strlen(q->path));
+        if (q->op == FOP_READ) {
+            mp_obj_t where = files_call("where", 1, a);
+            if (where != mp_const_none) {
+                wread_t rq = { NULL, mp_obj_str_get_str(where), q->offset, q->dst,
+                               q->len, 0 };
+                read_on_vm(&rq);
+                q->r = (int32_t)rq.got;
+            }
+        } else if (q->op == FOP_WRITE) {
+            wfile_forget();              // the held-open file may be the old copy
+            a[1] = mp_obj_new_memoryview('B', q->len, (void *)q->data);
+            q->r = (int32_t)mp_obj_get_int(files_call("write", 2, a));
+        } else if (q->op == FOP_ERASE) {
+            wfile_forget();
+            q->r = (int32_t)mp_obj_get_int(files_call("erase", 1, a));
+        } else {
+            a[1] = mp_obj_new_int_from_uint(q->index);
+            mp_obj_t name = files_call("name", 2, a);
+            if (name != mp_const_none) {
+                mp_buffer_info_t b;
+                mp_get_buffer_raise(name, &b, MP_BUFFER_READ);
+                memcpy(q->dst, b.buf, b.len < q->len ? b.len : q->len);
+                q->r = (int32_t)b.len;
+            }
+        }
+        nlr_pop();
+    }
+}
+
+static int32_t files_ask(wfiles_t *q)
+{
+    if (moy_wasm_on_vm(files_on_vm, q) != 0) return q->op == FOP_WRITE ? MOY_WASM_FAILED : -1;
+    return q->r;
+}
+
+static int32_t hw_written(void *user, const char *path, uint32_t offset,
+                          uint8_t *dst, uint32_t len)
+{
+    wfiles_t q = { FOP_READ, path, NULL, offset, 0, dst, len, -1 };
+    (void)user;
+    return files_ask(&q);
+}
+
+static int32_t hw_write(void *user, const char *path, const uint8_t *data, uint32_t len)
+{
+    wfiles_t q = { FOP_WRITE, path, data, 0, 0, NULL, len, MOY_WASM_FAILED };
+    (void)user;
+    return files_ask(&q);
+}
+
+static int32_t hw_erase(void *user, const char *path)
+{
+    wfiles_t q = { FOP_ERASE, path, NULL, 0, 0, NULL, 0, -1 };
+    (void)user;
+    return files_ask(&q);
+}
+
+static int32_t hw_list(void *user, const char *prefix, uint32_t index, uint8_t *dst,
+                       uint32_t len)
+{
+    wfiles_t q = { FOP_LIST, prefix, NULL, 0, index, dst, len, -1 };
+    (void)user;
+    return files_ask(&q);
 }
 
 typedef struct {
@@ -2669,6 +2779,7 @@ static void wasm_trapped(void)
 }
 
 static int wasm_begin(const char *path, const char *sha, const char *dir,
+                      const char *writable, size_t writable_len,
                       int swapped, int allow_unsigned, int interp, char *err,
                       size_t errlen)
 {
@@ -2683,6 +2794,21 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
     }
     WR->w.read = hw_read;
     WR->w.wire_swapped = swapped;
+    // The manifest's "writable" entries, NUL-separated as Python joined them,
+    // and two NULs to end libmoy's list.
+    if (writable_len) {
+        WR->writable = (char *)wmem_calloc(writable_len + 2, 1);
+        if (!WR->writable) {
+            snprintf(err, errlen, "out of memory: no PSRAM for the cart's run state");
+            return 1;
+        }
+        memcpy(WR->writable, writable, writable_len);
+        WR->w.writable = WR->writable;
+    }
+    WR->w.written = hw_written;
+    WR->w.write = hw_write;
+    WR->w.erase = hw_erase;
+    WR->w.list = hw_list;
 #if MOY_WASM
     WR->w.frame = wo_frame;
     WR->w.lanes = moy_wasm_session_lanes();
@@ -2750,6 +2876,7 @@ static void wasm_end(void)
 #endif
     wfile_forget();
     MP_STATE_VM(moycore_wasm_gate) = MP_OBJ_NULL;
+    MP_STATE_VM(moycore_wasm_files) = MP_OBJ_NULL;
     if (WR) {
         wrun_free(WR);
         WR = NULL;
@@ -2758,8 +2885,8 @@ static void wasm_end(void)
 #endif // MOYCORE_WASM
 
 // wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
-//           gate=None, allow_unsigned=False, interp=False) -> None, or the
-//           refusal or trap as text
+//           gate=None, allow_unsigned=False, interp=False, writable=None,
+//           files=None) -> None, or the refusal or trap as text
 //
 // After run_begin(..., vm=False): load the compiled module at `module_path`
 // on the engine, check it against the canonical .wasm's head (`wasm_head`,
@@ -2773,8 +2900,11 @@ static void wasm_end(void)
 // (moy_wasm_session.h). `interp` is true when `module_path` IS the cart's own
 // main.wasm, run on the interpreter tier (docs/wasm_tier_plan_2026-09.md, "A
 // cart survives its firmware", 2026-09-30): no key, no signature, no Unknown
-// sources check, and `wasm_sha` is ignored. A refusal or a trap closes
-// nothing -- close() does.
+// sources check, and `wasm_sha` is ignored. `writable` is the manifest's
+// "writable" entries joined by NUL characters, and `files` the cart's written
+// files (runtime/cart_files.py's CartFiles), which write, erase, list and a
+// written copy's read reach (moy-spec SPEC.md 16.12). A refusal or a trap
+// closes nothing -- close() does.
 static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
 {
     if (!RUN.open || RUN.L || RUN.wasm)
@@ -2782,13 +2912,17 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                      MP_ERROR_TEXT("moycore: wasm_open wants a run begun with vm=False"));
 #if MOYCORE_WASM
     MP_STATE_VM(moycore_wasm_gate) = n_args > 6 ? a[6] : MP_OBJ_NULL;
+    MP_STATE_VM(moycore_wasm_files) = n_args > 10 ? a[10] : MP_OBJ_NULL;
     char err[192];
-    size_t hlen = 0;
+    size_t hlen = 0, wlen = 0;
+    const char *writable = NULL;
+    if (n_args > 9 && a[9] != mp_const_none) writable = mp_obj_str_get_data(a[9], &wlen);
     g_whead = (const uint8_t *)buf_r(a[1], &hlen);
     g_whead_len = hlen;
     g_wpages = (uint32_t)mp_obj_get_int(a[2]);
     const char *sha = a[3] == mp_const_none ? NULL : mp_obj_str_get_str(a[3]);
     int rc = wasm_begin(mp_obj_str_get_str(a[0]), sha, mp_obj_str_get_str(a[4]),
+                        writable, wlen,
                         mp_obj_is_true(a[5]), n_args > 7 && mp_obj_is_true(a[7]),
                         n_args > 8 && mp_obj_is_true(a[8]), err, sizeof(err));
     g_whead = NULL;
@@ -2802,7 +2936,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                  MP_ERROR_TEXT("moycore: this build has no wasm engine"));
 #endif
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_open_obj, 6, 9, mod_wasm_open);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_open_obj, 6, 11, mod_wasm_open);
 
 // wasm_quit() -> whether the cart called quit(): it ended itself, and the
 // run must not call it again.
@@ -3399,6 +3533,7 @@ MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_calls);
 // The compiled cart's open data file (`read`), held between its reads.
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_file);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_gate);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_files);
 // The PICO-8 machine's Python-owned buffers (p8_memory), kept alive here.
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8mem);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8rom);

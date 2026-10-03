@@ -32,7 +32,10 @@ What it does differently, because a console is not a PC:
     bounded slice per frame.
   * it updates in place: a newer version, or files that differ from what was
     installed (a module for this console's format, say), replaces the folder
-    through the same staging, carrying the kid's saves and an edited config.
+    through the same staging, carrying the kid's saves and an edited config;
+    the files a compiled cart wrote live beside the store
+    (runtime/cart_files.py), so an update never touches them, and REMOVE
+    takes them with the cart.
   * it installs only what a sandbox runs (RUNTIMES): a compiled cart, whose
     native module a board loads only by its signature, or a Lua cart. A board
     fetches over TLS without checking certificates (the OTA's arrangement),
@@ -114,12 +117,14 @@ try:
     from moy_store_base import _sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES
     from moy_fs import _exists, _mkdir
     import moy_carts as _store
+    import cart_files as _cart_files
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
     from runtime.moy_store_base import (_sibling_path, _rmtree, _is_dir,
                                         COVER_MAX_BYTES)
     from runtime.moy_fs import _exists, _mkdir
     from runtime import moy_carts as _store
+    from runtime import cart_files as _cart_files
 
 
 INDEX_VERSION = 1
@@ -613,7 +618,8 @@ def recover(root):
 def remove(root, folder, keep=None):
     """Take `folder` off the shelf: one rename out of the carts folder (so a
     crash mid-delete never leaves half a cart listed), then the delete, then
-    the record. Call inside one store session.
+    the record, then the files the cart wrote (runtime/cart_files.py), which
+    live beside the store and go with it. Call inside one store session.
 
     With a keeper the record without the cart goes to the store of record
     FIRST, ahead of the folder's deletion: a record that outlives its folder
@@ -632,6 +638,10 @@ def remove(root, folder, keep=None):
     _rmtree(gone)
     if had:
         save_record(root, rec)
+    _cart_files.remove(root, folder)
+    erased = getattr(keep, "erased", None)
+    if erased is not None:
+        erased(_cart_files.cart_id(folder), None)
 
 
 # -- fetching -------------------------------------------------------------------

@@ -739,6 +739,89 @@ static int inside_cart(const char *name)
     }
 }
 
+/* -- the cart's writable files: write, erase, list (SPEC.md 16.12) ---------- */
+
+/* Is `path` one the manifest's "writable" declares? An entry ending in '/'
+ * is a folder, and declares every path below it; any other entry declares
+ * itself. An entry that breaks the path rule declares nothing. */
+static int writable(const moy_wasm *w, const char *path)
+{
+    const char *e = w->writable;
+    if (!e) return 0;
+    for (; *e; e += strlen(e) + 1) {
+        size_t n = strlen(e);
+        char folder[MOY_WASM_PATH_MAX + 1];
+        if (n > MOY_WASM_PATH_MAX) continue;
+        if (e[n - 1] != '/') {
+            if (inside_cart(e) && !strcmp(e, path)) return 1;
+            continue;
+        }
+        memcpy(folder, e, n - 1);
+        folder[n - 1] = 0;
+        if (inside_cart(folder) && !strncmp(e, path, n) && path[n]) return 1;
+    }
+    return 0;
+}
+
+/* A path write or erase may name, as a C string in `buf`: NULL unless it is
+ * well-formed, no longer than MOY_WASM_PATH_MAX, and writable. */
+static const char *written_path(const moy_wasm *w, const uint8_t *s, uint32_t len,
+                                char buf[MOY_WASM_PATH_MAX + 1])
+{
+    if (len > MOY_WASM_PATH_MAX || memchr(s, 0, len)) return NULL;
+    memcpy(buf, s, len);
+    buf[len] = 0;
+    return inside_cart(buf) && writable(w, buf) ? buf : NULL;
+}
+
+/* write(path, data): the whole written copy, replaced. The host is never
+ * handed a path the manifest does not declare, nor more than
+ * MOY_WASM_WRITE_MAX bytes. */
+static int32_t w_write(env_t e, const uint8_t *path, uint32_t plen,
+                       const uint8_t *data, uint32_t len)
+{
+    moy_wasm *w = bound(e);
+    char buf[MOY_WASM_PATH_MAX + 1];
+    const char *p;
+    int32_t r;
+    if (!w) return MOY_WASM_FAILED;
+    p = written_path(w, path, plen, buf);
+    if (!p) return MOY_WASM_NOT_WRITABLE;
+    if (len > MOY_WASM_WRITE_MAX) return MOY_WASM_NO_ROOM;
+    if (!w->write) return MOY_WASM_FAILED;
+    r = w->write(w->files_user, p, data, len);
+    return (r == 0 || r == MOY_WASM_NO_ROOM) ? r : MOY_WASM_FAILED;
+}
+
+static int32_t w_erase(env_t e, const uint8_t *path, uint32_t plen)
+{
+    moy_wasm *w = bound(e);
+    char buf[MOY_WASM_PATH_MAX + 1];
+    const char *p;
+    if (!w) return -1;
+    p = written_path(w, path, plen, buf);
+    if (!p || !w->erase) return -1;
+    return w->erase(w->files_user, p) == 0 ? 0 : -1;
+}
+
+/* list(prefix, index, dst): a byte prefix, not a folder -- "saves/slot"
+ * lists every slot -- and "" the whole of the cart's files. */
+static int32_t w_list(env_t e, const uint8_t *prefix, uint32_t plen, int32_t index,
+                      uint8_t *dst, uint32_t len)
+{
+    moy_wasm *w = bound(e);
+    char buf[MOY_WASM_NAME_MAX + 1];
+    const char *p;
+    int32_t r;
+    if (!w || !w->list || index < 0) return -1;
+    p = c_string(prefix, plen, buf);
+    if (!p) return -1;
+    r = w->list(w->files_user, p, (uint32_t)index, dst, len);
+    return r < 0 ? -1 : r;
+}
+
+/* read(name, ...): a writable path's written copy when it has one, and
+ * otherwise the file in the cart's folder. */
 static int32_t w_read(env_t e, const uint8_t *name, uint32_t nlen, uint32_t offset,
                       uint8_t *dst, uint32_t len)
 {
@@ -746,9 +829,14 @@ static int32_t w_read(env_t e, const uint8_t *name, uint32_t nlen, uint32_t offs
     char buf[MOY_WASM_NAME_MAX + 1];
     const char *nm;
     uint32_t got;
-    if (!w || !w->read) return 0;
+    if (!w) return 0;
     nm = c_string(name, nlen, buf);
     if (!nm || !inside_cart(nm)) return 0;
+    if (w->written && nlen <= MOY_WASM_PATH_MAX && writable(w, nm)) {
+        int32_t r = w->written(w->files_user, nm, offset, dst, len);
+        if (r >= 0) return (len && (uint32_t)r > len) ? (int32_t)len : r;
+    }
+    if (!w->read) return 0;
     got = w->read(w->read_user, nm, offset, dst, len);
     if (len && got > len) got = len;
     return (int32_t)got;
@@ -1054,6 +1142,9 @@ static const NativeSymbol NATIVES[] = {
     {"read", FN(w_read), "(*~i*~)i", NULL},
     {"snd", FN(w_snd), "(ii)i", NULL},
     {"par", FN(w_par), "(iiii)", NULL},
+    {"write", FN(w_write), "(*~*~)i", NULL},
+    {"erase", FN(w_erase), "(*~)i", NULL},
+    {"list", FN(w_list), "(*~i*~)i", NULL},
 };
 
 const NativeSymbol *moy_wasm_natives(uint32_t *count)

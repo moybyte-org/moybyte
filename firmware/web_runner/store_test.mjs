@@ -463,6 +463,54 @@ const defl = await store.unzip(deflatedZip("x.moy/main.py", "hello deflate\n"));
 ok("a DEFLATED zip reads too", defl.length === 1 && dec.decode(defl[0].data) === "hello deflate\n",
    defl.length ? dec.decode(defl[0].data) : "no entries");
 
+// ---- a compiled cart's written files (moy-spec SPEC.md 16.12) -----------------
+{
+    const OLD = enc.encode("old save"), NEW = enc.encode("the new, longer save");
+    const w = await store.openWritten(fakeNav(true));
+    await store.commitWritten(w, "doom", "doomsav0.dsg", OLD);
+    let got = await store.readWritten(w);
+    ok("a written file reads back as it was written",
+       Object.keys(got).join() === "doom/doomsav0.dsg" && dec.decode(got["doom/doomsav0.dsg"]) === "old save",
+       JSON.stringify(Object.keys(got)));
+    // A reload at every change commitWritten makes: the file is the old save or
+    // the new one, whole, and nothing of the attempt is left behind.
+    let probe = await store.openWritten(fakeNav(true));
+    await store.commitWritten(probe, "doom", "doomsav0.dsg", OLD);
+    CRASH = { left: 1e9 };
+    await store.commitWritten(probe, "doom", "doomsav0.dsg", NEW);
+    const steps = 1e9 - CRASH.left;
+    CRASH = null;
+    let torn = 0, newer = 0;
+    for (let k = 0; k < steps; k++) {
+        const s = await store.openWritten(fakeNav(true));
+        await store.commitWritten(s, "doom", "doomsav0.dsg", OLD);
+        CRASH = { left: k };
+        try { await store.commitWritten(s, "doom", "doomsav0.dsg", NEW); } catch (e) { }
+        CRASH = null;
+        const after = await store.readWritten(s);
+        const text = after["doom/doomsav0.dsg"] ? dec.decode(after["doom/doomsav0.dsg"]) : null;
+        if (text !== "old save" && text !== "the new, longer save") torn++;
+        if (text === "the new, longer save") newer++;
+        const d = await s.dir.getDirectoryHandle("doom");
+        for await (const [n] of d.entries()) if (n.includes("~")) torn++;
+    }
+    ok("a reload at any of " + steps + " steps of a write leaves the old save or the new, whole",
+       torn === 0 && newer > 0, "torn " + torn + ", new " + newer);
+    await store.commitWritten(w, "doom", "default.cfg", NEW);
+    await store.commitWritten(w, "jet", "options.cfg", OLD);
+    await store.dropWritten(w, "doom", "doomsav0.dsg");
+    got = await store.readWritten(w);
+    ok("an erase takes one file", Object.keys(got).sort().join() === "doom/default.cfg,jet/options.cfg",
+       Object.keys(got).join());
+    await store.dropWritten(w, "doom", null);
+    got = await store.readWritten(w);
+    ok("a removed cart's files go, and another cart's stay", Object.keys(got).join() === "jet/options.cfg",
+       Object.keys(got).join());
+    let refused = false;
+    try { await store.commitWritten(w, "..", "x", OLD); } catch (e) { refused = true; }
+    ok("a written path that is not one name in one folder is refused", refused);
+}
+
 // ---- naming -----------------------------------------------------------------
 const have = { "star.moy": 1, "star_2.moy": 1 };
 ok("an imported cart takes the store's duplicate-naming rule",

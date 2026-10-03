@@ -1,0 +1,8 @@
+{
+  "format": "moy-1",
+  "title": "Files Wasm",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 17,
+  "writable": ["saves/", "options.cfg"]
+}

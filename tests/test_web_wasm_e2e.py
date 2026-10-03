@@ -16,6 +16,8 @@ What it proves, in real Chrome against the built dist/:
     ends it on the console's own error panel;
   * Jet Teapot and ESP 88, built by tools/jet_cart.py as the carts' recipe
     builds them, play;
+  * a compiled cart's written files outlive a reload: the Files Wasm
+    fixture writes on one load and finds them on the next, out of OPFS;
   * Get Carts offers a compiled cart from a local index and installs it --
     reading only the members this console keeps, by range, so not one byte
     of a chip's module crosses -- and the installed cart plays on the next
@@ -185,6 +187,37 @@ def test_a_compiled_cart_runs_in_the_browser_as_it_runs_on_the_host(tmp_path):
         "the cart's samples did not reach the page's audio: %r" % pcm
     assert "unreachable" in (after["err"] or ""), after
     assert after["notice"] is None, after
+
+
+FILES = ROOT / "tests" / "fixtures" / "wasm" / "wasm_files.moy"
+
+
+def test_a_compiled_carts_written_files_outlive_a_reload(tmp_path):
+    """Files Wasm (its src/main.wat says what it checks) writes in its first
+    turn and finds everything in its second, which runs on the next load of
+    the page: the written files went from the VFS to OPFS through the
+    worker's keeper and came back before the console booted. The second turn
+    erases them, so the third load is a first again."""
+    web_e2e.require("store")
+    cart = _built(FILES, tmp_path / "carts" / "wasm_files.moy")
+    site = _site(tmp_path, [cart])
+    server, base = web_e2e.serve(site, web_e2e.free_port())
+    profile = tmp_path / "chrome"
+    state = ("__moyState().then(s => JSON.stringify({cart: s.cart, err: s.cart_error, "
+             "notice: s.notice, pmem: s.pmem}))")
+    try:
+        for n, turn in enumerate((1, 2, 1)):
+            out, js = web_e2e.run(tmp_path, "files%d" % n,
+                                  "?handheld=1&dev=1&cart=wasm_files.moy", [
+                {"wait": 3000}, {"js": state}, {"shot": "turn%d" % n},
+            ], base, profile)
+            assert len(js) == 1, out[-3000:]
+            st = json.loads(js[0])
+            assert st["cart"] == "Files Wasm" and st["err"] is None, st
+            assert st["pmem"][:4] == [turn, 0, 0, 4], (n, st["pmem"])
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
 
 
 def test_the_jet_carts_play_in_the_browser(tmp_path):
