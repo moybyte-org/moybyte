@@ -1069,6 +1069,108 @@ def test_i_agree_fetches_the_external_file_with_the_cart(tmp_path):
     assert (tmp_path / "carts" / "dm.moy" / "game.wad").exists()
 
 
+def _long_licence(repo, net, cid, path, n=40):
+    """Give an external file's licence `n` lines -- the fixture's default
+    ('for fun', two lines) never overflows the box, so a scroll test needs
+    its own. Patches what the in-memory transport actually serves (`Repo.add`
+    took its snapshot into `net.routes` before this runs), and keeps
+    `repo.files`/the index in sync behind it."""
+    entry = next(c for c in repo.carts if c["id"] == cid)
+    ext = next(e for e in entry["external"] if e["path"] == path)
+    text = "\n".join("Line %d of the licence." % i for i in range(n)).encode()
+    ext["licence"]["size"] = len(text)
+    ext["licence"]["sha256"] = sha(text)
+    repo.files[ext["licence"]["url"]] = text
+    repo.files["index.json"] = repo.index()
+    net.routes[repo.url(ext["licence"]["url"])] = text
+    net.routes[repo.url("index.json")] = repo.files["index.json"]
+
+
+def _lic_open(ws, app):
+    """Walk Dungeon's GET through to its licence screen."""
+    app._tap_row(0)                               # Dungeon (the external file)
+    ws.frame(1 / 30)
+    _tap(ws, app, "btn", "GET")
+    _frames(ws, app)
+    assert app.phase == "licence"
+
+
+def _lic_drag(app, x, y0, dy, steps=8, dt_ms=16.0):
+    """Press at (x, y0) over the licence box, drag by `dy` over `steps`
+    samples `dt_ms` apart (so the release carries a real velocity), release
+    at the end -- `ui.DragTap`'s press/move/release shape, fed the way `_tap`
+    already drives this app's buttons (straight into `handle_pointer`, the
+    pointer's own `.down` set alongside it)."""
+    app._lic_frame_dt_ms = dt_ms
+    ptr = app._surf.pointer()
+    ptr.down = True
+    app.handle_pointer(x, y0, True)                # press edge
+    for i in range(1, steps + 1):
+        app.handle_pointer(x, y0 + dy * i // steps, False)
+    ptr.down = False
+    app.handle_pointer(x, y0 + dy, False)           # release
+
+
+def test_a_drag_scrolls_the_licence_text(tmp_path):
+    gpl, mit, net = _shelves(tmp_path)
+    _long_licence(gpl, net, "dm", "game.wad")
+    ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
+    _open(ws, app)
+    _lic_open(ws, app)
+    assert app.lic[2] == 0
+    area = app.layout.lic_area()
+    x, y0 = area[0] + area[2] // 2, area[1] + area[3] // 2
+    _lic_drag(app, x, y0, -3 * app.layout.line_h * 4)   # finger moves UP
+    assert app.lic[2] > 0, "a drag must move the pixel offset, not a page"
+    assert app.phase == "licence"                       # still on the screen
+
+
+def test_a_tap_on_the_licence_text_does_nothing(tmp_path):
+    gpl, mit, net = _shelves(tmp_path)
+    _long_licence(gpl, net, "dm", "game.wad")
+    ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
+    _open(ws, app)
+    _lic_open(ws, app)
+    area = app.layout.lic_area()
+    x, y = area[0] + area[2] // 2, area[1] + area[3] // 2
+    ptr = app._surf.pointer()
+    ptr.down = True
+    app.handle_pointer(x, y, True)      # press
+    ptr.down = False
+    app.handle_pointer(x, y, False)     # clean release, no movement
+    assert app.lic[2] == 0
+    assert app.phase == "licence", "a tap on the text must not act like NO"
+
+
+def test_keys_still_scroll_the_licence(tmp_path):
+    gpl, mit, net = _shelves(tmp_path)
+    _long_licence(gpl, net, "dm", "game.wad")
+    ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
+    _open(ws, app)
+    _lic_open(ws, app)
+    app.handle_input(_In("down"))
+    assert app.lic[2] == app.layout.line_h
+    app.handle_input(_In("down"))
+    assert app.lic[2] == 2 * app.layout.line_h
+    app.handle_input(_In("up"))
+    assert app.lic[2] == app.layout.line_h
+
+
+def test_the_licence_scroll_clamps_at_both_ends(tmp_path):
+    gpl, mit, net = _shelves(tmp_path)
+    _long_licence(gpl, net, "dm", "game.wad", n=40)
+    ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
+    _open(ws, app)
+    _lic_open(ws, app)
+    area = app.layout.lic_area()
+    x, y0 = area[0] + area[2] // 2, area[1] + area[3] // 2
+    _lic_drag(app, x, y0, -100000)                  # way past the last line
+    max_off = len(app.lic[1]) * app.layout.line_h - area[3]
+    assert app.lic[2] == max_off
+    _lic_drag(app, x, y0, 100000)                   # way past the top
+    assert app.lic[2] == 0
+
+
 def test_a_cart_that_will_not_fit_offers_no_get(tmp_path):
     gpl, mit, net = _shelves(tmp_path)
     ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])

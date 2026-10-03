@@ -147,6 +147,15 @@ class GetCartsLayout(ListShellLayout):
     def buttons(self, n):
         return _ui.hsplit(self.btns, n, gap=6 * self.fs)
 
+    def lic_area(self):
+        """The licence box's VIEWPORT: two fixed header lines below `text_y`
+        (the external path, then the licence name), then every remaining text
+        row down to the buttons. The scroll model needs the whole band where
+        the draw needs a slot, and both come off this one formula."""
+        page = max(1, self.text_rows - 2)
+        return (self.body[0], self.text_y + 2 * self.line_h, self.body[2],
+                page * self.line_h)
+
 
 class GetCartsAppLayer(ListShellApp):
     id = "getcarts"
@@ -185,8 +194,11 @@ class GetCartsAppLayer(ListShellApp):
         self.cur = None               # the CART screen's row
         self.focus = 0
         self.job = None
-        self.lic = None               # [external, wrapped lines or None, top line]
+        self.lic = None               # [external, wrapped lines or None, scroll px]
         self._lic_text = ""
+        self._lic_scroll = None       # lazy ui.ScrollRegion over the licence text
+        self._lic_taps = None
+        self._lic_frame_dt_ms = 33.0  # last draw() tick, for the drag's fling EMA
         self.accepted = []
         self.armed = False
         self.arm_remove = False
@@ -235,6 +247,7 @@ class GetCartsAppLayer(ListShellApp):
         if self.lic is not None and self.lic[1] is not None:
             self.lic[1] = self._wrap(self._lic_text)
             self.lic[2] = 0
+            self._lic_reset_scroll()
         self._clamp_list(len(self.rows))
 
     def close(self):
@@ -625,6 +638,7 @@ class GetCartsAppLayer(ListShellApp):
         self._lic_text = _ci.as_text(data)
         self.lic[1] = self._wrap(self._lic_text)
         self.lic[2] = 0
+        self._lic_reset_scroll()
         self._go("licence", focus=1)       # NO has the focus
 
     # -- YOUR COPY: an external file this console cannot fetch -----------------
@@ -869,11 +883,59 @@ class GetCartsAppLayer(ListShellApp):
         return True
 
     def _scroll_licence(self, d):
-        lines = self.lic[1]
-        page = self.layout.text_rows - 2
-        top = self.lic[2] + d * (1 if abs(d) == 1 else page)
-        self.lic[2] = max(0, min(top, max(0, len(lines) - page)))
+        """Key/d-pad step: one line (`d` is ±1), in the SAME pixel offset the
+        drag and the fling share (`_lic_region`) -- a keyboard step kills a
+        live fling, the way `_sync_scroll_from_top` does for the Settings
+        rows."""
+        sr = self._lic_region()
+        sr.scroll_by(d * self.layout.line_h)
+        sr.stop()
+        self.lic[2] = sr.offset
         self._damage.all()
+
+    # -- the licence text's TOUCH model (#113) --------------------------------
+    #
+    # The text carries no selection to preserve (unlike the row lists), so it
+    # rides the Library shelf's pattern rather than the Settings rows': the
+    # region's offset IS `self.lic[2]`, pixel-smooth, with no page snapping.
+
+    def _lic_region(self):
+        """The licence text's ScrollRegion + drag/fling machine, built lazily
+        and re-synced to the live layout each sample."""
+        if self._lic_scroll is None:
+            self._lic_scroll = _ui.ScrollRegion()
+            self._lic_taps = _ui.DragTap(self._lic_scroll)
+        sr = self._lic_scroll
+        lay = self.layout
+        sr.set(lay.lic_area(), len(self.lic[1]) * lay.line_h)
+        if not (sr.drag_active or sr.animating):
+            sr.offset = self.lic[2]
+        return sr
+
+    def _lic_reset_scroll(self):
+        """A fresh licence (a new fetch, a relayout) starts at the top and
+        drops any fling still coasting from the one before it."""
+        if self._lic_scroll is not None:
+            self._lic_scroll.stop()
+            self._lic_scroll.offset = 0
+
+    def _lic_pointer(self, px, py, click):
+        """One pointer sample over the licence text: a held drag SCROLLS it
+        (`self.lic[2]` follows the region's offset); a clean release does
+        nothing -- the text is not a tap target, only YES/NO are.
+
+        `dt_ms` feeds the release-velocity EMA (the fling, #113): `ctx.surface`
+        carries no per-sample dt of its own (the kernel's banked pointer dt is
+        a `Workstation` internal), so this rides `_lic_frame_dt_ms` -- the
+        loop's own last `draw()` tick, injected there, never a clock read
+        here."""
+        sr = self._lic_region()
+        self._lic_taps.frame(px, py, click, self._surf.pointer().down,
+                             slop=4 * self.layout.fs + 2,
+                             dt_ms=self._lic_frame_dt_ms)
+        if self._lic_taps.dragging:
+            self.lic[2] = sr.offset
+            self._damage.all()
 
     def handle_pointer(self, px, py, click):
         lay = self.layout
@@ -884,6 +946,8 @@ class GetCartsAppLayer(ListShellApp):
             if row is not None:
                 self._tap_row(row)
             return True
+        if self.phase == "licence" and self.lic is not None and self.lic[1] is not None:
+            self._lic_pointer(px, py, click)
         if not click:
             return True
         hit = self.hits.at(px, py)
@@ -894,8 +958,6 @@ class GetCartsAppLayer(ListShellApp):
             self._check()
         elif verb == "back":
             self._back()
-        elif verb == "page":
-            self._scroll_licence(arg)
         elif verb == "btn" and (self.phase != "cart" or self._enabled(arg)):
             self._press(arg)
         return True
@@ -904,6 +966,17 @@ class GetCartsAppLayer(ListShellApp):
 
     def draw(self, dt):
         self._pump()
+        if dt > 0:
+            self._lic_frame_dt_ms = min(dt * 1000.0, 100.0)
+        if self.phase == "licence" and self._lic_scroll is not None:
+            # A coasting fling advances BEFORE the text paints, so the lines
+            # below are drawn at this frame's offset (settings_layer's
+            # rows_anim_frame does the same ahead of its own draw).
+            if self._lic_scroll.tick(self._lic_frame_dt_ms):
+                self.lic[2] = self._lic_scroll.offset
+                self._damage.all()
+            if self._lic_scroll.animating:
+                self._damage.again()
         cv = self._surf.canvas()
         lay = self.layout
         th = self._theme.colors()
@@ -1044,24 +1117,33 @@ class GetCartsAppLayer(ListShellApp):
     def _draw_licence(self, cv, th):
         lay = self.layout
         fs = lay.fs
-        ext, lines, top = self.lic
-        y = self._line(cv, "Before getting %s:" % ext["path"], lay.text_y, th["ink"])
-        y = self._line(cv, (ext["licence"].get("name") or "its licence")[:lay.cols],
-                       y, th["accent"])
-        page = lay.text_rows - 2
-        x0, w0 = lay.body[0], lay.body[2]
-        area = (x0, y, w0, page * lay.line_h)
+        ext, lines, _off = self.lic
+        self._line(cv, "Before getting %s:" % ext["path"], lay.text_y, th["ink"])
+        self._line(cv, (ext["licence"].get("name") or "its licence")[:lay.cols],
+                   lay.text_y + lay.line_h, th["accent"])
+        area = lay.lic_area()
         cv.rect(area[0], area[1], area[2], area[3], th["surface"])
-        yy = y + 2 * fs
-        for ln in lines[top:top + page]:
-            cv.print(ln[:lay.cols], x0 + 4 * fs, yy, th["ink"], 1)
+        sr = self._lic_region()
+        off = sr.offset
+        i = off // lay.line_h
+        yy = area[1] + 2 * fs - off % lay.line_h
+        clip = getattr(cv, "clip", None)
+        if clip is not None:
+            clip(*area)
+        while yy < area[1] + area[3] and i < len(lines):
+            cv.print(lines[i][:lay.cols], area[0] + 4 * fs, yy, th["ink"], 1)
             yy += lay.line_h
-        half = area[3] // 2
-        self.hits.add((area[0], area[1], area[2], half), "page", -page)
-        self.hits.add((area[0], area[1] + half, area[2], area[3] - half), "page", page)
-        _ui.scroll_cues(cv, (x0 + w0 - 10 * fs, area[1] + 2 * fs),
-                        (x0 + w0 - 10 * fs, area[1] + area[3] - 10 * fs),
-                        top > 0, top + page < len(lines), th["accent"], fs)
+            i += 1
+        if clip is not None:
+            clip()
+        self._lic_bar(cv, th)
+
+    def _lic_bar(self, cv, th):
+        """The licence box's scrollbar, drawn from the SAME region the drag
+        moves -- the way `_rows_bar` draws the cart list's."""
+        lay = self.layout
+        if len(self.lic[1]) * lay.line_h > lay.lic_area()[3]:
+            self._lic_region().draw_bar(cv, th)
 
     def _message(self):
         """(title, lines) for the screens that are only words and a button."""
