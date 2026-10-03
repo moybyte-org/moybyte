@@ -33,7 +33,9 @@ the manifest's pages before its memory exists, binds the instance to the
 console and calls the three hooks, each on the engine's thread through its
 session callbacks
 (`native/moy_wasm/moy_wasm_session.h`). `tick` then runs `_update` and `_draw`
-there and times the halves for `tick_split`.
+there and times the halves for `tick_split`. `wasm_table()` is the table's
+names, which the Player holds a module's imports to before it opens one
+(`device/moycore_glue.missing_imports`).
 
 Every host callback the table reaches from that thread is a C read or write
 against the console except the ones that need the VM -- `read`, the cart's own

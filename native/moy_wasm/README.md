@@ -220,6 +220,21 @@ start path, the engine's and moycore's and WAMR's "allocate ... failed", reads
 by the same header against `wasm_host.MEMORY_LIMIT`, the biggest board's
 PSRAM, so a cart the host refuses is one no board could run.
 
+## A cart built for a newer console
+
+A module that imports a name this console's import table lacks was built
+against a newer one, and the Player refuses it before anything loads, as it
+refuses a cart too big: `moycore_glue.WasmRuntime.missing` reads the module's
+imports from its head (`wasm_head`) and holds them to `moycore.wasm_table()`,
+the table the engine registers, and a name it lacks opens the NOTICE under
+"Needs a newer console." naming the cart and every import missing
+(`runtime/player.py`'s `newer_notice`). The comparison is
+`moycore_glue.missing_imports`, the one every tier's runtime uses: the host
+twin holds the module to the same table compiled into its binding. A cart is
+never linked short of an import and left to trap when it first calls it;
+`moy_wasm_check` still refuses at load whatever else is wrong with a module's
+imports -- another module, a row at the wrong type -- on the error panel.
+
 ## The cache sync
 
 On the S3 the loader writes the text through the data bus and fetches it
@@ -583,7 +598,9 @@ waits for it, so an item that never returns holds the cart where it is.
   having run some of them, a cart whose module was tampered with after
   signing refused, the huge fixture -- 40 MB of declared memory, past every
   board's PSRAM -- refused with the fit notice, the hello cart running after
-  it, and the Read Dir fixture's `read` of its own `src/` folder reading
+  it, the newer fixture -- importing a name no table has -- refused with the
+  newer-console notice, the hello cart running after it too, and the Read
+  Dir fixture's `read` of its own `src/` folder reading
   nothing, as a missing file does. **The interpreter tier, on every board**:
   a cart with no module, one built for another chip, and one named for a
   stale format all play on the interpreter with the short "needs an update"

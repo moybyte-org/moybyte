@@ -2950,6 +2950,25 @@ static mp_obj_t mod_wasm_quit(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_quit_obj, mod_wasm_quit);
 
+// wasm_table() -> the names in this console's import table (libmoy's
+// moy_wasm_natives), every function a compiled cart may import from "moy":
+// what the Player holds a module's imports to before it loads one
+// (moycore_glue.missing_imports). () in a build with no wasm engine.
+static mp_obj_t mod_wasm_table(void)
+{
+#if MOYCORE_WASM
+    uint32_t n = 0;
+    const NativeSymbol *rows = moy_wasm_natives(&n);
+    mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(n, NULL));
+    for (uint32_t i = 0; i < n; i++)
+        t->items[i] = mp_obj_new_str(rows[i].symbol, strlen(rows[i].symbol));
+    return MP_OBJ_FROM_PTR(t);
+#else
+    return mp_const_empty_tuple;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_table_obj, mod_wasm_table);
+
 // take_frames(on, palette=True) -- whether a compiled cart's blits leave
 // their frames in its memory for the board to show (frame/frame_presented)
 // instead of writing the canvas: blit565's when `on`, and blit's too unless
@@ -3461,6 +3480,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_WASM),        MP_ROM_INT(MOYCORE_WASM) },
     { MP_ROM_QSTR(MP_QSTR_wasm_open),   MP_ROM_PTR(&mod_wasm_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_quit),   MP_ROM_PTR(&mod_wasm_quit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_table),  MP_ROM_PTR(&mod_wasm_table_obj) },
     { MP_ROM_QSTR(MP_QSTR_take_frames), MP_ROM_PTR(&mod_take_frames_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame),       MP_ROM_PTR(&mod_frame_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_settle), MP_ROM_PTR(&mod_frame_settle_obj) },

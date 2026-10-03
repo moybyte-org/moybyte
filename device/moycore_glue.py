@@ -1,8 +1,9 @@
 # Map (grep -n a name to jump there):
 #   reserve_p8_memory     take the PICO-8 buffers while the heap is whole
 #   MoycoreRun            one Lua cart run under moycore
-#   -- the compiled cart  aot_path, wasm_head, CartFrame, WasmRun
+#   -- the compiled cart  aot_path, wasm_head, missing_imports, CartFrame, WasmRun
 #   aot_path              where a cart's compiled module for a chip lives
+#   missing_imports       what a module imports that this console's table lacks
 #   CartFrame             a compiled cart's frame on its way to the glass
 #   WasmRun               one compiled cart run
 #   make_moycore_runtime  the Lua runtime factory
@@ -536,6 +537,82 @@ def wasm_head(path):
                 return data
 
 
+
+def _uleb(b, i):
+    """The unsigned LEB128 at `b[i]`, and the index past it."""
+    v = shift = 0
+    while True:
+        c = b[i]
+        i += 1
+        v |= (c & 0x7F) << shift
+        shift += 7
+        if not c & 0x80:
+            return v, i
+
+
+def _limits(b, i):
+    """Past a table's or a memory's limits at `b[i]`."""
+    flags = b[i]
+    _, i = _uleb(b, i + 1)
+    if flags & 1:
+        _, i = _uleb(b, i)
+    return i
+
+
+def missing_imports(head, table):
+    """The names a compiled cart's module imports from "moy" that `table` --
+    this console's import table (`moycore.wasm_table()` on a board and in the
+    browser, `wasm_binding.table()` on the host) -- lacks, in the order the
+    module declares them. Every tier's runtime answers the Player's
+    `missing(cart)` through this, and the Player refuses a cart that names
+    any before it loads: a cart built for a newer console's table (moy-spec
+    SPEC.md 16.3). `head` is the module through its import section at least
+    (`wasm_head`). An import from another module or of another kind is the
+    cart's own error, which the engine's load check names; bytes that do not
+    parse answer what was read before them."""
+    out = []
+    if len(head) < 8 or head[:4] != b"\0asm":
+        return out
+    have = set(table)
+    i = 8
+    try:
+        while i < len(head):
+            sid = head[i]
+            size, i = _uleb(head, i + 1)
+            if sid != 2:
+                if sid > 2:
+                    return out
+                i += size
+                continue
+            count, i = _uleb(head, i)
+            for _ in range(count):
+                n, i = _uleb(head, i)
+                module = head[i:i + n]
+                n, i = _uleb(head, i + n)
+                name = head[i:i + n]
+                i += n
+                kind = head[i]
+                i += 1
+                if kind == 0:
+                    _, i = _uleb(head, i)
+                elif kind == 1:
+                    i = _limits(head, i + 1)
+                elif kind == 2:
+                    i = _limits(head, i)
+                elif kind == 3:
+                    i += 2
+                else:
+                    return out
+                if kind == 0 and module == b"moy":
+                    name = name.decode("utf-8")
+                    if name not in have and name not in out:
+                        out.append(name)
+            return out
+    except (IndexError, ValueError):
+        pass
+    return out
+
+
 def _sha256_file(path):
     import hashlib
     h = hashlib.sha256()
@@ -894,8 +971,9 @@ _MAX_PAGES = 16384
 
 class WasmRuntime:
     """`ws.runtimes["wasm"]`: called with `(ns, src)` it starts a WasmRun,
-    and before it does, the Player asks it what the cart's load needs
-    (`footprint`) and what this board can give (`memory`)."""
+    and before it does, the Player asks it what the cart imports that this
+    console lacks (`missing`), what the cart's load needs (`footprint`) and
+    what this board can give (`memory`)."""
 
     def __init__(self, ws):
         self.ws = ws
@@ -947,6 +1025,23 @@ class WasmRuntime:
         if not size:
             return None
         return self.footprint_of(pages, size, interp)
+
+    def missing(self, cart):
+        """The names the cart's main.wasm imports that this console's table
+        lacks (`missing_imports`), which the Player refuses it for before it
+        loads. [] when there is nothing to read -- no module, or an engine
+        that does not report its table -- and the load answers for itself."""
+        table = getattr(_moycore, "wasm_table", None)
+        path = cart.get("path")
+        if table is None or not path:
+            return []
+        p = path + "/" + cart.get("main", "main.wasm")
+        gate = getattr(self.ws, "_with_sd", None)
+        try:
+            head = gate(lambda: wasm_head(p)) if gate is not None else wasm_head(p)
+        except OSError:
+            return []
+        return missing_imports(head, table())
 
     def footprint_of(self, pages, module_len, interp):
         """`footprint` from the numbers alone: `pages` of declared memory and

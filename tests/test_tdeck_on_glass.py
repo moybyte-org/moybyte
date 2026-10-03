@@ -164,6 +164,10 @@ def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_cart
     on_glass.wasm_too_big_cart_opens_the_notice(board, WASM_BOARD_DIR)
 
 
+def test_a_compiled_cart_for_a_newer_console_opens_the_notice(board, wasm_carts):
+    on_glass.wasm_newer_cart_opens_the_notice(board, WASM_BOARD_DIR)
+
+
 def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
     on_glass.wasm_read_of_a_folder_reads_nothing(board, WASM_BOARD_DIR)
 

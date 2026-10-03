@@ -239,6 +239,12 @@ def _files_fn(files):
     return _FILES_FN(call)
 
 
+class _NativeSymbol(ctypes.Structure):
+    """WAMR's NativeSymbol: one row of the import table."""
+    _fields_ = [("symbol", ctypes.c_char_p), ("func_ptr", ctypes.c_void_p),
+                ("signature", ctypes.c_char_p), ("attachment", ctypes.c_void_p)]
+
+
 def _lib():
     if _LIB[0] is None:
         try:
@@ -286,6 +292,8 @@ def _lib():
             d.hw_footprint.restype = None
             d.hw_interp_footprint.argtypes = [ctypes.c_uint64, ctypes.c_uint64, _U64P, _U64P]
             d.hw_interp_footprint.restype = None
+            d.moy_wasm_natives.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+            d.moy_wasm_natives.restype = ctypes.POINTER(_NativeSymbol)
             if not d.hw_runtime():
                 _WHY[0] = "WAMR did not initialise"
                 _LIB[0] = False
@@ -320,6 +328,18 @@ def interp_footprint(memory, module_len):
     d.hw_interp_footprint(int(memory), int(module_len), ctypes.byref(total),
                           ctypes.byref(block))
     return total.value, block.value
+
+
+def table():
+    """The names in the import table this binding registers -- libmoy's
+    moy_wasm.c, the boards' own (moy_wasm_natives) -- which the host holds a
+    module's imports to before it loads one (moycore_glue.missing_imports)."""
+    d = _lib()
+    if d is None:
+        raise RuntimeError("no host wasm binding (%s)" % (why_unavailable() or "?"))
+    n = ctypes.c_uint32(0)
+    rows = d.moy_wasm_natives(ctypes.byref(n))
+    return tuple(rows[i].symbol.decode("utf-8") for i in range(n.value))
 
 
 SNAP_LEN = 14

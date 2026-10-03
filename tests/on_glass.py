@@ -1408,6 +1408,41 @@ def wasm_too_big_cart_opens_the_notice(board, board_dir):
     return notice, need, have
 
 
+# -- a cart built for a newer console --------------------------------------------
+#
+# A compiled cart importing a name this board's import table lacks is refused
+# at launch with a plain notice naming it -- never a load error, never a trap
+# when the cart first calls it. The Player holds the module's imports to the
+# engine's table (`moycore.wasm_table`) before anything loads.
+
+NEWER_TITLE = "Newer Wasm"
+NEWER_NOTICE = ("Newer Wasm needs a newer console (missing: later). "
+                "Update the firmware.")
+
+
+def wasm_newer_cart_opens_the_notice(board, board_dir):
+    """The newer fixture imports `later`, which no console's table has:
+    launching it opens the newer-console notice naming it, and the board
+    stays healthy: the hello cart runs after it and reads its greeting. It
+    carries no module for the chip -- nothing would load it. Returns the
+    notice."""
+    import tempfile
+    from tools import wasm_cart
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_newer_")
+    out = os.path.join(tmp, "newer.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "newer.moy"), out)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_newer.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    missing = board.pyval(
+        "ws.runtimes['wasm'].missing([c for c in ws.carts.all if c['title'] == %r][0])"
+        % NEWER_TITLE, timeout=30, strict=True)
+    assert missing == ["later"], missing
+    notice = _notice_on_launch(board, NEWER_TITLE, NEWER_NOTICE)
+    _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)
+    return notice
+
+
 # -- Doom, built by the recipe (experiments/wasm_aot/doom/build_cart.py) --------
 #
 # Opt-in by construction: the cart links GPL code and carries the shareware

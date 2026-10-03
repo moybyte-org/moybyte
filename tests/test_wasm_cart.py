@@ -16,6 +16,9 @@ What is pinned here:
     or any cart past the host's configured limit -- opens the fit NOTICE by
     the boards' own footprint arithmetic, not an error panel, and a load that
     still runs out of memory gets the same notice;
+  * a cart importing a name the console's table lacks -- one built for a newer
+    console -- is refused before it loads with a notice naming the import, by
+    the one comparison every tier's runtime uses (moycore_glue.missing_imports);
   * the store never reads a compiled cart's main as text, the Code tab exists
     only when the cart ships `src/`, no text write ever reaches its module, a
     copy carries the module's bytes, and the sync walk leaves it home.
@@ -30,6 +33,7 @@ import hashlib
 import json
 import os
 import shutil
+import types
 
 import pytest
 
@@ -790,6 +794,134 @@ def test_the_notice_never_reads_as_a_fit():
     assert text == "Doom needs 3.0 MB of memory to run. This console has 2.9 MB free."
     assert fit_notice("Doom", None, None) == (
         "Doom needs more memory than this console has free.")
+
+
+# -- a cart built for a newer console ----------------------------------------------
+
+NEWER = os.path.join(FIXTURES, "newer.moy")
+NEWER_NOTICE = ("Newer Wasm needs a newer console (missing: later). "
+                "Update the firmware.")
+
+
+def _newer(root):
+    wasm_cart.build(NEWER, os.path.join(root, "newer.moy"))
+
+
+def test_a_cart_built_for_a_newer_console_opens_the_notice_not_an_error(tmp_path):
+    """Newer Wasm imports `later`, which no console's table has: refused
+    before it loads -- nothing reaches the engine, so there is no load error
+    and no trap when the cart would call it -- on the Player's panel drawn
+    as a notice naming what is missing, and the console runs the next cart
+    as before."""
+    _binding_or_skip()
+    from runtime import player
+    from runtime.dev_channel import _remote_state
+    ws = host_app.build_workstation(_store(tmp_path, _newer, _hello))
+    open_cart(ws, "Newer Wasm")
+    p = ws.player
+    assert p.notice == NEWER_NOTICE, p.cart_error
+    assert p._notice_title == player.NEWER_TITLE == "Needs a newer console."
+    assert p._lua is None and p._update is None and p._draw is None
+    assert not ws.wm.top_is("menu"), "a notice threw into the Editor"
+    _frames(ws, 3)
+    st = _remote_state(ws)
+    assert st["notice"] == p.notice and st["cart_error"] is None
+    ws._exit_to_caller()
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.cart_error is None and ws.player.notice is None
+
+
+def test_a_console_without_write_erase_and_list_refuses_a_cart_that_keeps_files(
+        tmp_path, monkeypatch):
+    """A console whose table predates write, erase and list (moy-spec SPEC.md
+    16.12) refuses Files Wasm, which imports all three, naming them in the
+    order the module imports them; the console that has them plays it."""
+    _binding_or_skip()
+    from runtime import wasm_binding
+    table = wasm_binding.table()
+    assert {"cls", "read", "write", "erase", "list"} <= set(table)
+    older = tuple(n for n in table if n not in ("write", "erase", "list"))
+    monkeypatch.setattr(wasm_binding, "table", lambda: older)
+    ws = host_app.build_workstation(_store(tmp_path, _files))
+    open_cart(ws, "Files Wasm")
+    assert ws.player.notice == ("Files Wasm needs a newer console (missing: "
+                                "write, erase, list). Update the firmware."), \
+        ws.player.cart_error
+    ws._exit_to_caller()
+    monkeypatch.undo()
+    open_cart(ws, "Files Wasm")
+    assert ws.player.notice is None and ws.player.cart_error is None
+
+
+class _Gated:
+    """A workstation's storage gate, counting what passes through it."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def _with_sd(self, fn):
+        self.calls += 1
+        return fn()
+
+
+def test_the_board_and_browser_runtime_holds_imports_to_its_engines_table(
+        tmp_path, monkeypatch):
+    """device/moycore_glue.WasmRuntime -- the boards' and the browser
+    console's -- reads the module's head through the storage gate and holds
+    it to the table its engine reports (moycore.wasm_table); an engine that
+    reports none leaves the load to answer, and so does a module that is not
+    there."""
+    from device import moycore_glue
+    wasm_cart.build(NEWER, str(tmp_path / "newer.moy"))
+    cart = {"path": str(tmp_path / "newer.moy"), "main": "main.wasm"}
+    ws = _Gated()
+    rt = moycore_glue.WasmRuntime(ws)
+    monkeypatch.setattr(moycore_glue, "_moycore",
+                        types.SimpleNamespace(wasm_table=lambda: ("cls",)))
+    assert rt.missing(cart) == ["later"] and ws.calls == 1
+    monkeypatch.setattr(moycore_glue, "_moycore",
+                        types.SimpleNamespace(wasm_table=lambda: ("cls", "later")))
+    assert rt.missing(cart) == []
+    assert rt.missing(dict(cart, main="gone.wasm")) == []
+    monkeypatch.setattr(moycore_glue, "_moycore", types.SimpleNamespace())
+    assert rt.missing(cart) == []
+
+
+def test_the_player_refuses_through_the_board_runtime_before_any_engine(
+        tmp_path, monkeypatch):
+    """The boards' load path end to end on the host: the Player asks the
+    device glue's runtime, which refuses Newer Wasm before a WasmRun exists
+    -- this host has no moycore, so a run would have raised instead."""
+    from device import moycore_glue
+    ws = host_app.build_workstation(_store(tmp_path, _newer))
+    monkeypatch.setattr(moycore_glue, "_moycore",
+                        types.SimpleNamespace(WASM=1, wasm_table=lambda: ("cls",)))
+    ws.runtimes["wasm"] = moycore_glue.WasmRuntime(ws)
+    open_cart(ws, "Newer Wasm")
+    assert ws.player.notice == NEWER_NOTICE, ws.player.cart_error
+
+
+def test_missing_imports_reads_only_the_functions_moy_is_asked_for():
+    """The one comparison: names from module "moy" imported as functions, in
+    the module's order, each once; another module's import or a memory is the
+    load check's to refuse, not a missing name; bytes that are not a module,
+    or a head cut short, answer what was read before them."""
+    from device.moycore_glue import missing_imports
+    blob = wat.assemble("""(module
+      (import "env" "sleep" (func (param i32)))
+      (import "moy" "cls" (func (param i32)))
+      (import "moy" "later" (func))
+      (import "moy" "mem" (memory 1 1))
+      (import "moy" "flag" (global i32))
+      (import "moy" "later" (func (param i32)))
+      (import "moy" "sooner" (func))
+      (memory (export "memory") 1 1))""")
+    table = ("cls", "sleep", "mem", "flag")
+    assert missing_imports(blob, table) == ["later", "sooner"]
+    assert missing_imports(blob, table + ("later", "sooner")) == []
+    assert missing_imports(b"not a module", table) == []
+    cut = blob.index(b"sooner")
+    assert missing_imports(blob[:cut], table) == ["later"]
 
 
 # -- the compiled module's name on a board ---------------------------------------

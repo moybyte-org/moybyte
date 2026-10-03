@@ -18,6 +18,8 @@ What it proves, in real Chrome against the built dist/:
     builds them, play;
   * a compiled cart's written files outlive a reload: the Files Wasm
     fixture writes on one load and finds them on the next, out of OPFS;
+  * a cart importing a name the browser's table lacks (the Newer Wasm
+    fixture) is refused before it loads, with the Player's notice naming it;
   * Get Carts offers a compiled cart from a local index and installs it --
     reading only the members this console keeps, by range, so not one byte
     of a chip's module crosses -- and the installed cart plays on the next
@@ -219,6 +221,26 @@ def test_a_compiled_carts_written_files_outlive_a_reload(tmp_path):
         server.terminate()
         server.wait(timeout=10)
 
+
+NEWER = ROOT / "tests" / "fixtures" / "wasm" / "newer.moy"
+
+
+def test_a_cart_built_for_a_newer_console_is_refused_with_the_notice(tmp_path):
+    """Newer Wasm imports `later`, which the browser's table -- libmoy's, the
+    boards' -- lacks: the console refuses it before the worker ever compiles
+    it (moycore.wasm_table, held to the module by the board glue's one
+    comparison), on the Player's notice naming the import, never an error."""
+    web_e2e.require("store")
+    cart = _built(NEWER, tmp_path / "carts" / "newer.moy")
+    out, js = _play(tmp_path, _site(tmp_path, [cart]), "newer",
+                    "?handheld=1&dev=1&cart=newer.moy", [
+        {"wait": 3000}, {"js": _STATE}, {"shot": "newer"},
+    ])
+    assert len(js) == 1, "the scenario did not run to its end:\n%s" % out[-3000:]
+    st = json.loads(js[0])
+    assert st["cart"] == "Newer Wasm" and st["err"] is None, st
+    assert st["notice"] == ("Newer Wasm needs a newer console (missing: later). "
+                            "Update the firmware."), st
 
 def test_the_jet_carts_play_in_the_browser(tmp_path):
     web_e2e.require("store")

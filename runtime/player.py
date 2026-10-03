@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
-#   _TooBig               a compiled cart the fit check refused
+#   _Refused              a compiled cart refused before it loads
+#   newer_notice          the notice for a cart built for a newer console
 #   fit_notice            the notice for a cart too big to load
 #   Player                runs one cart: start, tick every frame, always exit
 #   Player.start          start or re-run a cart under make_api
@@ -290,6 +291,14 @@ def _compiled(cart):
 # engines on every tier begin that failure's text with _OUT_OF_MEMORY.
 NOTICE_TITLE = "Too big for this console."
 _OUT_OF_MEMORY = "out of memory"
+
+# A compiled cart whose module imports a name this console's import table
+# lacks was built for a newer console (moy-spec SPEC.md 16.3), and is refused
+# the same way, before it loads, with a notice naming what is missing: never
+# a load error, never a trap when the cart first calls the import. Every
+# tier's runtime answers `missing(cart)` through one comparison,
+# device/moycore_glue.missing_imports.
+NEWER_TITLE = "Needs a newer console."
 _MB = 1024 * 1024
 
 # A compiled cart whose module does not run natively on this console -- none
@@ -324,8 +333,16 @@ INTERP_NOTICE_SUB = {
 INTERP_NOTICE_SUB_DEFAULT = INTERP_NOTICE_SUB["missing"]
 
 
-class _TooBig(Exception):
-    """A compiled cart the fit check refused; args[0] is the notice."""
+class _Refused(Exception):
+    """A compiled cart refused before it loads: args are the notice and
+    the title it is drawn under."""
+
+
+def newer_notice(title, missing):
+    """The notice for a cart whose module imports `missing`, names this
+    console's import table lacks."""
+    return ("%s needs a newer console (missing: %s). Update the firmware."
+            % (title or "This game", ", ".join(missing)))
 
 
 def _mb(n, up):
@@ -370,6 +387,20 @@ def _cart_fit(make, cart):
         if need is None:
             return None
         return need, mem()
+    except Exception:  # noqa: BLE001 -- a report is advisory; the load decides
+        return None
+
+
+def _cart_missing(make, cart):
+    """What the cart imports that the runtime's table lacks, from a runtime
+    that can say (`missing`), or None: a runtime with no such report, a cart
+    that imports nothing missing, or a report that failed -- the load then
+    answers for itself."""
+    fn = getattr(make, "missing", None)
+    if fn is None:
+        return None
+    try:
+        return fn(cart) or None
     except Exception:  # noqa: BLE001 -- a report is advisory; the load decides
         return None
 
@@ -1686,13 +1717,19 @@ class Player:
                 raise RuntimeError("needs the %s runtime (not in this build)"
                                    % RUNTIME_NAMES[runtime])
             if runtime == "wasm":
-                # A compiled cart's load footprint against what this console
-                # can give it, before anything loads.
-                fit = _cart_fit(make, ws.cart or {})
+                # A compiled cart's imports against this console's table, and
+                # its load footprint against what this console can give it,
+                # before anything loads.
+                cart = ws.cart or {}
+                missing = _cart_missing(make, cart)
+                if missing:
+                    raise _Refused(newer_notice(cart.get("title"), missing),
+                                   NEWER_TITLE)
+                fit = _cart_fit(make, cart)
                 if fit is not None and (fit[0][0] > fit[1][0]
                                         or fit[0][1] > fit[1][1]):
-                    raise _TooBig(fit_notice((ws.cart or {}).get("title"),
-                                             fit[0], fit[1]))
+                    raise _Refused(fit_notice(cart.get("title"), fit[0], fit[1]),
+                                   NOTICE_TITLE)
             lua = make(ns, src)
             if runtime == "wasm" and getattr(lua, "interp", False):
                 # Not an error and not a panel: the cart plays, on the
@@ -1720,18 +1757,19 @@ class Player:
             # a load/syntax or _init error carries its `cart:N:` position, so
             # EDIT drops on the line exactly like a Python SyntaxError (#24) --
             # and on a cart of several scripts, in the FILE that raised. A
-            # compiled cart has no line to drop on; one this console cannot
-            # hold gets the fit notice, whether the check refused it or its
-            # load ran out of memory. Every OTHER compiled-cart refusal
+            # compiled cart has no line to drop on; one built for a newer
+            # console gets the newer-console notice, and one this console
+            # cannot hold gets the fit notice, whether the check refused it or
+            # its load ran out of memory. Every OTHER compiled-cart refusal
             # (no/stale module, unsigned with the switch off) was already
             # retried on the interpreter inside WasmRun -- what reaches here
             # is a real error (a trap, a bad signature, a malformed cart).
             if runtime == "wasm":
                 self.crash_file, self.crash_line = None, None
                 title = (ws.cart or {}).get("title")
-                if isinstance(exc, _TooBig):
+                if isinstance(exc, _Refused):
                     self._notice = self.cart_error = exc.args[0]
-                    self._notice_title = NOTICE_TITLE
+                    self._notice_title = exc.args[1]
                 elif _out_of_memory(exc):
                     print("Moybyte cart load:", self.cart_error)
                     fit = _cart_fit(make, ws.cart or {})
@@ -2136,7 +2174,8 @@ class Player:
     @property
     def notice(self):
         """A notice's text while it is the panel up, else None: a compiled
-        cart refused before it loaded, for want of room or of a signature."""
+        cart refused before it loaded, for want of room, of a signature or of
+        an import this console has."""
         n = self._notice
         return n if n is not None and n == self.cart_error else None
 
@@ -2146,8 +2185,8 @@ class Player:
         # box + a short title + the exception text, word-wrapped and truncated to
         # fit. The CODE/EDIT button below it stays live so the kid can fix the cart.
         # A notice is the same panel in calmer colours under its own title:
-        # nothing went wrong, the cart is bigger than this console or is not
-        # signed.
+        # nothing went wrong, the cart is bigger than this console, needs a
+        # newer one, or is not signed.
         # `cv` defaults to the GAME canvas (a crashed running cart); the system-
         # domain cards tab passes ws.sys_canvas so its defensive fallback stays
         # visible on a distinct system canvas (#39 step 3).

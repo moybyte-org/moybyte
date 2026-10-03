@@ -67,7 +67,8 @@ def _wire_swapped():
 
 class WasmHostRuntime:
     """`ws.runtimes["wasm"]` on the host: called with `(ns, src)` it starts
-    a WasmHostRun, and before it does, the Player asks it what the cart's load
+    a WasmHostRun, and before it does, the Player asks it what the cart
+    imports that the host's table lacks (`missing`), what the cart's load
     needs (`footprint`) and what the host gives (`memory`) -- the device
     glue's `moycore_glue.WasmRuntime`, with `MEMORY_LIMIT` for free PSRAM."""
 
@@ -76,6 +77,25 @@ class WasmHostRuntime:
 
     def __call__(self, ns, src):
         return WasmHostRun(self.ws, ns, src)
+
+    def missing(self, cart):
+        """The names the cart's main.wasm imports that the host's table --
+        the boards' own, compiled into the binding -- lacks, by the device
+        glue's one comparison (`moycore_glue.missing_imports`). [] when
+        there is no module to read; the load answers for itself."""
+        from runtime import wasm_binding
+        try:
+            from device.moycore_glue import wasm_head, missing_imports
+        except ImportError:                          # pragma: no cover
+            from moycore_glue import wasm_head, missing_imports
+        path = cart.get("path")
+        if not path:
+            return []
+        try:
+            head = wasm_head(path + "/" + cart.get("main", "main.wasm"))
+        except OSError:
+            return []
+        return missing_imports(head, wasm_binding.table())
 
     def footprint(self, cart):
         """(total, block) by the boards' sizing, the host's module being
