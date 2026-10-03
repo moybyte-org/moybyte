@@ -45,6 +45,7 @@ _ROOT = native_build.ROOT
 _NATIVE = os.path.join(_ROOT, "native")
 _LIBMOY = native_build.LIBMOY                        # the raster + moy.h
 _BINDING_DIR = os.path.join(_NATIVE, "moycore", "libmoy")   # libmoy's Lua binding
+_MOYCORE = os.path.join(_NATIVE, "moycore")          # the layer glue the boards run
 _LUA = os.path.join(_NATIVE, "moy_lua", "lua")       # the vendored VM
 _SHIM = os.path.join(_HERE, "moyhost_lua.c")
 _CACHE = os.path.join(_ROOT, ".build", "host_lua")
@@ -90,10 +91,11 @@ def build(verbose=False):
     lua = _lua_names()
     if not lua or not os.path.isfile(os.path.join(_BINDING_DIR, "moy_lua.c")):
         return None
-    names = list(_RASTER) + ["moy_lua.c", "moy_p8.c", "moyhost_console.h"] + lua
+    names = (list(_RASTER) + ["moy_lua.c", "moy_p8.c", "moyhost_console.h",
+                               "moycore_layers.h"] + lua)
     return native_build.build(
         "moyhost_lua", _SHIM, names, _CACHE, cflags=_CFLAGS,
-        libmoy_dir=(_LIBMOY, _BINDING_DIR, _LUA, _HERE),
+        libmoy_dir=(_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE),
         # Lua's own math (pow/fmod/floor) -- a no-op against glibc >= 2.34,
         # which folded libm into libc, and required everywhere older.
         link_flags=["-lm"], verbose=verbose)
@@ -146,6 +148,8 @@ def _lib():
             d.hl_get_global_num.argtypes = [_P, _C, ctypes.POINTER(ctypes.c_double)]
             d.hl_get_global_num.restype = _I
             d.hl_register.argtypes = [_P, _C, _I]
+            d.hl_layer_bind.argtypes = [_P, _P, _I, _I, _I]
+            d.hl_layer_bind.restype = _I
             d.hl_set_dispatch.argtypes = [_P, _P]
             d.hl_free.argtypes = [_P]
             _LIB[0] = d
@@ -297,6 +301,18 @@ class HostLuaRun:
         self._ext.append(fn)
         self._d.hl_register(self._r, name.encode(), idx)
 
+    def layer_bind(self, buf, w, h):
+        """Hand a cart layer's RGB565 buffer to the run; the prelude's
+        make_layer builds its canvas over it next (moycore_layers.h). The run
+        keeps the buffer exported until it closes."""
+        ref = (ctypes.c_char * len(buf)).from_buffer(buf)
+        if self._d.hl_layer_bind(self._r, ctypes.cast(ref, _P), len(buf),
+                                 int(w), int(h)) != 0:
+            raise ValueError("layer_bind: buffer too small, or an indexed run")
+        if not hasattr(self, "_layer_refs"):
+            self._layer_refs = []
+        self._layer_refs.append(ref)
+
     def _dispatch(self, idx, argc, kinds, iargs, sargs, out, sout):
         """C -> Python. 0 nil, 1 the int in out, 2 the string, 3 the boolean."""
         try:
@@ -413,3 +429,4 @@ class HostLuaRun:
         if getattr(self, "_r", None):
             self._d.hl_free(self._r)
             self._r = None
+        self._layer_refs = []

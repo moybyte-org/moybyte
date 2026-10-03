@@ -51,6 +51,13 @@ back, and a `pix(5,5)` -> `pix(6,5)` slip was invisible until the sample
 straddled a drawn edge instead of sitting inside a flat region. A trace that
 observes a value which does not depend on the thing being tested passes for
 the wrong reason.
+
+EXTENDED 2026-10-04 (#225, before a Lua layer's drawing moved onto libmoy's
+verbs): the twins draw INTO the layer every frame -- its own camera (set, and
+read back), clip and pal around shapes, text, sspr, map, spr and tline -- and
+read its pixels in pairs across the edges those move. Mutation-tested: the
+layer's camera, clip and pal, the camera read-back, and the sspr/tline/map/spr
+/line/rectb/print placements each turn it red.
 """
 
 import shutil
@@ -131,6 +138,34 @@ def _draw():
     spr(5, 24, 30, 20)
     rectb(2, 2, 90, 60, 7)
     camera()
+    # --- drawing INTO the layer (#225): a Lua cart's layer methods are the
+    # screen's libmoy verbs retargeted, a Python cart's are make_api over the
+    # layer's canvas. The layer persists across frames, so every frame draws
+    # over the last; its camera/clip/pal are its own, set and read back.
+    l = LYR[0]
+    l.camera(f % 3, 1)
+    l.rect(4, 4, 10, 6, 8 + f % 4)
+    l.line(0, 0, 40, f % 30, 11)
+    l.clip(2, 2, 60, 40)
+    l.pal(11, 12)
+    l.circ(30, 20, 5, 11)
+    l.rectb(20, 30, 30, 20, 11)
+    l.pal()
+    l.clip()
+    l.print("L" + str(f), 50, 10, 7)
+    lx, ly = l.camera()
+    l.sspr(4, 8, 16, 16, 70, 30, 24, 18)
+    l.tline(0, 60, 95, 60, 0, 131072, 65536, 0)
+    l.map(0, 0, 4, 3, 96, 0)
+    l.spr(4, 100, 40, 20)
+    # Read ACROSS edges, never inside a flat run: both sides of the rect's
+    # two edges (the layer camera moves them every frame, and the rect's colour
+    # changes with it), the rectb's left edge (pal), and either side of the
+    # clip's bottom row on its right edge.
+    trace(f, "layer", lx, ly, l.pix(3 - f % 3, 4), l.pix(4 - f % 3, 4),
+          l.pix(13 - f % 3, 4), l.pix(14 - f % 3, 4))
+    trace(f, "layer2", l.pix(20 - f % 3, 35), l.pix(49 - f % 3, 41),
+          l.pix(49 - f % 3, 42))
     draw_layer(LYR[0], f % 8, 2)
     clip(8, 6, 70, 44)
     circ(46, 30, 12, 5)
@@ -228,6 +263,26 @@ function _draw()
   spr(5, 24, 30, 20)
   rectb(2, 2, 90, 60, 7)
   camera()
+  -- drawing into the layer; see the Python twin
+  LYR:camera(f % 3, 1)
+  LYR:rect(4, 4, 10, 6, 8 + f % 4)
+  LYR:line(0, 0, 40, f % 30, 11)
+  LYR:clip(2, 2, 60, 40)
+  LYR:pal(11, 12)
+  LYR:circ(30, 20, 5, 11)
+  LYR:rectb(20, 30, 30, 20, 11)
+  LYR:pal()
+  LYR:clip()
+  LYR:print("L" .. f, 50, 10, 7)
+  local lx, ly = LYR:camera()
+  LYR:sspr(4, 8, 16, 16, 70, 30, 24, 18)
+  LYR:tline(0, 60, 95, 60, 0, 131072, 65536, 0)
+  LYR:map(0, 0, 4, 3, 96, 0)
+  LYR:spr(4, 100, 40, 20)
+  trace(f, "layer", lx, ly, LYR:pix(3 - f % 3, 4), LYR:pix(4 - f % 3, 4),
+        LYR:pix(13 - f % 3, 4), LYR:pix(14 - f % 3, 4))
+  trace(f, "layer2", LYR:pix(20 - f % 3, 35), LYR:pix(49 - f % 3, 41),
+        LYR:pix(49 - f % 3, 42))
   draw_layer(LYR, f % 8, 2)
   clip(8, 6, 70, 44)
   circ(46, 30, 12, 5)

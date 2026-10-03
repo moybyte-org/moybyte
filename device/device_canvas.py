@@ -2876,6 +2876,11 @@ class DeviceCanvas:
         self.flush_batch()
         _dirty = getattr(layer, "_batch_arr", None)
         _dirty = _dirty is not None and _dirty[0] > 4    # layer edited THIS frame
+        if getattr(layer, "_edited", False):
+            # Drawn by a raster this canvas does not see -- a Lua cart's libmoy
+            # verbs (runtime/lua_ext.py's _draw_layer sets it): edited too.
+            layer._edited = False
+            _dirty = True
         _fb = getattr(layer, "flush_batch", None)
         if _fb is not None:
             _fb()

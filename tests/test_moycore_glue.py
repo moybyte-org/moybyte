@@ -175,7 +175,8 @@ class FakeMoycore(types.ModuleType):
                      "tick_split", "pmem_image", "retarget", "close",
                      "active", "view", "set_sram_floor", "alloc_stats",
                      "get_global", "wasm_open", "take_frames", "frame",
-                     "frame_settle", "frame_presented", "frame_kept"):
+                     "frame_settle", "frame_presented", "frame_kept",
+                     "layer_bind"):
             assert verb in C_NAMES, verb
             setattr(self, verb, getattr(self, "_" + verb))
 
@@ -201,6 +202,9 @@ class FakeMoycore(types.ModuleType):
             raise self.register_error[1]
         self.registered[name] = fn
         self._log("register", name)
+
+    def _layer_bind(self, buf, w, h):
+        self._log("layer_bind", w, h)
 
     def _exec(self, src, chunk):
         self._log("exec", src, chunk)
@@ -491,17 +495,25 @@ def make_ns(**extra):
     return ns
 
 
+class FakeLayerCanvas:
+    def __init__(self, w, h):
+        self.w = w
+        self.h = h
+        self._buf = bytearray(w * h * 2)
+
+
 class FakeLayer:
+    """A layer as the glue sees it: the canvas whose pixels it binds, and the
+    one Python-side draw a Lua layer still makes (a paint image)."""
+
     def __init__(self, w, h, log=None):
         self.w = w
         self.h = h
+        self._canvas = FakeLayerCanvas(w, h)
         self.log = [] if log is None else log
 
     def spr(self, *a):
         self.log.append(("layer.spr", self) + a)
-
-    def cls(self, c):
-        self.log.append(("layer.cls", self, c))
 
 
 LUA_SRC = "function _update() end"
@@ -901,7 +913,12 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     from runtime.lua_ext import PRELUDE_HANDLES
 
     w.run()
-    wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - {"__id", "__img"}
+    # Fields and a metamethod, not handles: a layer's id, canvas and edited
+    # mark, an image's id. And the two layer natives are the RUNTIME's own C
+    # (moycore_layers.h), installed by run_begin and hl_new, never registered.
+    fields = {"__id", "__img", "__c", "__e", "__index"}
+    natives = {"__layer_canvas", "__layer_verb"}
+    wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - fields - natives
     gated = {n for n in wanted if n.startswith("__ed_")}
     assert gated, "the editor handles vanished from the prelude"
     got = {n for n in w.core.registered if n.startswith("__")}
@@ -926,16 +943,18 @@ def test_a_layer_made_through_a_handle_is_pinned_by_the_run(w):
     assert lid == 0
     lay = run._layers[0]
     assert (lay.w, lay.h) == (64, 32)
-    reg["__layer_cls"](0.0, 3.0)
-    reg["__layer_spr"](0.0, 7.0, 1.0, 2.0, -1.0, 1.0, 0.0)
+    # Its pixels went to the run, which draws into them with libmoy's verbs.
+    assert ("layer_bind", 64, 32) in w.core.calls
     reg["__draw_layer"](lid, 8, 9)
-    assert ("layer.cls", lay, 3) in w.ns["_log"]
-    assert ("layer.spr", lay, 7, 1, 2, -1, 1, 0) in w.ns["_log"]
     assert ("draw_layer", lay, 8, 9) in w.ns["_log"]
-    # By TYPE, not by value: `7.0 == 7`, so a comparison alone cannot see the
-    # coercion being dropped.
-    spr = [c for c in w.ns["_log"] if c[0] == "layer.spr"][0]
-    assert all(isinstance(v, int) for v in spr[2:]), spr
+    assert not getattr(lay._canvas, "_edited", False)
+    # A layer libmoy drew into reaches draw_layer marked, so the console takes
+    # no copy it predicted from the old pixels.
+    reg["__draw_layer"](lid, 8, 9, True)
+    assert lay._canvas._edited is True
+    # By TYPE, not by value: `64.0 == 64`, so a comparison alone cannot see
+    # the coercion being dropped.
+    assert isinstance(lay.w, int) and isinstance(lay.h, int), (lay.w, lay.h)
 
 
 def test_an_image_handle_indexes_the_runs_own_registry(w):

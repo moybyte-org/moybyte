@@ -394,10 +394,17 @@ transfer.
 ## Superset verbs are not bound here
 
 `make_layer`/`draw_layer`/`image`, scenes and `view()` are
-moybyte's, not the spec's. The cart census that decided to leave them
-Python-side is in the plan: one Lua cart in the tree uses layers, at one blit
-per frame rather than one per sprite, so a second console in C would trade the
-duplication this module deletes for a smaller one.
+moybyte's, not the spec's, and they stay Python-side: registered trampolines
+and the int-handle prelude in `runtime/lua_ext.py`. A layer is the console's
+object (an off-heap canvas lent to the run), not a second console in C.
+
+What a cart draws INTO a layer is the exception, and it is libmoy's verb table
+again rather than a copy of it (#225): `moycore_layers.h` gives the prelude
+`__layer_canvas`, a `moy_canvas` over the layer's buffer (which `layer_bind`
+hands over from the `__layer_new` trampoline), and `__layer_verb`, which wraps
+a screen verb into a layer method that points `con->canvas` at that canvas for
+one protected call. The host's Lua shim (`runtime/moyhost_lua.c`) includes the
+same header, so both Lua hosts draw into a layer through one body.
 
 ## Testing
 

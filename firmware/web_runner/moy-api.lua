@@ -306,7 +306,9 @@ function volume(level) end
 ---@field W integer
 ---@field H integer
 local MoyLayer = {}
----Draw into the layer with the same verbs (l:spr(...), l:cls(...)).
+---Every drawing verb draws into a layer as a colon call with the screen
+---verb's arguments (l:rect(...), l:print(...)); a layer's camera, clip, pal,
+---palt and fillp are its own and keep their values across frames.
 ---@param img integer|MoyImage tile id or image handle
 ---@param x? integer
 ---@param y? integer
@@ -316,6 +318,25 @@ local MoyLayer = {}
 function MoyLayer:spr(img, x, y, colorkey, scale, flip) end
 ---@param c? integer
 function MoyLayer:cls(c) end
+function MoyLayer:pix(x, y, c) end
+function MoyLayer:line(x0, y0, x1, y1, c) end
+function MoyLayer:rect(x, y, w, h, c) end
+function MoyLayer:rectb(x, y, w, h, c) end
+function MoyLayer:circ(cx, cy, r, c) end
+function MoyLayer:circb(cx, cy, r, c) end
+function MoyLayer:oval(x, y, rx, ry, c) end
+function MoyLayer:ovalb(x, y, rx, ry, c) end
+function MoyLayer:tri(x1, y1, x2, y2, x3, y3, c) end
+function MoyLayer:trib(x1, y1, x2, y2, x3, y3, c) end
+function MoyLayer:print(s, x, y, c) end
+function MoyLayer:sspr(sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip) end
+function MoyLayer:map(mx, my, w, h, sx, sy, colorkey, scale) end
+function MoyLayer:tline(x0, y0, x1, y1, mx, my, mdx, mdy, colorkey) end
+function MoyLayer:camera(x, y) end
+function MoyLayer:clip(x, y, w, h) end
+function MoyLayer:pal(c0, c1) end
+function MoyLayer:palt(c, on) end
+function MoyLayer:fillp(p, c) end
 
 ---An off-screen canvas (w x h, may be wider than the screen): pre-render a
 ---level ONCE, then window-copy per frame with draw_layer -- the 60fps

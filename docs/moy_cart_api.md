@@ -115,7 +115,11 @@ The few Lua-specific notes:
   the Python twin of the same cart had one.
 - `print(...)` is the **draw-text verb** (as in this doc), not Lua's console print.
 - Layer methods are **colon calls**: `lay = make_layer(w, h)`, then `lay:cls(0)`,
-  `lay:map(...)`, `lay:spr(...)`; stamp with `draw_layer(lay, cam_x, cam_y)`.
+  `lay:map(...)`, `lay:rect(...)`; stamp with `draw_layer(lay, cam_x, cam_y)`.
+  A layer answers every drawing verb with the screen verb's arguments — `cls`
+  `pix` `line` `rect` `rectb` `circ` `circb` `oval` `ovalb` `tri` `trib`
+  `print` `spr` `sspr` `map` `tline` — and has its own `camera`, `clip`, `pal`,
+  `palt` and `fillp`, which keep their values across frames.
 - `spr(n, x, y, colorkey, scale, flip)` takes **sheet-tile numbers** (the fast
   path). Paint images (`image("name")`) are placed via a layer —
   `lay:spr(image("bg"), x, y)` — not passed to `spr()` directly; multi-tile

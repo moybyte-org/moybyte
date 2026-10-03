@@ -253,7 +253,8 @@ class MoycoreRun:
             # calling make_layer() gets "unsupported value" back from the
             # trampoline and the whole run falls to the old runtime, which is
             # what sakura_lua/brick_siege/ray did before this landed.
-            self._layers, self._images = install_handles(ns, _moycore.register)
+            self._layers, self._images = install_handles(
+                ns, _moycore.register, _moycore.layer_bind)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 raise RuntimeError(err)

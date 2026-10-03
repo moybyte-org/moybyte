@@ -110,7 +110,8 @@ class MoycoreHostRun:
             # the same module and the same prelude the boards run. Without it
             # `make_layer` returns a Layer, the dispatch cannot marshal it, and
             # the cart gets nil back: sakura_lua died on `lay:spr(...)`.
-            self._layers, self._images = install_handles(ns, reg)
+            self._layers, self._images = install_handles(
+                ns, reg, self._run.layer_bind)
             err = self._run.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 self._run.close()

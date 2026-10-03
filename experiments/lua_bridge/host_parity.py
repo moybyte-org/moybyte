@@ -120,10 +120,19 @@ class _Pt:
         self.x, self.y = x, y
 
 
+class _PyLayerCanvas:
+    """The pixels a Lua run's own layer verbs draw into (lua_ext's bind)."""
+
+    def __init__(self, w, h):
+        self.w, self.h = w, h
+        self._buf = bytearray(w * h * 2)
+
+
 class _PyLayer:
-    def __init__(self, events, lid):
+    def __init__(self, events, lid, w, h):
         self._events = events
         self._id = lid
+        self._canvas = _PyLayerCanvas(w, h)
 
     def spr(self, img, x, y, ck=-1, *a):
         self._events.append(("layer_spr", self._id, img, x, y))
@@ -160,7 +169,7 @@ class FakeConsole:
     # -- the verbs -----------------------------------------------------------
     def make_layer(self, w, h):
         self.events.append(("make_layer", w, h))
-        lay = _PyLayer(self.events, self._layers)
+        lay = _PyLayer(self.events, self._layers, w, h)
         self._layers += 1
         return lay
 

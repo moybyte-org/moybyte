@@ -48,7 +48,9 @@ extensions failed that test first.
 **Known gaps, so nobody mistakes the pin for wider than it is.** Covered today:
 cls default form, map with colorkey and scale, clip clamped both directions,
 camera's return value read back, pal past index 63 and a repeated tint, palt
-un-setting, the 2-arg `pix` read, btn/btnp edges, pmem wrap, audio order. NOT
+un-setting, the 2-arg `pix` read, btn/btnp edges, pmem wrap, audio order, and
+drawing INTO a layer — its own camera (set and read back), clip, pal and the
+shape, text, sprite, map and textured-line verbs, read across their edges. NOT
 covered: `key`/`keyp`, `touch`/`mouse`, `textmode`/`quit`/`view`, the
 player-slot form `btn(name, p)`, scenes, the exit-time state
 read-back, and non-draw-lane **liveness guards** — the draw lanes assert they
@@ -96,11 +98,19 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   three (`make_layer`/`draw_layer`/`image`) ride int handles plus a Lua prelude
   because a trampoline marshals scalars and tuples. A cart needing a
   Python-backed verb does not need a second engine.
-  **What would reopen C layers:** a Lua cart that makes layers per-frame-HOT —
-  `draw_layer` inside a sprite loop, or many layers composited per frame. Today
-  the census is one cart at one blit per frame, and the cost of C layers is a
-  second console in C (each moybyte layer is a full canvas with the whole verb
-  table bound to it).
+  **What a cart DRAWS into a layer is libmoy's (#225, 2026-10-04).** The layer
+  object stays the console's — an off-heap canvas, lent to the run and
+  composited by `draw_layer`'s blit — while each layer method is the screen's
+  libmoy verb with the console's canvas pointed at the layer's buffer for one
+  call (`native/moycore/moycore_layers.h`, the shape of libmoy's own layer
+  method and of the wasm binding's `target`). That gives a layer SPEC.md 6's
+  whole verb set with no trampoline per verb, which could not have carried
+  `sspr` and `tline` anyway (more arguments than either bridge passes). It was
+  forced by conformance — moy-spec `403680a`'s five `layer_*` scenes — not by a
+  hot cart, and it is not a second console in C: the canvas is the screen's
+  `moy_canvas`, the verbs are the screen's. **What would reopen the layer
+  OBJECT in C:** a Lua cart that composites many layers per frame, since
+  `draw_layer` is still one trampoline a call.
 - **Registration is a DENY list, not an allow list** — what is stable and
   enumerable is what libmoy OWNS. One definition, `runtime/lua_ext.py`, imported
   by every runtime including the host's; an allow list silently drops any verb

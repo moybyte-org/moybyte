@@ -34,7 +34,9 @@
 // Verbs moybyte adds ON TOP of the spec -- layers/images, scenes,
 // view() -- are not IMPLEMENTED here, and they do not need to be: they
 // are REGISTERED here, as Lua globals backed by the same Python closures they
-// always had (register() below).
+// always had (register() below). What a cart DRAWS into a layer is the one
+// exception, and it is libmoy's verb table again, not a copy of it: a layer
+// method retargets the console's canvas for one call (moycore_layers.h).
 //
 // That distinction is the whole design, and getting it wrong cost a rewrite:
 // EVERY Lua cart runs here -- libmoy's table first, extra verbs on top as
@@ -60,6 +62,7 @@
 #include "lauxlib.h"
 
 #include "moy.h"
+#include "moycore_layers.h"
 
 // The board allocator, probed the way moy_lua probes it: present on an ESP-IDF
 // build, absent on the host/unix/wasm ones, which then use plain realloc.
@@ -207,6 +210,7 @@ typedef struct {
     int16_t    *aq;              // Python-owned array("h"): [n, (op,a,b,c)*]
     size_t      aq_cap;
     mp_obj_t    cfg;             // the cart's config dict, or MP_OBJ_NULL
+    moycore_layers layers;       // the cart's layers' canvases (moycore_layers.h)
     int         open;
 } moycore_run;
 
@@ -1138,6 +1142,22 @@ static mp_obj_t mod_register(mp_obj_t name_obj, mp_obj_t fn)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_register_obj, mod_register);
 
+// layer_bind(buf, w, h) -- park a cart layer's RGB565 buffer for the prelude's
+// make_layer, which builds its canvas next (moycore_layers.h). Called from the
+// __layer_new trampoline, so the VM is mid-call: this touches no Lua state.
+static mp_obj_t mod_layer_bind(mp_obj_t buf_obj, mp_obj_t w_obj, mp_obj_t h_obj)
+{
+    if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError,
+                                MP_ERROR_TEXT("moycore: no run"));
+    size_t len = 0;
+    void *pix = buf_w(buf_obj, &len);
+    if (moycore_layers_park(&RUN.layers, pix, len, mp_obj_get_int(w_obj),
+                            mp_obj_get_int(h_obj)) != 0)
+        mp_raise_ValueError(MP_ERROR_TEXT("layer_bind: buffer too small"));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_layer_bind_obj, mod_layer_bind);
+
 // -- the per-verb profiler ---------------------------------------------------
 //
 // WHY IT EXISTS. A Lua/p8 cart draws through libmoy's own C verbs straight into
@@ -1986,6 +2006,8 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     lua_setglobal(RUN.L, "__moy_map_masked");
     lua_pushcfunction(RUN.L, l_map_flags);
     lua_setglobal(RUN.L, "__moy_map_flags");
+    // The layer glue's two natives, captured and cleared by the prelude.
+    moycore_layers_open(RUN.L, &RUN.layers, &RUN.con);
     // ONE table: libmoy's fget/fset/map(..., layers) and the p8 shim's masked
     // walk read the same 512 bytes, seeded above from the cart's file. The
     // shim's __moy_map_flags(gff) overwrites it at cart boot, which is what a
@@ -3506,6 +3528,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_perf_reset),  MP_ROM_PTR(&mod_perf_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_bind),  MP_ROM_PTR(&mod_layer_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_gc),          MP_ROM_PTR(&mod_gc_obj) },
     { MP_ROM_QSTR(MP_QSTR_active),      MP_ROM_PTR(&mod_active_obj) },

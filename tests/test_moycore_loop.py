@@ -248,24 +248,30 @@ moycore.close()
 # real runtime/lua_ext.py, imported and executed -- not a transcription of it.
 from lua_ext import PRELUDE_HANDLES, install_handles
 
+class _Canvas:
+    def __init__(self, w, h):
+        self.w, self.h = w, h
+        self._buf = bytearray(w * h * 2)
+
 class _Layer:
     def __init__(self, w, h):
         self.wh = (w, h)
+        self._canvas = _Canvas(w, h)
     def spr(self, *a):
         calls.append(("spr",) + a)
-    def cls(self, c):
-        calls.append(("cls", c))
 
 class _Img:
     pass
 
 calls = []
 _img = _Img()
-NS = {"make_layer": lambda w, h: (calls.append(("new", w, h)), _Layer(w, h))[1],
+LAYERS = []
+NS = {"make_layer": lambda w, h: (calls.append(("new", w, h)),
+                                  LAYERS.append(_Layer(w, h)), LAYERS[-1])[2],
       "draw_layer": lambda l, x, y: calls.append(("draw", l.wh, x, y)),
       "image": lambda n: _img if n == "bg" else None}
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
-install_handles(NS, moycore.register)
+install_handles(NS, moycore.register, moycore.layer_bind)
 print("PRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
 print("OBJ", moycore.load(((
     "function _init()\n"
@@ -281,6 +287,16 @@ print("OBJ", moycore.load(((
 moycore.tick(0.03125)
 print("OBJCALLS", calls)
 print("OBJGLOBALS", moycore.get_global("N"), moycore.get_global("MISS"))
+# L:cls and the tile spr are libmoy's own verbs against the layer's buffer, not
+# calls into Python: the layer holds colour 3 where the sprite is not, and the
+# sprite where it is. The screen's cls(3) is the word colour 3 is.
+_lay = LAYERS[0]
+moycore.exec("cls(3)", "@screen3")
+_w3 = fb[0] | (fb[1] << 8)
+_lw = [(_lay._canvas._buf[2 * i] | (_lay._canvas._buf[2 * i + 1] << 8))
+       for i in range(9 * 5)]
+print("OBJPIX", _w3 != 0, _lw[0] == _w3, _lw[8] == _w3,
+      sum(1 for v in _lw if v != _w3) > 0)
 moycore.close()
 
 # The placement API (#85/#109) over the SAME shared Scenes the Python tier
@@ -305,7 +321,7 @@ PNS = {"scene": _scenes.scene, "load_scene": _scenes.load_scene,
             for a in _world.actors()])}
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
 moycore.register("draw_scene", PNS["draw_scene"])
-install_handles(PNS, moycore.register)
+install_handles(PNS, moycore.register, moycore.layer_bind)
 print("PPRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
 print("PLACE", moycore.load(((
     "function _init()\n"
@@ -742,14 +758,18 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["PRE"][1] == "None", out
     assert by["OBJ"][1] == "None", \
         "the prelude did not define make_layer/image for the cart: %s" % out
-    assert ("OBJCALLS [('new', 9, 5), ('cls', 3), "
-            "('spr', <_Img object>, 1, 2), ('spr', 9, 1, 2, -1, 2, 1), "
+    assert ("OBJCALLS [('new', 9, 5), "
+            "('spr', <_Img object>, 1, 2), "
             "('draw', (9, 5), 5, 6)]" in out.replace(
                 out[out.index("<_Img"):out.index(">", out.index("<_Img")) + 1],
                 "<_Img object>")), \
         "layer/image handles did not reach the Python objects: %s" % out
     assert by["OBJGLOBALS"][1:] == ["3", "None"], \
         "the table library or the missing-image nil regressed: %s" % out
+    # The layer's own drawing is libmoy's (#225): cls and the tile sprite
+    # reached the layer's pixels without one call into Python.
+    assert by["OBJPIX"][1:] == ["True", "True", "True", "True"], \
+        "libmoy did not draw into the layer's buffer: %s" % out
 
     # The placement API (#214). scene() reached Lua as NIL until the rows got a
     # route across the boundary, so `ipairs(scene())` was "value expected" on

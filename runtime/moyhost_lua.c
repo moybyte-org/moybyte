@@ -43,6 +43,7 @@
 
 #include "moy.h"
 #include "moyhost_console.h"
+#include "moycore_layers.h"
 
 typedef struct {
     hc_console  hc;          /* the console, shared with moyhost_wasm.c */
@@ -55,6 +56,7 @@ typedef struct {
                                 caller's canvas is already RGB565 */
     moy_pixel  *shadow;      /* the 565 buffer libmoy draws into when it is */
     int         npix;
+    moycore_layers layers;   /* the cart's layers' canvases, the boards' body */
 } host_lua;
 
 static host_lua *CUR;        /* the run hl_tramp and hl_set_dispatch serve */
@@ -80,11 +82,11 @@ static host_lua *CUR;        /* the run hl_tramp and hl_set_dispatch serve */
  * have arrived as ("hidden", id, 0). Nothing mixed the kinds until the
  * placement verbs did, which is why that survived this long; every existing
  * verb (all ints, or the lone string of image("bg")) sees what it always saw. */
-/* Eight, not four: the widest wrapper is the prelude's
- * __layer_spr(lid, tile, x, y, ck, scale, flip) at seven. Four silently
- * TRUNCATED it -- the extra arguments never reached Python, the closure raised
- * on its missing parameters, and hl_tramp reads a raising verb as nil. A layer
- * sprite would simply not draw, with nothing printed anywhere. */
+/* Arguments past eight are DROPPED, and a Python verb missing a parameter
+ * raises, which hl_tramp reads as nil: the call simply does nothing. The
+ * prelude's wrappers stay well inside it (the widest is __actor_set at five),
+ * and a layer's drawing verbs do not come through here at all -- they are
+ * libmoy's own, retargeted (moycore_layers.h). */
 #define HL_MAX_IARGS 8
 
 /* Argument i: HL_NUM takes iargs[i], HL_STR sargs[i], HL_BOOL iargs[i] != 0,
@@ -214,7 +216,18 @@ host_lua *hl_new(void *pix, int nbytes, int w, int h, int indexed,
     if (moy_lua_open(r->L, &r->hc.con) != 0) {
         lua_close(r->L); free(r->shadow); free(r); CUR = NULL; HC = NULL; return NULL;
     }
+    moycore_layers_open(r->L, &r->layers, &r->hc.con);
     return r;
+}
+
+/* Park a cart layer's RGB565 buffer for the prelude's make_layer, which builds
+ * its canvas next (native/moycore/moycore_layers.h). 0 on success; nonzero for
+ * a buffer short of w x h pixels, and on the indexed bridge, whose one shadow
+ * is the screen's. */
+int hl_layer_bind(host_lua *r, void *pix, int nbytes, int w, int h)
+{
+    if (r->idx || nbytes < 0) return 1;
+    return moycore_layers_park(&r->layers, pix, (size_t)nbytes, w, h);
 }
 
 /* The sheet, flags and map: moyhost_console.h's, which says why each is

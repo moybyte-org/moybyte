@@ -293,6 +293,20 @@ NOT_REGISTRABLE = frozenset((
     "open_editor",                         # an editor handle: prelude + handles
 ))
 
+# What a Lua cart's layer answers: every drawing verb, and the draw STATE that
+# scopes it -- libmoy's own LAYER_VERBS (native/moycore/libmoy/moy_lua.c), the
+# set moy-spec's players give a layer, and tests/test_lua_layers.py holds the
+# two lists equal. Each method is the SCREEN's verb, libmoy's C, run against
+# the layer's canvas (native/moycore/moycore_layers.h), so a layer's camera,
+# clip and palettes are its own and nothing per call crosses into Python.
+# `spr` also places a paint image, which is the console's object and the one
+# layer draw that goes through Python.
+LAYER_VERBS = (
+    "cls", "pix", "line", "rect", "rectb", "circ", "circb", "oval", "ovalb",
+    "print", "camera", "clip", "pal", "palt", "fillp", "spr", "map",
+    "tri", "trib", "sspr", "tline",
+)
+
 # The prelude in two chunks, because moycore takes only one of them.
 #
 # Under moy_lua every verb is a registered Python trampoline, so both
@@ -306,34 +320,35 @@ NOT_REGISTRABLE = frozenset((
 PRELUDE_HANDLES = """
 do
   local layer_new, layer_spr_img = __layer_new, __layer_spr_img
-  local layer_spr, layer_cls = __layer_spr, __layer_cls
-  local layer_map = __layer_map
+  local layer_canvas, layer_verb = __layer_canvas, __layer_verb
   local draw_layer_h, image_h = __draw_layer, __image_handle
-  __layer_new, __layer_spr_img, __layer_spr = nil, nil, nil
-  __layer_cls, __draw_layer, __image_handle = nil, nil, nil
-  __layer_map = nil
+  __layer_new, __layer_spr_img, __layer_canvas = nil, nil, nil
+  __layer_verb, __draw_layer, __image_handle = nil, nil, nil
+  local setmt, type = setmetatable, type
+  -- The methods every layer shares (LAYER_VERBS in runtime/lua_ext.py): the
+  -- screen's own verbs, run against the layer's canvas `__c`. Each one sets
+  -- `__e`, which tells draw_layer the pixels moved since it last looked.
+  local Layer = {}
+  Layer.__index = Layer
+  for _, name in ipairs({@LAYER_VERBS@}) do
+    Layer[name] = layer_verb(_ENV[name])
+  end
+  local spr_tile = Layer.spr
+  function Layer.spr(self, img, x, y, ...)
+    if type(img) == "table" then
+      self.__e = true
+      layer_spr_img(self.__id, img.__img, x or 0, y or 0)
+    else
+      return spr_tile(self, img, x, y, ...)
+    end
+  end
   function make_layer(w, h)
-    local l = { __id = layer_new(w, h), W = w, H = h }
-    l.spr = function(self, img, x, y, ck, sc, fl)
-      if type(img) == "table" then
-        layer_spr_img(self.__id, img.__img, x or 0, y or 0)
-      else
-        layer_spr(self.__id, img, x or 0, y or 0, ck or -1, sc or 1, fl or 0)
-      end
-    end
-    l.cls = function(self, c) layer_cls(self.__id, c or 0) end
-    -- The tile route into a layer, which is how a scroller actually fills one:
-    -- a level is a map, and without this a Lua cart had to spr() every cell.
-    -- The tile counts default to the layer's own size rather than crossing a
-    -- nil, because the trampoline speaks scalars.
-    l.map = function(self, mx, my, tw, th, sx, sy)
-      layer_map(self.__id, mx or 0, my or 0, tw or (self.W // 8),
-                th or (self.H // 8), sx or 0, sy or 0)
-    end
-    return l
+    local id = layer_new(w, h)
+    return setmt({ __id = id, __c = layer_canvas(), W = w, H = h }, Layer)
   end
   function draw_layer(l, cx, cy)
-    draw_layer_h(l.__id, cx or 0, cy or 0)
+    draw_layer_h(l.__id, cx or 0, cy or 0, l.__e)
+    l.__e = nil
   end
   local cache = {}
   function image(name)
@@ -653,7 +668,9 @@ end
 # One name for everything the handle registry backs, because every runtime
 # feeds `PRELUDE_HANDLES` to its VM alongside one `install_handles` call and a
 # second name would be a second thing to remember to send.
-PRELUDE_HANDLES = PRELUDE_HANDLES + PRELUDE_EDITOR
+PRELUDE_HANDLES = (PRELUDE_HANDLES.replace(
+    "@LAYER_VERBS@", ", ".join('"%s"' % v for v in LAYER_VERBS))
+    + PRELUDE_EDITOR)
 
 _LUA_PRELUDE = PRELUDE_HANDLES + PRELUDE_FASTMATH
 
@@ -703,7 +720,7 @@ def rows_blob(rows, ident):
     return ",".join(parts) + ","
 
 
-def install_handles(ns, reg):
+def install_handles(ns, reg, bind):
     """Register the int-handle half of PRELUDE_HANDLES; return the registries.
 
     The object-valued API entries (layers, paint images, the placement rows of
@@ -713,8 +730,12 @@ def install_handles(ns, reg):
     lists also PIN the objects for the run's lifetime; drop them at close and
     the layers go with them.
 
-    `reg` is the runtime's own register verb (`moy_lua.register` or
-    `moycore.register`), which is the only thing that differs between the two.
+    `reg` is the runtime's own register verb (`moycore.register`, or the host
+    run's `register`), and `bind` its layer bind (`moycore.layer_bind`, the
+    host run's `layer_bind`): it hands a layer's pixels to the run, whose
+    libmoy verbs then draw into them (LAYER_VERBS). Those two are the only
+    things that differ between the runtimes. `bind` is REQUIRED because a run
+    without it would make layers its cart can never draw into.
     """
     layers = []
     images = []
@@ -723,25 +744,23 @@ def install_handles(ns, reg):
     image = ns.get("image")
 
     def _layer_new(w, h):
-        layers.append(make_layer(int(w), int(h)))
+        lay = make_layer(int(w), int(h))
+        c = lay._canvas
+        bind(c._buf, c.w, c.h)
+        layers.append(lay)
         return len(layers) - 1
 
     def _layer_spr_img(lid, ih, x, y):
         layers[int(lid)].spr(images[int(ih)], int(x), int(y))
 
-    def _layer_spr(lid, tile, x, y, ck, sc, fl):
-        layers[int(lid)].spr(int(tile), int(x), int(y), int(ck),
-                             int(sc), int(fl))
-
-    def _layer_cls(lid, c):
-        layers[int(lid)].cls(int(c))
-
-    def _layer_map(lid, mx, my, tw, th, sx, sy):
-        layers[int(lid)].map(int(mx), int(my), int(tw), int(th),
-                             int(sx), int(sy))
-
-    def _draw_layer(lid, cx, cy):
-        draw_layer(layers[int(lid)], cx, cy)
+    def _draw_layer(lid, cx, cy, edited=None):
+        lay = layers[int(lid)]
+        if edited:
+            # libmoy drew into it behind the canvas's back: a copy predicted
+            # from its old pixels must not be taken (device_canvas
+            # blit_window_from).
+            lay._canvas._edited = True
+        draw_layer(lay, cx, cy)
 
     def _image_handle(name):
         img = image(name) if image is not None else None
@@ -752,9 +771,6 @@ def install_handles(ns, reg):
 
     reg("__layer_new", _layer_new)
     reg("__layer_spr_img", _layer_spr_img)
-    reg("__layer_spr", _layer_spr)
-    reg("__layer_cls", _layer_cls)
-    reg("__layer_map", _layer_map)
     reg("__draw_layer", _draw_layer)
     reg("__image_handle", _image_handle)
 

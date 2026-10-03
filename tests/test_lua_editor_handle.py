@@ -121,7 +121,7 @@ class Run:
         self.ns = {"open_editor": open_editor} if granted else {}
         self.buf = bytearray(96 * 64 * 2)
         self.run = lb.HostLuaRun(self.buf, 96, 64)
-        install_handles(self.ns, self.run.register)
+        install_handles(self.ns, self.run.register, self.run.layer_bind)
         assert self.run.exec(PRELUDE_HANDLES, "prelude") is None
 
     def get(self, name):
