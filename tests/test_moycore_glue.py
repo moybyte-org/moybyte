@@ -1921,6 +1921,27 @@ def test_a_cart_without_its_main_wasm_is_refused_by_name(tmp_path, make):
         world.close()
 
 
+def test_a_module_this_firmware_cannot_link_reads_as_the_firmware(tmp_path):
+    """A load that stops on a helper the module calls and this firmware's
+    runtime does not register (#229: `__fixsfdi` on the P4) is retried on
+    the interpreter like any non-tamper refusal, but the cause is the
+    console's -- "firmware" -- so the Player's notice does not tell the
+    player the cart needs an update."""
+    cart, main = _compiled(tmp_path)
+    world = _wasm_world()
+    world.core.wasm_open_errs = [
+        "load: AOT module load failed: resolve symbol __fixsfdi failed", None]
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        run = world.mod.WasmRun(ws, make_ns(), None)
+        assert run.interp and run.interp_cause == "firmware"
+        opens = [c for c in world.core.calls if c[0] == "wasm_open"]
+        assert [o[9] for o in opens] == [False, True]
+        assert opens[1][1] == main
+    finally:
+        world.close()
+
+
 def test_a_key_mismatch_that_retries_clean_reads_as_missing(tmp_path):
     """A corrupted or mismatched AOT file (rare: the name matched, the
     content did not) is retried on the interpreter same as an absent one,

@@ -307,6 +307,25 @@ def test_a_cart_with_no_matching_module_plays_with_a_needs_update_notice(tmp_pat
     assert ws.notice_active()
 
 
+def test_a_module_this_firmware_cannot_link_blames_the_console(tmp_path):
+    """The third cause: the module is this console's, and the load stopped on
+    a helper the firmware's runtime does not register (#229). The cart is not
+    what needs an update, the console is, and the sub-line says so -- within
+    the characters the notice prints."""
+    from runtime import player
+    ws = _open_interp_hello(tmp_path, "firmware")
+    sub = player.INTERP_NOTICE_SUB["firmware"]
+    assert ws._notice == (player.INTERP_NOTICE_TITLE, sub, "warn")
+    assert sub != player.INTERP_NOTICE_SUB["missing"]
+    printed = []
+    ws.sys_canvas.print = lambda text, *a, **k: printed.append(text)
+    for text in player.INTERP_NOTICE_SUB.values():
+        ws._notice = (player.INTERP_NOTICE_TITLE, text, "warn")
+        del printed[:]
+        ws._draw_notice()
+        assert text in printed, (text, printed)
+
+
 def test_a_module_whose_signature_fails_keeps_the_error_panel(tmp_path):
     """Tamper evidence is the one refusal WasmRun never retries -- it is
     the engine's own decision, made before the Player is asked anything --

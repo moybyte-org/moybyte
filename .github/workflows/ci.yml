@@ -71,6 +71,26 @@ jobs:
       - name: wasi-sdk for the compiled showcase cart
         run: .venv/bin/python tools/jet_cart.py --toolchain
 
+      # The pinned AOT compilers (tools/wasm_module.py's COMPILERS, one 65 MB
+      # binary under each target's name), for the checks that compile a module
+      # with a console chip's own flags: tests/test_aot_symbols.py -- every
+      # symbol a module calls resolves in that chip's relocation table, which
+      # FAILS under CI rather than skipping without them -- and the key and
+      # push tests. Cached under the pins; the fetch checks each hash.
+      - name: wamrc pins
+        id: wamrc
+        run: |
+          echo "sha256=$(grep -o '"sha256": "[0-9a-f]*"' tools/wasm_module.py | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pinned wamrc
+        uses: actions/cache@v4
+        with:
+          path: experiments/wasm_aot/toolchain/dist
+          key: wamrc-${{ steps.wamrc.outputs.sha256 }}
+
+      - name: The pinned wamrc for the AOT checks
+        run: .venv/bin/python tools/wasm_module.py compilers
+
       # The COMPILED-VS-COMPILED lane. tests/test_gfx_binding.py's
       # test_matches_the_native_moy_gfx drives the same ops through the host's
       # ctypes binding and through the REAL native moy_gfx under a desktop

@@ -9,7 +9,7 @@
     "native/moy_wasm/wamr/core/iwasm/aot/aot_reloc.h": "aff58ad1392902f75f5ff093b12d69421a29bfa4e7dd4a6a3225ed258c0da7e1",
     "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.c": "169e5c7a9e60a01db389956bac5c0720bbfa5e8992567f056a9833f23a546d0d",
     "native/moy_wasm/wamr/core/iwasm/aot/aot_runtime.h": "1cfb51f6d86c7af11da129961c2ea1da958fab3d9aefe38a24d48e1355db80ac",
-    "native/moy_wasm/wamr/core/iwasm/aot/arch/aot_reloc_riscv.c": "4677e121347781674fa90f1bb9b467b24fc660d36b47e1299ea1b770f2e8c0f8",
+    "native/moy_wasm/wamr/core/iwasm/aot/arch/aot_reloc_riscv.c": "6bb42b4bbd2da3ad4b5907e7a3f78959eb724a1144fcb657ac02bea0f48427cc",
     "native/moy_wasm/wamr/core/iwasm/aot/arch/aot_reloc_xtensa.c": "cbabd4b585c4d5fb652ee6b934f35c7de804bdc6977672f2ba0b0de53f409bc3",
     "native/moy_wasm/wamr/core/iwasm/common/arch/invokeNative_riscv.S": "8e6e4d38424363e4369a098ed03e03f5fa39b01ef77468c102ed644d26ff3943",
     "native/moy_wasm/wamr/core/iwasm/common/arch/invokeNative_xtensa.s": "0d0a058e5b13db7b52b3eb5c3ec6cc614129960f2651697e3118c65bea329434",
@@ -92,8 +92,8 @@
   },
   "upstream": {
     "branch": "moybyte-2.4.5",
-    "commit": "a03cce7e8ceb08a22e2527a9a9e69b0197459369",
-    "date": "2026-10-01",
+    "commit": "3e3909d8ce86afe8112f30b70427d3ffc5456f72",
+    "date": "2026-10-03",
     "repo": "moybyte-org/wasm-micro-runtime"
   }
 }

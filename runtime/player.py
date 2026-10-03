@@ -302,13 +302,16 @@ _MB = 1024 * 1024
 # with no module by this console's own name -- none built yet, or one left
 # over from a format this console has moved past -- needs a fresh build;
 # one whose module matched but carried no signature while Unknown sources is
-# off is simply not signed. Any other non-tamper refusal (a corrupt or
-# foreign-chip key despite a matching file name) reads the same as "missing":
-# this console's copy is not one it can use, whatever the reason.
+# off is simply not signed; one whose module calls a helper this firmware's
+# runtime does not register is waiting on the CONSOLE, not the cart. Any
+# other non-tamper refusal (a corrupt or foreign-chip key despite a matching
+# file name) reads the same as "missing": this console's copy is not one it
+# can use, whatever the reason.
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 INTERP_NOTICE_SUB = {
     "missing": "needs an update",
     "unsigned": "isn't signed",
+    "firmware": "console needs an update",
 }
 INTERP_NOTICE_SUB_DEFAULT = INTERP_NOTICE_SUB["missing"]
 

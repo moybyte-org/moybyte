@@ -465,6 +465,13 @@ _AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature"
 # sub-line ("isn't signed" against "needs an update", runtime/player.py).
 _AOT_UNSIGNED = "refused: unsigned module"
 
+# A load that stops on a helper the module calls and this firmware's runtime
+# does not register ("load: AOT module load failed: resolve symbol <name>
+# failed", #229) is the CONSOLE's gap, not the cart's: the module is the one
+# this console's chip and format name, and a firmware that registers the
+# helper loads it. `self.interp_cause` reads it as "firmware".
+_AOT_UNRESOLVED = "resolve symbol "
+
 
 def aot_path(cart_dir, main, chip, format):
     """Where a cart's compiled module for `chip` and a compiled-code format
@@ -709,8 +716,8 @@ class WasmRun(MoycoreRun):
         # cart plays on the interpreter -- main.wasm itself, which needs
         # neither key nor signature. `self.interp` is what the Player reads
         # to show the short notice (never the blocking panel a missing or
-        # unsigned module used to get); `self.interp_cause` ("missing" or
-        # "unsigned") is which sub-line it shows.
+        # unsigned module used to get); `self.interp_cause` ("missing",
+        # "unsigned" or "firmware") is which sub-line it shows.
         #
         # An engine with no compiled-module tier -- the browser's
         # (native/moy_wasm_web), whose CHIP is None -- runs main.wasm itself
@@ -798,13 +805,16 @@ class WasmRun(MoycoreRun):
                 if err and not err.startswith(_AOT_TAMPER_EVIDENCE):
                     # Not tamper evidence -- a mismatched or unsigned module,
                     # despite carrying this console's own file name (rare: a
-                    # push tool built it unsigned, or the file is corrupt).
-                    # The cart itself is fine; only this console's copy of
-                    # its module is unusable, so it plays on the interpreter,
-                    # exactly as it would have with no module at all.
+                    # push tool built it unsigned, or the file is corrupt),
+                    # or one calling a helper this firmware lacks. The cart
+                    # itself is fine; only this console cannot use its
+                    # module, so it plays on the interpreter, exactly as it
+                    # would have with no module at all.
                     self.interp = True
-                    self.interp_cause = ("unsigned" if err.startswith(_AOT_UNSIGNED)
-                                         else "missing")
+                    self.interp_cause = (
+                        "unsigned" if err.startswith(_AOT_UNSIGNED)
+                        else "firmware" if _AOT_UNRESOLVED in err
+                        else "missing")
                     err = _open(path + "/" + main, None, True)
             else:
                 err = _open(path + "/" + main, None, True)

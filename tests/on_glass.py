@@ -540,7 +540,7 @@ def wasm_modules(chip):
     by the key exactly as it always has (the Player-level interpreter
     fallback is a layer above it, in device/moycore_glue.py, that this
     function's caller does not go through): the hello module, the
-    misaligned-access guard, the saturating-conversion guard, and six a board
+    misaligned-access guard, the float-to-int conversion guard, and six a board
     must refuse -- no key, another
     compiled-code format version, other flags (the key saying so), another
     chip, no signature, and a signed module with one byte of its key changed
@@ -707,15 +707,17 @@ def wasm_misaligned_access_is_exact(board, paths):
 
 
 def wasm_saturating_conversions_are_exact(board, paths):
-    """The compiler's saturating float-to-int conversions give wasm's answer
-    at every limit on this board's core -- on the ESP32-S3 they are TRUNC.S
-    and a NaN check, which leans on what the core does past the int32 range
-    (native/moy_wasm/README.md, "Float-to-int conversions"). The guard module
+    """The compiler's float-to-int conversions give wasm's answer at every
+    limit on this board's core -- on the ESP32-S3 the saturating ones to 32
+    bits are TRUNC.S and a NaN check, which leans on what the core does past
+    the int32 range, and every one to 64 bits calls a helper this firmware's
+    runtime must resolve, or the module does not load (#229;
+    native/moy_wasm/README.md, "Float-to-int conversions"). The guard module
     converts NaNs, the infinities and both ends of the range and counts the
     results that differ."""
     r = wasm_run(board, paths["conversions"], "check")
     assert r["ok"], r["error"]
-    print("\nWASM saturating conversions: %d wrong" % r["value"])
+    print("\nWASM float-to-int conversions: %d wrong" % r["value"])
     assert r["value"] == 0, r
 
 
@@ -1256,8 +1258,10 @@ INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # every one of those is simply the wrong file name to this console, so the
 # Player cannot tell them apart and shows the same "needs an update"; a
 # module that matched this console's name but carried no signature while
-# Unknown sources is off is "unsigned".
-INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed"}
+# Unknown sources is off is "unsigned"; one whose load stopped on a helper
+# this firmware does not register is "firmware".
+INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
+                     "firmware": "console needs an update"}
 
 
 def _runs_on_interpreter(board, title, check=None, cause="missing"):

@@ -64,6 +64,9 @@ step "docs agree with the tree"                     "${PY}" tools/check_docs.py
 # CI's cached step: the toolchain the showcase cart's goldens build with,
 # fetched by its pinned sha256 when absent (a no-op when it is here).
 step "wasi-sdk for the compiled showcase cart"      "${PY}" tools/jet_cart.py --toolchain
+# CI's cached step too: the pinned wamrc the AOT checks compile with, fetched
+# and hash-checked when absent.
+step "the pinned wamrc for the AOT checks"          "${PY}" tools/wasm_module.py compilers
 step "suite (redraw excluded)" \
   "${PY}" -m pytest -q --ignore=tests/test_redraw_on_change.py
 step "redraw suite, alone"     "${PY}" -m pytest -q tests/test_redraw_on_change.py

@@ -306,11 +306,14 @@ UTRUNC.S clamps above the range but gives neither 0 nor a clamp below it --
 read off a T-Deck, not the ISA manual. So for `--cpu=esp32s3` the fork's
 compiler emits TRUNC.S and 0 for a NaN, and UTRUNC.S and 0 for anything not
 `>= 0`, where the generic expansion was three branches against two float
-constants. The guard is a module that converts NaNs of both signs, the
-infinities, both ends of the range and their neighbours, from float and from
-double, and counts the results that are not wasm's
-(`tests/fixtures/wasm/conversions.c`); every console board's suite runs it
-and wants 0.
+constants. A conversion to 64 bits has no instruction on either core: the
+compiler calls a helper (`__fixsfdi` and its kin) that the runtime's
+relocation table must resolve (`tests/test_aot_symbols.py`). The guard is a
+module that converts NaNs of both signs, the infinities, both ends of the
+range and their neighbours, from float and from double, to 32 and to 64
+bits, saturating and (in range) trapping, and counts the results that are
+not wasm's (`tests/fixtures/wasm/conversions.c`); every console board's suite
+runs it and wants 0.
 
 **And the file is signed the way OTA images are.** A module file is the
 module, then an RSA signature (PKCS#1 v1.5, SHA-256), its length and the magic
@@ -353,10 +356,13 @@ the cart plays regardless -- natively when the switch is on, interpreted with
 a short "isn't signed" notice when it is off. The same retry covers a
 corrupted or mismatched AOT module (rare: its file name matched this
 console's chip and format, its content did not; that one reads as "needs an
-update", the same as no module at all) -- ANY AOT refusal falls back to the
-interpreter **except tamper evidence**: a signature that is PRESENT but does
-not verify is the one case that still refuses to the ordinary error panel,
-because that module was changed after it was signed, which is not staleness.
+update", the same as no module at all) and a module calling a helper this
+firmware's runtime does not register, which reads as "console needs an
+update" because the cart is not what is out of date -- ANY AOT refusal falls
+back to the interpreter **except tamper evidence**: a signature that is
+PRESENT but does not verify is the one case that still refuses to the
+ordinary error panel, because that module was changed after it was signed,
+which is not staleness.
 
 | the module file | setting off | setting on |
 |---|---|---|
@@ -367,6 +373,7 @@ because that module was changed after it was signed, which is not staleness.
 | a trailer whose length is out of range | `refused: malformed signature` (panel) | `refused: malformed signature` (panel) |
 | key content does not match this console (name matched by chance, or corrupt) | interpreter, "needs an update" | interpreter, "needs an update" |
 | no module by this console's name at all | interpreter, "needs an update" | interpreter, "needs an update" |
+| calls a helper this firmware's runtime does not register (the loader's `resolve symbol <name> failed`) | interpreter, "console needs an update" | interpreter, "console needs an update" |
 
 Whatever passes signing goes on to the provenance key, which is checked
 either way: the setting says nothing about which format or chip a module was
@@ -485,8 +492,9 @@ check out for a reason that is not tamper evidence (Unknown sources, ESP 88's
 (`runtime/console_notices.py`'s `_draw_notice`, the same mechanism "MOYBYTE
 UPDATED" uses, never `_draw_toast`'s achievement banner): `ws.notice(
 INTERP_NOTICE_TITLE, sub, "warn")`, where `sub` is `self.interp_cause`
-("missing" or "unsigned") read through `INTERP_NOTICE_SUB`. It never blocks
-the crash panel: the cart is already playing by the time the notice appears.
+("missing", "unsigned" or "firmware") read through `INTERP_NOTICE_SUB`. It
+never blocks the crash panel: the cart is already playing by the time the
+notice appears.
 
 ## Stopping a run
 
@@ -515,6 +523,13 @@ waits for it, so an item that never returns holds the cart where it is.
   file is one `vendor-wamr` actually copies, and the key names the format,
   never a fork commit.
 - `tests/test_wasm_module.py`: the key and the flags the builder derives.
+- `tests/test_aot_symbols.py`: a module compiled by the pinned wamrc with each
+  console chip's flags -- every wasm numeric instruction, every load and store
+  width, and the runtime's memory, table and call entries -- names no symbol
+  the loader cannot resolve, against `target_sym_map` as that chip's build
+  preprocesses it (#229: the P4's rv32f table lacked `__fixsfdi` and
+  `__fixunssfdi`). CI fetches the pinned compilers for it and fails rather
+  than skips without them.
 - `tests/test_wasm_signing.py`: the signature, through the device's own
   `moy_ota.verify_sig` with a throwaway key -- a signed module verifies and
   comes back as it was built; a byte changed anywhere, the key section

@@ -480,7 +480,7 @@ def misaligned_wasm():
 
 
 def conversions_wasm():
-    """The saturating-conversion guard (tests/fixtures/wasm/conversions.c) as
+    """The float-to-int conversion guard (tests/fixtures/wasm/conversions.c) as
     a wasm module (bytes): its `check` export counts the float-to-int
     conversions at the limits that gave other than wasm's answer."""
     return _c_wasm(CONVERSIONS_SRC)
