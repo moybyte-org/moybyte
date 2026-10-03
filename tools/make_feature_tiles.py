@@ -655,6 +655,123 @@ def tile_browser():
     return frames
 
 
+# --- compiled carts: a wireframe cube spins in place --------------------------
+
+CUBE_V = [(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
+          (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1)]
+CUBE_E = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4),
+          (0, 4), (1, 5), (2, 6), (3, 7)]
+
+
+def tile_compiled():
+    frames = []
+    cx, cy = 32, 22
+    tilt = math.radians(24)
+    n = 36
+    for k in range(n):
+        ang = math.radians(k * 360 / n)
+        b = Bmp()
+        pts = []
+        for x, y, z in CUBE_V:
+            xr = x * math.cos(ang) + z * math.sin(ang)
+            zr = -x * math.sin(ang) + z * math.cos(ang)
+            yt = y * math.cos(tilt) - zr * math.sin(tilt)
+            zt = y * math.sin(tilt) + zr * math.cos(tilt)
+            p = 4.2 / (4.2 + zt)
+            pts.append((cx + xr * 11 * p, cy - yt * 11 * p))
+        for i, j in CUBE_E:
+            b.line(pts[i][0], pts[i][1], pts[j][0], pts[j][1])
+        frames.append(b)
+    return frames
+
+
+# --- get carts: a cartridge drops from a cloud, a progress bar fills ----------
+
+def cloud(b, x, y):
+    b.fill(x + 4, y, 6, 3)
+    b.fill(x + 1, y + 1, 5, 3)
+    b.fill(x + 7, y + 1, 6, 3)
+    b.fill(x, y + 3, 14, 2)
+
+
+def cart_icon(b, x, y, grow=1.0):
+    w, h = max(1, round(14 * grow)), max(1, round(16 * grow))
+    x, y = x + (14 - w) // 2, y + (16 - h) // 2
+    b.rect(x, y, w, h)
+    if w > 5 and h > 7:
+        b.fill(x + 3, y + 3, max(1, w - 6), max(1, h - 9))
+    if w > 7 and h > 5:
+        b.fill(x + 3, y + h - 4, max(1, w - 10), 1)
+
+
+def tile_getcarts():
+    frames = []
+    cx, cloud_y, shelf_y = 32, 3, 24
+    bx, by, bw, bh = 12, 43, 40, 3
+
+    def frame(cart_y, grow, frac):
+        b = Bmp()
+        cloud(b, cx - 7, cloud_y)
+        cart_icon(b, cx - 7, cart_y, grow)
+        b.rect(bx, by, bw, bh)
+        if frac > 0:
+            b.fill(bx, by, max(1, int(bw * frac)), bh)
+        return b
+
+    total = 18
+    for k in range(total):
+        t = ease((k + 1) / total)
+        frames.append(frame(lerp(cloud_y + 6, shelf_y, t), 1.0, t))
+    for grow in (0.7, 1.15, 0.9, 1.0):
+        frames.append(frame(shelf_y, grow, 1.0))
+    hold(frames, 16)
+    return frames
+
+
+# --- make it yours: a window's wallpaper cycles, an icon gets repainted -------
+
+def paint_interior(b, x, y, w, h, kind):
+    for yy in range(y, y + h):
+        for xx in range(x, x + w):
+            if kind == "solid":
+                on = True
+            elif kind == "dots":
+                on = (xx - x) % 3 == 0 and (yy - y) % 3 == 0
+            elif kind == "diag":
+                on = ((xx - x) + (yy - y)) % 4 < 2
+            else:  # check
+                on = ((xx - x) // 4 + (yy - y) // 4) % 2 == 0
+            if on:
+                b.px(xx, yy)
+
+
+ICON_ART = ["..#..", ".###.", "#####", ".###.", "..#.."]
+ICON_CELLS = [(c, r) for r in range(5) for c in range(5) if ICON_ART[r][c] == "#"]
+
+
+def icon_swatch(b, x, y, frac):
+    b.rect(x, y, 10, 10)
+    n = int(round(len(ICON_CELLS) * frac))
+    for c, r in ICON_CELLS[:n]:
+        b.fill(x + 2 + c, y + 2 + r, 1, 1)
+
+
+def tile_yours():
+    frames = []
+    wx, wy, ww, wh = 8, 3, 48, 30
+    ix, iy, iw, ih = wx + 1, wy + 3, ww - 2, wh - 4
+    icon_x, icon_y = 48, 36
+    per = 9
+    for kind in ("solid", "dots", "diag", "check"):
+        for k in range(per):
+            b = Bmp()
+            window(b, wx, wy, ww, wh)
+            paint_interior(b, ix, iy, iw, ih, kind)
+            icon_swatch(b, icon_x, icon_y, (k + 1) / per)
+            frames.append(b)
+    return frames
+
+
 TILES = {
     "windows": tile_windows,
     "editors": tile_editors,
@@ -665,6 +782,9 @@ TILES = {
     "folders": tile_folders,
     "updates": tile_updates,
     "browser": tile_browser,
+    "compiled": tile_compiled,
+    "getcarts": tile_getcarts,
+    "yours": tile_yours,
 }
 
 

@@ -321,6 +321,17 @@ FEATURES = [
     ("browser", "In the browser",
      "The same console runs in a tab and keeps your carts there. A board can also "
      "serve it over WiFi, so a phone or laptop edits that board&rsquo;s carts."),
+    ("compiled", "Compiled carts",
+     "C, C++ or Rust compiled to WebAssembly instead of Python or Lua. A board "
+     "runs it natively for its own chip; the browser console runs it on the "
+     "browser&rsquo;s own engine. Doom and Jet Teapot are compiled carts."),
+    ("getcarts", "Get Carts",
+     "The console&rsquo;s store installs carts other people publish, over WiFi "
+     "on a board or in the browser, showing each cart&rsquo;s licence before it "
+     "fetches. The catalogue is moybyte-org/carts."),
+    ("yours", "Make it yours",
+     "Wallpapers &mdash; a cart can be one, running live &mdash; window themes "
+     "and the system&rsquo;s icons are all editable on the console."),
 ]
 FEATURE_SRC = os.path.join(ROOT, "docs", "media", "features")
 TILE_W = 256
