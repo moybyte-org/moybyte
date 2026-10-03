@@ -19,11 +19,12 @@ failed/half-written update can't brick the device. Rollback is enabled in the
 bootloader (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE): a freshly-flashed app that
 never calls mark_valid() is reverted on the next boot, so a bad image self-heals.
 
-Source of the image is the SD card (kid copies / future #38 WiFi downloads a .bin
-to /sd/update/). SD shares the panel's SPI host, so every SD touch goes through the
-injected `with_sd` wrapper (moy_runtime's _with_sd_synced -> comp.sync() +
-moybyte_sd.with_sd_live) exactly like cart saves -- it drains any in-flight panel
-DMA, then runs the op on the native single-bus path.
+Two sources: a .bin somebody copied into `update_dir` (UPDATE FW), and the
+WiFi download below. On the T-Deck the card shares the panel's SPI host, so every
+store touch and every slot write goes through the injected `with_sd` wrapper (the
+board's store session: comp.sync() + moybyte_sd.with_sd_live) exactly like cart
+saves -- it drains any in-flight panel DMA, then runs the op on the native
+single-bus path. Elsewhere it is a plain call-through.
 
 Architecture split (host == device, #17): this module owns ONLY the hardware
 (esp32.Partition flash writes + SD reads). ALL pixels -- the confirm screen and
@@ -32,13 +33,15 @@ drives this backend one chunk per frame so the normal frame/flush loop stays in
 charge. The host injects no updater, so the shared "UPDATE FW" Settings row simply
 doesn't appear there.
 
-Driven by the console as: find_bin() -> begin(path) -> step()*N -> finish() -> reset().
+A copied .bin is driven as: find_bin() -> begin(path) -> step()*N -> finish() -> reset().
 
 Phase 3 (#53) adds WiFi download: check_online() fetches a small JSON manifest
 ({"version", "url", "sha256", "size"}) over HTTP(S) via the injected wifi service,
-and if it advertises a newer FIRMWARE_VERSION, download_step()*N streams the .bin
-straight to /sd/update (raw socket -> SD, never buffering the whole image in RAM)
-while accumulating a SHA-256 to verify before the same Phase-2 install path runs.
+and if it advertises a newer FIRMWARE_VERSION, begin_download(to_slot=True) ->
+download_step()*N streams the image straight into the inactive slot (never
+buffering it in RAM, never through a filesystem) while accumulating a SHA-256
+that download_finish() checks; installing it is then finish()'s set_boot. The
+file sink (to_slot=False) is the C6 updater's, whose image goes to another chip.
 The network code is the LIVE counterpart of the host fake. The whole chain --
 TLS to github.com, the 302 to the release CDN, signature verify, the streamed
 download, install and rollback -- ran on glass on BOTH boards 2026-08-02
@@ -47,8 +50,7 @@ WiFi/LCD-DMA coexistence #38 had flagged.
 """
 
 UPDATE_DIR = "/sd/update"    # the T-Deck default; a board with no SD passes its own
-                             # (the P4 stages on its 24MB internal VFS -- see
-                             # OtaUpdater(update_dir=...), which every path here reads
+                             # (OtaUpdater(update_dir=...), which every path here reads
                              # off the instance rather than this module constant)
 BLOCK = 4096                 # esp32.Partition native block (erase page); writeblocks erases
 IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header_t.magic)
@@ -83,7 +85,7 @@ IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header
 HEALTHY_PAINTS = 1
 HEALTHY_LOOPS = 120
 HEALTHY_SERVES = 300
-PENDING_NAME = "pending.json"   # written beside the image at finish(), read at boot
+PENDING_NAME = "pending.json"   # written into update_dir at finish(), read at boot
 # How long wait_online() waits for the link AFTER the autoconnect attempt. See
 # its docstring: a saved network on the P4 came up 1.5s after connect() had
 # already given up and returned False.
@@ -245,7 +247,7 @@ OTA_SCHEME = "moybyte-ota-v2"    # v2 added `board` -- see _canonical
 _SHA256_DER = b"\x30\x31\x30\x0d\x06\x09\x60\x86\x48\x01\x65" \
               b"\x03\x04\x02\x01\x05\x00\x04\x20"
 
-DOWNLOAD_NAME = "firmware.bin"   # WiFi downloads land here (then the Phase-2 install runs)
+DOWNLOAD_NAME = "firmware.bin"   # a file-sink download (to_slot=False) lands here
 # What `download_finish` returns instead of a path when the bytes went STRAIGHT
 # INTO THE INACTIVE SLOT (begin_download(to_slot=True)). There is no file to
 # hand back, and the install phase has nothing left to do but activate.
@@ -281,20 +283,21 @@ def _ms_since(start):
 
 
 class OtaUpdater:
-    """Stepwise OTA install from an SD .bin into the inactive app slot.
+    """Firmware into the inactive app slot, a step per frame: from a copied .bin,
+    or streamed off the wire.
 
-    `with_sd(fn)` runs fn() with the SD card mounted on the live single-bus path and
-    the panel DMA drained first (injected by run_desktop). Flash writes themselves
-    don't touch the shared SPI bus, but the SD reads do, so the whole read+write of
-    each chunk runs inside one with_sd() call.
+    `with_sd(fn)` runs fn() inside the board's store session (on the T-Deck: the
+    card mounted on the live single-bus path, the panel DMA drained first). Flash
+    writes themselves don't touch the shared SPI bus, but the card reads do, so the
+    whole read+write of each chunk runs inside one with_sd() call, and a streamed
+    chunk's slot pages are written inside one too.
     """
 
     def __init__(self, with_sd, wifi=None, go_online=None, update_dir=None):
-        # Where a downloaded/copied image is staged. The T-Deck uses the SD card
-        # (its VFS is the card); the P4 has no SD in the console at all and
-        # passes a path on its 24MB internal filesystem. Every path in here reads
-        # THIS, never the module constant, so two boards' updaters cannot look at
-        # each other's directory.
+        # Where a copied image is found, the pending marker is kept and a
+        # file-sink download lands: the card on a T-Deck that has one, the
+        # internal VFS elsewhere. Every path in here reads THIS, never the module
+        # constant, so two boards' updaters cannot look at each other's directory.
         self.update_dir = update_dir or UPDATE_DIR
         self._with_sd = with_sd
         self._wifi = wifi         # injected wifi service (DeviceWifi); None -> no online update
@@ -653,7 +656,8 @@ class OtaUpdater:
         try:
             eof = self._with_sd(_do)
         except Exception as exc:
-            self.error = _short(exc)
+            self.error = _store_short(exc)
+            _log("install write FAILED at %d/%d:" % (self.done, self.total), _short(exc))
             self.cancel()
             return False
         if eof:
@@ -678,15 +682,8 @@ class OtaUpdater:
         return True
 
     def _discard_download(self):
-        """Delete the image WE downloaded, now that it is safely in the slot.
-
-        Nothing used to, and on a board that stages on INTERNAL flash that makes
-        for a one-update console. Measured on the Guition 2026-08-20, its first
-        OTA: vfs is 0x5E0000 (6.2MB) against a 3,585,936-byte payload, and the
-        console's own files take ~2MB of it, so the second download had 0.6MB to
-        land in. That board stages internally on purpose -- a card pulled
-        mid-stream must never kill an update (moy_runtime's note) -- so the fix
-        is to stop hoarding the payload, not to move it to the card.
+        """Delete the image a file-sink download left, now that it is safely in
+        the slot: kept, a payload on an internal VFS leaves no room for the next.
 
         Scoped to DOWNLOAD_NAME deliberately: a .bin the owner copied into
         /sd/update themselves is THEIR file, possibly meant for another board,
@@ -732,10 +729,9 @@ class OtaUpdater:
     # -- WiFi download (Phase 3, #53): manifest check + streamed .bin --------
     #
     # check_online() pulls a small JSON manifest; if it's newer, the console drives
-    # begin_download() -> download_step()*N -> download_finish(), which streams the
-    # image straight from the socket into /sd/update/firmware.bin (never holding the
-    # whole 3MB in RAM) and verifies size + sha256. Then the normal Phase-2 install
-    # path takes the downloaded file. On-glass verified on both boards (2026-08-02).
+    # begin_download(to_slot=True) -> download_step()*N -> download_finish(), which
+    # streams the image from the socket into the inactive slot (never holding the
+    # whole image in RAM) and verifies size + sha256; finish() then activates it.
 
     def manifest_url(self, channel=None):
         """The manifest URL for `channel`: /sd/update/ota.json if it names one, else
@@ -931,8 +927,11 @@ class OtaUpdater:
         184KB into the transfer. Meanwhile the inactive slot is 2.75MB and empty,
         which is what it is for.
 
-        It is better everywhere else too -- half the flash writes and roughly
-        half the wall time, since the staged path writes every byte twice.
+        The update screen asks for it on every board. The Guition S3 and the
+        P4s keep `update_dir` on an internal VFS with less room than their
+        image, where a staged download stopped with the same OSError 28
+        (2026-10-03); and everywhere it halves the flash writes and roughly the
+        wall time, since the staged path writes every byte twice.
 
         WHAT IT DOES NOT CHANGE is the two-act consent. Writing an INACTIVE slot
         changes nothing a board runs; the running slot is untouched either way,
@@ -1028,17 +1027,19 @@ class OtaUpdater:
             _log("download read FAILED at %d/%d:" % (self.dl_done, self.dl_total),
                  self.error)
             self._dl_close()
+            self._slot_failed()
             return False
         if not buf:
             _log("download EOF at %d/%d" % (self.dl_done, self.dl_total))
             return False                       # clean EOF on a block boundary
         try:
-            self._consume(buf)                 # one hash update + one SD write of the block
+            self._consume(buf)                 # one hash update + one write of the block
         except Exception as exc:
-            self.error = _short(exc)
-            _log("download SD write FAILED at %d/%d:" % (self.dl_done, self.dl_total),
-                 self.error)
+            self.error = _store_short(exc)
+            _log("download write FAILED at %d/%d:" % (self.dl_done, self.dl_total),
+                 _short(exc))
             self._dl_close()
+            self._slot_failed()
             return False
         # Progress breadcrumb every ~256K so a stall is visible without spamming serial.
         if self.dl_done - getattr(self, "_dl_logged", 0) >= 262144:
@@ -1047,10 +1048,12 @@ class OtaUpdater:
         return True
 
     def _consume(self, chunk):
-        """Hash the bytes and put them in whichever sink begin_download opened."""
+        """Hash the bytes and put them in whichever sink begin_download opened,
+        inside one store session either way: the slot's pages are written under
+        the same gate the file's bytes and the copied image's install are."""
         self._hash.update(chunk)
         if self._dl_f is None and self._part is not None:
-            self._to_slot(chunk)
+            self._with_sd(lambda: self._to_slot(chunk))
         else:
             def _w():
                 self._dl_f.write(chunk)
@@ -1093,13 +1096,14 @@ class OtaUpdater:
             try:
                 for j in range(self._dl_fill, BLOCK):
                     self._dl_buf[j] = 0xFF
-                self._part.writeblocks(self._block, memoryview(self._dl_buf))
+                self._with_sd(lambda: self._part.writeblocks(
+                    self._block, memoryview(self._dl_buf)))
                 self._block += 1
                 self.done += self._dl_fill
                 self._dl_fill = 0
             except Exception as exc:           # noqa: BLE001
-                self.error = _short(exc)
-                _log("download_finish tail write FAILED:", self.error)
+                self.error = _store_short(exc)
+                _log("download_finish tail write FAILED:", _short(exc))
                 self._dl_close()
                 return self._slot_failed()
         self._dl_close()
@@ -1125,7 +1129,7 @@ class OtaUpdater:
         return self.path
 
     def _slot_failed(self):
-        """Every failing exit from download_finish comes through here.
+        """Every failing exit from a slot download comes through here.
 
         DROPPING `_part` IS THE POINT. `finish()` activates whatever partition
         handle it finds, and a download that failed verification has left a
@@ -1220,6 +1224,22 @@ def _short(exc):
     elif cls in ("OSError", "ValueError") and s[:1].isdigit():
         s = "%s %s" % (cls, s)
     return s[:48]
+
+
+ENOSPC = 28
+NO_ROOM = "Not enough room for it."
+NO_WRITE = "Couldn't save the update."
+
+
+def _store_short(exc):
+    """What the screen says when writing the image fails: no room, or no write.
+    The raw error is the caller's serial line."""
+    if not isinstance(exc, OSError):
+        return _short(exc)
+    code = getattr(exc, "errno", None)
+    if code is None and exc.args:
+        code = exc.args[0]
+    return NO_ROOM if code == ENOSPC else NO_WRITE
 
 
 def _log(*a):

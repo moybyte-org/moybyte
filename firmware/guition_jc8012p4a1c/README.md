@@ -146,8 +146,9 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   no BOOT button: esptool's default reset drove `chip_id`, a full 16MB
   `read_flash` and every `write_flash` first try.
 - **16MB flash, not 32**: the same OTA-shaped table (2×4MB app slots, otadata
-  at 0xd000) leaves ~7.9MB for the auto-built VFS; the 36-cart seed roster
-  fits with room for an OTA image to stage. The build prints the app slot
+  at 0xd000) leaves ~7.9MB for the auto-built VFS, which the 36-cart seed
+  roster fits; a WiFi update streams into the inactive slot, so no image
+  stages there. The build prints the app slot
   headroom; nothing else about it is current.
 
 ## Build / flash

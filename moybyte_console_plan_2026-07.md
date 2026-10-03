@@ -441,7 +441,7 @@ The "hardware learning" pillar: gated `module.*` / `led.set` / `servo.set` APIs,
 
 ### 12.1 OTA firmware update (#53, BUILT, hardware-confirmed)
 
-Dual-OTA partitioning: the device flashes a new `.bin` into the **inactive** slot and ping-pongs, with rollback on (a bad image self-heals; `run_desktop` calls `mark_valid()` at a healthy boot). **Two channels — STABLE and UNSTABLE/BETA** — toggled in Settings; the build stamps its channel/version into a gitignored `_ota_build.py`. Phase-3 WiFi download streams a manifest-described `.bin` to SD (sha256-verified). **Bump `moy_ota.FIRMWARE_VERSION` on every release.** Download ~72KB/s ≈ the MicroPython TCP ceiling (don't chase it).
+Dual-OTA partitioning: the device flashes a new `.bin` into the **inactive** slot and ping-pongs, with rollback on (a bad image self-heals; `run_desktop` calls `mark_valid()` at a healthy boot). **Two channels — STABLE and UNSTABLE/BETA** — toggled in Settings; the build stamps its channel/version into a gitignored `_ota_build.py`. Phase-3 WiFi download streams a manifest-described image straight into the inactive slot (sha256-verified), so no filesystem has to hold it. **Bump `moy_ota.FIRMWARE_VERSION` on every release.** Download ~72KB/s ≈ the MicroPython TCP ceiling (don't chase it).
 
 ### 12.2 The browser console (#41/#151)
 

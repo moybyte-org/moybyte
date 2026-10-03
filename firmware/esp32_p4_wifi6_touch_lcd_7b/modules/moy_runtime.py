@@ -49,10 +49,11 @@ PANEL_DIAGONAL_IN = 7.0            # the glass, in inches -- board.toml [panel] 
 # on sys.path), and the first boot's seeded /moybyte dir broke the next boot's
 # `from moybyte.input import ...` (hardware-learned 2026-07-08).
 CARTS_ROOT = "/moy/carts"
-# Where an OTA image stages (#53). This board has no SD -- the T-Deck's
-# /sd/update has no meaning here -- so it lands on the internal VFS, which
-# has ~23MB free against a ~3MB image. NOT under /moy/carts: the store
-# scans that directory.
+# The OTA directory (#53) -- a copied image, the pending marker, the C6's
+# image. This board has no SD -- the T-Deck's /sd/update has no meaning
+# here -- so it is on the internal VFS. NOT under /moy/carts: the store
+# scans that directory. A WiFi firmware update streams into the inactive
+# slot and stages nothing here.
 OTA_UPDATE_DIR = "/moy/update"
 
 

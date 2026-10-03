@@ -416,7 +416,7 @@ def test_a_failed_read_cancels_the_install_and_names_the_error(board):
     board.u.step(max_blocks=1)
     board.card.fail = OSError(5)
     assert board.u.step() is False
-    assert board.u.error == "OSError 5"
+    assert board.u.error == board.mod.NO_WRITE
     assert board.u._part is None and board.u._f is None
     board.card.fail = None
     assert board.u.finish() is False              # nothing to point the boot at
@@ -427,7 +427,7 @@ def test_a_failed_flash_write_cancels_the_install(board):
     board.u.begin(path)
     board.esp.other.write_error = OSError("ESP_ERR_FLASH_OP_FAIL")
     assert board.u.step() is False
-    assert "FLASH_OP_FAIL" in board.u.error
+    assert board.u.error == board.mod.NO_WRITE
     assert board.u.done == 0
 
 
@@ -1140,7 +1140,7 @@ def test_a_storage_failure_mid_stream_closes_everything(board):
     board.u.begin_download(manifest)
     board.card.fail = OSError(28)                    # ENOSPC
     assert board.u.download_step() is False
-    assert board.u.error == "OSError 28"
+    assert board.u.error == board.mod.NO_ROOM
     assert sock.closed is True
 
 
@@ -1535,3 +1535,87 @@ def test_the_staged_file_path_still_works(tmp_path, monkeypatch):
     assert u.staged_in_slot() is False
     with open(got, "rb") as f:
         assert f.read() == payload
+
+
+# -- the update screen over the slot sink -------------------------------------
+#
+# The screen streams every board's download into the slot. The Guition S3 kept
+# `update_dir` on an internal VFS with 1.6MB free against a 3.7MB image and
+# stopped with OSError 28 at 2.2MB (2026-10-03); the P4s' VFS is no bigger.
+
+
+def _screen_over(tmp_path, monkeypatch, payload):
+    """The console's update screen driving a REAL updater whose download goes
+    through `_Card` sessions into the slot double."""
+    from runtime import host_app
+
+    mod, u, esp, manifest = _slot_board(tmp_path, monkeypatch, payload)
+    card = _Card()
+    u._with_sd = card
+    esp.other.card = card
+    u.check_online = lambda ch=None: manifest
+    u.offers = lambda m, ch=None: True
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.updater = u
+    uu = ws.update_ui
+    uu.open_update_online()
+    uu._pump_update(0.0)                 # the one-frame CHECKING gate
+    uu._pump_update(0.0)                 # the check
+    assert uu._upd_phase == "confirm_online"
+    uu._update_pointer(160, 120, True)   # a tap: download
+    return mod, u, esp, uu
+
+
+def test_the_update_screen_streams_into_the_slot_and_installs_by_activating(
+        tmp_path, monkeypatch):
+    payload = app_image(4096 * 2 + 100)
+    mod, u, esp, uu = _screen_over(tmp_path, monkeypatch, payload)
+    while uu._upd_phase == "downloading":
+        uu._pump_update(0.0)
+
+    assert uu._upd_phase == "confirm", uu._upd_msg
+    assert uu._upd_bin[0] == mod.SLOT_STAGED
+    assert list((tmp_path / "update").iterdir()) == [], \
+        "the download wrote a file; on an internal VFS that is ENOSPC"
+    assert esp.other.image()[:len(payload)] == payload
+    assert all(esp.other.sessions_at_write), \
+        "a slot page was written outside the store session"
+    assert esp.other.booted is False, "the second consent was skipped"
+    uu._draw_update(0.0)                 # the confirm screen draws the slot case
+
+    uu._update_pointer(160, 120, True)   # a tap: install
+    assert uu._upd_phase == "done", uu._upd_msg
+    assert esp.other.booted is True
+    assert (tmp_path / "update" / mod.PENDING_NAME).exists(), \
+        "no pending marker: a rollback would be silent"
+
+
+def test_leaving_before_the_install_leaves_the_slot_unactivatable(tmp_path,
+                                                                 monkeypatch):
+    payload = app_image(4096 * 2)
+    mod, u, esp, uu = _screen_over(tmp_path, monkeypatch, payload)
+    while uu._upd_phase == "downloading":
+        uu._pump_update(0.0)
+    assert uu._upd_phase == "confirm"
+    uu._exit_update()
+    assert u.staged_in_slot() is False
+    assert u.finish() is False
+    assert esp.other.booted is False
+
+
+def test_a_slot_that_will_not_take_the_bytes_says_so_in_words(tmp_path,
+                                                             monkeypatch):
+    mod, u, esp, uu = _screen_over(tmp_path, monkeypatch, app_image(4096 * 3))
+    esp.other.write_error = OSError(5)
+    while uu._upd_phase == "downloading":
+        uu._pump_update(0.0)
+    assert uu._upd_phase == "error"
+    assert uu._upd_msg == mod.NO_WRITE
+    assert u.staged_in_slot() is False
+
+
+def test_the_store_words_are_for_store_errors_only(board):
+    m = board.mod
+    assert m._store_short(OSError(28)) == m.NO_ROOM
+    assert m._store_short(OSError(5)) == m.NO_WRITE
+    assert m._store_short(ValueError("not an app image")) == "not an app image"

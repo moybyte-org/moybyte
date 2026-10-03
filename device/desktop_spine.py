@@ -250,9 +250,10 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
         log("boot", "link unavailable: %s" % exc)
         ws.link = None
-    # OTA (#53): the image stages where the board's store said (update_dir),
-    # and every write goes through the console's store gate -- the SD bracket
-    # where the card shares the panel's bus, a plain call-through elsewhere.
+    # OTA (#53): update_dir is where the board's store said (a copied image,
+    # the pending marker), and every write -- the slot's included -- goes
+    # through the console's store gate: the SD bracket where the card shares
+    # the panel's bus, a plain call-through elsewhere.
     try:
         import moy_ota
         ws.updater = moy_ota.OtaUpdater(ws._with_sd, update_dir=update_dir)

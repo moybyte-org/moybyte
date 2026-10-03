@@ -93,8 +93,8 @@ class UpdateUI:
 
     def open_update_online(self):
         """Open the online-update flow (#53 Phase 3): connect WiFi + fetch the manifest,
-        and if it's newer, download the image to SD. The blocking check runs in
-        _pump_update one frame later so a CHECKING... screen shows first."""
+        and if it's newer, stream the image into the inactive slot. The blocking check
+        runs in _pump_update one frame later so a CHECKING... screen shows first."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
         self.ws.show_achievements = False
@@ -149,13 +149,16 @@ class UpdateUI:
         return True
 
     def _start_download(self):
-        """Open the socket + SD file and switch to the streaming download phase."""
+        """Open the socket and the inactive slot, and switch to the streaming
+        download phase. Into the slot on every board: no filesystem space, and
+        one write of each byte (the Guition S3's internal VFS cannot hold its
+        own image)."""
         u = self.ws.updater
         if u is None or not self._online_manifest:
             return
         self.ws._dirty = True
         try:
-            u.begin_download(self._online_manifest)
+            u.begin_download(self._online_manifest, to_slot=True)
             self._upd_phase = "downloading"
         except Exception as exc:               # noqa: BLE001 -- shown to the kid
             self._upd_phase = "error"
@@ -163,8 +166,8 @@ class UpdateUI:
 
     def _exit_update(self):
         """Leave the update screen back to Settings, dropping any in-progress install
-        (the inactive slot may be half-written, but it was never set bootable) or
-        download (the socket + partial SD file are closed)."""
+        or download (the inactive slot may be half-written, but it was never set
+        bootable; the socket and any partial file are closed)."""
         u = self.ws.updater
         if u is not None:
             try:
@@ -185,12 +188,27 @@ class UpdateUI:
         self.ws.wm.goto("settings")   # Stage 6e: pop the update screen, back to Settings
         self.ws._dirty = True
 
+    def _in_slot(self):
+        """True when the image is already in the inactive slot (streamed there and
+        verified), so installing it is pointing the bootloader at it."""
+        staged = getattr(self.ws.updater, "staged_in_slot", None)
+        return bool(staged is not None and staged())
+
     def _confirm_update(self):
-        """Begin flashing the found image (validates header + size, opens the slot)."""
+        """Install the image: activate one already in the slot, else begin flashing
+        the found file (validates header + size, opens the slot)."""
         u = self.ws.updater
         if u is None or not self._upd_bin:
             return
         self.ws._dirty = True
+        if self._in_slot():
+            if u.finish():
+                self._upd_phase = "done"
+                self._upd_at = _ticks_ms()
+            else:
+                self._upd_phase = "error"
+                self._upd_msg = u.error or "set_boot failed"
+            return
         try:
             u.begin(self._upd_bin[0])
             self._upd_phase = "install"
@@ -388,7 +406,7 @@ class UpdateUI:
                 self._upd_phase = "error"
                 self._upd_msg = "no updater"
                 return
-            more = u.download_step()           # one chunk: socket -> SD (+ running sha256)
+            more = u.download_step()           # one chunk: socket -> slot (+ running sha256)
             if u.error:
                 self._upd_phase = "error"
                 self._upd_msg = u.error
@@ -400,7 +418,7 @@ class UpdateUI:
                     self._upd_msg = u.error or "verify failed"
                     return
                 self._upd_bin = (path, u.dl_total or u.dl_done)
-                self._upd_phase = "confirm"    # hand off to the Phase-2 install confirm
+                self._upd_phase = "confirm"    # the second consent: A = INSTALL
         elif ph == "install":
             if u is None:
                 self._upd_phase = "error"
@@ -581,8 +599,12 @@ class UpdateUI:
             self._line(x, y, "B = CANCEL", th["ink_dim"])
         elif phase == "confirm" and self._upd_bin:
             path, size = self._upd_bin
-            name = path.rsplit("/", 1)[-1]
-            self._line(x, y, "FOUND ON SD:", th["ink_dim"])
+            if self._in_slot():
+                head = "DOWNLOADED:"
+                name = str((self._online_manifest or {}).get("label") or "firmware")
+            else:
+                head, name = "FOUND ON SD:", path.rsplit("/", 1)[-1]
+            self._line(x, y, head, th["ink_dim"])
             y += 12 * fs
             self._line(x, y, name[:24], th["play"])
             y += 12 * fs

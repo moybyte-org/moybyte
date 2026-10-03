@@ -266,7 +266,7 @@ scan never sees it -- that tier is the second source, [native.p4] below.)"""
 module = "moy_sd"
 why = """
 This console has no SD card in play: carts live on the internal-flash VFS
-(/moy/carts), OTA stages to /moy/update, and moy_sd's whole reason to exist --
+(/moy/carts), the OTA directory is /moy/update, and moy_sd's whole reason to exist --
 attaching a card to a host the T-Deck's moy_lcd already initialised, on a
 SHARED SPI bus -- names hardware this board does not have. The TF slot here
 is the Waveshare's arrangement exactly (SDMMC slot 0 on GPIO39-44, powered
@@ -436,7 +436,7 @@ WLAN, so link.start()'s wlan.active(True) is load-bearing here."""
 [[modules.device.group]]
 files = ["moy_ota.py"]
 why = """
-The OTA updater (#53). Board-agnostic: its staging directory is a constructor
+The OTA updater (#53). Board-agnostic: its update directory is a constructor
 argument (this console has no SD, so run_desktop passes a path on the internal
 VFS) and its board identity comes from the generated `_ota_build.py` --
 `guition_p4`, a manifest of its own, since an app image is board-specific."""
