@@ -301,3 +301,72 @@ def test_a_board_served_page_gets_no_carts_of_its_own(tmp_path, board, home):
         p.terminate()
         p.wait(timeout=10)
         pages.stop()
+
+
+def test_a_board_with_a_big_store_serves_a_page_that_boots(tmp_path):
+    """A board serves one connection at a time and cuts off a client that
+    stops reading for its send budget, so the page has to read carts.json as
+    it arrives: the other boot answers queue behind it. The twin here holds
+    a store bigger than the browser buffers, over a board's link
+    (`serve.py --one-link`): the page boots, and Get Carts says the carts
+    are the board's. A compiled cart's main.wasm never crosses the wire, so
+    the page's scan leaves it off the shelf (moy_carts.load, a cart with no
+    main): asked for by name, nothing opens and the console carries on."""
+    import random
+    web_e2e.require("store", "carts")
+    store = tmp_path / "store"
+    store.mkdir()
+    shutil.copytree(ROOT / "system_carts" / "get_carts.moy", store / "get_carts.moy")
+    sys.path.insert(0, str(ROOT))
+    from tools import wasm_cart
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "tier.moy"),
+                    str(store / "tier.moy"))
+    rnd = random.Random(7)
+    for i in range(24):
+        d = store / ("big%02d.moy" % i)
+        d.mkdir()
+        (d / "manifest.json").write_text(json.dumps(
+            {"format": "moy-1", "title": "Big %d" % i, "runtime": "lua",
+             "main": "main.lua"}))
+        lines = ["-- %s" % "".join(rnd.choice("abcdefghij ") for _ in range(70))
+                 for _ in range(14000)]
+        (d / "main.lua").write_text("function _draw() cls(1) end\n" + "\n".join(lines))
+    site = _console(tmp_path, "http://127.0.0.1:9/index.json")
+    port = web_e2e.free_port()
+    p = subprocess.Popen([sys.executable, "serve.py", str(port), str(site),
+                          "--carts", str(store), "--update", "glass", "--one-link"],
+                         cwd=RUNNER, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    base = "http://127.0.0.1:%d" % port
+    state = ("__moyState().then(s => JSON.stringify({cart: s.cart, err: s.cart_error, "
+             "notice: s.notice, stack: s.stack, frames: s.frames}))")
+    try:
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(base + "/index.html", timeout=1).read(64)
+                break
+            except OSError:
+                time.sleep(0.1)
+        out, js = web_e2e.run(tmp_path, "big_board", "?handheld=1&dev=1&cart=get_carts.moy", [
+            {"wait": 2500},
+            {"js": "window.__moyPersist ? window.__moyPersist.mode : 'none'"},
+            {"js": "JSON.stringify((window.__moyUpdate || {}).services || null)"},
+            {"js": state},
+            {"shot": "on_the_console"},
+        ], base, tmp_path / "chrome", boot_ms=30000)
+        assert len(js) == 3, "the page did not boot:\n%s" % out[-3000:]
+        assert js[0] == "board", out[-2000:]
+        assert json.loads(js[1])["cart_home"] == "board", js[1]
+        st = json.loads(js[2])
+        assert st["cart"] == "Get Carts" and st["err"] is None, st
+        out, js = web_e2e.run(tmp_path, "big_compiled", "?handheld=1&dev=1&cart=tier.moy", [
+            {"wait": 2500}, {"js": state}, {"wait": 1000}, {"js": state},
+            {"shot": "launcher"},
+        ], base, tmp_path / "chrome2", boot_ms=30000)
+        assert len(js) == 2, out[-3000:]
+        st, later = json.loads(js[0]), json.loads(js[1])
+        assert st["cart"] is None and st["err"] is None and st["notice"] is None, st
+        assert st["stack"] == ["launcher"], st
+        assert later["stack"] == ["launcher"] and later["err"] is None, later
+    finally:
+        p.terminate()
+        p.wait(timeout=10)

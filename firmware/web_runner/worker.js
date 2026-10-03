@@ -787,9 +787,18 @@ async function init(search) {
     // indexes.json: the shelves Get Carts lists, chosen by whoever SERVES this
     // page -- the browser's twin of a board's indexes.json beside its carts.
     // Absent (moybyte.com, a board) means the console's default shelves.
+    //
+    // Every body is READ as soon as its head arrives, carts.json's included. A
+    // board serves one connection at a time and cuts off a client that stops
+    // reading for its send budget (moy_webserver.WEB_SEND_TIMEOUT). A body
+    // left unread until the other answers are in -- and they queue behind it
+    // -- stops draining once the browser's buffer is full, and the board cuts
+    // it off: a board with more carts than that serves a console that cannot
+    // boot. tests/test_web_store_e2e.py boots one over a board-shaped link.
     const [mods, cartsRes, files, shelves] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
-        fetch(withPin("carts.json")),
+        fetch(withPin("carts.json")).then(async (r) => (
+            { status: r.status, json: r.status === 403 ? null : await r.json() })),
         fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
             .catch(() => null),
         fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null)]);
@@ -803,7 +812,7 @@ async function init(search) {
         console.log("[moy] carts.json refused the pin");
         return;
     }
-    const carts = await cartsRes.json();
+    const carts = cartsRes.json;
     let boot = "";
     if (mods) {
         mkdirs("/modules");
