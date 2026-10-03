@@ -37,6 +37,12 @@ device = [
   "esptool>=4.7,<5",   # tools/esptool_no_modem.py patches esptool 4.x internals
   "pyserial>=3.5",     # serial monitor + tools/p4_autotest.py (on-glass tests)
 ]
+# A page in headless Chrome (tools/web.py shot). Not in `make setup`: no test
+# needs it, and it drives the SYSTEM Chrome (`channel="chrome"`), so it
+# downloads no browser -- never `playwright install`.
+web = [
+  "playwright>=1.40",
+]
 # SIGNING an OTA manifest (tools/ota_sign.py keygen/sign). Not in `make setup`:
 # only the release publisher needs it, and only for the private-key half.
 # VERIFYING needs nothing -- it is pow() and a byte compare, which is exactly

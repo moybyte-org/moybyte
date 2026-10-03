@@ -17,14 +17,17 @@ Cost is turns × context: every turn re-reads everything so far.
   `-q`, `--quiet`).
 - Wait for builds, suites and flashes by running them in the background and
   taking the completion notice. Never poll with `sleep`/`until`.
-- Use the repository's one-command tools (`tools/board.py`, `tools/preflight.sh`)
-  rather than hand sequences.
+- Use the repository's one-command tools rather than hand sequences:
+  `tools/board.py pass` for a board pass, `tools/web.py shot` for a page,
+  `tools/preflight.sh` before you report.
 
-Work only in your worktree. Your shell's working directory resets to the MAIN
-checkout before every command, so a relative path or a bare `make`/`git`/build
-lands there: `cd <your worktree> && …` in the same command, or use absolute
-paths, every time, for edits, builds, tests and git alike. Before your first
-commit, check `git -C <main checkout> status` shows nothing of yours. Commit by pathspec, one commit per landed outcome. Push
+Work only in your worktree (`tools/worktree.py new NAME` makes one that builds
+and tests as it is). Your shell's working directory resets to the MAIN checkout
+before every command, so a relative path or a bare `make`/`git`/build lands
+there: `cd <your worktree> && …` in the same command, or use absolute paths,
+every time, for edits, builds, tests and git alike. Before your first commit,
+check `git -C <main checkout> status` shows nothing of yours. Commit by
+pathspec, one commit per landed outcome. Push
 nothing, release nothing, create no repository, change no settings. No model
 identifiers in commits or files. Comments and docs state what IS; the story goes
 in the commit message.

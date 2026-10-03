@@ -6,14 +6,14 @@ wasm_spike/main/core6502_*.h
 wasm_spike/build/
 wasm_spike/sdkconfig
 wasm_spike/sdkconfig.old
-wamr/
+/wamr
 wamrc_bin/
 *_linked.aot
 wasm_spike/build_s3/
 wasm_spike/sdkconfig.s3
 wasm_spike/sdkconfig.s3.old
 # the S3 half: toolchains, vendored sources and build products
-toolchain/wasi-sdk/
+toolchain/wasi-sdk
 toolchain/.venv/
 toolchain/*.log
 doomgeneric/
@@ -32,7 +32,7 @@ doom/doom_spike/build_p4/
 doom/doom_spike/sdkconfig.p4
 doom/doom_spike/sdkconfig.p4.old
 # the pinned compilers (tools/wasm_module.py), fetched or built, never committed
-toolchain/dist/
+toolchain/dist
 # doom/build_cart.py: its downloads, its staged engine and the cart it builds
 doom/cache/
 doom/stage/

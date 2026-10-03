@@ -673,7 +673,7 @@ def test_a_stable_build_is_stamped_with_the_release_name_not_the_counter(tmp_pat
     assert (ns["CHANNEL"], ns["VERSION"], ns["LABEL"], ns["BOARD"]) == \
         ("stable", 7, "0.9", "tdeck")
     assert js == {"channel": "stable", "version": 7,
-                  "label": "0.9", "board": "tdeck"}
+                  "label": "0.9", "board": "tdeck", "commit": "unknown"}
 
 
 @pytest.mark.xfail(strict=True, reason=(
@@ -726,6 +726,56 @@ def test_the_stamp_creates_the_dist_directory_it_writes_into(tmp_path):
            MODULES_DIR=str(tmp_path), DIST_DIR=str(dist))
     assert r.returncode == 0
     assert (dist / "ota_build.json").exists()
+
+
+def test_the_stamp_names_the_commit_the_image_was_built_from(tmp_path):
+    """`tools/board.py pass` prints it as the image's commit; `+` is a tree
+    with tracked changes on top of it."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = dict(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_NOSYSTEM="1",
+               GIT_CONFIG_GLOBAL=os.devnull, PATH=os.environ["PATH"])
+    run = lambda *a: subprocess.run(["git"] + list(a), cwd=str(repo), env=env,
+                                    check=True, capture_output=True, text=True)
+    (repo / "f").write_text("a\n")
+    run("init", "-q")
+    run("add", "f")
+    run("commit", "-q", "-m", "c")
+    sha = run("rev-parse", "--short=8", "HEAD").stdout.strip()
+    ota = _ota_py(tmp_path)
+    assert _stamp(tmp_path, ota, REPO_ROOT=str(repo))[2]["commit"] == sha
+    (repo / "f").write_text("b\n")
+    assert _stamp(tmp_path, ota, REPO_ROOT=str(repo))[2]["commit"] == sha + "+"
+    assert _stamp(tmp_path, ota)[2]["commit"] == "unknown"
+
+
+def _ccache_env(tmp_path, **env):
+    """What moybyte_ccache exports, with a stand-in `ccache` on PATH."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / "ccache").write_text("#!/bin/sh\n")
+    (bin_dir / "ccache").chmod(0o755)
+    path = "%s:%s" % (bin_dir, os.environ.get("PATH", "/usr/bin:/bin"))
+    r = sh("moybyte_ccache; env | grep -E '^(IDF_CCACHE_ENABLE|CCACHE_[A-Z]+|IDF_PATH)=' || true",
+           REPO_ROOT=str(ROOT), IDF_DIR="/x/esp-idf", PATH=path, **env)
+    assert r.returncode == 0, r.stderr
+    return dict(ln.split("=", 1) for ln in r.stdout.split())
+
+
+def test_a_local_build_shares_one_compiler_cache_rooted_at_the_main_checkout(tmp_path):
+    common = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute",
+         "--git-common-dir"], capture_output=True, text=True, check=True).stdout
+    got = _ccache_env(tmp_path)
+    assert got == {"IDF_CCACHE_ENABLE": "1",
+                   "CCACHE_BASEDIR": os.path.dirname(common.strip()),
+                   "CCACHE_NOHASHDIR": "1", "IDF_PATH": "/x/esp-idf"}
+    assert _ccache_env(tmp_path, IDF_CCACHE_ENABLE="0")["IDF_CCACHE_ENABLE"] == "0"
+
+
+def test_ci_keeps_its_own_cache_settings(tmp_path):
+    assert _ccache_env(tmp_path, CI="true") == {}
 
 
 # -- the frozen manifest --------------------------------------------------------

@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   BoardError                        a step that cannot go on, said so a person can act
+#   -- the boards and their declarations  boards, board_file, is_console
+#   -- which port: facts that need no open  learn, holders, port_table, claim, resolve
+#   -- opening a board                refuse_if_held, attach, stable
+#   -- verbs                          cmd_state, cmd_py, cmd_run, cmd_desk, cmd_perf, cmd_pmem, cmd_tail
+#   -- the picture on the glass       grab, cmd_shot
+#   -- the ports                      cmd_ports
+#   -- reset, flash, wait             wait_for_desk, esptool_reset, cmd_reboot, cmd_flash
+#   -- the command line               parser, main (`pass` goes to tools/board_pass.py)
 """Drive an attached board by name: the on-glass loop, one command per step.
 
     tools/board.py ports                        which port is which board, who holds it
@@ -19,6 +29,9 @@
     tools/board.py tdeck flash [--build]        cable-flash its image, wait for the desk
     tools/board.py tdeck reboot [--soft]        reset it the way it allows, wait for the desk
     tools/board.py tdeck wait                   until the desk answers
+    tools/board.py pass tdeck p4 [-k EXPR]      build, flash, suite, one table
+                                                (tools/board_pass.py; --all,
+                                                --skip-build, --no-flash, --shot)
 
 The board is its `[board] ota` id (p4, tdeck, guition_s3, guition_p4,
 xiao_zero), the same name `--board` takes everywhere else. Everything goes
@@ -875,8 +888,9 @@ def parser(dirs):
     ap = argparse.ArgumentParser(
         description=__doc__.split("\n")[0],
         epilog="`tools/board.py BOARD VERB -h` for a verb's options.")
-    ap.add_argument("board", choices=sorted(dirs) + ["ports"],
-                    help="the board's [board] ota id, or `ports`")
+    ap.add_argument("board", choices=sorted(dirs) + ["ports", "pass"],
+                    help="the board's [board] ota id, `ports`, or `pass "
+                         "BOARD...` (`tools/board.py pass -h`)")
     _common(ap, lambda v: v)
     ap.add_argument("--probe", action="store_true",
                     help="(ports) ask each unclaimed port who it is, once")
@@ -969,6 +983,10 @@ def parser(dirs):
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["pass"]:
+        import board_pass
+        return board_pass.main(argv[1:])
     dirs = boards()
     a = parser(dirs).parse_args(argv)
     try:

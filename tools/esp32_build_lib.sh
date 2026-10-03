@@ -81,6 +81,29 @@ moybyte_setup_idf() {
     command -v idf.py >/dev/null 2>&1 || { echo "!! idf.py still missing after install.sh" >&2; exit 1; }
   fi
   set -u
+  moybyte_ccache
+}
+
+# One compiler cache for every checkout of this repository on this machine: the
+# main checkout and each worktree (tools/worktree.py) build through ccache's
+# one directory. Paths under the main checkout are hashed relative to the
+# build directory (CCACHE_BASEDIR) and the build directory itself is not
+# hashed (CCACHE_NOHASHDIR: only the ELF's debug info names it, never the
+# .bin), so a worktree's first build reuses what another tree compiled. The
+# IDF is named by the path the build was given (a worktree's link), not by
+# the directory activate.py resolves it to, so its sources sit at the same
+# relative place from every tree's build. Local only: CI sets its own
+# IDF_CCACHE_ENABLE and keeps its cache per board. Each setting the caller
+# made wins.
+moybyte_ccache() {
+  [ -z "${CI:-}" ] || return 0
+  command -v ccache >/dev/null 2>&1 || return 0
+  local common
+  common="$(git -C "${REPO_ROOT}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  export IDF_CCACHE_ENABLE="${IDF_CCACHE_ENABLE:-1}"
+  export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$(dirname "${common}")}"
+  export CCACHE_NOHASHDIR="${CCACHE_NOHASHDIR:-1}"
+  export IDF_PATH="${IDF_DIR}"
 }
 
 # Append an IDF component to the esp32 port's IDF_COMPONENTS list (idempotent).
@@ -339,10 +362,10 @@ moybyte_stage_native() {
 # ("tdeck"/"p4"), $2 the path to the moy_ota.py this image freezes (the SHARED
 # device/moy_ota.py -- both boards freeze a staged copy of the same file, so
 # both read the same source of FIRMWARE_VERSION/FIRMWARE_NAME). Writes
-# ${MODULES_DIR}/_ota_build.py and ${DIST_DIR}/ota_build.json, and echoes the
-# identity. The CHANNEL is a BUILD choice (MOYBYTE_OTA_CHANNEL, default
-# stable), so it stays clean across merges; a beta's VERSION is the build
-# epoch, auto-newer on every publish.
+# ${MODULES_DIR}/_ota_build.py and ${DIST_DIR}/ota_build.json (which also
+# names the commit), and echoes the identity. The CHANNEL is a BUILD choice
+# (MOYBYTE_OTA_CHANNEL, default stable), so it stays clean across merges; a
+# beta's VERSION is the build epoch, auto-newer on every publish.
 moybyte_ota_identity() {
   local board_id="$1" ota_py="$2"
   OTA_CHANNEL="${MOYBYTE_OTA_CHANNEL:-stable}"
@@ -372,9 +395,17 @@ VERSION = ${OTA_VERSION}
 LABEL = "${OTA_LABEL}"
 BOARD = "${board_id}"
 EOF
+  # The commit the image is built from (REPO_ROOT's), `+` when tracked files
+  # differ from it. The JSON only: the image does not change with the commit.
+  local commit="unknown"
+  if [ -n "${REPO_ROOT:-}" ] && commit="$(git -C "${REPO_ROOT}" rev-parse --short=8 HEAD 2>/dev/null)"; then
+    git -C "${REPO_ROOT}" diff --quiet HEAD -- 2>/dev/null || commit="${commit}+"
+  else
+    commit="unknown"
+  fi
   mkdir -p "${DIST_DIR}"
   cat > "${DIST_DIR}/ota_build.json" <<EOF
-{"channel": "${OTA_CHANNEL}", "version": ${OTA_VERSION}, "label": "${OTA_LABEL}", "board": "${board_id}"}
+{"channel": "${OTA_CHANNEL}", "version": ${OTA_VERSION}, "label": "${OTA_LABEL}", "board": "${board_id}", "commit": "${commit}"}
 EOF
   echo "OTA build identity: board=${board_id} channel=${OTA_CHANNEL} version=${OTA_VERSION} label='${OTA_LABEL}'"
 }

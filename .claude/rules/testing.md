@@ -70,7 +70,10 @@ paths:
   `tests/test_guition_on_glass.py` (`MOYBYTE_GUITION_PORT`),
   `tests/test_guition_p4_on_glass.py` (`MOYBYTE_GUITION_P4_PORT`), over
   `P4Board` and the shared `tests/on_glass.py` fixture, which RESETS the
-  Waveshare P4 and ATTACHES to the others as they are.
+  Waveshare P4 and ATTACHES to the others as they are. `tools/board.py pass`
+  builds, flashes and runs them in one command, and finds each board's suite
+  and variable in these files (`on_glass.gate(...)` and the board dir its
+  session opens); `tests/test_board_pass.py` pins one suite per console board.
   - **A gesture test that fails on a board you have been driving is a DIRTY
     DESK before it is a regression.** The suites assume the launcher they were
     written against; a leftover menu or a scrolled shelf makes a fling land on

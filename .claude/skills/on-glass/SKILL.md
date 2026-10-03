@@ -1,6 +1,6 @@
 ---
 name: on-glass
-description: Drive an attached Moybyte board -- find its port, check who holds it, flash it, push and run a cart, take a screenshot, read state/pmem/heap, run its on-glass suite, and get the desk back when it is wedged. Use before opening any serial port or writing a script that talks to a board.
+description: Drive an attached Moybyte board -- find its port, check who holds it, run a board pass (build, flash, suite, one table), flash it, push and run a cart, take a screenshot, read state/pmem/heap, run its on-glass suite, and get the desk back when it is wedged. Use before opening any serial port or writing a script that talks to a board.
 ---
 
 # On glass
@@ -77,6 +77,29 @@ python3 tools/jet_cart.py /tmp/carts --cart teapot --chip esp32s3
 python3 experiments/wasm_aot/doom/build_cart.py --out /tmp/carts   # never committed or pushed to a store
 ```
 
+## A board pass
+
+```bash
+tools/board.py pass tdeck p4          # build each image from THIS tree, flash, boot, suite
+tools/board.py pass --all -k wasm     # every console board; -k goes to pytest
+tools/board.py pass tdeck --skip-build   # flash what dist/ has; --no-flash: the suite only
+tools/board.py pass --all --shot      # ...and a screenshot of each at the end
+```
+
+It is one job, however many boards: run it in the background and take its
+one notice; the table is its last lines. One row a board: the commit its image
+was built from (`+`: tracked changes on top), the headroom the build printed,
+passed/skipped/failed and the failing tests by name; every step's log is a
+file under the directory it prints. A
+pass that builds builds the browser console first, because every image bakes
+the tree's own (a board built without one fails its suite's baked-console
+check). Run it
+from a worktree (`tools/worktree.py new NAME`): in the main checkout a build is
+refused without `--main`, because its `dist/` is what every other session
+flashes. It skips a board whose port is held, naming the holder, never touches
+the Zero, and leaves each board at its launcher, the T-Deck at volume 0. The
+`board-pass` agent (`.claude/agents/board-pass.md`) runs it and reports the table.
+
 ## Flash, reboot, wait
 
 ```bash
@@ -86,10 +109,13 @@ tools/board.py tdeck reboot --soft  # Ctrl-C, then Ctrl-D: for a board sitting a
 tools/board.py guition_s3 wait      # until `state` answers (default 120 s)
 ```
 
-Build the two P4s one at a time (they race on the component manager's git
-cache). A board takes most of a minute to reach the desk after a reset — the
-Guition S3 from its card the longest — and `wait` is what knows when it has;
-a suite started earlier errors every test with "did not answer `state`".
+By hand, never start two builds at the same moment: every ESP32 build races
+on the component manager's cache while it configures
+(`.claude/rules/boards.md`); `pass` builds the P4s one at a time and reruns a
+build that lost. A board takes most of a minute to reach the desk after a
+reset — the Guition S3 from its card the longest — and `wait` is what knows
+when it has; a suite started earlier errors every test with "did not answer
+`state`".
 
 ## When it will not answer
 
@@ -109,7 +135,8 @@ leftovers first: `desk`, check `state`'s stack, reboot if unsure.
 
 ## The suites
 
-Each board has one, gated on its own variable, over `tests/on_glass.py`:
+Each board has one, gated on its own variable, over `tests/on_glass.py`
+(`tools/board.py pass --no-flash BOARD` runs it and prints the table):
 
 ```bash
 MOYBYTE_TDECK_PORT=$(tools/board.py tdeck port) .venv/bin/python -m pytest tests/test_tdeck_on_glass.py

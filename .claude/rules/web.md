@@ -171,6 +171,10 @@ nor those docs will warn you about:
   `browsershot.mjs` drives the shipped page in real headless Chrome. **The page
   waits behind a play-button splash unless the scenario passes `?dev=1`**, so a
   scenario that forgets it screenshots a blank canvas and looks like a raster bug.
+  For a one-off look at a page, `tools/web.py shot URL` prints the PNG's path
+  and the page's errors (`shot /?dev=1` serves this tree's dist for the shot;
+  `tools/web.py serve` serves it on a free port until stopped). It drives the
+  SYSTEM Chrome through Playwright, the `web` extra: never `playwright install`.
 - **The p8 import is UPSTREAM of us, BOTH halves.** SPEC.md says what a
   converted cart MEANS, so corrections are worked out in moy-spec and travel
   HERE — and once they did not: upstream fixed a pitch offset, our hand-copy

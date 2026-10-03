@@ -21,7 +21,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   toolchain and its self-heal, IDF components, native staging, the web blob
   (generated into the STAGED copy — a build never writes into `native/`), the
   OTA identity stamp from `device/moy_ota.py`, the frozen manifest and its
-  fingerprint, the stale-sdkconfig guard and the #168 size guard. What stays per
+  fingerprint, the stale-sdkconfig guard, the #168 size guard and, outside
+  CI, the one ccache every checkout and worktree shares (`moybyte_ccache`). What stays per
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
   MicroPython v1.28 and ESP-IDF v5.5.1 into the board's `.build/`, and an
   oversized image is a build FAILURE on every board.
@@ -71,10 +72,21 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   `git checkout` of the header alone (2026-09-23) left `main.c` patched, a
   `.rej` behind, and the build stopped before REPR_C re-applied. Reset the two
   together, delete any `.rej`, rebuild: every patcher is idempotent from stock.
-- **Build the two P4s one at a time.** They share the component manager's git
-  cache (`~/.cache/Espressif/ComponentManager`) and race on its `index.lock`:
-  "Unable to create index.lock: File exists" (2026-09-22), and a retry passes.
-  The two S3s build side by side.
+- **A build runs in a worktree, never the main checkout.** The main
+  checkout's `dist/` and board `.build/` trees are the images every other
+  session flashes, and a build there overwrites them (it happened twice before
+  2026-10-03). `tools/worktree.py new NAME` makes a worktree that builds as it
+  is: its own MicroPython trees, local clones of the main checkout's, over the
+  one shared ESP-IDF, and its own browser console, which every image bakes
+  (an image built with none fails the suites' baked-console check).
+  `tools/board.py pass` refuses a build in the main checkout without `--main`.
+- **Every ESP32 build checks out micropython's tinyusb fork from the component
+  manager's one git cache** (`~/.cache/Espressif/ComponentManager`) while it
+  configures, so two builds configuring at the same moment race on its
+  `index.lock`: "Unable to create index.lock: File exists" (two P4s
+  2026-09-22, the T-Deck and a P4 2026-10-03), and a retry passes.
+  `tools/board.py pass` builds the two P4s one at a time and runs a build that
+  lost the race again.
 
 ## Settled
 
