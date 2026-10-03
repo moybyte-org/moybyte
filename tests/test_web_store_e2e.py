@@ -3,8 +3,9 @@
 Two local servers stand in for the two kinds of host a carts index names:
 
   * PAGES -- the carts repository's Pages site, which answers every file with
-    `Access-Control-Allow-Origin: *`: index.json, the licence texts, and the
-    MIRROR of each release asset (moy-spec's `moy index --mirror`);
+    `Access-Control-Allow-Origin: *`: index.json, the licence texts, the
+    MIRROR of each release asset (moy-spec's `moy index --mirror`), and the
+    mirror of an external file the repository gives away itself;
   * RELEASES -- a GitHub release download and Debian's archive, neither of
     which sends a CORS header, so a page may ask and may not read.
 
@@ -18,7 +19,9 @@ release; it lands in OPFS whole, binary file and record included, with nothing
 left in staging; a cart whose external file's host the page cannot read asks
 for the player's own copy, takes it, and installs it; a cart whose bytes are
 wrong installs nothing; and on a second load in the same browser the carts and
-the record come back out of OPFS and the installed cart PLAYS.
+the record come back out of OPFS and the installed cart PLAYS. Apart: an
+external file with a mirror on PAGES installs from it, and the page asks the
+player nothing and the archive's host not once.
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_store_e2e.py
 
@@ -254,6 +257,71 @@ def test_a_hosted_console_installs_carts_into_its_own_store(tmp_path):
         ], base, profile)
         assert js3[0] == "Rock Run", "the installed cart did not run:\n%s" % out3[-3000:]
         print("\nstore e2e: %s" % js2[2])
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+        pages.stop()
+        releases.stop()
+
+
+def test_a_hosted_console_takes_an_external_file_from_its_mirror(tmp_path):
+    web_e2e.require("store", "carts")
+    pages, releases = web_e2e.Host(cors=True), web_e2e.Host(cors=False)
+    lic = b"The MIT licence of the test carts.\n"
+    pages.files["/carts/LICENCE.txt"] = lic
+    level = bytes((i * 13 + 5) & 255 for i in range(80000))
+    folder, files = _lua("wm.moy", "Warp Map", 3)
+    z = stored_zip(folder, files)
+    rel = "releases/wm-v1/wm.moy.zip"
+    releases.files["/o/carts/releases/download/wm-v1/wm.moy.zip"] = z
+    pages.files["/" + rel] = z
+    arc = tar_gz({"pkg/level.wad": level})
+    releases.files["/debian/pool/level.wad.tar.gz"] = arc
+    pages.files["/files/wm/level.wad"] = level
+    ltext = b"You may give this file away, and not sell it.\n"
+    pages.files["/carts/level.wad.txt"] = ltext
+    pages.files["/index.json"] = json.dumps({"version": 1, "name": "Test shelf",
+                                             "home": releases.base + "/o/carts", "carts": [{
+        "id": "wm", "name": "Warp Map", "version": 1, "folder": folder, "runtime": "lua",
+        "licence": {"spdx": "MIT", "name": "MIT License", "url": "carts/LICENCE.txt",
+                    "size": len(lic), "sha256": sha(lic)},
+        "assets": [{"name": folder + ".zip",
+                    "url": "%s/o/carts/releases/download/wm-v1/wm.moy.zip" % releases.base,
+                    "mirror": rel, "size": len(z), "sha256": sha(z),
+                    "files": dict((fn, {"size": len(b), "sha256": sha(b)})
+                                  for fn, b in files.items())}],
+        "external": [{
+            "path": "level.wad", "size": len(level), "sha256": sha(level),
+            "mirror": "files/wm/level.wad",
+            "licence": {"name": "The game data's licence", "url": "carts/level.wad.txt",
+                        "size": len(ltext), "sha256": sha(ltext)},
+            "archive": {"urls": ["%s/debian/pool/level.wad.tar.gz" % releases.base],
+                        "format": "tar.gz", "size": len(arc), "sha256": sha(arc),
+                        "member": "pkg/level.wad"}}]}]}).encode()
+    site = _console(tmp_path, pages.base + "/index.json")
+    server, base = web_e2e.serve(site, web_e2e.free_port())
+    at = _layout()
+    try:
+        out, js = web_e2e.run(tmp_path, "mirror", "?handheld=1&dev=1&cart=get_carts.moy", [
+            {"note": "Get Carts opened at boot", "wait": 4000},
+            {"click": at["row"][0]},
+            {"wait": 800}, {"click": at["one"]},
+            {"note": "its licence first", "wait": 3000},
+            {"click": at["two"][0]},
+            {"note": "from the mirror, asking nothing", "wait": 6000}, {"shot": "wm_ready"},
+            {"js": "JSON.stringify(window.__moyPick || null)"},
+            {"js": "getComputedStyle(document.getElementById('pk')).display"},
+            {"js": _OPFS % '["wm.moy"]'},
+        ], base, tmp_path / "chrome")
+        assert len(js) == 3, "the scenario did not run to its end:\n%s" % out[-4000:]
+        assert json.loads(js[0]) is None and js[1] == "none", js[:2]
+        got = json.loads(js[2])
+        wm = got["carts"]["wm.moy"]
+        assert wm and wm["level.wad"] == [len(level), hashlib.sha256(level).hexdigest()], \
+            "%r\n%s" % (wm, out[-3000:])
+        assert sorted(got["record"]["carts"]) == ["wm.moy"] and got["staging"] == []
+        assert "/files/wm/level.wad" in pages.asked
+        assert releases.asked == [], "the page asked a host it cannot read: %r" % releases.asked
     finally:
         server.terminate()
         server.wait(timeout=10)

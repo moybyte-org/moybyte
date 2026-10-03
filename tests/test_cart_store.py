@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from cart_store_fixtures import (GPL_URL, MIT_URL, MemNet, Repo, Server, Truncated,
+from cart_store_fixtures import (FIXTURES, INDEX_URL, MemNet, Repo, Server, Truncated,
                                  _Resp, sha, snapshot, stored_zip)
 from runtime import cart_index as ci
 
@@ -87,18 +87,54 @@ def _untouched(root, folder):
 
 # -- READING -------------------------------------------------------------------
 
-def test_the_live_indexes_parse():
-    gpl = ci.parse_index(snapshot("gpl-index.json"), GPL_URL)
-    mit = ci.parse_index(snapshot("mit-index.json"), MIT_URL)
-    assert [c["id"] for c in gpl] == ["doom"]
-    assert sorted(c["id"] for c in mit) == ["esp88", "teapot"]
-    doom = gpl[0]
-    assert doom["index"] == GPL_URL and doom["shelf"] == "Moybyte GPL carts"
-    assert doom["external"][0]["path"] == "doom1.wad"
+def _snapshot_cart(cid):
+    return next(c for c in ci.parse_index(snapshot("index.json"), INDEX_URL)
+                if c["id"] == cid)
+
+
+def test_the_default_index_is_the_one_carts_repository():
+    assert ci.DEFAULT_INDEXES == (INDEX_URL,)
+
+
+def test_the_index_parses():
+    carts = ci.parse_index(snapshot("index.json"), INDEX_URL)
+    assert sorted(c["id"] for c in carts) == ["doom", "esp88", "teapot"]
+    assert {c["licence"]["spdx"] for c in carts} == {"GPL-2.0-or-later", "MIT"}
+    doom = next(c for c in carts if c["id"] == "doom")
+    assert doom["index"] == INDEX_URL and doom["shelf"] == "Moybyte carts"
+    wad = doom["external"][0]
+    assert wad["path"] == "doom1.wad"
+    assert wad["mirror"] == "files/doom/doom1.wad"
+    assert ci.resolve(INDEX_URL, wad["mirror"]) == \
+        "https://moybyte-org.github.io/carts/files/doom/doom1.wad"
+    assert ci.external_sources(wad)[0] == "files/doom/doom1.wad"
+    assert ci.external_sources(wad)[1:] == wad["archive"]["urls"]
+
+
+@pytest.mark.parametrize("chip", ["esp32s3", "esp32p4"])
+def test_a_console_with_the_v3_carts_reads_each_as_an_update(chip):
+    """A console that installed Doom, ESP 88 and Jet Teapot v3 from gpl-carts'
+    and mit-carts' indexes finds each in the one index as an UPDATE -- matched
+    by folder and id, never by the index it came from -- and nothing it holds
+    reads as another cart's."""
+    with open(FIXTURES / "installed-v3.json") as f:
+        rec = json.load(f)["records"][chip]["carts"]
+    carts = ci.parse_index(snapshot("index.json"), INDEX_URL)
+    assert sorted(c["folder"] for c in carts) == sorted(rec)
+    for cart in carts:
+        entry = rec[cart["folder"]]
+        assert entry["version"] == 3 and entry["index"] != INDEX_URL
+        p = ci.plan(cart, chip, 2)
+        assert p["module"] == entry["module"]
+        assert ci.cart_state(cart, p, entry, True) == "update", cart["id"]
+        # The same files under the new version number would be ON CONSOLE.
+        same = dict(entry, version=cart["version"],
+                    files=dict((fn, m["sha256"]) for fn, m in p["files"].items()))
+        assert ci.cart_state(cart, p, same, True) == "installed"
 
 
 def test_the_plan_takes_main_wasm_and_only_this_consoles_module():
-    doom = ci.parse_index(snapshot("gpl-index.json"), GPL_URL)[0]
+    doom = _snapshot_cart("doom")
     p = ci.plan(doom, "esp32s3", 2)
     assert p["module"] == "main.esp32s3.f2.aot"
     assert "main.esp32p4.f2.aot" not in p["files"]
@@ -108,7 +144,10 @@ def test_the_plan_takes_main_wasm_and_only_this_consoles_module():
     assert p["store_bytes"] == sum(m["size"] for fn, m in files.items()
                                    if fn != "main.esp32p4.f2.aot") \
         + doom["external"][0]["size"]
-    assert p["download_bytes"] == doom["assets"][0]["size"] \
+    assert p["download_bytes"] == doom["assets"][0]["size"] + doom["external"][0]["size"]
+    old = dict(doom, external=[dict(doom["external"][0])])
+    del old["external"][0]["mirror"]
+    assert ci.plan(old, "esp32s3", 2)["download_bytes"] == doom["assets"][0]["size"] \
         + doom["external"][0]["archive"]["size"]
 
 
@@ -116,8 +155,7 @@ def test_the_plan_takes_main_wasm_and_only_this_consoles_module():
 def test_a_console_with_no_module_of_its_own_takes_none(chip, fmt):
     """A board with a compiled tier and no module of its own plays the cart on
     the interpreter (slow); the host has no compiled tier to be slow against."""
-    tea = next(c for c in ci.parse_index(snapshot("mit-index.json"), MIT_URL)
-               if c["id"] == "teapot")
+    tea = _snapshot_cart("teapot")
     p = ci.plan(tea, chip, fmt)
     assert p["module"] is None
     assert p["slow"] is bool(chip)
@@ -134,9 +172,9 @@ def test_module_names_are_read_by_the_wasm_cart_rule():
 
 
 def test_references_resolve_against_the_index():
-    idx = "https://moybyte-org.github.io/gpl-carts/index.json"
+    idx = INDEX_URL
     assert ci.resolve(idx, "carts/doom/NOTICE") == \
-        "https://moybyte-org.github.io/gpl-carts/carts/doom/NOTICE"
+        "https://moybyte-org.github.io/carts/carts/doom/NOTICE"
     assert ci.resolve(idx, "/x/y") == "https://moybyte-org.github.io/x/y"
     assert ci.resolve(idx, "https://deb.debian.org/a") == "https://deb.debian.org/a"
     assert ci.resolve("http://192.168.1.5:8000/index.json", "./carts/a") == \
@@ -246,6 +284,77 @@ def test_an_accepted_external_file_comes_out_of_its_archive(tmp_path):
     assert (Path(job.path) / "game.wad").read_bytes() == wad
     assert not (Path(job.path) / "README").exists()
     assert job.done == job.total
+
+
+def _mirrored(wad):
+    repo = Repo(BASE)
+    repo.add("dm", external=[("game.wad", wad, "pkg/game.wad", True)])
+    cart = _cart(repo, "dm")
+    ext = cart["external"][0]
+    return repo, cart, ci.resolve(cart["index"], ext["mirror"]), ext["archive"]["urls"][0]
+
+
+def test_an_external_file_comes_bare_from_its_mirror(tmp_path):
+    """The repository's own copy, no archive held and no inflate: the plan,
+    the bar and the download are the file's own bytes."""
+    root = _store(tmp_path)
+    wad = os.urandom(70000)
+    repo, cart, mirror, arc = _mirrored(wad)
+    p = ci.plan(cart, "esp32s3", 2)
+    assert p["download_bytes"] == cart["assets"][0]["size"] + len(wad)
+    net = MemNet(repo.routes())
+    job = _install(cart, root, net)
+    assert job.error is None, job.detail
+    assert (Path(job.path) / "game.wad").read_bytes() == wad
+    assert mirror in net.opened and arc not in net.opened
+    assert job.total == cart["assets"][0]["size"] + len(wad)
+    assert job.done == job.total
+    assert ci.load_record(root)["dm.moy"]["files"]["game.wad"] == sha(wad)
+
+
+@pytest.mark.parametrize("fault", ["missing", "wrong size", "unreachable"])
+def test_a_mirror_that_does_not_answer_leaves_the_archive(tmp_path, fault):
+    root = _store(tmp_path)
+    wad = os.urandom(60000)
+    repo, cart, mirror, arc = _mirrored(wad)
+    routes = repo.routes()
+    if fault == "missing":
+        del routes[mirror]
+    elif fault == "wrong size":
+        routes[mirror] = lambda: _Resp(wad[:100])
+
+    else:
+        def refuse():
+            raise OSError(113, "no route to host")
+        routes[mirror] = refuse
+    net = MemNet(routes)
+    job = _install(cart, root, net)
+    assert job.error is None, job.detail
+    assert (Path(job.path) / "game.wad").read_bytes() == wad
+    assert net.opened.index(mirror) < net.opened.index(arc)
+    assert job.done == job.total
+
+
+def test_a_mirror_whose_bytes_are_wrong_lands_nothing(tmp_path):
+    root = _store(tmp_path)
+    wad = os.urandom(60000)
+    repo, cart, mirror, arc = _mirrored(wad)
+    routes = repo.routes()
+    routes[mirror] = os.urandom(len(wad))
+    job = _install(cart, root, MemNet(routes))
+    assert job.error == ci.MISMATCH
+    _untouched(root, "dm.moy")
+
+
+@pytest.mark.parametrize("bad", ["../game.wad", "https://elsewhere.example/game.wad",
+                                 "/files/dm/game.wad"])
+def test_an_external_mirror_outside_the_site_is_left_out_and_the_cart_stays(bad):
+    repo, cart, mirror, arc = _mirrored(b"x" * 100)
+    repo.carts[0]["external"][0]["mirror"] = bad
+    got = ci.parse_index(repo.index(), repo.url("index.json"))
+    assert [c["id"] for c in got] == ["dm"]
+    assert "mirror" not in got[0]["external"][0]
+    assert ci.external_sources(got[0]["external"][0]) == [arc]
 
 
 def test_the_licence_text_is_checked_too():
@@ -1061,15 +1170,16 @@ def test_doom_is_refused_where_the_engine_has_too_little_free(tmp_path):
 
         def memory(self):
             return 3 * 1048576, 3 * 1048576
-    net = MemNet({GPL_URL: snapshot("gpl-index.json")})
-    ws, app = _app_ws(tmp_path, net, [GPL_URL])
+    net = MemNet({INDEX_URL: snapshot("index.json")})
+    ws, app = _app_ws(tmp_path, net, [INDEX_URL])
     ws.runtimes["wasm"] = S3Engine()
     app._inst.chip = lambda: ("esp32s3", "2")
     _open(ws, app)
-    doom = app.rows[0]
-    assert doom["cart"]["id"] == "doom" and doom["plan"]["module"] == "main.esp32s3.f2.aot"
+    doom = next(r for r in app.rows if r["cart"]["id"] == "doom")
+    assert doom["plan"]["module"] == "main.esp32s3.f2.aot"
     assert doom["fit"] and "Doom needs" in doom["fit"] and "MB" in doom["fit"]
-    assert net.opened == [GPL_URL]
+    # The index and the covers it names; nothing of Doom's was fetched.
+    assert [u for u in net.opened if not u.endswith("/cover.png")] == [INDEX_URL]
 
 
 def test_the_archive_goes_to_a_file_where_memory_is_short(tmp_path):
@@ -1389,10 +1499,14 @@ def test_the_installer_runs_under_micropython(tmp_path, archive):
     wad = os.urandom(90000)
     repo.add("dm", external=[("game.wad", wad, "pkg/game.wad")])
     repo.add("jet", extra={"big.bin": os.urandom(150000)})
+    # From its mirror, bare: its archive is not on this transport at all.
+    repo.add("wm", external=[("level.wad", wad, "pkg/level.wad", True)])
+    routes = repo.routes()
+    del routes[repo.carts[-1]["external"][0]["archive"]["urls"][0]]
     data = tmp_path / "data"
     data.mkdir()
     url_map = {}
-    for i, (url, blob) in enumerate(repo.routes().items()):
+    for i, (url, blob) in enumerate(routes.items()):
         p = data / ("f%d" % i)
         p.write_bytes(blob)
         url_map[url] = str(p)
@@ -1409,9 +1523,11 @@ def test_the_installer_runs_under_micropython(tmp_path, archive):
     lines = [ln for ln in out.stdout.splitlines() if not ln.startswith("Moybyte")]
     assert "dm None" in lines[0] and "game.wad" in lines[0], out.stdout
     assert "main.esp32p4.f2.aot" in lines[1] and "esp32s3" not in lines[1], out.stdout
-    assert lines[2] == "record ['dm.moy', 'jet.moy']"
+    assert "wm None" in lines[2] and "level.wad" in lines[2], out.stdout
+    assert lines[3] == "record ['dm.moy', 'jet.moy', 'wm.moy']"
     # an InstallError raised and caught on MicroPython, which has no
     # Exception.__init__ for a subclass to call
-    assert lines[3] == "refused True False", out.stdout
+    assert lines[4] == "refused True False", out.stdout
     assert (Path(root) / "dm.moy" / "game.wad").read_bytes() == wad
+    assert (Path(root) / "wm.moy" / "level.wad").read_bytes() == wad
     assert os.listdir(Path(root).parent / ci.STAGE_DIR) == []

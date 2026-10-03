@@ -13,7 +13,7 @@ import SPEC.md §16.5 keeps for pixels that are direct-colour by nature:
 - **ESP 88** (`esp88.moy/`): `esp32-neon-film`, the two-minute neon city film
   in twelve cuts, played in a loop.
 
-**Their home is [moybyte-org/mit-carts](https://github.com/moybyte-org/mit-carts)**,
+**Their home is [moybyte-org/carts](https://github.com/moybyte-org/carts)**,
 which builds and publishes them: a change to a cart lands there. The two
 folders here are its carts/<id>/, less that repository's own cart.json,
 recipe and README, copied by `tools/vendor_jet_carts.py` (`make
@@ -21,7 +21,7 @@ vendor-jet-carts`) and stamped in `jet_carts_vendor.json`, because this
 repository's tests and on-glass guards build them and a build here never
 fetches; `tests/test_jet_vendor.py` makes an edit to the copy loud. What stays
 this repository's own is Jet and the film's code (`make vendor-jet`), and the
-build, `tools/jet_cart.py`, which mit-carts' recipe also runs at a pinned
+build, `tools/jet_cart.py`, which the carts' recipe also runs at a pinned
 moybyte commit, so the flags have one home.
 
 ## Credits
@@ -34,7 +34,7 @@ A Phong-lit surface is a gradient, which a 256-entry palette would have to
 quantize first; this is the cart that made `blit565` earn its place.
 
 Its buttons and its `config.json` keys (`width`, `interlaced`, `shading`,
-`hud`, `cores`) are mit-carts' `carts/teapot/README.md`. The HUD's strip reads the width, the shading, the whole-frame rate, the mean
+`hud`, `cores`) are the carts repository's `carts/teapot/README.md`. The HUD's strip reads the width, the shading, the whole-frame rate, the mean
 time Jet's `render()` took, and the triangles it rasterized, each averaged over
 the last second. The cart draws it into its own frame, before `blit565`, in
 the console's font (`src/hud_font.h`) and two of its palette's colours: the
@@ -56,8 +56,8 @@ buffer instead.
 The film's own code builds and animates every cut — the city, the cars, the
 cockpit, the rain, the lens pulls — through `Film::seek`, and the cart plays
 it from its own clock, looping where the example restarts its board after a
-second of black. Its buttons and `config.json` keys are mit-carts'
-`carts/esp88/README.md`.
+second of black. Its buttons and `config.json` keys are the carts
+repository's `carts/esp88/README.md`.
 
 It renders the way the example's ESP32 runtime (`components/esp32_jet`) does:
 Jet's half-width field buffers, one field a frame, the river reflecting the
@@ -100,12 +100,12 @@ by board, is #158's.
 
 | what | where |
 |---|---|
-| a cart's folder: manifest, config, data, licences, `src/` -- mit-carts' copy | `teapot.moy/`, `esp88.moy/`, stamped in `jet_carts_vendor.json` (`make vendor-jet-carts`) |
+| a cart's folder: manifest, config, data, licences, `src/` -- the carts repository's copy | `teapot.moy/`, `esp88.moy/`, stamped in `jet_carts_vendor.json` (`make vendor-jet-carts`) |
 | the hooks, buttons, config, buffers and HUD | `<cart>/src/main.cpp` |
 | the imports, moy-spec's header; the heap, `par`'s items and their stacks, and the C library's edges; the HUD's glyphs, the console's font | `<cart>/src/moy_cart.h`, `runtime.cpp`, `hud_font.h` — one body in both, which a test holds equal |
 | the teapot's scene, compiled once per Jet build, and its Jet configuration | `teapot.moy/src/scene.cpp`, `JetConfig.hpp` |
 | Jet, vendored at the commit JetExamples pins | `jet/`, stamped in `jet_vendor.json` (`make vendor-jet`) |
-| the teapot's model, derived from the example's generated mesh | `teapot.moy/teapot.obj` (derived by the same script, `--carts` writing it into mit-carts) |
+| the teapot's model, derived from the example's generated mesh | `teapot.moy/teapot.obj` (derived by the same script, `--carts` writing it into the carts repository) |
 | the film's code and Jet configuration, from the same JetExamples commit | `examples/esp32-neon-film/main/` (the same script) |
 | the film's artwork, derived from its generated headers | `esp88.moy/assets.bin` (the same, `--carts`) |
 
@@ -201,7 +201,7 @@ and each chip's module, signed with the OTA key — made by the build, never by
 hand and never committed.
 
 1. **Where it comes from.** The build of the copy here, whose `main.wasm` is
-   the one mit-carts' release carries, gets a roster entry with `"system":
+   the one the carts repository's release carries, gets a roster entry with `"system":
    true` and an `"order"`, and `tools/gen_device_carts.py`, which packs the
    roster into each image, learns one thing: a system cart whose runtime is
    `wasm` is not read as text but taken from a directory of built carts

@@ -4,7 +4,7 @@ browsed and installed over WiFi with no PC involved.
 The screens, in the order a kid meets them:
 
   CHECKING   the radio comes up under the "carts" lease and every index is
-             fetched -- moybyte-org's carts repositories unless `indexes.json`
+             fetched -- moybyte-org's carts repository unless `indexes.json`
              beside the carts folder names others (runtime/cart_index.py) --
              then the covers they name that this session has not drawn yet.
   LIST       a big row per cart: its cover when its index names one, its
@@ -20,13 +20,14 @@ The screens, in the order a kid meets them:
              will not fit in the store, that the engine would refuse to load
              (the Player's check, asked of the index before the download), or
              that this console cannot play says why and offers no GET.
-  LICENCE    a file the cart needs that its repository does not host (Doom's
-             WAD) shows its licence before it is fetched. NO has the focus;
+  LICENCE    a file the cart needs that is not in its release (Doom's WAD)
+             shows its licence before it is fetched. NO has the focus;
              I AGREE is the only way on.
   YOUR COPY  a console that can be handed a file (the browser) first asks
-             whether it can read that file's hosts at all; where it cannot,
-             the player chooses their own copy, which is held to the index's
-             size and sha256 before anything is downloaded.
+             whether it can read that file from anywhere the index names --
+             its mirror beside the index, then its archive's hosts; where it
+             cannot, the player chooses their own copy, which is held to the
+             index's size and sha256 before anything is downloaded.
   GETTING    the download, a slice per frame (`cart_index.Install.step`), with
              its progress and CANCEL -- until the build is checked and goes to
              a store of record that is not these files (the browser's), when
@@ -104,6 +105,12 @@ def _host_of(url):
     rest = url[start + 3:] if start >= 0 else url
     cut = rest.find("/")
     return rest if cut < 0 else rest[:cut]
+
+
+def _ext_host(cart, e):
+    """Where an external file comes from first, as the screens name it: its
+    mirror's host, else its archive's."""
+    return _host_of(_ci.resolve(cart["index"], _ci.external_sources(e)[0]))
 
 
 class GetCartsLayout(ListShellLayout):
@@ -635,8 +642,9 @@ class GetCartsAppLayer(ListShellApp):
             self._go("probing")
 
     def _pump_probe(self):
-        """Can this console read the external file's archive from any of its
-        hosts? Yes: the install fetches it. No: the player picks a copy."""
+        """Can this console read the external file from its mirror or any of
+        its archive's hosts? Yes: the install fetches it. No: the player picks
+        a copy."""
         e = self._external()
         if e is None:
             self._go("connecting")
@@ -649,7 +657,7 @@ class GetCartsAppLayer(ListShellApp):
             net = self._inst.net()
             index = self.cur["cart"]["index"]
             self._fetch = _ci.Reach(net, [_ci.resolve(index, u)
-                                          for u in e["archive"]["urls"]])
+                                          for u in _ci.external_sources(e)])
             self._fetching = ("reach", self._ext)
         if self._fetch.step():
             return
@@ -666,7 +674,7 @@ class GetCartsAppLayer(ListShellApp):
         if self._pick is not None:
             self._pick.close()        # a question answered with the wrong file
         self._pick = self._inst.pick(e["path"], e["size"],
-                                     _host_of(e["archive"]["urls"][0]))
+                                     _ext_host(self.cur["cart"], e))
         if self._pick is None:
             self._fail(_ci.UNREACHABLE)
             return
@@ -1013,8 +1021,7 @@ class GetCartsAppLayer(ListShellApp):
                                                           _mb(p["download_bytes"])),
                        y, th["ink"])
         for e in p["external"]:
-            y = self._line(cv, "Needs %s from %s" % (e["path"],
-                                                     _host_of(e["archive"]["urls"][0])),
+            y = self._line(cv, "Needs %s from %s" % (e["path"], _ext_host(c, e)),
                            y, th["ink"])
         if p["slow"]:
             y = self._line(cv, "Plays slowly on this console.", y, self.names["orange"])
@@ -1089,7 +1096,7 @@ class GetCartsAppLayer(ListShellApp):
             e = self._external()
             lines = [] if self.pick_why is None else [self.pick_why]
             lines.append("This console can't fetch %s from %s."
-                         % (e["path"], _host_of(e["archive"]["urls"][0])))
+                         % (e["path"], _ext_host(self.cur["cart"], e)))
             lines.append("Choose your own copy of %s (%s) in the box below."
                          % (e["path"], _mb(e["size"])) if ph == "pick"
                          else "Checking your copy...")

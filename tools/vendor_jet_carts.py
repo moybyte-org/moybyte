@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Nikola Jovicic
-"""Re-vendor the Jet carts from moybyte-org/mit-carts into ports/jet.
+"""Re-vendor the Jet carts from moybyte-org/carts into ports/jet.
 
-    make vendor-jet-carts                         # ../mit-carts at its HEAD
-    make vendor-jet-carts MIT=/path/to/mit-carts COMMIT=<sha>
+    make vendor-jet-carts                         # ../carts at its HEAD
+    make vendor-jet-carts CARTS_REPO=/path/to/carts COMMIT=<sha>
     python3 tools/vendor_jet_carts.py --check     # what would change
 
-Jet Teapot and ESP 88 live in mit-carts, the MIT carts repository, which
+Jet Teapot and ESP 88 live in moybyte-org/carts, the carts repository, which
 builds and publishes them. This repository keeps a copy of each cart's folder
 because its tests and on-glass guards build them -- the host frame goldens,
 the heap and two-core checks in tests/test_jet_cart.py, and every console
 board's `jet_holds_its_floor` -- and a build here never fetches
 (tools/vendor_libmoy.py says why). The copy is ports/jet/<cart>.moy/: every
-file of mit-carts' carts/<id>/ but that repository's own cart.json, recipe.py
+file of the carts repository's carts/<id>/ but its own cart.json, recipe.py
 and README.md, read from the clone's git OBJECTS at the commit, never its
-working tree. A change to a cart belongs in mit-carts and arrives here by
-re-vendoring; the stamp, ports/jet/jet_carts_vendor.json, is what
+working tree. A change to a cart belongs in the carts repository and arrives
+here by re-vendoring; the stamp, ports/jet/jet_carts_vendor.json, is what
 tests/test_jet_vendor.py holds the copy to.
 
 What stays this repository's own under ports/jet: Jet and the film's code
 (tools/vendor_jet.py, from CubeCoders), the build (tools/jet_cart.py, which
-mit-carts' recipe also runs, at a pinned moybyte commit) and the README.
+the carts' recipe also runs, at a pinned moybyte commit) and the README.
 """
 
 import argparse
@@ -34,13 +34,13 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = os.path.join(ROOT, "ports", "jet")
 STAMP = os.path.join(PORT, "jet_carts_vendor.json")
-REPO = "moybyte-org/mit-carts"
-DEFAULT_CLONE = os.environ.get("MOYBYTE_MIT_CARTS") or os.path.join(
-    os.path.dirname(ROOT), "mit-carts")
+REPO = "moybyte-org/carts"
+DEFAULT_CLONE = os.environ.get("MOYBYTE_CARTS") or os.path.join(
+    os.path.dirname(ROOT), "carts")
 
-# mit-carts cart id -> the folder here.
+# The carts repository's cart id -> the folder here.
 CARTS = {"teapot": "teapot.moy", "esp88": "esp88.moy"}
-# mit-carts' own files in a cart folder, never the cart's.
+# The carts repository's own files in a cart folder, never the cart's.
 REPO_FILES = ("cart.json", "recipe.py", "README.md")
 
 
@@ -91,18 +91,17 @@ def vendored_now():
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--mit", default=DEFAULT_CLONE,
-                    help="a clone of %s (default: $MOYBYTE_MIT_CARTS, else "
-                    "../mit-carts)" % REPO)
+    ap.add_argument("--carts", default=DEFAULT_CLONE,
+                    help="a clone of %s (default: $MOYBYTE_CARTS, else ../carts)" % REPO)
     ap.add_argument("--commit", default="HEAD", help="the commit to vendor (default: HEAD)")
     ap.add_argument("--check", action="store_true", help="report what would change; write nothing")
     args = ap.parse_args(argv)
-    if not os.path.isdir(os.path.join(args.mit, ".git")):
+    if not os.path.isdir(os.path.join(args.carts, ".git")):
         print("vendor-jet-carts: no clone at %s\n  git clone https://github.com/%s.git %s"
-              % (args.mit, REPO, args.mit), file=sys.stderr)
+              % (args.carts, REPO, args.carts), file=sys.stderr)
         return 2
-    files, upstream = from_clone(args.mit, args.commit)
-    print("vendor-jet-carts: %s @ %s" % (args.mit, upstream["commit"][:12]))
+    files, upstream = from_clone(args.carts, args.commit)
+    print("vendor-jet-carts: %s @ %s" % (args.carts, upstream["commit"][:12]))
 
     changed = []
     for path, data in sorted(files.items()):

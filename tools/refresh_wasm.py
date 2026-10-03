@@ -36,7 +36,7 @@ freshly built `main.wasm`; a cart whose OWN folder under `system_carts/` or
 `ports/` already carries one is pushed as it is. A cart with neither is
 refused by name, the same answer this tool's docstring already gave a
 hand-pushed cart with no source here: push it again from wherever its source
-lives (Doom's is moybyte-org/gpl-carts, never this tree, by licence).
+lives (Doom's is moybyte-org/carts, never this tree, by licence).
 
 WHAT COUNTS AS STALE: whether `main.<chip>.f<format>.aot` -- this board's own
 key, the name `device/moycore_glue.aot_path` looks for -- already sits beside

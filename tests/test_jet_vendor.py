@@ -3,12 +3,12 @@
 ports/jet/jet/ is the subset of CubeCoders' Jet the Jet carts compile, and
 ports/jet/examples/ is ESP 88's code from JetExamples with the one change
 tools/vendor_jet.py's PATCHES records -- stamped in ports/jet/jet_vendor.json.
-ports/jet/teapot.moy/ and esp88.moy/ are moybyte-org/mit-carts' two carts,
+ports/jet/teapot.moy/ and esp88.moy/ are moybyte-org/carts' two Jet carts,
 copied by tools/vendor_jet_carts.py and stamped in
 ports/jet/jet_carts_vendor.json; their data (teapot.obj, assets.bin, both
 LICENSES.txt) is what tools/vendor_jet.py derives from JetExamples at the pin,
 which the last of the vendor tests re-derives. A fix belongs upstream -- Jet,
-JetExamples or mit-carts -- and arrives here by re-vendoring; an edit made
+JetExamples or the carts repository -- and arrives here by re-vendoring; an edit made
 here survives only until the next re-vendor silently reverts it. These are the
 checks that make it loud.
 """
@@ -170,7 +170,7 @@ def test_the_copy_is_upstream_at_the_pinned_commits(manifest):
             "and re-run `make vendor-jet`" % rel)
 
 
-# -- the carts: mit-carts' copy ------------------------------------------------
+# -- the carts: the carts repository's copy ------------------------------------
 
 
 @pytest.fixture(scope="module")
@@ -178,22 +178,22 @@ def carts_stamp():
     return load_manifest(CARTS_STAMP, "vendor-jet-carts")
 
 
-def test_the_carts_stamp_names_a_mit_carts_commit(carts_stamp):
+def test_the_carts_stamp_names_a_carts_repository_commit(carts_stamp):
     check_manifest_not_empty(carts_stamp)
-    assert carts_stamp["upstream"]["repo"] == "moybyte-org/mit-carts"
+    assert carts_stamp["upstream"]["repo"] == "moybyte-org/carts"
     assert re.fullmatch(r"[0-9a-f]{40}", carts_stamp["upstream"]["commit"])
 
 
-def test_the_carts_are_mit_carts_copy(carts_stamp):
-    check_files_match(carts_stamp, "moybyte-org/mit-carts' carts/<id>/",
+def test_the_carts_are_the_carts_repositorys_copy(carts_stamp):
+    check_files_match(carts_stamp, "moybyte-org/carts' carts/<id>/",
                       "vendor-jet-carts")
 
 
 def test_every_file_in_a_cart_folder_is_in_the_stamp(carts_stamp):
     from tools import vendor_jet_carts
     assert vendor_jet_carts.vendored_now() == sorted(carts_stamp["files"]), (
-        "a file sits in ports/jet/<cart>.moy that mit-carts does not have, or the "
-        "other way round: change the cart in mit-carts and `make vendor-jet-carts`")
+        "a file sits in ports/jet/<cart>.moy that the carts repository does not have, "
+        "or the other way round: change the cart there and `make vendor-jet-carts`")
 
 
 def test_the_carts_data_is_what_vendor_jet_derives(carts_stamp):

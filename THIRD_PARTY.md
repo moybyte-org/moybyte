@@ -262,7 +262,7 @@ component generates around it (`COLMOD` 0x55, `MADCTL`, `INVOFF`, `SLPOUT`,
 `ports/jet/jet/`
 
 The compiled (`"runtime": "wasm"`) tier's Jet carts, `ports/jet/teapot.moy/`
-and `ports/jet/esp88.moy/` -- moybyte-org/mit-carts' carts, copied here by
+and `ports/jet/esp88.moy/` -- moybyte-org/carts' Jet carts, copied here by
 `tools/vendor_jet_carts.py` for the tests and guards -- compile Jet into their
 modules; nothing in any firmware image does. A module is a build product
 (`tools/jet_cart.py`) and is never committed.
@@ -285,7 +285,7 @@ modules; nothing in any firmware image does. A module is a build product
   artwork.
 - **What the built module also contains:** compiled code from wasi-sdk 24's
   wasi-libc and LLVM's libc++/libc++abi (§6.4's toolchain). A built cart is
-  not published by this repository (mit-carts publishes them); before one ships
+  not published by this repository (moybyte-org/carts publishes them); before one ships
   in a product, its `LICENSES.txt` carries those libraries' notices as well
   (`ports/jet/README.md`, "Seeding").
 
@@ -411,7 +411,7 @@ under its `assets`).
 - **Modified: converted.** `tools/vendor_jet.py` derives it -- the example's
   integer vertices and normals as OBJ, at the scales Jet's loader multiplies
   back by, so the mesh the cart loads is the example's, value for value -- into
-  mit-carts, whose copy of the cart is vendored here, and
+  moybyte-org/carts, whose copy of the cart is vendored here, and
   `tests/test_jet_vendor.py` re-derives it and compares.
 
 ### 3.3b ESP 88 — the film's code and artwork
@@ -606,14 +606,17 @@ image. Nothing else is pulled in.
 | doomgeneric (id Software's DOOM, ozkl's portable fork), the engine `build_wasm.sh` stages from a gitignored checkout the developer fetches and `build_cart.py` fetches at a pinned commit into its gitignored cache, checked by the sha256 of its tree; never vendored | <https://github.com/ozkl/doomgeneric> | **GPL-2.0** |
 | DOOM shareware IWAD `doom1.wad` v1.9 (1993), a gitignored file the developer obtains; `build_cart.py` fetches Debian's `doom-wad-shareware` source package (<http://deb.debian.org/debian/pool/non-free/d/doom-wad-shareware/>) into its gitignored cache and checks the tarball and the WAD by sha256; never vendored, never redistributed | id Software | id Software Limited Use licence: free unmodified copies only, no consideration, no derivative works |
 
-**Doom lives in its own repository, not in this one's products.** The
-cart's glue and recipe are GPL-2.0-or-later in
-<https://github.com/moybyte-org/gpl-carts>, which publishes built carts as a
-free, opt-in download with their complete source. The shareware WAD is never
-hosted there or here: that repository's installer fetches Debian's copy and
-prints id's terms first, since they allow free copies but no consideration
-and no derivative works. Doom is never seeded, preloaded, sold with a
-console, or shipped in a product image, exactly as §7 says of Celeste. The
+**Doom lives in the carts repository, not in this one's products.** The
+cart's glue and recipe are GPL-2.0-or-later in `carts/doom/` of
+<https://github.com/moybyte-org/carts>, each cart there under the licence in
+its own folder, which publishes built carts as a free, opt-in download with
+their complete source. The shareware WAD is never in this repository or in
+that one's git history or releases; that repository's Pages site gives it
+away, free and unmodified, beside id's terms (owner, 2026-10-03), which allow
+free copies but no consideration and no derivative works. Its installers
+show those terms before fetching it, from that copy or from Debian's. Doom
+and its WAD are never seeded, preloaded, sold with a console, or shipped in a
+product image, exactly as §7 says of Celeste. The
 spike's glue under `experiments/wasm_aot/doom/` is the same GPL derivative
 and is built only locally. No `.wasm`, `.aot`, `.wad` or built cart is
 tracked by this repository.

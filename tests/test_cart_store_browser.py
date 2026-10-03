@@ -789,6 +789,33 @@ def test_a_file_the_page_cannot_fetch_is_the_players_own_copy(tmp_path):
     assert net.opened.count(arc) == 1, "the archive was asked for more than the probe"
 
 
+def test_a_file_on_the_site_comes_from_its_mirror_without_asking(tmp_path):
+    """The repository gives the external file away beside the index, where a
+    page can read it: the probe finds it there, no question goes to the
+    player, and the archive -- unreadable here -- is never asked for."""
+    repo = Repo(BASE, "Browser carts")
+    wad = os.urandom(40000)
+    repo.add("dm", name="Dungeon", runtime="lua", modules=(), release=GITHUB,
+             mirror=True, external=[("game.wad", wad, "pkg/game.wad", True)])
+    arc = repo.carts[0]["external"][0]["archive"]["urls"][0]
+    net = Trickle(repo.routes(), chunk=4096, cors=True,
+                  unreadable=list(repo.releases) + [arc])
+    pick = Picker()
+    ws, app = _app_ws(tmp_path, net, [repo.url("index.json")], keep=Keeper(), pick=pick)
+    ws.open_app(app)
+    _until(ws, app, net, lambda: app.phase == "list")
+    app._tap_row(0)
+    _frame(ws, net)
+    app._press("GET")
+    _until(ws, app, net, lambda: app.phase == "licence")
+    app._press("I AGREE")
+    _until(ws, app, net, lambda: app.phase == "done")
+    assert pick.asked == []
+    assert (tmp_path / "carts" / "dm.moy" / "game.wad").read_bytes() == wad
+    assert arc not in net.opened
+    assert net.opened.count(repo.url("files/dm/game.wad")) == 2   # the probe, the install
+
+
 def test_every_file_the_page_cannot_fetch_is_asked_for_and_kept_until_read(tmp_path):
     repo = Repo(BASE)
     a, b = os.urandom(3000), os.urandom(5000)

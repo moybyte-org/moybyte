@@ -117,12 +117,13 @@ font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:#c2c3c7}
 background:#29366f;border:1px solid #5f6f9f;border-radius:4px;padding:4px 9px;
 cursor:pointer}
 #p8 button:hover{background:#3d4a8a}
-/* Get Carts' file question (#124): a file a cart needs whose host this page
-   cannot read (Doom's WAD, from Debian) is the player's own copy instead. The
-   console asks; the CHOICE has to be a real control in the page, because a
-   browser opens its file dialog only from a click on one -- never from a tap
-   the console relays a frame later. Under the canvas like #p8, never over it:
-   the console's own screen says what is being asked and keeps its CANCEL. */
+/* Get Carts' file question (#124): a file a cart needs that this page can
+   read neither from its mirror nor from its archive's hosts is the player's
+   own copy instead. The console asks; the CHOICE has to be a real control in
+   the page, because a browser opens its file dialog only from a click on
+   one -- never from a tap the console relays a frame later. Under the canvas
+   like #p8, never over it: the console's own screen says what is being asked
+   and keeps its CANCEL. */
 #pk{display:none;max-width:min(560px,94vw);margin:8px 0 0;padding:10px 12px;
 border-radius:6px;background:#1d2b53;border:1px solid #ffec27;text-align:left;
 font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:#c2c3c7}

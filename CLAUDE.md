@@ -66,8 +66,8 @@ a browser. **`.moy` is the only cart format** (the `.moyproj` SDK was deleted
 **Where a piece belongs (owner, 2026-09-26).** What a cart author needs to make
 a game for every moy host — the verb table, libmoy, the bindings, the CLI,
 conformance, starter templates — goes to moy-spec. moybyte-org's installable
-carts live in git repos split by licence (GPL ones in moybyte-org/gpl-carts);
-user carts go through the planned store (#122–#124). How a console runs them
+carts live in one repo, moybyte-org/carts, each under the licence in its own
+folder (#230); user carts go through the planned store (#122–#124). How a console runs them
 stays here: boards, shell, store, OTA, per-chip compiling and signing, and the
 seed set (`system_carts/`: the shell's apps and wallpapers, Python-only games,
 and the fixtures the perf ledger and parity harness use).

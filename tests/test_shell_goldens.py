@@ -135,7 +135,7 @@ from pathlib import Path
 
 import pytest
 
-from cart_store_fixtures import GPL_URL, MIT_URL, MemNet, snapshot
+from cart_store_fixtures import INDEX_URL, MemNet, snapshot
 from ws_helpers import open_cart
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -421,13 +421,12 @@ def _surface_plan(ws, cfg):
 
 
 def _open_get_carts(ws):
-    """Get Carts over the two live indexes' snapshots (tests/fixtures/carts)
+    """Get Carts over the carts repository's index snapshot (tests/fixtures/carts)
     through an in-memory transport, so its golden is the LIST a kid sees on a
     fresh console rather than the no-network notice. The store's free space is
     the one machine-dependent number on that screen, so it is pinned."""
     def enter():
-        ws.cart_net = MemNet({GPL_URL: snapshot("gpl-index.json"),
-                              MIT_URL: snapshot("mit-index.json")})
+        ws.cart_net = MemNet({INDEX_URL: snapshot("index.json")})
         app = ws._apps_by_id["getcarts"]
         app._inst.free = lambda: (64 * 1048576, 4096)
         ws.open_app(app)

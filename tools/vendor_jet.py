@@ -24,10 +24,10 @@ What crosses into ports/jet:
     ports/jet/examples/ under upstream's paths (FILM_FILES), World.hpp with
     the one change PATCHES records.
 
-The carts themselves are moybyte-org/mit-carts', and ports/jet/<cart>.moy/ is
+The carts themselves are moybyte-org/carts', and ports/jet/<cart>.moy/ is
 tools/vendor_jet_carts.py's stamped copy of them. Their data is still DERIVED
 here from JetExamples, which is how it was made and how the tests prove it is
-still upstream's: `--carts DIR` writes it into a mit-carts checkout's carts/,
+still upstream's: `--carts DIR` writes it into a carts checkout's carts/,
 and tests/test_jet_vendor.py re-derives it and compares. The data:
 
   * for the teapot (carts/teapot/):
@@ -489,7 +489,7 @@ def _rel(path):
 
 def cart_data():
     """The derived files that are the carts' data, by where they sit in the
-    vendored copy: {repo-relative path: (mit-carts cart id, file name)}."""
+    vendored copy: {repo-relative path: (carts repository cart id, file name)}."""
     return {_rel(os.path.join(CART, "teapot.obj")): ("teapot", "teapot.obj"),
             _rel(os.path.join(CART, "LICENSES.txt")): ("teapot", "LICENSES.txt"),
             _rel(os.path.join(FILM_CART, "assets.bin")): ("esp88", "assets.bin"),
@@ -498,7 +498,7 @@ def cart_data():
 
 def vendored_paths():
     """Every file this script writes here, repo-relative: Jet and the film's
-    code, not the carts' data (cart_data()), which is mit-carts'."""
+    code, not the carts' data (cart_data()), which is the carts repository's."""
     return sorted([_rel(os.path.join(DEST, rel)) for rel in FILES]
                   + [_rel(os.path.join(EXAMPLES_DEST, EXAMPLES_LICENSE))]
                   + [_rel(os.path.join(EXAMPLES_DEST, FILM_DIR, n)) for n in FILM_FILES])
@@ -529,7 +529,7 @@ def main(argv):
                     help="report what would change; write nothing")
     ap.add_argument("--carts", metavar="DIR",
                     help="also write the carts' derived data into DIR/<cart id>/ "
-                    "(a moybyte-org/mit-carts checkout's carts/)")
+                    "(a moybyte-org/carts checkout's carts/)")
     args = ap.parse_args(argv)
 
     for path, repo in ((args.jet, JET_REPO), (args.examples, EXAMPLES_REPO)):

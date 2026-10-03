@@ -4,16 +4,17 @@ browsed and installed over WiFi with no PC involved (#124).
 THE FORMAT IS moy-spec's (cartindex.py, index version 1), read as it is. A
 carts repository lists its carts in one index.json: id, name, version, licence,
 the release assets with every file's size and sha256, and any file a cart needs
-that the repository does not host (Doom's WAD), with where to fetch it and under
-what licence. moybyte-org's gpl-carts and mit-carts are the first two
-(DEFAULT_INDEXES).
+that is not in its release (an external file: Doom's WAD), with where to fetch
+it and under what licence. moybyte-org/carts is the first (DEFAULT_INDEXES).
 
 What it does the way `moy install` does:
   * every byte is checked against the index: each release asset's size and
     sha256, every file in it, each external archive and the file inside it;
   * an external file is fetched only after its licence text, itself checked by
     sha256, has been shown and accepted (the app's job; `Install` refuses an
-    external nobody accepted);
+    external nobody accepted) -- bare from its `mirror`, the copy its
+    repository gives away beside the index, when the index names one, and
+    from its archive when it does not or the mirror does not answer;
   * nothing reaches the carts folder until every file has been checked: the
     cart is built in a staging folder and moved into place by one rename.
 
@@ -22,9 +23,10 @@ What it does differently, because a console is not a PC:
     tools/wasm_cart.py's `aot_name`) beside main.wasm; the other modules stream
     past unwritten. With none for this console the cart plays on the
     interpreter (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware").
-  * it streams. The release asset is a STORED zip (the carts repositories build
+  * it streams. The release asset is a STORED zip (a carts repository builds
     it sorted and uncompressed), so its members are cut out of the socket as
-    they pass. An external file's tar.gz is kept whole while its hash is
+    they pass, and an external file from its mirror goes straight to the store
+    the same way. An external file's tar.gz is kept whole while its hash is
     checked -- in RAM, or in a file beside the build where memory is short
     (`_TarGzReader` says why) -- and then inflated. `Install.step` does a
     bounded slice per frame.
@@ -78,9 +80,10 @@ another origin read. A GitHub release download is not that, so it reads an
 asset's `mirror` -- the same bytes beside the index on the repository's Pages
 site (moy-spec's cartindex.py says how a repository publishes one) -- before
 its release `url`; every other console reads the release first and falls back
-to the mirror. An external file such a console cannot read from its archive's
-hosts is one the player SUPPLIES instead (`Install`'s `supplied`, the Get Carts
-app's file picker), checked like a download.
+to the mirror. An external file's mirror is on that site too, so such a
+console reads it like any other; one it can read from neither the mirror nor
+its archive's hosts is one the player SUPPLIES instead (`Install`'s
+`supplied`, the Get Carts app's file picker), checked like a download.
 
 Where the store of record is not the files this module writes (the browser's
 OPFS behind its in-memory VFS), a KEEPER is injected (`Install`'s `keep`):
@@ -121,8 +124,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 INDEX_VERSION = 1
 DEFAULT_INDEXES = (
-    "https://moybyte-org.github.io/gpl-carts/index.json",
-    "https://moybyte-org.github.io/mit-carts/index.json",
+    "https://moybyte-org.github.io/carts/index.json",
 )
 INDEXES_NAME = "indexes.json"
 RECORD_NAME = "installed.json"
@@ -265,6 +267,21 @@ def asset_urls(asset, cors=False):
     return [m, asset["url"]] if cors else [asset["url"], m]
 
 
+def external_mirror(ext):
+    """An external file's `mirror` -- its repository's own copy of the bare
+    file, a path relative to the index -- or None when it names none (or one
+    moy-spec's check_index would refuse)."""
+    m = ext.get("mirror")
+    return m if mirror_ok(m) else None
+
+
+def external_sources(ext):
+    """Where an external file can come from, in the order to try: its mirror,
+    then its archive's hosts."""
+    m = external_mirror(ext)
+    return ([m] if m is not None else []) + list(ext["archive"]["urls"])
+
+
 def _sha(s):
     if not isinstance(s, str) or len(s) != 64:
         return False
@@ -376,6 +393,16 @@ def parse_index(data, url):
                 del a["mirror"]
             assets.append(a)
         c["assets"] = assets
+        exts = []
+        for e in c.get("external") or ():
+            if "mirror" in e and external_mirror(e) is None:
+                _log("%s: %r's %s mirror %r left out" % (url, c["id"], e["path"],
+                                                          e["mirror"]))
+                e = dict(e)
+                del e["mirror"]
+            exts.append(e)
+        if "external" in c:
+            c["external"] = exts
         c["index"] = url
         c["shelf"] = str(index.get("name") or "")
         out.append(c)
@@ -442,7 +469,8 @@ def plan(cart, chip=None, fmt=None, ranges=False):
       external        the cart's external files (each needs its licence accepted)
       store_bytes     what the written files add up to
       download_bytes  what is fetched: whole assets, or with `ranges` the pieces
-                      of one this console keeps only some of; whole archives
+                      of one this console keeps only some of; an external file
+                      from its mirror, else its whole archive
       load_bytes      the file a compiled cart's load reads -- this console's
                       module, or main.wasm when it plays on the interpreter --
                       which the fit check sizes it by; None for other runtimes
@@ -469,7 +497,7 @@ def plan(cart, chip=None, fmt=None, ranges=False):
         keep = _kept(a, files) if ranges else None
         down += a["size"] if keep is None else _ranged_bytes(cart, a, keep)
     for e in ext:
-        down += e["archive"]["size"]
+        down += e["size"] if external_mirror(e) is not None else e["archive"]["size"]
     load = None
     if cart["runtime"] == "wasm":
         if module is not None:
@@ -1493,6 +1521,30 @@ class _TarGzReader:
         self.job.in_store(_drop)
 
 
+class _Bare:
+    """An external file from its mirror: the file itself, written as it
+    streams. Its hash is the download's own, which `_Fetched.finish` checks
+    before the build can commit."""
+
+    def __init__(self, job, src, ext):
+        self.job = job
+        self.src = src
+        self.left = ext["size"]
+        job.sink.begin(ext["path"])
+
+    def unit(self):
+        sink = self.job.sink
+        if self.left:
+            mv = sink.space(self.left)
+            n = self.src.readinto(mv)
+            sink.wrote(n)
+            self.left -= n
+            if self.left:
+                return True
+        sink.end()
+        return False
+
+
 class _Local:
     """An external file the player supplied, where this console could not
     fetch it from its archive's hosts (the browser): copied from where it was
@@ -1544,14 +1596,17 @@ class _Local:
 
 
 class _Opening:
-    """A download being opened: the URLs still to try, the answer awaited."""
+    """A download being opened: the URLs still to try, the answer awaited,
+    and -- for an external file's mirror -- the external whose archive is
+    opened instead when none of them answers."""
 
-    def __init__(self, urls, size, sha, what, then):
+    def __init__(self, urls, size, sha, what, then, fallback=None):
         self.urls = list(urls)
         self.size = size
         self.sha = sha
         self.what = what
-        self.then = then              # ("asset" | "external", the index's item)
+        self.then = then              # ("asset" | "bare" | "external", the index's item)
+        self.fallback = fallback
         self.url = None
         self.resp = None
         self.why = []
@@ -1610,8 +1665,8 @@ class Install:
             keep = _kept(a, p["files"]) if self.ranges else None
             self.total += a["size"] if keep is None else _ranged_bytes(cart, a, keep)
         for e in p["external"]:
-            self.total += e["size"]       # the inflate (or the copy) moves the bar too
-            if e["path"] not in self.supplied:
+            self.total += e["size"]       # the inflate, the copy or the mirror's bytes
+            if e["path"] not in self.supplied and external_mirror(e) is None:
                 self.total += e["archive"]["size"]
         self.done = 0
         self.error = None
@@ -1757,14 +1812,21 @@ class Install:
                 return True
             self._opening = _Opening(urls, item["size"], item["sha256"], item["name"],
                                      (kind, item))
+        elif external_mirror(item) is not None:
+            self._opening = _Opening([external_mirror(item)], item["size"], item["sha256"],
+                                     item["path"], ("bare", item), fallback=item)
         else:
-            arc = item["archive"]
-            if arc.get("format") != "tar.gz":
-                raise InstallError(PACKING, "%s: archive format %r"
-                                   % (item["path"], arc.get("format")))
-            self._opening = _Opening(arc["urls"], arc["size"], arc["sha256"],
-                                     "the archive holding " + item["path"], (kind, item))
+            self._opening = self._archive(item)
         return True
+
+    def _archive(self, item):
+        """The opening of an external file's archive."""
+        arc = item["archive"]
+        if arc.get("format") != "tar.gz":
+            raise InstallError(PACKING, "%s: archive format %r"
+                               % (item["path"], arc.get("format")))
+        return _Opening(arc["urls"], arc["size"], arc["sha256"],
+                        "the archive holding " + item["path"], ("external", item))
 
     def _open_step(self):
         """Open the download in hand from the first of its URLs that answers
@@ -1772,6 +1834,14 @@ class Install:
         o = self._opening
         while True:
             if o.resp is None:
+                if not o.urls and o.fallback is not None:
+                    # The mirror did not answer: the archive, as a console that
+                    # does not know mirrors fetches it.
+                    _log("%s: %s; its archive instead" % (o.what, "; ".join(o.why)))
+                    item = o.fallback
+                    self._opening = o = self._archive(item)
+                    self.total += item["archive"]["size"]
+                    continue
                 if not o.urls:
                     raise InstallError(o.text, "could not get %s: %s"
                                        % (o.what, "; ".join(o.why)))
@@ -1798,6 +1868,8 @@ class Install:
             kind, item = o.then
             if kind == "asset":
                 self._reader = _ZipReader(self, self._src, self.cart, item)
+            elif kind == "bare":
+                self._reader = _Bare(self, self._src, item)
             else:
                 self._reader = _TarGzReader(self, self._src, item)
             self._opening = None

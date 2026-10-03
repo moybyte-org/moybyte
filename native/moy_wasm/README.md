@@ -340,7 +340,7 @@ setting on); `--unsigned` builds a module with no signature, and so does
 Signing is the default, not a lock (the plan's 2026-09-29 decision).
 Settings -> UNKNOWN SOURCES, off by default and turned on past a warning, lets
 a module with **no** signature load AT FULL SPEED (native trust), so someone
-who rebuilds a cart from its source -- Doom from moybyte-org/gpl-carts, their
+who rebuilds a cart from its source -- Doom from moybyte-org/carts, their
 own game -- runs it on their own console. The setting is the console's
 (`ws.unknown_sources`, persisted in `system.json`, on every tier); the engine
 is told it per load: `moycore_glue.WasmRun` hands it to `moycore.wasm_open`,

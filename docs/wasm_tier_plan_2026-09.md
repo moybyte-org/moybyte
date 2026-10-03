@@ -28,7 +28,7 @@ the decisions below record what they changed.
 - **The owner can run unknown sources (owner, 2026-09-29).** Signing is
   the default, not a lock: a Settings switch, off by default and turned on
   past a plain warning, lets a board run unsigned modules, so anyone who
-  rebuilds a cart from its source (Doom from moybyte-org/gpl-carts, their own
+  rebuilds a cart from its source (Doom from moybyte-org/carts, their own
   game) can run it on their own console. The provenance key is still
   checked, because it is what keeps a module built for another runtime from
   crashing the board. Carts published through the store never need the
@@ -91,12 +91,15 @@ the decisions below record what they changed.
   cannot fit it refuses at launch with a plain notice to the player, never an
   error panel or a crash. Raising what a board can fit is the kernel work in
   the C re-architecture issue, not a per-cart exception.
-- **Doom lives in moybyte-org/gpl-carts, never in the firmware.** doomgeneric
+- **Doom lives in moybyte-org/carts, never in the firmware.** doomgeneric
   is GPL and the shareware WAD forbids consideration and derivative works, so
-  the glue and recipe are GPL-2.0-or-later in that repository (decided
-  2026-09-26), which publishes built carts with their source; its installer
-  fetches Debian's WAD rather than anyone hosting it, and Doom is never
-  seeded, preloaded or shipped with a console (`THIRD_PARTY.md`). It runs from the launcher
+  the glue and recipe are GPL-2.0-or-later (decided 2026-09-26), in that
+  repository's `carts/doom/` under the licence in its folder (one carts
+  repository, #230), which publishes built carts with their source. Its site
+  gives the WAD away, free and unmodified, beside id's licence (owner,
+  2026-10-03); an installer fetches it from there or from Debian's archive,
+  and Doom is never seeded, preloaded or shipped with a console
+  (`THIRD_PARTY.md`). It runs from the launcher
   on a board that can fit it and shows the notice on one that cannot: the
   Waveshare P4 always, the T-Deck from a fresh boot but not after a session
   has left about 200 KB less PSRAM free (its largest block unchanged, so
@@ -212,14 +215,14 @@ all four boards under pinned fps floors, its model read through `read` and its
 frame, HUD included, handed to `blit565`; its source and build tools are MIT (2026-09-26; numbers on #158). What remains follows
 CLAUDE.md's placement rule:
 
-- The teapot and ESP 88 are moybyte-org/mit-carts' (2026-09-30), which
+- The teapot and ESP 88 are moybyte-org/carts' (2026-09-30), which
   builds and publishes them by recipe with `tools/jet_cart.py` at a pinned
   moybyte commit; `ports/jet/` keeps a stamped copy for the guards (its
   README says why). Further JetExamples ports (the tropical island, the
-  mail-plane sprite demo, the neon car, one effects demo) join mit-carts,
-  each after its own asset-licence check. template-cube is moy-spec's `moy
+  mail-plane sprite demo, the neon car, one effects demo) join that
+  repository, each after its own asset-licence check. template-cube is moy-spec's `moy
   new --jet` starter, and `moy install` and `moy index` are moy-spec's, which
-  both carts repositories use. moybyte keeps the seeding and the on-glass
+  the carts repository uses. moybyte keeps the seeding and the on-glass
   guards; seeding a compiled cart is designed in `ports/jet/README.md` and
   waits on #124's gate.
 - The compiled tier's render cost against native (#158 has the numbers):
@@ -253,7 +256,7 @@ module a board needs when a cart has none.
 
 ### Phase 5 — distribution
 
-- The carts repositories publish each compiled cart's signed per-chip
+- The carts repository publishes each compiled cart's signed per-chip
   modules beside `main.wasm` in its release asset, and a console's Get Carts
   app (#124) installs `main.wasm` with the one module named for its chip and
   format; an update rebuilds that set when the index lists a module the
@@ -270,7 +273,7 @@ module a board needs when a cart has none.
   breach is the console's with WiFi up, not the tier's; WiFi is not meant to
   be on while a cart plays, and the S3 diet is a later item of its own.
 - ~~Whether the Doom glue is marked GPL-2.0-or-later.~~ Decided 2026-09-26:
-  it is, in moybyte-org/gpl-carts, which is Doom's home.
+  it is, in Doom's home, `carts/doom/` of moybyte-org/carts.
 - Human testing on every touched board before any of this reaches master.
 - ~~After phase 4: promote the proposal to a binding, or keep the vendor
   runtime.~~ Decided: promoted, SPEC.md §16 (2026-09-30).

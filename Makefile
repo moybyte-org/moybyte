@@ -346,8 +346,8 @@ vendor-p8-import:
 # Re-vendor Jet -- the rasteriser the compiled showcase carts compile -- and ESP
 # 88's film code, reading clones of both (.build/jet/, or JET=/EXAMPLES=) at the
 # JetExamples pin, whose Jet submodule is Jet's pin. The carts' derived data
-# (teapot.obj, assets.bin, their LICENSES.txt) is mit-carts'; `tools/vendor_jet.py
-# --carts <mit-carts>/carts` writes it there. Stamps ports/jet/jet_vendor.json;
+# (teapot.obj, assets.bin, their LICENSES.txt) is the carts repository's;
+# `tools/vendor_jet.py --carts <carts>/carts` writes it there. Stamps ports/jet/jet_vendor.json;
 # tests/test_jet_vendor.py holds the copy to it.
 #   make vendor-jet
 #   make vendor-jet EXAMPLES_COMMIT=<sha>
@@ -355,13 +355,13 @@ vendor-jet:
 	$(PYTHON) tools/vendor_jet.py $(if $(JET),--jet $(JET)) $(if $(EXAMPLES),--examples $(EXAMPLES)) $(if $(EXAMPLES_COMMIT),--examples-commit $(EXAMPLES_COMMIT))
 
 # Re-vendor the Jet carts themselves -- Jet Teapot and ESP 88, whose home is
-# moybyte-org/mit-carts -- into ports/jet/<cart>.moy, from a clone's git objects
-# (../mit-carts, $MOYBYTE_MIT_CARTS or MIT=) at its HEAD or COMMIT=. Stamps
+# moybyte-org/carts -- into ports/jet/<cart>.moy, from a clone's git objects
+# (../carts, $MOYBYTE_CARTS or CARTS_REPO=) at its HEAD or COMMIT=. Stamps
 # ports/jet/jet_carts_vendor.json; tests/test_jet_vendor.py holds the copy to it.
 #   make vendor-jet-carts
-#   make vendor-jet-carts MIT=/path/to/mit-carts COMMIT=<sha>
+#   make vendor-jet-carts CARTS_REPO=/path/to/carts COMMIT=<sha>
 vendor-jet-carts:
-	$(PYTHON) tools/vendor_jet_carts.py $(if $(MIT),--mit $(MIT)) $(if $(COMMIT),--commit $(COMMIT))
+	$(PYTHON) tools/vendor_jet_carts.py $(if $(CARTS_REPO),--carts $(CARTS_REPO)) $(if $(COMMIT),--commit $(COMMIT))
 
 # The T-Deck build (mainline MicroPython -- the only T-Deck build since the
 # fork's deletion, 2026-08-17). The `lilygo-micropython` names below are the

@@ -14,7 +14,7 @@ What it proves, in real Chrome against the built dist/:
     (tests/tier_frame.py's golden); its `snd` samples are drained by the
     page's audio pull and reach the page in the frames; and button A's trap
     ends it on the console's own error panel;
-  * Jet Teapot and ESP 88, built by tools/jet_cart.py as mit-carts' recipe
+  * Jet Teapot and ESP 88, built by tools/jet_cart.py as the carts' recipe
     builds them, play;
   * Get Carts offers a compiled cart from a local index and installs it --
     reading only the members this console keeps, by range, so not one byte

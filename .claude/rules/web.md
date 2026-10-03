@@ -78,11 +78,12 @@ nor those docs will warn you about:
     `ready` is a hung tab. A body goes into a spool file in the VFS -- the
     page's memory -- and never through the 16 MB heap.
   - **A page cannot read a release download or Debian's archive** (neither
-    sends a CORS header). It reads an asset's `mirror` on the carts
-    repository's Pages site first (moy-spec's cartindex.py), and an external
-    file is the player's own copy, chosen through a REAL page control (the card
-    under the canvas): a browser opens its file dialog only from a click on
-    one, never from a tap the console relays a frame later.
+    sends a CORS header). It reads an asset's `mirror`, and an external
+    file's, on the carts repository's Pages site first (moy-spec's
+    cartindex.py). An external file it can read from neither is the player's
+    own copy, chosen through a REAL page control (the card under the canvas):
+    a browser opens its file dialog only from a click on one, never from a tap
+    the console relays a frame later.
   - **The sweep cannot persist an install**: the wire carries text and covers,
     never a module or a WAD. The keeper writes the folder and the record into
     OPFS behind one marker file (`moy_store.commitInstall`), boot rolls an

@@ -177,7 +177,7 @@ jobs:
       - name: Build the browser console
         run: firmware/web_runner/build.sh
 
-      # The wasm suite builds Jet Teapot and ESP 88 the way mit-carts' recipe
+      # The wasm suite builds Jet Teapot and ESP 88 the way the carts' recipe
       # does, with wasi-sdk 24 -- ci.yml's cache, under the sha256 the build
       # pins, so a runner fetches it once.
       - name: wasi-sdk pin

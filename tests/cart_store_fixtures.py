@@ -3,9 +3,12 @@ the shapes moybyte-org's publish (an index.json, a STORED zip per cart, an
 external file inside a tar.gz with its licence), an in-memory transport, and a
 local HTTP server for the host's real urllib transport.
 
-`fixtures/carts/` holds snapshots of the two live indexes (gpl-carts and
-mit-carts, 2026-10-01), so the console's reader is pinned to the format the
-repositories actually publish -- moy-spec's `moy index` writes them."""
+`fixtures/carts/index.json` is a snapshot of moybyte-org/carts' index (its
+first: Doom, ESP 88 and Jet Teapot v4, 2026-10-03), so the console's reader is
+pinned to the format the repository actually publishes -- moy-spec's `moy
+index` writes it. `fixtures/carts/installed-v3.json` is the record a console
+of each chip kept after installing the three at v3 from the two indexes that
+came before it (gpl-carts and mit-carts)."""
 
 import gzip
 import hashlib
@@ -18,8 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "carts"
-GPL_URL = "https://moybyte-org.github.io/gpl-carts/index.json"
-MIT_URL = "https://moybyte-org.github.io/mit-carts/index.json"
+INDEX_URL = "https://moybyte-org.github.io/carts/index.json"
 _TIME = (1980, 1, 1, 0, 0, 0)
 
 
@@ -80,7 +82,9 @@ class Repo:
         """`release` puts the release asset on another host (a GitHub release
         download's base URL) instead of under `base`; `mirror` serves a copy
         under `base` too and names it in the index, the way moy-spec's
-        `moy index --mirror releases` does."""
+        `moy index --mirror releases` does. Each of `external` is (path, data,
+        archive member), or with a fourth item True a file the repository
+        also serves bare at files/<id>/<path>, named as its mirror."""
         folder = cid + ".moy"
         name = name or cid.replace("_", " ").title()
         files = {"manifest.json": json.dumps({"format": "moy-1", "title": name,
@@ -137,20 +141,22 @@ class Repo:
                 if k == "licence":
                     placed["cover"] = ref
             entry = placed
-        for path, data, member in external or ():
+        for path, data, member, *bare in external or ():
             arc = tar_gz({member: data, "pkg/README": b"read me\n"})
             arel = "mirror/%s.tar.gz" % path
             self.files[arel] = arc
             ltext = ("The licence for %s.\n\nYou may use it for fun.\n" % path).encode()
             lrel = "carts/%s/licenses/%s.txt" % (cid, path)
             self.files[lrel] = ltext
-            entry["external"].append({
-                "path": path, "size": len(data), "sha256": sha(data),
-                "licence": {"name": "The %s licence" % path, "url": lrel,
-                            "size": len(ltext), "sha256": sha(ltext)},
-                "archive": {"urls": [self.url(arel)], "format": "tar.gz",
-                            "size": len(arc), "sha256": sha(arc), "member": member},
-            })
+            ext = {"path": path, "size": len(data), "sha256": sha(data)}
+            if bare and bare[0]:
+                ext["mirror"] = "files/%s/%s" % (cid, path)
+                self.files[ext["mirror"]] = data
+            ext["licence"] = {"name": "The %s licence" % path, "url": lrel,
+                              "size": len(ltext), "sha256": sha(ltext)}
+            ext["archive"] = {"urls": [self.url(arel)], "format": "tar.gz",
+                              "size": len(arc), "sha256": sha(arc), "member": member}
+            entry["external"].append(ext)
         self.carts = [c for c in self.carts if c["id"] != cid] + [entry]
         self.files["index.json"] = self.index()
         return entry
