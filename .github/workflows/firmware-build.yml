@@ -116,10 +116,8 @@ jobs:
     env:
       WANT: ${{ github.event.inputs.board || 'both' }}
       IDF_CCACHE_ENABLE: "1"
-      # ccache 4 writes ~/.cache/ccache unless told; the cache step below saves
-      # this directory, so name it. The size cap keeps five boards' caches
-      # inside the repository's 10 GB Actions cache.
-      CCACHE_DIR: /home/runner/.ccache
+      # The size cap keeps five boards' ccaches inside the repository's 10 GB
+      # Actions cache.
       CCACHE_MAXSIZE: 400M
       MOYBYTE_BUILD_JOBS: "4"
       # The image's baked OTA identity (#53): build.sh stamps CHANNEL/VERSION/
@@ -186,6 +184,12 @@ jobs:
           path: ~/.espressif
           key: idf-${{ matrix.board }}-${{ runner.os }}-v1
           restore-keys: idf-${{ matrix.board }}-${{ runner.os }}-
+
+      # ccache 4 writes ~/.cache/ccache unless told; name the directory the
+      # cache step below saves.
+      - name: Point ccache at the cached directory
+        if: steps.gate.outputs.run == 'true'
+        run: echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
 
       # ccache rolls: a key per run saves this run's objects, and the prefix
       # restores the newest. A fixed key would be saved once and never again
