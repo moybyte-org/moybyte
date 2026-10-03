@@ -946,9 +946,9 @@ Since #170 the model is PICO-8-parity:
 Imported PICO-8 carts (`tools/import_p8.py` / `moy port`) carry all of this
 over verbatim — waves, effects, keyed rests and all four music channels. The
 two tools land on the *same* `sounds.json` because they are the same converter:
-moy-spec's `p8_import.py`, vendored here as `tools/p8_import.py`. They differ
-only in what they do with the cart's *code* — `moy port` writes Lua plus a p8
-compat shim, `tools/import_p8.py` writes a Python stub for you to port into.
+moy-spec's `p8_import.py`, vendored here as `tools/p8_import.py`. Both write
+the cart's *code* as Lua under a generated p8 compat shim — moy-spec's porter,
+vendored here as `tools/p8_lua_port.py`.
 
 **One number worth knowing if you read a `.p8` by hand:** PICO-8's tracker
 labels its pitch `0` as "C0", but its synth tunes pitch `33` to 440 Hz, so its
