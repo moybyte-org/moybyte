@@ -152,14 +152,14 @@ BOARD = "tdeck"
 #       (and the version) via a generated `_ota_build` module from MOYBYTE_OTA_CHANNEL, so
 #       the committed default stays "stable" and the channel is a build choice -- clean
 #       across merges, not a per-branch source edit.
-FIRMWARE_VERSION = 10            # v10: v0.13: a fifth board and one frame scheduler. The Guition JC8012P4A1C 10.1" (ESP32-P4) joins as a BETA board: landscape on portrait glass, touch calibrated, every on-glass check passing, but fast games blink the panel for a frame (#220) and WiFi is off on its factory C6 radio. Games run their logic at the rate they declare and draw on whatever divisor the board can hold; dt-scaled games say "fps": "free" and run with the loop, and ported PICO-8 carts run their logic at 60 again. PICO-8 carts keep their tabs as files, and the palette, fill pattern, flip, font and title fixes land; split, rnd, srand, the lut span and map are C verbs. Notes is the one text app, the vault holds plain .md, .py and .lua files, and a script runs as a folderless cart; Sheets and Beeper are retired. Files opens an item by what it is and comes back to itself; a cart's own image opens in Paint. A picture is one deflated format read a kilobyte at a time; a save is two writes and a stamped backup; old store files read as absent instead of being migrated. The radio is a lease, off unless something holds it. Tap targets have a physical size floor, and Lua carts get the pointer. Faster: the Guition S3 runs Hop Quest, Sky Run and Star Catcher at 60 fps, up from 50 to 54, and the play frame builds nothing it built last frame. Fixes: a typed field no longer commits on a still-held Enter, Bluetooth bonds survive a power cut mid-save, the boot diag dump reads the card again, and every console board boots through one shared spine.
+FIRMWARE_VERSION = 11            # v11: Compiled carts (C, C++ or Rust as WebAssembly) on every tier: native on the boards, on the browser's own engine, keeping their own files. Get Carts installs published carts from moybyte-org/carts on boards and in the browser. Covers on the shelf and in the store. Much faster USB pushes. T-Deck boot and memory fixes. moy core 0.4.
 #   FIRMWARE_NAME -- what a HUMAN calls this release ("0.6"), and the only version anyone
 #       outside the code ever reads: the update screen, the manifest label, the git tag.
 #       Deliberately separate from FIRMWARE_VERSION above, which exists solely so the
 #       device can order two builds with `>` -- it is signed as an int, and betas stamp a
 #       build epoch into it, so it can never carry a dotted name. `make release NAME=0.7`
 #       sets this; MAJOR.MINOR, with a third component only when a release is purely a fix.
-FIRMWARE_NAME = "0.13"
+FIRMWARE_NAME = "0.14"
 FIRMWARE_CHANNEL = "stable"
 FIRMWARE_LABEL = None
 try:
