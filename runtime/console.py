@@ -298,13 +298,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_context import AppContext
 
 # Crash isolation for content the shell runs on the kid's behalf (#160,
-# ui_refactor_2026-08 Phase 8): three failed opens and an app cart stops being
-# offered -- see runtime/crash_guard.py for why an in-process except cannot do
-# this job.
+# ui_refactor_2026-08 Phase 8): three failed runs and an app cart, or the
+# wallpaper, stops being run -- see runtime/crash_guard.py for why an
+# in-process except cannot do this job.
 try:
-    from crash_guard import CrashGuard
+    from crash_guard import CrashGuard, WALLPAPER_KEY
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.crash_guard import CrashGuard
+    from runtime.crash_guard import CrashGuard, WALLPAPER_KEY
 
 # Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
 # -- theme + variant, the widget skin, the system font scale, the wallpaper
@@ -942,8 +942,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         self.prefs = SystemStore(self, self.store)
         self.system = self.prefs.settings
         # Crash isolation (#160 / Phase 8): the dict itself, because it stays
-        # the same object across a load.
+        # the same object across a load. One ledger per role -- see
+        # runtime/crash_guard.py, "Two roles, two ledgers".
         self.app_guard = CrashGuard(self.system, self.prefs.persist)
+        self.wallpaper_guard = CrashGuard(self.system, self.prefs.persist,
+                                          key=WALLPAPER_KEY)
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
         # home/settings frame -- the Picotron "wallpaper is a cart" model. The
@@ -1359,6 +1362,16 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices):
         if not self.is_user_app(cart):
             return False
         return self.app_guard.forgive(system_api.app_id_for(cart))
+
+    def forgive_wallpaper(self, cart):
+        """Clear `cart`'s crash strikes AS THE BACKDROP (#160) -- `forgive_app`'s
+        twin for the wallpaper role, called beside it from
+        `Project.commit_code` for the same reason. The ledger is keyed by the
+        wallpaper id; a cart with nothing on it writes nothing. The fixed code
+        runs at the next boot or the next pick of it in Appearance."""
+        if cart is None or cart.get("type") != "wallpaper":
+            return False
+        return self.wallpaper_guard.forgive(self.look.wp_id_for(cart))
 
     def load_system(self):
         """Read the system settings (`self.prefs`) and APPLY them -- the saved

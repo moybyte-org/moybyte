@@ -130,6 +130,7 @@ def test_the_crash_guard_sees_a_reload(tmp_path):
     ws = _ws(tmp_path)
     assert ws.app_guard.arm("some_app") is True
     assert ws.app_guard.strikes("some_app") == 1
+    ws.app_guard.release()                          # that run ended unhealed
     # What a board that died twice holding this app comes back to.
     moy_carts.save_system(
         {crash_guard.KEY: {"strikes": {"some_app": 2}, "open": None}},

@@ -309,8 +309,10 @@ painted frames; three unhealed opens and the console stops running it, landing
 the next tap on the ordinary error panel whose top bar carries EDIT/CODE. The
 cart stays in the picker, because editing it is how it gets fixed.
 
-Armed for `type: "app"` carts only. Two small settings writes per open is not
-free, and a game that always crashes shows the panel and is not a brick.
+The Player arms it for `type: "app"` carts only. Two small settings writes per
+open is not free, and a game that always crashes shows the panel and is not a
+brick. The wallpaper, which runs itself at every boot, has its own ledger; how
+it boots without those writes is in `runtime/crash_guard.py`.
 
 ## Non-goals (v1)
 

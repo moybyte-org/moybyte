@@ -347,7 +347,7 @@ stays in the picker. *Gate MET:* `test_a_cart_that_raises_on_every_open_is_disab
 plus `test_the_strikes_survive_a_reboot` (three fresh workstations over one
 store).
 
-Two open tails, deliberately not built:
+Two tails Phase 8 deliberately did not build:
 
 - **A broken-app BADGE in the launcher/picker.** The plan's phrase was "shows it
   as broken in the picker". `ws.cart_broken(cart)` and
@@ -355,9 +355,11 @@ Two open tails, deliberately not built:
   `launcher_layer` (a new corner-chrome idiom next to the favourite star), which
   is Phase 3's file and a visual-identity decision. The refusal is not silent
   without it -- the panel says so by name.
-- **The WALLPAPER is not guarded yet**, and it is the actual #160 report: a
-  wallpaper cart runs itself at boot. `CrashGuard` is keyed by an arbitrary id
-  precisely so `wallpaper.compile()` can adopt it in a few lines.
+- **The WALLPAPER**, the actual #160 report: a wallpaper cart runs itself at
+  boot. `CrashGuard` was keyed by an arbitrary id so `wallpaper.compile()` could
+  adopt it, and it did on 2026-10-04 -- under its own ledger
+  (`ws.wallpaper_guard`), and with a proof of firmware and source so a proven
+  wallpaper boots with no write (`runtime/crash_guard.py`).
 
 **Phases 0–4 make the UI one surface. Phases 2, 5, 6 make system apps easy.
 Phases 7–8 make user apps possible** — and as of 2026-08-19 they do: a `.moy`

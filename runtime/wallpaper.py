@@ -21,7 +21,18 @@ fallback. It reaches the cart-run machinery (build sheet/tilemap, make_api) thro
 its self.ws back-ref; the audio/pmem building blocks for the wallpaper's own namespace
 are imported (leaf modules; same bare-or-runtime fallback the other extracted modules
 use). `NAMES` is injected; `_err_text` is duplicated (tiny/pure).
+
+The compile is crash-guarded (#160): `ws.wallpaper_guard` arms before the cart's
+code runs and heals once the backdrop has painted, so a wallpaper that hangs or
+faults the board at every boot strikes out and the desk boots on the fill. A
+proven wallpaper (its source already healed on this firmware) arms for free --
+runtime/crash_guard.py, "What it costs".
 """
+import sys
+try:
+    from binascii import crc32
+except ImportError:  # pragma: no cover - no proof: every compile arms
+    crc32 = None
 try:
     from audio import AudioBank, AudioEngine
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -35,6 +46,19 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (text_sig, load_wallpaper_preview,
                                    save_wallpaper_preview)
+
+
+def _build_id():
+    """The firmware build, as the wallpaper guard's proof names it: the
+    interpreter's version line (a MicroPython build carries its date there)
+    and `moy_ota.FIRMWARE_VERSION` (a beta stamps its build epoch into it) on
+    the tiers that stage moy_ota."""
+    try:
+        import moy_ota
+        v = moy_ota.FIRMWARE_VERSION
+    except Exception:  # noqa: BLE001 -- the host and the web stage no OTA
+        v = None
+    return "%s|%s" % (sys.version, v)
 
 
 class Wallpaper:
@@ -52,6 +76,9 @@ class Wallpaper:
         self._wp_draw = None
         self._wp_cart = None
         self._wp_live = True
+        # The title of a wallpaper the crash guard refused at this compile; the
+        # first fill paint turns it into a notice.
+        self._refused = None
         # The Appearance monitor's PREVIEW runner: the same cart compiled a
         # second time over an OFFSCREEN host canvas, so the little screen can
         # show the full frame without touching the game canvas (and without a
@@ -73,6 +100,7 @@ class Wallpaper:
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
         self._wp_restore_bg = None
+        self._refused = None
         self._pv_ns = self._pv_update = self._pv_draw = None
         self._pv_restore = None
         self._pv_for = None
@@ -118,8 +146,14 @@ class Wallpaper:
     def _compile(self, cart):
         """Compile a wallpaper cart into its own namespace + grab its _update/_draw,
         running its _init. Guarded: any failure leaves the backdrop on the solid
-        fill (a broken wallpaper must never take down the desktop)."""
+        fill (a broken wallpaper must never take down the desktop), and a
+        wallpaper the crash guard has struck out never runs at all."""
         ws = self.ws
+        guard = getattr(ws, "wallpaper_guard", None)
+        if guard is not None and not guard.arm(ws.look.wp_id_for(cart),
+                                               self._proof(cart)):
+            self._refused = cart.get("title") or "Wallpaper"
+            return
         try:
             sheet = ws._build_sheet(cart)
             tilemap = ws._build_tilemap(cart)
@@ -139,9 +173,35 @@ class Wallpaper:
             self._wp_update = ns.get("_update")
             self._wp_draw = ns.get("_draw")
             self._wp_restore_bg = ns.get("_moy_restore_bg")   # #63 declared background
+            if self._wp_draw is None and guard is not None:
+                guard.heal()    # nothing runs per frame: the compile was all of it
         except Exception as exc:  # noqa: BLE001
             print("Moybyte wallpaper error:", _err_text(exc))
             self._wp_ns = self._wp_update = self._wp_draw = None
+            if guard is not None:
+                guard.release()
+
+    def _proof(self, cart):
+        """What is about to run, for the crash guard: the source's length and a
+        crc32 over the firmware build and the source. A software crc, because
+        the first hardware hash of a boot holds ~240 B of internal SRAM (its DMA
+        channel) for the rest of it. None (always arm) without crc32."""
+        if crc32 is None:
+            return None
+        src = (cart.get("src") or "").encode()
+        crc = crc32(src, crc32(_build_id().encode())) & 0xFFFFFFFF
+        return "%x-%08x" % (len(src), crc)
+
+    def _painted(self, live):
+        """A backdrop frame painted without raising -- the crash guard's heal
+        clock. A live wallpaper heals after HEAL_FRAMES; a static one at its
+        first frame, because nothing may paint it again until a touch."""
+        guard = getattr(self.ws, "wallpaper_guard", None)
+        if guard is not None:
+            if live:
+                guard.frame()
+            else:
+                guard.heal()
 
     def is_animating(self, dt):
         """True when a LIVE wallpaper (its own _update advancing it) is loaded, so the
@@ -182,6 +242,7 @@ class Wallpaper:
             try:
                 if art.draw_wallpaper(ws.sys_canvas):
                     ws._reset_canvas_state()
+                    self._painted(False)
                     return
             except Exception as exc:  # noqa: BLE001 -- fall back to the wallpaper cart
                 print("Moybyte artwork wallpaper error:", _err_text(exc))
@@ -236,11 +297,23 @@ class Wallpaper:
                 sc = ws.sys_canvas
                 if sc is not ws.canvas:
                     self._backdrop_blit(sc, ws.canvas)
+                self._painted(self._wp_live and self._wp_update is not None)
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
                 print("Moybyte wallpaper draw error:", _err_text(exc))
                 ws._reset_canvas_state()
                 self._wp_ns = self._wp_update = self._wp_draw = None
+                guard = getattr(ws, "wallpaper_guard", None)
+                if guard is not None:
+                    guard.release()     # its strike stands
+        # A struck-out wallpaper says so once, as a notice: the machine turned
+        # it off, so the machine says it (console_notices.notice).
+        if self._refused is not None:
+            title = self._refused
+            self._refused = None
+            note = getattr(ws, "notice", None)
+            if note is not None:
+                note("WALLPAPER OFF", "%s couldn't start" % title, "warn")
         # Solid fill fallback (also the "fill:<color>" built-ins). Fill the SYSTEM
         # canvas -- the surface the desktop actually shows (#39; the same object as
         # the game canvas on the 320x240 tiers, so byte-identical there).

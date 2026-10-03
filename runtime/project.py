@@ -563,16 +563,18 @@ class Project:
             # any stale crash text so returning to the desktop re-runs the fixed
             # cart instead of re-painting the old "crashed" panel. (run_code/the
             # _leave_menu re-_start() then actually re-exec it.)
-            # ...and the same for a `type: "app"` cart the crash guard struck
-            # out (#160). The refusal panel says "EDIT it"; this is the line
-            # that makes that true. Code is the ONLY edit that clears strikes
-            # -- see Workstation.forgive_app for why not every commit_* verb.
+            # ...and the same for a cart the crash guard struck out (#160), as
+            # an app or as the wallpaper. The refusal panel says "EDIT it";
+            # this is the line that makes that true. Code is the ONLY edit that
+            # clears strikes -- see Workstation.forgive_app for why not every
+            # commit_* verb.
             # Neither is true of a KEPT write: the code is on disk and still
             # broken, so a stale crash panel is not stale and re-arming the guard
             # would just let the same cart strike out again.
             if parsed:
                 ws.cart_error = None
                 ws.forgive_app(self.cart)
+                ws.forgive_wallpaper(self.cart)
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)

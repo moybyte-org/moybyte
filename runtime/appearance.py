@@ -203,6 +203,12 @@ class Appearance:
         if not (isinstance(wp_id, str) and wp_id.startswith("fill:")):
             cart = self.wp_cart_by_id(wp_id)
             if cart is not None:
+                if persist:
+                    # A deliberate pick is the kid's "try again" (#160): a
+                    # struck-out wallpaper gets a fresh three strikes.
+                    guard = getattr(ws, "wallpaper_guard", None)
+                    if guard is not None:
+                        guard.forgive(wp_id)
                 # #66 live-set diet: a slimmed wallpaper cart rehydrates for the
                 # compile (which bakes src/sheet into the wallpaper's own ns), then
                 # re-slims -- unless it IS the open project's cart (stays fat).
