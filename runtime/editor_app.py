@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   EditorApp            the authoring app: a project across a tab ladder
+#   EditorApp.set_tab    switch tab, building its editor
+#   EditorApp.leave      PLAY: leave the tab, committing it
+#   EditorApp.draw_zone  the tab ladder, UNDO/REDO and PLAY
+#   EditorApp.zone_tap   hit-test the ladder and dispatch
+#   EditorApp.save_tab   route one tab's commit to its owner
 """The EDITOR app (Stage 3 of docs/history/shell_ux_technical_plan_v1.md).
 
 `EditorApp` is the console's authoring app: ONE app, opened on a `Project`, whose

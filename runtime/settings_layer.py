@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   -- settings-screen geometry      the Settings constants (console.py imports them back)
+#   -- the settings-toggle registry  the rows a toggle derives
+#   SettingsLayer                    the Settings content layer: rows, panels, flings
+#   SettingsLayer.settings_adjust    step the selected row
+#   SettingsLayer.open_bluetooth     the Bluetooth keyboard picker
+#   SettingsLayer.draw               the Settings app
 """The Settings app (#28/#39/#53), extracted from Workstation (runtime/console.py) as
 its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 

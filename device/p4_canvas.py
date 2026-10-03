@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   P4SystemCanvas                   the P4 system canvas: PPA fill, scale and present
+#   P4SystemCanvas.enable_ppa        probe and register the PPA
+#   P4SystemCanvas.set_crisp_scale   CRISP PIXELS
+#   P4SystemCanvas.present_frame     a compiled cart's frame on the PPA
+#   P4SystemCanvas.blit_strip_async  the drag stamp-defer hook
+#   run_ppa_smoke                    A/B the PPA against the CPU blit
 """The ESP32-P4 SYSTEM canvas (the P4 silicon tier's Python half): the shared
 system-surface contract over the DSI framebuffer, plus the hardware PPA
 composite hooks the shared WM probes for.

@@ -1,3 +1,9 @@
+# Map (grep -n a name to jump there):
+#   _Prompt                  one open dialog and what OK does
+#   -- card geometry         the cards' constants (console.py imports them back)
+#   CardsLayout              responsive "Make it mine" geometry
+#   CardsLayer               the cards content layer: draw, input, prompts
+#   CardsLayer.scroll_cards  scroll the cards window
 """The "Make it mine" config-card editor (#3/#15), extracted from Workstation
 (runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 

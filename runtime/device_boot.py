@@ -1,3 +1,16 @@
+# Map (grep -n a name to jump there):
+#   DeviceBoot                        the boot sequence's shared steps and its screen
+#   OtaHealth                         did the update work: the boot-side check
+#   frame_slot_ms                     the cadence one frame is measured against
+#   FramePump                         the frame loop's dt clock, head and tail
+#   IdleBlank                         blank the backlight after a spell with no input
+#   apply_touch                       one touch sample -> the shared pointer
+#   poll_webhost                      one webhost slice per frame
+#   poll_link                         one radio slice per frame
+#   PerfSampler                       the serial PERF line, one body for every board
+#   -- #210: the frame loop's per-stage deadline meters  StageMeters, FrameLoop
+#   StageMeters                       per-stage deadline accounting
+#   FrameLoop                         the device frame loop's invariant order
 """The device boot spine and frame pump -- ONE implementation, both boards (#161).
 
 WHY THIS EXISTS. Each board used to author its own `run_desktop` boot

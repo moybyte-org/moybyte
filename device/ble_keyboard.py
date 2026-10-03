@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   adv_has_hid                      does an advertisement name a HID keyboard
+#   decode_keyboard_report           a boot report -> (modifiers, usages)
+#   usage_to_keycode                 one HID usage -> a console key
+#   buttons_for_key                  a typed byte -> the buttons it fires
+#   BleHidKeyboard                   one BLE HID keyboard feeding the console
+#   BleHidKeyboard.settings_devices  the discovered keyboards
+#   BleHidKeyboard.connect_device    persist and connect one
+#   BleHidKeyboard.forget            forget the keyboard and its bond
+#   BleHidKeyboard.poll              apply the latest report
 """Bluetooth LE HID keyboard input -- the shared device driver (#202 Phase C).
 
 Born as the P4's `p4_ble_keyboard.py` and PROMOTED to the shared device tree

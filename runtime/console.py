@@ -1,3 +1,26 @@
+# Map (grep -n a name to jump there):
+#   splash_image                     the Moy mascot as a 16x16 blittable
+#   draw_splash                      paint the boot logo
+#   Workstation                      the console: canvases, the process stack, the store, every frame
+#   Workstation._init_canvases       the system and game canvases
+#   Workstation._init_components     the collaborators every surface reaches through ws
+#   -- the layer stack               the compositor and router's layer list
+#   -- user apps                     app identity and the crash guard
+#   -- WEB CONSOLE                   forwards to the web collaborator
+#   -- top-bar system menu           the bar's menu groups
+#   -- open-cart workspace forwards  Project forwards
+#   -- cart-run forwards             Player forwards
+#   -- run / exit                    launch_named, run_script, go_home, the return stack
+#   -- the app bar contract          the bar every app gets
+#   -- the desk                      the windowed tier's make world
+#   -- cart management               create, duplicate, delete
+#   -- pointer                       handle_pointer
+#   -- frame + drawing               frame: one console frame
+#   -- two-domain composite          the game viewport and its coordinates
+#   -- per-run cart canvas           the run's own game canvas
+#   -- redraw-on-change              the redraw gate
+#   -- content-layer draw bodies     what frame() routes each layer to
+#   wire_workstation_core            the board-agnostic service wiring
 """The shared Moybyte v0.4 console UI -- launcher + desktop + cards/code/paint
 editors + the trackball/touch Pointer. Backend-agnostic: it draws through an
 injected `canvas` (host Canvas or device DeviceCanvas -- identical TIC-80 API +

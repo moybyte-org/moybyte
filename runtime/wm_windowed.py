@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   _LayoutCtx                    every layout object a relayout rebuilds
+#   _Win                          one open window
+#   _WindowStackLayer             the one layer that presents the window stack
+#   _PlayerWindowLayer            the quiet-frame partial repaint of a cart window
+#   WindowedWM                    the windowed tier's presentation of the back-stack
+#   WindowedWM.draw_stack         the frame router's draw list
+#   WindowedWM.keys_to_cart       focus-aware key routing
+#   WindowedWM.surface_skip       the skip-draw probe
+#   WindowedWM.close_window_kind  close one window by its kind
 """The WINDOWED window manager -- the big-screen / P4 "One" presentation tier
 (#73 / #58 "Desktop look"; spec docs/shell_ux_v1.md §3's tier table).
 

@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   cart_chunks                       a cart's Lua scripts as chunks
+#   -- the frame seam, once for both Lua tiers  snap_shared, sync_view, drain_audio
+#   snap_shared                       player two, the pointer and the clock into the cart
+#   sync_view                         apply the cart's view() to the console
+#   drain_audio                       play the queued audio through the console's engine
+#   -- what NOT to register on top of libmoy's table  rows_blob, install_handles
+#   install_handles                   register the int-handle half of the prelude
 """What both Lua tiers share -- the object-verb glue, and the frame seam.
 
 Several families of the moybyte cart API return objects: `make_layer` (a

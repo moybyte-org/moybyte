@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   _TooBig               a compiled cart the fit check refused
+#   fit_notice            the notice for a cart too big to load
+#   Player                runs one cart: start, tick every frame, always exit
+#   Player.start          start or re-run a cart under make_api
+#   Player.frame_plan     what this loop frame is for the cart
+#   Player.tick           one frame of the running cart
+#   Player.release_world  drop the dead run's world at exit
 """The cart PLAYER -- the run-loop black box (Stage 2 of
 docs/history/shell_ux_technical_plan_v1.md).
 

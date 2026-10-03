@@ -1,3 +1,15 @@
+# Map (grep -n a name to jump there):
+#   pin_ok             may a request with this pin proceed
+#   pack_store         the whole store as the page's bundle
+#   stream_store_json  the same bundle, as JSON pieces
+#   update_status      the one /update document
+#   ConsoleUpdate      the /update backend on a board with glass
+#   WebHost            the transport, the console's pages and its store
+#   WebHost.start      bring the link up, then listen
+#   WebHost.poll       one transport poll and one slice of work
+#   WebHost.gate       None when a gated request may proceed
+#   ensure_online      connect, wait for the link, report
+#   make_webhost       the WebHost every board injects
 """Serve the moybyte web console FROM the console, over the device's own WiFi.
 
 This is what replaces the streaming web view (#100), and it is the opposite

@@ -1,3 +1,15 @@
+# Map (grep -n a name to jump there):
+#   wait_online                      report the link, dialling saved credentials first
+#   -- manifest signing              verify_sig's key and rules
+#   OtaUpdater                       stepwise OTA install into the inactive slot
+#   OtaUpdater.boot_check            read the last install's marker
+#   OtaUpdater.begin                 open the image and the target slot
+#   OtaUpdater.check_online          fetch and parse a channel's manifest
+#   OtaUpdater.download_step         stream a slice to the card
+#   OtaUpdater.download_finish       verify size and sha256
+#   -- the streaming HTTP(S) client  parse_url, http_open, http_open_once, verify_sig
+#   http_open                        http_open_once plus redirects
+#   verify_sig                       does a signature sign the payload
 """OTA firmware updater for the device (#53): flash a new app image from SD.
 
 The Moybyte build now ships a DUAL-APP partition table (otadata + ota_0 + ota_1,

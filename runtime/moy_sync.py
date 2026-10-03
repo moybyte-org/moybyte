@@ -1,3 +1,14 @@
+# Map (grep -n a name to jump there):
+#   Root                one syncable store, described by data
+#   root_by_id          the Root for a wire root id
+#   read_text_chunks    a file's text in bounded pieces
+#   safe_segments       a relative path validated into segments
+#   parse_batch         a POST body -> (ops, pin, root id)
+#   apply_ops           apply one batch into a store
+#   StoreWatcher        detect a store's changes and queue them as batches
+#   StoreWatcher.sweep  one pass over the store
+#   StoreWatcher.take   the next wire batch
+#   StoreWatcher.ack    settle the batch in flight
 """Commit-shaped store sync between the wasm head and a board (#197 mode 2,
 moycore plan 3.4 -- the PUSH half; the pull half is moy_webhost's
 GET /carts.json + GET /files.json).

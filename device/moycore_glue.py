@@ -1,3 +1,14 @@
+# Map (grep -n a name to jump there):
+#   reserve_p8_memory     take the PICO-8 buffers while the heap is whole
+#   MoycoreRun            one Lua cart run under moycore
+#   -- the compiled cart  aot_path, wasm_head, CartFrame, WasmRun
+#   aot_path              where a cart's compiled module for a chip lives
+#   CartFrame             a compiled cart's frame on its way to the glass
+#   WasmRun               one compiled cart run
+#   make_moycore_runtime  the Lua runtime factory
+#   WasmRuntime           ws.runtimes["wasm"]
+#   make_wasm_runtime     the compiled-cart runtime, or None
+#   make_runtimes         every runtime this image has
 """The host half of moycore (stage 2): what the frame loop does around tick().
 
 `LuaCartRun` next door registers ~40 Python closures as Lua globals and the

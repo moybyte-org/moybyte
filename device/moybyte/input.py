@@ -1,3 +1,12 @@
+# Map (grep -n a name to jump there):
+#   -- the T-Deck keyboard, in ONE place  the matrix layout and its key codes
+#   decode_raw                        five raw matrix bytes -> (buttons, last key)
+#   -- multi-source input             every producer owns a source; the state is the merge
+#   InputSource                       one producer's held set and key
+#   InputState                        the merged input every surface reads
+#   InputState.button_masks           (held, pressed) as bitmasks in one call
+#   TDeckKeyboard                     the T-Deck's I2C keyboard: ASCII and raw-matrix modes
+#   InputPoller                       the input poller thread, paced by the frame
 BUTTONS = (
     "up",
     "down",

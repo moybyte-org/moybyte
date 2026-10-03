@@ -1,3 +1,18 @@
+# Map (grep -n a name to jump there):
+#   Damage         whole-surface invalidation
+#   Surface        the system canvas an app draws on, and its state
+#   Theme          the live panel-theme tokens and the verbs that change them
+#   _StoreRole     what Files, Carts and WallpaperRole share
+#   _RawFiles      the user-files verbs with no session and no error mapping
+#   Files          the user-files store (`files/<kind>/` beside the carts)
+#   _RawCarts      Carts' in-session view
+#   Carts          the cart store: projects, not documents
+#   Nav            where the console goes next
+#   Prefs          per-app settings in the shell's system.json
+#   Notify         achievements and the system notice banner
+#   WallpaperRole  the desktop backdrop
+#   Installer      carts from outside: fetch, verify, install
+#   AppContext     what a system app is constructed with: every role above
 """`AppContext` -- the narrowed shell interface a SYSTEM APP is handed
 (docs/app_api_v1.md, ui_refactor_2026-08 Phase 6).
 

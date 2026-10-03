@@ -1,3 +1,22 @@
+# Map (grep -n a name to jump there):
+#   parse_flags                a flags blob -> 512 bytes
+#   load_cover                 a cart's cover.png bytes
+#   decode_cover               cover.png bytes -> 128x128 indices
+#   encode_cover               128x128 indices -> cover.png bytes
+#   load_images                a cart's paint-image assets
+#   load_scenes                a cart's scene assets
+#   -- sibling stores          load_artwork, save_artwork, load_deck, save_deck
+#   -- the document codec      encode_text, decode_text, load, scan
+#   -- manifest metadata       save_manifest_meta, add_source, compile_check
+#   -- a cart's SCRIPTS        cart_sources, source_text, set_source, save_code
+#   -- block source            load_blocks, save_blocks
+#   -- persistent cart memory  load_pmem, save_pmem
+#   -- shared sprite sheet     load_shared_sheet, save_shared_sheet
+#   -- system icon theme       load_system_icons
+#   -- known WiFi networks     load_wifi, save_wifi, remember_wifi
+#   -- system settings         load_system, save_system
+#   -- achievements            load_achievements, save_achievements
+#   -- cart management         store_full, create, new_from_template, duplicate
 # Moybyte SD cartridge store.
 #
 # Cartridges live as .moy folders under /sd/moybyte/carts/<name>.moy/:

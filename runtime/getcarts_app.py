@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   GetCartsLayout                the Get Carts window's geometry
+#   GetCartsAppLayer              the Get Carts app: index, covers, install
+#   GetCartsAppLayer._pump        one frame's slice of fetching and installing
+#   GetCartsAppLayer._build_rows  the index's carts as rows
+#   GetCartsAppLayer.blocker      why a row cannot be installed here
+#   GetCartsAppLayer.draw         the app's frame
 """Get Carts -- the console's store (#124): carts other people publish,
 browsed and installed over WiFi with no PC involved.
 

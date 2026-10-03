@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   gate                              (port, skip marker) for a suite
+#   session                           one board, held open for a suite
+#   -- the checks every fullscreen-tier board shares  fullscreen_tier_state, wifi_*, cart_runs_and_exits
+#   -- the windowed tier's three PERF columns  wm_meters_answer_for_the_frame_they_measured
+#   -- the WebAssembly engine         wasm_modules, wasm_push
+#   -- the Player path                wasm_carts_push, wasm_cart_fps
+#   -- Settings -> UNKNOWN SOURCES    unknown_sources
+#   -- a cart too big for the board   wasm_fit, wasm_too_big_cart_opens_the_notice
+#   -- Doom, built by the recipe      doom_push, doom_frames_match_the_host
 """The three on-glass suites' shared body (#206 item 3).
 
 `tests/test_{p4,tdeck,guition}_on_glass.py` each drive a REAL board over

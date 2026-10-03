@@ -1,3 +1,7 @@
+# Map (grep -n a name to jump there):
+#   color     a colour name or MOY64 index -> index
+#   _Layer    a scroll background: a wider off-screen canvas
+#   make_api  the cart's global namespace: every verb a cart calls
 """THE cart-API namespace builder (make_api) -- one body for every tier.
 
 Until 2026-08-17 this function existed twice: `runtime/host_api.py` (host sim +

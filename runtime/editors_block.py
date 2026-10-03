@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   _BlockOps                the block editor's undo op codec
+#   BlockRow                 one visual line of the flattened outline
+#   BlockEditor              the block program and a cursor over it
+#   BlockEditor.reflow       rebuild the flat rows from the tree
+#   BlockEditor.set_slot     write a slot value
+#   -- music / sound editor  MusicEditor
 """BlockEditor (#29 Part 2) -- the structured-outline block program + cursor
 (+ BlockRow / _clone_tree). Split out of editors.py (which re-exports them);
 history via the shared editors_base discipline."""

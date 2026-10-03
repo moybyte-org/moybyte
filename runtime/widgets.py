@@ -1,3 +1,19 @@
+# Map (grep -n a name to jump there):
+#   arm_prompt                 take the keyboard for a modal prompt
+#   ConfirmTap                 a two-tap guard on a destructive button
+#   _Blit                      the cursor sprite's blittable
+#   Pointer                    a screen-space cursor
+#   -- achievements            Achievements, Clipboard, Pmem
+#   Achievements               the milestones a kid has unlocked
+#   Clipboard                  the one system clipboard
+#   Pmem                       a cart's 256 persistent signed ints
+#   -- placed-actor scenes     Actor, Scenes, SceneWorld
+#   Actor                      one placed actor from a scene
+#   Scenes                     a cart's scenes, parsed
+#   SceneWorld                 the live actor world a cart mutates
+#   _SilentAudio               the no-op audio backend
+#   -- reusable overlay popup  Popup
+#   Popup                      a self-contained dropdown overlay
 """Self-contained console support widgets, extracted from Workstation
 (runtime/console.py) -- the cohesive, boundaried little classes with their own state
 that don't belong to any one surface Layer or the router:

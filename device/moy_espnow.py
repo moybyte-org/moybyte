@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   Peer                  another console we can hear
+#   EspNowNet             the cart-facing net.* backend over the radio
+#   EspNowLink            discovery, pairing and frame dispatch
+#   EspNowLink.start      bring the radio up
+#   EspNowLink.poll       drain the ring and beacon
+#   EspNowLink.offer      the host's half of starting a match
+#   EspNowLink.end_match  drop the match
+#   launch_cart           the guest's half: open the cart the host named
+#   make_link             the injected backend factory
 """The board's ONE ESP-NOW owner: discovery, pairing, and the two-console link (#7/#65).
 
 ESP-NOW has exactly ONE receive-callback slot for the whole firmware -- there is no

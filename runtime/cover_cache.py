@@ -1,3 +1,12 @@
+# Map (grep -n a name to jump there):
+#   _CoverImage                a decoded cover in RGB565
+#   _CoverJob                  a resumable decode of one cover
+#   CoverCache                 the cover and icon caches, budgets and warmers
+#   CoverCache.cover_for       a cart's cover at a reduction
+#   CoverCache.sheet_icon      the icon out of a cart's sprite sheet
+#   CoverCache.invalidate_all  drop everything a store rescan could change
+#   CoverCache.diet_release    drop the cover pipeline before a cart runs
+#   CoverCache.prefetch_tick   warm one cart's cover file
 """The shelf's COVER + ICON pipeline (#209 landing C) -- `Workstation.covers`.
 
 A cart's cover is its `cover.png` (SPEC.md 3.6), read by runtime/cover_png.py

@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   -- bar geometry           the bar's constants (console.py imports them back)
+#   BarLayer                  the unified 18px top bar: zones, clock, status, taps
+#   BarLayer.invalidate       repaint the cached running-cart bar
+#   BarLayer.redraw_clock     repaint just the clock cell
+#   BarLayer.handle_bar_tap   the zoned bar's tap slice, shared by every surface
+#   BarLayer.handle_cart_tap  the running-cart bar's tap slice
 """The unified 18px top bar (#46), extracted from Workstation
 (runtime/console.py) as its own surface -- docs/history/shell_layers_refactor_v1.md.
 

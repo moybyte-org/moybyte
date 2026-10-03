@@ -1,3 +1,14 @@
+# Map (grep -n a name to jump there):
+#   PaintDocument                 an indexed document whose size the window never changes
+#   PaintAppLayout                responsive Paint chrome for one window rect
+#   PaintAppLayer                 the Paint app process: layout, input, draw
+#   PaintAppLayer.is_app          the app-API matcher
+#   ArtworkService                Paint's document model, wallpapers and attachments
+#   ArtworkService.load           the open drawing as (w, h, index bytes)
+#   ArtworkService.save           persist the canvas to its named drawing
+#   ArtworkService.set_wallpaper  a drawing as the desktop wallpaper
+#   ArtworkService.attach         copy a drawing into a cart
+#   ArtworkService.usage          where a drawing is used
 """Paint's narrow shell-owned artwork capability.
 
 The Paint cartridge owns the editor, pixels and interaction. This service owns

@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   make_tile                   one launcher tile for a cart
+#   Launcher                    the desktop home: carts laid out as the library grid
+#   Launcher.nav2d              grid navigation
+#   Launcher.pointer_frame      one pointer sample over the grid
+#   Launcher.cover_specs        every cover the next full draw needs
+#   LauncherHomeLayer           the launcher content layer: wallpaper, grid, zone
+#   LauncherHomeLayer.draw      the home desktop
+#   LauncherHomeLayer.zone_tap  the lent left zone's taps
+#   EditorPickerLayer           the Editor's project picker
 """The desktop home / launcher (#28), extracted from Workstation
 (runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md (Move 1b,
 the last surface). Three classes:

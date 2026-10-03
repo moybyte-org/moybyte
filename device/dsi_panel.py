@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   P4Compositor                      the P4 compositor over a moy_dsi panel
+#   P4Compositor.flush                present a frame
+#   rotate_rect                       a landscape rect -> the portrait rect it lands on
+#   unrotate_rect                     a portrait rect -> the landscape rect it came from
+#   RotatedCompositor                 the landscape compositor over a portrait panel
+#   RotatedCompositor.set_angle       flip the desk, live
+#   RotatedCompositor.present_pending  the loop's pre-frame hook
+#   RotatedCompositor.frame_fence     nothing writes a buffer in flight
+#   RotatedCompositor.overlap_stats   the overlap counters since boot
 """The ESP32-P4 DSI compositor (the P4 silicon tier's Python half): the
 compositor shim over the shared `native/p4/moy_dsi`.
 

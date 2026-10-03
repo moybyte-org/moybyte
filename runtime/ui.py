@@ -1,3 +1,18 @@
+# Map (grep -n a name to jump there):
+#   is_light                          the theme's tool-surface presentation class
+#   wrap_words                        greedy word wrap
+#   -- rect algebra                   inset, cut_top, cut_bottom, cut_left, split
+#   -- interaction state              widget_state, state_token
+#   -- the skin                       the look and the numbers, as data
+#   -- the default state table        set_skin, metrics, state_colors
+#   -- draw == tap                    Hits
+#   Hits                              per-draw hit registry
+#   -- widgets                        button, chip
+#   -- list rows and grid cells       row, cell
+#   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
+#   -- scrolling                      row_drag, ScrollRegion, DragTap
+#   ScrollRegion                      the one scroll model
+#   DragTap                           press/drag/release over a ScrollRegion
 """Shared immediate-mode widget toolkit (visual identity v1, Phase 3).
 
 The ONE place the Open Machine chrome vocabulary is drawn -- buttons, tab rows,

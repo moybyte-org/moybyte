@@ -1,4 +1,20 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   board_dirs          {ota id: board dir}, discovered from board.toml
+#   declared_serial     a board's [serial] block
+#   usb_serial_of       the USB serial number behind a tty
+#   load_identities     this machine's learned serial -> board map
+#   find_port           a board dir -> its serial port
+#   add_board_args      the --board/--port pair
+#   DeviceError         the board answered `py` with an exception
+#   P4Board             the serial driver every board tool goes through
+#   P4Board.cmd         one dev command and its reply
+#   P4Board.reset       hard reset (CH343 boards only) and wait
+#   P4Board.state       the console's state, parsed
+#   P4Board.leave_cart  end a cart, leave the board where it was
+#   P4Board.pyval       evaluate an expression on the board
+#   P4Board.pyexec      run a snippet on the board
+#   _tour               the standalone tour `main` runs
 """On-glass P4 test driver: the host half of the serial test harness.
 
 The P4 desktop's serial dev commands (`swipe` / `tap` / `open` / `state` /

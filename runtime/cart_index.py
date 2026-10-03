@@ -1,3 +1,19 @@
+# Map (grep -n a name to jump there):
+#   InstallError                a failure: the kid's text and serial's detail
+#   -- references               is_url, resolve, plain_name, mirror_ok
+#   -- the index                check_cart, cover_ref, parse_index, load_indexes
+#   -- what this console takes  plan, need_bytes
+#   -- the record               load_record, save_record, record_entry
+#   -- fetching                 Fetch, Reach, FileCheck, index_fetch, cover_fetch
+#   Fetch                       one small document, whole
+#   Reach                       which of a cart's URLs this console can read
+#   FileCheck                   a file the player supplied, held to the index
+#   -- the streaming install    the readers an install streams through
+#   _ZipReader                  a stored zip, member by member, as it streams
+#   _TarGzReader                an external file's archive
+#   Install                     install or update one cart, a slice per frame
+#   Install.step                up to budget_ms of work
+#   Install.cancel              stop, keeping nothing
 """cart_index -- the console's `moy install`: carts other people publish,
 browsed and installed over WiFi with no PC involved (#124).
 

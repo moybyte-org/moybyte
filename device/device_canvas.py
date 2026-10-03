@@ -1,3 +1,17 @@
+# Map (grep -n a name to jump there):
+#   to_indices                   an RGB565 framebuffer back to palette indices
+#   ellipse                      the ellipse inscribed in a box
+#   tri_spans                    a filled triangle's spans
+#   _MaskedRegion                a cell grid standing in for a tilemap
+#   DeviceCanvas                 the kid drawing API on the device, every board
+#   DeviceCanvas.sync_back       re-point the draw target at the back buffer
+#   DeviceCanvas.palette         swap the RGB table
+#   DeviceCanvas.blit_game       the fullscreen WM's game composite
+#   DeviceCanvas.present_frame   a compiled cart's frame to the flush
+#   DeviceCanvas.blit565         place an RGB565 picture
+#   DeviceCanvas.reclaim_layers  return a dead program's layer buffers
+#   SystemCanvas                 DeviceCanvas plus the system-surface contract
+#   _LayerComp                   the compositor stand-in a layer canvas draws through
 """The device DRAWING backend (extracted from moy_runtime.py) -- the single most
 performance-critical + native-coupled unit on the device.
 

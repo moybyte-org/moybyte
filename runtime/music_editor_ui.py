@@ -1,3 +1,7 @@
+# Map (grep -n a name to jump there):
+#   MusicLayout          responsive music-editor geometry
+#   MusicEditorUI        the music editor's UI: step list and edit pad
+#   MusicEditorUI.build  build the MusicEditor over the cart's bank
 """The music/sound editor's UI layer (issue #50): a tracker-style step editor
 over the cart's AudioBank -- SFX view (note/wave/vol steps) and SONG view (a
 phrase of SFX-id slots), a scrolling step/slot list, a right-hand edit pad, a

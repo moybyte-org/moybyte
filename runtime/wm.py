@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   FullscreenStackWM                 the fullscreen back-stack window manager (S3, host)
+#   FullscreenStackWM.goto            navigate the stack so a kind is on top
+#   FullscreenStackWM.viewport        the composited game viewport
+#   FullscreenStackWM.game_xy         a system-canvas point -> game coordinates
+#   FullscreenStackWM.present_frame   show a compiled cart's frame
+#   FullscreenStackWM.composite_game  the game canvas into the system canvas
 """The window manager -- the S3/host fullscreen back-stack WM (Stage 6 of
 docs/history/shell_ux_technical_plan_v1.md).
 

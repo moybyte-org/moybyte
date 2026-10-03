@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   serial_cfg       a board's [serial] declaration
+#   StoreFull        the board's store has no room for the cart
+#   check_room       refuse a cart the store cannot hold
+#   Link             what a session knows about the board's recv
+#   RateRefused      the board did not answer at the payload rate
+#   push_file_raw    one file over the raw receive
+#   compiled_module  a compiled cart's module for the board's chip
+#   push_files       push paths inside the cart
+#   cart_files       every file in the cart folder
+#   main             the command line
+#   connect          an identity-checked P4Board on a board's port
 """Copy a cart folder onto a board's cart store, over the serial console.
 
     python tools/push_cart.py ports/celeste.moy --board p4

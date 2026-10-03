@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   verbs_line         the VERBS line: where a Lua frame's time goes
+#   perfcnt_line       the PERFCNT line: instructions per cycle
+#   luaprof_line       the LUAPROF line: the interpreter's split
+#   DevChannel         the serial line commands: one class, every board
+#   DevChannel.run     the command table of record
+#   DevChannel.poll    drain the bytes a frame may take
+#   DevChannel.report  the per-tick diag line
 """The serial DEV CHANNEL: drive a running console over the board's serial line.
 
 ONE implementation, every board that has a working stdin. Extracted from the

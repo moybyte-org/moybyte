@@ -1,3 +1,9 @@
+# Map (grep -n a name to jump there):
+#   _ConfigOps               the CONFIG tab's undo op codec
+#   Project                  the open cart's data and its persistence verbs
+#   Project.commit_code      persist validated source
+#   Project.commit_manifest  persist edited metadata
+#   Project.history_for      the op history for a tab
 """The open cart's live WORKSPACE (Stage 1 of docs/history/shell_ux_technical_plan_v1.md).
 
 `Project` holds the DATA of the one cart currently open in the console -- the cart

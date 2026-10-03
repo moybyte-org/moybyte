@@ -1,3 +1,9 @@
+# Map (grep -n a name to jump there):
+#   journal_append    record a commit: snapshot and op batch
+#   journal_undo      restore the previous snapshot
+#   journal_redo      re-apply the next snapshot
+#   journal_can_undo  can undo, read-only
+#   journal_compact   drop the oldest entries to the budget
 # The per-project undo/redo journal (#7, Stage 7 of docs/history/shell_ux_technical_plan_v1.md),
 # extracted from moy_carts.py (which re-exports every name here, so `store.journal_*`
 # call sites and tests are unchanged). MicroPython-safe (json + os only); file

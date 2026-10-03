@@ -1,3 +1,7 @@
+# Map (grep -n a name to jump there):
+#   Wallpaper               the desktop backdrop: solid, image or live
+#   Wallpaper.is_animating  a live wallpaper is running
+#   Wallpaper.draw_preview  the Appearance monitor's screen
 """The desktop wallpaper backdrop (#28), extracted from Workstation
 (runtime/console.py) as a component -- docs/history/shell_layers_refactor_v1.md (Move 1a).
 
