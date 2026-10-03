@@ -45,9 +45,10 @@ PANEL_DIAGONAL_IN = 10.1       # the glass, in inches -- board.toml [panel] is t
 # importable module SHADOWS the frozen module of that name (the Waveshare's
 # hardware-learned rule, 2026-07-08; same MicroPython, same rule).
 CARTS_ROOT = "/moy/carts"
-# Where an OTA image stages (#53): the internal VFS, NOT under /moy/carts
-# (the store scans that directory). ~4MB free after the seed against a ~3.6MB
-# image on this 16MB chip -- the README carries the headroom.
+# The OTA directory (#53) -- a copied image, the pending marker, the C6's
+# image: the internal VFS, NOT under /moy/carts (the store scans that
+# directory). A WiFi firmware update streams into the inactive slot and
+# stages nothing here.
 OTA_UPDATE_DIR = "/moy/update"
 
 

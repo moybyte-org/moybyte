@@ -58,7 +58,8 @@ ROOT = "/moy"
 CARTS_DIR = ROOT + "/carts"
 WIFI_STORE = ROOT + "/wifi.json"
 ZERO_STORE = ROOT + "/zero.json"   # this board's own name + write pin (setup)
-# Where an OTA payload is staged. On the internal VFS because there is no card
+# The OTA directory (the pending marker; the image streams into the inactive
+# slot). On the internal VFS because there is no card
 # slot on this board at all -- moy_ota's default names /sd/update, which every
 # path in that module reads off the instance instead, precisely so two boards'
 # updaters cannot look at each other's directory.

@@ -519,7 +519,7 @@ status nobody can get."""
 [[modules.device.group]]
 files = ["moy_ota.py"]
 why = """
-STAGE 6. The OTA updater (#53). Board-agnostic: its staging directory is a
+STAGE 6. The OTA updater (#53). Board-agnostic: its update directory is a
 constructor argument and its identity comes from the generated `_ota_build.py`.
 The partition table is byte-for-byte the deleted fork build's, so boards that
 took their last update from it install this build over plain OTA."""

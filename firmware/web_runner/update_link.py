@@ -200,7 +200,9 @@ class RemoteUpdater:
         """
         return self._state() == "offer"
 
-    def begin_download(self, manifest):
+    def begin_download(self, manifest, to_slot=False):
+        """Where the bytes land is the board's own choice; `to_slot` is the
+        screen's, taken and ignored."""
         self._ask("download")
 
     def download_step(self, max_bytes=None):

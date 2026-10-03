@@ -52,10 +52,11 @@ OTA_UPDATE_DIR = "/moy/update"
 # internal-flash root above, exactly the store this board shipped with. The
 # slot is on its OWN SPI3 pins (community map, verified on this glass), nothing
 # shared with the panel's SPI2, so this is plain machine.SDCard + os.mount --
-# none of the T-Deck's moy_sd bus-sharing machinery applies. Deliberate: OTA
-# keeps staging on the INTERNAL VFS (a pulled card must never kill an update
-# mid-stream; the 16MB flash has the room), and the BLE bond store stays
-# internal too (device identity, not cart data). Wifi credentials live beside
+# none of the T-Deck's moy_sd bus-sharing machinery applies. Deliberate: the
+# OTA directory (a copied image, the pending marker) and the BLE bond store
+# stay on the INTERNAL VFS (device identity, not cart data). A WiFi update
+# stages nothing: it streams into the inactive slot, because this VFS cannot
+# hold the image. Wifi credentials live beside
 # the carts and so follow the card -- the T-Deck accepts the same trade.
 # slot=2 IS SPI3_HOST -- machine_sdcard.c's spi table lists SPI3 FIRST, so
 # SPI slot numbers map in the OPPOSITE order of the host numbers (slot 2 ->
@@ -106,7 +107,7 @@ def _mount_sd():
 
 def _load_carts(boot, store):
     """This board's store: the card when it mounts, internal flash when not;
-    the OTA image stages on internal flash either way."""
+    the OTA directory is on internal flash either way."""
     sd_ok = _mount_sd()
     carts, root = boot.load_carts(store, CARTS,
                                   root=SD_CARTS_ROOT if sd_ok else CARTS_ROOT,

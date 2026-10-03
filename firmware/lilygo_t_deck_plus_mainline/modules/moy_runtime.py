@@ -160,9 +160,9 @@ class _Storage:
     def load(self, boot, store):
         """The cart store: seed + scan on the card, bracketed (`with_sd_live`
         attaches once and keeps the card resident); internal flash when there
-        is no card. The OTA image stages wherever the store went -- an updater
-        aimed at /sd/update on a card-less board would stage onto a card that
-        is not there."""
+        is no card. The OTA directory goes wherever the store went -- an
+        updater aimed at /sd/update on a card-less board would look on a card
+        that is not there."""
         carts, root = boot.load_carts(store, CARTS, session=self._bracketed,
                                       media="SD",
                                       fallback_root=FLASH_CARTS_ROOT)

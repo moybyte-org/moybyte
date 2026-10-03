@@ -289,7 +289,7 @@ function say(s) { self.postMessage({ t: "status", s: s }); }
 const OUT_OF_BOUNDS = "out of bounds memory access";
 class CartTrap extends Error {}
 
-function installCartEngine(M) {
+export function installCartEngine(M) {
     const dec = new TextDecoder();
     const u32 = () => new Uint32Array(M.HEAPU8.buffer);   // fresh: growth replaces it
     const cstr = (p) => {
@@ -410,8 +410,19 @@ function installCartEngine(M) {
         open(bytes, vm) {
             C = vm;
             try {
-                if (!imports) imports = adapters();
+                // COMPILE FIRST. `bytes` is a view into the VM's own HEAPU8
+                // (web_open's HEAPU8.subarray). On the FIRST open ever,
+                // `adapters()` below calls into the VM (C.malloc/C.natives)
+                // to build the import table, and that call can GROW the
+                // VM's memory -- which DETACHES every view taken before the
+                // growth, `bytes` included, reading back length 0
+                // ("BufferSource argument is empty"). WebAssembly.Module()
+                // only ever needs `bytes` for this one call, so nothing
+                // after it may still depend on that view.
+                // cart_engine_test.mjs pins it with a VM that grows on its
+                // first malloc.
                 const module = new WebAssembly.Module(bytes);
+                if (!imports) imports = adapters();
                 instance = new WebAssembly.Instance(module, { moy: imports });
             } catch (e) {
                 instance = null;
