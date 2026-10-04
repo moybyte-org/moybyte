@@ -1009,7 +1009,7 @@ def runtime_compile_check(cart, src):
 
     A python cart is compile()d. A "lua" cart (#67) answers ok UNCHECKED:
     neither tier has a syntax-only Lua entry -- the host's hl_exec and the
-    device's moycore run_chunk both luaL_loadbuffer AND lua_pcall in one step,
+    device's moycore run_chunk both load (text only) AND lua_pcall in one step,
     over a run that needs a framebuffer under it, which an Editor tab has not
     got. So the gate degrades to COMMIT rather than to never-commit, and a Lua
     syntax error surfaces where it always did, at PLAY. Gating Lua means a

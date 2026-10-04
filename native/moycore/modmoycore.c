@@ -2008,12 +2008,19 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 14, 14, mod_run_be
 
 // Run one chunk. Shared by exec() and load(); the only difference between them
 // is whether _init follows.
+//
+// TEXT ONLY ("t"). Lua does not verify precompiled bytecode, and a crafted
+// binary chunk can read and write outside the VM -- on a board, the firmware's
+// own memory. SPEC.md 4.1 bans load/loadstring/dofile for that reason; a
+// cart's source arriving here is the one door those bans do not cover. A chunk
+// that opens with ESC, as every binary one does, fails with Lua's own load
+// error. runtime/moyhost_lua.c's hl_exec is the host's twin of this call.
 static mp_obj_t run_chunk(mp_obj_t src_obj, mp_obj_t name_obj)
 {
     size_t srclen = 0;
     const char *src = mp_obj_str_get_data(src_obj, &srclen);
     const char *name = mp_obj_str_get_str(name_obj);
-    if (luaL_loadbuffer(RUN.L, src, srclen, name) != LUA_OK
+    if (luaL_loadbufferx(RUN.L, src, srclen, name, "t") != LUA_OK
         || lua_pcall(RUN.L, 0, 0, 0) != LUA_OK) {
         const char *msg = lua_tostring(RUN.L, -1);
         return mp_obj_new_str(msg ? msg : "load failed",

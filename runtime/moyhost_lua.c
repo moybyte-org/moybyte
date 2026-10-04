@@ -243,13 +243,15 @@ void hl_retarget(host_lua *r, void *pix)
     else        r->hc.canvas.pix = (moy_pixel *)pix;
 }
 
-/* Run one chunk. 0 on success; the message lands in err. */
+/* Run one chunk. 0 on success; the message lands in err. Text only ("t"):
+ * a binary chunk is unverified bytecode, refused here exactly as moycore's
+ * run_chunk refuses it on a board (native/moycore/modmoycore.c says why). */
 int hl_exec(host_lua *r, const char *src, int len, const char *name,
             char *err, int errlen)
 {
     CUR = r;
     HC = &r->hc;
-    if (luaL_loadbuffer(r->L, src, (size_t)len, name) != LUA_OK
+    if (luaL_loadbufferx(r->L, src, (size_t)len, name, "t") != LUA_OK
         || lua_pcall(r->L, 0, 0, 0) != LUA_OK) {
         const char *m = lua_tostring(r->L, -1);
         if (err && errlen > 0) { strncpy(err, m ? m : "load failed", errlen - 1); err[errlen - 1] = 0; }

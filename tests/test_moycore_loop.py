@@ -550,6 +550,47 @@ moycore.close()
 '''
 
 
+# A cart's source is Lua TEXT. Lua does not verify bytecode, and on a board
+# nothing stands between a crafted binary chunk and the firmware's memory, so
+# run_chunk loads in text mode: ESC, the first byte of every binary chunk, is
+# refused with Lua's own message -- binary mode would read on and fail on the
+# junk with a different one. exec() and load() both go through run_chunk.
+TEXT_ONLY_DRIVER = r'''
+import moycore
+from array import array
+
+W, H = 32, 32
+fb = bytearray(W * H * 2)
+snap = array("i", bytearray(4 * moycore.SNAP_LEN))
+aq = array("h", bytearray(2 * (1 + moycore.AQ_SLOTS * moycore.AQ_MAX)))
+BIN = "\x1bLua\x54\x00 not a real chunk"
+
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+print("BINLOAD", moycore.load(((BIN, "@cart"),)))
+moycore.close()
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+print("BINEXEC", moycore.exec(BIN, "glue"))
+moycore.close()
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+print("TEXTLOAD", moycore.load((("function _update(dt) end", "@cart"),)))
+moycore.close()
+'''
+
+
+def test_a_cart_is_lua_text_never_precompiled_bytecode():
+    exe = require_unix_mp(
+        "moycore",
+        why="Without it nothing checks that a board refuses a Lua cart made "
+            "of precompiled bytecode, which Lua does not verify.")
+    p = subprocess.run([exe, "-c", TEXT_ONLY_DRIVER], capture_output=True,
+                       text=True, timeout=60)
+    assert p.returncode == 0, p.stdout + p.stderr
+    by = {l.split()[0]: l for l in p.stdout.splitlines() if l}
+    for key in ("BINLOAD", "BINEXEC"):
+        assert "attempt to load a binary chunk" in by[key], p.stdout
+    assert by["TEXTLOAD"].split()[1] == "None", p.stdout
+
+
 def _run():
     exe = require_unix_mp(
         "moycore",

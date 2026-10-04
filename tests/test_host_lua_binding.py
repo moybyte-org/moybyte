@@ -100,6 +100,32 @@ def test_the_sandbox_is_the_same_ceiling_the_boards_have():
         r.close()
 
 
+@pytest.mark.skipif(not lb.HostLuaRun.available(),
+                    reason="no C compiler for the host lua binding")
+def test_a_cart_is_lua_text_never_precompiled_bytecode():
+    """Every chunk loads in Lua's text mode. Lua does not verify bytecode, so a
+    crafted binary chunk can read and write outside the VM, and SPEC.md 4.1
+    already bans load/loadstring/dofile for that reason; the cart's own source
+    is the one door they do not cover. ESC opens every binary chunk
+    (LUA_SIGNATURE), and text mode refuses on that byte with Lua's own message
+    -- where binary mode would read on and fail on the junk instead."""
+    for chunks in ([(b"\x1bLua\x54\x00 not a real chunk", "@cart")],
+                   [("function _update(dt) end", "@shim"),
+                    (b"\x1bLua\x54\x00 not a real chunk", "@cart")]):
+        r = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
+        try:
+            err = r.load(chunks)
+            assert err is not None and "attempt to load a binary chunk" in err, err
+        finally:
+            r.close()
+    r = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
+    try:
+        assert r.exec(b"\x1bLua\x54\x00 not a real chunk") is not None
+        assert r.load([("function _update(dt) X = 1 end", "@cart")]) is None
+    finally:
+        r.close()
+
+
 TOUCH_CART = """
 px, py, pt, ph = -1, -1, -1, -1
 function _update(dt)

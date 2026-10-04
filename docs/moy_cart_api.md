@@ -128,6 +128,11 @@ The few Lua-specific notes:
   `a.flags["size"]`.
 - No imports, same as Python. The **safe Lua stdlib** is available: `math.*`,
   `string.*`, `table.*` (no `io`/`os`/`load`/`require`).
+- A Lua cart's files are **source text**. A precompiled chunk (`luac` output,
+  or anything opening with Lua's binary signature, `ESC "Lua"`) is refused at
+  load with Lua's own "attempt to load a binary chunk" error, on every tier:
+  Lua does not verify bytecode, and a crafted chunk can write outside the VM.
+  It is the same door SPEC.md 4.1 shuts by removing `load`.
 - A crash opens the same error panel, and EDIT drops on the offending
   `main.lua` line. The code editor's tap-palette offers `~` (for `~=`) in a
   Lua project.
