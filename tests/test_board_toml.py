@@ -820,3 +820,30 @@ def test_the_partition_table_is_named_once(board):
         "%s/build.sh restates the partition table filename %r, which "
         "sdkconfig.board already has to name" % (board, csv))
     assert "${BOARD_PARTITION_CSV}" in sh
+
+
+def test_every_console_board_imports_its_frozen_modules_first():
+    """Each import walks `sys.path` in order, and MicroPython's default puts the
+    flash root ('') ahead of '.frozen': every frozen module paid a failed stat
+    of the flash per name first. The console boards' boot.py reorders it, and
+    this runs each one against the default path. The headless Zero keeps the
+    default."""
+    import types
+    consoles = [t.parent for t in ALL_DECLS
+                if board_config.load(t.parent)["board"]["tier"]
+                in ("handheld", "desktop")]
+    assert len(consoles) >= 4, consoles
+    for d in consoles:
+        fake_sys = types.SimpleNamespace(path=["", ".frozen", "/lib"])
+        mods = {"sys": fake_sys, "gc": types.SimpleNamespace(collect=lambda: 0)}
+        real_import = __import__
+
+        def _import(name, *a, **kw):
+            return mods[name] if name in mods else real_import(name, *a, **kw)
+
+        src = (d / "modules" / "boot.py").read_text(encoding="utf-8")
+        exec(compile(src, str(d / "boot.py"), "exec"),
+             {"__builtins__": dict(__builtins__ if isinstance(__builtins__, dict)
+                                   else vars(__builtins__),
+                                   __import__=_import, print=lambda *a: None)})
+        assert fake_sys.path == [".frozen", "", "/lib"], (d.name, fake_sys.path)

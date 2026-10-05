@@ -216,7 +216,7 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     its intended hardware) to the shared boot spine `device/desktop_spine.py`.
     Carts live on the TF card when one mounts (the SD bullet below) and
     otherwise on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
-    `/moybyte/...`, which shadows the frozen `moybyte.input` module and killed a
+    `/moybyte/...`, which shadowed the frozen `moybyte.input` module and killed a
     boot; see the constraint below. A card is optional here.
   - Staged at build (canonical sources elsewhere), and **declared in
     `board.toml`** since #161 Phase 3 rather than listed in `build.sh`: the
@@ -304,11 +304,13 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   during idf.py's early-expansion phase, which is when component `REQUIRES`
   are collected. `build.sh` patches `esp32_common.cmake`'s `IDF_COMPONENTS`
   list instead (idempotent sed).
-- **A root-level VFS dir named like a frozen module SHADOWS it** (`''` precedes
-  `.frozen` on `sys.path`): the first console boot seeded `/moybyte/carts` and
-  the next boot died with `ImportError: no module named 'moybyte.input'`. The
-  flash store root is therefore **`/moy/carts`** — never name a VFS root dir
-  after an importable module.
+- **A root-level VFS dir named like a frozen module shadowed it** while `''`
+  preceded `.frozen` on `sys.path`: the first console boot seeded
+  `/moybyte/carts` and the next boot died with `ImportError: no module named
+  'moybyte.input'`. The flash store root is therefore **`/moy/carts`**. Every
+  console board's `boot.py` puts `.frozen` first (2026-10-05, #224), so a
+  frozen module now wins over a flash file or dir of its name; still never
+  name a VFS root dir after an importable module.
 - **The PPA driver INVALIDATES the whole out-picture buffer at submit** — any
   CPU frame writes not yet flushed from cache are silently DISCARDED (pixels
   revert to stale PSRAM content; glass-confirmed as speed-scaled desktop
