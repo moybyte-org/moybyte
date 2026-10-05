@@ -206,11 +206,11 @@ def test_a_cart_may_be_several_scripts_and_each_one_is_its_own_chunk(tmp_path):
     assert cart_chunks({}, "C") == [("C", "@cart")], \
         "a one-script cart must reach load() as the list it always was"
 
-    # ...and the diet drops them: 62KB of shim resident per cart is the largest
-    # single payload on a ported shelf and the least useful (#66).
-    from runtime import cart_manager
-    assert "src_before" in cart_manager._HEAVY_CART_KEYS
-    assert "src_after" in cart_manager._HEAVY_CART_KEYS
+    # ...and the shelf never holds them: 62KB of shim resident per cart is the
+    # largest single payload on a ported shelf and the least useful (#66).
+    from runtime import moy_carts
+    assert "src_before" in moy_carts.PAYLOADS
+    assert "src_after" in moy_carts.PAYLOADS
 
 
 def test_a_several_script_cart_survives_the_bake_and_the_seed(tmp_path):

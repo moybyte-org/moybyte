@@ -3,7 +3,9 @@ store module shares.
 
 The directory and extension names, the sibling-path formula (system state
 lives BESIDE the carts dir), `ensure_dirs`, the cart NAME rule (`slug`), the
-manifest canvas-field codec and the two directory primitives `moy_fs` lacks.
+manifest canvas-field codec, the rows of a sprite sheet a launcher icon is cut
+from (`icon_rows`, which the shelf's scan and the sheet codec both read) and
+the two directory primitives `moy_fs` lacks.
 `moy_carts` (the store core), `moy_seed`, `moy_files` and `moy_file_ops` all
 import from here and never from each other's callers, so any of them can be
 imported first. `moy_carts` re-exports every name under its old spelling.
@@ -97,6 +99,55 @@ COVER_MAX_BYTES = 65536               # cover_png.MAX_BYTES (pinned equal)
 # actor table per scene.
 SCENES_DIR = "scenes"
 SCENE_EXT = ".moyscene"
+
+# A cart's sprite sheet (SPEC.md 3.2): `sprites.moygfx`, one hex digit a pixel
+# and one line a pixel row of 16 x 32 tiles of 8. Blank lines are skipped, and
+# a short blob leaves the rows it lacks blank.
+SPRITES_NAME = "sprites.moygfx"
+# The hex digits of a pixel with colour: `set(line) & SHEET_INK` asks whether a
+# whole line has art in one C-level pass, decoding nothing.
+SHEET_INK = set("123456789abcdefABCDEF")
+
+
+def icon_rows(lines, n=0, tw=1, th=1, cols=16, rows=32, tile=8):
+    """The rows of a sheet a launcher icon is cut from: `(pw, ph, want)`,
+    `want` holding each of the icon's `ph` pixel rows as its slice of the hex
+    line (None where the blob ends first), or None when the sheet carries no
+    art at all, so the card draws its type glyph.
+
+    The icon is tiles `n` .. spanning `tw` x `th` (SPEC.md 3.4), clamped to the
+    sheet, and an `n` off the sheet is tile 0. `lines` is any iterable of the
+    blob's lines -- the split text or a file read a piece at a time -- and is
+    read only until the art is found and the icon's rows are in hand, so the
+    shelf's scan of a cart touches the top of its sheet and no more."""
+    w, h = cols * tile, rows * tile
+    if n < 0 or n >= cols * rows:
+        n, tw, th = 0, 1, 1
+    if tw < 1:
+        tw = 1
+    if th < 1:
+        th = 1
+    ox, oy = (n % cols) * tile, (n // cols) * tile
+    tw = min(tw, (w - ox) // tile)
+    th = min(th, (h - oy) // tile)
+    pw, ph = tw * tile, th * tile
+    want = [None] * ph
+    ink = False
+    y = 0
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if y >= h:
+            break
+        if not ink and (set(line[:w]) & SHEET_INK):
+            ink = True
+        if oy <= y < oy + ph:
+            want[y - oy] = line[ox:ox + pw]
+        y += 1
+        if ink and y >= oy + ph:
+            break
+    return (pw, ph, want) if ink else None
 
 
 def _sibling_path(root, name):

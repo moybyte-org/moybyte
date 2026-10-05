@@ -1030,13 +1030,13 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
     # cached icon (the heavy payloads are ~0.2ms/KB of GC mark cost EVERY collect);
     # opening rehydrates from the store in place, switching re-slims the previous.
     from runtime import host_app
-    from runtime.cart_manager import _HEAVY_CART_KEYS
+    from runtime.moy_carts import PAYLOADS
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     sd = [c for c in ws.carts.all if c.get("path")]
     assert sd, "seeded carts expected"
     for c in sd:
         assert c.get("lazy") is True
-        for k in _HEAVY_CART_KEYS:
+        for k in PAYLOADS + ("icon_rows",):
             assert k not in c, "%s survived slimming on %s" % (k, c["title"])
     # icons were baked BEFORE slimming, so the grid never needs the sheet back
     assert any(ws.covers.icons.values()), "icon cache should be populated"

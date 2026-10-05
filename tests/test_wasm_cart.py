@@ -536,9 +536,9 @@ def test_the_store_never_reads_the_module_as_text(tmp_path):
     # its source is src/, and that is its code
     assert host_app.moy_carts.cart_sources(cart) == ["src/main.wat"]
     assert "(module" in host_app.moy_carts.source_text(cart)
-    # a slim scan still requires the module to exist
+    # a catalogue entry still requires the module to exist
     os.remove(os.path.join(root, "hello.moy", "main.wasm"))
-    assert host_app.moy_carts.load(os.path.join(root, "hello.moy"), src=False) is None
+    assert host_app.moy_carts.entry(os.path.join(root, "hello.moy")) is None
 
 
 def test_no_text_write_reaches_the_module(tmp_path):

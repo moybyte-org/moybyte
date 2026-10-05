@@ -6,7 +6,8 @@
 #   load_images                a cart's paint-image assets
 #   load_scenes                a cart's scene assets
 #   -- sibling stores          load_artwork, save_artwork, load_deck, save_deck
-#   -- the document codec      encode_text, decode_text, load, scan
+#   -- the document codec      encode_text, decode_text
+#   -- the catalogue           PAYLOADS, entry, load, catalogue, scan
 #   -- manifest metadata       save_manifest_meta, add_source, compile_check
 #   -- a cart's SCRIPTS        cart_sources, source_text, set_source, save_code
 #   -- block source            load_blocks, save_blocks
@@ -64,7 +65,8 @@ try:
                                 IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
                                 SCENE_EXT, _normalize_canvas, _canvas_str,
                                 _sibling_path, slug, ensure_dirs, _is_dir,
-                                _rmtree, COVER_FILE, COVER_MAX_BYTES)
+                                _rmtree, COVER_FILE, COVER_MAX_BYTES,
+                                SPRITES_NAME, icon_rows)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
                                         IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
@@ -72,7 +74,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         _normalize_canvas, _canvas_str,
                                         _sibling_path, slug, ensure_dirs,
                                         _is_dir, _rmtree, COVER_FILE,
-                                        COVER_MAX_BYTES)
+                                        COVER_MAX_BYTES, SPRITES_NAME,
+                                        icon_rows)
 
 
 # Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
@@ -543,17 +546,44 @@ def _project_title(path):
     return name[:-4] if name.endswith(".moy") else (name or "cart")
 
 
-def load(path, src=True):
-    """Load one .moy folder into a cart dict, or None on error.
+# --- the catalogue and the whole cart ---
+#
+# The shelf holds each cart as its catalogue ENTRY -- the manifest's metadata,
+# the config, the tile flags and the scene names -- and reads a cart WHOLE only
+# to open it. `catalogue(root)` is the shelf's read, one `entry` per folder;
+# `load(path)` is the whole cart, which the shelf merges into the entry it holds
+# (CartManager.rehydrate) and drops again when the workspace moves on (reslim).
 
-    `src=False` reads everything BUT the source -- what a shelf scan wants.
-    The source is the one allocation that fails on a fragmented heap while the
-    memory to serve it exists (tens of KB as one string), and a scan never
-    uses it: the manager slims every scanned cart straight away and the
-    source is read back at open (rehydrate). A mid-session rescan that read
-    it dropped every big cart from the shelf until the next boot (the Guition
-    S3, 2026-09-08: ten of forty-four carts "unreadable" at 79KB apiece). The
-    file must still EXIST, or the cart is as broken as it ever was.
+# What `load` reads beyond an entry: the cart's scripts and its assets.
+PAYLOADS = ("src", "src_before", "src_after", "sprites", "sounds", "map",
+            "images", "blocks", "scenes")
+
+
+def entry(path):
+    """The catalogue entry of the .moy folder at `path`, or None when it is no
+    cart: what `load` returns without its PAYLOADS, read without opening their
+    files, and refused on the same terms -- except that of the scripts only
+    the main one's EXISTENCE is checked (the rest are read at open).
+
+    An entry costs the shelf a few hundred bytes where the whole cart can cost
+    tens of KB, and the scan reads one per cart folder, so its peak is what the
+    gc heap grows to and keeps for the session (#224). A payload is also the
+    allocation a fragmented heap refuses mid-session while the memory to serve
+    it exists: a rescan that read sources dropped ten of forty-four carts off
+    the Guition S3's shelf as "unreadable" (2026-09-08).
+
+    One field is the shelf's, and lives until the shelf takes the entry:
+    `icon_rows`, the rows of the sprite sheet the cart's launcher icon is cut
+    from (`moy_store_base.icon_rows`; None for no sheet or no art), read a
+    piece at a time and only as far as the icon needs. `CartManager.slim`
+    bakes the icon from it and drops it."""
+    return _load(path, False)
+
+
+def load(path):
+    """Load one .moy folder WHOLE into a cart dict, or None on error -- its
+    `entry` and every one of its PAYLOADS. What opening a cart reads, and what
+    the shelf's rehydrate merges into the entry it holds.
 
     A corrupt cart (bad manifest.json, missing main.py, or anything else
     unexpected) returns None instead of throwing, so one broken folder can never
@@ -565,6 +595,10 @@ def load(path, src=True):
     live objects (SpriteSheet / TileMap / the 512-byte flag table) are built
     from them by `Project`. An absent `flags.moyflags` is `None` here and
     all-zero there, which is SPEC.md 3.5's own reading of a missing file."""
+    return _load(path, True)
+
+
+def _load(path, whole):
     try:
         broken = ""
         try:
@@ -610,12 +644,13 @@ def load(path, src=True):
                 if _exists(path + "/" + alt):
                     mainf = alt
                     break
-        if src and compiled:
+        src = None
+        if whole and compiled:
             if not _exists(path + "/" + mainf) and not broken:
                 print("Moybyte cart main missing:", path)
                 return None
             src = ""            # a module has no text; `src/` below is the code
-        elif src:
+        elif whole:
             try:
                 src = _read_main(path, mainf)
             except OSError as exc:
@@ -626,8 +661,6 @@ def load(path, src=True):
         elif not broken and not _exists(path + "/" + mainf):
             print("Moybyte cart main missing:", path)
             return None
-        else:
-            src = None          # not read: the cart carries no "src" key
         # THE CART'S OTHER SCRIPTS (SPEC.md 4). `sources` is the whole load
         # order with `main` among them; absent it is [main], which is every
         # cart that is not a PICO-8 port. Split at main because that is how the
@@ -642,13 +675,12 @@ def load(path, src=True):
         # captures (__p8_gff, __music_map, __p8_map_raw, __p8_sheet) sit beside
         # the data tables IN THAT FILE, which is why the cut is there.
         #
-        # Read on the same terms as `src` -- the #66 live-set diet drops them
-        # together on a slim scan.
+        # Read on the same terms as `src`: a catalogue entry carries neither.
         before = []
         after = []
-        if src is not None and compiled:
+        if whole and compiled:
             after = _compiled_sources(path)
-        elif src is not None:
+        elif whole:
             names = man.get("sources") or ()
             if names and mainf not in names:
                 # SPEC.md 4 requires it. Running main last (which is where an
@@ -678,27 +710,10 @@ def load(path, src=True):
         except (OSError, ValueError):
             pass
         try:
-            sprites = _read(path + "/sprites.moygfx")   # PICO-8 __gfx__-style hex, optional
-        except OSError:
-            sprites = None
-        try:
-            sounds = json.loads(_read(path + "/sounds.json"))  # AudioBank, optional (#16)
-        except (OSError, ValueError):
-            sounds = None
-        try:
-            tilemap = _read(path + "/map.moymap")   # TileMap blob (#32), optional
-        except OSError:
-            tilemap = None
-        try:
             flags = _read(path + "/" + FLAGS_NAME)  # tile flags (SPEC.md 3.5), optional
         except OSError:
             flags = None
-        try:
-            blocks = json.loads(_read(path + "/blocks.json"))  # block source (#29), optional
-        except (OSError, ValueError):
-            blocks = None
-        images = load_images(path)                # paint-image assets (#63), {} if none
-        scenes = load_scenes(path)                # scene assets (#85), {} if none
+        icon = _normalize_icon(man.get("icon"))
         cart = {
             "path": path,
             "title": man.get("title", "cart"),
@@ -736,12 +751,6 @@ def load(path, src=True):
             # vocabulary; makes the block editor read-only. Default False (absent =
             # not graduated). Un-set only through the undo journal (the grad rider).
             "graduated": bool(man.get("graduated", False)),
-            "src": src,
-            # SPEC.md 4's other scripts, as (filename, text) in load order.
-            # Empty lists, never None, for a cart that has none -- the tiers
-            # iterate them unconditionally.
-            "src_before": before,
-            "src_after": after,
             # The cart's LOGIC rate (#217): the Player ticks a GAME at 60 only
             # when its manifest says so, else at the 30 SPEC.md 5 guarantees.
             # Spec carts default to that tick explicitly.
@@ -755,7 +764,7 @@ def load(path, src=True):
             # The sheet tiles a launcher shows this cart by (SPEC.md 3.4):
             # (tile, w, h) or None to let the host choose. A POINTER into art the
             # cart already has -- no image, no codec, no reserved tiles.
-            "icon": _normalize_icon(man.get("icon")),
+            "icon": icon,
             "cfg": cfg,
             "edit": man.get("edit", []),
             # Manifest capability permissions (#38): a cart only gets a gated API
@@ -771,54 +780,120 @@ def load(path, src=True):
             # the 320x240 default, or the raw out-of-set value Player.start
             # refuses by name -- see _normalize_canvas above.
             "canvas": _normalize_canvas(man.get("canvas")),
-            "sprites": sprites,
-            "sounds": sounds,
-            "map": tilemap,
             # Tile flags (SPEC.md 3.5): the flags.moyflags text, or None when the
             # cart has no such file -- carried in the SERIALISED form like
             # sprites/map, and turned into the live 512-byte table by
             # Project._build_flags (absent -> all zero, which is what the spec
             # says an absent file means).
             "flags": flags,
-            # Block source (#29): the program tree a cart was authored from in the
-            # block editor, or None for a code-authored cart. main.py stays the
-            # runnable source either way; blocks.json is the editable origin.
-            "blocks": blocks,
-            # Paint-image assets (#63 Fold 3): {name: .moyimg text} from images/, or {}.
-            # A cart references one via the api's image(name) accessor and places it
-            # with spr(img, x, y) -- a big MOY64 index bitmap (a painted background).
-            "images": images,
-            # Scene assets (#85 Variant A): {name: .moyscene text} from scenes/, or {}.
-            # The manifest's assets.scenes is the ordered set (element 0 = default
-            # active); Project builds a widgets.Scenes the cart reads via scene()/
-            # load_scene() in _init. scene_names is that order (files not in the
-            # manifest are appended sorted, so a hand-added scene still loads).
-            "scenes": scenes,
-            "scene_names": scene_names(man, scenes),
         }
         if broken:
             # Set ONLY on a cart whose manifest would not parse, so every reader
             # is a `.get` and a repaired cart simply stops carrying the key.
             cart["broken"] = broken
-        if src is None:
-            del cart["src"]     # absent, never "": the open path reads absent as slim
+        if not whole:
+            # The scene ORDER from the folder's listing; no scene is read.
+            cart["scene_names"] = scene_names(man, _scene_files(path))
+            cart["icon_rows"] = _sheet_icon(path, icon)
+            return cart
+        cart["src"] = src
+        # SPEC.md 4's other scripts, as (filename, text) in load order. Empty
+        # lists, never None, for a cart that has none -- the tiers iterate them
+        # unconditionally.
+        cart["src_before"] = before
+        cart["src_after"] = after
+        try:
+            # PICO-8 __gfx__-style hex, optional
+            cart["sprites"] = _read(path + "/" + SPRITES_NAME)
+        except OSError:
+            cart["sprites"] = None
+        try:
+            # AudioBank, optional (#16)
+            cart["sounds"] = json.loads(_read(path + "/sounds.json"))
+        except (OSError, ValueError):
+            cart["sounds"] = None
+        try:
+            cart["map"] = _read(path + "/map.moymap")   # TileMap blob (#32), optional
+        except OSError:
+            cart["map"] = None
+        try:
+            # Block source (#29): the program tree a cart was authored from in
+            # the block editor, or None for a code-authored cart. main.py stays
+            # the runnable source either way; blocks.json is the editable origin.
+            cart["blocks"] = json.loads(_read(path + "/blocks.json"))
+        except (OSError, ValueError):
+            cart["blocks"] = None
+        # Paint-image assets (#63 Fold 3): {name: .moyimg text} from images/, or
+        # {}. A cart references one via the api's image(name) accessor and places
+        # it with spr(img, x, y) -- a big MOY64 index bitmap (a painted background).
+        cart["images"] = load_images(path)
+        # Scene assets (#85 Variant A): {name: .moyscene text} from scenes/, or
+        # {}. The manifest's assets.scenes is the ordered set (element 0 =
+        # default active); Project builds a widgets.Scenes the cart reads via
+        # scene()/load_scene() in _init. scene_names is that order (files not in
+        # the manifest are appended sorted, so a hand-added scene still loads).
+        scenes = load_scenes(path)
+        cart["scenes"] = scenes
+        cart["scene_names"] = scene_names(man, scenes)
         return cart
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
         print("Moybyte cart unreadable:", path, exc)
         return None
 
 
-def scan(root=CARTS_DIR, src=True):
-    """All carts found under root, sorted by folder name. Corrupt carts are
-    skipped (load() returns None), and any per-entry surprise is swallowed so a
-    single bad folder can't break the launcher.
+def _scene_files(path):
+    """A cart's scene names as `scene_names` reads them, from its scenes/
+    listing alone: no scene file is opened."""
+    try:
+        names = os.listdir(path + "/" + SCENES_DIR)
+    except OSError:
+        return {}
+    return {n[:-len(SCENE_EXT)]: None for n in names if n.endswith(SCENE_EXT)}
+
+
+def _pieces(f, size=1024):
+    """The lines of an open text file, read `size` characters at a time, so a
+    reader that stops early never holds the rest of the file."""
+    tail = ""
+    while True:
+        piece = f.read(size)
+        if not piece:
+            break
+        lines = (tail + piece).split("\n")
+        tail = lines.pop()
+        for line in lines:
+            yield line
+    if tail:
+        yield tail
+
+
+def _sheet_icon(path, icon):
+    """The rows of the cart at `path`'s sprite sheet its launcher icon is cut
+    from (`icon_rows`), read off the top of the file -- or None when it has no
+    sheet, no art on it, or a sheet that will not read as text."""
+    try:
+        f = open(path + "/" + SPRITES_NAME)
+    except OSError:
+        return None
+    try:
+        n, tw, th = icon or (0, 1, 1)
+        return icon_rows(_pieces(f), n, tw, th)
+    except (OSError, ValueError):
+        return None
+    finally:
+        f.close()
+
+
+def _each(root, read):
+    """`read(folder)` for every cart folder under root, sorted by name, the
+    folders it refuses (None) left out and any per-folder surprise swallowed,
+    so a single bad folder can't break the launcher.
 
     A cart is a FOLDER. A `.moy` FILE beside them is an archive -- how a cart
     travels, not how it is stored -- and is skipped silently: unpacking belongs
     to whatever brought it here, because a cart in an archive can't be edited,
-    can't take an autosave commit, and can't hold its own undo journal or saves.
-    (Before this, a `.moy` file was handed to load(), which opened it as a
-    directory, failed, and reported it as a CORRUPT CART.)"""
+    can't take an autosave commit, and can't hold its own undo journal or
+    saves."""
     carts = []
     try:
         names = sorted(os.listdir(root))
@@ -827,13 +902,26 @@ def scan(root=CARTS_DIR, src=True):
     for name in names:
         if name.endswith(".moy") and _is_dir(root + "/" + name):
             try:
-                c = load(root + "/" + name, src)
-            except Exception as exc:  # noqa: BLE001  -- belt-and-braces over load()
+                c = read(root + "/" + name)
+            except Exception as exc:  # noqa: BLE001  -- belt-and-braces over _load()
                 print("Moybyte cart scan skipped:", name, exc)
                 c = None
             if c:
                 carts.append(c)
     return carts
+
+
+def catalogue(root=CARTS_DIR):
+    """The shelf: every cart folder's `entry` under root, sorted by folder
+    name. What a boot, a rescan and every roster change read."""
+    return _each(root, entry)
+
+
+def scan(root=CARTS_DIR):
+    """Every cart under root, loaded WHOLE, sorted by folder name -- for a
+    caller that wants every cart's payloads (a host tool, a test); the shelf
+    reads the `catalogue`."""
+    return _each(root, load)
 
 
 def save_config(cart):
@@ -1114,7 +1202,7 @@ def save_code(cart, src, force=False, name=None):
 def save_sprites(cart, hex_text):
     """Persist the sprite sheet (PICO-8 __gfx__-style hex) to sprites.moygfx,
     atomically so an interrupted write can't truncate the real file."""
-    _write_atomic(cart["path"] + "/sprites.moygfx", hex_text)
+    _write_atomic(cart["path"] + "/" + SPRITES_NAME, hex_text)
     cart["sprites"] = hex_text
 
 

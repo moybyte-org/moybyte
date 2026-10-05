@@ -272,7 +272,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # worker's idle collect still lands them on quiet frames.
     import gc
     gc.threshold(4 * 1024 * 1024)
-    carts = moy_carts.scan(carts_root)
+    carts = moy_carts.catalogue(carts_root)
     if windowed:
         # The system canvas is never smaller than the 320x240 game canvas it
         # composites in as a viewport (host_app.build_workstation clamps the
@@ -568,7 +568,7 @@ def _rescan():
     `apply` also keeps the old shelf when a scan comes back empty rather than
     blanking it, which is its deliberate failure direction and now this one's."""
     ws = _S["ws"]
-    ws.carts.apply(moy_carts.scan(_S["root"]))
+    ws.carts.apply(moy_carts.catalogue(_S["root"]))
     ws._dirty = True
 
 

@@ -123,8 +123,8 @@ class FakeStore:
     def embedded_floor(self, seed):
         return [dict(c) for c in seed]
 
-    def scan(self, root, src=True):
-        self.calls.append(("scan", root, src))
+    def catalogue(self, root):
+        self.calls.append(("catalogue", root))
         return list(self.carts)
 
 
@@ -257,7 +257,7 @@ def test_the_carts_load_through_the_boards_storage_session(capsys):
 
     assert (len(carts), root) == (2, store.CARTS_DIR)
     assert opened == ["in", "out"]
-    assert [c[0] for c in store.calls] == ["ensure_dirs", "seed_builtins", "scan"]
+    assert [c[0] for c in store.calls] == ["ensure_dirs", "seed_builtins", "catalogue"]
     assert "Moybyte loaded 2 carts from SD" in capsys.readouterr().out
 
 

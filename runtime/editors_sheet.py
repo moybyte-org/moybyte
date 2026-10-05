@@ -2,10 +2,17 @@
 re-exports them): _SheetSprite (the blittable view), SpriteSheet (8x8 tile
 sheet + PICO-8 __gfx__-style hex, #4 storage), IconSheet (16x16 tiles -- the
 editable top-bar icon theme), TileMap (grid of tile ids + map.moymap hex,
-#32 storage). Pure logic, dependency-free (binascii aside -- every target
-ships it, and it is what keeps the hex codecs off the interpreter)."""
+#32 storage). Pure logic over two imports: binascii (every target ships it,
+and it is what keeps the hex codecs off the interpreter) and
+moy_store_base's `icon_rows` (the rows of a sheet an icon is cut from, which
+the shelf's scan reads straight off the card)."""
 
 from binascii import hexlify as _hexlify
+
+try:
+    from moy_store_base import icon_rows
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import icon_rows
 
 
 # moy SPEC.md 3.2 fixes a CART sheet at 128 x 256 pixels -- 16 cols x 32 rows of
@@ -34,13 +41,10 @@ SHEET_W = SHEET_COLS * 8          # 128 px
 SHEET_H = SHEET_ROWS * 8          # 256 px
 
 # A .moygfx blob is one hex NIBBLE per pixel, and the only hex primitive either
-# VM implements in C (`bytes.fromhex`) hands back a BYTE per pair -- so these two
-# tables are what let a sheet be decoded by C instead of by the interpreter.
-# _NIBBLES splits a packed byte back into its two pixels; _INK is the hex digits
-# meaning "this pixel has colour", so `set(line) & _INK` answers is_blank()'s
-# question about a whole line in one C-level pass, decoding nothing.
+# VM implements in C (`bytes.fromhex`) hands back a BYTE per pair -- so this
+# table is what lets a sheet be decoded by C instead of by the interpreter:
+# _NIBBLES splits a packed byte back into its two pixels.
 _NIBBLES = [bytes((_b >> 4, _b & 15)) for _b in range(256)]
-_INK = set("123456789abcdefABCDEF")
 # `_hexlify` (imported at the top) is the ENCODE half of the same bargain, and
 # `to_hex` below packs pixel pairs back into bytes so it can run: the blob's two
 # nibbles per byte are exactly what hex text is, on both sides.
@@ -341,50 +345,29 @@ class SpriteSheet:
         """The launcher's grid icon for sprite `n` out of a .moygfx blob: the
         same blittable `from_hex(text).tile_image(n)` returns (or
         `tile_span_image(n, tw, th)` for a multi-tile icon), and None when the
-        sheet carries no art at all -- but WITHOUT materialising the sheet, which
-        `CartManager.slim` would otherwise do once per cart at every boot.
+        sheet carries no art at all -- but WITHOUT materialising the sheet.
         Only the icon's own rows are decoded; every other line is read by one
-        `set` intersection, all `is_blank()` ever asked of it.
+        `set` intersection, all `is_blank()` ever asked of it
+        (`moy_store_base.icon_rows`, which says where the read stops).
 
         The `n` out of range -> tile 0 fallback is SPEC.md 3.4's: an icon naming
         tiles this cart's sheet lacks is the host's choice.
         """
         if not text:
             return None
-        tile = cls.TILE
-        w, h = cols * tile, rows * tile
-        if n < 0 or n >= cols * rows:
-            n, tw, th = 0, 1, 1
-        if tw < 1:
-            tw = 1
-        if th < 1:
-            th = 1
-        ox, oy = (n % cols) * tile, (n // cols) * tile
-        # Clamp the span to what fits to the right of / below the start tile,
-        # exactly as tile_span_image does.
-        tw = min(tw, (w - ox) // tile)
-        th = min(th, (h - oy) // tile)
-        pw, ph = tw * tile, th * tile
-        want = [None] * ph
-        ink = False
-        y = 0
-        for line in text.split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            if y >= h:
-                break
-            if not ink and (set(line[:w]) & _INK):
-                ink = True
-            if oy <= y < oy + ph:
-                want[y - oy] = line[ox:ox + pw]
-            y += 1
-            # Both questions answered -- art found, icon rows in hand -- so the
-            # rest of the blob is never touched.
-            if ink and y >= oy + ph:
-                break
-        if not ink:
+        return cls.icon_from_rows(
+            icon_rows(text.split("\n"), n, tw, th, cols, rows, cls.TILE),
+            transparent)
+
+    @staticmethod
+    def icon_from_rows(art, transparent=-1):
+        """The icon `icon_rows` cut out of a sheet -- `(pw, ph, want)`, or
+        None for a sheet with no art -- as a blittable. A catalogue entry
+        carries exactly this for its cart (`moy_carts.entry`), so the shelf
+        bakes its icons without the sheet ever being read whole."""
+        if art is None:
             return None            # no art anywhere: the card draws its glyph
+        pw, ph, want = art
         pix = []
         for row in want:
             if row:

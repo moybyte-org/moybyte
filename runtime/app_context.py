@@ -553,7 +553,7 @@ class _RawCarts:
                                            type=type)
 
     def scan(self):
-        return self.__ws.carts_store.scan(self.__ws.carts_root)
+        return self.__ws.carts_store.catalogue(self.__ws.carts_root)
 
     def load_deck(self, cart):
         return self.__ws.carts_store.load_deck(cart)

@@ -134,12 +134,10 @@ def push_cart(board, cart_dir, name, log=print):
         log("    %-16s %d bytes" % (fn, len(blob)))
     # Make the launcher see THIS cart, without rescanning the whole store.
     # `ws.carts.all` is the roster the launcher's items derive from (#209
-    # landing C moved it off the console). A full moy_carts.scan(root) re-loads
-    # every folder on the card -- 25s on the T-Deck, 130s on the Guition's TF
-    # card, and WORSE as a long session fragments the heap (measured 2026-09-03:
-    # a fresh Guition scans in 25s, a day-worn one in 52s). One cart's load is
-    # ~0.1s, so load just the folder we pushed and splice it in: same visible
-    # result, ~600x less time, and no dependence on the heap's state.
+    # landing C moved it off the console). A rescan reads every folder on the
+    # card, seconds on a board and more as a long session fragments the heap,
+    # where one cart's load is ~0.1s: so load just the folder we pushed and
+    # splice it in -- same visible result, and no dependence on the heap's state.
     ok = board.pyexec(
         "import moy_carts\n"
         "_c = moy_carts.load(%r)\n"

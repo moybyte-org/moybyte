@@ -301,7 +301,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     the font scale."""
     carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
-    carts = moy_carts.scan(carts_dir)
+    carts = moy_carts.catalogue(carts_dir)
     sw, sh = sys_size if sys_size else (WIDTH, HEIGHT)
     # The system canvas must be at least the game size -- the game is composited into
     # it as a viewport, so a smaller panel makes no sense (and would letterbox into

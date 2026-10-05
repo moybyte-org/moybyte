@@ -196,8 +196,8 @@ and every `getattr(ws, "…")` name in runtime/device/tools. Facts not to undo:
 - **The frame loop reaches collaborators directly, never through a forward**;
   per-card grid paths use injected BOUND methods.
 - **`_icon_cache` is CoverCache's and invalidates on a rescan**, BEFORE
-  `slim_carts` re-bakes — slimming is the last moment a cart's sprite art exists
-  in RAM.
+  `slim_carts` re-bakes — slimming is the last moment a cart's icon art (the
+  `icon_rows` a catalogue entry carries) exists in RAM.
 - **Serial vocabulary moved with the code**: `p4_conformance` speaks `ws.carts.all`,
   `p4_hitch` wraps `ws.history.idle_tick`, `p4_chrome_freeze`/`p4_scroll_ab` speak
   `ws.look`.

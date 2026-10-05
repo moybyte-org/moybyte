@@ -147,8 +147,8 @@ class _Store:
     def seed_any(self, seed, root, progress=None):
         self.calls.append(("seed", root))
 
-    def scan(self, root, src=True):
-        self.calls.append(("scan", root))
+    def catalogue(self, root):
+        self.calls.append(("catalogue", root))
         return [{"title": "a"}]
 
     def embedded_floor(self, seed):

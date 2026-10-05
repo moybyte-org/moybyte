@@ -39,16 +39,17 @@ handle reads them through `ws` at the moment of use, so there is no wiring-order
 trap to get right.
 """
 
-# The heavy per-cart payloads the launcher list does NOT need (#66 live-set diet):
-# kept resident they are ~300-500KB of permanently-live strings the GC MARK phase
-# pays for on every collect (~0.2ms/KB on device -- most of the 93-161ms pauses).
-# slim() strips them after the icons are cached; opening a cart rehydrates
-# from the store, and switching carts re-slims the previous one.
-# "src_before" is the biggest of them on a ported cart (p8.lua is 62KB where
-# src is 38KB) and the least useful resident: nobody reads a generated shim off
-# the shelf.
-_HEAVY_CART_KEYS = ("src", "src_before", "src_after", "sprites", "sounds",
-                    "map", "images", "blocks", "scenes")
+# The shelf holds each cart as the store's catalogue entry (`moy_carts.entry`):
+# none of the cart's PAYLOADS -- its scripts and assets, kept resident they are
+# ~300-500KB of permanently-live strings the GC MARK phase pays for on every
+# collect (#66 live-set diet). Opening a cart rehydrates them from the store,
+# and switching carts re-slims the previous one. "icon_rows" is what the scan
+# read for the cart's icon, dropped once slim() has baked it.
+try:
+    from moy_carts import PAYLOADS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_carts import PAYLOADS
+_SLIM_DROPS = PAYLOADS + ("icon_rows",)
 
 
 class CartManager:
@@ -95,13 +96,14 @@ class CartManager:
             # Cover bitmaps, parsed sources, the cover-less set AND the icon
             # cache: a re-scan may carry new or changed art and may take a cart
             # away entirely. BEFORE slim(), and that order is load-bearing:
-            # slim() bakes each cart's icon and then DELETES its sprite art,
-            # so it is the last moment the art exists in RAM -- clearing after it
-            # would leave a slimmed cart with no icon and nothing to rebuild one
-            # from, and clearing nothing (what this did before #209 landing C)
-            # let slim()'s bake hit the STALE entry and make it permanent.
+            # slim() bakes each cart's icon and then DELETES the rows it baked
+            # from, so it is the last moment the art exists in RAM -- clearing
+            # after it would leave a slimmed cart with no icon and nothing to
+            # rebuild one from, and clearing nothing (what this did before #209
+            # landing C) let slim()'s bake hit the STALE entry and make it
+            # permanent.
             ws.covers.invalidate_all()
-            self.slim()                    # #66: a rescan reloads FULL carts -- re-slim
+            self.slim()                    # #66: bake the new entries' icons, mark them lazy
             ws.launcher.set_items(ws._launcher_view_items())   # #105: keep an active filter
             ws.picker.set_items(ws._picker_items(items))
 
@@ -116,12 +118,12 @@ class CartManager:
         if not self.store.ready():
             return
         ws = self.ws
-        # src=False on every scan here: the shelf is slimmed straight after, the
-        # source comes back at open, and reading it mid-session is the one
-        # allocation a fragmented heap refuses (see moy_carts.load).
+        # The catalogue on every scan here: the payloads come back at open, and
+        # reading them mid-session is the allocation a fragmented heap refuses
+        # (see moy_carts.entry).
         try:
             self.apply(self.store.call(
-                lambda: ws.carts_store.scan(ws.carts_root, src=False)))
+                lambda: ws.carts_store.catalogue(ws.carts_root)))
         except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
             print("Moybyte rescan failed:", exc)
         ws._dirty = True
@@ -129,12 +131,14 @@ class CartManager:
     # -- the #66 live-set diet -----------------------------------------------
 
     def slim(self):
-        """The #66 live-set diet: after the backend wires the cart store, drop every
-        SD-backed cart's heavy payloads (source/sprites/sounds/map/images/blocks)
-        from the scanned list -- the launcher only needs metadata + the icon, which
-        is baked into the icon cache here first. Cuts the permanently-live heap by
-        ~300-500KB, which is most of a GC collect's mark cost (~0.2ms/KB on device).
-        Embedded carts (no path / no store) stay fat -- they cannot be reloaded."""
+        """The #66 live-set diet, run once the backend wires the cart store:
+        every SD-backed cart on the shelf becomes a catalogue entry marked
+        `lazy`. Its grid icon is baked into the icon cache first -- from the
+        `icon_rows` a catalogue scan read, or from the sprite sheet of a cart
+        that arrived whole -- and then its PAYLOADS and the rows go. Keeping
+        them resident would cost ~300-500KB of live heap, most of a GC
+        collect's mark cost (~0.2ms/KB on device). Embedded carts (no path /
+        no store) stay fat -- they cannot be reloaded."""
         ws = self.ws
         if ws.carts_store is None:
             return
@@ -145,7 +149,7 @@ class CartManager:
                 ws.covers.sheet_icon(cart)   # bake the grid icon while the art is here
             except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
                 pass
-            for k in _HEAVY_CART_KEYS:
+            for k in _SLIM_DROPS:
                 if k in cart:
                     del cart[k]
             cart["lazy"] = True
@@ -200,7 +204,7 @@ class CartManager:
         # most ~one fat cart live). Only SD-backed carts that slim() managed.
         if cart is None or not cart.get("path") or cart.get("lazy") is not False:
             return
-        for k in _HEAVY_CART_KEYS:
+        for k in PAYLOADS:
             if k in cart:
                 del cart[k]
         cart["lazy"] = True
@@ -226,7 +230,7 @@ class CartManager:
         try:
             new, items = self.store.call(lambda: (
                 ws.carts_store.new_from_template(ws.carts_root),
-                ws.carts_store.scan(ws.carts_root, src=False)))
+                ws.carts_store.catalogue(ws.carts_root)))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte new cart failed:", exc)
             self._say_if_full(exc, "CAN'T MAKE")
@@ -246,7 +250,7 @@ class CartManager:
         try:
             self.apply(self.store.call(lambda: (
                 ws.carts_store.duplicate(sel, ws.carts_root),
-                ws.carts_store.scan(ws.carts_root, src=False))[1]))
+                ws.carts_store.catalogue(ws.carts_root))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte duplicate failed:", exc)
             self._say_if_full(exc, "CAN'T COPY")
@@ -274,7 +278,7 @@ class CartManager:
         try:
             self.apply(self.store.call(lambda: (
                 ws.carts_store.delete(target),
-                ws.carts_store.scan(ws.carts_root, src=False))[1]))
+                ws.carts_store.catalogue(ws.carts_root))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
 

@@ -277,7 +277,7 @@ def _sz(v, d=0):
 _gc.collect()
 _a0 = _gc.mem_alloc()
 _t0 = _t.ticks_ms()
-_r = ws._with_sd(lambda: _mc.scan(str(ws.carts_root), src=False))
+_r = ws._with_sd(lambda: _mc.catalogue(str(ws.carts_root)))
 _dt = _t.ticks_diff(_t.ticks_ms(), _t0)
 _gc.collect()
 _a1 = _gc.mem_alloc()
@@ -294,7 +294,7 @@ _r = _per = _keys = None
 
 def scan(b):
     """The shelf's scan run again on the live console, its result held: the
-    live bytes the full catalogue costs (what the boot holds before
+    live bytes the catalogue costs (what the boot holds before
     `carts.slim()`), its time, the heaviest carts and fields by string
     bytes, and the string bytes the slimmed catalogue keeps."""
     run(b, SCAN, timeout=180)

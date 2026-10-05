@@ -68,7 +68,7 @@ each):
   * doc:   save_file('docs', name, "<text>") -- a document is plain Markdown
            (files/docs/<name>.md), so the file's text IS the page's text.
   * cart:  carts_store.create(title, root, src=...) then
-           ws.carts.apply(store.scan(root)).
+           ws.carts.apply(store.catalogue(root)).
   * There is no load_code(path); reading a cart's source goes through load(path).
 
 STRUCTURAL NOTE (content-independent): the Editor tabs and the Desk Lab apps share

@@ -248,7 +248,7 @@ class DeviceBoot:
                 store.ensure_dirs(root)
                 store.seed_any(seed, root, progress=self.seed_progress)
                 sram_census("seeded")
-                return store.scan(root, src=False)   # the shelf; the source at open
+                return store.catalogue(root)   # the shelf; a cart's payloads at open
 
             carts = _seed_and_scan() if session is None else session(_seed_and_scan)
             if carts:

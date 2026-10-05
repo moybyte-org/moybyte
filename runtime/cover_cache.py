@@ -397,7 +397,9 @@ class CoverCache:
     def sheet_icon(self, cart):
         """The icon out of the cart's SPRITE SHEET, cached per cart path so the
         grid doesn't rebuild a sheet every frame -- and baked by
-        `CartManager.slim` while the sheet is still in RAM.
+        `CartManager.slim` while the art is still in RAM: the `icon_rows` a
+        catalogue entry carries (`moy_carts.entry`), or the sheet of a cart
+        that arrived whole.
 
         The tiles come from the manifest's "icon" (SPEC.md 3.4) -- [tile, w, h],
         or a bare tile id for 1x1 -- falling back to tile 0. The field has to be
@@ -415,8 +417,11 @@ class CoverCache:
         # test and the SPEC 3.4 out-of-range fallback, so the picture is
         # unchanged -- the shell goldens pin it.
         try:
-            img = SpriteSheet.icon_from_hex(cart.get("sprites"), n, tw, th,
-                                            cols=16, rows=32)
+            if "icon_rows" in cart:
+                img = SpriteSheet.icon_from_rows(cart["icon_rows"])
+            else:
+                img = SpriteSheet.icon_from_hex(cart.get("sprites"), n, tw, th,
+                                                cols=16, rows=32)
         except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
             img = None
         cache[key] = img
@@ -448,14 +453,14 @@ class CoverCache:
         """Drop every desktop icon that CAN be rebuilt, and every icon whose
         cart has gone away. What survives is the one case a blanket clear would
         lose for the rest of the session: a cart still on the shelf that has
-        already been slimmed (#66), whose sprite art is no longer in RAM.
+        already been slimmed (#66), whose icon's art is no longer in RAM.
 
         The predicate is `lazy`, which is exactly the flag `CartManager.slim` sets
         after it bakes an icon and deletes the art -- so "will something re-bake
         this?" and "will this survive the prune?" are answers to the same
         question and cannot drift apart. A slimmed cart's icon also cannot have
-        gone stale: a real edit arrives as a fresh FAT scan, which is the branch
-        that drops."""
+        gone stale: a real edit arrives as a fresh scan, whose entries carry
+        their icon rows and are not yet lazy, which is the branch that drops."""
         keep = {}
         for cart in self.ws.carts.all:
             if not cart.get("lazy"):
