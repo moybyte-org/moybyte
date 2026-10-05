@@ -32,6 +32,12 @@ paths:
   - **A cable flash must erase otadata FIRST**, or a board that has taken an OTA
     writes ota_0 and boots the stale ota_1 — indistinguishable from a flash that
     did nothing. `tools/board_flash.py` does it, from `[flash]` data.
+  - **A cable flash that moves the store must erase its first blocks.** The
+    store is wherever the image's table puts it (a listed `vfs`, else the tail
+    after the last partition); a filesystem does not mount at another offset or
+    size, and `inisetup` formats only a first sector that reads all 0xFF, else
+    "filesystem appears to be corrupted" on every boot. `board_flash.py` reads
+    the board's table first and does this when the store moved.
   - **The rollback confirm fires from the FRAME LOOP**, not the boot path:
     `confirm_when_healthy(ws._frames_drawn)` needs `HEALTHY_PAINTS` frames on the
     glass AND `HEALTHY_LOOPS` iterations survived. Confirming where the desktop is

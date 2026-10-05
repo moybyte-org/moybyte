@@ -18,6 +18,17 @@ no_reset), then write the merged image, so the board leaves the flash running
 the slot just written. A board that has taken an OTA is on ota_1, and skipping
 the erase makes a cable flash into ota_0 look like a flash that did nothing.
 
+THE STORE FOLLOWS THE TABLE. The merged image carries its partition table, and
+the store is wherever that table puts it: a listed `vfs`/`ffat` partition, or
+the tail MicroPython builds from the end of the last partition. A filesystem
+does not mount at another offset or size, and MicroPython's `inisetup` formats
+only a first sector that reads all 0xFF: anything else prints "filesystem
+appears to be corrupted" on every boot and the console never starts. So the
+flash reads the board's table (0x8000) before it writes, and when the image's
+table puts the store somewhere else it erases the new store's first sectors
+too, and says so. Same table, same store: nothing extra is erased and the
+store survives the flash.
+
 `--before` and `--after` come from the toml, because how a board enters and
 leaves the ROM loader is a hardware fact and not a preference. The T-Deck
 declares `before = usb_reset` (measured: default_reset write-times-out against
@@ -36,8 +47,10 @@ survives for the legacy Makefile variants that still name it.
 """
 
 import argparse
+import struct
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +66,77 @@ def _esptool(chip, port, baud, *args):
     cmd += list(args)
     print("+", " ".join(cmd))
     return subprocess.call(cmd)
+
+
+PT_OFFSET = 0x8000   # ESP-IDF's default table offset, which every board here keeps
+PT_SIZE = 0xC00      # the entries; the rest of the sector is the signature area
+_ENTRY = struct.Struct("<2sBBII16sI")   # magic, type, subtype, offset, size, label, flags
+_MAGIC = b"\xaa\x50"
+_TYPE_DATA = 1
+_STORE_LABELS = ("vfs", "ffat")   # the names MicroPython's startup looks for
+STORE_ERASE = 0x2000   # the filesystem's first two blocks: LittleFS's root pair
+
+
+def parse_table(blob):
+    """The (label, type, subtype, offset, size) of each entry of a partition
+    table sector. The entries end at the first one without the magic (the MD5
+    record or erased flash), so a blank sector parses to []."""
+    entries = []
+    for at in range(0, min(len(blob), PT_SIZE) - _ENTRY.size + 1, _ENTRY.size):
+        magic, typ, sub, off, size, label, _flags = _ENTRY.unpack_from(blob, at)
+        if magic != _MAGIC:
+            break
+        entries.append((label.split(b"\0", 1)[0].decode("ascii", "replace"),
+                        typ, sub, off, size))
+    return entries
+
+
+def store_of(entries):
+    """Where a table puts the store, as (offset, size): the listed vfs/ffat
+    data partition, or (end of the last partition, None) for the tail
+    MicroPython builds itself. None for an empty table."""
+    for label, typ, _sub, off, size in entries:
+        if typ == _TYPE_DATA and label in _STORE_LABELS:
+            return (off, size)
+    if not entries:
+        return None
+    return (max(off + size for _l, _t, _s, off, size in entries), None)
+
+
+def moved_store(board_table, image_table):
+    """The (offset, size) the image's table gives the store when the board's
+    table gives it another place, else None."""
+    new = store_of(parse_table(image_table))
+    return new if new and new != store_of(parse_table(board_table)) else None
+
+
+def _describe_store(store):
+    if store is None:
+        return "none"
+    off, size = store
+    return "%#x+%s" % (off, "tail" if size is None else "%#x" % size)
+
+
+def _image_table(image, offset):
+    """The partition table sector inside a merged image written at `offset`,
+    or None when the image does not reach it (an app-only image)."""
+    at = PT_OFFSET - offset
+    if at < 0:
+        return None
+    with open(image, "rb") as f:
+        f.seek(at)
+        blob = f.read(PT_SIZE)
+    return blob if len(blob) == PT_SIZE else None
+
+
+def _read_board_table(chip, port, baud, before):
+    """(esptool's return code, the board's table sector)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "table.bin"
+        args = ["--before", str(before)] if before else []
+        rc = _esptool(chip, port, baud, *args, "--after", "no_reset",
+                      "read_flash", hex(PT_OFFSET), hex(PT_SIZE), str(out))
+        return rc, out.read_bytes() if out.exists() else b""
 
 
 def _verify_identity(board_dir, port):
@@ -109,11 +193,30 @@ def flash(board_dir, port, verify=True):
         sys.exit("no image at %s -- build it first (make firmware-build-...)"
                  % image)
     baud = fl.get("baud")
+    # 0) where the image puts the store, against where the board has it.
+    new_store = None
+    image_table = _image_table(image, int(str(fl["offset"]), 0))
+    if image_table:
+        rc, board_table = _read_board_table(chip, port, baud, fl.get("before"))
+        if rc:
+            return rc
+        new_store = moved_store(board_table, image_table)
+        if new_store:
+            print("!! this image's partition table moves the store (board: %s, "
+                  "image: %s): its first %#x bytes are erased so the console "
+                  "formats a fresh filesystem; the store re-seeds"
+                  % (_describe_store(store_of(parse_table(board_table))),
+                     _describe_store(new_store), STORE_ERASE))
     # 1) otadata erase, FIRST and with no reset after -- see the module
     #    docstring for why the order is load-bearing.
     if fl.get("otadata_offset"):
         rc = _esptool(chip, port, baud, "--after", "no_reset", "erase_region",
                       str(fl["otadata_offset"]), str(fl.get("otadata_size", "0x2000")))
+        if rc:
+            return rc
+    if new_store:
+        rc = _esptool(chip, port, baud, "--after", "no_reset", "erase_region",
+                      hex(new_store[0]), hex(STORE_ERASE))
         if rc:
             return rc
     # 2) the merged image at the board's offset.
