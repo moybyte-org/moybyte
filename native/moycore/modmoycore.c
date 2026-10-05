@@ -3488,6 +3488,21 @@ static mp_obj_t mod_perf_stats(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_perf_stats_obj, mod_perf_stats);
 
+// perf_read() -> (cycles, event): both counters as they stand, 32 bits that
+// wrap, for a caller timing its own window between two reads (the difference
+// masked to 32 bits); None where there is no counter. perf_counters(1, ...)
+// arms them and picks what the second counts.
+static mp_obj_t mod_perf_read(void)
+{
+    uint32_t cyc, evt;
+    if (!pm_alive()) return mp_const_none;
+    pm_read(&cyc, &evt);
+    mp_obj_t t[2] = { mp_obj_new_int_from_uint(cyc),
+                      mp_obj_new_int_from_uint(evt) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_perf_read_obj, mod_perf_read);
+
 static mp_obj_t mod_perf_reset(void)
 {
     g_pm_frames = 0;
@@ -3526,6 +3541,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_perf_counters), MP_ROM_PTR(&mod_perf_counters_obj) },
     { MP_ROM_QSTR(MP_QSTR_perf_stats),  MP_ROM_PTR(&mod_perf_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_perf_reset),  MP_ROM_PTR(&mod_perf_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_perf_read),   MP_ROM_PTR(&mod_perf_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_layer_bind),  MP_ROM_PTR(&mod_layer_bind_obj) },
