@@ -633,7 +633,8 @@ through emcc, and matching rustc to emscripten is fragile where the web runner
 and moy-spec pin emscripten for reproducibility. Two languages in the tree.
 
 **Sprint 1a is the spike, on the smallest store component, and its gate is the
-decision.** Written in Rust and in C, it must:
+decision.** The component is one the 1b carve has already given its native
+interface (§6). Written in Rust and in C, it must:
 
 1. link into all five firmware targets (four consoles and the Zero), the S3s'
    through the forked toolchain;
@@ -662,6 +663,25 @@ sprint 0's baseline. **Every sprint's gate also includes:** internal SRAM free
 and low-water on both S3 boards with WiFi and BLE up (§4.6); each image's
 headroom above a per-board floor set in sprint 0; the semantic traces extended
 before anything crosses.
+
+**Every sprint opens with a carve, in Python, before any native code is
+written** (owner, 2026-10-05):
+
+1. Each module §2.2.1 marks split along this sprint's line is split into files,
+   so the crossing replaces whole files rather than operating inside one.
+2. The components that cross take the interface the native code will expose —
+   handles, not objects (§4.3), the native API's call shapes and errors — and
+   their callers move to it.
+3. The semantic traces and host tests pin that interface.
+
+The crossing then swaps the implementation under unchanged tests and traces. A
+carve changes no behaviour, so it lands on dev on its own with the goldens and
+the on-glass suites untouched, and its iterations are host test runs, not
+firmware builds. It runs one sprint ahead, never further: sprint 5 redesigns the
+roles, and sprints 6 and 7 cross what sprint 5 reshapes. No general clean-up
+precedes the sprints, because each sprint deletes the Python it replaces. The
+1b carve runs before sprint 1a, so the spike writes a component whose
+interface is already defined and pinned, in both languages.
 
 | sprint | moves | gate |
 |---|---|---|
