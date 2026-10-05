@@ -271,6 +271,14 @@ The card is left **mounted** at `/sd` when the smoke returns. That is
 deliberate: `with_sd_live` attaches once and keeps the device resident for the
 session, because tearing it down between ops is what corrupts the bus.
 
+**Card format.** FAT12/16/32 and exFAT both mount: a card over 32GB ships
+exFAT, which an esp32 build without `MICROPY_FATFS_EXFAT` (`mpconfigboard.h`)
+refuses with ENODEV. The card behind `moy_sd` is a block device `vfs.mount`
+hands to FatFS like any other, so the define is the whole of it. The mount is
+`moybyte_sd`'s and not `device/card_store.py`'s (the P4s' and the Guition S3's):
+`card_store.mount` calls `deinit()` on a card whose mount failed, which here
+would be a teardown after the attach.
+
 #### `MODE = "audio"` (stage 5)
 
 A rising four-note phrase, the three starter SFX (coin / jump / thud), five

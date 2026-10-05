@@ -56,6 +56,14 @@
 // the port's own SD support is deliberately NOT enabled.
 #define MICROPY_HW_ENABLE_SDCARD            (0)
 
+// exFAT in FatFS (lib/oofatfs, whose ffconf.h reads this define; ESP32 ports
+// leave it off). It is the filesystem's, not the driver's: the card behind
+// moy_sd is a block device `vfs.mount` hands to FatFS like any other, and a
+// card over 32 GB ships exFAT, which without this define is refused with
+// ENODEV and leaves the console on its flash store. FAT12/16/32 cards mount as
+// before. LFN is already on, which exFAT needs.
+#define MICROPY_FATFS_EXFAT                 (1)
+
 // Audio is a MAX98357 mono I2S amp (BCK 7 / WS 5 / DOUT 6), driven by the
 // `moy_audio` usermod's core-1 feeder task. `machine.I2S` is on because
 // device_audio.py falls back to it when that task cannot be created -- the

@@ -44,8 +44,12 @@ def board():
 # image of the same tree, at the launcher right after boot: (free, largest)
 # internal SRAM. That image is board.toml's moy_wasm `take` turned to `deny`,
 # built from an EMPTY build dir: a configured one keeps the engine in its
-# module table and fails to link.
-WASM_IDLE_BASELINE = (122343, 81920)
+# module table and fails to link. The baseline is less EXFAT_SRAM, what FatFS's
+# exFAT build holds in internal SRAM at the idle desk (2026-10-05, the
+# same image and a fresh boot: 119955 free with it, 120523 without), so the
+# guard keeps measuring the engine's own cost.
+EXFAT_SRAM = 568
+WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 
