@@ -1,0 +1,25 @@
+[package]
+name = "moy_rs_probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+# One source, three artefacts: a staticlib for firmware / wasm / the unix
+# MicroPython build, a cdylib for the host's ctypes, an rlib for `cargo test`
+# and Miri. A cross build selects with `cargo rustc --crate-type staticlib`.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# A deliberate out-of-bounds read through a raw pointer, for the sanitizer and
+# Miri checks only. Never in a library a board links.
+bug = []
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+[profile.dev]
+panic = "abort"
