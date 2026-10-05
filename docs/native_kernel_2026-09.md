@@ -595,7 +595,7 @@ finalisers close files, sockets, I2S and SD; the `moy_alloc` registry freed; the
 native-code arena freed; `mp_deinit`; the root section zeroed; the first area
 freed; `mp_main_task_handle` handed to the kernel's task; the VM's task deleted.
 
-**Embed, not fork (sprint 0, 2026-10-05; the owner's to confirm).** MicroPython
+**Embed, not fork (owner, 2026-10-05).** MicroPython
 becomes a service the kernel starts and stops on a task of its own, inside the
 esp32 port's build: the port's `MICROPY_ESP_IDF_ENTRY` override
 (`mpconfigport.h`) renames its `app_main`, the kernel's entry runs instead, and
@@ -848,17 +848,17 @@ makes it false, not annotated:
 ## 10. Open questions (bounded)
 
 1. **The return budget.** Nothing reboots, but exit-to-launcher means starting a
-   VM and rebuilding a Python launcher. How long may it take? The owner sets it
-   from sprint 0's first figure (owner, 2026-09-27); sprint 4 measures against it
-   and decides the launcher (§3).
-2. **Embed or fork the port's `main.c`** for an in-process VM stop. Sprint 0's
-   inventory answers embed; the case is §4.4's, and it is the owner's to
-   confirm.
+   VM and rebuilding a Python launcher. How long may it take? The owner leans to
+   a native launcher and sets the budget when sprint 4 can measure a Python
+   launcher's return against it (owner, 2026-10-05); sprint 0's figures are
+   #224's.
+2. **Embed or fork the port's `main.c`** for an in-process VM stop. Embed (owner,
+   2026-10-05): §4.4 has the case, #224 the spike's runs of both and their
+   MicroPython v1.29.0 rehearsal.
 3. **The Lua superset rulings**, name by name (§2.3). Sprint 4.
-4. **`_LAYER_POOL`.** Answered only if sprint 0's census names it as the
-   T-Deck's retained memory (owner, 2026-09-27): then the owner decides whether
-   its retention is fixed on its own or waits for sprint 3, where the pool
-   becomes kernel-owned.
+4. **`_LAYER_POOL`.** Sprint 0's census names it as most of the T-Deck's
+   retained memory; its retention waits for sprint 3, where the pool becomes
+   kernel-owned (owner, 2026-10-05).
 5. **The desk.** Whether the P4 ever stops its VM with apps open.
 6. **Text.** One text path for every app runtime; a fixed 8×8 font will not be
    enough for wasm apps (#158's e-reader case). Sprint 6.
