@@ -7,6 +7,7 @@ ConsoleDriver: mouse == touch, arrows == trackball), so these assert host==devic
 behavior. The IconSheet/storage tests poke the cores directly."""
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -914,7 +915,7 @@ def _open_edit_cart(ws):
     if os.path.exists(dst):
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
-    ws.launcher.items = host_app.moy_carts.scan(ws.carts_root)
+    ws.launcher.items = shelf(ws.carts_root)
     ws.launcher.sel = [i for i, c in enumerate(ws.launcher.items)
                        if "star_catcher" in c["path"]][0]
 

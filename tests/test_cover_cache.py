@@ -31,6 +31,7 @@ order assertion itself, not a proxy for one.
 """
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -233,7 +234,7 @@ def test_a_rescan_rebuilds_the_icon_from_the_new_art(tmp_path):
 
     stored = next(c for c in moy_carts.scan(root) if c["title"] == "Iconic")
     moy_carts.save_sprites(stored, _tile0("e"))      # repaint the icon's tile
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
 
     fresh = next(c for c in ws.carts.all if c["title"] == "Iconic")
     after = _icon_pixels(ws.covers.icon_sheet_for(fresh))
@@ -256,7 +257,7 @@ def test_a_deleted_carts_icon_does_not_outlive_it(tmp_path):
     assert key in ws.covers.icons
 
     moy_carts.delete(cart)
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
 
     assert key not in ws.covers.icons
 
@@ -291,7 +292,7 @@ def test_gen_bumps_on_a_build_a_diet_release_and_a_rescan(tmp_path):
     after_diet = covers.gen
     assert after_diet > after_build
 
-    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))   # invalidate_all
+    ws.carts.apply(shelf(str(tmp_path / "carts")))   # invalidate_all
     assert covers.gen > after_diet
 
 
@@ -418,7 +419,7 @@ def test_the_diet_release_keeps_the_newest_entries_of_both_lrus(tmp_path):
     covers = ws.covers
     keep = cover_cache._COVER_DIET_KEEP
     carts = [_mk_cart(tmp_path, "Cover%d" % i, i + 1) for i in range(keep + 3)]
-    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))
+    ws.carts.apply(shelf(str(tmp_path / "carts")))
     live = {c["path"]: c for c in ws.carts.all}
     order = [live[c["path"]] for c in carts]
     for cart in order:
@@ -489,7 +490,7 @@ def test_a_rescan_forgets_that_a_cart_had_no_cover(tmp_path):
 
     stored = next(c for c in moy_carts.scan(root) if c["path"] == bare["path"])
     moy_carts.save_cover(stored, cover_bytes(7))
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     assert ws.covers._none == {}
 
     fresh = next(c for c in ws.carts.all if c["path"] == bare["path"])

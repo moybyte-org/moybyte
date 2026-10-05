@@ -28,6 +28,8 @@ already draw that -- but four things a whole-screen hash cannot see:
 import ast
 import inspect
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
+from runtime import moy_catalogue  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -64,7 +66,7 @@ def test_apply_rebinds_the_list_so_a_captured_reference_goes_stale(tmp_path):
     root = str(ws.carts_root)
     captured = ws.carts.all
     _mk(root, "Latecomer")
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     assert ws.carts.all is not captured
     assert "Latecomer" in [c["title"] for c in ws.carts.all]
     assert "Latecomer" not in [c["title"] for c in captured]
@@ -93,7 +95,7 @@ def test_apply_invalidates_covers_before_slimming_and_re_derives_both_grids(tmp_
     ws.launcher.set_items = lambda items: order.append(("launcher", len(items)))
     ws.picker.set_items = lambda items: order.append(("picker", len(items)))
 
-    ws.carts.apply(moy_carts.scan(str(ws.carts_root)))
+    ws.carts.apply(shelf(str(ws.carts_root)))
     assert order[0] == "invalidate"
     assert order[1] == "slim"
     assert [o[0] for o in order[2:]] == ["launcher", "picker"]
@@ -103,7 +105,7 @@ def test_the_grids_follow_a_create_through_apply(tmp_path):
     ws = build_ws(tmp_path)
     root = str(ws.carts_root)
     _mk(root, "Freshly")
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     assert "Freshly" in _titles(ws.launcher)
     assert "Freshly" in _titles(ws.picker)
 
@@ -132,17 +134,14 @@ def test_rescan_is_a_no_op_with_no_store_wired(tmp_path):
     assert ws.carts.all is before
 
 
-def test_rescan_keeps_the_old_shelf_when_the_scan_raises(tmp_path):
+def test_rescan_keeps_the_old_shelf_when_the_scan_raises(tmp_path, monkeypatch):
     ws = build_ws(tmp_path)
     before = ws.carts.all
 
-    class _Boom:
-        def __getattr__(self, name):
-            def _raise(*a, **kw):
-                raise OSError("card gone")
-            return _raise
+    def _raise(*a, **kw):
+        raise OSError("card gone")
 
-    ws.carts_store = _Boom()
+    monkeypatch.setattr(moy_catalogue, "catalogue", _raise)
     ws.carts.rescan()
     assert ws.carts.all is before
 
@@ -190,7 +189,7 @@ def test_a_read_only_store_refuses_every_write_verb(tmp_path):
     never a crash and never a partial create."""
     ws = build_ws(tmp_path)
     _mk(str(ws.carts_root), "Second")
-    ws.carts.apply(moy_carts.scan(str(ws.carts_root)))
+    ws.carts.apply(shelf(str(ws.carts_root)))
     ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
                          if it.get("title") == "Second")
     before = list(ws.carts.all)
@@ -344,7 +343,7 @@ def test_delete_prefers_the_open_cart_over_the_pickers_selection(tmp_path):
     root = str(ws.carts_root)
     _mk(root, "Opened")
     _mk(root, "Selected")
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     opened = next(c for c in ws.carts.all if c["title"] == "Opened")
     ws._open_workspace(opened)
     ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
@@ -389,7 +388,7 @@ def test_slim_bakes_the_grid_icon_while_the_art_is_still_in_ram(tmp_path):
     `slim` skips a cart that is already `lazy` -- that skip is the reason the
     icon prune keeps exactly the slimmed entries (test_cover_cache owns it)."""
     ws = build_ws(tmp_path)
-    ws.carts.all = moy_carts.scan(str(ws.carts_root))     # fat again
+    ws.carts.all = shelf(str(ws.carts_root))     # fat again
     assert not any(c.get("lazy") for c in ws.carts.all)
     drawn = [c for c in ws.carts.all if c.get("sprites")]
     assert drawn, "the seeded roster carries no sprite art -- nothing to prove"
@@ -467,7 +466,7 @@ def test_recents_move_to_the_front_without_duplicating_and_cap(tmp_path):
     root = str(ws.carts_root)
     for i in range(ws.carts._MRU_CAP + 3):
         _mk(root, "Filler %d" % i)
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     made = [c for c in ws.carts.all if c["title"].startswith("Filler ")]
 
     first = made[0]

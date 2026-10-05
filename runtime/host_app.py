@@ -76,6 +76,8 @@ sys.modules.setdefault("players", _players)   # console.py does `from players im
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
+from . import moy_catalogue  # noqa: E402  (the store's carts-by-handle interface)
+sys.modules.setdefault("moy_catalogue", moy_catalogue)   # ONE index per process
 # The RASTER is the boards' (`device_canvas.DeviceCanvas`, RGB565), reached
 # through the two factories in host_canvas.py. There is no host-only canvas
 # class any more -- runtime/canvas.py, the second raster, is deleted.
@@ -301,7 +303,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     the font scale."""
     carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
-    carts = moy_carts.catalogue(carts_dir)
+    carts = moy_catalogue.catalogue(carts_dir)
     sw, sh = sys_size if sys_size else (WIDTH, HEIGHT)
     # The system canvas must be at least the game size -- the game is composited into
     # it as a viewport, so a smaller panel makes no sense (and would letterbox into

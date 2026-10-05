@@ -410,7 +410,7 @@ def embedded_floor(seed):
     """The read-only carts a board falls back to when it has NO writable store.
 
     Nearly unreachable since 2026-08-30: every board now retries on internal
-    flash before it gets here (device_boot.load_carts `fallback_root`), so
+    flash before it gets here (boot_carts.load_carts `fallback_root`), so
     reaching this means the internal VFS itself is gone -- a board that cannot
     save anything at all. That is the only reason inflating the WHOLE roster is
     acceptable here: ~732 KB held at once, which every console board has in

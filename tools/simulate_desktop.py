@@ -156,7 +156,9 @@ def _open_named_cart(ws, cart_path, carts_dir):
     if os.path.abspath(cart_path) != os.path.abspath(dst) and not os.path.exists(dst):
         import shutil
         shutil.copytree(cart_path, dst)
-    ws.launcher.items = host_app.moy_carts.scan(ws.carts_root)
+    cat = host_app.moy_catalogue
+    ws.launcher.items = [c for c in (cat.load(e["h"])
+                                     for e in cat.catalogue(ws.carts_root)) if c]
     for i, c in enumerate(ws.launcher.items):
         if os.path.abspath(c["path"]) == os.path.abspath(dst):
             ws.launcher.sel = i

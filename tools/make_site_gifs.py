@@ -190,7 +190,9 @@ class Recorder:
             base.update(cfg)
             with open(os.path.join(dst, "config.json"), "w", encoding="utf-8") as f:
                 json.dump(base, f)
-        items = host_app.moy_carts.scan(self.ws.carts_root)
+        cat = host_app.moy_catalogue
+        items = [c for c in (cat.load(e["h"])
+                             for e in cat.catalogue(self.ws.carts_root)) if c]
         self.ws.carts.apply(items)
         cart = next(c for c in self.ws.carts.all
                     if os.path.basename(c["path"]) == name)

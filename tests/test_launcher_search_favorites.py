@@ -7,6 +7,7 @@ ConsoleDriver: mouse == touch, arrows == trackball, type_char == a typed ASCII
 byte), so these assert host==device behavior, not a host-only path."""
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -238,7 +239,7 @@ def test_recents_cap_at_mru_limit(tmp_path):
     for k in range(n):
         moy_carts.create("Pad%d" % k, carts_dir, src="def _draw():\n    cls(1)\n",
                           type="game")
-    ws.carts.apply(moy_carts.scan(carts_dir))
+    ws.carts.apply(shelf(carts_dir))
     pads = [it for it in ws.launcher.items if it.get("title", "").startswith("Pad")]
     assert len(pads) == n
     for it in pads:

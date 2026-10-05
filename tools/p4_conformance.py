@@ -139,8 +139,8 @@ def push_cart(board, cart_dir, name, log=print):
     # where one cart's load is ~0.1s: so load just the folder we pushed and
     # splice it in -- same visible result, and no dependence on the heap's state.
     ok = board.pyexec(
-        "import moy_carts\n"
-        "_c = moy_carts.load(%r)\n"
+        "import moy_catalogue\n"
+        "_c = moy_catalogue.load(moy_catalogue.handle(%r))\n"
         "if _c:\n"
         "    ws.carts.all = [x for x in ws.carts.all"
         " if x.get('path') != _c['path']] + [_c]\n"

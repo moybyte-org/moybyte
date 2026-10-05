@@ -14,6 +14,7 @@ decoded SOURCE (164ms per read) and per-size crop sidecars (~66ms to read, the
 same as rebuilding, plus a write per cover per size). Nothing here writes."""
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -143,7 +144,7 @@ def test_an_edited_cover_is_picked_up_after_a_rescan(tmp_path):
     img = _land_cover(ws, cart)
     assert _first_word(img, ws) == 5
     moy_carts.save_cover(cart, cover_bytes(9))
-    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))
+    ws.carts.apply(shelf(str(tmp_path / "carts")))
     cart = next(c for c in ws.carts.all if c.get("path") == cart["path"])
     img = _land_cover(ws, cart)
     assert _first_word(img, ws) == 9, "a re-scan did not drop the cached file"

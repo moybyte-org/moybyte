@@ -176,6 +176,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     d = Desktop(name)
     gfx = comp.gfx()
     import moy_carts
+    import moy_catalogue
 
     # DeviceBoot owns the boot splash + its progress bar, the cart seed/scan,
     # the Lua runtime probe and the "first frame in Nms" report. The panel
@@ -198,11 +199,11 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
 
     boot.note("loading cartridges")
     if load_carts is None:
-        carts, carts_root = boot.load_carts(moy_carts, seed_carts,
+        carts, carts_root = boot.load_carts(moy_catalogue, seed_carts,
                                             root=store_root, media="flash")
         update_dir = ota_dir
     else:
-        carts, carts_root, update_dir = load_carts(boot, moy_carts)
+        carts, carts_root, update_dir = load_carts(boot, moy_catalogue)
 
     _census("store")
     boot.note("building the desktop")

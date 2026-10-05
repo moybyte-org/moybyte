@@ -542,18 +542,29 @@ class Files(_StoreRole):
 
 # -- the cart store ----------------------------------------------------------
 
+def _catalogue():
+    """The store's cart interface (`moy_catalogue`), imported at the call so
+    this module stays a leaf."""
+    try:
+        import moy_catalogue
+    except ImportError:  # pragma: no cover - host package lane
+        from runtime import moy_catalogue
+    return moy_catalogue
+
+
 class _RawCarts:
-    """`Carts`' in-session view -- same split, same reason as `_RawFiles`."""
+    """`Carts`' in-session view -- same split, same reason as `_RawFiles`. A
+    cart it returns carries its store handle as "h" (`moy_catalogue`)."""
 
     def __init__(self, ws):
         self.__ws = ws
 
     def create(self, title, src=None, type=None):
-        return self.__ws.carts_store.create(title, self.__ws.carts_root, src=src,
-                                           type=type)
+        return _catalogue().create(title, self.__ws.carts_root, src=src,
+                                   type=type)
 
     def scan(self):
-        return self.__ws.carts_store.catalogue(self.__ws.carts_root)
+        return _catalogue().catalogue(self.__ws.carts_root)
 
     def load_deck(self, cart):
         return self.__ws.carts_store.load_deck(cart)

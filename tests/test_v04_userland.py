@@ -9,6 +9,7 @@ index -- `cv.pix(x, y)` reads an index back, and `canvas_probe` reads the buffer
 at the canvas's real pixel width."""
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -586,7 +587,7 @@ def test_paint_and_map_editors_fully_cover_the_running_cart(tmp_path):
     moy_carts.create("Flood", carts_dir, src="def _draw():\n    cls(%d)\n" % FLOOD,
                      type="game", edit=[{"key": "c", "type": "int", "min": 0, "max": 9,
                                          "card": "C {value}"}])
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.set_items(shelf(carts_dir))
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it["title"] == "Flood")
     ws.open_in_editor()                        # starts the cart, lands on the cards tab

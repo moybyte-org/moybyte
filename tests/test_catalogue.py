@@ -21,6 +21,7 @@ from pathlib import Path
 
 from runtime import host_app, moy_carts, moy_store_base
 from runtime.editors_sheet import SpriteSheet
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -101,16 +102,16 @@ def test_the_catalogue_is_the_slimmed_whole_scan(tmp_path):
     and the same baked icons."""
     root = _store(tmp_path)
     ws = host_app.build_workstation(root)
-    shelf = [dict(c) for c in ws.carts.all]
+    booted = [dict(c) for c in ws.carts.all]
     icons = {k: _pixels(v) for k, v in ws.covers.icons.items()}
 
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     whole = ws.carts.all
     whole_icons = {k: _pixels(v) for k, v in ws.covers.icons.items()}
 
-    assert len(shelf) > 40
-    assert [c["path"] for c in shelf] == [c["path"] for c in whole]
-    for mine, theirs in zip(shelf, whole):
+    assert len(booted) > 40
+    assert [c["path"] for c in booted] == [c["path"] for c in whole]
+    for mine, theirs in zip(booted, whole):
         assert mine == theirs, mine["path"]
         assert "icon_rows" not in mine and mine["lazy"] is True
     assert icons == whole_icons

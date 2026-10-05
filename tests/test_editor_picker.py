@@ -11,6 +11,7 @@ The flow under test:
 """
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -207,7 +208,7 @@ def test_delete_removes_the_pickers_selection_when_no_cart_is_open(tmp_path):
     ws = _ws(tmp_path)
     moy_carts.create("Extra", str(ws.carts_root), src="def _draw():\n    cls(1)\n",
                      type="app")
-    ws.carts.apply(moy_carts.scan(str(ws.carts_root)))
+    ws.carts.apply(shelf(str(ws.carts_root)))
     assert ws.cart is None
     idx = next(i for i, it in enumerate(ws.picker.items) if it.get("title") == "Extra")
     ws.picker.sel = idx

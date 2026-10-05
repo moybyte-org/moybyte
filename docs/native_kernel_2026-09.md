@@ -358,11 +358,13 @@ console needs while no Python app runs is OS.
 | `runtime/lua_ext.py` | cart path | 4 | the Lua superset's shared glue: the per-name rulings of §2.3 are made here |
 | `runtime/lua_host.py` | host-only | — | the host twin of `device/moycore_glue.py`; follows it in 4 |
 | `runtime/map_editor_ui.py` | app | — | the Editor's Map tab |
-| `runtime/moy_carts.py` | store | 1b | the `.moy` store; the Zero takes it |
+| `runtime/moy_carts.py` | store | 1b | the `.moy` store, read and written by path; its callers reach a cart through `runtime/moy_catalogue.py`; the Zero takes it |
+| `runtime/moy_catalogue.py` | store | 1b | the store's interface: carts by handle (§4.3), the native store's call shapes and errors written over the Python store; every caller of the catalogue, a whole-cart load, create, duplicate and delete goes through it |
 | `runtime/moy_file_ops.py` | store | 1b | a user file's life: history sidecars, rename, trash, restore; the Zero takes it |
 | `runtime/moy_files.py` | store | 1b | the user-files layer under the Files app and role; the Zero takes it |
 | `runtime/moy_fs.py` | store | 1b | the crash-safe write primitive every store module stands on, so it goes first; the Zero takes it |
 | `runtime/moy_image.py` | split | 4 + 5 | `Image`, the `image` verb's object and a kernel handle (§2.3) → 4; the wallpaper-preview sidecar → 5; the codec is `runtime/moyimg.py` |
+| `runtime/moy_index.py` | store | 1a | the store's index: a row per cart folder named by a handle, slot and generation, checked on every use; no I/O. The component sprint 1a writes in Rust and in C (§6) |
 | `runtime/moy_journal.py` | store | 1b | the undo journal, named under storage in §2.2; the Zero takes it |
 | `runtime/moy_qr.py` | radios and links | open | the pairing QR encoder for the web-console screen; follows `runtime/web_console_ui.py` |
 | `runtime/moy_seed.py` | store | 1b | seeding and the sweep of retired seeds; the Zero takes it |
@@ -779,7 +781,7 @@ interface is already defined and pinned, in both languages.
 | sprint | moves | gate |
 |---|---|---|
 | **0 — evidence** | nothing. Meters: a `heapcaps` dev-channel word (PSRAM and internal, free and largest) and a GC-pause field in PERF. The census by owner (live GC bytes, held areas, `heap_caps` bytes) with `_LAYER_POOL` checked first. Doom's fit over ≥5 boots per S3 board. Launcher import + construction time on both S3 boards. The complete placement table (§2.2). The stop inventory (§4.4) and the embed-vs-port-fork decision. A stop/start spike on an S3 that keeps one real peripheral alive across the stop — the flush task and a C-owned touch poll. The P4 repartition costed. | the census names the owners of the boot peak and of the T-Deck's retained memory; 100 stop/start cycles on the S3 with the peripheral alive and `heap_caps` free flat; a cart-available PSRAM threshold and the kernel's fixed share defined from the census; per-board headroom floors set (§6.1) |
-| **1a — the language** | the smallest store component, in Rust and in C (§5) | §5's six items; the owner's decision |
+| **1a — the language** | the smallest store component, the store's index (`runtime/moy_index.py`: the handle table every call that names a cart validates against, no I/O), in Rust and in C (§5) | §5's six items; the owner's decision |
 | **1b — the store** | the store's index, catalogue build, cover bookkeeping, seed and project loading; the journal | the parity tests across bindings; the heap after boot within §6.1's bound; Doom loads on a fresh Guition S3 over five boots |
 | **2 — the spine** | handle tables; the crash record and strike ledger (`crash_guard`); the native recovery screen; the settings store; WiFi leases | a native crash is recorded and shown after reboot; a VM that fails to start lands on the recovery screen; a stale handle is refused loudly |
 | **3 — the survival set** | input (touch, keyboards, BLE HID below `bluetooth`); audio (I2S feed and the sfx/music semantics); the glass (canvas ownership, present, compositors); the SD gate; the frame tail (loop, pump, idle blank, OTA health, PERF, serial); radios, the webhost and the sync RPC | the native loop drives the frame on every tier with Python as an upcall (§4.2); each board's on-glass suite unchanged; `surface_model_v1.md`'s amendment (§8) landed first |

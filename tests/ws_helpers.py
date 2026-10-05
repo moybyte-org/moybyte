@@ -95,7 +95,7 @@ def build_ws_with_shelf(tmp_path, n):
         i = len(ws.launcher.items)
         moy_carts.create("Extra %02d" % i, carts_dir,
                          src="def _draw():\n    cls(1)\n", type="app")
-        ws.launcher.items = moy_carts.scan(carts_dir)
+        ws.launcher.items = shelf(carts_dir)
     ws.launcher.sel = 0
     ws.launcher.scroll = 0
     return ws
@@ -135,3 +135,13 @@ def cover_bytes(value=5, stripes=None):
             pix[y * cover_png.SIDE:(y + 1) * cover_png.SIDE] = (
                 bytes([stripes]) * cover_png.SIDE)
     return cover_png.encode_indexed(bytes(pix), cover_png.moy64())
+
+
+def shelf(root):
+    """Every cart under `root` WHOLE, each carrying its store handle ("h") --
+    what `moy_carts.scan` reads, through the interface the console holds carts
+    by (`moy_catalogue`), so a list a test hands a workstation is one the
+    console could have built itself."""
+    from runtime import moy_catalogue as cat
+    return [c for c in (cat.load(e["h"]) for e in cat.catalogue(str(root)))
+            if c]

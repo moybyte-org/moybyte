@@ -37,17 +37,27 @@ Same `StoreHandle` `SystemStore` takes, and for the same reason: `carts_store`,
 construction time and are injected (or swapped, on the boards) afterwards. The
 handle reads them through `ws` at the moment of use, so there is no wiring-order
 trap to get right.
+
+## Carts by handle
+
+The roster reaches the store's carts through `moy_catalogue`, the interface the
+native store exposes: every entry the scan returns carries its index handle as
+"h", and opening (`rehydrate`/`reload`), `dup` and `delete` name a cart by it.
+A cart deleted behind the shelf's back is a stale handle the next time it is
+named, which the verbs below already read as "nothing to load".
 """
 
-# The shelf holds each cart as the store's catalogue entry (`moy_carts.entry`):
+# The shelf holds each cart as the store's catalogue entry (`moy_catalogue`):
 # none of the cart's PAYLOADS -- its scripts and assets, kept resident they are
 # ~300-500KB of permanently-live strings the GC MARK phase pays for on every
 # collect (#66 live-set diet). Opening a cart rehydrates them from the store,
 # and switching carts re-slims the previous one. "icon_rows" is what the scan
 # read for the cart's icon, dropped once slim() has baked it.
 try:
+    import moy_catalogue
     from moy_carts import PAYLOADS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moy_catalogue
     from runtime.moy_carts import PAYLOADS
 _SLIM_DROPS = PAYLOADS + ("icon_rows",)
 
@@ -123,7 +133,7 @@ class CartManager:
         # (see moy_carts.entry).
         try:
             self.apply(self.store.call(
-                lambda: ws.carts_store.catalogue(ws.carts_root)))
+                lambda: moy_catalogue.catalogue(ws.carts_root)))
         except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
             print("Moybyte rescan failed:", exc)
         ws._dirty = True
@@ -168,7 +178,7 @@ class CartManager:
         if not cart.get("lazy") or ws.carts_store is None or not cart.get("path"):
             return cart
         try:
-            full = self.store.call(lambda: ws.carts_store.load(cart["path"]))
+            full = self.store.call(lambda: moy_catalogue.load(cart["h"]))
         except Exception:  # noqa: BLE001 -- SD hiccup: stay slim, surface downstream
             full = None
         if full:
@@ -190,7 +200,7 @@ class CartManager:
         if cart is None or not cart.get("path") or ws.carts_store is None:
             return cart
         try:
-            full = self.store.call(lambda: ws.carts_store.load(cart["path"]))
+            full = self.store.call(lambda: moy_catalogue.load(cart["h"]))
         except Exception:  # noqa: BLE001 -- SD hiccup: keep what we have
             full = None
         if full:
@@ -229,8 +239,8 @@ class CartManager:
         ws = self.ws
         try:
             new, items = self.store.call(lambda: (
-                ws.carts_store.new_from_template(ws.carts_root),
-                ws.carts_store.catalogue(ws.carts_root)))
+                moy_catalogue.new(ws.carts_root),
+                moy_catalogue.catalogue(ws.carts_root)))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte new cart failed:", exc)
             self._say_if_full(exc, "CAN'T MAKE")
@@ -246,11 +256,10 @@ class CartManager:
         sel = ws._real_selected(ws.picker)
         if not self.store.writable() or sel is None:
             return
-        self.rehydrate(sel)   # #66: duplicate() copies src/cfg FROM the dict
         try:
             self.apply(self.store.call(lambda: (
-                ws.carts_store.duplicate(sel, ws.carts_root),
-                ws.carts_store.catalogue(ws.carts_root))[1]))
+                moy_catalogue.duplicate(sel["h"], ws.carts_root),
+                moy_catalogue.catalogue(ws.carts_root))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte duplicate failed:", exc)
             self._say_if_full(exc, "CAN'T COPY")
@@ -277,8 +286,8 @@ class CartManager:
             return
         try:
             self.apply(self.store.call(lambda: (
-                ws.carts_store.delete(target),
-                ws.carts_store.catalogue(ws.carts_root))[1]))
+                moy_catalogue.delete(target["h"]),
+                moy_catalogue.catalogue(ws.carts_root))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
 

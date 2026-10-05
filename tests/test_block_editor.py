@@ -13,6 +13,7 @@ colored blocks, cursor nav, press A to insert from a category menu, no dragging.
 """
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -183,7 +184,7 @@ def _ws_with_block_cart(tmp_path, title="UI Block Cart"):
     root = str(tmp_path / "carts")
     ws = host_app.build_workstation(root)
     cart = moy_carts.create(title, root, type="game")
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == title:
             ws.launcher.sel = i
@@ -342,7 +343,7 @@ def test_block_authored_cart_runs_normally(tmp_path):
     be.insert_block("set_var", {"var": "x", "value": 100})
     ws.block_ui.save_blocks()
     # reopen the cart fresh from disk and run it
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == cart["title"]:
             ws.launcher.sel = i
@@ -418,7 +419,7 @@ def _ws_with_code_cart(tmp_path, src, title="Code Cart"):
     root = str(tmp_path / "carts")
     ws = host_app.build_workstation(root)
     cart = moy_carts.create(title, root, src=src, type="game")
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == title:
             ws.launcher.sel = i
@@ -476,7 +477,7 @@ def test_block_authored_cart_is_not_protected(tmp_path):
     assert ws.block_ui.save_blocks() is True
     # reopen fresh from disk: it loads its blocks.json, so it's NOT protected and
     # saving works again (round-trip unchanged).
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == cart["title"]:
             ws.launcher.sel = i

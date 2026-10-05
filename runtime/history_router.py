@@ -77,6 +77,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.op_history import History, TextEditCodec, text_diff_op
 
 try:
+    import moy_catalogue
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moy_catalogue
+
+try:
     from chrome import _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import _err_text
@@ -420,10 +425,9 @@ class HistoryRouter:
         restored code. `file` is which live file the walk touched (informational --
         the reload is wholesale)."""
         ws = self.ws
-        store = ws.carts_store
-        path = ws.cart["path"]
+        h = ws.cart["h"]
         try:
-            fresh = self.store.call(lambda: store.load(path))
+            fresh = self.store.call(lambda: moy_catalogue.load(h))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte reload after undo failed:", _err_text(exc))
             return

@@ -13,6 +13,7 @@ in-process LoopbackNet + a fake extra-controller source.
 import json
 import sys
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -282,7 +283,7 @@ def test_normal_cart_has_no_net_names(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     moy_carts.create("Plain", carts_dir, type="game",
                      src="def _update(dt):\n    pass\ndef _draw():\n    cls(0)\n")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.set_items(shelf(carts_dir))
     _run_cart(ws, "Plain")
     assert ws.screen == "desktop"
     assert "net" not in ws.ns and "on_net" not in ws.ns

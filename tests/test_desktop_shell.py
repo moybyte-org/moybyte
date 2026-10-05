@@ -7,6 +7,7 @@ ConsoleDriver: mouse == touch, arrows == trackball), so these assert host==devic
 behavior, not a host-only path."""
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -357,7 +358,7 @@ def test_launcher_tap_runs_every_cart_type(tmp_path):
         moy_carts.create(title, carts_dir, src="def _draw():\n    cls(1)\n",
                          type=ctype, edit=edit)
         ws.go_home()
-        ws.launcher.set_items(moy_carts.scan(carts_dir))
+        ws.launcher.set_items(shelf(carts_dir))
         ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                                if it.get("title") == title)
         ws.launch_selected()                        # the launcher tap
@@ -594,7 +595,7 @@ def _make_tool_ws(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
     moy_carts.create("MyTool", carts_dir, src="def _draw():\n    cls(1)\n", type="tool")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.set_items(shelf(carts_dir))
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("title") == "MyTool")
     ws.launch_selected()                             # a tool always LAUNCHES (Part 2)
@@ -686,7 +687,7 @@ def test_cart_quit_verb_pops_to_the_launcher(tmp_path):
            "        quit()\n"
            "def _draw():\n    cls(1)\n")
     moy_carts.create("Quitter", carts_dir, src=src, type="game")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.set_items(shelf(carts_dir))
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("title") == "Quitter")
     ws.open()                                # PLAY it
@@ -708,7 +709,7 @@ def test_cart_quit_flag_is_cleared_for_the_next_cart(tmp_path):
     moy_carts.create("Plain", carts_dir,
                      src="def _update(dt):\n    pass\ndef _draw():\n    cls(2)\n",
                      type="game")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.set_items(shelf(carts_dir))
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("title") == "Plain")
     ws.input.cart_quit = True                # a leftover flag from some prior run

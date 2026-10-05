@@ -21,6 +21,7 @@ from runtime import host_app, moy_carts
 from runtime.editors_base import (KeyEdge, TextEntry, text_key, TE_EDIT,
                                   TE_COMMIT, TE_CANCEL)
 from runtime.widgets import ConfirmTap
+from ws_helpers import shelf  # noqa: E402
 
 
 class _Inp:
@@ -140,7 +141,7 @@ def _ws_with_lua_cart(tmp_path):
                      edit=[{"key": "n", "type": "int", "min": 0, "max": 9,
                             "card": "N"}])
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
                            if c["title"] == "Lua One")
     ws.open_in_editor()

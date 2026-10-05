@@ -14,6 +14,7 @@ this only covers the unambiguous title/author half of the gap.
 """
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -95,7 +96,7 @@ def test_project_commit_manifest_persists_and_syncs_ram(tmp_path):
     moy_carts.ensure_dirs(root)
     _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
                            if c["title"] == "Tune Me")
     ws.open_in_editor()
@@ -120,7 +121,7 @@ def test_project_commit_manifest_rejects_blank_title(tmp_path):
     moy_carts.ensure_dirs(root)
     cart = _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
                            if c["title"] == "Tune Me")
     ws.open_in_editor()
@@ -158,7 +159,7 @@ def test_info_button_tap_opens_the_modal(tmp_path):
     moy_carts.ensure_dirs(root)
     _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
     ws.input.begin_frame()
     ws.frame(1 / 30)                                    # draw once (lays out layout)
@@ -181,7 +182,7 @@ def test_meta_modal_edits_title_and_author_and_commits(tmp_path):
     moy_carts.ensure_dirs(root)
     cart = _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
 
     cl = ws.cards_layer
@@ -211,7 +212,7 @@ def test_meta_modal_blank_title_stays_open_with_message(tmp_path):
     moy_carts.ensure_dirs(root)
     _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
 
     cl = ws.cards_layer
@@ -231,7 +232,7 @@ def test_meta_modal_cancel_discards_edits(tmp_path):
     moy_carts.ensure_dirs(root)
     cart = _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
 
     cl = ws.cards_layer
@@ -251,7 +252,7 @@ def test_meta_modal_draws_without_crashing_and_reset_closes_it(tmp_path):
     moy_carts.ensure_dirs(root)
     _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
 
     ws.cards_layer._open_meta()

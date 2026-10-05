@@ -17,6 +17,7 @@ end-to-end `test_*` below.
 
 import json
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -188,7 +189,7 @@ def _block_cart(tmp_path, title="Grad Cart"):
     }
     status, _ = moy_carts.save_blocks(cart, prog)
     assert status == moy_carts.SAVE_OK
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     _select(ws, title)
     ws.open()
     assert ws.cart["blocks"] is not None
@@ -247,7 +248,7 @@ def test_code_only_cart_never_graduates(tmp_path):
     root = str(tmp_path / "carts")
     ws = host_app.build_workstation(root)
     cart = moy_carts.create("Plain", root, src="def _draw():\n    cls(1)\n")
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     _select(ws, "Plain")
     ws.open()
     assert ws.cart["blocks"] is None
@@ -360,7 +361,7 @@ def _story_cart(tmp_path, title="Story Cart"):
     src = deck_to_code(deck, title)
     cart = moy_carts.create(title, root, src=src, type="story")
     moy_carts.save_deck(cart, json.dumps(deck))
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     _select(ws, title)
     ws.open()
     assert ws.cart["blocks"] is None

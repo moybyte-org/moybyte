@@ -888,18 +888,20 @@ def _sheet_icon(path, icon):
 def _each(root, read):
     """`read(folder)` for every cart folder under root, sorted by name, the
     folders it refuses (None) left out and any per-folder surprise swallowed,
-    so a single bad folder can't break the launcher.
+    so a single bad folder can't break the launcher. None when root itself
+    will not list, which a caller keeping state per folder must not read as
+    "every cart is gone" (moy_catalogue.catalogue).
 
     A cart is a FOLDER. A `.moy` FILE beside them is an archive -- how a cart
     travels, not how it is stored -- and is skipped silently: unpacking belongs
     to whatever brought it here, because a cart in an archive can't be edited,
     can't take an autosave commit, and can't hold its own undo journal or
     saves."""
-    carts = []
     try:
         names = sorted(os.listdir(root))
     except OSError:
-        return carts
+        return None
+    carts = []
     for name in names:
         if name.endswith(".moy") and _is_dir(root + "/" + name):
             try:
@@ -914,15 +916,16 @@ def _each(root, read):
 
 def catalogue(root=CARTS_DIR):
     """The shelf: every cart folder's `entry` under root, sorted by folder
-    name. What a boot, a rescan and every roster change read."""
-    return _each(root, entry)
+    name. moy_catalogue.catalogue is the shelf's read: this one, with a
+    handle on every entry."""
+    return _each(root, entry) or []
 
 
 def scan(root=CARTS_DIR):
     """Every cart under root, loaded WHOLE, sorted by folder name -- for a
     caller that wants every cart's payloads (a host tool, a test); the shelf
     reads the `catalogue`."""
-    return _each(root, load)
+    return _each(root, load) or []
 
 
 def save_config(cart):

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from blocks_helpers import go_to_insert
 from ws_helpers import build_ws_with_cart
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -653,7 +654,7 @@ def test_graduated_blocks_tab_undo_ungraduates_under_scoped_walk(tmp_path):
             blocks.make_block("cls", {"color": "black"}),
             blocks.make_block("set_var", {"var": "score", "value": 7})])]}
     assert moy_carts.save_blocks(cart, prog)[0] == moy_carts.SAVE_OK
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == "Grad":
             ws.launcher.sel = i

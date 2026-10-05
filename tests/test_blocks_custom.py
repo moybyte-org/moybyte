@@ -21,6 +21,7 @@ A kid defines a reusable block ("define NAME p1 p2 ..." with a body) and calls i
 
 import ast
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -415,7 +416,7 @@ def _ws_with_block_cart(tmp_path, title="Custom Block Cart"):
     root = str(tmp_path / "carts")
     ws = host_app.build_workstation(root)
     moy_carts.create(title, root, type="game")
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == title:
             ws.launcher.sel = i

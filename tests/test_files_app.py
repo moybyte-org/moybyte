@@ -5,6 +5,7 @@ OPEN picker + autosave riding the same layer."""
 from pathlib import Path
 
 from runtime import moy_carts
+from ws_helpers import shelf  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -278,7 +279,7 @@ def test_send_sprites_to_files_producer(tmp_path):
     ws = _ws(tmp_path)
     # Open a project so ws.project.sheet is a real sprite sheet.
     cart = ws.carts_store.create("Doodle", carts, type="game")
-    ws.carts.apply(ws.carts_store.scan(carts))
+    ws.carts.apply(shelf(carts))
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Doodle"))
     ws.project.sheet.pset(0, 0, 9)
     name = ws.send_sprites_to_files()
