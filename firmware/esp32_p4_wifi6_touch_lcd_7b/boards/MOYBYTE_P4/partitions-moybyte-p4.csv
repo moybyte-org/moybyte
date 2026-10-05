@@ -2,17 +2,25 @@
 #
 # The mainline default (partitions-4MiBplus.csv) caps the app at 0x1F0000
 # (~1.94MB); the frozen console overflows that. This table is OTA-SHAPED from
-# day one -- two 4MB app slots, mirroring the T-Deck's #53 layout -- so the
-# eventual P4 OTA lands without the partition-layout migration reflash the
-# T-Deck had to eat. The tail (~24MB from 0x810000) is deliberately UNLISTED:
-# mainline MicroPython auto-builds the vfs over the unallocated remainder
-# (the "plus" table behavior; this is where the bring-up's 31.5MB internal
-# filesystem came from). build.sh copies this file into ports/esp32/ at stage
-# time (CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves project-relative).
+# day one -- two app slots, mirroring the T-Deck's #53 layout -- so the P4 OTAs
+# without the partition-layout migration reflash the T-Deck had to eat. The
+# slots are 6MB (owner, 2026-10-05; 4MB at first): the image was inside the
+# build's headroom warning and the native kernel (#224) grows it, so the
+# slots take the room the store does not need on a 32MB chip. The tail (from
+# 0xC10000, the rest of the chip) is deliberately UNLISTED: mainline
+# MicroPython auto-builds the vfs over the unallocated remainder (the "plus"
+# table behavior). build.sh copies this file into ports/esp32/ at stage time
+# (CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves project-relative).
+#
+# The store's size and offset are the tail's, so a change to the slots moves
+# it: the LittleFS there no longer mounts, and a stale first sector reads as
+# "filesystem appears to be corrupted" on every boot. A cable flash that finds
+# the store somewhere else on the board erases the new store's first blocks
+# before it writes (tools/board_flash.py); the store re-seeds.
 #
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x4000,
 otadata,  data, ota,     0xd000,   0x2000,
 phy_init, data, phy,     0xf000,   0x1000,
-ota_0,    app,  ota_0,   0x10000,  0x400000,
-ota_1,    app,  ota_1,   0x410000, 0x400000,
+ota_0,    app,  ota_0,   0x10000,  0x600000,
+ota_1,    app,  ota_1,   0x610000, 0x600000,

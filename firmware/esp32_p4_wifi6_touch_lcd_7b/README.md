@@ -154,10 +154,10 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 
 - `boards/MOYBYTE_P4/` — out-of-tree board def: the `C6_WIFI` variant's
   sdkconfig fragments + `sdkconfig.board` (PSRAM @ 200MHz, 32MB flash, the
-  custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×4MB app
+  custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×6MB app
   slots — the default 4MiBplus table's ~1.94MB app can't hold the frozen
-  console — with the ~24MB tail left unlisted so mainline auto-builds the vfs
-  over it).
+  console — with the tail from 0xC10000 left unlisted so mainline auto-builds
+  the vfs over it; moving it is a full-chip erase, see the CSV).
 - `native/p4/moy_dsi/` (repo root — the P4 SILICON tier since 2026-09-06, shared
   with the Guition JC8012P4A1C and staged here by `board.toml` `[native.p4]`;
   this board names `MOY_DSI_PANEL_EK79007` in its `mpconfigboard.cmake`) — the

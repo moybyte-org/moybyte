@@ -167,7 +167,7 @@ moybyte_stage_native
 moybyte_ota_identity p4 "${REPO_ROOT}/device/moy_ota.py"
 
 # ---------------------------------------------------------------------------
-# 4) Frozen manifest + partition table (#58: OTA-shaped 2x4MB app slots +
+# 4) Frozen manifest + partition table (#58: OTA-shaped 2x6MB app slots +
 #    auto-vfs tail -- the default 4MiBplus table's ~1.94MB app can't hold the
 #    frozen console) + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------

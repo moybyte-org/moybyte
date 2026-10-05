@@ -21,7 +21,7 @@ Everything else -- the 320x240 GAME canvas, the windowed WM, the BLE keyboard
 over the C6, OTA on the internal VFS, the dev channel, the frame loop -- is the
 Waveshare's, by import.
 
-Carts live on the INTERNAL flash VFS (~7.9MB of the 16MB chip); the TF slot is
+Carts live on the INTERNAL flash VFS (the tail of the 16MB chip after the app slots); the TF slot is
 wired like the Waveshare's (SDMMC slot 0 on LDO4) and equally unused.
 """
 

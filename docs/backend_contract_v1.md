@@ -275,7 +275,7 @@ sequences **after** Phase 0 here — the conformance suite is what makes it safe
   self-failing at ~2KB for `+present.py` alone), boot `free-int` unchanged, and
   launcher live set unchanged via `micropython.mem_info()` — **not** bare
   `gc.mem_free()`, which reads ~28MB against ~1.4MB real on the P4 port.
-  Flash is not the scarce resource here (S3 app slots 4MB, P4 45% headroom);
+  Flash is not the scarce resource here (each build prints its app slot's headroom);
   **internal SRAM and GC live set are.**
 - **The dispatch tax is real but small, and v1.0 pointed at the wrong hazard.**
   None of the converted sites is per-**draw-call**; they are per-frame,

@@ -22,8 +22,9 @@ The two-domain seam (#39) runs for real here for the first time on hardware:
     installs `WindowedWM` -- the launcher is the desktop, every app a floating
     window (#73's presentation tier, finally on its intended hardware).
 
-Carts live on the INTERNAL flash VFS (31.5MB -- SD is optional on this board;
-the SDIO slot + LDO4 power fix are a follow-up for removable-cart workflows).
+Carts live on the INTERNAL flash VFS (the tail of the 32MB chip after the app
+slots -- SD is optional on this board; the SDIO slot + LDO4 power fix are a
+follow-up for removable-cart workflows).
 """
 
 # The seed roster, generated from system_carts/ at build time and PACKED
