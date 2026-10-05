@@ -121,10 +121,11 @@ word of every live block, so collect time grows with live bytes.
 ### 1.6 The only full reclaim today is a reboot
 
 **SOURCE: `ports/esp32/main.c` at v1.28.0.** The port's soft reset is the only
-place that tears down timers, threads (`mp_thread_deinit`), the native-code arena
-(`esp_native_code_free_all`), BLE, ESP-NOW, UARTs and pins, then re-runs the
-boot. The console's boot repeats what the user watches: the splash, the touch
-bring-up, the store scan, the radios.
+place that tears down timers, threads (`mp_thread_deinit`), BLE, ESP-NOW, UARTs
+and pins, then re-runs the boot; the native-code arena
+(`esp_native_code_free_all`) is freed there and at a cart-compile miss
+(`patches/esp32_native_code_free.patch`). The console's boot repeats what the
+user watches: the splash, the touch bring-up, the store scan, the radios.
 
 ### 1.7 What is not the problem: code, and the P4 desk
 
@@ -546,23 +547,89 @@ The VM starts when a Python app or cart opens and stops when the last one
 closes. On the S3 fullscreen tier that is one app at a time; on the P4 desk the
 VM stays up while any Python app is open.
 
-A stop is harder than a sweep, and sprint 0 inventories it before anything is
-built (SOURCE: `ports/esp32/main.c`, `native/moycore/modmoycore.c`):
+**The inventory (sprint 0, 2026-10-05).** A stop is harder than a sweep.
+SOURCE: MicroPython v1.28.0's `ports/esp32/main.c` (`mp_task` and its
+`soft_reset_exit:` list), `mpthreadport.c`, `machine_pin.c`,
+`usb_serial_jtag.c`, `py/runtime.c` and `py/gc.c`; ours as each row names.
+"Soft reset" is what the port does today, "stop" what the VM stop must do. The
+P4 rows matter only if a P4 ever stops its VM (§10 question 5).
 
-- **Everything with a Python callback must be torn down**, or an ISR calls into a
-  freed heap: `machine.Timer`s, `bluetooth` IRQ handlers, threads. Keeping BLE up
-  across a stop therefore means the HID keyboard lives below `modbluetooth`.
-- **C statics survive `mp_deinit`:** moycore's `g_p8mem`/`g_p8rom` (Python
-  bytearrays), `g_wread`, the Lua state, five `MP_REGISTER_ROOT_POINTER`s, and
-  `moy_alloc` registry entries owned by `moybuf` views. Each is either cleared at
-  stop or moved to kernel ownership.
-- **The native-code arena** (`esp_native_code_free_all`) is freed only in the
-  port's soft reset.
-- **The first 64 KB area** is allocated outside the `soft_reset:` label and never
-  freed.
-- **MicroPython is the port's `main.c` task, not a library.** Stopping and
-  restarting it in-process is either an embedding of MicroPython under our own
-  task or a fork of the port's `main.c`. Sprint 0 decides which.
+| what | where | soft reset today | stop | sprint |
+|---|---|---|---|---|
+| ***Python callbacks run from an ISR or another task*** | | | | |
+| GPIO IRQs (T-Deck trackball, the GT911 INT gate) | `device/device_input.py`'s `p.irq`; the port's ISR schedules the handler held in the `machine_pin_irq_handler` root | `machine_pins_deinit` removes the GPIO ISR of every pin in the port's table, whoever installed it | remove only the pins with a Python handler; a kernel GPIO ISR survives | 0 (the rule); 3 moves input native |
+| the input poller thread (T-Deck) | `device/moybyte/input.py`'s `InputPoller` | `mp_thread_deinit` deletes every thread wherever it stands, even mid-I2C with the bus held | stopped cooperatively and joined before the port's deinit; `mp_thread_deinit` only as the backstop | 3 |
+| the BLE keyboard | `device/ble_keyboard.py`'s `ble.irq`; NimBLE's task writes events into a ring in the GC heap | `mp_bluetooth_deinit`: the stack stops, the keyboard drops | the same, until the HID lives below `modbluetooth` (the P4's notifications already do: `patches/p4_modbluetooth_ble_hid_fastpath.patch`) | 3 |
+| ESP-NOW | `device/moy_espnow.py` polls; the port's receive callback (WiFi task) writes into a ring in the GC heap | `espnow_deinit` | the same | 3 (radios), 4 (lockstep) |
+| the legacy I2S feed | `device/device_audio.py`'s `i2s.irq`, taken only when the core-1 task fails to start | the object's finaliser, at the sweep | the same | 3 deletes it |
+| `machine.Timer`, `micropython.schedule`, UART, socket callbacks, dupterm | no user in `runtime/`, `device/` or a board's modules | `machine_timer_deinit_all`, `machine_uart_deinit_all`, `socket_events_deinit` | kept | — |
+| the console's RX ISR | `usb_serial_jtag.c` wakes `mp_main_task_handle` on every packet | the VM's task never dies | the handle moves to the kernel's task before the VM's task is deleted, or a byte from the host notifies a freed task | 0 |
+| the wasm session's task | `native/moy_wasm/modmoy_wasm.c`'s `g_sess` asks the VM's task to run `vm_fn` for a cart's `read` and file calls, through `moycore_wasm_gate` | nothing ends the session | moycore's `close()` (`wasm_end`) first | 3 (the SD gate), 4 |
+| ***C state that survives `mp_deinit`*** | | | | |
+| root pointers | seven in `native/moycore/modmoycore.c` (`moycore_calls`, `_wasm_file`, `_wasm_gate`, `_wasm_files`, `_p8mem`, `_p8rom`, `_view`), and the port's | kept: `mp_init` resets only its own fields, and the collector scans the whole root section, so a stale root marks whatever now sits at its address in the reused first area | the root section zeroed after `mp_deinit` | 0 |
+| moycore's statics | `g_p8mem`/`g_p8rom` (into the `p8_memory` bytearrays); `RUN`'s canvas, sheet, map, layer, `snap` and `aq` pointers into Python buffers, and `RUN.cfg`; `WR`, `g_wread` | kept (`open` re-zeroes `RUN`) | moycore's stop hook: `close()`, then the p8 pointers cleared | 0; 4 makes cart state the kernel's |
+| the Lua state and its pool | `RUN.L` over moycore's chunk pool, in `heap_caps` memory | leaked if a cart is running: nothing calls `close()` | `close()` before the sweep frees every chunk (`pool_release`) | 4 |
+| the fold latch | `native/moy_flush/moy_fold.c`'s `moy_fold`: pointers into the fold scratch (`device/moycore_glue.py`), the palette and the game canvas, which the core-0 feeder reads band by band; a snapshot copy may be in flight | not fenced | the feeder drained, the snapshot fenced, the fold disarmed, before the sweep; the kernel owns the next present | 0; 3 |
+| async copies | `native/moy_gfx/modmoy_gfx.c`'s `moy_gfx_mcp`; P4: `native/p4/moy_ppa/modmoy_ppa.c`'s bounce worker | not waited | waited out before the sweep | 3 |
+| ***`heap_caps` memory owned by Python objects*** | | | | |
+| the `moy_alloc` registry | `native/moy_alloc/modmoy_alloc.c`'s `moy_buf_live`: on the S3s, every off-heap byte Python holds — layers, `_LAYER_POOL` and `_LENT_BAKES` (`device/device_canvas.py`), `runtime/moybuf.py`'s caches, the fold scratch | leaked for good: the views die, the entries stay (`_LAYER_POOL` never frees, stop or no stop) | every entry freed after the sweep, which no view survives; the bytes counted per stop | 0; 3 makes the pool the kernel's (§10 question 4) |
+| `moy_alloc.malloc_dma` | the P4 scan buffers (`device/dsi_panel.py`); `device_canvas`'s lane for a firmware without `alloc` | no free exists | P4: kernel-owned before a P4 stops; the fallback lane deleted | 3 |
+| wasm linear memory and the runtime pool | `modmoy_wasm.c`, per session | freed by `wasm_end` | `close()` first | 4 |
+| driver buffers | the panel framebuffers (`s_fbs` in `moy_lcd`/`moy_axs`), the flush bounce slots, the audio bank and PCM ring, the SD bounce, `moy_prof`'s ring | C-owned, allocated once | kept: the kernel's | — |
+| ***Port state only the soft reset handles*** | | | | |
+| the native-code arena | `esp_native_code_free_all`, in `MALLOC_CAP_EXEC` (internal) memory; extern by `patches/esp32_native_code_free.patch` for `moy_gfx.native_code_free_all` | freed after the sweep | the same | 0 |
+| the first heap area | `mp_task` allocates it before `soft_reset:` | reused, never freed | freed with the VM, allocated at start | 0 |
+| the VM's task | `mp_task` never returns; `mp_thread_init` binds thread 0 to it | lives forever | created at start, deleted at stop (its stack goes back to internal SRAM, §4.6); `mp_thread_init` at every start | 0 |
+| mounts and SD | `mp_init` empties the mount table and the port's `_boot.py` remounts flash. Guition S3: `machine.SDCard` (`firmware/guition_jc3248w535/modules/moy_runtime.py`), whose finaliser frees its SPI host at the sweep. T-Deck: `moy_sd` stays attached (`init` is idempotent) | remounted | the same until the gate is native; a failed Guition remount stays failed until a reboot (its README) | 3 |
+| WiFi and its leases | the port never deinitialises the WLAN driver; the lease table (`Workstation.wifi_hold`) is Python | the radio left as it was | refused while a lease is held | 2 |
+| an OTA write | `device/moy_ota.py` streams into the inactive slot | — | refused while it runs | 2 |
+| ***Native tasks*** | | | | |
+| the flush feeder, the audio core-1 task, `moy_prof`'s timer; P4: `moy_c6`'s TX task, `moy_ble_hid`'s queue | `native/moy_flush/`, `native/moy_audio/`, `native/moy_prof/`, `native/p4/` | no VM calls; they survive | kept; the audio task silences the cart's sound | 3 |
+
+**The order of a stop** follows from the table: the app's `close()`; the
+cooperative stops (threads joined, moycore's `close()`, the feeder drained and
+the fold disarmed, async copies waited); the port's deinit list, with the
+pin-wide sweep replaced by the Python-handler one; `gc_sweep_all`, whose
+finalisers close files, sockets, I2S and SD; the `moy_alloc` registry freed; the
+native-code arena freed; `mp_deinit`; the root section zeroed; the first area
+freed; `mp_main_task_handle` handed to the kernel's task; the VM's task deleted.
+
+**Embed, not fork (sprint 0, 2026-10-05; the owner's to confirm).** MicroPython
+becomes a service the kernel starts and stops on a task of its own, inside the
+esp32 port's build: the port's `MICROPY_ESP_IDF_ENTRY` override
+(`mpconfigport.h`) renames its `app_main`, the kernel's entry runs instead, and
+the kernel's VM service calls `gc_init` and `mp_init` and runs the order above
+itself, over the port's extern deinit functions. The literal `ports/embed` is
+not it: it builds the core without the port's modules (`machine`, `network`,
+`bluetooth`, `espnow`), which the console's Python uses until sprints 2 and 3
+move what it needs. The case:
+
+- **A tag bump.** A fork is a patch over `mp_task`'s body, and the soft-reset
+  list is where a port release adds a peripheral's teardown: a multi-hunk
+  rebase on every bump. The embed adds no patch (`esp_native_code_free_all` is
+  extern already) and links against the port's functions, so a rename fails the
+  build. What it could miss is a new teardown step, so it carries a guard: the
+  build compares `mp_task`'s call list at the pinned `MPY_TAG` with the one the
+  VM service records, and fails on a difference. The bump's review is that diff.
+- **Teardown.** The fork inherits a list that is wrong for a stop with the
+  kernel up: `machine_pins_deinit` removes the kernel's GPIO ISRs with Python's,
+  and nothing drains the feeder, frees the registry, zeroes the roots or frees
+  the first area. The patch would rewrite the list anyway, inside a task that
+  never dies, so the VM's stack never returns to internal SRAM.
+- **The inversion.** §4.2 has the native loop own the frame with Python as an
+  upcall. The embed is that shape on the device: the kernel's task owns the
+  board and starts the VM. A fork keeps MicroPython's task as the board's main
+  task, with the kernel running inside it.
+- **The other tiers need nothing from either.** The browser's VM lives as long
+  as its worker (`firmware/web_runner/worker.js` loads it), and unix MicroPython
+  and the CPython host never stop one. The zero-upcall count (§4.2) is the
+  contract every tier shares.
+- **The five targets** are all esp32-port builds. Once the kernel owns the loop
+  (sprint 3) it is the entry on every one, whether or not that board ever stops
+  its VM, and a board takes the VM service in board.toml as it takes `moy_wasm`.
+
+Sprint 0's spike is built in this shape, so it tests the decision as well as
+the stop.
 
 Unix MicroPython has none of `heap_caps`, the native-code arena or IRQs, so it
 tests VM re-initialisation and the zero-upcall contract, not the stop's memory.
@@ -783,8 +850,9 @@ makes it false, not annotated:
    VM and rebuilding a Python launcher. How long may it take? The owner sets it
    from sprint 0's first figure (owner, 2026-09-27); sprint 4 measures against it
    and decides the launcher (§3).
-2. **Embed or fork the port's `main.c`** for an in-process VM stop (§4.4).
-   Sprint 0.
+2. **Embed or fork the port's `main.c`** for an in-process VM stop. Sprint 0's
+   inventory answers embed; the case is §4.4's, and it is the owner's to
+   confirm.
 3. **The Lua superset rulings**, name by name (§2.3). Sprint 4.
 4. **`_LAYER_POOL`.** Answered only if sprint 0's census names it as the
    T-Deck's retained memory (owner, 2026-09-27): then the owner decides whether
