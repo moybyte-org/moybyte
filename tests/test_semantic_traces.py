@@ -58,13 +58,29 @@ read back), clip and pal around shapes, text, sspr, map, spr and tline -- and
 read its pixels in pairs across the edges those move. Mutation-tested: the
 layer's camera, clip and pal, the camera read-back, and the sspr/tline/map/spr
 /line/rectb/print placements each turn it red.
+
+EXTENDED 2026-10-05 (#224, before the store crosses in sprint 1b): a second
+trace, the STORE's. The native store will expose carts by handle
+(runtime/moy_catalogue.py over runtime/moy_index.py), and this replays one
+scripted session of that interface -- create, catalogue, a rescan, entry and
+load, path and handle, new, duplicate, delete and every call on the deleted
+handle, a freed slot taken again under its next generation, a folder removed
+behind the store's back and reconciled away, a root that will not list, a
+second store displacing the first, forged and non-int handles, a full index
+-- on CPython, on the boards' VM and, where it is built, on the boards'
+32-bit object model. The log is pinned VERBATIM (STORE_TRACE): the handle
+values are slot.generation, so the allocation order is part of the contract a
+native binding must keep, not an accident of this one. Mutation-tested: the
+generation bump on release, lowest-free-first reuse, the reconcile's release
+and the unlisted root's no-op each turn it red.
 """
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-from unix_mp import require_unix_mp
+from unix_mp import find_unix_mp, require_unix_mp
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -602,3 +618,178 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # module held the VM for the whole trace.
     assert stats.startswith("True "), \
         "side A did not run under moycore: %s" % stats
+
+
+# -- the store's trace (#224, sprint 1b) ---------------------------------------
+#
+# One driver, three interpreters. Every line the driver prints that starts
+# with "T " is an observation; the store's own diagnostics (a manifest that
+# will not read) print too and are not compared, since their errno text is the
+# VM's. @RUNTIME@ and @ROOT@ are the source tree and a fresh store dir.
+
+STORE_DRIVER = r'''import os
+import sys
+sys.path.insert(0, @RUNTIME@)
+
+import moy_carts
+import moy_catalogue as cat
+from moy_index import Index, StaleHandle, SLOTS, SLOT_BITS
+
+ROOT = @ROOT@
+A = ROOT + "/a/carts"
+B = ROOT + "/b/carts"
+SRC = "def _draw():\n    cls(1)\n"
+HMAX = [0]
+
+
+def rel(p):
+    return p[len(ROOT) + 1:]
+
+
+def h_(h):
+    """A handle as the log shows it: slot.generation, and its magnitude kept."""
+    if isinstance(h, int) and h > HMAX[0]:
+        HMAX[0] = h
+    return "%d.%d" % (h & (SLOTS - 1), h >> SLOT_BITS)
+
+
+def say(*a):
+    print("T", " ".join(str(x) for x in a))
+
+
+def tried(fn, *a):
+    try:
+        return fn(*a)
+    except StaleHandle:
+        return "STALE"
+    except TypeError:
+        return "TYPE"
+    except OSError as e:
+        return "OSERROR %d" % e.args[0]
+
+
+def shelf(root):
+    return " ".join("%s=%s" % (e["title"], h_(e["h"])) for e in cat.catalogue(root))
+
+
+cat.ensure_dirs(A)
+for t in ("Beta", "Alpha", "Gamma"):
+    c = cat.create(t, A, src=SRC)
+    say("create", t, h_(c["h"]), rel(c["path"]))
+say("catalogue", shelf(A))
+say("rescan", shelf(A))
+es = cat.catalogue(A)
+alpha, beta, gamma = [e["h"] for e in es]
+e = cat.entry(alpha)
+say("entry", h_(e["h"]), sorted(k for k in e if k in ("src", "sprites", "h", "title", "cfg")))
+w = cat.load(alpha)
+say("load", h_(w["h"]), w["title"], len(w["src"]), "src" in w)
+say("path", rel(cat.path(beta)), cat.handle(cat.path(beta)) == beta, cat.valid(beta))
+
+n = cat.new(A)
+say("new", n["title"], h_(n["h"]))
+d = cat.duplicate(alpha, A)
+say("duplicate", d["title"], h_(d["h"]), d["src"] == SRC)
+say("shelf", shelf(A))
+cat.delete(d["h"])
+say("delete", cat.valid(d["h"]), tried(cat.load, d["h"]), tried(cat.entry, d["h"]),
+    tried(cat.path, d["h"]), tried(cat.delete, d["h"]), tried(cat.duplicate, d["h"], A))
+say("folder gone", not moy_carts._exists(d["path"]))
+x = cat.create("Delta", A, src=SRC)
+say("reuse", h_(x["h"]), "old", h_(d["h"]), tried(cat.load, d["h"]))
+
+moy_carts._rmtree(cat.path(gamma))
+say("behind", cat.valid(gamma), cat.load(gamma), cat.entry(gamma))
+say("shelf", shelf(A))
+say("reconciled", cat.valid(gamma), tried(cat.load, gamma))
+
+say("unlisted", cat.catalogue(ROOT + "/nowhere"), cat.valid(alpha), cat.valid(beta))
+
+cat.ensure_dirs(B)
+cat.create("Other", B, src=SRC)
+say("other store", shelf(B), cat.valid(alpha), tried(cat.load, alpha))
+say("back", shelf(A))
+
+for forged in (0, -1, alpha ^ (1 << SLOT_BITS), (1 << SLOT_BITS) | (SLOTS - 1)):
+    say("forged", tried(cat.load, forged), cat.valid(forged))
+for junk in (None, "1"):
+    say("junk", tried(cat.load, junk), cat.valid(junk))
+
+idx = Index()
+hs = [idx.intern("/x/%d.moy" % i) for i in range(SLOTS)]
+say("full", idx.count(), tried(idx.intern, "/x/more.moy"))
+idx.release(hs[9])
+say("refill", h_(idx.intern("/x/more.moy")), idx.find("/x/9.moy"))
+say("ints", all(isinstance(h, int) for h in idx.handles()), HMAX[0] < (1 << 30))
+print("DRIVER_DONE")
+'''
+
+STORE_TRACE = """\
+create Beta 0.1 a/carts/beta.moy
+create Alpha 1.1 a/carts/alpha.moy
+create Gamma 2.1 a/carts/gamma.moy
+catalogue Alpha=1.1 Beta=0.1 Gamma=2.1
+rescan Alpha=1.1 Beta=0.1 Gamma=2.1
+entry 1.1 ['cfg', 'h', 'title']
+load 1.1 Alpha 24 True
+path a/carts/beta.moy True True
+new New Cart 3.1
+duplicate Alpha copy 4.1 True
+shelf Alpha=1.1 Alpha copy=4.1 Beta=0.1 Gamma=2.1 New Cart=3.1
+delete False STALE STALE STALE STALE STALE
+folder gone True
+reuse 4.2 old 4.1 STALE
+behind True None None
+shelf Alpha=1.1 Beta=0.1 Delta=4.2 New Cart=3.1
+reconciled False STALE
+unlisted [] True True
+other store Other=2.2 False STALE
+back Alpha=0.2 Beta=1.2 Delta=3.2 New Cart=4.3
+forged STALE False
+forged STALE False
+forged STALE False
+forged STALE False
+junk TYPE False
+junk TYPE False
+full 4096 OSERROR 28
+refill 9.2 0
+ints True True
+"""
+
+
+def _store_trace(exe, tmp_path, tag):
+    root = tmp_path / tag
+    root.mkdir()
+    script = tmp_path / ("store_%s.py" % tag)
+    script.write_text(STORE_DRIVER.replace("@RUNTIME@", repr(str(ROOT / "runtime")))
+                      .replace("@ROOT@", repr(str(root))))
+    out = subprocess.run([exe, str(script)], capture_output=True, text=True,
+                         timeout=180)
+    assert out.returncode == 0, out.stderr or out.stdout
+    lines = out.stdout.strip().splitlines()
+    assert lines and lines[-1] == "DRIVER_DONE", out.stdout
+    return [line[2:] for line in lines if line.startswith("T ")]
+
+
+def _first_difference(got, want):
+    for i, (a, b) in enumerate(zip(got, want)):
+        if a != b:
+            return "line %d:\n  got:  %s\n  want: %s" % (i + 1, a, b)
+    return "lengths %d vs %d" % (len(got), len(want))
+
+
+def test_store_trace_is_the_interface_on_every_vm(tmp_path):
+    want = STORE_TRACE.splitlines()
+    py = _store_trace(sys.executable, tmp_path, "cpython")
+    assert py == want, "the store trace moved: " + _first_difference(py, want)
+    exe = require_unix_mp(
+        why="This is the store interface's pin on the VM a board runs: the "
+            "handle values, the stale-handle refusals and the reconcile, "
+            "replayed where the native store will be swapped in.")
+    mp = _store_trace(exe, tmp_path, "micropython")
+    assert mp == want, "MicroPython diverges: " + _first_difference(mp, want)
+    board = find_unix_mp(board_model=True)
+    if board is not None:
+        b32 = _store_trace(board, tmp_path, "board_model")
+        assert b32 == want, ("the 32-bit object model diverges: "
+                             + _first_difference(b32, want))

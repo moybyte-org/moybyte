@@ -83,6 +83,12 @@ to whoever called it.
 - **`runtime/moy_carts.py` is the `.moy` store** (and the #108 user-files layer
   beside it, and the per-project undo journal). The file lists its verbs; the
   decisions behind it:
+  - **A CART is reached by handle, through `runtime/moy_catalogue.py`** -- the
+    shelf's scan, a whole-cart load, create, duplicate and delete -- and every
+    cart dict it returns carries its index handle as `"h"`. A path names a FILE
+    (the save_* verbs, the journal, the sync wire). Calling moy_carts' own
+    catalogue/load/create/duplicate/delete from outside the store is the line
+    the native kernel's sprint 1b crosses on, and a test fails it.
   - **No SAVE button, no dirty star, ever** (#111). Commits fire on a typing-idle
     debounce and on EVERY exit path.
   - **Undo is scoped to the active tab's file(s), never another tab's.** The one
