@@ -442,6 +442,17 @@ def native_dest(board_dir):
     return cfg.get("native", {}).get("dest", "native/.staged")
 
 
+# What a native source dir may hold that was GENERATED for another build (the
+# desktop binary's `moy_web_blob.gen.c`, written there by `make
+# unix-micropython`). Never staged: the copy keeps the source's mtime, so a
+# generated file would arrive carrying the time it was last written for someone
+# else -- older than the object a previous board build compiled from different
+# text -- and the generator, finding the text already right, leaves it. ninja
+# then keeps that object, and a removed web bundle ships as the old blob. The
+# board's build generates these into the staged copy, new every build.
+GENERATED = "*.gen.*"
+
+
 def stage_native(board_dir, root=ROOT, quiet=False):
     """Stage the shared native modules into <board>/<native.dest> and write the
     cmake include list the board's tracked native/micropython.cmake pulls in.
@@ -474,7 +485,8 @@ def stage_native(board_dir, root=ROOT, quiet=False):
              "target_compile_definitions(usermod INTERFACE NDEBUG)"]
     for m, src in mods:
         shutil.copytree(src, dest / m,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc",
+                                                      GENERATED))
         lines.append("include(${CMAKE_CURRENT_LIST_DIR}/%s/micropython.cmake)"
                      % m)
     mods = [m for m, _src in mods]

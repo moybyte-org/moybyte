@@ -417,6 +417,48 @@ def test_stage_native_produces_the_declared_tree(tmp_path, board):
     assert not (staged / "moy_stray").exists()
 
 
+def test_a_generated_file_is_not_staged_with_its_old_timestamp(
+        tmp_path, monkeypatch):
+    """A removed web bundle shipped as the old blob. The desktop build leaves
+    `moy_web_blob.gen.c` in `native/moy_web/` (here the empty table, written
+    long ago); the stager copied it with its mtime, the generator found its text
+    already right and left it, and ninja -- seeing a source older than the
+    object a previous board build made from the full blob -- kept that object.
+    The staged tree carries no generated file, so the generator writes a new
+    one and it is newer than any object built before it."""
+    import os
+    import time
+    from tools import gen_web_blob
+
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("MOYBYTE_REQUIRE_WEB_BUNDLE", "0")
+    root = tmp_path / "root"
+    shutil.copytree(ROOT / "native" / "moy_web", root / "native" / "moy_web")
+    empty = tmp_path / "no_dist"
+    empty.mkdir()
+    source = root / "native" / "moy_web" / "moy_web_blob.gen.c"
+    assert gen_web_blob.main(["--dist", str(empty), "--out", str(source),
+                              "--quiet"]) == 0
+    os.utime(source, (1, 1))
+
+    work = tmp_path / "board"
+    work.mkdir()
+    (work / "board.toml").write_text('[native.shared]\nsource = "native"\n',
+                                     encoding="utf-8")
+    assert board_config.stage_native(work, root, quiet=True) == ["moy_web"]
+    staged = work / "native" / ".staged" / "moy_web"
+    assert (staged / "modmoy_web.c").exists()
+    assert not (staged / "moy_web_blob.gen.c").exists(), \
+        "a generated file was staged with the mtime it was last written at"
+
+    object_built_at = time.time() - 100
+    out = staged / "moy_web_blob.gen.c"
+    assert gen_web_blob.main(["--dist", str(empty), "--out", str(out),
+                              "--quiet"]) == 0
+    assert out.stat().st_mtime > object_built_at, \
+        "the generated file is older than the object built before it"
+
+
 def test_the_p4_denies_exactly_its_missing_hardware():
     """The P4's denials are the hand-cp list build.sh used to encode silently:
     no SD in play, ES8311 audio still open (#82), and no banded flush at all --

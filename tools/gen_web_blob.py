@@ -29,9 +29,15 @@ Usage (both boards' build.sh call this before staging the module):
 
     tools/gen_web_blob.py --out <native>/moy_web/moy_web_blob.gen.c [--require]
 
-With no bundle built it emits an EMPTY table and says so loudly; `--require`
-(set by CI and by `MOYBYTE_REQUIRE_WEB_BUNDLE=1`) makes that a hard failure
-instead. The default is soft because building the bundle needs emsdk (~1.7 GB)
+With no usable bundle it emits an EMPTY table and says so loudly -- that is
+the stated meaning of a missing bundle, the same image a `--no-web` worktree
+builds -- and `--require` (set by CI and by `MOYBYTE_REQUIRE_WEB_BUNDLE=1`)
+makes it a hard failure instead. "Usable" is decided by the bytes: every asset's
+raw file is present, and a `.gz` beside it inflates to exactly that file (a `.gz`
+left behind by a removed bundle, or one a half-finished build did not refresh,
+is not a bundle). The output file is rewritten whenever its text differs, and
+its text carries each asset's digest, so what is baked never depends on a file's
+timestamp. The default is soft because building the bundle needs emsdk (~1.7 GB)
 and a firmware flash is the daily loop -- but an image published to a device
 must never be the one that quietly has no console, which is what --require is
 for. Same doctrine as `MOYBYTE_REQUIRE_UNIX_MP` (.claude/rules/testing.md).
@@ -40,10 +46,12 @@ for. Same doctrine as `MOYBYTE_REQUIRE_UNIX_MP` (.claude/rules/testing.md).
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import importlib.util
 import os
 import sys
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import board_config                                              # noqa: E402
@@ -80,21 +88,52 @@ def asset_names():
     return list(mod.ASSETS)
 
 
-def pick(dist, name):
-    """(path, served_name) for one asset -- the .gz if there is one.
+def _read(path):
+    with open(path, "rb") as f:
+        return f.read()
 
-    The board serves `<name>.gz` with `Content-Encoding: gzip` and the browser
-    inflates it, so the gz is what gets baked; the served name keeps the `.gz`
-    suffix exactly as the on-storage lookup does, which is what lets
-    `_asset()` use one rule for both sources.
+
+def _gz_matches(gz, raw):
+    """True when `gz` inflates to exactly the bytes of `raw`."""
+    try:
+        return gzip.decompress(_read(gz)) == _read(raw)
+    except (OSError, EOFError, zlib.error):
+        return False
+
+
+def pick(dist, name):
+    """(path, served_name) for one asset, or (None, None) when the bundle has
+    no usable copy of it.
+
+    The RAW file is the bundle -- it is what the web build copies into `dist/`
+    -- and the `.gz` beside it is derived from it. The board serves
+    `<name>.gz` with `Content-Encoding: gzip` and the browser inflates it, so
+    the gz is what gets baked when it IS that file's gzip, and the served name
+    keeps the `.gz` suffix exactly as the on-storage lookup does, which is what
+    lets `_asset()` use one rule for both sources.
+
+    Decided by CONTENT, never by which file exists or is newer: a `.gz` whose
+    raw file is gone is the leftover of a bundle that was removed (baking it
+    ships a console nobody has built in a while), and a `.gz` that does not
+    inflate to the raw file beside it is a build that stopped between the two.
+    Neither is a bundle. A raw file with no `.gz` bakes as it is.
     """
     gz = os.path.join(dist, name + ".gz")
-    if os.path.exists(gz):
-        return gz, name + ".gz"
     raw = os.path.join(dist, name)
-    if os.path.exists(raw):
-        return raw, name
-    return None, None
+    if not os.path.exists(raw):
+        return None, None
+    if os.path.exists(gz):
+        return (gz, name + ".gz") if _gz_matches(gz, raw) else (None, None)
+    return raw, name
+
+
+def diagnose(dist, name):
+    """Why `pick` found nothing for `name`, as a phrase for the build log."""
+    if not os.path.exists(os.path.join(dist, name)):
+        if os.path.exists(os.path.join(dist, name + ".gz")):
+            return "%s (only its .gz is there; the file it came from is gone)" % name
+        return name
+    return "%s (its .gz is not the gzip of the file beside it)" % name
 
 
 def collect(dist):
@@ -109,7 +148,7 @@ def collect(dist):
         if path is None:
             missing.append(name)
             continue
-        data = open(path, "rb").read()
+        data = _read(path)
         out.append((served, path, len(data), hashlib.sha256(data).hexdigest()))
     if missing:
         return [], missing
@@ -282,8 +321,8 @@ def main(argv=None):
 
     assets, missing = collect(args.dist)
     if missing:
-        msg = ("no web console to bake into this image: %s missing from %s"
-               % (", ".join(missing), args.dist))
+        msg = ("no web console to bake into this image: %s unusable in %s"
+               % (", ".join(diagnose(args.dist, n) for n in missing), args.dist))
         # Strict under CI unless explicitly opted out: an image PUBLISHED to a
         # device must never be the one that quietly has no console, which is
         # the whole failure this feature exists to end. A local flash is the
