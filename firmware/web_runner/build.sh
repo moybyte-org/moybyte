@@ -65,25 +65,20 @@ if [ "${STAGE_ONLY}" = "0" ]; then
     git clone --quiet https://github.com/emscripten-core/emsdk.git "${EMSDK_DIR}"
     (cd "${EMSDK_DIR}" && ./emsdk install latest && ./emsdk activate latest)
   fi
-  if [ ! -d "${MPY_DIR}" ]; then
-    # Prefer the P4 target's existing local checkout (same tag) to skip the network.
-    P4_MPY="${REPO_ROOT}/firmware/esp32_p4_wifi6_touch_lcd_7b/.build/micropython"
-    if [ -d "${P4_MPY}" ]; then
-      echo "== cloning micropython ${MPY_TAG} (local, from the P4 checkout)"
-      git clone --quiet "${P4_MPY}" "${MPY_DIR}"
-    else
-      echo "== cloning micropython ${MPY_TAG}"
-      git clone --depth 1 -b "${MPY_TAG}" --quiet \
-        https://github.com/micropython/micropython "${MPY_DIR}"
-    fi
-  fi
-  # OUTSIDE the clone guard on purpose. Two reasons, both learned from the first
+  # Cloned when absent -- from the P4 target's local checkout when it has one,
+  # which skips the network -- and, on every run, put at MPY_TAG: a tree at
+  # another tag is reset to stock (the patches below re-apply), never compiled.
+  bash "${REPO_ROOT}/tools/mpy_tree.sh" "${MPY_DIR}" "${MPY_TAG}" \
+    "${REPO_ROOT}/firmware/esp32_p4_wifi6_touch_lcd_7b/.build/micropython"
+  # SEPARATE from the clone on purpose. Three reasons, both learned from the first
   # Pages deploy: `--quiet` has to precede the path (after it, git reads it as a
   # second pathspec and dies with "pathspec '--quiet' did not match"), and a
   # checkout can exist WITHOUT its submodule -- which is exactly what that failed
   # run left in the CI cache, since the clone succeeded and only this line broke.
   # Guarding it meant a half-built .build/ could never repair itself. It is a
   # no-op once the submodule is there, so running it every build costs nothing.
+  # (Third: a tree just reset to another tag carries that tag's pin, which
+  # only this moves the submodule to.)
   (cd "${MPY_DIR}" && git submodule update --init --quiet lib/micropython-lib)
 
   # Port patches (idempotent -- grep-guarded).

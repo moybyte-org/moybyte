@@ -72,6 +72,11 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   `git checkout` of the header alone (2026-09-23) left `main.c` patched, a
   `.rej` behind, and the build stopped before REPR_C re-applied. Reset the two
   together, delete any `.rej`, rebuild: every patcher is idempotent from stock.
+- **`MPY_TAG` is a property of the tree, checked every build.** Each `build.sh`
+  (and `make unix-micropython`) runs `tools/mpy_tree.sh`: a tree at another
+  commit than the tag's is reset to stock at the tag (patches gone, the
+  patchers re-apply them) and a tag it cannot get fails the build. Same tag: a
+  silent no-op, patches and objects kept.
 - **A build runs in a worktree, never the main checkout.** The main
   checkout's `dist/` and board `.build/` trees are the images every other
   session flashes, and a build there overwrites them (it happened twice before

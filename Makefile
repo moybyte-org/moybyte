@@ -237,11 +237,11 @@ unix-micropython:
 # where no wasm bundle exists -- and "this image has no browser console" is not
 # news about a test binary that is not an image.
 	@MOYBYTE_REQUIRE_WEB_BUNDLE=0 $(PYTHON) tools/gen_web_blob.py --quiet >/dev/null
-	@test -d $(UNIX_MP_SRC)/.git || git clone --depth 1 --branch $(UNIX_MP_TAG) \
-	    --quiet https://github.com/micropython/micropython $(UNIX_MP_SRC)
-# Outside the clone guard on purpose (the web runner's build.sh learned the
+	@bash tools/mpy_tree.sh $(UNIX_MP_SRC) $(UNIX_MP_TAG)
+# Separate from the clone on purpose (the web runner's build.sh learned the
 # same lesson): a checkout can exist WITHOUT its submodules if a previous run
-# died between the two, and a guarded init could never repair that.
+# died between the two, and a guarded init could never repair that. It is also
+# what moves them to the pins of a tag the tree was just reset to.
 	@cd $(UNIX_MP_SRC) && git submodule update --init --depth 1 --quiet \
 	    lib/micropython-lib lib/berkeley-db-1.xx
 # Symlinks, not copies: the modules under test must be the working tree's, or

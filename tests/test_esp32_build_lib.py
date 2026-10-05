@@ -15,8 +15,9 @@ here, in bash, against temp trees -- nothing is transcribed into Python.
 
 WHAT CANNOT RUN HERE, said out loud rather than left as a gap:
 
-  * `moybyte_clone_micropython` / `moybyte_setup_idf` / `moybyte_build_and_collect`
-    clone ~500MB and invoke a cross toolchain.
+  * `moybyte_setup_idf` / `moybyte_build_and_collect` clone ~500MB and invoke a
+    cross toolchain. (`moybyte_clone_micropython` runs in `test_mpy_tree.py`,
+    against a local repository standing in for upstream.)
   * the APPLY half of the three `patch` helpers needs the real upstream tree the
     diffs were cut against; their GUARD half (the idempotence that makes a warm
     rebuild a no-op) is what runs below.

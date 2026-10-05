@@ -33,13 +33,12 @@ moybyte_resolve_build_python() {
   fi
 }
 
-# Clone mainline MicroPython at the pinned tag into MPY_DIR (idempotent).
+# Mainline MicroPython at MPY_TAG in MPY_DIR: cloned when absent, and a warm
+# tree whose commit is not the tag's is reset to stock MPY_TAG (the patchers
+# below are idempotent from stock) or the build fails -- tools/mpy_tree.sh says
+# how and why. A no-op, and silent, when the tree is already at the tag.
 moybyte_clone_micropython() {
-  if [ ! -d "${MPY_DIR}" ]; then
-    echo "== cloning micropython ${MPY_TAG}"
-    git clone --depth 1 -b "${MPY_TAG}" \
-      https://github.com/micropython/micropython "${MPY_DIR}"
-  fi
+  bash "${REPO_ROOT}/tools/mpy_tree.sh" "${MPY_DIR}" "${MPY_TAG}"
 }
 
 # Resolve + activate ESP-IDF v5.5.1 for $1 (the idf.py target, e.g. esp32s3).
