@@ -836,8 +836,8 @@ board stands against each value, are #224's.
   `39b7186`), on each console board with the census's stores.
 
 The Guition S3 takes the same values. Its figures on its card after the
-catalogue fix are missing from #224, so its values were derived without them
-and are re-derived when they land.
+catalogue fix, fresh and after the scripted session, are #224's, and the
+values hold against them.
 
 ## 7. What it costs
 
