@@ -1,12 +1,13 @@
 # The native kernel — the OS below the app verb table, Python as an app runtime (2026-09)
 
-**Status: DRAFT rev 2, 2026-09-27.** The direction doc #224 asks for as its
+**Status: rev 2, 2026-09-27.** The direction doc #224 asks for as its
 first deliverable. Rev 1 went through the adversarial architecture and
 performance/hardware passes the same day (verdicts: **REWORK** / **PERF CASE
 STANDS WITH FIXES**); every finding is folded into this revision, and **§12 is
-the finding-by-finding ledger**. Nothing here is scheduled until the owner
-accepts it. It reverses a standing sentence — "MicroPython is the shell"
-(`docs/moycore_direction.md` §1) — which is why it is settled on paper first.
+the finding-by-finding ledger**. **Accepted by the owner 2026-10-05**; the
+sprints of §6 run in order, and where each one stands is #224's. It reverses a
+standing sentence — "MicroPython is the shell" (`docs/moycore_direction.md` §1)
+— which is why it was settled on paper first.
 **Tracks:** #224 (the direction) · #158 (the compiled tier; Doom on the floor
 board is the memory half's acceptance test) · #66 (heap and frame numbers) ·
 #186 (`moybuf`) · #58 (P4).
