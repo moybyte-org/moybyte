@@ -2228,6 +2228,73 @@ def test_blit_game_composites_itself_when_the_geometry_is_refused():
     assert comp.calls == [("fold_fence",)]
 
 
+class _AllocRegistry:
+    """A fake `moy_alloc` with the C registry's teeth: free() refuses a
+    buffer alloc() did not hand out, or one already freed. Both verbs log
+    into the compositor's call list, so their order against the fence shows."""
+
+    MEMORY_SPIRAM = 0x400
+    MEMORY_DMA = 0x8
+
+    def __init__(self, log):
+        self.live = {}
+        self.log = log
+
+    def alloc(self, n, caps):
+        buf = bytearray(n)
+        self.live[id(buf)] = buf
+        self.log.append(("alloc", n))
+        return buf
+
+    def free(self, buf):
+        if self.live.pop(id(buf), None) is None:
+            raise ValueError("not a live alloc() buffer")
+        self.log.append(("free", len(buf)))
+
+
+def test_a_scratch_a_new_geometry_replaces_is_given_back(monkeypatch):
+    """The fold's snapshot scratch and the view crop's are off-heap: nothing
+    collects them, so the canvas that replaces one frees it. Dropped instead,
+    every switch between a scaled 128x128 cart and a 320x240 one on the
+    Guition S3 lost the scratch it replaced (153,600 or 32,768 B, without
+    bound: the sprint 0 census, #224). The snapshot scratch is freed AFTER
+    the fence -- no feed reads it then -- and before its successor is
+    allocated, so the successor can take the same memory."""
+    m = _load_device_canvas()
+    comp = _FoldingFakeComp(480, 320)
+    reg = _AllocRegistry(comp.calls)
+    monkeypatch.setitem(sys.modules, "moy_alloc", reg)
+    sc = m.DeviceCanvas(comp)
+    small = m.DeviceCanvas(_FakeComp(128, 128))
+    big = m.DeviceCanvas(_FakeComp(320, 240))
+
+    sc.blit_game(small, 112, 32, 2)
+    assert [c[0] for c in comp.calls] == ["fold_fence", "alloc", "snap"]
+    for _ in range(10):
+        comp.calls.clear()
+        sc.blit_game(big, 80, 40, 1)
+        assert comp.calls[:3] == [("fold_fence",), ("free", 128 * 128 * 2),
+                                  ("alloc", 320 * 240 * 2)]
+        comp.calls.clear()
+        sc.blit_game(small, 112, 32, 2)
+        assert comp.calls[:3] == [("fold_fence",), ("free", 320 * 240 * 2),
+                                  ("alloc", 128 * 128 * 2)]
+        assert list(reg.live.values()) == [sc._snap_scratch.framebuffer()]
+    comp.calls.clear()
+    sc.blit_game(small, 112, 32, 2)               # same geometry: reused
+    assert [c[0] for c in comp.calls] == ["fold_fence", "snap"]
+
+    # A refused fold composites through the view crop, whose scratch is
+    # replaced on the same rule; at most one of each is ever live.
+    comp.refuse = True
+    for _ in range(5):
+        for crop in ((0, 4, 128, 120), (16, 14, 96, 100)):
+            sc.blit_game(small, 112, 32, 2, src=crop)
+            assert sorted(len(b) for b in reg.live.values()) == sorted(
+                (128 * crop[3] * 2, crop[2] * crop[3] * 2))
+    assert sc._view_scratch.framebuffer() is not None
+
+
 def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
     """#186: the two off-heap lanes must never both hold one buffer.
 

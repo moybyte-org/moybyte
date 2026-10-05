@@ -1556,6 +1556,12 @@ class DeviceCanvas:
             comp.fold_fence()
             scr = self._snap_scratch
             if scr is None or scr._w != gw or scr._h != vh:
+                # A new geometry: give the old scratch back (off-heap, no
+                # collector). The fence above means no feed reads it and its
+                # snapshot has landed, and every arm is consumed by the
+                # flush of the frame that made it, so no latch holds it.
+                if scr is not None:
+                    scr.release()
                 scr = self._snap_scratch = _LayerComp(gw, vh, g)
             try:
                 if snap(src_buf, sy * gw * 2, scr.framebuffer(), vw, vh, sx, gw,
@@ -1567,6 +1573,8 @@ class DeviceCanvas:
         if sx or sy or vw != gw or vh != gh:
             scr = self._view_scratch
             if scr is None or scr._w != vw or scr._h != vh:
+                if scr is not None:
+                    scr.release()      # read only by the synchronous blit below
                 scr = self._view_scratch = _LayerComp(vw, vh, g)
             g.blit565(scr.framebuffer(), vw, vh, -sx, -sy,
                       src_buf, gw, gh, -1)

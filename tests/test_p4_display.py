@@ -1370,6 +1370,66 @@ def test_a_layer_gives_its_off_heap_buffer_back_on_release():
     assert comp3._buf is None
 
 
+def test_the_view_crop_a_new_view_replaces_is_given_back(monkeypatch):
+    """The P4's cart-view crop is an off-heap layer, so the canvas that
+    replaces it for a new view frees it, once no PPA op of the last frame
+    still reads it. Dropped instead, every change of view lost the old crop
+    for good -- the S3 fold's scratch leak (#224) in the P4's own spelling."""
+    import importlib.util as ilu
+    from runtime import host_canvas
+    log = []
+
+    class FakeAlloc:
+        MEMORY_SPIRAM = 1
+        MEMORY_DMA = 2
+
+        def __init__(self):
+            self.live = {}
+
+        def alloc(self, n, caps=1):
+            buf = memoryview(bytearray(n))
+            self.live[id(buf)] = buf
+            log.append(("alloc", n))
+            return buf
+
+        def free(self, view):
+            if self.live.pop(id(view), None) is None:
+                raise ValueError("not a live alloc() buffer")
+            log.append(("free", len(view)))
+
+    class FakePPA:
+        def sync(self):
+            log.append(("sync",))
+
+    fake = FakeAlloc()
+    monkeypatch.setitem(sys.modules, "moy_alloc", fake)
+    monkeypatch.setitem(sys.modules, "lcd_bus", None)
+    host_canvas.install()
+    spec = ilu.spec_from_file_location("p4_canvas_under_test", DEVICE / "p4_canvas.py")
+    mod = ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cv = mod.P4SystemCanvas(host_canvas.HostCompositor(320, 200), font_scale=1)
+    cv._ppa = FakePPA()
+    cv._blit_game_full = lambda *a, **k: None   # the crop's lifecycle only
+    gc = cv.new_layer(128, 128)
+    log.clear()
+    cv.blit_game(gc, 0, 0, 1, src=(0, 4, 128, 120))
+    assert log == [("alloc", 128 * 120 * 2)]
+    for _ in range(5):
+        log.clear()
+        cv.blit_game(gc, 0, 0, 1, src=(16, 14, 96, 100))
+        assert log == [("sync",), ("free", 128 * 120 * 2),
+                       ("alloc", 96 * 100 * 2)]
+        log.clear()
+        cv.blit_game(gc, 0, 0, 1, src=(0, 4, 128, 120))
+        assert log == [("sync",), ("free", 96 * 100 * 2),
+                       ("alloc", 128 * 120 * 2)]
+    log.clear()
+    cv.blit_game(gc, 0, 0, 1, src=(0, 4, 128, 120))   # same view: reused
+    assert log == []
+    assert len(fake.live) == 2                          # the game layer + one crop
+
+
 def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
     """A paint-buffer block of BOUNCE_MIN_PX or more goes through
     moy_ppa.rotate_bounce, whose transaction count is what the present must

@@ -204,6 +204,12 @@ class P4SystemCanvas(SystemCanvas):
             sx, sy, vw, vh = src
             scr = self._view_crop
             if scr is None or scr.w != vw or scr.h != vh:
+                if scr is not None:
+                    # Off-heap, no collector: give it back once no PPA op of
+                    # the last frame still reads it.
+                    if self._ppa is not None:
+                        self._ppa.sync()
+                    scr.release()
                 scr = self._view_crop = self.new_layer(vw, vh)
             self._gfx.blit565(scr._buf, vw, vh, -sx, -sy,
                               gc._buf, gc.w, gc.h, -1)
