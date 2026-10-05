@@ -223,8 +223,13 @@ UNIX_MP_NATIVE := native
 # must stay read-only, which is the kind of thing that otherwise fails first on
 # glass. Its blob table is generated (see the recipe below). moy_png is the
 # cover reader, here so tests/test_cover_png.py holds the boards' C to the
-# host's Python reader and to moy-spec's vectors.
-UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png
+# host's Python reader and to moy-spec's vectors. moy_index is the store's
+# native index, built as the twin UNIX_MP_INDEX names (tools/moy_index_spike.py
+# has the hook): it registers extensible, so a run with runtime/ on its path
+# still imports runtime/moy_index.py, and tests/test_moy_index_twins.py and the
+# store trace reach the native one with the path emptied.
+UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png moy_index
+UNIX_MP_INDEX ?= c
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 
 .PHONY: unix-micropython
@@ -257,6 +262,9 @@ unix-micropython:
 # cost a confused half hour when moy_web landed with a `names()` verb.
 # Regenerating is ~5s and only happens when a usermod source actually changed.
 	@for b in build-moybyte build-moybyte-r32; do \
+	  s=$(UNIX_MP_SRC)/ports/unix/$$b/moy_index_impl; \
+	  if [ -d "$$(dirname $$s)" ] && [ "$$(cat $$s 2>/dev/null || echo c)" != "$(UNIX_MP_INDEX)" ]; then \
+	    rm -rf $(UNIX_MP_SRC)/ports/unix/$$b/genhdr; fi; \
 	  f=$(UNIX_MP_SRC)/ports/unix/$$b/frozen_content.c; \
 	  if [ -f "$$f" ] && [ -n "$$(find -L $(UNIX_MP_USERMODS)/ -name '*.[ch]' \
 	      -newer "$$f" -print -quit 2>/dev/null)" ]; then rm -f "$$f"; fi; done
@@ -264,14 +272,18 @@ unix-micropython:
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
 	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1 \
+	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) MOY_INDEX_RUST_LIB=$(MOY_INDEX_RUST_LIB) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
+	@echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_index_impl
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 	@if echo 'int main(void){return 0;}' | cc -m32 -x c - -o /dev/null 2>/dev/null; then \
 	  $(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 MICROPY_PY_BTREE=0 \
 	    MICROPY_FORCE_32BIT=1 BUILD=build-moybyte-r32 \
 	    CFLAGS_EXTRA="$(UNIX_MP_R32_CFLAGS)" \
+	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) MOY_INDEX_RUST_LIB=$(MOY_INDEX_RUST_LIB_R32) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS) && \
+	  echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-r32/moy_index_impl && \
 	  echo "...and in the boards' object model (32-bit, REPR_C): $(UNIX_MP_R32)"; \
 	else \
 	  echo "no 32-bit C toolchain (gcc-multilib): the boards' object-model build is skipped"; \

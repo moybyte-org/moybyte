@@ -184,6 +184,13 @@ PYEOF
   cp -r "${REPO_ROOT}/native/moy_png" \
         "${USERMODS_DIR}/moy_png"
 
+  # moy_index usermod: the store's native index. Its fragment compiles a twin
+  # only when MOY_INDEX_IMPL names one (tools/moy_index_spike.py's header), and
+  # board_config's stage below then leaves runtime/moy_index.py out; unset, it
+  # adds nothing.
+  cp -r "${REPO_ROOT}/native/moy_index" \
+        "${USERMODS_DIR}/moy_index"
+
   # moy_wasm_web usermod: the browser's compiled-cart ENGINE -- the session
   # surface the boards' WAMR engine implements, over the page's own
   # WebAssembly engine (the cart is a sibling module the worker instantiates;
@@ -384,8 +391,18 @@ EOF
   # shellcheck disable=SC1091
   source "${EMSDK_DIR}/emsdk_env.sh" >/dev/null 2>&1
   make -C "${MPY_DIR}/mpy-cross" -j"$(nproc)" >/dev/null
+  # MicroPython keeps a source's generated qstr and module entries until that
+  # source is preprocessed again, so a build that drops a usermod source
+  # (MOY_INDEX_IMPL back to py) would link a module table naming code it no
+  # longer has. A changed hook starts the generated headers afresh.
+  INDEX_STAMP="${PORT_DIR}/build-moybyte/moy_index_impl"
+  INDEX_HOOK="${MOY_INDEX_IMPL:-py}${MOY_INDEX_BENCH:++bench}"
+  if [ "$(cat "${INDEX_STAMP}" 2>/dev/null || echo py)" != "${INDEX_HOOK}" ]; then
+    rm -rf "${PORT_DIR}/build-moybyte/genhdr"
+  fi
   make -C "${PORT_DIR}" VARIANT=moybyte USER_C_MODULES="${USERMODS_DIR}" \
     FROZEN_MANIFEST="${BUILD_DIR}/frozen_manifest.py" -j"$(nproc)" >/dev/null
+  echo "${INDEX_HOOK}" > "${INDEX_STAMP}"
 fi
 
 # ---------------------------------------------------------------------------

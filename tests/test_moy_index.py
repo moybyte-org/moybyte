@@ -1,12 +1,14 @@
 """The store's index (runtime/moy_index.py): the interface sprint 1a writes in
 Rust and in C, pinned once for every binding.
 
-`BINDINGS` names each implementation by a factory for an empty table. Today it
-is the Python twin; the 1a spike adds its native builds here (through ctypes)
-and every test below runs against each, unchanged -- the parity the 1b gate
-asks for. The same calls run on the boards' VM in
-tests/test_semantic_traces.py's store trace, whose log also pins the handle
-VALUES, so a binding that hands out different numbers fails there too.
+`BINDINGS` names each implementation by a factory for an empty table: the
+Python twin, and the native twins over the host's C ABI through ctypes
+(tools/moy_index_spike.py: the C twin always, the Rust twin under
+MOY_INDEX_IMPL=rust). Every test below runs against each, unchanged -- the
+parity the 1b gate asks for. tests/test_moy_index_twins.py runs this same file
+on the boards' VM over the native module, and tests/test_semantic_traces.py's
+store trace pins the handle VALUES, so a binding that hands out different
+numbers fails there too.
 
 What a binding must do, in the order the tests below say it:
 
@@ -28,6 +30,13 @@ from runtime import moy_index
 from runtime.moy_index import GEN_MAX, SLOT_BITS, SLOTS, StaleHandle
 
 BINDINGS = {"python": moy_index.Index}
+
+try:
+    from tools import moy_index_spike
+except ImportError:         # the VM's run of this file has no tools/
+    moy_index_spike = None
+if moy_index_spike is not None:
+    BINDINGS.update(moy_index_spike.host_bindings())
 
 
 @pytest.fixture(params=sorted(BINDINGS))

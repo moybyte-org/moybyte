@@ -72,7 +72,8 @@ second store displacing the first, forged and non-int handles, a full index
 values are slot.generation, so the allocation order is part of the contract a
 native binding must keep, not an accident of this one. Mutation-tested: the
 generation bump on release, lowest-free-first reuse, the reconcile's release
-and the unlisted root's no-op each turn it red.
+and the unlisted root's no-op each turn it red. The same log is pinned over the
+native index (sprint 1a's twin, native/moy_index) on both object models.
 """
 
 import shutil
@@ -757,12 +758,25 @@ ints True True
 """
 
 
-def _store_trace(exe, tmp_path, tag):
+# Run ahead of STORE_DRIVER, it puts the NATIVE index under every import of
+# moy_index: the extensible builtin, reached with the path emptied and then
+# registered so runtime/moy_index.py never loads (modmoy_index.c's header).
+NATIVE_INDEX = r'''import sys
+_path = sys.path[:]
+sys.path[:] = []
+import moy_index
+sys.path[:] = _path
+assert not hasattr(moy_index, "__file__"), "no native moy_index in this binary"
+sys.modules["moy_index"] = moy_index
+'''
+
+
+def _store_trace(exe, tmp_path, tag, prelude=""):
     root = tmp_path / tag
     root.mkdir()
     script = tmp_path / ("store_%s.py" % tag)
-    script.write_text(STORE_DRIVER.replace("@RUNTIME@", repr(str(ROOT / "runtime")))
-                      .replace("@ROOT@", repr(str(root))))
+    script.write_text(prelude + STORE_DRIVER.replace(
+        "@RUNTIME@", repr(str(ROOT / "runtime"))).replace("@ROOT@", repr(str(root))))
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
     assert out.returncode == 0, out.stderr or out.stdout
@@ -793,3 +807,21 @@ def test_store_trace_is_the_interface_on_every_vm(tmp_path):
         b32 = _store_trace(board, tmp_path, "board_model")
         assert b32 == want, ("the 32-bit object model diverges: "
                              + _first_difference(b32, want))
+
+
+def test_store_trace_holds_over_the_native_index(tmp_path):
+    """The same session over the native index (sprint 1a's twin, whichever
+    `make unix-micropython` built in), on both object models: the log must be
+    STORE_TRACE line for line."""
+    want = STORE_TRACE.splitlines()
+    exe = require_unix_mp(
+        "moy_index",
+        why="The native store index's parity with the Python one on the VM "
+            "a board runs: the handle values, refusals and reconcile.")
+    mp = _store_trace(exe, tmp_path, "native", NATIVE_INDEX)
+    assert mp == want, "the native index diverges: " + _first_difference(mp, want)
+    board = find_unix_mp("moy_index", board_model=True)
+    if board is not None:
+        b32 = _store_trace(board, tmp_path, "native_board_model", NATIVE_INDEX)
+        assert b32 == want, ("the native index in the 32-bit object model "
+                             "diverges: " + _first_difference(b32, want))

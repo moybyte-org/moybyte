@@ -291,7 +291,7 @@ siblings' DENYLIST shape -- because `native/` really does default to yes: a new
 shared C module is a capability every board that has the hardware should get,
 and every denial below is the same sentence with different nouns.
 
-What crosses is exactly ONE module, `moy_web`, and it is the module that
+What crosses and compiles is ONE module, `moy_web`, and it is the module that
 justifies this board having an image at all: the browser console rides the
 firmware (a 627,373 B .incbin of the gzipped bundle) so the page a board serves
 cannot drift behind the board serving it. Until 2026-08-29 this board had no
@@ -299,6 +299,11 @@ image, so `moy_webhost`'s baked half was structurally unreachable here and the
 bundle was only ever a copy somebody pushed -- exactly the drift that baking it
 was introduced to end, one board late. A pushed copy still WINS at serve time;
 the image is the guarantee, not the ceiling (.claude/rules/web.md).
+
+`moy_index`, the store's native index, also stages and compiles to nothing:
+its fragment builds a twin only when a build sets MOY_INDEX_IMPL (sprint 1a's
+hook, tools/moy_index_spike.py), and this board is one of the five targets the
+twin must link into.
 
 Every module below is flash spent TWICE, once per OTA slot, which on 8MB is the
 difference between a table that fits and one that does not."""
