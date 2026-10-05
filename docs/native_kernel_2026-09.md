@@ -581,7 +581,7 @@ P4 rows matter only if a P4 ever stops its VM (§10 question 5).
 | the native-code arena | `esp_native_code_free_all`, in `MALLOC_CAP_EXEC` (internal) memory; extern by `patches/esp32_native_code_free.patch` for `moy_gfx.native_code_free_all` | freed after the sweep | the same | 0 |
 | the first heap area | `mp_task` allocates it before `soft_reset:` | reused, never freed | freed with the VM, allocated at start | 0 |
 | the VM's task | `mp_task` never returns; `mp_thread_init` binds thread 0 to it | lives forever | created at start, deleted at stop (its stack goes back to internal SRAM, §4.6); `mp_thread_init` at every start | 0 |
-| mounts and SD | `mp_init` empties the mount table and the port's `_boot.py` remounts flash. Guition S3: `machine.SDCard` (`firmware/guition_jc3248w535/modules/moy_runtime.py`), whose finaliser frees its SPI host at the sweep. T-Deck: `moy_sd` stays attached (`init` is idempotent) | remounted | the same until the gate is native; a failed Guition remount stays failed until a reboot (its README) | 3 |
+| mounts and SD | `mp_init` empties the mount table and the port's `_boot.py` remounts flash. Guition S3: `machine.SDCard` (`moy_runtime.tf_card`, mounted by `device/card_store.py`), whose finaliser frees its SPI host at the sweep. T-Deck: `moy_sd` stays attached (`init` is idempotent) | remounted | the same until the gate is native; a failed Guition remount stays failed until a reboot (its README) | 3 |
 | WiFi and its leases | the port never deinitialises the WLAN driver; the lease table (`Workstation.wifi_hold`) is Python | the radio left as it was | refused while a lease is held | 2 |
 | an OTA write | `device/moy_ota.py` streams into the inactive slot | — | refused while it runs | 2 |
 | ***Native tasks*** | | | | |

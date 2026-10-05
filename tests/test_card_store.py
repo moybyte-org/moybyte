@@ -10,8 +10,10 @@ never second-guessed. The module has no top-level imports, so the real file
 runs against the doubles below.
 """
 
+import re
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -249,3 +251,127 @@ def test_a_p4_board_stages_the_card_store(board, variant):
     root = Path(__file__).resolve().parent.parent
     assert "card_store.py" in board_config.staged_modules(
         root / "firmware" / board, root)
+
+
+# -- the two ESP32-S3 boards ---------------------------------------------------
+#
+# The Guition S3's card has an SPI host of its own (SPI3; the panel is QSPI on
+# SPI2), so it takes this module. The T-Deck's shares the panel's host and
+# keeps `moybyte_sd`: the one thing `mount` does that it must never do is hand
+# a host back after a failed mount, which on that board is the teardown that
+# hangs the next panel flush.
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+GUITION_S3 = ROOT_DIR / "firmware" / "guition_jc3248w535"
+TDECK = ROOT_DIR / "firmware" / "lilygo_t_deck_plus_mainline"
+
+
+def _header(board_dir, variant):
+    return (board_dir / "boards" / variant / "mpconfigboard.h").read_text()
+
+
+@pytest.mark.parametrize("board_dir,variant", [
+    (GUITION_S3, "MOYBYTE_GUITION_S3"),
+    (TDECK, "MOYBYTE_TDECK"),
+])
+def test_an_s3_board_builds_exfat(board_dir, variant):
+    """exFAT is FatFS's, not the card driver's: the T-Deck's moy_sd block device
+    reaches `vfs.mount` the same way, so a 64 GB card needs the define there too."""
+    assert re.search(r"#define\s+MICROPY_FATFS_EXFAT\s+\(1\)",
+                     _header(board_dir, variant)), variant
+
+
+def test_the_guition_s3_builds_the_card_driver():
+    assert re.search(r"#define\s+MICROPY_HW_ENABLE_SDCARD\s+\(1\)",
+                     _header(GUITION_S3, "MOYBYTE_GUITION_S3"))
+
+
+def test_the_guition_s3_stages_the_card_store_and_not_the_spi_attach():
+    from tools import board_config
+    staged = board_config.staged_modules(GUITION_S3, ROOT_DIR)
+    assert "card_store.py" in staged
+    assert "moybyte_sd.py" not in staged
+
+
+def test_the_tdeck_keeps_its_own_bracketed_mount():
+    """Its card shares the panel's SPI host: every store op runs in a session
+    that drains the panel, the card is attached ONCE and never torn down.
+    `card_store.mount` deinit()s on a failed mount, which is that teardown."""
+    from tools import board_config
+    staged = board_config.staged_modules(TDECK, ROOT_DIR)
+    assert "moybyte_sd.py" in staged
+    assert "card_store.py" not in staged
+    assert "card_store" not in (ROOT_DIR / "device" / "moybyte_sd.py").read_text()
+
+
+def _module_part(path, names):
+    """The shipped top-level assignments and functions `names` of a module that
+    cannot be imported on a host (its imports are generated or native), compiled
+    alone."""
+    import ast
+    tree = ast.parse(path.read_text())
+    keep = [n for n in tree.body
+            if (isinstance(n, ast.FunctionDef) and n.name in names)
+            or (isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id in names
+                        for t in n.targets))]
+    assert {getattr(n, "name", None) or n.targets[0].id for n in keep} == set(names)
+    ns = {}
+    exec(compile(ast.Module(keep, []), str(path), "exec"), ns)  # noqa: S102
+    return ns
+
+
+@pytest.fixture
+def guition(monkeypatch):
+    """The Guition's `tf_card` over a `machine.SDCard` that models the sdspi
+    singleton: a second construction while one is held fails exactly as the
+    board's did (ESP_ERR_INVALID_STATE) until `deinit()` frees the host."""
+    state = types.SimpleNamespace(held=None, built=[])
+
+    class SDCard:
+        def __init__(self, **kw):
+            if state.held is not None:
+                raise OSError(-259, "ESP_ERR_INVALID_STATE")
+            state.held = self
+            state.built.append(kw)
+
+        def deinit(self):
+            state.held = None
+
+    machine = types.ModuleType("machine")
+    machine.SDCard = SDCard
+    monkeypatch.setitem(sys.modules, "machine", machine)
+    state.mod = _module_part(GUITION_S3 / "modules" / "moy_runtime.py",
+                             ["SD_PINS", "SD_CARTS_ROOT", "tf_card"])
+    return state
+
+
+def test_the_guition_card_is_on_spi3_never_the_panels_host(guition):
+    """machine.SDCard's SPI slot numbers run opposite to the host numbers: slot
+    2 is SPI3 (the card's pins), slot 3 is SPI2, the panel's QSPI host."""
+    guition.mod["tf_card"]()
+    assert guition.built == [dict(slot=2, sck=12, mosi=11, miso=13, cs=10)]
+
+
+def test_a_failed_mount_frees_the_guitions_spi_host(guition, vfs):
+    """The mount fails with the card constructed: without `deinit()` every later
+    construction in the boot (the dev channel's included) reads
+    ESP_ERR_INVALID_STATE until a reboot."""
+    vfs.error = OSError(19)
+
+    assert card_store.mount(guition.mod["tf_card"], say=lambda _m: None) is False
+
+    assert guition.held is None
+    guition.mod["tf_card"]()            # constructs again
+
+
+@pytest.mark.parametrize("path,names", [
+    (GUITION_S3 / "modules" / "moy_runtime.py", ["SD_CARTS_ROOT"]),
+    (ROOT_DIR / "device" / "p4_desktop.py", ["SD_CARTS_ROOT"]),
+])
+def test_a_card_store_lives_where_the_t_deck_keeps_it(path, names):
+    """One layout on every board: the store is `moy_carts.CARTS_DIR`, and the
+    system documents beside it land in /sd/moybyte, not at the card's root."""
+    from runtime import moy_carts
+    root = _module_part(path, names)["SD_CARTS_ROOT"]
+    assert root == moy_carts.CARTS_DIR, path.name

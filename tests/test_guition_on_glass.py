@@ -36,8 +36,12 @@ def board():
 # the file on purpose: the comparison is against a fresh boot, and the wasm
 # block at the end brings the radios up. Measured 2026-09-25 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
-# internal SRAM.
-WASM_IDLE_BASELINE = (95507, 55296)
+# internal SRAM -- less EXFAT_SRAM, what FatFS's exFAT build holds in internal
+# SRAM at the idle desk (2026-10-05, the same image and a fresh boot:
+# 93091 free with it, 93731 without), so the guard keeps measuring the engine's
+# own cost.
+EXFAT_SRAM = 640
+WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM, 55296)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc3248w535"
 
 
@@ -298,6 +302,10 @@ def test_draw_gates_are_installed(board):
 
 def test_draw_gates_take_the_traffic(board):
     on_glass.draw_gates_take_the_traffic(board)
+
+
+def test_the_cart_store_is_the_card_when_one_mounted(board):
+    on_glass.cart_store_follows_the_card(board)
 
 
 def test_the_web_console_is_baked_into_this_image(board):

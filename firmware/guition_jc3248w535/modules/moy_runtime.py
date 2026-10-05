@@ -20,6 +20,7 @@ when not. Everything else -- the boot order, the service set, the frame loop
 """
 
 from mem_census import mark as _census
+from card_store import carts_loader
 from desktop_spine import build_desktop, bt_command
 # The seed roster, generated from system_carts/ at build time and PACKED
 # (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
@@ -50,72 +51,35 @@ PANEL_DIAGONAL_IN = 3.5        # the glass, in inches -- board.toml [panel] is t
 CARTS_ROOT = "/moy/carts"
 OTA_UPDATE_DIR = "/moy/update"
 
-# Stage 4 (owner call 2026-08-20): a TF card, when present, IS the cart store
-# (the T-Deck model -- removable, kid-swappable carts); no card degrades to the
-# internal-flash root above, exactly the store this board shipped with. The
-# slot is on its OWN SPI3 pins (community map, verified on this glass), nothing
-# shared with the panel's SPI2, so this is plain machine.SDCard + os.mount --
-# none of the T-Deck's moy_sd bus-sharing machinery applies. Deliberate: the
-# OTA directory (a copied image, the pending marker) and the BLE bond store
-# stay on the INTERNAL VFS (device identity, not cart data). A WiFi update
-# stages nothing: it streams into the inactive slot, because this VFS cannot
-# hold the image. Wifi credentials live beside
-# the carts and so follow the card -- the T-Deck accepts the same trade.
+# A TF card, when present, IS the cart store (the T-Deck model -- removable,
+# kid-swappable carts); no card, an unreadable one or a store that cannot be
+# seeded there all degrade to the internal-flash root above, exactly the store
+# this board shipped with. The mount is `device/card_store.py`'s, once at boot;
+# what is this board's is how the card is CONSTRUCTED. The slot is on its OWN
+# SPI3 pins (community map, verified on this glass), nothing shared with the
+# panel's QSPI on SPI2, so the card is plain machine.SDCard + vfs.mount and none
+# of the T-Deck's moy_sd bus-sharing machinery applies. The OTA directory (a
+# copied image, the pending marker) and the BLE bond store stay on the INTERNAL
+# VFS (device identity, not cart data). A WiFi update stages nothing: it streams
+# into the inactive slot, because this VFS cannot hold the image. The store on a
+# card is moy_carts.CARTS_DIR, so the system documents beside the carts
+# (system.json, wifi.json, shared.moygfx) land in /sd/moybyte, not at the
+# card's root.
 # slot=2 IS SPI3_HOST -- machine_sdcard.c's spi table lists SPI3 FIRST, so
 # SPI slot numbers map in the OPPOSITE order of the host numbers (slot 2 ->
 # SPI3, slot 3 -> SPI2). slot=3 therefore grabs the PANEL's bus and every
 # construction dies with ESP_ERR_INVALID_STATE before touching the card --
 # measured on this glass 2026-08-20, one evening of postmortem plumbing.
 SD_PINS = dict(slot=2, sck=12, mosi=11, miso=13, cs=10)
-SD_MOUNT = "/sd"
-SD_CARTS_ROOT = "/sd/carts"
-# _mount_sd's postmortem: the boot happens before a serial host attaches (the
-# #201 console DROPS unheard output), so the mount verdict is also recorded
-# here for the dev channel -- `py __import__("moy_runtime").SD_STATUS`.
-SD_STATUS = "not attempted"
+SD_CARTS_ROOT = "/sd/moybyte/carts"
 
 
-def _mount_sd():
-    """Mount the TF card; True if the store should live there. Any failure --
-    no card, wrong pins, dead card, foreign filesystem -- degrades to internal
-    flash with the reason on serial, so SD can only ever ADD storage, never
-    cost the boot."""
-    global SD_STATUS
-    try:
-        import machine
-        import os
-        sd = machine.SDCard(**SD_PINS)
-    except Exception as exc:  # noqa: BLE001
-        SD_STATUS = "construct failed: %r" % exc
-        print("Moybyte Guition SD: no card interface (%r)" % exc)
-        return False
-    try:
-        os.mount(sd, SD_MOUNT)
-        SD_STATUS = "mounted"
-        print("Moybyte Guition SD: mounted at %s" % SD_MOUNT)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        SD_STATUS = "mount failed: %r" % exc
-        # deinit() frees the SPI bus (it calls spi_bus_free) -- without it a
-        # failed mount leaks the claimed host and every later probe, live ones
-        # over the dev channel included, reads ESP_ERR_INVALID_STATE.
-        try:
-            sd.deinit()
-        except Exception:  # noqa: BLE001
-            pass
-        print("Moybyte Guition SD: card unreadable (%r) -- carts on internal "
-              "flash (a modern card often ships exFAT; format it FAT32)" % exc)
-        return False
-
-
-def _load_carts(boot, store):
-    """This board's store: the card when it mounts, internal flash when not;
-    the OTA directory is on internal flash either way."""
-    sd_ok = _mount_sd()
-    carts, root = boot.load_carts(store, CARTS,
-                                  root=SD_CARTS_ROOT if sd_ok else CARTS_ROOT,
-                                  media="SD" if sd_ok else "flash")
-    return carts, root, OTA_UPDATE_DIR
+def tf_card():
+    """The TF card on SPI3. Constructing claims the host; a failed mount's
+    `deinit()` (card_store.mount) is what frees it, so a later construction in
+    this boot, the dev channel's included, still works."""
+    import machine
+    return machine.SDCard(**SD_PINS)
 
 
 # Idle screen blank -- the shared IdleBlank, the shared 5 minutes.
@@ -153,7 +117,8 @@ def run_desktop(fps_cap=60):
                       power_save_ms=POWER_SAVE_MS, game_wh=(GAME_W, GAME_H),
                       font_scale=FONT_SCALE,
                       panel_diagonal_in=PANEL_DIAGONAL_IN,
-                      load_carts=_load_carts,
+                      load_carts=carts_loader(tf_card, CARTS, SD_CARTS_ROOT,
+                                              CARTS_ROOT, OTA_UPDATE_DIR),
                       extras={"bt": bt_command(keyboard)}, fps_cap=fps_cap)
 
     def _tail(now):

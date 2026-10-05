@@ -65,7 +65,7 @@ def carts_root(board):
     DISCOVERED, NOT DECLARED -- the rule tools/push_cart.py states and follows.
     The store is not the same path on every board and on the Guition it is not
     even the same path on every boot: a TF card, when present, IS the store
-    (/sd/carts), otherwise the internal VFS is (#202). A constant here would be
+    (/sd/moybyte/carts), otherwise the internal VFS is (#202). A constant here would be
     wrong on that board half the time and a second source of truth on the two
     where it happens to be right."""
     root = getattr(board, "_carts_root", None)

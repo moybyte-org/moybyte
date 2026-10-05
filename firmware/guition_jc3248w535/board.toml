@@ -292,14 +292,13 @@ with the stage that revisits it."""
 [[native.shared.deny]]
 module = "moy_sd"
 why = """
-SD is stage 4 of this board's checklist and stage 4 has not run: the JC3248W535
-has a TF slot but its pins are not in the verified ESPHome definition, and
 moy_sd's whole reason to exist -- attaching a card to a host the T-Deck's
-moy_lcd already initialised, on a SHARED SPI bus -- names a topology this board
-may not even have (nothing else is known to share the panel's QSPI host).
-Carts live on the internal-flash VFS (/moy/carts, the P4 arrangement) until
-stage 4 decides; flip this with measured pins and a mount that survived a
-panel flush."""
+moy_lcd already initialised, on a SHARED SPI bus -- names hardware this board
+does not have: the TF slot is on SPI3 pins of its own (CS 10 / MOSI 11 /
+SCLK 12 / MISO 13), nothing shared with the panel's QSPI host. It is plain
+`machine.SDCard`, and `device/card_store.py` mounts it and makes it the cart
+store when a card is in (the board README's SD row). The OTA directory stays
+/moy/update on the internal VFS either way."""
 
 [[native.shared.deny]]
 module = "moy_audio"
@@ -331,8 +330,9 @@ tier and not every board drives every piece of it. This board's absences, each
 a decision: no `device_input.py` (there is no trackball and no I2C keyboard;
 the touch part is an AXS15231 on its own shared driver below -- `gt911.py`
 DOES stage, but only for the `HeldPoint` that driver imports, never for its
-GT911 register map, see that group's why), no `moybyte_sd.py` (stage 4, see
-the moy_sd native denial), no `device_audio.py` (stage 5, see moy_audio), no
+GT911 register map, see that group's why), no `moybyte_sd.py` (the card has
+a host of its own: `card_store.py`, see the moy_sd native denial), no
+`device_audio.py` (stage 5, see moy_audio), no
 `device_diag.py`/`moybyte_diag.py` (the T-Deck's offline diag ring exists
 because that board's serial RX was dead for months; this board boots with a
 live dev channel, so it starts with the P4's print-to-serial arrangement and
@@ -366,6 +366,18 @@ carried the same imports, the same IdleBlank/FramePump/FrameLoop construction,
 the same `ws.*` service assignments and the same hook names in fifty-four
 byte-identical lines each; a board now passes its hardware -- compositor,
 canvas, inputs, keyboard, store, constants -- and takes the rest."""
+
+[[modules.device.group]]
+files = ["card_store.py"]
+why = """
+The cart store on a card that has a bus of its own (tests/test_card_store.py
+executes it): `moy_runtime.tf_card` constructs the card on SPI3, `card_store`
+mounts it once at boot with `vfs.mount` and returns the `load_carts` hook
+`build_desktop` takes. A card that is absent, will not mount, has a filesystem
+this build cannot read or cannot be seeded boots on the internal store with one
+`SD:` line, and `card_store.STATUS` is the verdict for the dev channel (boot
+output is dropped until a host attaches, #201). A failed mount's `deinit()`
+frees the SPI host."""
 
 [[modules.device.group]]
 files = ["mem_census.py"]

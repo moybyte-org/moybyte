@@ -2,7 +2,7 @@
 """Put a folder of files onto a board over WiFi -- normally a cart.
 
     python tools/push_cart_wifi.py --board guition_s3 \
-        --dir ports/celeste.moy --dest /sd/carts/celeste.moy
+        --dir ports/celeste.moy --dest /sd/moybyte/carts/celeste.moy
 
 --board is REQUIRED and has no default, for the reason push_cart.py and
 p4_perf.py spell out: the boards differ in the serial line state at open, and
@@ -124,7 +124,7 @@ def main(argv=None):
     ap.add_argument("--port", help="override the port --board resolves to")
     ap.add_argument("--dir", required=True, help="the folder to push")
     ap.add_argument("--dest", required=True,
-                    help="destination on the board (e.g. /sd/carts/x.moy)")
+                    help="destination on the board (e.g. /sd/moybyte/carts/x.moy)")
     ap.add_argument("--http-port", type=int, default=8731)
     args = ap.parse_args(argv)
 

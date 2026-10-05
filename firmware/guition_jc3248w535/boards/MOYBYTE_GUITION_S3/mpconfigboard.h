@@ -35,6 +35,13 @@
 // that hazard does not exist on this wiring.
 #define MICROPY_HW_ENABLE_SDCARD            (1)
 
+// exFAT in FatFS (lib/oofatfs, whose ffconf.h reads this define; ESP32 ports
+// leave it off). A card over 32 GB ships exFAT, and without it a read-only
+// vfs.mount of one fails with ENODEV: the TF slot is the console's cart store
+// when a card is in it (device/card_store.py), and a big card is the common one.
+// FAT12/16/32 cards mount as before. LFN is already on, which exFAT needs.
+#define MICROPY_FATFS_EXFAT                 (1)
+
 // The Python heap may grow on demand (split heap), but never into this much
 // of PSRAM: it is the Lua VM's, the panel DMA's and the layer pool's share.
 // The biggest corpus cart's VM peaks near 1.8MB live and the pool that serves

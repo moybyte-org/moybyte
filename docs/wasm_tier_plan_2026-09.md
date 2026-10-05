@@ -79,7 +79,8 @@ the decisions below record what they changed.
   chosen and its per-board cost are #158's.
 - **Cart storage is the board's.** The SD card on the T-Deck; on the P4 boards
   and the Guition S3 a card when one mounts, the flash VFS when not (never a
-  requirement; the P4s' mount is `device/card_store.py`, FAT32 or exFAT).
+  requirement; the P4s' and the Guition S3's mount is `device/card_store.py`,
+  FAT32 or exFAT).
   Assets are read through the cart's own folder and nothing else.
 - **Every console board, not two.** Each board declares or denies the module
   in its `board.toml` with a reason, and the gate runs on every board that

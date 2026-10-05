@@ -157,8 +157,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   initialises the driver, so `radio_off` never constructs one. The Zero is
   outside this: WiFi is its only I/O.
 - **On the T-Deck SD shares the SPI host with the display, and getting it wrong
-  HANGS the board** — gray screen, dead USB, no panic (the P4 boards' card has a
-  bus of its own: plain `machine.SDCard`, see the P4 section):
+  HANGS the board** — gray screen, dead USB, no panic (the P4 boards' and the
+  Guition S3's cards have a host of their own: plain `machine.SDCard` under
+  `device/card_store.py`, whose failed-mount `deinit()` is the teardown this
+  board must never do, so it stays off the T-Deck):
   - nothing touches SD before the panel is up (#56): a pre-display mount
     re-runs `spi_bus_initialize()` and leaves the host claimed on a populated
     card (`PREFETCH_SD_BEFORE_DISPLAY=False`; carts load after init and fall
@@ -172,6 +174,17 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
     `TFT_CS`/`SD_CS` (driver-owned; park only the LoRa `RADIO_CS`), never flush
     the panel inside a session. `tests/test_moybyte_sd.py` pins which lifecycle
     touches which pin.
+- **The Guition S3's TF card is on SPI3, the panel's QSPI on SPI2**, so the card
+  is plain `machine.SDCard(slot=2, ...)` under `device/card_store.py`
+  (`moy_runtime.tf_card` constructs it; `vfs.mount` once at boot). SPI slot
+  numbers run OPPOSITE to host numbers: slot 3 is the PANEL's SPI2 and dies with
+  `ESP_ERR_INVALID_STATE`, leaking the sdspi singleton until a reboot. The store
+  is `/sd/moybyte/carts` and its sibling documents `/sd/moybyte/*`; no card, a
+  dead one or a filesystem the build cannot read all boot on the internal store
+  (`/moy/carts`) with one line, and `card_store.STATUS` is the verdict. FAT12/16/32
+  and exFAT both mount (`MICROPY_FATFS_EXFAT` in `mpconfigboard.h`, the T-Deck's
+  too). The OTA directory and the BLE bond store stay internal. Never format or
+  erase a card from the console.
 - **On the S3 boards a play frame can skip the root canvas.** The #190 fold
   (`native/moy_flush/moy_fold`, shared C: the latch, the fence and both boards'
   gathers) scales a small game canvas into the panel bands on the feeder,
