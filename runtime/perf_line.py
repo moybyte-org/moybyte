@@ -71,6 +71,8 @@ FIELDS = (
     ("fence_ms", "%.1f", ""),           # P4: composite fence ms this sample
     ("gfence_ms", "%.1f", ""),          # P4: game fence ms (hides in busy= else)
     ("home", "%d/%d/%d", ""),           # launcher split: wallpaper/grid/bar ms
+    ("gc", "%d/%d/%d", ""),             # collections / their pause us / longest
+                                        # pause us, this sample (gc.pauses())
 )
 
 _NAMES = tuple(n for n, _s, _u in FIELDS)

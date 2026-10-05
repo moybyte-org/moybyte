@@ -45,6 +45,7 @@ tools/board.py tdeck py "ws.screen" "len(ws.carts.all)"   # eval on the live con
 tools/board.py tdeck py --exec "ws._x = 1"    # statements, in the shared ws._g namespace
 tools/board.py tdeck pmem [--text]            # the running cart's 256 cells (--text: a string)
 tools/board.py tdeck mem                      # python heap, internal SRAM, PSRAM
+tools/board.py tdeck tail 3 --send heapcaps --grep HEAPCAPS  # every heap's total/free/largest/low-water, one line
 tools/board.py tdeck tap 160 120              # swipe X0 Y0 X1 Y1 [FRAMES] / open settings
 tools/board.py tdeck tail 10 --send "diag 1" --grep PERF
 tools/board.py tdeck perf "Brick Siege"       # see the perf skill

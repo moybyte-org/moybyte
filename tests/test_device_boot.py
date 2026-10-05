@@ -1425,21 +1425,21 @@ PERF_CASES = {
          "home": None},
         "PERF cart=- fps=0/62 net=- tick=- miss=- busy=2ms draw=33 flush=1 "
         "logic=0 render=0 chrome=33 wmr=28 wmw=1 wms=0 ppa=0/0/0/0/0 "
-        "fence_ms=0.0 gfence_ms=0.0 home=-"),
+        "fence_ms=0.0 gfence_ms=0.0 home=- gc=-"),
     "guition": (
         {"cart": None, "fps": (0, 61), "net": None, "busy": 4,
          "draw": 72.0, "flush": 0.0, "logic": 0.0, "render": 0.0,
          "chrome": 72.0, "home": None},
         "PERF cart=- fps=0/61 net=- tick=- miss=- busy=4ms draw=72 flush=0 "
         "logic=0 render=0 chrome=72 wmr=- wmw=- wms=- ppa=- fence_ms=- "
-        "gfence_ms=- home=-"),
+        "gfence_ms=- home=- gc=-"),
     "tdeck": (
         {"cart": "Sakura Lua", "fps": (53, 55), "net": None, "busy": 18,
          "draw": 14.0, "flush": 0.0, "logic": 3.0, "render": 9.0,
          "chrome": 2.0, "home": None},
         "PERF cart=Sakura_Lua fps=53/55 net=- tick=- miss=- busy=18ms draw=14 "
         "flush=0 logic=3 render=9 chrome=2 wmr=- wmw=- wms=- ppa=- fence_ms=- "
-        "gfence_ms=- home=-"),
+        "gfence_ms=- home=- gc=-"),
     "p4_dark": (
         {"cart": None, "fps": (0, 62), "net": None, "busy": 2,
          "draw": 33.0, "flush": 1.0, "logic": 0.0, "render": 0.0,
@@ -1447,7 +1447,7 @@ PERF_CASES = {
          "gfence_ms": 0.0, "home": None},
         "PERF cart=- fps=0/62 net=- tick=- miss=- busy=2ms draw=33 flush=1 "
         "logic=0 render=0 chrome=33 wmr=- wmw=- wms=- ppa=0/0/0/0/0 "
-        "fence_ms=0.0 gfence_ms=0.0 home=-"),
+        "fence_ms=0.0 gfence_ms=0.0 home=- gc=-"),
 }
 
 # Every column populated and every value DISTINCT: the captures above are idle
@@ -1459,10 +1459,11 @@ PERF_LOUD = (
      "miss": 3, "busy": 8,
      "draw": 3.6, "flush": 1.4, "logic": 5.4, "render": 12.7, "chrome": 2.2,
      "wmr": 7, "wmw": 8, "wms": 9, "ppa": (1, 2, 3, 4, 0),
-     "fence_ms": 2.5, "gfence_ms": 0.7, "home": (3, 4, 1)},
+     "fence_ms": 2.5, "gfence_ms": 0.7, "home": (3, 4, 1),
+     "gc": (6, 41530, 11200)},
     "PERF cart=Brick_Siege fps=20/31 net=30 tick=60/2 miss=3 busy=8ms draw=4 "
     "flush=1 logic=5 render=13 chrome=2 wmr=7 wmw=8 wms=9 ppa=1/2/3/4/0 "
-    "fence_ms=2.5 gfence_ms=0.7 home=3/4/1")
+    "fence_ms=2.5 gfence_ms=0.7 home=3/4/1 gc=6/41530/11200")
 
 
 @pytest.mark.parametrize("case", sorted(PERF_CASES))
@@ -1636,6 +1637,50 @@ def test_a_board_with_no_overlap_source_reports_the_PPA_columns_absent(
     s = device_boot.PerfSampler(ws, emit=out.append)
     _drive(monkeypatch, s, ws, 122, 4, 0)
     assert out == [PERF_CASES["guition"][1]]
+
+
+def test_the_collectors_pauses_arrive_as_deltas_over_one_sample(monkeypatch):
+    """gc.pauses() (tools/patch_gc_meters.py) is cumulative in its first two
+    slots, wrapping at 2**32, and window-shaped in its third: the read resets
+    the longest pause. The first line has no baseline, so it says `-`; the
+    second carries this sample's collections, their pause and the longest --
+    across a wrap of the microsecond counter."""
+    _clock(monkeypatch)
+    reads = [(10, 0xFFFFFF00, 5000), (14, 0x00000100, 900)]
+    ws = PerfWs()
+    out = []
+    s = device_boot.PerfSampler(ws, emit=out.append,
+                                pauses=lambda: reads.pop(0))
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    assert parse_perf(out[0])["gc"] is None
+    assert out[1].endswith(" gc=4/512/900")
+    assert parse_perf(out[1])["gc"] == (4.0, 512.0, 900.0)
+
+
+def test_the_collectors_baseline_does_not_survive_the_diag_going_off(
+        monkeypatch):
+    """With PERF DIAG off nothing reads gc.pauses() -- reading it every period
+    would be garbage of its own -- so the first line after the diag comes back
+    has no window to difference and prints `-`, not the collections of every
+    minute the diag was off. A host has no meter at all: `-` throughout."""
+    _clock(monkeypatch)
+    reads = [(1, 100, 50), (90, 9000, 70), (93, 9300, 40)]
+    ws = PerfWs()
+    out = []
+    s = device_boot.PerfSampler(ws, emit=out.append,
+                                pauses=lambda: reads.pop(0))
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    ws.diag_live = False
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    ws.diag_live = True
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    assert [parse_perf(ln)["gc"] for ln in out] == [None, None, (3.0, 300.0, 40.0)]
+    host = []
+    _drive(monkeypatch, device_boot.PerfSampler(ws, emit=host.append,
+                                                pauses=None), ws, 2, 0, 0)
+    assert host[0].endswith(" gc=-")
 
 
 def test_the_overlap_counters_arrive_as_deltas_over_one_sample(monkeypatch):

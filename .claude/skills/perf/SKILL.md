@@ -55,6 +55,8 @@ the best remaining lever is a few hundred µs a frame.
 | question | meter |
 |---|---|
 | fps and the frame split | `PERF` (`runtime/perf_line.py`, every board, ~2 s, under PERF DIAG) |
+| the collector's stops | `PERF`'s `gc=n/us/max`: collections this sample, their pause and the longest, in µs (`gc.pauses()`, `tools/patch_gc_meters.py`; `-` where a build lacks it) |
+| what each heap holds | `heapcaps`: PSRAM, internal and internal-DMA total/free/largest/low-water, and the gc heap's held/live/areas (`heapcaps_line` in `runtime/dev_channel.py`) |
 | the S3 panel pump, draw batches, loop hitches | `device_diag`'s `DRAWBRK`/`BATCH`/`DRAW2`/`LOOP`/`PUMP`/`I2CSTAT`/`WEBHOST`/`HITCH` — staged on the T-Deck alone (each board.toml says why); elsewhere `state`'s `pump`/`fold`/`ppa`/`stages` read the same C meters |
 | instructions or memory? | `PERFCNT`: `perfcnt on [event]`, then `perfcnt` — retired instructions per cycle over update and draw (`runtime/dev_channel.py`; the strategy doc argues its readings) |
 | a Lua/p8 cart's draw | `VERBS`: `verbs on`, then `verbs` — per-frame calls and ms per verb. The canvas meters read zero on a Lua cart: it draws through libmoy's C verbs (`native/moycore/README.md`) |

@@ -81,6 +81,11 @@ except ImportError:  # pragma: no cover - host package lane
     from runtime.perf_line import FAILED as PERF_FAILED, format_perf
 
 try:
+    from gc import pauses as _gc_pauses
+except ImportError:  # a host, or a MicroPython without tools/patch_gc_meters.py
+    _gc_pauses = None
+
+try:
     from device_util import sram_census
 except ImportError:  # pragma: no cover - host lane: no device tier staged
     def sram_census(stage):
@@ -697,6 +702,12 @@ class PerfSampler:
     timer resets either way, so a broken sample cannot become a per-frame retry
     flooding the serial it is measured over.
 
+    `pauses` is the collector's meter, `gc.pauses()` on a board whose build
+    takes tools/patch_gc_meters.py: cumulative (collections, pause us), and the
+    longest pause since the previous read, which the read resets -- so this is
+    its one reader. None (a host) leaves gc= reading `-`, and so does the first
+    line after the diag comes on, which has no baseline.
+
     `emit` is the sink. The P4 and the Guition print; the T-Deck prints AND
     rings the same line for its offline SD log, because that board's serial was
     unreadable for months and the ring is why anything was known about it.
@@ -721,9 +732,12 @@ class PerfSampler:
     which follow the same switch through its `diag` attribute.
     """
 
-    def __init__(self, ws, overlap=None, period_ms=2000, emit=print):
+    def __init__(self, ws, overlap=None, period_ms=2000, emit=print,
+                 pauses=_gc_pauses):
         self.ws = ws
         self._overlap = overlap
+        self._pauses = pauses
+        self._gcp = None
         self._period = period_ms
         self._emit = emit
         # Whole seconds per sample: fps= and the loop count are RATES.
@@ -741,6 +755,7 @@ class PerfSampler:
         self._v = {}
         self._fps = [0, 0]
         self._tick = [0, 0]
+        self._gc = [0, 0, 0]
 
     def _take(self, name):
         """Read one windowed-WM meter and CLEAR it: it says what THIS sample
@@ -785,6 +800,7 @@ class PerfSampler:
                 self._sample(ws, drawn)
             else:
                 self._ov = None          # re-read when the diag comes back
+                self._gcp = None
                 self._baseline_misses(ws)
         except Exception as exc:  # noqa: BLE001 -- a diag never kills the loop
             self._emit(PERF_FAILED % (type(exc).__name__, exc))
@@ -839,6 +855,17 @@ class PerfSampler:
         v["wmw"] = self._take("_pf_wm_windows")
         v["wms"] = self._take("_pf_wm_stamp")
         v["home"] = getattr(ws, "_pf_home", None)
+        v["gc"] = None
+        if self._pauses is not None:
+            cur = self._pauses()
+            prev = self._gcp
+            self._gcp = cur
+            if prev is not None:
+                g = self._gc
+                g[0] = (cur[0] - prev[0]) & 0xFFFFFFFF
+                g[1] = (cur[1] - prev[1]) & 0xFFFFFFFF
+                g[2] = cur[2]
+                v["gc"] = g
         v["ppa"] = v["fence_ms"] = v["gfence_ms"] = None
         v["tick"] = None
         if self._overlap is not None:

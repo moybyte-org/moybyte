@@ -2,6 +2,7 @@
 #   verbs_line         the VERBS line: where a Lua frame's time goes
 #   perfcnt_line       the PERFCNT line: instructions per cycle
 #   luaprof_line       the LUAPROF line: the interpreter's split
+#   heapcaps_line      the HEAPCAPS line: what each heap holds
 #   DevChannel         the serial line commands: one class, every board
 #   DevChannel.run     the command table of record
 #   DevChannel.poll    drain the bytes a frame may take
@@ -400,6 +401,63 @@ def perfcnt_line(st, name=None):
     if not selectable:
         out.append("(riscv: retired only)")
     return " | ".join(out)
+
+
+# The HEAPCAPS line's heap_caps sets, as the raw MALLOC_CAP_* bits
+# esp32.idf_heap_info takes: SPIRAM, INTERNAL, and INTERNAL|DMA -- the share an
+# S3's WiFi, BLE and panel DMA draw on.
+HEAP_CAPS = (("psram", 0x400), ("sram", 0x800), ("dma", 0x808))
+
+
+def _num(v):
+    return "-" if v is None else "%d" % v
+
+
+def heapcaps_line(esp32=None, gc=None):
+    """The `HEAPCAPS` line: what each heap holds, in bytes.
+
+        HEAPCAPS psram=T/F/L/W sram=T/F/L/W dma=T/F/L/W gc=H/V/A
+
+    Per heap_caps set: total, free, the largest free block, and the low-water
+    -- the least free since boot, summed over the set's regions as IDF's
+    `heap_caps_get_minimum_free_size` sums it. `gc` is the MicroPython heap:
+    H bytes its areas hold and A areas (`gc.areas()`), read BEFORE the collect
+    that makes V, the bytes live -- a split heap keeps an area until a sweep
+    empties it (docs/native_kernel_2026-09.md 1.3), so a collect first would
+    report what the heap held after it, not what it holds.
+
+    A figure this board or host cannot read is `-`, never 0: no `esp32` module
+    (a host), no region with those caps (no PSRAM), no `gc.areas()` (a build
+    without tools/patch_gc_meters.py). `gc.mem_alloc()` walks the whole heap
+    -- a word's cost, never a frame's."""
+    out = ["HEAPCAPS"]
+    for name, caps in HEAP_CAPS:
+        regs = None
+        if esp32 is not None:
+            try:
+                regs = esp32.idf_heap_info(caps)
+            except Exception:  # noqa: BLE001 -- a meter says `-`, it never raises
+                regs = None
+        if not regs:
+            out.append(" %s=-" % name)
+            continue
+        tot = free = big = low = 0
+        for r in regs:
+            tot += r[0]
+            free += r[1]
+            low += r[3]
+            if r[2] > big:
+                big = r[2]
+        out.append(" %s=%d/%d/%d/%d" % (name, tot, free, big, low))
+    areas = held = live = None
+    if gc is not None:
+        if hasattr(gc, "areas"):
+            areas, held = gc.areas()
+        if hasattr(gc, "mem_alloc"):
+            gc.collect()
+            live = gc.mem_alloc()
+    out.append(" gc=%s/%s/%s" % (_num(held), _num(live), _num(areas)))
+    return "".join(out)
 
 
 def luaprof_line(st, rng, top=10):
@@ -1827,6 +1885,14 @@ class DevChannel:
         if cmd in ("skip", "gov"):
             print("REMOTE %s: retired by the tick model (#217) -- the Player "
                   "schedules logic and draw; `steady 0|1` is the knob" % cmd)
+            return
+        if cmd == "heapcaps":
+            import gc
+            try:
+                import esp32
+            except ImportError:
+                esp32 = None
+            print(heapcaps_line(esp32, gc))
             return
         if cmd == "mem":
             import gc

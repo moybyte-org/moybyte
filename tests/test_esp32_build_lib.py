@@ -371,6 +371,105 @@ def test_a_half_applied_run_hints_tree_is_REFUSED(tmp_path):
     assert r.returncode != 0 and "half-applied" in r.stderr
 
 
+# -- the gc meters: gc.pauses() and gc.areas() --------------------------------
+#
+# The stock lines tools/patch_gc_meters.py anchors on, in stock order.
+
+_GC_C_METERS_STOCK = """\
+#include "py/gc.h"
+#include "py/runtime.h"
+
+void gc_collect_start(void) {
+    gc_collect_start_common();
+}
+
+void gc_collect_end(void) {
+    MP_STATE_THREAD(gc_lock_depth) &= ~GC_COLLECT_FLAG;
+    GC_EXIT();
+    #if MICROPY_PY_WEAKREF
+    gc_weakref_sweep();
+    #endif
+}
+"""
+
+_MODGC_C_STOCK = """\
+static const mp_rom_map_elem_t mp_module_gc_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_mem_free), MP_ROM_PTR(&gc_mem_free_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mem_alloc), MP_ROM_PTR(&gc_mem_alloc_obj) },
+};
+"""
+
+
+def _meters_tree(tmp_path, gc_c=_GC_C_METERS_STOCK, modgc_c=_MODGC_C_STOCK):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "gc.c").write_text(gc_c, encoding="utf-8")
+    (p / "modgc.c").write_text(modgc_c, encoding="utf-8")
+    return p / "gc.c", p / "modgc.c"
+
+
+def _meters(tmp_path):
+    return sh("moybyte_patch_gc_meters", MPY_DIR=str(tmp_path),
+              REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_gc_meters_patch_times_every_collect_and_registers_both_reads(
+        tmp_path):
+    """The clock at the top of gc_collect_start and the bottom of
+    gc_collect_end, both behind MICROPY_PY_GC (mpy-cross compiles gc.c with no
+    clock to link), and both functions in the gc module's table."""
+    gc_c, modgc_c = _meters_tree(tmp_path)
+    r = _meters(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c, m = _both(gc_c, modgc_c)
+    assert '#if MICROPY_PY_GC // Moybyte: gc meters\n#include "py/mphal.h"' in c
+    assert ("void gc_collect_start(void) {\n    MOYBYTE_GC_PAUSE_START();"
+            in c)
+    assert "    MOYBYTE_GC_PAUSE_END(); // Moybyte: gc meters\n}\n" in c
+    assert c.index("#define MOYBYTE_GC_PAUSE_END()") < c.index(
+        "void gc_collect_start(void)")
+    assert "extern uint32_t moybyte_gc_pause[3];" in m
+    assert "MP_ROM_QSTR(MP_QSTR_pauses), MP_ROM_PTR(&gc_pauses_obj)" in m
+    assert "MP_ROM_QSTR(MP_QSTR_areas), MP_ROM_PTR(&gc_areas_obj)" in m
+    assert m.index("gc_areas_obj, gc_areas)") < m.index("mp_module_gc_globals_table[]")
+
+
+def test_the_gc_meters_patch_is_idempotent_and_independent_of_the_run_hints(
+        tmp_path):
+    """Neither patch touches the other's lines, so a tree takes both in either
+    order and comes out the same."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    for d in (a, b):
+        _meters_tree(d, gc_c=_GC_C_METERS_STOCK + _GC_C_STOCK)
+        (d / "py" / "mpstate.h").write_text(_MPSTATE_H_STOCK, encoding="utf-8")
+    assert _meters(a).returncode == 0 and _run_hints(a).returncode == 0
+    assert _run_hints(b).returncode == 0 and _meters(b).returncode == 0
+    texts = [(d / "py" / f).read_text(encoding="utf-8")
+             for d in (a, b) for f in ("gc.c", "modgc.c", "mpstate.h")]
+    assert texts[:3] == texts[3:]
+    assert _meters(a).returncode == 0
+    assert [(a / "py" / f).read_text(encoding="utf-8")
+            for f in ("gc.c", "modgc.c", "mpstate.h")] == texts[:3]
+
+
+def test_a_gc_meters_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    gc_c, modgc_c = _meters_tree(tmp_path, gc_c=_GC_C_METERS_STOCK.replace(
+        "    gc_weakref_sweep();\n", "    gc_weakref_sweep_all();\n"))
+    before = _both(gc_c, modgc_c)
+    r = _meters(tmp_path)
+    assert r.returncode != 0
+    assert "did not apply" in r.stderr and "collect end" in r.stderr
+    assert _both(gc_c, modgc_c) == before
+
+
+def test_a_half_applied_gc_meters_tree_is_REFUSED(tmp_path):
+    gc_c, modgc_c = _meters_tree(tmp_path)
+    assert _meters(tmp_path).returncode == 0
+    _meters_tree(tmp_path, gc_c=gc_c.read_text(encoding="utf-8"))
+    r = _meters(tmp_path)
+    assert r.returncode != 0 and "half-applied" in r.stderr
+
+
 # -- the stdin ring for a UART console -----------------------------------------
 
 _MPHALPORT_STOCK = """\

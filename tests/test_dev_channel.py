@@ -16,6 +16,7 @@ import hashlib
 import json
 
 from runtime.dev_channel import (DevChannel, PERF_EVENTS, _remote_state,
+                                 heapcaps_line,
                                  luaprof_line, perfcnt_line, shim_line_range,
                                  cart_shim_range,
                                  verbs_line)
@@ -1597,3 +1598,90 @@ def test_a_put_whose_stream_stops_ends_short_and_leaves_nothing(tmp_path, capsys
     assert said[1].startswith("moy-err d.moy/main.lua: the stream stopped after")
     assert ch._put is None
     assert not list(tmp_path.rglob("*.new")) and not (tmp_path / "d.moy" / "main.lua").exists()
+
+
+# -- the HEAPCAPS line (docs/native_kernel_2026-09.md sprint 0) ----------------
+
+
+class FakeEsp32:
+    """`esp32.idf_heap_info(caps)`: a list of (total, free, largest, min free)
+    per region carrying those caps."""
+
+    def __init__(self, regions):
+        self.regions = regions
+
+    def idf_heap_info(self, caps):
+        return self.regions.get(caps, [])
+
+
+class FakeGc:
+    def __init__(self, areas=(2, 3145728), live=812000, has_areas=True):
+        self.calls = []
+        self._areas = areas
+        self._live = live
+        if has_areas:
+            self.areas = self._read_areas
+
+    def _read_areas(self):
+        self.calls.append("areas")
+        return self._areas
+
+    def collect(self):
+        self.calls.append("collect")
+
+    def mem_alloc(self):
+        self.calls.append("mem_alloc")
+        return self._live
+
+
+def test_the_heapcaps_line_sums_regions_as_idf_does():
+    """Total, free and low-water add over a set's regions -- the low-water sum
+    is exactly IDF's own heap_caps_get_minimum_free_size -- and the largest
+    free block is the largest of any one region, since no allocation spans
+    two."""
+    esp = FakeEsp32({
+        0x400: [(8388608, 4000000, 3900000, 3500000)],
+        0x800: [(200000, 30000, 12000, 9000), (100000, 20000, 15000, 4000)],
+        0x808: [(200000, 25000, 12000, 8000)],
+    })
+    line = heapcaps_line(esp, FakeGc())
+    assert line == ("HEAPCAPS psram=8388608/4000000/3900000/3500000 "
+                    "sram=300000/50000/15000/13000 "
+                    "dma=200000/25000/12000/8000 gc=3145728/812000/2")
+
+
+def test_the_heapcaps_line_reads_what_the_heap_holds_before_collecting():
+    """A split heap gives an area back only when a sweep empties it, so a
+    collect ahead of gc.areas() would report what the heap held after the
+    word's own collect. Held first; then the collect that makes `live` mean
+    live."""
+    g = FakeGc()
+    heapcaps_line(FakeEsp32({}), g)
+    assert g.calls == ["areas", "collect", "mem_alloc"]
+
+
+def test_a_figure_the_board_cannot_read_is_a_dash_and_never_a_zero():
+    """A host has no esp32 module; a board with no PSRAM has no region with
+    those caps; a build without the gc meters patch has no gc.areas(); CPython
+    has no gc.mem_alloc(). Each is absence, and each says so in its own slot."""
+    assert heapcaps_line(None, None) == \
+        "HEAPCAPS psram=- sram=- dma=- gc=-/-/-"
+    esp = FakeEsp32({0x800: [(300000, 50000, 15000, 13000)],
+                     0x808: [(200000, 25000, 12000, 8000)]})
+    line = heapcaps_line(esp, FakeGc(has_areas=False))
+    assert line.startswith("HEAPCAPS psram=- sram=300000/")
+    assert line.endswith(" gc=-/812000/-")
+
+    class Raises:
+        def idf_heap_info(self, caps):
+            raise OSError(caps)
+    assert heapcaps_line(Raises(), None).startswith(
+        "HEAPCAPS psram=- sram=- dma=- ")
+
+
+def test_heapcaps_is_a_dev_channel_word(capsys):
+    """On the host: no esp32, and CPython's gc has neither meter."""
+    ws, ch = make()
+    ch.run(ws, "heapcaps")
+    out = capsys.readouterr().out.splitlines()
+    assert "HEAPCAPS psram=- sram=- dma=- gc=-/-/-" in out

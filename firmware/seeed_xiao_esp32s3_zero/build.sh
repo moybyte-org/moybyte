@@ -79,6 +79,9 @@ moybyte_setup_idf esp32s3 \
 #    request. Taken the day something here allocates at a rate, with the
 #    rebuild and the boot check that costs.
 #
+# DECLINED moybyte_patch_gc_meters -- gc.pauses() feeds the PERF line and
+#    gc.areas() the dev channel's `heapcaps`; this board runs neither.
+#
 # DECLINED moybyte_patch_psram_retune -- the #169 vendor-gate patch. This is
 #    NOT a "no carts" argument, because the PSRAM is real (8MB octal, and the
 #    heap and the lwIP buffers both live in it). It is a dependency argument:

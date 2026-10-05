@@ -215,6 +215,15 @@ moybyte_patch_gc_run_hints() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_run_hints.py" "${MPY_DIR}" || exit 1
 }
 
+# The gc meters: gc.pauses() (collections and their pause, for the PERF line)
+# and gc.areas() (the split heap's areas and bytes held, for `heapcaps`).
+# tools/patch_gc_meters.py is the patch and its own documentation:
+# all-or-nothing, idempotent, independent of the run hints.
+moybyte_patch_gc_meters() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_meters.py" "${MPY_DIR}" || exit 1
+}
+
 # A 4 KB stdin ring, in the ESP32-P4's TCM, for a board whose serial is a
 # UART, and an RX ISR that wakes the reader. The port's stock ring is 260 bytes
 # and the UART has no flow control, so a heap collection landing while a long

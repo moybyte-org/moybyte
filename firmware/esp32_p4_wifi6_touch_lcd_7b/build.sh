@@ -103,6 +103,9 @@ moybyte_patch_map_cache_for_repr_c
 # Size-class run hints for gc_alloc (#66): every console board takes it; the
 # lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
 moybyte_patch_gc_run_hints
+# The gc meters (gc.pauses, gc.areas): every console board takes them, for
+# the PERF line's gc= field and the dev channel's `heapcaps` word.
+moybyte_patch_gc_meters
 
 # 2f) A 4 KB stdin ring, in TCM, and a UART RX ISR that wakes the reader: this
 #     board's serial is the CH343's UART, with no flow control, and the stock
