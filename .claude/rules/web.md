@@ -31,6 +31,14 @@ nor those docs will warn you about:
   without their comments (build.sh re-prints them with emsdk's terser, nothing
   else changed): read `worker.js` and `moy_store.mjs` in the tree, not in
   `dist/`.
+- **The emscripten is PINNED: `EMSDK_VERSION` in build.sh, held by
+  `tools/emsdk_tree.sh` on every full build** (a tree at the pin is a silent
+  no-op, another version is moved to it, one that cannot be had fails the
+  build). emcc's output is not byte-reproducible across versions and this
+  bundle rides every board image, so an emsdk cloned under `latest` made two
+  machines' bundles differ. The pin is the version moy-spec's preflight builds
+  its player in; bump the two together. A move shares its emsdk with every
+  worktree (`tools/worktree.py` links it).
 - **`worker.js` STATICALLY imports `moy_store.mjs`**, so it must be in
   `moy_webhost.ASSETS`: a board that does not serve it serves a console that
   cannot boot.

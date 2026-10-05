@@ -10,8 +10,10 @@
     entries are keyed by their inputs, so two trees cannot disagree in one):
     `.venv`; the wasm toolchain (`experiments/wasm_aot/toolchain/{dist,
     wasi-sdk}`) and the WAMR fork clone (`experiments/wasm_aot/wamr`); every
-    ESP-IDF and emsdk under `firmware/*/.build/`; the host caches in
-    `.build/` named in SHARED_CACHES; the perf carts in `ports/p8perf`.
+    ESP-IDF and emsdk under `firmware/*/.build/` (the web runner's build moves
+    a linked emsdk to its pinned version, for every tree that shares it); the
+    host caches in `.build/` named in SHARED_CACHES; the perf carts in
+    `ports/p8perf`.
   * ITS OWN: every MicroPython tree the main checkout has
     (`firmware/*/.build/micropython`, `.build/unix_micropython/micropython`),
     each a local clone of the main checkout's at the same commit -- hardlinked

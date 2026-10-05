@@ -725,7 +725,8 @@ Xtensa backend is experimental and Rust does not target it. Rust in an ESP-IDF
 CMake build as a static library is documented; in a MicroPython usermod there is
 no prior art. The browser is the known risk: `wasm32-unknown-emscripten` links
 through emcc, and matching rustc to emscripten is fragile where the web runner
-and moy-spec pin emscripten for reproducibility. Two languages in the tree.
+(`EMSDK_VERSION` in its build.sh) and moy-spec's preflight pin emscripten for
+reproducibility. Two languages in the tree.
 
 **Sprint 1a is the spike, on the smallest store component, and its gate is the
 decision.** The component is one the 1b carve has already given its native

@@ -6,8 +6,8 @@
 #
 # Follows the board build.sh pattern: toolchain cloned into .build/ (gitignored),
 # canonical module sources staged as COPIES from runtime/ every build, output to
-# dist/. Unlike the boards this needs no ESP-IDF -- just emsdk (auto-installed
-# here) and node (for the harness).
+# dist/. Unlike the boards this needs no ESP-IDF -- just emsdk (installed at
+# EMSDK_VERSION below, by tools/emsdk_tree.sh) and node (for the harness).
 #
 #   ./build.sh              # stage + FROZEN build + assemble dist/ (the ship
 #                           # shape: the console is frozen bytecode inside the
@@ -46,6 +46,10 @@ EMSDK_DIR="${BUILD_DIR}/emsdk"
 PORT_DIR="${MPY_DIR}/ports/webassembly"
 STAGE_DIR="${BUILD_DIR}/stage"
 MPY_TAG="${MPY_TAG:-v1.28.0}"
+# The emscripten the bundle is compiled with: emcc's output is not byte-reproducible
+# across versions, and this bundle rides every board image. It is the version
+# moy-spec's preflight builds its player in (EMSDK_IMAGE there); move them together.
+EMSDK_VERSION="${EMSDK_VERSION:-6.0.7}"
 
 PY="${REPO_ROOT}/.venv/bin/python"
 [ -x "${PY}" ] || PY=python3
@@ -60,11 +64,9 @@ esac
 # ---------------------------------------------------------------------------
 if [ "${STAGE_ONLY}" = "0" ]; then
   mkdir -p "${BUILD_DIR}"
-  if [ ! -d "${EMSDK_DIR}" ]; then
-    echo "== installing emsdk (one-time, ~1GB)"
-    git clone --quiet https://github.com/emscripten-core/emsdk.git "${EMSDK_DIR}"
-    (cd "${EMSDK_DIR}" && ./emsdk install latest && ./emsdk activate latest)
-  fi
+  # Absent: cloned and installed (~1 GB, once). Present at another version: moved
+  # to EMSDK_VERSION. Unobtainable: the build stops. A tree at the pin is a no-op.
+  bash "${REPO_ROOT}/tools/emsdk_tree.sh" "${EMSDK_DIR}" "${EMSDK_VERSION}"
   # Cloned when absent -- from the P4 target's local checkout when it has one,
   # which skips the network -- and, on every run, put at MPY_TAG: a tree at
   # another tag is reset to stock (the patches below re-apply), never compiled.

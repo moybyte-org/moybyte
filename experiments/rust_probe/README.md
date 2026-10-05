@@ -100,4 +100,5 @@ on a board.
 - **rustc's LLVM is older than emcc's** (22 against 24). It links because a
   `no_std` staticlib holds wasm object code, not bitcode; `-C linker-plugin-lto`
   or embedded bitcode in the archive would couple the two versions.
-  `firmware/web_runner/build.sh` installs the emsdk `latest`, not a pin.
+  `firmware/web_runner/build.sh` holds its emsdk to `EMSDK_VERSION`, so the
+  emcc the Rust object links under is the pinned one.
