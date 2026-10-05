@@ -374,6 +374,14 @@ byte-identical lines each; a board now passes its hardware -- compositor,
 canvas, inputs, keyboard, store, constants -- and takes the rest."""
 
 [[modules.device.group]]
+files = ["mem_census.py"]
+why = """
+The memory census the spine marks its boot steps into: inert unless the flash
+root holds `/mem_census` (written by `tools/mem_census.py`), which arms the
+boot trace and the import timer. The spine imports it, so every board that
+takes the spine takes it."""
+
+[[modules.device.group]]
 files = ["device_util.py", "device_canvas.py", "device_api.py", "moycore_glue.py"]
 why = """
 The drawing backend and the cart namespace: DeviceCanvas (the raster every tier

@@ -19,6 +19,7 @@ when not. Everything else -- the boot order, the service set, the frame loop
 -- is the shared spine (`device/desktop_spine.py`).
 """
 
+from mem_census import mark as _census
 from desktop_spine import build_desktop, bt_command
 # The seed roster, generated from system_carts/ at build time and PACKED
 # (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
@@ -27,6 +28,8 @@ from desktop_spine import build_desktop, bt_command
 # compression is a storage detail of this one import.
 from carts_data import CARTS_Z as CARTS
 from device_canvas import SystemCanvas
+
+_census("imports")
 
 GAME_W, GAME_H = 320, 240
 FONT_SCALE = 1                 # 2x was BUILT AND REVERTED on owner verdict
@@ -135,6 +138,7 @@ def run_desktop(fps_cap=60):
     print("Moybyte Guition display up (%dx%d, gfx=%s)"
           % (comp.size()[0], comp.size()[1], "native" if gfx else "NONE"))
     sys_canvas = SystemCanvas(comp, font_scale=FONT_SCALE)
+    _census("panel")
     inp = InputState()
     # The S3's on-chip radio; started by the spine after the Workstation's boot
     # allocations. Also this board's game-exit path: a paired keyboard's

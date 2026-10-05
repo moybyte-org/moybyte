@@ -390,14 +390,16 @@ def test_the_runtime_status_can_be_routed_to_a_boards_own_log():
 # -- the internal-SRAM census -------------------------------------------------
 
 
-def test_the_sram_census_names_its_four_stages_in_boot_order(monkeypatch):
+def test_the_sram_census_names_its_five_stages_in_boot_order(monkeypatch):
     """One census, every board (#66/#67, 2026-09-08).
 
     It was four hand-placed calls in the T-Deck's `run_desktop` and nowhere
     else, so the one question a Lua cart's PSRAM fallback raises -- who took
     the internal SRAM, and at which stage -- could be asked only on the board
     that happened to have the calls. The deltas between the lines are the
-    whole point: any single line is a number without an owner.
+    whole point: any single line is a number without an owner. "seeded"
+    splits the store's seed from its scan, which the memory census
+    (`device/mem_census.py`) marks too.
     """
     seen = []
     monkeypatch.setattr(device_boot, "sram_census", seen.append)
@@ -407,7 +409,7 @@ def test_the_sram_census_names_its_four_stages_in_boot_order(monkeypatch):
     boot.runtimes(FakeWs())
     boot.start_frames(FakeWs())
 
-    assert seen == ["rd-entry", "carts", "console", "desktop-up"]
+    assert seen == ["rd-entry", "seeded", "carts", "console", "desktop-up"]
 
 
 def test_a_store_that_fails_still_weighs_the_heap_the_scan_fragmented(monkeypatch):

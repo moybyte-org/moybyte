@@ -216,12 +216,16 @@ moybyte_patch_gc_run_hints() {
 }
 
 # The gc meters: gc.pauses() (collections and their pause, for the PERF line)
-# and gc.areas() (the split heap's areas and bytes held, for `heapcaps`).
-# tools/patch_gc_meters.py is the patch and its own documentation:
-# all-or-nothing, idempotent, independent of the run hints.
+# and gc.areas() (the split heap's areas and bytes held, for `heapcaps`); and
+# the census's three reads, gc.area_map() (each area's range, held, used,
+# largest free run), gc.growths() (every area added or freed, with the
+# request that grew it) and gc.refs() (the heap blocks holding an address). tools/patch_gc_meters.py and tools/patch_gc_census.py
+# are the patches and their own documentation: all-or-nothing, idempotent,
+# independent of each other and of the run hints.
 moybyte_patch_gc_meters() {
   [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_meters.py" "${MPY_DIR}" || exit 1
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_census.py" "${MPY_DIR}" || exit 1
 }
 
 # A 4 KB stdin ring, in the ESP32-P4's TCM, for a board whose serial is a

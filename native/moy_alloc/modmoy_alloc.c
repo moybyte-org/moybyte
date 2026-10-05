@@ -173,12 +173,31 @@ static mp_obj_t moy_alloc_stats(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_alloc_stats_obj, moy_alloc_stats);
 
+// live() -> [(address, size), ...] of every alloc() buffer not yet freed,
+// newest first: what the memory census (device/mem_census.py) names by owner,
+// matching each to the view that holds it by uctypes.addressof.
+static mp_obj_t moy_alloc_live(void) {
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+#if MOY_HAVE_HEAP_CAPS
+    for (moy_buf_node_t *node = moy_buf_live; node != NULL; node = node->next) {
+        mp_obj_t t[2] = {
+            mp_obj_new_int_from_uint((uintptr_t)node->ptr),
+            mp_obj_new_int_from_uint(node->size),
+        };
+        mp_obj_list_append(out, mp_obj_new_tuple(2, t));
+    }
+#endif
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_alloc_live_obj, moy_alloc_live);
+
 static const mp_rom_map_elem_t moy_alloc_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),        MP_OBJ_NEW_QSTR(MP_QSTR_moy_alloc) },
     { MP_ROM_QSTR(MP_QSTR_malloc_dma),      MP_ROM_PTR(&moy_alloc_malloc_dma_obj) },
     { MP_ROM_QSTR(MP_QSTR_alloc),           MP_ROM_PTR(&moy_alloc_alloc_obj) },
     { MP_ROM_QSTR(MP_QSTR_free),            MP_ROM_PTR(&moy_alloc_free_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats),           MP_ROM_PTR(&moy_alloc_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_live),            MP_ROM_PTR(&moy_alloc_live_obj) },
     { MP_ROM_QSTR(MP_QSTR_MEMORY_DMA),      MP_ROM_INT(MALLOC_CAP_DMA) },
     { MP_ROM_QSTR(MP_QSTR_MEMORY_INTERNAL), MP_ROM_INT(MALLOC_CAP_INTERNAL) },
     // MEMORY_SPIRAM mirrors lcd_bus's constant so a mainline build (P4 #58, no

@@ -54,6 +54,7 @@ from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
 from device_api import make_api
 from device_canvas import DeviceCanvas, _LayerComp
 from device_wifi import autoconnect_wifi, make_wifi
+from mem_census import mark as _census
 
 
 class Desktop:
@@ -171,6 +172,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     if log is None:
         def log(tag, msg):
             print("%s %s: %s" % (name, tag, msg))
+    _census("spine")
     d = Desktop(name)
     gfx = comp.gfx()
     import moy_carts
@@ -188,9 +190,11 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         # The fixed GAME canvas (#39): off-screen RGB565 over the same native
         # kernel; the WM composites it onto the system canvas.
         game = DeviceCanvas(_LayerComp(game_wh[0], game_wh[1], gfx))
+    _census("splash")
     touch = inputs()
     pointer = Pointer(sys_canvas.w, sys_canvas.h)
     inp.pointer = pointer          # touch-driven carts read it via the api touch()
+    _census("inputs")
 
     boot.note("loading cartridges")
     if load_carts is None:
@@ -200,10 +204,12 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     else:
         carts, carts_root, update_dir = load_carts(boot, moy_carts)
 
+    _census("store")
     boot.note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=font_scale,
                      panel_diagonal_in=panel_diagonal_in)
+    _census("workstation")
     # The chrome strip a quiet frame rotates beside the game rect on a
     # rotated compositor: the TALLEST bar the layout can draw.
     if getattr(comp, "rotated", False):
@@ -223,6 +229,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # a ring to route them through.
     rt_log = None if board_log is None else (lambda m: log("carts", m))
     runtimes = boot.runtimes(ws, log=rt_log)
+    _census("runtimes")
     # The shared service wiring: api/audio/runtimes + store/root/can_manage + WiFi
     # + the #66 slim_carts diet + pointer/keyboard + the boot loads, in the
     # ONE canonical order the host uses too.
@@ -231,6 +238,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                           make_audio=make_audio, runtimes=runtimes,
                           before_slim=before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+    _census("wired")
     if ble_keyboard is not None:
         # A second keyboard beside the physical one (#26). Both write into the
         # same InputState, so the console never asks which one a key came
@@ -250,6 +258,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
         log("boot", "link unavailable: %s" % exc)
         ws.link = None
+    _census("link")
     # OTA (#53): update_dir is where the board's store said (a copied image,
     # the pending marker), and every write -- the slot's included -- goes
     # through the console's store gate: the SD bracket where the card shares
@@ -283,6 +292,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         ws.reboot_hook = machine.reset
     except Exception as exc:  # noqa: BLE001
         log("boot", "reboot hook unavailable: %s" % exc)
+    _census("ota")
     # WEB CONSOLE (moycore plan 3.4 pull half): the wasm console baked into
     # the image, served from the board. Constructed, NOT started -- __init__
     # binds no socket, so injecting it only makes the Settings row appear.
@@ -293,19 +303,23 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                                   with_sd=with_sd)
     except Exception as exc:  # noqa: BLE001
         log("boot", "web console unavailable: %s" % exc)
+    _census("webhost")
     if after_services is not None:
         after_services(ws)
+    _census("services")
     if wm is not None:
         # The windowed tier (#73): installed AFTER the boot loads (the same
         # order as host build_workstation) so the persisted font scale is
         # applied before the root layout context is captured.
         ws.wm = wm(ws)
         ws.open_desk()
+        _census("wm")
     if keyboard is not None and getattr(keyboard, "start", None) is not None:
         # A BLE keyboard starts its radio only now, after the Workstation's
         # boot allocations; a keyboard that answers from __init__ has no
         # start(). Failure is touch-only, never a boot failure.
         keyboard.start()
+        _census("keyboard")
 
     ws._psave_ms = power_save_ms   # `state` reports the LIVE timeout
     serial_ch = None
@@ -325,6 +339,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         except Exception as exc:  # noqa: BLE001 -- remote input is optional sugar
             log("boot", "serial channel unavailable: %s" % exc)
             serial_ch = None
+    _census("dev channel")
 
     import gc
     gc.collect()
@@ -335,7 +350,9 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     ota = OtaHealth(ws, log=lambda m: log("OTA", m))
     ota.boot_check()
     print("%s desktop running (Ctrl-C for REPL)" % name)
+    _census("ota check")
     boot.start_frames(ws)
+    _census("frames")
     pump = FramePump(boot, ota, fps_cap)
     if serial_ch is not None:
         serial_ch.env["pump"] = pump
@@ -360,4 +377,5 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     d.serial = serial_ch
     d.pump = pump
     d.perf = perf
+    _census("spine done")
     return d

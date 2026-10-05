@@ -49,6 +49,11 @@ def sram_census(stage):
                       int_tot // 1024, ps_free // 1024))
     except Exception:
         pass
+    try:
+        from mem_census import mark
+        mark("stage " + stage)
+    except ImportError:     # a board that does not take the spine
+        pass
 
 
 def _diag_note(tag, msg):

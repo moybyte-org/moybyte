@@ -373,11 +373,23 @@ def test_a_half_applied_run_hints_tree_is_REFUSED(tmp_path):
 
 # -- the gc meters: gc.pauses() and gc.areas() --------------------------------
 #
-# The stock lines tools/patch_gc_meters.py anchors on, in stock order.
+# The stock lines tools/patch_gc_meters.py and tools/patch_gc_census.py
+# anchor on, in stock order: moybyte_patch_gc_meters applies both.
 
 _GC_C_METERS_STOCK = """\
 #include "py/gc.h"
 #include "py/runtime.h"
+
+#if MICROPY_GC_SPLIT_HEAP
+void gc_add(void *start, void *end) {
+}
+
+static bool gc_try_add_heap(size_t failed_alloc) {
+    gc_add(new_heap, (void *)new_heap + to_alloc);
+
+    return true;
+}
+#endif
 
 void gc_collect_start(void) {
     gc_collect_start_common();
@@ -390,9 +402,22 @@ void gc_collect_end(void) {
     gc_weakref_sweep();
     #endif
 }
+
+static void gc_sweep_free_blocks(void) {
+        if (last_used_block == 0 && prev_area != NULL) {
+            DEBUG_printf("gc_sweep_free_blocks free empty area %p\\n", area);
+            NEXT_AREA(prev_area) = NEXT_AREA(area);
+            MP_PLAT_FREE_HEAP(area);
+        }
+}
 """
 
 _MODGC_C_STOCK = """\
+#if MICROPY_GC_ALLOC_THRESHOLD
+static mp_obj_t gc_threshold(size_t n_args, const mp_obj_t *args) {
+}
+#endif
+
 static const mp_rom_map_elem_t mp_module_gc_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_mem_free), MP_ROM_PTR(&gc_mem_free_obj) },
     { MP_ROM_QSTR(MP_QSTR_mem_alloc), MP_ROM_PTR(&gc_mem_alloc_obj) },
@@ -450,6 +475,59 @@ def test_the_gc_meters_patch_is_idempotent_and_independent_of_the_run_hints(
     assert _meters(a).returncode == 0
     assert [(a / "py" / f).read_text(encoding="utf-8")
             for f in ("gc.c", "modgc.c", "mpstate.h")] == texts[:3]
+
+
+def test_the_gc_census_patch_records_every_area_and_registers_both_reads(
+        tmp_path):
+    """An area added notes the request that grew the heap, an area a sweep
+    frees notes itself, and area_map/growths sit in the gc module's table
+    between entries the meters patch does not anchor on."""
+    gc_c, modgc_c = _meters_tree(tmp_path)
+    r = _meters(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c, m = _both(gc_c, modgc_c)
+    assert ("    gc_add(new_heap, (void *)new_heap + to_alloc);\n"
+            "    MOYBYTE_GC_NOTE(failed_alloc, to_alloc);") in c
+    assert ("    MOYBYTE_GC_NOTE(0, area->gc_pool_end - (byte *)area);"
+            in c)
+    assert c.index("size_t moybyte_gc_area_map(") < c.index("void gc_add(")
+    assert c.index("#define MOYBYTE_GC_NOTE(") < c.index("gc_try_add_heap(")
+    assert ("MP_QSTR_mem_free), MP_ROM_PTR(&gc_mem_free_obj) },\n"
+            "    { MP_ROM_QSTR(MP_QSTR_area_map), MP_ROM_PTR(&gc_area_map_obj) }"
+            in m)
+    assert "MP_ROM_QSTR(MP_QSTR_growths), MP_ROM_PTR(&gc_growths_obj)" in m
+    assert "MP_ROM_QSTR(MP_QSTR_refs), MP_ROM_PTR(&gc_refs_obj)" in m
+    assert c.index("size_t moybyte_gc_refs(") < c.index("void gc_add(")
+    assert m.index("gc_growths_obj, gc_growths)") < m.index("gc_threshold(")
+
+
+def test_the_gc_census_and_meters_patches_land_the_same_in_either_order(
+        tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    for d in (a, b):
+        _meters_tree(d)
+    run = [sys.executable, str(ROOT / "tools" / "patch_gc_census.py")]
+    meters = [sys.executable, str(ROOT / "tools" / "patch_gc_meters.py")]
+    for d, order in ((a, (run, meters)), (b, (meters, run))):
+        for cmd in order:
+            assert subprocess.run(cmd + [str(d)]).returncode == 0
+    assert _both(*_meters_tree_paths(a)) == _both(*_meters_tree_paths(b))
+
+
+def _meters_tree_paths(d):
+    return d / "py" / "gc.c", d / "py" / "modgc.c"
+
+
+def test_a_gc_census_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    gc_c, modgc_c = _meters_tree(tmp_path, gc_c=_GC_C_METERS_STOCK.replace(
+        "            NEXT_AREA(prev_area) = NEXT_AREA(area);\n",
+        "            prev_area->next = area->next;\n"))
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "patch_gc_census.py"),
+                        str(tmp_path)], capture_output=True, text=True)
+    assert r.returncode != 0
+    assert "did not apply" in r.stderr and "area freed" in r.stderr
+    assert "gc census" not in gc_c.read_text(encoding="utf-8")
+    assert "gc census" not in modgc_c.read_text(encoding="utf-8")
 
 
 def test_a_gc_meters_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):

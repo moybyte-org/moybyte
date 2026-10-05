@@ -22,6 +22,7 @@ audio backend, WiFi service, OTA updater -- is staged from the shared
 underneath.
 """
 
+from mem_census import mark as _census
 from console import _cursor_delta
 from desktop_spine import build_desktop
 from device_boot import apply_touch
@@ -38,6 +39,8 @@ from device_canvas import DeviceCanvas
 from device_diag import (_diag_flush, _diag_hitch,
                          _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat, _diag_webhost,
                          _diag_pump, HITCH_MS)
+
+_census("imports")
 
 # --- #69 the input-poller thread ---------------------------------------------
 #
@@ -204,6 +207,7 @@ def run_desktop(fps_cap=60):
 
     comp = TDeckCompositor(nfbs=2)
     canvas = DeviceCanvas(comp)
+    _census("panel")
     try:
         import moybyte_diag as diag
     except Exception:  # noqa: BLE001
