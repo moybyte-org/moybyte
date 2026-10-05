@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
 
-from runtime import device_boot  # noqa: E402
+from runtime import boot_carts, device_boot  # noqa: E402
 
 
 # -- fakes --------------------------------------------------------------------
@@ -403,6 +403,7 @@ def test_the_sram_census_names_its_five_stages_in_boot_order(monkeypatch):
     """
     seen = []
     monkeypatch.setattr(device_boot, "sram_census", seen.append)
+    monkeypatch.setattr(boot_carts, "sram_census", seen.append)
     boot, _, _ = _boot()
 
     boot.load_carts(FakeStore(), [{"title": "s"}])
@@ -418,6 +419,7 @@ def test_a_store_that_fails_still_weighs_the_heap_the_scan_fragmented(monkeypatc
     one whose heap someone is about to ask about."""
     seen = []
     monkeypatch.setattr(device_boot, "sram_census", seen.append)
+    monkeypatch.setattr(boot_carts, "sram_census", seen.append)
     boot, _, _ = _boot()
 
     boot.load_carts(FakeStore(raise_on="ensure_dirs"), [{"title": "b"}])
@@ -430,6 +432,7 @@ def test_the_census_is_a_no_op_off_board():
     to be callable and silent -- every board method above calls it
     unconditionally."""
     assert device_boot.sram_census("anything") is None
+    assert boot_carts.sram_census("anything") is None
 
 
 # -- the OTA verdict + confirm ------------------------------------------------
@@ -735,20 +738,21 @@ def test_the_spine_imports_no_board_module():
     assertion above) and starts being un-stageable to the wasm head, whose
     `DENY` glob does not exclude it.
     """
-    src = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
     # `moycore_glue` and `device_util` are device-tier LEAVES, not board
     # modules: both are staged to every board, neither knows a panel or a pin,
     # and both are imported behind an ImportError guard with a working
-    # off-board answer. A firmware/ module never belongs here.
+    # off-board answer. A firmware/ module never belongs here -- nor in the
+    # cart step the spine takes (boot_carts.py), whose store is an argument.
     allowed = {"console", "runtime", "chrome", "ticks", "moycore_glue",
-               "device_util", "perf_line", "time", "gc"}
+               "device_util", "perf_line", "time", "gc", "boot_carts"}
     seen = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            seen |= {a.name.split(".")[0] for a in node.names}
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            seen.add(node.module.split(".")[0])
+    for name in ("device_boot.py", "boot_carts.py"):
+        src = (ROOT / "runtime" / name).read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.Import):
+                seen |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                seen.add(node.module.split(".")[0])
     assert seen <= allowed, "device_boot imports board modules: %s" % sorted(
         seen - allowed)
 

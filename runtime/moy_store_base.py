@@ -73,7 +73,7 @@ def _canvas_str(value):
 # <name>.moyimg files -- the THIRD asset type (a 64-colour MOY64 index bitmap from
 # the paint app), alongside sprites.moygfx and map.moymap. A .moyimg is a small JSON
 # header {format,w,h,data} over deflated indices, one byte per pixel -- ONE format,
-# whoever wrote it (runtime/moy_image.py holds the codec and the argument).
+# whoever wrote it (runtime/moyimg.py holds the codec and the argument).
 IMAGES_DIR = "images"
 IMAGE_EXT = ".moyimg"
 
@@ -94,6 +94,10 @@ TILE_FLAGS = 512
 # the seed roster and the sync wire carry as bytes.
 COVER_FILE = "cover.png"
 COVER_MAX_BYTES = 65536               # cover_png.MAX_BYTES (pinned equal)
+
+# A cart's regenerable preview cache: `thumbs/`, the wallpaper-preview
+# sidecars runtime/moy_image.py writes. Never copied with a cart, never synced.
+THUMBS_DIR = "thumbs"
 
 # Placed-actor scenes (#85) live in a per-cart scenes/ subfolder, one .moyscene
 # actor table per scene.

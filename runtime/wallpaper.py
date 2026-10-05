@@ -42,9 +42,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, _SilentAudio, _Blit, _err_text
 try:
-    from moy_image import text_sig, load_wallpaper_preview, save_wallpaper_preview
+    from moyimg import text_sig
+    from moy_image import load_wallpaper_preview, save_wallpaper_preview
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_image import (text_sig, load_wallpaper_preview,
+    from runtime.moyimg import text_sig
+    from runtime.moy_image import (load_wallpaper_preview,
                                    save_wallpaper_preview)
 
 

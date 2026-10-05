@@ -41,7 +41,7 @@
 # one namespace for every caller:
 #   moy_store_base   the on-card layout, slug, ensure_dirs, the dir primitives
 #   moy_fs           crash-safe file primitives
-#   moy_image        the moyimg codec
+#   moyimg           the moyimg codec
 #   moy_journal      the per-project undo journal
 #   moy_seed         seeding, the packed roster, the retired-seed sweep
 #   moy_files        the #108 user-files layer
@@ -178,19 +178,20 @@ def flags_to_hex(flags):
         for row in range(16)) + "\n"
 
 
-# The moyimg codec + cover-thumb sidecars and the crash-safe file primitives
-# moved to their own leaf modules (moy_image / moy_fs); imported back + re-exported
-# under their pre-extraction names so every caller, test and `store.X` lookup is
-# unchanged. Same bare-or-package fallback as every shared module.
+# The moyimg codec and the crash-safe file primitives live in their own leaf
+# modules (moyimg / moy_fs); imported back + re-exported under these names so
+# every `store.X` lookup reaches them. Same bare-or-package fallback as every
+# shared module.
 try:
-    from moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg,
-                           decode_moyimg, text_sig)
+    from moy_store_base import THUMBS_DIR
+    from moyimg import _b64_encode, encode_moyimg, decode_moyimg, text_sig
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                         _write_atomic, _read_recover, _read_bak, _forget_bak,
                         set_publish_root, _read_bytes, _write_bytes)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_image import (THUMBS_DIR, _b64_encode, encode_moyimg,
-                                   decode_moyimg, text_sig)
+    from runtime.moy_store_base import THUMBS_DIR
+    from runtime.moyimg import (_b64_encode, encode_moyimg, decode_moyimg,
+                                text_sig)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover, _read_bak,
                                 _forget_bak, set_publish_root, _read_bytes,

@@ -464,15 +464,15 @@ def _chunk(tag, body):
 def encode_indexed(indices, palette):
     """128 x 128 palette indices (row-major) and their palette (R, G, B bytes,
     1-256 entries) -> a cover.png in the profile: colour type 3, every row
-    filter 0, the zlib stream moy_image writes pictures with."""
+    filter 0, the zlib stream moyimg writes pictures with."""
     if len(indices) != SIDE * SIDE:
         raise ValueError("a cover is %dx%d" % (SIDE, SIDE))
     if len(palette) % 3 or not 3 <= len(palette) <= 768:
         raise ValueError("a cover's palette has 1-256 entries")
     try:
-        from moy_image import _deflate_pieces
+        from moyimg import _deflate_pieces
     except ImportError:  # pragma: no cover - host fallback when not yet aliased
-        from runtime.moy_image import _deflate_pieces
+        from runtime.moyimg import _deflate_pieces
     mv = memoryview(bytes(indices))
     zero = b"\0"
 

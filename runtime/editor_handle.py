@@ -63,9 +63,11 @@ except ImportError:  # pragma: no cover - direct host import
     from runtime import text_modes as _modes
 
 try:
-    from moy_image import Image, decode_moyimg
+    from moy_image import Image
+    from moyimg import decode_moyimg
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.moy_image import Image, decode_moyimg
+    from runtime.moy_image import Image
+    from runtime.moyimg import decode_moyimg
 
 try:
     from ticks import _ticks_ms, _ticks_diff

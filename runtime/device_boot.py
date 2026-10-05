@@ -33,7 +33,8 @@ beside it. The nineteen steps sort into three kinds --
 
   IDENTICAL (here)          the boot splash + its progress bar + the "first
                             frame in Nms" report; the cart load/seed/scan with
-                            its built-in fallback; the Lua runtime probe; the
+                            its built-in fallback (`BootCarts`, in
+                            boot_carts.py); the Lua runtime probe; the
                             four-stage internal-SRAM census; the OTA boot
                             verdict and the frame-loop rollback confirm; the
                             frame cadence, its debt and the sleep.
@@ -81,6 +82,11 @@ except ImportError:  # pragma: no cover - host package lane
     from runtime.perf_line import FAILED as PERF_FAILED, format_perf
 
 try:
+    from boot_carts import BootCarts
+except ImportError:  # pragma: no cover - host package lane
+    from runtime.boot_carts import BootCarts
+
+try:
     from gc import pauses as _gc_pauses
 except ImportError:  # a host, or a MicroPython without tools/patch_gc_meters.py
     _gc_pauses = None
@@ -92,13 +98,14 @@ except ImportError:  # pragma: no cover - host lane: no device tier staged
         """No second region off-board, so nothing to weigh."""
 
 
-class DeviceBoot:
+class DeviceBoot(BootCarts):
     """The boot sequence's shared steps, and the screen that reports them.
 
     One instance per boot, constructed as soon as a board has a canvas and a
     compositor. `label` is the serial prefix ("Moybyte" / "Moybyte P4") and
     `set_backlight` the board's panel-light function -- the two things that
-    differ between the boards in every line this class prints.
+    differ between the boards in every line this class prints. The cart step
+    (`load_carts`, `seed_progress`) is `BootCarts`, runtime/boot_carts.py.
     """
 
     def __init__(self, canvas, comp, set_backlight=None, label="Moybyte"):
@@ -167,96 +174,7 @@ class DeviceBoot:
         except Exception as exc:  # noqa: BLE001 -- a splash must never fail a boot
             self.say("splash unavailable: %s" % (exc,))
 
-    def seed_progress(self, done, total, title):
-        """`seed_builtins`' progress callback: one repaint per cart, one serial
-        line every eighth.
-
-        A repaint costs nothing against ~550ms of flash writes per cart
-        (measured: the P4 boot stays at 25.4s), and this is the only stretch of
-        the boot that knows how much of itself is left. Every eighth also goes
-        to the wire, because a repaint says nothing to someone watching over
-        serial -- and one line per cart would drown the boot log.
-        """
-        if done % 8 == 0:
-            self.say("boot: loading cartridges %d/%d" % (done + 1, total))
-        self.note("loading cartridges  %d/%d" % (done + 1, total),
-                  frac=float(done) / total if total else 1.0)
-
     # -- the steps -----------------------------------------------------------
-
-    def load_carts(self, store, seed, root=None, session=None, media="SD",
-                   fallback_root=None, fallback_media="flash"):
-        """Seed + scan the cart store, falling back to the embedded carts.
-
-        Returns `(carts, carts_root)`; a None root means "management disabled",
-        which is what `wire_workstation_core` turns into `can_manage=False`.
-
-        `session` is the board's storage lifecycle wrapper -- on the T-Deck
-        `moybyte_sd.with_sd_live` (SD shares the panel's SPI host, so the mount
-        must bracket the whole seed+scan), on the P4s and the Guition S3 nothing
-        at all, because the card has a bus of its own (device/card_store.py) and
-        internal flash races no one. `media` is the word that appears in the
-        serial lines ("SD" / "flash").
-
-        `fallback_root` is the SECOND STORE to try before giving up, and it is
-        what keeps a card-less board WRITABLE. Without it a T-Deck with no card
-        in the slot booted to the embedded carts with a None root, i.e. a
-        read-only console: every cart visible, none editable, nothing saveable,
-        and the only explanation a single serial line nobody was attached to
-        read. The retry runs with NO session, because a board only ever needs a
-        lifecycle wrapper for the bus it just failed on -- internal flash races
-        nobody on any board here.
-
-        Why a retry rather than a probe: on this hardware there is nothing to
-        probe. The Guition mounts its card once at boot and asks the mount, but
-        the T-Deck's card shares the panel's SPI host and is mounted PER
-        SESSION, so the only honest question is "did a real session work" --
-        which is this call. The boards differ because the buses do.
-        """
-        sram_census("rd-entry")
-        try:
-            # BEFORE the scan, which is what fragments the heap: the PICO-8
-            # machine's 81KB has to be a contiguous run, and after the store is
-            # up an S3 has none (moycore_glue.reserve_p8_memory has the numbers).
-            try:
-                from moycore_glue import reserve_p8_memory
-                if reserve_p8_memory():
-                    self.say("p8 machine memory reserved")
-            except ImportError:
-                pass                    # a build with no moycore staged
-            if root is None:
-                root = store.CARTS_DIR
-            carts = self._try_store(store, seed, root, session, media)
-            if carts:
-                return carts, root
-            if fallback_root is not None and fallback_root != root:
-                carts = self._try_store(store, seed, fallback_root, None,
-                                        fallback_media)
-                if carts:
-                    return carts, fallback_root
-            self.say("using built-in carts")
-            return store.embedded_floor(seed), None
-        finally:
-            sram_census("carts")
-
-    def _try_store(self, store, seed, root, session, media):
-        """One store attempt: seed it, scan it, say what happened. [] on any
-        failure OR an empty scan -- the caller decides whether another store is
-        left to try."""
-        try:
-            def _seed_and_scan():
-                store.ensure_dirs(root)
-                store.seed_any(seed, root, progress=self.seed_progress)
-                sram_census("seeded")
-                return store.catalogue(root)   # the shelf; a cart's payloads at open
-
-            carts = _seed_and_scan() if session is None else session(_seed_and_scan)
-            if carts:
-                self.say("loaded %d carts from %s" % (len(carts), media))
-                return carts
-        except Exception as exc:  # noqa: BLE001 -- any store failure degrades
-            self.say("%s carts unavailable: %s" % (media, exc))
-        return []
 
     def runtimes(self, ws, log=None):
         """The cart runtimes in this image (`ws.runtimes`), and a line each

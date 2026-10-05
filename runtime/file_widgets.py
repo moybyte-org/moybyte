@@ -7,10 +7,10 @@
 # no paths, no extensions. MicroPython-safe; staged to both boards.
 
 try:
-    from moy_image import decode_moyimg
+    from moyimg import decode_moyimg
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_image import decode_moyimg
+    from runtime.moyimg import decode_moyimg
     from runtime import ui as _ui
 
 _in = _ui.rect_in

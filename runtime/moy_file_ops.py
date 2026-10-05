@@ -17,9 +17,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_fs import (_copy, _exists, _forget_bak, _mkdir, _read, _remove, _write_atomic)
 try:
-    from moy_image import (text_sig)
+    from moyimg import text_sig
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_image import (text_sig)
+    from runtime.moyimg import text_sig
 try:
     from moy_store_base import (CARTS_DIR, _is_dir, _rmtree, ensure_dirs)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -411,7 +411,7 @@ def empty_trash(root=CARTS_DIR):
 # source can never break anything.
 
 def content_sig(text):
-    """A cheap content stamp for a user-file blob (moy_image.text_sig)."""
+    """A cheap content stamp for a user-file blob (moyimg.text_sig)."""
     return text_sig(text) if text else 0
 
 

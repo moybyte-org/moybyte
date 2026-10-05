@@ -549,12 +549,12 @@ def test_there_is_one_new_layer_factory_and_it_pins_retained_frames():
 
 def test_paint_image_assets_wired_device_and_carts():
     """ONE codec for a paint image: `cart_api._decode_moyimg` is a FORWARD to
-    moy_image, never a second inflater. The drawing tiers used to inflate the
+    moyimg, never a second inflater. The drawing tiers used to inflate the
     envelope themselves while the store read Paint's second codec, which is how
     a picture came back blank on whichever tier held the other half. The codec
-    is executed in tests/test_moy_image.py."""
+    is executed in tests/test_moyimg.py."""
     cart_api_src = Path("runtime/cart_api.py").read_text(encoding="utf-8")
-    assert "return moy_image.decode_moyimg(text)" in cart_api_src
+    assert "return moyimg.decode_moyimg(text)" in cart_api_src
     assert "deflate" not in cart_api_src and "zlib" not in cart_api_src
 
 

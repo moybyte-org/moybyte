@@ -659,7 +659,7 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
     """
     staged = set(board_config.staged_modules(ZERO, ROOT))
     for name in ("moy_sync.py", "moy_fs.py",          # the 3.4 RPC
-                 "moy_carts.py", "moy_image.py",      # #108 files sync
+                 "moy_carts.py", "moyimg.py",         # #108 files sync
                  "moy_store_base.py", "moy_seed.py",  # ...and the store's own
                  "moy_files.py", "moy_file_ops.py",   # split-off modules
                  "moy_journal.py",                    # the store of record

@@ -311,6 +311,7 @@ console needs while no Python app runs is OS.
 | `runtime/bar_layer.py` | window managers | 7 | the top bar and dock every WM draws; its geometry constants are read outside it |
 | `runtime/block_editor_ui.py` | app | — | the Editor's Blocks tab |
 | `runtime/blocks.py` | app | — | the block compiler is an editor's (§2.2) |
+| `runtime/boot_carts.py` | store | 1b | the boot's cart step, split from `runtime/device_boot.py`: seed the store, read its catalogue, fall back to the built-in carts; `DeviceBoot` takes it as a mixin |
 | `runtime/calc_app.py` | app | — | Calc |
 | `runtime/cards_layer.py` | app | — | the Config tab's "Make it mine" cards |
 | `runtime/cart_api.py` | cart path | open | `make_api` builds the Python cart's namespace, one body on every tier; a Python cart runs in the VM (§1.2). Question: does it stay as the Python runtime's binding, thinning as the services under it go native, or does the kernel install the verb table into a Python cart's globals as libmoy's binding does for Lua and wasm? `device/device_api.py`, `runtime/cart_verbs.py` and `runtime/host_api.py`'s re-export follow the answer |
@@ -329,7 +330,7 @@ console needs while no Python app runs is OS.
 | `runtime/cover_png.py` | store | 1b | the native `moy_png` already decodes on boards and in the browser; the Python reader is the host's |
 | `runtime/crash_guard.py` | spine | 2 | the strike ledger for apps and the wallpaper |
 | `runtime/dev_channel.py` | frame tail | 3 | the serial dev channel, one vocabulary on every board |
-| `runtime/device_boot.py` | split | 1b + 3 + 4 | `DeviceBoot`'s cart load, seed and scan → 1b; its runtime probe and map → 4; the frame pump, OTA health, idle blank, PERF sampler and `FrameLoop` → 3 |
+| `runtime/device_boot.py` | split | 3 + 4 | `DeviceBoot`'s runtime probe and map → 4; its boot screen, the frame pump, OTA health, idle blank, PERF sampler and `FrameLoop` → 3; its cart step is `runtime/boot_carts.py` |
 | `runtime/editor_app.py` | app | — | the Editor and its tab ladder |
 | `runtime/editor_handle.py` | app | — | the Editor's engine behind `open_editor`; a cart that calls it keeps the VM (§2.3) |
 | `runtime/editors.py` | app | — | the umbrella that re-exports the editor cores |
@@ -361,7 +362,7 @@ console needs while no Python app runs is OS.
 | `runtime/moy_file_ops.py` | store | 1b | a user file's life: history sidecars, rename, trash, restore; the Zero takes it |
 | `runtime/moy_files.py` | store | 1b | the user-files layer under the Files app and role; the Zero takes it |
 | `runtime/moy_fs.py` | store | 1b | the crash-safe write primitive every store module stands on, so it goes first; the Zero takes it |
-| `runtime/moy_image.py` | split | 1b + 4 + 5 | the moyimg codec → 1b; `Image`, the `image` verb's object and a kernel handle (§2.3) → 4; the wallpaper-preview sidecar → 5; the Zero takes it |
+| `runtime/moy_image.py` | split | 4 + 5 | `Image`, the `image` verb's object and a kernel handle (§2.3) → 4; the wallpaper-preview sidecar → 5; the codec is `runtime/moyimg.py` |
 | `runtime/moy_journal.py` | store | 1b | the undo journal, named under storage in §2.2; the Zero takes it |
 | `runtime/moy_qr.py` | radios and links | open | the pairing QR encoder for the web-console screen; follows `runtime/web_console_ui.py` |
 | `runtime/moy_seed.py` | store | 1b | seeding and the sweep of retired seeds; the Zero takes it |
@@ -373,6 +374,7 @@ console needs while no Python app runs is OS.
 | `runtime/moyhost_gfx.c` | host-only | — | the C shim `runtime/gfx_binding.py` compiles |
 | `runtime/moyhost_lua.c` | host-only | — | the C shim `runtime/lua_binding.py` compiles |
 | `runtime/moyhost_wasm.c` | host-only | — | the C shim `runtime/wasm_binding.py` compiles |
+| `runtime/moyimg.py` | store | 1b | the moyimg codec and the content stamp the store's sidecars are keyed on, split from `runtime/moy_image.py`; the Zero takes it |
 | `runtime/music_editor_ui.py` | app | — | the Editor's Music tab |
 | `runtime/native_build.py` | host-only | — | builds the host's ctypes bindings; the kernel's host binding (§4.2) builds through it from the first crossing |
 | `runtime/netplay.py` | cart path | 4 | lockstep: inputs, never state |
@@ -383,7 +385,8 @@ console needs while no Python app runs is OS.
 | `runtime/perf_line.py` | frame tail | 3 | the PERF line's one field table, formatter and parser |
 | `runtime/player.py` | cart path | 4 | the cart loop and the runtime map |
 | `runtime/players.py` | cart path | 4 | input routing to player slots and the net seam netplay uses |
-| `runtime/project.py` | split | 1b, rest stays | the cart's loading and its `commit_*` persistence verbs → 1b; `history_for` and the CONFIG tab's undo codec stay with the Editor |
+| `runtime/project.py` | app | — | `Project`: `runtime/project_store.py`'s class plus the Editor's half, the per-tab op histories (`history_for`) and the CONFIG tab's undo codec |
+| `runtime/project_store.py` | store | 1b | the open cart's data, its builders and its `commit_*` verbs, split from `runtime/project.py`; the code commit's graduation check still asks the block compiler and Storybook's deck compiler, which are apps' |
 | `runtime/scene_editor_ui.py` | app | — | the Editor's Scene tab |
 | `runtime/settings_layer.py` | app | — | Settings; its WIFI panel drives the spine's leases |
 | `runtime/skin.py` | toolkit | 6 | the skin catalogue stays unchanged data the native toolkit installs (§4.5) |

@@ -130,10 +130,10 @@ def _decode_moyimg(text):
     a silently blank image on whichever tier held the other half."""
     try:
         try:
-            import moy_image
+            import moyimg
         except ImportError:
-            from runtime import moy_image
-        return moy_image.decode_moyimg(text)
+            from runtime import moyimg
+        return moyimg.decode_moyimg(text)
     except Exception:  # noqa: BLE001 -- bad/absent image -> caller gets None
         return None
 

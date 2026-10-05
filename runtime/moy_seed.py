@@ -15,9 +15,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_fs import (_exists, _mkdir, _read, _read_recover, _write,
                                 _write_bytes)
 try:
-    from moy_image import _b64_decode
+    from moyimg import _b64_decode
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_image import _b64_decode
+    from runtime.moyimg import _b64_decode
 try:
     from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _rmtree, _sibling_path, slug)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased

@@ -54,7 +54,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from runtime import moy_image  # noqa: E402
+from runtime import moyimg  # noqa: E402
 from runtime.palette import MOY64  # noqa: E402
 from tools import pngwrite  # noqa: E402
 
@@ -190,11 +190,11 @@ def write_png(path, buf, scale=1):
 def encode_bg(buf):
     """The `.moyimg` envelope, through the codec every writer shares.
 
-    Not a local `zlib.compress`: the window is PINNED (moy_image.MOYIMG_WBITS)
+    Not a local `zlib.compress`: the window is PINNED (moyimg.MOYIMG_WBITS)
     so a picture written here and one written by Paint on a board are the same
     stream, and a tool with its own copy of that number is how they stop being.
     """
-    return moy_image.encode_moyimg(W, H, buf)
+    return moyimg.encode_moyimg(W, H, buf)
 
 
 def main(argv=None):

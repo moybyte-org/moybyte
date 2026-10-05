@@ -392,7 +392,7 @@ def _stage_for_micropython(tmp_path):
     fails if these names stop being the ones the board freezes.
     """
     for name in ("moy_carts.py", "moy_store_base.py", "moy_seed.py",
-                 "moy_files.py", "moy_file_ops.py", "moy_image.py", "moy_fs.py",
+                 "moy_files.py", "moy_file_ops.py", "moyimg.py", "moy_fs.py",
                  "moy_journal.py", "ticks.py"):
         with open(os.path.join(ROOT, "runtime", name), encoding="utf-8") as f:
             body = f.read()

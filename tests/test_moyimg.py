@@ -36,7 +36,7 @@ import unix_mp
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime import moy_image  # noqa: E402
+from runtime import moyimg  # noqa: E402
 
 BOARDS = (
     "lilygo_t_deck_plus_mainline/boards/MOYBYTE_TDECK",
@@ -60,16 +60,16 @@ def _art(w=40, h=20):
 
 def test_the_blob_is_a_json_header_over_a_deflate_stream():
     art = _art()
-    blob = moy_image.encode_moyimg(40, 20, art)
+    blob = moyimg.encode_moyimg(40, 20, art)
     meta = json.loads(blob)
     assert meta["format"] == "moyimg-v1" and meta["w"] == 40 and meta["h"] == 20
     assert set(meta) == {"format", "w", "h", "data"}, (
         "one format -- there is no codec field to dispatch on")
-    raw = moy_image._b64_decode(meta["data"])
+    raw = moyimg._b64_decode(meta["data"])
     # A zlib header: CM=8 in the low nibble, and CINFO -- the window, minus
     # eight -- in the high one. THIS is what a reader takes its window from.
     assert raw[0] & 0x0F == 8
-    assert (raw[0] >> 4) + 8 == moy_image.MOYIMG_WBITS
+    assert (raw[0] >> 4) + 8 == moyimg.MOYIMG_WBITS
     assert (raw[0] * 256 + raw[1]) % 31 == 0
 
 
@@ -78,8 +78,8 @@ def test_the_pinned_window_is_the_measured_one():
     half a percent of the best ratio any window reaches, for a 4 KB heap
     allocation instead of 32 KB -- and the window is live on a board that is
     compressing a kid's drawing while the shell is on screen."""
-    assert moy_image.MOYIMG_WBITS == 12
-    assert (1 << moy_image.MOYIMG_WBITS) == 4096
+    assert moyimg.MOYIMG_WBITS == 12
+    assert (1 << moyimg.MOYIMG_WBITS) == 4096
 
 
 def test_a_picture_written_with_a_bigger_window_still_reads():
@@ -92,23 +92,23 @@ def test_a_picture_written_with_a_bigger_window_still_reads():
     raw = comp.compress(art) + comp.flush()
     assert (raw[0] >> 4) + 8 == 15
     blob = json.dumps({"format": "moyimg-v1", "w": 40, "h": 20,
-                       "data": moy_image._b64_encode(raw)})
-    assert moy_image.decode_moyimg(blob) == (40, 20, art)
+                       "data": moyimg._b64_encode(raw)})
+    assert moyimg.decode_moyimg(blob) == (40, 20, art)
 
 
 @pytest.mark.parametrize("size", [(1, 1), (3, 7), (40, 20), (320, 240), (512, 300)])
 def test_encode_decode_round_trips(size):
     w, h = size
     art = _art(w, h)
-    assert moy_image.decode_moyimg(moy_image.encode_moyimg(w, h, art)) == (w, h, art)
+    assert moyimg.decode_moyimg(moyimg.encode_moyimg(w, h, art)) == (w, h, art)
 
 
 def test_a_list_of_indices_encodes_like_a_buffer():
     """A cart hands `image()` whatever it has; the codec must not care."""
     art = _art(8, 4)
-    assert (moy_image.encode_moyimg(8, 4, list(art))
-            == moy_image.encode_moyimg(8, 4, bytearray(art))
-            == moy_image.encode_moyimg(8, 4, art))
+    assert (moyimg.encode_moyimg(8, 4, list(art))
+            == moyimg.encode_moyimg(8, 4, bytearray(art))
+            == moyimg.encode_moyimg(8, 4, art))
 
 
 @pytest.mark.parametrize("bad", [
@@ -121,7 +121,7 @@ def test_a_list_of_indices_encodes_like_a_buffer():
 def test_a_blob_that_is_not_a_picture_reads_as_absent(bad):
     """None, never a raise: every caller on every tier treats a picture it
     cannot read as one that is not there."""
-    assert moy_image.decode_moyimg(bad) is None
+    assert moyimg.decode_moyimg(bad) is None
 
 
 def test_a_retired_rle_blob_reads_as_absent():
@@ -141,17 +141,17 @@ def test_a_retired_rle_blob_reads_as_absent():
         packed += bytes((count, art[pos]))
         pos += count
     blob = json.dumps({"format": "moyimg-v1", "w": 64, "h": 48, "codec": "rle",
-                       "data": moy_image._b64_encode(bytes(packed))})
-    assert moy_image.decode_moyimg(blob) is None
+                       "data": moyimg._b64_encode(bytes(packed))})
+    assert moyimg.decode_moyimg(blob) is None
 
 
 def test_extra_header_keys_survive_a_decode():
     """The #108 provenance stamp rides in the same object."""
     art = _art(8, 4)
-    meta = json.loads(moy_image.encode_moyimg(8, 4, art))
+    meta = json.loads(moyimg.encode_moyimg(8, 4, art))
     meta["src"] = "drawings/sunset"
     meta["sig"] = 12345
-    assert moy_image.decode_moyimg(json.dumps(meta)) == (8, 4, art)
+    assert moyimg.decode_moyimg(json.dumps(meta)) == (8, 4, art)
 
 
 def test_a_heap_that_says_no_is_not_a_missing_picture():
@@ -160,14 +160,14 @@ def test_a_heap_that_says_no_is_not_a_missing_picture():
     then cache and act on -- where raised it is a caller's choice to skip one
     picture and come back to it."""
     art = _art(16, 16)
-    blob = moy_image.encode_moyimg(16, 16, art)
-    real = moy_image._inflate
-    moy_image._inflate = _starved
+    blob = moyimg.encode_moyimg(16, 16, art)
+    real = moyimg._inflate
+    moyimg._inflate = _starved
     try:
         with pytest.raises(MemoryError):
-            moy_image.decode_moyimg(blob)
+            moyimg.decode_moyimg(blob)
     finally:
-        moy_image._inflate = real
+        moyimg._inflate = real
 
 
 def _starved(raw):
@@ -189,9 +189,9 @@ def test_the_streaming_compressor_writes_a_picture_anything_can_read(chunk):
     other's, which is what this asserts."""
     art = _art(320, 240)
     pieces = [art[i:i + chunk] for i in range(0, len(art), chunk)]
-    got = moy_image._deflate_pieces(pieces)
-    assert moy_image._inflate(got) == art
-    whole = moy_image._deflate(art)
+    got = moyimg._deflate_pieces(pieces)
+    assert moyimg._inflate(got) == art
+    whole = moyimg._deflate(art)
     assert len(got) <= len(whole) * 1.05 + 64
 
 
@@ -230,7 +230,7 @@ def test_no_asset_in_the_tree_is_the_retired_codec():
     for p in sorted((ROOT / "system_carts").glob("**/*.moyimg")):
         meta = json.loads(p.read_text())
         assert "codec" not in meta, p
-        got = moy_image.decode_moyimg(p.read_text())
+        got = moyimg.decode_moyimg(p.read_text())
         assert got is not None and len(got[2]) == got[0] * got[1], p
         seen += 1
     assert seen >= 2, "the seed pictures went missing, not the codec"
@@ -241,17 +241,17 @@ def test_no_asset_in_the_tree_is_the_retired_codec():
 DRIVER = """
 import sys
 sys.path.insert(0, ".")
-import json, moy_image
+import json, moyimg
 
 art = bytes(((i * 37) & 63) for i in range(320 * 240))
-blob = moy_image.encode_moyimg(320, 240, art)
-got = moy_image.decode_moyimg(blob)
+blob = moyimg.encode_moyimg(320, 240, art)
+got = moyimg.decode_moyimg(blob)
 assert got is not None and got[0] == 320 and got[1] == 240
 assert bytes(got[2]) == art, "a board could not read back its own picture"
 
 # ...and the one CPython wrote, which is the direction that actually ships.
 host = open("host.moyimg").read()
-hgot = moy_image.decode_moyimg(host)
+hgot = moyimg.decode_moyimg(host)
 assert hgot is not None and bytes(hgot[2]) == art, "a board could not read the host's"
 
 # The STREAMING writer, on the implementation that actually runs it:
@@ -260,12 +260,12 @@ assert hgot is not None and bytes(hgot[2]) == art, "a board could not read the h
 # thing -- which is how we know `deflate` closes a block per write and CPython
 # does not.
 pieces = [art[i:i + 1024] for i in range(0, len(art), 1024)]
-streamed_blob = moy_image._deflate_pieces(pieces)
-assert moy_image._inflate(streamed_blob) == art, "a board could not read the picture it wrote piece by piece"
+streamed_blob = moyimg._deflate_pieces(pieces)
+assert moyimg._inflate(streamed_blob) == art, "a board could not read the picture it wrote piece by piece"
 piecewise = len(streamed_blob)
 
 meta = json.loads(blob)
-raw = moy_image._b64_decode(meta["data"])
+raw = moyimg._b64_decode(meta["data"])
 print("RESULT " + json.dumps({
     "bytes": len(blob), "same_as_host": blob == host, "piecewise": piecewise,
     "wbits": (raw[0] >> 4) + 8,
@@ -282,12 +282,12 @@ def test_the_codec_round_trips_on_the_interpreter_the_board_runs(tmp_path):
         why="This is the only lane where the board's OWN compressor writes a\n"
             "picture and its own inflater reads one. CPython's zlib is what\n"
             "every other check uses for both halves.")
-    for name in ("moy_image.py", "moy_fs.py"):
+    for name in ("moyimg.py",):
         (tmp_path / name).write_text(
             (ROOT / "runtime" / name).read_text(encoding="utf-8"),
             encoding="utf-8")
     art = bytes(((i * 37) & 63) for i in range(320 * 240))
-    (tmp_path / "host.moyimg").write_text(moy_image.encode_moyimg(320, 240, art))
+    (tmp_path / "host.moyimg").write_text(moyimg.encode_moyimg(320, 240, art))
     (tmp_path / "run.py").write_text(DRIVER)
 
     r = subprocess.run([exe, "run.py"], cwd=str(tmp_path), capture_output=True,
@@ -296,7 +296,7 @@ def test_the_codec_round_trips_on_the_interpreter_the_board_runs(tmp_path):
     line = [l for l in r.stdout.split("\n") if l.startswith("RESULT ")]
     assert line, r.stdout[-3000:]
     got = json.loads(line[0][len("RESULT "):])
-    assert got["wbits"] == moy_image.MOYIMG_WBITS
+    assert got["wbits"] == moyimg.MOYIMG_WBITS
     # A writer that streams its raster into the compressor pays a RATIO, not a
     # byte-identity -- `deflate` closes a block per write where CPython's
     # compressobj does not. Measured here rather than assumed, because a writer
@@ -308,5 +308,5 @@ def test_the_codec_round_trips_on_the_interpreter_the_board_runs(tmp_path):
     # reads the other, which the driver checked before printing this.
     print("\nunix MicroPython: 320x240 -> %d B (host %d B, identical: %s); "
           "written piece by piece %d B"
-          % (got["bytes"], len(moy_image.encode_moyimg(320, 240, art)),
+          % (got["bytes"], len(moyimg.encode_moyimg(320, 240, art)),
              got["same_as_host"], got["piecewise"]))
