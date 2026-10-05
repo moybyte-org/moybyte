@@ -193,9 +193,10 @@ class DeviceBoot:
 
         `session` is the board's storage lifecycle wrapper -- on the T-Deck
         `moybyte_sd.with_sd_live` (SD shares the panel's SPI host, so the mount
-        must bracket the whole seed+scan), on the P4 nothing at all, because the
-        store is internal flash and races no one. `media` is the word that
-        appears in the serial lines ("SD" / "flash").
+        must bracket the whole seed+scan), on the P4s and the Guition S3 nothing
+        at all, because the card has a bus of its own (device/card_store.py) and
+        internal flash races no one. `media` is the word that appears in the
+        serial lines ("SD" / "flash").
 
         `fallback_root` is the SECOND STORE to try before giving up, and it is
         what keeps a card-less board WRITABLE. Without it a T-Deck with no card

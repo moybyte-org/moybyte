@@ -39,8 +39,12 @@ def board():
 # the file on purpose: the comparison is against a fresh boot, and the wasm
 # block at the end brings the radios up. Measured 2026-09-25 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
-# internal SRAM.
-WASM_IDLE_BASELINE = (188991, 94208)
+# internal SRAM -- less TF_CARD_SRAM, what the card driver holds once the card
+# is the cart store (2026-10-05, same image and same fresh boot: 187407 free
+# with the engine and no card code, 186651 with the card mounted). The engine's
+# own cost stays the bound the guard measures.
+TF_CARD_SRAM = 756
+WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 
 
@@ -382,6 +386,10 @@ def test_draw_gates_are_installed(board):
 
 def test_draw_gates_take_the_traffic(board):
     on_glass.draw_gates_take_the_traffic(board)
+
+
+def test_the_cart_store_is_the_card_when_one_mounted(board):
+    on_glass.cart_store_follows_the_card(board)
 
 
 def test_the_web_console_is_baked_into_this_image(board):

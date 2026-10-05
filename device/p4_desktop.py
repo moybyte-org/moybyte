@@ -13,6 +13,9 @@ P4 tier's, and lives here once for both boards:
     Library;
   * a BLE HID keyboard over the companion C6 is the console's keyboard, and
     the C6 has an updater of its own (Settings -> UPGRADE C6 RADIO);
+  * the cart store is the TF card when one mounts and the board's internal
+    flash when not (`device/card_store.py`), the slot being SDMMC slot 0 on
+    LDO channel 4 on both boards;
   * the deferred present (#58 composite-overlap) runs before the canvases
     re-point, and the PPA's overlap counters ride the PERF line;
   * three dev-channel extras: `bt` (the keyboard), `union` and `cache` (the
@@ -22,11 +25,35 @@ A board passes what its own glass decides -- its name, its compositor, its
 touch driver, its constants -- and takes the rest.
 """
 
+from card_store import carts_loader
 from desktop_spine import build_desktop, bt_command
 from device_util import _ticks_ms, _ticks_diff
 from p4_canvas import P4SystemCanvas
 
-BLE_STORE = "/moy/ble_keyboard.json"   # the bond store lives beside the carts
+BLE_STORE = "/moy/ble_keyboard.json"   # the bond store is device identity: internal flash
+
+# The TF slot, wired the same on both boards: SDMMC slot 0 on GPIO39-44. (Slot 1
+# is the C6's transport; constructing it panics the board.) A card's store is
+# `moy_carts.CARTS_DIR`, the T-Deck's, so the system documents beside the carts
+# (system.json, wifi.json, shared.moygfx) land in /sd/moybyte and not at the
+# card's root.
+SD_PINS = dict(slot=0, width=4, sck=43, cmd=44, data=(39, 40, 41, 42))
+SD_CARTS_ROOT = "/sd/moybyte/carts"
+# PMU_EXT_LDO_P1_0P2A: the register that owns LDO channel 4, which powers the
+# slot. Stock MicroPython never enables it, and without it `machine.SDCard`
+# times out whether a card is there or not.
+LDO4_REG = 0x501151D8
+
+
+def p4_card():
+    """The TF card: LDO4 switched on (software-owned, tied to the 3.3V rail,
+    then powered), then the SDMMC host. Raises when there is no card."""
+    import time
+    from machine import mem32, SDCard
+    mem32[LDO4_REG] |= (1 << 7) | (1 << 14)
+    mem32[LDO4_REG] |= (1 << 8)
+    time.sleep_ms(10)               # the card's supply settling before CMD0
+    return SDCard(**SD_PINS)
 
 
 def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
@@ -34,8 +61,9 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
                 power_save_ms, game_wh=(320, 240), fps_cap=60):
     """Boot the shared console on a P4 board: launcher-as-desktop under
     WindowedWM, this board's glass, its touch as the pointer, a BLE HID
-    keyboard over the companion C6, and carts on internal flash. Ctrl-C over
-    the board's REPL interrupts the loop."""
+    keyboard over the companion C6, and carts on the TF card when one mounts
+    (`store_root`, on the board's internal flash, when not). Ctrl-C over the
+    board's REPL interrupts the loop."""
     from ble_keyboard import BleHidKeyboard
     from moybyte.input import InputState
     from wm_windowed import WindowedWM
@@ -73,7 +101,8 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
                       power_save_ms=power_save_ms, game_wh=game_wh,
                       font_scale=font_scale,
                       panel_diagonal_in=panel_diagonal_in,
-                      store_root=store_root, ota_dir=ota_dir,
+                      load_carts=carts_loader(p4_card, seed_carts, SD_CARTS_ROOT,
+                                              store_root, ota_dir),
                       wm=WindowedWM, c6_updater=C6Updater,
                       extras={"bt": bt_command(keyboard, comp),
                               "union": _union_cmd, "cache": _cache_cmd},

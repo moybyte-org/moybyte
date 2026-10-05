@@ -214,9 +214,10 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     Guition P4, which constructs the 1024×600 system canvas + the fixed
     320×240 off-screen game canvas and hands **`WindowedWM`** (#73's tier, on
     its intended hardware) to the shared boot spine `device/desktop_spine.py`.
-    Carts live on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
+    Carts live on the TF card when one mounts (the SD bullet below) and
+    otherwise on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
     `/moybyte/...`, which shadows the frozen `moybyte.input` module and killed a
-    boot; see the constraint below. SD is optional here.
+    boot; see the constraint below. A card is optional here.
   - Staged at build (canonical sources elsewhere), and **declared in
     `board.toml`** since #161 Phase 3 rather than listed in `build.sh`: the
     whole shared console from `runtime/` as a **denylist** — everything crosses
@@ -250,10 +251,25 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   how the S3 boards' out-of-range BLE knob was found.
 - **The SD slot is powered from the P4's internal LDO channel 4** — stock
   MicroPython never enables it, so `machine.SDCard` times out card-or-no-card.
-  Until the board-init owns this, the pure-Python poke (verified):
-  `mem32[0x501151D8] |= (1<<7)|(1<<14)` then `|= (1<<8)` (PMU_EXT_LDO_P1_0P2A:
-  SW-own, tie to 3.3V rail, power on). SD then works:
+  `device/p4_desktop.py` (`p4_card`, shared with the Guition P4) does the
+  pure-Python poke at boot: `mem32[0x501151D8] |= (1<<7)|(1<<14)` then
+  `|= (1<<8)` (PMU_EXT_LDO_P1_0P2A: SW-own, tie to 3.3V rail, power on), then
   `SDCard(slot=0, width=4, sck=43, cmd=44, data=(39,40,41,42))`.
+- **A card that mounts IS the cart store** (`device/card_store.py`; the T-Deck's
+  and the Guition S3's model, minus their bus-sharing machinery — this slot
+  shares nothing). Mounted once at `/sd`; the carts and the system documents
+  beside them (`system.json`, `wifi.json`, `shared.moygfx`) live under
+  **`/sd/moybyte/`** — the T-Deck's layout, so nothing lands at the card's root.
+  FAT32 and **exFAT** both mount: the esp32 port leaves FatFS's exFAT off
+  (`MICROPY_FATFS_EXFAT`, set in `mpconfigboard.h`), and a card over 32GB ships
+  exFAT. No card, a card that will not construct, a filesystem the build cannot
+  read, or a card whose store cannot be made all boot on the internal store with
+  one `SD: ...` line; `card_store.STATUS` carries the verdict for the dev channel
+  (`py __import__("card_store").STATUS`), since a boot line printed before a
+  serial host attaches can be dropped. ONE store per boot, chosen before anything
+  is written: a card put in later is picked up at the next boot, and the internal
+  store stays as it was. The OTA directory (`/moy/update`) and the BLE bond store
+  stay on the internal VFS — they are the device's, not the card's.
 - **SDMMC slot 1 belongs to the C6** (ESP-Hosted WiFi transport, pins
   CLK18/CMD19/D0-3=14-17/reset 54). Constructing `machine.SDCard(slot=1)`
   panics the board. SD card = slot 0, C6 = slot 1, panel = DSI — three

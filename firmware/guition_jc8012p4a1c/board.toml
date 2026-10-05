@@ -265,13 +265,13 @@ scan never sees it -- that tier is the second source, [native.p4] below.)"""
 [[native.shared.deny]]
 module = "moy_sd"
 why = """
-This console has no SD card in play: carts live on the internal-flash VFS
-(/moy/carts), the OTA directory is /moy/update, and moy_sd's whole reason to exist --
-attaching a card to a host the T-Deck's moy_lcd already initialised, on a
-SHARED SPI bus -- names hardware this board does not have. The TF slot here
-is the Waveshare's arrangement exactly (SDMMC slot 0 on GPIO39-44, powered
-from LDO channel 4 -- the vendor BSP says so); when a removable-cart
-workflow lands it will be an SDMMC driver, not this SPI-attach module."""
+moy_sd's whole reason to exist -- attaching a card to a host the T-Deck's
+moy_lcd already initialised, on a SHARED SPI bus -- names hardware this board
+does not have. The TF slot here is the Waveshare's arrangement exactly (SDMMC
+slot 0 on GPIO39-44, powered from LDO channel 4 -- the vendor BSP says so),
+which is plain `machine.SDCard`; `device/card_store.py` mounts it and makes it
+the cart store when a card is in. The OTA directory stays /moy/update on the
+internal VFS either way."""
 
 [[native.shared.deny]]
 module = "moy_audio"
@@ -329,7 +329,7 @@ The second staging source, and the one that must STAY an allowlist.
 default answer is "yes, this crosses". `device/` is the boards' shared DEVICE
 tier -- a repo-root tree since the fork's deletion (2026-08-17, `a02bb33`).
 It stays an allowlist even so, because not every board drives every piece of
-it: this board has no SD and no I2S in play (`moybyte_sd.py`,
+it: this board has no SPI-shared SD and no I2S in play (`moybyte_sd.py`,
 `device_audio.py` stay T-Deck-only), no GT911 (`gt911.py` crosses only for
 its HeldPoint core, which the GSL3680 driver rides), and the allowlist is
 where that per-board difference is written down rather than discovered as a
@@ -384,14 +384,17 @@ queue out, pmem at the #66 boundaries), and the leaf ticks helpers
 device_canvas imports."""
 
 [[modules.device.group]]
-files = ["dsi_panel.py", "p4_canvas.py", "p4_desktop.py"]
+files = ["dsi_panel.py", "p4_canvas.py", "p4_desktop.py", "card_store.py"]
 why = """
 The P4 silicon tier's Python half (2026-09-06, promoted out of the Waveshare's
 p4_display.py / moy_runtime.py the day this board became their second
 consumer): the DSI compositor over native/p4/moy_dsi (triple-buffer rotation,
 deferred present, fences) and the SYSTEM canvas with the PPA composite hooks
 the windowed WM probes for. This board's guition_p4_display.py adds only its
-backlight; its moy_runtime.py constructs the canvas at this glass's size."""
+backlight; its moy_runtime.py constructs the canvas at this glass's size.
+`card_store.py` is the cart store on a card that has a bus of its own
+(tests/test_card_store.py executes it): the TF card when one mounts, the
+internal flash when not."""
 
 [[modules.device.group]]
 files = ["gt911.py", "gsl3680.py"]
@@ -437,8 +440,8 @@ WLAN, so link.start()'s wlan.active(True) is load-bearing here."""
 files = ["moy_ota.py"]
 why = """
 The OTA updater (#53). Board-agnostic: its update directory is a constructor
-argument (this console has no SD, so run_desktop passes a path on the internal
-VFS) and its board identity comes from the generated `_ota_build.py` --
+argument (run_desktop passes a path on the internal VFS: a card can be pulled
+out, and the update directory holds the device's own image) and its board identity comes from the generated `_ota_build.py` --
 `guition_p4`, a manifest of its own, since an app image is board-specific."""
 
 [[modules.device.group]]

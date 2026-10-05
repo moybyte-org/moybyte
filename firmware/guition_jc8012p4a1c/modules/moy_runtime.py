@@ -21,8 +21,10 @@ Everything else -- the 320x240 GAME canvas, the windowed WM, the BLE keyboard
 over the C6, OTA on the internal VFS, the dev channel, the frame loop -- is the
 Waveshare's, by import.
 
-Carts live on the INTERNAL flash VFS (the tail of the 16MB chip after the app slots); the TF slot is
-wired like the Waveshare's (SDMMC slot 0 on LDO4) and equally unused.
+Carts live on the TF card when one is in the slot and mounts (FAT32 or exFAT),
+and on the INTERNAL flash VFS (the tail of the 16MB chip after the app slots)
+when not. The slot is wired like the Waveshare's (SDMMC slot 0 on LDO4);
+`device/p4_desktop.py` owns the mount and `device/card_store.py` the choice.
 """
 
 # The seed roster, generated from system_carts/ at build time and PACKED: one
@@ -41,14 +43,15 @@ PANEL_DIAGONAL_IN = 10.1       # the glass, in inches -- board.toml [panel] is t
                                # interactive geometry lays out at scale 2 while
                                # every glyph stays at FONT_SCALE (owner, from the
                                # desk, 2026-09-06: "too tiny", not "too small to read").
-# Internal-flash store root. NOT "/moybyte/..." -- a root-level dir named like an
-# importable module SHADOWS the frozen module of that name (the Waveshare's
-# hardware-learned rule, 2026-07-08; same MicroPython, same rule).
+# Internal-flash store root, the one a card-less boot uses. NOT "/moybyte/..." --
+# a root-level dir named like an importable module SHADOWS the frozen module of
+# that name (the Waveshare's hardware-learned rule, 2026-07-08; same MicroPython,
+# same rule).
 CARTS_ROOT = "/moy/carts"
 # The OTA directory (#53) -- a copied image, the pending marker, the C6's
-# image: the internal VFS, NOT under /moy/carts (the store scans that
-# directory). A WiFi firmware update streams into the inactive slot and
-# stages nothing here.
+# image: the internal VFS whether or not a card holds the carts, NOT under
+# /moy/carts (the store scans that directory). A WiFi firmware update streams
+# into the inactive slot and stages nothing here.
 OTA_UPDATE_DIR = "/moy/update"
 
 
@@ -103,8 +106,8 @@ def run_desktop(fps_cap=60):
     """Boot the shared console on the Guition P4: launcher-as-desktop under
     WindowedWM, 1280x800 landscape rotated onto the portrait glass, GSL3680
     touch as the pointer, a BLE HID keyboard over the companion C6, and carts
-    on internal flash. Ctrl-C over the USB-Serial/JTAG REPL interrupts the
-    loop.
+    on the TF card when one mounts, internal flash when not. Ctrl-C over the
+    USB-Serial/JTAG REPL interrupts the loop.
 
     The BODY is `device/p4_desktop.py`, shared with the Waveshare (2026-09-09):
     two P4 boards running the same console over the same silicon tier had two

@@ -45,8 +45,12 @@ def board():
 # the file on purpose: the comparison is against a fresh boot, and the wasm
 # block at the end brings the radios up. Measured 2026-09-30 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
-# internal SRAM.
-WASM_IDLE_BASELINE = (276743, 188416)
+# internal SRAM -- less TF_CARD_SRAM, what the card driver holds once the card
+# is the cart store (2026-10-05, same image and same fresh boot: 275143 free
+# with the engine and no card code, 274299 with the card mounted). The engine's
+# own cost stays the bound the guard measures.
+TF_CARD_SRAM = 844
+WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
 
@@ -724,6 +728,10 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
 
 
 # -- the browser console baked into the image (moy_web) -----------------------
+
+
+def test_the_cart_store_is_the_card_when_one_mounted(board):
+    on_glass.cart_store_follows_the_card(board)
 
 
 def test_the_web_console_is_baked_into_this_image(board):

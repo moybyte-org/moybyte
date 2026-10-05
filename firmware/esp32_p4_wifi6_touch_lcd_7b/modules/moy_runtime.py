@@ -22,9 +22,10 @@ The two-domain seam (#39) runs for real here for the first time on hardware:
     installs `WindowedWM` -- the launcher is the desktop, every app a floating
     window (#73's presentation tier, finally on its intended hardware).
 
-Carts live on the INTERNAL flash VFS (the tail of the 32MB chip after the app
-slots -- SD is optional on this board; the SDIO slot + LDO4 power fix are a
-follow-up for removable-cart workflows).
+Carts live on the TF card when one is in the slot and mounts (FAT32 or exFAT),
+and on the INTERNAL flash VFS (the tail of the 32MB chip after the app slots)
+when not -- the card is optional, never a requirement. `device/p4_desktop.py`
+owns the mount (LDO4, SDMMC slot 0), `device/card_store.py` the choice.
 """
 
 # The seed roster, generated from system_carts/ at build time and PACKED
@@ -51,20 +52,20 @@ PANEL_DIAGONAL_IN = 7.0            # the glass, in inches -- board.toml [panel] 
 # `from moybyte.input import ...` (hardware-learned 2026-07-08).
 CARTS_ROOT = "/moy/carts"
 # The OTA directory (#53) -- a copied image, the pending marker, the C6's
-# image. This board has no SD -- the T-Deck's /sd/update has no meaning
-# here -- so it is on the internal VFS. NOT under /moy/carts: the store
-# scans that directory. A WiFi firmware update streams into the inactive
+# image. It is on the internal VFS whether or not a card holds the carts: it
+# is the device's own, and a card can be pulled out. NOT under /moy/carts: the
+# store scans that directory. A WiFi firmware update streams into the inactive
 # slot and stages nothing here.
 OTA_UPDATE_DIR = "/moy/update"
 
 
 # Loading the carts is DeviceBoot.load_carts (#161 Phase 4): the seed + scan +
 # built-in fallback is the same on every board, and what differs here is
-# arguments -- the internal-flash root above, no storage SESSION at all (this
-# console has no SD card and the store races nobody), and the word "flash" in
-# the serial lines. On a full-erase boot that call is 17.5 of the 25 seconds
-# before anything composes, and every second of it is seeding -- which is what
-# the splash's progress bar is for.
+# arguments -- the card's root when one mounts, else the internal-flash root
+# above (`store_root` to run_desktop), and no storage SESSION at all (the card's
+# SDMMC slot is shared with nobody). On a full-erase boot that call is 17.5 of
+# the 25 seconds before anything composes, and every second of it is seeding --
+# which is what the splash's progress bar is for.
 
 
 def run_touch_calibrate():

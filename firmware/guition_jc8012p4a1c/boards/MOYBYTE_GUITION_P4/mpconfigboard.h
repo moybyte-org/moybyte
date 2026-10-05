@@ -18,6 +18,13 @@
 
 #define MICROPY_HW_ENABLE_SDCARD            (1)
 
+// exFAT in FatFS (lib/oofatfs, whose ffconf.h reads this define; ESP32 ports
+// leave it off). A card over 32 GB ships exFAT, and without it a read-only
+// vfs.mount of one fails with ENODEV: the TF slot is the console's cart store
+// when a card is in it (device/card_store.py), and a big card is the common one.
+// FAT12/16/32 cards mount as before. LFN is already on, which exFAT needs.
+#define MICROPY_FATFS_EXFAT                 (1)
+
 #ifndef USB_SERIAL_JTAG_PACKET_SZ_BYTES
 #define USB_SERIAL_JTAG_PACKET_SZ_BYTES (64)
 #endif

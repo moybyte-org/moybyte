@@ -471,7 +471,7 @@ different strategies:
 | source | strategy | why |
 |---|---|---|
 | `runtime/` | **denylist** | a shared tree's default answer is "yes, this crosses", so what needs writing down is the exclusions, each with a reason. |
-| `device/` | **allowlist** | the shared device tier; each board names the pieces it actually drives (this board has no BLE, the P4 no SD/I2S), so the difference is written down instead of frozen by accident. |
+| `device/` | **allowlist** | the shared device tier; each board names the pieces it actually drives (this board has no BLE, the P4s no `moybyte_sd` -- their card is `card_store.py` -- and no I2S), so the difference is written down instead of frozen by accident. |
 
 The stager also prunes: the frozen manifest freezes the whole `modules/`
 directory, and that directory is gitignored, so an unstaged module would

@@ -151,8 +151,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   guard and `state`'s `wifi_held` names the holders. Constructing `network.WLAN`
   initialises the driver, so `radio_off` never constructs one. The Zero is
   outside this: WiFi is its only I/O.
-- **SD shares the SPI host with the display, and getting it wrong HANGS the
-  board** — gray screen, dead USB, no panic:
+- **On the T-Deck SD shares the SPI host with the display, and getting it wrong
+  HANGS the board** — gray screen, dead USB, no panic (the P4 boards' card has a
+  bus of its own: plain `machine.SDCard`, see the P4 section):
   - nothing touches SD before the panel is up (#56): a pre-display mount
     re-runs `spi_bus_initialize()` and leaves the host claimed on a populated
     card (`PREFETCH_SD_BEFORE_DISPLAY=False`; carts load after init and fall
@@ -218,8 +219,18 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 - **`moy_dsi` scans, it does not push**: DPI mode reads a PSRAM framebuffer
   continuously, so there is no per-frame flush (the P4 boards deny
   `moy_flush`). SD power, the C6's SDMMC slot, the 200 MHz PSRAM floor and the
-  VFS shadowing rule (the store root is `/moy/carts`) are the Waveshare
-  README's.
+  VFS shadowing rule (the internal store root is `/moy/carts`) are the
+  Waveshare README's.
+- **A TF card is the P4 boards' cart store when one mounts**
+  (`device/card_store.py` over `p4_desktop.p4_card`: LDO4 poke, SDMMC slot 0,
+  `vfs.mount` once at boot; FAT32 and exFAT, the latter being
+  `MICROPY_FATFS_EXFAT` in each `mpconfigboard.h`). The store is
+  `/sd/moybyte/carts` and its sibling documents `/sd/moybyte/*`; no card, a dead
+  one or a filesystem the build cannot read all boot on the internal store with
+  one line, and `card_store.STATUS` is the verdict. `machine.SDCard` builds
+  without touching the card, so an EMPTY slot surfaces as `vfs.mount`'s EBUSY.
+  The OTA directory and the BLE bond store stay internal. Never format or erase
+  a card from the console.
 - **A compiled cart's blit565 frame skips the game canvas**
   (`p4_canvas.present_frame`): the PPA scales it from the cart's memory, or
   from the GDMA snapshot every frame takes into the run's scratch where the

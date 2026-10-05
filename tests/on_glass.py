@@ -249,6 +249,24 @@ def display_underruns_are_zero(board):
     assert n == 0, n
 
 
+def cart_store_follows_the_card(board):
+    """One store per boot, and it is the card's when the card mounted: a board
+    that says `mounted` keeps its carts and the system documents beside them on
+    the card, and one that does not (no card, or a filesystem its build cannot
+    read) runs on its internal flash -- never a mix, never the read-only floor.
+    The update directory is the device's own and stays internal either way.
+    Which of the two this run is depends on what is in the slot, so the test
+    pins the pairing, and the board's `card_store.STATUS` names the verdict."""
+    status = board.pyval("__import__('card_store').STATUS")
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    if status == "mounted":
+        assert root == "/sd/moybyte/carts", (status, root)
+    else:
+        assert root == "/moy/carts", (status, root)
+    assert board.pyval("ws.updater.update_dir") == "/moy/update"
+    assert board.pyval("len(ws.carts.all)") > 0, "the store shows no carts"
+
+
 def web_console_is_baked_into_the_image(board):
     """The wasm console this board hands a browser lives in its OWN image, and
     reads back correctly from flash -- the one part no host test can reach,

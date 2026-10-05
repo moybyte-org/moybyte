@@ -215,7 +215,7 @@ plus the P4 extras `bt`/`union`/`cache`.
 | Touch | GSL3680 @ **0x40** on I2C0 **SDA=7 / SCL=8** (400kHz), **RST=22, INT=21** (INT held low through reset selects the address) |
 | C6 (WiFi/BLE) | ESP-Hosted SDIO: CLK18 CMD19 D0–D3 = 14–17, reset **GPIO54** — the Waveshare's wiring pin for pin |
 | Audio | ES8311 codec + ES7210 mics on the touch I2C bus; I2S MCLK13 BCLK12 LRCLK10 DOUT9 DIN11; PA enable **GPIO20** (Waveshare: 53). Unwired, like the Waveshare's (#82) |
-| TF card | SDMMC slot 0: CLK43 CMD44 D0–D3 = 39–42, powered from **LDO channel 4** (the vendor BSP) — the Waveshare's arrangement; unused by the console |
+| TF card | SDMMC slot 0: CLK43 CMD44 D0–D3 = 39–42, powered from **LDO channel 4** (the vendor BSP) — the Waveshare's arrangement. **A card that mounts is the console's cart store** (FAT32 or exFAT; the Waveshare README's SD bullets are the authority: LDO4 poke, `/sd/moybyte/`, the fallback) |
 | Camera | MIPI-CSI socket (OV02C10 in the vendor kit); not populated on the owner's unit as far as the port knows |
 | USB | USB-C straight to the P4's USB-Serial/JTAG (`303a:1001`) |
 | Factory firmware | `JC8012P4A1C_I_W_Y_xiaozhi2.0.4.bin` (P4) + `JC-C6-slave_v2.3.2.bin` (C6) in the vendor's demo repo |
@@ -292,5 +292,4 @@ for the C6/audio pins, which agree with the BSP.
 4. The factory slave's two 5s RPC timeouts per boot (the section above); the
    shimmed slave image is the fix for 3 and 4 at once.
 5. BLE keyboard (unverified: nothing paired), audio (#82, same codec as the
-   Waveshare), the TF slot (LDO4, a future removable-cart workflow),
-   backlight PWM (one line in `guition_p4_display.py` when wanted).
+   Waveshare), backlight PWM (one line in `guition_p4_display.py` when wanted).
