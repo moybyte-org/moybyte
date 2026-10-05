@@ -195,22 +195,22 @@ Getting a wasm app onto a board is the tier plan's phase 5, not this doc.
 
 ### 2.2 Placement
 
-Everything the console needs while no Python app runs is OS. Sprint 0 delivers
-the complete per-module placement of `runtime/` and `device/` as a table in this
-doc; the grouping the sprints follow:
+Everything the console needs while no Python app runs is OS. §2.2.1 places
+every module of `runtime/` and `device/`; the grouping it applies, and the
+sprints that follow it:
 
-| group | modules (not exhaustive) | sprint |
+| group | headline modules | sprint |
 |---|---|---|
 | the kernel's spine: routing, back-stack, app registry, settings store, WiFi leases, crash record, strike ledger, recovery screen | `runtime/console.py` (in part), `runtime/crash_guard.py`, `runtime/system_store.py` | 2 |
 | input: touch, keyboards, the BLE HID keyboard below `bluetooth` | `device/gt911.py`, `device/gsl3680.py`, `device/axs_touch.py`, `device/ble_keyboard.py` | 3 |
 | audio: the I2S feed and the sfx/music semantics the glue drains through `make_api` | `device/device_audio.py`, `device/moycore_glue.py`'s audio half | 3 |
 | the glass: canvas ownership, present, compositors | `device/device_canvas.py`, `device/dsi_panel.py`, `device/p4_canvas.py` | 3 |
 | storage: the SD gate, the store of record and its journal | the boards' `with_sd`, `runtime/moy_journal.py` | 1b and 3 |
-| the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/device_boot.py`, `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
+| the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/device_boot.py` (in part), `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
 | radios and links: WiFi, ESP-NOW, the C6 updater, the webhost and sync RPC | `device/device_wifi.py`, `device/moy_espnow.py`, `device/moy_c6_update.py`, `device/moy_webhost.py`, `device/moy_webserver.py`, `runtime/moy_sync.py` | 3 |
-| the store: index, catalogue, covers, seed, project loading | `runtime/moy_carts.py`, `runtime/cover_cache.py`, `runtime/moy_seed.py`, `runtime/project.py` | 1b |
+| the store: index, catalogue, covers, seed, project loading | `runtime/moy_carts.py`, `runtime/cover_cache.py`, `runtime/moy_seed.py`, `runtime/project.py` (in part) | 1b |
 | the cart path: loop, tick model, runtime map, moycore glue, in-cart chrome, netplay lockstep, notices and toasts over a cart | `runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`, `runtime/system_menu_ui.py`, `runtime/netplay.py`, the achievements/notify path | 4 |
-| the roles and their services | `runtime/app_context.py`, `runtime/system_api.py`, `runtime/artwork.py`, the wallpaper role | 5 |
+| the roles and their services | `runtime/app_context.py`, `runtime/system_api.py`, `runtime/artwork.py`'s `ArtworkService` (the rest of the file is Paint, an app), `runtime/wallpaper.py` | 5 |
 | the toolkit's core | `runtime/ui.py` | 6 |
 | the window managers | `runtime/wm_windowed.py`, `runtime/wm_desk.py`, `runtime/wm_chrome.py`, the rest of `runtime/console.py` | 7 |
 | apps (stay Python) | the launcher, Settings, Files, Paint, Calc, Notes, Storybook, Appearance, the Editor and its tabs (the Studio, `docs/studio_2026-09.md`, panes and docking included), `runtime/blocks.py` (the block compiler is an editor's) | — |
@@ -218,6 +218,213 @@ doc; the grouping the sprints follow:
 The Zero companion board (`firmware/seeed_xiao_esp32s3_zero/`) is a fifth
 target: headless, the cart store, running the webhost and the sync RPC. Every
 link gate counts it.
+
+### 2.2.1 Every module
+
+Every tracked Python module of `runtime/` and `device/`, the C shims beside
+them, the Python each board authors under `firmware/<board>/modules/` and the
+browser tier's own Python is placed below; the copies a build stages into a
+board's tree are not listed. The rule applied throughout is §0's: everything the
+console needs while no Python app runs is OS.
+
+- **Group** is a row of the table above by its first words (spine, input, audio,
+  glass, storage, frame tail, radios and links, store, cart path, roles,
+  toolkit, window managers), or **app** (stays Python, §3), **host-only** (the
+  simulator, the browser page and build tooling: not on a board), **bring-up**
+  (the boot ladder and the REPL smokes) or **split** (the note names the parts).
+- **Sprint** is the sprint of §6 in which the module crosses, is rebased onto
+  the kernel or is deleted. "—" is a module that never crosses: an app, or a
+  file that is not on a board. "rest stays" on a split names the part that
+  remains Python.
+- **open** is a placement this doc does not settle. The question is in the
+  note, the group is the one the module belongs to if the answer is "OS", and
+  the owner decides it.
+- The Zero takes the store modules (`runtime/moy_carts.py` and its siblings),
+  `runtime/moy_fs.py`, `runtime/moy_journal.py`, `runtime/moy_sync.py`,
+  `runtime/ticks.py`, `device/moy_webhost.py`, `device/moy_webserver.py` and
+  `device/moy_ota.py` (`firmware/seeed_xiao_esp32s3_zero/board.toml` is the
+  authority), so a crossing of any of them is a Zero link gate.
+
+**`device/`**
+
+| module | group | sprint | note |
+|---|---|---|---|
+| `device/axs_touch.py` | input | 3 | the AXS15231 touch half of the Guition S3's glass |
+| `device/banded_panel.py` | glass | 3 | the compositor both banded-panel S3 boards run; their per-board subclasses are in the board table |
+| `device/ble_keyboard.py` | input | 3 | the HID keyboard lives below `bluetooth` so its IRQ outlives a VM stop (§4.4) |
+| `device/boot_shell.py` | bring-up | open | the boot-mode ladder every board's `moybyte_shell.py` calls; its `desktop` mode is the production boot, every other mode a REPL smoke. Question: with a native loop as the boot entry, do the smoke modes become native bring-up modes, dev-channel words, or stay Python probes? One answer covers this row, the boards' entry stubs and `moybyte_shell.py` files, and the three smoke modules |
+| `device/cart_net.py` | radios and links | 3 | Get Carts' transport over the OTA HTTP client; the app above it stays Python |
+| `device/desktop_spine.py` | split | 3 + 7 | the boot order and `Desktop.run`, the frame loop, cross with the frame tail; the `Workstation` and WM construction goes with `runtime/console.py` |
+| `device/device_api.py` | cart path | open | a re-export of `make_api`; follows `runtime/cart_api.py` |
+| `device/device_audio.py` | audio | 3 | the I2S feed and the six cart audio verbs |
+| `device/device_canvas.py` | glass | 3 | the one canvas class every tier runs; `runtime/host_canvas.py` rebinds with it and `tools/p4_conformance.py` is its check on glass |
+| `device/device_diag.py` | frame tail | 3 | the serial diagnostics the frame loop emits between frames |
+| `device/device_input.py` | input | 3 | the T-Deck trackball and its GT911 wrapper |
+| `device/device_util.py` | frame tail | 3 | the leaf under the device modules (tick helpers, diag shims); deleted with its last device importer |
+| `device/device_wifi.py` | radios and links | 3 | the radio driver; the lease that gates it (`wifi_hold` / `wifi_release`) is the spine's, in `runtime/console.py` |
+| `device/dsi_panel.py` | glass | 3 | the shared P4 DSI compositor, rotated variant included |
+| `device/gsl3680.py` | input | 3 | the RAM-loaded GSL3680 core; its firmware bytes are `gsl_fw_jc8012.py` |
+| `device/gt911.py` | input | 3 | the GT911 core both the T-Deck and the Waveshare P4 carry |
+| `device/moy_c6_update.py` | radios and links | 3 | the P4's radio co-processor updater, the backend of Settings → UPGRADE C6 RADIO |
+| `device/moy_espnow.py` | radios and links | 3 | the board's one ESP-NOW owner; netplay's lockstep over it is the cart path's |
+| `device/moy_ota.py` | frame tail | 3 | OTA health and the updater; it also carries the streaming HTTP(S) client Get Carts' transport reads through. The Zero takes it |
+| `device/moy_webhost.py` | radios and links | 3 | the webhost; the Zero takes it |
+| `device/moy_webserver.py` | radios and links | 3 | the socket and HTTP core under the webhost; the Zero takes it |
+| `device/moybyte/__init__.py` | input | 3 | the package marker of the device input contract |
+| `device/moybyte/input.py` | input | 3 | the T-Deck keyboard decode and the merged multi-source `InputState`; `runtime/input.py` is its host and browser twin |
+| `device/moybyte_diag.py` | frame tail | 3 | offline log capture to SD for the T-Deck, where the loop starves USB serial |
+| `device/moybyte_sd.py` | storage | 3 | the T-Deck's SD gate on the SPI host the panel owns; a per-op teardown hangs the board with no panic |
+| `device/moycore_glue.py` | split | 3 + 4 | the audio drain half crosses with audio; the input refresh and the frame around `tick()` cross with the cart path |
+| `device/p4_canvas.py` | glass | 3 | the P4 system canvas over the DSI framebuffer, with the PPA composite hooks |
+| `device/p4_desktop.py` | split | 3 + 7 | the P4 canvas, deferred present, BLE keyboard and C6 updater wiring cross with the glass and radios; installing the windowed WM goes with the WMs |
+
+**`runtime/`**
+
+| module | group | sprint | note |
+|---|---|---|---|
+| `runtime/__init__.py` | host-only | — | the host package marker |
+| `runtime/achievements_ui.py` | cart path | 4 | the achievement and Easter-egg drawing: the "achievements/notify path" of §2.2 |
+| `runtime/app_context.py` | roles | 5 | `ROLES` is the ABI's source |
+| `runtime/app_decls.py` | spine | 2 | the app registry's frozen declaration, generated from the manifests by `tools/gen_device_carts.py`; the manifests stay the source |
+| `runtime/app_shell.py` | app | — | the list shell Files, Storybook and Get Carts share |
+| `runtime/appearance.py` | roles | 5 | `Workstation.look`: theme variant, skin, font scale, wallpaper and bar icons, the state behind the Theme and Wallpaper roles |
+| `runtime/appearance_app.py` | app | — | Appearance |
+| `runtime/artwork.py` | split | 5, rest stays | `ArtworkService` is a role service (5); `PaintDocument`, `PaintAppLayout` and `PaintAppLayer`, the Paint app, stay Python |
+| `runtime/audio.py` | split | 3, rest stays | `AudioEngine` crosses with audio; the bank model (`SFX`, `MusicTrack`, `AudioBank`) is the music editor's data and stays |
+| `runtime/audio_binding.py` | host-only | — | the host's ctypes binding of libmoy audio; sprint 3's audio crossing rebinds it |
+| `runtime/bar_layer.py` | window managers | 7 | the top bar and dock every WM draws; its geometry constants are read outside it |
+| `runtime/block_editor_ui.py` | app | — | the Editor's Blocks tab |
+| `runtime/blocks.py` | app | — | the block compiler is an editor's (§2.2) |
+| `runtime/calc_app.py` | app | — | Calc |
+| `runtime/cards_layer.py` | app | — | the Config tab's "Make it mine" cards |
+| `runtime/cart_api.py` | cart path | open | `make_api` builds the Python cart's namespace, one body on every tier; a Python cart runs in the VM (§1.2). Question: does it stay as the Python runtime's binding, thinning as the services under it go native, or does the kernel install the verb table into a Python cart's globals as libmoy's binding does for Lua and wasm? `device/device_api.py`, `runtime/cart_verbs.py` and `runtime/host_api.py`'s re-export follow the answer |
+| `runtime/cart_files.py` | store | 1b | a compiled cart's written files; native before sprint 4's VM-free gate asks for it |
+| `runtime/cart_index.py` | app | — | Get Carts' engine: the index, the per-console plan and `Install`; it writes through the store |
+| `runtime/cart_manager.py` | store | 1b | the shelf's roster: scan, new, duplicate, delete, favorites and recents |
+| `runtime/cart_verbs.py` | cart path | open | the cart API's names as one tuple, read by the code editor's highlighter and the block compiler; follows `runtime/cart_api.py` |
+| `runtime/chrome.py` | split | 5 + 6 + 7, rest stays | token tables, `theme_colors` and the default bar icons → 5; colour names, the glyph vocabulary and scaled-text helpers → 6; `Layout` → 7 with the bar it positions; `CodeLayout` stays with the Editor |
+| `runtime/code_layer.py` | app | — | the Editor's Code tab |
+| `runtime/console.py` | split | 2 + 7 | the run and exit verbs, the return stack, app resolution, the WiFi lease and the prefs wiring → 2; the layer stack, frame, pointer, composite and the rest → 7, where the file is deleted; `wire_workstation_core` loses a line as each service crosses |
+| `runtime/console_notices.py` | cart path | 4 | achievements wiring, the notice banner and its toast deadline; the firmware-update verdict it carries is raised by sprint 3's OTA health |
+| `runtime/console_perf.py` | frame tail | 3 | the PERF meters and the capture frame tail |
+| `runtime/console_saves.py` | app | — | the Editor's save and PLAY verbs on the Workstation; PLAY starts the Player through the spine |
+| `runtime/console_settings.py` | spine | 2 | the toggle setters over the settings store; each toggle's subject (frame tail, input, glass, store) crosses in its own sprint |
+| `runtime/cover_cache.py` | store | 1b | the shelf's cover and icon pipeline |
+| `runtime/cover_png.py` | store | 1b | the native `moy_png` already decodes on boards and in the browser; the Python reader is the host's |
+| `runtime/crash_guard.py` | spine | 2 | the strike ledger for apps and the wallpaper |
+| `runtime/dev_channel.py` | frame tail | 3 | the serial dev channel, one vocabulary on every board |
+| `runtime/device_boot.py` | split | 1b + 3 + 4 | `DeviceBoot`'s cart load, seed and scan → 1b; its runtime probe and map → 4; the frame pump, OTA health, idle blank, PERF sampler and `FrameLoop` → 3 |
+| `runtime/editor_app.py` | app | — | the Editor and its tab ladder |
+| `runtime/editor_handle.py` | app | — | the Editor's engine behind `open_editor`; a cart that calls it keeps the VM (§2.3) |
+| `runtime/editors.py` | app | — | the umbrella that re-exports the editor cores |
+| `runtime/editors_base.py` | app | — | the shared typed-key and text-entry leaf |
+| `runtime/editors_block.py` | app | — | the block program model |
+| `runtime/editors_code.py` | app | — | the code buffer |
+| `runtime/editors_music.py` | app | — | the tracker-style music editor core |
+| `runtime/editors_paint_map.py` | app | — | the paint and map editor cores |
+| `runtime/editors_scene.py` | app | — | the scene placement core |
+| `runtime/editors_sheet.py` | app | — | the sprite, tile and map models; `IconSheet` is also the bar's icon data, which the bar reads in 7 |
+| `runtime/file_widgets.py` | app | — | the thumbnail-grid picker Files and Paint share |
+| `runtime/files_app.py` | app | — | Files |
+| `runtime/font.py` | host-only | — | the host's petme128 glyph table, standing in for the `framebuf` font a board has; the native canvas carries its font from sprint 3, and one text path for every runtime is sprint 6's (§10) |
+| `runtime/getcarts_app.py` | app | — | Get Carts, a registered system app |
+| `runtime/gfx_binding.py` | host-only | — | the host's `moy_gfx`; sprint 3's glass rebinds it |
+| `runtime/history_router.py` | app | — | the Editor's UNDO and REDO router |
+| `runtime/host_api.py` | host-only | — | the host's service fakes and the driver; it re-exports `make_api` |
+| `runtime/host_app.py` | host-only | — | the simulator's harness; it becomes the host driver of the native loop (§4.2) as sprints 3 to 7 land |
+| `runtime/host_canvas.py` | host-only | — | the boards' canvas class on CPython; rebinds with `device/device_canvas.py` in 3 |
+| `runtime/input.py` | input | 3 | the host and browser twin of `device/moybyte/input.py`; one native input state replaces both |
+| `runtime/launcher_layer.py` | app | — | the launcher stays Python unless the return-budget measurement fails (§3); `EditorPickerLayer` rides in it |
+| `runtime/layers.py` | split | 7, rest stays | the `Layer` protocol stays as the apps' base; the draw-only overlays and the object-surface adapters go with the WMs |
+| `runtime/layout_base.py` | toolkit | 6 | the baseline predicate every `*Layout` derives from, the apps' layouts included |
+| `runtime/lua_binding.py` | host-only | — | the host's ctypes binding of libmoy's Lua |
+| `runtime/lua_ext.py` | cart path | 4 | the Lua superset's shared glue: the per-name rulings of §2.3 are made here |
+| `runtime/lua_host.py` | host-only | — | the host twin of `device/moycore_glue.py`; follows it in 4 |
+| `runtime/map_editor_ui.py` | app | — | the Editor's Map tab |
+| `runtime/moy_carts.py` | store | 1b | the `.moy` store; the Zero takes it |
+| `runtime/moy_file_ops.py` | store | 1b | a user file's life: history sidecars, rename, trash, restore; the Zero takes it |
+| `runtime/moy_files.py` | store | 1b | the user-files layer under the Files app and role; the Zero takes it |
+| `runtime/moy_fs.py` | store | 1b | the crash-safe write primitive every store module stands on, so it goes first; the Zero takes it |
+| `runtime/moy_image.py` | split | 1b + 4 + 5 | the moyimg codec → 1b; `Image`, the `image` verb's object and a kernel handle (§2.3) → 4; the wallpaper-preview sidecar → 5; the Zero takes it |
+| `runtime/moy_journal.py` | store | 1b | the undo journal, named under storage in §2.2; the Zero takes it |
+| `runtime/moy_qr.py` | radios and links | open | the pairing QR encoder for the web-console screen; follows `runtime/web_console_ui.py` |
+| `runtime/moy_seed.py` | store | 1b | seeding and the sweep of retired seeds; the Zero takes it |
+| `runtime/moy_store_base.py` | store | 1b | the store's on-card layout and shared rules; the Zero takes it |
+| `runtime/moy_sync.py` | radios and links | 3 | the sync RPC's push half; the Zero takes it |
+| `runtime/moybuf.py` | spine | 2 | the Python view over `moy_alloc` entries; the stop inventory (§4.4) clears them or moves them to kernel ownership with the handle table |
+| `runtime/moyhost_audio.c` | host-only | — | the C shim `runtime/audio_binding.py` compiles |
+| `runtime/moyhost_console.h` | host-only | — | the console the Lua and wasm host shims share |
+| `runtime/moyhost_gfx.c` | host-only | — | the C shim `runtime/gfx_binding.py` compiles |
+| `runtime/moyhost_lua.c` | host-only | — | the C shim `runtime/lua_binding.py` compiles |
+| `runtime/moyhost_wasm.c` | host-only | — | the C shim `runtime/wasm_binding.py` compiles |
+| `runtime/music_editor_ui.py` | app | — | the Editor's Music tab |
+| `runtime/native_build.py` | host-only | — | builds the host's ctypes bindings; the kernel's host binding (§4.2) builds through it from the first crossing |
+| `runtime/netplay.py` | cart path | 4 | lockstep: inputs, never state |
+| `runtime/op_history.py` | app | — | the in-RAM undo core every editor and Desk Lab app shares |
+| `runtime/paint_layer.py` | app | — | the sprite and icon paint editor, and EDIT ICONS |
+| `runtime/palette.py` | glass | 3 | the MOY64 table the canvas converts through; the native canvas owns it |
+| `runtime/perf_hud.py` | frame tail | 3 | the FPS and frame-time overlay, drawn over any content |
+| `runtime/perf_line.py` | frame tail | 3 | the PERF line's one field table, formatter and parser |
+| `runtime/player.py` | cart path | 4 | the cart loop and the runtime map |
+| `runtime/players.py` | cart path | 4 | input routing to player slots and the net seam netplay uses |
+| `runtime/project.py` | split | 1b, rest stays | the cart's loading and its `commit_*` persistence verbs → 1b; `history_for` and the CONFIG tab's undo codec stay with the Editor |
+| `runtime/scene_editor_ui.py` | app | — | the Editor's Scene tab |
+| `runtime/settings_layer.py` | app | — | Settings; its WIFI panel drives the spine's leases |
+| `runtime/skin.py` | toolkit | 6 | the skin catalogue stays unchanged data the native toolkit installs (§4.5) |
+| `runtime/storybook_app.py` | app | — | Storybook |
+| `runtime/surface.py` | glass | 3 | the Surface and its dirty protocol, kernel-owned after the `surface_model_v1.md` amendment (§8) |
+| `runtime/system_api.py` | roles | 5 | the user-app permission filter over the roles |
+| `runtime/system_menu_ui.py` | cart path | 4 | the ≡ system menu over a cart |
+| `runtime/system_store.py` | spine | 2 | `system.json`'s owner, the settings store |
+| `runtime/text_console.py` | app | — | a script's screen; a Python script is itself the app |
+| `runtime/text_modes.py` | app | — | the editor mode table |
+| `runtime/tick_model.py` | cart path | 4 | the scheduler that paces a cart's logic and draw |
+| `runtime/ticks.py` | app | — | the Python side's clock shim, a support leaf; the native modules have their own clock; the Zero takes it |
+| `runtime/ui.py` | toolkit | 6 | the immediate-mode toolkit core; `docs/theming_2026-09.md` §8 lists what is built ahead of it |
+| `runtime/update_ui.py` | frame tail | open | the firmware-update flow (SD, online, C6) with its per-frame install pump; Settings opens it. Question: is it an OS screen that crosses with `device/moy_ota.py` in 3 (or with the toolkit in 6), because a console that cannot start its VM must still update itself, or a Settings screen that stays Python above a native updater? |
+| `runtime/wallpaper.py` | roles | 5 | the backdrop renderer behind the wallpaper role; a wallpaper cart runs under the spine's crash guard |
+| `runtime/wasm_binding.py` | host-only | — | the host's ctypes binding of libmoy's wasm import table |
+| `runtime/wasm_host.py` | host-only | — | the host twin of `device/moycore_glue.py` for wasm; follows it in 4 |
+| `runtime/web_console.py` | radios and links | 3 | the web-console switch: pairing pin, paired url, and parking the glass while a browser edits the store |
+| `runtime/web_console_ui.py` | radios and links | open | the screen the glass parks on while no app runs, so it is OS by §2.2's rule; it draws with `runtime/ui.py` and `runtime/moy_qr.py`. Question: does it cross in 3 with the webhost, drawn without the toolkit, or wait for the toolkit in 6? |
+| `runtime/web_input.py` | input | 3 | the browser's event decode; the boards deny it |
+| `runtime/widgets.py` | split | 3 + 4 + 5 + 6 | `Pointer` and `pointer_state`, `_SilentAudio` → 3; `Achievements`, `Pmem`, `Actor`, `Scenes`, `SceneWorld`, `Popup` → 4; `Clipboard` → 5; `ConfirmTap`, `_Blit` and the small draw helpers → 6 |
+| `runtime/wm.py` | split | 2 + 7 | the process back-stack, the state `screen` projects, → 2; the memoized draw stack and the game-to-system composite → 7 |
+| `runtime/wm_chrome.py` | window managers | 7 | the windowed WM's title strip, borders and taskbar chips |
+| `runtime/wm_desk.py` | window managers | 7 | the windowed desk's root layer and backdrop cache |
+| `runtime/wm_windowed.py` | window managers | 7 | the P4 desk; the Studio's Run pane lands before it starts (§6) |
+
+**Board-specific Python (`firmware/<board>/modules/`)**
+
+| module | group | sprint | note |
+|---|---|---|---|
+| `firmware/lilygo_t_deck_plus_mainline/modules/tdeck_panel.py` | glass | 3 | the T-Deck's thin subclass over `device/banded_panel.py` |
+| `firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_display.py` | glass | 3 | this board's backlight and the shared DSI compositor |
+| `firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_input.py` | input | 3 | the Waveshare P4's GT911 wiring |
+| `firmware/guition_jc3248w535/modules/guition_panel.py` | glass | 3 | the Guition S3's thin subclass over `device/banded_panel.py` |
+| `firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py` | input | 3 | the GSL3680 firmware bytes, data a native driver carries as an array |
+| `firmware/guition_jc8012p4a1c/modules/guition_p4_display.py` | glass | 3 | this board's backlight and the rotated DSI compositor |
+| `firmware/guition_jc8012p4a1c/modules/guition_p4_input.py` | input | 3 | the Guition P4's GSL3680 wiring and its calibration |
+| `firmware/seeed_xiao_esp32s3_zero/modules/zero_host.py` | radios and links | open | the Zero runs no app and no cart, so the memory goal does not reach it, yet everything it does is the OS's by §2.2's rule and every link gate counts it. Question: do the Zero's own Python modules (`zero_host.py`, `zero_gpio.py`, `zero_setup.py` and the entry stubs) cross in 3 with the webhost they drive, or stay Python as the one board with nothing to free? |
+| each console board's `boot.py`, `main.py` and `moybyte_shell.py` | bring-up | open | entry stubs and boot-mode declarations on the T-Deck, Waveshare P4, Guition S3 and Guition P4; see `device/boot_shell.py` |
+| the bring-up smokes `tdeck_smoke.py`, `guition_smoke.py` and `guition_p4_smoke.py` | bring-up | open | per-subsystem REPL smokes; see `device/boot_shell.py` |
+| each console board's `moy_runtime.py` | frame tail | 3 | board glue: builds the board's drivers and hands them to the spine, and dissolves into the kernel's per-board configuration as they cross; the T-Deck's also holds the input-poller thread and the SD gate wrapper, input's and storage's |
+| the Zero's `zero_gpio.py` and `zero_setup.py` | radios and links | open | the allowlisted GPIO endpoint and the first-run access point; follow `zero_host.py` |
+| the Zero's `boot.py` and `main.py` | radios and links | open | the entry stubs; `main.py` auto-boots the store host, guarded so a failure falls to the REPL; follow `zero_host.py` |
+
+**The browser tier (`firmware/web_runner/`)**
+
+| module | group | sprint | note |
+|---|---|---|---|
+| `firmware/web_runner/carts_link.py` | radios and links | 3 | the page's half of Get Carts' transport: fetch, the OPFS keeper and the file picker |
+| `firmware/web_runner/gpio_link.py` | radios and links | 3 | the page's half of the Zero's GPIO verbs, a queue |
+| `firmware/web_runner/serve.py` | host-only | — | the local static server for the web build |
+| `firmware/web_runner/shims/zlib.py` | host-only | — | a browser-VM stdlib shim over `deflate` |
+| `firmware/web_runner/update_link.py` | radios and links | 3 | the page's half of updating the board that served it |
+| `firmware/web_runner/variant/manifest.py` | host-only | — | the web build's freeze manifest |
+| `firmware/web_runner/web_boot.py` | frame tail | 3 | the browser's boot; JS drives the native loop per frame (§4.2) |
+| `firmware/web_runner/web_canvas.py` | glass | 3 | the wasm head's raster, the browser's canvas |
+| `firmware/web_runner/web_p8.py` | host-only | — | browser-only glue around moy-spec's PICO-8 converter |
 
 ### 2.3 The Lua superset: registration is a deny list
 
@@ -249,9 +456,9 @@ says which carts in the tree run VM-free, by name.
 
 - **Size.** The OS side is about 45,000 lines of Python (ESTIMATED from the
   architecture review's count, 2026-09-27: the §2.2 `runtime/` modules ~18,500,
-  `device/` ~14,500, unplaced services ~11,900; sprint 0's placement table
-  settles it). The apps are roughly 23,000 more. Rewriting the apps frees no
-  memory, because their memory goes when the VM stops.
+  `device/` ~14,500, unplaced services ~11,900; #224 carries the count by
+  placement, taken from §2.2.1). The apps are roughly 23,000 more. Rewriting the
+  apps frees no memory, because their memory goes when the VM stops.
 - **Change rate.** The editors and Paint change most; a Python edit needs no
   firmware build.
 - **They keep the ABI honest.** Our apps on the table a kid's app uses is the
@@ -566,6 +773,9 @@ makes it false, not annotated:
 5. **The desk.** Whether the P4 ever stops its VM with apps open.
 6. **Text.** One text path for every app runtime; a fixed 8×8 font will not be
    enough for wasm apps (#158's e-reader case). Sprint 6.
+7. **The open placements** of §2.2.1: the rows whose sprint reads `open`, each
+   with its question in its note. Each is answered before its group's sprint
+   starts.
 
 ## 11. What can kill it
 
