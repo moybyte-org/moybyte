@@ -273,7 +273,8 @@ moybyte_patch_sdcard_runs() {
 
 # Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
 # on demand by DOUBLING it, from the same ESP heap the Lua VM, the panel DMA
-# and the layer pool allocate from, and never gives an area back. On an 8MB
+# and the layer pool allocate from, and gives an area back only when a sweep
+# finds it wholly empty. On an 8MB
 # S3 board one fragmented Python allocation took every remaining byte of
 # PSRAM and every big cart then failed at load with Lua's "not enough
 # memory" until a hard reset (2026-09-02, #66). The patch caps what a growth
