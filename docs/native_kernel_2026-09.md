@@ -5,7 +5,9 @@ first deliverable. Rev 1 went through the adversarial architecture and
 performance/hardware passes the same day (verdicts: **REWORK** / **PERF CASE
 STANDS WITH FIXES**); every finding is folded into this revision, and **§12 is
 the finding-by-finding ledger**. **Accepted by the owner 2026-10-05**; the
-sprints of §6 run in order, and where each one stands is #224's. It reverses a
+sprints of §6 run in order, and where each one stands is #224's. Sprint 0's
+findings are folded in (2026-10-05): §1 and §11 say what its census found, and
+§6.1 holds the values its gate set. It reverses a
 standing sentence — "MicroPython is the shell" (`docs/moycore_direction.md` §1)
 — which is why it was settled on paper first.
 **Tracks:** #224 (the direction) · #158 (the compiled tier; Doom on the floor
@@ -29,14 +31,21 @@ runs. Above it sit apps and carts, in Python, Lua or wasm. Our own shipped apps
 table (§3). The kernel's language is decided by a spike: Rust if it passes, C if
 it does not (§5).
 
-**The goal that forces it is memory for carts.** A compiled cart's memory is the
-cart-runtime reserve, not free PSRAM (`docs/wasm_tier_plan_2026-09.md`), and on
-the S3 boards that reserve is what the Python heap leaves. The heap after boot
-holds several times its live set at the launcher (MEASURED, Guition S3, #158:
-about 4 MB grown for about 0.7 MB live) — free space the collector cannot hand
-back while any object pins an area. When the OS no longer lives in that heap, the
-VM runs only while a Python app or cart does, and stopping it hands every grown
-area back (SOURCE, §1.3).
+**What it buys.** A VM that runs only while a Python app or cart does, so every
+app starts on a clean heap and stopping it hands every grown area back (SOURCE,
+§1.3); a kernel that outlives an app's crash and records it (§5's containment,
+sprint 2's recovery floor); one app API for Python and wasm apps (§2.1); one
+toolkit for every app runtime (§4.5); and speed on the S3: native chrome, with
+latency-bound state in internal SRAM where the Python heap can only be PSRAM
+(§1.8, §4.6). A compiled cart's memory is the cart-runtime reserve, not free
+PSRAM (`docs/wasm_tier_plan_2026-09.md`), and on the S3 boards that reserve is
+what the Python heap and the C side leave; a cart that runs with the VM stopped
+gets everything the VM held.
+
+**Memory for carts proposed it; the census moved it onto those grounds.** The
+boot's peak had one owner, the shelf scan, and it is fixed in Python (§11): the
+S3 heap no longer boots to several times its live set (#224). The retained
+memory's main owner, `_LAYER_POOL`, becomes the kernel's in sprint 3 (§1.4).
 
 **MicroPython stays, in its right place.** It is why a kid can write an app in
 200 lines with no build (`system_carts/notes.moy`), why the editors iterate fast,
@@ -47,29 +56,23 @@ is its role as the base a constrained OS stands on.
 
 ### 1.1 The acceptance test: Doom, fresh and after a session
 
-**MEASURED, #158 (2026-09-26).** Doom's load footprint
-(`native/moy_wasm/moy_wasm_footprint.h`) against each board's free PSRAM when
-the Player starts it: it runs on the Waveshare P4; it runs on a freshly booted
-T-Deck and is refused after a session, which leaves about 200 KB less PSRAM free
-with the largest block unchanged; it is refused on a freshly booted Guition S3,
-the floor board. (The Guition P4's refusal is its store's size, and #158's
-question.)
-
-**ESTIMATED: still refused on the floor board after the compiler fix `14241a8`.**
-That fix shrank Doom's S3 module to 789 KB. The footprint is the file block (26
-pages plus 1/32 plus 1 KB: 1,758,208 B), the pool (256 KB plus a quarter of the
-module), the module and the 16 KB stack: 1,758,208 + 464,128 + 807,936 + 16,384
-= **3,046,656 B** with 789 KiB (3,022,986 B with 789,000 B). The Guition S3's
-last measured fresh-boot free is 3,014,696 B, so Doom is **8–32 KB over** — and
-run-to-run spread in free PSRAM is larger than that margin (#158 recorded about
-110 KB of spread at the launcher), and the images have changed since. No free
-figure is current until sprint 0 re-measures.
+**MEASURED, #224 (sprint 0's census and its boot fixes, 2026-10-05).** Doom's
+load footprint (`native/moy_wasm/moy_wasm_footprint.h`, for the S3 module the
+compiler fix `14241a8` shrank) against free PSRAM at the Player's fit check: it
+loads on fresh boots of both S3 boards, the Guition S3 — the floor board — by
+the narrowest margin. A scripted session retains PSRAM outside the GC heap,
+most of it `_LAYER_POOL` (§1.4), so the fit after a session is the harder one
+on both boards. Since the shelf scan builds the slim catalogue directly (dev
+`39b7186`), the T-Deck's GC heap boots to about 1 MB held, not 4.19 MB, and
+the PSRAM it no longer holds is cart-available. #224 holds each
+fit, per board and state. (On the Waveshare P4 Doom runs; the Guition P4's
+refusal is its store's size, and #158's question.)
 
 Doom is the **minimum**. A bigger zone, a bigger WAD or the next cart needs the
 held space. The metric this doc is held to is **cart-available PSRAM at launch**
 — free total AND largest block when the Player starts a cart, over at least five
-boots, fresh and after a scripted session, on each S3 board — with its threshold
-set by the sprint 0 census (§6).
+boots, fresh and after a scripted session, on each S3 board — with the threshold
+sprint 0 set (§6.1).
 
 ### 1.2 One heap is the system's memory
 
@@ -94,24 +97,35 @@ stop sweeps everything, so every grown area goes back. The heap is sized by its
 PEAK demand and shrinks only when a whole area empties, which one survivor
 prevents.
 
-**MEASURED.** The S3 boards' `mpconfigboard.h` records the launcher's boot heap
-growing with the number of carts on the card (#66); #158 measured the held-to-
-live ratio above, and that a 4 MB reserve held the heap lower with all 51 carts
-still loading. On 2026-09-02 one fragmented Python allocation on an 8 MB S3 took
+**MEASURED, #224's census.** The boot's peak is what sizes the heap, and its
+owner was the shelf scan: it decoded every cart's sprites and map, then
+`slim_carts` dropped most of what it decoded, and the areas grown for that
+transient stayed because survivors sat in each. The scan builds the slim
+catalogue directly (dev `39b7186`), so the boot leaves five areas, about 1 MB
+held, on every console board (#224 has each board's figures).
+An allocation a collect cannot place still doubles it: on some T-Deck boots a
+sixth area grew between the launcher and a cart's start (#224). On 2026-09-02 one
+fragmented Python allocation on an 8 MB S3 took
 every remaining byte of PSRAM until a hard reset (#66). The reserve
 (`MOYBYTE_GC_SPLIT_RESERVE`) and the flash partition stay as they are
 (`docs/wasm_tier_plan_2026-09.md`, 2026-09-26).
 
-### 1.4 Retained memory, with a named candidate
+### 1.4 Retained memory: `_LAYER_POOL` first
 
-**MEASURED, #158:** the T-Deck's ~200 KB after a session is retained, not
-fragmented. **SOURCE: `device/device_canvas.py`'s `_LAYER_POOL`** is a candidate
-that fits: a dead cart's PSRAM layer buffer (150–384 KB) goes into a pool keyed
-by size, and "nothing is ever dropped from the pool". It lives outside the GC
-heap, so a VM stop does NOT return it — and a stop that drops the Python dict
-holding it would leak it for good. Separately, once WiFi has been up, the S3's
-internal SRAM does not come back (#158, phase 1). Sprint 0's census attributes
-both before anything is sized.
+**MEASURED, #224's census.** What a scripted session keeps is PSRAM outside
+the GC heap, whose held bytes do not move, and every byte of it has an owner:
+it is retained, not fragmented.
+Its largest owner on both S3 boards, and most of it on the T-Deck, is
+**`device/device_canvas.py`'s `_LAYER_POOL`** (SOURCE): a dead cart's PSRAM
+layer buffer goes into a pool keyed by size, and nothing is ever dropped from
+the pool. The rest is buffers each made once and kept — the fold's scratch, the
+bars' strips, the run-canvas cache, the audio backend. A fold scratch that a new
+geometry replaces is released (`8199005`; the census found it leaking). The pool
+lives outside the GC heap, so a VM stop returns it only through the `moy_alloc`
+registry's free-all (§4.4); its retention waits for sprint 3, where the pool
+becomes the kernel's (owner, 2026-10-05; §10 question 4). Separately, once WiFi
+has been up, the S3's internal SRAM does not come back (#158, phase 1; the
+census confirms it).
 
 ### 1.5 Long-lived data costs every collect
 
@@ -156,7 +170,8 @@ Speed is not the case this doc rests on. What is known and predicted:
   call (~1.2 µs) plus any heap allocation for returned tuples. Native-to-native
   is cheap; Python-to-native is what it is today.
 
-Sprint 0 records a speed baseline and every sprint re-takes it (§6).
+Sprint 0's speed baseline is #224's census — collections and their pauses,
+frame rates, imports, exit to the launcher — and every sprint re-takes it (§6).
 
 ## 2. The line
 
@@ -470,8 +485,10 @@ says which carts in the tree run VM-free, by name.
 **The launcher is decided by measurement.** Every cart returns to it. A Python
 launcher means every return starts the VM, re-imports the launcher and rebuilds
 its live set from a 64 KB first area, doubling through collects as it grows.
-Nobody has timed that; sprint 0 does, on both S3 boards, before sprint 1
-commits. If it misses the return budget (§10), the launcher becomes the one
+Sprint 0 timed the parts on both S3 boards (#224): the imports, the launcher's
+construction, and an exit whose cost is mostly one full collect. The return
+budget is set when sprint 4 can measure a Python launcher's whole return (owner,
+2026-10-05; §10 question 1); if the launcher misses it, it becomes the one
 shipped app that goes native.
 
 **The recovery floor is native.** `docs/shell_architecture_v1.md` §2.3 requires
@@ -612,6 +629,9 @@ move what it needs. The case:
   build. What it could miss is a new teardown step, so it carries a guard: the
   build compares `mp_task`'s call list at the pinned `MPY_TAG` with the one the
   VM service records, and fails on a difference. The bump's review is that diff.
+  v1.29.0 is the case (#224's rehearsal): its port drops
+  `machine_timer_deinit_all`, and a timer is released only by its finaliser,
+  inside the sweep, so the stop stops timers itself before the sweep.
 - **Teardown.** The fork inherits a list that is wrong for a stop with the
   kernel up: `machine_pins_deinit` removes the kernel's GPIO ISRs with Python's,
   and nothing drains the feeder, frees the registry, zeroes the roots or frees
@@ -664,15 +684,17 @@ rows that exercise the toolkit — not the 320×240/1× row
 Moving objects out of the PSRAM GC heap into native code can be a **net internal
 SRAM loss**: native `.bss`/`.data`, task stacks and small `malloc`s land in
 internal DRAM, and IDF sends small allocations internal-first. The S3's budget
-is tiny and shared with WiFi, BLE and the display's DMA (#158: the T-Deck's
-low-water with WiFi and BLE up is a few KB; WiFi does not give its share back).
+is tiny and shared with WiFi, BLE and the display's DMA (sprint 0's baseline,
+#224: with WiFi and BLE up the T-Deck's DMA-capable low-water is the tightest
+figure on either board; WiFi does not give its share back, #158).
 moycore's Lua allocator uses internal SRAM above a floor and falls back to PSRAM
 below it at a measured cost (`native/moycore/modmoycore.c`). So:
 
 - **Rule:** kernel data is allocated with `heap_caps(MALLOC_CAP_SPIRAM)` unless
   it is latency-bound, and a test asserts it.
 - **Gate:** every sprint records internal free and low-water on both S3 boards
-  with WiFi and BLE up, against sprint 0's baseline.
+  with WiFi and BLE up, against sprint 0's baseline and within the kernel's
+  internal share (§6.1).
 
 ## 5. The kernel's language
 
@@ -729,7 +751,7 @@ Each sprint moves one set of components, deletes the Python it replaces, passes
 its gate on the host, the browser and every target that takes it, and re-takes
 sprint 0's baseline. **Every sprint's gate also includes:** internal SRAM free
 and low-water on both S3 boards with WiFi and BLE up (§4.6); each image's
-headroom above a per-board floor set in sprint 0; the semantic traces extended
+headroom above its floor (§6.1); the semantic traces extended
 before anything crosses.
 
 **Every sprint opens with a carve, in Python, before any native code is
@@ -753,18 +775,19 @@ interface is already defined and pinned, in both languages.
 
 | sprint | moves | gate |
 |---|---|---|
-| **0 — evidence** | nothing. Meters: a `heapcaps` dev-channel word (PSRAM and internal, free and largest) and a GC-pause field in PERF. The census by owner (live GC bytes, held areas, `heap_caps` bytes) with `_LAYER_POOL` checked first. Doom's fit over ≥5 boots per S3 board. Launcher import + construction time on both S3 boards. The complete placement table (§2.2). The stop inventory (§4.4) and the embed-vs-port-fork decision. A stop/start spike on an S3 that keeps one real peripheral alive across the stop — the flush task and a C-owned touch poll. The P4 repartition costed. | the census names the owners of the boot peak and of the T-Deck's ~200 KB; 100 stop/start cycles on the S3 with the peripheral alive and `heap_caps` free flat; a cart-available PSRAM threshold and the kernel's fixed share defined from the census; per-board headroom floors set |
+| **0 — evidence** | nothing. Meters: a `heapcaps` dev-channel word (PSRAM and internal, free and largest) and a GC-pause field in PERF. The census by owner (live GC bytes, held areas, `heap_caps` bytes) with `_LAYER_POOL` checked first. Doom's fit over ≥5 boots per S3 board. Launcher import + construction time on both S3 boards. The complete placement table (§2.2). The stop inventory (§4.4) and the embed-vs-port-fork decision. A stop/start spike on an S3 that keeps one real peripheral alive across the stop — the flush task and a C-owned touch poll. The P4 repartition costed. | the census names the owners of the boot peak and of the T-Deck's retained memory; 100 stop/start cycles on the S3 with the peripheral alive and `heap_caps` free flat; a cart-available PSRAM threshold and the kernel's fixed share defined from the census; per-board headroom floors set (§6.1) |
 | **1a — the language** | the smallest store component, in Rust and in C (§5) | §5's six items; the owner's decision |
-| **1b — the store** | the store's index, catalogue build, cover bookkeeping, seed and project loading; the journal | the parity tests across bindings; the heap after boot within the census's threshold of live; IF the census names the store as the boot peak's owner, Doom loads on a fresh Guition S3 over five boots |
+| **1b — the store** | the store's index, catalogue build, cover bookkeeping, seed and project loading; the journal | the parity tests across bindings; the heap after boot within §6.1's bound; Doom loads on a fresh Guition S3 over five boots |
 | **2 — the spine** | handle tables; the crash record and strike ledger (`crash_guard`); the native recovery screen; the settings store; WiFi leases | a native crash is recorded and shown after reboot; a VM that fails to start lands on the recovery screen; a stale handle is refused loudly |
 | **3 — the survival set** | input (touch, keyboards, BLE HID below `bluetooth`); audio (I2S feed and the sfx/music semantics); the glass (canvas ownership, present, compositors); the SD gate; the frame tail (loop, pump, idle blank, OTA health, PERF, serial); radios, the webhost and the sync RPC | the native loop drives the frame on every tier with Python as an upcall (§4.2); each board's on-glass suite unchanged; `surface_model_v1.md`'s amendment (§8) landed first |
-| **4 — the cart path** | the Player's loop and tick model, the runtime map, moycore's glue, the in-cart chrome (strip, system menu, error and fit panels, toasts), netplay lockstep, the Lua superset rulings (§2.3) | a Lua and a wasm cart run launch to exit with **zero Python upcalls** on every tier and **with the VM stopped** on the S3s; cart-available PSRAM above the sprint 0 threshold; Doom loads on a T-Deck after a scripted session and on a fresh Guition S3; the cart census of VM-free carts; exit-to-launcher time against the return budget decides the launcher (§3) |
-| **5 — the ABI** | the roles redesigned import-shaped (§2.1); `ctx.shell` closed; the Python binding thin; the wasm import adapter; the `open()`-after-stop contract | `docs/app_api_v1.md` rewritten in place; `tests/test_app_context.py` and the traces cover every role; a wasm module reaches a role through an import; every shipped app restores after a stop |
-| **6 — the toolkit** | `runtime/ui.py`'s core and one text path for every runtime | pixel goldens identical on every row that exercises the toolkit; an A/B of widget-heavy frames on an S3 and a P4; a wasm app draws a button and a scroll list |
-| **7 — the window managers** | the WMs' state, policy and chrome; the rest of `runtime/console.py` | the P4 desk's on-glass suites unchanged; an A/B of chrome frames on an S3 with the dev channel's timing; `runtime/console.py` is gone |
+| **4 — the cart path** | the Player's loop and tick model, the runtime map, moycore's glue, the in-cart chrome (strip, system menu, error and fit panels, toasts), netplay lockstep, the Lua superset rulings (§2.3) | a Lua and a wasm cart run launch to exit with **zero Python upcalls** on every tier and **with the VM stopped** on the S3s; cart-available PSRAM at or above §6.1's threshold; Doom loads on a T-Deck after a scripted session and on a fresh Guition S3; the cart census of VM-free carts; exit-to-launcher time against the return budget decides the launcher (§3) |
+| **5 — the ABI** (scope: §10 question 8) | the roles redesigned import-shaped (§2.1); `ctx.shell` closed; the Python binding thin; the wasm import adapter; the `open()`-after-stop contract | `docs/app_api_v1.md` rewritten in place; `tests/test_app_context.py` and the traces cover every role; a wasm module reaches a role through an import; every shipped app restores after a stop |
+| **6 — the toolkit** (scope: §10 question 8) | `runtime/ui.py`'s core and one text path for every runtime | pixel goldens identical on every row that exercises the toolkit; an A/B of widget-heavy frames on an S3 and a P4; a wasm app draws a button and a scroll list |
+| **7 — the window managers** (scope: §10 question 8) | the WMs' state, policy and chrome; the rest of `runtime/console.py` | the P4 desk's on-glass suites unchanged; an A/B of chrome frames on an S3 with the dev channel's timing; `runtime/console.py` is gone |
 
-Sprint 4 is where the memory half's acceptance test is met, and where Python
-stops being the OS. Sprints 5 to 7 finish the line.
+Sprint 4 is where the memory half's acceptance test is met and the cart path
+runs VM-free. Sprints 5 to 7 finish the line as far as the scope the owner
+chooses before sprint 5 takes them (§10 question 8).
 
 **The Studio's Run pane is sprint 7's concern.** `docs/studio_2026-09.md` docks
 the playtest window into a pane the Editor lends, which is new policy in
@@ -773,6 +796,48 @@ it, or it is designed into sprint 7; it never lands during sprint 6 or 7, whose
 gates hold pixels (`docs/theming_2026-09.md` §8 sets the same rule for
 theming). The Player in the pane is the same Player, so sprint 4's gate is
 unaffected.
+
+### 6.1 The values sprint 0 set (2026-10-05)
+
+Configuration, derived from #224's measurements; the derivation, and where each
+board stands against each value, are #224's.
+
+- **Cart-available PSRAM** (§1.1): at the Player's fit check, the worst of at
+  least five boots, fresh and after the census's scripted session
+  (`tools/mem_census.py`), on each S3 board: **at least 4 MiB free and a 3 MiB
+  largest block**. Doom's footprint is the floor. The margin above it is one
+  area of the Python heap at its boot size (about 1 MiB), the step by which
+  free PSRAM at the fit check moved between boots once the catalogue fix
+  landed, so one growth of the heap before a cart starts cannot refuse Doom;
+  rounded up to whole MiB.
+- **The kernel's fixed share.** PSRAM: native code holds **at most 1 MiB** at
+  the Player's fit check on each S3 board — panel buffers, flush slots, audio,
+  driver buffers, the game canvas, the layer pool once it is the kernel's, the
+  kernel's own tables — so that with the cart threshold it leaves 3 MiB for the
+  Python heap and what Python holds while the VM runs. The C side the census
+  measured fits it on both boards; on the Guition S3 what is left is about one pooled 320×240
+  layer, which bounds the pool sprint 3 makes the kernel's. Internal SRAM: the
+  kernel costs **at most 4 KiB net** against sprint 0's baseline (§4.6: free,
+  largest block and low-water, all-internal and DMA-capable, WiFi and BLE up)
+  while the VM runs, and **nothing net** while it is stopped, when the VM task's
+  stack is back. Kernel data is PSRAM by rule, and the T-Deck's DMA-capable
+  low-water with both radios up is the tightest figure on either board.
+- **Image headroom floors**, the OTA-slot headroom `build.sh` prints with the
+  browser console baked in, at every sprint's gate:
+
+  | image | floor | why |
+  |---|---|---|
+  | Waveshare P4, Guition P4 | 1 MiB | the 6 MiB slots (owner, 2026-10-05; `f738797`) were cut for the kernel; the floor leaves it about half of their headroom, so the store never pays for a second table change |
+  | T-Deck, Guition S3 | 512 KiB | no table change is planned; the floor leaves the kernel about two-thirds of their headroom and keeps the build's own warning (`MOYBYTE_APP_HEADROOM_WARN_BYTES`, 200 KB, #168) over twice |
+  | Zero | 256 KiB | it meets the kernel only through the web bundle, where the kernel's wasm build lands; a gate that would cross the floor first takes the bundle off the Zero's image (#224's flash costing) or re-tables the Zero |
+
+- **The heap after boot** (sprint 1b's gate): the GC heap the boot leaves at the
+  launcher holds at most the five areas the catalogue's boot leaves (dev
+  `39b7186`), on each console board with the census's stores.
+
+The Guition S3 takes the same values. Its figures on its card after the
+catalogue fix are missing from #224, so its values were derived without them
+and are re-derived when they land.
 
 ## 7. What it costs
 
@@ -788,11 +853,12 @@ unaffected.
   become roughly 0.5–1 MB of native text against roughly 0.35–0.5 MB of frozen
   bytecode deleted, net +0.15–0.5 MB for the `runtime/` share alone — and the
   kernel's wasm build rides every image again inside the web bundle. The P4
-  images have the least headroom (#158), so a repartition is likely early. A
-  partition change is a cable migration flash that can wipe the store
+  boards were repartitioned to 6 MiB app slots for it (owner, 2026-10-05;
+  `f738797`, `f596ed5`), paid from the store. A partition change is a cable
+  flash — OTA writes only the next app slot — and `tools/board_flash.py`
+  formats a store the new table moved, so the store's contents go
   (`firmware/seeed_xiao_esp32s3_zero/README.md`): cheap while the field is the
-  owner's desk, expensive after. Sprint 0 costs it; every sprint gates on the
-  headroom floor.
+  owner's desk, expensive after. Every sprint gates on §6.1's floors.
 - **Internal SRAM** (§4.6), gated every sprint.
 - **A second public contract.** The roles become an ABI for Python and wasm
   apps, under a trace pin.
@@ -831,7 +897,7 @@ makes it false, not annotated:
 | `console.py` as the shell kernel | `.claude/rules/shell.md` | sprint 7 |
 | the Surface's home and producer-owned dirty signals | `docs/surface_model_v1.md` §2–§3 | the amendment, before sprint 3 |
 | the roles as object-returning methods | `docs/app_api_v1.md` | sprint 5 |
-| the heap "never shrinks" / "never gives an area back" (true in practice, false as mechanism: §1.3) | `.claude/rules/boards.md`, `tools/esp32_build_lib.sh` | sprint 0, in the first change that touches each file — a comment edit alone to the build lib would run the firmware build |
+| the heap "never gives an area back" (false as mechanism: §1.3) | `tools/esp32_build_lib.sh`, the split reserve's comment | the next change that touches the file — a comment edit alone would run the firmware build |
 
 ## 9. Non-goals
 
@@ -865,18 +931,38 @@ makes it false, not annotated:
 7. **The open placements** of §2.2.1: the rows whose sprint reads `open`, each
    with its question in its note. Each is answered before its group's sprint
    starts.
+8. **The scope after sprint 4.** Sprints 1b–4 run as §6 has them (owner,
+   2026-10-05). **Before sprint 5 starts**, the owner chooses between:
+   - **the full plan**: sprints 5–7 as §6 has them;
+   - **a narrowed plan**: sprint 5 limited to the `open()`-after-stop contract
+     every Python app needs; the wasm app ABI and sprints 6–7 deferred until
+     wasm apps need them. The app world stays Python, and only the cart path
+     runs VM-free.
 
 ## 11. What can kill it
 
-- **Sprint 0's stop spike failing** with a real peripheral alive. The invisible
-  stop dies; the fallback is a soft reset into a Player-only VM before a big cart,
-  built only then.
-- **The census naming something cheaper.** If the boot peak or the retained
-  memory is one fixable owner, fix it; the kernel then has to earn itself on its
-  other grounds — wasm apps, one toolkit, speed — and this doc says so.
+- **A stop failing with a real peripheral alive.** Sprint 0's spike passed on
+  the Guition S3 (2026-10-05, #224): 100 stops in one boot with the flush task
+  and a C-owned touch poll alive, memory flat, in both lifecycles. The T-Deck's
+  input poller and shared bus run the spike before sprint 4 relies on stops
+  (#224). If a stop fails there, the invisible stop dies; the fallback is a soft
+  reset into a Player-only VM before a big cart, built only then.
+- **The census naming something cheaper — it did, for the boot peak.** The rule
+  was: if the boot peak or the retained memory is one fixable owner, fix it, and
+  the kernel then has to earn itself on its other grounds. The boot peak had one
+  owner, the shelf scan, and it is fixed in Python: the scan builds the slim
+  catalogue directly (dev `39b7186`) and frozen modules come first on
+  `sys.path` (`4d85b00`). The retained memory's main owner, `_LAYER_POOL`,
+  waits for sprint 3, where the pool becomes the kernel's (owner, 2026-10-05).
+  So the kernel proceeds on its other grounds (§0): a restartable VM with a
+  clean heap per app; crash containment; one app API for Python and wasm apps;
+  one toolkit; and the S3's chrome speed, with latency-bound state in internal
+  SRAM. On those grounds the owner runs sprints 1b–4 as planned and chooses the
+  scope after them before sprint 5 (2026-10-05; §10 question 8).
 - **Internal SRAM.** If moving state native costs the S3 internal SRAM it cannot
-  spare, and PSRAM placement cannot absorb it.
-- **Flash headroom** that forces a repartition after there are users.
+  spare, and PSRAM placement cannot absorb it (the share, §6.1).
+- **Flash headroom** that forces a repartition after there are users (the
+  floors, §6.1).
 - **A crossing without its pin.**
 
 ## 12. Review ledger
