@@ -2,7 +2,6 @@
 # Map (grep -n a name to jump there):
 #   impl_of            the hook's value, checked
 #   build_env          the hook's environment for one build
-#   rust_lib           the Rust twin's static library for a target
 #   binding            runtime/moy_index.py's interface over a twin, by ctypes
 #   host_bindings      the suite's native BINDINGS
 #   fuzz_binary        fuzz_index under ASan+UBSan: libFuzzer's or the seeded one
@@ -17,9 +16,9 @@
 #   objdump_loads      the loads in the twin's own code, by width
 #   cmd_bench          build, flash, bench, census
 #   cmd_ci_time        what the twin's tests cost a CI run
-"""Sprint 1a's harness: the store's index built as each twin for every target,
-and the numbers the kernel's language is decided on (#224;
-docs/native_kernel_2026-09.md section 5).
+"""Sprint 1a's harness: the store's index built as the C twin for every target,
+and the numbers the kernel's language was decided on (#224; the decision is
+docs/native_kernel_2026-09.md section 5, C).
 
     tools/moy_index_spike.py host     [--impl c]      the suite over ctypes and on the
                                                       desktop MicroPython, the store trace
@@ -42,18 +41,11 @@ THE HOOK. MOY_INDEX_IMPL picks the store index a build compiles in:
     c     native/moy_index/moy_index.c under modmoy_index.c, and
           runtime/moy_index.py left out of the frozen set, so the extensible
           builtin answers `import moy_index`
-    rust  the same binding over a Rust static library
 
 native/moy_index/micropython.cmake (the boards) and micropython.mk (the
 desktop MicroPython, the browser) read it, tools/board_config.py drops the
 Python twin from a twin's frozen set, and `make unix-micropython` builds the
-twin its UNIX_MP_INDEX names (default `c`). For `rust` every build links
-MOY_INDEX_RUST_LIB: a static library defining every function moy_index.h
-declares, importing its two host functions. This harness gets one per target
-from `native/moy_index/rust/build.sh TARGET`, whose last line of output is the
-library's path; TARGET is a key of RUST_TARGETS. That script is all the Rust
-twin supplies -- the binding, the tests, the fuzz driver and this table are
-shared.
+twin its UNIX_MP_INDEX names (default `c`).
 
 MOY_INDEX_BENCH=1 adds the `moy_index_bench` module (bench_moy_index.c) to a
 twin build, for `bench`; no image the size table measures carries it. Each
@@ -84,24 +76,10 @@ CACHE = os.path.join(ROOT, ".build", "host_index")
 OUT = os.path.join(ROOT, ".build", "moy_index_spike")
 WEB_DIR = os.path.join(ROOT, "firmware", "web_runner")
 WEB_DIST = os.path.join(WEB_DIR, "dist")
-WEB_PORT = os.path.join(WEB_DIR, ".build", "micropython", "ports", "webassembly")
 UNIX_PORT = os.path.join(ROOT, ".build", "unix_micropython", "micropython",
                          "ports", "unix")
 
-IMPLS = ("py", "c", "rust")
-RUST_BUILD = os.path.join(NATIVE, "rust", "build.sh")
-RUST_TARGETS = {
-    "host": "the host's own triple: the ctypes library, the 64-bit desktop "
-            "MicroPython",
-    "host-sanitize": "the same, instrumented for AddressSanitizer",
-    "host-fuzz": "host-sanitize with libFuzzer's coverage instrumentation, "
-                 "as the C twin's code has under -fsanitize=fuzzer",
-    "host-r32": "i686: the desktop MicroPython in the boards' object model",
-    "esp32s3": "the T-Deck, the Guition S3 and the Zero",
-    "esp32p4": "the two P4 boards",
-    "web": "wasm32-unknown-emscripten, under the web runner's emsdk",
-}
-CHIP_TARGET = {"esp32s3": "esp32s3", "esp32p4": "esp32p4"}
+IMPLS = ("py", "c")
 SANITIZE = ["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
             "-fno-omit-frame-pointer"]
 
@@ -122,41 +100,17 @@ BENCH_EVENTS = (
 def impl_of(arg=None):
     v = arg or os.environ.get("MOY_INDEX_IMPL") or "py"
     if v not in IMPLS:
-        raise SystemExit("MOY_INDEX_IMPL is py, c or rust, not %r" % v)
+        raise SystemExit("MOY_INDEX_IMPL is py or c, not %r" % v)
     return v
 
 
-def rust_lib(target):
-    """The Rust twin's static library for `target`, from its build script."""
-    if target not in RUST_TARGETS:
-        raise ValueError("no Rust target %r" % target)
-    if not os.path.exists(RUST_BUILD):
-        raise RuntimeError("the Rust twin supplies %s TARGET (the header of %s "
-                           "says what it prints); it is not there"
-                           % (os.path.relpath(RUST_BUILD, ROOT),
-                              os.path.relpath(__file__, ROOT)))
-    out = subprocess.run(["bash", RUST_BUILD, target], cwd=ROOT,
-                         capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError("%s %s failed:\n%s" % (RUST_BUILD, target,
-                                                  out.stderr or out.stdout))
-    path = out.stdout.strip().splitlines()[-1].strip()
-    if not os.path.isfile(path):
-        raise RuntimeError("%s %s printed %r, which is not a file"
-                           % (RUST_BUILD, target, path))
-    return os.path.abspath(path)
-
-
-def build_env(impl, target=None, bench=False):
-    """os.environ with the hook set for one build of `target`."""
+def build_env(impl, bench=False):
+    """os.environ with the hook set for one build."""
     env = dict(os.environ)
     env["MOY_INDEX_IMPL"] = impl
-    env.pop("MOY_INDEX_RUST_LIB", None)
     env.pop("MOY_INDEX_BENCH", None)
     if bench and impl != "py":
         env["MOY_INDEX_BENCH"] = "1"
-    if impl == "rust":
-        env["MOY_INDEX_RUST_LIB"] = rust_lib(target)
     return env
 
 
@@ -164,27 +118,20 @@ def build_env(impl, target=None, bench=False):
 
 
 def host_library(impl="c", sanitize=False):
-    """The host shared library for a twin, built once per content (cached
+    """The host shared library for the C twin, built once per content (cached
     under .build/host_index); None where there is no C compiler."""
     from runtime import native_build
-    if impl not in ("c", "rust"):
-        raise ValueError("a host library is a twin's, not %r" % impl)
+    if impl != "c":
+        raise ValueError("a host library is the C twin's, not %r" % impl)
     if sanitize:
         cflags = ["-std=c99", "-O1", "-g", "-fPIC", "-shared"] + SANITIZE
     else:
         cflags = list(native_build.BASE_CFLAGS)
-    names = ["moy_index.h"] + (["moy_index.c"] if impl == "c" else [])
-    link = []
-    if impl == "rust":
-        # The shim defines only the host's two imports, so nothing in it pulls
-        # a member out of the archive: the library takes all of it.
-        link = ["-Wl,--whole-archive", rust_lib("host-sanitize" if sanitize
-                                                else "host"),
-                "-Wl,--no-whole-archive"]
+    names = ["moy_index.h", "moy_index.c"]
     return native_build.build(
         "moy_index_%s%s" % (impl, "_san" if sanitize else ""),
         os.path.join(NATIVE, "moy_index_host.c"), names, CACHE,
-        cflags=cflags, libmoy_dir=NATIVE, link_flags=link)
+        cflags=cflags, libmoy_dir=NATIVE)
 
 
 _SIGS = (
@@ -206,7 +153,7 @@ _SIGS = (
 
 
 def binding(impl="c", sanitize=False):
-    """An Index class with runtime/moy_index.py's interface over a twin's
+    """An Index class with runtime/moy_index.py's interface over the C twin's
     host library, or None where there is no C compiler."""
     path = host_library(impl, sanitize)
     if path is None:
@@ -289,17 +236,11 @@ def binding(impl="c", sanitize=False):
 
 
 def host_bindings():
-    """{name: Index class} for the suite's BINDINGS: the C twin always, the
-    Rust twin when MOY_INDEX_IMPL=rust; sanitized under MOY_INDEX_SANITIZE=1."""
+    """{name: Index class} for the suite's BINDINGS: the C twin; sanitized
+    under MOY_INDEX_SANITIZE=1."""
     san = os.environ.get("MOY_INDEX_SANITIZE") == "1"
-    out = {}
-    for impl in ("c", "rust"):
-        if impl == "rust" and os.environ.get("MOY_INDEX_IMPL") != "rust":
-            continue
-        cls = binding(impl, sanitize=san)
-        if cls is not None:
-            out[impl] = cls
-    return out
+    cls = binding("c", sanitize=san)
+    return {} if cls is None else {"c": cls}
 
 
 # -- the fuzz driver ------------------------------------------------------------
@@ -322,16 +263,12 @@ def _cc_works(cc, flags):
 
 
 def fuzz_binary(impl="c", libfuzzer=False):
-    """Build fuzz_index for a twin under ASan+UBSan: libFuzzer's (clang) or
-    the seeded driver (any compiler). The path, or None with no toolchain
+    """Build fuzz_index for the C twin under ASan+UBSan: libFuzzer's (clang)
+    or the seeded driver (any compiler). The path, or None with no toolchain
     that has the sanitizers."""
     os.makedirs(CACHE, exist_ok=True)
-    srcs = [os.path.join(NATIVE, "fuzz_index.c")]
-    link = []
-    if impl == "c":
-        srcs.append(os.path.join(NATIVE, "moy_index.c"))
-    else:
-        link = [rust_lib("host-fuzz" if libfuzzer else "host-sanitize")]
+    srcs = [os.path.join(NATIVE, "fuzz_index.c"),
+            os.path.join(NATIVE, "moy_index.c")]
     if libfuzzer:
         cc = shutil.which("clang")
         flags = ["-fsanitize=fuzzer,address,undefined"] + SANITIZE[1:]
@@ -345,7 +282,7 @@ def fuzz_binary(impl="c", libfuzzer=False):
     exe = os.path.join(CACHE, "fuzz_index_%s%s" % (impl, "_lf" if libfuzzer
                                                     else ""))
     cmd = ([cc, "-std=c99", "-O1", "-g", "-Wall", "-Wextra", "-I", NATIVE]
-           + flags + srcs + ["-o", exe] + link)
+           + flags + srcs + ["-o", exe])
     out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError("fuzz_index build failed:\n%s" % out.stderr)
@@ -371,7 +308,7 @@ def fuzz_libfuzzer(impl="c", seconds=60):
     os.makedirs(corpus, exist_ok=True)
     # clang 14's ASan runtime dies in its own init under the address-space
     # entropy of Linux 6.6 and later (vm.mmap_rnd_bits 32), a third of starts
-    # here, either twin: the run goes without ASLR.
+    # here: the run goes without ASLR.
     norand = ["setarch", "-R"] if shutil.which("setarch") else []
     t = time.time()
     out = subprocess.run(norand + [exe, "-max_total_time=%d" % seconds,
@@ -410,7 +347,7 @@ def pytest(args, env=None):
 
 def unix_micropython(impl):
     """`make unix-micropython` with the twin `impl` in both binaries (the
-    binaries are removed first: a changed link line alone relinks nothing)."""
+    binaries are removed first, so a changed hook relinks them)."""
     for b in ("build-moybyte", "build-moybyte-board"):
         try:
             os.remove(os.path.join(UNIX_PORT, b, "micropython"))
@@ -418,9 +355,6 @@ def unix_micropython(impl):
             pass
     cmd = ["make", "--no-print-directory", "unix-micropython",
            "UNIX_MP_INDEX=%s" % impl]
-    if impl == "rust":
-        cmd += ["MOY_INDEX_RUST_LIB=%s" % rust_lib("host"),
-                "MOY_INDEX_RUST_LIB_R32=%s" % rust_lib("host-r32")]
     out = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError("make unix-micropython (%s) failed:\n%s"
@@ -434,12 +368,10 @@ HOST_TESTS = ["tests/test_moy_index.py", "tests/test_moy_index_twins.py",
 def cmd_host(a):
     impl = impl_of(a.impl)
     if impl == "py":
-        raise SystemExit("`host` runs a twin: --impl c or rust")
+        raise SystemExit("`host` runs the twin: --impl c")
     unix_micropython(impl)
     env = dict(os.environ, MOY_INDEX_IMPL=impl, MOYBYTE_REQUIRE_UNIX_MP="1")
     rc, secs, tail = pytest(HOST_TESTS, env)
-    if impl != "c":
-        unix_micropython("c")
     print("\n".join(tail[-15:]))
     save("host-%s.json" % impl, {"impl": impl, "rc": rc, "seconds": secs,
                                  "tail": tail[-15:]})
@@ -458,7 +390,7 @@ def libasan():
 def cmd_sanitize(a):
     impl = impl_of(a.impl)
     if impl == "py":
-        raise SystemExit("`sanitize` runs a twin: --impl c or rust")
+        raise SystemExit("`sanitize` runs the twin: --impl c")
     res = {"impl": impl}
     asan = libasan()
     if asan:
@@ -487,41 +419,9 @@ def cmd_sanitize(a):
             "no clang with libFuzzer" if lf is None else
             "ok=%(ok)s %(runs)s runs in %(seconds)ss, cov %(cov)s, ft "
             "%(features)s, corpus %(corpus)s" % lf))
-    if impl == "rust" and a.seconds:
-        # cargo-fuzz: the safe API against a model, Rust's own libFuzzer and
-        # AddressSanitizer (build.sh fuzz).
-        t = time.time()
-        out = subprocess.run(["bash", RUST_BUILD, "fuzz", str(a.seconds),
-                              os.path.join(OUT, "corpus_cargo_fuzz")], cwd=ROOT,
-                             capture_output=True, text=True)
-        text = out.stdout + out.stderr
-        done = re.findall(r"Done (\d+) runs", text)
-        cov = re.findall(r"cov: (\d+) ft: (\d+)", text)
-        res["cargo_fuzz"] = {
-            "ok": out.returncode == 0, "seconds": round(time.time() - t, 1),
-            "runs": int(done[-1]) if done else None,
-            "cov": int(cov[-1][0]) if cov else None,
-            "features": int(cov[-1][1]) if cov else None,
-            "tail": text.strip().splitlines()[-12:]}
-        print("cargo-fuzz, ASan: ok=%(ok)s %(runs)s runs in %(seconds)ss, cov "
-              "%(cov)s, ft %(features)s" % res["cargo_fuzz"])
-    if impl == "rust":
-        # The crate's own tests, then the same under Miri (build.sh test|miri).
-        for step in ("test", "miri"):
-            t = time.time()
-            out = subprocess.run(["bash", RUST_BUILD, step], cwd=ROOT,
-                                 capture_output=True, text=True)
-            tail = (out.stdout + out.stderr).strip().splitlines()
-            res[step] = {"rc": out.returncode, "seconds": round(time.time() - t, 1),
-                         "tail": tail[-4:]}
-            print("crate %s: rc=%d %.1fs  %s" % (step, out.returncode,
-                                                res[step]["seconds"],
-                                                " ".join(tail[-2:])))
     save("sanitize-%s.json" % impl, res)
     bad = (res["suite"] and res["suite"]["rc"]) or not (res["seeded"] or {}).get("ok") \
-        or (res.get("libfuzzer") and not res["libfuzzer"]["ok"]) \
-        or any(res.get(k, {}).get("rc") for k in ("test", "miri")) \
-        or not res.get("cargo_fuzz", {"ok": True})["ok"]
+        or (res.get("libfuzzer") and not res["libfuzzer"]["ok"])
     return 1 if bad else 0
 
 
@@ -569,11 +469,7 @@ _MAP_ROW = re.compile(r"^\s*(\.\S+)?\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+(\S+)$")
 
 def objects_of(impl):
     """What names the twin's own objects in a link map."""
-    if impl == "c":
-        return re.compile(r"\((mod)?moy_index\.c\.obj\)$|/(mod)?moy_index\.c\.obj$")
-    # The binding, and every member of the library rust/build.sh names.
-    return re.compile(r"\(modmoy_index\.c\.obj\)$|/modmoy_index\.c\.obj$"
-                      r"|/libmoy_index_rs\.a\(")
+    return re.compile(r"\((mod)?moy_index\.c\.obj\)$|/(mod)?moy_index\.c\.obj$")
 
 
 def map_rows(path, objects):
@@ -610,8 +506,8 @@ _KINDS = (("code", (".text", ".literal", ".iram")), ("rodata", (".rodata",)),
 
 
 def map_summary(path, impl):
-    """The twin's allocated bytes by kind, the binding (modmoy_index.c, shared
-    by both twins) apart from the twin's own code; and its function names.
+    """The twin's allocated bytes by kind, the binding (modmoy_index.c) apart
+    from the twin's own code; and its function names.
     Merged string sections (`.str1.N`) are left out: the linker pools them
     across objects and the map charges the pool to whichever came first."""
     out = {"core": dict.fromkeys(k for k, _ in _KINDS),
@@ -647,12 +543,6 @@ def build_board(name, d, env, logdir):
 def build_web(env, logdir, tag):
     import board_pass
     log = os.path.join(logdir, "web.%s.build.log" % tag)
-    if env.get("MOY_INDEX_RUST_LIB"):
-        # The library is a link flag, not a prerequisite: relink against it.
-        try:
-            os.remove(os.path.join(WEB_PORT, "build-moybyte", "micropython.mjs"))
-        except OSError:
-            pass
     return board_pass.run_logged(["bash", os.path.join(WEB_DIR, "build.sh")],
                                  log, env), log
 
@@ -679,7 +569,7 @@ def cmd_sizes(a):
     The browser console is left as py; results merge into one JSON."""
     impl = impl_of(a.impl)
     if impl == "py":
-        raise SystemExit("`sizes` compares a twin with py: --impl c or rust")
+        raise SystemExit("`sizes` compares the twin with py: --impl c")
     boards = _boards()
     want = a.targets or (["web"] + sorted(boards))
     unknown = [t for t in want if t != "web" and t not in boards]
@@ -698,7 +588,7 @@ def cmd_sizes(a):
     if "web" in want:
         for which in ("py", impl):
             t0 = time.time()
-            rc, log = build_web(build_env(which, "web"), logdir, which)
+            rc, log = build_web(build_env(which), logdir, which)
             if rc != 0:
                 raise SystemExit("web build (%s) failed: %s" % (which, log))
             shutil.rmtree(web_copy(which), ignore_errors=True)
@@ -713,8 +603,7 @@ def cmd_sizes(a):
             for which in ("py", impl):
                 use_web(which)
                 t0 = time.time()
-                rc, log = build_board(name, d, build_env(
-                    which, CHIP_TARGET.get(chip)), logdir)
+                rc, log = build_board(name, d, build_env(which), logdir)
                 if rc != 0:
                     row[which] = {"failed": os.path.relpath(log, ROOT)}
                     print("%s %s: BUILD FAILED (%s)" % (name, which, log),
@@ -983,8 +872,8 @@ def cmd_bench(a):
     os.makedirs(logdir, exist_ok=True)
     res = {"impl": impl, "board": a.board, "plain": a.plain}
     if not a.no_build:
-        rc, log = build_board(a.board, d, build_env(impl, CHIP_TARGET[chip],
-                                                    bench=not a.plain), logdir)
+        rc, log = build_board(a.board, d, build_env(impl, bench=not a.plain),
+                              logdir)
         if rc != 0:
             raise SystemExit("build failed: %s" % log)
         res["app"] = _size(app_image(d))
@@ -1064,7 +953,7 @@ def cmd_ci_time(a):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Sprint 1a's harness: the store's "
-                                "index as each twin, on every target")
+                                "index as the C twin, on every target")
     p.add_argument("--board", choices=sorted(_boards()),
                    help="the S3 board `bench` builds for, flashes and drives")
     sub = p.add_subparsers(dest="cmd", required=True)

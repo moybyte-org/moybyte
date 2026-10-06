@@ -1,12 +1,21 @@
 # Rust toolchain probe (#224, sprint 1a)
 
-Can Rust build a `no_std` C-ABI static library for every target this repo ships,
-with the toolchains each target pins, and link it into the target's real build?
-This directory is the experiment: one crate, one trivial usermod, and the
-commands that put the library into each build. It changes no product file and
-flashes nothing. The numbers it produced (versions, sizes, times, errors) are in
-#224's comment, not here (`docs/native_kernel_2026-09.md` §5 is the decision
-they feed).
+**This directory is a record, kept for a revisit.** The kernel's language is C
+(owner, 2026-10-06): `docs/native_kernel_2026-09.md` §5 is the decision and says
+when Rust is considered again. The store's index was also written as a Rust twin
+(a `no_std` crate over `moy_index.h`, its build script with the toolchain pins,
+and a link-map guard against Rust's bundled C library objects), and that twin
+was deleted when the decision was taken. `36115eaf` is the last commit whose
+tree holds it (`git show 36115eaf:native/moy_index/rust/build.sh`); the commit
+after it, "Kernel 1a: delete the Rust twin, the language is C (#224)", deletes
+it. Nothing else in the tree builds or runs this probe.
+
+The question it answered: can Rust build a `no_std` C-ABI static library for
+every target this repo ships, with the toolchains each target pins, and link it
+into the target's real build? The directory is the experiment: one crate, one
+trivial usermod, and the commands that put the library into each build. It
+changes no product file and flashes nothing. The numbers it produced (versions,
+sizes, times, errors) are in #224's comment, not here.
 
 ```
 crate/                 moy_rs_probe: `moy_rs_probe(int)` plus one export per thing
@@ -83,9 +92,10 @@ on a board.
   removes the `compiler_builtins-*` members and only those: on the riscv32 and
   x86 targets the archive also bundles compiler-rt's C objects under hashed
   names (`<hash>-popcountsi2.o`, strong definitions, soft-float on riscv32), and
-  the unix build here still took `__popcountdi2` from one. The Rust twin's
-  `native/moy_index/rust/build.sh` keeps only the crate's own object, and
-  `tools/link_providers.py` is the guard. Localizing the weak symbols with
+  the unix build here still took `__popcountdi2` from one. The deleted Rust
+  twin's build script kept only the crate's own object, and its link-map guard
+  failed any image whose C library names came from a Rust object. Localizing the
+  weak symbols with
   `objcopy` also works on ELF, and cannot be done on wasm (`llvm-objcopy` only
   edits sections).
 - **The hosted targets need `rust_eh_personality`.** Their prebuilt

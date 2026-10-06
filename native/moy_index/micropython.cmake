@@ -4,22 +4,11 @@
 # nothing here is built. THIS FILE AND micropython.mk ARE TWINS.
 
 set(MOY_INDEX_IMPL "$ENV{MOY_INDEX_IMPL}")
-if(MOY_INDEX_IMPL STREQUAL "c" OR MOY_INDEX_IMPL STREQUAL "rust")
+if(MOY_INDEX_IMPL STREQUAL "c")
     add_library(usermod_moy_index INTERFACE)
     target_sources(usermod_moy_index INTERFACE
-        ${CMAKE_CURRENT_LIST_DIR}/modmoy_index.c)
-    if(MOY_INDEX_IMPL STREQUAL "c")
-        target_sources(usermod_moy_index INTERFACE
-            ${CMAKE_CURRENT_LIST_DIR}/moy_index.c)
-    else()
-        if(NOT EXISTS "$ENV{MOY_INDEX_RUST_LIB}")
-            message(FATAL_ERROR "MOY_INDEX_IMPL=rust links MOY_INDEX_RUST_LIB, "
-                "a static library implementing moy_index.h; it is "
-                "'$ENV{MOY_INDEX_RUST_LIB}'")
-        endif()
-        target_link_libraries(usermod_moy_index INTERFACE
-            "$ENV{MOY_INDEX_RUST_LIB}")
-    endif()
+        ${CMAKE_CURRENT_LIST_DIR}/modmoy_index.c
+        ${CMAKE_CURRENT_LIST_DIR}/moy_index.c)
     if("$ENV{MOY_INDEX_BENCH}" STREQUAL "1")
         target_sources(usermod_moy_index INTERFACE
             ${CMAKE_CURRENT_LIST_DIR}/bench_moy_index.c)
@@ -28,5 +17,5 @@ if(MOY_INDEX_IMPL STREQUAL "c" OR MOY_INDEX_IMPL STREQUAL "rust")
         ${CMAKE_CURRENT_LIST_DIR})
     target_link_libraries(usermod INTERFACE usermod_moy_index)
 elseif(NOT MOY_INDEX_IMPL STREQUAL "" AND NOT MOY_INDEX_IMPL STREQUAL "py")
-    message(FATAL_ERROR "MOY_INDEX_IMPL is py, c or rust, not '${MOY_INDEX_IMPL}'")
+    message(FATAL_ERROR "MOY_INDEX_IMPL is py or c, not '${MOY_INDEX_IMPL}'")
 endif()

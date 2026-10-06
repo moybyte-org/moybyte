@@ -1,11 +1,10 @@
-"""The store's index (runtime/moy_index.py): the interface sprint 1a writes in
-Rust and in C, pinned once for every binding.
+"""The store's index (runtime/moy_index.py): the interface sprint 1a wrote in
+C beside the Python, pinned once for every binding.
 
 `BINDINGS` names each implementation by a factory for an empty table: the
-Python twin, and the native twins over the host's C ABI through ctypes
-(tools/moy_index_spike.py: the C twin always, the Rust twin under
-MOY_INDEX_IMPL=rust). Every test below runs against each, unchanged -- the
-parity the 1b gate asks for. tests/test_moy_index_twins.py runs this same file
+Python twin, and the C twin over the host's C ABI through ctypes
+(tools/moy_index_spike.py). Every test below runs against each, unchanged --
+the parity the 1b gate asks for. tests/test_moy_index_twins.py runs this same file
 on the boards' VM over the native module, and tests/test_semantic_traces.py's
 store trace pins the handle VALUES, so a binding that hands out different
 numbers fails there too.

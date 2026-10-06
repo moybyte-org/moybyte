@@ -283,20 +283,18 @@ unix-micropython:
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
 	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1 \
-	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) MOY_INDEX_RUST_LIB=$(MOY_INDEX_RUST_LIB) \
+	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_index_impl
-	@$(PYTHON) tools/link_providers.py check $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython.map
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 	@if echo 'int main(void){return 0;}' | cc -m32 -x c - -o /dev/null 2>/dev/null; then \
 	  $(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 MICROPY_PY_BTREE=0 \
 	    MICROPY_FORCE_32BIT=1 MICROPY_PY_THREAD_GIL=1 BUILD=build-moybyte-board \
 	    CFLAGS_EXTRA="$(UNIX_MP_R32_CFLAGS)" \
-	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) MOY_INDEX_RUST_LIB=$(MOY_INDEX_RUST_LIB_R32) \
+	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS) && \
 	  echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/moy_index_impl && \
-	  $(PYTHON) tools/link_providers.py check $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/micropython.map && \
 	  echo "...and in the boards' object model (32-bit, REPR_C, one GIL): $(UNIX_MP_R32)"; \
 	else \
 	  echo "no 32-bit C toolchain (gcc-multilib): the boards' object-model build is skipped"; \

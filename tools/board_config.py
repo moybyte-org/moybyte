@@ -346,10 +346,10 @@ def staged_modules(board_dir, root=ROOT):
         for group in device.get("group", []):
             for name in group["files"]:
                 out[name] = dev_dir / name
-    # A build that takes a native store index (MOY_INDEX_IMPL, sprint 1a's
+    # A build that takes the native store index (MOY_INDEX_IMPL, sprint 1a's
     # hook: tools/moy_index_spike.py) freezes no Python one, so `import
     # moy_index` reaches the extensible builtin native/moy_index registers.
-    if os.environ.get("MOY_INDEX_IMPL") in ("c", "rust"):
+    if os.environ.get("MOY_INDEX_IMPL") == "c":
         out.pop("moy_index.py", None)
     return out
 

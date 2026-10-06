@@ -91,12 +91,6 @@ if [ "${STAGE_ONLY}" = "0" ]; then
   if ! grep -q '^JSFLAGS += -Os$' "${MK}"; then
     sed -i 's|^JSFLAGS += -s EXPORTED_FUNCTIONS="\\$|JSFLAGS += -Os\nJSFLAGS += -s EXPORTED_FUNCTIONS="\\|' "${MK}"
   fi
-  # The link map, for tools/link_providers.py's guard below; a tree linked
-  # before it relinks once, so the map exists.
-  if ! grep -q '^JSFLAGS += -Wl,--Map=' "${MK}"; then
-    sed -i 's|^JSFLAGS += -Os$|&\nJSFLAGS += -Wl,--Map=$(BUILD)/micropython.map|' "${MK}"
-    rm -f "${PORT_DIR}/build-moybyte/micropython.mjs"
-  fi
   # A usermod cannot silence -Wunknown-pragmas by itself: py.mk folds
   # CFLAGS_USERMOD into CFLAGS at its include (line ~32) and the port appends
   # its own -Wall AFTER that (line ~48), which re-enables the warning -- and
@@ -190,8 +184,8 @@ PYEOF
   cp -r "${REPO_ROOT}/native/moy_png" \
         "${USERMODS_DIR}/moy_png"
 
-  # moy_index usermod: the store's native index. Its fragment compiles a twin
-  # only when MOY_INDEX_IMPL names one (tools/moy_index_spike.py's header), and
+  # moy_index usermod: the store's native index. Its fragment compiles the C
+  # twin only when MOY_INDEX_IMPL names it (tools/moy_index_spike.py's header), and
   # board_config's stage below then leaves runtime/moy_index.py out; unset, it
   # adds nothing.
   cp -r "${REPO_ROOT}/native/moy_index" \
@@ -409,9 +403,6 @@ EOF
   make -C "${PORT_DIR}" VARIANT=moybyte USER_C_MODULES="${USERMODS_DIR}" \
     FROZEN_MANIFEST="${BUILD_DIR}/frozen_manifest.py" -j"$(nproc)" >/dev/null
   echo "${INDEX_HOOK}" > "${INDEX_STAMP}"
-  # No Rust object may stand in for the C library (tools/link_providers.py).
-  "${PY}" "${REPO_ROOT}/tools/link_providers.py" check \
-    "${PORT_DIR}/build-moybyte/micropython.map"
 fi
 
 # ---------------------------------------------------------------------------
