@@ -21,34 +21,35 @@ SD_LIVE_FREQ_KHZ = 20000
 
 
 class _NativeSDBlockDev:
-    """MicroPython block device backed by moy_sd (FAT via vfs.mount)."""
+    """MicroPython block device backed by moy_sd (FAT via vfs.mount). The
+    module's calls are bound once: an import per transfer cost the shelf scan
+    a third of a second (#224)."""
 
     def __init__(self, sectors):
-        self.sectors = sectors
-
-    def readblocks(self, block, buf, off=0):
         import moy_sd
 
+        self.sectors = sectors
+        self._read = moy_sd.read
+        self._write = moy_sd.write
+        self._size = moy_sd.SECTOR_SIZE
+
+    def readblocks(self, block, buf, off=0):
         if off:
             raise OSError(22)  # EINVAL: byte-offset addressing unsupported (FAT uses 512-blocks)
-        moy_sd.read(block, buf, len(buf) // moy_sd.SECTOR_SIZE)
+        self._read(block, buf, len(buf) // self._size)
         return 0
 
     def writeblocks(self, block, buf, off=0):
-        import moy_sd
-
         if off:
             raise OSError(22)
-        moy_sd.write(block, buf, len(buf) // moy_sd.SECTOR_SIZE)
+        self._write(block, buf, len(buf) // self._size)
         return 0
 
     def ioctl(self, op, arg):
         if op == 4:        # MP_BLOCKDEV_IOCTL_BLOCK_COUNT
             return self.sectors
         if op == 5:        # MP_BLOCKDEV_IOCTL_BLOCK_SIZE
-            import moy_sd
-
-            return moy_sd.SECTOR_SIZE
+            return self._size
         return 0           # INIT / DEINIT / SYNC / BLOCK_ERASE: nothing to do
 
 
