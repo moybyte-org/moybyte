@@ -12,8 +12,10 @@ measurement, are #224's.
 `runtime/moy_catalogue.py` is the store's interface, carts by handle;
 `runtime/moy_index.py` is the handle table and `native/moy_index/` its C twin;
 `runtime/project_store.py`, `runtime/boot_carts.py` and `runtime/moyimg.py` are
-split out. The scan reads each cart folder from one listing, from inside it,
-and the seed answers "is it there" from one listing (`e253dc2`, `aa9ee94`).
+split out. The scan reads each cart folder from one listing, from inside it
+(`e253dc2`); the boot's seed runs after it and decides from its entries'
+versions (slice 0), and the Zero's answers "is it there" from one listing
+(`aa9ee94`).
 `tests/test_catalogue.py`, `tests/test_moy_index.py`,
 `tests/test_store_on_vfs.py` and the store trace in
 `tests/test_semantic_traces.py` pin it; the crossing swaps implementations

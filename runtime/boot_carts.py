@@ -1,5 +1,5 @@
-"""The boot's cart step: seed the store, read its catalogue, fall back to the
-built-in carts -- `DeviceBoot`'s store half, one body for every board.
+"""The boot's cart step: read the store's catalogue, seed it against that, fall
+back to the built-in carts -- `DeviceBoot`'s store half, one body for every board.
 
 `BootCarts` is a mixin `DeviceBoot` (runtime/device_boot.py) takes: it speaks
 through the boot's own screen (`say`, `note`), so the serial lines and the
@@ -111,17 +111,22 @@ class BootCarts:
             sram_census("carts")
 
     def _try_store(self, store, seed, root, session, media):
-        """One store attempt: seed it, scan it, say what happened. [] on any
+        """One store attempt: scan it, seed it, say what happened. [] on any
         failure OR an empty scan -- the caller decides whether another store is
         left to try."""
         try:
-            def _seed_and_scan():
+            def _scan_and_seed():
                 store.ensure_dirs(root)
-                store.seed_any(seed, root, progress=self.seed_progress)
+                store.sweep_store(root)
+                shelf = store.catalogue(root)  # the shelf; a cart's payloads at open
+                sram_census("scanned")
+                # The seed after the scan: the shelf's versions say what to
+                # write, and only what it wrote is read again.
+                shelf = store.seed(seed, root, shelf, progress=self.seed_progress)
                 sram_census("seeded")
-                return store.catalogue(root)   # the shelf; a cart's payloads at open
+                return shelf
 
-            carts = _seed_and_scan() if session is None else session(_seed_and_scan)
+            carts = _scan_and_seed() if session is None else session(_scan_and_seed)
             if carts:
                 self.say("loaded %d carts from %s" % (len(carts), media))
                 return carts

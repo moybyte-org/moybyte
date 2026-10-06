@@ -522,17 +522,30 @@ def test_the_sweep_runs_once_so_a_kids_own_cart_survives(tmp_path):
     assert not mine.exists()
 
 
-def test_seed_any_sweeps_before_it_seeds(tmp_path):
-    # The one call a board's boot makes has to be the one that sweeps, or every
-    # board needs its own remembering.
+def test_the_boot_sweeps_before_it_scans(tmp_path):
+    # The boot's store step is the one that sweeps, or every board needs its
+    # own remembering; and it sweeps BEFORE the scan, or the shelf shows a
+    # retired seed the sweep has just removed.
     from runtime import moy_carts
+    from runtime import moy_catalogue
+    from runtime.boot_carts import BootCarts
+
+    class Boot(BootCarts):
+        def say(self, msg):
+            pass
+
+        def note(self, msg):
+            pass
 
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     stale = _retired_folder(moy_carts, root)
     stale.mkdir()
+    (stale / "manifest.json").write_text('{"title": "retired"}')
+    (stale / "main.py").write_text("def _draw():\n    cls(0)\n")
     seed = [{"title": "Bench", "type": "game", "src": "def _draw():\n    cls(0)\n",
              "cfg": {}, "edit": []}]
-    moy_carts.seed_any(seed, root)
+    carts, _root = Boot().load_carts(moy_catalogue, seed, root=root)
     assert not stale.exists()
     assert (Path(root) / "bench.moy").is_dir()
+    assert [c["title"] for c in carts] == ["Bench"]

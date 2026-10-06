@@ -16,7 +16,14 @@ thing the store holds across them, so its rows are what take handles.
   StaleHandle                      raised by every call below given a handle
                                    whose row is gone (a ValueError)
   ensure_dirs(root)                make the root and its parent
-  seed_any(seed, root, progress)   seed the built-in roster (packed or listed)
+  sweep_store(root)                the once-per-store sweep of retired seeds,
+                                   which a boot runs before its catalogue
+  seed(seed, root, shelf, progress) -> [entry]
+                                   seed the built-in roster (packed or listed)
+                                   against `shelf`, the root's catalogue: the
+                                   entries' versions say what to write, and
+                                   the shelf comes back with each folder the
+                                   seed wrote read again
   embedded_floor(seed)             the read-only built-ins, for a board with no
                                    writable store: carts with no path and no "h"
   catalogue(root) -> [entry]       the shelf: one entry per cart folder, in
@@ -74,7 +81,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 CARTS_DIR = moy_carts.CARTS_DIR
 ensure_dirs = moy_carts.ensure_dirs
-seed_any = moy_carts.seed_any
+sweep_store = moy_carts.sweep_store
 embedded_floor = moy_carts.embedded_floor
 
 ROOTS = 8
@@ -135,6 +142,34 @@ def catalogue(root=CARTS_DIR):
         if h not in found and _index.path(h)[0] == mark:
             _index.release(h)
     return items
+
+
+def seed(seed, root, shelf, progress=None):
+    present = {}
+    for e in shelf:
+        present[e["path"][len(root) + 1:]] = e["version"]
+    wrote = moy_carts.seed_any(seed, root, present, progress)
+    if not wrote:
+        return shelf
+    known = set(f.lower() for f in present)
+    for name in wrote:
+        if name not in present and name.lower() in known:
+            return catalogue(root)    # a folder FAT matched by another case
+    rid = _rid(root)
+    byname = {}
+    for e in shelf:
+        byname[e["path"][len(root) + 1:]] = e
+    for name in sorted(wrote):
+        e = moy_carts.entry(cart_path(root, name))
+        if e:
+            e["h"] = _index.intern(_key(rid, name))
+            byname[name] = e
+        elif name in byname:
+            del byname[name]
+            h = _index.find(_key(rid, name))
+            if h:
+                _index.release(h)
+    return [byname[name] for name in sorted(byname)]
 
 
 def entry(h):

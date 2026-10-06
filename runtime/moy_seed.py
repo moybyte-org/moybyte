@@ -1,7 +1,8 @@
 """Seeding the `.moy` store: the built-in roster, its PACKED form, and the
 once-per-store sweep of seeds that no longer ship.
 
-`seed_any` is the one door a board's boot calls. Everything here writes carts
+`seed_any` is the seed a board's boot runs, after its scan (moy_catalogue.seed).
+Everything here writes carts
 through the store core's rules (`moy_store_base`) and nothing here is read by
 the core, so `moy_carts` re-exports these names rather than the reverse.
 """
@@ -85,13 +86,15 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
     # it is the only stage of that boot with a countable unit of work. Optional
     # and best-effort -- a progress callback must never be able to fail a seed.
     _total = len(seed_list)
+    wrote = []
     for _seeded, cart in enumerate(seed_list):
         if progress is not None:
             try:
                 progress(_seeded, _total, cart.get("title", ""))
             except Exception:                 # noqa: BLE001
                 progress = None               # broken hook: drop it, keep seeding
-        d = cart_path(root, cart_folder(cart["title"]))
+        name = cart_folder(cart["title"])
+        d = cart_path(root, name)
         seed_ver = int(cart.get("version", 0))
         preserved = None
         if _exists(d):
@@ -150,9 +153,9 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
         # The cart's other scripts beside it (SPEC.md 4), and `sources` in the
         # manifest above naming the order -- a port's main.lua cannot run
         # without its shim chunk, and nothing else says where that goes.
-        for name, text in list(cart.get("src_before") or ()) \
+        for script, text in list(cart.get("src_before") or ()) \
                 + list(cart.get("src_after") or ()):
-            _write(d + "/" + name, text)
+            _write(d + "/" + script, text)
         _write(d + "/config.json", json.dumps(cart["cfg"]))
         sprites = cart.get("sprites")
         if sprites:
@@ -186,8 +189,10 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
         if preserved:
             # restore the kid's saves + tuning AFTER the seed write, so config.json
             # holds their values (not the freshly-seeded defaults) and pmem survives.
-            for name, data in preserved.items():
-                _write(d + "/" + name, data)
+            for kept, data in preserved.items():
+                _write(d + "/" + kept, data)
+        wrote.append(name)
+    return wrote
 
 
 # -- the PACKED seed roster (2026-08-30) -------------------------------------
@@ -405,12 +410,35 @@ def sweep_store(root=CARTS_DIR):
     return prune_retired(root)
 
 
-def seed_any(seed, root=CARTS_DIR, progress=None):
-    """Seed a roster of either form. The one call a board's boot makes."""
-    sweep_store(root)
-    if is_packed(seed):
-        return seed_packed(seed, root, progress=progress)
-    return seed_builtins(seed, root, progress=progress)
+def seed_any(seed, root, present, progress=None):
+    """Seed a roster of either form AFTER the scan of `root`, the one seed a
+    console board's boot runs (moy_catalogue.seed).
+
+    `present` is each cart folder the scan found and its version ({folder:
+    version}), so deciding what to write reads no manifest and lists nothing:
+    a built-in absent from it, or present and older, goes to `seed_builtins`,
+    which writes it whole and keeps its saves and config across a re-seed. A
+    packed roster is inflated one cart at a time, and only for a cart that is
+    written. `progress(done, total, title)` is called once per built-in.
+    Returns the folders written, for the caller to read again."""
+    packed = is_packed(seed)
+    total = len(seed)
+    wrote = []
+    for index, item in enumerate(seed):
+        if packed:
+            title, version = item[0], item[1]
+        else:
+            title, version = item["title"], item.get("version", 0)
+        if progress is not None:
+            try:
+                progress(index, total, title)
+            except Exception:             # noqa: BLE001 -- as in seed_builtins
+                progress = None
+        name = cart_folder(title)
+        if name in present and int(version) <= present[name]:
+            continue
+        wrote += seed_builtins([unpack_seed(item[2]) if packed else item], root)
+    return wrote
 
 
 def embedded_floor(seed):

@@ -110,15 +110,20 @@ class FakeStore:
         if self.raise_on == "ensure_dirs" or root == self.dead_root:
             raise OSError("no card")
 
-    def seed_any(self, seed, root, progress=None):
-        # The real store dispatches on the roster's FORM (moy_carts.seed_any);
-        # what the boot spine has to get right is that it calls the one door.
+    def sweep_store(self, root):
+        self.calls.append(("sweep_store", root))
+
+    def seed(self, seed, root, shelf, progress=None):
+        # The real store dispatches on the roster's FORM (moy_seed.seed_any);
+        # what the boot spine has to get right is that it seeds AFTER the
+        # scan, against the shelf the scan read.
         self.calls.append(("seed_builtins", root, len(seed)))
         if self.raise_on == "seed_builtins":
             raise OSError("write failed")
         if progress is not None:
             for i in range(len(seed)):
                 progress(i, len(seed), seed[i].get("title"))
+        return shelf
 
     def embedded_floor(self, seed):
         return [dict(c) for c in seed]
@@ -284,7 +289,8 @@ def test_the_carts_load_through_the_boards_storage_session(capsys):
 
     assert (len(carts), root) == (2, store.CARTS_DIR)
     assert opened == ["in", "out"]
-    assert [c[0] for c in store.calls] == ["ensure_dirs", "seed_builtins", "catalogue"]
+    assert [c[0] for c in store.calls] == ["ensure_dirs", "sweep_store", "catalogue",
+                                           "seed_builtins"]
     assert "Moybyte loaded 2 carts from SD" in capsys.readouterr().out
 
 
@@ -419,16 +425,16 @@ def test_the_runtime_status_can_be_routed_to_a_boards_own_log():
 # -- the internal-SRAM census -------------------------------------------------
 
 
-def test_the_sram_census_names_its_five_stages_in_boot_order(monkeypatch):
+def test_the_sram_census_names_its_six_stages_in_boot_order(monkeypatch):
     """One census, every board (#66/#67, 2026-09-08).
 
     It was four hand-placed calls in the T-Deck's `run_desktop` and nowhere
     else, so the one question a Lua cart's PSRAM fallback raises -- who took
     the internal SRAM, and at which stage -- could be asked only on the board
     that happened to have the calls. The deltas between the lines are the
-    whole point: any single line is a number without an owner. "seeded"
-    splits the store's seed from its scan, which the memory census
-    (`device/mem_census.py`) marks too.
+    whole point: any single line is a number without an owner. "scanned"
+    splits the store's scan from the seed that follows it, which the memory
+    census (`device/mem_census.py`) marks too.
     """
     seen = []
     monkeypatch.setattr(device_boot, "sram_census", seen.append)
@@ -439,7 +445,8 @@ def test_the_sram_census_names_its_five_stages_in_boot_order(monkeypatch):
     boot.runtimes(FakeWs())
     boot.start_frames(FakeWs())
 
-    assert seen == ["rd-entry", "seeded", "carts", "console", "desktop-up"]
+    assert seen == ["rd-entry", "scanned", "seeded", "carts", "console",
+                    "desktop-up"]
 
 
 def test_a_store_that_fails_still_weighs_the_heap_the_scan_fragmented(monkeypatch):

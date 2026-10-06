@@ -144,8 +144,12 @@ class _Store:
         if root in self.dead:
             raise OSError(28)
 
-    def seed_any(self, seed, root, progress=None):
+    def sweep_store(self, root):
+        self.calls.append(("sweep", root))
+
+    def seed(self, seed, root, shelf, progress=None):
         self.calls.append(("seed", root))
+        return shelf
 
     def catalogue(self, root):
         self.calls.append(("catalogue", root))

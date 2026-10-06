@@ -742,8 +742,10 @@ def J(verb, h, *a):
 
 
 def seeded(seed, root):
-    cat.seed_any(seed, root)
-    return cat.catalogue(root)
+    shelf = cat.seed(seed, root, cat.catalogue(root))
+    again = cat.catalogue(root)
+    assert [(e["path"], e["h"]) for e in shelf] == [(e["path"], e["h"]) for e in again]
+    return shelf
 
 
 cat.ensure_dirs(C)

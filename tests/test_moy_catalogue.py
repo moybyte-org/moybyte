@@ -165,6 +165,38 @@ def test_the_boot_reads_the_shelf_through_the_interface(tmp_path):
     assert cat.path(carts[0]["h"]) == carts[0]["path"]
 
 
+def test_the_seed_runs_after_the_scan_and_reads_only_what_it_writes(tmp_path,
+                                                                  monkeypatch):
+    """The scan's entries carry each present built-in's version, so a seed
+    with nothing to write opens no file; one that writes reads back only the
+    folders it wrote, and its shelf is the one a catalogue would read."""
+    import builtins
+
+    root = str(tmp_path / "carts")
+    cat.ensure_dirs(root)
+    seed = [{"title": t, "type": "game", "version": 2, "src": SRC, "cfg": {},
+             "edit": []} for t in ("One", "Two", "Three")]
+    shelf = cat.seed(seed, root, cat.catalogue(root))
+    assert [e["title"] for e in shelf] == ["One", "Three", "Two"]
+    assert ([(e["path"], e["h"]) for e in shelf]
+            == [(e["path"], e["h"]) for e in cat.catalogue(root)])
+
+    opened = []
+    real = builtins.open
+    monkeypatch.setattr(builtins, "open", lambda p, *a, **k: (
+        opened.append(str(p)), real(p, *a, **k))[1])
+    assert cat.seed(seed, root, shelf) is shelf
+    assert opened == []
+
+    seed[1]["version"] = 3          # Two
+    again = cat.seed(seed, root, shelf)
+    assert any("/two.moy/" in p for p in opened)
+    assert not [p for p in opened if "/one.moy" in p or "/three.moy" in p]
+    assert [(e["title"], e["version"], e["h"]) for e in again] == [
+        ("One", 2, shelf[0]["h"]), ("Three", 2, shelf[1]["h"]),
+        ("Two", 3, shelf[2]["h"])]
+
+
 # -- the line -----------------------------------------------------------------
 
 # moy_carts' path-level bodies a cart passes through, the journal's included:
