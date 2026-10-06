@@ -74,6 +74,17 @@ native binding must keep, not an accident of this one. Mutation-tested: the
 generation bump on release, lowest-free-first reuse, the reconcile's release
 and the unlisted root's no-op each turn it red. The same log is pinned over the
 native index (sprint 1a's twin, native/moy_index) on both object models.
+
+EXTENDED 2026-10-06 (#224, before the spine crosses in sprint 2): a third
+trace, the SPINE's (runtime/moy_spine.py, and the strike ledger in
+runtime/crash_guard.py). One session of handle tables (a foreign, released,
+forged and non-int handle each refused), the app registry, the back-stack and
+the return routes, the WiFi leases, the settings rows and the ledger's arm /
+heal / strike / forgive / proof bracket, pinned verbatim on every VM like the
+store's: the handle values are kind.slot.generation. Mutation-tested: the
+generation bump, lowest-free reuse, the kind check, goto's RETURN truncation,
+the route's editor-before-app order and the ledger's proof skip each turn it
+red.
 """
 
 import shutil
@@ -825,3 +836,252 @@ def test_store_trace_holds_over_the_native_index(tmp_path):
         b32 = _store_trace(board, tmp_path, "native_board_model", NATIVE_INDEX)
         assert b32 == want, ("the native index in the 32-bit object model "
                              "diverges: " + _first_difference(b32, want))
+
+
+# -- the spine's trace (#224, sprint 2) ----------------------------------------
+#
+# The same shape as the store's: one driver, every interpreter, the log pinned
+# verbatim. @RUNTIME@ is the source tree.
+
+SPINE_DRIVER = r'''import sys
+sys.path.insert(0, @RUNTIME@)
+
+import moy_spine as sp
+from moy_spine import StaleHandle
+from crash_guard import CrashGuard, WALLPAPER_KEY
+
+
+def say(*a):
+    print("T", " ".join(str(x) for x in a))
+
+
+def h_(h):
+    """A handle as the log shows it: kind.slot.generation."""
+    return "%d.%d.%d" % ((h >> sp.KIND_SHIFT) & 15, h & (sp.SLOTS - 1),
+                         h >> sp.GEN_SHIFT)
+
+
+def tried(fn, *a):
+    try:
+        return fn(*a)
+    except StaleHandle:
+        return "STALE"
+    except TypeError:
+        return "TYPE"
+    except ValueError:
+        return "VALUE"
+    except OSError as e:
+        return "OSERROR %d" % e.args[0]
+
+
+t = sp.Table(3, "thing", 4)
+a = t.new("a")
+b = t.new("b")
+say("new", h_(a), h_(b), t.count(), t.get(b))
+u = sp.Table(4, "other")
+say("foreign", tried(u.get, a), u.valid(a))
+t.release(a)
+say("released", tried(t.get, a), t.valid(a), tried(t.release, a))
+c = t.new("c")
+say("reuse", h_(c), "old", h_(a), tried(t.get, a), t.get(c))
+t.new(1)
+e = t.new(2)
+say("full", t.count(), tried(t.new, "x"))
+t.release(e)
+t.release(b)
+say("handles", " ".join(h_(h) for h in t.handles()), t.count())
+say("lowest", h_(t.new("f")), " ".join(h_(h) for h in t.handles()))
+for forged in (0, -1, c ^ (1 << sp.GEN_SHIFT), c | (1 << 30), c ^ (1 << sp.KIND_SHIFT)):
+    say("forged", tried(t.get, forged), t.valid(forged))
+for junk in (None, "1"):
+    say("junk", tried(t.get, junk), t.valid(junk))
+
+reg = sp.AppRegistry()
+for d in (("artwork", "Paint", False, None), ("files", "Files", True, (310, 230)),
+          ("calc", "Calc", False, None)):
+    say("register", d[0], h_(reg.register(*d)))
+fh = reg.find("files")
+say("find", h_(fh), reg.find("menu"), tried(reg.find, None))
+say("row", reg.app_id(fh), reg.title(fh), reg.text_mode(fh), reg.min_size(fh))
+say("refused", tried(reg.register, "files", "x"), tried(reg.register, "", "x"),
+    tried(reg.register, "x" * 16, "x"), tried(reg.register, 5, "x"))
+say("stale app", tried(reg.title, fh + (1 << sp.GEN_SHIFT)), reg.valid(fh))
+say("apps", " ".join(h_(h) for h in reg.handles()), reg.count())
+
+st = sp.BackStack()
+rt = sp.Returns(reg)
+
+
+def nav(k):
+    say("goto", k, st.goto(k), "/".join(st.kinds()))
+
+
+nav("menu")
+rt.run(sp.EDITOR)
+nav("desktop")
+say("route", rt.route(False), rt.route(True), rt.caller())
+say("spend", rt.spend(), rt.caller())
+nav("menu")
+nav("files")
+say("note", rt.note(st.top()), rt.back())
+nav("artwork")
+say("note", rt.note("settings"), rt.back())
+rt.run("files")
+nav("desktop")
+say("route", rt.route(False), rt.spend())
+rt.run("launcher")
+say("route", rt.route(False), rt.spend())
+rt.run(None)
+say("route", rt.route(False), rt.spend())
+say("take", rt.take_back(), rt.back())
+nav("launcher")
+nav("desk")
+nav("settings")
+nav("launcher")
+nav("desk")
+nav("desktop")
+nav("settings")
+say("remove", st.remove("desktop"), st.remove("launcher"), st.remove("nope"),
+    "/".join(st.kinds()))
+say("refused", tried(st.goto, None), tried(st.goto, ""), tried(st.goto, "x" * 16),
+    tried(rt.run, 3), tried(rt.note, None))
+say("index", st.index("settings"), st.index("menu"), st.has("desk"), st.depth(), st.top())
+for i in range(st.DEPTH - st.depth()):
+    st.goto("k%d" % i)
+say("deep", st.depth(), tried(st.goto, "more"), st.goto("desk"), st.depth())
+
+ls = sp.Leases()
+say("hold", ls.hold("update"), ls.hold("web"), ls.hold("update"), ",".join(ls.holders()))
+say("held", ls.held("web"), ls.held("cart"), ls.mask())
+say("release", ls.release("link"), ls.release("update"), ls.release("web"), ls.holders())
+say("tags", tried(ls.hold, "wasm"), tried(ls.release, None), tried(ls.held, "nobody"))
+
+s = sp.Settings()
+say("load", s.load('{"theme": "outline", "fs": 2, "favorites": ["/a.moy"]}'),
+    sorted(s.keys()))
+s.set("fs", "3")
+s.set("guard", '{"open": "files"}')
+say("rows", s.get("fs"), s.get("favorites"), s.get("guard"), s.get("nope"))
+say("delete", s.delete("theme"), s.delete("theme"), sorted(s.keys()))
+r = sp.Settings()
+r.set("b", "1")
+r.set("a", '[1, "x"]')
+r.set("b", "2")
+r.delete("a")
+r.set("a", "null")
+say("dump", r.dump())
+say("refused", tried(s.set, "fs", "nope"), tried(s.set, "fs", 3), tried(s.load, "[1]"),
+    tried(s.get, ""), tried(s.set, None, "1"))
+
+store = {}
+saves = []
+g = CrashGuard(store, lambda: saves.append(1))
+say("arm", g.arm("files"), g.strikes("files"), g.last_open(), len(saves))
+g.frame()
+g.frame()
+say("healing", g.frame(), g.strikes("files"), g.last_open(), len(saves))
+for _ in range(3):
+    g.arm("calc")
+    g.release()
+say("struck", g.strikes("calc"), g.disabled("calc"), g.arm("calc"), g.broken_ids())
+say("forgive", g.forgive("calc"), g.strikes("calc"), g.forgive("calc"), len(saves))
+w = CrashGuard(store, lambda: saves.append(1), key=WALLPAPER_KEY)
+say("proof", w.arm("sky", "p1"), w.heal(), len(saves), w.arm("sky", "p1"), len(saves),
+    w.arm("sky", "p2"), w.strikes("sky"), len(saves))
+say("keys", sorted(store), sorted(store[WALLPAPER_KEY]))
+print("DRIVER_DONE")
+'''
+
+SPINE_TRACE = """\
+new 3.0.1 3.1.1 2 b
+foreign STALE False
+released STALE False STALE
+reuse 3.0.2 old 3.0.1 STALE c
+full 4 OSERROR 28
+handles 3.0.2 3.2.1 2
+lowest 3.1.2 3.0.2 3.1.2 3.2.1
+forged STALE False
+forged STALE False
+forged STALE False
+forged STALE False
+forged STALE False
+junk TYPE False
+junk TYPE False
+register artwork 1.0.1
+register files 1.1.1
+register calc 1.2.1
+find 1.1.1 0 TYPE
+row files Files True (310, 230)
+refused VALUE VALUE VALUE TYPE
+stale app STALE True
+apps 1.0.1 1.1.1 1.2.1 3
+goto menu 1 launcher/menu
+goto desktop 1 launcher/menu/desktop
+route 1 3 menu
+spend menu None
+goto menu 2 launcher/menu
+goto files 1 launcher/menu/files
+note True files
+goto artwork 1 launcher/menu/files/artwork
+note False files
+goto desktop 1 launcher/menu/files/artwork/desktop
+route 2 files
+route 0 launcher
+route 0 None
+take files None
+goto launcher 2 launcher
+goto desk 1 launcher/desk
+goto settings 1 launcher/desk/settings
+goto launcher 2 launcher
+goto desk 1 launcher/desk
+goto desktop 1 launcher/desk/desktop
+goto settings 1 launcher/desk/desktop/settings
+remove True False False launcher/desk/settings
+refused TYPE VALUE VALUE TYPE TYPE
+index 2 -1 True 3 settings
+deep 32 OSERROR 28 2 2
+hold 2 3 3 web,update
+held True False 3
+release 3 1 0 []
+tags VALUE TYPE VALUE
+load 3 ['favorites', 'fs', 'theme']
+rows 3 ["/a.moy"] {"open": "files"} None
+delete True False ['favorites', 'fs', 'guard']
+dump {"b": 2, "a": null}
+refused VALUE TYPE VALUE VALUE TYPE
+arm True 1 files 1
+healing True 0 None 2
+struck 3 True False ['calc']
+forgive True 0 False 6
+proof True True 8 True 8 True 1 9
+keys ['app_guard', 'wallpaper_guard'] ['open', 'proven', 'strikes']
+"""
+
+
+def _spine_trace(exe, tmp_path, tag, prelude=""):
+    script = tmp_path / ("spine_%s.py" % tag)
+    script.write_text(prelude + SPINE_DRIVER.replace(
+        "@RUNTIME@", repr(str(ROOT / "runtime"))))
+    out = subprocess.run([exe, str(script)], capture_output=True, text=True,
+                         timeout=180)
+    assert out.returncode == 0, out.stderr or out.stdout
+    lines = out.stdout.strip().splitlines()
+    assert lines and lines[-1] == "DRIVER_DONE", out.stdout
+    return [line[2:] for line in lines if line.startswith("T ")]
+
+
+def test_spine_trace_is_the_interface_on_every_vm(tmp_path):
+    want = SPINE_TRACE.splitlines()
+    py = _spine_trace(sys.executable, tmp_path, "cpython")
+    assert py == want, "the spine trace moved: " + _first_difference(py, want)
+    exe = require_unix_mp(
+        why="This is the spine interface's pin on the VM a board runs: the "
+            "handle values, the refusals, the routes and the ledger, replayed "
+            "where the native spine will be swapped in.")
+    mp = _spine_trace(exe, tmp_path, "micropython")
+    assert mp == want, "MicroPython diverges: " + _first_difference(mp, want)
+    board = find_unix_mp(board_model=True)
+    if board is not None:
+        b32 = _spine_trace(board, tmp_path, "board_model")
+        assert b32 == want, ("the 32-bit object model diverges: "
+                             + _first_difference(b32, want))
