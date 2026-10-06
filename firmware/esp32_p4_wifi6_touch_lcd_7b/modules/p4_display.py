@@ -12,18 +12,11 @@ try:
 except ImportError:  # pragma: no cover - host package lane
     from device.dsi_panel import P4Compositor as _DsiCompositor
 
-BACKLIGHT_GPIO = 32     # active-LOW (board fact, hardware-confirmed)
-
-_bl_pin = None
 
 
 def set_backlight(on):
-    global _bl_pin
-    from machine import Pin
-    if _bl_pin is None:
-        _bl_pin = Pin(BACKLIGHT_GPIO, Pin.OUT, value=0 if on else 1)
-    else:
-        _bl_pin.value(0 if on else 1)
+    import moy_dsi
+    moy_dsi.backlight(on)
 
 
 class P4Compositor(_DsiCompositor):

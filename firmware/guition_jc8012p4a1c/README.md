@@ -135,7 +135,9 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   over the dev channel); turning the desk the other way up (ROTATION 90)
   means both flips go True.
 - **Backlight is GPIO23, ACTIVE-HIGH** (the Waveshare's is GPIO32 active-low —
-  the one fact the two boards' display modules differ on). The vendor BSP
+  the one fact the two boards' display modules differ on), the
+  `MOY_DSI_BL_*` defines in `mpconfigboard.cmake` that `moy_dsi.backlight`
+  and the kernel's recovery floor drive. The vendor BSP
   drives it as an LEDC PWM channel, so a duty is one line away the day
   something wants dimming; today every caller asks for on/off.
 - **Serial is the P4's own USB-Serial/JTAG** (`303a:1001`, no CH343): the

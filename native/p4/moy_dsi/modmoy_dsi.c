@@ -20,6 +20,7 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_cache.h"
 #include "esp_attr.h"
+#include "driver/gpio.h"
 
 // ---------------------------------------------------------------------------
 // The panel: everything a board's glass decides, and nothing else. A board
@@ -67,6 +68,10 @@ typedef jd9365_vendor_config_t moy_dsi_vendor_config_t;
 #error "moy_dsi: the board must name its panel in mpconfigboard.cmake (MICROPY_DEF_BOARD MOY_DSI_PANEL_EK79007=1 or MOY_DSI_PANEL_JD9365=1)"
 #endif
 
+#if !defined(MOY_DSI_BL_GPIO) || !defined(MOY_DSI_BL_ACTIVE_LOW)
+#error "moy_dsi: the board names its backlight in mpconfigboard.cmake (MOY_DSI_BL_GPIO, MOY_DSI_BL_ACTIVE_LOW)"
+#endif
+
 #define MOY_DSI_FB_BYTES     (MOY_DSI_H_RES * MOY_DSI_V_RES * 2) // RGB565
 #define MOY_DSI_PHY_LDO_CHAN 3    // MIPI DSI PHY power rail (both boards)
 #define MOY_DSI_PHY_LDO_MV   2500
@@ -112,9 +117,15 @@ static void moy_dsi_check(esp_err_t err, const char *what) {
     }
 }
 
-static mp_obj_t moy_dsi_init(void) {
+// ---- the kernel's entry points (native/moy_kernel: the recovery floor) ------
+// The bodies the binding calls too. None raises or needs the VM: the floor
+// draws on a boot no VM has run in. `what` names the step that failed.
+
+#define MOY_DSI_TRY(call, name) do { esp_err_t e_ = (call); if (e_ != ESP_OK) { *what = (name); return e_; } } while (0)
+
+static esp_err_t moy_dsi_bringup(const char **what) {
     if (s_panel != NULL) {
-        return mp_const_none;
+        return ESP_OK;
     }
 
     s_underruns = 0;
@@ -124,13 +135,13 @@ static mp_obj_t moy_dsi_init(void) {
         .chan_id = MOY_DSI_PHY_LDO_CHAN,
         .voltage_mv = MOY_DSI_PHY_LDO_MV,
     };
-    moy_dsi_check(esp_ldo_acquire_channel(&ldo_cfg, &s_phy_ldo), "phy ldo");
+    MOY_DSI_TRY(esp_ldo_acquire_channel(&ldo_cfg, &s_phy_ldo), "phy ldo");
 
     esp_lcd_dsi_bus_config_t bus_cfg = MOY_DSI_BUS_CONFIG();
-    moy_dsi_check(esp_lcd_new_dsi_bus(&bus_cfg, &s_bus), "dsi bus");
+    MOY_DSI_TRY(esp_lcd_new_dsi_bus(&bus_cfg, &s_bus), "dsi bus");
 
     esp_lcd_dbi_io_config_t dbi_cfg = MOY_DSI_DBI_CONFIG();
-    moy_dsi_check(esp_lcd_new_panel_io_dbi(s_bus, &dbi_cfg, &s_io), "dbi io");
+    MOY_DSI_TRY(esp_lcd_new_panel_io_dbi(s_bus, &dbi_cfg, &s_io), "dbi io");
 
     esp_lcd_dpi_panel_config_t dpi_cfg = MOY_DSI_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
     dpi_cfg.num_fbs = 3;    // triple-buffer: 3x the frame in PSRAM (both boards
@@ -152,21 +163,67 @@ static mp_obj_t moy_dsi_init(void) {
         .bits_per_pixel = 16,
         .vendor_config = &vendor_cfg,
     };
-    moy_dsi_check(moy_dsi_new_panel(s_io, &panel_cfg, &s_panel), "panel new");
-    moy_dsi_check(esp_lcd_panel_reset(s_panel), "panel reset");
-    moy_dsi_check(esp_lcd_panel_init(s_panel), "panel init");
+    MOY_DSI_TRY(moy_dsi_new_panel(s_io, &panel_cfg, &s_panel), "panel new");
+    MOY_DSI_TRY(esp_lcd_panel_reset(s_panel), "panel reset");
+    MOY_DSI_TRY(esp_lcd_panel_init(s_panel), "panel init");
     esp_lcd_dpi_panel_event_callbacks_t cbs = {
         .on_refresh_done = moy_dsi_on_refresh_done,
     };
-    moy_dsi_check(esp_lcd_dpi_panel_register_event_callbacks(s_panel, &cbs, NULL),
-                  "refresh callback");
+    MOY_DSI_TRY(esp_lcd_dpi_panel_register_event_callbacks(s_panel, &cbs, NULL),
+                "refresh callback");
 #if MOY_DSI_MIRROR_XY
-    moy_dsi_check(esp_lcd_panel_mirror(s_panel, true, true), "panel mirror");
+    MOY_DSI_TRY(esp_lcd_panel_mirror(s_panel, true, true), "panel mirror");
 #endif
-    moy_dsi_check(esp_lcd_dpi_panel_get_frame_buffer(s_panel, MOY_DSI_NUM_FBS,
-                                                     &s_fbs[0], &s_fbs[1], &s_fbs[2]), "get fbs");
+    MOY_DSI_TRY(esp_lcd_dpi_panel_get_frame_buffer(s_panel, MOY_DSI_NUM_FBS,
+                                                   &s_fbs[0], &s_fbs[1], &s_fbs[2]), "get fbs");
     s_nfbs = MOY_DSI_NUM_FBS;
     s_fb = s_fbs[0];
+    return ESP_OK;
+}
+
+int moy_dsi_kinit(void) {
+    const char *what = "";
+    return moy_dsi_bringup(&what);
+}
+
+uint16_t *moy_dsi_kfb(void) {
+    return (uint16_t *)s_fbs[0];
+}
+
+// Framebuffer 0 on glass: the CPU's cached writes pushed out, then the
+// zero-copy switch show() makes.
+int moy_dsi_kpresent(void) {
+    if (s_panel == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t e = esp_cache_msync(s_fbs[0], MOY_DSI_FB_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    if (e == ESP_OK) {
+        e = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, MOY_DSI_H_RES, MOY_DSI_V_RES, s_fbs[0]);
+    }
+    return e;
+}
+
+// The backlight is the BOARD's (MOY_DSI_BL_GPIO and its polarity, beside the
+// panel define in mpconfigboard.cmake).
+void moy_dsi_kbacklight(int on) {
+    static bool configured;
+    int level = (on != 0) != (MOY_DSI_BL_ACTIVE_LOW != 0);
+    if (!configured) {
+        gpio_config_t cfg = {
+            .pin_bit_mask = 1ULL << MOY_DSI_BL_GPIO,
+            .mode = GPIO_MODE_OUTPUT,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_set_level(MOY_DSI_BL_GPIO, level);
+        gpio_config(&cfg);
+        configured = true;
+    }
+    gpio_set_level(MOY_DSI_BL_GPIO, level);
+}
+
+static mp_obj_t moy_dsi_init(void) {
+    const char *what = "";
+    moy_dsi_check(moy_dsi_bringup(&what), what);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_init_obj, moy_dsi_init);
@@ -271,6 +328,13 @@ static mp_obj_t moy_dsi_set_pattern(mp_obj_t pat_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_dsi_set_pattern_obj, moy_dsi_set_pattern);
 
+// backlight(on): this board's backlight, through the kernel's body.
+static mp_obj_t moy_dsi_backlight(mp_obj_t on_in) {
+    moy_dsi_kbacklight(mp_obj_is_true(on_in));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_dsi_backlight_obj, moy_dsi_backlight);
+
 static const mp_rom_map_elem_t moy_dsi_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_dsi) },
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&moy_dsi_init_obj) },
@@ -282,6 +346,7 @@ static const mp_rom_map_elem_t moy_dsi_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_show), MP_ROM_PTR(&moy_dsi_show_obj) },
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&moy_dsi_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_pattern), MP_ROM_PTR(&moy_dsi_set_pattern_obj) },
+    { MP_ROM_QSTR(MP_QSTR_backlight), MP_ROM_PTR(&moy_dsi_backlight_obj) },
     { MP_ROM_QSTR(MP_QSTR_WIDTH), MP_ROM_INT(MOY_DSI_H_RES) },
     { MP_ROM_QSTR(MP_QSTR_HEIGHT), MP_ROM_INT(MOY_DSI_V_RES) },
     { MP_ROM_QSTR(MP_QSTR_PANEL), MP_ROM_QSTR(MOY_DSI_PANEL_QSTR) },

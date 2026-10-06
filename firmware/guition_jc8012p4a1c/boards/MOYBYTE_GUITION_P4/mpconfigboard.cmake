@@ -27,4 +27,8 @@ list(APPEND MICROPY_DEF_BOARD
     # guition_p4_display.ROTATION (90/270) -- one knob, not two. (The factory
     # demo mirrors both axes for its portrait image; 1 reproduces that.)
     MOY_DSI_MIRROR_XY=0
+    # Its backlight, which moy_dsi drives (backlight(), and the kernel's
+    # recovery floor): GPIO23, active HIGH.
+    MOY_DSI_BL_GPIO=23
+    MOY_DSI_BL_ACTIVE_LOW=0
 )

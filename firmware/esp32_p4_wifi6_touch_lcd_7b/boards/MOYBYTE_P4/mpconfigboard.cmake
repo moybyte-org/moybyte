@@ -21,4 +21,8 @@ list(APPEND MICROPY_DEF_BOARD
     # (1024x600, reset GPIO33). The panel facts live behind this one name in
     # modmoy_dsi.c; the Guition P4 names MOY_DSI_PANEL_JD9365 instead.
     MOY_DSI_PANEL_EK79007=1
+    # Its backlight, which moy_dsi drives (backlight(), and the kernel's
+    # recovery floor): GPIO32, active LOW.
+    MOY_DSI_BL_GPIO=32
+    MOY_DSI_BL_ACTIVE_LOW=1
 )

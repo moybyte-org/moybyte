@@ -97,3 +97,15 @@
 // lands while the store writes the last one instead of stalling the USB
 // endpoint at the port's 260 bytes. The module's header says which boards may.
 #define MOY_SERIAL_RING_BYTES               (32768)
+
+// The kernel's recovery floor (native/moy_kernel): moy_dsi's entry points, and
+// the landscape 1280x800 floor turned onto the 800x1280 portrait framebuffer by
+// guition_p4_display.ROTATION (270, counter-clockwise). No input reaches the
+// floor -- the GSL3680 needs its firmware uploaded -- so serial drives it, and
+// with no input for 30 s it starts SAFE.
+#define MOY_KERNEL_PANEL(fn)                moy_dsi_k##fn
+#define MOY_KERNEL_PANEL_W                  (1280)
+#define MOY_KERNEL_PANEL_H                  (800)
+#define MOY_KERNEL_PANEL_ROT                (270)
+#define MOY_KERNEL_PANEL_SWAP               (0)
+#define MOY_KERNEL_IDLE_SAFE_MS             (30000)

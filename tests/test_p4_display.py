@@ -52,9 +52,13 @@ class FakeDsi:
         self._fbs = [FB(i) for i in range(n)]
         self.shown = []
         self.flushes = 0
+        self.lit = None
 
     def init(self):
         pass
+
+    def backlight(self, on):
+        self.lit = bool(on)
 
     def nfbs(self):
         return self._n
@@ -157,18 +161,11 @@ class FakeWS:
 
 @contextlib.contextmanager
 def p4_display(dsi, ppa, gfx=None):
-    """Load `p4_display` fresh against stubbed native modules.
-
-    Fresh every time on purpose: `set_backlight` caches its Pin in a module
-    global, so a shared import would carry one test's pin into the next.
-    """
-    keys = ("p4_display", "dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx", "machine")
+    """Load `p4_display` fresh against stubbed native modules."""
+    keys = ("p4_display", "dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx")
     saved = {k: sys.modules.get(k) for k in keys}
-    machine = types.ModuleType("machine")
-    machine.Pin = _FakePin
     sys.modules["moy_dsi"] = dsi
     sys.modules["moy_ppa"] = ppa
-    sys.modules["machine"] = machine
     if gfx is None:
         sys.modules.pop("moy_gfx", None)
     else:
@@ -195,17 +192,6 @@ def p4_display(dsi, ppa, gfx=None):
                 sys.modules.pop(k, None)
             else:
                 sys.modules[k] = v
-
-
-class _FakePin:
-    OUT = 1
-
-    def __init__(self, gpio, mode=None, value=None):
-        self.gpio = gpio
-        self.level = value
-
-    def value(self, v):
-        self.level = v
 
 
 class StepTicks:
