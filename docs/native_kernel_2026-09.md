@@ -321,7 +321,8 @@ console needs while no Python app runs is OS.
 | `runtime/cart_verbs.py` | cart path | open | the cart API's names as one tuple, read by the code editor's highlighter and the block compiler; follows `runtime/cart_api.py` |
 | `runtime/chrome.py` | split | 5 + 6 + 7, rest stays | token tables, `theme_colors` and the default bar icons → 5; colour names, the glyph vocabulary and scaled-text helpers → 6; `Layout` → 7 with the bar it positions; `CodeLayout` stays with the Editor |
 | `runtime/code_layer.py` | app | — | the Editor's Code tab |
-| `runtime/console.py` | split | 2 + 7 | the run and exit verbs, the return stack, app resolution, the WiFi lease and the prefs wiring → 2; the layer stack, frame, pointer, composite and the rest → 7, where the file is deleted; `wire_workstation_core` loses a line as each service crosses |
+| `runtime/console.py` | split | 2 + 7 | the spine's half is `runtime/console_spine.py` (2); the layer stack, frame, pointer, composite and the rest → 7, where the file is deleted; `wire_workstation_core` loses a line as each service crosses |
+| `runtime/console_spine.py` | spine | 2 | the run and exit verbs, app registration and resolution, the WiFi lease and the settings wiring, over `runtime/moy_spine.py`; its Python side (the app objects, the surfaces a route lands on, the radio glue) stays until each subject's sprint (`docs/kernel_spine_2026-10.md`) |
 | `runtime/console_notices.py` | cart path | 4 | achievements wiring, the notice banner and its toast deadline; the firmware-update verdict it carries is raised by sprint 3's OTA health |
 | `runtime/console_perf.py` | frame tail | 3 | the PERF meters and the capture frame tail |
 | `runtime/console_saves.py` | app | — | the Editor's save and PLAY verbs on the Workstation; PLAY starts the Player through the spine |
@@ -368,9 +369,10 @@ console needs while no Python app runs is OS.
 | `runtime/moy_journal.py` | store | 1b | the undo journal, named under storage in §2.2; the Zero takes it |
 | `runtime/moy_qr.py` | radios and links | open | the pairing QR encoder for the web-console screen; follows `runtime/web_console_ui.py` |
 | `runtime/moy_seed.py` | store | 1b | seeding and the sweep of retired seeds; the Zero takes it |
+| `runtime/moy_spine.py` | spine | 2 | the spine's interface and its Python twin: handle tables, the app registry, the back-stack and return records, the WiFi lease mask and the settings rows; the native `moy_spine` replaces it (`docs/kernel_spine_2026-10.md`) |
 | `runtime/moy_store_base.py` | store | 1b | the store's on-card layout and shared rules; the Zero takes it |
 | `runtime/moy_sync.py` | radios and links | 3 | the sync RPC's push half; the Zero takes it |
-| `runtime/moybuf.py` | spine | 2 | the Python view over `moy_alloc` entries; the stop inventory (§4.4) clears them or moves them to kernel ownership with the handle table |
+| `runtime/moybuf.py` | spine | 2 | the Python view over `moy_alloc` entries; the registry becomes a handle table of kind BUF (`docs/kernel_spine_2026-10.md` §1), and the stop inventory (§4.4) clears its rows or moves them to kernel ownership |
 | `runtime/moyhost_audio.c` | host-only | — | the C shim `runtime/audio_binding.py` compiles |
 | `runtime/moyhost_console.h` | host-only | — | the console the Lua and wasm host shims share |
 | `runtime/moyhost_gfx.c` | host-only | — | the C shim `runtime/gfx_binding.py` compiles |
@@ -410,7 +412,7 @@ console needs while no Python app runs is OS.
 | `runtime/web_console_ui.py` | radios and links | open | the screen the glass parks on while no app runs, so it is OS by §2.2's rule; it draws with `runtime/ui.py` and `runtime/moy_qr.py`. Question: does it cross in 3 with the webhost, drawn without the toolkit, or wait for the toolkit in 6? |
 | `runtime/web_input.py` | input | 3 | the browser's event decode; the boards deny it |
 | `runtime/widgets.py` | split | 3 + 4 + 5 + 6 | `Pointer` and `pointer_state`, `_SilentAudio` → 3; `Achievements`, `Pmem`, `Actor`, `Scenes`, `SceneWorld`, `Popup` → 4; `Clipboard` → 5; `ConfirmTap`, `_Blit` and the small draw helpers → 6 |
-| `runtime/wm.py` | split | 2 + 7 | the process back-stack, the state `screen` projects, → 2; the memoized draw stack and the game-to-system composite → 7 |
+| `runtime/wm.py` | window managers | 7 | the memoized draw stack, the game-to-system composite and navigation over the spine's back-stack (`runtime/moy_spine.py`'s `BackStack`, 2) |
 | `runtime/wm_chrome.py` | window managers | 7 | the windowed WM's title strip, borders and taskbar chips |
 | `runtime/wm_desk.py` | window managers | 7 | the windowed desk's root layer and backdrop cache |
 | `runtime/wm_windowed.py` | window managers | 7 | the P4 desk; the Studio's Run pane lands before it starts (§6) |
