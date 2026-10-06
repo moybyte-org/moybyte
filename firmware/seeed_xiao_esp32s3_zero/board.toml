@@ -300,10 +300,10 @@ bundle was only ever a copy somebody pushed -- exactly the drift that baking it
 was introduced to end, one board late. A pushed copy still WINS at serve time;
 the image is the guarantee, not the ceiling (.claude/rules/web.md).
 
-`moy_index`, the store's native index, also stages and compiles to nothing:
-its fragment builds a twin only when a build sets MOY_INDEX_IMPL (sprint 1a's
-hook, tools/moy_index_spike.py), and this board is one of the five targets the
-twin must link into.
+`moy_index`, the store's native index, and `moy_spine`, the kernel's spine, also
+stage and compile to nothing: their fragments build a twin only when a build
+sets MOY_INDEX_IMPL or MOY_SPINE_IMPL (the hooks of tools/moy_index_spike.py),
+and this board is one of the five targets the twins must link into.
 
 Every module below is flash spent TWICE, once per OTA slot, which on 8MB is the
 difference between a table that fits and one that does not."""

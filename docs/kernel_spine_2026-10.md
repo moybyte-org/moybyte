@@ -18,10 +18,10 @@ swaps each twin for its binding under those tests unchanged.
 
 | component | Python twin (the interface) | C module |
 |---|---|---|
-| handle tables | `moy_spine.Table` | `+native/moy_spine/moy_htab.h` |
-| app registry, back-stack, return records | `moy_spine.AppRegistry`, `BackStack`, `Returns` | `+native/moy_spine/moy_route.h` |
+| handle tables | `moy_spine.Table` | `native/moy_spine/moy_htab.h` |
+| app registry, back-stack, return records | `moy_spine.AppRegistry`, `BackStack`, `Returns` | `native/moy_spine/moy_route.h` |
 | WiFi leases | `moy_spine.Leases` | `moy_route.h` (one mask) |
-| settings store | `moy_spine.Settings` under `runtime/system_store.py` | `+native/moy_spine/moy_settings.h` |
+| settings store | `moy_spine.Settings` under `runtime/system_store.py` | `native/moy_spine/moy_settings.h` |
 | strike ledger | `runtime/crash_guard.py` | `+native/moy_crash/moy_ledger.c` |
 | crash record, boot-loop guard | — | `+native/moy_crash/moy_crash.h` |
 | recovery screen | — | `+native/moy_recovery/moy_recovery.h` |
@@ -53,28 +53,33 @@ row there.
     kind   1..15, assigned in moy_htab.h: APP = 1, BUF = 2; later sprints add theirs
     gen    1..262143, wraps to 1; a freed slot is reused lowest-first
 
-    moy_htab_t *moy_htab_new(uint8_t kind, uint16_t slots, size_t row_size);
-    int  moy_htab_add(moy_htab_t *, uint32_t *h, void **row);  // FULL
+    moy_htab_t *moy_htab_new(const moy_htab_mem_t *, uint8_t kind, uint32_t slots, size_t row_size);
+    int  moy_htab_add(moy_htab_t *, uint32_t *h, void **row);  // FULL, NOMEM
     int  moy_htab_get(const moy_htab_t *, uint32_t h, void **row);  // STALE
     int  moy_htab_release(moy_htab_t *, uint32_t h);            // STALE
     uint32_t moy_htab_count(...), moy_htab_slots(...), moy_htab_at(..., slot);
 
-Every byte comes from `moy_htab_host_alloc`, which the host defines: PSRAM
-(`heap_caps_malloc(MALLOC_CAP_SPIRAM)`) on a board, malloc on the host, a
-failure-injecting counter under the fuzzer. The binding maps STALE to
-`StaleHandle` (a ValueError naming the table), FULL to `OSError(ENOSPC)` and a
-non-int argument to TypeError, which is what the twin raises.
+Every byte comes from the `moy_htab_mem_t` the client passes in, a pair of
+allocate and release functions, because the store index (the gc heap, so the
+collector keeps its table with the object) and the spine (PSRAM) share one
+`moy_htab.c` in one image and cannot share one host symbol. The spine's is
+PSRAM (`heap_caps_calloc(MALLOC_CAP_SPIRAM)`) on a board, calloc on the host and
+a failure-injecting counter under the fuzzer. The binding maps STALE to
+`StaleHandle` (a ValueError naming the table), FULL to `OSError(ENOSPC)`, NOMEM
+to `MemoryError` and a non-int argument to TypeError, which is what the twin
+raises. A kinded table has up to 256 slots; the binding's `Table` keeps its
+rows' Python objects in a gc array beside the C table, which holds no row bytes.
 
 **The store index is this table.** `moy_index`'s handles are the same layout
-with the kind field folded into a 12-bit slot, so when 1b crosses,
-`native/moy_index/moy_index.c` keeps its ABI and its pinned values and takes
-its slot bookkeeping from `moy_htab` with `slot_bits = 12` and no kind; its path
-intern is a key map on top.
+with the kind field folded into a 12-bit slot: `moy_htab` with kind 0 is that
+table, and `native/moy_index/moy_index.c` keeps its ABI and its pinned values
+and takes its slot bookkeeping from it; its path intern is a key map on top.
 
 ## 3. Routing: the registry, the back-stack and the return records
 
 `moy_route` holds kinds, never objects: a kind (an app id or a back-stack kind)
-is 1..15 bytes, stored in a `char[16]`. The binding hands a kind to Python as
+is 1..15 bytes of any value, stored as a length and 15 bytes (16 in all), so a
+kind with a NUL in it is its own kind. The binding hands a kind to Python as
 an interned string (a qstr, made once per kind), so `top()` and `has()` on the
 frame path allocate nothing (`tests/test_frame_alloc.py`).
 
@@ -124,15 +129,25 @@ last read or wrote, so a kernel-owned row is never written back from a stale
 copy (pinned: `tests/test_moy_spine.py`). The file write goes through the
 Python SD gate until sprint 3 makes the gate native.
 
-    int moy_settings_load(moy_settings_t *, const char *text, size_t len);  // BADJSON
-    int moy_settings_get(const moy_settings_t *, const char *key, const char **json, size_t *len);
-    int moy_settings_set(moy_settings_t *, const char *key, const char *json, size_t len);
-    int moy_settings_delete(moy_settings_t *, const char *key);
+    int moy_settings_load(moy_settings_t *, const char *text, size_t len, uint32_t *rows);  // BADJSON, NOMEM
+    int moy_settings_get(const moy_settings_t *, const char *key, size_t key_len, const char **json, size_t *len);
+    int moy_settings_set(moy_settings_t *, const char *key, size_t key_len, const char *json, size_t len);
+    int moy_settings_delete(moy_settings_t *, const char *key, size_t key_len);
     size_t moy_settings_dump(const moy_settings_t *, char *out, size_t cap);
 
+A key is held decoded, with its length (it may hold a NUL), and written as a
+JSON string escaping only what JSON requires; a value is held as written. The
+scanner is RFC 8259 plus the `NaN`, `Infinity` and `-Infinity` tokens CPython's
+`json` reads and writes, and refuses three more things: an empty key, a lone
+surrogate escape in a key (it holds no UTF-8), and nesting past 31 containers
+inside a value (the file's object is the 32nd). A refused load changes nothing.
+The Python twin refuses the same three, and re-encodes each value `load` reads,
+so for text `json.dumps` wrote its rows and the scanner's are the same bytes.
+
 The scanner reads untrusted bytes, so it is fuzzed under ASan and UBSan
-against CPython's `json` as the model (the containment of
-`docs/native_kernel_2026-09.md` §5).
+(`native/moy_spine/fuzz_spine.c`) and held to CPython's `json` as the model, on
+generated and corrupted text, by `tests/test_moy_spine_twins.py` (the
+containment of `docs/native_kernel_2026-09.md` §5).
 
 ## 6. The crash record and the strike ledger
 

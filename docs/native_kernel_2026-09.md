@@ -737,8 +737,8 @@ AddressSanitizer and UndefinedBehaviorSanitizer in CI; fuzzing for every parser
 of untrusted bytes; a small kernel; a crash-only kernel that records its reason,
 reboots to the native recovery screen or the launcher, and reports over the dev
 channel; and handles instead of pointers (§4.3). The store's index is the first
-component under it: `tools/moy_index_spike.py` runs its suite and its API fuzz
-under both sanitizers.
+component under it, and the spine the second: `tools/moy_index_spike.py` runs
+each one's suite and API fuzz under both sanitizers.
 
 **Revisited, never assumed.** Rust is considered again per subsystem when
 upstream LLVM's Xtensa support matures, so that the S3 builds with a stock

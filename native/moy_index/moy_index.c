@@ -1,17 +1,23 @@
 // The store's index, the C twin (moy_index.h has the contract).
 //
-// Rows live in an array indexed by slot that grows by doubling to
-// MOY_INDEX_SLOTS; a row's path is its own allocation, hashed once (FNV-1a).
-// A path finds its slot through an open-addressed table of slot + 1 entries,
-// kept at most three-quarters full, tombstones included.
+// The slots are native/moy_spine's handle table (moy_htab.h), unkinded: its
+// handle is this header's, slot | generation << 12, so the bookkeeping --
+// generations, lowest-first reuse, the check on every use -- is the kernel's one
+// implementation. A row holds a pointer to its path's own allocation, hashed
+// once (FNV-1a). A path finds its slot through an open-addressed table of
+// slot + 1 entries, kept at most three-quarters full, tombstones included.
 
 #include <string.h>
 
+#include "moy_htab.h"
 #include "moy_index.h"
 
-#define SLOT_MASK (MOY_INDEX_SLOTS - 1u)
 #define EMPTY 0u
 #define TOMB 0xffffu
+
+typedef char slot_bits_agree[MOY_INDEX_SLOT_BITS == MOY_HTAB_GEN_SHIFT ? 1 : -1];
+typedef char slots_agree[MOY_INDEX_SLOTS == MOY_HTAB_SLOTS_PLAIN ? 1 : -1];
+typedef char gen_max_agrees[MOY_INDEX_GEN_MAX == MOY_HTAB_GEN_MAX ? 1 : -1];
 
 typedef struct {
     uint32_t hash;
@@ -19,21 +25,18 @@ typedef struct {
     char path[];        // len bytes, then a NUL
 } row_t;
 
-typedef struct {
-    uint32_t gen;
-    row_t *row;         // NULL while the slot is free
-} slot_t;
-
 struct moy_index {
-    slot_t *slot;
+    moy_htab_t *t;      // rows of one row_t *
     uint16_t *tab;
-    uint32_t cap;       // slots allocated
-    uint32_t used;      // slots ever taken: the high-water mark
-    uint32_t live;
-    uint32_t free_lo;   // every slot below it is live
     uint32_t tab_cap;   // a power of two, or 0 before the first row
     uint32_t tab_fill;  // live entries plus tombstones
 };
+
+static const moy_htab_mem_t mem = { moy_index_host_alloc, moy_index_host_free };
+
+static inline row_t *row_at(const moy_index_t *ix, uint32_t s) {
+    return *(row_t **)moy_htab_row(ix->t, s);
+}
 
 static uint32_t hash_of(const char *p, size_t n) {
     uint32_t h = 2166136261u;
@@ -44,18 +47,9 @@ static uint32_t hash_of(const char *p, size_t n) {
     return h;
 }
 
-static inline uint32_t handle_of(const moy_index_t *ix, uint32_t s) {
-    return (ix->slot[s].gen << MOY_INDEX_SLOT_BITS) | s;
-}
-
-// The slot `h` names, or MOY_INDEX_SLOTS.
-static uint32_t check(const moy_index_t *ix, uint32_t h) {
-    uint32_t s = h & SLOT_MASK;
-    if (h == 0 || s >= ix->used || ix->slot[s].row == NULL
-        || ix->slot[s].gen != (h >> MOY_INDEX_SLOT_BITS)) {
-        return MOY_INDEX_SLOTS;
-    }
-    return s;
+// The slot `h` names, or MOY_HTAB_NOSLOT.
+static inline uint32_t check(const moy_index_t *ix, uint32_t h) {
+    return moy_htab_slot_of(ix->t, h);
 }
 
 // slot + 1 of the row holding `p`, or 0.
@@ -71,7 +65,7 @@ static uint32_t lookup(const moy_index_t *ix, const char *p, size_t n,
             return 0;
         }
         if (e != TOMB) {
-            const row_t *r = ix->slot[e - 1u].row;
+            const row_t *r = row_at(ix, e - 1u);
             if (r->hash == hash && r->len == n && memcmp(r->path, p, n) == 0) {
                 return e;
             }
@@ -95,40 +89,22 @@ static int tab_reserve(moy_index_t *ix) {
         return MOY_INDEX_OK;
     }
     uint32_t cap = 8u;
-    while (cap < (ix->live + 1u) * 2u) {
+    while (cap < (moy_htab_count(ix->t) + 1u) * 2u) {
         cap <<= 1;
     }
     uint16_t *tab = moy_index_host_alloc(cap * sizeof(uint16_t));
     if (tab == NULL) {
         return MOY_INDEX_NOMEM;
     }
-    for (uint32_t s = 0; s < ix->used; s++) {
-        if (ix->slot[s].row != NULL) {
-            tab_put(tab, cap, ix->slot[s].row->hash, s);
+    for (uint32_t s = 0, n = moy_htab_slots(ix->t); s < n; s++) {
+        if (moy_htab_live(ix->t, s)) {
+            tab_put(tab, cap, row_at(ix, s)->hash, s);
         }
     }
     moy_index_host_free(ix->tab, ix->tab_cap * sizeof(uint16_t));
     ix->tab = tab;
     ix->tab_cap = cap;
-    ix->tab_fill = ix->live;
-    return MOY_INDEX_OK;
-}
-
-static int slots_reserve(moy_index_t *ix) {
-    if (ix->used < ix->cap) {
-        return MOY_INDEX_OK;
-    }
-    uint32_t cap = ix->cap ? ix->cap * 2u : 8u;
-    slot_t *slot = moy_index_host_alloc(cap * sizeof(slot_t));
-    if (slot == NULL) {
-        return MOY_INDEX_NOMEM;
-    }
-    if (ix->used) {
-        memcpy(slot, ix->slot, ix->used * sizeof(slot_t));
-    }
-    moy_index_host_free(ix->slot, ix->cap * sizeof(slot_t));
-    ix->slot = slot;
-    ix->cap = cap;
+    ix->tab_fill = moy_htab_count(ix->t);
     return MOY_INDEX_OK;
 }
 
@@ -137,20 +113,29 @@ static size_t row_size(uint32_t len) {
 }
 
 moy_index_t *moy_index_new(void) {
-    return moy_index_host_alloc(sizeof(moy_index_t));
+    moy_index_t *ix = moy_index_host_alloc(sizeof(moy_index_t));
+    if (ix == NULL) {
+        return NULL;
+    }
+    ix->t = moy_htab_new(&mem, MOY_KIND_NONE, MOY_INDEX_SLOTS, sizeof(row_t *));
+    if (ix->t == NULL) {
+        moy_index_host_free(ix, sizeof(moy_index_t));
+        return NULL;
+    }
+    return ix;
 }
 
 void moy_index_free(moy_index_t *ix) {
     if (ix == NULL) {
         return;
     }
-    for (uint32_t s = 0; s < ix->used; s++) {
-        row_t *r = ix->slot[s].row;
-        if (r != NULL) {
+    for (uint32_t s = 0, n = moy_htab_slots(ix->t); s < n; s++) {
+        if (moy_htab_live(ix->t, s)) {
+            row_t *r = row_at(ix, s);
             moy_index_host_free(r, row_size(r->len));
         }
     }
-    moy_index_host_free(ix->slot, ix->cap * sizeof(slot_t));
+    moy_htab_free(ix->t);
     moy_index_host_free(ix->tab, ix->tab_cap * sizeof(uint16_t));
     moy_index_host_free(ix, sizeof(moy_index_t));
 }
@@ -160,18 +145,16 @@ int moy_index_intern(moy_index_t *ix, const char *path, size_t len,
     uint32_t hash = hash_of(path, len);
     uint32_t e = lookup(ix, path, len, hash);
     if (e) {
-        *h = handle_of(ix, e - 1u);
+        *h = moy_htab_handle(ix->t, e - 1u);
         return MOY_INDEX_OK;
     }
-    int fresh = ix->live == ix->used;
-    if (fresh && ix->used == MOY_INDEX_SLOTS) {
+    if (moy_htab_full(ix->t)) {
         return MOY_INDEX_FULL;
     }
     if (len > UINT32_MAX - sizeof(row_t) - 1u) {
         return MOY_INDEX_NOMEM;
     }
-    if ((fresh && slots_reserve(ix) != MOY_INDEX_OK)
-        || tab_reserve(ix) != MOY_INDEX_OK) {
+    if (tab_reserve(ix) != MOY_INDEX_OK) {
         return MOY_INDEX_NOMEM;
     }
     row_t *r = moy_index_host_alloc(row_size((uint32_t)len));
@@ -183,20 +166,14 @@ int moy_index_intern(moy_index_t *ix, const char *path, size_t len,
     if (len) {
         memcpy(r->path, path, len);
     }
-    uint32_t s;
-    if (fresh) {
-        s = ix->used++;
-        ix->slot[s].gen = 1u;
-        ix->free_lo = ix->used;
-    } else {
-        s = ix->free_lo;
-        while (ix->slot[s].row != NULL) {
-            s++;
-        }
-        ix->free_lo = s + 1u;
+    row_t **slot;
+    uint32_t handle;
+    if (moy_htab_add(ix->t, &handle, (void **)&slot) != MOY_HTAB_OK) {
+        moy_index_host_free(r, row_size((uint32_t)len));
+        return MOY_INDEX_NOMEM;
     }
-    ix->slot[s].row = r;
-    ix->live++;
+    *slot = r;
+    uint32_t s = handle & (MOY_INDEX_SLOTS - 1u);
     uint32_t mask = ix->tab_cap - 1u, i = hash & mask;
     while (ix->tab[i] != EMPTY && ix->tab[i] != TOMB) {
         i = (i + 1u) & mask;
@@ -205,36 +182,37 @@ int moy_index_intern(moy_index_t *ix, const char *path, size_t len,
         ix->tab_fill++;
     }
     ix->tab[i] = (uint16_t)(s + 1u);
-    *h = handle_of(ix, s);
+    *h = handle;
     return MOY_INDEX_OK;
 }
 
 uint32_t moy_index_find(const moy_index_t *ix, const char *path, size_t len) {
     uint32_t e = lookup(ix, path, len, hash_of(path, len));
-    return e ? handle_of(ix, e - 1u) : 0u;
+    return e ? moy_htab_handle(ix->t, e - 1u) : 0u;
 }
 
 int moy_index_path(const moy_index_t *ix, uint32_t h, const char **path,
                    size_t *len) {
     uint32_t s = check(ix, h);
-    if (s == MOY_INDEX_SLOTS) {
+    if (s == MOY_HTAB_NOSLOT) {
         return MOY_INDEX_STALE;
     }
-    *path = ix->slot[s].row->path;
-    *len = ix->slot[s].row->len;
+    const row_t *r = row_at(ix, s);
+    *path = r->path;
+    *len = r->len;
     return MOY_INDEX_OK;
 }
 
 int moy_index_valid(const moy_index_t *ix, uint32_t h) {
-    return check(ix, h) != MOY_INDEX_SLOTS;
+    return check(ix, h) != MOY_HTAB_NOSLOT;
 }
 
 int moy_index_release(moy_index_t *ix, uint32_t h) {
     uint32_t s = check(ix, h);
-    if (s == MOY_INDEX_SLOTS) {
+    if (s == MOY_HTAB_NOSLOT) {
         return MOY_INDEX_STALE;
     }
-    row_t *r = ix->slot[s].row;
+    row_t *r = row_at(ix, s);
     uint32_t mask = ix->tab_cap - 1u, i = r->hash & mask;
     while (ix->tab[i] != s + 1u) {
         i = (i + 1u) & mask;
@@ -246,27 +224,18 @@ int moy_index_release(moy_index_t *ix, uint32_t h) {
         ix->tab[i] = TOMB;
     }
     moy_index_host_free(r, row_size(r->len));
-    ix->slot[s].row = NULL;
-    ix->slot[s].gen = ix->slot[s].gen >= MOY_INDEX_GEN_MAX
-        ? 1u : ix->slot[s].gen + 1u;
-    ix->live--;
-    if (s < ix->free_lo) {
-        ix->free_lo = s;
-    }
+    moy_htab_release(ix->t, h);
     return MOY_INDEX_OK;
 }
 
 uint32_t moy_index_count(const moy_index_t *ix) {
-    return ix->live;
+    return moy_htab_count(ix->t);
 }
 
 uint32_t moy_index_slots(const moy_index_t *ix) {
-    return ix->used;
+    return moy_htab_slots(ix->t);
 }
 
 uint32_t moy_index_at(const moy_index_t *ix, uint32_t slot) {
-    if (slot >= ix->used || ix->slot[slot].row == NULL) {
-        return 0u;
-    }
-    return handle_of(ix, slot);
+    return moy_htab_at(ix->t, slot);
 }

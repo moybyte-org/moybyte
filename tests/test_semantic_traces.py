@@ -84,7 +84,9 @@ heal / strike / forgive / proof bracket, pinned verbatim on every VM like the
 store's: the handle values are kind.slot.generation. Mutation-tested: the
 generation bump, lowest-free reuse, the kind check, goto's RETURN truncation,
 the route's editor-before-app order and the ledger's proof skip each turn it
-red.
+red. The same log is pinned over the native spine (sprint 2's twin,
+native/moy_spine) on both object models, the ledger half still the Python
+CrashGuard.
 """
 
 import shutil
@@ -1070,6 +1072,19 @@ def _spine_trace(exe, tmp_path, tag, prelude=""):
     return [line[2:] for line in lines if line.startswith("T ")]
 
 
+# Run ahead of SPINE_DRIVER, it puts the NATIVE spine under every import of
+# moy_spine: the extensible builtin, reached with the path emptied and then
+# registered so runtime/moy_spine.py never loads (modmoy_spine.c's header).
+NATIVE_SPINE = r'''import sys
+_path = sys.path[:]
+sys.path[:] = []
+import moy_spine
+sys.path[:] = _path
+assert not hasattr(moy_spine, "__file__"), "no native moy_spine in this binary"
+sys.modules["moy_spine"] = moy_spine
+'''
+
+
 def test_spine_trace_is_the_interface_on_every_vm(tmp_path):
     want = SPINE_TRACE.splitlines()
     py = _spine_trace(sys.executable, tmp_path, "cpython")
@@ -1085,3 +1100,21 @@ def test_spine_trace_is_the_interface_on_every_vm(tmp_path):
         b32 = _spine_trace(board, tmp_path, "board_model")
         assert b32 == want, ("the 32-bit object model diverges: "
                              + _first_difference(b32, want))
+
+
+def test_spine_trace_holds_over_the_native_spine(tmp_path):
+    """The same session over the native spine (sprint 2's twin, whichever
+    `make unix-micropython` built in), on both object models: the log must be
+    SPINE_TRACE line for line."""
+    want = SPINE_TRACE.splitlines()
+    exe = require_unix_mp(
+        "moy_spine",
+        why="The native spine's parity with the Python one on the VM a board "
+            "runs: the handle values, the refusals, the routes and the rows.")
+    mp = _spine_trace(exe, tmp_path, "native", NATIVE_SPINE)
+    assert mp == want, "the native spine diverges: " + _first_difference(mp, want)
+    board = find_unix_mp("moy_spine", board_model=True)
+    if board is not None:
+        b32 = _spine_trace(board, tmp_path, "native_board_model", NATIVE_SPINE)
+        assert b32 == want, ("the native spine in the 32-bit object model "
+                             "diverges: " + _first_difference(b32, want))

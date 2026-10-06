@@ -12,6 +12,7 @@ authority on that hook and the harness's commands. The spike's numbers are
 |---|---|
 | `moy_index.h` | the ABI: the twin implements it, everything above calls only it |
 | `moy_index.c` | the C twin |
+| (`../moy_spine/moy_htab.h`) | the handle table `moy_index.c` takes its slots from: generations, lowest-first reuse and the check on every use are the kernel's one implementation, here unkinded with 12 bits of slot; the index adds the path intern on top |
 | `modmoy_index.c` | the MicroPython binding: the module `moy_index`, registered extensible so a `moy_index.py` on the path wins |
 | `bench_moy_index.c` | `moy_index_bench`, the hot path driven from C; only under `MOY_INDEX_BENCH=1` |
 | `moy_index_host.c` | the two host imports over malloc, for the ctypes binding |

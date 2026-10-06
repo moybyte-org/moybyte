@@ -137,9 +137,9 @@ class Component:
 
 
 INDEX = Component(
-    "index", [NATIVE], "moy_index_host.c",
-    ["moy_index.h", "moy_index.c"],
-    ("fuzz_index.c", ["moy_index.c"]),
+    "index", [NATIVE, NATIVE_SPINE], "moy_index_host.c",
+    ["moy_index.h", "moy_index.c", "moy_htab.h", "moy_htab.c"],
+    ("fuzz_index.c", ["moy_index.c", "moy_htab.c"]),
     r"\((mod)?moy_index\.c\.obj\)$|/(mod)?moy_index\.c\.obj$",
     ["tests/test_moy_index.py", "tests/test_moy_index_twins.py"],
     "index or store", "")

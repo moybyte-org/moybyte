@@ -23,7 +23,13 @@ TypeError otherwise, ValueError when empty or longer. Settings keys are any
 non-empty str and values are JSON text.
 
 Errors are the native module's: OSError(ENOSPC) when a fixed table is full,
-ValueError for a refused argument, TypeError for a wrong type.
+ValueError for a refused argument, TypeError for a wrong type. The arguments the
+native module cannot hold are refused here too: a table's name is a str, an
+app's min size fits 32 bits, a settings key holds no lone surrogate, and a
+settings value nests at most 31 containers (the file's object is the 32nd).
+Settings.load re-encodes each value, so for text json.dumps wrote the rows are
+the native scanner's byte for byte; the native module keeps any other text as
+it was written.
 """
 
 import json
@@ -34,6 +40,7 @@ GEN_SHIFT = 12
 GEN_MAX = (1 << 18) - 1
 SLOTS = 1 << SLOT_BITS
 ID_MAX = 15
+JSON_DEPTH = 32
 
 KIND_APP = 1
 
@@ -62,6 +69,8 @@ class Table:
     handle's error says it was."""
 
     def __init__(self, kind, name, slots=SLOTS):
+        if not isinstance(name, str):
+            raise TypeError("a table name is a str")
         if not 1 <= kind <= _KIND_MASK or not 1 <= slots <= SLOTS:
             raise ValueError("table kind 1..15, slots 1..%d" % SLOTS)
         self.kind = kind
@@ -144,6 +153,8 @@ class AppRegistry:
             raise ValueError("duplicate app id: " + app_id)
         if min_size is not None:
             min_size = (int(min_size[0]), int(min_size[1]))
+            if not all(-(1 << 31) <= v < (1 << 31) for v in min_size):
+                raise ValueError("min_size must fit 32 bits")
         h = self._t.new((app_id, str(title), bool(text_mode), min_size))
         self._by_id[app_id] = h
         return h
@@ -346,7 +357,27 @@ def _key(k):
         raise TypeError("a settings key is a str")
     if not k:
         raise ValueError("an empty settings key")
+    k.encode()              # a lone surrogate holds no UTF-8: ValueError
     return k
+
+
+def _depth(v):
+    """The containers `v` nests: 0 for a scalar, 1 for an empty list or dict."""
+    if isinstance(v, dict):
+        v = list(v.values())
+    elif not isinstance(v, (list, tuple)):
+        return 0
+    return 1 + max([_depth(x) for x in v] or [0])
+
+
+def _value(text):
+    """`text`'s value, ValueError unless it is one JSON value a row may hold."""
+    if not isinstance(text, str):
+        raise TypeError("a settings value is JSON text")
+    v = json.loads(text)
+    if _depth(v) >= JSON_DEPTH:
+        raise ValueError("a settings value nests too deep")
+    return v
 
 
 class Settings:
@@ -361,7 +392,7 @@ class Settings:
 
     def load(self, text):
         """Replace every row with the object `text` holds; ValueError when it
-        is not a JSON object. The row count."""
+        is not a JSON object, and then nothing changes. The row count."""
         d = json.loads(text)
         if not isinstance(d, dict):
             raise ValueError("system.json is not an object")
@@ -369,20 +400,22 @@ class Settings:
         return len(self._keys)
 
     def adopt(self, d):
-        """Replace every row with `d`'s items, each value encoded."""
-        self._keys = []
-        self._text = {}
-        for k in d:
-            self.set(k, json.dumps(d[k]))
+        """Replace every row with `d`'s items, each value encoded; a key or a
+        value that is refused leaves the rows as they were."""
+        keys = [_key(k) for k in d]
+        rows = {}
+        for k in keys:
+            rows[k] = json.dumps(d[k])
+            _value(rows[k])
+        self._keys = keys
+        self._text = rows
 
     def get(self, key):
         """The value's JSON text, or None when the key has no row."""
         return self._text.get(_key(key))
 
     def set(self, key, text):
-        if not isinstance(text, str):
-            raise TypeError("a settings value is JSON text")
-        json.loads(text)
+        _value(text)
         if _key(key) not in self._text:
             self._keys.append(key)
         self._text[key] = text

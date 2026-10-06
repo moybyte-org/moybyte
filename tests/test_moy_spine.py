@@ -1,10 +1,13 @@
 """The kernel spine's interface (runtime/moy_spine.py), pinned once for every
-binding: the Python twin today, the native `moy_spine` when sprint 2 crosses
-(docs/kernel_spine_2026-10.md), each test unchanged.
+binding: the Python twin and the C twin (native/moy_spine,
+docs/kernel_spine_2026-10.md), each test unchanged.
 
-`BINDINGS` names each implementation by its module. The semantic trace in
-tests/test_semantic_traces.py replays one session of this interface on every
-VM and pins the handle VALUES; this file pins the rules:
+`BINDINGS` names each implementation by its module: the Python twin, and the C
+twin over the host's C ABI through ctypes (tools/moy_spine_binding.py).
+tests/test_moy_spine_twins.py runs this same file on the boards' VM over the
+native module. The semantic trace in tests/test_semantic_traces.py replays one
+session of this interface on every VM and pins the handle VALUES; this file
+pins the rules:
 
   * a handle is gen << GEN_SHIFT | kind << KIND_SHIFT | slot: never 0, below
     2**30, the first row slot 0 at generation 1;
@@ -18,8 +21,9 @@ VM and pins the handle VALUES; this file pins the rules:
   * a run's exit route follows its caller's kind; the app-return only sets;
   * a lease tag outside LEASE_TAGS is refused, a release of one never held
     is not;
-  * settings rows hold JSON text, dump is the object json.loads reads back,
-    and the store's mirror pushes only the keys it changed.
+  * settings rows hold JSON text, dump is the object json.loads reads back, a
+    load that is refused changes nothing, and the store's mirror pushes only
+    the keys it changed.
 """
 
 import json
@@ -29,6 +33,13 @@ import pytest
 from runtime import moy_spine
 
 BINDINGS = {"python": moy_spine}
+
+try:
+    from tools import moy_spine_binding
+except ImportError:         # the VM's run of this file has no tools/
+    moy_spine_binding = None
+if moy_spine_binding is not None:
+    BINDINGS.update(moy_spine_binding.host_bindings())
 
 
 @pytest.fixture(params=sorted(BINDINGS))
@@ -99,6 +110,18 @@ def test_a_table_takes_a_kind_and_a_size_it_can_name(sp):
     for kind, slots in ((0, 4), (16, 4), (1, 0), (1, sp.SLOTS + 1)):
         with pytest.raises(ValueError):
             sp.Table(kind, "x", slots)
+    with pytest.raises(TypeError):
+        sp.Table(1, 5)
+
+
+def test_a_table_holds_any_object_and_gives_it_back(sp):
+    t = sp.Table(2, "buf")
+    rows = ["s", 3, None, (1, 2), [4], {"k": 5}]
+    hs = [t.new(r) for r in rows]
+    assert [t.get(h) for h in hs] == rows and t.count() == len(rows)
+    t.put(hs[0], "t")
+    assert t.release(hs[0]) == "t" and t.release(hs[2]) is None
+    assert t.handles() == [hs[1], hs[3], hs[4], hs[5]]
 
 
 # -- the app registry -------------------------------------------------------
@@ -121,8 +144,20 @@ def test_the_registry_keeps_ids_and_metadata_not_objects(sp):
     for bad in ("", "x" * (sp.ID_MAX + 1)):
         with pytest.raises(ValueError):
             reg.register(bad, "x")
-    with pytest.raises(sp.StaleHandle):
+    with pytest.raises(sp.StaleHandle, match="stale app handle"):
         reg.title(h + (1 << sp.GEN_SHIFT))
+
+
+def test_a_min_size_is_two_ints_that_fit_32_bits(sp):
+    reg = sp.AppRegistry()
+    h = reg.register("a", "A", False, (-5, (1 << 31) - 1))
+    assert reg.min_size(h) == (-5, (1 << 31) - 1)
+    for bad in ((1 << 31, 1), (1, -(1 << 31) - 1), (1 << 40, 1)):
+        with pytest.raises(ValueError):
+            reg.register("b", "B", False, bad)
+    assert reg.find("b") == 0 and reg.count() == 1
+    assert reg.title(reg.register("c", 42)) == "42"     # a title is str()'d
+    assert reg.title(reg.register("d", "\u00e9t\u00e9")) == "\u00e9t\u00e9"
 
 
 # -- the back-stack ---------------------------------------------------------
@@ -196,6 +231,15 @@ def test_the_app_return_only_sets_and_only_for_an_app(sp):
 
 # -- WiFi leases ------------------------------------------------------------
 
+def test_the_lease_tags_are_the_closed_set(sp):
+    assert tuple(sp.LEASE_TAGS) == ("web", "update", "settings", "cart", "link",
+                                    "carts", "dev")
+    ls = sp.Leases()
+    for i, tag in enumerate(sp.LEASE_TAGS):
+        assert ls.hold(tag) == (1 << (i + 1)) - 1 and ls.held(tag)
+    assert ls.holders() == list(sp.LEASE_TAGS)
+
+
 def test_leases_are_a_mask_over_a_closed_set_of_tags(sp):
     ls = sp.Leases()
     assert ls.hold("update") == ls.hold("update") != 0
@@ -232,6 +276,55 @@ def test_settings_rows_hold_json_text_and_dump_the_file(sp):
         s.load("[1, 2]")
     with pytest.raises(ValueError):
         s.get("")
+
+
+def test_a_refused_load_changes_nothing(sp):
+    s = sp.Settings()
+    assert s.load('{"a": 1, "b": [2, 3]}') == 2
+    for bad in ("", "nope", "[1, 2]", "3", '{"a": 1', '{"": 1}', "{'a': 1}",
+                '{"a": 1} x'):
+        with pytest.raises(ValueError):
+            s.load(bad)
+        assert s.dump() == '{"a": 1, "b": [2, 3]}'
+    assert s.load("{}") == 0 and s.keys() == [] and s.dump() == "{}"
+
+
+def test_settings_keys_hold_escapes_and_unicode(sp):
+    s = sp.Settings()
+    assert s.load('{"caf\\u00e9": 1, "a\\"b": 2, "n\\nl": 3, "\u00fc": 4}') == 4
+    assert sorted(s.keys()) == sorted(["caf\u00e9", 'a"b', "n\nl", "\u00fc"])
+    assert s.get("caf\u00e9") == "1" and s.get('a"b') == "2"
+    assert json.loads(s.dump()) == {"caf\u00e9": 1, 'a"b': 2, "n\nl": 3,
+                                    "\u00fc": 4}
+    s.set("tab\there", "[]")
+    assert json.loads(s.dump())["tab\there"] == []
+
+
+def test_a_value_nests_at_most_31_containers(sp):
+    s = sp.Settings()
+    s.set("k", "[" * 31 + "]" * 31)
+    with pytest.raises(ValueError):
+        s.set("k2", "[" * 32 + "]" * 32)
+    assert s.keys() == ["k"]
+    assert s.load('{"a": ' + "[" * 31 + "]" * 31 + "}") == 1
+    with pytest.raises(ValueError):
+        s.load('{"a": ' + "[" * 32 + "]" * 32 + "}")
+    assert s.keys() == ["a"]
+
+
+def test_adopt_encodes_a_dict_into_rows(sp):
+    s = sp.Settings()
+    s.set("old", "1")
+    d = {"b": [1, {"x": None}], "a": "caf\u00e9", "n": 2, "f": True}
+    s.adopt(d)
+    assert sorted(s.keys()) == ["a", "b", "f", "n"]   # a dict has no order on the VM
+    assert s.get("b") == '[1, {"x": null}]' and s.get("n") == "2"
+    assert json.loads(s.dump()) == d
+    with pytest.raises(ValueError):
+        s.adopt({"ok": 1, "": 2})
+    with pytest.raises(TypeError):
+        s.adopt({1: 2})
+    assert json.loads(s.dump()) == d                  # a refused adopt changes nothing
 
 
 def test_the_store_pushes_only_what_its_mirror_changed(tmp_path):

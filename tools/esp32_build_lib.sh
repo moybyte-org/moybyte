@@ -585,16 +585,20 @@ moybyte_build_and_collect() {
   local bout="build-${BOARD}"
   # MicroPython keeps a source's generated qstr and module entries until that
   # source is preprocessed again, so a build that drops a usermod source
-  # (MOY_INDEX_IMPL back to py, tools/moy_index_spike.py) would link a module
-  # table naming code it no longer has. A changed hook starts genhdr afresh.
+  # (MOY_INDEX_IMPL or MOY_SPINE_IMPL back to py, tools/moy_index_spike.py)
+  # would link a module table naming code it no longer has. A changed hook
+  # starts genhdr afresh.
   local index_hook="${MOY_INDEX_IMPL:-py}${MOY_INDEX_BENCH:++bench}"
-  if [ "$(cat "${bout}/moy_index_impl" 2>/dev/null || echo py)" != "${index_hook}" ]; then
+  local spine_hook="${MOY_SPINE_IMPL:-py}"
+  if [ "$(cat "${bout}/moy_index_impl" 2>/dev/null || echo py)" != "${index_hook}" ] \
+     || [ "$(cat "${bout}/moy_spine_impl" 2>/dev/null || echo py)" != "${spine_hook}" ]; then
     rm -rf "${bout}/genhdr"
   fi
   make -j"${BUILD_JOBS}" BOARD_DIR="${BOARD_DIR}" \
     USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
     FROZEN_MANIFEST="${MANIFEST}"
   echo "${index_hook}" > "${bout}/moy_index_impl"
+  echo "${spine_hook}" > "${bout}/moy_spine_impl"
   cp "${bout}/firmware.bin" "${DIST_DIR}/${stem}.bin"
   cp "${bout}/micropython.bin" "${DIST_DIR}/${stem}_app.bin"
   moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin"

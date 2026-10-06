@@ -43,7 +43,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # What `make unix-micropython` builds: mainline MicroPython's unix port with
 # every native module that ships a Makefile fragment (moy_gfx, moy_lua, moycore,
-# moy_audio, moy_web, moy_png, and moy_index as the twin UNIX_MP_INDEX names)
+# moy_audio, moy_web, moy_png, and moy_index and moy_spine as the twins UNIX_MP_INDEX
+# and UNIX_MP_SPINE name)
 # compiled in. Note moy_lua is the vendored VM and no longer
 # a module -- `import moy_lua` is MEANT to fail; moycore is the runtime that
 # binds it. moy_web is the browser console baked into the firmware image, here

@@ -88,9 +88,11 @@ MICROPYTHON_BUILTINS = {
 
 # Native usermods compiled into a given target (USER_C_MODULES / ext_mod).
 NATIVE = {
-    # moy_index, the store's native index, stages on every target and compiles
-    # nothing unless a build takes a twin (MOY_INDEX_IMPL, sprint 1a's hook in
-    # tools/moy_index_spike.py), so it crosses everywhere a twin must link.
+    # moy_index, the store's native index, and moy_spine, the kernel's spine
+    # (the handle table moy_index shares), stage on every target and compile
+    # nothing unless a build takes a twin (MOY_INDEX_IMPL and MOY_SPINE_IMPL,
+    # hooks in tools/moy_index_spike.py), so they cross everywhere a twin must
+    # link.
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
@@ -99,14 +101,15 @@ NATIVE = {
     # STAGED like one, so it is declared like one.
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
-                       "moy_wasm", "moy_serial", "moy_png", "moy_index"},
+                       "moy_wasm", "moy_serial", "moy_png", "moy_index",
+                       "moy_spine"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush along with moy_sd and moy_audio.
     # moy_c6 is the ESP-NOW-over-hosted shim + C6 plumbing (#7, the espnow
     # track -- docs/history/espnow_p4_2026-08.md).
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof", "moy_wasm",
-           "moy_serial", "moy_png", "moy_index"},
+           "moy_serial", "moy_png", "moy_index", "moy_spine"},
     # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
     # four P4 modules are the SILICON tier (native/p4, a second board.toml
     # source) since the day this board became their second consumer -- it
@@ -114,23 +117,24 @@ NATIVE = {
     # through a board define rather than a second panel module.
     "guition-p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_dsi", "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof",
-                   "moy_wasm", "moy_serial", "moy_png", "moy_index"},
+                   "moy_wasm", "moy_serial", "moy_png", "moy_index",
+                   "moy_spine"},
     # The Guition denies moy_sd + moy_audio for now (stage 4/5 of its bring-up,
     # see its board.toml); moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial",
-                   "moy_png", "moy_index"},
+                   "moy_png", "moy_index", "moy_spine"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
     # running on it. `moy_web` is the only shared C module it compiles in by
-    # default (moy_index stages and compiles to nothing, above), and
+    # default (moy_index and moy_spine stage and compile to nothing, above), and
     # it is the module that justifies the board having an image at all -- the
     # browser console rides the firmware so the page a board serves cannot
     # drift behind the board serving it. Every other one is denied in its
     # board.toml, each with the hardware or the workload that is missing.
-    "zero": {"moy_web", "moy_index"},
+    "zero": {"moy_web", "moy_index", "moy_spine"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
-            "jsffi", "moy_index"},
+            "jsffi", "moy_index", "moy_spine"},
 }
 
 # Host-only modules that must NEVER reach a given target: staging one is the

@@ -13,8 +13,11 @@ if(MOY_INDEX_IMPL STREQUAL "c")
         target_sources(usermod_moy_index INTERFACE
             ${CMAKE_CURRENT_LIST_DIR}/bench_moy_index.c)
     endif()
+    # moy_index.c's slots are native/moy_spine's handle table: moy_htab.h is
+    # found beside it, and moy_htab.c is built by moy_spine's own fragment.
     target_include_directories(usermod_moy_index INTERFACE
-        ${CMAKE_CURRENT_LIST_DIR})
+        ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/../moy_spine)
     target_link_libraries(usermod INTERFACE usermod_moy_index)
 elseif(NOT MOY_INDEX_IMPL STREQUAL "" AND NOT MOY_INDEX_IMPL STREQUAL "py")
     message(FATAL_ERROR "MOY_INDEX_IMPL is py or c, not '${MOY_INDEX_IMPL}'")
