@@ -100,7 +100,7 @@ at install so an unarmed frame carries no wrapper.
   channel, Player, glue and compositor hand-off allocate zero bytes a frame,
   and the periodic diag text is written only under PERF DIAG.
   `tests/test_frame_alloc.py` pins it on the desktop MicroPython
-  built in the boards' object model (32-bit, REPR_C). What allocates on a
+  built in the boards' model (32-bit, REPR_C, threads under one GIL). What allocates on a
   board and reads as free: set arithmetic, a `getattr` that finds a method (a
   bound method), a tuple returned to be unpacked, `str()` of a str (a copy), a
   function holding a generator or closure (its cells are made on EVERY call,

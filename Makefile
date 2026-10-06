@@ -205,13 +205,24 @@ UNIX_MP_DIR ?= .build/unix_micropython
 UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
 UNIX_MP_USERMODS := $(UNIX_MP_DIR)/usermods
 UNIX_MP := $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython
-# The same tree built a second time the way the BOARDS build MicroPython's
-# object model: 32-bit words, REPR_C (a float result is not a heap object) and
+# The same tree built a second time the way the BOARDS build MicroPython:
+# 32-bit words, REPR_C (a float result is not a heap object) and
 # single-precision floats, so one GC block is 16 bytes and a float costs what it
 # costs on glass. The 64-bit build boxes every float, which buries what a frame
 # really allocates; tests/test_frame_alloc.py measures on this one. It needs a
 # 32-bit C toolchain (gcc-multilib) and is skipped, out loud, without one.
-UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-r32/micropython
+#
+# It also runs its threads under ONE GIL, as every board does (the T-Deck's
+# input poller is a thread whose staging, attribute stores and queue are atomic
+# only because of it). The unix port's own default is true parallel threads
+# with no GIL (ports/unix/mpconfigport.mk), under which the poller and the
+# frame loop mutate one keyboard object at the same time: a map rehash read
+# mid-write and a collection that frees what the other thread is holding, which
+# surfaces as a segfault or a lost attribute. The build
+# directory carries the model in its name because MicroPython's objects do not
+# track their flags: a tree built without the GIL would be linked into this one.
+# tests/unix_mp.py probes the binary for the GIL, so the model cannot drift.
+UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/micropython
 UNIX_MP_R32_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 \
 	-DMICROPY_OBJ_REPR=MICROPY_OBJ_REPR_C \
 	-DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
@@ -261,7 +272,7 @@ unix-micropython:
 # (or the reverse once it is gone), and re-running make does NOT converge. It
 # cost a confused half hour when moy_web landed with a `names()` verb.
 # Regenerating is ~5s and only happens when a usermod source actually changed.
-	@for b in build-moybyte build-moybyte-r32; do \
+	@for b in build-moybyte build-moybyte-board; do \
 	  s=$(UNIX_MP_SRC)/ports/unix/$$b/moy_index_impl; \
 	  if [ -d "$$(dirname $$s)" ] && [ "$$(cat $$s 2>/dev/null || echo c)" != "$(UNIX_MP_INDEX)" ]; then \
 	    rm -rf $(UNIX_MP_SRC)/ports/unix/$$b/genhdr; fi; \
@@ -279,12 +290,12 @@ unix-micropython:
 	@if echo 'int main(void){return 0;}' | cc -m32 -x c - -o /dev/null 2>/dev/null; then \
 	  $(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 MICROPY_PY_BTREE=0 \
-	    MICROPY_FORCE_32BIT=1 BUILD=build-moybyte-r32 \
+	    MICROPY_FORCE_32BIT=1 MICROPY_PY_THREAD_GIL=1 BUILD=build-moybyte-board \
 	    CFLAGS_EXTRA="$(UNIX_MP_R32_CFLAGS)" \
 	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) MOY_INDEX_RUST_LIB=$(MOY_INDEX_RUST_LIB_R32) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS) && \
-	  echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-r32/moy_index_impl && \
-	  echo "...and in the boards' object model (32-bit, REPR_C): $(UNIX_MP_R32)"; \
+	  echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/moy_index_impl && \
+	  echo "...and in the boards' object model (32-bit, REPR_C, one GIL): $(UNIX_MP_R32)"; \
 	else \
 	  echo "no 32-bit C toolchain (gcc-multilib): the boards' object-model build is skipped"; \
 	fi

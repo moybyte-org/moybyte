@@ -56,11 +56,13 @@ CANONICAL = (ROOT / ".build" / "unix_micropython" / "micropython" / "ports"
 # (2026-08-17) -- nothing creates them and the paths can no longer exist.
 CANDIDATES = (CANONICAL,)
 
-# The same target's second binary: the same modules in the BOARDS' object model
-# (32-bit words, REPR_C, single-precision floats). A heap allocation measured on
-# it is one a board makes; on the 64-bit binary every float result is a heap
-# object too. `board_model=True` asks for it, and the probe checks the word.
-BOARD_MODEL = CANONICAL.parent.parent / "build-moybyte-r32" / "micropython"
+# The same target's second binary: the same modules in the BOARDS' model
+# (32-bit words, REPR_C, single-precision floats, threads under one GIL). A heap
+# allocation measured on it is one a board makes; on the 64-bit binary every
+# float result is a heap object too, and its threads run in parallel with no
+# GIL, which no board's do. `board_model=True` asks for it, and the probe checks
+# the word and the GIL.
+BOARD_MODEL = CANONICAL.parent.parent / "build-moybyte-board" / "micropython"
 
 _PROBED = {}
 
@@ -86,10 +88,70 @@ def _provides(exe, modules, board_model=False):
     return _PROBED[key]
 
 
+# What a GIL does that parallel threads do not: a thread inside one C call keeps
+# every other thread out of the interpreter. Two threads each sort a list in a
+# single C call, released together, and note when each call started and ended.
+# Under a GIL the two calls cannot overlap, ever; with parallel threads (the
+# unix port's default) they overlap, and a build whose workers die or whose
+# calls never finish fails the probe too.
+_GIL_PROBE = """
+import _thread, time
+go = [False]
+ready = [0]
+done = [0]
+span = {}
+
+
+def work(name):
+    data = [(i * 7919) % 400000 for i in range(400000)]
+    ready[0] += 1
+    while not go[0]:
+        pass
+    t0 = time.ticks_us()
+    data.sort()
+    span[name] = (t0, time.ticks_us())
+    done[0] += 1
+
+
+def wait(counter, want, ms):
+    t = time.ticks_ms()
+    while counter[0] < want:
+        assert time.ticks_diff(time.ticks_ms(), t) < ms, (counter[0], want)
+        time.sleep_ms(5)
+
+
+_thread.start_new_thread(work, ("a",))
+_thread.start_new_thread(work, ("b",))
+wait(ready, 2, 30000)
+go[0] = True
+wait(done, 2, 30000)
+(a0, a1), (b0, b1) = span["a"], span["b"]
+for lo, hi in (span["a"], span["b"]):
+    assert time.ticks_diff(hi, lo) > 10000, "a sort too short to tell: %d us" % time.ticks_diff(hi, lo)
+assert time.ticks_diff(b0, a1) >= 0 or time.ticks_diff(a0, b1) >= 0, span
+"""
+
+
+def has_gil(exe):
+    """Does this binary run its threads under a GIL, as every board does?
+    Cached per binary. A build that does not is the unix port's default, and
+    the console's input poller races its frame loop on it."""
+    key = ("gil", exe)
+    if key not in _PROBED:
+        try:
+            out = subprocess.run([exe, "-X", "heapsize=64M", "-c", _GIL_PROBE],
+                                 capture_output=True, text=True, timeout=120)
+            _PROBED[key] = out.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            _PROBED[key] = False
+    return _PROBED[key]
+
+
 def find_unix_mp(*modules, board_model=False):
     """The first desktop MicroPython that provides `modules`, or None."""
     if board_model:
-        if BOARD_MODEL.exists() and _provides(str(BOARD_MODEL), modules, True):
+        if (BOARD_MODEL.exists() and _provides(str(BOARD_MODEL), modules, True)
+                and has_gil(str(BOARD_MODEL))):
             return str(BOARD_MODEL)
         return None
     env = os.environ.get("MOYBYTE_MICROPYTHON")
@@ -104,7 +166,7 @@ def find_unix_mp(*modules, board_model=False):
 def missing_message(modules=(), why="", board_model=False):
     msg = ["the check did not run: no desktop MicroPython with the native "
            "usermods%s%s. Build one -- it takes about fifteen seconds:"
-           % (" in the boards' object model (32-bit, REPR_C)" if board_model
+           % (" in the boards' model (32-bit, REPR_C, one GIL)" if board_model
               else "",
               " (needs " + ", ".join(modules) + ")" if modules else "")]
     msg.append("")

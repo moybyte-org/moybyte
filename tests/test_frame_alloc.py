@@ -13,10 +13,18 @@ every byte was the console's frame.
 So this boots the REAL T-Deck desktop -- `moy_runtime.run_desktop`, the shared
 boot spine, the FrameLoop, the Workstation, the Player, `moycore_glue`'s
 WasmRun with its CartFrame hand-off -- on the desktop MicroPython built in the
-BOARDS' object model (32-bit words, REPR_C, single floats: see `make
-unix-micropython`), with its hardware replaced underneath by fakes that return
-what the C returns in the shapes the C returns them. It runs a compiled cart,
-lets it warm up, and then counts `gc.mem_alloc()` across whole loop frames.
+BOARDS' model (32-bit words, REPR_C, single floats, threads under one GIL: see
+`make unix-micropython`), with its hardware replaced underneath by fakes that
+return what the C returns in the shapes the C returns them. It runs a compiled
+cart, lets it warm up, and then counts `gc.mem_alloc()` across whole loop frames.
+
+THE GIL IS PART OF THE MODEL. The console's input poller is a thread that
+mutates the keyboard object while the frame loop runs, and a board's threads
+take turns under one GIL. The unix port's default is parallel threads with no
+GIL, and on that build the poller and the loop corrupt each other's maps and
+collections free what the other thread holds: a segfault or a lost attribute
+mid-boot, with the driver reporting nothing. `tests/unix_mp.py` refuses a
+board-model binary that is not under a GIL.
 
 WHAT IT PINS. The frames allocate nothing -- with nothing held, and with a
 button held down -- over windows long enough to take in two PERF periods and a
