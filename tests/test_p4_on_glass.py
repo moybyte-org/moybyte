@@ -244,11 +244,8 @@ def test_wifi_is_off_at_rest(board):
 
 
 def test_appearance_cart_is_claimed(board):
-    """The Appearance app must claim its cart on the DEVICE store. The device
-    seeds the folder from the TITLE slug (appearance.moy) while the host copies
-    the source folder (theme_picker.moy); an is_app that knows only the host
-    name reads False and Settings' APPEARANCE row silently does nothing (the
-    on-glass 2026-07-25 report)."""
+    """The Appearance app must claim its cart on the DEVICE store, or Settings'
+    APPEARANCE row silently does nothing."""
     st = board.state()
     cart = st.get("appearance_cart")
     assert cart, "no Appearance cart in the device store"

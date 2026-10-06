@@ -81,7 +81,7 @@ def test_a_cart_made_in_the_browser_survives_a_reload(tmp_path):
         mode_said, _asked, shelf, batches, detail = js[:5]
         assert "saved in this browser" in mode_said, \
             "a static host must land in site mode, said: %r\n%s" % (mode_said, out[-2000:])
-        assert "new_cart.moy" in shelf, "the cart was never created:\n%s" % out[-3000:]
+        assert "local.new_cart.moy" in shelf, "the cart was never created:\n%s" % out[-3000:]
         assert int(batches) >= 1, \
             "nothing was ever written to the local store (%s ops batches):\n%s" % (
                 batches, out[-3000:])
@@ -90,7 +90,7 @@ def test_a_cart_made_in_the_browser_survives_a_reload(tmp_path):
         # THE CLAIM: a second load, no server-side state, same browser.
         out2, js2 = _run("persist_reload", base, profile, tmp_path / "s2")
         assert "saved in this browser" in js2[0], js2[0]
-        assert "new_cart.moy" in js2[1], \
+        assert "local.new_cart.moy" in js2[1], \
             "the cart did NOT survive the reload:\n%s" % out2[-3000:]
         # ...and it came from the local store, not from the served carts.json.
         assert js2[2].startswith("loaded "), \
@@ -111,22 +111,19 @@ def test_a_cart_exports_and_imports_as_a_zip(tmp_path):
     try:
         _run("persist_create", base, profile, tmp_path / "s1")
         out, js = _run("persist_zip", base, profile, tmp_path / "s2")
-        assert len(js) >= 9, out[-3000:]
-        zipline, imported, again, shelf = js[2], js[4], js[6], js[8]
+        assert len(js) >= 7, out[-3000:]
+        zipline, imported, shelf = js[2], js[4], js[6]
         assert zipline.startswith("local.new_cart.moy.zip "), \
             "export produced nothing: %r\n%s" % (zipline, out[-3000:])
         assert int(zipline.split()[1]) > 200, "suspiciously small zip: %s" % zipline
-        # the archive's folder through moy_store.mjs's cartBase: "." is no
-        # name character there
-        assert "imported local_new_cart.moy" in imported, (imported, out[-3000:])
-        assert "imported local_new_cart_2.moy" in again, \
-            "the re-import did not take the duplicate name: %r\n%s" % (again, out[-3000:])
-        assert "local_new_cart_2.moy" in shelf, out[-2000:]
+        assert "imported local.new_cart_2.moy" in imported, \
+            "the re-import did not take the duplicate name: %r\n%s" % (imported, out[-3000:])
+        assert "new_cart_2.moy" in shelf, out[-2000:]
         print("\nzip round trip: %s -> %s" % (zipline, imported))
 
         # The imported cart is a COMMIT like any other: it must persist too.
         out2, js2 = _run("persist_reload", base, profile, tmp_path / "s3")
-        assert "local_new_cart_2.moy" in js2[1], \
+        assert "new_cart_2.moy" in js2[1], \
             "the imported cart did not survive a reload:\n%s" % out2[-3000:]
     finally:
         server.terminate()
@@ -146,7 +143,7 @@ def test_a_board_served_page_keeps_nothing_locally(tmp_path):
     web_e2e.require("store")
     store = tmp_path / "store"
     store.mkdir()
-    for cart in ("star_catcher.moy", "sakura.moy"):
+    for cart in ("moybyte.star_catcher.moy", "moybyte.sakura.moy"):
         shutil.copytree(ROOT / "system_carts" / cart, store / cart)
     port = web_e2e.free_port()
     server, base = _serve(port, ("--carts", str(store)))

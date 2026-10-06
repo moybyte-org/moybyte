@@ -1,4 +1,4 @@
--- Brick Siege Lua -- the #67 A/B twin of brick_siege.moy, a SEPARATE cart so both
+-- Brick Siege Lua -- the #67 A/B twin of moybyte.brick_siege.moy, a SEPARATE cart so both
 -- sit on the shelf and the same tank battle can be measured under either runtime.
 -- Brick Siege is the console's heaviest seed cart (the #66 ledger's floor), so it is
 -- the interesting one to run twice: the map() blit and the sprite pass are identical
@@ -15,7 +15,7 @@
 -- arithmetic in the same order, so the two runtimes produce the same draw stream and
 -- the same game state to within float32 rounding (verified per frame by
 -- experiments/lua_bridge/brick_parity.py, which runs this file on the shipped VM).
--- Kept in lockstep with brick_siege.moy/main.py: edit BOTH or the parity test fails.
+-- Kept in lockstep with moybyte.brick_siege.moy/main.py: edit BOTH or the parity test fails.
 --
 -- THIS CART IS moy core 0.1 ONLY -- no extensions, no vendor verbs. It is the
 -- showcase cart for the public spec (moy-spec), so a conformant third-party
@@ -32,7 +32,7 @@
 --   * print()'s 5th scale argument -> dropped. SPEC.md §6's print signature has
 --     no scale; the console accepted-and-ignored it.
 --
--- Port conventions (the canonical .lua cart shapes; see also sakura_lua.moy):
+-- Port conventions (the canonical .lua cart shapes; see also moybyte.sakura_lua.moy):
 --   * same call names + args as Python (map/mget/mset/spr/rect/print/btn/btnp/sfx/
 --     cfg/rnd)
 --   * Python's int() truncates toward zero: use trunc() below, NOT math.floor --

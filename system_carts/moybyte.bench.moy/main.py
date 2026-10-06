@@ -752,7 +752,7 @@ def _serial_report():
 
 
 # PMEM REPORT LAYOUT v1 (int32 cells; keep the three copies in lock-step --
-# this cart, bench_lua.moy/main.lua, tools/p4_cart_bench.py). The Lua twin
+# this cart, moybyte.bench_lua.moy/main.lua, tools/p4_cart_bench.py). The Lua twin
 # has no serial print (SPEC sandbox), so the report also goes into pmem, which
 # a harness reads live through moycore.pmem_image; this cart writes the SAME
 # cells so the channel itself is A/B-able. Cells are the bench's own save

@@ -843,9 +843,6 @@ def _remote_state(ws):
     except Exception as exc:  # noqa: BLE001
         st["stages_err"] = str(exc)
     try:
-        # Look system-app carts up by TITLE, never folder name: the device seeds
-        # from the title slug and the host store copies the source folder, and
-        # assuming either name is what broke `is_app` on the P4's glass.
         app = getattr(ws, "appearance_app", None)
         cart = None
         for c in ws.carts.all:

@@ -170,7 +170,7 @@ class GetCartsAppLayer(ListShellApp):
     TITLE = "GET CARTS"
     APP_TITLE = "Get Carts"
     APP_PERM = "getcarts"
-    APP_FOLDER = "get_carts.moy"
+    APP_FOLDER = "moybyte.get_carts.moy"
     # `install` is the network, its lease and the store an install writes;
     # `nav` is PLAY.
     NEEDS = ("surface", "theme", "damage", "install", "nav")

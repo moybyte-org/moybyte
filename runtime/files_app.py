@@ -10,7 +10,7 @@ DELETE -- which moves to the restorable trash, never destroys (trash trains
 recovery; confirms train click-through).
 
 Presented exactly like Paint: a `.moy` cartridge identity on the
-launcher (`files.moy`) backed by a responsive SYSTEM process. The grid itself
+launcher (`moybyte.files.moy`) backed by a responsive SYSTEM process. The grid itself
 is the shared `file_widgets.FileGridView` -- the same widget Paint's OPEN mode
 embeds, so browsing your stuff is one learned gesture everywhere. Selection
 state lives ON the grid (`grid.sel_name()`), never mirrored here.
@@ -121,7 +121,7 @@ class FilesAppLayer(ListShellApp):
     TITLE = "FILES"
     APP_TITLE = "Files"
     APP_PERM = "files"
-    APP_FOLDER = "files.moy"
+    APP_FOLDER = "moybyte.files.moy"
     # The shell roles this app uses (runtime/app_context.py). `nav` carries the
     # app-to-app jumps the router takes (a drawing opens in Paint, a note on
     # the text page, a project in the Editor) --

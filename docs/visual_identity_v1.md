@@ -442,7 +442,7 @@ Rules:
 ### 6.4 Desktop field and taskbar
 
 - Dark blue/navy field with an optional sparse dot/construction grid.
-- The selectable `system_carts/open_machine.moy` cart is the coded reference for this
+- The selectable `system_carts/moybyte.open_machine.moy` cart is the coded reference for this
   backdrop. It remains static and MOY64-only; Moy Night remains available.
 - Static by default so idle frames remain free.
 - Taskbar chips represent real open processes only.

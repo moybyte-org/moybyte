@@ -102,7 +102,7 @@ def test_the_bench_carries_the_assets_its_folded_scenes_read():
     # layer's width). Both carts ship the same two files.
     from runtime.editors_sheet import TileMap
 
-    for folder in ("bench.moy", "bench_lua.moy"):
+    for folder in ("moybyte.bench.moy", "moybyte.bench_lua.moy"):
         d = SYSTEM_CARTS / folder
         tm = TileMap.from_hex((d / "map.moymap").read_text())
         assert (tm.w, tm.h) == (64, 30), folder

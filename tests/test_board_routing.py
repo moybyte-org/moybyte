@@ -580,12 +580,12 @@ def test_seed_carts_model_the_fast_draw_habits():
     headless in tests/test_seed_carts.py, but that suite watches pixels, and
     telling a `cls()` from a declared backdrop there would take a recording
     canvas the console does not carry -- out of proportion for two idioms."""
-    battle = (Path("system_carts") / "brick_siege.moy" / "main.py").read_text(encoding="utf-8")
+    battle = (Path("system_carts") / "moybyte.brick_siege.moy" / "main.py").read_text(encoding="utf-8")
     assert 'background(col("dark_blue"))' in battle     # the backdrop is DECLARED
     assert 'cls(' not in battle.split("def _draw()")[1].split("def ")[0], (
         "the play frame must not clear -- the engine restores the declared backdrop")
     assert 'rect(0, 0, FIELD, FIELD' not in battle      # no double-paint backdrop
-    hop = (Path("system_carts") / "platformer.moy" / "main.py").read_text(encoding="utf-8")
+    hop = (Path("system_carts") / "moybyte.hop_quest.moy" / "main.py").read_text(encoding="utf-8")
     assert "def _build_layer():" in hop
     assert "lay.map(0, 0, MW, MH" in hop                # terrain rendered once
     assert "draw_layer(lay, 0, 0)" in hop               # stamped per frame

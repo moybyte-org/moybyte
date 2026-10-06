@@ -1,7 +1,7 @@
 """NOTES -- the console's one text app, and it is a CART (step 3 of
 docs/text_editing_2026-09.md).
 
-The skin is `system_carts/notes.moy/main.py`: a list, three buttons and a rect
+The skin is `system_carts/moybyte.notes.moy/main.py`: a list, three buttons and a rect
 for the editor handle. Everything below drives the REAL console the way a kid
 does -- open it off the launcher, tap what it drew, arrive from Files -- and
 asserts what is on the card or where the console ended up. The engine behind

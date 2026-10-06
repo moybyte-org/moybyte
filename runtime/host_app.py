@@ -250,6 +250,11 @@ def _manifest_version(cart_dir):
         return 0
 
 
+def _manifest_title(cart_dir):
+    with open(os.path.join(cart_dir, "manifest.json"), encoding="utf-8") as f:
+        return json.load(f)["title"]
+
+
 def _seed_system_carts(carts_dir):
     """Copy the read-only system .moy folders into the user store so the launcher shows
     them (and the child duplicates/edits copies). Version-aware (#47): a built-in whose
@@ -260,12 +265,11 @@ def _seed_system_carts(carts_dir):
     os.makedirs(carts_dir, exist_ok=True)
     names = ([n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
              if os.path.isdir(SYSTEM_CARTS) else [])
-    # A retired seed leaves the store, once, and so do the built-ins' folders
-    # from before their namespace (#162).
-    moy_carts.sweep_store(carts_dir, folders=names)
+    moy_carts.sweep_store(carts_dir, [{"title": _manifest_title(
+        os.path.join(SYSTEM_CARTS, n))} for n in names])
     for name in names:
         src = os.path.join(SYSTEM_CARTS, name)
-        dst = moy_carts.cart_path(carts_dir, moy_carts.BUILTIN_NS + "." + name)
+        dst = moy_carts.cart_path(carts_dir, name)
         if not os.path.exists(dst):
             shutil.copytree(src, dst)
         elif _manifest_version(src) > _manifest_version(dst):

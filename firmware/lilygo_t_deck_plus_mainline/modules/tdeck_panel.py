@@ -89,7 +89,7 @@ ASYNC_FLUSH = True
 # all -- its `background(col("dark_blue"))` is a `cls()`, a PSRAM fill -- so it
 # cannot move by a microsecond. On the shipped roster the carts that CAN move
 # are exactly three, the ones with a screen-wide `make_layer(W, H)` restored at
-# (0, 0): sakura, letter_blitz and platformer. Every `background()` in
+# (0, 0): sakura, letter_blitz and hop_quest. Every `background()` in
 # system_carts takes a COLOUR (open_machine's `background(field)` included --
 # `field` is a `col()`), so the Image form, which bakes a full-screen layer and
 # is the other shape this arms for, has no cart exercising it here.

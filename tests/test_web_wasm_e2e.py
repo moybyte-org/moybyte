@@ -341,7 +341,7 @@ def test_get_carts_installs_a_compiled_cart_without_its_modules_and_it_plays(tmp
     row = lay.row_rect(0)
     one = lay.buttons(1)[0]
     try:
-        out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"note": "Get Carts lists the compiled cart as one to GET", "wait": 4000},
             {"shot": "list"},
             {"click": [row[0] + row[2] // 2, row[1] + row[3] // 2]},

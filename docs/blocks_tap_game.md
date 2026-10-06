@@ -6,7 +6,7 @@ to a new spot. A timer counts down -- when it hits zero, it's GAME OVER. Tap aga
 to play once more.
 
 Everything here uses only blocks and buttons that exist in the editor. The finished
-cart ships as `system_carts/tap_game.moy` -- you can open it to peek, or build your
+cart ships as `system_carts/moybyte.tap_game.moy` -- you can open it to peek, or build your
 own from scratch.
 
 ## Controls (host simulator)
@@ -196,7 +196,7 @@ Blocks used here:
 To run the shipped version on the host:
 
 ```bash
-python tools/simulate_desktop.py --cart system_carts/tap_game.moy
+python tools/simulate_desktop.py --cart system_carts/moybyte.tap_game.moy
 ```
 
 ## Want to see the code?

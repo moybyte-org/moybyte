@@ -3,7 +3,7 @@
 Deliberately tiny and built ONLY on the public seams, so it doubles as the
 "how to write an app" example:
 
-  * a cartridge IDENTITY (system_carts/calc.moy: manifest + a fallback main.py
+  * a cartridge IDENTITY (system_carts/moybyte.calc.moy: manifest + a fallback main.py
     an older shell runs as a plain cart) whose manifest carries the `app` block
     the shell registers from -- there is no per-app line in console.py;
   * one content-Layer class here (id/domain/draw/handle_input/handle_pointer +
@@ -103,7 +103,7 @@ class CalcAppLayer:
         path = cart.get("path")
         if not path:                 # embedded fallback cart (no writable store)
             return int(cart.get("version", 0)) >= 1
-        return builtin_name(path) == "calc.moy"
+        return builtin_name(path) == "moybyte.calc.moy"
 
     def open(self):
         self.entry = "0"

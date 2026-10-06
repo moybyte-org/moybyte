@@ -67,7 +67,7 @@ def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
         # written once, so the test registers its own title over the read.
         declared = ws.app_title
         ws.app_title = lambda kind: titles.get(kind) or declared(kind)
-    ws.look.select_wallpaper("open_machine", persist=False)
+    ws.look.select_wallpaper("moybyte.open_machine", persist=False)
     ws.open_desk()
     ws.pointer.visible = False
     ws._toast_until = 0

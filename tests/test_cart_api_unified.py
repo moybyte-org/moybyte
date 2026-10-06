@@ -230,7 +230,7 @@ def test_a_several_script_cart_survives_the_bake_and_the_seed(tmp_path):
     from runtime import moy_carts
 
     src = tmp_path / "system_carts"
-    cart = src / "port.moy"
+    cart = src / "moybyte.port.moy"
     cart.mkdir(parents=True)
     (cart / "manifest.json").write_text(json.dumps(
         {"format": "moy-1", "title": "Port", "type": "game", "version": 3,

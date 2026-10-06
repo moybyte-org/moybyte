@@ -1,7 +1,7 @@
--- Sakura Lua -- the #67 A/B twin of sakura.moy, a SEPARATE cart so both sit on
+-- Sakura Lua -- the #67 A/B twin of moybyte.sakura.moy, a SEPARATE cart so both sit on
 -- the shelf and the same scene can be measured under either runtime.
 --
--- The backdrop (images/bg.moyimg, byte-identical to sakura.moy's) is an image
+-- The backdrop (images/bg.moyimg, byte-identical to moybyte.sakura.moy's) is an image
 -- supplied by the project owner (AI-generated; the project's own, no outside
 -- rights holder), converted to the 320x240 MOY64 bitmap
 -- by tools/import_sakura_bg.py. That same script writes scenes/blossoms.moyscene,
@@ -14,7 +14,7 @@
 -- arithmetic in the same order, so the two runtimes produce the same draw stream
 -- and the same petal state to within float32 drift (verified per frame by
 -- experiments/lua_bridge/host_parity.py, which runs this file on the shipped VM).
--- Kept in lockstep with sakura.moy/main.py: edit BOTH or the parity test fails.
+-- Kept in lockstep with moybyte.sakura.moy/main.py: edit BOTH or the parity test fails.
 -- Launches through the manifest "runtime": "lua" seam: host and device run the
 -- SAME vendored Lua -- runtime/lua_host.py over the ctypes binding here,
 -- moycore there.

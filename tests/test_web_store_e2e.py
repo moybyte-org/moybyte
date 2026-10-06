@@ -175,7 +175,7 @@ def test_a_hosted_console_installs_carts_into_its_own_store(tmp_path):
     profile = tmp_path / "chrome"
     at = _layout()
     try:
-        out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"note": "Get Carts opened at boot; the index came from PAGES", "wait": 4000},
             {"shot": "list"},
             {"js": "window.__moyPersist ? window.__moyPersist.mode : 'none'"},
@@ -247,7 +247,7 @@ def test_a_hosted_console_installs_carts_into_its_own_store(tmp_path):
         shelf = js2[1]
         assert "rock.moy" in shelf and "dm.moy" in shelf and "zap.moy" not in shelf, \
             "the installs did not survive a reload:\n%s" % out2[-3000:]
-        assert "get_carts.moy" in shelf, \
+        assert "moybyte.get_carts.moy" in shelf, \
             "a system cart the store never had did not come from the bundle"
         assert js2[2].startswith("loaded "), js2[2]
 
@@ -302,7 +302,7 @@ def test_a_hosted_console_takes_an_external_file_from_its_mirror(tmp_path):
     server, base = web_e2e.serve(site, web_e2e.free_port())
     at = _layout()
     try:
-        out, js = web_e2e.run(tmp_path, "mirror", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "mirror", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"note": "Get Carts opened at boot", "wait": 4000},
             {"click": at["row"][0]},
             {"wait": 800}, {"click": at["one"]},
@@ -340,7 +340,7 @@ def test_a_board_served_page_gets_no_carts_of_its_own(tmp_path, board, home):
     pages.files["/index.json"] = b'{"version": 1, "carts": []}'
     store = tmp_path / "store"
     store.mkdir()
-    shutil.copytree(ROOT / "system_carts" / "get_carts.moy", store / "get_carts.moy")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.get_carts.moy", store / "moybyte.get_carts.moy")
     site = _console(tmp_path, pages.base + "/index.json")
     port = web_e2e.free_port()
     p = subprocess.Popen([sys.executable, "serve.py", str(port), str(site),
@@ -354,7 +354,7 @@ def test_a_board_served_page_gets_no_carts_of_its_own(tmp_path, board, home):
                 break
             except OSError:
                 time.sleep(0.1)
-        out, js = web_e2e.run(tmp_path, "board", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "board", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"wait": 2500},
             {"js": "window.__moyPersist ? window.__moyPersist.mode : 'none'"},
             {"js": "JSON.stringify((window.__moyUpdate || {}).services || null)"},
@@ -384,7 +384,7 @@ def test_a_board_with_a_big_store_serves_a_page_that_boots(tmp_path):
     web_e2e.require("store", "carts")
     store = tmp_path / "store"
     store.mkdir()
-    shutil.copytree(ROOT / "system_carts" / "get_carts.moy", store / "get_carts.moy")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.get_carts.moy", store / "moybyte.get_carts.moy")
     sys.path.insert(0, str(ROOT))
     from tools import wasm_cart
     wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "tier.moy"),
@@ -414,7 +414,7 @@ def test_a_board_with_a_big_store_serves_a_page_that_boots(tmp_path):
                 break
             except OSError:
                 time.sleep(0.1)
-        out, js = web_e2e.run(tmp_path, "big_board", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "big_board", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"wait": 2500},
             {"js": "window.__moyPersist ? window.__moyPersist.mode : 'none'"},
             {"js": "JSON.stringify((window.__moyUpdate || {}).services || null)"},

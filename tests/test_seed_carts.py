@@ -31,7 +31,7 @@ def _run(ws, frames, dt=1 / 30):
 def test_seed_cart_folders_present_and_valid():
     import json
 
-    for folder in ("pet", "tiny_runner", "platformer", "tap_red", "harpoon_pop"):
+    for folder in ("moybyte.pixel_pet", "moybyte.tiny_runner", "moybyte.hop_quest", "moybyte.tap_only_red", "moybyte.harpoon_pop"):
         d = SYSTEM_CARTS / (folder + ".moy")
         assert (d / "manifest.json").is_file(), folder
         assert (d / "main.py").is_file(), folder
@@ -159,10 +159,10 @@ def test_platformer_level_rows_are_equal_width():
     # with the constants (the shape a resize leaves behind) is caught.
     import re
 
-    src = (SYSTEM_CARTS / "platformer.moy" / "main.py").read_text(encoding="utf-8")
+    src = (SYSTEM_CARTS / "moybyte.hop_quest.moy" / "main.py").read_text(encoding="utf-8")
     mw = int(re.search(r"^MW = (\d+)", src, re.M).group(1))
     mh = int(re.search(r"^MH = (\d+)", src, re.M).group(1))
-    blob = (SYSTEM_CARTS / "platformer.moy" / "map.moymap").read_text(encoding="utf-8")
+    blob = (SYSTEM_CARTS / "moybyte.hop_quest.moy" / "map.moymap").read_text(encoding="utf-8")
     lines = [ln.strip() for ln in blob.split("\n") if ln.strip()]
     assert lines, "empty map.moymap"
     assert lines[0].split() == [str(mw), str(mh)], (
@@ -241,28 +241,28 @@ def test_tap_red_scores_red_and_penalizes_other(tmp_path):
 # interacts with -- the collectible, the obstacle and the goal were still circ/rect
 # in code, which is the same defect one rung down.
 CONVERTED_SHEETS = {
-    "pet": (0, 1, 2, 3, 6),      # pet faces, then the mood face and the care heart
-    "tiny_runner": (0, 1, 2, 32),   # runner heroes, a cactus, the parallax hill
-    "platformer": (0, 1, 3, 5),  # hop heroes, the coin, the goal flag
-    "star_catcher": (0, 1, 2, 3, 6),   # catchers, star, basket span, life heart
-    "scroll_demo": (0, 3, 6, 32, 34, 38),  # both heroes, coin, tree, cloud, flag
-    "harpoon_pop": (0, 2, 5, 8, 12, 64),   # both hunters, then one tile per bubble size
-    "letter_blitz": (1, 2, 3, 16, 18),     # brick, turret, star, the two tank spans
+    "moybyte.pixel_pet": (0, 1, 2, 3, 6),      # pet faces, then the mood face and the care heart
+    "moybyte.tiny_runner": (0, 1, 2, 32),   # runner heroes, a cactus, the parallax hill
+    "moybyte.hop_quest": (0, 1, 3, 5),  # hop heroes, the coin, the goal flag
+    "moybyte.star_catcher": (0, 1, 2, 3, 6),   # catchers, star, basket span, life heart
+    "moybyte.sky_run": (0, 3, 6, 32, 34, 38),  # both heroes, coin, tree, cloud, flag
+    "moybyte.harpoon_pop": (0, 2, 5, 8, 12, 64),   # both hunters, then one tile per bubble size
+    "moybyte.letter_blitz": (1, 2, 3, 16, 18),     # brick, turret, star, the two tank spans
     # The bench twins' folded ray scene: one wall texture per maze tile id, and
     # +16 is that wall's dim side-on face (they were ray_test/ray_lua's tiles).
-    "bench": (64, 65, 66, 67, 80, 81, 82, 83),
-    "bench_lua": (64, 65, 66, 67, 80, 81, 82, 83),
+    "moybyte.bench": (64, 65, 66, 67, 80, 81, 82, 83),
+    "moybyte.bench_lua": (64, 65, 66, 67, 80, 81, 82, 83),
 }
 # Letter Blitz is the partial case worth stating: its PROPS are sheet tiles above,
 # but its 26 letters deliberately stay GLYPH_ROWS in main.py -- the trace bonus
 # reads which pixels are ink and no verb reads the sheet back (there is no sget),
 # so a sheet copy would be a second source of truth, not an editable one.
-GLYPH_DATA_CARTS = {"letter_blitz": "GLYPH_ROWS"}
+GLYPH_DATA_CARTS = {"moybyte.letter_blitz": "GLYPH_ROWS"}
 
 # Tap Only Red stays PRIMITIVE on purpose: its bubbles are variable-radius
 # circles whose color IS the gameplay (red vs lure), set per-bubble at spawn --
 # a fixed 8x8 tile can't express that, so it has no sprites.moygfx.
-PRIMITIVE_CARTS = ("tap_red",)
+PRIMITIVE_CARTS = ("moybyte.tap_only_red",)
 
 
 def test_converted_carts_have_nonempty_sprite_sheets():
@@ -296,7 +296,7 @@ def test_glyph_data_carts_keep_their_table_in_source():
 def test_converted_carts_draw_no_hand_rolled_art():
     # The pass this ratchet records: the collectible/obstacle/goal art moved out of
     # main.py, so these carts no longer reach for a primitive where a tile belongs.
-    for folder in ("platformer", "star_catcher", "scroll_demo", "harpoon_pop"):
+    for folder in ("moybyte.hop_quest", "moybyte.star_catcher", "moybyte.sky_run", "moybyte.harpoon_pop"):
         src = (SYSTEM_CARTS / (folder + ".moy") / "main.py").read_text(encoding="utf-8")
         assert "spr(" in src, folder + " draws no sprites"
 
@@ -304,11 +304,11 @@ def test_converted_carts_draw_no_hand_rolled_art():
 def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
     from runtime import host_app
 
-    title_for = {"pet": "Pixel Pet", "tiny_runner": "Tiny Runner",
-                 "platformer": "Hop Quest", "star_catcher": "Star Catcher",
-                 "scroll_demo": "Sky Run", "harpoon_pop": "Harpoon Pop",
-                 "letter_blitz": "Letter Blitz", "bench": "Bench",
-                 "bench_lua": "Bench Lua"}
+    title_for = {"moybyte.pixel_pet": "Pixel Pet", "moybyte.tiny_runner": "Tiny Runner",
+                 "moybyte.hop_quest": "Hop Quest", "moybyte.star_catcher": "Star Catcher",
+                 "moybyte.sky_run": "Sky Run", "moybyte.harpoon_pop": "Harpoon Pop",
+                 "moybyte.letter_blitz": "Letter Blitz", "moybyte.bench": "Bench",
+                 "moybyte.bench_lua": "Bench Lua"}
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for folder, tiles in CONVERTED_SHEETS.items():
         _open_cart(ws, title_for[folder])
@@ -355,8 +355,8 @@ import re  # noqa: E402
 
 # Folder -> the sprite tile ids its sprites.moygfx must paint.
 WALLPAPER_SHEETS = {
-    "wallpaper_space": (0, 1),    # frog / robot pet faces (copied from star_catcher, #18)
-    "ocean": (0,),                # the fish
+    "moybyte.space_desktop": (0, 1),    # frog / robot pet faces (copied from star_catcher, #18)
+    "moybyte.ocean_desktop": (0,),                # the fish
 }
 
 
@@ -386,7 +386,7 @@ def test_wallpaper_carts_draw_via_integer_sprite_tile():
 def test_wallpaper_carts_load_their_sheet_and_run_headless(tmp_path):
     from runtime import host_app
 
-    title_for = {"wallpaper_space": "Space Desktop", "ocean": "Ocean Desktop"}
+    title_for = {"moybyte.space_desktop": "Space Desktop", "moybyte.ocean_desktop": "Ocean Desktop"}
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for folder, tiles in WALLPAPER_SHEETS.items():
         _open_cart(ws, title_for[folder])

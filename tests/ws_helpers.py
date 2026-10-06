@@ -145,3 +145,13 @@ def shelf(root):
     from runtime import moy_catalogue as cat
     return [c for c in (cat.load(e["h"]) for e in cat.catalogue(str(root)))
             if c]
+
+
+def select_first_game(ws):
+    """Select the first GAME on the launcher and return it. The shelf sorts by
+    folder, so `sel = 0` is whatever sorts first -- an app, today."""
+    for i, it in enumerate(ws.launcher.items):
+        if it.get("path") and it.get("type") == "game":
+            ws.launcher.sel = i
+            return it
+    raise AssertionError("no game cart seeded")

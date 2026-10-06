@@ -342,7 +342,7 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
 
 
 def test_tapping_the_wifi_icon_launches_the_wifi_tool(tmp_path):
-    """Part 3: the right-zone wifi icon is a shortcut -- tapping it LAUNCHES the wifi.moy
+    """Part 3: the right-zone wifi icon is a shortcut -- tapping it LAUNCHES the moybyte.wifi.moy
     tool (runs it; never the editor). From the launcher home the tap lands on the running
     tool (screen "desktop", cart type "tool")."""
     from runtime import host_app
@@ -353,7 +353,7 @@ def test_tapping_the_wifi_icon_launches_the_wifi_tool(tmp_path):
     drv.frame(1 / 30)
     assert ws.screen == "desktop"               # launched the wifi tool (ran it)
     assert ws.cart is not None and ws.cart.get("type") == "tool"
-    assert (ws.cart.get("path") or "").endswith("wifi.moy")
+    assert (ws.cart.get("path") or "").endswith("moybyte.wifi.moy")
 
 
 def test_launch_wifi_tool_is_a_noop_when_absent(tmp_path):
@@ -363,7 +363,7 @@ def test_launch_wifi_tool_is_a_noop_when_absent(tmp_path):
     ws = _ws(tmp_path)
     # Drop every wifi tool from the launcher store view.
     ws.launcher.set_items([it for it in ws.launcher.items
-                           if not (it.get("path") or "").endswith("wifi.moy")])
+                           if not (it.get("path") or "").endswith("moybyte.wifi.moy")])
     assert ws.launch_wifi_tool() is False
     assert ws.screen == "launcher"
 
@@ -910,14 +910,14 @@ def _open_edit_cart(ws):
     import os
     import shutil
     from runtime import host_app
-    src = os.path.join(str(ROOT), "system_carts", "star_catcher.moy")
-    dst = os.path.join(ws.carts_root, "star_catcher.moy")
+    src = os.path.join(str(ROOT), "system_carts", "moybyte.star_catcher.moy")
+    dst = os.path.join(ws.carts_root, "moybyte.star_catcher.moy")
     if os.path.exists(dst):
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
     ws.launcher.items = shelf(ws.carts_root)
     ws.launcher.sel = [i for i, c in enumerate(ws.launcher.items)
-                       if "star_catcher" in c["path"]][0]
+                       if "moybyte.star_catcher" in c["path"]][0]
 
 
 def test_config_tab_play_runs_and_persists_config(tmp_path):

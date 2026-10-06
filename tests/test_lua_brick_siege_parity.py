@@ -1,7 +1,7 @@
 """Parity: the Brick Siege Lua port against main.py, on the shipped VM (#67).
 
 Runs experiments/lua_bridge/brick_parity.py's harness: the real
-system_carts/brick_siege.moy/main.py and system_carts/brick_siege_lua.moy/main.lua
+system_carts/moybyte.brick_siege.moy/main.py and system_carts/moybyte.brick_siege_lua.moy/main.lua
 under one deterministic fake API (shared PRNG, shared tilemap, scripted
 buttons), the Lua side under runtime/lua_host's MoycoreHostRun -- libmoy's
 binding over the vendored Lua 5.4 the boards compile, LUA_32BITS and all --

@@ -4,7 +4,7 @@
 // staged-module import error, cart crash, or protocol break surfaces here.
 //
 //   node harness.mjs             # full sweep
-//   node harness.mjs star_catcher.moy   # one cart
+//   node harness.mjs moybyte.star_catcher.moy   # one cart
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";

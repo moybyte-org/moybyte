@@ -86,7 +86,7 @@ Each was mocked and judged worse (§11).
   `name()`, `variant()`, `set()`, `set_variant()`, `skin`, `set_skin`;
   `runtime/app_context.py`). App carts (`"type": "app"`) through the ungated
   `theme()` global, which returns today's token dict (`runtime/system_api.py`;
-  `system_carts/notes.moy` reads `th["panel"]` and `th["ink_dim"]`). **Games
+  `system_carts/moybyte.notes.moy` reads `th["panel"]` and `th["ink_dim"]`). **Games
   have no `theme()`**, and giving them one would be a cart-verb change in
   moy-spec's SPEC.md.
 - **Persisted settings:** `theme`, `theme_variant`, `skin` and `wallpaper` in

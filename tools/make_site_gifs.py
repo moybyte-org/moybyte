@@ -397,7 +397,7 @@ def scene_paint(r):
     corners up turns it into a smile, and the pet is drawn from that same tile at
     4x, so PLAY shows it immediately.
     """
-    cart = r.reset_cart("pet.moy", cfg={"autoplay": 1})
+    cart = r.reset_cart("moybyte.pixel_pet.moy", cfg={"autoplay": 1})
     r.desk(16)                               # (windowed tier only) the desktop
     r.open_editor(cart)                      # lands on Config ("Make it mine")
     r.settle(14)
@@ -414,7 +414,7 @@ def scene_paint(r):
 
 def scene_code(r):
     """The code editor is a tab in the same console: retype a constant, PLAY."""
-    cart = r.reset_cart("star_catcher.moy", cfg={"autoplay": 1})
+    cart = r.reset_cart("moybyte.star_catcher.moy", cfg={"autoplay": 1})
     r.desk(16)
     r.open_editor(cart)
     r.settle(12)
@@ -439,7 +439,7 @@ def scene_blocks(r):
     # is a touch-only cart with no scene, so on the desktop tier that half of the
     # window would sit empty; Coin Quest is the same kind of block program WITH a
     # stage (a player + coins), which is what that view was built to show.
-    cart = r.reset_cart("coin_quest.moy" if r.windowed else "tap_game.moy")
+    cart = r.reset_cart("moybyte.coin_quest.moy" if r.windowed else "moybyte.tap_game.moy")
     r.desk(16)
     r.open_editor(cart)
     r.ws.editor_app.open_blocks()             # open ON the Blocks tab (a block cart
@@ -461,7 +461,7 @@ def scene_blocks(r):
 
 def scene_tap(r):
     """The "Make it mine" cards: pick another pet on the Config tab, then PLAY."""
-    cart = r.reset_cart("pet.moy", cfg={"autoplay": 1})
+    cart = r.reset_cart("moybyte.pixel_pet.moy", cfg={"autoplay": 1})
     r.desk(16)
     r.open_editor(cart)
     r.settle(20)

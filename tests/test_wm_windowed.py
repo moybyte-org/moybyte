@@ -965,7 +965,7 @@ def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
 
 def test_bar_wifi_icon_deep_links_to_settings_wifi(tmp_path):
     """On the windowed desktop the bar's wifi icon opens Settings -> WIFI (a
-    window over whatever runs) instead of launching the wifi.moy tool cart."""
+    window over whatever runs) instead of launching the moybyte.wifi.moy tool cart."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open()                                  # a game is running

@@ -1,7 +1,7 @@
 """The Bench pmem report (2026-08-17): the Lua twin's sandbox has no serial
 print, so both Bench carts write their numbers into a fixed pmem layout that
 tools/p4_cart_bench.py reads live through moycore.pmem_image. The layout lives
-in THREE hand-copies (bench.moy/main.py, bench_lua.moy/main.lua, the tool) --
+in THREE hand-copies (moybyte.bench.moy/main.py, moybyte.bench_lua.moy/main.lua, the tool) --
 these tests are the lock-step guard the comments in all three promise, plus a
 real writer->reader roundtrip through the Python cart's own namespace."""
 
@@ -15,8 +15,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import p4_cart_bench as bench_tool                     # noqa: E402
 
-PY_CART = (ROOT / "system_carts" / "bench.moy" / "main.py").read_text()
-LUA_CART = (ROOT / "system_carts" / "bench_lua.moy" / "main.lua").read_text()
+PY_CART = (ROOT / "system_carts" / "moybyte.bench.moy" / "main.py").read_text()
+LUA_CART = (ROOT / "system_carts" / "moybyte.bench_lua.moy" / "main.lua").read_text()
 
 
 def _lua_verb_ids():

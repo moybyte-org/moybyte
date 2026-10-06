@@ -1072,7 +1072,7 @@ def set_graduated(cart_or_path, value=True):
 # title, author, permissions not editable here"). `permissions` stays
 # READ-ONLY -- it gates privileged system-app identity + the network
 # capability (app_shell.py/artwork.py/appearance_app.py/calc_app.py check it,
-# wifi.moy is the one network cart), so turning it into a free-form kid toggle
+# moybyte.wifi.moy is the one network cart), so turning it into a free-form kid toggle
 # is a separate, security-sensitive design question the tracker doesn't settle;
 # title/author are the unambiguous, low-risk half of the gap.
 #

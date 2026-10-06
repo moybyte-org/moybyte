@@ -32,7 +32,7 @@ def _type(app, inp, text):
 
 
 def test_storybook_cart_is_versioned_system_app():
-    folder = ROOT / "system_carts" / "storybook.moy"
+    folder = ROOT / "system_carts" / "moybyte.storybook.moy"
     man = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     assert man["version"] >= 1
     assert man["type"] == "app"

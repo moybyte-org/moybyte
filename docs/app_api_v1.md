@@ -4,7 +4,7 @@
 and Storybook grew organically ("a cartridge identity backed by a
 responsive system process") into one public seam, aligned with
 `docs/shell_architecture_v1.md`'s privileged-system-carts direction. **Calc**
-(`runtime/calc_app.py` + `system_carts/calc.moy`) is the reference app — small
+(`runtime/calc_app.py` + `system_carts/moybyte.calc.moy`) is the reference app — small
 enough to read in one sitting, built ONLY on the seams below.
 
 ## The model
@@ -284,16 +284,16 @@ calculator or a notepad, fixed is the right answer.
 
 ### What a user app costs to write
 
-`system_carts/notes.moy` is the worked example: a notepad that types, saves into
+`system_carts/moybyte.notes.moy` is the worked example: a notepad that types, saves into
 the kid's documents (the same `docs` kind Files browses -- open one
 there and it is really the same file), lists what it saved and remembers which
 note was open. **200 lines of cart, no shell code, no registration, no
 `runtime/` module** -- and no C, no build, no reflash: it is a cart, so it edits
 and re-runs on the device.
 
-    system_carts/notes.moy/manifest.json   "type": "app" + the permissions
-    system_carts/notes.moy/main.py         _init / _update / _draw
-    system_carts/notes.moy/sprites.moygfx  one 8x8 tile: its launcher icon
+    system_carts/moybyte.notes.moy/manifest.json   "type": "app" + the permissions
+    system_carts/moybyte.notes.moy/main.py         _init / _update / _draw
+    system_carts/moybyte.notes.moy/sprites.moygfx  one 8x8 tile: its launcher icon
 
 Compare the shipped path in the checklist below: a Layer class, a `NEEDS` tuple,
 an `app` block, a regenerated `app_decls.py` and a firmware build.

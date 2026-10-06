@@ -103,7 +103,7 @@ def _check(out, js, form):
     assert sent.endswith(form), sent
 
     # 1. it converted and landed in the store
-    assert "imported tiny_dash.moy" in imported, \
+    assert "imported local.tiny_dash.moy" in imported, \
         "%s: the drop did not import: %r\n%s" % (form, imported, out[-3000:])
 
     # 2. the compatibility report is REAL prose about THIS cart (#194: report,
@@ -167,7 +167,7 @@ def test_a_dropped_pico8_cart_converts_runs_and_opens_in_the_editor(
         out, js = _run(base, tmp_path / "chrome", tmp_path / "s", drop)
         _check(out, js, form)
         shelf = js[-1]
-        assert "tiny_dash.moy" in shelf, \
+        assert "local.tiny_dash.moy" in shelf, \
             "the imported cart is not on the shelf: %r\n%s" % (shelf, out[-2000:])
         print("\n%s -> %s" % (form, js[3]))
     finally:
@@ -192,7 +192,7 @@ def test_a_file_that_is_not_a_cart_is_reported_not_crashed(tmp_path):
         assert panel == "block|bad", \
             "a refused import must paint as an error: %r" % panel
         # ...and the console is still alive: the shelf still answers.
-        assert "star_catcher.moy" in js[-1] or js[-1], js[-1]
+        assert "moybyte.star_catcher.moy" in js[-1] or js[-1], js[-1]
         assert "console crash" not in out, out[-2000:]
     finally:
         server.terminate()

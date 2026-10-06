@@ -57,7 +57,7 @@ class SpineVerbs:
         """True when `cart` is an app cart the Player runs as a USER APP -- a
         `type: "app"` cart that no registered shell app claims as its identity.
 
-        The claim check matters: `calc.moy` is also `type: "app"`, but the
+        The claim check matters: `moybyte.calc.moy` is also `type: "app"`, but the
         launcher dispatches it to `CalcAppLayer` and its `main.py` is only the
         older-shell fallback body."""
         return (cart is not None and cart.get("type") == "app"

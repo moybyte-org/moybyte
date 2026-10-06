@@ -445,12 +445,10 @@ def test_every_system_cart_is_versioned():
 
 
 def test_every_system_app_claims_its_device_seeded_folder(tmp_path):
-    """host == device for APP IDENTITY: the host store copies each cart's SOURCE
-    folder name (theme_picker.moy), but the device's seed_builtins names the
-    seeded folder from the TITLE slug (appearance.moy). An is_app that only
-    knows the source name silently fails to claim its cart on device, and the
-    app becomes unopenable -- Settings -> APPEARANCE did nothing on the P4
-    (on-glass, 2026-07-25). Every registered system app must accept BOTH."""
+    """host == device for APP IDENTITY: the host store copies each cart's
+    folder from system_carts/ and the device's seed_builtins names it from the
+    TITLE slug; both are `moybyte.<slug>.moy`, and every registered system app
+    claims it under either path."""
     from runtime import host_app, moy_carts
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))

@@ -64,9 +64,9 @@ at the moment of use and never captured here.
 """
 
 try:
-    from moy_store_base import builtin_name
+    from moy_store_base import BUILTIN_NS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import builtin_name
+    from runtime.moy_store_base import BUILTIN_NS
 
 try:
     from chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
@@ -175,16 +175,16 @@ class Appearance:
         return out
 
     def wp_id_for(self, cart):
-        # A stable id for a wallpaper cart: its folder name (slug) so the choice
-        # survives a reboot. Embedded/path-less carts fall back to the title slug.
+        # A stable id for a wallpaper cart: its folder name without the
+        # extension, so the choice survives a reboot. A path-less cart is an
+        # embedded built-in, named as its seed would be.
         path = cart.get("path")
         if path:
-            name = builtin_name(path) or path.rsplit("/", 1)[-1]
-            if name.endswith(".moy"):
-                name = name[:-4]
-            return name
+            name = path.rsplit("/", 1)[-1]
+            return name[:-4] if name.endswith(".moy") else name
         store = self.ws.carts_store
-        return store.slug(cart["title"]) if store else cart["title"]
+        return (BUILTIN_NS + "." + store.slug(cart["title"]) if store
+                else cart["title"])
 
     def wp_cart_by_id(self, wp_id):
         for c in self.wallpaper_carts():

@@ -158,9 +158,9 @@ def test_calc_is_app_rejects_lookalikes(tmp_path):
     from runtime.calc_app import CalcAppLayer
     assert not CalcAppLayer.is_app(None)
     assert not CalcAppLayer.is_app({"title": "Calc", "permissions": ("graphics",),
-                                    "path": "/x/calc.moy"})
+                                    "path": "/x/moybyte.calc.moy"})
     assert not CalcAppLayer.is_app({"title": "My Calc", "permissions": ("calc",),
-                                    "path": "/x/calc.moy"})
+                                    "path": "/x/moybyte.calc.moy"})
     assert CalcAppLayer.is_app({"title": "Calc", "permissions": ("calc",),
                                 "path": "/carts/moybyte.calc.moy"})
 

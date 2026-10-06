@@ -102,7 +102,7 @@ to open the editor on any cart.
 .venv/bin/python tools/simulate_desktop.py --size 1024x600 --windowed
 
 # run one cart
-.venv/bin/python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
+.venv/bin/python tools/simulate_desktop.py --cart system_carts/moybyte.star_catcher.moy
 
 # a headless tour, recorded to a GIF (how the GIFs above are made)
 .venv/bin/python tools/simulate_desktop.py --demo --gif demo.gif
@@ -150,7 +150,7 @@ def _draw():
 ```
 
 For Lua, set `"runtime": "lua"` in the manifest and write `main.lua`.
-`system_carts/sakura_lua.moy` is a Lua copy of `system_carts/sakura.moy`, and a
+`system_carts/moybyte.sakura_lua.moy` is a Lua copy of `system_carts/moybyte.sakura.moy`, and a
 test checks that they draw the same pixels.
 
 A cart can also be compiled, from C, C++ or Rust (see "Compiled carts" above).
@@ -161,7 +161,7 @@ Doom and Jet Teapot.
 - [`docs/moy_cart_api.md`](docs/moy_cart_api.md) — the verb table.
 - `system_carts/` — the 30 built-in carts, from a 70-line tap game to Brick Siege.
 - [`docs/blocks_tap_game.md`](docs/blocks_tap_game.md) — building
-  `system_carts/tap_game.moy` in the block editor, step by step.
+  `system_carts/moybyte.tap_game.moy` in the block editor, step by step.
 
 ## The spec
 

@@ -108,9 +108,9 @@ def test_seed_system_carts_have_a_bumped_version_and_declared_kinds_match_their_
     a buttons-only game, and a textmode()+touch game -- each manifest version is
     bumped (#47) so an already-seeded device/host picks up the new hint."""
     for folder, title, kinds, min_version in (
-        ("tap_red", "Tap Only Red", ["touch"], 5),
-        ("brick_siege", "Brick Siege", ["buttons"], 7),
-        ("letter_blitz", "Letter Blitz", ["keyboard", "touch"], 13),
+        ("moybyte.tap_only_red", "Tap Only Red", ["touch"], 5),
+        ("moybyte.brick_siege", "Brick Siege", ["buttons"], 7),
+        ("moybyte.letter_blitz", "Letter Blitz", ["keyboard", "touch"], 13),
     ):
         man = json.loads(open(os.path.join(SYSTEM_CARTS, folder + ".moy", "manifest.json"),
                               encoding="utf-8").read())

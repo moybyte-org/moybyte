@@ -826,13 +826,17 @@ export function zipTopDir(entries) {
     return top;
 }
 
-// A cart folder base from a zip's top directory or its file name -- the same
-// character class moy_carts.slug() lands on, so an imported folder is one a
-// board's store would have created itself.
-export function cartBase(name) {
+// A cart folder base from a zip's top directory or its file name: the cart's
+// id, `<author>.<name>`, each part in the id's characters (lowercase a-z, 0-9
+// and _, as moy_carts.slug() lands on), so an imported folder is one a board's
+// store would have created itself. A name with no author part is the local
+// author's (moy_store_base.USER_NS).
+export function cartBase(name, author = "local") {
     let n = String(name || "cart").replace(/\.zip$/i, "").replace(/\.moy$/i, "");
-    n = n.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-    return n || "cart";
+    const part = (s) => s.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    const dot = n.indexOf(".");
+    const who = dot < 0 ? author : part(n.slice(0, dot)) || author;
+    return part(who) + "." + (part(dot < 0 ? n : n.slice(dot + 1)) || "cart");
 }
 
 // moy_carts._unique_dir's rule, so an imported cart is named the way a

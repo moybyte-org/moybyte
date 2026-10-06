@@ -8,7 +8,7 @@ two is the language *around* the calls, and that is what this page is for.
 **You are probably here because you opened a cart in a language you don't
 write.** A cart imported from PICO-8 arrives as Lua (see the last section), and
 two of the seed carts ship as line-for-line twins on purpose:
-`system_carts/sakura.moy/main.py` and `system_carts/sakura_lua.moy/main.lua` are
+`system_carts/moybyte.sakura.moy/main.py` and `system_carts/moybyte.sakura_lua.moy/main.lua` are
 the same game in the two languages, so you can read one beside the other.
 
 **Which one is a cart?** Its `manifest.json` says: `"runtime": "python"` with
@@ -169,7 +169,7 @@ end
 
 Python's `int()` **truncates toward zero**; Lua's `math.floor` always goes
 **down**. They agree on `3.7` and disagree on `-3.7` (`-3` vs `-4`) — which is
-exactly the case a wrapped sprite hits. `sakura_lua.moy` carries the fix as a
+exactly the case a wrapped sprite hits. `moybyte.sakura_lua.moy` carries the fix as a
 three-line helper:
 
 ```lua

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Import the Sakura carts' backdrop from the owner's source image.
 
-`system_carts/sakura.moy` and `system_carts/sakura_lua.moy` share one static
+`system_carts/moybyte.sakura.moy` and `system_carts/moybyte.sakura_lua.moy` share one static
 scene: `images/bg.moyimg`, a 320x240 MOY64 index bitmap the cart bakes into an
 off-screen layer with a single spr() (see the carts' main.py/main.lua header).
 This script is the conversion that produced it -- run it again with the same
@@ -59,7 +59,7 @@ from runtime.palette import MOY64  # noqa: E402
 from tools import pngwrite  # noqa: E402
 
 W, H = 320, 240
-CARTS = ("sakura", "sakura_lua")
+CARTS = ("moybyte.sakura", "moybyte.sakura_lua")
 
 # Nearest-colour metric: plain RGB distance weighted toward how much each
 # channel carries luma, which keeps the sky's lavender ramp from snapping to

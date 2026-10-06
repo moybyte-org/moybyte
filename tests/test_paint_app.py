@@ -31,8 +31,8 @@ def _open_paint(ws):
 
 
 def test_paint_and_my_art_are_well_formed_system_carts():
-    paint = ROOT / "system_carts" / "paint.moy"
-    wall = ROOT / "system_carts" / "my_art.moy"
+    paint = ROOT / "system_carts" / "moybyte.paint.moy"
+    wall = ROOT / "system_carts" / "moybyte.my_art.moy"
     for folder in (paint, wall):
         man = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
         assert man["version"] >= 1
@@ -43,7 +43,7 @@ def test_paint_and_my_art_are_well_formed_system_carts():
 
 
 def test_the_paint_cart_body_is_only_the_fallback_card():
-    """Paint the APP is `runtime/artwork.py`; `paint.moy/main.py` is the card an
+    """Paint the APP is `runtime/artwork.py`; `moybyte.paint.moy/main.py` is the card an
     older shell shows instead, and nothing else.
 
     A registered app CLAIMS its cart (`console.open()` routes a claimed cart to
@@ -52,7 +52,7 @@ def test_the_paint_cart_body_is_only_the_fallback_card():
     carried a second 705-line drawing studio until 2026-09-15. The other four
     app-claimed carts ship the same 12-15 line card; this pins Paint to it.
     """
-    src = (ROOT / "system_carts" / "paint.moy" / "main.py").read_text(encoding="utf-8")
+    src = (ROOT / "system_carts" / "moybyte.paint.moy" / "main.py").read_text(encoding="utf-8")
     assert "UPDATE MOYBYTE TO OPEN" in src
     assert "def _update" not in src and "def _init" not in src
     assert len(src.splitlines()) < 40, "the fallback card grew a second app"
@@ -126,8 +126,8 @@ def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
     assert app._save()
 
     assert ws.artwork.set_wallpaper()
-    assert ws.look.wallpaper_id == "my_art"
-    assert moy_carts.load_system(carts)["wallpaper"] == "my_art"
+    assert ws.look.wallpaper_id == "moybyte.my_art"
+    assert moy_carts.load_system(carts)["wallpaper"] == "moybyte.my_art"
 
     titles = ws.artwork.targets()
     target_i = titles.index("Star Catcher")
@@ -471,7 +471,7 @@ def test_the_backdrops_loan_comes_back_on_every_wallpaper_change(tmp_path,
         assert art._wall_bitmap is not None and art._wall_bitmap.pix is indices
         assert art._wall_bitmap._rgb_i is None, "a stale draw must re-bake"
 
-        ws.look.select_wallpaper("my_art", persist=False)
+        ws.look.select_wallpaper("moybyte.my_art", persist=False)
         art.draw_wallpaper(cv)
         assert loans.stats() == on_my_art, "the ledger drifted across a switch"
         assert art._wall_bitmap.pix is indices, "the resample was paid twice"

@@ -97,7 +97,7 @@ normally, `1` starts it in the measured scene. A kid never sees it; a measuremen
 session flips it in the Editor's Config tab with no re-push, and
 `host_app._SEED_PRESERVE` keeps the value across a re-seed. `0`/`1` rather than
 `true`/`false` because that is what the shipped carts already use
-(`brick_siege_lua.moy/config.json`). Measured on Guition P4 glass the day it
+(`moybyte.brick_siege_lua.moy/config.json`). Measured on Guition P4 glass the day it
 landed — moss moss: `perf 0` logic 21ms / 30 fps drawn, `perf 1` logic 28ms /
 13 fps, which reproduces the retired twin cart's numbers from one cart.
 

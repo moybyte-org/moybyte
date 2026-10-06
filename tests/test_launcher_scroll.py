@@ -257,17 +257,19 @@ def test_tap_icon_opens_cart(tmp_path):
 
     ws = _ws_with_carts(tmp_path, 10)
     drv = host_app.ConsoleDriver(ws)
-    # Tap the second card -> RUNS it on RELEASE. The locked model (spec
+    # Tap a game's card -> RUNS it on RELEASE. The locked model (spec
     # shell_ux_v1.md): a launcher tap RUNS the cart, always, for every type --
     # no maker/player tap_mode dispatch.
-    r = ws.launcher.tile_rect(1)
+    game = next(i for i, it in enumerate(ws.launcher.items)
+                if it.get("path") and it.get("type") == "game")
+    r = ws.launcher.tile_rect(game)
     cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
     drv.touch(cx, cy)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
     assert ws.screen == "desktop"                        # the tap RAN the cart
-    assert ws.launcher.sel == 1
+    assert ws.launcher.sel == game
 
 
 def test_tap_a_scrolled_to_card_opens_the_right_cart(tmp_path):

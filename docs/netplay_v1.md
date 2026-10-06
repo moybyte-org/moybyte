@@ -159,7 +159,7 @@ against ~60 µs on an S3; a 12-deep TX queue plus sender task took that to **20
 
 A cart sees `players()` and `btn(name, i)` and nothing else: it never learns
 whether pad two is a keyboard beside it or a console across the room. The
-two-player seeds `system_carts/brick_siege.moy` and `harpoon_pop.moy` read that
+two-player seeds `system_carts/moybyte.brick_siege.moy` and `moybyte.harpoon_pop.moy` read that
 API, and their Lua twins are ported in step — both tiers have fed player two
 since 2026-08-22 (libmoy's snapshot had the slots and nothing filled them, so a
 faithful twin fielded one tank against the original's two). Brick Siege's roster

@@ -62,7 +62,7 @@ def _twin(tmp_path, mode, close_after=None, pin=None):
     store.mkdir()
     # Two carts: a single-cart store trips worker.js's kiosk path (the game IS
     # the page), and there would then be no page chrome to drive.
-    for cart in ("star_catcher.moy", "sakura.moy"):
+    for cart in ("moybyte.star_catcher.moy", "moybyte.sakura.moy"):
         shutil.copytree(ROOT / "system_carts" / cart, store / cart)
     port = web_e2e.free_port()
     argv = [sys.executable, "serve.py", str(port), "dist",

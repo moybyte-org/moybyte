@@ -625,7 +625,7 @@ def _select_cart(name):
 
 
 def open_cart(name):
-    """Select + run a cart by folder name ('star_catcher.moy', extension
+    """Select + run a cart by folder name ('moybyte.star_catcher.moy', extension
     optional) or manifest title, skipping the launcher -- the single-cart-embed
     path (?cart=...). Unknown name -> False (the shelf stays up)."""
     if not _select_cart(name):

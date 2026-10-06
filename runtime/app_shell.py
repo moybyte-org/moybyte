@@ -87,7 +87,7 @@ class ListShellApp:
 
     APP_TITLE = None            # the shipped cart's title ("Files", ...)
     APP_PERM = None             # its identity permission ("browse", ...)
-    APP_FOLDER = None           # its store folder ("files.moy", ...)
+    APP_FOLDER = None           # its store folder ("moybyte.files.moy", ...)
 
     @classmethod
     def is_app(cls, cart):

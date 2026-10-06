@@ -24,7 +24,7 @@ import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" prob
 SYSTEM_CARTS = ROOT / "system_carts"
 
 
-from ws_helpers import StubInput, open_cart as _open_cart
+from ws_helpers import StubInput, open_cart as _open_cart, select_first_game
 
 
 # -- palette ---------------------------------------------------------------
@@ -717,6 +717,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     assert ws.launcher.items                            # seeded system carts
     drv.frame(1 / 30)
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                   # launcher renders
+    select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
     assert ws.screen == "desktop"                       # opened a cart (plays)
@@ -745,6 +746,7 @@ def test_code_view_arrows_move_caret_and_scroll(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
     ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
@@ -775,6 +777,7 @@ def test_code_editor_drag_scrolls_without_crashing(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
     ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
@@ -794,6 +797,7 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
     ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
@@ -825,6 +829,7 @@ def test_host_console_paint_via_mouse(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
     ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
@@ -1348,6 +1353,7 @@ def test_host_console_map_open_place_and_render(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
     ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
@@ -1375,6 +1381,7 @@ def test_host_console_map_erase_and_pan(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
@@ -1401,6 +1408,7 @@ def test_host_console_map_save_roundtrips(tmp_path):
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     cart_path = ws.cart["path"]
     ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
@@ -1425,6 +1433,7 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     tm = ws.tilemap
     before = tm.gen
@@ -1439,7 +1448,7 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
 # -- map editor zoom levels (#37 follow-up) --------------------------------
 
 def _open_cart_map(tmp_path, cart_name):
-    """Build a workstation, open the `<cart_name>.moy` seed cart, then enter the
+    """Build a workstation, open the `moybyte.<cart_name>.moy` seed cart, then enter the
     map editor. Returns (C, ws, drv)."""
     import os
     from runtime import console as C
@@ -1474,7 +1483,7 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     from runtime.map_editor_ui import _MV_ZOOMS
 
     fitted = 0
-    for name in ("brick_siege", "bench", "letter_blitz", "platformer", "scroll_demo"):
+    for name in ("brick_siege", "bench", "letter_blitz", "hop_quest", "sky_run"):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
         w, h = ws.tilemap.w, ws.tilemap.h
         assert ws.map_ui.map_zoom == 0                          # opens at the fit default

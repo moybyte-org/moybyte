@@ -22,7 +22,7 @@ right here on open (`_graduate_hand_edit`), so "leveled up to code" is never a
 transient, un-persisted, un-undoable guess again.
 
 Same app pattern as Paint/Appearance: a `.moy` cartridge identity
-(`storybook.moy`) backed by this responsive system process."""
+(`moybyte.storybook.moy`) backed by this responsive system process."""
 
 try:
     import ui as _ui
@@ -163,7 +163,7 @@ class StorybookAppLayer(ListShellApp):
     # The shipped identity (ListShellApp.is_app gates on these).
     APP_TITLE = "Storybook"
     APP_PERM = "storybook"
-    APP_FOLDER = "storybook.moy"
+    APP_FOLDER = "moybyte.storybook.moy"
     # The shell roles this app uses (runtime/app_context.py). Storybook is the
     # ONE shipped app that authors CARTS -- which is exactly why ctx.carts is a
     # role of its own and not folded into ctx.files (a story is executable

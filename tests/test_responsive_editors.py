@@ -20,10 +20,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+from ws_helpers import select_first_game  # noqa: E402
 
 
 def _open_first_cart(ws):
-    ws.launcher.sel = 0
+    select_first_game(ws)
     ws.open()
     return ws
 
@@ -318,7 +319,7 @@ def _scrolled_code_ws(tmp_path, **kw):
     panned AWAY from it -- what a kid has after tapping a line and drag-scrolling."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
-    ws.launcher.sel = 0
+    select_first_game(ws)
     ws.open_in_editor()
     ws.set_menu_view("code")
     ed = ws.editor

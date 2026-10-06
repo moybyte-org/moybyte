@@ -46,8 +46,8 @@ SIDE = cover_png.SIDE
 # has no storm yet at FRAMES; Tap The Coin's whole frame is an empty field
 # with one coin in it, so its cover is that coin, at twice its size.
 PICKS = {
-    "bullet_storm": (200, None),
-    "tap_game": (FRAMES, (34, 160, 64)),
+    "moybyte.bullet_storm": (200, None),
+    "moybyte.tap_game": (FRAMES, (34, 160, 64)),
 }
 
 

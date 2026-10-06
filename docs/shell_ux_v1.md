@@ -417,7 +417,7 @@ works with no carve-out. The wifi keyboard problem is not solved by Settings —
 (scan/pick/password/connect/forget over the injected wifi service), and because
 Settings is an app, wifi setup works while a game keeps running; the bar's wifi
 status icon deep-links here on the windowed tier, exactly this section's model.
-The standalone wifi.moy tool cart remains the launcher-grid path. Settings also
+The standalone moybyte.wifi.moy tool cart remains the launcher-grid path. Settings also
 gained a THEME row — selectable panel colorways, `chrome.THEMES`. 2026-07-11:
 the theme tokens grew the visual-identity-v1 §4.3 SEMANTIC roles — desktop /
 surface / ink / focus / play / author / danger etc., resolved for every theme

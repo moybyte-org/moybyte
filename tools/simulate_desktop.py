@@ -28,7 +28,7 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   python tools/simulate_desktop.py --gif out.gif --script "wait:20 right run wait:40 home"
 
   # launch a single cartridge directly (skip the launcher)
-  python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
+  python tools/simulate_desktop.py --cart system_carts/moybyte.star_catcher.moy
 
   # a roomy responsive desktop at a larger SYSTEM canvas (#39): the desktop reflows
   # to fill it; the game stays a fixed 320x240, composited as a centered viewport.

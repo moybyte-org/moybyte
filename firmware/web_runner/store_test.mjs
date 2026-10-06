@@ -385,16 +385,16 @@ for (const sync of [true, false]) {
     const bundle = {
         "star.moy/manifest.json": '{"title":"Star","system":true,"version":9}',
         "star.moy/main.py": "new code",
-        "get_carts.moy/manifest.json": '{"title":"Get Carts","system":true}',
-        "get_carts.moy/main.py": "pass",
-        "get_carts.moy/cover.png": { b: "AAAA" },
+        "moybyte.get_carts.moy/manifest.json": '{"title":"Get Carts","system":true}',
+        "moybyte.get_carts.moy/main.py": "pass",
+        "moybyte.get_carts.moy/cover.png": { b: "AAAA" },
         "demo.moy/manifest.json": '{"title":"Demo"}',
         "demo.moy/main.py": "x",
     };
     const got = store.missingSystemCarts(local, bundle);
     ok("a system cart the store lacks comes from the bundle, whole",
        Object.keys(got).sort().join() ===
-       "get_carts.moy/cover.png,get_carts.moy/main.py,get_carts.moy/manifest.json",
+       "moybyte.get_carts.moy/cover.png,moybyte.get_carts.moy/main.py,moybyte.get_carts.moy/manifest.json",
        JSON.stringify(Object.keys(got)));
     ok("one the store has is never touched, and a non-system cart never added",
        !("star.moy/main.py" in got) && !("demo.moy/main.py" in got));
@@ -517,8 +517,11 @@ ok("an imported cart takes the store's duplicate-naming rule",
    store.uniqueCartDir((n) => n in have, "star") === "star_3.moy",
    store.uniqueCartDir((n) => n in have, "star"));
 ok("a free name is taken as is", store.uniqueCartDir(() => false, "star") === "star.moy");
-ok("a zip file name becomes a legal folder base",
-   store.cartBase("My Game!.moy.zip") === "My_Game");
+ok("a zip file name becomes a legal folder base, under the local author",
+   store.cartBase("My Game!.moy.zip") === "local.my_game", store.cartBase("My Game!.moy.zip"));
+ok("a zip named for a cart's id keeps it",
+   store.cartBase("kenny.Star Catcher.moy.zip") === "kenny.star_catcher",
+   store.cartBase("kenny.Star Catcher.moy.zip"));
 
 console.log("\n" + (fail ? fail + " FAILED" : "all store checks passed"));
 process.exit(fail ? 1 : 0);

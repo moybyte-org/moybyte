@@ -48,7 +48,7 @@ S3 heap no longer boots to several times its live set (#224). The retained
 memory's main owner, `_LAYER_POOL`, becomes the kernel's in sprint 3 (§1.4).
 
 **MicroPython stays, in its right place.** It is why a kid can write an app in
-200 lines with no build (`system_carts/notes.moy`), why the editors iterate fast,
+200 lines with no build (`system_carts/moybyte.notes.moy`), why the editors iterate fast,
 and the language most of the console's carts are written in. What this doc ends
 is its role as the base a constrained OS stands on.
 

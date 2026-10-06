@@ -46,7 +46,7 @@ def _run_until_pop(ws, want, max_frames=40, dt=1 / 30):
 def test_letter_blitz_folder_present_and_valid():
     import json
 
-    d = SYSTEM_CARTS / "letter_blitz.moy"
+    d = SYSTEM_CARTS / "moybyte.letter_blitz.moy"
     assert (d / "manifest.json").is_file()
     assert (d / "main.py").is_file()
     man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))

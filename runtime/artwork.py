@@ -1065,7 +1065,7 @@ class ArtworkService:
         path = cart.get("path")
         if not path:                 # embedded fallback cart (no writable store)
             return int(cart.get("version", 0)) >= 1
-        return builtin_name(path) == "paint.moy"
+        return builtin_name(path) == "moybyte.paint.moy"
 
     def _wall_cart(self):
         for cart in self._carts.all():

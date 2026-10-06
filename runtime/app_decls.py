@@ -18,16 +18,16 @@ app; there is no per-app line anywhere in the shell.
   text_mode  True = a TYPING app (the clean ASCII keyboard)
   order      registration precedence (NOT the cart's shelf order)
   folder     the identity cart it rides on, in system_carts/
-  title      that cart's title (what the device names its seeded folder from)
+  title      that cart's title
   min_size   optional (w, h) windowed resize floor; omitted means the app's
              layout MIN_W/MIN_H are adopted at registration
 """
 
 APPS = [
-    {'id': 'artwork', 'entry': 'artwork:PaintAppLayer', 'text_mode': False, 'order': 10, 'folder': 'paint', 'title': 'Paint'},
-    {'id': 'appearance', 'entry': 'appearance_app:AppearanceAppLayer', 'text_mode': False, 'order': 20, 'folder': 'theme_picker', 'title': 'Appearance'},
-    {'id': 'storybook', 'entry': 'storybook_app:StorybookAppLayer', 'text_mode': False, 'order': 40, 'folder': 'storybook', 'title': 'Storybook'},
-    {'id': 'files', 'entry': 'files_app:FilesAppLayer', 'text_mode': True, 'order': 60, 'folder': 'files', 'title': 'Files'},
-    {'id': 'calc', 'entry': 'calc_app:CalcAppLayer', 'text_mode': False, 'order': 70, 'folder': 'calc', 'title': 'Calc'},
-    {'id': 'getcarts', 'entry': 'getcarts_app:GetCartsAppLayer', 'text_mode': False, 'order': 80, 'folder': 'get_carts', 'title': 'Get Carts'},
+    {'id': 'artwork', 'entry': 'artwork:PaintAppLayer', 'text_mode': False, 'order': 10, 'folder': 'moybyte.paint', 'title': 'Paint'},
+    {'id': 'appearance', 'entry': 'appearance_app:AppearanceAppLayer', 'text_mode': False, 'order': 20, 'folder': 'moybyte.appearance', 'title': 'Appearance'},
+    {'id': 'storybook', 'entry': 'storybook_app:StorybookAppLayer', 'text_mode': False, 'order': 40, 'folder': 'moybyte.storybook', 'title': 'Storybook'},
+    {'id': 'files', 'entry': 'files_app:FilesAppLayer', 'text_mode': True, 'order': 60, 'folder': 'moybyte.files', 'title': 'Files'},
+    {'id': 'calc', 'entry': 'calc_app:CalcAppLayer', 'text_mode': False, 'order': 70, 'folder': 'moybyte.calc', 'title': 'Calc'},
+    {'id': 'getcarts', 'entry': 'getcarts_app:GetCartsAppLayer', 'text_mode': False, 'order': 80, 'folder': 'moybyte.get_carts', 'title': 'Get Carts'},
 ]

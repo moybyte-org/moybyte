@@ -382,8 +382,14 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
            "Sheets", "Beeper", "Writer")
 # Generation 5 is #162's rename: every built-in moved from `<slug>.moy` into
 # its namespace, `moybyte.<slug>.moy`, so the sweep also takes the roster's
-# own titles' bare folders (`sweep_store`'s `seed`).
-RETIRED_GEN = 5
+# own titles' bare folders (`sweep_store`'s `seed`). Generation 6 takes
+# RETIRED_FOLDERS: the names a host store gave the built-ins whose source
+# folder was not their title's slug, before system_carts/ shipped each one
+# under its id.
+RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
+    "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
+    "wallpaper_space"))
+RETIRED_GEN = 6
 RETIRED_VER_NAME = "retired.ver"
 
 
@@ -425,11 +431,10 @@ def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN,
     return gone
 
 
-def sweep_store(root=CARTS_DIR, seed=None, folders=()):
+def sweep_store(root=CARTS_DIR, seed=None):
     """The one-shot pass a store OPENING runs, behind one door. Returns the
     number of retired folders removed. `seed` is the roster the store is
-    seeded from and `folders` any other bare built-in folders (the host's):
-    generation 5 takes their folders from before #162's namespace.
+    seeded from, whose titles' bare folders generation 5 takes.
 
     The door is kept for the next sweep that earns it, and the bar it has to
     clear is `prune_retired`'s: gated on a generation sidecar, so the warm path
@@ -439,7 +444,7 @@ def sweep_store(root=CARTS_DIR, seed=None, folders=()):
     titles = list(RETIRED)
     if seed:
         titles += [item[0] if is_packed(seed) else item["title"] for item in seed]
-    return prune_retired(root, titles, folders=folders)
+    return prune_retired(root, titles, folders=RETIRED_FOLDERS)
 
 
 def seed_any(seed, root, present, progress=None):

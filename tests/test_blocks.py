@@ -489,12 +489,12 @@ def test_tap_position_readers_compile_and_hit_test():
 
 
 # ----------------------------------------------------------------------------
-# The shipped tap_game.moy: its blocks.json is the source of truth, compiles to
+# The shipped moybyte.tap_game.moy: its blocks.json is the source of truth, compiles to
 # the shipped main.py, and the cart plays (tap the target -> score).
 # ----------------------------------------------------------------------------
 
 def _tap_game_dir():
-    return str(ROOT / "system_carts" / "tap_game.moy")
+    return str(ROOT / "system_carts" / "moybyte.tap_game.moy")
 
 
 def test_tap_game_blocks_json_compiles_to_shipped_main():

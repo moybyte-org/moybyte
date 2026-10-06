@@ -1856,10 +1856,9 @@ def h_status(resp):
 def test_launch_named_takes_a_title_or_a_folder(tmp_path):
     """The browser knows a cart by its TITLE (that is what rides every frame
     payload); a human at a serial prompt types part of a folder name. Both are
-    accepted because on device the two DIFFER by construction -- the board
-    seeds from the title slug while the host copies the source folder."""
+    accepted."""
     ws = _ws(tmp_path)
-    for name in ("Star Catcher", "star_catcher", "star_catcher.moy",
+    for name in ("Star Catcher", "star_catcher", "moybyte.star_catcher.moy",
                  "star catch"):
         assert ws.launch_named(name) == "Star Catcher", name
         ws.go_home()

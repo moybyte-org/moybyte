@@ -568,8 +568,8 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
 
     carts = str(tmp_path / "carts")
     moy_carts.ensure_dirs(carts)
-    moy_carts.save_system({"wallpaper": "moy_night"}, carts)
-    moy_carts.save_system({"wallpaper": "moy_night", "theme": "outline"}, carts)
+    moy_carts.save_system({"wallpaper": "moybyte.moy_night"}, carts)
+    moy_carts.save_system({"wallpaper": "moybyte.moy_night", "theme": "outline"}, carts)
     moy_carts.save_achievements(["first_cart"], carts)
     moy_carts.save_achievements(["first_cart", "first_edit"], carts)
 
@@ -577,7 +577,7 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
                  moy_carts.achievements_store_path(carts)):
         os.remove(path)                  # the crash window, again
 
-    assert moy_carts.load_system(carts) == {"wallpaper": "moy_night",
+    assert moy_carts.load_system(carts) == {"wallpaper": "moybyte.moy_night",
                                             "theme": "outline"}
     assert moy_carts.load_achievements(carts) == ["first_cart", "first_edit"]
 

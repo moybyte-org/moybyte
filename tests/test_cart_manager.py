@@ -356,7 +356,7 @@ def test_delete_prefers_the_open_cart_over_the_pickers_selection(tmp_path):
 def test_delete_keeps_the_last_cart(tmp_path):
     """A device that deleted its way to an empty shelf has no way back."""
     ws = build_ws(tmp_path)
-    only = ws.carts.all[0]
+    only = next(c for c in ws.carts.all if c.get("type") == "game")
     ws.carts.all = [only]
     ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
                          if it.get("path") == only.get("path"))

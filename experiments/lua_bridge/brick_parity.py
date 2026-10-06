@@ -1,8 +1,8 @@
 """Brick Siege Python-vs-Lua parity harness (#67, host edition).
 
 The sibling of host_parity.py (sakura), for the console's heaviest seed cart:
-runs the REAL system_carts/brick_siege.moy/main.py and its line-faithful Lua port
-brick_siege_lua.moy/main.lua side by side for N deterministic frames -- same
+runs the REAL system_carts/moybyte.brick_siege.moy/main.py and its line-faithful Lua port
+moybyte.brick_siege_lua.moy/main.lua side by side for N deterministic frames -- same
 seeded PRNG, same scripted buttons, same manifest config, same tilemap -- and
 after EVERY frame compares
 
@@ -88,8 +88,8 @@ from parity_wire import (decode, same, FloatStats, Lcg, PRNG_LUA,   # noqa: E402
                          check_prng_twins, ENC_LUA, FakeWs, FLOAT_TOL)
 
 _CARTS = os.path.join(_ROOT, "system_carts")
-PY_CART_DIR = os.path.join(_CARTS, "brick_siege.moy")        # the Python original
-LUA_CART_DIR = os.path.join(_CARTS, "brick_siege_lua.moy")   # the #67 A/B twin
+PY_CART_DIR = os.path.join(_CARTS, "moybyte.brick_siege.moy")        # the Python original
+LUA_CART_DIR = os.path.join(_CARTS, "moybyte.brick_siege_lua.moy")   # the #67 A/B twin
 DT = 1.0 / 32.0
 SEED = 0xC0FFEE % 2147483648
 
@@ -140,7 +140,7 @@ def _load_config():
     with open(os.path.join(LUA_CART_DIR, "manifest.json")) as fh:
         lua_cfg = json.load(fh)["config"]
     if py_cfg != lua_cfg:
-        raise AssertionError("brick_siege.moy and brick_siege_lua.moy configs "
+        raise AssertionError("moybyte.brick_siege.moy and moybyte.brick_siege_lua.moy configs "
                              "drifted: %r != %r" % (py_cfg, lua_cfg))
     return py_cfg
 
@@ -162,7 +162,7 @@ def _check_maps():
     with open(os.path.join(LUA_CART_DIR, "map.moymap")) as fh:
         b = fh.read()
     if a != b:
-        raise AssertionError("brick_siege.moy and brick_siege_lua.moy "
+        raise AssertionError("moybyte.brick_siege.moy and moybyte.brick_siege_lua.moy "
                              "map.moymap drifted")
 
 

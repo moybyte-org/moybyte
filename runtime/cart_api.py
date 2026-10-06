@@ -57,7 +57,7 @@ def _owned_image_cls(owner):
 
     image() stamps `_owner` on what the ENGINE loads, and that is only half the
     verb table: `Image` is exposed too, and a cart that constructs its own
-    320x240 picture -- `system_carts/paint.moy`'s body is the one in the tree --
+    320x240 picture -- `system_carts/moybyte.paint.moy`'s body is the one in the tree --
     got an untagged one, so its 153,600-byte RGB565 bake stayed on the gc heap,
     which is the heap that has no run that size once a console has been up a
     while (#186, device_canvas._paint_bake_buf). Same verb table, same size,

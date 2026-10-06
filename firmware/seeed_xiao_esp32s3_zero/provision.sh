@@ -27,14 +27,10 @@
 # arrive. Default is "push only if the board has no carts at all", which is the
 # image's own rule so the two paths cannot fight; `--carts` forces the push.
 #
-# TWO THINGS FORCING IT MEANS, both of them real. It OVERWRITES the repo's copy
-# of a cart over whatever is on the board, which on the one board that is the
-# store OF RECORD is a thing to mean rather than to do idly. And the two paths
-# NAME A FOLDER DIFFERENTLY -- `seed_builtins` names it from the cart's TITLE
-# slug (hop_quest.moy) while this pushes the SOURCE folder (platformer.moy),
-# which is the same split `gen_device_carts.title_to_folder` exists for -- so
-# forcing a push onto an image-seeded store leaves the launcher showing both.
-# Delete the store (or reflash) if that is what you have done.
+# Forcing it OVERWRITES the repo's copy of a cart over whatever is on the
+# board, which on the one board that is the store OF RECORD is a thing to mean
+# rather than to do idly. The pushed folder is the one `seed_builtins` names
+# (system_carts/ ships each built-in under its id, `moybyte.<slug>.moy`).
 #
 # The push did not go away, it became OPT-IN (`--modules`): a sub-minute dev
 # loop for a module that changed since the image was built. The hazard is why

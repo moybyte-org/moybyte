@@ -37,7 +37,7 @@ from ws_helpers import build_ws                # noqa: E402
 DT = 1.0 / 30
 
 # The shipped demo app, whose source both halves of the permission test share.
-NOTES_DIR = ROOT / "system_carts" / "notes.moy"
+NOTES_DIR = ROOT / "system_carts" / "moybyte.notes.moy"
 NOTES_SRC = (NOTES_DIR / "main.py").read_text(encoding="utf-8")
 
 
@@ -398,7 +398,7 @@ def test_a_game_gets_no_app_api_at_all(tmp_path):
 
 
 def test_an_identity_cart_of_a_shipped_app_is_not_a_user_app(tmp_path):
-    """`calc.moy` is `type: "app"` too, but the launcher dispatches it to the
+    """`moybyte.calc.moy` is `type: "app"` too, but the launcher dispatches it to the
     shell's CalcAppLayer -- its `main.py` is only the older-shell fallback. It
     must not be handed the user-app surface, and it must not take crash
     strikes for a body nobody runs."""

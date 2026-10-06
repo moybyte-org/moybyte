@@ -316,8 +316,8 @@ def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    # Slot 0 is the pinned Make tile; the first real cart is slot 1.
-    real = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    real = next(i for i, it in enumerate(ws.launcher.items)
+                if it.get("path") and it.get("type") == "game")
     x, y, w, h = ws.launcher.tile_rect(real)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
@@ -1043,7 +1043,7 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
     assert any(ws.covers.icons.values()), "icon cache should be populated"
     # RUN rehydrates in place and the cart actually plays
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("path"))
+                           if it.get("path") and it.get("type") == "game")
     ws.open()
     a = ws.cart
     assert a.get("lazy") is False and "src" in a

@@ -29,8 +29,8 @@ def _have_dist():
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 @pytest.mark.skipif(not _have_dist(), reason="web_runner dist/ not built")
 @pytest.mark.parametrize("search", [
-    "?desktop=1&cart=brick_siege.moy",     # windowed desktop, cart running
-    "?cart=star_catcher.moy",              # handheld tier, cart running
+    "?desktop=1&cart=moybyte.brick_siege.moy",     # windowed desktop, cart running
+    "?cart=moybyte.star_catcher.moy",              # handheld tier, cart running
     "?desktop=1",                          # idle desk: the redraw gate must hold
 ])
 def test_worker_protocol(search):

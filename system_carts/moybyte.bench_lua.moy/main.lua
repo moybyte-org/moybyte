@@ -1,6 +1,6 @@
 -- Bench Lua -- the on-glass performance meter's LUA TWIN (#163 door 2).
 --
--- Line-faithful port of bench.moy/main.py: same phases, same LCG workload,
+-- Line-faithful port of moybyte.bench.moy/main.py: same phases, same LCG workload,
 -- same constants -- so a glass A/B of the two carts reads the Python-vs-Lua
 -- VERB PATH cost directly (the sprites' C lane is shared; everything else
 -- rides each runtime's own dispatch). The report draws ON SCREEN and, since
@@ -19,7 +19,7 @@
 -- the float lane, and an indexed container plus a call.
 --
 -- PMEM REPORT LAYOUT v1 (int32 cells; keep the three copies in lock-step --
--- this cart, bench.moy/main.py, tools/p4_cart_bench.py):
+-- this cart, moybyte.bench.moy/main.py, tools/p4_cart_bench.py):
 --   0 magic 45948   1 version   2 n_verbs   3 done flag (written LAST)
 --   8 + i*3:  verb_id, k, best_ms          (verb ids in VERB_ID below)
 --   64 + i*8: phase_id, n, p50*10, p90*10, p99*10, worst*10, fps*10

@@ -103,8 +103,8 @@ end
 **Why pick Lua:** speed. Logic-heavy carts run flat frame times with no
 garbage-collector pauses (the measured verdicts live in issue #67 — e.g. Sakura's
 logic at a flat 3–4ms where the Python twin spikes to 19–24ms).
-`system_carts/sakura_lua.moy` is the living example — a line-by-line twin of
-`sakura.moy`, pixel-identical by test.
+`system_carts/moybyte.sakura_lua.moy` is the living example — a line-by-line twin of
+`moybyte.sakura.moy`, pixel-identical by test.
 
 The few Lua-specific notes:
 
@@ -457,7 +457,7 @@ The **Actors** block category gives you the no-loop version of the same thing:
 *for each `player` actor → move actor with the buttons*, *for each `coin` actor → if
 actor touching `player`? → remove actor, change score by 1*, then *clear*, *draw
 scene*, *write score*. Inside a *for each … actor* block, "actor" always means the
-one it's currently looping over. (`system_carts/coin_quest.moy` is the built-in demo.)
+one it's currently looping over. (`system_carts/moybyte.coin_quest.moy` is the built-in demo.)
 
 ## Make it fast (five habits)
 
@@ -726,7 +726,7 @@ you, and it can ask for a few of the console's own powers by naming them in
 | `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
 | `appearance` | `set_theme(name)` / `themes()` |
 | `launch` | `open_app(id)` |
-| `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/notes.moy` is that cart |
+| `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/moybyte.notes.moy` is that cart |
 
 Every app cart also gets four names with no permission needed, because they are
 how an app draws rather than what it may touch: **`screen()`** (the canvas),
@@ -738,7 +738,7 @@ and never crashes, so there is no `try` to write.
 Anything you did not ask for **is not there** — no `carts`, no shell. Writing
 that name is an ordinary "name is not defined" error, like a typo.
 
-`system_carts/notes.moy` is the worked example: it lists your notes, opens one
+`system_carts/moybyte.notes.moy` is the worked example: it lists your notes, opens one
 through the editor handle below, and holds no text of its own. The full rules
 (what is never grantable, and how to make an app reflow to a big screen with
 `_layout(w, h, fs)` instead of drawing at a fixed 320×240) are in
@@ -1018,5 +1018,5 @@ Player / One). When you add a drawing
 feature, add it to the ONE canvas class (`device_canvas.DeviceCanvas`) and keep the name
 identical.
 
-**Fuller example:** `system_carts/star_catcher.moy/main.py` (a complete game — sprites,
+**Fuller example:** `system_carts/moybyte.star_catcher.moy/main.py` (a complete game — sprites,
 particles, `cfg` tuning, `pmem`, hearts/score UI).

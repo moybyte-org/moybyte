@@ -209,14 +209,8 @@ def slug(title):
 
 def app_id_for(cart):
     """The identity a user app's prefs namespace and crash-guard strikes are
-    keyed by: the manifest TITLE's slug.
-
-    The title and not the folder, because the two differ by tier -- the device
-    seeds a folder from the title slug while the host copies the SOURCE folder
-    (`theme_picker.moy` vs `appearance.moy`, the mismatch that broke
-    `AppearanceAppLayer.is_app` on device and is now pinned by
-    `tests/test_device_seed_parity.py`). Keying on the title makes an app's
-    saved settings survive the crossing."""
+    keyed by: the manifest TITLE's slug, which a cart with no store path has
+    too."""
     if not cart:
         return "app"
     return slug(cart.get("title") or "app")

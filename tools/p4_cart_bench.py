@@ -7,7 +7,7 @@
     python3 tools/p4_cart_bench.py --diff before.json after.json
 
 Not to be confused with `p4_bench.py`, which benches the console's own UI
-panels end-to-end. This one drives `system_carts/bench.moy`: a MICRO phase
+panels end-to-end. This one drives `system_carts/moybyte.bench.moy`: a MICRO phase
 timing one draw VERB per frame in adaptively-sized batches (best-of-8, so a GC
 landing is excluded rather than averaged in), then a scene per thing worth
 timing -- the busy game frame, and since 2026-09-06 the software 3D frame
@@ -18,7 +18,7 @@ the raster kernel -- same workload every run, no play skill, no feel.
 
 `Bench Lua` is the line-faithful twin (same phases, same LCG workload). The
 SPEC.md 4.1 sandbox has no print, so the twin writes its report into PMEM
-instead (layout v1, the comment block in bench.moy/main.py -- both carts write
+instead (layout v1, the comment block in moybyte.bench.moy/main.py -- both carts write
 the same cells), and this tool reads it live through `moycore.pmem_image` over
 the dev channel, synthesizing the same BENCHCART lines -- so `show`, `--json`
 and `--diff` speak one format for both twins. `--frame` still captures the
@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 # PMEM REPORT LAYOUT v1 -- the carts' side of this is the comment block in
-# system_carts/bench.moy/main.py; keep the three copies in lock-step.
+# system_carts/moybyte.bench.moy/main.py; keep the three copies in lock-step.
 PMEM_MAGIC = 45948
 VERB_NAMES = ("cls", "rect", "circ", "line", "pix", "print", "rectb",
               "circb", "tri", "spr", "map", "sspr", "tline", "trib",

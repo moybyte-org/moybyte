@@ -86,6 +86,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from runtime.moy_store_base import BUILTIN_NS, cart_folder  # noqa: E402
+
 DEFAULT_FORMAT = "moybyte-cart-v1"
 
 # Every consumer of system_carts/ reads its declarations through the four
@@ -131,6 +134,12 @@ def read_manifests(system_carts_dir=None):
         if order in seen:
             raise ValueError("duplicate \"order\" %d: %s and %s"
                              % (order, seen[order], folder))
+        if name != cart_folder(man.get("title", ""), BUILTIN_NS):
+            raise ValueError(
+                "%s must be named %s: a built-in ships under the id every "
+                "store seeds it as, `%s.<title slug>`"
+                % (name, cart_folder(man.get("title", ""), BUILTIN_NS),
+                   BUILTIN_NS))
         seen[order] = folder
         out.append((folder, man))
     out.sort(key=lambda fm: (fm[1]["order"], fm[0]))
@@ -143,10 +152,7 @@ def cart_order(system_carts_dir=None):
 
 
 def title_to_folder(system_carts_dir=None):
-    """`{manifest title: folder}`. The device names a seeded folder from the
-    TITLE slug while the host copies the SOURCE folder, so the two names differ
-    (theme_picker.moy vs appearance.moy) and something has to relate them --
-    tests/test_device_seed_parity.py used to do it with a hand-written map."""
+    """`{manifest title: folder}`."""
     return {man["title"]: folder
             for folder, man in read_manifests(system_carts_dir)}
 
@@ -414,7 +420,7 @@ APP_DECLS_HEADER = (
     "  text_mode  True = a TYPING app (the clean ASCII keyboard)\n"
     "  order      registration precedence (NOT the cart's shelf order)\n"
     "  folder     the identity cart it rides on, in system_carts/\n"
-    "  title      that cart's title (what the device names its seeded folder from)\n"
+    "  title      that cart's title\n"
     "  min_size   optional (w, h) windowed resize floor; omitted means the app's\n"
     "             layout MIN_W/MIN_H are adopted at registration\n"
     '"""\n'

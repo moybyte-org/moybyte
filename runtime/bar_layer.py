@@ -617,7 +617,7 @@ class BarLayer:
         # WiFi status icon: on the WINDOWED desktop it deep-links into Settings ->
         # WIFI (spec Section 5's "status icons shortcut into Settings" -- Settings is
         # a system APP, so wifi setup coexists with a running cart, #38); on the
-        # fullscreen tiers it launches the wifi.moy tool (Part 3, unchanged device
+        # fullscreen tiers it launches the moybyte.wifi.moy tool (Part 3, unchanged device
         # behavior). Consumes the tap either way so it never leaks to the lent zone.
         if _in(px, py, wifi_hit):
             if getattr(ws, "windowed_chrome", False):

@@ -1,6 +1,6 @@
 """Sakura Python-vs-Lua parity harness (#67 Phase 4, host edition).
 
-Runs the REAL system_carts/sakura.moy/main.py and its line-faithful Lua port
+Runs the REAL system_carts/moybyte.sakura.moy/main.py and its line-faithful Lua port
 main.lua side by side for N deterministic frames -- same seeded PRNG, same
 scripted touch, same manifest config, and the shed scene both carts ship,
 parsed by the shared `widgets.Scenes` -- recording every draw call each side
@@ -64,8 +64,8 @@ from parity_wire import (decode, same, FloatStats, Lcg, PRNG_LUA,   # noqa: E402
                          check_prng_twins, ENC_LUA, FakeWs, FLOAT_TOL)
 
 _CARTS = os.path.join(_ROOT, "system_carts")
-PY_CART_DIR = os.path.join(_CARTS, "sakura.moy")        # the Python original
-LUA_CART_DIR = os.path.join(_CARTS, "sakura_lua.moy")   # the #67 A/B twin
+PY_CART_DIR = os.path.join(_CARTS, "moybyte.sakura.moy")        # the Python original
+LUA_CART_DIR = os.path.join(_CARTS, "moybyte.sakura_lua.moy")   # the #67 A/B twin
 DT = 1.0 / 32.0
 SEED = 0xC0FFEE % 2147483648
 PIXEL_TOL = 1          # a truncated float32 position may land one pixel over
@@ -90,7 +90,7 @@ def _load_config():
     with open(os.path.join(LUA_CART_DIR, "manifest.json")) as fh:
         lua_cfg = json.load(fh)["config"]
     if py_cfg != lua_cfg:
-        raise AssertionError("sakura.moy and sakura_lua.moy configs drifted: "
+        raise AssertionError("moybyte.sakura.moy and moybyte.sakura_lua.moy configs drifted: "
                              "%r != %r" % (py_cfg, lua_cfg))
     return py_cfg
 
@@ -105,7 +105,7 @@ def _load_scene():
         with open(os.path.join(d, "scenes", "blossoms.moyscene")) as fh:
             blobs.append(fh.read())
     if blobs[0] != blobs[1]:
-        raise AssertionError("sakura.moy and sakura_lua.moy scenes drifted")
+        raise AssertionError("moybyte.sakura.moy and moybyte.sakura_lua.moy scenes drifted")
     return Scenes({"blossoms": blobs[0]}, ["blossoms"])
 
 

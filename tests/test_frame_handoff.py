@@ -37,6 +37,7 @@ from types import SimpleNamespace
 from runtime import host_app
 from runtime.console import Workstation
 from runtime.wm_windowed import WindowedWM
+from ws_helpers import select_first_game  # noqa: E402
 
 DT = 1.0 / 30
 
@@ -80,7 +81,7 @@ class FakeCartFrame:
 def _playing(tmp_path, **kw):
     ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
+    select_first_game(ws)
     ws.open()
     ws._splash_until = None
     ws._toast_until = 0

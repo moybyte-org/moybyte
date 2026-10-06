@@ -2129,14 +2129,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         `run`, and the browser's PLAY ON DEVICE (moy_webhost's POST /run). Both
         arrive with a string somebody else chose, and the two obvious strings
         disagree -- the browser knows the cart by its TITLE (that is what rides
-        every frame payload), a human at a serial prompt types part of a folder
-        name, and title and folder differ on device by construction (the device
-        seeds from the title slug while the host copies the source folder --
-        `appearance.moy` vs `theme_picker.moy`, the mismatch #202's device-seed
-        parity test exists for). So both are accepted, exact before partial:
+        every frame payload) and a human at a serial prompt types part of a
+        folder name (`star_catcher` for `moybyte.star_catcher.moy`). So both
+        are accepted, exact before partial:
 
-            exact title -> exact folder (with or without .moy) -> title
-            substring, in shelf order
+            exact title -> exact folder (with or without .moy) -> title or
+            folder substring, in shelf order
 
         An empty `name` runs the first real cart, which is the dev channel's
         established `run` with no argument. Pseudo tiles (the pinned Make/New
@@ -2159,14 +2157,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 break
             title = str(it.get("title") or "").lower()
             folder = path.rsplit("/", 1)[-1].lower()
-            if folder.startswith("moybyte."):      # a built-in's shipped name (#162)
-                folder = folder[len("moybyte."):]
             if title == want and exact_title is None:
                 exact_title = i
             elif (folder == want or folder == want + ".moy") \
                     and exact_folder is None:
                 exact_folder = i
-            elif want in title and partial is None:
+            elif (want in title or want in folder) and partial is None:
                 partial = i
         pick = exact_title
         if pick is None:
@@ -2267,7 +2263,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def launch_wifi_tool(self):
         """Launch the WiFi system tool -- the right-zone wifi icon's tap target (Part 3):
-        find the wifi.moy tool in the launcher store, SELECT it, and RUN it (tools always
+        find the moybyte.wifi.moy tool in the launcher store, SELECT it, and RUN it (tools always
         launch, never the editor -- like launch_selected on a tool). Returns True iff it
         was found + launched; a no-op (False) when the tool isn't installed, so a device
         without it just doesn't respond to the tap rather than crashing. The launcher home
@@ -2276,7 +2272,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         for i in range(len(self.launcher.items)):
             it = self.launcher.items[i]
             path = it.get("path") or ""
-            if it.get("type") == "tool" and (path.endswith("wifi.moy")
+            if it.get("type") == "tool" and (path.endswith("moybyte.wifi.moy")
                                              or path.endswith("wifi")):
                 self.launcher.sel = i
                 self.open()            # tools always LAUNCH (Part 2)

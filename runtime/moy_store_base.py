@@ -187,12 +187,12 @@ USER_NS_KEY = "author"
 
 
 def builtin_name(path):
-    """The folder a built-in at `path` was shipped as (`files.moy` for
+    """The folder of the built-in at `path` (`moybyte.files.moy` for
     `.../moybyte.files.moy`), or None for any other cart: an app's identity
-    cart is a built-in, never a cart a kid made or copied."""
+    cart is a built-in, never a cart a kid made or copied. The folder is the
+    one name a built-in has: system_carts/ ships it, every store seeds it."""
     name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
-    head = BUILTIN_NS + "."
-    return name[len(head):] if name.startswith(head) else None
+    return name if name.startswith(BUILTIN_NS + ".") else None
 
 
 def cart_folder(name, ns=None):

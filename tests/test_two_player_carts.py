@@ -228,7 +228,7 @@ def test_both_carts_declare_the_multiplayer_permission(tmp_path):
     """Two-console play is gated on it, and a cart that forgot it would link
     with nobody while looking perfectly fine on one console."""
     import json
-    for folder in ("brick_siege", "harpoon_pop"):
+    for folder in ("moybyte.brick_siege", "moybyte.harpoon_pop"):
         man = json.loads(
             (ROOT / "system_carts" / (folder + ".moy") / "manifest.json")
             .read_text(encoding="utf-8"))

@@ -452,7 +452,7 @@ below used to hold:
   has yet called `pin_write` from a running cart, so `gpio_link` + the worker's
   pump remain host-checked. The wire shape between the two ends is pinned by a
   test that runs a real batch out of the browser queue and into
-  `zero_gpio.handle`, and `Pin Light` (`system_carts/pin_light.moy`) is the cart
+  `zero_gpio.handle`, and `Pin Light` (`system_carts/moybyte.pin_light.moy`) is the cart
   that closes it — step 5 below.
 
 **The reboot-into-STA leg LEFT this list on 2026-08-29**, and it is worth
@@ -652,7 +652,7 @@ new image's host did not come up.
 
     ```bash
     curl -X POST http://<board>/sync -H "Content-Type: application/json" \
-         -d '{"v":1,"pin":"NNNN","ops":[{"p":"pin_light.moy","dc":1}]}'
+         -d '{"v":1,"pin":"NNNN","ops":[{"p":"moybyte.pin_light.moy","dc":1}]}'
     # -> {"err": [], "ok": 1}
     ```
 

@@ -185,9 +185,9 @@ def test_bar_icons_get_plateless_light_variants(tmp_path):
 # -- Sections 1.2/6.1: the Library card's PLAY / CHANGE verbs ----------------
 
 def _select_real_cart(ws):
-    """Move the launcher selection onto the first real (non-pseudo) cart."""
+    """Move the launcher selection onto the first real (non-pseudo) game."""
     for i, it in enumerate(ws.launcher.items):
-        if it.get("path"):
+        if it.get("path") and it.get("type") == "game":
             ws.launcher.sel = i
             return it
     raise AssertionError("no real cart in the launcher grid")
