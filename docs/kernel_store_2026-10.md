@@ -24,9 +24,9 @@ under them.
 **Decision: the store speaks the file-system libraries the image already links
 — oofatfs on a card, littlefs2 on internal flash, POSIX in the browser and on
 the host — through one seam, `moy_vol` (§3). A volume has exactly one instance
-of its library. In 1b the store borrows the VM's instance for the length of a
-call; sprint 3's SD gate makes the kernel its owner, and the store does not
-change.**
+of its library. The store borrows the VM's instance for the length of a call
+until a volume is the kernel's: the card's in 1b's last slice (§10), the
+internal flash's in sprint 3. The store does not change when it is.**
 
 - **(a), at the library level.** Not the VFS's object API (`mp_vfs_open`,
   stream objects, `ilistdir` tuples), which allocates on the gc heap and raises
@@ -54,30 +54,34 @@ change.**
   `VfsPosix` to a VFS with no working directory, and a second littlefs to read
   the P4s' and the Zero's stores.
 
-| target | volumes | 1b borrows | owned below the VM (sprint 3) |
+| target | volumes | borrowed | owned below the VM |
 |---|---|---|---|
-| T-Deck | card, FAT/exFAT, `moy_sd` attached to the panel's SPI2 | `VfsFat` over `_NativeSDBlockDev` (Python, with its sector cache) | the kernel's `FATFS` over a C block device: `moy_sd`'s attach and the cache, in C |
-| Guition S3 | card on SPI3; with no card, littlefs `/moy` | `VfsFat` over `machine.SDCard`; `VfsLfs2` | the kernel's card driver on SPI3, initialised once and never torn down, with the cache this board never had; the kernel's `lfs2_t` |
-| Waveshare P4, Guition P4 | card on SDMMC slot 0; internal littlefs `/moy` | as the Guition S3 | when a P4 stops its VM (§10 question 5 of the kernel doc) |
+| T-Deck | card, FAT/exFAT, `moy_sd` attached to the panel's SPI2 | `VfsFat` over `_NativeSDBlockDev` (Python, with its sector cache) | slice 8: the kernel's `FATFS` over a C block device, `moy_sd`'s attach and the cache in C |
+| Guition S3 | card on SPI3; with no card, littlefs `/moy` | `VfsFat` over `machine.SDCard`; `VfsLfs2` | slice 8: the kernel's card driver on SPI3, initialised once and never torn down, with the cache this board never had; sprint 3: the kernel's `lfs2_t` |
+| Waveshare P4, Guition P4 | card on SDMMC slot 0; internal littlefs `/moy` | as the Guition S3 | slice 8: the card, with the cache; the internal littlefs when a P4 stops its VM (§10 question 5 of the kernel doc) |
 | Zero | internal littlefs | `VfsLfs2` | when the kernel is its entry (sprint 3) |
 | browser · host | MEMFS under `VfsPosix` · the disk | POSIX on the same paths | — |
 
-**The order does not change.** 1b does not need the SD gate: the store's code
-and both its interfaces (`moy_catalogue` above, `moy_vol` below) are the same
-over a borrowed and an owned instance; the gate changes who allocates the
-instance and what its block device is, and stays in sprint 3, where the stop
-inventory (§4.4) already puts the mounts. Two constraints on it: the owned card
-volume lands before an S3 stops its VM with a card mounted (`machine.SDCard`'s
-finaliser frees its SPI host at the sweep), and the owned littlefs volume
-before sprint 4 runs a cart VM-free off the Guition S3's internal store.
+**The card volume is 1b's last slice** (owner, 2026-10-06), taken from
+sprint 3's SD gate. The store's code and both its interfaces (`moy_catalogue`
+above, `moy_vol` below) are the same over a borrowed and an owned instance, so
+slices 0 to 7 need nothing from it; the slice changes who allocates the card's
+instance and what its block device is. It puts the T-Deck's read cache (dev
+`638661e`, Python today) in C under every console board's card, so the Guition
+S3 and the P4s read their cards through it too. It also meets, ahead of sprint
+3, the constraint that the owned card volume lands before an S3 stops its VM
+with a card mounted (`machine.SDCard`'s finaliser frees its SPI host at the
+sweep). The internal flash volumes stay sprint 3's, with the mounts in the stop
+inventory (§4.4 of the kernel doc), and the owned littlefs volume lands before
+sprint 4 runs a cart VM-free off the Guition S3's internal store.
 
-**The T-Deck's shared host** (`.claude/rules/boards.md`). In 1b every store
-call that reaches the card runs inside the Python storage gate (`with_sd_live`,
-the console's `_with_sd`), as the Python store's do. The owned volume keeps
-`moy_sd`'s lifecycle: attach once after the panel, no teardown between
-operations, `deinit` only after a failed attach. Whether the flush fence
-becomes per card transaction (the C block device against `moy_flush`'s
-`sync()`) or stays per session is sprint 3's, under
+**The T-Deck's shared host** (`.claude/rules/boards.md`). Until slice 8 every
+store call that reaches the card runs inside the Python storage gate
+(`with_sd_live`, the console's `_with_sd`), as the Python store's do. The owned
+volume keeps `moy_sd`'s lifecycle: attach once after the panel, no teardown
+between operations, `deinit` only after a failed attach. Whether the flush
+fence becomes per card transaction (the C block device against `moy_flush`'s
+`sync()`) or stays per session is slice 8's, under
 `native/moy_flush/moy_flush.c`'s header.
 
 ## 2. What crosses, and where it lands
@@ -85,6 +89,7 @@ becomes per card transaction (the C block device against `moy_flush`'s
 | component | Python twin | C |
 |---|---|---|
 | the volume seam | `runtime/moy_store_base.py`'s directory primitives | `+native/moy_store/moy_vol.h` |
+| the card volume (slice 8) | `device/moybyte_sd.py`'s block device and its read cache (T-Deck); `machine.SDCard` under `VfsFat` (Guition S3, the P4s) | `moy_vol`'s owned FAT backend: the kernel's `FATFS` over a C block device with the read cache |
 | the crash-safe write | `runtime/moy_fs.py` | `+native/moy_store/moy_fs.h` |
 | the index | `runtime/moy_index.py` | `native/moy_index/moy_index.h`, over `moy_htab` |
 | the catalogue, the covers' facts, create / duplicate / delete | `runtime/moy_carts.py`'s entry, `_each`, `_sheet_icon`, `create` and siblings | `+native/moy_store/moy_cat.h` |
@@ -146,8 +151,8 @@ are PSRAM and outlive a VM stop, and a handle the kernel holds stays valid
 across one. Its key is the
 root's id followed by the cart's folder name, not a path; the ABI, which
 compares keys bytewise, and its pinned values do not change. Roots are a small
-table (`moy_store_root(rid, path)`): the carts store, a profile's store (§8),
-a store on another volume. Only the store composes a cart's path from root and
+table (`moy_store_root(rid, path)`): the carts store; on a card with profiles
+(#131, §8), the family shelf and each kid's carts; a store on another volume. Only the store composes a cart's path from root and
 folder, and a catalogue of a root reconciles that root's rows alone, which
 replaces the carve's one-root-at-a-time rule. `handle(path)` stays for callers
 that start from a path (the sync wire, Files) and splits it against the roots.
@@ -242,8 +247,8 @@ readers plus a seed bump (CLAUDE.md, 2026-09-07).
 
 | issue | what the store carries | 1b | why |
 |---|---|---|---|
-| #162 namespaced ids | the folder name is the id, `<author>.<name>`, and the index key; create, duplicate and adopt write `"id"` into the manifest, and adopt names the folder from it; `title` is display only. A folder whose manifest has no `id` reads its id from its name, which is the rule, not a migration. The built-ins move into their namespace (§12) by a seed bump, the old folders retired by the sweep's generation gate | built: slices 1, 3, 4 | it is the index key; moving the key later changes the index twice |
-| #131 profiles | roots (§4); `owner` in the manifest and the row; a profile's saves at a path the store composes from (profile, id) | shaped | the isolation model awaits the owner; roots serve full isolation, owner plus saves serve shared games |
+| #162 namespaced ids | the folder name is the id, `<author>.<name>`, and the index key; create, duplicate and adopt write `"id"` into the manifest, and adopt names the folder from it; `title` is display only. A folder whose manifest has no `id` reads its id from its name, which is the rule, not a migration. A cart a user makes takes `<author>` from a Settings field (§12). The built-ins move into `moybyte` (`moybyte.<name>`) by a seed bump, the old folders retired by the sweep's generation gate | built: slices 1, 3, 4 | it is the index key; moving the key later changes the index twice |
+| #131 profiles | the decided layout (§12): a root for the family shelf (`/sd/moybyte/shared/carts`) and one for each kid's carts (`/sd/moybyte/kids/<name>/carts`), on a card only, since a board with no card has one profile; `owner` in the manifest and the row; a kid's saves at `kids/<name>/saves/<cart-id>`, a path the store composes from (profile, id), shared games included | built: the roots in slice 1, `owner` and the saves' path in slice 3; share (a snapshot copied to the family shelf) and remix (a copy into the kid's root) through adopt and provenance in slice 7 | the shelf is the family root plus the current kid's, so a sibling's carts are absent until shared; Who's playing, the PIN and its `gate(action)` are the spine's and the apps' |
 | #136 the time machine | `moy_journal_list` and `moy_journal_snap`; a restore appends the snapshot as a new commit, so history only grows | built: slice 6 | a read of the journal 1b moves; the timeline is the Editor's |
 | #127 backup, export, import | `moy_pack(h, history)` writes a `.moy` archive, a zip of the folder (`firmware/web_runner/moy_store.mjs`'s codec is its mirror, pinned by a round trip); `moy_adopt(staging, rid)` moves a staged cart into place with one rename and makes its row | built: slice 7 | Get Carts already stages and renames in Python; import, a gallery install and a remix all go through adopt |
 | #122, #125, #123, #195 sharing | provenance in the manifest and row (`origin`, the source's id and version, `remix_of`); publish is `moy_pack` without history under the wire's `_skip`; a remix is duplicate plus provenance | provenance and pack built: slice 7; the rest is not the store's | the transport is sprint 3's, the parent gate a setting (sprint 2), the screens apps, the gallery a server in moy-spec's tooling |
@@ -265,7 +270,7 @@ are in sprint 0's baseline.
 | seed arena | one seed | the 32 KiB inflate window (`wbits` 15) and one cart's files |
 | a loaded cart | until the binding built its dict; in sprint 4, the run | the cart's files, tens of KB |
 | a journal call | one call | one file and one snapshot |
-| an owned card volume (sprint 3) | the volume | the `FATFS` (~600 B) and a 32-sector cache (16 KiB) |
+| the owned card volume (slice 8) | the volume | the `FATFS` (~600 B) and a 32-sector cache (16 KiB) |
 
 The rows replace the gc heap's shelf catalogue (#224's census sizes it). Python
 keeps its shelf dicts while its VM runs, on the Python heap's budget; with the
@@ -308,11 +313,13 @@ the four consoles and the Zero's suite, and deletes the Python it replaces.
    FAT and littlefs; a host power-cut matrix (oofatfs on a RAM card, littlefs
    on a RAM flash, cut at every block write; every read returns the new file
    whole or the previous one); commit, reboot, intact on both S3s.
-3. **The catalogue, the covers' facts, the cart verbs, #162's id rule.** Gate:
+3. **The catalogue, the covers' facts, the cart verbs, #162's id rule** (the
+   author of a cart a user makes from Settings, §12). Gate:
    the shelf identical, key for key and icon for icon, over every seed, fixture
    and port cart and the broken-manifest cases; `moy_json` fuzzed against
    CPython's `json`; the heap after boot.
-4. **The seed, with #162's built-in rename as its seed bump.** Gate: the
+4. **The seed, with #162's rename of the built-ins into `moybyte.<name>` as
+   its seed bump.** Gate: the
    written tree byte-identical to the Python seed's on the host; a first boot
    on a wiped store and a warm boot on both S3s.
 5. **Loading a cart.** Gate: every cart loads whole, identical across
@@ -323,6 +330,18 @@ the four consoles and the Zero's suite, and deletes the Python it replaces.
 7. **Adopt, pack, provenance** (#127, #122, #195), Get Carts installing
    through adopt. Gate: a round trip against the browser's codec; an install on
    glass.
+8. **The card volume, owned** (§1; owner, 2026-10-06): on every console
+   board's card the kernel's `FATFS` over a C block device with the read
+   cache, mounted for Python at `/sd` so `VfsFat` and the store share one
+   instance; the T-Deck's `moy_sd` attach in C, the Guition S3's and the P4s'
+   card driver initialised once and never torn down; the T-Deck's storage gate
+   and flush fence under `native/moy_flush/moy_flush.c`'s header. It deletes
+   `device/moybyte_sd.py`'s Python block device. Gate:
+   `tests/test_store_on_vfs.py` over the C block device, every sector FatFS is
+   handed compared with the card's and a cache that skips the drop failing;
+   commit, reboot, intact on both S3s and both P4s; the boot and a live rescan
+   no slower than the Python cache's on the T-Deck and than the uncached card
+   on the Guition S3.
 
 ## 11. The browser, the Zero and the sync wire
 
@@ -349,13 +368,15 @@ never reaches the wire because the receiver resolves `<id>.moy` through the
 store. `apply_ops`' op vocabulary and the webhost's pull listings are sprint
 3's and unchanged; their writes go through C `moy_fs`.
 
-## 12. Open for the owner
+## 12. The owner's calls
 
-- **#131's model**: full isolation or shared games with split identity, and
-  whether a profile's saves live in its root keyed by cart id or in the cart
-  folder. The store is shaped for both.
-- **#162's author**: what a cart made before handles exist carries, and
-  whether the built-ins' namespace is `moybyte`.
-- **The owned card volume earlier**: it can be 1b's last slice instead of
-  sprint 3's, if the card cache on the Guition S3 and the P4s is wanted sooner.
-  Nothing in 1b needs it.
+- **#162's namespace and author** (owner, 2026-10-06). The built-ins'
+  namespace is `moybyte`: a built-in's id is `moybyte.<name>`. The author of a
+  cart a user makes comes from a Settings field, which defaults to the
+  profile's name once profiles exist and to `local` until then.
+- **The owned card volume is 1b's last slice** (owner, 2026-10-06), not
+  sprint 3's (§1, §10 slice 8): it has to be done anyway, and doing it in 1b
+  puts one card instance and its read cache under every board's store.
+- **#131's model** (owner, 2026-10-06) is #131's decision comment: one
+  folder per kid, a family shelf, optional parental controls; §8 says what the
+  store builds for it.
