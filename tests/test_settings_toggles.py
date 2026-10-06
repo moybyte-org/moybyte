@@ -47,7 +47,7 @@ SETTERS = [t[3] for t in SETTINGS_TOGGLES]
 # wiring, which is the failure `test_skin` was written after finding.
 OWNERS = {
     "settings_layer.py": "declares it, and draws the rows from it",
-    "console.py": "the boot apply (load_system)",
+    "console_spine.py": "the boot apply (load_system, the SpineVerbs mixin)",
     "console_perf.py": "the flat defaults (_init_perf, the PerfMeters mixin)",
     "console_settings.py": "the setters over the one _set_toggle tail (the "
                            "SettingsToggles mixin) -- the persistence tail",

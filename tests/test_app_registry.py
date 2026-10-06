@@ -96,16 +96,17 @@ def test_the_shell_registers_exactly_the_declared_apps(tmp_path):
 # -- structural: the hand-written lists cannot grow back --------------------
 
 def test_console_has_no_per_app_registration_line():
-    """`register_app` may appear exactly twice in console.py: its own definition
-    and the ONE call inside the declaration loop."""
-    src = _read("runtime/console.py")
+    """`register_app` may appear exactly twice in the Workstation's spine half
+    (runtime/console_spine.py, where the declaration loop lives): its own
+    definition and the ONE call inside that loop."""
+    src = _read("runtime/console_spine.py")
     tree = ast.parse(src)
     calls = [n for n in ast.walk(tree)
              if isinstance(n, ast.Call)
              and isinstance(n.func, ast.Attribute)
              and n.func.attr == "register_app"]
     assert len(calls) == 1, (
-        "console.py makes %d register_app calls; the declaration loop should "
+        "console_spine.py makes %d register_app calls; the declaration loop should "
         "make exactly one. Apps are declared in their manifest, not here." % len(calls))
     defs = [n for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "register_app"]

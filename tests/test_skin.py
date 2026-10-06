@@ -255,7 +255,7 @@ _SKIN_OWNERS = {
 # cascade, which re-applies the stored name through the owner.
 _SKIN_FORWARDERS = {
     "app_context.py": "Theme.set_skin -> ws.look.set_skin",
-    "console.py": "load_system's apply cascade -> ws.look.set_skin",
+    "console_spine.py": "load_system's apply cascade -> ws.look.set_skin",
 }
 
 
