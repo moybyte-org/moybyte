@@ -39,14 +39,14 @@
 
 #define MOY_SD_SECTOR 512
 // Sectors per multi-block transfer: a 16 KB bounce, taken per call and halved
-// until internal DMA memory can give it.
+// until internal DMA memory can give it. The card holds no bounce between
+// calls.
 #define MOY_SD_RUN 32
 
 #if MOY_SD_HAVE_IDF
 static sdmmc_card_t *s_card = NULL;
 static sdspi_dev_handle_t s_dev = -1;
 static bool s_host_inited = false;
-static uint8_t *s_bounce = NULL;  // 1-sector DMA-capable bounce (device lifetime)
 
 static void moy_sd_release(void) {
     if (s_card != NULL) {
@@ -138,8 +138,8 @@ static mp_obj_t moy_sd_init(size_t n_args, const mp_obj_t *args) {
     hostcfg.slot = s_dev;
     hostcfg.max_freq_khz = freq_khz;
 
-    // The card's state is no DMA buffer: PSRAM, so a card adds only its
-    // one-sector bounce to internal SRAM.
+    // The card's state is no DMA buffer: PSRAM, so an idle card holds no
+    // internal SRAM of its own.
     s_card = (sdmmc_card_t *)heap_caps_malloc(sizeof(sdmmc_card_t), MALLOC_CAP_SPIRAM);
     if (s_card == NULL) {
         s_card = (sdmmc_card_t *)malloc(sizeof(sdmmc_card_t));
@@ -151,13 +151,6 @@ static mp_obj_t moy_sd_init(size_t n_args, const mp_obj_t *args) {
     err = sdmmc_card_init(&hostcfg, s_card);
     moy_sd_check(err, "card_init");
 
-    if (s_bounce == NULL) {
-        s_bounce = (uint8_t *)heap_caps_malloc(MOY_SD_SECTOR, MALLOC_CAP_DMA);
-        if (s_bounce == NULL) {
-            moy_sd_release();
-            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_sd: no DMA bounce"));
-        }
-    }
     return mp_obj_new_int_from_uint(s_card->csd.capacity);
 #else
     (void)n_args;
@@ -179,27 +172,29 @@ static void moy_sd_require(void) {
 // multi-block command: on a write the card's busy time is paid once per run
 // instead of once per sector, and that wait is most of what a single-block
 // write costs. The run's bounce is taken for this call and given back; when
-// internal DMA memory cannot give it the run halves, and at one sector the
-// standing bounce carries it.
+// internal DMA memory cannot give it the run halves, down to one sector, and
+// with not even that the call fails with ESP_ERR_NO_MEM.
 // The card's sectors moved, raising nothing: ESP_OK or the driver's error.
 // What native/moy_store's card volume reads and writes through.
 int moy_sd_card_io(uint32_t start, uint8_t *buf, uint32_t count, int write) {
     if (s_card == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (count == 0) {
+        return ESP_OK;
+    }
     uint32_t run = count < MOY_SD_RUN ? count : MOY_SD_RUN;
-    uint8_t *big = NULL;
-    while (run > 1) {
-        big = heap_caps_malloc((size_t)run * MOY_SD_SECTOR,
-                               MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-        if (big != NULL) {
+    uint8_t *bounce = NULL;
+    while (run > 0) {
+        bounce = heap_caps_malloc((size_t)run * MOY_SD_SECTOR,
+                                  MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        if (bounce != NULL) {
             break;
         }
         run /= 2;
     }
-    uint8_t *bounce = big != NULL ? big : s_bounce;
-    if (big == NULL) {
-        run = 1;
+    if (bounce == NULL) {
+        return ESP_ERR_NO_MEM;
     }
     esp_err_t err = ESP_OK;
     for (uint32_t i = 0; i < count && err == ESP_OK; i += run) {
@@ -215,9 +210,7 @@ int moy_sd_card_io(uint32_t start, uint8_t *buf, uint32_t count, int write) {
             }
         }
     }
-    if (big != NULL) {
-        heap_caps_free(big);
-    }
+    heap_caps_free(bounce);
     return err;
 }
 

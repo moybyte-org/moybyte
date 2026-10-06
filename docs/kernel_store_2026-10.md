@@ -262,9 +262,11 @@ readers plus a seed bump (CLAUDE.md, 2026-09-07).
 
 **Everything the store holds is PSRAM** (`moy_htab_host_alloc`, and
 `heap_caps(MALLOC_CAP_SPIRAM)` for arenas). A store call runs on its caller's
-task with a small frame; the store owns no task, and its statics are a few
-pointers. The FAT long-name buffer and the card's DMA bounce exist already and
-are in sprint 0's baseline.
+task with a small frame that does not grow with what it reads (moy_json
+recurses only in its depth-capped scanner); the store owns no task, and its
+statics are a few pointers. The FAT long-name buffer exists already and is in
+sprint 0's baseline; the card's DMA bounce (`moy_sd_card_io`) is internal SRAM
+taken for one transfer and given back.
 
 | what | lives | ESTIMATED |
 |---|---|---|
