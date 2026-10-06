@@ -19,9 +19,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moyimg import _b64_decode
 try:
-    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _rmtree, _sibling_path, slug)
+    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, slug)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _rmtree, _sibling_path, slug)
+    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, slug)
 
 
 def _cart_version(path):
@@ -277,6 +277,9 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False):
     """
     total = len(packed)
     written = 0
+    # Which seeds are there at all, from one listing of the store: a lookup
+    # per seed walks the card's directories again for each.
+    names = _listing(root)
     for index, entry in enumerate(packed):
         title, version, blob = entry
         if progress is not None:
@@ -284,8 +287,10 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False):
                 progress(index, total, title)
             except Exception:             # noqa: BLE001 -- as in seed_builtins
                 progress = None
-        d = root + "/" + slug(title) + ".moy"
-        if _exists(d) and (only_new or int(version) <= _cart_version(d)):
+        name = slug(title) + ".moy"
+        d = root + "/" + name
+        if _has(names, root, name) and (only_new
+                                        or int(version) <= _cart_version(d)):
             continue
         # One cart in flight. seed_builtins gets a ONE-element list so every
         # rule it owns still applies -- and no progress hook, because the
@@ -300,6 +305,8 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False):
         # whose heap is megabytes of PSRAM a full scan per cart is a real cost
         # paid 35 times for a bound it does not move.
         seed_builtins([unpack_seed(blob)], root)
+        if names is not None:
+            names[name] = True
         written += 1
     return written
 

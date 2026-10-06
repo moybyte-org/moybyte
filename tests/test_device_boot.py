@@ -162,7 +162,22 @@ def test_the_backlight_is_lit_once_and_only_by_the_first_composed_frame():
     assert lights == [True], "the panel must be lit exactly once (#45)"
 
 
-def test_a_progress_repaint_moves_the_bar_and_keeps_the_wire_quiet(capsys):
+class _Clock:
+    """The boot's ms clock, moved by hand: a cart the seed writes takes
+    ~550ms, one it only checks takes none."""
+
+    def __init__(self, monkeypatch, step):
+        self.now, self.step = 1000, step
+        monkeypatch.setattr(boot_carts, "_ticks_ms", self.tick)
+
+    def tick(self):
+        self.now += self.step
+        return self.now
+
+
+def test_a_progress_repaint_moves_the_bar_and_keeps_the_wire_quiet(capsys,
+                                                                   monkeypatch):
+    _Clock(monkeypatch, 550)
     boot, canvas, _ = _boot()
     boot.seed_progress(0, 32, "cart")
     boot.seed_progress(1, 32, "cart")
@@ -172,6 +187,18 @@ def test_a_progress_repaint_moves_the_bar_and_keeps_the_wire_quiet(capsys):
     # watching the wire, and one line per cart would drown the boot log.
     assert out == "Moybyte boot: loading cartridges 1/32\n"
     assert canvas.paints == 2
+
+
+def test_a_seed_that_writes_nothing_paints_the_bar_once(capsys, monkeypatch):
+    """A warm boot checks every built-in and writes none: a repaint per cart
+    there was half the seed step on an S3 (#224). The wire keeps its line
+    every eighth cart."""
+    _Clock(monkeypatch, 2)
+    boot, canvas, _ = _boot()
+    for i in range(31):
+        boot.seed_progress(i, 31, "cart")
+    assert canvas.paints == 1
+    assert capsys.readouterr().out.count("loading cartridges") == 4
 
 
 def test_the_p4_label_is_the_only_thing_that_differs_in_the_wire_format(capsys):
@@ -355,11 +382,13 @@ def test_an_empty_store_also_falls_back(capsys):
     assert (len(carts), root) == (1, None)
 
 
-def test_the_seed_progress_bar_is_wired_into_the_store_call():
+def test_the_seed_progress_bar_is_wired_into_the_store_call(monkeypatch):
+    _Clock(monkeypatch, 550)
     boot, canvas, _ = _boot()
     boot.load_carts(FakeStore(), [{"title": "a"}, {"title": "b"}])
-    # One repaint per cart: free against ~550ms of flash writes each, and the
-    # only stretch of a first boot that knows how much of itself is left.
+    # One repaint per cart written: free against ~550ms of flash writes each,
+    # and the only stretch of a first boot that knows how much of itself is
+    # left.
     assert canvas.paints == 2
 
 

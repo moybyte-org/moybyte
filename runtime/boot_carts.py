@@ -17,23 +17,41 @@ except ImportError:  # pragma: no cover - host lane: no device tier staged
     def sram_census(stage):
         """No second region off-board, so nothing to weigh."""
 
+try:
+    from ticks import _ticks_ms, _ticks_diff
+except ImportError:  # pragma: no cover - host package lane
+    from runtime.ticks import _ticks_ms, _ticks_diff
+
+# The seed's progress bar repaints at most this often. A cart the seed WRITES
+# takes ~550ms, so every one still moves the bar; a seed that writes nothing
+# checks a cart in milliseconds, against ~16ms for a repaint of the splash.
+SEED_PAINT_MS = 250
+
 
 class BootCarts:
     """The cart load, seed and scan of a boot. Needs `say` and `note` from the
     class that takes it (`DeviceBoot`)."""
 
     def seed_progress(self, done, total, title):
-        """`seed_builtins`' progress callback: one repaint per cart, one serial
-        line every eighth.
+        """`seed_builtins`' progress callback: a repaint per cart at most every
+        SEED_PAINT_MS, one serial line every eighth.
 
-        A repaint costs nothing against ~550ms of flash writes per cart
-        (measured: the P4 boot stays at 25.4s), and this is the only stretch of
-        the boot that knows how much of itself is left. Every eighth also goes
-        to the wire, because a repaint says nothing to someone watching over
-        serial -- and one line per cart would drown the boot log.
+        This is the only stretch of the boot that knows how much of itself is
+        left, which is what a first boot -- every built-in written out -- needs
+        to show. A repaint costs nothing against ~550ms of flash writes per
+        cart (measured: the P4 boot stays at 25.4s) and ~16ms on an S3 against
+        a cart the seed only checks, so a seed that writes nothing paints once.
+        Every eighth also goes to the wire, because a repaint says nothing to
+        someone watching over serial -- and one line per cart would drown the
+        boot log.
         """
         if done % 8 == 0:
             self.say("boot: loading cartridges %d/%d" % (done + 1, total))
+        now = _ticks_ms()
+        last = getattr(self, "_seed_painted", None)
+        if done and last is not None and _ticks_diff(now, last) < SEED_PAINT_MS:
+            return
+        self._seed_painted = now
         self.note("loading cartridges  %d/%d" % (done + 1, total),
                   frac=float(done) / total if total else 1.0)
 
