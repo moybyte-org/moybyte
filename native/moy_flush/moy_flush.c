@@ -315,6 +315,12 @@ void moy_flush_kick(const uint8_t *src, int frame_rows) {
     xSemaphoreGive(moy_flush.kick_sem);
 }
 
+static void moy_flush_wait(void) {
+    for (int i = 0; moy_flush.frame_busy && i < 4; i++) {
+        xSemaphoreTake(moy_flush.done_sem, pdMS_TO_TICKS(300));
+    }
+}
+
 bool moy_flush_drain(void) {
     if (!moy_flush.frame_busy) {
         MOY_FLUSH_HANDOFF_BARRIER();
@@ -322,12 +328,16 @@ bool moy_flush_drain(void) {
     }
     uint32_t b0 = (uint32_t)esp_timer_get_time();
     MP_THREAD_GIL_EXIT();
-    for (int i = 0; moy_flush.frame_busy && i < 4; i++) {
-        xSemaphoreTake(moy_flush.done_sem, pdMS_TO_TICKS(300));
-    }
+    moy_flush_wait();
     MP_THREAD_GIL_ENTER();
     MOY_FLUSH_HANDOFF_BARRIER();
     moy_flush.block_us += (uint32_t)esp_timer_get_time() - b0;
+    return moy_flush.frame_clean && !moy_flush.frame_busy;
+}
+
+bool moy_flush_kdrain(void) {
+    moy_flush_wait();
+    MOY_FLUSH_HANDOFF_BARRIER();
     return moy_flush.frame_clean && !moy_flush.frame_busy;
 }
 

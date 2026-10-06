@@ -277,6 +277,10 @@ void moy_flush_kick(const uint8_t *src, int frame_rows);
 // bands may still be in flight -- the next frame's frame_begin recovers).
 bool moy_flush_drain(void);
 
+// The same wait for a caller with no VM, so no GIL to release: the kernel's
+// recovery floor (native/moy_kernel), which presents on a boot no VM ran in.
+bool moy_flush_kdrain(void);
+
 // Read-and-clear the latched transport error (the feeder runs the SPI, so an
 // error surfaces one frame late -- raise the finished frame's before handing
 // the next one over).

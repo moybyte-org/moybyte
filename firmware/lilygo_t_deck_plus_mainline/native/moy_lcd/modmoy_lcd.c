@@ -372,6 +372,151 @@ static void moy_lcd_free_all(void) {
     moy_flush.frame_clean = true;
 }
 
+// ---- the panel brought up: the binding's init() and the kernel's ----------
+// No raise and no VM in here: the kernel's recovery floor (native/moy_kernel)
+// calls it on a boot no VM has run in. `what` names the step that failed.
+
+#define MOY_LCD_TRY(call, name) do { esp_err_t e_ = (call); if (e_ != ESP_OK) { *what = (name); return e_; } } while (0)
+
+static esp_err_t moy_lcd_bringup(int nfbs, int pclk_hz, const char **what) {
+    // Board rail + every OTHER chip select on this bus parked inactive-high
+    // BEFORE the bus exists. TFT_CS is parked too and then handed to esp_lcd,
+    // which is what the fork's tdeck_board.init_board_pins does; what the hard
+    // constraints forbid is re-creating a Pin on TFT_CS/SD_CS AFTERWARDS, while
+    // a driver owns it.
+    moy_lcd_park_pin(MOY_LCD_PIN_POWERON, 1);
+    moy_lcd_park_pin(MOY_LCD_PIN_SD_CS, 1);
+    moy_lcd_park_pin(MOY_LCD_PIN_RADIO_CS, 1);
+    moy_lcd_park_pin(MOY_LCD_PIN_CS, 1);
+    // Backlight OFF until the first composed frame has been flushed (#45): the
+    // ST7789's power-on GRAM is noise and the user must never see it lit.
+    moy_lcd_park_pin(MOY_LCD_PIN_BL, 0);
+    gpio_set_pull_mode(MOY_LCD_PIN_MISO, GPIO_PULLUP_ONLY);
+
+    // Framebuffers in PSRAM, bounce buffers in internal DMA-capable SRAM.
+    // Allocated BEFORE the bus so a memory failure leaves nothing half-built.
+    for (int i = 0; i < nfbs; i++) {
+        s_fbs[i] = heap_caps_malloc(MOY_LCD_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_fbs[i] == NULL) {
+            moy_lcd_free_all();
+            *what = "no PSRAM framebuffer";
+            return ESP_ERR_NO_MEM;
+        }
+        memset(s_fbs[i], 0, MOY_LCD_FB_BYTES);
+    }
+    s_nfbs = nfbs;
+    // THE SHARED ENGINE: the internal-SRAM bounce slots plus the core-0 feeder
+    // and its semaphores, all idempotent across a soft reset. Started HERE,
+    // before the bus, for the same reason the buffers were allocated here --
+    // a memory failure leaves nothing half-built -- and the task simply waits
+    // on its semaphore until the first kick(), which cannot happen until this
+    // function has returned. A dead feeder is fatal: there is no feederless
+    // flush path to fall back to.
+    if (!moy_flush_start(&MOY_LCD_FLUSH_OPS)) {
+        moy_lcd_free_all();
+        *what = "no internal DMA bounce / feeder";
+        return ESP_ERR_NO_MEM;
+    }
+
+    spi_bus_config_t bus_cfg = {
+        .sclk_io_num = MOY_LCD_PIN_SCK,
+        .mosi_io_num = MOY_LCD_PIN_MOSI,
+        .miso_io_num = MOY_LCD_PIN_MISO,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        // Sized for a whole frame even though the flush bands: it costs only DMA
+        // descriptors, and it leaves room for a future PSRAM-direct transfer.
+        .max_transfer_sz = MOY_LCD_FB_BYTES + 64,
+        // The done-ISR lands on CORE 0 with the FEEDER (the VM core never
+        // fields per-band interrupts); the AUTO default would pin it to the
+        // init caller's core, which is the VM's. moy_sd shares this host, so
+        // SD completion ISRs move to core 0 with it -- also a win.
+        .isr_cpu_id = ESP_INTR_CPU_AFFINITY_0,
+    };
+    esp_err_t err = spi_bus_initialize(MOY_LCD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK) {
+        moy_lcd_free_all();
+        *what = "spi_bus_initialize";
+        return err;
+    }
+    s_bus_up = true;
+
+    esp_lcd_panel_io_spi_config_t io_cfg = {
+        .cs_gpio_num = MOY_LCD_PIN_CS,
+        .dc_gpio_num = MOY_LCD_PIN_DC,
+        .spi_mode = 0,
+        .pclk_hz = pclk_hz,
+        .trans_queue_depth = 10,
+        .on_color_trans_done = moy_lcd_trans_done,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+    };
+    MOY_LCD_TRY(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)MOY_LCD_SPI_HOST,
+                                           &io_cfg, &s_io), "panel_io_spi");
+
+    esp_lcd_panel_dev_config_t panel_cfg = {
+        // The T-Deck does not wire a panel reset GPIO; esp_lcd falls back to a
+        // SWRESET over SPI, which is what the fork's driver did too.
+        .reset_gpio_num = -1,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+        .bits_per_pixel = 16,
+    };
+    MOY_LCD_TRY(esp_lcd_new_panel_st7789(s_io, &panel_cfg, &s_panel), "panel_st7789");
+
+    MOY_LCD_TRY(esp_lcd_panel_reset(s_panel), "reset");
+    vTaskDelay(pdMS_TO_TICKS(120));                 // the fork waits 120ms; esp_lcd waits 20
+    MOY_LCD_TRY(esp_lcd_panel_init(s_panel), "init");   // SLPOUT + MADCTL + COLMOD
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Landscape: MV|MX (+ the BGR bit the panel config already carries) == 0x68.
+    MOY_LCD_TRY(esp_lcd_panel_swap_xy(s_panel, true), "swap_xy");
+    MOY_LCD_TRY(esp_lcd_panel_mirror(s_panel, true, false), "mirror");
+    s_madctl = 0x68;
+
+    for (size_t i = 0; i < MP_ARRAY_SIZE(MOY_LCD_INIT); i++) {
+        const moy_lcd_cmd_t *c = &MOY_LCD_INIT[i];
+        MOY_LCD_TRY(esp_lcd_panel_io_tx_param(s_io, c->cmd,
+                                                c->len ? c->data : NULL, c->len), "init cmd");
+        if (c->delay_ms) {
+            vTaskDelay(pdMS_TO_TICKS(c->delay_ms));
+        }
+    }
+
+    MOY_LCD_TRY(esp_lcd_panel_invert_color(s_panel, true), "invert");   // INVON
+    MOY_LCD_TRY(esp_lcd_panel_disp_on_off(s_panel, true), "disp_on");
+    vTaskDelay(pdMS_TO_TICKS(120));
+    return ESP_OK;
+}
+
+int moy_lcd_kinit(void) {
+    const char *what = "";
+    return s_panel != NULL ? ESP_OK : moy_lcd_bringup(1, MOY_LCD_PCLK_HZ, &what);
+}
+
+uint16_t *moy_lcd_kfb(void) {
+    return (uint16_t *)s_fbs[0];
+}
+
+// show(0) without the GIL: kick framebuffer 0 and wait it out.
+int moy_lcd_kpresent(void) {
+    if (s_panel == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    moy_flush_kdrain();
+    (void)moy_flush_take_err();
+    moy_fold_consume();
+    moy_flush_kick(s_fbs[0], MOY_LCD_H);
+    bool ok = moy_flush_kdrain();
+    esp_err_t e = moy_flush_take_err();
+    return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
+}
+
+// Active HIGH on GPIO42. Plain on/off; the fork drove PWM duty through LVGL's
+// driver, which nothing in the console ever used for dimming.
+void moy_lcd_kbacklight(int on) {
+    gpio_set_level(MOY_LCD_PIN_BL, on ? 1 : 0);
+}
+
 // init(nfbs=2, pclk_hz=80000000) -> None
 static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     static const mp_arg_t allowed[] = {
@@ -398,110 +543,12 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         mp_raise_ValueError(MP_ERROR_TEXT("nfbs 1..3"));
     }
 
-    // Board rail + every OTHER chip select on this bus parked inactive-high
-    // BEFORE the bus exists. TFT_CS is parked too and then handed to esp_lcd,
-    // which is what the fork's tdeck_board.init_board_pins does; what the hard
-    // constraints forbid is re-creating a Pin on TFT_CS/SD_CS AFTERWARDS, while
-    // a driver owns it.
-    moy_lcd_park_pin(MOY_LCD_PIN_POWERON, 1);
-    moy_lcd_park_pin(MOY_LCD_PIN_SD_CS, 1);
-    moy_lcd_park_pin(MOY_LCD_PIN_RADIO_CS, 1);
-    moy_lcd_park_pin(MOY_LCD_PIN_CS, 1);
-    // Backlight OFF until the first composed frame has been flushed (#45): the
-    // ST7789's power-on GRAM is noise and the user must never see it lit.
-    moy_lcd_park_pin(MOY_LCD_PIN_BL, 0);
-    gpio_set_pull_mode(MOY_LCD_PIN_MISO, GPIO_PULLUP_ONLY);
-
-    // Framebuffers in PSRAM, bounce buffers in internal DMA-capable SRAM.
-    // Allocated BEFORE the bus so a memory failure leaves nothing half-built.
-    for (int i = 0; i < nfbs; i++) {
-        s_fbs[i] = heap_caps_malloc(MOY_LCD_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (s_fbs[i] == NULL) {
-            moy_lcd_free_all();
-            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_lcd: no PSRAM framebuffer"));
-        }
-        memset(s_fbs[i], 0, MOY_LCD_FB_BYTES);
+    const char *what = "";
+    esp_err_t err = moy_lcd_bringup(nfbs, args[1].u_int, &what);
+    if (err == ESP_ERR_NO_MEM) {
+        mp_raise_msg_varg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_lcd: %s"), what);
     }
-    s_nfbs = nfbs;
-    // THE SHARED ENGINE: the internal-SRAM bounce slots plus the core-0 feeder
-    // and its semaphores, all idempotent across a soft reset. Started HERE,
-    // before the bus, for the same reason the buffers were allocated here --
-    // a memory failure leaves nothing half-built -- and the task simply waits
-    // on its semaphore until the first kick(), which cannot happen until this
-    // function has returned. A dead feeder is fatal: there is no feederless
-    // flush path to fall back to.
-    if (!moy_flush_start(&MOY_LCD_FLUSH_OPS)) {
-        moy_lcd_free_all();
-        mp_raise_msg(&mp_type_MemoryError,
-                     MP_ERROR_TEXT("moy_lcd: no internal DMA bounce / feeder"));
-    }
-
-    spi_bus_config_t bus_cfg = {
-        .sclk_io_num = MOY_LCD_PIN_SCK,
-        .mosi_io_num = MOY_LCD_PIN_MOSI,
-        .miso_io_num = MOY_LCD_PIN_MISO,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        // Sized for a whole frame even though the flush bands: it costs only DMA
-        // descriptors, and it leaves room for a future PSRAM-direct transfer.
-        .max_transfer_sz = MOY_LCD_FB_BYTES + 64,
-        // The done-ISR lands on CORE 0 with the FEEDER (the VM core never
-        // fields per-band interrupts); the AUTO default would pin it to the
-        // init caller's core, which is the VM's. moy_sd shares this host, so
-        // SD completion ISRs move to core 0 with it -- also a win.
-        .isr_cpu_id = ESP_INTR_CPU_AFFINITY_0,
-    };
-    esp_err_t err = spi_bus_initialize(MOY_LCD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK) {
-        moy_lcd_free_all();
-        moy_lcd_check(err, "spi_bus_initialize");
-    }
-    s_bus_up = true;
-
-    esp_lcd_panel_io_spi_config_t io_cfg = {
-        .cs_gpio_num = MOY_LCD_PIN_CS,
-        .dc_gpio_num = MOY_LCD_PIN_DC,
-        .spi_mode = 0,
-        .pclk_hz = args[1].u_int,
-        .trans_queue_depth = 10,
-        .on_color_trans_done = moy_lcd_trans_done,
-        .lcd_cmd_bits = 8,
-        .lcd_param_bits = 8,
-    };
-    moy_lcd_check(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)MOY_LCD_SPI_HOST,
-                                           &io_cfg, &s_io), "panel_io_spi");
-
-    esp_lcd_panel_dev_config_t panel_cfg = {
-        // The T-Deck does not wire a panel reset GPIO; esp_lcd falls back to a
-        // SWRESET over SPI, which is what the fork's driver did too.
-        .reset_gpio_num = -1,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
-        .bits_per_pixel = 16,
-    };
-    moy_lcd_check(esp_lcd_new_panel_st7789(s_io, &panel_cfg, &s_panel), "panel_st7789");
-
-    moy_lcd_check(esp_lcd_panel_reset(s_panel), "reset");
-    mp_hal_delay_ms(120);                 // the fork waits 120ms; esp_lcd waits 20
-    moy_lcd_check(esp_lcd_panel_init(s_panel), "init");   // SLPOUT + MADCTL + COLMOD
-    mp_hal_delay_ms(10);
-
-    // Landscape: MV|MX (+ the BGR bit the panel config already carries) == 0x68.
-    moy_lcd_check(esp_lcd_panel_swap_xy(s_panel, true), "swap_xy");
-    moy_lcd_check(esp_lcd_panel_mirror(s_panel, true, false), "mirror");
-    s_madctl = 0x68;
-
-    for (size_t i = 0; i < MP_ARRAY_SIZE(MOY_LCD_INIT); i++) {
-        const moy_lcd_cmd_t *c = &MOY_LCD_INIT[i];
-        moy_lcd_check(esp_lcd_panel_io_tx_param(s_io, c->cmd,
-                                                c->len ? c->data : NULL, c->len), "init cmd");
-        if (c->delay_ms) {
-            mp_hal_delay_ms(c->delay_ms);
-        }
-    }
-
-    moy_lcd_check(esp_lcd_panel_invert_color(s_panel, true), "invert");   // INVON
-    moy_lcd_check(esp_lcd_panel_disp_on_off(s_panel, true), "disp_on");
-    mp_hal_delay_ms(120);
+    moy_lcd_check(err, what);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(moy_lcd_init_obj, 0, moy_lcd_init);
@@ -931,10 +978,9 @@ static mp_obj_t moy_lcd_fold_test(mp_obj_t back_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_fold_test_obj, moy_lcd_fold_test);
 
-// backlight(on) -- active HIGH on GPIO42. Plain on/off; the fork drove PWM duty
-// through LVGL's driver, which nothing in the console ever used for dimming.
+// backlight(on) -- the kernel's body (moy_lcd_kbacklight).
 static mp_obj_t moy_lcd_backlight(mp_obj_t on_in) {
-    gpio_set_level(MOY_LCD_PIN_BL, mp_obj_is_true(on_in) ? 1 : 0);
+    moy_lcd_kbacklight(mp_obj_is_true(on_in));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_backlight_obj, moy_lcd_backlight);

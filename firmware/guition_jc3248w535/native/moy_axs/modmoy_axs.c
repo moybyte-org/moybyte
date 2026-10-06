@@ -556,6 +556,134 @@ static const moy_axs_cmd_t MOY_AXS_INIT[] = {
     { CMD_DISPON, 0, 20, {0} },
 };
 
+// ---- the panel brought up: the binding's init() and the kernel's ----------
+// No raise and no VM in here: the kernel's recovery floor (native/moy_kernel)
+// calls it on a boot no VM has run in. `what` names the step that failed.
+static void moy_axs_decide_window(void);
+
+static esp_err_t moy_axs_bringup(int nfbs, int pclk_hz, const char **what) {
+    // Backlight LOW before anything else (#45): power-on GRAM is noise.
+    moy_axs_park_pin(MOY_AXS_PIN_BL, 0);
+
+    for (int i = 0; i < nfbs; i++) {
+        s_fbs[i] = heap_caps_malloc(MOY_AXS_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_fbs[i] == NULL) {
+            moy_axs_free_all();
+            *what = "no PSRAM framebuffer";
+            return ESP_ERR_NO_MEM;
+        }
+        memset(s_fbs[i], 0, MOY_AXS_FB_BYTES);
+    }
+    s_nfbs = nfbs;
+    // THE SHARED ENGINE: the internal-SRAM bounce slots plus the core-0 feeder
+    // and its semaphores, all idempotent across a soft reset. Started HERE,
+    // before the bus, so a memory failure leaves nothing half-built; the task
+    // simply waits on its semaphore until the first kick(), which cannot
+    // happen until this function has returned. A dead feeder is fatal: there
+    // is no feederless flush path to fall back to.
+    if (!moy_flush_start(&MOY_AXS_FLUSH_OPS)) {
+        moy_axs_free_all();
+        *what = "no internal DMA bounce / feeder";
+        return ESP_ERR_NO_MEM;
+    }
+
+    spi_bus_config_t bus_cfg = {
+        .sclk_io_num = MOY_AXS_PIN_SCK,
+        .data0_io_num = MOY_AXS_PIN_D0,
+        .data1_io_num = MOY_AXS_PIN_D1,
+        .data2_io_num = MOY_AXS_PIN_D2,
+        .data3_io_num = MOY_AXS_PIN_D3,
+        .max_transfer_sz = MOY_AXS_BAND_BYTES + 64,
+        .flags = SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_QUAD,
+        // The done-ISR lands on CORE 0 with the feeder (the VM core never
+        // fields per-band interrupts); the AUTO default would pin it to the
+        // init caller's core, which is the VM's.
+        .isr_cpu_id = ESP_INTR_CPU_AFFINITY_0,
+    };
+    esp_err_t err = spi_bus_initialize(MOY_AXS_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK) {
+        moy_axs_free_all();
+        *what = "spi_bus_initialize";
+        return err;
+    }
+    s_bus_up = true;
+
+    spi_device_interface_config_t dev_cfg = {
+        .clock_speed_hz = pclk_hz,
+        .mode = 0,
+        .spics_io_num = MOY_AXS_PIN_CS,
+        // Bands the ISR has not STARTED yet: with NO_RETURN_RESULT a slot
+        // frees the moment the ISR picks the band up, and the engine never
+        // hands over more than its bounce slots' worth -- so a full queue can
+        // only mean the ISR has stopped, which the deadline then names.
+        .queue_size = MOY_AXS_BOUNCE_SLOTS + 2,
+        // NO_RETURN_RESULT: THE FAILURE PATHS above. The driver requires a
+        // post_cb in its place, which this module always had.
+        .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_RETURN_RESULT,
+        .post_cb = moy_axs_post_cb,
+    };
+    err = spi_bus_add_device(MOY_AXS_SPI_HOST, &dev_cfg, &s_dev);
+    if (err != ESP_OK) {
+        spi_bus_free(MOY_AXS_SPI_HOST);
+        s_bus_up = false;
+        moy_axs_free_all();
+        *what = "spi_bus_add_device";
+        return err;
+    }
+    s_dev_up = true;
+
+    // No reset GPIO on this board; the panel takes SLPOUT ~120ms after power.
+    vTaskDelay(pdMS_TO_TICKS(10));
+    for (size_t i = 0; i < MP_ARRAY_SIZE(MOY_AXS_INIT); i++) {
+        const moy_axs_cmd_t *c = &MOY_AXS_INIT[i];
+        err = spi_device_acquire_bus(s_dev, portMAX_DELAY);
+        if (err == ESP_OK) {
+            err = moy_axs_cmd_acquired(c->cmd, c->len ? c->data : NULL, c->len);
+            spi_device_release_bus(s_dev);
+        }
+        if (err != ESP_OK) {
+            *what = "cmd";
+            return err;
+        }
+        if (c->delay_ms) {
+            vTaskDelay(pdMS_TO_TICKS(c->delay_ms));
+        }
+    }
+    s_madctl = 0x00;
+    moy_axs_set_full_window();
+    return ESP_OK;
+}
+
+int moy_axs_kinit(void) {
+    const char *what = "";
+    return s_dev_up ? ESP_OK : moy_axs_bringup(1, MOY_AXS_PCLK_HZ, &what);
+}
+
+uint16_t *moy_axs_kfb(void) {
+    return (uint16_t *)s_fbs[0];
+}
+
+// show(0) without the GIL: kick framebuffer 0 full-screen and wait it out.
+int moy_axs_kpresent(void) {
+    if (!s_dev_up) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!moy_flush_kdrain() && moy_flush.frame_busy) {
+        return ESP_ERR_TIMEOUT;
+    }
+    (void)moy_flush_take_err();
+    moy_axs_decide_window();
+    moy_flush_kick(s_fbs[0], s_win_h);
+    bool ok = moy_flush_kdrain();
+    esp_err_t e = moy_flush_take_err();
+    return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
+}
+
+// GPIO1, active high, binary (see BACKLIGHT above).
+void moy_axs_kbacklight(int on) {
+    gpio_set_level(MOY_AXS_PIN_BL, on ? 1 : 0);
+}
+
 // init(nfbs=2, pclk_hz=40000000) -> None
 static mp_obj_t moy_axs_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     static const mp_arg_t allowed[] = {
@@ -589,84 +717,12 @@ static mp_obj_t moy_axs_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         mp_raise_ValueError(MP_ERROR_TEXT("nfbs 1..3"));
     }
 
-    // Backlight LOW before anything else (#45): power-on GRAM is noise.
-    moy_axs_park_pin(MOY_AXS_PIN_BL, 0);
-
-    for (int i = 0; i < nfbs; i++) {
-        s_fbs[i] = heap_caps_malloc(MOY_AXS_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (s_fbs[i] == NULL) {
-            moy_axs_free_all();
-            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_axs: no PSRAM framebuffer"));
-        }
-        memset(s_fbs[i], 0, MOY_AXS_FB_BYTES);
+    const char *what = "";
+    esp_err_t err = moy_axs_bringup(nfbs, args[1].u_int, &what);
+    if (err == ESP_ERR_NO_MEM) {
+        mp_raise_msg_varg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_axs: %s"), what);
     }
-    s_nfbs = nfbs;
-    // THE SHARED ENGINE: the internal-SRAM bounce slots plus the core-0 feeder
-    // and its semaphores, all idempotent across a soft reset. Started HERE,
-    // before the bus, so a memory failure leaves nothing half-built; the task
-    // simply waits on its semaphore until the first kick(), which cannot
-    // happen until this function has returned. A dead feeder is fatal: there
-    // is no feederless flush path to fall back to.
-    if (!moy_flush_start(&MOY_AXS_FLUSH_OPS)) {
-        moy_axs_free_all();
-        mp_raise_msg(&mp_type_MemoryError,
-                     MP_ERROR_TEXT("moy_axs: no internal DMA bounce / feeder"));
-    }
-
-    spi_bus_config_t bus_cfg = {
-        .sclk_io_num = MOY_AXS_PIN_SCK,
-        .data0_io_num = MOY_AXS_PIN_D0,
-        .data1_io_num = MOY_AXS_PIN_D1,
-        .data2_io_num = MOY_AXS_PIN_D2,
-        .data3_io_num = MOY_AXS_PIN_D3,
-        .max_transfer_sz = MOY_AXS_BAND_BYTES + 64,
-        .flags = SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_QUAD,
-        // The done-ISR lands on CORE 0 with the feeder (the VM core never
-        // fields per-band interrupts); the AUTO default would pin it to the
-        // init caller's core, which is the VM's.
-        .isr_cpu_id = ESP_INTR_CPU_AFFINITY_0,
-    };
-    esp_err_t err = spi_bus_initialize(MOY_AXS_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK) {
-        moy_axs_free_all();
-        moy_axs_check(err, "spi_bus_initialize");
-    }
-    s_bus_up = true;
-
-    spi_device_interface_config_t dev_cfg = {
-        .clock_speed_hz = args[1].u_int,
-        .mode = 0,
-        .spics_io_num = MOY_AXS_PIN_CS,
-        // Bands the ISR has not STARTED yet: with NO_RETURN_RESULT a slot
-        // frees the moment the ISR picks the band up, and the engine never
-        // hands over more than its bounce slots' worth -- so a full queue can
-        // only mean the ISR has stopped, which the deadline then names.
-        .queue_size = MOY_AXS_BOUNCE_SLOTS + 2,
-        // NO_RETURN_RESULT: THE FAILURE PATHS above. The driver requires a
-        // post_cb in its place, which this module always had.
-        .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_RETURN_RESULT,
-        .post_cb = moy_axs_post_cb,
-    };
-    err = spi_bus_add_device(MOY_AXS_SPI_HOST, &dev_cfg, &s_dev);
-    if (err != ESP_OK) {
-        spi_bus_free(MOY_AXS_SPI_HOST);
-        s_bus_up = false;
-        moy_axs_free_all();
-        moy_axs_check(err, "spi_bus_add_device");
-    }
-    s_dev_up = true;
-
-    // No reset GPIO on this board; the panel takes SLPOUT ~120ms after power.
-    mp_hal_delay_ms(10);
-    for (size_t i = 0; i < MP_ARRAY_SIZE(MOY_AXS_INIT); i++) {
-        const moy_axs_cmd_t *c = &MOY_AXS_INIT[i];
-        moy_axs_cmd(c->cmd, c->len ? c->data : NULL, c->len);
-        if (c->delay_ms) {
-            mp_hal_delay_ms(c->delay_ms);
-        }
-    }
-    s_madctl = 0x00;
-    moy_axs_set_full_window();
+    moy_axs_check(err, what);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(moy_axs_init_obj, 0, moy_axs_init);
@@ -920,7 +976,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_show_obj, 0, 1, moy_axs_show)
 
 // backlight(on) -- GPIO1, active high, binary (see BACKLIGHT above).
 static mp_obj_t moy_axs_backlight(mp_obj_t on_in) {
-    gpio_set_level(MOY_AXS_PIN_BL, mp_obj_is_true(on_in) ? 1 : 0);
+    moy_axs_kbacklight(mp_obj_is_true(on_in));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_axs_backlight_obj, moy_axs_backlight);

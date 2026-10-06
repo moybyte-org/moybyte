@@ -90,3 +90,16 @@
 // lands while the store writes the last one instead of stalling the USB
 // endpoint at the port's 260 bytes. The module's header says which boards may.
 #define MOY_SERIAL_RING_BYTES               (32768)
+
+// The kernel's recovery floor (native/moy_kernel): moy_axs's entry points, its
+// landscape 480x320 framebuffer in wire order (the module turns the bands onto
+// the portrait glass), and the AXS15231's touch on I2C0, polled from C.
+#define MOY_KERNEL_PANEL(fn)                moy_axs_k##fn
+#define MOY_KERNEL_PANEL_W                  (480)
+#define MOY_KERNEL_PANEL_H                  (320)
+#define MOY_KERNEL_PANEL_ROT                (0)
+#define MOY_KERNEL_PANEL_SWAP               (1)
+#define MOY_KERNEL_TOUCH_AXS15231           (1)
+#define MOY_KERNEL_TOUCH_SDA                MICROPY_HW_I2C0_SDA
+#define MOY_KERNEL_TOUCH_SCL                MICROPY_HW_I2C0_SCL
+#define MOY_KERNEL_TOUCH_ADDR               (0x3B)

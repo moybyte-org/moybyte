@@ -125,3 +125,14 @@
 // lands while the store writes the last one instead of stalling the USB
 // endpoint at the port's 260 bytes. The module's header says which boards may.
 #define MOY_SERIAL_RING_BYTES               (32768)
+
+// The kernel's recovery floor (native/moy_kernel): moy_lcd's entry points, the
+// landscape 320x240 framebuffer it already scans in wire order, and the
+// trackball click (GPIO0, active low) as its one button.
+#define MOY_KERNEL_PANEL(fn)                moy_lcd_k##fn
+#define MOY_KERNEL_PANEL_W                  (320)
+#define MOY_KERNEL_PANEL_H                  (240)
+#define MOY_KERNEL_PANEL_ROT                (0)
+#define MOY_KERNEL_PANEL_SWAP               (1)
+#define MOY_KERNEL_BUTTON_GPIO              (0)
+#define MOY_KERNEL_BUTTON_NAME              "CLICK"
