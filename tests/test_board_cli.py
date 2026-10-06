@@ -253,6 +253,10 @@ class WM:
     def desk_open(self):
         return self.desk
 
+    @property
+    def stack(self):
+        return types.SimpleNamespace(kinds=lambda: list(self._stack))
+
 
 class WS:
     """The workstation surface the channel and the tool reach, behaving the
@@ -265,7 +269,7 @@ class WS:
         self.cart_error = None
         self.diag_live = False
         self._uncap = False
-        self._wifi_holders = set()
+        self.leases = types.SimpleNamespace(holders=lambda: [])
         self.wifi = None
         self._psave_ms = 300000
         self._psave_asleep = False

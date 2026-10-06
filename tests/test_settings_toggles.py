@@ -389,9 +389,9 @@ def test_the_hot_readers_still_read_the_flat_attribute():
     painted game frame on all three boards. Neither may go through the
     registry or the system dict."""
     console_src = CONSOLE.read_text(encoding="utf-8")
-    assert 'ws.show_fps and self._stack[-1] == "desktop"' in (
+    assert 'ws.show_fps and self.stack.top() == "desktop"' in (
         ROOT / "runtime" / "wm.py").read_text(encoding="utf-8")
-    assert "self.ws.show_fps and bool(self._stack)" in (
+    assert 'self.ws.show_fps and self.stack.top() == "desktop"' in (
         ROOT / "runtime" / "wm_windowed.py").read_text(encoding="utf-8")
     for src in (console_src,
                 (ROOT / "runtime" / "wm.py").read_text(encoding="utf-8"),

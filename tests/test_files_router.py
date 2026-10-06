@@ -288,7 +288,7 @@ def test_going_home_from_inside_ends_the_return(tmp_path):
 
     ws.go_home()
     assert ws.wm.top_kind() == "launcher"
-    assert ws._app_return is None
+    assert ws.returns.back() is None
     ws.open_settings()
     ws.exit()
     assert ws.wm.top_kind() == "launcher"

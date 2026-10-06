@@ -602,27 +602,27 @@ def test_the_radio_is_off_unless_something_holds_it(tmp_path):
     assert w.radio is False, "a fresh console has its radio off"
 
     # A hold powers it up at once, and a second holder shares it.
-    assert ws.wifi_hold("a") is True
+    assert ws.wifi_hold("update") is True
     assert w.radio is True
-    ws.wifi_hold("b")
-    ws.wifi_hold("b")                       # idempotent per tag
-    ws.wifi_release("a")
+    ws.wifi_hold("settings")
+    ws.wifi_hold("settings")                # idempotent per tag
+    ws.wifi_release("update")
     assert w.radio is True, "one holder left: the radio stays"
     w.connect("Home WiFi", "hunter2")
     assert w.status()[0] is True
 
     # The last one out powers it down, link and all.
-    ws.wifi_release("b")
+    ws.wifi_release("settings")
     assert w.radio is False
     assert w.status() == (False, None, None)
-    assert ws._wifi_holders == set()
+    assert ws.leases.holders() == []
 
     # Releasing what was never held is fine -- every exit path releases
     # without asking -- and it still powers down whatever came up outside a
     # lease: "off in general" is the rule.
     w.scan()
     assert w.radio is True
-    ws.wifi_release("nobody")
+    ws.wifi_release("link")
     assert w.radio is False
 
 
@@ -644,11 +644,11 @@ def test_a_network_cart_holds_the_radio_for_its_run_and_no_longer(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "WiFi")
     assert ws.cart_error is None
-    assert "cart" in ws._wifi_holders
+    assert "cart" in ws.leases.holders()
     assert ws.wifi.radio is True
 
     ws.go_home()
-    assert ws._wifi_holders == set()
+    assert ws.leases.holders() == []
     assert ws.wifi.radio is False
     assert ws.wifi.status() == (False, None, None)
 
@@ -659,7 +659,7 @@ def test_a_plain_cart_never_touches_the_radio(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Star Catcher")
     assert ws.cart_error is None
-    assert ws._wifi_holders == set()
+    assert ws.leases.holders() == []
     assert ws.wifi.radio is False
     ws.go_home()
     assert ws.wifi.radio is False
@@ -672,10 +672,10 @@ def test_the_settings_wifi_panel_holds_the_radio_while_it_is_open(tmp_path):
     ws.open_settings()
     sl = ws.settings_layer
     sl.open_wifi()
-    assert sl.wifi_view and "settings" in ws._wifi_holders
+    assert sl.wifi_view and "settings" in ws.leases.holders()
     assert ws.wifi.radio is True
     sl.close_wifi()
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
     # Leaving Settings with the panel still open -- the HOME key, or the X --
     # ends the lease too: the panel is closed on the way out, not on the next
@@ -684,13 +684,13 @@ def test_the_settings_wifi_panel_holds_the_radio_while_it_is_open(tmp_path):
     assert ws.wifi.radio is True
     ws.go_home()
     assert not sl.wifi_view
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
     ws.open_settings()
     sl.open_wifi()
     ws._exit_settings()
     assert not sl.wifi_view
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 class _FakeNetwork:

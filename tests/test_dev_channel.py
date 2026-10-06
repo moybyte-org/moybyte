@@ -50,8 +50,13 @@ class FakeIdle:
         self.asleep = False
 
 
+class _Stack:
+    def kinds(self):
+        return ["home"]
+
+
 class FullscreenWM:
-    _stack = ["home"]
+    stack = _Stack()
 
 
 class Win:

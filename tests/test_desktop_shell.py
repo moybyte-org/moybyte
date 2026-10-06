@@ -763,7 +763,7 @@ def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path, monkeypatc
 
 def test_settings_opened_during_play_preserves_the_run_caller(tmp_path):
     """Stage-3 review fix, re-checked under the Stage-5 exit model: opening Settings over
-    a cart the EDITOR launched (via PLAY) must NOT clobber _run_caller. _exit_settings
+    a cart the EDITOR launched (via PLAY) must NOT clobber the run's caller. _exit_settings
     now resumes the cart with a bare screen flip (not run(), which would reset the caller
     to the launcher), so a later exit still lands back on the Editor tab, not home."""
     from runtime import host_app
@@ -772,12 +772,12 @@ def test_settings_opened_during_play_preserves_the_run_caller(tmp_path):
     ws.open()                          # launcher launch
     ws._open_menu()                    # into the Editor
     ws._leave_menu()                   # PLAY: caller = the Editor
-    assert ws._run_caller is ws.editor_app
+    assert ws.returns.caller() == "menu"
     ws.open_settings()                 # Settings over the running cart (crash-bar gear)
     assert ws.screen == "settings"
     ws._exit_settings()                # Back resumes the cart...
     assert ws.screen == "desktop"
-    assert ws._run_caller is ws.editor_app   # ...and the caller is PRESERVED (the fix)
+    assert ws.returns.caller() == "menu"   # ...and the caller is PRESERVED (the fix)
     ws._exit_to_caller()               # so the cart's exit still returns to the Editor
     assert ws.screen == "menu"
 

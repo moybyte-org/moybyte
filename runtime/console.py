@@ -439,12 +439,14 @@ try:
     from console_saves import SaveVerbs
     from console_notices import Notices
     from console_spine import SpineVerbs
+    from moy_spine import AppRegistry, Leases, Returns
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_perf import PerfMeters, _ema
     from runtime.console_settings import SettingsToggles
     from runtime.console_saves import SaveVerbs
     from runtime.console_notices import Notices
     from runtime.console_spine import SpineVerbs
+    from runtime.moy_spine import AppRegistry, Leases, Returns
 
 
 _SPLASH_IMG = None
@@ -660,7 +662,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # LEASE (console_spine's wifi_hold/wifi_release): the tags holding it,
         # and the last one out powers it down.
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
-        self._wifi_holders = set()
+        self.leases = Leases()
         # Multiplayer message service (#65): the transport-neutral net.* seam (a
         # players.LoopbackNet in the host sim, None on the device until the ESP-NOW
         # radio lands). A SYSTEM service like wifi -- exposed to a cart's namespace
@@ -831,10 +833,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # bar's left zone (draw_zone/zone_tap, bar_layer.py) so it needs the shared
         # draw toolkit, like the other zone-owning surfaces.
         self.editor_app = EditorApp(self, NAMES)
-        self._run_caller = None       # who to return to on EXIT (run() records it; the
-                                      # launcher root OR -- Stage 3 -- the Editor. The
-                                      # Stage-5 hold-BACKSPACE / context-X
-                                      # all pop to it via _exit_to_caller / exit())
+        # The registered system apps (filled by _init_apps) and the return
+        # records: a run's caller kind, popped by _exit_to_caller / exit(), and
+        # the app an app-to-app jump left, popped by _go_home_or_back.
+        self.apps = AppRegistry()
+        self.returns = Returns(self.apps)
         # (The cards menu's selection/scroll state -- msel/mtop -- lives on
         # self.cards_layer now, built in _build_layers with the rest of the stack.)
         # (The active menu sub-view -- "cards"|"code"|"paint"|"map"|"blocks"|"music"|
@@ -852,11 +855,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # the request, popped by _exit_to_caller, which re-reads the folder on
         # the way back so the loader sees what was written.
         self._project_return = None
-        # The registered APP an app-to-app jump must return INTO (Files opening
-        # a drawing in Paint / a project in the Editor): set by _note_app_caller
-        # with the jump, popped by _go_home_or_back. See its docstring for why
-        # this is a third slot beside _run_caller and _project_return.
-        self._app_return = None
         # The #111 UNDO ROUTER (#209 landing E, history_router.py): the bar
         # UNDO/REDO pair over both undo mechanisms (each Editor tab's in-RAM op
         # stack, then the tab-scoped durable journal walk), the code tab's typing
@@ -1118,8 +1116,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # is dispatch precedence.
         self._apps = []
         self._apps_by_id = {}
-        self._app_min_sizes = {}
-        self._app_titles = {}
         self._init_apps()
         # The boot logo is a draw-time takeover of the screen content (input still
         # routes to the underlying screen), so it's not in _content_layers.
@@ -2498,7 +2494,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The launcher root ends every return path: an app-to-app return that
         # outlived its journey here would drag an unrelated later exit into
         # Files. `_go_home_or_back` pops the slot BEFORE calling this.
-        self._app_return = None
+        self.returns.take_back()
         # (#111) autosave-only: going home is an exit path for every persistent
         # system app + the Editor, so each is persisted BEFORE the state below is
         # torn down (self.editor/self.project etc.) -- a HOME-key tap reaches

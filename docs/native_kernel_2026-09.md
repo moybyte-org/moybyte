@@ -277,7 +277,7 @@ console needs while no Python app runs is OS.
 | `device/device_diag.py` | frame tail | 3 | the serial diagnostics the frame loop emits between frames |
 | `device/device_input.py` | input | 3 | the T-Deck trackball and its GT911 wrapper |
 | `device/device_util.py` | frame tail | 3 | the leaf under the device modules (tick helpers, diag shims); deleted with its last device importer |
-| `device/device_wifi.py` | radios and links | 3 | the radio driver; the lease that gates it (`wifi_hold` / `wifi_release`) is the spine's, in `runtime/console.py` |
+| `device/device_wifi.py` | radios and links | 3 | the radio driver; the lease that gates it (`wifi_hold` / `wifi_release`) is the spine's, in `runtime/console_spine.py` over `runtime/moy_spine.py` |
 | `device/dsi_panel.py` | glass | 3 | the shared P4 DSI compositor, rotated variant included |
 | `device/gsl3680.py` | input | 3 | the RAM-loaded GSL3680 core; its firmware bytes are `gsl_fw_jc8012.py` |
 | `device/gt911.py` | input | 3 | the GT911 core both the T-Deck and the Waveshare P4 carry |
@@ -600,7 +600,7 @@ P4 rows matter only if a P4 ever stops its VM (§10 question 5).
 | the first heap area | `mp_task` allocates it before `soft_reset:` | reused, never freed | freed with the VM, allocated at start | 0 |
 | the VM's task | `mp_task` never returns; `mp_thread_init` binds thread 0 to it | lives forever | created at start, deleted at stop (its stack goes back to internal SRAM, §4.6); `mp_thread_init` at every start | 0 |
 | mounts and SD | `mp_init` empties the mount table and the port's `_boot.py` remounts flash. Guition S3: `machine.SDCard` (`moy_runtime.tf_card`, mounted by `device/card_store.py`), whose finaliser frees its SPI host at the sweep. T-Deck: `moy_sd` stays attached (`init` is idempotent) | remounted | the same until the gate is native; a failed Guition remount stays failed until a reboot (its README) | 3 |
-| WiFi and its leases | the port never deinitialises the WLAN driver; the lease table (`Workstation.wifi_hold`) is Python | the radio left as it was | refused while a lease is held | 2 |
+| WiFi and its leases | the port never deinitialises the WLAN driver; the lease table (`runtime/moy_spine.py`'s `Leases`) is Python | the radio left as it was | refused while a lease is held | 2 |
 | an OTA write | `device/moy_ota.py` streams into the inactive slot | — | refused while it runs | 2 |
 | ***Native tasks*** | | | | |
 | the flush feeder, the audio core-1 task, `moy_prof`'s timer; P4: `moy_c6`'s TX task, `moy_ble_hid`'s queue | `native/moy_flush/`, `native/moy_audio/`, `native/moy_prof/`, `native/p4/` | no VM calls; they survive | kept; the audio task silences the cart's sound | 3 |

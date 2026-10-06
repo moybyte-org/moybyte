@@ -1517,11 +1517,11 @@ def test_wasm_mode_holds_the_radio_and_lets_it_go_with_the_socket(tmp_path):
     ws = _mode_ws(tmp_path)
     assert ws.wifi.radio is False
     ws.toggle_webhost()
-    assert ws.webhost_serving() and "web" in ws._wifi_holders
+    assert ws.webhost_serving() and "web" in ws.leases.holders()
     assert ws.wifi.radio is True
     ws.toggle_webhost()
     assert not ws.webhost_serving()
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 def test_a_failed_start_holds_no_radio(tmp_path):
@@ -1533,7 +1533,7 @@ def test_a_failed_start_holds_no_radio(tmp_path):
     ws.open_settings()
     ws.toggle_webhost()
     assert "no wifi" in ws.webhost_label()
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(
@@ -1557,7 +1557,7 @@ def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(
     ws.stop_web_console()                   # the connection screen's TURN OFF
     assert h.serving is False and h.closing == "off"
     assert not ws.web.parked
-    assert "web" in ws._wifi_holders, "let go before the goodbye was said"
+    assert "web" in ws.leases.holders(), "let go before the goodbye was said"
     assert ws.wifi.radio is True
 
     clock = [0]
@@ -1566,11 +1566,11 @@ def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(
     h.closing_at = 0
     clock[0] = h.CLOSING_MS - 1
     h.poll()
-    assert "web" in ws._wifi_holders
+    assert "web" in ws.leases.holders()
     clock[0] = h.CLOSING_MS
     h.poll()
     assert h.closing is None
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 def test_every_board_wires_the_release_to_the_socket(tmp_path):
@@ -1583,7 +1583,7 @@ def test_every_board_wires_the_release_to_the_socket(tmp_path):
     h.sock = None
     h._ws = None
     h.stop()                                # a bare stop: the socket is gone
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 def test_park_sets_the_flag_before_it_hands_the_glass_over(tmp_path):

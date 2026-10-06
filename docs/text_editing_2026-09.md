@@ -40,11 +40,11 @@ tab's ADVANCED row, so the loader stays in the loop.
 
 **Everything the router opens comes BACK to Files**, on the shelf it was left
 on. Files is a cart app, so a note/project/drawing REPLACES it, and the console
-records who it is returning to: `_run_caller` for a run (the Notes cart),
-`_project_return` for a project file (which returns through the loader), and
-`_app_return` for a jump into another app's own surface (Paint, a project's
-Editor) -- popped by `Workstation._go_home_or_back`, which is what every exit
-gesture ends in. HOME is still home, and going home clears the return.
+records who it is returning to: the run's caller kind (`ws.returns`) for a run
+(the Notes cart), `_project_return` for a project file (which returns through
+the loader), and the app-return (`ws.returns.back()`) for a jump into another
+app's own surface (Paint, a project's Editor) -- popped by
+`Workstation._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
 
 **Modes** are the only thing that differs per file: Markdown (wrap, headings and
 checkboxes rendered, `[[note]]` tappable, `![[drawing]]` inline), code (the

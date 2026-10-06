@@ -35,8 +35,10 @@ into console (no circular import).
 
 try:
     from widgets import _Blit, _ticks_ms, _ticks_diff
+    from moy_spine import BackStack, STAYED
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import _Blit, _ticks_ms, _ticks_diff
+    from runtime.moy_spine import BackStack, STAYED
 
 
 _VIEWPORT_BEZEL = 0         # black -- the letterbox fill around a scaled game viewport
@@ -45,20 +47,22 @@ _VIEWPORT_IDENTITY = (0, 0, 1)   # the degradation viewport: one canvas IS the g
 
 class FullscreenStackWM:
     """The fullscreen back-stack window manager (S3 + host). Holds a `ws` back-ref to
-    the console it composites for; owns the game<->system viewport composite (#39) and
-    -- from Stage 6b/6c -- the process back-stack `screen` projects onto + the memoized
-    layer stack. One instance per Workstation, built in `Workstation.__init__`."""
+    the console it composites for; owns the game<->system viewport composite (#39), the
+    memoized layer stack (Stage 6c), and the navigation verbs over the spine's process
+    back-stack `screen` projects onto (`self.stack`, moy_spine.BackStack). One instance
+    per Workstation, built in `Workstation.__init__`."""
 
     def __init__(self, ws):
         self.ws = ws
-        # The process back-stack (Stage 6b): launcher root -> spawned app -> Player/tool.
-        # A list of "kind" strings (the same vocabulary the flat `screen` attribute used:
-        # "launcher" | "menu" | "settings" | "update" | "desktop"); the TOP is what
-        # `Workstation.screen` now projects onto (`top_kind`). It is a DATA STRUCTURE the
+        # The process back-stack (Stage 6b): launcher root -> spawned app -> Player/tool,
+        # as kinds (the vocabulary the flat `screen` attribute used: "launcher" | "menu" |
+        # "settings" | "update" | "desktop" | an app id); the TOP is what
+        # `Workstation.screen` projects onto (`top_kind`). It is a DATA STRUCTURE the
         # string-keyed router READS (via ws._content_layer), NOT a second dispatcher --
         # source-of-truth != dispatch, so "one router at all times" holds (plan Section 6).
-        # The launcher is the permanent root (index 0, never popped).
-        self._stack = ["launcher"]
+        # The spine owns it; every navigation goes through `goto` here, so the WM sees
+        # each change it has to rebuild for.
+        self.stack = BackStack()
         # Content-change generation (Stage 6c): bumped whenever the top-of-stack kind
         # actually changes, so the memoized layer stack knows to rebuild. (menu_view tab
         # switches bump it via EditorApp.tab; overlay-gate changes are caught separately
@@ -114,18 +118,18 @@ class FullscreenStackWM:
         """The kind of the top-of-stack process -- what `Workstation.screen` projects
         onto (a read-only projection of the back-stack top, exactly as `menu_view`
         projects `EditorApp.tab`)."""
-        return self._stack[-1]
+        return self.stack.top()
 
     def top_is(self, kind):
         """True iff the top-of-stack process is `kind`. The stack query the production
         readers use in place of `screen == kind` (Stage 6d) -- same answer, phrased as a
         question to the stack (the source of truth) rather than the projection string."""
-        return self._stack[-1] == kind
+        return self.stack.top() == kind
 
     def top_is_player(self):
         """True iff a cart Player is on top (screen "desktop") -- the running-cart test
         the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""
-        return self._stack[-1] == "desktop"
+        return self.stack.top() == "desktop"
 
     # -- the two worlds (#105): play (fullscreen) vs make (the windowed desk) --
 
@@ -145,7 +149,7 @@ class FullscreenStackWM:
         fullscreen tier a running cart on top owns ALL input; the crash panel
         (cart_error) hands keys back to the system chrome."""
         ws = self.ws
-        return (self._stack[-1] == "desktop" and ws.cart_error is None
+        return (self.stack.top() == "desktop" and ws.cart_error is None
                 and (ws._update is not None or ws._draw is not None))
 
     def goto(self, kind):
@@ -155,19 +159,8 @@ class FullscreenStackWM:
         everything above); a new `kind` is a PUSH. This reproduces the old flat-string
         `screen` transitions exactly at the top (golden-identical) while giving the
         stack an honest launcher-root -> ... -> top shape."""
-        st = self._stack
-        if st and st[-1] == kind:
-            return                      # already on top -- no navigation, no gen bump
-        idx = None
-        for i in range(len(st) - 1, -1, -1):
-            if st[i] == kind:
-                idx = i
-                break
-        if idx is not None:
-            del st[idx + 1:]            # RETURN: pop back to the already-open screen
-        else:
-            st.append(kind)             # PUSH: a newly-spawned screen
-        self._on_nav()
+        if self.stack.goto(kind) != STAYED:   # STAYED: no navigation, no gen bump
+            self._on_nav()
 
     def _on_nav(self):
         """A real top-of-stack change happened: bump the content generation so the
@@ -205,7 +198,7 @@ class FullscreenStackWM:
         sig = 0
         if ws._splash_until is not None:
             sig |= 1
-        if ws.show_fps and self._stack[-1] == "desktop":
+        if ws.show_fps and self.stack.top() == "desktop":
             sig |= 2
         # The three achievement overlays are flat kernel deadlines the objects
         # push at event time (#209 landing B) -- plain int reads, no call into

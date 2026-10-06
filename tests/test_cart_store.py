@@ -1020,7 +1020,7 @@ def test_with_no_way_to_fetch_the_app_says_so(tmp_path):
     ws, app = _app_ws(tmp_path, None)
     _open(ws, app)
     assert app.phase == "nonet"
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
 
 
 def test_the_app_lists_every_shelf_and_lets_the_radio_go(tmp_path):
@@ -1030,7 +1030,7 @@ def test_the_app_lists_every_shelf_and_lets_the_radio_go(tmp_path):
     assert app.phase == "list"
     assert [r["cart"]["name"] for r in app.rows] == ["Dungeon", "Jet Pot", "Rock Run"]
     assert [r["state"] for r in app.rows] == ["get", "get", "get"]
-    assert "carts" not in ws._wifi_holders and ws.wifi.radio is False
+    assert "carts" not in ws.leases.holders() and ws.wifi.radio is False
     assert net.opened == [gpl.url("index.json"), mit.url("index.json")]
 
 
@@ -1046,14 +1046,14 @@ def test_get_installs_a_cart_onto_the_shelf(tmp_path):
     held = []
     for _ in range(40):
         if app.phase == "getting":
-            held.append("carts" in ws._wifi_holders)
+            held.append("carts" in ws.leases.holders())
         ws._dirty = True
         ws.frame(1 / 30)
         if app.phase == "done":
             break
     assert app.phase == "done", app.why
     assert held and all(held), "the radio was not held for the download"
-    assert "carts" not in ws._wifi_holders and ws.wifi.radio is False
+    assert "carts" not in ws.leases.holders() and ws.wifi.radio is False
     assert any(str(c.get("path", "")).endswith("/jet.moy") for c in ws.carts.all)
     assert app.cur["state"] == "installed"
     _tap(ws, app, "btn", "PLAY")
@@ -1071,10 +1071,10 @@ def test_a_cart_with_an_external_file_asks_first_and_no_is_no(tmp_path):
     assert app.phase == "licence"
     assert app.focus == 1, "NO must have the focus on a licence"
     assert any("fun" in ln for ln in app.lic[1])
-    assert "carts" in ws._wifi_holders            # held through the reading
+    assert "carts" in ws.leases.holders()            # held through the reading
     app.handle_input(_In("a"))                    # A on the focused NO
     assert app.phase == "cart" and app.status == "NOT FETCHED"
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
     assert not [u for u in net.opened if u.endswith(".zip") or u.endswith(".tar.gz")]
     assert not (tmp_path / "carts" / "dm.moy").exists()
 
@@ -1223,11 +1223,11 @@ def test_closing_mid_download_cancels_it_and_lets_the_radio_go(tmp_path):
     ws.frame(1 / 30)                              # CONNECTING shows
     ws._dirty = True
     ws.frame(1 / 30)                              # the job starts
-    assert app.phase == "getting" and "carts" in ws._wifi_holders
+    assert app.phase == "getting" and "carts" in ws.leases.holders()
     app.job.step_ms = 0
     app.close()
     assert app.job.finished and app.job.path is None
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
     assert not (tmp_path / "carts" / "jet.moy").exists()
 
 
@@ -1360,10 +1360,10 @@ def test_b_stops_a_check_and_lets_the_radio_go(tmp_path):
     for _ in range(3):
         ws._dirty = True
         ws.frame(1 / 30)
-    assert app.phase == "checking" and "carts" in ws._wifi_holders
+    assert app.phase == "checking" and "carts" in ws.leases.holders()
     app.handle_input(_In("b"))
     assert app.phase == "list" and app.status == "STOPPED"
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
 
 
 def test_an_unreachable_shelf_offers_to_try_again(tmp_path):
@@ -1371,12 +1371,12 @@ def test_an_unreachable_shelf_offers_to_try_again(tmp_path):
     ws, app = _app_ws(tmp_path, net, ["https://nowhere.example/index.json"])
     _open(ws, app)
     assert app.phase == "unreached"
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
     net.up = False
     _tap(ws, app, "btn", "TRY AGAIN")
     _frames(ws, app)
     assert app.phase == "nowifi"
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
 
 
 def test_a_shelf_out_of_reach_for_memory_says_to_restart(tmp_path):
@@ -1390,7 +1390,7 @@ def test_a_shelf_out_of_reach_for_memory_says_to_restart(tmp_path):
     title, lines = app._message()
     assert title == "MEMORY FULL" and lines == [ci.NET_MEMORY]
     assert "Restart the console" in ci.NET_MEMORY
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
     net.starved = False
     _tap(ws, app, "btn", "TRY AGAIN")
     _frames(ws, app)
@@ -1419,7 +1419,7 @@ def test_a_radio_that_cannot_come_up_for_memory_says_to_restart(tmp_path, starve
     ws, app = _app_ws(tmp_path, _NoRadio(starved), ["https://x.example/i.json"])
     _open(ws, app)
     assert app.phase == phase
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
 
 
 def test_an_install_out_of_memory_says_to_restart(tmp_path):
@@ -1436,7 +1436,7 @@ def test_an_install_out_of_memory_says_to_restart(tmp_path):
     assert app.phase == "failed"
     title, lines = app._message()
     assert title == "NOT INSTALLED" and lines[0] == ci.NET_MEMORY
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
 
 
 def test_the_app_draws_at_every_shell_size(tmp_path):
@@ -1508,7 +1508,7 @@ def test_the_rows_show_the_covers_the_indexes_name(tmp_path):
     _open(ws, app)
     assert app.phase == "list"
     assert repo.url("carts/jet/cover.png") in net.opened
-    assert "carts" not in ws._wifi_holders and ws.wifi.radio is False
+    assert "carts" not in ws.leases.holders() and ws.wifi.radio is False
     cv = ws.sys_canvas
     side = app.layout.thumb
     rh = app.layout.row_h - 2 * app.layout.fs
@@ -1543,7 +1543,7 @@ def test_a_cover_that_does_not_come_leaves_the_row_as_it_is(tmp_path, fault):
         ws, app = _app_ws(d, net, [repo.url("index.json")])
         _open(ws, app)
         assert app.phase == "list"
-        assert "carts" not in ws._wifi_holders
+        assert "carts" not in ws.leases.holders()
         i = [row["cart"]["name"] for row in app.rows].index("Rock Run")
         assert ("cover" in app.rows[i]["cart"]) == (cover is not None)
         views.append(_canvas_rows(ws.sys_canvas, app.layout.row_rect(i - app.top)))

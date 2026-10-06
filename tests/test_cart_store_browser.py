@@ -735,7 +735,7 @@ def test_a_page_a_board_serves_says_where_carts_come_from(tmp_path):
         assert app.phase == "board"
         title, lines = app._message()
         assert title == "ON THE CONSOLE" and words in " ".join(lines)
-        assert app._current_verbs() == () and "carts" not in ws._wifi_holders
+        assert app._current_verbs() == () and "carts" not in ws.leases.holders()
 
 
 def test_the_browser_lists_and_installs_through_a_non_blocking_net(tmp_path):

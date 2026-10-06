@@ -99,7 +99,8 @@ def _count_writes(monkeypatch):
     real = moy_carts.save_system
 
     def counted(settings, root=moy_carts.CARTS_DIR):
-        writes.append(json.loads(json.dumps(settings)))
+        writes.append(json.loads(settings if isinstance(settings, str)
+                                 else json.dumps(settings)))
         return real(settings, root)
 
     monkeypatch.setattr(moy_carts, "save_system", counted)

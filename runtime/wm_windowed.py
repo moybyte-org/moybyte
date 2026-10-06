@@ -75,6 +75,7 @@ try:
     from surface import SurfaceSet    # surface model v1 (docs/surface_model_v1.md)
     from wm_desk import _BackdropLayer
     from wm_chrome import WindowChrome, _SHADOW
+    from moy_spine import EDITOR
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
@@ -82,6 +83,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.surface import SurfaceSet
     from runtime.wm_desk import _BackdropLayer
     from runtime.wm_chrome import WindowChrome, _SHADOW
+    from runtime.moy_spine import EDITOR
 
 import time as _time                  # the bar clock's minute (localtime)
 
@@ -423,11 +425,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return self._root_ctx.layout.status_h
 
     def desk_open(self):
-        return "desk" in self._stack
+        return self.stack.has("desk")
 
     def _on_nav(self):
         FullscreenStackWM._on_nav(self)
-        desk = "desk" in self._stack
+        desk = self.stack.has("desk")
         if desk != self._desk_was:
             # WORLD FLIP (#105): windowed_chrome just changed, and every app
             # layout bakes it into its bar_h at construction. Rebuild all
@@ -445,13 +447,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         is up). Returns [[slot_key, kind], ...] bottom -> top. In the play world
         (no desk on the stack) there are NO windows, ever -- every `not
         self._order` deferral then presents fullscreen (#105 two worlds)."""
-        st = self._stack
-        try:
-            base = st.index("desk") + 1
-        except ValueError:
+        base = self.stack.index("desk") + 1
+        if not base:
             return []
+        st = self.stack.kinds()
         slots = []
-        for k in st[base:]:
+        for i in range(base, len(st)):
+            k = st[i]
             g = _GROUP.get(k, k)
             if slots and slots[-1][0] == g:
                 slots[-1][1] = k        # the higher kind takes the window over
@@ -688,7 +690,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ws = self.ws
         if self.desk_open() and ws.wallpaper.is_animating(dt):
             return True
-        return ("desktop" in self._stack and ws.cart_error is None
+        return (self.stack.has("desktop") and ws.cart_error is None
                 and (ws._update is not None or ws._draw is not None))
 
     def _content_for(self, kind):
@@ -703,7 +705,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     # -- the memoized stacks (parent memo, windowed shape) ---------------------
 
     def _rebuild(self, content, sig):
-        if "desk" not in self._stack:
+        if not self.stack.has("desk"):
             # The PLAY world (#105): no desk -> byte-identical to the
             # fullscreen tier, for the whole stack (Library, fullscreen games,
             # play-world Settings/tools) -- not just the launcher root.
@@ -1622,8 +1624,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         """The parent's overlay-sig bit 2, re-read where the chip is now drawn:
         show_fps AND the player is the process on top (a game under Settings
         keeps its chip hidden, as before)."""
-        return (self.ws.show_fps and bool(self._stack)
-                and self._stack[-1] == "desktop")
+        return (self.ws.show_fps and self.stack.top() == "desktop")
 
     def _draw_player_window(self, win, running, focused, dt, full=True):
         ws = self.ws
@@ -1924,9 +1925,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         truncates everything above), but on a desktop closing one window must
         never take unrelated windows with it (the owner-reported bug: closing
         Make also closed Settings). The launcher root is never removable."""
-        st = self._stack
-        if kind in st and kind != "launcher":
-            st.remove(kind)
+        if self.stack.remove(kind):
             self._on_nav()
 
     def close_player(self):
@@ -1937,7 +1936,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ws = self.ws
         self._remove_kind("desktop")
         self._sync_windows()
-        if (getattr(ws, "_run_caller", None) is ws.editor_app
+        if (ws.returns.caller() == EDITOR
                 and "make" in self._order):
             self._focus = "make"
         ws._dirty = True

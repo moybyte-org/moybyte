@@ -34,10 +34,14 @@ through `ws` makes that trap structurally impossible rather than merely
 avoided by ordering.
 """
 
+import json
+
 try:
     from chrome import _err_text
+    from moy_spine import Settings
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import _err_text
+    from runtime.moy_spine import Settings
 
 
 class StoreHandle:
@@ -90,6 +94,13 @@ class SystemStore:
         # THE dict. `Workstation.__init__` aliases it as `ws.system` and
         # nothing rebinds either name again -- `load()` clears and updates it.
         self.settings = {}
+        # The store itself: the spine's rows, one per key, holding the value's
+        # JSON text (moy_spine.Settings). The dict is this side's mirror of
+        # them, and `_seen` is each key's text as the mirror last read or wrote
+        # it: `persist` pushes only the keys the mirror changed, so a row
+        # another writer owns is never written back from a stale copy.
+        self.rows = Settings()
+        self._seen = {}
 
     # -- system.json ---------------------------------------------------------
 
@@ -111,7 +122,22 @@ class SystemStore:
             loaded = {}
         self.settings.clear()
         self.settings.update(loaded)
+        self.rows.adopt(loaded)
+        self._seen = {k: self.rows.get(k) for k in self.rows.keys()}
         return self.settings
+
+    def _push(self):
+        """The mirror's changes into the rows: each key whose JSON differs from
+        what the mirror last saw, and each key it dropped."""
+        rows, seen, d = self.rows, self._seen, self.settings
+        for k in d:
+            t = json.dumps(d[k])
+            if seen.get(k) != t:
+                rows.set(k, t)
+                seen[k] = t
+        for k in [k for k in seen if k not in d]:
+            rows.delete(k)
+            del seen[k]
 
     def persist(self):
         """Write the dict to `system.json` when a writable store is wired.
@@ -119,13 +145,19 @@ class SystemStore:
         The ONE funnel behind every persisting Settings toggle (theme, skin,
         font scale, wallpaper, diagnostics, steady, 2P, crisp pixels, the FPS
         chip, the OTA channel), favorites/recents, the crash guard's strikes and
-        the pairing pin. A failed write just isn't remembered."""
+        the pairing pin. A failed write just isn't remembered. What reaches
+        the file is the rows' dump."""
+        try:
+            self._push()
+        except Exception as exc:  # noqa: BLE001 -- a value JSON cannot hold
+            print("Moybyte system save failed:", _err_text(exc))
+            return
         if not self.store.writable():
             return
         ws = self.ws
         try:
             self.store.call(
-                lambda: ws.carts_store.save_system(self.settings, ws.carts_root))
+                lambda: ws.carts_store.save_system(self.rows.dump(), ws.carts_root))
         except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
             print("Moybyte system save failed:", _err_text(exc))
 

@@ -673,10 +673,10 @@ def _remote_state(ws):
         st["ws_err"] = str(exc)
     try:
         wm = ws.wm
-        if hasattr(wm, "_stack"):
+        if hasattr(wm, "stack"):
             # The process back-stack, which on the fullscreen tier IS the whole
             # window model: `ws.screen` is a read-only projection of its top.
-            st["stack"] = list(wm._stack or ())
+            st["stack"] = wm.stack.kinds()
         if hasattr(wm, "_wins"):
             # The windowed tier's window model (#73/#105).
             desk = getattr(wm, "desk_open", None)
@@ -721,7 +721,7 @@ def _remote_state(ws):
         st["settings_err"] = str(exc)
     try:
         st["wifi"] = list(ws.wifi.status()) if ws.wifi is not None else None
-        st["wifi_held"] = sorted(ws._wifi_holders)     # the radio lease's holders
+        st["wifi_held"] = sorted(ws.leases.holders())  # the radio lease's holders
     except Exception as exc:  # noqa: BLE001
         st["wifi_err"] = str(exc)
     try:

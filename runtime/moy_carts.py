@@ -1534,10 +1534,12 @@ def load_system(root=CARTS_DIR):
 
 
 def save_system(settings, root=CARTS_DIR):
-    """Persist the system settings dict, atomically. Ensures the parent dir
-    exists. `settings` is plain JSON-able data."""
+    """Persist the system settings, atomically. Ensures the parent dir exists.
+    `settings` is a dict of plain JSON-able data, or the object's JSON text
+    (what the settings store's rows dump)."""
     ensure_dirs(root)
-    _write_atomic(system_store_path(root), json.dumps(dict(settings)))
+    _write_atomic(system_store_path(root), settings if isinstance(settings, str)
+                  else json.dumps(dict(settings)))
 
 
 # --- achievements (#21) -----------------------------------------------------

@@ -145,7 +145,7 @@ def test_editor_projects_affordance_returns_to_the_picker(tmp_path):
     ws.editor_app._activate_zone_tab(_ZONE_PROJECTS)   # the projects icon's dispatch
     assert ws.screen == "picker"               # back to the picker, not the launcher
     # the back-stack popped the Editor but kept the picker beneath (launcher is the root)
-    assert ws.wm._stack == ["launcher", "picker"]
+    assert ws.wm.stack.kinds() == ["launcher", "picker"]
 
 
 def test_editor_exit_goes_to_the_launcher(tmp_path):

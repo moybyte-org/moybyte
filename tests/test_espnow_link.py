@@ -604,16 +604,16 @@ def test_the_link_rides_the_radio_lease(tmp_path):
     assert ws.wifi.radio is False
     open_cart(ws, "Brick Siege")           # a "multiplayer" cart: the link runs
     assert ws.link.calls == ["start"]
-    assert "link" in ws._wifi_holders and ws.wifi.radio is True
+    assert "link" in ws.leases.holders() and ws.wifi.radio is True
 
     ws.netplay = object()                  # a session arranged for the next run
     ws.player.release_world()
-    assert "link" in ws._wifi_holders and ws.wifi.radio is True
+    assert "link" in ws.leases.holders() and ws.wifi.radio is True
 
     ws.netplay = None
     ws.player.release_world()
     assert ws.link.calls[-1] == "stop"
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 def _lose_invites(air, n):

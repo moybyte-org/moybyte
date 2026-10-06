@@ -243,7 +243,7 @@ import time as _t
 from device_wifi import autoconnect_wifi as _ac
 ws._census_wifi = None
 try:
-    ws.wifi_hold('census')
+    ws.wifi_hold('dev')
 except Exception as e:
     ws._census_wifi = 'hold: %s' % e
 try:

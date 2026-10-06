@@ -1,18 +1,27 @@
-"""The kernel spine's half of the Workstation: the run and exit verbs, app
-registration and resolution, the WiFi lease and the settings wiring, as a mixin
-over `self` -- the part of runtime/console.py the native kernel's sprint 2
-takes (docs/native_kernel_2026-09.md section 2.2.1).
+"""The kernel spine's half of the Workstation (docs/kernel_spine_2026-10.md):
+the run and exit verbs, app registration and resolution, the WiFi lease and
+the settings wiring, as a mixin over `self`.
+
+The state these verbs keep lives in `runtime/moy_spine.py`'s components --
+`self.apps` (AppRegistry), `self.wm.stack` (BackStack), `self.returns`
+(Returns), `self.leases` (Leases) and `self.prefs.rows` (Settings) -- which
+hold ids, kinds and JSON text, never a Python object. What stays here is the
+Python side of each verb: the app objects (`_apps`, `_apps_by_id`), the
+surfaces a route lands on, and the radio service the lease powers.
 """
 
 try:
     from app_decls import APPS
     from chrome import NAMES
     from settings_layer import SETTINGS_TOGGLES
+    from moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR, ROUTE_WINDOW)
     import system_api
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_decls import APPS
     from runtime.chrome import NAMES
     from runtime.settings_layer import SETTINGS_TOGGLES
+    from runtime.moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR,
+                                   ROUTE_WINDOW)
     from runtime import system_api
 
 
@@ -159,13 +168,26 @@ class SpineVerbs:
             return                     # the start already failed (syntax/init error):
                                        # no parked OOPS screen -- straight to the line
         self.crash_popup = None        # a clean launch retires any stale popup
-        self._run_caller = caller
+        kind = self._caller_kind(caller)
+        self.returns.run(kind)
         # #178: the caller already says WHY this run is starting, so the windowed
         # tier can size the playtest window for the job -- an Editor PLAY is a dev
         # action (small, beside the code), a desk/Library run is play (as big as
         # fits). Stamped BEFORE the push that creates the window.
-        self.wm.set_play_intent("dev" if caller is self.editor_app else "play")
+        self.wm.set_play_intent("dev" if kind == EDITOR else "play")
         self.wm.goto("desktop")        # Stage 6e: push the Player process onto the back-stack
+
+    def _caller_kind(self, caller):
+        """The kind a run started by `caller` records: the Editor's for the
+        Editor, a surface's own id otherwise, None for anything without one."""
+        if caller is None:
+            return None
+        if caller is self.editor_app:
+            return EDITOR
+        kind = getattr(caller, "id", None)
+        if isinstance(kind, str) and 0 < len(kind.encode()) <= 15:
+            return kind
+        return None
 
     def _exit_to_caller(self):
         """Pop the running cart back to whoever launched it (run()'s recorded caller,
@@ -191,9 +213,9 @@ class SpineVerbs:
         # routes here too, and a stale caller made it `goto` the app already on
         # top -- a no-op, so Files could never be left again once it had opened
         # a note.
-        caller = self._run_caller
+        rt = self.returns
         if back is not None:
-            self._run_caller = None
+            rt.spend()
             self._return_to_project(back)
             return
         # Windowed WM (#73): closing the playtest must never truncate unrelated
@@ -202,13 +224,14 @@ class SpineVerbs:
         # play-world game (launched from the fullscreen Library) pops by the
         # fullscreen rules below, landing back in the Library via go_home.
         _cp = getattr(self.wm, "close_player", None)
-        if _cp is not None and self.wm.desk_open():
+        route = rt.route(_cp is not None and self.wm.desk_open())
+        if route == ROUTE_WINDOW:
             self._dirty = True
-            _cp()                          # reads _run_caller to refocus
-            self._run_caller = None
+            _cp()                          # reads the caller to refocus
+            rt.spend()
             return
-        self._run_caller = None
-        if caller is self.editor_app:
+        caller = rt.spend()
+        if route == ROUTE_EDITOR:
             self._dirty = True             # screen change repaints (#44)
             self.wm.goto("menu")           # Stage 6e: pop the Player, back to the Editor tab
             # #80: returning DIRECTLY to the code tab is not a tab CHANGE, so
@@ -218,9 +241,7 @@ class SpineVerbs:
             # the code editor after a PLAY). Restore the returned-to tab's mode.
             self._set_text_mode(getattr(self.editor_app, "tab", None) == "code")
             return
-        caller_id = getattr(caller, "id", None)
-        if caller_id is not None and self._apps_by_id.get(caller_id) is caller \
-                and self._return_to_app(caller_id):
+        if route == ROUTE_APP and self._return_to_app(caller):
             return
         self._go_home_or_back()
 
@@ -234,26 +255,24 @@ class SpineVerbs:
             return False
         self._dirty = True
         self.wm.goto(app_id)
-        for _app, _text in self._apps:
-            if _app is app:
-                self._set_text_mode(bool(_text))
-                break
+        h = self.apps.find(app_id)
+        if h:
+            self._set_text_mode(self.apps.text_mode(h))
         return True
 
     def _go_home_or_back(self):
         """Leave the top surface for the launcher root -- unless an APP opened
         it, in which case leaving lands back INSIDE that app.
 
-        `_app_return` is the app-to-app half of the launch-and-return contract
-        (#108). `_run_caller` covers a RUN (the Player pops to whoever started
-        it) and `_project_return` a project-file edit (which comes back through
+        `returns.back()` is the app-to-app half of the launch-and-return
+        contract (#108). The run's caller covers a RUN (the Player pops to
+        whoever started it) and `_project_return` a project-file edit (which comes back through
         the loader); this covers the third shape -- Files opening a drawing in
         Paint or a project in the Editor, neither of which is a run. It survives
         a nested run on purpose, so PLAY from a Files-opened Editor still comes
         home to Files. Going home clears it, so a later unrelated exit can never
         inherit it."""
-        back = self._app_return
-        self._app_return = None
+        back = self.returns.take_back()
         self.go_home()                     # the leaving surface's save + teardown
         if back is not None and self.wm.top_is("launcher"):
             self._return_to_app(back)
@@ -268,9 +287,7 @@ class SpineVerbs:
         cart's cover in Paint is still on its way back to Files), and clearing
         there would strand the shelf. `go_home` is the one reset, because the
         launcher root is where every return path ends."""
-        app = self._apps_by_id.get(self.wm.top_kind())
-        if app is not None:
-            self._app_return = app.id
+        self.returns.note(self.wm.top_kind())
 
     def exit(self):
         """Exit the active TASKBAR app back toward the launcher root (spec Section 9's
@@ -323,20 +340,17 @@ class SpineVerbs:
         the app's layout are adopted. TITLE supplies window/taskbar text. A
         launcher tap on the claimed cart opens the app instead of the Player;
         everything else (window chrome, theme tokens, toolkit) comes free."""
-        if app.id in self._apps_by_id:
-            raise ValueError("duplicate app id: " + str(app.id))
-        self._apps.append((app, bool(text_mode)))
-        self._apps_by_id[app.id] = app
-        self._content_layers[app.id] = app
-        self._app_titles[app.id] = str(getattr(app, "TITLE", app.id.upper()))
         if min_size is None:
             layout = getattr(app, "layout", None)
             min_w = getattr(layout, "MIN_W", None)
             min_h = getattr(layout, "MIN_H", None)
             if min_w is not None and min_h is not None:
                 min_size = (int(min_w), int(min_h))
-        if min_size is not None:
-            self._app_min_sizes[app.id] = min_size
+        h = self.apps.register(app.id, getattr(app, "TITLE", app.id.upper()),
+                               text_mode, min_size)
+        self._apps.append((app, self.apps.text_mode(h)))
+        self._apps_by_id[app.id] = app
+        self._content_layers[app.id] = app
         hook = getattr(self.wm, "on_app_registered", None)
         if hook is not None:
             hook(app)
@@ -351,11 +365,13 @@ class SpineVerbs:
 
     def app_min_size(self, kind):
         """The registered windowed resize minimum for app `kind`, or None."""
-        return self._app_min_sizes.get(kind)
+        h = self.apps.find(kind)
+        return self.apps.min_size(h) if h else None
 
     def app_title(self, kind):
         """The registered app's requested window/taskbar title, or None."""
-        return self._app_titles.get(kind)
+        h = self.apps.find(kind)
+        return self.apps.title(h) if h else None
 
     def open_app(self, app, cart=None):
         """Spawn a registered system app on `cart` (default: the cart its
@@ -372,11 +388,8 @@ class SpineVerbs:
                     break
             if cart is None:
                 return False
-        text = False
-        for _app, _text in self._apps:
-            if _app is app:
-                text = _text
-                break
+        h = self.apps.find(app.id)
+        text = self.apps.text_mode(h) if h else False
         self._note_app_caller()        # a jump OUT of an app comes back to it
         self.cart = cart
         self.input.text_mode = False
@@ -406,11 +419,13 @@ class SpineVerbs:
         (the WIFI panel), "cart" (a run with the "network" permission), "link"
         (a match), "carts" (the Get Carts app while it fetches). A new consumer
         of the network takes a tag here and releases it on its way out, or the
-        radio never goes off again."""
+        radio never goes off again. The tags are `moy_spine.LEASE_TAGS`, and
+        any other is refused (ValueError)."""
         w = self.wifi
         if w is None:
+            self.leases.held(tag)          # refused even with no radio to hold
             return False
-        self._wifi_holders.add(tag)
+        self.leases.hold(tag)
         on = getattr(w, "radio_on", None)
         if on is None:
             return True
@@ -425,8 +440,7 @@ class SpineVerbs:
         asking), and an empty set powers down even so: "off in general" is the
         rule, and whatever a serial `py` brought up without a lease goes with
         the next exit."""
-        self._wifi_holders.discard(tag)
-        if self._wifi_holders:
+        if self.leases.release(tag):
             return
         off = getattr(self.wifi, "radio_off", None)
         if off is not None:

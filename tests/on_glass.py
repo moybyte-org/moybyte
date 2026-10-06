@@ -837,7 +837,7 @@ def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
     over, while a cart animates every frame and the WiFi radio is up -- the
     cache sync at each load runs with the other core busy. Every pass must
     return the same cycle count (a stale instruction cache would not)."""
-    board.cmd("py ws.wifi_hold('wasm')", wait_for="PY", timeout=20)
+    board.cmd("py ws.wifi_hold('dev')", wait_for="PY", timeout=20)
     try:
         board.cmd("run star", wait_for="REMOTE run")
         board.drain(2.5)
@@ -860,7 +860,7 @@ def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
         assert drew > 0, "no frame drew while the loop ran"
         return r, drew
     finally:
-        board.cmd("py ws.wifi_release('wasm')", wait_for="PY", timeout=20)
+        board.cmd("py ws.wifi_release('dev')", wait_for="PY", timeout=20)
 
 
 def wasm_low_water_with_radios_up(board, paths):
@@ -878,14 +878,14 @@ def wasm_low_water_with_radios_up(board, paths):
     with BLE as it found it."""
     ble_was_up = board.pyval("bool(getattr(%s, 'available', False))" % _ble(board),
                              strict=True)
-    board.cmd("py ws.wifi_hold('wasm')", wait_for="PY", timeout=20)
+    board.cmd("py ws.wifi_hold('dev')", wait_for="PY", timeout=20)
     try:
         assert board.pyval("%s.start()" % _ble(board), timeout=30) is True
         board.drain(3.0)
         r = wasm_run(board, paths["hello"], "step", (20000,), loops=20)
         floor = board.pyval("__import__('moycore').sram_report()[2]", strict=True)
     finally:
-        board.cmd("py ws.wifi_release('wasm')", wait_for="PY", timeout=20)
+        board.cmd("py ws.wifi_release('dev')", wait_for="PY", timeout=20)
         if not ble_was_up:
             # The radio holds about 45 KB of internal RAM while it is up, and
             # left up it cost the next TLS download its memory (2026-10-02).
