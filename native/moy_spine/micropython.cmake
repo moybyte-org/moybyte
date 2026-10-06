@@ -18,6 +18,7 @@ if(MOY_SPINE_IMPL STREQUAL "c" OR NOT MOY_INDEX_IMPL STREQUAL "py")
         target_sources(usermod_moy_spine INTERFACE
             ${CMAKE_CURRENT_LIST_DIR}/modmoy_spine.c
             ${CMAKE_CURRENT_LIST_DIR}/moy_route.c
+            ${CMAKE_CURRENT_LIST_DIR}/moy_ledger.c
             ${CMAKE_CURRENT_LIST_DIR}/moy_settings.c)
     endif()
     target_link_libraries(usermod INTERFACE usermod_moy_spine)

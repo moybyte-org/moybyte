@@ -35,8 +35,10 @@ the bar (ws.bar_layer) stay put.
 
 try:
     import ui as _ui
+    from crash_guard import crash_available, crash_lines, last_crash
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime.crash_guard import crash_available, crash_lines, last_crash
 
 try:
     from editors import TextEntry, TE_COMMIT, TE_CANCEL
@@ -282,6 +284,10 @@ class SettingsLayer:
         self.confirm_key = None
         self.confirm_sel = 0
         self._confirm_hits = _ui.Hits()
+        # The kernel's last crash record (Settings -> LAST CRASH): a read-only
+        # panel that replaces the rows, on a board whose kernel keeps one.
+        self.crash_view = False
+        self._crash_hits = _ui.Hits()
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -293,6 +299,7 @@ class SettingsLayer:
         if self.bt_view:
             self.close_bluetooth()
         self.confirm_key = None
+        self.crash_view = False
 
     # -- BLUETOOTH KEYBOARD panel (capability-gated; visual identity v1) ------
 
@@ -911,6 +918,59 @@ class SettingsLayer:
         self._confirm_hits.add(rects[1], "accept")
         _ui.focus_ring(cv, th, rects[self.confirm_sel], fs)
 
+    # -- LAST CRASH panel (the kernel's record, read-only) --------------------
+
+    def open_crash(self):
+        self.crash_view = True
+        self.ws._dirty = True
+
+    def close_crash(self):
+        self.crash_view = False
+        self.ws._dirty = True
+
+    def _crash_input(self, i):
+        """A / B / left / right close the panel; home leaves Settings."""
+        if i.pressed("home") or i.pressed("stop"):
+            self.close_crash()
+            self.ws.go_home()
+        elif (i.pressed("a") or i.pressed("run") or i.pressed("b")
+                or i.pressed("left") or i.pressed("right")):
+            self.close_crash()
+        return True
+
+    def _crash_pointer(self, px, py, click):
+        if click and self._crash_hits.at(px, py) is not None:
+            self.close_crash()
+        return True
+
+    def _draw_crash(self):
+        """The record in the Settings body: its lines, and one button back."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        lay = ws.layout
+        fs = lay.fs
+        fw = lay.font_w
+        _px, py, _pw, ph = lay.settings_panel
+        body = (lay.set_x, lay.set_row_y0, lay.set_w,
+                max(1, py + ph - lay.set_row_y0 - 4 * fs))
+        content = _ui.panel(cv, th, body, title="LAST CRASH", fs=fs)
+        actions_r, text_r = _ui.cut_bottom(content, 24 * fs)
+        tx, ty, tw, th_h = _ui.inset(text_r, 4 * fs, 6 * fs)
+        lh = 12 * fs
+        y = ty
+        for line in crash_lines(last_crash()):
+            for part in _ui.wrap_words(line, max(1, tw // fw)):
+                if y + 8 * fs > ty + th_h:
+                    break
+                cv.print(part, tx, y, th["ink"], 1)
+                y += lh
+        self._crash_hits.clear()
+        rect = _ui.inset(actions_r, 3 * fs)
+        _ui.button(cv, th, rect, "BACK")
+        self._crash_hits.add(rect, "back")
+        _ui.focus_ring(cv, th, rect, fs)
+
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
 
     def draw_zone(self, cv, rect):
@@ -992,6 +1052,8 @@ class SettingsLayer:
             # the non-P4 Settings row indices and frozen 320x240 pixels.
             rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
                 + rows[1:]
+        if crash_available():
+            rows = rows + (("crash", "LAST CRASH", "crash"),)
         if web:
             # WEB CONSOLE (moycore plan 3.4): serve the wasm console from this
             # board, so a browser on the same network opens YOUR carts. Its own
@@ -1075,6 +1137,9 @@ class SettingsLayer:
             return
         if kind == "webhost":                   # WEB CONSOLE: serve / stop serving
             ws.toggle_webhost()
+            return
+        if kind == "crash":                     # LAST CRASH: any step/tap opens the record
+            self.open_crash()
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             ws._cycle_channel(d)
@@ -1246,6 +1311,8 @@ class SettingsLayer:
             return self._bt_input(i)
         if self.confirm_key is not None:
             return self._confirm_input(i)
+        if self.crash_view:
+            return self._crash_input(i)
         rows = self._settings_rows()
         # The keep-selection-visible clamp (#53) fires ONLY when the keyboard
         # moves the selection -- NOT every frame. The per-frame form fought the
@@ -1281,6 +1348,8 @@ class SettingsLayer:
                 self.open_wifi()
             elif row[2] == "bluetooth":
                 self.open_bluetooth()
+            elif row[2] == "crash":
+                self.open_crash()
             elif row[2] == "action":
                 self._activate_settings_action(row[0])
             elif row[2] == "diag":              # ... and the ON/OFF gates (#68/#77)
@@ -1294,6 +1363,7 @@ class SettingsLayer:
     def handle_pointer(self, px, py, click):
         ws = self.ws
         if (not self.wifi_view and not self.bt_view and self.confirm_key is None
+                and not self.crash_view
                 and not ws.show_achievements):
             # The rows' shared press/drag/release machine: scrolls on drag,
             # activates a row only on a clean tap release.
@@ -1317,6 +1387,8 @@ class SettingsLayer:
             return self._bt_pointer(px, py, click)
         if self.confirm_key is not None:
             return self._confirm_pointer(px, py, click)
+        if self.crash_view:
+            return self._crash_pointer(px, py, click)
         lay = ws.layout
         if _in(px, py, lay.set_ach):      # trophy: open the achievements view (#21)
             ws.show_achievements = True
@@ -1357,6 +1429,9 @@ class SettingsLayer:
                     return True
                 if rows[i][2] == "bluetooth":
                     self.open_bluetooth()
+                    return True
+                if rows[i][2] == "crash":
+                    self.open_crash()
                     return True
                 if rows[i][2] == "action":
                     self._activate_settings_action(rows[i][0])  # EDIT ICONS / UPDATE FW
@@ -1434,6 +1509,10 @@ class SettingsLayer:
             return
         if self.confirm_key is not None:
             self._draw_confirm()
+            ws.bar_layer._draw_status_strip("settings")
+            return
+        if self.crash_view:
+            self._draw_crash()
             ws.bar_layer._draw_status_strip("settings")
             return
         # Achievements view button (#21): a trophy badge with the unlocked count.
@@ -1533,6 +1612,14 @@ class SettingsLayer:
                      NAMES["green"] if state == "ready" else NAMES["dark_grey"], 1)
             cv.print("OPEN", x + w - 38 * lay.fs, y + 5, NAMES["blue"], 1)
             return
+        if kind == "crash":
+            # LAST CRASH: what the kernel recorded, by kind, and OPEN.
+            rec = last_crash()
+            cv.print(str(rec.get("kind") or "?").upper()[:8] if rec else "NONE",
+                     x + w - 106 * lay.fs, y + 5,
+                     NAMES["orange"] if rec else NAMES["dark_grey"], 1)
+            cv.print("OPEN", x + w - 38 * lay.fs, y + 5, NAMES["blue"], 1)
+            return
         if kind == "action":
             # An action row (APPEARANCE / EDIT ICONS / UPDATE FW / UPDATE ONLINE): no
             # value/stepper -- just an OPEN affordance at the right so a tap (or A) is
@@ -1600,7 +1687,7 @@ class SettingsLayer:
         # Mark not-yet-functional rows clearly (wifi + font + channel +
         # diag + actions work).
         if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",
-                        "diag", "webhost"):
+                        "diag", "webhost", "crash"):
             # A second label line inside the SAME row rect (one font row below
             # the title), so it is the row kind again with its own text_dy. Its
             # grey is a frozen literal, not `ink_dim` -- off-token on every

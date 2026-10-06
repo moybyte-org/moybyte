@@ -31,19 +31,23 @@
 #include "py/qstr.h"
 #include "py/runtime.h"
 
-#ifdef ESP_PLATFORM
+// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
+// board is recognised by the header it has.
+#if __has_include("esp_heap_caps.h")
+#define MOY_SPINE_BOARD 1
 #include "esp_heap_caps.h"
 #else
 #include <stdlib.h>
 #endif
 
 #include "moy_htab.h"
+#include "moy_ledger.h"
 #include "moy_route.h"
 #include "moy_settings.h"
 
 // -- the allocator -------------------------------------------------------------
 
-#ifdef ESP_PLATFORM
+#ifdef MOY_SPINE_BOARD
 // PSRAM, zeroed. A board with no PSRAM at all takes the default heap; one whose
 // PSRAM is merely full refuses, rather than spend internal SRAM.
 static void *spine_alloc(size_t n) {
@@ -1083,6 +1087,269 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &settings_locals
     );
 
+// -- CrashGuard: the strike ledger over the settings rows ----------------------------
+
+// runtime/crash_guard.py's CrashGuard, call for call: the slot's text is read
+// with moy_settings_get and written with the same persisting write Settings.set
+// makes. The OPEN id is mirrored through the hook set_mirror() was given (the
+// kernel's moy_crash.arm), called as hook(role, id or None).
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_spine_mirror);
+
+typedef struct {
+    mp_obj_base_t base;
+    mp_obj_t store;
+    mp_obj_t key;
+    mp_obj_t armed;
+    mp_obj_t proof;
+    mp_int_t frames;
+    mp_int_t role;
+} guard_obj_t;
+
+#define GUARD_STRIKES 3
+#define GUARD_HEAL_FRAMES 3
+
+static mp_obj_t guard_make_new(const mp_obj_type_t *type, size_t n_args,
+                               size_t n_kw, const mp_obj_t *all_args) {
+    enum { ARG_store, ARG_key };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_store, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_key, MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
+                              allowed, args);
+    if (!mp_obj_is_type(args[ARG_store].u_obj, &settings_type)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("a ledger's store is a Settings"));
+    }
+    guard_obj_t *o = mp_obj_malloc(guard_obj_t, type);
+    o->store = args[ARG_store].u_obj;
+    o->key = args[ARG_key].u_obj == MP_OBJ_NULL
+        ? MP_OBJ_NEW_QSTR(MP_QSTR_app_guard) : args[ARG_key].u_obj;
+    o->armed = mp_const_none;
+    o->proof = mp_const_none;
+    o->frames = 0;
+    size_t kn;
+    const char *k = str_arg(o->key, &kn, MP_ERROR_TEXT("a ledger key is a str"));
+    o->role = (kn == 15 && memcmp(k, "wallpaper_guard", 15) == 0) ? 2 : 1;
+    return MP_OBJ_FROM_PTR(o);
+}
+
+static guard_obj_t *guard_of(mp_obj_t self) {
+    return MP_OBJ_TO_PTR(self);
+}
+
+// The slot's text, or NULL when the store has no row for the key.
+static const char *guard_slot(guard_obj_t *g, size_t *n) {
+    size_t kn;
+    const char *k = str_arg(g->key, &kn, MP_ERROR_TEXT("a ledger key is a str"));
+    const char *j;
+    if (!moy_settings_get(settings_of(g->store), k, kn, &j, n)) {
+        return NULL;
+    }
+    return j;
+}
+
+static mp_obj_t as_str(mp_obj_t o) {
+    return mp_obj_is_str(o) ? o : mp_call_function_1(MP_OBJ_FROM_PTR(&mp_type_str), o);
+}
+
+// `o` as the JSON text json.dumps writes for it.
+static mp_obj_t as_json(mp_obj_t o) {
+    return json_call(MP_QSTR_dumps, o);
+}
+
+static void guard_mirror(guard_obj_t *g, mp_obj_t cid) {
+    mp_obj_t hook = MP_STATE_VM(moy_spine_mirror);
+    if (hook != MP_OBJ_NULL && hook != mp_const_none) {
+        mp_call_function_2(hook, MP_OBJ_NEW_SMALL_INT(g->role), cid);
+    }
+}
+
+static mp_int_t guard_strikes(guard_obj_t *g, mp_obj_t cid) {
+    size_t n, idn;
+    const char *slot = guard_slot(g, &n);
+    mp_obj_t id = as_json(as_str(cid));
+    const char *i = str_arg(id, &idn, MP_ERROR_TEXT("an id is a str"));
+    return moy_ledger_strikes(slot, n, i, idn);
+}
+
+// Apply `op` to the slot and write the result: true when something was written.
+static bool guard_edit(guard_obj_t *g, int op, mp_obj_t cid, mp_obj_t proof) {
+    size_t n, idn, pn = 0;
+    const char *slot = guard_slot(g, &n);
+    mp_obj_t id = as_json(as_str(cid));
+    const char *i = str_arg(id, &idn, MP_ERROR_TEXT("an id is a str"));
+    const char *p = NULL;
+    mp_obj_t pj = mp_const_none;
+    if (proof != mp_const_none) {
+        pj = as_json(proof);
+        p = str_arg(pj, &pn, MP_ERROR_TEXT("a proof is JSON text"));
+    }
+    char *out = NULL;
+    size_t outn = 0;
+    int rc = moy_ledger_edit(&spine_mem, slot, n, op, i, idn, p, pn, &out, &outn);
+    if (rc < 0) {
+        no_memory();
+    }
+    if (rc == 0) {
+        return false;
+    }
+    mp_obj_t text = mp_obj_new_str_copy(&mp_type_str, (const byte *)out, outn);
+    spine_mem.release(out, outn);
+    settings_store(g->store, g->key, text, mp_const_true);
+    return true;
+}
+
+static mp_obj_t guard_strikes_m(mp_obj_t self, mp_obj_t cid) {
+    return MP_OBJ_NEW_SMALL_INT(guard_strikes(guard_of(self), cid));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(guard_strikes_obj, guard_strikes_m);
+
+static mp_obj_t guard_disabled(mp_obj_t self, mp_obj_t cid) {
+    return bool_obj(guard_strikes(guard_of(self), cid) >= GUARD_STRIKES);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(guard_disabled_obj, guard_disabled);
+
+static mp_obj_t guard_last_open(mp_obj_t self) {
+    size_t n, vn;
+    const char *v;
+    const char *slot = guard_slot(guard_of(self), &n);
+    if (slot == NULL || !moy_ledger_get(slot, n, "open", &v, &vn)) {
+        return mp_const_none;
+    }
+    return settings_decode(v, vn);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(guard_last_open_obj, guard_last_open);
+
+static mp_obj_t guard_release(mp_obj_t self) {
+    guard_obj_t *g = guard_of(self);
+    if (g->armed != mp_const_none) {
+        guard_mirror(g, mp_const_none);
+    }
+    g->armed = mp_const_none;
+    g->proof = mp_const_none;
+    g->frames = 0;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(guard_release_obj, guard_release);
+
+static mp_obj_t guard_arm(size_t n_args, const mp_obj_t *args) {
+    guard_obj_t *g = guard_of(args[0]);
+    mp_obj_t cid = as_str(args[1]);
+    mp_obj_t proof = n_args > 2 ? args[2] : mp_const_none;
+    if (guard_strikes(g, cid) >= GUARD_STRIKES) {
+        guard_release(args[0]);
+        return mp_const_false;
+    }
+    if (mp_obj_equal(cid, g->armed) && mp_obj_equal(proof, g->proof)) {
+        g->frames = 0;
+        return mp_const_true;
+    }
+    if (proof != mp_const_none) {
+        size_t n, idn, pn;
+        const char *slot = guard_slot(g, &n);
+        mp_obj_t id = as_json(cid), pj = as_json(proof);
+        const char *i = str_arg(id, &idn, MP_ERROR_TEXT("an id is a str"));
+        const char *p = str_arg(pj, &pn, MP_ERROR_TEXT("a proof is JSON text"));
+        if (moy_ledger_proven_is(slot, n, i, idn, p, pn)) {
+            guard_release(args[0]);
+            return mp_const_true;
+        }
+    }
+    g->armed = cid;
+    g->proof = proof;
+    g->frames = 0;
+    guard_edit(g, MOY_LEDGER_ARM, cid, mp_const_none);
+    guard_mirror(g, cid);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(guard_arm_obj, 2, 3, guard_arm);
+
+static mp_obj_t guard_heal(mp_obj_t self) {
+    guard_obj_t *g = guard_of(self);
+    mp_obj_t cid = g->armed;
+    if (cid == mp_const_none) {
+        return mp_const_false;
+    }
+    g->armed = mp_const_none;
+    guard_mirror(g, mp_const_none);
+    mp_obj_t proof = g->proof;
+    guard_edit(g, MOY_LEDGER_HEAL, cid, proof);
+    g->proof = mp_const_none;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(guard_heal_obj, guard_heal);
+
+static mp_obj_t guard_frame(mp_obj_t self) {
+    guard_obj_t *g = guard_of(self);
+    if (g->armed == mp_const_none) {
+        return mp_const_false;
+    }
+    g->frames++;
+    if (g->frames < GUARD_HEAL_FRAMES) {
+        return mp_const_false;
+    }
+    return guard_heal(self);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(guard_frame_obj, guard_frame);
+
+static mp_obj_t guard_forgive(mp_obj_t self, mp_obj_t cid_in) {
+    guard_obj_t *g = guard_of(self);
+    mp_obj_t cid = as_str(cid_in);
+    if (mp_obj_equal(g->armed, cid)) {
+        guard_release(self);
+    }
+    return bool_obj(guard_edit(g, MOY_LEDGER_FORGIVE, cid, mp_const_none));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(guard_forgive_obj, guard_forgive);
+
+static mp_obj_t guard_broken_ids(mp_obj_t self) {
+    guard_obj_t *g = guard_of(self);
+    size_t n, sn;
+    const char *s;
+    const char *slot = guard_slot(g, &n);
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    if (slot != NULL && moy_ledger_section(slot, n, "strikes", &s, &sn)) {
+        int c = moy_jobj_members(s, sn, NULL, 0);
+        for (int i = 0; i < c; i++) {
+            moy_jmem_t m;
+            if (moy_jobj_at(s, sn, i, &m) && moy_ledger_strikes(slot, n, m.k, m.kn) >= GUARD_STRIKES) {
+                mp_obj_t key = mp_obj_new_str_copy(&mp_type_str, (const byte *)m.k, m.kn);
+                mp_obj_list_append(out, json_call(MP_QSTR_loads, key));
+            }
+        }
+    }
+    return mp_call_function_1(mp_load_global(MP_QSTR_sorted), out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(guard_broken_ids_obj, guard_broken_ids);
+
+static const mp_rom_map_elem_t guard_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_STRIKES), MP_ROM_INT(GUARD_STRIKES) },
+    { MP_ROM_QSTR(MP_QSTR_HEAL_FRAMES), MP_ROM_INT(GUARD_HEAL_FRAMES) },
+    { MP_ROM_QSTR(MP_QSTR_strikes), MP_ROM_PTR(&guard_strikes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_disabled), MP_ROM_PTR(&guard_disabled_obj) },
+    { MP_ROM_QSTR(MP_QSTR_last_open), MP_ROM_PTR(&guard_last_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_arm), MP_ROM_PTR(&guard_arm_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&guard_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_heal), MP_ROM_PTR(&guard_heal_obj) },
+    { MP_ROM_QSTR(MP_QSTR_release), MP_ROM_PTR(&guard_release_obj) },
+    { MP_ROM_QSTR(MP_QSTR_forgive), MP_ROM_PTR(&guard_forgive_obj) },
+    { MP_ROM_QSTR(MP_QSTR_broken_ids), MP_ROM_PTR(&guard_broken_ids_obj) },
+};
+static MP_DEFINE_CONST_DICT(guard_locals, guard_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    guard_type, MP_QSTR_CrashGuard, MP_TYPE_FLAG_NONE,
+    make_new, guard_make_new,
+    locals_dict, &guard_locals
+    );
+
+static mp_obj_t mod_set_mirror(mp_obj_t hook) {
+    MP_STATE_VM(moy_spine_mirror) = hook;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_set_mirror_obj, mod_set_mirror);
+
 // -- the module --------------------------------------------------------------------
 
 static const mp_rom_obj_tuple_t lease_tags_tuple = {
@@ -1104,6 +1371,8 @@ static const mp_rom_map_elem_t moy_spine_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Leases), MP_ROM_PTR(&leases_type) },
     { MP_ROM_QSTR(MP_QSTR_Settings), MP_ROM_PTR(&settings_type) },
     { MP_ROM_QSTR(MP_QSTR_StaleHandle), MP_ROM_PTR(&stale_type) },
+    { MP_ROM_QSTR(MP_QSTR_CrashGuard), MP_ROM_PTR(&guard_type) },
+    { MP_ROM_QSTR(MP_QSTR_set_mirror), MP_ROM_PTR(&mod_set_mirror_obj) },
     { MP_ROM_QSTR(MP_QSTR_SLOT_BITS), MP_ROM_INT(8) },
     { MP_ROM_QSTR(MP_QSTR_KIND_SHIFT), MP_ROM_INT(MOY_HTAB_KIND_SHIFT) },
     { MP_ROM_QSTR(MP_QSTR_GEN_SHIFT), MP_ROM_INT(MOY_HTAB_GEN_SHIFT) },

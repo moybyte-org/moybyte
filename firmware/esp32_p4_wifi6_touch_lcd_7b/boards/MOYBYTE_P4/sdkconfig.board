@@ -154,3 +154,13 @@ CONFIG_BT_HCI_LOG_DEBUG_EN=n
 # boards first. The one behaviour lost is machine.freq(x) as a SETTER, which
 # starts raising ValueError; the getter is unaffected.
 CONFIG_PM_ENABLE=
+
+# The task watchdog (#160, docs/kernel_spine_2026-10.md section 6). The stock
+# build leaves it on, watching no idle task and only logging a timeout; the
+# kernel subscribes the VM task (native/moy_kernel: the console's frame feeds it
+# once per frame, and the loop leaving it unsubscribes) and a timeout PANICS, so
+# a frame that never ends is a crash record naming what ran. The timeout is
+# above the worst frame this board legitimately takes (the gate reads it with
+# `moy_kernel.watchdog()`).
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=15

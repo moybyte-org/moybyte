@@ -28,6 +28,14 @@ const moy_crash_rec_t *moy_kernel_take_crash(void);
 
 const char *moy_kernel_reset_name(int reason);
 
+// The task watchdog the console's frame feeds (#160): feed once per frame (the
+// first subscribes the VM task), rest when the loop ends. watchdog() answers
+// whether it is armed, its timeout, and the longest gap between two feeds and
+// the feeds counted since armed (or since `reset`).
+void moy_kernel_feed(void);
+void moy_kernel_rest(void);
+bool moy_kernel_watchdog(uint32_t *timeout_ms, uint32_t *max_gap_ms, uint32_t *frames, bool reset);
+
 // Dev only: arm a MOY_TEST_* one-shot and restart; crash the board now.
 void moy_kernel_test_restart(int test);
 void moy_kernel_test_crash(bool abort_not_fault);

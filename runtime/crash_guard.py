@@ -118,6 +118,32 @@ def last_crash():
     return _native.last() if _native is not None else None
 
 
+def crash_available():
+    """True on a board whose kernel keeps a crash record: the Settings
+    diagnostics row exists exactly there."""
+    return _native is not None
+
+
+def crash_lines(rec):
+    """A crash record as the Settings panel's lines (short, upper case): what
+    stopped, what was running, where, and the reason. `rec` None is no crash."""
+    if not rec:
+        return ["NO CRASH RECORDED"]
+    kind = str(rec.get("kind") or "?").upper()
+    who = rec.get("id")
+    lines = ["%s IN %s" % (kind, str(rec.get("task") or "?").upper())]
+    lines.append("%s %s" % (str(rec.get("role") or "app").upper(), who) if who
+                 else "NO APP OPEN")
+    lines.append("PC %08X  CAUSE %d" % (rec.get("pc") or 0, rec.get("cause") or 0))
+    lines.append("ADDR %08X" % (rec.get("addr") or 0))
+    lines.append("RESET %s  BOOT %d" % (str(rec.get("reset") or "?").upper(),
+                                        rec.get("boot") or 0))
+    lines.append("UP %d MS" % (rec.get("uptime_ms") or 0))
+    if rec.get("what"):
+        lines.append(str(rec["what"]).upper())
+    return lines
+
+
 def take_crash():
     """The crash this boot's intake took, once: what the notice banner says
     after the reboot. None on every later call, and on a clean boot."""
@@ -325,3 +351,16 @@ class CrashGuard:
         the board died first."""
         if _native is not None:
             _native.arm(_ROLE.get(self._key, 1), cid)
+
+
+# The native spine carries this ledger too (native/moy_spine/moy_ledger.c): the
+# same class over the same rows, its OPEN mirror going to the kernel's record
+# through the hook it is given here. The Python twin's spine has no such class,
+# so there this one stays.
+try:
+    from moy_spine import CrashGuard as _NativeGuard, set_mirror as _set_mirror
+except ImportError:
+    _NativeGuard = None
+if _NativeGuard is not None:
+    _set_mirror(_native.arm if _native is not None else None)
+    CrashGuard = _NativeGuard

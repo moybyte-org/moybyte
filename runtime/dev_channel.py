@@ -99,6 +99,10 @@ try:                       # device: the console's stdin read from C, and its ra
     import moy_serial as _moy_serial
 except ImportError:        # host CPython, the unix port: `_fill`'s own loop
     _moy_serial = None
+try:                       # device: the kernel's task watchdog, which a long
+    from moy_kernel import feed as _kernel_feed   # upload outlasts unfed
+except ImportError:        # host, and a board without the kernel
+    _kernel_feed = None
 
 # The ONE declaration of the persisted ON/OFF settings (#209 section 7). The
 # serial words below are derived from it -- an entry with a `dev` name IS the
@@ -415,6 +419,52 @@ def _num(v):
     return "-" if v is None else "%d" % v
 
 
+def stale_handle_probe(ws):
+    """The `kstale` line: the spine's handle gate, probed (#224 sprint 2).
+
+    A RELEASED handle (a throwaway table's own, released and presented again),
+    a FORGED one (the live app registry's first handle with its generation
+    moved on), one of the WRONG KIND (the same slot and generation, presented
+    as another table's) and 0 are each handed to the spine, and the line says
+    how every one was answered. A refusal is a `StaleHandle` that names its
+    table and the handle, so `kstale ok` means the spine said so out loud four
+    times and still serves the live handle. `impl` is where the spine runs:
+    `native` is native/moy_spine, `python` is runtime/moy_spine.py."""
+    try:
+        import moy_spine as sp
+    except ImportError:        # host / test -- the runtime package
+        from runtime import moy_spine as sp
+    reg = ws.apps
+    live = reg.handles()[0]
+    scratch = sp.Table(sp.KIND_APP, "app", 4)
+    gone = scratch.new("row")
+    scratch.release(gone)
+    probes = (
+        ("released", lambda: scratch.get(gone)),
+        ("forged", lambda: reg.title(live ^ (1 << sp.GEN_SHIFT))),
+        ("kind", lambda: reg.title(live ^ (1 << sp.KIND_SHIFT))),
+        ("zero", lambda: reg.title(0)),
+    )
+    out, ok = [], True
+    for name, fn in probes:
+        try:
+            fn()
+            out.append("%s=SERVED" % name)
+            ok = False
+        except sp.StaleHandle as exc:
+            out.append("%s=%s" % (name, exc))
+        except Exception as exc:  # noqa: BLE001 -- a refusal of any other kind is a finding
+            out.append("%s=%s:%s" % (name, type(exc).__name__, exc))
+            ok = False
+    try:
+        reg.title(live)
+    except Exception as exc:  # noqa: BLE001
+        out.append("live=%s:%s" % (type(exc).__name__, exc))
+        ok = False
+    impl = "python" if getattr(sp, "__file__", None) else "native"
+    return "REMOTE kstale %s impl=%s %s" % ("ok" if ok else "FAIL", impl, "; ".join(out))
+
+
 def heapcaps_line(esp32=None, gc=None):
     """The `HEAPCAPS` line: what each heap holds, in bytes.
 
@@ -713,6 +763,8 @@ def _remote_state(ws):
             "bt_view": bool(getattr(sl, "bt_view", False)),
             # the toggle whose warning is up before it turns ON, or None
             "confirm": getattr(sl, "confirm_key", None),
+            # the kernel's last-crash panel is up (Settings -> LAST CRASH)
+            "crash_view": bool(getattr(sl, "crash_view", False)),
         }
         win = ws.wm._wins.get("settings") if hasattr(ws.wm, "_wins") else None
         if win is not None and win.ctx is not None:
@@ -1432,6 +1484,8 @@ class DevChannel:
                         i = n
                     buf[0:i] = pending[:i]
                     pending = pending[i:]
+                if _kernel_feed is not None:
+                    _kernel_feed()
                 i = self._fill(buf, i, n, RECV_IDLE_MS)
                 if i < n:
                     # The stream stopped inside the window, which on a ring
@@ -1909,6 +1963,26 @@ class DevChannel:
             ws.app_guard.arm(parts[1] if len(parts) > 1 else "kernel-test")
             moy_crash.panic(parts[2] if len(parts) > 2 else "fault")
             return
+        if cmd == "khang":
+            # DEV, the task watchdog end to end (#160/#224): `khang [id]` arms
+            # `id` in the app strike ledger, then never ends the frame. The
+            # kernel's task watchdog panics the board once no frame has fed it
+            # for its timeout; after the reboot `state`'s `crash` is a `task_wdt`
+            # naming the id, and `py ws.app_guard.forgive('<id>')` drops the
+            # strike it took.
+            try:
+                import moy_kernel
+            except ImportError:
+                print("REMOTE khang: no kernel on this board")
+                return
+            armed = moy_kernel.watchdog()
+            if not armed[0]:
+                print("REMOTE khang: the console's loop has not armed the watchdog")
+                return
+            ws.app_guard.arm(parts[1] if len(parts) > 1 else "kernel-test")
+            print("REMOTE khang: hanging, the watchdog fires in %ds" % (armed[1] // 1000))
+            while True:
+                pass
         if cmd == "kfail":
             # DEV, the recovery floor (#224): `kfail [vm_start|heap]` restarts
             # the board with that VM start failure armed for one boot, which
@@ -1919,6 +1993,10 @@ class DevChannel:
                 print("REMOTE kfail: no kernel on this board")
                 return
             moy_kernel.test(parts[1] if len(parts) > 1 else "vm_start")
+            return
+        if cmd == "kstale":
+            # DEV, the spine's handle gate (#224): see stale_handle_probe.
+            print(stale_handle_probe(ws))
             return
         if cmd == "heapcaps":
             import gc

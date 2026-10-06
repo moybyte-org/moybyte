@@ -379,6 +379,42 @@ def test_every_board_decides_the_kernel_entry(board):
         "%s: the kernel is the entry on every console board" % board)
 
 
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_console_takes_the_native_spine_and_the_zero_declares_no_twin(board):
+    """The spine is native on every console and its Python twin is not frozen
+    there (docs/kernel_spine_2026-10.md); the Zero has no console to route and
+    declares no twin. The build exports the declaration as the hook."""
+    want = {"MOY_SPINE_IMPL": "c"} if board in CONSOLE_BOARDS else {}
+    assert board_config.impls(BOARDS[board]) == want
+
+
+def test_a_native_twin_the_board_names_is_py_or_c(tmp_path):
+    (tmp_path / "board.toml").write_text(
+        '[native]\n[native.impl]\nspine = "rust"\nwhy = "no"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="py or c"):
+        board_config.impls(tmp_path)
+
+
+def test_a_console_build_drops_the_python_spine_twin_and_the_environment_wins(tmp_path):
+    """The lib exports the board's twin before anything reads the hook, and a
+    build that sets MOY_SPINE_IMPL itself keeps its own."""
+    def frozen(**env):
+        script = (
+            "set -euo pipefail\nsource tools/esp32_build_lib.sh\n"
+            "BUILD_PYTHON='%s' REPO_ROOT='%s' SCRIPT_DIR='%s'\n"
+            "moybyte_board_impls\n"
+            "echo \"hook=${MOY_SPINE_IMPL:-}\"\n"
+            "'%s' tools/board_config.py list '%s' | grep -c '^moy_spine.py$' || true\n"
+            % (sys.executable, ROOT, TDECK, sys.executable, TDECK))
+        e = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), **env}
+        out = subprocess.run(["bash", "-c", script], cwd=str(ROOT), env=e,
+                             capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
+        return out.stdout.split()
+    assert frozen() == ["hook=c", "0"]                  # no Python twin frozen
+    assert frozen(MOY_SPINE_IMPL="py") == ["hook=py", "1"]
+
+
 def test_a_module_both_taken_and_denied_is_refused(tmp_path):
     (tmp_path / "board.toml").write_text(
         '[native]\n[native.shared]\nsource = "native"\n'

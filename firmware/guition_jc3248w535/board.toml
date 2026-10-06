@@ -280,6 +280,18 @@ baud = 115200
 [native]
 dest = "native/.staged"
 
+[native.impl]
+spine = "c"
+why = """
+The kernel's spine (docs/kernel_spine_2026-10.md) is native on this console: its
+handle tables, app registry, back-stack, WiFi leases and settings rows are
+native/moy_spine, and runtime/moy_spine.py, its Python twin, is not frozen into
+the image (`import moy_spine` reaches the extensible builtin). tools/
+esp32_build_lib.sh exports each value here as MOY_<NAME>_IMPL unless the build's
+environment sets one: MOY_SPINE_IMPL=py builds the twin in again, which is how
+`tools/moy_index_spike.py sizes` measures the difference. Every console takes
+it; the Zero declares none, because it has no console to route."""
+
 [native.shared]
 source   = "native"
 why = """

@@ -2,14 +2,18 @@
 """The kernel's sprint-2 gate on glass (docs/kernel_spine_2026-10.md §10), on
 one console board.
 
-    tools/kernel_gate.py BOARD [crash] [floor] [safe]     # default: all three
+    tools/kernel_gate.py BOARD [crash] [hang] [floor] [safe]    # default: all four
 
 Each step reboots the board, which a suite's held-open session cannot survive
 on an attach-only board, so the gate is a tool that opens the port per step:
 
   crash  `kcrash kernel-test fault`: after the reboot `state`'s `crash` names
-         kernel-test and a fault, and the notice banner is up. The strike the
+         kernel-test and a fault, the notice banner is up and Settings has its LAST CRASH row. The strike the
          dev word took is forgiven.
+  hang   `khang kernel-test`: the console's frame never ends, the task
+         watchdog (its timeout is the board's sdkconfig) panics the board, and
+         after the reboot `state`'s `crash` is a `task_wdt` naming kernel-test with
+         the reason `console hung`, and the notice banner is up (#160).
   floor  `kfail vm_start`: the board lands on the recovery screen, which says
          `KERNEL recovery reason=vm_start`; the crc32 of its framebuffer is the
          host's render of the lines it printed (tests/test_moy_kernel.py), and
@@ -34,7 +38,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import board as bd  # noqa: E402
 
-STEPS = ("crash", "floor", "safe")
+STEPS = ("crash", "hang", "floor", "safe")
 REPORT = re.compile(r"KERNEL recovery reason=(\w+) sel=(\w+) crc=([0-9a-f]{8})")
 CHOICES = ("RETRY", "SAFE", "REPL")
 
@@ -115,14 +119,36 @@ def _host_crc(name, lines, hint, sel):
 def step_crash(name, dirs):
     _send(name, dirs, "kcrash kernel-test fault")
     bd.wait_for_desk(name, dirs, quiet=True)
-    crash, notice = _vals(name, dirs, "__import__('moy_crash').last()", "ws._notice")
+    crash, notice, rows = _vals(name, dirs, "__import__('moy_crash').last()", "ws._notice",
+                                "[r[0] for r in ws.settings_layer._settings_rows()]")
     _vals(name, dirs, "ws.app_guard.forgive('kernel-test')")
+    if "crash" not in rows:
+        raise GateError("%s: Settings has no LAST CRASH row" % name)
     if not crash or crash.get("id") != "kernel-test" or crash.get("kind") != "fault":
         raise GateError("%s: state's crash is %r" % (name, crash))
     if not notice or "kernel-test" not in notice[1]:
         raise GateError("%s: the notice is %r" % (name, notice))
     return "fault in %s at pc=%08x cause=%d addr=%08x, notice up" % (
         crash["task"], crash["pc"], crash["cause"], crash["addr"])
+
+
+def step_hang(name, dirs):
+    armed, timeout_ms, _gap, frames = _vals(
+        name, dirs, "__import__('moy_kernel').watchdog()")[0]
+    if not armed:
+        raise GateError("%s: the console's loop has not armed the watchdog" % name)
+    _send(name, dirs, "khang kernel-test")
+    bd.wait_for_desk(name, dirs, quiet=True)
+    crash, notice = _vals(name, dirs, "__import__('moy_crash').last()", "ws._notice")
+    _vals(name, dirs, "ws.app_guard.forgive('kernel-test')")
+    if not crash or crash.get("kind") != "task_wdt" or crash.get("id") != "kernel-test":
+        raise GateError("%s: state's crash is %r" % (name, crash))
+    if "console hung" not in (crash.get("what") or ""):
+        raise GateError("%s: the reason is %r" % (name, crash.get("what")))
+    if not notice or "kernel-test" not in notice[1]:
+        raise GateError("%s: the notice is %r" % (name, notice))
+    return "task_wdt in %s after %ds (%s), pc=%08x, notice up" % (
+        crash["task"], timeout_ms // 1000, crash["what"], crash["pc"])
 
 
 def _to_floor(name, dirs):
@@ -168,15 +194,16 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("board", choices=sorted(dirs), help="a console board's id")
     ap.add_argument("steps", nargs="*", metavar="step",
-                    help="crash, floor, safe (default: all three)")
+                    help="crash, hang, floor, safe (default: all four)")
     a = ap.parse_args(argv)
     name, steps = a.board, a.steps or list(STEPS)
     if not bd.is_console(dirs[name]):
         ap.error("%s is not a console board" % name)
     bad = [s for s in steps if s not in STEPS]
     if bad:
-        ap.error("unknown step %s (crash, floor, safe)" % ", ".join(bad))
-    run = {"crash": step_crash, "floor": step_floor, "safe": step_safe}
+        ap.error("unknown step %s (crash, hang, floor, safe)" % ", ".join(bad))
+    run = {"crash": step_crash, "hang": step_hang, "floor": step_floor,
+           "safe": step_safe}
     for s in steps:
         try:
             print("%-6s %-10s ok  %s" % (s, name, run[s](name, dirs)))

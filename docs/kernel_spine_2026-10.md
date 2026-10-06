@@ -22,7 +22,7 @@ swaps each twin for its binding under those tests unchanged.
 | app registry, back-stack, return records | `moy_spine.AppRegistry`, `BackStack`, `Returns` | `native/moy_spine/moy_route.h` |
 | WiFi leases | `moy_spine.Leases` | `moy_route.h` (one mask) |
 | settings store | `moy_spine.Settings` under `runtime/system_store.py` | `native/moy_spine/moy_settings.h` |
-| strike ledger | `runtime/crash_guard.py` | stays Python in sprint 2 (2026-10-06): it mirrors its OPEN id into the record (§6) |
+| strike ledger | `runtime/crash_guard.py`'s `CrashGuard` | `native/moy_spine/moy_ledger.h`: the same class over the settings rows, `moy_spine.CrashGuard`, which `crash_guard` takes when the spine is native (§6) |
 | crash record, boot-loop guard | — | `native/moy_kernel/moy_crash.h` |
 | recovery screen | — | `native/moy_kernel/moy_recovery.h` |
 | the entry and the VM service | the port's `mp_task` | `native/moy_kernel/moy_kernel.c` |
@@ -33,6 +33,15 @@ MicroPython usermod registered extensible (a `moy_spine.py` on the path wins,
 so a build that leaves the native module out runs the twin), a host library
 for ctypes, and a fuzz driver. Each crossing deletes the twin it replaces in the
 same change (`docs/native_kernel_2026-09.md` §4.2).
+
+**Where the native spine is the default** (2026-10-06): the four consoles. Each
+board.toml declares `[native.impl] spine = "c"`, `tools/esp32_build_lib.sh`
+exports it as `MOY_SPINE_IMPL`, and the image freezes no `moy_spine.py`. The
+desktop MicroPython the traces run on builds it too (`UNIX_MP_SPINE`, default
+`c`). The CPython host runs the Python twin, which is also the interface the
+tests pin; the browser build keeps it because its wasm is a derived artifact of
+moy-spec's `runner/` and regenerating that is a cross-repo step; the Zero has no
+console to route.
 
 **What stays Python after sprint 2**, by decision: the app OBJECTS and the
 surfaces a route lands on (`console_spine.py`'s side of each verb); the radio
@@ -195,8 +204,12 @@ recorded by the VM service, which then restarts the board.
 
 **A hang becomes a record** (#160): the VM service task subscribes to the task
 watchdog with `CONFIG_ESP_TASK_WDT_PANIC=y`, and the console's frame feeds it
-through the binding once per frame; the timeout is a `board.toml` value, set at
-the gate from each board's worst legitimate frame (#66).
+through the binding once per frame; the timeout is the board's `CONFIG_ESP_TASK_WDT_TIMEOUT_S` in its
+`sdkconfig.board` (15 s), above the worst legitimate frame the gate reads with
+`moy_kernel.watchdog()` (#66). The first `feed()` subscribes the task, the
+loop's end unsubscribes it, so the REPL is never watched; the record's kind is
+`task_wdt` and its reason `console hung: no frame in Ns`. `khang` is the dev
+word and `tools/kernel_gate.py BOARD hang` the gate.
 
 **Shown after the reboot.** On the next healthy boot the console's first
 painted frame (`device_boot.boot_ok`) reads `moy_crash.take()` once and the
@@ -204,8 +217,12 @@ notice banner names what was running and why it stopped; the dev channel's `stat
 Settings diagnostics row shows it. The recovery screen (§7) shows it when the
 console cannot come up.
 
-**The ledger** stays `CrashGuard` in Python for sprint 2 (2026-10-06). Its
-armed id is mirrored into RTC memory at `arm` (`moy_crash.arm(role, id)`, one
+**The ledger** is `CrashGuard`, in Python (`runtime/crash_guard.py`, the reference) and
+in C (`native/moy_spine/moy_ledger.c` under `moy_spine.CrashGuard`, over
+`moy_settings_get` and the persisting write; the native spine's consoles run it,
+`tests/test_ledger_twin.py` holds its answers and the bytes it writes to the
+Python one's). The Python class stays in `crash_guard.py` because the file also
+holds the record's readers. Its armed id is mirrored into RTC memory at `arm` (`moy_crash.arm(role, id)`, one
 slot per role; the record names the app's over the wallpaper's) and cleared at
 the heal and the release, which is how the record names what was running; a
 boot clears what the last one left, which the record already holds.
@@ -320,7 +337,7 @@ S3 boards with WiFi and BLE up, and the numbers are #224's.
 
 | gate | host | on glass, every console board |
 |---|---|---|
-| a stale handle is refused loudly | `tests/test_moy_spine.py` gains the native binding through ctypes and the desktop MicroPython; the spine trace runs over the native module on both object models; the API-sequence and settings-scanner fuzzers under ASan and UBSan | a stale app handle through `py` answers `stale app handle` (a shared body in `tests/on_glass.py`) |
+| a stale handle is refused loudly | `tests/test_moy_spine.py` gains the native binding through ctypes and the desktop MicroPython; the spine trace runs over the native module on both object models; the API-sequence and settings-scanner fuzzers under ASan and UBSan | `kstale` hands the spine a released, a forged, a wrong-kind and a zero handle and each answers `stale app handle`; the shared body `stale_handle_is_refused_loudly` (`tests/on_glass.py`) also asks the live app registry through `py`, and reads `impl=native` |
 | a native crash is recorded and shown after reboot | `tests/test_moy_kernel.py`: the record's seal and crc through ctypes, a torn or foreign record read as none, the OPEN ids a boot forgets | `tools/kernel_gate.py BOARD crash`: `kcrash` arms a test id in the ledger and faults; after the reboot `state`'s `crash` names the id and the cause, and the notice is up |
 | a VM that fails to start lands on the recovery screen | the same file: `moy_boot_decide` as a pure function, and the recovery raster rendered at each console's size and rotation and hashed against goldens | `tools/kernel_gate.py BOARD floor safe`: `kfail` arms a one-shot start failure in RTC memory; the floor says `KERNEL recovery reason=vm_start`, its framebuffer's crc is the host's render of the lines it printed, and `retry` and `safe` start the console as they say |
 

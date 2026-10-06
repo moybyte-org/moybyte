@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   load                a board's board.toml, parsed
+#   staged_modules      the shared Python modules a board freezes
+#   native_modules      the shared native modules a board compiles in
+#   impls               the native twins a board's decision takes
+#   stage_native        stage the native modules and write their cmake list
+#   sdkconfig_required  the stale-sdkconfig guard's list
+#   stage               stage the Python modules
+#   Setting             one sdkconfig.board assignment and its prose
+#   TomlError           a board.toml the parser refuses
 """Read a board's `board.toml` and stage its modules (#161 Phase 3).
 
 WHY THIS EXISTS. A board's definition used to live in six places in three
@@ -440,6 +450,26 @@ def native_modules(board_dir, root=ROOT):
     return sorted(out)
 
 
+def impls(board_dir):
+    """{MOY_<NAME>_IMPL: value} -- the native twins this board's decision takes,
+    from board.toml's `[native.impl]` (a name and `py` or `c`, with a `why`).
+
+    The build exports each unless the environment already sets it, so a build
+    can still ask for the other twin; tools/esp32_build_lib.sh does the
+    exporting and the readers of the hook (the module fragments, `stage`) see
+    one variable, whoever set it."""
+    cfg = load(Path(board_dir).resolve()).get("native", {}).get("impl", {})
+    out = {}
+    for name, value in cfg.items():
+        if name == "why":
+            continue
+        if value not in ("py", "c"):
+            raise ValueError("board.toml [native.impl] %s is py or c, not %r"
+                             % (name, value))
+        out["MOY_%s_IMPL" % name.upper()] = value
+    return out
+
+
 def native_dest(board_dir):
     """Where `stage_native` puts the shared native modules, relative to the
     board dir -- board.toml `[native] dest`, or the default.
@@ -714,6 +744,10 @@ def main(argv):
     if len(argv) >= 3 and argv[1] == "stage-native":
         stage_native(argv[2])
         return 0
+    if len(argv) >= 3 and argv[1] == "impls":
+        for name, value in sorted(impls(argv[2]).items()):
+            print("%s=%s" % (name, value))
+        return 0
     if len(argv) >= 3 and argv[1] == "native-dest":
         print(native_dest(argv[2]))
         return 0
@@ -744,7 +778,7 @@ def main(argv):
     print(__doc__.strip().splitlines()[0], file=sys.stderr)
     print("usage: board_config.py stage|stage-native|list|list-native "
           "<board_dir>", file=sys.stderr)
-    print("       board_config.py native-dest <board_dir>", file=sys.stderr)
+    print("       board_config.py native-dest|impls <board_dir>", file=sys.stderr)
     print("       board_config.py sdkconfig-required|sdkconfig-get|"
           "sdkconfig-why <board_dir> [OPTION]", file=sys.stderr)
     return 2

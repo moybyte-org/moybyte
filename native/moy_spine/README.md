@@ -4,7 +4,9 @@ The data half of the spine `docs/kernel_spine_2026-10.md` designs, in C:
 `runtime/moy_spine.py` defines the interface and is the reference, call for call,
 and `tests/test_moy_spine.py` pins it for every binding. It is built the three
 ways `native/moy_index/` is (see its README), under its own hook
-`MOY_SPINE_IMPL=py|c`, with the Python twin the default;
+`MOY_SPINE_IMPL=py|c`: every console's board.toml declares `c` (`[native.impl]`)
+and freezes no Python twin, while the host, the browser build and the Zero run
+`runtime/moy_spine.py`;
 `tools/moy_index_spike.py --component spine` runs its host suite, sanitizers and
 image sizes.
 
@@ -13,6 +15,7 @@ image sizes.
 | `moy_htab.h`, `moy_htab.c` | the handle table: `gen << 12 \| kind << 8 \| slot`, never 0, generation-checked, lowest-first reuse. Unkinded (kind 0, 12 bits of slot) it is `native/moy_index`'s slot bookkeeping too |
 | `moy_route.h`, `moy_route.c` | the app registry (a kinded `moy_htab`), the back-stack, the return records and `route()`, the WiFi lease mask |
 | `moy_settings.h`, `moy_settings.c` | system.json as rows of JSON text, the scanner that reads it, and the count of changes since it was last clean |
+| `moy_ledger.h`, `moy_ledger.c` | the strike ledger's slot (`runtime/crash_guard.py`) as text in, text out: the edits `CrashGuard` makes, written as `json.dumps` would write them |
 | `modmoy_spine.c` | the MicroPython binding: the module `moy_spine`, registered extensible so a `moy_spine.py` on the path wins. `Settings.set` encodes a value, marks the store dirty and calls the save hook |
 | `moy_spine_host.c` | the allocator over calloc, and the table calls the header has only inline, for the ctypes binding (`tools/moy_spine_binding.py`) |
 | `fuzz_spine.c` | every component against a model with allocation failure injected, and the scanner on raw and corrupted text: libFuzzer or a seeded driver |

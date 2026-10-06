@@ -1114,6 +1114,10 @@ class FrameLoop:
         # class's order, so a board cannot own a different set of them.
         self.meters = StageMeters(ws, getattr(pump, "frame_ms", 1000 // 60))
         ws.stage_meters = self.meters
+        # The kernel's task watchdog (native/moy_kernel, #160): a frame that
+        # ends feeds it, a frame that never does panics the board into a crash
+        # record. None on every tier but a console board's.
+        self._feed = getattr(_kernel, "feed", None)
 
     def step(self):
         """One frame. Returns "quit" when the dev channel asked for the REPL,
@@ -1215,11 +1219,18 @@ class FrameLoop:
             self.account(now, elapsed, sleep_ms)
             if m is not None:
                 m.mark(_S_ACCOUNT)
+        if self._feed is not None:
+            self._feed()
         if sleep_ms:
             _sleep_ms(sleep_ms)
         return None
 
     def run(self):
-        while True:
-            if self.step() == "quit":
-                return "quit"
+        try:
+            while True:
+                if self.step() == "quit":
+                    return "quit"
+        finally:
+            rest = getattr(_kernel, "rest", None)
+            if rest is not None:
+                rest()          # a loop that ended is not a hang: the REPL is never watched

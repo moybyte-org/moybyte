@@ -549,13 +549,19 @@ def test_kernel_data_is_allocated_from_psram():
     for PSRAM first and falls to the default heap only on a board with none;
     and the one thing the binding keeps on the VM's heap is a Table's row
     objects, which the collector must see."""
-    for name in ("moy_htab.c", "moy_route.c", "moy_settings.c"):
+    for name in ("moy_htab.c", "moy_route.c", "moy_settings.c", "moy_ledger.c"):
         hits = ALLOC_CALLS.findall(_code(os.path.join(SPINE_DIR, name)))
         assert not hits, "%s allocates by itself: %s" % (name, hits)
     binding = _code(os.path.join(SPINE_DIR, "modmoy_spine.c"))
-    m = re.search(r"#ifdef ESP_PLATFORM\s+static void \*spine_alloc.*?#else",
+    m = re.search(r"#ifdef MOY_SPINE_BOARD\s+static void \*spine_alloc.*?#else",
                   binding, re.S)
     assert m, "no board allocator in modmoy_spine.c"
+    # ESP_PLATFORM is not defined for a usermod's sources, so the board is
+    # recognised by its header; an #ifdef ESP_PLATFORM here would build calloc
+    # into every board and spend internal SRAM.
+    raw = open(os.path.join(SPINE_DIR, "modmoy_spine.c")).read()
+    assert '#if __has_include("esp_heap_caps.h")\n#define MOY_SPINE_BOARD' in raw
+    assert "#ifdef ESP_PLATFORM" not in raw and "#if ESP_PLATFORM" not in raw
     alloc = m.group(0)
     first = alloc.index("heap_caps_calloc")
     assert "MALLOC_CAP_SPIRAM" in alloc[first:alloc.index(";", first)]

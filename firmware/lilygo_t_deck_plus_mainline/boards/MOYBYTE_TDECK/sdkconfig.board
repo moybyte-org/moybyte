@@ -302,3 +302,13 @@ CONFIG_PM_ENABLE=
 # asymmetry being closed, not a new risk appetite. The cost is losing an
 # automatic bad-PSRAM detector at boot.
 CONFIG_SPIRAM_MEMTEST=
+
+# The task watchdog (#160, docs/kernel_spine_2026-10.md section 6). The stock
+# build leaves it on, watching no idle task and only logging a timeout; the
+# kernel subscribes the VM task (native/moy_kernel: the console's frame feeds it
+# once per frame, and the loop leaving it unsubscribes) and a timeout PANICS, so
+# a frame that never ends is a crash record naming what ran. The timeout is
+# above the worst frame this board legitimately takes (the gate reads it with
+# `moy_kernel.watchdog()`).
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=15

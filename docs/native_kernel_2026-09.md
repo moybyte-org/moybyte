@@ -329,7 +329,7 @@ console needs while no Python app runs is OS.
 | `runtime/console_settings.py` | spine | 2 | the toggle setters over the settings store; each toggle's subject (frame tail, input, glass, store) crosses in its own sprint |
 | `runtime/cover_cache.py` | store | 1b | the shelf's cover and icon pipeline |
 | `runtime/cover_png.py` | store | 1b | the native `moy_png` already decodes on boards and in the browser; the Python reader is the host's |
-| `runtime/crash_guard.py` | spine | 2 | the strike ledger for apps and the wallpaper |
+| `runtime/crash_guard.py` | spine | 2 | the strike ledger for apps and the wallpaper; its C twin is `moy_spine.CrashGuard` (`native/moy_spine/moy_ledger.c`), which the native spine's consoles run |
 | `runtime/dev_channel.py` | frame tail | 3 | the serial dev channel, one vocabulary on every board |
 | `runtime/device_boot.py` | split | 3 + 4 | `DeviceBoot`'s runtime probe and map → 4; its boot screen, the frame pump, OTA health, idle blank, PERF sampler and `FrameLoop` → 3; its cart step is `runtime/boot_carts.py` |
 | `runtime/editor_app.py` | app | — | the Editor and its tab ladder |
@@ -369,7 +369,7 @@ console needs while no Python app runs is OS.
 | `runtime/moy_journal.py` | store | 1b | the undo journal, named under storage in §2.2; the Zero takes it |
 | `runtime/moy_qr.py` | radios and links | open | the pairing QR encoder for the web-console screen; follows `runtime/web_console_ui.py` |
 | `runtime/moy_seed.py` | store | 1b | seeding and the sweep of retired seeds; the Zero takes it |
-| `runtime/moy_spine.py` | spine | 2 | the spine's interface and its Python twin: handle tables, the app registry, the back-stack and return records, the WiFi lease mask and the settings rows; the native `moy_spine` replaces it (`docs/kernel_spine_2026-10.md`) |
+| `runtime/moy_spine.py` | spine | 2 | the spine's interface and its Python twin: handle tables, the app registry, the back-stack and return records, the WiFi lease mask and the settings rows; the native `moy_spine` replaces it on every console (`docs/kernel_spine_2026-10.md`); the host, the browser build and the Zero keep this file |
 | `runtime/moy_store_base.py` | store | 1b | the store's on-card layout and shared rules; the Zero takes it |
 | `runtime/moy_sync.py` | radios and links | 3 | the sync RPC's push half; the Zero takes it |
 | `runtime/moybuf.py` | spine | 2 | the Python view over `moy_alloc` entries; the registry becomes a handle table of kind BUF (`docs/kernel_spine_2026-10.md` §1), and the stop inventory (§4.4) clears its rows or moves them to kernel ownership |

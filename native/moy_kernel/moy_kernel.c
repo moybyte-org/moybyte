@@ -29,6 +29,13 @@
 // memory and calls the real handler; the intake copies it to NVS
 // (namespace moy_kernel, key crash) before the VM starts and clears the RTC
 // copy. A clean boot touches no NVS.
+//
+// A HANG IS A RECORD TOO (#160): the console's frame loop feeds the task
+// watchdog once per frame (moy_kernel_feed), which subscribes the VM task on
+// its first feed. CONFIG_ESP_TASK_WDT_PANIC is on and the timeout is the
+// board's (its sdkconfig.board), so a frame that never ends panics the board
+// through the same wrapper and the record says TWDT, what ran and why. The loop
+// leaves it with moy_kernel_rest, so the REPL is never watched.
 
 #include <stdio.h>
 #include <string.h>
@@ -48,6 +55,7 @@
 #include "esp_memory_utils.h"
 #include "esp_system.h"
 #include "esp_task.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "nvs.h"
 #include "driver/gpio.h"
@@ -125,6 +133,13 @@ void esp_native_code_free_all(void);
 RTC_NOINIT_ATTR static moy_kstate_t s_kst;
 RTC_NOINIT_ATTR static moy_crash_rec_t s_krec;
 
+// The task watchdog's reason, in the record a TWDT panic leaves: DRAM, because
+// the wrapper reads it with the flash cache possibly off.
+static DRAM_ATTR char s_twdt_what[MOY_CRASH_WHAT_LEN] = "task watchdog";
+extern bool g_twdt_isr;                     // esp_system's: the abort came from the TWDT
+static bool s_wd_armed;
+static uint32_t s_wd_last_ms, s_wd_max_gap_ms, s_wd_frames;
+
 static uint32_t s_build;                    // the build the record names
 static int s_mode = MOY_BOOT_START;
 static volatile bool s_proven;
@@ -154,7 +169,7 @@ IRAM_ATTR void __wrap_esp_panic_handler(panic_info_t *info) {
         ((volatile uint8_t *)r)[i] = 0;
     }
     if (g_panic_abort) {
-        r->kind = MOY_CRASH_ABORT;
+        r->kind = g_twdt_isr ? MOY_CRASH_TWDT : MOY_CRASH_ABORT;
     } else {
         switch (info->exception) {
             case PANIC_EXCEPTION_DEBUG: r->kind = MOY_CRASH_DEBUG; break;
@@ -203,7 +218,9 @@ IRAM_ATTR void __wrap_esp_panic_handler(panic_info_t *info) {
         TaskHandle_t t = xTaskGetCurrentTaskHandleForCore(info->core);
         moy_kernel_copy_text(r->task, MOY_CRASH_TASK_LEN, t ? pcTaskGetName(t) : NULL);
         const char *what = g_panic_abort ? g_panic_abort_details : info->reason;
-        if (g_panic_abort && what != NULL && esp_ptr_byte_accessible(what)) {
+        if (r->kind == MOY_CRASH_TWDT) {
+            what = s_twdt_what;
+        } else if (g_panic_abort && what != NULL && esp_ptr_byte_accessible(what)) {
             // "abort() was called at PC 0x... on core N": the kind says abort,
             // so the record keeps the PC.
             size_t i = 0;
@@ -391,6 +408,52 @@ void moy_kernel_test_crash(bool abort_not_fault) {
         abort();
     }
     *(volatile uint32_t *)0 = 0xDEADu;
+}
+
+// ---------------------------------------------------------------------------
+// The task watchdog (#160)
+// ---------------------------------------------------------------------------
+
+// One call per console frame. The first subscribes the VM task (it runs on it)
+// and the record's reason; every call resets the watchdog and keeps the longest
+// gap between two (the worst frame the console took), which the gate reads.
+void moy_kernel_feed(void) {
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (!s_wd_armed) {
+        if (esp_task_wdt_add(NULL) != ESP_OK) {
+            return;
+        }
+        snprintf(s_twdt_what, sizeof(s_twdt_what), "console hung: no frame in %us",
+                 (unsigned)CONFIG_ESP_TASK_WDT_TIMEOUT_S);
+        s_wd_armed = true;
+        s_wd_max_gap_ms = 0;
+        s_wd_frames = 0;
+    } else if (now - s_wd_last_ms > s_wd_max_gap_ms) {
+        s_wd_max_gap_ms = now - s_wd_last_ms;
+    }
+    s_wd_last_ms = now;
+    s_wd_frames++;
+    esp_task_wdt_reset();
+}
+
+// The console's loop ended (a quit, a Ctrl-C): nothing feeds the watchdog now.
+void moy_kernel_rest(void) {
+    if (s_wd_armed) {
+        esp_task_wdt_delete(NULL);
+        s_wd_armed = false;
+    }
+}
+
+bool moy_kernel_watchdog(uint32_t *timeout_ms, uint32_t *max_gap_ms, uint32_t *frames, bool reset) {
+    bool armed = s_wd_armed;
+    *timeout_ms = (uint32_t)CONFIG_ESP_TASK_WDT_TIMEOUT_S * 1000u;
+    *max_gap_ms = s_wd_max_gap_ms;
+    *frames = s_wd_frames;
+    if (reset) {
+        s_wd_max_gap_ms = 0;
+        s_wd_frames = 0;
+    }
+    return armed;
 }
 
 // The port's weak one prints and restarts; this one records first.
@@ -794,6 +857,8 @@ soft_reset:
     }
 
 soft_reset_exit:
+
+    moy_kernel_rest();
 
     #if MICROPY_BLUETOOTH_NIMBLE
     mp_bluetooth_deinit();

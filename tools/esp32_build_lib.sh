@@ -349,12 +349,28 @@ moybyte_patch_psram_retune() {
   fi
 }
 
+# The native twins this board takes (board.toml [native.impl]), exported as the
+# MOY_*_IMPL hooks the module fragments and `board_config.py stage` read -- the
+# build's environment wins, so `MOY_SPINE_IMPL=py` still builds the other twin.
+# Called first by moybyte_stage_native, ahead of everything that reads a hook.
+# Reads BUILD_PYTHON SCRIPT_DIR.
+moybyte_board_impls() {
+  local line name
+  while IFS= read -r line; do
+    name="${line%%=*}"
+    if [ -z "${!name:-}" ]; then
+      export "${line}"
+    fi
+  done < <("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" impls "${SCRIPT_DIR}")
+}
+
 # Stage the shared native modules per board.toml [native.shared] and generate
 # the web-console blob INTO THE STAGED COPY (never into the shared native/
 # tree two builds read). Reads SCRIPT_DIR, REPO_ROOT, BUILD_PYTHON. A missing
 # web bundle only WARNS locally and FAILS under CI/MOYBYTE_REQUIRE_WEB_BUNDLE,
 # because a PUBLISHED image with no console is the whole bug the baking fixes.
 moybyte_stage_native() {
+  moybyte_board_impls
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage-native "${SCRIPT_DIR}"
   # WHERE it staged them is the board's to say ([native] dest). Asked rather
   # than restated: a board moving its dest would otherwise leave the blob
@@ -593,6 +609,37 @@ moybyte_kernel_entry() {
   printf '#define MOY_FW_LABEL "%s"\n' "${label:-unlabelled}" > "${staged}/moy_fw_label.gen.h"
 }
 
+# The build's native configuration, as one line: the native modules this board
+# stages (board.toml's takes and denials) and every MOY_*_IMPL hook in the
+# environment (tools/moy_index_spike.py names them, MOY_INDEX_BENCH included).
+# Reads BUILD_PYTHON SCRIPT_DIR.
+moybyte_native_config() {
+  {
+    "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" list-native "${SCRIPT_DIR}"
+    env | { grep -E '^MOY_([A-Z]+_IMPL|INDEX_BENCH)=' || true; } | sort
+  } | tr '\n' ' '
+}
+
+# MicroPython keeps a source's generated qstr and module entries (genhdr) until
+# that source is preprocessed again, so a build that drops a source -- a hook
+# back to py, a module the board file now denies -- links a module table that
+# names code it no longer has (`undefined reference to moy_kernel_module`).
+# $1 is the build dir: when the native configuration is not the one it was last
+# built with, its genhdr starts afresh. The record is written here, before the
+# build, so a build that fails half-way still leaves genhdr and the record
+# naming the same configuration. A build dir with no record has none to trust.
+# Reads BUILD_PYTHON SCRIPT_DIR.
+moybyte_native_config_guard() {
+  local bout="$1" want
+  want="$(moybyte_native_config)"
+  if [ "$(cat "${bout}/moy_native_config" 2>/dev/null)" != "${want}" ]; then
+    echo "== native configuration changed: starting ${bout}/genhdr afresh"
+    rm -rf "${bout}/genhdr"
+  fi
+  mkdir -p "${bout}"
+  printf '%s\n' "${want}" > "${bout}/moy_native_config"
+}
+
 moybyte_build_and_collect() {
   local csv="$1" stem="$2" flash_note="$3"
   moybyte_kernel_entry
@@ -600,22 +647,10 @@ moybyte_build_and_collect() {
   cd "${MPY_DIR}/ports/esp32"
   make submodules BOARD_DIR="${BOARD_DIR}"
   local bout="build-${BOARD}"
-  # MicroPython keeps a source's generated qstr and module entries until that
-  # source is preprocessed again, so a build that drops a usermod source
-  # (MOY_INDEX_IMPL or MOY_SPINE_IMPL back to py, tools/moy_index_spike.py)
-  # would link a module table naming code it no longer has. A changed hook
-  # starts genhdr afresh.
-  local index_hook="${MOY_INDEX_IMPL:-c}${MOY_INDEX_BENCH:++bench}"
-  local spine_hook="${MOY_SPINE_IMPL:-py}"
-  if [ "$(cat "${bout}/moy_index_impl" 2>/dev/null || echo py)" != "${index_hook}" ] \
-     || [ "$(cat "${bout}/moy_spine_impl" 2>/dev/null || echo py)" != "${spine_hook}" ]; then
-    rm -rf "${bout}/genhdr"
-  fi
+  moybyte_native_config_guard "${bout}"
   make -j"${BUILD_JOBS}" BOARD_DIR="${BOARD_DIR}" \
     USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
     FROZEN_MANIFEST="${MANIFEST}"
-  echo "${index_hook}" > "${bout}/moy_index_impl"
-  echo "${spine_hook}" > "${bout}/moy_spine_impl"
   cp "${bout}/firmware.bin" "${DIST_DIR}/${stem}.bin"
   cp "${bout}/micropython.bin" "${DIST_DIR}/${stem}_app.bin"
   moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin"

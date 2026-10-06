@@ -1366,3 +1366,60 @@ def test_a_usj_init_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
     f, r = _usj(tmp_path, text)
     assert r.returncode != 0 and "did not apply" in r.stderr
     assert f.read_text(encoding="utf-8") == text
+
+
+# -- the native configuration guard ---------------------------------------------
+
+
+def _config_board(tmp_path):
+    """A board dir whose board.toml is the Guition P4's, a build dir with a
+    genhdr beside it, and the shell that runs the guard over both."""
+    bd = tmp_path / "board"
+    bd.mkdir()
+    src = ROOT / "firmware" / "guition_jc8012p4a1c" / "board.toml"
+    (bd / "board.toml").write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    out = tmp_path / "build-X"
+    (out / "genhdr").mkdir(parents=True)
+    return bd, out
+
+
+def _config_guard(bd, out, **env):
+    r = sh("moybyte_native_config_guard '%s'" % out, REPO_ROOT=str(ROOT),
+           SCRIPT_DIR=str(bd), BUILD_PYTHON=sys.executable, **env)
+    assert r.returncode == 0, r.stderr
+    return (out / "genhdr").is_dir()
+
+
+def test_a_flipped_take_or_denial_starts_genhdr_afresh(tmp_path):
+    """A build that drops a source links a module table naming code it no
+    longer has: `undefined reference to moy_kernel_module` after a board.toml
+    flip, until genhdr was deleted by hand."""
+    bd, out = _config_board(tmp_path)
+    assert _config_guard(bd, out) is False          # no record: nothing to trust
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out) is True           # the same configuration
+
+    toml = (bd / "board.toml").read_text(encoding="utf-8")
+    take = '[[native.shared.take]]\nmodule = "moy_kernel"'
+    assert take in toml
+    (bd / "board.toml").write_text(
+        toml.replace(take, '[[native.shared.deny]]\nmodule = "moy_kernel"'),
+        encoding="utf-8")
+    assert _config_guard(bd, out) is False          # take -> deny
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out) is True
+    (bd / "board.toml").write_text(toml, encoding="utf-8")
+    assert _config_guard(bd, out) is False          # deny -> take
+
+
+def test_a_changed_impl_hook_starts_genhdr_afresh(tmp_path):
+    bd, out = _config_board(tmp_path)
+    _config_guard(bd, out)
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out) is True
+    assert _config_guard(bd, out, MOY_SPINE_IMPL="c") is False
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out, MOY_SPINE_IMPL="c") is True
+    assert _config_guard(bd, out, MOY_SPINE_IMPL="py") is False
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out, MOY_SPINE_IMPL="py", CI="1") is True  # not a hook

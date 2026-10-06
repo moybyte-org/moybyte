@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "moy_htab.h"
+#include "moy_ledger.h"
 #include "moy_route.h"
 #include "moy_settings.h"
 
@@ -855,6 +856,60 @@ static void st_load(input_t *in) {
     st_verify();
 }
 
+
+// The strike ledger's edit over a slot that is a model's, a random object or
+// noise, with allocation failing: whatever it answers, the text it writes is
+// one object a settings row accepts, an ARM adds exactly one strike and names
+// the id, and nothing it allocated is left.
+static void led_edit(input_t *in) {
+    static const char *SLOTS[] = {
+        "{}", "{\"strikes\": {}}", "{\"strikes\": {\"a\": 2}, \"open\": \"a\"}",
+        "{\"x\": [1, {\"y\": \"}\"}], \"strikes\": 5}", "[1]", "",
+        "{\"strikes\": {\"a\": \"2\", \"b\": 2.5, \"c\": true}, \"proven\": {\"a\": \"p\"}}",
+    };
+    static const char *IDS[] = { "\"a\"", "\"b\"", "\"c\"", "\"q\\\"x\"" };
+    char noise[40];
+    const char *slot = SLOTS[next(in) % 7u];
+    size_t n = strlen(slot);
+    if (next(in) % 4u == 0u) {
+        n = next(in) % sizeof noise;
+        for (size_t i = 0; i < n; i++) {
+            static const char P[] = "{}\":, a1[]\\";
+            noise[i] = P[next(in) % (sizeof P - 1u)];
+        }
+        slot = noise;
+    }
+    if (next(in) % 8u == 0u) {
+        slot = NULL;
+        n = 0;
+    }
+    const char *id = IDS[next(in) % 4u];
+    size_t idn = strlen(id);
+    int op = 1 + (int)(next(in) % 3u);
+    const char *proof = (op == MOY_LEDGER_HEAL && next(in) & 1) ? "\"p1\"" : NULL;
+    int32_t before = moy_ledger_strikes(slot, n, id, idn);
+    char *out = NULL;
+    size_t outn = 0;
+    failed = 0;
+    int rc = moy_ledger_edit(&mem, slot, n, op, id, idn, proof,
+                             proof ? 4u : 0u, &out, &outn);
+    int hit = failed;
+    fail_in = 0;
+    CHECK(rc == 1 || rc == 0 || rc == MOY_LEDGER_NOMEM);
+    CHECK(rc != MOY_LEDGER_NOMEM || hit);
+    if (rc == 1) {
+        CHECK(moy_jobj_members(out, outn, NULL, 0) >= 1);
+        CHECK(moy_settings_validate(out, outn) == MOY_SETTINGS_OK);
+        if (op == MOY_LEDGER_ARM) {
+            CHECK(moy_ledger_strikes(out, outn, id, idn) == before + 1);
+            CHECK(moy_ledger_open_is(out, outn, id, idn));
+        } else {
+            CHECK(moy_ledger_strikes(out, outn, id, idn) == 0);
+        }
+        mem.release(out, outn);
+    }
+}
+
 // Text the scanner reads untrusted: raw bytes, or the model's file with a byte
 // changed. Any answer is allowed, but a refusal changes nothing and an
 // acceptance is a file that dumps and loads to itself.
@@ -972,7 +1027,7 @@ static void run(const uint8_t *data, size_t size) {
     tm_new(&in);
     unsigned ops = 0;
     while (in.i < in.n) {
-        uint8_t op = next(&in) % 26u;
+        uint8_t op = next(&in) % 27u;
         switch (op) {
             case 0: case 1:
                 tm_add();
@@ -1050,6 +1105,9 @@ static void run(const uint8_t *data, size_t size) {
                     moy_settings_clean(st.s);
                     st.dirty = 0;
                 }
+                break;
+            case 26:
+                led_edit(&in);
                 break;
             case 24:                            // towards a full registry
                 for (unsigned k = 0; k < 70u; k++) {

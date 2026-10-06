@@ -56,9 +56,10 @@ desktop MicroPython, the browser) read it, tools/board_config.py drops the
 Python twin from a twin's frozen set, and `make unix-micropython` builds the
 twin its UNIX_MP_INDEX names (default `c`).
 
-MOY_SPINE_IMPL is the spine's hook, the same shape with `py` its default:
-`py` keeps runtime/moy_spine.py frozen, `c` builds native/moy_spine (modmoy_spine.c over
-moy_route.c and moy_settings.c) and leaves the Python file out, and UNIX_MP_SPINE
+MOY_SPINE_IMPL is the spine's hook, the same shape (the consoles' board.toml
+declares `c`, `[native.impl]`; the browser build and the Zero leave it `py`): `py` keeps
+runtime/moy_spine.py frozen, `c` builds native/moy_spine (modmoy_spine.c over
+moy_route.c, moy_settings.c and moy_ledger.c) and leaves the Python file out, and UNIX_MP_SPINE
 (default `c`) is `make unix-micropython`'s. moy_htab.c, the handle table both
 components take their slots from, is built when either hook is `c`.
 runtime/moy_index.py stays the host's: CPython's simulator, tools and tests
@@ -66,11 +67,13 @@ import it, and it is the reference every binding is pinned against.
 
 MOY_INDEX_BENCH=1 adds the `moy_index_bench` module (bench_moy_index.c) to a
 twin build, for `bench`; no image the size table measures carries it. Each
-build dir records the hooks it was built with (`moy_index_impl`,
-`moy_spine_impl`) and starts its
-generated headers afresh when that changes (tools/esp32_build_lib.sh, the web
-runner's build.sh, the Makefile), because MicroPython keeps a dropped source's
-module registration until that source is preprocessed again.
+build dir records the hooks it was built with and starts its generated headers
+afresh when that changes, because MicroPython keeps a dropped source's module
+registration until that source is preprocessed again. A board's record
+(`moy_native_config`, tools/esp32_build_lib.sh) is every MOY_*_IMPL hook in the
+environment and the board's staged native modules, so flipping a board.toml
+take or denial is noticed the same way; the web runner's build.sh and the
+Makefile keep their own, over the two hooks.
 """
 
 import argparse
@@ -152,10 +155,11 @@ INDEX = Component(
 SPINE = Component(
     "spine", [NATIVE_SPINE], "moy_spine_host.c",
     ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
-     "moy_settings.h", "moy_settings.c"],
-    ("fuzz_spine.c", ["moy_htab.c", "moy_route.c", "moy_settings.c"]),
-    r"\((mod)?moy_(spine|route|settings|htab)\.c\.obj\)$"
-    r"|/(mod)?moy_(spine|route|settings|htab)\.c\.obj$",
+     "moy_settings.h", "moy_settings.c", "moy_ledger.h", "moy_ledger.c"],
+    ("fuzz_spine.c", ["moy_htab.c", "moy_route.c", "moy_settings.c",
+                      "moy_ledger.c"]),
+    r"\((mod)?moy_(spine|route|settings|ledger|htab)\.c\.obj\)$"
+    r"|/(mod)?moy_(spine|route|settings|ledger|htab)\.c\.obj$",
     ["tests/test_moy_spine.py", "tests/test_moy_spine_twins.py"],
     "spine", "spine-", "py")
 # The store's volume seam and crash-safe write (native/moy_store). It has no

@@ -4,6 +4,9 @@
 //   moy_kernel.boot_failed(text)   what the console's failed boot said
 //   moy_kernel.mode()              'start', 'safe' or 'repl'
 //   moy_kernel.test(kind)          DEV: 'vm_start' or 'heap' on the next boot; restarts
+//   moy_kernel.feed()              the console's frame: feeds the task watchdog (#160)
+//   moy_kernel.rest()              the frame loop ended: nothing feeds it now
+//   moy_kernel.watchdog([reset])   (armed, timeout_ms, max_gap_ms, frames)
 //
 //   moy_crash.arm(role, id)        the ledger's OPEN id (None clears), into RTC
 //   moy_crash.last()               the last record this board made, or None
@@ -50,12 +53,41 @@ static mp_obj_t mod_test(mp_obj_t kind) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_test_obj, mod_test);
 
+static mp_obj_t mod_feed(void) {
+    moy_kernel_feed();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_feed_obj, mod_feed);
+
+static mp_obj_t mod_rest(void) {
+    moy_kernel_rest();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_rest_obj, mod_rest);
+
+static mp_obj_t mod_watchdog(size_t n_args, const mp_obj_t *args) {
+    uint32_t timeout_ms, max_gap_ms, frames;
+    bool armed = moy_kernel_watchdog(&timeout_ms, &max_gap_ms, &frames,
+                                     n_args > 0 && mp_obj_is_true(args[0]));
+    mp_obj_t t[4] = {
+        mp_obj_new_bool(armed),
+        mp_obj_new_int_from_uint(timeout_ms),
+        mp_obj_new_int_from_uint(max_gap_ms),
+        mp_obj_new_int_from_uint(frames),
+    };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_watchdog_obj, 0, 1, mod_watchdog);
+
 static const mp_rom_map_elem_t moy_kernel_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_kernel) },
     { MP_ROM_QSTR(MP_QSTR_boot_ok), MP_ROM_PTR(&mod_boot_ok_obj) },
     { MP_ROM_QSTR(MP_QSTR_boot_failed), MP_ROM_PTR(&mod_boot_failed_obj) },
     { MP_ROM_QSTR(MP_QSTR_mode), MP_ROM_PTR(&mod_mode_obj) },
     { MP_ROM_QSTR(MP_QSTR_test), MP_ROM_PTR(&mod_test_obj) },
+    { MP_ROM_QSTR(MP_QSTR_feed), MP_ROM_PTR(&mod_feed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rest), MP_ROM_PTR(&mod_rest_obj) },
+    { MP_ROM_QSTR(MP_QSTR_watchdog), MP_ROM_PTR(&mod_watchdog_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_kernel_globals, moy_kernel_globals_table);
 

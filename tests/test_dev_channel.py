@@ -262,6 +262,38 @@ def test_py_env_reaches_injected_names(capsys):
     assert "PY 42" in capsys.readouterr().out
 
 
+def test_kstale_hands_the_spine_four_dead_handles_and_all_are_refused(capsys):
+    """The spine's handle gate on glass is this word (#224): a released, a
+    forged, a wrong-kind and a zero handle, each a StaleHandle that names its
+    table, with the live handle still served."""
+    from runtime.moy_spine import AppRegistry
+
+    ws, ch = make()
+    ws.apps = AppRegistry()
+    ws.apps.register("artwork", "Paint")
+    ch.run(ws, "kstale")
+    line = [ln for ln in capsys.readouterr().out.splitlines()
+            if ln.startswith("REMOTE kstale")][0]
+    assert line.startswith("REMOTE kstale ok impl=python "), line
+    for name in ("released", "forged", "kind", "zero"):
+        assert "%s=stale app handle " % name in line, line
+
+
+def test_kstale_fails_loudly_when_a_dead_handle_is_served(capsys):
+    from runtime.moy_spine import AppRegistry
+
+    class Serving(AppRegistry):
+        def title(self, h):
+            return "served"
+
+    ws, ch = make()
+    ws.apps = Serving()
+    ws.apps.register("artwork", "Paint")
+    ch.run(ws, "kstale")
+    out = capsys.readouterr().out
+    assert "REMOTE kstale FAIL" in out and "forged=SERVED" in out
+
+
 # -- power over the injected IdleBlank ------------------------------------------
 
 

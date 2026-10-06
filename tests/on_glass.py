@@ -137,6 +137,25 @@ def py_probe_reaches_the_console(board):
     assert line == "PY True", line
 
 
+def stale_handle_is_refused_loudly(board):
+    """Sprint 2's gate (#224): the spine refuses a dead handle out loud, on this
+    board, and the board runs the native spine. `kstale` hands it a released, a
+    forged, a wrong-kind and a zero handle; the same refusal is then asked for
+    through a plain `py` call on the live app registry, whose answer is the
+    StaleHandle itself."""
+    line = board.cmd("kstale", wait_for="REMOTE kstale", timeout=15.0)
+    assert line is not None and "REMOTE kstale ok" in line, line
+    assert "impl=native" in line, "the console is not on the native spine: " + line
+    for name in ("released", "forged", "kind", "zero"):
+        assert "%s=stale app handle " % name in line, line
+    live = board.pyval("ws.apps.handles()[0]", strict=True)
+    forged = live ^ (1 << 12)                    # the generation moved on
+    assert board.pyval("ws.apps.title(%d)" % forged) is None
+    assert "StaleHandle" in board.last_error, board.last_error
+    assert "stale app handle %d" % forged in board.last_error, board.last_error
+    assert board.pyval("ws.apps.title(%d)" % live, strict=True)
+
+
 @contextlib.contextmanager
 def perf_diag(board):
     """PERF DIAG on for a measurement that reads PERF lines, and back the way
