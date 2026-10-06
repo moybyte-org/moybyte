@@ -19,9 +19,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moyimg import _b64_decode
 try:
-    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, slug)
+    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, slug)
+    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder)
 
 
 def _cart_version(path):
@@ -91,7 +91,7 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
                 progress(_seeded, _total, cart.get("title", ""))
             except Exception:                 # noqa: BLE001
                 progress = None               # broken hook: drop it, keep seeding
-        d = root + "/" + slug(cart["title"]) + ".moy"
+        d = cart_path(root, cart_folder(cart["title"]))
         seed_ver = int(cart.get("version", 0))
         preserved = None
         if _exists(d):
@@ -287,8 +287,8 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False):
                 progress(index, total, title)
             except Exception:             # noqa: BLE001 -- as in seed_builtins
                 progress = None
-        name = slug(title) + ".moy"
-        d = root + "/" + name
+        name = cart_folder(title)
+        d = cart_path(root, name)
         if _has(names, root, name) and (only_new
                                         or int(version) <= _cart_version(d)):
             continue
@@ -382,7 +382,7 @@ def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN):
         return 0
     gone = 0
     for title in titles:
-        d = root + "/" + slug(title) + ".moy"
+        d = cart_path(root, cart_folder(title))
         if _exists(d):
             _rmtree(d)
             gone += 1

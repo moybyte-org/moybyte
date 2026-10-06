@@ -207,6 +207,7 @@ except ImportError:                      # host / CPython: the runtime package
     from runtime import moy_sync
 
 _skip = moy_sync._skip
+_store_path = moy_sync.store_path
 _entries = moy_sync._entries
 _is_dir = moy_sync._is_dir
 _read_text = moy_sync._read_text
@@ -233,7 +234,7 @@ def pack_store(carts_root, listdir=None, read=None, isdir=None, tops=None):
     _read = read or _read_text
     out = {}
     for top in _root_dirs(carts_root, listdir, isdir, tops):
-        _pack_dir(out, carts_root + "/" + top, top, listdir, isdir, _read)
+        _pack_dir(out, _store_path(carts_root, top), top, listdir, isdir, _read)
     return out
 
 
@@ -294,7 +295,7 @@ def stream_store_json(carts_root, listdir=None, read=None, isdir=None,
     yield "{"
     first = [True]
     for top in _root_dirs(carts_root, listdir, isdir, tops):
-        for piece in _stream_dir(carts_root + "/" + top, top,
+        for piece in _stream_dir(_store_path(carts_root, top), top,
                                  listdir, isdir, _read, first):
             yield piece
     yield "}"

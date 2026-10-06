@@ -218,7 +218,7 @@ def seed_carts(root=CARTS_DIR):
         # boot it is the longest silence in the log -- and on a board with no
         # screen a silence is what a hang looks like.
         missing = sum(1 for t, _v, _b in CARTS_Z
-                      if not moy_carts._exists(root + "/" + moy_carts.slug(t) + ".moy"))
+                      if not moy_carts._exists(moy_carts.cart_path(root, moy_carts.cart_folder(t))))
         if missing:
             print("ZERO seed: inflating %d carts from the image" % missing)
         started = ticks._ticks_ms()

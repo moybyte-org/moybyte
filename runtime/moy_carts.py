@@ -67,7 +67,8 @@ try:
                                 _sibling_path, slug, ensure_dirs, _is_dir,
                                 _rmtree, COVER_FILE, COVER_MAX_BYTES,
                                 SPRITES_NAME, icon_rows, _listing, _absent,
-                                _has, _cwd, _enter, _leave)
+                                _has, _cwd, _enter, _leave, CART_EXT,
+                                cart_path, cart_folder, store_path)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
                                         IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
@@ -77,7 +78,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         _is_dir, _rmtree, COVER_FILE,
                                         COVER_MAX_BYTES, SPRITES_NAME,
                                         icon_rows, _listing, _absent, _has,
-                                        _cwd, _enter, _leave)
+                                        _cwd, _enter, _leave, CART_EXT,
+                                        cart_path, cart_folder, store_path)
 
 
 # Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
@@ -940,9 +942,9 @@ def _each(root, read, enter=False):
     carts = []
     try:
         for name in sorted(names):
-            if not (name.endswith(".moy") and names[name]):
+            if not (name.endswith(CART_EXT) and names[name]):
                 continue
-            path = root + "/" + name
+            path = cart_path(root, name)
             try:
                 c = read(path, _enter(path) if here is not None else None)
             except Exception as exc:  # noqa: BLE001  -- belt-and-braces over _load()
@@ -1701,13 +1703,13 @@ def _whole_or_none(d, fn):
 
 
 def _unique_dir(root, base):
-    d = root + "/" + base + ".moy"
+    d = cart_path(root, cart_folder(base))
     if not _exists(d):
         return d
     i = 2
-    while _exists(root + "/" + base + "_" + str(i) + ".moy"):
+    while _exists(cart_path(root, cart_folder(base + "_" + str(i)))):
         i += 1
-    return root + "/" + base + "_" + str(i) + ".moy"
+    return cart_path(root, cart_folder(base + "_" + str(i)))
 
 
 def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",

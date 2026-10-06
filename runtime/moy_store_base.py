@@ -162,6 +162,35 @@ def _sibling_path(root, name):
     return (parent + "/" + name) if parent else name
 
 
+# A cart is a folder whose name ends in CART_EXT. Its path is composed here and
+# nowhere else (docs/kernel_store_2026-10.md section 4): a store that shards its
+# root or keeps a cart elsewhere changes these and no caller.
+# tests/test_store_paths.py fails any other module that composes one.
+CART_EXT = ".moy"
+
+
+def cart_path(root, folder):
+    """The path of the cart folder named `folder` in the store `root`."""
+    return root + "/" + folder
+
+
+def cart_folder(name):
+    """The folder a cart named `name` (a title, or a slug already) is stored
+    in: its slug and the extension."""
+    return slug(name) + CART_EXT
+
+
+def store_path(root, rel):
+    """The path of `rel`, a path relative to the store `root` as the sync wire
+    and the webhost name one: a cart folder's files under `cart_path`, and
+    anything else beside them."""
+    i = rel.find("/")
+    head = rel if i < 0 else rel[:i]
+    if head.endswith(CART_EXT):
+        return cart_path(root, head) + rel[len(head):]
+    return root + "/" + rel
+
+
 def slug(title):
     out = ""
     for ch in str(title).lower():

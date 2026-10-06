@@ -148,14 +148,16 @@ sheet, the icons), writing through C `moy_fs`; `system.json` is sprint 2's.
 
 `native/moy_index/` takes its slots from `moy_htab` (spine §2), so its rows
 are PSRAM and outlive a VM stop, and a handle the kernel holds stays valid
-across one. Its key is the
-root's id followed by the cart's folder name, not a path; the ABI, which
-compares keys bytewise, and its pinned values do not change. Roots are a small
-table (`moy_store_root(rid, path)`): the carts store; on a card with profiles
-(#131, §8), the family shelf and each kid's carts; a store on another volume. Only the store composes a cart's path from root and
-folder, and a catalogue of a root reconciles that root's rows alone, which
-replaces the carve's one-root-at-a-time rule. `handle(path)` stays for callers
-that start from a path (the sync wire, Files) and splits it against the roots.
+across one. Its key is the root's id followed by the cart's folder name, not a
+path; the ABI, which compares keys bytewise, and its pinned values do not
+change. Roots are a small table (`moy_store_root(rid, path)`): the carts store;
+on a card with profiles (#131, §8), the family shelf and each kid's carts; a
+store on another volume. Only the store composes a cart's path from root and
+folder (`runtime/moy_store_base.py`'s `cart_path`, `cart_folder` and
+`store_path`; `tests/test_store_paths.py` fails any other module that does),
+and a catalogue of a root reconciles that root's rows alone, which replaces
+the carve's one-root-at-a-time rule. `handle(path)` stays for callers that
+start from a path (the sync wire, Files) and splits it against the roots.
 
 ## 5. The crash-safe write
 

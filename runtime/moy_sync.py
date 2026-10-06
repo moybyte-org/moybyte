@@ -153,6 +153,11 @@ except ImportError:  # host / CPython: the runtime package
                                 _write_atomic, _crc32, _write_bytes)
 
 try:
+    from moy_store_base import store_path
+except ImportError:  # host / CPython: the runtime package
+    from runtime.moy_store_base import store_path
+
+try:
     import binascii as _binascii
 except ImportError:  # pragma: no cover -- every target ships binascii
     import ubinascii as _binascii
@@ -672,7 +677,7 @@ def safe_segments(rel):
 
 
 def _full(root, parts):
-    return root + "/" + "/".join(parts)
+    return store_path(root, "/".join(parts))
 
 
 # ---------------------------------------------------------------------------
@@ -790,7 +795,7 @@ def _journal_commit(root, parts, text):
     if mj is None:
         return
     try:
-        mj.journal_append(root + "/" + parts[0], "/".join(parts[1:]), text)
+        mj.journal_append(store_path(root, parts[0]), "/".join(parts[1:]), text)
     except Exception as exc:  # noqa: BLE001 -- the file is already durable
         print("SYNC journal failed:", exc)
 
@@ -833,7 +838,7 @@ def _apply_one(root, op, desc, journal=False):
         # system state beside the store, not the kid's work.
         return "not a store file", False
     full = _full(root, parts)
-    new_item = desc.shelf and not _exists(root + "/" + parts[0])
+    new_item = desc.shelf and not _exists(store_path(root, parts[0]))
     if op.get("d"):
         _remove(full)
         return None, desc.shelf and parts[-1] in _SHELF_FILES
@@ -1030,7 +1035,7 @@ class StoreWatcher:
 
     def _crc_of(self, rel):
         """The crc of `rel`'s payload, or None for one the wire cannot carry."""
-        text = self._read(self.root + "/" + rel)
+        text = self._read(store_path(self.root, rel))
         return None if text is None else _crc(text)
 
     def adopt(self, unit):
@@ -1048,7 +1053,7 @@ class StoreWatcher:
         for rel in list(self._snap):
             if rel.startswith(prefix):
                 del self._snap[rel]
-        for rel, size, mtime in self._walk_dir(self.root + "/" + unit, unit, 0):
+        for rel, size, mtime in self._walk_dir(store_path(self.root, unit), unit, 0):
             self._snap[rel] = (size, mtime, self._crc_of(rel))
 
     # -- change detection ----------------------------------------------------
@@ -1126,7 +1131,7 @@ class StoreWatcher:
                 continue
             if kinds is not None and top not in kinds:
                 continue
-            for item in self._walk_dir(self.root + "/" + top, top, 0):
+            for item in self._walk_dir(store_path(self.root, top), top, 0):
                 yield item
 
     def _walk_dir(self, path, prefix, depth):
@@ -1200,7 +1205,7 @@ class StoreWatcher:
                 ops.append({"p": rel, "d": 1})
                 paths.append(rel)
                 continue
-            text = self._read(self.root + "/" + rel)
+            text = self._read(store_path(self.root, rel))
             if text is None:                     # vanished since the sweep
                 ops.append({"p": rel, "d": 1})
                 paths.append(rel)

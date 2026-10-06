@@ -130,14 +130,15 @@ except ImportError:  # pragma: no cover
 
 try:
     from ticks import _ticks_ms, _ticks_diff
-    from moy_store_base import _sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES
+    from moy_store_base import (_sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES,
+                                cart_path)
     from moy_fs import _exists, _mkdir
     import moy_carts as _store
     import cart_files as _cart_files
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
     from runtime.moy_store_base import (_sibling_path, _rmtree, _is_dir,
-                                        COVER_MAX_BYTES)
+                                        COVER_MAX_BYTES, cart_path)
     from runtime.moy_fs import _exists, _mkdir
     from runtime import moy_carts as _store
     from runtime import cart_files as _cart_files
@@ -621,8 +622,8 @@ def recover(root):
         return 0
     for n in names:
         p = base + "/" + n
-        if n.endswith(".old") and not _exists(root + "/" + n[:-4]):
-            os.rename(p, root + "/" + n[:-4])
+        if n.endswith(".old") and not _exists(cart_path(root, n[:-4])):
+            os.rename(p, cart_path(root, n[:-4]))
             _log("put back %s" % n[:-4])
         elif _is_dir(p):
             _rmtree(p)
@@ -650,7 +651,7 @@ def remove(root, folder, keep=None):
     gone = base + "/" + folder + ".gone"
     if _exists(gone):
         _rmtree(gone)
-    os.rename(root + "/" + folder, gone)
+    os.rename(cart_path(root, folder), gone)
     _rmtree(gone)
     if had:
         save_record(root, rec)
@@ -1683,7 +1684,7 @@ class Install:
         self._in_session = False
         self.folder = cart["folder"]
         self.stage = stage_root(root) + "/" + self.folder
-        self.target = root + "/" + self.folder
+        self.target = cart_path(root, self.folder)
         self.ranges = bool(getattr(net, "ranges", False))
         self.whole = []                   # assets a ranged read handed back
         self.total = 0

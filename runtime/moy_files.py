@@ -23,9 +23,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_journal import (journal_append)
 try:
-    from moy_store_base import (CARTS_DIR, COVER_FILE, COVER_MAX_BYTES, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _is_dir, _sibling_path, ensure_dirs, slug)
+    from moy_store_base import (CARTS_DIR, COVER_FILE, COVER_MAX_BYTES, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _is_dir, _sibling_path, ensure_dirs, slug, cart_path)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, COVER_FILE, COVER_MAX_BYTES, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _is_dir, _sibling_path, ensure_dirs, slug)
+    from runtime.moy_store_base import (CARTS_DIR, COVER_FILE, COVER_MAX_BYTES, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _is_dir, _sibling_path, ensure_dirs, slug, cart_path)
 
 
 # --- user files (#108): the kid's creations as real files -------------------
@@ -200,7 +200,7 @@ def project_dir(kind, root=CARTS_DIR):
     folder = project_folder(kind)
     if not folder:
         raise ValueError("not a project kind: " + str(kind))
-    return root + "/" + folder
+    return cart_path(root, folder)
 
 
 def project_file_path(kind, name, root=CARTS_DIR):

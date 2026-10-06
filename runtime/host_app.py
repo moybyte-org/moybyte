@@ -264,7 +264,7 @@ def _seed_system_carts(carts_dir):
     names = [n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
     for name in names:
         src = os.path.join(SYSTEM_CARTS, name)
-        dst = os.path.join(carts_dir, name)
+        dst = moy_carts.cart_path(carts_dir, name)
         if not os.path.exists(dst):
             shutil.copytree(src, dst)
         elif _manifest_version(src) > _manifest_version(dst):
