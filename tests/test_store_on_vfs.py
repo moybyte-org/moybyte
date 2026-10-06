@@ -1,10 +1,11 @@
-"""The store on a real FAT file system, under the boards' MicroPython (#224).
+"""The store on the boards' file systems, under the boards' MicroPython (#224).
 
 The shelf scan reads each cart folder from ONE listing of it, from inside it:
 `os.ilistdir` for what is there, `os.chdir` into the folder, names opened
 relative to it (`moy_store_base._enter`). CPython runs the same code over a
-POSIX directory, which says nothing about FatFS's relative paths or
-MicroPython's VFS working directory. And the T-Deck's block device keeps a
+POSIX directory, which says nothing about FatFS's relative paths, littlefs's
+(MicroPython joins them onto the working directory itself) or MicroPython's
+VFS working directory. And the T-Deck's block device keeps a
 cache of sectors (`moybyte_sd._NativeSDBlockDev`), which is only correct if
 every write the store makes drops what it covers.
 
@@ -20,12 +21,17 @@ bytearray, in the desktop MicroPython built in the boards' model, and pins:
     sector fails on the spot);
   * the card read back through a device with no cache, after an unmount,
     holds that same shelf.
+
+The same scan and writes run on littlefs, a board's internal flash and the
+store a board falls back to with no card, over a plain RAM device.
 """
 
 import json
 import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from runtime import moy_carts, moy_catalogue
 from test_catalogue import _store
@@ -83,6 +89,25 @@ class Checked(moybyte_sd._NativeSDBlockDev):
         return 0
 
 
+class Ram:
+    def __init__(self, n, size=4096):
+        self.size = size
+        self.data = bytearray(n * size)
+
+    def readblocks(self, block, buf, off=0):
+        a = block * self.size + off
+        buf[:] = memoryview(self.data)[a:a + len(buf)]
+
+    def writeblocks(self, block, buf, off=None):
+        a = block * self.size + (off or 0)
+        memoryview(self.data)[a:a + len(buf)] = buf
+
+    def ioctl(self, op, arg):
+        if op == 4:
+            return len(self.data) // self.size
+        return self.size if op == 5 else 0
+
+
 class Plain:
     def readblocks(self, block, buf):
         moy_sd.read(block, buf, len(buf) // 512)
@@ -116,9 +141,14 @@ def shelf(cat, root):
     return json.dumps(out)
 
 
-bd = Checked(@SECTORS@)
-vfs.VfsFat.mkfs(bd)
-vfs.mount(vfs.VfsFat(bd), "/sd")
+if @FS@ == "fat":
+    bd = Checked(@SECTORS@)
+    vfs.VfsFat.mkfs(bd)
+    vfs.mount(vfs.VfsFat(bd), "/sd")
+else:
+    bd = Ram(@SECTORS@ // 8)
+    vfs.VfsLfs2.mkfs(bd)
+    vfs.mount(vfs.VfsLfs2(bd), "/sd")
 import moy_carts, moy_catalogue
 root = "/sd/moybyte/carts"
 moy_carts.ensure_dirs(root)
@@ -131,7 +161,10 @@ writes(moy_carts, moy_catalogue, root, moy_catalogue.catalogue(root))
 print("AFTER", shelf(moy_catalogue, root))
 print("HANDED", handed[0], moy_sd.reads)
 vfs.umount("/sd")
-vfs.mount(vfs.VfsFat(Plain()), "/sd")
+if @FS@ == "fat":
+    vfs.mount(vfs.VfsFat(Plain()), "/sd")
+else:
+    vfs.mount(vfs.VfsLfs2(bd), "/sd")
 print("REMOUNT", shelf(moy_catalogue, root))
 '''
 
@@ -159,7 +192,9 @@ def _card_shelf(line):
     return _same(json.loads(line))
 
 
-def test_the_scan_and_the_stores_writes_on_a_cached_fat_card(tmp_path):
+@pytest.mark.parametrize("fs", ["fat", "lfs"])
+def test_the_scan_and_the_stores_writes_on_the_boards_file_systems(tmp_path,
+                                                                   fs):
     exe = require_unix_mp(
         board_model=True,
         why="The only check of the shelf scan's working-directory reads on "
@@ -178,6 +213,7 @@ def test_the_scan_and_the_stores_writes_on_a_cached_fat_card(tmp_path):
         .replace("@RUNTIME@", repr(str(ROOT / "runtime")))
         .replace("@DEVICE@", repr(str(ROOT / "device")))
         .replace("@SECTORS@", str(SECTORS))
+        .replace("@FS@", repr(fs))
         .replace("@SRC@", repr(src))
         .replace("@WRITES@", WRITES))
     out = subprocess.run([exe, "-X", "heapsize=64m", str(script)],
@@ -203,5 +239,6 @@ def test_the_scan_and_the_stores_writes_on_a_cached_fat_card(tmp_path):
     assert {"Fresh Cart", "No Sheet Twin"} <= {e["title"] for e in after}
     assert "Short Sheet" not in {e["title"] for e in after}
 
-    handed, reads = map(int, lines["HANDED"].split())
-    assert reads < handed / 2, (handed, reads)
+    if fs == "fat":
+        handed, reads = map(int, lines["HANDED"].split())
+        assert reads < handed / 2, (handed, reads)
