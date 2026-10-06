@@ -297,10 +297,16 @@ static void json_bytes(const uint8_t *data, size_t size) {
     const char *s = moy_json_ws(t, end);
     const char *e = moy_json_value(s, end, 1u);
     CHECK(ok == (e != NULL && moy_json_ws(e, end) == end));
+    if (s < end && (*s == '{' || *s == '[')) {
+        // a container nobody scanned: written whole or refused, never a fault
+        size_t m = moy_json_canon(s, end, NULL, 0);
+        CHECK(e == NULL || moy_json_ws(e, end) != end || m != MOY_JSON_DEEP);
+    }
     if (e == NULL) {
         return;
     }
     size_t n = moy_json_canon(s, e, NULL, 0);
+    CHECK(n != MOY_JSON_DEEP);
     char *out = malloc(n + 1u);
     CHECK(out != NULL);
     CHECK(moy_json_canon(s, e, out, n) == n);
@@ -774,6 +780,9 @@ int main(int argc, char **argv) {
         "{\"a\": [1, 2.5e3, -0, \"\\u00e9\\ud83d\\ude00\"], \"a\": {}}",
         "[true, false, null, NaN, -Infinity, 1e400, \"\\/\\b\"]",
         "{\"t\": \"x\", \"\": 0.1}", "  \"\\u0000\" ",
+        "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+        "{\"a\":[{\"a\":[{\"a\":[{\"a\":[{\"a\":[{\"a\":[{\"a\":[{\"a\":[{\"a\":"
+        "[{\"a\":[{\"a\":[{\"a\":[{\"a\":[{\"a\":[{\"a\":[{\"a\":[2.5]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}",
     };
     for (unsigned long r = 0; r < runs; r++) {
         for (size_t k = 0; k < sizeof buf; k++) {

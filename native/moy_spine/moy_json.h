@@ -21,6 +21,10 @@
 
 #define MOY_JSON_DEPTH 32u
 
+// What moy_json_canon and moy_json_canon_set return for a span nested deeper
+// than MOY_JSON_DEPTH, or one that does not scan.
+#define MOY_JSON_DEEP ((size_t)-1)
+
 enum {
     MOY_JSON_OK = 0,
     MOY_JSON_BAD = 1,           // not JSON, or nested too deep
@@ -63,10 +67,12 @@ int moy_json_object(const char *text, size_t len, moy_json_member_fn fn,
                     void *ctx);
 
 // Walking a scanned object or array: moy_json_next gives the next member (key
-// span NULL for an array's element) and returns 1, or 0 past the last.
+// span NULL for an array's element) and returns 1, or 0 past the last. A
+// member that does not scan (a span that was not scanned whole, or one nested
+// deeper than MOY_JSON_DEPTH below it) ends the walk with `bad` set.
 typedef struct {
     const char *p, *end;
-    char obj;
+    char obj, bad;
 } moy_json_iter_t;
 
 void moy_json_iter(moy_json_iter_t *it, const char *v, const char *v_end);
@@ -107,7 +113,9 @@ int moy_json_int(const char *v, const char *v_end, int64_t *out);
 // What CPython's json.dumps(json.loads(v)) writes for the span: the default
 // separators, ASCII only, a repeated key at its first place with its last
 // value, numbers as Python repr()s them. Writes at most `cap` bytes to `out`
-// (no NUL) and returns the length the whole needs, as snprintf does.
+// (no NUL) and returns the length the whole needs, as snprintf does, or
+// MOY_JSON_DEEP when the span nests deeper than MOY_JSON_DEPTH or does not
+// scan. It takes the same stack at any nesting.
 size_t moy_json_canon(const char *v, const char *v_end, char *out, size_t cap);
 
 // moy_json_canon of the scanned object `obj` with `key` set to the JSON text

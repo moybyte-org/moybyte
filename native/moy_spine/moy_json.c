@@ -324,6 +324,7 @@ int moy_json_object(const char *text, size_t len, moy_json_member_fn fn,
 
 void moy_json_iter(moy_json_iter_t *it, const char *v, const char *v_end) {
     it->obj = *v == '{';
+    it->bad = 0;
     it->p = moy_json_ws(v + 1, v_end);
     it->end = v_end;
 }
@@ -336,15 +337,25 @@ int moy_json_next(moy_json_iter_t *it, const char **key, const char **key_end,
     }
     if (it->obj) {
         *key = p;
-        p = moy_json_string(p, end, 0, NULL, NULL);
+        p = *p == '"' ? moy_json_string(p, end, 0, NULL, NULL) : NULL;
         *key_end = p;
-        p = moy_json_ws(p, end);
-        p = moy_json_ws(p + 1, end);    // the ':'
+        if (p != NULL) {
+            p = moy_json_ws(p, end);
+            p = p < end && *p == ':' ? moy_json_ws(p + 1, end) : NULL;
+        }
     } else if (key != NULL) {
         *key = *key_end = NULL;
     }
-    *val = p;
-    p = moy_json_value(p, end, 0u);
+    const char *v = p;
+    if (p != NULL) {
+        p = moy_json_value(p, end, 0u);
+    }
+    if (p == NULL) {
+        it->bad = 1;
+        it->p = end;
+        return 0;
+    }
+    *val = v;
     *val_end = p;
     p = moy_json_ws(p, end);
     if (p < end && *p == ',') {
@@ -794,7 +805,10 @@ static void put_float(sink_t *k, double d) {
     put(k, o, (size_t)n);
 }
 
-static void canon(sink_t *k, const char *v, const char *v_end) {
+// A scalar as json.dumps writes it. Kept out of canon's frame: the number's
+// text is copied to hold the NUL strtod needs.
+static __attribute__((noinline)) void put_scalar(sink_t *k, const char *v,
+                                                 const char *v_end) {
     switch (moy_json_kind(v, v_end)) {
         case MOY_JSON_STR:
             put_string(k, v, v_end);
@@ -827,65 +841,6 @@ static void canon(sink_t *k, const char *v, const char *v_end) {
             put_float(k, d);
             return;
         }
-        case MOY_JSON_ARR: {
-            moy_json_iter_t it;
-            const char *e, *ee;
-            int first = 1;
-            put(k, "[", 1);
-            moy_json_iter(&it, v, v_end);
-            while (moy_json_next(&it, NULL, NULL, &e, &ee)) {
-                if (!first) {
-                    put(k, ", ", 2);
-                }
-                first = 0;
-                canon(k, e, ee);
-            }
-            put(k, "]", 1);
-            return;
-        }
-        case MOY_JSON_OBJ: {
-            moy_json_iter_t it, back, fwd;
-            const char *key, *ke, *e, *ee;
-            int first = 1;
-            put(k, "{", 1);
-            moy_json_iter(&it, v, v_end);
-            for (;;) {
-                back = it;
-                if (!moy_json_next(&it, &key, &ke, &e, &ee)) {
-                    break;
-                }
-                // a key seen before was written at its first place
-                moy_json_iter_t s;
-                const char *k2, *k2e, *e2, *e2e;
-                int seen = 0;
-                moy_json_iter(&s, v, v_end);
-                while (s.p < back.p && moy_json_next(&s, &k2, &k2e, &e2, &e2e)) {
-                    if (moy_json_str_eq(k2, k2e, key, ke)) {
-                        seen = 1;
-                        break;
-                    }
-                }
-                if (seen) {
-                    continue;
-                }
-                fwd = it;               // ...with its last value
-                while (moy_json_next(&fwd, &k2, &k2e, &e2, &e2e)) {
-                    if (moy_json_str_eq(k2, k2e, key, ke)) {
-                        e = e2;
-                        ee = e2e;
-                    }
-                }
-                if (!first) {
-                    put(k, ", ", 2);
-                }
-                first = 0;
-                put_string(k, key, ke);
-                put(k, ": ", 2);
-                canon(k, e, ee);
-            }
-            put(k, "}", 1);
-            return;
-        }
         case MOY_JSON_TRUE:
             put(k, "true", 4);
             return;
@@ -898,30 +853,22 @@ static void canon(sink_t *k, const char *v, const char *v_end) {
     }
 }
 
-size_t moy_json_canon(const char *v, const char *v_end, char *out, size_t cap) {
-    sink_t k = { out, cap, 0 };
-    canon(&k, v, v_end);
-    return k.n;
-}
-
-size_t moy_json_canon_set(const char *obj, const char *obj_end, const char *key,
-                          const char *val, char *out, size_t cap) {
-    sink_t k = { out, cap, 0 };
-    moy_json_iter_t it, s, fwd;
-    const char *mk, *mke, *e, *ee, *k2, *k2e, *e2, *e2e;
-    size_t kn = strlen(key);
-    int first = 1, done = 0;
-    put(&k, "{", 1);
-    moy_json_iter(&it, obj, obj_end);
+// The next member of the object `it` walks (`obj` is the object) whose key
+// was not seen before it, with that key's LAST value, as json.loads keeps a
+// repeated key: 1, or 0 past the last.
+static int next_member(moy_json_iter_t *it, const char *obj, const char **key,
+                       const char **ke, const char **e, const char **ee) {
     for (;;) {
-        moy_json_iter_t back = it;
-        if (!moy_json_next(&it, &mk, &mke, &e, &ee)) {
-            break;
+        const char *at = it->p;
+        if (!moy_json_next(it, key, ke, e, ee)) {
+            return 0;
         }
+        moy_json_iter_t s;
+        const char *k2, *k2e, *e2, *e2e;
         int seen = 0;
-        moy_json_iter(&s, obj, obj_end);
-        while (s.p < back.p && moy_json_next(&s, &k2, &k2e, &e2, &e2e)) {
-            if (moy_json_str_eq(k2, k2e, mk, mke)) {
+        moy_json_iter(&s, obj, it->end);
+        while (s.p < at && moy_json_next(&s, &k2, &k2e, &e2, &e2e)) {
+            if (moy_json_str_eq(k2, k2e, *key, *ke)) {
                 seen = 1;
                 break;
             }
@@ -929,16 +876,92 @@ size_t moy_json_canon_set(const char *obj, const char *obj_end, const char *key,
         if (seen) {
             continue;
         }
+        s = *it;
+        while (moy_json_next(&s, &k2, &k2e, &e2, &e2e)) {
+            if (moy_json_str_eq(k2, k2e, *key, *ke)) {
+                *e = e2;
+                *ee = e2e;
+            }
+        }
+        return 1;
+    }
+}
+
+// One container being written: its walk, where it starts (the repeated-key
+// search reads from there), and whether a member was written yet.
+typedef struct {
+    moy_json_iter_t it;
+    const char *v;
+    char first;
+} canon_frame_t;
+
+// The span written as json.dumps writes it, with no recursion: the open
+// containers sit in a fixed array, so the stack it takes does not grow with
+// the nesting. 0 when the span nests deeper than MOY_JSON_DEPTH or does not
+// scan.
+static int canon(sink_t *k, const char *v, const char *v_end) {
+    canon_frame_t st[MOY_JSON_DEPTH];
+    uint32_t n = 0;
+    for (;;) {
+        if (*v == '{' || *v == '[') {
+            if (n == MOY_JSON_DEPTH) {
+                return 0;
+            }
+            canon_frame_t *f = &st[n++];
+            put(k, v, 1);
+            moy_json_iter(&f->it, v, v_end);
+            f->v = v;
+            f->first = 1;
+        } else {
+            put_scalar(k, v, v_end);
+        }
+        for (;;) {
+            if (n == 0) {
+                return 1;
+            }
+            canon_frame_t *f = &st[n - 1u];
+            const char *key, *ke;
+            int more = f->it.obj
+                       ? next_member(&f->it, f->v, &key, &ke, &v, &v_end)
+                       : moy_json_next(&f->it, NULL, NULL, &v, &v_end);
+            if (more) {
+                if (!f->first) {
+                    put(k, ", ", 2);
+                }
+                f->first = 0;
+                if (f->it.obj) {
+                    put_string(k, key, ke);
+                    put(k, ": ", 2);
+                }
+                break;
+            }
+            if (f->it.bad) {
+                return 0;
+            }
+            put(k, f->it.obj ? "}" : "]", 1);
+            n--;
+        }
+    }
+}
+
+size_t moy_json_canon(const char *v, const char *v_end, char *out, size_t cap) {
+    sink_t k = { out, cap, 0 };
+    return canon(&k, v, v_end) ? k.n : MOY_JSON_DEEP;
+}
+
+size_t moy_json_canon_set(const char *obj, const char *obj_end, const char *key,
+                          const char *val, char *out, size_t cap) {
+    sink_t k = { out, cap, 0 };
+    moy_json_iter_t it;
+    const char *mk, *mke, *e, *ee;
+    size_t kn = strlen(key);
+    int first = 1, done = 0;
+    put(&k, "{", 1);
+    moy_json_iter(&it, obj, obj_end);
+    while (next_member(&it, obj, &mk, &mke, &e, &ee)) {
         int ours = moy_json_str_is(mk, mke, key, kn);
         if (ours && val == NULL) {
             continue;                   // removed
-        }
-        fwd = it;
-        while (moy_json_next(&fwd, &k2, &k2e, &e2, &e2e)) {
-            if (moy_json_str_eq(k2, k2e, mk, mke)) {
-                e = e2;
-                ee = e2e;
-            }
         }
         if (!first) {
             put(&k, ", ", 2);
@@ -949,9 +972,12 @@ size_t moy_json_canon_set(const char *obj, const char *obj_end, const char *key,
         if (ours) {
             put(&k, val, strlen(val));
             done = 1;
-        } else {
-            canon(&k, e, ee);
+        } else if (!canon(&k, e, ee)) {
+            return MOY_JSON_DEEP;
         }
+    }
+    if (it.bad) {
+        return MOY_JSON_DEEP;
     }
     if (!done && val != NULL) {
         if (!first) {

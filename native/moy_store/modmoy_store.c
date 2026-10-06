@@ -22,6 +22,7 @@
 #include "py/mphal.h"
 #include "py/parsenum.h"
 #include "py/gc.h"
+#include "py/stackctrl.h"
 #include <math.h>
 #include "extmod/vfs.h"
 
@@ -510,7 +511,9 @@ static mp_obj_t json_str(const char *v, const char *ve) {
     return mp_obj_new_str_from_vstr(&vs);
 }
 
-static mp_obj_t json_obj(const char *v, const char *ve) {
+// `depth` containers deep (the outermost is the first): past MOY_JSON_DEPTH,
+// or with the C stack short, it raises instead of recursing.
+static mp_obj_t json_obj(const char *v, const char *ve, uint32_t depth) {
     switch (moy_json_kind(v, ve)) {
         case MOY_JSON_STR:
             return json_str(v, ve);
@@ -530,22 +533,30 @@ static mp_obj_t json_obj(const char *v, const char *ve) {
             return mp_const_none;
             #endif
         case MOY_JSON_ARR: {
+            if (depth > MOY_JSON_DEPTH) {
+                mp_raise_ValueError(MP_ERROR_TEXT("JSON nested too deep"));
+            }
+            MP_STACK_CHECK();
             mp_obj_t l = mp_obj_new_list(0, NULL);
             moy_json_iter_t it;
             const char *e, *ee;
             moy_json_iter(&it, v, ve);
             while (moy_json_next(&it, NULL, NULL, &e, &ee)) {
-                mp_obj_list_append(l, json_obj(e, ee));
+                mp_obj_list_append(l, json_obj(e, ee, depth + 1u));
             }
             return l;
         }
         case MOY_JSON_OBJ: {
+            if (depth > MOY_JSON_DEPTH) {
+                mp_raise_ValueError(MP_ERROR_TEXT("JSON nested too deep"));
+            }
+            MP_STACK_CHECK();
             mp_obj_t d = mp_obj_new_dict(0);
             moy_json_iter_t it;
             const char *k, *ke, *e, *ee;
             moy_json_iter(&it, v, ve);
             while (moy_json_next(&it, &k, &ke, &e, &ee)) {
-                mp_obj_dict_store(d, json_str(k, ke), json_obj(e, ee));
+                mp_obj_dict_store(d, json_str(k, ke), json_obj(e, ee, depth + 1u));
             }
             return d;
         }
@@ -559,7 +570,7 @@ static mp_obj_t json_obj(const char *v, const char *ve) {
 }
 
 static mp_obj_t json_or(moy_cat_json_t f, mp_obj_t dflt) {
-    return f.v != NULL ? json_obj(f.v, f.e) : dflt;
+    return f.v != NULL ? json_obj(f.v, f.e, 1u) : dflt;
 }
 
 static mp_obj_t int_or(const moy_cat_int_t *i, mp_obj_t dflt) {
@@ -573,10 +584,10 @@ static mp_obj_t int_or(const moy_cat_int_t *i, mp_obj_t dflt) {
         }
         #if MICROPY_PY_BUILTINS_FLOAT
         if (moy_json_kind(v, ve) == MOY_JSON_FLOAT) {
-            return mp_obj_new_int_from_float(mp_obj_get_float(json_obj(v, ve)));
+            return mp_obj_new_int_from_float(mp_obj_get_float(json_obj(v, ve, 1u)));
         }
         #endif
-        mp_obj_t s = json_obj(v, ve);
+        mp_obj_t s = json_obj(v, ve, 1u);
         return mp_call_function_1(MP_OBJ_FROM_PTR(&mp_type_int), s);
     }
     return dflt;
@@ -791,7 +802,7 @@ static void update_from(mp_obj_t d, const char *v, const char *ve) {
     if (*v == '{') {
         moy_json_iter(&it, v, ve);
         while (moy_json_next(&it, &k, &ke, &x, &xe)) {
-            mp_obj_dict_store(d, json_str(k, ke), json_obj(x, xe));
+            mp_obj_dict_store(d, json_str(k, ke), json_obj(x, xe, 1u));
         }
     } else if (*v == '[') {
         moy_json_iter(&it, v, ve);
@@ -799,7 +810,7 @@ static void update_from(mp_obj_t d, const char *v, const char *ve) {
             moy_json_iter(&pair, x, xe);
             moy_json_next(&pair, NULL, NULL, &k, &ke);
             moy_json_next(&pair, NULL, NULL, &y, &ye);
-            mp_obj_dict_store(d, json_obj(k, ke), json_obj(y, ye));
+            mp_obj_dict_store(d, json_obj(k, ke, 1u), json_obj(y, ye, 1u));
         }
     }
 }
@@ -817,10 +828,10 @@ static int load_one(void *ctx, const moy_cart_t *c) {
     put(d, MP_QSTR_src_before, files_list(c->before, c->before_n));
     put(d, MP_QSTR_src_after, files_list(c->after, c->after_n));
     put(d, MP_QSTR_sprites, text_or_none(c->sprites, c->sprites_n));
-    put(d, MP_QSTR_sounds, c->sounds.p != NULL ? json_obj(c->sounds.p, c->sounds.e)
+    put(d, MP_QSTR_sounds, c->sounds.p != NULL ? json_obj(c->sounds.p, c->sounds.e, 1u)
                                                 : mp_const_none);
     put(d, MP_QSTR_map, text_or_none(c->map, c->map_n));
-    put(d, MP_QSTR_blocks, c->blocks.p != NULL ? json_obj(c->blocks.p, c->blocks.e)
+    put(d, MP_QSTR_blocks, c->blocks.p != NULL ? json_obj(c->blocks.p, c->blocks.e, 1u)
                                                 : mp_const_none);
     put(d, MP_QSTR_images, files_dict(c->images, c->images_n));
     put(d, MP_QSTR_scenes, files_dict(c->scenes, c->scenes_n));
@@ -938,7 +949,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_journal_compact_obj, mod_journal_compact);
 
 static int list_ent(void *ctx, uint32_t seq, const char *line, size_t n) {
     (void)seq;
-    mp_obj_list_append(*(mp_obj_t *)ctx, json_obj(line, line + n));
+    mp_obj_list_append(*(mp_obj_t *)ctx, json_obj(line, line + n, 1u));
     return 0;
 }
 
@@ -1090,6 +1101,9 @@ static mp_obj_t mod_canon(mp_obj_t text) {
         mp_raise_ValueError(MP_ERROR_TEXT("syntax error in JSON"));
     }
     size_t k = moy_json_canon(s, e, NULL, 0);
+    if (k == MOY_JSON_DEEP) {
+        mp_raise_ValueError(MP_ERROR_TEXT("JSON nested too deep"));
+    }
     vstr_t vs;
     vstr_init_len(&vs, k);
     moy_json_canon(s, e, vs.buf, k);
@@ -1106,7 +1120,7 @@ static mp_obj_t mod_loads(mp_obj_t text) {
     if (e == NULL || moy_json_ws(e, t + n) != t + n) {
         mp_raise_ValueError(MP_ERROR_TEXT("syntax error in JSON"));
     }
-    return json_obj(s, e);
+    return json_obj(s, e, 1u);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_loads_obj, mod_loads);
 

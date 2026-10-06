@@ -20,6 +20,7 @@ CPython's text mode turns CRLF into LF.
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 
@@ -293,6 +294,7 @@ def _text(rng):
                         "1E5", "123456789012345678901234567890", "1.0e-10",
                         "{\"a\": 1, \"a\": 2, \"b\": 3}", "\"\\u00e9\\ud83d\\ude00\"",
                         "\"\\/\\b\\f\"", "[" * 33 + "]" * 33, "[" * 31 + "]" * 31,
+                        '{"a": [' * 14 + '{"b": 1.5, "b": [{}]}' + ']}' * 14,
                         " \t\n 7 \r", "01", "-", "\"\x7f\"", "tru", "[1,]"])
     return t
 
@@ -324,6 +326,68 @@ def _depth(t):
         elif c in "]}":
             d -= 1
     return top
+
+
+def _call_graph(source, cflags=()):
+    """{function: (frame bytes, {callees})} of one C file, from GCC's
+    -fcallgraph-info=su; None with no GCC that writes one."""
+    import shutil
+    import tempfile
+    cc = shutil.which("gcc")
+    if cc is None:
+        return None
+    with tempfile.TemporaryDirectory() as d:
+        out = subprocess.run([cc, "-std=c99", "-O2", "-c", "-fcallgraph-info=su",
+                              "-I", os.path.dirname(source)] + list(cflags)
+                             + [source, "-o", os.path.join(d, "x.o")],
+                             cwd=d, capture_output=True, text=True)
+        ci = [f for f in os.listdir(d) if f.endswith(".ci")]
+        if out.returncode != 0 or not ci:
+            return None
+        with open(os.path.join(d, ci[0])) as f:
+            text = f.read()
+    name = lambda t: t.rsplit(":", 1)[-1].split(".")[0]
+    graph = {}
+    for title, size in re.findall(r'^node: \{ title: "([^"]*)" label: "[^"]*?\\n[^"]*?\\n(\d+) bytes',
+                                  text, re.M):
+        graph[name(title)] = (int(size), set())
+    for a, b in re.findall(r'^edge: \{ sourcename: "([^"]*)" targetname: "([^"]*)"', text, re.M):
+        if name(a) in graph:
+            graph[name(a)][1].add(name(b))
+    return graph
+
+
+@pytest.mark.parametrize("cflags", [(), ("-funsigned-char",)], ids=["char", "uchar"])
+def test_moy_json_recurses_only_in_its_bounded_scanner(cflags):
+    """The stack moy_json takes does not grow with what it reads: the one
+    recursive function is moy_json_value, which counts its depth and refuses
+    past MOY_JSON_DEPTH; canon walks with a fixed array. A recursive canon,
+    608 bytes a level on the P4 for its number buffer, overflowed the 16 KB VM
+    stack seeding tap_game's blocks.json, 22 containers deep. The same with
+    char unsigned, as RISC-V has it."""
+    graph = _call_graph(os.path.join(ROOT, "native", "moy_spine", "moy_json.c"), cflags)
+    if graph is None:
+        pytest.skip("no GCC with -fcallgraph-info here")
+
+    def cycles_from(fn, path):
+        for callee in graph.get(fn, (0, ()))[1]:
+            if callee in path:
+                yield path[path.index(callee):]
+            elif callee in graph:
+                yield from cycles_from(callee, path + [callee])
+
+    found = {tuple(c) for fn in graph for c in cycles_from(fn, [fn])}
+    assert found == {("moy_json_value",)}, found
+
+    def worst(fn, seen=()):
+        size, callees = graph[fn]
+        deeper = [worst(c, seen + (fn,)) for c in callees if c in graph and c not in seen]
+        return size + max(deeper, default=0)
+
+    value = graph["moy_json_value"][0]
+    for fn in ("moy_json_canon", "moy_json_canon_set"):
+        # one scan of MOY_JSON_DEPTH levels under whatever the walk holds
+        assert worst(fn) + 32 * value < 4608, (fn, worst(fn), value)
 
 
 # -- the seed (slice 4) --------------------------------------------------------------------

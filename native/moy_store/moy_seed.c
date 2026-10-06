@@ -187,7 +187,7 @@ static void sb_str(sb_t *b, const char *s) {
 
 static void sb_canon(sb_t *b, const char *v, const char *ve) {
     size_t n = moy_json_canon(v, ve, NULL, 0);
-    char *t = moy_store_alloc(n + 1u);
+    char *t = n == MOY_JSON_DEEP ? NULL : moy_store_alloc(n + 1u);
     if (t == NULL) {
         b->failed = 1;
         return;

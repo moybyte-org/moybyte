@@ -327,7 +327,7 @@ static void sb_quote(sb_t *b, const char *s, size_t n) {
 
 static void sb_canon(sb_t *b, const char *v, const char *ve) {
     size_t k = moy_json_canon(v, ve, NULL, 0);
-    char *t = moy_store_alloc(k + 1u);
+    char *t = k == MOY_JSON_DEEP ? NULL : moy_store_alloc(k + 1u);
     if (t == NULL) {
         b->failed = 1;
         return;
@@ -460,7 +460,7 @@ int moy_journal_graduate(const char *cart, int value) {
             if (now != (value != 0)) {
                 const char *val = value ? "true" : NULL;
                 size_t n = moy_json_canon_set(s, e, "graduated", val, NULL, 0);
-                char *t = moy_arena_alloc(&a, n + 1u);
+                char *t = n == MOY_JSON_DEEP ? NULL : moy_arena_alloc(&a, n + 1u);
                 if (t != NULL) {
                     moy_json_canon_set(s, e, "graduated", val, t, n);
                     done = moy_fs_publish(p, t, n) == 0;
