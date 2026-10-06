@@ -29,15 +29,31 @@ user actually SAW was `AttributeError: 'NoneType' object has no attribute
 'mg_fill'` out of a ctypes wrapper, four frames deep, naming nothing they could
 act on. There is deliberately no fallback added here; the failure is simply
 stated, once, in the terms of the thing they have to install.
+
+ONE BUILD PER LIBRARY, ACROSS PROCESSES. A library is built the first time any
+process asks for it, and pytest-xdist's workers all ask during collection (each
+test module binds its twins at import), so a cold cache saw N processes compile
+one source into one output path: whichever finished second renamed a file the
+first had already moved (FileNotFoundError at collection, intermittent, only on
+a cache that had been cleaned). The build is serialised on a lock file beside
+the library, taken after the first look and checked again once held, so the
+first process builds and every other finds the result; the output is written
+under a name only its builder uses and renamed into place whole.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import shutil
 import subprocess
 import sys
+
+try:
+    import fcntl
+except ImportError:             # no flock off POSIX: unique names still hold
+    fcntl = None
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(_HERE, ".."))
@@ -179,6 +195,21 @@ def cache_key(compiler, sources, cflags):
     return h.hexdigest()[:16]
 
 
+@contextlib.contextmanager
+def build_lock(path):
+    """Hold the exclusive lock file `path` (made if absent) for a with-block:
+    one process at a time builds what is cached beside it."""
+    if fcntl is None:
+        yield
+        return
+    with open(path, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def build(name, shim, libmoy_names, cache_dir, cflags=None, compile_names=None,
           libmoy_dir=None, link_flags=None, verbose=False):
     """Compile (or reuse) `name`'s cached .so. None when there is no compiler.
@@ -205,35 +236,38 @@ def build(name, shim, libmoy_names, cache_dir, cflags=None, compile_names=None,
     if os.path.exists(so_path):
         return so_path
     os.makedirs(cache_dir, exist_ok=True)
-    src_dir = so_path[:-3] + ".src"
-    os.makedirs(src_dir, exist_ok=True)
-    for fname, text in sources.items():
-        with open(os.path.join(src_dir, fname), "w") as fh:
-            fh.write(text)
-    if compile_names is None:
-        compile_names = [os.path.basename(shim)] + [n for n in libmoy_names
-                                                    if n.endswith(".c")]
-    tmp = so_path + ".tmp"
-    cmd = ([compiler] + cflags + ["-I", src_dir]
-           + [os.path.join(src_dir, n) for n in compile_names]
-           + ["-o", tmp] + link_flags)
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-    except OSError as exc:
-        # The compiler could not be RUN -- a `CC` pointing at a path that is not
-        # there, or one that is not executable. That is an absent toolchain, not
-        # a broken tree, so it takes the `None` lane and the same explanation a
-        # missing one gets. It used to escape as a bare FileNotFoundError from
-        # subprocess, naming the shim it was trying to build and not the setting
-        # that sent it nowhere.
-        warn_no_cc("%s: %s" % (compiler, exc))
-        return None
-    if proc.returncode != 0:
-        raise RuntimeError("%s build failed:\n%s" % (name, proc.stderr))
-    os.replace(tmp, so_path)            # atomic vs a parallel test run
-    if verbose:
-        print("%s: built %s" % (name, os.path.relpath(so_path, ROOT)))
-    return so_path
+    with build_lock(so_path + ".lock"):
+        if os.path.exists(so_path):     # another process built it while we waited
+            return so_path
+        src_dir = so_path[:-3] + ".src"
+        os.makedirs(src_dir, exist_ok=True)
+        for fname, text in sources.items():
+            with open(os.path.join(src_dir, fname), "w") as fh:
+                fh.write(text)
+        if compile_names is None:
+            compile_names = [os.path.basename(shim)] + [n for n in libmoy_names
+                                                        if n.endswith(".c")]
+        tmp = "%s.%d.tmp" % (so_path, os.getpid())
+        cmd = ([compiler] + cflags + ["-I", src_dir]
+               + [os.path.join(src_dir, n) for n in compile_names]
+               + ["-o", tmp] + link_flags)
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+        except OSError as exc:
+            # The compiler could not be RUN -- a `CC` pointing at a path that is
+            # not there, or one that is not executable. That is an absent
+            # toolchain, not a broken tree, so it takes the `None` lane and the
+            # same explanation a missing one gets. It used to escape as a bare
+            # FileNotFoundError from subprocess, naming the shim it was trying
+            # to build and not the setting that sent it nowhere.
+            warn_no_cc("%s: %s" % (compiler, exc))
+            return None
+        if proc.returncode != 0:
+            raise RuntimeError("%s build failed:\n%s" % (name, proc.stderr))
+        os.replace(tmp, so_path)        # whole, or not there at all
+        if verbose:
+            print("%s: built %s" % (name, os.path.relpath(so_path, ROOT)))
+        return so_path
 
 
 def check():
