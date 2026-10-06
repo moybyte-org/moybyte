@@ -559,9 +559,11 @@ def _project_title(path):
 # `load(path)` is the whole cart, which the shelf merges into the entry it holds
 # (CartManager.rehydrate) and drops again when the workspace moves on (reslim).
 
-# What `load` reads beyond an entry: the cart's scripts and its assets.
+# What `load` reads beyond an entry: the cart's scripts, its assets, its tile
+# flags and its config. Only a loaded cart reads the last two (the Project's
+# flag table, a wallpaper after `rehydrate`), and the shelf draws neither.
 PAYLOADS = ("src", "src_before", "src_after", "sprites", "sounds", "map",
-            "images", "blocks", "scenes")
+            "images", "blocks", "scenes", "flags", "cfg")
 
 
 def entry(path):
@@ -728,18 +730,6 @@ def _load(path, whole, folder=None):
                     after.append((n, text))
                 else:
                     before.append((n, text))
-        cfg = dict(man.get("config", {}))
-        if not _absent(folder, "config.json"):
-            try:
-                cfg.update(json.loads(_read(here + "config.json")))
-            except (OSError, ValueError):
-                pass
-        flags = None                     # tile flags (SPEC.md 3.5), optional
-        if not _absent(folder, FLAGS_NAME):
-            try:
-                flags = _read(here + FLAGS_NAME)
-            except OSError:
-                pass
         icon = _normalize_icon(man.get("icon"))
         cart = {
             "path": path,
@@ -792,7 +782,6 @@ def _load(path, whole, folder=None):
             # (tile, w, h) or None to let the host choose. A POINTER into art the
             # cart already has -- no image, no codec, no reserved tiles.
             "icon": icon,
-            "cfg": cfg,
             "edit": man.get("edit", []),
             # Manifest capability permissions (#38): a cart only gets a gated API
             # (e.g. the injected `wifi`) when its permission is listed here. A
@@ -807,12 +796,6 @@ def _load(path, whole, folder=None):
             # the 320x240 default, or the raw out-of-set value Player.start
             # refuses by name -- see _normalize_canvas above.
             "canvas": _normalize_canvas(man.get("canvas")),
-            # Tile flags (SPEC.md 3.5): the flags.moyflags text, or None when the
-            # cart has no such file -- carried in the SERIALISED form like
-            # sprites/map, and turned into the live 512-byte table by
-            # Project._build_flags (absent -> all zero, which is what the spec
-            # says an absent file means).
-            "flags": flags,
         }
         if broken:
             # Set ONLY on a cart whose manifest would not parse, so every reader
@@ -823,6 +806,23 @@ def _load(path, whole, folder=None):
             cart["scene_names"] = scene_names(man, _scene_files(here, folder))
             cart["icon_rows"] = _sheet_icon(here, icon, folder)
             return cart
+        # The manifest's config under the kid's config.json (the Make-it-mine
+        # values).
+        cfg = dict(man.get("config", {}))
+        try:
+            cfg.update(json.loads(_read(path + "/config.json")))
+        except (OSError, ValueError):
+            pass
+        cart["cfg"] = cfg
+        # Tile flags (SPEC.md 3.5): the flags.moyflags text, or None when the
+        # cart has no such file -- carried in the SERIALISED form like
+        # sprites/map, and turned into the live 512-byte table by
+        # Project._build_flags (absent -> all zero, which is what the spec
+        # says an absent file means).
+        try:
+            cart["flags"] = _read(path + "/" + FLAGS_NAME)
+        except OSError:
+            cart["flags"] = None
         cart["src"] = src
         # SPEC.md 4's other scripts, as (filename, text) in load order. Empty
         # lists, never None, for a cart that has none -- the tiers iterate them

@@ -806,7 +806,7 @@ create Alpha 1.1 a/carts/alpha.moy
 create Gamma 2.1 a/carts/gamma.moy
 catalogue Alpha=1.1 Beta=0.1 Gamma=2.1
 rescan Alpha=1.1 Beta=0.1 Gamma=2.1
-entry 1.1 ['cfg', 'h', 'title']
+entry 1.1 ['h', 'title']
 load 1.1 Alpha 24 True
 path a/carts/beta.moy True True
 new New Cart 3.1
