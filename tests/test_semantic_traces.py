@@ -66,10 +66,12 @@ scripted session of that interface -- create, catalogue, a rescan, entry and
 load, path and handle, new, duplicate, delete and every call on the deleted
 handle, a freed slot taken again under its next generation, a folder removed
 behind the store's back and reconciled away, a root that will not list, a
-second store displacing the first, forged and non-int handles, a full index,
+second store beside the first (a row's key is its root and folder), forged
+and non-int handles, a full index,
 then the seed (cold, warm, and a version bump that keeps the kid's config),
-load whole, a publish, a torn file recovered from its backup, and the journal's
-append (and its no-op), undo and redo to the floor and the ceiling -- on CPython, on the boards' VM and, where it is built, on the boards'
+load whole, a publish, a torn file recovered from its backup, the journal's
+append (and its no-op), undo and redo to the floor and the ceiling, and a
+full root table giving up the store named longest ago -- on CPython, on the boards' VM and, where it is built, on the boards'
 32-bit object model. The log is pinned VERBATIM (STORE_TRACE): the handle
 values are slot.generation, so the allocation order is part of the contract a
 native binding must keep, not an accident of this one. Mutation-tested: the
@@ -723,9 +725,9 @@ say("reconciled", cat.valid(gamma), tried(cat.load, gamma))
 say("unlisted", cat.catalogue(ROOT + "/nowhere"), cat.valid(alpha), cat.valid(beta))
 
 cat.ensure_dirs(B)
-cat.create("Other", B, src=SRC)
-say("other store", shelf(B), cat.valid(alpha), tried(cat.load, alpha))
-say("back", shelf(A))
+other = cat.create("Other", B, src=SRC)["h"]
+say("other store", shelf(B), cat.valid(alpha), tried(lambda h: cat.load(h)["title"], alpha))
+say("back", shelf(A), cat.valid(other), rel(cat.path(other)), cat.handle(cat.path(other)) == other)
 
 C = ROOT + "/c/carts"
 SRC2 = "def _draw():\n    cls(2)\n"
@@ -775,6 +777,15 @@ say("undo floor", J("undo", one))
 say("redo", J("redo", one), cat.load(one)["src"] == SRC3, J("can_redo", one))
 say("redo ceiling", J("redo", one))
 
+for i in range(cat.ROOTS - 3):
+    cat.ensure_dirs(ROOT + "/r%d/carts" % i)
+    cat.catalogue(ROOT + "/r%d/carts" % i)
+say("roots", cat.valid(other), cat.valid(alpha), cat.valid(one))
+cat.ensure_dirs(ROOT + "/last/carts")
+cat.catalogue(ROOT + "/last/carts")
+say("roots full", cat.valid(other), cat.valid(alpha), tried(cat.load, alpha), cat.valid(one))
+say("roots back", shelf(A), cat.valid(other), cat.valid(one))
+
 for forged in (0, -1, alpha ^ (1 << SLOT_BITS), (1 << SLOT_BITS) | (SLOTS - 1)):
     say("forged", tried(cat.load, forged), cat.valid(forged))
 for junk in (None, "1"):
@@ -808,11 +819,11 @@ behind True None None
 shelf Alpha=1.1 Beta=0.1 Delta=4.2 New Cart=3.1
 reconciled False STALE
 unlisted [] True True
-other store Other=2.2 False STALE
-back Alpha=0.2 Beta=1.2 Delta=3.2 New Cart=4.3
-seed Seed One=2.3/2 Seed Two=5.1/1
-seed warm Seed One=2.3/2 Seed Two=5.1/1
-seed bump Seed One=2.3/3 Seed Two=5.1/1
+other store Other=2.2 True Alpha
+back Alpha=1.1 Beta=0.1 Delta=4.2 New Cart=3.1 True b/carts/other.moy True
+seed Seed One=5.1/2 Seed Two=6.1/1
+seed warm Seed One=5.1/2 Seed Two=6.1/1
+seed bump Seed One=5.1/3 Seed Two=6.1/1
 load Seed One 3 [('speed', 9)] 1024 True [] [] None {}
 loaded ['author', 'blocks', 'canvas', 'cfg', 'edit', 'extensions', 'flags', 'format', 'fps', 'graduated', 'icon', 'images', 'input', 'main', 'map', 'memory', 'palette', 'permissions', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'title', 'type', 'version', 'writable']
 publish True
@@ -823,6 +834,9 @@ undo main.py True False True
 undo floor None
 redo main.py True False
 redo ceiling None
+roots True True True
+roots full True False STALE True
+roots back Alpha=0.2 Beta=1.2 Delta=2.3 New Cart=3.2 False True
 forged STALE False
 forged STALE False
 forged STALE False

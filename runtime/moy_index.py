@@ -5,8 +5,10 @@ slot's generation above them. Every call that takes one checks it against the
 table, so a handle whose row was released -- or released and taken again by
 another folder -- raises StaleHandle instead of naming the wrong cart
 (docs/native_kernel_2026-09.md section 4.3: handles, not objects). A row holds
-a folder's path and nothing a runtime owns; the generation is what tells two
-tenants of one slot apart.
+a key -- the catalogue's root id and folder name (runtime/moy_catalogue.py),
+which this table compares as it would any string -- and nothing a runtime
+owns; the generation is what tells two tenants of one slot apart. The calls
+below name the key `path`, as the native ABI does.
 
 The layout keeps every handle below 2**30, a small int on every VM the console
 runs (a board's 32-bit build boxes anything larger on the heap), and leaves

@@ -91,16 +91,38 @@ def test_a_root_that_will_not_list_changes_nothing(tmp_path):
     assert all(cat.valid(c["h"]) for c in made)
 
 
-def test_the_index_holds_one_store_at_a_time(tmp_path):
+def test_a_catalogue_reconciles_its_own_root_alone(tmp_path):
+    """A row's key is its root and its folder: a second store's catalogue
+    leaves the first one's rows, and the same folder name in each is two
+    rows."""
     root, made = _store(tmp_path)
     other = str(tmp_path / "other" / "carts")
     cat.ensure_dirs(other)
-    cat.create("Other", other, src=SRC)
-    assert [e["title"] for e in cat.catalogue(other)] == ["Other"]
-    assert not any(cat.valid(c["h"]) for c in made)
+    twin = cat.create("Alpha", other, src=SRC)
+    assert [e["title"] for e in cat.catalogue(other)] == ["Alpha"]
+    assert all(cat.valid(c["h"]) for c in made)
+    assert twin["h"] != made[1]["h"]
+    assert cat.path(twin["h"]) == twin["path"] == other + "/alpha.moy"
+    assert cat.path(made[1]["h"]) == root + "/alpha.moy"
+    assert cat.handle(other + "/alpha.moy") == twin["h"]
     back = cat.catalogue(root)
-    assert [e["title"] for e in back] == ["Alpha", "Beta"]
-    assert all(e["h"] not in {c["h"] for c in made} for e in back)
+    assert [e["h"] for e in back] == [made[1]["h"], made[0]["h"]]
+    assert cat.valid(twin["h"])
+
+
+def test_a_full_root_table_gives_up_the_root_named_longest_ago(tmp_path):
+    roots = []
+    for i in range(cat.ROOTS + 1):
+        r = str(tmp_path / ("s%d" % i) / "carts")
+        cat.ensure_dirs(r)
+        roots.append((r, cat.create("Cart", r, src=SRC)["h"]))
+    first, rest = roots[0], roots[1:]
+    assert not cat.valid(first[1])
+    with pytest.raises(StaleHandle):
+        cat.load(first[1])
+    assert all(cat.valid(h) for _r, h in rest)
+    assert [e["title"] for e in cat.catalogue(first[0])] == ["Cart"]
+    assert not cat.valid(rest[0][1]) and cat.valid(rest[1][1])
 
 
 def test_duplicate_copies_the_cart_the_store_holds(tmp_path):
