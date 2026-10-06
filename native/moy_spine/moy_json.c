@@ -809,11 +809,11 @@ static void canon(sink_t *k, const char *v, const char *v_end) {
         case MOY_JSON_FLOAT: {
             double d;
             if (*v == 'N') {
-                d = NAN;
+                d = (double)NAN;
             } else if (*v == 'I') {
-                d = INFINITY;
+                d = (double)INFINITY;
             } else if (*v == '-' && v[1] == 'I') {
-                d = -INFINITY;
+                d = -(double)INFINITY;
             } else {
                 char buf[400];
                 size_t n = (size_t)(v_end - v);
