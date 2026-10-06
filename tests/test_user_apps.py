@@ -31,6 +31,7 @@ from runtime import app_context as _ac        # noqa: E402
 from runtime import bar_layer as _bar         # noqa: E402
 from runtime import crash_guard, moy_carts, system_api  # noqa: E402
 from runtime.crash_guard import CrashGuard    # noqa: E402
+from runtime.moy_spine import Settings        # noqa: E402
 from ws_helpers import build_ws                # noqa: E402
 
 DT = 1.0 / 30
@@ -255,7 +256,7 @@ def test_the_demo_app_saves_a_document_the_rest_of_the_console_can_read(tmp_path
     again = ns["open_editor"](names[0])
     assert again.text() == "HELLO\nWORLD"
     # ...and its own prefs slot remembers it, namespaced under the app id.
-    assert ws.system["notes_last"] == names[0]
+    assert ws.system.get("notes_last") == names[0]
 
 
 def test_the_demo_apps_prefs_cannot_see_the_shells_own_settings(tmp_path):
@@ -263,11 +264,11 @@ def test_the_demo_apps_prefs_cannot_see_the_shells_own_settings(tmp_path):
     _open(ws, "Notes")
     _frames(ws)
     prefs = ws.player.ns["prefs"]
-    ws.system["theme"] = "night"
+    ws.system.set("theme", "night")
     assert prefs.get("theme") is None       # reads notes_theme, not theme
     prefs.set("theme", "hacked")
-    assert ws.system["theme"] == "night"    # ...and writes notes_theme
-    assert ws.system["notes_theme"] == "hacked"
+    assert ws.system.get("theme") == "night"    # ...and writes notes_theme
+    assert ws.system.get("notes_theme") == "hacked"
 
 
 def test_a_user_app_is_always_exitable_through_the_hosts_bar(tmp_path):
@@ -573,9 +574,9 @@ def test_a_declared_small_canvas_wins_over_the_responsive_probe(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_the_guard_counts_a_strike_per_open_and_forgives_a_healthy_run():
-    store = {}
     saves = []
-    g = CrashGuard(store, lambda: saves.append(dict(store)))
+    store = Settings(lambda text: saves.append(text))
+    g = CrashGuard(store)
     assert g.arm("app") is True
     assert g.strikes("app") == 1
     assert g.last_open() == "app"
@@ -589,7 +590,7 @@ def test_the_guard_counts_a_strike_per_open_and_forgives_a_healthy_run():
 
 
 def test_the_guard_disables_after_three_unhealed_opens():
-    g = CrashGuard({})
+    g = CrashGuard(Settings())
     for i in range(g.STRIKES):
         assert g.arm("app") is True, i
         g.release()                        # died before the heal
@@ -602,23 +603,24 @@ def test_the_guard_disables_after_three_unhealed_opens():
 
 
 def test_the_guard_holds_state_across_a_reload():
-    """The guard holds the settings DICT, not a callable that fetches it -- so
-    a reload has to arrive IN that object. `SystemStore.load()` clears and
-    updates in place for exactly this reason (#209 landing B); a load that
-    rebound the name instead would leave the guard counting strikes into an
+    """The guard holds the settings STORE, not a callable that fetches it -- so
+    a reload has to arrive IN that object. `SystemStore.load()` replaces the
+    rows in place (`adopt`) for exactly this reason (#209 landing B); a load
+    that rebound the name instead would leave the guard counting strikes into an
     orphan nobody persists, silently."""
-    settings = {}
+    settings = Settings()
     g = CrashGuard(settings)
     g.arm("app")
-    carried = settings[crash_guard.KEY]
-    settings.clear()                                   # what SystemStore.load does
-    settings.update({crash_guard.KEY: carried})
+    carried = settings.get(crash_guard.KEY)
+    settings.adopt({crash_guard.KEY: carried})         # what SystemStore.load does
     assert g.strikes("app") == 1
 
 
 def test_a_corrupt_guard_slot_cannot_disable_everything():
     for junk in ("nonsense", 7, [1, 2], None):
-        g = CrashGuard({crash_guard.KEY: junk})
+        s = Settings()
+        s.adopt({crash_guard.KEY: junk})
+        g = CrashGuard(s)
         assert g.disabled("app") is False
         assert g.arm("app") is True
 

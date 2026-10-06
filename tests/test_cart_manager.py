@@ -473,7 +473,7 @@ def test_recents_move_to_the_front_without_duplicating_and_cap(tmp_path):
     for c in made:
         ws.carts.note_recent(c)
     ws.carts.note_recent(first)
-    mru = ws.system["desk_mru"]
+    mru = ws.system.get("desk_mru")
     assert mru[0] == first["path"]
     assert len(mru) == ws.carts._MRU_CAP
     assert len(set(mru)) == len(mru)
@@ -486,7 +486,7 @@ def test_recent_resolves_paths_back_to_live_carts_and_drops_the_missing(tmp_path
     ws.carts.note_recent(b)
     assert [c["path"] for c in ws.carts.recent()] == [b["path"], a["path"]]
 
-    ws.system["desk_mru"] = ["gone/forever"] + ws.system["desk_mru"]
+    ws.system.set("desk_mru", ["gone/forever"] + ws.system.get("desk_mru"))
     assert [c["path"] for c in ws.carts.recent()] == [b["path"], a["path"]]
 
 
@@ -498,7 +498,7 @@ def test_a_launcher_run_records_the_cart_as_recent(tmp_path):
                            if it.get("path"))
     cart = ws.launcher.selected()
     ws.launch_selected()
-    assert ws.system["desk_mru"][0] == cart["path"]
+    assert ws.system.get("desk_mru")[0] == cart["path"]
 
 
 # -- the frame loop -----------------------------------------------------------

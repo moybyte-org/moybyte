@@ -23,8 +23,7 @@ class SettingsToggles:
         setattr(self, key, on)
         self._dirty = True
         if persist:
-            self.system[key] = on
-            self.prefs.persist()
+            self.system.set(key, on)
 
     def set_diag_live(self, on, persist=True):
         """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
@@ -156,6 +155,6 @@ class SettingsToggles:
         step flips. This only changes what UPDATE ONLINE checks -- the running firmware
         is unchanged until a manifest is actually installed (and the bootloader's
         rollback still guards a bad beta image)."""
-        self.system["ota_channel"] = (
+        self.system.set(
+            "ota_channel",
             "stable" if self._ota_channel() == "unstable" else "unstable")
-        self.prefs.persist()

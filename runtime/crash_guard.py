@@ -80,11 +80,13 @@ frames is ~100 ms. A false strike is cleared by the next healthy run anyway.
 
 ## Storage
 
-One key per role inside the shell's existing `system.json` (`ws.system` +
-`ws.prefs.persist`) -- no new store surface, no new file, and it inherits that
+One key per role inside the shell's existing `system.json` (`ws.system`, the
+spine's `Settings`) -- no new store surface, no new file, and it inherits that
 store's atomic write, so an interrupted write cannot leave a half-parsed guard
-that disables everything. The state is injected as a `(store, save)` pair rather
-than a `ws`, so this stays a leaf that a test can drive with a plain dict.
+that disables everything. A guard reads its slot with `store.get(key)` and
+writes the whole slot back with `store.set(key, slot)`, which persists it. The
+store is injected rather than a `ws`, so this stays a leaf that a test can drive
+with a `Settings` and a save hook of its own.
 
 A build with no writable store degrades to RAM-only counting: the strikes hold
 for the session and are forgotten on reboot. That is the honest floor -- a
@@ -100,17 +102,14 @@ WALLPAPER_KEY = "wallpaper_guard"
 class CrashGuard:
     """Per-cart strike counting around a risky open.
 
-    `store` is the persisted settings dict itself (`ws.system`); `save` is the
-    callable that writes it (`ws.prefs.persist`); `key` is the role's slot in
-    it (`KEY` or `WALLPAPER_KEY`). It used to be a zero-argument
-    CALLABLE returning the dict, because the old `load_system()` REBOUND
-    `ws.system` to what it read off the card and a guard holding the boot-time
-    dict would have counted strikes into an object nobody persists. `SystemStore`
-    owns that dict now and loads it IN PLACE (#209 landing B), so the object a
-    guard is handed at construction is the object the card's contents arrive in
-    -- there is nothing left for the indirection to protect against. Neither
-    argument is touched at construction, so a guard built before the store is
-    even wired still works."""
+    `store` is the persisted settings store itself (`ws.system`, a
+    `moy_spine.Settings`); `key` is the role's slot in it (`KEY` or
+    `WALLPAPER_KEY`). Its `set` persists, so a strike is on the card when `arm`
+    returns, with no save callable to forget. `SystemStore` loads the store IN
+    PLACE (#209 landing B), so the object a guard is handed at construction is
+    the object the card's contents arrive in. Nothing is touched at
+    construction, so a guard built before the store is even wired still
+    works."""
 
     # Three failed opens disable it. Deliberately not two: an app can lose one
     # open to something that is not its fault (a card pulled mid-save, a
@@ -122,9 +121,8 @@ class CrashGuard:
     # its body, its _init, its _update and its _draw without raising.
     HEAL_FRAMES = 3
 
-    def __init__(self, store, save=None, key=KEY):
+    def __init__(self, store, key=KEY):
         self._store = store
-        self._save = save
         self._key = key
         self._armed = None        # the id this run is holding a strike for
         self._proof = None        # what the heal records for it, or None
@@ -133,20 +131,25 @@ class CrashGuard:
     # -- state ---------------------------------------------------------------
 
     def _data(self):
-        """The guard's slot inside the settings dict, created lazily.
+        """The guard's slot, decoded afresh from its row, with the parts the
+        guard works on in place. A copy: nothing here changes the store until
+        `_commit` writes it back.
 
         Tolerant of garbage: a hand-edited or half-migrated `system.json` whose
-        guard slot is not a dict is REPLACED, never allowed to raise. A corrupt
-        guard must not be able to do what the guard exists to prevent."""
-        store = self._store
-        d = store.get(self._key)
+        guard slot is not a dict is REPLACED (by the next commit), never allowed
+        to raise. A corrupt guard must not be able to do what the guard exists
+        to prevent."""
+        d = self._store.get(self._key)
         if not isinstance(d, dict):
             d = {}
-            store[self._key] = d
         strikes = d.get("strikes")
         if not isinstance(strikes, dict):
             d["strikes"] = {}
         return d
+
+    def _commit(self, d):
+        """Write the slot back: the store persists it before this returns."""
+        self._store.set(self._key, d)
 
     def strikes(self, cid):
         """Failed opens recorded against `cid`."""
@@ -209,7 +212,7 @@ class CrashGuard:
         self._armed = cid
         self._proof = proof
         self._frames = 0
-        self._persist()
+        self._commit(d)
         return True
 
     def frame(self):
@@ -244,7 +247,7 @@ class CrashGuard:
                 d["proven"] = proven
             proven[cid] = self._proof
             self._proof = None
-        self._persist()
+        self._commit(d)
         return True
 
     def release(self):
@@ -273,7 +276,7 @@ class CrashGuard:
             return False
         if d.get("open") == cid:
             d["open"] = None
-        self._persist()
+        self._commit(d)
         return True
 
     def broken_ids(self):
@@ -287,6 +290,3 @@ class CrashGuard:
         d = self._data()
         return sorted(k for k in d["strikes"] if self.disabled(k))
 
-    def _persist(self):
-        if self._save is not None:
-            self._save()

@@ -192,9 +192,12 @@ from behind the façade in five gated landings. `tests/test_console_facade.py`
 pins every surviving forward with its caller, the 17 legacy property forwards,
 and every `getattr(ws, "…")` name in runtime/device/tools. Facts not to undo:
 
-- **`ws.system` is an ALIAS of the SystemStore dict and is never rebound** —
-  `SystemStore.load()` mutates it in place. That identity is why settings_layer's
-  and dev_channel's raw writes never had to migrate.
+- **`ws.system` is an ALIAS of the SystemStore rows (the spine's `Settings`) and
+  is never rebound** — `SystemStore.load()` replaces its rows in place. Reads are
+  `ws.system.get(key, default)`, a value decoded afresh; the ONE write is
+  `ws.system.set(key, value)`, which marks the store dirty and persists it, so
+  there is no `persist()` to forget and no dict beside the rows to write to. A
+  write that fails stays dirty and rides on the next.
 - **The achievement overlays are EVENT-PUSH**: an unlock writes the flat kernel
   deadlines from the arm site; `_animating` and both WMs read plain ints and never
   call into `ach`/`ach_ui`.

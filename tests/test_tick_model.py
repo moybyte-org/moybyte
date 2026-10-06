@@ -639,10 +639,9 @@ def test_steady_persists_and_reaches_the_running_cart(tmp_path):
 
 def test_a_stored_frameskip_key_is_dropped_on_load(tmp_path):
     ws = _ws(tmp_path)
-    ws.system["frameskip"] = True
-    ws.prefs.persist()
+    ws.system.set("frameskip", True)
     ws.load_system()
-    assert "frameskip" not in ws.system
+    assert ws.system.text("frameskip") is None
     assert ws.steady is True
 
 
@@ -732,7 +731,7 @@ def test_skip_and_gov_decline_and_name_the_knob(tmp_path, capsys):
         assert "retired" in out and "steady" in out
     ch.run(ws, "steady 0")
     assert capsys.readouterr().out.strip() == "REMOTE steady off"
-    assert ws.steady is False and "steady" not in ws.system
+    assert ws.steady is False and ws.system.text("steady") is None
 
 
 def test_the_perf_line_carries_the_tick_and_the_misses():

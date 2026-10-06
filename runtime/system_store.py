@@ -2,24 +2,27 @@
 
 `Workstation.prefs`. Every persisted Settings choice, the achievement badges,
 the crash guard's strikes, the pairing pin, favorites and recents all live in
-ONE dict on ONE file, and until this landing four separate bodies re-derived
+ONE store on ONE file, and until this landing four separate bodies re-derived
 the same "is there a writable store?" guard around it.
 
-## The dict is never rebound, and that is the whole mechanism
+## The rows are the store, and `set` is the only way in
 
-`ws.system` is the most-aliased object in the shell: settings_layer writes it
-raw, the dev channel writes it raw, the launcher reads `favorites` on every
-home paint, `app_context.Prefs` reads and writes it namespaced, and the goldens
-poke a pin into it. Handing all of those a collaborator to call would have been
-a cross-module migration of ~a dozen sites for no behavioural gain.
+`ws.system` is `prefs.rows`, the spine's `Settings` (`runtime/moy_spine.py`):
+one row per key holding the value's JSON text. It is the most-aliased object in
+the shell -- the launcher reads `favorites` on every home paint,
+`app_context.Prefs` reads and writes it namespaced, the crash guard keeps its
+ledger in it, the goldens poke a pin into it -- and it is created once and never
+rebound, so `load()` replaces its rows IN PLACE and every alias, including one
+captured before the store was wired, stays honest.
 
-So the dict object itself is the seam: `SystemStore` owns it, `load()` mutates
-it IN PLACE (`clear()` + `update()`), and `Workstation.__init__` binds
-`ws.system` to it once. Neither name is ever rebound again, so every alias --
-including one captured before the store was even wired -- stays honest forever
-with no consumer migration at all. The `CrashGuard`-takes-a-callable wart
-(which existed only because the old `load_system()` REBOUND the dict) retires
-with it.
+Reads are `ws.system.get(key, default)`, a value decoded afresh from its row, so
+what a reader does to it cannot change the store. A write is `ws.system.set(key,
+value)`: it marks the store dirty and persists it through `SystemStore._write`,
+the rows' save hook, so a write cannot be left out of the file by a caller that
+forgot to ask. A write that fails stays dirty and rides on the next. There is no
+dict beside the rows to write to, and none to push from: the rows a native
+component owns (the strike ledger, sprint 2) are written by that component
+through the same store.
 
 ## Reading the store through `ws`, per call
 
@@ -33,8 +36,6 @@ native mount *after* construction. A handle that snapshotted any of them at
 through `ws` makes that trap structurally impossible rather than merely
 avoided by ordering.
 """
-
-import json
 
 try:
     from chrome import _err_text
@@ -80,9 +81,9 @@ class StoreHandle:
 
 
 class SystemStore:
-    """The `system.json` dict and the four funnels that read and write it.
+    """The `system.json` rows and the hook that writes them.
 
-    Holds the dict `ws.system` aliases (see the module docstring) plus the
+    Holds the `Settings` `ws.system` aliases (see the module docstring) plus the
     achievements list's two store halves. What it deliberately does NOT own is
     what the settings MEAN: `load_system`'s apply cascade -- eight `set_*` verbs
     and `select_wallpaper` -- stays kernel policy, and so does the unlock beep
@@ -91,28 +92,21 @@ class SystemStore:
     def __init__(self, ws, handle):
         self.ws = ws
         self.store = handle
-        # THE dict. `Workstation.__init__` aliases it as `ws.system` and
-        # nothing rebinds either name again -- `load()` clears and updates it.
-        self.settings = {}
-        # The store itself: the spine's rows, one per key, holding the value's
-        # JSON text (moy_spine.Settings). The dict is this side's mirror of
-        # them, and `_seen` is each key's text as the mirror last read or wrote
-        # it: `persist` pushes only the keys the mirror changed, so a row
-        # another writer owns is never written back from a stale copy.
-        self.rows = Settings()
-        self._seen = {}
+        # THE store. `Workstation.__init__` aliases it as `ws.system` and
+        # nothing rebinds either name again -- `load()` replaces its rows.
+        self.rows = Settings(self._write)
 
     # -- system.json ---------------------------------------------------------
 
     def load(self):
-        """Read `system.json` into the dict, IN PLACE. Safe no-op if no store or
+        """Read `system.json` into the rows, IN PLACE. Safe no-op if no store or
         root is wired (an embedded boot keeps whatever it already had).
 
         A store that raises leaves the settings EMPTY rather than half-read: a
         bad card must not crash boot, and a partially-applied settings file is
         worse than the defaults, which are all valid."""
         if not self.store.ready():
-            return self.settings
+            return self.rows
         ws = self.ws
         try:
             loaded = self.store.call(
@@ -120,46 +114,24 @@ class SystemStore:
         except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
             print("Moybyte system load failed:", _err_text(exc))
             loaded = {}
-        self.settings.clear()
-        self.settings.update(loaded)
         self.rows.adopt(loaded)
-        self._seen = {k: self.rows.get(k) for k in self.rows.keys()}
-        return self.settings
+        return self.rows
 
-    def _push(self):
-        """The mirror's changes into the rows: each key whose JSON differs from
-        what the mirror last saw, and each key it dropped."""
-        rows, seen, d = self.rows, self._seen, self.settings
-        for k in d:
-            t = json.dumps(d[k])
-            if seen.get(k) != t:
-                rows.set(k, t)
-                seen[k] = t
-        for k in [k for k in seen if k not in d]:
-            rows.delete(k)
-            del seen[k]
-
-    def persist(self):
-        """Write the dict to `system.json` when a writable store is wired.
-
-        The ONE funnel behind every persisting Settings toggle (theme, skin,
-        font scale, wallpaper, diagnostics, steady, 2P, crisp pixels, the FPS
-        chip, the OTA channel), favorites/recents, the crash guard's strikes and
-        the pairing pin. A failed write just isn't remembered. What reaches
-        the file is the rows' dump."""
-        try:
-            self._push()
-        except Exception as exc:  # noqa: BLE001 -- a value JSON cannot hold
-            print("Moybyte system save failed:", _err_text(exc))
-            return
+    def _write(self, text):
+        """The rows' save hook: `text` is the file, written when a writable
+        store is wired. False when the write failed, so the rows stay dirty and
+        the next write carries it; True when it landed or when this build has
+        nowhere to put one (`can_manage` is False where the carts are baked
+        into the image: that is not a failure to retry)."""
         if not self.store.writable():
-            return
+            return True
         ws = self.ws
         try:
-            self.store.call(
-                lambda: ws.carts_store.save_system(self.rows.dump(), ws.carts_root))
+            self.store.call(lambda: ws.carts_store.save_system(text, ws.carts_root))
         except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
             print("Moybyte system save failed:", _err_text(exc))
+            return False
+        return True
 
     # -- achievements.json (#21) ---------------------------------------------
 

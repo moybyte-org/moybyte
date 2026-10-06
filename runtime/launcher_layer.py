@@ -1018,7 +1018,7 @@ class LauncherHomeLayer:
         return (self._statics_key(cv), ws.launcher.sel, ws.launcher.scroll,
                 ws.covers.gen, self._lhover,
                 tuple(it.get("title") for it in ws.launcher.items),
-                tuple(ws.system.get("favorites", ())),
+                ws.system.text("favorites"),
                 ws.bar_layer._cart_bar_key("home"))
 
     def _try_stamp_retained(self, cv, dt):

@@ -37,7 +37,8 @@ same change (`docs/native_kernel_2026-09.md` §4.2).
 **What stays Python after sprint 2**, by decision: the app OBJECTS and the
 surfaces a route lands on (`console_spine.py`'s side of each verb); the radio
 service the lease powers (`device/device_wifi.py`, sprint 3); the settings
-dict callers alias (`ws.system`, now a mirror, §5); the Editor's project return
+rows' save hook, which writes the file through the SD gate
+(`SystemStore._write`, §5); the Editor's project return
 (`_project_return` holds a cart and reloads it through the loader: an app's
 return, not the kernel's); `load_system`'s apply cascade (each subject crosses
 in its own sprint); the launcher's broken-cart badge (§10).
@@ -122,17 +123,29 @@ keys, same value shapes; a file the scanner refuses reads as absent (`{}`),
 the existing "a bad store must not crash boot" rule (CLAUDE.md: strict readers,
 no migrations).
 
-**A key has one writer.** The ledger's rows (`app_guard`, `wallpaper_guard`)
-are the kernel's. `SystemStore`'s dict is a mirror the console's sites keep
-aliasing; `persist` pushes only the keys whose JSON differs from what the mirror
-last read or wrote, so a kernel-owned row is never written back from a stale
-copy (pinned: `tests/test_moy_spine.py`). The file write goes through the
-Python SD gate until sprint 3 makes the gate native.
+**The rows are the store, and a write is one verb.** There is no dict beside
+them. Reads are `get(key, default)`, a value decoded afresh from its row (so
+nothing a reader does to it changes the store; `text(key)` is the row's JSON for
+a reader that only compares), and the one write is `set(key, value)`: it
+encodes the value as `json.dumps` writes it, marks the store dirty and calls the
+save hook with the file's text, which `SystemStore._write` writes through the
+Python SD gate until sprint 3 makes the gate native. A hook that answers False
+(a card pulled) leaves the store dirty and the next write carries the change;
+`persist=False` defers a write the same way. A write cannot be left out of the
+file by a caller that forgot to ask, and a key has one writer: the strike
+ledger's rows (`app_guard`, `wallpaper_guard`) are read and written by
+`CrashGuard` through the same `get` and `set` and, once the ledger is native, by
+the kernel's own, with no stale copy to write back from. `set_text` is the same write for
+text already JSON, kept as written. The format is pinned as literal bytes
+(`tests/test_moy_spine.py`): `json.dumps`'s of the same object, rows in file
+order.
 
     int moy_settings_load(moy_settings_t *, const char *text, size_t len, uint32_t *rows);  // BADJSON, NOMEM
     int moy_settings_get(const moy_settings_t *, const char *key, size_t key_len, const char **json, size_t *len);
     int moy_settings_set(moy_settings_t *, const char *key, size_t key_len, const char *json, size_t len);
     int moy_settings_delete(moy_settings_t *, const char *key, size_t key_len);
+    uint32_t moy_settings_dirty(const moy_settings_t *);   // changes since clean
+    void moy_settings_clean(moy_settings_t *);
     size_t moy_settings_dump(const moy_settings_t *, char *out, size_t cap);
 
 A key is held decoded, with its length (it may hold a NUL), and written as a

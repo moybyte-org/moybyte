@@ -57,7 +57,7 @@ def test_a_fresh_console_has_it_off_and_its_row_on_every_tier(tmp_path):
                                      windowed=True))):
         ws = build_ws(tmp_path / str(n), **kw)
         assert ws.unknown_sources is False
-        assert KEY not in ws.system
+        assert ws.system.text(KEY) is None
         rows = ws.settings_layer._settings_rows()
         assert (KEY, "UNKNOWN SOURCES", "diag") in rows
 
@@ -66,7 +66,7 @@ def test_it_persists_under_its_own_key_and_comes_back_on(tmp_path):
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
     ws.set_unknown_sources(True)
-    assert ws.system[KEY] is True
+    assert ws.system.get(KEY) is True
     again = host_app.build_workstation(carts)
     assert again.unknown_sources is True
     again.set_unknown_sources(False)
@@ -82,7 +82,7 @@ def test_tapping_the_row_opens_the_warning_and_changes_nothing(tmp_path):
     sl = ws.settings_layer
     assert sl.confirm_key == KEY
     assert sl.confirm_sel == 0, "KEEP OFF has the focus when it opens"
-    assert ws.unknown_sources is False and KEY not in ws.system
+    assert ws.unknown_sources is False and ws.system.text(KEY) is None
     title, text, yes = TOGGLE_CONFIRMS[KEY]
     assert title == "UNKNOWN SOURCES" and yes == "TURN ON"
     assert text == ("Unsigned carts can do anything on this console. "
@@ -99,7 +99,7 @@ def test_keep_off_closes_the_warning_with_the_switch_off(tmp_path):
     drv.click(*_hit_center(ws, "keep"))
     drv.frame(DT)
     assert ws.settings_layer.confirm_key is None
-    assert ws.unknown_sources is False and KEY not in ws.system
+    assert ws.unknown_sources is False and ws.system.text(KEY) is None
 
 
 def test_a_tap_elsewhere_on_the_warning_does_nothing(tmp_path):
@@ -120,7 +120,7 @@ def test_turn_on_turns_it_on_and_persists_it(tmp_path):
     drv.click(*_hit_center(ws, "accept"))
     drv.frame(DT)
     assert ws.settings_layer.confirm_key is None
-    assert ws.unknown_sources is True and ws.system[KEY] is True
+    assert ws.unknown_sources is True and ws.system.get(KEY) is True
 
 
 def test_on_the_keyboard_turning_it_on_takes_a_move_and_a_press(tmp_path):
@@ -152,7 +152,7 @@ def test_on_the_keyboard_turning_it_on_takes_a_move_and_a_press(tmp_path):
     key("right")
     key("a")
     assert sl.confirm_key is None
-    assert ws.unknown_sources is True and ws.system[KEY] is True
+    assert ws.unknown_sources is True and ws.system.get(KEY) is True
 
 
 def test_turning_it_off_is_immediate(tmp_path):
@@ -163,7 +163,7 @@ def test_turning_it_off_is_immediate(tmp_path):
     drv.click(x, y)
     drv.frame(DT)
     assert ws.settings_layer.confirm_key is None
-    assert ws.unknown_sources is False and ws.system[KEY] is False
+    assert ws.unknown_sources is False and ws.system.get(KEY) is False
 
 
 def test_the_other_toggles_flip_without_a_warning(tmp_path):
@@ -208,7 +208,7 @@ def test_the_dev_channel_sets_it_without_the_warning_or_persisting(tmp_path, cap
     assert _remote_state(ws)["unknown_sources"] is False
     ch.run(ws, "unknown_sources 1")
     assert capsys.readouterr().out.strip() == "REMOTE unknown_sources on"
-    assert ws.unknown_sources is True and KEY not in ws.system
+    assert ws.unknown_sources is True and ws.system.text(KEY) is None
     assert ws.settings_layer.confirm_key is None
     st = _remote_state(ws)
     assert st["unknown_sources"] is True

@@ -673,7 +673,7 @@ def test_a_deliberate_choice_beats_the_running_channel(tmp_path):
             return "unstable"
 
     ws.updater = _Beta()
-    ws.system["ota_channel"] = "stable"
+    ws.system.set("ota_channel", "stable")
     assert ws._ota_channel() == "stable"
 
 

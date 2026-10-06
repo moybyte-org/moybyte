@@ -1369,7 +1369,7 @@ def test_the_pin_is_minted_once_and_persisted(tmp_path):
     pin = ws.web_pin()
     assert len(pin) == 4 and pin.isdigit()
     assert ws.web_pin() == pin, "a second call minted a second pin"
-    assert ws.system["web_pin"] == pin
+    assert ws.system.get("web_pin") == pin
     assert _ws(tmp_path).web_pin() == pin, "it did not survive a fresh console"
 
 
@@ -1377,9 +1377,9 @@ def test_a_board_that_never_serves_never_writes_a_pin(tmp_path):
     """Lazy on purpose: a console whose owner never turns the row on has no
     business having written a secret into its store."""
     ws = _ws(tmp_path)
-    assert "web_pin" not in ws.system
+    assert ws.system.text("web_pin") is None
     ws.webhost = _ModeHost(pin_source=lambda: ws.web_pin())
-    assert "web_pin" not in ws.system, "constructing the host minted a pin"
+    assert ws.system.text("web_pin") is None, "constructing the host minted a pin"
     ws.toggle_webhost()
     assert ws.system.get("web_pin")
 

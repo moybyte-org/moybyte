@@ -53,14 +53,10 @@ FORWARDS = {
         "webhost_label": "label",            # settings_layer, tools/push_cart_wifi
         "toggle_webhost": "toggle",          # settings_layer, dev_channel, push_cart_wifi
     },
-    # Landing B. The dict itself needed no forward at all -- `ws.system` is a
-    # plain alias of `prefs.settings` and SystemStore loads it IN PLACE, so
-    # every raw reader and writer (settings_layer, the dev channel, the
-    # launcher's favorites, app_context's Prefs role) kept working untouched.
-    # Only the WRITE verb has callers left outside the kernel.
-    "prefs": {
-        "_persist_system": "persist",        # app_context's Prefs, dev_channel's `vol`
-    },
+    # Landing B. ZERO forwards: `ws.system` is a plain alias of the rows
+    # `prefs.rows` and SystemStore loads them IN PLACE, every reader calls
+    # `ws.system.get` and every writer `ws.system.set`, which persists, so the
+    # write verb that used to be forwarded (`_persist_system`) has no callers.
     # Landing C. ZERO forwards, and that is the finding rather than an
     # omission: every cover verb was kernel-INTERNAL. The three consumer
     # classes 3d names were all swept before the move -- the dev channel and

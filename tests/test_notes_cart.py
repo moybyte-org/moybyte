@@ -175,7 +175,7 @@ def test_the_last_note_reopens_on_the_next_launch(tmp_path):
     moy_carts.save_file("docs", "kept", "still here", ws.carts_root)
     ns = _open_notes(ws)
     _tap(ws, _hit(ns, "open", 0))
-    assert ws.system["notes_last"] == "kept"
+    assert ws.system.get("notes_last") == "kept"
     ws._exit_to_caller()
     ns = _open_notes(ws)
     assert ns["ed"] is not None and ns["ed"].name() == "kept"
@@ -241,7 +241,7 @@ def test_the_request_is_taken_once_and_a_re_run_lands_on_the_shelf(tmp_path):
     app._act("OPEN", "letter")
     _frames(ws)
     assert ws._text_request is None
-    ws.system.pop("notes_last", None)     # the OTHER way a note reopens
+    ws.system.delete("notes_last")     # the OTHER way a note reopens
     ws.player.start(ws.project)
     _frames(ws)
     assert ws.player.ns["ed"] is None

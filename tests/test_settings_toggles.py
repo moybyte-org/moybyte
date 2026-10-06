@@ -311,12 +311,12 @@ def test_the_serial_word_reports_what_the_console_reached(tmp_path, capsys):
     from runtime.dev_channel import DevChannel
     from tests.test_dev_channel import FakePointer
     ws = build_ws(tmp_path)
-    ws.system.pop("steady", None)
+    ws.system.delete("steady")
     ch = DevChannel(ws, FakePointer())
     capsys.readouterr()                 # the channel's own no-fileno notice
     ch.run(ws, "steady 0")
     assert capsys.readouterr().out.strip() == "REMOTE steady off"
-    assert ws.steady is False and "steady" not in ws.system
+    assert ws.steady is False and ws.system.text("steady") is None
     ch.run(ws, "steady 1")
     assert capsys.readouterr().out.strip() == "REMOTE steady on"
     assert ws.steady is True
@@ -352,7 +352,7 @@ def test_every_toggle_persists_under_its_own_key_and_comes_back(tmp_path):
         if gate is not None:
             continue
         getattr(ws, setter)(not default)
-        assert ws.system[key] is (not default), key
+        assert ws.system.get(key) is (not default), key
 
     ws2 = host_app.build_workstation(carts)
     for key, _l, default, _s, gate, _dev in SETTINGS_TOGGLES:
@@ -365,9 +365,10 @@ def test_the_boot_apply_writes_nothing_back(tmp_path):
     it just read (and must not mint keys the kid never chose)."""
     ws = build_ws(tmp_path)
     for key in KEYS:
-        ws.system.pop(key, None)
+        ws.system.delete(key)
     ws.load_system()
-    assert not (set(ws.system) & set(KEYS)), sorted(set(ws.system) & set(KEYS))
+    assert not (set(ws.system.keys()) & set(KEYS)), sorted(
+        set(ws.system.keys()) & set(KEYS))
 
 
 # -- the mirrors stay flat ----------------------------------------------------

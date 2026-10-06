@@ -391,7 +391,7 @@ def _surface_plan(ws, cfg):
                      lambda title=title: open_cart(ws, title)))
 
     def park():
-        ws.system["web_pin"] = GOLDEN_PIN
+        ws.system.set("web_pin", GOLDEN_PIN)
         if ws.webhost is None:
             ws.webhost = _GoldenWebHost()
         if not ws.webhost_serving():

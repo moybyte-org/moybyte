@@ -15,8 +15,9 @@ The webhost is read THROUGH `ws` on every call and never captured here: it is
 settings load later still (the same ordering `make_webhost` respects by reading
 the pin at `start()` rather than at construction). The pin's own persistence
 goes to the sibling collaborator that owns system.json (`ws.prefs`, #209
-landing B); `ws.system` stays a plain alias of the dict it holds, so reading and
-writing a key through it needs nothing from this object.
+landing B); `ws.system` stays a plain alias of the rows it holds, so reading and
+writing a key through it (`get`, and `set`, which persists) needs nothing from
+this object.
 """
 
 try:
@@ -73,8 +74,7 @@ class WebConsole:
         if pin:
             return str(pin)
         pin = self._mint_pin()
-        ws.system["web_pin"] = pin
-        ws.prefs.persist()
+        ws.system.set("web_pin", pin)
         return pin
 
     def _mint_pin(self):

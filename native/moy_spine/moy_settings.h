@@ -16,6 +16,10 @@
 // under the sanitizers, and tests/test_moy_spine_twins.py holds it to CPython's
 // json.
 //
+// A store counts the changes made since it was last clean: set and delete add
+// one, a load or moy_settings_clean zeroes it. What persists a dirty store, and
+// when, is the caller's (the binding calls its save hook, then cleans).
+//
 // Every byte comes from the moy_htab_mem_t the store is made with.
 
 #ifndef MOY_SETTINGS_H
@@ -46,7 +50,7 @@ int moy_settings_validate(const char *text, size_t len);
 
 // Replace every row with the object `text` holds: OK and the row count in
 // `rows`, BADJSON or NOMEM. A repeated key keeps its first position and its
-// last value.
+// last value. The store is clean after it.
 int moy_settings_load(moy_settings_t *s, const char *text, size_t len,
                       uint32_t *rows);
 
@@ -54,10 +58,15 @@ int moy_settings_load(moy_settings_t *s, const char *text, size_t len,
 int moy_settings_get(const moy_settings_t *s, const char *key, size_t key_len,
                      const char **json, size_t *json_len);
 // OK, BADKEY, BADJSON (`json` is not one value) or NOMEM. A new key goes last.
+// The store is dirty after it.
 int moy_settings_set(moy_settings_t *s, const char *key, size_t key_len,
                      const char *json, size_t json_len);
-// 1 when the key had a row, else 0.
+// 1 when the key had a row, else 0; the store is dirty after a 1.
 int moy_settings_delete(moy_settings_t *s, const char *key, size_t key_len);
+
+// The changes since the store was last clean.
+uint32_t moy_settings_dirty(const moy_settings_t *s);
+void moy_settings_clean(moy_settings_t *s);
 
 uint32_t moy_settings_count(const moy_settings_t *s);
 // Row `i` in order: 1 and its key and text, or 0 past the end.

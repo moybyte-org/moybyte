@@ -3,11 +3,12 @@
 Three mechanisms this landing introduced, each of which fails SILENTLY when it
 breaks -- which is why they are pinned directly rather than left to the goldens:
 
-  1. THE DICT IS NEVER REBOUND. `ws.system` is a plain alias of the store's own
-     dict and `load()` mutates it in place. A landing that re-assigned either
-     name would leave every alias in the shell (settings_layer's raw writes, the
+  1. THE STORE IS NEVER REBOUND. `ws.system` is a plain alias of the store's own
+     rows and `load()` replaces them in place. A landing that re-assigned either
+     name would leave every alias in the shell (the settings writers, the
      launcher's favorites read, `app_context.Prefs`, the crash guard) writing
-     into an orphan nobody persists -- and nothing would raise.
+     into an orphan nobody persists -- and nothing would raise. Its one way in
+     is `set`, which persists; a write that fails stays dirty for the next.
   2. THE GUARD IS ONE OBJECT. `StoreHandle` reads the store, the root,
      `can_manage` and the SD session wrapper THROUGH `ws` per call, because none
      of them exists when the collaborator is built.
@@ -66,55 +67,56 @@ class _AngryStore:
 
 
 # ---------------------------------------------------------------------------
-# 1. the dict identity
+# 1. the store identity
 # ---------------------------------------------------------------------------
 
-def test_ws_system_is_the_stores_own_dict(tmp_path):
+def test_ws_system_is_the_stores_own_rows(tmp_path):
     ws = _ws(tmp_path)
-    assert ws.system is ws.prefs.settings
+    assert ws.system is ws.prefs.rows
 
 
-def test_a_load_mutates_that_dict_in_place(tmp_path):
+def test_a_load_replaces_the_rows_in_place(tmp_path):
     """The mechanism the whole landing rests on: `load_system()` must not rebind
     either name, or every alias in the shell goes stale at boot."""
     ws = _ws(tmp_path)
-    alias = ws.system                       # what settings_layer/Prefs/the guard hold
+    alias = ws.system                       # what the writers/Prefs/the guard hold
     moy_carts.save_system({"font_scale": 1, "marker": "from-the-card"},
                           ws.carts_root)
     ws.load_system()
     assert ws.system is alias
-    assert ws.prefs.settings is alias
-    assert alias["marker"] == "from-the-card"
+    assert ws.prefs.rows is alias
+    assert alias.get("marker") == "from-the-card"
 
 
 def test_a_load_replaces_what_was_there(tmp_path):
     """Not a merge: a key the card does not carry is GONE after the load, which
     is what "the file is the state" means."""
     ws = _ws(tmp_path)
-    ws.system["stale"] = 1
+    ws.system.set("stale", 1)
     moy_carts.save_system({"marker": 2}, ws.carts_root)
     ws.load_system()
-    assert "stale" not in ws.system
-    assert ws.system["marker"] == 2
+    assert ws.system.text("stale") is None
+    assert ws.system.get("marker") == 2
+    assert not ws.system.dirty()            # what was read is what is on the card
 
 
 def test_a_load_with_no_store_keeps_what_is_there(tmp_path):
     """An embedded boot has no card to read: the in-RAM settings survive rather
     than being wiped by a load that could not happen."""
     ws = _ws(tmp_path)
-    ws.system["chosen"] = "here"
+    ws.system.set("chosen", "here")
     ws.carts_store = None
     ws.prefs.load()
-    assert ws.system["chosen"] == "here"
+    assert ws.system.get("chosen") == "here"
 
 
 def test_a_store_that_raises_leaves_the_settings_empty_and_boots(tmp_path):
     ws = _ws(tmp_path)
-    ws.system["stale"] = 1
+    ws.system.set("stale", 1)
     ws.carts_store = _AngryStore()
     ws.prefs.load()                         # must not raise
-    assert ws.system == {}
-    assert ws.system is ws.prefs.settings
+    assert ws.system.keys() == []
+    assert ws.system is ws.prefs.rows
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +144,7 @@ def test_the_crash_guard_sees_a_reload(tmp_path):
 
 
 def test_the_crash_guard_persists_through_the_store(tmp_path):
-    """`arm` writes a strike to system.json through `prefs.persist` -- so a
+    """`arm` writes a strike to system.json through the rows' save hook -- so a
     board that DIED holding one still knows on the next boot."""
     ws = _ws(tmp_path)
     ws.app_guard.arm("some_app")
@@ -186,7 +188,7 @@ def test_every_store_touch_runs_inside_one_sd_session(tmp_path):
         return inner(fn)
 
     ws._with_sd = counting
-    ws.prefs.persist()
+    ws.system.set("k", 1)
     ws.prefs.load()
     ws.prefs.load_achievements()
     ws.prefs.save_achievements(["first_open"])
@@ -200,17 +202,23 @@ def test_a_read_only_console_attempts_no_write(tmp_path):
     attempts = []
     ws._with_sd = lambda fn: attempts.append(1)
     ws.can_manage = False
-    ws.prefs.persist()
+    ws.system.set("k", 1)
     ws.prefs.save_achievements(["first_open"])
     assert attempts == []
+    assert ws.system.get("k") == 1 and not ws.system.dirty()   # not a failure
 
 
 def test_a_failing_write_is_not_fatal(tmp_path):
     ws = _ws(tmp_path)
+    good = ws.carts_store
     ws.carts_store = _AngryStore()
-    ws.system["theme"] = "berry"
-    ws.prefs.persist()                      # must not raise
-    assert ws.system["theme"] == "berry"    # and the choice still holds in RAM
+    ws.system.set("theme", "berry")         # must not raise
+    assert ws.system.get("theme") == "berry"    # and the choice still holds in RAM
+    assert ws.system.dirty()                # ...as a write that has not landed
+    ws.carts_store = good
+    ws.system.set("name", "Zed")            # the next write carries it
+    assert not ws.system.dirty()
+    assert moy_carts.load_system(ws.carts_root)["theme"] == "berry"
 
 
 def test_achievements_round_trip_through_the_handle(tmp_path):

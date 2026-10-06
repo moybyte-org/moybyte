@@ -191,12 +191,12 @@ def test_recent_carts_ordering_after_runs(tmp_path):
 
     ws.launcher.sel = ws.launcher.items.index(star)
     ws.launch_selected()
-    assert ws.system["desk_mru"] == [star["path"]]
+    assert ws.system.get("desk_mru") == [star["path"]]
     ws.go_home()
 
     ws.launcher.sel = ws.launcher.items.index(battle)
     ws.launch_selected()
-    assert ws.system["desk_mru"] == [battle["path"], star["path"]]
+    assert ws.system.get("desk_mru") == [battle["path"], star["path"]]
     ws.go_home()
 
     recent = ws.carts.recent()
@@ -213,7 +213,7 @@ def test_rerunning_a_cart_moves_it_to_the_front_without_duplicating(tmp_path):
         ws.launch_selected()
         ws.go_home()
 
-    assert ws.system["desk_mru"] == [star["path"], battle["path"]]
+    assert ws.system.get("desk_mru") == [star["path"], battle["path"]]
 
 
 def test_recents_persist_across_reboot(tmp_path):
@@ -247,9 +247,9 @@ def test_recents_cap_at_mru_limit(tmp_path):
         ws.launch_selected()
         ws.go_home()
 
-    assert len(ws.system["desk_mru"]) == ws.carts._MRU_CAP
+    assert len(ws.system.get("desk_mru")) == ws.carts._MRU_CAP
     # Newest-first: the last cart run is at the front.
-    assert ws.system["desk_mru"][0] == pads[-1]["path"]
+    assert ws.system.get("desk_mru")[0] == pads[-1]["path"]
 
 
 def test_recent_carts_skips_a_deleted_cart(tmp_path):
@@ -260,5 +260,5 @@ def test_recent_carts_skips_a_deleted_cart(tmp_path):
     ws.go_home()
     assert ws.carts.recent()                    # sanity: recorded
 
-    ws.system["desk_mru"] = ["nonexistent/path"] + ws.system["desk_mru"]
+    ws.system.set("desk_mru", ["nonexistent/path"] + ws.system.get("desk_mru"))
     assert all(c["path"] != "nonexistent/path" for c in ws.carts.recent())

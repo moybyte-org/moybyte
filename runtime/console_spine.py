@@ -147,14 +147,8 @@ class SpineVerbs:
         for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
             getattr(self, setter)(self.system.get(key, default), persist=False)
         # A key a retired setting left behind (#217 took FRAMESKIP) would ride
-        # every persist forever; drop it once.
-        if self.system.pop("frameskip", None) is not None:
-            self.prefs.persist()
-
-    def _persist_system(self):
-        """`prefs.persist()` -- app_context's Prefs role and the dev channel's
-        `vol`, which keep speaking this name."""
-        return self.prefs.persist()
+        # every write forever; drop it once.
+        self.system.delete("frameskip")
 
     def run(self, project, caller):
         """Show `project`'s running cart on the desktop, recording `caller` so the exit

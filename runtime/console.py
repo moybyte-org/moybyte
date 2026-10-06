@@ -131,9 +131,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_manager import CartManager
 
-# system.json's owner (#209 landing B, system_store.py): the settings dict
-# `ws.system` aliases, the one persist funnel behind every Settings toggle, and
-# the achievements list's store halves -- over a StoreHandle that reads the
+# system.json's owner (#209 landing B, system_store.py): the settings rows
+# `ws.system` aliases (written through one persisting setter), and the
+# achievements list's store halves -- over a StoreHandle that reads the
 # store/root/can_manage/_with_sd guard through `ws` per call. What APPLIES the
 # settings (load_system's cascade) stays kernel policy, below.
 try:
@@ -908,19 +908,19 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # over the web transport, never touches a host OS clipboard (parity
         # trap).
         self.clipboard = Clipboard()
-        # system.json (#209 landing B): the store owns the dict and every
-        # persist funnel; `self.system` is a plain ALIAS of it and neither name
-        # is ever rebound -- prefs.load() clears and updates in place, which is
-        # what keeps settings_layer's raw writes, the launcher's per-paint
-        # favorites read and app_context's Prefs role honest with no migration.
+        # system.json (#209 landing B): the store owns the rows and the hook
+        # that writes them; `self.system` is a plain ALIAS of the rows and
+        # neither name is ever rebound -- prefs.load() replaces them in place,
+        # which keeps the launcher's per-paint favorites read, app_context's
+        # Prefs role and the guards honest. Reads are `system.get`, writes are
+        # `system.set`, and a write persists itself.
         self.prefs = SystemStore(self, self.store)
-        self.system = self.prefs.settings
-        # Crash isolation (#160 / Phase 8): the dict itself, because it stays
-        # the same object across a load. One ledger per role -- see
+        self.system = self.prefs.rows
+        # Crash isolation (#160 / Phase 8): the rows themselves, because they
+        # stay the same object across a load. One ledger per role -- see
         # runtime/crash_guard.py, "Two roles, two ledgers".
-        self.app_guard = CrashGuard(self.system, self.prefs.persist)
-        self.wallpaper_guard = CrashGuard(self.system, self.prefs.persist,
-                                          key=WALLPAPER_KEY)
+        self.app_guard = CrashGuard(self.system)
+        self.wallpaper_guard = CrashGuard(self.system, key=WALLPAPER_KEY)
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
         # home/settings frame -- the Picotron "wallpaper is a cart" model. The

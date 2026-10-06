@@ -40,13 +40,19 @@ NATIVE = moy_spine_binding.host_bindings()
 SPINE_DIR = os.path.join(ROOT, "native", "moy_spine")
 
 # Tests that need the host (a tmp store, the workstation), not a VM.
-HOST_ONLY = ("test_the_store_pushes_only_what_its_mirror_changed",)
+HOST_ONLY = ("test_system_json_on_the_card_is_byte_identical",
+             "test_a_write_through_the_setter_reaches_the_card_with_no_persist_call")
+# MicroPython's dict has no order, so the Python twin there reads a file's
+# rows in the VM's order; the native twin keeps the file's.
+VM_NATIVE_ONLY = ("test_the_file_is_the_bytes_json_dumps_writes",)
 
 
 def _vm_suite(exe, tmp_path, native):
     """tests/test_moy_spine.py on `exe`: (passed, failed, output)."""
     return vm_suite.run(exe, tmp_path, "moy_spine", "test_moy_spine.py", native,
-                        "moy_spine", skip=HOST_ONLY, extra=("moy_index",))
+                        "moy_spine",
+                        skip=HOST_ONLY + (() if native else VM_NATIVE_ONLY),
+                        extra=("moy_index",))
 
 
 @pytest.mark.parametrize("native", [True, False], ids=["native", "python"])
@@ -198,6 +204,8 @@ KEYS = ["a", "b", "theme", "fs", "app_guard", 'q"q', "b\\s", "n\nl", "é",
 VALUES = ["1", "-0", "0.5e+3", "true", "null", "NaN", '"s"', '"\\u00e9\\n"',
           "[]", "{}", '[1, 2, {"a": null}]', " 7 ", "01", "[1,]", "", "'x'",
           "[" * 31 + "]" * 31, "[" * 32 + "]" * 32, 7, None]
+PYVALUES = [1, -3, 2 ** 40, "x", "caf\u00e9\n\"", None, True, False, [1, 2],
+            {"a": [True, None]}, 1.5, [], {}, [[[]]], "", object(), (1, 2)]
 
 
 def _canon(settings):
@@ -230,7 +238,16 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
     back = pair(lambda m: m.BackStack())
     returns = (ref.Returns(apps[0]), nat.Returns(apps[1]))
     leases = pair(lambda m: m.Leases())
-    sets = pair(lambda m: m.Settings())
+    saved = ([], [])                # what each save hook was handed, in order
+    landing = [True]                # whether a write lands: the hooks' answer
+
+    def hook(log):
+        def save(text):
+            log.append(json.loads(text))
+            return landing[0]
+        return save
+
+    sets = (ref.Settings(hook(saved[0])), nat.Settings(hook(saved[1])))
     seen = [0, -1, 1 << 40, None, "7", 2.0, 1 << 30, (1 << 30) - 1]
 
     def both(objs, op, *args):
@@ -320,11 +337,23 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
             assert leases[0].mask() == leases[1].mask()
             assert leases[0].holders() == leases[1].holders()
         else:                                            # the settings rows
-            op = rnd.choice(("set", "set", "set", "get", "delete", "load",
-                             "adopt"))
+            op = rnd.choice(("set", "set", "set_text", "set_text", "get", "text",
+                             "delete", "load", "adopt", "flush", "land"))
             key = rnd.choice(KEYS)
+            persist = rnd.random() < 0.7
             if op == "set":
-                got = both(sets, "set", key, rnd.choice(VALUES))
+                got = both(sets, "set", key, rnd.choice(PYVALUES), persist)
+            elif op == "set_text":
+                got = both(sets, "set_text", key, rnd.choice(VALUES), persist)
+            elif op == "get":
+                got = both(sets, "get", key, rnd.choice([None, 0, "d"]))
+            elif op == "delete":
+                got = both(sets, "delete", key, persist)
+            elif op == "flush":
+                got = both(sets, "flush")
+            elif op == "land":                       # the writes start or stop landing
+                landing[0] = rnd.random() < 0.5
+                got = (("ok", None), ("ok", None))
             elif op == "load":
                 members = {rnd.choice(KEYS[:12]): rnd.choice(
                     [1, "x", None, [1, 2], {"a": [True]}, 1.5, "é"])
@@ -337,11 +366,14 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
                 got = both(sets, "adopt", members)
             else:
                 got = both(sets, op, key)
-            agree(got, step)
+            assert repr(got[0]) == repr(got[1]), (step, op, got)    # NaN is not NaN
             assert sets[0].keys() == sets[1].keys(), step
             assert _canon(sets[0]) == _canon(sets[1]), step
+            assert sets[0].dirty() == sets[1].dirty(), step
+            assert saved[0] == saved[1], step
             for kk in sets[0].keys():
-                assert sets[0].get(kk) == sets[1].get(kk), (step, kk)
+                assert sets[0].text(kk) == sets[1].text(kk), (step, kk)
+                assert repr(sets[0].get(kk)) == repr(sets[1].get(kk)), (step, kk)
     for objs in tables:
         assert objs[0].handles() == objs[1].handles()
     assert apps[0].handles() == apps[1].handles()
@@ -455,18 +487,18 @@ def test_the_scanner_agrees_with_cpythons_json(name):
             text = _corrupt(rnd, text)
         want = _expected(text)
         s = sp.Settings()
-        s.set("before", "1")
+        s.set("before", 1)
         got = _outcome(s.load, text)
         if want is None:
             assert got[0] in ("value", "type"), (case, text, got)
-            assert s.keys() == ["before"] and s.get("before") == "1", (case, text)
+            assert s.keys() == ["before"] and s.get("before") == 1, (case, text)
             refused += 1
             continue
         accepted += 1
         assert got == ("ok", len(want)), (case, text, got)
         assert s.keys() == list(want), (case, text)
         for k, v in want.items():
-            assert json.dumps(json.loads(s.get(k))) == json.dumps(v), (case, k)
+            assert json.dumps(json.loads(s.text(k))) == json.dumps(v), (case, k)
         # the file it writes is the same object, and loads to itself
         assert json.dumps(json.loads(s.dump())) == json.dumps(want)
         again = sp.Settings()

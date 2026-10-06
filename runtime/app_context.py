@@ -795,14 +795,10 @@ class Prefs:
         return self.__ws.system.get(self._prefix + key, default)
 
     def set(self, key, value, persist=True):
-        self.__ws.system[self._prefix + key] = value
-        if persist:
-            self.__ws._persist_system()
+        self.__ws.system.set(self._prefix + key, value, persist)
 
     def clear(self, key, persist=True):
-        self.__ws.system.pop(self._prefix + key, None)
-        if persist:
-            self.__ws._persist_system()
+        self.__ws.system.delete(self._prefix + key, persist)
 
 
 # -- notifications -----------------------------------------------------------

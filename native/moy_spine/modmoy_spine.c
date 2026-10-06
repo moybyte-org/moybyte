@@ -798,6 +798,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 typedef struct {
     mp_obj_base_t base;
     moy_settings_t *s;
+    mp_obj_t save;          // the hook that writes the file, or None
 } settings_obj_t;
 
 static moy_settings_t *settings_of(mp_obj_t self) {
@@ -805,9 +806,16 @@ static moy_settings_t *settings_of(mp_obj_t self) {
 }
 
 static mp_obj_t settings_make_new(const mp_obj_type_t *type, size_t n_args,
-                                  size_t n_kw, const mp_obj_t *args) {
-    mp_arg_check_num(n_args, n_kw, 0, 0, false);
+                                  size_t n_kw, const mp_obj_t *all_args) {
+    enum { ARG_save };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_save, MP_ARG_OBJ, { .u_obj = mp_const_none } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed),
+                              allowed, args);
     settings_obj_t *o = mp_obj_malloc_with_finaliser(settings_obj_t, type);
+    o->save = args[ARG_save].u_obj;
     o->s = moy_settings_new(&spine_mem);
     if (o->s == NULL) {
         no_memory();
@@ -831,6 +839,54 @@ static const char *settings_key(mp_obj_t key, size_t *len) {
         mp_raise_ValueError(MP_ERROR_TEXT("an empty settings key"));
     }
     return s;
+}
+
+static mp_obj_t json_call(qstr name, mp_obj_t arg) {
+    mp_obj_t json = mp_import_name(MP_QSTR_json, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+    return mp_call_function_1(mp_load_attr(json, name), arg);
+}
+
+static int is_digit_run(const char *p, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (p[i] < '0' || p[i] > '9') {
+            return 0;
+        }
+    }
+    return n > 0;
+}
+
+// A row's JSON text as the value json.loads makes of it. null, the booleans,
+// small integers and strings with no escapes are made here, so a read on the
+// frame path does not go through the json module; anything else does.
+static mp_obj_t settings_decode(const char *j, size_t n) {
+    if (n == 4 && memcmp(j, "null", 4) == 0) {
+        return mp_const_none;
+    }
+    if (n == 4 && memcmp(j, "true", 4) == 0) {
+        return mp_const_true;
+    }
+    if (n == 5 && memcmp(j, "false", 5) == 0) {
+        return mp_const_false;
+    }
+    size_t sign = n > 0 && j[0] == '-';
+    if (n - sign >= 1 && n - sign <= 9 && is_digit_run(j + sign, n - sign)
+        && (j[sign] != '0' || n - sign == 1)) {
+        mp_int_t v = 0;
+        for (size_t i = sign; i < n; i++) {
+            v = v * 10 + (j[i] - '0');
+        }
+        return mp_obj_new_int(sign ? -v : v);
+    }
+    if (n >= 2 && j[0] == '"' && j[n - 1] == '"') {
+        size_t k = 1;
+        while (k < n - 1 && j[k] != '\\' && (unsigned char)j[k] >= 0x20) {
+            k++;
+        }
+        if (k == n - 1) {
+            return mp_obj_new_str_copy(&mp_type_str, (const byte *)j + 1, n - 2);
+        }
+    }
+    return json_call(MP_QSTR_loads, mp_obj_new_str_copy(&mp_type_str, (const byte *)j, n));
 }
 
 static mp_obj_t settings_load(mp_obj_t self, mp_obj_t text) {
@@ -857,13 +913,21 @@ static mp_obj_t settings_adopt(mp_obj_t self, mp_obj_t d) {
         size_t n;
         settings_key(k, &n);
     }
-    mp_obj_t json = mp_import_name(MP_QSTR_json, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
-    mp_obj_t text = mp_call_function_1(mp_load_attr(json, MP_QSTR_dumps), d);
-    return settings_load(self, text);
+    return settings_load(self, json_call(MP_QSTR_dumps, d));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(settings_adopt_obj, settings_adopt);
 
-static mp_obj_t settings_get(mp_obj_t self, mp_obj_t key) {
+static mp_obj_t settings_get(size_t n_args, const mp_obj_t *args) {
+    size_t kn, jn;
+    const char *k = settings_key(args[1], &kn), *j;
+    if (!moy_settings_get(settings_of(args[0]), k, kn, &j, &jn)) {
+        return n_args > 2 ? args[2] : mp_const_none;
+    }
+    return settings_decode(j, jn);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(settings_get_obj, 2, 3, settings_get);
+
+static mp_obj_t settings_text(mp_obj_t self, mp_obj_t key) {
     size_t kn, jn;
     const char *k = settings_key(key, &kn), *j;
     if (!moy_settings_get(settings_of(self), k, kn, &j, &jn)) {
@@ -871,9 +935,41 @@ static mp_obj_t settings_get(mp_obj_t self, mp_obj_t key) {
     }
     return mp_obj_new_str_copy(&mp_type_str, (const byte *)j, jn);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(settings_get_obj, settings_get);
+static MP_DEFINE_CONST_FUN_OBJ_2(settings_text_obj, settings_text);
 
-static mp_obj_t settings_set(mp_obj_t self, mp_obj_t key, mp_obj_t text) {
+static mp_obj_t settings_dump(mp_obj_t self) {
+    moy_settings_t *s = settings_of(self);
+    vstr_t vstr;
+    vstr_init_len(&vstr, moy_settings_dump(s, NULL, 0));
+    moy_settings_dump(s, vstr.buf, vstr.len);
+    return mp_obj_new_str_from_vstr(&vstr);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(settings_dump_obj, settings_dump);
+
+// The write hook, when the store is dirty: True when it is clean afterwards.
+static mp_obj_t settings_flush(mp_obj_t self_in) {
+    settings_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (moy_settings_dirty(self->s) == 0u) {
+        return mp_const_true;
+    }
+    if (self->save == mp_const_none
+        || mp_call_function_1(self->save, settings_dump(self_in)) == mp_const_false) {
+        return mp_const_false;
+    }
+    moy_settings_clean(self->s);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(settings_flush_obj, settings_flush);
+
+static mp_obj_t settings_dirty(mp_obj_t self) {
+    return bool_obj(moy_settings_dirty(settings_of(self)) != 0u);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(settings_dirty_obj, settings_dirty);
+
+// `text` as `key`'s row, kept as written: the text is checked before the key,
+// as the Python twin does.
+static void settings_store(mp_obj_t self, mp_obj_t key, mp_obj_t text,
+                           mp_obj_t persist) {
     size_t jn, kn;
     const char *j = str_arg(text, &jn, MP_ERROR_TEXT("a settings value is JSON text"));
     if (moy_settings_validate(j, jn) != MOY_SETTINGS_OK) {
@@ -884,16 +980,64 @@ static mp_obj_t settings_set(mp_obj_t self, mp_obj_t key, mp_obj_t text) {
     if (rc != MOY_SETTINGS_OK) {
         raise_settings(rc);
     }
+    if (mp_obj_is_true(persist)) {
+        settings_flush(self);
+    }
+}
+
+static mp_obj_t settings_set_kw(size_t n_args, const mp_obj_t *pos_args,
+                                mp_map_t *kw_args, bool as_text) {
+    enum { ARG_key, ARG_value, ARG_persist };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_value, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_persist, MP_ARG_OBJ, { .u_obj = mp_const_true } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed),
+                     allowed, args);
+    mp_obj_t text = args[ARG_value].u_obj;
+    if (!as_text) {
+        text = json_call(MP_QSTR_dumps, text);
+    }
+    settings_store(pos_args[0], args[ARG_key].u_obj, text, args[ARG_persist].u_obj);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(settings_set_obj, settings_set);
 
-static mp_obj_t settings_delete(mp_obj_t self, mp_obj_t key) {
-    size_t kn;
-    const char *k = settings_key(key, &kn);
-    return bool_obj(moy_settings_delete(settings_of(self), k, kn));
+// set(key, value, persist=True): the value as json.dumps writes it.
+static mp_obj_t settings_set(size_t n_args, const mp_obj_t *pos_args,
+                             mp_map_t *kw_args) {
+    return settings_set_kw(n_args, pos_args, kw_args, false);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(settings_delete_obj, settings_delete);
+static MP_DEFINE_CONST_FUN_OBJ_KW(settings_set_obj, 3, settings_set);
+
+static mp_obj_t settings_set_text(size_t n_args, const mp_obj_t *pos_args,
+                                  mp_map_t *kw_args) {
+    return settings_set_kw(n_args, pos_args, kw_args, true);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(settings_set_text_obj, 3, settings_set_text);
+
+static mp_obj_t settings_delete(size_t n_args, const mp_obj_t *pos_args,
+                                mp_map_t *kw_args) {
+    enum { ARG_key, ARG_persist };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_persist, MP_ARG_OBJ, { .u_obj = mp_const_true } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed),
+                     allowed, args);
+    size_t kn;
+    const char *k = settings_key(args[ARG_key].u_obj, &kn);
+    if (!moy_settings_delete(settings_of(pos_args[0]), k, kn)) {
+        return mp_const_false;
+    }
+    if (mp_obj_is_true(args[ARG_persist].u_obj)) {
+        settings_flush(pos_args[0]);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(settings_delete_obj, 2, settings_delete);
 
 static mp_obj_t settings_keys(mp_obj_t self) {
     moy_settings_t *s = settings_of(self);
@@ -909,15 +1053,6 @@ static mp_obj_t settings_keys(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(settings_keys_obj, settings_keys);
 
-static mp_obj_t settings_dump(mp_obj_t self) {
-    moy_settings_t *s = settings_of(self);
-    vstr_t vstr;
-    vstr_init_len(&vstr, moy_settings_dump(s, NULL, 0));
-    moy_settings_dump(s, vstr.buf, vstr.len);
-    return mp_obj_new_str_from_vstr(&vstr);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(settings_dump_obj, settings_dump);
-
 static mp_obj_t settings_del(mp_obj_t self_in) {
     settings_obj_t *self = MP_OBJ_TO_PTR(self_in);
     moy_settings_free(self->s);
@@ -930,8 +1065,12 @@ static const mp_rom_map_elem_t settings_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_load), MP_ROM_PTR(&settings_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_adopt), MP_ROM_PTR(&settings_adopt_obj) },
     { MP_ROM_QSTR(MP_QSTR_get), MP_ROM_PTR(&settings_get_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text), MP_ROM_PTR(&settings_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_set), MP_ROM_PTR(&settings_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_text), MP_ROM_PTR(&settings_set_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_delete), MP_ROM_PTR(&settings_delete_obj) },
+    { MP_ROM_QSTR(MP_QSTR_dirty), MP_ROM_PTR(&settings_dirty_obj) },
+    { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&settings_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_keys), MP_ROM_PTR(&settings_keys_obj) },
     { MP_ROM_QSTR(MP_QSTR_dump), MP_ROM_PTR(&settings_dump_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&settings_del_obj) },

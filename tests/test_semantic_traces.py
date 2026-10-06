@@ -79,9 +79,10 @@ EXTENDED 2026-10-06 (#224, before the spine crosses in sprint 2): a third
 trace, the SPINE's (runtime/moy_spine.py, and the strike ledger in
 runtime/crash_guard.py). One session of handle tables (a foreign, released,
 forged and non-int handle each refused), the app registry, the back-stack and
-the return routes, the WiFi leases, the settings rows and the ledger's arm /
-heal / strike / forgive / proof bracket, pinned verbatim on every VM like the
-store's: the handle values are kind.slot.generation. Mutation-tested: the
+the return routes, the WiFi leases, the settings rows (the setter that
+persists, the dirty store and its retried write, the read decoded afresh) and
+the ledger's arm / heal / strike / forgive / proof bracket over those rows,
+pinned verbatim on every VM like the store's: the handle values are kind.slot.generation. Mutation-tested: the
 generation bump, lowest-free reuse, the kind check, goto's RETURN truncation,
 the route's editor-before-app order and the ledger's proof skip each turn it
 red. The same log is pinned over the native spine (sprint 2's twin,
@@ -958,26 +959,39 @@ say("held", ls.held("web"), ls.held("cart"), ls.mask())
 say("release", ls.release("link"), ls.release("update"), ls.release("web"), ls.holders())
 say("tags", tried(ls.hold, "wasm"), tried(ls.release, None), tried(ls.held, "nobody"))
 
-s = sp.Settings()
+written = []
+s = sp.Settings(lambda text: written.append(text))
 say("load", s.load('{"theme": "outline", "fs": 2, "favorites": ["/a.moy"]}'),
-    sorted(s.keys()))
-s.set("fs", "3")
-s.set("guard", '{"open": "files"}')
-say("rows", s.get("fs"), s.get("favorites"), s.get("guard"), s.get("nope"))
-say("delete", s.delete("theme"), s.delete("theme"), sorted(s.keys()))
+    sorted(s.keys()), s.dirty())
+s.set("fs", 3)
+s.set_text("guard", '{"open": "files"}')
+say("rows", s.get("fs"), s.get("favorites"), s.text("guard"), s.get("nope"),
+    s.get("nope", 7), s.dirty(), len(written))
+say("written", written[0], written[1])
+say("delete", s.delete("theme"), s.delete("theme"), sorted(s.keys()), len(written))
+say("afresh", s.get("favorites") == s.get("favorites"),
+    s.get("favorites") is s.get("favorites"))
 r = sp.Settings()
-r.set("b", "1")
-r.set("a", '[1, "x"]')
-r.set("b", "2")
+r.set_text("b", "1")
+r.set("a", [1, "x"])
+r.set("b", 2)
 r.delete("a")
-r.set("a", "null")
-say("dump", r.dump())
-say("refused", tried(s.set, "fs", "nope"), tried(s.set, "fs", 3), tried(s.load, "[1]"),
-    tried(s.get, ""), tried(s.set, None, "1"))
+r.set("a", None)
+say("dump", r.dump(), r.dirty(), r.flush())
+lands = []
+w = sp.Settings(lambda text: lands.append(text) or len(lands) > 1)
+w.set("a", 1)
+say("failed", w.dirty(), len(lands), w.flush(), w.dirty(), len(lands), w.flush())
+w.set("b", 2, False)
+w.set_text("c", " 3 ", persist=False)
+say("deferred", w.dirty(), len(lands), w.flush(), lands[-1])
+say("refused", tried(s.set_text, "fs", "nope"), tried(s.set_text, "fs", 3),
+    tried(s.load, "[1]"), tried(s.get, ""), tried(s.set, None, 1),
+    tried(s.set, "", 1), tried(s.text, 4))
 
-store = {}
 saves = []
-g = CrashGuard(store, lambda: saves.append(1))
+store = sp.Settings(lambda text: saves.append(1))
+g = CrashGuard(store)
 say("arm", g.arm("files"), g.strikes("files"), g.last_open(), len(saves))
 g.frame()
 g.frame()
@@ -987,10 +1001,10 @@ for _ in range(3):
     g.release()
 say("struck", g.strikes("calc"), g.disabled("calc"), g.arm("calc"), g.broken_ids())
 say("forgive", g.forgive("calc"), g.strikes("calc"), g.forgive("calc"), len(saves))
-w = CrashGuard(store, lambda: saves.append(1), key=WALLPAPER_KEY)
+w = CrashGuard(store, key=WALLPAPER_KEY)
 say("proof", w.arm("sky", "p1"), w.heal(), len(saves), w.arm("sky", "p1"), len(saves),
     w.arm("sky", "p2"), w.strikes("sky"), len(saves))
-say("keys", sorted(store), sorted(store[WALLPAPER_KEY]))
+say("keys", sorted(store.keys()), sorted(store.get(WALLPAPER_KEY)))
 print("DRIVER_DONE")
 '''
 
@@ -1046,11 +1060,15 @@ hold 2 3 3 web,update
 held True False 3
 release 3 1 0 []
 tags VALUE TYPE VALUE
-load 3 ['favorites', 'fs', 'theme']
-rows 3 ["/a.moy"] {"open": "files"} None
-delete True False ['favorites', 'fs', 'guard']
-dump {"b": 2, "a": null}
-refused VALUE TYPE VALUE VALUE TYPE
+load 3 ['favorites', 'fs', 'theme'] False
+rows 3 ['/a.moy'] {"open": "files"} None 7 False 2
+written {"theme": "outline", "fs": 3, "favorites": ["/a.moy"]} {"theme": "outline", "fs": 3, "favorites": ["/a.moy"], "guard": {"open": "files"}}
+delete True False ['favorites', 'fs', 'guard'] 3
+afresh True False
+dump {"b": 2, "a": null} True False
+failed True 1 True False 2 True
+deferred True 2 True {"a": 1, "b": 2, "c":  3 }
+refused VALUE TYPE VALUE VALUE TYPE VALUE TYPE
 arm True 1 files 1
 healing True 0 None 2
 struck 3 True False ['calc']

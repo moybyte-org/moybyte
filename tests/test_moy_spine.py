@@ -21,9 +21,10 @@ pins the rules:
   * a run's exit route follows its caller's kind; the app-return only sets;
   * a lease tag outside LEASE_TAGS is refused, a release of one never held
     is not;
-  * settings rows hold JSON text, dump is the object json.loads reads back, a
-    load that is refused changes nothing, and the store's mirror pushes only
-    the keys it changed.
+  * settings rows hold JSON text and `set` is the one way in: it marks the
+    store dirty and persists it through the save hook, a failed write leaves it
+    dirty for the next, `get` decodes a row afresh, a load that is refused
+    changes nothing, and the file is the bytes json.dumps writes.
 """
 
 import json
@@ -262,20 +263,152 @@ def test_settings_rows_hold_json_text_and_dump_the_file(sp):
     s = sp.Settings()
     assert s.load('{"theme": "outline", "favorites": ["/a.moy"], "fs": 2}') == 3
     assert sorted(s.keys()) == ["favorites", "fs", "theme"]
-    assert s.get("theme") == '"outline"' and s.get("nope") is None
-    s.set("fs", "3")
-    s.set("guard", '{"open": null}')
+    assert s.text("theme") == '"outline"' and s.text("nope") is None
+    assert s.get("theme") == "outline" and s.get("favorites") == ["/a.moy"]
+    assert s.get("fs") == 2 and s.get("nope") is None and s.get("nope", 7) == 7
+    s.set("fs", 3)
+    s.set_text("guard", '{"open": null}')
     assert s.delete("theme") is True and s.delete("theme") is False
     assert json.loads(s.dump()) == {"favorites": ["/a.moy"], "fs": 3,
                                     "guard": {"open": None}}
     with pytest.raises(ValueError):
-        s.set("fs", "not json")
+        s.set_text("fs", "not json")
     with pytest.raises(TypeError):
-        s.set("fs", 3)
+        s.set_text("fs", 3)
     with pytest.raises(ValueError):
         s.load("[1, 2]")
     with pytest.raises(ValueError):
         s.get("")
+    with pytest.raises(ValueError):
+        s.set("", 1)
+    with pytest.raises(TypeError):
+        s.set(None, 1)
+    with pytest.raises(TypeError):
+        s.text(3)
+
+
+def test_a_value_decodes_to_what_json_loads_makes_of_it(sp):
+    s = sp.Settings()
+    values = [None, True, False, 0, -7, 123456789, 2 ** 40, 1.5, "", "plain",
+              "q\"uote\n", "caf\u00e9", [], {}, [1, [2, {"a": None}]],
+              {"k": [True, "x"], "n": {"m": -1}}]
+    for i, v in enumerate(values):
+        s.set("k%d" % i, v, False)
+    for i, v in enumerate(values):
+        got = s.get("k%d" % i)
+        assert got == v and type(got) is type(v), (i, v, got)
+    s.set_text("padded", " 7 ", False)
+    s.set_text("neg", "-0", False)
+    assert s.get("padded") == 7 and s.get("neg") == 0 and s.text("padded") == " 7 "
+
+
+def test_a_row_is_decoded_afresh_so_a_caller_cannot_change_it(sp):
+    s = sp.Settings()
+    s.set("l", [1, [2], {"a": 3}])
+    got = s.get("l")
+    got.append(9)
+    got[1].append(8)
+    got[2]["b"] = 7
+    assert s.get("l") == [1, [2], {"a": 3}] and s.text("l") == '[1, [2], {"a": 3}]'
+
+
+def test_a_write_marks_the_store_dirty_and_persists_it(sp):
+    wrote = []
+    s = sp.Settings(lambda text: wrote.append(text))
+    assert not s.dirty() and s.flush() is True and wrote == []
+    s.set("fs", 3)
+    assert wrote == ['{"fs": 3}'] and not s.dirty()
+    s.set("theme", "outline")
+    s.set("fs", 2)
+    assert wrote[1:] == ['{"fs": 3, "theme": "outline"}',
+                         '{"fs": 2, "theme": "outline"}']
+    assert s.delete("theme") is True
+    assert wrote[-1] == '{"fs": 2}' and len(wrote) == 4
+    assert s.delete("theme") is False and len(wrote) == 4      # nothing to write
+    s.set_text("raw", " [1] ")
+    assert wrote[-1] == '{"fs": 2, "raw":  [1] }'
+    assert not s.dirty() and s.flush() is True and len(wrote) == 5
+
+
+def test_a_failed_write_leaves_the_store_dirty_until_one_lands(sp):
+    landed = [False]
+    wrote = []
+
+    def save(text):
+        wrote.append(text)
+        return landed[0]
+
+    s = sp.Settings(save)
+    s.set("a", 1)
+    assert s.dirty() and wrote == ['{"a": 1}']
+    s.set("b", 2)                       # the next write carries the first
+    assert s.dirty() and wrote[-1] == '{"a": 1, "b": 2}'
+    assert s.flush() is False and len(wrote) == 3
+    landed[0] = True
+    assert s.flush() is True and not s.dirty() and len(wrote) == 4
+    assert s.flush() is True and len(wrote) == 4
+    none = sp.Settings()                # no hook: nowhere to write, still dirty
+    none.set("a", 1)
+    assert none.dirty() and none.flush() is False and none.get("a") == 1
+
+
+def test_persist_false_defers_the_write_to_the_next_one(sp):
+    wrote = []
+    s = sp.Settings(lambda text: wrote.append(text))
+    s.set("a", 1, persist=False)
+    s.set_text("b", "2", False)
+    assert wrote == [] and s.dirty()
+    s.set("c", 3)
+    assert wrote == ['{"a": 1, "b": 2, "c": 3}'] and not s.dirty()
+    assert s.delete("a", persist=False) is True
+    assert s.dirty() and len(wrote) == 1
+    assert s.flush() is True and wrote[-1] == '{"b": 2, "c": 3}'
+
+
+def test_a_load_or_an_adopt_is_the_file_so_the_store_is_clean(sp):
+    s = sp.Settings(lambda text: True)
+    s.set("a", 1, False)
+    assert s.dirty()
+    s.load('{"b": 2}')
+    assert not s.dirty() and s.keys() == ["b"]
+    s.set("c", 3, False)
+    s.adopt({"d": 4})
+    assert not s.dirty() and s.keys() == ["d"]
+    s.set("e", 5, False)
+    with pytest.raises(ValueError):
+        s.load("[1]")
+    assert s.dirty() and s.keys() == ["d", "e"]       # a refused load changes nothing
+
+
+# What `json.dumps` writes for these rows, spelled out: the format of system.json
+# is these bytes, in every binding, on every VM.
+GOLDEN = ('{"theme": "outline", "theme_variant": "dark", "font_scale": 2, '
+          '"favorites": ["/carts/a.moy", "/carts/b.moy"], "desk_mru": [], '
+          '"crisp_pixels": true, "ota_channel": "stable", '
+          '"app_guard": {"strikes": {"files": 1}, "open": "files"}, '
+          '"name": "Moy", "volume": 3, "skin": null, "ratio": 0.5}')
+
+
+def test_the_file_is_the_bytes_json_dumps_writes(sp):
+    wrote = []
+    s = sp.Settings(lambda text: wrote.append(text))
+    s.load(GOLDEN)
+    assert s.dump() == GOLDEN                       # read and written back unchanged
+    s.set("theme", "outline")                       # the same value: the same file
+    assert wrote[-1] == GOLDEN
+    s.set("font_scale", 3)                          # in place, in its position
+    s.set("brand_new", {"a": [1, None]})            # a new key goes last
+    s.delete("desk_mru")
+    s.set("favorites", ["/carts/b.moy"])
+    assert wrote[-1] == (
+        '{"theme": "outline", "theme_variant": "dark", "font_scale": 3, '
+        '"favorites": ["/carts/b.moy"], '
+        '"crisp_pixels": true, "ota_channel": "stable", '
+        '"app_guard": {"strikes": {"files": 1}, "open": "files"}, '
+        '"name": "Moy", "volume": 3, "skin": null, "ratio": 0.5, '
+        '"brand_new": {"a": [1, null]}}')
+    t = sp.Settings()                               # and it reads back as written
+    assert t.load(wrote[-1]) == 12 and t.dump() == wrote[-1]
 
 
 def test_a_refused_load_changes_nothing(sp):
@@ -293,18 +426,20 @@ def test_settings_keys_hold_escapes_and_unicode(sp):
     s = sp.Settings()
     assert s.load('{"caf\\u00e9": 1, "a\\"b": 2, "n\\nl": 3, "\u00fc": 4}') == 4
     assert sorted(s.keys()) == sorted(["caf\u00e9", 'a"b', "n\nl", "\u00fc"])
-    assert s.get("caf\u00e9") == "1" and s.get('a"b') == "2"
+    assert s.text("caf\u00e9") == "1" and s.get('a"b') == 2
     assert json.loads(s.dump()) == {"caf\u00e9": 1, 'a"b': 2, "n\nl": 3,
                                     "\u00fc": 4}
-    s.set("tab\there", "[]")
+    s.set("tab\there", [])
     assert json.loads(s.dump())["tab\there"] == []
 
 
 def test_a_value_nests_at_most_31_containers(sp):
     s = sp.Settings()
-    s.set("k", "[" * 31 + "]" * 31)
+    s.set_text("k", "[" * 31 + "]" * 31)
     with pytest.raises(ValueError):
-        s.set("k2", "[" * 32 + "]" * 32)
+        s.set_text("k2", "[" * 32 + "]" * 32)
+    with pytest.raises(ValueError):
+        s.set("k3", json.loads("[" * 32 + "]" * 32))
     assert s.keys() == ["k"]
     assert s.load('{"a": ' + "[" * 31 + "]" * 31 + "}") == 1
     with pytest.raises(ValueError):
@@ -314,11 +449,11 @@ def test_a_value_nests_at_most_31_containers(sp):
 
 def test_adopt_encodes_a_dict_into_rows(sp):
     s = sp.Settings()
-    s.set("old", "1")
+    s.set("old", 1)
     d = {"b": [1, {"x": None}], "a": "caf\u00e9", "n": 2, "f": True}
     s.adopt(d)
     assert sorted(s.keys()) == ["a", "b", "f", "n"]   # a dict has no order on the VM
-    assert s.get("b") == '[1, {"x": null}]' and s.get("n") == "2"
+    assert s.text("b") == '[1, {"x": null}]' and s.get("n") == 2
     assert json.loads(s.dump()) == d
     with pytest.raises(ValueError):
         s.adopt({"ok": 1, "": 2})
@@ -327,21 +462,45 @@ def test_adopt_encodes_a_dict_into_rows(sp):
     assert json.loads(s.dump()) == d                  # a refused adopt changes nothing
 
 
-def test_the_store_pushes_only_what_its_mirror_changed(tmp_path):
-    """The binding's rule: a row another writer owns (the strike ledger, once
-    it is native) is never written back from the mirror's stale copy."""
+def test_system_json_on_the_card_is_byte_identical(tmp_path):
+    """The format's pin through the shell's store (no migration, CLAUDE.md): a
+    card written the way json.dumps wrote it reads, and writes back, as the same
+    bytes, and every change through the one setter leaves the file json.dumps
+    of the same dict would."""
     from ws_helpers import build_ws
     from runtime import moy_carts
 
     ws = build_ws(tmp_path)
-    moy_carts.save_system({"theme": "outline", "ledger": {"strikes": 1}},
-                          ws.carts_root)
+    path = moy_carts.system_store_path(ws.carts_root)
+    old = json.loads(GOLDEN)
+    moy_carts.save_system(old, ws.carts_root)       # json.dumps(dict): the old writer
+    with open(path) as f:
+        assert f.read() == GOLDEN
     ws.prefs.load()
-    ws.prefs.rows.set("ledger", '{"strikes": 2}')   # the other writer
-    ws.system["theme"] = "classic"
-    ws.prefs.persist()
-    on_card = moy_carts.load_system(ws.carts_root)
-    assert on_card == {"theme": "classic", "ledger": {"strikes": 2}}
-    ws.system.pop("theme")
-    ws.prefs.persist()
-    assert moy_carts.load_system(ws.carts_root) == {"ledger": {"strikes": 2}}
+    ws.system.set("theme", "outline")               # a write that changes nothing
+    with open(path) as f:
+        assert f.read() == GOLDEN
+    for key, value in (("font_scale", 3), ("brand_new", {"a": [1, None]}),
+                       ("favorites", ["/carts/b.moy"]), ("theme_variant", "light")):
+        ws.system.set(key, value)
+        old[key] = value
+        with open(path) as f:
+            assert f.read() == json.dumps(old), key
+    ws.system.delete("desk_mru")
+    del old["desk_mru"]
+    with open(path) as f:
+        assert f.read() == json.dumps(old)
+    assert moy_carts.load_system(ws.carts_root) == old
+
+
+def test_a_write_through_the_setter_reaches_the_card_with_no_persist_call(tmp_path):
+    from ws_helpers import build_ws
+    from runtime import moy_carts
+
+    ws = build_ws(tmp_path)
+    ws.system.set("crisp_pixels", True)
+    assert moy_carts.load_system(ws.carts_root)["crisp_pixels"] is True
+    ws.system.set("steady", False, persist=False)
+    assert "steady" not in moy_carts.load_system(ws.carts_root)     # deferred...
+    ws.system.set("name", "Zed")
+    assert moy_carts.load_system(ws.carts_root)["steady"] is False   # ...not lost

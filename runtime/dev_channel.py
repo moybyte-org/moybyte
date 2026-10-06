@@ -1923,11 +1923,7 @@ class DevChannel:
             # worked right up until the next game started playing at full
             # volume. Storing it means the level is waiting for the backend
             # that has not been built yet (project._build_audio applies it).
-            ws.system["volume"] = lvl
-            try:
-                ws._persist_system()
-            except Exception as exc:  # noqa: BLE001
-                print("REMOTE vol: not persisted:", exc)
+            ws.system.set("volume", lvl)
             au = getattr(ws, "audio", None)
             if au is not None:
                 au.volume(lvl)

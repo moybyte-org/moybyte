@@ -115,7 +115,7 @@ belongs here is only what a coder must not undo:
   snapshot has slots for player two and nothing filled them, so libmoy's
   `players()` answered 1 forever and the line-faithful Lua twin of a 2P cart
   fielded one tank where the Python original fielded two. Both tiers feed it now.
-- **The master audio level persists across a cart start** (`ws.system["volume"]`,
+- **The master audio level persists across a cart start** (`ws.system.get("volume")`,
   applied in `project._build_audio`). The backend is rebuilt per run, so `vol 0`
   at the launcher used to print "no audio backend" and change nothing -- a mute
   that looked like it worked until the next game played at full volume.

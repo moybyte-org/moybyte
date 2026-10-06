@@ -97,6 +97,8 @@ _SIGS = (
     ("moy_settings_get", [_P, _PCHAR, _SIZE, _PP, c.POINTER(_SIZE)], c.c_int),
     ("moy_settings_set", [_P, _PCHAR, _SIZE, _PCHAR, _SIZE], c.c_int),
     ("moy_settings_delete", [_P, _PCHAR, _SIZE], c.c_int),
+    ("moy_settings_dirty", [_P], _U32),
+    ("moy_settings_clean", [_P], None),
     ("moy_settings_count", [_P], _U32),
     ("moy_settings_at", [_P, _U32, _PP, c.POINTER(_SIZE), _PP,
                          c.POINTER(_SIZE)], c.c_int),
@@ -426,10 +428,11 @@ def binding(sanitize=False):
         raise ValueError("not JSON the settings store holds")
 
     class Settings:
-        def __init__(self):
+        def __init__(self, save=None):
             self._p = lib.moy_settings_new(mem)
             if not self._p:
                 nomem("settings")
+            self._save = save
 
         __del__ = free_with("moy_settings_free")
 
@@ -446,7 +449,7 @@ def binding(sanitize=False):
                 settings_key(k)
             self.load(json.dumps(d))
 
-        def get(self, key):
+        def _text(self, key):
             kb = settings_key(key)
             j, n = c.c_void_p(), c.c_size_t()
             if not lib.moy_settings_get(self._p, kb, len(kb), c.byref(j),
@@ -454,7 +457,17 @@ def binding(sanitize=False):
                 return None
             return c.string_at(j.value, n.value).decode()
 
-        def set(self, key, text):
+        def get(self, key, default=None):
+            t = self._text(key)
+            return default if t is None else json.loads(t)
+
+        def text(self, key):
+            return self._text(key)
+
+        def set(self, key, value, persist=True):
+            self.set_text(key, json.dumps(value), persist)
+
+        def set_text(self, key, text, persist=True):
             jb = raw(text, "a settings value is JSON text")
             if lib.moy_settings_validate(jb, len(jb)) != OK:
                 settings_error(1)
@@ -462,10 +475,27 @@ def binding(sanitize=False):
             rc = lib.moy_settings_set(self._p, kb, len(kb), jb, len(jb))
             if rc != OK:
                 settings_error(rc)
+            if persist:
+                self.flush()
 
-        def delete(self, key):
+        def delete(self, key, persist=True):
             kb = settings_key(key)
-            return bool(lib.moy_settings_delete(self._p, kb, len(kb)))
+            if not lib.moy_settings_delete(self._p, kb, len(kb)):
+                return False
+            if persist:
+                self.flush()
+            return True
+
+        def dirty(self):
+            return lib.moy_settings_dirty(self._p) > 0
+
+        def flush(self):
+            if not lib.moy_settings_dirty(self._p):
+                return True
+            if self._save is None or self._save(self.dump()) is False:
+                return False
+            lib.moy_settings_clean(self._p)
+            return True
 
         def keys(self):
             out = []

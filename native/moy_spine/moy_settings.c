@@ -19,6 +19,7 @@ struct moy_settings {
     row_t *rows;
     uint32_t count;
     uint32_t cap;
+    uint32_t dirty;         // changes since the store was last clean
 };
 
 #define MAX_LEN 0x7fffffffu
@@ -460,7 +461,7 @@ static int load_row(void *ctx, const char *key, const char *key_end,
 
 int moy_settings_load(moy_settings_t *s, const char *text, size_t len,
                       uint32_t *rows) {
-    moy_settings_t tmp = { s->mem, NULL, 0u, 0u };
+    moy_settings_t tmp = { s->mem, NULL, 0u, 0u, 0u };
     load_t l = { 0, &tmp, 0u };
     int rc = walk_object(text, len, load_row, &l);
     if (rc != MOY_SETTINGS_OK) {
@@ -471,6 +472,7 @@ int moy_settings_load(moy_settings_t *s, const char *text, size_t len,
     s->rows = tmp.rows;
     s->count = tmp.count;
     s->cap = tmp.cap;
+    s->dirty = 0u;
     *rows = s->count;
     return MOY_SETTINGS_OK;
 }
@@ -500,7 +502,11 @@ int moy_settings_set(moy_settings_t *s, const char *key, size_t key_len,
     }
     memcpy(buf, key, key_len);
     memcpy(buf + key_len, json, json_len);
-    return put_row(s, buf, (uint32_t)key_len, (uint32_t)json_len);
+    int rc = put_row(s, buf, (uint32_t)key_len, (uint32_t)json_len);
+    if (rc == MOY_SETTINGS_OK) {
+        s->dirty++;
+    }
+    return rc;
 }
 
 int moy_settings_delete(moy_settings_t *s, const char *key, size_t key_len) {
@@ -514,7 +520,16 @@ int moy_settings_delete(moy_settings_t *s, const char *key, size_t key_len) {
             (size_t)(s->count - (uint32_t)at - 1u) * sizeof(row_t));
     s->count--;
     memset(&s->rows[s->count], 0, sizeof(row_t));
+    s->dirty++;
     return 1;
+}
+
+uint32_t moy_settings_dirty(const moy_settings_t *s) {
+    return s->dirty;
+}
+
+void moy_settings_clean(moy_settings_t *s) {
+    s->dirty = 0u;
 }
 
 uint32_t moy_settings_count(const moy_settings_t *s) {

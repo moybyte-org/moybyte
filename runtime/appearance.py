@@ -32,7 +32,7 @@ only thing in the tree that ever writes it -- which is the same shape rev 3
 gave the achievement overlays: the collaborator generates the value, the kernel
 holds the flat field the frame path reads.
 
-`ws.system`'s in-place trick is not available here and must not be attempted:
+`ws.system`'s never-rebound trick is not available here and must not be attempted:
 `launcher_layer._statics_key` and `_pseudo_key` fold `id(ws.theme_colors)` into
 their cache keys, so a theme swap invalidates the shelf statics BECAUSE the
 dict is rebound. Mutating it in place would leave the launcher painting the old
@@ -223,8 +223,7 @@ class Appearance:
             ws.ach.note("wallpaper_change")   # (#21)
 
     def _persist_wallpaper(self):
-        self.ws.system["wallpaper"] = self.wallpaper_id
-        self.ws.prefs.persist()
+        self.ws.system.set("wallpaper", self.wallpaper_id)
 
     def cycle_wallpaper(self, d):
         """Step the wallpaper choice by d (programmatic verb; the UI pick is the
@@ -401,8 +400,7 @@ class Appearance:
         self.set_font_scale(nxt, persist=True)
 
     def _persist_font_scale(self):
-        self.ws.system["font_scale"] = self.font_scale
-        self.ws.prefs.persist()
+        self.ws.system.set("font_scale", self.font_scale)
 
     # -- panel theme + widget skin -------------------------------------------
 
@@ -433,9 +431,8 @@ class Appearance:
             ws.bar_layer.invalidate()
         ws._dirty = True
         if persist:
-            ws.system["theme"] = self.theme_name
-            ws.system["theme_variant"] = self.theme_variant
-            ws.prefs.persist()
+            ws.system.set("theme", self.theme_name, persist=False)
+            ws.system.set("theme_variant", self.theme_variant)
 
     def set_theme_variant(self, variant, persist=True):
         """Flip the current theme between its dark and light presentation
@@ -472,8 +469,7 @@ class Appearance:
             ws.bar_layer.invalidate()
         ws._dirty = True
         if persist:
-            ws.system["skin"] = self.skin_name
-            ws.prefs.persist()
+            ws.system.set("skin", self.skin_name)
 
     # -- the per-draw gate ---------------------------------------------------
 

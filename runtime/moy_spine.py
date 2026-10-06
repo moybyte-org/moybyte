@@ -9,7 +9,8 @@ object outlives a call into one (docs/native_kernel_2026-09.md section 4.3):
   BackStack    the process back-stack: kinds, launcher root at the bottom
   Returns      where a leaving surface lands: a run's caller, an app's return
   Leases       the WiFi radio's holders, a closed set of tags
-  Settings     system.json as the store holds it: key -> the value's JSON text
+  Settings     system.json as the store holds it: key -> the value's JSON text,
+               written through one setter that persists
 
 A handle is gen << GEN_SHIFT | kind << KIND_SHIFT | slot: never 0, always
 below 2**30 (a small int on every VM), its generation in the same bits as
@@ -383,16 +384,28 @@ def _value(text):
 class Settings:
     """system.json as rows: one per top-level key, holding that value's JSON
     text. `dump` is the file: the object json.dumps writes, keys in row order
-    (a new key goes last). Values are never interpreted here; a component that
-    owns a key reads and writes its row."""
+    (a new key goes last). The rows are the store of record: `get` decodes a
+    row to a fresh value, so nothing a caller does to what it got can change a
+    row, and `set` is the only way in.
 
-    def __init__(self):
+    A write marks the store dirty and persists it: `save(text)` is the hook
+    that writes `dump()` where the file lives, and the store stays dirty until
+    it has (a hook that returns False, or none at all, leaves it dirty, and the
+    next write or `flush` tries again), so a change cannot be left out of the
+    file by a caller that forgot to ask. `persist=False` defers the write to
+    the next one: the change is dirty, never lost. A component that owns a key
+    reads and writes its row."""
+
+    def __init__(self, save=None):
         self._keys = []
         self._text = {}
+        self._save = save
+        self._dirty = 0
 
     def load(self, text):
         """Replace every row with the object `text` holds; ValueError when it
-        is not a JSON object, and then nothing changes. The row count."""
+        is not a JSON object, and then nothing changes. The row count. What
+        was read is what is on disk, so the store is clean."""
         d = json.loads(text)
         if not isinstance(d, dict):
             raise ValueError("system.json is not an object")
@@ -400,8 +413,9 @@ class Settings:
         return len(self._keys)
 
     def adopt(self, d):
-        """Replace every row with `d`'s items, each value encoded; a key or a
-        value that is refused leaves the rows as they were."""
+        """Replace every row with `d`'s items, each value encoded, and mark the
+        store clean; a key or a value that is refused leaves the rows as they
+        were."""
         keys = [_key(k) for k in d]
         rows = {}
         for k in keys:
@@ -409,22 +423,58 @@ class Settings:
             _value(rows[k])
         self._keys = keys
         self._text = rows
+        self._dirty = 0
 
-    def get(self, key):
-        """The value's JSON text, or None when the key has no row."""
+    def get(self, key, default=None):
+        """The value of `key`'s row, decoded afresh, or `default` when the key
+        has no row."""
+        t = self._text.get(_key(key))
+        return default if t is None else json.loads(t)
+
+    def text(self, key):
+        """The row's JSON text, or None when the key has no row."""
         return self._text.get(_key(key))
 
-    def set(self, key, text):
+    def set(self, key, value, persist=True):
+        """Store `value` (anything json.dumps writes) as `key`'s row, mark the
+        store dirty and, unless `persist` is False, write it."""
+        self.set_text(key, json.dumps(value), persist)
+
+    def set_text(self, key, text, persist=True):
+        """`set` for a value that is already JSON text, kept as written."""
         _value(text)
         if _key(key) not in self._text:
             self._keys.append(key)
         self._text[key] = text
+        self._dirty += 1
+        if persist:
+            self.flush()
 
-    def delete(self, key):
+    def delete(self, key, persist=True):
+        """Drop `key`'s row: True when it had one, which marks the store dirty
+        and, unless `persist` is False, writes it."""
         if _key(key) not in self._text:
             return False
         del self._text[key]
         self._keys.remove(key)
+        self._dirty += 1
+        if persist:
+            self.flush()
+        return True
+
+    def dirty(self):
+        """True while a change has not reached the file."""
+        return self._dirty > 0
+
+    def flush(self):
+        """Write the rows when the store is dirty: True when it is clean
+        afterwards. `save` is called with `dump()`; a False answer is a write
+        that failed."""
+        if not self._dirty:
+            return True
+        if self._save is None or self._save(self.dump()) is False:
+            return False
+        self._dirty = 0
         return True
 
     def keys(self):

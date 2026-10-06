@@ -431,10 +431,10 @@ def test_prefs_namespace_defaults_to_the_app_id(tmp_path):
     ws = _ws(tmp_path)
     ctx = ws.app_context("demo", ("prefs",))
     ctx.prefs.set("scroll", 7, persist=False)
-    assert ws.system["demo_scroll"] == 7
+    assert ws.system.get("demo_scroll") == 7
     assert ctx.prefs.get("scroll") == 7
     ctx.prefs.clear("scroll", persist=False)
-    assert "demo_scroll" not in ws.system
+    assert ws.system.text("demo_scroll") is None
     assert ctx.prefs.get("scroll", "fallback") == "fallback"
 
 
@@ -458,7 +458,7 @@ def test_prefs_writes_and_clears_reach_system_json(tmp_path):
     prefs.set("doc", "sketch_1")
     assert _system_json(ws)["demo_doc"] == "sketch_1"
     prefs.clear("doc")
-    assert "demo_doc" not in ws.system
+    assert ws.system.text("demo_doc") is None
     assert "demo_doc" not in _system_json(ws)
 
 
@@ -712,7 +712,7 @@ def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
     assert theme.variant() == "light" and theme.light() is True
     assert theme.name() == family                    # the FAMILY does not move
     assert theme.colors() is not before
-    assert ws.system["theme_variant"] == "light"
+    assert ws.system.get("theme_variant") == "light"
     assert _system_json(ws)["theme_variant"] == "light"
 
 

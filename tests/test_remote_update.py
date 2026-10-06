@@ -304,7 +304,7 @@ def test_the_channel_row_travels_with_the_request(tmp_path):
     ota, board = _zero()
     link = _Link(board)
     ws = _ws(tmp_path, link.remote)
-    ws.system["ota_channel"] = "unstable"
+    ws.system.set("ota_channel", "unstable")
     ws.update_ui.open_update_online()
     _frames(ws, link, n=8)
     assert ota.checked_channel == "unstable"

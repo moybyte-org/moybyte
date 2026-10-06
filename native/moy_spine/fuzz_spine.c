@@ -562,6 +562,7 @@ static struct {
     uint8_t klen[ROWS];
     char val[ROWS][VAL_MAX];
     uint8_t vlen[ROWS];
+    uint32_t dirty;         // changes since the store was last clean
 } st;
 
 // The keys: ASCII, the characters a JSON key escapes, and multi-byte UTF-8.
@@ -652,6 +653,7 @@ static char dump_buf[ROWS * (KEY_MAX * 6 + VAL_MAX + 8) + 8];
 
 static void st_verify(void) {
     CHECK(moy_settings_count(st.s) == st.n);
+    CHECK(moy_settings_dirty(st.s) == st.dirty);
     for (uint32_t i = 0; i < st.n; i++) {
         const char *k, *j;
         size_t kn, jn;
@@ -731,6 +733,7 @@ static void st_set(input_t *in) {
     } else {
         CHECK(rc == MOY_SETTINGS_OK);
         st_put(k, kn, v, vn);
+        st.dirty++;
     }
     st_verify();
 }
@@ -755,6 +758,7 @@ static void st_get_delete(input_t *in) {
             st.vlen[i] = st.vlen[i + 1u];
         }
         st.n--;
+        st.dirty++;
     }
     st_verify();
 }
@@ -847,6 +851,7 @@ static void st_load(input_t *in) {
         st_put(m[i].k, m[i].kn, m[i].v, m[i].vn);
     }
     CHECK(rows == st.n);
+    st.dirty = 0;                               // what a load reads is clean
     st_verify();
 }
 
@@ -936,6 +941,7 @@ static void make_all(void) {
     rt.clen = rt.blen = 0;
     ls.mask = 0;
     st.n = 0;
+    st.dirty = 0;
 }
 
 static void free_all(void) {
@@ -1040,6 +1046,10 @@ static void run(const uint8_t *data, size_t size) {
                 break;
             case 22:
                 st_scan(&in);
+                if (next(&in) % 4u == 0u) {     // the hook landed
+                    moy_settings_clean(st.s);
+                    st.dirty = 0;
+                }
                 break;
             case 24:                            // towards a full registry
                 for (unsigned k = 0; k < 70u; k++) {

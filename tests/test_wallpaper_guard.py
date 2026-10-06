@@ -15,6 +15,7 @@ from pathlib import Path
 
 from runtime import moy_carts
 from runtime.crash_guard import KEY, WALLPAPER_KEY, CrashGuard
+from runtime.moy_spine import Settings
 from ws_helpers import build_desktop_ws, build_ws, open_cart
 
 DT = 1.0 / 30
@@ -112,17 +113,23 @@ def _cart(ws, slug):
 
 
 # ---------------------------------------------------------------------------
-# the guard itself, on a plain dict
+# the guard itself, over a Settings store
 # ---------------------------------------------------------------------------
 
+def _store(saves=None):
+    """A settings store whose writes land, each counted in `saves`."""
+    return Settings(lambda text: saves.append(1) if saves is not None else None)
+
+
 def test_a_healed_proof_lets_the_next_arm_write_nothing():
-    store, saves = {}, []
-    g = CrashGuard(store, lambda: saves.append(1), key=WALLPAPER_KEY)
+    saves = []
+    store = _store(saves)
+    g = CrashGuard(store, key=WALLPAPER_KEY)
     assert g.arm("sky", "p1") is True
     assert len(saves) == 1 and g.strikes("sky") == 1
     assert g.heal() is True
     assert len(saves) == 2 and g.strikes("sky") == 0
-    assert store[WALLPAPER_KEY]["proven"] == {"sky": "p1"}
+    assert store.get(WALLPAPER_KEY)["proven"] == {"sky": "p1"}
 
     assert g.arm("sky", "p1") is True              # proven: no bracket at all
     assert len(saves) == 2
@@ -134,7 +141,7 @@ def test_a_healed_proof_lets_the_next_arm_write_nothing():
 
 
 def test_a_struck_out_id_is_refused_whatever_it_proves():
-    g = CrashGuard({}, key=WALLPAPER_KEY)
+    g = CrashGuard(_store(), key=WALLPAPER_KEY)
     g.arm("sky", "good")
     g.heal()
     for _ in range(g.STRIKES):
@@ -147,7 +154,7 @@ def test_re_arming_the_held_id_is_the_same_attempt():
     """A recompile in the process that armed it: that run did not kill the
     board, and it did not fail (a failure releases), so no second strike."""
     saves = []
-    g = CrashGuard({}, lambda: saves.append(1), key=WALLPAPER_KEY)
+    g = CrashGuard(_store(saves), key=WALLPAPER_KEY)
     g.arm("sky", "p")
     g.arm("sky", "p")
     assert g.strikes("sky") == 1 and len(saves) == 1
@@ -160,8 +167,8 @@ def test_forgiving_the_held_id_makes_the_next_arm_a_fresh_one():
     """A pick of the wallpaper that is armed and not yet healed: the forgive
     clears the mark on the card, so the re-arm has to write it again -- the
     code is about to run a second time."""
-    store, saves = {}, []
-    g = CrashGuard(store, lambda: saves.append(1), key=WALLPAPER_KEY)
+    saves = []
+    g = CrashGuard(_store(saves), key=WALLPAPER_KEY)
     g.arm("sky", "p")
     g.forgive("sky")
     assert g.last_open() is None
@@ -171,7 +178,7 @@ def test_forgiving_the_held_id_makes_the_next_arm_a_fresh_one():
 
 
 def test_the_two_roles_keep_separate_ledgers():
-    store = {}
+    store = _store()
     apps = CrashGuard(store)
     walls = CrashGuard(store, key=WALLPAPER_KEY)
     for _ in range(walls.STRIKES):
@@ -180,8 +187,8 @@ def test_the_two_roles_keep_separate_ledgers():
     assert walls.disabled("sky") is True
     assert apps.disabled("sky") is False
     assert apps.arm("sky") is True
-    assert store[WALLPAPER_KEY]["strikes"] == {"sky": walls.STRIKES}
-    assert store[KEY]["strikes"] == {"sky": 1}
+    assert store.get(WALLPAPER_KEY)["strikes"] == {"sky": walls.STRIKES}
+    assert store.get(KEY)["strikes"] == {"sky": 1}
 
 
 # ---------------------------------------------------------------------------

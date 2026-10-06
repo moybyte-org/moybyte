@@ -16,9 +16,9 @@ settings-only constants (_SET_*).
 
 Boundary (the anti-spaghetti line, per the doc): SettingsLayer owns NO config. Every
 value it steps or shows is CART/SYSTEM state on Workstation -- ws.system (the
-system.json dict), ws.look.font_scale, ws.diag_live, the
+system.json rows), ws.look.font_scale, ws.diag_live, the
 updater queries -- and every mutation goes through the ws setters (
-ws.look.cycle_font_scale / _cycle_channel / prefs.persist / the SETTINGS_TOGGLES
+ws.look.cycle_font_scale / _cycle_channel / ws.system.set / the SETTINGS_TOGGLES
 verbs). The module-level SETTINGS_TOGGLES registry is the one exception, and only
 in the sense the _SET_* geometry already is: it DECLARES the ON/OFF settings --
 name, label, default, verb, capability gate, serial word -- and console.py and
@@ -1085,10 +1085,10 @@ class SettingsLayer:
         if key == "name":
             cur = ws.system.get("name", self._MOCK_NAMES[0])
             i = self._MOCK_NAMES.index(cur) if cur in self._MOCK_NAMES else 0
-            ws.system["name"] = self._MOCK_NAMES[(i + d) % len(self._MOCK_NAMES)]
+            ws.system.set("name", self._MOCK_NAMES[(i + d) % len(self._MOCK_NAMES)])
         else:  # mock-gauge (volume / brightness): a 0..5 placeholder
             v = int(ws.system.get(key, 3)) + d
-            ws.system[key] = max(0, min(5, v))
+            ws.system.set(key, max(0, min(5, v)))
 
     # -- scroll window -------------------------------------------------------
 

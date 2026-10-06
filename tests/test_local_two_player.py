@@ -37,14 +37,12 @@ class _FakeBle:
 
 
 class _Prefs:
-    """The slice of `SystemStore` the setting touches: the dict `ws.system`
-    aliases, and a write that goes nowhere."""
+    """The slice of `SystemStore` the setting touches: the rows `ws.system`
+    aliases, over a save hook that writes nowhere."""
 
     def __init__(self):
-        self.settings = {}
-
-    def persist(self):
-        pass
+        from runtime.moy_spine import Settings
+        self.rows = Settings(lambda text: True)
 
 
 class _Ws:
@@ -57,7 +55,7 @@ class _Ws:
         self.keyboard = keyboard
         self.ble_keyboard = ble
         self.prefs = _Prefs()
-        self.system = self.prefs.settings
+        self.system = self.prefs.rows
 
     second_keyboard = None      # bound below from the real Workstation
 
@@ -192,11 +190,11 @@ def test_the_setting_drives_the_keyboard_and_persists():
 
     ws.set_two_player(True)
     assert ws.two_player is True and ble.src.player == 1
-    assert ws.system["two_player"] is True
+    assert ws.system.get("two_player") is True
 
     ws.set_two_player(False)
     assert ws.two_player is False and ble.src.player == 0
-    assert ws.system["two_player"] is False
+    assert ws.system.get("two_player") is False
 
 
 def test_the_settings_row_appears_only_where_the_option_works(tmp_path):

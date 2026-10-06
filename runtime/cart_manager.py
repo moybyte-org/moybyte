@@ -10,7 +10,7 @@ gallery browse/install/publish).
 ## `all` is a plain attribute with no `ws` mirror
 
 A re-scan builds a NEW list (`apply` rebinds it), so there is no alias trick to
-be had -- `ws.system`'s in-place `clear()`+`update()` works because that dict is
+be had -- `ws.system`'s in-place `adopt()` works because that store is
 never rebound, and this list is rebound on every create, duplicate, delete,
 re-seed and browser sync. So the consumers read `ws.carts.all` and they all
 migrated in the landing that moved it: the desk icon column and its statics key
@@ -73,7 +73,7 @@ class CartManager:
     # -- favorites + recents (#105) -------------------------------------------
     #
     # Both ride the SAME system.json persistence Settings already uses for
-    # theme/wallpaper/font/OTA channel (ws.system + ws.prefs.persist) -- no new
+    # theme/wallpaper/font/OTA channel (ws.system.set, which persists) -- no new
     # store surface. `favorites` is a plain path list (order = the order a kid
     # starred them, oldest first); `desk_mru` (issue #105's own naming note) is a
     # capped most-recently-run path list, newest first. Cart identity is the
@@ -91,6 +91,10 @@ class CartManager:
         # lookup read the FULL list rather than either display grid (the
         # Make/New pseudo tiles never leak out).
         self.all = list(carts) if carts else []
+        # The favorites as `is_favorite` last decoded them, with the row's text
+        # it decoded them from: a card asks per paint, a decode is per change.
+        self._fav_text = None
+        self._fav_paths = ()
 
     # -- the roster ----------------------------------------------------------
 
@@ -297,7 +301,12 @@ class CartManager:
         path = cart.get("path") if cart else None
         if not path:
             return False
-        return path in self.ws.system.get("favorites", [])
+        rows = self.ws.system
+        text = rows.text("favorites")
+        if text != self._fav_text:
+            self._fav_text = text
+            self._fav_paths = tuple(rows.get("favorites", ()))
+        return path in self._fav_paths
 
     def toggle_favorite(self, cart):
         """Star/unstar `cart` (the launcher card's corner badge tap) and persist.
@@ -311,9 +320,8 @@ class CartManager:
             favs.remove(path)
         else:
             favs.append(path)
-        ws.system["favorites"] = favs
+        ws.system.set("favorites", favs)
         ws._dirty = True
-        ws.prefs.persist()
 
     def note_recent(self, cart):
         """Record `cart` as most-recently-run: move its path to the front of
@@ -326,8 +334,7 @@ class CartManager:
         ws = self.ws
         mru = [p for p in ws.system.get("desk_mru", []) if p != path]
         mru.insert(0, path)
-        ws.system["desk_mru"] = mru[:self._MRU_CAP]
-        ws.prefs.persist()
+        ws.system.set("desk_mru", mru[:self._MRU_CAP])
 
     def recent(self):
         """The desk_mru path list resolved back to live cart dicts (newest first),

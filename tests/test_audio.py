@@ -1223,11 +1223,11 @@ def test_the_master_level_survives_a_cart_start(tmp_path):
     from ws_helpers import open_cart
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.system["volume"] = 0
+    ws.system.set("volume", 0)
     open_cart(ws, "Brick Siege")
     assert ws.audio is not None
     assert ws.audio.engine.master == 0, "the stored level must reach the new backend"
 
-    ws.system["volume"] = 5
+    ws.system.set("volume", 5)
     open_cart(ws, "Harpoon Pop")
     assert ws.audio.engine.master == 5
