@@ -66,8 +66,10 @@ scripted session of that interface -- create, catalogue, a rescan, entry and
 load, path and handle, new, duplicate, delete and every call on the deleted
 handle, a freed slot taken again under its next generation, a folder removed
 behind the store's back and reconciled away, a root that will not list, a
-second store displacing the first, forged and non-int handles, a full index
--- on CPython, on the boards' VM and, where it is built, on the boards'
+second store displacing the first, forged and non-int handles, a full index,
+then the seed (cold, warm, and a version bump that keeps the kid's config),
+load whole, a publish, a torn file recovered from its backup, and the journal's
+append (and its no-op), undo and redo to the floor and the ceiling -- on CPython, on the boards' VM and, where it is built, on the boards'
 32-bit object model. The log is pinned VERBATIM (STORE_TRACE): the handle
 values are slot.generation, so the allocation order is part of the contract a
 native binding must keep, not an accident of this one. Mutation-tested: the
@@ -725,6 +727,54 @@ cat.create("Other", B, src=SRC)
 say("other store", shelf(B), cat.valid(alpha), tried(cat.load, alpha))
 say("back", shelf(A))
 
+C = ROOT + "/c/carts"
+SRC2 = "def _draw():\n    cls(2)\n"
+SRC3 = "def _draw():\n    cls(3)\n"
+SEED = [{"title": "Seed One", "type": "game", "version": 2, "src": SRC,
+         "cfg": {"speed": 3}, "flags": "01" * 512},
+        {"title": "Seed Two", "type": "app", "version": 1, "src": SRC, "cfg": {}}]
+
+
+def J(verb, h, *a):
+    return getattr(moy_carts, "journal_" + verb)(cat.path(h), *a)
+
+
+def seeded(seed, root):
+    cat.seed_any(seed, root)
+    return cat.catalogue(root)
+
+
+cat.ensure_dirs(C)
+say("seed", " ".join("%s=%s/%d" % (e["title"], h_(e["h"]), e["version"])
+                     for e in seeded(SEED, C)))
+one = cat.catalogue(C)[0]["h"]
+moy_carts._write(cat.path(one) + "/config.json", '{"speed": 9}')
+say("seed warm", " ".join("%s=%s/%d" % (e["title"], h_(e["h"]), e["version"])
+                          for e in seeded(SEED, C)))
+SEED[0]["version"] = 3
+say("seed bump", " ".join("%s=%s/%d" % (e["title"], h_(e["h"]), e["version"])
+                          for e in seeded(SEED, C)))
+w = cat.load(one)
+say("load", w["title"], w["version"], sorted(w["cfg"].items()), len(w["flags"]),
+    w["src"] == SRC, w["src_before"], w["src_after"], w["sprites"], w["scenes"])
+say("loaded", sorted(k for k in w if k not in ("path", "h")))
+
+moy_carts.save_code(w, SRC2)
+say("publish", cat.load(one)["src"] == SRC2)
+main = cat.path(one) + "/" + w["main"]
+moy_carts._write(main, SRC2[:9])
+say("recover", cat.load(one)["src"] == SRC2, moy_carts._read(main) == SRC2)
+
+say("journal", J("append", one, "main.py", SRC2), J("append", one, "main.py", SRC2),
+    J("can_undo", one), J("can_redo", one))
+moy_carts.save_code(w, SRC3)
+say("journal", J("append", one, "main.py", SRC3), J("can_undo", one), J("can_redo", one))
+say("undo", J("undo", one), cat.load(one)["src"] == SRC2, J("can_undo", one),
+    J("can_redo", one))
+say("undo floor", J("undo", one))
+say("redo", J("redo", one), cat.load(one)["src"] == SRC3, J("can_redo", one))
+say("redo ceiling", J("redo", one))
+
 for forged in (0, -1, alpha ^ (1 << SLOT_BITS), (1 << SLOT_BITS) | (SLOTS - 1)):
     say("forged", tried(cat.load, forged), cat.valid(forged))
 for junk in (None, "1"):
@@ -760,6 +810,19 @@ reconciled False STALE
 unlisted [] True True
 other store Other=2.2 False STALE
 back Alpha=0.2 Beta=1.2 Delta=3.2 New Cart=4.3
+seed Seed One=2.3/2 Seed Two=5.1/1
+seed warm Seed One=2.3/2 Seed Two=5.1/1
+seed bump Seed One=2.3/3 Seed Two=5.1/1
+load Seed One 3 [('speed', 9)] 1024 True [] [] None {}
+loaded ['author', 'blocks', 'canvas', 'cfg', 'edit', 'extensions', 'flags', 'format', 'fps', 'graduated', 'icon', 'images', 'input', 'main', 'map', 'memory', 'palette', 'permissions', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'title', 'type', 'version', 'writable']
+publish True
+recover True True
+journal 1 None False False
+journal 2 True False
+undo main.py True False True
+undo floor None
+redo main.py True False
+redo ceiling None
 forged STALE False
 forged STALE False
 forged STALE False
