@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Map (grep -n a name to jump there):
+#   Component          one native component: its dir, hook and host sources
 #   impl_of            the hook's value, checked
 #   build_env          the hook's environment for one build
 #   binding            runtime/moy_index.py's interface over a twin, by ctypes
@@ -18,7 +19,11 @@
 #   cmd_ci_time        what the twin's tests cost a CI run
 """Sprint 1a's harness: the store's index built as the C twin for every target,
 and the numbers the kernel's language was decided on (#224; the decision is
-docs/native_kernel_2026-09.md section 5, C).
+docs/native_kernel_2026-09.md section 5, C). Sprint 2 generalised it to a second
+component, the kernel's spine (native/moy_spine, docs/kernel_spine_2026-10.md):
+`--component spine` runs `host`, `sanitize` and `sizes` for it, with its own
+hook, host library, fuzz driver and tests; `bench` and `ci-time` stay the
+index's.
 
     tools/moy_index_spike.py host     [--impl c]      the suite over ctypes and on the
                                                       desktop MicroPython, the store trace
@@ -30,6 +35,9 @@ docs/native_kernel_2026-09.md section 5, C).
                                                       the hot path on an S3 under perfcnt,
                                                       with the store's sprint-0 readings
     tools/moy_index_spike.py ci-time  [--impl c]      what the twin's tests cost a CI run
+
+    tools/moy_index_spike.py --component spine host|sanitize|sizes ...
+                                                      the same three for the spine
 
 Results land as JSON in .build/moy_index_spike/ as well as on stdout. `sizes`
 and `bench` build in THIS tree, so run them from a worktree; `sizes` leaves the
@@ -47,9 +55,16 @@ desktop MicroPython, the browser) read it, tools/board_config.py drops the
 Python twin from a twin's frozen set, and `make unix-micropython` builds the
 twin its UNIX_MP_INDEX names (default `c`).
 
+MOY_SPINE_IMPL is the spine's hook, the same shape: `py` keeps
+runtime/moy_spine.py frozen, `c` builds native/moy_spine (modmoy_spine.c over
+moy_route.c and moy_settings.c) and leaves the Python file out, and UNIX_MP_SPINE
+(default `c`) is `make unix-micropython`'s. moy_htab.c, the handle table both
+components take their slots from, is built when either hook is `c`.
+
 MOY_INDEX_BENCH=1 adds the `moy_index_bench` module (bench_moy_index.c) to a
 twin build, for `bench`; no image the size table measures carries it. Each
-build dir records the hook it was built with (`moy_index_impl`) and starts its
+build dir records the hooks it was built with (`moy_index_impl`,
+`moy_spine_impl`) and starts its
 generated headers afresh when that changes (tools/esp32_build_lib.sh, the web
 runner's build.sh, the Makefile), because MicroPython keeps a dropped source's
 module registration until that source is preprocessed again.
@@ -58,6 +73,7 @@ module registration until that source is preprocessed again.
 import argparse
 import ctypes
 import glob
+import hashlib
 import json
 import os
 import re
@@ -72,6 +88,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
 
 NATIVE = os.path.join(ROOT, "native", "moy_index")
+NATIVE_SPINE = os.path.join(ROOT, "native", "moy_spine")
 CACHE = os.path.join(ROOT, ".build", "host_index")
 OUT = os.path.join(ROOT, ".build", "moy_index_spike")
 WEB_DIR = os.path.join(ROOT, "firmware", "web_runner")
@@ -97,17 +114,58 @@ BENCH_EVENTS = (
 )
 
 
-def impl_of(arg=None):
-    v = arg or os.environ.get("MOY_INDEX_IMPL") or "py"
+class Component:
+    """One native component the harness builds, fuzzes and sizes: where its
+    sources are, the hook that picks its twin, the host library the ctypes
+    binding loads and the fuzz driver's sources."""
+
+    def __init__(self, name, dirs, shim, names, fuzz, objects, tests, trace,
+                 stamp):
+        self.name = name
+        self.env = "MOY_%s_IMPL" % name.upper()     # the hook
+        self.dirs = dirs            # source dirs, the component's own first
+        self.shim = shim            # the host's allocator imports
+        self.names = names          # what the host library compiles
+        self.fuzz = fuzz            # the fuzz driver, then what it links
+        self.objects = re.compile(objects)  # the twin's objects in a link map
+        self.tests = tests          # the files `host` and `sanitize` run
+        self.trace = trace          # the semantic trace's -k expression
+        self.stamp = stamp          # the saved result files' prefix
+        self.lib = "moy_" + name
+        self.cache = os.path.join(ROOT, ".build", "host_" + name)
+        self.glue = "modmoy_" + name
+
+
+INDEX = Component(
+    "index", [NATIVE], "moy_index_host.c",
+    ["moy_index.h", "moy_index.c"],
+    ("fuzz_index.c", ["moy_index.c"]),
+    r"\((mod)?moy_index\.c\.obj\)$|/(mod)?moy_index\.c\.obj$",
+    ["tests/test_moy_index.py", "tests/test_moy_index_twins.py"],
+    "index or store", "")
+SPINE = Component(
+    "spine", [NATIVE_SPINE], "moy_spine_host.c",
+    ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
+     "moy_settings.h", "moy_settings.c"],
+    ("fuzz_spine.c", ["moy_htab.c", "moy_route.c", "moy_settings.c"]),
+    r"\((mod)?moy_(spine|route|settings|htab)\.c\.obj\)$"
+    r"|/(mod)?moy_(spine|route|settings|htab)\.c\.obj$",
+    ["tests/test_moy_spine.py", "tests/test_moy_spine_twins.py"],
+    "spine", "spine-")
+COMPONENTS = {"index": INDEX, "spine": SPINE}
+
+
+def impl_of(arg=None, comp=INDEX):
+    v = arg or os.environ.get(comp.env) or "py"
     if v not in IMPLS:
-        raise SystemExit("MOY_INDEX_IMPL is py or c, not %r" % v)
+        raise SystemExit("%s is py or c, not %r" % (comp.env, v))
     return v
 
 
-def build_env(impl, bench=False):
+def build_env(impl, bench=False, comp=INDEX):
     """os.environ with the hook set for one build."""
     env = dict(os.environ)
-    env["MOY_INDEX_IMPL"] = impl
+    env[comp.env] = impl
     env.pop("MOY_INDEX_BENCH", None)
     if bench and impl != "py":
         env["MOY_INDEX_BENCH"] = "1"
@@ -117,9 +175,10 @@ def build_env(impl, bench=False):
 # -- the host's binding: the C ABI through ctypes ------------------------------
 
 
-def host_library(impl="c", sanitize=False):
+def host_library(impl="c", sanitize=False, comp=INDEX):
     """The host shared library for the C twin, built once per content (cached
-    under .build/host_index); None where there is no C compiler."""
+    under .build/host_<component>; native_build serialises concurrent builds of
+    one); None where there is no C compiler."""
     from runtime import native_build
     if impl != "c":
         raise ValueError("a host library is the C twin's, not %r" % impl)
@@ -127,11 +186,10 @@ def host_library(impl="c", sanitize=False):
         cflags = ["-std=c99", "-O1", "-g", "-fPIC", "-shared"] + SANITIZE
     else:
         cflags = list(native_build.BASE_CFLAGS)
-    names = ["moy_index.h", "moy_index.c"]
     return native_build.build(
-        "moy_index_%s%s" % (impl, "_san" if sanitize else ""),
-        os.path.join(NATIVE, "moy_index_host.c"), names, CACHE,
-        cflags=cflags, libmoy_dir=NATIVE)
+        "%s_%s%s" % (comp.lib, impl, "_san" if sanitize else ""),
+        os.path.join(comp.dirs[0], comp.shim), comp.names, comp.cache,
+        cflags=cflags, libmoy_dir=comp.dirs)
 
 
 _SIGS = (
@@ -246,9 +304,9 @@ def host_bindings():
 # -- the fuzz driver ------------------------------------------------------------
 
 
-def _cc_works(cc, flags):
-    probe = os.path.join(CACHE, "probe.c")
-    os.makedirs(CACHE, exist_ok=True)
+def _cc_works(cc, flags, cache=CACHE):
+    probe = os.path.join(cache, "probe.c")
+    os.makedirs(cache, exist_ok=True)
     with open(probe, "w") as f:
         f.write("#include <stdint.h>\n#include <stddef.h>\n"
                 "int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)"
@@ -262,36 +320,56 @@ def _cc_works(cc, flags):
     return out.returncode == 0
 
 
-def fuzz_binary(impl="c", libfuzzer=False):
-    """Build fuzz_index for the C twin under ASan+UBSan: libFuzzer's (clang)
-    or the seeded driver (any compiler). The path, or None with no toolchain
-    that has the sanitizers."""
-    os.makedirs(CACHE, exist_ok=True)
-    srcs = [os.path.join(NATIVE, "fuzz_index.c"),
-            os.path.join(NATIVE, "moy_index.c")]
+def fuzz_binary(impl="c", libfuzzer=False, comp=INDEX):
+    """Build the component's fuzz driver (fuzz_index, fuzz_spine) for the C twin
+    under ASan+UBSan: libFuzzer's (clang) or the seeded driver (any compiler).
+    The path, or None with no toolchain that has the sanitizers. A build is
+    keyed by the sources' content, made under native_build's lock and moved into
+    place whole, so parallel test workers share one."""
+    os.makedirs(comp.cache, exist_ok=True)
+    driver, linked = comp.fuzz
+    srcs = []
+    for n in [driver] + linked:
+        srcs.append([os.path.join(d, n) for d in comp.dirs
+                     if os.path.isfile(os.path.join(d, n))][0])
+    incs = [a for d in comp.dirs for a in ("-I", d)]
     if libfuzzer:
         cc = shutil.which("clang")
         flags = ["-fsanitize=fuzzer,address,undefined"] + SANITIZE[1:]
-        if not cc or not _cc_works(cc, flags + ["-DLIBFUZZER"]):
+        if not cc or not _cc_works(cc, flags + ["-DLIBFUZZER"], comp.cache):
             return None
     else:
         cc = os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
-        flags = SANITIZE + ["-DMOY_INDEX_FUZZ_MAIN"]
-        if not cc or not _cc_works(cc, SANITIZE):
+        flags = SANITIZE + ["-DMOY_%s_FUZZ_MAIN" % comp.name.upper()]
+        if not cc or not _cc_works(cc, SANITIZE, comp.cache):
             return None
-    exe = os.path.join(CACHE, "fuzz_index_%s%s" % (impl, "_lf" if libfuzzer
-                                                    else ""))
-    cmd = ([cc, "-std=c99", "-O1", "-g", "-Wall", "-Wextra", "-I", NATIVE]
-           + flags + srcs + ["-o", exe])
-    out = subprocess.run(cmd, capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError("fuzz_index build failed:\n%s" % out.stderr)
+    h = hashlib.sha256(" ".join([cc] + flags).encode())
+    for path in srcs + sorted(os.path.join(d, f) for d in comp.dirs
+                              for f in os.listdir(d) if f.endswith(".h")):
+        with open(path, "rb") as f:
+            h.update(f.read())
+    exe = os.path.join(comp.cache, "%s_%s%s-%s" % (
+        os.path.splitext(driver)[0], impl, "_lf" if libfuzzer else "",
+        h.hexdigest()[:12]))
+    if os.path.exists(exe):
+        return exe
+    from runtime import native_build
+    with native_build.build_lock(exe + ".lock"):
+        if os.path.exists(exe):
+            return exe
+        tmp = "%s.%d.tmp" % (exe, os.getpid())
+        cmd = ([cc, "-std=c99", "-O1", "-g", "-Wall", "-Wextra"] + incs
+               + flags + srcs + ["-o", tmp])
+        out = subprocess.run(cmd, capture_output=True, text=True)
+        if out.returncode != 0:
+            raise RuntimeError("%s build failed:\n%s" % (driver, out.stderr))
+        os.replace(tmp, exe)
     return exe
 
 
-def fuzz_seeded(impl="c", seed=1, runs=300):
+def fuzz_seeded(impl="c", seed=1, runs=300, comp=INDEX):
     """The seeded driver's run: (ok, seconds, output); None with no toolchain."""
-    exe = fuzz_binary(impl)
+    exe = fuzz_binary(impl, comp=comp)
     if exe is None:
         return None
     t = time.time()
@@ -300,11 +378,11 @@ def fuzz_seeded(impl="c", seed=1, runs=300):
     return out.returncode == 0, time.time() - t, (out.stdout + out.stderr)
 
 
-def fuzz_libfuzzer(impl="c", seconds=60):
-    exe = fuzz_binary(impl, libfuzzer=True)
+def fuzz_libfuzzer(impl="c", seconds=60, comp=INDEX):
+    exe = fuzz_binary(impl, libfuzzer=True, comp=comp)
     if exe is None:
         return None
-    corpus = os.path.join(OUT, "corpus_%s" % impl)
+    corpus = os.path.join(OUT, "corpus_%s%s" % (comp.stamp, impl))
     os.makedirs(corpus, exist_ok=True)
     # clang 14's ASan runtime dies in its own init under the address-space
     # entropy of Linux 6.6 and later (vm.mmap_rnd_bits 32), a third of starts
@@ -345,36 +423,36 @@ def pytest(args, env=None):
     return out.returncode, round(time.time() - t, 1), tail
 
 
-def unix_micropython(impl):
-    """`make unix-micropython` with the twin `impl` in both binaries (the
-    binaries are removed first, so a changed hook relinks them)."""
+def unix_micropython(impl, comp=INDEX):
+    """`make unix-micropython` with `comp`'s twin `impl` in both binaries (the
+    other component keeps the Makefile's default; the binaries are removed
+    first, so a changed hook relinks them)."""
     for b in ("build-moybyte", "build-moybyte-board"):
         try:
             os.remove(os.path.join(UNIX_PORT, b, "micropython"))
         except OSError:
             pass
     cmd = ["make", "--no-print-directory", "unix-micropython",
-           "UNIX_MP_INDEX=%s" % impl]
+           "UNIX_MP_%s=%s" % (comp.name.upper(), impl)]
     out = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError("make unix-micropython (%s) failed:\n%s"
                            % (impl, (out.stdout + out.stderr)[-3000:]))
 
 
-HOST_TESTS = ["tests/test_moy_index.py", "tests/test_moy_index_twins.py",
-              "tests/test_semantic_traces.py", "-k", "index or store"]
-
-
 def cmd_host(a):
-    impl = impl_of(a.impl)
+    comp = COMPONENTS[a.component]
+    impl = impl_of(a.impl, comp)
     if impl == "py":
         raise SystemExit("`host` runs the twin: --impl c")
-    unix_micropython(impl)
-    env = dict(os.environ, MOY_INDEX_IMPL=impl, MOYBYTE_REQUIRE_UNIX_MP="1")
-    rc, secs, tail = pytest(HOST_TESTS, env)
+    unix_micropython(impl, comp)
+    env = dict(os.environ, MOYBYTE_REQUIRE_UNIX_MP="1")
+    env[comp.env] = impl
+    rc, secs, tail = pytest(comp.tests + ["tests/test_semantic_traces.py",
+                                          "-k", comp.trace], env)
     print("\n".join(tail[-15:]))
-    save("host-%s.json" % impl, {"impl": impl, "rc": rc, "seconds": secs,
-                                 "tail": tail[-15:]})
+    save("host-%s%s.json" % (comp.stamp, impl),
+         {"impl": impl, "rc": rc, "seconds": secs, "tail": tail[-15:]})
     return rc
 
 
@@ -388,38 +466,38 @@ def libasan():
 
 
 def cmd_sanitize(a):
-    impl = impl_of(a.impl)
+    comp = COMPONENTS[a.component]
+    impl = impl_of(a.impl, comp)
     if impl == "py":
         raise SystemExit("`sanitize` runs the twin: --impl c")
     res = {"impl": impl}
     asan = libasan()
     if asan:
-        env = dict(os.environ, MOY_INDEX_IMPL=impl, MOY_INDEX_SANITIZE="1",
-                   LD_PRELOAD=asan,
+        env = dict(os.environ, LD_PRELOAD=asan,
                    ASAN_OPTIONS="detect_leaks=0:abort_on_error=1",
                    UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
-        rc, secs, tail = pytest(["tests/test_moy_index.py",
-                                 "tests/test_moy_index_twins.py", "-k",
-                                 "not vm and not fuzz"], env)
+        env["MOY_%s_SANITIZE" % comp.name.upper()] = "1"
+        env[comp.env] = impl
+        rc, secs, tail = pytest(comp.tests + ["-k", "not vm and not fuzz"], env)
         res["suite"] = {"rc": rc, "seconds": secs, "tail": tail[-6:]}
         print("suite over ctypes, ASan+UBSan: rc=%d %.1fs  %s"
               % (rc, secs, tail[-1] if tail else ""))
     else:
         res["suite"] = None
         print("suite over ctypes, ASan+UBSan: no libasan beside the compiler")
-    got = fuzz_seeded(impl, seed=a.seed, runs=a.runs)
+    got = fuzz_seeded(impl, seed=a.seed, runs=a.runs, comp=comp)
     res["seeded"] = None if got is None else {
         "ok": got[0], "seconds": round(got[1], 1), "runs": a.runs,
         "seed": a.seed, "out": got[2].strip().splitlines()[-3:]}
     print("seeded fuzz, ASan+UBSan: %s" % (res["seeded"] or "no toolchain"))
     if a.seconds:
-        lf = fuzz_libfuzzer(impl, a.seconds)
+        lf = fuzz_libfuzzer(impl, a.seconds, comp)
         res["libfuzzer"] = lf
         print("libFuzzer, ASan+UBSan: %s" % (
             "no clang with libFuzzer" if lf is None else
             "ok=%(ok)s %(runs)s runs in %(seconds)ss, cov %(cov)s, ft "
             "%(features)s, corpus %(corpus)s" % lf))
-    save("sanitize-%s.json" % impl, res)
+    save("sanitize-%s%s.json" % (comp.stamp, impl), res)
     bad = (res["suite"] and res["suite"]["rc"]) or not (res["seeded"] or {}).get("ok") \
         or (res.get("libfuzzer") and not res["libfuzzer"]["ok"])
     return 1 if bad else 0
@@ -467,9 +545,9 @@ def board_map(d):
 _MAP_ROW = re.compile(r"^\s*(\.\S+)?\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+(\S+)$")
 
 
-def objects_of(impl):
+def objects_of(comp=INDEX):
     """What names the twin's own objects in a link map."""
-    return re.compile(r"\((mod)?moy_index\.c\.obj\)$|/(mod)?moy_index\.c\.obj$")
+    return comp.objects
 
 
 def map_rows(path, objects):
@@ -505,8 +583,8 @@ _KINDS = (("code", (".text", ".literal", ".iram")), ("rodata", (".rodata",)),
           ("data", (".data", ".sdata", ".dram")), ("bss", (".bss", ".sbss")))
 
 
-def map_summary(path, impl):
-    """The twin's allocated bytes by kind, the binding (modmoy_index.c) apart
+def map_summary(path, comp=INDEX):
+    """The twin's allocated bytes by kind, the binding (modmoy_<name>.c) apart
     from the twin's own code; and its function names.
     Merged string sections (`.str1.N`) are left out: the linker pools them
     across objects and the map charges the pool to whichever came first."""
@@ -516,17 +594,17 @@ def map_summary(path, impl):
         for k in part:
             part[k] = 0
     fns = set()
-    for (obj, sec), n in map_sections(path, objects_of(impl)).items():
+    for (obj, sec), n in map_sections(path, objects_of(comp)).items():
         if ".str1." in sec:
             continue
-        part = out["glue" if obj.startswith("modmoy_index") else "core"]
+        part = out["glue" if obj.startswith(comp.glue) else "core"]
         for kind, prefixes in _KINDS:
             if sec.startswith(prefixes):
                 part[kind] += n
                 if kind == "code" and sec.startswith(".text."):
                     fns.add((obj, sec.split(".", 2)[-1]))
     out["core_functions"] = sorted(f for o, f in fns
-                                   if not o.startswith("modmoy_index"))
+                                   if not o.startswith(comp.glue))
     return out
 
 
@@ -566,12 +644,16 @@ def cmd_sizes(a):
     ways and keeps both; a board then builds against the matching one, since
     every image bakes it -- so run `sizes web` before the boards, and give
     each invocation few enough targets to finish inside a shell's patience.
-    The browser console is left as py; results merge into one JSON."""
-    impl = impl_of(a.impl)
+    The browser console is left as py; results merge into one JSON. With
+    --no-web the boards bake the browser console as it stands in
+    firmware/web_runner/dist (none, in a worktree made --no-web), so a delta is
+    the board's own native code and nothing of the bundle."""
+    comp = COMPONENTS[a.component]
+    impl = impl_of(a.impl, comp)
     if impl == "py":
         raise SystemExit("`sizes` compares the twin with py: --impl c")
     boards = _boards()
-    want = a.targets or (["web"] + sorted(boards))
+    want = a.targets or ([] if a.no_web else ["web"]) + sorted(boards)
     unknown = [t for t in want if t != "web" and t not in boards]
     if unknown:
         raise SystemExit("no target %s (web, %s)" % (", ".join(unknown),
@@ -579,7 +661,7 @@ def cmd_sizes(a):
     logdir = os.path.join(OUT, "logs-%s" % time.strftime("%Y%m%d-%H%M%S"))
     os.makedirs(logdir, exist_ok=True)
     print("logs: %s" % os.path.relpath(logdir, ROOT), flush=True)
-    path = os.path.join(OUT, "sizes-%s.json" % impl)
+    path = os.path.join(OUT, "sizes-%s%s.json" % (comp.stamp, impl))
     try:
         with open(path) as f:
             res = json.load(f)
@@ -588,7 +670,7 @@ def cmd_sizes(a):
     if "web" in want:
         for which in ("py", impl):
             t0 = time.time()
-            rc, log = build_web(build_env(which), logdir, which)
+            rc, log = build_web(build_env(which, comp=comp), logdir, which)
             if rc != 0:
                 raise SystemExit("web build (%s) failed: %s" % (which, log))
             shutil.rmtree(web_copy(which), ignore_errors=True)
@@ -601,9 +683,11 @@ def cmd_sizes(a):
             chip = _board_file(d).get("board", {}).get("chip", "")
             row = res["boards"].setdefault(name, {"chip": chip})
             for which in ("py", impl):
-                use_web(which)
+                if not a.no_web:
+                    use_web(which)
                 t0 = time.time()
-                rc, log = build_board(name, d, build_env(which), logdir)
+                rc, log = build_board(name, d, build_env(which, comp=comp),
+                                      logdir)
                 if rc != 0:
                     row[which] = {"failed": os.path.relpath(log, ROOT)}
                     print("%s %s: BUILD FAILED (%s)" % (name, which, log),
@@ -613,14 +697,14 @@ def cmd_sizes(a):
                        "seconds": round(time.time() - t0)}
                 mp = board_map(d)
                 if which != "py" and mp:
-                    got["module"] = map_summary(mp, which)
+                    got["module"] = map_summary(mp, comp)
                     got["map"] = os.path.relpath(mp, ROOT)
                 row[which] = got
                 print("%s %-4s %s" % (name, which, got), flush=True)
     finally:
         if os.path.isdir(web_copy("py")):
             use_web("py")
-        save("sizes-%s.json" % impl, res)
+        save("sizes-%s%s.json" % (comp.stamp, impl), res)
     print(size_table(res))
     return 0
 
@@ -830,7 +914,7 @@ def objdump_loads(d, impl):
     if tool is None or not os.path.exists(elf):
         return None
     out = {}
-    for obj, sec, addr, n in map_rows(mp, objects_of(impl)):
+    for obj, sec, addr, n in map_rows(mp, objects_of(INDEX)):
         if obj.startswith("modmoy_index") or not sec.startswith(".text.") or not n:
             continue
         # The bytes, disassembled raw: the ELF's property tables mark some
@@ -956,6 +1040,9 @@ def main(argv=None):
                                 "index as the C twin, on every target")
     p.add_argument("--board", choices=sorted(_boards()),
                    help="the S3 board `bench` builds for, flashes and drives")
+    p.add_argument("--component", choices=sorted(COMPONENTS), default="index",
+                   help="the component `host`, `sanitize` and `sizes` run for; "
+                        "`bench` and `ci-time` are the index's")
     sub = p.add_subparsers(dest="cmd", required=True)
     h = sub.add_parser("host")
     h.add_argument("--impl", default="c")
@@ -967,6 +1054,9 @@ def main(argv=None):
                    help="libFuzzer's budget; 0 skips it")
     z = sub.add_parser("sizes")
     z.add_argument("--impl", default="c")
+    z.add_argument("--no-web", action="store_true",
+                   help="leave the browser console out: build the boards "
+                        "against whatever dist/ holds")
     z.add_argument("targets", nargs="*")
     b = sub.add_parser("bench")
     b.add_argument("--impl", default="c")
@@ -983,6 +1073,8 @@ def main(argv=None):
     c = sub.add_parser("ci-time")
     c.add_argument("--impl", default="c")
     a = p.parse_args(argv)
+    if a.cmd in ("bench", "ci-time") and a.component != "index":
+        raise SystemExit("`%s` is the index's: --component index" % a.cmd)
     return {"host": cmd_host, "sanitize": cmd_sanitize, "sizes": cmd_sizes,
             "bench": cmd_bench, "ci-time": cmd_ci_time}[a.cmd](a)
 

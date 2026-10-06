@@ -3,7 +3,7 @@ sprint 1a's harness (tools/moy_index_spike.py) CI runs.
 
   * tests/test_moy_index.py itself, run on the boards' VM -- the desktop
     MicroPython, both object models -- over the native module, under a
-    stand-in for the little of pytest it uses;
+    stand-in for the little of pytest it uses (tests/vm_suite.py);
   * a seeded random walk of the API against the Python twin, every answer and
     every exception compared, for each native binding on the host;
   * the API-sequence fuzz (native/moy_index/fuzz_index.c) under
@@ -14,110 +14,23 @@ The store trace over the native index is tests/test_semantic_traces.py's.
 
 import os
 import random
-import subprocess
 
 import pytest
 
 from runtime import moy_index
 from tools import moy_index_spike
+import vm_suite
 from unix_mp import find_unix_mp, require_unix_mp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 NATIVE = moy_index_spike.host_bindings()
 
-# The bits of pytest tests/test_moy_index.py uses, for a VM that has none.
-PYTEST_STANDIN = '''
-_PARAMS = {}
-
-
-class _Raises:
-    def __init__(self, exc):
-        self.exc = exc
-        self.value = None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, t, v, tb):
-        if t is None:
-            raise AssertionError("did not raise %r" % (self.exc,))
-        if not issubclass(t, self.exc):
-            return False
-        self.value = v
-        return True
-
-
-def raises(exc):
-    return _Raises(exc)
-
-
-def fixture(*a, **k):
-    return lambda fn: fn
-
-
-class _Mark:
-    def parametrize(self, name, values):
-        def deco(fn):
-            _PARAMS[fn] = (name, values)
-            return fn
-        return deco
-
-
-mark = _Mark()
-'''
-
-VM_RUNNER = '''
-import sys
-sys.path[:] = [@DIR@]
-import moy_index
-assert @NATIVE@ == (not hasattr(moy_index, "__file__")), moy_index
-import pytest
-ns = {"__name__": "test_moy_index"}
-exec(open(@TEST@).read(), ns)
-passed = failed = 0
-for name in sorted(ns):
-    fn = ns[name]
-    if not name.startswith("test_"):
-        continue
-    cases = [{}]
-    if fn in pytest._PARAMS:
-        pname, values = pytest._PARAMS[fn]
-        cases = [{pname: v} for v in values]
-    for kw in cases:
-        try:
-            fn(moy_index.Index, **kw)
-            passed += 1
-        except Exception as e:
-            failed += 1
-            print("FAIL", name, kw, repr(e))
-print("RESULT", passed, failed)
-'''
-
 
 def _vm_suite(exe, tmp_path, native):
-    """tests/test_moy_index.py on `exe`: (passed, failed, output). The
-    `runtime` package's moy_index re-exports the top-level one: the builtin
-    when no moy_index.py is on the path (native), else the Python twin."""
-    d = tmp_path / ("vm_%s" % ("native" if native else "python"))
-    (d / "runtime").mkdir(parents=True)
-    (d / "pytest.py").write_text(PYTEST_STANDIN)
-    (d / "runtime" / "__init__.py").write_text("")
-    (d / "runtime" / "moy_index.py").write_text("from moy_index import *\n")
-    if not native:
-        with open(os.path.join(ROOT, "runtime", "moy_index.py")) as f:
-            (d / "moy_index.py").write_text(f.read())
-    script = d / "run.py"
-    script.write_text(VM_RUNNER.replace("@DIR@", repr(str(d)))
-                      .replace("@NATIVE@", repr(native))
-                      .replace("@TEST@", repr(os.path.join(HERE, "test_moy_index.py"))))
-    out = subprocess.run([exe, str(script)], capture_output=True, text=True,
-                         timeout=300)
-    text = out.stdout + out.stderr
-    last = [ln for ln in text.splitlines() if ln.startswith("RESULT ")]
-    assert out.returncode == 0 and last, text
-    _, passed, failed = last[-1].split()
-    return int(passed), int(failed), text
+    """tests/test_moy_index.py on `exe`: (passed, failed, output)."""
+    return vm_suite.run(exe, tmp_path, "moy_index", "test_moy_index.py", native,
+                        "moy_index.Index")
 
 
 @pytest.mark.parametrize("native", [True, False], ids=["native", "python"])
