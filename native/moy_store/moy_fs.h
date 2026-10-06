@@ -41,6 +41,8 @@ void moy_fs_unmark(const char *path);
 
 // The plain verbs. moy_fs_read_file refuses a file over `cap` with EFBIG.
 int moy_fs_read_file(const char *path, size_t cap, moy_buf_t *out);
+int moy_fs_read_vol(const moy_vol_t *v, const char *rest, size_t cap,
+                    moy_buf_t *out);
 int moy_fs_write(const char *path, const void *data, size_t n);
 int moy_fs_write_bytes(const char *path, const void *data, size_t n);
 int moy_fs_exists(const char *path);
@@ -50,6 +52,10 @@ int moy_fs_remove(const char *path);
 // The crash-safe write and its readers.
 int moy_fs_publish(const char *path, const char *data, size_t n);
 int moy_fs_read(const char *path, const char *at, moy_buf_t *out);
+// moy_fs_read with the file opened as `name` in the working folder `here`
+// (moy_vol_enter), or by `name` (a path) when `here` is NULL.
+int moy_fs_read_in(const char *path, moy_vol_here_t *here, const char *name,
+                   moy_buf_t *out);
 int moy_fs_read_stamped(const char *path, moy_buf_t *out);
 int moy_fs_bak_stamp(const char *path, uint32_t *chars, uint32_t *crc);
 int moy_fs_claim(const char *path, const char *dest, uint32_t chars,

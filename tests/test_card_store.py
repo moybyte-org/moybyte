@@ -144,7 +144,7 @@ class _Store:
         if root in self.dead:
             raise OSError(28)
 
-    def sweep_store(self, root):
+    def sweep_store(self, root, seed=None):
         self.calls.append(("sweep", root))
 
     def seed(self, seed, root, shelf, progress=None):
@@ -327,46 +327,47 @@ def _module_part(path, names):
 
 @pytest.fixture
 def guition(monkeypatch):
-    """The Guition's `tf_card` over a `machine.SDCard` that models the sdspi
-    singleton: a second construction while one is held fails exactly as the
-    board's did (ESP_ERR_INVALID_STATE) until `deinit()` frees the host."""
-    state = types.SimpleNamespace(held=None, built=[])
+    """The Guition's `tf_card` over a `moy_sd` that opens its SPI3 bus once
+    and a `moy_store` whose card volume mounts or refuses."""
+    state = types.SimpleNamespace(opened=[], cards=[], error=None)
+    moy_sd = types.ModuleType("moy_sd")
 
-    class SDCard:
-        def __init__(self, **kw):
-            if state.held is not None:
-                raise OSError(-259, "ESP_ERR_INVALID_STATE")
-            state.held = self
-            state.built.append(kw)
+    def open_(host, sck, mosi, miso, cs, khz):
+        state.opened.append((host, sck, mosi, miso, cs, khz))
+        return 1024
+    moy_sd.open = open_
+    moy_store = types.ModuleType("moy_store")
 
-        def deinit(self):
-            state.held = None
-
-    machine = types.ModuleType("machine")
-    machine.SDCard = SDCard
-    monkeypatch.setitem(sys.modules, "machine", machine)
+    def card(sectors, driver=None):
+        if state.error is not None:
+            raise state.error
+        state.cards.append(sectors)
+        return types.SimpleNamespace(sectors=sectors)
+    moy_store.card = card
+    monkeypatch.setitem(sys.modules, "moy_sd", moy_sd)
+    monkeypatch.setitem(sys.modules, "moy_store", moy_store)
     state.mod = _module_part(GUITION_S3 / "modules" / "moy_runtime.py",
-                             ["SD_PINS", "SD_CARTS_ROOT", "tf_card"])
+                             ["SD_PINS", "SD_SPI_HOST", "SD_FREQ_KHZ",
+                              "SD_CARTS_ROOT", "tf_card"])
     return state
 
 
 def test_the_guition_card_is_on_spi3_never_the_panels_host(guition):
-    """machine.SDCard's SPI slot numbers run opposite to the host numbers: slot
-    2 is SPI3 (the card's pins), slot 3 is SPI2, the panel's QSPI host."""
+    """SPI3 is host 2 (the card's pins); host 1 is SPI2, the panel's QSPI."""
     guition.mod["tf_card"]()
-    assert guition.built == [dict(slot=2, sck=12, mosi=11, miso=13, cs=10)]
+    assert guition.opened == [(2, 12, 11, 13, 10, 20000)]
+    assert guition.cards == [1024]
 
 
-def test_a_failed_mount_frees_the_guitions_spi_host(guition, vfs):
-    """The mount fails with the card constructed: without `deinit()` every later
-    construction in the boot (the dev channel's included) reads
-    ESP_ERR_INVALID_STATE until a reboot."""
-    vfs.error = OSError(19)
-
+def test_a_card_with_no_filesystem_leaves_the_bus_up_and_says_so(guition):
+    """The store's volume refuses a card it cannot read; the bus stays up,
+    since nothing here tears it down, and the next try opens it again."""
+    guition.error = OSError(19)
     assert card_store.mount(guition.mod["tf_card"], say=lambda _m: None) is False
-
-    assert guition.held is None
-    guition.mod["tf_card"]()            # constructs again
+    assert "no card interface" in card_store.STATUS
+    guition.error = None
+    guition.mod["tf_card"]()
+    assert len(guition.opened) == 2
 
 
 @pytest.mark.parametrize("path,names", [

@@ -459,3 +459,14 @@ def test_the_keypress_site_stores_the_tick_it_does_not_call(tmp_path):
              and isinstance(n.func.value, ast.Attribute)
              and n.func.value.attr == "history"]
     assert calls == []
+
+
+def test_a_commit_with_no_editor_open_still_journals(tmp_path):
+    """A commit from the dev channel or a hard-exit path can run with no Code
+    tab open: the write and its journal line must not hang on the editor."""
+    ws = _cart_ws(tmp_path)
+    cart_dir = ws.project.cart["path"]
+    before = len(history_router.moy_catalogue.moy_journal.journal_list(cart_dir))
+    ws.editor = None
+    assert ws.project.commit_code(SRC + "# headless\n") is True
+    assert len(history_router.moy_catalogue.moy_journal.journal_list(cart_dir)) == before + 1

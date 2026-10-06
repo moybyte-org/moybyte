@@ -805,14 +805,14 @@ print("DRIVER_DONE")
 '''
 
 STORE_TRACE = """\
-create Beta 0.1 a/carts/beta.moy
-create Alpha 1.1 a/carts/alpha.moy
-create Gamma 2.1 a/carts/gamma.moy
+create Beta 0.1 a/carts/local.beta.moy
+create Alpha 1.1 a/carts/local.alpha.moy
+create Gamma 2.1 a/carts/local.gamma.moy
 catalogue Alpha=1.1 Beta=0.1 Gamma=2.1
 rescan Alpha=1.1 Beta=0.1 Gamma=2.1
 entry 1.1 ['h', 'title']
 load 1.1 Alpha 24 True
-path a/carts/beta.moy True True
+path a/carts/local.beta.moy True True
 new New Cart 3.1
 duplicate Alpha copy 4.1 True
 shelf Alpha=1.1 Alpha copy=4.1 Beta=0.1 Gamma=2.1 New Cart=3.1
@@ -824,12 +824,12 @@ shelf Alpha=1.1 Beta=0.1 Delta=4.2 New Cart=3.1
 reconciled False STALE
 unlisted [] True True
 other store Other=2.2 True Alpha
-back Alpha=1.1 Beta=0.1 Delta=4.2 New Cart=3.1 True b/carts/other.moy True
+back Alpha=1.1 Beta=0.1 Delta=4.2 New Cart=3.1 True b/carts/local.other.moy True
 seed Seed One=5.1/2 Seed Two=6.1/1
 seed warm Seed One=5.1/2 Seed Two=6.1/1
 seed bump Seed One=5.1/3 Seed Two=6.1/1
 load Seed One 3 [('speed', 9)] 1024 True [] [] None {}
-loaded ['author', 'blocks', 'canvas', 'cfg', 'edit', 'extensions', 'flags', 'format', 'fps', 'graduated', 'icon', 'images', 'input', 'main', 'map', 'memory', 'palette', 'permissions', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'title', 'type', 'version', 'writable']
+loaded ['author', 'blocks', 'canvas', 'cfg', 'edit', 'extensions', 'flags', 'format', 'fps', 'graduated', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'palette', 'permissions', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'title', 'type', 'version', 'writable']
 publish True
 recover True True
 journal 1 None False False

@@ -226,7 +226,17 @@ SITE_SKIP_DIRS = ("thumbs", "__pycache__")
 SITE_SKIP_FILES = ()
 
 
+# The predicate is the native store's wherever it is linked (moy_pack.c's
+# moy_store_skip, which the archive takes too); this body is its twin.
+try:
+    from moy_store import skip as _native_skip
+except ImportError:
+    _native_skip = None
+
+
 def _skip(name):
+    if _native_skip is not None:
+        return _native_skip(name, False)
     if name in SKIP_DIRS or name in SKIP_FILES:
         return True
     for suf in SKIP_SUFFIXES:

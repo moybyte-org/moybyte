@@ -13,8 +13,14 @@
 // display runs, as long as the caller never flushes the panel mid-transaction
 // (the device desktop loop is single-threaded, so SD sessions run between frames).
 //
-// This exposes a thin block-device backend (init/read/write/deinit); the Python
-// side (moybyte_sd._NativeSDBlockDev) wraps it for vfs.mount.
+// It exposes the card as sectors (init/read/write/deinit), and as the C calls
+// native/moy_store's owned card volume reads through (moy_sd_card_io): the
+// store's FATFS over its own read cache, mounted at /sd (moybyte_sd).
+//
+// `open` is the same card on a host of its own (the Guition S3's SPI3): the
+// bus is initialised here, once, and never torn down -- a machine.SDCard's
+// finaliser frees its host at a VM stop, which the kernel's store must
+// outlive.
 
 #include <string.h>
 
@@ -24,6 +30,7 @@
 #ifdef ESP_IDF_VERSION
 #include "esp_heap_caps.h"
 #include "driver/sdspi_host.h"
+#include "driver/spi_master.h"
 #include "sdmmc_cmd.h"
 #define MOY_SD_HAVE_IDF 1
 #else
@@ -67,6 +74,46 @@ static void moy_sd_check(esp_err_t err, const char *what) {
 
 // init(host=1, cs=39, freq_khz=20000) -> sector count.
 // host is the IDF SPI host id (SPI2_HOST == 1), the SAME host esp_lcd initialized.
+#if MOY_SD_HAVE_IDF
+static bool s_bus_ours = false;
+#endif
+
+static mp_obj_t moy_sd_init(size_t n_args, const mp_obj_t *args);
+
+// open(host, sck, mosi, miso, cs, freq_khz) -> sectors: the bus initialised
+// here, once (a second open returns the card already up), then init's attach.
+static mp_obj_t moy_sd_open(size_t n_args, const mp_obj_t *args) {
+#if MOY_SD_HAVE_IDF
+    if (s_card != NULL) {
+        return mp_obj_new_int_from_uint(s_card->csd.capacity);
+    }
+    int host = mp_obj_get_int(args[0]);
+    if (!s_bus_ours) {
+        spi_bus_config_t bus = {
+            .sclk_io_num = mp_obj_get_int(args[1]),
+            .mosi_io_num = mp_obj_get_int(args[2]),
+            .miso_io_num = mp_obj_get_int(args[3]),
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+            .max_transfer_sz = MOY_SD_RUN * MOY_SD_SECTOR,
+        };
+        esp_err_t err = spi_bus_initialize((spi_host_device_t)host, &bus, SPI_DMA_CH_AUTO);
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("moy_sd bus failed: %d"),
+                              (int)err);
+        }
+        s_bus_ours = true;
+    }
+    mp_obj_t a[3] = { args[0], args[4], n_args > 5 ? args[5] : MP_OBJ_NEW_SMALL_INT(20000) };
+    return moy_sd_init(3, a);
+#else
+    (void)n_args;
+    (void)args;
+    mp_raise_NotImplementedError(MP_ERROR_TEXT("moy_sd needs ESP-IDF"));
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_sd_open_obj, 5, 6, moy_sd_open);
+
 static mp_obj_t moy_sd_init(size_t n_args, const mp_obj_t *args) {
 #if MOY_SD_HAVE_IDF
     int host = (n_args > 0) ? mp_obj_get_int(args[0]) : 1;
@@ -91,7 +138,12 @@ static mp_obj_t moy_sd_init(size_t n_args, const mp_obj_t *args) {
     hostcfg.slot = s_dev;
     hostcfg.max_freq_khz = freq_khz;
 
-    s_card = (sdmmc_card_t *)malloc(sizeof(sdmmc_card_t));
+    // The card's state is no DMA buffer: PSRAM, so a card adds only its
+    // one-sector bounce to internal SRAM.
+    s_card = (sdmmc_card_t *)heap_caps_malloc(sizeof(sdmmc_card_t), MALLOC_CAP_SPIRAM);
+    if (s_card == NULL) {
+        s_card = (sdmmc_card_t *)malloc(sizeof(sdmmc_card_t));
+    }
     if (s_card == NULL) {
         moy_sd_release();
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_sd: out of memory"));
@@ -129,7 +181,12 @@ static void moy_sd_require(void) {
 // write costs. The run's bounce is taken for this call and given back; when
 // internal DMA memory cannot give it the run halves, and at one sector the
 // standing bounce carries it.
-static void moy_sd_xfer(uint32_t start, uint8_t *buf, uint32_t count, bool write) {
+// The card's sectors moved, raising nothing: ESP_OK or the driver's error.
+// What native/moy_store's card volume reads and writes through.
+int moy_sd_card_io(uint32_t start, uint8_t *buf, uint32_t count, int write) {
+    if (s_card == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
     uint32_t run = count < MOY_SD_RUN ? count : MOY_SD_RUN;
     uint8_t *big = NULL;
     while (run > 1) {
@@ -144,10 +201,10 @@ static void moy_sd_xfer(uint32_t start, uint8_t *buf, uint32_t count, bool write
     if (big == NULL) {
         run = 1;
     }
-    for (uint32_t i = 0; i < count; i += run) {
+    esp_err_t err = ESP_OK;
+    for (uint32_t i = 0; i < count && err == ESP_OK; i += run) {
         uint32_t n = count - i < run ? count - i : run;
         uint8_t *at = buf + (size_t)i * MOY_SD_SECTOR;
-        esp_err_t err;
         if (write) {
             memcpy(bounce, at, (size_t)n * MOY_SD_SECTOR);
             err = sdmmc_write_sectors(s_card, bounce, start + i, n);
@@ -157,17 +214,18 @@ static void moy_sd_xfer(uint32_t start, uint8_t *buf, uint32_t count, bool write
                 memcpy(at, bounce, (size_t)n * MOY_SD_SECTOR);
             }
         }
-        if (err != ESP_OK) {
-            if (big != NULL) {
-                heap_caps_free(big);
-            }
-            moy_sd_check(err, write ? "write" : "read");
-        }
     }
     if (big != NULL) {
         heap_caps_free(big);
     }
+    return err;
 }
+
+static void moy_sd_xfer(uint32_t start, uint8_t *buf, uint32_t count, bool write) {
+    esp_err_t err = moy_sd_card_io(start, buf, count, write);
+    moy_sd_check(err, write ? "write" : "read");
+}
+
 #endif
 
 // read(start_block, buf, count) -> None. buf must hold count*512 bytes.
@@ -233,6 +291,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_sd_deinit_obj, moy_sd_deinit);
 static const mp_rom_map_elem_t moy_sd_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),     MP_OBJ_NEW_QSTR(MP_QSTR_moy_sd) },
     { MP_ROM_QSTR(MP_QSTR_init),         MP_ROM_PTR(&moy_sd_init_obj) },
+    { MP_ROM_QSTR(MP_QSTR_open),         MP_ROM_PTR(&moy_sd_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_read),         MP_ROM_PTR(&moy_sd_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_write),        MP_ROM_PTR(&moy_sd_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_sector_count), MP_ROM_PTR(&moy_sd_sector_count_obj) },

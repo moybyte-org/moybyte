@@ -519,10 +519,11 @@ def test_the_p4_denies_exactly_its_missing_hardware():
     assert sorted(board_config.native_denials(P4)) == [
         "moy_audio", "moy_flush", "moy_sd"]
     assert board_config.native_denials(TDECK) == {}
-    # The Guition's two denials are bring-up staging decisions (SD is stage 4,
-    # audio stage 5 -- docs/board_ports_2026-08.md); each names its stage in
-    # board.toml. Update there first, this pin second.
-    assert sorted(board_config.native_denials(GUITION)) == ["moy_audio", "moy_sd"]
+    # The Guition's denial is a bring-up staging decision (audio is stage 5 --
+    # docs/board_ports_2026-08.md), named with its stage in board.toml; its
+    # card opens through moy_sd (the store's card volume). Update there first,
+    # this pin second.
+    assert sorted(board_config.native_denials(GUITION)) == ["moy_audio"]
 
 
 # -- the [flash]/[monitor] declaration (#202 Phase A) -------------------------

@@ -18,9 +18,12 @@ except ImportError:  # pragma: no cover
     os = None
 
 try:
-    from moy_fs import (_exists, _mkdir, set_publish_root)
+    from moy_fs import (_exists, _mkdir, set_publish_root, _native as _store)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_exists, _mkdir, set_publish_root)
+    from runtime.moy_fs import (_exists, _mkdir, set_publish_root,
+                                _native as _store)
+if _store is not None and not hasattr(_store, "rmtree"):
+    _store = None
 
 
 CARTS_DIR = "/sd/moybyte/carts"
@@ -174,10 +177,28 @@ def cart_path(root, folder):
     return root + "/" + folder
 
 
-def cart_folder(name):
+# A cart's id is `<author>.<name>` (#162): the folder is the id and the
+# extension. The built-ins' author is BUILTIN_NS; a cart a kid makes takes its
+# author from the Settings field USER_NS_KEY, which is USER_NS until profiles
+# exist (docs/kernel_store_2026-10.md section 12).
+BUILTIN_NS = "moybyte"
+USER_NS = "local"
+USER_NS_KEY = "author"
+
+
+def builtin_name(path):
+    """The folder a built-in at `path` was shipped as (`files.moy` for
+    `.../moybyte.files.moy`), or None for any other cart: an app's identity
+    cart is a built-in, never a cart a kid made or copied."""
+    name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
+    head = BUILTIN_NS + "."
+    return name[len(head):] if name.startswith(head) else None
+
+
+def cart_folder(name, ns=None):
     """The folder a cart named `name` (a title, or a slug already) is stored
-    in: its slug and the extension."""
-    return slug(name) + CART_EXT
+    in: `<ns>.<slug>` and the extension, or the bare slug with no `ns`."""
+    return (slug(ns) + "." if ns else "") + slug(name) + CART_EXT
 
 
 def store_path(root, rel):
@@ -321,6 +342,9 @@ def _leave(here):
 
 
 def _rmtree(path):
+    if _store is not None:
+        _store.rmtree(path)
+        return
     try:
         names = os.listdir(path)
     except OSError:

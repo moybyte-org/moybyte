@@ -258,13 +258,14 @@ def _seed_system_carts(carts_dir):
     matching the device's seed_builtins, so a bumped cart actually propagates on the host
     (it used to seed once and ignore version bumps)."""
     os.makedirs(carts_dir, exist_ok=True)
-    moy_carts.sweep_store(carts_dir)     # a retired seed leaves the store, once
-    if not os.path.isdir(SYSTEM_CARTS):
-        return
-    names = [n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
+    names = ([n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
+             if os.path.isdir(SYSTEM_CARTS) else [])
+    # A retired seed leaves the store, once, and so do the built-ins' folders
+    # from before their namespace (#162).
+    moy_carts.sweep_store(carts_dir, folders=names)
     for name in names:
         src = os.path.join(SYSTEM_CARTS, name)
-        dst = moy_carts.cart_path(carts_dir, name)
+        dst = moy_carts.cart_path(carts_dir, moy_carts.BUILTIN_NS + "." + name)
         if not os.path.exists(dst):
             shutil.copytree(src, dst)
         elif _manifest_version(src) > _manifest_version(dst):

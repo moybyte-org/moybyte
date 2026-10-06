@@ -483,7 +483,8 @@ class ProjectStore:
                 ws.cart_error = "Could not save -- " + str(smsg)
                 return False
             parsed = status == ws.carts_store.SAVE_OK
-            ws.editor.dirty = False
+            if ws.editor is not None:
+                ws.editor.dirty = False
             # Save is invisible (spec Section 7 / #111): no "SAVED" happy path --
             # save_status carries FAILURES only, so a successful commit just
             # CLEARS any stale failure text (the old "SAVED" write also did the

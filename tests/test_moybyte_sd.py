@@ -174,7 +174,7 @@ class World:
     leaked one would make the second test in a file silently exercise nothing.
     """
 
-    NAMES = ("machine", "os", "vfs", "moy_sd")
+    NAMES = ("machine", "os", "vfs", "moy_sd", "moy_store")
 
     def __init__(self):
         self.log = []
@@ -186,6 +186,21 @@ class World:
         self.os()
         self.vfs()
         self.moy_sd()
+        self.moy_store()
+
+    def moy_store(self):
+        m = types.ModuleType("moy_store")
+        log = self.log
+
+        class Card:
+            def __init__(self, sectors):
+                self.sectors = sectors
+
+        def card(sectors, driver=None):
+            log.append(("moy_store.card", sectors))
+            return Card(sectors)
+        m.card = card
+        sys.modules["moy_store"] = m
 
     def machine(self, **kw):
         sys.modules["machine"] = _machine(self.log, **kw)
@@ -354,142 +369,6 @@ def test_the_live_mount_publishes_the_card_at_slash_sd(w):
     bd = w.mod.mount_sd_live()
     assert ("vfs.mount", "/sd", bd) in w.log
     assert bd.sectors == 15_523_840
-
-
-# -- the block device ---------------------------------------------------------
-
-
-def test_readblocks_asks_for_as_many_sectors_as_the_buffer_holds(w):
-    bd = w.mod._NativeSDBlockDev(64)
-    assert bd.readblocks(7, bytearray(2048)) == 0
-    assert ("moy_sd.read", 7, 2048, 4) in w.log
-
-
-def test_writeblocks_asks_for_as_many_sectors_as_the_buffer_holds(w):
-    bd = w.mod._NativeSDBlockDev(64)
-    assert bd.writeblocks(9, bytearray(1536)) == 0
-    assert ("moy_sd.write", 9, 1536, 3) in w.log
-
-
-def test_byte_offset_addressing_is_refused_without_touching_the_card(w):
-    """FAT addresses whole 512-blocks here. Passing a byte offset through as if
-    it were a block index would write the wrong sectors, so it must raise --
-    and must not have issued the transfer first."""
-    bd = w.mod._NativeSDBlockDev(64)
-    for verb in (bd.readblocks, bd.writeblocks):
-        with pytest.raises(OSError) as e:
-            verb(0, bytearray(512), 16)
-        assert e.value.args[0] == 22
-    assert w.log == []
-
-
-def test_the_ioctl_answers_the_two_questions_fat_asks(w):
-    bd = w.mod._NativeSDBlockDev(4096)
-    assert bd.ioctl(4, 0) == 4096          # BLOCK_COUNT
-    assert bd.ioctl(5, 0) == 512           # BLOCK_SIZE
-    for op in (1, 2, 3, 6):                # INIT / DEINIT / SYNC / BLOCK_ERASE
-        assert bd.ioctl(op, 0) == 0
-
-
-# -- the block device's sector cache ------------------------------------------
-
-
-class _Card:
-    """A card as moy_sd sees it: sectors in a bytearray, every transfer
-    counted. `torn` makes the next write land on the card and then report
-    failure, the case a cache dropped AFTER the write would get wrong."""
-
-    def __init__(self, sectors=64):
-        self.disk = bytearray((i * 7) & 0xFF for i in range(sectors * 512))
-        self.reads = 0
-        self.torn = False
-        m = self.module = types.ModuleType("moy_sd")
-        m.SECTOR_SIZE = 512
-        m.read = self.read
-        m.write = self.write
-
-    def read(self, block, buf, n):
-        self.reads += 1
-        buf[:n * 512] = self.disk[block * 512:(block + n) * 512]
-
-    def write(self, block, buf, n):
-        self.disk[block * 512:(block + n) * 512] = bytes(buf[:n * 512])
-        if self.torn:
-            self.torn = False
-            raise OSError(5)
-
-    def sector(self, block, n=1):
-        return bytes(self.disk[block * 512:(block + n) * 512])
-
-
-@pytest.fixture
-def card(w):
-    c = _Card()
-    sys.modules["moy_sd"] = c.module
-    return c
-
-
-def test_a_sector_read_again_comes_from_the_cache(w, card):
-    bd = w.mod._NativeSDBlockDev(64)
-    one, two = bytearray(512), bytearray(512)
-    bd.readblocks(5, one)
-    bd.readblocks(5, two)
-    assert card.reads == 1
-    assert bytes(one) == bytes(two) == card.sector(5)
-
-
-def test_a_multi_sector_read_goes_to_the_card(w, card):
-    """File data: read once, so caching it would only evict the directory."""
-    bd = w.mod._NativeSDBlockDev(64)
-    buf = bytearray(4 * 512)
-    bd.readblocks(8, buf)
-    bd.readblocks(8, buf)
-    assert card.reads == 2 and bytes(buf) == card.sector(8, 4)
-
-
-def test_every_read_is_the_cards_through_any_mix_of_reads_and_writes(w, card):
-    """The property the store's writes rest on, over a cache small enough to
-    evict constantly: whatever was written, by one sector or many, over a
-    cached sector or not, the next read of it is what the card holds."""
-    import random
-
-    rnd = random.Random(224)
-    bd = w.mod._NativeSDBlockDev(64, cache=6)
-    for step in range(4000):
-        n = rnd.choice((1, 1, 1, 2, 3, 8))
-        block = rnd.randrange(0, 64 - n + 1)
-        if rnd.random() < 0.3:
-            data = bytes(rnd.randrange(256) for _ in range(n * 512))
-            bd.writeblocks(block, bytearray(data))
-            assert card.sector(block, n) == data
-        else:
-            buf = bytearray(n * 512)
-            bd.readblocks(block, buf)
-            assert bytes(buf) == card.sector(block, n), step
-    assert card.reads < 4000 * 0.7
-
-
-def test_a_write_that_fails_leaves_no_stale_sector(w, card):
-    """The cached copy goes BEFORE the write is issued: a write the card took
-    and then reported failed must not leave the old sector being served."""
-    bd = w.mod._NativeSDBlockDev(64)
-    buf = bytearray(512)
-    bd.readblocks(3, buf)
-    card.torn = True
-    with pytest.raises(OSError):
-        bd.writeblocks(3, bytearray(b"\xAA" * 512))
-    bd.readblocks(3, buf)
-    assert bytes(buf) == b"\xAA" * 512 == card.sector(3)
-
-
-def test_a_new_mount_starts_with_an_empty_cache(w, card):
-    bd = w.mod._NativeSDBlockDev(64)
-    buf = bytearray(512)
-    bd.readblocks(2, buf)
-    card.disk[2 * 512] ^= 0xFF          # the card changed under the mount
-    assert bd.ioctl(1, 0) == 0          # INIT
-    bd.readblocks(2, buf)
-    assert card.reads == 2 and bytes(buf) == card.sector(2)
 
 
 # -- the helpers ---------------------------------------------------------------

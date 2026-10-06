@@ -22,7 +22,13 @@
 #include "lib/littlefs/lfs2.h"
 #include "lib/oofatfs/ff.h"
 #include "lib/oofatfs/diskio.h"
+#include "moy_cat.h"
 #include "moy_fs.h"
+#include "moy_journal.h"
+#include "moy_json.h"
+#include "moy_load.h"
+#include "moy_pack.h"
+#include "moy_seed.h"
 
 #define CHECK(c) do { \
         if (!(c)) { \
@@ -40,6 +46,9 @@ static long last_cut = -1;   // the cut the sequence under check was made with  
 // -- the imports, counted ----------------------------------------------------------
 
 static long scratch, kept;
+
+void moy_store_tick(void) {
+}
 
 void *moy_store_alloc(size_t n) {
     size_t *p = calloc(1, n + 2 * sizeof(size_t));
@@ -230,6 +239,183 @@ static void unmount_cold(void) {
     CHECK(scratch == 0 && kept == 0);
 }
 
+// -- the catalogue over whatever the medium holds ---------------------------------------
+
+static long scanned;
+
+static int count_entry(void *ctx, const moy_cat_entry_t *e) {
+    (void)ctx;
+    CHECK(e->folder_n > 0 && e->main != NULL && e->man != NULL);
+    CHECK(moy_json_valid(e->man, e->man_n) == MOY_JSON_OK);
+    for (size_t i = 0; i < e->scenes_n; i++) {
+        CHECK(e->scenes[i] != NULL);
+    }
+    scanned++;
+    return 0;
+}
+
+static int count_cart(void *ctx, const moy_cart_t *c) {
+    (void)ctx;
+    CHECK(c->src != NULL && c->e.main != NULL);
+    for (size_t i = 0; i < c->scenes_n; i++) {
+        CHECK(c->scenes[i].text != NULL);
+    }
+    scanned++;
+    return 0;
+}
+
+// A scan of the root and an entry of each folder in it: whatever a cut left,
+// it reads or refuses, leaves the working folder as it found it and holds no
+// scratch after.
+static void scan_all(const char *root) {
+    DWORD cdir = fatfs.cdir;
+    moy_cat_scan(root, count_entry, NULL, NULL);
+    moy_cat_entry(root, count_entry, NULL, NULL);
+    moy_cat_entry("/carts/a.moy", count_entry, NULL, NULL);
+    moy_cat_load("/carts/a.moy", count_cart, NULL, NULL);
+    moy_cat_load("/carts/moybyte.hop.moy", count_cart, NULL, NULL);
+    for (int i = 0; i < 6; i++) {
+        char p[32];
+        snprintf(p, sizeof p, "/carts/c%d.moy", i);
+        moy_cat_load(p, count_cart, NULL, NULL);
+    }
+    if (medium == 0) {
+        CHECK(fatfs.cdir == cdir);
+    }
+    CHECK(scratch == 0);
+}
+
+// moy_json over arbitrary bytes: whatever it accepts it can write again as
+// text it accepts, with the same kinds, and nothing it refuses is read.
+static void json_bytes(const uint8_t *data, size_t size) {
+    moy_buf_t inf;
+    if (moy_seed_inflate(data, size, &inf) == 0) {     // any stream: refused or whole
+        moy_buf_free(&inf);
+    }
+    const char *t = (const char *)data, *end = t + size;
+    int ok = moy_json_valid(t, size) == MOY_JSON_OK;
+    const char *s = moy_json_ws(t, end);
+    const char *e = moy_json_value(s, end, 1u);
+    CHECK(ok == (e != NULL && moy_json_ws(e, end) == end));
+    if (e == NULL) {
+        return;
+    }
+    size_t n = moy_json_canon(s, e, NULL, 0);
+    char *out = malloc(n + 1u);
+    CHECK(out != NULL);
+    CHECK(moy_json_canon(s, e, out, n) == n);
+    CHECK(moy_json_valid(out, n) == MOY_JSON_OK);
+    CHECK(moy_json_kind(out, out + n) == moy_json_kind(s, e)
+          || (moy_json_kind(s, e) == MOY_JSON_INT));
+    int64_t v;
+    moy_json_int(s, e, &v);
+    moy_json_truthy(s, e);
+    if (*s == '{' || *s == '[') {
+        moy_json_iter_t it;
+        const char *k, *ke, *x, *xe;
+        moy_json_iter(&it, s, e);
+        while (moy_json_next(&it, &k, &ke, &x, &xe)) {
+            if (k != NULL) {
+                char *d = malloc(moy_json_strlen(k, ke) + 1u);
+                CHECK(d != NULL);
+                CHECK(moy_json_str(k, ke, d) == moy_json_strlen(k, ke));
+                moy_json_str_eq(k, ke, k, ke);
+                free(d);
+            }
+        }
+        const char *g, *ge;
+        moy_json_get(s, e, "title", &g, &ge);
+    }
+    free(out);
+}
+
+// A random tree for the catalogue: cart folders whose manifests, sheets and
+// scenes come from the input, scanned on the medium.
+static void run_cat(const uint8_t *data, size_t size) {
+    size_t i = 1;
+#define NEXT() (i < size ? data[i++] : 0u)
+    medium = NEXT() & 1u;
+    format();
+    mount();
+    CHECK(moy_fs_mkdir("/carts") == 0);
+    unsigned carts = NEXT() % 6u;
+    char path[96];
+    static const char *const manifests[] = {
+        "{\"title\": \"A\", \"main\": \"main.py\", \"icon\": [3, 2, 2]}",
+        "{\"format\": \"moy-1\", \"assets\": {\"scenes\": [\"b\", 3, \"a\"]}}",
+        "{ broken", "[1]", "{\"runtime\": \"wasm\", \"writable\": [\"x\"], \"memory\": 2}",
+        "{\"canvas\": {\"width\": 160, \"height\": 120}, \"input\": [\"touch\"]}",
+        "{\"assets\": {\"scenes\": [[1]]}}", "{\"main\": 7}",
+    };
+    for (unsigned c = 0; c < carts; c++) {
+        snprintf(path, sizeof path, "/carts/c%u.moy", c);
+        moy_fs_mkdir(path);
+        unsigned roll = NEXT();
+        char file[128];
+        if (roll & 1u) {
+            snprintf(file, sizeof file, "%s/manifest.json", path);
+            size_t take = NEXT() % 48u;
+            if (roll & 2u && i + take <= size) {
+                moy_fs_write(file, data + i, take);     // bytes from the input
+                i += take;
+            } else {
+                const char *m = manifests[NEXT() % (sizeof manifests / sizeof manifests[0])];
+                moy_fs_write(file, m, strlen(m));
+            }
+        }
+        if (roll & 4u) {
+            snprintf(file, sizeof file, "%s/main.py", path);
+            moy_fs_write(file, "x", 1);
+        }
+        if (roll & 8u) {
+            snprintf(file, sizeof file, "%s/sprites.moygfx", path);
+            char sheet[600];
+            size_t n = 0;
+            unsigned lines = NEXT() % 20u;
+            for (unsigned l = 0; l < lines && n + 40 < sizeof sheet; l++) {
+                unsigned w = NEXT() % 36u;
+                for (unsigned k = 0; k < w; k++) {
+                    sheet[n++] = "0123456789abcdef \t"[NEXT() % 18u];
+                }
+                sheet[n++] = (NEXT() & 1u) ? '\n' : '\r';
+            }
+            moy_fs_write(file, sheet, n);
+        }
+        if (roll & 16u) {
+            snprintf(file, sizeof file, "%s/scenes", path);
+            if (roll & 32u) {
+                moy_fs_write(file, "f", 1);
+            } else {
+                moy_fs_mkdir(file);
+                snprintf(file, sizeof file, "%s/scenes/a.moyscene", path);
+                moy_fs_write(file, "[]", 2);
+                snprintf(file, sizeof file, "%s/scenes/b.moyscene", path);
+                moy_fs_write(file, "[]", 2);
+            }
+        }
+    }
+    // the archive: a cart packed and unpacked again, then the archive with
+    // input bytes written over part of it, unpacked
+    char top[64];
+    if (moy_pack("/carts/c0.moy", "c0.moy", "/carts/p.zip", NEXT() & 1u) >= 0) {
+        CHECK(moy_unpack("/carts/p.zip", "/carts/u", top, sizeof top) >= 0);
+        moy_buf_t z;
+        if (moy_fs_read_file("/carts/p.zip", (size_t)-1, &z) == 0) {
+            for (size_t k = 0; k < z.n && i < size; k += 1u + NEXT() % 32u) {
+                z.p[k] = (char)NEXT();
+            }
+            moy_fs_write("/carts/q.zip", z.p, z.n);
+            moy_buf_free(&z);
+            moy_unpack("/carts/q.zip", "/carts/v", top, sizeof top);
+        }
+        moy_adopt("/carts/u", "/carts/c1.moy");
+    }
+#undef NEXT
+    scanned = 0;
+    scan_all("/carts");
+    unmount_cold();
+}
+
 // -- the sequences -------------------------------------------------------------------------
 
 #define ROOT "/carts"
@@ -256,6 +442,47 @@ static int same(const moy_buf_t *b, const char *p, size_t n) {
     return b->n == n && memcmp(b->p, p, n) == 0;
 }
 
+// -- the seed --------------------------------------------------------------------------------
+//
+// A cart of the roster: its JSON (src the version's text), as one stored
+// deflate block, which is what moy_seed_inflate reads first.
+
+#define SEED_DIR ROOT "/moybyte.hop.moy"
+
+static char cart_json[8000];
+static uint8_t blob[8100];
+
+static size_t seed_blob(const char *src, size_t n, int version) {
+    size_t k = (size_t)snprintf(cart_json, sizeof cart_json,
+        "{\"title\": \"Hop\", \"type\": \"game\", \"version\": %d, "
+        "\"cfg\": {\"speed\": 3}, \"sprites\": \"0123\\n4567\", "
+        "\"scenes\": {\"b\": \"[]\", \"a\": \"[1]\"}, \"src\": \"", version);
+    memcpy(cart_json + k, src, n);
+    k += n;
+    memcpy(cart_json + k, "\"}", 2);
+    k += 2;
+    blob[0] = 1;                            // BFINAL, stored
+    blob[1] = (uint8_t)k;
+    blob[2] = (uint8_t)(k >> 8);
+    blob[3] = (uint8_t)~k;
+    blob[4] = (uint8_t)(~k >> 8);
+    memcpy(blob + 5, cart_json, k);
+    return k + 5u;
+}
+
+// One boot's seed of the cart: inflated, then written if the folder lacks it.
+static int seed_once(const char *src, size_t n, int version) {
+    size_t bn = seed_blob(src, n, version);
+    moy_buf_t text;
+    if (moy_seed_inflate(blob, bn, &text) != 0) {
+        return -1;
+    }
+    CHECK(text.n == bn - 5u && memcmp(text.p, cart_json, text.n) == 0);
+    int rc = moy_seed_write(ROOT, "moybyte.hop.moy", text.p, text.n);
+    moy_buf_free(&text);
+    return rc;
+}
+
 // The state before the sequence: the folders, and v1 published at A and B.
 static void before(int with_v1) {
     format();
@@ -268,6 +495,26 @@ static void before(int with_v1) {
         CHECK(moy_fs_publish(FILE_A, v1, n1) == 0);
         CHECK(moy_fs_write_bytes(FILE_B, v1, n1) == 0);
     }
+    if (scase == 9 || scase == 10) {        // a cart with v1 committed (and v2)
+        uint32_t seq;
+        CHECK(moy_fs_publish(FILE_A, v1, n1) == 0);
+        CHECK(moy_journal_append("/carts/a.moy", "main.py", v1, n1, -1, NULL, 0, 1, &seq) == 0);
+        if (scase == 10) {
+            CHECK(moy_fs_publish(FILE_A, v2, n2) == 0);
+            CHECK(moy_journal_append("/carts/a.moy", "main.py", v2, n2, 1, "[1]", 3, 2,
+                                     &seq) == 0);
+        }
+    }
+    if (scase == 11) {                      // a staged copy of the cart, v2
+        CHECK(moy_fs_mkdir("/carts/stage") == 0);
+        CHECK(moy_fs_write("/carts/stage/main.py", v2, n2) == 0);
+        CHECK(moy_fs_write(FILE_A, v1, n1) == 0);
+    }
+    if (scase == 8) {                       // a seeded cart a kid has played
+        CHECK(seed_once(v1, n1, 1) == 1);
+        CHECK(moy_fs_write(SEED_DIR "/pmem.json", "[7]", 3) == 0);
+        CHECK(moy_fs_write(SEED_DIR "/config.json", "{\"kid\": 1}", 10) == 0);
+    }
     unmount_cold();
 }
 
@@ -276,11 +523,31 @@ static void before(int with_v1) {
 //   1  publish v2 over v1 with no root           4  publish v2, then claim it
 //   2  write_bytes v2 over v1                    5  publish v2 twice in a row
 //   6  publish v2, then claim it into its own folder
+//   7  seed the cart (v2) where there is none
+//   8  seed v2 over the seeded v1, a kid's saves and config in it
 static void sequence(void) {
     if (scase != 1) {
         moy_fs_root(ROOT);
     }
     switch (scase) {
+        case 7: case 8:
+            seed_once(v2, n2, 2);
+            break;
+        case 9: {                           // a commit: published, then journaled
+            uint32_t seq;
+            if (moy_fs_publish(FILE_A, v2, n2) == 0) {
+                moy_journal_append("/carts/a.moy", "main.py", v2, n2, 0, "[[2]]", 5, 3, &seq);
+            }
+            break;
+        }
+        case 11:
+            moy_adopt("/carts/stage", "/carts/a.moy");
+            break;
+        case 10: {
+            char f[32];
+            moy_journal_undo("/carts/a.moy", NULL, 0, f, sizeof f);
+            break;
+        }
         case 0: case 1: case 3:
             moy_fs_publish(FILE_A, v2, n2);
             break;
@@ -309,7 +576,64 @@ static void verify(int had_v1) {
         moy_fs_root(ROOT);
     }
     moy_buf_t b;
-    if (scase == 2) {
+    if (scase == 11) {
+        // The cart is the old one or the new one whole, or the old one aside
+        // where cart_index.recover puts it back.
+        if (moy_fs_read_file(FILE_A, (size_t)-1, &b) == 0) {
+            CHECK(same(&b, v1, n1) || same(&b, v2, n2));
+            moy_buf_free(&b);
+        } else {
+            CHECK(moy_fs_read_file("/carts/stage.old/main.py", (size_t)-1, &b) == 0);
+            CHECK(same(&b, v1, n1));
+            moy_buf_free(&b);
+        }
+    } else if (scase == 9 || scase == 10) {
+        // The journal reads whatever the cut left, a walk restores whole
+        // snapshots or refuses, and the next commit lands.
+        char f[32];
+        int pass;
+        CHECK(moy_fs_read(FILE_A, NULL, &b) == 0);
+        CHECK(same(&b, v1, n1) || same(&b, v2, n2));
+        moy_buf_free(&b);
+        for (pass = 0; pass < 2; pass++) {
+            int rc = moy_journal_undo("/carts/a.moy", NULL, 0, f, sizeof f);
+            CHECK(rc == 0 || rc == 1);
+            CHECK(moy_fs_read(FILE_A, NULL, &b) == 0);
+            CHECK(same(&b, v1, n1) || same(&b, v2, n2));
+            moy_buf_free(&b);
+            rc = moy_journal_redo("/carts/a.moy", NULL, 0, f, sizeof f);
+            CHECK(rc == 0 || rc == 1);
+            CHECK(moy_fs_read(FILE_A, NULL, &b) == 0);
+            CHECK(same(&b, v1, n1) || same(&b, v2, n2));
+            moy_buf_free(&b);
+        }
+        uint32_t seq = 0;
+        CHECK(moy_fs_publish(FILE_A, v1, n1) == 0);
+        CHECK(moy_journal_append("/carts/a.moy", "main.py", v1, n1, -1, NULL, 0, 4, &seq) == 0);
+        CHECK(moy_journal_compact("/carts/a.moy") >= 0);
+        moy_buf_t snap;
+        if (seq != 0 && moy_journal_snap("/carts/a.moy", seq, &snap) == 0) {
+            CHECK(same(&snap, v1, n1));
+            moy_buf_free(&snap);
+        }
+    } else if (scase == 7 || scase == 8) {
+        // The next boot seeds again: whatever the cut left, the cart is whole.
+        int rc = seed_once(v2, n2, 2);
+        CHECK(rc == 0 || rc == 1);
+        CHECK(moy_fs_read_file(SEED_DIR "/main.py", (size_t)-1, &b) == 0);
+        CHECK(same(&b, v2, n2));
+        moy_buf_free(&b);
+        CHECK(moy_fs_read_file(SEED_DIR "/manifest.json", (size_t)-1, &b) == 0);
+        CHECK(strstr(b.p, "\"version\": 2") != NULL);
+        moy_buf_free(&b);
+        CHECK(moy_fs_read_file(SEED_DIR "/config.json", (size_t)-1, &b) == 0);
+        CHECK(strcmp(b.p, "{\"speed\": 3}") == 0
+              || (scase == 8 && strcmp(b.p, "{\"kid\": 1}") == 0));
+        moy_buf_free(&b);
+        CHECK(moy_fs_read_file(SEED_DIR "/scenes/a.moyscene", (size_t)-1, &b) == 0);
+        CHECK(strcmp(b.p, "[1]") == 0);
+        moy_buf_free(&b);
+    } else if (scase == 2) {
         int rc = moy_fs_read_file(FILE_B, (size_t)-1, &b);
         if (rc == 0) {
             CHECK(same(&b, v1, n1) || same(&b, v2, n2));
@@ -338,6 +662,7 @@ static void verify(int had_v1) {
             moy_buf_free(&b);
         }
     }
+    scan_all(ROOT);
     unmount_cold();
 }
 
@@ -355,7 +680,7 @@ static void load_image(void) {
 
 // Every cut of one sequence: the number of cuts made.
 static long every_cut(void) {
-    int had_v1 = scase != 3;
+    int had_v1 = scase != 3 && scase != 7;
     before(had_v1);
     save_image();
     mount();                    // uncut, to count its writes
@@ -384,7 +709,7 @@ static long matrix(void) {
                                        {0, 300} };
     long cuts = 0;
     for (medium = 0; medium < 2; medium++) {
-        for (scase = 0; scase < 7; scase++) {
+        for (scase = 0; scase < 12; scase++) {
             for (size_t s = 0; s < sizeof sizes / sizeof sizes[0]; s++) {
                 n1 = sizes[s][0];
                 n2 = sizes[s][1];
@@ -400,10 +725,18 @@ static long matrix(void) {
 
 // A seeded program: the medium, the case, the sizes, the bytes, the cut.
 static void run(const uint8_t *data, size_t size) {
+    if (size && (data[0] & 0xc0u) == 0xc0u) {
+        json_bytes(data + 1, size - 1u);
+        return;
+    }
+    if (size && (data[0] & 0xc0u) == 0x80u) {
+        run_cat(data, size);
+        return;
+    }
     size_t i = 0;
 #define NEXT() (i < size ? data[i++] : 0u)
     medium = NEXT() & 1u;
-    scase = NEXT() % 7u;
+    scase = NEXT() % 12u;
     n1 = ((size_t)NEXT() << 4) % sizeof v1;
     n2 = ((size_t)NEXT() << 4) % sizeof v2;
     unsigned s1 = NEXT(), s2 = NEXT(), same_head = NEXT() & 1u;
@@ -415,7 +748,7 @@ static void run(const uint8_t *data, size_t size) {
     long cut = (long)NEXT() << 8;
     cut |= (long)NEXT();
 #undef NEXT
-    int had_v1 = scase != 3;
+    int had_v1 = scase != 3 && scase != 7;
     before(had_v1);
     mount();
     writes = 0;
@@ -436,7 +769,12 @@ int main(int argc, char **argv) {
     uint32_t seed = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 1u;
     unsigned long runs = argc > 2 ? strtoul(argv[2], NULL, 0) : 300ul;
     uint32_t rng = seed ? seed : 1u;
-    uint8_t buf[16];
+    uint8_t buf[160];
+    static const char *const texts[] = {
+        "{\"a\": [1, 2.5e3, -0, \"\\u00e9\\ud83d\\ude00\"], \"a\": {}}",
+        "[true, false, null, NaN, -Infinity, 1e400, \"\\/\\b\"]",
+        "{\"t\": \"x\", \"\": 0.1}", "  \"\\u0000\" ",
+    };
     for (unsigned long r = 0; r < runs; r++) {
         for (size_t k = 0; k < sizeof buf; k++) {
             rng ^= rng << 13;
@@ -444,7 +782,20 @@ int main(int argc, char **argv) {
             rng ^= rng << 5;
             buf[k] = (uint8_t)rng;
         }
-        run(buf, sizeof buf);
+        size_t n = 16;
+        if (r % 4u == 1u) {
+            buf[0] |= 0xc0u;            // moy_json over a mutated text
+            const char *t = texts[r % (sizeof texts / sizeof texts[0])];
+            n = strlen(t) + 1u;
+            memcpy(buf + 1, t, n - 1u);
+            buf[1 + (rng % (n - 1u))] = (uint8_t)(rng >> 8);
+        } else if (r % 4u == 2u) {
+            buf[0] = (uint8_t)((buf[0] & 0x3fu) | 0x80u);   // a catalogue
+            n = sizeof buf;
+        } else {
+            buf[0] &= 0x3fu;
+        }
+        run(buf, n);
     }
     printf("fuzz_fs: %lu programs, seed %u, ok\n", runs, seed);
     return 0;

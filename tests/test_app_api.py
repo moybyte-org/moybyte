@@ -162,7 +162,7 @@ def test_calc_is_app_rejects_lookalikes(tmp_path):
     assert not CalcAppLayer.is_app({"title": "My Calc", "permissions": ("calc",),
                                     "path": "/x/calc.moy"})
     assert CalcAppLayer.is_app({"title": "Calc", "permissions": ("calc",),
-                                "path": "/carts/calc.moy"})
+                                "path": "/carts/moybyte.calc.moy"})
 
 
 # -- the bar contract is a HOST GUARANTEE (ui_refactor_2026-08 Phase 2) --------

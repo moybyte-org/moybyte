@@ -48,7 +48,7 @@ def test_every_cart_the_interface_returns_carries_its_handle(tmp_path):
         whole = cat.load(e["h"])
         assert whole["h"] == e["h"] and whole["src"] == SRC
         assert "src" not in e                        # an entry has no payloads
-    assert cat.new(root)["h"] == cat.handle(root + "/new_cart.moy")
+    assert cat.new(root)["h"] == cat.handle(root + "/local.new_cart.moy")
 
 
 def test_a_rescan_keeps_a_folders_handle(tmp_path):
@@ -102,9 +102,9 @@ def test_a_catalogue_reconciles_its_own_root_alone(tmp_path):
     assert [e["title"] for e in cat.catalogue(other)] == ["Alpha"]
     assert all(cat.valid(c["h"]) for c in made)
     assert twin["h"] != made[1]["h"]
-    assert cat.path(twin["h"]) == twin["path"] == other + "/alpha.moy"
-    assert cat.path(made[1]["h"]) == root + "/alpha.moy"
-    assert cat.handle(other + "/alpha.moy") == twin["h"]
+    assert cat.path(twin["h"]) == twin["path"] == other + "/local.alpha.moy"
+    assert cat.path(made[1]["h"]) == root + "/local.alpha.moy"
+    assert cat.handle(other + "/local.alpha.moy") == twin["h"]
     back = cat.catalogue(root)
     assert [e["h"] for e in back] == [made[1]["h"], made[0]["h"]]
     assert cat.valid(twin["h"])
@@ -190,8 +190,9 @@ def test_the_seed_runs_after_the_scan_and_reads_only_what_it_writes(tmp_path,
 
     seed[1]["version"] = 3          # Two
     again = cat.seed(seed, root, shelf)
-    assert any("/two.moy/" in p for p in opened)
-    assert not [p for p in opened if "/one.moy" in p or "/three.moy" in p]
+    assert any("/moybyte.two.moy/" in p for p in opened)
+    assert not [p for p in opened
+                if "/moybyte.one.moy" in p or "/moybyte.three.moy" in p]
     assert [(e["title"], e["version"], e["h"]) for e in again] == [
         ("One", 2, shelf[0]["h"]), ("Three", 2, shelf[1]["h"]),
         ("Two", 3, shelf[2]["h"])]
@@ -262,3 +263,29 @@ def test_the_line_sees_a_caller_that_crosses_it():
             if isinstance(n, ast.Attribute) and n.attr in _CART_BODIES
             and _names_the_store(n.value)]
     assert sorted(hits) == ["catalogue", "load", "scan"]
+
+
+def test_the_time_machine_reads_the_journal_and_restores_forward(tmp_path):
+    """#136: a file's timeline is its journal entries, each snapshot reads by
+    its seq, and a restore publishes an old snapshot as a NEW commit -- the
+    history only grows, and the restore is itself undoable."""
+    root = str(tmp_path / "carts")
+    cat.ensure_dirs(root)
+    h = cat.create("Clock", root, src=SRC)["h"]
+    main = cat.path(h) + "/main.py"
+    texts = [SRC + "# %d\n" % i for i in range(3)]
+    for t in texts:
+        from runtime import moy_fs
+        moy_fs._write_atomic(main, t)
+        cat.journal_append(h, "main.py", t)
+    tl = cat.journal_list(h, "main.py")
+    assert [e["seq"] for e in tl] == [1, 2, 3]
+    assert cat.journal_list(h, "sprites.moygfx") == []
+    assert [cat.journal_snap(h, e["seq"]) for e in tl] == texts
+    assert cat.journal_snap(h, 99) is None
+    assert cat.journal_restore(h, 1) == 4
+    assert cat.load(h)["src"] == texts[0]
+    assert [e["seq"] for e in cat.journal_list(h)] == [1, 2, 3, 4]
+    assert cat.journal_undo(h) == "main.py"
+    assert cat.load(h)["src"] == texts[2]
+    assert cat.journal_restore(h, 99) is None

@@ -92,7 +92,7 @@ def test_a_seed_cart_survives_its_first_frames(console, folder):
     on it is asserting on exactly what a person would see.
     """
     ws, driver = console
-    target = os.path.join(ws.carts_root, folder + ".moy")
+    target = os.path.join(ws.carts_root, "moybyte." + folder + ".moy")
     for i, cart in enumerate(ws.launcher.items):
         if os.path.abspath(cart["path"]) == os.path.abspath(target):
             ws.launcher.sel = i

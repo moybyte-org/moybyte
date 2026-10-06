@@ -243,7 +243,7 @@ class CartManager:
         ws = self.ws
         try:
             new, items = self.store.call(lambda: (
-                moy_catalogue.new(ws.carts_root),
+                moy_catalogue.new(ws.carts_root, ns=self._ns()),
                 moy_catalogue.catalogue(ws.carts_root)))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte new cart failed:", exc)
@@ -262,11 +262,17 @@ class CartManager:
             return
         try:
             self.apply(self.store.call(lambda: (
-                moy_catalogue.duplicate(sel["h"], ws.carts_root),
+                moy_catalogue.duplicate(sel["h"], ws.carts_root, ns=self._ns()),
                 moy_catalogue.catalogue(ws.carts_root))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte duplicate failed:", exc)
             self._say_if_full(exc, "CAN'T COPY")
+
+    def _ns(self):
+        """The author a made cart's id takes (#162): the Settings field, else
+        the store's default until profiles exist."""
+        ns = self.ws.system.get(moy_catalogue.USER_NS_KEY)
+        return ns if isinstance(ns, str) and ns else moy_catalogue.USER_NS
 
     def _say_if_full(self, exc, refusal):
         """A store that ran out of room says so on screen, in the system

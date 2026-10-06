@@ -64,6 +64,11 @@ at the moment of use and never captured here.
 """
 
 try:
+    from moy_store_base import builtin_name
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import builtin_name
+
+try:
     from chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                         DEFAULT_THEME, DEFAULT_VARIANT, theme_colors, THEMES,
                         THEME_VARIANTS)
@@ -174,7 +179,7 @@ class Appearance:
         # survives a reboot. Embedded/path-less carts fall back to the title slug.
         path = cart.get("path")
         if path:
-            name = path.rsplit("/", 1)[-1]
+            name = builtin_name(path) or path.rsplit("/", 1)[-1]
             if name.endswith(".moy"):
                 name = name[:-4]
             return name

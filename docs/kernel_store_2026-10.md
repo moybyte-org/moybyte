@@ -94,11 +94,11 @@ fence becomes per card transaction (the C block device against `moy_flush`'s
 | the card volume (slice 8) | `device/moybyte_sd.py`'s block device and its read cache (T-Deck); `machine.SDCard` under `VfsFat` (Guition S3, the P4s) | `moy_vol`'s owned FAT backend: the kernel's `FATFS` over a C block device with the read cache |
 | the crash-safe write | `runtime/moy_fs.py` | `native/moy_store/moy_fs.h` |
 | the index | `runtime/moy_index.py` | `native/moy_index/moy_index.h`, over `moy_htab` |
-| the catalogue, the covers' facts, create / duplicate / delete | `runtime/moy_carts.py`'s entry, `_each`, `_sheet_icon`, `create` and siblings | `+native/moy_store/moy_cat.h` |
-| the seed | `runtime/moy_seed.py` | `+native/moy_store/moy_seed.h` |
-| loading a cart | `moy_carts.load` | `+native/moy_store/moy_load.h` |
-| the journal | `runtime/moy_journal.py` | `+native/moy_store/moy_journal.h` |
-| reading manifests and journal lines | `json` | the settings store's scanner, as `+native/moy_spine/moy_json.h`: one body for both |
+| the catalogue, the covers' facts, create / duplicate / delete | `runtime/moy_carts.py`'s entry, `_each`, `_sheet_icon`, `create` and siblings | `native/moy_store/moy_cat.h` |
+| the seed | `runtime/moy_seed.py` | `native/moy_store/moy_seed.h` |
+| loading a cart | `moy_carts.load` | `native/moy_store/moy_load.h` |
+| the journal | `runtime/moy_journal.py` | `native/moy_store/moy_journal.h` |
+| reading manifests and journal lines | `json` | the settings store's scanner, as `native/moy_spine/moy_json.h`: one body for both |
 
 `native/moy_store/` builds three ways, as `native/moy_index/` does: a
 MicroPython usermod (boards, browser, unix MicroPython), a host library for

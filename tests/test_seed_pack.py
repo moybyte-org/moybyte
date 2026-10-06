@@ -148,11 +148,11 @@ def test_a_newer_baked_version_still_reseeds(tmp_path):
     cart = {"title": "Hop", "type": "game", "version": 1, "src": "OLD",
             "cfg": {}, "edit": []}
     moy_carts.seed_packed([("Hop", 1, gen.pack_cart(cart))], root)
-    assert moy_carts._read(root + "/hop.moy/main.py") == "OLD"
+    assert moy_carts._read(root + "/moybyte.hop.moy/main.py") == "OLD"
 
     cart2 = dict(cart, version=2, src="NEW")
     assert moy_carts.seed_packed([("Hop", 2, gen.pack_cart(cart2))], root) == 1
-    assert moy_carts._read(root + "/hop.moy/main.py") == "NEW"
+    assert moy_carts._read(root + "/moybyte.hop.moy/main.py") == "NEW"
 
 
 # -- the Zero's own gate ---------------------------------------------------
@@ -180,7 +180,7 @@ def test_an_empty_store_is_one_with_no_cart_in_it(tmp_path, monkeypatch):
     os.makedirs(root + "/journal")
     assert zero_host.store_is_empty(root) is True
 
-    os.makedirs(root + "/hop_quest.moy")
+    os.makedirs(root + "/moybyte.hop_quest.moy")
     assert zero_host.store_is_empty(root) is False
 
 
@@ -210,13 +210,13 @@ def test_the_zeros_seed_never_rewrites_a_cart_that_is_there(tmp_path, monkeypatc
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
-    os.makedirs(root + "/hop_quest.moy")
-    with open(root + "/hop_quest.moy/main.py", "w") as f:
+    os.makedirs(root + "/moybyte.hop_quest.moy")
+    with open(root + "/moybyte.hop_quest.moy/main.py", "w") as f:
         f.write("the kid's own")
 
     written = zero_host.seed_carts(root)
 
-    with open(root + "/hop_quest.moy/main.py") as f:
+    with open(root + "/moybyte.hop_quest.moy/main.py") as f:
         assert f.read() == "the kid's own", \
             "a baked version bump overwrote a cart the kid edited"
     # ...and everything the store did NOT have arrived, which is the half the
@@ -245,7 +245,7 @@ def test_a_zero_that_has_been_used_still_receives_a_new_builtin(tmp_path, monkey
 
     assert zero_host.seed_carts(root) == 1, \
         "a used Zero must still receive a built-in it has never had"
-    assert os.path.isdir(root + "/brand_new.moy")
+    assert os.path.isdir(root + "/moybyte.brand_new.moy")
 
 
 def test_the_zeros_seed_fills_an_empty_store(tmp_path, monkeypatch):

@@ -11,6 +11,11 @@ every tier -- the monitor scales from the 320x240 shelf to the desktop.
 """
 
 try:
+    from moy_store_base import builtin_name
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import builtin_name
+
+try:
     from chrome import THEMES, THEME_VARIANTS, theme_colors
 except ImportError:  # pragma: no cover - direct host import
     from runtime.chrome import THEMES, THEME_VARIANTS, theme_colors
@@ -179,8 +184,7 @@ class AppearanceAppLayer:
         # left every device's Appearance cart unclaimed, so Settings ->
         # APPEARANCE silently did nothing (on-glass P4, 2026-07-25). Pinned by
         # tests/test_device_seed_parity.py's app-identity parity test.
-        base = str(path).replace("\\", "/").rsplit("/", 1)[-1]
-        return base in ("theme_picker.moy", "appearance.moy")
+        return builtin_name(path) in ("theme_picker.moy", "appearance.moy")
 
     def relayout(self, w, h, fs, cs=None):
         self.layout = AppearanceLayout(w, h, fs, self._surf.windowed(), cs)

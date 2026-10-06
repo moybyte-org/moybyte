@@ -1,4 +1,7 @@
 # Map (grep -n a name to jump there):
+#   journal_list      a file's entries (#136's timeline)
+#   journal_snap      one entry's snapshot
+#   journal_restore   an old snapshot appended as a new commit
 #   journal_append    record a commit: snapshot and op batch
 #   journal_undo      restore the previous snapshot
 #   journal_redo      re-apply the next snapshot
@@ -691,3 +694,94 @@ def journal_compact(cart_dir):
     cursors = _journal_prune_cursors(cursors, remaining)
     _journal_write_cursors(cur_path, cursors, remaining)
     return len(dropped)
+
+
+# -- the time machine's reads (#136) -------------------------------------------
+#
+# The journal is a timeline already: every commit's full snapshot, by seq. The
+# Editor's timeline reads it through these three; a restore appends the old
+# snapshot as a NEW commit, so going back in time is itself undoable and the
+# history only ever grows.
+
+
+def journal_list(cart_dir, file=None):
+    """The entries of `file` (every file when None), oldest first: the dicts
+    the log's lines read as."""
+    jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
+    return [e for e in _journal_load_entries(log_path)
+            if file is None or e["file"] == file]
+
+
+def journal_snap(cart_dir, seq):
+    """Entry `seq`'s snapshot, checked as an undo checks it, or None when it is
+    gone or damaged."""
+    jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
+    for e in _journal_load_entries(log_path):
+        if e["seq"] == seq:
+            return _journal_read_snap(jdir, e)
+    return None
+
+
+def journal_restore(cart_dir, seq):
+    """Publish entry `seq`'s snapshot over its file and append it as a new
+    commit: the new seq, None when the snapshot is gone or damaged (or the
+    file already holds it)."""
+    jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
+    for e in _journal_load_entries(log_path):
+        if e["seq"] == seq:
+            data = _journal_read_snap(jdir, e)
+            if data is None:
+                return None
+            _write_atomic(cart_dir + "/" + e["file"], data)
+            return journal_append(cart_dir, e["file"], data)
+    return None
+
+
+# -- the native journal (native/moy_store/moy_journal.c) ------------------------
+#
+# Wherever the store's native module imports (every board, the browser, the
+# desktop MicroPython), the journal is the C one: the same files, the same
+# lines (json.dumps's text), the same walk. CPython keeps the body above, the
+# reference tests/test_store_native.py holds the C to.
+
+try:
+    import moy_store as _native
+except ImportError:
+    _native = None
+if _native is not None and not hasattr(_native, "journal_append"):
+    _native = None
+
+if _native is not None:
+    def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):  # noqa: F811
+        if new_bytes is None:
+            return None
+        return _native.journal_append(cart_dir, file, new_bytes,
+                                      None if grad is None else int(grad),
+                                      json.dumps(list(ops)) if ops else None,
+                                      _journal_ts())
+
+    def journal_undo(cart_dir, files=None):  # noqa: F811
+        return _native.journal_undo(cart_dir, None if files is None else list(files))
+
+    def journal_redo(cart_dir, files=None):  # noqa: F811
+        return _native.journal_redo(cart_dir, None if files is None else list(files))
+
+    def journal_can_undo(cart_dir, files=None):  # noqa: F811
+        return _native.journal_can(cart_dir, False,
+                                   None if files is None else list(files))
+
+    def journal_can_redo(cart_dir, files=None):  # noqa: F811
+        return _native.journal_can(cart_dir, True,
+                                   None if files is None else list(files))
+
+    def journal_compact(cart_dir):  # noqa: F811
+        return _native.journal_compact(cart_dir)
+
+    def journal_list(cart_dir, file=None):  # noqa: F811
+        return _native.journal_list(cart_dir, file)
+
+    def journal_snap(cart_dir, seq):  # noqa: F811
+        return _native.journal_snap(cart_dir, seq)
+
+    def journal_restore(cart_dir, seq):  # noqa: F811
+        return _native.journal_restore(cart_dir, seq, _journal_ts())

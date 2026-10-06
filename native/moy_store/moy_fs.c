@@ -149,13 +149,18 @@ static int resolve(const char *path, moy_vol_t *v, const char **rest) {
 int moy_fs_read_file(const char *path, size_t cap, moy_buf_t *out) {
     moy_vol_t v;
     const char *rest;
-    moy_vol_file_t *f;
     out->p = NULL;
     out->n = 0;
     int rc = resolve(path, &v, &rest);
-    if (rc == 0) {
-        rc = moy_vol_open(&v, rest, MOY_VOL_READ, &f);
-    }
+    return rc ? rc : moy_fs_read_vol(&v, rest, cap, out);
+}
+
+int moy_fs_read_vol(const moy_vol_t *v, const char *rest, size_t cap,
+                    moy_buf_t *out) {
+    moy_vol_file_t *f;
+    out->p = NULL;
+    out->n = 0;
+    int rc = moy_vol_open(v, rest, MOY_VOL_READ, &f);
     if (rc != 0) {
         return rc;
     }
@@ -634,7 +639,18 @@ static void heal(const char *path, const moy_buf_t *b) {
 }
 
 int moy_fs_read(const char *path, const char *at, moy_buf_t *out) {
-    int rc = moy_fs_read_file(at != NULL ? at : path, (size_t)-1, out);
+    return moy_fs_read_in(path, NULL, at, out);
+}
+
+int moy_fs_read_in(const char *path, moy_vol_here_t *here, const char *name,
+                   moy_buf_t *out) {
+    int rc;
+    if (here != NULL) {
+        const char *at = moy_vol_here_name(here, name);
+        rc = at == NULL ? MOY_ENOMEM : moy_fs_read_vol(&here->v, at, (size_t)-1, out);
+    } else {
+        rc = moy_fs_read_file(name != NULL ? name : path, (size_t)-1, out);
+    }
     moy_buf_t rec;
     if (rc != 0) {
         if (read_bak(path, &rec) != 0) {
@@ -691,7 +707,9 @@ int moy_fs_claim(const char *path, const char *dest, uint32_t chars,
     if (bak == NULL) {
         return 0;
     }
-    int rc = rename2(bak, dest, 0);
+    // `dest` is replaced, as the twin's os.rename replaces it on every VFS: a
+    // snapshot left by a journal line a power cut tore is an orphan.
+    int rc = rename2(bak, dest, 1);
     moy_store_free(bak, bn);
     return rc == 0;
 }

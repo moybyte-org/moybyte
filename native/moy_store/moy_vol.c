@@ -25,6 +25,7 @@ extern __typeof__(f_closedir) f_closedir __attribute__((weak));
 extern __typeof__(f_mkdir) f_mkdir __attribute__((weak));
 extern __typeof__(f_unlink) f_unlink __attribute__((weak));
 extern __typeof__(f_rename) f_rename __attribute__((weak));
+extern __typeof__(f_chdir) f_chdir __attribute__((weak));
 #endif
 #define FF(fn) fn
 #endif
@@ -60,6 +61,7 @@ struct moy_vol_file {
 };
 
 static moy_vol_file_t *open_files;
+static moy_vol_here_t *heres;
 
 static void unlink_open(moy_vol_file_t *f) {
     for (moy_vol_file_t **p = &open_files; *p; p = &(*p)->next) {
@@ -113,6 +115,7 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
         bytes += ((lfs2_t *)v->fs)->cfg->cache_size;
     }
     #endif
+    moy_store_tick();
     moy_vol_file_t *f = moy_store_alloc(bytes);
     if (f == NULL) {
         return MOY_ENOMEM;
@@ -126,7 +129,8 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
         case MOY_VOL_KIND_FAT:
             rc = fat_err(FF(f_open)((FATFS *)v->fs, &f->u.fil, path,
                                 mode == MOY_VOL_WRITE ? FA_WRITE | FA_CREATE_ALWAYS
-                                                      : FA_READ));
+                                : mode == MOY_VOL_APPEND ? FA_WRITE | FA_OPEN_APPEND
+                                : FA_READ));
             break;
         #endif
         #if MOY_VOL_LFS2
@@ -135,7 +139,8 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
             rc = lfs_err(lfs2_file_opencfg(
                 (lfs2_t *)v->fs, &f->u.lf, path,
                 mode == MOY_VOL_WRITE ? LFS2_O_WRONLY | LFS2_O_CREAT | LFS2_O_TRUNC
-                                      : LFS2_O_RDONLY, &f->lcfg));
+                : mode == MOY_VOL_APPEND ? LFS2_O_WRONLY | LFS2_O_CREAT | LFS2_O_APPEND
+                : LFS2_O_RDONLY, &f->lcfg));
             break;
         #endif
         #if MOY_VOL_POSIX
@@ -143,9 +148,11 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
             errno = 0;
             f->u.fd = mode == MOY_VOL_WRITE
                       ? open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666)
+                      : mode == MOY_VOL_APPEND
+                      ? open(path, O_WRONLY | O_CREAT | O_APPEND, 0666)
                       : open(path, O_RDONLY);
             rc = f->u.fd < 0 ? px_err() : 0;
-            if (rc == 0 && mode != MOY_VOL_WRITE) {
+            if (rc == 0 && mode == MOY_VOL_READ) {
                 struct stat st;
                 if (fstat(f->u.fd, &st) == 0 && S_ISDIR(st.st_mode)) {
                     close(f->u.fd);
@@ -316,6 +323,98 @@ void moy_vol_unwind(void) {
     while (open_files != NULL) {
         moy_vol_close(open_files);
     }
+    while (heres != NULL) {
+        moy_vol_leave(heres);
+    }
+}
+
+int moy_vol_enter(const moy_vol_t *v, const char *dir, moy_vol_here_t *h) {
+    memset(h, 0, sizeof *h);
+    h->v = *v;
+    h->dir_n = strlen(dir);
+    while (h->dir_n > 1u && dir[h->dir_n - 1u] == '/') {
+        h->dir_n--;
+    }
+    h->dir = moy_store_alloc(h->dir_n + 1u);
+    if (h->dir == NULL) {
+        return MOY_ENOMEM;
+    }
+    memcpy(h->dir, dir, h->dir_n);
+    #if MOY_VOL_FAT
+    if (v->kind == MOY_VOL_KIND_FAT) {
+        FATFS *fs = v->fs;
+        h->cdir = fs->cdir;
+        #if FF_FS_EXFAT
+        h->cdc_scl = fs->cdc_scl;
+        h->cdc_size = fs->cdc_size;
+        h->cdc_ofs = fs->cdc_ofs;
+        #endif
+        int rc = fat_err(FF(f_chdir)(fs, h->dir));
+        if (rc != 0) {
+            moy_store_free(h->dir, h->dir_n + 1u);
+            h->dir = NULL;
+            return rc;
+        }
+    }
+    #endif
+    h->next = heres;
+    heres = h;
+    return 0;
+}
+
+const char *moy_vol_here_name(moy_vol_here_t *h, const char *name) {
+    if (h->v.kind == MOY_VOL_KIND_FAT) {
+        return name;
+    }
+    if (name[0] == 0) {
+        return h->dir;
+    }
+    size_t nn = strlen(name), need = h->dir_n + nn + 2u;
+    if (need > h->name_cap) {
+        if (h->name != NULL) {
+            moy_store_free(h->name, h->name_cap);
+        }
+        h->name = moy_store_alloc(need);
+        h->name_cap = h->name != NULL ? need : 0u;
+        if (h->name == NULL) {
+            return NULL;
+        }
+    }
+    memcpy(h->name, h->dir, h->dir_n);
+    size_t k = h->dir_n;
+    if (k == 0u || h->name[k - 1u] != '/') {
+        h->name[k++] = '/';
+    }
+    memcpy(h->name + k, name, nn + 1u);
+    return h->name;
+}
+
+void moy_vol_leave(moy_vol_here_t *h) {
+    for (moy_vol_here_t **p = &heres; *p; p = &(*p)->next) {
+        if (*p == h) {
+            *p = h->next;
+            break;
+        }
+    }
+    #if MOY_VOL_FAT
+    if (h->v.kind == MOY_VOL_KIND_FAT && h->dir != NULL) {
+        FATFS *fs = h->v.fs;
+        fs->cdir = h->cdir;
+        #if FF_FS_EXFAT
+        fs->cdc_scl = h->cdc_scl;
+        fs->cdc_size = h->cdc_size;
+        fs->cdc_ofs = h->cdc_ofs;
+        #endif
+    }
+    #endif
+    if (h->name != NULL) {
+        moy_store_free(h->name, h->name_cap);
+    }
+    if (h->dir != NULL) {
+        moy_store_free(h->dir, h->dir_n + 1u);
+    }
+    h->name = h->dir = NULL;
+    h->name_cap = 0;
 }
 
 int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
@@ -370,6 +469,7 @@ int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
 int moy_vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
                  void *ctx) {
     int rc = 0;
+    moy_store_tick();
     switch (v->kind) {
         #if MOY_VOL_FAT
         case MOY_VOL_KIND_FAT: {

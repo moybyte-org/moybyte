@@ -248,11 +248,11 @@ def test_a_several_script_cart_survives_the_bake_and_the_seed(tmp_path):
     root = str(tmp_path / "carts")
     (tmp_path / "carts").mkdir()
     moy_carts.seed_builtins(baked, root=root)
-    seeded = json.loads((tmp_path / "carts" / "port.moy" / "manifest.json")
+    seeded = json.loads((tmp_path / "carts" / "moybyte.port.moy" / "manifest.json")
                         .read_text(encoding="utf-8"))
     assert seeded["sources"] == ["p8.lua", "main.lua", "perf.lua"], \
         "the regenerated manifest must name the order it was written with"
 
-    got = moy_carts.load(root + "/port.moy")
+    got = moy_carts.load(root + "/moybyte.port.moy")
     assert got["src_before"] == [("p8.lua", "-- prologue\n")]
     assert got["src_after"] == [("perf.lua", "-- epilogue\n")]

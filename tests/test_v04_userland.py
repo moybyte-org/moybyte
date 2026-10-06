@@ -1449,7 +1449,7 @@ def _open_cart_map(tmp_path, cart_name):
     sel = None
     for i in range(len(ws.launcher.items)):
         path = ws.launcher.items[i].get("path") or ""
-        if os.path.basename(path) == want:
+        if os.path.basename(path) == "moybyte." + want:
             sel = i
             break
     assert sel is not None, "cart %r not seeded" % cart_name

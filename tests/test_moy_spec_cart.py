@@ -438,7 +438,7 @@ def test_the_flags_blob_round_trips_through_a_seed(tmp_path):
         "src": "def _draw():\n    pass\n",
         "flags": moy_carts.flags_to_hex(table),
     }], root)
-    cart = moy_carts.load(root + "/tagged.moy")
+    cart = moy_carts.load(root + "/moybyte.tagged.moy")
     assert moy_carts.parse_flags(cart["flags"]) == table
 
 

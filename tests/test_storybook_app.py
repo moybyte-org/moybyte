@@ -44,7 +44,7 @@ def test_storybook_cart_is_versioned_system_app():
 
 def test_storybook_identity_rejects_copies_and_impostors():
     real = {"title": "Storybook", "permissions": ["storybook"],
-            "path": "/x/storybook.moy"}
+            "path": "/x/moybyte.storybook.moy"}
     assert StorybookAppLayer.is_app(real)
     assert not StorybookAppLayer.is_app(dict(real, title="My Storybook"))
     assert not StorybookAppLayer.is_app(dict(real, permissions=[]))

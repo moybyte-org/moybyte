@@ -158,9 +158,11 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   outside this: WiFi is its only I/O.
 - **On the T-Deck SD shares the SPI host with the display, and getting it wrong
   HANGS the board** — gray screen, dead USB, no panic (the P4 boards' and the
-  Guition S3's cards have a host of their own: plain `machine.SDCard` under
+  Guition S3's cards have a host of their own, mounted by
   `device/card_store.py`, whose failed-mount `deinit()` is the teardown this
-  board must never do, so it stays off the T-Deck):
+  board must never do, so it stays off the T-Deck). Every S3 card is the
+  store's own volume (`native/moy_store/moy_card.c`: a FATFS over a C block
+  device with the sector cache, `moy_store.card`), read through `moy_sd`:
   - nothing touches SD before the panel is up (#56): a pre-display mount
     re-runs `spi_bus_initialize()` and leaves the host claimed on a populated
     card (`PREFETCH_SD_BEFORE_DISPLAY=False`; carts load after init and fall
@@ -174,11 +176,12 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
     `TFT_CS`/`SD_CS` (driver-owned; park only the LoRa `RADIO_CS`), never flush
     the panel inside a session. `tests/test_moybyte_sd.py` pins which lifecycle
     touches which pin.
-- **The Guition S3's TF card is on SPI3, the panel's QSPI on SPI2**, so the card
-  is plain `machine.SDCard(slot=2, ...)` under `device/card_store.py`
-  (`moy_runtime.tf_card` constructs it; `vfs.mount` once at boot). SPI slot
-  numbers run OPPOSITE to host numbers: slot 3 is the PANEL's SPI2 and dies with
-  `ESP_ERR_INVALID_STATE`, leaking the sdspi singleton until a reboot. The store
+- **The Guition S3's TF card is on SPI3, the panel's QSPI on SPI2**, so
+  `moy_runtime.tf_card` opens it with `moy_sd.open(2, ...)` (the bus
+  initialised once, never torn down) and mounts the store's card volume over
+  it under `device/card_store.py`, once at boot. Host 2 is SPI3; host 1 is the
+  PANEL's SPI2 (as `machine.SDCard` slots, the numbers run opposite: slot 3 is
+  the panel's and dies with `ESP_ERR_INVALID_STATE`). The store
   is `/sd/moybyte/carts` and its sibling documents `/sd/moybyte/*`; no card, a
   dead one or a filesystem the build cannot read all boot on the internal store
   (`/moy/carts`) with one line, and `card_store.STATUS` is the verdict. FAT12/16/32

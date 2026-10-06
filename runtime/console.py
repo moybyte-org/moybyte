@@ -2159,6 +2159,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 break
             title = str(it.get("title") or "").lower()
             folder = path.rsplit("/", 1)[-1].lower()
+            if folder.startswith("moybyte."):      # a built-in's shipped name (#162)
+                folder = folder[len("moybyte."):]
             if title == want and exact_title is None:
                 exact_title = i
             elif (folder == want or folder == want + ".moy") \

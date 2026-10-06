@@ -606,6 +606,14 @@ def cart_state(cart, p, entry, present, manifest=None):
     return "taken"
 
 
+def _moy_carts():
+    try:
+        import moy_carts
+    except ImportError:  # pragma: no cover - host fallback when not yet aliased
+        from runtime import moy_carts
+    return moy_carts
+
+
 def stage_root(root):
     return _sibling_path(root, STAGE_DIR)
 
@@ -1964,17 +1972,9 @@ class Install:
         first), and the record. Inside one store session."""
         rec = load_record(self.root)
         old = rec.get(self.folder)
-        if _exists(self.target):
-            if carry:
-                self._carry(old)
-            aside = self.stage + ".old"
-            if _exists(aside):
-                _rmtree(aside)
-            os.rename(self.target, aside)
-            os.rename(self.stage, self.target)
-            _rmtree(aside)
-        else:
-            os.rename(self.stage, self.target)
+        if carry and _exists(self.target):
+            self._carry(old)
+        _moy_carts().adopt(self.stage, self.target)
         rec[self.folder] = entry
         save_record(self.root, rec)
 

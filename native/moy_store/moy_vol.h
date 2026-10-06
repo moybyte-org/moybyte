@@ -73,6 +73,7 @@ typedef struct {
 enum {
     MOY_VOL_READ = 1,
     MOY_VOL_WRITE = 2,          // created, or truncated
+    MOY_VOL_APPEND = 3,         // created, or written at its end
 };
 
 typedef struct moy_vol_file moy_vol_file_t;
@@ -106,11 +107,41 @@ int moy_vol_rename(const moy_vol_t *v, const char *src, const char *dst);
 // POSIX), and on FAT the rename after `dst` is removed.
 int moy_vol_replace(const moy_vol_t *v, const char *src, const char *dst);
 
+// A working folder. moy_vol_enter makes `dir` the place a relative name
+// starts; moy_vol_here_name gives the name to open a file of it by, and
+// moy_vol_leave puts the volume's working folder back as it was. On FAT it is
+// the volume's own: f_chdir on the FATFS, which then looks a relative name up
+// in that folder alone, where a full path walks every folder above it again;
+// leave restores every working-folder field (cdir, and exFAT's cdc_*) as one,
+// so the VM's working folder is untouched. On littlefs and POSIX it is a path
+// prefix. A raised call leaves through moy_vol_unwind, which leaves too.
+typedef struct moy_vol_here {
+    struct moy_vol_here *next;      // what moy_vol_unwind leaves
+    moy_vol_t v;
+    char *dir;                      // the folder, NUL-terminated
+    size_t dir_n;
+    uint32_t cdir, cdc_scl, cdc_size, cdc_ofs;
+    char *name;                     // moy_vol_here_name's scratch
+    size_t name_cap;
+} moy_vol_here_t;
+
+int moy_vol_enter(const moy_vol_t *v, const char *dir, moy_vol_here_t *h);
+// The name of `name` in the working folder: `name` itself where the volume
+// keeps the folder (FAT), else the folder joined with it. NULL with no memory.
+// The pointer is good until the next call on `h`.
+const char *moy_vol_here_name(moy_vol_here_t *h, const char *name);
+void moy_vol_leave(moy_vol_here_t *h);
+
 // Imported from the host. moy_vol_at resolves `path` to the volume that owns
 // it and the path within it; moy_store_alloc is a call's scratch (zeroed),
 // moy_store_keep what outlives the call (the marker cache); both are freed by
 // moy_store_free with the size they were made with.
 int moy_vol_at(const char *path, moy_vol_t *v, const char **rest);
+//
+// moy_store_tick is called at every open and every listing: on a board it
+// feeds the kernel's task watchdog when the frame loop has armed it, so a
+// long store call (a seed, a scan, a pack, a big load) is never a hang.
+void moy_store_tick(void);
 void *moy_store_alloc(size_t n);
 void *moy_store_keep(size_t n);
 void moy_store_free(void *p, size_t n);

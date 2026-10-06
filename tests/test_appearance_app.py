@@ -261,7 +261,7 @@ def test_static_preview_computes_once_and_caches_like_thumbnails(tmp_path):
     rect = (10, 10, 152, 114)
     ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
     assert ws.sys_canvas.pix(86, 67) != 0      # the rendered still landed
-    side = Path(carts) / "moy_night.moy" / "thumbs" / "wp152x114.mct"
+    side = Path(carts) / "moybyte.moy_night.moy" / "thumbs" / "wp152x114.mct"
     assert side.exists()                       # ...and persisted as a sidecar
 
     # A fresh session with NO runner (a board, which has no offscreen canvas
@@ -283,7 +283,7 @@ def test_static_preview_recomputes_when_the_source_changes(tmp_path):
     ws.look.select_wallpaper("moy_night", persist=False)
     rect = (10, 10, 152, 114)
     ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
-    main = Path(carts) / "moy_night.moy" / "main.py"
+    main = Path(carts) / "moybyte.moy_night.moy" / "main.py"
     main.write_text(main.read_text(encoding="utf-8") + "\n# edited\n",
                     encoding="utf-8")
     ws2 = host_app.build_workstation(carts)

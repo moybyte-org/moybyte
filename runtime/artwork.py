@@ -29,6 +29,11 @@ API unchanged and cannot reach the store through this object.
 """
 
 try:
+    from moy_store_base import builtin_name
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import builtin_name
+
+try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
@@ -1060,8 +1065,7 @@ class ArtworkService:
         path = cart.get("path")
         if not path:                 # embedded fallback cart (no writable store)
             return int(cart.get("version", 0)) >= 1
-        name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
-        return name == "paint.moy"
+        return builtin_name(path) == "paint.moy"
 
     def _wall_cart(self):
         for cart in self._carts.all():

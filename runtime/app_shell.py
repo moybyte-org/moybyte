@@ -26,6 +26,11 @@
 import json
 
 try:
+    from moy_store_base import builtin_name
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import builtin_name
+
+try:
     from app_context import NO_STORE
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_context import NO_STORE
@@ -93,7 +98,7 @@ class ListShellApp:
         path = cart.get("path")
         if not path:                 # embedded fallback cart (no writable store)
             return int(cart.get("version", 0)) >= 1
-        return str(path).replace("\\", "/").rsplit("/", 1)[-1] == cls.APP_FOLDER
+        return builtin_name(path) == cls.APP_FOLDER
 
     # -- store -----------------------------------------------------------------
 

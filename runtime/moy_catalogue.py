@@ -39,8 +39,11 @@ thing the store holds across them, so its rows are what take handles.
   valid(h) -> bool                 whether h names a live row
   rows() -> int                    how many rows the index holds, every root's
   create(title, root, **fields)    a new cart folder -> its cart, with "h"
-  new(root, title)                 a new cart from the template -> its cart
-  duplicate(h, root, new_title)    a copy of the cart on disk -> its cart
+  new(root, title, ns)             a new cart from the template -> its cart
+  duplicate(h, root, new_title, ns)
+                                   a copy of the cart on disk -> its cart
+                                   (a made cart's folder is `<ns>.<name>.moy`,
+                                   #162; `ns` is the Settings author)
   delete(h)                        remove the cart's folder; h goes stale
 
 The cart's undo journal (runtime/moy_journal.py), by handle:
@@ -49,6 +52,9 @@ The cart's undo journal (runtime/moy_journal.py), by handle:
   journal_undo(h, files=None) / journal_redo(h, files=None) -> file | None
   journal_can_undo(h, files=None) / journal_can_redo(h, files=None) -> bool
   journal_compact(h)
+  journal_list(h, file=None) -> [entry]    #136: a file's timeline, oldest first
+  journal_snap(h, seq) -> text | None      one entry's snapshot
+  journal_restore(h, seq) -> seq | None    an old snapshot as a new commit
 
 A call that takes a handle raises StaleHandle before it touches the card. A
 store that cannot be written raises OSError, ENOSPC when it is full (an index
@@ -74,12 +80,12 @@ try:
     import moy_carts
     import moy_journal
     from moy_index import Index, ROOTS, StaleHandle  # noqa: F401 (re-exported)
-    from moy_store_base import cart_path
+    from moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import moy_carts
     from runtime import moy_journal
     from runtime.moy_index import Index, ROOTS, StaleHandle  # noqa: F401
-    from runtime.moy_store_base import cart_path
+    from runtime.moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
 
 CARTS_DIR = moy_carts.CARTS_DIR
 ensure_dirs = moy_carts.ensure_dirs
@@ -112,7 +118,7 @@ def _stamp(cart, root):
 
 
 def catalogue(root=CARTS_DIR):
-    items = moy_carts._each(root, moy_carts._entry_at, True)
+    items = moy_carts.entries(root)
     if items is None:
         return []
     rid = _rid(root)
@@ -196,15 +202,15 @@ def create(title, root=CARTS_DIR, **fields):
     return _stamp(moy_carts.create(title, root, **fields), root)
 
 
-def new(root=CARTS_DIR, title="New Cart"):
-    return _stamp(moy_carts.new_from_template(root, title), root)
+def new(root=CARTS_DIR, title="New Cart", ns=USER_NS):
+    return _stamp(moy_carts.new_from_template(root, title, ns), root)
 
 
-def duplicate(h, root=CARTS_DIR, new_title=None):
+def duplicate(h, root=CARTS_DIR, new_title=None, ns=USER_NS):
     src = load(h)
     if src is None:
         return None
-    return _stamp(moy_carts.duplicate(src, root, new_title), root)
+    return _stamp(moy_carts.duplicate(src, root, new_title, ns), root)
 
 
 def delete(h):
@@ -240,3 +246,18 @@ def journal_can_redo(h, files=None):
 def journal_compact(h):
     p = path(h)
     return moy_journal.journal_compact(p)
+
+
+def journal_list(h, file=None):
+    p = path(h)
+    return moy_journal.journal_list(p, file)
+
+
+def journal_snap(h, seq):
+    p = path(h)
+    return moy_journal.journal_snap(p, seq)
+
+
+def journal_restore(h, seq):
+    p = path(h)
+    return moy_journal.journal_restore(p, seq)

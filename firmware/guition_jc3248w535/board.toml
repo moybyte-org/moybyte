@@ -298,19 +298,9 @@ why = """
 The C-module twin of [modules.shared] (#161; the T-Deck's board.toml carries
 the mechanism). Every directory under native/ with a micropython.cmake crosses
 unless denied here; this board's own moy_axs lives in its board tree and is
-not staged. The two denials below are bring-up staging decisions, each named
-with the stage that revisits it."""
-
-[[native.shared.deny]]
-module = "moy_sd"
-why = """
-moy_sd's whole reason to exist -- attaching a card to a host the T-Deck's
-moy_lcd already initialised, on a SHARED SPI bus -- names hardware this board
-does not have: the TF slot is on SPI3 pins of its own (CS 10 / MOSI 11 /
-SCLK 12 / MISO 13), nothing shared with the panel's QSPI host. It is plain
-`machine.SDCard`, and `device/card_store.py` mounts it and makes it the cart
-store when a card is in (the board README's SD row). The OTA directory stays
-/moy/update on the internal VFS either way."""
+not staged. The denial below is a bring-up staging decision, named with the
+stage that revisits it. moy_sd crosses: the TF card on SPI3 is opened by it
+and read through native/moy_store's card volume."""
 
 [[native.shared.deny]]
 module = "moy_audio"

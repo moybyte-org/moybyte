@@ -549,7 +549,8 @@ def test_kernel_data_is_allocated_from_psram():
     for PSRAM first and falls to the default heap only on a board with none;
     and the one thing the binding keeps on the VM's heap is a Table's row
     objects, which the collector must see."""
-    for name in ("moy_htab.c", "moy_route.c", "moy_settings.c", "moy_ledger.c"):
+    for name in ("moy_htab.c", "moy_route.c", "moy_settings.c", "moy_ledger.c",
+                 "moy_json.c"):
         hits = ALLOC_CALLS.findall(_code(os.path.join(SPINE_DIR, name)))
         assert not hits, "%s allocates by itself: %s" % (name, hits)
     binding = _code(os.path.join(SPINE_DIR, "modmoy_spine.c"))

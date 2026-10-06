@@ -25,6 +25,11 @@ the app stays open (a real calculator's feel), and resets on a fresh open.
 """
 
 try:
+    from moy_store_base import builtin_name
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import builtin_name
+
+try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
@@ -98,7 +103,7 @@ class CalcAppLayer:
         path = cart.get("path")
         if not path:                 # embedded fallback cart (no writable store)
             return int(cart.get("version", 0)) >= 1
-        return str(path).replace("\\", "/").rsplit("/", 1)[-1] == "calc.moy"
+        return builtin_name(path) == "calc.moy"
 
     def open(self):
         self.entry = "0"

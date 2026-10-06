@@ -110,7 +110,7 @@ class FakeStore:
         if self.raise_on == "ensure_dirs" or root == self.dead_root:
             raise OSError("no card")
 
-    def sweep_store(self, root):
+    def sweep_store(self, root, seed=None):
         self.calls.append(("sweep_store", root))
 
     def seed(self, seed, root, shelf, progress=None):

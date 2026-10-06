@@ -117,7 +117,7 @@ class BootCarts:
         try:
             def _scan_and_seed():
                 store.ensure_dirs(root)
-                store.sweep_store(root)
+                store.sweep_store(root, seed)
                 shelf = store.catalogue(root)  # the shelf; a cart's payloads at open
                 sram_census("scanned")
                 # The seed after the scan: the shelf's versions say what to

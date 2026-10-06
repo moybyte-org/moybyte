@@ -5,20 +5,22 @@ The shelf scan reads each cart folder from ONE listing of it, from inside it:
 relative to it (`moy_store_base._enter`). CPython runs the same code over a
 POSIX directory, which says nothing about FatFS's relative paths, littlefs's
 (MicroPython joins them onto the working directory itself) or MicroPython's
-VFS working directory. And the T-Deck's block device keeps a
-cache of sectors (`moybyte_sd._NativeSDBlockDev`), which is only correct if
-every write the store makes drops what it covers.
+VFS working directory. And every board's card is the store's own volume
+(native/moy_store/moy_card.c): a FATFS over a C block device that keeps a
+cache of sectors, which is only correct if every write the store makes drops
+what it covers.
 
-So this mounts a FAT image on that block device, over a card that is a
-bytearray, in the desktop MicroPython built in the boards' model, and pins:
+So this mounts a FAT image on that volume, over a card that is a bytearray
+behind a fake `moy_sd`, in the desktop MicroPython built in the boards'
+model, and pins:
 
   * the scan of a card is the scan CPython makes of the same files, entry for
     entry, and leaves the working directory where it found it;
-  * store writes made through the cached device -- a code save, a config, a
-    sprite sheet, a new cart, a duplicate, a delete -- leave the same shelf
-    CPython's store has after the same writes, and every sector the file
-    system is handed in the whole session is the card's own (a stale cached
-    sector fails on the spot);
+  * store writes made through the card -- a code save, a config, a sprite
+    sheet, a new cart, a duplicate, a delete -- leave the same shelf
+    CPython's store has after the same writes, and every sector the cache
+    hands FatFS in the whole session is compared with the card's (a stale
+    one fails on the spot, and a cache that skips the drop is caught);
   * the card read back through a device with no cache, after an unmount,
     holds that same shelf.
 
@@ -75,18 +77,9 @@ def writes(moy_carts, cat, root, shelf):
 DRIVER = '''
 import sys, os, vfs, json
 sys.path[:0] = [@STAGE@, @RUNTIME@, @DEVICE@]
-import moy_sd, moybyte_sd
+import moy_sd, moy_store
 moy_sd.init(@SECTORS@)
-handed = [0]
-
-
-class Checked(moybyte_sd._NativeSDBlockDev):
-    def readblocks(self, block, buf, off=0):
-        super().readblocks(block, buf, off)
-        handed[0] += 1
-        if buf != moy_sd.disk[block * 512:block * 512 + len(buf)]:
-            raise AssertionError("stale sector %d" % block)
-        return 0
+moy_store.card_stats(True, @SKIP_DROP@)     # every hit compared with the card
 
 
 class Ram:
@@ -142,9 +135,8 @@ def shelf(cat, root):
 
 
 if @FS@ == "fat":
-    bd = Checked(@SECTORS@)
-    vfs.VfsFat.mkfs(bd)
-    vfs.mount(vfs.VfsFat(bd), "/sd")
+    vfs.VfsFat.mkfs(Plain())
+    vfs.mount(moy_store.card(@SECTORS@, moy_sd), "/sd")
 else:
     bd = Ram(@SECTORS@ // 8)
     vfs.VfsLfs2.mkfs(bd)
@@ -159,7 +151,8 @@ print("CWD", os.getcwd() == here)
 @WRITES@
 writes(moy_carts, moy_catalogue, root, moy_catalogue.catalogue(root))
 print("AFTER", shelf(moy_catalogue, root))
-print("HANDED", handed[0], moy_sd.reads)
+reads, hits, handed, stale = moy_store.card_stats() if @FS@ == "fat" else (0, 0, 0, 0)
+print("HANDED", handed, hits, stale)
 vfs.umount("/sd")
 if @FS@ == "fat":
     vfs.mount(vfs.VfsFat(Plain()), "/sd")
@@ -192,18 +185,8 @@ def _card_shelf(line):
     return _same(json.loads(line))
 
 
-@pytest.mark.parametrize("fs", ["fat", "lfs"])
-def test_the_scan_and_the_stores_writes_on_the_boards_file_systems(tmp_path,
-                                                                   fs):
-    exe = require_unix_mp(
-        board_model=True,
-        why="The only check of the shelf scan's working-directory reads on "
-            "FatFS, and of the T-Deck's sector cache under the store's "
-            "writes; CPython has neither.")
+def _session(tmp_path, exe, fs, skip_drop=False):
     src = _store(tmp_path)
-    host = str(tmp_path / "host" / "carts")
-    shutil.copytree(src, host)
-    card = "/sd/moybyte/carts"
     stage = tmp_path / "stage"
     stage.mkdir()
     (stage / "moy_sd.py").write_text(FAKE_MOY_SD)
@@ -214,10 +197,35 @@ def test_the_scan_and_the_stores_writes_on_the_boards_file_systems(tmp_path,
         .replace("@DEVICE@", repr(str(ROOT / "device")))
         .replace("@SECTORS@", str(SECTORS))
         .replace("@FS@", repr(fs))
+        .replace("@SKIP_DROP@", repr(skip_drop))
         .replace("@SRC@", repr(src))
         .replace("@WRITES@", WRITES))
-    out = subprocess.run([exe, "-X", "heapsize=64m", str(script)],
-                         capture_output=True, text=True, timeout=300)
+    return src, subprocess.run([exe, "-X", "heapsize=64m", str(script)],
+                               capture_output=True, text=True, timeout=300)
+
+
+def test_a_cache_that_skips_the_drop_is_caught(tmp_path):
+    """The check is only worth its name if a cache that keeps a written
+    sector is stale on the next read of it: with the drop skipped, the session
+    fails."""
+    exe = require_unix_mp(board_model=True, why="the card volume's cache check")
+    _src, out = _session(tmp_path, exe, "fat", skip_drop=True)
+    assert out.returncode != 0 and "[Errno 5] EIO" in out.stdout + out.stderr, \
+        out.stdout[-2000:]
+
+
+@pytest.mark.parametrize("fs", ["fat", "lfs"])
+def test_the_scan_and_the_stores_writes_on_the_boards_file_systems(tmp_path,
+                                                                   fs):
+    exe = require_unix_mp(
+        board_model=True,
+        why="The only check of the shelf scan's working-directory reads on "
+            "FatFS, and of the T-Deck's sector cache under the store's "
+            "writes; CPython has neither.")
+    src, out = _session(tmp_path, exe, fs)
+    host = str(tmp_path / "host" / "carts")
+    shutil.copytree(src, host)
+    card = "/sd/moybyte/carts"
     lines = {}
     for ln in out.stdout.splitlines():
         key, _, rest = ln.partition(" ")
@@ -240,5 +248,6 @@ def test_the_scan_and_the_stores_writes_on_the_boards_file_systems(tmp_path,
     assert "Short Sheet" not in {e["title"] for e in after}
 
     if fs == "fat":
-        handed, reads = map(int, lines["HANDED"].split())
-        assert reads < handed / 2, (handed, reads)
+        handed, hits, stale = map(int, lines["HANDED"].split())
+        assert stale == 0
+        assert hits > handed / 2, (handed, hits)

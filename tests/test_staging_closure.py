@@ -125,7 +125,8 @@ NATIVE = {
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial",
-                   "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel"},
+                   "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel",
+                   "moy_sd"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
     # running on it. `moy_web` is the only shared C module it compiles in by
     # default (moy_index and moy_spine stage and compile to nothing, above), and

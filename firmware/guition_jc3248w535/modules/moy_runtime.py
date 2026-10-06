@@ -71,15 +71,21 @@ OTA_UPDATE_DIR = "/moy/update"
 # construction dies with ESP_ERR_INVALID_STATE before touching the card --
 # measured on this glass 2026-08-20, one evening of postmortem plumbing.
 SD_PINS = dict(slot=2, sck=12, mosi=11, miso=13, cs=10)
+SD_SPI_HOST = 2                 # SPI3_HOST: slot 2 (slot and host numbers run opposite)
+SD_FREQ_KHZ = 20000
 SD_CARTS_ROOT = "/sd/moybyte/carts"
 
 
 def tf_card():
-    """The TF card on SPI3. Constructing claims the host; a failed mount's
-    `deinit()` (card_store.mount) is what frees it, so a later construction in
-    this boot, the dev channel's included, still works."""
-    import machine
-    return machine.SDCard(**SD_PINS)
+    """The TF card on SPI3, as the store's own volume (native/moy_store's
+    card over moy_sd): the bus is initialised once, by `moy_sd.open`, and
+    never torn down, so the store's FATFS outlives anything the VM frees."""
+    import moy_sd
+    import moy_store
+    p = SD_PINS
+    sectors = moy_sd.open(SD_SPI_HOST, p["sck"], p["mosi"], p["miso"], p["cs"],
+                          SD_FREQ_KHZ)
+    return moy_store.card(sectors)
 
 
 # Idle screen blank -- the shared IdleBlank, the shared 5 minutes.

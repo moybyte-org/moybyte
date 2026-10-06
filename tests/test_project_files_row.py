@@ -333,7 +333,7 @@ def test_a_broken_manifest_keeps_the_project_openable_with_a_way_back(tmp_path):
 
     cart = next(c for c in ws.carts.all if c["path"].endswith("fixme.moy"))
     assert cart["broken"].startswith("manifest.json: ")
-    assert cart["title"] == "fixme"                  # its folder, since nothing else
+    assert cart["title"] == "local.fixme"            # its folder, since nothing else
     assert cart in ws.files_app._nav.projects()      # still an editable project
 
     # a launcher TAP does not run it (there is no manifest to run it BY) -- it
@@ -361,8 +361,8 @@ def test_the_project_kind_is_root_relative_and_refuses_a_climbing_name(tmp_path)
     ws = build_ws(tmp_path)
     cart = _project(ws)
     kind = moy_carts.project_kind(cart["path"])
-    assert kind == "project:testbed.moy"
-    assert moy_carts.project_folder(kind) == "testbed.moy"
+    assert kind == "project:local.testbed.moy"
+    assert moy_carts.project_folder(kind) == "local.testbed.moy"
     assert moy_carts.project_folder("docs") == ""      # a user-files kind
     for bad in ("../secret", "/etc/passwd", "a/b/c", ""):
         try:

@@ -6,6 +6,7 @@
 
 #include <string.h>
 
+#include "moy_json.h"
 #include "moy_settings.h"
 
 typedef struct {
@@ -24,328 +25,11 @@ struct moy_settings {
 
 #define MAX_LEN 0x7fffffffu
 
-// -- the scanner -------------------------------------------------------------
-
-static const char *skip_ws(const char *p, const char *end) {
-    while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
-        p++;
-    }
-    return p;
-}
-
-static int hex_val(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-        return c - 'a' + 10;
-    }
-    if (c >= 'A' && c <= 'F') {
-        return c - 'A' + 10;
-    }
-    return -1;
-}
-
-// The code unit of the \uXXXX escape at `p` (which points at the 'u'), or -1.
-static int32_t u_escape(const char *p, const char *end) {
-    if (end - p < 5) {
-        return -1;
-    }
-    int32_t v = 0;
-    for (int i = 1; i <= 4; i++) {
-        int d = hex_val(p[i]);
-        if (d < 0) {
-            return -1;
-        }
-        v = v * 16 + d;
-    }
-    return v;
-}
-
-// A string starting at its opening quote: the pointer past the closing one, or
-// NULL. With `key` the string is decoded into `out` (when not NULL) and its
-// decoded length goes to `*n`; a lone surrogate is refused.
-static const char *scan_string(const char *p, const char *end, int key,
-                               char *out, size_t *n) {
-    size_t w = 0;
-    p++;
-    for (;;) {
-        if (p >= end) {
-            return NULL;
-        }
-        unsigned char c = (unsigned char)*p;
-        if (c == '"') {
-            if (n != NULL) {
-                *n = w;
-            }
-            return p + 1;
-        }
-        if (c < 0x20) {
-            return NULL;
-        }
-        if (c != '\\') {
-            if (out != NULL) {
-                out[w] = (char)c;
-            }
-            w++;
-            p++;
-            continue;
-        }
-        if (++p >= end) {
-            return NULL;
-        }
-        char e = *p;
-        char lit = 0;
-        switch (e) {
-            case '"': lit = '"'; break;
-            case '\\': lit = '\\'; break;
-            case '/': lit = '/'; break;
-            case 'b': lit = '\b'; break;
-            case 'f': lit = '\f'; break;
-            case 'n': lit = '\n'; break;
-            case 'r': lit = '\r'; break;
-            case 't': lit = '\t'; break;
-            case 'u': break;
-            default: return NULL;
-        }
-        if (e != 'u') {
-            if (out != NULL) {
-                out[w] = lit;
-            }
-            w++;
-            p++;
-            continue;
-        }
-        int32_t u = u_escape(p, end);
-        if (u < 0) {
-            return NULL;
-        }
-        p += 5;
-        uint32_t cp = (uint32_t)u;
-        if (key) {
-            if (cp >= 0xdc00u && cp <= 0xdfffu) {
-                return NULL;
-            }
-            if (cp >= 0xd800u && cp <= 0xdbffu) {
-                int32_t lo;
-                if (end - p < 2 || p[0] != '\\' || p[1] != 'u'
-                    || (lo = u_escape(p + 1, end)) < 0
-                    || lo < 0xdc00 || lo > 0xdfff) {
-                    return NULL;
-                }
-                p += 6;
-                cp = 0x10000u + ((cp - 0xd800u) << 10) + ((uint32_t)lo - 0xdc00u);
-            }
-            // UTF-8 for cp
-            char b[4];
-            size_t k;
-            if (cp < 0x80u) {
-                b[0] = (char)cp;
-                k = 1;
-            } else if (cp < 0x800u) {
-                b[0] = (char)(0xc0u | (cp >> 6));
-                b[1] = (char)(0x80u | (cp & 0x3fu));
-                k = 2;
-            } else if (cp < 0x10000u) {
-                b[0] = (char)(0xe0u | (cp >> 12));
-                b[1] = (char)(0x80u | ((cp >> 6) & 0x3fu));
-                b[2] = (char)(0x80u | (cp & 0x3fu));
-                k = 3;
-            } else {
-                b[0] = (char)(0xf0u | (cp >> 18));
-                b[1] = (char)(0x80u | ((cp >> 12) & 0x3fu));
-                b[2] = (char)(0x80u | ((cp >> 6) & 0x3fu));
-                b[3] = (char)(0x80u | (cp & 0x3fu));
-                k = 4;
-            }
-            if (out != NULL) {
-                memcpy(out + w, b, k);
-            }
-            w += k;
-        }
-    }
-}
-
-static int is_digit(char c) {
-    return c >= '0' && c <= '9';
-}
-
-static const char *scan_number(const char *p, const char *end) {
-    if (p < end && *p == '-') {
-        p++;
-    }
-    if (p >= end || !is_digit(*p)) {
-        return NULL;
-    }
-    if (*p == '0') {
-        p++;
-    } else {
-        while (p < end && is_digit(*p)) {
-            p++;
-        }
-    }
-    if (p < end && *p == '.') {
-        p++;
-        if (p >= end || !is_digit(*p)) {
-            return NULL;
-        }
-        while (p < end && is_digit(*p)) {
-            p++;
-        }
-    }
-    if (p < end && (*p == 'e' || *p == 'E')) {
-        p++;
-        if (p < end && (*p == '+' || *p == '-')) {
-            p++;
-        }
-        if (p >= end || !is_digit(*p)) {
-            return NULL;
-        }
-        while (p < end && is_digit(*p)) {
-            p++;
-        }
-    }
-    return p;
-}
-
-static const char *literal(const char *p, const char *end, const char *word) {
-    size_t n = strlen(word);
-    if ((size_t)(end - p) < n || memcmp(p, word, n) != 0) {
-        return NULL;
-    }
-    return p + n;
-}
-
-// One value at `p` (whitespace already skipped), `depth` containers deep: the
-// pointer past it, or NULL.
-static const char *scan_value(const char *p, const char *end, uint32_t depth) {
-    if (p >= end) {
-        return NULL;
-    }
-    switch (*p) {
-        case '"':
-            return scan_string(p, end, 0, NULL, NULL);
-        case '{':
-        case '[': {
-            if (depth >= MOY_SETTINGS_DEPTH) {
-                return NULL;
-            }
-            char close = *p == '{' ? '}' : ']';
-            int obj = *p == '{';
-            p = skip_ws(p + 1, end);
-            if (p < end && *p == close) {
-                return p + 1;
-            }
-            for (;;) {
-                if (obj) {
-                    if (p >= end || *p != '"') {
-                        return NULL;
-                    }
-                    p = scan_string(p, end, 0, NULL, NULL);
-                    if (p == NULL) {
-                        return NULL;
-                    }
-                    p = skip_ws(p, end);
-                    if (p >= end || *p != ':') {
-                        return NULL;
-                    }
-                    p = skip_ws(p + 1, end);
-                }
-                p = scan_value(p, end, depth + 1u);
-                if (p == NULL) {
-                    return NULL;
-                }
-                p = skip_ws(p, end);
-                if (p < end && *p == ',') {
-                    p = skip_ws(p + 1, end);
-                    continue;
-                }
-                if (p < end && *p == close) {
-                    return p + 1;
-                }
-                return NULL;
-            }
-        }
-        case 't':
-            return literal(p, end, "true");
-        case 'f':
-            return literal(p, end, "false");
-        case 'n':
-            return literal(p, end, "null");
-        case 'N':
-            return literal(p, end, "NaN");
-        case 'I':
-            return literal(p, end, "Infinity");
-        case '-':
-            if (end - p >= 2 && p[1] == 'I') {
-                return literal(p, end, "-Infinity");
-            }
-            return scan_number(p, end);
-        default:
-            return scan_number(p, end);
-    }
-}
+// The scanner is moy_json's: a row holds one value, a file one object.
 
 int moy_settings_validate(const char *text, size_t len) {
-    const char *end = text + len;
-    const char *p = scan_value(skip_ws(text, end), end, 1u);
-    return p != NULL && skip_ws(p, end) == end ? MOY_SETTINGS_OK
-                                               : MOY_SETTINGS_BADJSON;
-}
-
-// The members of the object in `text`, in order, each as the spans of its key
-// string (quote to quote) and of its value: `visit` for each, stopping at its
-// first non-zero. BADJSON for anything that is not exactly one object.
-typedef int (*visit_t)(void *ctx, const char *key, const char *key_end,
-                       const char *val, const char *val_end);
-
-static int walk_object(const char *text, size_t len, visit_t visit, void *ctx) {
-    const char *end = text + len;
-    const char *p = skip_ws(text, end);
-    if (p >= end || *p != '{') {
-        return MOY_SETTINGS_BADJSON;
-    }
-    p = skip_ws(p + 1, end);
-    if (p < end && *p == '}') {
-        return skip_ws(p + 1, end) == end ? MOY_SETTINGS_OK
-                                          : MOY_SETTINGS_BADJSON;
-    }
-    for (;;) {
-        if (p >= end || *p != '"') {
-            return MOY_SETTINGS_BADJSON;
-        }
-        const char *k = p;
-        size_t kn;
-        p = scan_string(p, end, 1, NULL, &kn);
-        if (p == NULL || kn == 0u) {
-            return MOY_SETTINGS_BADJSON;
-        }
-        const char *k_end = p;
-        p = skip_ws(p, end);
-        if (p >= end || *p != ':') {
-            return MOY_SETTINGS_BADJSON;
-        }
-        p = skip_ws(p + 1, end);
-        const char *v = p;
-        p = scan_value(p, end, 1u);
-        if (p == NULL) {
-            return MOY_SETTINGS_BADJSON;
-        }
-        int rc = visit(ctx, k, k_end, v, p);
-        if (rc != 0) {
-            return rc;
-        }
-        p = skip_ws(p, end);
-        if (p < end && *p == ',') {
-            p = skip_ws(p + 1, end);
-            continue;
-        }
-        if (p < end && *p == '}') {
-            return skip_ws(p + 1, end) == end ? MOY_SETTINGS_OK
-                                              : MOY_SETTINGS_BADJSON;
-        }
-        return MOY_SETTINGS_BADJSON;
-    }
+    return moy_json_valid(text, len) == MOY_JSON_OK ? MOY_SETTINGS_OK
+                                                    : MOY_SETTINGS_BADJSON;
 }
 
 // -- the rows ----------------------------------------------------------------
@@ -447,13 +131,15 @@ static int load_row(void *ctx, const char *key, const char *key_end,
                     const char *val, const char *val_end) {
     load_t *l = ctx;
     size_t kn;
-    scan_string(key, key_end, 1, NULL, &kn);
+    if (moy_json_string(key, key_end, 1, NULL, &kn) == NULL || kn == 0u) {
+        return MOY_SETTINGS_BADJSON;    // a lone surrogate, or an empty key
+    }
     size_t jn = (size_t)(val_end - val);
     char *buf = make_buf(l->into, kn, jn);
     if (buf == NULL) {
         return MOY_SETTINGS_NOMEM;
     }
-    scan_string(key, key_end, 1, buf, &kn);
+    moy_json_string(key, key_end, 1, buf, &kn);
     memcpy(buf + kn, val, jn);
     l->seen++;
     return put_row(l->into, buf, (uint32_t)kn, (uint32_t)jn);
@@ -463,7 +149,7 @@ int moy_settings_load(moy_settings_t *s, const char *text, size_t len,
                       uint32_t *rows) {
     moy_settings_t tmp = { s->mem, NULL, 0u, 0u, 0u };
     load_t l = { 0, &tmp, 0u };
-    int rc = walk_object(text, len, load_row, &l);
+    int rc = moy_json_object(text, len, load_row, &l);
     if (rc != MOY_SETTINGS_OK) {
         clear_rows(&tmp);
         return rc;

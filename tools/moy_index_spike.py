@@ -155,9 +155,10 @@ INDEX = Component(
 SPINE = Component(
     "spine", [NATIVE_SPINE], "moy_spine_host.c",
     ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
-     "moy_settings.h", "moy_settings.c", "moy_ledger.h", "moy_ledger.c"],
+     "moy_settings.h", "moy_settings.c", "moy_ledger.h", "moy_ledger.c",
+     "moy_json.h", "moy_json.c"],
     ("fuzz_spine.c", ["moy_htab.c", "moy_route.c", "moy_settings.c",
-                      "moy_ledger.c"]),
+                      "moy_ledger.c", "moy_json.c"]),
     r"\((mod)?moy_(spine|route|settings|ledger|htab)\.c\.obj\)$"
     r"|/(mod)?moy_(spine|route|settings|ledger|htab)\.c\.obj$",
     ["tests/test_moy_spine.py", "tests/test_moy_spine_twins.py"],
@@ -169,11 +170,17 @@ SPINE = Component(
 MPY = os.path.join(ROOT, ".build", "unix_micropython", "micropython")
 NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
 FS = Component(
-    "fs", [NATIVE_STORE, os.path.join(NATIVE_STORE, "host"), MPY,
-           os.path.join(MPY, "lib", "oofatfs"), os.path.join(MPY, "lib", "littlefs")],
-    "moy_store_host.c", ["moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c"],
-    ("fuzz_fs.c", ["moy_vol.c", "moy_fs.c", "ff.c", "ffunicode.c", "lfs2.c",
-                   "lfs2_util.c"]),
+    "fs", [NATIVE_STORE, os.path.join(NATIVE_STORE, "host"), NATIVE_SPINE, MPY,
+           os.path.join(MPY, "lib", "oofatfs"), os.path.join(MPY, "lib", "littlefs"),
+           os.path.join(MPY, "lib", "uzlib")],
+    "moy_store_host.c", ["moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c",
+                         "moy_arena.h", "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_json.h",
+                         "moy_json.c"],
+    ("fuzz_fs.c", ["moy_vol.c", "moy_fs.c", "moy_cat.c", "moy_seed.c", "moy_journal.c",
+                   "moy_pack.c",
+                   "moy_json.c",
+                   "ff.c", "ffunicode.c", "lfs2.c", "lfs2_util.c", "tinflate.c",
+                   "adler32.c", "crc32.c"]),
     r"\((mod)?moy_(store|vol|fs)\.c\.obj\)$|/(mod)?moy_(store|vol|fs)\.c\.obj$",
     ["tests/test_moy_store.py"], "store", "fs-", "c",
     cflags=['-DFFCONF_H="lib/oofatfs/ffconf.h"', "-DMOY_VOL_FAT=1",

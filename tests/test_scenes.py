@@ -166,7 +166,7 @@ def test_seed_builtins_writes_scenes_and_manifest_assets(tmp_path):
         "scene_order": ["main", "level2"],
     }
     moy_carts.seed_builtins([seed], root)
-    path = root + "/seeded_scenes.moy"
+    path = root + "/moybyte.seeded_scenes.moy"
     man = json.loads((Path(path) / "manifest.json").read_text())
     assert man["assets"]["scenes"] == ["main", "level2"]
     loaded = moy_carts.load(path)
@@ -184,7 +184,7 @@ def test_seed_preserves_scenes_are_replaced_but_pmem_kept(tmp_path):
           "src": "def _draw():\n    cls(0)\n", "cfg": {},
           "scenes": {"main": MAIN_SCENE}, "scene_order": ["main"]}
     moy_carts.seed_builtins([v1], root)
-    path = root + "/reseed.moy"
+    path = root + "/moybyte.reseed.moy"
     (Path(path) / "pmem.json").write_text(json.dumps([42] + [0] * 255))  # a "save"
 
     v2 = dict(v1, version=2, scenes={"main": LEVEL2_SCENE})              # scene changed

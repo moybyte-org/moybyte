@@ -20,6 +20,9 @@ int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
     return 0;
 }
 
+void moy_store_tick(void) {
+}
+
 void *moy_store_alloc(size_t n) {
     void *p = calloc(1, n ? n : 1);
     if (p != NULL) {

@@ -278,7 +278,7 @@ def test_seed_builtins_writes_sprites_kgfx_when_present(tmp_path):
     }]
     moy_carts.seed_builtins(seed, root)
 
-    d = Path(root) / "sheety_cart.moy"
+    d = Path(root) / "moybyte.sheety_cart.moy"
     assert (d / "sprites.moygfx").read_text(encoding="utf-8") == hexs
     man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
     assert man["canvas"] == "160x120"
@@ -304,7 +304,7 @@ def test_seed_builtins_writes_map_kmap_when_present(tmp_path):
         "map": blob,
     }]
     moy_carts.seed_builtins(seed, root)
-    d = Path(root) / "mappy_cart.moy"
+    d = Path(root) / "moybyte.mappy_cart.moy"
     assert (d / "map.moymap").read_text(encoding="utf-8") == blob
     assert moy_carts.load(str(d))["map"] == blob
 
@@ -324,7 +324,7 @@ def test_seed_builtins_writes_images_when_present(tmp_path):
         "images": {"bg": blob},
     }]
     moy_carts.seed_builtins(seed, root)
-    d = Path(root) / "arty_cart.moy"
+    d = Path(root) / "moybyte.arty_cart.moy"
     assert (d / "images" / "bg.moyimg").read_text(encoding="utf-8") == blob
     assert moy_carts.load(str(d))["images"] == {"bg": blob}
 
@@ -337,7 +337,7 @@ def test_seed_builtins_skips_sheet_when_seed_has_none(tmp_path):
     seed = [{"title": "Plain Cart", "type": "game",
              "src": "def _draw():\n    cls(0)\n", "cfg": {}, "edit": []}]
     moy_carts.seed_builtins(seed, root)
-    d = Path(root) / "plain_cart.moy"
+    d = Path(root) / "moybyte.plain_cart.moy"
     assert (d / "main.py").is_file()
     assert not (d / "sprites.moygfx").exists()        # nothing written for a sheet-less seed
 
@@ -349,7 +349,7 @@ def test_seed_builtins_leaves_existing_cart_untouched(tmp_path):
 
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
-    d = Path(root) / "keep_me.moy"
+    d = Path(root) / "moybyte.keep_me.moy"
     d.mkdir()
     (d / "manifest.json").write_text('{"title": "Keep Me"}', encoding="utf-8")
     seed = [{"title": "Keep Me", "type": "game", "src": "X", "cfg": {}, "edit": [],
@@ -377,7 +377,7 @@ def test_seed_builtins_overwrites_when_version_is_newer(tmp_path):
     moy_carts.ensure_dirs(root)
 
     moy_carts.seed_builtins([_seed("Hop", 1, "OLD", sprites="aaaa")], root)
-    d = Path(root) / "hop.moy"
+    d = Path(root) / "moybyte.hop.moy"
     assert (d / "main.py").read_text(encoding="utf-8") == "OLD"
     # a v2 seed with new code and NO sprite blob must overwrite + drop the stale sheet
     moy_carts.seed_builtins([_seed("Hop", 2, "NEW")], root)
@@ -394,7 +394,7 @@ def test_seed_builtins_preserves_saves_and_config_across_version_bump(tmp_path):
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     moy_carts.seed_builtins([_seed("Hop", 1, "v1")], root)
-    d = Path(root) / "hop.moy"
+    d = Path(root) / "moybyte.hop.moy"
 
     cart = moy_carts.load(str(d))                    # the kid plays + tunes the cart
     moy_carts.save_config({**cart, "cfg": {"speed": 9}})   # Make-it-mine edit
@@ -414,7 +414,7 @@ def test_seed_builtins_skips_when_version_not_newer(tmp_path):
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     moy_carts.seed_builtins([_seed("Hop", 5, "MINE")], root)
-    d = Path(root) / "hop.moy"
+    d = Path(root) / "moybyte.hop.moy"
     moy_carts.seed_builtins([_seed("Hop", 5, "SAME")], root)   # equal -> skip
     assert (d / "main.py").read_text(encoding="utf-8") == "MINE"
     moy_carts.seed_builtins([_seed("Hop", 3, "OLDER")], root)  # older -> skip
@@ -428,7 +428,7 @@ def test_seed_builtins_refreshes_a_preversion_cart(tmp_path):
 
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
-    d = Path(root) / "hop.moy"
+    d = Path(root) / "moybyte.hop.moy"
     d.mkdir()
     (d / "manifest.json").write_text('{"title": "Hop"}', encoding="utf-8")  # no version
     (d / "main.py").write_text("STALE", encoding="utf-8")
@@ -462,7 +462,7 @@ def test_every_system_app_claims_its_device_seeded_folder(tmp_path):
         cart = dict(claimed[0])
         root, _, _base = cart["path"].replace("\\", "/").rpartition("/")
         # Re-path it exactly the way the device's seed_builtins would name it.
-        cart["path"] = root + "/" + moy_carts.slug(cart["title"]) + ".moy"
+        cart["path"] = root + "/moybyte." + moy_carts.slug(cart["title"]) + ".moy"
         assert app.is_app(cart), \
             "%s does not claim its DEVICE-seeded folder %s" % (app.id,
                                                                cart["path"])
@@ -491,7 +491,7 @@ def test_a_retired_seed_leaves_the_store(tmp_path):
              "cfg": {}, "edit": []},
             {"title": "Bench", "type": "game", "src": body,
              "cfg": {}, "edit": []}]
-    moy_carts.seed_builtins(seed, root)          # a store seeded before the fold
+    moy_carts.seed_builtins(seed, root, ns=None)  # a store seeded before the fold
     gone = _retired_folder(moy_carts, root)
     assert gone.is_dir()
 
@@ -547,5 +547,37 @@ def test_the_boot_sweeps_before_it_scans(tmp_path):
              "cfg": {}, "edit": []}]
     carts, _root = Boot().load_carts(moy_catalogue, seed, root=root)
     assert not stale.exists()
-    assert (Path(root) / "bench.moy").is_dir()
+    assert (Path(root) / "moybyte.bench.moy").is_dir()
     assert [c["title"] for c in carts] == ["Bench"]
+
+
+def test_the_rename_sweeps_the_bare_built_ins_once(tmp_path):
+    """#162's seed bump: generation 5 removes each roster title's folder from
+    before the namespace, and the seed writes it again as moybyte.<slug>.moy;
+    a kid's own cart, and the store's other folders, are left."""
+    from runtime import moy_carts
+    from runtime import moy_catalogue
+    from runtime.boot_carts import BootCarts
+
+    class Boot(BootCarts):
+        def say(self, msg):
+            pass
+
+        def note(self, msg):
+            pass
+
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    body = "def _draw():\n    cls(0)\n"
+    seed = [{"title": "Bench", "type": "game", "src": body, "cfg": {}, "edit": [],
+             "version": 2}]
+    moy_carts.seed_builtins(seed, root, ns=None)     # a store from before #162
+    mine = moy_carts.create("My Game", root, src=body)
+    with open(moy_carts.retired_version_path(root), "w") as f:
+        f.write("4")
+    carts, _root = Boot().load_carts(moy_catalogue, seed, root=root)
+    names = sorted(p.name for p in Path(root).iterdir() if p.is_dir())
+    assert names == ["local.my_game.moy", "moybyte.bench.moy"]
+    assert mine["path"].endswith("/local.my_game.moy")
+    assert sorted(c["id"] for c in carts) == ["local.my_game", "moybyte.bench"]
+    assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
