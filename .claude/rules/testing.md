@@ -30,9 +30,11 @@ paths:
 - **The p8 importer is tested UPSTREAM, and this repo does not download carts.**
   `make -C libmoy p8-carts` in moy-spec imports a corpus of real BBS carts and
   runs each through `run_cart` — the real C console — ratcheted against
-  `conformance/p8_carts_expected.json`, fetched from links in
-  `conformance/p8_corpus.json` and cached by CI. That is where the porter lives
-  and where a porter bug should turn red.
+  `conformance/p8_carts_expected.json`, downloaded by hand from the links in
+  `conformance/p8_corpus.json`. The BBS's terms ask that no script fetch from
+  it, so CI does not run that gate; moy-spec's `make test` does, on the carts a
+  person has downloaded. That is where the porter lives and where a porter bug
+  should turn red.
   - **Owner call 2026-09-01: moybyte owns none of that.** Real PICO-8 carts are
     other people's work, and a suite here that downloads twelve of them to test
     a VENDORED converter is coverage in the wrong repository. What stays here is

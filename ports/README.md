@@ -25,14 +25,15 @@ for seeding them, which nothing does yet.
 `tools/gen_p8_ports.py` builds `ports/p8/<lid>.moy` for each cart in moy-spec's
 `conformance/p8_corpus.json`. The carts are **not in this repo and must not be**
 — they are their authors' work, several under licences that forbid
-redistribution. The bytes come from that file's links, cached outside the tree by
-moy-spec's `conformance/fetch_p8_corpus.py` (`~/.cache/moy/p8`), which is what
-moy-spec CI already does. What IS committed is `ports/p8/perf/<lid>.lua`: our own
-~10 lines per cart naming the scene to measure in and why.
+redistribution. The bytes come from that file's links, downloaded BY HAND in a
+browser into `~/.cache/moy/p8` — the Lexaloffle BBS's terms ask that no script
+fetch from it, so nothing here or in moy-spec does. What IS committed is
+`ports/p8/perf/<lid>.lua`: our own ~10 lines per cart naming the scene to
+measure in and why.
 
 ```bash
-python3 ../moy-spec/conformance/fetch_p8_corpus.py   # once, ~570KB
-python3 tools/gen_p8_ports.py                        # -> ports/p8/*.moy
+python3 ../moy-spec/conformance/p8_corpus.py   # what to download, and what is missing
+python3 tools/gen_p8_ports.py                  # -> ports/p8/*.moy
 ```
 
 **ONE cart, not two.** The corpus is two things at once — the COMPATIBILITY set

@@ -671,8 +671,8 @@ No ported cart is committed here. `ports/celeste.moy` — *Celeste* (PICO-8,
 2016) by Maddy Thorson & Noel Berry — is used as a Lua-runtime conformance
 test and is gitignored on purpose; `ports/README.md` records its attribution
 and how to regenerate it locally. The moy-spec CLI (`moy demo`, or `moy port` on a
-`.p8.png`) downloads and converts it on request, printing the licence notice
-first — this repo's own `moy.py` was deleted 2026-08-25. It must not ship in a product
+`.p8.png`) converts it from a cart the user downloads by hand, printing the
+licence notice first — this repo's own `moy.py` was deleted 2026-08-25. It must not ship in a product
 image, a seed set, or anything commercial.
 
 Cartridges *you* author are yours; see LICENSE.md.
