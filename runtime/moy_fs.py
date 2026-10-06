@@ -419,13 +419,17 @@ def _heal(path, data):
     return data
 
 
-def _read_recover(path):
+def _read_recover(path, at=None):
     """Read `path`, healing it from `<path>.bak` when the published file is
     missing or is a half-written publish. Re-raises the original error if there is
     no usable backup. See the module docstring for why a mismatch that is NOT a
-    truncation is read as a foreign write rather than as damage."""
+    truncation is read as a foreign write rather than as damage.
+
+    `at` is a name the same file opens by more cheaply -- a name relative to a
+    working directory the caller moved into the file's folder. Only the first
+    open takes it; the marker and the backup are always reached by `path`."""
     try:
-        data = _read(path)
+        data = _read(at or path)
     except OSError:
         rec = _read_bak(path)         # never published, or lost after the backup landed
         if rec is None:

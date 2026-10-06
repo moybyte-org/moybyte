@@ -174,3 +174,61 @@ def test_an_entry_checks_only_the_main_scripts_existence(tmp_path):
     (tmp_path / "carts" / "packed.moy").write_text("archive")
     assert [c["title"] for c in moy_carts.catalogue(root)] == ["Missing Piece"]
     assert moy_carts.scan(root) == []
+
+
+def test_the_scan_reads_each_folder_from_its_listing_and_from_inside_it(
+        tmp_path, monkeypatch):
+    """What the scan costs a card (#224): a path lookup walks every directory
+    above the file again, so the shelf looks nothing up one name at a time.
+    Each folder is listed once and entered; no name is stat'ed, no file is
+    opened that the listing shows absent, and every open is by its name in
+    the folder. The working directory comes back as it was, and nothing is
+    imported while it is moved: `""` on a board's sys.path is the working
+    directory, and a cart's own files would be searched first."""
+    import builtins
+    import os
+
+    from runtime import moy_catalogue
+
+    root = _store(tmp_path)
+    start = os.getcwd()
+    opened, stats, imports = [], [], []
+    real_open, real_stat, real_import = builtins.open, os.stat, builtins.__import__
+
+    def spy_open(name, *a, **k):
+        f = real_open(name, *a, **k)          # a failed open raises first
+        opened.append(str(name))
+        return f
+
+    def spy_import(name, *a, **k):
+        if os.getcwd() != start:
+            imports.append(name)
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", spy_open)
+    monkeypatch.setattr(os, "stat", lambda p, *a, **k: (stats.append(p),
+                                                        real_stat(p, *a, **k))[1])
+    monkeypatch.setattr(builtins, "__import__", spy_import)
+    try:
+        shelf = moy_catalogue.catalogue(root)
+    finally:
+        monkeypatch.undo()
+    assert len(shelf) > 40
+    assert os.getcwd() == start
+    assert stats == [] and imports == []
+    assert opened and all("/" not in n for n in opened), opened
+
+
+def test_a_name_only_the_file_system_can_answer_is_asked_of_it():
+    """A listing proves a name absent only when every medium reads that name
+    literally: FAT folds case and answers to 8.3 aliases."""
+    from runtime.moy_store_base import _absent
+
+    names = {"Config.json": False, "main.py": False}
+    assert _absent(names, "flags.moyflags") is True
+    assert _absent(names, "main.py") is False
+    assert _absent(names, "config.json") is False       # FAT opens Config.json
+    assert _absent(names, "MAIN~1.PY") is False
+    assert _absent(names, "src/main.py") is False
+    assert _absent(names, "main.py.") is False
+    assert _absent(None, "flags.moyflags") is False

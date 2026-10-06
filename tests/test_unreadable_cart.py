@@ -49,11 +49,11 @@ def _deny_source(monkeypatch, cart, times):
     target = cart["path"] + "/main.py"
     left = [times]
 
-    def fake(path):
+    def fake(path, at=None):
         if path == target and left[0] > 0:
             left[0] -= 1
             raise MemoryError("memory allocation failed, allocating 77824 bytes")
-        return real(path)
+        return real(path, at)
 
     monkeypatch.setattr(moy_carts, "_read_recover", fake)
     return left

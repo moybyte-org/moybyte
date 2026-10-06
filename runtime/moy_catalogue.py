@@ -70,13 +70,13 @@ def _stamp(cart):
 def catalogue(root=CARTS_DIR):
     found = {}
 
-    def _read(path):
-        e = moy_carts.entry(path)
+    def _read(path, names):
+        e = moy_carts._entry_at(path, names)
         if e:
             e["h"] = found[path] = _index.intern(path)
         return e
 
-    items = moy_carts._each(root, _read)
+    items = moy_carts._each(root, _read, True)
     if items is None:
         return []
     for h in _index.handles():

@@ -66,7 +66,8 @@ try:
                                 SCENE_EXT, _normalize_canvas, _canvas_str,
                                 _sibling_path, slug, ensure_dirs, _is_dir,
                                 _rmtree, COVER_FILE, COVER_MAX_BYTES,
-                                SPRITES_NAME, icon_rows)
+                                SPRITES_NAME, icon_rows, _listing, _absent,
+                                _has, _cwd, _enter, _leave)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
                                         IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
@@ -75,7 +76,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         _sibling_path, slug, ensure_dirs,
                                         _is_dir, _rmtree, COVER_FILE,
                                         COVER_MAX_BYTES, SPRITES_NAME,
-                                        icon_rows)
+                                        icon_rows, _listing, _absent, _has,
+                                        _cwd, _enter, _leave)
 
 
 # Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
@@ -577,8 +579,22 @@ def entry(path):
     `icon_rows`, the rows of the sprite sheet the cart's launcher icon is cut
     from (`moy_store_base.icon_rows`; None for no sheet or no art), read a
     piece at a time and only as far as the icon needs. `CartManager.slim`
-    bakes the icon from it and drops it."""
-    return _load(path, False)
+    bakes the icon from it and drops it.
+
+    Read from inside the folder, against one listing of it (`_entry_at`)."""
+    here = _cwd() if path[:1] == "/" else None
+    if here is None:
+        return _load(path, False)
+    try:
+        return _load(path, False, _enter(path))
+    finally:
+        _leave(here)
+
+
+def _entry_at(path, folder):
+    """`entry` with the working directory already in the folder and `folder`
+    its listing (`_enter`), or by full path when `folder` is None."""
+    return _load(path, False, folder)
 
 
 def load(path):
@@ -599,19 +615,24 @@ def load(path):
     return _load(path, True)
 
 
-def _load(path, whole):
+def _load(path, whole, folder=None):
+    # `folder` is the folder's listing with the working directory inside it
+    # (`_enter`): a file it proves absent is never opened, and an optional
+    # one is opened by its name alone. None: every read is by full path.
     try:
+        here = "" if folder is not None else path + "/"
         broken = ""
         try:
             # _read_recover falls back to manifest.json.bak so a crash mid-save
             # (or an interrupted atomic write) doesn't make the cart unreadable.
-            man = json.loads(_read_recover(path + "/manifest.json"))
+            man = json.loads(_read_recover(path + "/manifest.json",
+                                           here + "manifest.json"))
         except (OSError, ValueError) as exc:
             broken = "manifest.json: " + str(exc)[:48]
         else:
             if not isinstance(man, dict):
                 broken = "manifest.json: not an object"
-        if broken and not _exists(path + "/manifest.json"):
+        if broken and not _has(folder, path, "manifest.json"):
             # Nothing to repair: the folder was pulled, or never held a cart.
             # Only a manifest that IS there and will not parse is recoverable.
             print("Moybyte cart manifest bad:", path, broken)
@@ -639,15 +660,15 @@ def _load(path, whole):
         compiled = runtime == "wasm"
         mainf = man.get("main", "main.wasm" if compiled else
                         ("main.lua" if spec else "main.py"))
-        if broken and not _exists(path + "/" + mainf):
+        if broken and not _has(folder, path, mainf):
             # No manifest to name the program, so take whichever is there.
             for alt in ("main.py", "main.lua"):
-                if _exists(path + "/" + alt):
+                if _has(folder, path, alt):
                     mainf = alt
                     break
         src = None
         if whole and compiled:
-            if not _exists(path + "/" + mainf) and not broken:
+            if not _has(folder, path, mainf) and not broken:
                 print("Moybyte cart main missing:", path)
                 return None
             src = ""            # a module has no text; `src/` below is the code
@@ -659,7 +680,7 @@ def _load(path, whole):
                     print("Moybyte cart main missing:", path, exc)
                     return None
                 src = ""        # a broken cart still opens; it just cannot run
-        elif not broken and not _exists(path + "/" + mainf):
+        elif not broken and not _has(folder, path, mainf):
             print("Moybyte cart main missing:", path)
             return None
         # THE CART'S OTHER SCRIPTS (SPEC.md 4). `sources` is the whole load
@@ -706,14 +727,17 @@ def _load(path, whole):
                 else:
                     before.append((n, text))
         cfg = dict(man.get("config", {}))
-        try:
-            cfg.update(json.loads(_read(path + "/config.json")))
-        except (OSError, ValueError):
-            pass
-        try:
-            flags = _read(path + "/" + FLAGS_NAME)  # tile flags (SPEC.md 3.5), optional
-        except OSError:
-            flags = None
+        if not _absent(folder, "config.json"):
+            try:
+                cfg.update(json.loads(_read(here + "config.json")))
+            except (OSError, ValueError):
+                pass
+        flags = None                     # tile flags (SPEC.md 3.5), optional
+        if not _absent(folder, FLAGS_NAME):
+            try:
+                flags = _read(here + FLAGS_NAME)
+            except OSError:
+                pass
         icon = _normalize_icon(man.get("icon"))
         cart = {
             "path": path,
@@ -794,8 +818,8 @@ def _load(path, whole):
             cart["broken"] = broken
         if not whole:
             # The scene ORDER from the folder's listing; no scene is read.
-            cart["scene_names"] = scene_names(man, _scene_files(path))
-            cart["icon_rows"] = _sheet_icon(path, icon)
+            cart["scene_names"] = scene_names(man, _scene_files(here, folder))
+            cart["icon_rows"] = _sheet_icon(here, icon, folder)
             return cart
         cart["src"] = src
         # SPEC.md 4's other scripts, as (filename, text) in load order. Empty
@@ -842,11 +866,15 @@ def _load(path, whole):
         return None
 
 
-def _scene_files(path):
+def _scene_files(here, folder=None):
     """A cart's scene names as `scene_names` reads them, from its scenes/
-    listing alone: no scene file is opened."""
+    listing alone: no scene file is opened. `here` prefixes a name in the
+    cart's folder; `folder` is that folder's listing, when there is one."""
+    if folder is not None and (folder.get(SCENES_DIR) is False
+                               or _absent(folder, SCENES_DIR)):
+        return {}
     try:
-        names = os.listdir(path + "/" + SCENES_DIR)
+        names = os.listdir(here + SCENES_DIR)
     except OSError:
         return {}
     return {n[:-len(SCENE_EXT)]: None for n in names if n.endswith(SCENE_EXT)}
@@ -868,12 +896,15 @@ def _pieces(f, size=1024):
         yield tail
 
 
-def _sheet_icon(path, icon):
-    """The rows of the cart at `path`'s sprite sheet its launcher icon is cut
-    from (`icon_rows`), read off the top of the file -- or None when it has no
-    sheet, no art on it, or a sheet that will not read as text."""
+def _sheet_icon(here, icon, folder=None):
+    """The rows of a cart's sprite sheet its launcher icon is cut from
+    (`icon_rows`), read off the top of the file -- or None when it has no
+    sheet, no art on it, or a sheet that will not read as text. `here` and
+    `folder` as `_scene_files` takes them."""
+    if _absent(folder, SPRITES_NAME):
+        return None
     try:
-        f = open(path + "/" + SPRITES_NAME)
+        f = open(here + SPRITES_NAME)
     except OSError:
         return None
     try:
@@ -885,32 +916,43 @@ def _sheet_icon(path, icon):
         f.close()
 
 
-def _each(root, read):
-    """`read(folder)` for every cart folder under root, sorted by name, the
-    folders it refuses (None) left out and any per-folder surprise swallowed,
-    so a single bad folder can't break the launcher. None when root itself
-    will not list, which a caller keeping state per folder must not read as
-    "every cart is gone" (moy_catalogue.catalogue).
+def _each(root, read, enter=False):
+    """`read(folder, listing)` for every cart folder under root, sorted by
+    name, the folders it refuses (None) left out and any per-folder surprise
+    swallowed, so a single bad folder can't break the launcher. None when root
+    itself will not list, which a caller keeping state per folder must not
+    read as "every cart is gone" (moy_catalogue.catalogue).
+
+    With `enter`, each read runs with the working directory in its folder and
+    `listing` that folder's (`_enter`; None where it could not), and the
+    working directory is put back once, after the last; without, `listing` is
+    None and every read is by full path.
 
     A cart is a FOLDER. A `.moy` FILE beside them is an archive -- how a cart
     travels, not how it is stored -- and is skipped silently: unpacking belongs
     to whatever brought it here, because a cart in an archive can't be edited,
     can't take an autosave commit, and can't hold its own undo journal or
     saves."""
-    try:
-        names = sorted(os.listdir(root))
-    except OSError:
+    names = _listing(root)
+    if names is None:
         return None
+    here = _cwd() if enter and root[:1] == "/" else None
     carts = []
-    for name in names:
-        if name.endswith(".moy") and _is_dir(root + "/" + name):
+    try:
+        for name in sorted(names):
+            if not (name.endswith(".moy") and names[name]):
+                continue
+            path = root + "/" + name
             try:
-                c = read(root + "/" + name)
+                c = read(path, _enter(path) if here is not None else None)
             except Exception as exc:  # noqa: BLE001  -- belt-and-braces over _load()
                 print("Moybyte cart scan skipped:", name, exc)
                 c = None
             if c:
                 carts.append(c)
+    finally:
+        if here is not None:
+            _leave(here)
     return carts
 
 
@@ -918,14 +960,18 @@ def catalogue(root=CARTS_DIR):
     """The shelf: every cart folder's `entry` under root, sorted by folder
     name. moy_catalogue.catalogue is the shelf's read: this one, with a
     handle on every entry."""
-    return _each(root, entry) or []
+    return _each(root, _entry_at, True) or []
 
 
 def scan(root=CARTS_DIR):
     """Every cart under root, loaded WHOLE, sorted by folder name -- for a
     caller that wants every cart's payloads (a host tool, a test); the shelf
     reads the `catalogue`."""
-    return _each(root, load) or []
+    return _each(root, _load_whole) or []
+
+
+def _load_whole(path, _names):
+    return load(path)
 
 
 def save_config(cart):

@@ -5,7 +5,8 @@ The directory and extension names, the sibling-path formula (system state
 lives BESIDE the carts dir), `ensure_dirs`, the cart NAME rule (`slug`), the
 manifest canvas-field codec, the rows of a sprite sheet a launcher icon is cut
 from (`icon_rows`, which the shelf's scan and the sheet codec both read) and
-the two directory primitives `moy_fs` lacks.
+the directory primitives `moy_fs` lacks: a folder's listing, what it proves
+absent, and a scan's walk into a folder (`_enter`/`_leave`).
 `moy_carts` (the store core), `moy_seed`, `moy_files` and `moy_file_ops` all
 import from here and never from each other's callers, so any of them can be
 imported first. `moy_carts` re-exports every name under its old spelling.
@@ -17,9 +18,9 @@ except ImportError:  # pragma: no cover
     os = None
 
 try:
-    from moy_fs import (_mkdir, set_publish_root)
+    from moy_fs import (_exists, _mkdir, set_publish_root)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_mkdir, set_publish_root)
+    from runtime.moy_fs import (_exists, _mkdir, set_publish_root)
 
 
 CARTS_DIR = "/sd/moybyte/carts"
@@ -188,6 +189,106 @@ def _is_dir(path):
         return (os.stat(path)[0] & 0x4000) != 0
     except OSError:
         return False
+
+
+# A path lookup is the expensive operation on every store medium: FAT on a
+# card reads each directory on the path again, one sector at a time, and
+# littlefs walks its metadata pairs. A cart's files are therefore checked
+# against ONE listing of its folder, never looked up one by one, and on FAT
+# the reads that remain are made from inside the folder (#224).
+_S_IFDIR = 0x4000
+_S_IFREG = 0x8000
+
+
+def _listing(path):
+    """The folder at `path` as {name: is_dir}, or None when it will not list.
+    "" is the working directory."""
+    try:
+        it = os.ilistdir(path) if path else os.ilistdir()
+    except AttributeError:                 # CPython: scandir says the same
+        try:
+            with os.scandir(path or ".") as it:
+                return {e.name: e.is_dir() for e in it}
+        except OSError:
+            return None
+    except OSError:
+        return None
+    names = {}
+    try:
+        for e in it:
+            kind = e[1]
+            if kind == _S_IFDIR or kind == _S_IFREG:
+                names[e[0]] = kind == _S_IFDIR
+            else:                          # a listing that does not say (DT_UNKNOWN)
+                names[e[0]] = _is_dir(path + "/" + e[0] if path else e[0])
+    except OSError:
+        return None
+    return names
+
+
+def _plain(name):
+    """Whether FAT reads `name` literally: one path component of ASCII letters,
+    digits, `_`, `-` and inner dots. FAT folds case, strips trailing dots and
+    spaces and answers to 8.3 aliases, so any other name may open where a
+    listing does not show it."""
+    if not name or name[0] in ". " or name[-1] in ". ":
+        return False
+    for c in name:
+        if ord(c) > 127 or not (c.isalpha() or c.isdigit() or c in "_-."):
+            return False
+    return True
+
+
+def _absent(names, name):
+    """True when the listing `names` proves `name` is not in its folder: no
+    entry by that name in any case, and a name every medium reads literally.
+    False when it is there, or when only the file system can say."""
+    if names is None or name in names:
+        return False
+    low = name.lower()
+    for n in names:
+        if n.lower() == low:
+            return False
+    return _plain(name)
+
+
+def _has(folder, path, name):
+    """Whether the folder at `path` holds `name`, answered from `folder`, its
+    listing, when the listing can say and by a lookup when it cannot."""
+    if folder is not None and name in folder:
+        return True
+    if _absent(folder, name):
+        return False
+    return _exists(path + "/" + name)
+
+
+def _cwd():
+    try:
+        return os.getcwd()
+    except (OSError, AttributeError):
+        return None
+
+
+def _enter(path):
+    """Move the working directory into the folder at `path` and return its
+    listing, or None when either fails -- the caller then reads by full path.
+    On FAT a name opened from inside the folder is looked up in that folder
+    alone, where a full path walks every directory above it again. Nothing may
+    import while a scan is inside a folder: `""` on sys.path is the working
+    directory, so a cart's own files would be searched, and could shadow a
+    module."""
+    try:
+        os.chdir(path)
+    except (OSError, AttributeError):
+        return None
+    return _listing("")
+
+
+def _leave(here):
+    try:
+        os.chdir(here)
+    except (OSError, AttributeError):
+        pass
 
 
 def _rmtree(path):
