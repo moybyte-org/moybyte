@@ -274,7 +274,10 @@ session, because tearing it down between ops is what corrupts the bus.
 **Card format.** FAT12/16/32 and exFAT both mount: a card over 32GB ships
 exFAT, which an esp32 build without `MICROPY_FATFS_EXFAT` (`mpconfigboard.h`)
 refuses with ENODEV. The card behind `moy_sd` is a block device `vfs.mount`
-hands to FatFS like any other, so the define is the whole of it. The mount is
+hands to FatFS like any other, so the define is the whole of it. That device
+(`_NativeSDBlockDev` in `device/moybyte_sd.py`) keeps a cache of single-sector
+reads, the directory and FAT sectors every path lookup reads again, and a
+write drops the sectors it covers before it is issued. The mount is
 `moybyte_sd`'s and not `device/card_store.py`'s (the P4s' and the Guition S3's):
 `card_store.mount` calls `deinit()` on a card whose mount failed, which here
 would be a teardown after the attach.
