@@ -130,6 +130,12 @@ when it has; a suite started earlier errors every test with "did not answer
    usb_reset`, which its `[flash]` block declares and `reboot` uses.
 4. Still silent after a reboot: the image. Hold the T-Deck's trackball (GPIO0)
    while powering on to reach the ROM loader, then `flash`.
+5. It prints `SERIAL: retry / safe / repl` and answers nothing else: the
+   board is on the kernel's recovery floor (`native/moy_kernel/`) -- the VM
+   failed to start or crashed into a boot loop. Read the crash it shows, then
+   send `retry`, `safe` (boots on default settings, `system.json` neither
+   read nor written, no wallpaper cart) or `repl` (skips `main.py`) as a line; each is a restart. `tools/kernel_gate.py BOARD` drives
+   the floor end to end.
 
 When a suite fails on a board you have just been driving, suspect your own
 leftovers first: `desk`, check `state`'s stack, reboot if unsure.
