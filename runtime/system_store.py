@@ -45,6 +45,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_spine import Settings
 
 
+def safe_mode():
+    """True when the kernel started this boot SAFE from its recovery screen
+    (native/moy_kernel): the settings are ignored -- the defaults, so no
+    wallpaper -- and the file is left as it was for the next ordinary boot."""
+    try:
+        import moy_kernel
+    except ImportError:
+        return False
+    return moy_kernel.mode() == "safe"
+
+
 class StoreHandle:
     """The (store, root, can_manage, with_sd) guard 4-tuple, as an object.
 
@@ -95,6 +106,7 @@ class SystemStore:
         # THE store. `Workstation.__init__` aliases it as `ws.system` and
         # nothing rebinds either name again -- `load()` replaces its rows.
         self.rows = Settings(self._write)
+        self.safe = safe_mode()
 
     # -- system.json ---------------------------------------------------------
 
@@ -106,6 +118,9 @@ class SystemStore:
         bad card must not crash boot, and a partially-applied settings file is
         worse than the defaults, which are all valid."""
         if not self.store.ready():
+            return self.rows
+        if self.safe:
+            print("Moybyte SAFE start: system.json ignored")
             return self.rows
         ws = self.ws
         try:
@@ -123,7 +138,7 @@ class SystemStore:
         the next write carries it; True when it landed or when this build has
         nowhere to put one (`can_manage` is False where the carts are baked
         into the image: that is not a failure to retry)."""
-        if not self.store.writable():
+        if self.safe or not self.store.writable():
             return True
         ws = self.ws
         try:

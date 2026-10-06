@@ -127,7 +127,12 @@ class SpineVerbs:
         # Paint's shared document lives outside the re-seeded built-in cart. Restore
         # My Art's bg asset before compiling a persisted My Art wallpaper.
         self.artwork.sync_wallpaper()
-        self.look.select_wallpaper(self.system.get("wallpaper"), persist=False)
+        # A SAFE start (the kernel's recovery screen) runs no wallpaper cart:
+        # the settings' absence would fall back to the first one there is.
+        wallpaper = self.system.get("wallpaper")
+        if getattr(self.prefs, "safe", False):
+            wallpaper = self.look.FILL_WALLPAPERS[0]
+        self.look.select_wallpaper(wallpaper, persist=False)
         self.look.set_theme(self.system.get("theme", self.look.theme_name),
                             persist=False,
                             variant=self.system.get("theme_variant",

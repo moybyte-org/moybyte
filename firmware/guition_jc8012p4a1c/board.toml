@@ -305,6 +305,15 @@ SRAM is not the constraint the S3 boards' is; the on-glass suite runs the same
 wasm checks. The run stack's size and placement are this board's MOY_WASM_*
 settings in mpconfigboard.h, with the measurement that chose them."""
 
+[[native.shared.take]]
+module = "moy_kernel"
+why = """
+The kernel's entry, crash record and recovery floor
+(docs/kernel_spine_2026-10.md §6-§8): taking it is what makes the kernel own
+app_main. Every console takes it; what is this board's is in mpconfigboard.h --
+the panel module's four entry points the floor draws through, and serial as
+its only input, so with none for 30 s it starts SAFE."""
+
 [native.p4]
 source   = "native/p4"
 why = """

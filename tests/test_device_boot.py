@@ -779,8 +779,12 @@ def test_the_spine_imports_no_board_module():
     # and both are imported behind an ImportError guard with a working
     # off-board answer. A firmware/ module never belongs here -- nor in the
     # cart step the spine takes (boot_carts.py), whose store is an argument.
+    # `crash_guard` is a runtime leaf, and `moy_kernel` is the kernel's binding
+    # (native/moy_kernel), guarded the same way: absent, the first frame
+    # proves nothing to nobody.
     allowed = {"console", "runtime", "chrome", "ticks", "moycore_glue",
-               "device_util", "perf_line", "time", "gc", "boot_carts"}
+               "device_util", "perf_line", "time", "gc", "boot_carts",
+               "crash_guard", "moy_kernel"}
     seen = set()
     for name in ("device_boot.py", "boot_carts.py"):
         src = (ROOT / "runtime" / name).read_text(encoding="utf-8")

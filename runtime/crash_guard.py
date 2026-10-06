@@ -98,6 +98,31 @@ because of it would be worse than the loop.
 KEY = "app_guard"
 WALLPAPER_KEY = "wallpaper_guard"
 
+# The kernel's crash record (native/moy_kernel/moy_crash.h), on a board that
+# takes it. A run this ledger holds OPEN is mirrored into RTC memory, so a
+# native fault, an abort or a watchdog names what was running; the record
+# reaches Python through `last_crash` and `take_crash`. Every other tier has no
+# record, and both read None.
+try:
+    import moy_crash as _native
+except ImportError:
+    _native = None
+
+_ROLE = {KEY: 1, WALLPAPER_KEY: 2}       # moy_crash.APP, moy_crash.WALLPAPER
+
+
+def last_crash():
+    """The last crash the kernel recorded on this board, as a dict (`kind`,
+    `task`, `id`, `role`, `what`, `reset`, `pc`, `cause`, `addr`, `bt`, `core`,
+    `boot`, `uptime_ms`, `build`), or None."""
+    return _native.last() if _native is not None else None
+
+
+def take_crash():
+    """The crash this boot's intake took, once: what the notice banner says
+    after the reboot. None on every later call, and on a clean boot."""
+    return _native.take() if _native is not None else None
+
 
 class CrashGuard:
     """Per-cart strike counting around a risky open.
@@ -213,6 +238,7 @@ class CrashGuard:
         self._proof = proof
         self._frames = 0
         self._commit(d)
+        self._mirror(cid)
         return True
 
     def frame(self):
@@ -236,6 +262,7 @@ class CrashGuard:
         if cid is None:
             return False
         self._armed = None
+        self._mirror(None)
         d = self._data()
         d["strikes"].pop(cid, None)      # forgiven wholesale, not decremented
         if d.get("open") == cid:
@@ -254,6 +281,8 @@ class CrashGuard:
         """The run ended. Any strike it took STANDS -- an exit before the heal
         is exactly the evidence we keep. Only drops the in-RAM arming so the
         next run starts clean."""
+        if self._armed is not None:
+            self._mirror(None)
         self._armed = None
         self._proof = None
         self._frames = 0
@@ -290,3 +319,9 @@ class CrashGuard:
         d = self._data()
         return sorted(k for k in d["strikes"] if self.disabled(k))
 
+    def _mirror(self, cid):
+        """The id this role holds OPEN, into the kernel's RTC memory (None
+        clears it). Free: no store write, nothing the next boot reads unless
+        the board died first."""
+        if _native is not None:
+            _native.arm(_ROLE.get(self._key, 1), cid)

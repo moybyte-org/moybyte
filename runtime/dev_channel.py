@@ -106,8 +106,10 @@ except ImportError:        # host CPython, the unix port: `_fill`'s own loop
 # being written here.
 try:
     from settings_layer import SETTINGS_TOGGLES
+    from crash_guard import last_crash
 except ImportError:        # host / test -- the runtime package
     from runtime.settings_layer import SETTINGS_TOGGLES
+    from runtime.crash_guard import last_crash
 
 # A partial line longer than this is noise; drop it. NOT sized for a human:
 # the on-glass harness's `pyexec` uploads code in 768-char chunks wrapped in a
@@ -724,6 +726,13 @@ def _remote_state(ws):
         st["wifi_held"] = sorted(ws.leases.holders())  # the radio lease's holders
     except Exception as exc:  # noqa: BLE001
         st["wifi_err"] = str(exc)
+    try:
+        # The last crash the kernel recorded (native/moy_kernel): what was
+        # OPEN in the strike ledger, why it stopped, where. None on a board
+        # with no record and on every tier without the kernel.
+        st["crash"] = last_crash()
+    except Exception as exc:  # noqa: BLE001
+        st["crash_err"] = str(exc)
     try:
         # The #7 radio. A board with no link reports None -- never a zeroed
         # tuple, because a board that HAS one and is simply not paired must be
@@ -1885,6 +1894,31 @@ class DevChannel:
         if cmd in ("skip", "gov"):
             print("REMOTE %s: retired by the tick model (#217) -- the Player "
                   "schedules logic and draw; `steady 0|1` is the knob" % cmd)
+            return
+        if cmd == "kcrash":
+            # DEV, the kernel's crash record end to end (#224): `kcrash [id]
+            # [fault|abort]` arms `id` (default kernel-test) in the app strike
+            # ledger, then faults the board. After the reboot `state`'s
+            # `crash` names the id and the cause, and the notice is up;
+            # `py ws.app_guard.forgive('<id>')` drops the strike it took.
+            try:
+                import moy_crash
+            except ImportError:
+                print("REMOTE kcrash: no kernel on this board")
+                return
+            ws.app_guard.arm(parts[1] if len(parts) > 1 else "kernel-test")
+            moy_crash.panic(parts[2] if len(parts) > 2 else "fault")
+            return
+        if cmd == "kfail":
+            # DEV, the recovery floor (#224): `kfail [vm_start|heap]` restarts
+            # the board with that VM start failure armed for one boot, which
+            # lands on the recovery screen.
+            try:
+                import moy_kernel
+            except ImportError:
+                print("REMOTE kfail: no kernel on this board")
+                return
+            moy_kernel.test(parts[1] if len(parts) > 1 else "vm_start")
             return
         if cmd == "heapcaps":
             import gc

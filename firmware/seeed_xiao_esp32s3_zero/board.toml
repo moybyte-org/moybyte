@@ -386,6 +386,13 @@ WebAssembly engine running a cart's main.wasm (native/moy_wasm_web) -- so the
 runtime would be flash spent in both OTA slots for code nothing calls."""
 
 [[native.shared.deny]]
+module = "moy_kernel"
+why = """
+The kernel's entry, crash record and recovery floor are a console's: this board
+has no panel for the floor to draw on, and it keeps the port's own app_main
+until the kernel is the entry on every target (docs/kernel_spine_2026-10.md §8)."""
+
+[[native.shared.deny]]
 module = "moy_png"
 why = """
 The cover reader (SPEC.md 3.6): a cart's cover.png decoded into a shelf's

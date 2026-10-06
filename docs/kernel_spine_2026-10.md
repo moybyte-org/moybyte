@@ -22,10 +22,10 @@ swaps each twin for its binding under those tests unchanged.
 | app registry, back-stack, return records | `moy_spine.AppRegistry`, `BackStack`, `Returns` | `native/moy_spine/moy_route.h` |
 | WiFi leases | `moy_spine.Leases` | `moy_route.h` (one mask) |
 | settings store | `moy_spine.Settings` under `runtime/system_store.py` | `native/moy_spine/moy_settings.h` |
-| strike ledger | `runtime/crash_guard.py` | `+native/moy_crash/moy_ledger.c` |
-| crash record, boot-loop guard | — | `+native/moy_crash/moy_crash.h` |
-| recovery screen | — | `+native/moy_recovery/moy_recovery.h` |
-| the entry and the VM service | the port's `mp_task` | `+native/moy_kernel/moy_kernel.c` |
+| strike ledger | `runtime/crash_guard.py` | stays Python in sprint 2 (2026-10-06): it mirrors its OPEN id into the record (§6) |
+| crash record, boot-loop guard | — | `native/moy_kernel/moy_crash.h` |
+| recovery screen | — | `native/moy_kernel/moy_recovery.h` |
+| the entry and the VM service | the port's `mp_task` | `native/moy_kernel/moy_kernel.c` |
 | `runtime/moybuf.py`'s registry | `moy_alloc`'s `moy_buf_live` | a `moy_htab` of kind BUF |
 
 `native/moy_spine/` builds three ways, as `native/moy_index/` does: a
@@ -164,11 +164,14 @@ containment of `docs/native_kernel_2026-09.md` §5).
 
 ## 6. The crash record and the strike ledger
 
-**The record** is one 64-byte struct: magic, version, crc32, boot sequence,
-`esp_reset_reason()`, uptime, the fault's PC, cause and address (Xtensa's
-EXCCAUSE/EXCVADDR on the S3s, RISC-V's MCAUSE/MTVAL on the P4s), the faulting
-task's name, the id the ledger held OPEN and its role, and the firmware build's
-crc.
+**The record** is one 128-byte struct: magic, version, size, crc32, boot
+sequence, uptime, the firmware build, the fault's PC, cause and address
+(Xtensa's EXCCAUSE/EXCVADDR on the S3s, RISC-V's MCAUSE/MTVAL on the P4s), four
+backtrace PCs (RISC-V: RA), the kind (fault, abort, either watchdog, an unclean
+reset with no record, a VM that died), the core, `esp_reset_reason()`, the
+faulting task's name, the id the ledger held OPEN and its role, and a short
+text: the abort's PC, the exception's name or the VM's error. 64 bytes held
+neither the backtrace nor the text.
 
 **Where it survives, per board.**
 
@@ -182,43 +185,58 @@ no core-dump partition (the headroom floors of `docs/native_kernel_2026-09.md`
 §6.1 assume none on the S3s). A brownout or a
 power-on leaves only `esp_reset_reason()`, which the intake records as such.
 
-**Capture.** `-Wl,--wrap=esp_panic_handler`: the wrapper, in IRAM and touching
+**Capture.** `-Wl,--wrap=esp_panic_handler`: the wrapper, in IRAM and writing
 only RTC memory, fills the record and calls the real handler. That covers
-panics, aborts and both watchdogs once they panic. A VM that dies without a
-reset (an exception out of the console's boot, a `nlr_jump_fail`) is recorded
-by the VM service with no reboot.
+panics, aborts and both watchdogs once they panic. It reads the task name, the
+uptime and the text only while the flash cache is on, so a panic inside a flash
+operation still leaves PC, cause, address and backtrace. A VM that dies with
+the board up (a console boot that ends before `boot_ok`, a `nlr_jump_fail`) is
+recorded by the VM service, which then restarts the board.
 
 **A hang becomes a record** (#160): the VM service task subscribes to the task
 watchdog with `CONFIG_ESP_TASK_WDT_PANIC=y`, and the console's frame feeds it
 through the binding once per frame; the timeout is a `board.toml` value, set at
 the gate from each board's worst legitimate frame (#66).
 
-**Shown after the reboot.** On the next healthy boot the console's notice
-banner reads `moy_crash.take()` once and names what was running and why it
-stopped; the dev channel's `state` carries the last record as `crash`, and the
+**Shown after the reboot.** On the next healthy boot the console's first
+painted frame (`device_boot.boot_ok`) reads `moy_crash.take()` once and the
+notice banner names what was running and why it stopped; the dev channel's `state` carries the last record as `crash`, and the
 Settings diagnostics row shows it. The recovery screen (§7) shows it when the
 console cannot come up.
 
-**The ledger** is `CrashGuard`'s C twin over its two rows, the same keys and
-shapes (`strikes`, `open`, `proven`), the same arm / frame / heal / forgive /
-proof bracket the spine trace pins. Its armed id is mirrored into RTC memory at
-`arm`, which is how the record names what was running.
+**The ledger** stays `CrashGuard` in Python for sprint 2 (2026-10-06). Its
+armed id is mirrored into RTC memory at `arm` (`moy_crash.arm(role, id)`, one
+slot per role; the record names the app's over the wallpaper's) and cleared at
+the heal and the release, which is how the record names what was running; a
+boot clears what the last one left, which the record already holds.
 
 **The boot-loop guard** is the same bracket around the console itself: the
-boot sequence counts in RTC memory, the console calls `moy_kernel.boot_ok()`
-after its first painted launcher frame, and three boots in a row without it
-send the next boot to the recovery screen instead of the VM.
+starts count in RTC memory, the console calls `moy_kernel.boot_ok()` after its
+first painted frame, and four starts in a row without it send the next boot to
+the recovery screen instead of the VM. Four, not three: a wallpaper that kills
+the board strikes out in the ledger after three boots and the fourth boots
+without it (#160), so the guard trips only once the ledger has had its turn
+(`tests/test_moy_kernel.py`). The boot shell's ways to the REPL, a developer's
+Ctrl-C and every self-terminating mode, call `boot_ok` too; a console boot that
+ends any other way before it is a failed start (§7).
 
 ## 7. The recovery screen
 
-**When**: the VM fails to start (the first heap area cannot be allocated, or an
-exception leaves the port's boot script or the console's `main.py` before
-`boot_ok`), or the boot-loop guard trips.
+**When**: the VM fails to start (the first heap area cannot be allocated, or the
+port's boot script or the console's `main.py` ends before `boot_ok`), or the
+boot-loop guard trips.
+
+**Only on a boot no VM ran in.** A start that fails inside the VM is recorded
+and the board restarts with the floor armed in RTC memory; each choice on the
+floor is a restart with that choice armed. So the floor never finds a panel, a
+feeder or a bus a VM left mid-frame (`native/moy_flush/moy_flush.c`'s header:
+every clause was a race once), and a missing heap area, which fails before the
+VM touches anything, is drawn in the same boot.
 
 **What**: the record (cause, the app, uptime), the firmware label, and three
-choices: RETRY (start the VM as usual), SAFE (start it with the settings rows
-ignored: defaults, the wallpaper off, nothing auto-run) and REPL (start it with
-`main.py` skipped, for a developer on serial).
+choices: RETRY (start the VM as usual), SAFE (start it with `system.json`
+neither read nor written: the defaults, a fill instead of a wallpaper cart) and
+REPL (start it with `main.py` skipped, for a developer on serial).
 
 **How it draws.** Its own raster, a few dozen lines: a filled rect and an 8×8
 glyph from libmoy's compiled-in `moy_font_data`, at an integer scale, with a
@@ -226,25 +244,30 @@ rotation of 0/90/180/270 applied per pixel, into the panel module's own
 framebuffer 0. No libmoy canvas state, no compositor, no PPA, no allocation:
 the floor must not depend on what sprint 3 replaces. Each panel module gains
 four C entry points beside its MicroPython binding, which keeps calling the same
-bodies:
+bodies; the two that can fail answer 0 or an `esp_err_t`, because a floor whose
+panel will not come up still has serial. A board names its four, its geometry
+and its input in `mpconfigboard.h` (`MOY_KERNEL_PANEL(fn)`, `MOY_KERNEL_*`):
 
-    void     moy_<panel>_kinit(void);        power, bus, panel init, as the binding's init()
+    int      moy_<panel>_kinit(void);        power, bus, panel init, as the binding's init()
     uint16_t *moy_<panel>_kfb(void);         framebuffer 0, panel-native size
-    void     moy_<panel>_kpresent(void);     blocking: banded flush, or cache writeback on DPI
+    int      moy_<panel>_kpresent(void);     blocking: banded flush, or cache writeback on DPI
     void     moy_<panel>_kbacklight(int on);
 
-| console | panel path today | what sprint 2 adds | rotation | input on the floor |
+| console | panel path before sprint 2 | what sprint 2 adds | rotation | input on the floor |
 |---|---|---|---|---|
 | T-Deck | `moy_lcd` (`firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/`): the power rail, backlight, SPI2 and the ST7789 sequence are already C | the four entry points, factored out of `init`/`fb`/`show`/`backlight`; present is the blocking banded flush | none (320×240) | trackball click (GPIO0, polled); serial |
-| Guition S3 | `moy_axs` (`firmware/guition_jc3248w535/native/moy_axs/`): QSPI AXS15231B, C | the stop spike's entry points (branch kernel-spike-v129, `486f843`), which drew the spike's frames with no VM, ungated from its build flag | the module's own rotated bands | the spike's C AXS15231 touch poll; serial |
+| Guition S3 | `moy_axs` (`firmware/guition_jc3248w535/native/moy_axs/`): QSPI AXS15231B, C | the four entry points factored out as on the T-Deck (the stop spike's, branch kernel-spike-v129 `486f843`, were a copy of `init`'s body) | the module's own rotated bands | the spike's C AXS15231 touch poll, on the port's legacy I2C driver: at v1.28 the port links it, and the IDF aborts a boot that links the new `i2c_master` beside it; serial |
 | Waveshare P4 | `moy_dsi` (`native/p4/moy_dsi/`): EK79007, DPI from a PSRAM framebuffer, C; the backlight (GPIO32, active-low) is Python (`firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_display.py`) | the entry points; present is a cache writeback; the backlight pin and polarity become board defines | none (1024×600) | BOOT button (GPIO35); serial |
-| Guition P4 | `moy_dsi`: JD9365, 800×1280 portrait; the desk's landscape is the PPA's rotation in `device/dsi_panel.py`; backlight GPIO23, active-high, Python (`firmware/guition_jc8012p4a1c/modules/guition_p4_display.py`) | as the Waveshare | 90°, in the raster | serial only: its GSL3680 needs a firmware upload and stays off the floor. With no input for 30 s the floor picks SAFE, never RETRY |
+| Guition P4 | `moy_dsi`: JD9365, 800×1280 portrait; the desk's landscape is the PPA's rotation in `device/dsi_panel.py`; backlight GPIO23, active-high, Python (`firmware/guition_jc8012p4a1c/modules/guition_p4_display.py`) | as the Waveshare | `guition_p4_display.ROTATION`'s 270°, counter-clockwise, in the raster | serial only: its GSL3680 needs a firmware upload and stays off the floor. With no input for 30 s the floor picks SAFE, never RETRY |
 
 **The minimum, on every console**: the panel brought up, presented and lit
 from C, one font, and serial. Serial is what every board shares: while the VM
 is down the kernel drains the console's RX ring (the stop inventory's rule) and reads
-`retry`, `safe` and `repl`, and it prints `KERNEL recovery reason=<r>`. That
-is also how the gate drives the floor on a board with no input on it.
+`retry`, `safe` and `repl`, answers `state` with `"screen": "recovery"`, and
+prints `KERNEL recovery reason=<r> sel=<choice> crc=<framebuffer crc32>` with
+the lines it drew, every five seconds. That is also how the gate drives the
+floor on a board with no input on it. A one-button board moves the highlight on
+a press and picks on a one-second hold.
 
 ## 8. The embed entry
 
@@ -255,23 +278,27 @@ code that runs when the VM cannot. `MICROPY_ESP_IDF_ENTRY` renames the port's
 instead:
 
 1. the port's one-time startup (`nvs_flash_init`, the board's startup hook);
-2. the crash intake (RTC record and reset reason into NVS) and the boot-loop
-   check;
+2. the crash intake (RTC record and reset reason into NVS);
 3. the VM service task, created with `mp_task`'s stack size, priority and core;
    `app_main` returns, so the IDF main task's stack is freed as it is today.
 
-The VM service runs `mp_task`'s body as the spike's embed lifecycle did: one
-start per boot, the soft reset (Ctrl-D) kept, no stop between apps (sprint 4
-adds it). Where the port would fall to the REPL after a failed console boot,
-the service runs the recovery loop instead. The spike's call-list guard comes
-with it (`+tools/mp_task_calls.py`): the build fails when the pinned `MPY_TAG`'s
-`mp_task` call list differs from the one the service was reviewed against.
+The VM service is `mp_task` copied: one start per boot, the soft reset (Ctrl-D)
+kept, no stop between apps (sprint 4 adds it). After the port's prelude, which
+the floor's serial needs, it makes the boot decision (`moy_boot_decide`: START,
+SAFE, REPL or the floor). Where the port would fall to the REPL after a failed
+console boot, the service records the failure and restarts into the floor; a
+missing first heap area lands there in the same boot instead of the port's
+restart. The spike's call-list guard comes with it (`tools/mp_task_calls.py`):
+the build fails when the pinned `MPY_TAG`'s `mp_task` call list differs from
+`native/moy_kernel/mp_task_calls.txt`, the one the copy was reviewed against,
+and `tests/test_mp_task_calls.py` holds the copy to that record.
 
 The four consoles take the entry in `board.toml` as they take `moy_wasm`. The
 Zero keeps the port's entry until sprint 3 makes the kernel the entry on every
 target. The browser and the host have no entry: the web runner's worker and
-CPython call the bindings, and `moy_crash` and `moy_recovery` build on the host
-for the tests only.
+CPython call the bindings, and `moy_crash.c` and `moy_recovery.c` build on the
+host for the tests only. The three, the entry and the binding are one directory,
+`native/moy_kernel/`, so a board takes or denies one module.
 
 ## 9. Internal SRAM against the kernel's share
 
@@ -291,11 +318,14 @@ S3 boards with WiFi and BLE up, and the numbers are #224's.
 
 ## 10. The gate, as tests
 
-| gate | host | on glass (a shared body in `tests/on_glass.py`, every console board) |
+| gate | host | on glass, every console board |
 |---|---|---|
-| a stale handle is refused loudly | `tests/test_moy_spine.py` gains the native binding through ctypes and the desktop MicroPython; the spine trace runs over the native module on both object models; the API-sequence and settings-scanner fuzzers under ASan and UBSan | a stale app handle through `py` answers `stale app handle` |
-| a native crash is recorded and shown after reboot | the record's encode, crc and NVS copy through ctypes over a fake RTC and NVS | a dev word arms a test id in the ledger and aborts; after the reboot `state`'s `crash` names the id and the cause, and the notice is up |
-| a VM that fails to start lands on the recovery screen | the VM service's decision (boot sequence, `boot_ok`, start result to START, SAFE or RECOVERY) as a pure function through ctypes; the recovery raster rendered at each console's size and rotation and hashed against goldens | a dev word arms a one-shot start failure in RTC memory; after the reboot serial reads `KERNEL recovery reason=vm_start`, the framebuffer's hash matches the golden, and `retry` brings the console back |
+| a stale handle is refused loudly | `tests/test_moy_spine.py` gains the native binding through ctypes and the desktop MicroPython; the spine trace runs over the native module on both object models; the API-sequence and settings-scanner fuzzers under ASan and UBSan | a stale app handle through `py` answers `stale app handle` (a shared body in `tests/on_glass.py`) |
+| a native crash is recorded and shown after reboot | `tests/test_moy_kernel.py`: the record's seal and crc through ctypes, a torn or foreign record read as none, the OPEN ids a boot forgets | `tools/kernel_gate.py BOARD crash`: `kcrash` arms a test id in the ledger and faults; after the reboot `state`'s `crash` names the id and the cause, and the notice is up |
+| a VM that fails to start lands on the recovery screen | the same file: `moy_boot_decide` as a pure function, and the recovery raster rendered at each console's size and rotation and hashed against goldens | `tools/kernel_gate.py BOARD floor safe`: `kfail` arms a one-shot start failure in RTC memory; the floor says `KERNEL recovery reason=vm_start`, its framebuffer's crc is the host's render of the lines it printed, and `retry` and `safe` start the console as they say |
+
+The two floor gates are a tool and not a suite body: each step reboots the
+board, which an attach-only board's held-open session does not survive.
 
 Plus every sprint's standing items (`docs/native_kernel_2026-09.md` §6): internal free and low-water on both S3s with WiFi and
 BLE up, every image above its headroom floor, and the traces extended before

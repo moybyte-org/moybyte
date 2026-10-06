@@ -577,8 +577,25 @@ moybyte_app_size_guard() {
 #                               bootloader into an app slot.
 # Reads: MPY_DIR BOARD BOARD_DIR SCRIPT_DIR MANIFEST DIST_DIR BUILD_JOBS.
 # Leaves the cwd in ports/esp32 (both scripts end here).
+# The kernel's entry (native/moy_kernel), on a board that takes it: its VM
+# service is mp_task copied, so the pinned tag's mp_task must be the one the
+# copy was reviewed against (tools/mp_task_calls.py, before anything compiles),
+# and its recovery floor names this build's OTA label. Reads SCRIPT_DIR MPY_DIR
+# MODULES_DIR.
+moybyte_kernel_entry() {
+  local dest staged label
+  dest="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" native-dest "${SCRIPT_DIR}")"
+  staged="${SCRIPT_DIR}/${dest}/moy_kernel"
+  [ -d "${staged}" ] || return 0
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/mp_task_calls.py" check \
+    "${MPY_DIR}" "${REPO_ROOT}/native/moy_kernel/mp_task_calls.txt" || exit 1
+  label="$(sed -n 's/^LABEL = "\(.*\)"$/\1/p' "${MODULES_DIR}/_ota_build.py" 2>/dev/null)"
+  printf '#define MOY_FW_LABEL "%s"\n' "${label:-unlabelled}" > "${staged}/moy_fw_label.gen.h"
+}
+
 moybyte_build_and_collect() {
   local csv="$1" stem="$2" flash_note="$3"
+  moybyte_kernel_entry
   make -C "${MPY_DIR}/mpy-cross" -j"${BUILD_JOBS}"
   cd "${MPY_DIR}/ports/esp32"
   make submodules BOARD_DIR="${BOARD_DIR}"

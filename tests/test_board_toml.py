@@ -365,6 +365,20 @@ def test_every_board_decides_the_wasm_engine(board):
         "%s: the wasm tier is on every console board or on none" % board)
 
 
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_board_decides_the_kernel_entry(board):
+    """Taking native/moy_kernel hands app_main to the kernel
+    (docs/kernel_spine_2026-10.md §8): every console takes it, and the Zero
+    keeps the port's entry, each in writing."""
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert "moy_kernel" in takes or "moy_kernel" in denies, (
+        "%s/board.toml neither takes nor denies moy_kernel" % board)
+    staged = "moy_kernel" in board_config.native_modules(BOARDS[board], ROOT)
+    assert staged == (board in CONSOLE_BOARDS), (
+        "%s: the kernel is the entry on every console board" % board)
+
+
 def test_a_module_both_taken_and_denied_is_refused(tmp_path):
     (tmp_path / "board.toml").write_text(
         '[native]\n[native.shared]\nsource = "native"\n'

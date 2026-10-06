@@ -83,8 +83,15 @@ except ImportError:  # pragma: no cover - host package lane
 
 try:
     from boot_carts import BootCarts
+    from crash_guard import take_crash
 except ImportError:  # pragma: no cover - host package lane
     from runtime.boot_carts import BootCarts
+    from runtime.crash_guard import take_crash
+
+try:
+    import moy_kernel as _kernel
+except ImportError:  # every tier but a console board's
+    _kernel = None
 
 try:
     from gc import pauses as _gc_pauses
@@ -229,7 +236,26 @@ class DeviceBoot(BootCarts):
             return False
         self.done = True
         self.say("first frame in %dms" % _ticks_diff(_ticks_ms(), self._first_at))
+        boot_ok(ws)
         return True
+
+
+def boot_ok(ws, kernel=None):
+    """The console painted its first frame: it proved itself to the kernel
+    (native/moy_kernel), which would otherwise send a boot that ends here to
+    the recovery screen, and counts it out of the boot-loop guard. Then the
+    crash the kernel recorded before this boot, if any, said once on the
+    notice banner."""
+    kernel = kernel or _kernel
+    if kernel is None:
+        return None
+    kernel.boot_ok()
+    rec = take_crash()
+    if rec:
+        who = rec.get("id") or rec.get("task") or "?"
+        ws.notice("IT CRASHED LAST TIME", "%s: %s" % (who, rec.get("what") or rec.get("kind")),
+                  "warn", 10000)
+    return rec
 
 
 class OtaHealth:

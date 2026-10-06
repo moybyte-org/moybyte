@@ -365,6 +365,15 @@ SRAM is the tighter of the two S3 floors, and the on-glass suite's wasm checks
 are the gate on it. The run stack's size and placement are this board's
 MOY_WASM_* settings in mpconfigboard.h, with the measurement that chose them."""
 
+[[native.shared.take]]
+module = "moy_kernel"
+why = """
+The kernel's entry, crash record and recovery floor
+(docs/kernel_spine_2026-10.md §6-§8): taking it is what makes the kernel own
+app_main. Every console takes it; what is this board's is in mpconfigboard.h --
+the panel module's four entry points the floor draws through, and the trackball
+click as the floor's input beside serial."""
+
 # ---------------------------------------------------------------------------
 
 [modules.device]

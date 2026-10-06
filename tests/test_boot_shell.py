@@ -99,6 +99,35 @@ def test_a_desktop_that_raises_says_what_broke_and_keeps_the_repl(desk, capsys):
     assert "Moybyte desktop FAILED: no panel" in capsys.readouterr().out
 
 
+@pytest.fixture
+def kernel(monkeypatch):
+    """A fake `moy_kernel` (native/moy_kernel): what the shell told it."""
+    mod = types.ModuleType("moy_kernel")
+    mod.said = []
+    mod.boot_ok = lambda: mod.said.append("ok")
+    mod.boot_failed = lambda what: mod.said.append(("failed", what))
+    monkeypatch.setitem(sys.modules, "moy_kernel", mod)
+    return mod
+
+
+def test_the_kernel_hears_only_what_means_the_repl(kernel, desk, smoke):
+    """The kernel sends a console boot that ends before its first frame to the
+    recovery screen, so each way out that MEANS the REPL says so: a Ctrl-C and
+    a self-terminating mode. A desktop that returns or raises says nothing of
+    the kind -- its first frame (device_boot.boot_ok) is the only proof -- and
+    one that raises names what broke for the record."""
+    boot_shell.main("P4", "desktop", ("desktop",), "fake_smoke")
+    assert kernel.said == []
+    desk.raises = KeyboardInterrupt()
+    boot_shell.main("P4", "desktop", ("desktop",), "fake_smoke")
+    assert kernel.said == ["ok"]
+    desk.raises = RuntimeError("no panel")
+    boot_shell.main("P4", "desktop", ("desktop",), "fake_smoke")
+    assert kernel.said == ["ok", ("failed", "RuntimeError: no panel")]
+    boot_shell.main("P4", "panel", ("panel", "desktop"), "fake_smoke")
+    assert kernel.said[-1] == "ok" and smoke.ran == ["panel"]
+
+
 def test_an_unknown_mode_reports_the_ladder_and_runs_nothing(desk, smoke, capsys):
     """ONE STRING, NOT SIX BOOLEANS -- and a typo in the one string has to be an
     answer, not a board that silently boots something else."""

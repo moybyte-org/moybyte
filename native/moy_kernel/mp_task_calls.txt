@@ -1,0 +1,94 @@
+# The esp32 port's mp_task call list (tools/mp_task_calls.py), what the
+# kernel's VM service was last reviewed against. Regenerate only after
+# that review: tools/mp_task_calls.py record <checkout> <this file>.
+# recorded at v1.28.0
+[MICROPY_ESP_IDF_ENTRY]
+call MICROPY_BOARD_STARTUP
+call xTaskCreatePinnedToCore
+[mp_task]
+call esp_cpu_get_sp
+#if MICROPY_PY_THREAD
+call mp_thread_init
+call pxTaskGetStackStart
+#endif
+#if MICROPY_HW_ESP_USB_SERIAL_JTAG
+call usb_serial_jtag_init
+#endif
+#if MICROPY_HW_ENABLE_USBDEV
+call usb_phy_init
+#endif
+#if MICROPY_HW_ENABLE_UART_REPL
+call uart_stdout_init
+#endif
+call machine_init
+#if MICROPY_SSL_MBEDTLS
+call mbedtls_platform_set_time
+#endif
+call esp_event_loop_create_default
+call ESP_LOGE
+call MP_PLAT_ALLOC_HEAP
+call printf
+call esp_restart
+label soft_reset
+call mp_cstack_init_with_top
+call gc_init
+call mp_init
+call mp_obj_list_append
+call MP_OBJ_NEW_QSTR
+call readline_init0
+call machine_pins_init
+#if MICROPY_PY_MACHINE_I2S
+call machine_i2s_init0
+#endif
+call pyexec_frozen_module
+call pyexec_file_if_exists
+#if MICROPY_HW_ENABLE_USBDEV
+call mp_usbd_init
+#endif
+goto soft_reset_exit
+call pyexec_file_if_exists
+goto soft_reset_exit
+call esp_log_set_vprintf
+call pyexec_raw_repl
+call esp_log_set_vprintf
+call pyexec_friendly_repl
+label soft_reset_exit
+#if MICROPY_BLUETOOTH_NIMBLE
+call mp_bluetooth_deinit
+#endif
+#if MICROPY_PY_ESPNOW
+call espnow_deinit
+call MP_STATE_PORT
+#endif
+#if MICROPY_PY_MACHINE_UART
+call machine_uart_deinit_all
+#endif
+call machine_timer_deinit_all
+#if MICROPY_PY_ESP32_PCNT
+call esp32_pcnt_deinit_all
+#endif
+#if MICROPY_PY_THREAD
+call mp_thread_deinit
+#endif
+#if MICROPY_HW_ENABLE_USBDEV
+call mp_usbd_deinit
+#endif
+call gc_sweep_all
+call esp_native_code_free_all
+call mp_hal_stdout_tx_str
+#if MICROPY_PY_MACHINE_PWM
+call machine_pwm_deinit_all
+#endif
+call machine_pins_deinit
+#if MICROPY_PY_MACHINE_I2C_TARGET
+call mp_machine_i2c_target_deinit_all
+#endif
+call machine_deinit
+#if MICROPY_PY_SOCKET_EVENTS
+call socket_events_deinit
+#endif
+call mp_deinit
+call fflush
+goto soft_reset
+[platform_mbedtls_time]
+call gettimeofday

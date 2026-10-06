@@ -17,6 +17,9 @@ breaks -- which is why they are pinned directly rather than left to the goldens:
      those ints and must not call into `ach` / `ach_ui` at all.
 """
 
+import sys
+import types
+
 import pytest
 
 from runtime import crash_guard, host_app, moy_carts, system_store
@@ -117,6 +120,27 @@ def test_a_store_that_raises_leaves_the_settings_empty_and_boots(tmp_path):
     ws.prefs.load()                         # must not raise
     assert ws.system.keys() == []
     assert ws.system is ws.prefs.rows
+
+
+def test_a_safe_start_ignores_the_file_and_leaves_it_alone(tmp_path, monkeypatch):
+    """SAFE on the kernel's recovery screen (native/moy_kernel): the console
+    starts on the defaults -- no wallpaper, nothing the settings would run --
+    and writes nothing back, so the next ordinary boot reads the owner's file
+    as it was."""
+    kernel = types.ModuleType("moy_kernel")
+    kernel.mode = lambda: "safe"
+    monkeypatch.setitem(sys.modules, "moy_kernel", kernel)
+    assert system_store.safe_mode()
+    ws = _ws(tmp_path)
+    ws.prefs.safe = system_store.safe_mode()
+    moy_carts.save_system({"wallpaper": "aurora", "marker": 1}, ws.carts_root)
+    ws.load_system()
+    assert ws.system.get("marker") is None and ws.system.get("wallpaper") is None
+    assert ws.look.wallpaper_id == ws.look.FILL_WALLPAPERS[0]
+    ws.system.set("theme", "berry")
+    assert moy_carts.load_system(ws.carts_root) == {"wallpaper": "aurora", "marker": 1}
+    kernel.mode = lambda: "start"
+    assert not system_store.safe_mode()
 
 
 # ---------------------------------------------------------------------------

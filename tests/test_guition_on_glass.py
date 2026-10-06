@@ -41,7 +41,14 @@ def board():
 # 93091 free with it, 93731 without), so the guard keeps measuring the engine's
 # own cost.
 EXFAT_SRAM = 640
-WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM, 55296)
+# And less KERNEL_SRAM, the kernel's static share (native/moy_kernel: its
+# panic wrapper in IRAM and its statics), which every console image carries
+# and docs/native_kernel_2026-09.md section 6.1 bounds on its own: measured
+# 2026-10-06 on this board, the internal heap an image that takes
+# the module has against the same tree denying it (the worse of two fresh
+# boots: 93067 and 93131 free without it, 92039 with it).
+KERNEL_SRAM = 1092
+WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM - KERNEL_SRAM, 55296)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc3248w535"
 
 
