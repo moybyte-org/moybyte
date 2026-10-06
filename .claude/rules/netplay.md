@@ -105,7 +105,7 @@ belongs here is only what a coder must not undo:
   kids was built and REVERTED the same day (owner call, 2026-08-22): that thumb
   keyboard is far too small for two people, and the second keyboard is the
   answer.**
-- **`system_carts/brick_siege.moy` and `harpoon_pop.moy` are two-player**, and
+- **`system_carts/moybyte.brick_siege.moy` and `moybyte.harpoon_pop.moy` are two-player**, and
   read `btn(name, i)` without learning where the second pad came from -- the
   point of one API. The Lua twin is ported in step (its parity test compares
   every draw call for 3000 frames). Brick Siege's roster global had to be renamed

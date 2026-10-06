@@ -105,7 +105,7 @@ their `v0_N` names under `docs/history/`. Two format names stay on purpose: the
 make setup                 # venv + pip install -e '.[dev,sim]' (hermetic)
 make test                  # pytest; one file: .venv/bin/python -m pytest tests/x.py -k name
 tools/preflight.sh         # what CI runs, in CI's order -- before pushing (--web adds Chrome)
-python tools/simulate_desktop.py [--cart system_carts/star_catcher.moy]
+python tools/simulate_desktop.py [--cart system_carts/moybyte.star_catcher.moy]
 tools/board.py ports       # which board is on which port, and who holds it
 tools/board.py pass tdeck p4  # from a worktree: build, flash, boot, suite -- one table
 tools/worktree.py new NAME    # .claude/worktrees/NAME, builds and tests as is; `rm NAME` removes it

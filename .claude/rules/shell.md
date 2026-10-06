@@ -96,7 +96,7 @@ to whoever called it.
   - **Undo is scoped to the active tab's file(s), never another tab's.** The one
     bar UNDO/REDO pair walks fine-grained in-RAM ops first, then whole commits.
   - **Blocks↔code graduation is one-way and reversible only by undo**: a diverging
-    code commit stores `"graduated": true`, the Blocks tab goes read-only, and
+    code commit stores `"moybyte": {"graduated": true}`, the Blocks tab goes read-only, and
     undoing past that commit un-graduates.
   - **Wallpaper previews keep a sidecar; covers DO NOT** (#155) — and the
     contrast is the point. A computed preview FRAME is far dearer to rebuild than
