@@ -329,6 +329,7 @@ import base64, json, os, sys
 root, out = sys.argv[1], sys.argv[2]
 sys.path.insert(0, os.environ["REPO_ROOT"])
 from runtime.moy_sync import is_binary
+from runtime.moy_store_base import BUILTIN_NS, builtin_name
 bundle = {}
 n = 0
 for cart in sys.argv[3:]:
@@ -336,6 +337,8 @@ for cart in sys.argv[3:]:
     # path.
     src = cart if os.sep in cart else os.path.join(root, cart)
     name = os.path.basename(src.rstrip("/"))
+    if builtin_name(name) is None:      # the folder the device's seed writes
+        name = BUILTIN_NS + "." + name
     if not os.path.isdir(src):
         print("  !! missing cart:", cart)
         continue

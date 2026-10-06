@@ -160,7 +160,7 @@ _FOLDERS = '["rock.moy", "dm.moy", "zap.moy"]'
 
 _FORGET_APP = """(async () => {
   const carts = await (await navigator.storage.getDirectory()).getDirectoryHandle('carts');
-  await carts.removeEntry('get_carts.moy', {recursive: true});
+  await carts.removeEntry('moybyte.get_carts.moy', {recursive: true});
   return 'gone';
 })()"""
 

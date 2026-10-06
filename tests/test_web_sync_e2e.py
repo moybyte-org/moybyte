@@ -106,7 +106,7 @@ def test_a_cart_made_in_chrome_lands_on_disk(tmp_path):
     with _twin(store) as base:
         run_out = _browsershot("sync_create.json", base, tmp_path / "shots")
 
-        new = store / "new_cart.moy"
+        new = store / "local.new_cart.moy"
         assert new.is_dir(), \
             "the browser-created cart never reached the store:\n%s" % run_out[-2000:]
         got = sorted(p.name for p in new.iterdir())
@@ -193,7 +193,7 @@ def test_a_pinned_board_prompts_in_the_page_and_then_works(tmp_path):
 
         # ...and the shelf behind it is the real console: a cart made on it
         # reaches the store through the same pinned /sync.
-        new = store / "new_cart.moy"
+        new = store / "local.new_cart.moy"
         assert new.is_dir(), \
             "no cart reached the store after pairing:\n%s" % out[-2000:]
 

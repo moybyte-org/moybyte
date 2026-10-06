@@ -45,6 +45,7 @@ import json
 import console
 import host_api
 import moy_carts
+from moy_store_base import builtin_name
 import moy_catalogue
 import web_canvas
 import web_input
@@ -614,6 +615,7 @@ def _select_cart(name):
     for i, c in enumerate(ws.launcher.items):
         path = c.get("path") or ""       # synthetic tiles (Make) carry no path
         folder = path.rsplit("/", 1)[-1].lower()
+        folder = builtin_name(folder) or folder
         if folder.endswith(".moy"):
             folder = folder[:-4]
         if want in (folder, c.get("title", "").lower()):
