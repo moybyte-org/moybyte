@@ -80,10 +80,14 @@ on a board.
   the linker takes Rust's port and never opens the board's libm: about forty
   newlib functions changed provider on both ESP-IDF targets, `strlen` and
   `memcmp` on the browser build and `sqrtf` on the unix one. `drop_builtins.sh`
-  removes its members; the references the Rust objects keep are answered by the
-  target's libgcc/libc/libm, and a name only Rust has (`__udivti3` on a 32-bit
-  target) is a link error. Localizing the weak symbols with `objcopy` also
-  works on ELF, and cannot be done on wasm (`llvm-objcopy` only edits sections).
+  removes the `compiler_builtins-*` members and only those: on the riscv32 and
+  x86 targets the archive also bundles compiler-rt's C objects under hashed
+  names (`<hash>-popcountsi2.o`, strong definitions, soft-float on riscv32), and
+  the unix build here still took `__popcountdi2` from one. The Rust twin's
+  `native/moy_index/rust/build.sh` keeps only the crate's own object, and
+  `tools/link_providers.py` is the guard. Localizing the weak symbols with
+  `objcopy` also works on ELF, and cannot be done on wasm (`llvm-objcopy` only
+  edits sections).
 - **The hosted targets need `rust_eh_personality`.** Their prebuilt
   `compiler_builtins` is built for unwinding and its tables name the routine;
   `lib.rs` defines an empty one. The bare-metal targets' prebuilt core is

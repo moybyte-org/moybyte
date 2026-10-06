@@ -595,6 +595,10 @@ moybyte_build_and_collect() {
     USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
     FROZEN_MANIFEST="${MANIFEST}"
   echo "${index_hook}" > "${bout}/moy_index_impl"
+  # No Rust object may stand in for the C library (tools/link_providers.py).
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/link_providers.py" check \
+    "${bout}/micropython.map" || exit 1
   cp "${bout}/firmware.bin" "${DIST_DIR}/${stem}.bin"
   cp "${bout}/micropython.bin" "${DIST_DIR}/${stem}_app.bin"
   moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin"
