@@ -399,7 +399,7 @@ def pytest(args, env=None):
 def unix_micropython(impl):
     """`make unix-micropython` with the twin `impl` in both binaries (the
     binaries are removed first: a changed link line alone relinks nothing)."""
-    for b in ("build-moybyte", "build-moybyte-r32"):
+    for b in ("build-moybyte", "build-moybyte-board"):
         try:
             os.remove(os.path.join(UNIX_PORT, b, "micropython"))
         except OSError:
