@@ -41,8 +41,8 @@ def test_files_cart_is_well_formed_and_the_app_opens(tmp_path):
     import json
     man = json.loads((ROOT / "system_carts" / "moybyte.files.moy" / "manifest.json")
                      .read_text(encoding="utf-8"))
-    assert man["type"] == "app" and man["version"] >= 1
-    assert "files" in man["permissions"]
+    assert man["moybyte"]["type"] == "app" and man["version"] >= 1
+    assert "files" in man["moybyte"]["permissions"]
     compile((ROOT / "system_carts" / "moybyte.files.moy" / "main.py").read_text(),
             "main.py", "exec")
 

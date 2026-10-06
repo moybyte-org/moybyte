@@ -59,7 +59,7 @@ def _draw():
 def _write_cart(carts_dir, name, src, canvas="128x128", extra=None):
     d = Path(carts_dir) / (name + ".moy")
     d.mkdir(parents=True, exist_ok=True)
-    man = {"title": name, "type": "game", "canvas": canvas}
+    man = {"title": name, "canvas": canvas, "moybyte": {"type": "game"}}
     if extra:
         man.update(extra)
     (d / "manifest.json").write_text(json.dumps(man))

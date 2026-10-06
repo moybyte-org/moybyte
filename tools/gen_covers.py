@@ -162,7 +162,7 @@ def gen_cover(slug):
     manifest_path = os.path.join(src_dir, "manifest.json")
     with open(manifest_path) as f:
         manifest = json.load(f)
-    if manifest.get("type") not in COVER_TYPES:
+    if manifest.get("moybyte", {}).get("type") not in COVER_TYPES:
         print("skip (not a game):", slug)
         return False
     # A throwaway store seeded from the real system carts, so the run uses the

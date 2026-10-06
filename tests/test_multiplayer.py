@@ -224,7 +224,7 @@ def _mp_cart(carts_dir, title, src):
                             edit=[])
     man_path = Path(cart["path"]) / "manifest.json"
     man = json.loads(man_path.read_text())
-    man["permissions"] = ["multiplayer"]
+    man["moybyte"]["permissions"] = ["multiplayer"]
     man_path.write_text(json.dumps(man))
     return moy_carts.scan(carts_dir)
 

@@ -82,7 +82,7 @@ in the store, reading wifi credentials, triggering OTA, editing the system icon 
 
 The proposal is a **second, additive API surface** — call it the *system* namespace —
 injected only when both are true:
-- the cart's `manifest.json` declares `"system": true` (a flag that already exists
+- the cart's `manifest.json` declares `"moybyte": {"system": true}` (a flag that already exists
   today, currently used only for "don't let the kid rename/delete this built-in," not
   for capability), **and**
 - it was loaded from the trusted system location (the seed/builtin path), never from

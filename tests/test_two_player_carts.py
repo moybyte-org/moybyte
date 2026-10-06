@@ -232,7 +232,7 @@ def test_both_carts_declare_the_multiplayer_permission(tmp_path):
         man = json.loads(
             (ROOT / "system_carts" / (folder + ".moy") / "manifest.json")
             .read_text(encoding="utf-8"))
-        assert "multiplayer" in man["permissions"], folder
+        assert "multiplayer" in man["moybyte"]["permissions"], folder
 
 
 def test_a_linked_match_reports_no_pointer(tmp_path):

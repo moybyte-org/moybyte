@@ -1,76 +1,79 @@
 {
   "format": "moy-1",
-  "version": 3,
+  "version": 4,
   "title": "Space Desktop",
-  "type": "wallpaper",
+  "id": "moybyte.space_desktop",
   "runtime": "python",
   "main": "main.py",
-  "system": true,
-  "order": 40,
   "canvas": "320x240",
-  "permissions": [
-    "graphics",
-    "input"
-  ],
-  "age_mode": "cards",
-  "safe_to_share": true,
-  "config": {
-    "star_count": 80,
-    "star_speed": 30,
-    "bg": "dark_blue",
-    "pet": 0
-  },
-  "edit": [
-    {
-      "key": "star_count",
-      "label": "STARS",
-      "type": "int",
-      "min": 10,
-      "max": 300,
-      "step": 10,
-      "card": "ADD {value} STARS"
+  "moybyte": {
+    "type": "wallpaper",
+    "system": true,
+    "order": 40,
+    "permissions": [
+      "graphics",
+      "input"
+    ],
+    "age_mode": "cards",
+    "safe_to_share": true,
+    "config": {
+      "star_count": 80,
+      "star_speed": 30,
+      "bg": "dark_blue",
+      "pet": 0
     },
-    {
-      "key": "star_speed",
-      "label": "SPEED",
-      "type": "int",
-      "min": 5,
-      "max": 90,
-      "step": 5,
-      "display": "gauge",
-      "gauge": {
-        "low": "turtle",
-        "high": "rabbit"
+    "edit": [
+      {
+        "key": "star_count",
+        "label": "STARS",
+        "type": "int",
+        "min": 10,
+        "max": 300,
+        "step": 10,
+        "card": "ADD {value} STARS"
       },
-      "card": "SKY MOVES AT {value}"
-    },
-    {
-      "key": "pet",
-      "label": "PET",
-      "type": "choice",
-      "choices": [
-        0,
-        1
-      ],
-      "tiles": [
-        0,
-        1
-      ],
-      "display": "sprite-tiles",
-      "card": "PET IS A {value}"
-    },
-    {
-      "key": "bg",
-      "label": "BG",
-      "type": "choice",
-      "choices": [
-        "dark_blue",
-        "night",
-        "stripes",
-        "indigo"
-      ],
-      "display": "bg-thumbs",
-      "card": "SKY IS {value}"
-    }
-  ]
+      {
+        "key": "star_speed",
+        "label": "SPEED",
+        "type": "int",
+        "min": 5,
+        "max": 90,
+        "step": 5,
+        "display": "gauge",
+        "gauge": {
+          "low": "turtle",
+          "high": "rabbit"
+        },
+        "card": "SKY MOVES AT {value}"
+      },
+      {
+        "key": "pet",
+        "label": "PET",
+        "type": "choice",
+        "choices": [
+          0,
+          1
+        ],
+        "tiles": [
+          0,
+          1
+        ],
+        "display": "sprite-tiles",
+        "card": "PET IS A {value}"
+      },
+      {
+        "key": "bg",
+        "label": "BG",
+        "type": "choice",
+        "choices": [
+          "dark_blue",
+          "night",
+          "stripes",
+          "indigo"
+        ],
+        "display": "bg-thumbs",
+        "card": "SKY IS {value}"
+      }
+    ]
+  }
 }

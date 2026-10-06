@@ -140,6 +140,7 @@ _KEYS = ("title", "author", "type", "runtime", "main", "format", "version",
          "memory", "writable", "graduated", "fps", "palette", "extensions",
          "icon", "edit", "permissions", "input", "canvas", "assets", "id",
          "config", "sources")
+_VENDOR = ("type", "graduated", "edit", "permissions", "assets", "config")
 
 
 def _value(rng, depth=0):
@@ -192,6 +193,18 @@ def _manifest(rng):
         if key == "icon" and rng.random() < 0.5:
             man[key] = rng.choice([[rng.randrange(-2, 520), rng.randrange(0, 6),
                                     rng.randrange(0, 6)], rng.randrange(600)])
+        if key == "id" and rng.random() < 0.6:
+            man[key] = rng.choice(["kenny.star", "local.a_1", "moybyte.x", "Kenny.star",
+                                   "a.b.c", ".x", "x.", "kenny", "k\u00e9.x", ""])
+    # Moybyte's own fields live under "moybyte" (moy_store_base.VENDOR_KEY):
+    # mostly moved there, sometimes left loose (read as absent), sometimes
+    # under a "moybyte" that is not an object.
+    roll = rng.random()
+    vend = {k: man.pop(k) for k in _VENDOR if k in man and roll < 0.8}
+    if roll < 0.75:
+        man["moybyte"] = vend
+    elif roll < 0.8:
+        man["moybyte"] = rng.choice([None, [], "app", 3])
     text = json.dumps(man, ensure_ascii=rng.random() < 0.5,
                       indent=rng.choice([None, 1]))
     if rng.random() < 0.2 and text.startswith("{\"") and len(man) > 1:
@@ -543,7 +556,8 @@ for step in range(@STEPS@):
         with open(cart + "/journal/journal.jsonl", "a") as fh:
             fh.write('{"seq": "torn')         # a torn last line
 man = json.loads(moy_carts._read(cart + "/manifest.json"))
-print("manifest", sorted(man.items()))
+print("manifest", sorted((k, sorted(v.items()) if isinstance(v, dict) else v)
+                        for k, v in man.items()))
 '''
 
 

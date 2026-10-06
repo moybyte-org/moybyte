@@ -1,26 +1,29 @@
 {
   "format": "moy-1",
-  "version": 3,
+  "version": 4,
   "title": "Notes",
-  "type": "app",
+  "id": "moybyte.notes",
   "runtime": "python",
   "main": "main.py",
-  "system": true,
-  "order": 350,
-  "targets": [
-    "host",
-    "device"
-  ],
   "canvas": "320x240",
-  "permissions": [
-    "graphics",
-    "input",
-    "files:docs",
-    "clipboard",
-    "prefs",
-    "editor"
-  ],
-  "safe_to_share": true,
-  "config": {},
-  "edit": []
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 350,
+    "targets": [
+      "host",
+      "device"
+    ],
+    "permissions": [
+      "graphics",
+      "input",
+      "files:docs",
+      "clipboard",
+      "prefs",
+      "editor"
+    ],
+    "safe_to_share": true,
+    "config": {},
+    "edit": []
+  }
 }

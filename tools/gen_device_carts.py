@@ -15,7 +15,8 @@ to emit `modules/carts_data.py` (gitignored, frozen into the firmware), and
 the device follows automatically.
 
 **It is also the ONE reader of the manifests' declarations** (the UI refactor's
-Phase 5, 2026-08-19). A system cart declares, in its own `manifest.json`:
+Phase 5, 2026-08-19). A system cart declares, in its own `manifest.json`'s
+`"moybyte"` object (Moybyte's own fields, moy_store_base.VENDOR_KEY):
 
     "system": true          -- this folder IS a seed cart (required; a folder
                                that forgets it is an ERROR here, never a
@@ -87,7 +88,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from runtime.moy_store_base import BUILTIN_NS, cart_folder  # noqa: E402
+from runtime.moy_store_base import BUILTIN_NS, cart_folder, vendor  # noqa: E402
 
 DEFAULT_FORMAT = "moybyte-cart-v1"
 
@@ -108,7 +109,7 @@ def read_manifests(system_carts_dir=None):
     """Every system cart as `(folder, manifest)`, in SEED order.
 
     Strict on purpose. A `.moy` folder here that does not declare
-    `"system": true` and a unique integer `"order"` raises, because the failure
+    `"moybyte": {"system": true}` and a unique integer `"order"` there raises, because the failure
     it replaces was invisible: a cart missing from the old hand-written
     CART_ORDER simply never reached the device, and the host kept working."""
     root = system_carts_dir or _default_system_carts()
@@ -122,14 +123,14 @@ def read_manifests(system_carts_dir=None):
             continue
         folder = name[:-len(CART_SUFFIX)]
         man = json.loads(_read(os.path.join(base, "manifest.json")))
-        if man.get("system") is not True:
+        if vendor(man).get("system") is not True:
             raise ValueError(
-                "%s/manifest.json must declare \"system\": true (it lives in "
+                "%s/manifest.json must declare \"moybyte\": {\"system\": true} (it lives in "
                 "system_carts/, so it IS a seed cart)" % name)
-        order = man.get("order")
+        order = vendor(man).get("order")
         if not isinstance(order, int):
             raise ValueError(
-                "%s/manifest.json must declare an integer \"order\" (its place "
+                "%s/manifest.json must declare an integer \"moybyte\".\"order\" (its place "
                 "in the device seed list)" % name)
         if order in seen:
             raise ValueError("duplicate \"order\" %d: %s and %s"
@@ -140,9 +141,12 @@ def read_manifests(system_carts_dir=None):
                 "store seeds it as, `%s.<title slug>`"
                 % (name, cart_folder(man.get("title", ""), BUILTIN_NS),
                    BUILTIN_NS))
+        if man.get("id") != folder:
+            raise ValueError("%s/manifest.json must declare \"id\": %r"
+                             % (name, folder))
         seen[order] = folder
         out.append((folder, man))
-    out.sort(key=lambda fm: (fm[1]["order"], fm[0]))
+    out.sort(key=lambda fm: (vendor(fm[1])["order"], fm[0]))
     return out
 
 
@@ -162,7 +166,7 @@ def roster(target, system_carts_dir=None):
     order. A manifest with no `"targets"` ships everywhere."""
     out = []
     for folder, man in read_manifests(system_carts_dir):
-        targets = man.get("targets")
+        targets = vendor(man).get("targets")
         if targets is None or "*" in targets or target in targets:
             out.append(folder)
     return out
@@ -178,7 +182,7 @@ def app_decls(system_carts_dir=None):
     rides on, so a consumer never has to re-open the manifest."""
     out = []
     for folder, man in read_manifests(system_carts_dir):
-        app = man.get("app")
+        app = vendor(man).get("app")
         if not app:
             continue
         for key in ("id", "entry"):
@@ -212,7 +216,7 @@ def build_carts(system_carts_dir):
         base = os.path.join(system_carts_dir, folder + CART_SUFFIX)
         cart = {
             "title": man["title"],
-            "type": man.get("type", "app"),
+            "type": vendor(man).get("type", "app"),
             # cart content version (#47): seed_builtins overwrites a stale on-SD copy
             # when this is newer. Pre-versioning carts default to 0.
             "version": int(man.get("version", 0)),
@@ -293,7 +297,7 @@ def build_carts(system_carts_dir):
                 cart["scenes"] = scenes
                 # seed_builtins writes manifest assets.scenes from scene_order
                 # (element 0 = the default active scene); carry the manifest order.
-                order = (man.get("assets") or {}).get("scenes") or []
+                order = (vendor(man).get("assets") or {}).get("scenes") or []
                 keep = [n for n in order if n in scenes]
                 if keep:
                     cart["scene_order"] = keep
@@ -304,12 +308,12 @@ def build_carts(system_carts_dir):
             cart["blocks"] = json.loads(_read(blocks))
         if "canvas" in man:
             cart["canvas"] = man["canvas"]
-        if "permissions" in man:
-            cart["permissions"] = man["permissions"]
+        if "permissions" in vendor(man):
+            cart["permissions"] = vendor(man)["permissions"]
         if "input" in man:                # #42 Thread 3 input-kind hint, optional
             cart["input"] = man["input"]
-        cart["cfg"] = man.get("config", {})
-        cart["edit"] = man.get("edit", [])
+        cart["cfg"] = vendor(man).get("config", {})
+        cart["edit"] = vendor(man).get("edit", [])
         carts.append(cart)
     return carts
 

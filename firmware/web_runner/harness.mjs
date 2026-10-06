@@ -97,7 +97,7 @@ step(1 / 60);
 const roster = process.argv[2] ? [process.argv[2]]
     : [...new Set(Object.keys(carts).map((k) => k.split("/")[0]))]
         .filter((c) => {   // wallpapers are backdrop-only (excluded from the run grid)
-            try { return JSON.parse(carts[c + "/manifest.json"]).type !== "wallpaper"; }
+            try { return (JSON.parse(carts[c + "/manifest.json"]).moybyte || {}).type !== "wallpaper"; }
             catch (e) { return true; }
         });
 let failed = 0;

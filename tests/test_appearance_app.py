@@ -32,8 +32,8 @@ def test_appearance_cart_is_versioned_system_app():
     folder = ROOT / "system_carts" / "moybyte.appearance.moy"
     man = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     assert man["version"] >= 1
-    assert man["type"] == "app"
-    assert "appearance" in man["permissions"]
+    assert man["moybyte"]["type"] == "app"
+    assert "appearance" in man["moybyte"]["permissions"]
     compile((folder / "main.py").read_text(encoding="utf-8"),
             str(folder / "main.py"), "exec")
 

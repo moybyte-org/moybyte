@@ -73,8 +73,8 @@ def _wallpaper(tmp_path, slug, src, title=None):
     carts = _carts(tmp_path)
     d = Path(carts) / (slug + ".moy")
     d.mkdir(parents=True, exist_ok=True)
-    man = {"title": title or slug.title(), "type": "wallpaper",
-           "canvas": "320x240"}
+    man = {"title": title or slug.title(), "canvas": "320x240",
+           "moybyte": {"type": "wallpaper"}}
     (d / "manifest.json").write_text(json.dumps(man))
     (d / "main.py").write_text(src)
     (d / "config.json").write_text("{}")

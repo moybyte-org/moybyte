@@ -1,25 +1,28 @@
 {
   "format": "moy-1",
-  "version": 3,
+  "version": 4,
   "title": "Files",
-  "type": "app",
+  "id": "moybyte.files",
   "runtime": "python",
   "main": "main.py",
-  "system": true,
-  "order": 330,
-  "app": {
-    "id": "files",
-    "entry": "files_app:FilesAppLayer",
-    "text_mode": true,
-    "order": 60
-  },
   "canvas": "320x240",
-  "permissions": [
-    "graphics",
-    "input",
-    "files"
-  ],
-  "safe_to_share": false,
-  "config": {},
-  "edit": []
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 330,
+    "app": {
+      "id": "files",
+      "entry": "files_app:FilesAppLayer",
+      "text_mode": true,
+      "order": 60
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "files"
+    ],
+    "safe_to_share": false,
+    "config": {},
+    "edit": []
+  }
 }

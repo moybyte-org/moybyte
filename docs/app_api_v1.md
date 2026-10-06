@@ -186,12 +186,13 @@ Two things follow for an app author:
 ## Checklist for a new shipped app (2026-08-19: it is two files)
 
 1. `runtime/<name>_app.py` — the Layer, with its `NEEDS` tuple.
-2. `system_carts/<slug>.moy` — the identity cart, whose manifest carries an
-   `"app"` block:
+2. `system_carts/moybyte.<slug>.moy` — the identity cart, whose manifest
+   carries an `"app"` block in its `"moybyte"` object (Moybyte's own fields,
+   SPEC.md §3.1):
 
    ```json
-   "app": { "id": "myapp", "entry": "myapp_app:MyAppLayer",
-            "text_mode": false, "order": 80 }
+   "moybyte": { "app": { "id": "myapp", "entry": "myapp_app:MyAppLayer",
+                         "text_mode": false, "order": 80 } }
    ```
 
    then regenerate the frozen copy:
@@ -221,8 +222,8 @@ into the firmware, registered from a manifest. A USER APP is the other kind: an
 ordinary `.moy` cart, editable in the project picker, that asks for shell
 capabilities in its own `manifest.json` and gets them as cart globals.
 
-    "type": "app"
-    "permissions": ["graphics", "input", "files:docs", "prefs"]
+    "moybyte": {"type": "app",
+                "permissions": ["graphics", "input", "files:docs", "prefs"]}
 
 The mechanism is `make_system_api(ctx_factory, cart, canvas, bar_h)`
 (`runtime/system_api.py` -- READ IT, it is the authority and carries the policy
@@ -291,7 +292,7 @@ note was open. **200 lines of cart, no shell code, no registration, no
 `runtime/` module** -- and no C, no build, no reflash: it is a cart, so it edits
 and re-runs on the device.
 
-    system_carts/moybyte.notes.moy/manifest.json   "type": "app" + the permissions
+    system_carts/moybyte.notes.moy/manifest.json   "moybyte": "type": "app" + the permissions
     system_carts/moybyte.notes.moy/main.py         _init / _update / _draw
     system_carts/moybyte.notes.moy/sprites.moygfx  one 8x8 tile: its launcher icon
 

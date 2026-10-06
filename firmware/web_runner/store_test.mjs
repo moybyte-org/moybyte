@@ -380,16 +380,18 @@ for (const sync of [true, false]) {
 
 // ---- a returning browser still gets a system cart it never had ---------------
 {
-    const local = { "star.moy/manifest.json": '{"title":"Star","system":true}',
+    const local = { "star.moy/manifest.json": '{"title":"Star","moybyte":{"system":true}}',
                     "mine.moy/manifest.json": '{"title":"Mine"}' };
     const bundle = {
-        "star.moy/manifest.json": '{"title":"Star","system":true,"version":9}',
+        "star.moy/manifest.json": '{"title":"Star","moybyte":{"system":true},"version":9}',
         "star.moy/main.py": "new code",
-        "moybyte.get_carts.moy/manifest.json": '{"title":"Get Carts","system":true}',
+        "moybyte.get_carts.moy/manifest.json": '{"title":"Get Carts","moybyte":{"system":true}}',
         "moybyte.get_carts.moy/main.py": "pass",
         "moybyte.get_carts.moy/cover.png": { b: "AAAA" },
         "demo.moy/manifest.json": '{"title":"Demo"}',
         "demo.moy/main.py": "x",
+        "loose.moy/manifest.json": '{"title":"Loose","system":true}',
+        "loose.moy/main.py": "x",
     };
     const got = store.missingSystemCarts(local, bundle);
     ok("a system cart the store lacks comes from the bundle, whole",
@@ -398,6 +400,8 @@ for (const sync of [true, false]) {
        JSON.stringify(Object.keys(got)));
     ok("one the store has is never touched, and a non-system cart never added",
        !("star.moy/main.py" in got) && !("demo.moy/main.py" in got));
+    ok("a top-level \"system\" is not Moybyte's field and reads as absent",
+       !("loose.moy/main.py" in got));
 }
 
 // The two predicates are two QUESTIONS, and the answers differ on exactly one

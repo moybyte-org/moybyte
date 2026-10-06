@@ -446,7 +446,7 @@ export function missingSystemCarts(local, bundle) {
         if (have.has(top) || typeof bundle[rel] !== "string") continue;
         try {
             const m = JSON.parse(bundle[rel]);
-            if (m && m.system === true) system.add(top);
+            if (m && m.moybyte && m.moybyte.system === true) system.add(top);
         } catch (e) { /* not a manifest anything reads: not a cart to add */ }
     }
     const out = {};

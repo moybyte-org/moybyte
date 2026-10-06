@@ -344,7 +344,7 @@ def test_sceneless_cart_editor_creates_main_on_save(tmp_path):
     ui._sync_live()
     ws.save_scene()
     man = json.loads((Path(ws.cart["path"]) / "manifest.json").read_text())
-    assert man["assets"]["scenes"] == ["main"]
+    assert man["moybyte"]["assets"]["scenes"] == ["main"]
     assert len(ws.scenes.scene("main")) == 1          # live object gained it too
 
 

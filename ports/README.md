@@ -5,7 +5,7 @@ runtimes**: carts from other fantasy consoles ported to the #67 Lua runtime
 with the moy-spec CLI's `moy port` (the one converter, spec-side —
 `p8_lua_port.py` there), and `jet/`, a third-party engine's example compiled
 for the WebAssembly tier. They are deliberately **NOT seed carts**: seeding is declared per cart now (a
-`system_carts/*/manifest.json` carries `"system": true` and an `"order"`, and
+`system_carts/*/manifest.json` carries `"moybyte": {"system": true, "order": …}`, and
 `tools/gen_device_carts.py` reads those), and nothing here carries either
 declaration or lives in `system_carts/` — so none of it is baked into a
 firmware image or seeded onto a device. To play one, copy the `.moy` folder into a cart store

@@ -29,7 +29,7 @@ size_t moy_seed_folder(const char *title, size_t n, const char *ns, char *out,
             unsigned char u = (unsigned char)*p;
             if (u >= 'A' && u <= 'Z') {
                 PUT((char)(u + 32));
-            } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9') || u >= 0x80u) {
+            } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
                 PUT((char)u);
             } else if (u == ' ' || u == '-' || u == '_') {
                 PUT('_');
@@ -48,7 +48,7 @@ size_t moy_seed_folder(const char *title, size_t n, const char *ns, char *out,
         unsigned char u = (unsigned char)title[i];
         if (u >= 'A' && u <= 'Z') {
             PUT((char)(u + 32));
-        } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9') || u >= 0x80u) {
+        } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
             PUT((char)u);
         } else if (u == ' ' || u == '-' || u == '_') {
             PUT('_');
@@ -397,8 +397,11 @@ static const char *i64(int64_t v, char *buf) {
     return p;
 }
 
-// The manifest seed_builtins writes, in its key order.
-static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver) {
+// The manifest seed_builtins writes, in its key order: the spec's fields, then
+// Moybyte's own under "moybyte". `folder` is the cart's folder, whose name
+// without the extension is its id.
+static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
+                     const char *folder) {
     span_t f;
     sb_str(b, "{\"format\": ");
     f = get(c, ce, "format");
@@ -410,9 +413,13 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver) {
     sb_str(b, ", \"title\": ");
     f = get(c, ce, "title");
     sb_canon(b, f.v, f.e);
-    sb_str(b, ", \"type\": ");
-    f = get(c, ce, "type");
-    sb_canon(b, f.v, f.e);
+    size_t fn = strlen(folder);
+    if (fn >= 4u && memcmp(folder + fn - 4u, ".moy", 4u) == 0) {
+        fn -= 4u;
+    }
+    sb_str(b, ", \"id\": \"");
+    sb_put(b, folder, fn);              // the store's own name: [a-z0-9_.] only
+    sb_str(b, "\"");
     sb_str(b, ", \"runtime\": ");
     f = get(c, ce, "runtime");
     if (f.v != NULL) {
@@ -426,13 +433,6 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver) {
         sb_canon(b, main.v, main.e);
     } else {
         sb_str(b, "\"main.py\"");
-    }
-    sb_str(b, ", \"edit\": ");
-    f = get(c, ce, "edit");
-    if (f.v != NULL) {
-        sb_canon(b, f.v, f.e);
-    } else {
-        sb_str(b, "[]");
     }
     char num[24];
     sb_str(b, ", \"version\": ");
@@ -512,14 +512,24 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver) {
             sb_canon(b, f.v, f.e);
         }
     }
-    f = get(c, ce, "permissions");
-    if (f.v != NULL && *f.v != 'n') {
-        sb_str(b, ", \"permissions\": ");
-        sb_canon(b, f.v, f.e);
-    }
     f = get(c, ce, "input");
     if (f.v != NULL && *f.v != 'n') {
         sb_str(b, ", \"input\": ");
+        sb_canon(b, f.v, f.e);
+    }
+    sb_str(b, ", \"moybyte\": {\"type\": ");
+    f = get(c, ce, "type");
+    sb_canon(b, f.v, f.e);
+    sb_str(b, ", \"edit\": ");
+    f = get(c, ce, "edit");
+    if (f.v != NULL) {
+        sb_canon(b, f.v, f.e);
+    } else {
+        sb_str(b, "[]");
+    }
+    f = get(c, ce, "permissions");
+    if (f.v != NULL && *f.v != 'n') {
+        sb_str(b, ", \"permissions\": ");
         sb_canon(b, f.v, f.e);
     }
     span_t scenes = get(c, ce, "scenes");
@@ -597,7 +607,7 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver) {
         }
         sb_str(b, "}");
     }
-    sb_str(b, "}");
+    sb_str(b, "}}");
 }
 
 // What a re-seed keeps of the cart it replaces: the kid's saves and config
@@ -808,7 +818,7 @@ int moy_seed_write(const char *root, const char *folder, const char *json,
         sb_t m = { NULL, 0, 0, 0 };
         size_t pn;
         char *p = path3(d, "manifest.json", NULL, &pn);
-        manifest(&m, c, ce, ver);
+        manifest(&m, c, ce, ver, folder);
         rc = m.failed || p == NULL ? MOY_ENOMEM : moy_fs_publish(p, m.p, m.n);
         moy_store_free(p, pn);
         sb_free(&m);

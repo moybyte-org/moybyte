@@ -76,7 +76,8 @@ try:
                                 SPRITES_NAME, icon_rows, _listing, _absent,
                                 _has, _cwd, _enter, _leave, CART_EXT,
                                 cart_path, cart_folder, store_path,
-                                USER_NS, BUILTIN_NS)
+                                USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
+                                is_cart_id)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
                                         IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
@@ -88,7 +89,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         icon_rows, _listing, _absent, _has,
                                         _cwd, _enter, _leave, CART_EXT,
                                         cart_path, cart_folder, store_path,
-                                        USER_NS, BUILTIN_NS)
+                                        USER_NS, BUILTIN_NS, VENDOR_KEY,
+                                        vendor, is_cart_id)
 
 
 # Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
@@ -337,14 +339,14 @@ def load_scenes(path):
 
 
 def scene_names(man, blobs):
-    """The ordered scene names for a cart (#85): the manifest's assets.scenes order
+    """The ordered scene names for a cart (#85): the manifest's moybyte.assets.scenes order
     (filtered to scenes that actually exist on disk), then any on-disk scene the
     manifest forgot, appended sorted -- so the loader is authoritative but robust to a
     hand-added file. `man` is the parsed manifest, `blobs` the load_scenes() dict.
     Element 0 is the default active scene."""
     order = []
     seen = {}
-    assets = man.get("assets") if isinstance(man, dict) else None
+    assets = vendor(man).get("assets")
     listed = assets.get("scenes") if isinstance(assets, dict) else None
     if isinstance(listed, list):
         for n in listed:
@@ -359,7 +361,7 @@ def scene_names(man, blobs):
 
 
 def _manifest_add_scene(cart_dir, name):
-    """Register scene `name` in manifest.json's assets.scenes list (#85), preserving
+    """Register scene `name` in manifest.json's moybyte.assets.scenes list (#85), preserving
     every other manifest field (title/version/edit/permissions/assets.*). Idempotent
     -- a name already listed writes nothing. Atomic (its rename is the torn-write
     proofing), like _manifest_set_graduated. Returns the ordered scene-name list after
@@ -372,10 +374,14 @@ def _manifest_add_scene(cart_dir, name):
         return None
     if not isinstance(man, dict):
         return None
-    assets = man.get("assets")
+    ven = man.get(VENDOR_KEY)
+    if not isinstance(ven, dict):
+        ven = {}
+        man[VENDOR_KEY] = ven
+    assets = ven.get("assets")
     if not isinstance(assets, dict):
         assets = {}
-        man["assets"] = assets
+        ven["assets"] = assets
     scenes = assets.get("scenes")
     if not isinstance(scenes, list):
         scenes = []
@@ -553,14 +559,30 @@ def _compiled_sources(path):
 
 
 def _cart_id(man, path, broken):
-    """A cart's id (#162): the manifest's "id" when it names one, else its
-    folder's name without the extension -- the rule, not a migration."""
+    """A cart's id (#162, SPEC.md 3.1): the manifest's "id" when it is one,
+    else its folder's name without the extension -- the rule, not a
+    migration."""
     cid = None if broken else man.get("id")
-    if isinstance(cid, str) and cid:
+    if is_cart_id(cid):
         return cid
     cut = max(path.rfind("/"), path.rfind("\\"))
     name = path[cut + 1:] if cut >= 0 else path
     return name[:-len(CART_EXT)] if name.endswith(CART_EXT) else name
+
+
+def _config_of(v):
+    """The manifest's config as a dict: an object, "" or a list of [key,
+    value] pairs (what dict() takes and moy_cat.c's dict_takes accepts, and
+    nothing else dict() would). ValueError otherwise."""
+    if isinstance(v, dict) or v == "":
+        return dict(v)
+    if isinstance(v, list):
+        for p in v:
+            if not (isinstance(p, list) and len(p) == 2
+                    and not isinstance(p[0], (list, dict))):
+                raise ValueError("config is not a mapping")
+        return dict(v)
+    raise ValueError("config is not a mapping")
 
 
 def _project_title(path):
@@ -759,6 +781,7 @@ def _load(path, whole, folder=None):
                 else:
                     before.append((n, text))
         icon = _normalize_icon(man.get("icon"))
+        ven = vendor(man)
         cart = {
             "path": path,
             "id": _cart_id(man, path, broken),
@@ -768,7 +791,7 @@ def _load(path, whole, folder=None):
             # pre-#94 hand-authored one, so this defaults to "" (a blank author
             # reads as "not set", never crashes a display that prints it).
             "author": man.get("author", ""),
-            "type": man.get("type", "game" if spec else "app"),
+            "type": ven.get("type", "game" if spec else "app"),
             # The #67 dual-runtime seam: which VM runs this cart ("python" today,
             # "lua" via the injected runtime), and which file `src` came from --
             # save_code/duplicate/seed must write THAT file back, never main.py.
@@ -796,7 +819,7 @@ def _load(path, whole, folder=None):
             # when a block-authored cart's code commit diverges past the block
             # vocabulary; makes the block editor read-only. Default False (absent =
             # not graduated). Un-set only through the undo journal (the grad rider).
-            "graduated": bool(man.get("graduated", False)),
+            "graduated": bool(ven.get("graduated", False)),
             # The cart's LOGIC rate (#217): the Player ticks a GAME at 60 only
             # when its manifest says so, else at the 30 SPEC.md 5 guarantees.
             # Spec carts default to that tick explicitly.
@@ -811,12 +834,12 @@ def _load(path, whole, folder=None):
             # (tile, w, h) or None to let the host choose. A POINTER into art the
             # cart already has -- no image, no codec, no reserved tiles.
             "icon": icon,
-            "edit": man.get("edit", []),
+            "edit": ven.get("edit", []),
             # Manifest capability permissions (#38): a cart only gets a gated API
             # (e.g. the injected `wifi`) when its permission is listed here. A
             # normal kid cart has just ["graphics","input"] (or none) and stays
             # network-less -- the sandbox is preserved.
-            "permissions": man.get("permissions", []),
+            "permissions": ven.get("permissions", []),
             # Input-kind hint (#42 Thread 3): which cart-API input groups this cart
             # actually reads, or None when undeclared (show every control -- see
             # _normalize_input_kinds above).
@@ -837,7 +860,7 @@ def _load(path, whole, folder=None):
             return cart
         # The manifest's config under the kid's config.json (the Make-it-mine
         # values).
-        cfg = dict(man.get("config", {}))
+        cfg = _config_of(ven.get("config", {}))
         try:
             cfg.update(json.loads(_read(path + "/config.json")))
         except (OSError, ValueError):
@@ -1021,7 +1044,7 @@ def save_config(cart):
 
 # --- graduation flag (#29 / spec Section 8): a stored, one-way project fact ---
 #
-# The `graduated` boolean lives in manifest.json (a project fact, not per-file
+# The `graduated` boolean lives in manifest.json's moybyte object (a project fact, not per-file
 # data). _manifest_set_graduated is the low-level read-modify-write that the public
 # setter AND the undo journal (journal_undo/redo, via the entry's `grad` rider)
 # both use, so a graduation and its undo touch the manifest through one code path.
@@ -1029,7 +1052,7 @@ def save_config(cart):
 # writes atomically like every other save. A missing/bad manifest is a no-op.
 
 def _manifest_set_graduated(cart_dir, value):
-    """Set manifest.json's `graduated` flag to `value` (a bool), preserving all
+    """Set manifest.json's `moybyte.graduated` flag to `value` (a bool), preserving all
     other fields. Returns True iff the manifest was rewritten (changed), False on a
     no-op or an unreadable/bad manifest. Atomic (its rename is the torn-write
     proofing)."""
@@ -1043,12 +1066,15 @@ def _manifest_set_graduated(cart_dir, value):
     if not isinstance(man, dict):
         return False
     want = bool(value)
-    if bool(man.get("graduated", False)) == want:
+    if bool(vendor(man).get("graduated", False)) == want:
         return False                         # already at the target -> write nothing
+    ven = man.get(VENDOR_KEY)
+    ven = dict(ven) if isinstance(ven, dict) else {}
     if want:
-        man["graduated"] = True
+        ven["graduated"] = True
     else:
-        man.pop("graduated", None)           # absent == not graduated (keep manifests clean)
+        ven.pop("graduated", None)           # absent == not graduated (keep manifests clean)
+    man[VENDOR_KEY] = ven
     _write_atomic(path, json.dumps(man))
     return True
 
@@ -1763,7 +1789,7 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
     default to a python cart; duplicate() passes a source cart's through so a
     copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
     ({name: .moyscene text}) + `scene_order` copy a source cart's scene assets (#85),
-    registered in manifest.assets.scenes and written under scenes/. `author` (#94)
+    registered in manifest.moybyte.assets.scenes and written under scenes/. `author` (#94)
     is optional -- omitted entirely when blank, so a fresh/duplicated cart's
     manifest stays as clean as before this field existed. `format`/`fps` are
     duplicate()'s passthrough (SPEC.md 3.1): copying a spec cart must yield
@@ -1778,10 +1804,13 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
 def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
                scene_order, author, palette, extensions, format, fps, icon,
                canvas):
+    name = d.replace("\\", "/").rsplit("/", 1)[-1]
     manifest = {
-        "format": format or CART_FORMAT, "title": title, "type": type,
-        "runtime": runtime, "main": main, "edit": edit or [],
+        "format": format or CART_FORMAT, "title": title,
+        "id": name[:-len(CART_EXT)],
+        "runtime": runtime, "main": main,
     }
+    ven = {"type": type, "edit": edit or []}
     if fps:                # 0 is moybyte's "unset" app default -- never written
         manifest["fps"] = fps
     if author:
@@ -1795,7 +1824,8 @@ def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
     if canvas is not None:            # cart canvas (SPEC.md 1/3.1) survives a copy
         manifest["canvas"] = _canvas_str(canvas)
     if scenes:                        # scene assets (#85): register + write (see above)
-        manifest["assets"] = {"scenes": list(scene_order or sorted(scenes.keys()))}
+        ven["assets"] = {"scenes": list(scene_order or sorted(scenes.keys()))}
+    manifest[VENDOR_KEY] = ven
     _write(d + "/manifest.json", json.dumps(manifest))
     _write(d + "/" + main, src if src is not None else NEW_TEMPLATE["src"])
     _write(d + "/config.json", json.dumps(cfg or {}))

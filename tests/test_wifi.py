@@ -163,7 +163,7 @@ def test_network_cart_gets_wifi_non_network_cart_does_not(tmp_path):
     import json
     man_path = priv["path"] + "/manifest.json"
     man = json.loads(Path(man_path).read_text())
-    man["permissions"] = ["graphics", "input", "network"]
+    man["moybyte"]["permissions"] = ["graphics", "input", "network"]
     Path(man_path).write_text(json.dumps(man))
 
     ws = host_app.build_workstation(carts_dir)

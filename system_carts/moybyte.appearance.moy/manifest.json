@@ -1,25 +1,28 @@
 {
   "format": "moy-1",
-  "version": 3,
+  "version": 4,
   "title": "Appearance",
-  "type": "app",
+  "id": "moybyte.appearance",
   "runtime": "python",
   "main": "main.py",
-  "system": true,
-  "order": 280,
-  "app": {
-    "id": "appearance",
-    "entry": "appearance_app:AppearanceAppLayer",
-    "text_mode": false,
-    "order": 20
-  },
   "canvas": "320x240",
-  "permissions": [
-    "graphics",
-    "input",
-    "appearance"
-  ],
-  "safe_to_share": false,
-  "config": {},
-  "edit": []
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 280,
+    "app": {
+      "id": "appearance",
+      "entry": "appearance_app:AppearanceAppLayer",
+      "text_mode": false,
+      "order": 20
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "appearance"
+    ],
+    "safe_to_share": false,
+    "config": {},
+    "edit": []
+  }
 }

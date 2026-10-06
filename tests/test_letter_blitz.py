@@ -51,9 +51,9 @@ def test_letter_blitz_folder_present_and_valid():
     assert (d / "main.py").is_file()
     man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
     assert man["format"] == "moy-1"          # SPEC.md 3.1
-    assert man["type"] == "game"
+    assert man["moybyte"]["type"] == "game"
     assert man["main"] == "main.py"
-    assert man["edit"], "no Make-it-mine cards"
+    assert man["moybyte"]["edit"], "no Make-it-mine cards"
     src = (d / "main.py").read_text(encoding="utf-8")
     compile(src, str(d / "main.py"), "exec")
     assert "_init" in src and "_update" in src and "_draw" in src

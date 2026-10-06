@@ -53,7 +53,7 @@ def test_both_twins_ship_the_same_scene_and_no_pasted_table():
         with open(os.path.join(d, "scenes", "blossoms.moyscene")) as fh:
             blobs.append(fh.read())
         man = json.load(open(os.path.join(d, "manifest.json")))
-        assert man["assets"]["scenes"] == ["blossoms"], slug
+        assert man["moybyte"]["assets"]["scenes"] == ["blossoms"], slug
     assert blobs[0] == blobs[1], "the twins' scenes drifted"
     rows = json.loads(blobs[0])
     assert len(rows) > 100 and all(r["tag"] == "blossom" for r in rows)

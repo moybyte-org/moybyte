@@ -201,8 +201,8 @@ and each chip's module, signed with the OTA key — made by the build, never by
 hand and never committed.
 
 1. **Where it comes from.** The build of the copy here, whose `main.wasm` is
-   the one the carts repository's release carries, gets a roster entry with `"system":
-   true` and an `"order"`, and `tools/gen_device_carts.py`, which packs the
+   the one the carts repository's release carries, gets a roster entry with `"moybyte":
+   {"system": true, "order": …}`, and `tools/gen_device_carts.py`, which packs the
    roster into each image, learns one thing: a system cart whose runtime is
    `wasm` is not read as text but taken from a directory of built carts
    (`--compiled DIR`), one per chip, and a board's image packs only its

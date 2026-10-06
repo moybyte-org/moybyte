@@ -48,8 +48,8 @@ NOTES_SRC = (NOTES_DIR / "main.py").read_text(encoding="utf-8")
 def _write_cart(carts_dir, name, src, perms=(), type="app", canvas="320x240"):
     d = Path(carts_dir) / (name + ".moy")
     d.mkdir(parents=True, exist_ok=True)
-    man = {"title": name, "type": type, "canvas": canvas,
-           "permissions": list(perms)}
+    man = {"title": name, "canvas": canvas,
+           "moybyte": {"type": type, "permissions": list(perms)}}
     (d / "manifest.json").write_text(json.dumps(man))
     (d / "main.py").write_text(src)
     (d / "config.json").write_text("{}")

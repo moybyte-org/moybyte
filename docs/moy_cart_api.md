@@ -345,7 +345,7 @@ re-drawing the background every frame.
 A **scene** is a saved table of placed actors — a sprite + a world position + a tag —
 that your cart reads once in `_init` and spawns however it likes. Scenes live in the
 cart's `scenes/<name>.moyscene` files (tiny JSON, one row per actor, list order =
-spawn order = draw order); the manifest's `assets.scenes` lists them, and the first
+spawn order = draw order); the manifest's `moybyte.assets.scenes` lists them, and the first
 entry is the default active scene. Pure data: `scene()` never draws anything, and a
 cart with no scenes just gets an empty list. Author them WYSIWYG in the Editor's
 **Scene** tab: pick a sprite, tap the world to place an actor, tap one to select it,
@@ -628,7 +628,7 @@ other console, and handle what arrives:
 | `on_net(fn)` | register `fn(msg)` — it's called once for **each** message that arrives, right before your `_update` runs |
 
 ```python
-# manifest.json: "permissions": ["multiplayer"]
+# manifest.json: "moybyte": {"permissions": ["multiplayer"]}
 def _catch(msg):
     other.x, other.y = msg          # the friend's position arrived
 on_net(_catch)
@@ -667,7 +667,7 @@ def _update(dt):
         pin_write(LED, 1)
 ```
 
-**Your cart must ASK, in its manifest.** `"permissions": ["pins"]` -- the same
+**Your cart must ASK, in its manifest.** `"moybyte": {"permissions": ["pins"]}` -- the same
 declaration `network` and `multiplayer` need, and for the same reason: a cart
 that can move the wiring in somebody's room should have said so where a person
 can read it before running it. Without it the names are absent even on a console
@@ -709,14 +709,19 @@ built-in LED.
 
 ## Turning a cart into an APP (`#181`)
 
-A cart whose manifest says `"type": "app"` is a tool rather than a game. The
+A cart whose manifest says `"moybyte": {"type": "app"}` is a tool rather than a game. The
 console runs it **with its own top bar** — a title and an X — so it can never trap
 you, and it can ask for a few of the console's own powers by naming them in
-`permissions`, exactly like `"multiplayer"` above:
+`permissions`, exactly like `"multiplayer"` above. Both are Moybyte's own
+fields, so they live in the manifest's `"moybyte"` object (SPEC.md §3.1: an
+implementation's fields go under one key named after it; loose at the top
+level, a console reads them as absent):
 
 ```json
-"type": "app",
-"permissions": ["graphics", "input", "files:docs", "prefs"]
+"moybyte": {
+  "type": "app",
+  "permissions": ["graphics", "input", "files:docs", "prefs"]
+}
 ```
 
 | permission | what the cart gets |
@@ -984,8 +989,8 @@ same here as on any other console that implements the spec.
 | `rnd(n=1.0)` | random float in `[0, n)` |
 | `flr(x)` | floor to int |
 | `W`, `H` | canvas size (320, 240) |
-| `wifi` | **only present** if the cart's manifest permissions include `"network"` (capability-gated, `#38`). A normal cart has no `wifi` name at all |
-| `net` / `on_net` | **only present** if the cart's manifest permissions include `"multiplayer"` (capability-gated, `#65`). See **Multiplayer** above |
+| `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`). A normal cart has no `wifi` name at all |
+| `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`). See **Multiplayer** above |
 
 ---
 

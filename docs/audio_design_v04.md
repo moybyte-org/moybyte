@@ -68,7 +68,7 @@ Design notes:
 - **`beep` is the zero-data escape hatch** — a cart with no sound bank can still
   make a tone. It is sugar for "a one-step SFX at this frequency".
 - **`volume` is the only stateful global** and is clamped. A cart that makes
-  sound declares `"audio"` in its manifest `permissions` (not the plan's
+  sound declares `"audio"` in its manifest `moybyte.permissions` (not the plan's
   `"sound"`), and nothing gates sound on it: the permissions the console
   actually enforces are the app ones and `network`/`multiplayer`
   (`runtime/system_api.py`). The `_SilentAudio` no-op backend is the hook if

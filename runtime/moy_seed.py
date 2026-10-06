@@ -20,9 +20,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moyimg import _b64_decode
 try:
-    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, BUILTIN_NS)
+    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, BUILTIN_NS, CART_EXT, VENDOR_KEY)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, BUILTIN_NS)
+    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, BUILTIN_NS, CART_EXT, VENDOR_KEY)
 try:
     from moy_fs import _native as _store
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -129,14 +129,14 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
             # while the host copies the source folder, so hardcoding CART_FORMAT
             # here restamped a "moy-1" built-in on device and nowhere else.
             "format": cart.get("format", CART_FORMAT),
-            "title": cart["title"], "type": cart["type"],
+            "title": cart["title"], "id": name[:-len(CART_EXT)],
             # #67 dual-runtime passthrough: a baked "lua" built-in seeds with its
             # runtime + main.lua intact.
             "runtime": cart.get("runtime", "python"),
             "main": cart.get("main", "main.py"),
-            "edit": cart.get("edit", []),
             "version": seed_ver,
         }
+        ven = {"type": cart["type"], "edit": cart.get("edit", [])}
         # SPEC.md 4's load order, rebuilt from the two lists: `main` sits
         # between them and must appear, so a reader gets the same order this
         # cart was written with. Omitted entirely for a one-script cart, which
@@ -155,18 +155,18 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
             # A baked seed carries the manifest string; a load()ed cart carries
             # the normalized (w, h) -- both serialize back to the "WxH" form.
             manifest["canvas"] = _canvas_str(cart["canvas"])
-        if cart.get("permissions") is not None:
-            manifest["permissions"] = cart["permissions"]
         if cart.get("input") is not None:               # #42 Thread 3 input-kind hint
             manifest["input"] = list(cart["input"])
+        if cart.get("permissions") is not None:
+            ven["permissions"] = cart["permissions"]
         scenes = cart.get("scenes")               # {name: .moyscene blob}, optional (#85)
         if scenes:
-            # Register the ordered set in manifest.assets.scenes (element 0 = default
+            # Register the ordered set in manifest.moybyte.assets.scenes (element 0 = default
             # active) BEFORE the manifest is written, so load() finds them. A seed may
             # pin the order via "scene_order"; else sorted names (bump the built-in's
             # version, #47, whenever a seed's scenes change -- like any other content).
-            manifest["assets"] = {"scenes": list(cart.get("scene_order")
-                                                 or sorted(scenes.keys()))}
+            ven["assets"] = {"scenes": list(cart.get("scene_order")
+                                            or sorted(scenes.keys()))}
         _write(d + "/" + cart.get("main", "main.py"), cart["src"])
         # The cart's other scripts beside it (SPEC.md 4), and `sources` in the
         # manifest above naming the order -- a port's main.lua cannot run
@@ -210,6 +210,7 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
         # re-seed) or none (a first seed), so the next boot's seed writes the
         # cart again; a manifest first would carry the seed's version over a
         # folder missing its payloads, and the version check would keep it so.
+        manifest[VENDOR_KEY] = ven
         _write_atomic(d + "/manifest.json", json.dumps(manifest))
         wrote.append(name)
     return wrote

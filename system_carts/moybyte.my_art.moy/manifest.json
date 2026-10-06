@@ -1,16 +1,25 @@
 {
   "format": "moy-1",
-  "version": 2,
+  "version": 3,
   "title": "My Art",
-  "type": "wallpaper",
+  "id": "moybyte.my_art",
   "runtime": "python",
   "main": "main.py",
-  "system": true,
-  "order": 30,
-  "targets": ["host", "device"],
   "canvas": "320x240",
-  "permissions": ["graphics", "input"],
-  "safe_to_share": true,
-  "config": {},
-  "edit": []
+  "moybyte": {
+    "type": "wallpaper",
+    "system": true,
+    "order": 30,
+    "targets": [
+      "host",
+      "device"
+    ],
+    "permissions": [
+      "graphics",
+      "input"
+    ],
+    "safe_to_share": true,
+    "config": {},
+    "edit": []
+  }
 }

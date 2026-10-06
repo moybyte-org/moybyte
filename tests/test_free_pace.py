@@ -101,5 +101,5 @@ def test_only_audited_seed_games_declare_free():
         m = json.loads(man.read_text(encoding="utf-8"))
         if m.get("fps") == "free":
             declared.add(m["title"])
-            assert m.get("type") == "game", m["title"]
+            assert m["moybyte"].get("type") == "game", m["title"]
     assert declared == FREE_SEEDS, sorted(declared ^ FREE_SEEDS)

@@ -8,10 +8,10 @@ A SHIPPED system app (Calc, Files, Paint ...) is shell code: a Layer class in
 (`runtime/app_context.py`) carrying exactly those roles. A USER APP is a
 `.moy` CART -- editable in the project picker like any other cart, written by
 whoever owns the console -- that asks for shell capabilities in its
-`manifest.json`:
+`manifest.json`, in its `"moybyte"` object (Moybyte's own fields):
 
-    "type": "app",
-    "permissions": ["graphics", "input", "files:docs", "prefs"]
+    "moybyte": {"type": "app",
+                "permissions": ["graphics", "input", "files:docs", "prefs"]}
 
 `make_system_api` is the FILTER between the two. It is not a second interface:
 it maps each declared permission to a role on the SAME `AppContext`, builds one

@@ -35,9 +35,9 @@ def test_storybook_cart_is_versioned_system_app():
     folder = ROOT / "system_carts" / "moybyte.storybook.moy"
     man = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     assert man["version"] >= 1
-    assert man["type"] == "app"
-    assert man["system"] is True
-    assert "storybook" in man["permissions"]
+    assert man["moybyte"]["type"] == "app"
+    assert man["moybyte"]["system"] is True
+    assert "storybook" in man["moybyte"]["permissions"]
     compile((folder / "main.py").read_text(encoding="utf-8"),
             str(folder / "main.py"), "exec")
 

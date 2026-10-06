@@ -80,11 +80,11 @@ Each was mocked and judged worse (§11).
 - **Icons:** a themeable 16×16 `IconSheet` (`runtime/editors_sheet.py`), baked
   from `chrome._ICON_ART`, or the user's own edited sheet, `system_icons.moygfx`
   (Settings → EDIT ICONS).
-- **Wallpapers** are carts with `"type": "wallpaper"`; apps reach the backdrop
+- **Wallpapers** are carts with `"moybyte": {"type": "wallpaper"}`; apps reach the backdrop
   through `ctx.wallpaper`.
 - **Who reads tokens:** shipped apps through `ctx.theme` (`colors()`, `light()`,
   `name()`, `variant()`, `set()`, `set_variant()`, `skin`, `set_skin`;
-  `runtime/app_context.py`). App carts (`"type": "app"`) through the ungated
+  `runtime/app_context.py`). App carts (`"moybyte": {"type": "app"}`) through the ungated
   `theme()` global, which returns today's token dict (`runtime/system_api.py`;
   `system_carts/moybyte.notes.moy` reads `th["panel"]` and `th["ink_dim"]`). **Games
   have no `theme()`**, and giving them one would be a cart-verb change in
@@ -114,8 +114,9 @@ What stops a Platinum or Win95 theme today:
 
 ## 3. The package
 
-A theme is a folder with `"type": "theme"` in its manifest (the manifest field
-is `type`, as for wallpapers and apps; `kind` is the Files document vocabulary).
+A theme is a folder with `"moybyte": {"type": "theme"}` in its manifest (the
+field is `type` in the manifest's `moybyte` object, as for wallpapers and apps;
+`kind` is the Files document vocabulary).
 It holds a `theme.json` and optional **data** assets: images, fonts, sprite and
 icon sheets. It never holds a cart or a script. Every key is optional (§5).
 

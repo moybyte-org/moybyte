@@ -238,6 +238,33 @@ static moy_cat_json_t field(const char *man, const char *end, const char *key) {
     return f;
 }
 
+// A field of the manifest's "moybyte" object, where Moybyte's own fields
+// live (moy_store_base.VENDOR_KEY); absent when there is no such object.
+static moy_cat_json_t vfield(const char *man, const char *end, const char *key) {
+    moy_cat_json_t v = field(man, end, "moybyte");
+    if (v.v == NULL || *v.v != '{') {
+        moy_cat_json_t none = { NULL, NULL };
+        return none;
+    }
+    return field(v.v, v.e, key);
+}
+
+// A cart id as SPEC.md 3.1 spells it (moy_store_base.is_cart_id): two parts
+// of a-z, 0-9 and _ joined by one dot.
+static int is_cart_id(const char *s, size_t n) {
+    size_t dot = 0, dots = 0;
+    for (size_t i = 0; i < n; i++) {
+        char ch = s[i];
+        if (ch == '.') {
+            dot = i;
+            dots++;
+        } else if (!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_')) {
+            return 0;
+        }
+    }
+    return dots == 1u && dot > 0u && dot + 1u < n;
+}
+
 static int is_str(moy_cat_json_t f, const char *s) {
     return f.v != NULL && *f.v == '"' && moy_json_str_is(f.v, f.e, s, strlen(s));
 }
@@ -432,7 +459,7 @@ static int scene_names(rd_t *r, const char *man, const char *mend,
     if (taken == NULL) {
         return MOY_ENOMEM;
     }
-    moy_cat_json_t assets = field(man, mend, "assets");
+    moy_cat_json_t assets = vfield(man, mend, "assets");
     if (assets.v != NULL && *assets.v == '{') {
         moy_cat_json_t listed = field(assets.v, assets.e, "scenes");
         if (listed.v != NULL && *listed.v == '[') {
@@ -769,12 +796,12 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
 
     e->title = field(man, mend, "title");
     e->author = field(man, mend, "author");
-    e->type = field(man, mend, "type");
+    e->type = vfield(man, mend, "type");
     e->fps = field(man, mend, "fps");
     e->palette = field(man, mend, "palette");
     e->extensions = field(man, mend, "extensions");
-    e->edit = field(man, mend, "edit");
-    e->permissions = field(man, mend, "permissions");
+    e->edit = vfield(man, mend, "edit");
+    e->permissions = vfield(man, mend, "permissions");
     moy_cat_json_t v = field(man, mend, "version");
     if (v.v != NULL) {
         e->version.kind = moy_json_int(v.v, v.e, &e->version.value);
@@ -799,7 +826,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
             }
         }
     }
-    moy_cat_json_t g = field(man, mend, "graduated");
+    moy_cat_json_t g = vfield(man, mend, "graduated");
     e->graduated = g.v != NULL && moy_json_truthy(g.v, g.e);
     e->icon_ok = norm_icon(field(man, mend, "icon"), e->icon);
     moy_cat_json_t in = field(man, mend, "input");
@@ -835,7 +862,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     moy_cat_json_t id = field(man, mend, "id");
     size_t idn = 0;
     char *ids = broken == NULL ? str_of(&r->a, id, &idn) : NULL;
-    if (ids != NULL && idn) {
+    if (ids != NULL && is_cart_id(ids, idn)) {
         e->id = ids;
         e->id_n = idn;
     } else {
@@ -1166,7 +1193,7 @@ static int load_payloads(rd_t *r, moy_cart_t *c, const char *man,
     c->after = after.f;
     c->after_n = after.len;
 
-    moy_cat_json_t cfg = field(man, mend, "config");
+    moy_cat_json_t cfg = vfield(man, mend, "config");
     if (cfg.v != NULL && !dict_takes(cfg.v, cfg.e)) {
         why = "config is not a mapping";
     }

@@ -1,26 +1,33 @@
 {
   "format": "moy-1",
-  "version": 1,
+  "version": 2,
   "title": "Get Carts",
-  "type": "app",
+  "id": "moybyte.get_carts",
   "runtime": "python",
   "main": "main.py",
-  "system": true,
-  "order": 320,
-  "targets": ["host", "device", "web"],
-  "app": {
-    "id": "getcarts",
-    "entry": "getcarts_app:GetCartsAppLayer",
-    "text_mode": false,
-    "order": 80
-  },
   "canvas": "320x240",
-  "permissions": [
-    "graphics",
-    "input",
-    "getcarts"
-  ],
-  "safe_to_share": false,
-  "config": {},
-  "edit": []
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 320,
+    "targets": [
+      "host",
+      "device",
+      "web"
+    ],
+    "app": {
+      "id": "getcarts",
+      "entry": "getcarts_app:GetCartsAppLayer",
+      "text_mode": false,
+      "order": 80
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "getcarts"
+    ],
+    "safe_to_share": false,
+    "config": {},
+    "edit": []
+  }
 }

@@ -47,7 +47,7 @@ def _cart(carts_dir, title, perms):
                             src="def _update(dt):\n    pass\ndef _draw():\n    cls(0)\n")
     man_path = Path(cart["path"]) / "manifest.json"
     man = json.loads(man_path.read_text())
-    man["permissions"] = perms
+    man["moybyte"]["permissions"] = perms
     man_path.write_text(json.dumps(man))
     return moy_carts.scan(carts_dir)
 

@@ -245,17 +245,19 @@ editor's op batch is JSON text it stores and returns verbatim.
 
 Each feature is built once, natively: **built** lands in the slice named;
 **shaped** means 1b's data model and interface carry it and the feature comes
-later. A new manifest field goes into moy-spec's SPEC.md before a store writes
-it (the manifest is a public format). A change to the medium ships as strict
-readers plus a seed bump (CLAUDE.md, 2026-09-07).
+later. The manifest is a public format: a spec field goes into moy-spec's
+SPEC.md before a store writes it, and Moybyte's own fields go under the
+manifest's `moybyte` key (SPEC.md §3.1; `moy_store_base.VENDOR_KEY`), never
+loose at the top level. A change to the medium ships as strict readers plus a
+seed bump (CLAUDE.md, 2026-09-07).
 
 | issue | what the store carries | 1b | why |
 |---|---|---|---|
 | #162 namespaced ids | the folder name is the id, `<author>.<name>`, and the index key; create, duplicate and adopt write `"id"` into the manifest, and adopt names the folder from it; `title` is display only. A folder whose manifest has no `id` reads its id from its name, which is the rule, not a migration. A cart a user makes takes `<author>` from a Settings field (§12). The built-ins move into `moybyte` (`moybyte.<name>`) by a seed bump, the old folders retired by the sweep's generation gate | built: slices 1, 3, 4 | it is the index key; moving the key later changes the index twice |
-| #131 profiles | the decided layout (§12): a root for the family shelf (`/sd/moybyte/shared/carts`) and one for each kid's carts (`/sd/moybyte/kids/<name>/carts`), on a card only, since a board with no card has one profile; `owner` in the manifest and the row; a kid's saves at `kids/<name>/saves/<cart-id>`, a path the store composes from (profile, id), shared games included | built: the roots in slice 1, `owner` and the saves' path in slice 3; share (a snapshot copied to the family shelf) and remix (a copy into the kid's root) through adopt and provenance in slice 7 | the shelf is the family root plus the current kid's, so a sibling's carts are absent until shared; Who's playing, the PIN and its `gate(action)` are the spine's and the apps' |
+| #131 profiles | the decided layout (§12): a root for the family shelf (`/sd/moybyte/shared/carts`) and one for each kid's carts (`/sd/moybyte/kids/<name>/carts`), on a card only, since a board with no card has one profile; `moybyte.owner` in the manifest and `owner` in the row; a kid's saves at `kids/<name>/saves/<cart-id>`, a path the store composes from (profile, id), shared games included | built: the roots in slice 1, `owner` and the saves' path in slice 3; share (a snapshot copied to the family shelf) and remix (a copy into the kid's root) through adopt and provenance in slice 7 | the shelf is the family root plus the current kid's, so a sibling's carts are absent until shared; Who's playing, the PIN and its `gate(action)` are the spine's and the apps' |
 | #136 the time machine | `moy_journal_list` and `moy_journal_snap`; a restore appends the snapshot as a new commit, so history only grows | built: slice 6 | a read of the journal 1b moves; the timeline is the Editor's |
 | #127 backup, export, import | `moy_pack(h, history)` writes a `.moy` archive, a zip of the folder (`firmware/web_runner/moy_store.mjs`'s codec is its mirror, pinned by a round trip); `moy_adopt(staging, rid)` moves a staged cart into place with one rename and makes its row | built: slice 7 | Get Carts already stages and renames in Python; import, a gallery install and a remix all go through adopt |
-| #122, #125, #123, #195 sharing | provenance in the manifest and row (`origin`, the source's id and version, `remix_of`); publish is `moy_pack` without history under the wire's `_skip`; a remix is duplicate plus provenance | provenance and pack built: slice 7; the rest is not the store's | the transport is sprint 3's, the parent gate a setting (sprint 2), the screens apps, the gallery a server in moy-spec's tooling |
+| #122, #125, #123, #195 sharing | provenance in the manifest's `moybyte` object and the row (`moybyte.origin`, `moybyte.source` — the source's id and version — and `moybyte.remix_of`); publish is `moy_pack` without history under the wire's `_skip`; a remix is duplicate plus provenance | provenance and pack built: slice 7; the rest is not the store's | the transport is sprint 3's, the parent gate a setting (sprint 2), the screens apps, the gallery a server in moy-spec's tooling |
 | #235 aging, sharding | only the store composes a cart's path (§4), so a shard level under `/moy/carts` is invisible to callers and to the wire; an aged volume compacts a cart by duplicating it to a fresh folder and adopting it over the old | shaped | a littlefs lever (#198), built when #235's numbers ask; FAT for regenerable data and QIO flash are partition and board work |
 
 ## 9. Memory

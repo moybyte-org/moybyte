@@ -233,9 +233,11 @@ def test_a_several_script_cart_survives_the_bake_and_the_seed(tmp_path):
     cart = src / "moybyte.port.moy"
     cart.mkdir(parents=True)
     (cart / "manifest.json").write_text(json.dumps(
-        {"format": "moy-1", "title": "Port", "type": "game", "version": 3,
-         "system": True, "order": 1, "runtime": "lua", "main": "main.lua",
-         "sources": ["p8.lua", "main.lua", "perf.lua"]}), encoding="utf-8")
+        {"format": "moy-1", "title": "Port", "id": "moybyte.port", "version": 3,
+         "runtime": "lua", "main": "main.lua",
+         "sources": ["p8.lua", "main.lua", "perf.lua"],
+         "moybyte": {"type": "game", "system": True, "order": 1}}),
+        encoding="utf-8")
     (cart / "main.lua").write_text("function _update() end\n", encoding="utf-8")
     (cart / "p8.lua").write_text("-- prologue\n", encoding="utf-8")
     (cart / "perf.lua").write_text("-- epilogue\n", encoding="utf-8")

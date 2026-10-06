@@ -1,24 +1,27 @@
 {
   "format": "moy-1",
-  "version": 3,
+  "version": 4,
   "title": "Coin Quest",
-  "type": "game",
+  "id": "moybyte.coin_quest",
   "runtime": "python",
   "main": "main.py",
-  "system": true,
-  "order": 110,
   "canvas": "320x240",
-  "permissions": [
-    "graphics",
-    "input",
-    "audio"
-  ],
-  "safe_to_share": true,
-  "config": {},
-  "edit": [],
-  "assets": {
-    "scenes": [
-      "main"
-    ]
+  "moybyte": {
+    "type": "game",
+    "system": true,
+    "order": 110,
+    "permissions": [
+      "graphics",
+      "input",
+      "audio"
+    ],
+    "safe_to_share": true,
+    "config": {},
+    "edit": [],
+    "assets": {
+      "scenes": [
+        "main"
+      ]
+    }
   }
 }

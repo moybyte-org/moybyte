@@ -186,6 +186,41 @@ USER_NS = "local"
 USER_NS_KEY = "author"
 
 
+# Moybyte's own manifest fields -- everything SPEC.md 3.1's table does not
+# name -- live under ONE top-level key named after the implementation
+# (`"moybyte": {"type": "app", ...}`), never loose at the top level. A field
+# of these at the top level reads as absent: the readers are strict.
+VENDOR_KEY = "moybyte"
+VENDOR_FIELDS = ("type", "system", "order", "permissions", "safe_to_share",
+                 "config", "edit", "targets", "age_mode", "app", "assets",
+                 "graduated")
+
+
+def vendor(man):
+    """The manifest's Moybyte object, or {} when it has none (or `man` is not
+    an object)."""
+    v = man.get(VENDOR_KEY) if isinstance(man, dict) else None
+    return v if isinstance(v, dict) else {}
+
+
+def _id_part(s):
+    if not s:
+        return False
+    for ch in s:
+        if not ("a" <= ch <= "z" or "0" <= ch <= "9" or ch == "_"):
+            return False
+    return True
+
+
+def is_cart_id(s):
+    """True for a cart id as SPEC.md 3.1 spells it: `<author>.<name>`, two
+    parts of a-z, 0-9 and _ joined by one dot."""
+    if not isinstance(s, str) or s.count(".") != 1:
+        return False
+    a, n = s.split(".")
+    return _id_part(a) and _id_part(n)
+
+
 def builtin_name(path):
     """The folder of the built-in at `path` (`moybyte.files.moy` for
     `.../moybyte.files.moy`), or None for any other cart: an app's identity
@@ -213,9 +248,11 @@ def store_path(root, rel):
 
 
 def slug(title):
+    """`title` in a cart id's characters (SPEC.md 3.1): lowercase a-z, 0-9 and
+    _, a space or a dash becoming _ and anything else dropped."""
     out = ""
     for ch in str(title).lower():
-        if ch.isalpha() or ch.isdigit():
+        if "a" <= ch <= "z" or "0" <= ch <= "9":
             out += ch
         elif ch in " -_":
             out += "_"

@@ -1,72 +1,79 @@
 {
   "format": "moy-1",
-  "version": 7,
+  "version": 8,
   "title": "Bullet Storm",
-  "type": "game",
+  "id": "moybyte.bullet_storm",
   "runtime": "lua",
   "main": "main.lua",
-  "system": true,
-  "order": 170,
-  "targets": ["host", "device", "web"],
   "fps": "free",
   "canvas": "320x240",
-  "permissions": [
-    "graphics",
-    "input",
-    "audio"
-  ],
-  "age_mode": "cards",
-  "safe_to_share": true,
-  "config": {
-    "storm": 5,
-    "ship_speed": 160,
-    "lives": 3,
-    "pattern": "cycle"
-  },
-  "edit": [
-    {
-      "key": "storm",
-      "label": "STORM",
-      "type": "int",
-      "min": 1,
-      "max": 10,
-      "step": 1,
-      "display": "gauge",
-      "gauge": {
-        "low": "turtle",
-        "high": "rabbit"
+  "moybyte": {
+    "type": "game",
+    "system": true,
+    "order": 170,
+    "targets": [
+      "host",
+      "device",
+      "web"
+    ],
+    "permissions": [
+      "graphics",
+      "input",
+      "audio"
+    ],
+    "age_mode": "cards",
+    "safe_to_share": true,
+    "config": {
+      "storm": 5,
+      "ship_speed": 160,
+      "lives": 3,
+      "pattern": "cycle"
+    },
+    "edit": [
+      {
+        "key": "storm",
+        "label": "STORM",
+        "type": "int",
+        "min": 1,
+        "max": 10,
+        "step": 1,
+        "display": "gauge",
+        "gauge": {
+          "low": "turtle",
+          "high": "rabbit"
+        },
+        "card": "THE STORM RAGES AT {value}"
       },
-      "card": "THE STORM RAGES AT {value}"
-    },
-    {
-      "key": "ship_speed",
-      "label": "SPEED",
-      "type": "int",
-      "min": 100,
-      "max": 240,
-      "step": 20,
-      "card": "YOUR SHIP FLIES AT {value}"
-    },
-    {
-      "key": "lives",
-      "label": "LIVES",
-      "type": "int",
-      "min": 1,
-      "max": 9,
-      "step": 1,
-      "card": "YOU GET {value} LIVES"
-    },
-    {
-      "key": "pattern",
-      "label": "PATTERN",
-      "type": "choice",
-      "choices": [
-        "cycle",
-        "spiral",
-        "rings",
-        "fans"
-      ],
-      "card": "THE STORM BLOWS IN {value}"
-    }
-  ]
+      {
+        "key": "ship_speed",
+        "label": "SPEED",
+        "type": "int",
+        "min": 100,
+        "max": 240,
+        "step": 20,
+        "card": "YOUR SHIP FLIES AT {value}"
+      },
+      {
+        "key": "lives",
+        "label": "LIVES",
+        "type": "int",
+        "min": 1,
+        "max": 9,
+        "step": 1,
+        "card": "YOU GET {value} LIVES"
+      },
+      {
+        "key": "pattern",
+        "label": "PATTERN",
+        "type": "choice",
+        "choices": [
+          "cycle",
+          "spiral",
+          "rings",
+          "fans"
+        ],
+        "card": "THE STORM BLOWS IN {value}"
+      }
+    ]
+  }
 }

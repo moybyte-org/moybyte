@@ -455,15 +455,27 @@ int moy_journal_graduate(const char *cart, int value) {
         const char *s = moy_json_ws(b.p, b.p + b.n);
         const char *e = moy_json_value(s, b.p + b.n, 1u);
         if (e != NULL && moy_json_ws(e, b.p + b.n) == b.p + b.n && *s == '{') {
-            const char *g, *ge;
-            int now = moy_json_get(s, e, "graduated", &g, &ge) && moy_json_truthy(g, ge);
+            // The flag is Moybyte's own field: manifest["moybyte"]["graduated"].
+            static const char empty[] = "{}";
+            const char *v, *ve, *g, *ge;
+            if (!moy_json_get(s, e, "moybyte", &v, &ve) || *v != '{') {
+                v = empty;
+                ve = empty + 2;
+            }
+            int now = moy_json_get(v, ve, "graduated", &g, &ge) && moy_json_truthy(g, ge);
             if (now != (value != 0)) {
                 const char *val = value ? "true" : NULL;
-                size_t n = moy_json_canon_set(s, e, "graduated", val, NULL, 0);
-                char *t = n == MOY_JSON_DEEP ? NULL : moy_arena_alloc(&a, n + 1u);
-                if (t != NULL) {
-                    moy_json_canon_set(s, e, "graduated", val, t, n);
-                    done = moy_fs_publish(p, t, n) == 0;
+                size_t vn = moy_json_canon_set(v, ve, "graduated", val, NULL, 0);
+                char *vt = vn == MOY_JSON_DEEP ? NULL : moy_arena_alloc(&a, vn + 1u);
+                if (vt != NULL) {
+                    moy_json_canon_set(v, ve, "graduated", val, vt, vn);
+                    vt[vn] = 0;
+                    size_t n = moy_json_canon_set(s, e, "moybyte", vt, NULL, 0);
+                    char *t = n == MOY_JSON_DEEP ? NULL : moy_arena_alloc(&a, n + 1u);
+                    if (t != NULL) {
+                        moy_json_canon_set(s, e, "moybyte", vt, t, n);
+                        done = moy_fs_publish(p, t, n) == 0;
+                    }
                 }
             }
         }

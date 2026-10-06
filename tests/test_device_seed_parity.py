@@ -207,8 +207,8 @@ def test_embedded_edit_and_cfg_match_manifest():
     carts = _carts_by_title()
     for title, cart in carts.items():
         man = _manifest(TITLE_TO_FOLDER[title])
-        assert cart["edit"] == man["edit"], "edit schema drifted for " + title
-        assert cart["cfg"] == man["config"], "config drifted for " + title
+        assert cart["edit"] == man["moybyte"]["edit"], "edit schema drifted for " + title
+        assert cart["cfg"] == man["moybyte"]["config"], "config drifted for " + title
 
 
 def test_embedded_blocks_match_blocks_json_or_both_absent():
@@ -282,8 +282,8 @@ def test_seed_builtins_writes_sprites_kgfx_when_present(tmp_path):
     assert (d / "sprites.moygfx").read_text(encoding="utf-8") == hexs
     man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
     assert man["canvas"] == "160x120"
-    assert man["permissions"] == ["graphics", "input"]
-    assert man["edit"] == seed[0]["edit"]
+    assert man["moybyte"]["permissions"] == ["graphics", "input"]
+    assert man["moybyte"]["edit"] == seed[0]["edit"]
 
     # A reload sees the sheet (this is what the device paint editor loads).
     cart = moy_carts.load(str(d))
@@ -579,3 +579,52 @@ def test_the_rename_sweeps_the_bare_built_ins_once(tmp_path):
     assert mine["path"].endswith("/local.my_game.moy")
     assert sorted(c["id"] for c in carts) == ["local.my_game", "moybyte.bench"]
     assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
+
+
+# -- Moybyte's own manifest fields (SPEC.md 3.1) ------------------------------
+
+def test_moybytes_own_fields_read_only_under_the_moybyte_key(tmp_path):
+    """SPEC.md 3.1: an implementation's own fields go under one key named after
+    it. A loose top-level `type`/`permissions`/`config` is not Moybyte's field
+    and reads as absent; there is no migration."""
+    import json
+    from runtime import moy_carts
+    root = tmp_path / "carts"
+    for name, man in (("local.loose", {"title": "Loose", "type": "game",
+                                       "permissions": ["network"],
+                                       "config": {"speed": 3}}),
+                      ("local.kept", {"title": "Kept", "moybyte": {
+                          "type": "game", "permissions": ["network"],
+                          "config": {"speed": 3}}})):
+        d = root / (name + ".moy")
+        d.mkdir(parents=True)
+        (d / "manifest.json").write_text(json.dumps(man))
+        (d / "main.py").write_text("def _draw():\n    cls(0)\n")
+    loose = moy_carts.load(str(root / "local.loose.moy"))
+    kept = moy_carts.load(str(root / "local.kept.moy"))
+    assert (loose["type"], loose["permissions"], loose["cfg"]) == ("app", [], {})
+    assert (kept["type"], kept["permissions"], kept["cfg"]) == \
+        ("game", ["network"], {"speed": 3})
+
+
+def test_a_cart_id_is_two_lowercase_parts(tmp_path):
+    """SPEC.md 3.1's id: `<author>.<name>`, each of a-z, 0-9 and _. A manifest
+    id that is not one is ignored and the folder name stands; every id the
+    store composes is one."""
+    import json
+    from runtime import moy_carts
+    from runtime.moy_store_base import is_cart_id
+    for good in ("kenny.star_catcher", "local.a1", "moybyte.x"):
+        assert is_cart_id(good), good
+    for bad in ("Kenny.star", "a.b.c", ".x", "x.", "kenny", "ké.x", "", None):
+        assert not is_cart_id(bad), bad
+    root = tmp_path / "carts"
+    d = root / "local.mine.moy"
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(json.dumps({"title": "Mine", "id": "Not.An-Id"}))
+    (d / "main.py").write_text("")
+    assert moy_carts.load(str(d))["id"] == "local.mine"
+    made = moy_carts.create("Café Racer!", str(root))
+    assert made["id"] == "local.caf_racer" and is_cart_id(made["id"])
+    man = json.loads((Path(made["path"]) / "manifest.json").read_text())
+    assert man["id"] == "local.caf_racer" and man["moybyte"]["type"] == "app"

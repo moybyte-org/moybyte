@@ -107,7 +107,7 @@ def test_save_scene_roundtrip_and_manifest_assets(tmp_path):
     assert c["scenes"]["main"] == MAIN_SCENE
     assert c["scene_names"] == ["main"]
     man = json.loads((Path(c["path"]) / "manifest.json").read_text())
-    assert man["assets"]["scenes"] == ["main"]
+    assert man["moybyte"]["assets"]["scenes"] == ["main"]
     # a second named scene appends to the manifest order
     mc.save_scene(c, "level2", LEVEL2_SCENE)
     assert c["scene_names"] == ["main", "level2"]
@@ -152,7 +152,7 @@ def test_duplicate_copies_scenes_and_order(tmp_path):
     assert dup["scenes"] == {"main": MAIN_SCENE, "level2": LEVEL2_SCENE}
     assert dup["scene_names"] == ["main", "level2"]
     man = json.loads((Path(dup["path"]) / "manifest.json").read_text())
-    assert man["assets"]["scenes"] == ["main", "level2"]
+    assert man["moybyte"]["assets"]["scenes"] == ["main", "level2"]
 
 
 def test_seed_builtins_writes_scenes_and_manifest_assets(tmp_path):
@@ -168,7 +168,7 @@ def test_seed_builtins_writes_scenes_and_manifest_assets(tmp_path):
     moy_carts.seed_builtins([seed], root)
     path = root + "/moybyte.seeded_scenes.moy"
     man = json.loads((Path(path) / "manifest.json").read_text())
-    assert man["assets"]["scenes"] == ["main", "level2"]
+    assert man["moybyte"]["assets"]["scenes"] == ["main", "level2"]
     loaded = moy_carts.load(path)
     assert loaded["scenes"]["main"] == MAIN_SCENE
     assert loaded["scene_names"] == ["main", "level2"]

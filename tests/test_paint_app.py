@@ -38,8 +38,8 @@ def test_paint_and_my_art_are_well_formed_system_carts():
         assert man["version"] >= 1
         compile((folder / "main.py").read_text(encoding="utf-8"),
                 str(folder / "main.py"), "exec")
-    assert json.loads((paint / "manifest.json").read_text())["type"] == "app"
-    assert json.loads((wall / "manifest.json").read_text())["type"] == "wallpaper"
+    assert json.loads((paint / "manifest.json").read_text())["moybyte"]["type"] == "app"
+    assert json.loads((wall / "manifest.json").read_text())["moybyte"]["type"] == "wallpaper"
 
 
 def test_the_paint_cart_body_is_only_the_fallback_card():

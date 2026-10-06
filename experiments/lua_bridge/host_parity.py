@@ -86,9 +86,9 @@ def _load_config():
     """Both carts' manifest configs, drift-guarded: the twins must tune alike or
     the A/B (and this parity run) compares different scenes."""
     with open(os.path.join(PY_CART_DIR, "manifest.json")) as fh:
-        py_cfg = json.load(fh)["config"]
+        py_cfg = json.load(fh)["moybyte"]["config"]
     with open(os.path.join(LUA_CART_DIR, "manifest.json")) as fh:
-        lua_cfg = json.load(fh)["config"]
+        lua_cfg = json.load(fh)["moybyte"]["config"]
     if py_cfg != lua_cfg:
         raise AssertionError("moybyte.sakura.moy and moybyte.sakura_lua.moy configs drifted: "
                              "%r != %r" % (py_cfg, lua_cfg))
