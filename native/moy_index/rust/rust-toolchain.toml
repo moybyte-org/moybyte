@@ -1,0 +1,8 @@
+# The upstream Rust every target but the S3s compiles with. build.sh pins the
+# other two: Espressif's fork for the S3s, a dated nightly for Miri and the
+# AddressSanitizer build; tools/rust_tree.sh installs all three.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+targets = ["riscv32imafc-unknown-none-elf", "wasm32-unknown-emscripten",
+           "i686-unknown-linux-gnu"]

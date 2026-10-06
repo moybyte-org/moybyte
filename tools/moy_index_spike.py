@@ -84,6 +84,7 @@ CACHE = os.path.join(ROOT, ".build", "host_index")
 OUT = os.path.join(ROOT, ".build", "moy_index_spike")
 WEB_DIR = os.path.join(ROOT, "firmware", "web_runner")
 WEB_DIST = os.path.join(WEB_DIR, "dist")
+WEB_PORT = os.path.join(WEB_DIR, ".build", "micropython", "ports", "webassembly")
 UNIX_PORT = os.path.join(ROOT, ".build", "unix_micropython", "micropython",
                          "ports", "unix")
 
@@ -93,6 +94,8 @@ RUST_TARGETS = {
     "host": "the host's own triple: the ctypes library, the 64-bit desktop "
             "MicroPython",
     "host-sanitize": "the same, instrumented for AddressSanitizer",
+    "host-fuzz": "host-sanitize with libFuzzer's coverage instrumentation, "
+                 "as the C twin's code has under -fsanitize=fuzzer",
     "host-r32": "i686: the desktop MicroPython in the boards' object model",
     "esp32s3": "the T-Deck, the Guition S3 and the Zero",
     "esp32p4": "the two P4 boards",
@@ -173,7 +176,11 @@ def host_library(impl="c", sanitize=False):
     names = ["moy_index.h"] + (["moy_index.c"] if impl == "c" else [])
     link = []
     if impl == "rust":
-        link = [rust_lib("host-sanitize" if sanitize else "host")]
+        # The shim defines only the host's two imports, so nothing in it pulls
+        # a member out of the archive: the library takes all of it.
+        link = ["-Wl,--whole-archive", rust_lib("host-sanitize" if sanitize
+                                                else "host"),
+                "-Wl,--no-whole-archive"]
     return native_build.build(
         "moy_index_%s%s" % (impl, "_san" if sanitize else ""),
         os.path.join(NATIVE, "moy_index_host.c"), names, CACHE,
@@ -324,7 +331,7 @@ def fuzz_binary(impl="c", libfuzzer=False):
     if impl == "c":
         srcs.append(os.path.join(NATIVE, "moy_index.c"))
     else:
-        link = [rust_lib("host-sanitize")]
+        link = [rust_lib("host-fuzz" if libfuzzer else "host-sanitize")]
     if libfuzzer:
         cc = shutil.which("clang")
         flags = ["-fsanitize=fuzzer,address,undefined"] + SANITIZE[1:]
@@ -362,9 +369,14 @@ def fuzz_libfuzzer(impl="c", seconds=60):
         return None
     corpus = os.path.join(OUT, "corpus_%s" % impl)
     os.makedirs(corpus, exist_ok=True)
+    # clang 14's ASan runtime dies in its own init under the address-space
+    # entropy of Linux 6.6 and later (vm.mmap_rnd_bits 32), a third of starts
+    # here, either twin: the run goes without ASLR.
+    norand = ["setarch", "-R"] if shutil.which("setarch") else []
     t = time.time()
-    out = subprocess.run([exe, "-max_total_time=%d" % seconds, "-max_len=4096",
-                          "-seed=1", "-print_final_stats=1", corpus],
+    out = subprocess.run(norand + [exe, "-max_total_time=%d" % seconds,
+                                   "-max_len=4096", "-seed=1",
+                                   "-print_final_stats=1", corpus],
                          capture_output=True, text=True, cwd=OUT)
     text = out.stdout + out.stderr
     done = re.findall(r"Done (\d+) runs", text)
@@ -475,9 +487,41 @@ def cmd_sanitize(a):
             "no clang with libFuzzer" if lf is None else
             "ok=%(ok)s %(runs)s runs in %(seconds)ss, cov %(cov)s, ft "
             "%(features)s, corpus %(corpus)s" % lf))
+    if impl == "rust" and a.seconds:
+        # cargo-fuzz: the safe API against a model, Rust's own libFuzzer and
+        # AddressSanitizer (build.sh fuzz).
+        t = time.time()
+        out = subprocess.run(["bash", RUST_BUILD, "fuzz", str(a.seconds),
+                              os.path.join(OUT, "corpus_cargo_fuzz")], cwd=ROOT,
+                             capture_output=True, text=True)
+        text = out.stdout + out.stderr
+        done = re.findall(r"Done (\d+) runs", text)
+        cov = re.findall(r"cov: (\d+) ft: (\d+)", text)
+        res["cargo_fuzz"] = {
+            "ok": out.returncode == 0, "seconds": round(time.time() - t, 1),
+            "runs": int(done[-1]) if done else None,
+            "cov": int(cov[-1][0]) if cov else None,
+            "features": int(cov[-1][1]) if cov else None,
+            "tail": text.strip().splitlines()[-12:]}
+        print("cargo-fuzz, ASan: ok=%(ok)s %(runs)s runs in %(seconds)ss, cov "
+              "%(cov)s, ft %(features)s" % res["cargo_fuzz"])
+    if impl == "rust":
+        # The crate's own tests, then the same under Miri (build.sh test|miri).
+        for step in ("test", "miri"):
+            t = time.time()
+            out = subprocess.run(["bash", RUST_BUILD, step], cwd=ROOT,
+                                 capture_output=True, text=True)
+            tail = (out.stdout + out.stderr).strip().splitlines()
+            res[step] = {"rc": out.returncode, "seconds": round(time.time() - t, 1),
+                         "tail": tail[-4:]}
+            print("crate %s: rc=%d %.1fs  %s" % (step, out.returncode,
+                                                res[step]["seconds"],
+                                                " ".join(tail[-2:])))
     save("sanitize-%s.json" % impl, res)
     bad = (res["suite"] and res["suite"]["rc"]) or not (res["seeded"] or {}).get("ok") \
-        or (res.get("libfuzzer") and not res["libfuzzer"]["ok"])
+        or (res.get("libfuzzer") and not res["libfuzzer"]["ok"]) \
+        or any(res.get(k, {}).get("rc") for k in ("test", "miri")) \
+        or not res.get("cargo_fuzz", {"ok": True})["ok"]
     return 1 if bad else 0
 
 
@@ -527,8 +571,9 @@ def objects_of(impl):
     """What names the twin's own objects in a link map."""
     if impl == "c":
         return re.compile(r"\((mod)?moy_index\.c\.obj\)$|/(mod)?moy_index\.c\.obj$")
-    lib = os.path.basename(os.environ.get("MOY_INDEX_RUST_LIB", "")) or "moy_index"
-    return re.compile(r"(\(modmoy_index\.c\.obj\)$)|(%s\()" % re.escape(lib))
+    # The binding, and every member of the library rust/build.sh names.
+    return re.compile(r"\(modmoy_index\.c\.obj\)$|/modmoy_index\.c\.obj$"
+                      r"|/libmoy_index_rs\.a\(")
 
 
 def map_rows(path, objects):
@@ -602,6 +647,12 @@ def build_board(name, d, env, logdir):
 def build_web(env, logdir, tag):
     import board_pass
     log = os.path.join(logdir, "web.%s.build.log" % tag)
+    if env.get("MOY_INDEX_RUST_LIB"):
+        # The library is a link flag, not a prerequisite: relink against it.
+        try:
+            os.remove(os.path.join(WEB_PORT, "build-moybyte", "micropython.mjs"))
+        except OSError:
+            pass
     return board_pass.run_logged(["bash", os.path.join(WEB_DIR, "build.sh")],
                                  log, env), log
 

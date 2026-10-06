@@ -15,10 +15,13 @@ twin's build script and the harness's commands. The spike's numbers are #224's.
 | `bench_moy_index.c` | `moy_index_bench`, the hot path driven from C; only under `MOY_INDEX_BENCH=1` |
 | `moy_index_host.c` | the two host imports over malloc, for the ctypes binding |
 | `fuzz_index.c` | the API-sequence fuzz against a model: libFuzzer or a seeded driver, under ASan and UBSan |
+| `rust/` | the Rust twin: a `no_std` crate exporting `moy_index.h` (`src/lib.rs`), its tests for `cargo test` and Miri, a cargo-fuzz target (`fuzz/`), and `build.sh`, which builds the static library for each target and names the toolchain pins (`tools/rust_tree.sh` installs them) |
 | `micropython.cmake`, `micropython.mk` | the boards', and the desktop's and browser's, builds of the hook |
 
-The nets: `tests/test_moy_index.py` (every binding, the C twin through
-ctypes), `tests/test_moy_index_twins.py` (that suite on the desktop
-MicroPython's both object models, a random walk against the Python twin, the
-fuzz under the sanitizers) and the store trace in
-`tests/test_semantic_traces.py`, pinned over the native index too.
+The nets: `tests/test_moy_index.py` (every binding: the C twin through ctypes,
+and the Rust twin under `MOY_INDEX_IMPL=rust`), `tests/test_moy_index_twins.py`
+(that suite on the desktop MicroPython's both object models, a random walk
+against the Python twin, the fuzz under the sanitizers), the store trace in
+`tests/test_semantic_traces.py`, pinned over the native index too, and
+`tools/link_providers.py`'s guard on every image's link map: no Rust object
+provides a C library name.

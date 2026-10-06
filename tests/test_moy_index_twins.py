@@ -183,10 +183,11 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
     assert ref.handles() == twin.handles()
 
 
-def test_the_api_fuzz_runs_clean_under_the_sanitizers():
-    """fuzz_index's seeded programs over the C twin, built with ASan and
+@pytest.mark.parametrize("impl", sorted(NATIVE) or ["c"])
+def test_the_api_fuzz_runs_clean_under_the_sanitizers(impl):
+    """fuzz_index's seeded programs over each native twin, built with ASan and
     UBSan: every answer checked against its model, every byte returned."""
-    got = moy_index_spike.fuzz_seeded("c", seed=1, runs=300)
+    got = moy_index_spike.fuzz_seeded(impl, seed=1, runs=300)
     if got is None:
         if os.environ.get("CI"):
             pytest.fail("no C compiler with AddressSanitizer here")

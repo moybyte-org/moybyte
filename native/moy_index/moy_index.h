@@ -60,7 +60,7 @@ uint32_t moy_index_slots(const moy_index_t *ix);
 uint32_t moy_index_at(const moy_index_t *ix, uint32_t slot);
 
 // Imported from the host.
-void *moy_index_host_alloc(size_t n);           // n zeroed bytes, or NULL
+void *moy_index_host_alloc(size_t n);           // n zeroed bytes, malloc-aligned, or NULL
 void moy_index_host_free(void *p, size_t n);    // n as it was allocated
 
 #endif // MOY_INDEX_H
