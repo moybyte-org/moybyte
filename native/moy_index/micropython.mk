@@ -1,7 +1,9 @@
 # moy_index for the unix and webassembly ports: the twin of micropython.cmake,
-# reading the same MOY_INDEX_IMPL (an environment or command-line variable).
+# reading the same MOY_INDEX_IMPL (an environment or command-line variable),
+# `c` when unset.
 
 MOY_INDEX_DIR := $(USERMOD_DIR)
+MOY_INDEX_IMPL ?= c
 
 ifeq ($(MOY_INDEX_IMPL),c)
 SRC_USERMOD_C += $(MOY_INDEX_DIR)/modmoy_index.c

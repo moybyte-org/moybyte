@@ -3,11 +3,12 @@
 # which tools/moy_index_spike.py's header describes; with it unset or `py` the
 # image keeps runtime/moy_spine.py and nothing of the module is built.
 # moy_htab.c is the handle table moy_index shares: it is built when either
-# takes a native twin, once. THIS FILE AND micropython.mk ARE TWINS.
+# takes a native twin, once -- the index's by default (MOY_INDEX_IMPL unset).
+# THIS FILE AND micropython.mk ARE TWINS.
 
 set(MOY_SPINE_IMPL "$ENV{MOY_SPINE_IMPL}")
 set(MOY_INDEX_IMPL "$ENV{MOY_INDEX_IMPL}")
-if(MOY_SPINE_IMPL STREQUAL "c" OR MOY_INDEX_IMPL STREQUAL "c")
+if(MOY_SPINE_IMPL STREQUAL "c" OR NOT MOY_INDEX_IMPL STREQUAL "py")
     add_library(usermod_moy_spine INTERFACE)
     target_sources(usermod_moy_spine INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}/moy_htab.c)

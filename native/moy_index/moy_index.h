@@ -14,7 +14,14 @@
 //
 // A path is `len` bytes, compared bytewise (the bindings pass a str's UTF-8).
 // The pointer moy_index_path hands back stays valid until the next call that
-// changes the table.
+// changes the table. The store's keys are a root's id, one byte, then the cart's
+// folder name (docs/kernel_store_2026-10.md section 4); the table compares them
+// as it would any path, and only the root table below reads that first byte.
+//
+// The root table holds MOY_INDEX_ROOTS store roots, a root's id its slot plus
+// one. moy_index_root takes a root the first time it is named: the lowest free
+// slot, else the slot of the root named longest ago, whose rows -- every row
+// whose key starts with that id -- are released first.
 //
 // Every byte an implementation holds comes from moy_index_host_alloc and goes
 // back through moy_index_host_free, which the HOST defines: the gc heap under
@@ -31,6 +38,7 @@
 #define MOY_INDEX_SLOT_BITS 12u
 #define MOY_INDEX_SLOTS (1u << MOY_INDEX_SLOT_BITS)
 #define MOY_INDEX_GEN_MAX ((1u << 18) - 1u)
+#define MOY_INDEX_ROOTS 8u
 
 enum {
     MOY_INDEX_OK = 0,
@@ -57,6 +65,13 @@ uint32_t moy_index_count(const moy_index_t *ix);
 // handle of the row in `slot`, or 0 when it is free.
 uint32_t moy_index_slots(const moy_index_t *ix);
 uint32_t moy_index_at(const moy_index_t *ix, uint32_t slot);
+
+// The root table: the id of the root `path` names (taken if absent), and the
+// path a root id names, MOY_INDEX_STALE for one that names none. A failed
+// moy_index_root (NOMEM) changes nothing.
+int moy_index_root(moy_index_t *ix, const char *path, size_t len, uint32_t *rid);
+int moy_index_root_path(const moy_index_t *ix, uint32_t rid, const char **path,
+                        size_t *len);
 
 // Imported from the host.
 void *moy_index_host_alloc(size_t n);           // n zeroed bytes, malloc-aligned, or NULL

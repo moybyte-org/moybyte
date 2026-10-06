@@ -6,6 +6,7 @@
 // implementation. A row holds a pointer to its path's own allocation, hashed
 // once (FNV-1a). A path finds its slot through an open-addressed table of
 // slot + 1 entries, kept at most three-quarters full, tombstones included.
+// The root table is MOY_INDEX_ROOTS paths and the order they were last named.
 
 #include <string.h>
 
@@ -25,11 +26,19 @@ typedef struct {
     char path[];        // len bytes, then a NUL
 } row_t;
 
+typedef struct {
+    char *path;         // len bytes and a NUL, or NULL while the slot is free
+    uint32_t len;
+} root_t;
+
 struct moy_index {
     moy_htab_t *t;      // rows of one row_t *
     uint16_t *tab;
     uint32_t tab_cap;   // a power of two, or 0 before the first row
     uint32_t tab_fill;  // live entries plus tombstones
+    root_t roots[MOY_INDEX_ROOTS];
+    uint8_t order[MOY_INDEX_ROOTS];     // root ids, the one named longest ago first
+    uint8_t named;                      // how many of order[] are set
 };
 
 static const moy_htab_mem_t mem = { moy_index_host_alloc, moy_index_host_free };
@@ -135,6 +144,11 @@ void moy_index_free(moy_index_t *ix) {
             moy_index_host_free(r, row_size(r->len));
         }
     }
+    for (uint32_t r = 0; r < MOY_INDEX_ROOTS; r++) {
+        if (ix->roots[r].path != NULL) {
+            moy_index_host_free(ix->roots[r].path, ix->roots[r].len + 1u);
+        }
+    }
     moy_htab_free(ix->t);
     moy_index_host_free(ix->tab, ix->tab_cap * sizeof(uint16_t));
     moy_index_host_free(ix, sizeof(moy_index_t));
@@ -238,4 +252,73 @@ uint32_t moy_index_slots(const moy_index_t *ix) {
 
 uint32_t moy_index_at(const moy_index_t *ix, uint32_t slot) {
     return moy_htab_at(ix->t, slot);
+}
+
+// rid moves to the end of the order: the root named last.
+static void named_now(moy_index_t *ix, uint32_t rid) {
+    uint32_t k = 0;
+    while (k < ix->named && ix->order[k] != rid) {
+        k++;
+    }
+    if (k == ix->named) {
+        ix->named++;
+    }
+    for (; k + 1u < ix->named; k++) {
+        ix->order[k] = ix->order[k + 1u];
+    }
+    ix->order[ix->named - 1u] = (uint8_t)rid;
+}
+
+int moy_index_root(moy_index_t *ix, const char *path, size_t len, uint32_t *rid) {
+    uint32_t r, free_r = MOY_INDEX_ROOTS;
+    for (r = 0; r < MOY_INDEX_ROOTS; r++) {
+        const root_t *x = &ix->roots[r];
+        if (x->path == NULL) {
+            if (free_r == MOY_INDEX_ROOTS) {
+                free_r = r;
+            }
+        } else if (x->len == len && memcmp(x->path, path, len) == 0) {
+            break;
+        }
+    }
+    if (r == MOY_INDEX_ROOTS) {
+        if (len > UINT32_MAX - 1u) {
+            return MOY_INDEX_NOMEM;
+        }
+        char *copy = moy_index_host_alloc(len + 1u);
+        if (copy == NULL) {
+            return MOY_INDEX_NOMEM;
+        }
+        if (len) {
+            memcpy(copy, path, len);
+        }
+        r = free_r;
+        if (r == MOY_INDEX_ROOTS) {
+            r = ix->order[0] - 1u;
+            for (uint32_t s = 0, n = moy_htab_slots(ix->t); s < n; s++) {
+                if (moy_htab_live(ix->t, s)) {
+                    const row_t *row = row_at(ix, s);
+                    if (row->len && (uint8_t)row->path[0] == r + 1u) {
+                        moy_index_release(ix, moy_htab_handle(ix->t, s));
+                    }
+                }
+            }
+            moy_index_host_free(ix->roots[r].path, ix->roots[r].len + 1u);
+        }
+        ix->roots[r].path = copy;
+        ix->roots[r].len = (uint32_t)len;
+    }
+    named_now(ix, r + 1u);
+    *rid = r + 1u;
+    return MOY_INDEX_OK;
+}
+
+int moy_index_root_path(const moy_index_t *ix, uint32_t rid, const char **path,
+                        size_t *len) {
+    if (rid == 0u || rid > MOY_INDEX_ROOTS || ix->roots[rid - 1u].path == NULL) {
+        return MOY_INDEX_STALE;
+    }
+    *path = ix->roots[rid - 1u].path;
+    *len = ix->roots[rid - 1u].len;
+    return MOY_INDEX_OK;
 }

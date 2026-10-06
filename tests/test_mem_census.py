@@ -156,3 +156,14 @@ def test_referrers_walk_containers_out_to_the_owning_instance(monkeypatch):
 def test_referrers_is_absent_without_gc_refs(monkeypatch):
     monkeypatch.setattr(mc, "gc", types.SimpleNamespace())
     assert mc.referrers(1) is None
+
+
+def test_store_reads_the_native_index_and_none_without(monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "moy_index",
+                        types.SimpleNamespace(mem=lambda: (300, 500)))
+    monkeypatch.setitem(sys.modules, "moy_catalogue",
+                        types.SimpleNamespace(rows=lambda: 7))
+    assert mc.store() == {"rows": 7, "bytes": 300, "high": 500}
+    monkeypatch.setitem(sys.modules, "moy_index", types.SimpleNamespace())
+    assert mc.store() is None

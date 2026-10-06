@@ -27,6 +27,16 @@ The interface, which the native index exposes call for call:
   handles() -> [h]        every live row, in slot order
   count() -> int          how many rows are live
 
+  root(path) -> rid       the store root `path` names, 1 .. ROOTS, taken the
+                          first time: the lowest free slot, else the slot of
+                          the root named longest ago, whose rows go first
+  root_path(rid) -> str   the root's path, None for an id that names none
+  rows(rid) -> [h]        the live rows of root `rid`, in slot order
+
+A store key is its root's id as one character, then the cart's folder name
+(docs/kernel_store_2026-10.md section 4); the table compares keys as it would
+any string, and only the root calls read that first character.
+
 A handle that is not an int raises TypeError; an int that names no live row
 raises StaleHandle (a ValueError). No call does I/O: what a folder holds is the
 catalogue's business (runtime/moy_catalogue.py), and this table only names it.
@@ -35,6 +45,7 @@ catalogue's business (runtime/moy_catalogue.py), and this table only names it.
 SLOT_BITS = 12
 SLOTS = 1 << SLOT_BITS
 GEN_MAX = (1 << 18) - 1
+ROOTS = 8
 
 _SLOT_MASK = SLOTS - 1
 _ENOSPC = 28
@@ -54,6 +65,8 @@ class Index:
         self._gen = []
         self._slot = {}           # path -> slot, for the live rows
         self._free = 0            # free slots below len(_path)
+        self._roots = [None] * ROOTS  # a root's id - 1 -> its path
+        self._named = []          # root ids, the one named longest ago first
 
     def _check(self, h):
         """The slot `h` names, or StaleHandle."""
@@ -109,3 +122,32 @@ class Index:
 
     def count(self):
         return len(self._slot)
+
+    def root(self, path):
+        if path in self._roots:
+            rid = self._roots.index(path) + 1
+        else:
+            if None in self._roots:
+                rid = self._roots.index(None) + 1
+            else:
+                rid = self._named[0]
+                for h in self.rows(rid):
+                    self.release(h)
+            self._roots[rid - 1] = path
+        if rid in self._named:
+            self._named.remove(rid)
+        self._named.append(rid)
+        return rid
+
+    def root_path(self, rid):
+        if not isinstance(rid, int):
+            raise TypeError("store root id must be an int")
+        return self._roots[rid - 1] if 0 < rid <= ROOTS else None
+
+    def rows(self, rid):
+        if not isinstance(rid, int):
+            raise TypeError("store root id must be an int")
+        mark = chr(rid) if 0 < rid <= ROOTS else None
+        return [(self._gen[s] << SLOT_BITS) | s
+                for s in range(len(self._path))
+                if self._path[s] is not None and self._path[s][:1] == mark]

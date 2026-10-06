@@ -335,7 +335,9 @@ def _read_stamped(path):
         return None
     stamp = _parse_stamp(head)
     if stamp is None:
-        return head + rest
+        # An empty file is a backup the power cut before its stamp landed (FAT
+        # writes the entry first), never a legacy one worth publishing.
+        return (head + rest) or None
     if _fits(rest, stamp):
         return rest
     return None                       # torn: refuse it, never publish garbage
@@ -447,3 +449,35 @@ def _read_recover(path, at=None):
     _forget_bak(path)                 # someone else published here; the stamp is stale
     _unmark(path)
     return data
+
+
+# -- the native store (native/moy_store) ----------------------------------------
+#
+# Every image -- the boards, the browser, the desktop MicroPython -- links
+# `moy_store`, the same story in C over the VM's own FAT, littlefs or POSIX
+# instance, and every store read and write here goes through it. CPython (the
+# simulator, the tools, the tests) has no such module and keeps the twin above;
+# tests/test_moy_store.py holds the two to one answer.
+
+try:
+    import moy_store as _native
+except ImportError:
+    _native = None
+
+if _native is not None:
+    set_publish_root = _native.set_publish_root
+    _read = _native.read
+    _write = _native.write
+    _read_bytes = _native.read_bytes
+    _write_bytes = _native.write_bytes
+    _remove = _native.remove
+    _mkdir = _native.mkdir
+    _exists = _native.exists
+    _stamp_of = _native.stamp
+    _bak_stamp = _native.bak_stamp
+    _read_stamped = _native.read_stamped
+    _unmark = _native.unmark
+    _write_atomic = _native.publish
+    _forget_bak = _native.forget_bak
+    _claim_bak = _native.claim
+    _read_recover = _native.read_recover

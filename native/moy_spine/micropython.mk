@@ -1,10 +1,11 @@
 # moy_spine for the unix and webassembly ports: the twin of micropython.cmake,
 # reading the same MOY_SPINE_IMPL and MOY_INDEX_IMPL (environment or
-# command-line variables). moy_htab.c is built when either takes a native twin.
+# command-line variables). moy_htab.c is built when either takes a native twin,
+# the index's by default (MOY_INDEX_IMPL unset).
 
 MOY_SPINE_DIR := $(USERMOD_DIR)
 
-ifneq ($(filter c,$(MOY_SPINE_IMPL) $(MOY_INDEX_IMPL)),)
+ifneq ($(filter c,$(MOY_SPINE_IMPL) $(or $(MOY_INDEX_IMPL),c)),)
 SRC_USERMOD_LIB_C += $(MOY_SPINE_DIR)/moy_htab.c
 CFLAGS_USERMOD += -I$(MOY_SPINE_DIR)
 endif

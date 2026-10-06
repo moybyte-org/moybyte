@@ -1,9 +1,12 @@
-# moy_index: the store's index, native (moy_index.h). Compiled in only when a
-# build takes a twin -- MOY_INDEX_IMPL, which tools/moy_index_spike.py's header
-# describes; with it unset or `py` the image keeps runtime/moy_index.py and
-# nothing here is built. THIS FILE AND micropython.mk ARE TWINS.
+# moy_index: the store's index, native (moy_index.h). Every image that takes
+# the module builds it; MOY_INDEX_IMPL=py (tools/moy_index_spike.py's header)
+# builds nothing here and freezes runtime/moy_index.py instead. THIS FILE AND
+# micropython.mk ARE TWINS.
 
 set(MOY_INDEX_IMPL "$ENV{MOY_INDEX_IMPL}")
+if(MOY_INDEX_IMPL STREQUAL "")
+    set(MOY_INDEX_IMPL "c")
+endif()
 if(MOY_INDEX_IMPL STREQUAL "c")
     add_library(usermod_moy_index INTERFACE)
     target_sources(usermod_moy_index INTERFACE
@@ -19,6 +22,6 @@ if(MOY_INDEX_IMPL STREQUAL "c")
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/../moy_spine)
     target_link_libraries(usermod INTERFACE usermod_moy_index)
-elseif(NOT MOY_INDEX_IMPL STREQUAL "" AND NOT MOY_INDEX_IMPL STREQUAL "py")
+elseif(NOT MOY_INDEX_IMPL STREQUAL "py")
     message(FATAL_ERROR "MOY_INDEX_IMPL is py or c, not '${MOY_INDEX_IMPL}'")
 endif()

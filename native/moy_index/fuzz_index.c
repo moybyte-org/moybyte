@@ -72,11 +72,17 @@ static uint32_t stale[STALE_RING];
 static uint32_t stale_at, serial;
 static int16_t m_head[1024];        // live rows chained by a hash of the path
 static int16_t m_next[SLOTS];
+static uint8_t m_rlive[MOY_INDEX_ROOTS];
+static uint8_t m_rlen[MOY_INDEX_ROOTS];
+static char m_rpath[MOY_INDEX_ROOTS][MAXP];
+static uint8_t m_order[MOY_INDEX_ROOTS];   // root ids, the oldest named first
+static uint32_t m_named;
 
 static void m_reset(void) {
     memset(m_live, 0, sizeof m_live);
     memset(m_head, 0xff, sizeof m_head);
-    m_used = m_count = 0;
+    memset(m_rlive, 0, sizeof m_rlive);
+    m_used = m_count = m_named = 0;
 }
 
 static int16_t *m_chain(const char *p, size_t n) {
@@ -120,7 +126,21 @@ static void verify_row(const moy_index_t *ix, uint32_t s) {
     CHECK(moy_index_valid(ix, h));
 }
 
+static void verify_roots(const moy_index_t *ix) {
+    for (uint32_t r = 0; r <= MOY_INDEX_ROOTS + 1u; r++) {
+        const char *p;
+        size_t n;
+        int live = r >= 1u && r <= MOY_INDEX_ROOTS && m_rlive[r - 1u];
+        int rc = moy_index_root_path(ix, r, &p, &n);
+        CHECK(rc == (live ? MOY_INDEX_OK : MOY_INDEX_STALE));
+        if (live) {
+            CHECK(n == m_rlen[r - 1u] && memcmp(p, m_rpath[r - 1u], n) == 0);
+        }
+    }
+}
+
 static void verify(const moy_index_t *ix) {
+    verify_roots(ix);
     CHECK(moy_index_count(ix) == m_count);
     CHECK(moy_index_slots(ix) == m_used);
     for (uint32_t s = 0; s < m_used; s++) {
@@ -233,6 +253,68 @@ static void release(moy_index_t *ix, uint32_t h) {
     verify_row(ix, s);
 }
 
+// The model's side of a release the implementation made itself.
+static void m_drop(uint32_t s) {
+    int16_t *link = m_chain(m_path[s], m_len[s]);
+    while (*link != (int16_t)s) {
+        link = &m_next[*link];
+    }
+    *link = m_next[s];
+    m_live[s] = 0u;
+    stale[stale_at++ % STALE_RING] = m_handle(s);
+    m_gen[s] = m_gen[s] >= MOY_INDEX_GEN_MAX ? 1u : m_gen[s] + 1u;
+    m_count--;
+}
+
+static void root(moy_index_t *ix, const char *p, size_t n) {
+    uint32_t r, free_r = MOY_INDEX_ROOTS;
+    for (r = 0; r < MOY_INDEX_ROOTS; r++) {
+        if (!m_rlive[r]) {
+            if (free_r == MOY_INDEX_ROOTS) {
+                free_r = r;
+            }
+        } else if (m_rlen[r] == n && memcmp(m_rpath[r], p, n) == 0) {
+            break;
+        }
+    }
+    uint32_t rid = 0;
+    failed = 0;
+    int rc = moy_index_root(ix, p, n, &rid);
+    if (r == MOY_INDEX_ROOTS && rc == MOY_INDEX_NOMEM) {
+        CHECK(failed);
+        verify(ix);
+        return;
+    }
+    CHECK(rc == MOY_INDEX_OK);
+    if (r == MOY_INDEX_ROOTS) {
+        r = free_r;
+        if (r == MOY_INDEX_ROOTS) {
+            r = m_order[0] - 1u;
+            for (uint32_t s = 0; s < m_used; s++) {
+                if (m_live[s] && m_len[s] && (uint8_t)m_path[s][0] == r + 1u) {
+                    m_drop(s);
+                }
+            }
+        }
+        m_rlive[r] = 1u;
+        m_rlen[r] = (uint8_t)n;
+        memcpy(m_rpath[r], p, n);
+    }
+    CHECK(rid == r + 1u);
+    uint32_t k = 0;
+    while (k < m_named && m_order[k] != rid) {
+        k++;
+    }
+    if (k == m_named) {
+        m_named++;
+    }
+    for (; k + 1u < m_named; k++) {
+        m_order[k] = m_order[k + 1u];
+    }
+    m_order[m_named - 1u] = (uint8_t)rid;
+    verify(ix);
+}
+
 static void run(const uint8_t *data, size_t size) {
     m_reset();
     stale_at = serial = 0;
@@ -247,7 +329,7 @@ static void run(const uint8_t *data, size_t size) {
         char p[MAXP];
         size_t n;
         uint32_t h;
-        uint8_t op = next(&in) % 10u;
+        uint8_t op = next(&in) % 11u;
         switch (op) {
             case 0:
                 n = path_of(&in, p);
@@ -308,6 +390,10 @@ static void run(const uint8_t *data, size_t size) {
                         CHECK(at >= 0);
                     }
                 }
+                break;
+            case 9:                         // a root, mostly one of a few
+                n = path_of(&in, p) % 3u;
+                root(ix, p, n);
                 break;
             default:                        // a new table; the old one freed
                 verify(ix);

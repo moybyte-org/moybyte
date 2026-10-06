@@ -1,16 +1,18 @@
 // moy_index's MicroPython binding: the native index (moy_index.h) as the
 // module runtime/moy_index.py is, name for name -- Index, StaleHandle,
-// SLOT_BITS, SLOTS, GEN_MAX. The same binding serves either twin; which one
-// links under it is the build's MOY_INDEX_IMPL (tools/moy_index_spike.py).
+// SLOT_BITS, SLOTS, GEN_MAX, ROOTS -- and mem(), the bytes the index holds now
+// and at its high water, which the census reads. Every image builds it unless
+// its MOY_INDEX_IMPL is `py` (tools/moy_index_spike.py).
 //
 // It registers EXTENSIBLE, so a moy_index.py on the import path wins over it.
-// A build that takes a twin stages no such file (tools/board_config.py), and
-// the desktop MicroPython's suites reach this one by importing it with the
-// path emptied (tests/test_moy_index_twins.py).
+// An image that takes it stages no such file (tools/board_config.py), and the
+// desktop MicroPython's suites reach this one by importing it with the path
+// emptied (tests/test_moy_index_twins.py).
 //
 // A path is a str; a handle is an int, and one outside 1 .. 2**30 - 1 names
-// no row. The table's memory is the gc heap's: every block hangs off the
-// Index object, so the collector keeps it while the object lives.
+// no row. The table's memory is PSRAM on a board (docs/kernel_store_2026-10.md
+// section 9), malloc elsewhere, and none of it is the gc heap's: an Index frees
+// its table in __del__.
 
 #include <string.h>
 
@@ -19,19 +21,49 @@
 #include "py/objstr.h"
 #include "py/runtime.h"
 
+// ESP_PLATFORM is not defined for a usermod's sources in every build, so the
+// board is told by its header, as native/moy_alloc's siblings tell it.
+#if __has_include("esp_heap_caps.h")
+#define MOY_INDEX_PSRAM 1
+#include "esp_heap_caps.h"
+#else
+#define MOY_INDEX_PSRAM 0
+#include <stdlib.h>
+#endif
+
 #include "moy_index.h"
 
+static size_t mem_now, mem_high;
+
+// PSRAM, zeroed. A board with no PSRAM at all takes the default heap; one whose
+// PSRAM is merely full refuses, rather than spend internal SRAM.
 void *moy_index_host_alloc(size_t n) {
-    void *p = m_malloc_maybe(n ? n : 1);
+    n = n ? n : 1u;
+    #if MOY_INDEX_PSRAM
+    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
+        p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
+    }
+    #else
+    void *p = calloc(1, n);
+    #endif
     if (p != NULL) {
-        memset(p, 0, n);
+        mem_now += n;
+        if (mem_now > mem_high) {
+            mem_high = mem_now;
+        }
     }
     return p;
 }
 
 void moy_index_host_free(void *p, size_t n) {
     if (p != NULL) {
-        m_del(uint8_t, p, n ? n : 1);
+        mem_now -= n ? n : 1u;
+        #if MOY_INDEX_PSRAM
+        heap_caps_free(p);
+        #else
+        free(p);
+        #endif
     }
 }
 
@@ -45,7 +77,11 @@ typedef struct {
 static const mp_obj_type_t index_type;
 
 static moy_index_t *ix_of(mp_obj_t self) {
-    return ((index_obj_t *)MP_OBJ_TO_PTR(self))->ix;
+    moy_index_t *ix = ((index_obj_t *)MP_OBJ_TO_PTR(self))->ix;
+    if (ix == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("store index freed"));
+    }
+    return ix;
 }
 
 static MP_NORETURN void raise_rc(int rc) {
@@ -104,7 +140,7 @@ moy_index_t *moy_index_of(mp_obj_t index) {
 static mp_obj_t index_make_new(const mp_obj_type_t *type, size_t n_args,
                                size_t n_kw, const mp_obj_t *args) {
     mp_arg_check_num(n_args, n_kw, 0, 0, false);
-    index_obj_t *o = mp_obj_malloc(index_obj_t, type);
+    index_obj_t *o = mp_obj_malloc_with_finaliser(index_obj_t, type);
     o->ix = moy_index_new();
     if (o->ix == NULL) {
         raise_rc(MOY_INDEX_NOMEM);
@@ -178,6 +214,71 @@ static mp_obj_t index_count(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(index_count_obj, index_count);
 
+static uint32_t rid_arg(mp_obj_t rid) {
+    uint32_t v;
+    if (!handle_of(rid, &v)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("store root id must be an int"));
+    }
+    return v;
+}
+
+static mp_obj_t index_root(mp_obj_t self, mp_obj_t path) {
+    size_t len;
+    const char *p = path_arg(path, &len);
+    uint32_t rid;
+    int rc = moy_index_root(ix_of(self), p, len, &rid);
+    if (rc != MOY_INDEX_OK) {
+        raise_rc(rc);
+    }
+    return MP_OBJ_NEW_SMALL_INT(rid);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(index_root_obj, index_root);
+
+static mp_obj_t index_root_path(mp_obj_t self, mp_obj_t rid) {
+    const char *p;
+    size_t len;
+    if (moy_index_root_path(ix_of(self), rid_arg(rid), &p, &len) != MOY_INDEX_OK) {
+        return mp_const_none;
+    }
+    return mp_obj_new_str_copy(&mp_type_str, (const byte *)p, len);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(index_root_path_obj, index_root_path);
+
+static mp_obj_t index_rows(mp_obj_t self, mp_obj_t rid) {
+    moy_index_t *ix = ix_of(self);
+    uint32_t r = rid_arg(rid);
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    if (r == 0u || r > MOY_INDEX_ROOTS) {
+        return out;
+    }
+    for (uint32_t s = 0, n = moy_index_slots(ix); s < n; s++) {
+        uint32_t h = moy_index_at(ix, s);
+        const char *p;
+        size_t len;
+        if (h && moy_index_path(ix, h, &p, &len) == MOY_INDEX_OK && len
+            && (uint8_t)p[0] == r) {
+            mp_obj_list_append(out, MP_OBJ_NEW_SMALL_INT(h));
+        }
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(index_rows_obj, index_rows);
+
+static mp_obj_t index_del(mp_obj_t self) {
+    index_obj_t *o = MP_OBJ_TO_PTR(self);
+    moy_index_free(o->ix);
+    o->ix = NULL;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(index_del_obj, index_del);
+
+static mp_obj_t mod_mem(void) {
+    mp_obj_t t[2] = { mp_obj_new_int_from_uint(mem_now),
+                      mp_obj_new_int_from_uint(mem_high) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_mem_obj, mod_mem);
+
 
 static const mp_rom_map_elem_t index_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_intern), MP_ROM_PTR(&index_intern_obj) },
@@ -187,6 +288,10 @@ static const mp_rom_map_elem_t index_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_release), MP_ROM_PTR(&index_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_handles), MP_ROM_PTR(&index_handles_obj) },
     { MP_ROM_QSTR(MP_QSTR_count), MP_ROM_PTR(&index_count_obj) },
+    { MP_ROM_QSTR(MP_QSTR_root), MP_ROM_PTR(&index_root_obj) },
+    { MP_ROM_QSTR(MP_QSTR_root_path), MP_ROM_PTR(&index_root_path_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rows), MP_ROM_PTR(&index_rows_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&index_del_obj) },
 };
 static MP_DEFINE_CONST_DICT(index_locals, index_locals_table);
 
@@ -203,6 +308,8 @@ static const mp_rom_map_elem_t moy_index_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_SLOT_BITS), MP_ROM_INT(MOY_INDEX_SLOT_BITS) },
     { MP_ROM_QSTR(MP_QSTR_SLOTS), MP_ROM_INT(MOY_INDEX_SLOTS) },
     { MP_ROM_QSTR(MP_QSTR_GEN_MAX), MP_ROM_INT(MOY_INDEX_GEN_MAX) },
+    { MP_ROM_QSTR(MP_QSTR_ROOTS), MP_ROM_INT(MOY_INDEX_ROOTS) },
+    { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mod_mem_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_index_globals, moy_index_globals_table);
 

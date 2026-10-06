@@ -184,12 +184,16 @@ PYEOF
   cp -r "${REPO_ROOT}/native/moy_png" \
         "${USERMODS_DIR}/moy_png"
 
-  # moy_index usermod: the store's native index. Its fragment compiles the C
-  # twin only when MOY_INDEX_IMPL names it (tools/moy_index_spike.py's header), and
-  # board_config's stage below then leaves runtime/moy_index.py out; unset, it
-  # adds nothing.
+  # moy_index usermod: the store's native index. Its fragment compiles it unless
+  # MOY_INDEX_IMPL=py (tools/moy_index_spike.py's header), and board_config's
+  # stage below then leaves runtime/moy_index.py out.
   cp -r "${REPO_ROOT}/native/moy_index" \
         "${USERMODS_DIR}/moy_index"
+
+  # moy_store usermod: the store's volume seam and crash-safe write, native;
+  # its volume here is POSIX on the worker's MEMFS, the tree VfsPosix shows.
+  cp -r "${REPO_ROOT}/native/moy_store" \
+        "${USERMODS_DIR}/moy_store"
 
   # moy_spine usermod: the kernel's spine, native, and the handle table
   # moy_index shares (so it stages beside it). Its fragment compiles the C twin
@@ -403,7 +407,7 @@ EOF
   # (MOY_INDEX_IMPL or MOY_SPINE_IMPL back to py) would link a module table naming code it no
   # longer has. A changed hook starts the generated headers afresh.
   INDEX_STAMP="${PORT_DIR}/build-moybyte/moy_index_impl"
-  INDEX_HOOK="${MOY_INDEX_IMPL:-py}${MOY_INDEX_BENCH:++bench}"
+  INDEX_HOOK="${MOY_INDEX_IMPL:-c}${MOY_INDEX_BENCH:++bench}"
   SPINE_STAMP="${PORT_DIR}/build-moybyte/moy_spine_impl"
   SPINE_HOOK="${MOY_SPINE_IMPL:-py}"
   if [ "$(cat "${INDEX_STAMP}" 2>/dev/null || echo py)" != "${INDEX_HOOK}" ] \

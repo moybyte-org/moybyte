@@ -184,10 +184,25 @@ def growths():
     return fn() if fn is not None else None
 
 
+def store():
+    """The store's resident native memory (docs/kernel_store_2026-10.md
+    section 9): the index's rows, and the bytes it holds now and at its high
+    water; None where the index is the Python one."""
+    mi = sys.modules.get("moy_index")
+    mem = getattr(mi, "mem", None)
+    if mem is None:
+        return None
+    now, high = mem()
+    cat = sys.modules.get("moy_catalogue")
+    return {"rows": cat.rows() if cat is not None else None,
+            "bytes": now, "high": high}
+
+
 def snap():
     """The heap figures now: ticks_ms, (areas, held) and allocated read BEFORE
     the collect, live and each area's occupancy after it, the area events,
-    every heap_caps set, the registry and the collector's pauses."""
+    every heap_caps set, the registry, the collector's pauses and the store's
+    native memory."""
     t = ticks_ms()
     n, held = _areas()
     alloc = gc.mem_alloc()
@@ -198,7 +213,8 @@ def snap():
             "area_map": _area_map(), "growths": growths(),
             "psram": caps(_PSRAM), "sram": caps(_SRAM), "dma": caps(_DMA),
             "registry": _registry(),
-            "pauses": pauses() if pauses is not None else None}
+            "pauses": pauses() if pauses is not None else None,
+            "store": store()}
 
 
 # -- off-heap by owner -----------------------------------------------------

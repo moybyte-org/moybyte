@@ -45,21 +45,24 @@ browser console built as the default (`py`) and each board's image as the twin.
 
 THE HOOK. MOY_INDEX_IMPL picks the store index a build compiles in:
 
-    py    the default: runtime/moy_index.py, frozen; no native index at all
-    c     native/moy_index/moy_index.c under modmoy_index.c, and
+    c     the default: native/moy_index/moy_index.c under modmoy_index.c, and
           runtime/moy_index.py left out of the frozen set, so the extensible
-          builtin answers `import moy_index`
+          builtin answers `import moy_index` on every image that takes the
+          module (the boards, the browser)
+    py    runtime/moy_index.py, frozen; no native index at all
 
 native/moy_index/micropython.cmake (the boards) and micropython.mk (the
 desktop MicroPython, the browser) read it, tools/board_config.py drops the
 Python twin from a twin's frozen set, and `make unix-micropython` builds the
 twin its UNIX_MP_INDEX names (default `c`).
 
-MOY_SPINE_IMPL is the spine's hook, the same shape: `py` keeps
-runtime/moy_spine.py frozen, `c` builds native/moy_spine (modmoy_spine.c over
+MOY_SPINE_IMPL is the spine's hook, the same shape with `py` its default:
+`py` keeps runtime/moy_spine.py frozen, `c` builds native/moy_spine (modmoy_spine.c over
 moy_route.c and moy_settings.c) and leaves the Python file out, and UNIX_MP_SPINE
 (default `c`) is `make unix-micropython`'s. moy_htab.c, the handle table both
 components take their slots from, is built when either hook is `c`.
+runtime/moy_index.py stays the host's: CPython's simulator, tools and tests
+import it, and it is the reference every binding is pinned against.
 
 MOY_INDEX_BENCH=1 adds the `moy_index_bench` module (bench_moy_index.c) to a
 twin build, for `bench`; no image the size table measures carries it. Each
@@ -120,9 +123,11 @@ class Component:
     binding loads and the fuzz driver's sources."""
 
     def __init__(self, name, dirs, shim, names, fuzz, objects, tests, trace,
-                 stamp):
+                 stamp, default, cflags=()):
         self.name = name
         self.env = "MOY_%s_IMPL" % name.upper()     # the hook
+        self.default = default      # what a build takes with the hook unset
+        self.cflags = list(cflags)  # what its fuzz driver builds with, beyond these
         self.dirs = dirs            # source dirs, the component's own first
         self.shim = shim            # the host's allocator imports
         self.names = names          # what the host library compiles
@@ -141,8 +146,9 @@ INDEX = Component(
     ["moy_index.h", "moy_index.c", "moy_htab.h", "moy_htab.c"],
     ("fuzz_index.c", ["moy_index.c", "moy_htab.c"]),
     r"\((mod)?moy_index\.c\.obj\)$|/(mod)?moy_index\.c\.obj$",
-    ["tests/test_moy_index.py", "tests/test_moy_index_twins.py"],
-    "index or store", "")
+    ["tests/test_moy_index.py", "tests/test_moy_index_twins.py",
+     "tests/test_store_roots.py"],
+    "index or store", "", "c")
 SPINE = Component(
     "spine", [NATIVE_SPINE], "moy_spine_host.c",
     ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
@@ -151,12 +157,29 @@ SPINE = Component(
     r"\((mod)?moy_(spine|route|settings|htab)\.c\.obj\)$"
     r"|/(mod)?moy_(spine|route|settings|htab)\.c\.obj$",
     ["tests/test_moy_spine.py", "tests/test_moy_spine_twins.py"],
-    "spine", "spine-")
-COMPONENTS = {"index": INDEX, "spine": SPINE}
+    "spine", "spine-", "py")
+# The store's volume seam and crash-safe write (native/moy_store). It has no
+# twin hook -- every image links it -- so `py` names nothing here; its fuzz
+# driver is the power-cut matrix's, over the oofatfs and littlefs2 sources of
+# the desktop MicroPython's tree (`make unix-micropython`).
+MPY = os.path.join(ROOT, ".build", "unix_micropython", "micropython")
+NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
+FS = Component(
+    "fs", [NATIVE_STORE, os.path.join(NATIVE_STORE, "host"), MPY,
+           os.path.join(MPY, "lib", "oofatfs"), os.path.join(MPY, "lib", "littlefs")],
+    "moy_store_host.c", ["moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c"],
+    ("fuzz_fs.c", ["moy_vol.c", "moy_fs.c", "ff.c", "ffunicode.c", "lfs2.c",
+                   "lfs2_util.c"]),
+    r"\((mod)?moy_(store|vol|fs)\.c\.obj\)$|/(mod)?moy_(store|vol|fs)\.c\.obj$",
+    ["tests/test_moy_store.py"], "store", "fs-", "c",
+    cflags=['-DFFCONF_H="lib/oofatfs/ffconf.h"', "-DMOY_VOL_FAT=1",
+            "-DMOY_VOL_LFS2=1", "-DLFS2_NO_MALLOC", "-DLFS2_NO_DEBUG",
+            "-DLFS2_NO_WARN", "-DLFS2_NO_ERROR", "-DLFS2_NO_ASSERT"])
+COMPONENTS = {"index": INDEX, "spine": SPINE, "fs": FS}
 
 
 def impl_of(arg=None, comp=INDEX):
-    v = arg or os.environ.get(comp.env) or "py"
+    v = arg or os.environ.get(comp.env) or comp.default
     if v not in IMPLS:
         raise SystemExit("%s is py or c, not %r" % (comp.env, v))
     return v
@@ -207,6 +230,11 @@ _SIGS = (
     ("moy_index_count", [ctypes.c_void_p], ctypes.c_uint32),
     ("moy_index_slots", [ctypes.c_void_p], ctypes.c_uint32),
     ("moy_index_at", [ctypes.c_void_p, ctypes.c_uint32], ctypes.c_uint32),
+    ("moy_index_root", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_uint32)], ctypes.c_int),
+    ("moy_index_root_path", [ctypes.c_void_p, ctypes.c_uint32,
+                             ctypes.POINTER(ctypes.c_void_p),
+                             ctypes.POINTER(ctypes.c_size_t)], ctypes.c_int),
 )
 
 
@@ -289,6 +317,25 @@ def binding(impl="c", sanitize=False):
         def count(self):
             return lib.moy_index_count(self._ix)
 
+        def root(self, path):
+            b, rid = raw(path), ctypes.c_uint32()
+            ok(lib.moy_index_root(self._ix, b, len(b), ctypes.byref(rid)))
+            return rid.value
+
+        def root_path(self, rid):
+            p, n = ctypes.c_void_p(), ctypes.c_size_t()
+            if lib.moy_index_root_path(self._ix, handle(rid), ctypes.byref(p),
+                                       ctypes.byref(n)):
+                return None
+            return ctypes.string_at(p.value, n.value).decode(
+                "utf-8", "surrogateescape")
+
+        def rows(self, rid):
+            r = handle(rid)
+            if not 0 < r <= ref.ROOTS:
+                return []
+            return [h for h in self.handles() if self.path(h)[:1] == chr(r)]
+
     Index.__name__ = Index.__qualname__ = "Index_%s" % impl
     return Index
 
@@ -343,6 +390,7 @@ def fuzz_binary(impl="c", libfuzzer=False, comp=INDEX):
         flags = SANITIZE + ["-DMOY_%s_FUZZ_MAIN" % comp.name.upper()]
         if not cc or not _cc_works(cc, SANITIZE, comp.cache):
             return None
+    flags = flags + comp.cflags
     h = hashlib.sha256(" ".join([cc] + flags).encode())
     for path in srcs + sorted(os.path.join(d, f) for d in comp.dirs
                               for f in os.listdir(d) if f.endswith(".h")):
@@ -375,6 +423,19 @@ def fuzz_seeded(impl="c", seed=1, runs=300, comp=INDEX):
     t = time.time()
     out = subprocess.run([exe, str(seed), str(runs)], capture_output=True,
                          text=True)
+    return out.returncode == 0, time.time() - t, (out.stdout + out.stderr)
+
+
+def fuzz_matrix(comp):
+    """The power-cut matrix (fuzz_fs --matrix): (ok, seconds, output); None
+    with no toolchain or no MicroPython tree to take the file systems from."""
+    if not os.path.isdir(os.path.join(MPY, "lib", "oofatfs")):
+        return None
+    exe = fuzz_binary("c", comp=comp)
+    if exe is None:
+        return None
+    t = time.time()
+    out = subprocess.run([exe, "--matrix"], capture_output=True, text=True)
     return out.returncode == 0, time.time() - t, (out.stdout + out.stderr)
 
 
@@ -490,6 +551,12 @@ def cmd_sanitize(a):
         "ok": got[0], "seconds": round(got[1], 1), "runs": a.runs,
         "seed": a.seed, "out": got[2].strip().splitlines()[-3:]}
     print("seeded fuzz, ASan+UBSan: %s" % (res["seeded"] or "no toolchain"))
+    if comp is FS:
+        got = fuzz_matrix(comp)
+        res["matrix"] = None if got is None else {
+            "ok": got[0], "seconds": round(got[1], 1),
+            "out": got[2].strip().splitlines()[-3:]}
+        print("power-cut matrix, ASan+UBSan: %s" % (res["matrix"] or "no toolchain"))
     if a.seconds:
         lf = fuzz_libfuzzer(impl, a.seconds, comp)
         res["libfuzzer"] = lf
@@ -499,7 +566,8 @@ def cmd_sanitize(a):
             "%(features)s, corpus %(corpus)s" % lf))
     save("sanitize-%s%s.json" % (comp.stamp, impl), res)
     bad = (res["suite"] and res["suite"]["rc"]) or not (res["seeded"] or {}).get("ok") \
-        or (res.get("libfuzzer") and not res["libfuzzer"]["ok"])
+        or (res.get("libfuzzer") and not res["libfuzzer"]["ok"]) \
+        or (res.get("matrix") is not None and not res["matrix"]["ok"])
     return 1 if bad else 0
 
 
