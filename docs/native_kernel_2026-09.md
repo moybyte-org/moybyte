@@ -5,7 +5,8 @@ first deliverable. Rev 1 went through the adversarial architecture and
 performance/hardware passes the same day (verdicts: **REWORK** / **PERF CASE
 STANDS WITH FIXES**); every finding is folded into this revision, and **§12 is
 the finding-by-finding ledger**. **Accepted by the owner 2026-10-05**; the
-sprints of §6 run in order, and where each one stands is #224's. Sprint 0's
+sprints of §6 run in the order §6 gives (owner, 2026-10-06), and where each one
+stands is #224's. The kernel's language is C (owner, 2026-10-06, §5). Sprint 0's
 findings are folded in (2026-10-05): §1 and §11 say what its census found, and
 §6.1 holds the values its gate set. It reverses a
 standing sentence — "MicroPython is the shell" (`docs/moycore_direction.md` §1)
@@ -28,8 +29,7 @@ table sit the kernel, the loop, the Player, the store, the drivers, the window
 managers, the toolkit and everything else the console needs while no Python app
 runs. Above it sit apps and carts, in Python, Lua or wasm. Our own shipped apps
 — the launcher, Settings, Files, Paint, the editors — stay Python apps on that
-table (§3). The kernel's language is decided by a spike: Rust if it passes, C if
-it does not (§5).
+table (§3). The kernel is written in C (§5).
 
 **What it buys.** A VM that runs only while a Python app or cart does, so every
 app starts on a clean heap and stopping it hands every grown area back (SOURCE,
@@ -364,7 +364,7 @@ console needs while no Python app runs is OS.
 | `runtime/moy_files.py` | store | 1b | the user-files layer under the Files app and role; the Zero takes it |
 | `runtime/moy_fs.py` | store | 1b | the crash-safe write primitive every store module stands on, so it goes first; the Zero takes it |
 | `runtime/moy_image.py` | split | 4 + 5 | `Image`, the `image` verb's object and a kernel handle (§2.3) → 4; the wallpaper-preview sidecar → 5; the codec is `runtime/moyimg.py` |
-| `runtime/moy_index.py` | store | 1a | the store's index: a row per cart folder named by a handle, slot and generation, checked on every use; no I/O. The component sprint 1a writes in Rust and in C (§6) |
+| `runtime/moy_index.py` | store | 1a | the store's index: a row per cart folder named by a handle, slot and generation, checked on every use; no I/O. Sprint 1a's language spike (§5, §6) wrote it as a C twin, `native/moy_index/moy_index.c` |
 | `runtime/moy_journal.py` | store | 1b | the undo journal, named under storage in §2.2; the Zero takes it |
 | `runtime/moy_qr.py` | radios and links | open | the pairing QR encoder for the web-console screen; follows `runtime/web_console_ui.py` |
 | `runtime/moy_seed.py` | store | 1b | seeding and the sweep of retired seeds; the Zero takes it |
@@ -505,27 +505,23 @@ native recovery screen is sprint 2's.
 
 ### 4.1 Three layers, two boundaries
 
-    hardware drivers (C, ESP-IDF)  ←→  the kernel (Rust or C)  ←→  libmoy, moycore, WAMR (C)
+    hardware drivers (C, ESP-IDF)  ←→  the kernel (C)  ←→  libmoy, moycore, WAMR (C)
                                               ↑
                               app runtimes: MicroPython, Lua, wasm
 
-C drivers and vendored code stay C whatever the kernel's language. The repo's
-Python drivers (touch, the BLE keyboard, audio) become kernel code (§2.2).
+The drivers, the vendored code and the kernel are one language, so a boundary
+between layers is a plain C call, with nothing to marshal. The repo's Python drivers (touch,
+the BLE keyboard, audio) become kernel code (§2.2).
 
-**What the boundaries cost.** A Rust↔C call is a plain call under the C ABI: no
-marshalling for `repr(C)` data, the cost of a C call across translation units.
-Lost: inlining across the boundary, since ESP-IDF builds C with GCC and Rust uses
-LLVM. The rule that makes that harmless is libmoy's — **a hot loop lives on one
-side**: the kernel calls a C kernel per rect, sprite or band. Risks the spike
-measures rather than assumes (§5):
+**What the boundaries cost.** A call between layers costs a C call across
+translation units. The rule that keeps it cheap is libmoy's — **a hot loop lives
+on one side**: the kernel calls a C kernel per rect, sprite or band. Two costs
+to design for:
 
-- **Misaligned access on Xtensa (MEASURED, #158):** Espressif's LLVM Xtensa
-  backend — Rust's backend on the S3 — split accesses of unknown alignment into
-  byte loads, roughly doubling Jet's raster time until fixed for the wasm
-  compilers. A store parser reading `u32`s out of byte buffers is that pattern.
-- **Placement:** Rust code lands in flash, where Lua's interpreter hot path is
-  placed in IRAM by `MOY_HOT` (`native/moy_lua/lua/luaconf.h`); kernel code
-  competes with frozen bytecode and the Lua VM for the S3's instruction cache.
+- **Placement:** kernel code lands in flash by default, where Lua's interpreter
+  hot path is placed in IRAM by `MOY_HOT` (`native/moy_lua/lua/luaconf.h`);
+  kernel code competes with frozen bytecode and the Lua VM for the S3's
+  instruction cache.
 - **Allocation:** through `heap_caps`, so kernel data lands in the RAM chosen
   for it (§4.6).
 
@@ -703,53 +699,63 @@ below it at a measured cost (`native/moycore/modmoycore.c`). So:
 
 ## 5. The kernel's language
 
-**#224 chose C on 2026-09-26. This doc reopens it for a spike**, because the
-kernel's scope changed: #224's reason that "most kernel code is glue to C" held
-for a thin layer, and §2.2 is tens of thousands of lines of logic and
-concurrency.
+**The kernel is written in C (owner, 2026-10-06, #224).** #224 chose C on
+2026-09-26; rev 1 of this doc reopened it for a spike, because the kernel's
+scope had grown from a thin layer to tens of thousands of lines of logic and
+concurrency (§2.2). Sprint 1a ran the spike on the store's index, written in both
+languages and measured on every target. The evidence is #224's: the C twin
+(comment 6005099497), the Rust probe (6003372477) and the side-by-side
+(6007533482). The reasons:
 
-**For Rust** (research, 2026-09-27): safe Rust rules out use-after-free, buffer
-overflows, null dereferences and data races by construction on every path,
-where sanitizers and fuzzing find them on the paths tests run. Google's Android
-report (2025) puts Rust's memory-safety bug density about 1000× below its C and
-C++, with 4× fewer rollbacks and 25% less review time. The kernel is concurrent
-across cores (`native/moy_flush/moy_flush.c`: "every clause was a race once"),
-the import-shaped ABI concentrates `unsafe` at a thin boundary, and most of this
-repo's code is written by agents.
+- **The S3 needs a forked compiler.** On Xtensa, Rust builds only with
+  Espressif's forked nightly. That compiler cannot use the S3's zero-overhead
+  loop, so the hot path (`intern`) ran slower than C's, and forcing the loop
+  crashes the fork.
+- **Rust's bundled runtime shadows the board's C library without a word.** The
+  `compiler_builtins` and compiler-rt in a Rust static library define the names
+  of libc and libm, and the link takes them silently. On the P4 they fail to link
+  at all, on the float ABI.
+- **Rust doubled the code size of a small component.**
+- **The kernel is mostly glue to C** (ESP-IDF, libmoy, MicroPython, WAMR), so
+  the logic Rust would make safe is the smaller part of it.
 
-**Against, or not bought:** a panic still takes the board down; logic bugs,
-deadlocks and stack overflows remain; `unsafe` can still corrupt memory (the
-Linux kernel's first Rust CVE, 2025, was a race in an `unsafe` list operation).
-The S3's Xtensa needs Espressif's forked rustc and LLVM (`espup`); upstream LLVM's
-Xtensa backend is experimental and Rust does not target it. Rust in an ESP-IDF
-CMake build as a static library is documented; in a MicroPython usermod there is
-no prior art. The browser is the known risk: `wasm32-unknown-emscripten` links
-through emcc, and matching rustc to emscripten is fragile where the web runner
-(`EMSDK_VERSION` in its build.sh) and moy-spec's preflight pin emscripten for
-reproducibility. Two languages in the tree.
+The P4's RISC-V side worked with upstream Rust; the S3 is where it did not.
 
-**Sprint 1a is the spike, on the smallest store component, and its gate is the
-decision.** The component is one the 1b carve has already given its native
-interface (§6). Written in Rust and in C, it must:
+**What C gives up.** Safe Rust rules out use-after-free, buffer overflows, null
+dereferences and data races by construction on every path, where sanitizers and
+fuzzing find them on the paths tests run; Google's Android report (2025) puts
+Rust's memory-safety bug density about 1000× below C and C++'s. The kernel is
+concurrent across cores (`native/moy_flush/moy_flush.c`: "every clause was a race
+once") and most of this repo's code is written by agents. A panic still takes
+the board down, and `unsafe` can still corrupt memory, so Rust is not free
+either. The decision makes containment carry the weight.
 
-1. link into all five firmware targets (four consoles and the Zero), the S3s'
-   through the forked toolchain;
+**Containment is mandatory, in any language** (#224): the host builds under
+AddressSanitizer and UndefinedBehaviorSanitizer in CI; fuzzing for every parser
+of untrusted bytes; a small kernel; a crash-only kernel that records its reason,
+reboots to the native recovery screen or the launcher, and reports over the dev
+channel; and handles instead of pointers (§4.3). The store's index is the first
+component under it: `tools/moy_index_spike.py` runs its suite and its API fuzz
+under both sanitizers.
+
+**Revisited, never assumed.** Rust is considered again per subsystem when
+upstream LLVM's Xtensa support matures, so that the S3 builds with a stock
+compiler, or for a self-contained core behind a narrow C interface. The bar is
+the six items the spike held both languages to:
+
+1. link into all five firmware targets (four consoles and the Zero);
 2. link into the web runner under the pinned emscripten;
 3. load on the host through ctypes and in the unix MicroPython build;
-4. report each image's delta against the C twin — counting the web bundle, which
+4. report each image's delta against the C twin, counting the web bundle, which
    rides every board's image (`.claude/rules/web.md`), so a kernel's wasm build
    is charged to every board a second time;
-5. bench unaligned loads and the instruction-cache miss rate (`perfcnt`) on its
-   hottest path on the S3, and show no regression on sprint 0's baseline;
+5. bench unaligned loads and the instruction-cache miss rate (`perfcnt`) on the
+   hottest path on the S3, with no regression on sprint 0's baseline;
 6. run under CI in the time preflight allows.
 
-We iterate until the owner is happy or calls it. **Unhappy means C, and nothing
-else in this doc changes**: the sprints, gates and ABI are language-neutral. The
-loser is deleted in 1a. Either way #224's containment is required: the host
-builds under AddressSanitizer and UndefinedBehaviorSanitizer in CI (Rust's
-`unsafe` included, Miri where it runs); fuzzing for every parser of untrusted
-bytes; a small kernel; a crash-only kernel that records its reason, reboots to
-the native recovery screen or the launcher, and reports over the dev channel.
+The Rust twin of the store's index, its toolchain pins and its link guard were
+deleted when the decision was taken. `experiments/rust_probe/` stays as the
+record of what a Rust build of each target needs; #224 holds the numbers.
 
 ## 6. The sprints
 
@@ -759,6 +765,13 @@ sprint 0's baseline. **Every sprint's gate also includes:** internal SRAM free
 and low-water on both S3 boards with WiFi and BLE up (§4.6); each image's
 headroom above its floor (§6.1); the semantic traces extended
 before anything crosses.
+
+**The order (owner, 2026-10-06):** sprint 0, 1a, then **sprint 2, the spine,
+before 1b**, then 1b (the native store), 3 and 4, then 5–7 or the narrowed scope
+(§10 question 8, decided before sprint 5). The table below follows it, and each
+sprint still opens with its carve. Each sprint also designs in the open issues
+whose features land in its subsystems (§6.2), so that nothing is built in Python
+and then ported.
 
 **Every sprint opens with a carve, in Python, before any native code is
 written** (owner, 2026-10-05):
@@ -776,15 +789,15 @@ the on-glass suites untouched, and its iterations are host test runs, not
 firmware builds. It runs one sprint ahead, never further: sprint 5 redesigns the
 roles, and sprints 6 and 7 cross what sprint 5 reshapes. No general clean-up
 precedes the sprints, because each sprint deletes the Python it replaces. The
-1b carve runs before sprint 1a, so the spike writes a component whose
-interface is already defined and pinned, in both languages.
+store's index took its native interface from the 1b carve before sprint 1a
+wrote it, so the language spike ran against pinned tests.
 
 | sprint | moves | gate |
 |---|---|---|
 | **0 — evidence** | nothing. Meters: a `heapcaps` dev-channel word (PSRAM and internal, free and largest) and a GC-pause field in PERF. The census by owner (live GC bytes, held areas, `heap_caps` bytes) with `_LAYER_POOL` checked first. Doom's fit over ≥5 boots per S3 board. Launcher import + construction time on both S3 boards. The complete placement table (§2.2). The stop inventory (§4.4) and the embed-vs-port-fork decision. A stop/start spike on an S3 that keeps one real peripheral alive across the stop — the flush task and a C-owned touch poll. The P4 repartition costed. | the census names the owners of the boot peak and of the T-Deck's retained memory; 100 stop/start cycles on the S3 with the peripheral alive and `heap_caps` free flat; a cart-available PSRAM threshold and the kernel's fixed share defined from the census; per-board headroom floors set (§6.1) |
-| **1a — the language** | the smallest store component, the store's index (`runtime/moy_index.py`: the handle table every call that names a cart validates against, no I/O), in Rust and in C (§5) | §5's six items; the owner's decision |
-| **1b — the store** | the store's index, catalogue build, cover bookkeeping, seed and project loading; the journal | the parity tests across bindings; the heap after boot within §6.1's bound; Doom loads on a fresh Guition S3 over five boots |
+| **1a — the language** | the smallest store component, the store's index (`runtime/moy_index.py`: the handle table every call that names a cart validates against, no I/O), written in C and in Rust as the language spike (§5) | §5's six items; the owner's decision (C, 2026-10-06) |
 | **2 — the spine** | handle tables; the crash record and strike ledger (`crash_guard`); the native recovery screen; the settings store; WiFi leases | a native crash is recorded and shown after reboot; a VM that fails to start lands on the recovery screen; a stale handle is refused loudly |
+| **1b — the store** | the store's index, catalogue build, cover bookkeeping, seed and project loading; the journal | the parity tests across bindings; the heap after boot within §6.1's bound; Doom loads on a fresh Guition S3 over five boots |
 | **3 — the survival set** | input (touch, keyboards, BLE HID below `bluetooth`); audio (I2S feed and the sfx/music semantics); the glass (canvas ownership, present, compositors); the SD gate; the frame tail (loop, pump, idle blank, OTA health, PERF, serial); radios, the webhost and the sync RPC | the native loop drives the frame on every tier with Python as an upcall (§4.2); each board's on-glass suite unchanged; `surface_model_v1.md`'s amendment (§8) landed first |
 | **4 — the cart path** | the Player's loop and tick model, the runtime map, moycore's glue, the in-cart chrome (strip, system menu, error and fit panels, toasts), netplay lockstep, the Lua superset rulings (§2.3) | a Lua and a wasm cart run launch to exit with **zero Python upcalls** on every tier and **with the VM stopped** on the S3s; cart-available PSRAM at or above §6.1's threshold; Doom loads on a T-Deck after a scripted session and on a fresh Guition S3; the cart census of VM-free carts; exit-to-launcher time against the return budget decides the launcher (§3) |
 | **5 — the ABI** (scope: §10 question 8) | the roles redesigned import-shaped (§2.1); `ctx.shell` closed; the Python binding thin; the wasm import adapter; the `open()`-after-stop contract | `docs/app_api_v1.md` rewritten in place; `tests/test_app_context.py` and the traces cover every role; a wasm module reaches a role through an import; every shipped app restores after a stop |
@@ -845,6 +858,24 @@ The Guition S3 takes the same values. Its figures on its card after the
 catalogue fix, fresh and after the scripted session, are #224's, and the
 values hold against them.
 
+### 6.2 The open issues each sprint absorbs (owner, 2026-10-06)
+
+An open issue whose feature lands in a subsystem a sprint moves is designed into
+that sprint, natively, against the kernel's interface; nothing is built in
+Python first and ported after. The sprint's carve names it.
+
+| sprint | subsystem | open issues |
+|---|---|---|
+| **2 — the spine** | the crash record and strike ledger; the recovery screen | #160 the crash-loop guard (a bad wallpaper cart at boot); #143 friendly failure (the recovery screen's words) |
+| **1b — the store** | cart identity, profiles, the journal, export, sharing, the on-card layout | #162 namespaced `<author>.<title>` ids; #131 multi-kid profiles; #136 the version time machine (reads the journal); #127 project backup, export and import; #122 online sharing, with #125 the publish flow, #123 the gallery index and #195 the browser's play-and-remix leg; #235 store aging and a sharded `/moy/carts` |
+| **3 — the survival set** | input | #26 BLE keyboard, mouse and joypad; #83 the P4's USB HID host; #196 the T-Deck's always-raw keyboard |
+| | audio | #82 the P4's ES8311 codec; #70 sound packs (a PCM sample voice, numbered slots) |
+| | the frame tail and the glass | #130 power management (idle dim and sleep, low battery); #126 on-device capture (screenshot, GIF); #226's idle screensaver |
+| **4 — the cart path** | the Player, the runtime map, the cart's verbs and chrome | #133 the cart-facing network verb, with #134 online leaderboards on it; #212 debug mode and the runaway watchdog; #228 3D for carts (`docs/engine3d_2026-10.md`); #7 local sharing over ESP-NOW; #227 native carts per chip; #231 the file picker for compiled carts; #192 the C play path (moycore's glue); #226's time verb; #143's error and fit panels |
+| **6–7 — the toolkit and the window managers** | the toolkit, the WMs and their chrome | #135 localization glyphs and strings; theming (`docs/theming_2026-09.md`); the Studio's docking (`docs/studio_2026-09.md`); the charm issues #140 (tracker), #141, #142, #144–#146 and #148; #177 hover feedback; #132 the system clipboard; #129 first-boot setup |
+
+Trackers (#66, #95, #97–#99, #105) and issues about apps alone are not listed.
+
 ## 7. What it costs
 
 - **Size.** About 45,000 lines of Python become native code (§3), crossed
@@ -871,9 +902,9 @@ values hold against them.
 
 ## 8. Relation to decisions already made, and the sentences this falsifies
 
-- **#224.** This doc is its deliverable. It keeps #224's direction and
-  containment, reopens its language for a spike (§5), moves the toolkit from
-  "last, or never" into sprint 6, and replaces its crossing order (§6).
+- **#224.** This doc is its deliverable. It keeps #224's direction, containment
+  and language (C, confirmed by the spike, §5), moves the toolkit from "last, or
+  never" into sprint 6, and replaces its crossing order (§6).
 - **`docs/wasm_tier_plan_2026-09.md`.** The reserve and the flash partition stay;
   raising what a board can fit is this work. A cart above the floor is still
   refused with a notice where it does not fit.
@@ -937,8 +968,8 @@ makes it false, not annotated:
 7. **The open placements** of §2.2.1: the rows whose sprint reads `open`, each
    with its question in its note. Each is answered before its group's sprint
    starts.
-8. **The scope after sprint 4.** Sprints 1b–4 run as §6 has them (owner,
-   2026-10-05). **Before sprint 5 starts**, the owner chooses between:
+8. **The scope after sprint 4.** Sprints 2, 1b, 3 and 4 run as §6 has them
+   (owner, 2026-10-05; the order, 2026-10-06). **Before sprint 5 starts**, the owner chooses between:
    - **the full plan**: sprints 5–7 as §6 has them;
    - **a narrowed plan**: sprint 5 limited to the `open()`-after-stop contract
      every Python app needs; the wasm app ABI and sprints 6–7 deferred until
@@ -963,8 +994,9 @@ makes it false, not annotated:
   So the kernel proceeds on its other grounds (§0): a restartable VM with a
   clean heap per app; crash containment; one app API for Python and wasm apps;
   one toolkit; and the S3's chrome speed, with latency-bound state in internal
-  SRAM. On those grounds the owner runs sprints 1b–4 as planned and chooses the
-  scope after them before sprint 5 (2026-10-05; §10 question 8).
+  SRAM. On those grounds the owner runs sprints 2, 1b, 3 and 4 as planned and
+  chooses the scope after them before sprint 5 (2026-10-05, the order
+  2026-10-06; §10 question 8).
 - **Internal SRAM.** If moving state native costs the S3 internal SRAM it cannot
   spare, and PSRAM placement cannot absorb it (the share, §6.1).
 - **Flash headroom** that forces a repartition after there are users (the
@@ -1003,4 +1035,5 @@ hardware pass (STANDS WITH FIXES).
 | P12 | growth wording wrong | accepted | §1.3 |
 
 The evidence and language-and-build passes were stopped early (owner,
-2026-09-27); sprint 1a's gate is the language pass in executable form.
+2026-09-27); sprint 1a ran the language pass in executable form, and §5 records
+its decision.
