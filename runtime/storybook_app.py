@@ -360,13 +360,13 @@ class StorybookAppLayer(ListShellApp):
         still marks the RAM copy graduated (never re-offers a clobbering SAVE
         this session), it just won't persist until the next successful write."""
         carts = self._store
-        path = cart.get("path")
-        if path and carts.ready() and carts.can_journal():
+        h = cart.get("h")
+        if h and carts.ready() and carts.can_journal():
             mainf = cart.get("main", "main.py")
 
             def _write(c):
-                c.journal_append(path, mainf, baseline_src, grad=0)
-                c.journal_append(path, mainf, diverged_src, grad=1)
+                c.journal_append(h, mainf, baseline_src, grad=0)
+                c.journal_append(h, mainf, diverged_src, grad=1)
 
             _v, err = carts.batch(_write)
             if err is not None:  # never crash the shell over this

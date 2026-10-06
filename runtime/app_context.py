@@ -584,8 +584,8 @@ class _RawCarts:
     def save_image(self, cart, name, blob):
         return self.__ws.carts_store.save_image(cart, name, blob)
 
-    def journal_append(self, path, main, src, grad=0):
-        return self.__ws.carts_store.journal_append(path, main, src, grad=grad)
+    def journal_append(self, h, main, src, grad=0):
+        return _catalogue().journal_append(h, main, src, grad=grad)
 
 
 class Carts(_StoreRole):
@@ -607,10 +607,9 @@ class Carts(_StoreRole):
         return self._shell().carts.all
 
     def can_journal(self):
-        """True when the store carries the #111 journal verbs (an older store
-        module simply does not, and the graduation path degrades)."""
-        store = self._store()
-        return store is not None and hasattr(store, "journal_append")
+        """True when there is a store to journal into (#111): a board with no
+        writable store has none, and the graduation path degrades."""
+        return self._store() is not None
 
     def slug(self, text):
         store = self._store()

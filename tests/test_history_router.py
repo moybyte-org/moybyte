@@ -18,6 +18,7 @@ import ast
 from pathlib import Path
 
 from ws_helpers import build_ws, quiesce
+from runtime import history_router
 
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "runtime" / "console.py"
@@ -136,9 +137,9 @@ def test_the_walk_is_handed_the_active_tabs_file_set(tmp_path, monkeypatch):
     ws = _cart_ws(tmp_path)
     _open_code(ws)
     seen = []
-    real = ws.carts_store.journal_undo
-    monkeypatch.setattr(ws.carts_store, "journal_undo",
-                        lambda p, f=None: (seen.append(f), real(p, f))[1])
+    real = history_router.moy_catalogue.journal_undo
+    monkeypatch.setattr(history_router.moy_catalogue, "journal_undo",
+                        lambda h, f=None: (seen.append(f), real(h, f))[1])
     ws.history._journal_walk(False)
     assert seen == [("main.py",)]
 
@@ -168,9 +169,9 @@ def test_bar_undo_bits_never_reads_the_journal(tmp_path, monkeypatch):
     reads = []
     for name in ("journal_can_undo", "journal_can_redo", "journal_undo",
                  "journal_redo"):
-        real = getattr(ws.carts_store, name)
+        real = getattr(history_router.moy_catalogue, name)
         monkeypatch.setattr(
-            ws.carts_store, name,
+            history_router.moy_catalogue, name,
             (lambda n, r: lambda *a, **k: (reads.append(n), r(*a, **k))[1])(name, real))
     assert ws.history.bar_undo_bits() == (False, False)
     assert reads == [], "the bar cache key reached the journal: " + repr(reads)
@@ -362,16 +363,12 @@ def test_writes_disabled_means_no_walk_and_no_check(tmp_path):
     assert ws.history.can_undo() is False
 
 
-def test_a_store_without_the_journal_verbs_is_a_safe_no_op(tmp_path):
-    """An older/embedded store simply has no journal API. Probing it must be a
-    dark icon, not an AttributeError inside a bar repaint."""
+def test_a_cart_with_no_handle_is_a_safe_no_op(tmp_path):
+    """A cart the store does not name (an embedded one) has no journal.
+    Probing it must be a dark icon, not a StaleHandle inside a bar repaint."""
     ws = _cart_ws(tmp_path)
     _open_code(ws)
-
-    class _Bare:
-        def load(self, path):
-            return None
-    ws.carts_store = _Bare()
+    del ws.cart["h"]
     assert ws.history.can_undo() is False
     assert ws.history.can_redo() is False
     assert ws.history.undo() is False
@@ -390,8 +387,8 @@ def test_a_failing_store_is_reported_and_never_crashes_the_shell(tmp_path,
 
     def _boom(*a, **k):
         raise OSError("card gone")
-    monkeypatch.setattr(ws.carts_store, "journal_undo", _boom)
-    monkeypatch.setattr(ws.carts_store, "journal_can_undo", _boom)
+    monkeypatch.setattr(history_router.moy_catalogue, "journal_undo", _boom)
+    monkeypatch.setattr(history_router.moy_catalogue, "journal_can_undo", _boom)
     assert ws.history.undo() is False
     assert ws.history.can_undo() is False
 

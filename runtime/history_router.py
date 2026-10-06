@@ -378,15 +378,14 @@ class HistoryRouter:
         ws = self.ws
         if not self.store.writable() or not ws.cart:
             return False
-        store = ws.carts_store
-        path = ws.cart.get("path")
-        name = "journal_can_redo" if redo else "journal_can_undo"
-        if not (path and hasattr(store, name)):
+        h = ws.cart.get("h")
+        if not h:
             return False
-        fn = getattr(store, name)
+        fn = (moy_catalogue.journal_can_redo if redo
+              else moy_catalogue.journal_can_undo)
         files = self.active_tab_files()
         try:
-            return bool(self.store.call(lambda: fn(path, files)))
+            return bool(self.store.call(lambda: fn(h, files)))
         except Exception as exc:  # noqa: BLE001 -- a check failure must never crash the shell
             print("Moybyte journal check failed:", _err_text(exc))
             return False
@@ -395,14 +394,13 @@ class HistoryRouter:
         ws = self.ws
         if not self.store.writable() or not ws.cart:
             return False
-        store = ws.carts_store
-        path = ws.cart.get("path")
-        if not (path and hasattr(store, "journal_undo")):
+        h = ws.cart.get("h")
+        if not h:
             return False
-        fn = store.journal_redo if redo else store.journal_undo
+        fn = moy_catalogue.journal_redo if redo else moy_catalogue.journal_undo
         files = self.active_tab_files()
         try:
-            changed = self.store.call(lambda: fn(path, files))
+            changed = self.store.call(lambda: fn(h, files))
         except Exception as exc:  # noqa: BLE001 -- a walk failure must never crash the shell
             print("Moybyte journal walk failed:", _err_text(exc))
             return False

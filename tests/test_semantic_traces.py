@@ -738,7 +738,7 @@ SEED = [{"title": "Seed One", "type": "game", "version": 2, "src": SRC,
 
 
 def J(verb, h, *a):
-    return getattr(moy_carts, "journal_" + verb)(cat.path(h), *a)
+    return tried(getattr(cat, "journal_" + verb), h, *a)
 
 
 def seeded(seed, root):
@@ -776,6 +776,8 @@ say("undo", J("undo", one), cat.load(one)["src"] == SRC2, J("can_undo", one),
 say("undo floor", J("undo", one))
 say("redo", J("redo", one), cat.load(one)["src"] == SRC3, J("can_redo", one))
 say("redo ceiling", J("redo", one))
+say("journal stale", J("append", d["h"], "main.py", SRC), J("undo", d["h"]),
+    J("redo", d["h"]), J("can_undo", d["h"]), J("can_redo", d["h"]), J("compact", d["h"]))
 
 for i in range(cat.ROOTS - 3):
     cat.ensure_dirs(ROOT + "/r%d/carts" % i)
@@ -834,6 +836,7 @@ undo main.py True False True
 undo floor None
 redo main.py True False
 redo ceiling None
+journal stale STALE STALE STALE STALE STALE STALE
 roots True True True
 roots full True False STALE True
 roots back Alpha=0.2 Beta=1.2 Delta=2.3 New Cart=3.2 False True

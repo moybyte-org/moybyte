@@ -68,6 +68,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # bare-or-package import fallback storybook_app/console use). No cycle: neither
 # storybook_app nor its own imports (ui/editors/app_shell) touch this file.
 try:
+    import moy_catalogue
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moy_catalogue
+try:
     from storybook_app import deck_to_code as _deck_to_code, STORY_TYPE as _STORY_TYPE
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.storybook_app import (deck_to_code as _deck_to_code,
@@ -232,7 +236,7 @@ class ProjectStore:
     #
     # A commit PERSISTS and JOURNALS: after each successful store write below, the
     # exact bytes that landed on disk are appended to the cart's durable undo journal
-    # (moy_carts.journal_append). The journal store owns the O(1) raw append, the
+    # (moy_catalogue.journal_append, by the cart's handle). The journal store owns the O(1) raw append, the
     # snapshot ceiling (no-op commits write nothing), and rotation; here we only feed
     # it the (file, bytes) each commit produced, in the SAME between-frames SD-session
     # discipline (ws._with_sd) as the save it shadows.
@@ -249,12 +253,12 @@ class ProjectStore:
         store = ws.carts_store
         if store is None or not self.cart or new_bytes is None:
             return
-        path = self.cart.get("path")
-        if not path or not ws.can_manage or not hasattr(store, "journal_append"):
+        h = self.cart.get("h")
+        if not h or not ws.can_manage:
             return
         try:
-            seq = ws._with_sd(lambda: store.journal_append(
-                path, file, new_bytes, grad=grad, ops=ops))
+            seq = ws._with_sd(lambda: moy_catalogue.journal_append(
+                h, file, new_bytes, grad=grad, ops=ops))
         except Exception as exc:  # noqa: BLE001 -- journaling can't be allowed to fail a save
             print("Moybyte journal append failed:", _err_text(exc))
             return

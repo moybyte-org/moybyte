@@ -167,11 +167,15 @@ def test_the_boot_reads_the_shelf_through_the_interface(tmp_path):
 
 # -- the line -----------------------------------------------------------------
 
-# moy_carts' path-level bodies a cart passes through. Reading a cart's FILES by
-# path (save_*, load_pmem, load_deck, the journal) is not on this list: those
-# leave nothing in the store between calls.
+# moy_carts' path-level bodies a cart passes through, the journal's included:
+# the shell walks and appends to a cart's journal by its handle. Reading a
+# cart's FILES by path (save_*, load_pmem, load_deck) is not on this list: those
+# leave nothing in the store between calls. The sync wire and Files' project
+# files start from a path and reach moy_journal itself.
 _CART_BODIES = {"catalogue", "entry", "load", "scan", "create",
-                "new_from_template", "duplicate", "delete"}
+                "new_from_template", "duplicate", "delete", "journal_append",
+                "journal_undo", "journal_redo", "journal_can_undo",
+                "journal_can_redo", "journal_compact"}
 # The store itself; and moy_seed, which writes the seed roster's folders.
 _STORE = {"runtime/moy_carts.py", "runtime/moy_catalogue.py",
           "runtime/moy_seed.py"}

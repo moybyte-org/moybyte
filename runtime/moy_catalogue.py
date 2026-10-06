@@ -35,6 +35,13 @@ thing the store holds across them, so its rows are what take handles.
   duplicate(h, root, new_title)    a copy of the cart on disk -> its cart
   delete(h)                        remove the cart's folder; h goes stale
 
+The cart's undo journal (runtime/moy_journal.py), by handle:
+
+  journal_append(h, file, data, grad=None, ops=None) -> seq | None
+  journal_undo(h, files=None) / journal_redo(h, files=None) -> file | None
+  journal_can_undo(h, files=None) / journal_can_redo(h, files=None) -> bool
+  journal_compact(h)
+
 A call that takes a handle raises StaleHandle before it touches the card. A
 store that cannot be written raises OSError, ENOSPC when it is full (an index
 with no free row is full too); a cart folder that will not read is None, as it
@@ -56,10 +63,12 @@ are. A root that will not list changes nothing and reads as an empty shelf.
 
 try:
     import moy_carts
+    import moy_journal
     from moy_index import Index, StaleHandle  # noqa: F401 (re-exported)
     from moy_store_base import cart_path
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import moy_carts
+    from runtime import moy_journal
     from runtime.moy_index import Index, StaleHandle  # noqa: F401
     from runtime.moy_store_base import cart_path
 
@@ -179,3 +188,33 @@ def duplicate(h, root=CARTS_DIR, new_title=None):
 def delete(h):
     moy_carts.delete({"path": path(h)})
     _index.release(h)
+
+
+def journal_append(h, file, data, grad=None, ops=None):
+    p = path(h)
+    return moy_journal.journal_append(p, file, data, grad=grad, ops=ops)
+
+
+def journal_undo(h, files=None):
+    p = path(h)
+    return moy_journal.journal_undo(p, files)
+
+
+def journal_redo(h, files=None):
+    p = path(h)
+    return moy_journal.journal_redo(p, files)
+
+
+def journal_can_undo(h, files=None):
+    p = path(h)
+    return moy_journal.journal_can_undo(p, files)
+
+
+def journal_can_redo(h, files=None):
+    p = path(h)
+    return moy_journal.journal_can_redo(p, files)
+
+
+def journal_compact(h):
+    p = path(h)
+    return moy_journal.journal_compact(p)
