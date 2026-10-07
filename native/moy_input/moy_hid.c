@@ -289,6 +289,10 @@ static void reset_connection(moy_hid_t *h) {
     h->sub_retries = 0;
     h->encrypted = false;
     h->interval = 0;
+    h->has_mouse = false;
+    h->mbuttons = 0;
+    h->mdx = 0;
+    h->mdy = 0;
     clear_reports(h);
 }
 
@@ -712,8 +716,9 @@ void moy_hid_on_dsc_done(moy_hid_t *h, uint16_t conn, int status) {
     }
     // Prefer Boot Host whenever the keyboard exposes it: Protocol Mode = 0 and
     // only the fixed boot report. Mixing Boot and Report characteristics leaves
-    // the payload layout ambiguous.
+    // the payload layout ambiguous. A Boot Mouse Input is subscribed beside it.
     bool boot = false;
+    bool mouse = false;
     h->protocol_handle = 0;
     for (uint8_t i = 0; i < h->nchrs; i++) {
         moy_hid_chr_t *c = &h->chrs[i];
@@ -721,20 +726,27 @@ void moy_hid_on_dsc_done(moy_hid_t *h, uint16_t conn, int status) {
             h->protocol_handle = c->val;
         } else if (c->uuid == MOY_HID_UUID_BOOT_KBD && (c->props & MOY_HID_PROP_NOTIFY)) {
             boot = true;
+        } else if (c->uuid == MOY_HID_UUID_BOOT_MOUSE && (c->props & MOY_HID_PROP_NOTIFY)) {
+            mouse = true;
         }
     }
     uint16_t want = boot ? MOY_HID_UUID_BOOT_KBD : MOY_HID_UUID_REPORT;
-    h->protocol = boot ? 1 : 2;
-    if (boot) {
+    h->protocol = boot || mouse ? 1 : 2;
+    if (h->protocol == 1) {
         set_boot_protocol(h);
+        if (!boot) {
+            want = 0;                   // a mouse alone: no keyboard report
+        }
     }
     h->nsubs = 0;
     MOY_DRV_LOCK(&h->lock);
     h->nreports = 0;
+    h->has_mouse = false;
     MOY_DRV_UNLOCK(&h->lock);
     for (uint8_t i = 0; i < h->nchrs && h->nsubs < MOY_HID_INPUTS; i++) {
         moy_hid_chr_t *c = &h->chrs[i];
-        if (c->uuid != want || !(c->props & MOY_HID_PROP_NOTIFY)) {
+        bool is_mouse = c->uuid == MOY_HID_UUID_BOOT_MOUSE;
+        if ((c->uuid != want && !is_mouse) || !(c->props & MOY_HID_PROP_NOTIFY)) {
             continue;
         }
         uint32_t next_def = (uint32_t)h->hid_end + 1;
@@ -751,6 +763,8 @@ void moy_hid_on_dsc_done(moy_hid_t *h, uint16_t conn, int status) {
                 moy_hid_report_t *r = &h->reports[h->nreports++];
                 memset(r, 0, sizeof(*r));
                 r->handle = c->val;
+                r->mouse = is_mouse;
+                h->has_mouse = h->has_mouse || is_mouse;
                 MOY_DRV_UNLOCK(&h->lock);
                 break;
             }
@@ -813,7 +827,14 @@ void moy_hid_on_notify(moy_hid_t *h, uint16_t conn, uint16_t handle, const uint8
             rep = &h->reports[i];
         }
     }
-    if (rep != NULL) {
+    if (rep != NULL && rep->mouse) {
+        h->notify_count++;
+        if (n >= 3) {
+            h->mbuttons = r[0];
+            h->mdx += (int8_t)r[1];
+            h->mdy += (int8_t)r[2];
+        }
+    } else if (rep != NULL) {
         h->notify_count++;
         if (moy_hid_decode(r, n, &mods, keys, &nkeys)) {
             for (uint8_t i = 0; i < nkeys; i++) {
@@ -871,6 +892,18 @@ static void sync_player(moy_hid_t *h) {
     if (moy_input_source_player(h->table, h->src, &now_p) == MOY_INPUT_OK && now_p != want) {
         moy_input_set_player(h->table, h->src, want);
     }
+}
+
+bool moy_hid_take_mouse(moy_hid_t *h, int32_t *dx, int32_t *dy, uint8_t *buttons) {
+    MOY_DRV_LOCK(&h->lock);
+    bool has = h->has_mouse && h->state == MOY_HID_READY;
+    *dx = h->mdx;
+    *dy = h->mdy;
+    *buttons = h->mbuttons;
+    h->mdx = 0;
+    h->mdy = 0;
+    MOY_DRV_UNLOCK(&h->lock);
+    return has;
 }
 
 void moy_hid_set_player(moy_hid_t *h, int8_t slot) {

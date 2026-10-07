@@ -830,6 +830,7 @@ HID_STATES = ("off", "disabled", "idle", "scanning", "found", "connecting", "pai
               "discovering", "subscribe-retry", "ready", "choose")
 HID_SERVICE, HID_BOOT_KBD, HID_REPORT, HID_PROTOCOL, HID_CCCD = (0x1812, 0x2A22, 0x2A4D,
                                                                  0x2A4E, 0x2902)
+HID_BOOT_MOUSE = 0x2A33
 HID_NOTIFY = 0x10
 
 
@@ -904,6 +905,8 @@ _HID_SIGS = (
                         ctypes.POINTER(_U8), ctypes.POINTER(_U8)], _B),
     ("moy_hid_keycode", [_U8, _U8, _B], _I32),
     ("moy_hid_buttons_for_key", [_I32], _U32),
+    ("moy_hid_take_mouse", [_PHID, ctypes.POINTER(_I32), ctypes.POINTER(_I32),
+                            ctypes.POINTER(_U8)], _B),
 )
 _DRV_SIGS = _DRV_SIGS + _HID_SIGS
 
@@ -1036,6 +1039,14 @@ class HidMachine:
     def preferred(self):
         a = _Addr()
         return (a.type, bytes(a.a)) if _lib().moy_hid_pref(self.h, ctypes.byref(a)) else None
+
+    def take_mouse(self):
+        """(dx, dy, buttons) since the last take, or None with no mouse."""
+        dx, dy, b = _I32(), _I32(), _U8()
+        if not _lib().moy_hid_take_mouse(self.h, ctypes.byref(dx), ctypes.byref(dy),
+                                         ctypes.byref(b)):
+            return None
+        return dx.value, dy.value, b.value
 
     def devices(self):
         out = []

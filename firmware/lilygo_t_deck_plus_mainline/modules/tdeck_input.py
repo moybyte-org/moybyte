@@ -57,6 +57,7 @@ class TDeckInput:
         if ble is not None:
             try:
                 ble.poll()
+                ble.apply_mouse(pointer)        # a boot mouse, where one is paired
             except Exception as exc:  # noqa: BLE001 -- BLE must fail keyboard-only
                 print("Moybyte BLE keyboard poll failed:", exc)
         touch = self.touch

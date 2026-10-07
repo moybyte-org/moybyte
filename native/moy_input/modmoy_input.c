@@ -1072,6 +1072,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_trackball_obj, input_trackball);
 typedef struct {
     mp_obj_base_t base;
     moy_hid_t *h;
+    bool left;                      // the mouse's left button at the last apply
 } input_ble_obj_t;
 
 static mp_obj_t ble_str_or_none(const char *s) {
@@ -1215,6 +1216,31 @@ static mp_obj_t ble_set_player(mp_obj_t self_in, mp_obj_t slot) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ble_set_player_obj, ble_set_player);
 
+// apply_mouse(pointer) -> True while a mouse is connected: its motion since the
+// last frame moves the pointer, which a mouse never lets expire (hovers), and
+// its left button is the "ble" source's pointer sample -- down, and the press
+// edge -- for the merge. Before begin_frame, like poll().
+static mp_obj_t ble_apply_mouse(mp_obj_t self_in, mp_obj_t ptr) {
+    input_ble_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    int32_t dx, dy;
+    uint8_t buttons;
+    if (!moy_hid_take_mouse(o->h, &dx, &dy, &buttons) || !mp_obj_is_type(ptr, &input_pointer_type)) {
+        o->left = false;
+        return mp_const_false;
+    }
+    moy_input_ptr_t *p = &((input_pointer_obj_t *)MP_OBJ_TO_PTR(ptr))->p;
+    uint32_t now = now_ms();
+    if (dx || dy) {
+        moy_input_ptr_move(p, dx, dy, now);
+    }
+    p->hovers = true;
+    bool left = (buttons & 1) != 0;
+    moy_input_point(o->h->table, o->h->src, p->x, p->y, left, left && !o->left, true);
+    o->left = left;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ble_apply_mouse_obj, ble_apply_mouse);
+
 // BLE reports carry text and make/break state: no mode to flip.
 static mp_obj_t ble_set_game_mode(mp_obj_t self_in, mp_obj_t on) {
     (void)self_in;
@@ -1242,6 +1268,7 @@ static const mp_rom_map_elem_t ble_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&ble_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&ble_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_poll), MP_ROM_PTR(&ble_poll_obj) },
+    { MP_ROM_QSTR(MP_QSTR_apply_mouse), MP_ROM_PTR(&ble_apply_mouse_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&ble_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_settings_status), MP_ROM_PTR(&ble_settings_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_settings_devices), MP_ROM_PTR(&ble_settings_devices_obj) },

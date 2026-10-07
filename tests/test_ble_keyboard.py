@@ -367,6 +367,42 @@ def test_the_player_slot_is_held_only_while_connected():
     assert m.src.player == 0
 
 
+def test_a_boot_mouse_is_subscribed_beside_the_keyboard_and_its_motion_taken():
+    """#26 (owner 2026-10-07): a boot mouse is the second report shape over the
+    same central -- buttons and deltas, taken by the frame for the pointer."""
+    table, stack, m = _machine()
+    m.started(True)
+    m.scan_result(ADDR, -40, HID_ADV)
+    m.on_scan_done()
+    m.connected(5, ADDR)
+    m.on_svc(5, 1, 20, mi.HID_SERVICE)
+    m.on_svc_done(5, 0)
+    m.on_chr(5, 2, 3, 0x04, mi.HID_PROTOCOL)
+    m.on_chr(5, 4, 5, mi.HID_NOTIFY, mi.HID_BOOT_KBD)
+    m.on_chr(5, 7, 8, mi.HID_NOTIFY, mi.HID_BOOT_MOUSE)
+    m.on_chr_done(5, 0)
+    m.on_dsc(5, 6, mi.HID_CCCD)
+    m.on_dsc(5, 9, mi.HID_CCCD)
+    m.on_dsc_done(5, 0)
+    assert ("write", 5, 3, b"\x00", False) in stack.calls
+    m.on_write_done(5, 6, 0)
+    m.on_write_done(5, 9, 0)
+    assert m.state == "ready"
+    m.notify(5, 8, bytes((1, 5, 0xFE)))           # left down, +5, -2
+    m.notify(5, 8, bytes((1, 3, 0x01)))
+    assert m.take_mouse() == (8, -1, 1)
+    assert m.take_mouse() == (0, 0, 1)            # taken once
+    m.notify(5, 5, b"\x00\x00\x04\x00\x00\x00\x00\x00")
+    _frame(m, table)
+    assert table.last_key == ord("a")             # the keyboard beside it
+
+
+def test_a_keyboard_with_no_mouse_has_no_mouse_to_take():
+    _table, _stack, m = _machine()
+    _ready(m)
+    assert m.take_mouse() is None
+
+
 # -- the boards' wiring --------------------------------------------------------------
 
 def test_every_console_takes_the_kernels_central_and_no_bluetooth_module():

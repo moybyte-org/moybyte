@@ -79,6 +79,7 @@ class Desktop:
         if keyboard is not None:
             try:
                 keyboard.poll()
+                keyboard.apply_mouse(self.pointer)     # a boot mouse, where one is paired
             except Exception as exc:  # noqa: BLE001 -- a keyboard must fail touch-only
                 print("%s keyboard poll failed:" % self.name, exc)
         touch = self.touch

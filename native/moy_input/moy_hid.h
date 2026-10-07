@@ -48,6 +48,7 @@
 
 #define MOY_HID_UUID_SERVICE 0x1812
 #define MOY_HID_UUID_BOOT_KBD 0x2A22
+#define MOY_HID_UUID_BOOT_MOUSE 0x2A33
 #define MOY_HID_UUID_REPORT 0x2A4D
 #define MOY_HID_UUID_PROTOCOL 0x2A4E
 #define MOY_HID_UUID_CCCD 0x2902
@@ -111,6 +112,7 @@ typedef struct {
     uint8_t mods;
     uint8_t keys[6];
     uint8_t nkeys;
+    bool mouse;                 // a Boot Mouse Input: buttons and deltas
 } moy_hid_report_t;
 
 struct moy_hid {
@@ -164,6 +166,9 @@ struct moy_hid {
     bool caps;
     bool level_idle;
     uint32_t notify_count;
+    bool has_mouse;             // a mouse report is subscribed
+    int32_t mdx, mdy;           // its motion since the frame took it
+    uint8_t mbuttons;
     int8_t want_player;         // -1: nobody asked
 };
 
@@ -209,6 +214,8 @@ void moy_hid_on_enc_change(moy_hid_t *h, uint16_t conn, bool encrypted, bool bon
 // -- the frame: the reports since the last frame into the source --
 void moy_hid_frame(moy_hid_t *h);
 void moy_hid_set_player(moy_hid_t *h, int8_t slot);
+// The mouse's motion and buttons since the last take; false with no mouse.
+bool moy_hid_take_mouse(moy_hid_t *h, int32_t *dx, int32_t *dy, uint8_t *buttons);
 
 // What persists, read back at start: enabled, and the picked keyboard (NULL
 // for none) with its name.

@@ -29,6 +29,7 @@
 
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "host/ble_hs.h"
@@ -43,7 +44,9 @@
 
 void ble_store_config_init(void);
 
-static moy_hid_t s_hid;
+// The machine is PSRAM: nothing an ISR touches is in it, and its ~800 bytes are
+// internal SRAM the share does not have.
+static moy_hid_t *s_h;
 static bool s_up;                   // the host runs
 static volatile bool s_synced;
 static uint8_t s_own_type;
@@ -78,12 +81,12 @@ static void verb_run(struct ble_npl_event *ev) {
         s_nverbs--;
         MOY_DRV_UNLOCK(&s_verb_lock);
         switch (v) {
-            case V_ENABLE: moy_hid_set_enabled(&s_hid, true); break;
-            case V_DISABLE: moy_hid_set_enabled(&s_hid, false); break;
-            case V_DISCOVER: moy_hid_discover(&s_hid); break;
-            case V_PICK: moy_hid_pick(&s_hid, &addr); break;
-            case V_FORGET: moy_hid_forget(&s_hid); break;
-            case V_SCAN: moy_hid_scan(&s_hid); break;
+            case V_ENABLE: moy_hid_set_enabled(s_h, true); break;
+            case V_DISABLE: moy_hid_set_enabled(s_h, false); break;
+            case V_DISCOVER: moy_hid_discover(s_h); break;
+            case V_PICK: moy_hid_pick(s_h, &addr); break;
+            case V_FORGET: moy_hid_forget(s_h); break;
+            case V_SCAN: moy_hid_scan(s_h); break;
         }
     }
 }
@@ -139,7 +142,7 @@ static int op_scan(void *ctx, bool picker) {
 
 static void scan_done_run(struct ble_npl_event *ev) {
     (void)ev;
-    moy_hid_on_scan_done(&s_hid);
+    moy_hid_on_scan_done(s_h);
 }
 
 static int op_scan_stop(void *ctx) {
@@ -181,10 +184,10 @@ static int svc_cb(uint16_t conn, const struct ble_gatt_error *err, const struct 
                   void *arg) {
     (void)arg;
     if (err->status == 0 && svc != NULL) {
-        moy_hid_on_svc(&s_hid, conn, svc->start_handle, svc->end_handle,
+        moy_hid_on_svc(s_h, conn, svc->start_handle, svc->end_handle,
                        ble_uuid_u16(&svc->uuid.u));
     } else {
-        moy_hid_on_svc_done(&s_hid, conn, err->status == BLE_HS_EDONE ? 0 : err->status);
+        moy_hid_on_svc_done(s_h, conn, err->status == BLE_HS_EDONE ? 0 : err->status);
     }
     return 0;
 }
@@ -199,10 +202,10 @@ static int chr_cb(uint16_t conn, const struct ble_gatt_error *err, const struct 
                   void *arg) {
     (void)arg;
     if (err->status == 0 && chr != NULL) {
-        moy_hid_on_chr(&s_hid, conn, chr->def_handle, chr->val_handle, chr->properties,
+        moy_hid_on_chr(s_h, conn, chr->def_handle, chr->val_handle, chr->properties,
                        ble_uuid_u16(&chr->uuid.u));
     } else {
-        moy_hid_on_chr_done(&s_hid, conn, err->status == BLE_HS_EDONE ? 0 : err->status);
+        moy_hid_on_chr_done(s_h, conn, err->status == BLE_HS_EDONE ? 0 : err->status);
     }
     return 0;
 }
@@ -217,9 +220,9 @@ static int dsc_cb(uint16_t conn, const struct ble_gatt_error *err, uint16_t chr_
     (void)arg;
     (void)chr_val_handle;
     if (err->status == 0 && dsc != NULL) {
-        moy_hid_on_dsc(&s_hid, conn, dsc->handle, ble_uuid_u16(&dsc->uuid.u));
+        moy_hid_on_dsc(s_h, conn, dsc->handle, ble_uuid_u16(&dsc->uuid.u));
     } else {
-        moy_hid_on_dsc_done(&s_hid, conn, err->status == BLE_HS_EDONE ? 0 : err->status);
+        moy_hid_on_dsc_done(s_h, conn, err->status == BLE_HS_EDONE ? 0 : err->status);
     }
     return 0;
 }
@@ -232,7 +235,7 @@ static int op_disc_dscs(void *ctx, uint16_t conn, uint16_t start, uint16_t end) 
 static int write_cb(uint16_t conn, const struct ble_gatt_error *err, struct ble_gatt_attr *attr,
                     void *arg) {
     (void)arg;
-    moy_hid_on_write_done(&s_hid, conn, attr ? attr->handle : 0, err->status);
+    moy_hid_on_write_done(s_h, conn, attr ? attr->handle : 0, err->status);
     return 0;
 }
 
@@ -310,44 +313,44 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
         case BLE_GAP_EVENT_DISC: {
             moy_hid_addr_t a;
             addr_from_ble(&event->disc.addr, &a);
-            moy_hid_on_scan_result(&s_hid, &a, event->disc.rssi, event->disc.data,
+            moy_hid_on_scan_result(s_h, &a, event->disc.rssi, event->disc.data,
                                    event->disc.length_data);
             return 0;
         }
         case BLE_GAP_EVENT_DISC_COMPLETE:
-            moy_hid_on_scan_done(&s_hid);
+            moy_hid_on_scan_done(s_h);
             return 0;
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0
                 && ble_gap_conn_find(event->connect.conn_handle, &desc) == 0) {
                 moy_hid_addr_t a;
                 addr_from_ble(&desc.peer_id_addr, &a);
-                moy_hid_on_connect(&s_hid, event->connect.conn_handle, &a);
+                moy_hid_on_connect(s_h, event->connect.conn_handle, &a);
             } else {
-                moy_hid_on_connect_failed(&s_hid);
+                moy_hid_on_connect_failed(s_h);
             }
             return 0;
         case BLE_GAP_EVENT_DISCONNECT:
-            moy_hid_on_disconnect(&s_hid, event->disconnect.conn.conn_handle);
+            moy_hid_on_disconnect(s_h, event->disconnect.conn.conn_handle);
             return 0;
         case BLE_GAP_EVENT_NOTIFY_RX: {
             uint8_t buf[16];
             uint16_t n = OS_MBUF_PKTLEN(event->notify_rx.om);
             if (n <= sizeof(buf) && ble_hs_mbuf_to_flat(event->notify_rx.om, buf, n, &n) == 0) {
-                moy_hid_on_notify(&s_hid, event->notify_rx.conn_handle, event->notify_rx.attr_handle,
+                moy_hid_on_notify(s_h, event->notify_rx.conn_handle, event->notify_rx.attr_handle,
                                   buf, n);
             }
             return 0;
         }
         case BLE_GAP_EVENT_CONN_UPDATE:
             if (ble_gap_conn_find(event->conn_update.conn_handle, &desc) == 0) {
-                moy_hid_on_conn_update(&s_hid, event->conn_update.conn_handle, desc.conn_itvl,
+                moy_hid_on_conn_update(s_h, event->conn_update.conn_handle, desc.conn_itvl,
                                        event->conn_update.status);
             }
             return 0;
         case BLE_GAP_EVENT_ENC_CHANGE:
             if (ble_gap_conn_find(event->enc_change.conn_handle, &desc) == 0) {
-                moy_hid_on_enc_change(&s_hid, event->enc_change.conn_handle,
+                moy_hid_on_enc_change(s_h, event->enc_change.conn_handle,
                                       desc.sec_state.encrypted, desc.sec_state.bonded);
             }
             return 0;
@@ -379,7 +382,7 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
 
 static void tick_run(struct ble_npl_event *ev) {
     (void)ev;
-    moy_hid_tick(&s_hid);
+    moy_hid_tick(s_h);
     ble_npl_callout_reset(&s_tick, ble_npl_time_ms_to_ticks32(500));
 }
 
@@ -387,7 +390,7 @@ static void on_sync(void) {
     ble_hs_util_ensure_addr(0);
     ble_hs_id_infer_auto(0, &s_own_type);
     s_synced = true;
-    moy_hid_started(&s_hid, true, NULL);
+    moy_hid_started(s_h, true, NULL);
     ble_npl_callout_reset(&s_tick, ble_npl_time_ms_to_ticks32(500));
 }
 
@@ -407,15 +410,24 @@ static bool s_inited;
 moy_hid_t *moy_ble_hid(void) {
     if (!s_inited) {
         moy_input_t *t = moy_input_kernel();
+        if (s_h == NULL) {
+            s_h = heap_caps_calloc(1, sizeof(*s_h), MALLOC_CAP_SPIRAM);
+            if (s_h == NULL) {
+                s_h = heap_caps_calloc(1, sizeof(*s_h), MALLOC_CAP_8BIT);
+            }
+            if (s_h == NULL) {
+                return NULL;
+            }
+        }
         uint32_t h;
         if (t == NULL || moy_input_source(t, "ble", 0, &h) != MOY_INPUT_OK) {
             return NULL;
         }
-        moy_hid_init(&s_hid, &s_ops, t, h);
-        load(&s_hid);
+        moy_hid_init(s_h, &s_ops, t, h);
+        load(s_h);
         s_inited = true;
     }
-    return &s_hid;
+    return s_h;
 }
 
 bool moy_ble_start(void) {
@@ -423,7 +435,7 @@ bool moy_ble_start(void) {
         return false;
     }
     if (s_up) {
-        if (s_hid.enabled && s_hid.state == MOY_HID_DISABLED) {
+        if (s_h->enabled && s_h->state == MOY_HID_DISABLED) {
             post(V_ENABLE, NULL);
         }
         return true;
@@ -434,12 +446,12 @@ bool moy_ble_start(void) {
     // before NimBLE's first HCI command (esp-hosted-mcu#212).
     esp_hosted_connect_to_slave();
     if (esp_hosted_bt_controller_init() != ESP_OK || esp_hosted_bt_controller_enable() != ESP_OK) {
-        moy_hid_started(&s_hid, false, "the companion's BT controller did not start");
+        moy_hid_started(s_h, false, "the companion's BT controller did not start");
         return false;
     }
     #endif
     if (nimble_port_init() != ESP_OK) {
-        moy_hid_started(&s_hid, false, "NimBLE did not start");
+        moy_hid_started(s_h, false, "NimBLE did not start");
         return false;
     }
     ble_hs_cfg.reset_cb = on_reset;
@@ -475,7 +487,7 @@ void moy_ble_stop(void) {
     esp_hosted_bt_controller_deinit(false);
     #endif
     s_synced = false;
-    moy_hid_stopped(&s_hid);
+    moy_hid_stopped(s_h);
 }
 
 bool moy_ble_up(void) {
