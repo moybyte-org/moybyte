@@ -1896,3 +1896,20 @@ class _StubUpdate:
 
     def step(self):
         return False
+
+
+def test_the_link_wait_feeds_an_armed_watchdog_and_leaves_an_unarmed_one(
+        monkeypatch):
+    """A WEB CONSOLE start with no reachable network holds the frame for the
+    whole link wait; unfed, the kernel's task watchdog reset the Guition S3.
+    Fed only when the frame loop armed it: the first feed would subscribe."""
+    import types
+    sys.path.insert(0, str(MODULES))
+    import moy_ota
+    for armed in (True, False):
+        fed = []
+        k = types.SimpleNamespace(watchdog=lambda: (armed, 5000, 0, 0),
+                                  feed=lambda: fed.append(1))
+        monkeypatch.setitem(sys.modules, "moy_kernel", k)
+        moy_ota.wait_online(lambda: False, None, wait_ms=40, step_ms=10)
+        assert (len(fed) >= 4) is armed, (armed, fed)

@@ -27,6 +27,15 @@ with no moy_runtime cycle.
 import time
 
 from device_util import _diag_note
+
+
+def _keep_alive():
+    """moy_ota.keep_alive: the connect's poll holds the frame on purpose."""
+    try:
+        from moy_ota import keep_alive
+    except ImportError:  # pragma: no cover -- a build with no updater
+        return
+    keep_alive()
 try:
     from moy_net import wifi_password, wifi_remember
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -220,6 +229,7 @@ class DeviceWifi:
                     if self.wlan.isconnected():
                         ok = True
                         break
+                    _keep_alive()
                     time.sleep_ms(100)
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte wifi connect failed:", exc)

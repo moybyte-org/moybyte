@@ -62,6 +62,20 @@ ONLINE_WAIT_MS = 12000
 ONLINE_STEP_MS = 250
 
 
+def keep_alive():
+    """Feed the kernel's task watchdog when the frame loop has armed it: a
+    wait that holds the frame (the link wait, a connect's poll) is the console
+    waiting on purpose, and an unfed one past the timeout resets the board
+    (the Guition S3 under WEB CONSOLE with no reachable network). Unarmed, it
+    is left alone -- the first feed would subscribe the task."""
+    try:
+        import moy_kernel
+        if moy_kernel.watchdog()[0]:
+            moy_kernel.feed()
+    except Exception:  # noqa: BLE001 -- a build without the kernel's watchdog
+        pass
+
+
 def wait_online(online, autoconnect=None, wait_ms=ONLINE_WAIT_MS,
                 step_ms=ONLINE_STEP_MS):
     """Report the link, dialling saved credentials first and then WAITING.
@@ -86,6 +100,7 @@ def wait_online(online, autoconnect=None, wait_ms=ONLINE_WAIT_MS,
     """
     if online():
         return True
+    keep_alive()
     if autoconnect is not None:
         try:
             autoconnect()
@@ -96,6 +111,7 @@ def wait_online(online, autoconnect=None, wait_ms=ONLINE_WAIT_MS,
     for _ in range(max(1, wait_ms // step_ms)):
         if online():
             return True
+        keep_alive()
         if sleep_ms is not None:
             sleep_ms(step_ms)
         else:                              # host / CPython: no sleep_ms
