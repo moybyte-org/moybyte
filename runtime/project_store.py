@@ -44,10 +44,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio import AudioBank, AudioEngine
 try:
     from widgets import Pmem, Scenes, _err_text, _ticks_ms, _ticks_diff
-    from audio_session import _SilentAudio
+    from audio_session import AudioSessions, _SilentAudio
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, Scenes, _err_text, _ticks_ms, _ticks_diff
-    from runtime.audio_session import _SilentAudio
+    from runtime.audio_session import AudioSessions, _SilentAudio
 # The cart FORMAT's own codecs (SPEC.md 3.5 tile flags). Read from the store
 # module rather than transcribed: `ws.carts_store` may be absent (a bare test
 # workstation), and a second parser here is exactly the drift the one-body rule
@@ -105,6 +105,7 @@ class ProjectStore:
         self.pmem = None              # Pmem (persistent cart store) for the open cart
         self.scenes = None            # Scenes (#85): the open cart's placed-actor
                                       # scenes; make_api binds scene()/load_scene()
+        self.audio_sessions = AudioSessions()  # the run's audio: owner "cart"
 
     # -- builders -------------------------------------------------------------
 
@@ -233,6 +234,7 @@ class ProjectStore:
                 ws.audio.diag = bool(getattr(ws, "diag_live", False))
         else:
             ws.audio = _SilentAudio(engine)
+        self.audio_sessions.open("cart", ws.audio)
 
     # -- the undo journal (Stage 7 of docs/history/shell_ux_technical_plan_v1.md) -------
     #
