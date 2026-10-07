@@ -92,6 +92,17 @@ try:
     import moybuf as _moybuf
 except ImportError:
     _moybuf = None
+try:
+    import moy_glass as _glass_mod
+except ImportError:  # pragma: no cover - host tree: the package-relative lane
+    from runtime import moy_glass as _glass_mod
+
+# The glass's tables for this module's canvases (runtime/moy_glass.py): every
+# off-heap buffer a canvas lends -- a cart's layers, a paint image's bake --
+# is a BUF row on loan to an OWNER, and the layer pool is its pool.
+_GLASS = _glass_mod.Glass()
+_ROLE_LAYER = _glass_mod.ROLE_LAYER
+_ROLE_BAKE = _glass_mod.ROLE_BAKE
 
 # A bake at or above this many bytes is a full-surface buffer and never comes
 # off the gc heap while an allocator will serve it (_paint_bake_buf). The bar
@@ -100,12 +111,12 @@ except ImportError:
 # that has been up for a while, however much heap is free in total.
 _OFFHEAP_BAKE_BYTES = 64 * 1024
 
-# Off-heap paint bakes on loan to a running program (#186), owner -> [(img,
-# buf)]. Module-level for the reason _LAYER_POOL is: the canvas that BAKES an
-# image is often a layer's throwaway canvas, while the reclaim call arrives on
-# the root -- a per-canvas register would have leaked exactly the buffers a
-# scroll cart makes. Drained by release_bakes(owner) / reclaim_layers(owner).
-_LENT_BAKES = {}
+# Off-heap paint bakes on loan to a running program (#186): _GLASS's BUF rows
+# of role BAKE, held by their image. Module-wide for the reason the pool is:
+# the canvas that BAKES an image is often a layer's throwaway canvas, while the
+# reclaim call arrives on the root -- a per-canvas register would have leaked
+# exactly the buffers a scroll cart makes. Drained by release_bakes(owner) /
+# reclaim_layers(owner).
 
 # ...and the most one owner may hold at once. The cap is not tidiness, it is
 # the price of lending to memory a CART can mint: off-heap bytes have no
@@ -156,7 +167,7 @@ def _paint_bake_buf(img, nbytes):
     names an OWNER (`_owner`) and so has something that will hand the buffer
     back: a CART's images, whether the engine loaded them (cart_api's image())
     or the cart built them itself (its `Image`), reclaimed with the run; and
-    the Paint app's document, reclaimed when the app is left. _LENT_BAKES holds
+    the Paint app's document, reclaimed when the app is left. _GLASS holds
     the loan until release_bakes(owner) -- which reclaim_layers(owner) calls,
     so a dead run's bakes go back through the same seam, and the same two call
     sites, that already pool its layer buffers. An UNOWNED paint image (the
@@ -171,14 +182,17 @@ def _paint_bake_buf(img, nbytes):
     owner = getattr(img, "_owner", None)
     if _moybuf is None or owner is None or nbytes < _OFFHEAP_BAKE_BYTES:
         return _bake_buf(img, nbytes)
-    lent = _LENT_BAKES.setdefault(owner, [])
-    for i in range(len(lent)):
-        if lent[i][0] is img:
-            buf = lent[i][1]
+    glass = _GLASS
+    lent = glass.loans(owner, _ROLE_BAKE)
+    for h in lent:
+        row = glass.row(h)
+        if row[_glass_mod.HOLDER] is img:
+            buf = row[_glass_mod.BUF]
             if len(buf) == nbytes:
                 return buf
             _moybuf.free(buf)
-            lent.pop(i)
+            glass.give_back(h)
+            lent.remove(h)
             break
     if len(lent) >= _MAX_LENT_BAKES:
         return bytearray(nbytes)       # the gc heap, flatly: _bake_buf's own
@@ -188,16 +202,18 @@ def _paint_bake_buf(img, nbytes):
                                        # outcome worse than a refused bake
     buf = _moybuf.alloc(nbytes)
     if isinstance(buf, memoryview):     # a bytearray back means PSRAM said no
-        lent.append((img, buf))
+        glass.lend(buf, nbytes, _ROLE_BAKE, _glass_mod.ORIGIN_ALLOC, owner, img)
     return buf
 
 
 def _release_bakes(owner):
     """Free `owner`'s off-heap paint bakes (see _paint_bake_buf)."""
-    lent = _LENT_BAKES.pop(owner, None)
-    if not lent or _moybuf is None:
-        return
-    for img, buf in lent:
+    glass = _GLASS
+    for h in glass.loans(owner, _ROLE_BAKE):
+        row = glass.give_back(h)
+        if _moybuf is None:
+            continue
+        img, buf = row[_glass_mod.HOLDER], row[_glass_mod.BUF]
         if getattr(img, "_rgb_i", None) is buf:
             img._rgb_i = None     # a stale draw raises, never reads freed RAM
         _moybuf.free(buf)
@@ -517,8 +533,7 @@ _GATE_RECT, _GATE_RECTB, _GATE_PRINT, _GATE_PIX = 0, 1, 2, 3
 # board without moy_alloc.alloc has, cannot free at all. Only moy_alloc-backed
 # buffers are pooled (a gc-heap fallback bytearray is the collector's job);
 # nothing is ever dropped from the pool -- the set of distinct layer sizes
-# across carts is small and stable.
-_LAYER_POOL = {}
+# across carts is small and stable. The pool is _GLASS's, keyed by byte size.
 
 
 # Fold 2 (#63) knob: the map() auto-cache trades the per-cell blit_map walk for a
@@ -702,7 +717,6 @@ class DeviceCanvas:
         self._mapcache = None
         self._map_raster_count = 0
         self._map_hits = 0
-        self._lent_layers = None      # owner -> [(buf, nbytes)] pooled loans (#63 leak fix)
         # A hidden layer (new_layer) sets this True: a layer is a draw-ONCE scratch buffer
         # (the escape hatch's make_layer, or this cache's own hidden layer), so its own map()
         # rasters DIRECTLY -- never a nested cache (which would double the layer's PSRAM and
@@ -2813,14 +2827,13 @@ class DeviceCanvas:
         # Layer lending (#63 leak fix): a pooled (moy_alloc-backed) buffer created for a
         # program (`owner`: "cart" via make_api, "wallpaper" via the wallpaper runner,
         # "_mapcache" for Fold 2's hidden cache) is recorded so reclaim_layers(owner)
-        # can return it to _LAYER_POOL when that program dies. owner=None (console
+        # can return it to the pool when that program dies: a BUF row of role
+        # LAYER on loan to `owner`, held by this canvas. owner=None (console
         # chrome, tests) is never reclaimed.
         comp = lay._comp
         if owner is not None and comp.pooled:
-            lent = self._lent_layers
-            if lent is None:
-                lent = self._lent_layers = {}
-            lent.setdefault(owner, []).append((comp._buf, comp._nbytes))
+            _GLASS.lend(comp._buf, comp._nbytes, _ROLE_LAYER, comp._origin,
+                        owner, self)
         return lay
 
     def release(self):
@@ -2845,7 +2858,7 @@ class DeviceCanvas:
         _release_bakes(owner)
 
     def reclaim_layers(self, owner):
-        """Return a dead program's pooled layer buffers to _LAYER_POOL for reuse
+        """Return a dead program's pooled layer buffers to the pool for reuse
         (#63 leak fix: without this every cart re-run leaks its world from the
         heap_caps pool). Also drops the Fold-2 map cache (its hidden layer is
         program content) and any in-flight async layer copy. Callers probe via
@@ -2855,18 +2868,15 @@ class DeviceCanvas:
         self._lcopy_pred = None
         self._mapcache = None
         # #186: and the run's off-heap paint bakes, which are loans of the same
-        # kind. BEFORE the _lent_layers guard below -- a cart that painted a
-        # backdrop without ever calling make_layer has bakes to give back and
-        # no layers, and returning early there leaked every one of them.
+        # kind. BEFORE the layers below -- a cart that painted a backdrop
+        # without ever calling make_layer has bakes to give back and no
+        # layers, and stopping early there leaked every one of them.
         _release_bakes(owner)
-        lent = self._lent_layers
-        if not lent:
-            return
+        glass = _GLASS
         for own in (owner, "_mapcache"):
-            lst = lent.pop(own, None)
-            if lst:
-                for buf, n in lst:
-                    _LAYER_POOL.setdefault(n, []).append(buf)
+            for h in glass.loans(own, _ROLE_LAYER, self):
+                row = glass.give_back(h)
+                glass.pool_put(row[_glass_mod.NBYTES], row[_glass_mod.BUF])
 
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
         # Copy the visible self.w x self.h window of `layer` into the framebuffer at
@@ -3244,7 +3254,9 @@ class SystemCanvas(DeviceCanvas):
         return
 
 
-_ORIGIN_HEAP, _ORIGIN_POOL, _ORIGIN_ALLOC, _ORIGIN_DMA = 0, 1, 2, 3
+_ORIGIN_HEAP, _ORIGIN_POOL, _ORIGIN_ALLOC, _ORIGIN_DMA = (
+    _glass_mod.ORIGIN_HEAP, _glass_mod.ORIGIN_POOL, _glass_mod.ORIGIN_ALLOC,
+    _glass_mod.ORIGIN_DMA)
 
 
 class _LayerComp:
@@ -3282,9 +3294,8 @@ class _LayerComp:
         # (the registry-backed allocator, #186), a malloc_dma one (older
         # firmware: no free) and a gc-heap bytearray are simply dropped.
         origin = _ORIGIN_HEAP
-        free = _LAYER_POOL.get(nbytes)
-        if free:
-            buf = free.pop()          # a dead cart's buffer of the same dims -> reuse
+        buf = _GLASS.pool_take(nbytes)   # a dead cart's buffer of the same dims -> reuse
+        if buf is not None:
             pooled = True
             origin = _ORIGIN_POOL
         else:
@@ -3345,7 +3356,7 @@ class _LayerComp:
         self._buf = None
         origin = self._origin
         if origin == _ORIGIN_POOL:
-            _LAYER_POOL.setdefault(self._nbytes, []).append(buf)
+            _GLASS.pool_put(self._nbytes, buf)
         elif origin == _ORIGIN_ALLOC:
             try:
                 import moy_alloc

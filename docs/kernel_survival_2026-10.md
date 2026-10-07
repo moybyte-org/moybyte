@@ -74,8 +74,8 @@ suite run every pass, `tools/preflight.sh` before the report).
 
 | what | Python today (the twin after the carve) | C | pass |
 |---|---|---|---|
-| canvas rows, the off-heap buffer table, the pool, lending and bakes | `device/device_canvas.py`, `_LayerComp`, `_LAYER_POOL`, `_LENT_BAKES` (`+runtime/moy_glass.py`) | `+native/moy_glass/moy_canvas.h`, `+native/moy_glass/moy_buf.h` | 1 |
-| the surface table and the mint | `runtime/surface.py` (`+runtime/moy_glass.py`) | `+native/moy_glass/moy_surface.h` | 1 |
+| canvas rows, the off-heap buffer table, the pool, lending and bakes | `device/device_canvas.py`, `_LayerComp`, `_LAYER_POOL`, `_LENT_BAKES` (`runtime/moy_glass.py`) | `+native/moy_glass/moy_canvas.h`, `+native/moy_glass/moy_buf.h` | 1 |
+| the surface table and the mint | `runtime/surface.py` (`runtime/moy_glass.py`) | `+native/moy_glass/moy_surface.h` | 1 |
 | the banded compositor, the fold | `device/banded_panel.py`, `modules/tdeck_panel.py`, `modules/guition_panel.py` | `+native/moy_glass/moy_present_banded.c` over `native/moy_flush/` and each board's panel module | 1 |
 | the DSI compositor, rotated included | `device/dsi_panel.py`, `device/p4_canvas.py`, `modules/p4_display.py`, `modules/guition_p4_display.py` | `+native/moy_glass/moy_present_dsi.c` over `native/p4/moy_dsi/` and `native/p4/moy_ppa/`; the backlight is the panel entry sprint 2 gave the floor | 1 |
 | the palette | `runtime/palette.py` | the canvas's table in `moy_canvas.h` | 1 |
@@ -179,7 +179,7 @@ made here, not promised.
    passes need them on day one: the kernel's I2C bus object
    (`native/moy_kernel/moy_bus.c`: one master bus per board define, devices
    added by address) and the handle kinds of §3.1 in `native/moy_spine/moy_htab.h`.
-7. **The twins take the native call shapes.** `+runtime/moy_glass.py`: tables
+7. **The twins take the native call shapes.** `runtime/moy_glass.py`: tables
    of kind CANVAS, BUF, SURF and OWNER over `moy_spine.Table`, the pool keyed
    by byte size with an owner per loan, and `present`, `fence` and
    `present_pending` as the three verbs the compositors answer;

@@ -255,8 +255,8 @@ def _children(obj):
 
 def offheap(ws, depth=14, modules=None):
     """Every live registry buffer, named by the first path that reaches it:
-    `ws` first, then each module's globals (the pool and the loan register
-    are module dicts in device_canvas). Returns {"total": (count, bytes),
+    `ws` first, then each module's globals (the pool is device_canvas's
+    _GLASS.pool, its loans _GLASS's rows, walked through `lent()`). Returns {"total": (count, bytes),
     "owners": [(path, bytes)], "unowned": [(address, bytes)]}."""
     live_fn = getattr(_moy_alloc, "live", None) if _moy_alloc is not None else None
     if live_fn is None:
@@ -268,6 +268,9 @@ def offheap(ws, depth=14, modules=None):
     found = []
     seen = set()
     roots = [("device_canvas", mods.get("device_canvas")), ("ws", ws)]
+    glass = getattr(mods.get("device_canvas"), "_GLASS", None)
+    if glass is not None:
+        roots.insert(1, ("device_canvas._GLASS.lent()", glass.lent()))
     for name in sorted(mods):
         if name not in ("device_canvas", "mem_census"):
             roots.append((name, mods[name]))
@@ -299,15 +302,15 @@ def offheap(ws, depth=14, modules=None):
 
 
 def pool():
-    """device_canvas's _LAYER_POOL as {nbytes: buffers} and _LENT_BAKES as
-    {owner: bytes}, or None where the module is absent."""
+    """device_canvas's layer pool as {nbytes: buffers} and its bake loans as
+    {owner: bytes} (its moy_glass tables), or None where the module is
+    absent."""
     dc = sys.modules.get("device_canvas")
-    if dc is None:
+    glass = getattr(dc, "_GLASS", None)
+    if glass is None:
         return None
-    lp = {n: len(v) for n, v in getattr(dc, "_LAYER_POOL", {}).items()}
-    lb = {}
-    for owner, lst in getattr(dc, "_LENT_BAKES", {}).items():
-        lb[str(owner)] = sum(len(b) for _i, b in lst)
+    lp = {n: len(v) for n, v in glass.pool.items()}
+    lb = {str(k): v for k, v in glass.lent_bytes(dc._ROLE_BAKE).items()}
     return {"pool": lp, "lent_bakes": lb}
 
 

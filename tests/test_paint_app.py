@@ -351,7 +351,7 @@ def _lending(monkeypatch, art):
     loans = _Loans()
     monkeypatch.setattr(dc, "_moybuf", loans)
     monkeypatch.setattr(aw, "_moybuf", loans)
-    monkeypatch.setattr(dc, "_LENT_BAKES", {})
+    monkeypatch.setattr(dc, "_GLASS", dc._glass_mod.Glass())
     return loans, dc
 
 
@@ -431,7 +431,8 @@ def test_the_backdrop_is_one_screen_sized_bake_the_register_lends(tmp_path,
     assert isinstance(m._rgb_i, memoryview) and len(m._rgb_i) == 153600
     assert len(m._rgb_i) >= device_canvas._OFFHEAP_BAKE_BYTES
     assert loans.stats() == (2, 320 * 240 * 3)
-    assert [len(b) for _i, b in device_canvas._LENT_BAKES["wallpaper_bg"]] == [153600]
+    assert [len(b) for _i, b in device_canvas._GLASS.held(
+        "wallpaper_bg", device_canvas._ROLE_BAKE)] == [153600]
 
     # Redrawing reuses both -- the desktop draws this every frame it paints.
     for _ in range(5):
@@ -467,7 +468,8 @@ def test_the_backdrops_loan_comes_back_on_every_wallpaper_change(tmp_path,
         ws.look.select_wallpaper("fill:black", persist=False)
         # The bake is back; the indices, and the bitmap, are still cached.
         assert loans.stats() == (1, 320 * 240), "the bake outlived its backdrop"
-        assert device_canvas._LENT_BAKES.get("wallpaper_bg") in (None, [])
+        assert device_canvas._GLASS.held("wallpaper_bg",
+                                         device_canvas._ROLE_BAKE) == []
         assert art._wall_bitmap is not None and art._wall_bitmap.pix is indices
         assert art._wall_bitmap._rgb_i is None, "a stale draw must re-bake"
 

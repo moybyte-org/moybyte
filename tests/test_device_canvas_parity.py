@@ -1208,13 +1208,13 @@ def test_release_bakes_returns_the_loan_and_leaves_the_layers_alone():
     img = _owned_paint_image(m, 320, 240, owner="artwork")
     dev.spr(img, 0, 0)
     dev._mapcache = object()
-    dev._lent_layers = {"cart": [(bytearray(8), 8)]}
+    m._GLASS.lend(bytearray(8), 8, m._ROLE_LAYER, m._ORIGIN_POOL, "cart", dev)
 
     dev.release_bakes("artwork")
     assert tr.freed == 1 and not tr.live
     assert img._rgb_i is None
     assert dev._mapcache is not None, "release_bakes is not reclaim_layers"
-    assert dev._lent_layers.get("cart"), "nor does it pool a cart's layers"
+    assert m._GLASS.loans("cart", m._ROLE_LAYER, dev), "nor does it pool a cart's layers"
 
     dev.release_bakes("artwork")        # idempotent: nothing lent, nothing freed
     assert tr.freed == 1
@@ -1990,7 +1990,7 @@ def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
     fake_alloc.MEMORY_DMA = 2
     monkeypatch.setitem(sys.modules, "moy_alloc", fake_alloc)
     g = m.DeviceCanvas.__init__.__globals__       # the device module's namespace
-    monkeypatch.setitem(g, "_LAYER_POOL", {})
+    monkeypatch.setitem(g, "_GLASS", m._glass_mod.Glass())
     cv = m.DeviceCanvas(_FakeComp(W, H))
     lay1 = cv.new_layer(64, 32, owner="cart")
     assert lay1._comp.pooled, "the stubbed allocator path must mark the buffer pooled"
@@ -1998,7 +1998,7 @@ def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
     # An unowned (console) layer is never lent/reclaimed.
     lay_console = cv.new_layer(64, 32)
     cv.reclaim_layers("cart")                     # the cart died (Player.start)
-    assert g["_LAYER_POOL"].get(64 * 32 * 2), "the cart buffer returns to the pool"
+    assert g["_GLASS"].pool.get(64 * 32 * 2), "the cart buffer returns to the pool"
     lay2 = cv.new_layer(64, 32, owner="cart")     # next run, same dims
     assert lay2._comp._buf is buf1, "the next same-dims layer must REUSE the buffer"
     assert lay_console._comp._buf is not buf1, "console layers stay untouched"
@@ -2313,14 +2313,14 @@ def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
     m, _host, dev = _both(True)
     tr = _BakeTracker()
     m._moybuf = tr
-    m._LENT_BAKES = {}
+    m._GLASS = m._glass_mod.Glass()
 
     img = _owned_paint_image(m, 320, 240, owner="wallpaper_bg")
     img.pix = memoryview(bytearray(img.pix))     # off-heap pixels, as the backdrop has
     dev.spr(img, 0, 0)
     assert isinstance(img._rgb_i, memoryview), "the full-screen bake stayed on the heap"
     assert len(tr.live) == 1, "the bake was lent twice, or not at all"
-    assert [b for _i, b in m._LENT_BAKES["wallpaper_bg"]] == [img._rgb_i]
+    assert [b for _i, b in m._GLASS.held("wallpaper_bg", m._ROLE_BAKE)] == [img._rgb_i]
 
     # The scaled lane bakes a pre-scaled copy the register does not track, so
     # for an OWNED image it takes the gc heap rather than an untracked loan.
@@ -2340,7 +2340,7 @@ def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
     cover.pix = memoryview(bytearray(cover.pix))
     dev.spr(cover, 0, 0)
     assert isinstance(cover._rgb_i, memoryview)
-    assert m._LENT_BAKES == {}, "an unowned image must never enter the register"
+    assert m._GLASS.bufs.count() == 0, "an unowned image must never enter the register"
 
 
 # --------------------------------------------------------------------------- #

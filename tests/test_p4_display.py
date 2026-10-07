@@ -1309,7 +1309,7 @@ def test_a_layer_gives_its_off_heap_buffer_back_on_release():
     saved_bus = sys.modules.get("lcd_bus")
     sys.modules["moy_alloc"] = fake
     sys.modules["lcd_bus"] = None                 # -> ImportError: caps from moy_alloc
-    pool = dc._LAYER_POOL
+    pool = dc._GLASS.pool
     n = 64 * 32 * 2
     pool.pop(n, None)
     try:

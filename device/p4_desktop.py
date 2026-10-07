@@ -29,6 +29,7 @@ from card_store import carts_loader
 from desktop_spine import build_desktop, bt_command
 from device_util import _ticks_ms, _ticks_diff
 from p4_canvas import P4SystemCanvas
+import moy_glass
 import wire_input
 import wire_links
 
@@ -121,7 +122,7 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
         # been DMAing through the input poll): wait the DMA, switch scan-out
         # to it, free the other buffer. No-op unless the last frame deferred.
         # Must precede sync_back, which re-points at the freed buffer.
-        comp.present_pending()
+        moy_glass.present_pending(comp)
         game.sync_back()           # off-screen: contract no-op
         sys_canvas.sync_back()     # double-buffer: re-point at the new BACK fb
 
