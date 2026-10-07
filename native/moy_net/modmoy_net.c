@@ -1,6 +1,7 @@
 // moy_net for MicroPython: the wire's pure half (moy_net.h) as the module the
 // boards and the browser import, name for name with runtime/net_binding.py.
 
+#include <stdio.h>
 #include <string.h>
 
 #include "py/objarray.h"
@@ -345,6 +346,93 @@ MP_DEFINE_CONST_OBJ_TYPE(moy_net_link_type, MP_QSTR_Link, MP_TYPE_FLAG_NONE,
 
 #endif
 
+
+#if defined(MOY_NET_WIFI) && MOY_NET_WIFI
+
+// The WiFi driver's face (moy_wifi.c): device/device_wifi.py's service and
+// the link call these; the spine's lease is what calls wifi_on and wifi_off.
+
+static void wcheck(int err) {
+    if (err != 0) {
+        mp_raise_OSError(err);
+    }
+}
+
+static mp_obj_t mod_wifi_on(void) {
+    wcheck(moy_wifi_on());
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_on_obj, mod_wifi_on);
+
+static mp_obj_t mod_wifi_off(void) {
+    moy_wifi_off();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_off_obj, mod_wifi_off);
+
+static mp_obj_t mod_wifi_connect(mp_obj_t ssid, mp_obj_t password) {
+    wcheck(moy_wifi_connect(mp_obj_str_get_str(ssid),
+                            password == mp_const_none ? "" : mp_obj_str_get_str(password)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_wifi_connect_obj, mod_wifi_connect);
+
+static mp_obj_t mod_wifi_disconnect(void) {
+    moy_wifi_disconnect();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_disconnect_obj, mod_wifi_disconnect);
+
+// (driver, on, connected, ssid or None, ip or None, last disconnect reason)
+static mp_obj_t mod_wifi_status(void) {
+    moy_wifi_state_t st;
+    moy_wifi_state(&st);
+    mp_obj_t ip = mp_const_none;
+    if (st.connected && st.ip) {
+        char b[16];
+        int n = snprintf(b, sizeof(b), "%u.%u.%u.%u", (unsigned)(st.ip & 0xff),
+                         (unsigned)((st.ip >> 8) & 0xff), (unsigned)((st.ip >> 16) & 0xff),
+                         (unsigned)(st.ip >> 24));
+        ip = mp_obj_new_str(b, (size_t)n);
+    }
+    mp_obj_t t[6] = {mp_obj_new_bool(st.driver), mp_obj_new_bool(st.on),
+                     mp_obj_new_bool(st.connected),
+                     st.ssid[0] ? mp_obj_new_str(st.ssid, strlen(st.ssid)) : mp_const_none,
+                     ip, MP_OBJ_NEW_SMALL_INT(st.reason)};
+    return mp_obj_new_tuple(6, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_status_obj, mod_wifi_status);
+
+// [(ssid bytes, rssi, auth)], [] while the radio is down.
+static mp_obj_t mod_wifi_scan(void) {
+    moy_wifi_ap_t *aps = m_new(moy_wifi_ap_t, MOY_WIFI_SCAN_MAX);
+    int n = moy_wifi_scan(aps, MOY_WIFI_SCAN_MAX);
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (int i = 0; i < n; i++) {
+        mp_obj_t t[3] = {mp_obj_new_bytes((const byte *)aps[i].ssid, strlen(aps[i].ssid)),
+                         MP_OBJ_NEW_SMALL_INT(aps[i].rssi), MP_OBJ_NEW_SMALL_INT(aps[i].auth)};
+        mp_obj_list_append(out, mp_obj_new_tuple(3, t));
+    }
+    m_del(moy_wifi_ap_t, aps, MOY_WIFI_SCAN_MAX);
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_scan_obj, mod_wifi_scan);
+
+static mp_obj_t mod_wifi_mac(void) {
+    uint8_t mac[6];
+    wcheck(moy_wifi_mac(mac));
+    return mp_obj_new_bytes(mac, 6);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_mac_obj, mod_wifi_mac);
+
+static mp_obj_t mod_wifi_ps(size_t n_args, const mp_obj_t *args) {
+    int v = moy_wifi_ps(n_args > 0 ? (int)mp_obj_get_int(args[0]) : -1);
+    return v < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wifi_ps_obj, 0, 1, mod_wifi_ps);
+
+#endif
+
 static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_net)},
     {MP_ROM_QSTR(MP_QSTR_parse_request), MP_ROM_PTR(&mod_parse_request_obj)},
@@ -354,6 +442,16 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_decode_batch), MP_ROM_PTR(&mod_decode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_password), MP_ROM_PTR(&mod_wifi_password_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_remember), MP_ROM_PTR(&mod_wifi_remember_obj)},
+    #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
+    {MP_ROM_QSTR(MP_QSTR_wifi_on), MP_ROM_PTR(&mod_wifi_on_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_off), MP_ROM_PTR(&mod_wifi_off_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_connect), MP_ROM_PTR(&mod_wifi_connect_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_disconnect), MP_ROM_PTR(&mod_wifi_disconnect_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_status), MP_ROM_PTR(&mod_wifi_status_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_scan), MP_ROM_PTR(&mod_wifi_scan_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_mac), MP_ROM_PTR(&mod_wifi_mac_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_ps), MP_ROM_PTR(&mod_wifi_ps_obj)},
+    #endif
     #if defined(MOY_NET_LINK) && MOY_NET_LINK
     {MP_ROM_QSTR(MP_QSTR_Link), MP_ROM_PTR(&moy_net_link_type)},
     {MP_ROM_QSTR(MP_QSTR_RATE_54M), MP_ROM_INT(WIFI_PHY_RATE_54M)},

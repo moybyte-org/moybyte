@@ -96,7 +96,7 @@ def test_the_fuzz_walk_holds_under_the_sanitizers(tmp_path):
         [cc, "-std=c99", "-g", "-O1", "-fsanitize=address,undefined",
          "-fno-sanitize-recover=all", "-I", NET, "-I", SPINE,
          os.path.join(NET, "fuzz_net.c"), os.path.join(NET, "moy_http.c"),
-         os.path.join(NET, "moy_sync.c"), os.path.join(NET, "moy_wifi.c"),
+         os.path.join(NET, "moy_sync.c"),
          os.path.join(NET, "moy_link.c"),
          os.path.join(SPINE, "moy_json.c"), "-o", exe],
         capture_output=True, text=True)

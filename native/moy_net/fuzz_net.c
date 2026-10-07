@@ -5,7 +5,6 @@
 //   cc -std=c99 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
 //      -I native/moy_net -I native/moy_spine native/moy_net/fuzz_net.c \
 //      native/moy_net/moy_http.c native/moy_net/moy_sync.c \
-//      native/moy_net/moy_wifi.c native/moy_net/moy_link.c \
 //      native/moy_spine/moy_json.c -o fuzz_net
 //   ./fuzz_net SEED ROUNDS
 

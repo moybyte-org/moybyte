@@ -153,9 +153,12 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   and `carts` (the Get Carts app while it fetches an index or a cart).
   A new network consumer takes a tag and releases it on every way out, or the
   radio never goes off again — `tests/test_wifi.py`'s lease section is the
-  guard and `state`'s `wifi_held` names the holders. Constructing `network.WLAN`
-  initialises the driver, so `radio_off` never constructs one. The Zero is
-  outside this: WiFi is its only I/O.
+  guard and `state`'s `wifi_held` names the holders. On the consoles the
+  station is the kernel's driver (`native/moy_net/moy_wifi.c`, reached through
+  `device_wifi.kernel_wlan`; Python never constructs the port's `network.WLAN`),
+  it outlives a soft reset, and a new VM puts it down unless the kernel's
+  ESP-NOW link rides it. The Zero is outside this: WiFi is its only I/O, and
+  it keeps the port's station for its setup access point.
 - **On the T-Deck SD shares the SPI host with the display, and getting it wrong
   HANGS the board** — gray screen, dead USB, no panic (the P4 boards' and the
   Guition S3's cards have a host of their own, mounted by

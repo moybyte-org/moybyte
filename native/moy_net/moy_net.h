@@ -13,6 +13,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 // -- HTTP ----------------------------------------------------------------------
 
@@ -97,7 +98,9 @@ size_t moy_sync_encode(char *out, size_t cap, const char *v, size_t v_n,
 // a stored one is not. The panel's known-network reconnect passes "" (it has
 // no credential access), and associating with "" AND remembering it destroyed
 // the saved password (the on-glass P4, 2026-07-25).
-int moy_wifi_use_stored(size_t password_n, size_t stored_n);
+static inline int moy_wifi_use_stored(size_t password_n, size_t stored_n) {
+    return password_n == 0 && stored_n != 0;
+}
 
 // Whether a connect's credentials are written to the store: when the radio
 // ASSOCIATED, or when a non-blank password differs from the stored one
@@ -107,7 +110,59 @@ int moy_wifi_use_stored(size_t password_n, size_t stored_n);
 // wifi.json as a single empty-password entry. A non-blank password is kept
 // even on failure: the connect's short poll giving up is the late association
 // the updater's ensure_online waits for.
-int moy_wifi_remember(int ok, const char *password, size_t password_n,
-                      const char *stored, size_t stored_n);
+static inline int moy_wifi_remember(int ok, const char *password,
+                                    size_t password_n, const char *stored,
+                                    size_t stored_n) {
+    if (ok) {
+        return 1;
+    }
+    if (password_n == 0) {
+        return 0;
+    }
+    return stored == NULL || stored_n != password_n
+           || memcmp(password, stored, password_n) != 0;
+}
+
+// -- the WiFi driver (a board that defines MOY_NET_WIFI) -------------------------
+
+#ifdef ESP_PLATFORM
+#include "py/mpconfig.h"            // the board's MOY_NET_WIFI (mpconfigboard.h)
+#endif
+
+#if defined(MOY_NET_WIFI) && MOY_NET_WIFI
+
+typedef struct {
+    uint8_t driver;         // initialised this boot (one-way: its RAM stays)
+    uint8_t on;             // started: the radio is up
+    uint8_t connected;      // associated and holding an address
+    uint8_t reason;         // the last disconnect's reason, 0 after an address
+    uint32_t ip;            // network order, 0 when none
+    char ssid[33];          // the network last asked for
+} moy_wifi_state_t;
+
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+    uint8_t auth;           // 0 open
+} moy_wifi_ap_t;
+
+#define MOY_WIFI_SCAN_MAX 24
+
+// Up and down are the lease's halves: the spine's WiFi lease calls them, and
+// nothing else starts or stops the radio. A connect is asked once and kept
+// (the driver re-associates on a loss) until a disconnect or the radio goes
+// down; its result is the state, polled.
+int moy_wifi_on(void);
+void moy_wifi_off(void);
+int moy_wifi_connect(const char *ssid, const char *password);
+void moy_wifi_disconnect(void);
+void moy_wifi_state(moy_wifi_state_t *out);
+// A blocking scan into `out`: the count, or -1 when the radio is down.
+int moy_wifi_scan(moy_wifi_ap_t *out, int max);
+int moy_wifi_mac(uint8_t mac[6]);
+// The power-save mode, set first when `set` is 0 or more; -1 before the driver.
+int moy_wifi_ps(int set);
+
+#endif
 
 #endif // MOY_NET_H

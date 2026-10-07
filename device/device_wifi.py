@@ -33,8 +33,87 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.net_binding import wifi_password, wifi_remember
 
 
+def _rest_after_vm_start():
+    """A new VM starts with no lease held, but the kernel's station outlives a
+    soft reset: put it down unless the kernel's ESP-NOW link, which rides it,
+    is up. Without this a Ctrl-D left the radio associated with nobody holding
+    it."""
+    try:
+        import moy_net
+        if not hasattr(moy_net, "wifi_status") or not moy_net.wifi_status()[1]:
+            return
+        link = getattr(moy_net, "Link", None)
+        if link is not None and link().stats()[5]:
+            return
+        moy_net.wifi_off()
+    except Exception as exc:  # noqa: BLE001 -- the console boots regardless
+        _diag_note("wifi", "rest after start failed: %s" % (exc,))
+
+
+class KernelWlan:
+    """The station as the kernel's WiFi driver serves it (native/moy_net/
+    moy_wifi.c), in the shape of the port's network.WLAN that this service and
+    the link were written against. Constructing one initialises nothing;
+    active(True) is the driver's start, active(False) its stop."""
+
+    PM_NONE = 0
+
+    def __init__(self):
+        import moy_net
+        self._n = moy_net
+
+    def active(self, on=None):
+        if on is True or on == 1:
+            self._n.wifi_on()
+        elif on is not None:
+            self._n.wifi_off()
+        return self._n.wifi_status()[1]
+
+    def scan(self):
+        return [(s, b"", 0, rssi, auth, False) for s, rssi, auth in self._n.wifi_scan()]
+
+    def connect(self, ssid, password=""):
+        self._n.wifi_connect(ssid, password or "")
+
+    def disconnect(self):
+        self._n.wifi_disconnect()
+
+    def isconnected(self):
+        return self._n.wifi_status()[2]
+
+    def ifconfig(self):
+        ip = self._n.wifi_status()[4] or "0.0.0.0"
+        return (ip, "255.255.255.0", "0.0.0.0", "0.0.0.0")
+
+    def config(self, key=None, **kw):
+        if "pm" in kw:
+            self._n.wifi_ps(kw["pm"])
+            return None
+        if key == "essid":
+            return self._n.wifi_status()[3] or ""
+        if key == "mac":
+            return self._n.wifi_mac()
+        if key == "pm":
+            return self._n.wifi_ps()
+        raise ValueError(key)
+
+
+def kernel_wlan():
+    """The station: the kernel's driver where the image has one, else the
+    port's network.WLAN (the Zero, which serves its setup access point
+    through the port's)."""
+    try:
+        import moy_net
+        if hasattr(moy_net, "wifi_on"):
+            return KernelWlan()
+    except ImportError:
+        pass
+    import network
+    return network.WLAN(network.STA_IF)
+
+
 class DeviceWifi:
-    """network.WLAN(STA_IF) wrapper. `store`/`root` are the moy_carts credential
+    """The station service over kernel_wlan(). `store`/`root` are the moy_carts credential
     store + carts dir; connect()/forget() persist there so the next boot can
     autoconnect."""
 
@@ -52,14 +131,14 @@ class DeviceWifi:
         # stops the radio but the driver keeps its internal-RAM allocation, so a
         # measurement of the idle desk's internal SRAM has to know.
         self.driver_up = False
+        _rest_after_vm_start()
 
     def _ensure_wlan(self):
         """Bring the radio up on demand (never at boot -- see __init__)."""
         if self.wlan is not None:
             return self.wlan
         try:
-            import network
-            self.wlan = network.WLAN(network.STA_IF)
+            self.wlan = kernel_wlan()
             self.driver_up = True
             self.wlan.active(True)
         except Exception as exc:  # noqa: BLE001 -- no radio / no network module -> degrade
@@ -163,7 +242,7 @@ class DeviceWifi:
         Eager on purpose -- every holder scans or connects right after, and the
         ESP-NOW link must find THIS service owning the interface it activates,
         because radio_off() below only ever touches a handle this service
-        holds: constructing network.WLAN is what initialises the driver."""
+        holds: an interface's first start is what initialises the driver."""
         return self._ensure_wlan() is not None
 
     def radio_off(self):
@@ -239,7 +318,7 @@ class DeviceWifi:
 
 
 def make_wifi(store=None, root=None):
-    """Injected backend factory (#38): the device network.WLAN service over the
+    """Injected backend factory (#38): the device station service over the
     moy_carts store. run_desktop hands this to the shared Workstation -- the mirror
     of the host's make_wifi."""
     return DeviceWifi(store, root)

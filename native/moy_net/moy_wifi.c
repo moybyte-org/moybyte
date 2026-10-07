@@ -1,21 +1,191 @@
-// The WiFi driver's credential rules (moy_net.h).
+// The WiFi driver (moy_net.h). Its credential rules are moy_net.h's, inline:
+// the port compiles a usermod into the elf and into main, and a file whose
+// content is a board define must define nothing else.
 
 #include <string.h>
 
 #include "moy_net.h"
 
-int moy_wifi_use_stored(size_t password_n, size_t stored_n) {
-    return password_n == 0 && stored_n != 0;
+#if defined(MOY_NET_WIFI) && MOY_NET_WIFI
+
+#include "esp_event.h"
+#include "esp_heap_caps.h"
+#include "esp_netif.h"
+#include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+
+// The driver's life (docs/kernel_survival_2026-10.md section 6.1): one
+// station, brought up the first time a holder of the spine's lease asks and
+// stopped when the last lets go. Its state is written by the event task's
+// handlers and read by anyone, a word at a time under the latch.
+static portMUX_TYPE s_latch = portMUX_INITIALIZER_UNLOCKED;
+static moy_wifi_state_t s_st;
+static esp_netif_t *s_netif;
+static volatile int s_want;             // a connect is asked for: retry on loss
+
+static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        s_st.on = 1;
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_STOP) {
+        s_st.on = 0;
+        s_st.connected = 0;
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *d = data;
+        portENTER_CRITICAL(&s_latch);
+        s_st.connected = 0;
+        s_st.ip = 0;
+        s_st.reason = d ? d->reason : 0;
+        portEXIT_CRITICAL(&s_latch);
+        if (s_want) {
+            esp_wifi_connect();
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        const ip_event_got_ip_t *g = data;
+        portENTER_CRITICAL(&s_latch);
+        s_st.ip = g ? g->ip_info.ip.addr : 0;
+        s_st.connected = 1;
+        s_st.reason = 0;
+        portEXIT_CRITICAL(&s_latch);
+    }
 }
 
-int moy_wifi_remember(int ok, const char *password, size_t password_n,
-                      const char *stored, size_t stored_n) {
-    if (ok) {
-        return 1;
+static int driver(void) {
+    if (s_st.driver) {
+        return ESP_OK;
     }
-    if (password_n == 0) {
-        return 0;
+    esp_err_t e = esp_netif_init();
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
+        return e;
     }
-    return stored == NULL || stored_n != password_n
-           || memcmp(password, stored, password_n) != 0;
+    e = esp_event_loop_create_default();
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
+        return e;
+    }
+    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, NULL, NULL);
+    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, NULL, NULL);
+    s_netif = esp_netif_create_default_wifi_sta();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    e = esp_wifi_init(&cfg);
+    if (e != ESP_OK) {
+        return e;
+    }
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    e = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (e == ESP_OK) {
+        s_st.driver = 1;
+    }
+    return e;
 }
+
+int moy_wifi_on(void) {
+    int e = driver();
+    if (e != ESP_OK) {
+        return e;
+    }
+    e = esp_wifi_start();
+    if (e == ESP_OK) {
+        s_st.on = 1;
+    }
+    return e;
+}
+
+void moy_wifi_off(void) {
+    if (!s_st.driver) {
+        return;
+    }
+    s_want = 0;
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    portENTER_CRITICAL(&s_latch);
+    s_st.on = 0;
+    s_st.connected = 0;
+    s_st.ip = 0;
+    s_st.ssid[0] = '\0';
+    portEXIT_CRITICAL(&s_latch);
+}
+
+int moy_wifi_connect(const char *ssid, const char *password) {
+    int e = moy_wifi_on();
+    if (e != ESP_OK) {
+        return e;
+    }
+    wifi_config_t c;
+    memset(&c, 0, sizeof(c));
+    size_t n = strlen(ssid), p = strlen(password);
+    if (n == 0 || n > sizeof(c.sta.ssid) || p >= sizeof(c.sta.password)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memcpy(c.sta.ssid, ssid, n);
+    memcpy(c.sta.password, password, p);
+    s_want = 0;
+    esp_wifi_disconnect();
+    e = esp_wifi_set_config(WIFI_IF_STA, &c);
+    if (e != ESP_OK) {
+        return e;
+    }
+    portENTER_CRITICAL(&s_latch);
+    memcpy(s_st.ssid, ssid, n);
+    s_st.ssid[n] = '\0';
+    portEXIT_CRITICAL(&s_latch);
+    s_want = 1;
+    return esp_wifi_connect();
+}
+
+void moy_wifi_disconnect(void) {
+    s_want = 0;
+    if (s_st.driver) {
+        esp_wifi_disconnect();
+    }
+}
+
+void moy_wifi_state(moy_wifi_state_t *out) {
+    portENTER_CRITICAL(&s_latch);
+    *out = s_st;
+    portEXIT_CRITICAL(&s_latch);
+}
+
+int moy_wifi_scan(moy_wifi_ap_t *out, int max) {
+    if (!s_st.on) {
+        return -1;
+    }
+    if (esp_wifi_scan_start(NULL, true) != ESP_OK) {
+        return -1;
+    }
+    uint16_t n = (uint16_t)max;
+    wifi_ap_record_t *recs = heap_caps_malloc(sizeof(*recs) * (size_t)max,
+                                              MALLOC_CAP_SPIRAM);
+    if (recs == NULL) {
+        esp_wifi_clear_ap_list();
+        return -1;
+    }
+    if (esp_wifi_scan_get_ap_records(&n, recs) != ESP_OK) {
+        heap_caps_free(recs);
+        return -1;
+    }
+    for (int i = 0; i < n; i++) {
+        memcpy(out[i].ssid, recs[i].ssid, sizeof(out[i].ssid));
+        out[i].ssid[sizeof(out[i].ssid) - 1] = '\0';
+        out[i].rssi = recs[i].rssi;
+        out[i].auth = (uint8_t)recs[i].authmode;
+    }
+    heap_caps_free(recs);
+    return n;
+}
+
+int moy_wifi_mac(uint8_t mac[6]) {
+    int e = driver();
+    return e != ESP_OK ? e : esp_wifi_get_mac(WIFI_IF_STA, mac);
+}
+
+int moy_wifi_ps(int set) {
+    if (!s_st.driver) {
+        return -1;
+    }
+    if (set >= 0) {
+        esp_wifi_set_ps((wifi_ps_type_t)set);
+    }
+    wifi_ps_type_t ps;
+    return esp_wifi_get_ps(&ps) == ESP_OK ? (int)ps : -1;
+}
+
+#endif

@@ -242,8 +242,8 @@ class EspNowLink:
             return True
         try:
             if self.wlan is None:
-                import network
-                self.wlan = network.WLAN(network.STA_IF)
+                from device_wifi import kernel_wlan
+                self.wlan = kernel_wlan()
             # Every start, not only the first: the console's radio lease
             # (Workstation.wifi_release) stops the interface between matches,
             # and ESP-NOW on a stopped WiFi raises. Idempotent when it is up.

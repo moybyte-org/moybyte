@@ -19,6 +19,10 @@
 // the link reports it down.
 #define MICROPY_PY_ESPNOW                (0)
 #define MOY_NET_LINK                     (1)
+// The WiFi driver is the kernel's too (native/moy_net/moy_wifi.c): the station
+// starts and stops as the spine's lease asks, and Python never constructs the
+// port's network.WLAN on this board.
+#define MOY_NET_WIFI                     (1)
 
 #define MICROPY_HW_ENABLE_SDCARD            (1)
 

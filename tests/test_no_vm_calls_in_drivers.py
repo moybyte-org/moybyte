@@ -15,7 +15,7 @@ NET = os.path.join(ROOT, "native", "moy_net")
 
 # Every moy_net source but the module face (modmoy_net.c) and the fuzz driver.
 DRIVERS = ("moy_http.c", "moy_sync.c", "moy_wifi.c", "moy_link.c", "moy_link.h",
-           "moy_net.h")
+           "moy_net.h", "moy_net_host.c")
 
 CONSOLES = {
     "lilygo_t_deck_plus_mainline": "MOYBYTE_TDECK",
@@ -61,3 +61,18 @@ def test_a_console_image_leaves_the_ports_espnow_out(board):
         code = _code(f.read())
     assert re.search(r"#define\s+MICROPY_PY_ESPNOW\s+\(0\)", code), board
     assert re.search(r"#define\s+MOY_NET_LINK\s+\(1\)", code), board
+    assert re.search(r"#define\s+MOY_NET_WIFI\s+\(1\)", code), board
+
+
+def test_only_the_station_fallback_constructs_the_ports_wlan():
+    """The consoles' station is the kernel's driver; device_wifi.kernel_wlan is
+    the one place the port's network.WLAN may appear, as the Zero's fallback."""
+    import glob
+    hits = []
+    for path in glob.glob(os.path.join(ROOT, "device", "*.py")) + \
+            glob.glob(os.path.join(ROOT, "runtime", "*.py")):
+        with open(path) as f:
+            for n, line in enumerate(f, 1):
+                if "network.WLAN(" in line and not line.lstrip().startswith("#"):
+                    hits.append("%s:%d" % (os.path.relpath(path, ROOT), n))
+    assert [h.split(":")[0] for h in hits] == ["device/device_wifi.py"], hits

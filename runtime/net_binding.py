@@ -27,9 +27,9 @@ from . import native_build
 
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
-_SHIM = os.path.join(_NET, "moy_http.c")
+_SHIM = os.path.join(_NET, "moy_net_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_net")
-_SOURCES = ("moy_net.h", "moy_sync.c", "moy_wifi.c", "moy_json.h", "moy_json.c")
+_SOURCES = ("moy_net.h", "moy_http.c", "moy_sync.c", "moy_json.h", "moy_json.c")
 _LIB = [None]
 
 _P = ctypes.c_char_p
@@ -59,8 +59,8 @@ _SIGS = (
     ("moy_sync_decode", [ctypes.c_void_p, _Z, ctypes.POINTER(_Env)], _I),
     ("moy_sync_encode", [ctypes.c_void_p, _Z, _P, _Z, _P, _Z, _P, _Z, _P, _Z],
      _Z),
-    ("moy_wifi_use_stored", [_Z, _Z], _I),
-    ("moy_wifi_remember", [_I, _P, _Z, _P, _Z], _I),
+    ("moy_net_host_use_stored", [_Z, _Z], _I),
+    ("moy_net_host_remember", [_I, _P, _Z, _P, _Z], _I),
 )
 
 
@@ -105,7 +105,7 @@ def _text(raw):
 def wifi_password(password, stored):
     """The password a connect to a network uses: the stored one when the one
     given is empty."""
-    use = _lib().moy_wifi_use_stored(len(password or ""), len(stored or ""))
+    use = _lib().moy_net_host_use_stored(len(password or ""), len(stored or ""))
     return stored if use else password
 
 
@@ -113,7 +113,7 @@ def wifi_remember(ok, password, stored):
     """Whether a connect's credentials are written to the store."""
     p = _bytes(password or "")
     s = None if stored is None else _bytes(stored)
-    return bool(_lib().moy_wifi_remember(1 if ok else 0, p, len(p), s,
+    return bool(_lib().moy_net_host_remember(1 if ok else 0, p, len(p), s,
                                          0 if s is None else len(s)))
 
 
