@@ -380,7 +380,7 @@ print("CLOCK", 1 if _t0 >= 5000 else 0, 1 if _t1 > _t0 else 0)
 moycore.close()
 
 # THE POINTER, through the BOARDS' OWN h_touch. The snapshot slot carries
-# widgets.py's P_LIVE/P_HELD/P_CLICK as flags, because h_touch has one slot and
+# moy_input.py's P_LIVE/P_HELD/P_CLICK as flags, because h_touch has one slot and
 # touch() has three questions; 0 is "no pointer", which reads as nil. Every one
 # of these decodings was dead code until 2026-09-12 -- nothing on either Lua
 # tier ever wrote the slot, so touch() answered nil for every Lua cart

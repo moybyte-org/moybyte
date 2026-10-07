@@ -69,9 +69,9 @@ except ImportError:                      # host tests importing the device modul
                                  snap_shared, sync_view, drain_audio)
 
 try:
-    from widgets import pointer_state
+    from moy_input import pointer_state
 except ImportError:                      # host tests importing the device module
-    from runtime.widgets import pointer_state
+    from runtime.moy_input import pointer_state
 
 try:
     import cart_files as _cart_files
@@ -184,7 +184,7 @@ class MoycoreRun:
         # the same reason the SNAP_* lookups above are bound at construction.
         self._I_SNAP = snap_slots(_moycore)
         self._aq_ops = audio_ops(_moycore)
-        self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
+        self._touch_out = [0, 0, 0, 0]   # reused; see moy_input.pointer_state
         self._masks = [0, 0]             # reused: button_masks' answer
         self._mask_inp = None            # the input _mask_ok answers for
         self._mask_ok = False

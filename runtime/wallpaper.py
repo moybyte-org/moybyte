@@ -38,9 +38,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio import AudioBank, AudioEngine
 try:
-    from widgets import Pmem, _SilentAudio, _Blit, _err_text
+    from widgets import Pmem, _Blit, _err_text
+    from audio_session import _SilentAudio
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, _SilentAudio, _Blit, _err_text
+    from runtime.widgets import Pmem, _Blit, _err_text
+    from runtime.audio_session import _SilentAudio
 try:
     from moyimg import text_sig
     from moy_image import load_wallpaper_preview, save_wallpaper_preview

@@ -250,20 +250,24 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import (CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA,
                                     _CODE_SYMBOLS, _SYM_Y, _SYM_CELL, _SYM_AREA)
 
-# Self-contained support widgets (see widgets.py): the Pointer cursor, the
-# Achievements milestone tracker (+ its ACHIEVEMENTS catalog), Pmem (cart
-# persistent RAM), the _SilentAudio no-op backend, and the reusable Popup
-# dropdown. A dependency-free leaf; imported back here so console.Pointer /
-# console.Popup / console.ACHIEVEMENTS / ... resolve for Workstation + host_app
-# + tests.
+# Self-contained support widgets (see widgets.py): the Achievements milestone
+# tracker (+ its ACHIEVEMENTS catalog), Pmem (cart persistent RAM) and the
+# reusable Popup dropdown; the Pointer cursor (moy_input.py) and the
+# _SilentAudio no-op backend (audio_session.py). Leaves; imported back here so
+# console.Pointer / console.Popup / console.ACHIEVEMENTS / ... resolve for
+# Workstation + host_app + tests.
 try:
-    from widgets import (Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup,
+    from widgets import (Achievements, Pmem, Clipboard, Popup,
                          ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y,
                          _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
+    from moy_input import Pointer
+    from audio_session import _SilentAudio
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Pointer, Achievements, Pmem, Clipboard, _SilentAudio,
+    from runtime.widgets import (Achievements, Pmem, Clipboard,
                                  Popup, ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X,
                                  _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
+    from runtime.moy_input import Pointer
+    from runtime.audio_session import _SilentAudio
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
 # SHARED backdrop the launcher home + Settings both draw (ws.wallpaper.draw). It owns

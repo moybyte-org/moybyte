@@ -30,7 +30,7 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 # the moy_button bit order, and the two deny lists that decide what gets
 # registered on top of libmoy's table.
 from runtime.ticks import _since_ms
-from runtime.widgets import pointer_state
+from runtime.moy_input import pointer_state
 from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                              LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
                              snap_slots, audio_ops, snap_shared, sync_view,
@@ -147,7 +147,7 @@ class MoycoreHostRun:
         # change the shape every other runtime presents. `draw_next` is how
         # the Player's scheduler (#217) asks for a logic-only tick.
         self.draw = self._draw_noop
-        self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
+        self._touch_out = [0, 0, 0, 0]   # reused; see moy_input.pointer_state
         self.draw_next = True
         # The slots and op codes lua_ext's shared bodies take -- this tier's
         # ABI is runtime/lua_binding's, the device's is the moycore module's.

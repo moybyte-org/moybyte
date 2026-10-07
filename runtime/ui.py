@@ -839,7 +839,7 @@ class Hits:
         (before or after the tap routing -- it reads, it never consumes), and
         mark the surface dirty on True. `pointer` is duck-typed: `.down` and
         `.visible`, plus the browser/mouse `.hovering` flag when a tier has one
-        (today's `widgets.Pointer` does not, so a tier hovers exactly when its
+        (today's `moy_input.Pointer` does not, so a tier hovers exactly when its
         cursor is visible -- trackball and mouse yes, touch never).
         """
         down = bool(getattr(pointer, "down", False))

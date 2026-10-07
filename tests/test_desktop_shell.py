@@ -1176,7 +1176,7 @@ def test_the_cursor_hides_after_the_idle_window_and_a_move_wakes_it():
     """The trackball cursor auto-hides after `idle_ms` without movement; a
     move wakes it, and a touch placement keeps it hidden (the finger already
     shows where you are). All on an injected clock."""
-    from runtime.widgets import Pointer
+    from runtime.moy_input import Pointer
 
     p = Pointer(320, 240, idle_ms=100)
     p.move(1, 0)

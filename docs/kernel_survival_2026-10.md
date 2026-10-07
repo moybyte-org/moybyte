@@ -80,12 +80,12 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the DSI compositor, rotated included | `device/dsi_panel.py`, `device/p4_canvas.py`, `modules/p4_display.py`, `modules/guition_p4_display.py` | `+native/moy_glass/moy_present_dsi.c` over `native/p4/moy_dsi/` and `native/p4/moy_ppa/`; the backlight is the panel entry sprint 2 gave the floor | 1 |
 | the palette | `runtime/palette.py` | the canvas's table in `moy_canvas.h` | 1 |
 | the host and browser rasters | `runtime/host_canvas.py`, `runtime/gfx_binding.py`, `firmware/web_runner/web_canvas.py` | the same `moy_glass` built for ctypes and for the web build | 1 |
-| the merged input state, sources, the pointer | `device/moybyte/input.py`'s `InputState`, `runtime/input.py`, `runtime/widgets.py`'s `Pointer` and `pointer_state` (`+runtime/moy_input.py`) | `+native/moy_input/moy_input.h` | 2 |
+| the merged input state, sources, the pointer | `device/moybyte/input.py`'s `InputState`, `runtime/input.py`, `Pointer` and `pointer_state` (`runtime/moy_input.py`) | `+native/moy_input/moy_input.h` | 2 |
 | the T-Deck keyboard, trackball and poller | `device/moybyte/input.py`'s `TDeckKeyboard`, `decode_raw`, `InputPoller`; `device/device_input.py` | `+native/moy_input/moy_tdeck_kbd.c`, a kernel task | 2 |
 | the touch drivers | `device/gt911.py`, `device/gsl3680.py`, `device/axs_touch.py`, `modules/p4_input.py`, `modules/guition_p4_input.py`, `modules/gsl_fw_jc8012.py` | `+native/moy_input/moy_touch_gt911.c`, `+native/moy_input/moy_touch_gsl3680.c`, `+native/moy_input/moy_touch_axs.c`; the GSL firmware as a C array | 2 |
 | the BLE HID central | `device/ble_keyboard.py` over `bluetooth`; `native/p4/moy_ble_hid/` | `+native/moy_input/moy_ble_hid.c` over the NimBLE host, on every console | 2 |
 | the browser's event decode | `runtime/web_input.py` | the web build's `moy_input` import | 2 |
-| the audio session, the six verbs, the bank push, the master level | `device/device_audio.py`, `runtime/audio.py`'s `AudioEngine`, `runtime/widgets.py`'s `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`+runtime/audio_session.py`) | `native/moy_audio/` grows its session and verb face; the codec in `+native/moy_audio/moy_codec_es8311.c` | 2 |
+| the audio session, the six verbs, the bank push, the master level | `device/device_audio.py`, `runtime/audio.py`'s `AudioEngine`, `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`runtime/audio_session.py`) | `native/moy_audio/` grows its session and verb face; the codec in `+native/moy_audio/moy_codec_es8311.c` | 2 |
 | WiFi, the radio under the spine's lease | `device/device_wifi.py` over `network` (`+runtime/moy_net.py`) | `+native/moy_net/moy_wifi.c` | 2 |
 | ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `+native/moy_net/moy_link.c` | 2 |
 | the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `+native/moy_net/moy_http.c`, `+native/moy_net/moy_webhost.c` | 2 |
@@ -153,7 +153,7 @@ made here, not promised.
    modules exist. What remains in each `moy_runtime.py` is the frame tail's:
    the tail hooks, the diag, the PERF sink.
 2. **The widgets split.** `Pointer` and `pointer_state` move to
-   `+runtime/moy_input.py`; `_SilentAudio` to `+runtime/audio_session.py`;
+   `runtime/moy_input.py`; `_SilentAudio` to `runtime/audio_session.py`;
    `runtime/console.py`'s one import line changes once, here.
 3. **The dev channel's words are registered.** `DevChannel` keeps the reader
    and a word table; `tap`, `swipe` and `drag` register from
@@ -184,12 +184,12 @@ made here, not promised.
    by byte size with an owner per loan, and `present`, `fence` and
    `present_pending` as the three verbs the compositors answer;
    `device/device_canvas.py` is rebased so every buffer it holds is a row.
-   `+runtime/moy_input.py`: one `InputTable` replacing the two `InputState`
+   `runtime/moy_input.py`: one `InputTable` replacing the two `InputState`
    classes (the boards' fifteen-name one and the host's eight), bit order
    fixed to libmoy's `moy_button` enum with the seven console-only names
    after it, sources by handle of kind SRC, `masks(order, player)` kept with
    both arguments, the pointer's place/down/fresh/click as fields of the
-   table. `+runtime/audio_session.py`: a session per owner carrying its bank,
+   table. `runtime/audio_session.py`: a session per owner carrying its bank,
    the six verbs on a session, `focus` naming the audible one.
    `+runtime/moy_net.py`: the WiFi state machine, the link's peer table of kind
    PEER, the HTTP request parser and response writers as pure functions, the
@@ -591,7 +591,7 @@ survives. The links pass makes the same guard hold for its receive ring.
 `device/moybyte/input.py` and `device/moybyte/__init__.py`, `runtime/input.py`,
 `runtime/web_input.py`, `device/device_input.py`, `device/gt911.py`,
 `device/gsl3680.py`, `device/axs_touch.py`, `device/ble_keyboard.py`, the
-boards' input modules, `gsl_fw_jc8012.py` and `+runtime/moy_input.py`'s twin
+boards' input modules, `gsl_fw_jc8012.py` and `runtime/moy_input.py`'s twin
 body. `tests/test_tdeck_keymap.py`, `tests/test_tdeck_input.py` and
 `tests/test_ble_keyboard.py` keep their cases over the binding.
 
@@ -630,7 +630,7 @@ the stream a compiled cart mixes in. What is Python is thin and scattered —
 engine is constructed per cart by `runtime/project_store.py`, wrapped by
 `runtime/host_api.py`'s `FakeAudio` and `web_boot.py`'s `_RunnerAudio` (a
 Python class over it), previewed by `runtime/music_editor_ui.py`, silenced by
-`runtime/widgets.py`'s `_SilentAudio`, driven by `runtime/wallpaper.py`'s
+`runtime/audio_session.py`'s `_SilentAudio`, driven by `runtime/wallpaper.py`'s
 run and drained by `device/moycore_glue.py`. The one global verb face those
 share has no owner, which is wrong on the P4 desk, where two cart windows and
 the Music editor's preview can hold banks at once. The crossing gives the
@@ -694,7 +694,7 @@ now.
 ### 5.3 What Python is deleted
 
 `device/device_audio.py`; `runtime/audio.py`'s `AudioEngine` (the bank model
-stays); `runtime/widgets.py`'s `_SilentAudio`, `runtime/host_api.py`'s
+stays); `runtime/audio_session.py`'s `_SilentAudio`, `runtime/host_api.py`'s
 `FakeAudio` and `web_boot.py`'s `_RunnerAudio` (a console with no backend
 holds no session and the binding's verbs are no-ops; the web runner's PCM
 sink pulls the kernel's `render`); `runtime/moyhost_audio.c` where the host

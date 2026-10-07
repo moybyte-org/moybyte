@@ -32,7 +32,7 @@ NAMES = ("dragon", "castle", "a name far too long for one tile", "kite")
 
 
 class _Ptr:
-    """The three fields the pump duck-types off widgets.Pointer."""
+    """The three fields the pump duck-types off moy_input.Pointer."""
 
     def __init__(self, visible=True, down=False):
         self.visible = visible

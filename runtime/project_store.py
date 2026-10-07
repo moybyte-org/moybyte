@@ -43,9 +43,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio import AudioBank, AudioEngine
 try:
-    from widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
+    from widgets import Pmem, Scenes, _err_text, _ticks_ms, _ticks_diff
+    from audio_session import _SilentAudio
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
+    from runtime.widgets import Pmem, Scenes, _err_text, _ticks_ms, _ticks_diff
+    from runtime.audio_session import _SilentAudio
 # The cart FORMAT's own codecs (SPEC.md 3.5 tile flags). Read from the store
 # module rather than transcribed: `ws.carts_store` may be absent (a bare test
 # workstation), and a second parser here is exactly the drift the one-body rule

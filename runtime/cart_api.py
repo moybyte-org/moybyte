@@ -43,9 +43,9 @@ try:
 except ImportError:
     from runtime.ticks import _since_ms
 try:
-    from widgets import pointer_state, P_NONE, P_HELD, P_CLICK
+    from moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
 except ImportError:
-    from runtime.widgets import pointer_state, P_NONE, P_HELD, P_CLICK
+    from runtime.moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
 
 
 # owner -> the Image subclass a cart of that owner constructs (below).
@@ -361,7 +361,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         bit = 1 << (int(b) & 7)
         tile_flags[n] = (tile_flags[n] | bit) if on else (tile_flags[n] & ~bit & 0xFF)
 
-    _touch_scratch = [0, 0, 0, 0]        # reused; see widgets.pointer_state
+    _touch_scratch = [0, 0, 0, 0]        # reused; see moy_input.pointer_state
 
     def touch():
         # Pointer (touch glass on a board, mouse on the host) exposed to
@@ -372,7 +372,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         #
         # Where the pointer COMES from -- the netplay refusal, the two-domain
         # seam, the linger that outlives a released finger -- is
-        # widgets.pointer_state, because the Lua tier resolves the same
+        # moy_input.pointer_state, because the Lua tier resolves the same
         # question through the same function. This used to be its own copy,
         # and the Lua tier had no copy at all.
         st = pointer_state(input, _touch_scratch)

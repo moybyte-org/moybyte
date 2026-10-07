@@ -2022,7 +2022,7 @@ class _Touch:
 
 
 def _pointer(w=320, h=240):
-    from runtime.widgets import Pointer
+    from runtime.moy_input import Pointer
 
     return Pointer(w, h)
 

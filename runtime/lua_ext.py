@@ -123,7 +123,7 @@ def snap_shared(s, inp, idx, pointer_state, out, since_ms):
     transport slot (a radio peer) lives there, not on the InputState; the fast
     path costs one dict test.
 
-    THE POINTER, in the cart's own coordinates (widgets.pointer_state). Same
+    THE POINTER, in the cart's own coordinates (moy_input.pointer_state). Same
     omission and the same consequence: the slot is in the C ABI, libmoy's
     touch() reads it, and nothing on either Lua tier ever wrote it -- so
     `touch()` answered nil for every Lua cart everywhere while the Python twin

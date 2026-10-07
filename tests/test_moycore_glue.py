@@ -412,7 +412,7 @@ class _FakePointer:
     """x/y/state/ms as `pointer_state` wants to read them off a Pointer."""
 
     def __init__(self, x, y, state, ms):
-        from runtime.widgets import P_CLICK, P_HELD, P_LIVE
+        from runtime.moy_input import P_CLICK, P_HELD, P_LIVE
 
         self.x, self.y, self.ms = x, y, ms
         self._state = state
@@ -1193,13 +1193,13 @@ def test_the_import_of_the_clock_is_hoisted_out_of_the_frame(w):
 def test_the_pointer_crosses_in_the_carts_own_coordinates(w):
     """...FLAGS INTACT, which is the part a boolean fake cannot see.
 
-    The slot carries widgets.py's P_LIVE/P_HELD/P_CLICK together, because
+    The slot carries moy_input.py's P_LIVE/P_HELD/P_CLICK together, because
     h_touch has one slot and touch() has three questions to answer out of it.
     This test used to hand the glue a BOOLEAN and assert the slot was 1 -- true
     of `int(True)` as well, so it went on passing when the contract underneath
     it changed and pinned nothing at all.
     """
-    from runtime.widgets import P_LIVE, P_HELD, P_CLICK
+    from runtime.moy_input import P_LIVE, P_HELD, P_CLICK
 
     inp = FakeInput(touch=(11, 22, P_LIVE | P_HELD | P_CLICK, 300))
     run = w.run(ws=FakeWs(inp=inp))
@@ -1649,7 +1649,7 @@ def test_a_dead_pointer_is_dead_even_when_a_game_pointer_still_stands(w):
     cart held a cursor over `dungeons & diagrams`' board forever and its d-pad
     was stamped over every frame by the cart's own mouse handler.
     """
-    from runtime.widgets import P_LIVE, P_NONE
+    from runtime.moy_input import P_LIVE, P_NONE
 
     inp = FakeInput(touch=(11, 22, P_LIVE, 0))
     inp.game_pointer = (5, 6, False, False)       # a stale mapping, still there

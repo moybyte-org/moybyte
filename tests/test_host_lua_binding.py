@@ -145,7 +145,7 @@ def test_touch_reaches_a_lua_cart_and_decodes_its_flags():
     The snapshot slot was in the C ABI and libmoy read it; NOTHING ever wrote
     it -- not this binding and not the boards' -- so a Lua cart had no pointer
     at all while the Python twin of the same cart did. The slot is FLAGS now
-    (widgets.P_LIVE/P_HELD/P_CLICK) because h_touch has one slot and three
+    (moy_input.P_LIVE/P_HELD/P_CLICK) because h_touch has one slot and three
     questions, and `click` is not nested inside `down`: a scripted tap raises
     the edge with the finger already lifted, which is what the last state here
     pins and what `letter blitz` scores with.

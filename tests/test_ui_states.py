@@ -31,7 +31,7 @@ TH = theme_colors("machine")
 # --- test doubles --------------------------------------------------------------
 
 class _Ptr:
-    """The three fields the pump duck-types off widgets.Pointer. `hovering` is
+    """The three fields the pump duck-types off moy_input.Pointer. `hovering` is
     the browser/mouse flag today's Pointer does NOT have -- it is set only by
     the test that proves the pump reads it when a tier grows one."""
 
@@ -413,7 +413,7 @@ def test_a_down_cursor_does_not_hover():
 
 
 def test_the_hovering_flag_is_read_when_a_tier_has_one():
-    """widgets.Pointer has no `hovering` today; the browser/mouse tier will."""
+    """moy_input.Pointer has no `hovering` today; the browser/mouse tier will."""
     h = _armed()
     assert h.pointer_frame(20, 20, _Ptr(visible=False)) is False
     assert h.pointer_frame(20, 20, _Ptr(visible=False, hovering=True)) is True
