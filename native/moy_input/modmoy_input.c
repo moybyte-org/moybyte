@@ -1332,6 +1332,14 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_ble_obj, input_ble);
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_ble_obj);
 
+// The VM service's soft reset re-initialises the heap but not the root
+// pointers registered beside it: the wrappers above belonged to the last VM's
+// heap, and the next VM builds its own.
+void moy_input_vm_fresh(void) {
+    MP_STATE_VM(moy_input_kernel_obj) = MP_OBJ_NULL;
+    MP_STATE_VM(moy_input_ble_obj) = MP_OBJ_NULL;
+}
+
 static mp_obj_t input_kick(void) {
     moy_input_board_kick();
     return mp_const_none;

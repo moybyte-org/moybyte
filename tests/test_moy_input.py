@@ -73,3 +73,21 @@ def test_masks_for_a_player_no_source_sits_on_are_empty():
     assert t.button_masks(mi.NAMES, 2) == (0, 0)
     assert t.button_masks(mi.NAMES, 0) == (0, 0)
     assert t.button_masks(mi.NAMES) == (16, 16)
+
+
+def test_a_new_vm_forgets_every_wrapper_the_last_one_cached():
+    """A soft reset re-initialises the heap, not the root pointers: each root
+    the binding registers is cleared when the kernel starts the next VM, or
+    the next `kernel()` hands back a word of the new heap (a Ctrl-D once met
+    `'list' object has no attribute 'pointer'`)."""
+    import re
+    with open(os.path.join(INPUT, "modmoy_input.c")) as f:
+        binding = f.read()
+    with open(os.path.join(ROOT, "native", "moy_kernel", "moy_kernel.c")) as f:
+        kernel = f.read()
+    roots = re.findall(r"MP_REGISTER_ROOT_POINTER\(mp_obj_t (\w+)\);", binding)
+    fresh = binding.split("void moy_input_vm_fresh(void) {", 1)[1].split("}", 1)[0]
+    assert roots and all("MP_STATE_VM(%s) = MP_OBJ_NULL;" % r in fresh for r in roots)
+    start = kernel.split("soft_reset:", 1)[1]
+    assert start.index("mp_init();") < start.index("moy_kernel_vm_fresh();") \
+        < start.index("pyexec_frozen_module")

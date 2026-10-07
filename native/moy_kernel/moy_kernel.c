@@ -9,13 +9,14 @@
 //
 // THE VM SERVICE is mp_task (ports/esp32/main.c at the pinned MPY_TAG), copied:
 // the same prelude, init, boot scripts, REPL loop and soft-reset list, in the
-// same order, with four changes marked MOY below. It decides the boot first
+// same order, with five changes marked MOY below. It decides the boot first
 // (moy_boot_decide), it lands on the recovery floor when the first heap area is
 // not there, when the console's boot ends before boot_ok() it records the
 // failure and restarts into the floor instead of falling to the REPL, and its
 // pin sweep removes only the ISRs a Python handler holds, so the kernel's own
-// (input's trackball and touch gate) outlive a soft reset. The
-// copy's call list is pinned: mp_task_calls.txt is what it was reviewed
+// (input's trackball and touch gate) outlive a soft reset, and each VM start
+// clears the VM objects the kernel's modules cached in root pointers, which
+// the last heap held. The copy's call list is pinned: mp_task_calls.txt is what it was reviewed
 // against, and tools/mp_task_calls.py fails the build when the tag's differs.
 //
 // THE FLOOR always draws on a boot no VM has run in: a failure inside a running
@@ -818,6 +819,16 @@ static void moy_kernel_kstop_line(const char *when) {
            (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
 }
 
+// A kernel module that caches a VM object in a root pointer forgets it at
+// every VM start; one an image does not take resolves to no call.
+void moy_input_vm_fresh(void) __attribute__((weak));
+
+static void moy_kernel_vm_fresh(void) {
+    if (moy_input_vm_fresh != NULL) {
+        moy_input_vm_fresh();
+    }
+}
+
 // The soft reset's pin sweep: the ISR of every pin a Python handler holds, and
 // no other. The port's machine_pins_deinit removes every pin's, the kernel's
 // included.
@@ -870,6 +881,8 @@ soft_reset:
     mp_cstack_init_with_top((void *)sp, MICROPY_TASK_STACK_SIZE);
     gc_init(mp_task_heap, mp_task_heap + MICROPY_GC_INITIAL_HEAP_SIZE);
     mp_init();
+    // MOY: the kernel modules' cached VM objects were the last heap's.
+    moy_kernel_vm_fresh();
     mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_lib));
     readline_init0();
 
