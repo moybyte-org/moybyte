@@ -47,7 +47,10 @@ EXFAT_SRAM = 640
 # 2026-10-06 on this board, the internal heap an image that takes
 # the module has against the same tree denying it (the worse of two fresh
 # boots: 93067 and 93131 free without it, 92039 with it).
-KERNEL_SRAM = 1092
+# Plus the glass's statics (native/moy_glass: its tables' roots and the
+# present engine), 56 bytes of .dram0.bss by the link map against dev
+# 82144715, 2026-10-07.
+KERNEL_SRAM = 1092 + 56
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on

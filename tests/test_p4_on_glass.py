@@ -55,7 +55,10 @@ TF_CARD_SRAM = 844
 # and docs/native_kernel_2026-09.md section 6.1 bounds on its own: measured
 # 2026-10-06 on the Waveshare P4; the Guition P4 runs the same code, the internal heap an image that takes
 # the module has against the same tree denying it.
-KERNEL_SRAM = 1288
+# Plus the glass's statics (native/moy_glass: its tables' roots and the
+# present engine), 48 bytes of .dram0.bss by the link map against dev
+# 82144715, 2026-10-07.
+KERNEL_SRAM = 1288 + 48
 WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
