@@ -673,7 +673,7 @@ def test_the_rollback_confirm_comes_from_the_frame_loop(board):
     2026-08-02: 15/15, both directions, banner and verdict correct each time.
     Not re-run here because one install is ~2min and leaves the board on the
     other slot, which every later test would inherit."""
-    ota = "__import__('moy_ota')"
+    ota = "__import__('moy_ota_health')"     # the updater's health half
     assert board.pyval("ws.updater.confirmed") is True
     loops = board.pyval("ws.updater._loops")
     assert loops >= board.pyval("%s.HEALTHY_LOOPS" % ota), \
