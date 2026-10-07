@@ -2,7 +2,6 @@
 #   -- the T-Deck keyboard, in ONE place  the matrix layout and its key codes
 #   decode_raw                        five raw matrix bytes -> (buttons, last key)
 #   -- multi-source input             every producer owns a source; the state is the merge
-#   InputState                        the one input table over all fifteen names
 #   TDeckKeyboard                     the T-Deck's I2C keyboard: ASCII and raw-matrix modes
 #   InputPoller                       the input poller thread, paced by the frame
 try:                                    # device: runtime/ is staged flat
@@ -165,11 +164,9 @@ def source_of(state, name):
     return state if fn is None else fn(name)
 
 
-class InputState(InputTable):
-    """The merged input every surface reads on a board: the one input table
-    (runtime/moy_input.py) over all fifteen names."""
-
-    BUTTONS = BUTTONS
+# The merged input every surface reads on a board: the one input table
+# (native/moy_input) over all fifteen names.
+InputState = InputTable
 
 
 class TDeckKeyboard:

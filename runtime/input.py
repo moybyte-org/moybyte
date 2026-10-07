@@ -8,11 +8,7 @@ BUTTONS, the eight names a keyboard, a mouse and the browser can press
 (libmoy's seven and `home`). A name outside them is refused.
 """
 
-try:                                    # device-shaped trees: flat
-    from moy_input import HOST_NAMES, InputTable
+try:                                    # a VM: the native module
+    from moy_input import HostInputTable as InputState
 except ImportError:                     # host: the runtime package
-    from runtime.moy_input import HOST_NAMES, InputTable
-
-
-class InputState(InputTable):
-    BUTTONS = HOST_NAMES
+    from runtime.moy_input import HostInputTable as InputState

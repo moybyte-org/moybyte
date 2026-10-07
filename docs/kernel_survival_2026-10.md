@@ -80,7 +80,7 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the DSI compositor, rotated included | `device/dsi_panel.py`, `device/p4_canvas.py`, `modules/p4_display.py`, `modules/guition_p4_display.py` | `native/moy_glass/moy_present_dsi.c` over `native/p4/moy_dsi/` and `native/p4/moy_ppa/`; the backlight is the panel entry sprint 2 gave the floor | 1 |
 | the palette | `runtime/palette.py` | the canvas's table in `moy_canvas.h` | 1 |
 | the host and browser rasters | `runtime/host_canvas.py`, `runtime/gfx_binding.py`, `firmware/web_runner/web_canvas.py` | the same `moy_glass` built for ctypes and for the web build | 1 |
-| the merged input state, sources, the pointer | `device/moybyte/input.py`'s `InputState`, `runtime/input.py`, `Pointer` and `pointer_state` (`runtime/moy_input.py`) | `+native/moy_input/moy_input.h` | 2 |
+| the merged input state, sources, the pointer | `device/moybyte/input.py`'s `InputState`, `runtime/input.py`, `Pointer` and `pointer_state` (`runtime/moy_input.py`) | `native/moy_input/moy_input.h` | 2 |
 | the T-Deck keyboard, trackball and poller | `device/moybyte/input.py`'s `TDeckKeyboard`, `decode_raw`, `InputPoller`; `device/device_input.py` | `+native/moy_input/moy_tdeck_kbd.c`, a kernel task | 2 |
 | the touch drivers | `device/gt911.py`, `device/gsl3680.py`, `device/axs_touch.py`, `modules/p4_input.py`, `modules/guition_p4_input.py`, `modules/gsl_fw_jc8012.py` | `+native/moy_input/moy_touch_gt911.c`, `+native/moy_input/moy_touch_gsl3680.c`, `+native/moy_input/moy_touch_axs.c`; the GSL firmware as a C array | 2 |
 | the BLE HID central | `device/ble_keyboard.py` over `bluetooth`; `native/p4/moy_ble_hid/` | `+native/moy_input/moy_ble_hid.c` over the NimBLE host, on every console | 2 |

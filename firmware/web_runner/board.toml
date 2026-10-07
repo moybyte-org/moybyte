@@ -97,6 +97,13 @@ why  = """
 The browser's moy_net is compiled in."""
 
 [[modules.shared.deny]]
+file = "moy_input.py"
+kind = "host-only"
+why  = """
+`moy_input` for CPython: compiles native/moy_input and dlopens it through
+ctypes. Here `moy_input` is a compiled-in usermod (native/.staged/moy_input)."""
+
+[[modules.shared.deny]]
 file = "glass_binding.py"
 kind = "host-only"
 why  = """

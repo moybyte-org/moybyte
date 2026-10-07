@@ -120,10 +120,10 @@ def test_the_slot_is_resolved_every_poll_without_thrashing_the_source():
     inp = _imod.InputState()
     ble = _FakeBle(inp)
     ble.set_player(1)
-    before = inp._multi
+    before = inp.multi()
     for _ in range(5):
         ble._sync_player()                  # idempotent: no rescan storm
-    assert inp._multi == before
+    assert inp.multi() == before
     assert ble.src.player == 1
 
 

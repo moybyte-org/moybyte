@@ -181,7 +181,7 @@ def test_a_source_write_does_not_move_the_union_until_begin_frame(tier):
 
     _set(kbd, "up")
     assert not inp.held("up")               # the source has it; this frame does not
-    assert "up" in kbd._held
+    assert "up" in kbd.held_names()
     assert inp.button_masks(("up",)) == (0, 0)
     inp.begin_frame()
     assert inp.held("up") and inp.pressed("up")
@@ -199,7 +199,7 @@ def test_a_source_write_does_not_move_the_union_until_begin_frame(tier):
     assert inp.held("a")
     kbd.release_all()
     assert inp.held("a")
-    assert not kbd._held
+    assert not kbd.held_names()
     inp.begin_frame()
     assert not inp.held("a")
 
@@ -218,9 +218,8 @@ def test_the_shared_release_all_stays_immediate_and_stays_consistent(tier):
 
     inp.release_all()
     assert not inp.held("up")               # immediately
-    before = set(inp._held)
-    inp._merge()                            # ...and the merge agrees
-    assert inp._held == before
+    inp.begin_frame()                       # ...and the merge agrees
+    assert not inp.any_held()
 
 
 @pytest.mark.parametrize("tier", TIERS)
@@ -239,22 +238,19 @@ def test_no_source_mutator_writes_the_shared_union(tier):
         assert gone not in src, gone
 
 
-@pytest.mark.parametrize("tier", TIERS)
-def test_the_merge_is_reached_only_through_begin_frame(tier):
-    """One caller, so `begin_frame` is a real frame boundary and not just the
-    usual one."""
-    # One table for both tiers since sprint 3's carve: runtime/moy_input.py.
-    path = ROOT / "runtime" / "moy_input.py"
-    src = path.read_text()
-    lines = [ln.split("#", 1)[0] for ln in src.splitlines()]
-    calls = [i for i, ln in enumerate(lines)
-             if "_merge()" in ln and "def _merge" not in ln]
-    assert len(calls) == 1, [lines[i] for i in calls]
-    at = calls[0]
-    assert lines[at].strip() == "self._merge()"
-    # ...and the enclosing def is begin_frame: walk back to the nearest one.
-    owner = next(ln for ln in reversed(lines[:at]) if ln.lstrip().startswith("def "))
-    assert owner.strip() == "def begin_frame(self):", owner
+def test_the_merge_is_reached_only_through_begin_frame():
+    """One author of the union, so `begin_frame` is a real frame boundary:
+    the merged set is written in native/moy_input/moy_input.c's begin_frame
+    and emptied by release_all, and nowhere else."""
+    src = (ROOT / "native" / "moy_input" / "moy_input.c").read_text()
+    owners = []
+    fn = None
+    for ln in src.splitlines():
+        if ln and not ln[0].isspace() and "(" in ln and ln.rstrip().endswith("{"):
+            fn = ln.split("(")[0].split()[-1]
+        if "t->held = " in ln:
+            owners.append(fn)
+    assert owners == ["moy_input_begin_frame", "moy_input_release_all"], owners
 
 
 # -- the frame loops read AFTER the merge -----------------------------------
@@ -329,7 +325,7 @@ def test_every_board_writes_every_source_before_begin_frame(board):
 # holds the backlight on (frame_loop.IdleBlank), so a stale read here blanks
 # the screen under a held button -- on glass, with no host test failing. It is
 # safe only because it runs AFTER inp.begin_frame().
-ACTIVE_READ = "bool(inp._held)"
+ACTIVE_READ = "inp.any_held()"
 
 
 @pytest.mark.parametrize("board", sorted(BOARD_RUNTIMES))
@@ -356,12 +352,12 @@ def test_the_boards_idle_check_still_sees_a_held_button_after_the_merge():
     kbd._i2c.frame = bytes([0x00, 0x04, 0, 0, 0])     # 'd' -> the `right` button
     kbd.poll()
     inp.begin_frame()
-    assert bool(inp._held) and bool(inp.last_key)     # active -> backlight stays on
+    assert inp.any_held() and bool(inp.last_key)     # active -> backlight stays on
 
     kbd._i2c.frame = b"\x00\x00\x00\x00\x00"
     kbd.poll()
     inp.begin_frame()
-    assert not inp._held and not inp.last_key         # idle -> the blank may arm
+    assert not inp.any_held() and not inp.last_key         # idle -> the blank may arm
 
 
 def test_the_tdeck_keyboard_smoke_stage_polls_before_it_merges():
@@ -692,5 +688,5 @@ def test_a_source_is_a_row_of_kind_src():
     a, b = inp.source("kbd"), inp.source("net0", player=1)
     for s in (a, b):
         assert (s.h >> moy_spine.KIND_SHIFT) & 0xF == moy_spine.KIND_SRC
-        assert inp._rows.get(s.h) is s
+        assert inp.source(s.name) is s
     assert inp.source("kbd").h == a.h

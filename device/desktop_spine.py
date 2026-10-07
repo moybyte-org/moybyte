@@ -83,7 +83,7 @@ class Desktop:
         touched, click = apply_touch(self.touch, self.pointer)
         out = self._click_active
         out[0] = click
-        out[1] = touched or bool(inp._held) or bool(inp.last_key)
+        out[1] = touched or inp.any_held() or bool(inp.last_key)
         return out
 
     def present(self):

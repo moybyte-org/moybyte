@@ -1076,7 +1076,7 @@ def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):
     assert ws.screen == "desktop"
     assert ws.wm.keys_to_cart()
     ws._dirty = False
-    ws.input._pressed = set()
+    ws.input.clear_edges()
     ws.input.last_key = ord("q")
     ws.handle_input()
     assert not ws._dirty, "cart-bound key dirtied the shell"
@@ -1085,7 +1085,8 @@ def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):
     assert ws.screen == "launcher"
     assert not ws.wm.keys_to_cart()
     ws._dirty = False
-    ws.input._pressed = {"right"}
+    ws.input.set_held("right", True)
+    ws.input.begin_frame()
     ws.handle_input()
     assert ws._dirty, "launcher nav key must repaint"
 

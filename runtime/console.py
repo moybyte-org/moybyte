@@ -2776,7 +2776,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # because a BLE keyboard reports last_key as LEVEL state (a held byte, not
         # the T-Deck's one-shot press edge): ANY held/mashed key collapsed P4 play
         # from ~30fps to ~10 (measured; the "every keypress slows the game" bug).
-        if getattr(i, "_pressed", None) or i.last_key:
+        pressed = i.any_pressed()
+        if pressed or i.last_key:
             if not self.wm.keys_to_cart():
                 self._dirty = True
         # Undo journal (Stage 7): activity in an EDITOR TAB (re)arms the idle
@@ -2787,7 +2788,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # tabs re-arm from handle_pointer -- paint/map/scene/music are drawn at
         # rather than typed at, and a debounce they could not arm would fire
         # mid-stroke.
-        if ((i.last_key or getattr(i, "_pressed", None))
+        if ((i.last_key or pressed)
                 and self.menu_view in COMMIT_TABS and self.wm.top_is("menu")):
             self.history.edit_ms = _ticks_ms()
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it

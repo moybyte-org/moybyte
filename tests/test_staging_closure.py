@@ -165,18 +165,18 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 # them.
 HOST_ONLY = {
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "lua_host",
-                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding",
+                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input",
                        "native_build", "simulate_desktop", "wasm_host",
                        "wasm_binding"},
     "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "native_build",
+           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "native_build",
            "simulate_desktop", "wasm_host", "wasm_binding"},
     "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     "guition-p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
@@ -185,7 +185,7 @@ HOST_ONLY = {
     # tripwire that only works on boards with denylists is a tripwire that
     # stops working the moment a second allowlist board appears.
     "zero": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding",
+             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input",
              "native_build", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
@@ -193,7 +193,7 @@ HOST_ONLY = {
     # half of the very module device_canvas imports.
     "web": {"host_app", "lua_host", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "glass_binding", "net_binding", "native_build", "host_canvas", "wasm_host",
+            "gfx_binding", "glass_binding", "net_binding", "moy_input", "native_build", "host_canvas", "wasm_host",
             "wasm_binding"},
 }
 

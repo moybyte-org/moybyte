@@ -114,7 +114,9 @@ class PlayerRouter:
         player -- a BLE keyboard given `src.player = 1` IS player 2, with no
         transport and no _Slot. False on a pre-source InputState (or a test
         stub), which is the old always-empty behaviour verbatim."""
-        return getattr(self._local, "_multi", False)
+        local = self._local
+        # hasattr, not getattr: a bound method is an allocation every frame.
+        return local.multi() if hasattr(local, "multi") else False
 
     def count(self):
         """The number of connected players: the DISTINCT slots anything is

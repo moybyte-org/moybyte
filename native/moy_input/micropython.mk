@@ -1,6 +1,7 @@
-# moy_input: input: the merged input table, its sources and the pointer, and
-# the drivers that write them (docs/kernel_survival_2026-10.md section 4). Its
-# Python twin is runtime/moy_input.py.
-#
-# The unix and webassembly ports' twin of micropython.cmake; it adds nothing
-# until the crossing gives the module its sources.
+# moy_input for the unix and webassembly ports: the twin of micropython.cmake.
+
+MOY_INPUT_DIR := $(USERMOD_DIR)
+
+SRC_USERMOD_C += $(MOY_INPUT_DIR)/modmoy_input.c
+SRC_USERMOD_LIB_C += $(MOY_INPUT_DIR)/moy_input.c
+CFLAGS_USERMOD += -I$(MOY_INPUT_DIR) -I$(MOY_INPUT_DIR)/../moy_spine

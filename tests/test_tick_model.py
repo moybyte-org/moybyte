@@ -527,7 +527,7 @@ def test_a_crash_disarms_the_pacing_and_the_panel_paints_every_frame(tmp_path):
     ws.player._update = boom
     _frames(ws, 4, 1 / 60)
     assert ws.cart_error is not None
-    assert ws.player.tick_ms == 0 and not ws.input._kept
+    assert ws.player.tick_ms == 0 and not ws.input.kept_names()
     drawn0 = ws._frames_drawn
     ws._dirty = True
     ws.frame(1 / 60)
@@ -539,7 +539,7 @@ def test_exit_disarms_the_pacing_and_the_launcher_paces_to_the_loop(tmp_path):
     _open(ws, PACED_GAME)
     assert ws.player.tick_ms == 33
     ws.go_home()
-    assert ws.player.tick_ms == 0 and not ws.input._kept
+    assert ws.player.tick_ms == 0 and not ws.input.kept_names()
     ws._dirty = True
     drawn0 = ws._frames_drawn
     ws.frame(1 / 60)
@@ -591,13 +591,13 @@ def test_a_game_parked_under_a_menu_keeps_no_edges_for_later(tmp_path):
     ws.input.set_held("a", True)
     ws.input.begin_frame()
     ws.frame(1 / 60)                              # no tick: the edge is kept
-    assert "a" in ws.input._kept
+    assert "a" in ws.input.kept_names()
     ws.input.set_held("a", False)
     ws.open_picker()                              # a shell surface over the game
     assert not ws.wm.top_is_player()
     ws.input.begin_frame()
     ws.frame(1 / 60)
-    assert not ws.input._kept and ws.player._keyp_latch == 0
+    assert not ws.input.kept_names() and ws.player._keyp_latch == 0
     ws.input.begin_frame()
     assert not ws.input.pressed("a"), "the shell reads this frame's edges only"
 

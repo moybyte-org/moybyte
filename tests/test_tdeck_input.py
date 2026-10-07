@@ -190,11 +190,11 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
     assert st.last_key == 0x08
 
     st = poll_frame(bytes([0x01, 0, 0, 0, 0]))    # q held: a letter, not a button
-    assert not st._held
+    assert not st.any_held()
     assert st.last_key == ord("q")
 
     st = poll_frame(bytes([0, 0x01, 0, 0, 0]))    # e held: a letter, not a button
-    assert not st._held
+    assert not st.any_held()
     assert st.last_key == ord("e")
 
     st = poll_frame(bytes([0, 0, 0, 0, 0x40]))    # k held: THE b button
@@ -202,7 +202,7 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
     st = poll_frame(bytes([0, 0, 0, 0, 0x02]))    # l held: THE a button
     assert st.held("a")
     st = poll_frame(bytes([0, 0x10, 0, 0, 0]))    # x is a plain letter now
-    assert not st._held
+    assert not st.any_held()
     assert st.last_key == ord("x")
     st = poll_frame(bytes([0, 0, 0, 0, 0x08]))    # backspace is NOT b anymore
     assert not st.held("b")

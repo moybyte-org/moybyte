@@ -82,12 +82,9 @@ def arm_prompt(ws):
     # EVERYBODY let go: the shared object's meaning (every source), not a
     # driver's per-source "I hold nothing" (runtime/input.py).
     ws.input.release_all()
-    try:
-        ws.input._pressed = set()
-        ws.input._released = set()
-        ws.input._last = set()          # the edge snapshot (moy_input.InputTable)
-    except AttributeError:
-        pass
+    clear = getattr(ws.input, "clear_edges", None)
+    if clear is not None:
+        clear()
     ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
     if ws.pointer is not None:
         ws.pointer.click = False        # the tap that opened the prompt is not OK
