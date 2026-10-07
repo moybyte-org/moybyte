@@ -734,7 +734,12 @@ def test_every_board_takes_the_one_boot_body(board):
     own beside it.
     """
     chain = wiring_chain(BOARDS[board])
-    assert chain[-1] == (SPINE, "build_desktop"), (board, chain)
+    assert (SPINE, "build_desktop") in chain, (board, chain)
+    # The spine is the last body that boots: what follows it is the board's
+    # input module and the spine's providers, which construct and boot nothing.
+    after = chain[chain.index((SPINE, "build_desktop")) + 1:]
+    for spine, fname in after:
+        assert _calls_on(_fn(spine, fname), "boot") == [], (board, spine)
     own = _fn(BOARDS[board], "run_desktop")
     assert _calls_on(own, "boot") == [], (
         "%s: run_desktop drives boot steps beside the shared spine" % board)

@@ -527,22 +527,28 @@ def _resolved(target):
     `dead` is the set of that link's own parameters this target left
     unsupplied (or supplied as None), carried down from the link before."""
     out = []
-    dead = frozenset()
-    links = _links(target)
-    for i, (path, fname) in enumerate(links):
+    for i, (path, fname) in enumerate(_links(target)):
         fn = _func(path, fname)
-        out.append((path, fn, dead))
-        if i + 1 == len(links):
-            break
-        nfn = _func(*links[i + 1])
-        params = _params(nfn)
-        given = set()
-        for n in ast.walk(fn):
-            if isinstance(n, ast.Call) and _called(n) == nfn.name:
+        if not out:
+            out.append((path, fn, frozenset()))
+            continue
+        # The link that CALLS this one (the latest before it that does): a
+        # spine calls its providers, each in turn, not one another.
+        params = _params(fn)
+        dead = frozenset()
+        for _p, caller, cdead in reversed(out):
+            calls = [n for n in ast.walk(caller)
+                     if isinstance(n, ast.Call) and _called(n) == fn.name]
+            if not calls:
+                continue
+            given = set()
+            for n in calls:
                 for prm, val in _call_args(n, params).items():
-                    if _real(val, dead):
+                    if _real(val, cdead):
                         given.add(prm)
-        dead = frozenset(set(params) - given)
+            dead = frozenset(set(params) - given)
+            break
+        out.append((path, fn, dead))
     return out
 
 
@@ -968,6 +974,10 @@ class _Handles:
 def _chain_maps(links):
     """Per link: ({parameter: service}, {local name: {service}}).
 
+    A link may call any link after it -- the spine calls each provider in turn
+    -- so every later link is a callee, and what a caller knows is carried
+    forward into the parameters it hands on.
+
     The first says which of a link's OWN parameters land on the Workstation as
     a service -- directly (`ws.svc = <param>`) or by being handed on, to the
     next link or to wire_workstation_core, under a parameter that does. The
@@ -993,9 +1003,9 @@ def _chain_maps(links):
                     if _is_ws_attr(t) and t.attr in SERVICES:
                         m[n.value.id] = t.attr
         callees = [(wire.name, _params(wire), inv)]
-        if i + 1 < len(links):
-            nfn = _func(*links[i + 1])
-            callees.append((nfn.name, _params(nfn), maps[i + 1]))
+        for j in range(i + 1, len(links)):     # every later link it may call
+            nfn = _func(*links[j])
+            callees.append((nfn.name, _params(nfn), maps[j]))
         for n in ast.walk(fn):
             if not isinstance(n, ast.Call):
                 continue
@@ -1008,6 +1018,20 @@ def _chain_maps(links):
                         if val.id in params:
                             m[val.id] = cmap[prm]
         maps[i], seeds[i] = m, seed
+    # And forward: a name a link knows as a service is that service in the
+    # parameter it is handed under (the spine's `keyboard` into a provider).
+    for i in range(len(links)):
+        fn = _func(*links[i])
+        for j in range(i + 1, len(links)):
+            nfn = _func(*links[j])
+            order = _params(nfn)
+            for n in ast.walk(fn):
+                if not (isinstance(n, ast.Call) and _called(n) == nfn.name):
+                    continue
+                for prm, val in _call_args(n, order).items():
+                    if isinstance(val, ast.Name) and val.id in seeds[i]:
+                        seeds[j].setdefault(prm, set()).update(
+                            seeds[i][val.id])
     return maps, seeds
 
 

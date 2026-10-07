@@ -29,6 +29,8 @@ from card_store import carts_loader
 from desktop_spine import build_desktop, bt_command
 from device_util import _ticks_ms, _ticks_diff
 from p4_canvas import P4SystemCanvas
+import wire_input
+import wire_links
 
 BLE_STORE = "/moy/ble_keyboard.json"   # the bond store is device identity: internal flash
 
@@ -74,13 +76,7 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
     keyboard over the companion C6, and carts on the TF card when one mounts
     (`store_root`, on the board's internal flash, when not). Ctrl-C over the
     board's REPL interrupts the loop."""
-    from ble_keyboard import BleHidKeyboard
-    from moybyte.input import InputState
     from wm_windowed import WindowedWM
-    try:
-        from moy_c6_update import C6Updater
-    except ImportError:            # a build without the C6 updater: no Settings row
-        C6Updater = None
 
     comp = compositor()
     gfx = comp.gfx()
@@ -92,8 +88,7 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
     # register.
     print("%s PPA:" % name,
           "enabled" if P4SystemCanvas.enable_ppa() else "CPU-only")
-    inp = InputState()
-    keyboard = BleHidKeyboard(inp, store_path=BLE_STORE, auto_start=False)
+    inp, keyboard = wire_input.ble_keyboard_input(BLE_STORE)
 
     def _union_cmd(ws, parts, line):
         on = not (len(parts) == 2 and parts[1] == "0")
@@ -113,7 +108,8 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
                       panel_diagonal_in=panel_diagonal_in,
                       load_carts=carts_loader(p4_card, seed_carts, SD_CARTS_ROOT,
                                               store_root, ota_dir),
-                      wm=WindowedWM, c6_updater=C6Updater,
+                      wm=WindowedWM,
+                      c6_updater=wire_links.c6_updater_class(),
                       extras={"bt": bt_command(keyboard, comp),
                               "union": _union_cmd, "cache": _cache_cmd},
                       overlap=comp.overlap_stats, fps_cap=fps_cap)

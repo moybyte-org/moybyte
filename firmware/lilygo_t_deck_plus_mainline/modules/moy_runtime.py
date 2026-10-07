@@ -23,34 +23,22 @@ underneath.
 """
 
 from mem_census import mark as _census
-from console import _cursor_delta
 from desktop_spine import build_desktop
-from frame_loop import apply_touch
 # The seed roster, generated from system_carts/ at build time and PACKED
 # (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
 # `moy_carts.seed_any`, which reads the roster's form rather than being told.
 # Named CARTS because that is what it is to everything downstream -- the
 # compression is a storage detail of this one import.
 from carts_data import CARTS_Z as CARTS
-from device_util import _ticks_ms, _ticks_diff, _sleep_ms, _diag_note, _diag_log
-from device_input import TrackBall, Touch
-from device_audio import make_audio
+from device_util import _ticks_ms, _ticks_diff, _sleep_ms, _diag_log
+from tdeck_input import TDeckInput
+from wire_audio import audio_factory
 from device_canvas import DeviceCanvas
 from device_diag import (_diag_flush, _diag_hitch,
                          _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat, _diag_webhost,
                          _diag_pump, HITCH_MS)
 
 _census("imports")
-
-# --- #69 the input-poller thread ---------------------------------------------
-#
-# Every I2C0 transaction (keyboard + GT911 + mode switches) moves to a dedicated
-# Python thread; the frame loop only consumes staged state. A C3 clock-stretch
-# stall then blocks the poller instead of a frame. Requires the build's
-# GIL-release patch to bite -- stage 3's `tdeck_smoke.keyboard()` is the on-glass
-# A/B that says whether it is in this image. False (or no `_thread`, or a dead
-# thread) falls back to synchronous polling with no rebuild.
-MOY_INPUT_POLLER = True
 
 # --- the serial dev channel ---------------------------------------------------
 #
@@ -186,12 +174,13 @@ def run_desktop(fps_cap=60):
     """Boot the shared console: launcher + carts + keyboard + touch, carts on SD.
 
     The boot order and the service set are the shared spine's; what is here is
-    the panel bring-up, the input trio and its poller thread, the SD/panel bus
-    gate, and the diag ticks this board's offline ring records.
+    the panel bring-up, the SD/panel bus gate, and the diag ticks this board's
+    offline ring records; the input trio and its poller thread are
+    `tdeck_input.TDeckInput`'s.
     """
     import tdeck_panel
     from tdeck_panel import TDeckCompositor, set_backlight
-    from moybyte.input import InputState, TDeckKeyboard, InputPoller
+    from moybyte.input import InputState
 
     # #54 St.2: arm the async layer copy BEFORE the first canvas exists.
     # `DeviceCanvas` latches `_async_ok` in __init__, so this has to precede the
@@ -214,53 +203,8 @@ def run_desktop(fps_cap=60):
         diag = None
 
     inp = InputState()
-    keyboard = TDeckKeyboard(inp)
-    ball = TrackBall()
-    touch = None
-    poller = None
-
-    def _inputs():
-        """The GT911 and the #69 poller thread, behind the splash. The touch
-        shares the keyboard's I2C object: one bus, one driver instance, so the
-        poller owns every transaction on it."""
-        nonlocal touch, poller
-        touch = Touch(canvas.w, canvas.h, i2c=getattr(keyboard, "_i2c", None))
-        if MOY_INPUT_POLLER:
-            try:
-                _p = InputPoller(keyboard, touch)
-                if _p.start():
-                    poller = _p
-                    keyboard._poller_owned = True
-                    touch._source = poller.consume_touch
-                    _diag_note("input", "poller thread running (#69, one pass per frame)")
-            except Exception as exc:  # noqa: BLE001 -- input must never fail closed
-                _diag_note("input", "poller setup failed: %s" % (exc,))
-                poller = None
-        return touch
-
-    # BLE HID keyboard (#26): a SECOND, optional input source on this board.
-    # On the touch-only boards a paired BLE keyboard is the only keyboard and
-    # becomes ws.keyboard outright; here the physical C3 keyboard keeps that
-    # slot and the BLE driver hangs off ws.ble_keyboard. Both write into the
-    # SAME InputState, so nothing in the shared console needs to know which
-    # one a keypress came from.
-    #
-    # auto_start=False deliberately: scanning is what makes BLE expensive, and
-    # a board whose keyboard already works should not pay for a radio nobody
-    # asked for. Settings starts it when the kid opens the panel.
-    #
-    # The bond store is on the INTERNAL VFS, not beside the carts the way the
-    # touch-only boards do it: this board's carts live on SD, whose writes have
-    # to go through the with_sd_live gate, and a pairing that fails because a
-    # card is missing would be a bad first experience for a feature whose whole
-    # point is "my keyboard works now".
-    _ble = None
-    try:
-        from ble_keyboard import BleHidKeyboard
-        _ble = BleHidKeyboard(inp, store_path="/ble_keyboard.json",
-                              auto_start=False)
-    except Exception as exc:  # noqa: BLE001 -- a build without the module, or no radio
-        print("Moybyte: BLE keyboard unavailable:", exc)
+    tdin = TDeckInput(inp)
+    keyboard = tdin.keyboard
 
     store = _Storage(comp)
 
@@ -271,8 +215,10 @@ def run_desktop(fps_cap=60):
 
     def _after_services(ws):
         _diag_log("boot", "desktop running kb=%d ball=%d touch=%d poller=%d"
-                  % (1 if keyboard.available else 0, 1 if ball.available else 0,
-                     1 if touch.available else 0, 1 if poller is not None else 0),
+                  % (1 if keyboard.available else 0,
+                     1 if tdin.ball.available else 0,
+                     1 if tdin.touch.available else 0,
+                     1 if tdin.poller is not None else 0),
                   diag)
         # #66/#67 SRAM diet: everything needing boot-time internal RAM has taken
         # it by here, so the Lua allocator's headroom floor drops 48->24KB. BOTH
@@ -309,11 +255,13 @@ def run_desktop(fps_cap=60):
                 pass
 
     d = build_desktop("Moybyte", "tdeck", comp, canvas, set_backlight, inp,
-                      inputs=_inputs, keyboard=keyboard, seed_carts=CARTS,
+                      inputs=lambda: tdin.build(canvas.w, canvas.h),
+                      keyboard=keyboard, seed_carts=CARTS,
                       power_save_ms=POWER_SAVE_MS,
                       load_carts=store.load, with_sd=store.session,
                       before_slim=_before_slim, after_services=_after_services,
-                      make_audio=make_audio, ble_keyboard=_ble,
+                      make_audio=audio_factory(),
+                      ble_keyboard=tdin.ble_keyboard,
                       serial=SERIAL_CMDS, perf_emit=_perf_emit,
                       log=lambda tag, msg: _diag_log(tag, msg, diag),
                       fps_cap=fps_cap)
@@ -334,71 +282,6 @@ def run_desktop(fps_cap=60):
     # steady per-frame cost that never crosses HITCH_MS is invisible without it.
     _acc = [0] * 12
     _t = {"kbd": 0, "inp": 0, "sb": 0, "diag": 0, "sd": 0, "web": 0}
-    _click_active = [False, False]   # _poll_inputs' answer, reused every frame
-
-    def _poll_inputs(now):
-        """Every input source on this board: the #69 poller (with its death
-        fallback), the keyboard, the BLE keyboard, the trackball (caret in the
-        code editor, cursor everywhere else), the GT911. Returns (click,
-        active) for the shared loop; the dev channel and idle blank run THERE,
-        in the one order that lets the waking touch be swallowed.
-
-        The two keyboards each write their OWN InputSource and inp.begin_frame()
-        merges them, so the order they poll in carries no authority -- which is
-        the whole point of the multi-source model (device/moybyte/input.py)."""
-        nonlocal poller
-        # If the poller thread ever dies, detach and fall back to synchronous
-        # polling -- input never goes dark.
-        if poller is not None and not poller.alive:
-            _diag_note("input", "poller thread died -> synchronous fallback")
-            keyboard._poller_owned = False
-            touch._source = None
-            poller = None
-        # The poller thread makes one pass per frame, when this thread lets it:
-        # kick() readies it and sleep_ms(0) (the port's GIL release + taskYIELD)
-        # runs it. Without the yield a free-running cart never lets go of the
-        # GIL and the thread starves (InputPoller's docstring has the numbers).
-        if poller is not None:
-            poller.kick()
-            _sleep_ms(0)
-        try:
-            if poller is not None:
-                poller.consume()
-            else:
-                keyboard.poll()
-        except Exception:  # noqa: BLE001
-            pass
-        # The BLE keyboard's reports arrive on a radio IRQ; poll() is what
-        # turns them into held buttons + a key, and it also advances
-        # scan/reconnect and flushes a new bond outside the IRQ.
-        if _ble is not None:
-            try:
-                _ble.poll()
-            except Exception as exc:  # noqa: BLE001 -- BLE must fail keyboard-only
-                print("Moybyte BLE keyboard poll failed:", exc)
-        _t["kbd"] = _ticks_diff(_ticks_ms(), now)
-        _t0 = _ticks_ms()
-        inp.begin_frame()
-        counts, click = ball.poll()
-        nx = counts[3] - counts[2]              # right - left (raw pulses)
-        ny = counts[1] - counts[0]              # down - up
-        # The ball is this board's arrow keys, so a surface holding a CARET
-        # gets them and everything else gets the cursor. ws.nav owns that
-        # decision (the code editor AND a cart's focused editor handle, #181)
-        # and says whether it spent them.
-        if not ws.nav(nx, ny):
-            dx = _cursor_delta(nx)
-            dy = _cursor_delta(ny)
-            if dx or dy:
-                pointer.move(dx, dy)
-        touched, tclick = apply_touch(touch, pointer)
-        if tclick:
-            click = True
-        _t["inp"] = _ticks_diff(_ticks_ms(), _t0)
-        _click_active[0] = click
-        _click_active[1] = (touched or nx or ny or click
-                            or bool(getattr(inp, "last_key", None)))
-        return _click_active
 
     def _present():
         _t0 = _ticks_ms()
@@ -420,7 +303,7 @@ def run_desktop(fps_cap=60):
         # kick -- one pass per two frames (measured 35/s under Brick Siege at
         # 55fps). This yield, after present, lets the pass finish inside its
         # own frame.
-        if poller is not None:
+        if tdin.poller is not None:
             _sleep_ms(0)
         # #183: close the SD bracket. A DRAWN frame here means the first panel
         # flush after the SD session completed, so the bus survived it.
@@ -487,7 +370,7 @@ def run_desktop(fps_cap=60):
                 # or the feeder. Prints nothing unless comp.bounce_flush, so a
                 # serialized build is silent rather than lying.
                 _diag_pump(diag, comp)
-                _diag_i2cstat(diag, keyboard, touch)
+                _diag_i2cstat(diag, keyboard, tdin.touch)
                 # The web console's SOCKET state: "serving but nobody
                 # connected" and "never started" look identical from the
                 # outside without it.
@@ -537,5 +420,7 @@ def run_desktop(fps_cap=60):
         _acc[10] += loop.t_hi
         _acc[11] += loop.t_hp
 
-    return d.run(_poll_inputs, present=_present, tail=_tail,
+    # Every input source on this board is TDeckInput.poll, timed into _t for
+    # the diag lines.
+    return d.run(lambda now: tdin.poll(now, ws, pointer, _t), present=_present, tail=_tail,
                  account=_account, frame_error=_frame_error)

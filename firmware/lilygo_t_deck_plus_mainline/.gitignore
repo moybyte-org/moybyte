@@ -17,3 +17,4 @@ modules/*
 !modules/tdeck_panel.py
 !modules/tdeck_smoke.py
 !modules/moy_runtime.py
+!modules/tdeck_input.py

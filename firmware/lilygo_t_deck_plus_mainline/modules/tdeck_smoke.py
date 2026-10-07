@@ -343,7 +343,7 @@ def keyboard(phase_s=_KBD_PHASE_S):
         while time.ticks_diff(t_end, time.ticks_ms()) > 0:
             t0 = time.ticks_ms()
             # Poll every source, THEN begin_frame -- the console's own order
-            # (moy_runtime._poll_inputs). begin_frame is where the union of the
+            # (tdeck_input.TDeckInput.poll). begin_frame is where the union of the
             # sources is derived, so merging before the poll reads back the
             # PREVIOUS pass's buttons.
             if poller is not None:

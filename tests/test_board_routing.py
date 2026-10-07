@@ -132,7 +132,7 @@ def test_micropython_touch_and_idle_cursor():
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
     boot_spine = Path("runtime/frame_loop.py").read_text(encoding="utf-8")
 
-    assert "touch = Touch(canvas.w, canvas.h" in runtime
+    assert "touch = self.touch = Touch(w, h" in runtime
     assert "apply_touch(touch, pointer)" in runtime
     assert "pointer.tick(now)" in boot_spine
     assert "loop = FrameLoop(" in runtime
@@ -177,7 +177,7 @@ def test_input_poller_wired_with_gil_release_patch():
     assert "poller.consume()" in runtime
     assert "keyboard.poll()" in runtime              # the synchronous path stays live
     assert "poller thread died -> synchronous fallback" in runtime
-    assert "touch._source = poller.consume_touch" in runtime
+    assert "touch._source = _p.consume_touch" in runtime
     assert "keyboard._poller_owned = True" in runtime
     # the GIL-release patch: applied by default, revertable, wraps cmd_begin
     assert "Moybyte #69 GIL" in build, "the GIL-release patch is not applied"
@@ -221,7 +221,7 @@ def test_micropython_offline_diag_wiring():
     assert "_diag_drawbrk(diag, ws)" in runtime
     assert "_diag_draw2(diag, ws)" in runtime
     assert "_diag_pump(diag, comp)" in runtime
-    assert "_diag_i2cstat(diag, keyboard, touch)" in runtime
+    assert "_diag_i2cstat(diag, keyboard, tdin.touch)" in runtime
     # Existing diagnostics routed through diag (printed AND persisted): the
     # frame-error trace and the in-cart crash.
     assert '_diag_log("frame error", exc, diag)' in runtime
@@ -245,7 +245,8 @@ def test_code_editor_wired_into_device_shell():
     save chain is executed in tests/test_code_multifile.py,
     tests/test_safe_edit.py and tests/test_journal_wiring.py."""
     runtime = _device_backend_src()
-    assert "from console import Pointer, Workstation" in runtime
+    assert "from console import Workstation" in runtime
+    assert "from console import Pointer" in runtime    # via wire_input
     assert "keyboard=keyboard" in runtime      # via wire_workstation_core
 
 

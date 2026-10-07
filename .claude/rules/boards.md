@@ -204,7 +204,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 - **The T-Deck's input poller is paced by the FRAME, never a timer.**
   `moybyte.input.InputPoller` owns every I2C0 transaction off the frame loop
   (#69; needs build.sh's `machine_i2c.c` GIL-release patch, and falls back to
-  synchronous polling without `_thread`). It blocks on a lock `_poll_inputs`
+  synchronous polling without `_thread`). It blocks on a lock `TDeckInput.poll`
   releases once a frame (`poller.kick()`), then yields with `_sleep_ms(0)`. A
   thread that sleeps re-takes the GIL every tick and starves under a
   free-running cart: on 2026-09-23 a key was read twice a second under Brick

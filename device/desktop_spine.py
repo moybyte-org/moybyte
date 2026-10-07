@@ -47,13 +47,14 @@ board with more hardware passes its own closures to `run()`, reading what it
 needs off the returned `Desktop`.
 """
 
-from console import Pointer, Workstation, wire_workstation_core
+from console import Workstation, wire_workstation_core
 from device_boot import DeviceBoot
 from frame_loop import (FrameLoop, FramePump, IdleBlank, OtaHealth,
                         PerfSampler, apply_touch, poll_link, poll_webhost)
 from device_api import make_api
 from device_canvas import DeviceCanvas, _LayerComp
-from device_wifi import autoconnect_wifi, make_wifi
+import wire_input
+import wire_links
 from mem_census import mark as _census
 
 
@@ -192,9 +193,8 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         # kernel; the WM composites it onto the system canvas.
         game = DeviceCanvas(_LayerComp(game_wh[0], game_wh[1], gfx))
     _census("splash")
-    touch = inputs()
-    pointer = Pointer(sys_canvas.w, sys_canvas.h)
-    inp.pointer = pointer          # touch-driven carts read it via the api touch()
+    touch, pointer = wire_input.wire_pointer(inp, inputs, sys_canvas.w,
+                                             sys_canvas.h)
     _census("inputs")
 
     boot.note("loading cartridges")
@@ -235,76 +235,16 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # + the #66 slim_carts diet + pointer/keyboard + the boot loads, in the
     # ONE canonical order the host uses too.
     wire_workstation_core(ws, moy_carts, carts_root, make_api,
-                          make_wifi(moy_carts, carts_root),
+                          wire_links.make_wifi(moy_carts, carts_root),
                           make_audio=make_audio, runtimes=runtimes,
                           before_slim=before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
     _census("wired")
-    if ble_keyboard is not None:
-        # A second keyboard beside the physical one (#26). Both write into the
-        # same InputState, so the console never asks which one a key came
-        # from; Settings finds it because _bt_service() checks ws.ble_keyboard
-        # before ws.keyboard.
-        ws.ble_keyboard = ble_keyboard
 
-    # THE RADIO LINK (#7/#65): the console's one ESP-NOW owner. Built here,
-    # INERT until a cart with the "multiplayer" permission runs (ws.link_arm
-    # starts the radio; pm=PM_NONE costs power and a console on its shelf has
-    # nobody to talk to).
-    try:
-        from moy_espnow import make_link
-        ws.link = make_link(board=link_id,
-                            name=ws.system.get("name", link_id))
-        ws.net = ws.link.net
-    except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
-        log("boot", "link unavailable: %s" % exc)
-        ws.link = None
-    _census("link")
-    # OTA (#53): update_dir is where the board's store said (a copied image,
-    # the pending marker), and every write -- the slot's included -- goes
-    # through the console's store gate: the SD bracket where the card shares
-    # the panel's bus, a plain call-through elsewhere.
-    try:
-        import moy_ota
-        ws.updater = moy_ota.OtaUpdater(ws._with_sd, update_dir=update_dir)
-    except Exception as exc:  # noqa: BLE001
-        log("boot", "OTA updater unavailable: %s" % exc)
-    if ws.updater is not None:
-        try:
-            ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
-        except Exception as exc:  # noqa: BLE001
-            log("boot", "OTA wifi wiring failed: %s" % exc)
-    # The network Get Carts fetches indexes and carts through (#124), over the
-    # OTA's HTTP client; the app takes its own radio lease.
-    try:
-        from cart_net import make_cart_net
-        ws.cart_net = make_cart_net(ws.wifi, autoconnect_wifi)
-    except Exception as exc:  # noqa: BLE001 -- no store network is a notice in the app
-        log("boot", "Get Carts network unavailable: %s" % exc)
-    if c6_updater is not None and ws.updater is not None:
-        # The companion radio's own updater (#7/#58): Settings -> UPGRADE C6
-        # RADIO. Failure is a missing Settings row, never a boot failure.
-        try:
-            ws.c6_updater = c6_updater(ws.updater)
-        except Exception as exc:  # noqa: BLE001
-            log("boot", "C6 updater unavailable: %s" % exc)
-    try:
-        import machine
-        ws.reboot_hook = machine.reset
-    except Exception as exc:  # noqa: BLE001
-        log("boot", "reboot hook unavailable: %s" % exc)
-    _census("ota")
-    # WEB CONSOLE (moycore plan 3.4 pull half): the wasm console baked into
-    # the image, served from the board. Constructed, NOT started -- __init__
-    # binds no socket, so injecting it only makes the Settings row appear.
-    try:
-        from moy_webhost import make_webhost
-        ws.webhost = make_webhost(ws, carts_root,
-                                  autoconnect=autoconnect_wifi,
-                                  with_sd=with_sd)
-    except Exception as exc:  # noqa: BLE001
-        log("boot", "web console unavailable: %s" % exc)
-    _census("webhost")
+    # The links: the radio, the updaters, Get Carts' network, the reboot
+    # hook and the web console, in that order (device/wire_links.py).
+    wire_links.wire_links(ws, link_id, update_dir, carts_root, with_sd,
+                          c6_updater, log, _census)
     if after_services is not None:
         after_services(ws)
     _census("services")
@@ -315,12 +255,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         ws.wm = wm(ws)
         ws.open_desk()
         _census("wm")
-    if keyboard is not None and getattr(keyboard, "start", None) is not None:
-        # A BLE keyboard starts its radio only now, after the Workstation's
-        # boot allocations; a keyboard that answers from __init__ has no
-        # start(). Failure is touch-only, never a boot failure.
-        keyboard.start()
-        _census("keyboard")
+    wire_input.start_keyboards(ws, keyboard, ble_keyboard, _census)
 
     ws._psave_ms = power_save_ms   # `state` reports the LIVE timeout
     serial_ch = None

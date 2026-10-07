@@ -12,3 +12,4 @@ modules/*
 !modules/guition_panel.py
 !modules/guition_smoke.py
 !modules/moy_runtime.py
+!modules/guition_input.py

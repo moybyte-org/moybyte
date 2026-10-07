@@ -270,21 +270,28 @@ BOARD_RUNTIMES = {
 # Everything that WRITES an InputSource inside a board's _poll_inputs. The
 # trackball's `ball.poll()` is deliberately absent: it feeds the pointer and
 # ws.nav, never a button, so it legitimately runs after the merge.
-SOURCE_WRITERS = ("poller.consume()", "keyboard.poll()", "_ble.poll()")
+SOURCE_WRITERS = ("poller.consume()", "keyboard.poll()", "ble.poll()")
 
 
 def _code_lines(src, start_at, stop_at):
     """The CODE of one block: docstrings and comments stripped, because the
-    thing being measured is what runs, and both boards' `_poll_inputs`
+    thing being measured is what runs, and the boards' input hooks'
     docstrings say the words `inp.begin_frame()` before the call does.
 
-    A board with its own input hardware writes `_poll_inputs` in its module;
-    the touch-only tier's body is the spine's `poll_inputs` method, and a
-    board that has no closure of its own is read there."""
+    A board with its own input hardware writes `_poll_inputs` in its module
+    or its input module's `poll` (the T-Deck's TDeckInput); the touch-only
+    tier's body is the spine's `poll_inputs` method, and a board that has no
+    closure of its own is read there."""
     if start_at == "def _poll_inputs(" and start_at not in src:
-        start_at = "def poll_inputs("
+        # The T-Deck's sources are its input module's (TDeckInput.poll).
+        start_at = ("def poll(self, now, ws, pointer, t):"
+                    if "class TDeckInput" in src else "def poll_inputs(")
     body = src[src.index(start_at):]
-    body = body[:body.index(stop_at, len(start_at))]
+    # A body that ends its file ends at the next file runtime_text joins.
+    ends = [i for i in (body.find(stop_at, len(start_at)),
+                        body.find("\n# ---- ", len(start_at))) if i >= 0]
+    assert ends, start_at
+    body = body[:min(ends)]
     out = []
     quoted = False
     for ln in body.splitlines():

@@ -142,14 +142,14 @@ made here, not promised.
    service, the ESP-NOW link, the updater, Get Carts' transport and the webhost
    itself, and `device/p4_desktop.py` constructs the BLE keyboard, the input
    state and the C6 updater. Each subsystem's construction moves to a provider
-   module — `+device/wire_input.py`, `+device/wire_audio.py`,
-   `+device/wire_links.py` — that `build_desktop` and the P4 desk call by one
+   module — `device/wire_input.py`, `device/wire_audio.py`,
+   `device/wire_links.py` — that `build_desktop` and the P4 desk call by one
    name each, so the spine composes and no pass edits it. The T-Deck's
    `moy_runtime.py` loses the poller thread, the keyboard and trackball
    construction and the text-mode hook to
-   `+firmware/lilygo_t_deck_plus_mainline/modules/tdeck_input.py`, its audio
+   `firmware/lilygo_t_deck_plus_mainline/modules/tdeck_input.py`, its audio
    factory and the webhost diag hook to the providers; the Guition S3 gets
-   `+firmware/guition_jc3248w535/modules/guition_input.py`; the P4s' input
+   `firmware/guition_jc3248w535/modules/guition_input.py`; the P4s' input
    modules exist. What remains in each `moy_runtime.py` is the frame tail's:
    the tail hooks, the diag, the PERF sink.
 2. **The widgets split.** `Pointer` and `pointer_state` move to

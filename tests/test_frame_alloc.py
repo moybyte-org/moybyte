@@ -470,7 +470,7 @@ def _stage(dest, exe):
     for name, src in board_config.staged_packages(TDECK, root=ROOT).items():
         shutil.copytree(src, stage / name,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    for name in ("moy_runtime.py", "tdeck_panel.py"):
+    for name in ("moy_runtime.py", "tdeck_panel.py", "tdeck_input.py"):
         shutil.copyfile(TDECK / "modules" / name, stage / name)
     (stage / "carts_data.py").write_text("CARTS_Z = []\n")
     # FROZEN, as on a board: compiled ahead by the tree's own mpy-cross. A

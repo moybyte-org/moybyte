@@ -99,9 +99,7 @@ def run_desktop(fps_cap=60):
     desktop (#201's console arrangement), so Ctrl-C interrupts and the dev
     channel takes complete lines."""
     from guition_panel import GuitionCompositor, set_backlight
-    from axs_touch import Touch
-    from ble_keyboard import BleHidKeyboard
-    from moybyte.input import InputState
+    from guition_input import make_input, make_touch
 
     comp = GuitionCompositor(nfbs=2)
     gfx = comp.gfx()
@@ -109,16 +107,11 @@ def run_desktop(fps_cap=60):
           % (comp.size()[0], comp.size()[1], "native" if gfx else "NONE"))
     sys_canvas = SystemCanvas(comp, font_scale=FONT_SCALE)
     _census("panel")
-    inp = InputState()
-    # The S3's on-chip radio; started by the spine after the Workstation's boot
-    # allocations. Also this board's game-exit path: a paired keyboard's
-    # hold-BACKSPACE works through the shared console unmodified.
-    keyboard = BleHidKeyboard(inp, store_path="/moy/ble_keyboard.json",
-                              auto_start=False)
+    inp, keyboard = make_input()
 
     d = build_desktop("Moybyte Guition", "guition_s3", comp, sys_canvas,
                       set_backlight, inp,
-                      inputs=lambda: Touch(sys_canvas.w, sys_canvas.h),
+                      inputs=lambda: make_touch(sys_canvas.w, sys_canvas.h),
                       keyboard=keyboard, seed_carts=CARTS,
                       power_save_ms=POWER_SAVE_MS, game_wh=(GAME_W, GAME_H),
                       font_scale=FONT_SCALE,

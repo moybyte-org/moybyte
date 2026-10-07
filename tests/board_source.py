@@ -29,6 +29,18 @@ _SPINES = {
     "from p4_desktop import": (ROOT / "device" / "p4_desktop.py", "run_desktop"),
     "from desktop_spine import": (ROOT / "device" / "desktop_spine.py",
                                   "build_desktop"),
+    # A board's own input module, and the spine's providers (each subsystem's
+    # construction, docs/kernel_survival_2026-10.md section 2 item 1): the
+    # function named is the one that attaches to the Workstation, or builds.
+    "from tdeck_input import": (ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
+                                / "modules" / "tdeck_input.py", "build"),
+    "from guition_input import": (ROOT / "firmware" / "guition_jc3248w535"
+                                  / "modules" / "guition_input.py",
+                                  "make_input"),
+    "import wire_input": (ROOT / "device" / "wire_input.py", "start_keyboards"),
+    "import wire_links": (ROOT / "device" / "wire_links.py", "wire_links"),
+    "from wire_audio import": (ROOT / "device" / "wire_audio.py",
+                               "audio_factory"),
 }
 
 
@@ -44,19 +56,16 @@ def wiring_chain(path):
     repo-relative."""
     p = _path(path)
     chain = [(p, "run_desktop")]
-    src = p.read_text(encoding="utf-8")
-    seen = set()
-    while True:
-        nxt = None
+    seen = {p}
+    i = 0
+    while i < len(chain):
+        src = chain[i][0].read_text(encoding="utf-8")
         for marker, (spine, fn) in _SPINES.items():
             if marker in src and spine not in seen:
-                nxt = (spine, fn)
-                break
-        if nxt is None:
-            return chain
-        seen.add(nxt[0])
-        chain.append(nxt)
-        src = nxt[0].read_text(encoding="utf-8")
+                seen.add(spine)
+                chain.append((spine, fn))
+        i += 1
+    return chain
 
 
 def runtime_text(path):
