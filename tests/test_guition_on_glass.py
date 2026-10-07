@@ -48,7 +48,14 @@ EXFAT_SRAM = 640
 # the module has against the same tree denying it (the worse of two fresh
 # boots: 93067 and 93131 free without it, 92039 with it).
 KERNEL_SRAM = 1092
-WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM - KERNEL_SRAM, 55296)
+# And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
+# moy_sd initialises and keeps, and its sdspi device and driver structs (the
+# store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on
+# this board, the same tree with tf_card mounting the card volume and with it
+# left out, fresh boots at the launcher (91747 free with it, 93551 without,
+# twice each).
+CARD_SRAM = 1804
+WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM - KERNEL_SRAM - CARD_SRAM, 55296)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc3248w535"
 
 
