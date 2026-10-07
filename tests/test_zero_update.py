@@ -525,10 +525,9 @@ def test_the_update_route_does_not_shadow_the_store(host):
 def test_this_board_downloads_STRAIGHT_INTO_THE_SLOT():
     """Not a preference on the Zero -- the difference between working and not.
 
-    Its whole filesystem is 2.38MB with ~180KB free and the image is 2.27MB, so
-    a staged copy could not fit on an EMPTY volume. The measured symptom was
-    `OSError 28` (ENOSPC) 184KB into the transfer, on the first OTA anyone ever
-    asked this board for. The inactive slot is 2.75MB and empty.
+    Its whole filesystem (1.875MB) is smaller than its image (~2.7MB), so a
+    staged copy cannot fit on an EMPTY volume; the symptom is `OSError 28`
+    (ENOSPC) part-way through the transfer. The inactive slot is 3MB and empty.
     """
     ota = _FakeOta(MANIFEST)
     task = zero_host.ZeroUpdate(ota)

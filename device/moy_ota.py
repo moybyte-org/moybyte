@@ -714,9 +714,9 @@ class OtaUpdater(SlotHealth):
         `to_slot` streams the bytes DIRECTLY INTO THE INACTIVE APP SLOT instead
         of a staging file, and it is not an optimisation -- on the Zero it is the
         difference between working and not. That board's whole filesystem is
-        2.38MB with ~180KB free, and the image is 2.27MB: staging it could not
-        fit on an EMPTY volume, and the real symptom was `OSError 28` (ENOSPC)
-        184KB into the transfer. Meanwhile the inactive slot is 2.75MB and empty,
+        smaller than its image (1.875MB against ~2.7MB): staging it cannot fit
+        on an EMPTY volume, and the symptom is `OSError 28` (ENOSPC) part-way
+        through the transfer. Meanwhile the inactive slot is 3MB and empty,
         which is what it is for.
 
         The update screen asks for it on every board. The Guition S3 and the

@@ -1394,10 +1394,10 @@ def test_logging_can_never_break_an_update(board, capsys):
 
 # -- streaming straight into the slot ---------------------------------------
 #
-# The Zero could not update at all: its download staged to a FILE on a 2.38MB
-# filesystem with ~180KB free, for a 2.27MB image, and died with OSError 28
-# (ENOSPC) 184KB in. It could not have fit on an EMPTY volume. The inactive slot
-# is 2.75MB and empty, which is what it is for -- so the bytes go there as they
+# The Zero cannot update through a staging FILE: its whole filesystem (1.875MB)
+# is smaller than its image (~2.7MB), so the download dies with OSError 28
+# (ENOSPC) even on an EMPTY volume. The inactive slot
+# is 3MB and empty, which is what it is for -- so the bytes go there as they
 # come off the wire. Half the flash writes on every other board too, since the
 # staged path writes every byte twice.
 

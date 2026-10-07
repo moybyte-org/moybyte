@@ -77,9 +77,11 @@ esptool-js does not implement. So the browser's gesture is a replug when the
 write finishes, and holding BOOT while plugging in is the escape hatch on the
 card.
 
-**The migration flash WIPES THE STORE.** The new partition table puts `vfs` at
-`0x5A0000`; the stock MicroPython table it replaces put it far lower, so the old
-filesystem is not where the new image looks and comes up freshly formatted. Run
+**A table-changing flash WIPES THE STORE.** The partition table puts `vfs` at
+`0x620000` (since 2026-10-07); a board flashed under an older table, or the
+stock MicroPython one, has its filesystem elsewhere, so the new image comes up
+on a freshly formatted store (`tools/board_flash.py` erases the moved store's
+first blocks and says so). Run
 `./provision.sh` afterwards to put the credentials and the pin back; the seed
 roster the image carries seeds itself on the next boot. A kid's browser-made
 carts are not lost by this — the browser keeps its own copy in OPFS and syncs
@@ -95,9 +97,13 @@ them back on the next visit — but anything that existed *only* here is.
 - **What makes two slots fit** is that the image is headless: no console, no
   canvas, and only one shared native module. Measured on the first build,
   2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**, against
-  the Guition's 3,668,096 B the day before. The CSV carries the full arithmetic
-  and what would falsify it; the build prints the headroom on every run and
-  fails on an overflow (#168).
+  the Guition's 3,668,096 B the day before. The baked browser console grew
+  the image past its 256 KiB headroom floor (`docs/native_kernel_2026-09.md`
+  §6.1), so since 2026-10-07 the slots are **3 MiB** (`0x300000`, at `0x20000`
+  and `0x320000`) and the store is the **1.875 MiB** `vfs` at `0x620000`, sized
+  for the kernel's native modules to cross onto this board. The CSV carries the
+  full arithmetic and what would falsify it; the build prints the headroom on
+  every run and fails on an overflow (#168).
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is

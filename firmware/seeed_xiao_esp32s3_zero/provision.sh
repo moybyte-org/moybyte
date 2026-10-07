@@ -154,7 +154,7 @@ try:
 except OSError:
     print('CARTS 0')" | tr -d '\r' | grep '^CARTS ' | cut -d' ' -f2 || echo 0)"
 if [ "${PUSH_CARTS}" = "1" ] || [ "${HAS_CARTS:-0}" = "0" ]; then
-  echo "== seed carts (the whole roster -- 763KB measured, against a 2.4MB vfs)"
+  echo "== seed carts (the whole roster -- 763KB measured, against a 1.9MB vfs)"
   for cart in "${REPO}"/system_carts/*.moy; do
     run cp -r "${cart}" :/moy/carts/ >/dev/null
   done

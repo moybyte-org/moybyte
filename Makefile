@@ -605,10 +605,10 @@ firmware-monitor-guition-p4:
 # so there is nothing to look at after a flash: `make firmware-monitor-zero` is
 # how you read the boot line, the paired url and every `ZERO ota:` transition.
 #
-# THE MIGRATION FLASH IS A STORE WIPE. This board's new table puts vfs at
-# 0x5A0000; the stock MicroPython table it is replacing put it far lower, so the
-# old filesystem is not where the new image looks and comes up freshly
-# formatted. Re-run provision.sh afterwards -- see the board README.
+# A TABLE-CHANGING FLASH IS A STORE WIPE. This board's table puts vfs at
+# 0x620000 (since 2026-10-07); a board flashed under an older table has its
+# filesystem elsewhere, so the new image comes up on a freshly formatted store.
+# Re-run provision.sh afterwards -- see the board README.
 
 firmware-build-zero:
 	firmware/seeed_xiao_esp32s3_zero/build.sh
