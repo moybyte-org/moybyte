@@ -14,6 +14,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "nvs.h"
 
 // The driver's life (docs/kernel_survival_2026-10.md section 6.1): one
 // station, brought up the first time a holder of the spine's lease asks and
@@ -25,6 +26,7 @@ static esp_netif_t *s_netif;
 static volatile int s_want;             // a connect is asked for: retry on loss
 static esp_timer_handle_t s_retry;      // the next attempt after a loss
 static volatile uint8_t s_backoff;      // retries since the last address
+static volatile uint8_t s_keep;         // an address came: keep the network
 
 // A lost or failed association is retried after a backoff (0.5 s doubling to
 // 8 s), never from the event itself: an immediate esp_wifi_connect() lands on
@@ -75,6 +77,7 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
         s_st.reason = 0;
         portEXIT_CRITICAL(&s_latch);
         s_backoff = 0;
+        s_keep = 1;
     }
 }
 
@@ -179,7 +182,80 @@ void moy_wifi_disconnect(void) {
     }
 }
 
+// The network that last gave an address, kept in NVS (namespace "moy_wifi")
+// so the recovery floor can reach the network with no VM and no store. It is
+// written from the caller's task the first time the state is read after an
+// address came, and only when it changed.
+#define KEEP_NS "moy_wifi"
+#define KEEP_KEY "net"
+
+typedef struct {
+    char ssid[33];
+    char pass[65];
+} kept_t;
+
+static void keep_now(void) {
+    s_keep = 0;
+    wifi_config_t c;
+    if (esp_wifi_get_config(WIFI_IF_STA, &c) != ESP_OK) {
+        return;
+    }
+    kept_t k, old;
+    memset(&k, 0, sizeof(k));
+    memcpy(k.ssid, c.sta.ssid, sizeof(k.ssid) - 1u);
+    memcpy(k.pass, c.sta.password, sizeof(k.pass) - 1u);
+    nvs_handle_t h;
+    if (nvs_open(KEEP_NS, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    size_t n = sizeof(old);
+    if (nvs_get_blob(h, KEEP_KEY, &old, &n) != ESP_OK || n != sizeof(old)
+        || memcmp(&old, &k, sizeof(k)) != 0) {
+        nvs_set_blob(h, KEEP_KEY, &k, sizeof(k));
+        nvs_commit(h);
+    }
+    nvs_close(h);
+}
+
+int moy_wifi_connect_kept(void) {
+    kept_t k;
+    nvs_handle_t h;
+    size_t n = sizeof(k);
+    if (nvs_open(KEEP_NS, NVS_READONLY, &h) != ESP_OK) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    esp_err_t e = nvs_get_blob(h, KEEP_KEY, &k, &n);
+    nvs_close(h);
+    if (e != ESP_OK || n != sizeof(k) || k.ssid[0] == '\0') {
+        return ESP_ERR_NOT_FOUND;
+    }
+    k.ssid[sizeof(k.ssid) - 1u] = '\0';
+    k.pass[sizeof(k.pass) - 1u] = '\0';
+    e = moy_wifi_connect(k.ssid, k.pass);
+    memset(&k, 0, sizeof(k));
+    return e;
+}
+
+void moy_wifi_forget_kept(const char *ssid) {
+    kept_t k;
+    nvs_handle_t h;
+    size_t n = sizeof(k);
+    if (nvs_open(KEEP_NS, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    if (nvs_get_blob(h, KEEP_KEY, &k, &n) == ESP_OK && n == sizeof(k)
+        && strncmp(k.ssid, ssid, sizeof(k.ssid)) == 0) {
+        nvs_erase_key(h, KEEP_KEY);
+        nvs_commit(h);
+    }
+    memset(&k, 0, sizeof(k));
+    nvs_close(h);
+}
+
 void moy_wifi_state(moy_wifi_state_t *out) {
+    if (s_keep) {
+        keep_now();
+    }
     portENTER_CRITICAL(&s_latch);
     *out = s_st;
     portEXIT_CRITICAL(&s_latch);

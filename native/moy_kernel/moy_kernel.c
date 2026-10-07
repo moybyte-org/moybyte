@@ -112,6 +112,18 @@
 #ifndef MOY_FW_LABEL
 #define MOY_FW_LABEL "unlabelled"
 #endif
+#ifndef MOY_FW_BOARD
+#define MOY_FW_BOARD "unknown"
+#endif
+#ifndef MOY_FW_CHANNEL
+#define MOY_FW_CHANNEL "stable"
+#endif
+
+#if defined(MOY_NET_WIFI) && MOY_NET_WIFI
+#include "moy_json.h"
+#include "moy_net.h"
+#include "moy_ota.h"
+#endif
 
 #if !SOC_RTC_MEM_SUPPORTED
 #error "moy_kernel keeps its crash record in RTC memory, which this chip lacks"
@@ -596,6 +608,120 @@ static void k_state(const k_floor_t *k) {
     }
 }
 
+#if defined(MOY_NET_WIFI) && MOY_NET_WIFI
+// The floor's `update` word (docs/kernel_survival_2026-10.md section 6.3): the
+// kernel's updater with no VM. `update` checks this build's channel for this
+// board and says what it offers; `update install` installs it and restarts
+// into it. A URL after either names another manifest -- typed at the serial,
+// the owner's choice as a card's ota.json is, so a signature is checked when
+// present and required only of the baked channel. The network is the one the
+// WiFi driver keeps (moy_wifi_connect_kept).
+#define K_UPDATE_WAIT_MS 20000
+#define K_RELEASES "https://github.com/moybyte-org/moybyte/releases/download/"
+
+static void k_update(const char *args) {
+    while (*args == ' ') {
+        args++;
+    }
+    int install = strncmp(args, "install", 7) == 0 && (args[7] == '\0' || args[7] == ' ');
+    if (install) {
+        args += 7;
+        while (*args == ' ') {
+            args++;
+        }
+    }
+    char url[256];
+    int baked = *args == '\0';
+    if (baked) {
+        snprintf(url, sizeof(url), K_RELEASES "%s/latest-%s.json",
+                 strcmp(MOY_FW_CHANNEL, "unstable") == 0 ? "firmware-beta" : "firmware-latest",
+                 MOY_FW_BOARD);
+    } else {
+        snprintf(url, sizeof(url), "%s", args);
+    }
+    moy_wifi_state_t st;
+    moy_wifi_state(&st);
+    if (!st.connected) {
+        int e = moy_wifi_connect_kept();
+        if (e != 0) {
+            k_printf("KERNEL update wifi err=0x%x (no kept network)\r\n", e);
+            return;
+        }
+        int64_t t0 = esp_timer_get_time();
+        do {
+            vTaskDelay(pdMS_TO_TICKS(250));
+            moy_wifi_state(&st);
+        } while (!st.connected && esp_timer_get_time() - t0 < K_UPDATE_WAIT_MS * 1000LL);
+        if (!st.connected) {
+            k_printf("KERNEL update wifi offline reason=%u\r\n", (unsigned)st.reason);
+            return;
+        }
+    }
+    k_printf("KERNEL update check %s\r\n", url);
+    char *text = NULL;
+    size_t n = 0;
+    int rc = moy_ota_check(url, MOY_FW_BOARD, baked, &text, &n);
+    if (rc == MOY_OTA_ABSENT) {
+        k_out("KERNEL update none published\r\n");
+        return;
+    }
+    if (rc != MOY_OTA_OK) {
+        k_printf("KERNEL update refused: %s\r\n", moy_ota_error());
+        return;
+    }
+    const char *o = moy_json_ws(text, text + n), *oe = moy_json_value(o, text + n, 0);
+    const char *v, *ve;
+    char murl[512] = "", sha[65] = "", chan[16] = "";
+    int64_t ver = 0, size = 0;
+    if (moy_json_get(o, oe, "url", &v, &ve) && moy_json_kind(v, ve) == MOY_JSON_STR
+        && moy_json_strlen(v, ve) < sizeof(murl)) {
+        murl[moy_json_str(v, ve, murl)] = '\0';
+    }
+    if (moy_json_get(o, oe, "sha256", &v, &ve) && moy_json_kind(v, ve) == MOY_JSON_STR
+        && moy_json_strlen(v, ve) < sizeof(sha)) {
+        sha[moy_json_str(v, ve, sha)] = '\0';
+    }
+    if (moy_json_get(o, oe, "channel", &v, &ve) && moy_json_kind(v, ve) == MOY_JSON_STR
+        && moy_json_strlen(v, ve) < sizeof(chan)) {
+        chan[moy_json_str(v, ve, chan)] = '\0';
+    }
+    if (moy_json_get(o, oe, "version", &v, &ve)) {
+        moy_json_int(v, ve, &ver);
+    }
+    if (moy_json_get(o, oe, "size", &v, &ve)) {
+        moy_json_int(v, ve, &size);
+    }
+    moy_net_free(text);
+    k_printf("KERNEL update offers version=%ld channel=%s size=%ld running=%s\r\n",
+             (long)ver, chan, (long)size, MOY_FW_LABEL);
+    if (!install) {
+        return;
+    }
+    if (moy_ota_dl_begin(murl, (uint32_t)size, sha, MOY_OTA_SINK_SLOT) != 0) {
+        k_printf("KERNEL update refused: %s\r\n", moy_ota_error());
+        return;
+    }
+    uint32_t shown = 0;
+    int more;
+    while ((more = moy_ota_dl_step(0)) > 0) {
+        moy_ota_state_t os;
+        moy_ota_state(&os);
+        if (os.dl_done - shown >= 262144u) {
+            shown = os.dl_done;
+            k_printf("KERNEL update %u/%u\r\n", (unsigned)os.dl_done, (unsigned)os.dl_total);
+        }
+    }
+    char label[16];
+    if (more < 0 || moy_ota_dl_finish() != 0 || moy_ota_activate(label, sizeof(label)) != 0) {
+        k_printf("KERNEL update failed: %s\r\n", moy_ota_error());
+        return;
+    }
+    k_printf("KERNEL update installed into %s; restarting\r\n", label);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    esp_restart();
+}
+#endif
+
 static void k_choose(int choice) {
     s_kst.next = (uint8_t)(MOY_BOOT_START + choice);
     k_printf("KERNEL recovery choice=%s\r\n", moy_recovery_choice_name(choice));
@@ -653,7 +779,7 @@ static void moy_kernel_recovery(int why) {
     int touch_choice = -1;
     #endif
 
-    char line[24];
+    char line[208];
     size_t n = 0;
     int64_t t0 = esp_timer_get_time(), last_report = t0, last_input = t0;
     #if defined(MOY_KERNEL_IDLE_SAFE_MS)
@@ -675,6 +801,12 @@ static void moy_kernel_recovery(int why) {
                         k_choose(2);
                     } else if (strcmp(line, "state") == 0) {
                         k_state(&k);
+                    #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
+                    } else if (strncmp(line, "update", 6) == 0
+                               && (line[6] == '\0' || line[6] == ' ')) {
+                        k_update(line + 6);
+                        last_input = esp_timer_get_time();
+                    #endif
                     } else {
                         k_report(&k);
                     }
@@ -782,6 +914,12 @@ __attribute__((weak)) void moy_glass_vm_stop(void) {
 }
 
 __attribute__((weak)) void moy_glass_vm_swept(void) {
+}
+
+// The links' teardown (native/moy_net/moy_ota.h): the client's connections and
+// an update still streaming are closed with the VM that opened them. Weak, so
+// an image without moy_net links.
+__attribute__((weak)) void moy_net_vm_stop(void) {
 }
 
 // kstop N (docs/kernel_survival_2026-10.md §7.5): the VM service's soft reset,
@@ -939,6 +1077,7 @@ soft_reset_exit:
     moy_kernel_rest();
     moy_kernel_kstop_line("before");
     moy_glass_vm_stop();
+    moy_net_vm_stop();
 
     #if MICROPY_BLUETOOTH_NIMBLE
     mp_bluetooth_deinit();

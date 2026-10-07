@@ -223,7 +223,7 @@ sprints that follow it:
 | the glass: canvas ownership, present, compositors | `device/device_canvas.py`, `device/dsi_panel.py`, `device/p4_canvas.py` | 3 |
 | storage: the SD gate, the store of record and its journal | the boards' `with_sd`, `runtime/moy_journal.py` | 1b and 3 |
 | the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/frame_loop.py`, `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
-| radios and links: WiFi, ESP-NOW, the C6 updater, the webhost and sync RPC | `device/device_wifi.py`, `device/moy_espnow.py`, `device/moy_c6_update.py`, `device/moy_webhost.py`, `device/moy_webserver.py`, `runtime/moy_sync.py` | 3 |
+| radios and links: WiFi, ESP-NOW, the updaters, the webhost and sync RPC | `device/device_wifi.py`, `device/moy_espnow.py`, `moy_c6_update.py` (deleted by sprint 3's links pass), `device/moy_webhost.py`, `device/moy_webserver.py`, `runtime/moy_sync.py` | 3 |
 | the store: index, catalogue, covers, seed, project loading | `runtime/moy_carts.py`, `runtime/cover_cache.py`, `runtime/moy_seed.py`, `runtime/project.py` (in part) | 1b |
 | the cart path: loop, tick model, runtime map, moycore glue, in-cart chrome, netplay lockstep, notices and toasts over a cart | `runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`, `runtime/system_menu_ui.py`, `runtime/netplay.py`, the achievements/notify path | 4 |
 | the roles and their services | `runtime/app_context.py`, `runtime/system_api.py`, `runtime/artwork.py`'s `ArtworkService` (the rest of the file is Paint, an app), `runtime/wallpaper.py` | 5 |
@@ -267,7 +267,7 @@ console needs while no Python app runs is OS.
 |---|---|---|---|
 | `device/banded_panel.py` | glass | 3 | the compositor both banded-panel S3 boards run; their per-board subclasses are in the board table |
 | `device/boot_shell.py` | bring-up | open | the boot-mode ladder every board's `moybyte_shell.py` calls; its `desktop` mode is the production boot, every other mode a REPL smoke. Question: with a native loop as the boot entry, do the smoke modes become native bring-up modes, dev-channel words, or stay Python probes? One answer covers this row, the boards' entry stubs and `moybyte_shell.py` files, and the three smoke modules |
-| `device/cart_net.py` | radios and links | 3 | Get Carts' transport over the OTA HTTP client; the app above it stays Python |
+| `cart_net.py` | radios and links | 3 | deleted 2026-10-07: Get Carts' transport is `device/wire_links.py`'s `CartNet` over `native/moy_net/moy_ota.c`'s client; the app above it stays Python |
 | `device/desktop_spine.py` | split | 3 + 7 | the boot order and `Desktop.run`, the frame loop, cross with the frame tail; the `Workstation` and WM construction goes with `runtime/console.py` |
 | `device/device_api.py` | cart path | open | a re-export of `make_api`; follows `runtime/cart_api.py` |
 | `device_audio.py` | audio | 3 | deleted 2026-10-07: the I2S feed and the six verbs are `native/moy_audio`'s |
@@ -276,9 +276,9 @@ console needs while no Python app runs is OS.
 | `device/device_util.py` | frame tail | 3 | the leaf under the device modules (tick helpers, diag shims); deleted with its last device importer |
 | `device/device_wifi.py` | radios and links | 3 | the radio driver; the lease that gates it (`wifi_hold` / `wifi_release`) is the spine's, in `runtime/console_spine.py` over `runtime/moy_spine.py` |
 | `device/dsi_panel.py` | glass | 3 | the shared P4 DSI compositor, rotated variant included |
-| `device/moy_c6_update.py` | radios and links | 3 | the P4's radio co-processor updater, the backend of Settings → UPGRADE C6 RADIO |
+| `moy_c6_update.py` | radios and links | 3 | deleted 2026-10-07: the C6's image streams into the radio through `native/moy_net/moy_ota.c`'s C6 sink; `device/moy_ota.py`'s `C6Updater` is Settings → UPGRADE C6 RADIO's face |
 | `device/moy_espnow.py` | radios and links | 3 | the board's one ESP-NOW owner; netplay's lockstep over it is the cart path's |
-| `device/moy_ota.py` | frame tail | 3 | OTA health and the updater; it also carries the streaming HTTP(S) client Get Carts' transport reads through. The Zero takes it |
+| `device/moy_ota.py` | frame tail | 3 | the firmware's identity and the updaters' Settings face over `native/moy_net/moy_ota.c` (crossed 2026-10-07, with its HTTP(S) client, `moy_http.py`); OTA health is `device/moy_ota_health.py`. The Zero takes it |
 | `device/moy_webhost.py` | radios and links | 3 | the webhost; the Zero takes it |
 | `device/moy_webserver.py` | radios and links | 3 | the socket and HTTP core under the webhost; the Zero takes it |
 | `device/moybyte_diag.py` | frame tail | 3 | offline log capture to SD for the T-Deck, where the loop starves USB serial |

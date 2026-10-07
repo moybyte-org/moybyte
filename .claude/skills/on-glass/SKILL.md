@@ -134,8 +134,11 @@ when it has; a suite started earlier errors every test with "did not answer
    board is on the kernel's recovery floor (`native/moy_kernel/`) -- the VM
    failed to start or crashed into a boot loop. Read the crash it shows, then
    send `retry`, `safe` (boots on default settings, `system.json` neither
-   read nor written, no wallpaper cart) or `repl` (skips `main.py`) as a line; each is a restart. `tools/kernel_gate.py BOARD` drives
-   the floor end to end.
+   read nor written, no wallpaper cart) or `repl` (skips `main.py`) as a line; each is a restart. A console that cannot start
+   its VM can still take a release there: `update` says what this build's
+   channel offers, `update install` installs it and restarts, over the
+   network the WiFi driver kept from its last address.
+   `tools/kernel_gate.py BOARD` drives the floor end to end.
 
 When a suite fails on a board you have just been driving, suspect your own
 leftovers first: `desk`, check `state`'s stack, reboot if unsure.

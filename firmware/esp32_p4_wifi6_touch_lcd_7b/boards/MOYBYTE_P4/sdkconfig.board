@@ -167,3 +167,14 @@ CONFIG_PM_ENABLE=
 # `moy_kernel.watchdog()`).
 CONFIG_ESP_TASK_WDT_PANIC=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
+
+# --- TLS in PSRAM -----------------------------------------------------------
+# mbedtls allocates through the IDF's own hook: with the default, every block
+# under SPIRAM_MALLOC_ALWAYSINTERNAL -- the handshake's bignums, the peer
+# certificate chain, the 4 KB out record -- is internal SRAM, and an HTTPS
+# download (the kernel's updater and Get Carts, native/moy_net/moy_ota.c) took
+# about 22 KB of it at its peak on the Guition S3. External puts all of
+# mbedtls's state in PSRAM; what stays internal is the hardware AES/SHA's DMA
+# bounce, a record at a time. docs/kernel_survival_2026-10.md section 8; the
+# figures are #224's.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

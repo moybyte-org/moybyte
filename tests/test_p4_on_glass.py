@@ -75,7 +75,11 @@ TF_CARD_SRAM = 844
 # which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
 # And the WiFi driver's reconnect timer handle and backoff, 5 bytes of .bss by
 # the link map, 2026-10-07 (the esp_timer it creates is the heap's).
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5
+# And the updater's (native/moy_net/moy_ota.c: the pointers to its state, its
+# clients, its keys and the trusted set, which are PSRAM), its slot's position
+# (moy_net_port.c) and the WiFi driver's kept-network flag, 38 bytes of .bss by
+# the objects' sizes, 2026-10-07.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38
 WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
@@ -257,6 +261,10 @@ def test_boots_to_the_desk(board):
 
 def test_wifi_status_is_readable(board):
     on_glass.wifi_status_is_readable(board)
+
+
+def test_the_kernel_verifies_a_signed_manifest(board):
+    on_glass.the_kernel_verifies_a_signed_manifest(board)
 
 
 def test_wifi_is_off_at_rest(board):
@@ -452,139 +460,12 @@ def test_idle_screen_blank_and_wake(board):
     board.cmd("power 300", wait_for="REMOTE power")     # restore the default
 
 
-# -- the OTA manifest verifier, on real MicroPython (#53) ---------------------
+# -- the OTA manifest verifier, in the kernel (#53, #224) ----------------------
 #
-# The P4 has no moy_ota -- the updater is T-Deck-only -- but it is the board
-# with a live REPL, and the thing worth proving is language-level, not
-# board-level: that the SHIPPED verifier runs under MicroPython at all. The host
-# suite proves the maths in CPython, where int(hex, 16) at 512 characters,
-# int.to_bytes(256, 'big') and a 2048-bit 3-argument pow are all free. On the
-# device each of those is a build-configuration question that was read out of
-# mpconfig.h and asserted. This executes them.
-#
-# The code under test is EXTRACTED from moy_ota.py by ast rather than retyped,
-# so a change there is picked up here instead of drifting; the only edits are
-# mechanical (dedent the methods, drop `self`).
-#
-# NAMING THE PIECES BY HAND WAS THE DRIFT (2026-08-27). `607ba35` promoted the
-# PKCS#1 block compare out of the class into a module-level `verify_sig` so the
-# C6 image's second signature could share it, and this extractor -- which knew
-# about class methods and module-level ASSIGNMENTS -- kept uploading a
-# `_verify_manifest` whose body had left the building. The board said
-# `NameError: name 'verify_sig' isn't defined` once per command; the harness
-# discarded the text and every assertion downstream read `assert None is False`.
-# So the closure is now DERIVED: whatever the extracted code still references,
-# the extractor goes and fetches, and what it cannot fetch it names, here, in
-# milliseconds, instead of on the wire as an absence.
-
-def _free_names(snippet):
-    """Names `snippet` READS that nothing in it (or in builtins) defines."""
-    import ast
-    import builtins
-
-    def params(args):
-        got = {a.arg for a in list(args.posonlyargs) + list(args.args)
-               + list(args.kwonlyargs)}
-        return got | {a.arg for a in (args.vararg, args.kwarg) if a}
-
-    tree = ast.parse(snippet)
-    top = set(dir(builtins))
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            top.update(t.id for t in node.targets if isinstance(t, ast.Name))
-        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-            top.add(node.name)
-
-    free = set()
-    for fn in [n for n in tree.body if isinstance(n, ast.FunctionDef)]:
-        # Bindings first, reads second: ast.walk does not visit a store before
-        # the load it feeds, so a one-pass check would flag ordinary locals.
-        local = params(fn.args)
-        for node in ast.walk(fn):
-            if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
-                local.add(node.id)
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                local.update((a.asname or a.name).split(".")[0]
-                             for a in node.names)
-            elif isinstance(node, ast.ExceptHandler) and node.name:
-                local.add(node.name)
-            elif isinstance(node, (ast.FunctionDef, ast.Lambda)):
-                local |= params(node.args)
-        free.update(n.id for n in ast.walk(fn)
-                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
-                    and n.id not in local and n.id not in top)
-    return free
-
-
-def _extract_verifier():
-    import ast
-    import textwrap
-
-    path = ROOT / "device" / "moy_ota.py"
-    src = path.read_text(encoding="utf-8")
-    tree = ast.parse(src)
-
-    def const(name):
-        for node in tree.body:
-            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == name:
-                return ast.get_source_segment(src, node)
-        raise AssertionError("constant vanished from moy_ota: " + name)
-
-    def method(name):
-        for cls in tree.body:
-            if isinstance(cls, ast.ClassDef) and cls.name == "OtaUpdater":
-                for f in cls.body:
-                    if isinstance(f, ast.FunctionDef) and f.name == name:
-                        out = textwrap.dedent(ast.get_source_segment(src, f))
-                        out = out.replace("def %s(self, " % name, "def %s(" % name)
-                        return out.replace("self._", "_")
-        raise AssertionError("method vanished from moy_ota: " + name)
-
-    def top_level(name):
-        """A module-level def or assignment the extracted code needs, or None
-        (a stdlib name, or something genuinely missing -- the caller says so)."""
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and node.name == name:
-                return ast.get_source_segment(src, node)
-            if isinstance(node, ast.Assign) and any(
-                    getattr(t, "id", "") == name for t in node.targets):
-                return ast.get_source_segment(src, node)
-        return None
-
-    parts = [const("OTA_SCHEME"), const("_SHA256_DER"), const("OTA_PUBLIC_KEYS"),
-             method("_canonical"), method("_verify_manifest")]
-    have = {"OTA_SCHEME", "_SHA256_DER", "OTA_PUBLIC_KEYS",
-            "_canonical", "_verify_manifest"}
-    for _ in range(8):                      # a chain, not a single hop
-        missing = sorted(_free_names("\n".join(parts)) - have)
-        if not missing:
-            break
-        for name in missing:
-            got = top_level(name)
-            assert got is not None, (
-                "the extracted verifier calls %r, which moy_ota does not define "
-                "at module level -- the device would answer NameError and the "
-                "test would read it as a missing value" % name)
-            parts.append(got)
-            have.add(name)
-    snippet = "\n".join(parts)
-    assert not _free_names(snippet), (
-        "the extracted verifier does not close over its own names: %s"
-        % sorted(_free_names(snippet)))
-    return snippet
-
-
-def _val(board, expr, timeout=30):
-    """Evaluate `expr` in the PERSISTENT device namespace.
-
-    The device's `py` handler builds a FRESH env per command, so anything
-    pyexec uploaded lives in ws._g and nowhere else -- a bare pyval of a name
-    defined up there comes back None (a device NameError), which reads exactly
-    like a failed assertion and is not one. strict=True is what makes that
-    distinction: a device exception arrives as DeviceError carrying the board's
-    own words, never as a value the caller then asserts against."""
-    return board.pyval("eval(%r, ws._g)" % expr, timeout=timeout, strict=True)
-
+# The verifier is native/moy_net/moy_ota.c's: the canonical text, SHA-256 and
+# the RSA-2048 modexp in C. The host suite runs the same C over net_binding;
+# every console's suite runs the image's own build of it
+# (on_glass.the_kernel_verifies_a_signed_manifest), and this one times it.
 
 SIGNED_MANIFEST = {
     "channel": "unstable", "version": 1785665581, "size": 4292512,
@@ -593,10 +474,10 @@ SIGNED_MANIFEST = {
 }
 
 
-def test_the_shipped_verifier_runs_on_micropython(board):
-    """Signed here rather than pasted from a release: the test has to keep
-    working when the key is rotated, and the private half of the real one is a
-    GitHub secret that is deliberately not on this machine."""
+def test_verification_is_fast_enough_to_not_think_about(board):
+    """It runs once per update check, behind a screen already waiting on the
+    network; the bound catches an order-of-magnitude regression only."""
+    import json as _json
     import sys as _sys
 
     _sys.path.insert(0, str(ROOT / "tests"))
@@ -604,55 +485,19 @@ def test_the_shipped_verifier_runs_on_micropython(board):
 
     manifest = dict(SIGNED_MANIFEST)
     manifest["sig"] = sign_with_test_key(manifest)
-
-    assert board.pyexec(_extract_verifier(), timeout=90), board.last_error
-    assert board.pyexec(
-        "KEYS = %r\nMANIFEST = %r\n" % (TEST_KEYS, manifest),
-        timeout=90), board.last_error
-
-    # The MicroPython API questions, asked one at a time so a failure names itself.
-    assert _val(board, "int(KEYS[0][0], 16).__class__.__name__") == "int"
-    assert _val(board, "len(int(KEYS[0][0], 16).to_bytes(256, 'big'))") == 256
-    assert _val(board,
-        "__import__('hashlib').sha256(b'moybyte').digest()[:4]") == b"\xbd\xd3\xd1\xb4"
-
-    assert _val(board, "_verify_manifest(MANIFEST, KEYS)") is True
-
-
-def test_verification_is_fast_enough_to_not_think_about(board):
-    """Measured 2026-08-02: 35ms modexp, 41ms whole verify. The bound is loose
-    on purpose -- it exists to catch an ORDER-of-magnitude regression (a
-    software-int fallback, a bigger key), not to police jitter. It runs once per
-    update check, behind a screen already waiting on the network."""
     assert board.pyexec(
         "import time\n"
+        "KEYS = %r\n"
+        "M = %r\n"
         "t0 = time.ticks_us()\n"
         "for _ in range(5):\n"
-        "    _verify_manifest(MANIFEST, KEYS)\n"
-        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n",
+        "    __import__('moy_net').ota_judge(M, None, True, KEYS)\n"
+        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n"
+        % (TEST_KEYS, _json.dumps(manifest)),
         timeout=60), board.last_error
     us = board.pyval("ws._g['VERIFY_US']", strict=True)
-    print("\nverify_manifest: %dus (%.1fms)" % (us, us / 1000.0))
+    print("\nota_judge: %dus (%.1fms)" % (us, us / 1000.0))
     assert 0 < us < 500_000, "verify took %dus -- something got much slower" % us
-
-
-def test_a_tampered_manifest_is_refused_on_the_device(board):
-    """Every field the signature covers, refused on real hardware -- and junk in
-    the signature refused without raising, because whatever arrives off the wire
-    lands straight in int(sig, 16) and pow()."""
-    for field, value in (("sha256", "0" * 64), ("version", 999),
-                         ("size", 1), ("channel", "stable")):
-        got = _val(board, "_verify_manifest(dict(MANIFEST, **{%r: %r}), KEYS)"
-                          % (field, value))
-        assert got is False, "tampering with %s was accepted" % field
-
-    assert _val(
-        board, "_verify_manifest({k: v for k, v in MANIFEST.items() if k != 'sig'}, KEYS)"
-    ) is False, "an unsigned manifest verified"
-
-    for junk in ("", "zz", "00", "ff" * 256):
-        assert _val(board, "_verify_manifest(dict(MANIFEST, sig=%r), KEYS)"
-                           % junk) is False, "junk signature %r accepted" % junk
 
 
 def test_the_ota_updater_is_live_on_this_board(board):

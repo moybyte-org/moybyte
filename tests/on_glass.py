@@ -106,6 +106,33 @@ def wifi_status_is_readable(board):
     assert st.get("wifi") is None or isinstance(st["wifi"], list)
 
 
+def the_kernel_verifies_a_signed_manifest(board):
+    """The updater's verifier, the image's own build of native/moy_net/
+    moy_ota.c: a manifest signed with the test key is accepted, one whose
+    signed field was changed is refused, and an unsigned one is refused where
+    a signature is required. The version is a beta's build epoch, the width a
+    board's printf once lost (2026-10-07): the canonical text is built by hand."""
+    import json as _json
+    import sys as _sys
+
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from test_ota_signing import TEST_KEYS, sign_with_test_key
+
+    m = {"board": "x", "channel": "unstable", "version": 1785665581,
+         "size": 4292512, "url": "https://example/app.bin",
+         "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"}
+    m["sig"] = sign_with_test_key(m)
+
+    def judge(man):
+        return board.pyval("__import__('moy_net').ota_judge(%r, None, True, %r)"
+                           % (_json.dumps(man), TEST_KEYS), strict=True)
+
+    assert judge(m) is None
+    assert judge(dict(m, version=1785665582)) == "bad signature"
+    assert judge(dict(m, sig="ff" * 256)) == "bad signature"
+    assert judge({k: v for k, v in m.items() if k != "sig"}) == "unsigned update"
+
+
 def wifi_is_off_at_rest(board):
     """The radio is a LEASE (2026-09-07): a console that is not serving the
     web, updating, in the WIFI panel, running a network cart or in a match

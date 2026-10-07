@@ -48,3 +48,52 @@ bool moy_flush_drain(void) {
     moy_net_host_drains++;
     return true;
 }
+
+// The companion radio's sink, standing in for native/p4/moy_c6: off unless a
+// test turns it on; it records what it was given.
+#include <stdlib.h>
+#include <string.h>
+
+int moy_net_host_c6_on;
+int moy_net_host_c6_fail_at = -1;
+int moy_net_host_c6_ver = -1;
+uint8_t *moy_net_host_c6_data;
+uint32_t moy_net_host_c6_n;
+int moy_net_host_c6_ended, moy_net_host_c6_active, moy_net_host_c6_writes;
+
+int moy_c6_ota_begin(void) {
+    if (!moy_net_host_c6_on) {
+        return 0x103;
+    }
+    free(moy_net_host_c6_data);
+    moy_net_host_c6_data = malloc(4u << 20);
+    moy_net_host_c6_n = 0;
+    moy_net_host_c6_ended = 0;
+    moy_net_host_c6_active = 0;
+    moy_net_host_c6_writes = 0;
+    return 0;
+}
+
+int moy_c6_ota_write(const void *p, size_t n) {
+    if (moy_net_host_c6_writes++ == moy_net_host_c6_fail_at || n > 1500
+        || moy_net_host_c6_n + n > (4u << 20)) {
+        return 0x103;
+    }
+    memcpy(moy_net_host_c6_data + moy_net_host_c6_n, p, n);
+    moy_net_host_c6_n += (uint32_t)n;
+    return 0;
+}
+
+int moy_c6_ota_end(void) {
+    moy_net_host_c6_ended = 1;
+    return 0;
+}
+
+int moy_c6_ota_activate(void) {
+    moy_net_host_c6_active = 1;
+    return 0;
+}
+
+int moy_c6_version(void) {
+    return moy_net_host_c6_ver;
+}

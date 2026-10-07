@@ -1,10 +1,13 @@
 // moy_net's wire half under the sanitizers: random and mutated requests,
 // queries and batch bodies, with every returned span held inside its buffer,
-// and every encoded batch decoded back to the fields it was given.
+// and every encoded batch decoded back to the fields it was given; the
+// updater's pure half (moy_ota.c): response heads, URLs and manifests, with
+// the canonical text and the judge never reading past what they were given.
 //
 //   cc -std=c99 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
 //      -I native/moy_net -I native/moy_spine native/moy_net/fuzz_net.c \
 //      native/moy_net/moy_http.c native/moy_net/moy_sync.c \
+//      native/moy_net/moy_link.c native/moy_net/moy_ota.c \
 //      native/moy_spine/moy_json.c -o fuzz_net
 //   ./fuzz_net SEED ROUNDS
 
@@ -15,6 +18,59 @@
 #include "moy_json.h"
 #include "moy_link.h"
 #include "moy_net.h"
+#include "moy_ota.h"
+
+// The platform moy_ota.c is linked against: memory, and no connection or slot.
+void *moy_net_alloc(size_t n) {
+    return calloc(1, n ? n : 1);
+}
+
+void moy_net_free(void *p) {
+    free(p);
+}
+
+int moy_conn_open(const char *host, uint16_t port, int tls, void **conn) {
+    (void)host, (void)port, (void)tls;
+    *conn = NULL;
+    return -111;
+}
+
+int moy_conn_read(void *conn, void *p, size_t n) {
+    (void)conn, (void)p, (void)n;
+    return -5;
+}
+
+int moy_conn_write(void *conn, const void *p, size_t n) {
+    (void)conn, (void)p, (void)n;
+    return -5;
+}
+
+void moy_conn_close(void *conn) {
+    (void)conn;
+}
+
+int moy_slot_open(uint32_t size, uint32_t *cap) {
+    (void)size;
+    *cap = 0;
+    return -19;
+}
+
+int moy_slot_write(const void *p, size_t n) {
+    (void)p, (void)n;
+    return -9;
+}
+
+int moy_slot_close(void) {
+    return -9;
+}
+
+int moy_slot_boot(char *label, size_t cap) {
+    (void)label, (void)cap;
+    return -9;
+}
+
+void moy_slot_abort(void) {
+}
 
 static uint32_t rng = 1;
 
@@ -42,6 +98,10 @@ static const char *SEEDS[] = {
     "{\"v\": 1, \"ops\": [], \"v\": \"again\"}",
     "[1, 2]",
     "\xff\xfe",
+    "HTTP/1.1 302 Found\r\nLocation: /next?a=1\r\ncontent-length: 0\r\n\r\nbody",
+    "{\"board\": \"tdeck\", \"channel\": \"stable\", \"version\": 7, \"size\": \"12\", "
+    "\"sha256\": \"AB\", \"sig\": \"0f\", \"c6\": {\"version\": 1.5, \"size\": null}}",
+    "https://h:8443/a/b.json",
 };
 
 static const char ALPHA[] = "GETPOS /?&=:\r\n\"{}[],0123456789vrootpsin-Content-Length\\u\xc3\xa9\xff";
@@ -142,6 +202,35 @@ static void one(const char *src, size_t n) {
     size_t hn = moy_http_head(head, sizeof(head), 200 + (int)(rnd() % 400),
                               "text/plain", n);
     CHECK(hn < sizeof(head));
+    moy_http_resp_t hr;
+    if (moy_http_resp_parse(buf, n, &hr) == MOY_HTTP_OK) {
+        CHECK(hr.head_end <= n && hr.status >= 0 && hr.status < 1000);
+        if (hr.loc) {
+            inside(buf, n, hr.loc, hr.loc_n);
+        }
+    }
+    char *z = malloc(n + 1);              // the URL parser takes a C string
+    memcpy(z, buf, n);
+    z[n] = '\0';
+    int tls;
+    char host[MOY_URL_HOST_MAX];
+    uint16_t port;
+    const char *path;
+    if (moy_url_parse(z, &tls, host, sizeof(host), &port, &path) == 0) {
+        CHECK(port > 0 && strlen(host) > 0 && path[0] == '/');
+    }
+    free(z);
+    char canon[600];
+    size_t cn = moy_ota_canonical(buf, n, canon, sizeof(canon));
+    CHECK(cn == (size_t)-1 || cn < 1000);
+    cn = moy_ota_canonical_c6(buf, n, canon, sizeof(canon));
+    CHECK(cn == (size_t)-1 || cn < 1000);
+    char why[MOY_OTA_ERR_MAX];
+    int jr = moy_ota_judge(buf, n, "tdeck", (int)(rnd() & 1), NULL, 0, why, sizeof(why));
+    CHECK(jr == MOY_OTA_OK || jr == MOY_OTA_ERR);
+    jr = moy_ota_judge_c6(buf, n, (int)(rnd() & 1), NULL, 0, why, sizeof(why));
+    CHECK(jr == MOY_OTA_OK || jr == MOY_OTA_ERR);
+    CHECK(moy_ota_verify(buf, n, buf, n < 600 ? n : 600, NULL, 0) == 0);
     free(buf);
 }
 
@@ -210,6 +299,23 @@ int main(int argc, char **argv) {
         one(buf, n);
     }
     ring_walk(rounds * 4);
+    // SHA-256 against its published vectors, fed in uneven pieces.
+    static const char *abc = "abc";
+    uint8_t d[32];
+    moy_sha256_t h;
+    moy_sha256_init(&h);
+    moy_sha256_update(&h, abc, 1);
+    moy_sha256_update(&h, abc + 1, 2);
+    moy_sha256_final(&h, d);
+    CHECK(d[0] == 0xba && d[1] == 0x78 && d[30] == 0x15 && d[31] == 0xad);
+    moy_sha256_init(&h);
+    for (int i = 0; i < 1000000; i += 1000) {
+        char a[1000];
+        memset(a, 'a', sizeof(a));
+        moy_sha256_update(&h, a, (size_t)(i % 3000 == 0 ? 1000 : 1000));
+    }
+    moy_sha256_final(&h, d);
+    CHECK(d[0] == 0xcd && d[1] == 0xc7 && d[31] == 0xd0);
     CHECK(moy_wifi_use_stored(0, 3) && !moy_wifi_use_stored(2, 3));
     CHECK(moy_wifi_remember(0, "a", 1, NULL, 0));
     CHECK(!moy_wifi_remember(0, "a", 1, "a", 1));

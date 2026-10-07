@@ -565,8 +565,8 @@ moybyte_app_size_guard() {
 # The kernel's entry (native/moy_kernel), on a board that takes it: its VM
 # service is mp_task copied, so the pinned tag's mp_task must be the one the
 # copy was reviewed against (tools/mp_task_calls.py, before anything compiles),
-# and its recovery floor names this build's OTA label. Reads SCRIPT_DIR MPY_DIR
-# MODULES_DIR.
+# and its recovery floor names this build's OTA label, board and channel (its
+# `update` word fetches that release). Reads SCRIPT_DIR MPY_DIR MODULES_DIR.
 moybyte_kernel_entry() {
   local dest staged label
   dest="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" native-dest "${SCRIPT_DIR}")"
@@ -574,8 +574,12 @@ moybyte_kernel_entry() {
   [ -d "${staged}" ] || return 0
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/mp_task_calls.py" check \
     "${MPY_DIR}" "${REPO_ROOT}/native/moy_kernel/mp_task_calls.txt" || exit 1
+  local board channel
   label="$(sed -n 's/^LABEL = "\(.*\)"$/\1/p' "${MODULES_DIR}/_ota_build.py" 2>/dev/null)"
-  printf '#define MOY_FW_LABEL "%s"\n' "${label:-unlabelled}" > "${staged}/moy_fw_label.gen.h"
+  board="$(sed -n 's/^BOARD = "\(.*\)"$/\1/p' "${MODULES_DIR}/_ota_build.py" 2>/dev/null)"
+  channel="$(sed -n 's/^CHANNEL = "\(.*\)"$/\1/p' "${MODULES_DIR}/_ota_build.py" 2>/dev/null)"
+  printf '#define MOY_FW_LABEL "%s"\n#define MOY_FW_BOARD "%s"\n#define MOY_FW_CHANNEL "%s"\n' \
+    "${label:-unlabelled}" "${board:-unknown}" "${channel:-stable}" > "${staged}/moy_fw_label.gen.h"
 }
 
 # The build's native configuration, as one line: the native modules this board

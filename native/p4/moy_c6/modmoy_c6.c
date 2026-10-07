@@ -495,9 +495,8 @@ esp_err_t esp_wifi_config_espnow_rate(wifi_interface_t ifx, wifi_phy_rate_t rate
 // -- the moy_c6 Python module: C6 plumbing that is NOT espnow ----------------
 //
 // fwversion/ping are the Phase D preflight (what does the C6 run, does it
-// carry the shim); the ota_* verbs are the streamed slave updater -- the
-// moy_ota shape, fed from MicroPython so the image rides the ordinary
-// push/serial machinery and is sha-checked in Python before activate.
+// carry the shim); the streamed slave OTA below is the kernel updater's C6
+// sink, with no Python verb.
 
 static mp_obj_t moy_c6_bt_up(void) {
     // The hosted >= ~2.8 BT contract (esp-hosted-mcu#212): the slave's BT
@@ -538,20 +537,19 @@ static mp_obj_t moy_c6_ping(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_ping_obj, moy_c6_ping);
 
-static mp_obj_t moy_c6_shim_version(void) {
-    // WHICH shim the slave runs (MOYC6_SHIM_VERSION, self-reported). None on
-    // timeout: a stock slave has no shim and the v1 shim predates the verb,
-    // and the updater treats both as "older than everything" -- which is what
-    // they are. The handshake's return IS the ACK's err field, where this
-    // verb carries the version.
+// The shim's version as the slave reports it (MOYC6_SHIM_VERSION), or -1: a
+// stock slave has no shim and the v1 shim predates the verb, and the updater
+// reads both as older than everything. The handshake's return IS the ACK's err
+// field, where this verb carries the version; ESP-IDF's error codes are
+// POSITIVE (ESP_ERR_TIMEOUT is 0x107), and a version is small by construction.
+int moy_c6_version(void) {
     esp_err_t got = moyc6_handshake(MOYC6_V_VERSION);
-    // ESP-IDF error codes are POSITIVE (ESP_ERR_TIMEOUT is 0x107), so "any
-    // positive answer is a version" would read a timeout as shim v263. A
-    // version is small by construction; the 0x100+ space is theirs.
-    if (got <= 0 || got >= 0x100) {
-        return mp_const_none;      // timeout / transport error / impossible 0
-    }
-    return mp_obj_new_int(got);
+    return got <= 0 || got >= 0x100 ? -1 : (int)got;
+}
+
+static mp_obj_t moy_c6_shim_version(void) {
+    int v = moy_c6_version();
+    return v < 0 ? mp_const_none : mp_obj_new_int(v);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_shim_version_obj, moy_c6_shim_version);
 
@@ -571,46 +569,24 @@ static mp_obj_t moy_c6_stats(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_stats_obj, moy_c6_stats);
 
-static mp_obj_t moy_c6_ota_begin(void) {
-    int err = esp_hosted_slave_ota_begin();
-    if (err != 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return mp_const_none;
+// The streamed slave OTA, as native/moy_net/moy_ota.c's C6 sink: 0, or the
+// hosted error. Activate reboots the C6; the updater's caller reboots the
+// console after it (device/moy_ota.py's C6Updater says why).
+int moy_c6_ota_begin(void) {
+    return esp_hosted_slave_ota_begin();
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_ota_begin_obj, moy_c6_ota_begin);
 
-static mp_obj_t moy_c6_ota_write(mp_obj_t data) {
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(data, &buf, MP_BUFFER_READ);
-    int err = esp_hosted_slave_ota_write((uint8_t *)buf.buf, buf.len);
-    if (err != 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return mp_obj_new_int(buf.len);
+int moy_c6_ota_write(const void *p, size_t n) {
+    return esp_hosted_slave_ota_write((uint8_t *)p, (uint32_t)n);
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(moy_c6_ota_write_obj, moy_c6_ota_write);
 
-static mp_obj_t moy_c6_ota_end(void) {
-    int err = esp_hosted_slave_ota_end();
-    if (err != 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return mp_const_none;
+int moy_c6_ota_end(void) {
+    return esp_hosted_slave_ota_end();
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_ota_end_obj, moy_c6_ota_end);
 
-static mp_obj_t moy_c6_ota_activate(void) {
-    // Reboots the C6. The caller owns the ceremony around this (sha check
-    // first, then re-verify wifi/BLE after -- docs/espnow_p4_2026-08.md
-    // Phase D); this verb only pulls the lever.
-    int err = esp_hosted_slave_ota_activate();
-    if (err != 0) {
-        mp_raise_OSError(MP_EIO);
-    }
-    return mp_const_none;
+int moy_c6_ota_activate(void) {
+    return esp_hosted_slave_ota_activate();
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_ota_activate_obj, moy_c6_ota_activate);
 
 static const mp_rom_map_elem_t moy_c6_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_c6) },
@@ -619,10 +595,6 @@ static const mp_rom_map_elem_t moy_c6_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_ping), MP_ROM_PTR(&moy_c6_ping_obj) },
     { MP_ROM_QSTR(MP_QSTR_shim_version), MP_ROM_PTR(&moy_c6_shim_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&moy_c6_stats_obj) },
-    { MP_ROM_QSTR(MP_QSTR_ota_begin), MP_ROM_PTR(&moy_c6_ota_begin_obj) },
-    { MP_ROM_QSTR(MP_QSTR_ota_write), MP_ROM_PTR(&moy_c6_ota_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_ota_end), MP_ROM_PTR(&moy_c6_ota_end_obj) },
-    { MP_ROM_QSTR(MP_QSTR_ota_activate), MP_ROM_PTR(&moy_c6_ota_activate_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_c6_module_globals, moy_c6_module_globals_table);
 

@@ -238,7 +238,7 @@ def read_stamp(artifacts, board_id):
 
 def asset_url(tag, name, repo=None):
     """The public download URL of a release asset (a 302 to the CDN, which the
-    device's updater follows -- see moy_ota._http_open)."""
+    device's updater follows -- native/moy_net/moy_ota.c's client)."""
     repo = repo or os.environ.get("GITHUB_REPOSITORY") or "moybyte-org/moybyte"
     return "https://github.com/%s/releases/download/%s/%s" % (repo, tag, name)
 
@@ -333,7 +333,7 @@ def stage_c6(manifest, folder, tag, workdir, repo=None):
     """Stage the P4's C6 co-processor image beside its app image, and describe
     it in the manifest's `c6` block (#7/#58: the radio is a second processor
     with its own firmware, updated FROM the console over SDIO --
-    device/moy_c6_update.py is the consumer). A run whose artifacts carry no
+    the kernel's updater, moy_ota.C6Updater on the P4s, is the consumer). A run whose artifacts carry no
     C6 image publishes a manifest without the block, and devices simply see
     nothing to offer; `version` comes from the artifact's stamp, which the
     slave build read out of the proto header the image itself was compiled

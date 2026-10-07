@@ -90,7 +90,7 @@ suite run every pass, `tools/preflight.sh` before the report).
 | ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `native/moy_net/moy_link.c` | 2 |
 | the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `native/moy_net/moy_http.c`, `native/moy_net/moy_net_port.c`, `native/moy_net/moy_webhost.c` | 2 |
 | the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `native/moy_net/moy_sync.c`, `native/moy_net/moy_sync_apply.c` | 2 |
-| the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | `device/moy_ota.py`'s updater half (`device/moy_http.py`), `device/moy_c6_update.py`, `device/cart_net.py` | `+native/moy_net/moy_ota.c`, `+native/moy_net/moy_c6_update.c` | 2 |
+| the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | crossed (`device/moy_ota.py`'s updater half; deleted: `moy_http.py`, `moy_c6_update.py`, `cart_net.py`) | `native/moy_net/moy_ota.c`, its platform in `native/moy_net/moy_net_port.c`; the C6's sink in `native/p4/moy_c6/modmoy_c6.c` | 2 |
 | the web-console switch | `runtime/web_console.py` (its screen: §13, question 8) | `+native/moy_net/moy_webconsole.c` | 2 |
 | the Zero's host | `modules/zero_host.py`, `modules/zero_gpio.py`, `modules/zero_setup.py` | the same `moy_net`, with the Zero's GPIO allowlist as a board table | 2 |
 | the internal flash volumes | `moy_vol`'s borrowed littlefs backend (sprint 1b) | `native/moy_store/moy_vol.c` owns the instance, with a VFS type of the kernel's for Python | 2 |
@@ -167,8 +167,8 @@ made here, not promised.
    `DeviceBoot` keeps the splash and the runtime probe.
 5. **`device/moy_ota.py` splits** into `device/moy_ota_health.py` (the boot
    verdict and the confirm after painted frames: the loop's) and the updater
-   over `device/moy_http.py` (the streaming client with redirects, which
-   `device/cart_net.py` already reads through). Two passes, two files.
+   over its streaming client with redirects, which Get Carts reads through
+   too. Two passes, two files; the updater crossed in pass 2 (§6.3).
 6. **The build registrations and the native stubs.** `native/moy_glass/`,
    `native/moy_input/`, `native/moy_net/` and the kernel's new files are added
    to every list that enumerates native modules — each console's and the
@@ -748,7 +748,7 @@ and which caught a 37% loss once that every per-side clock had certified.
   scan, connect with the saved credentials, autoconnect at boot, the
   `wifi.json` store through `moy_fs`, power down and up as the spine's lease
   mask asks. The lease is sprint 2's and stays where it is; the driver only
-  answers it. The internal-SRAM facts `device/cart_net.py` records — the
+  answers it. The internal-SRAM facts `device/wire_links.py` records — the
   receive buffers the driver takes on first start and keeps, the TLS working
   set a download needs — are the kernel's to report, not to hide.
 - **ESP-NOW.** `native/moy_net/moy_link.c` is `device/moy_espnow.py`'s
@@ -784,17 +784,22 @@ build, with fetch, OPFS and the file picker as JS imports, and its
 
 ### 6.3 The updater and its clients
 
-`+native/moy_net/moy_ota.c` is the updater: the streaming HTTP(S) client with
+`native/moy_net/moy_ota.c` is the updater: the streaming HTTP(S) client with
 redirects (also Get Carts' transport), the manifest's verification under the
-scheme `tools/ota_sign.py` defines, the write into the inactive slot, the card
-path from `/moy/update`. The health half — the boot verdict and the confirm
-after painted frames — is the loop's (§7). `+native/moy_net/moy_c6_update.c`
-is the C6's updater over ESP-Hosted's RPC with the block's own signature.
-The recovery floor gains an `update` word that drives this updater with no
-VM, from a card image or a URL, so a console that cannot start its VM can
-still take a release (§10). The TLS stack is the platform's on a board; the
-host exercises parsing, verification and the state machine over plain sockets
-and the signature vectors, as now.
+scheme `tools/ota_sign.py` defines (its own SHA-256 and RSA-2048 modexp), the
+stream into the inactive slot, each sector erased as the stream reaches it and
+the image checked whole before anything can boot it, and the copied image from
+the update directory, fed by the caller a slice a frame. The health half — the
+boot verdict and the confirm after painted frames — is the loop's (§7). The
+C6's image streams into the radio's own inactive slot as it arrives, over
+ESP-Hosted's slave OTA (`native/p4/moy_c6/modmoy_c6.c`'s sink), and is handed
+over only after its size and its `c6_sig`-covered sha256 check out. The
+recovery floor has an `update` word that drives this updater with no VM, over
+the network the WiFi driver keeps from its last address, so a console that
+cannot start its VM can still take a release (§10); a card image waits for the
+card's volume to be the kernel's. The TLS stack is the platform's on a board
+and verifies no certificate; the host exercises parsing, verification and the
+state machine over plain sockets and the signature vectors.
 
 ### 6.4 The web-console switch
 
@@ -839,9 +844,10 @@ write's duration; the gate holds the feeder's errors at zero through it.
 
 ### 6.7 What Python is deleted
 
-`device/device_wifi.py`, `device/moy_espnow.py`, `device/moy_webserver.py`,
-`device/moy_webhost.py`, `runtime/moy_sync.py`, `device/cart_net.py`,
-`device/moy_c6_update.py`, the updater half of `device/moy_ota.py`,
+Deleted with the updater's crossing (2026-10-07): `cart_net.py`,
+`moy_http.py`, `moy_c6_update.py` and the updater half of `device/moy_ota.py`.
+To go: `device/device_wifi.py`, `device/moy_espnow.py`,
+`device/moy_webserver.py`, `device/moy_webhost.py`, `runtime/moy_sync.py`,
 `runtime/web_console.py`, the three `*_link.py` files of the web runner, and
 the Zero's `zero_host.py`, `zero_gpio.py` and `zero_setup.py`.
 `runtime/host_api.py`'s service fakes shrink to what the host's harness still
@@ -1082,7 +1088,8 @@ way it moves:
 | the ISR text: trackball, touch INT, the band-done helper already there | IRAM, which shares the S3's internal pool with DRAM | hundreds of bytes; counted in the link map |
 | the C central's statics beside NimBLE's own | `.bss` | hundreds of bytes; NimBLE's host and its pools are in the baseline, which was taken with BLE up |
 | LEDC's fade service for the dim rung | internal, once installed | small; installed only on boards whose rung is on |
-| the TLS working set during an OTA, the WiFi driver's receive buffers | internal, transient and at first start respectively | today's costs, moved from Python's call to the kernel's; `device/cart_net.py` records their size class |
+| the TLS working set during an OTA or a Get Carts fetch | PSRAM (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC` on every console), but for the hardware AES/SHA's DMA bounce, internal and transient | the bounce, a record at a time; `device/wire_links.py` records its size class |
+| the WiFi driver's receive buffers | internal, at first start | today's cost; `device/wire_links.py` records its size class |
 | the loop, the pump, the ladder, the meters | the VM service task's stack while the VM runs | 0 |
 | `moy_loop_task` | internal; exists from this sprint, runs only while no VM does | its stack while a VM runs is a cost unless it is created at the first teardown — it is, so 0 while the VM runs |
 | the audio task and the I2S DMA ring | internal, started at the first session | today's first-cart cost, unchanged |

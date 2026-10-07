@@ -309,6 +309,12 @@ class DeviceWifi:
 
     def forget(self, ssid):
         ssid = str(ssid)
+        try:
+            import moy_net
+            if hasattr(moy_net, "wifi_forget"):
+                moy_net.wifi_forget(ssid)   # the network the kernel keeps for its floor
+        except ImportError:
+            pass
         if self._store is not None and self._root is not None:
             try:
                 self._store.forget_wifi(ssid, self._root)

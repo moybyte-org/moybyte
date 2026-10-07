@@ -13,6 +13,10 @@ same C built for the host.
   sync_apply       one batch's ops applied into a store (native/moy_store's C)
   web_*            the webhost: start, stop, poll, state, the parked request,
                    the router without a socket (web_handle) and the pull
+  ota_*            the updater (moy_ota.h): the manifest's check, the
+                   download into the slot or the C6, the copied image's
+                   install, the keys and the signature
+  http_*           the streaming client Get Carts and the updater fetch through
 
 `install()` puts this module where `import moy_net` finds it. What it adds to
 the C is what ctypes cannot do by itself: JSON text for a batch's ops (the
@@ -36,7 +40,7 @@ _WEB = os.path.join(native_build.ROOT, "native", "moy_web")
 _SHIM = os.path.join(_NET, "moy_net_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_net")
 _SOURCES = ("moy_net.h", "moy_http.c", "moy_net_port.c","moy_sync.c", "moy_sync_apply.c",
-            "moy_webhost.c", "moy_json.h", "moy_json.c", "moy_vol.h",
+            "moy_webhost.c", "moy_ota.h", "moy_ota.c", "moy_json.h", "moy_json.c", "moy_vol.h",
             "moy_vol.c", "moy_fs.h", "moy_fs.c", "moy_arena.h",
             "moy_journal.h", "moy_journal.c", "moy_store_host.c",
             "moy_web_blob.h")
@@ -89,6 +93,13 @@ class _WebState(ctypes.Structure):
                 ("err", _I)]
 
 
+class _OtaState(ctypes.Structure):
+    _fields_ = [("phase", ctypes.c_uint8), ("sink", ctypes.c_uint8),
+                ("dl_done", ctypes.c_uint32), ("dl_total", ctypes.c_uint32),
+                ("done", ctypes.c_uint32), ("total", ctypes.c_uint32),
+                ("err", ctypes.c_char * 48)]
+
+
 class _Env(ctypes.Structure):
     _fields_ = [(n, ctypes.c_void_p) for n in (
         "v", "v_end", "root", "root_end", "ops", "ops_end", "pin", "pin_end")]
@@ -125,6 +136,35 @@ _SIGS = (
                            ctypes.c_uint, _P], None),
     ("moy_net_host_use_stored", [_Z, _Z], _I),
     ("moy_net_host_remember", [_I, _P, _Z, _P, _Z], _I),
+    ("moy_ota_keys", [], _I),
+    ("moy_ota_key_hex", [_P, _Z, ctypes.c_void_p], _I),
+    ("moy_ota_key", [_I], ctypes.c_void_p),
+    ("moy_ota_verify", [ctypes.c_void_p, _Z, _P, _Z, ctypes.c_void_p, _I], _I),
+    ("moy_ota_canonical", [_P, _Z, ctypes.c_void_p, _Z], _Z),
+    ("moy_ota_canonical_c6", [_P, _Z, ctypes.c_void_p, _Z], _Z),
+    ("moy_ota_judge", [_P, _Z, _P, _I, ctypes.c_void_p, _I,
+                       ctypes.c_void_p, _Z], _I),
+    ("moy_ota_judge_c6", [_P, _Z, _I, ctypes.c_void_p, _I, ctypes.c_void_p, _Z],
+     _I),
+    ("moy_ota_check", [_P, _P, _I, ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
+    ("moy_ota_trust", [ctypes.c_void_p, _I], None),
+    ("moy_ota_error", [], _P),
+    ("moy_ota_dl_begin", [_P, ctypes.c_uint32, _P, _I], _I),
+    ("moy_ota_dl_step", [ctypes.c_uint32], _I),
+    ("moy_ota_dl_finish", [], _I),
+    ("moy_ota_cancel", [], None),
+    ("moy_ota_slot_begin", [ctypes.c_uint32], _I),
+    ("moy_ota_slot_write", [ctypes.c_void_p, _Z], _I),
+    ("moy_ota_slot_close", [], _I),
+    ("moy_ota_activate", [ctypes.c_void_p, _Z], _I),
+    ("moy_ota_c6_commit", [], _I),
+    ("moy_ota_state", [ctypes.c_void_p], None),
+    ("moy_httpc_open", [_P, _P, ctypes.POINTER(_I),
+                        ctypes.POINTER(ctypes.c_uint32)], _I),
+    ("moy_httpc_read", [_I, ctypes.c_void_p, _Z], _I),
+    ("moy_httpc_close", [_I], None),
+    ("moy_net_vm_stop", [], None),
+    ("moy_c6_version", [], _I),
 )
 
 
@@ -395,7 +435,238 @@ def web_stamp():
     return None if s is None else s.decode("utf-8")
 
 
+# -- the updater and its client (moy_ota.h) -------------------------------------
+
+_KEY_BYTES = 256
+
+
+def ota_keys():
+    """The moduli this image trusts, big-endian bytes each."""
+    d = _lib()
+    return tuple(ctypes.string_at(d.moy_ota_key(i), _KEY_BYTES)
+                 for i in range(d.moy_ota_keys()))
+
+
+def _keys_arg(keys):
+    """`keys` as (modulus_hex, exponent) pairs -> the C's key array and its
+    count, an entry that is not a usable key skipped; (None, -1) for the baked
+    ones."""
+    if keys is None:
+        return None, -1
+    arr = (ctypes.c_uint8 * (_KEY_BYTES * max(1, len(keys))))()
+    n = 0
+    for k in keys:
+        h = k[0] if isinstance(k, tuple) and k else None
+        if not isinstance(h, str):
+            continue
+        hb = h.encode()
+        if _lib().moy_ota_key_hex(hb, len(hb), ctypes.addressof(arr) + n * _KEY_BYTES) == 0:
+            n += 1
+    return arr, n
+
+
+def _with_keys(keys, fn):
+    arr, n = _keys_arg(keys)
+    if n == 0:
+        return None
+    return fn(arr if n > 0 else None, max(n, 0))
+
+
+def ota_verify(payload, sig, keys=None):
+    """Whether `sig` (hex) signs `payload` under a baked key (or `keys`)."""
+    if not sig or not isinstance(sig, str):
+        return False
+    p, s = _bytes(payload), _bytes(sig)
+    got = _with_keys(keys, lambda arr, n: _lib().moy_ota_verify(
+        p, len(p), s, len(s), arr, n))
+    return bool(got)
+
+
+def _canon(fn, manifest_text):
+    t = _bytes(manifest_text)
+    need = fn(t, len(t), None, 0)
+    if need == ctypes.c_size_t(-1).value:
+        return None
+    out = ctypes.create_string_buffer(need + 1)
+    fn(t, len(t), out, need)
+    return out.raw[:need]
+
+
+def ota_canonical(manifest_text):
+    return _canon(_lib().moy_ota_canonical, manifest_text)
+
+
+def ota_canonical_c6(manifest_text):
+    return _canon(_lib().moy_ota_canonical_c6, manifest_text)
+
+
+def ota_judge(text, board, require_sig, keys=None):
+    """None when the manifest passes, else the reason it is refused."""
+    t = _bytes(text)
+    why = ctypes.create_string_buffer(48)
+    rc = _with_keys(keys, lambda arr, n: _lib().moy_ota_judge(
+        t, len(t), None if board is None else _bytes(board),
+        1 if require_sig else 0, arr, n, why, 48))
+    if rc is None:
+        return "no usable key"
+    return None if rc == 0 else why.value.decode("utf-8")
+
+
+def ota_judge_c6(text, require_sig, keys=None):
+    t = _bytes(text)
+    why = ctypes.create_string_buffer(48)
+    rc = _with_keys(keys, lambda arr, n: _lib().moy_ota_judge_c6(
+        t, len(t), 1 if require_sig else 0, arr, n, why, 48))
+    if rc is None:
+        return "no usable key"
+    return None if rc == 0 else why.value.decode("utf-8")
+
+
+def _ota_err():
+    return _lib().moy_ota_error().decode("utf-8")
+
+
+def ota_check(url, board, require_sig):
+    """(0, manifest text) | (1, None) when the channel has nothing | (-1, why)"""
+    out = ctypes.c_void_p()
+    n = ctypes.c_size_t()
+    rc = _lib().moy_ota_check(_bytes(url), _bytes(board), 1 if require_sig else 0,
+                              ctypes.byref(out), ctypes.byref(n))
+    if rc == 0:
+        return (0, _taken(out, n).decode("utf-8"))
+    return (rc, _ota_err() if rc < 0 else None)
+
+
+def ota_dl_begin(url, size, sha256, sink):
+    if _lib().moy_ota_dl_begin(_bytes(url), int(size), _bytes(sha256 or ""),
+                               int(sink)) != 0:
+        raise ValueError(_ota_err())
+
+
+def ota_dl_step(max_bytes):
+    return _lib().moy_ota_dl_step(int(max_bytes))
+
+
+def ota_dl_finish():
+    return _lib().moy_ota_dl_finish() == 0
+
+
+def ota_cancel():
+    _lib().moy_ota_cancel()
+
+
+def ota_slot_begin(size):
+    if _lib().moy_ota_slot_begin(int(size)) != 0:
+        raise ValueError(_ota_err())
+
+
+def ota_slot_write(data):
+    raw = bytes(data)
+    return _lib().moy_ota_slot_write(raw, len(raw)) == 0
+
+
+def ota_slot_close():
+    return _lib().moy_ota_slot_close() == 0
+
+
+def ota_activate():
+    out = ctypes.create_string_buffer(24)
+    if _lib().moy_ota_activate(out, 24) != 0:
+        return None
+    return out.value.decode("utf-8")
+
+
+def ota_c6_commit():
+    return _lib().moy_ota_c6_commit() == 0
+
+
+def ota_c6_version():
+    v = _lib().moy_c6_version()
+    return None if v < 0 else v
+
+
+def ota_state():
+    """(phase, sink, dl_done, dl_total, done, total, error)"""
+    st = _OtaState()
+    _lib().moy_ota_state(ctypes.byref(st))
+    return (st.phase, st.sink, st.dl_done, st.dl_total, st.done, st.total,
+            st.err.decode("utf-8"))
+
+
+def http_open(url, agent):
+    """(handle, status, content_length) of a GET with redirects followed;
+    OSError(errno) when it cannot be made."""
+    status = ctypes.c_int()
+    clen = ctypes.c_uint32()
+    h = _lib().moy_httpc_open(_bytes(url), _bytes(agent), ctypes.byref(status),
+                              ctypes.byref(clen))
+    if h < 0:
+        raise OSError(-h, os.strerror(-h))
+    return (h, status.value, clen.value)
+
+
+def http_readinto(h, buf):
+    n = len(buf)
+    tmp = (ctypes.c_char * max(1, n))()
+    k = _lib().moy_httpc_read(int(h), tmp, n)
+    if k < 0:
+        raise OSError(-k, os.strerror(-k))
+    buf[:k] = tmp.raw[:k]
+    return k
+
+
+def http_close(h):
+    _lib().moy_httpc_close(int(h))
+
+
+def net_vm_stop():
+    """The kernel's VM teardown for the links (moy_net_vm_stop)."""
+    _lib().moy_net_vm_stop()
+
+
 # -- the host's stand-ins for what an image links (tests only) -------------------
+
+def _trust(keys=None):
+    """The keys ota_check trusts: `keys` ((modulus_hex, e) pairs), or the
+    baked ones for None."""
+    arr, n = _keys_arg(keys)
+    _lib().moy_ota_trust(arr if n > 0 else None, max(n, 0))
+
+
+def _slot():
+    """(bytes written to the host's slot, the label it booted or "")."""
+    d = _lib()
+    n = ctypes.c_uint32.in_dll(d, "moy_slot_host_n").value
+    p = ctypes.c_void_p.in_dll(d, "moy_slot_host_data").value
+    booted = (ctypes.c_char * 16).in_dll(d, "moy_slot_host_booted").value
+    return (ctypes.string_at(p, n) if p and n else b""), booted.decode("utf-8")
+
+
+def _slot_reset(cap=4 << 20):
+    d = _lib()
+    ctypes.c_uint32.in_dll(d, "moy_slot_host_cap").value = cap
+    ctypes.memset(ctypes.addressof((ctypes.c_char * 16).in_dll(
+        d, "moy_slot_host_booted")), 0, 16)
+
+
+def _c6(enabled=True, fail_at=None, version=-1):
+    """The host's C6 stand-in: on or off, a write that fails at its Nth call,
+    the version it reports. Returns its record: bytes written, ended, activated."""
+    d = _lib()
+    ctypes.c_int.in_dll(d, "moy_net_host_c6_on").value = 1 if enabled else 0
+    ctypes.c_int.in_dll(d, "moy_net_host_c6_fail_at").value = (
+        -1 if fail_at is None else fail_at)
+    ctypes.c_int.in_dll(d, "moy_net_host_c6_ver").value = version
+
+
+def _c6_record():
+    d = _lib()
+    n = ctypes.c_uint32.in_dll(d, "moy_net_host_c6_n").value
+    p = ctypes.c_void_p.in_dll(d, "moy_net_host_c6_data").value
+    return ((ctypes.string_at(p, n) if p and n else b""),
+            ctypes.c_int.in_dll(d, "moy_net_host_c6_ended").value,
+            ctypes.c_int.in_dll(d, "moy_net_host_c6_active").value,
+            ctypes.c_int.in_dll(d, "moy_net_host_c6_writes").value)
 
 _BAKED = []
 

@@ -75,8 +75,8 @@ belongs here is only what a coder must not undo:
   rate and the per-send cost are in that campaign record. Phase G (same day): the C6
   image SHIPS -- CI builds and publishes it, `latest-p4.json` carries a `c6`
   block under its own signature, and Settings -> UPGRADE C6 RADIO
-  (`device/moy_c6_update.py`, P4-gated) downloads and flashes the slave over
-  SDIO with the slave self-reporting its version (MOYC6_V_VERSION). On-glass
+  (`moy_ota.C6Updater` over the kernel's updater, P4-gated) streams the image
+  into the slave over SDIO as it downloads with the slave self-reporting its version (MOYC6_V_VERSION). On-glass
   end to end, including the second-run UP TO DATE.
   **FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT** (found by the owner's
   hands, first cross-arch match): two consoles in a match run the same sim,

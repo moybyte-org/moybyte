@@ -319,6 +319,11 @@ void moy_wifi_off(void);
 int moy_wifi_connect(const char *ssid, const char *password);
 void moy_wifi_disconnect(void);
 void moy_wifi_state(moy_wifi_state_t *out);
+// The network that last gave an address, kept by the driver across boots (no
+// VM or store needed): connect to it (ESP_ERR_NOT_FOUND when none is kept), or
+// forget it when it is `ssid`.
+int moy_wifi_connect_kept(void);
+void moy_wifi_forget_kept(const char *ssid);
 // A blocking scan into `out`: the count, or -1 when the radio is down.
 int moy_wifi_scan(moy_wifi_ap_t *out, int max);
 int moy_wifi_mac(uint8_t mac[6]);

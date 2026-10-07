@@ -11,6 +11,7 @@
 
 #include "moy_json.h"
 #include "moy_net.h"
+#include "moy_ota.h"
 
 // A str of the bytes: as they stand when they are UTF-8, else each byte as
 // its Latin-1 character (a client's malformed head still names a route).
@@ -378,6 +379,12 @@ static mp_obj_t mod_wifi_connect(mp_obj_t ssid, mp_obj_t password) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_wifi_connect_obj, mod_wifi_connect);
 
+static mp_obj_t mod_wifi_forget(mp_obj_t ssid) {
+    moy_wifi_forget_kept(mp_obj_str_get_str(ssid));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wifi_forget_obj, mod_wifi_forget);
+
 static mp_obj_t mod_wifi_disconnect(void) {
     moy_wifi_disconnect();
     return mp_const_none;
@@ -665,6 +672,261 @@ static mp_obj_t mod_web_stamp(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_stamp_obj, mod_web_stamp);
 
+// -- the updater and its client (moy_ota.h) -----------------------------------------
+
+static mp_obj_t ota_text(const char *s) {
+    return mp_obj_new_str(s, strlen(s));
+}
+
+// A failed call's reason as the exception the façade shows the kid.
+static void ota_raise(void) {
+    nlr_raise(mp_obj_new_exception_arg1(&mp_type_ValueError, ota_text(moy_ota_error())));
+}
+
+static mp_obj_t mod_ota_keys(void) {
+    int n = moy_ota_keys();
+    mp_obj_t items[4];
+    for (int i = 0; i < n && i < 4; i++) {
+        items[i] = mp_obj_new_bytes(moy_ota_key(i)->n, MOY_OTA_KEY_BYTES);
+    }
+    return mp_obj_new_tuple(n < 4 ? n : 4, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_keys_obj, mod_ota_keys);
+
+// Keys as the Python verifier takes them, ((modulus_hex, exponent), ...), into
+// `out` (up to `max`): the count, or -1 for None (the baked keys). An entry
+// that is not one is skipped.
+static int keys_of(mp_obj_t o, moy_ota_key_t *out, int max) {
+    if (o == mp_const_none) {
+        return -1;
+    }
+    size_t n, k = 0;
+    mp_obj_t *items;
+    mp_obj_get_array(o, &n, &items);
+    for (size_t i = 0; i < n && (int)k < max; i++) {
+        size_t m;
+        mp_obj_t *pair;
+        if (!mp_obj_is_type(items[i], &mp_type_tuple)) {
+            continue;
+        }
+        mp_obj_get_array(items[i], &m, &pair);
+        if (m < 1 || !mp_obj_is_str(pair[0])) {
+            continue;
+        }
+        size_t hn;
+        const char *h = mp_obj_str_get_data(pair[0], &hn);
+        if (moy_ota_key_hex(h, hn, &out[k]) == 0) {
+            k++;
+        }
+    }
+    return (int)k;
+}
+
+#define KEYS_MAX 4
+
+// ota_verify(payload, sig_hex, keys=None) -> whether a key signed it.
+static mp_obj_t mod_ota_verify(size_t n_args, const mp_obj_t *args) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(args[0], &b, MP_BUFFER_READ);
+    if (args[1] == mp_const_none || !mp_obj_is_str(args[1])) {
+        return mp_const_false;
+    }
+    moy_ota_key_t *keys = m_new(moy_ota_key_t, KEYS_MAX);
+    int nk = keys_of(n_args > 2 ? args[2] : mp_const_none, keys, KEYS_MAX);
+    size_t sn;
+    const char *s = mp_obj_str_get_data(args[1], &sn);
+    int ok = nk == 0 ? 0 : moy_ota_verify(b.buf, b.len, s, sn, nk < 0 ? NULL : keys, nk);
+    m_del(moy_ota_key_t, keys, KEYS_MAX);
+    return mp_obj_new_bool(ok);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_ota_verify_obj, 2, 3, mod_ota_verify);
+
+// ota_judge(text, board, require_sig, keys=None) -> None, or why it is refused.
+static mp_obj_t mod_ota_judge(size_t n_args, const mp_obj_t *args) {
+    size_t n;
+    const char *t = mp_obj_str_get_data(args[0], &n);
+    moy_ota_key_t *keys = m_new(moy_ota_key_t, KEYS_MAX);
+    int nk = keys_of(n_args > 3 ? args[3] : mp_const_none, keys, KEYS_MAX);
+    char why[MOY_OTA_ERR_MAX] = "no usable key";
+    int rc = nk == 0 ? MOY_OTA_ERR
+             : moy_ota_judge(t, n, args[1] == mp_const_none ? NULL : mp_obj_str_get_str(args[1]),
+                             mp_obj_is_true(args[2]), nk < 0 ? NULL : keys, nk, why, sizeof(why));
+    m_del(moy_ota_key_t, keys, KEYS_MAX);
+    return rc == MOY_OTA_OK ? mp_const_none : ota_text(why);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_ota_judge_obj, 3, 4, mod_ota_judge);
+
+// ota_judge_c6(text, require_sig, keys=None) -> None, or why it is refused.
+static mp_obj_t mod_ota_judge_c6(size_t n_args, const mp_obj_t *args) {
+    size_t n;
+    const char *t = mp_obj_str_get_data(args[0], &n);
+    moy_ota_key_t *keys = m_new(moy_ota_key_t, KEYS_MAX);
+    int nk = keys_of(n_args > 2 ? args[2] : mp_const_none, keys, KEYS_MAX);
+    char why[MOY_OTA_ERR_MAX] = "no usable key";
+    int rc = nk == 0 ? MOY_OTA_ERR
+             : moy_ota_judge_c6(t, n, mp_obj_is_true(args[1]), nk < 0 ? NULL : keys, nk,
+                                why, sizeof(why));
+    m_del(moy_ota_key_t, keys, KEYS_MAX);
+    return rc == MOY_OTA_OK ? mp_const_none : ota_text(why);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_ota_judge_c6_obj, 2, 3, mod_ota_judge_c6);
+
+// ota_canonical(text) / ota_canonical_c6(text) -> the bytes a signature
+// covers, or None when the manifest does not make one.
+static mp_obj_t canon_of(mp_obj_t text, size_t (*fn)(const char *, size_t, char *, size_t)) {
+    size_t n;
+    const char *t = mp_obj_str_get_data(text, &n);
+    size_t need = fn(t, n, NULL, 0);
+    if (need == (size_t)-1) {
+        return mp_const_none;
+    }
+    vstr_t v;
+    vstr_init_len(&v, need);
+    fn(t, n, v.buf, need);
+    return mp_obj_new_bytes_from_vstr(&v);
+}
+
+static mp_obj_t mod_ota_canonical(mp_obj_t text) {
+    return canon_of(text, moy_ota_canonical);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_ota_canonical_obj, mod_ota_canonical);
+
+static mp_obj_t mod_ota_canonical_c6(mp_obj_t text) {
+    return canon_of(text, moy_ota_canonical_c6);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_ota_canonical_c6_obj, mod_ota_canonical_c6);
+
+// ota_check(url, board, require_sig) -> (0, text) | (1, None) | (-1, reason)
+static mp_obj_t mod_ota_check(mp_obj_t url, mp_obj_t board, mp_obj_t req) {
+    char *text = NULL;
+    size_t n = 0;
+    int rc = moy_ota_check(mp_obj_str_get_str(url), mp_obj_str_get_str(board),
+                           mp_obj_is_true(req), &text, &n);
+    mp_obj_t o[2] = {MP_OBJ_NEW_SMALL_INT(rc), mp_const_none};
+    if (rc == MOY_OTA_OK) {
+        o[1] = mp_obj_new_str(text, n);
+        moy_net_free(text);
+    } else if (rc == MOY_OTA_ERR) {
+        o[1] = ota_text(moy_ota_error());
+    }
+    return mp_obj_new_tuple(2, o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_ota_check_obj, mod_ota_check);
+
+
+
+// ota_dl_begin(url, size, sha256, sink): raises ValueError(reason).
+static mp_obj_t mod_ota_dl_begin(size_t n_args, const mp_obj_t *args) {
+    if (moy_ota_dl_begin(mp_obj_str_get_str(args[0]), (uint32_t)mp_obj_get_int(args[1]),
+                         mp_obj_str_get_str(args[2]), mp_obj_get_int(args[3])) != 0) {
+        ota_raise();
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_ota_dl_begin_obj, 4, 4, mod_ota_dl_begin);
+
+static mp_obj_t mod_ota_dl_step(mp_obj_t max) {
+    return MP_OBJ_NEW_SMALL_INT(moy_ota_dl_step((uint32_t)mp_obj_get_int(max)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_ota_dl_step_obj, mod_ota_dl_step);
+
+static mp_obj_t mod_ota_dl_finish(void) {
+    return mp_obj_new_bool(moy_ota_dl_finish() == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_dl_finish_obj, mod_ota_dl_finish);
+
+static mp_obj_t mod_ota_cancel(void) {
+    moy_ota_cancel();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_cancel_obj, mod_ota_cancel);
+
+static mp_obj_t mod_ota_slot_begin(mp_obj_t size) {
+    if (moy_ota_slot_begin((uint32_t)mp_obj_get_int(size)) != 0) {
+        ota_raise();
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_ota_slot_begin_obj, mod_ota_slot_begin);
+
+static mp_obj_t mod_ota_slot_write(mp_obj_t data) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
+    return mp_obj_new_bool(moy_ota_slot_write(b.buf, b.len) == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_ota_slot_write_obj, mod_ota_slot_write);
+
+static mp_obj_t mod_ota_slot_close(void) {
+    return mp_obj_new_bool(moy_ota_slot_close() == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_slot_close_obj, mod_ota_slot_close);
+
+// ota_activate() -> the slot's label, or None (the reason in ota_state).
+static mp_obj_t mod_ota_activate(void) {
+    char label[24];
+    if (moy_ota_activate(label, sizeof(label)) != 0) {
+        return mp_const_none;
+    }
+    return ota_text(label);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_activate_obj, mod_ota_activate);
+
+static mp_obj_t mod_ota_c6_commit(void) {
+    return mp_obj_new_bool(moy_ota_c6_commit() == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_c6_commit_obj, mod_ota_c6_commit);
+
+static mp_obj_t mod_ota_c6_version(void) {
+    int v = moy_c6_version != NULL ? moy_c6_version() : -1;
+    return v < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_c6_version_obj, mod_ota_c6_version);
+
+// ota_state() -> (phase, sink, dl_done, dl_total, done, total, error)
+static mp_obj_t mod_ota_state(void) {
+    moy_ota_state_t st;
+    moy_ota_state(&st);
+    mp_obj_t o[7] = {
+        MP_OBJ_NEW_SMALL_INT(st.phase), MP_OBJ_NEW_SMALL_INT(st.sink),
+        mp_obj_new_int_from_uint(st.dl_done), mp_obj_new_int_from_uint(st.dl_total),
+        mp_obj_new_int_from_uint(st.done), mp_obj_new_int_from_uint(st.total),
+        ota_text(st.err),
+    };
+    return mp_obj_new_tuple(7, o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_state_obj, mod_ota_state);
+
+// http_open(url, agent) -> (handle, status, content_length); OSError(errno).
+static mp_obj_t mod_http_open(mp_obj_t url, mp_obj_t agent) {
+    int status = 0;
+    uint32_t clen = 0;
+    int h = moy_httpc_open(mp_obj_str_get_str(url), mp_obj_str_get_str(agent), &status, &clen);
+    if (h < 0) {
+        mp_raise_OSError(-h);
+    }
+    mp_obj_t o[3] = {MP_OBJ_NEW_SMALL_INT(h), MP_OBJ_NEW_SMALL_INT(status),
+                     mp_obj_new_int_from_uint(clen)};
+    return mp_obj_new_tuple(3, o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_http_open_obj, mod_http_open);
+
+static mp_obj_t mod_http_readinto(mp_obj_t h, mp_obj_t buf) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(buf, &b, MP_BUFFER_WRITE);
+    int k = moy_httpc_read(mp_obj_get_int(h), b.buf, b.len);
+    if (k < 0) {
+        mp_raise_OSError(-k);
+    }
+    return MP_OBJ_NEW_SMALL_INT(k);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_http_readinto_obj, mod_http_readinto);
+
+static mp_obj_t mod_http_close(mp_obj_t h) {
+    moy_httpc_close(mp_obj_get_int(h));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_http_close_obj, mod_http_close);
+
 static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_net)},
     {MP_ROM_QSTR(MP_QSTR_parse_request), MP_ROM_PTR(&mod_parse_request_obj)},
@@ -687,11 +949,33 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_web_handle), MP_ROM_PTR(&mod_web_handle_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_pack), MP_ROM_PTR(&mod_web_pack_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_stamp), MP_ROM_PTR(&mod_web_stamp_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_keys), MP_ROM_PTR(&mod_ota_keys_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_verify), MP_ROM_PTR(&mod_ota_verify_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_judge), MP_ROM_PTR(&mod_ota_judge_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_canonical), MP_ROM_PTR(&mod_ota_canonical_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_canonical_c6), MP_ROM_PTR(&mod_ota_canonical_c6_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_check), MP_ROM_PTR(&mod_ota_check_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_judge_c6), MP_ROM_PTR(&mod_ota_judge_c6_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_dl_begin), MP_ROM_PTR(&mod_ota_dl_begin_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_dl_step), MP_ROM_PTR(&mod_ota_dl_step_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_dl_finish), MP_ROM_PTR(&mod_ota_dl_finish_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_cancel), MP_ROM_PTR(&mod_ota_cancel_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_slot_begin), MP_ROM_PTR(&mod_ota_slot_begin_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_slot_write), MP_ROM_PTR(&mod_ota_slot_write_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_slot_close), MP_ROM_PTR(&mod_ota_slot_close_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_activate), MP_ROM_PTR(&mod_ota_activate_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_c6_commit), MP_ROM_PTR(&mod_ota_c6_commit_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_c6_version), MP_ROM_PTR(&mod_ota_c6_version_obj)},
+    {MP_ROM_QSTR(MP_QSTR_ota_state), MP_ROM_PTR(&mod_ota_state_obj)},
+    {MP_ROM_QSTR(MP_QSTR_http_open), MP_ROM_PTR(&mod_http_open_obj)},
+    {MP_ROM_QSTR(MP_QSTR_http_readinto), MP_ROM_PTR(&mod_http_readinto_obj)},
+    {MP_ROM_QSTR(MP_QSTR_http_close), MP_ROM_PTR(&mod_http_close_obj)},
     #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
     {MP_ROM_QSTR(MP_QSTR_wifi_on), MP_ROM_PTR(&mod_wifi_on_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_off), MP_ROM_PTR(&mod_wifi_off_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_connect), MP_ROM_PTR(&mod_wifi_connect_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_disconnect), MP_ROM_PTR(&mod_wifi_disconnect_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_forget), MP_ROM_PTR(&mod_wifi_forget_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_status), MP_ROM_PTR(&mod_wifi_status_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_scan), MP_ROM_PTR(&mod_wifi_scan_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_mac), MP_ROM_PTR(&mod_wifi_mac_obj)},

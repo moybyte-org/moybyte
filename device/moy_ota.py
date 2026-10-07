@@ -1,59 +1,34 @@
 # Map (grep -n a name to jump there):
 #   wait_online                      report the link, dialling saved credentials first
-#   -- manifest signing              verify_sig's key and rules
-#   OtaUpdater                       stepwise OTA install into the inactive slot
-#   OtaUpdater.begin                 open the image and the target slot
-#   OtaUpdater.check_online          fetch and parse a channel's manifest
-#   OtaUpdater.download_step         stream a slice to the card
-#   OtaUpdater.download_finish       verify size and sha256
-#   verify_sig                       does a signature sign the payload
-"""OTA firmware updater for the device (#53): flash a new app image from SD.
+#   OtaUpdater                       the Settings screens' updater, over the kernel's
+#   C6Updater                        the companion radio's updater (the P4s)
+#   verify_sig                       does a signature sign the payload (the reference)
+"""The firmware's identity and the updater's Python face.
 
-The Moybyte build now ships a DUAL-APP partition table (otadata + ota_0 + ota_1,
-see build.sh --ota), so the device can write a new firmware image to the INACTIVE
-slot and ping-pong between ota_0/ota_1 -- the running slot is never touched, so a
-failed/half-written update can't brick the device. Rollback is enabled in the
-bootloader (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE): a freshly-flashed app that
-never calls mark_valid() is reverted on the next boot, so a bad image self-heals.
+The updater is the kernel's (native/moy_net/moy_ota.c, docs/kernel_survival_2026-10.md
+section 6.3): the streaming HTTP(S) client with redirects, the manifest's
+signature under the keys below, the stream into the inactive app slot or the
+companion C6, and the image checked whole before anything can boot it. What
+stays here is what a screen drives: `OtaUpdater` keeps the surface
+`runtime/update_ui.py`, the webhost's `/update` and the Zero's `ZeroUpdate`
+pump a step per frame, the boot verdict and the confirm (`moy_ota_health`),
+the card's `ota.json` override and the pending marker -- the store's, read
+under the board's store gate (`with_sd`).
 
-Two sources: a .bin somebody copied into `update_dir` (UPDATE FW), and the
-WiFi download below. On the T-Deck the card shares the panel's SPI host, so every
-store touch and every slot write goes through the injected `with_sd` wrapper (the
-board's store session: comp.sync() + moybyte_sd.with_sd_live) exactly like cart
-saves -- it drains any in-flight panel DMA, then runs the op on the native
-single-bus path. Elsewhere it is a plain call-through.
-
-Architecture split (host == device, #17): this module owns ONLY the hardware
-(esp32.Partition flash writes + SD reads). ALL pixels -- the confirm screen and
-the progress bar -- are drawn by the shared console (Workstation._draw_update), which
-drives this backend one chunk per frame so the normal frame/flush loop stays in
-charge. The host injects no updater, so the shared "UPDATE FW" Settings row simply
-doesn't appear there.
-
-A copied .bin is driven as: find_bin() -> begin(path) -> step()*N -> finish() -> reset().
-
-Phase 3 (#53) adds WiFi download: check_online() fetches a small JSON manifest
-({"version", "url", "sha256", "size"}) over HTTP(S) via the injected wifi service,
-and if it advertises a newer FIRMWARE_VERSION, begin_download(to_slot=True) ->
-download_step()*N streams the image straight into the inactive slot (never
-buffering it in RAM, never through a filesystem) while accumulating a SHA-256
-that download_finish() checks; installing it is then finish()'s set_boot. The
-file sink (to_slot=False) is the C6 updater's, whose image goes to another chip.
-The network code is the LIVE counterpart of the host fake. The whole chain --
-TLS to github.com, the 302 to the release CDN, signature verify, the streamed
-download, install and rollback -- ran on glass on BOTH boards 2026-08-02
-(#53 has the numbers), which also settled the
-WiFi/LCD-DMA coexistence #38 had flagged.
+A board's slot ping-pongs between ota_0 and ota_1 and the bootloader rolls a
+never-confirmed image back, so a failed or half-written update cannot brick a
+board; the two consents are the download (into an INACTIVE slot, which changes
+nothing a board runs) and `finish()`, which makes it the next boot's.
 """
 
-from moy_http import _ms, _ms_since, http_open, http_open_once, parse_url
 from moy_ota_health import SlotHealth
 
+try:
+    import moy_net
+except ImportError:              # a host tool reading the identity or verify_sig
+    moy_net = None
+
 UPDATE_DIR = "/sd/update"    # the T-Deck default; a board with no SD passes its own
-                             # (OtaUpdater(update_dir=...), which every path here reads
-                             # off the instance rather than this module constant)
-BLOCK = 4096                 # esp32.Partition native block (erase page); writeblocks erases
-IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header_t.magic)
 
 # How long wait_online() waits for the link AFTER the autoconnect attempt. See
 # its docstring: a saved network on the P4 came up 1.5s after connect() had
@@ -158,19 +133,15 @@ try:
 except Exception:
     pass
 
-OTA_CFG_NAME = "ota.json"        # /sd/update/ota.json -> {"channels": {"stable": url, ...}}
+OTA_CFG_NAME = "ota.json"        # <update_dir>/ota.json -> {"channels": {"stable": url, ...}}
 
 # Where each channel lives when the card says nothing. The two branches publish
 # one rolling release each (.claude/skills/release/SKILL.md), and CI writes
-# `latest.json` beside the app image on both -- so a board straight off the
-# flasher can check for updates with no ota.json and no host of the owner's own.
-# An /sd/update/ota.json still WINS, which is how a LAN test against
-# `make ota-publish-unstable` + `make ota-serve` overrides these.
-#   stable   <- master, the tested branch (firmware-latest)
-#   unstable <- dev, every push (firmware-beta)
-# PER BOARD, because an OTA payload is an app-partition image: the T-Deck's is
-# Xtensa and the P4's is RISC-V, and a board handed the other one writes a
-# perfectly valid image that cannot boot. One manifest per (channel, board).
+# `latest-<board>.json` beside the app image on both. An <update_dir>/ota.json
+# still WINS, which is how a LAN test against `make ota-publish-unstable` +
+# `make ota-serve` overrides these. PER BOARD, because an OTA payload is an
+# app-partition image: a board handed another's writes a valid image that
+# cannot boot.
 _GH = "https://github.com/moybyte-org/moybyte/releases/download"
 DEFAULT_CHANNEL_RELEASES = {
     "stable": _GH + "/firmware-latest",
@@ -184,31 +155,15 @@ def default_manifest_url(channel, board=None):
 
 # -- manifest signing (the anti-MITM measure) --------------------------------
 #
-# TLS gets us nothing here on its own: MicroPython's ssl.wrap_socket does no
-# certificate verification, so anyone who can answer for github.com on the
-# kid's network can serve any firmware they like -- and the manifest's sha256
-# cannot help, because the same attacker writes the manifest. So a manifest
-# from the BAKED urls above must carry a signature made by the key whose public
-# half is here, in the image the owner flashed over a cable.
-#
-# RSA-2048/SHA-256 PKCS#1 v1.5, chosen for the verifier: pow(sig, 65537, n) is
-# ~17 modular squarings of a 2048-bit int, which MicroPython does in C with no
-# native module of ours. MEASURED on the P4 (2026-08-02, this exact code run on
-# real MicroPython over the serial harness): 35ms for the modexp, 41ms for a
-# whole verify_manifest. Expect the T-Deck to be slower -- 240MHz Xtensa against
-# the P4's RISC-V -- so budget ~100ms and no more thought than that: it happens
-# once per check, behind a CHECKING screen already waiting on the network. (An
-# earlier estimate here said "single-digit ms" and was simply wrong; mpz reduces
-# by division, which is the cost. Ed25519 remains far worse -- pure-Python
-# scalar multiplication runs into seconds.)
-# That rests on two build facts, both checked in the tree rather than assumed:
-# 3-argument pow is MICROPY_PY_BUILTINS_POW3, which mpconfig.h enables at
-# ROM_LEVEL_EXTRA_FEATURES, and the esp32 port sets exactly that level. A port
-# built below it would lose modular pow -- and with it, verification.
-# (Ed25519 would be the nicer primitive and the wrong one -- pure-Python scalar
-# multiplication here runs into seconds.) The signature covers
-# channel/version/size/sha256; the image follows from the sha256, which the
-# download is checked against. tools/ota_sign.py is the other half.
+# TLS verifies no certificate, so anyone who can answer for github.com on the
+# kid's network can serve any bytes they like, and the manifest's sha256 cannot
+# help when the same attacker writes the manifest. So a manifest from the BAKED
+# urls must carry a signature by a key whose public half is here: RSA-2048,
+# SHA-256, PKCS#1 v1.5 over the canonical text tools/ota_sign.py defines. The
+# board verifies in C (native/moy_net/moy_ota.c, whose KEYS_HEX mirrors this
+# tuple; tests/test_ota_signing.py holds the two to each other); `verify_sig`
+# below is the same arithmetic in Python, for the host's tools and the wasm
+# tier's module signatures.
 #
 # A TUPLE, not one key, so a compromised key can be rotated by publishing an
 # image trusted by the old key and signed by the new one. Empty = unsigned
@@ -226,124 +181,117 @@ OTA_PUBLIC_KEYS = (
         65537),
 )            # ((modulus_hex, exponent), ...) -- see `make ota-keygen`
 
-OTA_SCHEME = "moybyte-ota-v2"    # v2 added `board` -- see _canonical
-# The ASN.1 DigestInfo header for SHA-256. Fixed for the algorithm, so it is a
-# constant on both sides rather than a parser on either.
+OTA_SCHEME = "moybyte-ota-v2"    # v2 added `board`: tools/ota_sign.canonical
+# The ASN.1 DigestInfo header for SHA-256, fixed for the algorithm.
 _SHA256_DER = b"\x30\x31\x30\x0d\x06\x09\x60\x86\x48\x01\x65" \
               b"\x03\x04\x02\x01\x05\x00\x04\x20"
 
-DOWNLOAD_NAME = "firmware.bin"   # a file-sink download (to_slot=False) lands here
-# What `download_finish` returns instead of a path when the bytes went STRAIGHT
-# INTO THE INACTIVE SLOT (begin_download(to_slot=True)). There is no file to
-# hand back, and the install phase has nothing left to do but activate.
+# What `download_finish` returns: the bytes are in the sink, not in a file.
 SLOT_STAGED = "<slot>"
-DL_CHUNK = 16384                 # bytes streamed (and written to SD in ONE op) per frame.
-                                 # The per-frame cost (panel flush + SD sync + repaint) is
-                                 # FIXED, so a bigger block amortizes it: 4K/frame crawled
-                                 # (~100KB/s), 16K is ~4x. Matches the install step's 32K.
+C6_STAGED = "<c6>"
+DL_CHUNK = 16384                 # bytes streamed into the sink per painted frame
+INSTALL_CHUNK = 32768            # a copied image's bytes per painted frame
+IMAGE_MAGIC = 0xE9               # an ESP32 app image's first byte
+
+# moy_net's sinks and phases (native/moy_net/moy_ota.h).
+SINK_SLOT = 1
+SINK_C6 = 2
+_VERIFIED = 2
+AGENT = "moybyte-ota"
 
 
 class OtaUpdater(SlotHealth):
-    """Firmware into the inactive app slot, a step per frame: from a copied .bin,
-    or streamed off the wire.
+    """Firmware into the inactive app slot, a step per frame: streamed off the
+    wire, or from an image copied into `update_dir`. The kernel holds the
+    transfer; this holds what the screen reads.
 
-    `with_sd(fn)` runs fn() inside the board's store session (on the T-Deck: the
-    card mounted on the live single-bus path, the panel DMA drained first). Flash
-    writes themselves don't touch the shared SPI bus, but the card reads do, so the
-    whole read+write of each chunk runs inside one with_sd() call, and a streamed
-    chunk's slot pages are written inside one too.
+    `with_sd(fn)` runs fn() inside the board's store session (on the T-Deck:
+    the card on the live single-bus path, the panel DMA drained first): every
+    read of `update_dir` -- the copied image, ota.json, the pending marker --
+    goes through it.
     """
 
     def __init__(self, with_sd, wifi=None, go_online=None, update_dir=None):
-        # Where a copied image is found, the pending marker is kept and a
-        # file-sink download lands: the card on a T-Deck that has one, the
-        # internal VFS elsewhere. Every path in here reads THIS, never the module
-        # constant, so two boards' updaters cannot look at each other's directory.
         SlotHealth.__init__(self, with_sd, update_dir or UPDATE_DIR)
-        self._wifi = wifi         # injected wifi service (DeviceWifi); None -> no online update
+        self._wifi = wifi         # the wifi service; None -> no online update
         self._go_online = go_online  # callable: best-effort connect from saved creds
-        self._buf = bytearray(BLOCK)
-        self._mv = memoryview(self._buf)
-        self._part = None         # the target (inactive) esp32.Partition
-        self._f = None            # the open SD image file (resident across steps)
-        self._block = 0           # next block index to write
-        self.total = 0            # image size in bytes (for the progress bar)
-        self.done = 0             # bytes flashed so far
-        self.path = None          # the image being installed
-        self.error = None         # last error string (shown by the console)
-        self.absent = False       # the channel simply has nothing for this board yet
-        # WiFi download (Phase 3) state:
-        self._sock = None         # open HTTP(S) socket while a download streams
-        self._dl_f = None         # open SD file the download writes to
-        self._hash = None         # running sha256 of the downloaded bytes
-        self._dl_sha = ""         # expected sha256 (hex) from the manifest
-        self.dl_total = 0         # download size in bytes (Content-Length / manifest)
-        self.dl_done = 0          # bytes downloaded so far (for the progress bar)
+        self._f = None            # a copied image, open across steps
+        self._buf = bytearray(INSTALL_CHUNK)
+        self.path = None          # the image being installed, or a *_STAGED marker
+        self.error = None         # the last failure (what the screen shows)
+        self.absent = False       # the channel has nothing for this board yet
+        self.from_card = False    # where the last manifest url came from
+        self._manifest_text = None
 
     def set_wifi(self, wifi, go_online=None):
         self._wifi = wifi
         if go_online is not None:
             self._go_online = go_online
 
-    # -- capability + status (cheap, no SD) ----------------------------------
+    # -- capability, identity, progress -------------------------------------
 
     def available(self):
-        """True when this build has OTA partitions (running slot is ota_0/ota_1).
-        False on a legacy single-`factory` build -- there's no second slot to write,
-        so the console hides the UPDATE FW row until a full OTA image is USB-flashed."""
+        """True when this build has OTA partitions (running slot ota_0/ota_1)."""
         try:
-            import esp32
-
             return self._running_label() in ("ota_0", "ota_1")
         except Exception:
             return False
 
     def version(self):
-        """The running firmware version (compared against the online manifest)."""
         return FIRMWARE_VERSION
 
     def channel(self):
-        """The running release channel ("stable" / "unstable"). A manifest from a
-        DIFFERENT channel is always offered (so a kid can switch to beta and back); a
-        same-channel manifest is offered only when its version is higher."""
         return FIRMWARE_CHANNEL
 
     def version_label(self):
-        """A human label for the running build: the stamped label ("beta 2026-06-29
-        14:30" / "0.6"), else the release name, else the raw counter. Betas stamp an
-        epoch into FIRMWARE_VERSION, so the label is the only readable thing they have
-        -- and a stable build's counter is an ordering key nobody should have to read."""
+        """The stamped label, else the release name, else the raw counter."""
         return FIRMWARE_LABEL or FIRMWARE_NAME or ("v%d" % FIRMWARE_VERSION)
 
     def offers(self, manifest, channel=None):
-        """Decide whether `manifest` should be offered as an install. True when it's for
-        a different channel than the running build (a switch -- including a deliberate
-        beta->stable downgrade) OR a newer version within the running channel. `channel`
-        is the channel that was checked, used when the manifest omits its own."""
+        """Offer a manifest for a DIFFERENT channel (a switch, including a
+        deliberate beta->stable downgrade) or a newer version within this one."""
         try:
             mver = int(manifest.get("version", 0) or 0)
         except Exception:
             mver = 0
         mch = manifest.get("channel") or channel or FIRMWARE_CHANNEL
         if mch != FIRMWARE_CHANNEL:
-            return True                     # switching channels: always offer
-        return mver > FIRMWARE_VERSION      # same channel: only strictly newer
+            return True
+        return mver > FIRMWARE_VERSION
 
     def online_available(self):
-        """True when an online update is possible: OTA-capable build AND a wifi
-        service is injected. The console shows the UPDATE ONLINE row only then."""
         return self.available() and self._wifi is not None
 
-    # -- did the last update actually take? ----------------------------------
+    def _state(self):
+        return moy_net.ota_state()
+
+    @property
+    def dl_done(self):
+        return self._state()[2]
+
+    @property
+    def dl_total(self):
+        return self._state()[3]
+
+    @property
+    def done(self):
+        return self._state()[4]
+
+    @property
+    def total(self):
+        return self._state()[5]
+
+    def _failed(self, fallback):
+        self.error = self._state()[6] or fallback
+        _log(self.error)
+        return None
+
+    # -- did the last update take? --------------------------------------------
 
     def _arm_pending(self, slot):
-        """Record, just before the reboot, which slot the bootloader was pointed at.
-
-        Without this a rollback is SILENT: the board comes back on the old firmware
-        and nothing says the update was tried and undone, which reads to a kid as
-        "the update did nothing". One small file turns that into a verdict the next
-        boot can state out loud. Best-effort -- losing it costs the message, never
-        the update."""
+        """Record, just before the reboot, which slot the bootloader was pointed
+        at, so the next boot can say whether the update took or was rolled back
+        (a silent rollback reads to a kid as "the update did nothing")."""
         rec = {"slot": slot, "version": self.version(),
                "channel": self.channel(), "label": self.version_label()}
 
@@ -354,7 +302,7 @@ class OtaUpdater(SlotHealth):
             try:
                 os.mkdir(self.update_dir)
             except OSError:
-                pass                  # already there (the image lives in it)
+                pass
             f = open(self._pending_path(), "w")
             try:
                 f.write(json.dumps(rec))
@@ -368,10 +316,10 @@ class OtaUpdater(SlotHealth):
             _log("could not record the pending update:", _short(exc))
             return False
 
-    # -- discovery -----------------------------------------------------------
+    # -- a copied image --------------------------------------------------------
 
     def find_bin(self):
-        """The newest *.bin under /sd/update, as (path, size), or None. SD op."""
+        """The biggest *.bin under update_dir, as (path, size), or None."""
         def _scan():
             import os
 
@@ -398,127 +346,65 @@ class OtaUpdater(SlotHealth):
             self.error = _short(exc)
             return None
 
-    # -- install (driven one step per frame by the console) ------------------
-
     def begin(self, path):
-        """Open the image + target slot, validate it fits and looks like an app image.
-        Returns total bytes on success; raises on a bad/oversized image."""
-        import esp32
+        """Open a copied image and the slot. Returns its size; raises on an
+        empty, oversized or non-app image."""
         import os
 
         self.error = None
-        self._block = 0
-        self.done = 0
         self.path = path
 
-        size = os.stat(path)[6]
-        part = esp32.Partition(esp32.Partition.RUNNING).get_next_update()
-        slot_size = part.info()[3]
-        if size <= 0:
-            raise ValueError("empty image")
-        if size > slot_size:
-            raise ValueError("image %dK > slot %dK" % (size // 1024, slot_size // 1024))
-
         def _open():
+            size = os.stat(path)[6]
             f = open(path, "rb")
-            head = f.read(1)
-            f.seek(0)
-            return f, head
+            return f, size
 
-        f, head = self._with_sd(_open)
-        if not head or head[0] != IMAGE_MAGIC:
-            try:
-                f.close()
-            except Exception:
-                pass
-            raise ValueError("not an app image")
-
+        f, size = self._with_sd(_open)
+        try:
+            moy_net.ota_slot_begin(size)
+        except Exception:
+            f.close()
+            raise
         self._f = f
-        self._part = part
-        self.total = size
         return size
 
-    def step(self, max_blocks=8):
-        """Flash up to max_blocks (32K) of the image. Returns True while more remains,
-        False once the whole image is written (then call finish()). One SD session per
-        step, so the console can repaint the progress bar between steps."""
-        if self._f is None or self._part is None:
+    def step(self, max_bytes=INSTALL_CHUNK):
+        """Write the next slice of a copied image. True while more remains,
+        False once it is whole (then finish()) or on a failure (error set)."""
+        f = self._f
+        if f is None:
             return False
-
-        def _do():
-            for _ in range(max_blocks):
-                n = self._f.readinto(self._buf)
-                if not n:
-                    return True            # EOF on a block boundary
-                if n < BLOCK:              # final partial block: pad with 0xFF (erased)
-                    for j in range(n, BLOCK):
-                        self._buf[j] = 0xFF
-                # writeblocks(idx, buf) with no offset erases the 4K page then writes it.
-                self._part.writeblocks(self._block, self._mv)
-                self._block += 1
-                self.done += n
-                if n < BLOCK:
-                    return True            # that was the last (partial) block
-            return False                   # filled max_blocks, more to go
-
+        mv = memoryview(self._buf)[:max_bytes]
         try:
-            eof = self._with_sd(_do)
+            n = self._with_sd(lambda: f.readinto(mv))
         except Exception as exc:
             self.error = _store_short(exc)
-            _log("install write FAILED at %d/%d:" % (self.done, self.total), _short(exc))
             self.cancel()
             return False
-        if eof:
+        if n and not moy_net.ota_slot_write(mv[:n]):
             self._close_file()
-        return not eof
+            self._failed("Couldn't save the update.")
+            return False
+        if n == max_bytes:
+            return True
+        self._close_file()
+        if not moy_net.ota_slot_close():
+            self._failed("image refused")
+        return False
 
     def finish(self):
-        """Point the bootloader at the freshly-written slot. The new app boots on the
-        next reset and must confirm itself to keep it (confirm_when_healthy), else
-        rollback. Also records WHICH slot, so the next boot can tell whether the
-        thing we just installed is the thing now running."""
-        if self._part is None:
-            return False
-        try:
-            slot = self._part.info()[4]
-            self._part.set_boot()
-        except Exception as exc:
-            self.error = _short(exc)
+        """Make the verified slot the next boot's, and record which slot, so the
+        next boot can tell whether the image now running is the one installed."""
+        slot = moy_net.ota_activate()
+        if slot is None:
+            self._failed("set_boot failed")
             return False
         self._arm_pending(slot)
-        self._discard_download()
         return True
-
-    def _discard_download(self):
-        """Delete the image a file-sink download left, now that it is safely in
-        the slot: kept, a payload on an internal VFS leaves no room for the next.
-
-        Scoped to DOWNLOAD_NAME deliberately: a .bin the owner copied into
-        /sd/update themselves is THEIR file, possibly meant for another board,
-        and is never touched. A failed unlink is not an error either -- the
-        install already succeeded, and refusing to boot it over a stale temp
-        file would be the worse failure."""
-        if self.path != self.update_dir + "/" + DOWNLOAD_NAME:
-            return
-
-        def _rm():
-            import os
-
-            try:
-                os.remove(self.update_dir + "/" + DOWNLOAD_NAME)
-            except OSError:
-                pass
-
-        try:
-            self._with_sd(_rm)
-        except Exception:  # noqa: BLE001 -- cleanup must never fail a good install
-            pass
 
     def cancel(self):
         self._close_file()
-        self._part = None
-        self._block = 0
-        self.done = 0
+        moy_net.ota_cancel()
 
     def reset(self):
         import machine
@@ -530,29 +416,22 @@ class OtaUpdater(SlotHealth):
         self._f = None
         if f is not None:
             try:
-                f.close()
+                self._with_sd(f.close)
             except Exception:
                 pass
 
-    # -- WiFi download (Phase 3, #53): manifest check + streamed .bin --------
-    #
-    # check_online() pulls a small JSON manifest; if it's newer, the console drives
-    # begin_download(to_slot=True) -> download_step()*N -> download_finish(), which
-    # streams the image from the socket into the inactive slot (never holding the
-    # whole image in RAM) and verifies size + sha256; finish() then activates it.
+    # -- the online update: manifest, then a stream into the slot ----------
 
     def manifest_url(self, channel=None):
-        """The manifest URL for `channel`: /sd/update/ota.json if it names one, else
-        the baked DEFAULT_CHANNEL_URLS (the GitHub release each branch publishes).
-        Schema: {"channels": {"stable": url, "unstable": url}}; falls back to the running
-        channel, then "stable", then any. A legacy {"manifest_url": url} is honoured as
-        the single (stable) channel for back-compat. The card WINS over the default so a
-        LAN/offline host stays a one-file override."""
+        """The manifest URL for `channel`: update_dir/ota.json if it names one,
+        else the baked release for this board. Schema: {"channels": {"stable":
+        url, "unstable": url}}; a legacy {"manifest_url": url} is the one
+        channel. The card WINS so a LAN host stays a one-file override."""
         return self._manifest_source(channel)[0]
 
     def _manifest_source(self, channel=None):
-        """(url, from_card): WHERE the url came from decides whether an unsigned
-        manifest is acceptable -- see _require_signature."""
+        """(url, from_card): where the url came from decides whether an
+        unsigned manifest is acceptable (_require_signature)."""
         def _read():
             try:
                 import json
@@ -577,56 +456,12 @@ class OtaUpdater(SlotHealth):
             return url, True
         return default_manifest_url(channel or FIRMWARE_CHANNEL), False
 
-    # -- signature verification ----------------------------------------------
-
-    def _canonical(self, manifest):
-        """The bytes a signature covers. MIRRORS tools/ota_sign.canonical -- change
-        one and you must change the other (tests/test_ota_signing.py pins that they
-        agree). Built by hand rather than as canonical JSON because MicroPython's
-        json.dumps has neither sort_keys nor separators, so "serialize the same way
-        both sides do" has no meaning over here."""
-        return ("%s\n%s\n%s\n%d\n%d\n%s" % (
-            OTA_SCHEME,
-            manifest.get("board") or "",
-            manifest.get("channel") or "",
-            int(manifest.get("version") or 0),
-            int(manifest.get("size") or 0),
-            (manifest.get("sha256") or "").lower(),
-        )).encode()
-
-    def verify_manifest(self, manifest, keys=None):
-        """True when the manifest carries a signature from a key this image trusts.
-
-        Timed, because the cost of a 2048-bit modexp on this silicon was an
-        estimate until a board ran one, and the serial log is the only window this
-        board has (its USB RX is dead under the desktop). Once there is a real
-        number here, it stops being a question."""
-        t0 = _ms()
-        ok = self._verify_manifest(manifest, keys)
-        _log("verify_manifest ->", ok, "in %dms" % _ms_since(t0))
-        return ok
-
-    def _verify_manifest(self, manifest, keys):
-        """Whole-block comparison rather than a padding parser: rebuild the PKCS#1
-        block that a valid signature must decrypt to and compare it entire. Parsing
-        the padding is where the classic signature forgeries live, and there is
-        nothing in it worth parsing."""
-        return verify_sig(self._canonical(manifest), manifest.get("sig"), keys)
-
     def _require_signature(self, from_card):
-        """Whether an unsigned manifest may be installed.
-
-        A manifest from the BAKED urls must be signed: that is the path an
-        attacker on the network gets to answer for. One reached because the owner
-        put an ota.json on the card need not be -- choosing a host by physically
-        writing to the SD card is an act of consent, and it keeps the LAN dev loop
-        (`make ota-publish-unstable`) working with no key to manage. A signature
-        that IS present is still checked either way, so a tampered official
-        manifest cannot be laundered by copying it to a local host.
-
-        With no keys baked in at all, nothing can be verified, so requiring a
-        signature would just brick the update path -- an unsigned build trusts the
-        network exactly as it did before signing existed."""
+        """Whether an unsigned manifest is refused: one from the BAKED urls must
+        be signed; one the owner pointed at by writing ota.json to the card
+        need not be (a physical act of consent, and the LAN dev loop). A
+        signature that IS present is checked either way. With no keys baked,
+        nothing can be verified, and nothing is required."""
         return bool(OTA_PUBLIC_KEYS) and not from_card
 
     def wifi_online(self):
@@ -638,393 +473,191 @@ class OtaUpdater(SlotHealth):
             return False
 
     def ensure_online(self):
-        """Best-effort: report connected, else dial saved credentials and wait.
-        Never prompts for a password -- the kid joins a network via the WiFi
-        cart; this only reuses what's already saved. `wait_online` above owns
-        the wait and the measurement behind it."""
+        """Connected, else dial saved credentials and wait (`wait_online`)."""
         return wait_online(self.wifi_online, self._go_online)
 
     def check_online(self, channel=None):
-        """Fetch + parse the manifest for `channel` (default the running channel).
-        Returns the dict (with at least "version" and "url") or None, setting self.error
-        on any failure. Blocking network call -- the console runs it once, between
-        frames, behind a CHECKING... screen."""
+        """The channel's manifest, fetched and judged by the kernel (the board
+        it names, then its signature), as a dict; None with `error` set, or
+        with `absent` when the channel has nothing for this board yet.
+        Blocking: the screen runs it once, behind CHECKING..."""
         self.error = None
         self.absent = False
-        _log("check_online channel=%r running=%s/%s" % (
-            channel, FIRMWARE_CHANNEL, FIRMWARE_VERSION))
+        self._manifest_text = None
         url, from_card = self._manifest_source(channel)
-        # Remembered for the manifest's OTHER consumers (the C6 updater rides
-        # the same fetch): where the url came from decides whether an unsigned
-        # block is acceptable, exactly as it does for the app image.
         self.from_card = from_card
-        _log("manifest_url ->", url, "(from card)" if from_card else "(baked)")
+        _log("check channel=%r running=%s/%s url=%s%s" % (
+            channel, FIRMWARE_CHANNEL, FIRMWARE_VERSION, url,
+            " (from card)" if from_card else ""))
         if not url:
             self.error = "no manifest url"
-            _log("ABORT: no /sd/update/ota.json (or no url for channel)")
             return None
-        online = self.ensure_online()
-        try:
-            st = self._wifi.status() if self._wifi is not None else None
-        except Exception as exc:
-            st = ("status err", exc)
-        _log("ensure_online ->", online, "wifi.status=", st)
-        if not online:
+        if not self.ensure_online():
             self.error = "wifi offline"
             return None
+        rc, text = moy_net.ota_check(url, BOARD, self._require_signature(from_card))
+        if rc == 1:
+            _log("no manifest published on this channel for", BOARD)
+            self.absent = True
+            return None
+        if rc != 0:
+            self.error = text or "no manifest"
+            _log("manifest refused:", self.error)
+            return None
+        import json
+
         try:
-            txt = self._http_get_text(url)
-            _log("manifest body len=", len(txt) if txt is not None else None,
-                 "err=", self.error)
-            if txt is None:
-                # A manifest that isn't there is not a broken update -- it is a
-                # channel with nothing published for this board yet, which is
-                # the normal state of a channel before its first release. Saying
-                # "Update didn't finish, http 404" blames the kid's console for
-                # the absence of a file on a server.
-                if self.error in ("http 404", "http 410"):
-                    _log("no manifest published on this channel for", BOARD)
-                    self.error = None
-                    self.absent = True
-                return None
-            import json
-
-            m = json.loads(txt)
-            _log("manifest parsed: version=%r channel=%r size=%r" % (
-                m.get("version"), m.get("channel"), m.get("size")))
-
-            # Wrong board, wrong silicon. Checked BEFORE the signature so the
-            # error says the useful thing: a manifest naming another board is a
-            # misconfigured url or a replay, not a tampered file. (A manifest
-            # with no board at all is one from before the field existed, and
-            # only gets in if it is unsigned-and-allowed anyway.)
-            mboard = m.get("board")
-            if mboard and mboard != BOARD:
-                self.error = "wrong board"
-                _log("REJECTED: manifest is for %r, this is %r" % (mboard, BOARD))
-                return None
-
-            # The signature gate. A bad one is refused even when a signature was
-            # not required: a manifest that carries a signature and fails it has
-            # been tampered with, which is worse news than one carrying none.
-            signed = self.verify_manifest(m) if m.get("sig") else None
-            if signed is False:
-                self.error = "bad signature"
-                _log("REJECTED: signature present but not from a trusted key")
-                return None
-            if signed is None and self._require_signature(from_card):
-                self.error = "unsigned update"
-                _log("REJECTED: unsigned manifest from a baked url")
-                return None
-            _log("signature:", "verified" if signed else "not required")
-            return m
+            m = json.loads(text)
         except Exception as exc:
             self.error = _short(exc)
-            _log("manifest fetch/parse FAILED:", self.error)
             return None
+        self._manifest_text = text
+        _log("manifest: version=%r channel=%r size=%r" % (
+            m.get("version"), m.get("channel"), m.get("size")))
+        return m
 
-    def begin_download(self, manifest, to_slot=False):
-        """Open the socket and the sink for the manifest's image. Raises on a bad
-        URL or non-200 response; sets dl_total/dl_done for the progress bar.
-
-        `to_slot` streams the bytes DIRECTLY INTO THE INACTIVE APP SLOT instead
-        of a staging file, and it is not an optimisation -- on the Zero it is the
-        difference between working and not. That board's whole filesystem is
-        smaller than its image (1.875MB against ~2.7MB): staging it cannot fit
-        on an EMPTY volume, and the symptom is `OSError 28` (ENOSPC) part-way
-        through the transfer. Meanwhile the inactive slot is 3MB and empty,
-        which is what it is for.
-
-        The update screen asks for it on every board. The Guition S3 and the
-        P4s keep `update_dir` on an internal VFS with less room than their
-        image, where a staged download stopped with the same OSError 28
-        (2026-10-03); and everywhere it halves the flash writes and roughly the
-        wall time, since the staged path writes every byte twice.
-
-        WHAT IT DOES NOT CHANGE is the two-act consent. Writing an INACTIVE slot
-        changes nothing a board runs; the running slot is untouched either way,
-        and what the second consent gates is `finish()` -- the `set_boot` that
-        makes the new image bootable. The act being gated moved from "write the
-        bytes" to "point the bootloader at them", which is the one that matters.
-        """
+    def begin_download(self, manifest, to_slot=True, sink=SINK_SLOT):
+        """Open the stream and the sink for the manifest's image (the inactive
+        slot, or the C6 for its block). Raises with the reason."""
         self.error = None
-        self.dl_done = 0
         url = manifest.get("url")
-        _log("begin_download url=", url)
         if not url:
             raise ValueError("manifest has no url")
-        self.dl_total = int(manifest.get("size", 0) or 0)
-        self._dl_sha = (manifest.get("sha256") or "").lower()
-
-        sock, code, clen, rest = self._http_open(url)
-        if code != 200:
-            try:
-                sock.close()
-            except Exception:
-                pass
-            raise ValueError("http %d" % code)
-        if not self.dl_total and clen:
-            self.dl_total = clen
-        _log("download starting size=%d (rest=%d)" % (self.dl_total, len(rest)))
-        self._dl_logged = 0
-
-        import hashlib
-
-        self._hash = hashlib.sha256()
-        self._sock = sock
-
-        if to_slot:
-            import esp32
-
-            part = esp32.Partition(esp32.Partition.RUNNING).get_next_update()
-            slot_size = part.info()[3]
-            if self.dl_total and self.dl_total > slot_size:
-                try:
-                    sock.close()
-                except Exception:              # noqa: BLE001
-                    pass
-                self._sock = None
-                raise ValueError("image %dK > slot %dK"
-                                 % (self.dl_total // 1024, slot_size // 1024))
-            # `_part`/`_block`/`done` are the SAME fields the file-fed install
-            # writes through, so `finish()` needs no idea where the bytes came
-            # from -- it reads _part, calls set_boot, and arms the pending marker.
-            self._part = part
-            self._block = 0
-            self.done = 0
-            self._dl_buf = bytearray(BLOCK)
-            self._dl_fill = 0
-            self._dl_f = None
-            self.path = SLOT_STAGED
-        else:
-            def _open():
-                import os
-
-                try:
-                    os.mkdir(self.update_dir)
-                except OSError:
-                    pass
-                return open(self.update_dir + "/" + DOWNLOAD_NAME, "wb")
-
-            self._dl_f = self._with_sd(_open)
-            self.path = self.update_dir + "/" + DOWNLOAD_NAME
-        if rest:                               # body bytes already read with the headers
-            self._consume(rest)
+        size = int(manifest.get("size", 0) or 0)
+        sha = (manifest.get("sha256") or "").lower()
+        _log("download", url)
+        try:
+            moy_net.ota_dl_begin(url, size, sha, sink)
+        except ValueError as exc:
+            self.error = str(exc)
+            raise
+        self.path = C6_STAGED if sink == SINK_C6 else SLOT_STAGED
 
     def download_step(self, max_bytes=DL_CHUNK):
-        """Stream up to max_bytes socket -> SD in ONE write per call. Returns True while
-        more remains, False at EOF (then call download_finish()). One SD session per step,
-        so the console repaints the bar between steps. Filling a whole block per frame
-        (vs the old 4K) is the speed lever -- the per-frame flush/sync/repaint cost is
-        fixed, so more bytes per frame divides it down."""
-        # A sink is a file OR the inactive slot -- `_dl_f is None` alone used to
-        # mean "nothing open", and after the slot sink landed it also meant
-        # "streaming to flash", so this returned False on the first step and the
-        # transfer ended at 0 bytes with a size mismatch.
-        if self._sock is None or (self._dl_f is None and self._part is None):
-            return False
-        buf = bytearray()
-        try:
-            while len(buf) < max_bytes:
-                chunk = self._sock.read(max_bytes - len(buf))
-                if not chunk:
-                    break                      # EOF (server closed) -- flush what we have
-                buf += chunk
-        except Exception as exc:
-            self.error = _short(exc)
-            _log("download read FAILED at %d/%d:" % (self.dl_done, self.dl_total),
-                 self.error)
-            self._dl_close()
-            self._slot_failed()
-            return False
-        if not buf:
-            _log("download EOF at %d/%d" % (self.dl_done, self.dl_total))
-            return False                       # clean EOF on a block boundary
-        try:
-            self._consume(buf)                 # one hash update + one write of the block
-        except Exception as exc:
-            self.error = _store_short(exc)
-            _log("download write FAILED at %d/%d:" % (self.dl_done, self.dl_total),
-                 _short(exc))
-            self._dl_close()
-            self._slot_failed()
-            return False
-        # Progress breadcrumb every ~256K so a stall is visible without spamming serial.
-        if self.dl_done - getattr(self, "_dl_logged", 0) >= 262144:
-            self._dl_logged = self.dl_done
-            _log("download %d/%d" % (self.dl_done, self.dl_total))
-        return True
-
-    def _consume(self, chunk):
-        """Hash the bytes and put them in whichever sink begin_download opened,
-        inside one store session either way: the slot's pages are written under
-        the same gate the file's bytes and the copied image's install are."""
-        self._hash.update(chunk)
-        if self._dl_f is None and self._part is not None:
-            self._with_sd(lambda: self._to_slot(chunk))
-        else:
-            def _w():
-                self._dl_f.write(chunk)
-
-            self._with_sd(_w)
-        self.dl_done += len(chunk)
-
-    def _to_slot(self, chunk):
-        """Append into the block buffer, flushing every full 4K page into the
-        inactive slot. Partition writes are BLOCK-aligned and writeblocks erases
-        the page it writes, so the buffer exists to turn an arbitrary socket read
-        into whole pages; the final partial one is padded in download_finish."""
-        buf, mv = self._dl_buf, memoryview(self._dl_buf)
-        pos, n = 0, len(chunk)
-        while pos < n:
-            take = BLOCK - self._dl_fill
-            if take > n - pos:
-                take = n - pos
-            buf[self._dl_fill:self._dl_fill + take] = chunk[pos:pos + take]
-            self._dl_fill += take
-            pos += take
-            if self._dl_fill == BLOCK:
-                self._part.writeblocks(self._block, mv)
-                self._block += 1
-                self.done += BLOCK
-                self._dl_fill = 0
+        """One slice off the wire into the sink: True while more remains."""
+        k = moy_net.ota_dl_step(max_bytes)
+        if k < 0:
+            self._failed("download failed")
+        return k > 0
 
     def download_finish(self):
-        """Close the stream and verify size + sha256. Returns the .bin path on
-        success (or SLOT_STAGED when the bytes went straight into the slot),
-        else None with self.error set.
-
-        THE TAIL BLOCK is flushed here, before any verification, and it has to
-        be: a partition write is 4K-aligned, so the last page of an image that
-        is not a multiple of 4K sits in the buffer until now. It is padded with
-        0xFF -- what erased flash reads as -- exactly as the file-fed install
-        pads its final short read.
-        """
-        if self._dl_f is None and self._part is not None and self._dl_fill:
-            try:
-                for j in range(self._dl_fill, BLOCK):
-                    self._dl_buf[j] = 0xFF
-                self._with_sd(lambda: self._part.writeblocks(
-                    self._block, memoryview(self._dl_buf)))
-                self._block += 1
-                self.done += self._dl_fill
-                self._dl_fill = 0
-            except Exception as exc:           # noqa: BLE001
-                self.error = _store_short(exc)
-                _log("download_finish tail write FAILED:", _short(exc))
-                self._dl_close()
-                return self._slot_failed()
-        self._dl_close()
-        if self.dl_total and self.dl_done != self.dl_total:
-            self.error = "size %d/%d" % (self.dl_done, self.dl_total)
-            _log("download_finish SIZE MISMATCH:", self.error)
-            return self._slot_failed()
-        if self._dl_sha:
-            try:
-                import binascii
-
-                got = binascii.hexlify(self._hash.digest()).decode()
-            except Exception as exc:
-                self.error = _short(exc)
-                _log("download_finish hash err:", self.error)
-                return self._slot_failed()
-            if got != self._dl_sha:
-                self.error = "sha256 mismatch"
-                _log("download_finish SHA MISMATCH got=%s want=%s" % (
-                    got[:12], self._dl_sha[:12]))
-                return self._slot_failed()
-        _log("download_finish OK bytes=%d ->" % self.dl_done, self.path)
+        """The size and sha256 checked: the staged marker, or None with error."""
+        if not moy_net.ota_dl_finish():
+            return self._failed("verify failed")
+        st = self._state()
+        _log("download verified bytes=%d" % st[2])
         return self.path
 
-    def _slot_failed(self):
-        """Every failing exit from a slot download comes through here.
-
-        DROPPING `_part` IS THE POINT. `finish()` activates whatever partition
-        handle it finds, and a download that failed verification has left a
-        PARTIAL image in the slot -- so a later finish(), from a retry or a
-        stray request, would set_boot an image we just proved was wrong. The
-        bootloader's rollback would catch it, but a guard that relies on the
-        last line of defence is not a guard. Returns None, so callers read it
-        as the failure it is.
-        """
-        self._part = None
-        self._block = 0
-        self.done = 0
-        self._dl_fill = 0
-        return None
-
     def staged_in_slot(self):
-        """Did the last download land in the slot rather than a file? The install
-        phase reads this to know it has nothing to write and only has to
-        activate."""
-        return self.path == SLOT_STAGED and self._part is not None
+        st = self._state()
+        return st[0] == _VERIFIED and st[1] == SINK_SLOT
 
     def download_cancel(self):
-        self._dl_close()
-        self._slot_failed()          # a cancelled stream leaves a partial slot too
-        self.dl_done = 0
-        self.dl_total = 0
+        moy_net.ota_cancel()
 
-    def _dl_close(self):
-        s = self._sock
-        self._sock = None
-        if s is not None:
-            try:
-                s.close()
-            except Exception:
-                pass
-        f = self._dl_f
-        self._dl_f = None
-        if f is not None:
-            def _c():
-                f.close()
-            try:
-                self._with_sd(_c)
-            except Exception:
-                try:
-                    f.close()
-                except Exception:
-                    pass
 
-    # -- the streaming HTTP(S) client is device/moy_http.py's; Get Carts
-    #    (device/cart_net.py) rides the same one --
+class C6Updater:
+    """The companion C6's firmware (the P4s), pumped by the same screen:
+    check -> download, streamed into the radio's own inactive slot as it
+    arrives -> commit, which ends the radio's OTA and restarts it. The
+    manifest is the board's own (OtaUpdater.check_online fetched and judged
+    it); the `c6` block carries its own signature (`c6_sig`, tools/ota_sign.py's
+    canonical_c6), required exactly when the manifest's was. After the commit
+    the console reboots: its WiFi and BLE hold state against the old radio."""
 
-    def _parse_url(self, url):
-        return parse_url(url)
+    def __init__(self, updater):
+        self.updater = updater
+        self.error = None
+        self.offer = None               # the manifest's c6 block, when newer
+        self.installed = None           # what the radio said it runs at the check
+        self.fl_done = 0
+        self.fl_total = 0
 
-    def _http_open(self, url, hops=4):
-        return http_open(url, hops, AGENT, _log)
+    def shim_version(self):
+        """What the radio says it runs, or None (a stock slave, an old shim,
+        a transport that is down)."""
+        return moy_net.ota_c6_version()
 
-    def _http_open_once(self, url):
-        return http_open_once(url, AGENT, _log)
-
-    def _http_get_text(self, url, limit=8192):
-        """Fetch a small text resource (the manifest) fully into RAM."""
-        sock, code, clen, rest = self._http_open(url)
+    def check(self, channel=None):
+        """"offer" (self.offer set), "uptodate", "nopublish" or "error"."""
+        self.error = None
+        self.offer = None
+        u = self.updater
+        if u is None:
+            self.error = "no updater"
+            return "error"
+        m = u.check_online(channel)
+        if m is None:
+            if getattr(u, "absent", False):
+                return "nopublish"
+            self.error = u.error or "no manifest"
+            return "error"
+        c6 = m.get("c6")
+        if not c6:
+            return "nopublish"
+        why = moy_net.ota_judge_c6(u._manifest_text,
+                                   u._require_signature(u.from_card))
+        if why:
+            self.error = why
+            return "error"
         try:
-            if code != 200:
-                self.error = "http %d" % code
-                return None
-            body = rest
-            cap = clen if clen else limit
-            while len(body) < cap:
-                chunk = sock.read(512)
-                if not chunk:
-                    break
-                body += chunk
-                if len(body) > limit:
-                    break
-            return body.decode()
-        finally:
-            try:
-                sock.close()
-            except Exception:
-                pass
+            want = int(c6.get("version") or 0)
+        except (TypeError, ValueError):
+            self.error = "bad c6 version"
+            return "error"
+        self.installed = self.shim_version()
+        if self.installed is not None and self.installed >= want:
+            return "uptodate"
+        self.offer = c6
+        return "offer"
+
+    def begin_download(self):
+        self.updater.begin_download(self.offer, sink=SINK_C6)
+
+    def download_step(self):
+        return self.updater.download_step()
+
+    def download_finish(self):
+        path = self.updater.download_finish()
+        if path is None:
+            self.error = self.updater.error or "verify failed"
+        return path
+
+    def download_cancel(self):
+        self.updater.download_cancel()
+
+    @property
+    def dl_done(self):
+        return self.updater.dl_done if self.updater else 0
+
+    @property
+    def dl_total(self):
+        return self.updater.dl_total if self.updater else 0
+
+    # The image went into the radio as it arrived: "flashing" is the commit.
+    def begin_flash(self, path):
+        self.error = None
+        self.fl_total = self.fl_done = self.updater.dl_done
+
+    def flash_step(self):
+        return False
+
+    def finish_flash(self):
+        return True
+
+    def activate(self):
+        """End the radio's OTA and restart it into the verified image."""
+        if moy_net.ota_c6_commit():
+            return True
+        self.error = moy_net.ota_state()[6] or "c6 activate failed"
+        return False
+
+    def cancel(self):
+        self.download_cancel()
 
 
 def _short(exc):
-    # Keep the errno/class visible: an OSError's str() is often just the bare errno
-    # (e.g. "113"), so prefix the class name to make the on-screen + serial text legible.
+    # An OSError's str() is often the bare errno; prefix the class name.
     s = str(exc)
     cls = exc.__class__.__name__
     if not s:
@@ -1040,8 +673,7 @@ NO_WRITE = "Couldn't save the update."
 
 
 def _store_short(exc):
-    """What the screen says when writing the image fails: no room, or no write.
-    The raw error is the caller's serial line."""
+    """What the screen says when reading or writing the image fails."""
     if not isinstance(exc, OSError):
         return _short(exc)
     code = getattr(exc, "errno", None)
@@ -1051,27 +683,18 @@ def _store_short(exc):
 
 
 def _log(*a):
-    # Verbose OTA-online trace to serial (#53). During check_online / download the
-    # device is mostly blocked in socket I/O (not the tx_color busy-wait that starves
-    # USB), so these prints DO reach a passive `/dev/ttyACM*` reader -- the only window
-    # into the WiFi update path, which the native desktop loop otherwise hides. Guarded
-    # so a logging hiccup can never break an update.
     try:
         print("Moybyte OTA:", *a)
     except Exception:
         pass
 
 
-AGENT = "moybyte-ota"
-
-
 def verify_sig(payload, sig, keys=None):
-    """True when `sig` (hex) validly signs `payload` under a baked key.
-
-    Module-level so the manifest's OTHER signed blocks -- the C6 image's
-    c6_sig (device/moy_c6_update.py) -- verify through the SAME arithmetic as
-    the manifest's own signature instead of a second copy of the PKCS#1 block
-    compare (whole-block, never a padding parser -- see _verify_manifest)."""
+    """True when `sig` (hex) validly signs `payload` under a baked key: the
+    whole PKCS#1 v1.5 block rebuilt and compared, never a padding parser. The
+    kernel's moy_ota_verify on a board; this arithmetic where there is none."""
+    if keys is None and moy_net is not None and hasattr(moy_net, "ota_verify"):
+        return bool(sig) and moy_net.ota_verify(payload, sig)
     keys = OTA_PUBLIC_KEYS if keys is None else keys
     if not sig or not keys:
         return False

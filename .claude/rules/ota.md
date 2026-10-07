@@ -2,8 +2,7 @@
 paths:
   - "device/moy_ota.py"
   - "device/moy_ota_health.py"
-  - "device/moy_http.py"
-  - "device/moy_c6_update.py"
+  - "native/moy_net/moy_ota.*"
   - "runtime/update_ui.py"
   - "tools/ota_*.py"
   - "tools/release.py"
@@ -24,10 +23,17 @@ paths:
     where the console layout does not fit and the bootloader REJECTS the table
     into a silent boot loop. Its CSV carries the arithmetic and the measured
     image it is sized against.
+  - **The updater is the kernel's** (`native/moy_net/moy_ota.c`, 2026-10-07):
+    the streaming HTTP(S) client with redirects (Get Carts fetches through it
+    too), the manifest's signature, the stream into the inactive slot or the
+    C6, and the image checked whole (`esp_image_verify`) before anything can
+    boot it. `device/moy_ota.py` is its Settings face and the identity. The
+    recovery floor's `update` word drives it with no VM (`update` checks,
+    `update install` installs and restarts) over the network the WiFi driver
+    keeps in NVS from its last address.
   - **The OTA payload is the APP-PARTITION image, never the merged one.**
     `…_app.bin` is the payload; `…​.bin` is bootloader+table+app for a cable flash.
-    Handing the merged one to `esp32.Partition` writes a bootloader into an app
-    slot.
+    The merged one is refused at close: it does not verify as an app image.
   - **`step()` returns True WHILE MORE REMAINS** (`update_ui` drives it as
     `more = u.step()`). Inverting it writes a truncated image, whose `set_boot` is
     then correctly refused with `ESP_ERR_OTA_VALIDATE_FAILED`.
@@ -86,14 +92,15 @@ paths:
   - **The manifest is SIGNED, and the BOARD is inside the signature** (scheme
     `moybyte-ota-v2`): an OTA payload is an app-partition image, so another
     board's is a valid image that cannot boot, and a manifest naming one is
-    refused BY NAME before the signature is even checked. `ssl.wrap_socket` does
-    no certificate verification on device, which is *why* the manifest is signed
-    rather than trusted for arriving over TLS.
-  - **RSA, not Ed25519, purely for the verifier**: `pow(sig, 65537, n)` is a
-    handful of modular squarings MicroPython does in C, where pure-Python curve
-    arithmetic would take seconds. **Signing needs the `release` extra; verifying
-    needs nothing**, which is what lets the security-critical half be tested in
-    ordinary CI (`tests/test_ota_signing.py`, `tests/test_moy_ota.py`).
+    refused BY NAME before the signature is even checked. The kernel's TLS
+    verifies no certificate, which is *why* the manifest is signed rather than
+    trusted for arriving over TLS.
+  - **RSA, not Ed25519**: the verifier is seventeen Montgomery
+    multiplications in `moy_ota.c`, and `moy_ota.verify_sig` is the same
+    arithmetic in Python for the host's tools and the wasm tier. **Signing
+    needs the `release` extra; verifying needs nothing**, which is what lets the
+    security-critical half be tested in ordinary CI (`tests/test_ota_signing.py`,
+    `tests/test_moy_ota.py`).
   - **The url and label are deliberately UNSIGNED** so a classroom can mirror the
     official manifest to a LAN host and rewrite the url — the bytes stay pinned
     by the signed hash. **Policy:** a manifest from a BAKED channel url must be
@@ -103,7 +110,8 @@ paths:
     checked, so a tampered official manifest cannot be laundered through a local
     host. A build with no baked key cannot require one.
   - **`OTA_PUBLIC_KEYS` is a TUPLE so a key can be ROTATED** — publish an image
-    trusted by the old key and signed by the new.
+    trusted by the old key and signed by the new. The kernel's copy is
+    `moy_ota.c`'s `KEYS_HEX`; `tests/test_ota_signing.py` holds the two equal.
   - **`ensure_online()` must WAIT for the link** after autoconnect
     (`ONLINE_WAIT_MS`): `DeviceWifi.connect()` polls briefly and gives up, and a
     saved network that comes up just after reads as "wifi offline". The wait

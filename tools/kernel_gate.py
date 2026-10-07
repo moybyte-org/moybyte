@@ -2,7 +2,7 @@
 """The kernel's sprint-2 gate on glass (docs/kernel_spine_2026-10.md §10), on
 one console board.
 
-    tools/kernel_gate.py BOARD [crash] [hang] [floor] [safe]    # default: all four
+    tools/kernel_gate.py BOARD [crash] [hang] [floor] [safe] [update]   # default: all five
 
 Each step reboots the board, which a suite's held-open session cannot survive
 on an attach-only board, so the gate is a tool that opens the port per step:
@@ -20,6 +20,10 @@ on an attach-only board, so the gate is a tool that opens the port per step:
          `retry` brings the console back with mode 'start'.
   safe   the same floor, then `safe`: mode 'safe' with no wallpaper cart, then
          a reboot to an ordinary start.
+  update the console joins its network (the driver keeps it), then the same
+         floor, then `update`: with no VM the kernel's updater reaches this
+         build's channel and reads what it offers (`KERNEL update offers`),
+         installing nothing; `retry` brings the console back.
 
 One line a step, exit 1 on the first failure. The board is left at its
 launcher, on an ordinary start, whatever happened.
@@ -38,7 +42,8 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import board as bd  # noqa: E402
 
-STEPS = ("crash", "hang", "floor", "safe")
+STEPS = ("crash", "hang", "floor", "safe", "update")
+OFFER = re.compile(r"KERNEL update (offers version=\d+ channel=\w* size=\d+|none published)")
 REPORT = re.compile(r"KERNEL recovery reason=(\w+) sel=(\w+) crc=([0-9a-f]{8})")
 CHOICES = ("RETRY", "SAFE", "REPL")
 
@@ -184,6 +189,23 @@ def step_safe(name, dirs):
     return "SAFE -> safe, wallpaper %s; rebooted to start" % wp
 
 
+def step_update(name, dirs):
+    online, = _vals(name, dirs, "(ws.wifi_hold('update'), ws.updater.ensure_online(), "
+                                "__import__('moy_net').wifi_status()[2], "
+                                "ws.wifi_release('update'))[2]")
+    if not online:
+        raise GateError("%s: the console did not join its network" % name)
+    _to_floor(name, dirs)
+    got = _send(name, dirs, "update", secs=45.0)
+    said = [ln for ln in got if ln.startswith("KERNEL update")]
+    _send(name, dirs, "retry")
+    bd.wait_for_desk(name, dirs, quiet=True)
+    offer = [m.group(1) for m in map(OFFER.search, said) if m]
+    if not offer:
+        raise GateError("%s: the floor's update said %r" % (name, said))
+    return "no VM: %s" % offer[0]
+
+
 def _reboot(name, dirs):
     bd.main([name, "reboot"])
 
@@ -201,9 +223,9 @@ def main(argv=None):
         ap.error("%s is not a console board" % name)
     bad = [s for s in steps if s not in STEPS]
     if bad:
-        ap.error("unknown step %s (crash, hang, floor, safe)" % ", ".join(bad))
+        ap.error("unknown step %s (crash, hang, floor, safe, update)" % ", ".join(bad))
     run = {"crash": step_crash, "hang": step_hang, "floor": step_floor,
-           "safe": step_safe}
+           "safe": step_safe, "update": step_update}
     for s in steps:
         try:
             print("%-6s %-10s ok  %s" % (s, name, run[s](name, dirs)))

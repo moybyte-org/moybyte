@@ -76,7 +76,11 @@ EXFAT_SRAM = 568
 # which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
 # And the WiFi driver's reconnect timer handle and backoff, 5 bytes of .bss by
 # the link map, 2026-10-07 (the esp_timer it creates is the heap's).
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5
+# And the updater's (native/moy_net/moy_ota.c: the pointers to its state, its
+# clients, its keys and the trusted set, which are PSRAM), its slot's position
+# (moy_net_port.c) and the WiFi driver's kept-network flag, 38 bytes of .bss by
+# the objects' sizes, 2026-10-07.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
@@ -257,6 +261,10 @@ def test_state_snapshot_has_the_fullscreen_tier_shape(board):
 
 def test_wifi_status_is_readable(board):
     on_glass.wifi_status_is_readable(board)
+
+
+def test_the_kernel_verifies_a_signed_manifest(board):
+    on_glass.the_kernel_verifies_a_signed_manifest(board)
 
 
 def test_wifi_is_off_at_rest(board):

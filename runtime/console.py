@@ -715,7 +715,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._updater = None
         self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
         # The network Get Carts fetches carts through (#124, runtime/cart_index.py):
-        # `online()` and `open(url)`, injected by a board (device/cart_net.py),
+        # `online()` and `open(url)`, injected by a board (device/wire_links.CartNet),
         # by the live simulator (host_app.HostCartNet) and by a browser page
         # that keeps its own carts (firmware/web_runner/carts_link.py). None
         # elsewhere -- the app then says this console has no way to fetch.

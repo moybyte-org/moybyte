@@ -42,19 +42,17 @@ def _load_moy_ota():
     return moy_ota
 
 
-class _FakePart:
-    """The inactive slot. info() is (type, subtype, addr, size, label, encrypted)."""
+def _stage():
+    """A verified image in the host's slot (native/moy_net/moy_ota.c over
+    runtime/net_binding.py), what a download or a copied image leaves for
+    finish() to activate."""
+    from runtime import net_binding as nb
 
-    def __init__(self, label="ota_1", size=4 * 1024 * 1024):
-        self.label = label
-        self.size = size
-        self.booted = False
-
-    def info(self):
-        return (0, 0x10, 0x20000, self.size, self.label, False)
-
-    def set_boot(self):
-        self.booted = True
+    nb.ota_cancel()
+    nb._slot_reset()
+    nb.ota_slot_begin(64)
+    assert nb.ota_slot_write(b"\xe9" + b"\x00" * 63)
+    assert nb.ota_slot_close()
 
 
 def _updater(tmp_path, running="ota_0"):
@@ -223,82 +221,40 @@ def test_the_two_confirm_gates_are_not_the_same_gate(tmp_path):
 # -- the pending marker ------------------------------------------------------
 
 def test_finish_records_the_slot_it_pointed_the_bootloader_at(tmp_path):
+    from runtime import net_binding as nb
+
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     assert u.finish() is True
-    assert u._part.booted is True
+    assert nb._slot()[1] == "ota_1"
     rec = json.loads(Path(u._pending_path()).read_text(encoding="utf-8"))
     assert rec["slot"] == "ota_1"          # where we are going
     assert rec["version"] == mod.FIRMWARE_VERSION   # what we are leaving
     assert rec["channel"] == mod.FIRMWARE_CHANNEL
 
 
-def test_finish_discards_the_payload_it_downloaded(tmp_path):
-    """A consumed download is deleted, or a board that stages on internal flash
-    can only ever update once.
-
-    Measured on the Guition's first OTA (2026-08-20): its vfs is 6.2MB, the
-    payload 3.5MB, and with the console's own ~2MB of files the NEXT download
-    had 0.6MB to land in. That board stages internally on purpose (a card pulled
-    mid-stream must not kill an update), so the payload has to go, not move."""
-    mod, u = _updater(tmp_path)
-    payload = Path(u.update_dir) / mod.DOWNLOAD_NAME
-    payload.write_bytes(b"\xe9" + b"\x00" * 64)
-    u.path = str(payload)                  # what begin_download/begin() leave behind
-    u._part = _FakePart("ota_1")
-
-    assert u.finish() is True
-    assert not payload.exists(), "the consumed download was hoarded"
-    # the marker is NOT collateral: it has to survive into the next boot
-    assert Path(u._pending_path()).exists()
-
-
 def test_finish_never_deletes_an_image_the_owner_supplied(tmp_path):
-    """The Phase-2 path installs whatever .bin is on the card. That file is the
-    owner's -- possibly the only copy, possibly meant for the other board -- so
-    only DOWNLOAD_NAME is ever removed."""
+    """The copied-image path installs whatever .bin is in the update directory.
+    That file is the owner's -- possibly the only copy, possibly meant for the
+    other board -- so finish() never removes it."""
     mod, u = _updater(tmp_path)
     theirs = Path(u.update_dir) / "moybyte_tdeck_app.bin"
     theirs.write_bytes(b"\xe9" + b"\x00" * 64)
     u.path = str(theirs)
-    u._part = _FakePart("ota_1")
+    _stage()
 
     assert u.finish() is True
     assert theirs.exists(), "an owner-supplied image was deleted"
 
 
-def test_a_failed_discard_still_boots_the_new_image(tmp_path):
-    """Cleanup is housekeeping. The image is already in the slot and the
-    bootloader already points at it, so an unlink that cannot happen must not
-    turn a good install into a failure.
-
-    The unremovable payload here is a DIRECTORY under the name (os.remove
-    raises EISDIR): a real card can refuse for its own reasons, and this
-    reproduces the refusal through the public API rather than by stubbing
-    _with_sd, which _arm_pending also rides -- stubbing it tests the marker,
-    not the cleanup."""
-    mod, u = _updater(tmp_path)
-    stuck = Path(u.update_dir) / mod.DOWNLOAD_NAME
-    stuck.mkdir()
-    u.path = str(stuck)
-    u._part = _FakePart("ota_1")
-
-    assert u.finish() is True
-    assert Path(u._pending_path()).exists()
-    assert stuck.exists()
-
-
 def test_a_refused_set_boot_records_nothing(tmp_path):
-    # ESP_ERR_OTA_VALIDATE_FAILED on a truncated image: the bootloader was never
-    # repointed, so there is no pending update and the next boot must say nothing.
+    # Nothing verified to activate (a truncated image the slot refused): the
+    # bootloader was never repointed, so there is no pending update and the
+    # next boot must say nothing.
+    from runtime import net_binding as nb
+
+    nb.ota_cancel()
     mod, u = _updater(tmp_path)
-    part = _FakePart("ota_1")
-
-    def _boom():
-        raise OSError("ESP_ERR_OTA_VALIDATE_FAILED")
-
-    part.set_boot = _boom
-    u._part = part
     assert u.finish() is False
     assert not Path(u._pending_path()).exists()
     assert u.boot_check() is None
@@ -306,7 +262,7 @@ def test_a_refused_set_boot_records_nothing(tmp_path):
 
 def test_the_new_image_running_reads_as_success(tmp_path):
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     u.finish()
     # ...reboot: the board comes up on the slot we asked for.
     u._running_label = lambda: "ota_1"
@@ -317,7 +273,7 @@ def test_the_new_image_running_reads_as_success(tmp_path):
 
 def test_the_old_image_running_reads_as_a_rollback(tmp_path):
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     u.finish()
     # ...reboot: the bootloader gave up on ota_1 and put ota_0 back.
     kind, _text = u.boot_check()
@@ -347,7 +303,7 @@ def test_the_marker_survives_the_report_and_dies_at_the_confirm(tmp_path):
     worse failure would be the silent one.
     """
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     u.finish()
     u._running_label = lambda: "ota_1"
     assert u.boot_check()[0] == "ok"
@@ -386,7 +342,7 @@ def test_an_ordinary_boot_never_touches_the_card(tmp_path):
 
 def test_a_boot_that_did_see_a_marker_clears_it(tmp_path):
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     u.finish()
     assert u.boot_check()[0] == "rolled_back"
     for _ in range(moy_ota_health.HEALTHY_LOOPS):
@@ -398,7 +354,7 @@ def test_a_marker_write_failure_never_costs_the_update(tmp_path):
     # Best-effort by design: losing the verdict is a missing message; failing the
     # install because the message could not be written would be a real regression.
     mod, u = _updater(tmp_path)
-    u._part = _FakePart("ota_1")
+    _stage()
     u.update_dir = "/nonexistent-device-path/update"
     assert u.finish() is True
 
@@ -569,6 +525,16 @@ def test_dismissing_the_verdict_leaves_the_screen(tmp_path):
 
 # -- a channel with nothing on it yet ----------------------------------------
 
+def _check_against(u, status):
+    from ota_http import Server
+
+    u._wifi = object()
+    u.wifi_online = lambda: True
+    with Server({"/latest-p4.json": (status, {}, b"")}) as srv:
+        u._manifest_source = lambda ch=None: (srv.url("/latest-p4.json"), False)
+        return u.check_online("stable")
+
+
 def test_a_missing_manifest_is_not_a_failed_update(tmp_path):
     """404 on the manifest means the channel has nothing for this board yet.
 
@@ -578,16 +544,7 @@ def test_a_missing_manifest_is_not_a_failed_update(tmp_path):
     blames the kid's console for a file missing from a server.
     """
     mod, u = _updater(tmp_path)
-    u._wifi = object()
-    u.wifi_online = lambda: True
-    u._manifest_source = lambda ch=None: ("https://h/latest-p4.json", False)
-
-    def _get(url, limit=8192):
-        u.error = "http 404"
-        return None
-
-    u._http_get_text = _get
-    assert u.check_online("stable") is None
+    assert _check_against(u, 404) is None
     assert u.absent is True
     assert u.error is None, "a missing manifest is not an error"
 
@@ -596,16 +553,7 @@ def test_a_real_http_failure_stays_an_error(tmp_path):
     # 500/403 are not "nothing published" -- something is actually wrong, and
     # silently calling that "nothing new" would hide a broken release.
     mod, u = _updater(tmp_path)
-    u._wifi = object()
-    u.wifi_online = lambda: True
-    u._manifest_source = lambda ch=None: ("https://h/latest-p4.json", False)
-
-    def _get(url, limit=8192):
-        u.error = "http 500"
-        return None
-
-    u._http_get_text = _get
-    assert u.check_online("stable") is None
+    assert _check_against(u, 500) is None
     assert u.absent is False
     assert u.error == "http 500"
 

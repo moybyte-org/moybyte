@@ -826,80 +826,46 @@ def test_the_host_transport_reports_a_missing_file_and_a_cut_body(tmp_path, serv
     _untouched(root, "jet.moy")
 
 
-class _Sock:
-    def __init__(self, data):
-        self.data, self.pos, self.closed, self.sent = data, 0, False, b""
-
-    def settimeout(self, _):
-        pass
-
-    def connect(self, _):
-        pass
-
-    def write(self, b):
-        self.sent += b
-
-    def read(self, n=1):
-        chunk = self.data[self.pos:self.pos + n]
-        self.pos += len(chunk)
-        return chunk
-
-    def readinto(self, buf):
-        chunk = self.read(len(buf))
-        buf[:len(chunk)] = chunk
-        return len(chunk)
-
-    def close(self):
-        self.closed = True
-
-
-class _SockNet:
-    AF_INET, SOCK_STREAM, IPPROTO_TCP = 2, 1, 6
-
-    def __init__(self, *responses):
-        self.responses = list(responses)
-        self.made = []
-
-    def getaddrinfo(self, host, port):
-        return [(2, 1, 6, "", (host, port))]
-
-    def socket(self, *a):
-        s = _Sock(self.responses.pop(0))
-        self.made.append(s)
-        return s
-
-    def wrap_socket(self, sock, server_hostname=None):
-        return sock
-
-
-def test_the_board_transport_rides_the_ota_client(monkeypatch):
-    import moy_ota
+def _board_net(wifi=None, dial=None):
+    """The board's transport (device/wire_links.CartNet) over the kernel's
+    client, the C run by runtime/net_binding.py."""
+    from runtime import net_binding
+    net_binding.install()
     sys.path.insert(0, str(ROOT / "device"))
-    import cart_net
-    body = b"x" * 5000
-    net = _SockNet(b"HTTP/1.1 302 Found\r\nLocation: https://cdn.example/a\r\n\r\n",
-                   b"HTTP/1.1 200 OK\r\nContent-Length: 5000\r\n\r\n" + body)
-    monkeypatch.setitem(sys.modules, "socket", net)
-    monkeypatch.setitem(sys.modules, "ssl", net)
-    resp = cart_net.CartNet(wifi=None).open("https://github.com/o/r/releases/a")
-    assert (resp.status, resp.length) == (200, 5000)
-    got = bytearray()
-    buf = bytearray(1024)
-    while True:
-        n = resp.readinto(memoryview(buf))
-        if not n:
-            break
-        got += buf[:n]
-    assert bytes(got) == body
-    assert b"User-Agent: moybyte-carts" in net.made[1].sent
-    resp.close()
-    assert net.made[0].closed and net.made[1].closed
-    assert moy_ota.http_open is not None
+    import wire_links
+    return wire_links, wire_links.CartNet(wifi, dial)
+
+
+def test_the_board_transport_follows_a_redirect_to_the_release(tmp_path, server):
+    root = _store(tmp_path)
+    repo = Repo(server.base + "/repo")
+    repo.add("jet")
+    server.serve(repo, "/repo")
+    cart = _cart(repo, "jet")
+    real = cart["assets"][0]["url"][len(server.base):]
+    server.routes["/dl/jet.zip"] = ("redirect", real)
+    cart["assets"][0]["url"] = server.base + "/dl/jet.zip"
+    job = _install(cart, root, _board_net()[1])
+    assert job.error is None, job.detail
+
+
+def test_the_board_transport_reports_a_missing_file_and_a_cut_body(tmp_path, server):
+    root = _store(tmp_path)
+    repo = Repo(server.base + "/repo")
+    repo.add("jet")
+    server.serve(repo, "/repo")
+    cart = _cart(repo, "jet")
+    path = cart["assets"][0]["url"][len(server.base):]
+    data = server.routes.pop(path)
+    net = _board_net()[1]
+    assert _install(cart, root, net).error == ci.UNREACHABLE
+    server.routes[path] = ("cut", data, len(data) // 3)
+    assert _install(cart, root, net).error == ci.STOPPED
+    _untouched(root, "jet.moy")
 
 
 def test_the_board_transport_waits_for_a_late_link(monkeypatch):
-    sys.path.insert(0, str(ROOT / "device"))
-    import cart_net
+    wire_links, _net = _board_net()
     import moy_ota
     state = {"up": False, "dials": 0}
 
@@ -916,9 +882,9 @@ def test_the_board_transport_waits_for_a_late_link(monkeypatch):
         state["up"] = True
         return online()
     monkeypatch.setattr(moy_ota, "wait_online", fake_wait)
-    assert cart_net.CartNet(Wifi(), dial).online() is True
+    assert wire_links.CartNet(Wifi(), dial).online() is True
     assert state["dials"] == 1
-    assert cart_net.CartNet(None).online() is False
+    assert wire_links.CartNet(None).online() is False
 
 
 def test_the_board_transport_says_when_its_internal_ram_is_spent(monkeypatch):
@@ -926,8 +892,7 @@ def test_the_board_transport_says_when_its_internal_ram_is_spent(monkeypatch):
     crypto's DMA and the radio's buffers come from -- against TLS_SRAM_MIN;
     a console that cannot report its heap is never called out of memory."""
     import types
-    sys.path.insert(0, str(ROOT / "device"))
-    import cart_net
+    cart_net, _net = _board_net()
     asked = []
     regions = []
 

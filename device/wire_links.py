@@ -9,7 +9,7 @@ a notice rather than a boot failure when it cannot be built:
 
   ws.link / ws.net     the ESP-NOW link, INERT until a multiplayer cart arms it
   ws.updater           the OTA updater over the board's store gate
-  ws.cart_net          Get Carts' network
+  ws.cart_net          Get Carts' network (`CartNet`, over the kernel's client)
   ws.c6_updater        the companion radio's updater, where there is one
   ws.reboot_hook       the system menu's real reset
   ws.webhost           the baked web console, constructed and not started
@@ -27,12 +27,108 @@ def make_wifi(store, root):
 
 
 def c6_updater_class():
-    """The companion C6's updater class, or None on a build without it."""
+    """The companion C6's updater class, or None on a build without a C6."""
     try:
-        from moy_c6_update import C6Updater
-    except ImportError:            # a build without the C6 updater: no Settings row
+        import moy_c6              # the radio this updater talks to
+        from moy_ota import C6Updater
+    except ImportError:            # no C6 on this board: no Settings row
         return None
+    del moy_c6
     return C6Updater
+
+
+# Internal DMA-capable RAM (MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) a download
+# needs. The radio's driver takes RADIO_SRAM of it the first time it comes up
+# (its receive buffers, kept after the lease powers it down), and a TLS
+# download then takes TLS_SRAM_MIN more a record at a time: with mbedtls's
+# state in PSRAM (each console's sdkconfig.board), what is left internal is the
+# hardware AES/SHA's DMA bounce, 4.7 KB at its peak on the Guition S3
+# (2026-10-07, a 786 KB GitHub download). The driver measured 41 KB on the
+# T-Deck (2026-10-02). Short of the first, the radio does not come up
+# ("Expected to init 16 rx buffer, actual is 0"); short of the second, a
+# download stops partway. Only a restart gives the memory back.
+TLS_SRAM_MIN = 8192
+RADIO_SRAM = 41 * 1024
+_INTERNAL_DMA = 0x808
+CARTS_AGENT = "moybyte-carts"
+
+
+class _Response:
+    """One GET's body over the kernel's client (moy_net.http_*): `status`,
+    `length` (None when the server sent none), `readinto` and `close`."""
+
+    def __init__(self, handle, status, length):
+        self.handle = handle
+        self.status = status
+        self.length = length or None
+
+    def readinto(self, buf):
+        if self.handle is None:
+            return 0
+        import moy_net
+        return moy_net.http_readinto(self.handle, buf)
+
+    def close(self):
+        h, self.handle = self.handle, None
+        if h is not None:
+            import moy_net
+            moy_net.http_close(h)
+
+
+class CartNet:
+    """`ws.cart_net` on a board: Get Carts' transport (runtime/cart_index.py),
+    the shape the host's urllib one has (runtime/host_app.py).
+
+        online()   dial the saved network if the link is down and WAIT for it
+                   (moy_ota.wait_online)
+        open(url)  GET with redirects followed (a GitHub release asset is a
+                   302 to its CDN)
+
+    and `out_of_memory()`, which cart_index asks after a fetch fails, so a
+    console whose internal RAM is spent says so. TLS verifies no certificate:
+    cart_index checks every file against its index's sha256. The radio is the
+    app's lease (`ws.wifi_hold("carts")`), never this."""
+
+    def __init__(self, wifi, autoconnect=None):
+        self.wifi = wifi
+        self.autoconnect = autoconnect
+
+    def _up(self):
+        try:
+            return bool(self.wifi.status()[0])
+        except Exception:  # noqa: BLE001 -- a radio that cannot say is down
+            return False
+
+    def online(self):
+        if self.wifi is None:
+            return False
+        import moy_ota
+        return moy_ota.wait_online(self._up, None if self.autoconnect is None
+                                   else self._dial)
+
+    def _dial(self):
+        return self.autoconnect(self.wifi)
+
+    def open(self, url):
+        import moy_net
+        h, status, length = moy_net.http_open(url, CARTS_AGENT)
+        return _Response(h, status, length)
+
+    def out_of_memory(self):
+        """True when internal DMA-capable RAM is short of what a download
+        needs: TLS_SRAM_MIN, and RADIO_SRAM besides while the radio's driver
+        has not come up yet this boot."""
+        try:
+            import esp32
+            free = sum(h[1] for h in esp32.idf_heap_info(_INTERNAL_DMA))
+        except Exception:  # noqa: BLE001 -- a console that cannot say is not out
+            return False
+        need = TLS_SRAM_MIN
+        if not getattr(self.wifi, "driver_up", True):
+            need += RADIO_SRAM
+        print("Moybyte carts: internal RAM free %d after the failure, a download "
+              "needs %d" % (free, need))
+        return free < need
 
 
 def wire_links(ws, link_id, update_dir, carts_root, with_sd, c6_updater, log,
@@ -70,12 +166,8 @@ def wire_links(ws, link_id, update_dir, carts_root, with_sd, c6_updater, log,
         except Exception as exc:  # noqa: BLE001
             log("boot", "OTA wifi wiring failed: %s" % exc)
     # The network Get Carts fetches indexes and carts through (#124), over the
-    # OTA's HTTP client; the app takes its own radio lease.
-    try:
-        from cart_net import make_cart_net
-        ws.cart_net = make_cart_net(ws.wifi, autoconnect_wifi)
-    except Exception as exc:  # noqa: BLE001 -- no store network is a notice in the app
-        log("boot", "Get Carts network unavailable: %s" % exc)
+    # kernel's client; the app takes its own radio lease.
+    ws.cart_net = CartNet(ws.wifi, autoconnect_wifi)
     if c6_updater is not None and ws.updater is not None:
         # The companion radio's own updater (#7/#58): Settings -> UPGRADE C6
         # RADIO. Failure is a missing Settings row, never a boot failure.

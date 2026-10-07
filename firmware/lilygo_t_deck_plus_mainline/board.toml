@@ -548,21 +548,17 @@ and this board's is dead under the desktop, so a status nobody recorded is a
 status nobody can get."""
 
 [[modules.device.group]]
-files = ["moy_ota.py", "moy_ota_health.py", "moy_http.py"]
+files = ["moy_ota.py", "moy_ota_health.py"]
 why = """
 STAGE 6. The OTA updater (#53). Board-agnostic: its update directory is a
 constructor argument and its identity comes from the generated `_ota_build.py`.
 The partition table is byte-for-byte the deleted fork build's, so boards that
 took their last update from it install this build over plain OTA.
-The updater's two halves are their own files: moy_ota_health.py, the boot
-verdict and the rollback confirm the frame loop drives, and moy_http.py, the
-streaming HTTP(S) client the updater and Get Carts fetch through."""
+The updater itself is the kernel's (native/moy_net/moy_ota.c: the streaming
+HTTP(S) client the updater and Get Carts fetch through, the signature, the
+slot); moy_ota.py is its Settings face and the identity, moy_ota_health.py the
+boot verdict and the rollback confirm the frame loop drives."""
 
-[[modules.device.group]]
-files = ["cart_net.py"]
-why = """
-Get Carts' network (#124): the app's transport for indexes and carts, over
-moy_http's client and moy_ota's wait for the link."""
 
 [[modules.device.group]]
 files = ["moy_webhost.py"]

@@ -1746,6 +1746,37 @@ for i in range(moy_ota_health.HEALTHY_SERVES + 10):
     if h.confirm_when_serving(i != 7):
         serve.append(i)
 say("serving", serve, "valid", h.valid)
+
+# -- the updater's pure half and its slot (native/moy_net/moy_ota.c) -----------
+M = ('{"board": "tdeck", "channel": "unstable", "version": 1785665581, '
+     '"size": 4292512, "sha256": "AB%s", "c6": {"version": 2, "size": 9, '
+     '"sha256": "cd"}}' % ("01" * 31))
+say("canon", moy_net.ota_canonical(M))
+say("canon6", moy_net.ota_canonical_c6(M))
+say("canon-bad", moy_net.ota_canonical('{"version": "x"}'), moy_net.ota_canonical("[1]"))
+KEY = (("c" + "5" * 511, 65537),)
+for text, board, need in ((M, "tdeck", True), (M, "tdeck", False), (M, "p4", False),
+                          (M[:-1] + ', "sig": "00"}', None, False), ("nope", None, False)):
+    say("judge", moy_net.ota_judge(text, board, need, KEY))
+say("judge6", moy_net.ota_judge_c6(M, True, KEY), moy_net.ota_judge_c6(M, False, KEY))
+say("verify", moy_net.ota_verify(b"x", "zz", KEY), moy_net.ota_verify(b"x", None))
+for size, data in ((0, b""), (8, b"\x00" * 8), (8, b"\xe9" * 4), (8, b"\xe9" * 8)):
+    try:
+        moy_net.ota_slot_begin(size)
+        ok = moy_net.ota_slot_write(data) and moy_net.ota_slot_close()
+    except ValueError as e:
+        ok = "raised " + str(e)
+    say("slot", size, ok, moy_net.ota_state()[0], moy_net.ota_state()[6])
+say("activate", moy_net.ota_activate(), moy_net.ota_activate())
+for url in ("ftp://x/y", "http://h:0/"):
+    try:
+        moy_net.http_open(url, "t")
+    except OSError as e:
+        say("open", url, e.args[0])
+try:
+    moy_net.ota_dl_begin("", 1, "", 1)
+except ValueError as e:
+    say("dl", e)
 print("DRIVER_DONE")
 '''
 
@@ -1762,6 +1793,24 @@ confirm [119] valid 1 marker 0
 boot ota_0 None None
 confirm [119] valid 1 marker 0
 serving [307] valid 1
+canon b'moybyte-ota-v2\\ntdeck\\nunstable\\n1785665581\\n4292512\\nab01010101010101010101010101010101010101010101010101010101010101'
+canon6 b'moybyte-c6-v1\\ntdeck\\n2\\n9\\ncd'
+canon-bad None None
+judge unsigned update
+judge None
+judge wrong board
+judge bad signature
+judge bad manifest
+judge6 unsigned c6 image None
+verify False False
+slot 0 raised empty image 0 empty image
+slot 8 False 4 not an app image
+slot 8 False 4 size 4/8
+slot 8 True 2 
+activate ota_1 None
+open ftp://x/y 22
+open http://h:0/ 22
+dl manifest has no url
 """
 
 SESSION_DRIVER = r'''import sys
