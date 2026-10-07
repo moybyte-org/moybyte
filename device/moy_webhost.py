@@ -89,7 +89,7 @@ asking, on the reasoning that reading changes nothing. It reads a child's
 work off their console, which is the part that reasoning left out.
 
 A GET carries its pin the only place a GET can, `?pin=NNNN` -- which is why
-`moy_webserver.parse_request` stopped stripping query strings: it was spending
+`moy_net.parse_request` stopped stripping query strings: it was spending
 the credential before any handler saw it. A gated GET without the right pin is
 403 with `{"error":"pin"}`, deliberately distinguishable from the transport's
 plain-text 404, because the PAGE branches on it: worker.js stops its boot and

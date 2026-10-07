@@ -114,7 +114,7 @@ else:
     sys.path.insert(0, _repo)
     sys.path.insert(0, os.path.join(_repo, "device"))   # flat sibling imports
     import moy_webhost                                  # noqa: E402
-    from moy_webserver import query_param as _query      # noqa: E402
+    from runtime.moy_net import query_param as _query    # noqa: E402
     from moy_webserver import WEB_SEND_TIMEOUT          # noqa: E402
     # The twin's piece of a body over `--one-link`. A board's is 1 KB
     # (moy_webserver's CHUNK); this is bigger only so a loopback link moves a
