@@ -177,8 +177,9 @@ is a **global epoch bump** — the frame gate folds the flag into one
 safe, never wrong, merely unprofitable. Per-surface attribution is **opt-in
 per site**, added only where audited, as a `touch` on the surface's kernel
 handle, so shared `*_layer.py` code stays S3-safe. The audit
-is a named Phase A deliverable — there are **~179 raw `_dirty = True` sites
-across 22 files** (grep-verified; ui_damage §0.2.7 counted the same), several
+is a named Phase A deliverable — there are **about 135 raw `_dirty = True`
+sites across 31 files** (2026-10-07; the 2026-07 review counted ~179 across
+22, as ui_damage §0.2.7 had), several
 firing from async contexts (wifi scan, bluetooth, OTA `download_step`) where
 "the active surface" would mis-attribute. "Mechanical migration" is hereby
 retracted; un-audited sites stay global-epoch forever and are still correct.
@@ -804,12 +805,30 @@ against its own last-seen. The Python leaf `runtime/surface.py` is deleted by
 the glass pass; the WM mints sids from its registry keys as before and holds
 handles instead of objects.
 
-**Why now.** Two reasons, both the kernel's. The compositors cross to C in the
-same pass, and §4's per-buffer N-deep last-seen is theirs to keep — the P4's
-streak and sig fields fold in C, which is what §7's ledger already says. And
-from sprint 4 a Lua or wasm cart runs with no VM on the S3 boards: L9 still
-holds for it — content-dirty exactly on the frames it renders — and there is
-no Python left to say so, so the producer signal has to be a kernel call.
+**Why now, and at what scope.** The registry is inert on every shipping tier
+today: no canvas defines `begin_surface`, `wm_windowed`'s `_recording` is
+never set, and nothing reads a gen — the P4 desk's retained caches and streaks
+and the launcher's are the Python window managers' and stay theirs until §9's
+Phase C, which the kernel plan schedules as sprint 7 (the window managers).
+So the glass pass ports the registry as it is, inert, plus the epoch fold, and
+no kernel compositor reads a gen in sprint 3; §7's ledger rows that fold
+fields "in C" mean Phase C, as they always did, and that phase is where the
+per-buffer N-deep last-seen and the frame gate's predicate are re-expressed
+natively. Two things make the move worth doing now rather than then. From
+sprint 4 a Lua or wasm cart runs with no VM on the S3 boards: L9 still holds
+for it — content-dirty exactly on the frames it renders — and there is no
+Python left to say so, so the producer signal has to be a kernel call. And
+from sprint 3 the kernel draws frames of its own under a Python window
+manager (the idle wake, the screensaver, the parked screen, the floor's
+text), which needs a signal in the other direction:
+
+    uint32_t moy_surface_kernel_epoch(void);   // moved by every frame the kernel drew itself
+
+The frame gate reads it as one more leg — the kernel epoch moved since this
+console's last painted frame counts as dirty for `RETAINED_FRAMES` frames, so
+every retained buffer is repainted — which keeps the idle wake's rule (the
+panel never holds a stale frame after a wake) with no change to the WMs'
+caches.
 
 **What does not change.** §1's model and §2's laws, L1 to L10; the three
 producer classes of §3; the compositor contract of §4, `end_frame` included;
