@@ -457,7 +457,7 @@ after normalising those three, so the ONE-STRING rule, the self-terminating
 smokes and the keep-the-REPL guards now land once instead of four times."""
 
 [[modules.device.group]]
-files = ["desktop_spine.py", "wire_input.py", "wire_links.py", "wire_audio.py"]
+files = ["desktop_spine.py", "wire_input.py", "wire_links.py"]
 why = """
 The console desktop's boot spine: ONE `build_desktop` (the boot order and the
 service set every console board wires) and ONE frame loop over it, with the
@@ -469,8 +469,8 @@ canvas, inputs, keyboard, store, constants -- and takes the rest.
 
 The spine constructs each subsystem through its provider: wire_input.py (the
 pointer, the keyboards' start, a BLE-keyboard input state) and wire_links.py
-(the radio link, the updaters, Get Carts' network, the web console) and
-wire_audio.py (the codec's place on the kernel's I2C bus, at boot)."""
+(the radio link, the updaters, Get Carts' network, the web console). Audio has
+no provider: the kernel's moy_audio needs no construction at boot."""
 
 [[modules.device.group]]
 files = ["mem_census.py"]

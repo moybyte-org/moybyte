@@ -228,12 +228,6 @@ static mp_obj_t out_tuple(int st) {
     return mp_obj_new_tuple(2, t);
 }
 
-// attach() -> bool: the codec's place on the kernel's I2C bus, at boot.
-static mp_obj_t mod_attach(void) {
-    return mp_obj_new_bool(moy_aud_out_attach() == MOY_AUD_OK);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_attach_obj, mod_attach);
-
 static mp_obj_t mod_start(void) {
     return out_tuple(moy_aud_out_start());
 }
@@ -359,7 +353,6 @@ static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rate),         MP_ROM_PTR(&mod_rate_obj) },
     { MP_ROM_QSTR(MP_QSTR_render),       MP_ROM_PTR(&mod_render_obj) },
     { MP_ROM_QSTR(MP_QSTR_dump),         MP_ROM_PTR(&mod_dump_obj) },
-    { MP_ROM_QSTR(MP_QSTR_attach),       MP_ROM_PTR(&mod_attach_obj) },
     { MP_ROM_QSTR(MP_QSTR_start),        MP_ROM_PTR(&mod_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_out),          MP_ROM_PTR(&mod_out_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats),        MP_ROM_PTR(&mod_stats_obj) },

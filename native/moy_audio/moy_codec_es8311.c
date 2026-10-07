@@ -46,11 +46,6 @@ static const uint8_t SEQ[][2] = {
     {0x37, 0x08}, {0x32, 0xBF}, {0x31, 0x00},
 };
 
-int moy_es8311_attach(void) {
-    uint8_t dev;
-    return moy_bus_add(MOY_ES8311_ADDR, 50, &dev) == MOY_BUS_OK ? 0 : -1;
-}
-
 const char *moy_es8311_init(int rate) {
     (void)rate;                 // MCLK is 256 x whatever the channel runs at
     uint8_t dev, hi = 0, lo = 0;

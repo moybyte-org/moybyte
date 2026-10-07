@@ -39,8 +39,6 @@ _SPINES = {
                                   "make_input"),
     "import wire_input": (ROOT / "device" / "wire_input.py", "start_keyboards"),
     "import wire_links": (ROOT / "device" / "wire_links.py", "wire_links"),
-    "from wire_audio import": (ROOT / "device" / "wire_audio.py",
-                               "audio_factory"),
 }
 
 

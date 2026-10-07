@@ -10,10 +10,6 @@
 
 #define MOY_ES8311_ADDR 0x18
 
-// The codec's address on the kernel's bus, which installs the bus if nothing
-// has: 0, or -1 when the bus refuses it.
-int moy_es8311_attach(void);
-
 // The register sequence, each register read back after it: NULL when the codec
 // answered and took it, else what went wrong. What the read-back found is
 // moy_es8311_check's.

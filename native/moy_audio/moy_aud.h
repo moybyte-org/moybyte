@@ -159,11 +159,6 @@ enum {
     MOY_AUD_OUT_ABSENT = 3,     // this build has no output (host, browser)
 };
 int moy_aud_out_start(void);    // idempotent; the state it leaves
-// At boot, before any other driver opens the I2C bus: the codec's address on
-// the kernel's bus (moy_bus.h), so the bus is the kernel's whoever opens it
-// next. Nothing else: no register is written until the first start. OK on a
-// board without a codec.
-int moy_aud_out_attach(void);
 int moy_aud_out_state(const char **why);
 // The AUDIORATE line (the speaker's rate against the mix's, the seam, the
 // ring's misses, the lock and the trigger latency, and a compiled cart's stream

@@ -265,9 +265,6 @@ class Module:
         self._d.moy_aud_render(cbuf, n)
         return n
 
-    def attach(self):
-        return True
-
     def dump(self, h, buf, n):
         n = min(int(n), len(buf) // 2)
         cbuf = (self._C.c_char * (2 * n)).from_buffer(buf)

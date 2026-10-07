@@ -142,8 +142,8 @@ made here, not promised.
    service, the ESP-NOW link, the updater, Get Carts' transport and the webhost
    itself, and `device/p4_desktop.py` constructs the BLE keyboard, the input
    state and the C6 updater. Each subsystem's construction moves to a provider
-   module — `device/wire_input.py`, `device/wire_audio.py`,
-   `device/wire_links.py` — that `build_desktop` and the P4 desk call by one
+   module — `device/wire_input.py`, `wire_audio.py` (deleted by the audio
+   pass: the kernel's audio needs no construction), `device/wire_links.py` — that `build_desktop` and the P4 desk call by one
    name each, so the spine composes and no pass edits it. The T-Deck's
    `moy_runtime.py` loses the poller thread, the keyboard and trackball
    construction and the text-mode hook to
@@ -670,9 +670,9 @@ deleted, as the stop inventory has it; a board whose output cannot start has
 no audio, reported as absence (`moy_audio.out()`: state and reason). The I2S
 channel, its DMA ring, the mutex and the feeder task start at the first focus
 of a session, never at boot (the perf review's point: their internal memory is
-paid with the first cart today and stays paid then). At boot the board's
-provider (`device/wire_audio.py`) only puts the codec's address on the
-kernel's I2C bus, before the touch driver opens it. `device/moycore_glue.py`'s
+paid with the first cart today and stays paid then). Nothing of audio runs
+at boot: the codec's address goes on the kernel's I2C bus (`moy_bus_add`) at
+the first start, on the bus the touch driver brought up. `device/moycore_glue.py`'s
 drain calls the run's session, one kernel call per queued op, in the queue's
 order (`runtime/lua_ext.py`'s `drain_audio`). The console's level is the
 settings row: the boot reads it into the kernel and `vol` writes both. The
@@ -693,8 +693,11 @@ and the browser's per-frame pull is `runtime/audio_session.py`'s `PcmPump`
   `MOY_AUDIO_CODEC_ES8311` beside `MOY_AUDIO_I2S_*` and `MOY_AUDIO_PA_GPIO` in
   `mpconfigboard.h`, the way the DSI panel is a define, on the kernel's I2C bus
   beside the touch controller; both P4s take `moy_audio` in board.toml. The
-  codec's address goes on the bus at boot, before the touch driver opens it
-  (`device/wire_audio.py`), and its registers are written at the first start.
+  codec is added to the bus and its registers written at the first start,
+  never at boot: a codec added at boot moved the I2C driver's allocation and
+  split the Waveshare's largest internal block (2026-10-07; the measurement
+  is #224's). It needs the bus to be the kernel's (`moy_bus`), which it is
+  once the input pass's touch drivers are on it.
   The feeder task's design is the T-Deck's and is not re-measured against a
   per-frame feed, because the per-frame feed is deleted. The Guition S3 stays
   denied: its amp and pins are unverified, and verifying them is a bring-up,

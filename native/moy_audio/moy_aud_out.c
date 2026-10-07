@@ -271,14 +271,6 @@ int moy_aud_out_state(const char **why) {
     return s_state;
 }
 
-int moy_aud_out_attach(void) {
-#if MOY_AUDIO_CODEC_ES8311
-    return moy_es8311_attach() ? MOY_AUD_BAD : MOY_AUD_OK;
-#else
-    return MOY_AUD_OK;
-#endif
-}
-
 #else   // no output in this build: the host, the browser, a board with no pins
 
 static int s_state = MOY_AUD_OUT_ABSENT;
@@ -328,10 +320,6 @@ void moy_aud_out_shallow(int on) {
 
 int moy_aud_out_start(void) {
     return s_state;
-}
-
-int moy_aud_out_attach(void) {
-    return MOY_AUD_OK;
 }
 
 int moy_aud_out_state(const char **why) {

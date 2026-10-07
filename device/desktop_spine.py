@@ -52,7 +52,6 @@ from frame_loop import (FrameLoop, FramePump, IdleBlank, OtaHealth,
                         PerfSampler, apply_touch, poll_link, poll_webhost)
 from device_api import make_api
 from device_canvas import DeviceCanvas, _LayerComp, _owner_h
-import wire_audio
 import wire_input
 import wire_links
 from mem_census import mark as _census
@@ -193,7 +192,6 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         # kernel; the WM composites it onto the system canvas.
         game = DeviceCanvas(_LayerComp(game_wh[0], game_wh[1], gfx))
     _census("splash")
-    wire_audio.attach(lambda m: log("audio", m))   # before the touch opens the bus
     touch, pointer = wire_input.wire_pointer(inp, inputs, sys_canvas.w,
                                              sys_canvas.h)
     _census("inputs")
