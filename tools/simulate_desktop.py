@@ -340,10 +340,10 @@ def main():
     ws = host_app.build_workstation(args.save_dir, sys_size=sys_size,
                                     font_scale=args.font_scale,
                                     windowed=args.windowed)
-    # Live windowed run -> stream real audio to the speakers (#16). Headless /
-    # scripted runs keep the silent FakeAudio so they stay deterministic + device-free.
+    # Live windowed run -> the mix to the speakers (#16). Headless / scripted
+    # runs pull it and discard it, so they stay deterministic + device-free.
     if not args.demo and args.script is None:
-        ws.make_audio = host_app.make_sdl_audio
+        ws.audio_out = host_app.SdlPump()
         # Live run -> report the desktop's REAL WiFi connection/IP (your PC is online),
         # so network features test against real Python sockets. Headless keeps FakeWifi.
         ws.wifi = host_app.make_host_wifi(host_app.moy_carts, ws.carts_root)

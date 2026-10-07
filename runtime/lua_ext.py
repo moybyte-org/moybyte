@@ -3,7 +3,7 @@
 #   -- the frame seam, once for both Lua tiers  snap_shared, sync_view, drain_audio
 #   snap_shared                       player two, the pointer and the clock into the cart
 #   sync_view                         apply the cart's view() to the console
-#   drain_audio                       play the queued audio through the console's engine
+#   drain_audio                       play the queued audio on the run's session
 #   -- what NOT to register on top of libmoy's table  rows_blob, install_handles
 #   install_handles                   register the int-handle half of the prelude
 """What both Lua tiers share -- the object-verb glue, and the frame seam.
@@ -179,31 +179,29 @@ def sync_view(ws, view, last):
     return view
 
 
-def drain_audio(ns, ops, queue):
-    """Play the queued audio commands through the SAME make_api closures a
-    Python cart uses.
-
-    Deliberate: sfx/music semantics (bank sync, the volume model the Settings
-    surface reads, the diag triggers) stay in one place, and what the crossing
-    deletes is the per-CALL trip, not the behaviour. Order is preserved because
-    the queue is a queue. `queue` yields rows indexable as (op, a, b).
+def drain_audio(au, ops, queue):
+    """Play the queued audio commands on the run's session `au` (an
+    audio_session.AudioSession, or None: no audio), one kernel call per
+    command, in the queue's order. `queue` yields rows indexable as (op, a, b).
     """
+    if au is None:
+        return
     sfx, music, beep, music_stop, sound_stop, volume = ops
     for row in queue:
         op, a, b = row[0], row[1], row[2]
         try:
             if op == sfx:
-                ns["sfx"](a, None if b < 0 else b)
+                au.sfx(a, None if b < 0 else b)
             elif op == music:
-                ns["music"](a, bool(b))
+                au.music(a, bool(b))
             elif op == beep:
-                ns["beep"](a, b / 1000.0)
+                au.beep(a, b / 1000.0)
             elif op == music_stop:
-                ns["music_stop"]()
+                au.music_stop()
             elif op == sound_stop:
-                ns["sound_stop"](None if a < 0 else a)
+                au.sound_stop(None if a < 0 else a)
             elif op == volume:
-                ns["volume"](a)
+                au.volume(a)
         except Exception:  # noqa: BLE001 -- one bad command is not the frame
             pass
 

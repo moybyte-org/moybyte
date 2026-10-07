@@ -32,7 +32,7 @@ WHAT COUNTS AS AN INJECTION. Two sites, because the wiring lives in two:
     is not thereby a board that has an FPS preference the others lack.
 
   * an argument to `console.wire_workstation_core`, which is where `make_api`,
-    `wifi`, `make_audio`, `runtimes`, `keyboard`, `pointer`, `can_manage`
+    `wifi`, `audio_out`, `runtimes`, `keyboard`, `pointer`, `can_manage`
     and the store actually land on `ws`. That mapping is DERIVED from
     `wire_workstation_core`'s own body rather than restated here, so a new
     parameter that assigns to `ws` is picked up without editing this file --
@@ -100,7 +100,8 @@ INJECTED = True     # the target wires this service; anything else must be a
 # what is actually being given up.
 SERVICES = {
     "make_api": "the cart API factory: what a cart's globals are built from",
-    "make_audio": "the audio backend the AudioBank model is played through",
+    "audio_out": "the per-frame pull of the kernel's audio mix, where no feeder "
+                 "task plays it to a speaker",
     "runtimes": "the .moy cart engines by manifest runtime (#67 lua -> moycore, "
                 "wasm -> moycore over moy_wasm)",
     "make_game_canvas": "per-run canvas factory for a cart with a small raster",
@@ -140,7 +141,9 @@ SERVICES = {
 WIRING = {
     "tdeck": {
         "make_api": INJECTED,
-        "make_audio": INJECTED,
+        "audio_out": "the kernel's feeder task plays the mix to the speaker "
+                     "(native/moy_audio/moy_aud_out.c); nothing pulls it from "
+                     "Python",
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -177,10 +180,9 @@ WIRING = {
     },
     "p4": {
         "make_api": INJECTED,
-        "make_audio": "no ES8311 bring-up on this board yet (#82). The codec is "
-                      "on the hardware and unwired; until it is, injecting a "
-                      "backend would give the console an audio path that plays "
-                      "into nothing",
+        "audio_out": "the kernel's feeder task plays the mix to the speaker "
+                     "(native/moy_audio/moy_aud_out.c); nothing pulls it from "
+                     "Python",
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -217,10 +219,9 @@ WIRING = {
     # the same three absences for the same reasons.
     "guition_p4": {
         "make_api": INJECTED,
-        "make_audio": "no ES8311 bring-up on this board yet (#82). The codec is "
-                      "on the hardware and unwired; until it is, injecting a "
-                      "backend would give the console an audio path that plays "
-                      "into nothing",
+        "audio_out": "the kernel's feeder task plays the mix to the speaker "
+                     "(native/moy_audio/moy_aud_out.c); nothing pulls it from "
+                     "Python",
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -255,11 +256,9 @@ WIRING = {
     },
     "guition": {
         "make_api": INJECTED,
-        "make_audio": "audio is stage 5 of this board's bring-up and OPEN: "
-                      "which amp (if any) is populated and on which I2S pins "
-                      "is unverified, and its board.toml denies the moy_audio "
-                      "usermod for the same reason. Wire both together at "
-                      "stage 5",
+        "audio_out": "no audio: stage 5 of this board's bring-up is OPEN "
+                     "(which amp, which I2S pins), and its board.toml denies "
+                     "the moy_audio usermod for the same reason",
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -297,7 +296,7 @@ WIRING = {
     },
     "host": {
         "make_api": INJECTED,
-        "make_audio": INJECTED,
+        "audio_out": INJECTED,
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -347,7 +346,7 @@ WIRING = {
     },
     "web": {
         "make_api": INJECTED,
-        "make_audio": INJECTED,
+        "audio_out": INJECTED,
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -639,7 +638,7 @@ def test_the_extractor_still_sees_the_wiring():
     """A parse that finds nothing would make every assertion below vacuous --
     and this file reads four sources by path, any of which can be moved."""
     pmap = _wire_param_map()
-    for expect in ("make_api", "wifi", "make_audio", "runtimes", "keyboard"):
+    for expect in ("make_api", "wifi", "audio_out", "runtimes", "keyboard"):
         assert expect in pmap, "wire_workstation_core no longer wires %s" % expect
     for target in TARGETS:
         found = injections(target)

@@ -108,8 +108,8 @@ The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
 file = "host_api.py"
 kind = "host-only"
 why  = """
-The HOST side of the cart-API backend: FakeAudio/FakeWifi (the recordable
-service fakes) and ConsoleDriver (the sim/web per-frame driver). Since
+The HOST side of the cart-API backend: FakeWifi (the recordable service
+fake) and ConsoleDriver (the sim/web per-frame driver). Since
 2026-08-17 make_api itself is ONE body in the shared `cart_api.py` (which DOES
 stage here) and host_api merely re-exports it -- so this denial is no longer
 about duplicate backends, it is about dead weight: nothing on a board
@@ -159,8 +159,8 @@ the `moy_lua`/`moycore` usermods this board compiles in."""
 file = "audio_binding.py"
 kind = "host-only"
 why  = """
-ctypes over the vendored libmoy synth (#97 / moycore stage 0). The board's
-synth is the `moy_audio` usermod, bound by `device_audio.py`."""
+`moy_audio` for CPython: ctypes over native/moy_audio and the vendored libmoy
+synth. Here `moy_audio` is the usermod, the kernel's audio."""
 
 [[modules.shared.deny]]
 file = "native_build.py"
@@ -459,7 +459,7 @@ after normalising those three, so the ONE-STRING rule, the self-terminating
 smokes and the keep-the-REPL guards now land once instead of four times."""
 
 [[modules.device.group]]
-files = ["desktop_spine.py", "wire_input.py", "wire_links.py"]
+files = ["desktop_spine.py", "wire_input.py", "wire_links.py", "wire_audio.py"]
 why = """
 The console desktop's boot spine: ONE `build_desktop` (the boot order and the
 service set every console board wires) and ONE frame loop over it, with the
@@ -471,7 +471,8 @@ canvas, inputs, keyboard, store, constants -- and takes the rest.
 
 The spine constructs each subsystem through its provider: wire_input.py (the
 pointer, the keyboards' start, a BLE-keyboard input state) and wire_links.py
-(the radio link, the updaters, Get Carts' network, the web console)."""
+(the radio link, the updaters, Get Carts' network, the web console) and
+wire_audio.py (the codec's place on the kernel's I2C bus, at boot)."""
 
 [[modules.device.group]]
 files = ["mem_census.py"]
@@ -509,16 +510,6 @@ Its legacy `machine.SDCard` paths (`mount_sd`, `with_sd`, `read_first_project_so
 are dead on this build -- they reach `tdeck_display.get_spi_bus` and
 `machine.SPI.Bus`, neither of which exists on mainline -- but both lookups are
 already inside `try/except` there, and nothing on this board calls them."""
-
-[[modules.device.group]]
-files = ["device_audio.py", "wire_audio.py"]
-why = """
-STAGE 5 (audio). The I2S backend over the vendored libmoy synth (#97): pushes
-the cart's bank into the `moy_audio` usermod once and forwards the six SPEC §8.2
-verbs. Board-agnostic apart from three pin constants that are this exact board's
-(BCK 7 / WS 5 / DOUT 6), and it falls back to `machine.I2S` when the usermod is
-missing, which is what makes it stageable before stage 5 compiles one in.
-wire_audio.py is audio's provider: the factory the board hands the spine."""
 
 [[modules.device.group]]
 files = ["device_api.py", "moycore_glue.py"]

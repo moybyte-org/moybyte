@@ -88,7 +88,7 @@ The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
 file = "host_api.py"
 kind = "host-only"
 why  = """
-The HOST side of the cart-API backend: FakeAudio/FakeWifi + ConsoleDriver.
+The HOST side of the cart-API backend: FakeWifi + ConsoleDriver.
 make_api itself is ONE body in the shared `cart_api.py` (which DOES stage
 here); nothing on a board constructs a fake service or a sim driver."""
 
@@ -129,9 +129,9 @@ why  = "ctypes over libmoy's Lua binding. This board compiles moy_lua + moycore 
 file = "audio_binding.py"
 kind = "host-only"
 why  = """
-ctypes over the vendored libmoy synth (#97). Audio on this board is an OPEN
-stage-5 question (see the moy_audio native denial); when it lands it will be
-the usermod, not this."""
+`moy_audio` for CPython: ctypes over native/moy_audio. Audio on this board is
+an OPEN stage-5 question (see the moy_audio native denial); when it lands it
+will be the usermod, not this."""
 
 [[modules.shared.deny]]
 file = "native_build.py"
@@ -314,8 +314,8 @@ why = """
 Audio is stage 5 and OPEN: the board family ships a speaker header, but which
 amp (if any) is populated and on which I2S pins is unverified -- the ESPHome
 definition drives no audio. moy_audio's synth half is board-agnostic; its I2S
-plumbing wants pins nobody has measured. device_audio.py is likewise absent
-from this board's device allowlist. Flip both together at stage 5."""
+plumbing wants pins nobody has measured (mpconfigboard.h names none). Take it
+at stage 5 with the pins in mpconfigboard.h."""
 
 [[native.shared.take]]
 module = "moy_wasm"
@@ -373,7 +373,6 @@ the touch part is an AXS15231 on its own shared driver below -- `gt911.py`
 DOES stage, but only for the `HeldPoint` that driver imports, never for its
 GT911 register map, see that group's why), no `moybyte_sd.py` (the card has
 a host of its own: `card_store.py`, see the moy_sd native denial), no
-`device_audio.py` (stage 5, see moy_audio), no
 `device_diag.py`/`moybyte_diag.py` (the T-Deck's offline diag ring exists
 because that board's serial RX was dead for months; this board boots with a
 live dev channel, so it starts with the P4's print-to-serial arrangement and
@@ -398,7 +397,7 @@ after normalising those three, so the ONE-STRING rule, the self-terminating
 smokes and the keep-the-REPL guards now land once instead of four times."""
 
 [[modules.device.group]]
-files = ["desktop_spine.py", "wire_input.py", "wire_links.py"]
+files = ["desktop_spine.py", "wire_input.py", "wire_links.py", "wire_audio.py"]
 why = """
 The console desktop's boot spine: ONE `build_desktop` (the boot order and the
 service set every console board wires) and ONE frame loop over it, with the
@@ -410,7 +409,8 @@ canvas, inputs, keyboard, store, constants -- and takes the rest.
 
 The spine constructs each subsystem through its provider: wire_input.py (the
 pointer, the keyboards' start, a BLE-keyboard input state) and wire_links.py
-(the radio link, the updaters, Get Carts' network, the web console)."""
+(the radio link, the updaters, Get Carts' network, the web console) and
+wire_audio.py (the codec's place on the kernel's I2C bus, at boot)."""
 
 [[modules.device.group]]
 files = ["card_store.py"]

@@ -765,121 +765,101 @@ def test_native_moy_audio_is_vendored_libmoy():
     """The device synth is not ours: libmoy is vendored into
     native/moy_audio/libmoy/ and COMPILED IN, so the boards are conformant by
     construction. The vendoring is checked by hash in
-    tests/test_libmoy_vendor.py; what this pins is that the module is a
-    BINDING -- every verb forwarded, no synth of its own -- and that both
-    build systems compile the vendored source."""
+    tests/test_libmoy_vendor.py; what this pins is that the kernel's audio
+    (moy_aud.c) drives libmoy's verbs and carries no synth of its own, that the
+    binding is a binding, and that both build systems compile the vendored
+    source."""
+    aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
     c = (NATIVE / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
     cmake = (NATIVE / "moy_audio" / "micropython.cmake").read_text(encoding="utf-8")
     mk = (NATIVE / "moy_audio" / "micropython.mk").read_text(encoding="utf-8")
 
     assert "MP_REGISTER_MODULE(MP_QSTR_moy_audio" in c
-    assert '#include "moy_audio.h"' in c
+    assert '#include "moy_audio.h"' in aud
     for fn in ("moy_bank_parse(", "moy_audio_init(", "moy_audio_render(",
                "moy_audio_sfx(", "moy_audio_beep(", "moy_audio_music(",
-               "moy_audio_music_stop(", "moy_audio_sound_stop(",
-               "moy_audio_volume("):
-        assert fn in c, fn
-    # ...and it does NOT carry a synth of its own. These are the giveaways of the
-    # reimplementation this replaced; if one comes back, the boards have two
-    # synths again and only one of them is the spec. Checked against the CODE
-    # only -- the header comment names them all, explaining what went away.
-    code = "\n".join(ln for ln in c.splitlines()
-                     if not ln.lstrip().startswith("//"))
-    for gone in ("moy_sample_wave", "moy_mix_block", "moy_advance_step",
-                 "voice_set", "voice_read", "active_mask", "set_master"):
-        assert gone not in code, gone
+               "moy_audio_music_stop(", "moy_audio_sound_stop("):
+        assert fn in aud, fn
+    # ...and no synth of its own: the giveaways of the reimplementation this
+    # replaced. If one comes back, the boards have two synths again and only
+    # one of them is the spec.
+    for src in (aud, c):
+        code = "\n".join(ln for ln in src.splitlines()
+                         if not ln.lstrip().startswith("//"))
+        for gone in ("moy_sample_wave", "moy_mix_block", "moy_advance_step",
+                     "voice_set", "voice_read", "active_mask", "set_master"):
+            assert gone not in code, gone
+    # The binding converts arguments; the libmoy calls are moy_aud.c's.
+    assert "moy_audio_render(" not in c and "moy_bank_parse(" not in c
 
-    # Both build systems compile the vendored source alongside the binding:
-    # cmake for the boards, the .mk for ports/unix (how the binding is tested off
-    # hardware) and the wasm runner.
-    assert "libmoy/moy_audio.c" in cmake
+    assert "libmoy/moy_audio.c" in cmake and "moy_aud.c" in cmake
     assert "target_link_libraries(usermod INTERFACE usermod_moy_audio)" in cmake
-    assert "libmoy/moy_audio.c" in mk
+    assert "libmoy/moy_audio.c" in mk and "moy_aud.c" in mk
     assert "SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/modmoy_audio.c" in mk
 
 
-def test_web_runner_audio_forwards_to_libmoy():
-    """The wasm runner loads the SAME native module (its build.sh stages
-    native/moy_audio and the module ships its own micropython.mk), so the
-    browser's synth is libmoy too -- one audible behaviour across every target.
-    Pin the forwarding, and that no per-frame marshalling came back."""
+def test_web_runner_audio_pulls_the_kernels_mix():
+    """The wasm runner builds the SAME module (its build.sh stages
+    native/moy_audio, which ships its own micropython.mk), so the browser's
+    synth is libmoy too -- one audible behaviour across every target. The page
+    pulls the kernel's mix once a frame; no per-frame marshalling came back."""
     web = Path("firmware/web_runner")
     boot = (web / "web_boot.py").read_text(encoding="utf-8")
     build = (web / "build.sh").read_text(encoding="utf-8")
     assert "native/moy_audio" in build
-    # The module carries its own Makefile fragment; the runner must not be
-    # copying a second, drifting copy over it.
     assert not (web / "moy_audio_micropython.mk").exists()
     assert "moy_audio_micropython.mk" not in build
-    assert "self._ka.bank_load(" in boot
-    assert "self._ka.render(buf, n)" in boot
-    assert "def is_active(self):" in boot
-    for gone in (".voice_set(", ".voice_read(", "._advance_music("):
+    assert "class _RunnerPump(PcmPump):" in boot
+    assert "na.render(buf, n)" in boot
+    assert "audio_out=_RunnerPump()" in boot
+    for gone in (".voice_set(", ".voice_read(", "._advance_music(", "bank_load("):
         assert gone not in boot, gone
 
 
-def test_native_moy_audio_core1_task_wired():
-    """The I2S feed is a dedicated native C task PINNED TO CORE 1 that owns the
-    IDF i2s_std channel and feeds it continuously, decoupled from rendering:
-    core 0 (the MicroPython VM) cannot run Python on core 1, only a pure-C task
-    can. C-side facts no host test reaches; the Python DeviceAudio half is
-    executed in tests/test_device_audio.py."""
-    c = (NATIVE / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
+def test_the_feeder_task_is_pinned_lazy_and_chunked():
+    """The I2S feed is a native C task PINNED TO CORE 1 that owns the IDF
+    i2s_std channel and feeds it continuously, decoupled from the frame: the VM
+    cannot run Python there, only a pure-C task can. It is created at the
+    first focus of a session (moy_aud_focus -> moy_aud_out_start), never at
+    boot, and renders in chunks, so a verb waits tens of microseconds, not a
+    block. C-side facts no host test reaches; the mix itself is executed by
+    tests/test_audio_session.py."""
+    out = (NATIVE / "moy_audio" / "moy_aud_out.c").read_text(encoding="utf-8")
+    aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
 
-    assert "xTaskCreatePinnedToCore(" in c
-    assert "moy_audio_task" in c            # the core-1 feeder task body
-    assert "1 /* core 1 */" in c            # pinned to core 1 (the last argument)
-    # The task owns the IDF i2s_std channel (separate from machine.I2S) + writes it.
-    assert "i2s_new_channel(" in c
-    assert "i2s_channel_init_std_mode(" in c
-    assert "i2s_channel_write(" in c
-    # The one engine struct is mutex-protected (core 0 calls verbs, core 1
-    # renders): a torn read is NOT acceptable (a momentary glitch is).
-    assert "xSemaphoreCreateMutex(" in c
-    assert "xSemaphoreTake(" in c
-    assert "xSemaphoreGive(" in c
-    # The task renders in CHUNKS, dropping the lock between them, so a verb call
-    # from core 0 waits tens of microseconds rather than a whole 32 ms block.
-    assert "MOY_MIX_CHUNK" in c
-    assert "off += MOY_MIX_CHUNK" in c
-    # The core-1 task must NEVER call into the MicroPython runtime (no MP heap or
-    # GIL from core 1) -- it only touches libmoy's plain-C state.
-    assert "moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK)" in c
-    # MP control surface for the task: start (returns False -> fallback) and stop.
-    for fn in ("mod_audio_start", "mod_audio_stop", "mod_running"):
-        assert fn in c, fn
-    for name in ("MP_QSTR_audio_start", "MP_QSTR_audio_stop", "MP_QSTR_running",
-                 "MP_QSTR_bank_load", "MP_QSTR_active", "MP_QSTR_volume"):
-        assert name in c, name
+    assert "xTaskCreatePinnedToCore(feeder" in out
+    assert "&s_task, 1)" in out                 # core 1, the last argument
+    for fn in ("i2s_new_channel(", "i2s_channel_init_std_mode(",
+               "i2s_channel_write(", "xSemaphoreCreateMutex(",
+               "xSemaphoreTake(", "xSemaphoreGive("):
+        assert fn in out, fn
+    assert "off += MIX_CHUNK" in out
+    assert "moy_aud_render(block + off, MIX_CHUNK)" in out
+    # The lazy start: only the first focus of a live session reaches it.
+    focus = aud[aud.index("int moy_aud_focus("):]
+    focus = focus[:focus.index("\n}\n")]
+    assert "moy_aud_out_start()" in focus
+    assert "moy_aud_out_start" not in aud.replace(focus, "")
+    # No fallback feed: a board whose output cannot start has no audio.
+    for gone in ("machine.I2S", "i2s.irq", "legacy"):
+        assert gone not in out, gone
 
 
-def test_core1_writeback_cannot_clobber_a_fresh_trigger():
+def test_the_mix_reads_one_copy_of_each_sessions_state():
     """THE OVERLAPPING-SFX DROP, and why it cannot recur (#41 -> #97).
 
-    The core-1 task used to mix from a SNAPSHOT of a shared voice array and
-    fold its advanced cursor back afterwards, which meant deciding whose copy
-    was authoritative. The first attempt used a content proxy (same nsteps +
-    first step + step_dur) that a same-SFX retrigger satisfies exactly, so
-    "sound 1 ends inside the block, sound 2 starts on the reused channel"
-    folded active=0 back over the fresh trigger: sound 2 never played and the
-    channel leaked as busy. That was fixed with an exact per-voice commit
-    counter.
-
-    The counter is gone now, because the thing it arbitrated is gone: libmoy
-    owns the state and there is exactly ONE copy of it, so there is no
-    snapshot, no fold-back and nothing to reconcile. This pins the structural
-    property rather than the fix -- if a second copy of the voice state ever
-    reappears, so does the bug, and this is where it should be argued out."""
-    c = (NATIVE / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
-    code = "\n".join(ln for ln in c.splitlines()
+    The feeder used to mix from a SNAPSHOT of a shared voice array and fold
+    its advanced cursor back afterwards, which meant deciding whose copy was
+    authoritative; a same-SFX retrigger fooled the first arbiter and sound 2
+    never played. libmoy owns the state and each session holds exactly ONE
+    copy of it, so there is no snapshot and no fold-back. If a second copy of
+    the voice state ever reappears, so does the bug."""
+    aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in aud.splitlines()
                      if not ln.lstrip().startswith("//"))
-
-    # No second copy of the engine state, so no reconciliation machinery.
     for gone in ("moy_voice_t", "snap[", "memcpy(snap", "->seq", "shared->"):
         assert gone not in code, gone
-    # The task renders straight out of the one engine struct, under the lock.
-    assert "moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK)" in code
-    assert code.count("static moy_audio  s_audio;") == 1
+    assert "moy_audio_render(r->a, out, n)" in code
 
 
 # -- one Lua runtime ---------------------------------------------------------------------

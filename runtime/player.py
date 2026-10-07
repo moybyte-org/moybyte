@@ -1007,16 +1007,19 @@ class Player:
             return False
 
     def _audio_diag(self):
+        """The kernel's audio as the run found it: the output's state, the
+        focused session's voices, the mix's verb count."""
         try:
-            au = getattr(self.ws, "audio", None)
-            fn = getattr(au, "diag_state", None)
-            if fn is None:
-                return "audio=na"
-            st = fn()
-            if st is None:
-                return "audio=na"
-            return ("audio(seq=%d core1=%d reused=%d running=%d mask=%d committed=%d)"
-                    % (st[0], st[1], st[2], st[3], st[4], st[5]))
+            from audio_session import native
+        except ImportError:
+            from runtime.audio_session import native
+        try:
+            na = native()
+            if na is None:
+                return "audio=none"
+            st = na.stats()
+            return ("audio(out=%d mask=%d verbs=%d under=%d)"
+                    % (na.out()[0], na.active(), st[3], st[2]))
         except Exception:  # noqa: BLE001
             return "audio=err"
 
@@ -1874,8 +1877,8 @@ class Player:
                 if render and self._draw:
                     self._draw()
                 _td = _ticks_us() if _perf else 0
-                if ws.audio is not None:
-                    ws.audio.tick(dt)      # advance/feed playback (#16)
+                if ws.audio_out is not None:
+                    ws.audio_out.tick(dt)  # pull the mix where no feeder task does (#16)
                 if _perf:
                     upd = _ticks_diff(_tm, _ts)           # cart _update -> game LOGIC
                     cart = _ticks_diff(_td, _tm) + bg     # cart _draw + backdrop -> RENDERING
@@ -1896,7 +1899,7 @@ class Player:
                             _dr = int(_sp[1] * 1000.0)
                             cart = _dr + bg
                             upd = upd - _dr if upd > _dr else 0
-                    aud = _ticks_diff(_ticks_us(), _td)   # audio.tick (mixer feed)
+                    aud = _ticks_diff(_ticks_us(), _td)   # audio_out.tick (the pull)
                     ws._pf_upd = upd
                     ws._pf_cart = cart
                     ws._pf_audio = aud

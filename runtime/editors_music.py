@@ -73,7 +73,7 @@ class MusicEditor(OpHistoryMixin):
     """Tracker/step-editor state over a cart's AudioBank (#50) -- the sound analogue
     of MapEditor/PaintEditor. Pure logic: no canvas, no synth, no I/O, so the *same*
     file backs the host console and the frozen device console. The console wraps it
-    with rendering + input + live preview (it drives the injected AudioEngine; this
+    with rendering + input + live preview (it plays on the cart's audio session; this
     core never makes sound itself).
 
     It edits the bank IN PLACE through two views the kid flips between:

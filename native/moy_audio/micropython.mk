@@ -1,30 +1,22 @@
-# Makefile-port glue for moy_audio -- the twin of micropython.cmake, used by the
-# ports that build with make rather than cmake:
+# Makefile-port glue for moy_audio -- the twin of micropython.cmake, for the
+# ports that build with make:
 #
-#   * ports/unix -- how the binding is TESTED without hardware. The module is
-#     VM-neutral C (py/obj.h + py/runtime.h), so the same code that drives the
-#     T-Deck's I2S runs under the desktop VM and can be compared sample by sample
-#     against libmoy itself (tests/test_audio_parity.py, the moy_gfx bench
-#     precedent in tools/bench_unix_mp.py).
+#   * ports/unix -- how the binding is TESTED without hardware: the same C runs
+#     under the desktop VM and is compared sample by sample against libmoy
+#     (tests/test_audio_parity.py) and traced (tests/test_semantic_traces.py).
 #   * the webassembly runner -- firmware/web_runner/build.sh stages this
-#     directory into .build/usermods/moy_audio and this fragment is what it
-#     builds. Without ESP_IDF_VERSION the I2S half and the core-1 task compile
-#     out and only the synth, a compiled cart's stream and the render entry
-#     remain, which is all the runner needs: it pulls finished PCM per frame
-#     and the page plays it.
-#
-# libmoy/moy_audio.c is SPEC.md 8 itself (see libmoy/UPSTREAM.md) -- it is
-# compiled in, not reimplemented, which is the whole point of the directory.
+#     directory and its siblings. Without ESP_PLATFORM moy_aud_out.c has no
+#     speaker: the page pulls render() once a frame.
 
 MOY_AUDIO_MOD_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/modmoy_audio.c
+SRC_USERMOD_LIB_C += $(MOY_AUDIO_MOD_DIR)/moy_aud.c $(MOY_AUDIO_MOD_DIR)/moy_aud_out.c
 SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/libmoy/moy_audio.c
 
-CFLAGS_USERMOD += -I$(MOY_AUDIO_MOD_DIR) -I$(MOY_AUDIO_MOD_DIR)/libmoy
+CFLAGS_USERMOD += -I$(MOY_AUDIO_MOD_DIR) -I$(MOY_AUDIO_MOD_DIR)/libmoy -I$(MOY_AUDIO_MOD_DIR)/../moy_spine
 
 # MOY_AUDIO_SND points moycore's compiled tier at this module's stream
-# (moy_audio_snd.h), as the cmake twin does for a board's speaker: in the web
-# runner a compiled cart's `snd` is mixed into what render() hands the page.
-# The unix build carries no wasm engine, so nothing there reads it.
+# (moy_audio_snd.h): in the web runner a compiled cart's `snd` is mixed into
+# what render() hands the page. The unix build carries no wasm engine.
 CFLAGS_USERMOD += -DMOY_AUDIO_SND=1

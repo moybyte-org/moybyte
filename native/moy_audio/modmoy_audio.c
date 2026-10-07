@@ -1,752 +1,374 @@
-// Moybyte moy_audio: the MicroPython binding for libmoy's SPEC.md 8 synth.
+// moy_audio: the MicroPython binding for the kernel's audio (moy_aud.h). One
+// call per verb, nothing held between calls: a session is an integer handle.
 //
-// WHAT THIS IS
-// A thin shim. The synthesizer is libmoy/moy_audio.c -- moy-spec's own C
-// implementation of SPEC.md 8, vendored verbatim (see libmoy/UPSTREAM.md) --
-// and this file does three things and no more: it hands that library a place to
-// put its bank, forwards the six 8.2 verbs from Python, and owns the I2S plumbing
-// libmoy deliberately has none of.
+// The synth is libmoy/ (vendored, libmoy/UPSTREAM.md), the sessions and the mix
+// moy_aud.c, the speaker moy_aud_out.c. This file converts arguments. A stale
+// handle raises ValueError; a full table MemoryError.
 //
-// libmoy owns the synth state -- bank, voices, both sequencers (#97). Do NOT
-// reintroduce a Python-side mirror of any of it: the old two-copy design
-// marshalled four voices' state across the boundary every frame, needed a
-// per-voice commit counter, and still dropped overlapping sfx. The bank
-// crosses ONCE per cart, as sounds.json text.
-//
-// THE TASK SPLIT (#41's crackle fix)
-//   the VM: calls the verbs. That is all. No per-sample work, no I2S.
-//   the feeder (a C task): renders blocks straight out of libmoy and writes
-//                    them to I2S, blocking on the DMA drain -- which is what
-//                    paces it to the audio clock, whatever the frame loop is
-//                    doing. It never touches the MicroPython heap or the GIL.
-// Both are on core 1, and so is a compiled cart's thread: the feeder runs above
-// them and takes what it renders out of the frame's time, which is why its work
-// per block has to stay small. A mutex guards the one moy_audio struct. The
-// task renders in small CHUNKS and releases between them, so a verb waits tens
-// of microseconds, not a whole block.
-//
-// FALLBACK: if the task or the I2S channel can't be created, audio_start()
-// returns False and DeviceAudio drives render() itself from the frame loop
-// (machine.I2S), with no rebuild needed.
-//
-// A COMPILED CART'S SAMPLES (moy_audio_snd.h) are mixed in, not given the
-// output: the task adds them after the synth in each chunk it renders, under
-// the same lock and the same master level. The cart may still call the §8
-// verbs, the console's own sounds keep playing over it, Settings' volume
-// reaches it, and the I2S channel never changes hands or rate -- the stream is
-// at the output's 22050, so the mix is one add per sample on core 1. The
-// fallback feed plays the synth only: a cart's stream opens only while the
-// task runs, and moycore drains it by the clock otherwise. A build with no
-// IDF has no task and no fallback feed: what pulls its audio is render()
-// (the web runner's, once a frame), so there the stream is mixed into what
-// render() returns, after the synth, the same way.
-//
-// While a cart streams, the task runs a SHALLOW pipeline: blocks of 128
-// frames into a ring of 4 x 128, about 29 ms from the task taking a frame to
-// the speaker, where the synth's own is 256-frame blocks into 6 x 512 (about
-// 150 ms). A cart's samples arrive with the picture that caused them, so
-// every millisecond of ring is a millisecond they play late. The task swaps
-// the channel itself, between blocks, when the stream's first frame arrives
-// and when it closes.
-//
-// The synth half is checked against libmoy under the desktop VM
-// (tests/test_audio_parity.py); I2S, the core-1 task and the PSRAM bank
-// placement were confirmed by ear on a T-Deck (2026-08-09, firmware 0.9).
+// The same binding builds for the desktop MicroPython (tests/test_audio_parity.py
+// drives it against libmoy sample for sample) and the browser, where nothing
+// feeds a speaker and the page pulls render() once a frame.
 
-#include <stdlib.h>
 #include <string.h>
+
 #include "py/obj.h"
 #include "py/runtime.h"
 
-// libmoy, vendored. This is the whole synthesizer.
+#include "moy_aud.h"
 #include "moy_audio.h"
-#include "moy_audio_snd.h"
 
-// ESP-IDF I2S + FreeRTOS exist only in the firmware build. Everything device-only
-// hides behind MOY_AUDIO_HAVE_IDF so the module still compiles (synth + render
-// entry, no core-1 task) for ports/unix and the webassembly runner -- the same
-// guard moy_sd uses.
-#ifdef ESP_IDF_VERSION
-#include "driver/i2s_std.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-// xTaskCreatePinnedToCore (the SMP core-affinity API) is in the IDF additions
-// header, not vanilla FreeRTOS task.h -- include it explicitly.
-#include "freertos/idf_additions.h"
-#include "freertos/semphr.h"
-#include "esp_heap_caps.h"
-#define MOY_AUDIO_HAVE_IDF 1
-#else
-#define MOY_AUDIO_HAVE_IDF 0
+#if defined(ESP_PLATFORM)
+#include "py/mpconfig.h"
+#endif
+#if defined(ESP_PLATFORM) && MOY_AUDIO_CODEC_ES8311
+#include "moy_codec_es8311.h"
 #endif
 
-// --- core-1 task tuning ---------------------------------------------------
-// Mix/write block: small enough that the task tops the DMA up continuously,
-// large enough that per-block overhead is negligible. 256 frames @ 8 kHz = 32 ms.
-#define MOY_BLOCK_FRAMES  256
-// ...and while a compiled cart streams (see the header).
-#define MOY_STREAM_BLOCK  128
-#define MOY_STREAM_DESC   4
-// How much the task renders per mutex acquisition. libmoy's render is a pure
-// function of its state, so a block can be produced in pieces with the lock
-// dropped between them; this bounds how long a verb call can be made to wait.
-// 32 frames is ~4 ms of audio and well under 100 us of mixing.
-#define MOY_MIX_CHUNK     32
-// I2S DMA ring: dma_desc_num * dma_frame_num frames buffered in hardware.
-// 6 * 256 = 1536 frames ~= 0.19 s @ 8 kHz -- a deep cushion the task keeps
-// topped, independent of the frame loop's jitter.
-#define MOY_DMA_DESC_NUM  6
-#define MOY_DMA_FRAME_NUM 512   /* 6x512 = ~140ms of hardware cushion at 22050
-                                   (was 256: ~190ms at the old 8000 rate) */
-// A finite (not portMAX_DELAY) write timeout means a stuck channel cannot wedge
-// the task forever -- it loops and retries.
-#define MOY_WRITE_TIMEOUT_MS 100
-
-// --- the one copy of the state --------------------------------------------
-// The bank is ~33 KB, so it is allocated rather than declared: on the S3 that
-// belongs in PSRAM (internal SRAM is contended -- the Lua allocator alone wants
-// a 48 KB floor there), and everywhere else a plain malloc. NOT m_malloc: this
-// must not live on the MicroPython GC heap, where a collection could move it
-// while the core-1 task is reading it through libmoy's `const moy_bank *`.
-static moy_bank  *s_bank = NULL;
-static moy_audio  s_audio;
-static int        s_rate = 8000;
-static int        s_inited = 0;
-
-#if MOY_AUDIO_HAVE_IDF
-static i2s_chan_handle_t s_tx_chan = NULL;
-static TaskHandle_t      s_task = NULL;
-static SemaphoreHandle_t s_mutex = NULL;
-static volatile int      s_running = 0;
-// Frames the I2S peripheral has actually ACCEPTED. The feeder blocks on the DMA
-// drain, so this counter advances at the hardware's true consumption rate --
-// divide it by wall-clock and you get the rate the speaker is really running at,
-// which is the one number that says whether playback speed matches the rate
-// libmoy synthesised for. Written only by the core-1 task, read by anyone.
-static volatile uint32_t s_frames_out = 0;
-// The two sides of the render->speaker seam (2026-08-10 tempo hunt): the
-// engine timeline advances by RENDERED frames; the speaker plays WRITTEN
-// frames. If rendered outruns written, something consumes engine time
-// whose output never reaches the DMA -- audibly fast playback that every
-// per-side counter calls correct.
-static volatile uint32_t s_frames_rendered = 0;   // by the core-1 task
-// The amp's pins, kept for the task to re-open the channel with, and the
-// pipeline it runs: 0 the synth's, 1 the shallow one a streaming cart gets.
-static int s_bck, s_ws, s_dout;
-static volatile int s_shallow_want = 0;
-static int s_shallow = 0;
-
-#endif
-
-// The compiled cart's stream: its ring is PSRAM, allocated the first time a
-// cart opens one and kept, and `s_pcm_on` says whether the task mixes it.
-static moy_stream s_pcm;
-static int16_t *s_pcm_ring = NULL;
-static int s_pcm_on = 0;
-
-// The Python-side half of that seam, and it lives OUTSIDE the IDF guard because
-// mod_render is what the host, the unix test build and the wasm runner call --
-// they have no core-1 task, so this is the only frame counter they have. It was
-// declared inside the guard when the tempo hunt added it (2026-08-10), which
-// left every non-IDF build referencing an undeclared symbol: a compile error
-// nobody saw until the web runner was next rebuilt (moycore stage 4).
-static volatile uint32_t s_frames_pyrender = 0;   // by mod_render (Python)
-
-// The lock is a no-op until the core-1 task exists; in the fallback and host
-// builds the MP thread is the only accessor.
-static inline void moy_lock(void) {
-#if MOY_AUDIO_HAVE_IDF
-    if (s_mutex != NULL) {
-        xSemaphoreTake(s_mutex, portMAX_DELAY);
+static mp_int_t check(int rc) {
+    switch (rc) {
+        case MOY_AUD_OK:
+        case MOY_AUD_BANK:
+            return rc;
+        case MOY_AUD_STALE:
+            mp_raise_ValueError(MP_ERROR_TEXT("stale audio handle"));
+        case MOY_AUD_FULL:
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("the audio table is full"));
+        case MOY_AUD_NOMEM:
+            mp_raise_type(&mp_type_MemoryError);
+        default:
+            mp_raise_ValueError(MP_ERROR_TEXT("audio: bad argument"));
     }
-#endif
 }
 
-static inline void moy_unlock(void) {
-#if MOY_AUDIO_HAVE_IDF
-    if (s_mutex != NULL) {
-        xSemaphoreGive(s_mutex);
-    }
-#endif
+static uint32_t h_of(mp_obj_t o) {
+    return (uint32_t)mp_obj_get_int_truncated(o);
 }
 
-// Bring the engine up on the (possibly empty) bank. Safe to call repeatedly.
-static void moy_engine_init_locked(void) {
-    int master = s_inited ? s_audio.master : 7;   // keep the user's volume
-    moy_audio_init(&s_audio, s_bank, s_rate);
-    s_audio.master = master;
-    s_inited = 1;
+static int opt_int(size_t n_args, const mp_obj_t *a, size_t i, int dflt) {
+    return (n_args > i && a[i] != mp_const_none) ? (int)mp_obj_get_int(a[i]) : dflt;
 }
 
-static int moy_ensure_bank(void) {
-    if (s_bank != NULL) {
-        return 1;
+// open(owner, bank=None) -> handle. The bank is sounds.json text; a refused
+// one leaves the session open on a silent bank (bank() says which).
+static mp_obj_t mod_open(size_t n_args, const mp_obj_t *a) {
+    uint32_t h = 0;
+    const char *text = NULL;
+    size_t n = 0;
+    if (n_args > 1 && a[1] != mp_const_none) {
+        text = mp_obj_str_get_data(a[1], &n);
     }
-#if MOY_AUDIO_HAVE_IDF
-    s_bank = heap_caps_malloc(sizeof(moy_bank), MALLOC_CAP_SPIRAM);
-    if (s_bank == NULL) {
-        s_bank = heap_caps_malloc(sizeof(moy_bank), MALLOC_CAP_DEFAULT);
-    }
-#else
-    s_bank = malloc(sizeof(moy_bank));
-#endif
-    if (s_bank == NULL) {
-        return 0;
-    }
-    memset(s_bank, 0, sizeof(moy_bank));
-    moy_engine_init_locked();
-    return 1;
+    check(moy_aud_open(&h, (uint32_t)mp_obj_get_int(a[0]), text, n));
+    return mp_obj_new_int_from_uint(h);
 }
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_open_obj, 1, 2, mod_open);
 
-// --- Python-facing API ----------------------------------------------------
-
-// bank_load(json) -> bool. Parse a cart's sounds.json into the engine's bank.
-// ONE crossing per cart -- the text the store already holds, handed to libmoy's
-// own parser, so the device reads exactly what every other libmoy host reads.
-// False means the JSON was malformed or exceeded libmoy's fixed capacities (64
-// sfx x 64 steps, 32 tracks x 64 rows); the bank is then zeroed and silent
-// rather than half-loaded, and the caller can say so.
-static mp_obj_t mod_bank_load(mp_obj_t json_obj) {
-    const char *json = mp_obj_str_get_str(json_obj);
-    int err;
-    if (!moy_ensure_bank()) {
-        return mp_const_false;
-    }
-    moy_lock();
-    err = moy_bank_parse(s_bank, json);
-    moy_engine_init_locked();       // rebind + reset; a new cart starts silent
-    moy_unlock();
-    return err ? mp_const_false : mp_const_true;
+// bank(h, json) -> bool: True when the bank took the text.
+static mp_obj_t mod_bank(mp_obj_t h, mp_obj_t text) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(text, &n);
+    return mp_obj_new_bool(check(moy_aud_bank(h_of(h), s, n)) == MOY_AUD_OK);
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_bank_load_obj, mod_bank_load);
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_bank_obj, mod_bank);
 
-// set_rate(hz). Before audio_start; the task reads it when it opens the channel.
-static mp_obj_t mod_set_rate(mp_obj_t rate_obj) {
-    int rate = (int)mp_obj_get_int(rate_obj);
-    if (rate <= 0) {
-        rate = 8000;
+static mp_obj_t mod_focus(mp_obj_t h) {
+    check(moy_aud_focus(h_of(h)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_focus_obj, mod_focus);
+
+static mp_obj_t mod_focused(void) {
+    return mp_obj_new_int_from_uint(moy_aud_focused());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_focused_obj, mod_focused);
+
+static mp_obj_t mod_close(mp_obj_t h) {
+    check(moy_aud_close(h_of(h)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_close_obj, mod_close);
+
+// -- SPEC.md 8.2, one entry per verb -----------------------------------------------
+
+static mp_obj_t mod_sfx(size_t n_args, const mp_obj_t *a) {
+    check(moy_aud_sfx(h_of(a[0]), (int)mp_obj_get_int(a[1]), opt_int(n_args, a, 2, -1)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sfx_obj, 2, 3, mod_sfx);
+
+static mp_obj_t mod_beep(size_t n_args, const mp_obj_t *a) {
+    float dur = n_args > 2 ? (float)mp_obj_get_float(a[2]) : 0.15f;
+    check(moy_aud_beep(h_of(a[0]), (float)mp_obj_get_float(a[1]), dur));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_beep_obj, 2, 3, mod_beep);
+
+static mp_obj_t mod_music(size_t n_args, const mp_obj_t *a) {
+    int loop = n_args > 2 ? (mp_obj_is_true(a[2]) ? 1 : 0) : 1;
+    check(moy_aud_music(h_of(a[0]), (int)mp_obj_get_int(a[1]), loop));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_music_obj, 2, 3, mod_music);
+
+static mp_obj_t mod_music_stop(mp_obj_t h) {
+    check(moy_aud_music_stop(h_of(h)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_music_stop_obj, mod_music_stop);
+
+static mp_obj_t mod_stop(size_t n_args, const mp_obj_t *a) {
+    check(moy_aud_stop(h_of(a[0]), opt_int(n_args, a, 1, -1)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_stop_obj, 1, 2, mod_stop);
+
+static mp_obj_t mod_level(mp_obj_t h, mp_obj_t level) {
+    check(moy_aud_level(h_of(h), (int)mp_obj_get_int(level)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_level_obj, mod_level);
+
+// active(h=0) -> mask (moy_aud_active's bits); 0, the focused session.
+static mp_obj_t mod_active(size_t n_args, const mp_obj_t *a) {
+    uint32_t m = 0;
+    check(moy_aud_active(n_args > 0 ? h_of(a[0]) : 0u, &m));
+    return mp_obj_new_int_from_uint(m);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_active_obj, 0, 1, mod_active);
+
+// -- the console's -------------------------------------------------------------------
+
+static mp_obj_t mod_volume(size_t n_args, const mp_obj_t *a) {
+    if (n_args > 0) {
+        moy_aud_volume((int)mp_obj_get_int(a[0]));
     }
-    moy_lock();
-    s_rate = rate;
-    if (s_inited) {
-        s_audio.rate = rate;
-    }
-    moy_unlock();
+    return MP_OBJ_NEW_SMALL_INT(moy_aud_console_level());
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_volume_obj, 0, 1, mod_volume);
+
+static mp_obj_t mod_hush(void) {
+    moy_aud_hush();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_hush_obj, mod_hush);
+
+// -- the sample voice ------------------------------------------------------------------
+
+// sample_load(pcm, rate) -> clip: signed 16-bit little-endian mono.
+static mp_obj_t mod_sample_load(mp_obj_t pcm, mp_obj_t rate) {
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(pcm, &bi, MP_BUFFER_READ);
+    uint32_t h = 0;
+    check(moy_aud_sample_load(&h, (const int16_t *)bi.buf, bi.len / 2u,
+                              (int)mp_obj_get_int(rate)));
+    return mp_obj_new_int_from_uint(h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_sample_load_obj, mod_sample_load);
+
+static mp_obj_t mod_sample_play(size_t n_args, const mp_obj_t *a) {
+    check(moy_aud_sample_play(h_of(a[0]), h_of(a[1]), opt_int(n_args, a, 2, -1)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sample_play_obj, 2, 3, mod_sample_play);
+
+static mp_obj_t mod_sample_free(mp_obj_t h) {
+    check(moy_aud_sample_free(h_of(h)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_sample_free_obj, mod_sample_free);
+
+// -- the mix --------------------------------------------------------------------------
+
+static mp_obj_t mod_set_rate(mp_obj_t rate) {
+    moy_aud_set_rate((int)mp_obj_get_int(rate));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_set_rate_obj, mod_set_rate);
 
-// --- SPEC.md 8.2, one entry per verb --------------------------------------
-
-static mp_obj_t mod_sfx(size_t n_args, const mp_obj_t *a) {
-    int n = (int)mp_obj_get_int(a[0]);
-    int chan = (n_args > 1 && a[1] != mp_const_none)
-             ? (int)mp_obj_get_int(a[1]) : -1;
-    moy_lock();
-    if (s_inited) {
-        moy_audio_sfx(&s_audio, n, chan);
-    }
-    moy_unlock();
-    return mp_const_none;
+static mp_obj_t mod_rate(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_aud_rate());
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sfx_obj, 1, 2, mod_sfx);
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_rate_obj, mod_rate);
 
-static mp_obj_t mod_beep(size_t n_args, const mp_obj_t *a) {
-    float freq = (float)mp_obj_get_float(a[0]);
-    float dur = (n_args > 1) ? (float)mp_obj_get_float(a[1]) : 0.15f;
-    moy_lock();
-    if (s_inited) {
-        moy_audio_beep(&s_audio, freq, dur);
-    }
-    moy_unlock();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_beep_obj, 1, 2, mod_beep);
-
-static mp_obj_t mod_music(size_t n_args, const mp_obj_t *a) {
-    int track = (int)mp_obj_get_int(a[0]);
-    int loop = (n_args > 1) ? (mp_obj_is_true(a[1]) ? 1 : 0) : 1;
-    moy_lock();
-    if (s_inited) {
-        moy_audio_music(&s_audio, track, loop);
-    }
-    moy_unlock();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_music_obj, 1, 2, mod_music);
-
-static mp_obj_t mod_music_stop(void) {
-    moy_lock();
-    if (s_inited) {
-        moy_audio_music_stop(&s_audio);
-    }
-    moy_unlock();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_music_stop_obj, mod_music_stop);
-
-static mp_obj_t mod_sound_stop(size_t n_args, const mp_obj_t *a) {
-    int chan = (n_args > 0 && a[0] != mp_const_none)
-             ? (int)mp_obj_get_int(a[0]) : -1;
-    moy_lock();
-    if (s_inited) {
-        moy_audio_sound_stop(&s_audio, chan);
-    }
-    moy_unlock();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sound_stop_obj, 0, 1,
-                                           mod_sound_stop);
-
-static mp_obj_t mod_volume(mp_obj_t level_obj) {
-    int level = (int)mp_obj_get_int(level_obj);
-    moy_lock();
-    if (s_inited) {
-        moy_audio_volume(&s_audio, level);
-    }
-    moy_unlock();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_volume_obj, mod_volume);
-
-// --- render + state -------------------------------------------------------
-
-// render(buf, nframes) -> frames written. Mixes straight into the caller's
-// buffer. Used by the fallback per-frame feed and by the web runner, which pulls
-// finished PCM each frame and hands it to the page.
-//
-// libmoy writes native-endian int16; every target here (Xtensa, RISC-V, wasm,
-// x86) is little-endian, which is what machine.I2S and the page's PCM path both
-// expect. A bytearray's buffer comes from malloc, so the int16 alignment holds.
-static mp_obj_t mod_render(size_t n_args, const mp_obj_t *a) {
+// render(buf, n) -> frames: the next `n` frames of the mix, as the speaker
+// would take them. What the browser and the desktop pull; on a board the
+// feeder task is the only caller, and a second one shows as seam= above 1.
+static mp_obj_t mod_render(mp_obj_t buf, mp_obj_t nobj) {
     mp_buffer_info_t bi;
-    mp_int_t nframes = mp_obj_get_int(a[1]);
-    if (nframes <= 0) {
+    mp_int_t n = mp_obj_get_int(nobj);
+    mp_get_buffer_raise(buf, &bi, MP_BUFFER_WRITE);
+    if ((size_t)n * 2u > bi.len) {
+        n = (mp_int_t)(bi.len / 2u);
+    }
+    if (n <= 0) {
         return MP_OBJ_NEW_SMALL_INT(0);
     }
-    mp_get_buffer_raise(a[0], &bi, MP_BUFFER_WRITE);
-    if ((size_t)nframes * 2u > bi.len) {    // never overrun a short buffer
-        nframes = (mp_int_t)(bi.len / 2u);
-    }
-    if (nframes <= 0) {
-        return MP_OBJ_NEW_SMALL_INT(0);
-    }
-    if (n_args > 2) {                       // optional live rate override
-        mp_int_t rate = mp_obj_get_int(a[2]);
-        if (rate > 0) {
-            s_rate = (int)rate;
-        }
-    }
-    moy_lock();
-    if (!s_inited) {
-        memset(bi.buf, 0, (size_t)nframes * 2u);
-    } else {
-        s_audio.rate = s_rate;
-        moy_audio_render(&s_audio, (int16_t *)bi.buf, (int)nframes);
-        if (s_pcm_on) {
-            moy_stream_mix(&s_pcm, (int16_t *)bi.buf, (int)nframes, s_audio.rate,
-                           s_audio.master);
-        }
-        s_frames_pyrender += (uint32_t)nframes;
-    }
-    moy_unlock();
-    return MP_OBJ_NEW_SMALL_INT(nframes);
+    moy_aud_render((int16_t *)bi.buf, (int)n);
+    return MP_OBJ_NEW_SMALL_INT(n);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_render_obj, 2, 3,
-                                           mod_render);
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_render_obj, mod_render);
 
-// active() -> int. Bit c per sounding voice, bit 4 for a running music track,
-// bit 5 for the beep, bit 6 for a compiled cart's stream holding frames not
-// yet mixed. Non-zero is "something is audible" -- what the Music editor's
-// preview, the console's redraw gate and the web runner's pull ask.
-static mp_obj_t mod_active(void) {
-    uint32_t mask = 0;
-    int i;
-    moy_lock();
-    if (s_inited) {
-        for (i = 0; i < MOY_A_CHANNELS; i++) {
-            if (s_audio.v[i].owner) {
-                mask |= (uint32_t)1 << i;
-            }
-        }
-        if (s_audio.track != NULL) {
-            mask |= (uint32_t)1 << 4;
-        }
-        if (s_audio.bleft > 0.0f) {
-            mask |= (uint32_t)1 << 5;
-        }
+// dump(h, buf, n) -> frames: the self-dump, `n` frames of an unfocused
+// session's synth alone into `buf` (signed 16-bit mono), no speaker involved.
+static mp_obj_t mod_dump(mp_obj_t h, mp_obj_t buf, mp_obj_t nobj) {
+    mp_buffer_info_t bi;
+    mp_int_t n = mp_obj_get_int(nobj);
+    mp_get_buffer_raise(buf, &bi, MP_BUFFER_WRITE);
+    if ((size_t)n * 2u > bi.len) {
+        n = (mp_int_t)(bi.len / 2u);
     }
-    if (s_pcm_on && s_pcm.count > 0) {
-        mask |= (uint32_t)1 << 6;
-    }
-    moy_unlock();
-    return mp_obj_new_int_from_uint(mask);
+    check(moy_aud_dump(h_of(h), (int16_t *)bi.buf, (int)n));
+    return MP_OBJ_NEW_SMALL_INT(n);
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_active_obj, mod_active);
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_dump_obj, mod_dump);
 
-#if MOY_AUDIO_HAVE_IDF
-// Open the I2S channel on the amp's pins with a ring of `desc` x `frames`,
-// enabled. 0, or -1 with nothing left open.
-static int moy_chan_open(int desc, int frames) {
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    chan_cfg.dma_desc_num = desc;
-    chan_cfg.dma_frame_num = frames;
-    chan_cfg.auto_clear = true;   // emit silence, not stale DMA, on under-run
-    if (i2s_new_channel(&chan_cfg, &s_tx_chan, NULL) != ESP_OK) {
-        s_tx_chan = NULL;
-        return -1;
-    }
+// -- the output and its meters -----------------------------------------------------------
 
-    // Standard Philips I2S, 16-bit mono on the T-Deck amp pins. MONO puts the
-    // sample on the left slot, which is the MAX98357's mono input.
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)s_rate),
-        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
-                                                    I2S_SLOT_MODE_MONO),
-        .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = (gpio_num_t)s_bck,
-            .ws   = (gpio_num_t)s_ws,
-            .dout = (gpio_num_t)s_dout,
-            .din  = I2S_GPIO_UNUSED,
-            .invert_flags = { .mclk_inv = false, .bclk_inv = false, .ws_inv = false },
-        },
-    };
-    if (i2s_channel_init_std_mode(s_tx_chan, &std_cfg) != ESP_OK
-        || i2s_channel_enable(s_tx_chan) != ESP_OK) {
-        i2s_del_channel(s_tx_chan);
-        s_tx_chan = NULL;
-        return -1;
-    }
-    return 0;
+// start() -> (state, why): start the speaker now (the first focus does).
+static mp_obj_t out_tuple(int st) {
+    const char *why = "";
+    st = moy_aud_out_state(&why);
+    mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(st), mp_obj_new_str(why, strlen(why))};
+    return mp_obj_new_tuple(2, t);
 }
 
-// Re-open the channel for the pipeline asked for, between blocks. The synth's
-// ring when the shallow one will not open; the task ends when neither will.
-static void moy_chan_swap(void) {
-    int want = s_shallow_want;
-    i2s_channel_disable(s_tx_chan);
-    i2s_del_channel(s_tx_chan);
-    s_tx_chan = NULL;
-    if (want && moy_chan_open(MOY_STREAM_DESC, MOY_STREAM_BLOCK) == 0) {
-        s_shallow = 1;
-        return;
-    }
-    s_shallow = 0;
-    if (moy_chan_open(MOY_DMA_DESC_NUM, MOY_DMA_FRAME_NUM) != 0) {
-        s_running = 0;
-    }
+// attach() -> bool: the codec's place on the kernel's I2C bus, at boot.
+static mp_obj_t mod_attach(void) {
+    return mp_obj_new_bool(moy_aud_out_attach() == MOY_AUD_OK);
 }
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_attach_obj, mod_attach);
 
-// --- the core-1 feeder task ----------------------------------------------
-static void moy_audio_task(void *arg) {
-    (void)arg;
-    static int16_t block[MOY_BLOCK_FRAMES];
-    int off;
-
-    while (s_running) {
-        if (s_shallow_want != s_shallow) {
-            moy_chan_swap();
-            if (!s_running) {
-                break;
-            }
-        }
-        int frames = s_shallow ? MOY_STREAM_BLOCK : MOY_BLOCK_FRAMES;
-        // Render a block in chunks, dropping the lock between them so a verb
-        // is never held up for a whole block.
-        for (off = 0; off < frames; off += MOY_MIX_CHUNK) {
-            moy_lock();
-            if (s_inited) {
-                moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK);
-                if (s_pcm_on) {
-                    moy_stream_mix(&s_pcm, block + off, MOY_MIX_CHUNK, s_audio.rate,
-                                   s_audio.master);
-                }
-                s_frames_rendered += MOY_MIX_CHUNK;
-            } else {
-                memset(block + off, 0, sizeof(int16_t) * MOY_MIX_CHUNK);
-            }
-            moy_unlock();
-        }
-
-        // Blocks here while the DMA drains -- that IS the pacing, and it happens
-        // in this task, so the VM never stalls on it.
-        //
-        // Write the WHOLE block, retrying the remainder after a timeout
-        // (2026-08-10): the old single write dropped whatever a timeout left
-        // unwritten and moved on to render the NEXT block -- every drop skips
-        // the synth timeline forward, which the ear hears as SPED-UP audio on
-        // every cart, and which frames_out cannot see (it counts writes, so
-        // AUDIORATE read ~1.0 while the music ran fast). The sustained >1.0
-        // AUDIORATE means (1.01-1.08 steady, 1.1+ during sfx bursts) were this
-        // hole measured from the other side: rendered-minus-played.
-        // NEVER abandon rendered frames (2026-08-10, the celeste 1.6x): the
-        // driver chronically accepts only part of a block per call here, and
-        // every abandoned tail advances the synth timeline without reaching
-        // the speaker -- the seam counters measured rendered/written at the
-        // exact audible tempo error (1.61-1.64) while both per-side clocks
-        // read 1.000. Retry until the WHOLE block is consumed; a timeout just
-        // loops (s_running is the only exit), so a wedged channel parks the
-        // task at 100ms polls instead of silently eating the music.
-        size_t done = 0, bytes = (size_t)frames * sizeof(int16_t);
-        while (done < bytes && s_running) {
-            size_t written = 0;
-            i2s_channel_write(s_tx_chan, (const char *)block + done,
-                              bytes - done, &written,
-                              pdMS_TO_TICKS(MOY_WRITE_TIMEOUT_MS));
-            done += written;
-        }
-        s_frames_out += (uint32_t)(done / sizeof(int16_t));
-    }
-
-    if (s_tx_chan != NULL) {
-        i2s_channel_disable(s_tx_chan);
-    }
-    s_task = NULL;
-    vTaskDelete(NULL);
+static mp_obj_t mod_start(void) {
+    return out_tuple(moy_aud_out_start());
 }
-#endif  // MOY_AUDIO_HAVE_IDF
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_start_obj, mod_start);
 
-// audio_start(bck, ws, dout, rate) -> True if the core-1 feeder is running.
-// On ANY failure it tears everything back down and returns False, so DeviceAudio
-// falls back to the per-frame feed. Idempotent while running.
-static mp_obj_t mod_audio_start(size_t n_args, const mp_obj_t *a) {
-#if MOY_AUDIO_HAVE_IDF
-    int bck  = (n_args > 0) ? (int)mp_obj_get_int(a[0]) : 7;
-    int ws   = (n_args > 1) ? (int)mp_obj_get_int(a[1]) : 5;
-    int dout = (n_args > 2) ? (int)mp_obj_get_int(a[2]) : 6;
-    int rate = (n_args > 3) ? (int)mp_obj_get_int(a[3]) : 8000;
-    if (rate <= 0) {
-        rate = 8000;
-    }
-    if (s_task != NULL) {
-        return mp_const_true;
-    }
-    if (!moy_ensure_bank()) {
-        return mp_const_false;
-    }
-    s_rate = rate;
-    s_audio.rate = rate;
-
-    if (s_mutex == NULL) {
-        s_mutex = xSemaphoreCreateMutex();
-        if (s_mutex == NULL) {
-            return mp_const_false;
-        }
-    }
-
-    s_bck = bck;
-    s_ws = ws;
-    s_dout = dout;
-    s_shallow = 0;
-    if (moy_chan_open(MOY_DMA_DESC_NUM, MOY_DMA_FRAME_NUM) != 0) {
-        return mp_const_false;
-    }
-
-    s_running = 1;
-    BaseType_t ok = xTaskCreatePinnedToCore(
-        moy_audio_task, "moy_audio", 4096, NULL,
-        configMAX_PRIORITIES - 3,   // above idle, below the IDF I2S/system tasks
-        &s_task, 1 /* core 1 */);
-    if (ok != pdPASS) {
-        s_running = 0;
-        s_task = NULL;
-        i2s_channel_disable(s_tx_chan);
-        i2s_del_channel(s_tx_chan);
-        s_tx_chan = NULL;
-        return mp_const_false;
-    }
-    return mp_const_true;
-#else
-    (void)n_args; (void)a;
-    return mp_const_false;   // no IDF -> no core-1 task; Python uses render()
-#endif
+// out() -> (state, why): OUT_NONE, OUT_RUNNING, OUT_FAILED or OUT_ABSENT.
+static mp_obj_t mod_out(void) {
+    return out_tuple(0);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_audio_start_obj, 0, 4,
-                                           mod_audio_start);
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_out_obj, mod_out);
 
-// audio_stop() -> None. Signal the task to exit and release the I2S channel.
-// Safe when not running.
-static mp_obj_t mod_audio_stop(void) {
-#if MOY_AUDIO_HAVE_IDF
-    if (s_task == NULL) {
-        if (s_tx_chan != NULL) {
-            i2s_del_channel(s_tx_chan);
-            s_tx_chan = NULL;
-        }
+// stats(reset_max=False) -> (rendered, written, underruns, verbs, trig,
+// trig_us_last, trig_us_max, lock_wait_us_max, lock_hold_us_max,
+// bank_parse_us_max, hush_at, loud_at).
+static mp_obj_t mod_stats(size_t n_args, const mp_obj_t *a) {
+    moy_aud_stats_t st;
+    moy_aud_stats(&st);
+    if (n_args > 0 && mp_obj_is_true(a[0])) {
+        moy_aud_stats_reset_max();
+    }
+    uint32_t v[12] = {st.rendered, st.written, st.underruns, st.verbs, st.trig,
+                      st.trig_us_last, st.trig_us_max, st.lock_wait_us_max,
+                      st.lock_hold_us_max, st.bank_parse_us_max, st.hush_at,
+                      st.loud_at};
+    mp_obj_t t[12];
+    for (int i = 0; i < 12; i++) {
+        t[i] = mp_obj_new_int_from_uint(v[i]);
+    }
+    return mp_obj_new_tuple(12, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_stats_obj, 0, 1, mod_stats);
+
+// probe() -> the AUDIORATE line, or None when there is nothing new.
+static mp_obj_t mod_probe(void) {
+    char buf[200];
+    size_t n = moy_aud_out_probe(buf, sizeof buf);
+    return n ? mp_obj_new_str(buf, n) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_probe_obj, mod_probe);
+
+// trace(on) starts or stops the session trace; trace() reads and clears it:
+// a list of (slot, verb, a, b), slot -1 for a console-wide call.
+static mp_obj_t mod_trace(size_t n_args, const mp_obj_t *a) {
+    if (n_args > 0) {
+        moy_aud_trace_on(mp_obj_is_true(a[0]));
         return mp_const_none;
     }
-    s_running = 0;
-    // Bounded wait for the task to observe it and self-delete; never forever.
-    for (int i = 0; i < 40 && s_task != NULL; i++) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+    int32_t rows[MOY_AUD_TRACE_ROWS * 4u];
+    size_t n = moy_aud_trace_read(rows, MOY_AUD_TRACE_ROWS);
+    mp_obj_t l = mp_obj_new_list(0, NULL);
+    for (size_t i = 0; i < n; i++) {
+        mp_obj_t t[4];
+        for (int k = 0; k < 4; k++) {
+            t[k] = mp_obj_new_int(rows[4 * i + k]);
+        }
+        mp_obj_list_append(l, mp_obj_new_tuple(4, t));
     }
-    if (s_tx_chan != NULL) {
-        i2s_del_channel(s_tx_chan);   // the task already disabled it
-        s_tx_chan = NULL;
-    }
-#endif
+    return l;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_trace_obj, 0, 1, mod_trace);
+
+// codec() -> (chip_id, mismatches) on a board with a codec, else None.
+static mp_obj_t mod_codec(void) {
+#if defined(ESP_PLATFORM) && MOY_AUDIO_CODEC_ES8311
+    uint16_t id = 0;
+    int bad = -1;
+    moy_es8311_check(&id, &bad);
+    mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(id), MP_OBJ_NEW_SMALL_INT(bad)};
+    return mp_obj_new_tuple(2, t);
+#else
     return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_audio_stop_obj, mod_audio_stop);
-
-// running() -> bool. True while the core-1 feeder is alive.
-static mp_obj_t mod_running(void) {
-#if MOY_AUDIO_HAVE_IDF
-    return mp_obj_new_bool(s_task != NULL);
-#else
-    return mp_const_false;
 #endif
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_running_obj, mod_running);
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_codec_obj, mod_codec);
 
-// --- the compiled cart's stream (moy_audio_snd.h) ---------------------------
-
-// With IDF the core-1 task is what plays the stream, so it opens only while
-// the task runs. Without IDF, render() is what plays it (see the header).
-int moy_audio_snd_open(void) {
-    size_t bytes = MOY_AUDIO_SND_DEPTH * sizeof(int16_t);
-#if MOY_AUDIO_HAVE_IDF
-    if (s_task == NULL) {
-        return 0;
-    }
-    if (s_pcm_ring == NULL) {
-        s_pcm_ring = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
-        if (s_pcm_ring == NULL) {
-            s_pcm_ring = heap_caps_malloc(bytes, MALLOC_CAP_DEFAULT);
-        }
-    }
-#else
-    if (s_pcm_ring == NULL) {
-        s_pcm_ring = malloc(bytes);
-    }
-#endif
-    if (s_pcm_ring == NULL) {
-        return 0;
-    }
-    moy_lock();
-    moy_stream_init(&s_pcm, s_pcm_ring, MOY_AUDIO_SND_DEPTH, MOY_AUDIO_SND_RATE);
-    s_pcm_on = 1;
-    moy_unlock();
-    return 1;
-}
-
-uint32_t moy_audio_snd(const uint8_t *pcm, uint32_t n) {
-    uint32_t r = 0;
-    moy_lock();
-    if (s_pcm_on) {
-        r = n ? moy_stream_write(&s_pcm, pcm, n) : moy_stream_room(&s_pcm);
-    }
-    moy_unlock();
-#if MOY_AUDIO_HAVE_IDF
-    if (r && n) {
-        s_shallow_want = 1;
-    }
-#endif
-    return r;
-}
-
-void moy_audio_snd_close(void) {
-    moy_lock();
-    if (s_pcm_on) {
-        moy_stream_clear(&s_pcm);
-    }
-    s_pcm_on = 0;
-    moy_unlock();
-#if MOY_AUDIO_HAVE_IDF
-    s_shallow_want = 0;
-#endif
-}
-
-// snd_counts() -> (queued, played, starved, room, open), or None when no cart
-// has opened a stream since boot: frames the cart's `snd` queued, frames the
-// feeder mixed out of the queue, frames it rendered while the queue was empty
-// after the stream began, the queue's room now, and whether it is open.
-// Queued against played, over minutes, is the seam's two sides measured apart.
+// snd_counts() -> (queued, played, starved, room, open), or None before a
+// compiled cart opened its stream.
 static mp_obj_t mod_snd_counts(void) {
-    mp_obj_t t[5];
-    if (s_pcm_ring == NULL) {
+    uint32_t c[4];
+    int open = 0;
+    if (!moy_aud_snd_counts(c, &open)) {
         return mp_const_none;
     }
-    moy_lock();
-    t[0] = mp_obj_new_int_from_uint(s_pcm.in);
-    t[1] = mp_obj_new_int_from_uint(s_pcm.out);
-    t[2] = mp_obj_new_int_from_uint(s_pcm.starved);
-    t[3] = mp_obj_new_int_from_uint(moy_stream_room(&s_pcm));
-    t[4] = mp_obj_new_bool(s_pcm_on);
-    moy_unlock();
+    mp_obj_t t[5];
+    for (int i = 0; i < 4; i++) {
+        t[i] = mp_obj_new_int_from_uint(c[i]);
+    }
+    t[4] = mp_obj_new_bool(open);
     return mp_obj_new_tuple(5, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_snd_counts_obj, mod_snd_counts);
 
-// engine_sig() -> (rate, nsfx, sfx10_speed, music4_speed) read from the C
-// structs themselves (2026-08-10, the celeste tempo hunt): BANKSIG certifies
-// the PYTHON bank at push time; this reads back what libmoy actually HOLDS
-// after bank_load, closing the last unverified hop of the json crossing.
-static mp_obj_t mod_engine_sig(void) {
-    mp_obj_t t[4];
-    moy_lock();
-    int rate = s_inited ? (int)s_audio.rate : s_rate;
-    int nsfx = (s_bank != NULL) ? s_bank->nsfx : -1;
-    float s10 = (s_bank != NULL && s_bank->nsfx > 10)
-                ? s_bank->sfx[10].speed : -1.0f;
-    float m4 = (s_bank != NULL && s_bank->nmusic > 4)
-               ? s_bank->music[4].speed : -1.0f;
-    moy_unlock();
-    t[0] = mp_obj_new_int(rate);
-    t[1] = mp_obj_new_int(nsfx);
-    t[2] = mp_obj_new_float((mp_float_t)s10);
-    t[3] = mp_obj_new_float((mp_float_t)m4);
-    return mp_obj_new_tuple(4, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_engine_sig_obj, mod_engine_sig);
-
-// frames_out() -> (frames, rate). Frames the I2S peripheral has accepted since
-// boot, and the rate libmoy is synthesising for. Sampling this against wall
-// clock answers the one question the synth cannot: is the speaker consuming
-// samples at the rate they were MADE for? A ratio other than 1.0 is playback
-// speed error -- pitch and tempo together -- and no amount of staring at the
-// mixer will show it, because the mixer is right.
-static mp_obj_t mod_frames_out(void) {
-    mp_obj_t t[4];
-#if MOY_AUDIO_HAVE_IDF
-    t[0] = mp_obj_new_int_from_uint(s_frames_out);
-#else
-    t[0] = mp_obj_new_int_from_uint(0);
-#endif
-    t[1] = mp_obj_new_int(s_inited ? (int)s_audio.rate : s_rate);
-#if MOY_AUDIO_HAVE_IDF
-    t[2] = mp_obj_new_int_from_uint(s_frames_rendered);
-#else
-    t[2] = mp_obj_new_int_from_uint(0);
-#endif
-    t[3] = mp_obj_new_int_from_uint(s_frames_pyrender);
-    return mp_obj_new_tuple(4, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_frames_out_obj, mod_frames_out);
-
 static const mp_rom_map_elem_t moy_audio_globals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___name__),     MP_OBJ_NEW_QSTR(MP_QSTR_moy_audio) },
+    { MP_ROM_QSTR(MP_QSTR___name__),     MP_ROM_QSTR(MP_QSTR_moy_audio) },
     { MP_ROM_QSTR(MP_QSTR_CHANNELS),     MP_ROM_INT(MOY_A_CHANNELS) },
-    // the bank + the SPEC.md 8.2 verbs
-    { MP_ROM_QSTR(MP_QSTR_bank_load),    MP_ROM_PTR(&mod_bank_load_obj) },
-    { MP_ROM_QSTR(MP_QSTR_set_rate),     MP_ROM_PTR(&mod_set_rate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_OUT_NONE),     MP_ROM_INT(MOY_AUD_OUT_NONE) },
+    { MP_ROM_QSTR(MP_QSTR_OUT_RUNNING),  MP_ROM_INT(MOY_AUD_OUT_RUNNING) },
+    { MP_ROM_QSTR(MP_QSTR_OUT_FAILED),   MP_ROM_INT(MOY_AUD_OUT_FAILED) },
+    { MP_ROM_QSTR(MP_QSTR_OUT_ABSENT),   MP_ROM_INT(MOY_AUD_OUT_ABSENT) },
+    // sessions
+    { MP_ROM_QSTR(MP_QSTR_open),         MP_ROM_PTR(&mod_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bank),         MP_ROM_PTR(&mod_bank_obj) },
+    { MP_ROM_QSTR(MP_QSTR_focus),        MP_ROM_PTR(&mod_focus_obj) },
+    { MP_ROM_QSTR(MP_QSTR_focused),      MP_ROM_PTR(&mod_focused_obj) },
+    { MP_ROM_QSTR(MP_QSTR_close),        MP_ROM_PTR(&mod_close_obj) },
+    // SPEC.md 8.2
     { MP_ROM_QSTR(MP_QSTR_sfx),          MP_ROM_PTR(&mod_sfx_obj) },
     { MP_ROM_QSTR(MP_QSTR_beep),         MP_ROM_PTR(&mod_beep_obj) },
     { MP_ROM_QSTR(MP_QSTR_music),        MP_ROM_PTR(&mod_music_obj) },
     { MP_ROM_QSTR(MP_QSTR_music_stop),   MP_ROM_PTR(&mod_music_stop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sound_stop),   MP_ROM_PTR(&mod_sound_stop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_volume),       MP_ROM_PTR(&mod_volume_obj) },
-    // rendering + state
-    { MP_ROM_QSTR(MP_QSTR_render),       MP_ROM_PTR(&mod_render_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop),         MP_ROM_PTR(&mod_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_level),        MP_ROM_PTR(&mod_level_obj) },
     { MP_ROM_QSTR(MP_QSTR_active),       MP_ROM_PTR(&mod_active_obj) },
-    // core-1 feeder task (#41)
-    { MP_ROM_QSTR(MP_QSTR_audio_start),  MP_ROM_PTR(&mod_audio_start_obj) },
-    { MP_ROM_QSTR(MP_QSTR_audio_stop),   MP_ROM_PTR(&mod_audio_stop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_frames_out),   MP_ROM_PTR(&mod_frames_out_obj) },
-    { MP_ROM_QSTR(MP_QSTR_engine_sig),   MP_ROM_PTR(&mod_engine_sig_obj) },
-    { MP_ROM_QSTR(MP_QSTR_running),      MP_ROM_PTR(&mod_running_obj) },
-    // a compiled cart's stream (moy_audio_snd.h)
+    // the console's
+    { MP_ROM_QSTR(MP_QSTR_volume),       MP_ROM_PTR(&mod_volume_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hush),         MP_ROM_PTR(&mod_hush_obj) },
+    // the sample voice (#70)
+    { MP_ROM_QSTR(MP_QSTR_sample_load),  MP_ROM_PTR(&mod_sample_load_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sample_play),  MP_ROM_PTR(&mod_sample_play_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sample_free),  MP_ROM_PTR(&mod_sample_free_obj) },
+    // the mix, the output, the meters
+    { MP_ROM_QSTR(MP_QSTR_set_rate),     MP_ROM_PTR(&mod_set_rate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rate),         MP_ROM_PTR(&mod_rate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_render),       MP_ROM_PTR(&mod_render_obj) },
+    { MP_ROM_QSTR(MP_QSTR_dump),         MP_ROM_PTR(&mod_dump_obj) },
+    { MP_ROM_QSTR(MP_QSTR_attach),       MP_ROM_PTR(&mod_attach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_start),        MP_ROM_PTR(&mod_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_out),          MP_ROM_PTR(&mod_out_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stats),        MP_ROM_PTR(&mod_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_probe),        MP_ROM_PTR(&mod_probe_obj) },
+    { MP_ROM_QSTR(MP_QSTR_trace),        MP_ROM_PTR(&mod_trace_obj) },
+    { MP_ROM_QSTR(MP_QSTR_codec),        MP_ROM_PTR(&mod_codec_obj) },
     { MP_ROM_QSTR(MP_QSTR_snd_counts),   MP_ROM_PTR(&mod_snd_counts_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_audio_globals, moy_audio_globals_table);

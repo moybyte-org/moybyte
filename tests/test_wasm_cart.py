@@ -37,7 +37,7 @@ import types
 
 import pytest
 
-from runtime import host_app
+from runtime import audio_session, host_app
 from tools import wasm_cart, wat
 from ws_helpers import open_cart
 
@@ -347,7 +347,7 @@ TONE = """
 
 def test_a_carts_samples_reach_the_audio_output_at_the_rate(tmp_path):
     """snd on the host: the cart fills the room each tick, the console's audio
-    backend mixes the stream into every block it renders, and over ten seconds
+    pull mixes the stream into every block it renders, and over ten seconds
     of frames the output takes 22050 frames a second of it -- what the
     cart queued is what played plus what is still queued, nothing starved
     once the stream began, and the blocks carry the tone."""
@@ -357,7 +357,7 @@ def test_a_carts_samples_reach_the_audio_output_at_the_rate(tmp_path):
     open_cart(ws, "Tone")
     assert ws.player.cart_error is None, ws.player.cart_error
     run = ws.player._lua
-    assert ws.audio.stream is run._run
+    assert ws.audio_out.stream is run._run
     _frames(ws, 300)
     queued, played, starved, room = run.snd_counts()
     assert _pmem(ws)[0] == queued
@@ -366,10 +366,10 @@ def test_a_carts_samples_reach_the_audio_output_at_the_rate(tmp_path):
     # The host renders at the engine's own rate, so the stream is resampled,
     # and the resampler holds the stream's next frame in hand.
     assert 22050 * 10 - 2 <= played <= 22050 * 10, played
-    pcm = ws.audio.last_pcm
+    pcm = ws.audio_out.last_pcm
     peak = max(abs(int.from_bytes(pcm[i:i + 2], "little", signed=True))
                for i in range(0, len(pcm), 2))
-    assert peak == 8000 * ws.audio.engine.master // 7, peak
+    assert peak == 8000 * audio_session.console_volume() // 7, peak
 
 
 QUITTER = """

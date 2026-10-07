@@ -60,8 +60,8 @@ setup:
 	  echo "  ^^ make setup FINISHED, but the host console will not run until"; \
 	  echo "     a C compiler is installed. Re-run 'make setup' after that."; \
 	  echo ""; }
-# Host audio binding (#97 stage 0): compile vendored libmoy into the cached
-# .so the sim's AudioEngine loads. Never fails setup -- with no C compiler it
+# Host audio binding (#97 stage 0): compile the kernel's audio and vendored
+# libmoy into the cached .so the sim's `moy_audio` loads. Never fails setup -- with no C compiler it
 # prints a note and the host runs silent (which, since the check above, is the
 # smaller half of what a missing compiler costs).
 	$(PYTHON) -m runtime.audio_binding

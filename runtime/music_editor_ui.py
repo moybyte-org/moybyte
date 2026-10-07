@@ -5,8 +5,8 @@
 """The music/sound editor's UI layer (issue #50): a tracker-style step editor
 over the cart's AudioBank -- SFX view (note/wave/vol steps) and SONG view (a
 phrase of SFX-id slots), a scrolling step/slot list, a right-hand edit pad, a
-bottom PLAY/SAVE/LOOP/CLOSE bar, and the live preview (routed through the same
-AudioEngine the running cart uses).
+bottom PLAY/SAVE/LOOP/CLOSE bar, and the live preview (played on the same
+audio session the running cart uses).
 
 Extracted from Workstation (runtime/console.py), mirroring block_editor_ui.py's
 BlockEditorUI / map_editor_ui.py's MapEditorUI: this class owns the music
@@ -14,8 +14,8 @@ editor's UI state (musicedit/music_preview) and its _music_*/_mu_* methods,
 verbatim (no renaming), via a back-reference to the owning Workstation
 (`self.ws`) for the handful of primitives it shares with the rest of the
 console (canvas, _btn, _leave_menu, _leave_or_home, audio, save_sounds --
-the last two stay on Workstation: `audio` is the cart's live AudioEngine
-backend, also used by the running game, and `save_sounds` uses the shared
+the last two stay on Workstation: `audio` is the cart's audio session, also
+used by the running game, and `save_sounds` uses the shared
 `self.save_status` field like save_code/save_sprites/save_map, not a
 dedicated one, so it stays alongside them as a Workstation-level "persist
 this editor's content" method). `NAMES` is injected at construction
@@ -233,7 +233,7 @@ class MusicEditorUI:
         # Injected instead of imported back from console.py -- see module docstring.
         self._NAMES = names
         # `musicedit` is built lazily on first open. `music_preview` tracks what
-        # the live AudioEngine is previewing so the frame loop ticks the mixer
+        # the cart's session is previewing so the frame loop ticks the mixer
         # and shows STOP; None when nothing is playing.
         self.musicedit = None         # MusicEditor while menu_view == "music"
         self.music_preview = None     # ("sfx", n) | ("song", track) | None (preview)
@@ -249,13 +249,13 @@ class MusicEditorUI:
     def build(self):
         """Build the MusicEditor over the open cart's live AudioBank (#50): the
         SAME bank the running cart plays through, so an edit is heard immediately
-        by the preview AND by the cart on resume. The bank lives on the audio
-        backend's engine (ws.audio.engine.bank); SFX/MusicTrack are injected as
+        by the preview AND by the cart on resume. The bank is the run's audio
+        session's (ws.audio.bank); SFX/MusicTrack are injected as
         factories so the editor core stays import-free. Called from
         Workstation.set_menu_view("music")."""
         ws = self.ws
         if self.musicedit is None and ws.audio is not None:
-            bank = ws.audio.engine.bank
+            bank = ws.audio.bank
             self.musicedit = MusicEditor(bank, sfx_factory=SFX,
                                          track_factory=MusicTrack)
 
@@ -270,14 +270,15 @@ class MusicEditorUI:
 
     def _play_music_preview(self):
         """Preview what the cursor is on: in the SFX view play the current SFX, in
-        the SONG view play the current phrase (looping). Routes through the live
-        AudioEngine (the same backend the cart uses), so it sounds on the host and
-        the device. The frame loop ticks the mixer + redraws while a preview is up."""
+        the SONG view play the current phrase (looping). Plays on the cart's own
+        session, focused so it is the one heard, on every tier. The frame loop
+        ticks the mixer + redraws while a preview is up."""
         ws = self.ws
         me = self.musicedit
         au = ws.audio
         if me is None or au is None:
             return
+        au.focus()
         au.sound_stop()                          # cut any prior preview first
         if me.view == MusicEditor.SONG_VIEW:
             au.music(me.track_idx, True)
@@ -298,22 +299,12 @@ class MusicEditorUI:
 
     def _music_preview_active(self):
         """True while a music-editor preview is still producing sound (so the frame
-        loop keeps ticking the mixer + redrawing the PLAY/STOP button).
-
-        Asks the BACKEND, not `au.engine`: on the device and the web runner the
-        sequencers live in libmoy, so the Python engine's voices sit idle no
-        matter what the speaker is doing (#97). Backends without the hook fall
-        back to their engine, which is the host's answer anyway."""
+        loop keeps ticking the mixer + redrawing the PLAY/STOP button). The
+        session answers from the kernel, which holds the sequencers."""
         if self.music_preview is None:
             return False
         au = self.ws.audio
-        if au is None:
-            return False
-        hook = getattr(au, "is_active", None)
-        if hook is not None:
-            return bool(hook())
-        eng = getattr(au, "engine", None)
-        return bool(eng is not None and eng.is_active())
+        return au is not None and au.is_active()
 
     # -- input -------------------------------------------------------------------
 

@@ -311,23 +311,6 @@ def install(real, mod):
     mod.TICK_DRAW = 1
     _real[0] = real
 ''',
-    # The feeder runs on core 1 on the board; nothing of it is per-frame Python.
-    "moy_audio_shim.py": '''
-def audio_start(bck, ws, dout, rate):
-    return True
-
-
-def running():
-    return False
-
-
-def install(real, mod):
-    for k in dir(real):
-        if not k.startswith("__"):
-            setattr(mod, k, getattr(real, k))
-    mod.audio_start = audio_start
-    mod.running = running
-''',
 }
 
 DRIVER = r'''
@@ -404,10 +387,6 @@ def main():
         import moycore_shim
         moycore_shim.install(_real_moycore, moycore_shim)
         sys.modules["moycore"] = moycore_shim
-        import moy_audio as _real_audio
-        import moy_audio_shim
-        moy_audio_shim.install(_real_audio, moy_audio_shim)
-        sys.modules["moy_audio"] = moy_audio_shim
 
         import moybyte_sd
         moybyte_sd._live_mounted = True      # the card attached at boot

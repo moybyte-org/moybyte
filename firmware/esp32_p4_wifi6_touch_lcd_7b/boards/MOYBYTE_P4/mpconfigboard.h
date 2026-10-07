@@ -107,6 +107,15 @@
 #define MOY_BUS_I2C_SCL                     (8)
 #define MOY_BUS_I2C_HZ                      (400000)
 
+// The speaker (native/moy_audio/moy_aud_out.c, #82): the ES8311 codec on the
+// bus above, clocked from MCLK, and its power amplifier's enable.
+#define MOY_AUDIO_CODEC_ES8311              (1)
+#define MOY_AUDIO_I2S_MCLK                  (13)
+#define MOY_AUDIO_I2S_BCK                   (12)
+#define MOY_AUDIO_I2S_WS                    (10)
+#define MOY_AUDIO_I2S_DOUT                  (9)
+#define MOY_AUDIO_PA_GPIO                   (53)
+
 // The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
 // released layer buffers it keeps for the next run. A window's buffer is
 // never pooled (the desk re-mints at every size); a cart's worlds are.

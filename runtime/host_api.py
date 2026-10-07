@@ -5,7 +5,7 @@ make_api itself moved to `runtime/cart_api.py` on 2026-08-17 -- it existed here
 and in device/device_api.py as ~80% line-identical twins, and the twin killed
 that day had already drifted (the device's layer verbs lost `tline`, the host's
 multi-tile spr had lost the #63 cache). What REMAINS here is what is genuinely
-the host's: FakeAudio/FakeWifi (the recordable service fakes), ConsoleDriver
+the host's: FakeWifi (the recordable service fake), ConsoleDriver
 (the sim/web per-frame driver), _NullComp. host_app.py imports this back and
 re-exports every name, so `host_app.make_api` / `.ConsoleDriver` / ... are
 unchanged for the sim, the web console, and the tests. Everything stays
@@ -23,106 +23,12 @@ except ImportError:                     # host: the runtime package
 PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
 
 
-class FakeAudio:
-    """Host audio backend (#16) that records every call AND drives the shared
-    AudioEngine, so behavior is fully assertable headlessly -- no sound hardware
-    needed. Mirrors the existing sim fakes (moybyte_sim fake audio,
-    moybyte/audio.py AudioService.calls). The optional real-playback backend
-    (SdlAudio, see docs/audio_design_v04.md) is a thin follow-on that pulls
-    engine.render() from an SDL stream instead of just recording.
-
-    `tick(dt)` renders a block each frame so render() is exercised on the same
-    schedule the device's per-frame I2S feeder would use. The fraction of a
-    frame `dt` leaves over is carried to the next tick, so the blocks add up
-    to the engine's rate exactly.
-
-    `stream` is a compiled cart's `snd` queue while one runs (the host run,
-    `wasm_binding.HostWasmRun`); each block mixes it in after the synth, under
-    the master level, as the boards' speaker mixer does."""
-
-    def __init__(self, engine):
-        self.engine = engine
-        self.calls = []           # [("sfx", n, chan), ("beep", f, d), ...]
-        self.rendered = 0         # total PCM frames pulled via tick()
-        self.last_pcm = b""       # most recent tick()'s PCM block (drained by the web console)
-        self.stream = None
-        self._carry = 0.0
-
-    def sfx(self, n, chan=None):
-        self.calls.append(("sfx", int(n), chan))
-        self.engine.play_sfx(n, chan)
-
-    def beep(self, freq, dur=0.15):
-        self.calls.append(("beep", freq, dur))
-        self.engine.play_beep(freq, dur)
-
-    def music(self, track, loop=True):
-        self.calls.append(("music", int(track), bool(loop)))
-        self.engine.play_music(track, loop)
-
-    def music_stop(self):
-        self.calls.append(("music_stop",))
-        self.engine.stop_music()
-
-    def sound_stop(self, chan=None):
-        self.calls.append(("sound_stop", chan))
-        self.engine.stop(chan)
-
-    def volume(self, level):
-        self.calls.append(("volume", level))
-        self.engine.set_volume(level)
-
-    def is_active(self):
-        """True while anything is audible. The backend-level hook the Music
-        editor asks (#97) -- on the host that is just the engine, but the device
-        and web backends answer from libmoy, which owns the sequencers there."""
-        return self.engine.is_active()
-
-    def block(self, dt):
-        """The PCM `dt` stands for, as bytes of signed 16-bit mono: the synth,
-        then the cart's stream mixed in. b"" when `dt` covers no whole frame."""
-        want = self.engine.rate * max(0.0, dt) + self._carry
-        n = int(want)
-        self._carry = want - n
-        if n <= 0:
-            return b""
-        pcm = self.engine.render(n)
-        if self.stream is not None:
-            buf = bytearray(pcm)
-            self.stream.snd_mix(buf, n, self.engine.rate, self.engine.master)
-            pcm = bytes(buf)
-        self.rendered += n
-        return pcm
-
-    def tick(self, dt):
-        pcm = self.block(dt)
-        if pcm:
-            # Keep the rendered block (was discarded) so the web console can stream the
-            # FINISHED PCM to the browser -- no second synth in JS (audio.py stays the
-            # single source of truth). The device/headless paths just ignore last_pcm.
-            self.last_pcm = pcm
-
-    def take_pcm(self):
-        """Hand off the last tick()'s PCM (signed-16 LE mono bytes) and clear it. The
-        web console drains this each frame to stream finished audio; empty between
-        renders or when nothing is playing."""
-        pcm = self.last_pcm
-        self.last_pcm = b""
-        return pcm
-
-
-def make_audio(engine):
-    """Injected backend factory: wrap an AudioEngine in the host FakeAudio backend.
-    build_workstation hands this to the Workstation; the device injects its own."""
-    return FakeAudio(engine)
-
-
 # --- WiFi (#38): host fake backend ------------------------------------------
 # The device wraps network.WLAN; on the PC there is no radio, so this fake gives
 # the WiFi-manager cart something to drive in the simulator. It mirrors the
 # device backend's interface exactly -- scan/connect/status/forget/known -- with
 # canned scan results, a fake connect (records creds + reports connected), and a
-# fake IP, so the manager cart is fully assertable headlessly (like FakeAudio).
+# fake IP, so the manager cart is fully assertable headlessly.
 #
 # Credentials persist through the SAME store the device uses (moy_carts
 # load_wifi/remember_wifi/forget_wifi over wifi.json), so a connect() the kid

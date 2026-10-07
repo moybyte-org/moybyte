@@ -1,11 +1,11 @@
-"""Audio parity: the host AudioEngine's door into vendored libmoy (#97).
+"""Audio parity: the host's `moy_audio`, its door into vendored libmoy (#97).
 
 Every tier compiles libmoy (native/moy_audio/libmoy/) now: the boards and the
 web runner natively, and -- since moycore stage 0 deleted the hand-maintained
 Python twin -- the host sim too, through the ctypes .so that
-runtime/audio_binding.py builds from the DOUBLE-WIDENED vendored source. This
-harness renders the same scenario through `runtime/audio.AudioEngine` (i.e.
-the binding) and through an independently-driven reference binary
+runtime/audio_binding.py builds from the DOUBLE-WIDENED vendored source and
+the kernel's sessions (native/moy_audio/moy_aud.c). This harness renders the
+same scenario through a session of that binding and through an independently-driven reference binary
 (libmoy_render.c) and compares; what it can catch is no longer synth drift --
 there is one synth -- but a mangled verb argument, the bank's one JSON
 crossing, or a broken render buffer.
@@ -297,39 +297,43 @@ def find_micropython():
 # -- the Python engine -------------------------------------------------------
 
 def render_python(bank_dict, commands):
-    """Run one scenario through runtime/audio.AudioEngine -- since stage 0
-    that IS the ctypes binding over the double-widened vendored C, so this is
-    the host console's real playback path end to end; int16 samples."""
-    from runtime.audio import AudioBank, AudioEngine
+    """Run one scenario through the host's `moy_audio` -- the kernel's audio
+    (native/moy_audio) over the double-widened vendored C, by ctypes: the host
+    console's real playback path end to end; int16 samples."""
+    import json
+    sys.path.insert(0, _ROOT)
+    from runtime import audio_binding
 
-    engine = AudioEngine(AudioBank.from_dict(bank_dict), rate=RATE)
+    na = audio_binding.get()
+    na.set_rate(RATE)
+    h = na.open(0x7A11, json.dumps(bank_dict))
+    na.focus(h)
     out = []
-    for line in commands:
-        parts = line.split()
-        cmd, args = parts[0], parts[1:]
-        if cmd == "sfx":
-            n = int(args[0])
-            chan = int(args[1]) if len(args) > 1 else -1
-            engine.play_sfx(n, None if chan < 0 else chan)
-        elif cmd == "beep":
-            engine.play_beep(float(args[0]), float(args[1]))
-        elif cmd == "music":
-            loop = bool(int(args[1])) if len(args) > 1 else True
-            engine.play_music(int(args[0]), loop)
-        elif cmd == "music_stop":
-            engine.stop_music()
-        elif cmd == "sound_stop":
-            chan = int(args[0]) if args else -1
-            engine.stop(None if chan < 0 else chan)
-        elif cmd == "volume":
-            engine.set_volume(int(args[0]))
-        elif cmd == "render":
-            n = int(args[0])
-            buf = bytearray(n * 2)
-            engine.render_into(buf, n)
-            out.extend(struct.unpack("<%dh" % n, bytes(buf)))
-        else:
-            raise ValueError("unknown command " + cmd)
+    try:
+        for line in commands:
+            parts = line.split()
+            cmd, args = parts[0], parts[1:]
+            if cmd == "sfx":
+                na.sfx(h, int(args[0]), int(args[1]) if len(args) > 1 else -1)
+            elif cmd == "beep":
+                na.beep(h, float(args[0]), float(args[1]))
+            elif cmd == "music":
+                na.music(h, int(args[0]), int(args[1]) if len(args) > 1 else 1)
+            elif cmd == "music_stop":
+                na.music_stop(h)
+            elif cmd == "sound_stop":
+                na.stop(h, int(args[0]) if args else -1)
+            elif cmd == "volume":
+                na.level(h, int(args[0]))
+            elif cmd == "render":
+                n = int(args[0])
+                buf = bytearray(n * 2)
+                na.render(buf, n)
+                out.extend(struct.unpack("<%dh" % n, bytes(buf)))
+            else:
+                raise ValueError("unknown command " + cmd)
+    finally:
+        na.close(h)
     return out
 
 

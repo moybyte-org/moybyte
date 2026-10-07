@@ -335,5 +335,5 @@ def test_coin_quest_pickup_asks_for_a_sound_that_exists(tmp_path):
     ws = build_ws(tmp_path)
     open_cart(ws, "Coin Quest")
     assert ws.cart_error is None
-    sfx0 = ws.audio.engine.bank.get_sfx(0)
+    sfx0 = ws.audio.bank.get_sfx(0)
     assert sfx0 is not None and sfx0.steps, "Coin Quest picks up in silence"

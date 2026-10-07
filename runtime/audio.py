@@ -5,36 +5,21 @@ so the *same* file backs the host reference (imported as runtime.audio) and the
 MicroPython device port (frozen as the top-level module `audio`, staged by
 build.sh).
 
-It holds two things:
-
-  1. The sound DATA MODEL -- the kid-authored, JSON-serializable cart audio:
+It holds the sound DATA MODEL -- the kid-authored, JSON-serializable cart audio:
        note   = [pitch, wave, vol] or [pitch, wave, vol, eff]   (the atom)
        SFX     = {speed, loop, steps:[note]}   (a short blip/effect)
        music   = {speed, loop, pattern:[row]}  (rows: one SFX id, or a list of
                                                 up to 4 ids -- one per channel)
        AudioBank = {sfx:[SFX], music:[track]}  (the whole cart bank -> sounds.json)
 
-  2. AudioEngine -- the per-cart engine object. On the HOST it synthesizes by
-     driving the vendored libmoy C through runtime/audio_binding.py (a ctypes
-     .so built from the exact source the boards compile), and render(nframes)
-     pulls signed-16-bit mono PCM -- the seam the host backends consume (the
-     SDL stream, the test recorder, the web console's per-frame PCM). On the
-     DEVICE the binding is absent by design and the class is the MODEL holder
-     only: it carries the bank the Music editor edits and the master level,
-     while playback lives in the native moy_audio module (device_audio.py).
+The PLAYING is the kernel's: native/moy_audio (sessions, the mix, the speaker)
+over vendored libmoy, reached through runtime/audio_session.py on every tier.
 
-THERE IS NO PYTHON SYNTH ANY MORE (#97, moycore stage 0)
-This module used to carry a hand-maintained line-for-line Python twin of
-libmoy's synthesizer, pinned by a bit-exact parity suite. The twin's whole
-drift class had a body count anyway (the equal-loudness bug, the truncated
-fractional SFX speeds -- both were twin bugs the pin caught late), so the host
-now binds the vendored C itself: one synthesizer, every tier. The binding
-compiles the source DOUBLE-WIDENED (the parity harness's own recipe), which the
-old strict suite had already proven bit-identical to the twin -- the swap moved
-no sample the host ever played. Without a C compiler the host plays SILENCE
-(owner decision 2026-08-11: no fallback, KISS -- the degradation lane's job was
-never playback quality). tests/test_audio_parity.py still gates: it now pins
-the BINDING against the reference render, marshalling instead of arithmetic.
+THERE IS NO PYTHON SYNTH (#97, moycore stage 0). The host binds the vendored
+C itself (runtime/audio_binding.py, compiled DOUBLE-WIDENED, the parity
+harness's recipe); without a C compiler the host has no audio module and plays
+nothing (owner decision 2026-08-11: no fallback, KISS). tests/test_audio_parity.py
+pins the binding against the reference render.
 
 SPEC.md 8.3 exempts audio from pixel conformance, so cart mixes are balanced
 against PICO-8's deliberately unequal instrument loudness (via zepto8/fake-08);
@@ -305,207 +290,6 @@ class AudioBank:
         return cls([coin, jump, thud], [loop])
 
 
-# -- the engine ---------------------------------------------------------------
-#
-# AudioEngine drives the vendored libmoy synthesizer through the ctypes binding
-# (runtime/audio_binding.py). The class is constructed everywhere -- host and
-# device -- so the binding import is guarded and every playback verb degrades to
-# a silent no-op without it (on the boards, playback lives in the native
-# moy_audio module instead; this object is their bank/model holder). Argument
-# guards mirror what the retired twin did; the bounds/ownership logic itself is
-# libmoy's own (moy_audio.c checks them all), so nothing here re-implements the
-# spec.
-
-_binding_mod = None      # the audio_binding module, or False once import failed
-
-
-def _binding():
-    """The loaded C binding, or None (MicroPython, or no compiler)."""
-    global _binding_mod
-    if _binding_mod is False:
-        return None
-    if _binding_mod is None:
-        try:
-            try:
-                from runtime import audio_binding as _ab
-            except ImportError:
-                import audio_binding as _ab
-            _binding_mod = _ab
-        except Exception:        # MicroPython: no such module, by design
-            _binding_mod = False
-            return None
-    return _binding_mod.get()
-
-
-class AudioEngine:
-    """The per-cart audio engine: holds the AudioBank (the MODEL -- the Music
-    editor mutates it in place and bumps bank.rev) and, on the host, a libmoy
-    engine handle that does the actual synthesis. render(nframes) pulls
-    signed-16-bit little-endian mono PCM; without the binding it pulls silence.
-
-    The control surface (play_sfx/play_beep/play_music/stop_music/stop/
-    set_volume/is_active) survives the retired Python twin unchanged, so
-    FakeAudio, SdlAudio and the Music editor drive exactly what they always
-    drove. The bank crosses to C ONCE per edit generation, as sounds.json text
-    through libmoy's own parser -- the same single crossing the device makes,
-    re-checked by an identity+int compare at each trigger (AudioBank.rev)."""
-
-    def __init__(self, bank=None, rate=11025):
-        self.bank = bank if bank is not None else AudioBank.default()
-        self.rate = int(rate)
-        self.master = 7             # SPEC.md 8.2 volume(level): 0..7
-        lib = _binding()
-        self._h = lib.new(self.rate) if lib is not None else None
-        self._lib = lib if self._h else None
-        self._pushed_bank = None    # strong ref: the bank last handed to C --
-        self._pushed_rev = -1       # object identity, so a reused id() can
-        self._pushed_rate = -1      # never alias a fresh bank as "unchanged"
-
-    def __del__(self):
-        lib, h = self._lib, self._h
-        self._lib = None
-        self._h = None
-        if lib is not None and h:
-            try:
-                lib.free(h)
-            except Exception:       # interpreter teardown: ctypes may be gone
-                pass
-
-    def _sync(self):
-        """Hand the bank to libmoy when it (or the rate) moved since the last
-        trigger. One compare on the hot path; the JSON crossing only happens
-        after a real edit. Returns True when the C engine is live."""
-        lib, h = self._lib, self._h
-        if h is None:
-            return False
-        b = self.bank
-        if (b is self._pushed_bank and b.rev == self._pushed_rev
-                and self.rate == self._pushed_rate):
-            return True
-        if self.rate != self._pushed_rate:
-            lib.set_rate(h, self.rate)
-        import json
-        lib.bank_load(h, json.dumps(b.to_dict()))
-        lib.volume(h, self.master)  # bank_load resets the engine, master too
-        self._pushed_bank = b
-        self._pushed_rev = b.rev
-        self._pushed_rate = self.rate
-        return True
-
-    # -- control ---------------------------------------------------------
-
-    def set_volume(self, level):
-        """Master output level, 0..7 -- the same scale as a note's `vol`, and
-        what libmoy and SPEC.md 8.2 mean by volume(level)."""
-        try:
-            v = int(level)
-        except (TypeError, ValueError):
-            return
-        self.master = 0 if v < 0 else (7 if v > 7 else v)
-        if self._h is not None:
-            self._lib.volume(self._h, self.master)
-
-    def play_sfx(self, n, chan=None):
-        """Play SFX `n`. `chan` forces a channel; otherwise (or out of range)
-        libmoy round-robins whatever music leaves free -- see moy_audio_sfx."""
-        try:
-            n = int(n)
-            c = -1 if chan is None else int(chan)
-        except (TypeError, ValueError):
-            return
-        if self._sync():
-            self._lib.sfx(self._h, n, c)
-
-    def play_beep(self, freq, dur=0.15):
-        """A tone at `freq` Hz for `dur` seconds -- square at vol 6 (SPEC.md
-        8.2). The zero-data escape hatch: an exact frequency (not snapped to a
-        semitone) on the engine's own oscillator, so it costs no channel."""
-        try:
-            freq = float(freq)
-            dur = float(dur)
-        except (TypeError, ValueError):
-            return
-        if freq <= 0.0 or dur <= 0.0:
-            return
-        if self._h is not None:
-            self._lib.beep(self._h, freq, dur)
-
-    @staticmethod
-    def freq_to_pitch(freq):
-        """Nearest semitone index for a frequency (inverse of note_to_freq)."""
-        return int(round(_A4_PITCH + 12.0 * math.log(freq / _A4_FREQ, 2)))
-
-    def play_music(self, track, loop=True):
-        """Start music track `track`, claiming channels from the top (8.1).
-        `loop` overrides the track's own flag; None keeps the track's. Out of
-        range (or an empty pattern) is a no-op, exactly as libmoy treats it."""
-        try:
-            t = int(track)
-        except (TypeError, ValueError):
-            return
-        m = self.bank.get_music(t)
-        if m is None:
-            return
-        lp = m.loop if loop is None else bool(loop)
-        if self._sync():
-            self._lib.music(self._h, t, 1 if lp else 0)
-
-    def stop_music(self):
-        if self._h is not None:
-            self._lib.music_stop(self._h)
-
-    def stop(self, chan=None):
-        """Stop one channel, or everything (voices, music and the beep) when
-        chan is None."""
-        if self._h is None:
-            return
-        try:
-            c = -1 if chan is None else int(chan)
-        except (TypeError, ValueError):
-            return
-        self._lib.sound_stop(self._h, c)
-
-    def active_channels(self):
-        """Bit mask of what is sounding: bits 0..3 the four voices, bit 4 the
-        music track, bit 5 the beep -- the device module's active() layout, so
-        behavior tests read the same instrument on every tier. 0 is silence,
-        and all a binding-less build ever reports."""
-        if self._h is None:
-            return 0
-        return self._lib.active(self._h)
-
-    def is_active(self):
-        """True if anything is currently producing sound."""
-        return self.active_channels() != 0
-
-    # -- rendering -------------------------------------------------------
-
-    def render_into(self, out, nframes):
-        """Mix `nframes` of signed-16-bit mono PCM into the caller's `out`
-        bytearray (at least nframes*2 bytes). Returns the frames written.
-        Allocation-free when the binding is live: libmoy writes into the
-        buffer directly, in native byte order (little-endian on every host the
-        sim runs on, matching what the seam always produced)."""
-        nframes = int(nframes)
-        if nframes <= 0:
-            return 0
-        if self._h is not None:
-            self._lib.render_into(self._h, out, nframes)
-        else:
-            out[:2 * nframes] = b"\x00" * (2 * nframes)
-        return nframes
-
-    def render(self, nframes):
-        """Pull `nframes` of signed-16-bit little-endian mono PCM as bytes. The
-        seam the host backends consume; the device prefers render_into()."""
-        nframes = int(nframes)
-        if nframes <= 0:
-            return b""
-        out = bytearray(nframes * 2)
-        self.render_into(out, nframes)
-        return bytes(out)
-
-    def tick(self, dt):
-        """API-symmetry seam: a poll-based feeder could render rate*dt samples
-        here. The host's sample-pull backends call render() directly."""
-        return None
+def freq_to_pitch(freq):
+    """Nearest semitone index for a frequency (inverse of note_to_freq)."""
+    return int(round(_A4_PITCH + 12.0 * math.log(freq / _A4_FREQ, 2)))

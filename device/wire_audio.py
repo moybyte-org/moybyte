@@ -1,17 +1,24 @@
-"""Audio's provider: the console's audio backend factory, for the board whose
-image plays sound (docs/kernel_survival_2026-10.md section 2 item 1).
+"""Audio's provider (docs/kernel_survival_2026-10.md section 2 item 1): what a
+board's boot does for the speaker, which is nearly nothing. The kernel's
+`moy_audio` plays the focused session from its own feeder task, started at
+the first session's focus, never at boot; there is no fallback feed, and a
+board whose output cannot start has no audio (`moy_audio.out()` says why).
 
-`audio_factory()` is what a board hands `build_desktop` as `make_audio`: the
-device tier's `device_audio.make_audio` over the native `moy_audio`, or None
-where the image has no backend, in which case a cart plays into
-`audio_session._SilentAudio`.
+`attach()` runs before the touch driver opens the I2C bus: on a board with a
+codec it puts the codec's address on the kernel's bus (native/moy_kernel's
+moy_bus), so the bus is the kernel's from boot. No register is written until
+the first start.
 """
 
 
-def audio_factory():
-    """The audio backend factory, or None on an image without one."""
+def attach(log=print):
+    """Say whether this image plays sound, and take the codec's bus address.
+    Returns the module or None."""
     try:
-        from device_audio import make_audio
+        import moy_audio
     except ImportError:
+        log("audio: none in this image")
         return None
-    return make_audio
+    if not moy_audio.attach():
+        log("audio: the I2C bus refused the codec")
+    return moy_audio

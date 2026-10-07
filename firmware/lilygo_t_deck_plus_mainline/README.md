@@ -286,16 +286,16 @@ would be a teardown after the attach.
 #### `MODE = "audio"` (stage 5)
 
 A rising four-note phrase, the three starter SFX (coin / jump / thud), five
-seconds of music 0, then the same SFX at master volume 0 and 7.
+seconds of music 0, then the first SFX at the console's level 0.
 
 **But the verdict is a number, not the sound.** "I hear nothing" has at least
 four causes — no native module, no I2S channel, a synth producing silence, or
 an amp that is not wired — and an ear cannot tell them apart. So every step
-reports `moy_audio.frames_out()`, the frames the I2S peripheral has actually
+reports `moy_audio.stats()[1]`, the frames the I2S peripheral has actually
 **accepted**, which is the last thing measurable on this side of the wire:
 
 ```
-Moybyte audio: feed=core-1 task rate=22050 bank sfx=3 music=1
+Moybyte audio: out=1 () rate=22050 bank sfx=3 music=1
 Moybyte audio: beep 262    350ms frames=7717 measured=22048Hz (nominal 22050)
 Moybyte audio: VERDICT the peripheral consumes at the nominal rate.
 ```
@@ -303,7 +303,7 @@ Moybyte audio: VERDICT the peripheral consumes at the nominal rate.
 | the number | what it means |
 |---|---|
 | ~22050 Hz | the synth renders and the peripheral consumes. Silence past this point is the **amp or its wiring**, not the firmware |
-| flat / `frames=0` | nothing is feeding I2S. The `feed=` line says which path was taken — `core-1 task`, `legacy I2S`, or `NONE` |
+| flat / `frames=0` | nothing is feeding I2S. The `out=` line says whether the kernel's output started and, if not, why |
 | a *wrong* rate | the clock. By ear this is just "sounds a bit off"; by number it is unambiguous |
 | `moy_audio ABSENT` | the usermod is not in this image. That is silence **by design** (#97) — the Python fallback synth died with moycore stage 0 |
 

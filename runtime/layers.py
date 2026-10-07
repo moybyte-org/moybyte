@@ -277,8 +277,8 @@ class _MusicLayer(Layer):
     def draw(self, dt):
         ws = self.ws
         ws._reset_canvas_state()
-        if ws.audio is not None:
-            ws.audio.tick(dt)
+        if ws.audio_out is not None:
+            ws.audio_out.tick(dt)
         mu = ws.music_ui
         if mu.music_preview is not None and not mu._music_preview_active():
             mu.music_preview = None

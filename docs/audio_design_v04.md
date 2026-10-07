@@ -1,9 +1,12 @@
 # Moybyte v0.4 Audio — design + vertical slice
 
 **Issue:** #16 (Audio: sound effects + music, plus an on-device music editor)
-**Status:** shipped. The host, the T-Deck and the browser build all make sound.
-The synth is vendored libmoy (#97), rendered on core 1 on the board and fed to
-I2S; `docs/moy_cart_api.md` (Audio) is the current verb table.
+**Status:** shipped. The host, the T-Deck, both P4s and the browser build all
+make sound. The synth is vendored libmoy (#97); the playing is the kernel's
+(`native/moy_audio/moy_aud.h`, sprint 3, 2026-10-07: sessions per owner, the
+focused one heard, a core-1 feeder task on a board);
+`docs/kernel_survival_2026-10.md` §5 is that design and `docs/moy_cart_api.md`
+(Audio) is the current verb table.
 
 > **#170 (2026-07-29) — the model grew to PICO-8 parity** and this doc now
 > describes only the original core: today there are **8 waveforms**, an
@@ -19,16 +22,16 @@ I2S; `docs/moy_cart_api.md` (Audio) is the current verb table.
 > synthesis to PICO-8's measured output (zepto8/fake-08), and moy-spec's own C
 > implementation of it, **libmoy**, is now vendored into
 > `native/moy_audio/libmoy/` and
-> **compiled into** the T-Deck and the web runner. `native/moy_audio` is a thin
-> binding over its public API: libmoy owns the bank, both sequencers and the
-> mixer, and MicroPython only forwards the six §8.2 verbs. §2.5 and §5 below
-> describe the architecture that replaced — read them as history.
+> **compiled into** every tier. libmoy owns the bank, both sequencers and the
+> mixer. §2.5, §4 and §5 below describe the architecture that replaced — read
+> them as history.
 >
-> `runtime/audio.py`'s `AudioEngine` survives because the host sim runs CPython
-> and cannot link C without putting a compiler in `make setup`. It is a
-> hand-maintained twin of that same file, pinned **bit-for-bit** by
-> `tests/test_audio_parity.py`. The data model (§2.1–2.4) and the storage
-> format (§3) are unchanged and still shared by everything.
+> **Sprint 3 (2026-10-07) — the playing is the kernel's.** `AudioEngine`,
+> `FakeAudio`, `SdlAudio`, `DeviceAudio` and `_SilentAudio` are deleted: a cart
+> run opens a session in `native/moy_audio` (`runtime/audio_session.py` is the
+> Python face), and the host and the browser pull the kernel's mix once a
+> frame. The data model (§2.1–2.4) and the storage format (§3) are unchanged
+> and still shared by everything.
 **Scope of this doc:** the cart-facing audio API, the shared sound data model, the
 host backend, the device (T-Deck Plus I2S) backend, on-cart storage, and where the
 on-device music/SFX editor fits the existing console UI.
@@ -71,8 +74,8 @@ Design notes:
   sound declares `"audio"` in its manifest `moybyte.permissions` (not the plan's
   `"sound"`), and nothing gates sound on it: the permissions the console
   actually enforces are the app ones and `network`/`multiplayer`
-  (`runtime/system_api.py`). The `_SilentAudio` no-op backend is the hook if
-  audio ever joins them.
+  (`runtime/system_api.py`). A cart run without a session (its verbs no-ops)
+  is the hook if audio ever joins them.
 
 ---
 
@@ -148,14 +151,10 @@ editor are never empty.
 
 ### 2.5 The mixer (`AudioEngine`)
 
-> **Superseded by #97 for playback, and the Python twin is GONE** (moycore stage
-> 0, 2026-08-11). Every tier — boards, browser and host — renders through
-> vendored libmoy; `AudioEngine` keeps the name and the control surface below,
-> but it is now the BANK/MODEL holder plus (on the host) a libmoy engine handle,
-> and **there is no fallback synth: no binding means SILENCE**, by owner call.
-> Two API corrections to the list below: `set_volume` takes **0–7**, not a 0–1
-> fraction, and `beep` no longer consumes a channel. `runtime/audio.py`'s
-> docstring is the authority.
+> **History.** The Python twin died with moycore stage 0 (2026-08-11) and
+> `AudioEngine` itself with sprint 3 (2026-10-07): every tier renders through
+> the kernel's sessions over vendored libmoy (`native/moy_audio/moy_aud.h`),
+> and **there is no fallback synth: no module means SILENCE**, by owner call.
 
 The control surface (the shape libmoy is driven through, NOT a Python synth):
 
@@ -206,6 +205,11 @@ gates audio on it (see §1).
 
 ## 4. Host backend (`runtime/host_app.py`)
 
+> **History** (sprint 3, 2026-10-07): `FakeAudio` and `SdlAudio` are deleted.
+> The host's run opens a kernel session like a board's; `audio_session.PcmPump`
+> pulls the mix once a frame (`host_app.SdlPump` plays it), and the tests read
+> the session trace instead of a call list.
+
 `make_api` gains the audio functions, bound to a host audio backend:
 
 - **`FakeAudio`** (default for tests/headless): records every call
@@ -226,10 +230,11 @@ backend the calls + the engine state are enough to assert behavior headlessly.
 ## 5. Device backend (T-Deck Plus, I2S MAX98357)
 
 > **The pin map and the feed strategy below still hold; the rest is history
-> (#97).** `DeviceAudio` no longer renders anything: it hands the cart's
-> `sounds.json` to libmoy once, forwards the §8.2 verbs, and owns I2S. The
-> core-1 task renders straight out of libmoy's one engine struct under a mutex,
-> in small chunks so a verb call from core 0 waits microseconds. The per-frame
+> (#97, sprint 3).** `DeviceAudio` is deleted: the kernel's `moy_aud_out.c` owns
+> I2S, starting it at the first session's focus, and its core-1 task renders
+> straight out of the focused session's libmoy state under a mutex, in small
+> chunks so a verb call from core 0 waits microseconds. There is no per-frame
+> fallback feed. The per-frame
 > voice marshalling (`voice_set` / `voice_read`), the snapshot-and-fold-back and
 > the per-voice commit counter that arbitrated between the two copies are all
 > gone — there is one copy of the state now, so there is nothing to reconcile.

@@ -24,9 +24,9 @@ footprint arithmetic (`WasmHostRuntime`).
 The cart's written files (moy-spec SPEC.md 16.12) are kept beside the carts
 store, `written/<cart>/`, by runtime/cart_files.py, as every tier keeps them.
 
-The cart's `snd` stream is the run's; while it runs, the console's audio
-backend mixes it into every block it renders (`host_api.FakeAudio.stream`),
-so it drains at the pace the host plays, as a board's speaker drains it.
+The cart's `snd` stream is the run's; while it runs, the console's pull of
+the mix adds it to every block (`audio_session.PcmPump.stream`), so it drains
+at the pace the host plays, as a board's speaker drains it.
 
 Canonical home is runtime/; tests import it as runtime.wasm_host.
 """
@@ -168,7 +168,7 @@ class WasmHostRun(MoycoreHostRun):
             self._run.close()
             raise RuntimeError(err)
         self._sync_view()
-        self._audio = getattr(ws, "audio", None)
+        self._audio = getattr(ws, "audio_out", None)
         if self._audio is not None and hasattr(self._audio, "stream"):
             self._audio.stream = self._run
         self.init = None

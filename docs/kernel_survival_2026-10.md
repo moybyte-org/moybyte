@@ -85,7 +85,7 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the touch drivers | `device/gt911.py`, `device/gsl3680.py`, `device/axs_touch.py`, `modules/p4_input.py`, `modules/guition_p4_input.py`, `modules/gsl_fw_jc8012.py` | `+native/moy_input/moy_touch_gt911.c`, `+native/moy_input/moy_touch_gsl3680.c`, `+native/moy_input/moy_touch_axs.c`; the GSL firmware as a C array | 2 |
 | the BLE HID central | `device/ble_keyboard.py` over `bluetooth`; `native/p4/moy_ble_hid/` | `+native/moy_input/moy_ble_hid.c` over the NimBLE host, on every console | 2 |
 | the browser's event decode | `runtime/web_input.py` | the web build's `moy_input` import | 2 |
-| the audio session, the six verbs, the bank push, the master level | `device/device_audio.py`, `runtime/audio.py`'s `AudioEngine`, `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`runtime/audio_session.py`) | `native/moy_audio/` grows its session and verb face; the codec in `+native/moy_audio/moy_codec_es8311.c` | 2 |
+| the audio session, the six verbs, the bank push, the master level | `device_audio.py` (deleted), `runtime/audio.py`'s `AudioEngine`, `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`runtime/audio_session.py`) | `native/moy_audio/moy_aud.h` (sessions and the mix), `native/moy_audio/moy_aud_out.c` (the speaker), the codec in `native/moy_audio/moy_codec_es8311.c` | 2 |
 | WiFi, the radio under the spine's lease | `device/device_wifi.py` (the service over `kernel_wlan`; the Zero's station stays the port's) | `native/moy_net/moy_wifi.c` | 2 |
 | ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `native/moy_net/moy_link.c` | 2 |
 | the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `native/moy_net/moy_http.c`, `+native/moy_net/moy_webhost.c` | 2 |
@@ -624,85 +624,102 @@ baseline already; the C central's own statics are not, and §8 counts them.
 
 ### 5.1 Sessions and the verb face
 
-The synth is libmoy's and already C (`native/moy_audio/`): the bank, both
-sequencers, the mixer, the core-1 feeder task that blocks on the DMA drain,
-the stream a compiled cart mixes in. What is Python is thin and scattered —
-`device/device_audio.py` pushes the bank once per cart and forwards six verbs,
-`runtime/audio.py`'s `AudioEngine` holds the host's playback, and the
-engine is constructed per cart by `runtime/project_store.py`, wrapped by
-`runtime/host_api.py`'s `FakeAudio` and `web_boot.py`'s `_RunnerAudio` (a
-Python class over it), previewed by `runtime/music_editor_ui.py`, silenced by
-`runtime/audio_session.py`'s `_SilentAudio`, driven by `runtime/wallpaper.py`'s
-run and drained by `device/moycore_glue.py`. The one global verb face those
-share has no owner, which is wrong on the P4 desk, where two cart windows and
-the Music editor's preview can hold banks at once. The crossing gives the
-module sessions:
+The synth is libmoy's (`native/moy_audio/libmoy/`, vendored): the bank, both
+sequencers, the mixer, the stream a compiled cart mixes in. Before this pass
+the Python around it was thin and scattered -- a per-cart `AudioEngine`
+constructed by `runtime/project_store.py` and `runtime/wallpaper.py`, wrapped
+by `host_api.FakeAudio`, `web_boot.py`'s `_RunnerAudio` and
+`device_audio.py` (all deleted), silenced by `_SilentAudio` -- over one global verb
+face with no owner, which is wrong on the P4 desk, where two cart windows and
+the Music editor's preview hold banks at once. The kernel's audio is
+`native/moy_audio/moy_aud.h` (pass 2, 2026-10-07):
 
-    int  moy_audio_open(uint32_t *s, uint32_t owner, const char *bank_json, size_t n);
-    int  moy_audio_bank(uint32_t s, const char *bank_json, size_t n);   // on change of the bank's rev
-    void moy_audio_focus(uint32_t s);                       // the audible session; the others are muted, not stopped
-    void moy_audio_sfx(uint32_t s, int n, int chan);
-    void moy_audio_beep(uint32_t s, int freq_hz, int dur_ms);
-    void moy_audio_music(uint32_t s, int track, bool loop);
-    void moy_audio_music_stop(uint32_t s);
-    void moy_audio_stop(uint32_t s);
-    void moy_audio_close(uint32_t s);                       // voices silenced, bank freed
-    void moy_audio_volume(int level);                       // 0..7, the settings row, read at boot
-    void moy_audio_hush(void);                              // every session silent within a block
-    int  moy_audio_sample_load(uint32_t *h, const int16_t *pcm, size_t frames, int rate);   // #70's voice
-    void moy_audio_sample_play(uint32_t s, uint32_t h, int chan);
+    int  moy_aud_open(uint32_t *s, uint32_t owner, const char *bank_json, size_t n);
+    int  moy_aud_bank(uint32_t s, const char *bank_json, size_t n);
+    int  moy_aud_focus(uint32_t s);                   // the audible session; the others are muted, not stopped
+    int  moy_aud_sfx(uint32_t s, int n, int chan);
+    int  moy_aud_beep(uint32_t s, float freq_hz, float dur_s);
+    int  moy_aud_music(uint32_t s, int track, int loop);
+    int  moy_aud_music_stop(uint32_t s);
+    int  moy_aud_stop(uint32_t s, int chan);
+    int  moy_aud_level(uint32_t s, int level);        // the cart's volume(), capped by the console's
+    int  moy_aud_close(uint32_t s);                   // voices silenced, bank freed
+    void moy_aud_volume(int level);                   // 0..7, the console's: the settings row
+    void moy_aud_hush(void);                          // every session silent from the next chunk
+    int  moy_aud_sample_load(uint32_t *h, const int16_t *pcm, size_t frames, int rate);   // #70's voice
+    int  moy_aud_sample_play(uint32_t s, uint32_t h, int chan);
+    int  moy_aud_sample_free(uint32_t h);
+    void moy_aud_render(int16_t *out, int n);         // the mix
 
-A session is a row (kind AUDIO, few) owned by an OWNER handle (§3.1) — a cart
-run, the wallpaper, the Music editor — and `focus` is what the Player and
-the desk's focus change call. The legacy feed — `machine.I2S` driven from
-`tick()` when the core-1 task failed to start — is deleted, as the stop
-inventory has it; a board whose task cannot start has no audio, reported as
-absence. The I2S channel and the feeder task keep starting at the first
-session, not at boot: the perf review's point that their internal memory is
-paid with the first cart today and should stay paid then. `device/moycore_glue.py`'s
-drain stops going through `make_api` closures and calls the session's verbs,
-one C call per queued op, in the queue's order. The master level is a settings
-row the kernel reads; the Settings screen writes the row. The AUDIORATE probe
-and the trigger lines are the kernel's and gated by PERF DIAG as every periodic
-line is. The host's `runtime/audio_binding.py` rebinds to the same module built
-for ctypes, its `render` pulled by SDL and by the web runner's `take_pcm` as
-now.
+The prefix is `moy_aud_` because libmoy's own verbs hold `moy_audio_`. `beep`
+takes the frequency as a float, because SPEC.md 8.2's beep is an exact
+frequency; `stop` takes SPEC.md's channel. A session is a row of kind AUDIO
+(`moy_htab.h`) owned by an owner id -- a cart run, the Music editor -- of which
+an owner holds at most one; each has its own bank and libmoy state in PSRAM.
+The Player opens the run's (`ws.audio`, owner "cart") focused; the Music
+editor previews on the open cart's session and focuses it. A wallpaper is
+silent and holds no session. The FOCUSED session is the only one the mix
+renders; a muted one's verbs move its state and nothing of it is heard until
+it is focused.
+
+A bank is parsed outside the lock into fresh memory and swapped in under it,
+so the lock is held for a pointer swap and a voice reset whatever the bank's
+size, and the feeder never waits on a parse. The legacy feed --
+`machine.I2S` driven from `tick()` when the core-1 task failed to start -- is
+deleted, as the stop inventory has it; a board whose output cannot start has
+no audio, reported as absence (`moy_audio.out()`: state and reason). The I2S
+channel, its DMA ring, the mutex and the feeder task start at the first focus
+of a session, never at boot (the perf review's point: their internal memory is
+paid with the first cart today and stays paid then). At boot the board's
+provider (`device/wire_audio.py`) only puts the codec's address on the
+kernel's I2C bus, before the touch driver opens it. `device/moycore_glue.py`'s
+drain calls the run's session, one kernel call per queued op, in the queue's
+order (`runtime/lua_ext.py`'s `drain_audio`). The console's level is the
+settings row: the boot reads it into the kernel and `vol` writes both. The
+AUDIORATE line is formatted by the kernel (`moy_aud_out_probe`) and printed by
+the PERF sampler while PERF DIAG is on, as every periodic line is. The host
+binds the same module for ctypes (`runtime/audio_binding.py`), and the host's
+and the browser's per-frame pull is `runtime/audio_session.py`'s `PcmPump`
+(`ws.audio_out`), feeding SDL and the web runner's `take_pcm`.
 
 ### 5.2 Absorbed issues
 
 - **#82, the ES8311 on both P4s.** The codec is an I2C register sequence at
-  address 0x18 (the factory firmware and Waveshare's demo carry a known-good
-  one), the PA enable a GPIO (53 on the Waveshare, 20 on the Guition P4), the
-  I2S a standard channel on the pins both READMEs list. It lands as a board
-  define on the one module, `MOY_AUDIO_CODEC_ES8311`, the way the DSI panel is
-  a define, on the kernel's I2C bus beside the touch controller; both P4s flip
-  `moy_audio` from denied to taken in board.toml. The feeder task's design is
-  the T-Deck's and is not re-measured against a per-frame feed, because the
-  per-frame feed is the one being deleted. The Guition S3 stays denied: its
-  amp and pins are unverified, and verifying them is a bring-up, not a
-  crossing. The plan's §6.2 puts #82 in this sprint; the gate is the one every
-  board's audio takes (§5.5).
-- **#70, sound packs.** The mechanism is a sample voice in the mixer at the
-  point where a compiled cart's stream is already added (`moy_audio_snd.h`):
-  clips in PSRAM, resampled to the output rate at load, played by slot on a
-  session's channel under the master level. The issue's shape — a family-wide
-  `sound_packs/` folder in the store with templates, labels per slot and
-  recordings that never leave the device — makes a pack store content under
-  the user's files, loaded by a cart into cart memory on demand, never the
-  kernel's share. The cart-facing verb (`load_pack`, `play`) is a change to the
-  public verb table, which is moy-spec's; how much of the issue this sprint
-  takes is §13's question 2.
+  address 0x18 (`native/moy_audio/moy_codec_es8311.c`: Espressif's es8311
+  sequence for a slave on MCLK at 256 fs, 16-bit Philips I2S, DAC on; each
+  register read back after it, with the chip id), the PA enable a GPIO (53 on
+  the Waveshare, 20 on the Guition P4), the I2S a standard channel on the pins
+  both READMEs list, MCLK 13. It is a board define on the one module,
+  `MOY_AUDIO_CODEC_ES8311` beside `MOY_AUDIO_I2S_*` and `MOY_AUDIO_PA_GPIO` in
+  `mpconfigboard.h`, the way the DSI panel is a define, on the kernel's I2C bus
+  beside the touch controller; both P4s take `moy_audio` in board.toml. The
+  codec's address goes on the bus at boot, before the touch driver opens it
+  (`device/wire_audio.py`), and its registers are written at the first start.
+  The feeder task's design is the T-Deck's and is not re-measured against a
+  per-frame feed, because the per-frame feed is deleted. The Guition S3 stays
+  denied: its amp and pins are unverified, and verifying them is a bring-up,
+  not a crossing.
+- **#70, sound packs: the sample voice and its C API (owner, §13 question 2).**
+  The mechanism is a sample voice in the mix after the synth, before a
+  compiled cart's stream: clips in PSRAM, resampled to the output rate at load
+  (`moy_aud_sample_load`), played on one of a session's four sample channels
+  (`moy_aud_sample_play`) under the session's level, freed by their loader.
+  There is no cart verb and no recording: the cart-facing verb (`load_pack`,
+  `play`) is a change to the public verb table, which is moy-spec's, and comes
+  through it. When it does, a pack is store content in a family-wide
+  `sound_packs/` folder, as the issue has it, loaded by a cart into cart memory
+  on demand, never cart content and never the kernel's share.
 
 ### 5.3 What Python is deleted
 
-`device/device_audio.py`; `runtime/audio.py`'s `AudioEngine` (the bank model
-stays); `runtime/audio_session.py`'s `_SilentAudio`, `runtime/host_api.py`'s
+Deleted with the crossing (2026-10-07): `device_audio.py`;
+`runtime/audio.py`'s `AudioEngine` (the bank model stays); `runtime/audio_session.py`'s `_SilentAudio`, `runtime/host_api.py`'s
 `FakeAudio` and `web_boot.py`'s `_RunnerAudio` (a console with no backend
 holds no session and the binding's verbs are no-ops; the web runner's PCM
-sink pulls the kernel's `render`); `runtime/moyhost_audio.c` where the host
-library replaces it; the drain's closures in `device/moycore_glue.py`; the
-per-cart engine construction in `runtime/project_store.py` and
-`runtime/wallpaper.py`, which open sessions instead.
+sink pulls the kernel's `render`); the host's `moyhost_audio.c`, which the host
+library replaces; the drain's closures in `device/moycore_glue.py`; the
+per-cart engine construction in `runtime/project_store.py`, which opens the
+run's session instead, and in `runtime/wallpaper.py`, whose cart holds none.
 
 ### 5.4 Per-board facts that bite
 

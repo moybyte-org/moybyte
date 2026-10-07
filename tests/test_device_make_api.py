@@ -88,12 +88,20 @@ def _load_moy_runtime():
     # the device module execs under CPython (device_util first: device_wifi
     # imports it).
     for dname in ("device_util", "device_wifi", "device_input", "device_diag",
-                  "device_audio", "device_canvas", "device_api"):
+                  "device_canvas", "device_api"):
         ds = importlib.util.spec_from_file_location(
             dname, DEVICE / (dname + ".py"))
         dmod = importlib.util.module_from_spec(ds)
         _swap_in(saved, dname, dmod)
         ds.loader.exec_module(dmod)
+
+    # The board's own input module (its provider since the carve), from its
+    # tracked home beside moy_runtime.
+    ts = importlib.util.spec_from_file_location(
+        "tdeck_input", ROOT / "modules" / "tdeck_input.py")
+    tmod = importlib.util.module_from_spec(ts)
+    _swap_in(saved, "tdeck_input", tmod)
+    ts.loader.exec_module(tmod)
 
     # moy_runtime now does `from carts_data import CARTS` (build-generated from
     # system_carts/ -- see tools/gen_device_carts.py). Register the same generated

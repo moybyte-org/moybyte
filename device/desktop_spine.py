@@ -32,7 +32,6 @@ arguments and hooks:
                        where the store shares a bus with the panel
   before_slim          board glue between the store hookup and the cart diet
   after_services       board glue once every shared service is wired
-  make_audio           the audio backend factory, where the board has one
   wm                   the presentation tier to install over the fullscreen
                        stack, where the glass has room for windows
   c6_updater           the companion radio's updater class, where there is one
@@ -53,6 +52,7 @@ from frame_loop import (FrameLoop, FramePump, IdleBlank, OtaHealth,
                         PerfSampler, apply_touch, poll_link, poll_webhost)
 from device_api import make_api
 from device_canvas import DeviceCanvas, _LayerComp, _owner_h
+import wire_audio
 import wire_input
 import wire_links
 from mem_census import mark as _census
@@ -163,7 +163,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                   keyboard, seed_carts, power_save_ms,
                   game_wh=None, font_scale=1, panel_diagonal_in=None,
                   store_root=None, ota_dir=None, load_carts=None, with_sd=None,
-                  before_slim=None, after_services=None, make_audio=None,
+                  before_slim=None, after_services=None,
                   ble_keyboard=None, wm=None, c6_updater=None, extras=None,
                   serial=True, overlap=None, perf_emit=print, log=None,
                   fps_cap=60):
@@ -193,6 +193,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         # kernel; the WM composites it onto the system canvas.
         game = DeviceCanvas(_LayerComp(game_wh[0], game_wh[1], gfx))
     _census("splash")
+    wire_audio.attach(lambda m: log("audio", m))   # before the touch opens the bus
     touch, pointer = wire_input.wire_pointer(inp, inputs, sys_canvas.w,
                                              sys_canvas.h)
     _census("inputs")
@@ -238,7 +239,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # ONE canonical order the host uses too.
     wire_workstation_core(ws, moy_carts, carts_root, make_api,
                           wire_links.make_wifi(moy_carts, carts_root),
-                          make_audio=make_audio, runtimes=runtimes,
+                          runtimes=runtimes,
                           before_slim=before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
     _census("wired")

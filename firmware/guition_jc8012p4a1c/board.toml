@@ -90,7 +90,7 @@ The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
 file = "host_api.py"
 kind = "host-only"
 why  = """
-The HOST side of the cart-API backend: FakeAudio/FakeWifi + ConsoleDriver.
+The HOST side of the cart-API backend: FakeWifi + ConsoleDriver.
 make_api itself is ONE body in the shared `cart_api.py` since 2026-08-17
 (which DOES stage here; `device_api.py` re-exports it), so this denial is
 about dead weight, not duplicate backends: nothing on a board constructs a
@@ -133,10 +133,9 @@ why  = "ctypes over libmoy's Lua binding. This board compiles moy_lua + moycore 
 file = "audio_binding.py"
 kind = "host-only"
 why  = """
-ctypes over the vendored libmoy synth (#97). Audio on this board is an ES8311
-+ ES7210 on the same I2C bus as the touch (the Waveshare's parts, PA enable
-on GPIO20 here) and is unwired exactly as it is there (#82) -- and when it
-lands it will be a usermod, not this."""
+`moy_audio` for CPython: ctypes over native/moy_audio and the vendored libmoy
+synth. Here `moy_audio` is the usermod, the kernel's audio, which drives the
+ES8311 (#82)."""
 
 [[modules.shared.deny]]
 file = "native_build.py"
@@ -284,19 +283,9 @@ source   = "native"
 why = """
 The C-module twin of [modules.shared] (#161; see the T-Deck's board.toml for
 the mechanism). Every directory under native/ with a micropython.cmake crosses
-unless denied here. The two denials are the Waveshare's two, for the same
-hardware reasons. (native/p4/ has no micropython.cmake of its own, so this
+unless denied here. The denial is the Waveshare's, for the same hardware
+reason. (native/p4/ has no micropython.cmake of its own, so this
 scan never sees it -- that tier is the second source, [native.p4] below.)"""
-
-[[native.shared.deny]]
-module = "moy_audio"
-why = """
-Audio on this board is the same OPEN ES8311 bring-up as the Waveshare's (#82;
-same codec, same I2S pins, PA enable GPIO20 instead of 53). moy_audio's synth
-half (vendored libmoy) is board-agnostic, but its I2S plumbing is written
-against the T-Deck's wiring and nothing here would construct it --
-device_audio.py is not in this board's device allowlist either. Flip both
-together when #82 lands."""
 
 [[native.shared.deny]]
 module = "moy_flush"
@@ -389,8 +378,8 @@ The second staging source, and the one that must STAY an allowlist.
 default answer is "yes, this crosses". `device/` is the boards' shared DEVICE
 tier -- a repo-root tree since the fork's deletion (2026-08-17, `a02bb33`).
 It stays an allowlist even so, because not every board drives every piece of
-it: this board has no SPI-shared SD and no I2S in play (`moybyte_sd.py`,
-`device_audio.py` stay T-Deck-only), no GT911 (`gt911.py` crosses only for
+it: this board has no SPI-shared SD (`moybyte_sd.py` stays T-Deck-only), no
+GT911 (`gt911.py` crosses only for
 its HeldPoint core, which the GSL3680 driver rides), and the allowlist is
 where that per-board difference is written down rather than discovered as a
 frozen module nothing imports.
@@ -423,7 +412,7 @@ after normalising those three, so the ONE-STRING rule, the self-terminating
 smokes and the keep-the-REPL guards now land once instead of four times."""
 
 [[modules.device.group]]
-files = ["desktop_spine.py", "wire_input.py", "wire_links.py"]
+files = ["desktop_spine.py", "wire_input.py", "wire_links.py", "wire_audio.py"]
 why = """
 The console desktop's boot spine: ONE `build_desktop` (the boot order and the
 service set every console board wires) and ONE frame loop over it, with the
@@ -435,7 +424,8 @@ canvas, inputs, keyboard, store, constants -- and takes the rest.
 
 The spine constructs each subsystem through its provider: wire_input.py (the
 pointer, the keyboards' start, a BLE-keyboard input state) and wire_links.py
-(the radio link, the updaters, Get Carts' network, the web console)."""
+(the radio link, the updaters, Get Carts' network, the web console) and
+wire_audio.py (the codec's place on the kernel's I2C bus, at boot)."""
 
 [[modules.device.group]]
 files = ["mem_census.py"]

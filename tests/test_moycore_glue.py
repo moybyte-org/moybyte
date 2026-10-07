@@ -466,6 +466,18 @@ class FakeWs:
             self.pmem = pmem
 
 
+class NsSession:
+    """The run's audio session as the drain sees it: each verb is the
+    namespace's recorder of that name, looked up per call so a test can swap
+    one."""
+
+    def __init__(self, ns):
+        self._ns = ns
+
+    def __getattr__(self, verb):
+        return lambda *a: self._ns[verb](*a)
+
+
 def make_ns(**extra):
     """A cart api namespace shaped like `make_api`'s: the audio closures the
     drain calls, a few libmoy verbs that must NOT be re-registered, and the
@@ -569,6 +581,8 @@ class World:
     def run(self, ws=None, ns=None, src=LUA_SRC):
         self.ws = FakeWs() if ws is None else ws
         self.ns = make_ns() if ns is None else ns
+        if getattr(self.ws, "audio", None) is None:
+            self.ws.audio = NsSession(self.ns)
         return self.mod.MoycoreRun(self.ws, self.ns, src)
 
     def close(self):
@@ -1387,10 +1401,9 @@ def test_an_empty_queue_costs_one_read(w):
     assert w.ns["_log"] == []
 
 
-def test_every_op_reaches_the_same_make_api_closure_a_python_cart_uses(w):
-    """Deliberate: bank sync, the volume model the Settings surface reads and
-    the diag triggers stay in one place. What the crossing deleted is the
-    per-CALL trip, not the behaviour."""
+def test_every_op_is_one_call_on_the_runs_audio_session(w):
+    """One kernel call per queued command, on the run's session (ws.audio),
+    in the queue's order."""
     run = w.run()
     _queue(run,
            (C_CONSTS["AQ_SFX"], 3, 5),

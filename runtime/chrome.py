@@ -1268,7 +1268,7 @@ def _clamp_scroll(top, cur, visible, count):
 # imported above and re-exported so console.py's `from chrome import _in` holds.)
 
 
-# (Extracted helpers -- ACHIEVEMENTS, Popup, Pmem, _SilentAudio -- live in
+# (Extracted helpers -- ACHIEVEMENTS, Popup, Pmem -- live in
 # widgets.py/launcher_layer.py/paint_layer.py and are imported back at the top
 # of this file where console._X must still resolve for tests.)
 

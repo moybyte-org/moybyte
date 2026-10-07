@@ -260,8 +260,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # Self-contained support widgets (see widgets.py): the Achievements milestone
 # tracker (+ its ACHIEVEMENTS catalog), Pmem (cart persistent RAM) and the
-# reusable Popup dropdown; the Pointer cursor (moy_input.py) and the
-# _SilentAudio no-op backend (audio_session.py). Leaves; imported back here so
+# reusable Popup dropdown and the Pointer cursor (moy_input.py). Leaves;
+# imported back here so
 # console.Pointer / console.Popup / console.ACHIEVEMENTS / ... resolve for
 # Workstation + host_app + tests.
 try:
@@ -269,13 +269,13 @@ try:
                          ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y,
                          _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
     from moy_input import Pointer
-    from audio_session import _SilentAudio
+    from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import (Achievements, Pmem, Clipboard,
                                  Popup, ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X,
                                  _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
     from runtime.moy_input import Pointer
-    from runtime.audio_session import _SilentAudio
+    from runtime.audio_session import console_volume
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
 # SHARED backdrop the launcher home + Settings both draw (ws.wallpaper.draw). It owns
@@ -664,8 +664,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # its id, because `paint_doc` is on real cards since #108 (see Prefs).
         self.artwork = ArtworkService(
             self.app_context("paint", ArtworkService.NEEDS, prefs_ns="paint"))
-        self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
-        self.audio = None           # the per-cart audio backend (built on open, #16)
+        self.audio_out = None       # injected where no feeder task plays the mix: a PcmPump
+        self.audio = None           # the open cart's AudioSession (built on a run, #16)
         # WiFi (#38): a SYSTEM service shared across carts, not per-cart.
         # run_desktop/build_workstation injects the backend here; it's exposed
         # to a cart's namespace ONLY when the cart's manifest permissions
@@ -3871,7 +3871,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
 
 def wire_workstation_core(ws, store, carts_root, make_api, wifi,
-                          make_audio=None, runtimes=None, can_manage=None,
+                          audio_out=None, runtimes=None, can_manage=None,
                           before_slim=None, pointer=None, inp=None,
                           keyboard=None):
     """The board-agnostic Workstation service wiring, in the ONE canonical order
@@ -3886,8 +3886,8 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     the persisted font scale is applied before the root layout context is
     captured (#73/#58)."""
     ws.make_api = make_api
-    if make_audio is not None:
-        ws.make_audio = make_audio
+    if audio_out is not None:
+        ws.audio_out = audio_out
     if runtimes:
         ws.runtimes = dict(runtimes)
     ws.carts_store = store
@@ -3910,5 +3910,9 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     if keyboard is not None:
         ws.keyboard = keyboard      # lets the code editor switch to text (ASCII) mode
     ws.load_system()                # #28: system.json + the saved wallpaper
+    try:                            # the console's level, the Settings row
+        console_volume(int(ws.system.get("volume", 7)))
+    except (TypeError, ValueError):
+        pass
     ws.look.load_icon_sheet()       # Stage 1: the 16x16 bar IconSheet (theme or baked)
     ws.load_achievements()          # #21: unlocked badges survive reboots

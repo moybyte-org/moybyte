@@ -517,6 +517,7 @@ def run_side(kind):
         ws.project = proj
         ws.input = inp
         ws.pmem = pmem
+        ws.audio = audio                    # the run's session: the drain's target
         run = MoycoreRun(ws, ns, LUA_CART)
         inp.set_frame(0)
         # _init ran inside run_begin (libmoy's moy_lua_init), so there is no
@@ -1763,9 +1764,17 @@ serving [307] valid 1
 
 SESSION_DRIVER = r'''import sys
 sys.path.insert(0, @RUNTIME@)
+try:
+    import moy_audio as na                  # the usermod, on a VM
+except ImportError:                         # CPython: the same C over ctypes
+    sys.path.insert(0, @REPO@)
+    from runtime import audio_binding
+    na = audio_binding.install()
+import json
 
-from audio_session import AudioSessions
-import moy_spine
+from audio import AudioBank
+from audio_session import AudioSession
+from lua_ext import drain_audio
 
 
 def say(*a):
@@ -1776,64 +1785,87 @@ def h_(h):
     return "%d.%d.%d" % ((h >> 8) & 15, h & 255, h >> 12)
 
 
-class Rec:
-    def __init__(self, name):
-        self.name = name
-
-    def sfx(self, n, chan=None):
-        say(self.name, "sfx", n, chan)
-
-    def beep(self, freq, dur=0.15):
-        say(self.name, "beep", freq, dur)
-
-    def music(self, track, loop=True):
-        say(self.name, "music", track, int(loop))
-
-    def music_stop(self):
-        say(self.name, "music_stop")
-
-    def sound_stop(self, chan=None):
-        say(self.name, "sound_stop", chan)
-
-    def volume(self, level):
-        say(self.name, "volume", level)
+def calls():
+    for r in na.trace():
+        say("call", r[0], r[1], r[2], r[3])
 
 
-s = AudioSessions()
-a = s.open("cart", Rec("cart"))
-b = s.open("music_editor", Rec("editor"))
-say("open", h_(a), h_(b), "focused", h_(s.focused))
-s.sfx(a, 3)
-s.music(b, 1, False)
-s.focus(a)
-say("focus", h_(s.focused))
-s.beep(a, 440, 0.25)
-s.volume(b, 4)
-s.music_stop(b)
-s.sound_stop(a, 2)
-c = s.open("cart", Rec("cart2"))
-say("reopen", h_(c), "focused", h_(s.focused), "of", h_(s.of("cart")))
+buf = bytearray(800)
+
+
+def sounds():
+    na.render(buf, 400)
+    return any(buf)
+
+
+bank = json.dumps(AudioBank.default().to_dict())
+na.set_rate(8000)
+na.trace(True)
+a = na.open(11, bank)
+b = na.open(12, bank)
+na.focus(a)
+say("open", h_(a), h_(b), "focused", h_(na.focused()))
+na.sfx(b, 0)
+na.music(b, 0)
+say("muted", sounds(), "active", na.active(b) != 0)
+na.focus(b)
+say("focus", h_(na.focused()), "sounds", sounds())
+na.beep(a, 440, 0.25)
+na.level(b, 4)
+na.music_stop(b)
+na.stop(a, 2)
+calls()
+c = na.open(11)
+say("reopen", h_(c))
 try:
-    s.sfx(a, 1)
-except moy_spine.StaleHandle:
+    na.sfx(a, 1)
+except ValueError:
     say("stale", h_(a))
-s.end(c)
-say("end", s.focused, s.of("cart"), h_(s.of("music_editor")))
+na.close(c)
+na.close(b)
+say("end", na.focused())
+calls()
+na.hush()
+say("hush", sounds())
+s = AudioSession(AudioBank.default(), "cart")
+na.trace()
+drain_audio(s, (0, 1, 2, 3, 4, 5),
+            ((0, 3, -1), (1, 0, 1), (2, 440, 250), (3, 0, 0), (4, -1, 0), (5, 6, 0)))
+calls()
+s.close()
+na.trace(False)
 print("DRIVER_DONE")
 '''
 
 SESSION_TRACE = """\
-open 8.0.1 8.1.1 focused 8.1.1
-cart sfx 3 None
-editor music 1 0
-focus 8.0.1
-cart beep 440 0.25
-editor volume 4
-editor music_stop
-cart sound_stop 2
-reopen 8.0.2 focused 8.0.2 of 8.0.2
+open 8.0.1 8.1.1 focused 8.0.1
+muted False active True
+focus 8.1.1 sounds True
+call 0 1 11 0
+call 1 1 12 0
+call 0 3 0 0
+call 1 4 0 -1
+call 1 6 0 1
+call 1 3 0 0
+call 0 5 440000 250
+call 1 9 4 0
+call 1 7 0 0
+call 0 8 2 0
+reopen 8.0.2
 stale 8.0.1
-end 0 0 8.1.1
+end 0
+call 0 10 0 0
+call 0 1 11 0
+call 0 4 1 -1
+call 0 10 0 0
+call 1 10 0 0
+hush False
+call 0 4 3 -1
+call 0 6 0 1
+call 0 5 440000 250
+call 0 7 0 0
+call 0 8 -1 0
+call 0 9 6 0
 """
 
 SURVIVAL = {"input": (INPUT_DRIVER, INPUT_TRACE),

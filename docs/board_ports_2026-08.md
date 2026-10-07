@@ -232,8 +232,9 @@ where the poller-thread question lives on a bus-contended board.
 **Stage 4 — storage.** SD or internal VFS; the store root must not shadow a
 frozen module name (`/moy/carts`, never `/moybyte/...`).
 
-**Stage 5 — audio**, if wired (the moy_audio usermod + a device_audio
-constructor carrying the board's pins).
+**Stage 5 — audio**, if wired: the moy_audio usermod taken in board.toml and
+the board's I2S pins (and a codec, `MOY_AUDIO_CODEC_*`) in `mpconfigboard.h`
+(`native/moy_audio/moy_aud_out.c` lists the defines).
 
 **Stage 6 — the console.** run_desktop = construct compositor/canvas/inputs,
 `DeviceBoot` → `wire_workstation_core` → services (`ws.updater`/`ws.webhost`)

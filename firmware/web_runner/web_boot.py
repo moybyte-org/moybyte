@@ -49,9 +49,11 @@ import moy_catalogue
 import web_canvas
 import web_input
 from input import InputState
+from audio_session import PcmPump
 
 _S = {}          # the runner singletons: ws / canvas / driver / sink
-_AUDIO_RATE = [0]
+# The rate the page's worklet resamples from: the mix is made at it.
+_AUDIO_RATE_HZ = 11025
 
 
 # The page keeps ~this many seconds of PCM scheduled ahead of the audio clock.
@@ -62,133 +64,39 @@ _AUDIO_TARGET = 0.12
 _AUDIO_MAX_STEP = 0.20      # bound one frame's top-up render (seconds)
 
 
-class _RunnerAudio(host_api.FakeAudio):
-    """FakeAudio with the calls list capped, plus two web-runner twists
-    (#170 round 3 -- the owner's "crackle and slowdown" report):
+class _RunnerPump(PcmPump):
+    """The page's pull of the kernel's mix (#170 round 3 -- the owner's
+    "crackle and slowdown" report): the page reports how many seconds of PCM
+    it still has scheduled (step_frame_json's audio_ahead), and tick() renders
+    whatever refills that to _AUDIO_TARGET instead of exactly rate*dt, so one
+    late frame eats cushion, not the stream. Without the report (ahead < 0)
+    it renders rate*dt. Nothing is rendered while nothing sounds, so a silent
+    frame ships no audio. step_frame_json drains take_pcm() into the frame
+    payload and the page's playPCM plays the finished samples."""
 
-    * TOP-UP rendering (the crackle fix): the page reports how many seconds
-      of PCM it still has scheduled (step_frame_json's audio_ahead); tick()
-      renders whatever refills that to _AUDIO_TARGET instead of exactly
-      rate*dt. One late frame now eats cushion, not the stream -- the browser
-      twin of the device feed's ring top-up (device_audio.py). Without the
-      report (ahead < 0: a transport that never sends it) the per-dt render
-      stays, unchanged.
-    * The synth is the NATIVE moy_audio module when the wasm was built with the
-      usermod -- i.e. libmoy, moy-spec's own SPEC.md 8 implementation, compiled
-      in (#97). It owns the bank, both sequencers and the mixer; this class only
-      forwards the 8.2 verbs and pulls finished blocks. That is also the
-      slowdown fix: the Python per-sample loop cost whole milliseconds per frame
-      under wasm. Without the usermod it falls back to the shared Python engine,
-      which is a twin of the same libmoy source, so browser == device == host
-      stays one audible behaviour either way.
-
-    step_frame_json drains take_pcm() into the frame payload and the page's
-    playPCM plays the FINISHED samples (no JS synth), as before."""
-
-    def __init__(self, engine):
-        host_api.FakeAudio.__init__(self, engine)
-        self.ahead = -1.0           # page-reported queue depth; <0 = no report
-        try:
-            import moy_audio
-            self._ka = moy_audio
-        except ImportError:
-            self._ka = None
-        self._bank_rev = None
-        self._buf = bytearray(int(engine.rate * _AUDIO_MAX_STEP) * 2 + 64)
-        if self._ka is not None:
-            self._ka.set_rate(engine.rate)
-            self._push_bank()
-            self._ka.volume(engine.master)
-
-    # -- the bank: one crossing per cart, re-pushed when the editor moves it --
-
-    def _push_bank(self):
-        import json
-        bank = self.engine.bank
-        self._ka.bank_load(json.dumps(bank.to_dict()))
-        self._bank_rev = bank.rev
-
-    def _sync_bank(self):
-        if self._ka is not None and self.engine.bank.rev != self._bank_rev:
-            self._push_bank()
-
-    # -- SPEC.md 8.2, forwarded (FakeAudio still records every call) ----------
-
-    def sfx(self, n, chan=None):
-        self.calls.append(("sfx", int(n), chan))
-        if self._ka is not None:
-            self._sync_bank()
-            self._ka.sfx(int(n), -1 if chan is None else int(chan))
-        else:
-            self.engine.play_sfx(n, chan)
-
-    def beep(self, freq, dur=0.15):
-        self.calls.append(("beep", freq, dur))
-        if self._ka is not None:
-            self._ka.beep(float(freq), float(dur))
-        else:
-            self.engine.play_beep(freq, dur)
-
-    def music(self, track, loop=True):
-        self.calls.append(("music", int(track), bool(loop)))
-        if self._ka is not None:
-            self._sync_bank()
-            self._ka.music(int(track), 1 if loop else 0)
-        else:
-            self.engine.play_music(track, loop)
-
-    def music_stop(self):
-        self.calls.append(("music_stop",))
-        if self._ka is not None:
-            self._ka.music_stop()
-        else:
-            self.engine.stop_music()
-
-    def sound_stop(self, chan=None):
-        self.calls.append(("sound_stop", chan))
-        if self._ka is not None:
-            self._ka.sound_stop(-1 if chan is None else int(chan))
-        else:
-            self.engine.stop(chan)
-
-    def volume(self, level):
-        self.calls.append(("volume", level))
-        self.engine.set_volume(level)      # keep the model in step
-        if self._ka is not None:
-            self._ka.volume(self.engine.master)
-
-    def is_active(self):
-        if self._ka is not None:
-            return bool(self._ka.active())
-        return self.engine.is_active()
+    def __init__(self):
+        PcmPump.__init__(self, _AUDIO_RATE_HZ)
+        self.ahead = -1.0
+        self._buf = bytearray(int(self.rate * _AUDIO_MAX_STEP) * 2 + 64)
 
     def tick(self, dt):
-        if len(self.calls) > 64:
-            del self.calls[:]
-        eng = self.engine
         if self.ahead >= 0.0:
             want = _AUDIO_TARGET - self.ahead
             if want > _AUDIO_MAX_STEP:
                 want = _AUDIO_MAX_STEP
-            n = int(eng.rate * want) if want > 0 else 0
+            n = int(self.rate * want) if want > 0 else 0
         else:
-            n = int(eng.rate * dt) if dt > 0 else 0
+            n = int(self.rate * dt) if dt > 0 else 0
         cap = len(self._buf) // 2
         if n > cap:
             n = cap
-        if n <= 0 or not self.is_active():
+        na = self._na
+        if n <= 0 or na is None or not na.active():
             return
-        if self._ka is not None:
-            buf = memoryview(self._buf)[:n * 2]
-            self._ka.render(buf, n)
-            self.last_pcm = bytes(buf)
-        else:
-            self.last_pcm = eng.render(n)
+        buf = memoryview(self._buf)[:n * 2]
+        na.render(buf, n)
+        self.last_pcm = bytes(buf)
         self.rendered += n
-
-
-def _make_audio(engine):
-    return _RunnerAudio(engine)
 
 
 class _PointerSink:
@@ -335,7 +243,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     console.wire_workstation_core(
         ws, moy_carts, carts_root, _make_api,
         None,
-        make_audio=_make_audio, runtimes=runtimes, can_manage=True,
+        audio_out=_RunnerPump(), runtimes=runtimes, can_manage=True,
         pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
     # AUTHORING IS ON, BOTH TIERS (owner call): the browser build is the whole
     # console, not the player-only runner #151 originally scoped -- the Make tile
@@ -687,10 +595,7 @@ def _cart_title():
 
 
 def _audio_rate():
-    if not _AUDIO_RATE[0]:
-        from audio import AudioEngine
-        _AUDIO_RATE[0] = AudioEngine().rate
-    return _AUDIO_RATE[0]
+    return _AUDIO_RATE_HZ
 
 
 def assets_json():
@@ -767,20 +672,20 @@ def step_frame_json(dt, audio_ahead=-1.0):
     pixels it already has. Otherwise a small JSON string carrying what does not
     live in the framebuffer: whether it painted, the cart title, the input hint,
     and this frame's finished PCM. `audio_ahead` is the page's scheduled-ahead
-    audio depth in seconds (-1 = not reported): _RunnerAudio tops the cushion
+    audio depth in seconds (-1 = not reported): _RunnerPump tops the cushion
     back up to target each frame (the crackle fix, #170).
 
     The PIXELS are not in here. The worker reads them from fb_addr()/fb_len()
     when `paint` is set.
     """
     ws = _S["ws"]
-    au = getattr(ws, "audio", None)
+    au = getattr(ws, "audio_out", None)
     if au is not None and hasattr(au, "ahead"):
         au.ahead = float(audio_ahead)
     painted_before = ws._frames_drawn
     _S["driver"].frame(dt)
     painted = ws._frames_drawn != painted_before
-    # Drain the engine's FINISHED PCM (rendered by _RunnerAudio.tick during the
+    # Drain the engine's FINISHED PCM (rendered by _RunnerPump.tick during the
     # frame) -- the page plays it through its AudioWorklet ring.
     pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
     audio_b64 = ""

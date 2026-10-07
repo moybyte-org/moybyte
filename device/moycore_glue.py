@@ -20,11 +20,8 @@ this class does the three things that cannot live in C --
   * REFRESH the input snapshot before the tick. Buttons, time, the pointer and
     the last typed key are written into one `array("i")`; the cart's btn() is
     then an array read on the C side of the wall, however many times it asks.
-  * DRAIN the audio queue after it, through the SAME `make_api` closures a
-    Python cart uses. That is deliberate: sfx/music semantics (bank sync, the
-    volume model the Settings surface reads, the diag triggers) stay in one
-    place, and what the crossing deletes is the per-CALL trip, not the
-    behaviour. Order is preserved because the queue is a queue.
+  * DRAIN the audio queue after it: one call into the kernel's session per
+    queued command, in the queue's order (lua_ext.drain_audio).
   * PERSIST pmem at boundaries. The C side owns 256 int32 slots with a dirty
     flag, which is the shape the device already deferred to (#66) -- RAM during
     play, written at exit, crash capture, workspace swap and the periodic
@@ -364,7 +361,7 @@ class MoycoreRun:
     def _drain_queued(self, n):
         aq = self.aq
         slots = _moycore.AQ_SLOTS
-        drain_audio(self.ns, self._aq_ops,
+        drain_audio(getattr(self.ws, "audio", None), self._aq_ops,
                     ((aq[1 + i * slots], aq[2 + i * slots], aq[3 + i * slots])
                      for i in range(n)))
 

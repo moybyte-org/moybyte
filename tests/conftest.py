@@ -170,3 +170,19 @@ def pytest_addoption(parser):
     parser.addoption("--update-goldens", action="store_true", default=False,
                      help="rewrite tests/shell_goldens/hashes.json from this "
                           "run (shell pixel goldens; run with -p no:xdist)")
+
+
+@pytest.fixture(autouse=True)
+def _audio_console_level_back():
+    """The kernel's audio is one per process (native/moy_audio's session table,
+    the console's level, the mix's rate), as it is one per board. A test that
+    turns the console down would silence every later test on the worker, so
+    the level goes back to full after each."""
+    yield
+    try:
+        from runtime import audio_session
+    except ImportError:
+        return
+    na = audio_session._NA[0]
+    if na:
+        na.volume(7)

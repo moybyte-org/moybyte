@@ -3,7 +3,7 @@
 The device glue (`device/moycore_glue.py`) and the host runtime
 (`runtime/lua_host.py`) do the same three things around every Lua tick: fill the
 snapshot slots libmoy reads, apply the cart's `view()`, and drain the audio
-queue through the api closures. Until the seam moved into `runtime/lua_ext.py`
+queue onto the run's session. Until the seam moved into `runtime/lua_ext.py`
 they were two copies, identical down to `None if b < 0 else b`, `b / 1000.0` and
 the guard comments -- differing only in where the ABI numbers came from
 (`moycore` the C module on a board, `runtime.lua_binding` on the host).
@@ -17,7 +17,7 @@ work is the same work aimed at the wrong verb.
 So the pin is on BEHAVIOUR and on the ABI underneath it: the two tiers' op codes
 and slot indices are read from their own sources (the C enum, parsed; the host
 binding, imported) and one logical script is run through the shared body with
-each, and the recorded api calls must agree.
+each, and the recorded session calls must agree.
 """
 
 import types
@@ -42,7 +42,7 @@ AUDIO_NAMES = ("sfx", "music", "beep", "music_stop", "sound_stop", "volume")
 
 # (verb, a, b) in the tier-independent spelling. Every branch of the switch,
 # plus an op code no tier claims, plus the two negative sentinels that mean
-# "omitted" in the C ABI and `None` in the api closures.
+# "omitted" in the C ABI and `None` at the session's verbs.
 SCRIPT = (("sfx", 3, -1),
           ("sfx", 4, 2),
           ("music", 1, 1),
@@ -75,9 +75,19 @@ def _rows(mod):
             for verb, a, b in SCRIPT]
 
 
+class _Session:
+    """The run's audio session, its verbs recorded."""
+
+    def __init__(self, ns):
+        self._ns = ns
+
+    def __getattr__(self, verb):
+        return self._ns[verb]
+
+
 def _played(mod):
     ns, calls = _recording_ns()
-    lua_ext.drain_audio(ns, lua_ext.audio_ops(mod), _rows(mod))
+    lua_ext.drain_audio(_Session(ns), lua_ext.audio_ops(mod), _rows(mod))
     return calls
 
 

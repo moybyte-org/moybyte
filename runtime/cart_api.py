@@ -26,7 +26,7 @@ each resolved here on its merits:
     `runtime/ticks.py` now, like everything else.
 
 `host_api` and `device_api` still exist -- as the HOMES of what genuinely
-differs per side (host: FakeAudio/FakeWifi/ConsoleDriver; device: nothing but
+differs per side (host: FakeWifi/ConsoleDriver; device: nothing but
 the re-export) -- and both re-export this make_api, so every import site and
 frozen name is unchanged. tests/test_cart_api_unified.py pins the identity:
 one function OBJECT, not three agreeing copies.
@@ -204,9 +204,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     def cfg(key, default=None):
         return config.get(key, default)
 
-    # Audio (#16): bound to the injected backend (FakeAudio on the host,
-    # DeviceAudio on a board); no-op if absent so a cart's sfx()/beep()/music()
-    # never crash when audio isn't wired.
+    # Audio (#16): bound to the run's audio session (runtime/audio_session.py);
+    # no-op if absent (a wallpaper), so a cart's sfx()/beep()/music() never
+    # crash when no session is wired.
     def _sfx(n, chan=None):
         if audio is not None:
             audio.sfx(n, chan)

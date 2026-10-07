@@ -1729,7 +1729,7 @@ def test_each_subsystem_registers_its_words():
     section 2 item 3), so a pass edits its own table and never the reader's."""
     from runtime import devch_audio, devch_input, devch_links
     assert sorted(devch_input.WORDS) == ["drag", "swipe", "tap"]
-    assert sorted(devch_audio.WORDS) == ["vol"]
+    assert sorted(devch_audio.WORDS) == ["hush", "vol"]
     assert sorted(devch_links.WORDS) == ["link", "moy-del", "moy-put",
                                          "moy-rescan", "moy-run", "moy?",
                                          "recv", "web"]

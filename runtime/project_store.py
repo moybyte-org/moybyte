@@ -16,8 +16,8 @@ through the injected store (`ws.carts_store`) inside the SD session
 (`ws._with_sd`) and journal what landed (the durable undo journal,
 `moy_journal`). It keeps a `ws` back-reference for the Workstation-owned deps
 the builders and commits need: the SD-session wrapper `ws._with_sd`, the cart
-store `ws.carts_store`, `ws.can_manage`, the per-cart audio backend `ws.audio` +
-`ws.make_audio`, the save-status UI fields `ws.save_status`/`ws.cart_error` and
+store `ws.carts_store`, `ws.can_manage`, the run's audio session `ws.audio`,
+the save-status UI fields `ws.save_status`/`ws.cart_error` and
 the achievements tracker `ws.ach`.
 
 `Project` (runtime/project.py) is this class plus the Editor's half -- the
@@ -39,15 +39,15 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import SpriteSheet, TileMap
 try:
-    from audio import AudioBank, AudioEngine
+    from audio import AudioBank
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.audio import AudioBank, AudioEngine
+    from runtime.audio import AudioBank
 try:
     from widgets import Pmem, Scenes, _err_text, _ticks_ms, _ticks_diff
-    from audio_session import AudioSessions, _SilentAudio
+    from audio_session import AudioSession
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, Scenes, _err_text, _ticks_ms, _ticks_diff
-    from runtime.audio_session import AudioSessions, _SilentAudio
+    from runtime.audio_session import AudioSession
 # The cart FORMAT's own codecs (SPEC.md 3.5 tile flags). Read from the store
 # module rather than transcribed: `ws.carts_store` may be absent (a bare test
 # workstation), and a second parser here is exactly the drift the one-body rule
@@ -105,7 +105,6 @@ class ProjectStore:
         self.pmem = None              # Pmem (persistent cart store) for the open cart
         self.scenes = None            # Scenes (#85): the open cart's placed-actor
                                       # scenes; make_api binds scene()/load_scene()
-        self.audio_sessions = AudioSessions()  # the run's audio: owner "cart"
 
     # -- builders -------------------------------------------------------------
 
@@ -206,35 +205,17 @@ class ProjectStore:
         return Scenes(blobs, names)
 
     def _build_audio(self):
-        """Build the per-cart audio backend (#16): an AudioEngine over the cart's
-        sound bank (sounds.json), wrapped by the injected host/device backend. The
-        mirror of _build_sheet. A cart with no bank gets the friendly default bank
-        so beep()/the editor still work. Falls back to a silent backend if no
-        make_audio was injected (keeps make_api callable everywhere)."""
+        """Open the run's audio session (#16, owner "cart", focused) over the
+        cart's sound bank (sounds.json), closing the run before it. A cart with
+        no bank gets the friendly default so beep() and the Music editor still
+        work. On a console without `moy_audio` the session holds no handle and
+        its verbs do nothing (runtime/audio_session.py)."""
         ws = self.ws
         data = self.cart.get("sounds") if self.cart else None
         bank = AudioBank.from_dict(data) if data else AudioBank.default()
-        engine = AudioEngine(bank)
-        # The console's MASTER LEVEL has to be re-applied here. The backend is
-        # rebuilt per run, so a level set anywhere else -- the dev channel, a
-        # future Settings VOLUME row that is not a mock -- lasted exactly until
-        # the next cart start and then came back at full volume. That is not a
-        # cosmetic gap on a board with a speaker: `vol 0` at the launcher looked
-        # like it worked and the next game was loud (measured on a T-Deck,
-        # 2026-08-22).
-        try:
-            engine.set_volume(int(ws.system.get("volume", engine.master)))
-        except Exception:  # noqa: BLE001 -- a bad stored level must not block a run
-            pass
-        if ws.make_audio is not None:
-            ws.audio = ws.make_audio(engine)
-            # A backend with periodic diag lines is born following PERF DIAG;
-            # frame_loop.PerfSampler keeps it following from here.
-            if hasattr(ws.audio, "diag"):
-                ws.audio.diag = bool(getattr(ws, "diag_live", False))
-        else:
-            ws.audio = _SilentAudio(engine)
-        self.audio_sessions.open("cart", ws.audio)
+        if ws.audio is not None:
+            ws.audio.close()
+        ws.audio = AudioSession(bank, "cart")
 
     # -- the undo journal (Stage 7 of docs/history/shell_ux_technical_plan_v1.md) -------
     #
@@ -620,7 +601,7 @@ class ProjectStore:
 
     def commit_sounds(self):
         """Persist the cart's AudioBank to sounds.json (#50). The MusicEditor
-        edits the LIVE bank (ws.audio.engine.bank), so a save just serializes
+        edits the LIVE bank (ws.audio.bank), so a save just serializes
         what the cart already plays through."""
         ws = self.ws
         me = ws.music_ui.musicedit

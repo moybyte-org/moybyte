@@ -632,15 +632,15 @@ def audio():
     THE PROBLEM WITH TESTING AUDIO BY EAR. "I hear nothing" has at least four
     causes -- no native module, no I2S channel, a synth producing silence, or an
     amp that is not wired/powered -- and an ear cannot tell them apart. So this
-    smoke instruments the SEAM: `moy_audio.frames_out()` returns the frames the
-    I2S peripheral has actually ACCEPTED, which is the last thing measurable on
+    smoke instruments the SEAM: `moy_audio.stats()[1]` is the frames the I2S
+    peripheral has actually ACCEPTED, which is the last thing measurable on
     this side of the wire.
 
       frames climbing at ~22050/s  -> the synth renders and the peripheral
                                       consumes. Silence past this point is the
                                       AMP or its wiring, not the firmware.
-      frames flat                  -> nothing is feeding I2S. The feeder line
-                                      above says which path was taken.
+      frames flat                  -> nothing is feeding I2S. The output line
+                                      above says why.
       frames climbing at the WRONG rate -> the clock. Everything would play at
                                       the wrong pitch, which by ear just sounds
                                       like "a bit off".
@@ -651,45 +651,34 @@ def audio():
     The bank is `AudioBank.default()` -- the coin/jump/thud starter set every
     empty cart gets -- so this needs no card and no cart.
     """
-    from audio import AudioEngine
-    from device_audio import DeviceAudio, AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT
+    from audio import AudioBank
+    from audio_session import AudioSession, console_volume, native
 
     comp, canvas = _canvas()
     log = _Log(comp, canvas, "AUDIO SMOKE", keep=18)
     comp.set_backlight(True)
 
-    log.say("pins BCK=%d WS=%d DOUT=%d @%dHz"
-            % (I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE))
-    engine = AudioEngine()
-    dev = DeviceAudio(engine)
-    na = dev._na
+    na = native()
     if na is None:
         log.say("moy_audio ABSENT -- silent by design", RED)
         print("Moybyte audio: no native module in this image; nothing to measure")
         print("Moybyte audio smoke done -> REPL")
         return
-    feed = "core-1 task" if dev._core1 else ("legacy I2S" if dev.i2s else "NONE")
-    log.say("feed: %s" % feed, GREEN if feed != "NONE" else RED)
-    print("Moybyte audio: feed=%s rate=%d bank sfx=%d music=%d"
-          % (feed, AUDIO_RATE, len(engine.bank.sfx), len(engine.bank.music)))
-    try:
-        print("Moybyte audio: engine_sig=%s" % (na.engine_sig(),))
-    except Exception as exc:            # noqa: BLE001 -- diagnostic only
-        print("Moybyte audio: engine_sig unavailable: %s" % (exc,))
+    bank = AudioBank.default()
+    dev = AudioSession(bank, "cart")        # the first focus starts the output
+    st, why = na.out()
+    rate = na.rate()
+    ok_out = st == na.OUT_RUNNING
+    log.say("output: %s %s @%dHz" % ("running" if ok_out else "DOWN", why, rate),
+            GREEN if ok_out else RED)
+    print("Moybyte audio: out=%d (%s) rate=%d bank sfx=%d music=%d"
+          % (st, why, rate, len(bank.sfx), len(bank.music)))
 
     def _frames():
-        try:
-            return na.frames_out()[0]
-        except Exception:               # noqa: BLE001 -- older module
-            return -1
+        return na.stats()[1]
 
     def _play(label, fn, secs):
-        """Run `fn`, hold for `secs`, and report the frames the peripheral took.
-
-        `dev.tick(dt)` is called every 20ms throughout: in core-1 mode it is
-        almost nothing, but in the legacy fallback it IS the feed, so a smoke
-        that skipped it would measure silence and blame the amp.
-        """
+        """Run `fn`, hold for `secs`, and report the frames the peripheral took."""
         f0 = _frames()
         t0 = time.ticks_ms()
         fn()
@@ -697,7 +686,6 @@ def audio():
         log.say("%s ..." % label, GREY)
         i = 0
         while time.ticks_diff(t_end, time.ticks_ms()) > 0:
-            dev.tick(0.02)
             i += 1
             if i % 5 == 0:      # ~10Hz: a live counter, not a repaint benchmark
                 log.say_replace("%s  frames+%d  active=%s"
@@ -706,40 +694,41 @@ def audio():
         ms = time.ticks_diff(time.ticks_ms(), t0)
         got = _frames() - f0
         hz = (got * 1000 // ms) if (ms and got >= 0) else -1
-        ok = hz > 0 and abs(hz - AUDIO_RATE) * 20 < AUDIO_RATE      # within 5%
+        ok = hz > 0 and abs(hz - rate) * 20 < rate      # within 5%
         log.say_replace("%-10s %6d frames %5dHz" % (label, got, hz),
                         GREEN if ok else RED)
         print("Moybyte audio: %-10s %dms frames=%d measured=%dHz (nominal %d)%s"
-              % (label, ms, got, hz, AUDIO_RATE, "" if ok else "  <-- OFF"))
+              % (label, ms, got, hz, rate, "" if ok else "  <-- OFF"))
         return hz
 
     rates = []
     rates.append(_play("silence", lambda: None, 1.0))
     for (hz, dur) in _AUDIO_SCALE:
         _play("beep %d" % hz, lambda hz=hz, dur=dur: dev.beep(hz, dur), dur + 0.1)
-    for n in range(min(3, len(engine.bank.sfx))):
+    for n in range(min(3, len(bank.sfx))):
         rates.append(_play("sfx %d" % n, lambda n=n: dev.sfx(n), 1.0))
-    if engine.bank.music:
+    if bank.music:
         rates.append(_play("music 0", lambda: dev.music(0, True), 5.0))
         dev.music_stop()
-    # Volume is a real verb, not decoration: a master of 0 must SILENCE the amp
-    # while the peripheral keeps taking frames -- which is exactly the pair of
-    # facts the frames counter can show and an ear cannot.
-    dev.volume(0)
+    # The console's level is a real verb: 0 must SILENCE the amp while the
+    # peripheral keeps taking frames -- the pair of facts the frames counter
+    # can show and an ear cannot.
+    was = console_volume()
+    console_volume(0)
     _play("vol 0", lambda: dev.sfx(0), 1.2)
-    dev.volume(7)
-    _play("vol 7", lambda: dev.sfx(0), 1.2)
+    console_volume(was)
 
     good = [r for r in rates if r > 0]
-    if good and all(abs(r - AUDIO_RATE) * 20 < AUDIO_RATE for r in good):
+    if good and all(abs(r - rate) * 20 < rate for r in good):
         log.say("I2S consuming at rate -- OK", GREEN)
         print("Moybyte audio: VERDICT the peripheral consumes at the nominal "
               "rate. If it was silent, look at the amp and its wiring, not here.")
     else:
         log.say("frame rate WRONG or flat", RED)
-        print("Moybyte audio: VERDICT frames_out did not advance at %dHz -- the "
-              "feed is the suspect, not the amp. feed=%s" % (AUDIO_RATE, feed))
-    print("Moybyte audio smoke done -> REPL (the core-1 task keeps running)")
+        print("Moybyte audio: VERDICT the output did not take frames at %dHz -- "
+              "the feed is the suspect, not the amp. out=%d %s" % (rate, st, why))
+    dev.close()
+    print("Moybyte audio smoke done -> REPL (the feeder task keeps running)")
 
 
 class _Log:

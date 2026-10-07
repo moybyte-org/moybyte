@@ -191,7 +191,8 @@ class MoycoreHostRun:
             s[SNAP_QUIT] = 0
             inp.cart_quit = True
         self._sync_view()
-        drain_audio(self._ns, self._aq_ops, self._run.audio())
+        drain_audio(getattr(self._ws, "audio", None), self._aq_ops,
+                    self._run.audio())
         if err:
             raise RuntimeError(err)
 

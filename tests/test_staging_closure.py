@@ -108,11 +108,11 @@ NATIVE = {
                        "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
                        "moy_spine", "moy_kernel", "moy_glass", "moy_input", "moy_net"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
-    # it denies moy_flush along with moy_audio. moy_sd brings its TF card up on
+    # it denies moy_flush; moy_audio drives its ES8311 (#82). moy_sd brings its TF card up on
     # SDMMC slot 0 under the store's card volume.
     # moy_c6 is the ESP-NOW-over-hosted shim + C6 plumbing (#7, the espnow
     # track -- docs/history/espnow_p4_2026-08.md).
-    "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
+    "p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof", "moy_wasm",
            "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel",
            "moy_sd", "moy_glass", "moy_input", "moy_net"},
@@ -121,7 +121,7 @@ NATIVE = {
     # source) since the day this board became their second consumer -- it
     # authors no native module of its own, and moy_dsi drives its JD9365
     # through a board define rather than a second panel module.
-    "guition-p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
+    "guition-p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web",
                    "moy_dsi", "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof",
                    "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
                    "moy_spine", "moy_kernel", "moy_sd", "moy_glass", "moy_input", "moy_net"},

@@ -219,7 +219,7 @@ sprints that follow it:
 |---|---|---|
 | the kernel's spine: routing, back-stack, app registry, settings store, WiFi leases, crash record, strike ledger, recovery screen | `runtime/console.py` (in part), `runtime/crash_guard.py`, `runtime/system_store.py` | 2 |
 | input: touch, keyboards, the BLE HID keyboard below `bluetooth` | `device/gt911.py`, `device/gsl3680.py`, `device/axs_touch.py`, `device/ble_keyboard.py` | 3 |
-| audio: the I2S feed and the sfx/music semantics the glue drains through `make_api` | `device/device_audio.py`, `device/moycore_glue.py`'s audio half | 3 |
+| audio: the I2S feed and the sfx/music semantics the glue drains | `device_audio.py` (deleted by sprint 3's audio pass), `device/moycore_glue.py`'s audio half | 3 |
 | the glass: canvas ownership, present, compositors | `device/device_canvas.py`, `device/dsi_panel.py`, `device/p4_canvas.py` | 3 |
 | storage: the SD gate, the store of record and its journal | the boards' `with_sd`, `runtime/moy_journal.py` | 1b and 3 |
 | the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/frame_loop.py`, `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
@@ -272,7 +272,7 @@ console needs while no Python app runs is OS.
 | `device/cart_net.py` | radios and links | 3 | Get Carts' transport over the OTA HTTP client; the app above it stays Python |
 | `device/desktop_spine.py` | split | 3 + 7 | the boot order and `Desktop.run`, the frame loop, cross with the frame tail; the `Workstation` and WM construction goes with `runtime/console.py` |
 | `device/device_api.py` | cart path | open | a re-export of `make_api`; follows `runtime/cart_api.py` |
-| `device/device_audio.py` | audio | 3 | the I2S feed and the six cart audio verbs |
+| `device_audio.py` | audio | 3 | deleted 2026-10-07: the I2S feed and the six verbs are `native/moy_audio`'s |
 | `device/device_canvas.py` | glass | 3 | the one canvas class every tier runs; `runtime/host_canvas.py` rebinds with it and `tools/p4_conformance.py` is its check on glass |
 | `device/device_diag.py` | frame tail | 3 | the serial diagnostics the frame loop emits between frames |
 | `device/device_input.py` | input | 3 | the T-Deck trackball and its GT911 wrapper |
@@ -306,7 +306,7 @@ console needs while no Python app runs is OS.
 | `runtime/appearance.py` | roles | 5 | `Workstation.look`: theme variant, skin, font scale, wallpaper and bar icons, the state behind the Theme and Wallpaper roles |
 | `runtime/appearance_app.py` | app | — | Appearance |
 | `runtime/artwork.py` | split | 5, rest stays | `ArtworkService` is a role service (5); `PaintDocument`, `PaintAppLayout` and `PaintAppLayer`, the Paint app, stay Python |
-| `runtime/audio.py` | split | 3, rest stays | `AudioEngine` crosses with audio; the bank model (`SFX`, `MusicTrack`, `AudioBank`) is the music editor's data and stays |
+| `runtime/audio.py` | split | 3, rest stays | `AudioEngine` crossed with audio (deleted 2026-10-07); the bank model (`SFX`, `MusicTrack`, `AudioBank`) is the music editor's data and stays |
 | `runtime/audio_binding.py` | host-only | — | the host's ctypes binding of libmoy audio; sprint 3's audio crossing rebinds it |
 | `runtime/bar_layer.py` | window managers | 7 | the top bar and dock every WM draws; its geometry constants are read outside it |
 | `runtime/block_editor_ui.py` | app | — | the Editor's Blocks tab |
@@ -373,7 +373,7 @@ console needs while no Python app runs is OS.
 | `runtime/moy_store_base.py` | store | 1b | the store's on-card layout and shared rules; the Zero takes it |
 | `runtime/moy_sync.py` | radios and links | 3 | the sync RPC's push half; the Zero takes it |
 | `runtime/moybuf.py` | spine | 2 | the Python view over `moy_alloc` entries; the registry becomes a handle table of kind BUF (`docs/kernel_spine_2026-10.md` §1), and the stop inventory (§4.4) clears its rows or moves them to kernel ownership |
-| `runtime/moyhost_audio.c` | host-only | — | the C shim `runtime/audio_binding.py` compiles |
+| `moyhost_audio.c` | host-only | — | deleted 2026-10-07: `runtime/audio_binding.py` compiles `native/moy_audio` itself |
 | `runtime/moyhost_console.h` | host-only | — | the console the Lua and wasm host shims share |
 | `runtime/moyhost_gfx.c` | host-only | — | the C shim `runtime/gfx_binding.py` compiles |
 | `runtime/moyhost_lua.c` | host-only | — | the C shim `runtime/lua_binding.py` compiles |
@@ -411,7 +411,7 @@ console needs while no Python app runs is OS.
 | `runtime/web_console.py` | radios and links | 3 | the web-console switch: pairing pin, paired url, and parking the glass while a browser edits the store |
 | `runtime/web_console_ui.py` | radios and links | open | the screen the glass parks on while no app runs, so it is OS by §2.2's rule; it draws with `runtime/ui.py` and `runtime/moy_qr.py`. Question: does it cross in 3 with the webhost, drawn without the toolkit, or wait for the toolkit in 6? |
 | `runtime/web_input.py` | input | 3 | the browser's event decode; the boards deny it |
-| `runtime/widgets.py` | split | 3 + 4 + 5 + 6 | `Pointer` and `pointer_state`, `_SilentAudio` → 3; `Achievements`, `Pmem`, `Actor`, `Scenes`, `SceneWorld`, `Popup` → 4; `Clipboard` → 5; `ConfirmTap`, `_Blit` and the small draw helpers → 6 |
+| `runtime/widgets.py` | split | 3 + 4 + 5 + 6 | `Pointer` and `pointer_state`, `_SilentAudio` (deleted) → 3; `Achievements`, `Pmem`, `Actor`, `Scenes`, `SceneWorld`, `Popup` → 4; `Clipboard` → 5; `ConfirmTap`, `_Blit` and the small draw helpers → 6 |
 | `runtime/wm.py` | window managers | 7 | the memoized draw stack, the game-to-system composite and navigation over the spine's back-stack (`runtime/moy_spine.py`'s `BackStack`, 2) |
 | `runtime/wm_chrome.py` | window managers | 7 | the windowed WM's title strip, borders and taskbar chips |
 | `runtime/wm_desk.py` | window managers | 7 | the windowed desk's root layer and backdrop cache |
@@ -581,7 +581,7 @@ P4 rows matter only if a P4 ever stops its VM (§10 question 5).
 | the input poller thread (T-Deck) | `device/moybyte/input.py`'s `InputPoller` | `mp_thread_deinit` deletes every thread wherever it stands, even mid-I2C with the bus held | stopped cooperatively and joined before the port's deinit; `mp_thread_deinit` only as the backstop | 3 |
 | the BLE keyboard | `device/ble_keyboard.py`'s `ble.irq`; NimBLE's task writes events into a ring in the GC heap | `mp_bluetooth_deinit`: the stack stops, the keyboard drops | the same, until the HID lives below `modbluetooth` (the P4's notifications already do: `patches/p4_modbluetooth_ble_hid_fastpath.patch`) | 3 |
 | ESP-NOW | `native/moy_net/moy_link.c` holds esp_now's one receive callback, which latches each frame into the kernel's ring in PSRAM; `device/moy_espnow.py` drains it through `moy_net.Link` per frame | nothing: the port's `espnow` module is out of the console images, so the link and its ring stay up | the same | 3 (landed, pass 2), 4 (lockstep) |
-| the legacy I2S feed | `device/device_audio.py`'s `i2s.irq`, taken only when the core-1 task fails to start | the object's finaliser, at the sweep | the same | 3 deletes it |
+| the legacy I2S feed | `device_audio.py`'s `i2s.irq`, taken only when the core-1 task failed to start | the object's finaliser, at the sweep | the same | 3 (deleted, 2026-10-07: no Python feeds a speaker) |
 | `machine.Timer`, `micropython.schedule`, UART, socket callbacks, dupterm | no user in `runtime/`, `device/` or a board's modules | `machine_timer_deinit_all`, `machine_uart_deinit_all`, `socket_events_deinit` | kept | — |
 | the console's RX ISR | `usb_serial_jtag.c` wakes `mp_main_task_handle` on every packet | the VM's task never dies | the handle moves to the kernel's task before the VM's task is deleted, or a byte from the host notifies a freed task | 0 |
 | the console's input ring | the RX ISR moves bytes into the port's stdin ring only while it has room, and only the VM reads the ring; the ISR also schedules a `KeyboardInterrupt` on `mp_interrupt_char` | the VM drains it | while the VM is down the kernel drains the ring and re-polls the USB FIFO every window, and sets `mp_interrupt_char` to -1 — a host writing through a stop otherwise stalls the console's input for good (found by the spike, 2026-10-05) | 0 |

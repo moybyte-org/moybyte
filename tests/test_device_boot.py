@@ -1912,20 +1912,23 @@ def test_the_first_line_after_the_diag_comes_on_counts_its_own_window(
     assert parse_perf(out[-1])["ppa"] == (7.0, 7.0, 7.0, 7.0, 7.0)
 
 
-def test_the_audio_backends_periodic_lines_follow_PERF_DIAG(monkeypatch):
-    """The backend is rebuilt per cart, and its AUDIORATE/SNDSTREAM probe is
-    periodic too: the sampler hands it the switch with the capture meters'."""
+def test_the_kernels_audiorate_line_follows_PERF_DIAG(monkeypatch):
+    """The kernel's AUDIORATE line is periodic: printed beside PERF while the
+    diag is on, and never otherwise (kid mode writes no periodic line)."""
     for live in (True, False):
         _clock(monkeypatch)
+        monkeypatch.setattr(frame_loop, "_audio_probe", lambda: "AUDIORATE x=1")
         ws = PerfWs(diag_live=live)
-        ws.audio = type("A", (), {"diag": not live})()
-        s = frame_loop.PerfSampler(ws, emit=lambda _l: None)
+        out = []
+        s = frame_loop.PerfSampler(ws, emit=out.append)
         _drive(monkeypatch, s, ws, 2, 0, 0)
-        assert ws.audio.diag is live
-    ws = PerfWs()
-    ws.audio = object()                    # a backend with no periodic lines
-    s = frame_loop.PerfSampler(ws, emit=lambda _l: None)
+        assert ("AUDIORATE x=1" in out) is live
+    monkeypatch.setattr(frame_loop, "_audio_probe", lambda: None)
+    ws = PerfWs(diag_live=True)              # nothing new: no line
+    out = []
+    s = frame_loop.PerfSampler(ws, emit=out.append)
     _drive(monkeypatch, s, ws, 2, 0, 0)
+    assert not any(line.startswith("AUDIORATE") for line in out)
 
 
 # -- what each board declares ---------------------------------------------------

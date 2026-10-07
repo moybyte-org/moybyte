@@ -496,9 +496,12 @@ def test_multichannel_music_track_plays_on_the_engine(tmp_path):
     assert n_music == 1
     bank = AudioBank.from_dict(sounds)
     assert bank.music[0].pattern == [[0, 1]]
-    eng = A.AudioEngine(bank, rate=8000)
+    from audio_synth import Synth, available
+    if not available():                           # the module needs cc
+        return
+    eng = Synth(bank, rate=8000)
     eng.play_music(0)
-    if eng.active_channels():                     # binding present (needs cc)
+    if eng.active_channels():
         assert eng.active_channels() & 0x0F == 0b1100   # voices 3 + 2 claimed
         assert any(b != 0 for b in eng.render(400))
 

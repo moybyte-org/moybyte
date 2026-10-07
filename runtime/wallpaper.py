@@ -18,8 +18,8 @@ ws.look.wallpaper_id, plus select_wallpaper / cycle_wallpaper / wallpaper_option
 wallpaper_carts / wp_id_for / wp_cart_by_id. select_wallpaper drives this component
 via clear() + compile(cart); draw() reads ws.look.wallpaper_id for the fill
 fallback. It reaches the cart-run machinery (build sheet/tilemap, make_api) through
-its self.ws back-ref; the audio/pmem building blocks for the wallpaper's own namespace
-are imported (leaf modules; same bare-or-runtime fallback the other extracted modules
+its self.ws back-ref; the pmem building block for the wallpaper's own namespace
+is imported (leaf modules; same bare-or-runtime fallback the other extracted modules
 use). `NAMES` is injected; `_err_text` is duplicated (tiny/pure).
 
 The compile is crash-guarded (#160): `ws.wallpaper_guard` arms before the cart's
@@ -34,15 +34,9 @@ try:
 except ImportError:  # pragma: no cover - no proof: every compile arms
     crc32 = None
 try:
-    from audio import AudioBank, AudioEngine
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.audio import AudioBank, AudioEngine
-try:
     from widgets import Pmem, _Blit, _err_text
-    from audio_session import _SilentAudio
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, _Blit, _err_text
-    from runtime.audio_session import _SilentAudio
 try:
     from moyimg import text_sig
     from moy_image import load_wallpaper_preview, save_wallpaper_preview
@@ -162,7 +156,8 @@ class Wallpaper:
             sheet = ws._build_sheet(cart)
             tilemap = ws._build_tilemap(cart)
             ns = ws.make_api(ws.canvas, ws.input, dict(cart.get("cfg", {})),
-                             sheet, _SilentAudio(AudioEngine(AudioBank.default())),
+                             # A wallpaper is silent: it holds no audio session.
+                             sheet, None,
                              tilemap, Pmem(), None, cart.get("images") or {},
                              # A wallpaper is a cart, so it gets the fourth asset
                              # type too: sakura sheds its petals from a scene.
@@ -502,7 +497,7 @@ class Wallpaper:
                 sheet = ws._build_sheet(cart)
                 tilemap = ws._build_tilemap(cart)
                 ns = ws.make_api(pv, ws.input, dict(cart.get("cfg", {})),
-                                 sheet, _SilentAudio(AudioEngine(AudioBank.default())),
+                                 sheet, None,
                                  tilemap, Pmem(), None, cart.get("images") or {},
                                  ws._build_scenes(cart),
                                  flags=ws._build_flags(cart),

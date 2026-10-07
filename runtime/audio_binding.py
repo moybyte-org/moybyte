@@ -1,59 +1,57 @@
-"""Build + load the host's libmoy audio binding (#97, stage 0 of moycore).
+"""The kernel's audio (native/moy_audio) on CPython, by ctypes: the module
+`moy_audio` as the boards and the browser import it, name for name, over the
+same C built for the host.
 
-The host sim's ``AudioEngine`` synthesizes through the SAME vendored libmoy C
-the boards and the web runner compile -- this module is how that C reaches
-CPython. It compiles the vendored source plus a small shim
-(``runtime/moyhost_audio.c``) into one shared library and loads it with
-ctypes; the ``.so`` is cached under ``<repo>/.build/host_audio/`` keyed by a
-hash of the sources, the flags and the compiler, so the compile happens once
-per toolchain, not once per run. ``make setup`` pre-builds it; a tree that
-skipped that builds lazily on the first AudioEngine.
+`install()` puts it where `import moy_audio` finds it; `runtime/audio_session.py`
+does that on first use. The library is the session table and the mix
+(`moy_aud.c`), the output stub that has no speaker (`moy_aud_out.c`), the handle
+table (`moy_htab.c`) and the vendored synth (`libmoy/moy_audio.c`), cached under
+`<repo>/.build/host_audio/` by a hash of the sources, the flags and the
+compiler.
 
-Two deliberate choices, recorded:
+Two choices, recorded:
 
-* **The C is compiled DOUBLE-WIDENED** -- the same two mechanical regexes the
-  parity harness applies (``audio_parity._widen_to_double``): ``float`` ->
-  ``double``, and the ``f`` suffix off float literals. The strict parity suite
-  proved the retired Python twin bit-identical to exactly that program, so
-  binding the widened build made stage 0 a provably zero-behavior-change swap:
-  no sample the host ever played moved. (The boards run the float build; the
-  float-vs-double spread is measured and gated by test_audio_parity.py's
-  device-precision pass, unchanged.)
+* **The C is compiled DOUBLE-WIDENED** -- the parity harness's two mechanical
+  regexes (`audio_parity._widen_to_double`): `float` -> `double`, and the `f`
+  suffix off float literals. The strict parity suite proved the retired Python
+  twin bit-identical to exactly that program, so the host plays what it always
+  played. (The boards run the float build; the float-vs-double spread is
+  measured and gated by tests/test_audio_parity.py's device-precision pass.)
+* **No compiler means no module, not a fallback synth** (owner, 2026-08-11). A
+  console without `moy_audio` holds no session, and its verbs are no-ops.
 
-* **No compiler means SILENCE, not a fallback synth** (owner decision,
-  2026-08-11 -- KISS). ``get()`` returns None and AudioEngine degrades to
-  zero-filled PCM, the same absence the Lua host runner presents without a
-  compiler. The old degradation lane WAS the Python twin, and the twin's
-  drift class is what stage 0 exists to delete.
-
-MicroPython never imports this file (the boards bind libmoy natively via
-modmoy_audio.c); runtime/audio.py guards the import.
+MicroPython never imports this file: there `moy_audio` is the usermod.
 """
 
 import hashlib
 import os
 import re
-import shutil
 import subprocess
 import sys
 
+from . import native_build
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.normpath(os.path.join(_HERE, ".."))
-_LIBMOY = os.path.join(_ROOT, "native", "moy_audio", "libmoy")
-_SHIM = os.path.join(_HERE, "moyhost_audio.c")
+_AUDIO = os.path.join(_ROOT, "native", "moy_audio")
+_LIBMOY = os.path.join(_AUDIO, "libmoy")
+_SPINE = os.path.join(_ROOT, "native", "moy_spine")
 _CACHE = os.path.join(_ROOT, ".build", "host_audio")
+# (directory, name, widened): every source, read for the cache key; the .c
+# files are compiled. One compile recipe with the parity reference:
+# -ffp-contract=off keeps the compiler from fusing multiply-adds.
+_FILES = ((_LIBMOY, "moy_audio.c", True), (_LIBMOY, "moy_audio.h", True),
+          (_AUDIO, "moy_aud.c", True), (_AUDIO, "moy_aud.h", True),
+          (_AUDIO, "moy_aud_out.c", False), (_AUDIO, "moy_audio_snd.h", False),
+          (_SPINE, "moy_htab.c", False), (_SPINE, "moy_htab.h", False))
+_CFLAGS = ["-std=gnu99", "-O2", "-ffp-contract=off", "-fPIC", "-shared"]
 
-# One compile recipe, shared with the parity reference so bit-comparisons stay
-# meaningful: -ffp-contract=off keeps the compiler from fusing multiply-adds,
-# which rounds differently from the two separate operations.
-_CFLAGS = ["-std=c99", "-O2", "-ffp-contract=off", "-fPIC", "-shared"]
+OK, STALE, FULL, NOMEM, BANK, BAD = range(6)
+OUT_NONE, OUT_RUNNING, OUT_FAILED, OUT_ABSENT = range(4)
+CHANNELS = 4
 
-_lib = None          # the loaded wrapper, or None
-_tried = False       # first acquire attempt happened (so we only warn once)
-
-
-def _cc():
-    return os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
+_lib = None
+_tried = False
 
 
 def _widen_to_double(src):
@@ -66,11 +64,10 @@ def _widen_to_double(src):
 
 def _sources():
     out = {}
-    for name in ("moy_audio.c", "moy_audio.h"):
-        with open(os.path.join(_LIBMOY, name)) as fh:
-            out[name] = _widen_to_double(fh.read())
-    with open(_SHIM) as fh:
-        out["moyhost_audio.c"] = fh.read()
+    for d, name, widen in _FILES:
+        with open(os.path.join(d, name)) as fh:
+            text = fh.read()
+        out[name] = _widen_to_double(text) if widen else text
     return out
 
 
@@ -84,109 +81,240 @@ def _key(cc, sources):
         ver = subprocess.run([cc, "--version"], capture_output=True, text=True,
                              timeout=10).stdout.splitlines()[:1]
         h.update((ver[0] if ver else "").encode())
-    except Exception:   # noqa: BLE001 -- version is only a cache key refiner
+    except Exception:   # noqa: BLE001 -- the version only refines the key
         pass
     return h.hexdigest()[:16]
 
 
 def build(verbose=False):
-    """Compile (or reuse) the cached .so. Returns its path, or None with no
-    compiler. Raises on a compile failure -- that is a broken tree, not an
-    absent toolchain."""
-    cc = _cc()
+    """Compile (or reuse) the cached .so: its path, or None with no compiler.
+    Raises on a compile failure -- a broken tree, not an absent toolchain."""
+    cc = native_build.cc()
     if cc is None:
         return None
     sources = _sources()
-    so_path = os.path.join(_CACHE, "moyhost_audio-%s.so" % _key(cc, sources))
+    so_path = os.path.join(_CACHE, "moy_audio-%s.so" % _key(cc, sources))
     if os.path.exists(so_path):
         return so_path
     os.makedirs(_CACHE, exist_ok=True)
-    src_dir = so_path[:-3] + ".src"
-    os.makedirs(src_dir, exist_ok=True)
-    for name, text in sources.items():
-        with open(os.path.join(src_dir, name), "w") as fh:
-            fh.write(text)
-    tmp = so_path + ".tmp"
-    cmd = [cc] + _CFLAGS + ["-I", src_dir,
-                            os.path.join(src_dir, "moyhost_audio.c"),
-                            os.path.join(src_dir, "moy_audio.c"), "-o", tmp]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError("moyhost_audio build failed:\n" + proc.stderr)
-    os.replace(tmp, so_path)                    # atomic vs a parallel test run
+    with native_build.build_lock(so_path + ".lock"):
+        if os.path.exists(so_path):
+            return so_path
+        src_dir = so_path[:-3] + ".src"
+        os.makedirs(src_dir, exist_ok=True)
+        for name, text in sources.items():
+            with open(os.path.join(src_dir, name), "w") as fh:
+                fh.write(text)
+        tmp = "%s.%d.tmp" % (so_path, os.getpid())
+        cmd = ([cc] + _CFLAGS + ["-I", src_dir]
+               + [os.path.join(src_dir, n) for n in sorted(sources) if n.endswith(".c")]
+               + ["-o", tmp])
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError("moy_audio host build failed:\n" + proc.stderr)
+        os.replace(tmp, so_path)
     if verbose:
-        print("moyhost_audio: built", os.path.relpath(so_path, _ROOT))
+        print("moy_audio: built", os.path.relpath(so_path, _ROOT))
     return so_path
 
 
-class _Lib:
-    """ctypes wrapper: one method per shim export, argtypes pinned so a
-    mismatched call fails loudly instead of corrupting a stack."""
+def _load(path):
+    import ctypes as C
+    d = C.CDLL(path)
+    u32, i, p = C.c_uint32, C.c_int, C.c_void_p
+    pu32 = C.POINTER(u32)
+    sigs = (
+        ("moy_aud_open", [pu32, u32, C.c_char_p, C.c_size_t], i),
+        ("moy_aud_bank", [u32, C.c_char_p, C.c_size_t], i),
+        ("moy_aud_focus", [u32], i),
+        ("moy_aud_focused", [], u32),
+        ("moy_aud_close", [u32], i),
+        ("moy_aud_sfx", [u32, i, i], i),
+        ("moy_aud_beep", [u32, C.c_double, C.c_double], i),
+        ("moy_aud_music", [u32, i, i], i),
+        ("moy_aud_music_stop", [u32], i),
+        ("moy_aud_stop", [u32, i], i),
+        ("moy_aud_level", [u32, i], i),
+        ("moy_aud_active", [u32, pu32], i),
+        ("moy_aud_volume", [i], None),
+        ("moy_aud_console_level", [], i),
+        ("moy_aud_hush", [], None),
+        ("moy_aud_sample_load", [pu32, p, C.c_size_t, i], i),
+        ("moy_aud_sample_play", [u32, u32, i], i),
+        ("moy_aud_sample_free", [u32], i),
+        ("moy_aud_set_rate", [i], None),
+        ("moy_aud_rate", [], i),
+        ("moy_aud_render", [p, i], None),
+        ("moy_aud_stats", [C.POINTER(u32 * 12)], None),
+        ("moy_aud_dump", [u32, p, i], i),
+        ("moy_aud_stats_reset_max", [], None),
+        ("moy_aud_trace_on", [i], None),
+        ("moy_aud_trace_read", [C.POINTER(C.c_int32), C.c_size_t], C.c_size_t),
+        ("moy_aud_out_start", [], i),
+        ("moy_aud_out_state", [C.POINTER(C.c_char_p)], i),
+        ("moy_aud_snd_counts", [pu32, C.POINTER(i)], i),
+    )
+    for name, args, res in sigs:
+        fn = getattr(d, name)
+        fn.argtypes = args
+        fn.restype = res
+    return d
 
-    def __init__(self, path):
+
+def _check(rc):
+    if rc in (OK, BANK):
+        return rc
+    if rc == STALE:
+        raise ValueError("stale audio handle")
+    if rc == FULL:
+        raise MemoryError("the audio table is full")
+    if rc == NOMEM:
+        raise MemoryError()
+    raise ValueError("audio: bad argument")
+
+
+class Module:
+    """`moy_audio`, name for name (native/moy_audio/modmoy_audio.c)."""
+
+    CHANNELS = CHANNELS
+    OUT_NONE, OUT_RUNNING, OUT_FAILED, OUT_ABSENT = OUT_NONE, OUT_RUNNING, OUT_FAILED, OUT_ABSENT
+
+    def __init__(self, d):
         import ctypes
-        d = ctypes.CDLL(path)
-        d.moyhost_new.argtypes = [ctypes.c_int]
-        d.moyhost_new.restype = ctypes.c_void_p
-        d.moyhost_free.argtypes = [ctypes.c_void_p]
-        d.moyhost_bank_load.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-        d.moyhost_bank_load.restype = ctypes.c_int
-        d.moyhost_set_rate.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        d.moyhost_sfx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
-        d.moyhost_beep.argtypes = [ctypes.c_void_p, ctypes.c_double,
-                                   ctypes.c_double]
-        d.moyhost_music.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
-        d.moyhost_music_stop.argtypes = [ctypes.c_void_p]
-        d.moyhost_sound_stop.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        d.moyhost_volume.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        d.moyhost_active.argtypes = [ctypes.c_void_p]
-        d.moyhost_active.restype = ctypes.c_uint
-        d.moyhost_render.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
-                                     ctypes.c_int]
         self._d = d
-        self._ctypes = ctypes
+        self._C = ctypes
+        self.__name__ = "moy_audio"
 
-    def new(self, rate):
-        return self._d.moyhost_new(int(rate))
+    def _text(self, text):
+        b = text.encode() if isinstance(text, str) else bytes(text)
+        return b, len(b)
 
-    def free(self, h):
-        self._d.moyhost_free(h)
+    def open(self, owner, bank=None):
+        h = self._C.c_uint32()
+        b, n = self._text(bank) if bank is not None else (None, 0)
+        _check(self._d.moy_aud_open(self._C.byref(h), int(owner), b, n))
+        return h.value
 
-    def bank_load(self, h, json_text):
-        return bool(self._d.moyhost_bank_load(h, json_text.encode()))
+    def bank(self, h, text):
+        b, n = self._text(text)
+        return _check(self._d.moy_aud_bank(int(h), b, n)) == OK
 
-    def set_rate(self, h, rate):
-        self._d.moyhost_set_rate(h, int(rate))
+    def focus(self, h):
+        _check(self._d.moy_aud_focus(int(h)))
 
-    def sfx(self, h, n, chan):
-        self._d.moyhost_sfx(h, n, chan)
+    def focused(self):
+        return self._d.moy_aud_focused()
 
-    def beep(self, h, freq, dur):
-        self._d.moyhost_beep(h, freq, dur)
+    def close(self, h):
+        _check(self._d.moy_aud_close(int(h)))
 
-    def music(self, h, track, loop):
-        self._d.moyhost_music(h, track, loop)
+    def sfx(self, h, n, chan=-1):
+        _check(self._d.moy_aud_sfx(int(h), int(n), -1 if chan is None else int(chan)))
+
+    def beep(self, h, freq, dur=0.15):
+        _check(self._d.moy_aud_beep(int(h), float(freq), float(dur)))
+
+    def music(self, h, track, loop=True):
+        _check(self._d.moy_aud_music(int(h), int(track), 1 if loop else 0))
 
     def music_stop(self, h):
-        self._d.moyhost_music_stop(h)
+        _check(self._d.moy_aud_music_stop(int(h)))
 
-    def sound_stop(self, h, chan):
-        self._d.moyhost_sound_stop(h, chan)
+    def stop(self, h, chan=-1):
+        _check(self._d.moy_aud_stop(int(h), -1 if chan is None else int(chan)))
 
-    def volume(self, h, level):
-        self._d.moyhost_volume(h, level)
+    def level(self, h, level):
+        _check(self._d.moy_aud_level(int(h), int(level)))
 
-    def active(self, h):
-        return self._d.moyhost_active(h)
+    def active(self, h=0):
+        m = self._C.c_uint32()
+        _check(self._d.moy_aud_active(int(h), self._C.byref(m)))
+        return m.value
 
-    def render_into(self, h, out, nframes):
-        buf = (self._ctypes.c_char * (2 * nframes)).from_buffer(out)
-        self._d.moyhost_render(h, buf, nframes)
+    def volume(self, level=None):
+        if level is not None:
+            self._d.moy_aud_volume(int(level))
+        return self._d.moy_aud_console_level()
+
+    def hush(self):
+        self._d.moy_aud_hush()
+
+    def sample_load(self, pcm, rate):
+        buf = (self._C.c_char * len(pcm)).from_buffer_copy(bytes(pcm))
+        h = self._C.c_uint32()
+        _check(self._d.moy_aud_sample_load(self._C.byref(h), buf, len(pcm) // 2, int(rate)))
+        return h.value
+
+    def sample_play(self, h, clip, chan=-1):
+        _check(self._d.moy_aud_sample_play(int(h), int(clip), -1 if chan is None else int(chan)))
+
+    def sample_free(self, clip):
+        _check(self._d.moy_aud_sample_free(int(clip)))
+
+    def set_rate(self, rate):
+        self._d.moy_aud_set_rate(int(rate))
+
+    def rate(self):
+        return self._d.moy_aud_rate()
+
+    def render(self, buf, n):
+        n = min(int(n), len(buf) // 2)
+        if n <= 0:
+            return 0
+        cbuf = (self._C.c_char * (2 * n)).from_buffer(buf)
+        self._d.moy_aud_render(cbuf, n)
+        return n
+
+    def attach(self):
+        return True
+
+    def dump(self, h, buf, n):
+        n = min(int(n), len(buf) // 2)
+        cbuf = (self._C.c_char * (2 * n)).from_buffer(buf)
+        _check(self._d.moy_aud_dump(int(h), cbuf, n))
+        return n
+
+    def start(self):
+        self._d.moy_aud_out_start()
+        return self.out()
+
+    def out(self):
+        why = self._C.c_char_p()
+        st = self._d.moy_aud_out_state(self._C.byref(why))
+        return (st, (why.value or b"").decode())
+
+    def stats(self, reset=False):
+        v = (self._C.c_uint32 * 12)()
+        self._d.moy_aud_stats(self._C.byref(v))
+        if reset:
+            self._d.moy_aud_stats_reset_max()
+        return tuple(v)
+
+    def probe(self):
+        return None
+
+    def trace(self, on=None):
+        if on is not None:
+            self._d.moy_aud_trace_on(1 if on else 0)
+            return None
+        rows = (self._C.c_int32 * (64 * 4))()
+        n = self._d.moy_aud_trace_read(rows, 64)
+        return [tuple(rows[4 * k:4 * k + 4]) for k in range(n)]
+
+    def codec(self):
+        return None
+
+    def snd_counts(self):
+        c = (self._C.c_uint32 * 4)()
+        o = self._C.c_int()
+        if not self._d.moy_aud_snd_counts(c, self._C.byref(o)):
+            return None
+        return (c[0], c[1], c[2], c[3], bool(o.value))
 
 
 def get():
-    """The loaded binding, or None (no compiler). Memoized; warns once on
-    stderr when synthesis is unavailable so a silent sim is not a mystery."""
+    """The module, or None (no compiler). Memoized; says once on stderr why
+    the host is silent."""
     global _lib, _tried
     if _lib is not None or _tried:
         return _lib
@@ -194,29 +322,25 @@ def get():
     try:
         path = build()
     except Exception as exc:   # noqa: BLE001 -- a broken compile: say so, run silent
-        print("moyhost_audio: build failed, host audio SILENT: %s" % (exc,),
+        print("moy_audio: host build failed, host audio SILENT: %s" % (exc,),
               file=sys.stderr)
         return None
     if path is None:
-        print("moyhost_audio: no C compiler, host audio SILENT "
-              "(boards/web unaffected -- they compile libmoy natively)",
-              file=sys.stderr)
+        print("moy_audio: no C compiler, host audio SILENT", file=sys.stderr)
         return None
-    try:
-        _lib = _Lib(path)
-    except Exception as exc:   # noqa: BLE001
-        print("moyhost_audio: load failed, host audio SILENT: %s" % (exc,),
-              file=sys.stderr)
-        return None
+    _lib = Module(_load(path))
     return _lib
 
 
+def install():
+    """Put `moy_audio` where an `import` finds it; never displaces a real one."""
+    mod = get()
+    if mod is not None:
+        sys.modules.setdefault("moy_audio", mod)
+    return mod
+
+
 if __name__ == "__main__":
-    # `make setup` runs this so the first simulate_desktop needs no compile
-    # pause. Exit 0 either way: an absent compiler is a degradation, not a
-    # broken setup.
-    p = build(verbose=True) if _cc() else None
-    if p is None:
-        print("moyhost_audio: no C compiler -- host audio will be silent")
-    else:
-        print("moyhost_audio: ready")
+    # `make setup` runs this so the first simulate_desktop needs no compile.
+    p = build(verbose=True) if native_build.cc() else None
+    print("moy_audio: ready" if p else "moy_audio: no C compiler -- host audio will be silent")

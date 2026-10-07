@@ -87,9 +87,9 @@ from .moy_image import Image  # noqa: E402,F401  (re-exported: host_app.Image)
 # extracted to host_api.py so non-CPython targets can freeze it (#151 web runner);
 # re-exported here so host_app.make_api / .ConsoleDriver / ... are unchanged for
 # the sim, the web console, and the tests.
-from .host_api import (PAN_SPEED, ConsoleDriver, FakeAudio, FakeWifi,  # noqa: E402,F401
-                       _Layer, _NullComp, _decode_moyimg, make_api, make_audio,
-                       make_wifi)
+from .host_api import (PAN_SPEED, ConsoleDriver, FakeWifi,  # noqa: E402,F401
+                       _Layer, _NullComp, _decode_moyimg, make_api, make_wifi)
+from .audio_session import PcmPump  # noqa: E402
 from .input import InputState  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -97,50 +97,41 @@ SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 WIDTH, HEIGHT = 320, 240        # the fixed GAME canvas (the console spec)
 
 
-class SdlAudio(FakeAudio):
-    """Real desktop playback backend (#16): like FakeAudio (records calls + drives
-    the engine) but ALSO streams the rendered PCM to the speakers via pygame.mixer,
-    so audio can be evaluated on the PC before the device's I2S path. Each frame it
-    renders one block (signed-16-bit mono LE, the engine's native format) and queues
-    it on a channel so blocks play back-to-back. Falls back to silent (plain
-    FakeAudio behavior) if no audio device is available, so headless runs never
-    crash."""
+class SdlPump(PcmPump):
+    """The host's speaker (#16): the kernel's mix pulled once a frame and queued
+    on a pygame.mixer channel so blocks play back to back. Without an audio
+    device (headless, CI) it pulls and discards, so the sequencers still
+    advance exactly as they do with one."""
 
-    def __init__(self, engine):
-        FakeAudio.__init__(self, engine)
+    def __init__(self, rate=11025):
+        PcmPump.__init__(self, rate)
         self._ok = False
         self._pygame = None
         self._chan = None
-        self._keep = None        # hold a ref to the in-flight Sound so it isn't GC'd
+        self._keep = None        # the in-flight Sound, kept alive
         try:
             import pygame
             pygame.mixer.quit()  # reset any default (44.1k stereo) init to our format
-            pygame.mixer.init(frequency=engine.rate, size=-16, channels=1, buffer=512)
+            pygame.mixer.init(frequency=self.rate, size=-16, channels=1, buffer=512)
             self._pygame = pygame
             self._chan = pygame.mixer.Channel(0)
             self._ok = True
-        except Exception:        # no audio device (headless/CI) -> silent fallback
+        except Exception:        # no audio device (headless/CI)
             self._ok = False
 
     def tick(self, dt):
-        pcm = self.block(dt)          # advance the mixer; bytes of LE int16 mono
+        pcm = self.block(self.frames(dt))
         if not self._ok or not pcm:
             return
         try:
             snd = self._pygame.mixer.Sound(buffer=pcm)
             if self._chan.get_busy():
-                self._chan.queue(snd)     # play right after the current block
+                self._chan.queue(snd)
             else:
                 self._chan.play(snd)
             self._keep = snd
         except Exception:
-            self._ok = False              # stop trying if the device drops out
-
-
-def make_sdl_audio(engine):
-    """Factory for the real desktop-playback backend (simulate_desktop wires this
-    for live windowed runs; tests/headless keep make_audio's FakeAudio)."""
-    return SdlAudio(engine)
+            self._ok = False              # the device dropped out
 
 
 def _real_local_ip():
@@ -376,7 +367,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # SYSTEM canvas (the surface the cursor moves on), so it's sized to that.
     console.wire_workstation_core(
         ws, moy_carts, carts_dir, make_api, make_wifi(moy_carts, carts_dir),
-        make_audio=make_audio, runtimes=runtimes, can_manage=True,
+        audio_out=PcmPump(), runtimes=runtimes, can_manage=True,
         pointer=console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h), inp=inp)
     # Multiplayer (#65): a host-side fake net transport (the sim's fake radio, for
     # net.*), so a "multiplayer"-permission cart runs in the sim. Unlinked here (a

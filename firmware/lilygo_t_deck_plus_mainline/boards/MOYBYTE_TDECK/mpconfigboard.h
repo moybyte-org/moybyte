@@ -144,6 +144,12 @@
 #define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
 #define MOY_BUS_I2C_HZ                      (400000)
 
+// The speaker (native/moy_audio/moy_aud_out.c): the MAX98357 amp on its own
+// I2S pins, behind the board power gate (GPIO 10, driven at boot).
+#define MOY_AUDIO_I2S_BCK                   (7)
+#define MOY_AUDIO_I2S_WS                    (5)
+#define MOY_AUDIO_I2S_DOUT                  (6)
+
 // The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
 // released layer buffers it keeps for the next run, inside the kernel's 1 MiB
 // PSRAM share (docs/native_kernel_2026-09.md §6.1). One 320x240 layer: a

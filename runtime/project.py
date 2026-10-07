@@ -159,10 +159,10 @@ class Project(ProjectStore):
     def _music_history(self):
         """The op-history of the OPEN MusicEditor (#111 phase 4), or None --
         guarded on the live AudioBank identity like _paint_history (the bank a
-        MusicEditor edits is `ws.audio.engine.bank`; commit_sounds only wants
+        MusicEditor edits is `ws.audio.bank`; commit_sounds only wants
         the ops for THIS project's bank)."""
         me = getattr(self.ws.music_ui, "musicedit", None)
         au = getattr(self.ws, "audio", None)
-        if me is not None and au is not None and getattr(me, "bank", None) is au.engine.bank:
+        if me is not None and au is not None and getattr(me, "bank", None) is au.bank:
             return getattr(me, "_hist", None)
         return None

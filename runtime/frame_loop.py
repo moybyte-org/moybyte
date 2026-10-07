@@ -24,10 +24,12 @@ try:
     from chrome import _ticks_ms, _ticks_diff
     from ticks import _ticks_us, _sleep_ms
     from perf_line import FAILED as PERF_FAILED, format_perf
+    from audio_session import probe_line as _audio_probe
 except ImportError:  # pragma: no cover - host package lane
     from runtime.chrome import _ticks_ms, _ticks_diff
     from runtime.ticks import _ticks_us, _sleep_ms
     from runtime.perf_line import FAILED as PERF_FAILED, format_perf
+    from runtime.audio_session import probe_line as _audio_probe
 
 try:
     import moy_kernel as _kernel
@@ -456,8 +458,8 @@ class PerfSampler:
     False))`) stays in each board's `run_desktop`: it is a service assignment on
     the boot path, which is what `tests/test_board_service_parity.py` reads. The
     LIVE re-sync is here, so flipping Settings -> PERF DIAG needs no reboot --
-    for the capture meters and for the audio backend's own periodic lines,
-    which follow the same switch through its `diag` attribute.
+    for the capture meters and for the kernel's AUDIORATE line, which is
+    printed beside PERF while the diag is on and never otherwise.
     """
 
     def __init__(self, ws, overlap=None, period_ms=2000, emit=print,
@@ -521,11 +523,11 @@ class PerfSampler:
             live = bool(getattr(ws, "diag_live", False))
             if ws.perf_capture != live:
                 ws.perf_capture = live
-            aud = getattr(ws, "audio", None)
-            if aud is not None and hasattr(aud, "diag") and aud.diag != live:
-                aud.diag = live
             if live:
                 self._sample(ws, drawn)
+                line = _audio_probe()
+                if line:
+                    self._emit(line)
             else:
                 self._ov = None          # re-read when the diag comes back
                 self._gcp = None

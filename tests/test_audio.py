@@ -1,17 +1,14 @@
-"""Headless tests for the v0.4 audio core (#16): the shared sound data model +
-the engine surface (runtime/audio.py), the host audio API surface
-(host_app.make_api + FakeAudio), the .moy sounds.json store (moy_carts), and
-a cart making sound through the fake backend on the shared console
-(host == device).
+"""Headless tests for the audio core (#16): the shared sound data model
+(runtime/audio.py), what a bank renders through the kernel's audio
+(native/moy_audio, the same C the boards compile, over ctypes; driven here by
+tests/audio_synth.py), the cart API's audio verbs, the .moy sounds.json store
+(moy_carts), and a cart making sound on the shared console (host == device).
 
-No sound hardware: FakeAudio records calls AND drives the real AudioEngine, so
-the mixer is exercised under SDL_VIDEODRIVER=dummy. Since moycore stage 0
-(#97) the engine IS vendored libmoy behind a ctypes binding, so the behavior
-tests below exercise the same C the boards compile; they skip without a C
-compiler (the engine is then deliberately silent). What used to be asserted by
-reaching into the Python twin's voice structs is asserted through the engine's
-active_channels() mask -- the same instrument the device module exposes -- or
-pinned sample-exactly by tests/test_audio_parity.py's scenarios.
+No sound hardware: the host pulls the mix once a frame (audio_session.PcmPump)
+and the session trace records every call. Behaviour is asserted through the
+session's active() mask -- the instrument every tier exposes -- or pinned
+sample-exactly by tests/test_audio_parity.py's scenarios. Without a C compiler
+the host has no audio module and these skip.
 """
 
 from pathlib import Path
@@ -24,19 +21,13 @@ from runtime import audio  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 from ws_helpers import StubInput  # noqa: E402
-
-
-def _synth_available():
-    try:
-        from runtime import audio_binding
-        return audio_binding.get() is not None
-    except Exception:   # noqa: BLE001
-        return False
+import audio_synth  # noqa: E402
+from audio_synth import Synth  # noqa: E402
 
 
 requires_synth = pytest.mark.skipif(
-    not _synth_available(),
-    reason="no C compiler -- the host engine is silence by design (#97)")
+    not audio_synth.available(),
+    reason="no C compiler -- the host has no audio module by design (#97)")
 
 
 # -- note math -------------------------------------------------------------
@@ -58,7 +49,7 @@ def test_note_to_freq_and_name_to_pitch():
 def test_freq_to_pitch_roundtrips_through_note_to_freq():
     for name in ("C3", "E4", "A4", "G5"):
         p = audio.name_to_pitch(name)
-        assert audio.AudioEngine.freq_to_pitch(audio.note_to_freq(p)) == p
+        assert audio.freq_to_pitch(audio.note_to_freq(p)) == p
 
 
 # -- data model ------------------------------------------------------------
@@ -99,8 +90,9 @@ def test_audio_bank_default_and_roundtrip():
 
 # -- mixer -----------------------------------------------------------------
 
+@requires_synth
 def test_render_produces_pcm_and_silence_when_idle():
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng = Synth(audio.AudioBank.default(), rate=8000)
     # nothing playing -> all-zero PCM of the right length (16-bit mono)
     pcm = eng.render(100)
     assert len(pcm) == 200
@@ -108,13 +100,14 @@ def test_render_produces_pcm_and_silence_when_idle():
     assert not eng.is_active()
 
 
+@requires_synth
 def test_render_into_matches_render_and_reuses_buffer():
     # The device I2S backend (#16) feeds I2S from render_into() into ONE persistent
     # buffer per frame (so the non-blocking write's held pointer never sees a GC'd /
     # reallocated buffer). render_into must produce byte-identical output to render()
     # and report the frames written, so the two seams stay equivalent.
-    a = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
-    b = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    a = Synth(audio.AudioBank.default(), rate=8000)
+    b = Synth(audio.AudioBank.default(), rate=8000)
     a.play_sfx(0)
     b.play_sfx(0)
     buf = bytearray(400)                       # 200 frames * 2 bytes, reused below
@@ -128,8 +121,9 @@ def test_render_into_matches_render_and_reuses_buffer():
     assert bytes(buf) == a.render(200)         # both engines advanced in lockstep
 
 
+@requires_synth
 def test_render_into_idle_is_silent_and_returns_zero_for_empty():
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng = Synth(audio.AudioBank.default(), rate=8000)
     buf = bytearray(100)
     assert eng.render_into(buf, 0) == 0        # nframes<=0 -> no work
     assert eng.render_into(buf, 50) == 50      # idle engine -> silence written
@@ -138,7 +132,7 @@ def test_render_into_idle_is_silent_and_returns_zero_for_empty():
 
 @requires_synth
 def test_play_sfx_makes_nonzero_audio_then_finishes():
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng = Synth(audio.AudioBank.default(), rate=8000)
     eng.play_sfx(0)
     assert eng.is_active()
     pcm = eng.render(400)            # render across the whole short SFX
@@ -149,8 +143,9 @@ def test_play_sfx_makes_nonzero_audio_then_finishes():
     assert not eng.is_active()
 
 
+@requires_synth
 def test_out_of_range_sfx_is_silent_noop():
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng = Synth(audio.AudioBank.default(), rate=8000)
     eng.play_sfx(99)                 # no such SFX
     assert not eng.is_active()
     assert set(eng.render(50)) == {0}
@@ -158,7 +153,7 @@ def test_out_of_range_sfx_is_silent_noop():
 
 @requires_synth
 def test_beep_plays_a_tone_without_a_bank_entry():
-    eng = audio.AudioEngine(audio.AudioBank(), rate=8000)   # empty bank
+    eng = Synth(audio.AudioBank(), rate=8000)   # empty bank
     eng.play_beep(440, 0.05)
     assert eng.is_active()
     assert any(b != 0 for b in eng.render(400))
@@ -166,7 +161,7 @@ def test_beep_plays_a_tone_without_a_bank_entry():
 
 @requires_synth
 def test_volume_zero_silences_output():
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng = Synth(audio.AudioBank.default(), rate=8000)
     eng.set_volume(0.0)
     eng.play_sfx(0)
     assert set(eng.render(400)) == {0}    # muted
@@ -177,7 +172,7 @@ def test_volume_zero_silences_output():
 
 @requires_synth
 def test_music_loops_and_stops():
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng = Synth(audio.AudioBank.default(), rate=8000)
     eng.play_music(0)
     assert eng.is_active()
     # advance well past the 4-slot phrase; looping keeps it active
@@ -190,7 +185,7 @@ def test_music_loops_and_stops():
 
 @requires_synth
 def test_stop_all_silences_everything():
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng = Synth(audio.AudioBank.default(), rate=8000)
     eng.play_sfx(0)
     eng.play_music(0)
     eng.stop()
@@ -208,7 +203,7 @@ def test_forced_channel_retrigger_keeps_sounding():
     # The behavioral residue of the old gen-counter tests worth keeping: rapid
     # retriggers of the SAME sfx onto the SAME forced channel must each take
     # (the aliasing bug they pinned presented as a silently dropped retrigger).
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng = Synth(audio.AudioBank.default(), rate=8000)
     for _ in range(10):
         eng.play_sfx(0, chan=0)
         assert eng.active_channels() & 1
@@ -217,14 +212,23 @@ def test_forced_channel_retrigger_keeps_sounding():
     assert not eng.active_channels() & 1
 
 
-# -- host API surface (host_app.make_api + FakeAudio) ----------------------
+# -- the cart API's audio verbs ---------------------------------------------
 
-def test_make_api_exposes_audio_and_drives_engine():
+class _RecSession:
+    """What make_api binds the six verbs to: the run's AudioSession."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __getattr__(self, verb):
+        return lambda *a: self.calls.append((verb,) + a)
+
+
+def test_make_api_binds_the_six_verbs_to_the_runs_session():
     from runtime import host_app
     from runtime.host_canvas import make_canvas as Canvas
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
-    fake = host_app.FakeAudio(eng)
-    api = host_app.make_api(Canvas(32, 32), StubInput(), {}, None, fake)
+    rec = _RecSession()
+    api = host_app.make_api(Canvas(32, 32), StubInput(), {}, None, rec)
     for name in ("sfx", "beep", "music", "music_stop", "sound_stop", "volume"):
         assert name in api
     api["sfx"](1)
@@ -233,22 +237,42 @@ def test_make_api_exposes_audio_and_drives_engine():
     api["volume"](3)
     api["music_stop"]()
     api["sound_stop"]()
-    # the fake recorded every call ...
-    kinds = [c[0] for c in fake.calls]
-    assert kinds == ["sfx", "beep", "music", "volume", "music_stop", "sound_stop"]
-    # ... and routed them through the real engine (volume took effect).
-    # volume(level) is 0..7 -- the same scale as a note's vol, and what libmoy
-    # and SPEC.md 8.2 mean by it.
-    assert eng.master == 3
+    assert [c[0] for c in rec.calls] == ["sfx", "beep", "music", "volume",
+                                         "music_stop", "sound_stop"]
 
 
-def test_fake_audio_tick_renders_frames():
-    from runtime import host_app
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
-    fake = host_app.FakeAudio(eng)
-    fake.sfx(0)
-    fake.tick(1 / 30)
-    assert fake.rendered == int(8000 / 30)
+@requires_synth
+def test_a_cart_volume_turns_its_session_down_never_past_the_console():
+    """volume(level) is the cart's own level (SPEC.md 8.2, 0..7); the console's
+    (Settings' row) caps it, so a cart can be quieter than the console, never
+    louder."""
+    from runtime import audio_session
+    sess = audio_session.AudioSession(audio.AudioBank.default(), "cart")
+    pump = audio_session.PcmPump(8000)
+    def loud():
+        sess.sound_stop()
+        sess.sfx(0)
+        return max(abs(int.from_bytes(pump.block(400)[i:i + 2], "little", signed=True))
+                   for i in range(0, 800, 2))
+    full = loud()
+    sess.volume(3)
+    assert 0 < loud() < full
+    sess.volume(7)
+    audio_session.console_volume(0)
+    assert loud() == 0
+    audio_session.console_volume(7)
+    sess.close()
+
+
+@requires_synth
+def test_the_pump_pulls_the_rate_a_frame_stands_for():
+    from runtime import audio_session
+    pump = audio_session.PcmPump(8000)
+    pump.tick(1 / 30)
+    assert pump.rendered == int(8000 / 30)
+    for _ in range(29):
+        pump.tick(1 / 30)
+    assert pump.rendered == 8000          # the carried fractions add up
 
 
 # -- .moy store: sounds.json round-trip ----------------------------------
@@ -296,8 +320,9 @@ def _draw():
 """
 
 
+@requires_synth
 def test_a_cart_plays_music_sfx_and_a_raw_tone_through_the_console(tmp_path):
-    from runtime import host_app, moy_carts
+    from runtime import audio_session, host_app, moy_carts
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     cart = moy_carts.create("Noise Maker", root, src=_NOISY_SRC)
@@ -309,21 +334,28 @@ def test_a_cart_plays_music_sfx_and_a_raw_tone_through_the_console(tmp_path):
             break
     else:
         raise AssertionError("the fixture cart was not scanned")
+    na = audio_session.native()
+    na.trace(True)
     ws.open()
     assert ws.screen == "desktop" and ws.cart_error is None
-    assert isinstance(ws.audio, host_app.FakeAudio)
-    assert ("music", 0, True) in ws.audio.calls   # _init started the track
+    assert isinstance(ws.audio, audio_session.AudioSession) and ws.audio.h
+    assert na.focused() == ws.audio.h
+    rendered0 = ws.audio_out.rendered
     for _ in range(8):
         ws.frame(1 / 30)
-    kinds = [c[0] for c in ws.audio.calls]
-    assert "sfx" in kinds and "beep" in kinds
-    assert ws.audio.rendered > 0                  # tick() pulled PCM each frame
+    verbs = [r[1] for r in na.trace()]
+    na.trace(False)
+    music, sfx, beep = 6, 4, 5                    # moy_aud.h's MOY_AUD_T_*
+    assert music in verbs                         # _init started the track
+    assert sfx in verbs and beep in verbs
+    assert ws.audio_out.rendered > rendered0      # the pump pulled PCM each frame
 
 
-def test_cart_without_audio_backend_still_runs(tmp_path):
-    # A Workstation with no make_audio injected falls back to _SilentAudio so a
-    # cart's sfx()/beep() are harmless no-ops (and make_api stays callable).
-    from runtime import console, moy_carts
+def test_cart_without_audio_backend_still_runs(tmp_path, monkeypatch):
+    # A console without `moy_audio` holds no session: a cart's sfx()/beep() are
+    # harmless no-ops, and the bank model is still there for the editor.
+    from runtime import audio_session, console, moy_carts
+    monkeypatch.setattr(audio_session, "_NA", [False])
     from runtime.host_canvas import make_canvas as Canvas
     from runtime.input import InputState
     from runtime import host_app
@@ -333,12 +365,11 @@ def test_cart_without_audio_backend_still_runs(tmp_path):
                      src="def _draw():\n    sfx(0)\n    beep(440)\n    cls(1)\n")
     ws = console.Workstation(host_app._NullComp(), Canvas(320, 240), InputState(),
                              moy_carts.scan(root))
-    ws.make_api = host_app.make_api          # API present ...
-    ws.make_audio = None                     # ... but no audio backend
+    ws.make_api = host_app.make_api
     ws.open()
     ws.frame(1 / 30)
     assert ws.cart_error is None             # silent no-op, not a crash
-    assert isinstance(ws.audio, console._SilentAudio)
+    assert ws.audio.h == 0 and ws.audio.bank is not None
 
 
 # -- music / sound editor core (#50) ----------------------------------------
@@ -797,7 +828,7 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     me = ws.music_ui.musicedit
     assert me is not None
     # The editor edits the SAME bank the running cart plays through.
-    assert me.bank is ws.audio.engine.bank
+    assert me.bank is ws.audio.bank
 
     # A frame in the music view draws without error.
     ws.frame(1 / 30)
@@ -809,12 +840,12 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     ws.music_ui._music_click(r[0] + 2, r[1] + 2)
     assert me.cur_step()[0] == p0 + 1 and me.dirty
 
-    # PLAY starts a preview through the live engine; tapping again STOPS it (toggle).
+    # PLAY starts a preview on the cart's session; tapping again STOPS it (toggle).
     ws.music_ui._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
     assert ws.music_ui.music_preview is not None
-    rendered0 = ws.audio.rendered
-    ws.frame(1 / 30)                          # a frame ticks the mixer (renders PCM)
-    assert ws.audio.rendered > rendered0
+    rendered0 = ws.audio_out.rendered
+    ws.frame(1 / 30)                          # a frame pulls the mix (renders PCM)
+    assert ws.audio_out.rendered > rendered0
     ws.music_ui._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
     assert ws.music_ui.music_preview is None           # toggled off while still sounding
 
@@ -1014,7 +1045,7 @@ def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
 def test_all_eight_waves_make_sound():
     for w in range(8):
         b = audio.AudioBank([audio.SFX([[57, w, 6]] * 4, speed=8)], [])
-        eng = audio.AudioEngine(b, rate=8000)
+        eng = Synth(b, rate=8000)
         eng.play_sfx(0)
         assert any(x != 0 for x in eng.render(800)), "wave %d is silent" % w
 
@@ -1023,7 +1054,7 @@ def test_all_eight_waves_make_sound():
 def test_each_effect_changes_the_output():
     def render(fx):
         steps = [[57, 0, 6], [69, 0, 6, fx] if fx else [69, 0, 6]]
-        eng = audio.AudioEngine(
+        eng = Synth(
             audio.AudioBank([audio.SFX(steps, speed=4)], []), rate=8000)
         eng.play_sfx(0)
         return eng.render(4000)
@@ -1035,7 +1066,7 @@ def test_each_effect_changes_the_output():
 @requires_synth
 def test_fade_out_ends_silent_fade_in_starts_silent():
     def one_note(fx):
-        eng = audio.AudioEngine(
+        eng = Synth(
             audio.AudioBank([audio.SFX([[57, 0, 7, fx]], speed=1)], []),
             rate=8000)
         eng.play_sfx(0)
@@ -1062,7 +1093,7 @@ def test_keyed_rest_is_a_slide_origin():
     # keyed_rest_slide scenario; retrigger-survival of the origin lives in
     # libmoy itself now (voice_start keeps prev_pitch on purpose).
     def render(first):
-        eng = audio.AudioEngine(
+        eng = Synth(
             audio.AudioBank([audio.SFX([first, [90, 0, 6, audio.FX_SLIDE]],
                                        speed=2)], []), rate=8000)
         eng.play_sfx(0, chan=0)
@@ -1074,7 +1105,7 @@ def test_keyed_rest_is_a_slide_origin():
 def test_multichannel_music_claims_voices_from_the_top():
     sfx = [audio.SFX([[40 + i, 0, 6]] * 8, speed=8) for i in range(4)]
     b = audio.AudioBank(sfx, [audio.MusicTrack([[0, 1, 2]], speed=1)])
-    eng = audio.AudioEngine(b, rate=8000)
+    eng = Synth(b, rate=8000)
     eng.play_music(0)
     # row channel j -> voice MUSIC_CHANNEL - j; voice 0 stays free for sfx
     assert eng.active_channels() & 0x0F == 0b1110
@@ -1088,7 +1119,7 @@ def test_multichannel_music_claims_voices_from_the_top():
 def test_multichannel_row_minus_one_silences_that_voice():
     sfx = [audio.SFX([[40 + i, 0, 6]] * 8, speed=8) for i in range(4)]
     b = audio.AudioBank(sfx, [audio.MusicTrack([[0, 1], [0, -1]], speed=10)])
-    eng = audio.AudioEngine(b, rate=8000)
+    eng = Synth(b, rate=8000)
     eng.play_music(0)
     assert eng.active_channels() & 0b0100      # row ch 1 -> voice 2 sounding
     eng.render(1200)                     # 0.15 s -> exactly one slot advance
@@ -1106,7 +1137,7 @@ def test_music_track_rows_serialize_stably():
 
 @requires_synth
 def test_legacy_single_channel_music_behavior_unchanged():
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng = Synth(audio.AudioBank.default(), rate=8000)
     eng.play_music(0)
     assert eng.active_channels() & 0x0F == 1 << audio.MUSIC_CHANNEL
     # sfx still round-robin 0..2 and never steal the music voice
@@ -1149,7 +1180,7 @@ def test_sfx_loop_start_roundtrips_and_voice_wraps_there():
     assert audio.SFX.from_dict(d).to_dict() == d
     # a plain sfx serializes WITHOUT the key (pre-#170 banks byte-stable)
     assert "loop_start" not in audio.SFX([[60, 0, 6]]).to_dict()
-    eng = audio.AudioEngine(audio.AudioBank([s], []), rate=8000)
+    eng = Synth(audio.AudioBank([s], []), rate=8000)
     eng.play_sfx(0, chan=0)
     eng.render(8000)          # 10 steps/s -> several wraps in 1 s
     assert eng.active_channels() & 1   # still looping (the exact wrap point is
@@ -1168,7 +1199,7 @@ def test_music_row_secs_schedule_and_roundtrip():
     # 0.25 + 1.0 + 0.75 = 2.0 s schedule -- the uniform speed clock (4 rows/s)
     # would have ended it at 0.75 s. Row-by-row cursor motion is pinned
     # sample-exactly by the parity suite's music_row_secs scenario.
-    eng = audio.AudioEngine(audio.AudioBank(sfx, [t]), rate=8000)
+    eng = Synth(audio.AudioBank(sfx, [t]), rate=8000)
     eng.play_music(0, loop=False)
     eng.render(int(8000 * 1.9))
     assert eng.is_active()                 # still inside the schedule
@@ -1180,7 +1211,7 @@ def test_music_row_secs_schedule_and_roundtrip():
 def test_music_hold_forever_row_never_advances():
     riff = audio.SFX([[50, 0, 6], [-1, 0, 0]], speed=8, loop=True)
     t = audio.MusicTrack([[0], [0]], speed=4, row_secs=[0, 0.25])
-    eng = audio.AudioEngine(audio.AudioBank([riff], [t]), rate=8000)
+    eng = Synth(audio.AudioBank([riff], [t]), rate=8000)
     eng.play_music(0, loop=False)          # non-looping: if the 0-duration row
     for _ in range(5):                     # ADVANCED, the track would end in
         eng.render(8000)                   # 0.25 s -- 5 s later it must still
@@ -1213,21 +1244,25 @@ def test_music_editor_structural_ops_keep_row_secs_aligned():
     assert b.music[-1].row_secs is not t.row_secs
 
 
-def test_the_master_level_survives_a_cart_start(tmp_path):
-    """`vol 0` at the launcher used to print "no audio backend" and change
-    nothing, because the backend is rebuilt per run -- so a mute looked like it
-    worked right up until the next game started playing at full volume. On a
-    board with a speaker that is not a cosmetic gap (measured on a T-Deck,
-    2026-08-22)."""
-    from runtime import host_app
+def test_the_console_level_is_the_settings_row_and_outlives_a_cart_start(tmp_path):
+    """`vol 0` at the launcher used to change nothing, because the backend was
+    rebuilt per run -- so a mute looked like it worked right up until the next
+    game started playing at full volume (measured on a T-Deck, 2026-08-22).
+    The level is the kernel's now, one per console: `vol` writes the row and
+    the kernel's level, every session plays under it, and a console booting on
+    a stored row starts at it."""
+    from runtime import audio_session, devch_audio, host_app
     from ws_helpers import open_cart
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.system.set("volume", 0)
+    devch_audio.vol(None, ws, ["vol", "0"], "vol 0")
     open_cart(ws, "Brick Siege")
-    assert ws.audio is not None
-    assert ws.audio.engine.master == 0, "the stored level must reach the new backend"
-
-    ws.system.set("volume", 5)
+    assert ws.system.get("volume") == 0
+    assert audio_session.console_volume() == 0, "the level must survive the start"
+    devch_audio.vol(None, ws, ["vol", "5"], "vol 5")
     open_cart(ws, "Harpoon Pop")
-    assert ws.audio.engine.master == 5
+    assert audio_session.console_volume() == 5
+
+    ws.system.set("volume", 2)
+    host_app.build_workstation(str(tmp_path / "carts"))
+    assert audio_session.console_volume() == 2, "the boot reads the row"

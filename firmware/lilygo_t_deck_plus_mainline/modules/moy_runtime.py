@@ -32,7 +32,6 @@ from desktop_spine import build_desktop
 from carts_data import CARTS_Z as CARTS
 from device_util import _ticks_ms, _ticks_diff, _sleep_ms, _diag_log
 from tdeck_input import TDeckInput
-from wire_audio import audio_factory
 from device_canvas import DeviceCanvas
 from device_diag import (_diag_flush, _diag_hitch,
                          _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat, _diag_webhost,
@@ -277,7 +276,6 @@ def run_desktop(fps_cap=60):
                       power_save_ms=POWER_SAVE_MS,
                       load_carts=store.load, with_sd=store.session,
                       before_slim=_before_slim, after_services=_after_services,
-                      make_audio=audio_factory(),
                       ble_keyboard=tdin.ble_keyboard,
                       serial=SERIAL_CMDS, perf_emit=_perf_emit,
                       log=lambda tag, msg: _diag_log(tag, msg, diag),

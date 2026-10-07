@@ -76,3 +76,17 @@ def test_only_the_station_fallback_constructs_the_ports_wlan():
                 if "network.WLAN(" in line and not line.lstrip().startswith("#"):
                     hits.append("%s:%d" % (os.path.relpath(path, ROOT), n))
     assert [h.split(":")[0] for h in hits] == ["device/device_wifi.py"], hits
+
+
+# The kernel's audio (section 5.5): the session table, the mix and the feeder
+# task, and the codec's register sequence.
+AUDIO = (os.path.join(ROOT, "native", "moy_audio", n)
+         for n in ("moy_aud.c", "moy_aud_out.c", "moy_codec_es8311.c"))
+
+
+@pytest.mark.parametrize("path", sorted(AUDIO))
+def test_the_audio_feed_names_nothing_of_the_vm(path):
+    with open(path) as f:
+        code = _code(f.read())
+    hit = _VM.search(code)
+    assert hit is None, "%s calls into the VM: %r" % (path, hit.group(0))

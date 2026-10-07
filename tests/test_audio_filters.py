@@ -20,7 +20,8 @@ import shutil
 
 import pytest
 
-from runtime.audio import AudioBank, AudioEngine
+from runtime.audio import AudioBank
+from audio_synth import Synth as AudioEngine
 
 RATE = 22050
 A4 = 57                      # moy semitone 57 = A4 = 440 Hz

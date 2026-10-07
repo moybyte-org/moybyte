@@ -45,6 +45,7 @@ enum {
     MOY_KIND_SRC = 6,       // input sources: keyboards, touch, the browser, net slots
     MOY_KIND_PEER = 7,      // the radio link's peers
     MOY_KIND_AUDIO = 8,     // audio sessions, one per owner
+    MOY_KIND_CLIP = 9,      // the sample voice's clips (native/moy_audio)
 };
 
 enum {

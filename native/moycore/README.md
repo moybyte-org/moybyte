@@ -58,14 +58,14 @@ mono, a queue of 2,048 frames; moy-spec SPEC.md §16.9) is libmoy's
 into every chunk after the synth, under the same master level, so the cart's
 §8 verbs, the console's sounds and Settings' volume all still apply and the
 I2S channel never changes hands. While the stream plays the feeder runs a
-shallow pipeline, 128-frame blocks into a 4 x 128 ring (`modmoy_audio.c`'s
+shallow pipeline, 128-frame blocks into a 4 x 128 ring (`moy_aud_out.c`'s
 header), so a cart's samples reach the speaker about 29 ms after it takes
 them. `close()` drops what is queued. A board
 without a speaker leaves `snd` to the binding, which drains the queue by the
 console's clock and drops the samples, so the cart meets the same
 backpressure. `moy_audio.snd_counts()` is the stream from both ends -- frames
 the cart queued, frames the feeder played, frames it found none -- and the
-`SNDSTREAM` diag line prints it beside `AUDIORATE`. Each
+AUDIORATE line's `snd=` field prints it. Each
 `read` runs inside `gate(fn)`, the store's own gate (`ws._with_sd`), as every
 other store access does: on the T-Deck that drains the panel's flush before
 the card, which shares its SPI bus, is touched. The run's own state (libmoy's
