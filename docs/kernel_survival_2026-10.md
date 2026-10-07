@@ -1183,86 +1183,28 @@ their group's sprint. The recommendations, each one sentence of mechanism:
 - **A crossing without its trace.** The carve lands the traces first; a pass
   whose trace is not green on both object models does not flash.
 
-## 13. Open questions for the owner (bounded)
+## 13. The owner's answers (2026-10-07)
 
-Each is a product call; the recommendation is one option, the numbers are in
-the issue cited, and the doc's sections build whatever is chosen.
+The owner took the recommendation on every question but one, preferring to
+drop work over adding it:
 
-1. **#130's rungs, their row and their boards.** Facts: idle dim needs a
-   backlight pin LEDC can drive — every console's can, the T-Deck's and the
-   P4s' being plain GPIOs and the Guition S3's PWM-rated; no battery reader
-   exists in the tree and the T-Deck's README names no gauge, so the
-   low-battery rung starts with a hardware check; light sleep must refuse
-   while a WiFi lease is held or the webhost serves, its wake sources are the
-   ISRs this sprint builds, and the P4s are mains-powered, which #130 reads as
-   "no P4 work" although the idle blank already runs there. The issue asks
-   for a Settings row with OFF; the ladder's rungs are rows, runtime-settable,
-   as `power N` sets the blank today. Options: (a) dim, screensaver and blank
-   on every console now, battery and sleep later; (b) (a) plus the battery
-   rung after the gauge is identified; (c) all five. Recommendation: (a), with
-   one Settings row per rung and OFF on each.
-2. **#70's shape.** Facts: the mixer's sample voice is a few hundred lines at
-   a mix point that exists; the issue's pack is a family-wide store folder
-   with templates, per-slot labels and recordings that never leave the device,
-   which is store content under the user's files and needs 1b's store to
-   carry a new kind; the cart verb is a public-table change owned by moy-spec;
-   recording needs the Waveshare's ES7210, a `microphone` permission and a
-   recorder app; a 26-clip pack at 8 kHz is under half a megabyte of cart
-   memory while loaded. Options: (a) the voice and its C API only, and a
-   proposal to moy-spec for the verb; (b) (a) with the store's pack kind and
-   the verb landed through moy-spec in parallel; (c) recording too.
-   Recommendation: (a).
-3. **#83, USB HID host on the P4.** Facts: the IDF components exist and enter
-   through the board's component list, not a usermod (§6.8); VBUS and the
-   connector are unconfirmed on the Waveshare; the Guition P4's USB-C is its
-   serial port, so host mode there costs the dev channel. Options: (a) out of
-   this sprint, the report decode shared with BLE so USB adds only a transport
-   later; (b) keyboard only, Waveshare only, after a hardware check.
-   Recommendation: (a).
-4. **#26's gamepad.** Facts: a boot mouse is cheap and lands with the
-   keyboard; a gamepad needs either a named allowlist of report layouts or a
-   generic descriptor parser of about a thousand lines. Options: (a) keyboard
-   and mouse now, gamepad when the owner names the controllers #65's couch
-   co-op should take; (b) the parser now. Recommendation: (a).
-5. **#196, always-raw.** Facts: the decoder is C either way; always-raw means
-   owning base, shift and sym layout tables and repeat timing on the path that
-   must never mistype, and the issue's acute hazard (two decoders drifting) is
-   closed by the one table and its test. Options: (a) two modes; (b)
-   always-raw with the three tables. Recommendation: (a); the issue is marked
-   pending-decision, so this closes it one way or the other.
-6. **#126's GIF, and the picture format.** Facts: a ring of index frames for
-   five seconds at ten frames a second is of the order of the kernel's whole
-   PSRAM share on an S3, and the encode must stay out of the frame; the
-   screenshot of a direct-colour frame is quantised to MOY64 unless a PNG
-   encoder is written (a new module, in flash on five boards). Options: (a)
-   screenshot only, quantised when inexact, GIF never on the S3s; (b) (a) with
-   GIF on the P4s, where the share is not the constraint; (c) (a) with a PNG
-   encoder for inexact frames. Recommendation: (a) now, (b) if the P4 desk
-   wants it.
-7. **The screensaver's content (#226).** Facts: a cover cycle the kernel
-   draws from the store's cover facts through `moy_png` needs no VM and so
-   works on the S3s after sprint 4; a wallpaper cart needs the VM, which the
-   P4 desk keeps up anyway and the S3 would have to start, at the return
-   budget's cost. Options: (a) the kernel's cover cycle everywhere; (b) a
-   wallpaper cart on the P4s and the cover cycle on the S3s; (c) a wallpaper
-   cart everywhere. Recommendation: (b).
-8. **The web-console screen.** Facts: today's screen is themed, interactive
-   (SHOW ADDRESS, TURN OFF), under the pixel goldens, and drawn by Python
-   above the switch; a console that has stopped its VM for a browser's edit
-   session (sprint 4) has nothing to draw it with unless the kernel draws a
-   plain one through the floor's text path with a QR beside it. Options: (a)
-   the kernel's plain screen everywhere, goldens re-baselined; (b) the Python
-   screen stays while the VM is up and the plain one appears only when it is
-   not; (c) the Python screen stays and the VM is kept up for the session.
-   Recommendation: (b).
-9. **The splash.** Facts: the boot screen is composed by `DeviceBoot.note`
-   through the canvas with the console's look, after the VM is up; the kernel
-   can draw a plain one before the VM starts, which lights the glass earlier
-   and shows a boot that fails before the VM, at the cost of a different first
-   picture. Options: (a) the kernel's plain splash; (b) the kernel lights the
-   glass with the logo only, and the themed boot screen follows when Python
-   is up; (c) unchanged. Recommendation: (b).
-10. **The open placements** of §10: confirm or redirect each.
+1. **#130:** dim, screensaver and blank as Settings rows with OFF; battery and
+   sleep wait for a gauge and a reason.
+2. **#70:** the sample voice and its C API only; the cart verb goes through
+   moy-spec later; no recording.
+3. **#83:** out of sprint 3.
+4. **#26:** keyboard and boot mouse now; a gamepad when controllers are named.
+5. **#196:** two keyboard modes, decoder in C; the issue closes on this.
+6. **#126: dropped from sprint 3.** Screenshots, when they come, are the P4s'
+   only, and the P4's H.264 encoder (a video stream rather than a GIF) is the
+   direction to keep in mind; §3.6 stays a design, unbuilt.
+7. **#226:** the screensaver is a cover cycle on the S3s and a wallpaper cart on
+   the P4s.
+8. **The web-console screen:** the themed Python screen while the VM runs, the
+   kernel's plain one only when it does not.
+9. **The splash:** the kernel lights the glass with the logo; the themed boot
+   screen follows once Python is up.
+10. **§10's placements** stand as written.
 
 ## 14. Claims this sprint falsifies
 

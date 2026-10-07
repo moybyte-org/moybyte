@@ -794,6 +794,13 @@ precedes the sprints, because each sprint deletes the Python it replaces. The
 store's index took its native interface from the 1b carve before sprint 1a
 wrote it, so the language spike ran against pinned tests.
 
+**From sprint 4 the carve is no longer a phase of its own** (owner,
+2026-10-07). The pass that crosses a subsystem pins its traces first and
+splits a file only where two agents running in parallel would otherwise edit
+it; it writes no Python twin in the native call shapes beyond the reference
+the host already needs. Sprint 3's carve had landed whole by then
+(`docs/kernel_survival_2026-10.md` §2).
+
 | sprint | moves | gate |
 |---|---|---|
 | **0 — evidence** | nothing. Meters: a `heapcaps` dev-channel word (PSRAM and internal, free and largest) and a GC-pause field in PERF. The census by owner (live GC bytes, held areas, `heap_caps` bytes) with `_LAYER_POOL` checked first. Doom's fit over ≥5 boots per S3 board. Launcher import + construction time on both S3 boards. The complete placement table (§2.2). The stop inventory (§4.4) and the embed-vs-port-fork decision. A stop/start spike on an S3 that keeps one real peripheral alive across the stop — the flush task and a C-owned touch poll. The P4 repartition costed. | the census names the owners of the boot peak and of the T-Deck's retained memory; 100 stop/start cycles on the S3 with the peripheral alive and `heap_caps` free flat; a cart-available PSRAM threshold and the kernel's fixed share defined from the census; per-board headroom floors set (§6.1) |
