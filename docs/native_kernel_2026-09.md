@@ -218,7 +218,7 @@ sprints that follow it:
 | group | headline modules | sprint |
 |---|---|---|
 | the kernel's spine: routing, back-stack, app registry, settings store, WiFi leases, crash record, strike ledger, recovery screen | `runtime/console.py` (in part), `runtime/crash_guard.py`, `runtime/system_store.py` | 2 |
-| input: touch, keyboards, the BLE HID keyboard below `bluetooth` | `device/gt911.py`, `device/gsl3680.py`, `device/axs_touch.py`, `device/ble_keyboard.py` | 3 |
+| input: touch, keyboards, the BLE HID keyboard below `bluetooth` | `native/moy_input` (the table, the touch controllers, the T-Deck keyboard and trackball, the BLE HID central over NimBLE) | 3 |
 | audio: the I2S feed and the sfx/music semantics the glue drains | `device_audio.py` (deleted by sprint 3's audio pass), `device/moycore_glue.py`'s audio half | 3 |
 | the glass: canvas ownership, present, compositors | `device/device_canvas.py`, `device/dsi_panel.py`, `device/p4_canvas.py` | 3 |
 | storage: the SD gate, the store of record and its journal | the boards' `with_sd`, `runtime/moy_journal.py` | 1b and 3 |
@@ -265,9 +265,7 @@ console needs while no Python app runs is OS.
 
 | module | group | sprint | note |
 |---|---|---|---|
-| `device/axs_touch.py` | input | 3 | the AXS15231 touch half of the Guition S3's glass |
 | `device/banded_panel.py` | glass | 3 | the compositor both banded-panel S3 boards run; their per-board subclasses are in the board table |
-| `device/ble_keyboard.py` | input | 3 | the HID keyboard lives below `bluetooth` so its IRQ outlives a VM stop (§4.4) |
 | `device/boot_shell.py` | bring-up | open | the boot-mode ladder every board's `moybyte_shell.py` calls; its `desktop` mode is the production boot, every other mode a REPL smoke. Question: with a native loop as the boot entry, do the smoke modes become native bring-up modes, dev-channel words, or stay Python probes? One answer covers this row, the boards' entry stubs and `moybyte_shell.py` files, and the three smoke modules |
 | `device/cart_net.py` | radios and links | 3 | Get Carts' transport over the OTA HTTP client; the app above it stays Python |
 | `device/desktop_spine.py` | split | 3 + 7 | the boot order and `Desktop.run`, the frame loop, cross with the frame tail; the `Workstation` and WM construction goes with `runtime/console.py` |
@@ -275,19 +273,14 @@ console needs while no Python app runs is OS.
 | `device_audio.py` | audio | 3 | deleted 2026-10-07: the I2S feed and the six verbs are `native/moy_audio`'s |
 | `device/device_canvas.py` | glass | 3 | the one canvas class every tier runs; `runtime/host_canvas.py` rebinds with it and `tools/p4_conformance.py` is its check on glass |
 | `device/device_diag.py` | frame tail | 3 | the serial diagnostics the frame loop emits between frames |
-| `device/device_input.py` | input | 3 | the T-Deck trackball and its GT911 wrapper |
 | `device/device_util.py` | frame tail | 3 | the leaf under the device modules (tick helpers, diag shims); deleted with its last device importer |
 | `device/device_wifi.py` | radios and links | 3 | the radio driver; the lease that gates it (`wifi_hold` / `wifi_release`) is the spine's, in `runtime/console_spine.py` over `runtime/moy_spine.py` |
 | `device/dsi_panel.py` | glass | 3 | the shared P4 DSI compositor, rotated variant included |
-| `device/gsl3680.py` | input | 3 | the RAM-loaded GSL3680 core; its firmware bytes are `gsl_fw_jc8012.py` |
-| `device/gt911.py` | input | 3 | the GT911 core both the T-Deck and the Waveshare P4 carry |
 | `device/moy_c6_update.py` | radios and links | 3 | the P4's radio co-processor updater, the backend of Settings → UPGRADE C6 RADIO |
 | `device/moy_espnow.py` | radios and links | 3 | the board's one ESP-NOW owner; netplay's lockstep over it is the cart path's |
 | `device/moy_ota.py` | frame tail | 3 | OTA health and the updater; it also carries the streaming HTTP(S) client Get Carts' transport reads through. The Zero takes it |
 | `device/moy_webhost.py` | radios and links | 3 | the webhost; the Zero takes it |
 | `device/moy_webserver.py` | radios and links | 3 | the socket and HTTP core under the webhost; the Zero takes it |
-| `device/moybyte/__init__.py` | input | 3 | the package marker of the device input contract |
-| `device/moybyte/input.py` | input | 3 | the T-Deck keyboard decode and the merged multi-source `InputState`; `runtime/input.py` is its host and browser twin |
 | `device/moybyte_diag.py` | frame tail | 3 | offline log capture to SD for the T-Deck, where the loop starves USB serial |
 | `device/moybyte_sd.py` | storage | 1b | the T-Deck's SD gate on the SPI host the panel owns; a per-op teardown hangs the board with no panic |
 | `device/moycore_glue.py` | split | 3 + 4 | the audio drain half crosses with audio; the input refresh and the frame around `tick()` cross with the cart path |
@@ -351,7 +344,7 @@ console needs while no Python app runs is OS.
 | `runtime/host_api.py` | host-only | — | the host's service fakes and the driver; it re-exports `make_api` |
 | `runtime/host_app.py` | host-only | — | the simulator's harness; it becomes the host driver of the native loop (§4.2) as sprints 3 to 7 land |
 | `runtime/host_canvas.py` | host-only | — | the boards' canvas class on CPython; rebinds with `device/device_canvas.py` in 3 |
-| `runtime/input.py` | input | 3 | the host and browser twin of `device/moybyte/input.py`; one native input state replaces both |
+| `runtime/input.py` | input | 3 | the host's eight names over the native input table (`HostInputTable`) |
 | `runtime/launcher_layer.py` | app | — | the launcher stays Python unless the return-budget measurement fails (§3); `EditorPickerLayer` rides in it |
 | `runtime/layers.py` | split | 7, rest stays | the `Layer` protocol stays as the apps' base; the draw-only overlays and the object-surface adapters go with the WMs |
 | `runtime/layout_base.py` | toolkit | 6 | the baseline predicate every `*Layout` derives from, the apps' layouts included |
@@ -423,15 +416,12 @@ console needs while no Python app runs is OS.
 |---|---|---|---|
 | `firmware/lilygo_t_deck_plus_mainline/modules/tdeck_panel.py` | glass | 3 | the T-Deck's thin subclass over `device/banded_panel.py` |
 | `firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_display.py` | glass | 3 | this board's backlight and the shared DSI compositor |
-| `firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_input.py` | input | 3 | the Waveshare P4's GT911 wiring |
 | `firmware/guition_jc3248w535/modules/guition_panel.py` | glass | 3 | the Guition S3's thin subclass over `device/banded_panel.py` |
-| `firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py` | input | 3 | the GSL3680 firmware bytes, data a native driver carries as an array |
 | `firmware/guition_jc8012p4a1c/modules/guition_p4_display.py` | glass | 3 | this board's backlight and the rotated DSI compositor |
-| `firmware/guition_jc8012p4a1c/modules/guition_p4_input.py` | input | 3 | the Guition P4's GSL3680 wiring and its calibration |
 | `firmware/seeed_xiao_esp32s3_zero/modules/zero_host.py` | radios and links | open | the Zero runs no app and no cart, so the memory goal does not reach it, yet everything it does is the OS's by §2.2's rule and every link gate counts it. Question: do the Zero's own Python modules (`zero_host.py`, `zero_gpio.py`, `zero_setup.py` and the entry stubs) cross in 3 with the webhost they drive, or stay Python as the one board with nothing to free? |
 | each console board's `boot.py`, `main.py` and `moybyte_shell.py` | bring-up | open | entry stubs and boot-mode declarations on the T-Deck, Waveshare P4, Guition S3 and Guition P4; see `device/boot_shell.py` |
 | the bring-up smokes `tdeck_smoke.py`, `guition_smoke.py` and `guition_p4_smoke.py` | bring-up | open | per-subsystem REPL smokes; see `device/boot_shell.py` |
-| each console board's `moy_runtime.py` | frame tail | 3 | board glue: builds the board's drivers and hands them to the spine, and dissolves into the kernel's per-board configuration as they cross; the T-Deck's also holds the input-poller thread and the SD gate wrapper, input's and storage's |
+| each console board's `moy_runtime.py` | frame tail | 3 | board glue: builds the board's drivers and hands them to the spine, and dissolves into the kernel's per-board configuration as they cross; the T-Deck's also holds the SD gate wrapper, storage's |
 | the Zero's `zero_gpio.py` and `zero_setup.py` | radios and links | open | the allowlisted GPIO endpoint and the first-run access point; follow `zero_host.py` |
 | the Zero's `boot.py` and `main.py` | radios and links | open | the entry stubs; `main.py` auto-boots the store host, guarded so a failure falls to the REPL; follow `zero_host.py` |
 
@@ -577,9 +567,9 @@ P4 rows matter only if a P4 ever stops its VM (§10 question 5).
 | what | where | soft reset today | stop | sprint |
 |---|---|---|---|---|
 | ***Python callbacks run from an ISR or another task*** | | | | |
-| GPIO IRQs (T-Deck trackball, the GT911 INT gate) | `device/device_input.py`'s `p.irq`; the port's ISR schedules the handler held in the `machine_pin_irq_handler` root | `machine_pins_deinit` removes the GPIO ISR of every pin in the port's table, whoever installed it | remove only the pins with a Python handler; a kernel GPIO ISR survives | 0 (the rule); 3 moves input native |
-| the input poller thread (T-Deck) | `device/moybyte/input.py`'s `InputPoller` | `mp_thread_deinit` deletes every thread wherever it stands, even mid-I2C with the bus held | stopped cooperatively and joined before the port's deinit; `mp_thread_deinit` only as the backstop | 3 |
-| the BLE keyboard | `device/ble_keyboard.py`'s `ble.irq`; NimBLE's task writes events into a ring in the GC heap | `mp_bluetooth_deinit`: the stack stops, the keyboard drops | the same, until the HID lives below `modbluetooth` (the P4's notifications already do: `patches/p4_modbluetooth_ble_hid_fastpath.patch`) | 3 |
+| GPIO IRQs (T-Deck trackball, the GT911 INT gate) | the kernel's IRAM ISRs (`native/moy_input/moy_input_task.c`); a Python `Pin.irq` handler is held in the `machine_pin_irq_handler` root | the kernel's sweep (`moy_kernel_pins_deinit`, in place of `machine_pins_deinit`) removes only the pins with a Python handler; a kernel GPIO ISR survives | the same | 0 (the rule); 3 (landed, input pass) |
+| the input task (T-Deck) | `native/moy_input/moy_input_task.c`'s core-0 task, one pass per frame's kick | no VM call in it; it survives | kept | 3 (landed, input pass) |
+| the BLE keyboard | the kernel's central (`native/moy_input/moy_ble_task.c`): NimBLE's host task runs only C, and the console images carry no `bluetooth` module | the kernel owns the host; the soft reset does not touch it | kept | 3 (landed, input pass) |
 | ESP-NOW | `native/moy_net/moy_link.c` holds esp_now's one receive callback, which latches each frame into the kernel's ring in PSRAM; `device/moy_espnow.py` drains it through `moy_net.Link` per frame | nothing: the port's `espnow` module is out of the console images, so the link and its ring stay up | the same | 3 (landed, pass 2), 4 (lockstep) |
 | the legacy I2S feed | `device_audio.py`'s `i2s.irq`, taken only when the core-1 task failed to start | the object's finaliser, at the sweep | the same | 3 (deleted, 2026-10-07: no Python feeds a speaker) |
 | `machine.Timer`, `micropython.schedule`, UART, socket callbacks, dupterm | no user in `runtime/`, `device/` or a board's modules | `machine_timer_deinit_all`, `machine_uart_deinit_all`, `socket_events_deinit` | kept | — |
@@ -990,7 +980,7 @@ makes it false, not annotated:
 - **A stop failing with a real peripheral alive.** Sprint 0's spike passed on
   the Guition S3 (2026-10-05, #224): 100 stops in one boot with the flush task
   and a C-owned touch poll alive, memory flat, in both lifecycles. The T-Deck's
-  input poller and shared bus run the spike before sprint 4 relies on stops
+  input task and shared bus run the spike before sprint 4 relies on stops
   (#224). If a stop fails there, the invisible stop dies; the fallback is a soft
   reset into a Player-only VM before a big cart, built only then.
 - **The census naming something cheaper — it did, for the boot peak.** The rule

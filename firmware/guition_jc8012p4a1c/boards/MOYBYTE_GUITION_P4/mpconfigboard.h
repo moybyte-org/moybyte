@@ -46,9 +46,8 @@
 
 #define MICROPY_PY_MACHINE_I2S          (1)
 
-// I2C0 is the touch bus (GSL3680 @ 0x40, shared with the ES8311/ES7210 codecs).
-// guition_p4_input.py passes these pins explicitly; setting them here means a
-// bare machine.I2C(0) is also right.
+// I2C0 is the touch bus (GSL3680 @ 0x40, shared with the ES8311/ES7210 codecs),
+// the kernel's bus (MOY_BUS_I2C_* below): nothing opens a machine.I2C on port 0.
 #define MICROPY_HW_I2C0_SCL                 (8)
 #define MICROPY_HW_I2C0_SDA                 (7)
 
@@ -133,6 +132,31 @@
 #define MOY_AUDIO_I2S_WS                    (10)
 #define MOY_AUDIO_I2S_DOUT                  (9)
 #define MOY_AUDIO_PA_GPIO                   (20)
+
+// Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
+// central over NimBLE, its bonds in NVS. There is no `bluetooth` module.
+#define MOY_INPUT_BLE                       (1)
+#define MOY_INPUT_BLE_HOSTED                (1)     // the C6 over ESP-Hosted
+
+// Input's touch (native/moy_input/moy_input_task.c): the GSL3680 at 0x40, RST
+// 22, INT 21 (held low across a reset to pick the address), RAM-loaded with
+// this glass's firmware (gsl_fw_jc8012.c). Calibrated on glass 2026-09-06: it
+// reports LANDSCAPE, aligned with the desk at ROTATION 270 (no swap, no
+// flips), its space starting ~10 x ~21 counts in and spanning 1640 x 865 over
+// the 1280x800 glass. At ROTATION 90 both flips go true.
+#define MOY_INPUT_TOUCH_KIND                (2)     // MOY_TOUCH_GSL3680
+#define MOY_INPUT_TOUCH_ADDR                (0x40)
+#define MOY_INPUT_TOUCH_RST                 (22)
+#define MOY_INPUT_TOUCH_INT                 (21)
+#define MOY_INPUT_TOUCH_FW                  moy_gsl_fw
+#define MOY_INPUT_TOUCH_FW_LEN              moy_gsl_fw_LEN
+#define MOY_INPUT_TOUCH_SWAP                (0)
+#define MOY_INPUT_TOUCH_FLIP_X              (0)
+#define MOY_INPUT_TOUCH_FLIP_Y              (0)
+#define MOY_INPUT_TOUCH_RAW_X0              (10)
+#define MOY_INPUT_TOUCH_RAW_Y0              (21)
+#define MOY_INPUT_TOUCH_RAW_W               (1640)
+#define MOY_INPUT_TOUCH_RAW_H               (865)
 
 // The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
 // released layer buffers it keeps for the next run. A window's buffer is

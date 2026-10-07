@@ -177,50 +177,42 @@ petme128 text kernel as a side effect.
 | what you see | what it means |
 |---|---|
 | `available=0` / `GT911 not found on I2C0` | the controller did not answer at 0x5D or 0x14 on I2C0 (SCL 8 / SDA 18) — wiring or the I2C bus, not the mapping |
-| taps land in the WRONG box | the mapping. `raw=` climbing while `map=` falls names the flipped axis: set `device_input.TOUCH_FLIP_X` / `TOUCH_FLIP_Y` / `TOUCH_SWAP` from the REPL and re-run `tdeck_smoke.touch()` — module globals, no rebuild |
-| crosshair lags or sticks | `over20` on the I2CSTAT line. The GT911 clock-stretches 20-45ms on most finger-down reads (#74); this smoke is single-threaded, which is exactly the cost stage 3's poller thread removes |
+| taps land in the WRONG box | the mapping. `raw=` climbing while `map=` falls names the flipped axis: set the driver's `flip_x` / `flip_y` / `swap_xy` from the REPL (`moy_input.touch(320, 240).flip_x = 1`) and re-run `tdeck_smoke.touch()` — live attributes, no rebuild; bake the winners into `mpconfigboard.h`'s `MOY_INPUT_TOUCH_*` |
+| crosshair lags or sticks | `over20` on the I2CSTAT line. The GT911 clock-stretches 20-45ms on most finger-down reads (#74), which is why the kernel passes it on the input task, off the loop |
 | `gate=OFF (blind polling)` | the INT pin (GPIO16) could not be claimed. Touch still works; it just spends bus time on every pass |
 
 #### `MODE = "keyboard"` (stage 3)
 
-Three 15-second phases, then a verdict. A **moving green bar** runs across the
-top the whole time — a frozen bar is a frozen loop, which is the failure this
-smoke exists to make visible without a stopwatch. Under it: the last key byte,
-the raw five matrix bytes, the held buttons lit green, and everything typed so
-far.
+Two 15-second phases on the kernel's driver and its input task, one pass a
+frame. A **moving green bar** runs across the top the whole time — a frozen
+bar is a frozen loop, which is the failure this smoke exists to make visible
+without a stopwatch. Under it: the last key byte, the held buttons lit green,
+and everything typed so far.
 
 | phase | what it proves |
 |---|---|
-| 1 ASCII sync | the C3 answers at 0x55 and returns clean 1-byte ASCII — the mode the code editor runs in. **A held key does not repeat**; that is correct, not a fault |
-| 2 raw sync | `0x03` took, and reads return five bytes. **Hold W and the `up` chip stays lit** — that is the whole reason raw mode exists |
-| 3 raw poller | the same reads on `InputPoller`'s thread. Compare its `loop_max` with phase 2's |
+| 1 ascii | the C3 answers at 0x55 and returns clean 1-byte ASCII — the mode the code editor runs in. **A held key does not repeat**; that is correct, not a fault |
+| 2 raw | `0x03` took, and reads return five bytes. **Hold W and the `up` chip stays lit** — that is the whole reason raw mode exists |
 
 ```
-Moybyte kbd: 2 raw sync         frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
-Moybyte kbd: poller thread up (12ms cadence)
-Moybyte kbd: 3 raw poller       frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
-Moybyte kbd: GIL VERDICT loop_max sync=NNms poller=NNms
-Moybyte kbd: reverted to ASCII -- raw_mode=False
+Moybyte kbd: available=1 raw_allowed=True task_stack_free=NNNN
+Moybyte kbd: 1 ascii    frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
+Moybyte kbd: 2 raw      frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
+Moybyte kbd: reverted to ASCII -- raw_mode=False task_stack_free=NNNN
 ```
 
-**Read the verdict like this.** The C3 clock-stretches; measured stalls on this
-board run 21–60ms. In phase 2 that stall lands inside the loop and *is* the
-frame. In phase 3 it lands on the poller thread — but only if `machine_i2c.c`
-released the GIL, because MicroPython threads share one, so without the patch
-the stall freezes the VM from whichever thread took it.
-
-* phase 3 `loop_max` collapses toward the flush cost while its `i2c max=` stays
-  bad → **the patch works**, which is the whole reason this port carries it.
-* both `loop_max` values bad → the patch is not in this image. `grep "Moybyte #69 GIL"
-  firmware/lilygo_t_deck_plus_mainline/.build/micropython/ports/esp32/machine_i2c.c`.
-* both `loop_max` values good *and* `i2c max=` small → the C3 simply was not
-  stalling this run. Hold several keys at once and re-run `tdeck_smoke.keyboard()`.
+**Read it like this.** The C3 clock-stretches; measured stalls on this board
+run 21–60ms. They land on the input task (#69), never in the loop, so
+`loop_max` stays near the flush cost while `i2c max=` is as bad as the bus
+makes it. A `loop_max` that tracks `i2c max=` means a read is back on the
+loop. Both small means the C3 was not stalling this run: hold several keys at
+once and re-run `tdeck_smoke.keyboard()`. `task_stack_free` is the input
+task's unused stack, the margin `MOY_INPUT_TASK_STACK` is sized from.
 
 | what you see | what it means |
 |---|---|
 | `RAW MODE UNSUPPORTED` | C3 firmware older than 2025-06-12 ignored `0x03`. The driver stuck the session back on ASCII + the hold latch, which is correct — but hold-to-move will stall. Flash `T-Keyboard_..._250620.bin` |
-| phase 2 lights no buttons | the matrix decode. `bytes=` on screen is the raw five; `moybyte/input.py`'s `RAW_KEYS` table maps (byte, bit) → key |
-| `poller thread FAILED to start` | no `_thread` or no RAM. The console degrades to synchronous polling, which *is* phase 2 — a real fallback, not a break |
+| phase 2 lights no buttons | the matrix decode: `native/moy_input/moy_kbd.c`'s `RAW_KEYS` table maps (byte, bit) → key |
 | the bar freezes and never resumes | not a stall — a hang. The last serial line names the phase |
 
 The last thing the smoke does is send `0x04`. Skipping that revert is what once
@@ -673,17 +665,19 @@ off a board against `moy_fold_composite`.
 
 ---
 
-## The three fork patches, re-solved
+## The fork patches, re-solved
 
 `build.sh` applies them marker-guarded, so a warm `.build` re-patches nothing.
 
 | patch | how it is solved here | which stage needs it |
 |---|---|---|
 | **REPR_C unboxed floats** (#66) | guarded `sed` on MicroPython's own `mpconfigport.h` (in the cloned upstream under `.build/`, not a file of ours) — its `MICROPY_OBJ_REPR` line, and the build **fails loudly** if the line has changed shape. A sed rather than the fork's context diff, so it survives the line moving between MicroPython releases. Verified in the built tree. | None strictly — but it is free, it changes object layout so it must be settled early, and every image here was compiled and linked with it |
-| **I2C GIL release** (#69) | a small in-place Python edit that brackets `i2c_master_cmd_begin` with `MP_THREAD_GIL_EXIT/ENTER`. Result is byte-identical to the fork's patched file. Exits non-zero if the call site is not found. | **Stage 3.** It is what makes the poller THREAD worth having: without it a C3 clock-stretch stall holds the GIL and freezes the whole VM no matter which thread issued the read. Stage 2 reads I2C on the main thread and cannot tell the difference |
 | **esp_lcd `tx_color` no-acquire** (#66) | the fork's `.patch` file, applied to the ESP-IDF tree (idempotent; the shared checkout usually has it already from the fork build) | **The overlap.** Without it every continuation band calls `spi_device_acquire_bus`, which waits for the device's in-flight DMA — so `pump()` would block on the previous band and the flush would be serialized again, just spelled differently. Confirmed compiled in: `panel_io_spi_tx_color` branches on the sign of `lcd_cmd` around both the acquire and the release |
 
-A fourth rides along, the same one the P4 build reuses: **native-code-free**
+The fork's third, the #69 I2C GIL release, retired with the Python input
+poller it served (2026-10-07): the keyboard and the GT911 are the kernel's,
+passed on its input task, and nothing opens a `machine.I2C`. A third rides
+along, the same one the P4 build reuses: **native-code-free**
 (#66), which lets a cart-compile miss reclaim the `@micropython.native` exec
 arena instead of growing it until soft reset.
 
@@ -762,22 +756,24 @@ Every one of these was learned by hanging or bricking a board.
   note says why). In its default mode it returns
   clean 1-byte ASCII (shift, sym and digits resolved on the keyboard) but
   reports each key ONCE on the press edge with no autorepeat, so a held key can
-  only be faked for `KEY_HOLD_MS` by `TDeckKeyboard`'s latch. For true
-  hold-to-move a running cart switches it to raw-matrix mode (`0x03`,
-  `LILYGO_KB_MODE_RAW_CMD`), which streams the full key matrix every read.
-  `Workstation._set_text_mode` → `TDeckKeyboard.set_game_mode(on)` drives it:
+  only be faked for `MOY_KBD_HOLD_MS` by the driver's latch
+  (`native/moy_input/moy_kbd.c`). For true hold-to-move a running cart
+  switches it to raw-matrix mode (`0x03`, `LILYGO_KB_MODE_RAW_CMD`), which
+  streams the full key matrix every read. `Workstation._set_text_mode` →
+  `ws.keyboard.set_game_mode(on)` queues the flip and the input task's next
+  pass applies it:
   ASCII for the code editor (so typing is clean, `last_key`), raw everywhere
   else, and `0x04` (`..._MODE_KEY_CMD`) reverts — the step whose absence once
   garbled the editor irreversibly. **A mode switch swallows its own byte, on
   both sides of the seam**: what the C3 hands over at the revert was typed
-  while the matrix streamed, so `_disable_raw_mode` DRAINS the keyboard after
-  `0x04`, and `_set_text_mode(True)` seeds every typed-key edge with the byte
-  already in `last_key` — the matrix decodes only sixteen keys, so each half
-  covers a case the other cannot. `__init__` boots in ASCII and never enables
-  raw; raw needs keyboard firmware **≥ 2025-06-12**
-  (`T-Keyboard_..._250620.bin`), and on older firmware `_read_raw_buttons`
-  sees the stray ASCII byte and keeps the session on the 1-byte + latch path
-  (`_raw_unsupported`; class flag `RAW_GAME_MODE` force-disables raw). The
+  while the matrix streamed, so the driver DRAINS the keyboard after `0x04`,
+  and `_set_text_mode(True)` seeds every typed-key edge with the byte already
+  in `last_key` — the matrix decodes only sixteen keys, so each half covers a
+  case the other cannot. The driver boots in ASCII and never enables raw by
+  itself; raw needs keyboard firmware **≥ 2025-06-12**
+  (`T-Keyboard_..._250620.bin`), and on older firmware the raw read sees the
+  stray ASCII byte and keeps the session on the 1-byte + latch path
+  (`raw_unsupported`; `RAW_GAME_MODE = False` on the driver force-disables raw). The
   keyboard has no `=` `[ ] { } < > %` keys, so the code editor shows an
   on-screen symbol palette; `0x01 <duty>` sets its backlight. `MODE =
   "keyboard"` is the on-glass check (it dumps keys over serial), and the last
@@ -796,7 +792,7 @@ on glass, so a misbehaviour can be bisected by flashing the last good one.
 |---|---|---|---|---|
 | 1 | **Panel** — mainline boots, ST7789 comes up, a test pattern lands | `panel` | 1,704,976 B | **on glass 2026-08-16** |
 | 2 | **Touch** (GT911, I2C0 @ 0x5D/0x14) + `board.toml` + the whole shared module tree | `touch` | 2,207,232 B | **on glass 2026-08-16** |
-| 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 poller A/B | `keyboard` | 2,210,016 B | **on glass 2026-08-16** |
+| 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 A/B | `keyboard` | 2,210,016 B | **on glass 2026-08-16** |
 | 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | **on glass 2026-08-16** |
 | 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | **on glass 2026-08-16** |
 | 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,672 B | **on glass 2026-08-16** — worked, at ~half the fork's fps |

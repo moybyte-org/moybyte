@@ -61,7 +61,11 @@ TF_CARD_SRAM = 756
 # board takes since #82: its table roots, counters and output state), 288 bytes
 # of .dram0.data and .bss by the link map against dev cafae3a2, 2026-10-07; the
 # feeder's stack, ring and lock are allocated at the first cart, not at boot.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288
+# Plus input's statics (native/moy_input: the kernel table's latches, the touch
+# driver's state, and the kernel's I2C bus, which the carve compiled as a stub),
+# 575 bytes of .dram0.bss and .data by the link map against dev cafae3a2,
+# 2026-10-07.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 575
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 
@@ -253,14 +257,16 @@ def test_the_pointer_is_the_gsl3680(board):
                      wait_for="PY ")
     # The 2026-09-06 calibration: landscape as mounted, no swap, no flips.
     assert line == "PY (True, 0, 1280, 800, False, False, False)", line
-    # The mapping is the board's FITTED knobs (guition_p4_input.RAW_*: the
-    # five-target fit, not the firmware's nominal 1664x896), and the shared
-    # driver must carry exactly them -- a re-fit changes the module, not this.
-    line = board.cmd("py (touch.raw_x0, touch.raw_y0, touch.raw_w, touch.raw_h) == "
-                     "tuple(getattr(__import__('guition_p4_input'), k) "
-                     "for k in ('RAW_X0', 'RAW_Y0', 'RAW_W', 'RAW_H'))",
+    # The mapping is the board's FITTED knobs (mpconfigboard.h's
+    # MOY_INPUT_TOUCH_RAW_*: the five-target fit, not the firmware's nominal
+    # 1664x896), and the kernel's driver must carry exactly them -- a re-fit
+    # changes the header, not this.
+    from test_touch_mapping import knobs
+    k = knobs("guition_p4")
+    line = board.cmd("py (touch.raw_x0, touch.raw_y0, touch.raw_w, touch.raw_h)",
                      wait_for="PY ")
-    assert line == "PY True", line
+    assert line == "PY (%d, %d, %d, %d)" % (k["RAW_X0"], k["RAW_Y0"], k["RAW_W"],
+                                             k["RAW_H"]), line
 
 
 def test_the_ppa_composite_is_live(board):

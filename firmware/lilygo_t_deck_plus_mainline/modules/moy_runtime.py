@@ -30,7 +30,7 @@ from desktop_spine import build_desktop
 # Named CARTS because that is what it is to everything downstream -- the
 # compression is a storage detail of this one import.
 from carts_data import CARTS_Z as CARTS
-from device_util import _ticks_ms, _ticks_diff, _sleep_ms, _diag_log
+from device_util import _ticks_ms, _ticks_diff, _diag_log
 from tdeck_input import TDeckInput
 from device_canvas import DeviceCanvas
 from device_diag import (_diag_flush, _diag_hitch,
@@ -192,12 +192,12 @@ def run_desktop(fps_cap=60):
 
     The boot order and the service set are the shared spine's; what is here is
     the panel bring-up, the SD/panel bus gate, and the diag ticks this board's
-    offline ring records; the input trio and its poller thread are
-    `tdeck_input.TDeckInput`'s.
+    offline ring records; the input trio is `tdeck_input.TDeckInput`'s, over
+    the kernel's drivers.
     """
     import moy_glass
     import moy_lcd
-    from moybyte.input import InputState
+    import moy_input
 
     # #54 St.2: arm the async layer copy BEFORE the first canvas exists.
     # `DeviceCanvas` latches `_async_ok` in __init__, so this has to precede the
@@ -218,7 +218,7 @@ def run_desktop(fps_cap=60):
     except Exception:  # noqa: BLE001
         diag = None
 
-    inp = InputState()
+    inp = moy_input.kernel()
     tdin = TDeckInput(inp)
     keyboard = tdin.keyboard
 
@@ -231,10 +231,10 @@ def run_desktop(fps_cap=60):
 
     def _after_services(ws):
         _diag_log("boot", "desktop running kb=%d ball=%d touch=%d poller=%d"
-                  % (1 if keyboard.available else 0,
-                     1 if tdin.ball.available else 0,
-                     1 if tdin.touch.available else 0,
-                     1 if tdin.poller is not None else 0),
+                  % (1 if keyboard is not None and keyboard.available else 0,
+                     1 if tdin.ball is not None else 0,
+                     1 if tdin.touch is not None and tdin.touch.available else 0,
+                     1 if moy_input.task_stack_free() else 0),
                   diag)
         # #66/#67 SRAM diet: everything needing boot-time internal RAM has taken
         # it by here, so the Lua allocator's headroom floor drops 48->24KB. BOTH
@@ -312,14 +312,10 @@ def run_desktop(fps_cap=60):
 
     def _tail(now):
         loop = d.loop
-        # The second half of the poller's pass (#69): the thread let go of the
-        # GIL for its I2C read and needs it back to stage the result, and a
-        # frame that never blocks would hand it over only at the next frame's
-        # kick -- one pass per two frames (measured 35/s under Brick Siege at
-        # 55fps). This yield, after present, lets the pass finish inside its
-        # own frame.
-        if tdin.poller is not None:
-            _sleep_ms(0)
+        # One pass of the kernel's input task (#69) a frame, kicked after
+        # present so the keyboard's and the GT911's reads run while this frame
+        # paces, and the next frame's merge takes what they staged.
+        moy_input.kick()
         # #183: close the SD bracket. A DRAWN frame here means the first panel
         # flush after the SD session completed, so the bus survived it.
         if store.traced and loop.drew:

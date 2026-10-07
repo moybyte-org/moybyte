@@ -28,7 +28,7 @@ def _device_ws(tmp_path):
     """The console with the BOARDS' InputState under it; `(ws, keyboard)`."""
     import sys
     sys.path.insert(0, str(ROOT))
-    from device.moybyte.input import InputState as DeviceInputState
+    from runtime.moy_input import InputTable as DeviceInputState
 
     ws = _ws(tmp_path)
     inp = DeviceInputState()

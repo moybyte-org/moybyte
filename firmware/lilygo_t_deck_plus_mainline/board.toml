@@ -201,12 +201,10 @@ compiled on demand -- no compiler, git or cmake on a board."""
 file = "input.py"
 kind = "host-only"
 why  = """
-The host's `InputState`. The board's input contract is the frozen `moybyte`
-PACKAGE (`moybyte/input.py`, staged below) -- the T-Deck keyboard matrix, the
-raw/ASCII mode flip, and an InputState with a wider BUTTONS tuple. Freezing
-both would put two classes of the same name in one image, and the
-scripted-input suite already learned that lesson once: staging runtime/input.py
-made it compare the host against the host."""
+The host's `InputState`: the host's eight names over the input table. A board
+reads the kernel's table (`moy_input.kernel()`, all fifteen names), and the
+scripted-input suite already learned what freezing both costs: staging
+runtime/input.py made it compare the host against the host."""
 
 # -- never on a board: importing it RAISES, which reads as a missing feature --
 
@@ -445,17 +443,6 @@ native modules imported inside a guard.
 The groups below are ordered by the BRING-UP STAGE that first needed them, and
 each says which. The whole list is present from stage 2 (see the shared section
 for why the module set is settled before the console runs)."""
-packages = ["moybyte"]
-packages_why = """
-`moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState,
-the T-Deck keyboard matrix (both modes, the ASCII hold-latch, `decode_raw`) and
-the #69 `InputPoller`. Staged WHOLE (minus __pycache__) rather than file by
-file, so a new member of the package cannot go missing here.
-
-(Declared HERE, above the groups, and not at the end of the section: a bare key
-after a `[[modules.device.group]]` header belongs to that group's table, not to
-`[modules.device]`.)"""
-
 [[modules.device.group]]
 files = ["boot_shell.py"]
 why = """
@@ -490,12 +477,12 @@ boot trace and the import timer. The spine imports it, so every board that
 takes the spine takes it."""
 
 [[modules.device.group]]
-files = ["device_util.py", "device_canvas.py", "device_input.py", "gt911.py"]
+files = ["device_util.py", "device_canvas.py"]
 why = """
-STAGE 2 (touch). The drawing backend and the pointer drivers: `DeviceCanvas`
-(the RGB565 raster every tier now runs, palette resolved at draw time), the
-`_ticks_*`/`_diag_note` leaf helpers it and everything else import, and the
-GT911 touch + trackball drivers.
+STAGE 2 (touch). The drawing backend: `DeviceCanvas` (the RGB565 raster every
+tier now runs, palette resolved at draw time) and the `_ticks_*`/`_diag_note`
+leaf helpers it and everything else import. The GT911, trackball and keyboard
+drivers are the kernel's (native/moy_input).
 
 `device_canvas` picks its wire palette by PROBING for `moy_dsi`, and getting
 that right is what makes this board's colours correct with no code of its own:
@@ -586,27 +573,3 @@ web directory and the SD gate are constructor arguments. The WebSocket half went
 in 2026-09 with `web_view_ws.py`: the RPC that was supposed to ride it shipped as
 plain HTTP, so both were frozen here with no caller."""
 
-[[modules.device.group]]
-files = ["ble_keyboard.py"]
-why = """
-STAGE 6. The BLE HID keyboard -- the shared driver (born on the P4, promoted to
-the device tree 2026-08-19 when the Guition became its second consumer). The
-S3's radio is on-chip and `import bluetooth` is already in this image
-(sdkconfig.ble).
-
-THIS BOARD IS THE ODD ONE, and the reason is worth stating: on the P4 and the
-Guition a paired BLE keyboard is the ONLY keyboard, so it becomes `ws.keyboard`
-outright. The T-Deck has a physical C3 keyboard over I2C, so here the BLE
-driver is a SECOND, optional input source -- `ws.ble_keyboard`, while
-`ws.keyboard` stays TDeckKeyboard. Both write into the same InputState, so
-nothing above `moy_runtime` needs a notion of "which keyboard"; Settings gates
-its Bluetooth panel on `settings_layer._bt_service()`, which checks
-`ws.ble_keyboard` before `ws.keyboard` for exactly this case.
-
-Affordable only since 2026-08-21: the NimBLE config was right-sized for one
-keyboard in the same session (sdkconfig.board), which took ACTIVATING BLE on
-this board from leaving 756 bytes free in the 227KB internal region to ~5,200 --
-and the core-0 flush feeder (d9aa73e) handed back another 20KB on top, so a
-cart, WiFi and BLE now coexist (measured 52.7 fps with all three up). At the
-old defaults staging this file would have shipped a keyboard nobody could turn
-on without starving the console."""

@@ -2331,7 +2331,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # (true hold-to-move -- the ASCII path reports each key once on the press
         # edge with no autorepeat). Flip the keyboard between the two on every screen
         # change. Raw needs keyboard fw >= 2025-06-12; without it the keyboard keeps
-        # sending ASCII and TDeckKeyboard sticks on the 1-byte + hold-latch path, so
+        # sending ASCII and the keyboard's driver sticks on the 1-byte + hold-latch path, so
         # this is safe on any firmware. No-op on the host (no keyboard).
         # text_mode is the single source of truth for "typing, don't latch buttons":
         # the device keyboard, in ASCII, otherwise ALSO fires a typed key's game alias
@@ -2965,8 +2965,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
         On a backend that samples every frame (the host's mouse, the scripted
         remote gestures) every frame is fresh, so this is exactly
-        `self._frame_dt_ms`. BOTH boards' GT911 drivers hold + flag
-        (device_input.Touch and p4_input.Touch alike).
+        `self._frame_dt_ms`. Every touch driver holds + flags
+        (native/moy_input/moy_touch.c).
 
         (A "third rule" -- charge stale stretches past a threshold as real dt
         so a silent still finger decays the fling -- was built here on
@@ -2977,7 +2977,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         like the GT911's. The controller's only true silence is after a LIFT,
         and the defect that motivated the rule was the driver waiting the
         GT911's 400ms hold bound to believe one -- fixed where it belongs, in
-        device/axs_touch.py's per-controller bound. The rule meanwhile killed
+        the AXS driver's per-controller bound. The rule meanwhile killed
         real flicks dead: a lift's 400ms silence crossed the threshold and
         decayed the velocity to zero before the release ever fired.)"""
         dt = self._frame_dt_ms

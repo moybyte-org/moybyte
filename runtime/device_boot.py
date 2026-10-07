@@ -36,8 +36,8 @@ beside it. The nineteen steps sort into three kinds --
                             because that board has no serial RX to ask later).
 
   GENUINELY BOARD-SPECIFIC  the panel + canvas bring-up (esp_lcd strips vs DPI
-  (stays in moy_runtime)    scan-out); input (trackball + I2C poller thread vs
-                            BLE HID + GT911); the SD/panel bus gate; the
+  (stays in moy_runtime)    scan-out); which input the kernel's drivers bring
+                            (keyboard + trackball + GT911 vs BLE HID + touch); the SD/panel bus gate; the
                             presentation tier install (WindowedWM); the P4's
                             serial dev channel, drag/swipe scripts and idle
                             screen blank; the T-Deck's diag ring and HITCH/LOOP

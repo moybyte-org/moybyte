@@ -24,7 +24,6 @@ the vendor firmware's, and (c) that the two paths produce the same answer for
 every key.
 """
 
-import importlib.util
 import re
 from pathlib import Path
 
@@ -36,12 +35,23 @@ VENDOR_KBD = (ROOT / "firmware" / "lilygo_t_deck_plus_reference" / "examples"
 
 
 def _input_module():
-    # The shared device tier at the repo root -- the board's modules/ dir only
-    # holds gitignored build-staged copies, absent on a fresh checkout.
-    path = ROOT / "device" / "moybyte" / "input.py"
-    spec = importlib.util.spec_from_file_location("_tdeck_input_for_test", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    """The keyboard's decoders as the kernel has them (native/moy_input/
+    moy_kbd.c), over the host's binding: the ASCII table read back key by key,
+    the matrix table entry by entry, and the raw decode itself."""
+    from runtime import moy_input as mi
+
+    class TDeckKeyboard:
+        @staticmethod
+        def _buttons_for_key(key):
+            return mi.buttons_for_key(key)
+
+    class mod:
+        KEY_BUTTON = {c: mi.buttons_for_key(c)[0] for c in range(128)
+                      if not 65 <= c <= 90 and mi.buttons_for_key(c)}
+        RAW_KEYS = mi.raw_keys()
+        decode_raw = staticmethod(mi.decode_raw)
+
+    mod.TDeckKeyboard = TDeckKeyboard
     return mod
 
 
@@ -231,17 +241,18 @@ def test_the_p4_ble_keyboard_is_an_arrow_host_too():
     L/K. Its table said it was "shared with the T-Deck keyboard's game-button
     mapping" and was a fourth hand-written copy -- still carrying hjkl as a
     d-pad and R as `run` after the others had moved on."""
-    src = (ROOT / "device" / "ble_keyboard.py").read_text(encoding="utf-8")
-    tbl = re.search(r"BUTTON_FOR_KEY = \{(.+?)\n\}", src, re.S).group(1)
-    for want in ('ord("z"): "a"', 'ord("x"): "b"', 'ord(" "): "a"',
-                 '0x0D: "run"', '0x08: "home"'):
-        assert want in tbl, want
-    for gone in ('ord("l")', 'ord("k")', 'ord("h")', 'ord("j")', 'ord("r")'):
-        assert gone not in tbl, "%s still fires a button on the P4" % gone
+    from runtime import moy_input as mi
+    for key, button in ((ord("z"), "a"), (ord("x"), "b"), (ord(" "), "a"),
+                        (0x0D, "run"), (0x08, "home")):
+        assert mi.hid_buttons_for_key(key) == (button,), hex(key)
+    for gone in "lkhjr":
+        assert mi.hid_buttons_for_key(ord(gone)) == (), "%s fires a button on the P4" % gone
     # the HID arrow usages are what make it an arrow host in the first place
-    direct = re.search(r"_DIRECT_BUTTON = \{(.+?)\n\}", src, re.S).group(1)
-    for want in ('0x4F: "right"', '0x50: "left"',
-                 '0x51: "down"', '0x52: "up"'):
+    src = (ROOT / "native" / "moy_input" / "moy_hid.c").read_text(encoding="utf-8")
+    direct = src[src.index("static uint32_t direct_button("):]
+    direct = direct[:direct.index("\n}\n")]
+    for want in ("0x4F: return B_RIGHT", "0x50: return B_LEFT", "0x51: return B_DOWN",
+                 "0x52: return B_UP"):
         assert want in direct, want
 
 

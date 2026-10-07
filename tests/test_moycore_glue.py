@@ -1102,16 +1102,13 @@ def test_an_input_without_button_masks_falls_back_and_agrees_bit_for_bit(w):
 
 
 def test_both_real_input_states_drive_the_snapshot_the_same_way(w):
-    """`runtime/input.py` and the boards' `device/moybyte/input.py` differ in
-    BUTTONS length AND order; the snapshot must not."""
+    """`runtime/input.py` and the boards' table differ in BUTTONS length; the
+    snapshot must not."""
     from runtime.input import InputState as HostInput
+    from runtime.moy_input import InputTable as BoardInput
 
-    spec = importlib.util.spec_from_file_location(
-        "_dev_input_for_glue_test", ROOT / "device" / "moybyte" / "input.py")
-    device_input = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(device_input)
     snaps = []
-    for cls in (HostInput, device_input.InputState):
+    for cls in (HostInput, BoardInput):
         inp = cls()
         inp.set_button("up", True)
         inp.set_button("b", True)

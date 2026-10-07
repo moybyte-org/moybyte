@@ -49,9 +49,10 @@ needs off the returned `Desktop`.
 from console import Workstation, wire_workstation_core
 from device_boot import DeviceBoot
 from frame_loop import (FrameLoop, FramePump, IdleBlank, OtaHealth,
-                        PerfSampler, apply_touch, poll_link, poll_webhost)
+                        PerfSampler, poll_link, poll_webhost)
 from device_api import make_api
 from device_canvas import DeviceCanvas, _LayerComp, _owner_h
+import moy_input
 import wire_input
 import wire_links
 from mem_census import mark as _census
@@ -69,21 +70,26 @@ class Desktop:
     # -- the touch-only tier's frame hooks --------------------------------
 
     def poll_inputs(self, now):
-        """The keyboard's async reports (before begin_frame, so InputState gets
-        clean edges), the merge, then the touch into the pointer. Returns
-        (click, active) for the loop's idle blank."""
+        """One pass of the kernel's input drivers, the keyboard's async
+        reports and the touch's sample (each before begin_frame, so the table
+        gets clean edges), the merge, then the frame's pointer sample into the
+        pointer. Returns (click, active) for the loop's idle blank."""
+        moy_input.kick()
         keyboard = self.keyboard
         if keyboard is not None:
             try:
                 keyboard.poll()
             except Exception as exc:  # noqa: BLE001 -- a keyboard must fail touch-only
                 print("%s keyboard poll failed:" % self.name, exc)
+        touch = self.touch
+        if touch is not None:
+            touch.poll()
         inp = self.inp
         inp.begin_frame()
-        touched, click = apply_touch(self.touch, self.pointer)
+        f = inp.apply_pointer(self.pointer)
         out = self._click_active
-        out[0] = click
-        out[1] = touched or inp.any_held() or bool(inp.last_key)
+        out[0] = bool(f & moy_input.P_CLICK)
+        out[1] = bool(f & moy_input.P_HELD) or inp.any_held() or bool(inp.last_key)
         return out
 
     def present(self):
@@ -145,7 +151,7 @@ def bt_command(keyboard, comp=None):
             print("REMOTE bt status state=%s name=%s passkey=%s "
                   "protocol=%s interval_ms=%s notify=%s fast=%s%s error=%s"
                   % (st[0], st[1], st[2], keyboard.protocol,
-                     keyboard._conn_interval_ms, keyboard._notify_count,
+                     keyboard.conn_interval_ms, keyboard.notify_count,
                      keyboard.fast_status(),
                      "" if underruns is None
                      else " dsi_underruns=%s" % underruns(),

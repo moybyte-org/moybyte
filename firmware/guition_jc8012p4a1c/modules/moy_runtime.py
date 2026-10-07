@@ -15,8 +15,9 @@ so what this file owns is exactly what this glass decides --
     the README the measured costs) paints a persistent landscape buffer and
     rotates it onto the panel with the PPA -- the whole frame when chrome
     painted, one rect on a quiet game frame.
-  * the touch driver is the GSL3680 (`guition_p4_input.py` over the shared
-    `device/gsl3680.py`, firmware upload at boot) instead of a GT911.
+  * the touch driver is the GSL3680 (the kernel's, native/moy_input, its
+    firmware uploaded at boot from `boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c`)
+    instead of a GT911.
   * the backlight is GPIO23 active-high (the `MOY_DSI_BL_*` defines
     `moy_glass.backlight` drives), and up is ROTATION below.
 
@@ -81,13 +82,13 @@ def run_touch_calibrate():
         import moy_runtime; moy_runtime.run_touch_calibrate()
 
     Tap each numbered box; read which box the MAPPED coords land in. The knobs
-    are guition_p4_input's module globals, read when Touch() is constructed --
-    Ctrl-C, `import guition_p4_input as k; k.FLIP_X = True` (etc.), re-run, and
-    once mapped == tapped everywhere, bake the winners into that file. The
+    are live attributes on the kernel's touch driver -- `py touch.raw_x0 = 12`
+    over the dev channel, or on the REPL's driver -- and once mapped == tapped
+    everywhere, bake the winners into mpconfigboard.h's MOY_INPUT_TOUCH_*. The
     body is `device/p4_desktop.run_touch_calibrate`, shared with the
     Waveshare."""
     from moy_glass import backlight as set_backlight
-    from guition_p4_input import Touch
+    from moy_input import touch as Touch
     from p4_desktop import run_touch_calibrate as _calibrate
 
     _calibrate("Moybyte Guition P4", P4Compositor, set_backlight, Touch,
@@ -133,7 +134,7 @@ def run_desktop(fps_cap=60):
     board's name in a print string. What is left here is what this glass
     decides -- its compositor, its touch, its constants."""
     from moy_glass import backlight as set_backlight
-    from guition_p4_input import Touch
+    from moy_input import touch as Touch
     from p4_desktop import run_desktop as _run_desktop
 
     return _run_desktop(

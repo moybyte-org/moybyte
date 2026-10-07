@@ -63,23 +63,24 @@ def touch(seconds=15):
     """Stage 2: bring the GSL3680 up (firmware upload) and stream every sample
     for `seconds` -- raw + mapped + the knob state -- so a tap on each corner
     calibrates the flips."""
-    from guition_p4_input import Touch
-    import guition_p4_input as knobs
+    import moy_input
 
     t0 = time.ticks_ms()
-    tp = Touch(progress=lambda k, n: print("  fw %d/%d" % (k, n)))
-    print("Moybyte Guition P4 touch smoke: available=%s (init %dms) swap=%s flip_x=%s flip_y=%s"
-          % (tp.available, time.ticks_diff(time.ticks_ms(), t0),
-             knobs.SWAP_XY, knobs.FLIP_X, knobs.FLIP_Y))
+    tp = moy_input.touch(1280, 800)
+    print("Moybyte Guition P4 touch smoke: available=%s (init %dms, %d fw records) "
+          "swap=%s flip_x=%s flip_y=%s"
+          % (tp.available, time.ticks_diff(time.ticks_ms(), t0), tp.loaded,
+             tp.swap_xy, tp.flip_x, tp.flip_y))
     if not tp.available:
         return
     last = None
     end = time.ticks_add(time.ticks_ms(), seconds * 1000)
     n = 0
     while time.ticks_diff(end, time.ticks_ms()) > 0:
+        moy_input.kick()
         p = tp.poll()
-        if p is not None and (p[2] or p[:2] != last):
-            last = p[:2]
+        if p is not None and (p[2] or (p[0], p[1]) != last):
+            last = (p[0], p[1])
             n += 1
             print("TAP%s mapped=(%d,%d) raw=%s fingers=%d"
                   % ("*" if p[2] else " ", p[0], p[1], tp.raw, tp.fingers))

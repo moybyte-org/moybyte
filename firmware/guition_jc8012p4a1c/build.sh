@@ -43,10 +43,8 @@ moybyte_setup_idf esp32p4 \
 # 2) The patch ladder -- the Waveshare's, because it is the same silicon.
 # ---------------------------------------------------------------------------
 
-# 2a) The P4 SILICON patches (shared lib, both P4 boards): the BLE-HID
-#     notification fast path into MicroPython's modbluetooth.c, and the #106
-#     DSI bridge-underrun ISR backport into the (shared) ESP-IDF checkout.
-moybyte_patch_p4_ble_hid_fastpath
+# 2a) The P4 SILICON patch (shared lib, both P4 boards): the #106 DSI
+#     bridge-underrun ISR backport into the (shared) ESP-IDF checkout.
 moybyte_patch_p4_dsi_underrun
 
 # 2b) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel

@@ -118,7 +118,7 @@ def _device_ws(tmp_path):
     There are two InputState classes and the boards use `device/moybyte/input.py`
     -- a keyboard SOURCE writes `last_key` and the merge is what the console
     reads. Notes is opened the way a kid opens it: from the launcher."""
-    from device.moybyte.input import InputState as DeviceInputState
+    from runtime.moy_input import InputTable as DeviceInputState
 
     ws = build_ws(tmp_path)
     inp = DeviceInputState()

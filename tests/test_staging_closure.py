@@ -113,7 +113,7 @@ NATIVE = {
     # moy_c6 is the ESP-NOW-over-hosted shim + C6 plumbing (#7, the espnow
     # track -- docs/history/espnow_p4_2026-08.md).
     "p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web", "moy_dsi",
-           "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof", "moy_wasm",
+           "moy_ppa", "moy_c6", "moy_prof", "moy_wasm",
            "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel",
            "moy_sd", "moy_glass", "moy_input", "moy_net"},
     # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
@@ -122,7 +122,7 @@ NATIVE = {
     # authors no native module of its own, and moy_dsi drives its JD9365
     # through a board define rather than a second panel module.
     "guition-p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web",
-                   "moy_dsi", "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof",
+                   "moy_dsi", "moy_ppa", "moy_c6", "moy_prof",
                    "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
                    "moy_spine", "moy_kernel", "moy_sd", "moy_glass", "moy_input", "moy_net"},
     # The Guition denies moy_audio for now (stage 5 of its bring-up, see its

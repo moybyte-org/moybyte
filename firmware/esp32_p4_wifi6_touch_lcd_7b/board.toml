@@ -443,17 +443,6 @@ board through the SHARED denylist above, which is why nothing was added to this
 section for them. The line that decides is whether a module can import with no
 board present: both take every hardware object as an argument, so they load on
 CPython and tests/test_device_boot.py executes their shared half."""
-packages = ["moybyte"]
-packages_why = """
-`moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState
-plus the T-Deck keyboard matrix. Staged WHOLE (minus __pycache__) rather than
-file-by-file, so a new member of the package cannot go missing here.
-
-(Declared HERE, above the groups, and not at the end of the section: a bare key
-after a `[[modules.device.group]]` header belongs to that group's table, not to
-`[modules.device]` -- which is exactly what the first draft of this file got
-wrong and the stager reported as "no packages staged".)"""
-
 [[modules.device.group]]
 files = ["boot_shell.py"]
 why = """
@@ -488,8 +477,7 @@ boot trace and the import timer. The spine imports it, so every board that
 takes the spine takes it."""
 
 [[modules.device.group]]
-files = ["device_util.py", "device_canvas.py", "device_api.py", "moycore_glue.py",
-         "gt911.py"]
+files = ["device_util.py", "device_canvas.py", "device_api.py", "moycore_glue.py"]
 why = """
 The drawing backend and the cart namespace: DeviceCanvas (the raster every tier
 now runs, RGB565 with the palette resolved at draw time), `device_api` (the
@@ -509,15 +497,6 @@ desk's boot. This board's compositor is the kernel's moy_glass.DsiCompositor
 cart store on a card
 that has a bus of its own (tests/test_card_store.py executes it): the TF card
 when one mounts, the internal flash when not."""
-
-[[modules.device.group]]
-files = ["ble_keyboard.py"]
-why = """
-The BLE HID keyboard (#26) -- born in this board's tree as p4_ble_keyboard.py,
-promoted to device/ on 2026-08-19 when the Guition S3 became its second
-consumer. Standard `bluetooth` API; this board's radio is the companion C6
-over ESP-Hosted SDIO, and its `moy_ble_hid` notification fast-path usermod
-stays board-local (the driver imports it guardedly)."""
 
 [[modules.device.group]]
 files = ["device_wifi.py"]

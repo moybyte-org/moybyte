@@ -80,10 +80,10 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the DSI compositor, rotated included | `device/dsi_panel.py`, `device/p4_canvas.py`, `modules/p4_display.py`, `modules/guition_p4_display.py` | `native/moy_glass/moy_present_dsi.c` over `native/p4/moy_dsi/` and `native/p4/moy_ppa/`; the backlight is the panel entry sprint 2 gave the floor | 1 |
 | the palette | `runtime/palette.py` | the canvas's table in `moy_canvas.h` | 1 |
 | the host and browser rasters | `runtime/host_canvas.py`, `runtime/gfx_binding.py`, `firmware/web_runner/web_canvas.py` | the same `moy_glass` built for ctypes and for the web build | 1 |
-| the merged input state, sources, the pointer | `device/moybyte/input.py`'s `InputState`, `runtime/input.py`, `Pointer` and `pointer_state` (`runtime/moy_input.py`) | `native/moy_input/moy_input.h` | 2 |
-| the T-Deck keyboard, trackball and poller | `device/moybyte/input.py`'s `TDeckKeyboard`, `decode_raw`, `InputPoller`; `device/device_input.py` | `+native/moy_input/moy_tdeck_kbd.c`, a kernel task | 2 |
-| the touch drivers | `device/gt911.py`, `device/gsl3680.py`, `device/axs_touch.py`, `modules/p4_input.py`, `modules/guition_p4_input.py`, `modules/gsl_fw_jc8012.py` | `+native/moy_input/moy_touch_gt911.c`, `+native/moy_input/moy_touch_gsl3680.c`, `+native/moy_input/moy_touch_axs.c`; the GSL firmware as a C array | 2 |
-| the BLE HID central | `device/ble_keyboard.py` over `bluetooth`; `native/p4/moy_ble_hid/` | `+native/moy_input/moy_ble_hid.c` over the NimBLE host, on every console | 2 |
+| the merged input state, sources, the pointer | crossed (the boards' and the host's `InputState` twins, `Pointer`, `pointer_state`); `runtime/moy_input.py` is the ctypes binding | `native/moy_input/moy_input.h` | 2 |
+| the T-Deck keyboard, trackball and poller | crossed (the keyboard driver, its raw decoder and the #69 poller thread; the trackball and GT911 wrappers) | `native/moy_input/moy_kbd.c`; the input task and the ISRs in `native/moy_input/moy_input_task.c` | 2 |
+| the touch drivers | crossed (the GT911 core, the GSL3680 and AXS15231 drivers, the two P4 boards' wiring modules, the GSL firmware module) | `native/moy_input/moy_touchdev.c` over `native/moy_input/moy_touch.c`; the GSL firmware as a C array beside the Guition P4's `mpconfigboard.h` | 2 |
+| the BLE HID central | crossed (the Python central over `bluetooth`, the P4's notification fast path and its patch) | `native/moy_input/moy_hid.c`, the machine; `native/moy_input/moy_ble_task.c`, its NimBLE host on every console | 2 |
 | the browser's event decode | `runtime/web_input.py` | the web build's `moy_input` import | 2 |
 | the audio session, the six verbs, the bank push, the master level | `device_audio.py` (deleted), `runtime/audio.py`'s `AudioEngine`, `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`runtime/audio_session.py`) | `native/moy_audio/moy_aud.h` (sessions and the mix), `native/moy_audio/moy_aud_out.c` (the speaker), the codec in `native/moy_audio/moy_codec_es8311.c` | 2 |
 | WiFi, the radio under the spine's lease | `device/device_wifi.py` (the service over `kernel_wlan`; the Zero's station stays the port's) | `native/moy_net/moy_wifi.c` | 2 |
@@ -472,88 +472,82 @@ chrome in sprint 4.
 
 ### 4.1 The table
 
-One `moy_input` table for every tier: the fifteen buttons in libmoy's
-`moy_button` bit order (the host's eight were already in it; the boards'
-table is re-ordered to it, with the seven console-only names after), held and
-pressed masks per player, `last_key`, text mode, the pointer's place, down,
-fresh and click, and a source table of kind SRC — the keyboard, the BLE
-keyboard, the touch, the trackball, the browser, the net slots — each owning a
-held set and a key. The state every surface reads is the merge, taken once
-per frame at `moy_input_begin_frame`, which is where edges are computed.
+One `moy_input` table for every tier (`native/moy_input/moy_input.h`, landed
+2026-10-07): the fifteen buttons in libmoy's `moy_button` bit order (the host's
+eight are its prefix), held and pressed masks per player, `last_key`, text
+mode, and eight sources of kind SRC -- the table's own `local`, the keyboard,
+the BLE keyboard, the touch, the dev channel, the net slots -- each owning a
+held set, a key, a one-shot key queue and a pointer sample. The state every
+surface reads is the merge, taken once per frame at `moy_input_begin_frame`,
+which is where edges are computed; the frame's pointer sample is the newest of
+a source that is down, else the newest of any, and `apply_pointer` hands it to
+the pointer.
 
-    int  moy_input_source(uint32_t *h, const char *name, uint8_t player);
-    void moy_input_set_held(uint32_t src, uint8_t button, bool held);   // from a task or an ISR
-    void moy_input_key(uint32_t src, int key);               // one-shot: delivered for exactly one frame
-    void moy_input_release_all(uint32_t src);                // this source holds nothing
-    void moy_input_pointer(uint32_t src, int x, int y, bool down);
-    void moy_input_begin_frame(void);                        // the latches merged, the edges computed
-    void moy_input_masks(uint8_t player, uint32_t *held, uint32_t *pressed);   // player 0 is the union
-    int  moy_input_text_mode(bool on);                       // flips the T-Deck keyboard's mode
-    void moy_input_snapshot(int32_t *arr);                   // the array a Lua cart's btn() reads
+    moy_input_t *moy_input_kernel(void);                     // the drivers' table
+    int  moy_input_source(moy_input_t *t, const char *name, uint8_t player, uint32_t *h);
+    int  moy_input_set_held(moy_input_t *t, uint32_t h, uint8_t button, bool held);
+    int  moy_input_set_mask(moy_input_t *t, uint32_t h, uint32_t held);
+    int  moy_input_set_key(moy_input_t *t, uint32_t h, int32_t key);   // a level
+    int  moy_input_key(moy_input_t *t, uint32_t h, int32_t key);       // one frame
+    int  moy_input_point(moy_input_t *t, uint32_t h, int32_t x, int32_t y,
+                         bool down, bool edge, bool fresh);
+    void moy_input_begin_frame(moy_input_t *t);
+    void moy_input_masks(const moy_input_t *t, uint8_t player,
+                         uint32_t *held, uint32_t *pressed);           // MOY_INPUT_UNION: every source
+    int  moy_input_ptr_apply(const moy_input_t *t, moy_input_ptr_t *p, uint32_t now);
 
-`masks` keeps both of `button_masks`' arguments because
-`device/moybyte/input.py` records why each exists: a mask packed in the wrong
-order gave every Lua cart a d-pad rotated a quarter turn, and a mask packed for
-the wrong player is the same silent failure. The order is now the header's
-constant rather than a caller's tuple; the player argument stays, and
-`runtime/lua_ext.py`'s snapshot and `runtime/players.py`'s slots call it as
-they call `button_masks` now. The one host behaviour that changes — the host
-gains the seven console-only names — is pinned in the input trace. The dev
-channel's `tap`, `swipe` and `drag` inject into a source of their own, through
-the same table, so a scripted gesture is indistinguishable from a finger.
+`masks` keeps a player argument, and the bindings' `button_masks(order,
+player)` keeps both: a mask packed in the wrong order gave every Lua cart a
+d-pad rotated a quarter turn, and a mask packed for the wrong player is the same
+silent failure. The order is the header's; `runtime/lua_ext.py`'s snapshot and
+`runtime/players.py`'s slots call `button_masks` as before, and the input trace
+pins both. The dev channel's `tap`, `swipe` and `drag` write a source of their
+own (`devch`), so a scripted gesture reaches the pointer through the merge the
+way a finger does.
 
-**Writers are not frame code.** The sources are written by ISRs, by the
-poller task and by NimBLE's host task, and the table is PSRAM by rule, which
-an ISR cannot touch while the cache is off for an internal-flash write. So
-each source has a latch in internal RAM — its held bits, its key, its pointer
-sample — written under a `portMUX` spinlock, and `begin_frame` merges the
-latches into the PSRAM table once per frame. The latches and the ISR text in
-IRAM are in §8's ledger.
+**Writers are not frame code.** The sources are written by the input task, by
+NimBLE's host task and by the frame, and the table is PSRAM, which an ISR
+cannot touch while the cache is off. So each source has a latch in internal
+RAM -- its held bits, its key and queue, its pointer sample -- written under
+the table's `portMUX`, and `begin_frame` merges the latches into the PSRAM
+table once per frame. The ISRs touch only their own counters.
 
 ### 4.2 The drivers
 
-Each driver is a kernel task or an ISR writing into its source's latch; none
-touches a Python object.
+Each driver is the kernel's C and none touches a Python object
+(`tests/test_no_vm_calls_in_drivers.py`). A board selects them in
+`mpconfigboard.h` (`MOY_INPUT_*`, `native/moy_input/moy_input_task.c`).
 
-- **The T-Deck keyboard.** The C3 at I2C address 0x55 in its two modes:
-  ASCII (one byte per press edge, shift and sym resolved on the keyboard) and
-  raw matrix (five bytes, level state). `decode_raw` and the `KEY_BUTTON` table
-  are the C decoder, pinned by `tests/test_tdeck_keymap.py` over ctypes. The
-  mode flip is one C function: `0x03` on entering a game, `0x04` and the drain
-  on leaving, the typed byte seeded into `last_key` — the hazard the README
-  records closes because there is no GIL window between the revert and the
-  drain. The hold latch (`KEY_HOLD_MS`) stays for the ASCII mode. Raw needs
-  keyboard firmware of 2025-06-12 or later; an older unit is detected by its
-  stray ASCII byte and kept on the latch path, as today.
-- **The input poller task.** The I2C0 transactions — keyboard, GT911, the
-  deferred mode writes — move from a Python thread to a kernel task on core 0,
-  paced one pass per frame by a notify from the loop's input stage. A
-  clock-stretch stall (tens of milliseconds, measured in #69) blocks that task
-  and nothing else; the `I2CSTAT` counters keep counting from it. The build's
-  I2C GIL-release patch has no caller after this and leaves the board's patch
-  list. The stop inventory's row lands here: the task is stopped
-  cooperatively and joined before any VM teardown.
-- **The trackball and the touch INT gate.** Four direction pulses and a click
-  on GPIO IRQs, and the GT911's INT edge counter that gates its reads, become
-  kernel ISRs in IRAM.
-- **GT911 (T-Deck, Waveshare P4)**, **GSL3680 (Guition P4)**, **AXS15231
-  (Guition S3)**: the shared core `device/gt911.py` factors (the held point,
-  the mapping) is one C body; the GSL3680's firmware bytes are a C array and
-  its upload runs after the splash's first frame, behind a lit screen, as the
-  spine's `inputs()` ordering has it; the AXS touch reads portrait panel
-  coordinates on the panel's own I2C0. On both P4s the touch controller's bus
-  is the codec's too: the bus is the kernel's object (§2 item 6), input brings
+- **The T-Deck keyboard** (`moy_kbd.c`): the C3 at 0x55 in its two modes,
+  ASCII (one byte per press edge, each a one-shot key, the alias held for
+  `MOY_KBD_HOLD_MS`) and raw matrix (five bytes, level state). The mode flip is
+  queued and applied by the pass that owns the bus: `0x03` into a game, `0x04`
+  and the drain out of it. A keyboard older than 2025-06-12 is detected by its
+  stray ASCII byte and kept on the latch path.
+- **The input task** (T-Deck): every I2C0 transaction -- keyboard, GT911, the
+  mode writes -- runs on a core-0 task, one pass per `moy_input.kick()`, which
+  the frame's tail calls after present. A clock-stretch stall blocks that task
+  and nothing else; the stretch cap is the bus's (`MOY_BUS_I2C_STRETCH_US`,
+  5000). The build's I2C GIL-release patch retired with the Python poller.
+  The other boards have no task: their kick runs the touch's pass inline.
+- **The trackball and the touch INT gate**: IRAM ISRs counting pulses and INT
+  edges; the click is read as a level.
+- **Touch** (`moy_touchdev.c` over `moy_touch.c`): GT911 (T-Deck, Waveshare P4),
+  GSL3680 (Guition P4) and AXS15231 (Guition S3) over one mapping and one
+  no-news contract; the GSL3680's firmware is a C array beside its board's
+  header, uploaded at bring-up. On the P4s the touch's bus is the codec's too:
+  the bus is the kernel's object (`native/moy_kernel/moy_bus.c`), input brings
   it up, audio adds its device.
-- **BLE HID below `bluetooth`.** `device/ble_keyboard.py`'s whole protocol
-  path — scan for 0x1812, connect and bond, discover the Report and Boot
-  Keyboard Input characteristics, enable their CCCDs, consume reports — moves
-  onto the NimBLE host's C callbacks, with `native/p4/moy_ble_hid/`'s
-  notification queue as its seed, on every console (the S3s' on-die radio,
-  the P4s' C6 over ESP-Hosted). The kernel owns the NimBLE host's lifecycle.
-  Bond secrets go through the NimBLE store callbacks to `moy_fs` as it is in
-  1b, beside the chosen address and name, so nothing here waits on the links
-  pass. The Settings panel's scan, pick and forget are calls on the kernel's
-  device list.
+- **BLE HID** (`moy_hid.c`, `moy_ble_task.c`): scan for 0x1812, connect and
+  bond, discover the Report and Boot Keyboard Input characteristics, enable
+  their CCCDs, decode the boot-shaped report -- a machine over events, driven on
+  NimBLE's host task on every console (the S3s' on-die radio, the P4s' C6 over
+  ESP-Hosted). The kernel owns the host's lifecycle. Bonds are NimBLE's NVS
+  store (`CONFIG_BT_NIMBLE_NVS_PERSIST`) and the machine's settings -- enabled,
+  the picked address and its name -- NVS namespace `moy_ble`: both C, so no
+  volume and no VM is in the bond's path (decision 2026-10-07, in place of a
+  `moy_fs` file). Settings' scan, pick and forget are verbs queued to the host
+  task.
 - **The browser and the host.** `runtime/web_input.py`'s event batch decodes
   in the web build's C into the same table; the host's SDL driver writes the
   table through ctypes.
@@ -561,18 +555,14 @@ touches a Python object.
 ### 4.3 The soft-reset list
 
 The VM service's `soft_reset_exit` is `mp_task`'s, copied and pinned
-(`native/moy_kernel/mp_task_calls.txt`), and today it tears down what this
-pass makes the kernel's: `mp_bluetooth_deinit` stops the NimBLE host,
-`espnow_deinit` the radio's receive path, and `machine_pins_deinit` strips
-every pin in the port's table of its ISR, the kernel's included. A Ctrl-D
-would drop the keyboard, the trackball and the link. So this pass changes the
-copy in three MOY-marked places, and the record is regenerated under that
-review: `MICROPY_PY_BLUETOOTH` and `MICROPY_PY_ESPNOW` are off on the four
-consoles, because their only users are the two drivers that cross (the Zero
-never had them); the P4's `patches/p4_modbluetooth_ble_hid_fastpath.patch`
-retires with the module it patched; and the pin sweep becomes the one the
-plan's §4.4 asked for, a sweep of pins with a Python handler, so a kernel ISR
-survives. The links pass makes the same guard hold for its receive ring.
+(`native/moy_kernel/mp_task_calls.txt`). It tore down what input made the
+kernel's: `mp_bluetooth_deinit` stopped the NimBLE host and
+`machine_pins_deinit` stripped every pin's ISR, the kernel's included. Now:
+`MICROPY_PY_BLUETOOTH` is off on the four consoles, so the host is the kernel's
+and nothing tears it down; the P4's BLE fast-path patch retired with the module
+it patched; and the pin sweep is the kernel's (`moy_kernel_pins_deinit`, a
+MOY-marked change in the copy), removing only the ISRs a Python handler holds.
+The links pass makes the same guard hold for its receive ring.
 
 ### 4.4 Absorbed issues
 
@@ -590,12 +580,15 @@ survives. The links pass makes the same guard hold for its receive ring.
 
 ### 4.5 What Python is deleted
 
-`device/moybyte/input.py` and `device/moybyte/__init__.py`, `runtime/input.py`,
-`runtime/web_input.py`, `device/device_input.py`, `device/gt911.py`,
-`device/gsl3680.py`, `device/axs_touch.py`, `device/ble_keyboard.py`, the
-boards' input modules, `gsl_fw_jc8012.py` and `runtime/moy_input.py`'s twin
-body. `tests/test_tdeck_keymap.py`, `tests/test_tdeck_input.py` and
-`tests/test_ble_keyboard.py` keep their cases over the binding.
+The device tier's input package (the boards' `InputState`, the T-Deck
+keyboard and its poller thread), the trackball and GT911 wrappers, the GT911
+core, the GSL3680 and AXS15231 drivers, the two P4 boards' wiring modules, the
+GSL firmware module, the Python BLE central and `runtime/moy_input.py`'s
+twin body (deleted 2026-10-07); `runtime/web_input.py` with its crossing. `runtime/input.py` stays as the host's vocabulary over the table.
+`tests/test_tdeck_keymap.py`, `tests/test_tdeck_input.py`,
+`tests/test_touch_core.py`, `tests/test_gsl3680.py`,
+`tests/test_touch_mapping.py` and `tests/test_ble_keyboard.py` keep their
+cases over the binding.
 
 ### 4.6 Per-board facts that bite
 

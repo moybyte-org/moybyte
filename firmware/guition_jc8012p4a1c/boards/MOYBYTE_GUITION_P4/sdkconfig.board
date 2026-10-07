@@ -35,18 +35,21 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 # copies it into ports/esp32/ (the filename resolves project-relative).
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-guition-p4.csv"
 
-# BLE notifications arrive from the C6 over ESP-Hosted while MicroPython's
-# synchronous Bluetooth IRQ may be waiting for the VM/GIL during a long display
-# draw.  The upstream 24-buffer pool exhausts under keyboard autorepeat and the
-# hosted VHCI driver then drops reports ("alloc_acl_from_ll failed").  Keep enough
-# host-bound ACL buffers to absorb those render bursts.
+# BLE notifications arrive from the C6 over ESP-Hosted in bursts, and the
+# upstream 24-buffer pool exhausted under keyboard autorepeat ("alloc_acl_from_ll
+# failed", measured while MicroPython's IRQ held them behind a long draw). Keep
+# enough host-bound ACL buffers to absorb a burst.
 CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64
 
-# MicroPython's ESP32 binding executes synchronous BLE callbacks as Python on
-# the NimBLE host task.  The upstream 6144-byte stack is marginal for the P4's
-# HID discovery/subscription state machine (hardware panics symbolized inside
-# mp_execute_bytecode/mp_obj_print_helper during connect).  Keep ample headroom.
-CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288
+# NimBLE's host task runs the kernel's C callbacks (native/moy_input): the
+# 12288 bytes it once had were for MicroPython's BLE handlers running Python
+# on this task.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+# The kernel's BLE keyboard keeps its bonds in NimBLE's own NVS store
+# (native/moy_input/moy_ble_task.c): the pairing survives a reboot with no file
+# on any volume.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
 
 # OTA rollback (#53). An app that does not call
 # esp32.Partition.mark_app_valid_cancel_rollback() on its first boot is REVERTED

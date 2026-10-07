@@ -15,6 +15,7 @@ falls back to a self-contained shim), which is what makes this testable at all.
 import hashlib
 import json
 
+from runtime import moy_input
 from runtime.dev_channel import (DevChannel, PERF_EVENTS, _remote_state,
                                  heapcaps_line,
                                  luaprof_line, perfcnt_line, shim_line_range,
@@ -97,6 +98,7 @@ class FakeWS:
         self._dirty = False
         self._psave_ms = 300000
         self._psave_asleep = False
+        self.input = moy_input.HostInputTable()
 
 
 def make(ws=None, **kw):
@@ -188,24 +190,32 @@ def test_state_reports_the_sram_headroom_the_run_had_or_none():
 # -- gesture scripts -----------------------------------------------------------
 
 
+def _gesture_frame(ws, pointer):
+    """One frame of the loop's pointer stage: the merge, then the frame's
+    sample into the pointer -- where a scripted sample lands, as a finger's
+    does."""
+    ws.input.begin_frame()
+    f = ws.input.apply_pointer(pointer)
+    return (pointer.x, pointer.y), pointer.down, bool(f & moy_input.P_CLICK), pointer.fresh
+
+
 def test_swipe_is_press_hold_release(capsys):
     """i==0 press edge, held interpolation, i==n a real RELEASE sample at the
-    end point (down=False) -- the shape the fling estimators need."""
-    ws, ch = make()
+    end point (down=False) -- the shape the fling estimators need. Each sample
+    goes into the channel's own source and reaches the pointer through the
+    next frame's merge."""
+    ws = FakeWS()
+    ch = DevChannel(ws, moy_input.Pointer(320, 240))
     ch.run(ws, "swipe 0 0 100 0 5")
     samples = []
     while ch._swipe is not None:
-        ch.click = False
         ch._scripts()
-        if ch._swipe is not None or samples[-1:] != []:
-            pass
-        samples.append((ch.pointer.placed[-1] if ch.pointer.placed else None,
-                        ch.pointer.down, ch.click))
+        samples.append(_gesture_frame(ws, ch.pointer))
     out = capsys.readouterr().out
     assert "REMOTE swipe 0,0 -> 100,0 frames=5" in out
     assert "REMOTE swipe done" in out
     # 6 pointer frames for n=5 (0..5), then the done frame cleared the script.
-    xs = [p[0][0] for p in samples if p[0] is not None]
+    xs = [p[0][0] for p in samples]
     assert xs[0] == 0 and xs[-1] == 100
     press = samples[0]
     assert press[1] is True and press[2] is True          # press edge clicks
@@ -213,8 +223,19 @@ def test_swipe_is_press_hold_release(capsys):
     assert release[1] is False                            # real release sample
     assert all(s[1] is True for s in samples[1:5])        # held in between
     assert all(s[2] is False for s in samples[1:])        # click frame 0 only
-    assert all(s[0] is not None for s in samples[:6])
-    assert ch.pointer.fresh is True                       # scripted = fresh
+    assert all(s[3] is True for s in samples)             # scripted = fresh
+
+
+def test_a_tap_is_a_press_then_a_release_through_the_table(capsys):
+    ws = FakeWS()
+    ch = DevChannel(ws, moy_input.Pointer(320, 240))
+    ch.run(ws, "tap 40 50")
+    assert "REMOTE tap 40 50" in capsys.readouterr().out
+    ch._scripts()                                         # the tap's own frame
+    assert _gesture_frame(ws, ch.pointer)[:3] == ((40, 50), True, True)
+    ch._scripts()
+    assert _gesture_frame(ws, ch.pointer)[1:3] == (False, False)
+    assert ch._tap is None
 
 
 def test_drag_declines_without_windows_and_runs_with(capsys):
@@ -223,13 +244,15 @@ def test_drag_declines_without_windows_and_runs_with(capsys):
     assert "REMOTE drag: no window open" in capsys.readouterr().out
     assert ch._drag is None
 
-    ws2, ch2 = make(ws=FakeWS(wm=WindowedWM()))
+    ws2 = FakeWS(wm=WindowedWM())
+    ch2 = DevChannel(ws2, moy_input.Pointer(320, 240))
     ch2.run(ws2, "drag 12 3")
     out = capsys.readouterr().out
     assert "REMOTE drag win=settings" in out and "frames=12 step=3" in out
     n = 0
     while ch2._drag is not None:
         ch2._scripts()
+        _gesture_frame(ws2, ch2.pointer)
         n += 1
     assert "REMOTE drag done" in capsys.readouterr().out
     assert n == 13                                        # 12 frames + done

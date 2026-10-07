@@ -1,102 +1,105 @@
-"""The four touch drivers' raw -> glass mapping, pinned on sample points.
+"""The four boards' raw -> glass touch mapping, pinned on sample points.
 
 Every console board maps a controller's raw point onto its glass through the
 same four steps -- swap the axes, scale the controller's space onto the
-panel's, flip, clamp -- and each driver carried its own copy of that tail in
-its own order with its own knob convention. These pins were written against
-the copies BEFORE they were promoted into `gt911.map_point`, so the promotion
-is provably neutral: corners, the centre, and a press past each axis, per
-driver, with the knobs each board ships.
+panel's, flip, clamp both ends -- in one body, the kernel's
+(native/moy_input/moy_touch.c). Each board's knobs are its mpconfigboard.h's
+MOY_INPUT_TOUCH_*, read here from the header the image is built from, and the
+point goes through the board's real controller protocol (moy_touchdev.c) on a
+fake bus: a report on the wire, one pass, the frame's poll. Corners, the
+centre, and a press past each axis, per board.
 
-ONE DELIBERATE CHANGE, recorded here rather than hidden: the Waveshare P4's
-`p4_input.Touch` clamped only the UPPER bound, and with both flips on (its
-calibration) an off-glass raw coordinate flipped NEGATIVE and left the driver
-as a point off the opposite edge. The shared body clamps both ends, as
-`axs_touch` already did for the same reason; the last test in the P4 section
-pins the shared behaviour.
-
-The drivers' I2C halves are stubbed at the import boundary exactly the way
-`tests/test_device_input.py` does it; nothing here is a transcription of a
-mapping -- the real module is loaded and its `poll()` is what produces the
-numbers.
+The Waveshare P4's driver once clamped only the upper bound, so with both
+flips on an off-glass raw coordinate left it as a point off the opposite edge;
+the shared body clamps both ends, and the P4's section pins that.
 """
 
-import contextlib
-import importlib.util
-import sys
-import types
+import re
 from pathlib import Path
 
 import pytest
 
+from runtime import moy_input as mi
+
 ROOT = Path(__file__).resolve().parent.parent
-DEVICE = ROOT / "device"
-P4_MODULES = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
+BOARDS = {
+    "guition_s3": ("guition_jc3248w535", "MOYBYTE_GUITION_S3", 480, 320),
+    "guition_p4": ("guition_jc8012p4a1c", "MOYBYTE_GUITION_P4", 1280, 800),
+    "tdeck": ("lilygo_t_deck_plus_mainline", "MOYBYTE_TDECK", 320, 240),
+    "p4": ("esp32_p4_wifi6_touch_lcd_7b", "MOYBYTE_P4", 1024, 600),
+}
 
 
-@contextlib.contextmanager
-def _flat_device(machine=None):
-    """Bind the frozen tree's flat names (`device_util`, `gt911`, `machine`)
-    for one module load, and restore them afterwards."""
-    from device import gt911 as real_gt911
-
-    saved = {k: sys.modules.get(k, KeyError)
-             for k in ("device_util", "gt911", "machine")}
-    if not isinstance(saved["device_util"], types.ModuleType):
-        spec = importlib.util.spec_from_file_location(
-            "device_util", DEVICE / "device_util.py")
-        du = importlib.util.module_from_spec(spec)
-        sys.modules["device_util"] = du
-        spec.loader.exec_module(du)
-    sys.modules["gt911"] = real_gt911
-    if machine is not None:
-        sys.modules["machine"] = machine
-    try:
-        yield
-    finally:
-        for k, v in saved.items():
-            if v is KeyError:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
+def knobs(board):
+    """A board's MOY_INPUT_TOUCH_* defines, as ints."""
+    d, b, _w, _h = BOARDS[board]
+    src = (ROOT / "firmware" / d / "boards" / b / "mpconfigboard.h").read_text()
+    out = {}
+    for name, val in re.findall(r"#define MOY_INPUT_TOUCH_(\w+)\s+\(?(0x[0-9A-Fa-f]+|\d+)\)?",
+                                src):
+        out[name] = int(val, 0)
+    return out
 
 
-def _load(name, path, machine=None):
-    with _flat_device(machine):
-        spec = importlib.util.spec_from_file_location(name, path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-    return mod
+class _Bus:
+    """Every controller's reads, answering one report: a GT911's status and
+    point (by register), the GSL3680's eight bytes at 0x80, the AXS15231's
+    eight after its command."""
 
+    def __init__(self, report, gt911_status=None):
+        self.report = report
+        self.status = gt911_status
 
-# -- axs_touch (Guition JC3248W535): swap + flip_x, landscape 480x320 --------
+    def readfrom_mem(self, _a, reg, n, addrsize=8):
+        if reg == 0x814E:
+            return bytes([self.status])
+        return self.report[:n]
 
+    def readfrom(self, _a, n):
+        return self.report[:n]
 
-class _AxsBus:
-    def __init__(self, *frames):
-        self.frames = list(frames)
-
-    def writeto(self, addr, data):
+    def writeto(self, _a, _data):
         pass
 
-    def readfrom(self, addr, n):
-        return self.frames.pop(0) if self.frames else bytes(8)
+
+def _report(kind, x, y, yx=False):
+    if kind == mi.GT911:
+        a, b = (y, x) if yx else (x, y)
+        return bytes((a & 0xFF, a >> 8, b & 0xFF, b >> 8))
+    if kind == mi.GSL3680:
+        return bytes((1, 0, 0, 0, y & 0xFF, (y >> 8) & 0x0F, x & 0xFF, (x >> 8) & 0x0F))
+    return bytes((0, 1, (x >> 8) & 0x0F, x & 0xFF, (y >> 8) & 0x0F, y & 0xFF, 0, 0))
 
 
-def _axs_report(x, y):
-    return bytes((0, 1, (x >> 8) & 0x0F, x & 0xFF, (y >> 8) & 0x0F, y & 0xFF,
-                  0, 0))
-
-
-def _axs_point(raw_x, raw_y):
-    from device import axs_touch
-    assert (axs_touch.SWAP_XY, axs_touch.FLIP_X, axs_touch.FLIP_Y) \
-        == (True, True, False), "the Guition S3's baked knobs moved"
-    t = axs_touch.Touch(w=480, h=320,
-                        i2c=_AxsBus(bytes(8), _axs_report(raw_x, raw_y)))
-    assert t.available
-    x, y, _edge = t.poll()
+def _point(board, raw_x, raw_y, **over):
+    k = knobs(board)
+    k.update(over)
+    _d, _b, w, h = BOARDS[board]
+    w = over.pop("W", w)
+    h = over.pop("H", h)
+    kind = k["KIND"]
+    yx = bool(k.get("YX", 0))
+    bus = _Bus(_report(kind, raw_x, raw_y, yx), gt911_status=0x81)
+    t = mi.TouchDriver(bus, kind, w, h, addr=k.get("ADDR", 0),
+                       swap_xy=bool(k["SWAP"]), flip_x=bool(k["FLIP_X"]),
+                       flip_y=bool(k["FLIP_Y"]), raw_w=k.get("RAW_W", 0),
+                       raw_h=k.get("RAW_H", 0), raw_x0=k.get("RAW_X0", 0),
+                       raw_y0=k.get("RAW_Y0", 0), yx=yx,
+                       clear_first=bool(k.get("CLEAR_FIRST", 0)),
+                       extrapolate=bool(k.get("EXTRAPOLATE", 0)))
+    t.probe()
+    t.available = True                  # a GSL3680 is up once its upload signs
+    t.pass_()
+    x, y, _edge = t.poll(0)
     return x, y
+
+
+# -- the Guition S3's AXS15231: swap + flip_x, landscape 480x320 -----------------
+
+def test_the_guition_s3s_baked_knobs():
+    k = knobs("guition_s3")
+    assert (k["SWAP"], k["FLIP_X"], k["FLIP_Y"]) == (1, 1, 0)
+    assert k["EXTRAPOLATE"] == 1 and k["HOLD_MS"] == 90
 
 
 @pytest.mark.parametrize("raw, glass", [
@@ -107,7 +110,7 @@ def _axs_point(raw_x, raw_y):
     ((160, 240), (239, 160)),      # the centre
 ])
 def test_axs_maps_its_corners_and_centre(raw, glass):
-    assert _axs_point(*raw) == glass
+    assert _point("guition_s3", *raw) == glass
 
 
 @pytest.mark.parametrize("raw, glass", [
@@ -116,38 +119,10 @@ def test_axs_maps_its_corners_and_centre(raw, glass):
     ((4095, 4095), (0, 319)),      # a 12-bit maximum on both
 ])
 def test_axs_clamps_an_off_glass_press_at_both_ends(raw, glass):
-    assert _axs_point(*raw) == glass
+    assert _point("guition_s3", *raw) == glass
 
 
-# -- gsl3680 (Guition JC8012P4A1C): a firmware space scaled onto 1280x800 ---
-
-
-def _gsl_point(raw_x, raw_y, **knobs):
-    from device.gsl3680 import Touch
-    from device.gt911 import HeldPoint
-    t = Touch.__new__(Touch)
-    t.w, t.h = knobs.pop("w", 1280), knobs.pop("h", 800)
-    for k in ("swap_xy", "flip_x", "flip_y"):
-        setattr(t, k, knobs.pop(k, False))
-    for k in ("raw_w", "raw_h", "raw_x0", "raw_y0"):
-        setattr(t, k, knobs.pop(k, 0))
-    assert not knobs, knobs
-    t.available = True
-    t.raw = None
-    t.fingers = 0
-    t._hp = HeldPoint()
-
-    class _Chip:
-        def read(self):
-            return 1, raw_x, raw_y
-
-    t._chip = _Chip()
-    x, y, _edge = t.poll()
-    return x, y
-
-
-FIT = dict(raw_w=1640, raw_h=865, raw_x0=10, raw_y0=21)   # the board's fit
-
+# -- the Guition P4's GSL3680: a firmware space scaled onto 1280x800 --------------
 
 @pytest.mark.parametrize("raw, glass", [
     ((10, 21), (0, 0)),                    # the fitted origin
@@ -156,7 +131,7 @@ FIT = dict(raw_w=1640, raw_h=865, raw_x0=10, raw_y0=21)   # the board's fit
     ((835, 462), (643, 407)),              # its centre target
 ])
 def test_gsl_scales_the_firmware_space_onto_the_glass(raw, glass):
-    assert _gsl_point(*raw, **FIT) == glass
+    assert _point("guition_p4", *raw) == glass
 
 
 @pytest.mark.parametrize("raw, glass", [
@@ -164,34 +139,31 @@ def test_gsl_scales_the_firmware_space_onto_the_glass(raw, glass):
     ((1700, 900), (1279, 799)),            # past the span -> clamped
 ])
 def test_gsl_clamps_past_the_fitted_span_at_both_ends(raw, glass):
-    assert _gsl_point(*raw, **FIT) == glass
+    assert _point("guition_p4", *raw) == glass
 
 
 def test_gsl_scales_BEFORE_it_flips():
     """The one order that is observable: with a span that does not divide the
-    glass, flipping the raw value and then scaling rounds differently from
-    scaling and then flipping. The driver scales first."""
-    assert _gsl_point(2, 0, w=5, h=5, raw_w=7, raw_h=7, flip_x=True) == (3, 0)
+    glass, flipping and then scaling rounds differently from scaling and then
+    flipping. The driver scales first."""
+    assert _point("guition_p4", 2, 0, W=5, H=5, RAW_W=7, RAW_H=7, RAW_X0=0, RAW_Y0=0,
+                  FLIP_X=1) == (3, 0)
 
 
 def test_gsl_swap_and_flips_apply_after_the_scale():
-    assert _gsl_point(1248, 17, raw_w=1664, raw_h=896,
-                      flip_x=True, flip_y=True) == (1279 - 960, 799 - 15)
-    assert _gsl_point(100, 700, raw_w=1664, raw_h=896, swap_xy=True) \
+    base = dict(RAW_W=1664, RAW_H=896, RAW_X0=0, RAW_Y0=0)
+    assert _point("guition_p4", 1248, 17, FLIP_X=1, FLIP_Y=1, **base) \
+        == (1279 - 960, 799 - 15)
+    assert _point("guition_p4", 100, 700, SWAP=1, **base) \
         == (700 * 1280 // 1664, 100 * 800 // 896)
 
 
-# -- device_input (T-Deck): a 320x240 controller space, y inverted ----------
+# -- the T-Deck's GT911: a 320x240 controller space, y inverted -------------------
 
-
-def _tdeck_map(raw_x, raw_y, w=320, h=240):
-    mod = _load("moybyte_test_tdeck_touch_map", DEVICE / "device_input.py")
-    assert (mod.TOUCH_SWAP, mod.TOUCH_FLIP_X, mod.TOUCH_FLIP_Y,
-            mod.TOUCH_RAW_W, mod.TOUCH_RAW_H) == (False, False, True, 320, 240), \
-        "the T-Deck's baked knobs moved"
-    t = mod.Touch.__new__(mod.Touch)
-    t.w, t.h = w, h
-    return t._map(raw_x, raw_y)
+def test_the_tdecks_baked_knobs():
+    k = knobs("tdeck")
+    assert (k["SWAP"], k["FLIP_X"], k["FLIP_Y"], k["RAW_W"], k["RAW_H"], k["YX"]) \
+        == (0, 0, 1, 320, 240, 1)
 
 
 @pytest.mark.parametrize("raw, glass", [
@@ -202,7 +174,7 @@ def _tdeck_map(raw_x, raw_y, w=320, h=240):
     ((160, 120), (160, 119)),
 ])
 def test_tdeck_maps_its_corners_and_centre(raw, glass):
-    assert _tdeck_map(*raw) == glass
+    assert _point("tdeck", *raw) == glass
 
 
 @pytest.mark.parametrize("raw, glass", [
@@ -211,43 +183,15 @@ def test_tdeck_maps_its_corners_and_centre(raw, glass):
     ((65535, 65535), (319, 0)),     # a 16-bit maximum on both
 ])
 def test_tdeck_clamps_an_off_glass_press_at_both_ends(raw, glass):
-    assert _tdeck_map(*raw) == glass
+    assert _point("tdeck", *raw) == glass
 
 
-# -- p4_input (Waveshare 7B): a self-configured GT911, both axes flipped -----
+# -- the Waveshare P4's GT911: native 1024x600, mounted 180 degrees ---------------
 
-
-class _P4Bus:
-    """A GT911 reporting x(lo,hi) y(lo,hi) -- the Waveshare part's order."""
-
-    def __init__(self, x, y):
-        self.point = bytes((x & 0xFF, x >> 8, y & 0xFF, y >> 8))
-
-    def readfrom_mem(self, addr, reg, n, addrsize=8):
-        if reg == 0x814E:
-            return b"\x81"
-        return self.point[:n]
-
-    def writeto_mem(self, addr, reg, buf, addrsize=8):
-        pass
-
-
-def _p4_point(raw_x, raw_y):
-    bus = _P4Bus(raw_x, raw_y)
-    machine = types.ModuleType("machine")
-    machine.Pin = lambda *a, **k: None
-    machine.I2C = lambda *a, **k: bus
-    with _flat_device(machine):
-        spec = importlib.util.spec_from_file_location(
-            "moybyte_test_p4_touch_map", P4_MODULES / "p4_input.py")
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        assert (mod.SWAP_XY, mod.FLIP_X, mod.FLIP_Y) == (False, True, True), \
-            "the Waveshare's baked knobs moved"
-        t = mod.Touch()             # `machine` is imported inside __init__
-    assert t.available
-    x, y, _edge = t.poll()
-    return x, y
+def test_the_p4s_baked_knobs():
+    k = knobs("p4")
+    assert (k["SWAP"], k["FLIP_X"], k["FLIP_Y"], k["ADDR"], k["CLEAR_FIRST"]) \
+        == (0, 1, 1, 0x5D, 1)
 
 
 @pytest.mark.parametrize("raw, glass", [
@@ -258,7 +202,7 @@ def _p4_point(raw_x, raw_y):
     ((512, 300), (511, 299)),
 ])
 def test_p4_maps_its_corners_and_centre(raw, glass):
-    assert _p4_point(*raw) == glass
+    assert _point("p4", *raw) == glass
 
 
 @pytest.mark.parametrize("raw, glass", [
@@ -266,31 +210,9 @@ def test_p4_maps_its_corners_and_centre(raw, glass):
     ((512, 610), (511, 0)),
 ])
 def test_p4_clamps_an_off_glass_press_at_both_ends(raw, glass):
-    """THE DELIBERATE CHANGE. With both flips on, a raw coordinate past the
-    panel flips negative; the driver used to clamp only the upper bound and
-    handed that negative point on, so an off-glass press landed on the far
-    edge. The shared mapping clamps both ends, as axs_touch always did."""
-    assert _p4_point(*raw) == glass
+    assert _point("p4", *raw) == glass
 
 
-# -- the routing: one mapping, four takers ------------------------------------
-
-
-@pytest.mark.parametrize("path", [
-    DEVICE / "axs_touch.py", DEVICE / "gsl3680.py", DEVICE / "device_input.py",
-    P4_MODULES / "p4_input.py"])
-def test_every_touch_driver_maps_through_the_shared_body(path):
-    """Routing only (the bodies are executed above): a driver that grows its
-    own swap/flip/clamp tail again is a fifth copy of the one that drifted."""
-    src = path.read_text(encoding="utf-8")
-    assert "map_point(" in src, path
-    assert "self.w - 1 - x" not in src and "self.h - 1 - y" not in src, path
-
-
-def test_map_point_scales_then_flips_then_clamps_both_ends():
-    from device.gt911 import map_point
-    assert map_point(2, 0, 5, 5, False, True, False, 7, 7) == (3, 0)
-    assert map_point(30, 30, 10, 10, True, True, True) == (0, 0)
-    assert map_point(-3, 12, 10, 10, False, False, False) == (0, 9)
-    assert map_point(92, 86, 1280, 800, False, False, False,
-                     1640, 865, 10, 21) == (64, 60)
+def test_every_board_names_a_controller_the_kernel_drives():
+    for board in BOARDS:
+        assert knobs(board)["KIND"] in (mi.GT911, mi.GSL3680, mi.AXS), board

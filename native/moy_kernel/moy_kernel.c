@@ -9,10 +9,12 @@
 //
 // THE VM SERVICE is mp_task (ports/esp32/main.c at the pinned MPY_TAG), copied:
 // the same prelude, init, boot scripts, REPL loop and soft-reset list, in the
-// same order, with three changes marked MOY below. It decides the boot first
+// same order, with four changes marked MOY below. It decides the boot first
 // (moy_boot_decide), it lands on the recovery floor when the first heap area is
-// not there, and when the console's boot ends before boot_ok() it records the
-// failure and restarts into the floor instead of falling to the REPL. The
+// not there, when the console's boot ends before boot_ok() it records the
+// failure and restarts into the floor instead of falling to the REPL, and its
+// pin sweep removes only the ISRs a Python handler holds, so the kernel's own
+// (input's trackball and touch gate) outlive a soft reset. The
 // copy's call list is pinned: mp_task_calls.txt is what it was reviewed
 // against, and tools/mp_task_calls.py fails the build when the tag's differs.
 //
@@ -506,7 +508,8 @@ static int k_getc(void) {
 
 #if defined(MOY_KERNEL_TOUCH_AXS15231)
 #include "driver/i2c.h"
-// The AXS15231's touch, the C twin of device/axs_touch.py's read, on the
+// The AXS15231's touch, the same read as input's driver
+// (native/moy_input/moy_touchdev.c), on the
 // port's legacy I2C driver (the one this MicroPython links; the new driver
 // beside it aborts the boot). The VM never runs in a floor's boot, so the
 // floor owns I2C0.
@@ -815,6 +818,17 @@ static void moy_kernel_kstop_line(const char *when) {
            (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
 }
 
+// The soft reset's pin sweep: the ISR of every pin a Python handler holds, and
+// no other. The port's machine_pins_deinit removes every pin's, the kernel's
+// included.
+static void moy_kernel_pins_deinit(void) {
+    for (int i = 0; i < GPIO_PIN_COUNT; i++) {
+        if (MP_STATE_PORT(machine_pin_irq_handler)[i] != MP_OBJ_NULL && GPIO_IS_VALID_GPIO(i)) {
+            gpio_isr_handler_remove(i);
+        }
+    }
+}
+
 static void moy_vm_task(void *pvParameter) {
     volatile uint32_t sp = (uint32_t)esp_cpu_get_sp();
     #if MICROPY_PY_THREAD
@@ -954,7 +968,8 @@ soft_reset_exit:
     machine_pwm_deinit_all();
     #endif
     // TODO: machine_rmt_deinit_all();
-    machine_pins_deinit();
+    // MOY: the sweep spares the kernel's ISRs.
+    moy_kernel_pins_deinit();
     #if MICROPY_PY_MACHINE_I2C_TARGET
     mp_machine_i2c_target_deinit_all();
     #endif

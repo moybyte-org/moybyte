@@ -123,17 +123,19 @@ def test_micropython_native_sd_shares_display_spi_host():
 
 
 def test_micropython_touch_and_idle_cursor():
-    """The GT911 driver is constructed by run_desktop and fed into the shared
-    pointer through the spine's `apply_touch`, and the pointer ticks in the
-    SHARED FrameLoop. The driver is executed in tests/test_device_input.py,
-    apply_touch in tests/test_device_boot.py, the Pointer's auto-hide in
+    """The kernel's GT911 driver is constructed by run_desktop's input module,
+    its sample written before the merge and the frame's sample applied to the
+    shared pointer after it, and the pointer ticks in the SHARED FrameLoop. The
+    driver is executed in tests/test_tdeck_input.py, the merge and
+    apply_pointer in tests/test_device_boot.py, the Pointer's auto-hide in
     tests/test_desktop_shell.py."""
     runtime = _device_backend_src()
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
     boot_spine = Path("runtime/frame_loop.py").read_text(encoding="utf-8")
 
-    assert "touch = self.touch = Touch(w, h" in runtime
-    assert "apply_touch(touch, pointer)" in runtime
+    assert "self.touch = moy_input.touch(w, h)" in runtime
+    assert runtime.index("touch.poll()") < runtime.index("inp.begin_frame()") \
+        < runtime.index("inp.apply_pointer(pointer)")
     assert "pointer.tick(now)" in boot_spine
     assert "loop = FrameLoop(" in runtime
     # Touch calibration bring-up mode (serial-only, flush-once): a rung of the
@@ -161,37 +163,19 @@ def test_kid_mode_gates_diag_frame_eaters():
     assert 'getattr(ws, "diag_sd", False)' in runtime      # timer flush gated
 
 
-def test_input_poller_wired_with_gil_release_patch():
-    """The poller only isolates a stall when machine.I2C frees the GIL across
-    its blocking legacy-driver transaction wait: run_desktop prefers the poller
-    and keeps the synchronous path as a live fallback, and the build applies
-    the GIL patch. The poller's body is executed in tests/test_tdeck_input.py.
-
-    The patch itself is an INLINE sed in this board's build.sh rather than a
-    `moybyte_patch_*` of the shared lib, so it has no patch-harness twin; its
-    guard stays a grep until it moves into the lib."""
+def test_the_input_task_is_kicked_once_a_frame_and_the_gil_patch_is_gone():
+    """The keyboard and the GT911 are passed on the kernel's input task (#69),
+    kicked once a frame after present, so a C3 stall blocks that task and
+    never the loop -- which is why the build no longer patches machine.I2C to
+    release the GIL: nothing on this board opens a machine.I2C. The drivers
+    are executed in tests/test_tdeck_input.py."""
     runtime = _device_backend_src()
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-
-    assert "MOY_INPUT_POLLER = True" in runtime      # default ON, revert w/o rebuild
-    assert "poller.consume()" in runtime
-    assert "keyboard.poll()" in runtime              # the synchronous path stays live
-    assert "poller thread died -> synchronous fallback" in runtime
-    assert "touch._source = _p.consume_touch" in runtime
-    assert "keyboard._poller_owned = True" in runtime
-    # the GIL-release patch: applied by default, revertable, wraps cmd_begin
-    assert "Moybyte #69 GIL" in build, "the GIL-release patch is not applied"
-    assert "MP_THREAD_GIL_EXIT();" in build
-    assert "i2c_master_cmd_begin(" in build
-    assert "MP_THREAD_GIL_ENTER();" in build
-
-
-def test_touch_holds_a_held_finger_between_gt911_samples():
-    """The hold/stale/bound contract is ONE copy in the shared gt911 core
-    (executed in tests/test_gt911_core.py); the driver must still ROUTE its
-    no-news pass through it."""
-    inp = (DEVICE / "device_input.py").read_text(encoding="utf-8")
-    assert "return self._hp.hold()" in inp
+    header = (ROOT / "boards" / "MOYBYTE_TDECK" / "mpconfigboard.h").read_text()
+    assert "moy_input.kick()" in runtime
+    assert "inp = moy_input.kernel()" in runtime
+    assert "#define MOY_INPUT_TASK " in header
+    assert "Moybyte #69 GIL" not in build and "MP_THREAD_GIL_EXIT" not in build
 
 
 def test_hitch_logger_wired():

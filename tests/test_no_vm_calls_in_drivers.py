@@ -1,5 +1,5 @@
-"""The links' drivers call no Python (docs/kernel_survival_2026-10.md section
-6.9): what runs on the WiFi task, or below the VM between frames, is C that
+"""The links' and input's drivers call no Python (docs/kernel_survival_2026-10.md
+sections 6.9 and 4.7): what runs on the WiFi task, or below the VM between frames, is C that
 names nothing of the VM's, so a VM stop or a soft reset cannot leave it calling
 into a heap that is gone. And the console images leave the port's espnow
 module out, so nothing in Python can take esp_now's one receive callback from
@@ -90,3 +90,30 @@ def test_the_audio_feed_names_nothing_of_the_vm(path):
         code = _code(f.read())
     hit = _VM.search(code)
     assert hit is None, "%s calls into the VM: %r" % (path, hit.group(0))
+
+
+
+# -- input's drivers (native/moy_input) ----------------------------------------------
+#
+# The table, the drivers, the input task with its ISRs and the BLE central run
+# below the VM and outlive it. The one VM file in the directory is the binding,
+# modmoy_input.c, which runs on the VM's task.
+
+INPUT = os.path.join(ROOT, "native", "moy_input")
+INPUT_BINDING = {"modmoy_input.c", "fuzz_input.c"}
+INPUT_DRIVERS = ("moy_input.c", "moy_input.h", "moy_kbd.c", "moy_touchdev.c", "moy_touch.c",
+                 "moy_touch.h", "moy_drivers.h", "moy_input_task.c", "moy_hid.c", "moy_hid.h",
+                 "moy_ble_task.c", "moy_ble.h")
+
+
+def test_every_input_source_but_the_binding_is_checked():
+    names = {n for n in os.listdir(INPUT) if n.endswith((".c", ".h"))} - INPUT_BINDING
+    assert names == set(INPUT_DRIVERS), names
+
+
+@pytest.mark.parametrize("name", INPUT_DRIVERS)
+def test_an_input_driver_names_nothing_of_the_vm(name):
+    with open(os.path.join(INPUT, name)) as f:
+        code = _code(f.read())
+    hit = _VM.search(code)
+    assert hit is None, "%s calls into the VM: %r" % (name, hit.group(0))

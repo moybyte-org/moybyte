@@ -584,10 +584,12 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     shutil.copy(ROOT / "runtime" / "lua_ext.py", stage / "lua_ext.py")
     # input.py so the scripted feed can BE the console's InputState rather than
     # a second implementation of held/pressed/button_masks -- and it is the
-    # BOARDS' one, because this harness models a device build. Staging the
-    # host's (which is what it used to do) meant the one suite that drives real
-    # input through the real glue was testing the wrong tier's input class.
-    shutil.copy(ROOT / "device" / "moybyte" / "input.py", stage / "input.py")
+    # BOARDS' one, because this harness models a device build: the native
+    # table over all fifteen names. Staging the host's (which is what it used
+    # to do) meant the one suite that drives real input through the real glue
+    # was testing the wrong tier's input class.
+    (stage / "input.py").write_text(
+        "from moy_input import InputTable as InputState, NAMES as BUTTONS\n")
     # Same reasoning as the input class above: device_canvas takes Image from
     # moy_image now (ONE definition, shared with the host canvas), and the real
     # build stages it -- with its moy_fs leaf -- out of runtime/ into modules/.

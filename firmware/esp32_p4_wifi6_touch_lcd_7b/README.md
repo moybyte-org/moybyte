@@ -10,37 +10,26 @@ Status (2026-07-09): REPL / WiFi-via-C6 / GT911 touch / SD / DSI panel / **the
 console on glass** all hardware-confirmed. Launcher runs under `WindowedWM`;
 colors (canonical RGB565 vs the T-Deck's byte-swapped wire order → `PAL565_WIRE`),
 flicker (DPI `num_fbs=2` ping-pong scan-out), touch (180° panel mount →
-`p4_input.FLIP_X/Y`), popup/wallpaper geometry all fixed on-glass. Play perf
+both touch flips, `MOY_INPUT_TOUCH_FLIP_X/Y` in `mpconfigboard.h`), popup/wallpaper geometry all fixed on-glass. Play perf
 comes from three levers: the quiet-frame partial repaint
 (`WindowedWM.draw_stack`), the hardware-PPA game composite, and the
 async-composite overlap. Brick Siege 35→51→56; most carts ~60fps. The
 `_BackdropLayer` retained backdrop cache gives ~15fps app-window drags. See #58
 for the living status.
 
-**BLE-HID keyboard support is hardware-paired (2026-07-13; latency fast path
-2026-07-14).** `device/ble_keyboard.py` (this board's `p4_ble_keyboard.py`
-until it was promoted to the shared device tree on 2026-08-19, when the
-Guition became its second consumer) uses the C6_WIFI build's existing
-MicroPython NimBLE central/GATT-client path over ESP-Hosted SDIO: it discovers
-HOGP service `0x1812`, bonds, prefers the profile's deterministic Boot Host path
-(writes Protocol Mode `0x00`, then subscribes only to Boot Keyboard Input), and
-feeds real make/break state + ASCII into the shared `InputState`. Put a **BLE**
-keyboard in pairing mode before boot; serial shows `scanning → connected → boot
-protocol → native input queue → ready`. Steady-state notifications bypass the
-ESP32 port's synchronous Python BLE IRQ/GIL path: the P4-only `moy_ble_hid`
-module copies registered HID reports immediately on the NimBLE host task into a
-64-entry native queue, then `keyboard.poll()` drains it before the frame's input
-edge snapshot. `bt status` reports `(received, dropped, queued, max_depth,
-enabled)` for that queue; `bt trace 1` adds host-queue age in microseconds to
-each decoded report. Fast make+break pairs are preserved across the frame
-boundary instead of losing the tap. **Settings → BLUETOOTH KEYBOARD** exposes
-the normal user path: input ON/OFF, a full nearby-HOGP scan, explicit device
-selection, and forget. The chosen address, enabled gate and display name persist
-beside the NimBLE bond keys in `/moy/ble_keyboard.json`; boot reconnects only to
-that saved keyboard (v1 name+bond stores migrate without re-pairing). Report-only keyboards remain on a traced
-standard-report fallback; arbitrary/NKRO Report Maps, Classic-Bluetooth-only
-keyboards, mouse, media keys and gamepads are not supported. USB-HID remains
-#83's wired/multi-device path.
+**BLE-HID keyboard support is hardware-paired (2026-07-13).** The central is
+the kernel's (`native/moy_input/moy_hid.c` on NimBLE's host task,
+`moy_ble_task.c`, since 2026-10-07): over the C6 on ESP-Hosted it discovers
+HOGP service `0x1812`, bonds (Just Works, the bonds in NimBLE's NVS store),
+prefers the Boot Host path (Protocol Mode `0x00`, then Boot Keyboard Input
+only), and writes make/break state and the typed byte into the kernel table's
+`ble` source, which the frame takes before its edge snapshot. There is no
+`bluetooth` module and nothing of it runs Python, so a soft reset leaves the
+link up. `bt status` names the machine's state. Settings' picker lists every
+nearby HOGP keyboard and reconnects only the one picked. Report-only keyboards
+are decoded as the standard eight-byte report; arbitrary/NKRO Report Maps,
+Classic-Bluetooth-only keyboards, media keys and gamepads are not supported.
+USB-HID is #83's, out of sprint 3.
 
 **The hardware PPA (Pixel-Processing Accelerator) is wired for the game
 composite** (`moy_ppa`, ESP-IDF `esp_driver_ppa` SRM client, patched into
@@ -127,9 +116,10 @@ the command answers `REMOTE ? recv` and the tool stops with one line saying to
 flash the board.
 
 `moy_runtime.run_touch_calibrate()` (REPL-invokable) draws corner targets and
-dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs; the
-body is `device/p4_desktop.run_touch_calibrate`, shared with the Guition P4,
-and this board hands it the knobs' home (the `p4_input` module globals).
+dumps raw/mapped GT911 samples for re-calibrating the touch knobs; the
+body is `device/p4_desktop.run_touch_calibrate`, shared with the Guition P4.
+The knobs are live attributes on the kernel's driver (`py touch.flip_x = 0`)
+and baked into `mpconfigboard.h`'s `MOY_INPUT_TOUCH_*`.
 
 ## Build / flash
 
@@ -195,16 +185,14 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     deferred present and its fences), held dark until the first composed
     frame; the backlight (GPIO32 active-low, the `MOY_DSI_BL_*` defines) is
     `moy_glass.backlight`, the panel entry the recovery floor lights it with.
-  - `p4_input.py` — GT911 polling driver (I2C0 SDA7/SCL8 @ 0x5D, native
-    1024×600 coords; `FLIP_X`/`FLIP_Y` knobs for the 180° panel mount if touch
-    lands mirrored).
-  - `device/ble_keyboard.py` (SHARED, staged — it was this board's
-    `p4_ble_keyboard.py` until the Guition became its second consumer on
-    2026-08-19) — pure-MicroPython BLE HID central, here over the hosted C6:
-    scan/pair/bond/discover/subscribe plus standard keyboard-report →
-    `InputState`/`last_key` mapping. Settings can enable/disable, scan/pick and
-    forget; the preferred address + gate + bond keys persist in
-    `/moy/ble_keyboard.json`. Radio or protocol failures degrade to touch-only.
+  - the GT911 is the kernel's driver (`native/moy_input`, I2C0 SDA7/SCL8 @
+    0x5D on the kernel's bus, native 1024×600 coords), named in
+    `mpconfigboard.h` (`MOY_INPUT_TOUCH_*`, both flips for the 180° panel
+    mount), and polled once a frame by the input stage's `moy_input.kick()`.
+  - the BLE HID keyboard is the kernel's central (`moy_input.ble()`, above),
+    here over the hosted C6. Settings can enable/disable, scan/pick and
+    forget; the picked address and the enable gate persist in NVS beside
+    NimBLE's bonds. Radio or protocol failures degrade to touch-only.
   - `moy_runtime.py` — the P4 backend: `P4SystemCanvas` (`device/p4_canvas.py`
     since 2026-09-06, shared with the Guition P4; a `DeviceCanvas` over
     the DSI framebuffer + the system-surface contract: `font_scale` text via
@@ -217,7 +205,7 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     its intended hardware) to the shared boot spine `device/desktop_spine.py`.
     Carts live on the TF card when one mounts (the SD bullet below) and
     otherwise on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
-    `/moybyte/...`, which shadowed the frozen `moybyte.input` module and killed a
+    `/moybyte/...`, which shadowed the then-frozen `moybyte` package and killed a
     boot; see the constraint below. A card is optional here.
   - Staged at build (canonical sources elsewhere), and **declared in
     `board.toml`** since #161 Phase 3 rather than listed in `build.sh`: the
@@ -299,12 +287,8 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   at zero. Keep
   `CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64` in `sdkconfig.board`: the
   upstream 24-packet host pool was hardware-confirmed to exhaust during keyboard
-  autorepeat while a synchronous MicroPython BLE IRQ waited behind a long render
-  (`vhci_drv: Rx: alloc_acl_from_ll failed`), dropping HID input reports. The
-  larger ACL pool is burst protection, not the latency solution: registered HID
-  notifications are intercepted by `moy_ble_hid_queue_on_notify` before Python
-  IRQ dispatch and drained by the frame loop. Pairing/bonding/discovery still use
-  the normal synchronous MicroPython path.
+  autorepeat (`vhci_drv: Rx: alloc_acl_from_ll failed`), dropping HID input
+  reports; the larger pool is burst protection.
 - **USER_C_MODULES cannot add IDF components** — the usermod cmake is skipped
   during idf.py's early-expansion phase, which is when component `REQUIRES`
   are collected. `build.sh` patches `esp32_common.cmake`'s `IDF_COMPONENTS`

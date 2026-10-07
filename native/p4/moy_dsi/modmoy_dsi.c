@@ -31,7 +31,7 @@
 // Waveshare ESP32-P4-WIFI6-Touch-LCD-7B: EK79007, 7" 1024x600 landscape,
 // 2-lane DSI @ 900Mbps (the vendored component's own bus config), LCD reset
 // GPIO33, DSI PHY on LDO channel 3 @ 2.5V. Panel mounted 180 degrees --
-// handled on the TOUCH side (p4_input.FLIP_X/Y), never here.
+// handled on the TOUCH side (the board's MOY_INPUT_TOUCH_FLIP_X/Y), never here.
 #include "esp_lcd_ek79007.h"
 #define MOY_DSI_H_RES        1024
 #define MOY_DSI_V_RES        600

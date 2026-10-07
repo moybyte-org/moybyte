@@ -20,9 +20,9 @@
 // exactly while the USB path is being debugged.
 #define MICROPY_HW_ENABLE_UART_REPL         (0)
 
-// I2C0 is the AXS15231's touch bus (addr 0x3B). device/axs_touch.py passes
-// these pins explicitly; setting them here means a bare machine.I2C(0) is also
-// right. (Pins from the owner's working ESPHome definition.)
+// I2C0 is the AXS15231's touch bus (addr 0x3B), the kernel's bus (MOY_BUS_I2C_*
+// below): nothing opens a machine.I2C on port 0. (Pins from the owner's
+// working ESPHome definition.)
 #define MICROPY_HW_I2C0_SCL                 (8)
 #define MICROPY_HW_I2C0_SDA                 (4)
 
@@ -109,6 +109,22 @@
 #define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
 #define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
 #define MOY_BUS_I2C_HZ                      (400000)
+
+// Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
+// central over NimBLE, its bonds in NVS. There is no `bluetooth` module.
+#define MOY_INPUT_BLE                       (1)
+#define MICROPY_PY_BLUETOOTH                (0)
+
+// Input's touch (native/moy_input/moy_input_task.c): the AXS15231B bridge at
+// 0x3B, portrait-native, mapped onto the landscape console (moy_axs rot 0:
+// swap, then flip x), extrapolated through its lift window with a 90 ms hold.
+#define MOY_INPUT_TOUCH_KIND                (3)     // MOY_TOUCH_AXS
+#define MOY_INPUT_TOUCH_ADDR                (0x3B)
+#define MOY_INPUT_TOUCH_SWAP                (1)
+#define MOY_INPUT_TOUCH_FLIP_X              (1)
+#define MOY_INPUT_TOUCH_FLIP_Y              (0)
+#define MOY_INPUT_TOUCH_EXTRAPOLATE         (1)
+#define MOY_INPUT_TOUCH_HOLD_MS             (90)
 
 // The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
 // released layer buffers it keeps for the next run, inside the kernel's 1 MiB

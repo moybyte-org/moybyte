@@ -11,29 +11,64 @@ a BLE keyboard IS `ws.keyboard`, the only one there is, so handing it to player
 two would leave player one with nothing to press.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "device"))
-from moybyte import input as _imod  # noqa: E402
-import ble_keyboard as _ble  # noqa: E402
-sys.path.remove(str(ROOT / "device"))
 
+from runtime import moy_input as _mi  # noqa: E402
 from runtime import players as players_mod  # noqa: E402
 
 
+class _Stack:
+    """NimBLE reduced to accepting every request."""
+
+    def __getattr__(self, name):
+        return lambda *a: 0
+
+    def ms(self):
+        return 1000
+
+
 class _FakeBle:
-    """A BLE keyboard reduced to what the player slot touches: a source, a
-    connection state, and the two methods the console calls."""
+    """The kernel's BLE keyboard machine (native/moy_input/moy_hid.c) over a
+    stack that accepts everything: `state` drives it to ready or away, and
+    the two verbs the console calls are the machine's."""
 
-    def __init__(self, state, connected=True):
-        self.src = state.source("ble")
-        self.state = "ready" if connected else "idle"
-        self._want_player = 0
+    ADDR = (0, b"\x01\x02\x03\x04\x05\x06")
 
-    set_player = _ble.BleHidKeyboard.set_player
-    _sync_player = _ble.BleHidKeyboard._sync_player
+    def __init__(self, table, connected=True):
+        self.m = _mi.HidMachine(table, _Stack())
+        self.src = self.m.src
+        self.m.started(True)
+        if connected:
+            self.state = "ready"
+
+    @property
+    def state(self):
+        return self.m.state
+
+    @state.setter
+    def state(self, value):
+        m = self.m
+        if value == "ready":
+            m.scan_result(self.ADDR, -40, bytes((3, 0x03, 0x12, 0x18)))
+            m.on_scan_done()
+            m.connected(3, self.ADDR)
+            m.on_svc(3, 1, 12, _mi.HID_SERVICE)
+            m.on_svc_done(3, 0)
+            m.on_chr(3, 2, 3, _mi.HID_NOTIFY, _mi.HID_REPORT)
+            m.on_chr_done(3, 0)
+            m.on_dsc(3, 4, _mi.HID_CCCD)
+            m.on_dsc_done(3, 0)
+            m.on_write_done(3, 4, 0)
+        else:
+            m.on_disconnect(3)
+
+    def set_player(self, slot):
+        self.m.set_player(slot)
+
+    def poll(self):
+        self.m.frame()
 
 
 class _Prefs:
@@ -75,7 +110,7 @@ def _ws(**kw):
 # -- the mechanism ----------------------------------------------------------
 
 def test_a_connected_bluetooth_keyboard_becomes_player_two():
-    inp = _imod.InputState()
+    inp = _mi.InputTable()
     kbd = inp.source("kbd")                 # the board's own keyboard
     ble = _FakeBle(inp)
     router = players_mod.PlayerRouter(inp)
@@ -96,7 +131,7 @@ def test_a_connected_bluetooth_keyboard_becomes_player_two():
 def test_an_unconnected_keyboard_does_not_hold_a_player_slot():
     """A cart must not field a second character nobody can move. The slot is an
     INTENT resolved against the live connection, not a latch."""
-    inp = _imod.InputState()
+    inp = _mi.InputTable()
     inp.source("kbd")
     ble = _FakeBle(inp, connected=False)
     router = players_mod.PlayerRouter(inp)
@@ -106,29 +141,29 @@ def test_an_unconnected_keyboard_does_not_hold_a_player_slot():
     assert router.count() == 1, "not connected, not a player"
 
     ble.state = "ready"                     # it pairs
-    ble._sync_player()                      # what poll() does every frame
+    ble.poll()                              # what a frame does
     inp.begin_frame()
     assert router.count() == 2
 
     ble.state = "idle"                      # ...and walks away again
-    ble._sync_player()
+    ble.poll()
     inp.begin_frame()
     assert router.count() == 1, "the slot is released, not stranded"
 
 
 def test_the_slot_is_resolved_every_poll_without_thrashing_the_source():
-    inp = _imod.InputState()
+    inp = _mi.InputTable()
     ble = _FakeBle(inp)
     ble.set_player(1)
     before = inp.multi()
     for _ in range(5):
-        ble._sync_player()                  # idempotent: no rescan storm
+        ble.poll()                          # idempotent: no rescan storm
     assert inp.multi() == before
     assert ble.src.player == 1
 
 
 def test_turning_it_off_returns_the_console_to_one_player():
-    inp = _imod.InputState()
+    inp = _mi.InputTable()
     inp.source("kbd")
     ble = _FakeBle(inp)
     router = players_mod.PlayerRouter(inp)
@@ -143,20 +178,19 @@ def test_turning_it_off_returns_the_console_to_one_player():
 
 
 def test_the_real_driver_carries_the_verbs_the_console_calls():
-    """The fake above borrows them, so pin that they exist on the real class."""
-    assert callable(_ble.BleHidKeyboard.set_player)
-    assert callable(_ble.BleHidKeyboard._sync_player)
-    src = (ROOT / "device" / "ble_keyboard.py").read_text(encoding="utf-8")
-    body = src[src.index("    def poll(self):"):]
-    assert "_sync_player()" in body[:400], (
-        "poll() must resolve the slot -- a keyboard that disconnects mid-game "
-        "would otherwise keep a player nobody can move")
+    """A frame resolves the slot -- a keyboard that disconnects mid-game would
+    otherwise keep a player nobody can move."""
+    src = (ROOT / "native" / "moy_input" / "moy_hid.c").read_text(encoding="utf-8")
+    body = src[src.index("void moy_hid_frame(moy_hid_t *h) {"):]
+    assert "sync_player(h);" in body[:200]
+    binding = (ROOT / "native" / "moy_input" / "modmoy_input.c").read_text(encoding="utf-8")
+    assert "MP_QSTR_set_player" in binding and "moy_hid_frame(" in binding
 
 
 # -- the capability gate ----------------------------------------------------
 
 def test_only_a_board_with_a_second_keyboard_can_do_this():
-    inp = _imod.InputState()
+    inp = _mi.InputTable()
     ble = _FakeBle(inp)
 
     # The T-Deck: a physical keyboard, and a BLE one beside it.
@@ -175,7 +209,7 @@ def test_only_a_board_with_a_second_keyboard_can_do_this():
 def test_the_setting_refuses_where_it_cannot_work():
     """Reporting ON with nothing able to produce a second player's buttons is
     the frozen-meter bug in another costume."""
-    inp = _imod.InputState()
+    inp = _mi.InputTable()
     ble = _FakeBle(inp)
     guition = _ws(keyboard=ble, ble=ble)
     guition.set_two_player(True, persist=False)
@@ -184,7 +218,7 @@ def test_the_setting_refuses_where_it_cannot_work():
 
 
 def test_the_setting_drives_the_keyboard_and_persists():
-    inp = _imod.InputState()
+    inp = _mi.InputTable()
     ble = _FakeBle(inp)
     ws = _ws(keyboard=object(), ble=ble)
 
@@ -204,7 +238,7 @@ def test_the_settings_row_appears_only_where_the_option_works(tmp_path):
     assert not any(r[0] == "two_player" for r in rows), "no second keyboard, no row"
 
     ws.keyboard = object()
-    ws.ble_keyboard = _FakeBle(_imod.InputState())
+    ws.ble_keyboard = _FakeBle(_mi.InputTable())
     rows = ws.settings_layer._settings_rows()
     keys = [r[0] for r in rows]
     assert "two_player" in keys

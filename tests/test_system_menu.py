@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
-from device.moybyte.input import InputState as DeviceInputState  # noqa: E402
+from runtime.moy_input import InputTable as DeviceInputState  # noqa: E402
 from ws_helpers import build_ws as _ws
 
 

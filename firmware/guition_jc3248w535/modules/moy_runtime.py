@@ -12,7 +12,7 @@ code on this side of it: the base `SystemCanvas` already carries
 blit_game/blit_cover, the WM already computes the viewport, and this file
 only constructs the pieces.
 
-Input is the P4's shape (touch-only, no poller thread, no keyboard modes),
+Input is the P4's shape (touch-only, no input task, no keyboard modes),
 the panel is this board's own (`moy_glass.BandedCompositor` over
 `moy_axs`), the store is a TF card when one is in the slot and internal flash
 when not. Everything else -- the boot order, the service set, the frame loop

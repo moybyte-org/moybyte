@@ -974,6 +974,11 @@ class DevChannel:
     def __init__(self, ws, pointer, set_backlight=None, idle=None,
                  extra=None, env=None):
         self.pointer = pointer
+        # The gestures' source in the input table, made by the first gesture:
+        # a scripted sample reaches the pointer through the frame's merge, the
+        # way a finger's does.
+        self._ws = ws
+        self.src = None
         self.click = False
         self.quit = False       # `quit` asked for the REPL; run_desktop returns
         self.buf = bytearray()  # the line so far, as bytes
@@ -992,6 +997,7 @@ class DevChannel:
         self.env = env or {}                 # extra names in the `py` scope
         self._drag = None       # `drag` playback state
         self._swipe = None      # `swipe` playback state
+        self._tap = None        # a `tap` waiting for its release sample
         self.armed = False
         self._poll = None
         self._stdin = None
@@ -1101,19 +1107,35 @@ class DevChannel:
                   % self.rx)
         return self._scripts() or ran
 
+    def point(self, x, y, down, edge=False):
+        """One scripted pointer sample into the channel's source; the next
+        frame's merge applies it. `fresh` is always True: the kinetic-scroll
+        velocity estimator reads every scripted sample as measured."""
+        src = self.src
+        if src is None:
+            src = self.src = self._ws.input.source("devch")
+        src.point(x, y, down, edge, True)
+
     def _scripts(self):
-        """Advance the swipe/drag playbacks: one pointer sample per frame,
-        through the SAME pointer the glass feeds. Runs at the poll tail, i.e.
-        after the board's touch poll, so a scripted sample outranks whatever
-        the touch driver left behind (`fresh=True` is load-bearing for the
-        kinetic-scroll velocity estimator). Returns True while one is active,
-        which the caller counts as activity."""
+        """Advance the tap/swipe/drag playbacks: one pointer sample per frame,
+        into the channel's source in the input table, whose merge prefers a
+        source that is down, so a scripted sample outranks a touch driver
+        reporting no finger. Returns True while one is active, which the
+        caller counts as activity."""
         ran = False
+        tap = self._tap
+        if tap is not None:
+            if tap[2]:
+                tap[2] = False          # the frame the press is merged in
+            else:
+                self.point(tap[0], tap[1], False)
+                self._tap = None
+            ran = True
         if self._drag is not None:
             s = self._drag
             i = s["i"]
             if i >= s["n"]:
-                self.pointer.down = False
+                self.point(s["cx"], s["cy"], False)
                 self._drag = None
                 print("REMOTE drag done")
             else:
@@ -1122,11 +1144,7 @@ class DevChannel:
                 t = i % 40
                 tri = t if t < 20 else 40 - t          # 0..20..0
                 off = 0 if i == 0 else (tri - 10) * s["step"]
-                self.pointer.place(s["cx"] + off, s["cy"])
-                self.pointer.down = True
-                self.pointer.fresh = True
-                if i == 0:
-                    self.click = True                  # frame 0 arms the drag
+                self.point(s["cx"] + off, s["cy"], True, i == 0)   # frame 0 arms the drag
                 s["i"] = i + 1
             ran = True
         if self._swipe is not None:
@@ -1143,11 +1161,7 @@ class DevChannel:
                 f = min(i, n - 1) / (n - 1)
                 x = s["x0"] + int((s["x1"] - s["x0"]) * f)
                 y = s["y0"] + int((s["y1"] - s["y0"]) * f)
-                self.pointer.place(x, y)
-                self.pointer.down = i < n
-                self.pointer.fresh = True
-                if i == 0:
-                    self.click = True
+                self.point(x, y, i < n, i == 0)
                 s["i"] = i + 1
             ran = True
         return ran

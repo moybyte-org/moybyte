@@ -12,11 +12,16 @@ set(SDKCONFIG_DEFAULTS
     ${MICROPY_BOARD_DIR}/sdkconfig.board
 )
 
+# The GSL3680's firmware, which the kernel's touch driver uploads
+# (MOY_INPUT_TOUCH_FW in mpconfigboard.h).
+list(APPEND MICROPY_SOURCE_BOARD ${MICROPY_BOARD_DIR}/gsl_fw_jc8012.c)
+
 list(APPEND MICROPY_DEF_BOARD
     MICROPY_HW_BOARD_NAME="Moybyte Guition P4 (JC8012P4A1C, C6 WiFi)"
     MICROPY_PY_NETWORK_WLAN=1
-    MICROPY_PY_BLUETOOTH=1
-    MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE=1
+    # No `bluetooth` module: the BLE keyboard is the kernel's central over
+    # NimBLE (native/moy_input, MOY_INPUT_BLE in mpconfigboard.h).
+    MICROPY_PY_BLUETOOTH=0
     # The PANEL the shared native/p4/moy_dsi drives: this board's JD9365
     # (800x1280 portrait-native, reset GPIO27, 2-lane DSI @1500Mbps, DPI
     # 60MHz -- the factory demo's numbers). The panel facts live behind this

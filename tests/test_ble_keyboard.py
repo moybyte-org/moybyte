@@ -1,630 +1,406 @@
-"""P4 BLE-HID keyboard: report mapping + low-level GATT wiring.
+"""The BLE HID keyboard central (native/moy_input/moy_hid.c), EXECUTED: the
+report decode and keymap, the level state with its one-frame make edges, and
+the scan / connect / pair / discover / subscribe machine, over a fake stack
+through the host's binding (runtime/moy_input.py's HidMachine). A board runs
+the same machine on NimBLE's host task (moy_ble_task.c); its wiring is pinned
+at the end, and the radio itself on glass."""
 
-The real transport is MicroPython NimBLE over the ESP32-C6 hosted controller.
-These tests keep the device module importable on CPython, drive its IRQ state
-machine with a fake BLE object, and verify the exact shared InputState contract.
-"""
-
-import importlib.util
-import json
-
-from board_source import runtime_text
-import sys
-import types
+import re
 from pathlib import Path
 
-
+from runtime import moy_input as mi
 from tools import board_config
 
 ROOT = Path(__file__).resolve().parents[1]
-# The driver is SHARED since 2026-08-19 (device/ble_keyboard.py -- promoted
-# from the P4's tree when the Guition S3 became its second consumer); the
-# moy_ble_hid fast-path assertions below still point at the P4's board tree,
-# where that usermod deliberately stays.
-SOURCE = ROOT / "device" / "ble_keyboard.py"
+ADDR = (0, b"\x01\x02\x03\x04\x05\x06")
+HID_ADV = bytes((3, 0x03, 0x12, 0x18))
 
 
-def _load_module():
-    spec = importlib.util.spec_from_file_location("ble_keyboard_under_test", SOURCE)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+class FakeStack:
+    """NimBLE as the machine sees it: every request recorded, every one
+    accepted, a clock the test moves."""
 
-
-blekbd = _load_module()
-
-
-# THE REAL boards' InputState, not a fake of it. This driver is one SOURCE
-# among however many a board has (the T-Deck also has a physical keyboard), so
-# what these tests must pin is the MERGE -- and a hand-written stand-in would
-# be a second implementation of exactly the thing under test. It used to be
-# one, which is why nothing here noticed that the driver asserted full
-# authority over the shared state every poll.
-_INPUT_SOURCE = ROOT / "device" / "moybyte" / "input.py"
-_ispec = importlib.util.spec_from_file_location("moybyte_input_under_test",
-                                                _INPUT_SOURCE)
-_imod = importlib.util.module_from_spec(_ispec)
-_ispec.loader.exec_module(_imod)
-
-
-class InputState(_imod.InputState):
     def __init__(self):
-        _imod.InputState.__init__(self)
-        self.text_mode = False
+        self.calls = []
+        self.t = 1000
+        self.saved = []
 
+    def _rec(self, *call):
+        self.calls.append(call)
+        return 0
+
+    def scan(self, picker):
+        return self._rec("scan", picker)
+
+    def scan_stop(self):
+        return self._rec("scan_stop")
+
+    def connect(self, addr):
+        return self._rec("connect", addr)
+
+    def disconnect(self, conn):
+        return self._rec("disconnect", conn)
+
+    def pair(self, conn):
+        return self._rec("pair", conn)
+
+    def disc_svcs(self, conn):
+        return self._rec("services", conn)
+
+    def disc_chrs(self, conn, start, end):
+        return self._rec("chars", conn, start, end)
+
+    def disc_dscs(self, conn, start, end):
+        return self._rec("descriptors", conn, start, end)
+
+    def write(self, conn, handle, data, response):
+        return self._rec("write", conn, handle, data, response)
+
+    def forget_bonds(self):
+        return self._rec("forget")
+
+    def save(self, machine):
+        self.saved.append((machine.enabled, machine.preferred, machine.name))
+
+    def ms(self):
+        return self.t
+
+
+def _machine(**kw):
+    table = mi.InputTable()
+    stack = FakeStack()
+    m = mi.HidMachine(table, stack, **kw)
+    return table, stack, m
+
+
+def _ready(m, conn=3, handle=3):
+    """Through scan, connect, discovery and the one subscription to ready,
+    with a Report-only keyboard whose input report is `handle`."""
+    m.started(True)
+    m.scan_result(ADDR, -40, HID_ADV)
+    m.on_scan_done()
+    m.connected(conn, ADDR)
+    m.on_svc(conn, 1, 12, mi.HID_SERVICE)
+    m.on_svc_done(conn, 0)
+    m.on_chr(conn, 2, handle, mi.HID_NOTIFY, mi.HID_REPORT)
+    m.on_chr_done(conn, 0)
+    m.on_dsc(conn, handle + 1, mi.HID_CCCD)
+    m.on_dsc_done(conn, 0)
+    m.on_write_done(conn, handle + 1, 0)
+    assert m.state == "ready"
+
+
+def _frame(m, table):
+    m.frame()
+    table.begin_frame()
+
+
+# -- the pure parts --------------------------------------------------------------
 
 def test_advertisement_recognises_hid_service_and_name():
-    # Flags + complete 16-bit service list (0x1812 LE) + complete local name.
-    payload = bytes((2, 0x01, 0x06,
-                     3, 0x03, 0x12, 0x18,
-                     9, 0x09)) + b"Air Mini"
-    assert blekbd.adv_has_hid(payload)
-    assert blekbd.adv_name(payload) == "Air Mini"
-    assert not blekbd.adv_has_hid(bytes((3, 0x03, 0x0F, 0x18)))
+    payload = bytes((2, 0x01, 0x06, 3, 0x03, 0x12, 0x18, 9, 0x09)) + b"Air Mini"
+    assert mi.adv_has_hid(payload)
+    assert mi.adv_name(payload) == "Air Mini"
+    assert not mi.adv_has_hid(bytes((3, 0x03, 0x0F, 0x18)))
+    assert mi.adv_has_hid(bytes((5, 0x16, 0x12, 0x18, 0, 0)))       # service data
 
 
 def test_boot_report_and_ascii_mapping_cover_typing_shortcuts_and_symbols():
-    assert blekbd.decode_keyboard_report(b"\x02\x00\x04\x00\x00\x00\x00\x00") \
-        == (0x02, (0x04,))
-    assert blekbd.decode_keyboard_report(b"\x07\x02\x00\x04\x00\x00\x00\x00\x00") \
-        == (0x02, (0x04,))
-    assert blekbd.decode_keyboard_report(b"\x00\x01\x04\x00\x00\x00\x00\x00") is None
+    assert mi.decode_report(b"\x02\x00\x04\x00\x00\x00\x00\x00") == (0x02, (0x04,))
+    assert mi.decode_report(b"\x07\x02\x00\x04\x00\x00\x00\x00\x00") == (0x02, (0x04,))
+    assert mi.decode_report(b"\x00\x01\x04\x00\x00\x00\x00\x00") is None
+    assert mi.decode_report(b"\x00\x00\x01\x04\x04\x00\x00\x00") == (0, (0x04,))
 
-    assert blekbd.usage_to_keycode(0x04) == ord("a")
-    assert blekbd.usage_to_keycode(0x04, modifiers=0x02) == ord("A")
-    assert blekbd.usage_to_keycode(0x04, caps=True) == ord("A")
-    assert blekbd.usage_to_keycode(0x04, modifiers=0x02, caps=True) == ord("a")
-    assert blekbd.usage_to_keycode(0x1D, modifiers=0x01) == 0x1A  # Ctrl+Z
-    assert blekbd.usage_to_keycode(0x1E, modifiers=0x02) == ord("!")
-    assert blekbd.usage_to_keycode(0x2F, modifiers=0x02) == ord("{")
-    assert blekbd.usage_to_keycode(0x28) == 0x0D
-    assert blekbd.usage_to_keycode(0x2A) == 0x08
+    assert mi.usage_to_keycode(0x04) == ord("a")
+    assert mi.usage_to_keycode(0x04, 0x02) == ord("A")
+    assert mi.usage_to_keycode(0x04, 0, True) == ord("A")
+    assert mi.usage_to_keycode(0x04, 0x02, True) == ord("a")
+    assert mi.usage_to_keycode(0x1D, 0x01) == 0x1A              # Ctrl+Z
+    assert mi.usage_to_keycode(0x1E, 0x02) == ord("!")
+    assert mi.usage_to_keycode(0x2F, 0x02) == ord("{")
+    assert mi.usage_to_keycode(0x28) == 0x0D
+    assert mi.usage_to_keycode(0x2A) == 0x08
 
+
+def test_the_arrow_host_scheme():
+    """Arrows + Z/X, PICO-8's and every emulator's (owner call 2026-08-14);
+    the T-Deck's L/K scheme is pinned in tests/test_tdeck_keymap.py."""
+    assert mi.hid_buttons_for_key(ord("z")) == ("a",)
+    assert mi.hid_buttons_for_key(ord(" ")) == ("a",)
+    assert mi.hid_buttons_for_key(ord("x")) == ("b",)
+    assert mi.hid_buttons_for_key(ord("W")) == ("up",)
+    assert mi.hid_buttons_for_key(0x0D) == ("run",)
+    assert mi.hid_buttons_for_key(0x08) == ("home",)
+    assert mi.hid_buttons_for_key(ord("l")) == ()
+
+
+# -- the level state ---------------------------------------------------------------
 
 def test_report_level_state_gives_real_hold_edges_and_text_mode_suppression():
-    inp = InputState()
-    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
-
-    # W make -> held Up and one clean press edge; held report stays held.
-    keyboard._reports[7] = (0, (0x1A,))
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.last_key == ord("w")
-    assert inp.held("up") and inp.pressed("up")
-
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.held("up") and not inp.pressed("up")
-
-    # W break -> release edge.
-    keyboard._reports[7] = (0, ())
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.last_key == 0
-    assert inp.released("up")
-
-    # Text mode types W but must not also fire its game alias. Physical arrows
-    # remain directional so a desktop keyboard can navigate the editor.
-    inp.text_mode = True
-    keyboard._reports[7] = (0, (0x1A,))
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.last_key == ord("w")
-    assert not inp.held("up")
-    keyboard._reports[7] = (0, (0x50,))
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.last_key == 0
-    assert inp.held("left")
-
-
-def test_an_idle_keyboard_stops_re_applying_an_empty_level_state_every_frame():
-    """#220. With no keyboard in the room the level-state pass is a no-op that
-    still cost two sets, a sorted() list and a release_all on every frame of
-    every game. The first poll runs it (the source must be cleared once); the
-    ones after take the early-out."""
-    inp = InputState()
-    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
-    src = keyboard.src
-    calls = []
-    src.release_all = lambda: calls.append(1)          # noqa: E731 -- a witness
-
-    keyboard.poll()
-    assert calls == [1]                                # cleared once...
-    keyboard.poll()
-    keyboard.poll()
-    assert calls == [1]                                # ...and not again
-
-
-def test_a_report_after_an_idle_stretch_still_reaches_the_input():
-    """The early-out must not be a latch: a key arriving after any number of
-    skipped frames is applied on the next poll, and its release still lands."""
-    inp = InputState()
-    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
-    for _ in range(5):
-        keyboard.poll()
-        inp.begin_frame()
-    assert not inp.held("up")
-
-    keyboard._reports[7] = (0, (0x1A,))
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.held("up") and inp.pressed("up")
-
-    # Held across frames: a held report is never skipped.
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.held("up")
-
-    # ...and the release still runs the full pass, because the frame that
-    # clears the state is the frame BEFORE the guard is armed.
-    keyboard._reports.clear()
-    keyboard.poll()
-    inp.begin_frame()
-    assert not inp.held("up") and inp.released("up")
-    assert inp.last_key == 0
-
-
-def test_a_pending_edge_from_the_irq_defeats_the_idle_early_out():
-    """A make+break that lands entirely between two polls leaves nothing in
-    `_reports` -- only the pending sets carry it. The early-out reads those
-    too, or a fast tap would be swallowed by the optimisation."""
-    inp = InputState()
-    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
-    keyboard.poll()                                    # arm the guard
-    inp.begin_frame()
-    keyboard._conn = 1
-    keyboard._input_handles = {7}
-    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
-                  (1, 7, b"\x00\x00\x1a\x00\x00\x00\x00\x00"))
-    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
-                  (1, 7, b"\x00\x00\x00\x00\x00\x00\x00\x00"))
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.held("up") and inp.pressed("up")
+    table, _stack, m = _machine()
+    _ready(m)
+    m.notify(3, 3, b"\x00\x00\x1a\x00\x00\x00\x00\x00")      # W make
+    _frame(m, table)
+    assert table.last_key == ord("w")
+    assert table.held("up") and table.pressed("up")
+    _frame(m, table)
+    assert table.held("up") and not table.pressed("up")
+    m.notify(3, 3, bytes(8))                                  # W break
+    _frame(m, table)
+    assert table.last_key == 0 and table.released("up")
+    # Text mode types W and fires no game alias; the arrows stay directional.
+    table.text_mode = True
+    m.notify(3, 3, b"\x00\x00\x1a\x00\x00\x00\x00\x00")
+    _frame(m, table)
+    assert table.last_key == ord("w") and not table.held("up")
+    m.notify(3, 3, b"\x00\x00\x50\x00\x00\x00\x00\x00")
+    _frame(m, table)
+    assert table.last_key == 0 and table.held("left")
 
 
 def test_make_and_break_between_frames_preserves_one_press_then_release():
-    inp = InputState()
-    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
-    keyboard._conn = 1
-    keyboard._input_handles = {7}
-
-    # A quick tap can deliver both notifications before the render loop polls.
-    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
-                  (1, 7, b"\x00\x00\x1a\x00\x00\x00\x00\x00"))
-    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
-                  (1, 7, b"\x00\x00\x00\x00\x00\x00\x00\x00"))
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.held("up") and inp.pressed("up")
-
-    keyboard.poll()
-    inp.begin_frame()
-    assert not inp.held("up") and inp.released("up")
-
-
-class FakeUUID:
-    def __init__(self, value):
-        self.value = value.value if isinstance(value, FakeUUID) else int(value)
-
-    def __eq__(self, other):
-        return isinstance(other, FakeUUID) and self.value == other.value
-
-    def __hash__(self):
-        return self.value
-
-
-class FakeBLE:
-    def __init__(self):
-        self.handler = None
-        self.calls = []
-
-    def irq(self, handler):
-        self.handler = handler
-
-    def config(self, **kwargs):
-        self.calls.append(("config", kwargs))
-
-    def active(self, on):
-        self.calls.append(("active", on))
-
-    def gap_scan(self, *args):
-        self.calls.append(("scan", args))
-
-    def gap_connect(self, addr_type, addr):
-        self.calls.append(("connect", addr_type, bytes(addr)))
-
-    def gap_pair(self, conn):
-        self.calls.append(("pair", conn))
-
-    def gap_disconnect(self, conn):
-        self.calls.append(("disconnect", conn))
-
-    def gattc_discover_services(self, *args):
-        self.calls.append(("services", args))
-
-    def gattc_discover_characteristics(self, *args):
-        self.calls.append(("chars", args))
-
-    def gattc_discover_descriptors(self, *args):
-        self.calls.append(("descriptors", args))
-
-    def gattc_write(self, conn, handle, value, mode):
-        self.calls.append(("write", conn, handle, bytes(value), mode))
-
-
-class FakeFastQueue:
-    def __init__(self):
-        self.events = []
-        self.configured = None
-        self.disabled = False
-
-    def configure(self, conn, handles):
-        self.configured = (conn, tuple(handles))
-        self.disabled = False
-
-    def disable(self):
-        self.disabled = True
-
-    def read(self):
-        return self.events.pop(0) if self.events else None
-
-    def stats(self):
-        return (2, 0, len(self.events), 2, not self.disabled)
-
-
-def test_irq_state_machine_scans_pairs_discovers_subscribes_and_feeds_input(monkeypatch):
-    fake_module = types.SimpleNamespace(UUID=FakeUUID, BLE=FakeBLE)
-    monkeypatch.setitem(sys.modules, "bluetooth", fake_module)
-    radio = FakeBLE()
-    inp = InputState()
-    keyboard = blekbd.BleHidKeyboard(inp, ble=radio, store_path=None)
-
-    assert keyboard.state == "scanning"
-    addr = b"\x01\x02\x03\x04\x05\x06"
-    hid_adv = bytes((3, 0x03, 0x12, 0x18))
-    keyboard._irq(blekbd._IRQ_SCAN_RESULT, (0, addr, 0, -40, hid_adv))
-    assert keyboard.state == "found"
-    assert ("scan", (None,)) in radio.calls
-    keyboard._irq(blekbd._IRQ_SCAN_DONE, None)
-    assert ("connect", 0, addr) in radio.calls
-
-    keyboard._irq(blekbd._IRQ_PERIPHERAL_CONNECT, (3, 0, addr))
-    assert ("pair", 3) in radio.calls
-    assert any(call[0] == "services" for call in radio.calls)
-
-    keyboard._irq(blekbd._IRQ_GATTC_SERVICE_RESULT,
-                  (3, 1, 12, FakeUUID(blekbd._HID_SERVICE)))
-    keyboard._irq(blekbd._IRQ_GATTC_SERVICE_DONE, (3, 0))
-    keyboard._irq(blekbd._IRQ_GATTC_CHARACTERISTIC_RESULT,
-                  (3, 2, 3, blekbd._FLAG_NOTIFY, FakeUUID(blekbd._REPORT)))
-    keyboard._irq(blekbd._IRQ_GATTC_CHARACTERISTIC_DONE, (3, 0))
-    keyboard._irq(blekbd._IRQ_GATTC_DESCRIPTOR_RESULT,
-                  (3, 4, FakeUUID(blekbd._CCCD)))
-    keyboard._irq(blekbd._IRQ_GATTC_DESCRIPTOR_DONE, (3, 0))
-    assert ("write", 3, 4, b"\x01\x00", 1) in radio.calls
-    keyboard._irq(blekbd._IRQ_GATTC_WRITE_DONE, (3, 4, 0))
-    assert keyboard.state == "ready"
-
-    # Left Shift + A report -> uppercase A and held left game alias.
-    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
-                  (3, 3, b"\x02\x00\x04\x00\x00\x00\x00\x00"))
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.last_key == ord("A")
-    assert inp.held("left") and inp.pressed("left")
-
-    keyboard._irq(blekbd._IRQ_GATTC_NOTIFY,
-                  (3, 3, b"\x00\x00\x00\x00\x00\x00\x00\x00"))
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.last_key == 0
-    assert inp.released("left")
-
-
-def test_native_queue_is_drained_without_synchronous_python_ble_irq():
-    inp = InputState()
-    keyboard = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
-    fast = FakeFastQueue()
-    keyboard._fast = fast
-    keyboard._conn = 6
-    keyboard._input_handles = {11}
-
-    assert keyboard._enable_fastpath()
-    assert fast.configured == (6, (11,))
-    # Complete W make+break arrived on the NimBLE task while Python was drawing.
-    fast.events.extend([
-        (11, b"\x00\x00\x1a\x00\x00\x00\x00\x00", 700),
-        (11, b"\x00\x00\x00\x00\x00\x00\x00\x00", 450),
-    ])
-    keyboard.poll()
-    inp.begin_frame()
-    assert inp.held("up") and inp.pressed("up")
-    assert keyboard.fast_status() == (2, 0, 0, 2, True)
-
-    keyboard.poll()
-    inp.begin_frame()
-    assert not inp.held("up") and inp.released("up")
-    keyboard._reset_connection()
-    assert fast.disabled
-
-
-def test_security_gated_cccd_is_retried_after_encryption(monkeypatch):
-    fake_module = types.SimpleNamespace(UUID=FakeUUID, BLE=FakeBLE)
-    monkeypatch.setitem(sys.modules, "bluetooth", fake_module)
-    radio = FakeBLE()
-    keyboard = blekbd.BleHidKeyboard(InputState(), ble=radio, store_path=None)
-    keyboard._conn = 9
-    keyboard._subscribe_all = [44]
-    keyboard._subscribe_queue = []
-    keyboard._write_pending = 44
-
-    keyboard._irq(blekbd._IRQ_GATTC_WRITE_DONE, (9, 44, 5))
-    assert keyboard.state == "subscribe-retry"
-    assert not any(call[:3] == ("write", 9, 44) for call in radio.calls)
-
-    keyboard._irq(blekbd._IRQ_ENCRYPTION_UPDATE, (9, True, False, True, 16))
-    assert ("write", 9, 44, b"\x01\x00", 1) in radio.calls
-
-
-def test_boot_keyboard_is_selected_and_protocol_mode_is_written(monkeypatch):
-    fake_module = types.SimpleNamespace(UUID=FakeUUID, BLE=FakeBLE)
-    monkeypatch.setitem(sys.modules, "bluetooth", fake_module)
-    radio = FakeBLE()
-    keyboard = blekbd.BleHidKeyboard(InputState(), ble=radio, store_path=None)
-    keyboard._conn = 4
-    keyboard._hid_range = (1, 12)
-    keyboard._chars = [
-        (2, 3, 0x04, FakeUUID(blekbd._PROTOCOL_MODE)),
-        (4, 5, blekbd._FLAG_NOTIFY, FakeUUID(blekbd._BOOT_KEYBOARD_INPUT)),
-        (7, 8, blekbd._FLAG_NOTIFY, FakeUUID(blekbd._REPORT)),
-    ]
-    keyboard._descriptors = [
-        (6, FakeUUID(blekbd._CCCD)),
-        (9, FakeUUID(blekbd._CCCD)),
-    ]
-
-    keyboard._prepare_subscriptions()
-
-    assert keyboard.protocol == "boot"
-    assert keyboard._input_handles == {5}
-    assert ("write", 4, 3, b"\x00", 0) in radio.calls
-    assert ("write", 4, 6, b"\x01\x00", 1) in radio.calls
-    assert not any(call[:3] == ("write", 4, 9) for call in radio.calls)
-
-
-def test_picker_lists_all_hid_devices_and_connects_only_the_picked_one(monkeypatch):
-    fake_module = types.SimpleNamespace(UUID=FakeUUID, BLE=FakeBLE)
-    monkeypatch.setitem(sys.modules, "bluetooth", fake_module)
-    radio = FakeBLE()
-    keyboard = blekbd.BleHidKeyboard(InputState(), ble=radio, store_path=None)
-
-    # Replace the boot auto-scan with the user-facing full picker scan.
-    assert keyboard.discover_devices()
-    keyboard._irq(blekbd._IRQ_SCAN_DONE, None)
-    assert keyboard.state == "scanning"
-    addr_a = b"\x01\x02\x03\x04\x05\x06"
-    addr_b = b"\x11\x12\x13\x14\x15\x16"
-    hid = bytes((3, 0x03, 0x12, 0x18))
-    keyboard._irq(blekbd._IRQ_SCAN_RESULT, (0, addr_a, 0, -35, hid))
-    keyboard._irq(blekbd._IRQ_SCAN_RESULT, (1, addr_b, 0, -48, hid))
-    keyboard._irq(blekbd._IRQ_SCAN_DONE, None)
-    rows = keyboard.settings_devices()
-    assert keyboard.state == "choose"
-    assert [row[0] for row in rows] == [(0, addr_a), (1, addr_b)]
-
-    assert keyboard.connect_device(rows[1][0])
-    assert ("connect", 1, addr_b) in radio.calls
-    assert not any(call == ("connect", 0, addr_a) for call in radio.calls)
-    assert keyboard.settings_status()[3] == (1, addr_b)
-
-
-def test_saved_enabled_preferred_address_and_bond_round_trip(tmp_path):
-    store = tmp_path / "ble_keyboard.json"
-    keyboard = blekbd.BleHidKeyboard(
-        InputState(), store_path=str(store), auto_start=False)
-    keyboard.name = "Pocket Keys"
-    keyboard._preferred = (1, b"\xaa\xbb\xcc\xdd\xee\xff")
-    keyboard._secrets[(2, b"peer")] = b"bond-key"
-    keyboard._enabled = False
-    keyboard._store_dirty = True
-    keyboard.poll()
-
-    raw = json.loads(store.read_text())
-    assert raw["version"] == 2
-    assert raw["enabled"] is False
-    assert raw["preferred"] == [1, "aabbccddeeff"]
-
-    restored = blekbd.BleHidKeyboard(
-        InputState(), store_path=str(store), auto_start=False)
-    assert restored.settings_status()[:4] == (
-        False, "off", "Pocket Keys", (1, b"\xaa\xbb\xcc\xdd\xee\xff"))
-    assert restored._secrets[(2, b"peer")] == b"bond-key"
-    rows = restored.settings_devices()
-    assert rows[0][:4] == ((1, b"\xaa\xbb\xcc\xdd\xee\xff"),
-                           "Pocket Keys", -127, True)
-
-
-def _bond_store(tmp_path, name="Pocket Keys"):
-    store = tmp_path / "ble_keyboard.json"
-    keyboard = blekbd.BleHidKeyboard(
-        InputState(), store_path=str(store), auto_start=False)
-    keyboard.name = name
-    keyboard._preferred = (1, b"\xaa\xbb\xcc\xdd\xee\xff")
-    keyboard._secrets[(2, b"peer")] = b"bond-key"
-    keyboard._store_dirty = True
-    keyboard.poll()
-    return store
-
-
-def test_a_bond_save_never_unlinks_the_live_store(tmp_path, monkeypatch):
-    """The bonds must be readable at SOME path at every instant of a save.
-
-    The old publish was tmp -> os.remove -> os.rename, and the instant between
-    the remove and the rename has them on neither path: a power cut there costs
-    the kid a re-pairing of a keyboard that was already paired. The save rides
-    moy_fs now -- a stamped `.bak`, then the file itself, overwritten in place.
-    """
-    fs = sys.modules[blekbd._write_atomic.__module__]
-
-    class _SpyOs:
-        def __init__(self, real):
-            self._real = real
-            self.calls = []
-
-        def __getattr__(self, name):
-            fn = getattr(self._real, name)
-
-            def _wrapped(*a, **kw):
-                self.calls.append((name, a))
-                return fn(*a, **kw)
-            return _wrapped
-
-    spy = _SpyOs(fs.os)
-    monkeypatch.setattr(fs, "os", spy)
-    store = _bond_store(tmp_path)
-
-    assert json.loads(store.read_text())["preferred"] == [1, "aabbccddeeff"]
-    assert not [c for c in spy.calls if c[0] == "rename"]
-    assert not [c for c in spy.calls
-                if c[0] == "remove" and c[1][:1] == (str(store),)]
-
-
-def test_a_torn_bond_publish_is_recovered_from_the_backup(tmp_path):
-    """The window moy_fs's `.bak` exists to close: FAT truncates on open and
-    then grows the file, so a power cut mid-publish leaves the store somewhere
-    between empty and whole. The next boot finishes the publish instead of
-    reading a short file as "never paired"."""
-    store = _bond_store(tmp_path)
-    whole = store.read_text()
-    store.write_text(whole[:len(whole) // 3])          # the interrupted publish
-
-    restored = blekbd.BleHidKeyboard(
-        InputState(), store_path=str(store), auto_start=False)
-    assert restored.name == "Pocket Keys"
-    assert restored._secrets[(2, b"peer")] == b"bond-key"
-    assert store.read_text() == whole, "the recovery was not republished"
-
-
-def test_version_one_bond_store_migrates_without_forgetting_keys(tmp_path):
-    store = tmp_path / "ble_keyboard.json"
-    store.write_text(json.dumps({
-        "version": 1,
-        "name": "Old Bond",
-        "secrets": [[3, "70656572", "736563726574"]],
-    }))
-    keyboard = blekbd.BleHidKeyboard(
-        InputState(), store_path=str(store), auto_start=False)
-    assert keyboard.settings_status()[:4] == (True, "off", "Old Bond", None)
-    assert keyboard._secrets[(3, b"peer")] == b"secret"
-
-
-def test_disable_disconnects_without_forgetting_and_enable_rescans(monkeypatch):
-    fake_module = types.SimpleNamespace(UUID=FakeUUID, BLE=FakeBLE)
-    monkeypatch.setitem(sys.modules, "bluetooth", fake_module)
-    radio = FakeBLE()
-    keyboard = blekbd.BleHidKeyboard(InputState(), ble=radio, store_path=None)
-    keyboard._conn = 7
-    keyboard._candidate = (0, b"\x01\x02\x03\x04\x05\x06")
-    keyboard._preferred = keyboard._candidate
-    keyboard._secrets[(1, b"peer")] = b"bond"
-
-    assert keyboard.set_enabled(False) is False
-    assert ("disconnect", 7) in radio.calls
-    assert keyboard.settings_status()[0:2] == (False, "disabled")
-    assert keyboard._preferred is not None and keyboard._secrets
-    keyboard._irq(blekbd._IRQ_PERIPHERAL_DISCONNECT,
-                  (7, 0, b"\x01\x02\x03\x04\x05\x06"))
-
-    assert keyboard.set_enabled(True) is True
-    assert keyboard.settings_status()[0] is True
-    assert keyboard.state == "scanning"
-
-
-def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
-    driver = SOURCE.read_text()
-    board_cmake = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "boards"
-                   / "MOYBYTE_P4" / "mpconfigboard.cmake").read_text()
-    board_sdkconfig = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "boards"
-                       / "MOYBYTE_P4" / "sdkconfig.board").read_text()
-    build_script = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
-                    / "build.sh").read_text()
-    # The P4 silicon tier (2026-09-06): the modules and patches both P4 boards
-    # take live at the repo root, and a board names them through board.toml
-    # ([native.p4]) and the shared build lib, never by path.
-    native_cmake = "\n".join(
-        "%s/micropython.cmake" % m for m in
-        board_config.native_modules(
-            ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"))
-    dsi_native = (ROOT / "native" / "p4" / "moy_dsi" / "modmoy_dsi.c").read_text()
-    native_queue = (ROOT / "native" / "p4" / "moy_ble_hid"
-                    / "modmoy_ble_hid.c").read_text()
-    bt_patch = (ROOT / "patches"
-                / "p4_modbluetooth_ble_hid_fastpath.patch").read_text()
-    underrun_patch = (ROOT / "patches"
-                      / "p4_esp_lcd_dsi_underrun_hook.patch").read_text()
-    build_lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text()
-    runtime = runtime_text(ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
-                           / "modules" / "moy_runtime.py")
-    sdkconfig = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / ".build"
-                 / "micropython" / "ports" / "esp32" / "boards"
-                 / "sdkconfig.p4_wifi_common")
-
-    assert "MICROPY_PY_BLUETOOTH=1" in board_cmake
-    assert "MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE=1" in board_cmake
-    assert "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64" in board_sdkconfig
-    assert "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288" in board_sdkconfig
-    # build.sh names no CONFIG_ option: its guard derives them from the
-    # fragment, so what is pinned here is the derivation reaching these two.
-    required = [s.assignment for s in
-                board_config.sdkconfig_required(
-                    ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b")]
-    assert "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64" in required
-    assert "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288" in required
-    assert "moybyte_sdkconfig_guard" in build_script
-    assert "moy_ble_hid/micropython.cmake" in native_cmake
-    assert "moy_ble_hid_queue_on_notify" in native_queue
-    assert "moy_ble_hid_queue_on_notify" in bt_patch
-    assert "moybyte_patch_p4_ble_hid_fastpath" in build_script
-    assert "p4_modbluetooth_ble_hid_fastpath.patch" in build_lib
-    assert "moy_dsi_note_underrun" in dsi_native
-    assert "moy_dsi_note_underrun" in underrun_patch
-    assert "moybyte_patch_p4_dsi_underrun" in build_script
-    assert "p4_esp_lcd_dsi_underrun_hook.patch" in build_lib
-    assert ".intr_priority = 3" in underrun_patch
-    assert "ETS_DSI_BRIDGE_INTR_SOURCE" in underrun_patch
-    assert "CONFIG_LCD_DSI_ISR_IRAM_SAFE=y" in board_sdkconfig
-    assert "dpi_cfg.num_fbs = 3" in dsi_native   # triple-buffer (#58, 6b045e3)
-    assert "dsi_underruns=" in runtime
-    # BLE IRQs execute on NimBLE's core-0 task. Serial output must be deferred
-    # to poll() on the main task; print() here caused hardware stack panics.
-    assert "print(" not in driver[driver.index("    def _irq("):]
-    # The upstream fragment may not exist in a clean checkout, so the durable
-    # contract is the selected C6_WIFI variant + Bluetooth module define. If the
-    # checkout is present, pin the hosted VHCI setting too.
-    assert "boards/sdkconfig.p4_wifi_c6" in board_cmake
-    if sdkconfig.exists():
-        text = sdkconfig.read_text()
-        assert "CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y" in text
-
-    assert "from ble_keyboard import BleHidKeyboard" in runtime
-    assert "keyboard=keyboard" in runtime    # via console.wire_workstation_core
-    assert runtime.index("keyboard.poll()") < runtime.index("inp.begin_frame()")
-
-
-def test_stop_powers_the_radio_down_and_says_so(monkeypatch):
-    """stop() is start()'s undo: scanning stops, a connection drops, the
-    radio is deactivated (what gives its internal RAM back), and the driver
-    reads as off -- a second stop() has nothing to do."""
-    fake_module = types.SimpleNamespace(UUID=FakeUUID, BLE=FakeBLE)
-    monkeypatch.setitem(sys.modules, "bluetooth", fake_module)
-    radio = FakeBLE()
-    keyboard = blekbd.BleHidKeyboard(InputState(), ble=radio, store_path=None)
-    assert keyboard.available and keyboard.state == "scanning"
-    keyboard._conn = 7
-    radio.calls.clear()
-    assert keyboard.stop() is True
-    assert radio.calls == [("scan", (None,)), ("disconnect", 7), ("active", False)]
-    assert (keyboard.available, keyboard.state, keyboard._conn) == (False, "off", None)
-    assert keyboard.stop() is False
+    table, _stack, m = _machine()
+    _ready(m)
+    m.notify(3, 3, b"\x00\x00\x1a\x00\x00\x00\x00\x00")
+    m.notify(3, 3, bytes(8))                    # the whole tap before a frame
+    _frame(m, table)
+    assert table.held("up") and table.pressed("up")
+    _frame(m, table)
+    assert not table.held("up") and table.released("up")
+
+
+def test_an_idle_keyboard_writes_its_source_once_then_rests():
+    """#220: with nothing held and nothing arriving, a frame writes nothing --
+    and a key after any number of resting frames still lands, and so does its
+    release."""
+    table, _stack, m = _machine()
+    _ready(m)
+    for _ in range(5):
+        _frame(m, table)
+    assert not table.held("up")
+    m.notify(3, 3, b"\x00\x00\x1a\x00\x00\x00\x00\x00")
+    _frame(m, table)
+    assert table.held("up") and table.pressed("up")
+    m.notify(3, 3, bytes(8))
+    _frame(m, table)
+    assert not table.held("up") and table.last_key == 0
+
+
+def test_caps_lock_toggles_on_its_make():
+    table, _stack, m = _machine()
+    _ready(m)
+    m.notify(3, 3, b"\x00\x00\x39\x00\x00\x00\x00\x00")       # Caps make
+    m.notify(3, 3, bytes(8))
+    m.notify(3, 3, b"\x00\x00\x04\x00\x00\x00\x00\x00")       # a
+    _frame(m, table)
+    assert m.caps
+    _frame(m, table)
+    assert table.last_key == ord("A")
+
+
+def test_a_report_on_another_handle_is_not_input():
+    table, _stack, m = _machine()
+    _ready(m)
+    m.notify(3, 9, b"\x00\x00\x1a\x00\x00\x00\x00\x00")
+    _frame(m, table)
+    assert not table.held("up") and m.notify_count == 0
+
+
+# -- the machine -------------------------------------------------------------------
+
+def test_the_machine_scans_pairs_discovers_subscribes_and_feeds_input():
+    table, stack, m = _machine()
+    m.started(True)
+    assert m.state == "scanning" and ("scan", False) in stack.calls
+    m.scan_result(ADDR, -40, HID_ADV)
+    assert m.state == "found" and ("scan_stop",) in stack.calls
+    m.on_scan_done()
+    assert ("connect", ADDR) in stack.calls
+    m.connected(3, ADDR)
+    assert ("pair", 3) in stack.calls and ("services", 3) in stack.calls
+    m.on_svc(3, 1, 12, mi.HID_SERVICE)
+    m.on_svc_done(3, 0)
+    assert ("chars", 3, 1, 12) in stack.calls
+    m.on_chr(3, 2, 3, mi.HID_NOTIFY, mi.HID_REPORT)
+    m.on_chr_done(3, 0)
+    m.on_dsc(3, 4, mi.HID_CCCD)
+    m.on_dsc_done(3, 0)
+    assert ("write", 3, 4, b"\x01\x00", True) in stack.calls
+    m.on_write_done(3, 4, 0)
+    assert m.state == "ready" and m.protocol == "report"
+    # Left Shift + A -> upper-case A and the held `left` alias.
+    m.notify(3, 3, b"\x02\x00\x04\x00\x00\x00\x00\x00")
+    _frame(m, table)
+    assert table.last_key == ord("A") and table.held("left") and table.pressed("left")
+    m.notify(3, 3, bytes(8))
+    _frame(m, table)
+    assert table.last_key == 0 and table.released("left")
+    m.tick()
+    assert stack.saved[-1] == (True, ADDR, "BLE keyboard")
+
+
+def test_boot_keyboard_is_selected_and_protocol_mode_is_written():
+    _table, stack, m = _machine()
+    m.started(True)
+    m.scan_result(ADDR, -40, HID_ADV)
+    m.on_scan_done()
+    m.connected(4, ADDR)
+    m.on_svc(4, 1, 12, mi.HID_SERVICE)
+    m.on_svc_done(4, 0)
+    m.on_chr(4, 2, 3, 0x04, mi.HID_PROTOCOL)
+    m.on_chr(4, 4, 5, mi.HID_NOTIFY, mi.HID_BOOT_KBD)
+    m.on_chr(4, 7, 8, mi.HID_NOTIFY, mi.HID_REPORT)
+    m.on_chr_done(4, 0)
+    m.on_dsc(4, 6, mi.HID_CCCD)
+    m.on_dsc(4, 9, mi.HID_CCCD)
+    m.on_dsc_done(4, 0)
+    assert m.protocol == "boot"
+    assert ("write", 4, 3, b"\x00", False) in stack.calls
+    assert ("write", 4, 6, b"\x01\x00", True) in stack.calls
+    assert not any(c[:3] == ("write", 4, 9) for c in stack.calls)
+
+
+def test_security_gated_cccd_is_retried_after_encryption():
+    _table, stack, m = _machine()
+    m.started(True)
+    m.scan_result(ADDR, -40, HID_ADV)
+    m.on_scan_done()
+    m.connected(9, ADDR)
+    m.on_svc(9, 1, 50, mi.HID_SERVICE)
+    m.on_svc_done(9, 0)
+    m.on_chr(9, 42, 43, mi.HID_NOTIFY, mi.HID_REPORT)
+    m.on_chr_done(9, 0)
+    m.on_dsc(9, 44, mi.HID_CCCD)
+    m.on_dsc_done(9, 0)
+    stack.calls.clear()
+    m.on_write_done(9, 44, 5)                   # rejected before encryption
+    assert m.state == "subscribe-retry"
+    assert not any(c[:3] == ("write", 9, 44) for c in stack.calls)
+    m.on_enc_change(9, True, True)
+    assert ("write", 9, 44, b"\x01\x00", True) in stack.calls
+    m.on_write_done(9, 44, 0)
+    assert m.state == "ready"
+
+
+def test_picker_lists_all_hid_devices_and_connects_only_the_picked_one():
+    _table, stack, m = _machine()
+    m.started(True)
+    m.discover()
+    m.on_scan_done()                            # the boot scan ends, the picker starts
+    assert m.state == "scanning" and ("scan", True) in stack.calls
+    addr_b = (1, b"\x11\x12\x13\x14\x15\x16")
+    m.scan_result(ADDR, -35, HID_ADV)
+    m.scan_result(addr_b, -48, HID_ADV)
+    m.on_scan_done()
+    assert m.state == "choose"
+    assert [d[0] for d in m.devices()] == [ADDR, addr_b]
+    assert m.pick(addr_b)
+    assert ("connect", addr_b) in stack.calls and ("connect", ADDR) not in stack.calls
+    assert m.preferred == addr_b
+
+
+def test_a_picked_keyboard_is_the_only_one_reconnected():
+    _table, stack, m = _machine(preferred=(1, b"\x11\x12\x13\x14\x15\x16"), name="Air")
+    m.started(True)
+    m.scan_result(ADDR, -30, HID_ADV)           # another keyboard, closer
+    assert m.state == "scanning"
+    m.scan_result((1, b"\x11\x12\x13\x14\x15\x16"), -60, HID_ADV)
+    assert m.state == "found"
+
+
+def test_disable_disconnects_without_forgetting_and_enable_rescans():
+    _table, stack, m = _machine()
+    _ready(m, conn=7)
+    m.set_enabled(False)
+    assert ("disconnect", 7) in stack.calls
+    assert (m.enabled, m.state) == (False, "disabled")
+    assert m.preferred == ADDR and ("forget",) not in stack.calls
+    m.on_disconnect(7)
+    m.set_enabled(True)
+    assert m.enabled and m.state == "scanning"
+
+
+def test_forget_drops_the_keyboard_and_every_bond():
+    _table, stack, m = _machine()
+    _ready(m, conn=7)
+    m.forget()
+    assert ("forget",) in stack.calls and ("disconnect", 7) in stack.calls
+    assert m.preferred is None and m.devices() == [] and m.state == "choose"
+
+
+def test_timeouts_retry_and_a_stalled_discovery_disconnects():
+    _table, stack, m = _machine()
+    m.started(True)
+    m.on_scan_done()                            # nothing found
+    assert m.state == "idle"
+    stack.t += 5000
+    m.tick()
+    assert m.state == "scanning"
+    m.scan_result(ADDR, -40, HID_ADV)
+    m.on_scan_done()
+    m.connected(3, ADDR)
+    stack.t += 15001
+    m.tick()
+    assert ("disconnect", 3) in stack.calls
+
+
+def test_the_player_slot_is_held_only_while_connected():
+    table, _stack, m = _machine()
+    m.set_player(1)
+    m.started(True)
+    m.frame()
+    assert m.src.player == 0
+    m.scan_result(ADDR, -40, HID_ADV)
+    m.on_scan_done()
+    m.connected(3, ADDR)
+    m.on_svc(3, 1, 12, mi.HID_SERVICE)
+    m.on_svc_done(3, 0)
+    m.on_chr(3, 2, 3, mi.HID_NOTIFY, mi.HID_REPORT)
+    m.on_chr_done(3, 0)
+    m.on_dsc(3, 4, mi.HID_CCCD)
+    m.on_dsc_done(3, 0)
+    m.on_write_done(3, 4, 0)
+    m.frame()
+    assert m.src.player == 1
+    m.on_disconnect(3)
+    m.frame()
+    assert m.src.player == 0
+
+
+# -- the boards' wiring --------------------------------------------------------------
+
+def test_every_console_takes_the_kernels_central_and_no_bluetooth_module():
+    for board in ("lilygo_t_deck_plus_mainline", "guition_jc3248w535",
+                  "esp32_p4_wifi6_touch_lcd_7b", "guition_jc8012p4a1c"):
+        d = ROOT / "firmware" / board
+        header = next((d / "boards").glob("*/mpconfigboard.h")).read_text()
+        cmake = next((d / "boards").glob("*/mpconfigboard.cmake")).read_text()
+        sdk = next((d / "boards").glob("*/sdkconfig.board")).read_text()
+        assert re.search(r"#define MOY_INPUT_BLE\s+\(1\)", header), board
+        assert "MICROPY_PY_BLUETOOTH=1" not in cmake, board
+        if "p4" in board:
+            assert "MICROPY_PY_BLUETOOTH=0" in cmake, board
+            assert re.search(r"#define MOY_INPUT_BLE_HOSTED\s+\(1\)", header), board
+        else:
+            assert re.search(r"#define MICROPY_PY_BLUETOOTH\s+\(0\)", header), board
+        assert "CONFIG_BT_NIMBLE_NVS_PERSIST=y" in sdk, board
+        required = [s.assignment for s in board_config.sdkconfig_required(d)]
+        assert "CONFIG_BT_NIMBLE_NVS_PERSIST=y" in required, board
+
+
+def test_the_p4_silicon_tier_carries_no_python_ble_fast_path():
+    assert not (ROOT / "native" / "p4" / "moy_ble_hid").exists()
+    assert not (ROOT / "patches" / "p4_modbluetooth_ble_hid_fastpath.patch").exists()
+    lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text()
+    assert "ble_hid_fastpath" not in lib
+    for board in ("esp32_p4_wifi6_touch_lcd_7b", "guition_jc8012p4a1c"):
+        assert "ble_hid_fastpath" not in (ROOT / "firmware" / board / "build.sh").read_text()
+
+
+def test_the_frame_half_polls_before_the_merge():
+    """The central runs no Python (tests/test_no_vm_calls_in_drivers.py holds
+    its sources); its frame half takes the reports into the source before the
+    merge, or the table answers a frame late."""
+    spine = (ROOT / "device" / "desktop_spine.py").read_text()
+    body = spine[spine.index("    def poll_inputs("):spine.index("    def present(")]
+    assert body.index("keyboard.poll()") < body.index("inp.begin_frame()")

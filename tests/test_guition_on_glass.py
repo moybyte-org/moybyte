@@ -55,7 +55,11 @@ EXFAT_SRAM = 640
 # 2026-10-07; the port's espnow module they replace held its ring in the heap.
 # And the WiFi driver's (native/moy_net/moy_wifi.c: its state, latch and
 # connect flag), 56 bytes of .bss and .data by the object's sizes, 2026-10-07.
-KERNEL_SRAM = 1092 + 56 + 40 + 56
+# Plus input's statics (native/moy_input: the kernel table's latches, the touch
+# driver's state, and the kernel's I2C bus, which the carve compiled as a stub),
+# 575 bytes of .dram0.bss and .data by the link map against dev cafae3a2,
+# 2026-10-07.
+KERNEL_SRAM = 1092 + 56 + 40 + 56 + 575
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on

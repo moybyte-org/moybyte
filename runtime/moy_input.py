@@ -1,3 +1,16 @@
+# Map (grep -n a name to jump there):
+#   Pointer                      the screen-space cursor (moy_input_ptr_t)
+#   InputSource                  one producer's held set, key and pointer sample
+#   InputTable                   the merged table every surface reads
+#   HostInputTable               the same table over the host's eight names
+#   pointer_state                the pointer a cart sees
+#   kernel                       the drivers' table; keyboard/touch/trackball/kick
+#   Bus                          a machine.I2C-shaped fake as the drivers' C bus
+#   KbdDriver                    the T-Deck keyboard's C driver over a Bus
+#   TouchDriver                  a touch controller's C driver over a Bus
+#   HeldPoint                    the no-news contract on its own
+#   map_point                    a raw point onto the glass
+#   HidMachine                   the BLE keyboard central's machine over a fake stack
 """The input table (native/moy_input) on CPython, by ctypes: the module
 `moy_input` as the boards and the browser import it, name for name
 (docs/kernel_survival_2026-10.md section 4.1). A VM's `import moy_input` is the
@@ -45,7 +58,7 @@ NAMES = ("left", "right", "up", "down", "a", "b", "run", "home",
 HOST_NAMES = NAMES[:8]
 _BIT = {n: i for i, n in enumerate(NAMES)}
 
-SOURCES = 12
+SOURCES = 8
 PLAYERS = 8
 UNION = 0xFF
 _TICKS_MASK = (1 << 30) - 1     # the VM's ticks_ms period
@@ -134,13 +147,18 @@ _SIGS = (
     ("moy_input_ptr_place", [_P, _I32, _I32, _U32], None),
     ("moy_input_ptr_live", [_P, _U32], _B),
     ("moy_input_ptr_tick", [_P, _U32], None),
+    ("moy_input_point", [_P, _U32, _I32, _I32, _B, _B, _B], _I),
+    ("moy_input_ptr_apply", [_P, _P, _U32], _I),
 )
 
 _LIB = [None]
 
 
 def build(verbose=False):
-    return native_build.build("moy_input", _SHIM, ("moy_input.h", "moy_htab.h"),
+    return native_build.build("moy_input", _SHIM,
+                              ("moy_input.h", "moy_htab.h", "moy_touch.h", "moy_drivers.h",
+                               "moy_hid.h", "moy_touch.c", "moy_kbd.c", "moy_touchdev.c",
+                               "moy_hid.c"),
                               _CACHE, libmoy_dir=(_INPUT, _SPINE), verbose=verbose)
 
 
@@ -150,7 +168,7 @@ def _lib():
         if path is None:
             raise ImportError("moy_input: no C compiler for the host build")
         d = ctypes.CDLL(path)
-        for name, args, res in _SIGS:
+        for name, args, res in _SIGS + _DRV_SIGS:
             fn = getattr(d, name)
             fn.argtypes = args
             fn.restype = res
@@ -221,6 +239,11 @@ class InputSource:
         ownership moves on a NEW nonzero value, and only the owner going quiet
         hands the slot to whoever else is still typing."""
         _lib().moy_input_set_key(self.state._t, self.h, value or 0)
+
+    def point(self, x, y, down, edge=False, fresh=True):
+        """This source's pointer sample, standing until it writes another."""
+        _check(_lib().moy_input_point(self.state._t, self.h, int(x), int(y), bool(down),
+                                      bool(edge), bool(fresh)), "point")
 
     def key(self, value):
         """A one-shot key: delivered as this source's key for exactly one frame."""
@@ -387,6 +410,11 @@ class InputTable:
         n = _lib().moy_input_players(self._t, out)
         return tuple(out[i] for i in range(n))
 
+    def apply_pointer(self, pointer):
+        """The frame's pointer sample into `pointer`: P_HELD while down, with
+        P_CLICK on its press edge; 0 when no source has a sample."""
+        return _lib().moy_input_ptr_apply(self._t, ctypes.byref(pointer), _now())
+
     def multi(self):
         """Do the sources sit on more than one player slot?"""
         return _lib().moy_input_multi(self._t)
@@ -429,3 +457,590 @@ def pointer_state(inp, out):
               | (P_CLICK if getattr(p, "click", False) else 0))
     out[3] = 0
     return out
+
+
+# -- the board's drivers ---------------------------------------------------------
+#
+# A board's `keyboard()`, `touch(w, h)` and `trackball()` are its drivers in the
+# kernel (native/moy_input/moy_input_task.c); the host has none, so each is
+# None, and `kick()` -- one pass of them, once a frame -- does nothing. `kernel()`
+# is the drivers' table, the one a board's console reads.
+
+def keyboard():
+    return None
+
+
+def touch(w, h):
+    return None
+
+
+def trackball():
+    return None
+
+
+def kick():
+    return None
+
+
+def ble():
+    return None
+
+
+def task_stack_free():
+    return 0
+
+
+_KERNEL = [None]
+
+
+def kernel():
+    if _KERNEL[0] is None:
+        _KERNEL[0] = InputTable()
+    return _KERNEL[0]
+
+
+# The drivers' protocols over a bus a test supplies (native/moy_input/
+# moy_drivers.h): the same C a board runs, driven through machine.I2C's shape --
+# readfrom(addr, n), writeto(addr, buf), readfrom_mem(addr, reg, n, addrsize)
+# -- so a fake that answers a keyboard or a touch controller drives the real
+# protocol. A bus may also give ms() and us() clocks and sleep_ms(); without
+# them the host's ticks are used and sleeps are skipped.
+
+_WRITE = ctypes.CFUNCTYPE(_I, _P, _U8, ctypes.POINTER(_U8), ctypes.c_size_t)
+_READ = ctypes.CFUNCTYPE(_I, _P, _U8, ctypes.POINTER(_U8), ctypes.c_size_t)
+_WREAD = ctypes.CFUNCTYPE(_I, _P, _U8, ctypes.POINTER(_U8), ctypes.c_size_t,
+                          ctypes.POINTER(_U8), ctypes.c_size_t)
+_CLOCK = ctypes.CFUNCTYPE(_U32, _P)
+_SLEEP = ctypes.CFUNCTYPE(None, _P, _U32)
+
+
+class _Ops(ctypes.Structure):
+    _fields_ = [("write", _WRITE), ("read", _READ), ("write_read", _WREAD),
+                ("ms", _CLOCK), ("us", _CLOCK), ("sleep_ms", _SLEEP), ("ctx", _P)]
+
+
+class Bus:
+    """A machine.I2C-shaped object, as the drivers' C bus. A transfer that
+    raises is a failed transfer, as on the board."""
+
+    def __init__(self, i2c):
+        self.i2c = i2c
+
+        def write(_ctx, addr, src, n):
+            try:
+                i2c.writeto(addr, bytes(src[:n]))
+                return 0
+            except Exception:       # noqa: BLE001 -- a failed transfer
+                return -1
+
+        def read(_ctx, addr, dst, n):
+            try:
+                data = i2c.readfrom(addr, n)
+            except Exception:       # noqa: BLE001
+                return -1
+            for i, b in enumerate(bytes(data)[:n]):
+                dst[i] = b
+            return 0
+
+        def write_read(_ctx, addr, src, ns, dst, nd):
+            reg = 0
+            for i in range(ns):
+                reg = (reg << 8) | src[i]
+            try:
+                data = i2c.readfrom_mem(addr, reg, nd, addrsize=8 * ns)
+            except Exception:       # noqa: BLE001
+                return -1
+            for i, b in enumerate(bytes(data)[:nd]):
+                dst[i] = b
+            return 0
+
+        def ms(_ctx):
+            f = getattr(i2c, "ms", None)
+            return (f() if f is not None else _ticks_ms()) & _TICKS_MASK
+
+        def us(_ctx):
+            f = getattr(i2c, "us", None)
+            return (f() if f is not None else int(_ticks_ms() * 1000)) & 0xFFFFFFFF
+
+        def sleep(_ctx, ms_):
+            f = getattr(i2c, "sleep_ms", None)
+            if f is not None:
+                f(ms_)
+
+        self._fns = (_WRITE(write), _READ(read), _WREAD(write_read), _CLOCK(ms),
+                     _CLOCK(us), _SLEEP(sleep))
+        self.ops = _Ops(*self._fns, None)
+
+
+class _Map(ctypes.Structure):
+    _fields_ = [("w", _I32), ("h", _I32), ("raw_w", _I32), ("raw_h", _I32),
+                ("raw_x0", _I32), ("raw_y0", _I32), ("swap", _B), ("flip_x", _B),
+                ("flip_y", _B)]
+
+
+class _Held(ctypes.Structure):
+    _fields_ = [("down", _B), ("fresh", _B), ("has_last", _B), ("extrapolate", _B),
+                ("gliding", _B), ("lx", _I32), ("ly", _I32), ("gx", _I32), ("gy", _I32),
+                ("w", _I32), ("h", _I32), ("hold_ms", _I32), ("ms", _U32),
+                ("vx", ctypes.c_float), ("vy", ctypes.c_float), ("damp", ctypes.c_float)]
+
+
+class _Pt(ctypes.Structure):
+    _fields_ = [("down", _B), ("edge", _B), ("x", _I32), ("y", _I32)]
+
+
+class _Kbd(ctypes.Structure):
+    _fields_ = [("table", _P), ("src", _U32), ("available", _B), ("raw_mode", _B),
+                ("raw_unsupported", _B), ("raw_game", _B), ("want", ctypes.c_int8),
+                ("err_run", _U8), ("held", _U32), ("held_until", _U32),
+                ("raw_held", _U32), ("raw_key", _I32), ("raw_bytes", _U8 * 5),
+                ("raw_valid", _B), ("stat_n", _U32), ("stat_max_us", _U32),
+                ("stat_over5", _U32), ("stat_over20", _U32), ("stat_timeouts", _U32),
+                ("stat_max_raw", _B)]
+
+
+class _Touch(ctypes.Structure):
+    _fields_ = [("kind", _U8), ("addr", _U8), ("available", _B), ("yx", _B),
+                ("clear_first", _B), ("gate", _B), ("int_count", _U32), ("int_last", _U32),
+                ("int_seen", _B), ("touching", _B), ("last_read_ms", _U32), ("fw", _P),
+                ("fw_len", ctypes.c_size_t), ("loaded", _U32), ("init_state", ctypes.c_int8),
+                ("reprobe", ctypes.c_uint16), ("lock", _I), ("st_point", _B), ("st_up", _B),
+                ("st_x", _I32), ("st_y", _I32), ("st_fingers", _U8), ("map", _Map),
+                ("held", _Held), ("raw_x", _I32), ("raw_y", _I32), ("has_raw", _B),
+                ("fingers", _U8), ("stat_n", _U32), ("stat_max_us", _U32),
+                ("stat_over5", _U32), ("stat_over20", _U32), ("stat_skipped", _U32),
+                ("fb_set", _B), ("fb_phase", _U8), ("fb_status", ctypes.c_int16),
+                ("fb_ms", _U32), ("fb_n", _U32)]
+
+
+_PKBD = ctypes.POINTER(_Kbd)
+_PTOUCH = ctypes.POINTER(_Touch)
+_POPS = ctypes.POINTER(_Ops)
+_RESET = ctypes.CFUNCTYPE(None, _P, _B)
+
+_DRV_SIGS = (
+    ("moy_kbd_buttons_for_key", [_I32], _U32),
+    ("moy_kbd_decode_raw", [ctypes.POINTER(_U8), _PU32, ctypes.POINTER(_I32)], None),
+    ("moy_kbd_init", [_PKBD, _POPS, _P, _U32], None),
+    ("moy_kbd_game_mode", [_PKBD, _B], None),
+    ("moy_kbd_pass", [_PKBD, _POPS], None),
+    ("moy_kbd_sizeof", [], ctypes.c_size_t),
+    ("moy_kbd_raw_key", [ctypes.c_size_t, ctypes.POINTER(_U8), ctypes.POINTER(_U8),
+                         ctypes.POINTER(_U8)], _I),
+    ("moy_touchdev_init", [_PTOUCH, _U8, _U8, ctypes.POINTER(_Map), _B, ctypes.c_float, _I32],
+     None),
+    ("moy_touchdev_probe", [_PTOUCH, _POPS], None),
+    ("moy_gsl_init", [_PTOUCH, _POPS, _RESET, _P], _B),
+    ("moy_touchdev_pass", [_PTOUCH, _POPS], None),
+    ("moy_touchdev_poll", [_PTOUCH, _U32, ctypes.POINTER(_Pt)], None),
+    ("moy_touchdev_sizeof", [], ctypes.c_size_t),
+    ("moy_touch_map", [ctypes.POINTER(_Map), _I32, _I32, ctypes.POINTER(_I32),
+                       ctypes.POINTER(_I32)], None),
+    ("moy_touch_held_init", [ctypes.POINTER(_Held), _B, _I32, _I32, ctypes.c_float, _I32],
+     None),
+    ("moy_touch_sample", [ctypes.POINTER(_Held), _I32, _I32, _U32, ctypes.POINTER(_Pt)], None),
+    ("moy_touch_release", [ctypes.POINTER(_Held), ctypes.POINTER(_Pt)], None),
+    ("moy_touch_hold", [ctypes.POINTER(_Held), _U32, ctypes.POINTER(_Pt)], None),
+)
+
+GT911, GSL3680, AXS = 1, 2, 3
+KBD_ADDR = 0x55
+KBD_HOLD_MS = 260
+KBD_ERR_RUN = 10
+TOUCH_HOLD_MS = 400
+TOUCH_HOLD_MS_STREAM = 90
+
+
+def buttons_for_key(key):
+    """The button names a typed byte fires (an upper-case letter its lower's)."""
+    bits = _lib().moy_kbd_buttons_for_key(key)
+    return tuple(n for i, n in enumerate(NAMES) if bits & (1 << i))
+
+
+def decode_raw(data):
+    """Five matrix bytes -> (button names, key)."""
+    d = (_U8 * 5)(*bytes(data)[:5])
+    held, key = _U32(), _I32()
+    _lib().moy_kbd_decode_raw(d, ctypes.byref(held), ctypes.byref(key))
+    return tuple(n for i, n in enumerate(NAMES) if held.value & (1 << i)), key.value
+
+
+def raw_keys():
+    """The matrix table, (byte, bit, key) in the order the decoder tests them."""
+    out = []
+    a, b, c = _U8(), _U8(), _U8()
+    while _lib().moy_kbd_raw_key(len(out), ctypes.byref(a), ctypes.byref(b), ctypes.byref(c)):
+        out.append((a.value, b.value, c.value))
+    return tuple(out)
+
+
+class _Fields:
+    """Attribute access onto a driver's C struct, by its field names."""
+
+    def __getattr__(self, name):
+        s = self.__dict__.get("_s")
+        if s is not None and name in s._names:
+            return getattr(s.contents if hasattr(s, "contents") else s, name)
+        raise AttributeError(name)
+
+    def __setattr__(self, name, value):
+        s = self.__dict__.get("_s")
+        if s is not None and name in s._names:
+            setattr(s, name, value)
+        else:
+            object.__setattr__(self, name, value)
+
+
+class KbdDriver(_Fields):
+    """The T-Deck keyboard's driver (moy_kbd.c) over `i2c`, writing `table`'s
+    "kbd" source. pass_() is one input-task pass; set_game_mode queues the flip."""
+
+    def __init__(self, table, i2c):
+        assert _lib().moy_kbd_sizeof() == ctypes.sizeof(_Kbd)
+        self.__dict__["_s"] = _Kbd()
+        self._s._names = {f[0] for f in _Kbd._fields_}
+        self.bus = Bus(i2c)
+        self.state = table
+        self.source = table.source("kbd")
+        _lib().moy_kbd_init(ctypes.byref(self._s), ctypes.byref(self.bus.ops), table._t,
+                            self.source.h)
+
+    def pass_(self):
+        _lib().moy_kbd_pass(ctypes.byref(self._s), ctypes.byref(self.bus.ops))
+
+    def set_game_mode(self, on):
+        _lib().moy_kbd_game_mode(ctypes.byref(self._s), bool(on))
+
+    @property
+    def RAW_GAME_MODE(self):
+        return self._s.raw_game
+
+    @RAW_GAME_MODE.setter
+    def RAW_GAME_MODE(self, on):
+        self._s.raw_game = bool(on)
+
+
+class TouchDriver(_Fields):
+    """A touch controller's driver (moy_touchdev.c) over `i2c`: probe() it,
+    pass_() is one input-task pass, poll() the frame's sample, (x, y, edge) or
+    None, with `fresh` beside it."""
+
+    def __init__(self, i2c, kind, w, h, addr=0, swap_xy=False, flip_x=False, flip_y=False,
+                 raw_w=0, raw_h=0, raw_x0=0, raw_y0=0, yx=False, clear_first=False,
+                 extrapolate=False, damp=0.5, hold_ms=TOUCH_HOLD_MS, fw=None):
+        assert _lib().moy_touchdev_sizeof() == ctypes.sizeof(_Touch)
+        self.__dict__["_s"] = _Touch()
+        self._s._names = {f[0] for f in _Touch._fields_}
+        self.bus = Bus(i2c)
+        m = _Map(w, h, raw_w, raw_h, raw_x0, raw_y0, swap_xy, flip_x, flip_y)
+        _lib().moy_touchdev_init(ctypes.byref(self._s), kind, addr, ctypes.byref(m),
+                                 extrapolate, damp, hold_ms)
+        self._s.yx = yx
+        self._s.clear_first = clear_first
+        if fw is not None:
+            self._fw = ctypes.create_string_buffer(bytes(fw), len(fw))
+            self._s.fw = ctypes.cast(self._fw, _P)
+            self._s.fw_len = len(fw)
+        self._pt = _Pt()
+
+    def probe(self):
+        _lib().moy_touchdev_probe(ctypes.byref(self._s), ctypes.byref(self.bus.ops))
+
+    def gsl_init(self, reset):
+        """The GSL3680's bring-up; `reset(before)` pulses or releases the pins."""
+        self._reset = _RESET(lambda _ctx, before: reset(bool(before)))
+        return _lib().moy_gsl_init(ctypes.byref(self._s), ctypes.byref(self.bus.ops),
+                                   self._reset, None)
+
+    def pass_(self):
+        _lib().moy_touchdev_pass(ctypes.byref(self._s), ctypes.byref(self.bus.ops))
+
+    def poll(self, now=None):
+        if now is None:
+            now = self.bus._fns[3](None)
+        _lib().moy_touchdev_poll(ctypes.byref(self._s), now & _TICKS_MASK,
+                                 ctypes.byref(self._pt))
+        p = self._pt
+        return (p.x, p.y, p.edge) if p.down else None
+
+    @property
+    def fresh(self):
+        return self._s.held.fresh
+
+    @property
+    def raw(self):
+        return (self._s.raw_x, self._s.raw_y) if self._s.has_raw else None
+
+
+class HeldPoint:
+    """The no-news contract (moy_touch.h) on its own: sample, release, hold."""
+
+    def __init__(self, extrapolate=False, w=0, h=0, damp=1.0, hold_ms=TOUCH_HOLD_MS):
+        self._h = _Held()
+        self._pt = _Pt()
+        _lib().moy_touch_held_init(ctypes.byref(self._h), extrapolate, w, h, damp, hold_ms)
+
+    def _out(self):
+        p = self._pt
+        return (p.x, p.y, p.edge) if p.down else None
+
+    def sample(self, x, y, now=None):
+        _lib().moy_touch_sample(ctypes.byref(self._h), x, y,
+                                (_now() if now is None else now) & _TICKS_MASK,
+                                ctypes.byref(self._pt))
+        return self._out()
+
+    def release(self):
+        _lib().moy_touch_release(ctypes.byref(self._h), ctypes.byref(self._pt))
+        return None
+
+    def hold(self, now=None):
+        _lib().moy_touch_hold(ctypes.byref(self._h),
+                              (_now() if now is None else now) & _TICKS_MASK,
+                              ctypes.byref(self._pt))
+        return self._out()
+
+    @property
+    def fresh(self):
+        return self._h.fresh
+
+    @property
+    def down(self):
+        return self._h.down
+
+
+def map_point(x, y, w, h, swap, flip_x, flip_y, raw_w=0, raw_h=0, raw_x0=0, raw_y0=0):
+    """A controller's raw point onto the glass: swap, scale, flip, clamp."""
+    m = _Map(w, h, raw_w or 0, raw_h or 0, raw_x0, raw_y0, swap, flip_x, flip_y)
+    ox, oy = _I32(), _I32()
+    _lib().moy_touch_map(ctypes.byref(m), x, y, ctypes.byref(ox), ctypes.byref(oy))
+    return ox.value, oy.value
+
+
+# -- the BLE keyboard central's machine (native/moy_input/moy_hid.c) ----------------
+#
+# The machine without a radio: `stack` is the test's fake of NimBLE -- scan(picker),
+# scan_stop(), connect(addr), disconnect(conn), pair(conn), disc_svcs(conn),
+# disc_chrs(conn, start, end), disc_dscs(conn, start, end), write(conn, handle,
+# data, response), forget_bonds(), save(machine) and ms() -- each request
+# returning 0 when it went out; the test feeds the stack's events back through
+# the on_* methods, as NimBLE's host task does on a board.
+
+HID_STATES = ("off", "disabled", "idle", "scanning", "found", "connecting", "pairing",
+              "discovering", "subscribe-retry", "ready", "choose")
+HID_SERVICE, HID_BOOT_KBD, HID_REPORT, HID_PROTOCOL, HID_CCCD = (0x1812, 0x2A22, 0x2A4D,
+                                                                 0x2A4E, 0x2902)
+HID_NOTIFY = 0x10
+
+
+class _Addr(ctypes.Structure):
+    _fields_ = [("type", _U8), ("a", _U8 * 6)]
+
+
+def _addr(a):
+    return _Addr(a[0], (_U8 * 6)(*bytes(a[1])))
+
+
+_PADDR = ctypes.POINTER(_Addr)
+_H_SCAN = ctypes.CFUNCTYPE(_I, _P, _B)
+_H_CTX = ctypes.CFUNCTYPE(_I, _P)
+_H_CONNECT = ctypes.CFUNCTYPE(_I, _P, _PADDR)
+_H_CONN = ctypes.CFUNCTYPE(_I, _P, ctypes.c_uint16)
+_H_RANGE = ctypes.CFUNCTYPE(_I, _P, ctypes.c_uint16, ctypes.c_uint16, ctypes.c_uint16)
+_H_WRITE = ctypes.CFUNCTYPE(_I, _P, ctypes.c_uint16, ctypes.c_uint16, ctypes.POINTER(_U8),
+                            ctypes.c_size_t, _B)
+_H_VOID = ctypes.CFUNCTYPE(None, _P)
+_H_SAVE = ctypes.CFUNCTYPE(None, _P, _P)
+
+
+class _HidOps(ctypes.Structure):
+    _fields_ = [("scan", _H_SCAN), ("scan_stop", _H_CTX), ("connect", _H_CONNECT),
+                ("disconnect", _H_CONN), ("pair", _H_CONN), ("disc_svcs", _H_CONN),
+                ("disc_chrs", _H_RANGE), ("disc_dscs", _H_RANGE), ("write", _H_WRITE),
+                ("forget_bonds", _H_VOID), ("save", _H_SAVE), ("ms", _CLOCK), ("ctx", _P)]
+
+
+_PHID = _P
+_U16 = ctypes.c_uint16
+_HID_SIGS = (
+    ("moy_hid_sizeof", [], ctypes.c_size_t),
+    ("moy_hid_init", [_PHID, ctypes.POINTER(_HidOps), _P, _U32], None),
+    ("moy_hid_load", [_PHID, _B, _PADDR, ctypes.c_char_p], None),
+    ("moy_hid_started", [_PHID, _B, ctypes.c_char_p], None),
+    ("moy_hid_stopped", [_PHID], None),
+    ("moy_hid_tick", [_PHID], None),
+    ("moy_hid_set_enabled", [_PHID, _B], None),
+    ("moy_hid_discover", [_PHID], None),
+    ("moy_hid_pick", [_PHID, _PADDR], _B),
+    ("moy_hid_forget", [_PHID], None),
+    ("moy_hid_scan", [_PHID], _B),
+    ("moy_hid_on_scan_result", [_PHID, _PADDR, ctypes.c_int8, ctypes.c_char_p, ctypes.c_size_t],
+     None),
+    ("moy_hid_on_scan_done", [_PHID], None),
+    ("moy_hid_on_connect", [_PHID, _U16, _PADDR], None),
+    ("moy_hid_on_connect_failed", [_PHID], None),
+    ("moy_hid_on_disconnect", [_PHID, _U16], None),
+    ("moy_hid_on_svc", [_PHID, _U16, _U16, _U16, _U16], None),
+    ("moy_hid_on_svc_done", [_PHID, _U16, _I], None),
+    ("moy_hid_on_chr", [_PHID, _U16, _U16, _U16, _U8, _U16], None),
+    ("moy_hid_on_chr_done", [_PHID, _U16, _I], None),
+    ("moy_hid_on_dsc", [_PHID, _U16, _U16, _U16], None),
+    ("moy_hid_on_dsc_done", [_PHID, _U16, _I], None),
+    ("moy_hid_on_write_done", [_PHID, _U16, _U16, _I], None),
+    ("moy_hid_on_notify", [_PHID, _U16, _U16, ctypes.c_char_p, ctypes.c_size_t], None),
+    ("moy_hid_on_conn_update", [_PHID, _U16, _U16, _I], None),
+    ("moy_hid_on_enc_change", [_PHID, _U16, _B, _B], None),
+    ("moy_hid_frame", [_PHID], None),
+    ("moy_hid_set_player", [_PHID, ctypes.c_int8], None),
+    ("moy_hid_state", [_PHID], _U8),
+    ("moy_hid_text", [_PHID, _I], ctypes.c_char_p),
+    ("moy_hid_int", [_PHID, _I], _I32),
+    ("moy_hid_dev", [_PHID, _U8, _PADDR, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int8)], _B),
+    ("moy_hid_pref", [_PHID, _PADDR], _B),
+    ("moy_hid_adv_has_hid", [ctypes.c_char_p, ctypes.c_size_t], _B),
+    ("moy_hid_adv_name", [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t],
+     ctypes.c_size_t),
+    ("moy_hid_decode", [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(_U8),
+                        ctypes.POINTER(_U8), ctypes.POINTER(_U8)], _B),
+    ("moy_hid_keycode", [_U8, _U8, _B], _I32),
+    ("moy_hid_buttons_for_key", [_I32], _U32),
+)
+_DRV_SIGS = _DRV_SIGS + _HID_SIGS
+
+
+def adv_has_hid(adv):
+    adv = bytes(adv)
+    return _lib().moy_hid_adv_has_hid(adv, len(adv))
+
+
+def adv_name(adv):
+    adv = bytes(adv)
+    out = ctypes.create_string_buffer(32)
+    n = _lib().moy_hid_adv_name(adv, len(adv), out, 32)
+    return out.value.decode() if n else None
+
+
+def decode_report(report):
+    """A boot-shaped report -> (modifiers, usages), or None for another layout."""
+    r = bytes(report)
+    mods, keys, n = _U8(), (_U8 * 6)(), _U8()
+    if not _lib().moy_hid_decode(r, len(r), ctypes.byref(mods), keys, ctypes.byref(n)):
+        return None
+    return mods.value, tuple(keys[i] for i in range(n.value))
+
+
+def usage_to_keycode(usage, modifiers=0, caps=False):
+    return _lib().moy_hid_keycode(usage, modifiers, caps)
+
+
+def hid_buttons_for_key(key):
+    bits = _lib().moy_hid_buttons_for_key(key)
+    return tuple(n for i, n in enumerate(NAMES) if bits & (1 << i))
+
+
+class HidMachine:
+    """The central's machine over `stack`, writing `table`'s "ble" source."""
+
+    def __init__(self, table, stack, enabled=True, preferred=None, name=""):
+        lib = _lib()
+        self._buf = ctypes.create_string_buffer(lib.moy_hid_sizeof())
+        self.h = ctypes.cast(self._buf, _P)
+        self.stack = stack
+        self.table = table
+        self.src = table.source("ble")
+
+        def call(name, *a):
+            r = getattr(stack, name)(*a)
+            return 0 if r is None else int(r)
+
+        self._fns = (
+            _H_SCAN(lambda _c, picker: call("scan", bool(picker))),
+            _H_CTX(lambda _c: call("scan_stop")),
+            _H_CONNECT(lambda _c, a: call("connect", (a.contents.type, bytes(a.contents.a)))),
+            _H_CONN(lambda _c, conn: call("disconnect", conn)),
+            _H_CONN(lambda _c, conn: call("pair", conn)),
+            _H_CONN(lambda _c, conn: call("disc_svcs", conn)),
+            _H_RANGE(lambda _c, conn, s, e: call("disc_chrs", conn, s, e)),
+            _H_RANGE(lambda _c, conn, s, e: call("disc_dscs", conn, s, e)),
+            _H_WRITE(lambda _c, conn, h, src, n, rsp: call("write", conn, h, bytes(src[:n]),
+                                                           bool(rsp))),
+            _H_VOID(lambda _c: call("forget_bonds")),
+            _H_SAVE(lambda _c, _h: call("save", self)),
+            _CLOCK(lambda _c: int(stack.ms()) & _TICKS_MASK),
+        )
+        self.ops = _HidOps(*self._fns, None)
+        lib.moy_hid_init(self.h, ctypes.byref(self.ops), table._t, self.src.h)
+        pref = _addr(preferred) if preferred is not None else None
+        lib.moy_hid_load(self.h, enabled, ctypes.byref(pref) if pref else None,
+                         name.encode())
+
+    def __getattr__(self, name):
+        if name.startswith("on_") or name in ("tick", "discover", "forget", "frame",
+                                               "stopped"):
+            fn = getattr(_lib(), "moy_hid_" + name)
+            return lambda *a: fn(self.h, *a)
+        raise AttributeError(name)
+
+    def started(self, ok=True, why=None):
+        _lib().moy_hid_started(self.h, ok, (why or "").encode())
+
+    def scan(self):
+        return _lib().moy_hid_scan(self.h)
+
+    def set_enabled(self, on):
+        _lib().moy_hid_set_enabled(self.h, bool(on))
+
+    def pick(self, addr):
+        a = _addr(addr)
+        return _lib().moy_hid_pick(self.h, ctypes.byref(a))
+
+    def set_player(self, slot):
+        _lib().moy_hid_set_player(self.h, slot)
+
+    def scan_result(self, addr, rssi, adv):
+        a = _addr(addr)
+        adv = bytes(adv)
+        _lib().moy_hid_on_scan_result(self.h, ctypes.byref(a), rssi, adv, len(adv))
+
+    def connected(self, conn, addr):
+        a = _addr(addr)
+        _lib().moy_hid_on_connect(self.h, conn, ctypes.byref(a))
+
+    def notify(self, conn, handle, report):
+        r = bytes(report)
+        _lib().moy_hid_on_notify(self.h, conn, handle, r, len(r))
+
+    @property
+    def state(self):
+        return HID_STATES[_lib().moy_hid_state(self.h)]
+
+    def _int(self, which):
+        return _lib().moy_hid_int(self.h, which)
+
+    enabled = property(lambda self: bool(self._int(0)))
+    protocol = property(lambda self: (None, "boot", "report")[self._int(1)])
+    conn = property(lambda self: self._int(2))
+    notify_count = property(lambda self: self._int(3))
+    available = property(lambda self: bool(self._int(5)))
+    caps = property(lambda self: bool(self._int(6)))
+
+    @property
+    def name(self):
+        return _lib().moy_hid_text(self.h, 0).decode() or None
+
+    @property
+    def error(self):
+        return _lib().moy_hid_text(self.h, 1).decode() or None
+
+    @property
+    def preferred(self):
+        a = _Addr()
+        return (a.type, bytes(a.a)) if _lib().moy_hid_pref(self.h, ctypes.byref(a)) else None
+
+    def devices(self):
+        out = []
+        a, name, rssi = _Addr(), ctypes.create_string_buffer(32), ctypes.c_int8()
+        for i in range(self._int(4)):
+            _lib().moy_hid_dev(self.h, i, ctypes.byref(a), name, ctypes.byref(rssi))
+            out.append(((a.type, bytes(a.a)), name.value.decode(), rssi.value))
+        return out

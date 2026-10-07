@@ -64,8 +64,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   → dev channel → idle tick → pointer → present → frame → backlight gate →
   pump.tail → tail → pace, once, pinned by order tests in
   `tests/test_device_boot.py`. A board's `run_desktop` supplies hooks and its
-  hardware. The GT911's no-news contract (hold / stale-mark / bound) is one copy
-  in `device/gt911.py`.
+  hardware. Every touch driver's no-news contract (hold / stale-mark / bound)
+  and mapping is one copy in `native/moy_input/moy_touch.c`.
 - **Never reset ONE patched file in a board's `.build/micropython` by hand.**
   `moybyte_patch_native_code_free` patches the esp32 port's `main.c` and
   `mpconfigport.h` as one unit and keys "already applied" on the header; a
@@ -203,19 +203,18 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   SRAM, only the first band carries a command (what "a full-screen flush must
   be a single `tx_color`" meant), and a band fits one SPI DMA transaction — a
   compile-time assert.
-- **The T-Deck's input poller is paced by the FRAME, never a timer.**
-  `moybyte.input.InputPoller` owns every I2C0 transaction off the frame loop
-  (#69; needs build.sh's `machine_i2c.c` GIL-release patch, and falls back to
-  synchronous polling without `_thread`). It blocks on a lock `TDeckInput.poll`
-  releases once a frame (`poller.kick()`), then yields with `_sleep_ms(0)`. A
-  thread that sleeps re-takes the GIL every tick and starves under a
-  free-running cart: on 2026-09-23 a key was read twice a second under Brick
-  Siege, and lockstep netplay shipped that stale mask. Both halves of the
-  handoff are load-bearing.
+- **The T-Deck's input task is paced by the FRAME, never a timer.** The
+  kernel's input task (`native/moy_input/moy_input_task.c`, core 0) owns every
+  I2C0 transaction -- keyboard, GT911, the mode writes -- and runs one pass per
+  `moy_input.kick()`, which the frame's tail calls after present, so a C3
+  clock-stretch blocks that task and never the loop (#69). A pass on a timer
+  would read keys the frame never merges; under Brick Siege on 2026-09-23 the
+  thread this replaced read a key twice a second, and lockstep netplay shipped
+  that stale mask.
 - **The T-Deck keyboard (a separate ESP32-C3) switches mode per screen**:
-  ASCII for text, raw matrix for games.
-  `_disable_raw_mode` drains after the `0x04` revert and a text surface seeds
-  its edges with the byte already held — the README has the mechanism.
+  ASCII for text, raw matrix for games. The flip is queued and applied by the
+  input task's pass, which drains after the `0x04` revert, and a text surface
+  seeds its edges with the byte already held — the README has the mechanism.
 - **Serial reads are unreliable ACROSS a reset** on the SoC-USB boards: a reset
   removes the device node from under an open handle, and a reader that opens
   early sees nothing, which reads as a dead board. Attach after the boot
@@ -278,8 +277,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   call 2026-09-06, pinned by `tests/test_p4_display.py`): one persistent landscape buffer the PPA rotates
   onto the panel, with per-buffer stale rects so a ping-pong buffer is never
   shown behind. Up is the board runtime's `ROTATION` (90/270), live as
-  `py comp.set_angle(270)`. Its GSL3680 touch is RAM-loaded
-  (`device/gsl3680.py` uploads `modules/gsl_fw_jc8012.py` after every reset);
+  `py comp.set_angle(270)`. Its GSL3680 touch is RAM-loaded (the kernel's
+  driver uploads `boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c` after every reset);
   its serial is the P4's own USB-Serial/JTAG (the S3 rules, and esptool needs
   no BOOT button); its backlight GPIO23 is active-HIGH where the Waveshare's is
   active-low; its C6 runs Guition's factory slave, so BLE works and ESP-NOW

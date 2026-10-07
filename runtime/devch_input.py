@@ -3,9 +3,10 @@
 
 Each word is `word(chan, ws, parts, line)` in WORDS, the table DevChannel
 dispatches through; a word that returns False was not this one's after all,
-and the line goes on to the channel's own table. A gesture goes through the
-channel's pointer, the same one the glass feeds, and plays back a sample a
-frame in DevChannel._scripts.
+and the line goes on to the channel's own table. A gesture plays back a
+sample a frame in DevChannel._scripts. Every sample goes into the channel's own source
+in the input table (`DevChannel.point`), so the frame's merge hands it to the
+pointer exactly as it hands over a finger's.
 """
 
 
@@ -23,9 +24,8 @@ def tap(chan, ws, parts, line):
     if r is None:
         print("REMOTE ? %s" % line)
         return
-    chan.pointer.place(r[0], r[1])
-    chan.pointer.down = True     # released next frame (touch reads None)
-    chan.click = True
+    chan.point(r[0], r[1], True, True)
+    chan._tap = [r[0], r[1], True]   # released by the frame after the press is merged
     print("REMOTE tap %d %d" % r)
 
 

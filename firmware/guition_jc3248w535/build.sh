@@ -50,9 +50,7 @@ moybyte_setup_idf esp32s3 \
 # ---------------------------------------------------------------------------
 # 2) The patch ladder -- THIS BOARD'S half of the build, deliberately short.
 #    Not applied, each a decision: the esp_lcd tx_color no-acquire patch
-#    (moy_axs drives spi_master raw, no esp_lcd anywhere in this build) and
-#    the #69 I2C GIL release (no input-poller thread here -- the AXS touch is
-#    one 8-byte read per frame on an otherwise idle bus).
+#    (moy_axs drives spi_master raw, no esp_lcd anywhere in this build).
 # ---------------------------------------------------------------------------
 
 # 2a) REPR_C unboxed floats (#66) -- the same chip-class lever the T-Deck
@@ -80,9 +78,6 @@ moybyte_patch_usj_rx_init
 #     sdkconfig.board (adopted 2026-08-19).
 moybyte_patch_psram_retune
 
-# DECLINED moybyte_patch_p4_ble_hid_fastpath -- an ESP32-P4 silicon patch: it
-# edits modbluetooth.c for native/p4/moy_ble_hid, a module this board does not
-# compile.
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
 # the MIPI-DSI bridge-underrun ISR. This board has no DSI peripheral.
 

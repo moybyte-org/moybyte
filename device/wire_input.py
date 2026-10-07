@@ -5,22 +5,22 @@ in one place for every console board (docs/kernel_survival_2026-10.md section
 `build_desktop` (device/desktop_spine.py) calls `wire_pointer` behind the
 splash and `start_keyboards` once the presentation tier is up; a board whose
 keyboard is a BLE HID one (the P4 desk, the Guition S3) builds its input state
-with `ble_keyboard_input`. What is a board's own hardware -- the T-Deck's
-keyboard matrix, trackball and poller thread -- is its board module's
+with `ble_keyboard_input`. The table is the kernel's (`moy_input.kernel()`),
+the one its drivers write. What is a board's own hardware -- the T-Deck's
+keyboard, trackball and GT911 -- is its board module's
 (`modules/tdeck_input.py`).
 """
 
 from console import Pointer
 
 
-def ble_keyboard_input(store_path):
-    """(inp, keyboard): the merged InputState and a BLE HID keyboard writing
-    into it, its bonds kept at `store_path`. The keyboard's radio is started
-    by `start_keyboards`, after the Workstation's boot allocations."""
-    from ble_keyboard import BleHidKeyboard
-    from moybyte.input import InputState
-    inp = InputState()
-    return inp, BleHidKeyboard(inp, store_path=store_path, auto_start=False)
+def ble_keyboard_input():
+    """(inp, keyboard): the kernel's input table and its BLE HID keyboard
+    (native/moy_input's central, its bonds in NVS), or None where the board
+    takes no BLE. The radio is started by `start_keyboards`, after the
+    Workstation's boot allocations."""
+    import moy_input
+    return moy_input.kernel(), moy_input.ble()
 
 
 def wire_pointer(inp, inputs, w, h):

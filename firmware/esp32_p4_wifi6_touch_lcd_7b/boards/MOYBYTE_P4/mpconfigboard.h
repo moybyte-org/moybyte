@@ -116,6 +116,21 @@
 #define MOY_AUDIO_I2S_DOUT                  (9)
 #define MOY_AUDIO_PA_GPIO                   (53)
 
+// Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
+// central over NimBLE, its bonds in NVS. There is no `bluetooth` module.
+#define MOY_INPUT_BLE                       (1)
+#define MOY_INPUT_BLE_HOSTED                (1)     // the C6 over ESP-Hosted
+
+// Input's touch (native/moy_input/moy_input_task.c): the GT911 at 0x5D,
+// self-configured for the 1024x600 panel (INT and RST not wired), its status
+// cleared before the point is read; the panel is mounted 180 degrees.
+#define MOY_INPUT_TOUCH_KIND                (1)     // MOY_TOUCH_GT911
+#define MOY_INPUT_TOUCH_ADDR                (0x5D)
+#define MOY_INPUT_TOUCH_CLEAR_FIRST         (1)
+#define MOY_INPUT_TOUCH_SWAP                (0)
+#define MOY_INPUT_TOUCH_FLIP_X              (1)
+#define MOY_INPUT_TOUCH_FLIP_Y              (1)
+
 // The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
 // released layer buffers it keeps for the next run. A window's buffer is
 // never pooled (the desk re-mints at every size); a cart's worlds are.

@@ -6,8 +6,7 @@
 
 #include "moy_htab.h"
 
-#ifdef ESP_PLATFORM
-#include "esp_attr.h"
+#ifdef MOY_INPUT_BOARD
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #define LOCK(t) portENTER_CRITICAL_SAFE(&(t)->front->mux)
@@ -32,14 +31,20 @@ typedef struct {
     uint8_t qn;
     uint8_t queued;                 // the queue drives `key` at every begin_frame
     uint16_t qlast;                 // the key the queue delivered last frame
+    uint8_t pflags;                 // the pointer sample: P_SET | P_DOWN | P_EDGE | P_FRESH
+    int16_t px, py;
+    uint32_t pseq;                  // when it was written, for the newest-wins merge
 } moy_input_latch_t;
 
+enum { P_SET = 1, P_DOWN = 2, P_EDGE = 4, P_FRESH = 8 };
+
 typedef struct {
-#ifdef ESP_PLATFORM
+#ifdef MOY_INPUT_BOARD
     portMUX_TYPE mux;
 #endif
     int8_t key_src;                 // which source owns last_key, -1 for none
     int32_t last_key;
+    uint32_t pseq;
     moy_input_latch_t src[MOY_INPUT_SOURCES];
 } moy_input_front_t;
 
@@ -59,6 +64,7 @@ struct moy_input {
     uint32_t p_last[MOY_INPUT_PLAYERS];
     uint32_t p_pressed[MOY_INPUT_PLAYERS];
     uint32_t p_kept[MOY_INPUT_PLAYERS];
+    moy_input_sample_t smp;
 };
 
 #define HANDLE(slot) ((1u << MOY_HTAB_GEN_SHIFT) | ((uint32_t)MOY_KIND_SRC << MOY_HTAB_KIND_SHIFT) | (slot))
@@ -75,7 +81,7 @@ static uint32_t vocab(const moy_input_t *t) {
     return (1u << t->nbuttons) - 1u;
 }
 
-#ifdef ESP_PLATFORM
+#ifdef MOY_INPUT_BOARD
 static void *tab_alloc(size_t n) {
     void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
     return p ? p : heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
@@ -117,7 +123,7 @@ static void rescan(moy_input_t *t) {
 static int init(moy_input_t *t, moy_input_front_t *front, uint8_t nbuttons) {
     memset(t, 0, sizeof(*t));
     memset(front, 0, sizeof(*front));
-#ifdef ESP_PLATFORM
+#ifdef MOY_INPUT_BOARD
     portMUX_INITIALIZE(&front->mux);
 #endif
     front->key_src = -1;
@@ -154,11 +160,8 @@ void moy_input_free(moy_input_t *t) {
     tab_free(t);
 }
 
-#ifdef ESP_PLATFORM
-static DRAM_ATTR moy_input_front_t s_kernel_front;
-#else
+// The kernel table's latches: .bss, which is internal RAM on a board.
 static moy_input_front_t s_kernel_front;
-#endif
 static moy_input_t *s_kernel;
 
 moy_input_t *moy_input_kernel(void) {
@@ -351,6 +354,23 @@ uint32_t moy_input_source_held(const moy_input_t *t, uint32_t h) {
     return s < 0 ? 0 : t->front->src[s].held;
 }
 
+int moy_input_point(moy_input_t *t, uint32_t h, int32_t x, int32_t y, bool down, bool edge,
+                    bool fresh) {
+    int s = slot_of(t, h);
+    if (s < 0) {
+        return MOY_INPUT_STALE;
+    }
+    moy_input_latch_t *l = &t->front->src[s];
+    LOCK(t);
+    l->px = (int16_t)(x < INT16_MIN ? INT16_MIN : (x > INT16_MAX ? INT16_MAX : x));
+    l->py = (int16_t)(y < INT16_MIN ? INT16_MIN : (y > INT16_MAX ? INT16_MAX : y));
+    l->pflags = (uint8_t)(P_SET | (down ? P_DOWN : 0) | (edge ? P_EDGE : 0) | (fresh ? P_FRESH : 0)
+                          | (l->pflags & P_EDGE));
+    l->pseq = ++t->front->pseq;
+    UNLOCK(t);
+    return MOY_INPUT_OK;
+}
+
 // The next one-shot key for this frame: none when the queue is empty, and a
 // zero frame between two equal keys.
 static int32_t dequeue_locked(moy_input_latch_t *l) {
@@ -367,9 +387,25 @@ static int32_t dequeue_locked(moy_input_latch_t *l) {
 
 // -- the frame -------------------------------------------------------------------
 
+// Is a's sample the better one: a source that is down beats one that is not,
+// then the newer wins (pseq wraps; differences stay small).
+static bool better(const moy_input_latch_t *a, const moy_input_latch_t *b) {
+    if (b == NULL) {
+        return true;
+    }
+    bool ad = (a->pflags & P_DOWN) != 0;
+    bool bd = (b->pflags & P_DOWN) != 0;
+    if (ad != bd) {
+        return ad;
+    }
+    return (int32_t)(a->pseq - b->pseq) > 0;
+}
+
 void moy_input_begin_frame(moy_input_t *t) {
     uint32_t held = 0;
     uint32_t ph[MOY_INPUT_PLAYERS] = {0};
+    const moy_input_latch_t *best = NULL;
+    moy_input_sample_t smp = {0};
     LOCK(t);
     for (uint8_t i = 0; i < t->nsrc; i++) {
         moy_input_latch_t *l = &t->front->src[i];
@@ -378,8 +414,23 @@ void moy_input_begin_frame(moy_input_t *t) {
         }
         held |= l->held;
         ph[t->player[i]] |= l->held;
+        if ((l->pflags & P_SET) && better(l, best)) {
+            best = l;
+        }
+    }
+    if (best != NULL) {
+        smp.any = true;
+        smp.down = (best->pflags & P_DOWN) != 0;
+        smp.edge = smp.down && (best->pflags & P_EDGE) != 0;
+        smp.fresh = (best->pflags & P_FRESH) != 0;
+        smp.x = best->px;
+        smp.y = best->py;
+    }
+    for (uint8_t i = 0; i < t->nsrc; i++) {
+        t->front->src[i].pflags &= (uint8_t)~P_EDGE;
     }
     UNLOCK(t);
+    t->smp = smp;
     t->held = held;
     t->pressed = held & ~t->last;
     t->released = t->last & ~held;
@@ -454,6 +505,10 @@ void moy_input_masks(const moy_input_t *t, uint8_t player, uint32_t *held, uint3
 
 uint32_t moy_input_released(const moy_input_t *t) {
     return t->released;
+}
+
+void moy_input_sample(const moy_input_t *t, moy_input_sample_t *out) {
+    *out = t->smp;
 }
 
 uint32_t moy_input_kept(const moy_input_t *t) {
@@ -544,4 +599,18 @@ void moy_input_ptr_tick(moy_input_ptr_t *p, uint32_t now) {
     if (p->visible && moy_input_ticks_diff(now, p->last_move) >= p->idle_ms) {
         p->visible = false;
     }
+}
+
+int moy_input_ptr_apply(const moy_input_t *t, moy_input_ptr_t *p, uint32_t now) {
+    const moy_input_sample_t *s = &t->smp;
+    if (!s->any) {
+        return 0;
+    }
+    p->down = s->down;
+    p->fresh = s->fresh;
+    if (!s->down) {
+        return 0;
+    }
+    moy_input_ptr_place(p, s->x, s->y, now);
+    return MOY_INPUT_P_HELD | (s->edge ? MOY_INPUT_P_CLICK : 0);
 }

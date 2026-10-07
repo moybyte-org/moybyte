@@ -234,8 +234,7 @@ CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
 # was the difference between "WiFi cannot initialise" and a working web host.
 #
 # Roles are deliberately NOT trimmed: dropping PERIPHERAL/BROADCASTER is likely
-# the biggest remaining win, but MicroPython's modbluetooth compiles its gatts_*
-# half unconditionally, so that is a build risk to test on its own.
+# the biggest remaining win, and a build risk to test on its own.
 #
 # ADV_REPORT_FLOW_CTRL_NUM is 50 because IDF ranges it 50..1000 (default 100):
 # an out-of-range value is REFUSED SILENTLY and the build keeps the default, so
@@ -251,6 +250,16 @@ CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
 CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=8
 CONFIG_BT_CTRL_BLE_MAX_ACT=3
 CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=50
+
+# The kernel's BLE keyboard keeps its bonds in NimBLE's own NVS store
+# (native/moy_input/moy_ble_task.c): the pairing survives a reboot with no file
+# on any volume.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# NimBLE's host task runs the kernel's C callbacks (native/moy_input), not
+# Python: sdkconfig.ble's 6144 was sized for MicroPython's BLE IRQ handlers,
+# and the 2 KB it carries above IDF's default is internal SRAM.
+CONFIG_BT_NIMBLE_TASK_STACK_SIZE=4096
 
 # --- The panel flush done-ISR runs from IRAM, not flash ---------------------
 # IDF's own default is y; MicroPython's boards/sdkconfig.base turns it off in a

@@ -46,8 +46,8 @@
 #define MICROPY_HW_ENABLE_UART_REPL         (0)
 
 // I2C0 is the T-Deck's peripheral bus: the ESP32-C3 keyboard (0x55) and the
-// GT911 touch controller (0x5D/0x14) share it. device_input.py passes these
-// pins explicitly; setting them here means a bare machine.I2C(0) is also right.
+// GT911 touch controller (0x5D/0x14) share it, the kernel's bus (MOY_BUS_I2C_*
+// below): nothing opens a machine.I2C on port 0.
 #define MICROPY_HW_I2C0_SCL                 (8)
 #define MICROPY_HW_I2C0_SDA                 (18)
 
@@ -143,6 +143,36 @@
 #define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
 #define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
 #define MOY_BUS_I2C_HZ                      (400000)
+// The C3 keyboard clock-stretches for tens of milliseconds (#69): a stretch
+// past this many microseconds fails the read, which the keyboard's driver holds
+// over as one stale frame.
+#define MOY_BUS_I2C_STRETCH_US              (5000)
+
+// Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
+// central over NimBLE, its bonds in NVS. There is no `bluetooth` module.
+#define MOY_INPUT_BLE                       (1)
+#define MICROPY_PY_BLUETOOTH                (0)
+
+// Input's drivers (native/moy_input/moy_input_task.c): the C3 keyboard, the
+// trackball's four pulse pins and its click, and the GT911 (y then x, its INT
+// line gating the reads, #74), all passed on the input task (#69), whose
+// stack is the measured high water plus a margin.
+#define MOY_INPUT_KBD_TDECK                 (1)
+#define MOY_INPUT_TASK                      (1)
+#define MOY_INPUT_TASK_STACK                (2560)
+#define MOY_INPUT_BALL_UP                   (3)
+#define MOY_INPUT_BALL_DOWN                 (15)
+#define MOY_INPUT_BALL_LEFT                 (1)
+#define MOY_INPUT_BALL_RIGHT                (2)
+#define MOY_INPUT_BALL_CLICK                (0)
+#define MOY_INPUT_TOUCH_KIND                (1)     // MOY_TOUCH_GT911
+#define MOY_INPUT_TOUCH_YX                  (1)
+#define MOY_INPUT_TOUCH_INT                 (16)
+#define MOY_INPUT_TOUCH_SWAP                (0)
+#define MOY_INPUT_TOUCH_FLIP_X              (0)
+#define MOY_INPUT_TOUCH_FLIP_Y              (1)     // the GT911's Y runs opposite the screen
+#define MOY_INPUT_TOUCH_RAW_W               (320)
+#define MOY_INPUT_TOUCH_RAW_H               (240)
 
 // The speaker (native/moy_audio/moy_aud_out.c): the MAX98357 amp on its own
 // I2S pins, behind the board power gate (GPIO 10, driven at boot).

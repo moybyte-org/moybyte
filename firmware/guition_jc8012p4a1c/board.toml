@@ -385,9 +385,8 @@ The second staging source, and the one that must STAY an allowlist.
 default answer is "yes, this crosses". `device/` is the boards' shared DEVICE
 tier -- a repo-root tree since the fork's deletion (2026-08-17, `a02bb33`).
 It stays an allowlist even so, because not every board drives every piece of
-it: this board has no SPI-shared SD (`moybyte_sd.py` stays T-Deck-only), no
-GT911 (`gt911.py` crosses only for
-its HeldPoint core, which the GSL3680 driver rides), and the allowlist is
+it: this board has no SPI-shared SD (`moybyte_sd.py` stays T-Deck-only), its
+touch driver is the kernel's (native/moy_input), and the allowlist is
 where that per-board difference is written down rather than discovered as a
 frozen module nothing imports.
 
@@ -400,15 +399,6 @@ The boot spine and the frame loop are `runtime/device_boot.py` and
 The line that decides is whether a module can import with no board present:
 both take every hardware object as an argument, so they load on CPython and
 tests/test_device_boot.py executes their shared half."""
-packages = ["moybyte"]
-packages_why = """
-`moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState
-plus the T-Deck keyboard matrix. Staged WHOLE (minus __pycache__) rather than
-file-by-file, so a new member of the package cannot go missing here.
-
-(Declared HERE, above the groups: a bare key after a `[[modules.device.group]]`
-header belongs to that group's table, not to `[modules.device]`.)"""
-
 [[modules.device.group]]
 files = ["boot_shell.py"]
 why = """
@@ -463,26 +453,6 @@ boot. This board's compositor is the kernel's moy_glass.RotatedCompositor
 `card_store.py` is the cart store on a card that has a bus of its own
 (tests/test_card_store.py executes it): the TF card when one mounts, the
 internal flash when not."""
-
-[[modules.device.group]]
-files = ["gt911.py", "gsl3680.py"]
-why = """
-The touch driver: `gsl3680.py` is the Silead GSL3680's shared core (a NEW
-part, so it starts in device/ with the board's pins, firmware and flips
-passed in -- the port checklist's stage-2 rule), and `gt911.py` crosses for
-ONE thing, its HeldPoint -- the no-news contract every touch driver rides
-(hold / stale-mark / bound). No GT911 is on this board. The firmware the
-driver uploads is the board's own `gsl_fw_jc8012.py` (tracked, in modules/):
-it carries this glass's sensor geometry and belongs to no other board."""
-
-[[modules.device.group]]
-files = ["ble_keyboard.py"]
-why = """
-The BLE HID keyboard (#26). Standard `bluetooth` API; this board's radio is
-the companion C6 over ESP-Hosted SDIO, exactly the Waveshare's arrangement,
-and the `moy_ble_hid` notification fast-path usermod is the P4 silicon tier's
-(the driver imports it guardedly). UNVERIFIED on this board's glass: no
-keyboard was paired at bring-up."""
 
 [[modules.device.group]]
 files = ["device_wifi.py"]

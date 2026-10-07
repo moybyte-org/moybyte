@@ -38,8 +38,13 @@ def _load(path, name):
     return mod
 
 
-device_input = _load(ROOT / "device" / "moybyte" / "input.py", "moy_device_input")
-blekbd = _load(ROOT / "device" / "ble_keyboard.py", "moy_ble_under_test")
+from runtime import moy_input as _mi  # noqa: E402
+
+
+class device_input:
+    """The boards' input: the kernel's table (all fifteen names) and the T-Deck
+    keyboard's driver, native/moy_input, over the host's binding."""
+    InputState = _mi.InputTable
 from runtime.input import InputState as HostInputState        # noqa: E402
 
 
@@ -360,15 +365,14 @@ def test_the_boards_idle_check_still_sees_a_held_button_after_the_merge():
     assert not inp.any_held() and not inp.last_key         # idle -> the blank may arm
 
 
-def test_the_tdeck_keyboard_smoke_stage_polls_before_it_merges():
-    """A merge taken before the poll makes the button row lag the key by a
-    frame."""
+def test_the_tdeck_keyboard_smoke_stage_kicks_before_it_merges():
+    """A merge taken before the pass makes the button row lag the key by a
+    frame: the smoke's loop merges what the last kick's pass wrote."""
     src = (ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
            / "tdeck_smoke.py").read_text()
     lines = _code_lines(src, "def _run_phase(", "\ndef ")
-    merge = _line_of(lines, "inp.begin_frame()", "tdeck_smoke")
-    assert _line_of(lines, "kbd.poll()", "tdeck_smoke") < merge
-    assert _line_of(lines, "poller.consume()", "tdeck_smoke") < merge
+    assert _line_of(lines, "moy_input.kick()", "tdeck_smoke") \
+        < _line_of(lines, "inp.begin_frame()", "tdeck_smoke")
 
 
 # -- last_key ---------------------------------------------------------------
@@ -530,13 +534,56 @@ class _FakeI2C:
         buf[:] = self.frame
 
 
+class _Kbd:
+    """The T-Deck keyboard's C driver in raw mode over a fake matrix; poll() is
+    one input-task pass."""
+
+    def __init__(self, inp):
+        self._i2c = _FakeI2C()
+        self.drv = _mi.KbdDriver(inp, self._i2c)
+        self.drv.raw_mode = True
+
+    def poll(self):
+        self.drv.pass_()
+
+
 def _tdeck_keyboard(inp):
-    kbd = device_input.TDeckKeyboard.__new__(device_input.TDeckKeyboard)
-    kbd.input = inp
-    kbd.available = True
-    kbd.raw_mode = True
-    kbd._i2c = _FakeI2C()
-    return kbd
+    return _Kbd(inp)
+
+
+class _AnyStack:
+    def __getattr__(self, name):
+        return lambda *a: 0
+
+    def ms(self):
+        return 1000
+
+
+class _Ble:
+    """The kernel's BLE keyboard machine, connected, its input report on handle
+    7; `press(usages)` is a report and poll() the frame's half."""
+
+    def __init__(self, inp):
+        m = self.m = _mi.HidMachine(inp, _AnyStack())
+        self.src = m.src
+        addr = (0, b"\x01\x02\x03\x04\x05\x06")
+        m.started(True)
+        m.scan_result(addr, -40, bytes((3, 0x03, 0x12, 0x18)))
+        m.on_scan_done()
+        m.connected(3, addr)
+        m.on_svc(3, 1, 12, _mi.HID_SERVICE)
+        m.on_svc_done(3, 0)
+        m.on_chr(3, 2, 7, _mi.HID_NOTIFY, _mi.HID_REPORT)
+        m.on_chr_done(3, 0)
+        m.on_dsc(3, 8, _mi.HID_CCCD)
+        m.on_dsc_done(3, 0)
+        m.on_write_done(3, 8, 0)
+
+    def press(self, *usages):
+        self.m.notify(3, 7, bytes((0, 0) + usages + (0,) * (6 - len(usages))))
+
+    def poll(self):
+        self.m.frame()
 
 
 def test_the_physical_keyboards_poll_no_longer_erases_the_ble_keyboard():
@@ -550,10 +597,10 @@ def test_the_physical_keyboards_poll_no_longer_erases_the_ble_keyboard():
     inp = device_input.InputState()
     inp.text_mode = False
     kbd = _tdeck_keyboard(inp)
-    ble = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
+    ble = _Ble(inp)
 
     # A BLE report lands (usage 0x1A = W -> the `up` button, key 'w').
-    ble._reports[7] = (0, (0x1A,))
+    ble.press(0x1A)
     ble.poll()
 
     # ...and the physical keyboard polls an EMPTY matrix, over and over.
@@ -571,7 +618,7 @@ def test_the_physical_keyboards_poll_no_longer_erases_the_ble_keyboard():
     assert inp.held("up") and inp.held("right")
 
     # The BLE keyboard lets go; the physical one keeps what it holds.
-    ble._reports[7] = (0, ())
+    ble.press()
     ble.poll()
     kbd.poll()
     inp.begin_frame()
@@ -580,7 +627,7 @@ def test_the_physical_keyboards_poll_no_longer_erases_the_ble_keyboard():
 
     # ...and the other way round.
     kbd._i2c.frame = b"\x00\x00\x00\x00\x00"
-    ble._reports[7] = (0, (0x1A,))
+    ble.press(0x1A)
     ble.poll()
     kbd.poll()
     inp.begin_frame()
@@ -594,12 +641,11 @@ def test_the_two_keyboards_can_be_two_players():
     inp = device_input.InputState()
     inp.text_mode = False
     kbd = _tdeck_keyboard(inp)
-    ble = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
-    ble.poll()                                   # binds its source
+    ble = _Ble(inp)
     ble.src.player = 1
 
     kbd._i2c.frame = bytes([0x00, 0x04, 0, 0, 0])    # 'd' -> `right`
-    ble._reports[7] = (0, (0x1A,))                   # 'w' -> `up`
+    ble.press(0x1A)                                  # 'w' -> `up`
     kbd.poll()
     ble.poll()
     inp.begin_frame()

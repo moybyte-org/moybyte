@@ -147,52 +147,31 @@ def touch(secs=60):
     This is the stage's whole verification, because touch has three independent
     ways to be wrong and only the raw numbers separate them:
 
-      NOT FOUND     -> "GT911 not found on I2C0". The controller is on the same
-                       I2C0 (SCL 8 / SDA 18) as the keyboard C3, at 0x5D or
-                       0x14 depending on how the INT line was strapped at reset.
+      NOT FOUND     -> available=0. The controller is on the same I2C0 (SCL 8 /
+                       SDA 18) as the keyboard C3, at 0x5D or 0x14 depending on
+                       how the INT line was strapped at reset.
       FOUND, MAPPED WRONG -> taps land in the wrong box. `raw=` vs `map=` on the
-                       serial line says which axis: device_input's TOUCH_SWAP /
-                       TOUCH_FLIP_X / TOUCH_FLIP_Y are the three knobs, and they
-                       are module globals, so they can be poked from the REPL
-                       and this smoke re-run with NO rebuild.
+                       serial line says which axis: the driver's swap_xy /
+                       flip_x / flip_y are live attributes, poked from the REPL
+                       with this smoke re-run and NO rebuild, then baked into
+                       mpconfigboard.h's MOY_INPUT_TOUCH_*.
       FOUND, MAPPED RIGHT, SLOW -> the I2CSTAT line. The GT911 clock-stretches
                        20-45ms on most reads taken while a finger is DOWN (#74),
-                       which is why stage 3's poller thread exists at all. Seeing
-                       `over20` climb HERE, in a single-threaded program, is the
-                       measurement that justifies it.
+                       which is why the kernel passes it on the input task.
 
     The screen repaints only when the touch state changes, so an idle board is
     not flushing the panel 60 times a second while the owner reads serial.
     """
-    from device_input import Touch
-    import device_input
+    import moy_input
 
     comp, canvas = _canvas()
     w, h = canvas.w, canvas.h
-    tp_dev = Touch(w, h)
-    # Tap the driver's RAW sample on its way past, so the serial line can show
-    # raw beside mapped. Wrapped HERE, on the instance, rather than adding a
-    # debug field to `device_input` -- that module is staged from the SHIPPING
-    # build's tree and a bring-up program has no business editing it.
-    raw_seen = [None]
-    _read_raw = tp_dev.read_raw
-
-    def _tapped_read_raw():
-        r = _read_raw()
-        if r is not None and r is not False:
-            raw_seen[0] = r
-        return r
-
-    tp_dev.read_raw = _tapped_read_raw
-    print("Moybyte touch: available=%d addr=%s int_pin=%s gate=%s"
-          % (1 if tp_dev.available else 0,
-             hex(tp_dev.addr) if tp_dev.addr else "-",
-             device_input.Touch.INT_PIN,
-             "on" if tp_dev._int_pin is not None else "OFF (blind polling)"))
+    tp_dev = moy_input.touch(w, h)
+    print("Moybyte touch: available=%d addr=0x%02x gate=%s"
+          % (1 if tp_dev.available else 0, tp_dev.addr,
+             "on" if tp_dev.gate else "OFF (blind polling)"))
     print("Moybyte touch: map knobs swap=%s flip_x=%s flip_y=%s raw=%dx%d"
-          % (device_input.TOUCH_SWAP, device_input.TOUCH_FLIP_X,
-             device_input.TOUCH_FLIP_Y, device_input.TOUCH_RAW_W,
-             device_input.TOUCH_RAW_H))
+          % (tp_dev.swap_xy, tp_dev.flip_x, tp_dev.flip_y, tp_dev.raw_w, tp_dev.raw_h))
 
     targets = _touch_targets(w, h)
     last = None
@@ -212,7 +191,7 @@ def touch(secs=60):
             col = RED if tap else GREEN
             canvas.line(x - 12, y, x + 12, y, col)
             canvas.line(x, y - 12, x, y + 12, col)
-            canvas.print("map=%d,%d raw=%s" % (x, y, _raw_str(raw_seen[0])),
+            canvas.print("map=%d,%d raw=%s" % (x, y, _raw_str(tp_dev.raw)),
                          6, h - 16, WHITE)
         _present(comp, canvas)
 
@@ -222,6 +201,8 @@ def touch(secs=60):
     t_end = time.ticks_add(time.ticks_ms(), secs * 1000)
     t_beat = time.ticks_ms()
     while time.ticks_diff(t_end, time.ticks_ms()) > 0:
+        moy_input.kick()
+        time.sleep_ms(10)
         pt = tp_dev.poll()
         state = None if pt is None else (pt[0], pt[1])
         if state != last:
@@ -229,188 +210,114 @@ def touch(secs=60):
             _paint(pt, bool(pt and pt[2]))
         if pt is not None and pt[2]:
             taps += 1
-            print("TAP %d map=(%d,%d) raw=%s" % (taps, pt[0], pt[1],
-                                                 _raw_str(raw_seen[0])))
+            print("TAP %d map=(%d,%d) raw=%s" % (taps, pt[0], pt[1], _raw_str(tp_dev.raw)))
         if time.ticks_diff(time.ticks_ms(), t_beat) >= 3000:
             t_beat = time.ticks_ms()
             print("Moybyte touch: %s" % _i2cstat(tp_dev))
-        time.sleep_ms(10)
 
     print("Moybyte touch: taps=%d %s" % (taps, _i2cstat(tp_dev)))
     print("Moybyte touch smoke done -> REPL")
 
 
 # ---------------------------------------------------------------------------
-# STAGE 3 -- the ESP32-C3 keyboard on I2C0, and the #69 poller thread.
+# STAGE 3 -- the ESP32-C3 keyboard on I2C0, on the kernel's input task (#69).
 # ---------------------------------------------------------------------------
 
-# Buttons drawn as a held/not-held row. Not every name in InputState.BUTTONS --
-# these are the ones the T-Deck matrix can actually produce (moybyte/input.py's
-# KEY_BUTTON): the WASD d-pad, L/space = A, K = B, ENTER = run, BACKSPACE = home.
+# Buttons drawn as a held/not-held row: the ones the T-Deck matrix can
+# produce (native/moy_input/moy_kbd.c's scheme): the WASD d-pad, L/space = A,
+# K = B, ENTER = run, BACKSPACE = home.
 _KBD_BUTTONS = ("up", "down", "left", "right", "a", "b", "run", "home")
 
-# Seconds per phase. Three phases, so the whole smoke is ~3x this plus the
+# Seconds per phase. Two phases, so the whole smoke is ~2x this plus the
 # wrap-up -- long enough to hold a key down and see it repeat, short enough
 # that the owner is not standing over the board.
 _KBD_PHASE_S = 15
 
 
 def keyboard(phase_s=_KBD_PHASE_S):
-    """Keyboard bring-up AND the #69 poller A/B, in one program.
+    """Keyboard bring-up and the #69 A/B, in one program: the kernel's driver
+    passed on the input task, one pass a frame.
 
-    THREE PHASES, and the third is the point:
+      1. ASCII -- the mode the code editor runs in. Each key reports ONCE on
+         the press edge with no autorepeat, which is why a held key can only be
+         faked (MOY_KBD_HOLD_MS) and why raw mode has to exist.
+      2. RAW MATRIX -- `0x03`, five bytes per read, one bitmask per column. A
+         HELD direction keeps firing here, which is what a running cart needs.
+         Needs C3 firmware >= 2025-06-12; older firmware ignores the command and
+         keeps sending ASCII, which the driver detects and falls back on.
 
-      1. ASCII (synchronous)  -- the mode the code editor runs in. Each key
-         reports ONCE on the press edge with no autorepeat, which is why a held
-         key can only be faked (`KEY_HOLD_MS`) and why raw mode has to exist.
-      2. RAW MATRIX (synchronous) -- `0x03`, five bytes per read, one bitmask
-         per column, bit N = row N. A HELD direction keeps firing here, which is
-         what a running cart needs. Needs C3 firmware >= 2025-06-12; older
-         firmware ignores the command and keeps sending ASCII, which the driver
-         detects and falls back on -- the smoke says so if it happens.
-      3. RAW MATRIX (POLLER THREAD) -- the same reads, moved off the frame loop
-         onto `moybyte.input.InputPoller`.
-
-    WHAT PHASE 3 MEASURES, and why it is the whole reason the port carries the
-    #69 GIL patch. The C3 is a bit-banged I2C slave that CLOCK-STRETCHES: real
-    stalls of 21-60ms have been measured on this board. In phases 1 and 2 that
-    stall lands inside the loop and IS the frame. In phase 3 it lands on the
-    poller thread instead -- but ONLY if `machine_i2c.c` releases the GIL across
-    the blocking transaction, because MicroPython threads share one GIL, so
-    without the patch the stall freezes the VM from whichever thread took it.
-
-    So the loop's worst iteration is printed for every phase, and the phase-2
-    vs phase-3 pair is the on-glass proof that the patch is doing its job:
-    phase 3's `max=` should collapse toward the panel flush cost while its
-    `i2c max=` stays just as bad. Both numbers staying bad means the patch is
-    not in the image; both improving means the C3 simply was not stalling and
-    the test needs a harder workout (hold several keys).
+    WHAT IT MEASURES. The C3 CLOCK-STRETCHES: real stalls of 21-60ms have been
+    measured on this board. On the input task a stall blocks that task and
+    never the loop, so each phase prints the loop's worst iteration beside the
+    driver's worst transaction: `loop_max` should stay near the panel flush
+    while `i2c max=` stays just as bad as the bus makes it.
 
     The screen shows a MOVING BAR. A frozen bar is a frozen loop, which is the
     one failure this program exists to make visible without a stopwatch.
     """
-    from moybyte.input import InputState, TDeckKeyboard, InputPoller
+    import moy_input
 
     comp, canvas = _canvas()
-    inp = InputState()
-    kbd = TDeckKeyboard(inp)
-    # Watch the raw five bytes go past. Instance-level, like the touch smoke's
-    # wrapper: `moybyte/input.py` is the SHIPPING build's keyboard driver and a
-    # bring-up program does not get to add debug fields to it.
-    raw_seen = [None]
-    _timed_read = kbd._timed_read
-
-    def _tapped_timed_read(n):
-        d = _timed_read(n)
-        if n == 5 and d is not None and len(d) == 5:
-            raw_seen[0] = bytes(d)
-        return d
-
-    kbd._timed_read = _tapped_timed_read
-
-    print("Moybyte kbd: available=%d addr=0x%02x raw_allowed=%s timeout_us=%s"
-          % (1 if kbd.available else 0, kbd.KEYBOARD_ADDR, kbd.RAW_GAME_MODE,
-             kbd.I2C_TIMEOUT_US))
+    inp = moy_input.kernel()
+    kbd = moy_input.keyboard()
+    print("Moybyte kbd: available=%d raw_allowed=%s task_stack_free=%d"
+          % (1 if kbd.available else 0, kbd.RAW_GAME_MODE, moy_input.task_stack_free()))
     if not kbd.available:
         print("Moybyte kbd: NOT FOUND on I2C0 -- nothing further to measure")
 
     comp.set_backlight(True)
     typed = []
-    results = []
 
-    def _run_phase(label, raw, poller, secs):
-        """One phase: drive input for `secs`, draw every frame, and return the
-        loop's own worst iteration beside the I2C driver's worst transaction."""
+    def _run_phase(label, raw, secs):
         kbd.set_game_mode(raw)
-        if poller is not None:
-            # The poller owns the bus, so the mode switch it was just handed is
-            # applied by the poller on a pass, and a pass happens per kick (one
-            # per frame in the console). Give it a few before measuring, or
-            # phase 3 spends its first samples in the mode phase 2 left behind.
-            for _ in range(4):
-                poller.kick()
-                time.sleep_ms(20)
+        for _ in range(4):                  # the flip is applied by a pass
+            moy_input.kick()
+            time.sleep_ms(20)
         base_n = kbd.stat_n
-        base_max = kbd.stat_max_us
         base_o5 = kbd.stat_over5
         base_o20 = kbd.stat_over20
         base_to = kbd.stat_timeouts
-        kbd.stat_max_us = 0             # per-phase worst; restored below
         worst = 0
         over20 = 0
         frames = 0
         t_end = time.ticks_add(time.ticks_ms(), secs * 1000)
         while time.ticks_diff(t_end, time.ticks_ms()) > 0:
             t0 = time.ticks_ms()
-            # Poll every source, THEN begin_frame -- the console's own order
-            # (tdeck_input.TDeckInput.poll). begin_frame is where the union of the
-            # sources is derived, so merging before the poll reads back the
-            # PREVIOUS pass's buttons.
-            if poller is not None:
-                poller.kick()
-                time.sleep_ms(0)        # the yield that runs the pass
-                poller.consume()
-            else:
-                kbd.poll()
             inp.begin_frame()
             k = inp.last_key
             if k and 0x20 <= k <= 0x7E:
                 typed.append(chr(k))
                 del typed[:-24]
-            _paint_kbd(comp, canvas, label, kbd, inp, raw_seen[0], typed,
-                       frames, worst)
+            _paint_kbd(comp, canvas, label, kbd, inp, None, typed, frames, worst)
+            moy_input.kick()
             frames += 1
             el = time.ticks_diff(time.ticks_ms(), t0)
             if el > worst:
                 worst = el
             if el >= 20:
                 over20 += 1
-        line = ("%-18s frames=%d loop_max=%dms over20=%d | i2c reads=%d "
-                "max=%.1fms over5=%d over20=%d timeouts=%d raw_mode=%s"
-                % (label, frames, worst, over20, kbd.stat_n - base_n,
-                   kbd.stat_max_us / 1000.0, kbd.stat_over5 - base_o5,
-                   kbd.stat_over20 - base_o20, kbd.stat_timeouts - base_to,
-                   kbd.raw_mode))
-        if kbd.stat_max_us < base_max:
-            kbd.stat_max_us = base_max      # keep the session maximum honest
-        print("Moybyte kbd: " + line)
-        results.append((label, worst))
+        print("Moybyte kbd: %-10s frames=%d loop_max=%dms over20=%d | i2c reads=%d "
+              "max=%.1fms over5=%d over20=%d timeouts=%d raw_mode=%s"
+              % (label, frames, worst, over20, kbd.stat_n - base_n,
+                 kbd.stat_max_us / 1000.0, kbd.stat_over5 - base_o5,
+                 kbd.stat_over20 - base_o20, kbd.stat_timeouts - base_to,
+                 kbd.raw_mode))
 
-    _run_phase("1 ascii sync", False, None, phase_s)
-    _run_phase("2 raw sync", True, None, phase_s)
-    if kbd._raw_unsupported:
+    _run_phase("1 ascii", False, phase_s)
+    _run_phase("2 raw", True, phase_s)
+    if kbd.raw_unsupported:
         print("Moybyte kbd: RAW MODE UNSUPPORTED -- the C3 firmware ignored 0x03 "
               "(pre-2025-06-12). The driver fell back to ASCII + the hold latch, "
               "which is correct behaviour, but hold-to-move will stall.")
-
-    # Phase 3: the same reads, off the loop. `touch=None` is deliberate -- this
-    # phase is about the keyboard's stall, and adding the GT911's would make the
-    # two numbers uninterpretable.
-    poller = InputPoller(kbd, None)
-    if poller.start():
-        kbd._poller_owned = True
-        print("Moybyte kbd: poller thread up (one pass per kick)")
-        _run_phase("3 raw poller", True, poller, phase_s)
-        poller.stop()
-        kbd._poller_owned = False
-        time.sleep_ms(50)
-        print("Moybyte kbd: poller thread alive=%s after stop" % poller.alive)
-    else:
-        print("Moybyte kbd: poller thread FAILED to start -- no _thread or no RAM; "
-              "the console falls back to synchronous polling, which is phase 2")
-
     # Back to ASCII (0x04). Sending the revert is the step an earlier attempt
     # missed, and skipping it leaves the keyboard streaming matrix bytes at the
-    # code editor -- irreversibly garbled text, from the next boot's point of
-    # view, because nothing re-sends it.
+    # code editor.
     kbd.set_game_mode(False)
-    kbd.poll()
-    print("Moybyte kbd: reverted to ASCII -- raw_mode=%s" % kbd.raw_mode)
-    if len(results) >= 3:
-        print("Moybyte kbd: GIL VERDICT loop_max sync=%dms poller=%dms "
-              "(poller should be the smaller; both large = the #69 I2C "
-              "GIL-release patch is not in this image)"
-              % (results[1][1], results[2][1]))
+    for _ in range(4):
+        moy_input.kick()
+        time.sleep_ms(20)
+    print("Moybyte kbd: reverted to ASCII -- raw_mode=%s task_stack_free=%d"
+          % (kbd.raw_mode, moy_input.task_stack_free()))
     print("Moybyte kbd smoke done -> REPL")
 
 
@@ -775,7 +682,7 @@ class _Log:
 def _raw_str(r):
     """The last RAW GT911 sample, straight off the wire.
 
-    `Touch._map` is what turns raw into canvas coords, so printing both is what
+    The driver's mapping turns raw into canvas coords, so printing both is what
     makes a mirrored axis a two-second diagnosis instead of a guess: raw rising
     while mapped falls names the flipped axis outright.
     """

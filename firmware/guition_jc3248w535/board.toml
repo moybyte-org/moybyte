@@ -375,25 +375,13 @@ why = """
 The second staging source, and the one that must STAY an allowlist -- same
 call as both siblings, same reason: `device/` is the boards' shared device
 tier and not every board drives every piece of it. This board's absences, each
-a decision: no `device_input.py` (there is no trackball and no I2C keyboard;
-the touch part is an AXS15231 on its own shared driver below -- `gt911.py`
-DOES stage, but only for the `HeldPoint` that driver imports, never for its
-GT911 register map, see that group's why), no `moybyte_sd.py` (the card has
+a decision: no input driver (the AXS15231 touch is the kernel's,
+native/moy_input), no `moybyte_sd.py` (the card has
 a host of its own: `card_store.py`, see the moy_sd native denial), no
 `device_diag.py`/`moybyte_diag.py` (the T-Deck's offline diag ring exists
 because that board's serial RX was dead for months; this board boots with a
 live dev channel, so it starts with the P4's print-to-serial arrangement and
 earns a ring only if a real debugging session misses one)."""
-packages = ["moybyte"]
-packages_why = """
-`moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState.
-This board constructs InputState only -- the T-Deck keyboard matrix and the
-#69 InputPoller ride along frozen-but-unconstructed, which is the P4's
-arrangement too and costs flash, not RAM. The doc's input-contract split
-("separable InputState core") stays on the table for the day the rider weight
-bothers someone; it did not block the port, so per the rule it was not done
-ahead of need."""
-
 [[modules.device.group]]
 files = ["boot_shell.py"]
 why = """
@@ -440,36 +428,18 @@ boot trace and the import timer. The spine imports it, so every board that
 takes the spine takes it."""
 
 [[modules.device.group]]
-files = ["device_util.py", "device_canvas.py", "axs_touch.py", "gt911.py"]
+files = ["device_util.py", "device_canvas.py"]
 why = """
-STAGE 1-2 (panel + touch). The drawing backend and this board's pointer:
-DeviceCanvas (RGB565, palette resolved at draw time -- `moy_dsi` is absent
-here so PAL565_WIRE resolves to the byte-SWAPPED PAL565_SW, exactly what
-moy_axs stores), the ticks/diag leaf helpers, and the AXS15231 touch driver --
-new hardware, so it starts life IN the shared tree (Phase C's rule) with this
-board passing its pins/geometry as constructor arguments. `gt911.py` crosses
-for its `HeldPoint` -- the promoted no-news contract axs_touch imports (all
-three clauses; a flaky I2C read must hold, stale, bounded) -- NOT for its
-GT911 register map, which nothing here reads. If the misleading home ever
-bothers someone, the move is HeldPoint out to a neutral module, never a copy."""
+STAGE 1-2 (panel + touch). The drawing backend: DeviceCanvas (RGB565, palette
+resolved at draw time -- `moy_dsi` is absent here so PAL565_WIRE resolves to
+the byte-SWAPPED PAL565_SW, exactly what moy_axs stores) and the ticks/diag
+leaf helpers. The AXS15231 touch driver is the kernel's (native/moy_input)."""
 
 [[modules.device.group]]
 files = ["device_api.py", "moycore_glue.py"]
 why = """
 STAGE 6 (console). The cart namespace's device home: `device_api` re-exports
 THE make_api (one body in the shared cart_api.py) and moycore's host half."""
-
-[[modules.device.group]]
-files = ["ble_keyboard.py"]
-why = """
-The BLE HID keyboard -- the shared driver (promoted from the P4's tree
-2026-08-19, this board being the second consumer that fired the Phase C
-rule). The S3's radio is on-chip and `import bluetooth` is already in this
-image (sdkconfig.ble); the P4-local moy_ble_hid fast-path is absent here on
-purpose -- the driver's guarded import runs the ordinary notification path,
-and whether this board ever needs the fast-path is an on-glass measurement.
-Also this board's first game-EXIT path: hold-BACKSPACE works once a keyboard
-is paired (the touch-only gesture stays open on #202 for keyboard-less use)."""
 
 [[modules.device.group]]
 files = ["device_wifi.py"]

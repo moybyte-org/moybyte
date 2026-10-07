@@ -29,11 +29,11 @@ touch driver, its constants -- and takes the rest.
 from card_store import carts_loader
 from desktop_spine import build_desktop, bt_command
 from device_util import _ticks_ms, _ticks_diff
+from moy_input import kick
 from p4_canvas import P4SystemCanvas
 import wire_input
 import wire_links
 
-BLE_STORE = "/moy/ble_keyboard.json"   # the bond store is device identity: internal flash
 
 # The TF slot, wired the same on both boards: SDMMC slot 0 on GPIO39-44. (Slot 1
 # is the C6's transport; constructing it panics the board.) A card's store is
@@ -89,7 +89,7 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
     # register.
     print("%s PPA:" % name,
           "enabled" if P4SystemCanvas.enable_ppa() else "CPU-only")
-    inp, keyboard = wire_input.ble_keyboard_input(BLE_STORE)
+    inp, keyboard = wire_input.ble_keyboard_input()
 
     def _union_cmd(ws, parts, line):
         on = not (len(parts) == 2 and parts[1] == "0")
@@ -170,6 +170,7 @@ def run_touch_calibrate(name, compositor, set_backlight, touch_cls, knobs):
           % (name, touch.available, knobs(touch)))
     last_print = 0
     while True:
+        kick()
         tp = touch.poll()
         now = _ticks_ms()
         if tp is not None and (tp[2] or _ticks_diff(now, last_print) > 250):

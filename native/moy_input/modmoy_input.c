@@ -17,9 +17,12 @@
 
 #include "py/mperrno.h"
 #include "py/mphal.h"
+#include "py/objlist.h"
 #include "py/objstr.h"
 #include "py/runtime.h"
 
+#include "moy_ble.h"
+#include "moy_drivers.h"
 #include "moy_input.h"
 
 static const qstr NAME_Q[MOY_INPUT_BUTTONS] = {
@@ -384,6 +387,9 @@ static mp_obj_t table_set_button(mp_obj_t self_in, mp_obj_t name, mp_obj_t held)
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(table_set_button_obj, table_set_button);
 
+static mp_obj_t table_apply_pointer(mp_obj_t self_in, mp_obj_t ptr);
+static MP_DEFINE_CONST_FUN_OBJ_2(table_apply_pointer_obj, table_apply_pointer);
+
 #define TABLE_LOCALS(buttons) \
     { MP_ROM_QSTR(MP_QSTR_BUTTONS), MP_ROM_PTR(buttons) }, \
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&table_del_obj) }, \
@@ -405,6 +411,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(table_set_button_obj, table_set_button);
     { MP_ROM_QSTR(MP_QSTR_source_players), MP_ROM_PTR(&table_source_players_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_player_count), MP_ROM_PTR(&table_player_count_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_multi), MP_ROM_PTR(&table_multi_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_apply_pointer), MP_ROM_PTR(&table_apply_pointer_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_set_button), MP_ROM_PTR(&table_set_button_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_set_held), MP_ROM_PTR(&table_set_button_obj) }
 
@@ -516,6 +523,17 @@ static mp_obj_t source_key(mp_obj_t self_in, mp_obj_t key) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(source_key_obj, source_key);
 
+// point(x, y, down, edge=False, fresh=True): this source's pointer sample.
+static mp_obj_t source_point(size_t n_args, const mp_obj_t *args) {
+    input_source_obj_t *o = MP_OBJ_TO_PTR(args[0]);
+    bool edge = n_args > 4 && mp_obj_is_true(args[4]);
+    bool fresh = n_args <= 5 || mp_obj_is_true(args[5]);
+    check(moy_input_point(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h, coord(args[1]),
+                          coord(args[2]), mp_obj_is_true(args[3]), edge, fresh));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(source_point_obj, 4, 6, source_point);
+
 static mp_obj_t source_held_names(mp_obj_t self_in) {
     input_source_obj_t *o = MP_OBJ_TO_PTR(self_in);
     return names_set(moy_input_source_held(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h));
@@ -528,6 +546,7 @@ static const mp_rom_map_elem_t source_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_held), MP_ROM_PTR(&source_set_button_obj) },
     { MP_ROM_QSTR(MP_QSTR_key), MP_ROM_PTR(&source_key_obj) },
     { MP_ROM_QSTR(MP_QSTR_held_names), MP_ROM_PTR(&source_held_names_obj) },
+    { MP_ROM_QSTR(MP_QSTR_point), MP_ROM_PTR(&source_point_obj) },
 };
 static MP_DEFINE_CONST_DICT(source_locals, source_locals_table);
 
@@ -688,6 +707,15 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &pointer_locals
     );
 
+// apply_pointer(pointer) -> P_HELD | P_CLICK: the frame's sample into it.
+static mp_obj_t table_apply_pointer(mp_obj_t self_in, mp_obj_t ptr) {
+    if (!mp_obj_is_type(ptr, &input_pointer_type)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("apply_pointer: not a Pointer"));
+    }
+    input_pointer_obj_t *po = MP_OBJ_TO_PTR(ptr);
+    return MP_OBJ_NEW_SMALL_INT(moy_input_ptr_apply(table_of(self_in)->t, &po->p, now_ms()));
+}
+
 // -- the pointer a cart sees ---------------------------------------------------------
 
 static mp_obj_t attr_or(mp_obj_t o, qstr attr, mp_obj_t dflt) {
@@ -757,6 +785,537 @@ static mp_obj_t input_pointer_state(mp_obj_t inp, mp_obj_t out) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(input_pointer_state_obj, input_pointer_state);
 
+
+// -- the board's drivers (moy_input_task.c) ------------------------------------------
+//
+// keyboard() -> Keyboard or None: the T-Deck's C3, writing the kernel table's
+//   "kbd" source from the input task. set_game_mode(on) queues the mode flip.
+// touch(w, h) -> Touch or None: the board's controller; poll() answers the
+//   pointer sample the way every touch driver did, [x, y, press_edge] (one list,
+//   the driver's own, rewritten by the next poll) or None, `fresh` beside it.
+// trackball() -> Trackball or None: poll() -> [[up, down, left, right], click].
+// kick(): one pass of the board's drivers (on the input task where the board
+//   has one); the frame's input stage calls it once.
+
+static mp_obj_t stat_first_big(const moy_touchdev_t *d) {
+    if (!d->fb_set) {
+        return mp_const_none;
+    }
+    static const qstr PHASE[3] = {MP_QSTR_status, MP_QSTR_point, MP_QSTR_clear};
+    mp_obj_t t[4] = {
+        mp_obj_new_int_from_uint(d->fb_ms), MP_OBJ_NEW_QSTR(PHASE[d->fb_phase % 3]),
+        d->fb_status < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(d->fb_status),
+        mp_obj_new_int_from_uint(d->fb_n),
+    };
+    return mp_obj_new_tuple(4, t);
+}
+
+typedef struct {
+    mp_obj_base_t base;
+    moy_kbd_t *k;
+} input_kbd_obj_t;
+
+static mp_obj_t kbd_set_game_mode(mp_obj_t self_in, mp_obj_t on) {
+    input_kbd_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    moy_kbd_game_mode(o->k, mp_obj_is_true(on));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(kbd_set_game_mode_obj, kbd_set_game_mode);
+
+static const mp_rom_map_elem_t kbd_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_set_game_mode), MP_ROM_PTR(&kbd_set_game_mode_obj) },
+};
+static MP_DEFINE_CONST_DICT(kbd_locals, kbd_locals_table);
+
+static void kbd_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    moy_kbd_t *k = ((input_kbd_obj_t *)MP_OBJ_TO_PTR(self_in))->k;
+    if (dest[0] == MP_OBJ_SENTINEL) {
+        if (attr == MP_QSTR_RAW_GAME_MODE && dest[1] != MP_OBJ_NULL) {
+            k->raw_game = mp_obj_is_true(dest[1]);
+            dest[0] = MP_OBJ_NULL;
+        }
+        return;
+    }
+    if (dest[0] != MP_OBJ_NULL) {
+        return;
+    }
+    switch (attr) {
+        case MP_QSTR_available: dest[0] = mp_obj_new_bool(k->available); break;
+        case MP_QSTR_raw_mode: dest[0] = mp_obj_new_bool(k->raw_mode); break;
+        case MP_QSTR_RAW_GAME_MODE: dest[0] = mp_obj_new_bool(k->raw_game); break;
+        case MP_QSTR_raw_unsupported: dest[0] = mp_obj_new_bool(k->raw_unsupported); break;
+        case MP_QSTR_stat_n: dest[0] = mp_obj_new_int_from_uint(k->stat_n); break;
+        case MP_QSTR_stat_max_us: dest[0] = mp_obj_new_int_from_uint(k->stat_max_us); break;
+        case MP_QSTR_stat_max_raw: dest[0] = mp_obj_new_bool(k->stat_max_raw); break;
+        case MP_QSTR_stat_over5: dest[0] = mp_obj_new_int_from_uint(k->stat_over5); break;
+        case MP_QSTR_stat_over20: dest[0] = mp_obj_new_int_from_uint(k->stat_over20); break;
+        case MP_QSTR_stat_timeouts: dest[0] = mp_obj_new_int_from_uint(k->stat_timeouts); break;
+        default: dest[1] = MP_OBJ_SENTINEL; break;
+    }
+}
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    input_kbd_type, MP_QSTR_Keyboard, MP_TYPE_FLAG_NONE,
+    attr, kbd_attr,
+    locals_dict, &kbd_locals
+    );
+
+static mp_obj_t input_keyboard(void) {
+    moy_kbd_t *k;
+    if (!moy_input_board_kbd(&k)) {
+        return mp_const_none;
+    }
+    input_kbd_obj_t *o = mp_obj_malloc(input_kbd_obj_t, &input_kbd_type);
+    o->k = k;
+    return MP_OBJ_FROM_PTR(o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(input_keyboard_obj, input_keyboard);
+
+typedef struct {
+    mp_obj_base_t base;
+    moy_touchdev_t *d;
+    uint32_t src;                   // the kernel table's "touch" source
+    mp_obj_t out;                   // [x, y, edge], rewritten by every poll
+} input_touch_obj_t;
+
+static mp_obj_t touch_poll(mp_obj_t self_in) {
+    input_touch_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    moy_touch_pt_t pt;
+    moy_touchdev_poll(o->d, now_ms(), &pt);
+    moy_input_point(moy_input_kernel(), o->src, pt.x, pt.y, pt.down, pt.edge, o->d->held.fresh);
+    if (!pt.down) {
+        return mp_const_none;
+    }
+    mp_obj_list_t *l = MP_OBJ_TO_PTR(o->out);
+    l->items[0] = MP_OBJ_NEW_SMALL_INT(pt.x);
+    l->items[1] = MP_OBJ_NEW_SMALL_INT(pt.y);
+    l->items[2] = mp_obj_new_bool(pt.edge);
+    return o->out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(touch_poll_obj, touch_poll);
+
+static const mp_rom_map_elem_t touch_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_poll), MP_ROM_PTR(&touch_poll_obj) },
+};
+static MP_DEFINE_CONST_DICT(touch_locals, touch_locals_table);
+
+static int32_t *touch_knob(moy_touchdev_t *d, qstr attr) {
+    switch (attr) {
+        case MP_QSTR_w: return &d->map.w;
+        case MP_QSTR_h: return &d->map.h;
+        case MP_QSTR_raw_w: return &d->map.raw_w;
+        case MP_QSTR_raw_h: return &d->map.raw_h;
+        case MP_QSTR_raw_x0: return &d->map.raw_x0;
+        case MP_QSTR_raw_y0: return &d->map.raw_y0;
+        default: return NULL;
+    }
+}
+
+static bool *touch_flag(moy_touchdev_t *d, qstr attr) {
+    switch (attr) {
+        case MP_QSTR_swap_xy: return &d->map.swap;
+        case MP_QSTR_flip_x: return &d->map.flip_x;
+        case MP_QSTR_flip_y: return &d->map.flip_y;
+        default: return NULL;
+    }
+}
+
+static void touch_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    moy_touchdev_t *d = ((input_touch_obj_t *)MP_OBJ_TO_PTR(self_in))->d;
+    int32_t *knob = touch_knob(d, attr);
+    bool *flag = knob ? NULL : touch_flag(d, attr);
+    if (dest[0] == MP_OBJ_SENTINEL) {
+        if (dest[1] != MP_OBJ_NULL && (knob || flag)) {
+            if (knob) {
+                *knob = mp_obj_get_int(dest[1]);
+            } else {
+                *flag = mp_obj_is_true(dest[1]);
+            }
+            dest[0] = MP_OBJ_NULL;
+        }
+        return;
+    }
+    if (dest[0] != MP_OBJ_NULL) {
+        return;
+    }
+    if (knob) {
+        dest[0] = MP_OBJ_NEW_SMALL_INT(*knob);
+        return;
+    }
+    if (flag) {
+        dest[0] = mp_obj_new_bool(*flag);
+        return;
+    }
+    switch (attr) {
+        case MP_QSTR_available: dest[0] = mp_obj_new_bool(d->available); break;
+        case MP_QSTR_fresh: dest[0] = mp_obj_new_bool(d->held.fresh); break;
+        case MP_QSTR_fingers: dest[0] = MP_OBJ_NEW_SMALL_INT(d->fingers); break;
+        case MP_QSTR_loaded: dest[0] = mp_obj_new_int_from_uint(d->loaded); break;
+        case MP_QSTR_addr: dest[0] = MP_OBJ_NEW_SMALL_INT(d->addr); break;
+        case MP_QSTR_raw: {
+            if (!d->has_raw) {
+                dest[0] = mp_const_none;
+            } else {
+                mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(d->raw_x), MP_OBJ_NEW_SMALL_INT(d->raw_y)};
+                dest[0] = mp_obj_new_tuple(2, t);
+            }
+            break;
+        }
+        case MP_QSTR_stat_n: dest[0] = mp_obj_new_int_from_uint(d->stat_n); break;
+        case MP_QSTR_stat_max_us: dest[0] = mp_obj_new_int_from_uint(d->stat_max_us); break;
+        case MP_QSTR_stat_over5: dest[0] = mp_obj_new_int_from_uint(d->stat_over5); break;
+        case MP_QSTR_stat_over20: dest[0] = mp_obj_new_int_from_uint(d->stat_over20); break;
+        case MP_QSTR_stat_skipped: dest[0] = mp_obj_new_int_from_uint(d->stat_skipped); break;
+        case MP_QSTR_stat_int_edges: dest[0] = mp_obj_new_int_from_uint(d->int_count); break;
+        case MP_QSTR_stat_first_big: dest[0] = stat_first_big(d); break;
+        case MP_QSTR_gate: dest[0] = mp_obj_new_bool(d->gate); break;
+        default: dest[1] = MP_OBJ_SENTINEL; break;
+    }
+}
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    input_touch_type, MP_QSTR_Touch, MP_TYPE_FLAG_NONE,
+    attr, touch_attr,
+    locals_dict, &touch_locals
+    );
+
+static mp_obj_t input_touch(mp_obj_t w, mp_obj_t h) {
+    moy_touchdev_t *d;
+    if (!moy_input_board_touch(&d, mp_obj_get_int(w), mp_obj_get_int(h))) {
+        return mp_const_none;
+    }
+    uint32_t src;
+    moy_input_t *t = moy_input_kernel();
+    if (t == NULL || moy_input_source(t, "touch", 0, &src) != MOY_INPUT_OK) {
+        return mp_const_none;
+    }
+    input_touch_obj_t *o = mp_obj_malloc(input_touch_obj_t, &input_touch_type);
+    o->d = d;
+    o->src = src;
+    mp_obj_t items[3] = {MP_OBJ_NEW_SMALL_INT(0), MP_OBJ_NEW_SMALL_INT(0), mp_const_false};
+    o->out = mp_obj_new_list(3, items);
+    return MP_OBJ_FROM_PTR(o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(input_touch_obj, input_touch);
+
+typedef struct {
+    mp_obj_base_t base;
+    moy_ball_t *b;
+    bool prev;                      // the click was down at the last poll
+    mp_obj_t counts;                // [up, down, left, right]
+    mp_obj_t out;                   // [counts, click]
+} input_ball_obj_t;
+
+static mp_obj_t ball_poll(mp_obj_t self_in) {
+    input_ball_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    uint32_t c[4];
+    bool down;
+    moy_ball_t *b;
+    moy_input_board_ball(&b, &down);
+    moy_ball_take(o->b, c);
+    mp_obj_list_t *l = MP_OBJ_TO_PTR(o->counts);
+    for (int i = 0; i < 4; i++) {
+        l->items[i] = MP_OBJ_NEW_SMALL_INT(c[i]);
+    }
+    mp_obj_list_t *out = MP_OBJ_TO_PTR(o->out);
+    out->items[1] = mp_obj_new_bool(down && !o->prev);
+    o->prev = down;
+    return o->out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ball_poll_obj, ball_poll);
+
+static const mp_rom_map_elem_t ball_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_poll), MP_ROM_PTR(&ball_poll_obj) },
+};
+static MP_DEFINE_CONST_DICT(ball_locals, ball_locals_table);
+
+static void ball_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    (void)self_in;
+    if (dest[0] == MP_OBJ_NULL && attr == MP_QSTR_available) {
+        dest[0] = mp_const_true;
+    } else if (dest[0] == MP_OBJ_NULL) {
+        dest[1] = MP_OBJ_SENTINEL;
+    }
+}
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    input_ball_type, MP_QSTR_Trackball, MP_TYPE_FLAG_NONE,
+    attr, ball_attr,
+    locals_dict, &ball_locals
+    );
+
+static mp_obj_t input_trackball(void) {
+    moy_ball_t *b;
+    bool down;
+    if (!moy_input_board_ball(&b, &down)) {
+        return mp_const_none;
+    }
+    input_ball_obj_t *o = mp_obj_malloc(input_ball_obj_t, &input_ball_type);
+    o->b = b;
+    o->prev = down;
+    mp_obj_t z[4] = {MP_OBJ_NEW_SMALL_INT(0), MP_OBJ_NEW_SMALL_INT(0), MP_OBJ_NEW_SMALL_INT(0),
+                     MP_OBJ_NEW_SMALL_INT(0)};
+    o->counts = mp_obj_new_list(4, z);
+    mp_obj_t out[2] = {o->counts, mp_const_false};
+    o->out = mp_obj_new_list(2, out);
+    return MP_OBJ_FROM_PTR(o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(input_trackball_obj, input_trackball);
+
+
+// ble() -> the BLE HID keyboard, or None where the board takes no BLE: the
+//   kernel's central (moy_ble_task.c over moy_hid.c), writing the kernel
+//   table's "ble" source. start() brings the radio up; poll() takes the
+//   reports since the last frame into the source (before begin_frame); the
+//   Settings panel's verbs are queued for NimBLE's host task.
+
+typedef struct {
+    mp_obj_base_t base;
+    moy_hid_t *h;
+} input_ble_obj_t;
+
+static mp_obj_t ble_str_or_none(const char *s) {
+    return s[0] ? mp_obj_new_str(s, strlen(s)) : mp_const_none;
+}
+
+static mp_obj_t ble_addr(const moy_hid_addr_t *a) {
+    mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(a->type), mp_obj_new_bytes(a->a, 6)};
+    return mp_obj_new_tuple(2, t);
+}
+
+static mp_obj_t ble_state(const moy_hid_t *h) {
+    return mp_obj_new_str(MOY_HID_STATES[h->state], strlen(MOY_HID_STATES[h->state]));
+}
+
+static moy_hid_t *ble_of(mp_obj_t self_in) {
+    return ((input_ble_obj_t *)MP_OBJ_TO_PTR(self_in))->h;
+}
+
+static mp_obj_t ble_start(mp_obj_t self_in) {
+    (void)self_in;
+    return mp_obj_new_bool(moy_ble_start());
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ble_start_obj, ble_start);
+
+static mp_obj_t ble_stop(mp_obj_t self_in) {
+    bool was = moy_ble_up();
+    moy_ble_stop();
+    (void)self_in;
+    return mp_obj_new_bool(was);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ble_stop_obj, ble_stop);
+
+static mp_obj_t ble_poll(mp_obj_t self_in) {
+    moy_hid_frame(ble_of(self_in));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ble_poll_obj, ble_poll);
+
+static mp_obj_t ble_status(mp_obj_t self_in) {
+    moy_hid_t *h = ble_of(self_in);
+    mp_obj_t t[3] = {ble_state(h), ble_str_or_none(h->name), mp_const_none};
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ble_status_obj, ble_status);
+
+static mp_obj_t ble_settings_status(mp_obj_t self_in) {
+    moy_hid_t *h = ble_of(self_in);
+    mp_obj_t t[5] = {
+        mp_obj_new_bool(h->enabled), ble_state(h), ble_str_or_none(h->name),
+        h->has_pref ? ble_addr(&h->pref) : mp_const_none, ble_str_or_none(h->error),
+    };
+    return mp_obj_new_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ble_settings_status_obj, ble_settings_status);
+
+// ((address, name, rssi, preferred, connected), ...) in display order; the
+// address is opaque to the shell, which hands it back to connect_device.
+static mp_obj_t ble_settings_devices(mp_obj_t self_in) {
+    moy_hid_t *h = ble_of(self_in);
+    moy_hid_dev_t devs[MOY_HID_DEVICES];
+    MOY_DRV_LOCK(&h->lock);
+    uint8_t n = h->ndev;
+    memcpy(devs, h->devs, sizeof(devs));
+    MOY_DRV_UNLOCK(&h->lock);
+    mp_obj_t rows[MOY_HID_DEVICES];
+    for (uint8_t i = 0; i < n; i++) {
+        moy_hid_dev_t *d = &devs[i];
+        bool pref = h->has_pref && d->addr.type == h->pref.type
+                    && memcmp(d->addr.a, h->pref.a, 6) == 0;
+        bool conn = h->conn >= 0 && h->has_cand && d->addr.type == h->cand.type
+                    && memcmp(d->addr.a, h->cand.a, 6) == 0;
+        mp_obj_t row[5] = {ble_addr(&d->addr), mp_obj_new_str(d->name, strlen(d->name)),
+                           MP_OBJ_NEW_SMALL_INT(d->rssi), mp_obj_new_bool(pref),
+                           mp_obj_new_bool(conn)};
+        rows[i] = mp_obj_new_tuple(5, row);
+    }
+    return mp_obj_new_tuple(n, rows);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ble_settings_devices_obj, ble_settings_devices);
+
+static mp_obj_t ble_set_enabled(mp_obj_t self_in, mp_obj_t on) {
+    bool want = mp_obj_is_true(on);
+    if (want && !moy_ble_up()) {
+        ble_of(self_in)->enabled = true;
+        moy_ble_verb(MOY_BLE_ENABLE, NULL);
+        moy_ble_start();
+    } else {
+        moy_ble_verb(want ? MOY_BLE_ENABLE : MOY_BLE_DISABLE, NULL);
+    }
+    return mp_obj_new_bool(want);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ble_set_enabled_obj, ble_set_enabled);
+
+static mp_obj_t ble_discover(mp_obj_t self_in) {
+    return mp_obj_new_bool(ble_of(self_in)->enabled && moy_ble_verb(MOY_BLE_DISCOVER, NULL));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ble_discover_obj, ble_discover);
+
+static mp_obj_t ble_connect_device(mp_obj_t self_in, mp_obj_t address) {
+    moy_hid_t *h = ble_of(self_in);
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_get_array(address, &n, &items);
+    if (n != 2) {
+        return mp_const_false;
+    }
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(items[1], &bi, MP_BUFFER_READ);
+    if (bi.len != 6) {
+        return mp_const_false;
+    }
+    moy_hid_addr_t a = {.type = (uint8_t)mp_obj_get_int(items[0])};
+    memcpy(a.a, bi.buf, 6);
+    bool known = false;
+    MOY_DRV_LOCK(&h->lock);
+    for (uint8_t i = 0; i < h->ndev; i++) {
+        known = known || (h->devs[i].addr.type == a.type && memcmp(h->devs[i].addr.a, a.a, 6) == 0);
+    }
+    MOY_DRV_UNLOCK(&h->lock);
+    return mp_obj_new_bool(known && moy_ble_verb(MOY_BLE_PICK, &a));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ble_connect_device_obj, ble_connect_device);
+
+static mp_obj_t ble_forget(mp_obj_t self_in) {
+    (void)self_in;
+    moy_ble_verb(MOY_BLE_FORGET, NULL);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ble_forget_obj, ble_forget);
+
+static mp_obj_t ble_scan(mp_obj_t self_in) {
+    moy_hid_t *h = ble_of(self_in);
+    return mp_obj_new_bool(h->available && h->enabled && moy_ble_verb(MOY_BLE_SCAN, NULL));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ble_scan_obj, ble_scan);
+
+static mp_obj_t ble_set_player(mp_obj_t self_in, mp_obj_t slot) {
+    moy_hid_set_player(ble_of(self_in), (int8_t)mp_obj_get_int(slot));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ble_set_player_obj, ble_set_player);
+
+// BLE reports carry text and make/break state: no mode to flip.
+static mp_obj_t ble_set_game_mode(mp_obj_t self_in, mp_obj_t on) {
+    (void)self_in;
+    (void)on;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ble_set_game_mode_obj, ble_set_game_mode);
+
+static mp_obj_t ble_none_1(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    (void)args;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ble_fast_status_obj, 1, 1, ble_none_1);
+
+// The raw-notification trace is not carried: it declines.
+static mp_obj_t ble_trace(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    (void)args;
+    return mp_const_false;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ble_trace_obj, 1, 2, ble_trace);
+
+static const mp_rom_map_elem_t ble_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&ble_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&ble_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_poll), MP_ROM_PTR(&ble_poll_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&ble_status_obj) },
+    { MP_ROM_QSTR(MP_QSTR_settings_status), MP_ROM_PTR(&ble_settings_status_obj) },
+    { MP_ROM_QSTR(MP_QSTR_settings_devices), MP_ROM_PTR(&ble_settings_devices_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_enabled), MP_ROM_PTR(&ble_set_enabled_obj) },
+    { MP_ROM_QSTR(MP_QSTR_discover_devices), MP_ROM_PTR(&ble_discover_obj) },
+    { MP_ROM_QSTR(MP_QSTR_connect_device), MP_ROM_PTR(&ble_connect_device_obj) },
+    { MP_ROM_QSTR(MP_QSTR_forget), MP_ROM_PTR(&ble_forget_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scan), MP_ROM_PTR(&ble_scan_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_player), MP_ROM_PTR(&ble_set_player_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_game_mode), MP_ROM_PTR(&ble_set_game_mode_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fast_status), MP_ROM_PTR(&ble_fast_status_obj) },
+    { MP_ROM_QSTR(MP_QSTR_trace), MP_ROM_PTR(&ble_trace_obj) },
+};
+static MP_DEFINE_CONST_DICT(ble_locals, ble_locals_table);
+
+static void ble_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    if (dest[0] != MP_OBJ_NULL) {
+        return;
+    }
+    moy_hid_t *h = ble_of(self_in);
+    switch (attr) {
+        case MP_QSTR_available: dest[0] = mp_obj_new_bool(h->available); break;
+        case MP_QSTR_state: dest[0] = ble_state(h); break;
+        case MP_QSTR_name: dest[0] = ble_str_or_none(h->name); break;
+        case MP_QSTR_error: dest[0] = ble_str_or_none(h->error); break;
+        case MP_QSTR_passkey: dest[0] = mp_const_none; break;
+        case MP_QSTR_settings_capable: dest[0] = mp_const_true; break;
+        case MP_QSTR_notify_count: dest[0] = mp_obj_new_int_from_uint(h->notify_count); break;
+        case MP_QSTR_protocol:
+            dest[0] = h->protocol == 1 ? MP_OBJ_NEW_QSTR(MP_QSTR_boot)
+                      : h->protocol == 2 ? MP_OBJ_NEW_QSTR(MP_QSTR_report) : mp_const_none;
+            break;
+        case MP_QSTR_conn_interval_ms:
+            dest[0] = h->interval ? mp_obj_new_float((mp_float_t)h->interval * (mp_float_t)1.25) : mp_const_none;
+            break;
+        default: dest[1] = MP_OBJ_SENTINEL; break;
+    }
+}
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    input_ble_type, MP_QSTR_BleKeyboard, MP_TYPE_FLAG_NONE,
+    attr, ble_attr,
+    locals_dict, &ble_locals
+    );
+
+static mp_obj_t input_ble(void) {
+    moy_hid_t *h = moy_ble_hid();
+    if (h == NULL) {
+        return mp_const_none;
+    }
+    mp_obj_t o = MP_STATE_VM(moy_input_ble_obj);
+    if (o == MP_OBJ_NULL) {
+        input_ble_obj_t *b = mp_obj_malloc(input_ble_obj_t, &input_ble_type);
+        b->h = h;
+        o = MP_OBJ_FROM_PTR(b);
+        MP_STATE_VM(moy_input_ble_obj) = o;
+    }
+    return o;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(input_ble_obj, input_ble);
+
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_ble_obj);
+
+static mp_obj_t input_kick(void) {
+    moy_input_board_kick();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(input_kick_obj, input_kick);
+
+static mp_obj_t input_task_stack_free(void) {
+    return mp_obj_new_int_from_uint(moy_input_board_stack_free());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(input_task_stack_free_obj, input_task_stack_free);
+
 // -- the module ----------------------------------------------------------------------
 
 static const mp_rom_map_elem_t moy_input_globals_table[] = {
@@ -769,6 +1328,12 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Pointer), MP_ROM_PTR(&input_pointer_type) },
     { MP_ROM_QSTR(MP_QSTR_kernel), MP_ROM_PTR(&input_kernel_obj) },
     { MP_ROM_QSTR(MP_QSTR_pointer_state), MP_ROM_PTR(&input_pointer_state_obj) },
+    { MP_ROM_QSTR(MP_QSTR_keyboard), MP_ROM_PTR(&input_keyboard_obj) },
+    { MP_ROM_QSTR(MP_QSTR_touch), MP_ROM_PTR(&input_touch_obj) },
+    { MP_ROM_QSTR(MP_QSTR_trackball), MP_ROM_PTR(&input_trackball_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kick), MP_ROM_PTR(&input_kick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ble), MP_ROM_PTR(&input_ble_obj) },
+    { MP_ROM_QSTR(MP_QSTR_task_stack_free), MP_ROM_PTR(&input_task_stack_free_obj) },
     { MP_ROM_QSTR(MP_QSTR_SOURCES), MP_ROM_INT(MOY_INPUT_SOURCES) },
     { MP_ROM_QSTR(MP_QSTR_PLAYERS), MP_ROM_INT(MOY_INPUT_PLAYERS) },
     { MP_ROM_QSTR(MP_QSTR_UNION), MP_ROM_INT(MOY_INPUT_UNION) },

@@ -77,18 +77,18 @@ def run_touch_calibrate():
         import moy_runtime; moy_runtime.run_touch_calibrate()
 
     Tap each numbered box; read which box the MAPPED coords land in. The knobs
-    are live module globals -- Ctrl-C, `import p4_input; p4_input.FLIP_X = True`
-    (etc.), re-run, and once mapped == tapped everywhere, bake the winners into
-    p4_input.py. The body is `device/p4_desktop.run_touch_calibrate`, shared
-    with the Guition P4."""
+    are live attributes on the kernel's touch driver -- `py touch.flip_x = 1`
+    over the dev channel, or on the REPL's driver -- and once mapped == tapped
+    everywhere, bake the winners into mpconfigboard.h's MOY_INPUT_TOUCH_*. The
+    body is `device/p4_desktop.run_touch_calibrate`, shared with the Guition
+    P4."""
     from moy_glass import backlight as set_backlight
-    from p4_input import Touch
+    from moy_input import touch as Touch
     from p4_desktop import run_touch_calibrate as _calibrate
-    import p4_input
 
     _calibrate("Moybyte P4", P4Compositor, set_backlight, Touch,
                lambda touch: "swap=%s flip_x=%s flip_y=%s"
-               % (p4_input.SWAP_XY, p4_input.FLIP_X, p4_input.FLIP_Y))
+               % (touch.swap_xy, touch.flip_x, touch.flip_y))
 
 
 def P4Compositor():
@@ -140,7 +140,7 @@ def run_desktop(fps_cap=60):
     were the board's own name in a print string. What is left here is what
     this glass decides -- its compositor, its touch, its constants."""
     from moy_glass import backlight as set_backlight
-    from p4_input import Touch
+    from moy_input import touch as Touch
     from p4_desktop import run_desktop as _run_desktop
 
     return _run_desktop(

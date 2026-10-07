@@ -16,7 +16,7 @@ board; tuning deliberately not copied, see `boards/.../sdkconfig.board`)
 | subsystem | facts |
 |---|---|
 | panel | AXS15231B, 320x480 portrait-native, QSPI @ 40MHz: CLK 47, D0 21, D1 48, D2 40, D3 39, CS 45. No reset GPIO. MADCTL MV is DEAD on this glass (tested 0x60 + 0x20 live, both scramble; Arduino_GFX writes the bit, the LVGL-forum reports match ours) -- the console runs LANDSCAPE 480x320 via the rotate in moy_axs's band copy (owner call 2026-08-18). |
-| touch | AXS15231 (same bridge), I2C0 SDA 4 / SCL 8, addr 0x3B. Raw coords are portrait panel coords (driver: `device/axs_touch.py`). |
+| touch | AXS15231 (same bridge), I2C0 SDA 4 / SCL 8, addr 0x3B. Raw coords are portrait panel coords (driver: the kernel's `native/moy_input/moy_touchdev.c`, knobs in `mpconfigboard.h`). |
 | backlight | GPIO1, active high, PWM-capable (binary on/off for now -- owner call). |
 | battery | ADC GPIO5, divider ~1.72x (unwired here yet). |
 | flash/PSRAM | 16MB DIO; octal PSRAM. BOTH at 120MHz since 2026-08-19 (the T-Deck's experimental MSPI profile, A/B'd on this glass: carts +25-29%, pump -23%, SPI starvation -77%; needs the #169 retune patch, applied by build.sh). |
@@ -189,8 +189,8 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
   wedge arc's closing field data: **the cable-flash replug rule is RETIRED**
   (owner observation, after many flashes since bring-up: touch answered
   immediately after every one -- the single dead-touch episode never
-  recurred, consistent with the boot-race + idle-filler story in
-  device/axs_touch.py's docstring). Flash normally; a dead touch after boot
+  recurred, consistent with the boot-race + idle-filler story in the AXS
+  driver's header, `native/moy_input/moy_touchdev.c`). Flash normally; a dead touch after boot
   would be a boot-race recurrence worth a serial trace, not routine. (The
   rule lives on only in this issue thread's OLDER comments -- an agent
   following #202 chronologically re-instructed replugs twice on 2026-08-19;
@@ -231,8 +231,8 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
     (rotate-gather: sequential PSRAM reads, scattered writes into the
     uncached SRAM bounce -- same read traffic as the memcpy it replaced), with
     `moy_axs.set_rot(0|1)` as the direction knob; rot 0 confirmed upright.
-  * **touch has two failure modes that present identically** (both in
-    `device/axs_touch.py`'s docstring): a SECOND machine.I2C(0) instance
+  * **touch has two failure modes that present identically**: a SECOND
+    machine.I2C(0) instance
     reads constant bytes while the driver's first instance works -- so never
     diagnose touch with a side probe, go through the live console -- and a
     BOOT RACE where the constructor's single probe read loses and
@@ -258,7 +258,7 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
   * **the scroll feel, closed the same evening** (owner verdict: "perfect,
     looks better than tdeck"): the drag-hang-then-phantom-fling was the
     driver waiting the GT911's 400ms no-news bound to believe a lift on a
-    controller whose only silence IS the lift. Fixed in device/axs_touch.py
+    controller whose only silence IS the lift. Fixed in the AXS driver
     with measured constants: a 90ms per-controller bound (2x the worst
     touched gap) plus hold-window EXTRAPOLATION (the pointer glides on its
     measured velocity through the <=90ms release window instead of
@@ -277,7 +277,8 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
   * stage 2 (half): the AXS15231 touch controller answers at 0x3B and
     reports no-touch correctly. The MAPPING knobs were the ESPHome-derived
     guess that night; `guition_smoke.touch()` with a finger settled them the
-    next day and `device/axs_touch.py` carries the winners (see above).
+    next day, and `mpconfigboard.h`'s `MOY_INPUT_TOUCH_*` carry the winners
+    (see above).
   * stage 6: boots to the desktop (first frame 270ms after a seeded boot;
     34 carts seeded to `/moy/carts` on the first boot), OTA confirm fired
     (`marked app valid (slot ota_0)`), and

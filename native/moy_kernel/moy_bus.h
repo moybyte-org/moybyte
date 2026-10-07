@@ -3,7 +3,8 @@
 // share it, so it is the kernel's rather than any one driver's.
 //
 // A board names its bus in mpconfigboard.h (MOY_BUS_I2C_PORT, _SDA, _SCL and
-// _HZ); without them every call answers MOY_BUS_NONE. The bus installs on the
+// _HZ, and MOY_BUS_I2C_STRETCH_US where a device clock-stretches past what a
+// transfer may wait); without them every call answers MOY_BUS_NONE. The bus installs on the
 // first moy_bus_add and stays for the console's lifetime.
 //
 // It drives the IDF's legacy I2C driver (driver/i2c.h), the one MicroPython's

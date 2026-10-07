@@ -668,7 +668,7 @@ def _device_ws(tmp_path):
     import sys
     sys.path.insert(0, str(ROOT))
     from runtime import host_app
-    from device.moybyte.input import InputState as DeviceInputState
+    from runtime.moy_input import InputTable as DeviceInputState
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     inp = DeviceInputState()

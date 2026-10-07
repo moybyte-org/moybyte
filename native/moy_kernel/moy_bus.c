@@ -20,6 +20,10 @@
 
 #include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
+#ifdef MOY_BUS_I2C_STRETCH_US
+#include "esp_clk_tree.h"
+#include "hal/i2c_ll.h"
+#endif
 #include "freertos/semphr.h"
 
 typedef struct {
@@ -44,8 +48,16 @@ static int bus_up(void) {
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = MOY_BUS_I2C_HZ,
     };
-    if (i2c_param_config(MOY_BUS_I2C_PORT, &conf) != ESP_OK
-        || i2c_driver_install(MOY_BUS_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0) != ESP_OK) {
+    if (i2c_param_config(MOY_BUS_I2C_PORT, &conf) != ESP_OK) {
+        return MOY_BUS_ERR;
+    }
+    #ifdef MOY_BUS_I2C_STRETCH_US
+    uint32_t sclk = 0;
+    esp_clk_tree_src_get_freq_hz(I2C_CLK_SRC_DEFAULT, ESP_CLK_TREE_SRC_FREQ_PRECISION_APPROX, &sclk);
+    int to = i2c_ll_calculate_timeout_us_to_reg_val(sclk, MOY_BUS_I2C_STRETCH_US);
+    i2c_set_timeout(MOY_BUS_I2C_PORT, to > I2C_LL_MAX_TIMEOUT ? I2C_LL_MAX_TIMEOUT : to);
+    #endif
+    if (i2c_driver_install(MOY_BUS_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0) != ESP_OK) {
         return MOY_BUS_ERR;
     }
     s_up = true;

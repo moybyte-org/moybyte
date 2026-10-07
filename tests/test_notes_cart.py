@@ -274,7 +274,7 @@ def test_the_bar_x_exits_and_writes_the_open_note(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _device_ws(tmp_path):
-    from device.moybyte.input import InputState as DeviceInputState
+    from runtime.moy_input import InputTable as DeviceInputState
 
     ws = build_ws(tmp_path)
     inp = DeviceInputState()

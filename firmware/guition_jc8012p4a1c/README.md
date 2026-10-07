@@ -110,10 +110,11 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   over the dev channel — the panel is driven UNMIRRORED
   (`MOY_DSI_MIRROR_XY=0`) so that knob is the only one. **270 is up on the
   desk** (owner, 2026-09-06: the first build's 90 came up flipped).
-- **The GSL3680 is RAM-LOADED**: it has no flash, so `device/gsl3680.py`
-  streams the vendor firmware (`modules/gsl_fw_jc8012.py`, 4587 records
-  transcribed by `tools/gen_gsl_fw.py`) into it over I2C after every reset —
-  1.34s from MicroPython at 400kHz, measured — before it reports anything.
+- **The GSL3680 is RAM-LOADED**: it has no flash, so the kernel's driver
+  (`native/moy_input/moy_touchdev.c`) streams the vendor firmware
+  (`boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c`, 4587 records transcribed by
+  `tools/gen_gsl_fw.py`) into it over I2C after every reset, before it
+  reports anything; the upload's time is in #224.
   The bring-up sequence is the vendor's factory driver's, cross-checked
   against Linux's `silead.c`; the chip answers `0x5A5A5A5A` at register 0xB0
   once its firmware runs (glass-confirmed). Silead's GPL finger-id algorithm
@@ -125,13 +126,13 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   swap, no flips — in the firmware's own space, not the glass's. The
   five-target tool (`run_touch_calibrate()`) then gave the fit: the raw
   origin sits (10, 21) counts in and the spans are 1640×865 over the
-  1280×800 glass (`RAW_X0/RAW_Y0/RAW_W/RAW_H` in `guition_p4_input.py`,
-  `raw_x0`…`raw_h` on the shared driver); the firmware's nominal 1664×896
+  1280×800 glass (`MOY_INPUT_TOUCH_RAW_X0`…`_RAW_H` in `mpconfigboard.h`,
+  `raw_x0`…`raw_h` on the kernel's driver); the firmware's nominal 1664×896
   was ~10px off at the edges. **The same session found the bug behind "the
   touch feels inaccurate": the chip raises bit 14 of the raw Y on some
   packets, the vendor's decoder never masked it (Linux's does), and every
-  such packet threw the pointer to the bottom edge.** `device/gsl3680.py`
-  masks both axes to 12 bits now; `tests/test_gsl3680.py` pins the flagged
+  such packet threw the pointer to the bottom edge.** The driver masks both
+  axes to 12 bits; `tests/test_gsl3680.py` pins the flagged
   packet and the five-target fit. The knobs stay live (`py touch.raw_x0 = 12`
   over the dev channel); turning the desk the other way up (ROTATION 90)
   means both flips go True.
@@ -190,18 +191,18 @@ plus the P4 extras `bt`/`union`/`cache`.
 
 - `board.toml` — the declaration: `[native.shared]` + **`[native.p4]`** (the
   silicon tier, a second native source — `tools/board_config.py
-  native_sources`), the device allowlist (adds `p4_canvas`,
-  `gsl3680`; `gt911` crosses for its HeldPoint only), `[flash]`/`[serial]`
+  native_sources`), the device allowlist (adds `p4_canvas`), `[flash]`/`[serial]`
   with the USB-Serial/JTAG facts.
 - `boards/MOYBYTE_GUITION_P4/` — `mpconfigboard.cmake` (the C6_WIFI fragments,
-  `MOY_DSI_PANEL_JD9365=1`, `MOY_DSI_MIRROR_XY=1`), `mpconfigboard.h`,
+  `MOY_DSI_PANEL_JD9365=1`, `MOY_DSI_MIRROR_XY=1`, the touch firmware as a
+  board source), `mpconfigboard.h` (the touch's pins and knobs,
+  `MOY_INPUT_TOUCH_*`), `gsl_fw_jc8012.c` (the touch firmware — generated,
+  but checked in: it is a panel fact),
   `sdkconfig.board` (the Waveshare's levers carried over: PSRAM 200MHz, L2
   256KB, DSI ISR in IRAM, hosted mempool in PSRAM, the WIFI_RMT set, rollback;
   16MB flash + this board's partition CSV), `partitions-moybyte-guition-p4.csv`.
 - `modules/` (tracked): `boot.py`/`main.py`/`moybyte_shell.py` (the Guition
-  S3's MODE-string shell), `guition_p4_input.py` (pins, knobs, the shared GSL3680 driver),
-  `gsl_fw_jc8012.py` (the touch firmware — generated, but checked in: it is a
-  panel fact), `guition_p4_smoke.py`, `moy_runtime.py` (`ROTATION` and the compositor it builds; `run_desktop` — this
+  S3's MODE-string shell), `guition_p4_smoke.py`, `moy_runtime.py` (`ROTATION` and the compositor it builds; `run_desktop` — this
   glass's arguments to `device/p4_desktop.py`, the P4 tier's body over the
   shared boot spine `device/desktop_spine.py`). Everything else in `modules/` is
   staged at build and gitignored.

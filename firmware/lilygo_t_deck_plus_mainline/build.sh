@@ -57,7 +57,6 @@ moybyte_setup_idf esp32s3 \
 # 2) The patch ladder -- THIS BOARD'S half of the build. All marker-guarded,
 #    because both .build trees persist across builds.
 # ---------------------------------------------------------------------------
-MACHINE_I2C_C="${MPY_DIR}/ports/esp32/machine_i2c.c"
 
 # 2a) moy_lcd needs esp_lcd in the main component's REQUIRES.
 moybyte_idf_component esp_lcd
@@ -74,40 +73,6 @@ moybyte_patch_gc_run_hints
 # the PERF line's gc= field and the dev channel's `heapcaps` word.
 moybyte_patch_gc_meters
 moybyte_patch_gc_split_reserve
-
-# 2c) Release the GIL across machine.I2C's blocking wait (#69).
-#     This is what makes the input POLLER THREAD work: a T-Deck keyboard C3
-#     clock-stretch stall (40-60ms, I2CSTAT-sized on hardware) then blocks only
-#     the poller thread while the VM keeps rendering. Without it the stall holds
-#     the GIL and freezes the whole loop no matter which thread reads.
-#     Only pure IDF code runs unlocked -- the same pattern this port already uses
-#     around its SPI/UART blocking waits.
-if [ -f "${MACHINE_I2C_C}" ] && ! grep -q "Moybyte #69 GIL" "${MACHINE_I2C_C}"; then
-  python3 - "${MACHINE_I2C_C}" <<'PY'
-import sys
-path = sys.argv[1]
-src = open(path).read()
-needle = "    esp_err_t err = i2c_master_cmd_begin("
-i = src.find(needle)
-if i < 0:
-    sys.exit("machine_i2c.c: i2c_master_cmd_begin call not found -- re-solve #69 by hand")
-end = src.index("\n", i) + 1
-src = (src[:i]
-       + "    // Moybyte #69 GIL: release the GIL across the blocking transaction\n"
-         "    // wait so a slave clock-stretch stall (the T-Deck keyboard C3 stretches\n"
-         "    // up to ~50ms per read) blocks only the CALLING Python thread (the input\n"
-         "    // poller), never the whole VM / render loop. Only pure IDF code runs\n"
-         "    // while unlocked -- no MP state is touched, the driver serializes per\n"
-         "    // port internally, and the caller's buffers are non-moving MP heap the\n"
-         "    // calling thread keeps alive.\n"
-         "    MP_THREAD_GIL_EXIT();\n"
-       + src[i:end]
-       + "    MP_THREAD_GIL_ENTER();\n"
-       + src[end:])
-open(path, "w").write(src)
-PY
-  echo "== patched machine_i2c.c: GIL release around i2c_master_cmd_begin (#69)"
-fi
 
 # 2d) esp_lcd tx_color no-acquire (#66), applied to the IDF tree.
 #     A continuation colour write (lcd_cmd < 0) is queue-only, but esp_lcd still
@@ -142,9 +107,6 @@ moybyte_patch_usj_rx_init
 #     MSPI setting in sdkconfig.board, not optional alongside it.
 moybyte_patch_psram_retune
 
-# DECLINED moybyte_patch_p4_ble_hid_fastpath -- an ESP32-P4 silicon patch: it
-# edits modbluetooth.c for native/p4/moy_ble_hid, a module this board does not
-# compile.
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
 # the MIPI-DSI bridge-underrun ISR. This board has no DSI peripheral.
 

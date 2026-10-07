@@ -65,18 +65,17 @@ _TOUCH_BOX = 24
 def touch(secs=60):
     """Corner + centre targets on the glass; every sample printed raw + mapped
     + the live knob state. Tap the targets; when mapped == tapped everywhere,
-    bake the knob values into device/axs_touch.py with the date. Self-
-    terminating after `secs` (and Ctrl-C works -- the REPL is alive here)."""
-    import axs_touch
-    from axs_touch import Touch
+    bake the knob values into mpconfigboard.h's MOY_INPUT_TOUCH_* with the
+    date. Self-terminating after `secs` (and Ctrl-C works -- the REPL is
+    alive here)."""
+    import moy_input
 
     comp = moy_glass.BandedCompositor(moy_axs, nfbs=2)
     gfx = comp.gfx()
     w, h = comp.size()
-    touch = Touch(w, h)
+    touch = moy_input.touch(w, h)
     print("Moybyte touch: available=%s addr=0x%02x knobs swap=%s fx=%s fy=%s"
-          % (touch.available, touch.addr, axs_touch.SWAP_XY,
-             axs_touch.FLIP_X, axs_touch.FLIP_Y))
+          % (touch.available, touch.addr, touch.swap_xy, touch.flip_x, touch.flip_y))
 
     m, b = _TOUCH_MARGIN, _TOUCH_BOX
     targets = ((m, m), (w - m, m), (m, h - m), (w - m, h - m), (w // 2, h // 2))
@@ -105,6 +104,7 @@ def touch(secs=60):
     end = time.ticks_add(time.ticks_ms(), secs * 1000)
     last = 0
     while time.ticks_diff(end, time.ticks_ms()) > 0:
+        moy_input.kick()
         tp = touch.poll()
         now = time.ticks_ms()
         if tp is not None and (tp[2] or time.ticks_diff(now, last) > 250):
@@ -112,7 +112,7 @@ def touch(secs=60):
             raw = touch.raw or (-1, -1)
             print("TAP%s mapped=(%d,%d) raw=(%d,%d) swap=%s fx=%s fy=%s"
                   % ("*" if tp[2] else " ", tp[0], tp[1], raw[0], raw[1],
-                     axs_touch.SWAP_XY, axs_touch.FLIP_X, axs_touch.FLIP_Y))
+                     touch.swap_xy, touch.flip_x, touch.flip_y))
             if tp[2]:
                 _paint(mark=(tp[0], tp[1]))
         time.sleep_ms(20)

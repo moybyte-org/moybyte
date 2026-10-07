@@ -62,6 +62,6 @@ def main(board, mode, modes, smoke):
     except Exception as exc:            # noqa: BLE001 -- a failed smoke is a RESULT
         # Printed, never re-raised: the traceback would land on the same serial
         # line either way, and returning cleanly leaves the REPL usable for the
-        # follow-up question ("moy_lcd.set_madctl(0x28)", "device_input.TOUCH_FLIP_X
-        # = True; tdeck_smoke.touch()") which is the whole point of a smoke.
+        # follow-up question ("moy_lcd.set_madctl(0x28)", "flip the touch's
+        # flip_x, re-run tdeck_smoke.touch()") which is the whole point of a smoke.
         print("Moybyte %s smoke FAILED: %s: %s" % (mode, type(exc).__name__, exc))

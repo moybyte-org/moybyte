@@ -27,6 +27,13 @@
 // key is queued and delivered as the source's level for exactly one frame, a
 // zero frame between two equal keys so an edge reader sees both.
 //
+// THE POINTER. A source may also hold a pointer sample -- a place, down, the
+// press edge and whether the hardware measured it this frame -- written like
+// its buttons. The frame's sample is the merge: the newest sample of a source
+// that is down, else the newest of any; an edge is delivered once. The touch
+// driver and the dev channel's gestures are two such sources, so a scripted
+// tap reaches the pointer the way a finger does.
+//
 // PLAYERS. A source sits on a player slot (0 .. MOY_INPUT_PLAYERS-1). The
 // union (MOY_INPUT_UNION) is every source; a player's view is its sources'.
 // While every source sits on one slot, that slot's view is the union and
@@ -42,9 +49,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
+// board is recognised by the header it has.
+#if defined(__has_include)
+#if __has_include("esp_heap_caps.h")
+#define MOY_INPUT_BOARD 1
+#endif
+#endif
+
 #define MOY_INPUT_BUTTONS 15u
 #define MOY_INPUT_HOST_BUTTONS 8u
-#define MOY_INPUT_SOURCES 12u
+#define MOY_INPUT_SOURCES 8u
 #define MOY_INPUT_PLAYERS 8u
 #define MOY_INPUT_UNION 0xFFu
 #define MOY_INPUT_KEYQ 8u           // one-shot keys a source queues
@@ -72,6 +87,15 @@ enum {
 extern const char *const MOY_INPUT_NAMES[MOY_INPUT_BUTTONS];
 
 typedef struct moy_input moy_input_t;
+
+// The frame's pointer sample (moy_input_sample after begin_frame).
+typedef struct {
+    bool any;               // some source has written a sample
+    bool down;
+    bool edge;              // went down this frame
+    bool fresh;             // measured this frame, not a held repeat
+    int32_t x, y;
+} moy_input_sample_t;
 
 #define MOY_INPUT_TICKS_PERIOD (1u << 30)  // the VM's ticks_ms period
 
@@ -117,6 +141,9 @@ int moy_input_set_key(moy_input_t *t, uint32_t h, int32_t key);      // the key,
 int moy_input_key(moy_input_t *t, uint32_t h, int32_t key);          // one-shot: one frame
 int moy_input_source_key(const moy_input_t *t, uint32_t h, int32_t *key);
 uint32_t moy_input_source_held(const moy_input_t *t, uint32_t h);
+// This source's pointer sample, which stands until it writes another.
+int moy_input_point(moy_input_t *t, uint32_t h, int32_t x, int32_t y, bool down, bool edge,
+                    bool fresh);
 
 // -- the frame --
 void moy_input_begin_frame(moy_input_t *t);   // the latches merged, the edges computed
@@ -134,6 +161,7 @@ void moy_input_drop_edges(moy_input_t *t);
 // Held and pressed bits for `player`, MOY_INPUT_UNION for every source.
 void moy_input_masks(const moy_input_t *t, uint8_t player, uint32_t *held, uint32_t *pressed);
 uint32_t moy_input_released(const moy_input_t *t);
+void moy_input_sample(const moy_input_t *t, moy_input_sample_t *out);
 uint32_t moy_input_kept(const moy_input_t *t);   // the press edges a paced cart's next tick takes
 int32_t moy_input_last_key(const moy_input_t *t);
 void moy_input_set_last_key(moy_input_t *t, int32_t key);   // a direct write; the next source write heals it
@@ -150,5 +178,9 @@ void moy_input_ptr_move(moy_input_ptr_t *p, int32_t dx, int32_t dy, uint32_t now
 void moy_input_ptr_place(moy_input_ptr_t *p, int32_t x, int32_t y, uint32_t now);
 bool moy_input_ptr_live(const moy_input_ptr_t *p, uint32_t now);
 void moy_input_ptr_tick(moy_input_ptr_t *p, uint32_t now);
+// The frame's sample into the pointer: down and fresh, and the place while
+// down. Returns MOY_INPUT_P_HELD while down, with MOY_INPUT_P_CLICK on its
+// press edge; 0, and the pointer untouched, when no source has a sample.
+int moy_input_ptr_apply(const moy_input_t *t, moy_input_ptr_t *p, uint32_t now);
 
 #endif // MOY_INPUT_H

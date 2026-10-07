@@ -43,7 +43,7 @@ belongs here is only what a coder must not undo:
   bench (a stalled frame loop stops re-arming the scan). Background rescans
   are 10% duty + passive now; only the user-facing picker scans continuously.
   If a radio symptom appears only while the loop RUNS, suspect the scan first
-  (`device/ble_keyboard.py` has the numbers).
+  (`native/moy_input/moy_ble_task.c` has the numbers).
 - **The link's receive ring is the kernel's** (`native/moy_net/moy_link.c`,
   `moy_net.Link`); the port's espnow module is out of the console images.
   `docs/netplay_v1.md` has why and what `_recover()` still does.

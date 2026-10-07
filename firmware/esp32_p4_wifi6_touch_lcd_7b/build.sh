@@ -54,12 +54,9 @@ moybyte_setup_idf esp32p4
 #    because both the .build tree and a reused IDF checkout persist.
 # ---------------------------------------------------------------------------
 
-# 2a) The P4 SILICON patches (shared lib, both P4 boards): the BLE-HID
-#     notification fast path into MicroPython's modbluetooth.c, and the #106
-#     DSI bridge-underrun ISR backport into the (shared) ESP-IDF checkout.
-#     Both were this directory's patches/ until 2026-09-06; they live in
-#     patches/p4_*.patch now.
-moybyte_patch_p4_ble_hid_fastpath
+# 2a) The P4 SILICON patch (shared lib, both P4 boards): the #106 DSI
+#     bridge-underrun ISR backport into the (shared) ESP-IDF checkout. It was
+#     this directory's patches/ until 2026-09-06; it lives in patches/p4_*.patch now.
 moybyte_patch_p4_dsi_underrun
 
 # 2c) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel

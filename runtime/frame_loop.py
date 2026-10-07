@@ -3,7 +3,6 @@
 #   frame_slot_ms                     the cadence one frame is measured against
 #   FramePump                         the frame loop's dt clock, head and tail
 #   IdleBlank                         blank the backlight after a spell with no input
-#   apply_touch                       one touch sample -> the shared pointer
 #   poll_webhost                      one webhost slice per frame
 #   poll_link                         one radio slice per frame
 #   PerfSampler                       the serial PERF line, one body for every board
@@ -333,24 +332,6 @@ class IdleBlank:
             print("Moybyte power save: screen off (idle %ds)"
                   % (self.timeout_ms // 1000))
         return click
-
-
-def apply_touch(touch, pointer):
-    """One GT911 sample -> the shared pointer, the same way on every board
-    (#202 Phase C; both poll_inputs hooks carried this verbatim).
-
-    Touch.poll holds a held finger's last point across the passes the GT911
-    produced no fresh buffer for (#74), so `pointer.down` is a real LEVEL and
-    a drag survives them; `fresh` marks those repeats so kinetic scrolling
-    (#113) doesn't measure finger speed against a sample the hardware never
-    took. Returns (touched, clicked) for the hook's click/active summary."""
-    tp = touch.poll()
-    pointer.down = tp is not None
-    pointer.fresh = getattr(touch, "fresh", True)
-    if tp is None:
-        return False, False
-    pointer.place(tp[0], tp[1])
-    return True, bool(tp[2])
 
 
 def poll_webhost(ws):

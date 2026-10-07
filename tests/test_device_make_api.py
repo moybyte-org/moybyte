@@ -87,7 +87,7 @@ def _load_moy_runtime():
     # gitignored, so a fresh checkout has none). Register them from device/ so
     # the device module execs under CPython (device_util first: device_wifi
     # imports it).
-    for dname in ("device_util", "device_wifi", "device_input", "device_diag",
+    for dname in ("device_util", "device_wifi", "device_diag",
                   "device_canvas", "device_api"):
         ds = importlib.util.spec_from_file_location(
             dname, DEVICE / (dname + ".py"))
@@ -109,6 +109,13 @@ def _load_moy_runtime():
     sys.path.insert(0, "tools")
     import gen_device_carts
     _swap_in(saved, "carts_data", gen_device_carts.as_module("system_carts"))
+
+    # The board's own input module, which moy_runtime imports bare.
+    ts = importlib.util.spec_from_file_location("tdeck_input",
+                                                ROOT / "modules" / "tdeck_input.py")
+    tmod = importlib.util.module_from_spec(ts)
+    _swap_in(saved, "tdeck_input", tmod)
+    ts.loader.exec_module(tmod)
 
     spec = importlib.util.spec_from_file_location(
         "moy_runtime", ROOT / "modules" / "moy_runtime.py"

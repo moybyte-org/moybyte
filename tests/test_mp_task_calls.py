@@ -56,10 +56,11 @@ def test_the_committed_record_is_the_pinned_tags():
 
 def test_the_kernels_copy_is_the_record_plus_its_own_calls():
     """The VM service is mp_task copied: with the kernel's own calls taken out
-    (every `moy_*`), its list is the record's, but for the one call the copy
+    (every `moy_*`), its list is the record's, but for the two calls the copy
     replaces -- a missing first heap area lands on the recovery floor instead
-    of `esp_restart`. A tag bump that moves the record moves this test with it,
-    so the copy cannot fall behind the review."""
+    of `esp_restart`, and the pin sweep is the kernel's, which spares its own
+    ISRs, instead of `machine_pins_deinit`. A tag bump that moves the record
+    moves this test with it, so the copy cannot fall behind the review."""
     with open(KERNEL) as f:
         src = f.read()
     mine = g.call_list(src, ("app_main", "moy_vm_task", "platform_mbedtls_time"))
@@ -68,8 +69,12 @@ def test_the_kernels_copy_is_the_record_plus_its_own_calls():
     _tag, _functions, recorded = g.read_record(RECORD)
     i = recorded.index("call esp_restart")
     assert recorded[i - 1] == "call printf"        # "mp_task_heap allocation failed!"
-    assert mine == recorded[:i] + recorded[i + 1:]
+    want = recorded[:i] + recorded[i + 1:]
+    want.remove("call machine_pins_deinit")
+    assert mine == want
     assert recorded.count("call esp_restart") == 1
+    assert "call machine_pins_deinit" not in mine
+    assert "moy_kernel_pins_deinit();" in src
 
 
 def test_comments_strings_and_formatting_are_not_changes():

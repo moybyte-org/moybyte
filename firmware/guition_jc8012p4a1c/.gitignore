@@ -10,7 +10,5 @@ modules/*
 !modules/boot.py
 !modules/main.py
 !modules/moybyte_shell.py
-!modules/guition_p4_input.py
 !modules/guition_p4_smoke.py
-!modules/gsl_fw_jc8012.py
 !modules/moy_runtime.py

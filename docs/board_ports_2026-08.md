@@ -27,7 +27,7 @@ own board-dir README and in the sections below.
 | `board.toml` (modules + native, denials with whys) | copy + edit | solved (#161) |
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
 | panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
-| input drivers | one copy each | `device/gt911.py`, `native/moy_flush`, `native/moy_glass`'s banded compositor |
+| input drivers | one copy each | `native/moy_input` (the touch controllers, the T-Deck keyboard and trackball, selected by a board's `MOY_INPUT_*` defines), `native/moy_flush`, `native/moy_glass`'s banded compositor |
 | **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is `frame_loop.FrameLoop`, and every console board rides it |
 | `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | rides `FrameLoop` |
 | Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
@@ -70,9 +70,10 @@ were closed.
 The rule: a driver moves from a board tree to the shared `device/` (Python) or
 `native/` (C) the day a SECOND board carries the hardware, parameterized by
 `board.toml` data — and not one day earlier.
-  * **GT911**: the Guition P4 did NOT bring one (it is a GSL3680), so the
-    second consumer has not arrived; the HeldPoint core in `device/gt911.py`
-    is what the GSL3680 driver rides, which is the promotion that DID happen.
+  * **Touch (2026-10-07)**: every controller is the kernel's
+    (`native/moy_input/moy_touchdev.c`: the GT911, the GSL3680, the AXS15231)
+    over one mapping and no-news body (`moy_touch.c`); a board names its
+    controller, pins and knobs in `mpconfigboard.h` (`MOY_INPUT_TOUCH_*`).
   * **The P4 silicon (2026-09-06, the Guition P4 as second consumer)**: four C
     modules (`moy_dsi` parameterized by a `MOY_DSI_PANEL_*` board define,
     `moy_ppa`, `moy_ble_hid`, `moy_c6`) moved to **`native/p4/`**, declared by
@@ -92,12 +93,8 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     patches became `patches/p4_*.patch` behind two shared build-lib
     functions. What stayed per board: the backlight (GPIO + polarity), the
     touch driver, the canvas sizes, `run_desktop`.
-  * **GSL3680**: a NEW part, so it started in `device/gsl3680.py` with the
-    board's pins, firmware and flips passed in — the stage-2 rule, followed.
-    The firmware blob is the BOARD's (`gsl_fw_jc8012.py`): it carries one
-    glass's sensor geometry.
-  * **AXS15231 touch**: lands directly as a shared `device/` driver — it is
-    new code, so it starts in the right place.
+  * **GSL3680**: the firmware blob is the BOARD's (`gsl_fw_jc8012.c` beside
+    its `mpconfigboard.h`): it carries one glass's sensor geometry.
   * **The QSPI panel**: `moy_lcd`'s VALUE is not the ST7789 init table — it is
     the band/bounce/kick-pump-drain machinery and the hard-won DMA rules
     compiled into it. Whether the AXS15231B backend shares that C core
@@ -221,10 +218,11 @@ write only its three transport hooks, so "stands alone" means the transport,
 not the concurrency. A board whose panel scans continuously (DPI) denies
 moy_flush in `board.toml` and has no stage-1 flush at all.
 
-**Stage 2 — touch.** Start from `device/gt911.py` if the part matches (the
-byte-order caveat: read the dump, never assume); calibrate with a
-corner-target smoke; bake the swap/flip knobs with the calibration date. A new
-part's driver starts IN `device/` (shared) with board params.
+**Stage 2 — touch.** Name the controller in `mpconfigboard.h`
+(`MOY_INPUT_TOUCH_KIND` and its pins, `native/moy_input/moy_input_task.c`) if
+the kernel drives the part (the byte-order caveat: read the dump, never
+assume); calibrate with a corner-target smoke; bake the swap/flip knobs with
+the calibration date. A new part's protocol joins `moy_touchdev.c`, shared.
 
 **Stage 3 — input beyond touch** (keyboard/trackball/BLE), if any. This is
 where the poller-thread question lives on a bus-contended board.
@@ -270,9 +268,9 @@ each of these by copying, and a fourth would pay again):
 
 ## What the Guition S3 specifically stresses (and the P4 doesn't)
 
-* **Input without a keyboard.** `moybyte/input.py` is the T-Deck keyboard
-  matrix + InputState fused; a touch-only board needs the InputState core
-  separable from the keyboard driver. Do this split AS the port needs it.
+* **Input without a keyboard.** The input table and the T-Deck keyboard are
+  separate (`native/moy_input`: the table in `moy_input.c`, the keyboard in
+  `moy_kbd.c`), so a touch-only board takes the table and names no keyboard.
 * **A third system resolution on the fullscreen tier.** 480×320 landscape
   (owner call 2026-08-18, off the portrait-native 320×480 glass): system UI
   responsive at native res (#39 — closed, the machinery exists), the game a

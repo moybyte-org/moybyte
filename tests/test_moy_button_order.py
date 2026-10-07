@@ -58,18 +58,15 @@ def _enum_from_header():
 
 
 def _device_input_module():
-    """The boards' moybyte.input, loaded by path.
+    """The boards' input table: native/moy_input, its InputTable the fifteen
+    names a board's kernel table holds."""
+    from runtime import moy_input
 
-    It is not importable as `moybyte.input` from the host tree, and importing
-    it is the whole point -- the tier this test exists for is the one the suite
-    otherwise only ever greps.
-    """
-    path = (ROOT / "device"
-            / "moybyte" / "input.py")
-    spec = importlib.util.spec_from_file_location("_dev_input_for_test", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    class _Boards:
+        InputState = moy_input.InputTable
+        BUTTONS = moy_input.NAMES
+
+    return _Boards
 
 
 def test_moy_buttons_matches_the_vendored_enum():

@@ -32,7 +32,7 @@ separate question from what is committed.
 | ESP 88, the neon city film: its code and artwork (the ESP 88 cart) | `ports/jet/examples/`, `ports/jet/esp88.moy/assets.bin` | [CubeCoders/JetExamples](https://github.com/CubeCoders/JetExamples) (`esp32-neon-film`) | MIT | One line (the film's frame size); artwork repacked, glow and credits scaled |
 | `esp_lcd_ek79007` panel driver | `native/p4/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
 | `esp_lcd_jd9365` panel driver, Guition's build | `native/p4/moy_dsi/vendor_jd9365/` | Espressif's component as shipped in [Guition's JC8012P4A1C demo](https://github.com/DevinWatson/10.1-inch-ESP32P4-Xiaozhi-ESP32-C6-JC8012P4A1C_I_W_Y) | Apache-2.0 | No |
-| GSL3680 touch firmware (JC8012P4A1C glass) | `firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py` | Silead, via the same Guition demo (`esp_lcd_gsl3680.h`) | vendor firmware, redistributed as shipped | Transcribed (`tools/gen_gsl_fw.py`) |
+| GSL3680 touch firmware (JC8012P4A1C glass) | `firmware/guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c` | Silead, via the same Guition demo (`esp_lcd_gsl3680.h`) | vendor firmware, redistributed as shipped | Transcribed (`tools/gen_gsl_fw.py`) |
 | ST7789 init register values (T-Deck panel) | `firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c` | [lvgl-micropython/lvgl_micropython](https://github.com/lvgl-micropython/lvgl_micropython) | MIT | **Yes** — transcribed to C |
 | AXS15231B init register values (Guition panel) | `firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c` | [esphome/esphome](https://github.com/esphome/esphome) | MIT (their Python half) | **Yes** — transcribed to C |
 | esptool-js 0.6.0 (the site's board flasher) | `site/vendor/esptool-js/` | [espressif/esptool-js](https://github.com/espressif/esptool-js) | Apache-2.0 | No |
@@ -152,16 +152,16 @@ mirrored at
 
 ### 2.3b Silead GSL3680 touch firmware — the Guition P4 glass
 
-`firmware/guition_jc8012p4a1c/modules/gsl_fw_jc8012.py`
+`firmware/guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c`
 
 The GSL3680 is a RAM-loaded touch controller: the host uploads its firmware
 over I²C after every reset. Silead publishes it only through panel vendors,
 and this table came from the same Guition demo above (`GSLX680_FW[]` in
-`src/touch/esp_lcd_gsl3680.h`), transcribed to a `bytes` literal by
+`src/touch/esp_lcd_gsl3680.h`), transcribed to a C byte array by
 `tools/gen_gsl_fw.py` (offset + 32-bit value per record, nothing else
 changed). Every project driving this glass redistributes the same table
 (ESPHome's `gsl3680` component included); Silead ships no licence with it.
-Moybyte's driver (`device/gsl3680.py`) is its own work and does NOT carry
+Moybyte's driver (`native/moy_input/moy_touchdev.c`) is its own work and does NOT carry
 Silead's GPL `gsl_point_id.c` finger-tracking algorithm.
 
 ### 2.4 ST7789 init register values — the T-Deck panel on mainline
@@ -249,8 +249,8 @@ component generates around it (`COLMOD` 0x55, `MADCTL`, `INVOFF`, `SLPOUT`,
   CS assertion, the band/bounce/kick-pump-drain flush, the landscape
   rotate-gather) is Moybyte's own work — see the module header for why that C
   body is not shared with `moy_lcd`'s.
-- **The touch half is a protocol constant, not a table.** `device/axs_touch.py`
-  writes the same 11-byte read-touchpad command ESPHome's
+- **The touch half is a protocol constant, not a table.** The kernel's driver
+  (`native/moy_input/moy_touchdev.c`) writes the same 11-byte read-touchpad command ESPHome's
   `axs15231_touchscreen.cpp` declares — a C++ file, so GPLv3 on their side of
   the split. What crossed is that byte string: the command a chip with no
   datasheet answers to. No code did — the poller, its no-news contract and the
@@ -459,7 +459,8 @@ names it, and a reader deserves to know where the numbers came from.
 ### 3.5 Board pin assignments — Guition JC3248W535
 
 `firmware/guition_jc3248w535/board.toml` and the constants derived from it in
-`firmware/guition_jc3248w535/native/moy_axs/` and `device/axs_touch.py`.
+`firmware/guition_jc3248w535/native/moy_axs/` and the board's
+`MOY_INPUT_TOUCH_*` in `boards/MOYBYTE_GUITION_S3/mpconfigboard.h`.
 
 Guition publishes no board file worth transcribing, so the pins came from a
 working **ESPHome** definition for this board that the owner already ran on
@@ -628,7 +629,7 @@ hand-written 8-opcode benchmark cores, not derived from any emulator.
 
 `patches/*.patch` (the two `p4_*` ones were the Waveshare's own
 `patches/` until 2026-09-06, when both ESP32-P4 boards started applying them)
-are Moybyte-authored diffs against MicroPython and ESP-IDF (I²C GIL release, `MICROPY_OBJ_REPR_C`
+are Moybyte-authored diffs against MicroPython and ESP-IDF (`MICROPY_OBJ_REPR_C`
 floats, native-code arena reclaim, T-Deck early board init, SPI PSRAM TX DMA,
 `esp_lcd` no-acquire `tx_color`, PSRAM temperature retune, DSI underrun hook,
 BLE-HID notification fast path). Being diffs, each carries a few lines of
