@@ -9,8 +9,9 @@
 //
 // Loading is a scanner, not a tree: it walks the top-level object, splits key
 // and value spans and refuses what is not JSON (RFC 8259, plus the NaN /
-// Infinity / -Infinity tokens CPython's json reads and writes), nesting deeper
-// than MOY_SETTINGS_DEPTH containers (the file's object is the first), and a
+// Infinity / -Infinity tokens CPython's json reads and writes), a file nested
+// deeper than MOY_SETTINGS_DEPTH containers (the file's object is the first,
+// so a row's value holds at most MOY_SETTINGS_DEPTH - 1), and a
 // key with a lone surrogate escape, which holds no UTF-8. A refused file
 // changes nothing. The scanner reads untrusted bytes; fuzz_spine.c runs it
 // under the sanitizers, and tests/test_moy_spine_twins.py holds it to CPython's
@@ -45,7 +46,7 @@ moy_settings_t *moy_settings_new(const moy_htab_mem_t *mem);    // or NULL
 void moy_settings_free(moy_settings_t *s);                      // NULL is a no-op
 
 // OK when `text` is exactly one JSON value (whitespace around it allowed) that
-// a row may hold, else BADJSON.
+// a row may hold, nested at most MOY_SETTINGS_DEPTH - 1 deep, else BADJSON.
 int moy_settings_validate(const char *text, size_t len);
 
 // Replace every row with the object `text` holds: OK and the row count in

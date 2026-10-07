@@ -4,8 +4,11 @@
 // from, walked in place.
 //
 // What it accepts is CPython's json.loads over text: RFC 8259, plus the NaN,
-// Infinity and -Infinity tokens, nesting at most MOY_JSON_DEPTH containers
-// deep (the outermost counts as the first). It reads untrusted bytes:
+// Infinity and -Infinity tokens, nested less than MOY_JSON_DEPTH containers
+// deep: a value (moy_json_valid, and every scan the store makes) holds at most
+// MOY_JSON_DEPTH - 1, the outermost counted, and an object walked with
+// moy_json_object at most MOY_JSON_DEPTH counting itself, since its members
+// are values. It reads untrusted bytes:
 // native/moy_spine/fuzz_spine.c and native/moy_store/fuzz_fs.c run it under
 // the sanitizers, and tests/test_moy_spine_twins.py and tests/test_store_native.py
 // hold it to CPython's json.
