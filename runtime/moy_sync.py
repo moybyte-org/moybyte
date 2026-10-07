@@ -137,7 +137,6 @@ publishes, atomically, so a dropped connection mid-file leaves the previous
 good copy untouched and the retry simply restarts at part 0.
 """
 
-import json
 import time
 
 try:
@@ -152,6 +151,10 @@ except ImportError:  # host / CPython: the runtime package
     from runtime.moy_fs import (_mkdir, _write, _remove, _exists, _copy,
                                 _write_atomic, _crc32, _write_bytes)
 
+try:
+    from moy_net import decode_batch, encode_batch
+except ImportError:  # pragma: no cover - host package lane
+    from runtime.moy_net import decode_batch, encode_batch
 try:
     from moy_store_base import store_path
 except ImportError:  # host / CPython: the runtime package
@@ -703,24 +706,16 @@ def parse_batch(body):
     flashed board already parses, or whatever a v2 batch names. An unknown root
     is malformed on purpose -- a receiver must never guess where a path lands.
     """
-    if isinstance(body, bytes):
-        try:
-            body = body.decode("utf-8")
-        except Exception:  # noqa: BLE001
-            return None, None, None
-    try:
-        doc = json.loads(body)
-    except Exception:  # noqa: BLE001
+    got = decode_batch(body)
+    if got is None:
         return None, None, None
-    if not isinstance(doc, dict):
-        return None, None, None
-    root = root_for_wire(doc.get("v"), doc.get("root"))
+    v, named, ops, pin = got
+    root = root_for_wire(v, named)
     if root is None:
         return None, None, None
-    ops = doc.get("ops")
     if not isinstance(ops, list):
         return None, None, None
-    return ops, doc.get("pin"), root.id
+    return ops, pin, root.id
 
 
 def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
@@ -1282,12 +1277,8 @@ class StoreWatcher:
             return ""
         root = root_by_id(self.root_id) or CARTS_ROOT
         if root.wire == PROTOCOL_V:
-            doc = {"v": PROTOCOL_V, "ops": ops}
-        else:
-            doc = {"v": root.wire, "root": root.id, "ops": ops}
-        if pin:
-            doc["pin"] = pin
-        return json.dumps(doc)
+            return encode_batch(PROTOCOL_V, None, ops, pin)
+        return encode_batch(root.wire, root.id, ops, pin)
 
     def ack(self, ok):
         """Settle the in-flight batch. ok=False requeues everything it carried

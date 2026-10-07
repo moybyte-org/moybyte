@@ -89,7 +89,8 @@ here" -- and it is also what a person typing a half-remembered address gets.
 
 import json
 
-from moy_webserver import WebServer, http_response
+from moy_net import http_response
+from moy_webserver import WebServer
 
 try:
     from ticks import _ticks_ms as ticks_ms, _ticks_diff as ticks_diff

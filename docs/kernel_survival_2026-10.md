@@ -86,7 +86,7 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the BLE HID central | `device/ble_keyboard.py` over `bluetooth`; `native/p4/moy_ble_hid/` | `+native/moy_input/moy_ble_hid.c` over the NimBLE host, on every console | 2 |
 | the browser's event decode | `runtime/web_input.py` | the web build's `moy_input` import | 2 |
 | the audio session, the six verbs, the bank push, the master level | `device/device_audio.py`, `runtime/audio.py`'s `AudioEngine`, `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`runtime/audio_session.py`) | `native/moy_audio/` grows its session and verb face; the codec in `+native/moy_audio/moy_codec_es8311.c` | 2 |
-| WiFi, the radio under the spine's lease | `device/device_wifi.py` over `network` (`+runtime/moy_net.py`) | `+native/moy_net/moy_wifi.c` | 2 |
+| WiFi, the radio under the spine's lease | `device/device_wifi.py` over `network` (`runtime/moy_net.py`) | `+native/moy_net/moy_wifi.c` | 2 |
 | ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `+native/moy_net/moy_link.c` | 2 |
 | the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `+native/moy_net/moy_http.c`, `+native/moy_net/moy_webhost.c` | 2 |
 | the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `+native/moy_net/moy_sync.c` | 2 |
@@ -191,7 +191,7 @@ made here, not promised.
    both arguments, the pointer's place/down/fresh/click as fields of the
    table. `runtime/audio_session.py`: a session per owner carrying its bank,
    the six verbs on a session, `focus` naming the audible one.
-   `+runtime/moy_net.py`: the WiFi state machine, the link's peer table of kind
+   `runtime/moy_net.py`: the WiFi state machine, the link's peer table of kind
    PEER, the HTTP request parser and response writers as pure functions, the
    sync batch codec.
 8. **The survival traces** join `tests/test_semantic_traces.py` before anything

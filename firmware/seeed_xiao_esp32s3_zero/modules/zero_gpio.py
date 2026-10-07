@@ -40,7 +40,7 @@ forever -- and here the neighbours are the write that turns a motor OFF.
 
 import json
 
-from moy_webserver import http_response, query_param
+from moy_net import http_response, query_param
 
 # Wire version. Bumped only if the op shape changes; the browser sends it and a
 # batch without it is refused, so an old page cannot half-speak to a new board.

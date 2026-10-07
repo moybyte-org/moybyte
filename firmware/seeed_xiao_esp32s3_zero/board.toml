@@ -91,11 +91,13 @@ every import of every staged module resolves on this target, which is precisely
 the failure an allowlist has and a denylist does not."""
 
 [[modules.shared.group]]
-files = ["moy_sync.py", "moy_fs.py"]
+files = ["moy_sync.py", "moy_fs.py", "moy_net.py"]
 why = """
 The 3.4 sync RPC itself: the batch format, the per-file last-writer-wins apply,
 the two roots (carts and the #108 files layer), and the small filesystem
-helpers every one of them writes through. This is the board's reason to exist
+helpers every one of them writes through. moy_net.py is the links twin's pure
+half: the batch codec and the HTTP parser and response writer the webserver
+and the GPIO routes use. This is the board's reason to exist
 -- `moy_webhost` is a transport in front of these two files."""
 
 [[modules.shared.group]]

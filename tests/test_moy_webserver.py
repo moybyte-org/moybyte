@@ -31,6 +31,7 @@ if MODULES not in sys.path:
     sys.path.insert(0, MODULES)
 
 import moy_webserver as web  # noqa: E402  (the DEVICE transport core)
+from runtime import moy_net  # noqa: E402  (its parser and writer)
 
 
 # ---------------------------------------------------------------------------
@@ -45,23 +46,23 @@ def test_parse_request_keeps_the_query_for_the_handler():
     was written: a GET carries its credential as `?pin=NNNN` and nowhere else,
     so discarding it in the parser made gating a read inexpressible. Handlers
     route on the bare path themselves (moy_webhost always did, defensively)."""
-    m, p, clen, end = web.parse_request(b"GET /sync?t=1 HTTP/1.1\r\nHost: x\r\n\r\n")
+    m, p, clen, end = moy_net.parse_request(b"GET /sync?t=1 HTTP/1.1\r\nHost: x\r\n\r\n")
     assert m == "GET" and p == "/sync?t=1" and clen == 0 and end > 0
-    m, p, clen, end = web.parse_request(b"GET /sync HTTP/1.1\r\nHost: x\r\n\r\n")
+    m, p, clen, end = moy_net.parse_request(b"GET /sync HTTP/1.1\r\nHost: x\r\n\r\n")
     assert p == "/sync", "a target with no query must not grow one"
 
 
 def test_query_param_reads_a_pin_off_a_target():
-    assert web.query_param("/carts.json?pin=1234", "pin") == "1234"
-    assert web.query_param("/carts.json?dev=1&pin=99&x=2", "pin") == "99"
+    assert moy_net.query_param("/carts.json?pin=1234", "pin") == "1234"
+    assert moy_net.query_param("/carts.json?dev=1&pin=99&x=2", "pin") == "99"
     # Absent, empty, and no query at all are all "" -- one answer, so a caller
     # never has to tell three kinds of nothing apart.
-    assert web.query_param("/carts.json?dev=1", "pin") == ""
-    assert web.query_param("/carts.json?pin=", "pin") == ""
-    assert web.query_param("/carts.json", "pin") == ""
-    assert web.query_param("", "pin") == ""
+    assert moy_net.query_param("/carts.json?dev=1", "pin") == ""
+    assert moy_net.query_param("/carts.json?pin=", "pin") == ""
+    assert moy_net.query_param("/carts.json", "pin") == ""
+    assert moy_net.query_param("", "pin") == ""
     # A prefix match is not a match: `?pinned=1` must not read as a pin.
-    assert web.query_param("/carts.json?pinned=1234", "pin") == ""
+    assert moy_net.query_param("/carts.json?pinned=1234", "pin") == ""
 
 
 def test_the_handler_seam_receives_the_query():
@@ -72,7 +73,7 @@ def test_the_handler_seam_receives_the_query():
     class Srv(web.WebServer):
         def handle_http(self, method, path, body):
             seen.append(path)
-            return web.http_response(200, "{}")
+            return moy_net.http_response(200, "{}")
 
     srv = Srv.__new__(Srv)
     srv.requests = 0
@@ -83,18 +84,18 @@ def test_the_handler_seam_receives_the_query():
 
 def test_parse_request_post_reads_content_length():
     raw = b"POST /push HTTP/1.1\r\nContent-Length: 11\r\n\r\nhello world"
-    m, p, clen, end = web.parse_request(raw)
+    m, p, clen, end = moy_net.parse_request(raw)
     assert m == "POST" and p == "/push" and clen == 11
     assert raw[end:end + clen] == b"hello world"
 
 
 def test_parse_request_incomplete_headers():
-    m, p, clen, end = web.parse_request(b"GET /sync HTTP/1.1\r\nHost: x")
+    m, p, clen, end = moy_net.parse_request(b"GET /sync HTTP/1.1\r\nHost: x")
     assert end == -1 and m is None
 
 
 def test_http_response_well_formed():
-    r = web.http_response(200, '{"ok":true}')
+    r = moy_net.http_response(200, '{"ok":true}')
     head, _, body = r.partition(b"\r\n\r\n")
     assert head.startswith(b"HTTP/1.1 200 OK")
     assert b"Content-Type: application/json" in head
@@ -228,7 +229,7 @@ def test_server_handle_http_seam_serves_a_subclass_endpoint():
     class _Rpc(web.WebServer):
         def handle_http(self, method, path, body):
             if method == "GET" and path == "/ping":
-                return web.http_response(200, '{"pong":1}')
+                return moy_net.http_response(200, '{"pong":1}')
             return None
 
     srv = _Rpc(port=0)

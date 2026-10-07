@@ -27,6 +27,10 @@ with no moy_runtime cycle.
 import time
 
 from device_util import _diag_note
+try:
+    from moy_net import wifi_password, wifi_remember
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_net import wifi_password, wifi_remember
 
 
 class DeviceWifi:
@@ -121,8 +125,7 @@ class DeviceWifi:
         up is the late-association case ensure_online() waits for."""
         ssid = str(ssid)
         stored = self._stored_password(ssid)
-        if not password and stored:
-            password = stored
+        password = wifi_password(password, stored)
         ok = False
         if self._ensure_wlan() is not None:
             try:
@@ -140,7 +143,7 @@ class DeviceWifi:
                 ok = False
         if ok:
             self._ssid = ssid
-        if (ok or (password and password != stored)) \
+        if wifi_remember(ok, password, stored) \
                 and self._store is not None and self._root is not None:
             try:
                 self._store.remember_wifi(ssid, password, self._root)

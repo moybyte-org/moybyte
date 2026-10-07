@@ -116,9 +116,12 @@ def test_device_webserver_is_transport_core_only():
                  "def recording_wanted", "def stream_mode", "def begin_frame",
                  "PAGE_HTML,", "self.recorder", "self.provider"):
         assert dead not in src, dead
-    for alive in ("def parse_request", "def http_response", "class WebServer",
-                  "def handle_http"):
+    for alive in ("class WebServer", "def handle_http"):
         assert alive in src, alive
+    # The parser and the response writer are the links twin's (moy_net).
+    net = _read("runtime", "moy_net.py")
+    for alive in ("def parse_request", "def http_response"):
+        assert alive in net, alive
 
 
 def test_the_websocket_half_is_gone_with_its_framing_leaf():

@@ -72,6 +72,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.players import NetService
 try:
+    from moy_net import PeerTable
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_net import PeerTable
+try:
     from cart_api import CART_BUTTONS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_api import CART_BUTTONS
@@ -147,7 +151,7 @@ class EspNowLink:
         self.mac = b""
         self.active = False
         self.error = None
-        self.peers = {}             # mac -> Peer
+        self.peers = PeerTable()    # mac -> Peer, rows of kind PEER
         self.session = None         # the live LockstepSession, or None
         self.net = EspNowNet(self)
         self.rx = 0
@@ -238,7 +242,7 @@ class EspNowLink:
             except Exception:  # noqa: BLE001
                 pass
             self._pm_was = None
-        self.peers = {}
+        self.peers = PeerTable()
         self.active = False
 
     # -- transmit ------------------------------------------------------------
