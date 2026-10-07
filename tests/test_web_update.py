@@ -85,6 +85,10 @@ class _Gate:
 
 
 def _host(ws, tmp_path, pin="1234", gate=None):
+    # The kernel's webhost is one per process: a host another test on this
+    # worker left serving would keep this one from configuring its own store
+    # and pin, so each test starts from a stopped one.
+    moy_webhost.moy_net.web_stop()
     h = moy_webhost.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
                             pin=pin, with_sd=gate,
                             update=moy_webhost.ConsoleUpdate(ws))
