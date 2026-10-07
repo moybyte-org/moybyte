@@ -512,7 +512,7 @@ def test_state_reports_ppa_as_None_on_a_board_with_no_overlap():
 
 # The PERF line's format, its %-count and its `-`-never-0 marker moved to
 # tests/test_device_boot.py with the sampler itself (#206 item 2): the line is
-# device_boot.PerfSampler now, so those assertions can EXECUTE the emitter
+# frame_loop.PerfSampler now, so those assertions can EXECUTE the emitter
 # instead of parsing a print out of this board's source. What stays a P4
 # question -- that the overlap tuple this file exercises is what the line's
 # ppa=/fence_ms= fields carry -- is pinned there against this board's own

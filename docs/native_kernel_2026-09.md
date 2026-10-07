@@ -222,7 +222,7 @@ sprints that follow it:
 | audio: the I2S feed and the sfx/music semantics the glue drains through `make_api` | `device/device_audio.py`, `device/moycore_glue.py`'s audio half | 3 |
 | the glass: canvas ownership, present, compositors | `device/device_canvas.py`, `device/dsi_panel.py`, `device/p4_canvas.py` | 3 |
 | storage: the SD gate, the store of record and its journal | the boards' `with_sd`, `runtime/moy_journal.py` | 1b and 3 |
-| the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/device_boot.py` (in part), `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
+| the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/frame_loop.py`, `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
 | radios and links: WiFi, ESP-NOW, the C6 updater, the webhost and sync RPC | `device/device_wifi.py`, `device/moy_espnow.py`, `device/moy_c6_update.py`, `device/moy_webhost.py`, `device/moy_webserver.py`, `runtime/moy_sync.py` | 3 |
 | the store: index, catalogue, covers, seed, project loading | `runtime/moy_carts.py`, `runtime/cover_cache.py`, `runtime/moy_seed.py`, `runtime/project.py` (in part) | 1b |
 | the cart path: loop, tick model, runtime map, moycore glue, in-cart chrome, netplay lockstep, notices and toasts over a cart | `runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`, `runtime/system_menu_ui.py`, `runtime/netplay.py`, the achievements/notify path | 4 |

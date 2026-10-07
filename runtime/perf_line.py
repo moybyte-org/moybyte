@@ -3,7 +3,7 @@
 WHAT THIS IS. Every ~2s while Settings -> PERF DIAG is on, each board puts one
 line on serial naming what its frame cost; with it off (kid mode, the default)
 there is no line at all, and whatever reads one turns the diag on for its
-measurement and puts it back (`device_boot.PerfSampler` says why).
+measurement and puts it back (`frame_loop.PerfSampler` says why).
 `tools/p4_perf.py --diag` reads the line for #66's per-phase numbers (its
 default, the shipping fps, reads the same `_frames_drawn` counter with the diag
 off), so the line is a CONTRACT -- and until 2026-08-28 it was three contracts

@@ -557,19 +557,19 @@ def _perf_run(tmp_path, monkeypatch, uncap):
     on: each PERF line's drawn fps, beside the drawn-frame counter read the way
     tools/p4_perf.py reads it, at the same instants."""
     import p4_perf
-    from runtime import device_boot
+    from runtime import frame_loop
     from runtime.perf_line import parse_perf
     from ws_helpers import build_ws, open_cart
     ms = [0]
-    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: ms[0])
-    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(frame_loop, "_ticks_ms", lambda: ms[0])
+    monkeypatch.setattr(frame_loop, "_ticks_diff", lambda a, b: a - b)
     ws = build_ws(tmp_path)
     ws._uncap = uncap
     open_cart(ws, "Coin Quest")
     assert ws.cart_error is None, ws.cart_error
     ws.diag_live = True
     out = []
-    sampler = device_boot.PerfSampler(ws, emit=out.append)
+    sampler = frame_loop.PerfSampler(ws, emit=out.append)
     reads = []
     for f in range(7 * 60):
         ws.input.begin_frame()

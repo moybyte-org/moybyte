@@ -25,7 +25,7 @@ underneath.
 from mem_census import mark as _census
 from console import _cursor_delta
 from desktop_spine import build_desktop
-from device_boot import apply_touch
+from frame_loop import apply_touch
 # The seed roster, generated from system_carts/ at build time and PACKED
 # (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
 # `moy_carts.seed_any`, which reads the roster's form rather than being told.
@@ -71,7 +71,7 @@ MOY_INPUT_POLLER = True
 # one without it).
 SERIAL_CMDS = True
 
-# Idle screen blank (shared with the P4 via device_boot.IdleBlank). Overridable
+# Idle screen blank (shared with the P4 via frame_loop.IdleBlank). Overridable
 # before boot (`import moy_runtime; moy_runtime.POWER_SAVE_MS = ...`) and at
 # runtime over the dev channel (`power <secs>`, `power off`). Same 5 minutes the
 # P4 ships, so the two boards behave alike unless a board has a reason not to.

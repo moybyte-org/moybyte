@@ -616,7 +616,7 @@ class Player:
         self._native_fail = None      # reason for bytecode fallback, when auto-native fails
         # The tick model (#217): one scheduler per run. `tick_ms` is the cart's
         # tick period while a GAME is paced and 0 otherwise -- a flat attribute
-        # because device_boot's frame_slot_ms reads it every loop iteration.
+        # because frame_loop's frame_slot_ms reads it every loop iteration.
         self.sched = TickScheduler()
         self.tick_ms = 0
         self._n_ticks = 1             # frame_plan's answer, run by tick()

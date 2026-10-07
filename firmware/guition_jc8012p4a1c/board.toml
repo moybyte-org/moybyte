@@ -385,11 +385,11 @@ Each file named below is board-AGNOSTIC by construction, with its
 board-specific imports guarded and its hardware inputs passed as constructor
 arguments.
 
-The boot spine and frame pump are `runtime/device_boot.py` and reach this
-board through the SHARED denylist above. The line that decides is whether a
-module can import with no board present: device_boot takes every hardware
-object as an argument, so it loads on CPython and its shared half is executed
-by tests/test_device_boot.py."""
+The boot spine and the frame loop are `runtime/device_boot.py` and
+`runtime/frame_loop.py` and reach this board through the SHARED denylist above.
+The line that decides is whether a module can import with no board present:
+both take every hardware object as an argument, so they load on CPython and
+tests/test_device_boot.py executes their shared half."""
 packages = ["moybyte"]
 packages_why = """
 `moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState

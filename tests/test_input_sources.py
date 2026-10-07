@@ -320,7 +320,7 @@ def test_every_board_writes_every_source_before_begin_frame(board):
 
 
 # The one shipped consumer that reads the union as a bare attribute. `active`
-# holds the backlight on (device_boot.IdleBlank), so a stale read here blanks
+# holds the backlight on (frame_loop.IdleBlank), so a stale read here blanks
 # the screen under a held button -- on glass, with no host test failing. It is
 # safe only because it runs AFTER inp.begin_frame().
 ACTIVE_READ = "bool(inp._held)"

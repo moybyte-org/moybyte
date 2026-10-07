@@ -38,7 +38,7 @@ mystery hang -- which is the diagnostic that proved RX dead on this board for
 weeks (rx stuck at 1 while a host write was accepted and discarded).
 
 BOARD BITS ARE INJECTED, not imported: `set_backlight` and an `idle`
-(device_boot.IdleBlank). Both may be None, and the commands that need them say
+(frame_loop.IdleBlank). Both may be None, and the commands that need them say
 so rather than raising -- a board without a backlight hook should decline `bl`,
 not traceback into the frame loop.
 

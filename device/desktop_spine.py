@@ -48,9 +48,9 @@ needs off the returned `Desktop`.
 """
 
 from console import Pointer, Workstation, wire_workstation_core
-from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
-                         OtaHealth, PerfSampler, apply_touch, poll_link,
-                         poll_webhost)
+from device_boot import DeviceBoot
+from frame_loop import (FrameLoop, FramePump, IdleBlank, OtaHealth,
+                        PerfSampler, apply_touch, poll_link, poll_webhost)
 from device_api import make_api
 from device_canvas import DeviceCanvas, _LayerComp
 from device_wifi import autoconnect_wifi, make_wifi

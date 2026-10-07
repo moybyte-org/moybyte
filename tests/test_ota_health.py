@@ -689,7 +689,7 @@ def test_no_updater_at_all_defaults_to_stable(tmp_path):
 def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
     """WHERE each half runs, asserted structurally rather than by grep.
 
-    Both boards drive one shared implementation now (`runtime/device_boot.py`'s
+    Both boards drive one shared implementation now (`runtime/frame_loop.py`'s
     OtaHealth + FramePump, #161 Phase 4/5), which makes the old string match
     both weaker and misleading: a literal that lives in a third file says
     nothing about whether a board reached it, and the whole claim here is about
@@ -742,7 +742,7 @@ def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
             "%s: the OTA health reporter must be built on the boot path" % mod_path)
         assert seen.get("boot_check") == {False}, (
             "%s: the boot verdict is read once, before the loop" % mod_path)
-        # #202 Phase B: the frame loop itself is SHARED (device_boot.FrameLoop
+        # #202 Phase B: the frame loop itself is SHARED (frame_loop.FrameLoop
         # calls pump.tail every frame -- asserted against the spine below), so
         # the per-board placement claim becomes: the boot hands the pump to a
         # FrameLoop and runs it, and nothing drives pump.tail beside it.
@@ -757,7 +757,7 @@ def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
         assert "ws.updater.mark_valid()" not in src, mod_path
 
     # And the shared half really does confirm on painted frames, not on boot.
-    spine = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
+    spine = (ROOT / "runtime" / "frame_loop.py").read_text(encoding="utf-8")
     assert 'confirm_when_healthy(getattr(self.ws, "_frames_drawn", 0))' in spine
     # ...and the shared FrameLoop is what pumps it, after the ws phase.
     step = spine[spine.index("def step(self):"):]
@@ -766,5 +766,5 @@ def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "boot_check":
             assert "confirm_when_healthy" not in ast.dump(node), (
-                "device_boot.OtaHealth.boot_check must NOT confirm -- reaching "
+                "frame_loop.OtaHealth.boot_check must NOT confirm -- reaching "
                 "the boot path proves only that the desktop was constructed")

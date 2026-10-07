@@ -547,7 +547,7 @@ def test_other_is_the_frame_left_over_after_every_named_stage(dd):
 @pytest.mark.xfail(strict=True, reason=(
     "device/device_diag.py:400 -- `stages` includes acc[9] (the pacing sleep) "
     "while acc[1] (`frame`) is accumulated BEFORE the sleep and excludes it "
-    "(moy_runtime._account, and device_boot.FrameLoop.step measures elapsed "
+    "(moy_runtime._account, and frame_loop.FrameLoop.step measures elapsed "
     "before pace()). So `other` = unaccounted work MINUS deliberate idle, and "
     "reads NEGATIVE on any paced loop -- the ordinary desk. The line's own "
     "commit message says sleep is 'carried separately so a paced loop cannot "

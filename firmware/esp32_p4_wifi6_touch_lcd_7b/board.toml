@@ -425,11 +425,11 @@ board-specific imports guarded and its hardware inputs passed as constructor
 arguments.
 
 PHASE 4/5 UPDATE (2026-08-15): the boot spine and frame pump did NOT move here
--- they went into `runtime/device_boot.py` and reach this board through the
-SHARED denylist above, which is why nothing was added to this section for them.
-The line that decides is whether a module can import with no board present:
-device_boot takes every hardware object as an argument, so it loads on CPython
-and its shared half is executed by tests/test_device_boot.py."""
+-- they are `runtime/device_boot.py` and `runtime/frame_loop.py` and reach this
+board through the SHARED denylist above, which is why nothing was added to this
+section for them. The line that decides is whether a module can import with no
+board present: both take every hardware object as an argument, so they load on
+CPython and tests/test_device_boot.py executes their shared half."""
 packages = ["moybyte"]
 packages_why = """
 `moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState

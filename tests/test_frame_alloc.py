@@ -412,6 +412,7 @@ def main():
         import moybyte_sd
         moybyte_sd._live_mounted = True      # the card attached at boot
         import device_boot
+        import frame_loop
         import moy_runtime
 
         def _load(self, boot, store):
@@ -429,8 +430,8 @@ def main():
 
         moy_runtime._Storage.load = _load
         moy_runtime.POWER_SAVE_MS = 0
-        device_boot._sleep_ms = _nosleep     # the loop's pacing; nothing else
-        device_boot.FrameLoop.run = _run
+        frame_loop._sleep_ms = _nosleep     # the loop's pacing; nothing else
+        frame_loop.FrameLoop.run = _run
         moy_runtime.run_desktop()
     except _Measured:
         pass

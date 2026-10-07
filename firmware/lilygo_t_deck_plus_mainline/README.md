@@ -463,7 +463,7 @@ The board-authored modules, and what each is for:
   benchmark harness is the #63 `MOYBYTE_BENCH=1` build.
 - `moy_runtime.py` — this board's hardware half of `run_desktop()` and nothing
   else: the panel bring-up, the input trio, the SD/panel bus gate and the serial
-  channel, over the shared boot spine (`device_boot.DeviceBoot`/`FrameLoop`).
+  channel, over the shared boot spine (`device_boot.DeviceBoot`, `frame_loop.FrameLoop`).
   `DeviceCanvas`, `make_api`, `TrackBall`/`Touch` and the seed roster are
   imports from the shared device tier, and the console itself is staged from
   `runtime/` with the device `make_api` and store injected into

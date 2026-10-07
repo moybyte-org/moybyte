@@ -34,7 +34,7 @@ class FakePointer:
 
 
 class FakeIdle:
-    """The IdleBlank surface `power` drives (device_boot.IdleBlank's shape)."""
+    """The IdleBlank surface `power` drives (frame_loop.IdleBlank's shape)."""
 
     def __init__(self, timeout_ms=300000):
         self.timeout_ms = timeout_ms
@@ -136,21 +136,21 @@ def test_state_reports_every_frame_stage_with_its_budget_and_misses():
     """#210's route. `state` is the one every board serves -- the Guition
     stages no device_diag and has no PUMP line -- so the per-stage deadline
     meters ride it, in the loop's invariant order and with its field shape."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     class CapWS(FakeWS):
         def __init__(self):
             FakeWS.__init__(self)
             self.perf_capture = True
-            self.stage_meters = device_boot.StageMeters(self)
+            self.stage_meters = frame_loop.StageMeters(self)
 
     ws = CapWS()
     m = ws.stage_meters
     m.start(m.slot_ms)
-    m.mark(device_boot._S_FRAME)
+    m.mark(frame_loop._S_FRAME)
 
     st = _remote_state(ws)
-    assert list(st["stages"]) == list(device_boot.STAGE_ORDER)
+    assert list(st["stages"]) == list(frame_loop.STAGE_ORDER)
     for row in st["stages"].values():
         assert sorted(row) == ["avg_us", "budget_us", "last_us", "max_us",
                                "misses", "n"]

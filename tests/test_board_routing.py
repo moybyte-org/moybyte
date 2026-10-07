@@ -40,14 +40,15 @@ def _staged():
 def _device_backend_src():
     """The device backend's source, as the greps below mean it: the board's
     `moy_runtime` and every spine it delegates to, `device_api` (the device
-    re-export home of make_api), the one `cart_api` body, and `device_boot`
-    -- read through `_staged()` on purpose, which asserts the spine really is
-    staged onto this board."""
+    re-export home of make_api), the one `cart_api` body, `device_boot` and
+    `frame_loop` -- read through `_staged()` on purpose, which asserts the
+    spine really is staged onto this board."""
     return "\n".join((
         runtime_text(ROOT / "modules" / "moy_runtime.py"),
         (DEVICE / "device_api.py").read_text(encoding="utf-8"),
         Path("runtime/cart_api.py").read_text(encoding="utf-8"),
         _staged()["device_boot.py"].read_text(encoding="utf-8"),
+        _staged()["frame_loop.py"].read_text(encoding="utf-8"),
     ))
 
 
@@ -129,7 +130,7 @@ def test_micropython_touch_and_idle_cursor():
     tests/test_desktop_shell.py."""
     runtime = _device_backend_src()
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
-    boot_spine = Path("runtime/device_boot.py").read_text(encoding="utf-8")
+    boot_spine = Path("runtime/frame_loop.py").read_text(encoding="utf-8")
 
     assert "touch = Touch(canvas.w, canvas.h" in runtime
     assert "apply_touch(touch, pointer)" in runtime
@@ -266,7 +267,7 @@ def test_both_boards_service_the_web_console_every_frame():
     that board served and this one never did -- so this asserts it for BOTH,
     not for whichever one someone remembers.
     """
-    # The drain is ONE helper (device_boot.poll_webhost); each board's frame
+    # The drain is ONE helper (frame_loop.poll_webhost); each board's frame
     # tail must still CALL it -- the failure this pins was exactly a tail that
     # stopped calling. That the helper actually polls, only while the host is
     # SERVING, and never breaks the frame when the transfer dies, is executed

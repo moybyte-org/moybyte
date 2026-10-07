@@ -1,4 +1,4 @@
-"""`device_boot.IdleBlank` -- the shared power-save gate.
+"""`frame_loop.IdleBlank` -- the shared power-save gate.
 
 All three boards construct it and nothing off-glass ever ran it: the only
 executable driver was `tests/test_tdeck_on_glass.py`, opt-in and hardware-gated,
@@ -7,7 +7,7 @@ the shape. Its class docstring names three behaviours a hand-rolled second copy
 got wrong; those three are what this pins.
 """
 
-from runtime.device_boot import IdleBlank
+from runtime.frame_loop import IdleBlank
 
 
 class _Ptr:

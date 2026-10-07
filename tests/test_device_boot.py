@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
 
-from runtime import boot_carts, device_boot  # noqa: E402
+from runtime import boot_carts, device_boot, frame_loop  # noqa: E402
 
 
 # -- fakes --------------------------------------------------------------------
@@ -499,7 +499,7 @@ def test_the_boot_verdict_reaches_both_the_log_and_the_desktop():
     ws = FakeWs()
     ws.updater = FakeUpdater(verdict=("rolled_back", "the update did not stick"))
     lines = []
-    health = device_boot.OtaHealth(ws, log=lines.append)
+    health = frame_loop.OtaHealth(ws, log=lines.append)
     health.boot_check()
 
     assert lines == ["last update rolled_back (the update did not stick)"]
@@ -510,14 +510,14 @@ def test_no_verdict_says_nothing():
     ws = FakeWs()
     ws.updater = FakeUpdater(verdict=None)
     lines = []
-    device_boot.OtaHealth(ws, log=lines.append).boot_check()
+    frame_loop.OtaHealth(ws, log=lines.append).boot_check()
     assert lines == [] and ws.announced == 0
 
 
 def test_a_board_with_no_updater_is_silent_and_harmless():
     ws = FakeWs()
     lines = []
-    health = device_boot.OtaHealth(ws, log=lines.append)
+    health = frame_loop.OtaHealth(ws, log=lines.append)
     health.boot_check()
     health.tick()
     assert lines == []
@@ -528,7 +528,7 @@ def test_the_confirm_waits_for_painted_frames_then_disarms():
     up = FakeUpdater(healthy_at=1)
     ws.updater = up
     lines = []
-    health = device_boot.OtaHealth(ws, log=lines.append)
+    health = frame_loop.OtaHealth(ws, log=lines.append)
 
     health.tick()
     assert up.asked == [0] and lines == []
@@ -548,7 +548,7 @@ def test_a_throwing_updater_never_breaks_a_frame():
     ws = FakeWs(frames=5)
     ws.updater = Angry()
     lines = []
-    health = device_boot.OtaHealth(ws, log=lines.append)
+    health = frame_loop.OtaHealth(ws, log=lines.append)
     health.tick()
     health.tick()
     assert lines == ["confirm failed: partition gone"], "and it stops asking"
@@ -562,7 +562,7 @@ def test_a_throwing_boot_check_never_blocks_the_desktop():
     ws = FakeWs()
     ws.updater = Angry()
     lines = []
-    device_boot.OtaHealth(ws, log=lines.append).boot_check()
+    frame_loop.OtaHealth(ws, log=lines.append).boot_check()
     assert lines == ["boot_check failed: marker unreadable"]
 
 
@@ -571,12 +571,12 @@ def test_a_throwing_boot_check_never_blocks_the_desktop():
 
 def _pump(cap=60, ota=None):
     boot, _, _ = _boot()
-    return device_boot.FramePump(boot, ota, cap)
+    return frame_loop.FramePump(boot, ota, cap)
 
 
 def test_dt_is_seconds_and_clamped_so_a_hitch_cannot_teleport_a_cart():
     pump = _pump()
-    pump.last = device_boot._ticks_ms() - 5000     # a 5s stall
+    pump.last = frame_loop._ticks_ms() - 5000     # a 5s stall
     _, dt = pump.begin()
     assert dt == 0.1, "clamped to 100ms: physics must not jump a whole second"
 
@@ -642,8 +642,8 @@ def test_the_tail_reports_the_first_frame_and_confirms_the_update():
     boot, _, _ = _boot()
     ws = FakeWs(frames=1)
     ws.updater = FakeUpdater(healthy_at=1)
-    health = device_boot.OtaHealth(ws, log=lambda m: None)
-    pump = device_boot.FramePump(boot, health, 60)
+    health = frame_loop.OtaHealth(ws, log=lambda m: None)
+    pump = frame_loop.FramePump(boot, health, 60)
     boot.start_frames(ws)
 
     pump.tail(ws)
@@ -652,7 +652,7 @@ def test_the_tail_reports_the_first_frame_and_confirms_the_update():
 
 def test_the_tail_is_harmless_on_a_build_with_no_ota():
     boot, _, _ = _boot()
-    pump = device_boot.FramePump(boot, None, 60)
+    pump = frame_loop.FramePump(boot, None, 60)
     boot.start_frames(FakeWs())
     pump.tail(FakeWs(frames=1))            # must not raise
 
@@ -705,17 +705,21 @@ SPINE = ROOT / "device" / "desktop_spine.py"
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_each_board_imports_the_shared_spine(board):
     src = runtime_text(BOARDS[board])
-    lines = [l for l in src.splitlines()
-             if l.startswith("from device_boot import")]
-    assert lines, "%s does not import the shared spine" % board
-    # One import line somewhere down the chain carries all three (a board's
-    # own module may import a single verb from the spine beside it).
-    assert any(all(name in l for name in ("DeviceBoot", "FramePump",
-                                          "FrameLoop")) for l in lines), (
-        "%s does not import DeviceBoot/FramePump/FrameLoop: %s" % (board, lines))
-    # The staged name is flat (`device_boot`), never the host package path --
-    # there is no `runtime` package on a board.
+    lines = src.splitlines()
+    boot = [l for l in lines if l.startswith("from device_boot import")]
+    loop = [l for l in lines if l.startswith("from frame_loop import")]
+    assert boot and loop, "%s does not import the shared spine" % board
+    # Somewhere down the chain the boot's import carries DeviceBoot and the
+    # loop's FramePump and FrameLoop together (a board's own module may import
+    # a single verb from the spine beside it).
+    assert any("DeviceBoot" in l for l in boot), (
+        "%s does not import DeviceBoot: %s" % (board, boot))
+    assert any("FramePump" in l and "FrameLoop" in l for l in loop), (
+        "%s does not import FramePump/FrameLoop: %s" % (board, loop))
+    # The staged names are flat, never the host package path -- there is no
+    # `runtime` package on a board.
     assert "from runtime.device_boot" not in src
+    assert "from runtime.frame_loop" not in src
 
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
@@ -872,7 +876,7 @@ class _Rec:
         self.calls.append("account")
 
     def loop(self, **kw):
-        from runtime.device_boot import FrameLoop
+        from runtime.frame_loop import FrameLoop
         return FrameLoop(self.ws, self.pump, self.pointer, self.poll_inputs,
                          idle=self.idle, serial=self.serial,
                          present=self.present, tail=self.tail,
@@ -1015,32 +1019,32 @@ class _CapWS:
 
 
 def _meters(tick_ms=0, floor_ms=1000 // 60):
-    from runtime import device_boot
-    return device_boot.StageMeters(_CapWS(tick_ms), floor_ms)
+    from runtime import frame_loop
+    return frame_loop.StageMeters(_CapWS(tick_ms), floor_ms)
 
 
 def test_the_budget_table_is_one_place_and_spends_one_whole_slot():
     """Budgets are CONFIGURATION and live in exactly one tuple. The shares sum
     to the slot on purpose: the frame's own 780 against 220 of overhead is the
     statement that four fifths of every slot is meant to reach the glass."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
-    declared = [sh for _n, sh in device_boot.STAGE_BUDGETS if sh is not None]
+    declared = [sh for _n, sh in frame_loop.STAGE_BUDGETS if sh is not None]
     assert sum(declared) == 1000
-    assert device_boot.STAGE_ORDER == tuple(
-        n for n, _sh in device_boot.STAGE_BUDGETS)
+    assert frame_loop.STAGE_ORDER == tuple(
+        n for n, _sh in frame_loop.STAGE_BUDGETS)
     # The index constants the loop marks with are the table's own positions --
     # a stage cannot be added without one, and none can silently swap.
-    assert (device_boot._S_INPUTS, device_boot._S_FRAME,
-            device_boot._S_ACCOUNT) == (0, 5, 10)
-    assert len(device_boot.STAGE_ORDER) == 11
+    assert (frame_loop._S_INPUTS, frame_loop._S_FRAME,
+            frame_loop._S_ACCOUNT) == (0, 5, 10)
+    assert len(frame_loop.STAGE_ORDER) == 11
 
 
 def test_every_stage_in_the_pinned_order_is_metered_in_that_order():
     """The companion the order test asked for: the marks are not a second list
     that can drift from the loop's shape. A measured frame with every hook
     present closes each stage exactly once, in STAGE_ORDER."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     class Serial:
         click = False
@@ -1055,21 +1059,21 @@ def test_every_stage_in_the_pinned_order_is_metered_in_that_order():
         def tick(self, now, active, ws, pointer, click):
             return click
 
-    class Rec(device_boot.StageMeters):
+    class Rec(frame_loop.StageMeters):
         def __init__(self, *a, **kw):
             self.marks = []
-            device_boot.StageMeters.__init__(self, *a, **kw)
+            frame_loop.StageMeters.__init__(self, *a, **kw)
 
         def mark(self, i):
-            self.marks.append(device_boot.STAGE_ORDER[i])
-            device_boot.StageMeters.mark(self, i)
+            self.marks.append(frame_loop.STAGE_ORDER[i])
+            frame_loop.StageMeters.mark(self, i)
 
     r = _Rec(serial=Serial(), idle=Idle())
     r.ws.perf_capture = True
     lp = r.loop()
     lp.meters = Rec(r.ws)
     lp.step()
-    assert tuple(lp.meters.marks) == device_boot.STAGE_ORDER
+    assert tuple(lp.meters.marks) == frame_loop.STAGE_ORDER
 
 
 def test_the_loop_stamps_the_meters_on_the_console_for_state_to_find():
@@ -1079,12 +1083,12 @@ def test_the_loop_stamps_the_meters_on_the_console_for_state_to_find():
 
 
 def test_a_stage_over_budget_counts_a_miss_and_lifts_the_max(monkeypatch):
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_us", lambda: clock[0])
     m = _meters()
-    i = device_boot.STAGE_ORDER.index("inputs")
+    i = frame_loop.STAGE_ORDER.index("inputs")
     budget = m.budget[i]
     assert budget == 16 * 1000 * 60 // 1000
 
@@ -1116,13 +1120,13 @@ def test_the_frame_that_launched_the_cart_is_not_a_frame_of_the_cart(
     Measured 2026-09-11: `dev` read 12.9ms a loop under moss moss and 1.6ms
     under Star Catcher -- one launch, divided by each cart's frame count, and it
     reads as a per-frame cost that scales with the cart."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_us", lambda: clock[0])
     m = _meters()
-    dev = device_boot.STAGE_ORDER.index("dev")
-    inp = device_boot.STAGE_ORDER.index("inputs")
+    dev = frame_loop.STAGE_ORDER.index("dev")
+    inp = frame_loop.STAGE_ORDER.index("inputs")
 
     m.start(m.slot_ms)
     clock[0] += 200
@@ -1144,12 +1148,12 @@ def test_a_stage_with_no_declared_budget_reports_None_and_never_zero(monkeypatch
     """`tail` is where poll_webhost runs and a browser pulling the console
     bundle owns the frame it lands in -- there is no deadline, so there is no
     miss count. 0 would read as a stage that always makes its deadline."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_us", lambda: clock[0])
     m = _meters()
-    i = device_boot.STAGE_ORDER.index("tail")
+    i = frame_loop.STAGE_ORDER.index("tail")
     assert m.budget[i] is None
     m.start(m.slot_ms)
     clock[0] += 900000                      # 0.9s: a whole asset transfer
@@ -1193,28 +1197,28 @@ def test_the_budgets_are_cut_from_the_pacing_slot_and_follow_it():
     """A paced 30Hz game halves the cadence, so every stage's allowance doubles.
     Cutting budgets from a constant would make one of the two cadences a
     permanent miss, which is a broken meter with extra steps."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     fast = _meters()
     assert fast.slot_ms == 16
-    assert fast.budget[device_boot._S_FRAME] == 16 * 1000 * 780 // 1000
+    assert fast.budget[frame_loop._S_FRAME] == 16 * 1000 * 780 // 1000
 
     fast.start(33)                           # what pace() slotted this frame
     assert fast.slot_ms == 33
-    assert fast.budget[device_boot._S_FRAME] == 33 * 1000 * 780 // 1000
-    assert fast.budget[device_boot._S_TAIL] is None
+    assert fast.budget[frame_loop._S_FRAME] == 33 * 1000 * 780 // 1000
+    assert fast.budget[frame_loop._S_TAIL] is None
 
 
 def test_the_pump_publishes_the_slot_the_budgets_are_cut_from(monkeypatch):
     """One author for the cadence: pace() derives the slot and the budgets read
     what it derived, so a cart that changes the cadence cannot be judged
     against the one it replaced."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
-    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
-    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    monkeypatch.setattr(frame_loop, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_diff", lambda a, b: a - b)
+    pump = frame_loop.FramePump(boot=None, ota=None, fps_cap=60)
     assert pump.slot == 16
     pump.pace(_CapWS(33), 5)
     assert pump.slot == 33
@@ -1223,12 +1227,12 @@ def test_the_pump_publishes_the_slot_the_budgets_are_cut_from(monkeypatch):
 
 
 def test_reset_drops_every_sample_but_keeps_the_declarations(monkeypatch):
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_us", lambda: clock[0])
     m = _meters()
-    i = device_boot._S_INPUTS
+    i = frame_loop._S_INPUTS
     for _ in range(3):
         m.start(m.slot_ms)
         clock[0] += m.budget[i] + 5
@@ -1244,15 +1248,15 @@ def test_stage_meters_report_a_rolling_mean_of_each_stage(monkeypatch):
     """#210's attribution field. `last_us` is one arbitrary frame and `max_us`
     the run's worst GC; the mean is the only one of the three that says where
     the frame GOES."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_us", lambda: clock[0])
     m = _meters()
     for us in (100, 200, 300, 400):
         m.start(m.slot_ms)
         clock[0] += us
-        m.mark(device_boot._S_INPUTS)
+        m.mark(frame_loop._S_INPUTS)
     r = m.report()
     assert r["inputs"]["avg_us"] == 250 and r["inputs"]["last_us"] == 400
     # A stage nothing sampled is None, never the 0 a broken meter also reads.
@@ -1266,19 +1270,19 @@ def test_the_rolling_sum_halves_instead_of_growing_a_bignum(monkeypatch):
     past it allocates a bignum on every frame, which is a meter paying for
     itself in exactly the pathology it exists to find. Halving the count with
     it keeps the mean across the fold."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_us", lambda: clock[0])
     m = _meters()
-    i = device_boot._S_INPUTS
+    i = frame_loop._S_INPUTS
     step = 20000                       # a fat frame stage, in us
-    m.total[i] = device_boot._MEAN_CAP - step // 2
+    m.total[i] = frame_loop._MEAN_CAP - step // 2
     m.seen[i] = m.total[i] // step
     m.start(m.slot_ms)
     clock[0] += step
     m.mark(i)
-    assert m.total[i] <= device_boot._MEAN_CAP
+    assert m.total[i] <= frame_loop._MEAN_CAP
     assert m.total[i] < (1 << 30)      # still a small int under REPR_C
     assert abs(m.report()["inputs"]["avg_us"] - step) <= step // 100
     # ...and the lifetime count the miss ratio is read against is NOT halved.
@@ -1289,15 +1293,15 @@ def test_a_cart_start_and_a_cart_exit_each_reset_the_meters(tmp_path):
     """#210's pollution rule, on the real Player: a run's misses are its own
     and the desk does not inherit them."""
     from ws_helpers import build_ws
-    from runtime import device_boot
+    from runtime import frame_loop
 
     ws = build_ws(tmp_path)
-    ws.stage_meters = device_boot.StageMeters(ws)
+    ws.stage_meters = frame_loop.StageMeters(ws)
     m = ws.stage_meters
-    m.n[device_boot._S_FRAME] = 7
-    m.misses[device_boot._S_FRAME] = 3
+    m.n[frame_loop._S_FRAME] = 7
+    m.misses[frame_loop._S_FRAME] = 3
     ws.player._reset_stage_meters()
-    assert m.n[device_boot._S_FRAME] == 0 and m.misses[device_boot._S_FRAME] == 0
+    assert m.n[frame_loop._S_FRAME] == 0 and m.misses[frame_loop._S_FRAME] == 0
     # ...and both call sites are wired, not just the helper.
     src = (ROOT / "runtime" / "player.py").read_text(encoding="utf-8")
     assert src.count("self._reset_stage_meters()") == 2
@@ -1313,16 +1317,16 @@ def test_pump_slack_converges_on_a_constant_sleep_overshoot(monkeypatch):
     walker learns the overshoot from begin()'s real periods and pre-pays it,
     so the cadence converges back to the cap; on an exact-sleep platform it
     stays 0 and nothing changes."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
-    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(frame_loop, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
         pass
 
-    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    pump = frame_loop.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
     ws = WS()
 
@@ -1344,16 +1348,16 @@ def test_pump_slack_converges_on_a_constant_sleep_overshoot(monkeypatch):
 
 
 def test_pump_slack_stays_zero_on_exact_sleeps(monkeypatch):
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
-    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(frame_loop, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
         pass
 
-    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    pump = frame_loop.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
     ws = WS()
     for _ in range(20):
@@ -1369,16 +1373,16 @@ def test_pump_slack_never_charges_a_hitch(monkeypatch):
     """A 200ms GC on a slept frame must not slam the walker -- the per-frame
     step is +-1 and the cap is 8, so a hitch is one tick of slack and stays
     debt's business."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
-    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(frame_loop, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
         pass
 
-    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    pump = frame_loop.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
     ws = WS()
     pump.begin()
@@ -1394,16 +1398,16 @@ def test_pump_slack_recovers_after_swallowing_the_whole_sleep(monkeypatch):
     sleep-gated learner froze at its ceiling and the loop ran PAST the cap
     (73fps under 60). A fully-cut sleep stays learnable, so the walker steps
     back down and the cadence re-converges on the slot."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
-    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(frame_loop, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
         pass
 
-    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    pump = frame_loop.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
     pump.slack = 8                             # walker at its ceiling
     ws = WS()
@@ -1609,7 +1613,7 @@ def _drive(monkeypatch, sampler, ws, frames, elapsed, drawn):
     for i in range(frames):
         if i == frames - 1:
             ws._frames_drawn = drawn
-            device_boot._ticks_ms.at[0] = sampler._at   # the period expires
+            frame_loop._ticks_ms.at[0] = sampler._at   # the period expires
         sampler.account(0, elapsed, 0)
 
 
@@ -1619,8 +1623,8 @@ def _clock(monkeypatch):
     def now():
         return at[0]
     now.at = at
-    monkeypatch.setattr(device_boot, "_ticks_ms", now)
-    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(frame_loop, "_ticks_ms", now)
+    monkeypatch.setattr(frame_loop, "_ticks_diff", lambda a, b: a - b)
     return at
 
 
@@ -1635,7 +1639,7 @@ def test_the_sampler_measures_the_P4s_captured_idle_line(monkeypatch):
                         "_pf_wm_restore": 28, "_pf_wm_windows": 1,
                         "_pf_wm_stamp": 0, "_pf_home": None})
     out = []
-    s = device_boot.PerfSampler(ws, overlap=lambda: ov[0], emit=out.append)
+    s = frame_loop.PerfSampler(ws, overlap=lambda: ov[0], emit=out.append)
     _drive(monkeypatch, s, ws, 124, 2, 0)
     assert out == [PERF_CASES["p4"][1]]
 
@@ -1654,7 +1658,7 @@ def test_a_wm_column_answers_once_and_then_says_it_measured_nothing(
                         "_pf_wm_restore": 28, "_pf_wm_windows": 46,
                         "_pf_wm_stamp": 3})
     out = []
-    s = device_boot.PerfSampler(ws, emit=out.append)
+    s = frame_loop.PerfSampler(ws, emit=out.append)
     _drive(monkeypatch, s, ws, 122, 4, 0)
     assert " wmr=28 wmw=46 wms=3 " in out[0]
     # ... and the WM has not drawn since.
@@ -1666,7 +1670,7 @@ def test_a_wm_column_answers_once_and_then_says_it_measured_nothing(
     bare = PerfWs(meters={"_draw_ms": 72.0, "_flush_ms": 0.0, "_upd_ms": 0.0,
                           "_cart_ms": 0.0, "_chrome_ms": 72.0})
     out2 = []
-    _drive(monkeypatch, device_boot.PerfSampler(bare, emit=out2.append),
+    _drive(monkeypatch, frame_loop.PerfSampler(bare, emit=out2.append),
            bare, 122, 4, 0)
     assert " wmr=- wmw=- wms=- " in out2[0]
     assert not hasattr(bare, "_pf_wm_windows")
@@ -1680,7 +1684,7 @@ def test_a_board_with_no_overlap_source_reports_the_PPA_columns_absent(
     ws = PerfWs(meters={"_draw_ms": 72.0, "_flush_ms": 0.0, "_upd_ms": 0.0,
                         "_cart_ms": 0.0, "_chrome_ms": 72.0})
     out = []
-    s = device_boot.PerfSampler(ws, emit=out.append)
+    s = frame_loop.PerfSampler(ws, emit=out.append)
     _drive(monkeypatch, s, ws, 122, 4, 0)
     assert out == [PERF_CASES["guition"][1]]
 
@@ -1695,7 +1699,7 @@ def test_the_collectors_pauses_arrive_as_deltas_over_one_sample(monkeypatch):
     reads = [(10, 0xFFFFFF00, 5000), (14, 0x00000100, 900)]
     ws = PerfWs()
     out = []
-    s = device_boot.PerfSampler(ws, emit=out.append,
+    s = frame_loop.PerfSampler(ws, emit=out.append,
                                 pauses=lambda: reads.pop(0))
     _drive(monkeypatch, s, ws, 2, 0, 0)
     _drive(monkeypatch, s, ws, 2, 0, 0)
@@ -1714,7 +1718,7 @@ def test_the_collectors_baseline_does_not_survive_the_diag_going_off(
     reads = [(1, 100, 50), (90, 9000, 70), (93, 9300, 40)]
     ws = PerfWs()
     out = []
-    s = device_boot.PerfSampler(ws, emit=out.append,
+    s = frame_loop.PerfSampler(ws, emit=out.append,
                                 pauses=lambda: reads.pop(0))
     _drive(monkeypatch, s, ws, 2, 0, 0)
     ws.diag_live = False
@@ -1724,7 +1728,7 @@ def test_the_collectors_baseline_does_not_survive_the_diag_going_off(
     _drive(monkeypatch, s, ws, 2, 0, 0)
     assert [parse_perf(ln)["gc"] for ln in out] == [None, None, (3.0, 300.0, 40.0)]
     host = []
-    _drive(monkeypatch, device_boot.PerfSampler(ws, emit=host.append,
+    _drive(monkeypatch, frame_loop.PerfSampler(ws, emit=host.append,
                                                 pauses=None), ws, 2, 0, 0)
     assert host[0].endswith(" gc=-")
 
@@ -1740,7 +1744,7 @@ def test_the_overlap_counters_arrive_as_deltas_over_one_sample(monkeypatch):
              tuple(i * 20000 for i in range(1, 8))]
     ws = PerfWs()
     out = []
-    s = device_boot.PerfSampler(ws, overlap=lambda: reads.pop(0),
+    s = frame_loop.PerfSampler(ws, overlap=lambda: reads.pop(0),
                                 emit=out.append)
     _drive(monkeypatch, s, ws, 2, 0, 0)
     got = parse_perf(out[0])
@@ -1760,7 +1764,7 @@ def test_the_absent_lockstep_marker_is_a_dash_and_never_a_zero(monkeypatch):
         _clock(monkeypatch)
         out = []
         ws = PerfWs(net=net)
-        s = device_boot.PerfSampler(ws, emit=out.append)
+        s = frame_loop.PerfSampler(ws, emit=out.append)
         _drive(monkeypatch, s, ws, 2, 0, 0)
         seen[net] = out[0].split("net=")[1].split(" ")[0]
     assert seen == {None: "-", 0: "0", 30: "30"}
@@ -1779,7 +1783,7 @@ def test_a_raising_meter_costs_the_sample_and_not_the_loop(monkeypatch):
     _clock(monkeypatch)
     out = []
     ws = PerfWs()
-    s = device_boot.PerfSampler(ws, overlap=lambda: (0,) * 7, emit=out.append)
+    s = frame_loop.PerfSampler(ws, overlap=lambda: (0,) * 7, emit=out.append)
     s._overlap = boom
     _drive(monkeypatch, s, ws, 40, 1, 7)
     assert out == ["PERF sample failed: AttributeError: overlap_stats"]
@@ -1796,7 +1800,7 @@ def test_the_sampler_emits_once_per_period_and_never_once_per_frame(frames,
     at = _clock(monkeypatch)
     out = []
     ws = PerfWs()
-    s = device_boot.PerfSampler(ws, emit=out.append)
+    s = frame_loop.PerfSampler(ws, emit=out.append)
     for period in range(2):
         at[0] = s._at
         for _ in range(frames):
@@ -1827,7 +1831,7 @@ def test_a_new_carts_misses_count_from_its_own_scheduler(monkeypatch):
     out = []
     ws = PerfWs()
     ws.player = _FakePlayer(_FakeSched(rate=60, div=1, misses=424))
-    s = device_boot.PerfSampler(ws, emit=out.append)
+    s = frame_loop.PerfSampler(ws, emit=out.append)
     _drive(monkeypatch, s, ws, 2, 0, 0)
     assert parse_perf(out[-1])["miss"] == 424.0
 
@@ -1847,7 +1851,7 @@ def test_the_meters_follow_PERF_DIAG_live(monkeypatch):
         _clock(monkeypatch)
         ws = PerfWs(diag_live=live)
         ws.perf_capture = not live
-        s = device_boot.PerfSampler(ws, emit=lambda _l: None)
+        s = frame_loop.PerfSampler(ws, emit=lambda _l: None)
         _drive(monkeypatch, s, ws, 2, 0, 0)
         assert ws.perf_capture is live
 
@@ -1863,7 +1867,7 @@ def test_with_PERF_DIAG_off_nothing_periodic_is_written(monkeypatch):
     ws.perf_capture = True
     ws.perf_net = lambda: (_ for _ in ()).throw(AssertionError(
         "perf_net CONSUMES its window: it is read only for a line"))
-    s = device_boot.PerfSampler(ws, emit=out.append)
+    s = frame_loop.PerfSampler(ws, emit=out.append)
     for _ in range(5):
         _drive(monkeypatch, s, ws, 30, 20, 0)
     assert out == []
@@ -1884,7 +1888,7 @@ def test_the_first_line_after_the_diag_comes_on_counts_its_own_window(
     sched = _FakeSched(rate=30, div=1, misses=0)
     ws.player = _FakePlayer(sched)
     ov = [(0, 0, 0, 0, 0, 0, 0)]
-    s = device_boot.PerfSampler(ws, overlap=lambda: ov[0], emit=out.append)
+    s = frame_loop.PerfSampler(ws, overlap=lambda: ov[0], emit=out.append)
     for i in range(3):                     # off: 100 misses, 900 PPA ops
         sched.misses += 100
         ov[0] = tuple(x + 300 for x in ov[0])
@@ -1910,12 +1914,12 @@ def test_the_audio_backends_periodic_lines_follow_PERF_DIAG(monkeypatch):
         _clock(monkeypatch)
         ws = PerfWs(diag_live=live)
         ws.audio = type("A", (), {"diag": not live})()
-        s = device_boot.PerfSampler(ws, emit=lambda _l: None)
+        s = frame_loop.PerfSampler(ws, emit=lambda _l: None)
         _drive(monkeypatch, s, ws, 2, 0, 0)
         assert ws.audio.diag is live
     ws = PerfWs()
     ws.audio = object()                    # a backend with no periodic lines
-    s = device_boot.PerfSampler(ws, emit=lambda _l: None)
+    s = frame_loop.PerfSampler(ws, emit=lambda _l: None)
     _drive(monkeypatch, s, ws, 2, 0, 0)
 
 
@@ -2029,7 +2033,7 @@ def _pointer(w=320, h=240):
 
 def test_a_touch_sample_places_the_pointer_and_reports_the_tap():
     p = _pointer()
-    touched, clicked = device_boot.apply_touch(_Touch([(40, 90, True)]), p)
+    touched, clicked = frame_loop.apply_touch(_Touch([(40, 90, True)]), p)
     assert (touched, clicked) == (True, True)
     assert (p.x, p.y) == (40, 90)
     assert p.down is True
@@ -2040,15 +2044,15 @@ def test_the_tap_flag_is_the_press_EDGE_not_the_level():
     as the click would re-fire the launcher's open on every frame of a drag."""
     t = _Touch([(10, 10, True), (12, 10, False), (14, 10, False)])
     p = _pointer()
-    passes = [device_boot.apply_touch(t, p) for _ in range(3)]
+    passes = [frame_loop.apply_touch(t, p) for _ in range(3)]
     assert passes == [(True, True), (True, False), (True, False)]
     assert p.down is True
 
 
 def test_a_pass_with_no_sample_lifts_the_pointer():
     p = _pointer()
-    device_boot.apply_touch(_Touch([(5, 5, True)]), p)
-    assert device_boot.apply_touch(_Touch([None]), p) == (False, False)
+    frame_loop.apply_touch(_Touch([(5, 5, True)]), p)
+    assert frame_loop.apply_touch(_Touch([None]), p) == (False, False)
     assert p.down is False
     assert (p.x, p.y) == (5, 5)      # the position is not reset by a lift
 
@@ -2062,7 +2066,7 @@ def test_pointer_down_is_a_LEVEL_so_a_held_finger_survives_a_stale_pass():
     p = _pointer()
     downs = []
     for _ in range(3):
-        device_boot.apply_touch(t, p)
+        frame_loop.apply_touch(t, p)
         downs.append((p.down, p.fresh, p.x))
     assert downs == [(True, True, 100), (True, False, 100), (True, True, 108)]
 
@@ -2074,7 +2078,7 @@ def test_the_stale_mark_is_carried_even_on_the_lift_pass():
     t = _Touch([None], fresh=[False])
     p = _pointer()
     p.fresh = True
-    device_boot.apply_touch(t, p)
+    frame_loop.apply_touch(t, p)
     assert p.fresh is False
 
 
@@ -2088,13 +2092,13 @@ def test_a_backend_with_no_stale_mark_reads_as_always_fresh():
 
     p = _pointer()
     p.fresh = False
-    device_boot.apply_touch(_NoFresh(), p)
+    frame_loop.apply_touch(_NoFresh(), p)
     assert p.fresh is True
 
 
 def test_the_placed_point_is_clamped_to_the_canvas():
     p = _pointer(320, 240)
-    device_boot.apply_touch(_Touch([(999, -4, False)]), p)
+    frame_loop.apply_touch(_Touch([(999, -4, False)]), p)
     assert (p.x, p.y) == (319, 0)
 
 
@@ -2120,8 +2124,8 @@ class _WSWeb:
 
 def test_the_webhost_is_polled_once_a_frame_while_it_serves():
     ws = _WSWeb(_Host())
-    device_boot.poll_webhost(ws)
-    device_boot.poll_webhost(ws)
+    frame_loop.poll_webhost(ws)
+    frame_loop.poll_webhost(ws)
     assert ws.webhost.polls == 2
 
 
@@ -2130,22 +2134,22 @@ def test_a_bound_listener_that_is_not_serving_is_left_alone():
     boot on every board, and polling one that never started would spend a
     syscall per frame on all three."""
     ws = _WSWeb(_Host(serving=False))
-    assert device_boot.poll_webhost(ws) == 0
+    assert frame_loop.poll_webhost(ws) == 0
     assert ws.webhost.polls == 0
 
 
 def test_a_board_with_no_webhost_at_all_costs_nothing():
-    assert device_boot.poll_webhost(_WSWeb(None)) == 0
-    assert device_boot.poll_webhost(object()) == 0
+    assert frame_loop.poll_webhost(_WSWeb(None)) == 0
+    assert frame_loop.poll_webhost(object()) == 0
 
 
 def test_a_failing_poll_never_breaks_the_frame(capsys):
     """It runs at the frame TAIL of a single-threaded loop; an escaped exception
     there is the desktop dropping to the REPL. It reports and carries on."""
     ws = _WSWeb(_Host(error=RuntimeError("socket gone")))
-    assert device_boot.poll_webhost(ws) >= 0
+    assert frame_loop.poll_webhost(ws) >= 0
     assert "WEB ERR RuntimeError: socket gone" in capsys.readouterr().out
-    device_boot.poll_webhost(ws)
+    frame_loop.poll_webhost(ws)
     assert ws.webhost.polls == 2      # and the next frame still polls
 
 
@@ -2153,27 +2157,27 @@ def test_the_elapsed_ms_is_measured_around_the_poll(monkeypatch):
     """The T-Deck's HITCH line carries this as `web=`; a serve that stalls the
     desktop must be visible as the cost it is."""
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_ms", lambda: clock[0])
 
     class _Slow(_Host):
         def poll(self):
             _Host.poll(self)
             clock[0] += 47
 
-    assert device_boot.poll_webhost(_WSWeb(_Slow())) == 47
+    assert frame_loop.poll_webhost(_WSWeb(_Slow())) == 47
 
 
 def test_a_failing_poll_still_reports_the_time_it_burned(monkeypatch):
     """The stall is the interesting number precisely when the transfer died."""
     clock = [0]
-    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(frame_loop, "_ticks_ms", lambda: clock[0])
 
     class _SlowBoom(_Host):
         def poll(self):
             clock[0] += 12
             raise OSError(104)
 
-    assert device_boot.poll_webhost(_WSWeb(_SlowBoom())) == 12
+    assert frame_loop.poll_webhost(_WSWeb(_SlowBoom())) == 12
 
 
 def test_a_compound_perf_field_renders_an_absent_component_as_a_dash():

@@ -50,7 +50,7 @@ except ImportError:  # pragma: no cover - host package lane
 
 # The async-overlap meters, in order: every compositor in this module returns
 # THIS field set from `overlap_stats()`, whatever its path does internally.
-# `runtime/device_boot.PerfSampler` deltas the tuple and the PERF line prints
+# `runtime/frame_loop.PerfSampler` deltas the tuple and the PERF line prints
 # five of the slots as `ppa=` with `fence_us`/`game_us` as fence_ms/gfence_ms,
 # so a compositor that answered a slot with some other counter would print one
 # board's number under every board's label. A slot whose mechanism this path

@@ -228,7 +228,7 @@ class ProjectStore:
         if ws.make_audio is not None:
             ws.audio = ws.make_audio(engine)
             # A backend with periodic diag lines is born following PERF DIAG;
-            # device_boot.PerfSampler keeps it following from here.
+            # frame_loop.PerfSampler keeps it following from here.
             if hasattr(ws.audio, "diag"):
                 ws.audio.diag = bool(getattr(ws, "diag_live", False))
         else:

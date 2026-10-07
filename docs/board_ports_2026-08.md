@@ -28,7 +28,7 @@ own board-dir README and in the sections below.
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
 | panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
 | input drivers | one copy each | `device/gt911.py`, `device/banded_panel.py`, `native/moy_flush` |
-| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is `device_boot.FrameLoop`, and every console board rides it |
+| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is `frame_loop.FrameLoop`, and every console board rides it |
 | `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | rides `FrameLoop` |
 | Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
 | CI legs + cache keys | one include-row per board | derived from the board list |
@@ -45,7 +45,7 @@ so this pays twice on arrival. Safe, mechanical, testable
 (`tests/test_board_toml.py` grows the same both-halves checks the staging got).
 
 **Phase B — the frame-loop spine.** Extract the loop's INVARIANT ORDER into
-shared code (a `FrameLoop` beside `device_boot`'s `FramePump`): begin → input
+shared code (a `FrameLoop` beside `frame_loop`'s `FramePump`): begin → input
 sources → dev channel → idle tick (after EVERY input source — the wake-swallow
 rule) → pointer → present hooks → `ws.frame` → tail → pace. Boards supply
 `poll_input()` / `present()` / `tail()` hooks and keep their hardware.
@@ -250,7 +250,7 @@ constructor carrying the board's pins).
 `DeviceBoot` → `wire_workstation_core` → services (`ws.updater`/`ws.webhost`)
 → `IdleBlank` + `DevChannel` (+ board extras via its `extra`/`env` hooks) →
 the board's `poll_inputs`/`present`/`tail`/`account` hooks + the shared
-`device_boot.FrameLoop`. Exit criteria, all three: the desktop on glass;
+`frame_loop.FrameLoop`. Exit criteria, all three: the desktop on glass;
 `make test` green; **the board's on-glass suite exists and passes**. OTA
 needs no extra step: the board id is in board.toml and the manifest publisher
 follows the CI matrix row.
@@ -263,7 +263,7 @@ each of these by copying, and a fourth would pay again):
   board lacks is expressed by the ATTRIBUTE'S ABSENCE (`fold_supported`), never
   by a zero.
 - **The PERF line** is `runtime/perf_line.py` (the field table, formatter and
-  parser in one module) measured by `device_boot.PerfSampler` on the
+  parser in one module) measured by `frame_loop.PerfSampler` on the
   `FrameLoop.account` hook. A board emits the SAME field set as every other
   board and prints `-` for what it cannot measure. Do not add a board-shaped
   variant: three of them existed under one name, and the odd one out was

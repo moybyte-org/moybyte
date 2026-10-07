@@ -101,7 +101,7 @@ AUDIO_DIAG = True
 # see _rate_probe. Quiet when silent.
 AUDIO_RATE_PROBE = True
 # Both are PERF DIAG's (owner call 2026-09-30): a backend writes them only while
-# its `diag` is True, which device_boot.PerfSampler keeps equal to Settings ->
+# its `diag` is True, which frame_loop.PerfSampler keeps equal to Settings ->
 # PERF DIAG. In kid mode a game's sounds and the stream's clock print nothing,
 # because every line is garbage the collector stops the frame for.
 

@@ -14,7 +14,7 @@ two functions on the stock `gc` module:
         `mp_hal_ticks_us()` read at each end. The first two count since boot
         and wrap at 2**32; the third is the longest pause since the previous
         call, which resets it, so it has ONE reader: the PERF line
-        (`runtime/device_boot.PerfSampler`). `gc_sweep_all` at a VM stop runs
+        (`runtime/frame_loop.PerfSampler`). `gc_sweep_all` at a VM stop runs
         `gc_collect_end` without `gc_collect_start` and is not counted.
 
     gc.areas() -> (areas, held_bytes)

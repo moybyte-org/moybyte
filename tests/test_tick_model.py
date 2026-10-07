@@ -695,17 +695,17 @@ def test_lockstep_owns_the_tick_and_pins_the_divisor(tmp_path):
 # -- the loop and the wire ----------------------------------------------------
 
 def test_frame_slot_ms_is_the_carts_tick_and_a_paced_game_never_sleeps():
-    from runtime import device_boot
+    from runtime import frame_loop
 
     class Paced:
         def __init__(self, tick_ms):
             self.player = type("P", (), {"tick_ms": tick_ms})()
 
-    assert device_boot.frame_slot_ms(Paced(33), 16) == 33
-    assert device_boot.frame_slot_ms(Paced(16), 16) == 16
-    assert device_boot.frame_slot_ms(Paced(0), 16) == 16
-    assert device_boot.frame_slot_ms(object(), 16) == 16
-    pump = device_boot.FramePump(boot=None, fps_cap=60)
+    assert frame_loop.frame_slot_ms(Paced(33), 16) == 33
+    assert frame_loop.frame_slot_ms(Paced(16), 16) == 16
+    assert frame_loop.frame_slot_ms(Paced(0), 16) == 16
+    assert frame_loop.frame_slot_ms(object(), 16) == 16
+    pump = frame_loop.FramePump(boot=None, fps_cap=60)
     assert pump.pace(Paced(33), 4) == 0 and pump.slot == 33
     assert pump.pace(Paced(33), 50) == 0 and pump.debt == 0
     assert pump.pace(Paced(0), 4) == 12

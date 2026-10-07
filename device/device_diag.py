@@ -36,7 +36,7 @@ def _diag_flush(diag, ws):
 
 
 # The PERF sample is not a diag helper (#206 item 2): it rides
-# device_boot.PerfSampler on the shared FrameLoop.account hook, in the one
+# frame_loop.PerfSampler on the shared FrameLoop.account hook, in the one
 # format every board emits. This board still PERSISTS it -- run_desktop's emit
 # rings the finished line -- but it no longer composes a second one.
 

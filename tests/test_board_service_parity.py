@@ -814,30 +814,30 @@ LIFECYCLE = {
             "theirs at boot because a paired keyboard is their only way out of "
             "a cart"),
         ("ble_keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("webhost", "poll"): Via("runtime/frame_loop.py", "poll_webhost"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
+        ("link", "poll"): Via("runtime/frame_loop.py", "poll_link"),
     },
     "p4": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("webhost", "poll"): Via("runtime/frame_loop.py", "poll_webhost"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
+        ("link", "poll"): Via("runtime/frame_loop.py", "poll_link"),
     },
     "guition": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("webhost", "poll"): Via("runtime/frame_loop.py", "poll_webhost"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
+        ("link", "poll"): Via("runtime/frame_loop.py", "poll_link"),
     },
     "guition_p4": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("webhost", "poll"): Via("runtime/frame_loop.py", "poll_webhost"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
+        ("link", "poll"): Via("runtime/frame_loop.py", "poll_link"),
     },
 }
 
@@ -934,7 +934,7 @@ class _Handles:
 
         per_frame is True when the call sits in a loop or inside a nested def
         -- a frame hook, which is what `poll_inputs`/`tail` are handed to
-        device_boot.FrameLoop as. That distinction is the point: a poll() on a
+        frame_loop.FrameLoop as. That distinction is the point: a poll() on a
         board's boot path runs once and reads, in every static sense, exactly
         like one that runs every frame.
         """

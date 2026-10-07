@@ -833,7 +833,7 @@ class WebHost(WebServer):
         row reads it, and `web_console.toggle` unparks the glass on it. Holding
         it true across the window would leave a kid staring at a parked screen
         for five seconds after they turned the row off. The lingering socket is
-        a transport detail, so it gets its own flag and `device_boot.poll_webhost`
+        a transport detail, so it gets its own flag and `frame_loop.poll_webhost`
         polls on either.
 
         Without a `why` the old behaviour stands, which is what a test teardown

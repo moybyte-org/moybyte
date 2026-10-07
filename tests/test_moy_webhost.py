@@ -2019,7 +2019,7 @@ def test_the_frame_loop_keeps_polling_a_host_that_is_saying_goodbye():
     row and the glass follow the tap; the socket outlives it by a few seconds
     purely to answer. Polling only on `serving` would leave nobody to answer,
     which is the bug the window exists to fix."""
-    from runtime import device_boot
+    from runtime import frame_loop
 
     class Host:
         serving = False
@@ -2032,11 +2032,11 @@ def test_the_frame_loop_keeps_polling_a_host_that_is_saying_goodbye():
     class Ws:
         webhost = Host()
 
-    device_boot.poll_webhost(Ws())
+    frame_loop.poll_webhost(Ws())
     assert Host.polled == 1
 
     Ws.webhost.closing = None
-    device_boot.poll_webhost(Ws())
+    frame_loop.poll_webhost(Ws())
     assert Host.polled == 1, "a host that is neither serving nor closing is idle"
 
 

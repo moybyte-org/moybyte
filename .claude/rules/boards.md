@@ -60,7 +60,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   Waveshare P4, the `recv_baud` its payload crosses at) for `P4Board` and
   `tools/push_cart.py`. No tool restates them, and the CI matrix is one row a
   board.
-- **The frame loop is shared** (`device_boot.FrameLoop`, #202 Phase B): inputs
+- **The frame loop is shared** (`frame_loop.FrameLoop`, #202 Phase B): inputs
   → dev channel → idle tick → pointer → present → frame → backlight gate →
   pump.tail → tail → pace, once, pinned by order tests in
   `tests/test_device_boot.py`. A board's `run_desktop` supplies hooks and its
