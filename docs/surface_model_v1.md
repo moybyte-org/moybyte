@@ -281,10 +281,11 @@ writes folded once per painted frame, and L6 shows the ≤single-digit-µs
 arithmetic. Hardware constraints bounding any future change: the banded
 flush fed from core 0 (`native/moy_flush/moy_flush.h`); the SD/display shared
 SPI host on the T-Deck; the I2C poller (#69). This annex exists mostly to
-say: **do nothing here.** The gate for this tier is "the per-frame executed
-path is provably unchanged": each S3's on-glass suite and the perf roster
-within noise, not file bytes — the frozen *source* of shared files may still
-drift textually (comments, unrelated edits).
+say: **do nothing here.** The per-frame executed path gains the kernel's
+epoch read (L6) and nothing else, and the gate for this tier is each S3's
+on-glass suite and the perf roster within noise, not file bytes — the frozen
+*source* of shared files may still drift textually (comments, unrelated
+edits).
 
 **A compiled cart's frame reaches the flush from the cart's own memory and
 adds nothing to the contract.** The game composite on a banded board is a
