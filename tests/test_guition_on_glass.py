@@ -53,7 +53,9 @@ EXFAT_SRAM = 640
 # And the links' statics (native/moy_net/moy_link.c: the link's ring header,
 # its latch and its flag), 40 bytes of .bss and .data by the objects' sizes,
 # 2026-10-07; the port's espnow module they replace held its ring in the heap.
-KERNEL_SRAM = 1092 + 56 + 40
+# And the WiFi driver's (native/moy_net/moy_wifi.c: its state, latch and
+# connect flag), 56 bytes of .bss and .data by the object's sizes, 2026-10-07.
+KERNEL_SRAM = 1092 + 56 + 40 + 56
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on

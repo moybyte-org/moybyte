@@ -61,7 +61,9 @@ TF_CARD_SRAM = 844
 # And the links' statics (native/moy_net/moy_link.c: the link's ring header,
 # its latch and its flag), 40 bytes of .bss and .data by the objects' sizes,
 # 2026-10-07; the port's espnow module they replace held its ring in the heap.
-KERNEL_SRAM = 1288 + 48 + 40
+# And the WiFi driver's (native/moy_net/moy_wifi.c: its state, latch and
+# connect flag), 56 bytes of .bss and .data by the object's sizes, 2026-10-07.
+KERNEL_SRAM = 1288 + 48 + 40 + 56
 WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
