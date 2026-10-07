@@ -92,12 +92,22 @@ the route's editor-before-app order and the ledger's proof skip each turn it
 red. The same log is pinned over the native spine (sprint 2's twin,
 native/moy_spine) on both object models, the ledger half still the Python
 CrashGuard.
+
+EXTENDED 2026-10-07 (#224, sprint 3's carve, before the survival set
+crosses): five more, one per twin -- input (runtime/moy_input.py), the glass
+(runtime/moy_glass.py under device_canvas), the frame loop
+(runtime/frame_loop.py), the links (runtime/moy_net.py, runtime/moy_sync.py
+and device/moy_ota_health.py) and audio sessions (runtime/audio_session.py).
+Each is pinned on every VM and over the native spine; the section above the
+drivers says what each logs.
 """
 
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from unix_mp import find_unix_mp, require_unix_mp
 
@@ -1218,3 +1228,637 @@ def test_spine_trace_holds_over_the_native_spine(tmp_path):
         b32 = _spine_trace(board, tmp_path, "native_board_model", NATIVE_SPINE)
         assert b32 == want, ("the native spine in the 32-bit object model "
                              "diverges: " + _first_difference(b32, want))
+
+
+# -- the survival set's traces (#224, sprint 3) ----------------------------------
+#
+# Sprint 3's carve pins each subsystem's twin before anything crosses
+# (docs/kernel_survival_2026-10.md section 2 item 8): input (a scripted event
+# stream -> the merged table's masks for players 0 and 1 and the union, and the
+# pointer, per frame), the glass (a draw script -> the frame's hash, the buffer
+# rows by owner and origin, the pool), the loop (twenty frames -> the stage
+# order, the idle ladder and the upcalls per frame, the last ten driven from a
+# second thread), the links (a sync batch -> the store's rows; the OTA health
+# machine on canned installs) and audio sessions (two sessions, one focused).
+# Each driver's log is pinned on CPython, on the desktop MicroPython in both
+# object models, and over the native spine. @RUNTIME@, @DEVICE@ and @REPO@ are
+# the source trees, @STAGE@ the files a build stages under frozen names, @ROOT@
+# a fresh store dir.
+
+INPUT_DRIVER = r'''import sys
+sys.path.insert(0, @RUNTIME@)
+
+import moy_input as mi
+from input import InputState as HostInput
+from lua_ext import MOY_BUTTONS
+
+
+def say(*a):
+    print("T", " ".join(str(x) for x in a))
+
+
+def h_(h):
+    return "%d.%d.%d" % ((h >> 8) & 15, h & 255, h >> 12)
+
+
+def tried(fn, *a):
+    try:
+        fn(*a)
+        return "ok"
+    except ValueError:
+        return "VALUE"
+
+
+board = mi.InputTable()
+host = HostInput()
+say("names", ",".join(mi.NAMES))
+say("host", ",".join(HostInput.BUTTONS))
+say("refuse", tried(host.source("kbd").set_held, "start", True),
+    tried(board.source("kbd").set_held, "start", True),
+    tried(board.source("kbd").set_held, "jump", True))
+board.source("kbd").set_held("start", False)
+kbd, ble, touch = board.source("kbd"), board.source("ble", 1), board.source("touch")
+say("sources", h_(kbd.h), h_(ble.h), h_(touch.h))
+ptr = mi.Pointer(320, 240)
+board.pointer = ptr
+
+# (source, button, down) writes, a key, and a pointer sample, per frame
+SCRIPT = {
+    0: ([("kbd", "left", True)], 0, None),
+    1: ([("kbd", "a", True), ("ble", "up", True)], 0x61, (10, 20, True)),
+    2: ([("kbd", "left", False)], 0, (12, 22, True)),
+    3: ([("ble", "b", True), ("ble", "home", True)], 0x1b, None),
+    4: ([("kbd", "a", False), ("ble", "up", False)], 0, (12, 22, False)),
+    5: ([("touch", "run", True)], 0, None),
+    6: ([("ble", "b", False), ("ble", "home", False), ("touch", "run", False)], 0, None),
+    7: ([("kbd", "select", True), ("ble", "start", True)], 0x0d, (300, 239, True)),
+    8: ([], 0, None),
+    9: ([("kbd", "select", False), ("ble", "start", False)], 0, None),
+}
+SRC = {"kbd": kbd, "ble": ble, "touch": touch}
+out = [0, 0]
+for f in range(10):
+    writes, key, sample = SCRIPT[f]
+    for name, button, down in writes:
+        SRC[name].set_held(button, down)
+    kbd.last_key = key
+    if sample is not None:
+        x, y, down = sample
+        ptr.place(x, y)
+        ptr.click = down and not ptr.down
+        ptr.down = down
+        ptr.fresh = True
+    else:
+        ptr.click = False
+        ptr.fresh = False
+    board.begin_frame()
+    m = []
+    for p in (None, 0, 1):
+        board.button_masks(MOY_BUTTONS, p, out)
+        m.append("%d/%d" % (out[0], out[1]))
+    full = board.button_masks(mi.NAMES)
+    say("frame", f, "moy", " ".join(m), "all %d/%d" % full,
+        "key", board.last_key, "players", board.player_count(),
+        "ptr", ptr.x, ptr.y, int(ptr.down), int(ptr.click), int(ptr.fresh))
+board.release_all()
+board.begin_frame()
+say("release_all", "%d/%d" % board.button_masks(mi.NAMES))
+print("DRIVER_DONE")
+'''
+
+INPUT_TRACE = """\
+names left,right,up,down,a,b,run,home,x,y,stop,save,share,select,start
+host left,right,up,down,a,b,run,home
+refuse VALUE ok VALUE
+sources 6.1.1 6.2.1 6.3.1
+frame 0 moy 1/1 1/1 0/0 all 1/1 key 0 players 2 ptr 160 120 0 0 0
+frame 1 moy 21/20 17/16 4/4 all 21/20 key 97 players 2 ptr 10 20 1 1 1
+frame 2 moy 20/0 16/0 4/0 all 20/0 key 0 players 2 ptr 12 22 1 0 1
+frame 3 moy 52/32 16/0 36/32 all 180/160 key 27 players 2 ptr 12 22 1 0 0
+frame 4 moy 32/0 0/0 32/0 all 160/0 key 0 players 2 ptr 12 22 0 0 1
+frame 5 moy 96/64 64/64 32/0 all 224/64 key 0 players 2 ptr 12 22 0 0 0
+frame 6 moy 0/0 0/0 0/0 all 0/0 key 0 players 2 ptr 12 22 0 0 0
+frame 7 moy 0/0 0/0 0/0 all 24576/24576 key 13 players 2 ptr 300 239 1 1 1
+frame 8 moy 0/0 0/0 0/0 all 24576/0 key 0 players 2 ptr 300 239 1 0 0
+frame 9 moy 0/0 0/0 0/0 all 0/0 key 0 players 2 ptr 300 239 1 0 0
+release_all 0/0
+"""
+
+GLASS_DRIVER = r'''import sys
+sys.path.insert(0, @RUNTIME@)
+sys.path.insert(0, @DEVICE@)
+sys.path.insert(0, @STAGE@)
+try:
+    import moy_gfx                          # the usermod, on a VM
+except ImportError:                         # CPython: the host's binding
+    sys.path.insert(0, @REPO@)
+    from runtime import host_canvas
+    host_canvas.install()                   # moy_gfx over ctypes, framebuf
+    import moy_gfx
+import hashlib
+
+import device_canvas as dc
+import moy_glass as mg
+
+
+def say(*a):
+    print("T", " ".join(str(x) for x in a))
+
+
+def h_(h):
+    return "%d.%d.%d" % ((h >> 8) & 15, h & 255, h >> 12)
+
+
+class Comp:
+    def __init__(self, w, h):
+        self._w, self._h = w, h
+        self._buf = bytearray(w * h * 2)
+
+    def size(self):
+        return (self._w, self._h)
+
+    def framebuffer(self):
+        return self._buf
+
+    def gfx(self):
+        return moy_gfx
+
+
+class Alloc:
+    """moy_alloc's freeing allocator, as the glass sees it: a buffer per ask,
+    counted, and every free checked."""
+    MEMORY_SPIRAM = 1
+    MEMORY_DMA = 2
+
+    def __init__(self):
+        self.live = 0
+
+    def alloc(self, n, caps=0):
+        self.live += 1
+        return memoryview(bytearray(n))
+
+    def free(self, buf):
+        self.live -= 1
+
+
+def rows(tag):
+    g = dc._GLASS
+    out = []
+    for role in (mg.ROLE_LAYER, mg.ROLE_BAKE):
+        for h in g.loans(tag, role):
+            r = g.row(h)
+            out.append("%s:r%d:o%d:%d" % (h_(h), r[mg.ROLE], r[mg.ORIGIN],
+                                          r[mg.NBYTES]))
+    return ",".join(out) or "-"
+
+
+def crc(cv):
+    return hashlib.sha256(cv._comp._buf).digest()[:6].hex()
+
+
+alloc = Alloc()
+sys.modules["moy_alloc"] = alloc
+cv = dc.DeviceCanvas(Comp(96, 64))
+cv.cls(1)
+cv.rect(4, 4, 20, 12, 8)
+cv.print("GLASS", 30, 10, 7)
+say("draw", crc(cv))
+lay = cv.new_layer(64, 32, owner="cart")
+lay.cls(3)
+lay.rect(0, 0, 8, 8, 10)
+cv.draw_layer(lay, 4, 0) if hasattr(cv, "draw_layer") else cv.blit_window_from(lay, 4, 0)
+say("layer", crc(cv), "owner", h_(dc._GLASS.owner("cart")), "rows", rows("cart"),
+    "alloc", alloc.live)
+lay2 = cv.new_layer(32, 16, owner="cart")
+console = cv.new_layer(32, 16)
+say("lent", rows("cart"), "console", int(console._comp.pooled))
+cv.reclaim_layers("cart")
+pool = sorted((n, len(v)) for n, v in dc._GLASS.pool.items())
+say("reclaim", rows("cart"), "pool", pool, "alloc", alloc.live)
+again = cv.new_layer(64, 32, owner="cart")
+say("reuse", rows("cart"), int(again._comp._origin == mg.ORIGIN_POOL),
+    "pool", sorted((n, len(v)) for n, v in dc._GLASS.pool.items()))
+console.release()
+say("release", "alloc", alloc.live)
+print("DRIVER_DONE")
+'''
+
+GLASS_TRACE = """\
+draw bcf7a0e484b6
+layer 55129292ac68 owner 5.0.1 rows 2.0.1:r1:o2:4096 alloc 1
+lent 2.0.1:r1:o2:4096,2.1.1:r1:o2:1024 console 1
+reclaim - pool [(1024, 1), (4096, 1)] alloc 3
+reuse 2.0.2:r1:o1:4096 1 pool [(1024, 1), (4096, 0)]
+release alloc 2
+"""
+
+LOOP_DRIVER = r'''import sys
+sys.path.insert(0, @RUNTIME@)
+
+import frame_loop
+from frame_loop import FrameLoop, IdleBlank, STAGE_ORDER
+
+try:
+    import _thread
+except ImportError:
+    _thread = None
+
+
+def say(*a):
+    print("T", " ".join(str(x) for x in a))
+
+
+CLOCK = [1000]
+frame_loop._ticks_ms = lambda: CLOCK[0]
+frame_loop._ticks_us = lambda: CLOCK[0] * 1000
+frame_loop._ticks_diff = lambda a, b: a - b
+frame_loop._sleep_ms = lambda ms: None
+CALLS = []
+UP = [0]
+LIT = []
+
+
+class Comp:
+    def sync(self):
+        CALLS.append("fence")
+
+
+class Pump:
+    frame_ms = 50
+    slot = 50
+
+    def begin(self):
+        CALLS.append("begin")
+        return CLOCK[0], 0.05
+
+    def tail(self, ws):
+        CALLS.append("pump_tail")
+
+    def pace(self, ws, elapsed):
+        CALLS.append("pace")
+        return 0
+
+
+class WS:
+    comp = Comp()
+    _frames_drawn = 0
+    perf_capture = True
+    _dirty = False
+    _psave_asleep = False
+
+    def handle_input(self):
+        UP[0] += 1
+
+    def handle_pointer(self):
+        UP[0] += 1
+
+    def frame(self, dt):
+        UP[0] += 1
+        self._frames_drawn += 1
+
+
+class Pointer:
+    click = False
+    down = False
+
+    def tick(self, now):
+        CALLS.append("pointer")
+
+
+class Meters(frame_loop.StageMeters):
+    def mark(self, i):
+        CALLS.append("|" + STAGE_ORDER[i])
+        frame_loop.StageMeters.mark(self, i)
+
+
+# Input on frames 0-2 and a touch on frame 16; the blank comes after 300ms.
+ACTIVE = (0, 1, 2, 16)
+F = [0]
+
+
+def poll_inputs(now):
+    CALLS.append("inputs")
+    a = F[0] in ACTIVE
+    return a, a
+
+
+ws = WS()
+idle = IdleBlank(LIT.append, 300)
+pointer = Pointer()
+loop = FrameLoop(ws, Pump(), pointer, poll_inputs, idle=idle,
+                 present=lambda: CALLS.append("present"),
+                 tail=lambda now: CALLS.append("tail"),
+                 account=lambda now, e, s: CALLS.append("account"),
+                 set_backlight=LIT.append, lit=False)
+loop.meters = Meters(ws, 50)
+
+
+def one(f):
+    F[0] = f
+    del CALLS[:]
+    UP[0] = 0
+    loop.step()
+    say("frame", f, " ".join(CALLS), "upcalls", UP[0],
+        "asleep", int(idle.asleep), "click", int(pointer.click),
+        "lit", ",".join(str(int(x)) for x in LIT))
+    CLOCK[0] += 50
+
+
+for f in range(10):
+    one(f)
+
+# The last ten from a second thread: the loop keeps no state on a stack.
+DONE = []
+
+
+def rest():
+    for f in range(10, 20):
+        one(f)
+    DONE.append(1)
+
+
+if _thread is not None:
+    _thread.start_new_thread(rest, ())
+    import time
+    while not DONE:
+        time.sleep(0.01)
+else:
+    rest()
+print("DRIVER_DONE")
+'''
+
+LOOP_TRACE = """\
+frame 0 begin inputs |inputs |idle pointer |pointer present |present |frame fence |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 1 lit 1
+frame 1 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 1 lit 1
+frame 2 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 1 lit 1
+frame 3 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
+frame 4 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
+frame 5 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
+frame 6 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
+frame 7 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
+frame 8 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
+frame 9 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
+frame 10 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
+frame 11 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
+frame 12 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
+frame 13 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
+frame 14 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
+frame 15 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
+frame 16 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1,0,1
+frame 17 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1,0,1
+frame 18 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1,0,1
+frame 19 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1,0,1
+"""
+
+LINKS_DRIVER = r'''import os
+import sys
+sys.path.insert(0, @RUNTIME@)
+sys.path.insert(0, @DEVICE@)
+
+import moy_net
+import moy_sync
+import moy_ota_health
+from moy_ota_health import SlotHealth
+
+ROOT = @ROOT@
+
+
+def say(*a):
+    print("T", " ".join(str(x) for x in a))
+
+
+def tree(path, rel=""):
+    out = []
+    for name in sorted(os.listdir(path)):
+        full = path + "/" + name
+        r = rel + name
+        try:
+            os.listdir(full)
+            out.extend(tree(full, r + "/"))
+        except OSError:
+            with open(full) as f:
+                out.append("%s=%d" % (r, len(f.read())))
+    return out
+
+
+# -- a sync batch into a store --------------------------------------------------
+carts = ROOT + "/carts"
+os.mkdir(carts)
+BATCH = moy_net.encode_batch(1, None, [
+    {"p": "hop.moy/manifest.json", "t": '{"title": "Hop"}'},
+    {"p": "hop.moy/main.py", "t": "def _draw():\n    cls(1)\n"},
+    {"p": "hop.moy/big.lua", "t": "-- one", "part": 0},
+    {"p": "hop.moy/big.lua", "t": " two", "part": 1},
+    {"p": "hop.moy/big.lua", "pub": 1},
+    {"p": "hop.moy/journal/x", "t": "never"},
+    {"p": "../escape", "t": "never"},
+    {"p": "old.moy/main.py", "t": "x"},
+    {"p": "old.moy", "dc": 1}], "1234")
+ops, pin, root_id = moy_sync.parse_batch(BATCH.encode())
+say("parse", len(ops), pin, root_id)
+applied, errs, shelf = moy_sync.apply_ops(carts, ops, root_id)
+say("apply", applied, ",".join("%d:%s" % e for e in errs), int(shelf))
+say("rows", " ".join(tree(carts)))
+say("refuse", moy_sync.parse_batch(moy_net.encode_batch(2, "nope", [])),
+    moy_sync.parse_batch(moy_net.encode_batch(1, "files", [])),
+    moy_sync.parse_batch(b"{"))
+files_ops = moy_sync.parse_batch(moy_net.encode_batch(2, "files", [{"p": "x"}]))
+say("files", files_ops[2], len(files_ops[0]))
+
+# -- the OTA health machine on a canned install --------------------------------
+upd = ROOT + "/update"
+os.mkdir(upd)
+
+
+class Health(SlotHealth):
+    def __init__(self, running):
+        SlotHealth.__init__(self, lambda fn: fn(), upd)
+        self._running = running
+        self.valid = 0
+
+    def _running_label(self):
+        return self._running
+
+    def version_label(self):
+        return "0.9"
+
+    def mark_valid(self):
+        self.valid += 1
+        return True
+
+
+def pending(slot):
+    with open(upd + "/" + moy_ota_health.PENDING_NAME, "w") as f:
+        f.write('{"slot": "%s", "version": 5, "label": "0.8"}' % slot)
+
+
+for running, staged in (("ota_1", "ota_1"), ("ota_0", "ota_1"), ("ota_0", None)):
+    if staged:
+        pending(staged)
+    h = Health(running)
+    say("boot", running, staged, h.boot_check())
+    ladder = []
+    for i in range(moy_ota_health.HEALTHY_LOOPS + 2):
+        if h.confirm_when_healthy(0 if i < 3 else 1):
+            ladder.append(i)
+    say("confirm", ladder, "valid", h.valid, "marker",
+        int(moy_ota_health.PENDING_NAME in os.listdir(upd)))
+h = Health("ota_0")
+serve = []
+for i in range(moy_ota_health.HEALTHY_SERVES + 10):
+    if h.confirm_when_serving(i != 7):
+        serve.append(i)
+say("serving", serve, "valid", h.valid)
+print("DRIVER_DONE")
+'''
+
+LINKS_TRACE = """\
+parse 9 1234 carts
+apply 7 5:bad path,6:bad path 1
+rows hop.moy/big.lua=10 hop.moy/main.py=24 hop.moy/main.py.bak=46 hop.moy/manifest.json=16 hop.moy/manifest.json.bak=38
+refuse (None, None, None) (None, None, None) (None, None, None)
+files files 1
+boot ota_1 ota_1 ('ok', '0.8 -> 0.9')
+confirm [119] valid 1 marker 0
+boot ota_0 ota_1 ('rolled_back', 'put 0.9 back')
+confirm [119] valid 1 marker 0
+boot ota_0 None None
+confirm [119] valid 1 marker 0
+serving [307] valid 1
+"""
+
+SESSION_DRIVER = r'''import sys
+sys.path.insert(0, @RUNTIME@)
+
+from audio_session import AudioSessions
+import moy_spine
+
+
+def say(*a):
+    print("T", " ".join(str(x) for x in a))
+
+
+def h_(h):
+    return "%d.%d.%d" % ((h >> 8) & 15, h & 255, h >> 12)
+
+
+class Rec:
+    def __init__(self, name):
+        self.name = name
+
+    def sfx(self, n, chan=None):
+        say(self.name, "sfx", n, chan)
+
+    def beep(self, freq, dur=0.15):
+        say(self.name, "beep", freq, dur)
+
+    def music(self, track, loop=True):
+        say(self.name, "music", track, int(loop))
+
+    def music_stop(self):
+        say(self.name, "music_stop")
+
+    def sound_stop(self, chan=None):
+        say(self.name, "sound_stop", chan)
+
+    def volume(self, level):
+        say(self.name, "volume", level)
+
+
+s = AudioSessions()
+a = s.open("cart", Rec("cart"))
+b = s.open("music_editor", Rec("editor"))
+say("open", h_(a), h_(b), "focused", h_(s.focused))
+s.sfx(a, 3)
+s.music(b, 1, False)
+s.focus(a)
+say("focus", h_(s.focused))
+s.beep(a, 440, 0.25)
+s.volume(b, 4)
+s.music_stop(b)
+s.sound_stop(a, 2)
+c = s.open("cart", Rec("cart2"))
+say("reopen", h_(c), "focused", h_(s.focused), "of", h_(s.of("cart")))
+try:
+    s.sfx(a, 1)
+except moy_spine.StaleHandle:
+    say("stale", h_(a))
+s.end(c)
+say("end", s.focused, s.of("cart"), h_(s.of("music_editor")))
+print("DRIVER_DONE")
+'''
+
+SESSION_TRACE = """\
+open 8.0.1 8.1.1 focused 8.1.1
+cart sfx 3 None
+editor music 1 0
+focus 8.0.1
+cart beep 440 0.25
+editor volume 4
+editor music_stop
+cart sound_stop 2
+reopen 8.0.2 focused 8.0.2 of 8.0.2
+stale 8.0.1
+end 0 0 8.1.1
+"""
+
+SURVIVAL = {"input": (INPUT_DRIVER, INPUT_TRACE),
+            "glass": (GLASS_DRIVER, GLASS_TRACE),
+            "loop": (LOOP_DRIVER, LOOP_TRACE),
+            "links": (LINKS_DRIVER, LINKS_TRACE),
+            "session": (SESSION_DRIVER, SESSION_TRACE)}
+
+
+def _survival_trace(name, exe, tmp_path, tag, prelude=""):
+    driver = SURVIVAL[name][0]
+    work = tmp_path / ("%s_%s" % (name, tag))
+    stage = work / "stage"
+    store = work / "store"
+    stage.mkdir(parents=True)
+    store.mkdir()
+    # What a build stages under frozen names that the glass's canvas imports.
+    shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
+    for f in ("moy_image.py", "moy_fs.py"):
+        shutil.copy(ROOT / "runtime" / f, stage / f)
+    for token, value in (("@RUNTIME@", ROOT / "runtime"), ("@DEVICE@", ROOT / "device"),
+                         ("@STAGE@", stage), ("@ROOT@", store), ("@REPO@", ROOT)):
+        driver = driver.replace(token, repr(str(value)))
+    script = work / "driver.py"
+    script.write_text(prelude + driver)
+    out = subprocess.run([exe, str(script)], capture_output=True, text=True,
+                         timeout=180)
+    assert out.returncode == 0, out.stderr or out.stdout
+    lines = out.stdout.strip().splitlines()
+    assert lines and lines[-1] == "DRIVER_DONE", out.stdout
+    return [line[2:] for line in lines if line.startswith("T ")]
+
+
+@pytest.mark.parametrize("name", sorted(SURVIVAL))
+def test_survival_trace_is_the_interface_on_every_vm(name, tmp_path):
+    want = SURVIVAL[name][1].splitlines()
+    py = _survival_trace(name, sys.executable, tmp_path, "cpython")
+    assert py == want, "the %s trace moved: %s" % (name, _first_difference(py, want))
+    exe = require_unix_mp(
+        "moy_gfx",
+        why="The survival set's twins on the VM a board runs, before sprint 3 "
+            "crosses them (docs/kernel_survival_2026-10.md section 2 item 8).")
+    mp = _survival_trace(name, exe, tmp_path, "micropython")
+    assert mp == want, "MicroPython diverges: " + _first_difference(mp, want)
+    board = find_unix_mp("moy_gfx", board_model=True)
+    if board is not None:
+        b32 = _survival_trace(name, board, tmp_path, "board_model")
+        assert b32 == want, ("the 32-bit object model diverges: "
+                             + _first_difference(b32, want))
+
+
+@pytest.mark.parametrize("name", sorted(SURVIVAL))
+def test_survival_trace_holds_over_the_native_spine(name, tmp_path):
+    """The twins' rows are moy_spine tables; on a board those are the native
+    spine's, so the logs must hold over it line for line."""
+    want = SURVIVAL[name][1].splitlines()
+    exe = require_unix_mp(
+        "moy_spine", "moy_gfx",
+        why="The survival twins' rows over the native spine, as a board runs "
+            "them.")
+    mp = _survival_trace(name, exe, tmp_path, "native", NATIVE_SPINE)
+    assert mp == want, "the native spine diverges: " + _first_difference(mp, want)
