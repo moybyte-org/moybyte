@@ -321,8 +321,8 @@ class MoycoreRun:
         if not self._mask_ok:
             # The guard is BACK, and the reason is worth keeping: it was removed
             # on the argument that every tier builds the real InputState, which
-            # was wrong -- there are TWO InputState classes (runtime/input.py
-            # and modules/moybyte/input.py), the boards use the second, and
+            # was wrong -- there are TWO input modules (runtime/input.py and
+            # modules/moybyte/input.py), the boards use the second, and
             # removing this dropped a Lua cart into the crash-to-code editor
             # with `no attribute button_masks`. One getattr per input object is
             # cheap insurance against an input this file has never heard of.

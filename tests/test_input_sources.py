@@ -10,12 +10,11 @@ poll erased every BLE keypress within a frame: held buttons died immediately,
 `last_key` survived only as a race, and the BLE keyboard did nothing at all on
 that board.
 
-Every behavioural test below runs against BOTH InputState classes, because
-there are two and they diverge on purpose (different button vocabularies, in
-different orders, with a different primary verb -- runtime/input.py's
-`set_held` vs device/moybyte/input.py's `set_button`). A model that landed on
-one tier and not the other would be exactly the shape of failure
-`button_masks`'s docstring records: no crash, no failing test, no frame hash.
+Every behavioural test below runs against BOTH tiers' InputState. They are
+one table now (runtime/moy_input.py's InputTable) over two vocabularies -- the
+boards' fifteen names and the host's first eight -- and a tier that stopped
+being that table would be exactly the shape of failure `button_masks`'s
+docstring records: no crash, no failing test, no frame hash.
 
 The second thing pinned here: `begin_frame` is the union's SOLE author and
 consumers read after it. The tests below make both halves of that a failure
@@ -229,10 +228,10 @@ def test_no_source_mutator_writes_the_shared_union(tier):
     """The ratchet: a mirror into the shared union is two lines, and exactly
     the sort of line that comes back the next time someone wants a mid-frame
     read to be live."""
-    path = (ROOT / "runtime" / "input.py") if tier == "host" \
-        else (ROOT / "device" / "moybyte" / "input.py")
+    # One table for both tiers since sprint 3's carve: runtime/moy_input.py.
+    path = ROOT / "runtime" / "moy_input.py"
     src = path.read_text()
-    body = src[src.index("class InputSource"):src.index("class InputState")]
+    body = src[src.index("class InputSource"):src.index("class InputTable")]
     assert "state._held" not in body, "the union mirror is back in InputSource"
     assert "_drop" not in body, "the incremental union drop is back"
     # ...and its helpers stayed deleted rather than lingering unused.
@@ -244,8 +243,8 @@ def test_no_source_mutator_writes_the_shared_union(tier):
 def test_the_merge_is_reached_only_through_begin_frame(tier):
     """One caller, so `begin_frame` is a real frame boundary and not just the
     usual one."""
-    path = (ROOT / "runtime" / "input.py") if tier == "host" \
-        else (ROOT / "device" / "moybyte" / "input.py")
+    # One table for both tiers since sprint 3's carve: runtime/moy_input.py.
+    path = ROOT / "runtime" / "moy_input.py"
     src = path.read_text()
     lines = [ln.split("#", 1)[0] for ln in src.splitlines()]
     calls = [i for i, ln in enumerate(lines)
@@ -665,3 +664,33 @@ def test_a_one_player_cart_responds_to_any_controller():
     assert ns["btn"]("a", 1) is True         # ...and it is addressable as P2
     assert ns["btn"]("a", 0) is False        # ...and it has left slot 0
     assert ns["players"]() == 2
+
+
+def test_one_table_two_vocabularies():
+    """Both tiers' InputState are moy_input's InputTable (sprint 3's carve):
+    the boards accept all fifteen names, the host its eight, which are the
+    first eight of the same order -- libmoy's moy_button enum, then `home` --
+    and a name outside a table's vocabulary is refused."""
+    from runtime import moy_input
+    from runtime.input import InputState as Host
+    from runtime.lua_ext import MOY_BUTTONS
+    Board = device_input.InputState
+    assert issubclass(Host, moy_input.InputTable)
+    assert issubclass(Board, moy_input.InputTable)
+    assert moy_input.NAMES[:len(MOY_BUTTONS)] == MOY_BUTTONS
+    assert Host.BUTTONS == moy_input.NAMES[:8] and len(Board.BUTTONS) == 15
+    host, board = Host(), Board()
+    board.source("kbd").set_held("start", True)
+    with pytest.raises(ValueError):
+        host.source("kbd").set_held("start", True)
+
+
+def test_a_source_is_a_row_of_kind_src():
+    from runtime import moy_spine
+    from runtime.input import InputState
+    inp = InputState()
+    a, b = inp.source("kbd"), inp.source("net0", player=1)
+    for s in (a, b):
+        assert (s.h >> moy_spine.KIND_SHIFT) & 0xF == moy_spine.KIND_SRC
+        assert inp._rows.get(s.h) is s
+    assert inp.source("kbd").h == a.h

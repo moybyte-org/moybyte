@@ -85,8 +85,7 @@ def arm_prompt(ws):
     try:
         ws.input._pressed = set()
         ws.input._released = set()
-        ws.input._last = set()          # device InputState edge snapshot
-        ws.input._prev = set()          # host InputState edge snapshot
+        ws.input._last = set()          # the edge snapshot (moy_input.InputTable)
     except AttributeError:
         pass
     ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0

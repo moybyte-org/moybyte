@@ -233,9 +233,10 @@ body and nothing executable guarded it.**
   value carries its own per-board argument.
 - **A wired service must be STARTED and POLLED, not merely built**, and `poll` must
   be per-frame: on the boot path it runs once and reads statically identical.
-- **Derived values get one author.** The two InputStates stay separate at 94%
-  identical — `BUTTONS` is 8 names vs 15, in different orders, and a test says
-  asserting them equal would be wrong.
+- **Derived values get one author.** Both tiers' InputState are one table
+  (`runtime/moy_input.py`'s `InputTable`) over two vocabularies — the boards'
+  fifteen names, the host's first eight of the same order — and a mask's bit
+  order is the caller's (`button_masks(order, player)`), never the vocabulary's.
 - **Storage READS take the SD gate too, not just writes.** `poll_webhost` runs at
   the frame tail after `kick()`, so a frame that painted leaves the feeder shipping
   bands, and an sdspi transaction there is the documented panic.

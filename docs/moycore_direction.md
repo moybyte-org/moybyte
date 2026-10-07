@@ -59,7 +59,7 @@ can pass vacuously.
 
 **Input MAPPING is a separate net and stays one** (`tests/test_moy_button_order.py`,
 2026-08-14): the bit order is libmoy's ABI, read out of `moy.h` rather than
-restated, and checked behaviourally against both InputState classes. A frame
+restated, and checked behaviourally against both tiers' InputState. A frame
 hash cannot see a rotated d-pad — the bug that shipped to both boards for a day
 was invisible to every other net in the tree, this harness included, because it
 builds the host InputState.

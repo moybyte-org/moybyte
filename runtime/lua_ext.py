@@ -61,9 +61,9 @@ def cart_chunks(ns, src):
 # THIS tuple and nothing else.
 #
 # It lives here, beside the rest of the runtime glue, because on 2026-08-13 it
-# was "de-duplicated" into InputState.BUTTONS -- and there are two InputState
-# classes whose BUTTONS differ in ORDER as well as in length. The host's happens
-# to start with libmoy's seven; the boards' starts up/down/left/right. So every
+# was "de-duplicated" into InputState.BUTTONS -- and the two tiers' BUTTONS then
+# differed in ORDER as well as in length. The host's happened to start with
+# libmoy's seven; the boards' started up/down/left/right. So every
 # Lua cart on both boards ran with its d-pad rotated a quarter turn and `run`
 # wired to nothing, for a day, silently: no crash, no failing test, and a
 # controller permutation is not something a frame hash or an fps number can see.

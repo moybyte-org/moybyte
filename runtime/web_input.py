@@ -13,8 +13,8 @@ hold-Backspace-to-exit gesture.
 
 import json
 
-# `runtime` first, NOT the usual device-name-first ladder: there are TWO
-# InputState classes and `input` is the frozen name of BOTH (the boards' 15-name
+# `runtime` first, NOT the usual device-name-first ladder: there are TWO input
+# modules and `input` is the frozen name of BOTH (the boards' 15-name
 # moybyte.input outranks this one on the semantic-trace harness's sys.path).
 # web_input decodes into the HOST class, so it must name it unambiguously; the
 # bare-name branch is for the wasm head, which stages runtime/input.py as `input`
