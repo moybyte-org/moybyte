@@ -62,7 +62,11 @@ EXFAT_SRAM = 568
 # 2026-10-07; the port's espnow module they replace held its ring in the heap.
 # And the WiFi driver's (native/moy_net/moy_wifi.c: its state, latch and
 # connect flag), 56 bytes of .bss and .data by the object's sizes, 2026-10-07.
-KERNEL_SRAM = 968 + 56 + 40 + 56
+# Less what the kernel's audio gave back: the synth's
+# state moved from a static to its session's PSRAM (native/moy_audio), 9,824
+# bytes of .dram0.data and .bss by the link map against dev cafae3a2,
+# 2026-10-07.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 

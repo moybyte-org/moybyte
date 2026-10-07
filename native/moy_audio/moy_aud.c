@@ -45,7 +45,6 @@ typedef struct {
     uint32_t focus_h;
     int rate;
     int console;                // 0..7
-    int hush;                   // the next render clears the stream first
     // a compiled cart's stream
     moy_stream pcm;
     int16_t *pcm_ring;

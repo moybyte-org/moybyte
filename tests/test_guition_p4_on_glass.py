@@ -57,7 +57,11 @@ TF_CARD_SRAM = 756
 # 2026-10-07; the port's espnow module they replace held its ring in the heap.
 # And the WiFi driver's (native/moy_net/moy_wifi.c: its state, latch and
 # connect flag), 56 bytes of .bss and .data by the object's sizes, 2026-10-07.
-KERNEL_SRAM = 1288 + 48 + 40 + 56
+# Plus the kernel's audio (native/moy_audio, which this
+# board takes since #82: its table roots, counters and output state), 288 bytes
+# of .dram0.data and .bss by the link map against dev cafae3a2, 2026-10-07; the
+# feeder's stack, ring and lock are allocated at the first cart, not at boot.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 

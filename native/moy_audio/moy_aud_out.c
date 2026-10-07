@@ -175,7 +175,7 @@ static void chan_swap(void) {
 
 static void feeder(void *arg) {
     (void)arg;
-    static int16_t block[BLOCK_FRAMES];
+    int16_t block[BLOCK_FRAMES];    // on the task's stack: nothing static until a start
     uint32_t ovf_seen = s_ovf;
     while (s_running) {
         if (s_shallow_want != s_shallow) {
@@ -248,7 +248,8 @@ int moy_aud_out_start(void) {
         return s_state;
     }
     s_running = 1;
-    if (xTaskCreatePinnedToCore(feeder, "moy_audio", 4096, NULL, configMAX_PRIORITIES - 3,
+    if (xTaskCreatePinnedToCore(feeder, "moy_audio", 4096 + BLOCK_FRAMES * 2, NULL,
+                                configMAX_PRIORITIES - 3,
                                 &s_task, 1) != pdPASS) {
         s_running = 0;
         s_task = NULL;
