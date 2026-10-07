@@ -4,7 +4,7 @@
 #   luaprof_line       the LUAPROF line: the interpreter's split
 #   heapcaps_line      the HEAPCAPS line: what each heap holds
 #   DevChannel         the serial line commands: one class, every board
-#   DevChannel.run     the command table of record
+#   DevChannel.run     the command table, after the registered words
 #   DevChannel.poll    drain the bytes a frame may take
 #   DevChannel.report  the per-tick diag line
 """The serial DEV CHANNEL: drive a running console over the board's serial line.
@@ -84,6 +84,12 @@ try:                                    # device: ticks is frozen flat
     from ticks import _ticks_diff, _ticks_ms
 except ImportError:                     # host: the runtime package
     from runtime.ticks import _ticks_diff, _ticks_ms
+try:                                    # each subsystem's words
+    import devch_input
+    import devch_audio
+    import devch_links
+except ImportError:                     # host: the runtime package
+    from runtime import devch_input, devch_audio, devch_links
 try:                       # device (device_util is staged from device/)
     from device_util import _diag_log
 except ImportError:        # host / test -- no diag ring; print is it
@@ -948,6 +954,11 @@ class DevChannel:
                       (see _recv)
       quit            leave the desktop for the REPL
 
+    THE WORDS OF A SUBSYSTEM ARE REGISTERED: `tap`, `swipe` and `drag` from
+    devch_input.py, `vol` from devch_audio.py, `link`, `web`, `recv` and the
+    `moy` lines from devch_links.py, each a WORDS table this class's `words`
+    holds; `run` keeps the rest.
+
     BOARD BITS ARE INJECTED: `set_backlight`, `idle` (an IdleBlank), `env`
     (extra names for `py` -- comp/game/boot/pump on the P4), and `extra`, a
     {name: handler(ws, parts, line)} dict of board-only commands (the P4's
@@ -973,6 +984,11 @@ class DevChannel:
         self.idle = idle        # an IdleBlank, for `power`; may be None
         self.set_backlight = set_backlight   # board's panel light; may be None
         self.extra = extra or {}             # board-only commands
+        # The word table each subsystem registers into (devch_input,
+        # devch_audio, devch_links); `run` dispatches through it first.
+        self.words = {}
+        for mod in (devch_input, devch_audio, devch_links):
+            self.words.update(mod.WORDS)
         self.env = env or {}                 # extra names in the `py` scope
         self._drag = None       # `drag` playback state
         self._swipe = None      # `swipe` playback state
@@ -1837,46 +1853,12 @@ class DevChannel:
             print("REMOTE quit -> REPL")
             self.quit = True
             return
-        if cmd == "link":
-            # `link` alone reports; `link on|off` arms the radio by hand, which
-            # is what a two-board bench needs -- the Player only arms it for a
-            # cart that declares the multiplayer permission.
-            lk = getattr(ws, "link", None)
-            if lk is None:
-                print("REMOTE link: no radio on this board")
-                return
-            action = parts[1] if len(parts) > 1 else ""
-            if action == "on":
-                lk.start()
-            elif action == "off":
-                lk.stop()
-            elif action == "cart" and len(parts) > 2:
-                lk.announce(" ".join(parts[2:]), 1)
-            import json
-            print("LINK %s" % json.dumps(lk.stats()))
+        word = self.words.get(cmd)
+        if word is not None and word(self, ws, parts, line) is not False:
             return
         if cmd == "state":
             import json
             print("STATE %s" % json.dumps(_remote_state(ws)))
-            return
-        if cmd == "tap":
-            r = None
-            if len(parts) == 3:
-                try:
-                    r = (int(parts[1]), int(parts[2]))
-                except ValueError:
-                    r = None
-            elif len(parts) == 2:
-                rect = getattr(ws.layout, parts[1] + "_btn", None)
-                if rect:
-                    r = (rect[0] + rect[2] // 2, rect[1] + rect[3] // 2)
-            if r is None:
-                print("REMOTE ? %s" % line)
-                return
-            self.pointer.place(r[0], r[1])
-            self.pointer.down = True     # released next frame (touch reads None)
-            self.click = True
-            print("REMOTE tap %d %d" % r)
             return
         if cmd == "run":
             # The lookup is ws.launch_named -- the SAME body the browser's PLAY
@@ -2024,20 +2006,6 @@ class DevChannel:
                     self.idle.asleep = True
             print("REMOTE bl %s" % ("on" if on else "off"))
             return
-        if cmd == "vol":
-            lvl = int(parts[1]) if len(parts) == 2 else 0
-            # PERSIST first, apply second. ws.audio exists only while a cart
-            # holds the backend, so at the launcher this used to print "no
-            # audio backend" and change nothing -- which reads as a mute that
-            # worked right up until the next game started playing at full
-            # volume. Storing it means the level is waiting for the backend
-            # that has not been built yet (project._build_audio applies it).
-            ws.system.set("volume", lvl)
-            au = getattr(ws, "audio", None)
-            if au is not None:
-                au.volume(lvl)
-            print("REMOTE vol %d%s" % (lvl, "" if au is not None else " (stored)"))
-            return
         if cmd == "power":
             # Act on the IdleBlank DIRECTLY rather than parking a request for the
             # loop to apply. The deferred version reported the value it had not
@@ -2087,77 +2055,6 @@ class DevChannel:
             else:
                 print("REMOTE open ? %s" % line)
             return
-        if cmd == "swipe" and len(parts) >= 5:
-            # A synthetic touch gesture fed through the SAME pointer path as
-            # the glass, so the harness can exercise scroll/drag/fling on any
-            # surface. Playback is per-frame in _scripts().
-            try:
-                self._swipe = {"i": 0,
-                               "x0": int(parts[1]), "y0": int(parts[2]),
-                               "x1": int(parts[3]), "y1": int(parts[4]),
-                               "n": max(2, int(parts[5]))
-                               if len(parts) > 5 else 20}
-                print("REMOTE swipe %d,%d -> %d,%d frames=%d"
-                      % (self._swipe["x0"], self._swipe["y0"],
-                         self._swipe["x1"], self._swipe["y1"],
-                         self._swipe["n"]))
-            except ValueError:
-                self._swipe = None
-                print("REMOTE swipe ? %s" % line)
-            return
-        if cmd == "drag":
-            # Grab the TOP window's title strip and oscillate it for n frames,
-            # so the PERF sampler reports DRAG-time fps. Windowed tier only --
-            # a WM without windows declines, it does not traceback.
-            order = getattr(ws.wm, "_order", None) or []
-            if not order:
-                print("REMOTE drag: no window open")
-                return
-            win = ws.wm._wins[order[-1]]
-            n = 120
-            step = 6
-            if len(parts) >= 2:
-                try:
-                    n = max(8, int(parts[1]))
-                except ValueError:
-                    pass
-            if len(parts) >= 3:
-                try:
-                    step = max(1, int(parts[2]))  # px/frame amplitude scale
-                except ValueError:
-                    pass
-            self._drag = {"i": 0, "n": n, "step": step,
-                          "cx": win.x + 30,
-                          "cy": win.y + max(6, win.title_h // 2)}
-            print("REMOTE drag win=%s cx=%d cy=%d frames=%d step=%d"
-                  % (order[-1], self._drag["cx"], self._drag["cy"], n, step))
-            return
-        if cmd == "web":
-            # Serve the wasm console FROM this board (moy_webhost), which since
-            # #197 also parks the glass on the connection screen. The PAIRED url
-            # is what gets printed -- the pin is what the page must carry to
-            # write anything back, so a bare address would be an address that
-            # syncs nothing and says nothing about why.
-            try:
-                wh = getattr(ws, "webhost", None)
-                if wh is None:
-                    print("WEB no service")
-                else:
-                    if not wh.serving:
-                        ws.toggle_webhost()
-                    url = ws.web_console_url() or wh.url()
-                    print("WEB %s %s" % (url, wh.error or ""))
-            except Exception as exc:  # noqa: BLE001
-                print("WEB ERR %s: %s" % (type(exc).__name__, exc))
-            return
-        if cmd == "recv":
-            # The one command that leaves the line discipline: everything after
-            # its newline is payload, not commands. See _recv.
-            self._recv(line, parts, ws)
-            return
-        if cmd.startswith("moy"):
-            if self._moy(ws, cmd, parts, line):
-                return
         if cmd == "py" and len(parts) > 1:
             code = line.split(None, 1)[1]
             env = {"ws": ws, "wm": ws.wm, "pointer": self.pointer}

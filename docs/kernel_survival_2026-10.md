@@ -157,9 +157,9 @@ made here, not promised.
    `runtime/console.py`'s one import line changes once, here.
 3. **The dev channel's words are registered.** `DevChannel` keeps the reader
    and a word table; `tap`, `swipe` and `drag` register from
-   `+runtime/devch_input.py`, `vol` from `+runtime/devch_audio.py`, `link`,
+   `runtime/devch_input.py`, `vol` from `runtime/devch_audio.py`, `link`,
    `web`, `recv` and the tier-1 sideload words (`moy?`, `moy-put`, `moy-del`,
-   `moy-rescan`, `moy-run`) from `+runtime/devch_links.py`. The frame tail's
+   `moy-rescan`, `moy-run`) from `runtime/devch_links.py`. The frame tail's
    reader later takes the same tables from C.
 4. **The frame half of `runtime/device_boot.py`** — `FrameLoop`, `FramePump`,
    `IdleBlank`, `OtaHealth`, `PerfSampler`, `StageMeters`, `poll_webhost`,

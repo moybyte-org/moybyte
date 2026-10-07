@@ -1722,3 +1722,24 @@ def test_heapcaps_is_a_dev_channel_word(capsys):
     ch.run(ws, "heapcaps")
     out = capsys.readouterr().out.splitlines()
     assert "HEAPCAPS psram=- sram=- dma=- gc=-/-/-" in out
+
+
+def test_each_subsystem_registers_its_words():
+    """The words are registered per subsystem (docs/kernel_survival_2026-10.md
+    section 2 item 3), so a pass edits its own table and never the reader's."""
+    from runtime import devch_audio, devch_input, devch_links
+    assert sorted(devch_input.WORDS) == ["drag", "swipe", "tap"]
+    assert sorted(devch_audio.WORDS) == ["vol"]
+    assert sorted(devch_links.WORDS) == ["link", "moy-del", "moy-put",
+                                         "moy-rescan", "moy-run", "moy?",
+                                         "recv", "web"]
+    _ws, ch = make()
+    assert ch.words == dict(devch_input.WORDS, **devch_audio.WORDS,
+                            **devch_links.WORDS)
+
+
+def test_a_short_swipe_falls_through_to_the_extras():
+    seen = []
+    _ws, ch = make(extra={"swipe": lambda ws, parts, line: seen.append(line)})
+    ch.run(_ws, "swipe 1 2")
+    assert seen == ["swipe 1 2"] and ch._swipe is None

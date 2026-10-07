@@ -139,6 +139,16 @@ def _dev_channel_commands():
                 if fields[5].value:
                     cmds.add(fields[5].value)
 
+    # The words each subsystem registers (runtime/devch_*.py's WORDS).
+    for words in sorted(ROOT.glob("runtime/devch_*.py")):
+        for node in ast.walk(_tree(words)):
+            if (isinstance(node, ast.Assign)
+                    and any(getattr(t, "id", "") == "WORDS"
+                            for t in node.targets)
+                    and isinstance(node.value, ast.Dict)):
+                cmds.update(k.value for k in node.value.keys
+                            if isinstance(k, ast.Constant))
+
     # Board-only handlers, from the `extra=` each board's runtime passes.
     for runtime in sorted(ROOT.glob("firmware/*/modules/moy_runtime.py")):
         for node in ast.walk(_tree(runtime)):
@@ -228,7 +238,7 @@ def test_the_dev_channel_vocabulary_parsed():
     anchors = {"py", "state", "diag", "run", "tap", "swipe", "drag", "recv",
                "open", "mem", "power", "steady"}
     missing = sorted(anchors - DEV_COMMANDS)
-    assert not missing, ("DevChannel.run no longer dispatches %s -- if that is "
+    assert not missing, ("the dev channel no longer dispatches %s -- if that is "
                          "the change, the tools speaking it need the same edit"
                          % ", ".join(missing))
 
