@@ -73,7 +73,9 @@ TF_CARD_SRAM = 844
 # 1455 bytes of .dram0.bss and .data by the objects' sizes, 2026-10-07.
 # And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
 # which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4
+# And the WiFi driver's reconnect timer handle and backoff, 5 bytes of .bss by
+# the link map, 2026-10-07 (the esp_timer it creates is the heap's).
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5
 WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 

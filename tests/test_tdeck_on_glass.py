@@ -74,7 +74,9 @@ EXFAT_SRAM = 568
 # is 2 KiB smaller: both are heap, which the guard measures), 2026-10-07.
 # And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
 # which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4
+# And the WiFi driver's reconnect timer handle and backoff, 5 bytes of .bss by
+# the link map, 2026-10-07 (the esp_timer it creates is the heap's).
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 

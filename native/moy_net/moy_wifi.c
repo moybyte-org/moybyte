@@ -10,6 +10,7 @@
 
 #include "esp_event.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -22,6 +23,33 @@ static portMUX_TYPE s_latch = portMUX_INITIALIZER_UNLOCKED;
 static moy_wifi_state_t s_st;
 static esp_netif_t *s_netif;
 static volatile int s_want;             // a connect is asked for: retry on loss
+static esp_timer_handle_t s_retry;      // the next attempt after a loss
+static volatile uint8_t s_backoff;      // retries since the last address
+
+// A lost or failed association is retried after a backoff (0.5 s doubling to
+// 8 s), never from the event itself: an immediate esp_wifi_connect() lands on
+// the attempt a fresh connect has just started -- on the P4 the event crosses
+// to the C6 after that connect -- and the two leave the station associating
+// with nothing (reason 8, ASSOC_LEAVE, and no further event). Through the C6
+// the leave a connect's own disconnect causes can also end the attempt that
+// follows it, so a leave is retried like any loss; an attempt that has
+// already got its address is left alone.
+static void retry(void *arg) {
+    (void)arg;
+    if (s_want && !s_st.connected) {
+        esp_wifi_connect();
+    }
+}
+
+static void schedule_retry(void) {
+    if (s_retry == NULL) {
+        return;
+    }
+    uint8_t k = s_backoff < 4 ? s_backoff : 4;
+    s_backoff++;
+    esp_timer_stop(s_retry);
+    esp_timer_start_once(s_retry, (uint64_t)500000u << k);
+}
 
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
@@ -37,7 +65,7 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
         s_st.reason = d ? d->reason : 0;
         portEXIT_CRITICAL(&s_latch);
         if (s_want) {
-            esp_wifi_connect();
+            schedule_retry();
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *g = data;
@@ -46,6 +74,7 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
         s_st.connected = 1;
         s_st.reason = 0;
         portEXIT_CRITICAL(&s_latch);
+        s_backoff = 0;
     }
 }
 
@@ -64,6 +93,8 @@ static int driver(void) {
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, NULL, NULL);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, NULL, NULL);
     s_netif = esp_netif_create_default_wifi_sta();
+    const esp_timer_create_args_t ta = {.callback = retry, .name = "moy_wifi"};
+    esp_timer_create(&ta, &s_retry);
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     e = esp_wifi_init(&cfg);
     if (e != ESP_OK) {
@@ -94,6 +125,9 @@ void moy_wifi_off(void) {
         return;
     }
     s_want = 0;
+    if (s_retry != NULL) {
+        esp_timer_stop(s_retry);
+    }
     esp_wifi_disconnect();
     esp_wifi_stop();
     portENTER_CRITICAL(&s_latch);
@@ -118,6 +152,10 @@ int moy_wifi_connect(const char *ssid, const char *password) {
     memcpy(c.sta.ssid, ssid, n);
     memcpy(c.sta.password, password, p);
     s_want = 0;
+    s_backoff = 0;
+    if (s_retry != NULL) {
+        esp_timer_stop(s_retry);
+    }
     esp_wifi_disconnect();
     e = esp_wifi_set_config(WIFI_IF_STA, &c);
     if (e != ESP_OK) {
@@ -133,6 +171,9 @@ int moy_wifi_connect(const char *ssid, const char *password) {
 
 void moy_wifi_disconnect(void) {
     s_want = 0;
+    if (s_retry != NULL) {
+        esp_timer_stop(s_retry);
+    }
     if (s_st.driver) {
         esp_wifi_disconnect();
     }
