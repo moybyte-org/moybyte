@@ -1574,6 +1574,9 @@ for f in range(10):
     one(f)
 
 # The last ten from a second thread: the loop keeps no state on a stack.
+# The main thread blocks on a lock while the second one runs -- no polling
+# beside it (the unix port runs threads with no GIL) -- and the second always
+# releases it, so a failure there is reported, never a hang.
 DONE = []
 
 
@@ -1608,7 +1611,8 @@ if _thread is not None:
     wait_for_rest()
 else:
     rest()
-print("DRIVER_DONE")
+if DONE == [None]:
+    print("DRIVER_DONE")
 '''
 
 LOOP_TRACE = """\

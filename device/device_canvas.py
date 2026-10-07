@@ -407,10 +407,21 @@ LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 _MAP_SIZES = (17, 23, 29, 37, 47, 59, 73, 97, 127, 167, 223, 293)
 
 
+_HOST_ONLY_KEYS = ("__dict__", "__weakref__", "__qualname__", "__firstlineno__",
+                   "__static_attributes__", "__doc__")
+
+
+def _map_len(obj):
+    return len([k for k in obj.__dict__ if k not in _HOST_ONLY_KEYS])
+
+
 def _room(obj):
     """Leave `obj`'s attribute map at most four-fifths full: past that, add
-    spare attributes until the map grows to its next size."""
-    n = len(obj.__dict__)
+    spare attributes until the map grows to its next size. An instance store
+    looks its name up through every class first, so a class's map counts as
+    much as the instance's. Counted as MicroPython counts it: CPython's own
+    class entries are not in a board's map."""
+    n = _map_len(obj)
     for s in _MAP_SIZES:
         if s >= n:
             if n * 5 > s * 4:
@@ -2498,6 +2509,10 @@ class _LayerComp:
     def gfx(self):
         return self._gfx
 
+
+for _k in (DeviceCanvas, SystemCanvas, _LayerComp):
+    _room(_k)
+del _k
 
 # class _Layer lived here until 2026-08-17 (end of file); THE copy is
 # runtime/cart_api.py -- whose verb list is the superset this one had

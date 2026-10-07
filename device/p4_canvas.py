@@ -559,6 +559,9 @@ class P4SystemCanvas(SystemCanvas):
     # it's a launcher-only backdrop, not a per-frame hot path.
 
 
+_room(P4SystemCanvas)
+
+
 def run_ppa_smoke(comp, set_backlight, scale=2, iters=60, game_w=320, game_h=240):
     """A/B the P4 hardware PPA vs the CPU moy_gfx blit for the game->window
     composite (#58 perf). Ctrl-C the desktop to the REPL first, then each

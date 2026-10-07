@@ -251,7 +251,8 @@ def main():
     args = ap.parse_args()
     b = board_from_args(args)
     try:
-        b.reset()
+        if not b.attach_only:       # an attach-only board is benched as found
+            b.reset()
         bench_all(b, args.out)
     finally:
         b.close()

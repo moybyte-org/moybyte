@@ -97,8 +97,6 @@ void mg_fill_rect(uint16_t *px, size_t cap, int stride,
     }
 }
 
-/* ---- scroll ----------------------------------------------------------- */
-
 // fill_spans' walk (#163/#167): n packed (x, y, w, h, ci) int16 quads, each
 // offset by (ox, oy) and the camera, clipped, filled with `cov` when it is an
 // RGB565 word (>= 0) or with pal[ci & 63] otherwise.
@@ -131,6 +129,8 @@ void mg_fill_spans(uint16_t *dst, size_t cap, int dw, const int16_t *q, int n,
         }
     }
 }
+
+/* ---- scroll ----------------------------------------------------------- */
 
 void mg_scroll_rect(uint16_t *px, size_t cap, int stride,
                     int rx, int ry, int rw, int rh, int dx, int dy)

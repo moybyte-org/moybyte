@@ -213,3 +213,9 @@ def test_a_canvas_attribute_map_is_never_left_near_full():
         n = len(cv.__dict__)
         size = next(s for s in dc._MAP_SIZES if s >= n)
         assert n * 5 <= size * 4, (type(cv).__name__, n, size)
+    # The classes an instance store looks through first (the T-Deck's fillp
+    # went 1x -> 1.2x per oval_p at 73 of 73 slots in DeviceCanvas's map).
+    for k in (dc.DeviceCanvas, dc.SystemCanvas, dc._LayerComp):
+        n = dc._map_len(k)
+        size = next(s for s in dc._MAP_SIZES if s >= n)
+        assert n * 5 <= size * 4, (k.__name__, n, size)
