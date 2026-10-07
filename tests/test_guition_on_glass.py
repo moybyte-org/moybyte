@@ -67,7 +67,10 @@ EXFAT_SRAM = 640
 # clients, its keys and the trusted set, which are PSRAM), its slot's position
 # (moy_net_port.c) and the WiFi driver's kept-network flag, 38 bytes of .bss by
 # the objects' sizes, 2026-10-07.
-KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38
+# And the web-console switch's (native/moy_net/moy_webconsole.c: the pointer
+# to its state, which is PSRAM), 4 bytes of .bss by the object's size,
+# 2026-10-07.
+KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on

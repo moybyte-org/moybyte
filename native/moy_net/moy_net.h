@@ -239,6 +239,10 @@ void moy_web_answer(const void *resp, size_t n);
 // Close the connection a poll was serving when the VM's store raised under it.
 void moy_web_abort(void);
 
+// Bind the configured host on `port` (a configure-only moy_web_start first):
+// 0, or the errno the bind failed with. A listener already on `port` stays.
+int moy_web_bind(uint16_t port);
+
 // The router without a socket: a request's whole response appended to `out`
 // (moy_net_alloc'd, grown as needed; `*out_n` its length), or 0 when the
 // request is one the VM answers. The host's tests and the dev server.
@@ -253,6 +257,47 @@ int moy_web_pack(const char *root, const char *kinds, char **out,
 
 // The image's bundle: "<count> <bytes> <digest>", or NULL with none baked.
 const char *moy_web_stamp_text(void);
+
+// -- the web-console switch (moy_webconsole.c) --------------------------------------
+//
+// The mode the Settings row and the dev channel's `web` turn on and off. A start
+// never waits: it configures the webhost and returns JOINING, and each poll
+// brings the switch on -- SERVING once the link has an address and the bind
+// took, FAILED once MOY_WC_JOIN_MS passed without one or the bind refused. The
+// link is the kernel's WiFi driver where the image has one (moy_net_link);
+// elsewhere the caller names the address (`ip`, network order). PARKED is the
+// glass given to the connection screen; changing it is a kernel epoch.
+
+#define MOY_WC_JOIN_MS 20000
+
+enum {
+    MOY_WC_OFF = 0,
+    MOY_WC_JOINING = 1,
+    MOY_WC_SERVING = 2,
+    MOY_WC_CLOSING = 3,             // the goodbye window
+    MOY_WC_FAILED = 4,
+};
+
+typedef struct {
+    uint8_t state;
+    uint8_t parked;
+    uint8_t dialled;                // the kernel dialled its kept network for this join
+    uint16_t port;
+    uint32_t ip;                    // the address served on, network order; 0 when none
+    int err;                        // FAILED: the bind's errno, or ETIMEDOUT for no link
+} moy_wc_state_t;
+
+int moy_wc_on(const moy_web_cfg_t *cfg, uint32_t ip);
+void moy_wc_off(const char *why);
+int moy_wc_poll(void);              // 1 when the state moved
+void moy_wc_state(moy_wc_state_t *out);
+void moy_wc_set_pin(const char *pin);
+void moy_wc_park(int on);
+// "http://a.b.c.d[:port]/" (with "?pin=..." when `paired`): its length, 0 with no address.
+size_t moy_wc_url(char *out, size_t cap, int paired);
+
+// The kernel's link where the image has one: whether it holds an address.
+int moy_net_link(uint32_t *ip);
 
 // -- the WiFi credential rules --------------------------------------------------
 

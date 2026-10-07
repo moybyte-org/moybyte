@@ -352,7 +352,10 @@ def poll_webhost(ws):
     # few seconds purely to tell the browser this was deliberate. Polling only
     # on `serving` would leave nobody to answer, which is the bug the window
     # exists to fix.
-    if not (getattr(wh, "serving", False) or getattr(wh, "closing", None)):
+    # `joining` too: the switch never waits for the link, so the poll is what
+    # brings it on (or says it failed) once the address comes.
+    if not (getattr(wh, "serving", False) or getattr(wh, "closing", None)
+            or getattr(wh, "joining", False)):
         return 0
     t0 = _ticks_ms()
     try:

@@ -25,6 +25,27 @@ def link(chan, ws, parts, line):
     print("LINK %s" % json.dumps(lk.stats()))
 
 
+def _settle(wh, limit_ms=25000):
+    """The dev word answers with the outcome, so it waits out the join the
+    Settings row never waits for: the switch's poll, the watchdog fed."""
+    import time
+    sleep_ms = getattr(time, "sleep_ms", None)
+    waited = 0
+    while getattr(wh, "joining", False) and waited < limit_ms:
+        wh.poll()
+        try:
+            import moy_ota
+            moy_ota.keep_alive()
+        except ImportError:
+            pass
+        if sleep_ms is not None:
+            sleep_ms(100)
+        else:
+            time.sleep(0.1)
+        waited += 100
+    wh.poll()
+
+
 def web(chan, ws, parts, line):
     # Serve the wasm console FROM this board (moy_webhost), which since
     # #197 also parks the glass on the connection screen. The PAIRED url
@@ -36,8 +57,9 @@ def web(chan, ws, parts, line):
         if wh is None:
             print("WEB no service")
         else:
-            if not wh.serving:
+            if not wh.serving and not getattr(wh, "joining", False):
                 ws.toggle_webhost()
+            _settle(wh)
             url = ws.web_console_url() or wh.url()
             print("WEB %s %s" % (url, wh.error or ""))
     except Exception as exc:  # noqa: BLE001

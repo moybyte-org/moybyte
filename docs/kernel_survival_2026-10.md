@@ -91,7 +91,7 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `native/moy_net/moy_http.c`, `native/moy_net/moy_net_port.c`, `native/moy_net/moy_webhost.c` | 2 |
 | the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `native/moy_net/moy_sync.c`, `native/moy_net/moy_sync_apply.c` | 2 |
 | the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | crossed (`device/moy_ota.py`'s updater half; deleted: `moy_http.py`, `moy_c6_update.py`, `cart_net.py`) | `native/moy_net/moy_ota.c`, its platform in `native/moy_net/moy_net_port.c`; the C6's sink in `native/p4/moy_c6/modmoy_c6.c` | 2 |
-| the web-console switch | `runtime/web_console.py` (its screen: §13, question 8) | `+native/moy_net/moy_webconsole.c` | 2 |
+| the web-console switch | crossed (the switch half of `runtime/web_console.py` and `device/moy_webhost.py`; the pin, the router's park and the themed screen stay, §6.4) | `native/moy_net/moy_webconsole.c` | 2 |
 | the Zero's host | `modules/zero_host.py`, `modules/zero_gpio.py`, `modules/zero_setup.py` | the same `moy_net`, with the Zero's GPIO allowlist as a board table | 2 |
 | the internal flash volumes | `moy_vol`'s borrowed littlefs backend (sprint 1b) | `native/moy_store/moy_vol.c` owns the instance, with a VFS type of the kernel's for Python | 2 |
 | the loop, the pump, idle, OTA health, PERF, the HUD, stage meters, the tail polls | `runtime/device_boot.py`'s frame half (`runtime/frame_loop.py`), `runtime/console_perf.py`, `runtime/perf_hud.py`, `runtime/perf_line.py`'s formatter, `device/moy_ota_health.py` | `+native/moy_kernel/moy_loop.c`, `+native/moy_kernel/moy_idle.c`, `+native/moy_kernel/moy_perf.c` | 3 |
@@ -803,14 +803,19 @@ state machine over plain sockets and the signature vectors.
 
 ### 6.4 The web-console switch
 
-`runtime/web_console.py` — the pairing pin, the paired URL, parking the glass
-while a browser edits the store — is `+native/moy_net/moy_webconsole.c`. The
-screen the glass parks on (`runtime/web_console_ui.py`, with its QR from
-`runtime/moy_qr.py` and its two buttons) is a themed, interactive screen
-under the pixel goldens; whether the kernel draws a plain one in its place,
-so that a console whose VM is down can still show it, or the Python screen
-stays above a native switch, is §13's question 8. The switch itself crosses
-either way, and the park is a kernel epoch (§3.3).
+`native/moy_net/moy_webconsole.c` is the switch: off, joining the link,
+serving, saying goodbye, failed. A start never waits — it configures the
+webhost, dials the network the WiFi driver kept when the link is down, and
+returns; each frame's poll binds the listener once the link has an address, or
+fails the join after `MOY_WC_JOIN_MS` into the Settings row's label. The paired
+URL is the switch's, and the park — the glass given to the connection screen —
+is its flag, whose change is a kernel epoch (§3.3). Above it stays Python what
+the window managers own until sprint 7: the pin's minting and its row in
+`system.json`, the park and unpark through the router (`runtime/web_console.py`),
+and the themed screen (`runtime/web_console_ui.py`, with its QR from
+`runtime/moy_qr.py`), which is the screen while the VM runs (§13, question 8).
+The kernel's plain screen, for a console whose VM does not run, is drawn by
+the loop task that runs with no VM (§7).
 
 ### 6.5 The Zero
 
@@ -848,7 +853,7 @@ Deleted with the updater's crossing (2026-10-07): `cart_net.py`,
 `moy_http.py`, `moy_c6_update.py` and the updater half of `device/moy_ota.py`.
 To go: `device/device_wifi.py`, `device/moy_espnow.py`,
 `device/moy_webserver.py`, `device/moy_webhost.py`, `runtime/moy_sync.py`,
-`runtime/web_console.py`, the three `*_link.py` files of the web runner, and
+the switch half of `runtime/web_console.py` (crossed; the rest is §6.4's), the three `*_link.py` files of the web runner, and
 the Zero's `zero_host.py`, `zero_gpio.py` and `zero_setup.py`.
 `runtime/host_api.py`'s service fakes shrink to what the host's harness still
 stands in for.

@@ -40,7 +40,7 @@ _WEB = os.path.join(native_build.ROOT, "native", "moy_web")
 _SHIM = os.path.join(_NET, "moy_net_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_net")
 _SOURCES = ("moy_net.h", "moy_http.c", "moy_net_port.c","moy_sync.c", "moy_sync_apply.c",
-            "moy_webhost.c", "moy_ota.h", "moy_ota.c", "moy_json.h", "moy_json.c", "moy_vol.h",
+            "moy_webhost.c", "moy_ota.h", "moy_ota.c", "moy_webconsole.c", "moy_json.h", "moy_json.c", "moy_vol.h",
             "moy_vol.c", "moy_fs.h", "moy_fs.c", "moy_arena.h",
             "moy_journal.h", "moy_journal.c", "moy_store_host.c",
             "moy_web_blob.h")
@@ -98,6 +98,12 @@ class _OtaState(ctypes.Structure):
                 ("dl_done", ctypes.c_uint32), ("dl_total", ctypes.c_uint32),
                 ("done", ctypes.c_uint32), ("total", ctypes.c_uint32),
                 ("err", ctypes.c_char * 48)]
+
+
+class _WcState(ctypes.Structure):
+    _fields_ = [("state", ctypes.c_uint8), ("parked", ctypes.c_uint8),
+                ("dialled", ctypes.c_uint8), ("port", ctypes.c_uint16),
+                ("ip", ctypes.c_uint32), ("err", _I)]
 
 
 class _Env(ctypes.Structure):
@@ -164,6 +170,13 @@ _SIGS = (
     ("moy_httpc_read", [_I, ctypes.c_void_p, _Z], _I),
     ("moy_httpc_close", [_I], None),
     ("moy_net_vm_stop", [], None),
+    ("moy_wc_on", [ctypes.c_void_p, ctypes.c_uint32], _I),
+    ("moy_wc_off", [_P], None),
+    ("moy_wc_poll", [], _I),
+    ("moy_wc_state", [ctypes.c_void_p], None),
+    ("moy_wc_set_pin", [_P], None),
+    ("moy_wc_park", [_I], None),
+    ("moy_wc_url", [ctypes.c_void_p, _Z, _I], _Z),
     ("moy_c6_version", [], _I),
 )
 
@@ -355,6 +368,67 @@ def web_start(port, carts, files, kinds, pin, defer):
     rc = _lib().moy_web_start(ctypes.byref(cfg))
     if rc:
         raise OSError(rc, os.strerror(rc))
+
+
+def _ip_of(ip):
+    try:
+        parts = [int(p) for p in ip.split(".")]
+    except (AttributeError, ValueError):
+        return 0
+    if len(parts) != 4 or any(p < 0 or p > 255 for p in parts):
+        return 0
+    return parts[0] | parts[1] << 8 | parts[2] << 16 | parts[3] << 24
+
+
+def wc_on(port, carts, files, kinds, pin, defer, ip):
+    """The web-console switch on: never waits; OSError for a refused
+    configuration."""
+    cfg = _WebCfg(port, _bytes(carts), None if files is None else _bytes(files),
+                  _names(kinds), None if not pin else _bytes(pin),
+                  _names(defer), 0)
+    rc = _lib().moy_wc_on(ctypes.byref(cfg), _ip_of(ip))
+    if rc:
+        raise OSError(rc, os.strerror(rc))
+
+
+def wc_off(why=None):
+    _lib().moy_wc_off(None if why is None else _bytes(why))
+
+
+def wc_poll():
+    return bool(_lib().moy_wc_poll())
+
+
+def wc_state():
+    """(state, parked, dialled, port, ip or None, err)"""
+    st = _WcState()
+    _lib().moy_wc_state(ctypes.byref(st))
+    ip = None
+    if st.ip:
+        ip = "%d.%d.%d.%d" % (st.ip & 255, (st.ip >> 8) & 255,
+                              (st.ip >> 16) & 255, st.ip >> 24)
+    return (st.state, bool(st.parked), bool(st.dialled), st.port, ip, st.err)
+
+
+def wc_phase(port):
+    """The switch's state when it is on `port`, else 0."""
+    st = _WcState()
+    _lib().moy_wc_state(ctypes.byref(st))
+    return st.state if st.port == port else 0
+
+
+def wc_set_pin(pin):
+    _lib().moy_wc_set_pin(None if not pin else _bytes(pin))
+
+
+def wc_park(on):
+    _lib().moy_wc_park(1 if on else 0)
+
+
+def wc_url(paired):
+    out = ctypes.create_string_buffer(96)
+    n = _lib().moy_wc_url(out, 96, 1 if paired else 0)
+    return out.raw[:min(n, 95)].decode("utf-8")
 
 
 def web_stop(why=None):
@@ -647,6 +721,11 @@ def _slot_reset(cap=4 << 20):
     ctypes.c_uint32.in_dll(d, "moy_slot_host_cap").value = cap
     ctypes.memset(ctypes.addressof((ctypes.c_char * 16).in_dll(
         d, "moy_slot_host_booted")), 0, 16)
+
+
+def _link(ip=None):
+    """The host's stand-in for the kernel's link: its address, or None (down)."""
+    ctypes.c_uint32.in_dll(_lib(), "moy_net_host_link_ip").value = _ip_of(ip) if ip else 0
 
 
 def _c6(enabled=True, fail_at=None, version=-1):

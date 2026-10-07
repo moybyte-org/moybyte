@@ -218,7 +218,13 @@ def _parked(ws, host):
     screen -- the state every request in this section arrives in, and the one
     that made a browser-driven install impossible: the update screen is not up,
     so nothing would have advanced it."""
-    host.serving = True
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    host.port = s.getsockname()[1]
+    s.close()
+    host.start(ip="127.0.0.1")
+    assert host.serving
     ws.webhost = host
     ws.web.park()
     assert ws.web.parked
@@ -384,6 +390,7 @@ def test_the_console_path_never_takes_the_storage_gate(tmp_path):
     gate = _Gate()
     h = _host(ws, tmp_path, gate=gate)
     _parked(ws, h)
+    gate.entries = 0                        # the start's own look at the volume
     h.handle_http("GET", "/update?pin=1234", None)
     h.handle_http("POST", "/update?pin=1234", '{"action":"install"}')
     h.update.step()

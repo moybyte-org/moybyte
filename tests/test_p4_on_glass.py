@@ -79,7 +79,10 @@ TF_CARD_SRAM = 844
 # clients, its keys and the trusted set, which are PSRAM), its slot's position
 # (moy_net_port.c) and the WiFi driver's kept-network flag, 38 bytes of .bss by
 # the objects' sizes, 2026-10-07.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38
+# And the web-console switch's (native/moy_net/moy_webconsole.c: the pointer
+# to its state, which is PSRAM), 4 bytes of .bss by the object's size,
+# 2026-10-07.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4
 WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 

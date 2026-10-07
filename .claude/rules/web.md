@@ -166,7 +166,11 @@ nor those docs will warn you about:
 - **WASM MODE IS A SWITCH, NOT A SESSION** (owner call): no heartbeat, no presence
   detection, no timeout. While WEB CONSOLE is ON the glass PARKS on a connection
   screen — which is how the two-writer collision is **designed out rather than
-  detected**. The QR encoder is ours because there is no library on a board and
+  detected**. The switch is the kernel's (`native/moy_net/moy_webconsole.c`)
+  and **a start never waits**: it returns JOINING, the frame's poll binds once
+  the WiFi driver's link has an address (the kernel dials the network it kept)
+  and parks the glass then, and a join that outlives `MOY_WC_JOIN_MS` fails
+  into the row's label. Only the dev word `web` waits for the outcome. The QR encoder is ours because there is no library on a board and
   the pin is not a constant anything could be baked with. **The pin is read at
   `start()`, never at construction** — boards build the webhost before
   system.json is loaded, so a pin captured then is one minted against an empty

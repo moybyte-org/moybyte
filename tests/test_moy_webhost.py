@@ -1078,14 +1078,29 @@ def test_the_link_wait_is_moy_otas_one_body_with_moy_otas_bounds(monkeypatch):
 def test_make_webhost_reads_the_wifi_service_lazily():
     """`ws.wifi` is attached by wire_workstation_core, which has not run when a
     board builds this -- so binding the service at construction time would
-    capture None forever."""
+    capture None forever. The dial reads it when the switch turns."""
+    dialled = []
+
+    class _Wlan:
+        def connect(self, ssid, pw):
+            dialled.append(ssid)
+
+    class _Store:
+        def load_wifi(self, root):
+            return [{"ssid": "home", "password": "x"}, {"ssid": "other"}]
+
+    class _Wifi2:
+        _store = _Store()
+        _root = "/r"
+        wlan = _Wlan()
+
     class _WS:
         wifi = None
 
     ws = _WS()
     host = wh.make_webhost(ws, "/moy/carts", "/moy/web")
-    ws.wifi = _Wifi(up=True)              # attached AFTER construction
-    assert host._ensure_online() == "192.168.1.50"
+    ws.wifi = _Wifi2()                    # attached AFTER construction
+    assert host._dial() is True and dialled == ["home"]
 
 
 # The web dir a board passes is named for the STORAGE it lives on, never for
@@ -1376,9 +1391,10 @@ def test_every_board_wires_the_release_to_the_socket(tmp_path):
     """make_webhost is the ONE injection every board takes, so the lease's
     release lives there and not in four board files."""
     ws = _ws(tmp_path)
-    h = wh.make_webhost(ws, str(_store(tmp_path)), port=0)
+    h = wh.make_webhost(ws, str(_store(tmp_path)), port=_free_port())
     ws.wifi_hold("web")
-    h.serving = True
+    h.start(ip="127.0.0.1")
+    assert h.serving
     h.stop()                                # a bare stop: the socket is gone
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
@@ -1527,6 +1543,8 @@ def test_the_windowed_tier_parks_FULLSCREEN_not_in_a_window(tmp_path):
     assert ws.wm.desk_open() is False, "the connection screen became a window"
     ws.toggle_webhost()
     assert ws.wm.desk_open() is True, "the desk is home on this tier"
+    assert "webconsole" not in ws.wm.stack.kinds(), \
+        "the connection screen stayed under the desk"
 
 
 # -- PLAY ON DEVICE ----------------------------------------------------------
@@ -1913,3 +1931,87 @@ def test_the_link_wait_feeds_an_armed_watchdog_and_leaves_an_unarmed_one(
         monkeypatch.setitem(sys.modules, "moy_kernel", k)
         moy_ota.wait_online(lambda: False, None, wait_ms=40, step_ms=10)
         assert (len(fed) >= 4) is armed, (armed, fed)
+
+
+# -- the switch never waits (native/moy_net/moy_webconsole.c) -------------------
+
+
+def test_a_start_with_no_link_returns_at_once_and_the_poll_brings_it_on(tmp_path):
+    """ensure_online used to hold the frame until the link came, past the task
+    watchdog on a board with no reachable network. The switch returns JOINING,
+    and the frame's poll binds once the kernel's link has an address."""
+    seen = []
+    nb._link(None)
+    h = wh.WebHost(str(_store(tmp_path)), port=_free_port(),
+                   on_serving=lambda: seen.append("up"))
+    try:
+        t0 = time.time()
+        h.start()
+        assert time.time() - t0 < 0.5
+        assert h.joining and not h.serving
+        h.poll()
+        assert h.joining and seen == []
+        nb._link("192.168.4.9")
+        h.poll()
+        assert h.serving and seen == ["up"]
+        assert h.url() == "http://192.168.4.9:%d/" % h.port
+        assert nb.wc_url(True).startswith("http://192.168.4.9:")
+    finally:
+        h.stop()
+        nb._link(None)
+
+
+def test_a_join_that_never_gets_a_link_fails_and_says_so(tmp_path):
+    failed = []
+    nb._link(None)
+    h = wh.WebHost(str(_store(tmp_path)), port=_free_port(),
+                   on_failed=lambda: failed.append(h.error))
+    h.start()
+    nb._skew_clock(20001)
+    h.poll()
+    assert failed == ["no wifi"]
+    assert not h.joining and not h.serving
+
+
+def test_turning_a_join_off_ends_it_and_lets_the_radio_go(tmp_path):
+    stopped = []
+    nb._link(None)
+    h = wh.WebHost(str(_store(tmp_path)), port=_free_port(),
+                   on_stop=lambda: stopped.append(1))
+    h.start()
+    h.stop("off")
+    assert stopped == [1] and not h.joining
+    nb._link("10.1.1.1")
+    h.poll()
+    assert not h.serving, "a join that was turned off came on anyway"
+    nb._link(None)
+
+
+def test_the_console_parks_when_the_join_arrives_and_not_before(tmp_path):
+    ws = _ws(tmp_path)
+    nb._link(None)
+    ws.webhost = wh.make_webhost(ws, str(_store(tmp_path)), port=_free_port())
+    ws.toggle_webhost()
+    assert ws.webhost.joining and not ws.web.parked
+    assert ws.webhost_label() == "JOINING..."
+    nb._link("10.2.0.4")
+    ws.webhost.poll()
+    try:
+        assert ws.web.parked and ws.webhost_serving()
+        assert nb.wc_state()[1] is True, "the park is the kernel's flag"
+    finally:
+        ws.toggle_webhost()
+        nb._link(None)
+    assert not ws.web.parked and ws.webhost_label() == "OFF"
+
+
+def test_the_goodbye_ends_with_the_switch_off(tmp_path):
+    h = wh.WebHost(str(_store(tmp_path)), port=_free_port())
+    h.start(ip="127.0.0.1")
+    h.stop("off")
+    assert nb.wc_state()[0] == wh.WebHost.CLOSING
+    nb._skew_clock(5001)
+    for _ in range(5):                  # the frame loop polls only while closing
+        if h.closing or h.serving or h.joining:
+            h.poll()
+    assert nb.wc_state()[0] == wh.WebHost.OFF

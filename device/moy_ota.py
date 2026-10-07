@@ -40,8 +40,8 @@ ONLINE_STEP_MS = 250
 def keep_alive():
     """Feed the kernel's task watchdog when the frame loop has armed it: a
     wait that holds the frame (the link wait, a connect's poll) is the console
-    waiting on purpose, and an unfed one past the timeout resets the board
-    (the Guition S3 under WEB CONSOLE with no reachable network). Unarmed, it
+    waiting on purpose (an update check behind its CHECKING screen, Get Carts'
+    connect), and an unfed one past the timeout resets the board. Unarmed, it
     is left alone -- the first feed would subscribe the task."""
     try:
         import moy_kernel

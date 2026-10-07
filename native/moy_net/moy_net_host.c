@@ -97,3 +97,12 @@ int moy_c6_ota_activate(void) {
 int moy_c6_version(void) {
     return moy_net_host_c6_ver;
 }
+
+// The kernel's link, standing in for the WiFi driver: an address in network
+// order once a test says the link came up, 0 before.
+uint32_t moy_net_host_link_ip;
+
+int moy_net_link(uint32_t *ip) {
+    *ip = moy_net_host_link_ip;
+    return *ip != 0;
+}

@@ -6,7 +6,7 @@
 #   WebHost            the Settings contract over the kernel's webhost
 #   WebHost.poll       the C poll, its events, the parked request, the update
 #   WebHost.handle_http  the routes the VM answers: /run and /update
-#   ensure_online      connect, wait for the link, report
+#   ensure_online      connect, wait for the link, report (a port's station)
 #   make_webhost       the WebHost every board injects
 """Serve the moybyte web console FROM the console, over the device's own WiFi.
 
@@ -251,22 +251,29 @@ class ConsoleUpdate:
 
 
 class WebHost:
-    """The Settings contract (`.serving`, `.closing`, `.start()`, `.stop()`,
-    `.url()`, `.error`) over the kernel's webhost.
+    """The Settings contract (`.serving`, `.joining`, `.closing`, `.start()`,
+    `.stop()`, `.url()`, `.error`) over the kernel's web-console switch
+    (native/moy_net/moy_webconsole.c) and its webhost.
 
-    There is one kernel webhost; this object configures it. Constructed, it
-    binds nothing -- injecting it costs nothing until a kid turns the row on --
-    but a host the kernel is ALREADY serving (a soft reset under a running
-    one) is adopted as serving, holding the radio lease it rides on."""
+    A start never waits: it hands the switch the configuration and returns,
+    and the frame's poll brings it on -- serving once the link has an address
+    (the kernel dials the network its driver kept; `dial` is this console's
+    own fallback), failed once the join ran out. `on_serving` and `on_failed`
+    are the switch's two outcomes, said once each. Constructed, it binds
+    nothing; a switch the kernel is ALREADY serving (a soft reset under a
+    running one) is adopted, holding the radio lease it rides on."""
 
     # The routes the VM answers. A subclass adds its own (the Zero's /gpio)
     # and answers them in `handle_http`.
     DEFER = ("/run", "/update")
 
+    # The switch's states (moy_net.h's MOY_WC_*).
+    OFF, JOINING, SERVING, CLOSING, FAILED = range(5)
+
     def __init__(self, carts_root, port=None, with_sd=None,
                  ensure_online=None, pin=None, on_sync=None, pin_source=None,
                  on_run=None, update=None, on_stop=None, files_root=None,
-                 kinds=None):
+                 kinds=None, dial=None, on_serving=None, on_failed=None):
         self.port = DEFAULT_PORT if port is None else port
         self.carts_root = carts_root
         self.files_root = (moy_sync.files_root(carts_root)
@@ -278,13 +285,36 @@ class WebHost:
         self.on_run = on_run
         self.update = update
         self.on_stop = on_stop
+        self.on_serving = on_serving
+        self.on_failed = on_failed
         self._ensure_online = ensure_online
+        self._dial = dial
         self._with_sd = with_sd or (lambda fn: fn())
-        self.ip = None
+        self._given_ip = None
         self.error = None
         self._why = None
-        st = moy_net.web_state()
-        self.serving = bool(st[0]) and st[3] == self.port
+        self._seen = moy_net.wc_phase(self.port)
+
+    def _state(self):
+        return moy_net.wc_phase(self.port)  # no allocation: the frame asks it
+
+    @property
+    def serving(self):
+        return self._state() == self.SERVING
+
+    @property
+    def joining(self):
+        return self._state() == self.JOINING
+
+    @property
+    def ip(self):
+        st = moy_net.wc_state()
+        mine = st[3] == self.port and st[0] in (self.SERVING, self.CLOSING)
+        return (st[4] if mine else None) or self._given_ip
+
+    @ip.setter
+    def ip(self, ip):
+        self._given_ip = ip
 
     @property
     def closing(self):
@@ -303,10 +333,10 @@ class WebHost:
                           self.pin or None, self.DEFER)
 
     def start(self, ip=None):
-        """Bring the link up, then listen. `serving` only if BOTH worked.
-
-        `ip` is the address to ADVERTISE; the socket listens on every
-        interface."""
+        """Turn the switch on, never waiting for the link. `ip` is the address
+        to serve on where the kernel has no driver of its own (the Zero, the
+        host); a console's comes from its driver. OSError when the bind is
+        refused at once (the link was already up)."""
         if self._pin_source is not None:
             # BEFORE the bind: a socket accepting writes for even one poll
             # without the gate its own screen advertises is the bug this
@@ -315,16 +345,34 @@ class WebHost:
                 self.pin = self._pin_source() or None
             except Exception as exc:  # noqa: BLE001
                 print("WEBHOST pin unavailable:", exc)
-        if self._ensure_online is not None and ip is None:
-            ip = self._ensure_online()
-        self.ip = ip
-        try:
-            self._with_sd(lambda: None)      # the store's volume is up
-            self._configure(self.port)
-        except OSError:
-            raise OSError("port %d busy" % self.port)
-        self.serving = True
+        if ip is None and self._ensure_online is not None:
+            ip = self._ensure_online()      # a board whose station is the port's
+        self._given_ip = ip
+        self.error = None
         self._why = None
+        self._with_sd(lambda: None)          # the store's volume is up
+        moy_net.wc_on(self.port, self.carts_root, self.files_root,
+                      self.kinds if self.files_root else None,
+                      self.pin or None, self.DEFER, ip)
+        st = moy_net.wc_state()
+        if st[0] == self.JOINING and not st[2] and self._dial is not None:
+            try:
+                self._dial()                 # no kept network: this console's own
+            except Exception as exc:         # noqa: BLE001 -- the join's timeout decides
+                print("WEBHOST dial:", exc)
+        self._seen = self._state()
+        if self._seen == self.FAILED:
+            self.error = self._failure(st[5])
+            raise OSError(self.error)
+        if self._seen == self.SERVING:
+            self._announce()
+
+    def _failure(self, err):
+        if err == 110:
+            return "no wifi"
+        return "port %d busy" % self.port
+
+    def _announce(self):
         try:
             print("WEBHOST", self.source_note())
         except Exception:                # noqa: BLE001 -- a log is never fatal
@@ -345,13 +393,7 @@ class WebHost:
             ws.wifi_hold("web")
             if self._pin_source is not None:
                 self.pin = self._pin_source() or None
-                moy_net.web_set_pin(self.pin)
-            st = None
-            wifi = getattr(ws, "wifi", None)
-            if wifi is not None:
-                st = wifi.status()
-            if st and st[0]:
-                self.ip = st[2]
+                moy_net.wc_set_pin(self.pin)
         except Exception as exc:         # noqa: BLE001 -- the console boots regardless
             print("WEBHOST adopt:", exc)
         return True
@@ -361,6 +403,8 @@ class WebHost:
         the update backend -- after the transport's, never inside a handler:
         the console board's turns the web console off, which closes the socket
         the request arrived on. Never breaks a frame."""
+        moy_net.wc_poll()
+        self._transition()
         did = moy_net.web_poll()
         ev = moy_net.web_events()
         if ev & EV_SHELF and self.on_sync is not None:
@@ -391,7 +435,32 @@ class WebHost:
 
     service = poll
 
+    def _transition(self):
+        """Say the switch's outcome once: serving, or the failure (whose
+        radio lease goes with it)."""
+        now = self._state()
+        if now == self._seen:
+            return
+        was, self._seen = self._seen, now
+        if now == self.SERVING and was == self.JOINING:
+            self._announce()
+            hook = self.on_serving
+        elif now == self.FAILED:
+            self.error = self._failure(moy_net.wc_state()[5])
+            moy_net.wc_off()
+            self._seen = self.OFF
+            hook = self.on_failed
+        else:
+            return
+        if hook is not None:
+            try:
+                hook()
+            except Exception as exc:     # noqa: BLE001 -- a hook is never fatal
+                print("WEBHOST hook:", exc)
+
     def _stopped(self):
+        moy_net.wc_poll()               # the switch sees the listener gone: off
+        self._seen = self._state()
         self._why = None
         hook = self.on_stop
         if hook is not None:
@@ -405,18 +474,23 @@ class WebHost:
         before the socket closes, so a page can tell "switched off" from
         "unplugged". `serving` goes False at once either way: the Settings row
         and the glass follow the tap, and the lingering socket is a transport
-        detail (`closing`)."""
-        self.serving = False
-        if why is None:
-            moy_net.web_stop()
+        detail (`closing`). A join still waiting for the link just ends."""
+        state = self._state()
+        if why is None or state != self.SERVING:
+            moy_net.wc_off()
             moy_net.web_events()
+            self._seen = self.OFF
             self._stopped()
             return
         self._why = why
-        moy_net.web_stop(why)
+        moy_net.wc_off(why)
+        self._seen = self.CLOSING
 
     def url(self):
         """The address to hand a human; the port is spelled unless it is 80."""
+        got = moy_net.wc_url(False) if self._state() == self.SERVING else ""
+        if got:
+            return got
         host = self.ip or "0.0.0.0"
         if self.port == 80:
             return "http://%s/" % host
@@ -440,7 +514,7 @@ class WebHost:
         the VM answers. Off a socket this is the host's seam (the tests and
         the dev loop); on a board the poll calls it for parked requests only.
         """
-        if not self.serving and self._why is None:
+        if self._state() == self.OFF and self._why is None:
             st = moy_net.web_state()
             if not (st[0] or st[1]):    # never re-point a kernel host that serves
                 self._configure(0)      # off a socket: this host's store and pin
@@ -542,15 +616,37 @@ def make_webhost(ws, carts_root, autoconnect=None, with_sd=None,
     left without the web console by a per-board injection nobody wrote.
 
     Takes `ws` rather than `ws.wifi`: the wifi service is attached later, and
-    the closures read it at toggle time. The pin is read off the live `ws` at
-    START (an explicit `pin=` wins), and ConsoleUpdate asks `ws` whether this
-    build can take an OTA at every request."""
+    the closures read it when the switch is turned. The pin is read off the
+    live `ws` at START (an explicit `pin=` wins), and ConsoleUpdate asks `ws`
+    whether this build can take an OTA at every request. The switch joins
+    the network the kernel's driver kept; `dial` is the console's own
+    fallback when it kept none. `autoconnect` is accepted for the boards'
+    call shape and not used: nothing here waits for a link."""
     return WebHost(carts_root, port=port, with_sd=with_sd,
-                   ensure_online=lambda: ensure_online(
-                       getattr(ws, "wifi", None), autoconnect),
+                   dial=lambda: dial_saved(getattr(ws, "wifi", None)),
                    pin=pin,
                    pin_source=None if pin else lambda: ws.web_pin(),
                    on_sync=lambda: ws.rescan_carts(),
                    on_run=lambda name: ws.launch_named(name),
                    on_stop=lambda: ws.wifi_release("web"),
+                   on_serving=lambda: ws.web.on_serving(),
+                   on_failed=lambda: ws.web.on_failed(),
                    update=ConsoleUpdate(ws))
+
+
+def dial_saved(wifi):
+    """Ask the station for the network the store remembers first, without
+    waiting for it (the switch's poll does): what a console dials when its
+    driver kept no network yet."""
+    if wifi is None:
+        return False
+    store = getattr(wifi, "_store", None)
+    root = getattr(wifi, "_root", None)
+    up = getattr(wifi, "_ensure_wlan", None)
+    wlan = up() if up is not None else getattr(wifi, "wlan", None)
+    if store is None or root is None or wlan is None:
+        return False
+    for n in store.load_wifi(root):
+        wlan.connect(n["ssid"], n.get("password", ""))
+        return True
+    return False

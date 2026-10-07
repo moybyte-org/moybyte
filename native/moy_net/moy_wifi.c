@@ -169,7 +169,13 @@ int moy_wifi_connect(const char *ssid, const char *password) {
     s_st.ssid[n] = '\0';
     portEXIT_CRITICAL(&s_latch);
     s_want = 1;
-    return esp_wifi_connect();
+    // A connect asked while the radio is still starting (through the C6 on a
+    // P4, right after the lease brought it up) is refused; the backoff asks
+    // again, as it does after a loss.
+    if (esp_wifi_connect() != ESP_OK) {
+        schedule_retry();
+    }
+    return ESP_OK;
 }
 
 void moy_wifi_disconnect(void) {
@@ -215,6 +221,14 @@ static void keep_now(void) {
         nvs_commit(h);
     }
     nvs_close(h);
+}
+
+int moy_net_link(uint32_t *ip) {
+    portENTER_CRITICAL(&s_latch);
+    int up = s_st.connected && s_st.ip != 0;
+    *ip = s_st.ip;
+    portEXIT_CRITICAL(&s_latch);
+    return up;
 }
 
 int moy_wifi_connect_kept(void) {

@@ -561,6 +561,112 @@ static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_start_obj, 6, 6, mod_web_start);
 
+// -- the web-console switch -----------------------------------------------------
+
+// "a.b.c.d" in network order, 0 for None or anything else.
+static uint32_t ip_of(mp_obj_t o) {
+    if (o == mp_const_none) {
+        return 0;
+    }
+    const char *s = mp_obj_str_get_str(o);
+    uint32_t ip = 0;
+    for (int i = 0; i < 4; i++) {
+        uint32_t v = 0;
+        int d = 0;
+        while (*s >= '0' && *s <= '9' && d < 3) {
+            v = v * 10u + (uint32_t)(*s++ - '0');
+            d++;
+        }
+        if (d == 0 || v > 255 || (i < 3 && *s++ != '.')) {
+            return 0;
+        }
+        ip |= v << (8 * i);
+    }
+    return *s == '\0' ? ip : 0;
+}
+
+static mp_obj_t ip_text(uint32_t ip) {
+    if (ip == 0) {
+        return mp_const_none;
+    }
+    char b[16];
+    int n = snprintf(b, sizeof(b), "%u.%u.%u.%u", (unsigned)(ip & 0xff),
+                     (unsigned)((ip >> 8) & 0xff), (unsigned)((ip >> 16) & 0xff),
+                     (unsigned)(ip >> 24));
+    return mp_obj_new_str(b, (size_t)n);
+}
+
+// wc_on(port, carts, files, kinds, pin, defer, ip): never waits; OSError when
+// the configuration itself is refused.
+static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
+    char kinds[96], defer[96];
+    moy_web_cfg_t cfg = {
+        .port = (uint16_t)mp_obj_get_int(args[0]),
+        .carts = mp_obj_str_get_str(args[1]),
+        .files = str_or_null(args[2]),
+        .kinds = names_of(args[3], kinds, sizeof(kinds)),
+        .pin = str_or_null(args[4]),
+        .defer = names_of(args[5], defer, sizeof(defer)),
+        .epoch = VM_EPOCH,
+    };
+    int rc = moy_wc_on(&cfg, ip_of(args[6]));
+    if (rc != 0) {
+        mp_raise_OSError(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wc_on_obj, 7, 7, mod_wc_on);
+
+static mp_obj_t mod_wc_off(size_t n_args, const mp_obj_t *args) {
+    moy_wc_off(n_args ? str_or_null(args[0]) : NULL);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wc_off_obj, 0, 1, mod_wc_off);
+
+static mp_obj_t mod_wc_poll(void) {
+    return mp_obj_new_bool(moy_wc_poll());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wc_poll_obj, mod_wc_poll);
+
+// (state, parked, dialled, port, ip or None, err)
+static mp_obj_t mod_wc_state(void) {
+    moy_wc_state_t st;
+    moy_wc_state(&st);
+    mp_obj_t t[6] = {MP_OBJ_NEW_SMALL_INT(st.state), mp_obj_new_bool(st.parked),
+                     mp_obj_new_bool(st.dialled), MP_OBJ_NEW_SMALL_INT(st.port),
+                     ip_text(st.ip), MP_OBJ_NEW_SMALL_INT(st.err)};
+    return mp_obj_new_tuple(6, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wc_state_obj, mod_wc_state);
+
+// wc_phase(port) -> the switch's state when it is on `port`, else 0 (OFF):
+// the frame's question, answered without an allocation.
+static mp_obj_t mod_wc_phase(mp_obj_t port) {
+    moy_wc_state_t st;
+    moy_wc_state(&st);
+    return MP_OBJ_NEW_SMALL_INT(st.port == (uint16_t)mp_obj_get_int(port) ? st.state : 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_phase_obj, mod_wc_phase);
+
+static mp_obj_t mod_wc_set_pin(mp_obj_t pin) {
+    moy_wc_set_pin(str_or_null(pin));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_set_pin_obj, mod_wc_set_pin);
+
+static mp_obj_t mod_wc_park(mp_obj_t on) {
+    moy_wc_park(mp_obj_is_true(on));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_park_obj, mod_wc_park);
+
+static mp_obj_t mod_wc_url(mp_obj_t paired) {
+    char b[96];
+    size_t n = moy_wc_url(b, sizeof(b), mp_obj_is_true(paired));
+    return mp_obj_new_str(b, n < sizeof(b) ? n : sizeof(b) - 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_url_obj, mod_wc_url);
+
 static mp_obj_t mod_web_stop(size_t n_args, const mp_obj_t *args) {
     moy_web_stop(n_args ? str_or_null(args[0]) : NULL);
     return mp_const_none;
@@ -949,6 +1055,14 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_web_handle), MP_ROM_PTR(&mod_web_handle_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_pack), MP_ROM_PTR(&mod_web_pack_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_stamp), MP_ROM_PTR(&mod_web_stamp_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wc_on), MP_ROM_PTR(&mod_wc_on_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wc_off), MP_ROM_PTR(&mod_wc_off_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wc_poll), MP_ROM_PTR(&mod_wc_poll_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wc_state), MP_ROM_PTR(&mod_wc_state_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wc_phase), MP_ROM_PTR(&mod_wc_phase_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wc_set_pin), MP_ROM_PTR(&mod_wc_set_pin_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wc_park), MP_ROM_PTR(&mod_wc_park_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wc_url), MP_ROM_PTR(&mod_wc_url_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_keys), MP_ROM_PTR(&mod_ota_keys_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_verify), MP_ROM_PTR(&mod_ota_verify_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_judge), MP_ROM_PTR(&mod_ota_judge_obj)},

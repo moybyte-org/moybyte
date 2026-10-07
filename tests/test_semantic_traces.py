@@ -1777,6 +1777,15 @@ try:
     moy_net.ota_dl_begin("", 1, "", 1)
 except ValueError as e:
     say("dl", e)
+
+# -- the web-console switch (native/moy_net/moy_webconsole.c) ------------------
+moy_net.wc_on(0, carts, None, None, "1234", ("/run",), None)
+say("wc join", moy_net.wc_state()[0], moy_net.wc_url(True) == "")
+moy_net.wc_park(True)
+say("wc park", moy_net.wc_state()[1])
+moy_net.wc_park(False)
+moy_net.wc_off()
+say("wc off", moy_net.wc_state()[0])
 print("DRIVER_DONE")
 '''
 
@@ -1811,6 +1820,9 @@ activate ota_1 None
 open ftp://x/y 22
 open http://h:0/ 22
 dl manifest has no url
+wc join 1 True
+wc park True
+wc off 0
 """
 
 SESSION_DRIVER = r'''import sys

@@ -175,11 +175,10 @@ def main(argv=None):
         else:
             board.reset(boot_timeout=90)
         time.sleep(2)
-        # The WEB CONSOLE row owns the WiFi bring-up (and its 12s link wait), so
-        # turning it on is also how this gets a network. Idempotent: already-on
-        # stays on.
-        board.pyval("(ws.webhost_serving() or ws.toggle_webhost()) or 1",
-                    timeout=90)
+        # The WEB CONSOLE switch owns the WiFi bring-up, so turning it on is
+        # also how this gets a network; the dev word `web` answers once the
+        # join has settled. Idempotent: already-on stays on.
+        board.cmd("web", wait_for="WEB ", timeout=60.0)
         print("board wifi:", board.pyval("ws.webhost_label()"))
         code = ("HOST = %r\nPORT = %d\nWEBDIR = %r\nFILES = %r\n"
                 % (ip, args.http_port, args.web_dir, list(FILES))) + DOWNLOADER

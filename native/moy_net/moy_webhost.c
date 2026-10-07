@@ -201,6 +201,29 @@ int moy_web_start(const moy_web_cfg_t *cfg) {
     return 0;
 }
 
+int moy_web_bind(uint16_t port) {
+    if (!ensure()) {
+        return MOY_ENOMEM;
+    }
+    if (W->lfd >= 0) {
+        if (W->port == port) {
+            return 0;
+        }
+        close_conn(&W->lfd);
+    }
+    int fd = moy_http_listen(port);
+    if (fd < 0) {
+        W->err = -fd;
+        return -fd;
+    }
+    W->lfd = fd;
+    W->port = port;
+    W->requests = 0;
+    W->closing = 0;
+    W->err = 0;
+    return 0;
+}
+
 static void stop_now(void) {
     close_conn(&W->lfd);
     close_conn(&W->pfd);
