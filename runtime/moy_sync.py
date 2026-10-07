@@ -1,17 +1,15 @@
 # Map (grep -n a name to jump there):
 #   Root                one syncable store, described by data
 #   root_by_id          the Root for a wire root id
-#   read_text_chunks    a file's text in bounded pieces
-#   safe_segments       a relative path validated into segments
 #   parse_batch         a POST body -> (ops, pin, root id)
-#   apply_ops           apply one batch into a store
+#   apply_ops           apply one batch into a store (the kernel's C)
 #   StoreWatcher        detect a store's changes and queue them as batches
 #   StoreWatcher.sweep  one pass over the store
 #   StoreWatcher.take   the next wire batch
 #   StoreWatcher.ack    settle the batch in flight
 """Commit-shaped store sync between the wasm head and a board (#197 mode 2,
-moycore plan 3.4 -- the PUSH half; the pull half is moy_webhost's
-GET /carts.json + GET /files.json).
+moycore plan 3.4 -- the PUSH half; the pull half is the webhost's
+GET /carts.json + GET /files.json, native/moy_net/moy_webhost.c).
 
 The unit of sync is the COMMIT, and the design rides what already exists: the
 console has no SAVE button, so a cart's durable state changes only at the
@@ -63,13 +61,15 @@ One body, three consumers, so the two sides cannot disagree about the wire:
     writes through several funnels (moy_fs atomic dances, raw journal
     appends, os.rename), and watching the filesystem catches every writer by
     construction where a verb-level wrapper would miss the next one added.
-  * `apply_ops` -- the RECEIVING half: the board (moy_webhost POST /sync),
-    the dev server (web_runner/serve.py --carts), and the convergence harness all apply
-    a batch through this one function. MicroPython-safe (os + json only);
-    every landed file goes through moy_fs's crash-safe publish.
-  * `_skip` -- the ONE predicate for what never crosses the wire, now shared
-    by the pull walkers (moy_webhost imports it from here) and the push
-    sweep. journal/ + thumbs/ + .bak stay home in BOTH directions: the pull
+  * `apply_ops` -- the RECEIVING half, which is C: native/moy_net's
+    moy_sync_apply.c, over native/moy_store. The board's webhost applies a
+    POST /sync through it with no Python in the way, and the dev server
+    (web_runner/serve.py --carts) and the convergence harness call it here;
+    every landed file goes through moy_fs's crash-safe publish. Which store a
+    batch speaks for (`parse_batch`) is the same C's rule.
+  * `_skip` -- the ONE predicate for what never crosses the wire
+    (moy_store_skip, native/moy_store/moy_fs.c), shared by the pull walker
+    and the push sweep. journal/ + thumbs/ + .bak stay home in BOTH directions: the pull
     decision (2026-08-22, "the browser gets carts, not their history") and
     its mirror -- a pushed journal line could only replay browser-era ops
     onto a board that has its own log. `skip_keep_journal` is the SITE-MODE
@@ -144,17 +144,18 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
-try:
-    from moy_fs import (_mkdir, _write, _remove, _exists, _copy, _write_atomic,
-                        _crc32, _write_bytes)
-except ImportError:  # host / CPython: the runtime package
-    from runtime.moy_fs import (_mkdir, _write, _remove, _exists, _copy,
-                                _write_atomic, _crc32, _write_bytes)
+import json as _json
 
 try:
-    from moy_net import decode_batch, encode_batch
+    from moy_fs import _crc32
+except ImportError:  # host / CPython: the runtime package
+    from runtime.moy_fs import _crc32
+
+try:
+    from moy_net import encode_batch, sync_batch, sync_apply
 except ImportError:  # pragma: no cover - host package lane
-    from runtime.net_binding import decode_batch, encode_batch
+    from runtime.net_binding import (encode_batch, sync_batch,
+                                     sync_apply)
 try:
     from moy_store_base import store_path
 except ImportError:  # host / CPython: the runtime package
@@ -179,7 +180,7 @@ FILES_ROOT_ID = "files"
 # name its path); it stays importable under this name for callers that had it.
 
 # One chunk of a large file per op, and the total text budget of one batch.
-# The transport (`moy_webserver._recv_request`) refuses requests past 64KB as
+# The webhost (MOY_HTTP_REQ_MAX, native/moy_net) cuts a request at 64KB as
 # an OOM guard, and JSON escaping expands source text, so both stay well
 # under it.
 PART_MAX = 16 * 1024
@@ -252,8 +253,8 @@ def skip_keep_journal(name):
     """`_skip` with journal/ + journal.jsonl allowed through -- the predicate a
     SITE-MODE watcher takes, and nothing else ever does.
 
-    Never the wire's rule and never a receiver's: `safe_segments` still refuses
-    a journal path outright, so a board cannot be handed one no matter which
+    Never the wire's rule and never a receiver's: the receiving C
+    (moy_sync_apply.c) still refuses a journal path outright, so a board cannot be handed one no matter which
     watcher built the batch. What this changes is only which files a browser
     sweeps out of its own VFS and into its own OPFS.
     """
@@ -286,26 +287,6 @@ def _moy_carts():
                 return None
         _CARTS.append(mc)
     return _CARTS[0]
-
-
-_JOURNAL = []
-
-
-def _moy_journal():
-    """The #111 journal module, through the same guarded window `moy_carts`
-    rides. None where there is none -- a receiver with no journal module (the
-    convergence harness, an old headless store) simply does not journal, which
-    is a missing history and never a refused write."""
-    if not _JOURNAL:
-        try:
-            import moy_journal as mj
-        except ImportError:              # host / CPython: the runtime package
-            try:
-                from runtime import moy_journal as mj
-            except ImportError:          # pragma: no cover -- no journal at all
-                return None
-        _JOURNAL.append(mj)
-    return _JOURNAL[0]
 
 
 def file_kinds():
@@ -342,9 +323,6 @@ def files_root(carts_root):
 # manifest would only move the coupling.
 # ---------------------------------------------------------------------------
 
-# The files whose write can change what the LAUNCHER shows -- a cover, a cover
-# sheet or a manifest (title/order). Only a shelf-bearing root consults this.
-_SHELF_FILES = ("manifest.json", "sheet.json", "cover.png")
 
 
 class Root:
@@ -360,35 +338,25 @@ class Root:
       kinds    the first path segment must be a `moy_carts.FILE_KINDS` name --
                which is also what keeps `.history`/`trash` home, in both
                directions, with no second skip list.
-      journals a publish here writes #111 history when the receiver is of record
-               (the board journaling a browser's pushes).
-      shelf    a change here can dirty the launcher (a cart born/dying, a
-               manifest/sheet edit). The files root never touches the shelf.
-      ensure   mkdir the root on the first write -- the files root is created
-               lazily, the first thing a peer sends may BE its first drawing.
-      dc_min/  a whole-folder delete names a path this many segments deep. A cart
-      dc_max   is exactly one segment; a files item is a kind/name (2) or a
-               recording folder below it (>=2, so dc_max is None).
       site_keep_journal
                in SITE mode (the browser's OPFS is of record) this root's watcher
                sweeps `journal/` too, so the kid's undo history survives the tab.
                Only carts relaxes; the files layer's history is `.history/`
                sidecars, a different mechanism that stays home either way.
+
+    What a receiver does per root -- the carts root journals and dirties the
+    shelf, a whole-cart delete is one segment, the files root is made on its
+    first write and a files item is two or more -- is the apply's, in C
+    (native/moy_net/moy_sync_apply.c).
     """
 
-    def __init__(self, id, wire, path, endpoint, kinds=False, journals=False,
-                 shelf=False, ensure=False, dc_min=1, dc_max=1,
+    def __init__(self, id, wire, path, endpoint, kinds=False,
                  site_keep_journal=False):
         self.id = id
         self.wire = wire
         self._path = path
         self.endpoint = endpoint
         self.kinds = kinds
-        self.journals = journals
-        self.shelf = shelf
-        self.ensure = ensure
-        self.dc_min = dc_min
-        self.dc_max = dc_max
         self.site_keep_journal = site_keep_journal
 
     def path(self, carts_root):
@@ -403,7 +371,7 @@ class Root:
 
 CARTS_ROOT = Root(
     CARTS_ROOT_ID, PROTOCOL_V, lambda carts_root: carts_root, "/carts.json",
-    shelf=True, journals=True, dc_min=1, dc_max=1, site_keep_journal=True)
+    site_keep_journal=True)
 
 FILES_ROOT = Root(
     # A lambda, not the bare `files_root` reference, so the name resolves at CALL
@@ -411,7 +379,7 @@ FILES_ROOT = Root(
     # here and the endpoint 404s, exactly as it should, per call rather than per
     # registry construction.
     FILES_ROOT_ID, PROTOCOL_V_ROOTED, lambda carts_root: files_root(carts_root),
-    "/files.json", kinds=True, ensure=True, dc_min=2, dc_max=None)
+    "/files.json", kinds=True)
 
 SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT)
 ROOT_IDS = tuple(r.id for r in SYNC_ROOTS)
@@ -421,21 +389,6 @@ _ROOT_BY_ID = {r.id: r for r in SYNC_ROOTS}
 def root_by_id(root_id):
     """The Root for a wire root id, or None."""
     return _ROOT_BY_ID.get(root_id)
-
-
-def root_for_wire(v, named):
-    """The Root a batch (version `v`, optional `named` root field) speaks for, or
-    None when the pair is not one this build serves -- which a receiver treats as
-    "refuse", never "guess". A v1 batch is carts BY DEFINITION and one that
-    smuggles a different root is refused rather than read as carts."""
-    if v == PROTOCOL_V:
-        if named is not None and named != CARTS_ROOT_ID:
-            return None
-        return CARTS_ROOT
-    if v == PROTOCOL_V_ROOTED:
-        r = _ROOT_BY_ID.get(named)
-        return r if (r is not None and r.wire == PROTOCOL_V_ROOTED) else None
-    return None
 
 
 def _entries(path, _listdir=None, _isdir=None):
@@ -539,119 +492,6 @@ def _read_payload(path):
     return _retry_io(_open, None)
 
 
-def read_binary_b64(path, chunk=None):
-    """A binary file as base64 pieces for a PULL, or None -- the
-    `read_text_chunks` of a BINARY_FILES name: a bounded read at a time, each a
-    whole number of 3-byte groups, so the pieces join into one base64 value."""
-    chunk = chunk or STORE_READ_CHUNK * 3 // 4
-    try:
-        f = open(path, "rb")
-    except OSError:
-        return None
-    return _b64_pieces(f, chunk - chunk % 3)
-
-
-def _b64_pieces(f, chunk):
-    try:
-        while True:
-            piece = f.read(chunk)
-            if not piece:
-                return
-            yield b64(piece)
-    finally:
-        _close_quietly(f)
-
-
-# How much of a file one store-pull piece carries, and with it the whole
-# memory cost of a pull: nothing between the card and the socket is ever
-# bigger than this. 4KB rather than 512B because a piece is also one `f.read`,
-# and FatFS reads a multi-sector request straight into the destination while a
-# sub-sector one goes through its own window buffer a sector at a time.
-STORE_READ_CHUNK = 4096
-
-
-def read_text_chunks(path, chunk=STORE_READ_CHUNK):
-    """A file's text in bounded pieces, or None -- `_read_text` for a PULL.
-
-    A whole-file `read()` is the thing a pull cannot afford, and the store this
-    was written for is why. MEASURED ON GUITION GLASS 2026-09-09: 48 carts, 272
-    files, 3.5MB, of which 22 files are over 30KB and the biggest is a 142,740-
-    byte `main.lua` from a PICO-8 port. One of those used to cross the wire as
-    six 150KB-class copies -- the read, its JSON escape, the transport's
-    `encode`, its coalescing join and two chunk-frame concatenations -- and the
-    MicroPython heap is 4MB with a largest free RUN of 449KB, so the copies in
-    flight fragmented it below the next one. Every pull died with `MemoryError:
-    memory allocation failed, allocating 150641 bytes` at whichever big cart it
-    reached first, after 0.24-3.1MB and 11-41s. Reading in pieces is what makes
-    the cost of a pull independent of the biggest file in the store.
-
-    None means SKIP, exactly as `_read_text`'s None does, and it is decided on
-    the FIRST piece -- so a file that cannot be read as text is ABSENT from the
-    bundle, never present and empty. Past that first piece a card that fails
-    every retry ENDS the value instead: the response stays valid JSON holding a
-    short file, where propagating would truncate the whole pull, which this
-    module's `_retry_io` already calls the strictly worse answer.
-    """
-    opened = _retry_io(lambda: _open_text_at(path, 0, chunk), None)
-    if opened is None:
-        return None                          # the card gave up: skip, as _read_text
-    if opened[1] is None:
-        _close_quietly(opened[0])
-        return None                          # binary/unreadable: skip, permanent
-    return _text_pieces(path, opened[0], opened[1], chunk)
-
-
-def _open_text_at(path, pos, chunk):
-    """(handle, first piece read from `pos`), or (handle, None) for a file that
-    does not read as text.
-
-    `pos` is what makes the retry work past the first piece: a FatFS handle
-    LATCHES its disk error (`FR_INVALID_OBJECT` on every later call), so a card
-    that EIO'd mid-file cannot be re-read through the handle that saw it -- the
-    retry has to re-open and seek back to where the last good piece ended.
-    """
-    f = open(path, "r")
-    try:
-        if pos:
-            f.seek(pos)
-        try:
-            return f, f.read(chunk)
-        except (UnicodeError, ValueError):
-            return f, None                   # binary/unreadable: skip, permanent
-    except Exception:                        # noqa: BLE001 -- never leak a handle
-        _close_quietly(f)
-        raise
-
-
-def _close_quietly(f):
-    try:
-        f.close()
-    except OSError:
-        pass
-
-
-def _text_pieces(path, f, piece, chunk):
-    pos = 0
-    try:
-        while piece:
-            pos = f.tell()                   # where a retry re-opens: past `piece`
-            yield piece
-            try:
-                piece = f.read(chunk)
-            except (UnicodeError, ValueError):
-                return                       # not text past here: end the value
-            except OSError:
-                _close_quietly(f)
-                nxt = _retry_io(lambda: _open_text_at(path, pos, chunk), None)
-                if nxt is None:
-                    return                   # the card gave up: end the value
-                f, piece = nxt
-                if piece is None:
-                    return
-    finally:
-        _close_quietly(f)
-
-
 def _stat_file(path):
     """(size, mtime) or None. mtime is whatever the VFS reports -- the sweep
     only ever compares a file's mtime against its own previous value and
@@ -665,306 +505,46 @@ def _stat_file(path):
 
 
 # ---------------------------------------------------------------------------
-# Path validation -- everything the receiving side trusts about a path.
-# ---------------------------------------------------------------------------
-
-
-def safe_segments(rel):
-    """`rel` split into validated path segments, or None if it has no business
-    being applied. An allowlist of shape, not a blocklist of tricks: forward
-    slashes only, no empty/dot segments, no separators or control bytes inside
-    a segment, and nothing the skip predicate keeps off the wire (a client
-    that asks to write journal/ or a .bak is malformed by definition)."""
-    if not isinstance(rel, str) or not rel or len(rel) > 256:
-        return None
-    parts = rel.split("/")
-    for seg in parts:
-        if not seg or seg in (".", ".."):
-            return None
-        for ch in ("\\", "\0", "\r", "\n"):
-            if ch in seg:
-                return None
-        if _skip(seg):
-            return None
-    return parts
-
-
-def _full(root, parts):
-    return store_path(root, "/".join(parts))
-
-
-# ---------------------------------------------------------------------------
-# The receiving half.
+# The receiving half: native/moy_net's C (moy_sync.c's batch rule and
+# moy_sync_apply.c), which the board's webhost runs with no Python between.
 # ---------------------------------------------------------------------------
 
 
 def parse_batch(body):
     """The POST body -> (ops, pin, root_id) or (None, None, None) on anything
-    malformed. Tolerant of bytes (the transport hands bytes).
-
-    `root_id` is which store the ops speak for: "carts" for the v1 shape every
-    flashed board already parses, or whatever a v2 batch names. An unknown root
-    is malformed on purpose -- a receiver must never guess where a path lands.
-    """
-    got = decode_batch(body)
+    malformed. Which store a batch speaks for is the C's rule: a v1 batch is
+    carts by definition (one that names another root is refused, never read as
+    carts), a v2 batch names a v2 root, and anything else is refused -- a
+    receiver never guesses where a path lands."""
+    got = sync_batch(body)
     if got is None:
         return None, None, None
-    v, named, ops, pin = got
-    root = root_for_wire(v, named)
-    if root is None:
-        return None, None, None
-    if not isinstance(ops, list):
-        return None, None, None
-    return ops, pin, root.id
+    root_id, pin, ops = got
+    return _json.loads(ops), pin, root_id
 
 
 def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
-    """Apply one batch into the store at path `root`, whose SHAPE is `root_id`
-    ("carts" or "files" -- what parse_batch returned).
+    """Apply one batch's `ops` into the store at path `root`, whose SHAPE is
+    `root_id` ("carts" or "files", what parse_batch returned).
 
     Returns (applied, errors, shelf_dirty): how many ops landed, [(index,
-    reason)] for the ones that did not (a bad op skips, it never aborts the
-    batch -- the client's retry would just replay the same poison forever),
-    and whether the SHELF needs a re-scan -- a cart appeared or disappeared,
-    or a manifest/sheet changed (covers + titles live in RAM on the boards; a
-    main.py edit needs no scan because code is read at cart open). A files
-    batch never dirties the shelf: the launcher renders no drawings, and the
-    Files app scans its kinds when it opens.
+    reason)] for the first eight that did not (a bad op skips, it never aborts
+    the batch -- the client's retry would replay the same poison forever), and
+    whether the SHELF needs a re-scan (a cart born or dying, a manifest, cover
+    or cover sheet changed). A files batch never dirties the shelf.
 
-    `journal=True` says THIS STORE IS OF RECORD, so every carts-root file the
-    batch publishes also gets a #111 commit (see the module docstring). The
-    boards pass it; the browser's own OPFS apply is JavaScript and journals by
-    sweeping the files rather than by calling this.
-
-    The cost is honest and worth stating where it is paid: `journal_append`
-    writes a FULL SNAPSHOT per file plus a log line plus an atomic cursor
-    rewrite, so a three-file cart commit is ~a dozen small littlefs/FAT
-    operations. That is fine at cart sizes -- the console's own commits have
-    always paid exactly this -- and it is why the flag exists rather than the
-    behaviour being unconditional: a receiver that is a scratch directory (the
-    convergence harness) should not grow a history nobody will ever walk.
-    """
-    desc = root_by_id(root_id)
-    if desc is None:                     # parse_batch gates this; belt to braces
-        return 0, [(i, "unknown root") for i in range(len(ops))], False
-    applied = 0
-    errors = []
-    shelf_dirty = False
-    for i, op in enumerate(ops):
-        try:
-            reason, shelf = _apply_one(root, op, desc, journal)
-        except Exception as exc:  # noqa: BLE001 -- one bad op never kills a batch
-            reason, shelf = ("%s: %s" % (type(exc).__name__, exc)), False
-        if reason is None:
-            applied += 1
-            shelf_dirty = shelf_dirty or shelf
-        else:
-            errors.append((i, reason))
-    return applied, errors, shelf_dirty
-
-
-def _files_shape(parts, op):
-    """None when `parts` is a legal user-files path, else the refusal reason.
-
-    Tighter than the carts root because the files root has a fixed vocabulary:
-    the first segment must be a kind moy_carts knows, which refuses `.history`
-    and `trash` by construction. `dc` is a whole-FOLDER delete, so it is refused
-    on a kind dir (that would wipe every drawing the kid owns because one item
-    left our copy) and allowed from depth 2 down, where a folder-valued
-    recording is exactly one item.
+    `journal=True` says THIS STORE IS OF RECORD: every carts-root text file the
+    batch publishes is also a #111 commit, so on-glass UNDO walks back through
+    an edit made in a browser. The cost is the journal's (a snapshot, a log
+    line and a cursor per file), which is why a scratch receiver (the
+    convergence harness) passes False.
     """
     kinds = file_kinds()
-    if kinds is None:                    # no store module: refuse, never guess
-        return "no files layer"
-    if parts[0] not in kinds:
-        return "not a file kind"
-    if len(parts) < 2:
-        return "dc wants an item" if op.get("dc") else "not a file"
-    return None
-
-
-def _journal_commit(root, parts, text):
-    """Record a #111 commit for a carts-root file this batch just published.
-
-    The exact call `Project.commit_*` makes -- `journal_append(cart_dir,
-    rel_file, new_bytes)` -- so a browser-made edit is indistinguishable from a
-    keyboard-made one to the Editor's UNDO, which is the whole point. One batch
-    is one commit's worth of files, which is already the shape a sweep hands
-    over.
-
-    Guarded end to end: the FILE HAS ALREADY LANDED by the time this runs, so a
-    journal that cannot be written costs a history entry and must never cost the
-    write. A store with no journal module simply has no history.
-    """
-    mj = _moy_journal()
-    if mj is None:
-        return
-    try:
-        mj.journal_append(store_path(root, parts[0]), "/".join(parts[1:]), text)
-    except Exception as exc:  # noqa: BLE001 -- the file is already durable
-        print("SYNC journal failed:", exc)
-
-
-def _shelf_dirty(desc, parts, new_item):
-    """Whether landing `parts` in `desc` should make the launcher re-scan -- a
-    root without a shelf never does; one with a shelf does for a new top-level
-    folder or a change to a shelf-visible file (a cover sheet, a manifest)."""
-    return desc.shelf and (new_item or parts[-1] in _SHELF_FILES)
-
-
-def _apply_one(root, op, desc, journal=False):
-    """Apply one op into `root` (the store path) whose SHAPE is `desc` (a Root).
-    -> (error_reason_or_None, shelf_dirty). Every branch that used to test
-    `root_id == FILES_ROOT_ID` now reads a field off `desc`."""
-    if not isinstance(op, dict):
-        return "not an op", False
-    parts = safe_segments(op.get("p", ""))
-    if parts is None:
-        return "bad path", False
-    if desc.kinds:
-        # A kinded root (files) has a fixed vocabulary: the first segment must be
-        # a known kind, which also refuses `.history`/`trash` by construction.
-        bad = _files_shape(parts, op)
-        if bad:
-            return bad, False
-    if op.get("dc"):
-        # Whole-folder delete: the receiver removes everything under it INCLUDING
-        # what never crossed the wire (a cart's journal, its thumbs) -- a deleted
-        # cart's history dies with it, the same as the on-device picker. The
-        # folder is a CART (one segment) in the carts root, an ITEM (>=2) in the
-        # files root -- `desc.dc_min/dc_max` say which.
-        n = len(parts)
-        if n < desc.dc_min or (desc.dc_max is not None and n > desc.dc_max):
-            return "bad dc target", False
-        _rmtree(_full(root, parts))
-        return None, desc.shelf
-    if len(parts) < 2:
-        # Never a top-level file: system.json / wifi.json / the shared sheet are
-        # system state beside the store, not the kid's work.
-        return "not a store file", False
-    full = _full(root, parts)
-    new_item = desc.shelf and not _exists(store_path(root, parts[0]))
-    if op.get("d"):
-        _remove(full)
-        return None, desc.shelf and parts[-1] in _SHELF_FILES
-    if op.get("pub"):
-        _publish(full)
-        if journal and desc.journals and not is_binary(parts[-1]):
-            # Read the file BACK rather than re-assembling the chunks: they
-            # arrived across several requests and were never all resident here,
-            # which is the point of chunking. One bounded read is the cheap half
-            # of the snapshot this is about to write anyway.
-            _journal_commit(root, parts, _read_text(full))
-        return None, _shelf_dirty(desc, parts, new_item)
-    data = op.get("b")
-    if data is not None:
-        return _apply_binary(root, parts, full, op, data, desc, new_item)
-    text = op.get("t")
-    if not isinstance(text, str):
-        return "no text", False
-    if len(text) > PART_MAX * 2:
-        return "op too large", False
-    if desc.ensure:
-        # A lazily-created root (files) may not exist until the first write, and
-        # the first thing a peer sends may BE that. Its parent is the carts
-        # root's parent, which is already there.
-        _mkdir(root)
-    _mkdirs(root, parts[:-1])
-    part = op.get("part")
-    if part is None:
-        _write_atomic(full, text)
-        if journal and desc.journals:
-            _journal_commit(root, parts, text)
-    elif part == 0:
-        _write(full + ".tmp", text)
-        return None, False           # nothing published yet
-    else:
-        with open(full + ".tmp", "a") as f:
-            f.write(text)
-        return None, False
-    return None, _shelf_dirty(desc, parts, new_item)
-
-
-def _apply_binary(root, parts, full, op, data, desc, new_item):
-    """A `"b"` op: base64 of a BINARY_FILES file, whole or one chunk of it. Not
-    journaled -- the journal holds text, and the picture is its own record."""
-    if not is_binary(parts[-1]):
-        return "not a binary file", False
-    if not isinstance(data, str) or len(data) > PART_MAX * 2:
-        return "op too large", False
-    try:
-        raw = _binascii.a2b_base64(data)
-    except Exception:  # noqa: BLE001 -- binascii.Error is a ValueError on CPython only
-        return "bad base64", False
-    if desc.ensure:
-        _mkdir(root)
-    _mkdirs(root, parts[:-1])
-    part = op.get("part")
-    if part is None:
-        _write_bytes(full, raw)
-    elif part == 0:
-        with open(full + ".tmp", "wb") as f:
-            f.write(raw)
-        return None, False           # nothing published yet
-    else:
-        with open(full + ".tmp", "ab") as f:
-            f.write(raw)
-        return None, False
-    return None, _shelf_dirty(desc, parts, new_item)
-
-
-def _publish(path):
-    """Publish `<path>.tmp` as `path` -- the rename-rotation publish, for the
-    chunked path where the .tmp already holds the full new bytes and re-reading
-    them into RAM to hand `_write_atomic` a string is the thing being avoided. FAT
-    rename-can't-clobber fallback included. The `.bak` it rotates into place is an
-    UNSTAMPED one (moy_fs reads it as a legacy backup, which is exactly what it
-    is: the previous whole file), so the stale-stamp invariant holds."""
-    tmp = path + ".tmp"
-    bak = path + ".bak"
-    if not _exists(tmp):
-        raise OSError("no staged tmp for " + path)
-    if _exists(path):
-        _remove(bak)
-        try:
-            os.rename(path, bak)
-        except OSError:
-            try:
-                _copy(path, bak)
-            except Exception:  # noqa: BLE001
-                pass
-    try:
-        os.rename(tmp, path)
-    except OSError:
-        _copy(tmp, path)
-        _remove(tmp)
-
-
-def _mkdirs(root, parts):
-    cur = root
-    for seg in parts:
-        cur = cur + "/" + seg
-        _mkdir(cur)
-
-
-def _rmtree(path, depth=0):
-    """Recursive delete, bounded -- a cart folder is at most a few levels."""
-    if depth > 6:
-        return
-    try:
-        entries = list(_entries(path))
-    except OSError:
-        return
-    for name, isdir in entries:
-        full = path + "/" + name
-        if isdir:
-            _rmtree(full, depth + 1)
-        else:
-            _remove(full)
-    try:
-        os.rmdir(path)
-    except OSError:
-        pass
+    applied, errors, shelf, _refused = sync_apply(
+        root, root if root_id == FILES_ROOT_ID else None,
+        None if kinds is None else tuple(kinds), root_id, _json.dumps(ops),
+        journal)
+    return applied, errors, shelf
 
 
 # ---------------------------------------------------------------------------

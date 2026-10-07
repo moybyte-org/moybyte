@@ -40,8 +40,8 @@ nor those docs will warn you about:
   its player in; bump the two together. A move shares its emsdk with every
   worktree (`tools/worktree.py` links it).
 - **`worker.js` STATICALLY imports `moy_store.mjs`**, so it must be in
-  `moy_webhost.ASSETS`: a board that does not serve it serves a console that
-  cannot boot.
+  the webhost's ASSETS table (`native/moy_net/moy_webhost.c`): a board that
+  does not serve it serves a console that cannot boot.
 - **TWO WEB MODES, TOTAL, NO CROSSOVER.** Where a page is SERVED from decides
   where its carts live — a board-served page edits the BOARD's store, a page on
   a static host keeps them in the browser. **The mode is decided ONCE at boot,
@@ -66,9 +66,9 @@ nor those docs will warn you about:
 - **THE PIN GATES EVERYTHING** (owner call), reversing the earlier read-half-open
   design: handing any device on the WiFi a child's whole cart store for the asking
   was the thing being fixed. Only the boot assets and `GET /sync` are open, by
-  necessity. **A GET carries its pin the only place a GET can**, so
-  `moy_webserver.parse_request` stopped stripping query strings — it was spending
-  the credential before any handler saw it.
+  necessity. **A GET carries its pin the only place a GET can**, so the request
+  parser (`moy_http_parse`) keeps the query string — stripping it once spent the
+  credential before any handler saw it.
 - **The #108 user files ride the same protocol as a SECOND root**, stamped
   `{"v": 2, "root": "files"}` — the bump is what makes a board flashed before it
   REFUSE the batch instead of writing `drawings/…` into its carts store. A files
@@ -141,9 +141,14 @@ nor those docs will warn you about:
   the unsynced-work warning, because board mode keeps no local store. First
   reason wins, so an update nobody needs warning about cannot later be
   re-reported as a loss.
-- **`device/moy_webserver.py` is the bare HTTP transport** `moy_webhost`
-  overrides: a non-blocking listener, `parse_request`/`http_response`, one-shot
-  serving, and a `WebServer` whose one seam is `handle_http`. The streaming web
+- **The console's HTTP server is the kernel's** (`native/moy_net/moy_webhost.c`
+  over `moy_http.c` and `moy_net_port.c`): a non-blocking listener polled at the
+  frame tail with no Python, one-shot serving, the bundle, the pulls and the
+  sync apply in C, and a soft reset leaves it serving. `device/moy_webhost.py`
+  is its Settings contract and answers the routes the VM owns (`/run`,
+  `/update`, the Zero's `/gpio`), which the C parks for the poll to take.
+  `device/moy_webserver.py` is the Zero's setup access point's transport alone
+  until the Zero's modules cross. The streaming web
   view — the frame push, `device_webview.py`, the recording `TeeCanvas`, stream
   mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py`
   and its VM recipe — was DELETED in the 2026-08 sunset (owner decision,

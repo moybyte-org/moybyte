@@ -59,7 +59,9 @@ EXFAT_SRAM = 640
 # drivers' state, the kernel's I2C bus, which the carve compiled as a stub, and
 # NimBLE's bond cache, ble_store_config, in place of MicroPython's bluetooth),
 # 1024 bytes of .dram0 by the link map against dev 8ecf490a, 2026-10-07.
-KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024
+# And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
+# which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
+KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on

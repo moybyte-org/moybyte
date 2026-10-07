@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bake `firmware/web_runner/dist` INTO the firmware image.
 
-The board serves a browser console (`moy_webhost`), and until now it served it
+The board serves a browser console (the webhost), and until now it served it
 from a copy of the web build somebody had put on the board's storage by hand.
 That copy drifts silently: on 2026-08-15 a board served a bundle old enough to
 still carry a desktop-blackout bug that had been fixed in `dist/` hours before,
@@ -11,10 +11,11 @@ input under the desktop until #201 -- so its bundle went on by card reader or
 not at all.
 
 So the image carries one. This emits a C translation unit that `.incbin`s the
-PRE-GZIPPED assets (every one in `moy_webhost.ASSETS` -- 609,268 B against
-1,230,814 B raw; raw does not fit the T-Deck's slot at all) and exposes them
-as a table the `moy_web` native module hands out as memoryviews. Storage still
-WINS at serve time; see `moy_webhost._asset`.
+PRE-GZIPPED assets (every one in the ASSETS table of
+native/moy_net/moy_webhost.c -- 609,268 B against 1,230,814 B raw; raw does
+not fit the T-Deck's slot at all) and exposes them as a table the webhost
+serves from flash and the `moy_web` module hands out as memoryviews. There is
+no copy on storage; the gzipped asset wins over a raw one of the same name.
 
 WHY .incbin AND NOT ESP-IDF's EMBED_FILES: `EMBED_FILES` is an argument to
 `idf_component_register`, and a MicroPython usermod is not a component -- it is
@@ -48,7 +49,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
-import importlib.util
+import re
 import os
 import sys
 import zlib
@@ -58,8 +59,7 @@ import board_config                                              # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_RUNNER = os.path.join(ROOT, "firmware", "web_runner")
-TDECK_MODULES = os.path.join(
-    ROOT, "device")
+WEBHOST_C = os.path.join(ROOT, "native", "moy_net", "moy_webhost.c")
 DEFAULT_DIST = os.path.join(ROOT, "firmware", "web_runner", "dist")
 DEFAULT_OUT = os.path.join(
     ROOT, "native", "moy_web",
@@ -67,25 +67,18 @@ DEFAULT_OUT = os.path.join(
 
 
 def asset_names():
-    """The files a browser needs, read from `moy_webhost.ASSETS` itself.
+    """The files a browser needs, read from the webhost's own ASSETS table
+    (native/moy_net/moy_webhost.c).
 
     Not a second list. The allowlist the server serves from and the set the
     image bakes have to be the same set -- an asset in one and not the other is
     either a 404 on a board that has the bytes, or dead weight in a 5 MB slot.
     """
-    path = os.path.join(TDECK_MODULES, "moy_webhost.py")
-    # The modules dir on sys.path, because moy_webhost imports its sibling
-    # transport by plain name the way the device does -- and this tree's root,
-    # so its `from runtime import moy_sync` reads THIS tree's runtime and not
-    # whichever checkout an installed package points at.
-    if TDECK_MODULES not in sys.path:
-        sys.path.insert(0, TDECK_MODULES)
-    if ROOT not in sys.path:
-        sys.path.insert(0, ROOT)
-    spec = importlib.util.spec_from_file_location("_moy_webhost_for_blob", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return list(mod.ASSETS)
+    with open(WEBHOST_C) as f:
+        text = f.read()
+    table = text[text.index("} ASSETS[] = {"):]
+    table = table[:table.index("};")]
+    return re.findall(r'\{"([^"]+)", "[^"]+"\}', table)
 
 
 def _read(path):

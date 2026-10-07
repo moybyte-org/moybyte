@@ -517,7 +517,8 @@ def test_the_update_route_does_not_shadow_the_store(host):
     """`/update` is a fourth arm on a subclass, and the three it sits beside
     have to keep working: an override that swallowed everything would be a
     board that serves no carts and passes every test in this file."""
-    assert host.handle_http("GET", "/updates?pin=1234", None) is None
+    assert host.handle_http("GET", "/updates?pin=1234", None).startswith(
+        b"HTTP/1.1 404")
     code, _ = _status(host.handle_http("GET", "/carts.json", None))
     assert code == 403, "the store's own gate still applies"
 

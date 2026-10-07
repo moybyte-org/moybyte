@@ -1,6 +1,6 @@
 // A cart as it travels (docs/kernel_store_2026-10.md section 8; #127, #122):
-// the `.moy` archive, the wire's skip rule, and adopt, which moves a staged
-// cart into its place on the shelf.
+// the `.moy` archive and adopt, which moves a staged cart into its place on
+// the shelf. The wire's skip rule it packs by is moy_fs.h's.
 //
 // The archive is firmware/web_runner/moy_store.mjs's codec, byte for byte on
 // the writing side: STORED entries named `<folder>/<path>`, a fixed
@@ -19,11 +19,6 @@
 #include <stdint.h>
 
 #include "moy_fs.h"
-
-// `_skip`: what never crosses the wire or goes into an archive -- journal/,
-// thumbs/, __pycache__/, journal.jsonl, and moy_fs's .bak and .tmp. With
-// `history`, journal/ and journal.jsonl are let through.
-int moy_store_skip(const char *name, size_t n, int history);
 
 // The cart folder at `cart` written to `dest` as an archive whose entries sit
 // under `folder`: the number of files, or a negative errno value.

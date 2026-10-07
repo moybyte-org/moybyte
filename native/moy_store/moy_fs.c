@@ -713,3 +713,14 @@ int moy_fs_claim(const char *path, const char *dest, uint32_t chars,
     moy_store_free(bak, bn);
     return rc == 0;
 }
+
+int moy_store_skip(const char *name, size_t n, int history) {
+    static const char *const dirs[] = { "thumbs", "__pycache__", "journal", "journal.jsonl" };
+    for (int i = 0; i < 4; i++) {
+        if ((i < 2 || !history) && strlen(dirs[i]) == n && memcmp(name, dirs[i], n) == 0) {
+            return 1;
+        }
+    }
+    return n >= 4 && (memcmp(name + n - 4, ".bak", 4) == 0
+                      || memcmp(name + n - 4, ".tmp", 4) == 0);
+}

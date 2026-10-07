@@ -35,15 +35,19 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 def _rest_after_vm_start():
     """A new VM starts with no lease held, but the kernel's station outlives a
-    soft reset: put it down unless the kernel's ESP-NOW link, which rides it,
-    is up. Without this a Ctrl-D left the radio associated with nobody holding
-    it."""
+    soft reset: put it down unless the kernel's ESP-NOW link or its webhost,
+    which ride it, is up (the console adopts a serving webhost and takes its
+    lease back). Without this a Ctrl-D left the radio associated with nobody
+    holding it."""
     try:
         import moy_net
         if not hasattr(moy_net, "wifi_status") or not moy_net.wifi_status()[1]:
             return
         link = getattr(moy_net, "Link", None)
         if link is not None and link().stats()[5]:
+            return
+        web = getattr(moy_net, "web_state", None)
+        if web is not None and (web()[0] or web()[1]):
             return
         moy_net.wifi_off()
     except Exception as exc:  # noqa: BLE001 -- the console boots regardless

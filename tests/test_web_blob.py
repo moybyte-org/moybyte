@@ -36,7 +36,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import board_config as bc                                         # noqa: E402
 import gen_web_blob as gwb                                        # noqa: E402
-import moy_webhost as wh                                          # noqa: E402
+
+ASSETS = gwb.asset_names()
 
 
 def _put(d, name, raw):
@@ -49,7 +50,7 @@ def _dist(tmp_path, names=None, sizes=None):
     """A fake `firmware/web_runner/dist`: every asset raw, plus its gzip."""
     d = tmp_path / "dist"
     d.mkdir()
-    names = names if names is not None else list(wh.ASSETS)
+    names = names if names is not None else list(ASSETS)
     for i, name in enumerate(names):
         n = (sizes or {}).get(name, 1000 + i * 37)
         # Not a repeating byte: a length bug that drops or doubles a chunk is
@@ -69,10 +70,19 @@ def _generate(tmp_path, dist, **kw):
 
 def test_what_is_baked_is_what_the_server_serves():
     """Two lists would be one 404 on a board that has the bytes, or dead weight
-    in a 5MB slot. The generator reads moy_webhost.ASSETS itself; this pins
-    that it is still that module's list and not a copy that drifted."""
-    assert gwb.asset_names() == list(wh.ASSETS)
-    assert "micropython.wasm" in gwb.asset_names()
+    in a 5MB slot. The generator reads the webhost's own table
+    (native/moy_net/moy_webhost.c); this pins that every name it bakes is one
+    the server answers with its bytes."""
+    from runtime import net_binding as nb
+    assert "micropython.wasm" in ASSETS and "moy_store.mjs" in ASSETS
+    nb._bake({n + ".gz": n.encode() for n in ASSETS})
+    try:
+        nb.web_start(0, "/nonexistent", None, None, None, ())
+        for n in ASSETS:
+            r = nb.web_handle("GET", "/" + n, b"")
+            assert r.startswith(b"HTTP/1.1 200") and r.endswith(n.encode()), n
+    finally:
+        nb._bake({})
 
 
 def test_the_gz_is_what_gets_baked_when_there_is_one(tmp_path):
@@ -88,11 +98,11 @@ def test_a_raw_only_bundle_still_bakes(tmp_path):
     lookup handles both, so the generator must too."""
     d = tmp_path / "dist"
     d.mkdir()
-    for name in wh.ASSETS:
+    for name in ASSETS:
         (d / name).write_bytes(b"x" * 10)
     assets, missing = gwb.collect(str(d))
     assert not missing
-    assert [a[0] for a in assets] == list(wh.ASSETS)
+    assert [a[0] for a in assets] == list(ASSETS)
 
 
 # -- the generated C, compiled -----------------------------------------------
@@ -143,13 +153,13 @@ def test_the_baked_bytes_come_back_byte_for_byte(tmp_path):
     assert rc == 0
     stamp, count, table, blob = _compile_and_read(tmp_path, gen_c)
 
-    assert count == len(wh.ASSETS)
+    assert count == len(ASSETS)
     expect = b""
-    for name in wh.ASSETS:
+    for name in ASSETS:
         expect += (d / (name + ".gz")).read_bytes()
     assert blob == expect, "the embedded bytes are not the bundle's"
-    assert [row[0] for row in table] == [n + ".gz" for n in wh.ASSETS]
-    for row, name in zip(table, wh.ASSETS):
+    assert [row[0] for row in table] == [n + ".gz" for n in ASSETS]
+    for row, name in zip(table, ASSETS):
         assert int(row[1]) == (d / (name + ".gz")).stat().st_size
         assert row[2] == "0", "%s is not 4-byte aligned" % row[0]
     assert stamp.startswith("%d %d " % (count, len(expect)))
@@ -241,10 +251,10 @@ def test_a_gz_left_behind_by_a_removed_bundle_is_not_a_bundle(
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("MOYBYTE_REQUIRE_WEB_BUNDLE", raising=False)
     d = _dist(tmp_path)
-    for name in wh.ASSETS:
+    for name in ASSETS:
         (d / name).unlink()
     assets, missing = gwb.collect(str(d))
-    assert assets == [] and missing == list(wh.ASSETS)
+    assert assets == [] and missing == list(ASSETS)
     rc, gen_c = _generate(tmp_path, d)
     assert rc == 0 and _empty_table(gen_c)
     err = capsys.readouterr().err

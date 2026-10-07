@@ -71,7 +71,9 @@ TF_CARD_SRAM = 844
 # drivers' state, the kernel's I2C bus, which the carve compiled as a stub, and
 # NimBLE's bond cache, ble_store_config, in place of MicroPython's bluetooth),
 # 1455 bytes of .dram0.bss and .data by the objects' sizes, 2026-10-07.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455
+# And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
+# which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4
 WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
@@ -767,12 +769,12 @@ def test_the_console_is_served_out_of_the_firmware_image(board):
     assert board.pyexec(
         "import moy_webhost\n"
         "H = moy_webhost.WebHost('/moy/carts')\n"
-        "R = H.handle_http('GET', '/micropython.wasm', b'')\n")
-    kind = board.pyval("eval('type(R).__name__', ws._g)")
-    assert kind == "BlobResponse", kind
-    head = board.pyval("eval('R.head()', ws._g)")
+        "R = H.handle_http('GET', '/worker.js', b'')\n"
+        "HEAD, BODY = R.split(bytes((13, 10, 13, 10)), 1)\n")
+    head = board.pyval("eval('HEAD', ws._g)")
     assert b"Content-Encoding: gzip" in head, head
     assert b"200 OK" in head and b"no-store" in head
+    assert board.pyval("eval('bytes(BODY[:3])', ws._g)") == b"\x1f\x8b\x08"
     note = board.pyval("eval('H.source_note()', ws._g)")
     assert "baked into this firmware" in note, note
 

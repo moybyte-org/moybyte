@@ -264,6 +264,16 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         ws.open_desk()
         _census("wm")
     wire_input.start_keyboards(ws, keyboard, ble_keyboard, _census)
+    # A soft reset under a serving web console leaves the kernel's webhost up
+    # (native/moy_net/moy_webhost.c): this VM takes its radio lease and parks
+    # the glass on it, as the switch that started it did.
+    wh = getattr(ws, "webhost", None)
+    try:
+        if wh is not None and wh.adopt(ws):
+            ws.park_web_console()
+            log("boot", "web console still serving: adopted")
+    except Exception as exc:  # noqa: BLE001 -- the console boots regardless
+        log("boot", "web console adopt failed: %s" % exc)
 
     ws._psave_ms = power_save_ms   # `state` reports the LIVE timeout
     serial_ch = None

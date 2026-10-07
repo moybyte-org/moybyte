@@ -483,8 +483,9 @@ Get Carts' network (#124): the app's transport for indexes and carts, over
 moy_http's client and moy_ota's wait for the link."""
 
 [[modules.device.group]]
-files = ["moy_webserver.py", "moy_webhost.py"]
+files = ["moy_webhost.py"]
 why = """
-STAGE 6. The socket/HTTP transport core plus the "serve the wasm console from
-this board" handler. Its WebSocket half went in 2026-09 with `web_view_ws.py`:
-the RPC that was supposed to ride it shipped as plain HTTP."""
+STAGE 6. The web console's Settings contract over the kernel's webhost
+(native/moy_net/moy_webhost.c: the listener, the baked bundle, the store's
+pulls and the sync apply, polled with no Python), and the routes the console
+answers: PLAY ON DEVICE and the firmware hand-off."""

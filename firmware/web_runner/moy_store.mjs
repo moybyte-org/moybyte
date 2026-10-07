@@ -116,7 +116,8 @@ export function rootById(id) {
     return null;
 }
 
-// A path the local store will accept: the JS half of moy_sync.safe_segments.
+// A path the local store will accept: the JS half of the receiving C's path
+// rule (native/moy_net/moy_sync_apply.c).
 // An allowlist of shape, not a blocklist of tricks -- the store is a real
 // filesystem and `..` in a cart name must never resolve. `skip` defaults to the
 // WIRE's rule; every store-side caller here passes `skipLocal`, so a journal

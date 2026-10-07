@@ -65,7 +65,9 @@ TF_CARD_SRAM = 756
 # drivers' state, the kernel's I2C bus, which the carve compiled as a stub, and
 # NimBLE's bond cache, ble_store_config, in place of MicroPython's bluetooth),
 # 1455 bytes of .dram0.bss and .data by the objects' sizes, 2026-10-07.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455
+# And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
+# which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 

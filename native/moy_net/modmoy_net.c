@@ -9,6 +9,7 @@
 #include "py/objstr.h"
 #include "py/runtime.h"
 
+#include "moy_json.h"
 #include "moy_net.h"
 
 // A str of the bytes: as they stand when they are UTF-8, else each byte as
@@ -433,6 +434,237 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wifi_ps_obj, 0, 1, mod_wifi_ps);
 
 #endif
 
+// -- the sync apply and the webhost -------------------------------------------------
+
+#include "py/mphal.h"
+
+void moy_store_unwind(void);
+
+// A store call raised under one of these (a block device's read, through the
+// VM's mount table): the connection it was serving is closed and the store's
+// open files and scratch freed before the exception goes on.
+#define WEB_GUARD_BEGIN { nlr_buf_t nlr_; if (nlr_push(&nlr_) == 0) {
+#define WEB_GUARD_END nlr_pop(); } else { moy_web_abort(); moy_store_unwind(); \
+    nlr_jump(nlr_.ret_val); } }
+
+// A tuple of str (or None) as a NUL-separated list ending in "": in `buf`.
+static const char *names_of(mp_obj_t o, char *buf, size_t cap) {
+    if (o == mp_const_none) {
+        return NULL;
+    }
+    size_t n, k = 0;
+    mp_obj_t *items;
+    mp_obj_get_array(o, &n, &items);
+    for (size_t i = 0; i < n; i++) {
+        size_t len;
+        const char *s = mp_obj_str_get_data(items[i], &len);
+        if (len == 0 || k + len + 2u > cap) {
+            mp_raise_ValueError(MP_ERROR_TEXT("names"));
+        }
+        memcpy(buf + k, s, len);
+        buf[k + len] = '\0';
+        k += len + 1u;
+    }
+    buf[k] = '\0';
+    return buf;
+}
+
+static const char *str_or_null(mp_obj_t o) {
+    return o == mp_const_none ? NULL : mp_obj_str_get_str(o);
+}
+
+#if MICROPY_EPOCH_IS_2000
+#define VM_EPOCH 946684800
+#else
+#define VM_EPOCH 0
+#endif
+
+// sync_batch(body) -> (root id, pin or None, ops JSON text), or None.
+static mp_obj_t mod_sync_batch(mp_obj_t body) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(body, &b, MP_BUFFER_READ);
+    moy_sync_batch_t bt;
+    if (moy_sync_batch(b.buf, b.len, &bt) != MOY_SYNC_OK) {
+        return mp_const_none;
+    }
+    mp_obj_t fn = mp_load_attr(mp_import_name(MP_QSTR_json, mp_const_none,
+                                              MP_OBJ_NEW_SMALL_INT(0)),
+                               MP_QSTR_loads);
+    mp_obj_t t[3] = {
+        MP_OBJ_NEW_QSTR(bt.root == MOY_SYNC_FILES ? MP_QSTR_files : MP_QSTR_carts),
+        loads(fn, bt.pin, bt.pin_end),
+        mp_obj_new_str(bt.ops, (size_t)(bt.ops_end - bt.ops)),
+    };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_sync_batch_obj, mod_sync_batch);
+
+// sync_apply(carts, files, kinds, root id, ops JSON, journal)
+//   -> (applied, [(index, reason)], shelf, refused)
+static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
+    char kinds[96];
+    moy_sync_store_t s = {
+        .carts = mp_obj_str_get_str(args[0]),
+        .files = str_or_null(args[1]),
+        .kinds = names_of(args[2], kinds, sizeof(kinds)),
+        .journal = mp_obj_is_true(args[5]),
+        .ts = (int64_t)(mp_hal_time_ns() / 1000000000ull) - VM_EPOCH,
+    };
+    int root = strcmp(mp_obj_str_get_str(args[3]), "files") == 0
+               ? MOY_SYNC_FILES : MOY_SYNC_CARTS;
+    size_t on;
+    const char *ops = mp_obj_str_get_data(args[4], &on);
+    if (moy_json_valid(ops, on) != MOY_JSON_OK) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ops"));
+    }
+    const char *a = moy_json_ws(ops, ops + on);
+    moy_sync_result_t r;
+    WEB_GUARD_BEGIN
+    moy_sync_apply(&s, root, a, moy_json_value(a, ops + on, 0), &r);
+    WEB_GUARD_END
+    mp_obj_t errs = mp_obj_new_list(0, NULL);
+    for (uint32_t i = 0; i < r.nerr; i++) {
+        mp_obj_t e[2] = {mp_obj_new_int_from_uint(r.err[i].index),
+                         mp_obj_new_str(r.err[i].why, strlen(r.err[i].why))};
+        mp_obj_list_append(errs, mp_obj_new_tuple(2, e));
+    }
+    mp_obj_t t[4] = {mp_obj_new_int_from_uint(r.applied), errs,
+                     mp_obj_new_bool(r.shelf), mp_obj_new_int_from_uint(r.refused)};
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sync_apply_obj, 6, 6, mod_sync_apply);
+
+// web_start(port, carts, files, kinds, pin, defer): raises OSError on a bind.
+static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
+    char kinds[96], defer[96];
+    moy_web_cfg_t cfg = {
+        .port = (uint16_t)mp_obj_get_int(args[0]),
+        .carts = mp_obj_str_get_str(args[1]),
+        .files = str_or_null(args[2]),
+        .kinds = names_of(args[3], kinds, sizeof(kinds)),
+        .pin = str_or_null(args[4]),
+        .defer = names_of(args[5], defer, sizeof(defer)),
+        .epoch = VM_EPOCH,
+    };
+    int rc = moy_web_start(&cfg);
+    if (rc != 0) {
+        mp_raise_OSError(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_start_obj, 6, 6, mod_web_start);
+
+static mp_obj_t mod_web_stop(size_t n_args, const mp_obj_t *args) {
+    moy_web_stop(n_args ? str_or_null(args[0]) : NULL);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_stop_obj, 0, 1, mod_web_stop);
+
+static mp_obj_t mod_web_set_pin(mp_obj_t pin) {
+    moy_web_set_pin(str_or_null(pin));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_set_pin_obj, mod_web_set_pin);
+
+static mp_obj_t mod_web_poll(void) {
+    int did = 0;
+    WEB_GUARD_BEGIN
+    did = moy_web_poll();
+    WEB_GUARD_END
+    return mp_obj_new_bool(did);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_poll_obj, mod_web_poll);
+
+// (serving, closing, parked, port, requests, err)
+static mp_obj_t mod_web_state(void) {
+    moy_web_state_t st;
+    moy_web_state(&st);
+    mp_obj_t t[6] = {mp_obj_new_bool(st.serving), mp_obj_new_bool(st.closing),
+                     mp_obj_new_bool(st.parked), MP_OBJ_NEW_SMALL_INT(st.port),
+                     mp_obj_new_int_from_uint(st.requests), MP_OBJ_NEW_SMALL_INT(st.err)};
+    return mp_obj_new_tuple(6, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_state_obj, mod_web_state);
+
+static mp_obj_t mod_web_events(void) {
+    return mp_obj_new_int_from_uint(moy_web_events());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_events_obj, mod_web_events);
+
+// web_take() -> (method, target, body bytes) for the parked request, or None.
+static mp_obj_t mod_web_take(void) {
+    const char *m, *t, *b;
+    size_t mn, tn, bn;
+    if (!moy_web_take(&m, &mn, &t, &tn, &b, &bn)) {
+        return mp_const_none;
+    }
+    mp_obj_t o[3] = {text_of(m, mn), text_of(t, tn), mp_obj_new_bytes((const byte *)b, bn)};
+    return mp_obj_new_tuple(3, o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_take_obj, mod_web_take);
+
+static mp_obj_t mod_web_answer(mp_obj_t resp) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(resp, &b, MP_BUFFER_READ);
+    moy_web_answer(b.buf, b.len);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_answer_obj, mod_web_answer);
+
+static mp_obj_t out_bytes(char *p, size_t n) {
+    mp_obj_t o = mp_obj_new_bytes((const byte *)(p ? p : ""), n);
+    moy_net_free(p);
+    return o;
+}
+
+// web_handle(method, target, body) -> the whole response, or None when the
+// VM answers this request.
+static mp_obj_t mod_web_handle(mp_obj_t method, mp_obj_t target, mp_obj_t body) {
+    size_t mn, tn;
+    const char *m = mp_obj_str_get_data(method, &mn);
+    const char *t = mp_obj_str_get_data(target, &tn);
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(body, &b, MP_BUFFER_READ);
+    char *out = NULL;
+    size_t n = 0;
+    int done = 0;
+    WEB_GUARD_BEGIN
+    done = moy_web_handle(m, mn, t, tn, b.buf, b.len, &out, &n);
+    WEB_GUARD_END
+    if (!done) {
+        moy_net_free(out);
+        return mp_const_none;
+    }
+    return out_bytes(out, n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_web_handle_obj, mod_web_handle);
+
+// web_pack(root, kinds) -> the store under `root` as the pull's JSON text.
+static mp_obj_t mod_web_pack(mp_obj_t root, mp_obj_t kinds_o) {
+    char kinds[96];
+    const char *k = names_of(kinds_o, kinds, sizeof(kinds));
+    char *out = NULL;
+    size_t n = 0;
+    int rc = 0;
+    WEB_GUARD_BEGIN
+    rc = moy_web_pack(mp_obj_str_get_str(root), k, &out, &n);
+    WEB_GUARD_END
+    if (rc != 0) {
+        moy_net_free(out);
+        mp_raise_OSError(rc);
+    }
+    mp_obj_t s = mp_obj_new_str(out ? out : "", n);
+    moy_net_free(out);
+    return s;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_web_pack_obj, mod_web_pack);
+
+static mp_obj_t mod_web_stamp(void) {
+    const char *s = moy_web_stamp_text();
+    return s ? mp_obj_new_str(s, strlen(s)) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_stamp_obj, mod_web_stamp);
+
 static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_net)},
     {MP_ROM_QSTR(MP_QSTR_parse_request), MP_ROM_PTR(&mod_parse_request_obj)},
@@ -442,6 +674,19 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_decode_batch), MP_ROM_PTR(&mod_decode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_password), MP_ROM_PTR(&mod_wifi_password_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_remember), MP_ROM_PTR(&mod_wifi_remember_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sync_batch), MP_ROM_PTR(&mod_sync_batch_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sync_apply), MP_ROM_PTR(&mod_sync_apply_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_start), MP_ROM_PTR(&mod_web_start_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_stop), MP_ROM_PTR(&mod_web_stop_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_set_pin), MP_ROM_PTR(&mod_web_set_pin_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_poll), MP_ROM_PTR(&mod_web_poll_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_state), MP_ROM_PTR(&mod_web_state_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_events), MP_ROM_PTR(&mod_web_events_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_take), MP_ROM_PTR(&mod_web_take_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_answer), MP_ROM_PTR(&mod_web_answer_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_handle), MP_ROM_PTR(&mod_web_handle_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_pack), MP_ROM_PTR(&mod_web_pack_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_stamp), MP_ROM_PTR(&mod_web_stamp_obj)},
     #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
     {MP_ROM_QSTR(MP_QSTR_wifi_on), MP_ROM_PTR(&mod_wifi_on_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_off), MP_ROM_PTR(&mod_wifi_off_obj)},

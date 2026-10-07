@@ -697,6 +697,9 @@ def zero_host_class():
         no screen, which is the whole difference.
         """
 
+        # /gpio is answered here, so the kernel's router parks it for us.
+        DEFER = WebHost.DEFER + ("/gpio",)
+
         def __init__(self, *a, **kw):
             WebHost.__init__(self, *a, **kw)
             self._pins = None       # built on the first /gpio, not at boot: a

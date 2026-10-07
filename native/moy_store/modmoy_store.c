@@ -177,6 +177,12 @@ static void unwind(void) {
     }
 }
 
+// The same, for a store call made from another module's binding (moy_net's
+// webhost) whose own nlr frame caught the raise.
+void moy_store_unwind(void) {
+    unwind();
+}
+
 #define GUARD_BEGIN { nlr_buf_t nlr_; if (nlr_push(&nlr_) == 0) {
 #define GUARD_END nlr_pop(); } else { unwind(); nlr_jump(nlr_.ret_val); } }
 

@@ -1669,7 +1669,7 @@ class SettingsLayer:
             #
             # There used to be a last-resort fallback here that dropped a
             # trailing ":8080" to make a long label fit. It is GONE with the
-            # 2026-08-29 move to port 80 (moy_webserver.DEFAULT_PORT): the
+            # 2026-08-29 move to port 80 (moy_webhost.DEFAULT_PORT): the
             # default address no longer carries a port at all, so the rule was
             # stripping a suffix nothing emits -- and generalising it to any
             # ":PORT" would be worse than doing nothing, because a browser

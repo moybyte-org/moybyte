@@ -14,7 +14,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NET = os.path.join(ROOT, "native", "moy_net")
 
 # Every moy_net source but the module face (modmoy_net.c) and the fuzz driver.
-DRIVERS = ("moy_http.c", "moy_sync.c", "moy_wifi.c", "moy_link.c", "moy_link.h",
+DRIVERS = ("moy_http.c", "moy_net_port.c","moy_sync.c", "moy_sync_apply.c", "moy_webhost.c",
+           "moy_wifi.c", "moy_link.c", "moy_link.h",
            "moy_net.h", "moy_net_host.c")
 
 CONSOLES = {

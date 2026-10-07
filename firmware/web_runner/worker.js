@@ -843,7 +843,7 @@ async function init(search) {
     //
     // Every body is READ as soon as its head arrives, carts.json's included. A
     // board serves one connection at a time and cuts off a client that stops
-    // reading for its send budget (moy_webserver.WEB_SEND_TIMEOUT). A body
+    // reading for its send budget (native/moy_net, MOY_HTTP_SEND_MS). A body
     // left unread until the other answers are in -- and they queue behind it
     // -- stops draining once the browser's buffer is full, and the board cuts
     // it off: a board with more carts than that serves a console that cannot

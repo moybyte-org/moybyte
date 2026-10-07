@@ -88,8 +88,8 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the audio session, the six verbs, the bank push, the master level | `device_audio.py` (deleted), `runtime/audio.py`'s `AudioEngine`, `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`runtime/audio_session.py`) | `native/moy_audio/moy_aud.h` (sessions and the mix), `native/moy_audio/moy_aud_out.c` (the speaker), the codec in `native/moy_audio/moy_codec_es8311.c` | 2 |
 | WiFi, the radio under the spine's lease | `device/device_wifi.py` (the service over `kernel_wlan`; the Zero's station stays the port's) | `native/moy_net/moy_wifi.c` | 2 |
 | ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `native/moy_net/moy_link.c` | 2 |
-| the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `native/moy_net/moy_http.c`, `+native/moy_net/moy_webhost.c` | 2 |
-| the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `native/moy_net/moy_sync.c` | 2 |
+| the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `native/moy_net/moy_http.c`, `native/moy_net/moy_net_port.c`, `native/moy_net/moy_webhost.c` | 2 |
+| the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `native/moy_net/moy_sync.c`, `native/moy_net/moy_sync_apply.c` | 2 |
 | the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | `device/moy_ota.py`'s updater half (`device/moy_http.py`), `device/moy_c6_update.py`, `device/cart_net.py` | `+native/moy_net/moy_ota.c`, `+native/moy_net/moy_c6_update.c` | 2 |
 | the web-console switch | `runtime/web_console.py` (its screen: §13, question 8) | `+native/moy_net/moy_webconsole.c` | 2 |
 | the Zero's host | `modules/zero_host.py`, `modules/zero_gpio.py`, `modules/zero_setup.py` | the same `moy_net`, with the Zero's GPIO allowlist as a board table | 2 |
@@ -762,20 +762,25 @@ and which caught a 37% loss once that every per-side clock had certified.
 
 ### 6.2 The HTTP core, the webhost and the sync RPC
 
-`native/moy_net/moy_http.c` is `device/moy_webserver.py` over BSD sockets:
-the request parser, the sized, chunked, file and blob responses, the
-non-blocking listener polled once per frame. It builds on lwip and on POSIX
-alike, so the host runs it under the fuzzers. `+native/moy_net/moy_webhost.c`
-is the routes: the baked bundle from `native/moy_web/` zero-copy, the live
-store packed from the C catalogue (1b's), the user files, the PIN gate on
-every write, `/sync`, `/run`, `/update`, the goodbye window. The sync codec
-(`runtime/moy_sync.py`'s batches, base64 payloads, roots, the journal commit
-per published cart file) is one C body for both ends: the webhost applies
-batches through `moy_fs` and `moy_journal`; the browser's half
-(`carts_link.py`, `update_link.py`, `gpio_link.py`) is the same code in the
-web build, with fetch, OPFS and the file picker as JS imports. The
-`StoreWatcher` that detects changes for the push half reads the store's index
-rows.
+`native/moy_net/moy_http.c` is the request parser and the response head;
+`native/moy_net/moy_net_port.c` is the platform under the links (the clock,
+kernel memory, and the non-blocking listener over lwip on a board and POSIX on
+the host, the unix port and the browser's build). `native/moy_net/moy_webhost.c`
+is the routes: the baked bundle from `native/moy_web/` zero-copy, the store's
+two pulls streamed from a walk of the volume in 8 KB chunks, the PIN gate,
+`POST /sync`, the capability marker and the goodbye window, polled once per
+frame at the tail with no Python, its state and buffers in kernel memory so a
+soft reset leaves it serving and the next VM adopts it. `/run` and `/update`
+(and the Zero's `/gpio`) are the VM's: the C parks such a request until the
+VM's poll takes and answers it, and answers 503 itself when no VM does. The
+receiving half of the sync codec (the batch's root rule, the ops, base64
+payloads, the journal commit per published cart file) is
+`native/moy_net/moy_sync.c` and `native/moy_net/moy_sync_apply.c` over
+`moy_fs` and `moy_journal`, run by the webhost, the dev server and
+`runtime/moy_sync.py`'s `apply_ops`; the browser's half (`StoreWatcher`,
+`carts_link.py`, `update_link.py`, `gpio_link.py`) is the same code in the web
+build, with fetch, OPFS and the file picker as JS imports, and its
+`StoreWatcher` reads the store's index rows.
 
 ### 6.3 The updater and its clients
 

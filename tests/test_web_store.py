@@ -82,8 +82,26 @@ def test_the_sync_root_registry_agrees_across_languages():
         assert field(entry, "id") == root.id, entry
         assert field(entry, "endpoint") == root.endpoint.lstrip("/"), entry
         assert field(entry, "vfs") == "/moy/" + root.id, entry
-        assert field(entry, "dcMin") == root.dc_min, entry
-        assert field(entry, "dcMax") == root.dc_max, entry
+        lo, hi = field(entry, "dcMin"), field(entry, "dcMax")
+        assert [n for n in (1, 2, 3, 4) if n >= lo and (hi is None or n <= hi)] \
+            == _dc_depths(root.id), entry
+
+
+def _dc_depths(root_id):
+    """The whole-folder-delete depths the receiving C applies for `root_id`."""
+    import tempfile
+    from runtime import moy_sync
+    with tempfile.TemporaryDirectory() as d:
+        ok = []
+        for n in (1, 2, 3, 4):
+            path = "/".join(["drawings"] + ["x%d" % i for i in range(n - 1)])
+            if root_id == "carts":
+                path = "/".join(["a.moy"] + ["x%d" % i for i in range(n - 1)])
+            applied, _errs, _shelf = moy_sync.apply_ops(
+                d, [{"p": path, "dc": 1}], root_id)
+            if applied:
+                ok.append(n)
+        return ok
 
 
 def test_the_journal_crosses_only_into_the_local_store():
@@ -100,7 +118,11 @@ def test_the_journal_crosses_only_into_the_local_store():
         assert moy_sync._skip(name) and moy_sync.skip_keep_journal(name), name
     # The wire's own validator never softens: a batch aimed at a BOARD carries
     # no journal path no matter which watcher built it.
-    assert moy_sync.safe_segments("a.moy/journal/journal.jsonl") is None
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        _n, errs, _s = moy_sync.apply_ops(
+            d, [{"p": "a.moy/journal/journal.jsonl", "t": "x"}])
+        assert errs == [(0, "bad path")]
 
 
 def test_an_import_stays_pending_but_a_reload_rebases():
@@ -123,13 +145,13 @@ def test_the_store_module_reaches_every_host_that_serves_the_console():
     console must serve it too -- a board included, where the asset list is a
     fixed allowlist and a miss is a console that cannot boot at all."""
     import sys
-    sys.path.insert(0, os.path.join(_ROOT, "device"))
-    import moy_webhost
+    sys.path.insert(0, os.path.join(_ROOT, "tools"))
+    import gen_web_blob
 
     worker = _read("firmware", "web_runner", "worker.js")
     build = _read("firmware", "web_runner", "build.sh")
     assert 'from "./moy_store.mjs"' in worker
-    assert "moy_store.mjs" in moy_webhost.ASSETS
+    assert "moy_store.mjs" in gen_web_blob.asset_names()
     # ...built into dist/, and pre-gzipped like every other served asset.
     assert 'cp "${SCRIPT_DIR}/moy_store.mjs"' in build
     assert re.search(r"for f in .*moy_store\.mjs.*; do", build)

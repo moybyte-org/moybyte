@@ -167,8 +167,8 @@ the push is a flag rather than the default, `--clean` removes exactly what
 `ZERO NOTE: pushed copies are SHADOWING the image for: …` line at boot.
 
 Neither list is written in the script. The module list comes from `board.toml`
-(the same call the build stages from) and the asset list from
-`moy_webhost.ASSETS`; a hand-list is what broke this board once already.
+(the same call the build stages from) and the asset list from the webhost's
+own table (`native/moy_net/moy_webhost.c`); a hand-list is what broke this board once already.
 
 ## Updates, on a board with no screen
 

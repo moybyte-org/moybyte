@@ -125,6 +125,19 @@ static void one(const char *src, size_t n) {
             free(out);
         }
     }
+    // The receiver's batch rule: a batch it takes is one the envelope took, its
+    // ops an array and its pin a span inside the body.
+    moy_sync_batch_t bt;
+    if (moy_sync_batch(buf, n, &bt) == MOY_SYNC_OK) {
+        CHECK(moy_sync_decode(buf, n, &e) == MOY_SYNC_OK);
+        CHECK(bt.root == MOY_SYNC_CARTS || bt.root == MOY_SYNC_FILES);
+        inside(buf, n, bt.ops, (size_t)(bt.ops_end - bt.ops));
+        CHECK(moy_json_kind(bt.ops, bt.ops_end) == MOY_JSON_ARR);
+        if (bt.pin) {
+            inside(buf, n, bt.pin, (size_t)(bt.pin_end - bt.pin));
+        }
+        CHECK(moy_sync_pin_ok(&bt, NULL) && moy_sync_pin_ok(&bt, ""));
+    }
     char head[256];
     size_t hn = moy_http_head(head, sizeof(head), 200 + (int)(rnd() % 400),
                               "text/plain", n);

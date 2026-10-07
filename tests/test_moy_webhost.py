@@ -1,16 +1,22 @@
 """Serving the web console from the board (moycore plan 3.4, the pull half).
 
-The bet this slice makes is that the page needs NO change to read a board: it
-already boots with `fetch("carts.json")` -- a relative url -- so a page served
-from the console fetches the console's store. That bet is only good if the
-board emits exactly the bundle shape `worker.js` consumes, so most of what is
-worth testing here is the SHAPE, plus the two things that would go wrong on
-real hardware and nowhere else: a megabyte asset held in RAM, and a path from
-the network reaching a file that is none of the browser's business.
+The server is the kernel's (native/moy_net/moy_webhost.c), run here through
+the same C over ctypes; `device/moy_webhost.py` is the Settings contract over
+it and the routes the VM answers. The bet this slice makes is that the page
+needs NO change to read a board: it boots with `fetch("carts.json")` -- a
+relative url -- so a page served from the console fetches the console's
+store. That bet is only good if the board emits exactly the bundle shape
+`worker.js` consumes, so most of what is worth testing here is the SHAPE, plus
+the things that would go wrong on real hardware and nowhere else: a megabyte
+held in RAM, a store touched against a band in flight, and a path from the
+network reaching a file that is none of the browser's business.
 """
 
 import json
+import socket
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -22,7 +28,18 @@ MODULES = ROOT / "device"
 sys.path.insert(0, str(MODULES))
 
 import moy_webhost as wh                                       # noqa: E402
-from moy_webserver import FileResponse                          # noqa: E402
+from runtime import net_binding as nb                           # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _kernel_host():
+    """The kernel's webhost is one per process: each test starts it unbaked
+    and leaves it stopped."""
+    nb._bake({})
+    yield
+    nb.web_stop()
+    nb.web_events()
+    nb._bake({})
 
 
 def _store(tmp_path):
@@ -54,9 +71,48 @@ def _store(tmp_path):
     return root
 
 
+def h_status(resp):
+    return resp.split(b"\r\n")[0]
+
+
+def _head(resp):
+    return resp.split(b"\r\n\r\n", 1)[0].decode("latin-1")
+
+
+def _chunks(resp):
+    """A chunked response's chunks, checking the framing as it goes."""
+    head, wire = resp.split(b"\r\n\r\n", 1)
+    assert b"Transfer-Encoding: chunked" in head
+    assert wire.endswith(b"0\r\n\r\n"), wire[-16:]
+    out = []
+    while True:
+        size_s, _, wire = wire.partition(b"\r\n")
+        n = int(size_s, 16)
+        if n == 0:
+            return out
+        out.append(wire[:n])
+        assert wire[n:n + 2] == b"\r\n"
+        wire = wire[n + 2:]
+
+
+def _body(resp):
+    if b"Transfer-Encoding: chunked" in resp.split(b"\r\n\r\n", 1)[0]:
+        return b"".join(_chunks(resp))
+    return resp.split(b"\r\n\r\n", 1)[1]
+
+
+def _json(resp):
+    return json.loads(_body(resp))
+
+
+def _pull(root, path="/carts.json"):
+    """The pull the page makes, through the whole router."""
+    return _json(wh.WebHost(str(root)).handle_http("GET", path, b""))
+
+
 def test_the_bundle_is_the_shape_the_page_already_consumes(tmp_path):
     """`{"<cart>/<rel>": text}` -- worker.js's writeCarts input, and what the
-    dev server (web_runner/moy.py's pack_cart) emits. A different shape here
+    dev server (web_runner/serve.py --carts) emits. A different shape here
     means the page needs a branch, and the whole point of this slice is that it
     does not."""
     b = wh.pack_store(str(_store(tmp_path)))
@@ -65,429 +121,424 @@ def test_the_bundle_is_the_shape_the_page_already_consumes(tmp_path):
     assert b["hop.moy/images/bg.moyimg"] == "0,0,"    # nested dirs keep their path
     assert b["sky.moy/main.lua"].startswith("function")
     assert all("/" in k for k in b), "a key without a cart prefix"
+    assert _pull(tmp_path / "carts") == b, "the dev server and the wire differ"
 
 
 def test_thumbs_do_not_cross_the_wire(tmp_path):
     """`thumbs/` is a REGENERABLE cache keyed to a screen size (#66/#155) --
     sending it costs transfer time for pixels the browser will rebuild at its
     own size anyway. It is also the largest thing in a cart folder."""
-    b = wh.pack_store(str(_store(tmp_path)))
+    b = _pull(_store(tmp_path))
     assert not any("thumbs" in k for k in b), sorted(b)
 
 
 def test_the_undo_journal_does_not_cross_the_wire(tmp_path):
-    """The bulk of a real store, and inert at the far end: this endpoint is
-    READ-ONLY, so the browser's copy never syncs back and undo there runs off
-    op_history's in-RAM ops rather than a shipped log.
-
-    Both walkers, because they are independent bodies: a skip added to one only
-    is exactly the drift `test_the_streamed_json_equals_the_packed_dict` pins.
-    """
-    root = _store(tmp_path)
-    packed = wh.pack_store(str(root))
-    streamed = json.loads("".join(wh.stream_store_json(str(root))))
-    for bundle, who in ((packed, "pack_store"), (streamed, "stream_store_json")):
-        assert not [k for k in bundle if "journal" in k], (who, sorted(bundle))
-        assert "hop.moy/main.py" in bundle, who      # the cart itself survives
+    """The bulk of a real store, and inert at the far end: each side keeps its
+    own undo history."""
+    b = _pull(_store(tmp_path))
+    assert not [k for k in b if "journal" in k], sorted(b)
+    assert "hop.moy/main.py" in b                    # the cart itself survives
 
 
 def test_the_atomic_write_backups_do_not_cross_the_wire(tmp_path):
-    """`<file>.bak` is `moy_fs._write_atomic`'s crash-recovery rotation: the
-    live file is already in the bundle, so every one of these is a second copy
-    of content the browser has, on a transport whose size is the whole problem.
-
-    Both walkers, like the journal cut above -- they are independent bodies.
-    """
-    root = _store(tmp_path)
-    packed = wh.pack_store(str(root))
-    streamed = json.loads("".join(wh.stream_store_json(str(root))))
-    for bundle, who in ((packed, "pack_store"), (streamed, "stream_store_json")):
-        assert not [k for k in bundle if k.endswith(".bak")], (who, sorted(bundle))
-        assert bundle["hop.moy/main.py"].startswith("def _draw()"), who
+    """`<file>.bak` is moy_fs's crash-recovery rotation: the live file is
+    already in the bundle, so every one of these is a second copy of content
+    the browser has, on a transport whose size is the whole problem."""
+    b = _pull(_store(tmp_path))
+    assert not [k for k in b if k.endswith(".bak")], sorted(b)
+    assert b["hop.moy/main.py"].startswith("def _draw()")
 
 
 def test_a_kids_saves_still_cross_the_wire(tmp_path):
     """The contrast that makes the journal cut a judgement and not a diet:
-    pmem.json is their score, their pet, where they got to, so a cart played in
-    the browser comes up holding their things."""
-    root = _store(tmp_path)
-    packed = wh.pack_store(str(root))
-    streamed = json.loads("".join(wh.stream_store_json(str(root))))
-    for bundle, who in ((packed, "pack_store"), (streamed, "stream_store_json")):
-        assert bundle.get("hop.moy/pmem.json") == "[41, 0, 0]", who
+    pmem.json is their score, their pet, where they got to."""
+    assert _pull(_store(tmp_path)).get("hop.moy/pmem.json") == "[41, 0, 0]"
 
 
 def test_a_carts_cover_crosses_the_wire_as_its_bytes(tmp_path):
     """The one binary file a pull carries: a cart's cover.png (SPEC.md 3.6),
     as {"b": base64} -- the page's writeStore writes it as bytes. A compiled
-    module beside it stays home. Both walkers, and the streamed one in
-    pieces that must join into the one value."""
+    module beside it stays home. Bigger than one read, so its pieces must join
+    into the one value."""
     import base64
     root = _store(tmp_path)
     data = bytes((i * 37 + 11) & 255 for i in range(10000))
     (root / "hop.moy" / "cover.png").write_bytes(data)
     (root / "hop.moy" / "main.wasm").write_bytes(b"\0asm\1\0\0\0\xff\xfe")
-    packed = wh.pack_store(str(root))
-    streamed = json.loads("".join(wh.stream_store_json(str(root))))
-    for bundle, who in ((packed, "pack_store"), (streamed, "stream_store_json")):
-        assert base64.b64decode(bundle["hop.moy/cover.png"]["b"]) == data, who
-        assert "hop.moy/main.wasm" not in bundle, who
+    b = _pull(root)
+    assert base64.b64decode(b["hop.moy/cover.png"]["b"]) == data
+    assert "hop.moy/main.wasm" not in b
 
 
 def test_a_loose_file_beside_the_carts_is_not_a_cart(tmp_path):
-    b = wh.pack_store(str(_store(tmp_path)))
+    b = _pull(_store(tmp_path))
     assert not any(k.startswith("loose") for k in b)
 
 
 def test_an_unreadable_file_is_skipped_not_fatal(tmp_path):
     """A binary asset in a cart folder must not take the whole endpoint down --
-    the store is the kid's, and one odd file in it should cost that file."""
+    the store is the kid's, and one odd file in it should cost that file. And
+    it is ABSENT, never present and empty."""
     root = _store(tmp_path)
     (root / "hop.moy" / "blob.bin").write_bytes(b"\xff\xfe\x00\x01")
-    b = wh.pack_store(str(root))
+    b = _pull(root)
     assert "hop.moy/blob.bin" not in b
     assert "hop.moy/main.py" in b, "one bad file killed the rest"
-    streamed = json.loads("".join(wh.stream_store_json(str(root))))
-    assert "hop.moy/blob.bin" not in streamed, \
-        "a skipped file must be ABSENT, not present and empty"
+
+
+def test_an_empty_file_crosses_as_an_empty_value(tmp_path):
+    root = _store(tmp_path)
+    (root / "hop.moy" / "empty.txt").write_text("")
+    assert _pull(root)["hop.moy/empty.txt"] == ""
+
+
+def test_a_file_that_stops_being_text_ends_its_value(tmp_path):
+    """Decided on the first piece: past it, bytes that cannot be UTF-8 END the
+    value, so the response stays valid JSON holding a short file rather than
+    a pull that dies half way."""
+    root = _store(tmp_path)
+    (root / "hop.moy" / "odd.txt").write_bytes(b"a" * 5000 + b"\xff" + b"b" * 10)
+    v = _pull(root)["hop.moy/odd.txt"]
+    assert v == "a" * len(v) and 4096 <= len(v) <= 5000
 
 
 def test_a_big_file_is_streamed_in_pieces_and_never_held(tmp_path):
-    """The 2026-09-09 Guition fix, at this layer: no piece this walker yields
-    is as big as the file it came from.
-
-    A store with 142KB PICO-8 carts on it used to die every pull -- the value
-    was one `_jstr(text)` of the whole file, which the transport then encoded,
-    joined and concatenated into five more copies of the same size. Pin the
-    BOUND: a packer that goes back to whole values still round-trips every
-    content test above and brings the MemoryError straight back.
-    """
-    from runtime import moy_sync
-
+    """The 2026-09-09 Guition fix, at the wire: no chunk is as big as the file
+    it came from. A store with 142KB PICO-8 carts on it used to die every pull
+    on copies of a whole value."""
     root = _store(tmp_path)
     text = "-- a line of a cart\n" * 9000                        # 180KB
     (root / "hop.moy" / "big.lua").write_text(text)
-    big = max(len(p) for p in wh.stream_store_json(str(root)))
-    # One read chunk, at the escape's worst case (every character a \u00XX).
-    assert big <= 6 * moy_sync.STORE_READ_CHUNK, big
-    assert big < len(text) // 4, (big, len(text))
-    streamed = json.loads("".join(wh.stream_store_json(str(root))))
-    assert streamed == wh.pack_store(str(root))
+    r = wh.WebHost(str(root)).handle_http("GET", "/carts.json", b"")
+    sizes = [len(c) for c in _chunks(r)]
+    assert max(sizes) <= 8192, max(sizes)
+    assert _json(r)["hop.moy/big.lua"] == text
 
 
 def test_a_value_split_across_pieces_is_still_the_file(tmp_path):
-    """Escaping is per character and stateless, which is the only reason a
-    value may be emitted in pieces at all. Quotes, backslashes, control
-    characters and non-ASCII across a piece boundary are where that claim gets
-    tested, so put them there deliberately."""
-    from runtime import moy_sync
-
-    step = moy_sync.STORE_READ_CHUNK
+    """A file is read 4 KB at a time and escaped piece by piece. Quotes,
+    backslashes, control characters and multi-byte UTF-8 across a piece
+    boundary are where that gets tested, so put them there deliberately."""
     nasty = ('a"b\\c\td\n\x01e' * 200 + "héllo 中文 \U0001f600")
-    text = ("." * (step - 3)) + nasty * 6
-    root = _store(tmp_path)
-    (root / "hop.moy" / "nasty.txt").write_text(text)
-    streamed = json.loads("".join(wh.stream_store_json(str(root))))
-    assert streamed["hop.moy/nasty.txt"] == text
+    for lead in range(4090, 4097):
+        text = ("." * lead) + nasty * 6
+        root = tmp_path / ("s%d" % lead) / "carts"
+        (root / "odd.moy").mkdir(parents=True)
+        (root / "odd.moy" / "nasty.txt").write_text(text)
+        assert _pull(root)["odd.moy/nasty.txt"] == text, lead
 
 
-# -- the handler -------------------------------------------------------------
+def test_the_stream_escapes_what_json_requires(tmp_path):
+    root = tmp_path / "carts"
+    (root / "odd.moy").mkdir(parents=True)
+    nasty = 'q = "hi"\\ntab\\there\\n\\u0001 \\\\ backslash\\r\\n\x7f\x1f'
+    (root / "odd.moy" / "main.py").write_text(nasty)
+    assert _pull(root)["odd.moy/main.py"] == nasty
 
-def _host(tmp_path):
-    """A host with NO console bundle. Assets come from the firmware image, so a
-    test that wants one installs it with the `baked` fixture."""
-    root = _store(tmp_path)
-    h = wh.WebHost.__new__(wh.WebHost)          # no socket needed
-    h.carts_root = str(root)
-    h._with_sd = lambda fn: fn()
-    h.pin = None                                # OPEN: the LAN dev-loop shape
-    # NOT serving, and not saying goodbye either -- the ordinary state. This
-    # fixture predates __init__ being socket-free and hand-builds what the
-    # routing reads, so a new field on the host has to be declared here too.
-    h.closing = None
-    h.closing_at = 0
-    return h
+
+# -- the router --------------------------------------------------------------
+
+
+def _host(tmp_path, **kw):
+    """A host over the `_store` tree, OPEN (the LAN dev-loop shape) unless a
+    test passes a pin. Assets come from the firmware image, so a test that
+    wants one installs it with the `baked` fixture. Port 0: a start binds
+    nothing, so a test needs no free port to switch it on and off."""
+    kw.setdefault("port", 0)
+    return wh.WebHost(str(_store(tmp_path)), **kw)
+
+
+@pytest.fixture
+def baked():
+    """Install a baked bundle (native/moy_web's table) for one test."""
+    return nb._bake
+
+
+ASSETS = None
+
+
+def _assets():
+    sys.path.insert(0, str(ROOT / "tools"))
+    import gen_web_blob
+    return gen_web_blob.asset_names()
 
 
 def test_the_root_serves_the_console_page(tmp_path, baked):
-    from moy_webserver import BlobResponse
     baked({"index.html.gz": b"\x1f\x8bpage"})
     h = _host(tmp_path)
     for path in ("/", "/index.html"):
         r = h.handle_http("GET", path, b"")
-        assert isinstance(r, BlobResponse), path
-        assert r.content_type.startswith("text/html")
-
-
+        assert b"200" in h_status(r), path
+        assert "Content-Type: text/html" in _head(r)
+        assert "Content-Encoding: gzip" in _head(r)
+        assert r.endswith(b"\x1f\x8bpage")
 
 
 def test_carts_json_is_json_and_live(tmp_path):
     h = _host(tmp_path)
     r = h.handle_http("GET", "/carts.json", b"")
-    head = r.head().decode()
+    head = _head(r)
     assert "application/json" in head
     assert "no-store" in head, "the store is live; caching it serves stale carts"
-    assert json.loads("".join(r.body_iter))["hop.moy/main.py"].startswith(
-        "def _draw()")
+    assert "Content-Length" not in head, "chunked and length are exclusive"
+    assert _json(r)["hop.moy/main.py"].startswith("def _draw()")
 
 
-def test_only_the_four_known_assets_are_reachable(tmp_path):
+def test_only_the_known_assets_are_reachable(tmp_path, baked):
     """An ALLOWLIST, not a `..` check. The set of files a browser needs is
     fixed at build time, so accepting a path from the network buys nothing and
     risks handing out wifi.json -- and "reject .." is one encoding trick from
     being wrong."""
+    baked({"secret.txt": b"wifi password", "index.html.gz": b"\x1f\x8b"})
     h = _host(tmp_path)
     (tmp_path / "secret.txt").write_text("wifi password")
     for path in ("/secret.txt", "/../secret.txt", "/carts/hop.moy/main.py",
-                 "/%2e%2e/secret.txt", "/wifi.json"):
-        assert h.handle_http("GET", path, b"") is None, path
+                 "/%2e%2e/secret.txt", "/wifi.json", "/index.html.gz"):
+        r = h.handle_http("GET", path, b"")
+        assert b"404" in h_status(r) and b"wifi password" not in r, path
 
 
 def test_a_query_string_does_not_hide_an_asset(tmp_path, baked):
     """The page opens itself with `?dev=1`; a served index must survive it."""
-    from moy_webserver import BlobResponse
     baked({"index.html.gz": b"\x1f\x8bpage"})
-    h = _host(tmp_path)
-    assert isinstance(h.handle_http("GET", "/?dev=1", b""), BlobResponse)
+    r = _host(tmp_path).handle_http("GET", "/?dev=1", b"")
+    assert b"200" in h_status(r) and r.endswith(b"page")
 
 
 def test_a_board_with_no_bundle_says_how_to_get_one(tmp_path):
     """A firmware built with no web bundle looks exactly like a broken feature
     in a browser. Name the build step, since that is the whole fix."""
-    h = _host(tmp_path)
-    r = h.handle_http("GET", "/", b"")
-    assert isinstance(r, bytes) and b"404" in r.split(b"\r\n")[0]
+    r = _host(tmp_path).handle_http("GET", "/", b"")
+    assert b"404" in h_status(r)
     assert b"web_runner/dist" in r and b"reflash" in r
 
 
-# -- the bundle baked into the firmware image --------------------------------
-#
-# The board used to serve ONLY a copy a human had put on its storage, and that
-# copy drifts with nothing to detect it: a board once served a bundle old
-# enough to still carry a desktop-blackout bug fixed in dist/ hours earlier.
-# The T-Deck could not even be pushed to (its USB-CDC RX is dead under the
-# desktop), so its copy went on by card reader or not at all. Hence moy_web:
-# the gzipped bundle rides the image, and a console that boots is current with
-# its own firmware.
-
-
-class _FakeMoyWeb:
-    """The native module's three verbs, over a dict of bytes."""
-
-    def __init__(self, blobs, stamp="4 572693 deadbeef1234"):
-        self.blobs = {k: memoryview(v) for k, v in blobs.items()}
-        self._stamp = stamp
-
-    def asset(self, name):
-        return self.blobs.get(name)
-
-    def names(self):
-        return tuple(self.blobs)
-
-    def stamp(self):
-        return self._stamp
-
-    def total(self):
-        return sum(len(v) for v in self.blobs.values())
-
-
-@pytest.fixture
-def baked(monkeypatch):
-    """Install a fake baked bundle for the duration of one test."""
-    def _install(blobs, **kw):
-        mod = _FakeMoyWeb(blobs, **kw)
-        monkeypatch.setattr(wh, "_moy_web", mod)
-        return mod
-    return _install
-
-
-def test_the_image_serves_the_console_when_storage_has_none(tmp_path, baked):
-    """The guarantee. A board that has never been pushed to still serves a
-    console, and it is the one its firmware was built from."""
-    from moy_webserver import BlobResponse
-    baked({"index.html.gz": b"\x1f\x8b" + b"page",
-           "micropython.wasm.gz": b"\x1f\x8b" + b"w" * 900})
-    h = _host(tmp_path)
-    r = h.handle_http("GET", "/", b"")
-    assert isinstance(r, BlobResponse)
-    assert r.content_type.startswith("text/html")
-    head = r.head().decode()
-    assert "Content-Encoding: gzip" in head, "stored gzipped, served as gzip"
-    assert "Content-Length: 6" in head
-    assert "no-store" in head
-
-
 def test_a_raw_baked_asset_is_served_without_an_encoding(tmp_path, baked):
-    """The build bakes .gz today, but the lookup is the same two-step rule as
-    on storage, so a raw bundle needs no code change -- and must not be
-    announced as gzip, which is a page that fails to boot."""
-    from moy_webserver import BlobResponse
+    """A bundle baked without its .gz is served raw, and must not claim to be
+    gzip -- a browser handed raw bytes under that header sees garbage."""
     baked({"worker.js": b"// raw"})
-    h = _host(tmp_path)
-    r = h.handle_http("GET", "/worker.js", b"")
-    assert isinstance(r, BlobResponse)
-    assert r.encoding is None
-    assert "Content-Encoding" not in r.head().decode()
-
-
-def test_an_image_with_no_bundle_falls_through_to_the_404(tmp_path, baked):
-    """A firmware built without a web bundle (the generator warns loudly, and
-    CI refuses to publish one). The module is still there and reports nothing,
-    so the request must land on the 404 -- not on an exception mid-request."""
-    baked({})
-    h = _host(tmp_path)
-    r = h.handle_http("GET", "/", b"")
-    assert isinstance(r, bytes) and b"404" in r.split(b"\r\n")[0]
-    assert b"no web console baked in" in r
-
-
-def test_a_broken_native_module_is_not_a_broken_request(tmp_path, monkeypatch):
-    """`_baked` is guarded, not trusted. An old image has no module at all and
-    a wedged one must cost the request its bundle, not the whole endpoint."""
-    class _Boom:
-        def asset(self, name):
-            raise RuntimeError("nope")
-
-    monkeypatch.setattr(wh, "_moy_web", _Boom())
-    h = _host(tmp_path)
-    r = h.handle_http("GET", "/", b"")
-    assert isinstance(r, bytes) and b"404" in r.split(b"\r\n")[0]
-
-
-def test_the_baked_response_holds_no_copy_of_the_bundle(tmp_path, baked):
-    """The reason this is affordable at all. The blob is flash-mapped rodata
-    and the response is a memoryview at it -- #66 measures ~23KB of internal
-    SRAM free during play, so a bytes() of the 523KB wasm is not a slow path,
-    it is one that does not run."""
-    from moy_webserver import BlobResponse
-    mod = baked({"micropython.wasm.gz": b"\x1f\x8b" + b"z" * 4000})
-    h = _host(tmp_path)
-    r = h.handle_http("GET", "/micropython.wasm", b"")
-    assert isinstance(r, BlobResponse)
-    assert r.data is mod.blobs["micropython.wasm.gz"], "the bundle was copied"
-    assert r.size == 4002
+    r = _host(tmp_path).handle_http("GET", "/worker.js", b"")
+    assert b"200" in h_status(r) and r.endswith(b"// raw")
+    assert "Content-Encoding" not in _head(r)
+    assert "javascript" in _head(r)
 
 
 def test_the_baked_stamp_answers_which_console_this_board_serves(baked):
-    """The question that started the whole thing, now one line over a REPL."""
     baked({"index.html.gz": b"x"}, stamp="4 572693 d44b8756bf08")
     assert wh.baked_stamp() == "4 572693 d44b8756bf08"
-
-
-def test_the_baked_stamp_is_none_on_an_image_without_the_module(monkeypatch):
-    monkeypatch.setattr(wh, "_moy_web", None)
+    assert "4 572693 d44b8756bf08" in wh.WebHost("/x").source_note()
+    baked({})
     assert wh.baked_stamp() is None
+    assert "NONE" in wh.WebHost("/x").source_note()
 
 
-def test_the_baked_body_streams_byte_for_byte(tmp_path, baked):
-    """The chunk pump over a REAL socket, the same net FileResponse has.
-
-    A blob send slices a memoryview instead of refilling a buffer, so the
-    failure mode is the mirror image: correct for every full chunk and short or
-    doubled in the tail. On a wasm binary that means a browser that refuses to
-    instantiate and says nothing useful, so: a payload that is deliberately not
-    a chunk multiple, compared byte for byte.
-    """
-    import socket
-    import threading
-    from moy_webserver import WebServer, BlobResponse
-
-    payload = bytes(range(256)) * 40 + b"tail"        # 10244 B: 2 chunks + 2052
-    resp = BlobResponse(memoryview(payload), "application/wasm",
-                        encoding="gzip")
-    a, b = socket.socketpair()
-    srv = WebServer.__new__(WebServer)
-
-    def pump():
-        try:
-            srv._send_blob(a, resp)
-        finally:
-            a.close()
-
-    t = threading.Thread(target=pump)
-    t.start()
-    b.settimeout(5)
-    got = b""
-    while True:
-        chunk = b.recv(65536)
-        if not chunk:
-            break
-        got += chunk
-    t.join(5)
-    assert not t.is_alive(), "the send never finished"
-    b.close()
-
-    head, _, body = got.partition(b"\r\n\r\n")
-    assert b"Content-Length: %d" % len(payload) in head
-    assert b"Content-Encoding: gzip" in head
-    assert body == payload, "streamed body differs (len %d vs %d)" % (
-        len(body), len(payload))
+@pytest.mark.parametrize("name", _assets())
+def test_every_allowlisted_asset_has_a_sane_content_type(tmp_path, baked, name):
+    """A wrong type on `micropython.wasm` is the difference between the console
+    booting and the browser refusing to instantiate it -- and it fails only in
+    a real browser, which is the expensive place to find out."""
+    baked({name + ".gz": b"\x1f\x8bx"})
+    ctype = _head(_host(tmp_path).handle_http("GET", "/" + name, b""))
+    ctype = [l for l in ctype.split("\r\n") if l.startswith("Content-Type")][0]
+    if name.endswith(".wasm"):
+        assert ctype == "Content-Type: application/wasm"
+    if name.endswith(".js") or name.endswith(".mjs"):
+        assert "javascript" in ctype
+    if name.endswith(".html"):
+        assert "text/html" in ctype
 
 
-def test_a_blob_goes_out_through_the_transports_dispatch(tmp_path, baked):
-    """`_http_send_close` decides by TYPE, and a new response class that nobody
-    added a branch for would be sent with `sendall(<object>)` -- i.e. a
-    TypeError swallowed by that method's catch-all, which reads to a browser as
-    a connection that closed with no reply."""
-    import socket
-    import threading
-    from moy_webserver import WebServer, BlobResponse
-
-    resp = BlobResponse(memoryview(b"\x1f\x8bbody"), "text/html")
-    a, b = socket.socketpair()
-    srv = WebServer.__new__(WebServer)
-    t = threading.Thread(target=lambda: srv._http_send_close(a, resp))
-    t.start()
-    b.settimeout(5)
-    got = b""
-    while True:
-        c = b.recv(65536)
-        if not c:
-            break
-        got += c
-    t.join(5)
-    b.close()
-    assert got.endswith(b"\x1f\x8bbody"), got[-32:]
-
-
-def test_the_blob_send_pays_no_storage_gate(tmp_path, baked):
-    """The T-Deck's SD gate exists because its card shares the panel's SPI host.
-    The baked bundle is in flash and races nothing, so the SEND takes no gate --
-    a mount in the path of every asset byte would be an unrelated cost.
-
-    """
+def test_an_asset_is_never_cached(tmp_path, baked):
+    """The regression that shipped once: a day-long cache on files whose whole
+    delivery mechanism is a new build."""
     baked({"worker.js.gz": b"\x1f\x8bx"})
-    entered = []
-    host = wh.WebHost(str(tmp_path / "carts"),
-                      with_sd=lambda fn: (entered.append(1), fn())[1])
-    resp = host._asset("worker.js")        # the probe: gated, on purpose
-    del entered[:]                         # measure only the send
-    conn = _Conn()
-    host._send_blob(conn, resp)
-    assert not entered, "the baked bundle went through the SD gate"
-    assert bytes(conn.sent).endswith(b"\x1f\x8bx")
+    assert "no-store" in _head(_host(tmp_path).handle_http("GET", "/worker.js", b""))
 
 
+def test_the_bundle_send_drains_nothing(tmp_path, baked):
+    """The T-Deck's drain exists because its card shares the panel's SPI host.
+    The baked bundle is in flash and races nothing, so serving it waits on no
+    band in flight."""
+    baked({"worker.js.gz": b"\x1f\x8bx"})
+    h = _host(tmp_path)
+    before = nb._drains()
+    h.handle_http("GET", "/worker.js", b"")
+    h.handle_http("GET", "/sync", b"")
+    assert nb._drains() == before
 
 
 def test_a_write_anywhere_but_sync_is_still_405(tmp_path):
-    """The write surface is exactly ONE path. Every other method+path pair
-    stays refused with a reason the page can read (405, not a 404 that reads
-    as a wrong url)."""
+    """The write surface is exactly the named paths. Every other method+path
+    pair stays refused with a reason the page can read (405, not a 404 that
+    reads as a wrong url)."""
     h = _host(tmp_path)
     r = h.handle_http("POST", "/carts.json", b"{}")
-    assert b"405" in r.split(b"\r\n")[0]
+    assert b"405" in h_status(r)
     assert b"/sync" in r
     r = h.handle_http("PUT", "/sync", b"{}")
-    assert b"405" in r.split(b"\r\n")[0]
+    assert b"405" in h_status(r)
+    r = h.handle_http("PUT", "/update", b"{}")
+    assert b"405" in h_status(r), "a wrong verb on a VM route is still 405"
+
+
+# -- over a real socket --------------------------------------------------------
+
+
+def _free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def _exchange(host, raw, polls=400):
+    """Send `raw` to the serving host from a thread, pumping its poll the way
+    the frame loop does, and return everything it answered."""
+    out = {}
+
+    def client():
+        c = socket.create_connection(("127.0.0.1", host.port), timeout=5)
+        c.sendall(raw)
+        got = b""
+        while True:
+            k = c.recv(65536)
+            if not k:
+                break
+            got += k
+        c.close()
+        out["r"] = got
+
+    t = threading.Thread(target=client)
+    t.start()
+    for _ in range(polls):
+        host.poll()
+        if not t.is_alive():
+            break
+        time.sleep(0.005)
+    t.join(5)
+    assert not t.is_alive(), "the exchange never finished"
+    return out["r"]
+
+
+@pytest.fixture
+def serving(tmp_path):
+    hosts = []
+
+    def make(**kw):
+        h = wh.WebHost(str(_store(tmp_path)), port=_free_port(), **kw)
+        h.start(ip="127.0.0.1")
+        hosts.append(h)
+        return h
+    yield make
+    for h in hosts:
+        h.stop()
+
+
+def test_the_baked_body_streams_byte_for_byte(serving, baked):
+    """The send over a REAL socket: a body whose size is deliberately not a
+    multiple of the slice it goes out in, compared byte for byte -- a wrong
+    last slice is a wasm binary the browser refuses with nothing to say why."""
+    payload = bytes(range(256)) * 17 + b"tail"      # 4356 B
+    baked({"micropython.wasm.gz": payload})
+    h = serving()
+    got = _exchange(h, b"GET /micropython.wasm HTTP/1.1\r\nHost: x\r\n\r\n")
+    head, _, body = got.partition(b"\r\n\r\n")
+    assert b"Content-Length: %d" % len(payload) in head
+    assert body == payload
+
+
+def test_the_chunked_wire_format_is_well_formed(serving):
+    """`<hex>\\r\\n<data>\\r\\n` per chunk, `0\\r\\n\\r\\n` to end, over a real
+    socket: a browser is unforgiving here and the failure is a page that hangs
+    mid-load with no error."""
+    h = serving()
+    got = _exchange(h, b"GET /carts.json HTTP/1.1\r\n\r\n")
+    assert json.loads(b"".join(_chunks(got)))["hop.moy/pmem.json"] == "[41, 0, 0]"
+
+
+def test_a_post_body_split_across_packets_is_read_whole(serving):
+    h = serving()
+    body = json.dumps({"v": 1, "ops": [{"p": "hop.moy/main.py",
+                                         "t": "x" * 20000}]}).encode()
+    raw = (b"POST /sync HTTP/1.1\r\nContent-Length: %d\r\n\r\n" % len(body)) + body
+    got = _exchange(h, raw)
+    assert json.loads(got.split(b"\r\n\r\n", 1)[1]) == {"ok": 1, "err": []}
+
+
+def test_a_request_the_vm_answers_is_parked_and_answered(serving):
+    """/run is the console's: the kernel parks it, the poll takes it, the VM
+    answers it -- the C itself never calls up."""
+    seen = []
+    h = serving(on_run=lambda name: (seen.append(name), "Hop")[1])
+    got = _exchange(h, b'POST /run HTTP/1.1\r\nContent-Length: 15\r\n\r\n'
+                       b'{"cart": "hop"}')
+    assert b"200" in h_status(got)
+    assert json.loads(got.split(b"\r\n\r\n", 1)[1]) == {"run": "Hop"}
+    assert seen == ["hop"]
+
+
+def test_a_parked_request_nobody_takes_is_a_503(tmp_path):
+    """A VM gone mid-request (a soft reset) must not leave the browser hanging:
+    the kernel answers it itself once the window is out."""
+    h = wh.WebHost(str(_store(tmp_path)), port=_free_port())
+    h.start(ip="127.0.0.1")
+    try:
+        c = socket.create_connection(("127.0.0.1", h.port), timeout=5)
+        c.sendall(b"GET /update HTTP/1.1\r\n\r\n")
+        for _ in range(100):
+            nb.web_poll()                     # the kernel's poll alone: no VM
+            if nb.web_state()[2]:
+                break
+            time.sleep(0.005)
+        assert nb.web_state()[2], "never parked"
+        nb._skew_clock(3001)
+        nb.web_poll()
+        got = c.recv(4096)
+        c.close()
+        assert b"503" in h_status(got) and b"busy" in got
+    finally:
+        h.stop()
+
+
+def test_start_refuses_to_report_serving_when_the_bind_failed(tmp_path):
+    """Not checking the bind is how a row comes to say ON over a server that is
+    serving nothing."""
+    s = socket.socket()
+    s.bind(("0.0.0.0", 0))
+    s.listen(1)
+    try:
+        h = wh.WebHost(str(tmp_path / "carts"), port=s.getsockname()[1])
+        with pytest.raises(OSError):
+            h.start(ip="10.0.0.5")
+        assert h.serving is False
+    finally:
+        s.close()
+
+
+def test_a_host_the_kernel_kept_serving_is_adopted(serving):
+    """A soft reset leaves the kernel's webhost serving; the next VM's host is
+    serving from construction, and takes the radio lease it rides on."""
+    h = serving()
+    again = wh.WebHost(h.carts_root, port=h.port)
+    assert again.serving is True
+    held = []
+
+    class _WS:
+        wifi = None
+
+        def wifi_hold(self, tag):
+            held.append(tag)
+    assert again.adopt(_WS()) is True and held == ["web"]
+    other = wh.WebHost(h.carts_root, port=h.port + 1)
+    assert other.serving is False, "a host on another port is not this one"
 
 
 # ---------------------------------------------------------------------------
 # POST /sync -- the push half (moycore plan 3.4; moy_sync carries the batch
 # semantics and its own suites; what belongs HERE is the endpoint's wiring:
-# routing, the pin gate, the SD gate, and the shelf-refresh hook).
+# routing, the pin gate, the feeder drain, and the shelf-refresh event).
 # ---------------------------------------------------------------------------
-
 
 def _batch(*ops, pin=None, root=None):
     doc = ({"v": 1, "ops": list(ops)} if root is None else
@@ -564,15 +615,14 @@ def test_a_pinned_board_refuses_its_store_to_a_page_with_no_pin(tmp_path):
 def test_the_pin_rides_the_query_because_a_get_has_nowhere_else(tmp_path):
     h = _pinned(tmp_path)
     r = h.handle_http("GET", "/carts.json?pin=4321", b"")
-    assert hasattr(r, "body_iter"), r
-    assert json.loads("".join(r.body_iter))["hop.moy/main.py"]
+    assert _json(r)["hop.moy/main.py"]
     # Wrong, empty and prefix-lookalike are all refusals.
-    for q in ("?pin=0000", "?pin=", "?pinned=4321", "?dev=1"):
+    for q in ("?pin=0000", "?pin=", "?pinned=4321", "?dev=1", "?pin=43210"):
         r = h.handle_http("GET", "/carts.json" + q, b"")
-        assert isinstance(r, bytes) and b"403" in r.split(b"\r\n")[0], q
+        assert b"403" in h_status(r), q
     # ...and the pin survives company on the query.
     r = h.handle_http("GET", "/carts.json?dev=1&pin=4321", b"")
-    assert hasattr(r, "body_iter")
+    assert b"200" in h_status(r)
 
 
 def test_a_post_wants_its_pin_in_the_body_and_ignores_the_query(tmp_path):
@@ -617,11 +667,10 @@ def test_the_boot_assets_stay_open_or_nothing_can_ask_for_the_pin(tmp_path, bake
     shows the pin prompt, so a board that gated its own console behind the pin
     would have nothing left to ask the question with. These are the same bytes
     every build ships and say nothing about this board."""
-    from moy_webserver import BlobResponse
-    baked({n + ".gz": b"\x1f\x8b" + n.encode() for n in wh.ASSETS})
+    baked({n + ".gz": b"\x1f\x8b" + n.encode() for n in _assets()})
     h = _pinned(tmp_path)
     for path in ("/", "/index.html", "/worker.js", "/micropython.wasm"):
-        assert isinstance(h.handle_http("GET", path, b""), BlobResponse), path
+        assert b"200" in h_status(h.handle_http("GET", path, b"")), path
 
 
 def test_the_capability_marker_stays_open_and_says_only_that(tmp_path):
@@ -635,24 +684,23 @@ def test_the_capability_marker_stays_open_and_says_only_that(tmp_path):
 
 
 def test_an_open_host_is_open_end_to_end(tmp_path):
-    """pin=None -- a test, the dev server, a pre-#197 board -- keeps the LAN dev
-    loop free of a password."""
+    """pin=None -- a test, the dev server -- keeps the LAN dev loop free of a
+    password."""
     h = _host(tmp_path)
-    assert hasattr(h.handle_http("GET", "/carts.json", b""), "body_iter")
-    assert b"200" in h.handle_http(
-        "POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "x\n"})
-    ).split(b"\r\n")[0]
+    assert b"200" in h_status(h.handle_http("GET", "/carts.json", b""))
+    assert b"200" in h_status(h.handle_http(
+        "POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "x\n"})))
 
 
 def test_a_refused_read_never_touches_the_store(tmp_path):
-    """Refusing AFTER the walk would leak its timing and, on the T-Deck, take
-    the SD gate to do it -- the gate must come first."""
+    """Refusing AFTER the walk would leak its timing and, on the T-Deck, wait
+    on the panel feeder to do it -- the gate comes first."""
     h = _pinned(tmp_path)
-    hits = []
-    h._with_sd = lambda fn: (hits.append(1), fn())[1]
+    before = nb._drains()
     h.handle_http("GET", "/carts.json", b"")
     h.handle_http("GET", "/files.json", b"")
-    assert not hits, "a refused request still entered the storage gate"
+    h.handle_http("POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "x"}))
+    assert nb._drains() == before, "a refused request touched the store"
 
 
 # ---------------------------------------------------------------------------
@@ -691,76 +739,50 @@ def test_the_journal_a_push_writes_still_never_travels_back(tmp_path):
     history") and the receiver's own journal is not an exception to it."""
     h = _host(tmp_path)
     h.handle_http("POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "z\n"}))
-    body = json.loads("".join(h.handle_http("GET", "/carts.json", b"").body_iter))
+    body = _json(h.handle_http("GET", "/carts.json", b""))
     assert not any("journal" in k for k in body), sorted(body)
 
 
-def test_sync_apply_runs_inside_the_storage_gate(tmp_path):
+def test_sync_apply_drains_the_feeder_once_first(tmp_path):
     """On the T-Deck every one of these writes lands on the card that shares
-    the panel's SPI host -- the whole apply must sit inside ONE gate entry,
-    same law as the asset probe (see that test above)."""
-    root = _store(tmp_path)
-    depth = [0]
-    entries = []
-
-    def gate(fn):
-        depth[0] += 1
-        entries.append(True)
-        try:
-            return fn()
-        finally:
-            depth[0] -= 1
-
-    h = wh.WebHost(str(root), with_sd=gate)
-    seen = []
-    real = wh.moy_sync.apply_ops
-    wh.moy_sync.apply_ops = lambda *a, **kw: (seen.append(depth[0]),
-                                              real(*a, **kw))[1]
-    try:
-        h.handle_http("POST", "/sync",
-                      _batch({"p": "hop.moy/main.py", "t": "x = 1\n"}))
-    finally:
-        wh.moy_sync.apply_ops = real
-    assert seen == [1], "apply ran outside the storage gate"
-    assert len(entries) == 1
+    the panel's SPI host: the apply waits out the band in flight ONCE, before
+    its first write, and holds the bus for the whole batch."""
+    h = _host(tmp_path)
+    before = nb._drains()
+    h.handle_http("POST", "/sync", _batch(
+        {"p": "hop.moy/main.py", "t": "x = 1\n"},
+        {"p": "hop.moy/pmem.json", "t": "[1]"}))
+    assert nb._drains() == before + 1
 
 
 def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
+    """The kernel raises an event; the VM's poll turns it into the rescan."""
     root = _store(tmp_path)
     hits = []
-    h = wh.WebHost(str(root),
-                   on_sync=lambda: hits.append(1))
+    h = wh.WebHost(str(root), on_sync=lambda: hits.append(1))
     h.handle_http("POST", "/sync",
                   _batch({"p": "hop.moy/main.py", "t": "x = 2\n"}))
+    h.poll()
     assert not hits, "a code edit repaints nothing on the shelf"
     h.handle_http("POST", "/sync",
                   _batch({"p": "hop.moy/manifest.json", "t": '{"title":"H2"}'}))
+    h.poll()
     assert hits == [1]
+    h.handle_http("POST", "/sync", _batch({"p": "new.moy/main.py", "t": "y"}))
+    h.poll()
+    assert hits == [1, 1], "a cart born is a shelf change"
+    h.poll()
+    assert hits == [1, 1], "an event fires once"
 
 
-def test_the_sd_gate_wraps_the_store_read(tmp_path):
-    """On the T-Deck the store is on a shared-SPI SD card that must only be
-    touched inside moybyte_sd.with_sd_live -- reading it from anywhere else is
-    the class of mistake that hangs the panel (.claude/rules/boards.md).
-    The handler must go through the injected gate, not around it."""
+def test_the_pull_drains_the_feeder_once_not_per_file(tmp_path):
+    """On the T-Deck the store is on a card sharing the panel's SPI host
+    (.claude/rules/boards.md): the pull waits out the band in flight before it
+    reads, once -- the card stays resident for the walk."""
     h = _host(tmp_path)
-    calls = []
-
-    def gate(fn):
-        calls.append(1)
-        return fn()
-
-    h._with_sd = gate
-    r = h.handle_http("GET", "/carts.json", b"")
-    assert calls == [1], "the store was read outside the SD gate"
-    # The gate is entered BEFORE the generator is built, and the walk runs
-    # after -- which is right for with_sd_live (mount once, keep resident) and
-    # would be wrong for a scoped mount. Pinned because the generator rewrite
-    # silently turned "wrap the read" into "wrap building an iterator", and the
-    # count above passes either way.
-    assert calls == [1] and hasattr(r, "body_iter")
-    json.loads("".join(r.body_iter))       # the walk, after the gate returned
-    assert calls == [1], "the walk re-entered the gate per file"
+    before = nb._drains()
+    _json(h.handle_http("GET", "/carts.json", b""))
+    assert nb._drains() == before + 1
 
 
 # ---------------------------------------------------------------------------
@@ -790,13 +812,12 @@ def test_files_json_serves_the_kinds_and_nothing_else(tmp_path):
     """The same bundle shape as carts.json, kind-filtered: `.history/` is each
     side's own undo history and `trash/` is a LOCAL recovery bin, so neither
     crosses in either direction."""
-    h = _host(tmp_path)
     _files(tmp_path)
+    h = _host(tmp_path)
     r = h.handle_http("GET", "/files.json", b"")
-    assert "application/json" in r.head().decode()
-    body = json.loads("".join(r.body_iter))
-    assert body == {"drawings/sunset.moyimg": "0,1,",
-                    "recordings/take_1/part0.json": "[1]"}
+    assert "application/json" in _head(r)
+    assert _json(r) == {"drawings/sunset.moyimg": "0,1,",
+                        "recordings/take_1/part0.json": "[1]"}
 
 
 def test_files_json_answers_on_a_board_that_has_made_nothing_yet(tmp_path):
@@ -804,33 +825,28 @@ def test_files_json_answers_on_a_board_that_has_made_nothing_yet(tmp_path):
     board predates files sync, and returning it for a store that merely holds
     no drawings would disable the push half for good."""
     h = _host(tmp_path)
-    r = h.handle_http("GET", "/files.json", b"")
-    assert json.loads("".join(r.body_iter)) == {}
+    assert _json(h.handle_http("GET", "/files.json", b"")) == {}
 
 
 def test_a_host_with_no_files_layer_404s_and_says_so_by_being_silent(tmp_path,
                                                                     monkeypatch):
-    """The headless XIAO cart store ships moy_webhost + moy_sync and no
-    moy_carts, so it cannot resolve a files root at all. That is the SAME
+    """A host that cannot resolve a files root (no moy_carts) gives the SAME
     answer a board flashed before files sync gives -- the page then builds no
     files watcher, and nothing retries a batch this host could only refuse."""
-    h = wh.WebHost(str(_store(tmp_path)))
     monkeypatch.setattr(wh.moy_sync, "files_root", lambda root: None)
-    assert h.handle_http("GET", "/files.json", b"") is None
+    h = wh.WebHost(str(_store(tmp_path)))
+    assert b"404" in h_status(h.handle_http("GET", "/files.json", b""))
     r = h.handle_http("POST", "/sync", _batch(
         {"p": "drawings/x.moyimg", "t": "0,"}, root="files"))
-    assert b"400" in r.split(b"\r\n")[0]
+    assert b"400" in h_status(r)
 
 
-def test_the_sd_gate_wraps_the_files_read_too(tmp_path):
-    h = _host(tmp_path)
+def test_the_files_pull_drains_the_feeder_too(tmp_path):
     _files(tmp_path)
-    calls = []
-    h._with_sd = lambda fn: (calls.append(1), fn())[1]
-    r = h.handle_http("GET", "/files.json", b"")
-    assert calls == [1], "the files root was read outside the SD gate"
-    json.loads("".join(r.body_iter))
-    assert calls == [1], "the walk re-entered the gate per file"
+    h = _host(tmp_path)
+    before = nb._drains()
+    _json(h.handle_http("GET", "/files.json", b""))
+    assert nb._drains() == before + 1
 
 
 def test_sync_routes_a_files_batch_into_the_files_root(tmp_path):
@@ -870,31 +886,16 @@ def test_a_files_batch_never_fires_the_shelf_rescan(tmp_path):
     assert not hits
 
 
-def test_the_files_apply_runs_inside_the_storage_gate(tmp_path):
+def test_the_files_apply_drains_the_feeder_too(tmp_path):
     """Same law as the carts apply: on the T-Deck every one of these writes
     lands on the card that shares the panel's SPI host."""
     root = _store(tmp_path)
     _files(tmp_path)
-    depth = [0]
-
-    def gate(fn):
-        depth[0] += 1
-        try:
-            return fn()
-        finally:
-            depth[0] -= 1
-
-    h = wh.WebHost(str(root), with_sd=gate)
-    seen = []
-    real = wh.moy_sync.apply_ops
-    wh.moy_sync.apply_ops = lambda *a, **kw: (seen.append(depth[0]),
-                                              real(*a, **kw))[1]
-    try:
-        h.handle_http("POST", "/sync", _batch(
-            {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
-    finally:
-        wh.moy_sync.apply_ops = real
-    assert seen == [1], "the files apply ran outside the storage gate"
+    h = wh.WebHost(str(root))
+    before = nb._drains()
+    h.handle_http("POST", "/sync", _batch(
+        {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
+    assert nb._drains() == before + 1
 
 
 def test_an_unknown_root_is_a_bad_batch_not_a_guess(tmp_path):
@@ -906,157 +907,14 @@ def test_an_unknown_root_is_a_bad_batch_not_a_guess(tmp_path):
     assert (root / "hop.moy" / "main.py").read_text().endswith("cls(1)\n")
 
 
-@pytest.mark.parametrize("name,ctype", sorted(wh.ASSETS.items()))
-def test_every_allowlisted_asset_has_a_sane_content_type(name, ctype):
-    """A wrong type on `micropython.wasm` is the difference between the console
-    booting and the browser refusing to instantiate it -- and it fails only in
-    a real browser, which is the expensive place to find out."""
-    assert "/" in ctype
-    if name.endswith(".wasm"):
-        assert ctype == "application/wasm"
-    if name.endswith(".js") or name.endswith(".mjs"):
-        assert "javascript" in ctype
-
-
-def test_the_stream_delivers_the_file_byte_for_byte(tmp_path):
-    """The chunk pump over a REAL socket, because everything above it only
-    checks the header.
-
-    `_send_file` reuses one buffer and sends a memoryview slice of it; the
-    failure mode of getting that wrong is not a crash but a body that is
-    correct for every full chunk and garbage in the last partial one -- which
-    on a wasm binary means the browser refuses to instantiate and nothing says
-    why. So: a file whose size is deliberately NOT a chunk multiple, compared
-    byte for byte.
-    """
-    import socket
-    import threading
-    from moy_webserver import WebServer
-
-    payload = bytes(range(256)) * 17 + b"tail"      # 4356 B: 4 chunks + 260
-    src = tmp_path / "micropython.wasm"
-    src.write_bytes(payload)
-    resp = FileResponse(str(src), len(payload), "application/wasm")
-
-    a, b = socket.socketpair()
-    srv = WebServer.__new__(WebServer)
-
-    def pump():
-        try:
-            srv._send_file(a, resp)
-        finally:
-            a.close()               # EOF, so the read loop below terminates
-
-    t = threading.Thread(target=pump)
-    t.start()
-    b.settimeout(5)                 # never hang the suite on a broken pump
-    got = b""
-    while True:
-        chunk = b.recv(65536)
-        if not chunk:
-            break
-        got += chunk
-    t.join(5)
-    assert not t.is_alive(), "the send never finished"
-    b.close()
-
-    head, _, body = got.partition(b"\r\n\r\n")
-    assert b"Content-Length: %d" % len(payload) in head
-    assert body == payload, "streamed body differs (len %d vs %d)" % (
-        len(body), len(payload))
 
 
 # -- the streamed store ------------------------------------------------------
 
-def _stream_to_json(root):
-    return json.loads("".join(wh.stream_store_json(str(root))))
 
 
-def test_the_streamed_json_equals_the_packed_dict(tmp_path):
-    """The generator replaced pack_store on the wire because the dict did not
-    fit (982KB / 61s on P4 glass). It must produce the SAME bundle -- an
-    equality this direct is worth having precisely because the two now share no
-    code path."""
-    root = _store(tmp_path)
-    assert _stream_to_json(root) == wh.pack_store(str(root))
 
 
-def test_the_stream_escapes_what_json_requires(tmp_path):
-    """Hand-rolled escaping, because json.dumps on a 40KB main.py allocates a
-    second 40KB string -- the same mistake one level down. Hand-rolled means it
-    has to be checked against the real thing."""
-    root = tmp_path / "carts"
-    (root / "odd.moy").mkdir(parents=True)
-    nasty = 'q = "hi"\\ntab\\there\\n\\u0001 \\\\ backslash\\r\\n'
-    (root / "odd.moy" / "main.py").write_text(nasty)
-    assert _stream_to_json(root)["odd.moy/main.py"] == nasty
-
-
-def test_an_ascii_file_is_not_rebuilt_character_by_character():
-    """The common case -- a cart source with nothing to escape -- must return
-    the input string itself, not a rebuilt copy. On a 40KB file the difference
-    is a 40KB allocation per cart, which is the whole reason this is not
-    json.dumps."""
-    plain = "def _draw():\n"          # \n IS escaped, so use a truly plain one
-    plain = "def _draw(): cls(1)"
-    assert wh._jstr(plain) == '"' + plain + '"'
-
-
-def test_carts_json_is_a_chunked_response_now(tmp_path):
-    from moy_webserver import ChunkedResponse
-    h = _host(tmp_path)
-    r = h.handle_http("GET", "/carts.json", b"")
-    assert isinstance(r, ChunkedResponse)
-    head = r.head().decode()
-    assert "Transfer-Encoding: chunked" in head
-    assert "Content-Length" not in head, "chunked and length are exclusive"
-    assert json.loads("".join(r.body_iter))["hop.moy/main.py"]
-
-
-def test_the_chunked_wire_format_is_well_formed(tmp_path):
-    """Framing over a real socket: `<hex>\\r\\n<data>\\r\\n` per chunk, `0\\r\\n\\r\\n`
-    to end. A browser is unforgiving here and the failure is a page that hangs
-    mid-load with no error."""
-    import socket
-    import threading
-    from moy_webserver import WebServer, ChunkedResponse
-
-    body = ["{", '"a/b.py"', ":", '"x"', "}"]
-    resp = ChunkedResponse(iter(body))
-    a, b = socket.socketpair()
-    srv = WebServer.__new__(WebServer)
-
-    def pump():
-        try:
-            srv._send_chunked(a, resp)
-        finally:
-            a.close()
-
-    t = threading.Thread(target=pump)
-    t.start()
-    b.settimeout(5)
-    got = b""
-    while True:
-        c = b.recv(65536)
-        if not c:
-            break
-        got += c
-    t.join(5)
-    b.close()
-
-    head, _, wire = got.partition(b"\r\n\r\n")
-    assert b"chunked" in head
-    assert wire.endswith(b"0\r\n\r\n"), wire[-16:]
-    # De-chunk and require the original JSON back.
-    out, rest = b"", wire
-    while True:
-        size_s, _, rest = rest.partition(b"\r\n")
-        n = int(size_s, 16)
-        if n == 0:
-            break
-        out += rest[:n]
-        rest = rest[n + 2:]
-    assert json.loads(out) == {"a/b.py": "x"}
 
 
 # -- the Settings row --------------------------------------------------------
@@ -1143,42 +1001,6 @@ def test_the_verbs_are_safe_with_no_service(tmp_path):
     ws.toggle_webhost()                     # must not raise
 
 
-def test_start_refuses_to_report_serving_when_the_bind_failed(tmp_path):
-    """WebServer.start RETURNS False on a busy port rather than raising (it is
-    guarded so it cannot take the loop down). Not checking it is how a row comes
-    to say ON over a server that is serving nothing."""
-    h = wh.WebHost.__new__(wh.WebHost)
-    h.serving = False
-    h.error = None
-    h.port = 80
-    h._ensure_online = lambda: "10.0.0.5"
-    h._pin_source = None                    # #197: start() resolves the pin
-    h.ip = None
-    from moy_webserver import WebServer
-    h.__class__.__mro__      # sanity: WebHost derives from WebServer
-    orig = WebServer.start
-    try:
-        WebServer.start = lambda self, ip=None: False      # simulate a busy port
-        raised = False
-        try:
-            wh.WebHost.start(h)
-        except OSError:
-            raised = True
-        assert raised, "a failed bind was reported as success"
-        assert h.serving is False
-    finally:
-        WebServer.start = orig
-
-
-def test_an_asset_is_never_cached_by_default(tmp_path):
-    """The regression that shipped: a day-long cache on files whose whole
-    delivery mechanism is "push a new build, no reflash". Pinned as a DEFAULT,
-    because the bug was not the parameter existing -- it was the default."""
-    from moy_webserver import FileResponse as FR
-    assert FR("x", 1, "text/plain").max_age == 0
-    assert "no-store" in FR("x", 1, "text/plain").head().decode()
-    # ...and a caller with genuinely immutable assets can still opt in.
-    assert "max-age=60" in FR("x", 1, "text/plain", max_age=60).head().decode()
 
 
 # -- the link wait, and the board parity it exists to protect -----------------
@@ -1299,22 +1121,6 @@ def test_every_board_injects_the_web_console(board):
     assert "ws.webhost" in src, "%s never attaches one to the console" % board
 
 
-class _Conn:
-    def __init__(self):
-        self.sent = bytearray()
-
-    def sendall(self, b):
-        self.sent += bytes(b)
-
-
-def test_a_board_without_shared_storage_pays_no_gate(tmp_path, baked):
-    """A board that declares no shared-storage gate must not acquire one."""
-    baked({"worker.js.gz": b"\x1f\x8bx"})
-    host = wh.WebHost(str(tmp_path / "carts"))
-    assert host.stream_gate is None
-    conn = _Conn()
-    host._send_blob(conn, host._asset("worker.js"))
-    assert bytes(conn.sent).endswith(b"\x1f\x8bx")
 
 
 def test_the_link_wait_is_shared_and_not_recopied_per_board():
@@ -1467,8 +1273,7 @@ def test_the_url_spells_the_port_unless_it_is_the_default(tmp_path):
     scans, one QR version). Omitting anything else would hand a browser a url
     that goes to port 80 -- so the host dev twin's 8321, and every explicit
     port a test or a deployment picks, must still render."""
-    from moy_webserver import DEFAULT_PORT
-    assert DEFAULT_PORT == 80
+    assert wh.DEFAULT_PORT == 80
     host = wh.WebHost(str(tmp_path / "carts"))
     host.ip = "10.0.0.5"
     assert host.port == 80
@@ -1536,22 +1341,20 @@ def test_a_failed_start_holds_no_radio(tmp_path):
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
-def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(
-        tmp_path, monkeypatch):
+def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(tmp_path):
     """The page's last round trip rides the link. `serving` drops at once when
     the row is switched off, but the socket lingers for the closing window --
     and so must the radio, or the goodbye is said into a dead radio and the
     page gets the vanished-board panel this window was written to prevent.
-    `make_webhost` wires the release to the host's own `on_stop`."""
+    `make_webhost` wires the release to the host's own `on_stop`, which the
+    kernel's STOPPED event fires."""
     ws = _ws(tmp_path)
-    h = wh.WebHost(str(_store(tmp_path)), pin="4321",
+    h = wh.WebHost(str(_store(tmp_path)), pin="4321", port=0,
                    on_stop=lambda: ws.wifi_release("web"))
-    h.sock = None
-    h._ws = None
     h.update = None
     ws.webhost = h
     ws.wifi_hold("web")
-    h.serving = True
+    h.start(ip="10.0.0.5")
     ws.web.park()
 
     ws.stop_web_console()                   # the connection screen's TURN OFF
@@ -1560,14 +1363,10 @@ def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(
     assert "web" in ws.leases.holders(), "let go before the goodbye was said"
     assert ws.wifi.radio is True
 
-    clock = [0]
-    monkeypatch.setattr(wh, "_ticks_ms", lambda: clock[0])
-    monkeypatch.setattr(wh, "_ticks_diff", lambda a, b: a - b)
-    h.closing_at = 0
-    clock[0] = h.CLOSING_MS - 1
+    nb._skew_clock(4990)
     h.poll()
     assert "web" in ws.leases.holders()
-    clock[0] = h.CLOSING_MS
+    nb._skew_clock(20)
     h.poll()
     assert h.closing is None
     assert ws.leases.holders() == [] and ws.wifi.radio is False
@@ -1577,11 +1376,9 @@ def test_every_board_wires_the_release_to_the_socket(tmp_path):
     """make_webhost is the ONE injection every board takes, so the lease's
     release lives there and not in four board files."""
     ws = _ws(tmp_path)
-    h = wh.make_webhost(ws, str(_store(tmp_path)))
+    h = wh.make_webhost(ws, str(_store(tmp_path)), port=0)
     ws.wifi_hold("web")
     h.serving = True
-    h.sock = None
-    h._ws = None
     h.stop()                                # a bare stop: the socket is gone
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
@@ -1847,8 +1644,6 @@ def test_the_405_still_names_where_writes_go(tmp_path):
     assert b"/sync" in r and b"/run" in r
 
 
-def h_status(resp):
-    return resp.split(b"\r\n")[0]
 
 
 # -- the cart-name lookup, and the exit that comes back here -----------------
@@ -1944,9 +1739,8 @@ def test_the_dev_channel_run_uses_the_same_lookup():
 
 def test_a_stop_with_a_reason_keeps_answering_to_give_it(tmp_path):
     h = _host(tmp_path)
-    h.serving = True
+    h.start(ip="10.0.0.5")
     h.stop(why="off")
-
     assert h.serving is False, (
         "`serving` is the console's notion of the feature being ON -- the row "
         "reads it and web_console unparks the glass on it, so holding it true "
@@ -1963,55 +1757,48 @@ def test_the_goodbye_outranks_the_pin(tmp_path):
     deserves to know the console was switched off rather than be left to decide
     it vanished -- and this says nothing except that somebody turned it off."""
     h = _pinned(tmp_path)
-    h.serving = True
+    h.start(ip="10.0.0.5")
     h.stop(why="off")
     r = h.handle_http("GET", "/carts.json", b"")
     assert json.loads(r.split(b"\r\n\r\n", 1)[1])["error"] == "closing"
 
 
-def test_the_window_closes_the_socket_when_it_expires(tmp_path, monkeypatch):
-    h = _host(tmp_path)
-    h.serving = True
-    h.sock = None
-    h._ws = None
-    h.update = None                      # poll() pumps this; nothing to pump here
+def test_the_window_closes_the_socket_when_it_expires(tmp_path):
+    stopped = []
+    h = _host(tmp_path, on_stop=lambda: stopped.append(1))
+    h.start(ip="10.0.0.5")
     h.stop(why="off")
-
-    clock = [0]
-    monkeypatch.setattr(wh, "_ticks_ms", lambda: clock[0])
-    monkeypatch.setattr(wh, "_ticks_diff", lambda a, b: a - b)
-    h.closing_at = 0
-
-    clock[0] = h.CLOSING_MS - 1
+    nb._skew_clock(4990)
     h.poll()
     assert h.closing == "off", "closed early -- the page may not have asked yet"
-
-    clock[0] = h.CLOSING_MS
+    assert not stopped
+    nb._skew_clock(20)
     h.poll()
     assert h.closing is None and h.serving is False
+    assert stopped == [1], "the socket closed and nobody let the radio go"
 
 
 def test_a_bare_stop_still_closes_at_once(tmp_path):
     """What a teardown and an error path want: no window, no waiting. The
     goodbye is opt-in, so nothing that used to stop instantly now lingers."""
     h = _host(tmp_path)
-    h.serving = True
-    h.sock = None
-    h._ws = None
+    h.start(ip="10.0.0.5")
     h.stop()
     assert h.serving is False and h.closing is None
+    assert b"200" in h_status(h.handle_http("GET", "/sync", b""))
 
 
 def test_starting_again_cancels_the_goodbye(tmp_path):
     """Toggled off and straight back on inside the window. A host left
     `closing` would answer 503 to everything while its Settings row said ON."""
     h = _host(tmp_path)
-    h.serving = True
+    h.start(ip="10.0.0.5")
     h.stop(why="off")
     assert h.closing == "off"
-    h.closing = None                     # what start() does; no socket here
+    h.start(ip="10.0.0.5")
+    assert h.closing is None and h.serving is True
     r = h.handle_http("GET", "/carts.json", b"")
-    assert not isinstance(r, bytes) or b"503" not in r.split(b"\r\n")[0]
+    assert b"503" not in h_status(r)
 
 
 def test_the_frame_loop_keeps_polling_a_host_that_is_saying_goodbye():

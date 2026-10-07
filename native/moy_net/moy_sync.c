@@ -60,3 +60,54 @@ size_t moy_sync_encode(char *out, size_t cap, const char *v, size_t v_n,
     put(&s, "}", 1);
     return s.n;
 }
+
+// The integer the span holds when it is a JSON integer from 0 to 9, else -1.
+static int small_int(const char *v, const char *v_end) {
+    if (v == NULL || moy_json_kind(v, v_end) != MOY_JSON_INT) {
+        return -1;
+    }
+    if (v_end - v == 1 && v[0] >= '0' && v[0] <= '9') {
+        return v[0] - '0';
+    }
+    return -1;
+}
+
+int moy_sync_batch(const char *body, size_t n, moy_sync_batch_t *b) {
+    memset(b, 0, sizeof(*b));
+    moy_sync_env_t e;
+    if (moy_sync_decode(body, n, &e) != MOY_SYNC_OK) {
+        return MOY_SYNC_BAD;
+    }
+    int v = small_int(e.v, e.v_end);
+    int named = e.root != NULL && moy_json_kind(e.root, e.root_end) != MOY_JSON_NULL;
+    int str = named && moy_json_kind(e.root, e.root_end) == MOY_JSON_STR;
+    if (v == 1) {
+        if (named && !(str && moy_json_str_is(e.root, e.root_end, "carts", 5))) {
+            return MOY_SYNC_BAD;
+        }
+        b->root = MOY_SYNC_CARTS;
+    } else if (v == 2) {
+        if (!str || !moy_json_str_is(e.root, e.root_end, "files", 5)) {
+            return MOY_SYNC_BAD;
+        }
+        b->root = MOY_SYNC_FILES;
+    } else {
+        return MOY_SYNC_BAD;
+    }
+    if (e.ops == NULL || moy_json_kind(e.ops, e.ops_end) != MOY_JSON_ARR) {
+        return MOY_SYNC_BAD;
+    }
+    b->ops = e.ops;
+    b->ops_end = e.ops_end;
+    b->pin = e.pin;
+    b->pin_end = e.pin_end;
+    return MOY_SYNC_OK;
+}
+
+int moy_sync_pin_ok(const moy_sync_batch_t *b, const char *pin) {
+    if (pin == NULL || pin[0] == '\0') {
+        return 1;
+    }
+    return b->pin != NULL && moy_json_kind(b->pin, b->pin_end) == MOY_JSON_STR
+           && moy_json_str_is(b->pin, b->pin_end, pin, strlen(pin));
+}

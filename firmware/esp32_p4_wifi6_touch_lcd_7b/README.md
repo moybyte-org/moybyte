@@ -213,7 +213,7 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     except the files that board file names, each with its reason, which is how
     `wm_windowed.py` and its halves come across here and are denied
     on the S3 — plus `device_canvas`/`device_api`/`device_wifi`/`device_util`/
-    `moycore_glue`/`moy_ota`/`moy_webserver`/`moy_webhost` and the `moybyte`
+    `moycore_glue`/`moy_ota`/`moy_webhost` and the `moybyte`
     input package from the T-Deck modules tree (an **allowlist**, and it stays
     one: that is a board tree whose default answer is "no"), and the generated
     `carts_data.py`. The stager prunes untracked strays it did not stage — the

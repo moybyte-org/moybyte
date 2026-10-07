@@ -72,7 +72,9 @@ EXFAT_SRAM = 568
 # 1180 bytes of .dram0 and .iram0 by the link map against dev 8ecf490a (the input task's
 # stack, 2560 bytes, replaces the poller thread's 5 KiB and NimBLE's host stack
 # is 2 KiB smaller: both are heap, which the guard measures), 2026-10-07.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180
+# And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
+# which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 

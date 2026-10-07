@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from runtime import moy_sync                                    # noqa: E402
 from runtime.moy_sync import (StoreWatcher, apply_ops, parse_batch,  # noqa: E402
-                              safe_segments, PART_MAX, BATCH_BUDGET,
+                              PART_MAX, BATCH_BUDGET,
                               FILES_ROOT_ID)
 
 
@@ -145,80 +145,7 @@ def test_a_transient_card_read_is_retried_not_dropped(tmp_path):
         builtins.open = orig
 
 
-def test_a_pull_reads_a_file_in_bounded_pieces(tmp_path):
-    """The PULL never holds a file, whatever size it is.
 
-    This is the whole of the 2026-09-09 Guition fix: a 142KB PICO-8 `main.lua`
-    used to cross as six 150KB-class copies and every pull died with a
-    MemoryError on a heap reporting megabytes free, because none of its free
-    RUNS was that long. Assert the bound, not the symptom -- a reader that goes
-    back to `read()` passes every content test and brings the defect back.
-    """
-    p = tmp_path / "big.lua"
-    p.write_text("-- a line of a cart\n" * 9000)                # ~180KB
-    pieces = list(moy_sync.read_text_chunks(str(p)))
-    assert "".join(pieces) == p.read_text()
-    assert len(pieces) > 1, "the whole file arrived as one piece"
-    assert max(len(x) for x in pieces) <= moy_sync.STORE_READ_CHUNK
-
-
-def test_a_pull_reads_the_edge_shapes_the_way_read_text_does(tmp_path):
-    """Empty is a VALUE and binary is an ABSENCE, exactly as `_read_text`'s
-    "" and None are -- a binary file must not arrive as an empty string, which
-    is what deciding it after the first piece would produce."""
-    empty = tmp_path / "empty.txt"
-    empty.write_text("")
-    assert list(moy_sync.read_text_chunks(str(empty))) == []
-    assert moy_sync._read_text(str(empty)) == ""
-
-    blob = tmp_path / "blob.bin"
-    blob.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\xff\xfe\x00\x01" * 4000)
-    assert moy_sync.read_text_chunks(str(blob)) is None
-    assert moy_sync._read_text(str(blob)) is None
-
-
-def test_a_card_that_eios_mid_file_is_re_opened_where_it_left_off(tmp_path):
-    """The retry has to RE-OPEN, not re-read: a FatFS handle latches its disk
-    error, so the handle that saw the EIO answers FR_INVALID_OBJECT forever
-    after. Losing this would turn the Guition's documented transient-card EIO
-    from a hiccup into a silently short file."""
-    import builtins
-
-    p = tmp_path / "flaky.lua"
-    p.write_text("".join("line %04d\n" % i for i in range(2000)))   # ~20KB
-    state = {"reads": 0, "opens": 0}
-    orig = builtins.open
-
-    class _Latching:
-        def __init__(self, f):
-            self._f = f
-            self._dead = False
-
-        def read(self, n=-1):
-            if self._dead:
-                raise OSError(5, "EIO")      # the latch: this handle is done
-            state["reads"] += 1
-            if state["reads"] == 2:
-                self._dead = True
-                raise OSError(5, "EIO")
-            return self._f.read(n)
-
-        def __getattr__(self, name):
-            return getattr(self._f, name)
-
-    def flaky(path, *a, **k):
-        if str(path).endswith("flaky.lua"):
-            state["opens"] += 1
-            return _Latching(orig(path, *a, **k))
-        return orig(path, *a, **k)
-
-    builtins.open = flaky
-    try:
-        got = "".join(moy_sync.read_text_chunks(str(p), chunk=4096))
-    finally:
-        builtins.open = orig
-    assert got == p.read_text(), "the retry lost or duplicated a piece"
-    assert state["opens"] > 1, "the retry re-read the handle that had failed"
 
 
 # ---------------------------------------------------------------------------
@@ -226,22 +153,30 @@ def test_a_card_that_eios_mid_file_is_re_opened_where_it_left_off(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_paths_from_the_network_are_shape_checked():
-    assert safe_segments("hop.moy/main.py") == ["hop.moy", "main.py"]
-    assert safe_segments("hop.moy/scenes/a.moyscene") is not None
+def _refused(tmp_path, path):
+    root = tmp_path / "refusals"
+    root.mkdir(exist_ok=True)
+    applied, errors, _ = apply_ops(str(root), [{"p": path, "t": "x"}])
+    return applied == 0 and errors == [(0, "bad path")]
+
+
+def test_paths_from_the_network_are_shape_checked(tmp_path):
+    root = _store(tmp_path)
+    assert apply_ops(str(root), [{"p": "hop.moy/scenes/b.moyscene", "t": "{}"}])[0] == 1
     for bad in ("", "/abs/path", "a//b", "a/../b", "..", ".", "a/.", "a/",
-                "a\\b/c", "a/b\0c", "a/b\nc", None, 3, "x" * 300):
-        assert safe_segments(bad) is None, bad
+                "a\\b/c", "a/b\0c", "a/b\nc", None, 3, "x" * 300,
+                "a.moy/" + "é" * 255):
+        assert _refused(tmp_path, bad), bad
 
 
-def test_the_skip_set_is_refused_as_a_path_too():
+def test_the_skip_set_is_refused_as_a_path_too(tmp_path):
     """A client asking to write journal/, a .bak or a .tmp is malformed by
     definition -- those never cross the wire in either direction, and .tmp is
     also the receiver's own chunk staging."""
     for bad in ("hop.moy/journal/journal.jsonl", "hop.moy/journal.jsonl",
                 "hop.moy/main.py.bak", "hop.moy/main.py.tmp",
                 "hop.moy/thumbs/wp.mct"):
-        assert safe_segments(bad) is None, bad
+        assert _refused(tmp_path, bad), bad
 
 
 # ---------------------------------------------------------------------------
@@ -499,21 +434,9 @@ def test_a_journal_that_cannot_be_written_never_costs_the_write(tmp_path):
     """The file has already landed by the time the journal is touched, so a
     journal failure is a missing history entry and must never be a lost edit."""
     root = _store(tmp_path)
-    real = moy_sync._moy_journal()
-    assert real is not None
-
-    class Broken:
-        @staticmethod
-        def journal_append(*a, **kw):
-            raise OSError("no space left on device")
-
-    moy_sync._JOURNAL[:] = [Broken]
-    try:
-        applied, errors, _ = apply_ops(
-            str(root), [{"p": "hop.moy/main.py", "t": "cls(5)\n"}],
-            journal=True)
-    finally:
-        moy_sync._JOURNAL[:] = [real]
+    (root / "hop.moy" / "journal").write_text("a file where the folder goes")
+    applied, errors, _ = apply_ops(
+        str(root), [{"p": "hop.moy/main.py", "t": "cls(5)\n"}], journal=True)
     assert (applied, errors) == (1, [])
     assert (root / "hop.moy" / "main.py").read_text() == "cls(5)\n"
 

@@ -294,17 +294,20 @@ def web_console_is_baked_into_the_image(board):
     EVERY board asks, because the failure is silent on every board: a build
     made without `firmware/web_runner/dist` produces an image that compiles,
     boots and runs, and is about 700KB short -- two of them shipped on
-    2026-09-08 before anyone noticed. Self-consistent on purpose (the board's
-    own `moy_webhost.ASSETS`, not this checkout's `dist/`): a board may
+    2026-09-08 before anyone noticed. Self-consistent on purpose (the names
+    the webhost's table serves, not this checkout's `dist/`): a board may
     legitimately run an older build, and the question is whether ITS console
-    is whole.
+    is whole -- and whether the kernel's webhost hands it out.
     """
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import gen_web_blob
     stamp = board.pyval("__import__('moy_web').stamp()")
     assert stamp and stamp != "0 0 none", (
         "this image has NO baked web console (stamp %r) -- it was built with "
         "no firmware/web_runner/dist" % (stamp,))
     count, total = int(stamp.split()[0]), int(stamp.split()[1])
-    declared = board.pyval("sorted(__import__('moy_webhost').ASSETS)")
+    declared = sorted(gen_web_blob.asset_names())
     assert count == len(declared), (stamp, declared)
     assert total > 400000, "a bundle this small is not the wasm console"
     names = board.pyval("__import__('moy_web').assets()")
@@ -317,6 +320,12 @@ def web_console_is_baked_into_the_image(board):
     for name, size, magic in got:
         assert magic == b"\x1f\x8b\x08", (name, magic)
         assert size > 0, name
+    head = board.pyval(
+        "bytes(ws.webhost.handle_http('GET', '/', b'')[:160]) "
+        "if not ws.webhost.serving else b'serving'")
+    if head != b"serving":
+        assert head.startswith(b"HTTP/1.1 200 OK"), head
+        assert b"Content-Encoding: gzip" in head, head
 
 
 def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):

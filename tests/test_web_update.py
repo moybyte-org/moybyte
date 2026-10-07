@@ -176,7 +176,7 @@ def test_a_board_that_cannot_update_says_so_differently_from_one_that_cannot_hea
     code, payload = _reply(h.handle_http("GET", "/update?pin=1234", None))
     assert code == 503
     assert json.loads(payload) == {"error": "no updater"}
-    assert h.handle_http("GET", "/updates?pin=1234", None) is None
+    assert _reply(h.handle_http("GET", "/updates?pin=1234", None))[0] == 404
 
 
 def test_the_update_route_does_not_shadow_the_store(tmp_path):
@@ -384,10 +384,11 @@ def test_the_console_path_never_takes_the_storage_gate(tmp_path):
     h.handle_http("POST", "/update?pin=1234", '{"action":"install"}')
     h.update.step()
     assert gate.entries == 0, "the update endpoint reached storage"
-    # ...and the counter is LIVE, so the zero above is a fact about /update and
-    # not about a gate nothing was ever going to call.
-    h.handle_http("GET", "/carts.json?pin=1234", None)
-    assert gate.entries == 1
+    # ...and nothing under it touched the store by the kernel's route either.
+    from runtime import net_binding as nb
+    before = nb._drains()
+    h.handle_http("GET", "/update?pin=1234", None)
+    assert nb._drains() == before
 
 
 def test_the_backend_is_pumped_by_the_host_and_not_by_a_board(tmp_path):

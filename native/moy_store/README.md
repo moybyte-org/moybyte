@@ -9,10 +9,10 @@ Python twins, the reference the C is held to.
 | file | what it is |
 |---|---|
 | `moy_vol.h`, `moy_vol.c` | the volume seam: oofatfs, littlefs2 and POSIX behind one interface, and a working folder (`moy_vol_enter`: FAT's own, restored whole on leave; a prefix elsewhere); a store call borrows the VM's own instance |
-| `moy_fs.h`, `moy_fs.c` | the crash-safe write (marker, stamped backup, file in place), its recovering reader, the claim, and the plain file verbs |
+| `moy_fs.h`, `moy_fs.c` | the crash-safe write (marker, stamped backup, file in place), its recovering reader, the claim, the plain file verbs, and the wire's skip rule (`moy_sync._skip` calls it) |
 | `moy_load.h` | loading a cart whole (`moy_cat_load`, in `moy_cat.c`, the same reader as the entry): its scripts, config, flags, sheet, sounds, map, blocks, images and scenes into one PSRAM arena, freed once the binding has built `load`'s dict |
 | `moy_journal.h`, `moy_journal.c` | the journal: `journal.jsonl` appended one json.dumps line a commit, the snapshot first (a claimed publish backup where the stamp matches), the cursor map last; undo and redo by file scope; compaction to 64 entries and 512 KiB; #136's list, snapshot and restore; the graduation rider's manifest write |
-| `moy_pack.h`, `moy_pack.c` | a cart as it travels: the `.moy` archive (the browser's `zipStore`/`unzip` codec; stored entries written, stored and deflated read), the wire's skip rule (`moy_sync._skip` calls it), and adopt, a staged cart moved into place by one rename (Get Carts installs through it) |
+| `moy_pack.h`, `moy_pack.c` | a cart as it travels: the `.moy` archive (the browser's `zipStore`/`unzip` codec; stored entries written, stored and deflated read), and adopt, a staged cart moved into place by one rename (Get Carts installs through it) |
 | `moy_card.c` | the card volume, owned: the store's FATFS (a VfsFat object in PSRAM) over a NATIVE block device with the read cache (`moy_cache.c`), mounted for Python at `/sd` (`moy_store.card`), its sectors from `moy_sd_card_io` on a board (SPI on the S3s, SDMMC on the P4s) or a Python driver on the host; `card_stats` is the tests' check and fault switch |
 | `moy_cache.h`, `moy_cache.c` | the card's 32-sector read cache with no VM on either side: one-sector reads from the last 32 (clock eviction), every write dropping what it covers before it is issued; under `moy_card.c` on every board and under `fuzz_fs.c`'s RAM card at every cut |
 | `moy_arena.h` | a store call's scratch, freed at once |
