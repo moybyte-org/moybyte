@@ -61,11 +61,11 @@ TF_CARD_SRAM = 756
 # board takes since #82: its table roots, counters and output state), 288 bytes
 # of .dram0.data and .bss by the link map against dev cafae3a2, 2026-10-07; the
 # feeder's stack, ring and lock are allocated at the first cart, not at boot.
-# Plus input's statics (native/moy_input: the kernel table's latches, the touch
-# driver's state, and the kernel's I2C bus, which the carve compiled as a stub),
-# 575 bytes of .dram0.bss and .data by the link map against dev cafae3a2,
-# 2026-10-07.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 575
+# Plus input's statics (native/moy_input: the kernel table's latches, the
+# drivers' state, the kernel's I2C bus, which the carve compiled as a stub, and
+# NimBLE's bond cache, ble_store_config, in place of MicroPython's bluetooth),
+# 1455 bytes of .dram0.bss and .data by the objects' sizes, 2026-10-07.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 

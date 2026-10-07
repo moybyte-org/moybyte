@@ -443,12 +443,13 @@ bool moy_ble_start(void) {
     #if defined(MOY_INPUT_BLE_HOSTED)
     // Since hosted ~2.8 the companion's BT controller is not initialised or
     // enabled by default: the host does both, with the transport up first,
-    // before NimBLE's first HCI command (esp-hosted-mcu#212).
+    // before NimBLE's first HCI command (esp-hosted-mcu#212). A companion that
+    // does not answer these RPCs -- the Guition P4's factory C6 slave -- runs
+    // its controller already, so their results are not a verdict: NimBLE's own
+    // start is.
     esp_hosted_connect_to_slave();
-    if (esp_hosted_bt_controller_init() != ESP_OK || esp_hosted_bt_controller_enable() != ESP_OK) {
-        moy_hid_started(s_h, false, "the companion's BT controller did not start");
-        return false;
-    }
+    esp_hosted_bt_controller_init();
+    esp_hosted_bt_controller_enable();
     #endif
     if (nimble_port_init() != ESP_OK) {
         moy_hid_started(s_h, false, "NimBLE did not start");

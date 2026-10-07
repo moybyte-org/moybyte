@@ -66,7 +66,13 @@ EXFAT_SRAM = 568
 # state moved from a static to its session's PSRAM (native/moy_audio), 9,824
 # bytes of .dram0.data and .bss by the link map against dev cafae3a2,
 # 2026-10-07.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824
+# Plus input's statics (native/moy_input: the kernel table's latches, the
+# drivers' state, the kernel's I2C bus, which the carve compiled as a stub, and
+# NimBLE's bond cache, ble_store_config, in place of MicroPython's bluetooth),
+# 1180 bytes of .dram0 and .iram0 by the link map against dev 8ecf490a (the input task's
+# stack, 2560 bytes, replaces the poller thread's 5 KiB and NimBLE's host stack
+# is 2 KiB smaller: both are heap, which the guard measures), 2026-10-07.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
