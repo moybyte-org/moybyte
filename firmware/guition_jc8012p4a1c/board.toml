@@ -270,20 +270,9 @@ source   = "native"
 why = """
 The C-module twin of [modules.shared] (#161; see the T-Deck's board.toml for
 the mechanism). Every directory under native/ with a micropython.cmake crosses
-unless denied here. The three denials are the Waveshare's three, for the same
+unless denied here. The two denials are the Waveshare's two, for the same
 hardware reasons. (native/p4/ has no micropython.cmake of its own, so this
 scan never sees it -- that tier is the second source, [native.p4] below.)"""
-
-[[native.shared.deny]]
-module = "moy_sd"
-why = """
-moy_sd's whole reason to exist -- attaching a card to a host the T-Deck's
-moy_lcd already initialised, on a SHARED SPI bus -- names hardware this board
-does not have. The TF slot here is the Waveshare's arrangement exactly (SDMMC
-slot 0 on GPIO39-44, powered from LDO channel 4 -- the vendor BSP says so),
-which is plain `machine.SDCard`; `device/card_store.py` mounts it and makes it
-the cart store when a card is in. The OTA directory stays /moy/update on the
-internal VFS either way."""
 
 [[native.shared.deny]]
 module = "moy_audio"
@@ -306,6 +295,18 @@ framebuffer continuously, so there is no per-frame transfer, no band, no
 bounce and no completion ISR. Staging it would compile a FreeRTOS task and a
 DMA-SRAM allocation into the image for code nothing calls. A DSI board that
 ever needs a push path is a new decision, not a flip of this one."""
+
+[[native.shared.take]]
+module = "moy_sd"
+why = """
+The card driver under the store's own card volume (docs/kernel_store_2026-10.md
+slice 8): `moy_sd.mmc` brings the TF card up on SDMMC slot 0 (GPIO39-44, LDO4
+powered; slot 1 is the C6's) once and never tears it down, and
+native/moy_store's card -- the kernel's FATFS and read cache -- reads it
+through `moy_sd_card_io`, with each transfer's bounce in PSRAM, which this
+host's DMA reaches. `device/p4_desktop.p4_card` builds it and
+`device/card_store.py` makes it the cart store when a card is in. The OTA
+directory stays /moy/update on the internal VFS either way."""
 
 [[native.shared.take]]
 module = "moy_wasm"

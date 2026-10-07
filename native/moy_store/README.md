@@ -13,13 +13,14 @@ Python twins, the reference the C is held to.
 | `moy_load.h` | loading a cart whole (`moy_cat_load`, in `moy_cat.c`, the same reader as the entry): its scripts, config, flags, sheet, sounds, map, blocks, images and scenes into one PSRAM arena, freed once the binding has built `load`'s dict |
 | `moy_journal.h`, `moy_journal.c` | the journal: `journal.jsonl` appended one json.dumps line a commit, the snapshot first (a claimed publish backup where the stamp matches), the cursor map last; undo and redo by file scope; compaction to 64 entries and 512 KiB; #136's list, snapshot and restore; the graduation rider's manifest write |
 | `moy_pack.h`, `moy_pack.c` | a cart as it travels: the `.moy` archive (the browser's `zipStore`/`unzip` codec; stored entries written, stored and deflated read), the wire's skip rule (`moy_sync._skip` calls it), and adopt, a staged cart moved into place by one rename (Get Carts installs through it) |
-| `moy_card.c` | the card volume, owned: the store's FATFS (a VfsFat object in PSRAM) over a NATIVE block device with the 32-sector read cache, mounted for Python at `/sd` (`moy_store.card`), its sectors from `moy_sd_card_io` on a board or a Python driver on the host; `card_stats` is the tests' check and fault switch |
+| `moy_card.c` | the card volume, owned: the store's FATFS (a VfsFat object in PSRAM) over a NATIVE block device with the read cache (`moy_cache.c`), mounted for Python at `/sd` (`moy_store.card`), its sectors from `moy_sd_card_io` on a board (SPI on the S3s, SDMMC on the P4s) or a Python driver on the host; `card_stats` is the tests' check and fault switch |
+| `moy_cache.h`, `moy_cache.c` | the card's 32-sector read cache with no VM on either side: one-sector reads from the last 32 (clock eviction), every write dropping what it covers before it is issued; under `moy_card.c` on every board and under `fuzz_fs.c`'s RAM card at every cut |
 | `moy_arena.h` | a store call's scratch, freed at once |
 | `moy_seed.h`, `moy_seed.c` | the seed: a packed roster blob inflated (the image's uzlib) into PSRAM and written as `moybyte.<slug>.moy`; a re-seed keeps the kid's saves and config in place and publishes the manifest last, so a cut seed reads as the older version, or as none |
 | `moy_cat.h`, `moy_cat.c` | the catalogue: the shelf's scan of a root (one listing, then per cart folder one enter, one listing and the files it shows), one cart's entry, and the whole-folder verbs (remove, copy) |
 | `modmoy_store.c` | the MicroPython binding, module `moy_store`: the mount-table borrow (VfsFat's `FATFS`, VfsLfs2's `lfs2_t` behind a layout check, VfsPosix at `/`), every call under `nlr_push`, scratch and the marker cache in PSRAM on a board |
 | `moy_store_host.c` | the host's imports over malloc and POSIX, for the ctypes binding |
-| `fuzz_fs.c` | the power-cut matrix (`--matrix`) and the seeded fuzz over oofatfs on a RAM card and littlefs2 on a RAM flash, under ASan and UBSan |
+| `fuzz_fs.c` | the power-cut matrix (`--matrix`) and the seeded fuzz over oofatfs on a RAM card behind the read cache (every hit compared with the card) and littlefs2 on a RAM flash, under ASan and UBSan |
 | `host/py/mpconfig.h` | the FAT settings oofatfs reads, for the host builds |
 | `micropython.cmake`, `micropython.mk` | the boards', and the desktop's and browser's, builds |
 

@@ -1,5 +1,6 @@
-// The crash-safe write cut at every block write: oofatfs on a RAM card and
-// littlefs2 on a RAM flash, under the sanitizers.
+// The crash-safe write cut at every block write: oofatfs on a RAM card behind
+// the card volume's read cache (moy_cache.h, every hit compared with the card)
+// and littlefs2 on a RAM flash, under the sanitizers.
 //
 // tools/moy_index_spike.py --component fs builds it (`sanitize`), and so does
 // tests/test_moy_store.py. `fuzz_fs --matrix` is the power-cut matrix: every
@@ -22,6 +23,7 @@
 #include "lib/littlefs/lfs2.h"
 #include "lib/oofatfs/ff.h"
 #include "lib/oofatfs/diskio.h"
+#include "moy_cache.h"
 #include "moy_cat.h"
 #include "moy_fs.h"
 #include "moy_journal.h"
@@ -103,27 +105,36 @@ static int lands(void) {
     return cut_at < 0 || k < cut_at;
 }
 
+// The RAM card, below the cache as a board's card driver is below moy_card.c.
+static int ram_io(void *ctx, uint32_t start, uint8_t *buf, uint32_t n, int write) {
+    (void)ctx;
+    if ((size_t)start + n > SECTORS) {
+        return 1;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t *at = disk + ((size_t)start + i) * SECTOR;
+        if (!write) {
+            memcpy(buf + (size_t)i * SECTOR, at, SECTOR);
+        } else if (lands()) {
+            memcpy(at, buf + (size_t)i * SECTOR, SECTOR);
+        }
+    }
+    return 0;
+}
+
+static uint8_t cache_slots[MOY_CACHE_SLOTS * MOY_CACHE_SECTOR];
+static moy_cache_t cache = { .io = ram_io, .slots = cache_slots, .check = 1 };
+
 DRESULT disk_read(void *drv, BYTE *buff, DWORD sector, UINT count) {
     (void)drv;
-    if ((size_t)sector + count > SECTORS) {
-        return RES_PARERR;
-    }
-    memcpy(buff, disk + (size_t)sector * SECTOR, (size_t)count * SECTOR);
-    return RES_OK;
+    int rc = moy_cache_read(&cache, buff, sector, count);
+    CHECK(rc != MOY_CACHE_ESTALE);
+    return rc == 0 ? RES_OK : RES_PARERR;
 }
 
 DRESULT disk_write(void *drv, const BYTE *buff, DWORD sector, UINT count) {
     (void)drv;
-    if ((size_t)sector + count > SECTORS) {
-        return RES_PARERR;
-    }
-    for (UINT i = 0; i < count; i++) {
-        if (lands()) {
-            memcpy(disk + ((size_t)sector + i) * SECTOR, buff + (size_t)i * SECTOR,
-                   SECTOR);
-        }
-    }
-    return RES_OK;
+    return moy_cache_write(&cache, buff, sector, count) == 0 ? RES_OK : RES_PARERR;
 }
 
 DRESULT disk_ioctl(void *drv, BYTE cmd, void *buff) {
@@ -208,6 +219,7 @@ int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
 static void format(void) {
     cut_at = -1;
     if (medium == 0) {
+        moy_cache_drop_all(&cache);
         static uint8_t work[SECTOR];
         memset(disk, 0, sizeof disk);
         memset(&fatfs, 0, sizeof fatfs);
@@ -221,6 +233,7 @@ static void format(void) {
 
 static void mount(void) {
     if (medium == 0) {
+        moy_cache_drop_all(&cache);
         memset(&fatfs, 0, sizeof fatfs);
         CHECK(f_mount(&fatfs) == FR_OK);
     } else {
@@ -769,7 +782,8 @@ static void run(const uint8_t *data, size_t size) {
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "--matrix") == 0) {
         long cuts = matrix();
-        printf("fuzz_fs: matrix of %ld cuts, ok\n", cuts);
+        printf("fuzz_fs: matrix of %ld cuts, ok; card cache %lu hits checked\n", cuts,
+               (unsigned long)cache.hits);
         return 0;
     }
     uint32_t seed = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 1u;

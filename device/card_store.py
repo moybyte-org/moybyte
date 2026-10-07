@@ -1,11 +1,12 @@
 """A card as the cart store, on a board whose card has a bus of its own.
 
 The T-Deck's card shares the panel's SPI host and so lives behind a bracket
-(`moybyte_sd`); a board whose slot nothing else drives -- the two ESP32-P4
-boards' SDMMC slot 0 -- needs none of that: a card is `machine.SDCard` plus
-`vfs.mount`, mounted ONCE at boot, and the console runs on it like any other
-directory. This module is that body, taking the one thing a board decides --
-how to construct its card -- as a function.
+(`moybyte_sd`); a board whose slot nothing else drives -- the Guition S3's SPI3,
+the two ESP32-P4 boards' SDMMC slot 0 -- needs none of that: its card is the
+store's own volume (`moy_store.card` over `moy_sd`), mounted ONCE at boot, and
+the console runs on it like any other directory. This module is that body,
+taking the one thing a board decides -- how to construct its card -- as a
+function.
 
 One store per boot, chosen before anything is written: the card when it
 mounts, the internal flash when it does not. A card that is absent, will not
@@ -29,9 +30,10 @@ def mount(make_card, mount_point=SD_MOUNT, tag="SD", say=print):
     global STATUS
     try:
         card = make_card()
-    except Exception as exc:  # noqa: BLE001 -- no slot, a dead bus
+    except Exception as exc:  # noqa: BLE001 -- no slot, no card, a dead bus
         STATUS = "no card interface: %r" % (exc,)
-        say("%s: no card interface (%r) -- carts on internal flash" % (tag, exc))
+        say("%s: %s (%r) -- carts on internal flash"
+            % (tag, _why(exc, "no card interface"), exc))
         return False
     try:
         _vfs_mount(card, mount_point)
@@ -50,18 +52,18 @@ def mount(make_card, mount_point=SD_MOUNT, tag="SD", say=print):
     return True
 
 
-def _why(exc):
-    """What a failed mount means. `machine.SDCard` builds without touching the
-    card -- its first read is the mount's -- so "no card" arrives HERE, as the
-    errno FatFS gives a host that could not initialise one (FR_NOT_READY ->
-    EBUSY), and "a filesystem this build cannot read" as FR_NO_FILESYSTEM ->
-    ENODEV."""
+def _why(exc, otherwise="card unreadable"):
+    """What a failed card means. The store's card volume mounts as it is
+    built, so its FatFS errnos arrive from `make_card`: FR_NOT_READY -> EBUSY
+    for a host that could not initialise a card, FR_NO_FILESYSTEM -> ENODEV
+    for a filesystem this build cannot read. `moy_sd` names a card that never
+    answered its bring-up (`card_init`)."""
     code = exc.args[0] if getattr(exc, "args", None) else None
-    if code == 16:
+    if code == 16 or (isinstance(code, str) and "card_init" in code):
         return "no card answered"
     if code == 19:
         return "card has no filesystem this build reads"
-    return "card unreadable"
+    return otherwise
 
 
 def _vfs_mount(card, mount_point):

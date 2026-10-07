@@ -5,6 +5,7 @@ add_library(usermod_moy_store INTERFACE)
 target_sources(usermod_moy_store INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_store.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_card.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_cache.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_vol.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_fs.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_cat.c

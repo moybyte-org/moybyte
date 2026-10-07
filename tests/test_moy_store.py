@@ -17,6 +17,7 @@ the desktop MicroPython, where every write is the C store's.
 
 import ctypes
 import os
+import re
 import subprocess
 import sys
 
@@ -44,6 +45,10 @@ def test_the_power_cut_matrix_holds_on_fat_and_littlefs():
     ok, secs, out = got
     assert ok, out[-4000:]
     assert "cuts, ok" in out, out
+    # The FAT medium sits behind the card's read cache with every hit compared
+    # with the card: the matrix is the cache's too, so it must have been hit.
+    hits = re.search(r"card cache (\d+) hits checked", out)
+    assert hits and int(hits.group(1)) > 0, out
 
 
 def test_the_seeded_fuzz_runs_clean_under_the_sanitizers():

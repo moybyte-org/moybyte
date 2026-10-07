@@ -510,14 +510,13 @@ def test_a_generated_file_is_not_staged_with_its_old_timestamp(
 
 
 def test_the_p4_denies_exactly_its_missing_hardware():
-    """The P4's denials are the hand-cp list build.sh used to encode silently:
-    no SD in play, ES8311 audio still open (#82), and no banded flush at all --
+    """The P4's denials: ES8311 audio still open (#82), and no banded flush at all --
     its MIPI-DSI panel scans a PSRAM framebuffer continuously, so moy_flush's
-    feeder + bounce slots would be dead code and dead SRAM. The T-Deck denies
+    feeder + bounce slots would be dead code and dead SRAM. Its card takes
+    moy_sd (SDMMC slot 0 under the store's card volume). The T-Deck denies
     nothing. If this changes, it should be because a board's hardware story
     changed -- update board.toml first, this pin second."""
-    assert sorted(board_config.native_denials(P4)) == [
-        "moy_audio", "moy_flush", "moy_sd"]
+    assert sorted(board_config.native_denials(P4)) == ["moy_audio", "moy_flush"]
     assert board_config.native_denials(TDECK) == {}
     # The Guition's denial is a bring-up staging decision (audio is stage 5 --
     # docs/board_ports_2026-08.md), named with its stage in board.toml; its

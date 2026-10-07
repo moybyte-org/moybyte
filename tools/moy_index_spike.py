@@ -176,7 +176,7 @@ FS = Component(
     "moy_store_host.c", ["moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c",
                          "moy_arena.h", "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_json.h",
                          "moy_json.c"],
-    ("fuzz_fs.c", ["moy_vol.c", "moy_fs.c", "moy_cat.c", "moy_seed.c", "moy_journal.c",
+    ("fuzz_fs.c", ["moy_cache.c", "moy_vol.c", "moy_fs.c", "moy_cat.c", "moy_seed.c", "moy_journal.c",
                    "moy_pack.c",
                    "moy_json.c",
                    "ff.c", "ffunicode.c", "lfs2.c", "lfs2_util.c", "tinflate.c",

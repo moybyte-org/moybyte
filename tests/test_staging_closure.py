@@ -105,12 +105,14 @@ NATIVE = {
                        "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
                        "moy_spine", "moy_kernel"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
-    # it denies moy_flush along with moy_sd and moy_audio.
+    # it denies moy_flush along with moy_audio. moy_sd brings its TF card up on
+    # SDMMC slot 0 under the store's card volume.
     # moy_c6 is the ESP-NOW-over-hosted shim + C6 plumbing (#7, the espnow
     # track -- docs/history/espnow_p4_2026-08.md).
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof", "moy_wasm",
-           "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel"},
+           "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel",
+           "moy_sd"},
     # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
     # four P4 modules are the SILICON tier (native/p4, a second board.toml
     # source) since the day this board became their second consumer -- it
@@ -119,9 +121,9 @@ NATIVE = {
     "guition-p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_dsi", "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof",
                    "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
-                   "moy_spine", "moy_kernel"},
-    # The Guition denies moy_sd + moy_audio for now (stage 4/5 of its bring-up,
-    # see its board.toml); moy_axs is its board-authored QSPI panel backend,
+                   "moy_spine", "moy_kernel", "moy_sd"},
+    # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
+    # board.toml); moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial",

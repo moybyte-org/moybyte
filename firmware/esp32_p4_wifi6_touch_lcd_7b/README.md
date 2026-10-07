@@ -251,11 +251,15 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   step — and it also reports a setting ESP-IDF's Kconfig REFUSED, which is
   how the S3 boards' out-of-range BLE knob was found.
 - **The SD slot is powered from the P4's internal LDO channel 4** — stock
-  MicroPython never enables it, so `machine.SDCard` times out card-or-no-card.
-  `device/p4_desktop.py` (`p4_card`, shared with the Guition P4) does the
-  pure-Python poke at boot: `mem32[0x501151D8] |= (1<<7)|(1<<14)` then
-  `|= (1<<8)` (PMU_EXT_LDO_P1_0P2A: SW-own, tie to 3.3V rail, power on), then
-  `SDCard(slot=0, width=4, sck=43, cmd=44, data=(39,40,41,42))`.
+  MicroPython never enables it, so without it the card times out
+  card-or-no-card. `device/p4_desktop.py` (`p4_card`, shared with the Guition
+  P4) does the pure-Python poke at boot: `mem32[0x501151D8] |= (1<<7)|(1<<14)`
+  then `|= (1<<8)` (PMU_EXT_LDO_P1_0P2A: SW-own, tie to 3.3V rail, power on),
+  then `moy_sd.mmc(0, 43, 44, (39, 40, 41, 42))` brings slot 0 up once (4-bit,
+  20 MHz; never torn down) and `moy_store.card` mounts the store's own volume
+  over it — the kernel's FATFS with the card's read cache
+  (`native/moy_store/moy_card.c`), each transfer's bounce in PSRAM, which this
+  host's DMA reaches.
 - **A card that mounts IS the cart store** (`device/card_store.py`; the T-Deck's
   and the Guition S3's model, minus their bus-sharing machinery — this slot
   shares nothing). Mounted once at `/sd`; the carts and the system documents

@@ -80,9 +80,9 @@ def test_a_card_interface_that_will_not_construct_is_false_with_the_reason(vfs):
 
 
 def test_no_card_arrives_at_the_mount_as_ebusy(vfs):
-    """machine.SDCard() succeeds with nothing in the slot (it initialises the
-    host and leaves the card to the first read), so an empty slot is the mount's
-    failure: FatFS's FR_NOT_READY, EBUSY. Measured on both P4 boards, 2026-10-05."""
+    """A card object built with nothing in the slot (a host initialised, the
+    card left to the first read) fails at the mount: FatFS's FR_NOT_READY,
+    EBUSY."""
     vfs.error = OSError(16)
     card, lines = _Card(), []
 
@@ -90,6 +90,25 @@ def test_no_card_arrives_at_the_mount_as_ebusy(vfs):
 
     assert card.deinits == 1
     assert len(lines) == 1 and "no card answered" in lines[0]
+
+
+@pytest.mark.parametrize("exc,why", [
+    (OSError("moy_sd card_init failed: 263"), "no card answered"),
+    (OSError(19), "no filesystem this build reads"),
+    (OSError(5), "no card interface"),
+])
+def test_the_card_volume_fails_as_it_is_built_and_says_why(vfs, exc, why):
+    """The store's card volume mounts its FATFS as `make_card` builds it, so an
+    empty slot (moy_sd's card_init) and an unreadable filesystem arrive there,
+    and the line names them as the mount's would."""
+    def make():
+        raise exc
+    lines = []
+
+    assert card_store.mount(make, say=lines.append) is False
+
+    assert vfs.mounts == []
+    assert len(lines) == 1 and why in lines[0] and "internal flash" in lines[0]
 
 
 def test_a_filesystem_this_build_cannot_read_frees_the_host(vfs):
@@ -368,6 +387,63 @@ def test_a_card_with_no_filesystem_leaves_the_bus_up_and_says_so(guition):
     guition.error = None
     guition.mod["tf_card"]()
     assert len(guition.opened) == 2
+
+
+@pytest.fixture
+def p4(monkeypatch):
+    """The P4 tier's `p4_card` over a `machine` whose mem32 records the LDO
+    pokes, a `moy_sd` whose SDMMC slot comes up once, and a `moy_store` whose
+    card volume mounts."""
+    state = types.SimpleNamespace(log=[])
+
+    class _Mem:
+        def __init__(self):
+            self.regs = {}
+
+        def __getitem__(self, a):
+            return self.regs.get(a, 0)
+
+        def __setitem__(self, a, v):
+            self.regs[a] = v
+            state.log.append(("mem32", a, v))
+    machine = types.ModuleType("machine")
+    machine.mem32 = _Mem()
+    moy_sd = types.ModuleType("moy_sd")
+
+    def mmc(slot, clk, cmd, data, khz=20000):
+        state.log.append(("mmc", slot, clk, cmd, tuple(data), khz))
+        return 4096
+    moy_sd.mmc = mmc
+    moy_store = types.ModuleType("moy_store")
+
+    def card(sectors, driver=None):
+        state.log.append(("card", sectors, driver))
+        return types.SimpleNamespace(sectors=sectors)
+    moy_store.card = card
+    time = types.ModuleType("time")
+    time.sleep_ms = lambda ms: state.log.append(("sleep", ms))
+    for name, mod in (("machine", machine), ("moy_sd", moy_sd),
+                      ("moy_store", moy_store), ("time", time)):
+        monkeypatch.setitem(sys.modules, name, mod)
+    state.mod = _module_part(ROOT_DIR / "device" / "p4_desktop.py",
+                             ["SD_SLOT", "SD_CLK", "SD_CMD", "SD_DATA", "SD_FREQ_KHZ",
+                              "LDO4_REG", "p4_card"])
+    return state
+
+
+def test_the_p4_card_is_the_stores_volume_on_sdmmc_slot_0(p4):
+    """Both P4s: LDO4 powered before the card's first command, then SDMMC
+    slot 0 (slot 1 is the C6's) on GPIO39-44 through moy_sd, and the store's
+    own card volume -- the kernel's FATFS and read cache -- over it, with no
+    Python driver below it."""
+    vol = p4.mod["p4_card"]()
+    kinds = [e[0] for e in p4.log]
+    assert kinds.index("mem32") < kinds.index("sleep") < kinds.index("mmc")
+    ldo = [e[2] for e in p4.log if e[0] == "mem32"][-1]
+    assert ldo & (1 << 7) and ldo & (1 << 8) and ldo & (1 << 14)
+    assert ("mmc", 0, 43, 44, (39, 40, 41, 42), 20000) in p4.log
+    assert p4.log[-1] == ("card", 4096, None)
+    assert vol.sectors == 4096
 
 
 @pytest.mark.parametrize("path,names", [

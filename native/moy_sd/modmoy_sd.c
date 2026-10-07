@@ -20,7 +20,9 @@
 // `open` is the same card on a host of its own (the Guition S3's SPI3): the
 // bus is initialised here, once, and never torn down -- a machine.SDCard's
 // finaliser frees its host at a VM stop, which the kernel's store must
-// outlive.
+// outlive. `mmc` is the card on an SDMMC slot (the P4s' slot 0), likewise
+// initialised once and kept: the host is shared with the C6's slot 1, so only
+// the card's slot is ever deinitialised, and only by a failed bring-up.
 
 #include <string.h>
 
@@ -32,6 +34,10 @@
 #include "driver/sdspi_host.h"
 #include "driver/spi_master.h"
 #include "sdmmc_cmd.h"
+#include "soc/soc_caps.h"
+#if SOC_SDMMC_HOST_SUPPORTED
+#include "driver/sdmmc_host.h"
+#endif
 #define MOY_SD_HAVE_IDF 1
 #else
 #define MOY_SD_HAVE_IDF 0
@@ -47,12 +53,22 @@
 static sdmmc_card_t *s_card = NULL;
 static sdspi_dev_handle_t s_dev = -1;
 static bool s_host_inited = false;
+static int s_mmc_slot = -1;
+// Where a transfer's bounce comes from: internal DMA memory, unless the host
+// can reach PSRAM (the P4's SDMMC), when it is PSRAM on cache-line bounds.
+static uint32_t s_bounce_caps = MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL;
 
 static void moy_sd_release(void) {
     if (s_card != NULL) {
         free(s_card);
         s_card = NULL;
     }
+#if SOC_SDMMC_HOST_SUPPORTED
+    if (s_mmc_slot >= 0) {
+        sdmmc_host_deinit_slot(s_mmc_slot);
+        s_mmc_slot = -1;
+    }
+#endif
     if (s_dev >= 0) {
         sdspi_host_remove_device(s_dev);
         s_dev = -1;
@@ -114,6 +130,75 @@ static mp_obj_t moy_sd_open(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_sd_open_obj, 5, 6, moy_sd_open);
 
+#if MOY_SD_HAVE_IDF
+// The card's state is no DMA buffer: PSRAM, so an idle card holds no internal
+// SRAM of its own.
+static sdmmc_card_t *moy_sd_card_state(void) {
+    sdmmc_card_t *c = (sdmmc_card_t *)heap_caps_malloc(sizeof(sdmmc_card_t),
+                                                        MALLOC_CAP_SPIRAM);
+    if (c == NULL) {
+        c = (sdmmc_card_t *)malloc(sizeof(sdmmc_card_t));
+    }
+    if (c == NULL) {
+        moy_sd_release();
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_sd: out of memory"));
+    }
+    return c;
+}
+#endif
+
+// mmc(slot, clk, cmd, data, freq_khz=20000) -> sectors: the card on an SDMMC
+// slot, `data` its one or four data pins. The host is initialised here or by
+// whoever already holds another slot (ESP-Hosted's), and the slot once; a
+// second call returns the card already up.
+static mp_obj_t moy_sd_mmc(size_t n_args, const mp_obj_t *args) {
+#if MOY_SD_HAVE_IDF && SOC_SDMMC_HOST_SUPPORTED
+    if (s_card != NULL) {
+        return mp_obj_new_int_from_uint(s_card->csd.capacity);
+    }
+    int slot = mp_obj_get_int(args[0]);
+    size_t width;
+    mp_obj_t *data;
+    mp_obj_get_array(args[3], &width, &data);
+    if (width != 1 && width != 4) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_sd: 1 or 4 data pins"));
+    }
+    sdmmc_slot_config_t cfg = SDMMC_SLOT_CONFIG_DEFAULT();
+    cfg.width = width;
+    cfg.clk = (gpio_num_t)mp_obj_get_int(args[1]);
+    cfg.cmd = (gpio_num_t)mp_obj_get_int(args[2]);
+    cfg.d0 = (gpio_num_t)mp_obj_get_int(data[0]);
+    if (width == 4) {
+        cfg.d1 = (gpio_num_t)mp_obj_get_int(data[1]);
+        cfg.d2 = (gpio_num_t)mp_obj_get_int(data[2]);
+        cfg.d3 = (gpio_num_t)mp_obj_get_int(data[3]);
+    }
+    esp_err_t err = sdmmc_host_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        moy_sd_check(err, "mmc host_init");
+    }
+    err = sdmmc_host_init_slot(slot, &cfg);
+    moy_sd_check(err, "mmc slot");
+    s_mmc_slot = slot;
+#if SOC_SDMMC_PSRAM_DMA_CAPABLE
+    s_bounce_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED;
+#endif
+
+    sdmmc_host_t hostcfg = SDMMC_HOST_DEFAULT();
+    hostcfg.slot = slot;
+    hostcfg.max_freq_khz = n_args > 4 ? mp_obj_get_int(args[4]) : 20000;
+    s_card = moy_sd_card_state();
+    err = sdmmc_card_init(&hostcfg, s_card);
+    moy_sd_check(err, "card_init");
+    return mp_obj_new_int_from_uint(s_card->csd.capacity);
+#else
+    (void)n_args;
+    (void)args;
+    mp_raise_NotImplementedError(MP_ERROR_TEXT("moy_sd: no SDMMC host"));
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_sd_mmc_obj, 4, 5, moy_sd_mmc);
+
 static mp_obj_t moy_sd_init(size_t n_args, const mp_obj_t *args) {
 #if MOY_SD_HAVE_IDF
     int host = (n_args > 0) ? mp_obj_get_int(args[0]) : 1;
@@ -138,16 +223,7 @@ static mp_obj_t moy_sd_init(size_t n_args, const mp_obj_t *args) {
     hostcfg.slot = s_dev;
     hostcfg.max_freq_khz = freq_khz;
 
-    // The card's state is no DMA buffer: PSRAM, so an idle card holds no
-    // internal SRAM of its own.
-    s_card = (sdmmc_card_t *)heap_caps_malloc(sizeof(sdmmc_card_t), MALLOC_CAP_SPIRAM);
-    if (s_card == NULL) {
-        s_card = (sdmmc_card_t *)malloc(sizeof(sdmmc_card_t));
-    }
-    if (s_card == NULL) {
-        moy_sd_release();
-        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_sd: out of memory"));
-    }
+    s_card = moy_sd_card_state();
     err = sdmmc_card_init(&hostcfg, s_card);
     moy_sd_check(err, "card_init");
 
@@ -168,11 +244,12 @@ static void moy_sd_require(void) {
 }
 
 // `count` sectors from or to `buf`, which may live anywhere (a PSRAM
-// bytearray, unaligned), through internal DMA memory. A run of sectors is one
+// bytearray, unaligned), through a bounce the host's DMA reaches: internal
+// DMA memory on SPI, aligned PSRAM on the P4's SDMMC. A run of sectors is one
 // multi-block command: on a write the card's busy time is paid once per run
 // instead of once per sector, and that wait is most of what a single-block
 // write costs. The run's bounce is taken for this call and given back; when
-// internal DMA memory cannot give it the run halves, down to one sector, and
+// its memory cannot give it the run halves, down to one sector, and
 // with not even that the call fails with ESP_ERR_NO_MEM.
 // The card's sectors moved, raising nothing: ESP_OK or the driver's error.
 // What native/moy_store's card volume reads and writes through.
@@ -186,8 +263,7 @@ int moy_sd_card_io(uint32_t start, uint8_t *buf, uint32_t count, int write) {
     uint32_t run = count < MOY_SD_RUN ? count : MOY_SD_RUN;
     uint8_t *bounce = NULL;
     while (run > 0) {
-        bounce = heap_caps_malloc((size_t)run * MOY_SD_SECTOR,
-                                  MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        bounce = heap_caps_malloc((size_t)run * MOY_SD_SECTOR, s_bounce_caps);
         if (bounce != NULL) {
             break;
         }
@@ -285,6 +361,7 @@ static const mp_rom_map_elem_t moy_sd_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),     MP_OBJ_NEW_QSTR(MP_QSTR_moy_sd) },
     { MP_ROM_QSTR(MP_QSTR_init),         MP_ROM_PTR(&moy_sd_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_open),         MP_ROM_PTR(&moy_sd_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mmc),          MP_ROM_PTR(&moy_sd_mmc_obj) },
     { MP_ROM_QSTR(MP_QSTR_read),         MP_ROM_PTR(&moy_sd_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_write),        MP_ROM_PTR(&moy_sd_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_sector_count), MP_ROM_PTR(&moy_sd_sector_count_obj) },

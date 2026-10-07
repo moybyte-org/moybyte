@@ -57,8 +57,8 @@ OTA_UPDATE_DIR = "/moy/update"
 # this board shipped with. The mount is `device/card_store.py`'s, once at boot;
 # what is this board's is how the card is CONSTRUCTED. The slot is on its OWN
 # SPI3 pins (community map, verified on this glass), nothing shared with the
-# panel's QSPI on SPI2, so the card is plain machine.SDCard + vfs.mount and none
-# of the T-Deck's moy_sd bus-sharing machinery applies. The OTA directory (a
+# panel's QSPI on SPI2, so none of the T-Deck's bus-sharing machinery applies:
+# `tf_card` opens the bus once and mounts the store's card volume over it. The OTA directory (a
 # copied image, the pending marker) and the BLE bond store stay on the INTERNAL
 # VFS (device identity, not cart data). A WiFi update stages nothing: it streams
 # into the inactive slot, because this VFS cannot hold the image. The store on a

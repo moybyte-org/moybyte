@@ -37,23 +37,33 @@ BLE_STORE = "/moy/ble_keyboard.json"   # the bond store is device identity: inte
 # `moy_carts.CARTS_DIR`, the T-Deck's, so the system documents beside the carts
 # (system.json, wifi.json, shared.moygfx) land in /sd/moybyte and not at the
 # card's root.
-SD_PINS = dict(slot=0, width=4, sck=43, cmd=44, data=(39, 40, 41, 42))
+SD_SLOT = 0
+SD_CLK = 43
+SD_CMD = 44
+SD_DATA = (39, 40, 41, 42)
+SD_FREQ_KHZ = 20000
 SD_CARTS_ROOT = "/sd/moybyte/carts"
 # PMU_EXT_LDO_P1_0P2A: the register that owns LDO channel 4, which powers the
-# slot. Stock MicroPython never enables it, and without it `machine.SDCard`
-# times out whether a card is there or not.
+# slot. Stock MicroPython never enables it, and without it the card times out
+# whether one is there or not.
 LDO4_REG = 0x501151D8
 
 
 def p4_card():
-    """The TF card: LDO4 switched on (software-owned, tied to the 3.3V rail,
-    then powered), then the SDMMC host. Raises when there is no card."""
+    """The TF card as the store's own volume (native/moy_store's card over
+    moy_sd's SDMMC slot): LDO4 switched on (software-owned, tied to the 3.3V
+    rail, then powered), then the slot brought up once and never torn down,
+    so the store's FATFS outlives anything the VM frees. Raises when there is
+    no card."""
     import time
-    from machine import mem32, SDCard
+    import moy_sd
+    import moy_store
+    from machine import mem32
     mem32[LDO4_REG] |= (1 << 7) | (1 << 14)
     mem32[LDO4_REG] |= (1 << 8)
     time.sleep_ms(10)               # the card's supply settling before CMD0
-    return SDCard(**SD_PINS)
+    sectors = moy_sd.mmc(SD_SLOT, SD_CLK, SD_CMD, SD_DATA, SD_FREQ_KHZ)
+    return moy_store.card(sectors)
 
 
 def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
