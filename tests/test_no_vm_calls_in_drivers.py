@@ -24,7 +24,9 @@ CONSOLES = {
     "guition_jc8012p4a1c": "MOYBYTE_GUITION_P4",
 }
 
-_VM = re.compile(r'\bmp_[a-z_]+\s*\(|\bMP_[A-Z_]+\b|#include\s+"py/')
+# The port's configuration header is the one VM header a driver reads: it
+# carries the board's defines.
+_VM = re.compile(r'\bmp_[a-z_]+\s*\(|\bMP_[A-Z_]+\b|#include\s+"py/(?!mpconfig\.h")')
 
 
 def _code(text):

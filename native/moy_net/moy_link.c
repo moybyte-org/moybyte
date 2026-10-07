@@ -1,64 +1,10 @@
 // The radio link's owner (moy_link.h).
 
-#include <string.h>
-
 #include "moy_link.h"
 
-void moy_link_ring_init(moy_link_ring_t *r, uint8_t *buf, uint32_t cap) {
-    memset(r, 0, sizeof(*r));
-    r->buf = buf;
-    r->cap = cap;
-}
-
-static void copy_in(moy_link_ring_t *r, uint32_t at, const uint8_t *p,
-                    uint32_t n) {
-    at %= r->cap;
-    uint32_t first = r->cap - at < n ? r->cap - at : n;
-    memcpy(r->buf + at, p, first);
-    memcpy(r->buf, p + first, n - first);
-}
-
-static void copy_out(const moy_link_ring_t *r, uint32_t at, uint8_t *p,
-                     uint32_t n) {
-    at %= r->cap;
-    uint32_t first = r->cap - at < n ? r->cap - at : n;
-    memcpy(p, r->buf + at, first);
-    memcpy(p + first, r->buf, n - first);
-}
-
-int moy_link_ring_put(moy_link_ring_t *r, const uint8_t mac[6],
-                      const uint8_t *data, uint32_t len) {
-    uint32_t need = len + MOY_LINK_REC;
-    if (r->buf == NULL || len > MOY_LINK_MAX || need > r->cap - r->used) {
-        r->drops++;
-        return 0;
-    }
-    uint32_t tail = r->head + r->used;
-    uint8_t n = (uint8_t)len;
-    copy_in(r, tail, &n, 1);
-    copy_in(r, tail + 1, mac, 6);
-    copy_in(r, tail + MOY_LINK_REC, data, len);
-    r->used += need;
-    r->rx++;
-    if (r->used > r->peak) {
-        r->peak = r->used;
-    }
-    return 1;
-}
-
-int moy_link_ring_get(moy_link_ring_t *r, uint8_t mac[6], uint8_t *data,
-                      uint32_t cap) {
-    if (r->used == 0) {
-        return -1;
-    }
-    uint8_t n;
-    copy_out(r, r->head, &n, 1);
-    copy_out(r, r->head + 1, mac, 6);
-    copy_out(r, r->head + MOY_LINK_REC, data, n < cap ? n : cap);
-    r->head = (r->head + MOY_LINK_REC + n) % r->cap;
-    r->used -= MOY_LINK_REC + n;
-    return n;
-}
+// The radio half; the ring is moy_link.h's, inline, so a build that compiles
+// this file twice (the port links usermods into the elf and into main) never
+// sees it defined twice.
 
 #if defined(MOY_NET_LINK) && MOY_NET_LINK
 

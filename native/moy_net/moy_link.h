@@ -12,10 +12,12 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
-// A board says it has the link in its mpconfigboard.h (MOY_NET_LINK).
-#if defined(ESP_PLATFORM) && __has_include("mpconfigboard.h")
-#include "mpconfigboard.h"
+// A board says it has the link in its mpconfigboard.h (MOY_NET_LINK), which
+// the port's configuration header includes; nothing else of the VM's is read.
+#ifdef ESP_PLATFORM
+#include "py/mpconfig.h"
 #endif
 
 // The most a frame carries (ESP_NOW_MAX_DATA_LEN, v1 frames).
@@ -33,15 +35,64 @@ typedef struct {
     uint32_t peak;      // the most bytes ever held
 } moy_link_ring_t;
 
-void moy_link_ring_init(moy_link_ring_t *r, uint8_t *buf, uint32_t cap);
-// 1 when the record went in, 0 when it was dropped.
-int moy_link_ring_put(moy_link_ring_t *r, const uint8_t mac[6],
-                      const uint8_t *data, uint32_t len);
+static inline void moy_link_ring_init(moy_link_ring_t *r, uint8_t *buf, uint32_t cap) {
+    memset(r, 0, sizeof(*r));
+    r->buf = buf;
+    r->cap = cap;
+}
+
+static inline void moy_link_copy_in(moy_link_ring_t *r, uint32_t at, const uint8_t *p,
+                    uint32_t n) {
+    at %= r->cap;
+    uint32_t first = r->cap - at < n ? r->cap - at : n;
+    memcpy(r->buf + at, p, first);
+    memcpy(r->buf, p + first, n - first);
+}
+
+static inline void moy_link_copy_out(const moy_link_ring_t *r, uint32_t at, uint8_t *p,
+                     uint32_t n) {
+    at %= r->cap;
+    uint32_t first = r->cap - at < n ? r->cap - at : n;
+    memcpy(p, r->buf + at, first);
+    memcpy(p + first, r->buf, n - first);
+}
+
+// 1 when the record went in, 0 when it was dropped (and counted).
+static inline int moy_link_ring_put(moy_link_ring_t *r, const uint8_t mac[6],
+                      const uint8_t *data, uint32_t len) {
+    uint32_t need = len + MOY_LINK_REC;
+    if (r->buf == NULL || len > MOY_LINK_MAX || need > r->cap - r->used) {
+        r->drops++;
+        return 0;
+    }
+    uint32_t tail = r->head + r->used;
+    uint8_t n = (uint8_t)len;
+    moy_link_copy_in(r, tail, &n, 1);
+    moy_link_copy_in(r, tail + 1, mac, 6);
+    moy_link_copy_in(r, tail + MOY_LINK_REC, data, len);
+    r->used += need;
+    r->rx++;
+    if (r->used > r->peak) {
+        r->peak = r->used;
+    }
+    return 1;
+}
+
 // The oldest record's payload length, its MAC into `mac` and its payload into
-// `data` (at most `cap` bytes; the rest is discarded with it), or -1 when the
-// ring is empty.
-int moy_link_ring_get(moy_link_ring_t *r, uint8_t mac[6], uint8_t *data,
-                      uint32_t cap);
+// `data` (at most `cap` bytes; the rest goes with it), or -1 when empty.
+static inline int moy_link_ring_get(moy_link_ring_t *r, uint8_t mac[6], uint8_t *data,
+                      uint32_t cap) {
+    if (r->used == 0) {
+        return -1;
+    }
+    uint8_t n;
+    moy_link_copy_out(r, r->head, &n, 1);
+    moy_link_copy_out(r, r->head + 1, mac, 6);
+    moy_link_copy_out(r, r->head + MOY_LINK_REC, data, n < cap ? n : cap);
+    r->head = (r->head + MOY_LINK_REC + n) % r->cap;
+    r->used -= MOY_LINK_REC + n;
+    return n;
+}
 
 #if defined(MOY_NET_LINK) && MOY_NET_LINK
 
