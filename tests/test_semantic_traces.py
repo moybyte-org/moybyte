@@ -1572,16 +1572,34 @@ DONE = []
 
 
 def rest():
-    for f in range(10, 20):
-        one(f)
-    DONE.append(1)
+    try:
+        for f in range(10, 20):
+            one(f)
+        DONE.append(None)
+    except Exception as e:
+        DONE.append(repr(e))
+
+
+import time
+
+
+def wait_for_rest():
+    # A function, so the waiting thread adds nothing to the module's globals
+    # while the other one reads them: on a VM without a GIL that insertion
+    # races the lookup and the reader sees a NameError.
+    _thread.start_new_thread(rest, ())
+    waited = 0
+    while not DONE and waited < 3000:
+        time.sleep(0.01)
+        waited += 1
+    if not DONE:
+        raise SystemExit("the second thread never finished its ten frames")
+    if DONE[0] is not None:
+        raise SystemExit("the second thread raised " + DONE[0])
 
 
 if _thread is not None:
-    _thread.start_new_thread(rest, ())
-    import time
-    while not DONE:
-        time.sleep(0.01)
+    wait_for_rest()
 else:
     rest()
 print("DRIVER_DONE")
