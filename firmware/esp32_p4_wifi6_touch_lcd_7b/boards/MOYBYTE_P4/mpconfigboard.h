@@ -100,3 +100,8 @@
 #define MOY_BUS_I2C_SDA                     (7)
 #define MOY_BUS_I2C_SCL                     (8)
 #define MOY_BUS_I2C_HZ                      (400000)
+
+// The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
+// released layer buffers it keeps for the next run. A window's buffer is
+// never pooled (the desk re-mints at every size); a cart's worlds are.
+#define MOY_GLASS_POOL_BYTES                (2 * 1024 * 1024)

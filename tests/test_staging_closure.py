@@ -165,18 +165,18 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 # them.
 HOST_ONLY = {
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "lua_host",
-                       "input", "audio_binding", "lua_binding", "gfx_binding",
+                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding",
                        "native_build", "simulate_desktop", "wasm_host",
                        "wasm_binding"},
     "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-           "audio_binding", "lua_binding", "gfx_binding", "native_build",
+           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "native_build",
            "simulate_desktop", "wasm_host", "wasm_binding"},
     "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     "guition-p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
@@ -185,7 +185,7 @@ HOST_ONLY = {
     # tripwire that only works on boards with denylists is a tripwire that
     # stops working the moment a second allowlist board appears.
     "zero": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-             "audio_binding", "lua_binding", "gfx_binding",
+             "audio_binding", "lua_binding", "gfx_binding", "glass_binding",
              "native_build", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
@@ -193,7 +193,7 @@ HOST_ONLY = {
     # half of the very module device_canvas imports.
     "web": {"host_app", "lua_host", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "native_build", "host_canvas", "wasm_host",
+            "gfx_binding", "glass_binding", "native_build", "host_canvas", "wasm_host",
             "wasm_binding"},
 }
 
@@ -705,8 +705,7 @@ def test_the_two_boards_differ_by_exactly_the_presentation_tier():
     """
     tdeck = set(board_config.denials(TDECK))
     p4 = set(board_config.denials(P4))
-    assert tdeck - p4 == {"wm_windowed.py", "wm_desk.py", "wm_chrome.py",
-                          "surface.py"}, (
+    assert tdeck - p4 == {"wm_windowed.py", "wm_desk.py", "wm_chrome.py"}, (
         "the S3 denies these and the P4 does not: %s" % sorted(tdeck - p4))
     assert p4 - tdeck == set(), (
         "the P4 denies modules the S3 stages: %s" % sorted(p4 - tdeck))

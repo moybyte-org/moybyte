@@ -100,6 +100,13 @@ Runs the BOARDS' canvas class on CPython. The board has the real one; this is
 the adapter that exists only because CPython is not a board."""
 
 [[modules.shared.deny]]
+file = "glass_binding.py"
+kind = "host-only"
+why  = """
+`moy_glass` for CPython: compiles native/moy_glass and dlopens it through
+ctypes. Here `moy_glass` is a compiled-in usermod (native/.staged/moy_glass)."""
+
+[[modules.shared.deny]]
 file = "gfx_binding.py"
 kind = "host-only"
 why  = """
@@ -181,21 +188,13 @@ system-vs-game canvas split it DOES share with the desktop tier lives in
 composite_game, not in the windowed WM."""
 
 [[modules.shared.deny]]
-file = "surface.py"
-kind = "tier"
-why  = """
-Surface model v1's retained-surface object -- a LEAF whose only importers are
-`wm_windowed.py` and the web serve glue. With wm_windowed denied above,
-staging this would freeze bytes nothing imports."""
-
-[[modules.shared.deny]]
 file = "wm_desk.py"
 kind = "tier"
 why  = """
 The windowed WM's two halves that live in their own files: the desk root
 layer and the `WindowChrome` mixin. Only `wm_windowed.py` imports either, so
 with it denied above they would freeze bytes nothing imports -- the same
-reasoning as `surface.py`."""
+reasoning as for `wm_windowed.py` itself."""
 
 [[modules.shared.deny]]
 file = "wm_chrome.py"

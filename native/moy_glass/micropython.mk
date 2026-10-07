@@ -1,6 +1,8 @@
-# moy_glass: the glass: canvas rows, the off-heap buffer table, the layer pool,
-# the surface table and present (docs/kernel_survival_2026-10.md section 3).
-# Its Python twin is runtime/moy_glass.py.
-#
-# The unix and webassembly ports' twin of micropython.cmake; it adds nothing
-# until the crossing gives the module its sources.
+# moy_glass for the unix and webassembly ports: the twin of micropython.cmake.
+# Its handle table is native/moy_spine's moy_htab.c, which that module builds.
+
+MOY_GLASS_DIR := $(USERMOD_DIR)
+
+SRC_USERMOD_C += $(MOY_GLASS_DIR)/modmoy_glass.c
+SRC_USERMOD_LIB_C += $(MOY_GLASS_DIR)/moy_glass.c
+CFLAGS_USERMOD += -I$(MOY_GLASS_DIR) -I$(MOY_GLASS_DIR)/../moy_spine -DMOY_GLASS=1

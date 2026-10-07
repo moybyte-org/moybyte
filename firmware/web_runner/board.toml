@@ -34,8 +34,8 @@ tier = "browser"
 tier_why = """
 The browser runs BOTH board arrangements: handheld (one canvas, system IS
 game) and desktop (big system canvas + a real 320x240 game canvas +
-blit_game), picked at boot. So unlike the S3 it stages wm_windowed.py and
-surface.py, and unlike both boards it keeps host_api.py -- deliberately
+blit_game), picked at boot. So unlike the S3 it stages wm_windowed.py, and
+unlike both boards it keeps host_api.py -- deliberately
 portable, the wasm head's cart API -- and input.py, the host InputState
 web_input decodes into."""
 
@@ -89,6 +89,13 @@ kind = "host-only"
 why  = """
 ctypes over libmoy's wasm import table and WAMR built for Linux, fetched and
 compiled on demand -- no compiler, git or cmake on a board."""
+[[modules.shared.deny]]
+file = "glass_binding.py"
+kind = "host-only"
+why  = """
+`moy_glass` for CPython: compiles native/moy_glass and dlopens it through
+ctypes. The browser's moy_glass is compiled in."""
+
 [[modules.shared.deny]]
 file = "gfx_binding.py"
 kind = "host-only"

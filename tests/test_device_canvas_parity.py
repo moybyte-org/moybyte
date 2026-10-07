@@ -24,21 +24,15 @@ produced, so it silently skipped everywhere but one machine; `make
 unix-micropython` builds it, CI runs it, and it FAILS rather than skips when the
 binary is missing. Fixing that is what made this deletion safe.)
 
-WHAT EACH COMPARISON HERE MEANS NOW. `_both(gfx)` builds a pair, and the two
-arms are different questions:
+WHAT EACH COMPARISON HERE MEANS NOW. `_both()` builds a pair: the compiled
+kernel against `_FakeGfx`, which still transcribes moy_gfx's OWN COMPOSITOR:
+`fill`, `fill_rect`, `fill_spans`, `blit565`, `blit_window`, `blit_indices`.
+libmoy has no counterpart for those, so this is still two implementations, and
+it is what `cls`, `rect`, `pix`, layers, strips and the span batch run through
+in nearly every test below. `DeviceCanvas` has no Python draw lane of its own:
+every board, the browser and the host carry the kernel.
 
-  * `gfx=True` -- the compiled kernel against `_FakeGfx`, which still transcribes
-    moy_gfx's OWN COMPOSITOR: `fill`, `fill_rect`, `fill_spans`, `blit565`,
-    `blit_window`, `blit_indices`. libmoy has no counterpart for those, so this
-    is still two implementations, and it is what `cls`, `rect`, `pix`, layers,
-    strips and the span batch run through in nearly every test below.
-  * `gfx=False` -- the compiled kernel against `DeviceCanvas`'s OWN Python
-    fallback lanes (the no-`moy_gfx` build), plus `_FB`, a stand-in for
-    MicroPython's `framebuf` that CPython does not have. Those lanes are shipped
-    code and this file is the only thing that runs them; a `framebuf` stub is
-    not a copy of libmoy, so it stays.
-
-AND WHAT NEITHER ARM IS. Not a check of libmoy's raster -- read a difference in
+AND WHAT IT IS NOT. Not a check of libmoy's raster -- read a difference in
 one of the nine verbs as impossible here, because both sides call the same
 function. That raster is pinned by the gfx-binding test above, by
 `tests/test_spec_conformance.py` against the spec's goldens, and by
@@ -478,19 +472,11 @@ def Canvas(w, h):
     return host_canvas.make_canvas(w, h)
 
 
-def _both(use_gfx=True):
-    """A fresh pair: the compiled kernel, and the stand-in beside it.
-
-    `use_gfx=True` gives the SECOND canvas `_FakeGfx` -- the compositor verbs
-    transcribed, libmoy's nine forwarded to the same binding the first one uses.
-    `use_gfx=False` drops it to its `framebuf` lane instead (the no-moy_gfx
-    fallback a board takes when the usermod is absent, and DeviceCanvas's own
-    Python lanes for every verb that has one), which is the only reason that
-    lane is exercised anywhere. See the module docstring for what each arm
-    proves; they are not the same question.
-    """
+def _both():
+    """A fresh pair: the compiled kernel, and `_FakeGfx` beside it -- the
+    compositor verbs transcribed, libmoy's nine forwarded to the same binding
+    the first one uses."""
     m = _load_device_canvas()
-    m._USE_GFX = use_gfx
     host = Canvas(W, H)
     dev = m.DeviceCanvas(_FakeComp(W, H))
     return m, host, dev
@@ -534,11 +520,10 @@ def _draw_baseline(api_or_canvas):
 
 
 def test_baseline_primitives_match():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        _draw_baseline(host)
-        _draw_baseline(dev)
-        _assert_same(host, dev, "baseline gfx=%s" % gfx)
+    m, host, dev = _both()
+    _draw_baseline(host)
+    _draw_baseline(dev)
+    _assert_same(host, dev, "baseline")
 
 
 # --------------------------------------------------------------------------- #
@@ -569,11 +554,10 @@ def _draw_shapes(c):
 
 
 def test_fill_pattern_and_ovals_match():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        _draw_shapes(host)
-        _draw_shapes(dev)
-        _assert_same(host, dev, "shapes gfx=%s" % gfx)
+    m, host, dev = _both()
+    _draw_shapes(host)
+    _draw_shapes(dev)
+    _assert_same(host, dev, "shapes")
 
 
 def test_the_fill_pattern_is_screen_anchored_under_a_camera():
@@ -582,74 +566,69 @@ def test_the_fill_pattern_is_screen_anchored_under_a_camera():
     # different routes, so screen-anchoring makes them identical -- while a
     # raster that tested the pattern in world space would put the dither three
     # columns out of phase and still pass every other case in this file.
-    for gfx in (True, False):
-        _, _, a = _both(gfx)               # both arms the SAME lane, so the
-        _, _, b = _both(gfx)               # camera is the only variable
-        a.cls(1)
-        a.fillp(0x3C69)                    # asymmetric: a phase shift shows
-        a.rect(10, 10, 20, 12, 8)
-        b.cls(1)
-        b.fillp(0x3C69)
-        b.camera(3, 1)
-        b.rect(13, 11, 20, 12, 8)
-        assert _dev_rgb565(a) == _dev_rgb565(b), \
-            "the fill pattern moved with the camera (gfx=%s)" % gfx
+    _, _, a = _both()               # both arms the SAME lane, so the
+    _, _, b = _both()               # camera is the only variable
+    a.cls(1)
+    a.fillp(0x3C69)                    # asymmetric: a phase shift shows
+    a.rect(10, 10, 20, 12, 8)
+    b.cls(1)
+    b.fillp(0x3C69)
+    b.camera(3, 1)
+    b.rect(13, 11, 20, 12, 8)
+    assert _dev_rgb565(a) == _dev_rgb565(b), \
+        "the fill pattern moved with the camera"
 
 
 # --------------------------------------------------------------------------- #
 # camera: a draw offset applied to every primitive.                          #
 # --------------------------------------------------------------------------- #
 def test_camera_offsets_all_primitives():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(0)
-            c.camera(10, -5)
-            c.rect(12, 12, 8, 8, 8)
-            c.circ(40, 30, 5, 11)
-            c.line(0, 0, 40, 40, 7)
-            c.pix(20, 20, 10)
-        _assert_same(host, dev, "camera gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(0)
+        c.camera(10, -5)
+        c.rect(12, 12, 8, 8, 8)
+        c.circ(40, 30, 5, 11)
+        c.line(0, 0, 40, 40, 7)
+        c.pix(20, 20, 10)
+    _assert_same(host, dev, "camera")
 
 
 def test_camera_reset_restores_origin():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(0)
-            c.camera(20, 20)
-            c.rect(0, 0, 5, 5, 8)
-            c.camera()                 # reset to (0,0)
-            c.rect(0, 0, 5, 5, 11)
-        _assert_same(host, dev, "camera-reset gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(0)
+        c.camera(20, 20)
+        c.rect(0, 0, 5, 5, 8)
+        c.camera()                 # reset to (0,0)
+        c.rect(0, 0, 5, 5, 11)
+    _assert_same(host, dev, "camera-reset")
 
 
 # --------------------------------------------------------------------------- #
 # clip: pixels outside the rect are suppressed; no-arg resets to full screen. #
 # --------------------------------------------------------------------------- #
 def test_clip_suppresses_out_of_rect_and_resets():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(0)
-            c.clip(16, 16, 16, 16)
-            c.rect(0, 0, W, H, 8)       # would fill everything; clipped to the rect
-            c.circ(20, 20, 30, 11)      # huge circle, clipped
-            c.line(0, 0, W, H, 7)
-            c.clip()                    # reset
-            c.rect(0, 0, 4, 4, 14)      # now draws (top-left, outside old clip)
-        _assert_same(host, dev, "clip gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(0)
+        c.clip(16, 16, 16, 16)
+        c.rect(0, 0, W, H, 8)       # would fill everything; clipped to the rect
+        c.circ(20, 20, 30, 11)      # huge circle, clipped
+        c.line(0, 0, W, H, 7)
+        c.clip()                    # reset
+        c.rect(0, 0, 4, 4, 14)      # now draws (top-left, outside old clip)
+    _assert_same(host, dev, "clip")
 
 
 def test_clip_with_camera_combines():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(0)
-            c.camera(-8, -8)            # shift world right/down
-            c.clip(10, 10, 20, 20)      # clip is screen space (post-camera)
-            c.rect(0, 0, W, H, 9)
-        _assert_same(host, dev, "clip+camera gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(0)
+        c.camera(-8, -8)            # shift world right/down
+        c.clip(10, 10, 20, 20)      # clip is screen space (post-camera)
+        c.rect(0, 0, W, H, 9)
+    _assert_same(host, dev, "clip+camera")
 
 
 # --------------------------------------------------------------------------- #
@@ -660,27 +639,25 @@ def test_text_parity_native_and_fallback():
     # moy_gfx.text kernel (gfx=True) and the framebuf.text fallback (gfx=False --
     # same glyphs, buffer-bounds clip). The legacy per-call scale arg is ignored
     # by both backends (pass 3 to prove it).
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(0)
-            c.print("Hi moy!", 2, 3, 12)
-            c.print("EDGE", 44, 20, 7, 3)     # runs off the right edge; scale ignored
-            c.print("LOW", -5, H - 4, 9)      # off left + bottom
-        _assert_same(host, dev, "text gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(0)
+        c.print("Hi moy!", 2, 3, 12)
+        c.print("EDGE", 44, 20, 7, 3)     # runs off the right edge; scale ignored
+        c.print("LOW", -5, H - 4, 9)      # off left + bottom
+    _assert_same(host, dev, "text")
 
 
 def test_text_camera_pal_parity():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(1)
-            c.pal(12, 9)                # text colour remaps through pal
-            c.camera(6, -2)
-            c.print("CAM", 10, 10, 12)
-            c.camera()
-            c.pal()
-        _assert_same(host, dev, "text camera+pal gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(1)
+        c.pal(12, 9)                # text colour remaps through pal
+        c.camera(6, -2)
+        c.print("CAM", 10, 10, 12)
+        c.camera()
+        c.pal()
+    _assert_same(host, dev, "text camera+pal")
 
 
 def test_text_bytes_parity():
@@ -698,26 +675,25 @@ def test_text_bytes_parity():
     fallback (which cannot be handed a 0xFF at all) maps them to a space and
     lands the same pixels in the same places.
     """
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(0)
-            c.print(b"G\xffH", 2, 3, 12)        # bytes, straight from moy_lua
-            c.print("caf\u00e9", 2, 14, 7)      # a str: 5 bytes, so 5 cells
-            c.print(b"\x00\x1fA", 2, 25, 9)     # control bytes still advance
-            c.print(b"", 2, 36, 7)              # empty is not a crash
-        _assert_same(host, dev, "text bytes gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(0)
+        c.print(b"G\xffH", 2, 3, 12)        # bytes, straight from moy_lua
+        c.print("caf\u00e9", 2, 14, 7)      # a str: 5 bytes, so 5 cells
+        c.print(b"\x00\x1fA", 2, 25, 9)     # control bytes still advance
+        c.print(b"", 2, 36, 7)              # empty is not a crash
+    _assert_same(host, dev, "text bytes")
 
 
 def test_text_bytes_do_not_shift_what_follows():
     """The cursor keeps step: a byte with no glyph costs exactly one cell, so
     the text after it lands where it would have anyway. A tier that dropped the
     byte instead would slide the rest left and still 'look fine' in isolation."""
-    m, host, dev = _both(True)
+    m, host, dev = _both()
     for c in (host, dev):
         c.cls(0)
         c.print(b"A\xffB", 2, 3, 12)
-    m2, host2, dev2 = _both(True)
+    m2, host2, dev2 = _both()
     for c in (host2, dev2):
         c.cls(0)
         c.print(b"A B", 2, 3, 12)              # a space is also a blank cell
@@ -742,89 +718,83 @@ def _flip_image():
 
 
 def test_spr_flip_h_v_both_match_host():
-    for gfx in (True, False):
-        for flip in (0, 1, 2, 3):
-            m, host, dev = _both(gfx)
-            img_h = _flip_image()
-            img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
-                                       {"A": 8, "B": 9, "C": 10, "D": 11})
-            host.cls(0)
-            dev.cls(0)
-            host.spr(img_h, 20, 20, 1, flip)
-            dev.spr(img_d, 20, 20, 1, flip)
-            _assert_same(host, dev, "flip=%d gfx=%s" % (flip, gfx))
+    for flip in (0, 1, 2, 3):
+        m, host, dev = _both()
+        img_h = _flip_image()
+        img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
+                                   {"A": 8, "B": 9, "C": 10, "D": 11})
+        host.cls(0)
+        dev.cls(0)
+        host.spr(img_h, 20, 20, 1, flip)
+        dev.spr(img_d, 20, 20, 1, flip)
+        _assert_same(host, dev, "flip=%d" % (flip,))
 
 
 def test_spr_flip_scaled_matches_host():
-    for gfx in (True, False):
-        for flip in (1, 2, 3):
-            m, host, dev = _both(gfx)
-            img_h = _flip_image()
-            img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
-                                       {"A": 8, "B": 9, "C": 10, "D": 11})
-            host.cls(0)
-            dev.cls(0)
-            host.spr(img_h, 8, 8, 3, flip)
-            dev.spr(img_d, 8, 8, 3, flip)
-            _assert_same(host, dev, "flip-scaled=%d gfx=%s" % (flip, gfx))
+    for flip in (1, 2, 3):
+        m, host, dev = _both()
+        img_h = _flip_image()
+        img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
+                                   {"A": 8, "B": 9, "C": 10, "D": 11})
+        host.cls(0)
+        dev.cls(0)
+        host.spr(img_h, 8, 8, 3, flip)
+        dev.spr(img_d, 8, 8, 3, flip)
+        _assert_same(host, dev, "flip-scaled=%d" % (flip,))
 
 
 def test_spr_flip_clipped_matches_host():
     # Flip + clip + camera together through the native blit (clip args to the kernel).
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        img_h = _flip_image()
-        img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
-                                   {"A": 8, "B": 9, "C": 10, "D": 11})
-        for c, img in ((host, img_h), (dev, img_d)):
-            c.cls(0)
-            c.camera(2, 2)
-            c.clip(20, 20, 6, 6)
-            c.spr(img, 18, 18, 2, 3)
-        _assert_same(host, dev, "flip+clip gfx=%s" % gfx)
+    m, host, dev = _both()
+    img_h = _flip_image()
+    img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
+                               {"A": 8, "B": 9, "C": 10, "D": 11})
+    for c, img in ((host, img_h), (dev, img_d)):
+        c.cls(0)
+        c.camera(2, 2)
+        c.clip(20, 20, 6, 6)
+        c.spr(img, 18, 18, 2, 3)
+    _assert_same(host, dev, "flip+clip")
 
 
 # --------------------------------------------------------------------------- #
 # pal / palt: draw-time index remap + sprite transparency.                   #
 # --------------------------------------------------------------------------- #
 def test_pal_remap_matches_host_for_primitives():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(0)
-            c.pal(8, 11)                # draw "8" as "11"
-            c.rect(4, 4, 10, 10, 8)     # -> appears as 11
-            c.circ(40, 30, 6, 8)        # -> 11
-            c.pix(2, 2, 8)              # -> 11
-            c.pal()                     # reset
-            c.rect(20, 20, 6, 6, 8)     # -> stays 8
-        _assert_same(host, dev, "pal gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(0)
+        c.pal(8, 11)                # draw "8" as "11"
+        c.rect(4, 4, 10, 10, 8)     # -> appears as 11
+        c.circ(40, 30, 6, 8)        # -> 11
+        c.pix(2, 2, 8)              # -> 11
+        c.pal()                     # reset
+        c.rect(20, 20, 6, 6, 8)     # -> stays 8
+    _assert_same(host, dev, "pal")
 
 
 def test_pal_remap_matches_host_for_sprites():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        img_h = _flip_image()
-        img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
-                                   {"A": 8, "B": 9, "C": 10, "D": 11})
-        for c, img in ((host, img_h), (dev, img_d)):
-            c.cls(0)
-            c.pal(8, 14)                # recolour the sprite's "8" pixels to 14
-            c.spr(img, 16, 16, 2)
-        _assert_same(host, dev, "pal-spr gfx=%s" % gfx)
+    m, host, dev = _both()
+    img_h = _flip_image()
+    img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
+                               {"A": 8, "B": 9, "C": 10, "D": 11})
+    for c, img in ((host, img_h), (dev, img_d)):
+        c.cls(0)
+        c.pal(8, 14)                # recolour the sprite's "8" pixels to 14
+        c.spr(img, 16, 16, 2)
+    _assert_same(host, dev, "pal-spr")
 
 
 def test_palt_transparency_matches_host():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        img_h = _flip_image()
-        img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
-                                   {"A": 8, "B": 9, "C": 10, "D": 11})
-        for c, img in ((host, img_h), (dev, img_d)):
-            c.cls(3)                    # background so transparency is visible
-            c.palt(9, True)             # make index 9 ("B") transparent
-            c.spr(img, 16, 16, 2)
-        _assert_same(host, dev, "palt gfx=%s" % gfx)
+    m, host, dev = _both()
+    img_h = _flip_image()
+    img_d = m.Image.from_ascii(["AB..", "C...", "....", "...D"],
+                               {"A": 8, "B": 9, "C": 10, "D": 11})
+    for c, img in ((host, img_h), (dev, img_d)):
+        c.cls(3)                    # background so transparency is visible
+        c.palt(9, True)             # make index 9 ("B") transparent
+        c.spr(img, 16, 16, 2)
+    _assert_same(host, dev, "palt")
 
 
 # --------------------------------------------------------------------------- #
@@ -838,70 +808,65 @@ def _tilemap_scene(c, sheet, tm):
 
 
 def test_map_camera_clip_matches_host():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        # Build a sheet + tilemap (both sides share editors.py classes).
-        # SPEC.md 3.2's 16 x 32 sheet, and NOT the smaller one this used to
-        # build. libmoy refuses a sheet that is not exactly 128 x 256 and draws
-        # NOTHING (`mg_is_moy_sheet` in native/moy_gfx/moy_gfx_kernels.h, which both
-        # C surfaces include; `_FakeGfx._is_moy_sheet` here) -- so every sheet verb
-        # has to be handed the shape a real cart has, or this compares two blank
-        # framebuffers and calls it agreement.
-        sheet_h = SpriteSheet(16, 32)
-        sheet_d = m.SpriteSheet(16, 32)
-        for sh in (sheet_h, sheet_d):
-            sh.tset(1, 0, 0, 8)
-            sh.tset(1, 3, 3, 11)
-            sh.tset(2, 1, 1, 14)
-        tm_h = TileMap(4, 4)
-        tm_d = TileMap(4, 4)
-        for tm in (tm_h, tm_d):
-            tm.mset(0, 0, 1)
-            tm.mset(2, 1, 2)
-            tm.mset(3, 3, 1)
-        _tilemap_scene(host, sheet_h, tm_h)
-        _tilemap_scene(dev, sheet_d, tm_d)
-        _assert_same(host, dev, "map gfx=%s" % gfx)
+    m, host, dev = _both()
+    # Build a sheet + tilemap (both sides share editors.py classes).
+    # SPEC.md 3.2's 16 x 32 sheet, and NOT the smaller one this used to
+    # build. libmoy refuses a sheet that is not exactly 128 x 256 and draws
+    # NOTHING (`mg_is_moy_sheet` in native/moy_gfx/moy_gfx_kernels.h, which both
+    # C surfaces include; `_FakeGfx._is_moy_sheet` here) -- so every sheet verb
+    # has to be handed the shape a real cart has, or this compares two blank
+    # framebuffers and calls it agreement.
+    sheet_h = SpriteSheet(16, 32)
+    sheet_d = m.SpriteSheet(16, 32)
+    for sh in (sheet_h, sheet_d):
+        sh.tset(1, 0, 0, 8)
+        sh.tset(1, 3, 3, 11)
+        sh.tset(2, 1, 1, 14)
+    tm_h = TileMap(4, 4)
+    tm_d = TileMap(4, 4)
+    for tm in (tm_h, tm_d):
+        tm.mset(0, 0, 1)
+        tm.mset(2, 1, 2)
+        tm.mset(3, 3, 1)
+    _tilemap_scene(host, sheet_h, tm_h)
+    _tilemap_scene(dev, sheet_d, tm_d)
+    _assert_same(host, dev, "map")
 
 
 def test_map_layers_matches_host():
     """SPEC.md 7.2's layer mask through BOTH map lanes.
 
-    The mask is resolved into a masked copy of the region before either lane
-    runs, so this is what pins the two lanes to the same picture: gfx=True
-    rasters that copy through the compiled kernel, gfx=False walks it cell by
-    cell in Python. A filter applied in one lane and not the other would show
-    up nowhere else -- the goldens only replay the trace through the host."""
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        sheet_h = SpriteSheet(16, 32)
-        sheet_d = m.SpriteSheet(16, 32)
-        for sh in (sheet_h, sheet_d):
-            for tile, col in ((1, 8), (2, 11), (3, 14)):
-                for y in range(8):
-                    for x in range(8):
-                        sh.tset(tile, x, y, col)
-        tm_h = TileMap(4, 4)
-        tm_d = TileMap(4, 4)
-        for tm in (tm_h, tm_d):
-            tm.mset(0, 0, 1)
-            tm.mset(1, 0, 2)
-            tm.mset(2, 1, 3)
-            tm.mset(3, 3, 1)
-        flags = bytearray(512)
-        flags[1] = 0x01
-        flags[2] = 0x03
-        flags[3] = 0x02
-        for c, sh, tm in ((host, sheet_h, tm_h), (dev, sheet_d, tm_d)):
-            c.cls(0)
-            c.camera(2, 3)
-            c.clip(4, 4, 50, 40)
-            c.map(tm, sh, 0, 0, 4, 4, 0, 0, -1, 2, 1, flags)
-            c.map(tm, sh, 0, 0, 4, 4, 8, 8, -1, 1, 2, flags)
-            c.map(tm, sh, -1, -1, 6, 6, 0, 30, -1, 1, 3, flags)   # off-map edges
-            c.map(tm, sh, 0, 0, 4, 4, 0, 0, -1, 1, 0x80, flags)   # nothing carries it
-            c.map(tm, sh, 0, 0, 4, 4, 20, 0, -1, 1, 1, None)      # no table at all
-        _assert_same(host, dev, "map layers gfx=%s" % gfx)
+    The mask is resolved into a masked copy of the region before the kernel
+    rasters it, so this pins the masked picture against the host's."""
+    m, host, dev = _both()
+    sheet_h = SpriteSheet(16, 32)
+    sheet_d = m.SpriteSheet(16, 32)
+    for sh in (sheet_h, sheet_d):
+        for tile, col in ((1, 8), (2, 11), (3, 14)):
+            for y in range(8):
+                for x in range(8):
+                    sh.tset(tile, x, y, col)
+    tm_h = TileMap(4, 4)
+    tm_d = TileMap(4, 4)
+    for tm in (tm_h, tm_d):
+        tm.mset(0, 0, 1)
+        tm.mset(1, 0, 2)
+        tm.mset(2, 1, 3)
+        tm.mset(3, 3, 1)
+    flags = bytearray(512)
+    flags[1] = 0x01
+    flags[2] = 0x03
+    flags[3] = 0x02
+    for c, sh, tm in ((host, sheet_h, tm_h), (dev, sheet_d, tm_d)):
+        c.cls(0)
+        c.camera(2, 3)
+        c.clip(4, 4, 50, 40)
+        c.map(tm, sh, 0, 0, 4, 4, 0, 0, -1, 2, 1, flags)
+        c.map(tm, sh, 0, 0, 4, 4, 8, 8, -1, 1, 2, flags)
+        c.map(tm, sh, -1, -1, 6, 6, 0, 30, -1, 1, 3, flags)   # off-map edges
+        c.map(tm, sh, 0, 0, 4, 4, 0, 0, -1, 1, 0x80, flags)   # nothing carries it
+        c.map(tm, sh, 0, 0, 4, 4, 20, 0, -1, 1, 1, None)      # no table at all
+    _assert_same(host, dev, "map layers")
 
 
 # --------------------------------------------------------------------------- #
@@ -923,22 +888,21 @@ def test_scroll_layer_window_copy_matches_host():
     # new_layer + blit_window_from: pre-render the same scene into a wider layer on
     # both backends, then window-copy at a range of camera offsets (including the
     # right-edge clamp where dw is reduced) and assert the screens match pixel-for-
-    # pixel. Host copies palette indices; device uses moy_gfx.blit_window (gfx=True) or
-    # the memoryview fallback (gfx=False) over RGB565 -- all three must agree.
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        lh = host.new_layer(W * 2, H + 10)
-        ld = dev.new_layer(W * 2, H + 10)
-        assert (lh.w, lh.h) == (W * 2, H + 10)
-        assert (ld.w, ld.h) == (W * 2, H + 10)
-        _layer_scene(lh)
-        _layer_scene(ld)
-        for cam in ((0, 0), (W, 5), (W // 2, 8), (W + 17, 3), (W * 3, H * 3)):
-            host.cls(0)
-            dev.cls(0)
-            host.blit_window_from(lh, cam[0], cam[1])
-            dev.blit_window_from(ld, cam[0], cam[1])
-            _assert_same(host, dev, "scroll gfx=%s cam=%s" % (gfx, cam))
+    # pixel. Host copies palette indices; device uses moy_gfx.blit_window over
+    # RGB565 -- the two must agree.
+    m, host, dev = _both()
+    lh = host.new_layer(W * 2, H + 10)
+    ld = dev.new_layer(W * 2, H + 10)
+    assert (lh.w, lh.h) == (W * 2, H + 10)
+    assert (ld.w, ld.h) == (W * 2, H + 10)
+    _layer_scene(lh)
+    _layer_scene(ld)
+    for cam in ((0, 0), (W, 5), (W // 2, 8), (W + 17, 3), (W * 3, H * 3)):
+        host.cls(0)
+        dev.cls(0)
+        host.blit_window_from(lh, cam[0], cam[1])
+        dev.blit_window_from(ld, cam[0], cam[1])
+        _assert_same(host, dev, "scroll cam=%s" % (cam,))
 
 
 def _bg_index(x, y):
@@ -972,8 +936,7 @@ def test_a_layer_smaller_than_the_screen_lands_unsheared_at_the_origin():
         (40, 80, (0, 60), (0, 32)),
     )
     canvases = (("kernel", lambda: Canvas(W, H)),
-                ("transcription", lambda: _both(True)[2]),
-                ("fallback", lambda: _both(False)[2]))
+                ("transcription", lambda: _both()[2]))
     for lw, lh, cam, (cx, cy) in shapes:
         expect = []
         for y in range(H):
@@ -1009,8 +972,8 @@ def test_blit_indices_matches_host():
     # Place an index bitmap (a paint-app image) at a range of offsets -- including
     # negative and past the right/bottom edge (clamped), plus an index past the palette
     # (skipped, leaves the background) -- on both backends. Host writes indices; device
-    # converts index -> RGB565 via moy_gfx.blit_indices (gfx=True) or the memoryview
-    # fallback (gfx=False). All three must agree pixel-for-pixel.
+    # converts index -> RGB565 via moy_gfx.blit_indices. The two must agree
+    # pixel-for-pixel.
     iw, ih = 20, 12
     img = bytearray(iw * ih)
     for row in range(ih):
@@ -1018,14 +981,13 @@ def test_blit_indices_matches_host():
             img[row * iw + col] = (row * 3 + col) % 63      # valid MOY64 indices 0..62
     img[0] = 99                                             # past the palette -> skipped
     img[iw + 1] = 63
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for pos in ((10, 8), (0, 0), (-5, -4), (W - 6, H - 3), (-100, 50), (W + 5, 2)):
-            host.cls(5)
-            dev.cls(5)
-            host.blit_indices(img, iw, ih, pos[0], pos[1])
-            dev.blit_indices(img, iw, ih, pos[0], pos[1])
-            _assert_same(host, dev, "blit_indices gfx=%s pos=%s" % (gfx, pos))
+    m, host, dev = _both()
+    for pos in ((10, 8), (0, 0), (-5, -4), (W - 6, H - 3), (-100, 50), (W + 5, 2)):
+        host.cls(5)
+        dev.cls(5)
+        host.blit_indices(img, iw, ih, pos[0], pos[1])
+        dev.blit_indices(img, iw, ih, pos[0], pos[1])
+        _assert_same(host, dev, "blit_indices pos=%s" % (pos,))
 
 
 # --------------------------------------------------------------------------- #
@@ -1045,44 +1007,27 @@ def _paint_image(mk, iw, ih):
 
 def test_spr_paint_image_matches_host():
     iw, ih = 30, 20
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        hi = _paint_image(lambda w, h, p, t: Image(w, h, p, t), iw, ih)
-        di = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
-        # Place it at a few offsets including partly off-screen (clamped) + inside a clip.
-        for pos in ((5, 4), (0, 0), (W - 8, H - 6), (-6, -3)):
-            host.cls(3)
-            dev.cls(3)
-            host.spr(hi, pos[0], pos[1])
-            dev.spr(di, pos[0], pos[1])
-            _assert_same(host, dev, "spr(paint) gfx=%s pos=%s" % (gfx, pos))
-        # The device path baked the index->565 buffer ONCE via blit_indices (gfx only).
-        if gfx:
-            assert getattr(di, "_rgb_i", None) is not None, "no blit_indices bake cache"
+    m, host, dev = _both()
+    hi = _paint_image(lambda w, h, p, t: Image(w, h, p, t), iw, ih)
+    di = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
+    # Place it at a few offsets including partly off-screen (clamped) + inside a clip.
+    for pos in ((5, 4), (0, 0), (W - 8, H - 6), (-6, -3)):
+        host.cls(3)
+        dev.cls(3)
+        host.spr(hi, pos[0], pos[1])
+        dev.spr(di, pos[0], pos[1])
+        _assert_same(host, dev, "spr(paint) pos=%s" % (pos,))
+    # The device path baked the index->565 buffer ONCE via blit_indices.
+    assert getattr(di, "_rgb_i", None) is not None, "no blit_indices bake cache"
 
 
-class _BakeTracker:
-    """moybuf with the C registry's single-owner rule enforced (see
-    tests/test_moybuf.py): alloc hands out REAL memoryviews so the canvas's
-    isinstance ownership checks fire, and free refuses a foreign or
-    already-freed buffer."""
-
-    def __init__(self):
-        self.live = {}
-        self.freed = 0
-
-    def alloc(self, n):
-        v = memoryview(bytearray(n))
-        self.live[id(v)] = v
-        return v
-
-    def free(self, buf):
-        if not isinstance(buf, memoryview):
-            return
-        if id(buf) not in self.live:
-            raise AssertionError("freed a foreign or already-freed buffer")
-        del self.live[id(buf)]
-        self.freed += 1
+def _lent(m, tag):
+    """The bakes on loan to `tag`'s live lifetime, counted in the glass."""
+    g = m._glass_mod
+    h = m._OWNERS.get(tag)
+    if h is None:
+        return 0
+    return sum(1 for r in g.rows(h) if g.row(r)[1] == g.ROLE_BAKE)
 
 
 class _CartInput:
@@ -1108,14 +1053,12 @@ def test_a_full_screen_paint_bake_never_comes_off_the_gc_heap():
     churned (measured 64-147KB while ~3MB stayed free). It is the allocation a
     cart with a painted backdrop died on, so it must leave the gc heap whenever
     the image names an owner and an allocator exists."""
-    m, _host, dev = _both(True)
-    tr = _BakeTracker()
-    m._moybuf = tr
+    m, _host, dev = _both()
     img = _owned_paint_image(m, 320, 240)
     dev.spr(img, 0, 0)
     assert isinstance(img._rgb_i, memoryview), "the full-screen bake stayed on the gc heap"
     assert len(img._rgb_i) == 320 * 240 * 2 == 153600
-    assert len(tr.live) == 1
+    assert _lent(m, "cart") == 1
 
     # A RE-bake reuses the loan instead of taking a second one -- an image whose
     # _rgb_i is invalidated repeatedly (the Paint idiom) must not grow the register.
@@ -1123,13 +1066,13 @@ def test_a_full_screen_paint_bake_never_comes_off_the_gc_heap():
     img._rgb_i = None
     dev.spr(img, 0, 0)
     assert img._rgb_i is borrowed
-    assert len(tr.live) == 1
+    assert _lent(m, "cart") == 1
 
     # The run dies: reclaim_layers gives the bake back through the SAME seam
     # that pools its layers -- and this cart never made a layer, which is the
     # case an early return out of reclaim_layers used to leak.
     dev.reclaim_layers("cart")
-    assert tr.freed == 1 and not tr.live
+    assert _lent(m, "cart") == 0
     assert img._rgb_i is None, "a freed bake must be unreachable, not a stale view"
 
 
@@ -1138,9 +1081,7 @@ def test_only_an_owned_full_surface_bake_leaves_the_gc_heap():
     something will hand it back. An UNOWNED paint image (the WM's window
     rasters, a wallpaper thumbnail, the Paint app's own canvas) and a small
     owned one both keep their gc bytearray."""
-    m, _host, dev = _both(True)
-    tr = _BakeTracker()
-    m._moybuf = tr
+    m, _host, dev = _both()
 
     unowned = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), 320, 240)
     dev.spr(unowned, 0, 0)
@@ -1150,20 +1091,19 @@ def test_only_an_owned_full_surface_bake_leaves_the_gc_heap():
     dev.spr(small, 0, 0)
     assert isinstance(small._rgb_i, bytearray)
 
-    assert not tr.live and tr.freed == 0
+    assert _lent(m, "cart") == 0
     dev.reclaim_layers("cart")                      # nothing lent, nothing freed
-    assert tr.freed == 0
+    assert _lent(m, "cart") == 0
 
 
 def test_an_off_heap_paint_bake_draws_the_same_pixels():
     """Residency is an allocation decision, never a pixel one."""
-    m, _host, dev = _both(True)
+    m, _host, dev = _both()
     plain = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), 320, 240)
     dev.cls(3)
     dev.spr(plain, 2, 1)
     on_heap = _dev_rgb565(dev)
 
-    m._moybuf = _BakeTracker()
     owned = _owned_paint_image(m, 320, 240)
     dev.cls(3)
     dev.spr(owned, 2, 1)
@@ -1179,14 +1119,12 @@ def test_one_owner_may_hold_only_so_many_full_surface_loans():
     a dead one. Past the cap a bake takes the gc bytearray it took before this
     mechanism existed: the register stops growing and the cart is no worse off
     than it was."""
-    m, _host, dev = _both(True)
-    tr = _BakeTracker()
-    m._moybuf = tr
+    m, _host, dev = _both()
     imgs = [_owned_paint_image(m, 320, 240) for _ in range(m._MAX_LENT_BAKES + 3)]
     for img in imgs:
         dev.spr(img, 0, 0)
     lent = [i for i in imgs if isinstance(i._rgb_i, memoryview)]
-    assert len(lent) == m._MAX_LENT_BAKES == len(tr.live)
+    assert len(lent) == m._MAX_LENT_BAKES == _lent(m, "cart")
     assert lent == imgs[:m._MAX_LENT_BAKES], "the loans in hand are the first asked for"
     for img in imgs[m._MAX_LENT_BAKES:]:
         assert isinstance(img._rgb_i, bytearray), "past the cap: the old gc path"
@@ -1194,30 +1132,30 @@ def test_one_owner_may_hold_only_so_many_full_surface_loans():
     # ...and the cap costs nothing at reclaim: every loan taken is given back,
     # and no gc-heap bake is mistaken for one.
     dev.reclaim_layers("cart")
-    assert tr.freed == m._MAX_LENT_BAKES and not tr.live
+    assert _lent(m, "cart") == 0
+    assert all(i._rgb_i is None for i in lent)
 
 
 def test_release_bakes_returns_the_loan_and_leaves_the_layers_alone():
     """The verb for an owner that is not a cart RUN (the Paint app, which lives
     as long as the console and so never dies for reclaim_layers to notice). It
-    returns the bakes and NOTHING else -- a leaving app must not drop the map
-    cache or pool the layers of whatever it is leaving to."""
-    m, _host, dev = _both(True)
-    tr = _BakeTracker()
-    m._moybuf = tr
+    returns the bakes and NOTHING else -- a leaving app must not return the
+    layers of whatever it is leaving to."""
+    m, _host, dev = _both()
     img = _owned_paint_image(m, 320, 240, owner="artwork")
     dev.spr(img, 0, 0)
-    dev._mapcache = object()
-    m._GLASS.lend(bytearray(8), 8, m._ROLE_LAYER, m._ORIGIN_POOL, "cart", dev)
+    lay = dev.new_layer(4, 2, owner="artwork")
+    assert _lent(m, "artwork") == 1
 
     dev.release_bakes("artwork")
-    assert tr.freed == 1 and not tr.live
+    assert _lent(m, "artwork") == 0
     assert img._rgb_i is None
-    assert dev._mapcache is not None, "release_bakes is not reclaim_layers"
-    assert m._GLASS.loans("cart", m._ROLE_LAYER, dev), "nor does it pool a cart's layers"
+    assert lay._comp._b.live, "release_bakes is not reclaim_layers"
 
     dev.release_bakes("artwork")        # idempotent: nothing lent, nothing freed
-    assert tr.freed == 1
+    assert _lent(m, "artwork") == 0
+    dev.reclaim_layers("artwork")
+    assert not lay._comp._b.live
 
 
 def test_a_cart_that_builds_its_own_image_gets_the_same_loan():
@@ -1228,9 +1166,7 @@ def test_a_cart_that_builds_its_own_image_gets_the_same_loan():
     from runtime import cart_api
     from runtime.moy_image import Image as PlainImage
 
-    m, _host, dev = _both(True)
-    tr = _BakeTracker()
-    m._moybuf = tr
+    m, _host, dev = _both()
     ns = cart_api.make_api(dev, _CartInput(), {})
     cart_image = ns["Image"]
     assert issubclass(cart_image, PlainImage)
@@ -1243,17 +1179,17 @@ def test_a_cart_that_builds_its_own_image_gets_the_same_loan():
     assert isinstance(img, PlainImage), "spr() and background() dispatch on this"
     assert img._owner == "cart"
     dev.spr(img, 0, 0)
-    assert isinstance(img._rgb_i, memoryview) and len(tr.live) == 1
+    assert isinstance(img._rgb_i, memoryview) and _lent(m, "cart") == 1
 
     # The ASCII-art constructor still reaches through the subclass, and stays on
     # the gc heap -- a kid's 8x8 sprite is nowhere near the full-surface bar.
     tiny = cart_image.from_ascii(["..##..", ".####."], {"#": 8})
     assert isinstance(tiny, PlainImage) and tiny._owner == "cart"
     dev.spr(tiny, 0, 0)
-    assert len(tr.live) == 1
+    assert _lent(m, "cart") == 1
 
     dev.reclaim_layers("cart")          # the run dies: the built image's loan too
-    assert tr.freed == 1 and not tr.live and img._rgb_i is None
+    assert _lent(m, "cart") == 0 and img._rgb_i is None
 
 
 def test_spr_paint_image_into_layer_matches_host():
@@ -1261,19 +1197,18 @@ def test_spr_paint_image_into_layer_matches_host():
     # draw_layer per frame -- the device bakes the paint image into the layer buffer via
     # blit_indices. Host copies indices; both must agree after the window copy.
     iw, ih = W, H
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        hi = _paint_image(lambda w, h, p, t: Image(w, h, p, t), iw, ih)
-        di = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
-        lh = host.new_layer(W, H)
-        ld = dev.new_layer(W, H)
-        lh.spr(hi, 0, 0)                                 # bake the paint bg into the layer
-        ld.spr(di, 0, 0)
-        host.cls(0)
-        dev.cls(0)
-        host.blit_window_from(lh, 0, 0)
-        dev.blit_window_from(ld, 0, 0)
-        _assert_same(host, dev, "paint-in-layer gfx=%s" % gfx)
+    m, host, dev = _both()
+    hi = _paint_image(lambda w, h, p, t: Image(w, h, p, t), iw, ih)
+    di = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
+    lh = host.new_layer(W, H)
+    ld = dev.new_layer(W, H)
+    lh.spr(hi, 0, 0)                                 # bake the paint bg into the layer
+    ld.spr(di, 0, 0)
+    host.cls(0)
+    dev.cls(0)
+    host.blit_window_from(lh, 0, 0)
+    dev.blit_window_from(ld, 0, 0)
+    _assert_same(host, dev, "paint-in-layer")
 
 
 # --------------------------------------------------------------------------- #
@@ -1293,24 +1228,23 @@ def test_blit_strip_matches_host():
     # new_layer + blit_strip: render the same strip scene into a SHORT, full-width layer
     # on both backends, then stamp it at a range of offsets (including off-screen ones the
     # C kernel clamps) and assert the screens match pixel-for-pixel. Host copies palette
-    # indices; device uses moy_gfx.blit565 with key=-1 (gfx=True) or the memoryview fallback
-    # (gfx=False) over RGB565 -- all three agree. This is the cross-backend proof the
+    # indices; device uses moy_gfx.blit565 with key=-1 over RGB565 -- the two
+    # agree. This is the cross-backend proof the
     # cached top-bar strip lands identically everywhere.
     STRIP_H = 8
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        lh = host.new_layer(W, STRIP_H)
-        ld = dev.new_layer(W, STRIP_H)
-        assert (lh.w, lh.h) == (W, STRIP_H)
-        assert (ld.w, ld.h) == (W, STRIP_H)
-        _strip_scene(lh)
-        _strip_scene(ld)
-        for pos in ((0, 0), (0, H - STRIP_H), (5, 10), (-4, 2), (W - 6, 3), (0, H + 4)):
-            host.cls(0)
-            dev.cls(0)
-            host.blit_strip(lh, pos[0], pos[1])
-            dev.blit_strip(ld, pos[0], pos[1])
-            _assert_same(host, dev, "strip gfx=%s pos=%s" % (gfx, pos))
+    m, host, dev = _both()
+    lh = host.new_layer(W, STRIP_H)
+    ld = dev.new_layer(W, STRIP_H)
+    assert (lh.w, lh.h) == (W, STRIP_H)
+    assert (ld.w, ld.h) == (W, STRIP_H)
+    _strip_scene(lh)
+    _strip_scene(ld)
+    for pos in ((0, 0), (0, H - STRIP_H), (5, 10), (-4, 2), (W - 6, 3), (0, H + 4)):
+        host.cls(0)
+        dev.cls(0)
+        host.blit_strip(lh, pos[0], pos[1])
+        dev.blit_strip(ld, pos[0], pos[1])
+        _assert_same(host, dev, "strip pos=%s" % (pos,))
 
 
 # --------------------------------------------------------------------------- #
@@ -1397,7 +1331,7 @@ def _drive_sprite_scene(c, sheet, img, use_batch):
 def test_auto_batch_matches_immediate_on_host():
     # Batching invariance: the auto-batched scene == the same scene drawn immediately,
     # pixel-for-pixel, through the compiled kernel.
-    m, _, _ = _both(True)
+    m, _, _ = _both()
     sheet_h, _ = _batch_sheets(m)
     a = Canvas(W, H)
     b = Canvas(W, H)
@@ -1417,7 +1351,7 @@ def test_rect_sprite_overlap_order():
     auto-gate, which was REVERTED -- the pure-Python span append measured
     SLOWER than the direct fill it replaced, 65 -> 75-85us/op on glass; the
     scene stays as the interleaving pin either way.)"""
-    m, host, dev = _both(True)
+    m, host, dev = _both()
     sheet_h, sheet_d = _batch_sheets(m)
     for c, sheet in ((host, sheet_h), (dev, sheet_d)):
         c.cls(0)
@@ -1440,7 +1374,7 @@ def test_rect_sprite_overlap_order():
 def test_auto_batch_device_equals_immediate_device():
     # And on the DEVICE itself: the auto-batch path == drawing each sprite immediately,
     # so the native blit_batch / single-item blit565 fallback introduce no drift.
-    m, _, _ = _both(True)
+    m, _, _ = _both()
     _, sheet_d = _batch_sheets(m)
     imm = m.DeviceCanvas(_FakeComp(W, H))
     bat = m.DeviceCanvas(_FakeComp(W, H))
@@ -1503,7 +1437,7 @@ def test_spr_gate_protocol_matches_python_path():
     # plain Python spr_tile path for the SAME mixed scene: contiguous runs, a
     # colorkey change, a scale change, float coords, huge coords (int16 clamp),
     # an Image via the fallback, and interleaved non-spr primitives (run breaks).
-    m, _, _ = _both(True)
+    m, _, _ = _both()
     _, sheet_d = _batch_sheets(m)
     stray = _stray_image(m.Image.from_ascii)
 
@@ -1546,7 +1480,7 @@ def test_auto_batch_actually_coalesces():
     # cannot see (N individual sprs draw the same pixels as one blit_batch). This is the
     # runtime guard that a cart's N-sprite loop (e.g. sakura's 120 petals) is one native
     # call, not N -- the whole point of Fold 1.
-    m, _, _ = _both(True)
+    m, _, _ = _both()
     sheet_h, sheet_d = _batch_sheets(m)
     for cv, sh in ((Canvas(W, H), sheet_h),
                    (m.DeviceCanvas(_FakeComp(W, H)), sheet_d)):
@@ -1642,7 +1576,7 @@ def test_lua_spr_protocol_matches_python_path():
     # The Lua writer's scene must draw pixel-identically to the plain Python
     # spr_tile path: contiguous runs, colorkey/scale breaks, float truncation,
     # int16 clamps, invalid tile ids, and non-spr primitives breaking the run.
-    m, _, _ = _both(True)
+    m, _, _ = _both()
     _, sheet_d = _batch_sheets(m)
 
     def scene(cv, spr):
@@ -1678,7 +1612,7 @@ def test_lua_spr_protocol_matches_python_path():
 def test_lua_spr_array_shape_and_clamps():
     # The exact int16 layout the C kernel will read: header [next, colorkey,
     # scale, token] stamped by begin_batch, quads (tile, x, y, flip) after it.
-    m, _, _ = _both(True)
+    m, _, _ = _both()
     _, sheet_d = _batch_sheets(m)
     cv = m.DeviceCanvas(_FakeComp(W, H))
     spr = _LuaSpr(cv, sheet_d)
@@ -1702,7 +1636,7 @@ def test_lua_spr_run_breaks_and_cross_writer_interleave():
     # break; a FULL queue (512 quads) breaks mid-run; and interleaving with the
     # Python writer (token 0) breaks BOTH ways -- the foreign-token check is
     # what lets the console chrome and a Lua cart share one array safely.
-    m, _, _ = _both(True)
+    m, _, _ = _both()
     _, sheet_d = _batch_sheets(m)
     cv = m.DeviceCanvas(_FakeComp(W, H))
     spr = _LuaSpr(cv, sheet_d)
@@ -1733,7 +1667,7 @@ def test_lua_spr_bad_args_error_not_fallback():
     # Lua writer has NO fallback: wrong arity or a non-number arg is a Lua
     # error (-> the cart panel), and nothing lands in the queue.
     import pytest
-    m, _, _ = _both(True)
+    m, _, _ = _both()
     _, sheet_d = _batch_sheets(m)
     cv = m.DeviceCanvas(_FakeComp(W, H))
     spr = _LuaSpr(cv, sheet_d)
@@ -1744,200 +1678,6 @@ def test_lua_spr_bad_args_error_not_fallback():
     assert cv._batch_arr[0] == 4         # queue untouched
 
 
-# --------------------------------------------------------------------------- #
-# map auto-cache (#63 Fold 2): a naive camera()+map() re-uses a hidden cached    #
-# raster on a camera-only change (window/keyed blit) and re-rasters only on a     #
-# (tilemap.gen, sheet.gen, scale) bump. The cache must be BYTE-IDENTICAL to a     #
-# direct raster across camera moves and after mset/pal/scale edits, host-index == #
-# device-565, both gfx modes -- and it must actually KICK IN (counter proof).     #
-# --------------------------------------------------------------------------- #
-def _mapcache_world(m):
-    # A sheet + a WIDER-THAN-SCREEN tilemap (a Hop-Quest-style scroller) with EMPTY cells
-    # (transparency) AND a colorkey'd tile (index-0 holes under colorkey=0), so the cache's
-    # KEYED composite is exercised, not just an opaque background copy.
-    sheet_h = SpriteSheet(16, 32)                    # the SPEC sheet; see _batch_sheets
-    sheet_d = m.SpriteSheet(16, 32)
-    for sh in (sheet_h, sheet_d):
-        for ly in range(8):                          # tile 1: a solid block (no holes)
-            for lx in range(8):
-                sh.tset(1, lx, ly, 6)
-        sh.tset(1, 0, 0, 8); sh.tset(1, 7, 7, 12)    # ... with asymmetric markers
-        sh.tset(2, 1, 1, 11); sh.tset(2, 2, 2, 14)   # tile 2: sparse -> index-0 = colorkey holes
-        sh.tset(2, 5, 5, 9)
-    tm_h = TileMap(12, 10)
-    tm_d = TileMap(12, 10)
-    for tm in (tm_h, tm_d):
-        for cx in range(12):
-            tm.mset(cx, 9, 1)                        # a full solid ground row
-        tm.mset(2, 5, 2); tm.mset(7, 3, 1); tm.mset(9, 6, 2)
-    return sheet_h, sheet_d, tm_h, tm_d
-
-
-def _play_map(c, sheet, tm, cam, colorkey=0, scale=1, direct=False):
-    # Draw the whole tilemap over `sheet` at camera `cam`. `direct=True` forces the UNCACHED
-    # raster by first setting an identity pal(5, 5): that bumps _palgen (so map() rasters
-    # straight to the buffer) WITHOUT changing any pixel -- an in-test direct-raster reference.
-    c.cls(3)
-    if direct:
-        c.pal(5, 5)
-    c.camera(cam[0], cam[1])
-    c.map(tm, sheet, 0, 0, tm.w, tm.h, 0, 0, colorkey, scale)
-    c.camera()
-    if direct:
-        c.pal()
-
-
-def _map_cache_on(m, monkeypatch):
-    # Fold 2 ships DEFAULT OFF on device (the hardware A/B verdict lives on the
-    # MAP_AUTO_CACHE comment); the cache tests force it ON so the logic stays
-    # pinned for a future native keyed-blit kernel / the P4 (#58).
-    #
-    # BOTH module objects, because there are two: `m` is the copy this file
-    # execs per pair, and `device_canvas` is the one `runtime/host_canvas.py`
-    # imported for the C-kernel side. Patching only `m` leaves that side with
-    # the cache OFF, so a "the cache kicked in" counter reads 0 and a
-    # cached-vs-direct comparison silently compares direct against direct.
-    monkeypatch.setitem(m.DeviceCanvas.__init__.__globals__, "MAP_AUTO_CACHE", True)
-    import device_canvas as _dc_host
-    if _dc_host is not m:
-        monkeypatch.setitem(_dc_host.DeviceCanvas.__init__.__globals__,
-                            "MAP_AUTO_CACHE", True)
-
-
-def test_map_autocache_host_equals_device_across_camera_and_edits(monkeypatch):
-    # Cross-backend parity of the AUTO-CACHED map(): the host indexed rasterizer and the device
-    # native path agree byte-for-byte across a camera sweep (cache hits), after an mset
-    # (tilemap.gen bump -> re-raster) and under an active pal (both bypass to a direct raster).
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        _map_cache_on(m, monkeypatch)
-        sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
-        for cam in ((0, 0), (10, 4), (30, 20), (48, 32), (5, 0)):
-            _play_map(host, sh_h, tm_h, cam)
-            _play_map(dev, sh_d, tm_d, cam)
-            _assert_same(host, dev, "autocache gfx=%s cam=%s" % (gfx, cam))
-        tm_h.mset(4, 4, 2); tm_d.mset(4, 4, 2)       # edit the map -> both re-raster
-        _play_map(host, sh_h, tm_h, (12, 6))
-        _play_map(dev, sh_d, tm_d, (12, 6))
-        _assert_same(host, dev, "autocache post-mset gfx=%s" % gfx)
-        # An active palette on map() must still match (both backends bypass the cache).
-        host.pal(6, 14); dev.pal(6, 14)
-        _play_map(host, sh_h, tm_h, (8, 2))
-        _play_map(dev, sh_d, tm_d, (8, 2))
-        _assert_same(host, dev, "autocache pal-active gfx=%s" % gfx)
-
-
-def test_map_autocache_equals_direct_raster(monkeypatch):
-    # The cached path must be byte-identical to a DIRECT (uncached) raster of the SAME scene,
-    # on EACH backend, across camera moves and after an mset. This is the Fold-2 acceptance:
-    # auto-cached map() output == direct-raster map() output, byte-for-byte.
-    for gfx in (True, False):
-        m, _, _ = _both(gfx)
-        _map_cache_on(m, monkeypatch)
-        sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
-        tm_h.mset(4, 4, 2); tm_d.mset(4, 4, 2)       # (also proves the post-edit raster matches)
-        for cam in ((0, 0), (10, 4), (33, 18), (48, 30)):
-            # Host (index space).
-            cached = Canvas(W, H)
-            direct = Canvas(W, H)
-            _play_map(cached, sh_h, tm_h, cam)
-            _play_map(direct, sh_h, tm_h, cam, direct=True)
-            assert bytes(cached._buf) == bytes(direct._buf), (
-                "C-kernel cache != direct gfx=%s cam=%s in %d px"
-                % (gfx, cam, sum(1 for a, b in zip(_host_rgb565(cached),
-                                                   _host_rgb565(direct)) if a != b)))
-            # Device (RGB565).
-            dc_cached = m.DeviceCanvas(_FakeComp(W, H))
-            dc_direct = m.DeviceCanvas(_FakeComp(W, H))
-            _play_map(dc_cached, sh_d, tm_d, cam)
-            _play_map(dc_direct, sh_d, tm_d, cam, direct=True)
-            a = _dev_rgb565(dc_cached)
-            b = _dev_rgb565(dc_direct)
-            assert a == b, ("device cache != direct gfx=%s cam=%s in %d px"
-                            % (gfx, cam, sum(1 for x, y in zip(a, b) if x != y)))
-
-
-def test_map_autocache_actually_caches(monkeypatch):
-    # The cache must not just be pixel-correct -- it must KICK IN. The _map_raster_count /
-    # _map_hits counters (#63) prove a camera-only change re-uses the cached region (one
-    # blit565 / spr composite) instead of a full per-cell re-raster, which pixel-parity can't
-    # see. The Fold-2 analogue of test_auto_batch_actually_coalesces (device gfx-only cache).
-    m, _, _ = _both(True)
-    _map_cache_on(m, monkeypatch)
-    sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
-    for c, sh, tm in ((Canvas(W, H), sh_h, tm_h),
-                      (m.DeviceCanvas(_FakeComp(W, H)), sh_d, tm_d)):
-        c.map_cache_reset()
-        # First map() rasterizes; three camera-moved frames of the SAME region re-use it.
-        for cam in ((0, 0), (8, 0), (16, 4), (24, 6)):
-            c.cls(3)
-            c.camera(cam[0], cam[1])
-            c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 1)
-            c.camera()
-        assert c._map_raster_count == 1, "camera move re-rastered (%d)" % c._map_raster_count
-        assert c._map_hits == 3, "expected 3 cache hits, got %d" % c._map_hits
-        # An mset (tilemap.gen bump) drops the cache -> the next map() re-rasters.
-        tm.mset(1, 1, 2)
-        c.cls(3)
-        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 1)
-        assert c._map_raster_count == 2, "mset didn't re-raster (%d)" % c._map_raster_count
-        # A scale change (different pixel dims / key) re-rasters.
-        c.cls(3)
-        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
-        assert c._map_raster_count == 3, "scale change didn't re-raster (%d)" % c._map_raster_count
-        c.cls(3)                                     # ... then the scale-2 region caches too
-        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
-        assert c._map_raster_count == 3 and c._map_hits == 4
-        # A sheet paint edit (sheet.gen bump) also drops the cache.
-        sh.pset(0, 0, 5)
-        c.cls(3)
-        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
-        assert c._map_raster_count == 4, "sheet edit didn't re-raster (%d)" % c._map_raster_count
-        # An active pal bypasses the cache entirely (direct raster, counters unchanged).
-        # (A REAL remap: pal(3, 3) is identity CONTENT, and _palgen is a content id
-        # now -- identity would legitimately keep using the cache.)
-        c.pal(3, 5)
-        c.cls(3)
-        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
-        assert c._map_raster_count == 4, "pal-active path touched the cache (%d)" % c._map_raster_count
-        c.pal()
-
-
-def test_map_autocache_opaque_lane_full_coverage(monkeypatch):
-    # A FULL-COVERAGE region with no colorkey has no transparent pixel, so the device
-    # composite may take blit565's opaque row-memcpy lane (key=-1, the #66 chrome-trim
-    # lane) instead of testing every pixel -- and it must stay byte-identical to the
-    # direct raster. A sparse region (empty cells) must keep the keyed composite.
-    m, _, _ = _both(True)
-    _map_cache_on(m, monkeypatch)
-    sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
-    for tm in (tm_h, tm_d):
-        for cy in range(10):                     # fill EVERY cell -> full coverage
-            for cx in range(12):
-                if tm.mget(cx, cy) < 0:
-                    tm.mset(cx, cy, 1)
-    for cam in ((0, 0), (12, 6)):
-        cached = m.DeviceCanvas(_FakeComp(W, H))
-        direct = m.DeviceCanvas(_FakeComp(W, H))
-        for c, tm in ((cached, tm_d), (direct, tm_d)):
-            c.cls(3)
-            c.camera(cam[0], cam[1])
-            if c is direct:
-                c._nocache = True                # force the direct raster path
-            c.map(tm, sh_d, 0, 0, 12, 10, 0, 0, -1, 1)   # colorkey=-1: opaque-eligible
-            c.camera()
-        assert cached._mapcache is not None and cached._mapcache[4] == -1, (
-            "full-coverage colorkey=-1 region should composite via the opaque lane")
-        assert _dev_rgb565(cached) == _dev_rgb565(direct), "opaque lane changed pixels"
-    # Sparse (default world has empty cells): the keyed composite must be chosen.
-    _, _, _ = _both(True)
-    sh_h2, sh_d2, tm_h2, tm_d2 = _mapcache_world(m)
-    c = m.DeviceCanvas(_FakeComp(W, H))
-    c.cls(3)
-    c.map(tm_d2, sh_d2, 0, 0, 12, 10, 0, 0, -1, 1)
-    assert c._mapcache[4] != -1, "a sparse region must keep the keyed composite"
-
-
 def test_pal_tint_sandwich_bakes_each_variant_once():
     # #63 fast-by-default (the #72 Letter Blitz disease, fixed ENGINE-side): a sprite
     # drawn through the pal()/spr()/pal() tint sandwich -- alternating tints across
@@ -1945,7 +1685,7 @@ def test_pal_tint_sandwich_bakes_each_variant_once():
     # _palgen is a content id (identity == 0, a re-seen remap gets its old id back),
     # and the per-Image variant dict keeps the bakes alive across tint switches.
     # Pixels must stay byte-identical to the always-rebake behaviour.
-    m, _, _ = _both(True)
+    m, _, _ = _both()
     cv = m.DeviceCanvas(_FakeComp(W, H))
     ref = m.DeviceCanvas(_FakeComp(W, H))
     img = m.Image(4, 4, [7, 7, 0, 0, 7, 7, 0, 0, 0, 0, 8, 8, 0, 0, 8, 8], -1)
@@ -1974,41 +1714,27 @@ def test_pal_tint_sandwich_bakes_each_variant_once():
     assert _dev_rgb565(cv) == _dev_rgb565(ref), "variant reuse changed pixels"
 
 
-def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
-    # #63 leak fix: moy_alloc has no free(), so a dead cart's layer buffers must
-    # return to the pool and the next same-dims new_layer must REUSE them (without
-    # this, every cart re-run leaked its world from the heap_caps pool). Stub
-    # moy_alloc (caps constants + the older malloc_dma) so the CPython-run
-    # device module takes the pooled path.
-    import sys
-    import types
-    m, _, _ = _both(True)
-    _map_cache_on(m, monkeypatch)
-    fake_alloc = types.ModuleType("moy_alloc")
-    fake_alloc.malloc_dma = lambda n, caps=0: bytearray(n)
-    fake_alloc.MEMORY_SPIRAM = 1
-    fake_alloc.MEMORY_DMA = 2
-    monkeypatch.setitem(sys.modules, "moy_alloc", fake_alloc)
-    g = m.DeviceCanvas.__init__.__globals__       # the device module's namespace
-    monkeypatch.setitem(g, "_GLASS", m._glass_mod.Glass())
+def test_layer_pool_reclaims_cart_buffers_across_runs():
+    # #63 leak fix: a dead cart's layer buffers go back to the glass's pool
+    # and the next same-dims new_layer reuses one; the old loan's handle never
+    # validates again, and a console layer is never the cart's to return.
+    m, _, _ = _both()
+    g = m._glass_mod
     cv = m.DeviceCanvas(_FakeComp(W, H))
     lay1 = cv.new_layer(64, 32, owner="cart")
-    assert lay1._comp.pooled, "the stubbed allocator path must mark the buffer pooled"
-    buf1 = lay1._comp._buf
-    # An unowned (console) layer is never lent/reclaimed.
+    b1 = lay1._comp._b
+    assert b1.live and b1.nbytes == 64 * 32 * 2
     lay_console = cv.new_layer(64, 32)
-    cv.reclaim_layers("cart")                     # the cart died (Player.start)
-    assert g["_GLASS"].pool.get(64 * 32 * 2), "the cart buffer returns to the pool"
+    pooled = len(g.rows(-1))
+    cv.reclaim_layers("cart")                     # the cart died
+    assert not b1.live, "the dead run's loan is gone"
+    assert len(g.rows(-1)) == pooled + 1, "...and its buffer waits in the pool"
     lay2 = cv.new_layer(64, 32, owner="cart")     # next run, same dims
-    assert lay2._comp._buf is buf1, "the next same-dims layer must REUSE the buffer"
-    assert lay_console._comp._buf is not buf1, "console layers stay untouched"
-    # The Fold-2 hidden map cache is program content: reclaim drops + pools it.
-    sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
-    cv.cls(3)
-    cv.map(tm_d, sh_d, 0, 0, 12, 10, 0, 0, 0, 1)
-    assert cv._mapcache is not None
+    assert lay2._comp._b.origin == g.ORIGIN_POOL, "the next layer reuses it"
+    assert lay_console._comp._b.live, "console layers stay untouched"
     cv.reclaim_layers("cart")
-    assert cv._mapcache is None, "reclaim must drop the map cache (its layer is pooled)"
+    lay_console.release()
+    assert not lay_console._comp._buf
 
 
 # --------------------------------------------------------------------------- #
@@ -2018,20 +1744,19 @@ def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
 # and a cart branching on it could never be pixel-conformant.                  #
 # --------------------------------------------------------------------------- #
 def test_pix_read_returns_index_on_both():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        host.cls(1)
-        dev.cls(1)
-        for idx in (0, 1, 8, 12, 63):
-            host.pix(10, 10, idx)
-            dev.pix(10, 10, idx)
-            assert host.pix(10, 10) == idx, ("host gfx=%s" % gfx, idx)
-            assert dev.pix(10, 10) == idx, ("device gfx=%s" % gfx, idx)
-            assert dev.pix(10, 10) == host.pix(10, 10)
+    m, host, dev = _both()
+    host.cls(1)
+    dev.cls(1)
+    for idx in (0, 1, 8, 12, 63):
+        host.pix(10, 10, idx)
+        dev.pix(10, 10, idx)
+        assert host.pix(10, 10) == idx, ("host", idx)
+        assert dev.pix(10, 10) == idx, ("device", idx)
+        assert dev.pix(10, 10) == host.pix(10, 10)
 
 
 def test_pix_read_is_camera_relative_on_both():
-    m, host, dev = _both(True)
+    m, host, dev = _both()
     host.cls(0)
     dev.cls(0)
     host.pix(20, 12, 9)
@@ -2045,9 +1770,7 @@ def test_pix_read_is_camera_relative_on_both():
 
 # --------------------------------------------------------------------------- #
 # SPEC.md 6.1 verbs (#167 shape B): tri / sspr / tline. All three are libmoy  #
-# calls now, so the gfx=True arm only re-checks the surrounding compositor;   #
-# the gfx=False arm is the one with content here -- DeviceCanvas's own Python #
-# fallbacks for these verbs, which nothing else in the tree runs. The kernel  #
+# calls now, so this only re-checks the surrounding compositor. The kernel   #
 # itself is pinned by test_gfx_binding (two compiled kernels) and by the      #
 # conformance goldens (moy-spec provisional/_tline).                          #
 # --------------------------------------------------------------------------- #
@@ -2067,66 +1790,63 @@ def _sheet_and_map():
 
 
 def test_tri_parity():
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(1)
-            c.tri(4, 4, 40, 10, 20, 40, 8)
-            c.tri(30, 44, 60, 44, 45, 20, 11)          # flat bottom edge
-            c.tri(5, 46, 25, 46, 15, 46, 14)           # degenerate: one row
-            c.camera(6, 3)
-            c.tri(16, 16, 50, 22, 30, 47, 12)
-            c.camera()
-            c.clip(10, 10, 30, 25)
-            c.tri(0, 0, 63, 20, 20, 47, 10)
-            c.clip()
-        _assert_same(host, dev, "tri gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(1)
+        c.tri(4, 4, 40, 10, 20, 40, 8)
+        c.tri(30, 44, 60, 44, 45, 20, 11)          # flat bottom edge
+        c.tri(5, 46, 25, 46, 15, 46, 14)           # degenerate: one row
+        c.camera(6, 3)
+        c.tri(16, 16, 50, 22, 30, 47, 12)
+        c.camera()
+        c.clip(10, 10, 30, 25)
+        c.tri(0, 0, 63, 20, 20, 47, 10)
+        c.clip()
+    _assert_same(host, dev, "tri")
 
 
 def test_sspr_parity():
     sh, _tm = _sheet_and_map()
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(0)
-            c.sspr(sh, 8, 0, 8, 8, 2, 2, 20, 20)       # stretch tile 1
-            c.sspr(sh, 16, 0, 8, 8, 24, 2, 15, 30)     # non-uniform checker
-            c.sspr(sh, 16, 0, 8, 8, 42, 2, 12, 12, 7)  # colorkey drops dark
-            c.sspr(sh, 24, 0, 8, 8, 2, 26, 16, 16, -1, 3)  # border, flip both
-            c.palt(12, 1)
-            c.sspr(sh, 16, 0, 8, 8, 42, 26, 12, 12)    # palt drops light
-            c.palt()
-            c.camera(4, 2)
-            c.sspr(sh, 8, 0, 4, 4, 30, 30, 9, 9)
-            c.camera()
-        _assert_same(host, dev, "sspr gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(0)
+        c.sspr(sh, 8, 0, 8, 8, 2, 2, 20, 20)       # stretch tile 1
+        c.sspr(sh, 16, 0, 8, 8, 24, 2, 15, 30)     # non-uniform checker
+        c.sspr(sh, 16, 0, 8, 8, 42, 2, 12, 12, 7)  # colorkey drops dark
+        c.sspr(sh, 24, 0, 8, 8, 2, 26, 16, 16, -1, 3)  # border, flip both
+        c.palt(12, 1)
+        c.sspr(sh, 16, 0, 8, 8, 42, 26, 12, 12)    # palt drops light
+        c.palt()
+        c.camera(4, 2)
+        c.sspr(sh, 8, 0, 4, 4, 30, 30, 9, 9)
+        c.camera()
+    _assert_same(host, dev, "sspr")
 
 
 def test_tline_parity():
     sh, tm = _sheet_and_map()
     F = 65536
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        for c in (host, dev):
-            c.cls(1)
-            for i in range(10):                        # a small Mode 7 fan
-                c.tline(tm, sh, 0, 2 + i, 60, 2 + i,
-                        0, (i * 3 * F) // 2, F // 4 + i * (F // 64), 0)
-            c.tline(tm, sh, 2, 14, 60, 40, 0, 0, F // 2, F // 3)  # diagonal
-            c.tline(tm, sh, 0, 42, 60, 42, -tm.w * 8 * F, 4 * F, 2 * F, 0)  # wrap
-            c.tline(tm, sh, 58, 2, 58, 44, 4 * F, 0, 0, F // 2)   # vertical
-            c.tline(tm, sh, 2, 45, 40, 45, 0, 8 * F, F // 2, 0, 7)  # colorkey
-            c.palt(12, 1)
-            c.tline(tm, sh, 2, 47, 40, 47, 0, 8 * F, F // 2, 0)   # palt
-            c.palt()
-            c.camera(5, 2)
-            c.tline(tm, sh, 10, 20, 50, 20, 0, 16 * F, F // 2, 0)
-            c.camera()
-            c.clip(8, 30, 20, 10)
-            c.tline(tm, sh, 0, 34, 63, 34, 0, 0, F, 0)  # cursor walks under clip
-            c.clip()
-            c.tline(tm, sh, 33, 33, 33, 33, 0, 0, F, F)  # single pixel
-        _assert_same(host, dev, "tline gfx=%s" % gfx)
+    m, host, dev = _both()
+    for c in (host, dev):
+        c.cls(1)
+        for i in range(10):                        # a small Mode 7 fan
+            c.tline(tm, sh, 0, 2 + i, 60, 2 + i,
+                    0, (i * 3 * F) // 2, F // 4 + i * (F // 64), 0)
+        c.tline(tm, sh, 2, 14, 60, 40, 0, 0, F // 2, F // 3)  # diagonal
+        c.tline(tm, sh, 0, 42, 60, 42, -tm.w * 8 * F, 4 * F, 2 * F, 0)  # wrap
+        c.tline(tm, sh, 58, 2, 58, 44, 4 * F, 0, 0, F // 2)   # vertical
+        c.tline(tm, sh, 2, 45, 40, 45, 0, 8 * F, F // 2, 0, 7)  # colorkey
+        c.palt(12, 1)
+        c.tline(tm, sh, 2, 47, 40, 47, 0, 8 * F, F // 2, 0)   # palt
+        c.palt()
+        c.camera(5, 2)
+        c.tline(tm, sh, 10, 20, 50, 20, 0, 16 * F, F // 2, 0)
+        c.camera()
+        c.clip(8, 30, 20, 10)
+        c.tline(tm, sh, 0, 34, 63, 34, 0, 0, F, 0)  # cursor walks under clip
+        c.clip()
+        c.tline(tm, sh, 33, 33, 33, 33, 0, 0, F, F)  # single pixel
+    _assert_same(host, dev, "tline")
 
 
 # -- the game fold's snapshot (native/moy_flush/moy_fold.h) --------------------
@@ -2228,70 +1948,45 @@ def test_blit_game_composites_itself_when_the_geometry_is_refused():
     assert comp.calls == [("fold_fence",)]
 
 
-class _AllocRegistry:
-    """A fake `moy_alloc` with the C registry's teeth: free() refuses a
-    buffer alloc() did not hand out, or one already freed. Both verbs log
-    into the compositor's call list, so their order against the fence shows."""
-
-    MEMORY_SPIRAM = 0x400
-    MEMORY_DMA = 0x8
-
-    def __init__(self, log):
-        self.live = {}
-        self.log = log
-
-    def alloc(self, n, caps):
-        buf = bytearray(n)
-        self.live[id(buf)] = buf
-        self.log.append(("alloc", n))
-        return buf
-
-    def free(self, buf):
-        if self.live.pop(id(buf), None) is None:
-            raise ValueError("not a live alloc() buffer")
-        self.log.append(("free", len(buf)))
-
-
-def test_a_scratch_a_new_geometry_replaces_is_given_back(monkeypatch):
+def test_a_scratch_a_new_geometry_replaces_is_given_back():
     """The fold's snapshot scratch and the view crop's are off-heap: nothing
-    collects them, so the canvas that replaces one frees it. Dropped instead,
-    every switch between a scaled 128x128 cart and a 320x240 one on the
-    Guition S3 lost the scratch it replaced (153,600 or 32,768 B, without
-    bound: the sprint 0 census, #224). The snapshot scratch is freed AFTER
-    the fence -- no feed reads it then -- and before its successor is
+    collects them, so the canvas that replaces one gives it back. Dropped
+    instead, every switch between a scaled 128x128 cart and a 320x240 one on
+    the Guition S3 lost the scratch it replaced (153,600 or 32,768 B, without
+    bound: the sprint 0 census, #224). The snapshot scratch is given back
+    AFTER the fence -- no feed reads it then -- and before its successor is
     allocated, so the successor can take the same memory."""
     m = _load_device_canvas()
     comp = _FoldingFakeComp(480, 320)
-    reg = _AllocRegistry(comp.calls)
-    monkeypatch.setitem(sys.modules, "moy_alloc", reg)
     sc = m.DeviceCanvas(comp)
     small = m.DeviceCanvas(_FakeComp(128, 128))
     big = m.DeviceCanvas(_FakeComp(320, 240))
 
     sc.blit_game(small, 112, 32, 2)
-    assert [c[0] for c in comp.calls] == ["fold_fence", "alloc", "snap"]
+    assert [c[0] for c in comp.calls] == ["fold_fence", "snap"]
     for _ in range(10):
-        comp.calls.clear()
+        old = sc._snap_scratch._b
         sc.blit_game(big, 80, 40, 1)
-        assert comp.calls[:3] == [("fold_fence",), ("free", 128 * 128 * 2),
-                                  ("alloc", 320 * 240 * 2)]
-        comp.calls.clear()
+        assert not old.live and sc._snap_scratch._b.nbytes == 320 * 240 * 2
+        old = sc._snap_scratch._b
         sc.blit_game(small, 112, 32, 2)
-        assert comp.calls[:3] == [("fold_fence",), ("free", 320 * 240 * 2),
-                                  ("alloc", 128 * 128 * 2)]
-        assert list(reg.live.values()) == [sc._snap_scratch.framebuffer()]
+        assert not old.live and sc._snap_scratch._b.nbytes == 128 * 128 * 2
+        assert sc._snap_scratch._b.role == m._ROLE_SCRATCH
     comp.calls.clear()
+    kept = sc._snap_scratch._b
     sc.blit_game(small, 112, 32, 2)               # same geometry: reused
     assert [c[0] for c in comp.calls] == ["fold_fence", "snap"]
+    assert sc._snap_scratch._b is kept and kept.live
 
     # A refused fold composites through the view crop, whose scratch is
     # replaced on the same rule; at most one of each is ever live.
     comp.refuse = True
     for _ in range(5):
         for crop in ((0, 4, 128, 120), (16, 14, 96, 100)):
+            old = sc._view_scratch._b if sc._view_scratch is not None else None
             sc.blit_game(small, 112, 32, 2, src=crop)
-            assert sorted(len(b) for b in reg.live.values()) == sorted(
-                (128 * crop[3] * 2, crop[2] * crop[3] * 2))
+            assert sc._view_scratch._b.nbytes == crop[2] * crop[3] * 2
+            assert old is None or old is sc._view_scratch._b or not old.live
     assert sc._view_scratch.framebuffer() is not None
 
 
@@ -2300,38 +1995,43 @@ def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
 
     `_bake_buf`'s lane rides the IMAGE's residency -- an off-heap `pix` (a
     cover) gets off-heap bakes, freed by whoever owns the pixels and by
-    `_cache_rgb`'s variant eviction. `_paint_bake_buf`'s lane is the loan
-    register, freed by `release_bakes(owner)`. A buffer in both is freed twice,
-    which the C registry turns into a ValueError -- or into a live buffer handed
-    out again, if an id were reused.
+    `_cache_rgb`'s variant eviction. `_paint_bake_buf`'s lane is the glass's
+    loan to the image's owner, returned by `release_bakes(owner)`. A buffer in
+    both would be freed twice. So an owner settles it: the glass is the only
+    lender for an image that names one."""
+    m, _host, dev = _both()
 
-    Nothing had both until the desktop backdrop, which needs off-heap PIXELS
-    (a screenful of indices is 153,600 bytes on the Guition, past that board's
-    largest run at an untouched launcher) AND an owner for its bake. So an
-    owner now settles it: the register is the only lender for an image that
-    names one."""
-    m, _host, dev = _both(True)
-    tr = _BakeTracker()
-    m._moybuf = tr
-    m._GLASS = m._glass_mod.Glass()
+    class _Residency:
+        """moybuf's two verbs, counted."""
 
+        def __init__(self):
+            self.live = 0
+
+        def alloc(self, n):
+            self.live += 1
+            return memoryview(bytearray(n))
+
+        def free(self, buf):
+            self.live -= 1
+
+    res = _Residency()
+    m._moybuf = res
     img = _owned_paint_image(m, 320, 240, owner="wallpaper_bg")
     img.pix = memoryview(bytearray(img.pix))     # off-heap pixels, as the backdrop has
     dev.spr(img, 0, 0)
     assert isinstance(img._rgb_i, memoryview), "the full-screen bake stayed on the heap"
-    assert len(tr.live) == 1, "the bake was lent twice, or not at all"
-    assert [b for _i, b in m._GLASS.held("wallpaper_bg", m._ROLE_BAKE)] == [img._rgb_i]
+    assert _lent(m, "wallpaper_bg") == 1 and res.live == 0, \
+        "the bake was lent twice, or not at all"
+    assert img._bake.view is img._rgb_i
 
-    # The scaled lane bakes a pre-scaled copy the register does not track, so
+    # The scaled lane bakes a pre-scaled copy the glass does not track, so
     # for an OWNED image it takes the gc heap rather than an untracked loan.
     dev.spr(img, 0, 0, 2)
     assert isinstance(img._rgb, bytearray), "an untracked off-heap variant"
-    assert len(tr.live) == 1
+    assert _lent(m, "wallpaper_bg") == 1 and res.live == 0
 
-    # And the one release frees the one buffer -- _BakeTracker raises on a
-    # double free, so a second lender would surface right here.
     dev.release_bakes("wallpaper_bg")
-    assert tr.live == {} and tr.freed == 1
+    assert _lent(m, "wallpaper_bg") == 0
     assert img._rgb_i is None, "a stale draw must re-bake, never read freed RAM"
 
     # An UNOWNED off-heap image keeps the residency lane it always had (a
@@ -2339,8 +2039,8 @@ def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
     cover = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), 320, 240)
     cover.pix = memoryview(bytearray(cover.pix))
     dev.spr(cover, 0, 0)
-    assert isinstance(cover._rgb_i, memoryview)
-    assert m._GLASS.bufs.count() == 0, "an unowned image must never enter the register"
+    assert isinstance(cover._rgb_i, memoryview) and res.live == 1
+    assert getattr(cover, "_bake", None) is None, "an unowned image is never a loan"
 
 
 # --------------------------------------------------------------------------- #
@@ -2362,45 +2062,17 @@ def test_chrome_names_match_palette_names():
 def test_scroll_layer_buffer_is_off_gc_heap():
     """A scroll/paint layer's RGB565 buffer is the biggest object a cart keeps
     live, and collect cost scales with the live set -- so `_LayerComp` takes it
-    from moy_alloc (PSRAM, DMA-eligible for the GDMA window copy) where the
-    firmware has it: the registry-backed `alloc()` first, `malloc_dma` on an
-    older build, and a gc-heap bytearray only where there is no allocator at
-    all. Driven with a fake `moy_alloc` in sys.modules; the sizes are odd so
-    the layer pool never answers first."""
+    from the glass: a BUF row whose bytes the pixel allocator gave (PSRAM and
+    DMA-eligible on a board), its view a memoryview, never a gc bytearray."""
     m = _load_device_canvas()
+    g = m._glass_mod
     dev = m.DeviceCanvas(_FakeComp(W, H))
-    calls = []
-
-    def _alloc_mod(**verbs):
-        mod = types.SimpleNamespace(MEMORY_SPIRAM=0x400, MEMORY_DMA=0x8)
-        for k, v in verbs.items():
-            setattr(mod, k, v)
-        return mod
-
-    saved = sys.modules.get("moy_alloc")
-    try:
-        got = bytearray(13 * 7 * 2)
-        sys.modules["moy_alloc"] = _alloc_mod(
-            alloc=lambda n, caps: calls.append(("alloc", n, caps)) or got)
-        lay = dev.new_layer(13, 7)
-        assert calls == [("alloc", 13 * 7 * 2, 0x400 | 0x8)]
-        assert lay._buf is got
-
-        got2 = bytearray(13 * 9 * 2)
-        sys.modules["moy_alloc"] = _alloc_mod(
-            malloc_dma=lambda n, caps: calls.append(("dma", n, caps)) or got2)
-        lay2 = dev.new_layer(13, 9)
-        assert calls[-1] == ("dma", 13 * 9 * 2, 0x400 | 0x8)
-        assert lay2._buf is got2
-
-        sys.modules.pop("moy_alloc", None)
-        lay3 = dev.new_layer(13, 11)
-        assert isinstance(lay3._buf, bytearray) and len(lay3._buf) == 13 * 11 * 2
-    finally:
-        if saved is None:
-            sys.modules.pop("moy_alloc", None)
-        else:
-            sys.modules["moy_alloc"] = saved
+    lay = dev.new_layer(13, 7)
+    b = lay._comp._b
+    assert isinstance(lay._buf, memoryview) and len(lay._buf) == 13 * 7 * 2
+    assert b.origin in (g.ORIGIN_ALLOC, g.ORIGIN_POOL) and b.role == g.ROLE_LAYER
+    lay.release()
+    assert not b.live
 
 
 def test_blit565_places_direct_colour_on_every_lane():
@@ -2428,8 +2100,7 @@ def test_blit565_places_direct_colour_on_every_lane():
         (16, 12, 3, (10, 10, 40, 8), (2, 4)),
     )
     canvases = (("kernel", lambda: Canvas(W, H)),
-                ("transcription", lambda: _both(True)[2]),
-                ("fallback", lambda: _both(False)[2]))
+                ("transcription", lambda: _both()[2]))
     for x, y, s, clip, cam in cases:
         bx, by = x - cam[0], y - cam[1]
         cx0, cy0, cx1, cy1 = 0, 0, W, H

@@ -128,6 +128,11 @@ NOT_OURS = (
     "tools/web_console.py", "modules/device_webview.py", "device_webview.py",
     "runtime/web_view.py", "runtime/web_view_page.py", "tests/webharness.py",
     "tests/test_web_recording.py",
+    # The surface leaf and the glass's Python twin, deleted by sprint 3's glass
+    # pass (2026-10-07) when the kernel's native/moy_glass took the table and
+    # the rows. The kernel plans and the surface model name them to say what
+    # crossed.
+    "runtime/surface.py", "runtime/moy_glass.py",
 )
 
 

@@ -6,7 +6,7 @@
 #  `[modules.shared]` section was kept deny-for-deny identical to its twin's,
 #  cross-checked by `tests/test_board_toml.py`. The fork is gone; what that
 #  discipline bought stays: the P4's `[modules.shared]` differs from this one by
-#  exactly the presentation-tier pair (`wm_windowed.py` + `surface.py`), an
+#  exactly the presentation tier (`wm_windowed.py` and its halves), an
 #  asserted invariant.
 #
 #  The panel path here is `native/moy_lcd` plus the board-authored
@@ -125,6 +125,13 @@ ctypes compositor so the host stops having a second raster. The board has the
 real one; this is the adapter that exists only because CPython isn't one."""
 
 [[modules.shared.deny]]
+file = "glass_binding.py"
+kind = "host-only"
+why  = """
+`moy_glass` for CPython: compiles native/moy_glass and dlopens it through
+ctypes. Here `moy_glass` is a compiled-in usermod (native/.staged/moy_glass)."""
+
+[[modules.shared.deny]]
 file = "gfx_binding.py"
 kind = "host-only"
 why  = """
@@ -227,15 +234,6 @@ and the host's presentation tier. This board is 320x240 and runs
 tier it is not."""
 
 [[modules.shared.deny]]
-file = "surface.py"
-kind = "tier"
-why  = """
-Surface model v1's retained-surface object (docs/surface_model_v1.md §2). It is
-a LEAF whose only importers are `wm_windowed.py` and the web serve glue -- never
-`wm.py` or `console.py`, which this board freezes verbatim. With wm_windowed
-denied above, staging this would freeze bytes nothing imports."""
-
-[[modules.shared.deny]]
 file = "wm_desk.py"
 kind = "tier"
 why  = """
@@ -243,7 +241,7 @@ The windowed WM's two halves that live in their own files: the desk root
 layer (wallpaper + bar + icon column and its retained-backdrop cache) and the
 `WindowChrome` mixin (title strips, grip, taskbar chips). Only `wm_windowed.py`
 imports either, so with it denied above they would freeze bytes nothing
-imports -- the same reasoning as `surface.py`."""
+imports."""
 
 [[modules.shared.deny]]
 file = "wm_chrome.py"

@@ -22,8 +22,8 @@ tier    = "desktop"
 tier_why = """
 1024x600, TWO canvases: a big system canvas plus a real 320x240 game canvas
 composited into a window (`blit_game`). That is what makes `wm_windowed.py` and
-its `surface.py` leaf right here and wrong on the S3 -- the two boards' shared
-module lists differ by exactly those two files, and by nothing else."""
+its halves right here and wrong on the S3 -- the two boards' shared
+module lists differ by exactly those files, and by nothing else."""
 
 # ---------------------------------------------------------------------------
 
@@ -106,6 +106,13 @@ kind = "host-only"
 why  = """
 Runs the BOARDS' canvas class on CPython. The board has the real one; this is
 the adapter that exists only because CPython is not a board."""
+
+[[modules.shared.deny]]
+file = "glass_binding.py"
+kind = "host-only"
+why  = """
+`moy_glass` for CPython: compiles native/moy_glass and dlopens it through
+ctypes. Here `moy_glass` is a compiled-in usermod (native/.staged/moy_glass)."""
 
 [[modules.shared.deny]]
 file = "gfx_binding.py"
@@ -195,7 +202,7 @@ This board SERVES the wasm console (moy_webhost) -- it does not decode its
 input. Flip this the day it does."""
 
 # NOTE the two files that are NOT denied here and ARE on the T-Deck:
-# `wm_windowed.py` and its `surface.py` leaf. See [board].tier_why.
+# `wm_windowed.py` and its halves. See [board].tier_why.
 
 # -- staged under another name -----------------------------------------------
 

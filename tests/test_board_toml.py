@@ -174,15 +174,16 @@ def test_the_p4_stages_the_windowed_tier_and_the_s3_does_not():
 
     Stated here as well as in `test_staging_closure.py` because this is the
     claim `docs/surface_model_v1.md` L6 rests on: `wm.py` and `console.py` are
-    frozen verbatim on the S3, so the windowed WM and its `surface` leaf must
-    not be reachable there at all.
+    frozen verbatim on the S3, so the windowed WM must not be reachable there
+    at all. (The surface table it signals is the kernel's, native/moy_glass,
+    since §15.)
     """
     tdeck = set(board_config.staged_modules(TDECK, ROOT))
     p4 = set(board_config.staged_modules(P4, ROOT))
     guition = set(board_config.staged_modules(GUITION, ROOT))
-    assert {"wm_windowed.py", "surface.py"} <= p4
-    assert not {"wm_windowed.py", "surface.py"} & tdeck
-    assert not {"wm_windowed.py", "surface.py"} & guition
+    assert "wm_windowed.py" in p4
+    assert "wm_windowed.py" not in tdeck | guition
+    assert "surface.py" not in tdeck | guition | p4
 
 
 def test_the_board_identity_matches_the_ota_stamp():

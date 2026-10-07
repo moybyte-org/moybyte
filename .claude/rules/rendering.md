@@ -84,8 +84,9 @@ missing binary WARNS locally and FAILS under `CI`/`MOYBYTE_REQUIRE_UNIX_MP`.
 The same binary carries `moycore` and `moy_audio`. On the strength of it,
 `tests/test_device_canvas_parity.py` shed its ~400-line Python transcription of
 libmoy's nine verbs — `_FakeGfx` forwards them to the binding and transcribes
-only `moy_gfx`'s OWN compositor; its `gfx=False` arm STAYS, because it is the
-only thing anywhere that runs `device_canvas`'s no-kernel Python lanes. Two
+only `moy_gfx`'s OWN compositor. Its `gfx=False` arm went with the no-kernel
+Python lanes it ran (sprint 3's glass pass, 2026-10-07): every tier carries the
+kernel, so `device_canvas` has no draw lane without it. Two
 things not to undo in that op script: its framebuffer is a `memoryview` into a
 larger **patterned** arena (without it a capacity guard that fails to clamp
 writes past the end on BOTH sides and reads as agreement), and its clamp ops aim

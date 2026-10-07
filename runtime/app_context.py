@@ -126,11 +126,12 @@ class Damage:
 
     There is exactly ONE granularity today and this role says so honestly:
     `ws._dirty` is a global epoch flag. `docs/surface_model_v1.md` Section 3
-    explicitly RETRACTS a mechanical migration to per-surface attribution, and
-    `runtime/surface.py` is denied on two of the three boards, so this is a
-    plain leaf and NOT a `SurfaceSet` wrapper (ui_refactor_2026-08 Section 1.2
-    cut that). When opt-in attribution arrives it arrives as `damage.at(sid)`;
-    `all()` keeps meaning what it means."""
+    explicitly RETRACTS a mechanical migration to per-surface attribution. The
+    surface table is the kernel's (native/moy_glass, the model's §15), and the
+    frame gate folds `ws._dirty` into its epoch once per painted frame, so this
+    is a plain leaf and NOT a wrapper over the table (ui_refactor_2026-08
+    Section 1.2 cut that). When opt-in attribution arrives it arrives as
+    `damage.at(sid)`; `all()` keeps meaning what it means."""
 
     def __init__(self, ws):
         self.__ws = ws

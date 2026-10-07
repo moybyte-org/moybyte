@@ -13,7 +13,8 @@
 // to 1, never 0. A freed slot is reused lowest-first under its next generation.
 //
 // A row is `row_size` bytes of the client's struct, zeroed when it is taken and
-// when it is released, and its address is stable until the row is released. The
+// when it is released. Its address is stable until the next add grows the
+// table, and for good once moy_htab_reserve has allocated every slot. The
 // table owns the bytes, never what a row points at: a client frees that before
 // it releases the row (or walks the table before it frees it).
 //
@@ -87,6 +88,9 @@ void moy_htab_free(moy_htab_t *t);              // NULL is a no-op
 int moy_htab_add(moy_htab_t *t, uint32_t *h, void **row);
 // OK, or STALE when the handle names no live row.
 int moy_htab_release(moy_htab_t *t, uint32_t h);
+// Allocate every slot the table may have now, so no later add moves a row:
+// OK or NOMEM.
+int moy_htab_reserve(moy_htab_t *t);
 
 // The slot `h` names, or MOY_HTAB_NOSLOT. Any uint32_t is a legal argument.
 static inline uint32_t moy_htab_slot_of(const moy_htab_t *t, uint32_t h) {

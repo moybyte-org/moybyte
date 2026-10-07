@@ -46,7 +46,7 @@ def test_offheap_names_each_buffer_by_the_first_path_and_keeps_the_rest(
         fake, monkeypatch):
     fake([(100, 4096), (200, 153600), (300, 77)])
     pool_mod = types.ModuleType("device_canvas")
-    pool_mod._LAYER_POOL = {153600: [_View(200)]}
+    pool_mod._KEEP = {153600: [_View(200)]}
 
     class Ws:
         pass
@@ -57,7 +57,7 @@ def test_offheap_names_each_buffer_by_the_first_path_and_keeps_the_rest(
                                   "other": types.ModuleType("other")})
     assert got["total"] == (3, 4096 + 153600 + 77)
     owners = dict(got["owners"])
-    assert owners == {"device_canvas._LAYER_POOL[153600][0]": 153600,
+    assert owners == {"device_canvas._KEEP[153600][0]": 153600,
                       "ws.covers._buf": 4096}
     assert got["unowned"] == [(300, 77)]
 

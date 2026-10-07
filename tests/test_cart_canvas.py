@@ -182,12 +182,18 @@ def test_crash_on_small_canvas_survives(tmp_path):
     assert (ws.canvas.w, ws.canvas.h) == (320, 240)
 
 
-def test_rerun_reuses_the_cached_canvas(tmp_path):
+def test_the_run_canvas_goes_with_its_run(tmp_path):
+    """The small canvas's pixels are on loan to the run: its end returns them
+    with the run's layers (a 128x128 buffer back to the pool), and the next
+    run gets a canvas of its own."""
     ws, drv = _open(tmp_path, "tiny", PLAIN_SRC)
     small = ws.canvas
+    buf = small._comp._b
+    assert buf.live and buf.nbytes == 128 * 128 * 2
     ws.player.release_world()
+    assert not buf.live
     ws.open()
-    assert ws.canvas is small        # one 128x128 buffer per session, not per run
+    assert ws.canvas is not small and ws.canvas._comp._b.live
 
 BAD_SRC = "def _draw(:\n    pass\n"     # a cart that never loads
 
@@ -212,7 +218,5 @@ def test_failed_load_restores_the_palette_on_the_swapped_canvas(tmp_path):
     assert ws.cart_error is not None
     ws.player.release_world()
     assert list(ws.canvas.palette) == default
-    small = ws._run_canvas_cache.get((128, 128))
-    assert small is None or list(small.palette) == default
     assert ws.player._cart_palette is None
 

@@ -43,6 +43,14 @@ from editors import CodeEditor, _SheetSprite
 # block_editor_ui.py's module docstring for why it takes NAMES/_err_text/
 # _clamp_scroll as constructor args instead of importing them back from here (a
 # real circular import: this module builds the one BlockEditorUI instance a
+# The glass (native/moy_glass): the frame gate folds a dirty frame into the
+# surface table's epoch and reads the kernel's own epoch as a dirty leg
+# (docs/surface_model_v1.md §15). The host reaches the same C by ctypes.
+try:
+    import moy_glass as _glass
+except ImportError:  # pragma: no cover - host: the ctypes binding
+    from runtime import glass_binding as _glass
+
 # Workstation holds). Same bare-or-package fallback as the _blocks_mod import
 # just below (host tests that load console.py directly without the
 # runtime/host_app.py aliasing, or one that hand-registers editors/audio/blocks/
@@ -590,7 +598,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._run_canvas = None            # the bound small canvas, while a run holds it
         self._run_canvas_stock = None      # what self.canvas was before the bind
         self._run_canvas_shared = False    # True when the bind promoted stock to system
-        self._run_canvas_cache = {}        # {(w, h): canvas} -- 3 sizes max, reused
         # A RESPONSIVE app cart (#181) draws on the SYSTEM canvas instead of the
         # fixed game one; a plain attribute (never a property -- the app-context
         # perf convention) so the chrome can read it once per frame. False for
@@ -934,6 +941,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Expensive-event counters (2026-07-26). See note_cost.
         self.costs = {}
         self._quiet_frames = 0        # consecutive frames the redraw gate skipped
+        # The kernel's own draws (§15 of the surface model): the epoch this
+        # console last painted under, and how many more frames repaint because
+        # a buffer the backend retains may still hold the kernel's picture.
+        self._kepoch = _glass.kernel_epoch()
+        self._kframes = 0
         self._idle_warned = False     # the idle branch's backstop has spoken once
         # Unified top bar (Stage 1): _bar_img_cache memoises tile_image(slot) per
         # kind so the SAME _SheetSprite is reused every frame -- on the device that
@@ -3161,16 +3173,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         mk = self.make_game_canvas
         if mk is None:
             return False
-        small = self._run_canvas_cache.get((w, h))
+        # The run's own: its pixels are on loan to the run ("cart"), so the
+        # run's end returns them with its layers, after moycore has let go.
+        try:
+            small = mk(w, h, "cart")
+        except Exception as exc:  # noqa: BLE001 -- an alloc failure refuses, not crashes
+            print("Moybyte run canvas failed:", _err_text(exc))
+            small = None
         if small is None:
-            try:
-                small = mk(w, h)
-            except Exception as exc:  # noqa: BLE001 -- an alloc failure refuses, not crashes
-                print("Moybyte run canvas failed:", _err_text(exc))
-                small = None
-            if small is None:
-                return False
-            self._run_canvas_cache[(w, h)] = small
+            return False
         self._run_canvas = small
         self._run_canvas_stock = stock
         self._run_canvas_shared = self._sys_canvas is None
@@ -3339,7 +3350,19 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _needs_redraw(self, dt):
         """Decide whether frame() must repaint+flush this frame. True when something
         marked the UI dirty, an animation source is live, or the pointer state the
-        last frame drew has changed (cursor move/hide, tap, drag)."""
+        last frame drew has changed (cursor move/hide, tap, drag) -- or the
+        kernel drew a frame of its own since this console last painted, which
+        reads as dirty for as many frames as the backend retains, so no buffer
+        keeps the kernel's picture."""
+        k = _glass.kernel_epoch()
+        if k != self._kepoch:
+            self._kepoch = k
+            self._kframes = max(1, getattr(self._sys_canvas or self.canvas,
+                                           "RETAINED_FRAMES", 1))
+        if self._kframes:
+            self._kframes -= 1
+            self._dirty = True
+            return True
         if self._dirty:
             return True
         if self._animating(dt):
@@ -3455,6 +3478,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                         print("Moybyte idle work failed:", _err_text(exc))
             return
         self._quiet_frames = 0
+        if self._dirty:
+            _glass.epoch()            # §15: a dirty frame is the un-attributed epoch
         # The fps the chip shows is the DRAWN rate (#217): an EMA over the
         # frames that reach the glass, so a paced cart reads its draw rate and
         # not the loop's spin between ticks.

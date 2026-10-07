@@ -154,9 +154,10 @@ nor those docs will warn you about:
   (owner, 2026-08-25) — the browser IS the console. The WebSocket half went in
   2026-09, because the §3.4 sync RPC shipped as plain HTTP and nothing else
   used it. What survives of the old view is `runtime/web_input.py` (browser
-  events → InputState/Pointer, which the sync RPC speaks); `runtime/surface.py`
-  and `wm_windowed`'s `if not self._recording` guards deliberately STAY,
-  unreachable — `docs/surface_model_v1.md` §13 records why.
+  events → InputState/Pointer, which the sync RPC speaks); `wm_windowed`'s
+  `if not self._recording` guards deliberately STAY, unreachable, over the
+  kernel's surface table (`native/moy_glass`, which the browser's wasm links
+  like every board) — `docs/surface_model_v1.md` §13 and §15 record why.
 - **WASM MODE IS A SWITCH, NOT A SESSION** (owner call): no heartbeat, no presence
   detection, no timeout. While WEB CONSOLE is ON the glass PARKS on a connection
   screen — which is how the two-writer collision is **designed out rather than

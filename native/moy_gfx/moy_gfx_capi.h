@@ -33,7 +33,7 @@ typedef struct _moy_gfx_draw_ctx_obj_t moy_gfx_draw_ctx_t;
 moy_gfx_draw_ctx_t *moy_gfx_capi_ctx(mp_obj_t obj);
 
 // False until set_buf has pointed the ctx at a destination buffer.
-bool moy_gfx_capi_ready(const moy_gfx_draw_ctx_t *c);
+bool moy_gfx_capi_ready(moy_gfx_draw_ctx_t *c);
 
 // True when the canvas's sprite queue holds quads: the caller must upcall
 // canvas.flush_batch BEFORE drawing (the #63 order rule -- queued sprites
@@ -57,8 +57,8 @@ bool moy_gfx_capi_batch_src(const moy_gfx_draw_ctx_t *c);
 // to the canvas.flush_batch upcall -- no registered source, no destination,
 // or the pending run belongs to ANOTHER writer (its sheet is whatever
 // canvas._batch_sheet says, which only the Python flush knows). Pure C: no
-// upcalls, no allocation, never raises. The caller owns the pump feed and any
-// profiling counters, exactly as with the draw verbs above.
+// upcalls, no allocation, never raises. The caller owns any profiling
+// counters, exactly as with the draw verbs above.
 bool moy_gfx_capi_flush_batch(moy_gfx_draw_ctx_t *c, int token);
 
 // #67 stage-1b: the sheet-sampling verbs, against the ctx-registered sources.
@@ -87,12 +87,6 @@ mp_obj_t moy_gfx_capi_canvas(const moy_gfx_draw_ctx_t *c);
 // way the gates do -- the ticks_us pair costs ~6us on the S3, real money
 // against a 1x1 fill.
 bool moy_gfx_capi_prof(const moy_gfx_draw_ctx_t *c);
-
-// Pump bookkeeping (#163 door 1, T-Deck root canvas): decrement the shared
-// cadence counter by `nops`; when the pump is due, returns the registered
-// callable for the CALLER to invoke (protected), else MP_OBJ_NULL. Ctxs with
-// no pump (every canvas but the T-Deck root) always return MP_OBJ_NULL.
-mp_obj_t moy_gfx_capi_pump_due(moy_gfx_draw_ctx_t *c, int nops);
 
 // Draw verbs. Coordinates are canvas coords (camera applied inside), `ci` a
 // MOY64 palette index resolved through the ctx's pal-remapped RGB565 table.

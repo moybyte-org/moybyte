@@ -99,6 +99,39 @@ void mg_fill_rect(uint16_t *px, size_t cap, int stride,
 
 /* ---- scroll ----------------------------------------------------------- */
 
+// fill_spans' walk (#163/#167): n packed (x, y, w, h, ci) int16 quads, each
+// offset by (ox, oy) and the camera, clipped, filled with `cov` when it is an
+// RGB565 word (>= 0) or with pal[ci & 63] otherwise.
+void mg_fill_spans(uint16_t *dst, size_t cap, int dw, const int16_t *q, int n,
+                   int ox, int oy, int cov, const uint16_t *pal,
+                   int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1) {
+    if (dw <= 0 || (cov < 0 && pal == NULL)) {
+        return;
+    }
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    for (int i = 0; i < n; i++) {
+        const int16_t *p = q + i * 5;
+        uint16_t col = (cov >= 0) ? (uint16_t)cov : pal[p[4] & 63];
+        int x0 = (int)p[0] + ox - cam_x;
+        int y0 = (int)p[1] + oy - cam_y;
+        int x1 = x0 + (int)p[2];
+        int y1 = y0 + (int)p[3];
+        if (x0 < cx0) x0 = cx0;
+        if (y0 < cy0) y0 = cy0;
+        if (x1 > cx1) x1 = cx1;
+        if (y1 > cy1) y1 = cy1;
+        if (x1 <= x0 || y1 <= y0) {
+            continue;
+        }
+        size_t run = (size_t)(x1 - x0);
+        uint16_t *row = dst + (size_t)y0 * (size_t)dw + (size_t)x0;
+        for (int y = y0; y < y1; y++) {
+            mg_fill_run(row, run, col);
+            row += (size_t)dw;
+        }
+    }
+}
+
 void mg_scroll_rect(uint16_t *px, size_t cap, int stride,
                     int rx, int ry, int rw, int rh, int dx, int dy)
 {

@@ -52,7 +52,7 @@ from device_boot import DeviceBoot
 from frame_loop import (FrameLoop, FramePump, IdleBlank, OtaHealth,
                         PerfSampler, apply_touch, poll_link, poll_webhost)
 from device_api import make_api
-from device_canvas import DeviceCanvas, _LayerComp
+from device_canvas import DeviceCanvas, _LayerComp, _owner_h
 import wire_input
 import wire_links
 from mem_census import mark as _census
@@ -216,14 +216,16 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     if getattr(comp, "rotated", False):
         comp.strip_h = max(ws.layout.status_h, ws.bar_layer._bar_h("desktop"))
 
-    def _mk_game_canvas(w, h):
+    def _mk_game_canvas(w, h, owner=None):
         # Per-run cart canvas (SPEC.md 1/3.1): a cart declaring a smaller
-        # raster plays on its own off-screen canvas, which blit_game upscales.
+        # raster plays on its own off-screen canvas, which blit_game upscales;
+        # its pixels are on loan to `owner`, the run, and go back with it.
         # No native kernel -> None, so the Player refuses the cart cleanly
         # instead of crawling per-pixel.
         if gfx is None:
             return None
-        return DeviceCanvas(_LayerComp(int(w), int(h), gfx))
+        own = 0 if owner is None else _owner_h(owner)
+        return DeviceCanvas(_LayerComp(int(w), int(h), gfx, own))
 
     ws.make_game_canvas = _mk_game_canvas
     # The runtime probe's lines go to the boot's own sink unless the board has

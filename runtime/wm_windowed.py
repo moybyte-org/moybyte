@@ -72,7 +72,7 @@ try:
     from layers import Layer
     # (from widgets, not palette: runtime/palette.py needs colorsys -- host-only)
     from widgets import _Blit, _in, _ticks_ms, _ticks_diff
-    from surface import SurfaceSet    # surface model v1 (docs/surface_model_v1.md)
+    import moy_glass as _glass        # the surface table (docs/surface_model_v1.md §15)
     from wm_desk import _BackdropLayer
     from wm_chrome import WindowChrome, _SHADOW
     from moy_spine import EDITOR
@@ -80,7 +80,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
     from runtime.widgets import _Blit, _in, _ticks_ms, _ticks_diff
-    from runtime.surface import SurfaceSet
+    from runtime import glass_binding as _glass
     from runtime.wm_desk import _BackdropLayer
     from runtime.wm_chrome import WindowChrome, _SHADOW
     from runtime.moy_spine import EDITOR
@@ -259,14 +259,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._win_layer = _WindowStackLayer(self)
         self._wins = {}               # slot key -> _Win
         self._order = []              # window slots, bottom -> top (stack-shaped)
-        # Surface model v1 (docs/surface_model_v1.md): the registry + the one
-        # monotonic gen mint. Window records mirror _wins ("win:<slot key>" --
-        # REGISTRY keys, never content kinds, §2); _surface_signals bumps the
-        # epoch / attributes gestures; skip-draw (§4) consults the gens on the
+        # Surface model v1 (docs/surface_model_v1.md): the registry and the
+        # one monotonic gen mint are the kernel's surface table (§15, the
+        # glass). Window records mirror _wins ("win:<slot key>" -- REGISTRY
+        # keys, never content kinds, §2); _surface_signals bumps the epoch /
+        # attributes gestures; skip-draw (§4) consults the gens on the
         # RECORDING tier only -- the P4/host raster paths see zero new
         # per-frame work (_recording False -> signals early-return, and their
         # canvases have no skip_surface so the console probe stays None).
-        self.surfaces = SurfaceSet()
         self._recording = hasattr(self._root_canvas, "begin_surface")
         self._drawn_gens = {}         # sid -> content gen last actually DRAWN
         self.surface_keyframe = False  # armed by the serve loop (§5.4)
@@ -485,7 +485,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # Surface model: window records mirror the slot set. A dropped slot's
         # surface goes with it; a re-opened one is REBORN with fresh gens from
         # the monotonic mint, so no client cache can alias it (§2).
-        self.surfaces.sync(set("win:" + g for g in self._order))
+        if self._recording:
+            _glass.sync(["win:" + g for g in self._order])
 
     def set_play_intent(self, intent):
         """Record WHY the next cart run is starting -- "dev" (a playtest launched
@@ -1227,7 +1228,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if not self._recording:
             return                    # raster tiers: zero new per-frame work
         ws = self.ws
-        ss = self.surfaces
         self._kf_active = self.surface_keyframe
         self.surface_keyframe = False
         cur = ws._ptr_state()
@@ -1242,13 +1242,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                    or (ws._toast_until and _ticks_diff(ws._toast_until, now) > 0))
         gesture = self._drag if self._drag is not None else self._resize
         if ws._dirty or overlay:
-            ss.epoch()
+            _glass.epoch()
         elif gesture is not None:
             key = gesture[0]
             if self._wins.get(key) is not None:
-                ss.touch("win:" + key)   # pre-L4 streams carry the position
+                _glass.touch(_glass.surface("win:" + key))   # pre-L4 streams carry the position
                 if gesture is self._resize:
-                    ss.touch("chips")    # the rubber-band outline rides there
+                    _glass.touch(_glass.surface("chips"))    # the rubber-band outline rides there
         elif ptr and self._content_gesture and self._focus is not None:
             # A CONTENT gesture (a finger scrolling/selecting INSIDE the
             # focused window): the desk cannot change under it (the backdrop
@@ -1257,7 +1257,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # desk -- whose pixel cache the web root cannot use -- re-rendered
             # LIVE at ~627KB of garbage per frame (measured, the code-editor
             # drag), which is what marched the GC into mid-gesture collects.
-            ss.touch("win:" + self._focus)
+            _glass.touch(_glass.surface("win:" + self._focus))
         elif ptr or cur != last:
             # `cur != last` is a POSITION-only change: a hovering mouse. The
             # shell's hover feedback (desk icon highlight, cards msel) is drawn
@@ -1265,7 +1265,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # skip would swallow exactly the repaint hover needs. Epoch is the
             # honest cost of hover -- it lasts only while the mouse MOVES (a
             # still pointer is inert again, and the idle desktop stays free).
-            ss.epoch()
+            _glass.epoch()
         # The desk clock (bar HH:MM renders inside the "launcher" backdrop
         # surface): a minute flip is a content change nobody marks -- attribute
         # it here so a skipped desk can never show a stale clock.
@@ -1275,7 +1275,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             mm = None
         if mm != self._clock_min:
             self._clock_min = mm
-            ss.touch("launcher")
+            _glass.touch(_glass.surface("launcher"))
         # Class B for the non-window surfaces: the desk under a live wallpaper,
         # the visible cursor (its stream follows the pointer position) -- and
         # the PLAY-world Library while its grid coasts on a kinetic fling.
@@ -1285,10 +1285,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # lag" (a fast drag flings; a slow one doesn't). In the desk world the
         # Library grid isn't visible, so launcher.flinging is False there and
         # the desk backdrop keeps skipping.
-        ss.get("launcher").animating = (
+        _glass.animating(_glass.surface("launcher"), (
             ws.wallpaper.is_animating(dt)
-            or bool(getattr(ws.launcher, "flinging", False)))
-        ss.get("cursor").animating = bool(getattr(ws.pointer, "visible", False))
+            or bool(getattr(ws.launcher, "flinging", False))))
+        _glass.animating(_glass.surface("cursor"),
+                         bool(getattr(ws.pointer, "visible", False)))
 
     def _surface_windows(self):
         """Window-record bookkeeping, AFTER _sync_windows (live slot set):
@@ -1299,15 +1300,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if not self._recording:
             return
         ws = self.ws
-        ss = self.surfaces
         for z, key in enumerate(self._order):
             win = self._wins[key]
-            s = ss.get("win:" + key)
-            if (s.x != win.x or s.y != win.y or s.w != win.w or s.h != win.h
-                    or s.z != z):
-                s.x, s.y, s.w, s.h, s.z = win.x, win.y, win.w, win.h, z
-                s.place_gen = ss.mint()
-            s.animating = (win.kind in ("desktop", "update")
+            s = _glass.surface("win:" + key)
+            _glass.place(s, win.x, win.y, win.w, win.h, z)
+            _glass.animating(s, win.kind in ("desktop", "update")
                            or (win.kind == "settings"
                                and ws.settings_layer.bluetooth_animating())
                            or (win.kind == "menu" and ws.menu_view == "music"
@@ -1321,10 +1318,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         their layer carries the sync/bookkeeping and must always run)."""
         if not self._recording or self._kf_active or layer_id != "launcher":
             return False
-        ss = self.surfaces
-        if ss.is_animating(layer_id):
+        h = _glass.surface_find(layer_id)
+        if _glass.animating(h):
             return False
-        gen = ss.content_gen(layer_id)
+        gen = _glass.content_gen(h)
         if gen == self._drawn_gens.get(layer_id):
             self.ws.note_cost("surface.skip")
             return True
@@ -1340,7 +1337,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # call, no allocation, pixels byte-identical.
         _surf = getattr(self._root_canvas, "begin_surface", None)
         _skip = getattr(self._root_canvas, "skip_surface", None)
-        ss = self.surfaces
         n = len(self._order)
         first = self._lowest_dirty_window(dt)
         # Chrome freeze (#155): a window's strip/border/shadow is DISJOINT from
@@ -1371,9 +1367,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 # the client replays its retained stream. The gesture target
                 # can never match (its touch in _surface_signals moved the gen)
                 # and a reborn window's fresh mint always differs (§2).
-                gen = ss.content_gen(sid)
+                sh = _glass.surface_find(sid)
+                gen = _glass.content_gen(sh)
                 if (gen == self._drawn_gens.get(sid)
-                        and not ss.is_animating(sid)):
+                        and not _glass.animating(sh)):
                     _skip(sid, "system")
                     self.ws.note_cost("surface.skip")
                     continue
@@ -1404,7 +1401,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # The chips residual skips like a window: its content moves on
             # focus/order/minimize (dirty -> epoch) and on a resize outline
             # (attributed in _surface_signals).
-            gen = ss.content_gen("chips")
+            gen = _glass.content_gen(_glass.surface_find("chips"))
             if gen == self._drawn_gens.get("chips"):
                 _skip("chips", "system")
                 return

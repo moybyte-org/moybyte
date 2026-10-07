@@ -223,7 +223,7 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     `board.toml`** since #161 Phase 3 rather than listed in `build.sh`: the
     whole shared console from `runtime/` as a **denylist** — everything crosses
     except the files that board file names, each with its reason, which is how
-    `wm_windowed.py` and its `surface.py` leaf come across here and are denied
+    `wm_windowed.py` and its halves come across here and are denied
     on the S3 — plus `device_canvas`/`device_api`/`device_wifi`/`device_util`/
     `moycore_glue`/`moy_ota`/`moy_webserver`/`moy_webhost` and the `moybyte`
     input package from the T-Deck modules tree (an **allowlist**, and it stays

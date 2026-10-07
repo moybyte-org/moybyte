@@ -1263,6 +1263,14 @@ class Player:
             except Exception:  # noqa: BLE001 -- scene reset must never block a run
                 pass
         self._close_lua()              # a re-run replaces the previous run's Lua state
+        # #63 leak fix: the PREVIOUS cart is dead and moycore has let go of it
+        # -- return everything on loan to it (its make_layer worlds, its run
+        # canvas, its paint bakes) before this run binds and allocates its own.
+        # Probe: a canvas with no glass has nothing to return.
+        rl = getattr(ws.canvas, "reclaim_layers", None)
+        if rl is not None:
+            rl("cart")
+        self._t_reclaim = _ticks_diff(_ticks_ms(), t0)
         self._sram_run = None          # #211: whatever it reported was the LAST
                                        # run's; a Python cart must not inherit it
         self._pmem_last = t0           # periodic pmem flush counts from this run's start
@@ -1351,16 +1359,10 @@ class Player:
         return None
 
     def _prepare_world(self, ws, project, cart, t0):
-        """Reclaim the previous cart's buffers, build the audio, reset the
-        canvas state, install a declared palette and stamp the cart clock.
-        Returns the (reclaim, audio) ms for the RUNSTART diag."""
-        # #63 leak fix: the PREVIOUS cart is dead -- return its pooled layer buffers
-        # (make_layer worlds, the Fold-2 map cache) for reuse before the new run
-        # allocates. Probe: the host Canvas has no pool (gc reclaims its layers).
-        rl = getattr(ws.canvas, "reclaim_layers", None)
-        if rl is not None:
-            rl("cart")
-        t_reclaim = _ticks_diff(_ticks_ms(), t0)
+        """Build the audio, reset the canvas state, install a declared palette
+        and stamp the cart clock. Returns the (reclaim, audio) ms for the
+        RUNSTART diag; the reclaim is _begin_run's."""
+        t_reclaim = self._t_reclaim
         t1 = _ticks_ms()
         project._build_audio()
         t_audio = _ticks_diff(_ticks_ms(), t1)

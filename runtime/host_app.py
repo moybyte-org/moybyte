@@ -334,7 +334,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
                              panel_diagonal_in=panel_diagonal_in)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
-    ws.make_game_canvas = lambda w, h: host_canvas.make_canvas(w, h)
+    ws.make_game_canvas = host_canvas.make_canvas
     # ONE Lua runtime on the host, and it is the boards' (#67 rung 4 / plan 6.9):
     # runtime/lua_binding -- libmoy's own binding over the same vendored 5.4 the
     # firmware compiles, LUA_32BITS and all. A "lua" cart with no native module

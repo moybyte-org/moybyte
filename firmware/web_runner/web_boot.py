@@ -303,7 +303,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster (celeste's view(128, 120)) plays on its own off-screen canvas and
     # blit_game upscales it, same as both boards.
-    ws.make_game_canvas = lambda w, h: web_canvas.WebSystemCanvas(
+    ws.make_game_canvas = lambda w, h, owner=None: web_canvas.WebSystemCanvas(
         web_canvas.WebCompositor(int(w), int(h)))
     # Cart runtimes: moycore, the SAME native module and glue the boards run --
     # third architecture, one engine. A build without the usermod still boots

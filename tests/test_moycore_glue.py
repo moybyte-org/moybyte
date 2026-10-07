@@ -2199,25 +2199,6 @@ class DirectColourCanvas:
     presents_palette_frames = False
 
 
-class FakeAlloc(types.ModuleType):
-    MEMORY_SPIRAM = 1
-    MEMORY_DMA = 2
-
-    def __init__(self, room=True):
-        super().__init__("moy_alloc")
-        self.room = room
-        self.log = []
-
-    def alloc(self, n, caps):
-        self.log.append(("alloc", n, caps))
-        if not self.room:
-            raise MemoryError("no PSRAM")
-        return bytearray(n)
-
-    def free(self, buf):
-        self.log.append(("free", len(buf)))
-
-
 class FenceComp:
     def __init__(self, log):
         self.log = log
@@ -2297,36 +2278,40 @@ def test_the_cart_frame_forwards_to_the_binding(tmp_path):
 
 
 def test_the_scratch_is_the_runs_and_freed_once_nothing_reads_it(tmp_path):
+    """The frame fold's scratch is a BUF row of the glass (a SCRATCH, the
+    kernel's): grown by replacing it, given back at the run's close only
+    after every fence that could still be reading it."""
+    import types
     world = _wasm_world()
-    alloc = FakeAlloc()
-    saved = sys.modules.get("moy_alloc", KeyError)
-    sys.modules["moy_alloc"] = alloc
     try:
+        g = world.mod._glass
         cf = world.mod.CartFrame(320, 240)
-        log = alloc.log
+        log = []
         cf.close(FenceComp(log))
         assert log == []                    # nothing taken: nothing to wait on
         a = cf.scratch(77440)
-        assert log == [("alloc", 77440, 3)]
+        ba = cf._scratch_b
+        assert len(a) == 77440 and ba.live and ba.role == g.ROLE_SCRATCH
         assert cf.scratch(1000) is a        # big enough: the same buffer
         b = cf.scratch(154240)              # a blit565 frame wants more
-        assert b is not a and len(b) == 154240
-        assert log[1:] == [("free", 77440), ("alloc", 154240, 3)]
-        del log[:]
+        assert b is not a and len(b) == 154240 and not ba.live
+        bb = cf._scratch_b
         del world.core.calls[:]
         cf.close(FenceComp(log))
-        assert log == [("fold_fence",), ("snap_fence",), ("disarm",),
-                       ("free", 154240)]
+        assert log == [("fold_fence",), ("snap_fence",), ("disarm",)]
+        assert not bb.live
         # ...and the last frame shown went into the canvas before its copy
         # was let go: from here on the canvas is all that holds the game.
         assert world.core.calls == [("frame_settle",)]
-        alloc.room = False
+
+        def refuse(n, role, owner=0):
+            raise MemoryError
+        world.mod._glass = types.SimpleNamespace(buf=refuse,
+                                                 ROLE_SCRATCH=g.ROLE_SCRATCH,
+                                                 ORIGIN_HEAP=g.ORIGIN_HEAP)
         assert cf.scratch(10) is None       # no PSRAM: the caller settles
+        world.mod._glass = g
     finally:
-        if saved is KeyError:
-            del sys.modules["moy_alloc"]
-        else:
-            sys.modules["moy_alloc"] = saved
         world.close()
 
 
@@ -2397,9 +2382,6 @@ def test_a_frame_the_cart_did_not_replace_is_shown_again_from_the_scratch(tmp_pa
     take() hands back that frame's copy in the scratch, so the flush shows it
     again rather than a canvas nothing wrote."""
     world = _wasm_world()
-    alloc = FakeAlloc()
-    saved = sys.modules.get("moy_alloc", KeyError)
-    sys.modules["moy_alloc"] = alloc
     try:
         cf = world.mod.CartFrame(4, 2)
         assert cf.take() is None                     # nothing owed, nothing shown
@@ -2415,8 +2397,4 @@ def test_a_frame_the_cart_did_not_replace_is_shown_again_from_the_scratch(tmp_pa
         world.core.kept = False                      # a verb wrote the canvas
         assert cf.take() is None
     finally:
-        if saved is KeyError:
-            del sys.modules["moy_alloc"]
-        else:
-            sys.modules["moy_alloc"] = saved
         world.close()

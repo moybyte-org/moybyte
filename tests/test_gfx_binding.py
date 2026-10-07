@@ -104,6 +104,8 @@ def _px(buf):
 # The script both sides run. Kept as data so the CPython side and the
 # MicroPython side cannot drift into testing different things.
 OPS = """
+fill_spans(buf, 16, 8, spans, -1, 0, 0, -1, pal565, 0, 0, 0, 0, 16, 8)
+fill_spans(buf, 16, 8, spans, 2, 3, -1, 0x2468, None, 1, 2, 1, 1, 15, 7)
 fill_rect(buf, 16, 2, 1, 5, 3, 0xABCD)
 fill_rect(buf, 16, -3, 0, 6, 1, 0x1234)
 fill_rect(buf, 16, 13, 5, 9, 2, 0x00F0)
@@ -363,6 +365,7 @@ quads[0] = 12
 cells = bytearray([0, 1, 2, 1, 1, 0, 1, 2, 2, 1, 0, 1, 1, 2, 1, 0])
 idx = bytearray([(_i * 7) % 64 for _i in range(5 * 4)])
 pal565 = array.array("H", [(0xF000 - i * 0x0123) & 0xFFFF for i in range(64)])
+spans = array.array("h", [2, 1, 5, 2, 3,  -3, 4, 6, 3, 9,  12, 6, 9, 4, 17])
 # A synthetic petme128-LAYOUT font (8 bytes per glyph, column-major, LSB = top
 # row), not the real one: moy_font.py is a build artefact, and a fixture both
 # sides can BUILD cannot drift the way two staged copies of a blob can. Every
@@ -400,7 +403,7 @@ no_quads = array.array("h", [0, 0, 0, 0])
 over_quads = array.array("h", [999, 0, 0, 0, 5, 1, 1, 0])
 """
 
-_FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565",
+_FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565", "spans",
                   "font", "msg", "empty", "long", "big", "pal8", "idx8",
                   "no_quads", "over_quads")
 
@@ -470,10 +473,12 @@ def _canvas_verbs():
 
 def test_the_binding_carries_every_verb_device_canvas_calls_outright():
     probed, required = _canvas_verbs()
-    # A floor on both, so a refactor that changes how the canvas names its
-    # kernel cannot turn this into a test of an empty set that still passes.
-    assert len(required) >= 12, sorted(required)
-    assert len(probed) >= 4, sorted(probed)
+    # A floor on the required set, so a refactor that changes how the canvas
+    # names its kernel cannot turn this into a test of an empty set that still
+    # passes. The one verb it may probe for is the gates' context, which the
+    # host's kernel does not have.
+    assert len(required) >= 16, sorted(required)
+    assert probed == {"make_draw_ctx"}, sorted(probed)
     missing = sorted(n for n in required if not callable(getattr(g, n, None)))
     assert not missing, (
         "device_canvas calls these on the kernel with no fallback, and the host "
@@ -482,18 +487,16 @@ def test_the_binding_carries_every_verb_device_canvas_calls_outright():
 
 
 def test_the_optional_libmoy_verbs_are_implemented_here_anyway():
-    """tri/sspr/tline/text/shape are PROBED by device_canvas, and here
-    regardless.
+    """tri/sspr/tline/text/shape were once PROBED by device_canvas, with a
+    Python lane behind each; since the glass pass every tier carries the
+    kernel, so device_canvas calls them outright and they are here.
 
-    Pinning the decision _SIGS records: "optional" on a board means "the board
-    would be slower", not "the host may diverge". If one of these were dropped
-    here the canvas would quietly take its Python fallback and the host would
-    stop exercising the same raster the glass runs -- green, and no longer
-    testing anything.
+    Pinning the decision _SIGS records: the host may not diverge. If one of
+    these were dropped here the first draw would raise.
     """
-    probed, _ = _canvas_verbs()
-    for name in ("tri", "sspr", "tline", "text", "shape"):
-        assert name in probed, "%s is no longer probed by device_canvas" % name
+    _, required = _canvas_verbs()
+    for name in ("tri", "sspr", "tline", "shape", "fill_spans"):
+        assert name in required, "%s is no longer called by device_canvas" % name
         assert callable(getattr(g, name, None)), name
 
 
@@ -637,6 +640,7 @@ def _shot():
 
 def fill(*a): moy_gfx.fill(*a); _shot()
 def fill_rect(*a): moy_gfx.fill_rect(*a); _shot()
+def fill_spans(*a): moy_gfx.fill_spans(*a); _shot()
 def scroll_rect(*a): moy_gfx.scroll_rect(*a); _shot()
 def blit_window(*a): moy_gfx.blit_window(*a); _shot()
 def blit565(*a): moy_gfx.blit565(*a); _shot()

@@ -255,8 +255,8 @@ def _children(obj):
 
 def offheap(ws, depth=14, modules=None):
     """Every live registry buffer, named by the first path that reaches it:
-    `ws` first, then each module's globals (the pool is device_canvas's
-    _GLASS.pool, its loans _GLASS's rows, walked through `lent()`). Returns {"total": (count, bytes),
+    `ws` first, then each module's globals. The glass's buffers are not
+    the registry's: they are its rows, which pool() counts. Returns {"total": (count, bytes),
     "owners": [(path, bytes)], "unowned": [(address, bytes)]}."""
     live_fn = getattr(_moy_alloc, "live", None) if _moy_alloc is not None else None
     if live_fn is None:
@@ -268,9 +268,6 @@ def offheap(ws, depth=14, modules=None):
     found = []
     seen = set()
     roots = [("device_canvas", mods.get("device_canvas")), ("ws", ws)]
-    glass = getattr(mods.get("device_canvas"), "_GLASS", None)
-    if glass is not None:
-        roots.insert(1, ("device_canvas._GLASS.lent()", glass.lent()))
     for name in sorted(mods):
         if name not in ("device_canvas", "mem_census"):
             roots.append((name, mods[name]))
@@ -302,16 +299,32 @@ def offheap(ws, depth=14, modules=None):
 
 
 def pool():
-    """device_canvas's layer pool as {nbytes: buffers} and its bake loans as
-    {owner: bytes} (its moy_glass tables), or None where the module is
-    absent."""
-    dc = sys.modules.get("device_canvas")
-    glass = getattr(dc, "_GLASS", None)
-    if glass is None:
+    """The glass's buffer rows (native/moy_glass): the pool as {nbytes:
+    rows}, the paint bakes on loan as {owner handle: bytes}, and the table's
+    split by owner class and origin -- `glass`, the census's field -- or None
+    where the module is absent."""
+    try:
+        import moy_glass as g
+    except ImportError:
         return None
-    lp = {n: len(v) for n, v in glass.pool.items()}
-    lb = {str(k): v for k, v in glass.lent_bytes(dc._ROLE_BAKE).items()}
-    return {"pool": lp, "lent_bakes": lb}
+    lp = {}
+    for h in g.rows(-1):
+        n = g.row(h)[0]
+        lp[n] = lp.get(n, 0) + 1
+    lb = {}
+    for h in g.rows():
+        r = g.row(h)
+        if r[1] == g.ROLE_BAKE:
+            lb[str(r[3])] = lb.get(str(r[3]), 0) + r[0]
+    st = g.stats()
+    return {"pool": lp, "lent_bakes": lb,
+            "glass": {"rows": st[0], "peak": st[1], "pool_rows": st[2],
+                      "pool_bytes": st[3], "pool_bound": st[4],
+                      "heap_rows": st[5], "heap_bytes": st[6],
+                      "kernel_bytes": st[7], "cart_bytes": st[8],
+                      "owners": st[9], "evictions": st[10],
+                      "psram_free": st[11], "psram_largest": st[12],
+                      "canvases": st[13]}}
 
 
 def _type_names(modules=None):

@@ -83,6 +83,8 @@ _SIGS = (
     # forwarder in between.
     ("mg_fill", [_P, _Z, _I, _I], None),
     ("mg_fill_rect", [_P, _Z, _I, _I, _I, _I, _I, _I], None),
+    ("mg_fill_spans", [_P, _Z, _I, _P, _I, _I, _I, _I, _P,
+                       _I, _I, _I, _I, _I, _I], None),
     ("mg_scroll_rect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
     ("mg_blit565", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I,
                     _I, _I, _I, _I], None),
@@ -179,6 +181,25 @@ def fill_rect(buf, stride, x, y, w, h, color):
     arr, cap = _buf(buf)
     _lib().mg_fill_rect(ctypes.cast(arr, _P), cap, int(stride), int(x), int(y),
                         int(w), int(h), int(color) & 0xFFFF)
+
+
+def fill_spans(dst, dw, dh, arr, n, ox, oy, col, pal, cam_x, cam_y,
+               cx0, cy0, cx1, cy1):
+    arr_d, cap = _buf(dst)
+    raw = memoryview(arr).cast("B")
+    quads, _ = _rbuf(raw)
+    nmax = len(raw) // 10
+    n = int(n)
+    if n < 0 or n > nmax:
+        n = nmax
+    pal_a = None
+    if pal is not None:
+        pal_a, _ = _rbuf(memoryview(pal).cast("B"))
+    _lib().mg_fill_spans(ctypes.cast(arr_d, _P), cap, int(dw), ctypes.cast(quads, _P),
+                         n, int(ox), int(oy), int(col),
+                         None if pal_a is None else ctypes.cast(pal_a, _P),
+                         int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1),
+                         int(cy1))
 
 
 def shape(buf, dw, dh, kind, a0, a1, a2, a3, a4, a5, color, pat, hole,

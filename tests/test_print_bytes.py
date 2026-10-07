@@ -41,15 +41,15 @@ def _device_canvas_module():
     tree's import environment (they depend on nothing but builtins)."""
     path = ROOT / "device/device_canvas.py"
     src = path.read_text(encoding="utf-8")
-    # Take just the two helpers, by their exact extent: importing the module
+    # Take just the helper, by its exact extent: importing the module
     # needs the device's framebuf / moy_gfx / device_util, none of which exist
     # under CPython, and the parity suite already covers the class itself.
     start = src.index("def _text_bytes(")
-    tail = "return out.decode()"
+    tail = 'return str(s).encode("utf-8")'
     end = src.index(tail, start) + len(tail)
     ns = {}
     exec(compile(src[start:end], str(path), "exec"), ns)
-    assert "_text_bytes" in ns and "_fb_text" in ns
+    assert "_text_bytes" in ns
     return ns
 
 
@@ -97,17 +97,3 @@ def test_device_bytes_helper_does_not_stringify_a_bytes_object():
     # would have DRAWN that literal -- eight visible characters where the cart
     # asked for three.
     assert bytes(DEV["_text_bytes"](b"G\xffH")) == b"G\xffH"
-
-
-def test_framebuf_fallback_keeps_the_cell_count():
-    # framebuf.text needs a str and no str holds 0xFF. Bytes with no glyph draw
-    # nothing in the native path anyway, so the fallback maps them to a SPACE:
-    # same pixels, same advance, cursor stays in step.
-    assert DEV["_fb_text"](b"G\xffH") == "G H"
-    assert DEV["_fb_text"](b"\x00\x1fA") == "  A"
-    assert len(DEV["_fb_text"]("café")) == 5
-
-
-def test_framebuf_fallback_leaves_printable_ascii_alone():
-    assert DEV["_fb_text"]("Score: 100") == "Score: 100"
-    assert DEV["_fb_text"](b"\x7f") == "\x7f"      # 0x7F has a glyph

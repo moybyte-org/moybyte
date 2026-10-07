@@ -1276,120 +1276,51 @@ def test_a_clear_is_never_a_quiet_frame():
 
 def test_a_layer_gives_its_off_heap_buffer_back_on_release():
     """A layer's pixel buffer lives outside the gc heap on a board, so nothing
-    collects it: release() is the owner's word. Where the buffer came from
-    decides what that means -- an alloc() buffer is freed through the
-    registry (and the view neutered), a pool buffer goes back to the pool, a
-    gc-heap bytearray is simply dropped. Before this the windowed WM leaked
-    ~3.6MB of PSRAM per Library -> CHANGE -> home round on the Guition P4."""
-    import sys
-    import types
+    collects it: release() is the owner's word. It is a BUF row of the glass,
+    and the row decides what release means -- a layer lent to a program goes
+    back to the pool, anything else is freed, and the view is let go either
+    way. Before this the windowed WM leaked ~3.6MB of PSRAM per Library ->
+    CHANGE -> home round on the Guition P4."""
     from device import device_canvas as dc
+    g = dc._glass_mod
 
-    class FakeAlloc:
-        MEMORY_SPIRAM = 1
-        MEMORY_DMA = 2
+    comp = dc._LayerComp(64, 32, None)
+    b = comp._b
+    assert b.live and b.origin in (g.ORIGIN_ALLOC, g.ORIGIN_POOL)
+    comp.release()
+    assert not b.live and comp._buf is None
+    comp.release()                                # idempotent
 
-        def __init__(self):
-            self.allocs = []
-            self.frees = []
+    lent = dc._LayerComp(64, 32, None, dc._owner_h("p4_release"))
+    pooled = len(g.rows(-1))
+    lent.release()
+    assert len(g.rows(-1)) == pooled + 1, "a lent layer waits in the pool"
+    dc._owner_done("p4_release")
 
-        def alloc(self, n, caps=1):
-            buf = memoryview(bytearray(n))
-            self.allocs.append((n, caps))
-            return buf
-
-        def free(self, view):
-            self.frees.append(view)
-
-        def malloc_dma(self, n, caps=1):
-            raise AssertionError("alloc() is preferred when the firmware has it")
-
-    fake = FakeAlloc()
-    saved = sys.modules.get("moy_alloc")
-    saved_bus = sys.modules.get("lcd_bus")
-    sys.modules["moy_alloc"] = fake
-    sys.modules["lcd_bus"] = None                 # -> ImportError: caps from moy_alloc
-    pool = dc._GLASS.pool
-    n = 64 * 32 * 2
-    pool.pop(n, None)
-    try:
-        comp = dc._LayerComp(64, 32, None)
-        assert fake.allocs == [(n, 3)], "SPIRAM|DMA, through the registry alloc"
-        assert comp.pooled and comp._origin == dc._ORIGIN_ALLOC
-        buf = comp._buf
-        comp.release()
-        assert fake.frees == [buf] and comp._buf is None
-        comp.release()                            # idempotent
-        assert len(fake.frees) == 1
-        # A pool buffer is returned to the pool, never freed.
-        pooled = memoryview(bytearray(n))
-        pool[n] = [pooled]
-        comp2 = dc._LayerComp(64, 32, None)
-        assert comp2._buf is pooled and comp2._origin == dc._ORIGIN_POOL
-        assert pool[n] == []
-        comp2.release()
-        assert pool[n] == [pooled] and len(fake.frees) == 1
-        pool.pop(n, None)
-        # The canvas-level verb reaches the comp; a root (host compositor) ignores it.
-        from runtime import host_canvas
-        host_canvas.install()
-        root = host_canvas.make_canvas(64, 32)
-        root.release()                            # no release on HostCompositor
-        lay = root.new_layer(64, 32)
-        assert lay._comp._origin == dc._ORIGIN_ALLOC
-        lay.release()
-        assert lay._comp._buf is None and len(fake.frees) == 2
-    finally:
-        pool.pop(n, None)
-        if saved is None:
-            sys.modules.pop("moy_alloc", None)
-        else:
-            sys.modules["moy_alloc"] = saved
-        if saved_bus is None:
-            sys.modules.pop("lcd_bus", None)
-        else:
-            sys.modules["lcd_bus"] = saved_bus
-    # No allocator at all (the host): a gc-heap bytearray, dropped on release.
-    comp3 = dc._LayerComp(64, 32, None)
-    assert comp3._origin == dc._ORIGIN_HEAP and not comp3.pooled
-    comp3.release()
-    assert comp3._buf is None
+    # The canvas-level verb reaches the comp; a root (host compositor) ignores it.
+    from runtime import host_canvas
+    host_canvas.install()
+    root = host_canvas.make_canvas(64, 32)
+    root.release()                                # no release on HostCompositor
+    lay = root.new_layer(64, 32)
+    b = lay._comp._b
+    lay.release()
+    assert lay._comp._buf is None and not b.live
 
 
 def test_the_view_crop_a_new_view_replaces_is_given_back(monkeypatch):
     """The P4's cart-view crop is an off-heap layer, so the canvas that
-    replaces it for a new view frees it, once no PPA op of the last frame
+    replaces it for a new view gives it back, once no PPA op of the last frame
     still reads it. Dropped instead, every change of view lost the old crop
     for good -- the S3 fold's scratch leak (#224) in the P4's own spelling."""
     import importlib.util as ilu
     from runtime import host_canvas
     log = []
 
-    class FakeAlloc:
-        MEMORY_SPIRAM = 1
-        MEMORY_DMA = 2
-
-        def __init__(self):
-            self.live = {}
-
-        def alloc(self, n, caps=1):
-            buf = memoryview(bytearray(n))
-            self.live[id(buf)] = buf
-            log.append(("alloc", n))
-            return buf
-
-        def free(self, view):
-            if self.live.pop(id(view), None) is None:
-                raise ValueError("not a live alloc() buffer")
-            log.append(("free", len(view)))
-
     class FakePPA:
         def sync(self):
             log.append(("sync",))
 
-    fake = FakeAlloc()
-    monkeypatch.setitem(sys.modules, "moy_alloc", fake)
-    monkeypatch.setitem(sys.modules, "lcd_bus", None)
     host_canvas.install()
     spec = ilu.spec_from_file_location("p4_canvas_under_test", DEVICE / "p4_canvas.py")
     mod = ilu.module_from_spec(spec)
@@ -1398,22 +1329,19 @@ def test_the_view_crop_a_new_view_replaces_is_given_back(monkeypatch):
     cv._ppa = FakePPA()
     cv._blit_game_full = lambda *a, **k: None   # the crop's lifecycle only
     gc = cv.new_layer(128, 128)
-    log.clear()
     cv.blit_game(gc, 0, 0, 1, src=(0, 4, 128, 120))
-    assert log == [("alloc", 128 * 120 * 2)]
-    for _ in range(5):
+    assert cv._view_crop._comp._b.nbytes == 128 * 120 * 2
+    for crop in ((16, 14, 96, 100), (0, 4, 128, 120)) * 5:
+        old = cv._view_crop._comp._b
         log.clear()
-        cv.blit_game(gc, 0, 0, 1, src=(16, 14, 96, 100))
-        assert log == [("sync",), ("free", 128 * 120 * 2),
-                       ("alloc", 96 * 100 * 2)]
-        log.clear()
-        cv.blit_game(gc, 0, 0, 1, src=(0, 4, 128, 120))
-        assert log == [("sync",), ("free", 96 * 100 * 2),
-                       ("alloc", 128 * 120 * 2)]
+        cv.blit_game(gc, 0, 0, 1, src=crop)
+        assert log == [("sync",)], "the fence comes before the give-back"
+        assert not old.live
+        assert cv._view_crop._comp._b.nbytes == crop[2] * crop[3] * 2
+    kept = cv._view_crop._comp._b
     log.clear()
     cv.blit_game(gc, 0, 0, 1, src=(0, 4, 128, 120))   # same view: reused
-    assert log == []
-    assert len(fake.live) == 2                          # the game layer + one crop
+    assert log == [] and cv._view_crop._comp._b is kept and kept.live
 
 
 def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():

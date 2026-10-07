@@ -95,7 +95,7 @@ CrashGuard.
 
 EXTENDED 2026-10-07 (#224, sprint 3's carve, before the survival set
 crosses): five more, one per twin -- input (runtime/moy_input.py), the glass
-(runtime/moy_glass.py under device_canvas), the frame loop
+(native/moy_glass under device_canvas, since sprint 3's pass 1), the frame loop
 (runtime/frame_loop.py), the links (runtime/moy_net.py, runtime/moy_sync.py
 and device/moy_ota_health.py) and audio sessions (runtime/audio_session.py).
 Each is pinned on every VM and over the native spine; the section above the
@@ -1353,7 +1353,7 @@ try:
 except ImportError:                         # CPython: the host's binding
     sys.path.insert(0, @REPO@)
     from runtime import host_canvas
-    host_canvas.install()                   # moy_gfx over ctypes, framebuf
+    host_canvas.install()                   # moy_gfx and moy_glass over ctypes
     import moy_gfx
 import hashlib
 
@@ -1384,72 +1384,78 @@ class Comp:
         return moy_gfx
 
 
-class Alloc:
-    """moy_alloc's freeing allocator, as the glass sees it: a buffer per ask,
-    counted, and every free checked."""
-    MEMORY_SPIRAM = 1
-    MEMORY_DMA = 2
-
-    def __init__(self):
-        self.live = 0
-
-    def alloc(self, n, caps=0):
-        self.live += 1
-        return memoryview(bytearray(n))
-
-    def free(self, buf):
-        self.live -= 1
-
-
 def rows(tag):
-    g = dc._GLASS
+    h = dc._OWNERS.get(tag)
+    if h is None:
+        return "-"
     out = []
-    for role in (mg.ROLE_LAYER, mg.ROLE_BAKE):
-        for h in g.loans(tag, role):
-            r = g.row(h)
-            out.append("%s:r%d:o%d:%d" % (h_(h), r[mg.ROLE], r[mg.ORIGIN],
-                                          r[mg.NBYTES]))
+    for b in mg.rows(h):
+        r = mg.row(b)
+        out.append("%s:r%d:o%d:%d" % (h_(b), r[1], r[2], r[0]))
     return ",".join(out) or "-"
+
+
+def pool():
+    out = {}
+    for b in mg.rows(-1):
+        n = mg.row(b)[0]
+        out[n] = out.get(n, 0) + 1
+    return sorted(out.items())
 
 
 def crc(cv):
     return hashlib.sha256(cv._comp._buf).digest()[:6].hex()
 
 
-alloc = Alloc()
-sys.modules["moy_alloc"] = alloc
 cv = dc.DeviceCanvas(Comp(96, 64))
 cv.cls(1)
 cv.rect(4, 4, 20, 12, 8)
 cv.print("GLASS", 30, 10, 7)
-say("draw", crc(cv))
+say("draw", crc(cv), "canvas", h_(cv._crow.h))
 lay = cv.new_layer(64, 32, owner="cart")
 lay.cls(3)
 lay.rect(0, 0, 8, 8, 10)
-cv.draw_layer(lay, 4, 0) if hasattr(cv, "draw_layer") else cv.blit_window_from(lay, 4, 0)
-say("layer", crc(cv), "owner", h_(dc._GLASS.owner("cart")), "rows", rows("cart"),
-    "alloc", alloc.live)
-lay2 = cv.new_layer(32, 16, owner="cart")
+cv.blit_window_from(lay, 4, 0)
+say("layer", crc(cv), "owner", h_(dc._OWNERS["cart"]), "rows", rows("cart"),
+    "canvas", h_(lay._crow.h))
+small = dc.DeviceCanvas(dc._LayerComp(32, 16, moy_gfx, dc._owner_h("cart")))
+lay2 = small.new_layer(32, 16, owner="cart")
 console = cv.new_layer(32, 16)
-say("lent", rows("cart"), "console", int(console._comp.pooled))
+say("lent", rows("cart"), "console", h_(console._comp.buf_h))
 cv.reclaim_layers("cart")
-pool = sorted((n, len(v)) for n, v in dc._GLASS.pool.items())
-say("reclaim", rows("cart"), "pool", pool, "alloc", alloc.live)
+say("reclaim", rows("cart"), "pool", pool(), "live", int(lay._comp._b.live),
+    int(small._comp._b.live), int(lay2._comp._b.live))
 again = cv.new_layer(64, 32, owner="cart")
-say("reuse", rows("cart"), int(again._comp._origin == mg.ORIGIN_POOL),
-    "pool", sorted((n, len(v)) for n, v in dc._GLASS.pool.items()))
+say("reuse", rows("cart"), int(again._comp._b.origin == mg.ORIGIN_POOL),
+    "pool", pool())
 console.release()
-say("release", "alloc", alloc.live)
+st = mg.stats()
+say("release", "rows", st[0], "heap", st[5], "kernel", st[7], "cart", st[8])
+s1 = mg.surface("win:make")
+s2 = mg.surface("bar")
+g0 = mg.content_gen(s1)
+mg.touch(s1)
+mg.epoch()
+say("surf", h_(s1), h_(s2), int(mg.content_gen(s1) > g0),
+    int(mg.content_gen(s2) == mg.content_gen(mg.surface("chips"))))
+mg.sync(["win:other"])
+say("sync", mg.surface_find("win:make"), h_(mg.surface_find("bar")))
+k0 = mg.kernel_epoch()
+mg.kernel_bump()
+say("kernel", int(mg.kernel_epoch() != k0))
 print("DRIVER_DONE")
 '''
 
 GLASS_TRACE = """\
-draw bcf7a0e484b6
-layer 55129292ac68 owner 5.0.1 rows 2.0.1:r1:o2:4096 alloc 1
-lent 2.0.1:r1:o2:4096,2.1.1:r1:o2:1024 console 1
-reclaim - pool [(1024, 1), (4096, 1)] alloc 3
-reuse 2.0.2:r1:o1:4096 1 pool [(1024, 1), (4096, 0)]
-release alloc 2
+draw bcf7a0e484b6 canvas 3.0.1
+layer 55129292ac68 owner 5.0.1 rows 2.0.1:r1:o2:4096 canvas 3.1.1
+lent 2.0.1:r1:o2:4096,2.1.1:r1:o2:1024,2.2.1:r1:o2:1024 console 2.3.1
+reclaim - pool [(1024, 2), (4096, 1)] live 0 0 0
+reuse 2.0.3:r1:o1:4096 1 pool [(1024, 2)]
+release rows 3 heap 0 kernel 0 cart 4096
+surf 4.0.1 4.1.1 1 0
+sync 0 4.1.1
+kernel 1
 """
 
 LOOP_DRIVER = r'''import sys

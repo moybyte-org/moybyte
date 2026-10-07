@@ -39,9 +39,11 @@ board.toml declares `[native.impl] spine = "c"`, `tools/esp32_build_lib.sh`
 exports it as `MOY_SPINE_IMPL`, and the image freezes no `moy_spine.py`. The
 desktop MicroPython the traces run on builds it too (`UNIX_MP_SPINE`, default
 `c`). The CPython host runs the Python twin, which is also the interface the
-tests pin; the browser build keeps it because its wasm is a derived artifact of
-moy-spec's `runner/` and regenerating that is a cross-repo step; the Zero has no
-console to route.
+tests pin; the browser build keeps it until sprint 3's frame-tail pass takes the
+C spine into the browser's wasm, the kernel's modules having entered that build
+with the glass (2026-10-07: `native/moy_glass` compiles into it, and the bundle
+is rebuilt at the pinned emscripten and re-baked into every image); the Zero has
+no console to route.
 
 **What stays Python after sprint 2**, by decision: the app OBJECTS and the
 surfaces a route lands on (`console_spine.py`'s side of each verb); the radio

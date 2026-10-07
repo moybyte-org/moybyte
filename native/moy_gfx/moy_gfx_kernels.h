@@ -264,6 +264,9 @@ void mg_shape(uint16_t *dst, size_t cap, int dw, int kind,
 /* Shift the pixels inside (rx, ry, rw, rh) by (dx, dy) IN PLACE: the #113
  * scroll-as-blit primitive. Pixels that would leave the rect are dropped; the
  * strip shifted in from outside keeps its stale content. */
+void mg_fill_spans(uint16_t *dst, size_t cap, int dw, const int16_t *q, int n,
+                   int ox, int oy, int cov, const uint16_t *pal,
+                   int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 void mg_scroll_rect(uint16_t *px, size_t cap, int stride,
                     int rx, int ry, int rw, int rh, int dx, int dy);
 

@@ -41,22 +41,6 @@ from runtime.host_canvas import HostSystemCanvas                 # noqa: E402
 W, H = 96, 64
 
 
-def _text_lanes(w=W, h=H, font_scale=1):
-    """(kernel-text canvas, fallback-text canvas) of the same size.
-
-    The second one has its native text op removed, which is the state of a
-    checkout where nobody has built firmware: `moy_font` is what build.sh stages
-    runtime/font.py AS, and `device_canvas` gates the kernel op on importing it.
-    install() registers the canonical module under that name so the host does
-    not depend on a build artefact -- but the fallback still has to draw the
-    same glyphs, or a clean tree renders text nobody has looked at.
-    """
-    a = host_canvas.make_system_canvas(w, h, font_scale=font_scale)
-    b = host_canvas.make_system_canvas(w, h, font_scale=font_scale)
-    b._gfx_text = None
-    return a, b
-
-
 def _same(old, new, label):
     a = old.to_rgb888()
     b = new.to_rgb888()
@@ -166,29 +150,6 @@ def _sheet_and_map():
     tilemap.mset(2, 1, 2)
     tilemap.mset(3, 3, 1)
     return sheet, tilemap
-
-
-def test_the_two_text_lanes_draw_the_same_glyphs():
-    """libmoy's compiled-in petme128 against runtime/font.py, at every font
-    scale the shell offers.
-
-    These are two different programs drawing the same font, and only one of them
-    is exercised by a normal run: the C op. The Python lane is what a clean
-    checkout without a firmware build takes, and it is also the ONLY lane at
-    font scales above 1 on a kernel with no scaled text op -- so a drift here is
-    invisible until someone else's machine renders different chrome.
-
-    The scene deliberately includes camera, clip and pal, because the clip is
-    what bites: `DeviceCanvas`'s own no-kernel fallback is `framebuf.text`,
-    which has no clip rect at all, and this class rasterizes petme128 itself
-    rather than delegating to it for exactly that reason.
-    """
-    for fs in (1, 2, 3):
-        kernel, fallback = _text_lanes(font_scale=fs)
-        assert kernel._gfx_text is not None, "the native text op did not resolve"
-        _text(kernel)
-        _text(fallback)
-        _same(kernel, fallback, "text fs=%d" % fs)
 
 
 def test_the_scenes_the_conformance_goldens_now_own_still_draw():
@@ -361,11 +322,11 @@ def test_a_layer_is_a_system_canvas_carrying_the_font_scale():
     print into them. A bare DeviceCanvas layer would silently drop back to 8px
     text on a scaled desktop."""
     c = host_canvas.make_system_canvas(40, 40, font_scale=3)
-    lay = c.new_layer(32, 24, owner="cart")       # `owner` accepted and ignored
+    lay = c.new_layer(32, 24, owner="cart")       # on loan to the run, as on a board
     assert isinstance(lay, HostSystemCanvas)
     assert lay.font_scale == 3
     assert (lay.w, lay.h) == (32, 24)
-    assert lay._nocache is True
+    assert lay._comp._b.live
     plain = host_canvas.make_system_canvas(40, 40).new_layer(32, 24)
     dark = bytes(MOY64[0])
 
@@ -436,25 +397,6 @@ class _IndexSource:
     def rect(self, x, y, w, h, c):
         for yy in range(y, y + h):
             self.buf[yy * self.w + x:yy * self.w + x + w] = bytes([c]) * w
-
-
-def test_blit_cover_takes_an_indexed_source_too():
-    """`blit_cover`'s `_cover_fallback` lane resolves an index source through THIS
-    canvas's table, and must land the same pixels the 565 source does -- so a
-    backend that hands over indices composites identically."""
-    gc = _IndexSource(320, 240, 1)
-    gc.rect(0, 0, 320, 120, 8)
-    sc = host_canvas.make_system_canvas(1024, 600)
-    sc.cls(0)
-    sc.blit_cover(gc)
-
-    twin = host_canvas.make_canvas(320, 240)
-    twin.cls(1)
-    twin.rect(0, 0, 320, 120, 8)
-    ref = host_canvas.make_system_canvas(1024, 600)
-    ref.cls(0)
-    ref.blit_cover(twin)
-    assert sc.to_rgb888() == ref.to_rgb888()
 
 
 def test_blit_cover_crops_a_source_bigger_than_the_surface():

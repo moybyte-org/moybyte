@@ -263,8 +263,9 @@ sequences **after** Phase 0 here — the conformance suite is what makes it safe
 ## 6. Risks, honestly
 
 - **L9 / the S3 budget — the correction that matters.** v1.0 claimed
-  `+present.py` would be "a leaf module, staged per-target like `surface.py`".
-  **Inverted.** `surface.py` escapes the S3 only because its sole importer is
+  `+present.py` would be "a leaf module, staged per-target like `surface.py`"
+  (the surface leaf, deleted 2026-10-07 when the kernel's glass took the table).
+  **Inverted.** That leaf escaped the S3 only because its sole importer was
   `wm_windowed.py`, the one file the S3 build denylists. The probe sites are not
   leaf-shaped: `wm.py`, `wallpaper.py`, `console.py`, `launcher_layer.py`,
   `player.py` and `ui.py` are **all staged to the S3** and hold the

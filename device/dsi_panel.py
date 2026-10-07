@@ -481,6 +481,7 @@ class RotatedCompositor:
         self._fbs = [moy_dsi.fb(0), moy_dsi.fb(1), moy_dsi.fb(2)]
         # Two paint buffers, ping-ponged at flush: the PPA reads one while
         # the console paints the other (see the block comment).
+        self._held = []                # the glass rows the buffers below are
         self._paints = [self._alloc(self._w * self._h * 2),
                         self._alloc(self._w * self._h * 2)]
         self._pi = 0
@@ -553,17 +554,17 @@ class RotatedCompositor:
         self.retained_frames = 2
         self.rotated = True
 
-    @staticmethod
-    def _alloc(nbytes):
+    def _alloc(self, nbytes):
+        """A paint or scratch buffer the compositor holds for the console's
+        life: a BUF row of the glass (the kernel's, no owner), its bytes
+        DMA-reachable PSRAM the PPA reads and writes."""
         try:
-            import moy_alloc
-            buf = moy_alloc.malloc_dma(
-                nbytes, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
-            if buf is not None:
-                return buf
-        except Exception:  # noqa: BLE001 -- host / no allocator
-            pass
-        return bytearray(nbytes)
+            import moy_glass as g
+        except ImportError:  # host tests: the ctypes binding
+            from runtime import glass_binding as g
+        b = g.buf(nbytes, g.ROLE_PAINT)
+        self._held.append(b)
+        return b.view
 
     def size(self):
         return (self._w, self._h)

@@ -69,6 +69,15 @@ static int grow(moy_htab_t *t) {
     return MOY_HTAB_OK;
 }
 
+int moy_htab_reserve(moy_htab_t *t) {
+    while (t->cap < t->max) {
+        if (grow(t) != MOY_HTAB_OK) {
+            return MOY_HTAB_NOMEM;
+        }
+    }
+    return MOY_HTAB_OK;
+}
+
 int moy_htab_add(moy_htab_t *t, uint32_t *h, void **row) {
     int fresh = t->live == t->used;
     if (fresh) {

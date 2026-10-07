@@ -92,6 +92,11 @@ except ImportError:                      # a build without it: no wasm runtime
 # the snapshot's time slot -- the base libmoy's time() adds the milliseconds
 # inside the tick to (modmoycore.c's h_time_ms).
 try:
+    import moy_glass as _glass           # the frame fold's scratch is a BUF row
+except ImportError:                      # host tests: the ctypes binding
+    from runtime import glass_binding as _glass
+
+try:
     from ticks import _since_ms
 except ImportError:                      # host tests importing the device module
     from runtime.ticks import _since_ms
@@ -660,6 +665,7 @@ class CartFrame:
         self.kept_off = 0                # where the last frame shown sits in the scratch
         self.fmt = 0                     # its layout: moy_fold's LE565 1 / IDX8 2
         self._scratch = None
+        self._scratch_b = None           # the glass row the scratch is
         self._kv = None                  # kept_view's slice, and what it was cut for
         self._kv_s = None
         self._kv_off = -1
@@ -749,11 +755,14 @@ class CartFrame:
             return s
         self._free()
         try:
-            import moy_alloc
-            s = moy_alloc.alloc(n, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
-        except (ImportError, AttributeError, MemoryError):
-            s = None
-        self._scratch = s
+            b = _glass.buf(n, _glass.ROLE_SCRATCH)
+        except MemoryError:
+            return None
+        if b.origin == _glass.ORIGIN_HEAP:
+            b.release()                  # the fold reads it on the feeder: PSRAM or nothing
+            return None
+        self._scratch_b = b
+        s = self._scratch = b.view
         return s
 
     def close(self, comp):
@@ -772,15 +781,11 @@ class CartFrame:
         self._free()
 
     def _free(self):
-        s = self._scratch
-        self._scratch = None
+        b = self._scratch_b
+        self._scratch = self._scratch_b = None
         self._kv = self._kv_s = None
-        if s is not None:
-            try:
-                import moy_alloc
-                moy_alloc.free(s)
-            except (ImportError, AttributeError, ValueError):
-                pass
+        if b is not None:
+            b.release()
 
 
 class WasmRun(MoycoreRun):

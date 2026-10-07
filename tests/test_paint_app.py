@@ -348,11 +348,33 @@ def _lending(monkeypatch, art):
     install()
     dc = _sys.modules["device_canvas"]
     aw = _sys.modules[type(art).__module__]
+    dc._owner_done("wallpaper_bg")     # an earlier test's backdrop: its own lifetime
     loans = _Loans()
     monkeypatch.setattr(dc, "_moybuf", loans)
     monkeypatch.setattr(aw, "_moybuf", loans)
-    monkeypatch.setattr(dc, "_GLASS", dc._glass_mod.Glass())
-    return loans, dc
+    return _Ledger(loans, dc), dc
+
+
+class _Ledger:
+    """Every off-heap buffer the backdrop holds: the artwork service's
+    indices through moybuf's tracked allocator, and the canvas's bake, which
+    is the glass's loan to the backdrop's owner."""
+
+    def __init__(self, loans, dc):
+        self.loans = loans
+        self.dc = dc
+
+    def bakes(self):
+        g = self.dc._glass_mod
+        h = self.dc._OWNERS.get("wallpaper_bg")
+        if h is None:
+            return []
+        return [g.row(r)[0] for r in g.rows(h) if g.row(r)[1] == g.ROLE_BAKE]
+
+    def stats(self):
+        n, total = self.loans.stats()
+        b = self.bakes()
+        return (n + len(b), total + sum(b))
 
 
 def _device_canvas(ws, w, h):
@@ -431,8 +453,7 @@ def test_the_backdrop_is_one_screen_sized_bake_the_register_lends(tmp_path,
     assert isinstance(m._rgb_i, memoryview) and len(m._rgb_i) == 153600
     assert len(m._rgb_i) >= device_canvas._OFFHEAP_BAKE_BYTES
     assert loans.stats() == (2, 320 * 240 * 3)
-    assert [len(b) for _i, b in device_canvas._GLASS.held(
-        "wallpaper_bg", device_canvas._ROLE_BAKE)] == [153600]
+    assert loans.bakes() == [153600]
 
     # Redrawing reuses both -- the desktop draws this every frame it paints.
     for _ in range(5):
@@ -468,8 +489,7 @@ def test_the_backdrops_loan_comes_back_on_every_wallpaper_change(tmp_path,
         ws.look.select_wallpaper("fill:black", persist=False)
         # The bake is back; the indices, and the bitmap, are still cached.
         assert loans.stats() == (1, 320 * 240), "the bake outlived its backdrop"
-        assert device_canvas._GLASS.held("wallpaper_bg",
-                                         device_canvas._ROLE_BAKE) == []
+        assert loans.bakes() == []
         assert art._wall_bitmap is not None and art._wall_bitmap.pix is indices
         assert art._wall_bitmap._rgb_i is None, "a stale draw must re-bake"
 
@@ -477,7 +497,7 @@ def test_the_backdrops_loan_comes_back_on_every_wallpaper_change(tmp_path,
         art.draw_wallpaper(cv)
         assert loans.stats() == on_my_art, "the ledger drifted across a switch"
         assert art._wall_bitmap.pix is indices, "the resample was paid twice"
-    assert loans.freed == 6, "one bake returned per change, and nothing else"
+    assert loans.loans.freed == 0, "the bake came back each change, and nothing else"
 
 
 def test_publishing_a_new_drawing_returns_both_of_the_backdrops_loans(
